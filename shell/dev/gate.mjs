@@ -32,6 +32,14 @@ const READY_MS = Number(process.env.READY_MS || 8000);
 const SETTLE_MS = Number(process.env.SETTLE_MS || 400);
 const IDLE_MS = Number(process.env.IDLE_MS ?? 2000);
 const IDLE_WAIT_MS = Number(process.env.IDLE_WAIT_MS || 3000);
+/** GATE_ONLY: a regex on the run names ("search-launcher|relayout"); the rest are skipped (a case worked on alone). */
+const ONLY = process.env.GATE_ONLY ? new RegExp(process.env.GATE_ONLY) : null;
+/**
+ * GATE_THROTTLE: every page's CPU slowed that many times (CDP Emulation.setCPUThrottlingRate) - a loaded Mac's gate
+ * (two gates at --cpu-shares 256, frames late against the clock) on demand: a case must pass at 6.
+ */
+const THROTTLE = Number(process.env.GATE_THROTTLE || 1);
+const SKIP = Symbol("skipped");
 
 /** As ShellHost.mime: what the phone serves, so a module the phone refuses is refused here. */
 function mime(p) {
@@ -132,8 +140,24 @@ async function whenReady(r, check) {
     r.problems.push(`not ready (window.__powosAlive) within ${Date.now() - r.started} ms`);
     return { ...r, ready: false, ms: Date.now() - r.started };
   }
-  r.problems.push(...(await check().catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
+  r.problems.push(...(await checkOnce(r, check).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
   return { ...r, ready: true, ms: Date.now() - r.started };
+}
+
+/**
+ * [check], again once if the page's context went from under it - not an assertion of the check's, the evaluate lost:
+ * "Promise was collected" (2026-10-23, relayout-unfold on a loaded gate: the awaited promise gone with no result) or a
+ * context destroyed by a navigation. Retried from the page up again; a second loss is the failure.
+ */
+const GONE = /Promise was collected|Execution context was destroyed|Cannot find context with specified id/;
+async function checkOnce(r, check) {
+  try {
+    return await check();
+  } catch (e) {
+    if (!GONE.test(e?.message ?? "")) throw e;
+    await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+    return check();
+  }
 }
 
 /** In the page: steam (6x3) over fetch (3x3, the right half) on home's first page - merged, level, one surface? */
@@ -180,7 +204,33 @@ const tileRects = (page) =>
       })
       .sort(),
   );
-const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
+/**
+ * The relayout case's waits, on the page's state (not a time): [v] the window's size there (innerWidth/innerHeight;
+ * then frames: its resize event is dispatched by then), home's tiles at rest (no animation, the same rects over
+ * frames). [like]: until the tiles are those rects, at most 3 s, then at rest - the comparison after it is the check.
+ */
+const restAt = (page, v, like = null) =>
+  page.evaluate(
+    async (w, h, like) => {
+      const G = window.__gw;
+      const rects = () =>
+        [...document.querySelectorAll(".page:not(.away) .home-tile")]
+          .map((t) => {
+            const b = t.getBoundingClientRect();
+            return `${(t.textContent || "").slice(0, 10)}@${Math.round(b.left)},${Math.round(b.top)},${Math.round(b.width)}x${Math.round(b.height)}`;
+          })
+          .sort()
+          .join();
+      if (w) await G.until(() => innerWidth === w && innerHeight === h);
+      await G.frames(2);
+      if (like !== null) await G.until(() => rects() === like);
+      await G.until(() => G.still());
+      await G.steady(rects, 4);
+    },
+    v?.width ?? 0,
+    v?.height ?? 0,
+    like,
+  );
 const viewTo = (page, v) => page.setViewport({ ...v, deviceScaleFactor: 1 });
 /** The page as hidden / shown (an app in front of home), as the WebView says it. */
 const hideAs = (page, hidden) =>
@@ -351,58 +401,63 @@ async function overpullRest() {
   return [...(o.still() ? [] : ["an animation still runs in the panel at rest"]), ...(left.length ? [`the pull left inline values on ${left.length} elements`] : [])];
 }
 
-async function backFromApp(page, to, from) {
+async function backFromApp(page, to, from, fresh) {
   await hideAs(page, true);
   await viewTo(page, from);
-  await pause(600);
+  await restAt(page, from);
   await page.evaluate(() => {
     window.__eatResize = (e) => e.stopImmediatePropagation();
     addEventListener("resize", window.__eatResize, { capture: true });
   });
   await viewTo(page, to);
-  await pause(300);
+  // At [to] and its resize event eaten (dispatched in the frames restAt waits), only then listened to again.
+  await restAt(page, to);
   await page.evaluate(() => removeEventListener("resize", window.__eatResize, { capture: true }));
   await hideAs(page, false);
-  await pause(1200);
+  await restAt(page, null, fresh);
 }
 
 /** Shown again still at the app's size (its last frame), then the window back at [to] with no resize event. */
-async function shownAtAppSize(page, to, from) {
+async function shownAtAppSize(page, to, from, fresh) {
   await hideAs(page, true);
   await viewTo(page, from);
-  await pause(300);
+  await restAt(page, from);
   await hideAs(page, false);
-  await pause(600);
+  await restAt(page, from);
   await page.evaluate(() => {
     window.__eatResize = (e) => e.stopImmediatePropagation();
     addEventListener("resize", window.__eatResize, { capture: true });
   });
   await viewTo(page, to);
-  await pause(1200);
+  await restAt(page, to, fresh);
   await page.evaluate(() => removeEventListener("resize", window.__eatResize, { capture: true }));
 }
 
 /** Relaid in the other column count while measured at a size, then in its own at that same size (the phone's race). */
-async function otherColumns(page, to) {
+async function otherColumns(page, to, fresh) {
   await columnsAs(page, true);
   await viewTo(page, { width: to.width, height: to.height - 1 });
-  await pause(400);
+  await restAt(page, { width: to.width, height: to.height - 1 });
   await viewTo(page, to);
-  await pause(400);
+  await restAt(page, to);
   await columnsAs(page, false);
-  await pause(600);
+  await restAt(page, null, fresh);
 }
 
 /** The relayout case: each way of getting back to [to] must give a fresh layout's tiles and a full-width grid. */
 async function relayout(page, to, from) {
-  await pause(800);
+  await viewTo(page, to);
+  // A fresh layout: laid out and at rest (on a busy Mac the first tiles still moved in 800 ms after ready).
+  await page.evaluate(() => window.__gw.until(() => document.querySelector(".page:not(.away) .home-tile")));
+  await restAt(page, to);
   const fresh = await tileRects(page);
   if (!fresh.length) return ["no tiles laid out"];
+  const like = fresh.join();
   const steps = [
-    [`back from an app at ${from.width}x${from.height}`, () => backFromApp(page, to, from)],
-    [`turned ${from.width}x${from.height} and back`, async () => (await viewTo(page, from), await pause(800), await viewTo(page, to), await pause(1200))],
-    ["relaid in its own columns at the same size", () => otherColumns(page, to)],
-    [`shown at ${from.width}x${from.height}, then back with no resize event`, () => shownAtAppSize(page, to, from)],
+    [`back from an app at ${from.width}x${from.height}`, () => backFromApp(page, to, from, like)],
+    [`turned ${from.width}x${from.height} and back`, async () => (await viewTo(page, from), await restAt(page, from), await viewTo(page, to), await restAt(page, to, like))],
+    ["relaid in its own columns at the same size", () => otherColumns(page, to, like)],
+    [`shown at ${from.width}x${from.height}, then back with no resize event`, () => shownAtAppSize(page, to, from, like)],
   ];
   const bad = [];
   for (const [what, step] of steps) {
@@ -750,7 +805,6 @@ async function libraryDragCheck() {
  * by default the pill is in the bar and "+ widget" lists it; the drawer opened from it has the bar's pill to type in.
  */
 async function searchDefaultCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const S = await importShim("./state.ts");
   const A = await importShim("./ui/appwidget.tsx");
   const fails = [];
@@ -759,28 +813,32 @@ async function searchDefaultCheck() {
   if (!shown(document.querySelector(".home > .bar .bar-pill"))) fails.push("default: no search pill in the bar");
   S.editing.value = true;
   A.picker.value = true;
-  await sleep(500);
+  await window.__gw.until(() => /search bar/.test(document.body.innerText));
   if (!/search bar/.test(document.body.innerText)) fails.push('"+ widget" doesn\'t list the search bar');
   A.picker.value = false;
   S.editing.value = false;
-  await sleep(300);
+  // Out of edit mode and at rest: the bar's pill back (what the next check starts from).
+  await window.__gw.settled(() => shown(document.querySelector(".home > .bar .bar-pill")));
   return fails;
 }
 
 /** A pull up from [el] (a mouse drag: home's gesture path for a desktop browser), then the drawer's state. */
 async function pullUpFrom(el) {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const r = el.getBoundingClientRect();
   // Right of the middle: the left half's pull-up can be PowOS AI's panel (state.ts pullPanels), not the drawer.
   const [x, y] = [r.left + r.width * 0.8, r.top + r.height / 2];
   const fire = (type, dy, buttons) => el.dispatchEvent(new PointerEvent(type, { pointerId: 9, pointerType: "mouse", clientX: x, clientY: y - dy, buttons, bubbles: true, isPrimary: true }));
   fire("pointerdown", 0, 1);
+  // A finger's pace: a move a frame.
   for (let dy = 10; dy <= 220; dy += 30) {
     fire("pointermove", dy, 1);
-    await sleep(16);
+    await window.__gw.frames(1);
   }
   fire("pointerup", 220, 0);
-  await sleep(600);
+  // Until it's open and come to rest - the bar's pill over it faded in (drawerWithPill's checks), at most 3 s.
+  const bar = () => document.querySelector(".home > .bar");
+  await window.__gw.settled(() => document.querySelector(".home.open") && bar() && +getComputedStyle(bar()).opacity >= 0.9);
+  await window.__gw.steady(() => [document.querySelector(".home .launcher-clip")?.getBoundingClientRect().bottom, bar()?.querySelector(".bar-pill")?.getBoundingClientRect().top]);
 }
 
 /** The drawer is open with the bar's pill on screen, over the drawer's window (not under an app row). */
@@ -800,7 +858,7 @@ async function closeDrawerNow() {
   const S = await importShim("./state.ts");
   S.closeDrawer?.();
   if (S.drawer.value) S.drawer.value = 0;
-  await new Promise((ok) => setTimeout(ok, 500));
+  await window.__gw.settled(() => !S.drawer.value && !document.querySelector(".home.open"));
 }
 
 /**
@@ -808,7 +866,6 @@ async function closeDrawerNow() {
  * from or tapped, in the bar and on the grid; put back (the tile's button), it's the bar's again. Folded and unfolded.
  */
 async function searchLauncherCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const S = await importShim("./state.ts");
   const W = await importShim("./ui/searchwidget.tsx");
   const fails = [];
@@ -818,20 +875,23 @@ async function searchLauncherCheck() {
   await closeDrawerNow();
   // Moved onto the grid (edit mode, as a finger does: placeItem).
   S.editing.value = true;
-  await sleep(400);
+  await window.__gw.until(() => W.footSearch.value);
   const was = W.footSearch.value;
   if (!was) return [...fails, "edit mode: no search tile to move"];
   await W.placeItem("panel:search", { ...was.cell, y: Math.max(0, was.cell.y - 1) }, was.page);
   S.editing.value = false;
-  await sleep(500);
-  const tile = document.querySelector('.home-tile[data-key="panel:search"] .bar-pill');
+  // Until the widget is on the grid and the bar's pill faded out (a fade: on a busy gate it hadn't ended in 500 ms).
+  const widget = () => document.querySelector('.home-tile[data-key="panel:search"] .bar-pill');
+  await window.__gw.settled(() => widget() && +getComputedStyle(document.querySelector(".home > .bar")).opacity <= 0.1);
+  const tile = widget();
   if (!tile) return [...fails, "moved: no search widget on the grid"];
   if (+getComputedStyle(document.querySelector(".home > .bar")).opacity > 0.1) fails.push("moved: the bar's pill still shows beside the widget");
   await pullUpFrom(tile);
   fails.push(...drawerWithPill("pulled up from the widget"));
   await closeDrawerNow();
   tile.click();
-  await sleep(500);
+  const bar = () => document.querySelector(".home > .bar");
+  await window.__gw.settled(() => document.querySelector(".home.open") && +getComputedStyle(bar()).opacity >= 0.9);
   fails.push(...drawerWithPill("tapped on the widget"));
   if (document.activeElement !== document.querySelector(".home > .bar textarea")) fails.push("tapped on the widget: the bar's field isn't the one typing");
   await closeDrawerNow();
@@ -843,25 +903,25 @@ async function searchLauncherCheck() {
  * go - the pill is in the foot under the dock (folded), back in the bar (unfolded), and the drawer still has it.
  */
 async function searchToDock() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const S = await importShim("./state.ts");
   const G = await importShim("./ui/grid.tsx");
   const W = await importShim("./ui/searchwidget.tsx");
   const wide = !!document.querySelector(".home.wide");
   S.editing.value = true;
-  await sleep(400);
-  const tile = document.querySelector('.home-tile[data-key="panel:search"]')?.getBoundingClientRect();
   // Folded the dock's row (under the dock); wide the one bar's middle (no "under" there).
-  const to = document.querySelector(wide ? ".home > .edit-sheet" : ".home > .dock:not(.dock-tray)")?.getBoundingClientRect();
+  const foot = wide ? ".home > .edit-sheet" : ".home > .dock:not(.dock-tray)";
+  await window.__gw.settled(() => document.querySelector('.home-tile[data-key="panel:search"]') && W.footSearch.value && document.querySelector(foot));
+  const tile = document.querySelector('.home-tile[data-key="panel:search"]')?.getBoundingClientRect();
+  const to = document.querySelector(foot)?.getBoundingClientRect();
   if (!tile || !W.footSearch.value || !to) return ["edit mode: no search tile or foot to drag it to"];
   const at = (type, x, y) => new PointerEvent(type, { pointerId: 11, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true });
   G.startCarry({ item: W.footSearch.value }, at("pointerdown", tile.left + 20, tile.top + 10), { x: 20, y: 10 });
   window.dispatchEvent(at("pointermove", to.left + to.width / 2, to.top + to.height / 2));
-  await sleep(100);
+  await window.__gw.frames(2);
   window.dispatchEvent(at("pointerup", to.left + to.width / 2, to.top + to.height / 2));
-  await sleep(500);
+  await window.__gw.until(() => W.footBelow.value === (wide ? "" : "1") && !W.hasSearchWidget());
   S.editing.value = false;
-  await sleep(400);
+  await window.__gw.settled(() => !document.querySelector(".carried"));
   const fails = [];
   if (W.footBelow.value !== (wide ? "" : "1")) fails.push(`dragged onto the foot: footBelow is "${W.footBelow.value}"`);
   if (W.hasSearchWidget()) fails.push("dragged onto the foot: the search widget stayed on the grid");
@@ -877,13 +937,15 @@ async function searchPutBack() {
   const S = await importShim("./state.ts");
   S.editing.value = true;
   S.selected.value = "panel:search";
-  await new Promise((ok) => setTimeout(ok, 400));
-  const button = [...document.querySelectorAll(".tile-actions button")].find((b) => b.textContent.trim() === "put back in bar");
+  const putBack = () => [...document.querySelectorAll(".tile-actions button")].find((b) => b.textContent.trim() === "put back in bar");
+  await window.__gw.until(putBack);
+  const button = putBack();
   if (!button) return ["edit mode: the search widget has no \"put back in bar\""];
   button.click();
-  await new Promise((ok) => setTimeout(ok, 500));
+  const onGrid = () => S.home.value.items.some((i) => i.kind === "panel" && i.name === "search");
+  await window.__gw.until(() => !onGrid());
   S.editing.value = false;
-  await new Promise((ok) => setTimeout(ok, 400));
+  await window.__gw.settled(() => +getComputedStyle(document.querySelector(".home > .bar")).opacity >= 0.9);
   const fails = [];
   if (S.home.value.items.some((i) => i.kind === "panel" && i.name === "search")) fails.push("put back: the search widget is still on the grid");
   if (+getComputedStyle(document.querySelector(".home > .bar")).opacity < 0.9) fails.push("put back: no pill in the bar");
@@ -1256,9 +1318,11 @@ async function desktopsReloaded() {
 }
 
 async function open(browser, url, name, viewport = { width: 412, height: 915 }) {
+  if (ONLY && !ONLY.test(name)) throw SKIP;
   // A context (a window) of its own: tabs side by side in one window are hidden but the front one - no frames.
   const page = await (await browser.createBrowserContext()).newPage();
   await page.setViewport({ ...viewport, deviceScaleFactor: 1 });
+  if (THROTTLE > 1) await (await page.target().createCDPSession()).send("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
   const problems = [];
   const warnings = [];
   await page.setRequestInterception(true);
@@ -1323,6 +1387,44 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
         },
       });
     });
+  // The checks' waits (window.__gw), on every page before its scripts. A check waits on the STATE its assertion needs,
+  // never a fixed time: on a loaded Mac (two gates at --cpu-shares 256) frames lag the clock - a slide hadn't begun
+  // 500 ms in, a transition started a frame late ended late. until(f, ms = 3000): until f() (may be async) holds or ms
+  // pass - true if it held; the assertion after it is the one that fails. steady(f): f()'s measure unchanged over
+  // frames (script-driven motion included). still(sel): no finite animation or transition running on the document's
+  // clock (under sel's elements); endless ones (a loading pulse) don't count - the idle check has those.
+  await page.evaluateOnNewDocument(() => {
+    const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+    const frames = (n = 2) => new Promise((ok) => { const step = (k) => (k ? requestAnimationFrame(() => step(k - 1)) : ok()); step(n); });
+    const until = async (f, ms = 3000) => {
+      const t0 = performance.now();
+      while (!(await f())) {
+        if (performance.now() - t0 > ms) return false;
+        await sleep(16);
+      }
+      return true;
+    };
+    // (A scroll-driven one - animation-timeline: scroll(), the dock's edge fade - runs as long as it exists: not motion.)
+    const still = (sel) =>
+      !document.getAnimations().some((a) => a.playState === "running" && a.timeline === document.timeline && a.effect?.getComputedTiming().endTime !== Infinity && (!sel || a.effect?.target?.closest?.(sel)));
+    // Settled: f() holds, then no animation (under sel) and two frames on - the layout after the last one done.
+    const settled = async (f = () => true, sel, ms = 3000) => (await until(async () => (await f()) && still(sel), ms)) && (await frames(2), true);
+    // Steady: f()'s value (a JSON-able measure: rects, an order) the same over n frames running - motion a script drives
+    // (a spring, a rAF tween) that getAnimations() never sees has stopped. True if it got there within ms.
+    const steady = async (f, n = 3, ms = 3000) => {
+      const t0 = performance.now();
+      let last = JSON.stringify(await f()), same = 0;
+      while (same < n) {
+        if (performance.now() - t0 > ms) return false;
+        await frames(1);
+        const now = JSON.stringify(await f());
+        same = now === last ? same + 1 : 0;
+        last = now;
+      }
+      return true;
+    };
+    window.__gw = { sleep, frames, until, still, settled, steady };
+  });
   // Counts the page's requestAnimationFrame callbacks (the idle check): counted as they run, nothing else changes.
   await page.evaluateOnNewDocument(() => {
     const raf = window.requestAnimationFrame.bind(window);
@@ -1436,6 +1538,8 @@ const browser = await puppeteer.launch({
 let failed = 0;
 try {
   const runs = [];
+  // A run not in GATE_ONLY: open() throws SKIP before it makes a page; it reports nothing.
+  runs.push = (...ps) => Array.prototype.push.apply(runs, ps.map((p) => p.catch((e) => (e === SKIP ? null : Promise.reject(e)))));
   if (process.env.SHELL_PAGES !== "0") {
     for (const mode of modes()) {
       const url = `${ORIGIN}/index.html${mode === "home" ? "" : `?mode=${mode}`}`;
@@ -1817,7 +1921,7 @@ try {
       }),
     );
   }
-  for (const r of await Promise.all(runs)) {
+  for (const r of (await Promise.all(runs)).filter(Boolean)) {
     if (r.problems.length) {
       failed++;
       for (const p of r.problems) console.log(`FAIL ${r.name}: ${p}`);
