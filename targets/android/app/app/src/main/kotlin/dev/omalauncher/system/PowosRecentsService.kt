@@ -43,6 +43,7 @@ class PowosRecentsService : Service() {
     private var quickTools: QuickToolsHost? = null
     private var pull: PullHost? = null
     private var pet: PetOverlay? = null
+    private var frames: WindowFrames? = null
     private var gestureRetries = 0
 
     /** SystemUI's last state flags and nav bar region (they can come before the gesture input is up). */
@@ -93,6 +94,8 @@ class PowosRecentsService : Service() {
                     // The pet over apps (docs/PET.md step d).
                     if (pet == null) pet = runCatching { PetOverlay(this@PowosRecentsService).takeIf { it.start() } }.onFailure { Log.w(TAG, "no pet overlay", it) }.getOrNull()
                     pet?.homeVisible(Switcher.homeVisible)
+                    // PowOS's frames on the floating app windows (OxygenOS draws none).
+                    if (frames == null) frames = runCatching { WindowFrames(this@PowosRecentsService).also { it.start() } }.onFailure { Log.w(TAG, "no window frames", it) }.getOrNull()
                     startGestures()
                     nav?.systemUi = sysui
                     edge?.systemUi = sysui
@@ -104,6 +107,7 @@ class PowosRecentsService : Service() {
                 main.post {
                     shade?.systemUiState(stateFlags)
                     pet?.systemUiState(stateFlags)
+                    frames?.systemUiState(stateFlags)
                     systemUiState = stateFlags
                     nav?.systemUiState = stateFlags
                     edge?.systemUiState = stateFlags
@@ -131,6 +135,7 @@ class PowosRecentsService : Service() {
         super.onConfigurationChanged(newConfig)
         nav?.refresh()
         edge?.refresh()
+        frames?.refresh()
     }
 
     override fun onDestroy() {
@@ -179,6 +184,8 @@ class PowosRecentsService : Service() {
         pull = null
         pet?.stop()
         pet = null
+        frames?.stop()
+        frames = null
         shade?.stop()
         shade = null
         systemUi = null

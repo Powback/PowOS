@@ -22,6 +22,8 @@ internal class WindowBlur(
     private var maxRadiusDp: Float = MAX_RADIUS_DP,
     /** The window's page glass (home's GlassBlur.wholeWindow), which keeps its surfaces' regions beside this one. */
     private val glass: ((Float) -> Boolean)? = null,
+    /** The window's corners' radii, dp (top left, top right, bottom right, bottom left): square by default. */
+    private val cornersDp: FloatArray = FloatArray(4),
 ) {
     constructor(window: Window, maxRadiusDp: Float = MAX_RADIUS_DP, glass: ((Float) -> Boolean)? = null) : this({ window.decorView }, maxRadiusDp, glass)
 
@@ -61,7 +63,7 @@ internal class WindowBlur(
         val handled: Boolean? =
             runCatching {
                 glass?.invoke(r.toFloat())
-                    ?: if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) GlassBlur.wholeWindowOf(v, r.toFloat()) else false
+                    ?: if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) GlassBlur.wholeWindowOf(v, r.toFloat(), FloatArray(4) { cornersDp[it] * v.resources.displayMetrics.density }) else false
             }.getOrDefault(false)
         if (handled == null) {
             // The window isn't ready (just shown: no surface, not laid out): again on its next frame, not cached -

@@ -453,6 +453,8 @@ internal class GlassBlur(
         fun wholeWindowOf(
             view: View,
             radiusPx: Float,
+            /** Its corners' radii, px (top left, top right, bottom right, bottom left): a rounded window's glass. */
+            corners: FloatArray = FloatArray(4),
         ): Boolean? {
             val m = methods ?: return false
             return try {
@@ -467,7 +469,7 @@ internal class GlassBlur(
                         return false
                     }
                 val r = view.rootView
-                val regions = if (radiusPx < 1f) emptyArray() else arrayOf(c.encode(Region(0f, 0f, r.width.toFloat(), r.height.toFloat(), 0f, 0f, 0f, 0f, 1f, radiusPx)))
+                val regions = if (radiusPx < 1f) emptyArray() else arrayOf(c.encode(Region(0f, 0f, r.width.toFloat(), r.height.toFloat(), corners[0], corners[1], corners[2], corners[3], 1f, radiusPx)))
                 val t = SurfaceControl.Transaction()
                 m.setBlurRegions.invoke(t, surface, regions)
                 t.apply()

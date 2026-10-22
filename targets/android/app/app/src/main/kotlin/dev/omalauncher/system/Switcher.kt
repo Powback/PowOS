@@ -129,7 +129,12 @@ object Switcher {
 
     /** The layer is up (shown, or a swipe up is building it). */
     var open = false
-        private set
+        private set(v) {
+            if (field == v) return
+            field = v
+            // The floating windows' frames go while the switcher is up, and come back after.
+            WindowFrames.current?.let { f -> android.os.Handler(android.os.Looper.getMainLooper()).post { f.refresh() } }
+        }
 
     /** The task it was opened over (null: home). */
     var from: Int? = null

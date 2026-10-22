@@ -31,3 +31,19 @@ sh_ "dumpsys activity activities | grep -m1 -E \"Task\\{.*$PKG\" | grep -oE \"mo
 sh_ "am stack list | grep -m1 $PKG | grep -oE \"bounds=\\[[^ ]*\"" | tee -a "$OUT/mode.txt"
 "$T/shot.sh" "$OUT/floating.png"
 grep -q 'mode=freeform' "$OUT/mode.txt" && echo "PASS: a floating window" || echo "FAIL: not freeform"
+# PowOS's frame on it (system/WindowFrame.kt): the bar's window is there, a drag on the bar moves the task, the close
+# button closes it. Coordinates from the task's bounds: the bar is BAR_DP above its top, close is its last button.
+bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' '; }
+D=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1); px() { echo $(( $1 * D / 160 )); }
+bars=$(sh_ "dumpsys window windows | grep -c \"PowOS window bar\""); echo "frame bars: $bars" | tee -a "$OUT/mode.txt"
+[ "${bars:-0}" -ge 1 ] && echo "PASS: a title bar" || echo "FAIL: no title bar"
+read -r XL XT XR XB <<<"$(bounds)"; echo "before: $XL $XT $XR $XB"
+BY=$((XT - $(px 20))); sh_ "input swipe $((XL + (XR - XL) / 3)) $BY $((XL + (XR - XL) / 3 + 240)) $((BY + 180)) 700"; sleep 1.5; chk drag
+read -r XL2 XT2 XR2 XB2 <<<"$(bounds)"; echo "after drag: $XL2 $XT2 $XR2 $XB2" | tee -a "$OUT/mode.txt"
+"$T/shot.sh" "$OUT/framed.png"
+[ "$XL2" != "$XL" ] && [ "$XT2" != "$XT" ] && echo "PASS: the bar moves it" || echo "FAIL: the drag didn't move it"
+sh_ "input swipe $((XR2 - $(px 6))) $((XB2 - $(px 6))) $((XR2 + $(px 92))) $((XB2 + $(px 72))) 700"; sleep 1.5; chk grip
+read -r XL3 XT3 XR3 XB3 <<<"$(bounds)"; echo "after resize: $XL3 $XT3 $XR3 $XB3" | tee -a "$OUT/mode.txt"
+[ $((XR3 - XL3)) -gt $((XR2 - XL2)) ] && echo "PASS: the grip resizes it" || echo "FAIL: the grip didn't resize it"
+sh_ "input tap $((XR3 - $(px 6) - $(px 15))) $((XT3 - $(px 20)))"; sleep 1.5; chk close
+sh_ "am stack list | grep -c $PKG" | grep -qx 0 && echo "PASS: close closes it" || echo "FAIL: still open after close"
