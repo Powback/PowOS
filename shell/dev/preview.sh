@@ -108,7 +108,7 @@ browser() { # PASS
   # The preview's own page and baseline, from here: the shell checked (the installed APK's, say) may not carry them.
   mounts+=(-v "$SHELL_DIR/dev/preview:/shell/dev/preview:ro")
   [ -n "$wallpaper" ] && mounts+=(-v "$(cd "$(dirname "$wallpaper")" && pwd)/$(basename "$wallpaper"):/wallpaper.jpg:ro")
-  docker run --rm --platform linux/arm64 --shm-size 1g "${mounts[@]}" -e PASS="$1" -e HOST_WORK="$work" -e PREVIEW_THEMES="$themes" \
+  docker run --rm --platform linux/arm64 --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" -e PASS="$1" -e HOST_WORK="$work" -e PREVIEW_THEMES="$themes" \
     -e PREVIEW_LIVE="$live" -e PREVIEW_FAST="$fast" ${only:+-e PREVIEW_ONLY="$only"} ${PREVIEW_EMPTY:+-e PREVIEW_EMPTY="$PREVIEW_EMPTY"} \
     ${PREVIEW_JOBS:+-e PREVIEW_JOBS="$PREVIEW_JOBS"} ${PREVIEW_DEBUG:+-e PREVIEW_DEBUG=1} ${PREVIEW_DEBUG_KEY:+-e PREVIEW_DEBUG_KEY="$PREVIEW_DEBUG_KEY"} ${PREVIEW_BASELINE:+-e PREVIEW_BASELINE="$PREVIEW_BASELINE"} \
     -w /usr/src/app --entrypoint node "$IMAGE" preview.mjs

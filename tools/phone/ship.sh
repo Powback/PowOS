@@ -147,7 +147,7 @@ run)
         echo "$(date +%T) ${T:0:9}: nothing differs from what's live - ${#reqs[@]} request(s) done"; rc=0
       elif [ $kind = apk ]; then
         echo "$(date +%T) ship ${T:0:9} as an APK ($why) for $who_s"
-        POWOS_SHIP_SERVICE=1 bash tools/phone/ship-apk.sh "${na[@]}" > "$log" 2>&1; rc=$?
+        POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship bash tools/phone/ship-apk.sh "${na[@]}" > "$log" 2>&1; rc=$?
       else
         # Shell only: never inside a verify window, never beside an APK ship (a --direct one).
         if verify_held; then echo "$(date +%T) verify lock held ($(cat "$VL/who" 2>/dev/null)) - waiting"; sleep "$POLL"; continue; fi
@@ -155,10 +155,10 @@ run)
         echo "$(date +%T) ship ${T:0:9} as shell:$(echo $add)$([ -n "$gone" ] && echo " reset:$(echo $gone)") for $who_s"
         rc=0
         if [ -n "$add" ]; then
-          (cd shell && POWOS_SHIP_SERVICE=1 READY_MS=${READY_MS:-30000} ./push.sh --vpn "${na[@]}" $add) > "$log" 2>&1 || rc=$?
+          (cd shell && POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship READY_MS=${READY_MS:-30000} ./push.sh --vpn "${na[@]}" $add) > "$log" 2>&1 || rc=$?
         fi
         if [ $rc = 0 ] && [ -n "$gone" ]; then
-          (cd shell && POWOS_SHIP_SERVICE=1 ./push.sh --vpn --reset $gone) >> "$log" 2>&1 || rc=$?
+          (cd shell && POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship ./push.sh --vpn --reset $gone) >> "$log" 2>&1 || rc=$?
         fi
         rm -rf "$SL"
       fi

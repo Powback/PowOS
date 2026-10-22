@@ -119,6 +119,8 @@ if [ -n "$pregate" ]; then
   # Of origin's history (the tip, or behind it while origin moves on - ship-apk pushes what came later, gated).
   git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
   git merge-base --is-ancestor HEAD origin/worktree-powos-multiplatform 2>/dev/null || { echo "push.sh: --pre-gate: HEAD isn't on origin/worktree-powos-multiplatform" >&2; exit 1; }
+  # The ship's gate (ship-apk.sh runs this): its own slot, never queued behind agent gates (dev/gate.sh).
+  export GATE_PRIORITY=ship
   set +e
   out=$(dev/gate.sh "${pf[@]}" 2>&1); gate=$?
   if [ $gate -ne 0 ] && ! echo "$out" | grep '^FAIL' | grep -qv 'not ready'; then

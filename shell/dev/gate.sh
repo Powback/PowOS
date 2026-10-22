@@ -55,12 +55,53 @@ while [ $# -gt 0 ]; do
     *) files+=("$1"); shift ;;
   esac
 done
-command -v docker >/dev/null || { echo "gate: no docker" >&2; exit 2; }
+[ -n "${GATE_STUB_SLEEP:-}" ] || command -v docker >/dev/null || { echo "gate: no docker" >&2; exit 2; }
 t0=$(date +%s)
 # Under $HOME, not $TMPDIR: Colima's VM mounts the home folder only (a /var/folders path is empty in the container).
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate"
+# The slots (2026-10-23: ~8 agents gated at once, Mac load 17 - pages timed out and retried with longer READY_MS, and
+# the ship service's pre-gate of the user's APK install waited 10+ min). At most GATE_SLOTS (2) agent gates at once,
+# the rest wait; the ship's gate (GATE_PRIORITY=ship: ship.sh, ship-apk.sh, push.sh --pre-gate) never waits - a slot
+# of its own - and while it runs no new agent gate starts. A slot is a mkdir lock under slots/ with its pid; a dead
+# pid's is reclaimed. Agent gates run niced, their containers at --cpu-shares 256 (the ship's at the default 1024).
+slots="${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/slots" slot=""
+mkdir -p "$slots"
+slot_live() {   # $1 a slot dir: held by a running gate (a fresh dir whose pid isn't written yet counts as held)
+  local p; p=$(cat "$1/pid" 2>/dev/null) || p=""
+  if [ -z "$p" ]; then [ -n "$(find "$1" -maxdepth 0 -mmin -1 2>/dev/null)" ]; return; fi
+  kill -0 "$p" 2>/dev/null
+}
+slot_take() { mkdir "$1" 2>/dev/null || return 1; echo $$ > "$1/pid"; slot=$1; }
+reap() { local d; for d in "$slots"/*; do [ -d "$d" ] && ! slot_live "$d" && rm -rf "$d"; done; return 0; }
+running() { local d n=0; for d in "$slots"/*; do [ -d "$d" ] && slot_live "$d" && n=$((n + 1)); done; echo $n; }
+trap 'rm -rf ${slot:+"$slot"}' EXIT
+trap 'exit 130' INT TERM
+if [ "${GATE_PRIORITY:-}" = ship ]; then
+  rm -rf "$slots/ship.$$"; slot_take "$slots/ship.$$"
+  cpu=""
+else
+  said=""
+  while :; do
+    reap
+    if ! ls -d "$slots"/ship.* >/dev/null 2>&1; then
+      for i in $(seq 0 $((${GATE_SLOTS:-2} - 1))); do slot_take "$slots/agent.$i" && break; done
+      [ -n "$slot" ] && break
+    fi
+    [ -n "$said" ] || { echo "gate: waiting for a slot ($(running) running)"; said=1; }
+    sleep "${GATE_SLOT_POLL_S:-2}"
+  done
+  [ -z "$said" ] || echo "gate: got a slot after $(($(date +%s) - t0)) s"
+  renice -n 10 -p $$ >/dev/null 2>&1 || true
+  cpu="--cpu-shares 256"
+  export GATE_CPU_SHARES=256   # dev/preview.sh's container
+fi
+# GATE_STUB_SLEEP=N: the slots' test (shell/dev/gate-slots-test.sh) - holds the slot N s instead of gating.
+if [ -n "${GATE_STUB_SLEEP:-}" ]; then
+  echo "gate: stub ${GATE_PRIORITY:-agent} $(basename "$slot") start"; sleep "$GATE_STUB_SLEEP"
+  echo "gate: stub ${GATE_PRIORITY:-agent} $(basename "$slot") end"; exit 0
+fi
 work=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/run.XXXXXX")
-trap 'rm -rf "$work"' EXIT
+trap 'rm -rf "$work" ${slot:+"$slot"}' EXIT
 S=$work/shell
 case $base in
   dir) S=$dir ;;
@@ -132,7 +173,7 @@ if [ -n "$app" ]; then
   mounts+=(-v "$app/powos-app.json:/apps/$id/powos-app.json:ro" -v "$app/out/ui:/apps/$id/ui:ro")
 fi
 set +e
-docker run --rm --platform linux/arm64 --shm-size 512m "${mounts[@]}" -e READY_MS="${READY_MS:-8000}" \
+docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" -e READY_MS="${READY_MS:-8000}" \
   ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
   -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs
 rc=$?
@@ -167,7 +208,7 @@ if [ -n "$shots" ]; then
   # container can't follow - without it every icon glyph renders as tofu.
   nerd=$(cd "$SHELL_DIR/fonts" && cd "$(dirname "$(readlink nerd_symbols.ttf)")" 2>/dev/null && pwd -P)/nerd_symbols.ttf
   [ -f "$nerd" ] && smounts+=(-v "$nerd:/fonts/nerd_symbols.ttf:ro")
-  docker run --rm --platform linux/arm64 --shm-size 512m "${smounts[@]}" ${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} \
+  docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${smounts[@]}" ${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} \
     ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"} ${SHOTS_PROBE:+-e SHOTS_PROBE="$SHOTS_PROBE"} ${SHOTS_STRICT:+-e SHOTS_STRICT="$SHOTS_STRICT"} -w /usr/src/app --entrypoint node "$IMAGE" shots.mjs ||
     { echo "     shots: the render run failed$([ "${SHOTS_STRICT:-}" = 1 ] && echo " (strict: overlapping tiles or missing glyphs, report.json)")"
       [ "${SHOTS_STRICT:-}" = 1 ] && fail=1; }

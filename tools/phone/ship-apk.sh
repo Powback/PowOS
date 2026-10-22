@@ -68,7 +68,7 @@ fi
 # The commit's own shell must load before it's built in: the APK ships it whole, and an install resets the overrides
 # that may have covered for it (17:09: 5130d98's home.tsx imported a gesture.ts export only a later commit added -
 # every page failed to boot after the install). The gate on HEAD alone: tsc + every page booted.
-if ! READY_MS=${READY_MS:-30000} IDLE_MS=0 bash shell/dev/gate.sh > "${TMPDIR:-/tmp}/ship-apk-gate.log" 2>&1; then
+if ! GATE_PRIORITY=ship READY_MS=${READY_MS:-30000} IDLE_MS=0 bash shell/dev/gate.sh > "${TMPDIR:-/tmp}/ship-apk-gate.log" 2>&1; then
   grep -vE "^ok " "${TMPDIR:-/tmp}/ship-apk-gate.log" | tail -8 >&2
   echo "ship-apk: REFUSED - this commit's shell doesn't load (above); fix it on origin first" >&2
   exit 3
@@ -98,7 +98,7 @@ if [ -n "$newer" ]; then
   git worktree add -q --detach "$t/tree" "$tip" 2>/dev/null || { echo "ship-apk: REFUSED - couldn't check out origin's tip to gate the newer shell files" >&2; exit 3; }
   [ -d shell/node_modules ] && ln -s "$PWD/shell/node_modules" "$t/tree/shell/node_modules"
   echo "ship-apk: gating the shell files committed after the build, at $(git rev-parse --short "$tip"): $(echo $newer)"
-  pg=$(cd "$t/tree/shell" && READY_MS=${READY_MS:-60000} ./push.sh --pre-gate $newer 2>&1 || true)
+  pg=$(cd "$t/tree/shell" && GATE_PRIORITY=ship READY_MS=${READY_MS:-60000} ./push.sh --pre-gate $newer 2>&1 || true)
   stamp=$(echo "$pg" | sed -n 's/^pre-gated //p' | tail -1)
   if [ -z "$stamp" ]; then
     echo "$pg" | grep -vE "^ok " | tail -8 >&2

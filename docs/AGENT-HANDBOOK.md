@@ -45,6 +45,7 @@ minimal change and tell them.
 - Read narrowly (grep, then `sed -n a,b`); never re-read a file you read. Change code with targeted edits (Edit), not
   whole-file heredocs.
 - Git: rebase only right before you commit/push, not before every command. Commit subject <= 72 chars, a short body.
+- Gates queue: 2 agent gates at once (niced), a 3rd waits for a slot; the ship's (GATE_PRIORITY=ship) never waits.
 - No new process tooling (locks, gates, wrappers, handbook rules) unless something actually broke; say what broke.
 - Messages: shipped results or blockers only, one line.
 - Never ship a UI control whose backend isn't installed (manager, 2026-10-22: a "test now" button shipped before its APK
