@@ -30,6 +30,12 @@ install -m 644 $T/powos-android-tasks.desktop $R/etc/xdg/autostart/powos-android
 # The phone's controller (Steam Deck over uhid) and the focus watcher, which the session starts (powos-rooted-session).
 install -m 755 $T/powos-padd $R/usr/bin/powos-padd
 install -m 755 $T/powos-focus-watch $R/usr/bin/powos-focus-watch
+# Android's keyboard for X11 apps' text fields (unit x11-ime-bridge): IBus with powos-ime-bridge as its panel, started
+# by the session's autostart (ours replaces the image's ibus.desktop), and the IBus environment for every app.
+install -m 755 $T/powos-ime-bridge $R/usr/bin/powos-ime-bridge
+install -Dm 644 $T/powos-ime-bridge.desktop $R/etc/xdg/autostart/ibus.desktop
+install -Dm 644 $T/powos-plasma/powos-ime.sh $R/etc/xdg/plasma-workspace/env/ibus.sh
+install -Dm 644 $T/powos-plasma/powos-ime.sh $R/etc/profile.d/60-powos-ime.sh
 # The panel's launcher as the full-screen app grid (Application Dashboard), once per user (bin/powos-panel-phone;
 # KWin's swipe-up on the desktop/taskbar opens the same launcher). Part of the PowOS image; installed here too so a
 # rooted phone whose rootfs came from an older image has it.
@@ -67,7 +73,8 @@ install -Dm644 $T/fex-thunks.json $R/usr/share/fex-emu/thunks.json
 rm -f $T/fex-Config.json $T/fex-thunks.json
 rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
   $T/powos-units.sh \
-  $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task
+  $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task \
+  $T/powos-ime-bridge $T/powos-ime-bridge.desktop
 
 # The user: powos, as on every PowOS (password powos, sudo through wheel). Its uid is the PowOS app's Android uid:
 # the app's run dir (display socket, phone state) is then the user's own, as XDG_RUNTIME_DIR should be. Re-run
@@ -205,6 +212,13 @@ if [ -d $A ]; then
     [ -e "$p" ] || continue
     cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --needed --overwrite /usr/local/bin/Xwayland /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
       echo "xwayland-kgsl: $(chroot $R /usr/bin/pacman -Q xwayland-kgsl 2>/dev/null)"
+  done
+  # KWin, our package (pkgs/kwin: the Anland backend). The running session keeps its KWin until it restarts.
+  # powos-units: pkg:kwin
+  for p in $A/kwin-*.pkg.tar.*; do
+    [ -e "$p" ] || continue
+    cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --needed /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
+      echo "kwin: $(chroot $R /usr/bin/pacman -Q kwin 2>/dev/null)"
   done
   L=$R/usr/lib/powos/apps
   mkdir -p $L/services $L/registry

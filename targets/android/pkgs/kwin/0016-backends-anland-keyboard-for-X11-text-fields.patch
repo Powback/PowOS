@@ -1,0 +1,93 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] backends/anland: the Android keyboard for X11 apps' text fields
+
+Xwayland has no text-input, so an X11 app's text field (Steam's CEF, GTK/Qt apps on X11) never asked for the
+keyboard. The session's IBus panel (powos-ime-bridge) sees IBus's input-context focus and calls
+org.kde.KWin /org/powos/Keyboard org.powos.Keyboard.SetX11TextFocus(bool). Focus = a request to show it, held
+while the keyboard focus is Xwayland's; blur hides it. Logged as "Android keyboard shown/hidden - x11 focus/blur".
+---
+diff --git a/src/backends/anland/anland_backend.cpp b/src/backends/anland/anland_backend.cpp
+index 3b8f47e..e78ac64 100644
+--- a/src/backends/anland/anland_backend.cpp
++++ b/src/backends/anland/anland_backend.cpp
+@@ -30,6 +30,7 @@
+ #include "wayland_server.h"
+ #include "workspace.h"
+ 
++#include <QDBusConnection>
+ #include <QElapsedTimer>
+ #include <QFutureWatcher>
+ #include <QScopeGuard>
+@@ -243,6 +244,11 @@ bool AnlandBackend::initialize()
+         connect(t3, &TextInputV3Interface::requestHideInputPanel, this, [this]() {
+             hideConsumerKeyboard("v3 hide");
+         });
++        // X11 apps (Xwayland: no text-input): powos-ime-bridge calls SetX11TextFocus on IBus's focus changes.
++        if (!QDBusConnection::sessionBus().registerObject(QStringLiteral("/org/powos/Keyboard"), this,
++                                                          QDBusConnection::ExportScriptableSlots)) {
++            qCWarning(KWIN_ANLAND) << "Android keyboard: /org/powos/Keyboard not registered - X11 text fields won't show it";
++        }
+     }
+ 
+     return true;
+@@ -683,6 +689,12 @@ void AnlandBackend::updateConsumerKeyboard(bool showRequested, const char *why)
+         active = (t2->clientSupportsTextInput(client) && t2->isEnabled())
+             || (t3->clientSupportsTextInput(client) && t3->isEnabled());
+     }
++    // An X11 text field: IBus has the focus in one (SetX11TextFocus) and the keyboard focus is Xwayland's, so a
++    // focus IBus reported late can't bring the keyboard up over a Wayland window.
++    if (!active && m_x11TextFocus) {
++        SurfaceInterface *keyboardSurface = seat->focusedKeyboardSurface();
++        active = keyboardSurface && keyboardSurface->client() == waylandServer()->xWaylandConnection();
++    }
+     // A request counts until the text field it was for has the focus (as KWin's m_shouldShowPanel): Qt enables
+     // text input before the surface gets the keyboard focus, so opening the launcher's search asked first and became
+     // active a moment later. Kept briefly only, so a request whose field never got the focus can't show it later.
+@@ -695,6 +707,13 @@ void AnlandBackend::updateConsumerKeyboard(bool showRequested, const char *why)
+     setConsumerKeyboard(want, why);
+ }
+ 
++void AnlandBackend::SetX11TextFocus(bool focused)
++{
++    m_x11TextFocus = focused;
++    // A text field taking the focus is the request to show it (as text-input v3's enable).
++    updateConsumerKeyboard(focused, focused ? "x11 focus" : "x11 blur");
++}
++
+ void AnlandBackend::hideConsumerKeyboard(const char *why)
+ {
+     setConsumerKeyboard(false, why);
+diff --git a/src/backends/anland/anland_backend.h b/src/backends/anland/anland_backend.h
+index 7949d2d..755f97d 100644
+--- a/src/backends/anland/anland_backend.h
++++ b/src/backends/anland/anland_backend.h
+@@ -45,6 +45,8 @@ class RenderDevice;
+ class KWIN_EXPORT AnlandBackend : public OutputBackend
+ {
+     Q_OBJECT
++    // PowOS: org.kde.KWin /org/powos/Keyboard - the keyboard for X11 apps' text fields (SetX11TextFocus)
++    Q_CLASSINFO("D-Bus Interface", "org.powos.Keyboard")
+ 
+ public:
+     explicit AnlandBackend(const QString &socketPath = QString(), QObject *parent = nullptr);
+@@ -116,6 +118,12 @@ private:
+     void updateConsumerKeyboard(bool showRequested, const char *why);
+     void hideConsumerKeyboard(const char *why);
+     void setConsumerKeyboard(bool want, const char *why);
++public Q_SLOTS:
++    // PowOS: an X11 (Xwayland) app's text field gained/lost the focus. Xwayland has no text-input, so
++    // powos-ime-bridge (the session's IBus panel) reports IBus's input-context focus here over D-Bus.
++    Q_SCRIPTABLE void SetX11TextFocus(bool focused);
++
++private:
+     void sendClipboardToConsumer(const QByteArray &text);
+     void sendClipboardToKWin(const QByteArray &text);
+ 
+@@ -147,6 +155,7 @@ private:
+     // QByteArray is trivially sent over the data channel as UTF-8.
+     QByteArray m_clipboardText;
+     bool m_keyboardRequested = false;
++    bool m_x11TextFocus = false; // SetX11TextFocus: an X11 text field has IBus's focus
+     QElapsedTimer m_showRequestedAt; // a client's last request to show the keyboard (see updateConsumerKeyboard)
+ };
+ 

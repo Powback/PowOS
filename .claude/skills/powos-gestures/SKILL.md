@@ -85,8 +85,18 @@ description: Use when working on PowOS's edge gestures (Good Lock-style handles,
 - Wayland: KWin patches 0010/0012 (targets/android/pkgs/kwin) send OUTPUT_TYPE_KEYBOARD on text-input v2/v3 focus ->
   engine SystemIME.setSystemKeyboardVisible; typed text returns as INPUT_TYPE_TEXT_INPUT. KWin logs
   "Android keyboard shown/hidden - <why>" on its stderr.
-- Likely gap (unverified): X11 apps via Xwayland (Steam's CEF) signal no text focus; no IM framework, QT_IM_MODULE /
-  XMODIFIERS unset. Next step: measure with verify/keyboard.sh, then an IM bridge for Xwayland.
+- X11 (Xwayland: no text-input; KWin 6.7 has no IM path for X11 clients): unit x11-ime-bridge. ibus-daemon --xim
+  --panel=disable; GTK on X11 picks IBus's module by itself (GTK4: wayland prio 100 > ibus 50 > simple, so Wayland
+  GTK stays on text-input); session/powos-ime-bridge is IBus's panel: FocusIn(ctx) -> KWin patch 0016 D-Bus
+  `org.kde.KWin /org/powos/Keyboard org.powos.Keyboard.SetX11TextFocus(b)` (shown only while the keyboard focus is
+  Xwayland's; logged "x11 focus/blur"). InputContext_1 = IBus's fake context (= nothing focused); blur debounced 150 ms.
+  Typed text returns as key events (InputMethod::commitString without text-input). Log $XDG_RUNTIME_DIR/powos-ime-bridge.log.
+- Env (session/plasma/powos-ime.sh -> plasma-workspace/env/ibus.sh + profile.d/60-powos-ime.sh): XMODIFIERS,
+  IBUS_ADDRESS_FILE (IBus otherwise names its address file after WAYLAND_DISPLAY/DISPLAY, which differ per launcher).
+  Never GTK_IM_MODULE/QT_IM_MODULE (takes Wayland apps off text-input). The image's env/ibus.sh was a shell error.
+- Rootfs: phone-rules.conf keeps ibus (engines provided-away); KWin ships via rooted.sh deploy (newest out/pkgs kwin).
+- Open: Steam's CEF only reaches IBus if its webhelper loads GTK's IM (unverified on the phone); a keyboard dismissed by
+  Back doesn't return on a re-tap of the same X11 field (no new FocusIn).
 - Open Linux apps for a check as the launcher does: `am start -n com.powos.app/dev.omalauncher.shell.ShellActivity --es
   exec '<cmd>'` (debug builds); never type into the user's tmux sessions.
 
@@ -98,4 +108,3 @@ description: Use when working on PowOS's edge gestures (Good Lock-style handles,
   (window-lock.sh), honour LOCK_HELD=1.
 - Test swipes: keep Quick Tools' in-and-up near 40 degrees on every screen shape (a flatter one is straight in = Back).
   The lock face is a swipe up (no PIN); screenrecord only as root into /data/local/tmp; pull into an existing dir.
-- Compile before every Kotlin push: `tools/phone/compile-check.sh && git push` (exit code, retry on gradle's journal lock).

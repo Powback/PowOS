@@ -145,6 +145,12 @@ install -m 755 "$P/session/powos-open-task" /usr/local/bin/powos-open-task
 # The app's touch controls as a gamepad (started by powos-rooted-session).
 install -m 755 "$P/session/powos-padd" /usr/bin/powos-padd
 install -m 755 "$P/session/powos-focus-watch" /usr/bin/powos-focus-watch
+# Android's keyboard for X11 apps' text fields (unit x11-ime-bridge; after the image's content, whose ibus.desktop and
+# plasma-workspace env/ibus.sh these replace).
+install -m 755 "$P/session/powos-ime-bridge" /usr/bin/powos-ime-bridge
+install -Dm 644 "$P/session/powos-ime-bridge.desktop" /etc/xdg/autostart/ibus.desktop
+install -Dm 644 "$P/session/plasma/powos-ime.sh" /etc/xdg/plasma-workspace/env/ibus.sh
+install -Dm 644 "$P/session/plasma/powos-ime.sh" /etc/profile.d/60-powos-ime.sh
 install -Dm 644 "$P/session/powos-android-tasks.desktop" /etc/xdg/autostart/powos-android-tasks.desktop
 # The desktop over Android's wallpaper (the app's surface is translucent): a transparent wallpaper, made the desktop's
 # once per user by a Plasma update script.

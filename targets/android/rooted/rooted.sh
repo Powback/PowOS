@@ -57,7 +57,7 @@ deploy)
     adb push -q "$HERE/$f" "/data/local/tmp/$f"
   done
   for f in powos-android-app powos-android-tasks powos-android-tasks.desktop powos-padd powos-focus-watch powos-apps-export \
-    powos-open-task; do
+    powos-open-task powos-ime-bridge powos-ime-bridge.desktop; do
     adb push -q "$HERE/../session/$f" "/data/local/tmp/$f"
   done
   # PowOS's own scripts the phone's features rely on (shipped in the PowOS image - a rootfs from an older image
@@ -97,6 +97,10 @@ deploy)
   xwl=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" xwayland-kgsl)
   if [ -n "$xwl" ]; then adb push -q "$xwl" "/data/local/tmp/powos-apps/${xwl##*/}"
   else echo "rooted.sh: no xwayland-kgsl package (targets/android/build-pkgs.sh xwayland-kgsl) - Xwayland not updated"; fi
+  # KWin with the Anland backend (pkgs/kwin; build-pkgs.sh kwin builds it on PowOS's rootfs).
+  kw=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" kwin)
+  if [ -n "$kw" ]; then adb push -q "$kw" "/data/local/tmp/powos-apps/${kw##*/}"
+  else echo "rooted.sh: no kwin package (targets/android/build-pkgs.sh kwin) - KWin not updated"; fi
   reg=$HERE/../../../apps/registry/out/module.wasm
   if [ -f "$reg" ]; then adb push -q "$reg" /data/local/tmp/powos-apps/registry.wasm
   else echo "rooted.sh: no apps/registry/out/module.wasm (apps/build.sh registry) - the registry not updated"; fi
