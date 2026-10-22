@@ -1,19 +1,21 @@
 #!/bin/bash
 # tools/phone/verify/queue.sh: ONE queue for every on-device check, so no agent waits on the phone itself.
-#   queue.sh add [--close] [--name TEXT] [--screen inner|cover] <board-task> <cmd> [args...]
+#   queue.sh add [--close] [--name TEXT] [--screen inner|cover] [--budget S] <board-task> <cmd> [args...]
 #        queue a Mac-side check (a tools/phone/verify/*.sh or any command that drives the phone) and return at once;
 #        starts the runner if none runs, and marks the board task's step "phone check queued" (the AI page's "test now")
 #        env vars: queue them through env, e.g. `queue.sh add t env PROFILE=1 shell/dev/perf/drag-raster.sh 12`
 #        --close: a PASS also marks the board task done (use when this check is the task's last proof)
 #        --name: what the phone's status pill says is being tested (default: the script's name)
 #        --screen: the screen it needs (the pill asks to fold / unfold); default either
+#        --budget: seconds it may run (default 300); past it the runner kills it: "FAIL timeout" on the board and pill
 #   queue.sh list                               queued, running and the last results
 #   queue.sh run                                the runner (started by add; stays while anything is queued)
 # The runner waits for ONE free window (window-lock.sh: screen on, no touch for 120 s, then the verify lock), runs every
 # queued check in it with LOCK_HELD=1, then releases the lock. "Test now" on the AI page (VerifyRun.kt) writes the phone's
 # go flag (/tmp/powos-verify-go in PowOS: a task id or "all"): the wait returns at once and only that task's checks run.
-# While a check runs, the phone shows a status pill (VerifyPill.kt, fed /run/powos-app/verify-status.json); its tap
-# writes /tmp/powos-verify-stop, which ends the check like a real touch. A check that exits 3 (a real touch, no window)
+# While a check runs, the phone shows a status pill (VerifyRun.kt, fed /run/powos-app/verify/status.json): a heartbeat
+# every HB_S (4) s carries the check, k/N and elapsed time; no beat for 30 s and the pill hides itself. Its tap writes
+# /tmp/powos-verify-stop, which the next beat sees: the check is killed and stays queued. A check that exits 3 (a real touch, no window)
 # goes back on the queue for the next window, at most 3 tries (a stop from the pill doesn't count). A check that exits 0
 # but printed a line starting with FAIL is a FAIL. Each result goes onto the check's board task (`--step`, the log's
 # last line; a FAIL also gets a screenshot as its review image), a mail to the coder inbox (QUEUE_MAIL_TO) and the log
@@ -22,12 +24,12 @@
 # checkout (.claude/worktrees/verify-runner, fast-forwarded to origin before each window), so removing the worktree it
 # came from is fine - push before you queue. The runner runs a private copy of that checkout's queue.sh.
 set -uo pipefail
-here=${QUEUE_HERE:-$(cd "$(dirname "$0")" && pwd -P)}; unset QUEUE_HERE; phone=$(cd "$here/.." && pwd -P)
+here=${QUEUE_HERE:-$(cd "$(dirname "$0")" && pwd -P)}; unset QUEUE_HERE; phone=${QUEUE_PHONE:-$(cd "$here/.." && pwd -P)}
 BASE=worktree-powos-multiplatform
 REPO=$(cd "$here" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null && pwd -P || true)
 [ "$REPO" = / ] && REPO=
 VR=$REPO/.claude/worktrees/verify-runner   # the runner's checkout: only the runner touches it
-Q=$HOME/.cache/powos-verify-queue; mkdir -p "$Q/done"
+Q=${QUEUE_DIR:-$HOME/.cache/powos-verify-queue}; mkdir -p "$Q/done"
 QUEUED_STEP="phone check queued"   # shell/ui/powai.tsx matches this text
 # user_sh <script text>: run it inside PowOS as the session user (its `powos ...`), quietly.
 user_sh() { local s; s=$(mktemp "$Q/user.XXXX"); printf '%s\n' "$1" > "$s"; "$phone/user.sh" "$s" >/dev/null 2>&1; local rc=$?; rm -f "$s"; return $rc; }
@@ -68,10 +70,12 @@ verify_tree() {
 }
 case "${1:-}" in
 add)
-  shift; close=0; name=; screen=
+  shift; close=0; name=; screen=; budget=300
   while :; do case "${1:-}" in
-    --close) close=1; shift ;; --name) name=${2:-}; shift 2 ;; --screen) screen=${2:-}; shift 2 ;; *) break ;; esac; done
-  [ $# -ge 2 ] || { echo "usage: queue.sh add [--close] [--name TEXT] [--screen inner|cover] <board-task> <cmd> [args...]"; exit 2; }
+    --close) close=1; shift ;; --name) name=${2:-}; shift 2 ;; --screen) screen=${2:-}; shift 2 ;;
+    --budget) budget=${2:-}; shift 2 ;; *) break ;; esac; done
+  [ $# -ge 2 ] || { echo "usage: queue.sh add [--close] [--name TEXT] [--screen inner|cover] [--budget S] <board-task> <cmd> [args...]"; exit 2; }
+  [[ $budget =~ ^[1-9][0-9]*$ ]] || { echo "queue.sh: --budget <seconds>"; exit 2; }
   task=$1; shift
   [[ $task =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$ ]] || { echo "queue.sh: bad task id: $task"; exit 2; }
   case "$screen" in ""|inner|cover) ;; *) echo "queue.sh: --screen inner|cover"; exit 2 ;; esac
@@ -85,7 +89,7 @@ add)
   if wt_of "$cwd"; then from=$wroot; relify "$wsub"
   else for a in "$@"; do wt_of "$a" && { from=$wroot; relify ""; break; }; done; fi
   j=$Q/$(date +%Y%m%d-%H%M%S)-$$-$task.job
-  { printf 'task=%q\nclose=%s\ntries=0\ncwd=%q\nrel=%s\nfrom=%q\nname=%q\nscreen=%q\ncmd=(' "$task" "$close" "$cwd" "$rel" "$from" "$name" "$screen"
+  { printf 'task=%q\nclose=%s\ntries=0\ncwd=%q\nrel=%s\nfrom=%q\nname=%q\nscreen=%q\nbudget=%s\ncmd=(' "$task" "$close" "$cwd" "$rel" "$from" "$name" "$screen" "$budget"
     printf '%q ' "${cmd[@]}"; printf ')\n'; } > "$j"
   echo "queued $(basename "$j" .job) - the result goes to board task $task"
   if [ -z "${QUEUE_NO_RUN:-}" ]; then
@@ -113,28 +117,23 @@ run)
       [ "${3:-0}" = 1 ] && printf 'powos agents task done %q >/dev/null 2>&1 || true\n' "$1")
     user_sh "$s" || echo "board update failed for $1: $2"; }
   jstr() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '"%s"' "$s"; }
-  # status <job mark> <json> [more]: the pill's file (VerifyPill.kt watches /run/powos-app/verify-status.json), the
-  # stop watcher's job mark, the stop flag cleared; [more]: more shell (clearing the go flag). One adb call.
-  status() {
-    local c b
-    c=$(printf 'umask 022; printf %%s %q > /run/powos-app/.verify-status.tmp && mv -f /run/powos-app/.verify-status.tmp /run/powos-app/verify-status.json; printf %%s %q > /tmp/powos-verify-job; rm -f /tmp/powos-verify-stop; %s' "$2" "$1" "${3:-:}")
-    b=$(printf '%s\n' "$c" | base64 | tr -d '\n')
-    "$phone/adb.sh" shell "su -c 'sh /data/powos/powos-run.sh \"echo $b | base64 -d | bash\"'" >/dev/null 2>&1 || true
-  }
-  killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c"; done; kill "$1" 2>/dev/null; }
-  # `kill <runner.pid>` stops the window and its check too, and frees the verify lock if this runner held it.
-  trap 'for c in $(pgrep -P $$); do killtree $c; done; [ "$(cut -d" " -f1 "$HOME/.cache/powos-verify.lock/who" 2>/dev/null)" = verify-queue ] && rm -rf "$HOME/.cache/powos-verify.lock"; rm -f "$Q/runner.pid"; exit 143' TERM
-  # stopwatch <job mark>: one held adb call per check, its loop on the phone (2 s): "stop" once the pill's tap wrote the
-  # stop flag; ends by itself when the job mark changes (the next status). Again after a dropped connection.
-  stopwatch() {
-    local r
-    while :; do
-      r=$("$phone/adb.sh" shell "while [ \"\$(cat /data/powos/root/tmp/powos-verify-job 2>/dev/null)\" = '$1' ]; do [ -e /data/powos/root/tmp/powos-verify-stop ] && { echo stop; exit 0; }; sleep 2; done; echo gone" 2>/dev/null | tr -d '\r' | tail -1)
-      [ "$r" = stop ] && { echo stop; return; }
-      [ "$r" = gone ] && return
-      sleep 5
-    done
-  }
+  # status <job mark> <json> [more]: the pill's file (VerifyRun.kt watches /run/powos-app/verify/status.json; the old
+  # verify-status.json too, for APKs before the heartbeat), the job mark, the stop flag cleared; [more]: more shell
+  # (clearing the go flag). One adb call, at most 15 s.
+  status() { phone_sh "$(printf 'umask 022; %s; printf %%s %q > /tmp/powos-verify-job; rm -f /tmp/powos-verify-stop; %s' "$(put "$2")" "$1" "${3:-:}")" >/dev/null; }
+  # beat <json>: the heartbeat - the pill's file again; prints "stop" when the pill's tap wrote the stop flag.
+  beat() { phone_sh "$(printf 'umask 022; %s; [ -e /tmp/powos-verify-stop ] && echo stop; :' "$(put "$1")")" | tr -d '\r' | tail -1; }
+  put() { local f
+    for f in verify/status.json verify-status.json; do
+      printf 'mkdir -p /run/powos-app/verify; printf %%s %q > /run/powos-app/%s.tmp && mv -f /run/powos-app/%s.tmp /run/powos-app/%s; ' "$1" "$f" "$f" "$f"; done; printf ':'; }
+  # phone_sh <script>: run it in PowOS as root; killed after 15 s (a hung adb never holds the runner).
+  phone_sh() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
+    perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell "su -c 'sh /data/powos/powos-run.sh \"echo $b | base64 -d | bash\"'" 2>/dev/null; }
+  killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c" "${2:-TERM}"; done; kill -"${2:-TERM}" "$1" 2>/dev/null; }
+  # endjob <pid>: TERM its tree, KILL what's left after 5 s.
+  endjob() { killtree "$1"; for _ in 1 2 3 4 5; do kill -0 "$1" 2>/dev/null || return 0; sleep 1; done; killtree "$1" KILL; }
+  # `kill <runner.pid>` stops the window and its check too, frees the verify lock if this runner held it, and hides the pill.
+  trap 'for c in $(pgrep -P $$); do killtree $c; done; [ "$(cut -d" " -f1 "$HOME/.cache/powos-verify.lock/who" 2>/dev/null)" = verify-queue ] && rm -rf "$HOME/.cache/powos-verify.lock"; status "" "{\"done\":true,\"summary\":\"Phone checks stopped (the runner was stopped)\"}"; rm -f "$Q/runner.pid"; exit 143' TERM
   # The runner stays while anything is queued (a "test now" needs one waiting): a window that didn't come is waited for again.
   while ls "$Q"/*.job >/dev/null 2>&1; do
     verify_tree
@@ -147,12 +146,12 @@ run)
         task=; . "$j"
         [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] && sel+=("$j")
       done
-      N=${#sel[@]}; k=0; pass=0; fail=0; first=
+      N=${#sel[@]}; k=0; pass=0; fail=0; first=; prev=
       [ $N -gt 0 ] || { status "" '{"done":true}' "rm -f /tmp/powos-verify-go"; exit 5; }
       [ -n "$go" ] && echo "$(date +%T) go from the phone: $go ($N checks)"
       for j in "${sel[@]}"; do
         [ -f "$j" ] || continue
-        task=; close=0; tries=0; cwd=$PWD; rel=0; from=; name=; screen=; cmd=(); . "$j"
+        task=; close=0; tries=0; cwd=$PWD; rel=0; from=; name=; screen=; budget=300; cmd=(); . "$j"
         # A job from before repo-relative jobs: its worktree may be gone - run it in the verify checkout instead.
         if [ "$rel" != 1 ] && [[ "$cwd ${cmd[*]}" == *"$REPO/.claude/worktrees/"* ]]; then
           if wt_of "$cwd"; then relify "$wsub"; else relify ""; fi
@@ -160,14 +159,27 @@ run)
         [ "$rel" = 1 ] && cwd=$VR/$cwd
         n=$(basename "$j" .job); log=$Q/done/$n.log; k=$((k + 1))
         echo "$(date +%T) run $n: ${cmd[*]}"
-        status "$n" "{\"name\":$(jstr "${name:-$task}"),\"task\":$(jstr "$task"),\"k\":$k,\"n\":$N,\"screen\":$(jstr "$screen"),\"ts\":$(date +%s)}" "$([ $k = 1 ] && echo 'rm -f /tmp/powos-verify-go')"
+        js() { printf '{"name":%s,"task":%s,"k":%s,"n":%s,"screen":%s,"el":%s,"budget":%s,"prev":%s}' "$(jstr "${name:-$task}")" \
+          "$(jstr "$task")" $k $N "$(jstr "$screen")" "$1" "$budget" "$(jstr "$prev")"; }
+        status "$n" "$(js 0)" "$([ $k = 1 ] && echo 'rm -f /tmp/powos-verify-go')"
         ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 && exec "${cmd[@]}" ) > "$log" 2>&1 & jp=$!
-        rm -f "$Q/stopped"
-        ( [ "$(stopwatch "$n")" = stop ] && { touch "$Q/stopped"; killtree $jp; } ) & wp=$!
+        # The heartbeat: every HB_S s the pill hears check, k/N, elapsed; a tap's stop flag or the budget ends the check.
+        t0=$(date +%s); why=
+        while kill -0 $jp 2>/dev/null; do
+          for _ in $(seq "${HB_S:-4}"); do kill -0 $jp 2>/dev/null || break; sleep 1; done
+          kill -0 $jp 2>/dev/null || break
+          el=$(( $(date +%s) - t0 ))
+          [ $el -ge "$budget" ] && { why=timeout; break; }
+          [ "$(beat "$(js $el)")" = stop ] && { why=stop; break; }
+        done
+        [ -n "$why" ] && endjob $jp
         wait $jp; rc=$?
-        killtree $wp
-        if [ -e "$Q/stopped" ]; then
-          rm -f "$Q/stopped"; echo "$(date +%T) $n: stopped from the phone - stays queued"
+        if [ "$why" = timeout ]; then
+          rc=124; echo "FAIL timeout: still running after its ${budget}s budget - killed" >> "$log"
+          echo "$(date +%T) $n: past its ${budget}s budget - killed"
+        fi
+        if [ "$why" = stop ]; then
+          echo "$(date +%T) $n: stopped from the phone - stays queued"
           status "" "{\"done\":true,\"summary\":$(jstr "Phone checks stopped: $pass passed, $fail failed, $((N - k + 1)) still queued")}"
           exit 4
         fi
@@ -179,10 +191,11 @@ run)
         # A check that printed FAIL but exited 0 (float-windows did) failed.
         [ $rc = 0 ] && grep -q '^FAIL' "$log" && rc=1
         mv "$j" "$Q/done/$n.job"
-        r=$([ $rc = 0 ] && echo PASS || echo "FAIL rc=$rc"); echo "$r: $(tail -1 "$log")" >> "$log"
+        r=$([ $rc = 0 ] && echo PASS || { [ "$why" = timeout ] && echo "FAIL timeout" || echo "FAIL rc=$rc"; }); echo "$r: $(tail -1 "$log")" >> "$log"
+        prev="${name:-$task}: $r"
         img=
         if [ $rc != 0 ]; then
-          fail=$((fail + 1)); [ -n "$first" ] || first=${name:-$task}
+          fail=$((fail + 1)); [ -n "$first" ] || first=${name:-$task}$([ "$why" = timeout ] && echo ": timeout")
           # What the screen showed when it failed: the board task's review image (the pill keeps out of screencaps).
           f=verify-$(printf %s "$n" | tr -c 'A-Za-z0-9._-' '-').png
           "$phone/adb.sh" shell "su -c 'mkdir -p /data/powos/root/home/powos/design-qa'" >/dev/null 2>&1

@@ -17,10 +17,18 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
   readable by adb's shell user); `VERIFY_GO=1 idle.sh --wait` returns `go=<task|all>` at its next 5 s check; the runner
   runs only those jobs and clears it. /run/powos-app is NOT readable by shell (SELinux) - flags go in /tmp.
 - Status pill (VerifyRun.kt, window "PowOS verify status", TYPE 2017, skip-screenshot): the runner writes
-  /run/powos-app/verify-status.json per job ({name,task,k,n,screen}; {done,summary} at the end -> a notification) through
-  `su -c 'sh /data/powos/powos-run.sh "echo B64 | base64 -d | bash"'` (one adb call), plus /tmp/powos-verify-job (the
-  job mark). The pill's tap writes /tmp/powos-verify-stop; the runner's per-job stop watcher (one held adb call, its loop
-  on the phone, ends when the job mark changes) kills the job: it stays queued, tries not counted. Check: test-now.sh.
+  /run/powos-app/verify/status.json (its own folder: FileObservers on one folder share one inotify watch and the last
+  started gets every event - a widget's watch on /run/powos-app once ate the pill's "done") as a heartbeat every HB_S
+  (4) s while a check runs ({name,task,k,n,screen,el,budget,prev}; {done,summary} at the end -> a notification), each
+  one adb call killed after 15 s. The pill ticks the elapsed time itself and hides with a "Phone test stopped"
+  notification after 30 s without a beat. Its tap (every tap) writes /tmp/powos-verify-stop; the next beat sees it,
+  the runner kills the check (TERM, KILL after 5 s): it stays queued, tries not counted. Check: test-now.sh.
+- Budget: `add --budget S` (job file `budget=`, default 300). Past it the runner kills the check: "FAIL timeout" on
+  the board, the pill's next line (prev) and the summary. A runner TERM writes done too (the pill goes at once).
+- Clear a stuck pill (old APK): write `{"done":true}` to /run/powos-app/verify-status.json the way status() does.
+- Test the runner off the phone: QUEUE_DIR=<tmp> QUEUE_PHONE=<dir with stub adb.sh/user.sh/shot.sh> LOCK_HELD=1
+  QUEUE_COPY=<any file> QUEUE_HERE=<verify dir> bash queue.sh run (a stub adb.sh decodes the base64 and runs it with
+  /tmp and /run/powos-app mapped to a temp dir; map /tmp/ first).
 - Jobs run in the runner's own checkout `.claude/worktrees/verify-runner` (made if missing, node_modules linked,
   fast-forwarded - reset if dirty - to origin before each window): `add` stores cwd + command repo-relative when they
   are inside any PowOS worktree (absolute only otherwise), and old jobs with a `.claude/worktrees/*` cwd are rewritten
