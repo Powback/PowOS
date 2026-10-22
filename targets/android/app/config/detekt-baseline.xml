@@ -43,7 +43,6 @@
     <ID>CognitiveComplexMethod:ExtraKeys.kt$@Composable private fun StickyKey( key: Sticky, sticky: StickyModifier, modifier: Modifier, )</ID>
     <ID>CognitiveComplexMethod:Files.kt$fun watchFile(file: File): Flow&lt;String&gt;</ID>
     <ID>CognitiveComplexMethod:FilesChrome.kt$@Composable internal fun FileRow( entry: GuestEntry, selected: Boolean, selecting: Boolean, onClick: () -&gt; Unit, onLongClick: () -&gt; Unit, )</ID>
-    <ID>CognitiveComplexMethod:FilesScreen.kt$@Composable fun FilesScreen( runtime: Runtime, startPath: String, onExit: () -&gt; Unit, )</ID>
     <ID>CognitiveComplexMethod:G1Glasses.kt$G1Glasses.Arm$override fun onNotify( arm: BleArm, uuid: UUID, value: ByteArray, )</ID>
     <ID>CognitiveComplexMethod:G1Glasses.kt$G1Glasses.Arm$override fun onServices( arm: BleArm, gatt: BluetoothGatt, )</ID>
     <ID>CognitiveComplexMethod:G1Protocol.kt$G1Protocol$fun pages(text: String): List&lt;String&gt;</ID>
@@ -209,7 +208,6 @@
     <ID>CyclomaticComplexMethod:EdgeGestures.kt$EdgeGestures$private fun run(action: String)</ID>
     <ID>CyclomaticComplexMethod:Files.kt$fun watchFile(file: File): Flow&lt;String&gt;</ID>
     <ID>CyclomaticComplexMethod:FilesChrome.kt$@Composable internal fun FileRow( entry: GuestEntry, selected: Boolean, selecting: Boolean, onClick: () -&gt; Unit, onLongClick: () -&gt; Unit, )</ID>
-    <ID>CyclomaticComplexMethod:FilesScreen.kt$@Composable fun FilesScreen( runtime: Runtime, startPath: String, onExit: () -&gt; Unit, )</ID>
     <ID>CyclomaticComplexMethod:G1Glasses.kt$G1Glasses.Arm$override fun onNotify( arm: BleArm, uuid: UUID, value: ByteArray, )</ID>
     <ID>CyclomaticComplexMethod:G1Protocol.kt$G1Protocol$fun event(payload: ByteArray): GlassesEvent?</ID>
     <ID>CyclomaticComplexMethod:G2Glasses.kt$G2Glasses.Arm$override fun onNotify( arm: BleArm, uuid: UUID, value: ByteArray, )</ID>
@@ -350,7 +348,6 @@
     <ID>LongMethod:Compiler.kt$Compiler$private fun ex( e: Expr, s: Scope, ): Ev</ID>
     <ID>LongMethod:Compiler.kt$Compiler$private fun handler( h: Handler, scope: Scope, params: List&lt;String&gt; = HANDLER_PARAMS[h.name].orEmpty(), ): Action</ID>
     <ID>LongMethod:Compiler.kt$Compiler$private fun program(): Program</ID>
-    <ID>LongMethod:FilesScreen.kt$@Composable fun FilesScreen( runtime: Runtime, startPath: String, onExit: () -&gt; Unit, )</ID>
     <ID>LongMethod:Json.kt$Json.Reader$fun value(): Value</ID>
     <ID>LongMethod:Parser.kt$Parser$private fun body(top: Boolean = false): Body</ID>
     <ID>LongMethod:Parser.kt$Parser$private fun decl(): Decl</ID>
