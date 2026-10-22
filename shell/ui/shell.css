@@ -800,11 +800,36 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   justify-content: center;
 }
 .folder-panel {
-  display: grid;
-  grid-template-columns: repeat(3, var(--cell));
+  display: flex;
+  flex-direction: column;
   gap: var(--gap);
   padding: var(--edge);
+  max-width: calc(100% - 2 * var(--edge));
 }
+/* The folder's name (ui/folders.tsx): a title until it's tapped, then a soft-filled field - never a line. */
+.folder-name {
+  font: inherit;
+  font-weight: 600;
+  text-align: center;
+  color: var(--color-foreground);
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  padding: 6px 10px;
+  outline: none;
+}
+.folder-name:focus { background: var(--soft-fill); }
+.folder-name::placeholder { color: var(--color-muted); }
+.folder-apps {
+  display: grid;
+  grid-template-columns: repeat(3, var(--cell));
+  grid-auto-rows: var(--cell);
+  gap: var(--gap);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.folder-apps .app { touch-action: none; }
+.chosen-actions { z-index: 9; }
 
 /* OWL widgets (owl.tsx): the tree fills the tile as Render.kt's WidgetContent, a Column. */
 .owl {

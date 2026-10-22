@@ -549,6 +549,104 @@ async function partyMoveCheck() {
 }
 
 /**
+ * In the page, edit mode (the user, 2026-10-22): two apps tapped (picked), "group into folder" makes one folder in the
+ * first one's place with both in it, opened at once; its name is edited and kept (store home.folders); closed, a tap on
+ * the tile opens it again (out of edit mode).
+ */
+async function folderCreateCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const { powos } = await importShim("./bridge.ts");
+  const tap = (el) => {
+    const r = el.getBoundingClientRect();
+    for (const type of ["pointerdown", "pointerup"]) el.dispatchEvent(new PointerEvent(type, { pointerId: 9, pointerType: "touch", clientX: r.left + 8, clientY: r.top + 8, bubbles: true, isPrimary: true }));
+  };
+  const n = S.pages.value[S.page.value];
+  const [a, b] = S.home.value.items.filter((i) => i.page === n && i.kind === "app" && i.cell).sort((p, q) => p.cell.y - q.cell.y || p.cell.x - q.cell.x);
+  if (!b) return ["folder: the mock's page has no two apps"];
+  S.editing.value = true;
+  await sleep(300);
+  for (const k of [a.key, b.key]) tap(document.querySelector(`.home-tile[data-key="${k}"]`));
+  await sleep(150);
+  const button = document.querySelector(".chosen-actions .group-folder");
+  if (!button) return ["folder: two apps picked show no \"group into folder\""];
+  button.click();
+  await sleep(600);
+  const f = S.home.value.items.find((i) => i.kind === "folder" && i.apps.some((x) => x.key === a.key));
+  if (!f) return ["folder: \"group into folder\" made no folder of the two apps"];
+  const fails = [];
+  if (f.apps.length !== 2 || !f.apps.some((x) => x.key === b.key)) fails.push(`folder: holds [${f.apps.map((x) => x.key)}], not ${a.key} and ${b.key}`);
+  if (`${f.cell.x},${f.cell.y}` !== `${a.cell.x},${a.cell.y}`) fails.push(`folder: at ${f.cell.x},${f.cell.y}, not where ${a.key} was (${a.cell.x},${a.cell.y})`);
+  if (document.querySelectorAll(`.home-tile[data-key="${f.key}"] .folder-face img, .home-tile[data-key="${f.key}"] .folder-face span`).length !== 2) fails.push("folder: its tile doesn't show its two apps' icons");
+  if (!document.querySelector(".folder-panel .folder-name")) fails.push("folder: not opened after it was made (no popover with its name)");
+  return fails;
+}
+
+/** In the page, after folderCreateCheck (the folder open): its name edited is kept; closed, a tap on it opens it again. */
+async function folderNameCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const { powos } = await importShim("./bridge.ts");
+  const tap = (el) => {
+    const r = el.getBoundingClientRect();
+    for (const type of ["pointerdown", "pointerup"]) el.dispatchEvent(new PointerEvent(type, { pointerId: 11, pointerType: "touch", clientX: r.left + 8, clientY: r.top + 8, bubbles: true, isPrimary: true }));
+  };
+  const f = S.home.value.items.find((i) => i.key === S.folder.value);
+  const name = document.querySelector(".folder-panel .folder-name");
+  const fails = [];
+  name.value = "Gate test";
+  name.dispatchEvent(new Event("change", { bubbles: true }));
+  await sleep(200);
+  if ((await powos.store.get("home.folders"))?.[f.key] !== "Gate test") fails.push("folder: its name isn't kept (store home.folders)");
+  S.folder.value = null;
+  S.editing.value = false;
+  await sleep(200);
+  tap(document.querySelector(`.home-tile[data-key="${f.key}"]`));
+  await sleep(200);
+  if (document.querySelector(".folder-panel")?.dataset.key !== f.key) fails.push("folder: a tap on its tile doesn't open it");
+  else if (document.querySelector(".folder-panel .folder-name")?.value !== "Gate test") fails.push("folder: opened again, its name is gone");
+  return fails;
+}
+
+/**
+ * In the page, after folderCreateCheck (the folder open, two apps): one app held and dragged out onto a free cell is on
+ * home there, out of the folder; the folder, left with one app, goes away - that app in its place.
+ */
+async function folderDissolveCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const G = await importShim("./ui/grid.tsx");
+  const fire = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 10, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true }));
+  const f = S.home.value.items.find((i) => i.key === S.folder.value);
+  const el = document.querySelector(".folder-panel .folder-apps .app");
+  if (!f || !el) return ["folder: not open for the drag-out"];
+  const out = f.apps.find((x) => x.key === el.dataset.key);
+  const rest = f.apps.find((x) => x !== out);
+  const g = G.geometry.value;
+  const spot = G.placeNewCells(1, 1);
+  if (spot.page !== S.pages.value[S.page.value]) return ["folder: no free cell on the page to drag an app out to"];
+  const free = [spot.cell.x, spot.cell.y];
+  const r = el.getBoundingClientRect();
+  fire(el, "pointerdown", r.left + r.width / 2, r.top + r.height / 2);
+  await sleep(520);
+  const [tx, ty] = [g.left + g.pad + (free[0] + 0.5) * g.cellW, g.top + g.pad + (free[1] + 0.5) * g.cellH];
+  const pages = document.querySelector(".pages");
+  for (let k = 1; k <= 8; k++) fire(pages, "pointermove", r.left + ((tx - r.left) * k) / 8, r.top + ((ty - r.top) * k) / 8);
+  await sleep(60);
+  fire(pages, "pointerup", tx, ty);
+  await sleep(600);
+  const where = (key) => {
+    const c = S.home.value.items.find((i) => i.key === key && i.kind === "app")?.cell;
+    return c ? `${c.x},${c.y}` : "nowhere on home";
+  };
+  const fails = [];
+  if (where(out.key) !== `${free[0]},${free[1]}`) fails.push(`folder: ${out.key} dragged out to ${free} is at ${where(out.key)}`);
+  if (S.home.value.items.some((i) => i.key === f.key)) fails.push("folder: left with one app, it's still there");
+  if (where(rest.key) !== `${f.cell.x},${f.cell.y}`) fails.push(`folder: the app left (${rest.key}) is at ${where(rest.key)}, not the folder's place ${f.cell.x},${f.cell.y}`);
+  return fails;
+}
+
+/**
  * In the page: floating windows on home's pages (ui/desktops.ts) - the host stubbed (the mock has no floating
  * windows), two pages. A window opens on the page on screen; swiping pages hides the other page's windows
  * (floating.desktop's list); a window brought back from the dock (windows.raised) takes home to its page; one let go
@@ -971,6 +1069,16 @@ try {
       runs.push(open(browser, `${ORIGIN}/index.html`, `home-select-${label}`, viewport).then((r) => whenReady(r, async () => {
         const fails = await r.page.evaluate(marqueeCheck);
         return fails.length ? fails : r.page.evaluate(partyMoveCheck);
+      })));
+  // Folders from picked apps: made, opened, named, an app dragged out, the last one left dissolving it. Both screens.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `home-folder-${label}`, viewport).then((r) => whenReady(r, async () => {
+        for (const check of [folderCreateCheck, folderNameCheck, folderDissolveCheck]) {
+          const fails = await r.page.evaluate(check);
+          if (fails.length) return fails;
+        }
+        return [];
       })));
   // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
   // side-by-side pages without moving a tile.

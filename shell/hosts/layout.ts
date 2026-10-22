@@ -11,6 +11,14 @@ export function homeLayout(home: Home, changed: () => void, apps: () => App[]): 
     home.pages = [...new Set(home.items.map((i) => i.page))].sort((a, b) => a - b);
     changed();
   };
+  /** A folder of fewer than two apps goes away: the app left takes its place. */
+  const tidy = () => {
+    for (const f of home.items.filter((i) => i.kind === "folder" && i.apps!.length < 2)) {
+      const rest = f.apps![0];
+      home.items = home.items.filter((i) => i !== f);
+      if (rest) home.items.push({ key: rest.key, kind: "app", page: f.page, cell: f.cell, resizable: false, minSize: [1, 1], size: [1, 1], label: rest.label, app: rest.app });
+    }
+  };
   return {
     get: async () => structuredClone(home),
     place: async (key: string, cell: Cell, page: number) => {
@@ -24,6 +32,9 @@ export function homeLayout(home: Home, changed: () => void, apps: () => App[]): 
       if (!a) throw new Error(`no such app: ${app}`);
       const key = (a.kind === "linux" ? "linux:" : "app:") + a.key.slice(2);
       home.items = home.items.filter((i) => i.key !== key);
+      // Out of its folder, if it was in one (a folder left with one app goes away, as ShellHome's tidy).
+      for (const f of home.items.filter((i) => i.kind === "folder")) f.apps = f.apps!.filter((x) => x.key !== key);
+      tidy();
       home.items.push({ key, kind: "app", page, cell: cell ?? null, resizable: false, minSize: [1, 1], size: [1, 1], label: a.label, app });
       done();
       return key;
@@ -58,13 +69,15 @@ export function homeLayout(home: Home, changed: () => void, apps: () => App[]): 
       if (!item || !into || item.kind !== "app") return null;
       home.items = home.items.filter((i) => i.key !== key);
       const entry = { key: item.key, label: item.label!, app: item.app! };
+      let folder = into.key;
       if (into.kind === "folder") into.apps!.push(entry);
       else {
+        folder = "folder:" + Date.now().toString(36) + Math.floor(Math.random() * 1e4);
         home.items = home.items.filter((i) => i.key !== target);
-        home.items.push({ ...into, key: "folder:" + Date.now(), kind: "folder", apps: [{ key: into.key, label: into.label!, app: into.app! }, entry] });
+        home.items.push({ ...into, key: folder, kind: "folder", apps: [{ key: into.key, label: into.label!, app: into.app! }, entry] });
       }
       done();
-      return null;
+      return folder;
     },
   };
 }

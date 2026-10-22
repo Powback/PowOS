@@ -173,6 +173,22 @@ export function wide(n: Bridge): Bridge {
     return key;
   }
 
+  /** The folder [app] is in now, unfolded (taken out of it, the folder may go away). */
+  async function folderOf(app: string) {
+    if (!isWide() || !cells) return null;
+    const h = await n.home.get().catch(() => null);
+    return h?.items.find((i) => i.kind === "folder" && i.apps?.some((a) => a.app === app)) ?? null;
+  }
+
+  /** [app] taken out of [f]: the one app left in it, if that's all, takes the folder's wide cell (as folded). */
+  function dissolved(f: HomeItem, app: string) {
+    const at = cells?.[f.key];
+    const rest = f.apps!.filter((a) => a.app !== app);
+    if (!at || rest.length !== 1) return;
+    keep(rest[0].key, at, at.hp);
+    emit("home.changed", null);
+  }
+
   // Folded or unfolded: home is laid out again from the host's own layout.
   let was = isWide();
   const recheck = () => {
@@ -202,8 +218,21 @@ export function wide(n: Bridge): Bridge {
       get: async () => toWide(await n.home.get()),
       place,
       add: async (app, page, cell) => {
+        const from = await folderOf(app);
         const [p, c] = toHost(page, cell ?? null);
-        return added(await n.home.add(app, p, c ?? undefined), page, cell && { ...cell, w: 1, h: 1 });
+        const key = await added(await n.home.add(app, p, c ?? undefined), page, cell && { ...cell, w: 1, h: 1 });
+        if (from) dissolved(from, app);
+        return key;
+      },
+      group: async (key, target) => {
+        // Two apps make a new folder in the target's place: on the wide page too (not the side-by-side spot).
+        const at = isWide() && !target.startsWith("folder:") ? cells?.[target] : undefined;
+        const made = await n.home.group(key, target);
+        if (made && at && made !== target) {
+          keep(made, at, at.hp);
+          emit("home.changed", null);
+        }
+        return made;
       },
       addPanel: async (name, page, cell) => {
         const [p, c] = toHost(page, cell);

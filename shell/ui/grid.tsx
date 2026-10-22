@@ -21,6 +21,7 @@ import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, sele
 import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen, held } from "./gesture.ts";
+import { FolderFace, FolderPanel, folderable, folderName, groupIntoFolder, loadFolderNames } from "./folders.tsx";
 import { chosen, isChosen, marquee, MARQUEE_DWELL, partyCells, partyOf, startMarquee, toggleChosen } from "./homeselect.ts";
 import { OwlWidget } from "./owl.tsx";
 import { AppWidgetFace } from "./appwidget.tsx";
@@ -127,18 +128,34 @@ const shown = (i: HomeItem): Cell => (i.resizable ? i.cell! : { ...i.cell!, w: 1
 
 type Aim = { group: string; page: number; cell?: undefined } | { cell: Cell; page: number; group?: undefined };
 
+/** The tile of [items] under the carrying finger. */
+function underFinger(c: Carry, items: HomeItem[]) {
+  const g = geometry.value;
+  const finger = { x: (c.x - g.pad) / g.cellW, y: (c.y - g.pad) / g.cellH };
+  return items.find((i) => {
+    const s = shown(i);
+    return finger.x >= s.x && finger.x < s.x + s.w && finger.y >= s.y && finger.y < s.y + s.h;
+  });
+}
+
+/**
+ * An app taken out of a folder, let go: back over its own folder it stays in; anywhere else on home it's out - where
+ * it's let go, or the first free spot when there's no room there (the host's add takes it out of the folder).
+ */
+async function dropFromFolder(c: Carry, target: Aim | null) {
+  if (underFinger(c, itemsOn(pages.value[page.value]))?.key === c.fromFolder) return;
+  navigator.vibrate?.(10);
+  await powos.home.add(c.app!, target?.page ?? pages.value[page.value], target?.cell);
+}
+
 /** Where a drop at the finger would go: a free cell at the carried size, or an app or folder to group with. */
 function aim(c: Carry): Aim | null {
   const g = geometry.value;
   const n = pages.value[page.value];
   const size = c.item?.resizable ? { w: c.item.cell!.w, h: c.item.cell!.h } : { w: 1, h: 1 };
   const others = itemsOn(n).filter((i) => i.key !== c.item?.key);
-  const finger = { x: (c.x - g.pad) / g.cellW, y: (c.y - g.pad) / g.cellH };
   const app = !c.item || c.item.kind === "app";
-  const under = others.find((i) => {
-    const s = shown(i);
-    return finger.x >= s.x && finger.x < s.x + s.w && finger.y >= s.y && finger.y < s.y + s.h;
-  });
+  const under = underFinger(c, others);
   if (under && app && (under.kind === "app" || under.kind === "folder") && c.item) return { group: under.key, page: n };
   const x = Math.max(0, Math.min(home.value.columns - size.w, Math.round((c.x - c.grab.x - g.pad) / g.cellW)));
   const y = Math.max(0, Math.min(g.rows - size.h, Math.round((c.y - c.grab.y - g.pad) / g.cellH)));
@@ -202,7 +219,7 @@ export const placeNewCells = (w: number, h: number) => placeNew(w * (geometry.va
  * Starts carrying [what] ({ item } or { app }) with the pointer of [e]: follows it on the window until it lifts, then
  * drops. [grab] is where the finger holds the tile.
  */
-export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boolean }, e: PointerEvent, grab = { x: 0, y: 0 }) {
+export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boolean; fromFolder?: string }, e: PointerEvent, grab = { x: 0, y: 0 }) {
   const g = geometry.value;
   carry.value = { ...what, x: e.clientX - g.left, y: e.clientY - g.top, grab };
   hoverDock(carry.value, e.clientX, e.clientY);
@@ -255,6 +272,7 @@ export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boo
       if (target?.cell) await addHome(c.app, target.page, target.cell);
       return;
     }
+    if (c.fromFolder) return dropFromFolder(c, target);
     if (!target) return;
     navigator.vibrate?.(10);
     if (c.app) await powos.home.add(c.app, target.page, target.cell);
@@ -661,14 +679,7 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
       {item.kind === "panel" && item.name === "recents" && <RecentsPanel item={item} />}
       {item.kind === "panel" && item.name === "search" && <SearchPanel />}
       {item.kind === "app" && <AppFace appKey={item.app!} label={item.label} />}
-      {item.kind === "folder" && (
-        <div class="folder-face tile">
-          {item.apps!.slice(0, 4).map((a) => {
-            const app = byKey.value.get(a.app);
-            return app ? <img src={app.icon} alt="" draggable={false} /> : <span>{a.label[0]}</span>;
-          })}
-        </div>
-      )}
+      {item.kind === "folder" && <FolderFace item={item} />}
       {isSelected && !lifted && !isFootSearch(item.key) && <Actions item={item} />}
       {isSelected && !lifted && item.resizable && <ResizeHandle item={item} />}
     </div>
@@ -771,6 +782,36 @@ function Spot({ cell }: { cell: Cell }) {
   return <div class="drop-spot" style={{ left: `${spot.left}px`, top: `${spot.top}px`, width: `${spot.width}px`, height: `${spot.height}px` }} />;
 }
 
+/**
+ * What the picked tiles can do together, over them (under them when they're at the top): 2+ apps go into one folder,
+ * opened at once so it can be named. Only at rest - not while a finger draws or carries.
+ */
+function ChosenActions() {
+  const n = pages.value[page.value];
+  const items = itemsOn(n).filter((i) => isChosen(i.key));
+  if (!editing.value || items.length < 2 || carry.value || marquee.value || !folderable(items)) return null;
+  const boxes = items.map((i) => box(shown(i)));
+  const top = Math.min(...boxes.map((b) => b.top));
+  const bottom = Math.max(...boxes.map((b) => b.top + b.height));
+  const left = Math.min(...boxes.map((b) => b.left));
+  const above = top > 56;
+  const stop = (e: Event) => e.stopPropagation();
+  return (
+    <div class="tile-actions tile chosen-actions" style={{ left: `${left}px`, top: above ? `${top - 52}px` : `${bottom + 4}px`, bottom: "auto" }} onPointerDown={stop} onPointerUp={stop}>
+      <button
+        class="group-folder"
+        onClick={async () => {
+          const made = await groupIntoFolder(items);
+          chosen.value = [];
+          if (made) folder.value = made;
+        }}
+      >
+        group into folder
+      </button>
+    </div>
+  );
+}
+
 /** The selection rectangle being drawn on empty space (homeselect.ts): only while a finger draws it. */
 function Marquee() {
   const r = marquee.value;
@@ -806,7 +847,7 @@ function Face({ item }: { item: HomeItem }) {
   if (item.kind === "app") return <AppFace appKey={item.app!} label={item.label} />;
   return (
     <div class="tile widget-face focused">
-      <div class="widget-name">{item.name ?? "folder"}</div>
+      <div class="widget-name">{item.kind === "folder" ? folderName(item.key) : item.name}</div>
     </div>
   );
 }
@@ -830,29 +871,6 @@ export function Carried() {
       </div>
       <PartyGhosts c={c} />
     </>
-  );
-}
-
-function FolderPanel() {
-  const f = home.value.items.find((i) => i.key === folder.value);
-  if (!f) return null;
-  return (
-    <div class="folder-scrim" onClick={() => (folder.value = null)}>
-      <div class="folder-panel tile sheet pop" onClick={(e) => e.stopPropagation()}>
-        {f.apps!.map((a) => (
-          <div
-            class="app"
-            key={a.key}
-            onClick={() => {
-              folder.value = null;
-              launch(a.app);
-            }}
-          >
-            <AppFace appKey={a.app} label={a.label} />
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -966,6 +984,7 @@ export function Pages() {
   useEffect(() => {
     if (rows > 0 && home.value.items.some((i) => !i.cell)) powos.home.arrange(home.value.columns, rows);
   }, [home.value, rows]);
+  useEffect(loadFolderNames, []);
   // The recent apps row, once, as a widget of home's (ui/recentwidget.tsx), at the bottom of the first page.
   useEffect(() => void migrateRecents(rows), [rows]);
   // Also each render: a page's glass layer just mounted takes the track's place at once.
@@ -999,7 +1018,8 @@ export function Pages() {
       </div>
       <Preview />
       <Marquee />
-      <FolderPanel />
+      <ChosenActions />
+      <FolderPanel onDragOut={(app, from, e, grab) => startCarry({ app, fromFolder: from }, e, grab)} />
     </div>
   );
 }

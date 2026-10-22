@@ -53,6 +53,8 @@ export interface Carry {
   app?: string;
   /** Taken up out of the dock: let go anywhere off it, it's unpinned. */
   fromDock?: boolean;
+  /** Taken out of this folder (its key): let go off it, it's out of the folder - on home where it's let go. */
+  fromFolder?: string;
   x: number;
   y: number;
   grab: { x: number; y: number };

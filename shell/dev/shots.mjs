@@ -176,6 +176,9 @@ const SCENES = [
   ["home-p2", "home", "S.page.value = 1;", "wallpaper"],
   ["edit", "home", "S.editing.value = true;", "wallpaper"],
   ["edit-theme", "home", "S.editing.value = true; await sleep(200); [...document.querySelectorAll('.edit-act')].find(b => b.textContent.trim() === 'theme')?.click();", "wallpaper"],
+  // Picking tiles in edit mode (ui/homeselect.ts) and a folder made of them, open (ui/folders.tsx).
+  ["edit-chosen", "home", "S.editing.value = true; const H = await U('./ui/homeselect.ts'); H.chosen.value = S.home.value.items.filter((i) => i.kind === 'app').slice(0, 2).map((i) => i.key); await sleep(200);", "wallpaper"],
+  ["folder-open", "home", "S.editing.value = true; const H = await U('./ui/homeselect.ts'); H.chosen.value = S.home.value.items.filter((i) => i.kind === 'app').slice(0, 3).map((i) => i.key); await sleep(200); document.querySelector('.chosen-actions .group-folder')?.click(); await sleep(600); S.editing.value = false; await sleep(200);", "wallpaper"],
   ["edit-picker", "home", "S.editing.value = true; await sleep(150); (await U('./ui/appwidget.tsx')).picker.value = true;", "wallpaper"],
   ["drawer", "home", "S.drawer.value = 1;", "wallpaper"],
   // The running bar under icons (ui/running.ts; the mock: Chrome, Konsole, Spotify, Signal running, Dolphin and Steam
