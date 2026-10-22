@@ -299,6 +299,8 @@ const boxed = (i: HomeItem) =>
  * outer corners stay round. One pass over a grid of the page's cells; recomputed with the page's items.
  */
 function joins(items: HomeItem[]): Map<string, Record<string, number>> {
+  // The desktop's home (powos-shell under Plasma): widgets stay separate surfaces, like plasmoids - never merged.
+  if (document.documentElement.dataset.mode === "desktop") return new Map();
   const at = new Map<string, string>();
   for (const i of items) {
     if (!boxed(i)) continue;
