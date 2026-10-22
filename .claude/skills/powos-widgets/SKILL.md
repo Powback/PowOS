@@ -42,6 +42,17 @@ Three kinds of widget, one home grid (docs/AGENT-HANDBOOK.md, Widgets):
 - OWL layout is Compose's: an unsized Text/Grid/Canvas/chart or a Row of weights takes the column's width; a Row's
   fixed-width items don't spread without `fill: width`; size text from tileWidth/tileHeight, never a fixed cap.
 
+## OWL Canvas and Image on the phone (2026-10-22, the fetch logo)
+- A Canvas's box comes from its node (size/fill/weight/the Box around it), never from its bitmap: owl.tsx gives the
+  canvas `contain: size`. paint() sets the bitmap to box x devicePixelRatio, so a box sized by its own bitmap grows by
+  dpr at every ResizeObserver tick - invisible at dpr 1 (preview, gate), a 28 px bar down the tile drawn white on the
+  phone (dpr 2.76) after a restart. Bitmaps are capped at 4096 px a side; no 2D context = canvas hidden.
+- An Image that fails (/_wimg route or file gone) is hidden in its box (onError visibility hidden): layout kept,
+  never the WebView's broken-image box. Preview check: "a broken image shows"; variant data/97-now-playing~broken-art.
+  Also checked: "a canvas WxH past its tile".
+- Shared screenshots the user sent PowOS AI: /data/data/com.powos.app/files/run/powos-ai-shared/screen-<ms>.jpg -
+  the first thing to read for a reported visual bug (the 22:36 one showed the cover screen, not the inner one).
+
 ## Gesture ownership (shell/ui/gesture.ts homeGestures)
 Home's page swipe, drawer and shade are TOUCH events on .home: a control's pointerdown stopPropagation does NOT stop
 them. A drag that starts on `.letter-bar, input[type=range], [role=slider], [data-owns-gesture], ...` (the `own`

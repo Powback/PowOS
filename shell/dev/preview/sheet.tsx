@@ -379,9 +379,14 @@ export function check(EMPTY = 0.12, COVER = 0.25) {
       return false;
     };
     for (const el of face.querySelectorAll<HTMLElement>("*")) {
+      // A failed image hidden in its own box (owl.tsx Image onError) keeps the widget's layout: its slot counts as laid out.
+      if (el instanceof HTMLImageElement && el.complete && !el.naturalWidth && el.style.visibility === "hidden") add(visible(el, el.getBoundingClientRect(), face));
       if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
       const cs = getComputedStyle(el);
       if (el instanceof HTMLCanvasElement) {
+        // Sized by its node, never by its bitmap (owl.tsx Canvas: contain size): one taller or wider than its tile grew.
+        const cr = el.getBoundingClientRect();
+        if (cr.height > fr.height + 1 || cr.width > fr.width + 1) problems.push(`a canvas ${Math.round(cr.width)}x${Math.round(cr.height)} past its tile (sized by its bitmap)`);
         const r = inked(el);
         if (r) add(r);
         continue;
@@ -392,6 +397,8 @@ export function check(EMPTY = 0.12, COVER = 0.25) {
         continue;
       }
       if (el instanceof SVGElement) continue;
+      // A failed image is hidden (owl.tsx Image onError), never the WebView's broken-image box (data/97-now-playing~broken-art).
+      if (el instanceof HTMLImageElement && el.complete && !el.naturalWidth && el.getAttribute("src")) problems.push("a broken image shows (hide it on error)");
       if (el instanceof HTMLImageElement || el instanceof HTMLInputElement || painted(cs)) add(visible(el, el.getBoundingClientRect(), face));
       // Its own text: clipped by itself (ellipsis, line clamp) or by what holds it.
       const own = [...el.childNodes].filter((n) => n.nodeType === 3 && n.textContent!.trim());

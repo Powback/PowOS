@@ -332,6 +332,10 @@ function Node({ node, ctx, parent }: { node: OwlNode; ctx: Ctx; parent: string }
           src={`/_wimg/${encodeURIComponent(ctx.key)}/${encodeURIComponent(src)}`}
           alt=""
           draggable={false}
+          // An image that fails (a route gone after a restart, a file removed) is hidden, its box kept: the widget's
+          // layout stays and no broken-image box shows. A later load of the same element shows it again.
+          onError={(e) => (e.currentTarget.style.visibility = "hidden")}
+          onLoad={(e) => (e.currentTarget.style.visibility = "")}
           style={{ objectFit: (({ cover: "cover", fill: "fill" } as Record<string, string>)[p.fit] ?? "contain") as any, display: "block", ...style }}
         />
       );
@@ -445,19 +449,33 @@ function Canvas({ node, ctx, on, style }: { node: OwlNode; ctx: Ctx; on: object;
     return () => ro.disconnect();
   }, [node.id]);
   useEffect(() => paint(el.current, node.ops, ctx), [node.ops]);
-  return <canvas {...on} ref={el} style={{ display: "block", ...style }} />;
+  // contain: size - the canvas's box comes from its node (a size, a fill, the Box around it), never from its bitmap:
+  // paint() sets the bitmap to the box x devicePixelRatio, so a box sized by its own bitmap (a percentage height in an
+  // auto track) grew by that factor at every resize - on the phone (dpr 2.76) the fetch logo became a 28 px wide bar
+  // down the tile, too big to draw (white) after a restart (2026-10-22). At dpr 1 (the gate) it never grew.
+  return <canvas {...on} ref={el} style={{ display: "block", contain: "size", ...style }} />;
 }
+
+/** The largest canvas bitmap side drawn, px (a whole tile at 4x is ~2400). */
+const MAX_CANVAS = 4096;
 
 function paint(c: HTMLCanvasElement | null, ops: OwlOp[] | undefined, ctx: Ctx) {
   if (!c) return;
   const r = c.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
-  if (c.width !== Math.round(r.width * dpr) || c.height !== Math.round(r.height * dpr)) {
-    c.width = Math.round(r.width * dpr);
-    c.height = Math.round(r.height * dpr);
+  // A bitmap never past MAX_CANVAS a side: a bigger one can't be allocated or drawn (the WebView shows it white).
+  const w = Math.min(Math.round(r.width * dpr), MAX_CANVAS);
+  const h = Math.min(Math.round(r.height * dpr), MAX_CANVAS);
+  if (c.width !== w || c.height !== h) {
+    c.width = w;
+    c.height = h;
   }
-  const g = c.getContext("2d")!;
-  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const g = c.getContext("2d");
+  // No context (out of memory, a lost GPU): nothing drawn rather than a white box.
+  c.style.visibility = g ? "" : "hidden";
+  if (!g) return;
+  // dp -> bitmap px: dpr, less where the bitmap was capped.
+  g.setTransform(r.width > 0 ? w / r.width : dpr, 0, 0, r.height > 0 ? h / r.height : dpr, 0, 0);
   g.clearRect(0, 0, r.width, r.height);
   draw(g, ops ?? [], ctx);
 }
