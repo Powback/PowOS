@@ -26,7 +26,7 @@ import { AppWidgetFace } from "./appwidget.tsx";
 import { Island } from "./island.tsx";
 import { AgentsPanel } from "./agents.tsx";
 import { migrateRecents, RecentsPanel } from "./recentwidget.tsx";
-import { SearchPanel } from "./searchwidget.tsx";
+import { footSearch, isFootSearch, placeItem, SearchPanel } from "./searchwidget.tsx";
 import { openAgents } from "../agents.ts";
 import type { Cell, HomeItem } from "../types.ts";
 
@@ -118,7 +118,8 @@ function box(c: Cell) {
 const overlaps = (a: Cell, b: Cell) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 /** Items on the page number [n] (home.pages' numbers, not indices). */
-const itemsOn = (n: number) => home.value.items.filter((i) => i.page === n && i.cell);
+/** Page [n]'s placed items - in edit mode with the foot's search pill on the grid too (searchwidget.tsx footSearch). */
+const itemsOn = (n: number) => (footSearch.value ? [...home.value.items, footSearch.value] : home.value.items).filter((i) => i.page === n && i.cell);
 
 /** A tile's cell as shown: apps and folders are always 1x1. */
 const shown = (i: HomeItem): Cell => (i.resizable ? i.cell! : { ...i.cell!, w: 1, h: 1 });
@@ -234,7 +235,7 @@ export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boo
     navigator.vibrate?.(10);
     if (c.app) await powos.home.add(c.app, target.page, target.cell);
     else if (target.group) await powos.home.group(c.item!.key, target.group);
-    else await powos.home.place(c.item!.key, target.cell!, target.page);
+    else await placeItem(c.item!.key, target.cell!, target.page);
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
@@ -640,7 +641,7 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
           })}
         </div>
       )}
-      {isSelected && !lifted && <Actions item={item} />}
+      {isSelected && !lifted && !isFootSearch(item.key) && <Actions item={item} />}
       {isSelected && !lifted && item.resizable && <ResizeHandle item={item} />}
     </div>
   );
@@ -715,7 +716,7 @@ function ResizeHandle({ item }: { item: HomeItem }) {
         e.stopPropagation();
         const cell = fit(e) ?? size;
         setSize(null);
-        if (cell) await powos.home.place(item.key, cell, item.page);
+        if (cell) await placeItem(item.key, cell, item.page);
       }}
     >
       {n && <div class="resize-preview" style={{ width: `${n.width}px`, height: `${n.height}px`, left: `${-b.width + 18}px`, top: `${-b.height + 18}px` }} />}

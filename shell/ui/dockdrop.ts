@@ -5,6 +5,7 @@
  */
 import { byKey, dock, dockAim, editing, selected, setDock, type Carry } from "../state.ts";
 import { powos } from "../bridge.ts";
+import { wideHome } from "../hosts/wide.ts";
 
 /** The most apps the dock holds; a full one swaps instead of growing. */
 export const DOCK_MAX = 6;
@@ -34,8 +35,15 @@ export function aimDock(c: Carry, x: number, y: number) {
   const full = rest.length >= DOCK_MAX && !dock.value.includes(key);
   // Inserting: one more slot than there are others (the gap counts); swapping: one of the others.
   const n = full ? rest.length : rest.length + 1;
-  const slot = Math.max(0, Math.min(n - 1, Math.floor(((x - r.left) / r.width) * n)));
-  return { key, slot, swap: full };
+  return { key, slot: slotAt(el, r, x, n), swap: full };
+}
+
+/** Which of [n] slots of the dock [el] (at [r]) [x] is over. */
+function slotAt(el: HTMLElement, r: DOMRect, x: number, n: number) {
+  // Wide (one bar: home.tsx .home.wide), the pinned row is as long as its icons, not the dock's whole side.
+  const row = wideHome.value ? el.querySelector<HTMLElement>(".dock-page")?.getBoundingClientRect() : null;
+  const s = row?.width ? row : r;
+  return Math.max(0, Math.min(n - 1, Math.floor(((x - s.left) / s.width) * n)));
 }
 
 /** Follows the finger: the dock makes room as it comes and goes, with a tick for each new slot. */

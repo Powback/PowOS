@@ -375,6 +375,87 @@ async function relayout(page, to, from) {
 }
 
 /**
+ * In the page, unfolded: home is ONE wide page (hosts/wide.ts). The host's layout is backed up before the first wide
+ * cells are written; every tile shows where the side-by-side pages had it (x + 7 on the right); a tile placed across
+ * the middle stays there; one bar at the foot - the pinned dock left of the search pill, the recent apps right of it.
+ */
+async function wideMigrated() {
+  const S = await importShim("./state.ts");
+  const { powos } = await importShim("./bridge.ts");
+  const host = (await powos.store.get("home.wide.backup"))?.home;
+  if (!host?.items?.length) return ["no backup of the host's layout in the store (home.wide.backup)"];
+  const pages = [...host.pages].sort((a, b) => a - b);
+  const now = new Map(S.home.value.items.map((i) => [i.key, i.cell ? `${i.cell.x},${i.cell.y}` : "none"]));
+  const was = (it) => `${it.cell.x + pages.indexOf(it.page) * (host.columns + 1)},${it.cell.y}`;
+  return host.items
+    .filter((i) => i.cell && pages.indexOf(i.page) < 2 && now.get(i.key) !== was(i))
+    .map((i) => `${i.key} moved: at ${now.get(i.key)}, side by side it was ${was(i)}`);
+}
+
+/** In the page, unfolded: a tile placed across the middle of the wide page stays there (one page, not two halves). */
+async function wideAcross() {
+  const S = await importShim("./state.ts");
+  const { powos } = await importShim("./bridge.ts");
+  const tile = S.home.value.items.find((i) => i.kind === "widget" && i.cell?.w === 3);
+  if (!tile) return ["no 3-wide widget to place across the middle"];
+  await powos.home.place(tile.key, { ...tile.cell, x: 5, y: 12 }, 1);
+  await new Promise((ok) => setTimeout(ok, 400));
+  const c = S.home.value.items.find((i) => i.key === tile.key)?.cell;
+  return c?.x === 5 && c.y === 12 ? [] : [`${tile.key} placed across the middle at 5,12 shows at ${c?.x},${c?.y}`];
+}
+
+/** In the page: the wide screen's one bar - dock | search pill | recent apps, left to right, on one line. */
+async function wideBar() {
+  const S = await importShim("./state.ts");
+  // Some pinned apps (the mock pins none), the recent ones left for the right end.
+  if (!S.dock.value.length) S.setDock([...S.byKey.value.keys()].slice(0, 4));
+  await new Promise((ok) => setTimeout(ok, 300));
+  const fails = [];
+  const box = (q) => document.querySelector(q)?.getBoundingClientRect();
+  const [dock, pill, tray] = [box(".home.wide > .dock:not(.dock-tray) .app"), box(".home.wide .bar-pill"), box(".home.wide > .dock-tray .app")];
+  const lacks = [[dock, "the dock"], [pill, "the pill"], [tray, "the recent apps"]].filter(([r]) => !r).map(([, n]) => n);
+  if (lacks.length) return [`the wide bar lacks ${lacks.join(", ")}`];
+  if (!(dock.right <= pill.left && pill.right <= tray.left)) fails.push("the wide bar isn't dock | search | recent apps, left to right");
+  const mid = (r) => r.top + r.height / 2;
+  if (Math.abs(mid(dock) - mid(pill)) > 4 || Math.abs(mid(tray) - mid(pill)) > 4) fails.push("the wide bar's dock, pill and recent apps aren't on one line");
+  return fails;
+}
+
+/**
+ * In the page, in edit mode (the user, 2026-10-22, three reports): the search bar is ON the grid as a tile like the
+ * others, the dock stays in view; moved, it becomes the search widget there (and leaves the foot); resized, it keeps
+ * the new size. Folded and unfolded.
+ */
+async function editSearchCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const shown = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible";
+  S.editing.value = true;
+  await sleep(400);
+  const fails = [];
+  const tile = document.querySelector('.home-tile[data-key="panel:search"]');
+  if (!shown(tile?.querySelector(".bar-pill"))) fails.push("edit mode: no search bar tile on the grid");
+  if (!shown(document.querySelector(".home > .dock .app"))) fails.push("edit mode: the dock isn't in view");
+  if (shown(document.querySelector(".home > .bar"))) fails.push("edit mode: the foot's search bar still shows beside its tile");
+  return fails;
+}
+
+/** In the page, in edit mode after editSearchCheck: the search bar's tile moved and resized becomes the search widget. */
+async function editSearchMoved() {
+  const S = await importShim("./state.ts");
+  const W = await importShim("./ui/searchwidget.tsx");
+  const was = W.footSearch.value;
+  if (!was) return ["edit mode: no foot search item (searchwidget.tsx footSearch)"];
+  const to = { x: 0, y: Math.max(0, was.cell.y - 1), w: 2, h: 1 };
+  await W.placeItem("panel:search", to, was.page);
+  await new Promise((ok) => setTimeout(ok, 500));
+  S.editing.value = false;
+  const real = S.home.value.items.find((i) => i.kind === "panel" && i.name === "search");
+  const at = JSON.stringify(real?.cell ?? null);
+  return at === JSON.stringify(to) ? [] : [`moved and resized to ${JSON.stringify(to)}, the search widget is at ${at}`];
+}
+
+/**
  * In the page: floating windows on home's pages (ui/desktops.ts) - the host stubbed (the mock has no floating
  * windows), two pages. A window opens on the page on screen; swiping pages hides the other page's windows
  * (floating.desktop's list); a window brought back from the dock (windows.raised) takes home to its page; one let go
@@ -787,6 +868,14 @@ try {
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
       }),
     );
+  // Edit mode: the search bar a tile on the grid, the dock in view (the user, 2026-10-22). Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `edit-search-${label}`, viewport).then((r) => whenReady(r, async () => [...(await r.page.evaluate(editSearchCheck)), ...(await r.page.evaluate(editSearchMoved))])));
+  // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
+  // side-by-side pages without moving a tile.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar))])));
   // Home after an app at another size (Broforce in landscape, 2026-10-22: back on home the widgets were tiny and squashed
   // at the top). Laid out at [from] while hidden and shown again at [to], turned there and back, and relaid in its own
   // column count after the other's at the same size: the tiles must sit where a fresh layout at [to] puts them, and the

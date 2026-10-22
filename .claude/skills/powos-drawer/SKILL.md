@@ -41,6 +41,12 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
   calc((100cqw - 28px)/6), `.dock-pages` container-type inline-size. NOT 100vw: WebView's vw was 688 on the 404 cover.
   Check: shell/dev/perf/dock-scroll.sh (one free window: swipe, scrollLeft, widths, screencap).
 
+## Wide bar (unfolded, home.tsx .home.wide from hosts/wide.ts wideHome)
+- .home is a grid: stage over a one-row foot (strip-height): Dock (pinned only, no recents page) | .bar (pill column
+  --wide-pill clamp(220px, 30%, 360px), pill centred in the row: --pill-mid) | DockTray (recents, a .dock.paged row).
+  Slots --slot min(60px, (100cqw - 28px)/6); the pinned .dock-page is as long as its icons (dockdrop slotAt measures it).
+- Drawer over it: frame to the screen foot, window to the pill's top, no slide (the pill stays; the dock sides fade).
+
 ## Themed icons (board theme-recolor-icons)
 - Slice 1 (8f5c995): ui/icontint.ts. `iconTint = stored("icons.tint")`: "" (apps' own) | "mono". Settings > style >
   icons > "icon colours". AppIcon uses `tinted(src) ?? src`. Each icon redrawn ONCE in idle time on a canvas (<=192px):

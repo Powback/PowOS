@@ -124,7 +124,15 @@ strip only - not the cause when a drag in a tile fails.
   its neighbours together cover it). Scene home-merged = the user's unfolded layout as a mock (only kind widget /
   known panels draw a face: an unknown panel name has none, its "group" is shadow only).
 - Native glass (nativeglass.ts): a bridge's region overlaps both faces along its long sides; a fillet gets no region
-  (rounded boxes only: a region blurred the whole square, an untinted corner). Wide home = 13 columns (6 + free + 6).
+  (rounded boxes only: a region blurred the whole square, an untinted corner).
+- Wide home (hosts/wide.ts, unfolded >= 700 px): ONE page of 13 columns per pair of host pages (the user's [1, 3] = one
+  page); tiles go anywhere on it. The host keeps only the folded layout; wide cells live in the store "home.wide"
+  (key -> cell + hp, the host page then; hp changed folded = placed again). No wide cell: the side-by-side spot
+  (x + 7 on the right), else the first free one. Moved/resized wide = store only (folded never moves); onto another
+  wide page = the host moves it too. First wide run backs the host layout up to "home.wide.backup". Gate: wide-home.
+- Edit mode: the foot's pill is a grid tile (searchwidget.tsx footSearch, key panel:search, lowest free row: whole
+  row folded, middle 5 columns wide); placeItem() turns a move/resize of it into addPanel("search"). The dock stays;
+  the edit sheet takes the pill's slot (wide: the bar's middle). Gate: edit-search-folded/-unfolded.
 - Relayout: measure() never runs while document.hidden and compares cellW (column count) too; Pages useMeasured and
   hosts/wide.ts recheck on visibilitychange (+2 frames, +400 ms), pageshow, orientationchange, resize, ResizeObserver.
   Gate: relayout-landscape/-fold/-unfold. The mock can't reproduce the phone's stuck-wide state: verify on the device.

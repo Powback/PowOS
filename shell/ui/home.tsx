@@ -29,6 +29,7 @@ import { Pet } from "./pet.tsx";
 import { Recents } from "./recents.tsx";
 import { dockTap } from "./desktops.ts";
 import { footBelow, hasSearchWidget } from "./searchwidget.tsx";
+import { wideHome } from "../hosts/wide.ts";
 import { byKey, carry, dock, dockAim, dockDrag, drawer, editing, folder, menu, page, pullKind, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
@@ -229,7 +230,9 @@ export function Dock() {
   });
   // Nothing pinned at all (not just the one carried out of it): no pinned page, only the drop zone while carrying.
   const ghost = !dock.value.some((k) => byKey.value.has(k));
-  const recents = recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k));
+  // Wide (unfolded), the recent apps are the bar's right end (DockTray): the dock is its pinned apps only.
+  const wide = wideHome.value;
+  const recents = !wide && recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k));
   if (ghost && !carried && !recents) return null;
   // While an app is carried or moved along it, the dock is its pinned page only.
   const paged = recents && !carried && !d && !ghost;
@@ -275,7 +278,7 @@ export function Dock() {
               {!d && !carried && <DockWindows pinned={dock.value} />}
             </div>
           )}
-          {(paged || (ghost && !carried)) && (
+          {recents && (paged || (ghost && !carried)) && (
             <div class="dock-page dock-recent">
               <DockRecents count={30} />
             </div>
@@ -297,6 +300,24 @@ export function Dock() {
   );
 }
 
+/**
+ * The wide screen's bar (unfolded): one row at the foot - the dock's pinned apps on the left, the search pill in the
+ * middle, and here on the right the apps opened lately (last first, not the pinned ones), a row that scrolls on with
+ * the finger past what fits. It gives way with the dock as the launcher opens (a .dock: the same fade and slide).
+ */
+function DockTray() {
+  if (!recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k))) return null;
+  return (
+    <div class="dock dock-tray paged" data-p ref={followOpenness}>
+      <div class="dock-pages">
+        <div class="dock-page dock-recent">
+          <DockRecents count={30} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Home() {
   // data-p: these follow the panel's openness (--p, written by gesture.ts, not through a render).
   return (
@@ -305,7 +326,7 @@ export function Home() {
       <div class="screens" {...homeGestures()}>
         <PowAiPage />
         <div
-          class={`home ${footBelow.value ? "pill-below" : ""} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
+          class={`home ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
         >
           <div class="stage">
             <div class="home-content" data-p ref={followOpenness}>
@@ -328,6 +349,7 @@ export function Home() {
           </div>
           {!hasSearchWidget() && <Bar />}
           <Dock />
+          {wideHome.value && <DockTray />}
           <AppMenu />
           <EditSheet />
         </div>

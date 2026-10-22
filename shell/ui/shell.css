@@ -974,13 +974,30 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 .screen-close { font: inherit; color: var(--color-muted); background: none; border: 0; padding: 4px 8px; }
 .screen-body { flex: 1; min-height: 0; overflow-y: auto; }
 
-/* Edit mode (editsheet.tsx, state.ts editing): the bar and the dock make way for the edit sheet; the pages stay as they are. */
-/* The search widget's pill (searchwidget.tsx, a tile on the grid) stays: it's a tile like any other - shown, lifted and
-   moved; its field doesn't take the press there (the tile's own press lifts it). */
+/*
+ * Edit mode (editsheet.tsx, state.ts editing): the foot's search pill is on the grid, a tile like the others
+ * (searchwidget.tsx footSearch: shown, lifted, moved and resized; its field doesn't take the press there), so the
+ * edit sheet takes the pill's place in the foot; the dock stays where it is. The pages stay as they are.
+ */
 .home.editing .bar:not(.search-face .bar),
-.home.editing .dock,
 .home.editing .launcher,
 .home.editing .launcher-frame { visibility: hidden; }
+/* Pill over the dock (the default): the sheet in the pill's row, over the dock; wide: the middle of the one bar. */
+.home:not(.pill-below):not(.wide) { --edit-foot: calc(var(--strip-height) + max(var(--inset-bottom, 0px), var(--pill-foot))); }
+.home:not(.pill-below):not(.wide) > .edit-sheet { bottom: var(--edit-foot); min-height: 48px; padding-bottom: 0; border-radius: var(--radius); }
+.home:not(.pill-below):not(.wide) > .theme-pop { bottom: calc(var(--edit-foot) + 48px + var(--gap)); }
+.home.wide > .edit-sheet {
+  position: relative;
+  grid-area: 2 / 2;
+  align-self: center;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  min-height: 44px;
+  padding: 0 4px 0 var(--edge);
+  border-radius: 22px;
+}
+.home.wide > .theme-pop { bottom: calc(var(--strip-height) + max(var(--inset-bottom, 0px), var(--pill-foot)) + var(--gap)); }
 /* One slim bar where the search bar and the dock were, flush with the screen's foot (editsheet.tsx). */
 .edit-sheet {
   position: fixed;
@@ -2133,23 +2150,33 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .ai-screen .ai-open:not(.tile *), .ai-screen .ai-mail-clear:not(.tile *) { color: var(--accent-text); }
 
 /*
- * The wide screen (the phone unfolded, 821 CSS px; hosts/wide.ts shows two of home's pages side by side at their
- * folded size): the pill a column in the middle, not the screen's width; the dock's icons at their folded spacing in
- * the middle, not spread across it. Height, type and the field stay the pill's own rules.
+ * The wide screen (the phone unfolded, 821 CSS px; hosts/wide.ts: one wide page; home.tsx .home.wide): one bar at the
+ * foot - the dock's pinned apps on the left, the search pill in the middle, the recent apps (DockTray) on the right,
+ * every icon at one slot's width (a sixth of a side, at most 60 px). Opening the launcher, both sides give way (the
+ * dock's slide and fade) and the pill stays where it is: the drawer's window ends at its top.
  */
-@media (min-width: 700px) {
-  html[data-mode="home"] .home > .bar {
-    width: min(560px, calc(100% - 2 * var(--edge)));
-    margin-inline: auto;
-  }
-  html[data-mode="home"] .dock-page {
-    justify-content: center;
-    gap: 12px;
-  }
-  html[data-mode="home"] .dock .app {
-    flex: 0 0 72px;
-  }
+.home.wide {
+  --wide-pill: clamp(220px, 30%, 360px);
+  --pill-mid: calc((var(--strip-height) - 44px) / 2);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--wide-pill) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--strip-height);
+  column-gap: 8px;
 }
+.home.wide > .stage { grid-area: 1 / 1 / 2 / -1; }
+.home.wide > .dock:not(.dock-tray) { grid-area: 2 / 1; }
+.home.wide > .bar { grid-area: 2 / 2; height: auto; transform: none; }
+.home.wide > .dock-tray { grid-area: 2 / 3; }
+.home.wide > .bar .bar-pill { left: 0; right: 0; bottom: var(--pill-mid); }
+.home.wide .dock-page { --slot: min(60px, calc((100cqw - 28px) / 6)); flex: 0 0 auto; }
+.home.wide .dock :is(.app, .dock-gap), .home.wide .dock .dock-recent .app { flex: 0 0 var(--slot); }
+.home.wide > .dock:not(.dock-tray) { margin-left: 8px; }
+.home.wide > .dock-tray { margin-right: 8px; }
+/* The launcher over a one-row foot: the frost to the screen's foot, the drawer's window to the pill's top, no slide. */
+.home.wide > .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
+.home.wide > .stage > .launcher-clip { inset: 0 0 calc(4px - var(--pill-mid)); transform: none; }
+.home.wide > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
+.home.wide:not(:has(> .bar)) > .stage > .launcher-clip { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
 
 /*
  * The control center, v3 (control.tsx Controls, state.ts ccV3): one row of the most-used toggles, every control in a
