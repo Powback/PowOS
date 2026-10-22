@@ -22,6 +22,7 @@ minimal change and tell them.
 | edge gestures, Quick Tools, corner pull-ups over apps, overlay window hosts, home pull -> shade | powos-gestures |
 | inter-agent comms (`powos comms`, MCP), manager inbox, agentsd, agent-mail notifications | powos-comms |
 | SpacetimeDB modules, vendored bindings, shell/apps/stdb.ts, bindings-check, publishes | powos-stdb |
+| games: Steam/Proton/FEX on the phone, Broforce checks, xwayland-kgsl, phone kernel build/test boot/flash/rollback | powos-games |
 | swipe home, recents switcher, NavGesture/RecentsTransition, page-after-home, wallpaper capture | powos-switcher |
 | native bridge security: PowosHost/Native/Boot, ShellOrigin, iframes, bridge-check.sh | powos-bridge-security |
 | PowOS AI's chat: rich messages, present/present_choices, PowosAiChat items | powos-chat |
