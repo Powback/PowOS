@@ -71,11 +71,25 @@ grep -q 'mode=freeform' "$OUT/mode.txt" && pass "a floating window" || fail "not
 # Its content at the windows' density (FreeformTasks.density, AppWindows.windowDpi): the task's own dpi, a real
 # relayout (not a scaled bitmap), so its text is about the size the app's is full screen, and the window is a wide layout.
 FD=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1)
-cfg=$(sh_ "dumpsys activity activities" | awk "/Task\\{.*$PKG/{f=1} f&&/CurrentConfiguration=/{print; exit}")
-TD=$(printf %s "$cfg" | grep -oE ' [0-9]+dpi' | head -1 | tr -dc 0-9); TW=$(printf %s "$cfg" | grep -oE ' w[0-9]+dp' | head -1 | tr -dc 0-9)
+# The task's own configuration (= TaskInfo.configuration, what WindowFrames.dense reads back): `am stack list` prints
+# each root task's "configuration={... wNNNdp ... NNNdpi ...}" above its "taskId=N: <pkg>/..." line; a freeform task is
+# a root task of its own. Not the activity's CurrentConfiguration in dumpsys activity activities (came back empty on
+# APK ccab7f0). dense re-applies the density every 500 ms until it shows (up to 4 s): poll up to 5 s for it to settle.
+tcfg() { sh_ "am stack list" | awk -v p="$PKG" '/^ *configuration=/{c=$0} $0 ~ "taskId=[0-9]+: "p"/"{print c; exit}'; }
+TD=; TW=; WANT=$((FD * 95 / 100))
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  cfg=$(tcfg); printf '%s\n' "$cfg" > "$OUT/task-config.txt"
+  TD=$(printf %s "$cfg" | grep -oE '[ {][0-9]+dpi' | head -1 | tr -dc 0-9); TW=$(printf %s "$cfg" | grep -oE ' w[0-9]+dp' | head -1 | tr -dc 0-9)
+  [ -n "$TD" ] && [ "$TD" -le "$WANT" ] && break
+  sleep 0.5
+done
+sh_ "logcat -d -s PowosWindowFrames:I | tail -20" > "$OUT/frames-log.txt"
+# For the record: the old read (the first CurrentConfiguration after the task's line in dumpsys activity activities).
+sh_ "dumpsys activity activities" | awk "/Task\\{.*$PKG/{f=1} f" | head -60 > "$OUT/task-activities.txt"
+grep -E 'dpi: set' "$OUT/frames-log.txt" | tail -3 | tee -a "$OUT/mode.txt"
 echo "window: ${TD}dpi ${TW}dp wide; full screen ${FD}dpi" | tee -a "$OUT/mode.txt"
 [ -n "$TD" ] && [ $((TD * 100)) -ge $((FD * 70)) ] && [ $((TD * 100)) -le $((FD * 95)) ] && pass "text at about its full-screen size (${TD} of ${FD} dpi)" ||
-  fail "the window's content isn't at the windows' density: ${TD:-?}dpi against the screen's $FD (want 70-95%)"
+  fail "the window's content isn't at the windows' density: ${TD:-?}dpi against the screen's $FD (want 70-95%; task-config.txt, frames-log.txt)"
 [ "${TW:-0}" -ge 600 ] && pass "a wide layout (${TW} dp)" || fail "the window is ${TW:-?} dp wide: the app's phone layout, blown up"
 # Its default size and place: ~60% x 70% of the screen, never over home's bottom bar (read from the page, not assumed).
 BAR=$("$T/cdp.sh" eval home 'Math.round(Math.min(...[...document.querySelectorAll(".home > .bar, .home > .dock, .home > .bottom-bar")].map(e=>e.getBoundingClientRect()).filter(r=>r.height>0).map(r=>r.top))*devicePixelRatio)' 2>&1 | tr -dc '0-9\n' | tail -1)
