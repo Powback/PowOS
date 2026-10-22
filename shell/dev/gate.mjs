@@ -297,6 +297,84 @@ try {
       }),
     );
   }
+  // The control center's rearranging (ui/reorder.ts, control.tsx): a tile held and carried onto the first slot lands
+  // there, is saved, and is still there after the panel shut and opened again and in a page loaded afresh; a carry
+  // cancelled (the system took the pointer) changes nothing.
+  if (process.env.SHELL_PAGES !== "0") {
+    const ccOrder = () => [...document.querySelectorAll(".cc-main [data-key]")].map((e) => e.dataset.key);
+    runs.push(
+      open(browser, `${ORIGIN}/index.html?mode=shade`, "cc-reorder").then(async (r) => {
+        await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+        const out = await r.page
+          .evaluate(async (orderSrc) => {
+            const order = new Function(`return (${orderSrc})`)();
+            const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+            const S = await importShim("./state.ts");
+            const P = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerId: 9, isPrimary: true, pointerType: "touch" }));
+            const mid = (el) => { const b = el.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
+            const item = (k) => document.querySelector(`.cc-main [data-key="${k}"]`);
+            const fails = [];
+            S.notif.value = true;
+            await sleep(900);
+            const before = order();
+            if (before.length < 3) return [`only ${before.length} categories in the control center`];
+            // Cancelled: nothing changes.
+            const k0 = before[2];
+            let [x, y] = mid(item(k0));
+            P(item(k0), "pointerdown", x, y);
+            await sleep(520);
+            const [tx, ty] = mid(item(before[0]));
+            P(item(k0), "pointermove", (x + tx) / 2, (y + ty) / 2);
+            P(item(k0), "pointermove", tx, ty);
+            await sleep(250);
+            P(item(k0), "pointercancel", tx, ty);
+            await sleep(300);
+            if (order().join() !== before.join()) fails.push(`a cancelled carry changed the order: ${before.join(",")} -> ${order().join(",")}`);
+            if (document.querySelector(".cc .carried, .cc .lifted")) fails.push("a cancelled carry left its copy or its faint item behind");
+            // Carried onto the first slot and let go: it lands there.
+            [x, y] = mid(item(k0));
+            P(item(k0), "pointerdown", x, y);
+            await sleep(520);
+            P(item(k0), "pointermove", (x + tx) / 2, (y + ty) / 2);
+            await sleep(60);
+            P(item(k0), "pointermove", tx, ty);
+            await sleep(300);
+            P(item(k0), "pointerup", tx, ty);
+            await sleep(400);
+            const after = order();
+            if (after[0] !== k0) fails.push(`carried ${k0} onto the first slot, it landed at ${after.indexOf(k0)} (${after.join(",")})`);
+            if (document.querySelector(".cc .carried")) fails.push("the carried copy stayed after landing");
+            // Shut and opened again: still there.
+            S.notif.value = false;
+            await sleep(500);
+            S.notif.value = true;
+            await sleep(700);
+            if (order()[0] !== k0) fails.push(`after the panel shut and opened again, ${k0} is at ${order().indexOf(k0)} (${order().join(",")})`);
+            const { powos } = await importShim("./bridge.ts");
+            const saved = await powos.store.get("controls.layout");
+            if (!saved?.order?.length) fails.push("nothing saved to controls.layout");
+            return { fails, k0 };
+          }, ccOrder.toString())
+          .catch((e) => ({ fails: [`evaluate: ${e.message.split("\n")[0]}`] }));
+        r.problems.push(...(out.fails ?? []));
+        // The page loaded afresh (as another of the shade, home, Quick Tools reads it): the same order.
+        if (out.k0) {
+          await r.page.reload().catch(() => {});
+          await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+          const first = await r.page
+            .evaluate(async (orderSrc) => {
+              const S = await importShim("./state.ts");
+              S.notif.value = true;
+              await new Promise((ok) => setTimeout(ok, 900));
+              return new Function(`return (${orderSrc})`)()()[0];
+            }, ccOrder.toString())
+            .catch(() => null);
+          if (first !== out.k0) r.problems.push(`the page loaded afresh shows ${first} first, not the rearranged ${out.k0}`);
+        }
+        return { ...r, ready: true, ms: Date.now() - r.started };
+      }),
+    );
+  }
   // The pet (ui/pet.tsx): home with local.pet installed, driven through what the user does - shown, touched, each
   // state, a talk bubble, a deploy note, a move - so an error in its effects and timers (2026-10-21: a TDZ in the hop
   // timer's effect threw on every show) fails here; the plain home run never mounts it (the mock has no local.pet).

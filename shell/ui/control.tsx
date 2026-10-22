@@ -304,7 +304,10 @@ export function Tile({ t, big = false, hold = true }: { t: QuickTile; big?: bool
  */
 type Layout = { order: string[]; hidden: string[] };
 const layout = signal<Layout>({ order: [], hidden: [] });
-powos.store.get<Layout>("controls.layout").then((l) => l && (layout.value = l));
+/** The arrangement from the store: at start, and each time the control center opens - the shade, home and Quick
+ * Tools are separate pages, and one's rearranging must show in the others (nor be written over by their stale copy). */
+const loadLayout = () => powos.store.get<Layout>("controls.layout").then((l) => l && (layout.value = l)).catch(() => {});
+loadLayout();
 
 function arranged(tiles: QuickTile[]) {
   const { order, hidden } = layout.value;
@@ -667,6 +670,7 @@ export function ControlCenter() {
   const open = notifOpen.value;
   useEffect(() => {
     if (!open) return;
+    loadLayout();
     powos.qs.listening(true);
     askRemote();
     // The cable's state has no event: asked while the panel shows - not while its window is put away.
