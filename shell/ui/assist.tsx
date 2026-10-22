@@ -103,8 +103,6 @@ async function withScreen(text: string) {
     .join("\n");
   return context ? `${text}\n\n[What's on my screen right now - the app under this overlay, not PowOS AI itself:]\n${context}` : text;
 }
-// Over an app, asks also put the chat in the app switcher (as this panel always did).
-setAskContext(withScreen, true);
 
 /**
  * Asks the one conversation (assistant.ts askQueued, as the pill and the pet do): asked mid-turn, it waits for that
@@ -236,6 +234,10 @@ function takeOver() {
 
 export function Assist() {
   const panel = useRef<HTMLDivElement>(null);
+  // Over an app, asks carry the screen and put the chat in the app switcher. Registered on mount, never at import:
+  // app.tsx imports this module in every mode, and home's sends then started PowosAiActivity (keepInRecents) - its
+  // window covered home for a moment, a black flash on every send from the AI page.
+  useEffect(() => (setAskContext(withScreen, true), () => setAskContext(null)), []);
   useEffect(() => {
     // The page loaded during a summoning (not warm before it): no assist.reset came, so it listens now.
     powos.assist.screen().then((s) => {
