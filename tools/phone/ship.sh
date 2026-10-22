@@ -115,7 +115,7 @@ run)
       ship_tree >/dev/null || { sleep "$POLL"; continue; }
       T=$(git rev-parse HEAD)
       # The debounce: a tip is shipped once origin stayed on it QUIET s (since this service first saw it).
-      read -r seen at < "$Q/tip-seen" 2>/dev/null || seen=
+      { read -r seen at < "$Q/tip-seen"; } 2>/dev/null || seen=
       [ "$seen" = "$T" ] || { at=$(date +%s); echo "$T $at" > "$Q/tip-seen"; echo "$(date +%T) origin at ${T:0:9} - waiting for ${QUIET}s without a new commit"; }
       [ $(( $(date +%s) - at )) -ge "$QUIET" ] || { sleep "$POLL"; continue; }
       # A tip that failed: not again until origin moves.
@@ -148,6 +148,8 @@ run)
       elif [ $kind = apk ]; then
         echo "$(date +%T) ship ${T:0:9} as an APK ($why) for $who_s"
         POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship bash tools/phone/ship-apk.sh "${na[@]}" > "$log" 2>&1; rc=$?
+        # Installed is installed: ship-apk's exit is its last check's (a logcat grep with no match = 1, 2026-10-23).
+        [ $rc != 0 ] && [ "$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null)" = "$T" ] && rc=0
       else
         # Shell only: never inside a verify window, never beside an APK ship (a --direct one).
         if verify_held; then echo "$(date +%T) verify lock held ($(cat "$VL/who" 2>/dev/null)) - waiting"; sleep "$POLL"; continue; fi
