@@ -3,6 +3,10 @@
 #   ship.sh request --note "what changed, for the user"   after your push to origin - and nothing else. Returns at once.
 #   ship.sh request --silent                              a change the user can't see (refactor, lint, tooling)
 #   ship.sh status                                        queued requests, the service, what's live, the last ships
+#   ship.sh pause | resume                                pause: no new ship starts; a ship in flight that hasn't begun
+#        installing is stopped (its ship-apk / build / gate killed, the ship lock freed, its requests kept); an install
+#        or shell push in flight finishes, then nothing more. resume: go on. (2026-10-23: `launchctl bootout` left the
+#        runner's ship-apk building, about to install in the middle of a home recovery.)
 #   ship.sh run                                           the service: launchd agent com.powos.ship-runner
 #        (tools/phone/ship-deploy.sh; unit units/mac/ship-runner-mac.json). `request` kicks it; without the agent,
 #        request starts one of its own. ONE runner ever (lock dir <queue>/runner.lock, as the verify runner's).
@@ -33,6 +37,16 @@ LABEL=${SHIP_AGENT:-com.powos.ship-runner}
 QUIET=${SHIP_QUIET_S:-60} QS=${SHIP_QUIET_SHELL_S:-10} POLL=${SHIP_POLL_S:-10}
 alive_runner() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && ps -p "$1" -o command= 2>/dev/null | grep -q ship; }
 runner_up() { alive_runner "$(cat "$Q/runner.lock/pid" 2>/dev/null)"; }
+killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c"; done; kill "$1" 2>/dev/null; }
+# installing: an APK install (ship-apk) or a shell push is in flight - $Q/installing holds its pid. Its writer sets it,
+# THEN checks the pause flag; pause sets the flag, THEN reads it: one of the two always sees the other.
+installing() { local p; p=$(cat "$Q/installing" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
+# stop_ships RUNNER: everything the runner has in flight, killed - all of each process tree (a foreground child alone
+# kept building). The APK ship's subshell itself lives on to record its rc (the loop then sees it was a pause).
+stop_ships() { local c a; a=$(cat "$Q/apk/pid" 2>/dev/null)
+  for c in $(pgrep -P "$1"); do
+    if [ "$c" = "$a" ]; then for k in $(pgrep -P "$c"); do killtree "$k"; done; else killtree "$c"; fi
+  done; }
 # The launchd agent: only for the real queue dir, or the test agent SHIP_AGENT names.
 agent_on() { [ -z "${SHIP_DIR:-}" ] || [ -n "${SHIP_AGENT:-}" ]; }
 agent_loaded() { agent_on && launchctl print "user/$(id -u)/$LABEL" >/dev/null 2>&1; }
@@ -56,8 +70,20 @@ request)
   printf 'sha=%q\nnote=%q\nsilent=%s\nwho=%q\nat=%s\n' "$sha" "$note" "${silent:-0}" "${SHIP_REQUESTER:-$(basename "$top")}" "$(date +%s)" > "$r.tmp" && mv "$r.tmp" "$r"
   # The request is on disk before the runner check: a runner on its way out sees it (run's last look).
   runner_up || agent_kick || { nohup bash "$here/ship.sh" run >> "$Q/runner.log" 2>&1 & }
+  [ -e "$Q/paused" ] && echo "ship.sh request: the ship service is PAUSED - this ships after tools/phone/ship.sh resume"
   echo "ship requested (${sha:0:9}): the ship service ships origin's tip after ${QUIET}s without new commits - nothing else to do (status: tools/phone/ship.sh status)" ;;
+pause)
+  touch "$Q/paused"
+  if installing; then echo "paused: an install is in flight (pid $(cat "$Q/installing")) - it finishes (install + its push), then nothing new starts"
+  elif runner_up; then stop_ships "$(cat "$Q/runner.lock/pid")"
+    echo "paused: the ship in flight was stopped (its requests are kept); nothing ships until tools/phone/ship.sh resume"
+  else echo "paused: nothing ships until tools/phone/ship.sh resume"; fi ;;
+resume)
+  rm -f "$Q/paused"
+  ls "$Q"/*.req >/dev/null 2>&1 && { runner_up || agent_kick || { nohup bash "$here/ship.sh" run >> "$Q/runner.log" 2>&1 & }; }
+  echo "resumed$(ls "$Q"/*.req >/dev/null 2>&1 && echo ": $(ls "$Q"/*.req | wc -l | tr -d ' ') request(s) ship now")" ;;
 status)
+  [ -e "$Q/paused" ] && echo "PAUSED since $(date -r "$(stat -f %m "$Q/paused" 2>/dev/null || stat -c %Y "$Q/paused")" +%H:%M) - tools/phone/ship.sh resume$(installing && echo " (an install in flight finishes first)")"
   echo "requests:"; for r in "$Q"/*.req; do [ -f "$r" ] || continue; ( . "$r"; echo "  ${sha:0:9} $who: $([ "$silent" = 1 ] && echo '(silent)' || echo "$note")" ); done
   echo "service: $(runner_up && echo "running (pid $(cat "$Q/runner.lock/pid"))" || echo idle)$(agent_loaded && echo " (launchd $LABEL)")"
   echo "live: $(cut -c1-9 "$Q/live" 2>/dev/null || echo -)  installed APK: $(cut -c1-9 "$HOME/.cache/powos-installed-commit" 2>/dev/null || echo -)$([ -s "$Q/failed" ] && echo "  failed at: $(cut -c1-9 "$Q/failed") (waits for a new origin commit)")"
@@ -66,6 +92,7 @@ status)
 run)
   [ -n "$REPO" ] || { echo "ship.sh run: not in a PowOS checkout"; exit 2; }
   ls "$Q"/*.req >/dev/null 2>&1 || exit 0   # nothing requested (launchd starts it at load): gone at once
+  [ -e "$Q/paused" ] && { echo "$(date +%T) paused - not starting (tools/phone/ship.sh resume)"; exit 0; }
   # ONE runner: the lock dir holds its pid (exec keeps it, so the private copy below holds it already).
   L=$Q/runner.lock
   if [ "$(cat "$L/pid" 2>/dev/null)" != $$ ]; then
@@ -98,7 +125,10 @@ run)
   fi
   rm -f "$SHIP_COPY"; unset SHIP_COPY
   cd "$SR" || exit 1
-  trap 'for c in $(pgrep -P $$); do kill $c 2>/dev/null; done; rm -rf "$L"; exit 143' TERM
+  # Stopped (launchctl bootout, a kill): what's in flight goes with it, whole process trees - unless it's installing:
+  # that finishes first (ExitTimeOut 300 in the plist).
+  trap 'if installing; then echo "$(date +%T) stopping: the install in flight finishes first"; while installing; do sleep 1; done; fi
+    stop_ships $$; kill "$(cat "$Q/apk/pid" 2>/dev/null)" 2>/dev/null; rm -rf "$L"; exit 143' TERM
   SL=$HOME/.cache/powos-ship.lock VL=$HOME/.cache/powos-verify.lock
   mail() { local s; s=$(mktemp "$Q/mail.XXXX")
     printf 'powos comms send %q %q --from ship-queue >/dev/null 2>&1 || true\n' "${SHIP_MAIL_TO:-coder}" "$1" > "$s"
@@ -129,7 +159,7 @@ run)
     local nm=$REPO/.claude/worktrees/powos-multiplatform/shell/node_modules
     [ -e "$SA/shell/node_modules" ] || [ ! -d "$nm" ] || ln -s "$nm" "$SA/shell/node_modules"
     rm -rf "$Q/apk"; mkdir -p "$Q/apk"; echo "$a" > "$Q/apk/tip"; echo "$Q/done/$(date +%Y%m%d-%H%M%S)-${a:0:9}-apk.log" > "$Q/apk/log"
-    ( cd "$SA" && POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship bash tools/phone/ship-apk.sh "$@" > "$(cat "$Q/apk/log")" 2>&1; echo $? > "$Q/apk/rc" ) &
+    ( cd "$SA" && POWOS_SHIP_SERVICE=1 SHIP_DIR=$Q GATE_PRIORITY=ship bash tools/phone/ship-apk.sh "$@" > "$(cat "$Q/apk/log")" 2>&1; echo $? > "$Q/apk/rc" ) &
     echo $! > "$Q/apk/pid"
   }
   # done_req FILE RESULT: a request fully on the phone.
@@ -158,12 +188,18 @@ run)
           echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
           echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
         elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
+        elif [ -e "$Q/paused" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped by pause (rc $arc) - its requests are kept"
         else
           echo "$A" > "$Q/failed-apk"
           echo "$(date +%T) ${A:0:9}: APK ship FAILED rc $arc (log $alog) - waiting for a new origin commit"
           mail "ship ${A:0:9} (apk) FAILED rc $arc: $(grep -E 'REFUSED|refused|FAIL|error' "$alog" | tail -1 | cut -c1-200) - log $alog on the Mac; fix it on origin, then ship.sh request again"
         fi
         rm -rf "$Q/apk"; inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
+      fi
+      # Paused: nothing new starts; an APK ship still out (installing) is reaped first.
+      if [ -e "$Q/paused" ]; then
+        apk_alive && { sleep "$POLL"; continue; }
+        echo "$(date +%T) paused - $(ls "$Q"/*.req 2>/dev/null | wc -l | tr -d ' ') request(s) kept"; break
       fi
       # The debounce: shell after SHIP_QUIET_SHELL_S (10) s of origin on this tip, an APK after QUIET (60) s.
       { read -r seen at < "$Q/tip-seen"; } 2>/dev/null || seen=
@@ -205,6 +241,8 @@ run)
         if apk_alive && mkdir "$SL/phone" 2>/dev/null; then held="$SL/phone"
         elif ! apk_alive && ship_lock; then held=$SL
         else echo "$(date +%T) the phone is busy ($(cat "$SL/who" 2>/dev/null)$( [ -d "$SL/phone" ] && echo ', installing')) - waiting"; sleep "$POLL"; continue; fi
+        echo $$ > "$Q/installing"
+        [ -e "$Q/paused" ] && { rm -f "$Q/installing"; rm -rf "$held"; continue; }
         sn=$(joined ${snotes[@]+"${snotes[@]}"})
         if [ -n "$sn" ]; then na=(--note "$sn"); else na=(--silent); fi
         log=$Q/done/$(date +%Y%m%d-%H%M%S)-${T:0:9}.log
@@ -216,7 +254,7 @@ run)
         if [ $rc = 0 ] && [ -n "$gone" ]; then
           (cd shell && POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship ./push.sh --vpn --reset $gone) >> "$log" 2>&1 || rc=$?
         fi
-        rm -rf "$held"
+        rm -rf "$held"; rm -f "$Q/installing"
         if [ $rc = 0 ]; then
           echo "$T" > "$Q/live"; rm -f "$Q/failed"
           echo "$(date '+%F %T') ${T:0:9} shell ${#sreqs[@]} req ($who_s): ${sn:-(silent)}" >> "$Q/shipped.log"
@@ -247,6 +285,7 @@ run)
     done
     apk_alive && { sleep "$POLL"; continue; }   # an APK still out: reap it before leaving
     rm -rf "$L"
+    [ -e "$Q/paused" ] && break
     # A request written while this runner was on its way out: take the lock again and serve it.
     ls "$Q"/*.req >/dev/null 2>&1 || break
     mkdir "$L" 2>/dev/null && echo $$ > "$L/pid" || break

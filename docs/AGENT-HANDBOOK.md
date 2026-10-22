@@ -103,8 +103,9 @@ minimal change and tell them.
   the last ships; a failed ship mails coder and waits for a fix on origin. ship-apk.sh and push.sh refuse to run
   outside the service; `--direct` (from origin's tip, logged to ~/.cache/powos-ship-queue/direct.log) is only for an
   emergency the user asked for. Why: per-agent ships raced (2026-10-23: ~6 APKs + ~15 pushes a night; an APK from an
-  older tip twice wiped newer shell pushes). Stop it: `tools/phone/ship-deploy.sh remove` (or `launchctl bootout
-  user/$(id -u)/com.powos.ship-runner`). Test: tools/phone/ship-queue-test.sh. What the service runs is below.
+  older tip twice wiped newer shell pushes). Hold all ships (a recovery on the phone): `ship.sh pause` - nothing new
+  starts, a ship not yet installing is killed with its whole tree (lock freed, requests kept), an install in flight
+  finishes; `ship.sh resume`. Remove it: `tools/phone/ship-deploy.sh remove`. Test: tools/phone/ship-queue-test.sh. What the service runs is below.
 - Notes are only for what the user can SEE. A change they can't (refactor, lint, tooling, "behaviour unchanged")
   ships with `--silent` instead of `--note` (ship.sh request, and what it runs: shell/push.sh, ship-apk.sh, install-app.sh, deploy-note.sh): no
   notification, only a line in comms' quiet log (`powos comms quiet`).
@@ -126,10 +127,13 @@ minimal change and tell them.
   the last installed commit; takes the cross-agent lock (~/.cache/powos-ship.lock); runs the gate on HEAD's own shell
   (refuses if it doesn't load); builds (build-app.sh refuses a dirty shell/ or targets/android/app); waits for a free
   phone with `idle.sh --wait 60` in 10-min chunks (up to SHIP_WAIT_MIN=60, holding while ~/.cache/powos-verify.lock
-  exists; no window = exit 4, APK kept, nothing installed); installs; runs bindings-check; RESETS ALL shell overrides;
-  re-pushes every shell file origin changed since the build commit; prints
-  versionCode + any crash. `--now` skips the wait: only with `--direct`, when the user asked for an immediate install.
-- Those newer shell files are gated BEFORE the install, at origin's tip (`push.sh --pre-gate`; fails = no install, exit 3), and pushed seconds after the reset with `--pre-gated=<stamp>` (only that file set at that tree); later ones are gated after (tools/phone/ship-order-test.sh).
+  exists; no window = exit 4, APK kept, nothing installed); snapshots the installed APK + its exact overrides
+  (tools/phone/ship-guard.sh; none = exit 3); RESETS ALL shell overrides BEFORE the install (pages that boot on the new
+  APK with old overrides die, and a dead page never reloads: APK 29878476, 2026-10-23); installs; bindings-check; ONE
+  push of every shell file origin's tip has differently from the APK's own assets/shell; then every page (home, shade,
+  assist: window.__powosAlive) must boot within 2 min, else the WHOLE snapshot is restored (overrides off, previous APK
+  `install -r -d`, its overrides back) and coder told (exit 6); prints versionCode + any crash. `--now` skips the wait: only with `--direct`, when the user asked for an immediate install.
+- Those newer shell files are gated BEFORE the install, at origin's tip (`push.sh --pre-gate`; fails = no install, exit 3), and pushed seconds after the install with `--pre-gated=<stamp>` (only that file set at that tree); a different set (origin moved) is gated after (tools/phone/ship-order-test.sh).
 - The build is warm: build-app.sh builds in `powos-gradle-warm` (targets/android/tools/warm-builder.sh, unit
   units/mac/gradle-warm-mac.json), a long-lived builder whose Gradle daemon stays up, building every worktree from one
   rsync'd copy in /work (shared incremental state) - 6-11 s for a Kotlin or shell change, from any worktree, against

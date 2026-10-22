@@ -16,7 +16,7 @@ Tools (repo `tools/phone/`, all one adb call each):
 - Shipping (shell or APK): commit -> rebase -> push to origin -> `ship.sh request --note "..."` (or `--silent`), then
   end your turn. ONE ship service (launchd com.powos.ship-runner) ships origin's tip after 60 s without new commits:
   ship-apk.sh if Kotlin/APK inputs changed since the installed build, else push.sh of the shell files that differ
-  from what's live, all notes in one notification. `ship.sh status` = requests, live sha, last ships. ship-apk.sh and
+  from what's live, all notes in one notification. `ship.sh status` = requests, live sha, last ships; `ship.sh pause|resume` holds every ship (recoveries). ship-apk.sh and
   push.sh refuse to run outside it (`--direct` = a logged emergency). `shell/push.sh --errors` = the phone's shell errors.
 - Also: cpu.sh, idle-sample.sh, review-image.sh, app-src.sh, bindings-check.sh, bridge-check.sh, record/, verify/.
 

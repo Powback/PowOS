@@ -7,7 +7,8 @@
     once. Not WatchPaths: launchd watches through FSEvents, and in this headless Mac's user (Background) domain a
     watched path never fired (measured 2026-10-23: a dir, a file written, renamed, created - 0 runs).
   - KeepAlive SuccessfulExit=false: killed or crashed (a non-zero exit), launchd starts it again - so requested
-    ships never stall because a process went away.
+    ships never stall because a process went away. Stopped (bootout), it kills the ship in flight - whole process
+    trees - unless that is installing, which finishes first (ExitTimeOut 300). To hold ships: `ship.sh pause`.
   - LimitLoadToSessionType Background: loaded into the user/<uid> domain (this Mac is headless: no gui domain).
   - WorkingDirectory: the ship-runner checkout, never a worktree that may be removed (getcwd errors).
 -->
@@ -31,7 +32,7 @@
   <key>ThrottleInterval</key>
   <integer>10</integer>
   <key>ExitTimeOut</key>
-  <integer>30</integer>
+  <integer>300</integer>
   <key>LimitLoadToSessionType</key>
   <string>Background</string>
   <key>ProcessType</key>

@@ -56,9 +56,13 @@ mv tools/phone/ship-apk.sh tools/phone/ship-apk.real.sh
 cat > tools/phone/ship-apk.sh <<'EOF'
 #!/bin/bash
 l=$HOME/.cache/powos-ship.lock; mkdir "$l" && echo "apk pid $$ x" > "$l/who"
+trap 'rm -rf "$l"; [ "$(cat "$SHIP_DIR/installing" 2>/dev/null)" = $$ ] && rm -f "$SHIP_DIR/installing"' EXIT
 echo "APKSTART $(git rev-parse HEAD)" >> "$LOG"
 while [ -e "$HOME/hold-apk" ]; do sleep 0.3; done
 until mkdir "$l/phone" 2>/dev/null; do sleep 0.3; done
+# the installing mark + the pause flag, as the real one; APK_INSTALL_S: how long the install takes
+echo $$ > "$SHIP_DIR/installing"; [ -e "$SHIP_DIR/paused" ] && exit 7
+sleep "${APK_INSTALL_S:-0}"
 echo "APK $(git rev-parse HEAD) svc=${POWOS_SHIP_SERVICE:-} $*" >> "$LOG"; git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"
 rm -rf "$l"
 EOF
@@ -163,6 +167,36 @@ sleep 3
 land shell/ui/a.tsx 'export const a = 6' "fix"
 drained && grep -q 'a = 6' "$PHONE/files/shell/ui/a.tsx" && ok "the fix ships, both requests done" || { bad "fix not shipped"; cat "$Q/runner.log"; }
 
+# 7. pause / resume: a ship still building is stopped (lock freed, request kept); an install in flight finishes.
+: > "$LOG"; touch "$HOME/hold-apk"
+land targets/android/app/Main.kt 'class Main7' "kt7"; req --note "seven"; t7=$(tip)
+for _ in $(seq 40); do grep -q '^APKSTART' "$LOG" && break; sleep 1; done
+out=$(bash tools/phone/ship.sh pause)
+echo "$out" | grep -q "was stopped" && ok "pause stops the building ship" || { bad "pause: $out"; tail -5 "$Q/runner.log"; }
+for _ in $(seq 15); do [ -d "$HOME/.cache/powos-ship.lock" ] || [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 1; done
+[ ! -d "$HOME/.cache/powos-ship.lock" ] && ls "$Q"/*.req >/dev/null 2>&1 && ! grep -q "^APK $t7" "$LOG" && [ ! -s "$Q/failed-apk" ] &&
+  ok "lock freed, request kept, nothing installed, not marked failed" || { bad "after pause"; cat "$LOG"; ls "$Q"; tail -5 "$Q/runner.log"; }
+st=$(bash tools/phone/ship.sh status); grep -q '^PAUSED' <<<"$st" && ok "status says PAUSED" || { bad "status"; echo "$st"; }
+rm -f "$HOME/hold-apk"; req --note "eight"; sleep $((SHIP_QUIET_S + 3))
+[ "$(grep -c '^APKSTART' "$LOG")" = 1 ] && ok "no ship starts while paused" || { bad "shipped while paused"; cat "$LOG"; }
+export APK_INSTALL_S=8
+bash tools/phone/ship.sh resume >/dev/null
+for _ in $(seq 40); do [ -s "$Q/installing" ] && break; sleep 1; done
+out=$(bash tools/phone/ship.sh pause)
+echo "$out" | grep -q "install is in flight" && ok "pause during an install lets it run" || bad "pause mid-install: $out"
+drained 30 && grep -q "^APK $t7 svc=1" "$LOG" && ok "the install finished, its requests done" || { bad "install in flight"; cat "$LOG"; ls "$Q"; }
+bash tools/phone/ship.sh resume >/dev/null; export APK_INSTALL_S=0
+
+# 8. A stopped runner (launchctl bootout = TERM) takes its building APK ship with it: no ship-apk left to install.
+: > "$LOG"; touch "$HOME/hold-apk"
+land targets/android/app/Main.kt 'class Main8' "kt8"; req --note "nine"
+for _ in $(seq 40); do grep -q '^APKSTART' "$LOG" && break; sleep 1; done
+kill "$(cat "$Q/runner.lock/pid")"; sleep 3
+! pgrep -f "$T/.*ship-apk.sh" >/dev/null && [ ! -d "$HOME/.cache/powos-ship.lock" ] && ls "$Q"/*.req >/dev/null 2>&1 &&
+  ok "TERM stops the APK ship too (lock freed, request kept)" || { bad "TERM left: $(pgrep -fl "$T/.*ship-apk.sh")"; }
+rm -f "$HOME/hold-apk"; bash tools/phone/ship.sh resume >/dev/null; drained 40 || bad "kt8 not shipped after the restart"
+
+for _ in $(seq 15); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 1; done
 runner_left=$(cat "$Q/runner.lock/pid" 2>/dev/null)
 [ -z "$runner_left" ] && ok "runner exits when nothing is requested" || bad "runner still up ($runner_left)"
 [ $fails -eq 0 ] && echo "all pass" || { echo "$fails failed"; echo "--- runner.log"; cat "$Q/runner.log"; }
