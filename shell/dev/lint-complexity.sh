@@ -78,7 +78,8 @@ old = json.load(sys.stdin); new = json.load(open(sys.argv[1]))
 for f, rules in new.items():
     for r, v in rules.items():
         was = old.get(f, {}).get(r, {}).get("count", 0)
-        if v["count"] > was: print(f"{sys.argv[2]}: {f} {r}: {was} -> {v[\"count\"]}")
+        now = v["count"]
+        if now > was: print(f"{sys.argv[2]}: {f} {r}: {was} -> {now}")
 ' "$b" "$rel")
 done
 [ -z "$grew" ] || { echo "$grew" | sed 's/^/FAIL complexity baseline grew (it only shrinks): /'; exit 1; }

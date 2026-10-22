@@ -24,6 +24,10 @@ case $rc in
     *) bad "complexity lint"; echo "$out" | sed 's/^/       /' | head -40 ;;
 esac
 
+echo "== the baselines only shrink, across history =="
+if out=$(python3 "$ROOT/shell/dev/complexity-history.py" "$ROOT" 2>&1); then ok "no commit raised a baseline count without [baseline-reset]"
+else bad "a commit raised the complexity baseline"; echo "$out" | head -20 | sed 's/^/       /'; fi
+
 echo "== the lint catches a new violation =="
 probe="$ROOT/shell/ui/__complexity_probe_$$.ts"
 printf 'export function p(a: number, b: number, c: number, d: number, e: number) {\n  if (a) { if (b) { if (c) { if (d) { return e; } } } }\n  return 0;\n}\n' > "$probe"
