@@ -7,7 +7,7 @@
 # The runner waits for ONE free window (window-lock.sh: screen on, no touch for 120 s, then the verify lock), runs every
 # queued check in it with LOCK_HELD=1, then releases the lock. A check that exits 3 (a real touch, no window) goes back
 # on the queue for the next window, at most 3 tries. Each result goes onto the check's board task (`--step`, the log's
-# last line) and the log stays in ~/.cache/powos-verify-queue/done/. Queue a check and END YOUR TURN: the result shows
+# last line), a mail to the coder inbox (QUEUE_MAIL_TO) and the log stays in ~/.cache/powos-verify-queue/done/. Queue a check and END YOUR TURN: the result shows
 # on the board (handbook, Efficiency).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); phone=$(cd "$here/.." && pwd)
@@ -31,7 +31,8 @@ list)
 run)
   . "$here/window-lock.sh"
   board() {  # board <task> <text>: the result on the owner's task, as the session user on the phone
-    local s; s=$(mktemp "$Q/board.XXXX"); printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true\n' "$1" "$2" > "$s"
+    local s; s=$(mktemp "$Q/board.XXXX"); { printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true\n' "$1" "$2"
+      printf 'powos comms send %q %q --from verify-queue >/dev/null 2>&1 || true\n' "${QUEUE_MAIL_TO:-coder}" "$1: $2"; } > "$s"
     "$phone/user.sh" "$s" >/dev/null 2>&1 || echo "board update failed for $1: $2"; rm -f "$s"; }
   while ls "$Q"/*.job >/dev/null 2>&1; do
     ( window_lock verify-queue 120 "${WAIT_S:-7200}" >/dev/null || exit 3
