@@ -508,7 +508,7 @@ class ShellBridge(
         return JSONObject()
             .put("key", item.key)
             .put("app", item.app)
-            .put("icon", app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
+            .put("icon", linuxIcon(item) ?: app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
             .put("title", item.title)
             .put("text", item.text)
             .put("time", item.time)
@@ -516,9 +516,25 @@ class ShellBridge(
             .put("profile", item.profile ?: JSONObject.NULL)
             .put("actions", JSONArray(item.actions.map { JSONObject().put("title", it.title).put("input", it.input) }))
             .put("category", item.category ?: JSONObject.NULL)
-            .put("pkg", item.pkg)
+            // A Plasma one groups by its Linux app (not with PowOS's own notifications, which share the app's package).
+            .put("pkg", item.linuxEntry?.let { "linux:" + it.ifEmpty { item.app } } ?: item.pkg)
             .put("group", item.group ?: JSONObject.NULL)
             .put("conversation", item.conversation)
+    }
+
+    /**
+     * A Plasma notification's icon (PlasmaBridge): its Linux app's drawer icon - by its desktop entry, else the app
+     * whose Icon= it named, else by name - or Plasma's own; null for an Android notification.
+     */
+    private fun linuxIcon(item: dev.omalauncher.widgets.runtime.Notifications.Item): String? {
+        val entry = item.linuxEntry ?: return null
+        val apps = runtime.linuxApps
+        val app =
+            apps.firstOrNull { entry.isNotEmpty() && it.id == entry }
+                ?: apps.firstOrNull { !item.linuxIcon.isNullOrEmpty() && it.icon == item.linuxIcon }
+                ?: apps.firstOrNull { it.name.equals(item.app, ignoreCase = true) }
+                ?: apps.firstOrNull { it.id == "org.powos.plasma" }
+        return app?.let { icon("l:${it.id}") }
     }
 
     /** Live mode's state for the page: on or not, frames kept. */

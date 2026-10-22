@@ -32,6 +32,21 @@ home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the co
   on icons/.icon-names (the export's last rename) -> reloadPowosApps(). Unit android-apps. Launch: powos-open-task.
 - KF6 6.31 sends NO org.kde.KSycoca.notifyDatabaseChanged on D-Bus (kbuildsycoca6 measured silent): watch the file.
 - Check: verify/plasma-app.sh (watcher idle, entry, kbuildsycoca6 -> new export, apps.list, apps.launch from HomeShell -> MainActivity or its alias HomeDesktop + plasmashell/KWin up, powos-shell not).
+- Slice 3 (unit plasma-bridge): session/powos-plasma-bridge (python-dbus + GLib, autostart) <-> run/plasma/{out,in}/*.json
+  (".name" then rename) <-> PlasmaBridge.kt (FileObserver, main process only). Notifications: a WATCHER of Plasma's
+  server (org.kde.NotificationManager.RegisterWatcher; it calls our /NotificationWatcher org.kde.NotificationWatcher
+  .Notify(u s u s s s as a{sv} i) with its id), posted as Android notifications tag "plasma", id = Plasma's id, extras
+  powos.linux.app/entry/icon -> Notifications.item's app name, notificationJson's icon (linux app by entry/Icon=/name,
+  else l:org.powos.plasma) and pkg "linux:<entry|app>" (else the shade groups it as PowOS's own). Closing: Plasma sends
+  NotificationClosed TARGETED to the sender only, so a monitor-only connection (BecomeMonitor, one match rule) reads it;
+  reason 1 (popup timed out) keeps it on Android. Android swipe = delete intent -> CloseNotification; buttons/tap ->
+  org.kde.NotificationManager.InvokeAction. Skipped: app "PowOS agents" (comms-mcp already posts AgentMail).
+- Clipboard: Klipper (inside plasmashell, org.kde.klipper /klipper) clipboardHistoryUpdated/get/setClipboardContents.
+  Android reads the clip only while one of the app's windows has focus (READ_CLIPBOARD_IN_BACKGROUND is signature|role,
+  the IME is SwipeKeyboard): listener + PowosWindowActivity.focusHook. KWin's Anland path also syncs while MainActivity
+  is up; both dedupe on the last text. KDE Connect is in the rootfs, 0 devices paired: its notifications ride the watcher.
+- Check: verify/plasma-notify.sh (bridge idle, notify-send -w -> shade list, notifications.dismiss -> gone + notify-send
+  returns, Klipper <-> clipboard.read/write, the user's clip put back).
 
 ## Shot checks (shell/dev/shots.mjs, after each scene)
 - Errors per shot: overlapping tiles (>1 px), partial joins, uneven gutters on mode=desktop, missing glyphs.
@@ -103,5 +118,5 @@ The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's
   desktop host's own copy of shell/ only changes with dev/phone.sh build.
 
 ## Next
-Plasma backend slices 2-4 (Linux windows floating on home pages, Plasma notifications incl. KDE Connect in the shade,
-clipboard). Paused host: hotkey, dictation, theme mirror, widget picker, x86 Plasma, input region, OWL widgets.
+Plasma backend slice 2 (Linux windows floating on home pages); inline replies (NotificationReplied), images in
+clipboard/notifications. Paused host: hotkey, dictation, theme mirror, widget picker, x86 Plasma, input region, OWL widgets.

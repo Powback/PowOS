@@ -28,6 +28,9 @@ install -m 755 $T/powos-apps-export $R/usr/local/bin/powos-apps-export
 install -m 755 $T/powos-apps-watch $R/usr/local/bin/powos-apps-watch
 install -m 644 $T/powos-apps-watch.desktop $R/etc/xdg/autostart/powos-apps-watch.desktop
 install -Dm 644 $T/powos-plasma/org.powos.plasma.desktop $R/usr/share/applications/org.powos.plasma.desktop
+# Plasma's notifications in PowOS's shade and the clipboard both ways (D-Bus signals + inotify, nothing polls).
+install -m 755 $T/powos-plasma-bridge $R/usr/local/bin/powos-plasma-bridge
+install -m 644 $T/powos-plasma-bridge.desktop $R/etc/xdg/autostart/powos-plasma-bridge.desktop
 # A PowOS app tapped on Android opens in its own Android task, like a phone app (the PowOS app runs this).
 install -m 755 $T/powos-open-task $R/usr/local/bin/powos-open-task
 install -m 644 $T/powos-android-tasks.desktop $R/etc/xdg/autostart/powos-android-tasks.desktop
@@ -78,7 +81,7 @@ rm -f $T/fex-Config.json $T/fex-thunks.json
 rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
   $T/powos-units.sh \
   $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task \
-  $T/powos-apps-watch $T/powos-apps-watch.desktop \
+  $T/powos-apps-watch $T/powos-apps-watch.desktop $T/powos-plasma-bridge $T/powos-plasma-bridge.desktop \
   $T/powos-ime-bridge $T/powos-ime-bridge.desktop
 
 # The user: powos, as on every PowOS (password powos, sudo through wheel). Its uid is the PowOS app's Android uid:

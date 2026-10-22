@@ -76,6 +76,10 @@ class Notifications(
         val group: String? = null,
         /** A conversation (MessagingStyle, or a shortcut-backed message): the shade shows it on its own. */
         val conversation: Boolean = false,
+        /** From the Plasma session (PlasmaBridge): its app's desktop entry id ("" when it named none), else null. */
+        val linuxEntry: String? = null,
+        /** ...and the icon name it gave. */
+        val linuxIcon: String? = null,
     )
 
     data class Action(
@@ -87,7 +91,8 @@ class Notifications(
     fun item(sbn: StatusBarNotification) =
         Item(
             sbn.key,
-            label(sbn.packageName),
+            // A Plasma notification mirrored by PowOS (PlasmaBridge): its Linux app's name, not PowOS's.
+            sbn.notification.extras.getString(dev.omalauncher.PlasmaBridge.EXTRA_APP) ?: label(sbn.packageName),
             sbn.packageName,
             profile(sbn.user),
             title(sbn).orEmpty(),
@@ -101,6 +106,8 @@ class Notifications(
             sbn.notification.group,
             sbn.notification.extras.getString(Notification.EXTRA_TEMPLATE) == "android.app.Notification\$MessagingStyle" ||
                 (sbn.notification.category == Notification.CATEGORY_MESSAGE && sbn.notification.shortcutId != null),
+            sbn.notification.extras.getString(dev.omalauncher.PlasmaBridge.EXTRA_ENTRY),
+            sbn.notification.extras.getString(dev.omalauncher.PlasmaBridge.EXTRA_ICON),
         )
 
     /** Keys of what had a banner (the time it was posted), for once-only alerts' updates. */

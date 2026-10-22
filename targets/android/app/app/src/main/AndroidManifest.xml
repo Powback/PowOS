@@ -260,6 +260,10 @@
         <receiver
             android:name=".AgentMail$Reply"
             android:exported="false" />
+        <!-- Plasma's notifications mirrored here: their buttons, tap and swipe back to the session (PlasmaBridge). -->
+        <receiver
+            android:name=".PlasmaBridge$Receiver"
+            android:exported="false" />
 
         <!-- PowOS (rooted mode): a terminal the launcher draws, one task each (PowosTerminalActivity). -->
         <activity

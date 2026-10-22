@@ -143,6 +143,8 @@ install -m 755 "$P/session/powos-android-tasks" /usr/local/bin/powos-android-tas
 install -m 755 "$P/session/powos-apps-export" /usr/local/bin/powos-apps-export
 install -m 755 "$P/session/powos-apps-watch" /usr/local/bin/powos-apps-watch
 install -Dm 644 "$P/session/powos-apps-watch.desktop" /etc/xdg/autostart/powos-apps-watch.desktop
+install -m 755 "$P/session/powos-plasma-bridge" /usr/local/bin/powos-plasma-bridge
+install -Dm 644 "$P/session/powos-plasma-bridge.desktop" /etc/xdg/autostart/powos-plasma-bridge.desktop
 install -Dm 644 "$P/session/plasma/org.powos.plasma.desktop" /usr/share/applications/org.powos.plasma.desktop
 install -m 755 "$P/session/powos-open-task" /usr/local/bin/powos-open-task
 # The app's touch controls as a gamepad (started by powos-rooted-session).

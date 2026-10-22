@@ -103,9 +103,18 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus)
+        if (hasFocus) {
             WindowTasks.send("focus", id);
+            // PowOS: Android's clipboard to the session as this Linux window takes focus (the app can read it now;
+            // the desktop's MainActivity does the same through KWin). Set by the app (PlasmaBridge.pushClip).
+            Runnable hook = focusHook;
+            if (hook != null)
+                hook.run();
+        }
     }
+
+    /** Run as a Linux window's task gains focus (the app sets it: PlasmaBridge's clipboard push). */
+    public static volatile Runnable focusHook;
 
     @Override
     public void surfaceCreated(SurfaceHolder holder) {

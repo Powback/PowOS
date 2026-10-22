@@ -437,7 +437,12 @@ stays paused: the drawer entry opens Plasma's own shell, not ours.
   tasks are Android tasks, so they can go through the same freeform path (AppWindows/WindowFrames, `windows.list`)
   once WindowTasks opens them freeform on the unfolded screen; their page binding is desktops.ts's as is.
 
-**(3) Into the PowOS shade.** None exists yet.
+**(3) Into the PowOS shade.** Built 2026-10-23 (slices 3 + 4, unit plasma-bridge): `powos-plasma-bridge` in the session
+and `PlasmaBridge.kt` in the app, through run/plasma/{out,in}. What changed from the plan below: notifications come from
+a *watcher* of Plasma's server (`org.kde.NotificationManager.RegisterWatcher`, KDE Connect's way: it hands us the id),
+and only their close from a monitor, since Plasma sends NotificationClosed to the sending app alone. They become
+Android notifications (tag "plasma"), so the shade, its banner, buttons and swipe need nothing new. The clipboard
+reaches the session from Android only while one of the app's windows has focus (Android's rule).
 - Notifications: a session helper as a second org.freedesktop.Notifications *monitor* (BecomeMonitor on Notify /
   NotificationClosed, never the server: plasmashell stays the server) -> a spool in the run dir (AgentsSpool's
   pattern: FileObserver) -> the shade's notifications list, actions back over D-Bus ActionInvoked.
