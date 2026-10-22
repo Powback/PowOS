@@ -158,6 +158,53 @@ def summary_of(tool, inp):
     return clean(json.dumps(inp, ensure_ascii=False)[:400], 200)
 
 
+# The work board task an agent holds (`work`): from its own Bash calls, so no hook needs to know about the board.
+# `powos agents task set <id> --step/--progress/--plan/--commit` = it's working on <id> (the manager's assigning
+# `task set <id> --owner X --note ...` claims nothing); `task done <id>` or `queue.sh add ... <id>` (handed to the phone
+# check) lets it go. Only the id is kept, never the command.
+_WORK_ID = re.compile(r"[A-Za-z0-9][\w.:@-]{0,63}$")
+_CLAIMS = {"--step", "--progress", "--plan", "--commit"}
+_SEP = {";", "&&", "||", "|", "&", "(", ")"}
+
+
+def work_of(command):
+    """What [command] does to the board: [(claim True|False, task id)] in order."""
+    import shlex
+
+    try:
+        lx = shlex.shlex(str(command).replace("\n", ";"), posix=True, punctuation_chars=";&|()")
+        lx.whitespace_split = True
+        lx.commenters = ""
+        toks = list(lx)
+    except ValueError:
+        return []
+    out = []
+    for i, t in enumerate(toks):
+        nxt = toks[i + 1 : i + 2]
+        if t == "task" and nxt and nxt[0] in ("set", "done"):
+            j = i + 2
+            tid = toks[j] if j < len(toks) else ""
+            if not _WORK_ID.match(tid):
+                continue
+            if nxt[0] == "done":
+                out.append((False, tid))
+                continue
+            flags = set()
+            for x in toks[j + 1 :]:
+                if x in _SEP:
+                    break
+                flags.add(x.split("=", 1)[0])
+            if flags & _CLAIMS:
+                out.append((True, tid))
+        elif t.endswith("queue.sh") and nxt == ["add"]:
+            j = i + 2
+            while j < len(toks) and toks[j].startswith("--"):
+                j += 2 if toks[j] in ("--name", "--screen") else 1
+            if j < len(toks) and _WORK_ID.match(toks[j]):
+                out.append((False, toks[j]))
+    return out
+
+
 def safe_file(agent_id):
     return re.sub(r"[^A-Za-z0-9._-]", "_", agent_id)[:150]
 
@@ -225,6 +272,7 @@ class Spool:
                 "subs": 0,
                 "unread": 0,
                 "report": "",
+                "work": "",
                 "started": ts,
                 "last": ts,
                 "rev": 0,
@@ -388,7 +436,11 @@ class Spool:
                 if len(self.pending) > 512:
                     self.pending.pop(next(iter(self.pending)))
             step = tool if hint == tool else f"{tool} {hint}"
-            self.touch(me, ts, state="working", step=clean(step, 60))
+            work = me.get("work", "")
+            if tool == "Bash" and isinstance(rec.get("tool_input"), dict):
+                for claim, tid in work_of(rec["tool_input"].get("command") or ""):
+                    work = tid if claim else ("" if work == tid else work)
+            self.touch(me, ts, state="working", step=clean(step, 60), work=work)
             if me is not a and a["state"] != "working":
                 self.touch(a, ts, state="working")
         elif ev in ("PostToolUse", "PostToolUseFailure"):

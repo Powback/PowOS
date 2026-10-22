@@ -805,6 +805,8 @@ export interface Agent {
   subs: number;
   unread: number;
   report: string;
+  /** The work board task it holds (`powos agents task set <id> --step ...`; powos-agentsd's `work`), "" or absent: none. */
+  work?: string;
   started: number;
   last: number;
   rev: number;

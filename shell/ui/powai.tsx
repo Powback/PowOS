@@ -12,7 +12,7 @@ import { powos } from "../bridge.ts";
 import { chat, openSession, page, sessionView, stored } from "../state.ts";
 import { Pill, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
-import { openAgents } from "../agents.ts";
+import { boardState, openAgents, useAgents, useStallClock } from "../agents.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { checkAlive, useDb, useRows } from "../apps/stdb.ts";
 import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
@@ -189,6 +189,9 @@ const WORK_QUERY = "SELECT * FROM work";
 function WorkFeed() {
   const db = useDb("powos-agents", AgentsDb);
   const rows = useRows<WorkRow>(db, "work", WORK_QUERY);
+  // Which agent holds which task (live, from the hooks): a row says "working" only while one does.
+  useAgents();
+  useStallClock(board.value.filter((w) => w.status === "working"));
   useEffect(() => {
     if (db.status !== "connected") return;
     if (rows.length) {
@@ -373,6 +376,9 @@ function TestAll({ rows }: { rows: WorkRow[] }) {
   );
 }
 
+/** An open item's state in words ("working" only while a live agent holds it); null for blocked/waiting/done. */
+const rowState = (w: WorkRow) => (w.status === "working" ? boardState(w, checkQueued(w)) : null);
+
 /**
  * One open item: a dot, its title (up to two lines); when it's tracked, a thin bar, the current step and "3/10 · 2
  * commits · 2h ago" (else its age past a day). A tap shows its note, the steps done / now / next, the commits in plain
@@ -388,11 +394,13 @@ function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => 
   const tracked = total > 0 || !!w.step || commits.length > 0;
   // Who has it: "free" when nobody does (the board's "" or the catch-all "coder"), so a free task shows as one.
   const who = !w.owner || w.owner === "coder" ? "free" : w.owner;
-  const facts = [who, total > 0 && `${done}/${total}`, commits.length > 0 && `${commits.length} commit${commits.length > 1 ? "s" : ""}`, ago(moved) === "now" ? "just now" : `${ago(moved)} ago`].filter(Boolean).join(" · ");
+  // "working" only while a live agent holds it; else queued / awaiting check / stalled (agents.ts boardState).
+  const state = rowState(w);
+  const facts = [state, who, total > 0 && `${done}/${total}`, commits.length > 0 && `${commits.length} commit${commits.length > 1 ? "s" : ""}`, ago(moved) === "now" ? "just now" : `${ago(moved)} ago`].filter(Boolean).join(" · ");
   return (
     <div class={`ai-item ${w.status}`}>
       <button type="button" class="ai-item-row" onClick={onTap} aria-expanded={open}>
-        <span class={`ai-dot ${w.status === "working" ? "on" : ""}`} />
+        <span class={`ai-dot ${state === "working" ? "on" : ""}`} />
         <span class="ai-item-main">
           <span class="ai-item-title">{w.title}</span>
           {total > 0 && (
@@ -401,7 +409,7 @@ function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => 
             </span>
           )}
           {w.step && <StepLine w={w} />}
-          {tracked ? <span class="ai-item-facts">{facts}</span> : <span class="ai-item-facts">{who}</span>}
+          {tracked ? <span class="ai-item-facts">{facts}</span> : <span class="ai-item-facts">{[state, who].filter(Boolean).join(" · ")}</span>}
         </span>
         {!tracked && Date.now() / 1000 - moved > DAY_S && <span class="ai-item-age">{ago(moved)}</span>}
       </button>

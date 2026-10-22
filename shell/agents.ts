@@ -164,6 +164,64 @@ export function since(ms: number) {
   return `${Math.floor(s / 86400)}d`;
 }
 
+/**
+ * A board task's state as the user should read it (the user, 2026-10-22: idle tasks showed "working"): "working" only
+ * while a LIVE agent holds it - one whose `work` is the task (its own `task set <id> --step/--progress` calls,
+ * powos-agentsd), else a live agent of the owner's role holding nothing else. Without one: "awaiting check" (the
+ * verify queue's marker), "stalled" (started, nothing for STALL_MS) or "queued". Live = working or needs you, heard
+ * from within agentsd's own 30-minute staleness (a mirror that stopped).
+ */
+export type BoardState = "working" | "queued" | "awaiting check" | "stalled";
+export interface BoardTask {
+  id: string;
+  owner: string;
+  step?: string;
+  steps?: string;
+  commits?: string;
+  progressTotal?: number;
+  activity?: bigint | number;
+  updated: bigint | number;
+}
+export const STALL_MS = 20 * 60_000;
+const LIVE_MS = 30 * 60_000;
+const isLive = (a: Agent) => (a.state === "working" || a.state === "needs_you") && Date.now() - a.last < LIVE_MS;
+const movedAt = (w: BoardTask) => Number(w.activity) || Number(w.updated);
+/** Bumped at the next stall boundary (useStallClock): the only timer. */
+const stallClock = signal(0);
+
+export function holder(w: BoardTask): Agent | null {
+  let byRole: Agent | null = null;
+  for (const id of agentIds.value) {
+    const a = rows.get(id)?.value;
+    if (!a || !isLive(a)) continue;
+    if (a.work === w.id) return a;
+    if (!a.work && w.owner && w.owner !== "coder" && a.role === w.owner) byRole = a;
+  }
+  return byRole;
+}
+
+export function boardState(w: BoardTask, checkQueued: boolean): BoardState {
+  if (holder(w)) return "working";
+  if (checkQueued) return "awaiting check";
+  void stallClock.value;
+  return started(w) && Date.now() - movedAt(w) >= STALL_MS ? "stalled" : "queued";
+}
+
+/** Someone began it: a step, a bar, steps or commits. */
+const started = (w: BoardTask) => !!w.step || (w.progressTotal ?? 0) > 0 || [w.steps, w.commits].some((j) => !!j && j !== "[]");
+
+/** One timeout to the nearest moment one of [open] tasks turns stalled; nothing at rest. */
+export function useStallClock(open: BoardTask[]) {
+  const n = stallClock.value;
+  useEffect(() => {
+    const now = Date.now();
+    const next = Math.min(...open.map((w) => movedAt(w) + STALL_MS).filter((t) => t > now));
+    if (!Number.isFinite(next)) return;
+    const t = window.setTimeout(() => stallClock.value++, next - now + 50);
+    return () => clearTimeout(t);
+  }, [open, n]);
+}
+
 /** A state's mark (§1.1): working ●, idle ◐ (○ after 10 minutes), blocked ■, needs you !, paused ⏸, done ✓. */
 export function mark(a: Agent) {
   switch (a.state) {
