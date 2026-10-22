@@ -140,6 +140,11 @@ strip only - not the cause when a drag in a tile fails.
   tile's "put back in bar", "+ widget" > search bar, or a drop on the edit sheet (kept while the search is carried)
   = putBackInBar(); a drop on the dock row folded = back in the foot under the dock (footBelow "1"). gesture.ts
   tableOf keys on search-parked too. Gate: search-launcher-folded/-unfolded.
+- "+ app" (editsheet.tsx AppPicker): drawer.tsx AppList (the drawer's A-Z list/results + letter bar, onTap instead of
+  launch) + bar.tsx Pill with a local query (findApps = the drawer's ranking). A tap = placeNewCells(1,1) (page in
+  view, first free cell; wide page too) + powos.home.add, serialized, home re-read before the next; stays open for
+  more; an app already on home (page or folder) is left alone. Gate: add-app-folded/-unfolded (mock keeps its layout
+  over a reload when localStorage "powos-shell:mock.keepHome" = "1", bridge.ts). Render: shots edit-add-app.
 - Relayout: measure() never runs while document.hidden and compares cellW (column count) too; Pages useMeasured and
   hosts/wide.ts recheck on visibilitychange (+2 frames, +400 ms), pageshow, orientationchange, resize, ResizeObserver.
   Gate: relayout-landscape/-fold/-unfold. The mock can't reproduce the phone's stuck-wide state: verify on the device.

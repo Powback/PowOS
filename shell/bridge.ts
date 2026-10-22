@@ -436,6 +436,21 @@ function mock(): Bridge {
       },
     ],
   };
+  // The mock's layout lives in the page only; a check that reloads (dev/gate.mjs "add-app") sets "mock.keepHome" in
+  // localStorage to keep it there too, as the phone keeps its own.
+  const keepHome = (() => {
+    try {
+      const kept = localStorage.getItem(data("mock.keepHome")) === "1" && localStorage.getItem(data("mock.home"));
+      if (kept) Object.assign(home, JSON.parse(kept));
+      return localStorage.getItem(data("mock.keepHome")) === "1";
+    } catch {
+      return false;
+    }
+  })();
+  const homeChanged = () => {
+    if (keepHome) localStorage.setItem(data("mock.home"), JSON.stringify(home));
+    events.emit("home.changed", null);
+  };
   const changed = () => {
     home.pages = [...new Set(home.items.map((i) => i.page))].sort((a, b) => a - b);
     events.emit("home.changed", null);
@@ -455,7 +470,7 @@ function mock(): Bridge {
       running: async () => ({ "a:chrome": "running", "l:konsole": "running", "a:spotify": "running", "a:signal": "running", "l:dolphin": "frozen", "l:steam": "frozen" }),
     },
     usage: { recent: async (limit) => recent.slice(0, limit) },
-    home: homeLayout(home, () => events.emit("home.changed", null), () => apps),
+    home: homeLayout(home, homeChanged, () => apps),
     store: {
       get: async <T>(name: string) => {
         try {

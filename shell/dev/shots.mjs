@@ -177,6 +177,7 @@ const SCENES = [
   ["edit", "home", "S.editing.value = true;", "wallpaper"],
   ["edit-theme", "home", "S.editing.value = true; await sleep(200); [...document.querySelectorAll('.edit-act')].find(b => b.textContent.trim() === 'theme')?.click();", "wallpaper"],
   // Picking tiles in edit mode (ui/homeselect.ts) and a folder made of them, open (ui/folders.tsx).
+  ["edit-add-app", "home", "S.editing.value = true; await sleep(300); [...document.querySelectorAll('.edit-act')].find((b) => b.textContent.trim() === '+ app').click(); await sleep(400);", "wallpaper"],
   ["edit-chosen", "home", "S.editing.value = true; const H = await U('./ui/homeselect.ts'); H.chosen.value = S.home.value.items.filter((i) => i.kind === 'app').slice(0, 2).map((i) => i.key); await sleep(200);", "wallpaper"],
   ["folder-open", "home", "S.editing.value = true; const H = await U('./ui/homeselect.ts'); H.chosen.value = S.home.value.items.filter((i) => i.kind === 'app').slice(0, 3).map((i) => i.key); await sleep(200); document.querySelector('.chosen-actions .group-folder')?.click(); await sleep(600); S.editing.value = false; await sleep(200);", "wallpaper"],
   // The app library, home's last page (ui/library.tsx), and a search in it.

@@ -500,6 +500,87 @@ async function editSearchMoved() {
   return at === JSON.stringify(to) ? [] : [`moved and resized to ${JSON.stringify(to)}, the search widget is at ${at}`];
 }
 
+/** In the page: the first free 1x1 cell of the page in view, worked out here (not by grid.tsx placeNew), and a tap. */
+const addAppHelpers = `window.__aa = {
+  firstFree: (S, G, W) => {
+    const n = S.pages.value[S.page.value] ?? 1;
+    const items = [...S.home.value.items, ...(W.footSearch.value ? [W.footSearch.value] : [])].filter((i) => i.page === n && i.cell);
+    const taken = items.map((i) => (i.resizable ? i.cell : { ...i.cell, w: 1, h: 1 }));
+    const rows = G.geometry.value.rows, cols = S.home.value.columns;
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++)
+      if (!taken.some((t) => x >= t.x && x < t.x + t.w && y >= t.y && y < t.y + t.h)) return { page: n, x, y };
+    return null;
+  },
+  tap: (el) => {
+    const r = el.getBoundingClientRect(), at = { bubbles: true, pointerId: 7, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
+    el.dispatchEvent(new PointerEvent("pointerdown", { ...at, buttons: 1 }));
+    el.dispatchEvent(new PointerEvent("pointerup", at));
+  },
+  // Searched by its name, then tapped: a problem, or where it went (the first free cell, worked out first).
+  pick: async (S, G, W, app, all) => {
+    const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+    const field = document.querySelector(".app-picker textarea");
+    field.value = app.label;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    await sleep(200);
+    const found = [...document.querySelectorAll(".app-picker .drawer-list.results .app")];
+    const want = found.find((c) => c.dataset.key === app.key);
+    if (!want || found.length >= all || found.some((c) => !c.textContent.toLowerCase().includes(app.label.toLowerCase())))
+      return \`+ app: search "\${app.label}" shows \${found.length} of \${all}, \${want ? "with" : "without"} it\`;
+    const spot = window.__aa.firstFree(S, G, W);
+    window.__aa.tap(want);
+    await sleep(600);
+    const item = S.home.value.items.find((i) => i.app === app.key);
+    if (!item || item.page !== spot.page || item.cell?.x !== spot.x || item.cell?.y !== spot.y)
+      return \`+ app: \${app.label} at \${JSON.stringify(item && { page: item.page, ...item.cell })}, the first free cell is \${JSON.stringify(spot)}\`;
+    if (!document.querySelector(".app-picker")) return "+ app: the picker closed after one pick";
+    return { app: app.key, ...spot };
+  },
+}`;
+
+/**
+ * In the page, in edit mode (the user, 2026-10-23): "+ app" opens the drawer's list with its search; typing narrows it;
+ * a tap puts the app on the page in view at its first free cell, and the picker stays for the next. Two picked.
+ */
+async function addAppCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const G = await importShim("./ui/grid.tsx");
+  const W = await importShim("./ui/searchwidget.tsx");
+  S.page.value = 0;
+  S.editing.value = true;
+  await sleep(400);
+  const act = [...document.querySelectorAll(".edit-sheet .edit-act")].find((b) => b.textContent.trim() === "+ app");
+  if (!act) return ['edit bar: no "+ app"'];
+  act.click();
+  await sleep(300);
+  const all = document.querySelectorAll(".app-picker .grid.az .app").length;
+  if (all < 10) return [`+ app: the drawer's A-Z list has ${all} apps`];
+  const on = (a) => S.home.value.items.some((i) => i.app === a.key || i.apps?.some((x) => x.app === a.key));
+  const free = S.apps.value.filter((a) => !on(a) && S.apps.value.filter((b) => b.label === a.label).length === 1).slice(0, 2);
+  const placed = [];
+  for (const app of free) {
+    const got = await window.__aa.pick(S, G, W, app, all);
+    if (typeof got === "string") return [got];
+    placed.push(got);
+  }
+  document.querySelector(".app-picker .sheet-done").click();
+  S.editing.value = false;
+  await sleep(300);
+  localStorage.setItem("gate.addApp", JSON.stringify(placed));
+  return placed.length === 2 ? [] : [`+ app: only ${placed.length} apps free to add`];
+}
+
+/** In the page, reloaded after addAppCheck: both apps still where they were placed. */
+async function addAppReloaded() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  await sleep(600);
+  const placed = JSON.parse(localStorage.getItem("gate.addApp") ?? "[]");
+  const lost = placed.filter((p) => !S.home.value.items.some((i) => i.app === p.app && i.page === p.page && i.cell?.x === p.x && i.cell?.y === p.y));
+  return lost.length ? [`+ app after a reload: ${lost.map((p) => p.app).join(", ")} not where placed (${JSON.stringify(placed)})`] : [];
+}
+
 /**
  * In the page: a folder opens as a morph (the user, 2026-10-23: "so jarring") - moving at first (the sheet drawn at the
  * tile, easing out), then at rest with nothing left inline and no animation running, home's pages faded behind a
@@ -1403,6 +1484,18 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `edit-search-${label}`, viewport).then((r) => whenReady(r, async () => [...(await r.page.evaluate(editSearchCheck)), ...(await r.page.evaluate(editSearchMoved))])));
+  // Edit mode's "+ app" (the user, 2026-10-23): the drawer's list and search, a pick at the first free cell of the page
+  // in view, kept after a reload (the mock keeps its layout in localStorage once "mock.keepHome" is set). Both screens.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `add-app-${label}`, viewport).then(async (r) => {
+        await whenReady(r, () => r.page.evaluate(() => (localStorage.setItem("powos-shell:mock.keepHome", "1"), [])));
+        await r.page.reload().catch(() => {});
+        const s = await whenReady(r, () => r.page.evaluate(addAppHelpers).then(() => r.page.evaluate(addAppCheck)));
+        if (s.problems.length) return s;
+        await r.page.reload().catch(() => {});
+        return whenReady(r, () => r.page.evaluate(addAppReloaded));
+      }));
   // The app library: home's last page (the user, 2026-10-23). Both screens.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])

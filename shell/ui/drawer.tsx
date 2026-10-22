@@ -33,8 +33,11 @@ const sorted = computed(() => {
 });
 
 /** Matches for what's typed: names starting with it first, then words starting with it, then anywhere in them. */
-export const matches = computed(() => {
-  const q = query.value.trim().toLowerCase();
+export const matches = computed(() => findApps(query.value));
+
+/** [matches] for any text: the drawer's search, and the edit bar's "+ app" picker's (ui/editsheet.tsx). */
+export function findApps(typed: string) {
+  const q = typed.trim().toLowerCase();
   if (!q) return [];
   const rank = (label: string) => {
     const l = label.toLowerCase();
@@ -47,7 +50,7 @@ export const matches = computed(() => {
     .filter(([r]) => r >= 0)
     .sort((a, b) => a[0] - b[0] || collator.compare(a[1].label, b[1].label))
     .map(([, app]) => app);
-});
+}
 
 /**
  * The apps opened lately, newest first (the switcher's and the dock's source): one row - as many as fit across, the
@@ -129,7 +132,11 @@ function LetterBar({ onPick }: { onPick: (letter: string | null) => void }) {
   );
 }
 
-export function Drawer() {
+/**
+ * The drawer's list: every app A to Z with its A-Z bar, or [found] (what's typed matched), best by the pill. The drawer's
+ * and the edit bar's "+ app" picker's (ui/editsheet.tsx AppPicker: [onTap] places the app instead of opening it).
+ */
+export function AppList({ found, onTap }: { found: App[] | null; onTap?: (app: App) => void }) {
   const list = useRef<HTMLDivElement>(null);
   const jump = (letter: string | null) => {
     // Its first app, else the next letter's, else the last letter's. At once: a smooth scroll restarted for every
@@ -141,6 +148,19 @@ export function Drawer() {
     const el = l != null ? list.current?.querySelector<HTMLElement>(`.az > :nth-child(${first.get(l)! + 1})`) : null;
     if (el) list.current!.scrollTop += el.getBoundingClientRect().top - list.current!.getBoundingClientRect().top;
   };
+  const cell = (app: App) => <AppCell key={app.key} app={app} draggable={!onTap} onTap={onTap && (() => onTap(app))} />;
+  return (
+    <>
+      {/* Searching: by the bar, bottom-up - the best match nearest to it (shell.css .results). */}
+      <div class={`drawer-list ${found ? "results" : ""}`} ref={list}>
+        <div class={found ? "grid" : "grid az"}>{(found ?? sorted.value.list).map(cell)}</div>
+      </div>
+      {!found && <LetterBar onPick={jump} />}
+    </>
+  );
+}
+
+export function Drawer() {
   const searching = query.value.trim() !== "";
   // No app by that name: it's a question for PowOS AI. Asked, the chat stays until the search finds apps again.
   const asking = searching ? matches.value.length === 0 : chatting.value;
@@ -148,27 +168,7 @@ export function Drawer() {
   return (
     // The launcher panel's lower part (home.tsx): it comes in (shell.css, by --p) as the recent bar grows into the panel.
     <div class={`drawer ${open ? "shown" : ""}`} aria-hidden={!open}>
-      {asking ? (
-        <ChatView />
-      ) : (
-        <div class={`drawer-list ${searching ? "results" : ""}`} ref={list}>
-          {searching ? (
-            // By the bar, bottom-up: the best match nearest to it (shell.css .results).
-            <div class="grid">
-              {matches.value.map((app) => (
-                <AppCell key={app.key} app={app} draggable />
-              ))}
-            </div>
-          ) : (
-            <div class="grid az">
-              {sorted.value.list.map((app) => (
-                <AppCell key={app.key} app={app} draggable />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      {!searching && !asking && <LetterBar onPick={jump} />}
+      {asking ? <ChatView /> : <AppList found={searching ? matches.value : null} />}
       {!searching && !asking && <RecentRow />}
     </div>
   );

@@ -1,9 +1,9 @@
 /**
  * Edit mode's bar (the Compose launcher's home menu, slimmed): "+ widget" opens one picker of everything that can go on
- * home; "theme" a strip of swatches, each in its own colors, the picked one framed - a tap recolors everything at once;
- * done. Up while editing (state.ts editing), at the foot of the screen under the home pages.
+ * home; "+ app" the drawer's list, a tap puts that app on the page in view; "theme" a strip of swatches, each in its own
+ * colors, the picked one framed - a tap recolors everything at once; done. Up while editing (state.ts editing), at the foot of the screen under the home pages.
  */
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { carry, editing, home, page, pages } from "../state.ts";
@@ -13,7 +13,9 @@ import { geometry, placeNew, placeNewCells } from "./grid.tsx";
 import { hasRecentsWidget, recentsSpot } from "./recentwidget.tsx";
 import { footAim, footBelow, SEARCH_KEY, hasSearchWidget, putBackInBar } from "./searchwidget.tsx";
 import { startNewApp } from "./appbuild.tsx";
-import type { AppWidgetProvider, ThemeChoice } from "../types.ts";
+import { AppList, findApps } from "./drawer.tsx";
+import { Pill, type MicTarget } from "./bar.tsx";
+import type { App, AppWidgetProvider, ThemeChoice } from "../types.ts";
 
 const themes = signal<ThemeChoice[]>([]);
 const picked = signal<string | null>(null);
@@ -200,6 +202,51 @@ function ShellAdds({ done, q }: { done: () => void; q: string }) {
   );
 }
 
+/** The "+ app" picker: open or not. */
+const appPicker = signal(false);
+
+/** On home already: on a page or in a folder (adding it again would move it there). */
+const onHome = (app: App) => home.value.items.some((i) => i.app === app.key || i.apps?.some((a) => a.app === app.key));
+
+/**
+ * "+ app": the drawer's list and its search (drawer.tsx AppList, bar.tsx Pill: the drawer's own, not a copy). A tap puts
+ * that app on the page in view at its first free cell (grid.tsx placeNew: wide home's page too, hosts/wide.ts), and the
+ * picker stays open for the next; one at a time, each placed on the layout the last one left.
+ */
+function AppPicker() {
+  const [q, setQ] = useState("");
+  const [said, setSaid] = useState("tap apps to add them to this page");
+  const queue = useRef(Promise.resolve());
+  const mic: MicTarget = { typed: () => q, heard: (full) => setQ(full) };
+  const close = () => (appPicker.value = false);
+  const stop = (e: Event) => e.stopPropagation();
+  const place = (app: App) =>
+    (queue.current = queue.current.then(async () => {
+      if (onHome(app)) return setSaid(`${app.label.toLowerCase()} is on home already`);
+      const spot = placeNewCells(1, 1);
+      await powos.home.add(app.key, spot.page, spot.cell);
+      home.value = await powos.home.get();
+      navigator.vibrate?.(5);
+      setSaid(`added ${app.label.toLowerCase()}`);
+    }).catch(() => setSaid(`${app.label.toLowerCase()} wasn't added`)));
+  return (
+    <div class="aw-scrim" onClick={close} onPointerDown={stop} onTouchStart={stop}>
+      <div class="aw-picker app-picker tile sheet" onClick={stop}>
+        <div class="sheet-head">
+          <span class="muted">{said}</span>
+          <button type="button" class="sheet-done" onClick={close}>
+            done
+          </button>
+        </div>
+        <div class="drawer shown">
+          <AppList found={q.trim() ? findApps(q) : null} onTap={place} />
+        </div>
+        <Pill target={mic} value={q} onInput={setQ} placeholder="search apps" autocomplete="off" autoCapitalize="off" spellcheck={false} />
+      </div>
+    </div>
+  );
+}
+
 /**
  * Edit mode's bar: one slim strip at the foot of the screen, where the search bar and the dock were - "+ widget"
  * (one picker: the shell's widgets, PowOS apps', Android's, the stores, new ones with the agent), the theme (a small
@@ -213,6 +260,7 @@ export function EditSheet() {
     // Fresh each time it opens: themes download and get added, the agent can change.
     themesOpen.value = reopen;
     reopen = false;
+    appPicker.value = false;
     powos.theme.list().then((l) => (themes.value = l));
     powos.theme.get().then((t) => (picked.value = t.name));
     powos.agents.default().then((a) => (agent.value = a));
@@ -226,6 +274,7 @@ export function EditSheet() {
   if (!open || carriedAway()) return null;
   // The picker in its place while it's open (over home, its own scrolling list).
   if (picker.value) return <AppWidgetPicker onPick={addAppWidget} head={(close, q) => <ShellAdds done={close} q={q} />} />;
+  if (appPicker.value) return <AppPicker />;
   const current = themes.value.find((t) => t.name === picked.value);
   const stop = (e: Event) => e.stopPropagation();
   return (
@@ -251,6 +300,9 @@ export function EditSheet() {
       <div class={`edit-sheet tile ${footAim.value === "bar" ? "drop-here" : ""}`} onPointerDown={stop} onTouchStart={stop}>
         <button type="button" class="edit-act" onClick={() => ((themesOpen.value = false), (note.value = null), (picker.value = true))}>
           + widget
+        </button>
+        <button type="button" class="edit-act" onClick={() => ((themesOpen.value = false), (note.value = null), (appPicker.value = true))}>
+          + app
         </button>
         <button type="button" class={`edit-act ${themesOpen.value ? "on" : ""}`} onClick={() => (themesOpen.value = !themesOpen.value)}>
           theme
