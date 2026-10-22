@@ -7,7 +7,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
-import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
@@ -24,17 +23,20 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * One floating app window's frame, PowOS's own (OxygenOS draws none): a glass title bar above the window - its app's
+ * One floating app window's frame, PowOS's own (OxygenOS draws none): a thin glass title bar above the window - its app's
  * icon and name, minimise, maximise and close - that a finger drags to move it, and a grip on its lower right corner that resizes
  * it. Two small overlay windows (TYPE_APPLICATION_OVERLAY: over apps, under the status bar and the shade) placed on the
  * task's bounds; the task follows the finger through [FreeformTasks.resize], at most one call in flight.
- * Design language (powos-design): the glass is the compositor's blur plus a dark tint, no borders, soft round buttons.
+ * Design language (powos-design): the glass is the compositor's blur plus a dark tint, no borders, small marks. The bar
+ * is [BAR_DP] (the user, 2026-10-23: half the old 40); its window reaches [HIT_DP] higher, unblurred and clear, so the
+ * buttons and the drag keep a finger-sized target.
  */
 @SuppressLint("ClickableViewAccessibility", "ViewConstructor")
 class WindowFrame(
     private val context: Context,
     val id: Int,
-    pkg: String?,
+    /** Its app: the bar's icon and name. */
+    app: App,
     private val onMinimise: (Int) -> Unit,
     /** Let go at the screen's left (-1) or right (1) edge: the window goes to that home page (WindowFrames.edge). */
     private val onEdge: (Int, Int) -> Unit = { _, _ -> },
@@ -55,13 +57,13 @@ class WindowFrame(
         private set
 
     private lateinit var maxButton: GlyphView
-    private val bar = barView(pkg)
+    private val bar = barView(app.pkg, app.title)
     private val grip = GripView(context)
     private val barParams = params("PowOS window bar $id")
     private val gripParams = params("PowOS window grip $id")
     private var added = false
 
-    private val barBlur = WindowBlur({ bar.rootView }, BLUR_DP, cornersDp = floatArrayOf(CORNER_DP, CORNER_DP, 0f, 0f))
+    private val barBlur = WindowBlur({ bar.rootView }, BLUR_DP, cornersDp = floatArrayOf(CORNER_DP, CORNER_DP, 0f, 0f), topDp = HIT_DP)
     private val gripBlur = WindowBlur({ grip.rootView }, BLUR_DP, cornersDp = FloatArray(4) { GRIP_DP / 2 })
 
     init {
@@ -77,7 +79,7 @@ class WindowFrame(
 
     private fun layout(r: Rect) {
         bounds = Rect(r)
-        val h = dp(BAR_DP)
+        val h = dp(BAR_DP + HIT_DP)
         barParams.apply {
             x = r.left
             y = r.top - h
@@ -145,71 +147,123 @@ class WindowFrame(
 
     private fun appIcon(pkg: String?) = pkg?.let { p -> runCatching { context.packageManager.getApplicationIcon(p) }.getOrNull() }
 
-    private fun barView(pkg: String?): LinearLayout {
-        val label = appLabel(pkg)
+    /**
+     * The bar's window: the glass bar at its bottom ([BAR_DP]), a clear strip over it ([HIT_DP]); a touch in the strip
+     * is the bar's - its button below the finger, else the drag (the buttons span the window's height).
+     */
+    private fun barView(
+        pkg: String?,
+        title: String?,
+    ): LinearLayout {
+        val label = title?.takeIf { it.isNotBlank() } ?: appLabel(pkg)
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12f), 0, dp(6f), 0)
-            background =
-                GradientDrawable().apply {
-                    setColor(TINT)
-                    val c = CORNER_DP * density
-                    cornerRadii = floatArrayOf(c, c, c, c, 0f, 0f, 0f, 0f)
-                }
+            gravity = Gravity.BOTTOM
+            setPadding(dp(10f), 0, dp(2f), 0)
+            background = BarGlass(dp(HIT_DP).toFloat(), CORNER_DP * density)
+            val strip = dp(HIT_DP)
             appIcon(pkg)?.let { icon ->
-                addView(ImageView(context).apply { setImageDrawable(icon) }, LinearLayout.LayoutParams(dp(20f), dp(20f)).apply { marginEnd = dp(10f) })
+                addView(
+                    ImageView(context).apply { setImageDrawable(icon) },
+                    LinearLayout.LayoutParams(dp(ICON_DP), dp(ICON_DP)).apply {
+                        marginEnd = dp(8f)
+                        bottomMargin = (dp(BAR_DP) - dp(ICON_DP)) / 2
+                    },
+                )
             }
             addView(
                 TextView(context).apply {
                     text = label
                     setTextColor(INK)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
                     typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.END
+                    gravity = Gravity.CENTER_VERTICAL
                 },
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+                LinearLayout.LayoutParams(0, dp(BAR_DP), 1f),
             )
-            addView(button(Glyph.MINIMISE) { onMinimise(id) }, LinearLayout.LayoutParams(dp(BUTTON_DP), dp(BUTTON_DP)).apply { marginEnd = dp(4f) })
+            val full = dp(BAR_DP) + strip
+            addView(button(Glyph.MINIMISE) { onMinimise(id) }, LinearLayout.LayoutParams(dp(BUTTON_DP), full))
             maxButton = button(Glyph.MAXIMISE) { onMaximise(id) }
-            addView(maxButton, LinearLayout.LayoutParams(dp(BUTTON_DP), dp(BUTTON_DP)).apply { marginEnd = dp(4f) })
-            addView(button(Glyph.CLOSE) { Tasks.remove(context, id) }, LinearLayout.LayoutParams(dp(BUTTON_DP), dp(BUTTON_DP)))
+            addView(maxButton, LinearLayout.LayoutParams(dp(BUTTON_DP), full))
+            addView(button(Glyph.CLOSE) { Tasks.remove(context, id) }, LinearLayout.LayoutParams(dp(BUTTON_DP), full))
         }
+    }
+
+    /** The bar's glass tint, below the window's clear touch strip ([top] px), its upper corners rounded. */
+    private class BarGlass(
+        private val top: Float,
+        private val corner: Float,
+    ) : android.graphics.drawable.Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = TINT }
+        private val path = android.graphics.Path()
+
+        override fun draw(canvas: Canvas) {
+            val b = bounds
+            path.reset()
+            path.addRoundRect(b.left.toFloat(), b.top + top, b.right.toFloat(), b.bottom.toFloat(), floatArrayOf(corner, corner, corner, corner, 0f, 0f, 0f, 0f), android.graphics.Path.Direction.CW)
+            canvas.drawPath(path, paint)
+        }
+
+        override fun setAlpha(alpha: Int) {
+            paint.alpha = alpha
+        }
+
+        override fun setColorFilter(filter: android.graphics.ColorFilter?) {
+            paint.colorFilter = filter
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity() = PixelFormat.TRANSLUCENT
     }
 
     private fun button(
         glyph: Glyph,
         tap: () -> Unit,
     ): GlyphView =
-        GlyphView(context, glyph).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(SOFT_FILL)
-            }
+        GlyphView(context, glyph, dp(HIT_DP).toFloat()).apply {
             contentDescription = glyph.name.lowercase()
             setOnClickListener { tap() }
         }
 
+    /** A window's app: its package and, instead of the app's name, a PowOS (Linux) window's caption (its task is PowOS's own). */
+    data class App(
+        val pkg: String?,
+        val title: String? = null,
+    )
+
     private enum class Glyph { MINIMISE, MAXIMISE, RESTORE, CLOSE }
 
-    /** A button's mark, drawn (no icon files): a dash, a square, two squares or a cross. */
+    /**
+     * A button's mark, drawn (no icon files): a dash, a square, two squares or a cross, small, centred on the glass bar
+     * below the clear strip ([strip] px) the button reaches up through; a soft disc behind it while pressed.
+     */
     private class GlyphView(
         context: Context,
         var glyph: Glyph,
+        private val strip: Float,
     ) : View(context) {
+        private val d = context.resources.displayMetrics.density
         private val paint =
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = INK
-                strokeWidth = 1.6f * context.resources.displayMetrics.density
+                strokeWidth = 1.3f * d
                 strokeCap = Paint.Cap.ROUND
                 style = Paint.Style.STROKE
             }
+        private val pressedFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SOFT_FILL }
+
+        override fun drawableStateChanged() {
+            super.drawableStateChanged()
+            invalidate()
+        }
 
         override fun onDraw(canvas: Canvas) {
             val cx = width / 2f
-            val cy = height / 2f
-            val s = width * 0.18f
+            val cy = strip + (height - strip) / 2f
+            if (isPressed) canvas.drawCircle(cx, cy, (height - strip) * 0.42f, pressedFill)
+            val s = GLYPH_DP * d / 2f
             when (glyph) {
                 Glyph.MINIMISE -> canvas.drawLine(cx - s, cy, cx + s, cy, paint)
                 Glyph.MAXIMISE -> canvas.drawRect(cx - s, cy - s, cx + s, cy + s, paint)
@@ -276,15 +330,79 @@ class WindowFrame(
                     val dx = (e.rawX - x0).toInt()
                     val dy = (e.rawY - y0).toInt()
                     if (!dragging && dx * dx + dy * dy < slop * slop) return true
+                    if (!dragging) startDrag()
                     dragging = true
-                    val target = if (move) moved(from, dx, dy) else resized(from, dx, dy)
-                    layout(target)
-                    resize(target)
+                    follow(if (move) moved(from, dx, dy) else resized(from, dx, dy), e)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> release(e)
             }
             return true
         }
+    }
+
+    /** The frame being dragged ([DragLayer]: drawn in this process every frame); null when no finger has it. */
+    private var drag: DragLayer? = null
+
+    /** Measured, the frame's windows moved per touch event as before (WindowManager relayouts): ns per event. */
+    private val legacyLatencies = ArrayList<Long>()
+
+    /**
+     * HACK: the old way of following the finger, kept only to measure it against the drag layer (settings put global
+     * powos_drag_legacy 1). Real fix: remove once the numbers are in the board task.
+     */
+    private fun legacyDrag() = android.provider.Settings.Global.getInt(context.contentResolver, "powos_drag_legacy", 0) == 1
+
+    /** A drag starts: the frame's own windows step aside (drawn by the drag layer, no relayout per move). */
+    private fun startDrag() {
+        if (legacyDrag()) return
+        val bitmapOf = { v: View -> runCatching { v.drawToBitmap() }.getOrNull() }
+        drag = DragLayer(context, bitmapOf(bar), bitmapOf(grip), dp(BAR_DP + HIT_DP), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)
+        bar.alpha = 0f
+        grip.alpha = 0f
+        barBlur.set(0f)
+        gripBlur.set(0f)
+    }
+
+    /** The frame and the task to [target]: the frame on the next frame, the task as fast as it can. */
+    private fun follow(
+        target: Rect,
+        e: MotionEvent,
+    ) {
+        val eventNs = e.eventTime * 1_000_000
+        bounds = Rect(target)
+        val layer = drag
+        if (layer != null) {
+            layer.move(target, eventNs)
+        } else {
+            layout(target)
+            bar.viewTreeObserver.registerFrameCommitCallback { legacyLatencies.add(System.nanoTime() - eventNs) }
+        }
+        resize(target)
+    }
+
+    /** The drag is over: the frame's windows at [r] (once), the drag layer gone. */
+    private fun endDrag(r: Rect) {
+        layout(r)
+        val layer = drag
+        if (layer == null) {
+            DragLayer.report("PowosWindowDrag", "task $id legacy drag", legacyLatencies)
+            legacyLatencies.clear()
+            return
+        }
+        drag = null
+        bar.alpha = 1f
+        grip.alpha = 1f
+        barBlur.set(1f)
+        gripBlur.set(1f)
+        // The windows are there once this frame is drawn; the layer goes after it (no frame without one or the other).
+        bar.postOnAnimation { layer.hide("task $id drag") }
+    }
+
+    /** A bitmap of [this] view as it looks now (its size). */
+    private fun View.drawToBitmap(): android.graphics.Bitmap {
+        val b = android.graphics.Bitmap.createBitmap(maxOf(1, width), maxOf(1, height), android.graphics.Bitmap.Config.ARGB_8888)
+        draw(Canvas(b))
+        return b
     }
 
     /** The finger up: an edge drop sends the window to the next page, back whole on screen; else it stays put. */
@@ -294,10 +412,11 @@ class WindowFrame(
             val (s, _) = screen()
             val left = bounds.left.coerceIn(s.left, maxOf(s.left, s.right - bounds.width()))
             val back = Rect(left, bounds.top, left + bounds.width(), bounds.bottom)
-            layout(back)
+            endDrag(back)
             resize(back)
             onEdge(id, side)
         } else if (dragging) {
+            endDrag(Rect(bounds))
             resize(Rect(bounds))
         }
         dragging = false
@@ -353,9 +472,17 @@ class WindowFrame(
     private val pending = AtomicReference<Rect?>(null)
 
     companion object {
-        const val BAR_DP = 40f
-        private const val CORNER_DP = 14f
-        private const val BUTTON_DP = 30f
+        /** The glass bar's height (the user, 2026-10-23: about half the 40 it was). */
+        const val BAR_DP = 26f
+
+        /** The bar window's clear touch strip above the glass: the buttons' and the drag's target reaches it too. */
+        const val HIT_DP = 10f
+        private const val CORNER_DP = 10f
+        private const val BUTTON_DP = 34f
+        private const val ICON_DP = 15f
+
+        /** A button's mark, across. */
+        private const val GLYPH_DP = 9f
         private const val GRIP_DP = 36f
 
         /** How far the grip reaches outside the window's corner. */

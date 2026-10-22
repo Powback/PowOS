@@ -455,6 +455,8 @@ internal class GlassBlur(
             radiusPx: Float,
             /** Its corners' radii, px (top left, top right, bottom right, bottom left): a rounded window's glass. */
             corners: FloatArray = FloatArray(4),
+            /** Unblurred at its top, px (a window bar's touch strip above the glass). */
+            topPx: Float = 0f,
         ): Boolean? {
             val m = methods ?: return false
             return try {
@@ -464,7 +466,8 @@ internal class GlassBlur(
                 val surface = m.surface.invoke(viewRoot) as SurfaceControl? ?: return null
                 if (!surface.isValid || view.rootView.width <= 0 || view.rootView.height <= 0) return null
                 val c = codecOf(m, viewRoot) ?: return false
-                val regions = wholeRegion(c, view.rootView, radiusPx, corners)
+                val root = view.rootView
+                val regions = wholeRegion(c, android.graphics.RectF(0f, topPx, root.width.toFloat(), root.height.toFloat()), radiusPx, corners)
                 val t = SurfaceControl.Transaction()
                 m.setBlurRegions.invoke(t, surface, regions)
                 t.apply()
@@ -485,14 +488,14 @@ internal class GlassBlur(
                 null
             }
 
-        /** One region over the whole window [r], its corners rounded; none at a radius under 1 px. */
+        /** One region over [r] of the window (all of it but a strip at its top, if any), its corners rounded; none at a radius under 1 px. */
         private fun wholeRegion(
             c: Codec,
-            r: View,
+            r: android.graphics.RectF,
             radiusPx: Float,
             corners: FloatArray,
         ): Array<FloatArray> =
-            if (radiusPx < 1f) emptyArray() else arrayOf(c.encode(Region(0f, 0f, r.width.toFloat(), r.height.toFloat(), corners[0], corners[1], corners[2], corners[3], 1f, radiusPx)))
+            if (radiusPx < 1f) emptyArray() else arrayOf(c.encode(Region(r.left, r.top, r.right, r.bottom, corners[0], corners[1], corners[2], corners[3], 1f, radiusPx)))
 
         private val methods: Methods? by lazy {
             runCatching {

@@ -37,6 +37,8 @@ object FreeformTasks {
         val visible: Boolean,
         /** The density its app lays itself out at now (its task's configuration). */
         val dpi: Int = 0,
+        /** Its task's label (TaskDescription): a PowOS (Linux) window's caption. */
+        val label: String? = null,
     )
 
     /** The floating windows, top-most first. */
@@ -51,7 +53,7 @@ object FreeformTasks {
             val bounds = Rect(wc.javaClass.getMethod("getBounds").invoke(wc) as Rect)
             val visible = runCatching { android.app.TaskInfo::class.java.getField("isVisible").getBoolean(t) }.getOrDefault(true)
             val dpi = runCatching { (android.app.TaskInfo::class.java.getField("configuration").get(t) as Configuration).densityDpi }.getOrDefault(0)
-            Window(t.taskId, (t.baseActivity ?: t.topActivity)?.packageName, bounds, visible, dpi)
+            Window(t.taskId, (t.baseActivity ?: t.topActivity)?.packageName, bounds, visible, dpi, t.taskDescription?.label?.toString())
         }
     }
 

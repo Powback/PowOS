@@ -61,8 +61,11 @@ class WindowFrames(
         val ids = show.map { it.id }.toSet()
         frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
         // Bottom-most first, so a new frame's windows stack over the ones under it.
-        show.asReversed().forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, w.pkg, ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
+        show.asReversed().forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w)), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
     }
+
+    /** A PowOS (Linux) window's caption for its bar: its task is PowOS's own (PowosWindowActivity), so not "PowOS". */
+    private fun ownTitle(w: FreeformTasks.Window): String? = w.label.takeIf { w.pkg == context.packageName }
 
     /** The per-window state kept up with the listed windows ([all]; none count folded, apps aren't windows there). */
     private fun track(
