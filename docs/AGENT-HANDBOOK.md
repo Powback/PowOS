@@ -45,6 +45,8 @@ minimal change and tell them.
 - Git: rebase only right before you commit/push, not before every command. Commit subject <= 72 chars, a short body.
 - No new process tooling (locks, gates, wrappers, handbook rules) unless something actually broke; say what broke.
 - Messages: shipped results or blockers only, one line.
+- Worktrees: `tools/agents/worktree.sh new <name>` (origin tip, shared node_modules), `done <name>` once pushed (refuses
+  unpushed/uncommitted work), `list`. Never leave a merged worktree behind.
 
 ## Reaching the phone (OnePlus Open, rooted)
 - `tools/phone/adb.sh <adb args>`: adb over the VPN (powos-vadb's server, 10.13.13.7:5555) from any session.
