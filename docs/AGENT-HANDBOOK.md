@@ -168,6 +168,9 @@ Git and process
   3. APK changes: ship-apk at least every 30 min while anything is pending; a 2-min idle is enough (don't wait for
      long windows). Shell pushes go out immediately, batched per minute.
   4. Mock review only for brand-NEW screens; everything else ships, the manager reviews the device screencap after.
+  5a. The verify lock (~/.cache/powos-verify.lock) is taken only AFTER `idle.sh --wait` returns a free window, held
+     only for the injected part, never through a wait: ship-apk won't install while it exists (a check holding it
+     through its idle wait blocked every APK for 19 min, 2026-10-22).
   5. Device checks are automated (read-only CDP + a screencap in a free window) - never wait on the user for what a
      script can check.
   6. Idle? Pick the next unowned board task yourself (`powos agents task list`), set yourself on it, go.
