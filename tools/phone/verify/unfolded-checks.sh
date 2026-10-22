@@ -19,6 +19,9 @@ restore() {
   sh_ "input keyevent 4; input keyevent 4; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"
   rm -rf "$L"
 }
+# One wait for a free screen-on window (never wakes it; AWAKE_ONLY), then the verify lock (shared with the others'
+# checks: held only for this injected run).
+w=$(AWAKE_ONLY=1 "$T/idle.sh" --wait 120 "${MAX_WAIT:-10800}") || { echo "no free window: $w"; exit 4; }
 for k in $(seq 30); do mkdir "$L" 2>/dev/null && break; sleep 10; done
 [ -d "$L" ] || { echo "verify lock busy: $(cat "$L/who" 2>/dev/null)"; exit 4; }
 echo "powos-verify: unfolded checks (inner screen forced) $(date +%T), ~2 min" > "$L/who"; trap restore EXIT
@@ -30,14 +33,23 @@ step() { echo "== $*" | tee -a "$OUT/log.txt"; }
 step "screen state"; s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1"); echo "$s"
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
 step "inner screen"; sh_ "cmd device_state state 3"; sleep 3; chk unfold
-WH=$(sh_ "dumpsys display | grep -E \"^  DisplayDeviceInfo\" | sed -nE \"s/.*uniqueId=\\\"local:[0-9]+\\\", ([0-9]+) x ([0-9]+),.* state ON,.*/\\1 \\2/p\" | head -1")
-W=${WH% *}; H=${WH#* }; echo "on: ${W}x${H}"; [ "${W:-0}" -gt 2000 ] || echo "WARN: the ON display isn't the inner screen (${WH})"
+WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
+W=${WH% *}; H=${WH#* }; echo "on: ${W}x${H}"
+[ "${W:-0}" -gt 0 ] && [ "${H:-0}" -gt 0 ] || { echo "no screen size (wm size) - stopping before any input"; exit 5; }
+[ "$W" -gt 2000 ] || echo "WARN: display 0 isn't the inner screen (${W}x${H})"
 x() { echo $(( W * $1 / 1000 )); }; y() { echo $(( H * $1 / 1000 )); }
 
-step "lock face"; if sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qiE "Lock|Keyguard"; then
-  sh_ "input swipe $(x 500) $(y 900) $(x 500) $(y 250) 300"; sleep 1.5; chk lock
-  sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qiE "Lock|Keyguard" && { shot lock-still-showing; echo "lock face didn't go (a PIN?) - stopping"; exit 5; }
+step "lock face"
+# Android's keyguard (its window is "NotificationShade" - not named lock) behind PowOS's face: while it shows, the
+# screen dozes after ~10 s, so dismiss it first (no PIN: wm dismiss-keyguard), then swipe PowOS's face if it's up.
+kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
+if kg | grep -q true; then
+  sh_ "wm dismiss-keyguard"; sleep 1.5
+  kg | grep -q true && { sh_ "input swipe $(x 500) $(y 900) $(x 500) $(y 250) 300"; sleep 1.5; }
+  kg | grep -q true && { shot lock-still-showing; echo "the keyguard didn't go (a PIN?) - stopping"; exit 5; }
 fi
+if sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock"; then sh_ "input swipe $(x 500) $(y 900) $(x 500) $(y 250) 300"; sleep 1.5; fi
+chk lock
 step "home: merged tiles"; sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk home; shot home-unfolded
 
 field() { # page -> "x y" of the compose field's centre in device px (read only, CDP)
