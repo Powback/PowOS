@@ -415,3 +415,71 @@ export function SentImages({ text }: { text: string }) {
     </span>
   );
 }
+
+/** A design-qa review image as the page can load it (ShellHost /_qa/: a bare name of that folder), else null. */
+export const qaUrl = (path: string) =>
+  /^\/home\/powos\/design-qa\/[A-Za-z0-9._-]+\.(png|jpg)$/.test(path) && !path.includes("..") ? `/_qa/${encodeURIComponent(path.split("/").pop()!)}` : null;
+
+/** "mail from coder: …" (PowosAiChat's line for an agent's message): who sent it and what it says. */
+export function mailOf(text: string): { from: string; body: string } | null {
+  const m = text.match(/^mail from ([^:]{1,40}): ([\s\S]*)$/);
+  if (!m) return null;
+  // The agent often starts with its own name again ("coder: ack - ...").
+  return { from: m[1], body: m[2].replace(new RegExp(`^${m[1].replace(/[^\w-]/g, "")}:\s*`), "").trim() };
+}
+
+/** Commit hashes and agent ids ("611b9f8a", "(ae943ed)") out of what a person reads. */
+const unhashed = (t: string) => t.replace(/\s*\((?:[0-9a-f]{7,40}(?:[,\s/]+)?)+\)/g, "").replace(/\b[0-9a-f]{7,40}\b/g, "").replace(/[ \t]{2,}/g, " ");
+
+/** Its first sentence, plain: what the mail is about. */
+const firstSentence = (body: string) => {
+  const t = unhashed(body).replace(/\s+/g, " ").replace(/^(ack|fyi|note)\s*[-:]\s*/i, "").trim();
+  const m = t.match(/^(.{12,160}?[.!?])(\s|$)/);
+  return m ? m[1] : t.length > 140 ? `${t.slice(0, 140).trimEnd()}…` : t;
+};
+
+/** The body as Markdown: "SHIPPED:" / "IN PROGRESS" / "X:" lead lines as quiet headers, " - " runs as a list. */
+function mailMd(body: string) {
+  return unhashed(body)
+    // Review images show as thumbnails under it: their paths aren't words to read.
+    .replace(/,?\s*(review\s+)?\/home\/powos\/design-qa\/[A-Za-z0-9._-]+\.(png|jpg)/g, "")
+    // Status words anywhere ("... tweaks IN PROGRESS: - ...") start a section.
+    .replace(/\s*\b(SHIPPED|IN PROGRESS|BLOCKED|DONE|NEXT|WAITING ON YOU|WAITING)\b:?\s*/g, "\n\n##### $1\n")
+    .replace(/\s+-\s+(?=[A-Za-z(])/g, "\n- ")
+    .split("\n")
+    .map((l) => (/^\s*([A-Z][A-Z /]{2,30}|[A-Z][\w -]{1,24}):\s*$/.test(l) ? `##### ${l.trim().replace(/:$/, "")}` : l.replace(/^\s*([A-Z][A-Z /]{3,30}):\s+/, "##### $1\n")))
+    .join("\n");
+}
+
+/** An agent's message in the chat: a compact card - who, what in one line; a tap opens it (Markdown, its images). */
+export function MailCard({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const mail = mailOf(text)!;
+  const images = [...mail.body.matchAll(/\/home\/powos\/design-qa\/[A-Za-z0-9._-]+\.(?:png|jpg)/g)].map((m) => m[0]);
+  return (
+    <div class={`mail ${open ? "open" : ""}`}>
+      <button type="button" class="mail-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span class="ai-dot on" />
+        <span class="mail-from">{mail.from}</span>
+        {!open && <span class="mail-sum">{firstSentence(mail.body)}</span>}
+      </button>
+      {open && (
+        <>
+          <div class="md mail-body" onClick={onLink} dangerouslySetInnerHTML={{ __html: md(mailMd(mail.body)) }} />
+          {images.length > 0 && (
+            <div class="ai-imgs">
+              {images.map((p) => {
+                const url = qaUrl(p)!;
+                return (
+                  <button key={p} type="button" class="ai-img" onClick={() => openFull(p.split("/").pop()!, <img class="ai-img-full" src={url} alt="" />)}>
+                    <img src={url} alt="" loading="lazy" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

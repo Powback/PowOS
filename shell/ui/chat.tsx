@@ -6,7 +6,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { chat, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import type { ChatItem } from "../types.ts";
-import { Queued, Said, SentImages, Thread, ToolRun } from "./rich.tsx";
+import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf } from "./rich.tsx";
 
 /** How much of the conversation the launcher shows; the rest is in PowOS AI's page (left of home). */
 const SHOWN = 40;
@@ -27,6 +27,7 @@ export function Item({ item, reply = null }: { item: ChatItem; reply?: string | 
     case "tool":
       return <ToolRun tools={[item]} />;
     case "note":
+      if (!item.error && mailOf(item.text)) return <MailCard text={item.text} />;
       return <div class={`msg note ${item.error ? "error" : "muted"}`}>{item.text}</div>;
   }
 }

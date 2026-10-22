@@ -19,7 +19,7 @@ import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
-import { Queued, Said, SentImages, Thread, ToolRun, openFull, toolLabel } from "./rich.tsx";
+import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf, openFull, qaUrl, toolLabel } from "./rich.tsx";
 import { askQueued, openAssistant, waiting } from "./assistant.ts";
 
 const sessions = signal<AgentSession[]>([]);
@@ -90,11 +90,15 @@ export function Now() {
           <Said text={turn.answer} reply={null} />
         </div>
       )}
-      {turn.notes.map((n, i) => (
-        <div key={i} class={`ai-note ${n.error ? "error" : "muted"}`}>
-          {n.text}
-        </div>
-      ))}
+      {turn.notes.map((n, i) =>
+        !n.error && mailOf(n.text) ? (
+          <MailCard key={i} text={n.text} />
+        ) : (
+          <div key={i} class={`ai-note ${n.error ? "error" : "muted"}`}>
+            {n.text}
+          </div>
+        ),
+      )}
       {busy && !turn.answer && <div class="ai-thinking muted">thinking…</div>}
       {waiting.value.length > 0 && (
         <div class="ai-queued">
@@ -254,8 +258,6 @@ function NeedsYou() {
   );
 }
 
-/** A review image as the page can load it (ShellHost's _qa/: design-qa's files by name), else null. */
-const qaUrl = (path: string) => (/^\/home\/powos\/design-qa\/[A-Za-z0-9._-]+\.(png|jpg)$/.test(path) && !path.includes("..") ? `/_qa/${encodeURIComponent(path.split("/").pop()!)}` : null);
 const fileName = (path: string) => path.split("/").pop() ?? path;
 
 /** A review image: its picture (a tap: full screen), or its name where the page can't load it (an older host). */
@@ -283,7 +285,9 @@ function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => 
   const images = list<string>(w.images);
   const moved = sec(Number(w.activity) || (w.status === "done" && Number(w.done) ? w.done : w.updated));
   const tracked = total > 0 || !!w.step || commits.length > 0;
-  const facts = [total > 0 && `${done}/${total}`, commits.length > 0 && `${commits.length} commit${commits.length > 1 ? "s" : ""}`, ago(moved) === "now" ? "just now" : `${ago(moved)} ago`].filter(Boolean).join(" · ");
+  // Who has it: "free" when nobody does (the board's "" or the catch-all "coder"), so a free task shows as one.
+  const who = !w.owner || w.owner === "coder" ? "free" : w.owner;
+  const facts = [who, total > 0 && `${done}/${total}`, commits.length > 0 && `${commits.length} commit${commits.length > 1 ? "s" : ""}`, ago(moved) === "now" ? "just now" : `${ago(moved)} ago`].filter(Boolean).join(" · ");
   return (
     <div class={`ai-item ${w.status}`}>
       <button type="button" class="ai-item-row" onClick={onTap} aria-expanded={open}>
@@ -296,7 +300,7 @@ function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => 
             </span>
           )}
           {tracked && w.step && <span class="ai-item-step">{w.step}</span>}
-          {tracked && <span class="ai-item-facts">{facts}</span>}
+          {tracked ? <span class="ai-item-facts">{facts}</span> : <span class="ai-item-facts">{who}</span>}
         </span>
         {!tracked && Date.now() / 1000 - moved > DAY_S && <span class="ai-item-age">{ago(moved)}</span>}
       </button>
