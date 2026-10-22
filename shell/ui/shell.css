@@ -13,11 +13,12 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  /* The host's insets (app.tsx), else the browser's safe areas; the keyboard lifts the bar above it. */
+  /* The host's insets (app.tsx), else the browser's safe areas; the keyboard lifts the bar above it, a pill's foot
+     clear of it (the pill sat flush on the keyboard's toolbar). */
   padding:
     var(--inset-top, env(safe-area-inset-top))
     var(--inset-right, env(safe-area-inset-right))
-    max(var(--inset-bottom, env(safe-area-inset-bottom)), var(--inset-keyboard, 0px))
+    max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot)))
     var(--inset-left, env(safe-area-inset-left));
 }
 
@@ -1164,7 +1165,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 }
 html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 /* Its compose bar: the pill (.pill), where home's search sits. */
-.ai-screen .ai-compose { margin: 0 0 calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--pill-foot)); }
+.ai-screen .ai-compose { margin: 0 0 calc(max(var(--inset-bottom, 0px), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + var(--pill-foot)); }
 .ai-title { font-size: var(--text-item); font-weight: bold; }
 .ai-state { flex: 1; font-size: var(--text-small); color: var(--color-muted); }
 .ai-state.busy { color: var(--accent-text); }
@@ -1286,7 +1287,8 @@ html[data-mode="assist"] .assist {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  padding: 0 var(--edge) calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--edge));
+  /* Clear of the navigation handle and the keyboard by a pill's foot more than the edge (it sat tight on both). */
+  padding: 0 var(--edge) calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--pill-foot) + var(--edge));
   background: rgb(0 0 0 / 0.25);
 }
 /* Solid: over another app, what's under it would show through the field. */
