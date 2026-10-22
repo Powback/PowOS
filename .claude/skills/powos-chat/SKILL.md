@@ -112,6 +112,15 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
 - Black flash on send = PowosAiActivity started (ai.send's recents arg true -> keepInRecents). app.tsx imports
   assist.tsx in every mode, so assist registers setAskContext(withScreen, true) on Assist's mount, never at import.
   Check: tools/phone/verify/ai-send-flash.sh (events log wm_create_activity/new_intent + black frames).
+  Its "the field isn't showing" (rc 5) of 2026-10-23 was the check, not the page: it ran right after sketch-canvas.sh
+  had rotated the screen, home was still booting (widgets empty plates in the screencap) and the one swipe didn't land.
+  The check now swipes the lock face, waits for home's field, retries the swipe. A rc-5 "isn't showing": read the
+  page over CDP (`.ai-screen .ai-compose textarea`) and the run's design-qa screencap before touching powai.tsx.
+- Wide = the whole conversation (powai.tsx History, no "earlier" fold; narrow keeps Earlier): the newest 20 exchanges,
+  20 more when a top sentinel comes within 600 px (IntersectionObserver, root = the pane). `.ai-view.wide > .ai-talk`
+  is flex column-reverse around one `.ai-talk-in` (margin-bottom auto = short content sits on top): it opens at the
+  newest, stays there while a reply streams, holds still when older ones arrive - no scroll JS. Its scrollTop is 0 at
+  the bottom, negative upward. Device: ai-wide.sh checks no fold + |scrollTop| < 4 (BOARD_TASK= picks the task).
 
 ## Queued messages (one queue for every chat)
 - The app owns it: PowosAiChat.send while busy appends to `queued` (id, text, prompt) instead of dropping; at turn end
