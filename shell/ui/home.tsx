@@ -24,7 +24,7 @@ import { GlassesScreen } from "./glasses.tsx";
 import { AgentsScreen } from "./agents.tsx";
 import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
-import { AiContent, AiHeader, PowAiPage } from "./powai.tsx";
+import { AiView, PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
 import { Recents } from "./recents.tsx";
 import { footBelow, hasSearchWidget } from "./searchwidget.tsx";
@@ -315,10 +315,7 @@ export function Home() {
                 <div class="launcher-inner">
                   <div class="drawer-clip">
                     {pullKind.value === "ai" ? (
-                      <div class="ai-panel">
-                        <AiHeader />
-                        <AiContent shown={drawerOpen.value} />
-                      </div>
+                      <AiView shown={drawerOpen.value} cls="ai-panel" pill={false} />
                     ) : (
                       <Drawer />
                     )}

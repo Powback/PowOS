@@ -337,7 +337,7 @@ const OWN = ".letter-bar, input[type=range], [role=slider], [data-owns-gesture],
 
 /** The scrolling list under the finger - the drawer's, PowOS AI's chat, the notifications: it scrolls until its end. */
 function listUnder(target: Element) {
-  const list = target.closest?.(".drawer-list, .ai-panel, .chat, .notif-list");
+  const list = target.closest?.(".drawer-list, .ai-panel .ai-scroll, .ai-panel, .chat, .notif-list");
   if (!list) return { inList: false, listTop: true, listBottom: true };
   return { inList: true, listTop: list.scrollTop <= 0, listBottom: list.scrollTop + list.clientHeight >= list.scrollHeight - 1 };
 }

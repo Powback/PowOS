@@ -202,6 +202,9 @@ const SCENES = [
   ["test-now", "home", board(false) + TEST_NOW, "wallpaper"],
   ["test-now-testing", "home", board(false) + TEST_NOW + " document.querySelector('.ai-test')?.click(); await sleep(200);", "wallpaper"],
   ["ai-wide", "home", board(true), "wallpaper", undefined, WIDE_SIZES],
+  // The same AiView in home's AI panel and the pull-up over apps: one column folded, two panes wide.
+  ["ai-panel-wide", "home", board(true).replace(" S.page.value = -1;", "") + " S.openPanel('ai'); await sleep(500);", "wallpaper", undefined, WIDE_SIZES],
+  ["pull-ai-wide", "pull", board(true).replace(" S.page.value = -1;", "") + " E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(500);", "blurred", undefined, WIDE_SIZES],
   ["ai-v2-calm", "home", board(true).replace("P.board.value = B.map", "P.board.value = B.filter((r) => r.status !== 'waiting').map"), "wallpaper"],
   ["queued", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["queued-ai", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.page.value = -1;`, "wallpaper"],

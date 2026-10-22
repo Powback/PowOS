@@ -16,7 +16,7 @@ import { closeDrawer, drawer, pullKind } from "../state.ts";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
 import { drawerDrag, drawerOpen, drawerShown, followOpenness, homeGestures } from "./gesture.ts";
-import { AiContent, AiHeader } from "./powai.tsx";
+import { AiView } from "./powai.tsx";
 
 /** The host's calls (the edge gestures' OverlayHost); an older host has none - then nothing to tell. */
 const host = () => (powos as unknown as { pull?: { closed?: () => Promise<void>; launched?: () => Promise<void> } }).pull;
@@ -63,10 +63,7 @@ export function Pull() {
             <div class="launcher-inner">
               <div class="drawer-clip">
                 {pullKind.value === "ai" ? (
-                  <div class="ai-panel">
-                    <AiHeader />
-                    <AiContent shown={open} />
-                  </div>
+                  <AiView shown={open} cls="ai-panel" pill={false} />
                 ) : (
                   <Drawer />
                 )}

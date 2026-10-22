@@ -82,7 +82,12 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
   it before ship-apk - build-app refuses untracked files under shell/).
 - Wide (page >= 700 CSS px: unfolded 821, a desktop window; powai.tsx useWide = ResizeObserver on .ai-screen, never the
   device): `.ai-screen.wide` is a grid - header across, left `.ai-talk` (Earlier + Now, <= 70ch) with the pill under
-  it, right `.ai-side` (NeedsYou, board, AtWork, FromAgents) the full height; each its own `.ai-scroll`. AiContent's
+  it, right `.ai-side` (NeedsYou, board, AtWork, FromAgents) the full height; each its own `.ai-scroll`.
+- ONE component for every AI surface: powai.tsx `AiView` (header + one column / two panes by its own width + pill) is
+  the page (PowAiPage), home's AI pull-up panel (home.tsx) and the pull-up over apps (pull.tsx, mode=pull). Never mount
+  AiHeader/AiContent elsewhere. Wide CSS is `.ai-view.wide`; a narrow panel uses home's bar as its pill (pill={false}),
+  a wide one its own (the bar hidden). Shots: ai-panel-wide, pull-ai-wide. Task rows: bar + "N/M · step" ABOVE the
+  title, then "owner · K commits · ago" (rich.css .ai-item-row grid). AiContent's
   `part` ("talk" | "side") renders a pane; none = the one column (folded, the pull-up and drawer panels). Toggling
   remounts the panes (open rows close) - only on fold/unfold. Shots: scene ai-wide (WIDE_SIZES adds a 1600x1000
   window; a scene's 6th field = its sizes). Device: tools/phone/verify/ai-wide.sh (inner screen forced, read-only CDP).

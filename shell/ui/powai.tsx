@@ -603,7 +603,7 @@ function useAiRefresh(shown: boolean) {
 }
 
 /** Its header: the name and what the manager is doing. */
-export function AiHeader() {
+function AiHeader() {
   const { busy, items } = chat.value;
   const step = busy ? [...items].reverse().find((i) => i.kind === "tool" && i.ok == null) : null;
   return (
@@ -626,7 +626,7 @@ export function AiHeader() {
  * wide page's two panes - "talk" (the conversation) and "side" (needs you, the board, the agents); none = all of it,
  * in one column.
  */
-export function AiContent({ shown, part }: { shown: boolean; part?: "talk" | "side" }) {
+function AiContent({ shown, part }: { shown: boolean; part?: "talk" | "side" }) {
   const talk = part !== "side";
   const side = part !== "talk";
   useAiRefresh(shown && side);
@@ -654,7 +654,7 @@ export function AiContent({ shown, part }: { shown: boolean; part?: "talk" | "si
 }
 
 /** Its compose field: ask PowOS AI right here (the mic: hold to talk and send, tap to dictate). */
-export function AiCompose() {
+function AiCompose() {
   const input = useRef<HTMLTextAreaElement>(null);
   return (
     <form
@@ -693,13 +693,17 @@ function useWide() {
   return [ref, wide] as const;
 }
 
-export function PowAiPage() {
-  const shown = page.value === -1;
+/**
+ * PowOS AI's screen, wherever it's held - its page beside home, the pull-up panel on home and over apps (home.tsx,
+ * pull.tsx): one component, so every change lands in all of them. The header, then by the holder's width (useWide, never
+ * the device's): narrow one column; wide what needs the user and the board (left), the conversation at reading width
+ * with its pill (right, by the right thumb), each pane its own scroll. [pill] false: the holder's own pill asks (home's
+ * bar under a narrow panel); wide always has its own, under the conversation.
+ */
+export function AiView({ shown, cls, pill = true }: { shown: boolean; cls: string; pill?: boolean }) {
   const [ref, wide] = useWide();
-  // Wide: what needs the user and the board (left), the conversation at reading width with its pill (right, by the
-  // right thumb), each pane its own scroll. Narrow (folded): one column.
   return (
-    <div ref={ref} class={`ai-screen ${shown ? "shown" : ""} ${wide ? "wide" : ""}`}>
+    <div ref={ref} class={`${cls} ai-view ${wide ? "wide" : ""}`}>
       <AiHeader />
       {wide ? (
         <>
@@ -715,7 +719,13 @@ export function PowAiPage() {
           <AiContent shown={shown} />
         </div>
       )}
-      <AiCompose />
+      {(pill || wide) && <AiCompose />}
     </div>
   );
+}
+
+/** Its page, to the left of home. */
+export function PowAiPage() {
+  const shown = page.value === -1;
+  return <AiView shown={shown} cls={`ai-screen ${shown ? "shown" : ""}`} />;
 }
