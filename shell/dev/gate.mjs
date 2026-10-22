@@ -19,6 +19,7 @@
  * Mounted: /shell (the composed shell, read only), optionally /apps. Prints one line per page and exits 1 on any
  * failure; the reasons go to stdout as "FAIL <page>: <reason>".
  */
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import puppeteer from "puppeteer";
@@ -94,6 +95,36 @@ function appPage() {
   return `${head}</head><body></body></html>`;
 }
 
+/**
+ * A shell module's JS as index.html's fetch hook makes it (vendor/sucrase.js, its options): once per file per run,
+ * and kept in /cache by source hash (gate.sh mounts ~/.cache/powos-gate/tx) so an unchanged file isn't transpiled again.
+ */
+const txRuns = new Map();
+let sucrase;
+async function transpiled(p) {
+  const src = fs.readFileSync(p, "utf8");
+  const key = createHash("sha1").update(src).digest("hex");
+  if (!txRuns.has(key))
+    txRuns.set(
+      key,
+      (async () => {
+        const disk = fs.existsSync("/cache") ? path.join("/cache", key + ".js") : null;
+        if (disk && fs.existsSync(disk)) return fs.readFileSync(disk, "utf8");
+        sucrase ??= await import(path.join(ROOT, "vendor/sucrase.js"));
+        const { code } = sucrase.transform(src, {
+          transforms: ["typescript", "jsx"],
+          jsxRuntime: "automatic",
+          jsxImportSource: "preact",
+          production: true,
+          filePath: p,
+        });
+        if (disk) fs.writeFileSync(disk, code);
+        return code;
+      })(),
+    );
+  return txRuns.get(key);
+}
+
 async function open(browser, url, name) {
   // A context (a window) of its own: tabs side by side in one window are hidden but the front one - no frames.
   const page = await (await browser.createBrowserContext()).newPage();
@@ -107,6 +138,15 @@ async function open(browser, url, name) {
       // Off the origin (a mock's socket, a font): never the network, from a gate.
       return url.startsWith("data:") || url.startsWith("blob:") ? req.continue() : req.abort();
     }
+    // The shared transpile (see transpiled()): a module's JS, once for every page of the run.
+    if (url.includes("__gate_js=1")) {
+      const t = file(url.replace(/[?&]__gate_js=1$/, ""));
+      if (!t || t.virtual) return req.respond({ status: 404, contentType: "text/plain", body: "" });
+      return transpiled(t.path).then(
+        (code) => req.respond({ status: 200, contentType: "application/javascript", body: code, headers: { "Cache-Control": "no-store" } }),
+        (e) => req.respond({ status: 500, contentType: "text/plain", body: String(e?.message ?? e) }),
+      );
+    }
     const f = file(url);
     if (f?.virtual) return req.respond({ status: 200, contentType: "text/html", body: appPage() });
     if (!f) return req.respond({ status: 404, contentType: "text/plain", body: "" });
@@ -115,7 +155,7 @@ async function open(browser, url, name) {
   page.on("response", (res) => {
     const u = res.url();
     // A module that isn't there: es-module-shims reports it too, this names the file.
-    if (res.status() >= 400 && /\.(m?js|tsx?|css)(\?|$)/.test(u)) problems.push(`${res.status()} ${u.replace(ORIGIN + "/", "")}`);
+    if (res.status() >= 400 && /\.(m?js|tsx?|css)(\?|$)/.test(u) && !u.includes("__gate_js=1")) problems.push(`${res.status()} ${u.replace(ORIGIN + "/", "")}`);
   });
   // Uncaught errors: the boot guard (index.html) records them with their file - these only when it didn't (no guard).
   const uncaught = [];
@@ -130,6 +170,29 @@ async function open(browser, url, name) {
       problems.push(`console: ${text.split("\n")[0]}`);
     else if (!/Failed to load resource|^JSHandle@|^powos-shell-error /.test(text)) warnings.push(text.split("\n")[0]);
   });
+  // The page's module transpile through the gate's shared one (transpiled()): index.html's fetch hook, as it sets it,
+  // asks for "<file>?__gate_js=1" - the same sucrase build and options, run once per file for all pages and kept on
+  // disk by source hash across runs, instead of once per page (14 pages each transpiling the whole shell). A source
+  // the shared transpile fails on falls back to the page's own hook, which reports it as on the phone.
+  if (process.env.GATE_SHARED_TX !== "0")
+    await page.evaluateOnNewDocument(() => {
+      let opts;
+      Object.defineProperty(window, "esmsInitOptions", {
+        configurable: true,
+        get: () => opts,
+        set(v) {
+          const own = v?.fetch;
+          if (own)
+            v.fetch = async (url, options) => {
+              if (!/\.tsx?(\?|$)/.test(url)) return own(url, options);
+              const res = await fetch(url + (url.includes("?") ? "&" : "?") + "__gate_js=1");
+              if (!res.ok) return own(url, options);
+              return new Response(new Blob([(await res.text()) + "\n//# sourceURL=" + url], { type: "application/javascript" }));
+            };
+          opts = v;
+        },
+      });
+    });
   // Counts the page's requestAnimationFrame callbacks (the idle check): counted as they run, nothing else changes.
   await page.evaluateOnNewDocument(() => {
     const raf = window.requestAnimationFrame.bind(window);

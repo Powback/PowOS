@@ -113,7 +113,10 @@ if [ -z "$missing" ]; then echo "ok   referenced files"
 else echo "$missing" | sed 's/^/FAIL missing: /; s/$/ (not in what the phone will serve: push it with this)/'; fail=1; fi
 # 2. The pages, booted.
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
-mounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/gate.mjs:/usr/src/app/gate.mjs:ro")
+# The shared transpile's cache (gate.mjs transpiled()): by source hash, so it never goes stale; pruned of week-old files.
+tx="${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/tx"
+mkdir -p "$tx" && find "$tx" -type f -mtime +7 -delete 2>/dev/null || true
+mounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/gate.mjs:/usr/src/app/gate.mjs:ro" -v "$tx:/cache")
 # node_modules is a link out of the composed folder: the browser half needs none of it.
 if [ -n "$app" ]; then
   id=$(sed -n 's/^ *"id": *"\([^"]*\)".*/\1/p' "$app/powos-app.json" | head -1)
@@ -122,7 +125,7 @@ if [ -n "$app" ]; then
 fi
 set +e
 docker run --rm --platform linux/arm64 --shm-size 512m "${mounts[@]}" -e READY_MS="${READY_MS:-8000}" \
-  ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} \
+  ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
   -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs
 rc=$?
 set -e
