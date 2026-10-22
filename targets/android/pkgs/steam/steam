@@ -23,6 +23,48 @@ export LD_PRELOAD="$L/aarch64/libsysvipc-emu.so $L/i386/libsysvipc-emu.so $L/x86
 # helpers are all started by it. Running = the pid Steam keeps in ~/.steam/steam.pid is alive and is Steam's client (by
 # name, pgrep found this script: its process, and the subshells it forks, are called steam too).
 steam_pid=$(cat "$HOME/.steam/steam.pid" 2>/dev/null)
+
+# Proton prefixes' registries after a reboot or crash (checked while no Steam runs, so no wineserver writes them):
+# wineserver saves system/user/userdef.reg (temp file + rename) without fsync, and on the phone's f2fs (/data) a reboot
+# within a minute or so of a save can keep the files' size and lose their data - all NUL bytes. Wine then can't load
+# its registry and the game's whole launch chain dies ~10-16 s in, no window, every time (Broforce, 2026-10-22: saved
+# 23:57:58, rebooted 23:59). Each Steam start keeps an fsynced copy of every prefix's last good set (compatdata/<id>/
+# powos-reg) and puts it back over a broken one; with no copy, Proton rebuilds the registry itself (its creation path:
+# no creation_sync_guard -> the default prefix's files are copied in, drive_c and the game's data stay). Every Wine
+# key the game changed since the copy is lost, nothing else.
+reg_ok() { [ "$(head -c 23 "$1" 2>/dev/null | tr -d '\0')" = "WINE REGISTRY Version 2" ] && ! LC_ALL=C grep -qaP '\x00' "$1"; }
+reg_guard() {
+  local p c r ok bad
+  for p in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/compatdata/*/pfx; do
+    [ -f "$p/system.reg" ] || continue
+    c=${p%/pfx}
+    # The last rebuild's tracked_files (Proton's copy_pfx rewrote it with only what it copied): merged back.
+    [ -f "$c/tracked_files.powos-keep" ] && [ -e "$p/creation_sync_guard" ] \
+      && sort -u "$c/tracked_files.powos-keep" "$c/tracked_files" -o "$c/tracked_files" && rm -f "$c/tracked_files.powos-keep"
+    ok=1 bad=
+    for r in system user userdef; do reg_ok "$p/$r.reg" || { ok=; [ -e "$p/$r.reg" ] && bad="$bad $r"; }; done
+    if [ -n "$ok" ]; then
+      for r in system user userdef; do
+        cmp -s "$p/$r.reg" "$c/powos-reg/$r.reg" && continue
+        mkdir -p "$c/powos-reg" && cp -p "$p/$r.reg" "$c/powos-reg/$r.reg.tmp" && sync "$c/powos-reg/$r.reg.tmp" \
+          && mv -f "$c/powos-reg/$r.reg.tmp" "$c/powos-reg/$r.reg"
+      done
+      sync "$c/powos-reg" 2>/dev/null
+      continue
+    fi
+    [ -n "$bad" ] || continue
+    mkdir -p "$c/powos-reg-broken" && for r in $bad; do mv -f "$p/$r.reg" "$c/powos-reg-broken/$r.reg"; done
+    if reg_ok "$c/powos-reg/system.reg" && reg_ok "$c/powos-reg/user.reg" && reg_ok "$c/powos-reg/userdef.reg"; then
+      for r in system user userdef; do cp -p "$c/powos-reg/$r.reg" "$p/$r.reg"; done
+      echo "steam: ${c##*/}'s Wine registry was broken (${bad# }): restored the copy of $(date -r "$c/powos-reg/system.reg" '+%F %T')" | tee -a "$c/powos-reg-broken/log" >&2
+    else
+      for r in system user userdef; do [ -e "$p/$r.reg" ] && mv -f "$p/$r.reg" "$c/powos-reg-broken/$r.reg"; done
+      cp -p "$c/tracked_files" "$c/tracked_files.powos-keep" 2>/dev/null; rm -f "$p/creation_sync_guard"
+      echo "steam: ${c##*/}'s Wine registry was broken (${bad# }), no good copy: Proton rebuilds it at the next launch" | tee -a "$c/powos-reg-broken/log" >&2
+    fi
+    sync "$p" "$c/powos-reg-broken"
+  done
+}
 # Instant start: a game launch (steam://rungameid/<appid>) for a game this Steam already runs - kept alive, frozen
 # with Steam while out of sight (units/phone/steam.json "games": "pause") - thaws it and raises the game's window
 # (powos-sleep-gui's Resume) instead of handing Steam a launch it has nothing to do for. Not running, or no watcher
@@ -53,7 +95,8 @@ case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
     for f in /dev/shm/fex-*-stats; do
       pid=${f#/dev/shm/fex-}; pid=${pid%-stats}
       [ -e "$f" ] && [ ! -d "/proc/$pid" ] && rm -f "$f"
-    done ;;
+    done
+    reg_guard ;;
 esac
 
 if [ -n "${STEAM_X86:-}" ]; then
