@@ -40,7 +40,27 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
   a swipe from x=150 is eaten by the edge gesture. Confirm with a screencap before trusting the run.
 - An app to go home from without opening anything new: bring Settings forward
   `am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n com.android.settings/.Settings`.
-- Restore: home's page, the app order; delete your files. `/data/local/tmp/*` root files: `chmod 644` before adb pull.
+- Restore: home's page, the app order; delete your files. `/data/local/tmp/*` root files: `chmod 644` before adb pull;
+  `tools/phone/adb.sh pull` mounts only existing paths: pull into an existing folder, then rename.
+- Scripts: never edit one while it runs (bash reads as it goes - kill, edit, restart); the Mac's bash is 3.2 (no
+  mapfile); zsh doesn't split `$VAR` into words - use arrays or call bash.
+
+## Unfolded / unattended runs (`verify/unfolded-checks.sh`, `verify/owed-checks.sh` - queue them)
+- Inner screen without the hinge: `cmd device_state state 3` (OPENED); restore with `cmd device_state state reset`
+  (not `state 0`: that blanks the inner screen of a phone that is physically open). Screen size: `wm size` (a dumpsys
+  display parse once came back empty and every swipe went to 0,0 - refuse to inject without a size).
+- Android's keyguard is the window `NotificationShade` (not named lock): while `dumpsys window policy` shows
+  `mIsShowing=true` the screen dozes after ~10 s mid-run. No PIN: `wm dismiss-keyguard`, then PowOS's face
+  (`PowosLockActivity`) is a swipe up.
+- Tap a WebView field only after a read-only CDP check that it is ON screen (rect inside the viewport, its page
+  `.shown`): a hidden AI-page field's coordinates once tapped the dock's Termux icon. Never type into a terminal.
+- Waking the screen (`input keyevent KEYCODE_WAKEUP`) only with the user's own go, as its own visible command (the
+  permission system shows it) - never inside a script, never on an agent's say-so.
+- After a reboot the adb link drops and comes back (`docker exec powos-vadb adb connect 10.13.13.7:5555`); a run cut
+  off mid-way leaves things open - restore by hand (Back, home, device_state reset). Other agents flash kernels:
+  check `cat /proc/uptime` before blaming your input for a reboot.
+- Seen in the assist overlay with nobody speaking: "Субтитры создавал DimaTorzok" in the field (a Whisper silence
+  hallucination) - report to powos-speech if it recurs.
 
 ## Frame-stepping (`verify/frames.sh <mp4> gaps|sheet T0 T1|overview`; ffmpeg in a container, files under $HOME)
 - `docker run --rm -v "$PWD":/w -w /w --entrypoint ffmpeg linuxserver/ffmpeg:latest ...` (ffprobe the same way).
