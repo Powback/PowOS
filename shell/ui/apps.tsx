@@ -69,6 +69,8 @@ interface CellProps {
   onDrag?: (e: PointerEvent, el: HTMLElement) => void;
   class?: string;
   style?: Record<string, string>;
+  /** A tap: this instead of launching it (the dock's taskbar taps, ui/desktops.ts dockTap). */
+  onTap?: () => void;
 }
 
 /** Holding [key] and moving: the menu gives way, the launcher closes, and the app follows the finger onto home. */
@@ -78,9 +80,9 @@ export function dragHome(key: string, e: PointerEvent) {
   startCarry({ app: key }, e, { x: 30, y: 30 });
 }
 
-export function AppCell({ app, labels = true, draggable = false, onDrag, class: cls = "", style }: CellProps) {
+export function AppCell({ app, labels = true, draggable = false, onDrag, class: cls = "", style, onTap }: CellProps) {
   const press = usePress(
-    () => launch(app.key),
+    onTap ?? (() => launch(app.key)),
     (el) => (menu.value = { app, at: el.getBoundingClientRect() }),
     onDrag ? (e) => onDrag(e, e.currentTarget as HTMLElement) : draggable ? (e) => dragHome(app.key, e) : null,
   );

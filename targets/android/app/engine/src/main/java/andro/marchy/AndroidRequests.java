@@ -11,10 +11,17 @@ import java.nio.file.Files;
 
 /**
  * Requests from the Linux session for things only Android can do, written to run/android-request by the
- * android-request helper (atomically, by rename): "wifi-panel", "open <package>" (full screen), "split <package>" (beside Andromarchy), "float <package>" (floating window).
+ * android-request helper (atomically, by rename): "wifi-panel", "open <package>" (full screen; a floating window on the unfolded home, [openOptions]), "split <package>" (beside Andromarchy), "float <package>" (floating window).
  */
-final class AndroidRequests extends FileObserver {
+public final class AndroidRequests extends FileObserver {
     private static final String TAG = "AndroidRequests";
+
+    /**
+     * Launch options for "open <package>": the app module's (dev.omalauncher.system.AppWindows, set by Runtime) - a
+     * floating window on the unfolded home like every app opened there, null (full screen) folded. The engine can't
+     * see the app module, so it hands it in.
+     */
+    public static volatile java.util.function.Function<Context, android.os.Bundle> openOptions = null;
     private final Context ctx;
     private final File file;
 
@@ -115,7 +122,8 @@ final class AndroidRequests extends FileObserver {
             Restarter.power(ctx, req[1].trim());
             return;
         }
-        android.os.Bundle options = null;
+        java.util.function.Function<Context, android.os.Bundle> open = openOptions;
+        android.os.Bundle options = req[0].equals("open") && open != null ? open.apply(ctx) : null;
         if (req[0].equals("float") && req.length == 2) {
             intent = ctx.getPackageManager().getLaunchIntentForPackage(req[1].trim());
             options = floating().toBundle();

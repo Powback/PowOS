@@ -255,6 +255,11 @@ class ShellBridge(
             "windows.list" -> windows()
             "apps.running" -> running()
             "windows.restore" -> (dev.omalauncher.system.WindowFrames.current?.restore(a.getInt(0)) ?: false).also { if (it) emit("windows.raised", a.getInt(0)) }
+            // The dock's tap on the focused window's app (ui/desktops.ts dockTap): it goes, as its minimise button does.
+            "windows.minimise" -> dev.omalauncher.system.WindowFrames.current?.let { f -> main.post { f.minimise(a.getInt(0)) }; true } ?: false
+            "windows.maximise" -> dev.omalauncher.system.WindowFrames.current?.let { f -> main.post { f.maximise(a.getInt(0)) }; true } ?: false
+            // Where home's bottom bar starts (CSS px from the page's top): windows open and maximise above it.
+            "windows.area" -> { dev.omalauncher.system.AppWindows.barTop = screenRect(JSONObject().put("left", 0).put("top", a.getDouble(0)).put("width", 0).put("height", 0)).top; true }
             // Home's pages are desktops (ui/desktops.ts): the windows of the pages not on screen, out of sight.
             "windows.desktop" -> dev.omalauncher.system.WindowFrames.current?.desktop(a.getJSONArray(0).let { h -> (0 until h.length()).map { h.getInt(it) }.toSet() }) ?: false
             "tasks.list" -> tasks()
@@ -433,7 +438,8 @@ class ShellBridge(
                 }
                 else -> android.app.ActivityOptions.makeBasic()
             }
-        return dev.omalauncher.system.Tasks.open(context, id, options)
+        // Unfolded: a full-screen task comes back as a floating window, like any app opened there.
+        return dev.omalauncher.system.Tasks.open(context, id, dev.omalauncher.system.AppWindows.taskOptions(context, id, options))
     }
 
     private fun density() = context.resources.displayMetrics.density

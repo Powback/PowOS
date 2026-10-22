@@ -27,6 +27,7 @@ import { EditSheet } from "./editsheet.tsx";
 import { AiView, PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
 import { Recents } from "./recents.tsx";
+import { dockTap } from "./desktops.ts";
 import { footBelow, hasSearchWidget } from "./searchwidget.tsx";
 import { byKey, carry, dock, dockAim, dockDrag, drawer, editing, folder, menu, page, pullKind, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
@@ -164,7 +165,7 @@ function DockRecents({ count }: { count: number }) {
   return (
     <>
       {shown.map((app) => (
-        <AppCell key={app.key} app={app} labels={false} draggable />
+        <AppCell key={app.key} app={app} labels={false} draggable onTap={() => dockTap(app.key)} />
       ))}
     </>
   );
@@ -190,7 +191,7 @@ function DockWindows({ pinned }: { pinned: string[] }) {
     <>
       {shown.map(([k, state]) => {
         const app = byKey.value.get(k);
-        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state}`} />;
+        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state}`} onTap={() => dockTap(k)} />;
       })}
     </>
   );
@@ -249,6 +250,7 @@ export function Dock() {
         class={`${d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""} ${windowed.value.has(app.key) ? `windowed ${windowed.value.get(app.key)}` : ""}`}
         style={style}
         onDrag={(e) => el.current && moveInDock(app.key, e, el.current)}
+        onTap={() => dockTap(app.key)}
       />
     );
   });

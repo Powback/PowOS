@@ -446,6 +446,68 @@ async function desktopsEdge() {
   return fails;
 }
 
+/**
+ * In the page, after desktopsEdge: the dock's taps are a taskbar's (ui/desktops.ts dockTap; the user, 2026-10-22) - the
+ * app of the window in front: minimised; minimised, away or under another window: brought back (the host's launch
+ * restores it); no window: launched. And home tells the host where its bottom bar starts (windows.area), above which
+ * windows open and maximise.
+ */
+async function dockTapCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const D = await importShim("./ui/desktops.ts");
+  const { powos } = await importShim("./bridge.ts");
+  const fails = [];
+  const did = [];
+  let area = null;
+  powos.floating.minimise = async (id) => (did.push(`min ${id}`), true);
+  powos.floating.area = async (top) => ((area = top), true);
+  const launchWas = powos.apps.launch;
+  powos.apps.launch = async (key) => void did.push(`launch ${key}`);
+  const win = (id, extra = {}) => ({ id, pkg: `gate.app${id}`, label: `App ${id}`, minimised: false, ...extra });
+  const tap = async (key, want, what) => {
+    did.length = 0;
+    await D.dockTap(key);
+    await sleep(50);
+    if (did.join() !== want) fails.push(`${what}: [${did.join()}], not [${want}]`);
+  };
+  try {
+    S.windows.value = [win(101), win(102)];
+    await tap("a:gate.app101/.Main", "min 101", "its window in front");
+    await tap("a:gate.app102/.Main", "launch a:gate.app102/.Main", "its window under another");
+    S.windows.value = [win(102), win(101, { minimised: true })];
+    await tap("a:gate.app101/.Main", "launch a:gate.app101/.Main", "its window minimised");
+    S.windows.value = [win(101, { away: true }), win(102)];
+    await tap("a:gate.app101/.Main", "launch a:gate.app101/.Main", "its window on another page");
+    await tap("a:gate.app103/.Main", "launch a:gate.app103/.Main", "no window");
+    // The dock's own cells tap through dockTap: a pinned app's cell, its window in front, minimises it.
+    const cell = document.querySelector('.dock .app[data-key^="a:"]');
+    if (!cell) fails.push("no Android app in the dock to tap");
+    else {
+      const key = cell.dataset.key;
+      S.windows.value = [{ id: 201, pkg: key.slice(2).split("/")[0], label: "Docked", minimised: false }];
+      await sleep(50);
+      did.length = 0;
+      const r = cell.getBoundingClientRect();
+      const at = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, pointerId: 7, button: 0 };
+      cell.dispatchEvent(new PointerEvent("pointerdown", at));
+      cell.dispatchEvent(new PointerEvent("pointerup", at));
+      await sleep(100);
+      if (did.join() !== "min 201") fails.push(`a tap on the dock's ${key}, its window in front: [${did.join()}], not [min 201]`);
+    }
+    dispatchEvent(new Event("resize"));
+    await sleep(200);
+    const bar = Math.min(...[...document.querySelectorAll(".home > .bar, .home > .dock")].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => r.top));
+    if (area !== null && Math.abs(area - bar) > 1) fails.push(`windows.area told ${area}, the bottom bar starts at ${Math.round(bar)}`);
+    if (area === null && D.barTop() === null) fails.push("home found no bottom bar to keep windows above (windows.area never told)");
+    if (D.barTop() !== null && (D.barTop() < innerHeight / 2 || D.barTop() > innerHeight)) fails.push(`the bottom bar's top ${D.barTop()} isn't in the lower half of ${innerHeight}`);
+  } finally {
+    powos.apps.launch = launchWas;
+    S.windows.value = [];
+  }
+  return fails;
+}
+
 /** In the page, loaded afresh after desktopsCheck: the stored windows go back on their pages (page 2's hidden). */
 async function desktopsReloaded() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -719,6 +781,7 @@ try {
       open(browser, `${ORIGIN}/index.html`, "desktops", { width: 900, height: 1000 }).then(async (r) => {
         const s = await whenReady(r, () => r.page.evaluate(desktopsCheck));
         if (!s.problems.length) s.problems.push(...(await r.page.evaluate(desktopsEdge).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
+        if (!s.problems.length) s.problems.push(...(await r.page.evaluate(dockTapCheck).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
         if (s.problems.length) return s;
         await r.page.reload().catch(() => {});
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));

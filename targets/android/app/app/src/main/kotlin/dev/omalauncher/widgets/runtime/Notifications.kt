@@ -162,12 +162,16 @@ class Notifications(
 
     /** The launcher is in front, so it may start the app; since Android 14 it has to say so. */
     private fun startOptions() =
-        if (Build.VERSION.SDK_INT >= 34) {
-            @Suppress("DEPRECATION")
-            ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED).toBundle()
-        } else {
-            null
-        }
+        // Unfolded: the app opens in a floating window, as from the dock (AppWindows).
+        dev.omalauncher.system.AppWindows.bundle(
+            context,
+            if (Build.VERSION.SDK_INT >= 34) {
+                @Suppress("DEPRECATION")
+                ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+            } else {
+                null
+            },
+        )
 
     /** Whether the launcher may read notifications (the user granted it notification access). */
     val available get() = media.granted && MediaListener.connected != null

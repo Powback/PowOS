@@ -126,12 +126,15 @@ object Tasks {
     }
 
     /**
-     * Launch options for a floating (freeform) window at [bounds] (screen px). HACK: ActivityOptions.setLaunchWindowingMode
+     * Launch options ([base]'s, else plain) for a floating (freeform) window at [bounds] (screen px). HACK: ActivityOptions.setLaunchWindowingMode
      * is hidden (reflected); real fix: none for an app. Without freeform support (enable_freeform_support off) Android
      * opens the app full screen anyway.
      */
-    fun freeformOptions(bounds: android.graphics.Rect): ActivityOptions {
-        val options = ActivityOptions.makeBasic().setLaunchBounds(bounds)
+    fun freeformOptions(
+        bounds: android.graphics.Rect,
+        base: ActivityOptions? = null,
+    ): ActivityOptions {
+        val options = (base ?: ActivityOptions.makeBasic()).setLaunchBounds(bounds)
         runCatching {
             HiddenApi.allow()
             ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(options, WINDOWING_MODE_FREEFORM)

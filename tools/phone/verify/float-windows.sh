@@ -4,13 +4,17 @@
 # (cmd device_state state 3, as unfolded-checks.sh does), dismisses the keyguard / swipes the lock face (no PIN), home,
 # then opens Calculator THROUGH HOME's own launch path - the bridge call a tap makes (state.ts launch ->
 # powos.apps.launch -> PowosHost.postMessage [id, "apps.launch", [key]]; `powos` is a module, not a page global) - and
-# it must be a freeform task; then PowOS's frame (WindowFrame.kt): bar there, drag moves, grip resizes, minimise hides
-# it, its app's launch brings it back, close closes. Always restores: Calculator stopped, home,
+# it must be a freeform task, ~60% x 70% of the screen above home's bottom bar, its app laid out at the windows' density
+# (text about its full-screen size: the task's dpi 70-95% of the screen's, >= 600 dp wide; the screencap goes onto the
+# board task); then PowOS's frame (WindowFrame.kt): bar there, drag moves, grip resizes, maximise fills the area above
+# the bottom bar and again puts it back, minimise hides it, its app's launch brings it back, the dock's icon tap
+# minimises the window in front and brings it back, close closes; a full-screen task opened from recents (tasks.open)
+# comes back floating. Always restores: Calculator stopped, home,
 # `cmd device_state state reset` (the hinge decides again).
 # Exit: 0 all passed; 1 a step failed (FAIL: ...); 3 a real touch / no free window / screen not awake (re-queued);
 # 5 can't run (no screen size, keyguard with a PIN). Injected input only. A free window first, the lock only then (5a).
 set -uo pipefail
-here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
+here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"; ROOT=$(cd "$T/../.." && pwd)
 OUT=${1:-$HOME/.cache/powos-verify/float-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 PKG=com.oneplus.calculator
@@ -64,6 +68,27 @@ sh_ "am stack list | grep -m1 $PKG | grep -oE \"bounds=\\[[^ ]*\"" | tee -a "$OU
 "$T/shot.sh" "$OUT/floating.png"
 grep -q 'mode=freeform' "$OUT/mode.txt" && pass "a floating window" || fail "not freeform ($(head -1 "$OUT/mode.txt"))"
 
+# Its content at the windows' density (FreeformTasks.density, AppWindows.windowDpi): the task's own dpi, a real
+# relayout (not a scaled bitmap), so its text is about the size the app's is full screen, and the window is a wide layout.
+FD=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1)
+cfg=$(sh_ "dumpsys activity activities" | awk "/Task\\{.*$PKG/{f=1} f&&/CurrentConfiguration=/{print; exit}")
+TD=$(printf %s "$cfg" | grep -oE ' [0-9]+dpi' | head -1 | tr -dc 0-9); TW=$(printf %s "$cfg" | grep -oE ' w[0-9]+dp' | head -1 | tr -dc 0-9)
+echo "window: ${TD}dpi ${TW}dp wide; full screen ${FD}dpi" | tee -a "$OUT/mode.txt"
+[ -n "$TD" ] && [ $((TD * 100)) -ge $((FD * 70)) ] && [ $((TD * 100)) -le $((FD * 95)) ] && pass "text at about its full-screen size (${TD} of ${FD} dpi)" ||
+  fail "the window's content isn't at the windows' density: ${TD:-?}dpi against the screen's $FD (want 70-95%)"
+[ "${TW:-0}" -ge 600 ] && pass "a wide layout (${TW} dp)" || fail "the window is ${TW:-?} dp wide: the app's phone layout, blown up"
+# Its default size and place: ~60% x 70% of the screen, never over home's bottom bar (read from the page, not assumed).
+BAR=$("$T/cdp.sh" eval home 'Math.round(Math.min(...[...document.querySelectorAll(".home > .bar, .home > .dock, .home > .bottom-bar")].map(e=>e.getBoundingClientRect()).filter(r=>r.height>0).map(r=>r.top))*devicePixelRatio)' 2>&1 | tr -dc '0-9\n' | tail -1)
+read -r L0 T0 R0 B0 <<<"$(sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ')"
+echo "opened at $L0 $T0 $R0 $B0; bottom bar from y=$BAR" | tee -a "$OUT/mode.txt"
+[ $(((R0 - L0) * 100 / W)) -ge 55 ] && [ $(((R0 - L0) * 100 / W)) -le 62 ] && pass "opens $(((R0 - L0) * 100 / W))% wide" || fail "opens $(((R0 - L0) * 100 / W))% of the screen wide, not ~60%"
+[ $(((B0 - T0) * 100 / H)) -ge 50 ] && [ $(((B0 - T0) * 100 / H)) -le 71 ] && pass "opens $(((B0 - T0) * 100 / H))% high" || fail "opens $(((B0 - T0) * 100 / H))% of the screen high, not up to 70%"
+[ -n "$BAR" ] && [ "$B0" -le "$BAR" ] && pass "above the bottom bar" || fail "its bottom $B0 is over home's bottom bar (y=${BAR:-?})"
+[ -f "$OUT/floating.png" ] && "$T/review-image.sh" "$OUT/floating.png" >/dev/null 2>&1 && cp "$OUT/floating.png" "$OUT/float-density.png" &&
+  "$T/review-image.sh" "$OUT/float-density.png" >/dev/null 2>&1 &&
+  python3 "$ROOT/lib/ai/agents/powos-agents-cli" task set "${BOARD_TASK:-powos-home-as-the-desktop-linux-android-apps-as}" --image /home/powos/design-qa/float-density.png >/dev/null 2>&1 &&
+  echo "screencap on the board task" | tee -a "$OUT/log.txt"
+
 # PowOS's frame on it (system/WindowFrame.kt): the bar is BAR_DP (40) above the task's top; close is its last button
 # (30 dp, 6 dp from the end), minimise the one before it (4 dp gap); the grip disc sits on the lower-right corner.
 bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' '; }
@@ -79,9 +104,19 @@ read -r XL2 XT2 XR2 XB2 <<<"$(bounds)"; echo "after drag: $XL2 $XT2 $XR2 $XB2" |
 sh_ "input swipe $((XR2 - $(px 6))) $((XB2 - $(px 6))) $((XR2 + $(px 92))) $((XB2 + $(px 72))) 700"; sleep 1.5; chk grip
 read -r XL3 XT3 XR3 XB3 <<<"$(bounds)"; echo "after resize: $XL3 $XT3 $XR3 $XB3" | tee -a "$OUT/mode.txt"
 [ $((XR3 - XL3)) -gt $((XR2 - XL2)) ] && pass "the grip resizes it" || fail "the grip didn't resize it"
+# Maximise (the button before close: close 6 dp from the end, 30 dp buttons, 4 dp gaps): the whole width, above the
+# bottom bar; again: back where it was.
+sh_ "input tap $((XR3 - $(px 55))) $((XT3 - $(px 20)))"; sleep 1.5; chk maximise
+read -r ML MT MR MB <<<"$(bounds)"; echo "maximised: $ML $MT $MR $MB" | tee -a "$OUT/mode.txt"
+"$T/shot.sh" "$OUT/maximised.png"
+[ $((MR - ML)) -ge $((W * 98 / 100)) ] && [ -n "$BAR" ] && [ "$MB" -le "$BAR" ] && [ "$MB" -ge $((BAR - $(px 40))) ] && pass "maximise fills the area above the bottom bar" ||
+  fail "maximised to $ML $MT $MR $MB (screen ${W} wide, bottom bar at ${BAR:-?})"
+sh_ "input tap $((MR - $(px 55))) $((MT - $(px 20)))"; sleep 1.5; chk unmaximise
+read -r XL3 XT3 XR3 XB3 <<<"$(bounds)"; echo "restored: $XL3 $XT3 $XR3 $XB3" | tee -a "$OUT/mode.txt"
+[ $((XR3 - XL3)) -lt $((MR - ML)) ] && pass "maximise again puts it back" || fail "still maximised after the second tap"
 # Minimise: off screen and minimised in home's window list; the app's launch (a dock tap) brings it back.
 vis() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'visible=(true|false)'; }
-sh_ "input tap $((XR3 - $(px 55))) $((XT3 - $(px 20)))"; sleep 1.5; chk minimise
+sh_ "input tap $((XR3 - $(px 89))) $((XT3 - $(px 20)))"; sleep 1.5; chk minimise
 m=$(hcall windows.list "[]" "l=>l.filter(w=>w.pkg==='$PKG'&&w.minimised).length")
 echo "minimised: $(vis) windows.list minimised=$m" | tee -a "$OUT/mode.txt"
 "$T/shot.sh" "$OUT/minimised.png"
@@ -89,7 +124,23 @@ echo "minimised: $(vis) windows.list minimised=$m" | tee -a "$OUT/mode.txt"
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch (restore): $r"
 sleep 1.5; chk restore
 [ "$(vis)" = visible=true ] && pass "the dock brings it back" || fail "not back after its app's launch"
+# The dock's icon, taskbar style (ui/desktops.ts dockTap): a real tap on it while its window is in front minimises it,
+# the next brings it back.
+dockxy() { "$T/cdp.sh" eval home "(()=>{const e=document.querySelector('.dock .app[data-key=\"$key\"]');if(!e)return 'none';const r=e.getBoundingClientRect();return Math.round((r.left+r.width/2)*devicePixelRatio)+' '+Math.round((r.top+r.height/2)*devicePixelRatio)})()" 2>&1 | tr -d '"\r' | tail -1; }
+xy=$(dockxy); echo "dock icon at $xy" | tee -a "$OUT/mode.txt"
+case $xy in *[0-9]\ [0-9]*) ;; *) fail "no dock icon for $key ($xy)" ;; esac
+sh_ "input tap $xy"; sleep 1.5; chk docktap
+[ "$(vis)" = visible=false ] && pass "a dock tap minimises the window in front" || fail "a dock tap on its icon didn't minimise it ($(vis))"
+xy=$(dockxy); sh_ "input tap $xy"; sleep 1.5; chk docktap2
+[ "$(vis)" = visible=true ] && pass "a dock tap brings it back" || fail "a dock tap didn't bring it back ($(vis))"
 read -r XL3 XT3 XR3 XB3 <<<"$(bounds)"
 sh_ "input tap $((XR3 - $(px 6) - $(px 15))) $((XT3 - $(px 20)))"; sleep 1.5; chk close
 sh_ "am stack list | grep -c $PKG" | grep -qx 0 && pass "close closes it" || fail "still open after close"
+# Recents: a task that is full screen (started so here on purpose) opened from the switcher (tasks.open) floats.
+sh_ "am start -W --windowingMode 1 -n ${key#a:} >/dev/null"; sleep 2
+sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk recents-setup
+TID=$(sh_ "am stack list | grep -m1 $PKG" | grep -oE 'taskId=[0-9]+' | head -1 | tr -dc 0-9)
+r=$(hcall tasks.open "[$TID, null]" "v=>String(v)"); sleep 2; chk recents
+sh_ "dumpsys activity activities | grep -m1 -E \"Task\\{.*$PKG\" | grep -oE \"mode=[a-z-]+\"" | tee -a "$OUT/mode.txt" | grep -q mode=freeform &&
+  pass "a full-screen task opened from recents floats" || fail "tasks.open ($r) left task $TID full screen"
 echo "all passed; artefacts: $OUT"

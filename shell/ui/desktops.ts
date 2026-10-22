@@ -12,7 +12,7 @@
 import { batch, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { AppWindow } from "../types.ts";
-import { page, pages, windows } from "../state.ts";
+import { launch, page, pages, windows } from "../state.ts";
 
 const STORE = "home.windows";
 /** Window ids kept for closed tasks at most (folded, the list is empty but the windows aren't gone). */
@@ -102,12 +102,52 @@ export async function startDesktops() {
     powos.floating.desktop(hide).catch(() => (sent = null));
   });
   powos.on("windows.edge", (d: { id: number; side: number }) => toEdge(d.id, d.side));
+  // Read from the page, never assumed: the bottom bar's layout is home's (one wide bar unfolded, pill + dock folded).
+  tellBar();
+  addEventListener("resize", () => requestAnimationFrame(tellBar));
+  const sized = new ResizeObserver(() => tellBar());
+  for (const el of document.querySelectorAll(".home, .home > .bar, .home > .dock, .home > .bottom-bar")) sized.observe(el);
   powos.on("windows.raised", (id: number) => {
     const p = placed.value[id];
     const i = p === undefined ? null : indexOf(p);
     if (i === null) return moveTo(id, pageId());
     if (i !== page.value) page.value = i;
   });
+}
+
+/**
+ * A tap on an app in the dock, taskbar style (the user, 2026-10-22): its window open and in front (the top-most one
+ * showing) goes into the dock (minimised); minimised, on another page or under another window, it comes back in front
+ * (the host restores rather than launches: ShellBridge.launch, then "windows.raised"); no window, the app launches.
+ * Linux (KWin) windows: HOOK - the same rule once the Plasma backend lists them to the web launcher (planned in
+ * docs/DESKTOP-WEB-SHELL.md; Runtime.launch brings a running one to the front meanwhile).
+ */
+export async function dockTap(key: string) {
+  const pkg = key.startsWith("a:") ? key.slice(2).split("/")[0] : null;
+  const front = windows.value.find((w) => !w.minimised && !w.away);
+  if (pkg && front?.pkg === pkg && powos.floating?.minimise) {
+    const done = await powos.floating.minimise(front.id).catch(() => false);
+    if (done) return;
+  }
+  await launch(key);
+}
+
+/** The top of home's bottom bar (search pill, dock): the lowest edge a window may reach, told the host on change. */
+export function barTop(): number | null {
+  let top = Infinity;
+  for (const el of document.querySelectorAll<HTMLElement>(".home > .bar, .home > .dock, .home > .bottom-bar")) {
+    const r = el.getBoundingClientRect();
+    if (r.height > 0 && r.top < top) top = r.top;
+  }
+  return top === Infinity ? null : Math.round(top);
+}
+
+let toldBar: number | null = null;
+function tellBar() {
+  const top = barTop();
+  if (top === null || top === toldBar || !powos.floating?.area) return;
+  toldBar = top;
+  powos.floating.area(top).catch(() => (toldBar = null));
 }
 
 /** Ready once the kept placement is read (the gate waits on it). */

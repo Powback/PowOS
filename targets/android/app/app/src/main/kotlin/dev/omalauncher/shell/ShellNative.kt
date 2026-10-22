@@ -156,7 +156,7 @@ class ShellNative(
             return
         }
         try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context))
         } catch (e: ActivityNotFoundException) {
             Log.w(TAG, "open: nothing opens $url")
         }

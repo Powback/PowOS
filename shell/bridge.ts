@@ -228,6 +228,9 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       list: () => call<AppWindow[]>("windows.list"),
       restore: (id: number) => call<boolean>("windows.restore", id),
       desktop: (hide: number[]) => call<boolean>("windows.desktop", hide),
+      minimise: (id: number) => call<boolean>("windows.minimise", id),
+      maximise: (id: number) => call<boolean>("windows.maximise", id),
+      area: (barTop: number) => call<boolean>("windows.area", barTop),
     },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),

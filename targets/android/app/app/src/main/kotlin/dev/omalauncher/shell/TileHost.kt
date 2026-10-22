@@ -220,7 +220,7 @@ object TileHost {
                 },
             )
         }
-        runCatching { pi.send(app, 0, null, null, null, null, opts.toBundle()) }
+        runCatching { pi.send(app, 0, null, null, null, null, app?.let { dev.omalauncher.system.AppWindows.bundle(it, opts) } ?: opts.toBundle()) }
             .onFailure { Log.w(TAG, "can't start a tile's activity", it) }
         collapse()
     }

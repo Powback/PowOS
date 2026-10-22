@@ -682,7 +682,8 @@ class AppWidgets private constructor(
             options.setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
         }
         return runCatching {
-            context.startIntentSender(pendingIntent.intentSender, launch?.first, 0, 0, 0, options.toBundle())
+            // Unfolded: the app opens in a floating window, as from the dock (AppWindows).
+            context.startIntentSender(pendingIntent.intentSender, launch?.first, 0, 0, 0, (dev.omalauncher.system.AppWindows.options(context, options) ?: options).toBundle())
             true
         }.onFailure { Log.w(TAG, "widget click failed", it) }.getOrDefault(false)
     }

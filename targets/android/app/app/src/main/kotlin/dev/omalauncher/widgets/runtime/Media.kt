@@ -265,7 +265,7 @@ class Media(
             "next" -> t.skipToNext()
             "previous" -> t.skipToPrevious()
             // send() throws CanceledException, which isn't a RuntimeException: the tap handler wouldn't catch it.
-            "open" -> c.sessionActivity?.let { runCatching { it.send() } } ?: context.packageManager.getLaunchIntentForPackage(c.packageName)?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            "open" -> c.sessionActivity?.let { runCatching { it.send(context, 0, null, null, null, null, dev.omalauncher.system.AppWindows.bundle(context)) } } ?: context.packageManager.getLaunchIntentForPackage(c.packageName)?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context)) }
         }
     }
 

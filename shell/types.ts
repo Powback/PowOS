@@ -621,6 +621,12 @@ export interface Bridge {
     restore(id: number): Promise<boolean>;
     /** Home's pages as desktops (ui/desktops.ts): [hide] are the other pages' windows, out of sight; the rest back. */
     desktop(hide: number[]): Promise<boolean>;
+    /** Off the screen into the dock, as its minimise button does (the dock's tap on the focused window's app). */
+    minimise?(id: number): Promise<boolean>;
+    /** Over the windows' whole area, or back where it was (its title bar's maximise button). */
+    maximise?(id: number): Promise<boolean>;
+    /** Where home's bottom bar starts (CSS px from the top): windows open and maximise above it, never over it. */
+    area?(barTop: number): Promise<boolean>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up

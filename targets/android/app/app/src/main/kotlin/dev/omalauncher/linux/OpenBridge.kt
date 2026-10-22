@@ -56,7 +56,7 @@ class OpenBridge(
             return
         }
         try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context))
         } catch (e: ActivityNotFoundException) {
             Log.w(TAG, "no browser for $url")
         }

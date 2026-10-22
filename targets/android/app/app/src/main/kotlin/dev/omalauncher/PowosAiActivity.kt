@@ -266,6 +266,8 @@ class PowosAiActivity : ComponentActivity() {
                 Intent(context, PowosAiActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     .apply { prompt?.let { putExtra(EXTRA_PROMPT, it) } },
+                // Unfolded: a floating window like any app opened there (AppWindows).
+                dev.omalauncher.system.AppWindows.bundle(context),
             )
         }
     }

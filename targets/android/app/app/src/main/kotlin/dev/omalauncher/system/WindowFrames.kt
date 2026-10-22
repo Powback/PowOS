@@ -55,17 +55,55 @@ class WindowFrames(
     /** Folded/unfolded, rotated: the frames again. */
     fun refresh() {
         val all = runCatching { FreeformTasks.list(context) }.onFailure { Log.w(TAG, "no floating windows", it) }.getOrDefault(emptyList())
-        minimised.retainAll(all.map { it.id }.toSet())
         val floating = AppWindows.floating(context)
-        // Folded, the windows aren't listed but still belong to their pages: kept for the unfold.
-        if (floating) away.retainAll(all.map { it.id }.toSet())
-        // Folded, apps aren't windows: the dock shows none.
-        publish(if (floating) all else emptyList())
+        track(all, floating)
         val show = if (keyguard || Switcher.open || !floating) emptyList() else uncovered(all.filter { it.visible && it.id !in minimised && it.id !in away })
         val ids = show.map { it.id }.toSet()
         frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
         // Bottom-most first, so a new frame's windows stack over the ones under it.
-        show.asReversed().forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, w.pkg, ::minimise, ::edge) }.place(w.bounds) }
+        show.asReversed().forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, w.pkg, ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
+    }
+
+    /** The per-window state kept up with the listed windows ([all]; none count folded, apps aren't windows there). */
+    private fun track(
+        all: List<FreeformTasks.Window>,
+        floating: Boolean,
+    ) {
+        val ids = all.map { it.id }.toSet()
+        minimised.retainAll(ids)
+        // Folded, the windows aren't listed but still belong to their pages: kept for the unfold.
+        if (floating) away.retainAll(ids)
+        // Folded, apps aren't windows: the dock shows none.
+        publish(if (floating) all else emptyList())
+        dense(if (floating) ids else emptySet())
+        maximised.keys.retainAll { id -> all.any { it.id == id && it.bounds == maximised[id]?.second } }
+    }
+
+    /**
+     * Every floating window's app at the windows' density (AppWindows.windowDpi: about its full-screen size, not the
+     * phone layout blown up), set once per window; a task that is no longer a window ([windows] = the floating ones'
+     * tasks; none folded) gets the screen's density back, so full screen is exactly as before.
+     */
+    private fun dense(windows: Set<Int>) {
+        val dpi = AppWindows.windowDpi(context)
+        (scaled - windows).forEach { FreeformTasks.density(context, it, 0) }
+        scaled.retainAll(windows)
+        (windows - scaled).forEach { if (FreeformTasks.density(context, it, dpi)) scaled.add(it) }
+    }
+
+    /**
+     * Task [id]'s window over all of the windows' area (AppWindows.area: under the status bar, above home's bottom bar)
+     * - its title bar's maximise; again, back where it was. Moved or resized by hand, it's an ordinary window again.
+     */
+    fun maximise(id: Int) {
+        val now = frames[id]?.bounds ?: FreeformTasks.list(context).firstOrNull { it.id == id }?.bounds ?: return
+        val back = maximised.remove(id)
+        val target = back?.first ?: AppWindows.area(context)
+        if (back == null) maximised[id] = Rect(now) to Rect(target)
+        FreeformTasks.raise(context, id)
+        FreeformTasks.resize(id, target)
+        main.removeCallbacks(refreshNow)
+        main.postDelayed(refreshNow, SETTLE_MS)
     }
 
     /** The windows (top-most first) whose title bar isn't under a window above them: a covered bar would float over it. */
@@ -170,6 +208,12 @@ class WindowFrames(
 
         /** Minimised windows' tasks (kept across a service rebind: the windows are still minimised). */
         private val minimised = mutableSetOf<Int>()
+
+        /** Tasks whose density is the windows' (FreeformTasks.density): given back the screen's once not a window. */
+        private val scaled = mutableSetOf<Int>()
+
+        /** Maximised windows: task -> (its bounds before, its maximised bounds). */
+        private val maximised = mutableMapOf<Int, Pair<Rect, Rect>>()
 
         /** Windows of the home pages not on screen ([desktop]); kept across a rebind like [minimised]. */
         private val away = mutableSetOf<Int>()

@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * One floating app window's frame, PowOS's own (OxygenOS draws none): a glass title bar above the window - its app's
- * icon and name, minimise and close - that a finger drags to move it, and a grip on its lower right corner that resizes
+ * icon and name, minimise, maximise and close - that a finger drags to move it, and a grip on its lower right corner that resizes
  * it. Two small overlay windows (TYPE_APPLICATION_OVERLAY: over apps, under the status bar and the shade) placed on the
  * task's bounds; the task follows the finger through [FreeformTasks.resize], at most one call in flight.
  * Design language (powos-design): the glass is the compositor's blur plus a dark tint, no borders, soft round buttons.
@@ -38,6 +38,8 @@ class WindowFrame(
     private val onMinimise: (Int) -> Unit,
     /** Let go at the screen's left (-1) or right (1) edge: the window goes to that home page (WindowFrames.edge). */
     private val onEdge: (Int, Int) -> Unit = { _, _ -> },
+    /** The maximise button: over the windows' whole area, or back (WindowFrames.maximise). */
+    private val onMaximise: (Int) -> Unit = {},
 ) {
     private val wm = context.getSystemService(WindowManager::class.java)
     private val density = context.resources.displayMetrics.density
@@ -52,6 +54,7 @@ class WindowFrame(
     var dragging = false
         private set
 
+    private lateinit var maxButton: GlyphView
     private val bar = barView(pkg)
     private val grip = GripView(context)
     private val barParams = params("PowOS window bar $id")
@@ -102,6 +105,15 @@ class WindowFrame(
                 wm.updateViewLayout(grip, gripParams)
             }
         }
+    }
+
+    /** Maximised or not: its button shows "restore" (two squares) or "maximise" (one). */
+    fun showMaximised(on: Boolean) {
+        val glyph = if (on) Glyph.RESTORE else Glyph.MAXIMISE
+        if (maxButton.glyph == glyph) return
+        maxButton.glyph = glyph
+        maxButton.contentDescription = glyph.name.lowercase()
+        maxButton.invalidate()
     }
 
     fun remove() {
@@ -160,6 +172,8 @@ class WindowFrame(
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
             )
             addView(button(Glyph.MINIMISE) { onMinimise(id) }, LinearLayout.LayoutParams(dp(BUTTON_DP), dp(BUTTON_DP)).apply { marginEnd = dp(4f) })
+            maxButton = button(Glyph.MAXIMISE) { onMaximise(id) }
+            addView(maxButton, LinearLayout.LayoutParams(dp(BUTTON_DP), dp(BUTTON_DP)).apply { marginEnd = dp(4f) })
             addView(button(Glyph.CLOSE) { Tasks.remove(context, id) }, LinearLayout.LayoutParams(dp(BUTTON_DP), dp(BUTTON_DP)))
         }
     }
@@ -167,7 +181,7 @@ class WindowFrame(
     private fun button(
         glyph: Glyph,
         tap: () -> Unit,
-    ): View =
+    ): GlyphView =
         GlyphView(context, glyph).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -177,29 +191,38 @@ class WindowFrame(
             setOnClickListener { tap() }
         }
 
-    private enum class Glyph { MINIMISE, CLOSE }
+    private enum class Glyph { MINIMISE, MAXIMISE, RESTORE, CLOSE }
 
-    /** A button's mark, drawn (no icon files): a dash or a cross. */
+    /** A button's mark, drawn (no icon files): a dash, a square, two squares or a cross. */
     private class GlyphView(
         context: Context,
-        private val glyph: Glyph,
+        var glyph: Glyph,
     ) : View(context) {
         private val paint =
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = INK
                 strokeWidth = 1.6f * context.resources.displayMetrics.density
                 strokeCap = Paint.Cap.ROUND
+                style = Paint.Style.STROKE
             }
 
         override fun onDraw(canvas: Canvas) {
             val cx = width / 2f
             val cy = height / 2f
             val s = width * 0.18f
-            if (glyph == Glyph.MINIMISE) {
-                canvas.drawLine(cx - s, cy, cx + s, cy, paint)
-            } else {
-                canvas.drawLine(cx - s, cy - s, cx + s, cy + s, paint)
-                canvas.drawLine(cx - s, cy + s, cx + s, cy - s, paint)
+            when (glyph) {
+                Glyph.MINIMISE -> canvas.drawLine(cx - s, cy, cx + s, cy, paint)
+                Glyph.MAXIMISE -> canvas.drawRect(cx - s, cy - s, cx + s, cy + s, paint)
+                Glyph.RESTORE -> {
+                    val o = s * 0.4f
+                    canvas.drawRect(cx - s, cy - s + o, cx + s - o, cy + s, paint)
+                    canvas.drawLine(cx - s + o, cy - s, cx + s, cy - s, paint)
+                    canvas.drawLine(cx + s, cy - s, cx + s, cy + s - o, paint)
+                }
+                Glyph.CLOSE -> {
+                    canvas.drawLine(cx - s, cy - s, cx + s, cy + s, paint)
+                    canvas.drawLine(cx - s, cy + s, cx + s, cy - s, paint)
+                }
             }
         }
     }

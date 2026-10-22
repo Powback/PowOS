@@ -85,6 +85,29 @@ object FreeformTasks {
         context: Context,
         id: Int,
     ): Boolean =
+        transact(context, id) { wct, token -> wct.javaClass.getMethod("reorder", token.javaClass, Boolean::class.javaPrimitiveType).invoke(wct, token, false) }
+            .onFailure { Log.w(TAG, "can't minimise task $id", it) }.isSuccess
+
+    /**
+     * Task [id]'s content drawn at [dpi] (0: the screen's own again): a real per-task density, the app lays itself out
+     * for it (WindowContainerTransaction.setDensityDpi, what WM Shell's desktop mode does to its windows; checked on
+     * this ROM 2026-10-22: the task's configuration says the new dpi and its screen width in dp follows). HACK: hidden,
+     * reflected like [minimise]. Real fix: none for an app.
+     */
+    fun density(
+        context: Context,
+        id: Int,
+        dpi: Int,
+    ): Boolean =
+        transact(context, id) { wct, token -> wct.javaClass.getMethod("setDensityDpi", token.javaClass, Int::class.javaPrimitiveType).invoke(wct, token, dpi) }
+            .onFailure { Log.w(TAG, "can't set task $id to $dpi dpi", it) }.isSuccess
+
+    /** One WindowContainerTransaction on task [id]'s container (any windowing mode), applied through WindowOrganizer. */
+    private fun transact(
+        context: Context,
+        id: Int,
+        change: (Any, Any) -> Unit,
+    ): Result<Unit> =
         runCatching {
             HiddenApi.allow()
             @Suppress("DEPRECATION")
@@ -92,11 +115,11 @@ object FreeformTasks {
             val token = android.app.TaskInfo::class.java.getField("token").get(info)!!
             val wctClass = Class.forName("android.window.WindowContainerTransaction")
             val wct = wctClass.getConstructor().newInstance()
-            wctClass.getMethod("reorder", token.javaClass, Boolean::class.javaPrimitiveType).invoke(wct, token, false)
+            change(wct, token)
             val organizer = Class.forName("android.window.WindowOrganizer")
             organizer.getMethod("applyTransaction", wctClass).invoke(organizer.getConstructor().newInstance(), wct)
-            true
-        }.onFailure { Log.w(TAG, "can't minimise task $id", it) }.getOrDefault(false)
+            Unit
+        }
 
     /**
      * Calls [changed] (on a binder thread) whenever Android's tasks change - opened, raised, moved, closed; a handle to
