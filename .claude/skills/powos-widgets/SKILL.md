@@ -139,6 +139,28 @@ strip only - not the cause when a drag in a tile fails.
 - Gate cases go in dev/gate.mjs as small top-level helpers (whenReady, relayout...) - the complexity lint (60 lines,
   cognitive 10) covers dev/*.mjs too; prune baselines (dev/lint-complexity.sh --prune, targets/android/lint-complexity.sh --prune).
 
+## Picking tiles, folders, the app library (ui/homeselect.ts, ui/folders.tsx, ui/library.tsx)
+- Picking (edit mode only): chosen = keys. A tap toggles (edit mode never launches); the marquee starts on EMPTY space
+  only when the finger was held MARQUEE_DWELL (180 ms: sets gesture.ts held, so the page swipe abandons) or moved
+  up/down first (edit mode has no vertical gesture). Sideways at once = page swipe. Leaving edit mode clears chosen.
+- A long press on a picked tile carries the party (partyAim/partyCells): one delta for all, clamped to the grid, null
+  on any overlap (all or none), placed one by one through placeItem (wide.ts keeps wide cells). Ghosts = .carried each.
+- Folders are the host's (ShellHome.kt Shortcuts: group(), tidy() dissolves <2 apps, that app in the folder's cell);
+  the mock (hosts/layout.ts) now does the same and returns the folder key. Taking an app out = powos.home.add (the host
+  removes it from its folder): no APK call needed. Names: store "home.folders" (key -> name), shell-only.
+- wide.ts: group() copies the target's wide cell to the new folder; add() of an app from a 2-app folder gives the app
+  left the folder's wide cell (else both land on side-by-side spots).
+- App library = the page AFTER pages (state.ts pageCount/onLibrary: page.value === pages.value.length); pages itself
+  is unchanged so pages.value[page.value] is undefined there - aim()/partyAim/marquee guard it, `?? 1` callers go to
+  page 1. Vertical on it is its own (scroll). Categories: App.category (Android int) / categories (.desktop), from
+  ShellBridge apps() since the categories APK; else guessed (library.tsx GUESS). Every app shows once: user folders as
+  they are, every other app by category.
+- Library/folder icons (AppPress): touch-action pan-y in cards so the page scrolls; once lifted a touchmove
+  preventDefault keeps the carry (else pointercancel). Popovers close on lift (onLift), the card stays mounted.
+- Gate: home-select-*, home-folder-*, library-* (synthetic PointerEvents dispatched on .pages - window-only dispatch
+  never reaches element handlers). Device: tools/phone/verify/home-select.sh (transient only: picks, library; no
+  layout change). Renders: shots edit-chosen, folder-open, library.
+
 ## Tools
 - shot.sh mounts the icon font and passes SHOTS_STRICT; idle.sh --wait re-holds a dropped adb connection;
   app-src.sh push records the phone's md5s (a second push of the same file works). Device checks: queue them
