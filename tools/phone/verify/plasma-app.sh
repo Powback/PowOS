@@ -6,7 +6,10 @@
 #   3. a KSycoca rebuild (kbuildsycoca6, as kded6 runs it on an app dir change, as the session user) reruns the export
 #      (.icon-names renamed anew) - no file is created or changed by hand, only KService's own cache;
 #   4. home's bridge apps.list has "l:org.powos.plasma" (the app re-read the list itself);
-#   5. apps.launch of it (the drawer tap's call) brings the Plasma desktop (andro.marchy.MainActivity) in front.
+#   5. apps.launch of it (the drawer tap's call), from the web home (HomeShell), brings the Plasma desktop in front:
+#      the engine's MainActivity, by its class or by its HOME alias HomeDesktop (same activity, the unfolded "auto"
+#      home: MainActivity.show() resumes that instance) - and in it Plasma's own shell: plasmashell + KWin running,
+#      the paused powos-shell host not.
 # Always restores: home. Exit: 0 passed; 1 FAIL; 3 a real touch / not awake (re-queued); 5 keyguard with a PIN.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
@@ -71,9 +74,19 @@ if sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock"; then
 fi
 chk lock
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
+DESK='andro\.marchy\.(MainActivity|HomeDesktop)'
+# Unfolded, Home may be the desktop itself (HomeDesktop): start from the web home, or the launch proves nothing.
+if sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qE "$DESK"; then
+  sh_ "am start -W -n com.powos.app/andro.marchy.HomeShell >/dev/null"; sleep 2; chk webhome
+fi
+f=$(sh_ "dumpsys window | grep -m1 mCurrentFocus")
+grep -qE "$DESK" <<<"$f" && fail "the desktop was already in front before the launch: $f"
 r=$(hcall apps.launch "['$KEY']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch: $r"
 sleep 3; chk launch
 f=$(sh_ "dumpsys window | grep -m1 mCurrentFocus")
 "$T/shot.sh" "$OUT/plasma.png" >/dev/null 2>&1
-grep -q "andro.marchy.MainActivity" <<<"$f" || fail "Plasma's desktop isn't in front: $f"
-pass "Plasma opened from the drawer's launch ($OUT/plasma.png)"
+grep -qE "$DESK" <<<"$f" || fail "Plasma's desktop isn't in front: $f"
+sh_ "pgrep -x plasmashell" | grep -q . || fail "the desktop is in front but plasmashell isn't running"
+sh_ "pgrep -x kwin_wayland" | grep -q . || fail "the desktop is in front but KWin isn't running"
+sh_ "pgrep -x powos-shell" | grep -q . && fail "the paused powos-shell host is running (not Plasma's own shell)"
+pass "Plasma opened from the drawer's launch: ${f##*/} with plasmashell + KWin ($OUT/plasma.png)"

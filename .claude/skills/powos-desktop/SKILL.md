@@ -31,7 +31,7 @@ home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the co
   python inotify on ~/.cache ksycoca6_*, which kded6 rebuilds on an app dir change) reruns it; the app's FileObserver
   on icons/.icon-names (the export's last rename) -> reloadPowosApps(). Unit android-apps. Launch: powos-open-task.
 - KF6 6.31 sends NO org.kde.KSycoca.notifyDatabaseChanged on D-Bus (kbuildsycoca6 measured silent): watch the file.
-- Check: verify/plasma-app.sh (watcher idle, entry, kbuildsycoca6 -> new export, apps.list, apps.launch -> MainActivity).
+- Check: verify/plasma-app.sh (watcher idle, entry, kbuildsycoca6 -> new export, apps.list, apps.launch from HomeShell -> MainActivity or its alias HomeDesktop + plasmashell/KWin up, powos-shell not).
 
 ## Shot checks (shell/dev/shots.mjs, after each scene)
 - Errors per shot: overlapping tiles (>1 px), partial joins, uneven gutters on mode=desktop, missing glyphs.
