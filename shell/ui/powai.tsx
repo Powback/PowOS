@@ -102,7 +102,7 @@ function History() {
   return (
     <section class="ai-history">
       <button type="button" class="ai-work ai-work-fold muted" onClick={() => setOpen(!open)}>
-        {open ? "▾" : "▸"} the whole conversation · {items.filter((i) => i.kind === "user").length} asked
+        {open ? "▾" : "▸"} earlier · {Math.max(0, items.filter((i) => i.kind === "user").length - 1)}
       </button>
       {open && (
         <div class="chat ai-history-list">
@@ -127,13 +127,12 @@ interface WorkRow {
   project: string;
 }
 /** The board as last seen: shown at once when the page comes back, before the socket has caught up. */
-const board = signal<WorkRow[]>([]);
+export const board = signal<WorkRow[]>([]);
 const boardLive = signal(false);
 /** The board has been read at least once (until then an empty list means "not known yet", not "nothing"). */
-const boardSeen = signal(false);
+export const boardSeen = signal(false);
 /** Done this long ago or less: under "done recently". */
 const RECENT_MS = 24 * 3600 * 1000;
-const STATUS: Record<WorkRow["status"], string> = { working: "working", blocked: "blocked", waiting: "waiting on you", done: "done" };
 const sec = (ms: bigint | number) => Number(ms) / 1000;
 
 /** Subscribed only while the page shows: the socket goes 5 s after it's left (apps/stdb.ts), so home holds none. */
@@ -161,23 +160,25 @@ function WorkFeed() {
   return null;
 }
 
+/** Older than this, a row shows its age; younger, it's just "now-ish" - no number. */
+const DAY_MS = 24 * 3600 * 1000;
+const ageOf = (w: WorkRow) => Date.now() - Number(w.status === "done" && Number(w.done) ? w.done : w.updated);
+
+/** A row of the board: a status dot and the title (two lines, never cut short); a tap shows its note and details. */
 function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => void }) {
+  const old = ageOf(w) > DAY_MS;
   return (
     <button type="button" class={`ai-work ${w.status} ${open ? "open" : ""}`} onClick={onTap}>
       <span class="ai-work-line">
         <span class={`ai-dot ${w.status === "working" ? "on" : ""} ${w.status}`} />
         <span class="ai-work-title">{w.title}</span>
-        <span class="ai-work-meta">
-          {w.owner && <span class="muted">{w.owner} · </span>}
-          <span class="ai-work-status">{STATUS[w.status] ?? w.status}</span>
-          <span class="muted"> · {ago(sec(w.status === "done" && Number(w.done) ? w.done : w.updated))}</span>
-        </span>
+        {old && <span class="ai-work-meta muted">{ago(sec(w.status === "done" && Number(w.done) ? w.done : w.updated))}</span>}
       </span>
       {open && (
         <span class="ai-work-detail muted">
           {w.note && <span class="ai-work-note">{w.note}</span>}
           <span>
-            {w.owner ? `${w.owner} · ` : "nobody yet · "}started {ago(sec(w.created))} ago · last {ago(sec(w.updated))} ago · {w.id}
+            {w.owner || "nobody yet"} · started {ago(sec(w.created))} ago · {w.id}
           </span>
         </span>
       )}
@@ -185,111 +186,100 @@ function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => 
   );
 }
 
-/** Which project the chips show ("" = all), and the project groups folded shut: kept across reloads. */
-const workFilter = stored("powai.work.project");
-const workClosed = stored("powai.work.closed", "[]");
-const closedSet = () => {
+/** Needs-you cards set aside here ("later"): until they change (a new note brings one back). */
+const skipped = stored("powai.needs.skipped", "{}");
+const skippedMap = (): Record<string, number> => {
   try {
-    return new Set<string>(JSON.parse(workClosed.value));
+    return JSON.parse(skipped.value);
   } catch {
-    return new Set<string>();
+    return {};
   }
-};
-const projectOf = (w: WorkRow) => w.project || "Other";
-/** A chip's label: short ("UI", "Apps", "STAI") - the project's last part, PowOS's prefix dropped. */
-const SHORT: Record<string, string> = {
-  "phone ui": "UI",
-  "apps platform": "Apps",
-  "shopping app": "Shopping",
-  spacetimeai: "STAI",
-};
-const chipLabel = (p: string) => {
-  const last = (p.split("·").at(-1) ?? p).trim();
-  const known = SHORT[last.toLowerCase()];
-  if (known) return known;
-  const word = last.split(/\s+/)[0] ?? last;
-  return word.charAt(0).toUpperCase() + word.slice(1, 10);
 };
 
 /**
- * Work in progress: every agent's task on one line each, grouped by project (a group folds; its header counts what's
- * working and what waits on you), newest activity first in a group and the group with the newest activity first. A
- * chip shows one project alone. What's done lately is folded below.
+ * What waits on you, first and only when there's something: one card per item - what to do, in plain words (the
+ * task's note), what it's about under it. "done" tells PowOS AI (the board is the agents' to change - it updates it);
+ * "later" sets the card aside until the task changes.
+ */
+function NeedsYou() {
+  const later = skippedMap();
+  const items = board.value
+    .filter((w) => w.status === "waiting" && later[w.id] !== Number(w.updated))
+    .sort((a, b) => Number(b.updated) - Number(a.updated));
+  if (!items.length) return null;
+  const skip = (w: WorkRow) => (skipped.value = JSON.stringify({ ...skippedMap(), [w.id]: Number(w.updated) }));
+  return (
+    <section class="ai-needs">
+      <h3 class="ai-heading">needs you · {items.length}</h3>
+      {items.map((w) => (
+        <div key={w.id} class="ai-need tile">
+          <div class="ai-need-do">{w.note || w.title}</div>
+          {w.note && <div class="ai-need-about muted">{w.title}</div>}
+          <div class="ai-need-acts">
+            <button type="button" class="ai-need-act" onClick={() => powos.ai.send(`Done: ${w.title} (${w.id})`, false)}>
+              done
+            </button>
+            <button type="button" class="ai-need-act quiet" onClick={() => skip(w)}>
+              later
+            </button>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+/** More than this many in progress: grouped by project, under quiet headers. */
+const GROUP_OVER = 6;
+const projectOf = (w: WorkRow) => w.project || "Other";
+/** A project's name as a header: its last part (PowOS's prefix dropped). */
+const projectName = (p: string) => (p.split("·").at(-1) ?? p).trim();
+
+/**
+ * In progress: a calm list - a dot and a title per task, newest activity first; grouped by project (quiet headers)
+ * only past GROUP_OVER. Paused ones (blocked) fold under one line, done lately under another.
  */
 function Work({ shown }: { shown: boolean }) {
   const [opened, setOpened] = useState<string | null>(null);
+  const [showPaused, setShowPaused] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const all = [...board.value].sort((a, b) => Number(b.updated) - Number(a.updated));
-  const projects = [...new Set(all.filter((w) => w.status !== "done").map(projectOf))];
-  const only = projects.includes(workFilter.value) ? workFilter.value : "";
-  const mine = (w: WorkRow) => !only || projectOf(w) === only;
-  const active = all.filter((w) => w.status !== "done" && mine(w));
-  const now = Date.now();
-  const done = all.filter((w) => w.status === "done" && mine(w) && now - Number(w.done || w.updated) < RECENT_MS);
+  const active = all.filter((w) => w.status === "working");
+  const paused = all.filter((w) => w.status === "blocked");
+  const done = all.filter((w) => w.status === "done" && ageOf(w) < RECENT_MS);
   const tap = (id: string) => setOpened(opened === id ? null : id);
-  const closed = closedSet();
-  const toggle = (p: string) => {
-    const c = closedSet();
-    c.has(p) ? c.delete(p) : c.add(p);
-    workClosed.value = JSON.stringify([...c]);
-  };
-  // Groups in the order of their newest activity (active is newest first, so first seen = newest).
+  const line = (w: WorkRow) => <WorkLine key={w.id} w={w} open={opened === w.id} onTap={() => tap(w.id)} />;
   const groups = new Map<string, WorkRow[]>();
   for (const w of active) groups.set(projectOf(w), [...(groups.get(projectOf(w)) ?? []), w]);
+  const grouped = active.length > GROUP_OVER && groups.size > 1;
   return (
     <section class="ai-work-list tile">
-      {shown && <WorkFeed />}
       <h3 class="ai-heading ai-work-head">
-        work in progress{active.length ? ` · ${active.length}` : ""}
-        {!boardLive.value && shown && <span> · connecting…</span>}
+        in progress
+        {!boardLive.value && shown && <span class="muted"> · connecting…</span>}
       </h3>
-      {projects.length > 1 && (
-        <div class="ai-work-chips">
-          {["", ...projects].map((p) => (
-            <button
-              type="button"
-              key={p || "all"}
-              title={p || "all projects"}
-              class={`ai-work-chip surface ${only === p ? "on" : ""}`}
-              onClick={() => (workFilter.value = p)}
-            >
-              {p ? chipLabel(p) : "All"}
-            </button>
-          ))}
-        </div>
-      )}
       <div class="ai-work-box">
-        {[...groups].map(([p, ws]) => {
-          const shut = closed.has(p) && !only;
-          const working = ws.filter((w) => w.status === "working").length;
-          const waiting = ws.filter((w) => w.status === "waiting").length;
-          const blocked = ws.filter((w) => w.status === "blocked").length;
-          return (
-            <div key={p} class="ai-work-group">
-              {!only && (
-                <button type="button" class="ai-work ai-work-project" onClick={() => toggle(p)}>
-                  <span class="ai-work-line">
-                    <span class="ai-work-caret muted">{shut ? "▸" : "▾"}</span>
-                    <span class="ai-work-title">{p}</span>
-                    <span class="ai-work-meta muted">
-                      {working} working
-                      {waiting > 0 && <span class="ai-work-wait"> · {waiting} waiting</span>}
-                      {blocked > 0 && <span class="ai-work-blocked"> · {blocked} blocked</span>}
-                    </span>
-                  </span>
-                </button>
-              )}
-              {!shut && ws.map((w) => <WorkLine key={w.id} w={w} open={opened === w.id} onTap={() => tap(w.id)} />)}
-            </div>
-          );
-        })}
+        {grouped
+          ? [...groups].map(([p, ws]) => (
+              <div key={p} class="ai-work-group">
+                <div class="ai-work-group-head muted">{projectName(p)}</div>
+                {ws.map(line)}
+              </div>
+            ))
+          : active.map(line)}
         {!active.length && <div class="ai-work-empty muted">{boardSeen.value ? "nothing in progress" : "…"}</div>}
+        {paused.length > 0 && (
+          <button type="button" class="ai-work ai-work-fold muted" onClick={() => setShowPaused(!showPaused)}>
+            {showPaused ? "▾" : "▸"} paused · {paused.length}
+          </button>
+        )}
+        {showPaused && paused.map(line)}
         {done.length > 0 && (
           <button type="button" class="ai-work ai-work-fold muted" onClick={() => setShowDone(!showDone)}>
             {showDone ? "▾" : "▸"} done recently · {done.length}
           </button>
         )}
-        {showDone && done.map((w) => <WorkLine key={w.id} w={w} open={opened === w.id} onTap={() => tap(w.id)} />)}
+        {showDone && done.map(line)}
       </div>
     </section>
   );
@@ -405,9 +395,12 @@ export function AiContent({ shown }: { shown: boolean }) {
   useAiRefresh(shown);
   return (
     <>
+      {/* What waits on you first; then the conversation (its last exchange open, earlier folded); then the board. */}
+      <NeedsYou />
       <Now />
       <History />
-      {/* The board: work in progress, what's installed and running, the agents - one surface, its parts by spacing. */}
+      {shown && <WorkFeed />}
+      {/* The board: in progress, what's installed and running, the agents - one surface, its parts by spacing. */}
       <section class="ai-board tile">
         <Work shown={shown} />
         <Units shown={shown} />

@@ -1,0 +1,200 @@
+[
+{
+"id": "phone-kernel-build-build-only",
+"title": "Phone kernel build (build only)",
+"owner": "coder",
+"status": "waiting",
+"note": "only user item: plug the phone into the Mac's USB once",
+"project": "PowOS \u00b7 kernel",
+"createdAgo": 228917644,
+"updatedAgo": 118047410,
+"doneAgo": 0
+},
+{
+"id": "search-bar-as-a-movable-widget-below-dock-too",
+"title": "Search bar as a movable widget (below dock too)",
+"owner": "coder",
+"status": "waiting",
+"note": "in installed APK; user to try in edit mode",
+"project": "PowOS \u00b7 phone UI",
+"createdAgo": 113884393,
+"updatedAgo": 91074634,
+"doneAgo": 0
+},
+{
+"id": "broforce-doesn-t-start-proton-under-fex",
+"title": "Broforce doesn't start (Proton under FEX)",
+"owner": "coder",
+"status": "waiting",
+"note": "fixes in; needs a ~10 min play test",
+"project": "PowOS \u00b7 games",
+"createdAgo": 148752720,
+"updatedAgo": 91107548,
+"doneAgo": 0
+},
+{
+"id": "ai-pet-v1-companion-with-bubbles",
+"title": "Pet v2: native creature living in the UI",
+"owner": "manager",
+"status": "blocked",
+"note": "paused: user disabled the pet 10-22",
+"project": "PowOS \u00b7 AI",
+"createdAgo": 116545278,
+"updatedAgo": 7170797,
+"doneAgo": 0
+},
+{
+"id": "shade-still-has-no-blur",
+"title": "Real native blur (UI blurs UI), drop wallpaper-image hack",
+"owner": "coder",
+"status": "working",
+"note": "screencap batch open: next free screen-on window",
+"project": "PowOS \u00b7 phone UI",
+"createdAgo": 112396685,
+"updatedAgo": 90617049,
+"doneAgo": 0
+},
+{
+"id": "one-assistant-pet-side-button-search-ask",
+"title": "One assistant: search-chat is the one chat (side button + pet open it)",
+"owner": "coder",
+"status": "waiting",
+"note": "a360435 one chat + a98012b panel field = the shared pill (3 rows, live dictation, editable); shell pushed; renders in ~/design-qa/assist-pill-*; user to try",
+"project": "PowOS \u00b7 AI",
+"createdAgo": 114818821,
+"updatedAgo": 90181685,
+"doneAgo": 0
+},
+{
+"id": "desktop-shell-same-web-shell-in-plasma-round-1-p",
+"title": "Desktop shell: same web shell in Plasma (round 1 prototype)",
+"owner": "coder",
+"status": "waiting",
+"note": "round 3 approved; user to open PowOS desktop; Hue key decision pending",
+"project": "PowOS \u00b7 desktop",
+"createdAgo": 71816243,
+"updatedAgo": 65228709,
+"doneAgo": 0
+},
+{
+"id": "control-center-drag-reorder-tiles-sub-entries",
+"title": "Control center drag-reorder (tiles + sub-entries)",
+"owner": "coder",
+"status": "waiting",
+"note": "live; user to try long-press drag",
+"project": "PowOS \u00b7 phone UI",
+"createdAgo": 72525409,
+"updatedAgo": 71228505,
+"doneAgo": 0
+},
+{
+"id": "speech-recognizer-stuck-busy",
+"title": "Speech recognizer stuck 'busy'",
+"owner": "coder",
+"status": "waiting",
+"note": "GPU dictation default (Whisper/stt.pow, on-device fallback), APK 29876665; recorded-audio tests pass in all modes; user to try real dictation",
+"project": "PowOS \u00b7 phone UI",
+"createdAgo": 107504549,
+"updatedAgo": 76529276,
+"doneAgo": 0
+},
+{
+"id": "pet-platformer-mode-wall-jumps-pathfinds-to-thin",
+"title": "Pet platformer mode: wall-jumps + pathfinds to things on screen",
+"owner": "pet",
+"status": "blocked",
+"note": "paused: pet disabled",
+"project": "PowOS \u00b7 AI",
+"createdAgo": 108357052,
+"updatedAgo": 7170566,
+"doneAgo": 0
+},
+{
+"id": "ai-page-redesign-needs-you-cards-calm-list-chat",
+"title": "AI page redesign: Needs-you cards, calm list, chat first",
+"owner": "coder",
+"status": "working",
+"note": "design expert, after shade fix; review images ~30-45 min",
+"project": "PowOS \u00b7 AI",
+"createdAgo": 206181,
+"updatedAgo": 0,
+"doneAgo": 0
+},
+{
+"id": "shade-notification-cards-not-cascading",
+"title": "Shade: notification cards not cascading",
+"owner": "coder",
+"status": "working",
+"note": "design expert, user testing",
+"project": "PowOS \u00b7 phone UI",
+"createdAgo": 164,
+"updatedAgo": 164,
+"doneAgo": 0
+},
+{
+"id": "drawer-drag-cheaper-raster-one-layer-blur-at-res",
+"title": "Drawer drag: cheaper raster (one layer, blur at rest only)",
+"owner": "coder",
+"status": "done",
+"note": "real drag: app 57/renderer 74/SF 26 (was 105/97/62)",
+"project": "PowOS \u00b7 phone UI",
+"createdAgo": 70624881,
+"updatedAgo": 2085133,
+"doneAgo": 2085133
+},
+{
+"id": "drawer-open-from-70-height-grid-clears-the-pill",
+"title": "Drawer: open from ~70% height + grid clears the pill",
+"owner": "coder",
+"status": "done",
+"note": "e272d76 verified on device",
+"project": "PowOS \u00b7 phone UI",
+"createdAgo": 6828634,
+"updatedAgo": 3797653,
+"doneAgo": 3797653
+},
+{
+"id": "disable-the-pet-keep-code-toggle",
+"title": "Disable the pet (keep code + toggle)",
+"owner": "coder",
+"status": "done",
+"note": "verified on phone 4f8310f",
+"project": "PowOS \u00b7 AI",
+"createdAgo": 7171092,
+"updatedAgo": 6694007,
+"doneAgo": 6694007
+},
+{
+"id": "stdb-fork",
+"title": "Move hub to SpacetimeDB 2.12",
+"owner": "coder",
+"status": "done",
+"note": "fork done; switch re-run tonight 03-05",
+"project": "SpaceTimeAI",
+"createdAgo": 169677443,
+"updatedAgo": 50952923,
+"doneAgo": 50952944
+},
+{
+"id": "agents-widget-proper-empty-idle-state-phone-desk",
+"title": "Agents widget: proper empty/idle state (phone + desktop)",
+"owner": "coder",
+"status": "done",
+"note": "8409d27, fit 0 problems",
+"project": "PowOS \u00b7 phone UI",
+"createdAgo": 65228505,
+"updatedAgo": 63700321,
+"doneAgo": 63700321
+},
+{
+"id": "drawer-ai-as-pull-up-panels-like-the-shade",
+"title": "Try: pull-up drawer/AI panels (alongside, not replacing)",
+"owner": "coder",
+"status": "done",
+"note": "corner pull over apps verified",
+"project": "PowOS \u00b7 phone UI",
+"createdAgo": 114261542,
+"updatedAgo": 70416697,
+"doneAgo": 70416697
+}
+]
