@@ -52,7 +52,15 @@ stt-batch (whisper-fast large-v3-turbo, gpu-195 GPU1 :8001, Traefik `http://stt.
 OpenAI-compatible `POST /v1/audio/transcriptions` (multipart `file`, `model=whisper-1`, `response_format=verbose_json`
 gives `language`, `prompt`, `language`). `GET /health` returns `{"status":"ok",...}`. **No live streaming:**
 `stream=true` is SSE of the already-uploaded file only. No speech gives 200 with empty text. A 2-3 s clip takes ~60-150 ms; the phone (Wi-Fi) pings it at
-~12 ms. Server-side VAD is on. "Thank you."-style hallucinations on silence are filtered in GpuSession.
+~12 ms. Server-side VAD is on. verbose_json segments carry only id/start/end/text: NO `no_speech_prob`/`avg_logprob`
+(whisper-fast drops them; adding them is a VoiceAgent services/whisper-fast change on gpu-195, not in this repo).
+- **Whisper junk on silence/noise** ("Субтитры создавал DimaTorzok", "Thanks for watching!", "Продолжение следует...",
+  "Amara.org"): `WhisperJunk.clean` (WhisperJunk.kt, test WhisperJunkTest) on every GpuSession answer. Credit lines go
+  per sentence (<= 8 words, sentence split only at punctuation + space); "Thank you."/"You"/"Bye"/"Спасибо" only as
+  the whole answer (people say them after real speech). Drops log `dropped Whisper junk "..."`; add a phrase only
+  after seeing it there. The cleaned text is also what goes into the next segment's prompt.
+- Server model: large-v3-turbo (2024). Newer open ASR (Qwen3-ASR 1.7B, Canary-Qwen 2.5B, Parakeet) is a gpu-servers
+  owner decision, not a dictation change.
 
 ## Logs and checks
 - `tools/phone/adb.sh shell 'logcat -d -v time | grep -E "/speech|capacity is full|RecognitionClient"'`. Grep soon:
@@ -77,4 +85,6 @@ gives `language`, `prompt`, `language`). `GET /health` returns `{"status":"ok",.
   socket and runs tools/phone/cdp.ts; don't use copies in job tmp or ~/.cache, they get pruned). The js:
   `(async()=>{const h=window.PowosHost;for(const i of [1,2])h.postMessage(JSON.stringify([900000+i,"speech.start","[false]"]));await new Promise(r=>setTimeout(r,4000));h.postMessage(JSON.stringify([900003,"speech.cancel","[]"]));return "ok"})()`
   (cancel within the 8 s eval timeout). That opens the mic: only at idle >= 120 s.
-- Unit tests: `targets/android/app/app/src/test/kotlin/dev/omalauncher/ui/SpeechDictationTest.kt` (the Dictation rules).
+- Unit tests: `targets/android/app/app/src/test/kotlin/dev/omalauncher/ui/SpeechDictationTest.kt` (the Dictation rules),
+  `WhisperJunkTest.kt`. A worktree outside ~/Projects can't use compile-check.sh: run the android-builder image with
+  `-v $PWD:/w` and `./gradlew :app:testDebugUnitTest --tests dev.omalauncher.ui.WhisperJunkTest` (also compiles main).

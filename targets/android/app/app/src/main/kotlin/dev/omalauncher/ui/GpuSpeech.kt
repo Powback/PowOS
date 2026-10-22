@@ -574,8 +574,9 @@ internal class GpuSession(
                     SttServer.markUp()
                     if (language == null && audio.size >= 1500 * BYTES_PER_MS) language = h.language
                     if (s.final) return@onSuccess
-                    // Whisper's words for silence or noise: nothing.
-                    s.text = if (hallucination(h.text)) "" else h.text
+                    // Whisper's words for silence or noise (subtitle credits, "Thank you."): dropped, see WhisperJunk.
+                    s.text = WhisperJunk.clean(h.text)
+                    if (s.text != h.text) Log.i(TAG, "session #$id (gpu): dropped Whisper junk \"${h.text}\"")
                     if (final) s.final = true
                     if (answers == 1) Log.i(TAG, "session #$id (gpu): first words ${SystemClock.elapsedRealtime() - startedAt} ms after the start")
                     cb.onText(text)
@@ -587,9 +588,6 @@ internal class GpuSession(
             }
         }
     }
-
-    private fun hallucination(t: String) =
-        t.trim().lowercase().trimEnd('.', '!').let { it.isEmpty() || it in setOf("thank you", "thanks for watching", "you", "bye") }
 
     private val watch =
         object : Runnable {
