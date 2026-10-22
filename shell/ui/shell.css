@@ -1703,6 +1703,12 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .aw-preview { height: 96px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--color-surface); overflow: hidden; }
 .aw-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .aw-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* PowOS's own widgets' previews (ui/editsheet.tsx ShellAdds): the pill, the pill under the dock, a glyph row. */
+.aw-pill-preview { padding: 6px 18px; border-radius: 999px; background: var(--soft-fill); font-size: var(--text-small); color: var(--color-muted); }
+.aw-foot-preview { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.aw-foot-preview.below { flex-direction: column-reverse; }
+.aw-foot-preview i { width: 84px; height: 14px; border-radius: 6px; background: var(--soft-fill); }
+.aw-glyph { font-size: 18px; letter-spacing: 4px; color: var(--color-muted); }
 .aw-desc { font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* The Agents view (agents.tsx): home's widget, a line per agent, and its screen over home. */

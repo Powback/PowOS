@@ -92,50 +92,101 @@ try {
  * What the "+ widget" picker offers besides Android's widgets (ui/appwidget.tsx AppWidgetPicker heads its list with
  * these, and PowOS apps' widgets): the shell's own widgets, the stores, and new ones made with the coding agent.
  */
-function ShellAdds({ done }: { done: () => void }) {
+/**
+ * The picker's head: PowOS's own widgets as cards like every app's (a "PowOS" group - the search bar, the agents, the
+ * recent apps), found by the picker's search too ("search" found nothing when they were plain lines hidden while
+ * typing), then the makers and the stores. [q]: the picker's search, lowercased.
+ */
+function ShellAdds({ done, q }: { done: () => void; q: string }) {
   const who = (agent.value ?? "an agent").toLowerCase();
-  const chip = (label: string, run: () => void) => (
-    <button
-      type="button"
-      class="sheet-item"
-      onClick={() => {
-        done();
-        run();
-      }}
-    >
+  const run = (f: () => void) => () => {
+    done();
+    f();
+  };
+  const fullRow = () => {
+    const n = pages.value[page.value] ?? 1;
+    return recentsSpot(n, geometry.value.rows || 6) ?? placeNewCells(home.value.columns, 1);
+  };
+  const widgets: { key: string; label: string; desc: string; preview: any; add: () => void }[] = [];
+  if (!hasSearchWidget()) {
+    widgets.push({
+      key: "search",
+      label: "search bar",
+      desc: "the search pill as a widget: move it anywhere on home",
+      preview: <span class="aw-pill-preview">search</span>,
+      // A full-width row (the pill is as wide as its cells): the lowest free row of the page on screen.
+      add: () => {
+        const spot = fullRow();
+        powos.home.addPanel("search", spot.page, spot.cell).catch(() => (note.value = "the search widget needs the app updated"));
+      },
+    });
+    widgets.push({
+      key: "search-foot",
+      label: footBelow.value ? "search above the dock" : "search under the dock",
+      desc: footBelow.value ? "the pill back over the dock" : "the pill in home's foot, below the dock",
+      preview: <span class={`aw-foot-preview ${footBelow.value ? "" : "below"}`}><i /><span class="aw-pill-preview">search</span></span>,
+      add: () => (footBelow.value = footBelow.value ? "" : "1"),
+    });
+  }
+  if (!home.value.items.some((i) => i.key === "panel:agents"))
+    widgets.push({
+      key: "agents",
+      label: "agents",
+      desc: "your coding agents: what each is on, asks to allow",
+      preview: <span class="aw-glyph">◐ ● ○</span>,
+      // The Agents widget: about 4x2 cells, in the first free spot.
+      add: () => {
+        const cell = innerWidth / home.value.columns;
+        const spot = placeNew(4 * cell - 8, 2 * cell - 8);
+        powos.home.addPanel("agents", spot.page, spot.cell);
+      },
+    });
+  if (!hasRecentsWidget())
+    widgets.push({
+      key: "recents",
+      label: "recent apps",
+      desc: "the apps you opened lately",
+      preview: <span class="aw-glyph">▢ ▢ ▢</span>,
+      add: () => {
+        const spot = fullRow();
+        powos.home.addPanel("recents", spot.page, spot.cell);
+      },
+    });
+  const found = widgets.filter((w) => !q || `${w.label} ${w.desc} powos`.includes(q));
+  const chip = (label: string, f: () => void) => (
+    <button type="button" class="sheet-item" onClick={run(f)}>
       {label}
     </button>
   );
   return (
-    <div class="sheet-items">
-      {chip(`new widget with ${who}`, () => powos.agents.newWidget())}
-      {/* PowOS AI builds a PowOS app in its own chat thread (ui/appbuild.tsx); another agent, in a terminal. */}
-      {chip(`new app with ${who}`, () => (agent.value === "PowOS AI" ? startNewApp() : powos.agents.newApp()))}
-      {!home.value.items.some((i) => i.key === "panel:agents") &&
-        chip("agents", () => {
-          // The Agents widget: about 4×2 cells, in the first free spot.
-          const cell = innerWidth / home.value.columns;
-          const spot = placeNew(4 * cell - 8, 2 * cell - 8);
-          powos.home.addPanel("agents", spot.page, spot.cell);
-        })}
-      {!hasSearchWidget() &&
-        chip("search bar on home", () => {
-          // A full-width row (the pill is as wide as its cells): the lowest free row of the page on screen.
-          const n = pages.value[page.value] ?? 1;
-          const spot = recentsSpot(n, geometry.value.rows || 6) ?? placeNewCells(home.value.columns, 1);
-          powos.home.addPanel("search", spot.page, spot.cell).catch(() => (note.value = "the search widget needs the app updated"));
-        })}
-      {!hasSearchWidget() && chip(footBelow.value ? "search above the dock" : "search below the dock", () => (footBelow.value = footBelow.value ? "" : "1"))}
-      {!hasRecentsWidget() &&
-        chip("recent apps", () => {
-          // A row, full width: the lowest free row of the page on screen, else the first free spot.
-          const n = pages.value[page.value] ?? 1;
-          const spot = recentsSpot(n, geometry.value.rows || 6) ?? placeNewCells(home.value.columns, 1);
-          powos.home.addPanel("recents", spot.page, spot.cell);
-        })}
-      {chip("widget store", () => openScreen("store"))}
-      {chip("AUR app store", () => openScreen("aur"))}
-    </div>
+    <>
+      {found.length > 0 && (
+        <div class="aw-app">
+          <div class="aw-app-head">
+            <span class="aw-app-blank" />
+            <span>PowOS</span>
+          </div>
+          <div class="aw-row">
+            {found.map((w) => (
+              <button type="button" class="aw-provider" key={w.key} onClick={run(w.add)}>
+                <span class="aw-preview">{w.preview}</span>
+                <span class="aw-label">{w.label}</span>
+                <span class="aw-desc muted">{w.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {!q && (
+        <div class="sheet-items">
+          {chip(`new widget with ${who}`, () => powos.agents.newWidget())}
+          {/* PowOS AI builds a PowOS app in its own chat thread (ui/appbuild.tsx); another agent, in a terminal. */}
+          {chip(`new app with ${who}`, () => (agent.value === "PowOS AI" ? startNewApp() : powos.agents.newApp()))}
+          {chip("widget store", () => openScreen("store"))}
+          {chip("AUR app store", () => openScreen("aur"))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -163,7 +214,7 @@ export function EditSheet() {
   // Out of the way while a tile is carried: the whole page is somewhere to drop it.
   if (!open || carry.value) return null;
   // The picker in its place while it's open (over home, its own scrolling list).
-  if (picker.value) return <AppWidgetPicker onPick={addAppWidget} head={(close) => <ShellAdds done={close} />} />;
+  if (picker.value) return <AppWidgetPicker onPick={addAppWidget} head={(close, q) => <ShellAdds done={close} q={q} />} />;
   const current = themes.value.find((t) => t.name === picked.value);
   const stop = (e: Event) => e.stopPropagation();
   return (

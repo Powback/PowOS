@@ -172,7 +172,7 @@ export const picker = signal(false);
 const iconOf = (pkg: string) => apps.value.find((a) => a.key.startsWith(`a:${pkg}/`))?.icon;
 
 /** [head]: what the list starts with (the edit bar's: the shell's own widgets, the stores), given a close to call. */
-export function AppWidgetPicker({ onPick, head }: { onPick: (p: AppWidgetProvider) => void; head?: (close: () => void) => any }) {
+export function AppWidgetPicker({ onPick, head }: { onPick: (p: AppWidgetProvider) => void; head?: (close: () => void, q: string) => any }) {
   const [list, setList] = useState<AppWidgetProvider[] | null>(null);
   const [query, setQuery] = useState("");
   const open = picker.value;
@@ -211,9 +211,9 @@ export function AppWidgetPicker({ onPick, head }: { onPick: (p: AppWidgetProvide
           onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
         />
         <div class="aw-list">
-          {/* The caller's first (the edit bar's: ui/editsheet.tsx), PowOS apps' widgets (the registry:
-              ui/apppicker.tsx), then every Android app's. */}
-          {!q && head?.(close)}
+          {/* The caller's first (the edit bar's: ui/editsheet.tsx - PowOS's own widgets, found by the search too), PowOS
+              apps' widgets (the registry: ui/apppicker.tsx), then every Android app's. */}
+          {head?.(close, q)}
           {!q && <AppWidgetList onAdded={close} />}
           {list == null && <div class="muted">loading…</div>}
           {list != null && !shown.length && <div class="muted">no widgets{q ? ` for "${query}"` : ""}</div>}
