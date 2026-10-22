@@ -1,0 +1,437 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CognitiveComplexMethod:AgentsSpool.kt$AgentsSpool$fun start( context: Context, runDir: File, )</ID>
+    <ID>CognitiveComplexMethod:AgentsSpool.kt$AgentsSpool$private fun merge()</ID>
+    <ID>CognitiveComplexMethod:AgentsSpool.kt$AgentsSpool.AgentsNotifier$fun update( context: Context, agents: List&lt;JSONObject&gt;, )</ID>
+    <ID>CognitiveComplexMethod:AgentsSpool.kt$AgentsSpool.Asker$fun update( context: Context, open: List&lt;JSONObject&gt;, agents: Map&lt;String, JSONObject&gt;, )</ID>
+    <ID>CognitiveComplexMethod:AndroidApps.kt$AndroidAppCatalog$fun start()</ID>
+    <ID>CognitiveComplexMethod:AndroidApps.kt$AndroidAppCatalog$private fun reload(evict: String? = null)</ID>
+    <ID>CognitiveComplexMethod:AppWidgets.kt$AppWidgets$fun heal()</ID>
+    <ID>CognitiveComplexMethod:AppWidgets.kt$AppWidgets.Frames$fun offer(image: Image): Boolean</ID>
+    <ID>CognitiveComplexMethod:AudioBridge.kt$AudioBridge$private fun pump()</ID>
+    <ID>CognitiveComplexMethod:BleArm.kt$BleArm.Callback$override fun onConnectionStateChange( g: BluetoothGatt, status: Int, newState: Int, )</ID>
+    <ID>CognitiveComplexMethod:Bootstrap.kt$Bootstrap$private fun extract(tarball: File)</ID>
+    <ID>CognitiveComplexMethod:Bootstrap.kt$Bootstrap$private fun obtainTarball(): File</ID>
+    <ID>CognitiveComplexMethod:Bootstrap.kt$Bootstrap$suspend fun run()</ID>
+    <ID>CognitiveComplexMethod:Builtins.kt$Builtins$fun member( v: Value, name: String, ): Value</ID>
+    <ID>CognitiveComplexMethod:Builtins.kt$Builtins$fun operator(op: String): (Value, Value) -&gt; Value</ID>
+    <ID>CognitiveComplexMethod:Builtins.kt$Builtins$private fun weatherIcon( code: Int, night: Boolean, ): String</ID>
+    <ID>CognitiveComplexMethod:Canvas.kt$Painter$fun DrawScope.paint( nodes: List&lt;WNode&gt;, env: Env, )</ID>
+    <ID>CognitiveComplexMethod:Canvas.kt$Painter$private fun DrawScope.draw( n: WNode.Draw, env: Env, )</ID>
+    <ID>CognitiveComplexMethod:Client.kt$Client$fun run()</ID>
+    <ID>CognitiveComplexMethod:Client.kt$Client$private fun writeLoop()</ID>
+    <ID>CognitiveComplexMethod:Clipboard.kt$Selection$private fun mirror(source: DataSource)</ID>
+    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun arithmetic( op: String, a: Ev, b: Ev, slow: Ev, ): Ev</ID>
+    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun call( e: Expr.Call, s: Scope, ): Ev</ID>
+    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun draw( it: Item.Call, scope: Scope, ): WNode.Draw</ID>
+    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun element( n: Item.Node, scope: Scope, ): WNode</ID>
+    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun ex( e: Expr, s: Scope, ): Ev</ID>
+    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun handler( h: Handler, scope: Scope, params: List&lt;String&gt; = HANDLER_PARAMS[h.name].orEmpty(), ): Action</ID>
+    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun numericCall( name: String, args: List&lt;Ev&gt;, slow: Ev, ): Ev</ID>
+    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun program(): Program</ID>
+    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun shapes( e: Expr, s: Scope, ): List&lt;String&gt;?</ID>
+    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun source(d: Decl.Source): Global.Source</ID>
+    <ID>CognitiveComplexMethod:Compiler.kt$Compiler.Companion$fun quotable(shape: String): Boolean</ID>
+    <ID>CognitiveComplexMethod:Compositor.kt$ShmPool$override fun request( opcode: Int, args: Args, )</ID>
+    <ID>CognitiveComplexMethod:Compositor.kt$Surface$private fun upload( buffer: ShmBuffer, full: Boolean, )</ID>
+    <ID>CognitiveComplexMethod:CornerPull.kt$CornerPull$override fun onEvent(e: MotionEvent): GestureConsumer.Verdict</ID>
+    <ID>CognitiveComplexMethod:EdgeGestureClassifier.kt$EdgeGestureClassifier$fun move( x: Float, y: Float, t: Long, ): Direction?</ID>
+    <ID>CognitiveComplexMethod:EdgeGestures.kt$EdgeGestures$override fun onEvent(e: MotionEvent): GestureConsumer.Verdict</ID>
+    <ID>CognitiveComplexMethod:ExtraKeys.kt$@Composable private fun PlainKey( key: Plain, bridge: KeyboardBridge, modifier: Modifier, )</ID>
+    <ID>CognitiveComplexMethod:ExtraKeys.kt$@Composable private fun StickyKey( key: Sticky, sticky: StickyModifier, modifier: Modifier, )</ID>
+    <ID>CognitiveComplexMethod:Files.kt$fun watchFile(file: File): Flow&lt;String&gt;</ID>
+    <ID>CognitiveComplexMethod:FilesChrome.kt$@Composable internal fun FileRow( entry: GuestEntry, selected: Boolean, selecting: Boolean, onClick: () -&gt; Unit, onLongClick: () -&gt; Unit, )</ID>
+    <ID>CognitiveComplexMethod:FilesScreen.kt$@Composable fun FilesScreen( runtime: Runtime, startPath: String, onExit: () -&gt; Unit, )</ID>
+    <ID>CognitiveComplexMethod:G1Glasses.kt$G1Glasses.Arm$override fun onNotify( arm: BleArm, uuid: UUID, value: ByteArray, )</ID>
+    <ID>CognitiveComplexMethod:G1Glasses.kt$G1Glasses.Arm$override fun onServices( arm: BleArm, gatt: BluetoothGatt, )</ID>
+    <ID>CognitiveComplexMethod:G1Protocol.kt$G1Protocol$fun pages(text: String): List&lt;String&gt;</ID>
+    <ID>CognitiveComplexMethod:G2Glasses.kt$G2Glasses$override fun showImage(image: GlassesImage): Boolean</ID>
+    <ID>CognitiveComplexMethod:G2Glasses.kt$G2Glasses.Arm$private fun authenticated()</ID>
+    <ID>CognitiveComplexMethod:G2Protocol.kt$G2Protocol$fun pages( text: String, charsPerLine: Int = 25, linesPerPage: Int = 10, ): List&lt;String&gt;</ID>
+    <ID>CognitiveComplexMethod:G2Protocol.kt$G2Protocol$fun transcript(payload: ByteArray): Pair&lt;String, Boolean&gt;?</ID>
+    <ID>CognitiveComplexMethod:GestureMonitor.kt$GestureMonitor$private fun dispatch(e: MotionEvent)</ID>
+    <ID>CognitiveComplexMethod:GlassBlur.kt$GlassBlur$private fun set( regions: List&lt;Region&gt;, lag: Int, )</ID>
+    <ID>CognitiveComplexMethod:GlassesPairActivity.kt$GlassesPairActivity$private fun step( address: String?, name: String?, error: String?, )</ID>
+    <ID>CognitiveComplexMethod:GpuSpeech.kt$GpuSession$private fun frame(db: Double)</ID>
+    <ID>CognitiveComplexMethod:GpuSpeech.kt$GpuSession$private fun send( s: Seg, final: Boolean, )</ID>
+    <ID>CognitiveComplexMethod:GuestFs.kt$GuestFs$fun list( dir: String, showHidden: Boolean, ): List&lt;GuestEntry&gt;</ID>
+    <ID>CognitiveComplexMethod:GuestFs.kt$GuestFs$fun resolve( path: String, followLast: Boolean = true, ): String</ID>
+    <ID>CognitiveComplexMethod:GuestThemeConfig.kt$GuestThemeConfig$fun managed(theme: OmarchyTheme?): List&lt;Managed&gt;</ID>
+    <ID>CognitiveComplexMethod:IconTheme.kt$IconTheme.Companion$private fun build(named: Map&lt;String, Color&gt;): IconTheme</ID>
+    <ID>CognitiveComplexMethod:IconTheme.kt$IconTheme.Companion$private fun lookup( lut: IntArray, r: Int, g: Int, b: Int, ): Int</ID>
+    <ID>CognitiveComplexMethod:Input.kt$Input$fun key( code: Int, pressed: Boolean, )</ID>
+    <ID>CognitiveComplexMethod:Inputs.kt$@Composable internal fun InputNode( p: Props, mod: Modifier, sized: Boolean, )</ID>
+    <ID>CognitiveComplexMethod:Inputs.kt$@Composable internal fun SliderNode( p: Props, mod: Modifier, sized: Boolean, )</ID>
+    <ID>CognitiveComplexMethod:Json.kt$Json$private fun write( v: Value, out: StringBuilder, ): Boolean</ID>
+    <ID>CognitiveComplexMethod:Json.kt$Json.Reader$fun value(): Value</ID>
+    <ID>CognitiveComplexMethod:Keyboard.kt$KeyboardBridge$fun handle(event: KeyEvent): Boolean</ID>
+    <ID>CognitiveComplexMethod:Keyboard.kt$KeyboardBridge$fun type(text: CharSequence)</ID>
+    <ID>CognitiveComplexMethod:Lexer.kt$Lexer$fun run(): List&lt;Token&gt;</ID>
+    <ID>CognitiveComplexMethod:Lexer.kt$Lexer$private fun matchBrace(from: Int): Int</ID>
+    <ID>CognitiveComplexMethod:Lexer.kt$Lexer$private fun skipSpace()</ID>
+    <ID>CognitiveComplexMethod:Lexer.kt$Lexer$private fun string()</ID>
+    <ID>CognitiveComplexMethod:ManagedFiles.kt$ManagedFiles$fun sync(desired: List&lt;Managed&gt;)</ID>
+    <ID>CognitiveComplexMethod:Media.kt$Media$fun updates(): Flow&lt;Value&gt;</ID>
+    <ID>CognitiveComplexMethod:NavGesture.kt$NavGesture$override fun onEvent(e: MotionEvent): GestureConsumer.Verdict</ID>
+    <ID>CognitiveComplexMethod:NavGesture.kt$NavGesture$private fun began()</ID>
+    <ID>CognitiveComplexMethod:NavGesture.kt$NavGesture$private fun endOverHome(outcome: NavGestureClassifier.Outcome)</ID>
+    <ID>CognitiveComplexMethod:NavGesture.kt$NavGesture$private fun ended( outcome: NavGestureClassifier.Outcome, why: String = "", )</ID>
+    <ID>CognitiveComplexMethod:NavGestureClassifier.kt$NavGestureClassifier$fun move( x: Float, y: Float, t: Long, ): Axis?</ID>
+    <ID>CognitiveComplexMethod:NavGestureClassifier.kt$NavGestureClassifier$fun up( x: Float, y: Float, t: Long, ): Outcome</ID>
+    <ID>CognitiveComplexMethod:Notifications.kt$Notifications$fun peeks( sbn: StatusBarNotification, ranking: Ranking, ): Boolean</ID>
+    <ID>CognitiveComplexMethod:OmarchyTheme.kt$OmarchyTheme$fun guestFiles(): Map&lt;String, File&gt;</ID>
+    <ID>CognitiveComplexMethod:OverlayReload.kt$OverlayReload$private fun reload()</ID>
+    <ID>CognitiveComplexMethod:Parser.kt$Parser$private fun body(top: Boolean = false): Body</ID>
+    <ID>CognitiveComplexMethod:Parser.kt$Parser$private fun decl(): Decl</ID>
+    <ID>CognitiveComplexMethod:Parser.kt$Parser$private fun postfix(start: Expr): Expr</ID>
+    <ID>CognitiveComplexMethod:Parser.kt$Parser$private fun primary(): Expr</ID>
+    <ID>CognitiveComplexMethod:Paste.kt$Paste$fun download( id: String, userAgent: String, ): String</ID>
+    <ID>CognitiveComplexMethod:PetOverlay.kt$PetOverlay.Root$override fun onTouchEvent(ev: MotionEvent): Boolean</ID>
+    <ID>CognitiveComplexMethod:PowosAiActivity.kt$PowosAiActivity$@Composable private fun Bubble(item: PowosAiChat.Item)</ID>
+    <ID>CognitiveComplexMethod:PowosAiActivity.kt$PowosAiActivity$@Composable private fun Chat()</ID>
+    <ID>CognitiveComplexMethod:PowosAiChat.kt$PowosAiChat$private fun turn(prompt: String?)</ID>
+    <ID>CognitiveComplexMethod:PowosRecentsService.kt$PowosRecentsService$private fun startGestures()</ID>
+    <ID>CognitiveComplexMethod:Proot.kt$Proot$fun prepare()</ID>
+    <ID>CognitiveComplexMethod:PtyTerminal.kt$PtyTerminal$override fun key( code: Int, pressed: Boolean, )</ID>
+    <ID>CognitiveComplexMethod:PtyTerminal.kt$PtyTerminal.Companion$fun fontFile( context: Context, family: String, onLoaded: () -&gt; Unit, ): java.io.File?</ID>
+    <ID>CognitiveComplexMethod:QuickSettings.kt$QuickSettings$fun toggle(name: String)</ID>
+    <ID>CognitiveComplexMethod:QuickSettings.kt$QuickSettings$private fun tile(id: String): JSONObject?</ID>
+    <ID>CognitiveComplexMethod:QuickSettings.kt$QuickSettings.Companion$private fun split(spec: String): List&lt;String&gt;</ID>
+    <ID>CognitiveComplexMethod:Raster.kt$Raster$fun dither( argb: IntArray, width: Int, height: Int, ): BooleanArray</ID>
+    <ID>CognitiveComplexMethod:RecentsTransition.kt$RecentsTransition$private fun apply(look: Look)</ID>
+    <ID>CognitiveComplexMethod:RecentsTransition.kt$RecentsTransition$private fun finishAnimated( end: End, hold: ((() -&gt; Unit) -&gt; Unit)?, done: (Boolean) -&gt; Unit, )</ID>
+    <ID>CognitiveComplexMethod:RecentsTransition.kt$RecentsTransition$private fun settle( v0: Float, onFrame: (Float) -&gt; Unit, onDone: () -&gt; Unit, )</ID>
+    <ID>CognitiveComplexMethod:ReconActivity.kt$ReconReceiver$override fun onReceive( context: Context, intent: Intent, )</ID>
+    <ID>CognitiveComplexMethod:RemoteInput.kt$RemoteInput$@Synchronized private fun ensurePipe()</ID>
+    <ID>CognitiveComplexMethod:RemoteInput.kt$RemoteInput$fun init(context: Context)</ID>
+    <ID>CognitiveComplexMethod:RemoteViewsDump.kt$RemoteViewsDump$private fun obj( x: Any, depth: Int, ): JSONObject</ID>
+    <ID>CognitiveComplexMethod:RemoteViewsDump.kt$RemoteViewsDump$private fun value( v: Any?, depth: Int, key: String = "", ): Any?</ID>
+    <ID>CognitiveComplexMethod:Render.kt$@Composable private fun TextNode( p: Props, mod: Modifier, )</ID>
+    <ID>CognitiveComplexMethod:Render.kt$@Composable private fun common( p: Props, parent: Any?, ): Modifier</ID>
+    <ID>CognitiveComplexMethod:Render.kt$@OptIn(ExperimentalLayoutApi::class) @Composable private fun Element( el: WNode.Element, env: Env, inst: WidgetInstance, parent: Any?, )</ID>
+    <ID>CognitiveComplexMethod:Review.kt$Review$fun markdown(): String</ID>
+    <ID>CognitiveComplexMethod:Review.kt$Review$private fun run()</ID>
+    <ID>CognitiveComplexMethod:Runtime.kt$Runtime$suspend fun refreshApps()</ID>
+    <ID>CognitiveComplexMethod:ShadeHost.kt$ShadeHost$fun start(): Boolean</ID>
+    <ID>CognitiveComplexMethod:ShadeHost.kt$ShadeHost.Pull$fun move(e: MotionEvent): PullMove</ID>
+    <ID>CognitiveComplexMethod:Share.kt$Share$fun decode(s: String): String</ID>
+    <ID>CognitiveComplexMethod:Share.kt$Share$fun format(text: String): String</ID>
+    <ID>CognitiveComplexMethod:Share.kt$Share$fun prepare(text: String): String</ID>
+    <ID>CognitiveComplexMethod:ShellBridge.kt$ShellBridge$private fun dispatch( method: String, a: JSONArray, ): Any?</ID>
+    <ID>CognitiveComplexMethod:ShellErrors.kt$ShellErrors$fun rollback( context: Context, mode: String, cause: String, ): List&lt;String&gt;</ID>
+    <ID>CognitiveComplexMethod:ShellErrors.kt$ShellErrors$private fun send( context: Context, text: String, test: Boolean = false, force: Boolean = false, )</ID>
+    <ID>CognitiveComplexMethod:ShellHost.kt$HotReload$private fun changed( file: File, root: File, prefix: String, )</ID>
+    <ID>CognitiveComplexMethod:ShellHost.kt$ShellHost$private fun checkBoot( serial: Int, after: Long, )</ID>
+    <ID>CognitiveComplexMethod:ShellHost.kt$ShellHost.Client$override fun shouldInterceptRequest( view: WebView, request: WebResourceRequest, ): WebResourceResponse?</ID>
+    <ID>CognitiveComplexMethod:ShellNative.kt$ShellNative.Tile$fun draw(frame: String)</ID>
+    <ID>CognitiveComplexMethod:ShellNet.kt$ShellNet.Stream$override fun run()</ID>
+    <ID>CognitiveComplexMethod:ShellScreens.kt$ShellScreens$private fun opened(name: String)</ID>
+    <ID>CognitiveComplexMethod:ShellWords.kt$ShellWords$private fun firstProgram(segment: String): String?</ID>
+    <ID>CognitiveComplexMethod:ShellWords.kt$ShellWords$private fun segments(s: String): List&lt;String&gt;</ID>
+    <ID>CognitiveComplexMethod:Speech.kt$NativeSpeech$private fun intent( p: Plan?, feed: AudioFeed? = null, )</ID>
+    <ID>CognitiveComplexMethod:Speech.kt$NativeSpeech.Session.Listener$override fun onError(code: Int)</ID>
+    <ID>CognitiveComplexMethod:Speech.kt$Speech$fun start( hold: Boolean, onDone: (String) -&gt; Unit, )</ID>
+    <ID>CognitiveComplexMethod:Sprite.kt$Sprite.Companion$fun parse(rows: Value): Sprite</ID>
+    <ID>CognitiveComplexMethod:Streams.kt$Streams$suspend fun collect( command: String, onLine: (String) -&gt; Unit, )</ID>
+    <ID>CognitiveComplexMethod:StyleStore.kt$StyleStore$fun start()</ID>
+    <ID>CognitiveComplexMethod:Switcher.kt$Switcher$fun begin(over: Int?)</ID>
+    <ID>CognitiveComplexMethod:Switcher.kt$Switcher$fun settle( over: Int?, then: () -&gt; Unit, )</ID>
+    <ID>CognitiveComplexMethod:Switcher.kt$Switcher$fun show( context: Context, over: Int? = if (open &amp;&amp; homeVisible) from else Tasks.visible(context), )</ID>
+    <ID>CognitiveComplexMethod:Tarball.kt$internal fun unpackTarball( url: String, into: File, onProgress: (Int) -&gt; Unit = {}, maxMegabytes: Int = Int.MAX_VALUE, keep: (String) -&gt; Boolean, )</ID>
+    <ID>CognitiveComplexMethod:TerminalTiles.kt$@Composable fun TerminalView( term: EmbeddedTerminal, modifier: Modifier, interactive: Boolean = true, textSize: Float? = null, focus: Boolean = false, )</ID>
+    <ID>CognitiveComplexMethod:ThemeColors.kt$ThemeColors$fun fromAlacritty(text: String): Map&lt;String, String&gt;?</ID>
+    <ID>CognitiveComplexMethod:Toml.kt$Toml$fun parse(text: String): LinkedHashMap&lt;String, Any&gt;</ID>
+    <ID>CognitiveComplexMethod:Toml.kt$Toml$private fun basicString( text: String, line: Int, ): String</ID>
+    <ID>CognitiveComplexMethod:Toml.kt$Toml$private fun value( text: String, line: Int, ): Any</ID>
+    <ID>CognitiveComplexMethod:ViewTreeDump.kt$ViewTreeDump$private fun node( v: View, depth: Int, ): JSONObject</ID>
+    <ID>CognitiveComplexMethod:ViewTreeDump.kt$ViewTreeDump$private fun text( v: TextView, o: JSONObject, )</ID>
+    <ID>CognitiveComplexMethod:WidgetEngine.kt$WidgetEngine$fun start()</ID>
+    <ID>CognitiveComplexMethod:WidgetEngine.kt$WidgetEngine$private suspend fun checkDependencies(specs: List&lt;WidgetSpec&gt;)</ID>
+    <ID>CognitiveComplexMethod:WidgetEngine.kt$WidgetEngine$private suspend fun preview(name: String)</ID>
+    <ID>CognitiveComplexMethod:WidgetEngine.kt$WidgetEngine$private suspend fun reload(files: List&lt;File&gt;)</ID>
+    <ID>CognitiveComplexMethod:WidgetInstance.kt$WidgetInstance$fun start( scope: CoroutineScope, active: () -&gt; Boolean, )</ID>
+    <ID>CognitiveComplexMethod:WidgetInstance.kt$WidgetInstance$private fun loadImage(src: String)</ID>
+    <ID>CognitiveComplexMethod:WidgetInstance.kt$WidgetInstance$private fun sample(g: Global.Source)</ID>
+    <ID>CognitiveComplexMethod:WidgetInstance.kt$WidgetInstance$private fun startTriggers( scope: CoroutineScope, active: () -&gt; Boolean, )</ID>
+    <ID>CognitiveComplexMethod:WidgetInstance.kt$WidgetInstance$private suspend fun update( slot: Int, g: Global.Source, )</ID>
+    <ID>CognitiveComplexMethod:WidgetLayout.kt$WidgetLayout$private fun freeSpot( item: HomeItem, items: List&lt;HomeItem&gt;, cols: Int, rows: Int, ): Cell?</ID>
+    <ID>CognitiveComplexMethod:WidgetRecon.kt$WidgetRecon$private fun providerJson(info: AppWidgetProviderInfo): JSONObject</ID>
+    <ID>CognitiveComplexMethod:WidgetRecon.kt$WidgetRecon$private suspend fun shoot( /** The bound widget, or null to draw [info]'s initial layout on its own. */ id: Int?, info: AppWidgetProviderInfo, wDp: Int, hDp: Int, seconds: Int, out: File, notes: JSONArray, bound: String, configured: Boolean, )</ID>
+    <ID>CognitiveComplexMethod:WidgetRecon.kt$WidgetRecon$suspend fun capture( dir: File, req: Request, status: (String) -&gt; Unit = {}, ): File</ID>
+    <ID>CognitiveComplexMethod:WidgetServices.kt$WidgetServices$override suspend fun http( url: String, headers: Map&lt;String, String&gt;, timeoutSeconds: Int, ): ShellResult</ID>
+    <ID>CognitiveComplexMethod:WidgetTile.kt$@Composable internal fun WidgetTile( spec: WidgetSpec, instance: WidgetInstance?, cells: Pair&lt;Int, Int&gt;?, focused: Boolean, modifier: Modifier, onTap: () -&gt; Unit, needs: List&lt;String&gt;, install: WidgetEngine.Install?, onInstall: () -&gt; Unit, onFix: (String) -&gt; Unit, /** Where Linux stands, if the widget needs it and it isn't running: a placeholder keeps its cells. */ waitsForLinux: LinuxState? = null, onInstallLinux: () -&gt; Unit = {}, )</ID>
+    <ID>CognitiveComplexMethod:WidgetTree.kt$WidgetTree$private fun draw( list: List&lt;WNode&gt;, env: Env, out: JSONArray, )</ID>
+    <ID>CognitiveComplexMethod:WidgetTree.kt$WidgetTree$private fun element( el: WNode.Element, env: Env, id: String, ): JSONObject?</ID>
+    <ID>CognitiveComplexMethod:WidgetTree.kt$WidgetTree$private fun node( node: WNode, env: Env, id: String, out: JSONArray, )</ID>
+    <ID>CognitiveComplexMethod:WindowBlur.kt$WindowBlur$fun set(amount: Float)</ID>
+    <ID>CognitiveComplexMethod:WindowInput.kt$private fun handleMouse( wm: WindowManager, window: XdgToplevel, event: PointerEvent, previousButtons: Int, ): Int</ID>
+    <ID>CognitiveComplexMethod:WindowInput.kt$private suspend fun PointerInputScope.handlePointer( wm: WindowManager, window: XdgToplevel, touchSlop: Float, longPressMs: Long, )</ID>
+    <ID>CyclomaticComplexMethod:AgentMail.kt$AgentMail.Companion$private fun post( context: Context, mail: Mail, quiet: Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:AgentsSpool.kt$AgentsSpool$fun start( context: Context, runDir: File, )</ID>
+    <ID>CyclomaticComplexMethod:AgentsSpool.kt$AgentsSpool$private fun merge()</ID>
+    <ID>CyclomaticComplexMethod:AgentsSpool.kt$AgentsSpool.AgentsNotifier$fun update( context: Context, agents: List&lt;JSONObject&gt;, )</ID>
+    <ID>CyclomaticComplexMethod:AndroidApps.kt$AndroidAppCatalog$private fun reload(evict: String? = null)</ID>
+    <ID>CyclomaticComplexMethod:AppWidgetColors.kt$WidgetColors$@SuppressLint("DiscouragedApi") // The names, not R constants: the Material tokens are Android 14+ only. fun build( context: Context, background: Int, surface: Int, foreground: Int, muted: Int, accent: Int, border: Int, magenta: Int?, light: Boolean, ): SparseIntArray</ID>
+    <ID>CyclomaticComplexMethod:AppWidgets.kt$AppWidgets$fun heal()</ID>
+    <ID>CyclomaticComplexMethod:AppWidgets.kt$AppWidgets$fun watch( events: (String, Any?) -&gt; Unit, id: Int, wDp: Double, hDp: Double, ): JSONObject?</ID>
+    <ID>CyclomaticComplexMethod:AppWidgets.kt$AppWidgets.Frames$fun offer(image: Image): Boolean</ID>
+    <ID>CyclomaticComplexMethod:AudioBridge.kt$AudioBridge$private fun pump()</ID>
+    <ID>CyclomaticComplexMethod:BleArm.kt$BleArm.Callback$override fun onConnectionStateChange( g: BluetoothGatt, status: Int, newState: Int, )</ID>
+    <ID>CyclomaticComplexMethod:Bootstrap.kt$Bootstrap$private fun extract(tarball: File)</ID>
+    <ID>CyclomaticComplexMethod:Bootstrap.kt$Bootstrap$private fun obtainTarball(): File</ID>
+    <ID>CyclomaticComplexMethod:Builtins.kt$Builtins$fun index( v: Value, i: Value, ): Value</ID>
+    <ID>CyclomaticComplexMethod:Builtins.kt$Builtins$fun member( v: Value, name: String, ): Value</ID>
+    <ID>CyclomaticComplexMethod:Builtins.kt$Builtins$fun operator(op: String): (Value, Value) -&gt; Value</ID>
+    <ID>CyclomaticComplexMethod:Builtins.kt$Builtins$private fun weatherIcon( code: Int, night: Boolean, ): String</ID>
+    <ID>CyclomaticComplexMethod:Canvas.kt$Painter$private fun DrawScope.draw( n: WNode.Draw, env: Env, )</ID>
+    <ID>CyclomaticComplexMethod:Catalog.kt$Catalog$private fun entry(o: Obj): CatalogEntry?</ID>
+    <ID>CyclomaticComplexMethod:Client.kt$Client$fun run()</ID>
+    <ID>CyclomaticComplexMethod:Client.kt$Client$private fun writeLoop()</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun arithmetic( op: String, a: Ev, b: Ev, slow: Ev, ): Ev</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun call( e: Expr.Call, s: Scope, ): Ev</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun draw( it: Item.Call, scope: Scope, ): WNode.Draw</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun element( n: Item.Node, scope: Scope, ): WNode</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun ex( e: Expr, s: Scope, ): Ev</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun handler( h: Handler, scope: Scope, params: List&lt;String&gt; = HANDLER_PARAMS[h.name].orEmpty(), ): Action</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun item( it: Item, scope: Scope, mode: Children, ): WNode</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun numericCall( name: String, args: List&lt;Ev&gt;, slow: Ev, ): Ev</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun program(): Program</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun shapes( e: Expr, s: Scope, ): List&lt;String&gt;?</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun source(d: Decl.Source): Global.Source</ID>
+    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler.Companion$fun quotable(shape: String): Boolean</ID>
+    <ID>CyclomaticComplexMethod:Compositor.kt$ShmPool$override fun request( opcode: Int, args: Args, )</ID>
+    <ID>CyclomaticComplexMethod:Compositor.kt$Surface$private fun upload( buffer: ShmBuffer, full: Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:CornerPull.kt$CornerPull$override fun onEvent(e: MotionEvent): GestureConsumer.Verdict</ID>
+    <ID>CyclomaticComplexMethod:EdgeGestures.kt$EdgeGestures$override fun onDown(e: MotionEvent): Boolean</ID>
+    <ID>CyclomaticComplexMethod:EdgeGestures.kt$EdgeGestures$override fun onEvent(e: MotionEvent): GestureConsumer.Verdict</ID>
+    <ID>CyclomaticComplexMethod:EdgeGestures.kt$EdgeGestures$private fun run(action: String)</ID>
+    <ID>CyclomaticComplexMethod:Files.kt$fun watchFile(file: File): Flow&lt;String&gt;</ID>
+    <ID>CyclomaticComplexMethod:FilesChrome.kt$@Composable internal fun FileRow( entry: GuestEntry, selected: Boolean, selecting: Boolean, onClick: () -&gt; Unit, onLongClick: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:FilesScreen.kt$@Composable fun FilesScreen( runtime: Runtime, startPath: String, onExit: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:G1Glasses.kt$G1Glasses.Arm$override fun onNotify( arm: BleArm, uuid: UUID, value: ByteArray, )</ID>
+    <ID>CyclomaticComplexMethod:G1Protocol.kt$G1Protocol$fun event(payload: ByteArray): GlassesEvent?</ID>
+    <ID>CyclomaticComplexMethod:G2Glasses.kt$G2Glasses.Arm$override fun onNotify( arm: BleArm, uuid: UUID, value: ByteArray, )</ID>
+    <ID>CyclomaticComplexMethod:G2Protocol.kt$G2Protocol$fun pages( text: String, charsPerLine: Int = 25, linesPerPage: Int = 10, ): List&lt;String&gt;</ID>
+    <ID>CyclomaticComplexMethod:G2Protocol.kt$G2Protocol$fun transcript(payload: ByteArray): Pair&lt;String, Boolean&gt;?</ID>
+    <ID>CyclomaticComplexMethod:GestureMonitor.kt$GestureMonitor$private fun dispatch(e: MotionEvent)</ID>
+    <ID>CyclomaticComplexMethod:GlassBlur.kt$GlassBlur$private fun set( regions: List&lt;Region&gt;, lag: Int, )</ID>
+    <ID>CyclomaticComplexMethod:GlassBlur.kt$GlassBlur.Companion$fun wholeWindowOf( view: View, radiusPx: Float, ): Boolean?</ID>
+    <ID>CyclomaticComplexMethod:GlassBlur.kt$GlassBlur.Companion$private fun valid(c: Codec): Boolean</ID>
+    <ID>CyclomaticComplexMethod:Glasses.kt$Glasses$fun state(): JSONObject</ID>
+    <ID>CyclomaticComplexMethod:Glasses.kt$Glasses$private fun command(f: File)</ID>
+    <ID>CyclomaticComplexMethod:Glasses.kt$Glasses.Client$fun call( method: String, a: JSONArray, ): Any?</ID>
+    <ID>CyclomaticComplexMethod:GpuSpeech.kt$GpuSession$private fun frame(db: Double)</ID>
+    <ID>CyclomaticComplexMethod:GpuSpeech.kt$GpuSession$private fun send( s: Seg, final: Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:IconTheme.kt$IconTheme.Companion$private fun build(named: Map&lt;String, Color&gt;): IconTheme</ID>
+    <ID>CyclomaticComplexMethod:Input.kt$Input$fun key( code: Int, pressed: Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:Inputs.kt$@Composable internal fun InputNode( p: Props, mod: Modifier, sized: Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:Inputs.kt$@Composable internal fun SliderNode( p: Props, mod: Modifier, sized: Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:Json.kt$Json$private fun write( v: Value, out: StringBuilder, ): Boolean</ID>
+    <ID>CyclomaticComplexMethod:Json.kt$Json.Reader$fun string(): String</ID>
+    <ID>CyclomaticComplexMethod:Json.kt$Json.Reader$fun value(): Value</ID>
+    <ID>CyclomaticComplexMethod:Keyboard.kt$KeyboardBridge$fun handle(event: KeyEvent): Boolean</ID>
+    <ID>CyclomaticComplexMethod:Lexer.kt$Lexer$fun run(): List&lt;Token&gt;</ID>
+    <ID>CyclomaticComplexMethod:Lexer.kt$Lexer$private fun number()</ID>
+    <ID>CyclomaticComplexMethod:Lexer.kt$Lexer$private fun skipSpace()</ID>
+    <ID>CyclomaticComplexMethod:Lexer.kt$Lexer$private fun string()</ID>
+    <ID>CyclomaticComplexMethod:ManagedFiles.kt$ManagedFiles$fun sync(desired: List&lt;Managed&gt;)</ID>
+    <ID>CyclomaticComplexMethod:Media.kt$Media$fun control(command: String)</ID>
+    <ID>CyclomaticComplexMethod:Media.kt$Media$fun updates(): Flow&lt;Value&gt;</ID>
+    <ID>CyclomaticComplexMethod:Media.kt$Media$fun value(): Value</ID>
+    <ID>CyclomaticComplexMethod:NavGesture.kt$NavGesture$override fun onEvent(e: MotionEvent): GestureConsumer.Verdict</ID>
+    <ID>CyclomaticComplexMethod:NavGesture.kt$NavGesture$private fun began()</ID>
+    <ID>CyclomaticComplexMethod:NavGesture.kt$NavGesture$private fun ended( outcome: NavGestureClassifier.Outcome, why: String = "", )</ID>
+    <ID>CyclomaticComplexMethod:NavGestureClassifier.kt$NavGestureClassifier$fun move( x: Float, y: Float, t: Long, ): Axis?</ID>
+    <ID>CyclomaticComplexMethod:NavGestureClassifier.kt$NavGestureClassifier$fun up( x: Float, y: Float, t: Long, ): Outcome</ID>
+    <ID>CyclomaticComplexMethod:Notifications.kt$Notifications$fun peeks( sbn: StatusBarNotification, ranking: Ranking, ): Boolean</ID>
+    <ID>CyclomaticComplexMethod:OmarchyTheme.kt$OmarchyTheme$fun guestFiles(): Map&lt;String, File&gt;</ID>
+    <ID>CyclomaticComplexMethod:Parser.kt$Parser$private fun body(top: Boolean = false): Body</ID>
+    <ID>CyclomaticComplexMethod:Parser.kt$Parser$private fun decl(): Decl</ID>
+    <ID>CyclomaticComplexMethod:Parser.kt$Parser$private fun primary(): Expr</ID>
+    <ID>CyclomaticComplexMethod:Paste.kt$Paste$fun download( id: String, userAgent: String, ): String</ID>
+    <ID>CyclomaticComplexMethod:PetOverlay.kt$PetOverlay$fun update()</ID>
+    <ID>CyclomaticComplexMethod:PetOverlay.kt$PetOverlay.Root$override fun onTouchEvent(ev: MotionEvent): Boolean</ID>
+    <ID>CyclomaticComplexMethod:PowosAiActivity.kt$PowosAiActivity$@Composable private fun Bubble(item: PowosAiChat.Item)</ID>
+    <ID>CyclomaticComplexMethod:PowosAiChat.kt$PowosAiChat$private fun turn(prompt: String?)</ID>
+    <ID>CyclomaticComplexMethod:PowosRecentsService.kt$PowosRecentsService$private fun startGestures()</ID>
+    <ID>CyclomaticComplexMethod:PtyTerminal.kt$PtyTerminal$override fun key( code: Int, pressed: Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:QuickSettings.kt$QuickSettings$fun open(name: String)</ID>
+    <ID>CyclomaticComplexMethod:QuickSettings.kt$QuickSettings$fun toggle(name: String)</ID>
+    <ID>CyclomaticComplexMethod:QuickSettings.kt$QuickSettings$private fun tile(id: String): JSONObject?</ID>
+    <ID>CyclomaticComplexMethod:RecentsTransition.kt$RecentsTransition$private fun apply(look: Look)</ID>
+    <ID>CyclomaticComplexMethod:RecentsTransition.kt$RecentsTransition$private fun finishAnimated( end: End, hold: ((() -&gt; Unit) -&gt; Unit)?, done: (Boolean) -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:RemoteInput.kt$RemoteInput$private fun json(): JSONObject</ID>
+    <ID>CyclomaticComplexMethod:RemoteInput.kt$RemoteInput.Client$fun call( method: String, a: JSONArray, ): Any?</ID>
+    <ID>CyclomaticComplexMethod:RemoteViewsDump.kt$RemoteViewsDump$private fun note(a: JSONObject)</ID>
+    <ID>CyclomaticComplexMethod:RemoteViewsDump.kt$RemoteViewsDump$private fun obj( x: Any, depth: Int, ): JSONObject</ID>
+    <ID>CyclomaticComplexMethod:RemoteViewsDump.kt$RemoteViewsDump$private fun remoteViews( rv: RemoteViews, depth: Int, top: Boolean = false, ): JSONObject</ID>
+    <ID>CyclomaticComplexMethod:RemoteViewsDump.kt$RemoteViewsDump$private fun value( v: Any?, depth: Int, key: String = "", ): Any?</ID>
+    <ID>CyclomaticComplexMethod:Render.kt$@Composable private fun Node( node: WNode, env: Env, inst: WidgetInstance, parent: Any?, )</ID>
+    <ID>CyclomaticComplexMethod:Render.kt$@Composable private fun TextNode( p: Props, mod: Modifier, )</ID>
+    <ID>CyclomaticComplexMethod:Render.kt$@Composable private fun common( p: Props, parent: Any?, ): Modifier</ID>
+    <ID>CyclomaticComplexMethod:Render.kt$@OptIn(ExperimentalLayoutApi::class) @Composable private fun Element( el: WNode.Element, env: Env, inst: WidgetInstance, parent: Any?, )</ID>
+    <ID>CyclomaticComplexMethod:Review.kt$Review$private fun run()</ID>
+    <ID>CyclomaticComplexMethod:Runtime.kt$Runtime$suspend fun refreshApps()</ID>
+    <ID>CyclomaticComplexMethod:ShadeHost.kt$ShadeHost$fun start(): Boolean</ID>
+    <ID>CyclomaticComplexMethod:ShadeHost.kt$ShadeHost$private fun pullable(y: Float): From?</ID>
+    <ID>CyclomaticComplexMethod:ShadeHost.kt$ShadeHost.Pull$fun move(e: MotionEvent): PullMove</ID>
+    <ID>CyclomaticComplexMethod:Share.kt$Share$fun format(text: String): String</ID>
+    <ID>CyclomaticComplexMethod:Share.kt$Share$fun prepare(text: String): String</ID>
+    <ID>CyclomaticComplexMethod:Share.kt$Share$private fun apart( a: Token, b: Token, ): Boolean</ID>
+    <ID>CyclomaticComplexMethod:ShellBridge.kt$ShellBridge$private fun dispatch( method: String, a: JSONArray, ): Any?</ID>
+    <ID>CyclomaticComplexMethod:ShellBridge.kt$ShellBridge$private fun tasks(): JSONArray</ID>
+    <ID>CyclomaticComplexMethod:ShellErrors.kt$ShellErrors$fun rollback( context: Context, mode: String, cause: String, ): List&lt;String&gt;</ID>
+    <ID>CyclomaticComplexMethod:ShellErrors.kt$ShellErrors$private fun send( context: Context, text: String, test: Boolean = false, force: Boolean = false, )</ID>
+    <ID>CyclomaticComplexMethod:ShellHost.kt$ShellHost$private fun checkBoot( serial: Int, after: Long, )</ID>
+    <ID>CyclomaticComplexMethod:ShellHost.kt$ShellHost$private fun mime(path: String)</ID>
+    <ID>CyclomaticComplexMethod:ShellHost.kt$ShellHost.Client$override fun shouldInterceptRequest( view: WebView, request: WebResourceRequest, ): WebResourceResponse?</ID>
+    <ID>CyclomaticComplexMethod:ShellNative.kt$ShellNative$private fun command(text: String)</ID>
+    <ID>CyclomaticComplexMethod:ShellNative.kt$ShellNative.Tile$fun draw(frame: String)</ID>
+    <ID>CyclomaticComplexMethod:ShellNet.kt$ShellNet$private fun capture( app: String, cap: JSONObject, body: String, ): String</ID>
+    <ID>CyclomaticComplexMethod:ShellNet.kt$ShellNet$private fun handle(r: JSONObject): JSONObject?</ID>
+    <ID>CyclomaticComplexMethod:ShellNet.kt$ShellNet.Stream$override fun run()</ID>
+    <ID>CyclomaticComplexMethod:ShellScreens.kt$ShellScreens$fun act( name: String, action: String, arg: Any?, ): Any?</ID>
+    <ID>CyclomaticComplexMethod:ShellScreens.kt$ShellScreens$fun image( kind: String, id: String, ): Pair&lt;String, ByteArray&gt;?</ID>
+    <ID>CyclomaticComplexMethod:ShellScreens.kt$ShellScreens$private fun opened(name: String)</ID>
+    <ID>CyclomaticComplexMethod:ShellScreens.kt$ShellScreens$private fun style(): JSONObject</ID>
+    <ID>CyclomaticComplexMethod:ShellWallpaper.kt$ShellWallpaper$private fun which(context: Context): Triple&lt;String, String, () -&gt; Bitmap?&gt;?</ID>
+    <ID>CyclomaticComplexMethod:ShellWords.kt$ShellWords$private fun firstProgram(segment: String): String?</ID>
+    <ID>CyclomaticComplexMethod:ShellWords.kt$ShellWords$private fun segments(s: String): List&lt;String&gt;</ID>
+    <ID>CyclomaticComplexMethod:Speech.kt$NativeSpeech$@androidx.annotation.RequiresApi(33) private fun decide( c: Context, onDev: RecognitionSupport?, reg: RecognitionSupport?, ): Plan</ID>
+    <ID>CyclomaticComplexMethod:Speech.kt$NativeSpeech$private fun recognizer( c: Context, kind: Kind, ): SpeechRecognizer</ID>
+    <ID>CyclomaticComplexMethod:Speech.kt$NativeSpeech.Session.Listener$override fun onError(code: Int)</ID>
+    <ID>CyclomaticComplexMethod:Switcher.kt$Switcher$fun show( context: Context, over: Int? = if (open &amp;&amp; homeVisible) from else Tasks.visible(context), )</ID>
+    <ID>CyclomaticComplexMethod:Tarball.kt$internal fun unpackTarball( url: String, into: File, onProgress: (Int) -&gt; Unit = {}, maxMegabytes: Int = Int.MAX_VALUE, keep: (String) -&gt; Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:Templates.kt$Templates$private fun value( parts: List&lt;String&gt;, colors: Map&lt;String, String&gt;, ): String?</ID>
+    <ID>CyclomaticComplexMethod:TerminalTiles.kt$@Composable fun TerminalView( term: EmbeddedTerminal, modifier: Modifier, interactive: Boolean = true, textSize: Float? = null, focus: Boolean = false, )</ID>
+    <ID>CyclomaticComplexMethod:ThemeColors.kt$ThemeColors$fun fromAlacritty(text: String): Map&lt;String, String&gt;?</ID>
+    <ID>CyclomaticComplexMethod:ThemeColors.kt$ThemeColors$fun resolve(raw: Map&lt;String, String&gt;): Map&lt;String, String&gt;</ID>
+    <ID>CyclomaticComplexMethod:ThemeStore.kt$ThemeStore$suspend fun addBackground(uri: Uri)</ID>
+    <ID>CyclomaticComplexMethod:TileHost.kt$TileHost$fun host(ids: List&lt;String&gt;)</ID>
+    <ID>CyclomaticComplexMethod:Toml.kt$Toml$fun parse(text: String): LinkedHashMap&lt;String, Any&gt;</ID>
+    <ID>CyclomaticComplexMethod:Toml.kt$Toml$private fun basicString( text: String, line: Int, ): String</ID>
+    <ID>CyclomaticComplexMethod:Toml.kt$Toml$private fun value( text: String, line: Int, ): Any</ID>
+    <ID>CyclomaticComplexMethod:ViewTreeDump.kt$ViewTreeDump$private fun layoutParams( v: View, o: JSONObject, )</ID>
+    <ID>CyclomaticComplexMethod:ViewTreeDump.kt$ViewTreeDump$private fun node( v: View, depth: Int, ): JSONObject</ID>
+    <ID>CyclomaticComplexMethod:ViewTreeDump.kt$ViewTreeDump$private fun owl(v: View): String</ID>
+    <ID>CyclomaticComplexMethod:ViewTreeDump.kt$ViewTreeDump$private fun text( v: TextView, o: JSONObject, )</ID>
+    <ID>CyclomaticComplexMethod:WallpaperBackdrop.kt$WallpaperBackdrop.Companion$private fun mirrorStill( displayId: Int, crop: android.graphics.Rect, scale: Float, ): Bitmap?</ID>
+    <ID>CyclomaticComplexMethod:WidgetEngine.kt$WidgetEngine$private suspend fun checkDependencies(specs: List&lt;WidgetSpec&gt;)</ID>
+    <ID>CyclomaticComplexMethod:WidgetEngine.kt$WidgetEngine$private suspend fun preview(name: String)</ID>
+    <ID>CyclomaticComplexMethod:WidgetEngine.kt$WidgetEngine$private suspend fun receive(id: String)</ID>
+    <ID>CyclomaticComplexMethod:WidgetEngine.kt$WidgetEngine$private suspend fun reload(files: List&lt;File&gt;)</ID>
+    <ID>CyclomaticComplexMethod:WidgetInstance.kt$WidgetInstance$fun start( scope: CoroutineScope, active: () -&gt; Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:WidgetInstance.kt$WidgetInstance$override fun tile(name: String): Value</ID>
+    <ID>CyclomaticComplexMethod:WidgetInstance.kt$WidgetInstance$private fun loadImage(src: String)</ID>
+    <ID>CyclomaticComplexMethod:WidgetInstance.kt$WidgetInstance$private fun restore()</ID>
+    <ID>CyclomaticComplexMethod:WidgetInstance.kt$WidgetInstance$private fun sample(g: Global.Source)</ID>
+    <ID>CyclomaticComplexMethod:WidgetInstance.kt$WidgetInstance$private fun startTriggers( scope: CoroutineScope, active: () -&gt; Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:WidgetInstance.kt$WidgetInstance$private suspend fun update( slot: Int, g: Global.Source, )</ID>
+    <ID>CyclomaticComplexMethod:WidgetRecon.kt$WidgetRecon$private fun providerJson(info: AppWidgetProviderInfo): JSONObject</ID>
+    <ID>CyclomaticComplexMethod:WidgetRecon.kt$WidgetRecon$private suspend fun shoot( /** The bound widget, or null to draw [info]'s initial layout on its own. */ id: Int?, info: AppWidgetProviderInfo, wDp: Int, hDp: Int, seconds: Int, out: File, notes: JSONArray, bound: String, configured: Boolean, )</ID>
+    <ID>CyclomaticComplexMethod:WidgetRecon.kt$WidgetRecon$suspend fun capture( dir: File, req: Request, status: (String) -&gt; Unit = {}, ): File</ID>
+    <ID>CyclomaticComplexMethod:WidgetServices.kt$WidgetServices$override fun act( name: String, args: List&lt;Value&gt;, done: () -&gt; Unit, )</ID>
+    <ID>CyclomaticComplexMethod:WidgetServices.kt$WidgetServices$override fun appIcon(pkg: String): ImageBitmap?</ID>
+    <ID>CyclomaticComplexMethod:WidgetServices.kt$WidgetServices$private fun battery(): Value</ID>
+    <ID>CyclomaticComplexMethod:WidgetServices.kt$WidgetServices$private fun system(): Value</ID>
+    <ID>CyclomaticComplexMethod:WidgetTree.kt$WidgetTree$private fun draw( list: List&lt;WNode&gt;, env: Env, out: JSONArray, )</ID>
+    <ID>CyclomaticComplexMethod:WidgetTree.kt$WidgetTree$private fun element( el: WNode.Element, env: Env, id: String, ): JSONObject?</ID>
+    <ID>CyclomaticComplexMethod:WidgetTree.kt$WidgetTree$private fun json(v: Value): Any</ID>
+    <ID>CyclomaticComplexMethod:WidgetTree.kt$WidgetTree$private fun node( node: WNode, env: Env, id: String, out: JSONArray, )</ID>
+    <ID>CyclomaticComplexMethod:WindowBlur.kt$WindowBlur$fun set(amount: Float)</ID>
+    <ID>CyclomaticComplexMethod:WindowInput.kt$private fun handleMouse( wm: WindowManager, window: XdgToplevel, event: PointerEvent, previousButtons: Int, ): Int</ID>
+    <ID>CyclomaticComplexMethod:WindowInput.kt$private suspend fun PointerInputScope.handlePointer( wm: WindowManager, window: XdgToplevel, touchSlop: Float, longPressMs: Long, )</ID>
+    <ID>CyclomaticComplexMethod:XdgShell.kt$XdgPositioner$fun position(): Geometry</ID>
+    <ID>CyclomaticComplexMethod:XdgShell.kt$XdgSurface$override fun onCommit()</ID>
+    <ID>LongMethod:AndroidApps.kt$AndroidAppCatalog$private fun reload(evict: String? = null)</ID>
+    <ID>LongMethod:Canvas.kt$Painter$private fun DrawScope.draw( n: WNode.Draw, env: Env, )</ID>
+    <ID>LongMethod:Compiler.kt$Compiler$private fun ex( e: Expr, s: Scope, ): Ev</ID>
+    <ID>LongMethod:Compiler.kt$Compiler$private fun handler( h: Handler, scope: Scope, params: List&lt;String&gt; = HANDLER_PARAMS[h.name].orEmpty(), ): Action</ID>
+    <ID>LongMethod:Compiler.kt$Compiler$private fun program(): Program</ID>
+    <ID>LongMethod:FilesScreen.kt$@Composable fun FilesScreen( runtime: Runtime, startPath: String, onExit: () -&gt; Unit, )</ID>
+    <ID>LongMethod:Json.kt$Json.Reader$fun value(): Value</ID>
+    <ID>LongMethod:Parser.kt$Parser$private fun body(top: Boolean = false): Body</ID>
+    <ID>LongMethod:Parser.kt$Parser$private fun decl(): Decl</ID>
+    <ID>LongMethod:Parser.kt$Parser$private fun primary(): Expr</ID>
+    <ID>LongMethod:PowosAiActivity.kt$PowosAiActivity$@Composable private fun Chat()</ID>
+    <ID>LongMethod:PowosTerminalActivity.kt$PowosTerminalActivity$override fun onCreate(savedInstanceState: Bundle?)</ID>
+    <ID>LongMethod:Render.kt$@Composable private fun common( p: Props, parent: Any?, ): Modifier</ID>
+    <ID>LongMethod:Render.kt$@OptIn(ExperimentalLayoutApi::class) @Composable private fun Element( el: WNode.Element, env: Env, inst: WidgetInstance, parent: Any?, )</ID>
+    <ID>LongMethod:ShellBridge.kt$ShellBridge$private fun dispatch( method: String, a: JSONArray, ): Any?</ID>
+    <ID>LongMethod:ShellNative.kt$ShellNative.Tile$fun draw(frame: String)</ID>
+    <ID>LongMethod:ShellWords.kt$ShellWords$private fun segments(s: String): List&lt;String&gt;</ID>
+    <ID>LongMethod:Speech.kt$NativeSpeech.Session.Listener$override fun onError(code: Int)</ID>
+    <ID>LongMethod:TerminalTiles.kt$@Composable fun TerminalView( term: EmbeddedTerminal, modifier: Modifier, interactive: Boolean = true, textSize: Float? = null, focus: Boolean = false, )</ID>
+    <ID>LongMethod:WidgetRecon.kt$WidgetRecon$private suspend fun shoot( /** The bound widget, or null to draw [info]'s initial layout on its own. */ id: Int?, info: AppWidgetProviderInfo, wDp: Int, hDp: Int, seconds: Int, out: File, notes: JSONArray, bound: String, configured: Boolean, )</ID>
+    <ID>LongMethod:WindowInput.kt$private suspend fun PointerInputScope.handlePointer( wm: WindowManager, window: XdgToplevel, touchSlop: Float, longPressMs: Long, )</ID>
+    <ID>LongParameterList:AppWidgetColors.kt$WidgetColors$( context: Context, background: Int, surface: Int, foreground: Int, muted: Int, accent: Int, border: Int, magenta: Int?, light: Boolean, )</ID>
+    <ID>LongParameterList:AppWidgets.kt$AppWidgets$( id: Int, action: String, x: Double, y: Double, wCss: Double, hCss: Double, )</ID>
+    <ID>LongParameterList:AppWidgets.kt$AppWidgets$( providerName: String, page: Int, cell: JSONObject, wDp: Double, hDp: Double, )</ID>
+    <ID>LongParameterList:AppWidgets.kt$AppWidgets.Renderer$( info: AppWidgetProviderInfo, views: RemoteViews, nw: Int, nh: Int, then: (Image) -&gt; Unit, )</ID>
+    <ID>LongParameterList:Ast.kt$Decl.Source$( override val name: String, val expr: Expr, val every: Expr?, val json: Boolean, val timeout: Expr?, override val pos: Int, /** `status`: the value is {out, err, code, ok} instead of just the output. */ val status: Boolean = false, /** `optional`: a guest source that waits for Linux instead of making the widget need it. */ val optional: Boolean = false, )</ID>
+    <ID>LongParameterList:Bootstrap.kt$Step$( val id: String, val stage: Stage, val label: String, val network: Boolean, /** A failure doesn't stop a fresh install: the system works without it, and it's retried later. */ val optional: Boolean = false, val isDone: (() -&gt; Boolean)? = null, val run: suspend () -&gt; Unit, )</ID>
+    <ID>LongParameterList:Compiler.kt$Compiler$( e: Expr, ev: Ev, s: Scope, what: String, prefix: String = "", )</ID>
+    <ID>LongParameterList:Components.kt$( items: List&lt;Pair&lt;String, () -&gt; Unit&gt;&gt;, onDismiss: () -&gt; Unit, minWidth: Dp, itemPadding: Dp, fontSize: TextUnit, )</ID>
+    <ID>LongParameterList:Components.kt$( title: String, onDismiss: () -&gt; Unit, actions: @Composable RowScope.() -&gt; Unit = {}, contentWidth: Dp = Dp.Unspecified, content: @Composable ColumnScope.() -&gt; Unit, )</ID>
+    <ID>LongParameterList:Compositor.kt$ShmBuffer$( client: Client, id: Int, val pool: ShmPool, private val offset: Int, val width: Int, val height: Int, private val stride: Int, val format: Int, )</ID>
+    <ID>LongParameterList:FileDialogs.kt$( title: String, initial: String, confirm: String, hint: String? = null, onDismiss: () -&gt; Unit, onConfirm: (String) -&gt; Unit, )</ID>
+    <ID>LongParameterList:FileDialogs.kt$( title: String, message: String, confirm: String, onDismiss: () -&gt; Unit, /** Red by default: most confirmations are for something that can't be undone. */ confirmColor: Color = Palette.red, onConfirm: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:FilesChrome.kt$( count: Int, onClose: () -&gt; Unit, onSelectAll: () -&gt; Unit, onCopy: () -&gt; Unit, onCut: () -&gt; Unit, onDelete: () -&gt; Unit, onRename: (() -&gt; Unit)?, onShare: (() -&gt; Unit)?, onOpenWith: (() -&gt; Unit)?, onEdit: (() -&gt; Unit)?, )</ID>
+    <ID>LongParameterList:FilesChrome.kt$( entry: GuestEntry, selected: Boolean, selecting: Boolean, onClick: () -&gt; Unit, onLongClick: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:GlassBlur.kt$GlassBlur.Region$( val l: Float, val t: Float, val r: Float, val b: Float, val tl: Float, val tr: Float, val br: Float, val bl: Float, val alpha: Float, val radius: Float, )</ID>
+    <ID>LongParameterList:Images.kt$( bmpW: Int, bmpH: Int, w: Int, h: Int, offset: Float, )</ID>
+    <ID>LongParameterList:Lexer.kt$Token$( val type: T, val text: String, val pos: Int, /** True if a line break separates this token from the previous one. */ val nl: Boolean, val num: Double = 0.0, /** Numbers written as `3x2` (grid sizes). */ val pair: Pair&lt;Double, Double&gt;? = null, val parts: List&lt;StrPart&gt; = emptyList(), )</ID>
+    <ID>LongParameterList:LiquidGlass.kt$LiquidGlass.Rim$( val l: Float, val t: Float, val r: Float, val b: Float, val tl: Float, val tr: Float, val br: Float, val bl: Float, val alpha: Float, )</ID>
+    <ID>LongParameterList:Native.kt$Native$(fd: Int, buf: ByteBuffer, len: Int, fds: IntArray, nfds: Int)</ID>
+    <ID>LongParameterList:Native.kt$Native$(shm: Long, offset: Int, stride: Int, format: Int, store: Long, rects: IntArray, count: Int)</ID>
+    <ID>LongParameterList:Native.kt$Native$(window: Long, store: Long, x: Int, y: Int, width: Int, height: Int, opaque: Boolean)</ID>
+    <ID>LongParameterList:Previews.kt$Previews$( spec: WidgetSpec, instance: dev.omalauncher.widgets.runtime.WidgetInstance, cells: Pair&lt;Int, Int&gt;, widthPx: Int, heightPx: Int, out: File, ready: suspend () -&gt; Unit, )</ID>
+    <ID>LongParameterList:Previews.kt$Previews$( spec: WidgetSpec, instance: dev.omalauncher.widgets.runtime.WidgetInstance, widthPx: Int, heightPx: Int, out: File, ready: suspend () -&gt; Unit, )</ID>
+    <ID>LongParameterList:Previews.kt$Previews$( spec: WidgetSpec, widthPx: Int, heightPx: Int, out: File, ready: suspend () -&gt; Unit, content: @Composable () -&gt; Unit, )</ID>
+    <ID>LongParameterList:Program.kt$Global.Source$( override val name: String, val kind: String, val arg: Ev?, val every: Double, val json: Boolean, val timeout: Int, /** cmd(...) status: {out, err, code, ok}, and failures aren't reported. */ val status: Boolean = false, /** http(url, headers): the request headers, a map. */ val headers: Ev? = null, /** cmd, stream or file that runs only while Linux is installed, and stays null until then. */ val optional: Boolean = false, )</ID>
+    <ID>LongParameterList:Program.kt$Program$( val name: String, val meta: Map&lt;String, Value&gt;, /** The owl language version it needs; see [Compiler.LEVEL]. */ val level: Int, val size: Pair&lt;Int, Int&gt;?, val minSize: Pair&lt;Int, Int&gt;, val page: Int, val order: Int, /** Tile padding in dp, and an optional tile background. */ val padding: Double, val background: Ev?, val globals: List&lt;Global&gt;, val root: List&lt;WNode&gt;, /** The screen { } block: a full-screen view over the same globals, opened with screen(). */ val screen: List&lt;WNode&gt;? = null, val screenTitle: Ev? = null, val onTap: Action?, val triggers: List&lt;Trigger&gt;, /** Shell commands this widget can run, known without running it; for reviewing shared widgets. */ val commands: List&lt;String&gt;, /** Declared dependencies: package manager -&gt; package names, e.g. pacman -&gt; [jq, curl]. */ val requires: Map&lt;String, List&lt;String&gt;&gt;, /** * Runs commands in the guest or declares packages, so it can't work without Linux. * `optional` sources and terminal(...) or app(...) taps don't count: without Linux * the sources wait and a tap offers to install it. */ val needsLinux: Boolean, /** Programs the widget's fixed commands appear to run (a heuristic), to catch undeclared dependencies. */ val programs: Set&lt;String&gt;, /** Reads `time`, so it needs a frame clock while visible. */ val animated: Boolean, /** Has a Terminal node. */ val terminal: Boolean = false, val nodeCount: Int, )</ID>
+    <ID>LongParameterList:Pty.kt$Pty$(cwd: String, argv: Array&lt;String&gt;, env: Array&lt;String&gt;, rows: Int, cols: Int, pid: IntArray)</ID>
+    <ID>LongParameterList:RemoteInput.kt$RemoteInput$( buttons: Int, dx: Int, dy: Int, wheel: Int, pan: Int, )</ID>
+    <ID>LongParameterList:RootedGuest.kt$RootedGuest$( appId: String, wmClass: String?, exec: String, showDesktop: () -&gt; Unit, onLine: (String) -&gt; Unit = {}, )</ID>
+    <ID>LongParameterList:ShellErrors.kt$ShellErrors$( context: Context, text: String, signature: String, mode: String, detail: String, )</ID>
+    <ID>LongParameterList:ShellNative.kt$ShellNative.Tile$( x: Float, y: Float, w: Float, h: Float, dpr: Float, )</ID>
+    <ID>LongParameterList:ShellTerminals.kt$ShellTerminals$( id: String, owner: String?, command: String?, cols: Int, rows: Int, restart: Boolean, )</ID>
+    <ID>LongParameterList:ShellWidgets.kt$ShellWidgets$( key: String, cols: Int, rows: Int, width: Double, height: Double, )</ID>
+    <ID>LongParameterList:ShellWidgets.kt$ShellWidgets$( key: String, screen: Boolean, id: String, name: String, args: List&lt;Double&gt;, )</ID>
+    <ID>LongParameterList:Tarball.kt$( url: String, into: File, onProgress: (Int) -&gt; Unit = {}, maxMegabytes: Int = Int.MAX_VALUE, keep: (String) -&gt; Boolean, )</ID>
+    <ID>LongParameterList:TerminalTiles.kt$( term: EmbeddedTerminal, modifier: Modifier, interactive: Boolean = true, textSize: Float? = null, focus: Boolean = false, )</ID>
+    <ID>LongParameterList:TerminalTiles.kt$TerminalTiles$( imeHeight: Int, imeTarget: Int, windowHeight: Int, margin: Float, top: Float, minHeight: Float, )</ID>
+    <ID>LongParameterList:WallpaperBackdrop.kt$WallpaperBackdrop.Methods$( val wm: Any, val mirror: java.lang.reflect.Method, val listener: java.lang.reflect.Constructor&lt;*&gt;, val layerArgs: java.lang.reflect.Constructor&lt;*&gt;, val layerBuild: java.lang.reflect.Method, val captureLayers: java.lang.reflect.Method, val argsBuilder: java.lang.reflect.Constructor&lt;*&gt;, val argsBuild: java.lang.reflect.Method, val setScale: java.lang.reflect.Method, val setCrop: java.lang.reflect.Method, val exclude: java.lang.reflect.Method, val captureDisplay: java.lang.reflect.Method, val asBitmap: java.lang.reflect.Method, val hardwareBuffer: java.lang.reflect.Method, )</ID>
+    <ID>LongParameterList:WidgetEngine.kt$WidgetEngine$( file: File, previous: WidgetSpec?, stamp: Long, error: String, hash: String, )</ID>
+    <ID>LongParameterList:WidgetEngine.kt$WidgetSpec$( val file: File, val name: String, val page: Int, val order: Int, val program: Program?, val error: String? = null, /** Preferred size in grid cells; used when the widget is first placed. */ val size: Pair&lt;Int, Int&gt;? = null, /** Resizing stops here. */ val minSize: Pair&lt;Int, Int&gt; = 1 to 1, /** The file's modification time when it was compiled; unchanged files aren't recompiled. */ val stamp: Long = 0, )</ID>
+    <ID>LongParameterList:WidgetRecon.kt$WidgetRecon$( /** The bound widget, or null to draw [info]'s initial layout on its own. */ id: Int?, info: AppWidgetProviderInfo, wDp: Int, hDp: Int, seconds: Int, out: File, notes: JSONArray, bound: String, configured: Boolean, )</ID>
+    <ID>LongParameterList:WidgetTile.kt$( spec: WidgetSpec, instance: WidgetInstance?, cells: Pair&lt;Int, Int&gt;?, focused: Boolean, modifier: Modifier, onTap: () -&gt; Unit, needs: List&lt;String&gt;, install: WidgetEngine.Install?, onInstall: () -&gt; Unit, onFix: (String) -&gt; Unit, /** Where Linux stands, if the widget needs it and it isn't running: a placeholder keeps its cells. */ waitsForLinux: LinuxState? = null, onInstallLinux: () -&gt; Unit = {}, )</ID>
+    <ID>LongParameterList:WindowRenderer.kt$WindowRenderer$( layers: MutableList&lt;Layer&gt;, surface: Surface, x: Int, y: Int, scale: Int, inPopup: Boolean, )</ID>
+    <ID>NestedBlockDepth:AudioBridge.kt$AudioBridge$private fun pump()</ID>
+    <ID>NestedBlockDepth:Bootstrap.kt$Bootstrap$private fun extract(tarball: File)</ID>
+    <ID>NestedBlockDepth:Bootstrap.kt$Bootstrap$private fun obtainTarball(): File</ID>
+    <ID>NestedBlockDepth:Client.kt$Client$fun run()</ID>
+    <ID>NestedBlockDepth:Client.kt$Client$private fun writeLoop()</ID>
+    <ID>NestedBlockDepth:Compiler.kt$Compiler$private fun ex( e: Expr, s: Scope, ): Ev</ID>
+    <ID>NestedBlockDepth:G1Protocol.kt$G1Protocol$fun pages(text: String): List&lt;String&gt;</ID>
+    <ID>NestedBlockDepth:G2Protocol.kt$G2Protocol$fun transcript(payload: ByteArray): Pair&lt;String, Boolean&gt;?</ID>
+    <ID>NestedBlockDepth:HomeItems.kt$Shortcuts$private fun tidy()</ID>
+    <ID>NestedBlockDepth:IconTheme.kt$IconTheme.Companion$private fun lookup( lut: IntArray, r: Int, g: Int, b: Int, ): Int</ID>
+    <ID>NestedBlockDepth:Json.kt$Json.Reader$fun value(): Value</ID>
+    <ID>NestedBlockDepth:Lexer.kt$Lexer$private fun matchBrace(from: Int): Int</ID>
+    <ID>NestedBlockDepth:Parser.kt$Parser$private fun decl(): Decl</ID>
+    <ID>NestedBlockDepth:Parser.kt$Parser$private fun primary(): Expr</ID>
+    <ID>NestedBlockDepth:Paste.kt$Paste$fun download( id: String, userAgent: String, ): String</ID>
+    <ID>NestedBlockDepth:QuickSettings.kt$QuickSettings$private fun tile(id: String): JSONObject?</ID>
+    <ID>NestedBlockDepth:Raster.kt$Raster$fun dither( argb: IntArray, width: Int, height: Int, ): BooleanArray</ID>
+    <ID>NestedBlockDepth:Share.kt$Share$fun prepare(text: String): String</ID>
+    <ID>NestedBlockDepth:ShellNative.kt$ShellNative.Tile$fun draw(frame: String)</ID>
+    <ID>NestedBlockDepth:ShellNet.kt$ShellNet$private fun handle(r: JSONObject): JSONObject?</ID>
+    <ID>NestedBlockDepth:ShellNet.kt$ShellNet.Stream$override fun run()</ID>
+    <ID>NestedBlockDepth:ShellWords.kt$ShellWords$private fun segments(s: String): List&lt;String&gt;</ID>
+    <ID>NestedBlockDepth:WidgetInstance.kt$WidgetInstance$private suspend fun update( slot: Int, g: Global.Source, )</ID>
+    <ID>NestedBlockDepth:WidgetRecon.kt$WidgetRecon$private suspend fun shoot( /** The bound widget, or null to draw [info]'s initial layout on its own. */ id: Int?, info: AppWidgetProviderInfo, wDp: Int, hDp: Int, seconds: Int, out: File, notes: JSONArray, bound: String, configured: Boolean, )</ID>
+  </CurrentIssues>
+</SmellBaseline>

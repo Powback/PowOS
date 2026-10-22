@@ -1,0 +1,48 @@
+# The complexity lint for the Kotlin app (targets/android/lint-complexity.sh runs detekt with this, and only this).
+# Same limits as the shell's TS (shell/eslint.config.mjs): per function cyclomatic 10, cognitive 10, nesting depth 3,
+# 60 lines, 4 parameters. detekt's thresholds are "triggers at", hence 11 / 11 / 4 / 5.
+# Old debt: app/config/detekt-baseline.xml (per function id) - it only shrinks.
+config:
+  validation: true
+build:
+  maxIssues: 0
+complexity:
+  active: true
+  CyclomaticComplexMethod:
+    active: true
+    threshold: 11
+    ignoreSimpleWhenEntries: false
+    ignoreSingleWhenExpression: false
+    ignoreNestingFunctions: false
+  CognitiveComplexMethod:
+    active: true
+    threshold: 11
+  NestedBlockDepth:
+    active: true
+    threshold: 4
+  LongMethod:
+    active: true
+    threshold: 60
+  LongParameterList:
+    active: true
+    functionThreshold: 5
+    constructorThreshold: 7
+    ignoreDefaultParameters: false
+  ComplexCondition: { active: false }
+  ComplexInterface: { active: false }
+  LabeledExpression: { active: false }
+  LargeClass: { active: false }
+  MethodOverloading: { active: false }
+  NamedArguments: { active: false }
+  NestedScopeFunctions: { active: false }
+  ReplaceSafeCallChainWithRun: { active: false }
+  StringLiteralDuplication: { active: false }
+  TooManyFunctions: { active: false }
+comments: { active: false }
+coroutines: { active: false }
+empty-blocks: { active: false }
+exceptions: { active: false }
+naming: { active: false }
+performance: { active: false }
+potential-bugs: { active: false }
+style: { active: false }

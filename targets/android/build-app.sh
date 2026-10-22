@@ -21,6 +21,13 @@ if [ -n "$dirty" ] && [ "${POWOS_BUILD_DIRTY:-}" != 1 ]; then
   echo "$dirty" | sed 's/^/  /' >&2
   exit 3
 fi
+# The complexity lint (targets/android/lint-complexity.sh: per function cyclomatic/cognitive 10, depth 3, 60 lines,
+# 4 params; old debt in app/config/detekt-baseline.xml, which only shrinks): a function over it doesn't ship.
+# POWOS_SKIP_COMPLEXITY=1 for a deliberate local experiment; exit 2 (no docker/image/jar) only warns.
+if [ "${POWOS_SKIP_COMPLEXITY:-}" != 1 ]; then
+  cx=0; "$HERE/lint-complexity.sh" || cx=$?
+  if [ "$cx" = 1 ]; then echo "build-app: refusing - the complexity lint failed (above)" >&2; exit 4; fi
+fi
 AAD=${ANDROID_APP_DEV:-$HOME/Projects/android-app-dev}
 want=/Projects${HERE#$HOME/Projects}/app
 link=$AAD/projects/powos

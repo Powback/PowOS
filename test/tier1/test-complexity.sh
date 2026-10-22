@@ -4,6 +4,8 @@
 #   TS/TSX/JS (shell/, apps/*/ui): shell/dev/lint-complexity.sh --apps - per function cyclomatic 10, cognitive 10,
 #     depth 3, 60 lines, 4 params; old debt frozen in shell/dev/complexity-baseline*.json (a count per file and rule).
 #     A new violation fails; an entry no longer needed fails until pruned; an entry above HEAD's fails.
+#   Kotlin (targets/android/app): targets/android/lint-complexity.sh - detekt, the same limits, baseline
+#     targets/android/app/config/detekt-baseline.xml (one id per function).
 #   Bash (bin/, lib/, build/): build/complexity.py --check (the CC ratchet, build/complexity-budget.txt).
 #
 # Needs shell/node_modules (npm ci in shell/) for the TS half; skipped (not failed) without it.
@@ -38,6 +40,14 @@ case $rc in
          && ok "5 params + depth 4 in a new file fail" || bad "new violation failed without naming the rules" ;;
     2) echo "  skip - no shell/node_modules" ;;
     *) bad "a function with 5 params and depth 4 passed the lint" ;;
+esac
+
+echo "== Kotlin (targets/android/app) =="
+out=$(bash "$ROOT/targets/android/lint-complexity.sh" 2>&1); rc=$?
+case $rc in
+    0) ok "detekt: no function over the limits beyond app/config/detekt-baseline.xml, no stale ids" ;;
+    2) echo "  skip - $out" ;;
+    *) bad "kotlin complexity lint"; echo "$out" | sed 's/^/       /' | head -30 ;;
 esac
 
 echo "== Bash (bin/, lib/, build/) =="
