@@ -130,6 +130,9 @@ function openHere() {
   drawer.value = 1;
 }
 
+/** The foot's pill field (home.tsx: always there, parked while the search widget is on the grid). */
+const footField = () => document.querySelector<HTMLTextAreaElement>(".home > .bar textarea");
+
 /** Asked from the pill: the one chat surface (the drawer's chat) takes it - from PowOS AI's panel too. */
 function askHere(text: string) {
   pullKind.value = "apps";
@@ -140,7 +143,7 @@ function askHere(text: string) {
  * The search/ask bar: the pill PowOS AI's page asks in (shell.css .pill - the reference material, the field growing to
  * three rows upward over home without moving anything under it, the mic on its right), "search" its placeholder.
  */
-export function Bar() {
+export function Bar({ proxy = false }: { proxy?: boolean }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const [focused, setFocused] = useState(false);
   const s = speech.value;
@@ -151,8 +154,8 @@ export function Bar() {
   return (
     <form
       class={`bar ${active ? "active" : ""}`}
-      data-p
-      ref={followOpenness}
+      data-p={!proxy || undefined}
+      ref={proxy ? undefined : followOpenness}
       onSubmit={(e) => {
         e.preventDefault();
         const best = pullKind.value === "apps" ? matches.value[0] : null;
@@ -161,7 +164,9 @@ export function Bar() {
       }}
       onClick={() => {
         openHere();
-        input.current?.focus();
+        // The search widget on the grid is the pill's face only: the typing is the foot's pill (home.tsx, parked
+        // there while the widget is on the grid), which comes up with the drawer as the original did.
+        (proxy ? footField() : input.current)?.focus();
         powos.keyboard.show();
       }}
     >
@@ -185,6 +190,8 @@ export function Bar() {
         autocomplete="off"
         autoCapitalize="off"
         spellcheck={false}
+        readOnly={proxy}
+        tabIndex={proxy ? -1 : undefined}
       />
     </form>
   );

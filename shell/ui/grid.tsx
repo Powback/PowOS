@@ -29,7 +29,7 @@ import { AppWidgetFace } from "./appwidget.tsx";
 import { Island } from "./island.tsx";
 import { AgentsPanel } from "./agents.tsx";
 import { migrateRecents, RecentsPanel } from "./recentwidget.tsx";
-import { footSearch, isFootSearch, placeItem, SearchPanel } from "./searchwidget.tsx";
+import { dropSearchOnFoot, footSearch, hoverFoot, isFootSearch, placeItem, putBackInBar, SEARCH_KEY, SearchPanel } from "./searchwidget.tsx";
 import { openAgents } from "../agents.ts";
 import type { Cell, HomeItem } from "../types.ts";
 
@@ -252,6 +252,7 @@ export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boo
     carry.value = { ...carry.value, x: ev.clientX - geo.left, y: ev.clientY - geo.top };
     // Over the dock, the dock makes room for it (an app; a widget or a folder passes over it).
     hoverDock(carry.value, ev.clientX, ev.clientY);
+    hoverFoot(carry.value, ev.clientX, ev.clientY);
   };
   const up = async (ev: PointerEvent) => {
     if (ev.pointerId !== e.pointerId) return;
@@ -259,36 +260,42 @@ export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boo
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", up);
     clearInterval(turner);
-    const c = carry.value;
-    // Picked tiles carried together: onto home only, all or none.
-    const party = c && ev.type === "pointerup" ? partyAim(c) : null;
-    if (ev.type !== "pointerup" || !c || party) {
-      dockAim.value = null;
-      carry.value = null;
-      return party && dropParty(party);
-    }
-    // Let go over the dock: pinned there (dockdrop.ts) - not dropped on home under it.
-    const docked = dropOnDock(c, ev.clientX, ev.clientY);
-    const target = docked ? null : aim(c);
-    carry.value = null;
-    if (docked) return;
-    // Taken out of the dock and let go off it: unpinned, and on home where it's let go (if there's room there).
-    if (c.fromDock && c.app) {
-      setDocked(c.app, false);
-      navigator.vibrate?.(10);
-      if (target?.cell) await addHome(c.app, target.page, target.cell);
-      return;
-    }
-    if (c.fromFolder) return dropFromFolder(c, target);
-    if (!target) return;
-    navigator.vibrate?.(10);
-    if (c.app) await powos.home.add(c.app, target.page, target.cell);
-    else if (target.group) await powos.home.group(c.item!.key, target.group);
-    else await placeItem(c.item!.key, target.cell!, target.page);
+    await letGo(carry.value, ev);
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", up);
+}
+
+/** [c] let go at [ev] (startCarry): on the foot, the dock, a folder, or home's grid where the finger is. */
+async function letGo(c: Carry | null, ev: PointerEvent) {
+  // The search widget let go over the foot (the bar's slot, the dock or under it): back in the foot there.
+  if (dropSearchOnFoot(c, ev)) return;
+  // Picked tiles carried together: onto home only, all or none.
+  const party = c && ev.type === "pointerup" ? partyAim(c) : null;
+  if (ev.type !== "pointerup" || !c || party) {
+    dockAim.value = null;
+    carry.value = null;
+    return party && dropParty(party);
+  }
+  // Let go over the dock: pinned there (dockdrop.ts) - not dropped on home under it.
+  const docked = dropOnDock(c, ev.clientX, ev.clientY);
+  const target = docked ? null : aim(c);
+  carry.value = null;
+  if (docked) return;
+  // Taken out of the dock and let go off it: unpinned, and on home where it's let go (if there's room there).
+  if (c.fromDock && c.app) {
+    setDocked(c.app, false);
+    navigator.vibrate?.(10);
+    if (target?.cell) await addHome(c.app, target.page, target.cell);
+    return;
+  }
+  if (c.fromFolder) return dropFromFolder(c, target);
+  if (!target) return;
+  navigator.vibrate?.(10);
+  if (c.app) await powos.home.add(c.app, target.page, target.cell);
+  else if (target.group) await powos.home.group(c.item!.key, target.group);
+  else await placeItem(c.item!.key, target.cell!, target.page);
 }
 
 /** A tile's press: a tap opens, a long press lifts it (and selects it, if it's let go where it is). */
@@ -706,15 +713,27 @@ function Actions({ item }: { item: HomeItem }) {
           settings
         </button>
       )}
-      <button
-        class="danger"
-        onClick={async () => {
-          selected.value = null;
-          await powos.home.remove(item.key);
-        }}
-      >
-        remove
-      </button>
+      {item.key === SEARCH_KEY ? (
+        // The search widget is never removed (the drawer needs it): it goes back to the bar.
+        <button
+          onClick={() => {
+            selected.value = null;
+            void putBackInBar();
+          }}
+        >
+          put back in bar
+        </button>
+      ) : (
+        <button
+          class="danger"
+          onClick={async () => {
+            selected.value = null;
+            await powos.home.remove(item.key);
+          }}
+        >
+          remove
+        </button>
+      )}
     </div>
   );
 }

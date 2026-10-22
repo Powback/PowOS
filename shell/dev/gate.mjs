@@ -536,6 +536,151 @@ async function libraryDragCheck() {
 }
 
 /**
+ * In the page (the user, 2026-10-23, the 4th report: as a widget, search "no longer works with the pull-up launcher"):
+ * by default the pill is in the bar and "+ widget" lists it; the drawer opened from it has the bar's pill to type in.
+ */
+async function searchDefaultCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const A = await importShim("./ui/appwidget.tsx");
+  const fails = [];
+  const shown = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible" && +getComputedStyle(el).opacity > 0.5;
+  if (S.home.value.items.some((i) => i.kind === "panel" && i.name === "search")) fails.push("the mock home starts with the search widget on the grid");
+  if (!shown(document.querySelector(".home > .bar .bar-pill"))) fails.push("default: no search pill in the bar");
+  S.editing.value = true;
+  A.picker.value = true;
+  await sleep(500);
+  if (!/search bar/.test(document.body.innerText)) fails.push('"+ widget" doesn\'t list the search bar');
+  A.picker.value = false;
+  S.editing.value = false;
+  await sleep(300);
+  return fails;
+}
+
+/** A pull up from [el] (a mouse drag: home's gesture path for a desktop browser), then the drawer's state. */
+async function pullUpFrom(el) {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const r = el.getBoundingClientRect();
+  // Right of the middle: the left half's pull-up can be PowOS AI's panel (state.ts pullPanels), not the drawer.
+  const [x, y] = [r.left + r.width * 0.8, r.top + r.height / 2];
+  const fire = (type, dy, buttons) => el.dispatchEvent(new PointerEvent(type, { pointerId: 9, pointerType: "mouse", clientX: x, clientY: y - dy, buttons, bubbles: true, isPrimary: true }));
+  fire("pointerdown", 0, 1);
+  for (let dy = 10; dy <= 220; dy += 30) {
+    fire("pointermove", dy, 1);
+    await sleep(16);
+  }
+  fire("pointerup", 220, 0);
+  await sleep(600);
+}
+
+/** The drawer is open with the bar's pill on screen, over the drawer's window (not under an app row). */
+function drawerWithPill(where) {
+  const pill = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
+  const clip = document.querySelector(".home .launcher-clip")?.getBoundingClientRect();
+  const bar = document.querySelector(".home > .bar");
+  const fails = [];
+  if (!document.querySelector(".home.open")) return [`${where}: the drawer didn't open`];
+  if (!pill?.width || +getComputedStyle(bar).opacity < 0.9) fails.push(`${where}: the open drawer has no search pill`);
+  else if (clip && clip.bottom > pill.top + 2) fails.push(`${where}: the drawer's window runs ${Math.round(clip.bottom - pill.top)} px under the pill`);
+  return fails;
+}
+
+/** Closes the drawer (Back's way) and waits for it to settle. */
+async function closeDrawerNow() {
+  const S = await importShim("./state.ts");
+  S.closeDrawer?.();
+  if (S.drawer.value) S.drawer.value = 0;
+  await new Promise((ok) => setTimeout(ok, 500));
+}
+
+/**
+ * In the page: the search widget, wherever it sits, drives the pull-up launcher as the bar's pill does - pulled up
+ * from or tapped, in the bar and on the grid; put back (the tile's button), it's the bar's again. Folded and unfolded.
+ */
+async function searchLauncherCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const W = await importShim("./ui/searchwidget.tsx");
+  const fails = [];
+  const { pullUpFrom, drawerWithPill, closeDrawerNow, searchPutBack, searchToDock } = window.__sp;
+  await pullUpFrom(document.querySelector(".home > .bar .bar-pill"));
+  fails.push(...drawerWithPill("pulled up from the bar"));
+  await closeDrawerNow();
+  // Moved onto the grid (edit mode, as a finger does: placeItem).
+  S.editing.value = true;
+  await sleep(400);
+  const was = W.footSearch.value;
+  if (!was) return [...fails, "edit mode: no search tile to move"];
+  await W.placeItem("panel:search", { ...was.cell, y: Math.max(0, was.cell.y - 1) }, was.page);
+  S.editing.value = false;
+  await sleep(500);
+  const tile = document.querySelector('.home-tile[data-key="panel:search"] .bar-pill');
+  if (!tile) return [...fails, "moved: no search widget on the grid"];
+  if (+getComputedStyle(document.querySelector(".home > .bar")).opacity > 0.1) fails.push("moved: the bar's pill still shows beside the widget");
+  await pullUpFrom(tile);
+  fails.push(...drawerWithPill("pulled up from the widget"));
+  await closeDrawerNow();
+  tile.click();
+  await sleep(500);
+  fails.push(...drawerWithPill("tapped on the widget"));
+  if (document.activeElement !== document.querySelector(".home > .bar textarea")) fails.push("tapped on the widget: the bar's field isn't the one typing");
+  await closeDrawerNow();
+  return [...fails, ...(await searchPutBack()), ...(await searchToDock())];
+}
+
+/**
+ * The user's own move (2026-10-23, 5th report): edit mode, the search bar's tile carried down onto the dock and let
+ * go - the pill is in the foot under the dock (folded), back in the bar (unfolded), and the drawer still has it.
+ */
+async function searchToDock() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const G = await importShim("./ui/grid.tsx");
+  const W = await importShim("./ui/searchwidget.tsx");
+  const wide = !!document.querySelector(".home.wide");
+  S.editing.value = true;
+  await sleep(400);
+  const tile = document.querySelector('.home-tile[data-key="panel:search"]')?.getBoundingClientRect();
+  // Folded the dock's row (under the dock); wide the one bar's middle (no "under" there).
+  const to = document.querySelector(wide ? ".home > .edit-sheet" : ".home > .dock:not(.dock-tray)")?.getBoundingClientRect();
+  if (!tile || !W.footSearch.value || !to) return ["edit mode: no search tile or foot to drag it to"];
+  const at = (type, x, y) => new PointerEvent(type, { pointerId: 11, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true });
+  G.startCarry({ item: W.footSearch.value }, at("pointerdown", tile.left + 20, tile.top + 10), { x: 20, y: 10 });
+  window.dispatchEvent(at("pointermove", to.left + to.width / 2, to.top + to.height / 2));
+  await sleep(100);
+  window.dispatchEvent(at("pointerup", to.left + to.width / 2, to.top + to.height / 2));
+  await sleep(500);
+  S.editing.value = false;
+  await sleep(400);
+  const fails = [];
+  if (W.footBelow.value !== (wide ? "" : "1")) fails.push(`dragged onto the foot: footBelow is "${W.footBelow.value}"`);
+  if (W.hasSearchWidget()) fails.push("dragged onto the foot: the search widget stayed on the grid");
+  await window.__sp.pullUpFrom(document.querySelector(".home > .bar .bar-pill"));
+  fails.push(...window.__sp.drawerWithPill("pulled up after the drop on the foot"));
+  await window.__sp.closeDrawerNow();
+  W.footBelow.value = "";
+  return fails;
+}
+
+/** The tile's "put back in bar": the widget leaves the grid, the bar has the pill at rest again. */
+async function searchPutBack() {
+  const S = await importShim("./state.ts");
+  S.editing.value = true;
+  S.selected.value = "panel:search";
+  await new Promise((ok) => setTimeout(ok, 400));
+  const button = [...document.querySelectorAll(".tile-actions button")].find((b) => b.textContent.trim() === "put back in bar");
+  if (!button) return ["edit mode: the search widget has no \"put back in bar\""];
+  button.click();
+  await new Promise((ok) => setTimeout(ok, 500));
+  S.editing.value = false;
+  await new Promise((ok) => setTimeout(ok, 400));
+  const fails = [];
+  if (S.home.value.items.some((i) => i.kind === "panel" && i.name === "search")) fails.push("put back: the search widget is still on the grid");
+  if (+getComputedStyle(document.querySelector(".home > .bar")).opacity < 0.9) fails.push("put back: no pill in the bar");
+  return fails;
+}
+
+/**
  * In the page, edit mode (the user, 2026-10-22): a finger held on empty space then dragged draws the selection
  * rectangle and picks the two app tiles it touches; a quick sideways swipe there draws none (the page swipe's); out of
  * edit mode none either. Mock home only (synthetic pointers on the headless page).
@@ -1169,6 +1314,17 @@ try {
         }
         return [];
       })));
+  // The search widget and the pull-up launcher (the user, 2026-10-23): default in the bar and in "+ widget", pulled up
+  // or tapped from the bar and from the grid, put back; after a reload a pill is there again. Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `search-launcher-${label}`, viewport).then(async (r) => {
+        const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock} }`;
+        const s = await whenReady(r, async () => [...(await r.page.evaluate(searchDefaultCheck)), ...(await r.page.evaluate(helpers).then(() => r.page.evaluate(searchLauncherCheck)))]);
+        if (s.problems.length) return s;
+        await r.page.reload().catch(() => {});
+        return whenReady(r, () => r.page.evaluate(() => (document.querySelector(".home > .bar .bar-pill, .search-face .bar-pill") ? [] : ["after a reload: no search pill anywhere"])));
+      }));
   // Edit mode: a rectangle drawn on empty space picks tiles, picked tiles move together (the user, 2026-10-22).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])

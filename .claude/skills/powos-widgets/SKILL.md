@@ -133,6 +133,13 @@ strip only - not the cause when a drag in a tile fails.
 - Edit mode: the foot's pill is a grid tile (searchwidget.tsx footSearch, key panel:search, lowest free row: whole
   row folded, middle 5 columns wide); placeItem() turns a move/resize of it into addPanel("search"). The dock stays;
   the edit sheet takes the pill's slot (wide: the bar's middle). Gate: edit-search-folded/-unfolded.
+- Search widget on the grid (2026-10-23, P0): the foot's <Bar/> is ALWAYS rendered - the drawer's search. With
+  panel:search on home it's parked (.home.search-parked: order after the dock, margin-top -48px = no room, opacity
+  min(1, 3p), clip ends 52px-strip above the stage foot); the tile is <Bar proxy/> (readonly, tap = open + focus the
+  foot's textarea). Without this the pulled-up launcher had no search at all (the 4th report). Never "remove": the
+  tile's "put back in bar", "+ widget" > search bar, or a drop on the edit sheet (kept while the search is carried)
+  = putBackInBar(); a drop on the dock row folded = back in the foot under the dock (footBelow "1"). gesture.ts
+  tableOf keys on search-parked too. Gate: search-launcher-folded/-unfolded.
 - Relayout: measure() never runs while document.hidden and compares cellW (column count) too; Pages useMeasured and
   hosts/wide.ts recheck on visibilitychange (+2 frames, +400 ms), pageshow, orientationchange, resize, ResizeObserver.
   Gate: relayout-landscape/-fold/-unfold. The mock can't reproduce the phone's stuck-wide state: verify on the device.

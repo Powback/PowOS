@@ -28,7 +28,7 @@ import { AiView, PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
 import { Recents } from "./recents.tsx";
 import { dockTap } from "./desktops.ts";
-import { footBelow, hasSearchWidget } from "./searchwidget.tsx";
+import { footBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
 import { byKey, carry, dock, dockAim, dockDrag, drawer, editing, folder, menu, page, pullKind, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
@@ -326,7 +326,7 @@ export function Home() {
       <div class="screens" {...homeGestures()}>
         <PowAiPage />
         <div
-          class={`home ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
+          class={`home ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
         >
           <div class="stage">
             <div class="home-content" data-p ref={followOpenness}>
@@ -347,7 +347,9 @@ export function Home() {
               </div>
             </div>
           </div>
-          {!hasSearchWidget() && <Bar />}
+          {/* Always the foot's pill: the drawer's search. With the search widget on the grid it's parked (shell.css
+              .search-parked): unseen at rest, up with the drawer, which the widget opens. */}
+          <Bar />
           <Dock />
           {wideHome.value && <DockTray />}
           <AppMenu />

@@ -11,7 +11,7 @@ import { openScreen } from "../screens.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
 import { geometry, placeNew, placeNewCells } from "./grid.tsx";
 import { hasRecentsWidget, recentsSpot } from "./recentwidget.tsx";
-import { footBelow, hasSearchWidget } from "./searchwidget.tsx";
+import { footAim, footBelow, SEARCH_KEY, hasSearchWidget, putBackInBar } from "./searchwidget.tsx";
 import { startNewApp } from "./appbuild.tsx";
 import type { AppWidgetProvider, ThemeChoice } from "../types.ts";
 
@@ -88,6 +88,9 @@ try {
   // No local storage: nothing to restore.
 }
 
+/** A tile carried that isn't the search widget (the sheet gives way for it). */
+const carriedAway = () => !!carry.value && carry.value.item?.key !== SEARCH_KEY;
+
 /**
  * What the "+ widget" picker offers besides Android's widgets (ui/appwidget.tsx AppWidgetPicker heads its list with
  * these, and PowOS apps' widgets): the shell's own widgets, the stores, and new ones made with the coding agent.
@@ -127,7 +130,14 @@ function ShellAdds({ done, q }: { done: () => void; q: string }) {
       preview: <span class={`aw-foot-preview ${footBelow.value ? "" : "below"}`}><i /><span class="aw-pill-preview">search</span></span>,
       add: () => (footBelow.value = footBelow.value ? "" : "1"),
     });
-  }
+  } else
+    widgets.push({
+      key: "search",
+      label: "search bar",
+      desc: "on home now: put it back in the bar",
+      preview: <span class="aw-pill-preview">search</span>,
+      add: () => void putBackInBar(),
+    });
   if (!home.value.items.some((i) => i.key === "panel:agents"))
     widgets.push({
       key: "agents",
@@ -211,8 +221,9 @@ export function EditSheet() {
   useEffect(() => {
     strip.current?.querySelector<HTMLElement>(".swatch.on")?.scrollIntoView({ inline: "center", block: "nearest" });
   }, [themesOpen.value, themes.value.length]);
-  // Out of the way while a tile is carried: the whole page is somewhere to drop it.
-  if (!open || carry.value) return null;
+  // Out of the way while a tile is carried: the whole page is somewhere to drop it. Not for the search widget: the
+  // sheet holds the bar's slot, where it's put back (searchwidget.tsx footAimAt).
+  if (!open || carriedAway()) return null;
   // The picker in its place while it's open (over home, its own scrolling list).
   if (picker.value) return <AppWidgetPicker onPick={addAppWidget} head={(close, q) => <ShellAdds done={close} q={q} />} />;
   const current = themes.value.find((t) => t.name === picked.value);
@@ -237,7 +248,7 @@ export function EditSheet() {
           </div>
         </div>
       )}
-      <div class="edit-sheet tile" onPointerDown={stop} onTouchStart={stop}>
+      <div class={`edit-sheet tile ${footAim.value === "bar" ? "drop-here" : ""}`} onPointerDown={stop} onTouchStart={stop}>
         <button type="button" class="edit-act" onClick={() => ((themesOpen.value = false), (note.value = null), (picker.value = true))}>
           + widget
         </button>
