@@ -116,6 +116,13 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
 - Seen in the assist overlay with nobody speaking: "Субтитры создавал DimaTorzok" in the field (a Whisper silence
   hallucination) - report to powos-speech if it recurs.
 
+## Reading a FAIL
+- First check which commit ran it: the runner's checkout (verify-runner) ff's per job, but a fix pushed after the job
+  started isn't in it (`git -C .claude/worktrees/verify-runner reflog` vs the log's time). wide-home's 00:40 FAIL ran
+  a pre-fix copy.
+- A query by class (`.bar-pill`) matches the user's own widgets too: scope it to the element you mean (`> .bar`).
+- Before blaming a check for user data, compare with the backup the feature made (wide: home.wide.backup).
+
 ## Frame-stepping (`verify/frames.sh <mp4> gaps|sheet T0 T1|overview`; ffmpeg in a container, files under $HOME)
 - `docker run --rm -v "$PWD":/w -w /w --entrypoint ffmpeg linuxserver/ffmpeg:latest ...` (ffprobe the same way).
 - screenrecord is variable-rate: list frame times
