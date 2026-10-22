@@ -111,8 +111,11 @@ add)
   cmd=("$@"); cwd=$(pwd -P); rel=0; from=
   if wt_of "$cwd"; then from=$wroot; relify "$wsub"
   else for a in "$@"; do wt_of "$a" && { from=$wroot; relify ""; break; }; done; fi
+  # need: the queuing tree's commit - the check waits until the phone runs it (see shipped below), so a check queued
+  # right after `ship.sh request` doesn't FAIL against the old build (prompt-glyph, icon-norm, 2026-10-23).
+  need=; [ -n "$from" ] && need=$(git -C "$from" rev-parse HEAD 2>/dev/null || true)
   j=$Q/$(date +%Y%m%d-%H%M%S)-$$-$task.job
-  { printf 'task=%q\nclose=%s\ntries=0\ncwd=%q\nrel=%s\nfrom=%q\nname=%q\nscreen=%q\nbudget=%s\ncmd=(' "$task" "$close" "$cwd" "$rel" "$from" "$name" "$screen" "$budget"
+  { printf 'task=%q\nclose=%s\ntries=0\ncwd=%q\nrel=%s\nfrom=%q\nname=%q\nscreen=%q\nbudget=%s\nneed=%s\nqt=%s\ncmd=(' "$task" "$close" "$cwd" "$rel" "$from" "$name" "$screen" "$budget" "$need" "$(date +%s)"
     printf '%q ' "${cmd[@]}"; printf ')\n'; } > "$j"
   echo "queued $(basename "$j" .job) - the result goes to board task $task"
   if [ -z "${QUEUE_NO_RUN:-}" ]; then
@@ -205,6 +208,17 @@ EOS
   endjob() { killtree "$1"; for _ in 1 2 3 4 5; do kill -0 "$1" 2>/dev/null || return 0; sleep 1; done; killtree "$1" KILL; }
   # `kill <runner.pid>` stops the window and its check too, frees the verify lock if this runner held it, and hides the pill.
   trap 'for c in $(pgrep -P $$); do killtree $c; done; [ "$(cut -d" " -f1 "$HOME/.cache/powos-verify.lock/who" 2>/dev/null)" = verify-queue ] && rm -rf "$HOME/.cache/powos-verify.lock"; RSTATE=stopped status "" "{\"done\":true,\"summary\":\"Phone checks stopped (the runner was stopped)\"}"; rm -f "$Q/runner.pid"; rm -rf "$Q/runner.lock"; exit 143' TERM
+  # shipped <commit> <queued at>: 0 when the phone runs that commit - in the live shell (ship service's live), and in
+  # the installed APK too when targets/android differs from it. No commit, an unknown one (unpushed), or queued over
+  # NEED_MAX_S (2 h: a refused ship) ago: 0 - it runs anyway.
+  shipped() {
+    local c=$1 live inst; [ -n "$c" ] || return 0
+    [ $(( $(date +%s) - ${2:-0} )) -lt "${NEED_MAX_S:-7200}" ] || return 0
+    git -C "$VR" cat-file -e "$c^{commit}" 2>/dev/null || return 0
+    live=$(cat "${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/live" 2>/dev/null); inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null)
+    if [ -n "$inst" ] && ! git -C "$VR" merge-base --is-ancestor "$c" "$inst" 2>/dev/null \
+       && ! git -C "$VR" diff --quiet "$inst" "$c" -- targets/android 2>/dev/null; then return 1; fi
+    [ -z "$live" ] || git -C "$VR" merge-base --is-ancestor "$c" "$live" 2>/dev/null; }
   # pause <summary>: the user's stop - recorded (the runner stays, runs nothing until the phone's go flag), the pill gone.
   pause() { touch "$Q/paused"; RSTATE=paused status "" "{\"done\":true,\"summary\":$(jstr "$1 · resume on the AI page")}"; }
   # The runner stays while anything is queued (a "test now" needs one waiting): a window that didn't come is waited for again.
@@ -217,21 +231,24 @@ EOS
       window_lock verify-queue "${QUEUE_IDLE_S:-120}" "${WAIT_S:-7200}" >/dev/null || exit 3
       rm -f "$Q/paused"; RSTATE=running   # a go ends a pause
       go=; case "${WL_GOT:-}" in go=*) go=${WL_GOT#go=}; go=${go%% *} ;; esac
-      sel=()
+      sel=(); held=0
       for j in "$Q"/*.job; do
         [ -f "$j" ] || continue
-        task=; . "$j"
-        [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] && sel+=("$j")
+        task=; need=; qt=0; . "$j"
+        [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] || continue
+        # Not on the phone yet: it waits for its ship (a "test now" of exactly this task runs it anyway).
+        if [ "$task" != "$go" ] && ! shipped "$need" "$qt"; then held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): waits for its ship (${need:0:9})"; continue; fi
+        sel+=("$j")
       done
       N=${#sel[@]}; k=0; pass=0; fail=0; first=; prev=
-      [ $N -gt 0 ] || { status "" '{"done":true}' "rm -f /tmp/powos-verify-go"; exit 5; }
+      [ $N -gt 0 ] || { status "" '{"done":true}' "rm -f /tmp/powos-verify-go"; [ $held = 0 ] && exit 5; exit 7; }
       [ -n "$go" ] && echo "$(date +%T) go from the phone: $go ($N checks)"
       for j in "${sel[@]}"; do
         [ -f "$j" ] || continue
         # The checkout to origin's tip before EACH job, not just each window: a window can last an hour, and a check
         # pushed after it began was missing ("No such file", rc 126/127, 2026-10-23).
         verify_tree >/dev/null 2>&1 || true
-        task=; close=0; tries=0; cwd=$PWD; rel=0; from=; name=; screen=; budget=300; cmd=(); . "$j"
+        task=; close=0; tries=0; cwd=$PWD; rel=0; from=; name=; screen=; budget=300; need=; qt=0; cmd=(); . "$j"
         # A job from before repo-relative jobs: its worktree may be gone - run it in the verify checkout instead.
         if [ "$rel" != 1 ] && [[ "$cwd ${cmd[*]}" == *"$REPO/.claude/worktrees/"* ]]; then
           if wt_of "$cwd"; then relify "$wsub"; else relify ""; fi
@@ -293,6 +310,7 @@ EOS
       status "" "{\"done\":true,\"summary\":$(jstr "$sum")}" ) & wait $!
     rc=$?; [ $rc = 3 ] && echo "$(date +%T) no free window in ${WAIT_S:-7200}s - waiting again"
     [ $rc = 6 ] && { echo "$(date +%T) stopped from the phone - paused"; pause "Phone checks paused"; }
+    [ $rc = 7 ] && sleep "${NEED_POLL_S:-60}"   # every queued check waits for a ship: look again in a minute
   done
   RSTATE=idle phone_sh ':' >/dev/null
   rm -f "$Q/runner.pid"; rm -rf "$Q/runner.lock" ;;
