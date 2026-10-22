@@ -188,13 +188,35 @@
   display: flex;
   overflow-x: auto;
   overflow-y: hidden;
-  scroll-snap-type: x mandatory;
+  /* Proximity: the recent apps scroll freely with the finger (momentum), settling on the pinned page or the recents'
+     start only when let go near one. Sideways is the dock's own (gesture.ts inStrip), never home's page swipe. */
+  scroll-snap-type: x proximity;
   scrollbar-width: none;
   overscroll-behavior-x: contain;
   touch-action: pan-x;
 }
 .dock-pages::-webkit-scrollbar { display: none; }
 .dock-page { flex: 0 0 100%; display: flex; align-items: flex-start; gap: 4px; padding: 0 4px; scroll-snap-align: start; scroll-snap-stop: always; }
+/* The recent apps: one row as long as they are, each as wide as a pinned app (six to a width). */
+.dock-page.dock-recent { flex: 0 0 auto; scroll-snap-stop: normal; }
+.dock-recent .app { flex: 0 0 calc((100vw - 28px) / 6); }
+/* Faded at the edges where there's more to scroll, not cut: the right while there's more on, the left once scrolled
+   (a scroll-driven mask, on the compositor; without that support only the right). */
+@property --dock-fade-l { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --dock-fade-r { syntax: "<length>"; inherits: false; initial-value: 24px; }
+.dock.paged .dock-pages {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black var(--dock-fade-l), black calc(100% - var(--dock-fade-r)), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, black var(--dock-fade-l), black calc(100% - var(--dock-fade-r)), transparent 100%);
+}
+@supports (animation-timeline: scroll()) {
+  .dock.paged .dock-pages { animation: dock-fade linear both; animation-timeline: scroll(self x); }
+}
+@keyframes dock-fade {
+  0% { --dock-fade-l: 0px; --dock-fade-r: 24px; }
+  4% { --dock-fade-l: 24px; }
+  96% { --dock-fade-r: 24px; }
+  100% { --dock-fade-l: 24px; --dock-fade-r: 0px; }
+}
 .dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
 .dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
 .dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }

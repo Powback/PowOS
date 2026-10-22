@@ -150,8 +150,8 @@ function useGlide(el: { current: HTMLDivElement | null }, keys: string) {
  * it leaves no gap. With nothing pinned it's only there while an app is carried: a drop zone over the bar's foot.
  */
 /**
- * The dock's second page: the apps opened lately, last first, not those pinned (they're on the first) - as many as a
- * page holds, no scrolling of its own.
+ * After the dock's pinned page: the apps opened lately, last first, not those pinned (they're on the first) - all of
+ * them in a row that scrolls on with the finger (momentum, the browser's own), past what a page holds.
  */
 function DockRecents({ count }: { count: number }) {
   const pinned = new Set(dock.value);
@@ -193,7 +193,8 @@ function Dock() {
   useEffect(() => {
     const node = pagesEl.current;
     if (!node) return;
-    const settle = () => (dockPage.value = Math.round(node.scrollLeft / Math.max(1, node.clientWidth)));
+    // Anywhere in the recent apps (they scroll on past a page) is the second dot.
+    const settle = () => (dockPage.value = Math.min(1, Math.round(node.scrollLeft / Math.max(1, node.clientWidth))));
     node.addEventListener("scrollend", settle);
     return () => node.removeEventListener("scrollend", settle);
   });
@@ -228,8 +229,8 @@ function Dock() {
   return (
     <>
       {/*
-       * Two pages side by side, swiped between by the browser's own scroll snapping (on the compositor): the pinned
-       * apps, then the recent ones. The dots below follow when a scroll settles.
+       * The pinned apps' page, then the recent apps in a row that scrolls on (the browser's own scroll, on the
+       * compositor: momentum, snapping only near the two starts). The dots below follow when a scroll settles.
        */}
       <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p ref={followOpenness}>
         <div class="dock-pages" ref={pagesEl}>
@@ -245,7 +246,7 @@ function Dock() {
           )}
           {(paged || (ghost && !carried)) && (
             <div class="dock-page dock-recent">
-              <DockRecents count={6} />
+              <DockRecents count={30} />
             </div>
           )}
         </div>
