@@ -393,6 +393,8 @@ function seams(items: HomeItem[], joined: Map<string, Record<string, number>>, l
     if (r < 1) return;
     const x = sx > 0 ? px : px - r;
     const y = sy > 0 ? py : py - r;
+    // A third tile already there (the corner is inside the group, not where it turns): no fillet over its face.
+    for (const q of rect.values()) if (q.x0 < x + r - 0.5 && x + 0.5 < q.x1 && q.y0 < y + r - 0.5 && y + 0.5 < q.y1) return;
     const sweep = sx * sy < 0 ? 1 : 0;
     out.push({
       kind: "fillet", x, y, w: r, h: r, cx: sx > 0 ? r : 0, cy: sy > 0 ? r : 0,

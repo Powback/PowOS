@@ -562,6 +562,13 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
                 if (partial && Math.abs(aEnd - want) > 1) overlaps.push(`partial join: ${A.name} ${side} edge off its row line by ${Math.round(aEnd - want)} px`);
               }
             }
+          // No seam piece over a face (a fillet where a third tile already fills the corner: tint over tint).
+          for (const e of document.querySelectorAll(".seam")) {
+            const r = e.getBoundingClientRect();
+            for (const T of joinedTiles)
+              if (Math.min(r.right, T.face.right) - Math.max(r.left, T.face.left) > 1 && Math.min(r.bottom, T.face.bottom) - Math.max(r.top, T.face.top) > 1)
+                overlaps.push(`partial join: a seam piece (${e.className.replace("tile seam ", "")}) over ${T.name}'s face`);
+          }
           // The desktop's grid: one even gutter between neighbouring tiles in a row (its tiles never merge or touch).
           const gutters = [];
           if (document.documentElement.dataset.mode === "desktop") {
