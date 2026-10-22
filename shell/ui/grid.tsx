@@ -307,31 +307,50 @@ function joins(items: HomeItem[]): Map<string, Record<string, number>> {
     const c = shown(i);
     for (let y = c.y; y < c.y + c.h; y++) for (let x = c.x; x < c.x + c.w; x++) at.set(`${x},${y}`, i.key);
   }
-  const out = new Map<string, Record<string, number>>();
+  // An edge joins only where it's covered whole, and only to neighbours whose facing edge is covered whole too: a
+  // tile joined over part of an edge (games 6x3 over fetch 3x3, the right half) bridged the gutter along ALL of it, so
+  // the free half stuck half a gutter lower than the tiles beside it - a ragged step where merged tiles meet.
+  const full = new Map<string, { t: boolean; r: boolean; b: boolean; l: boolean }>();
+  const covered = (i: HomeItem, x0: number, y0: number, dx: number, dy: number, n: number) => {
+    const ks = new Set<string>();
+    for (let k = 0; k < n; k++) {
+      const o = at.get(`${x0 + dx * k},${y0 + dy * k}`);
+      if (o == null || o === i.key) return null;
+      ks.add(o);
+    }
+    return ks;
+  };
+  const sides = new Map<string, Record<"t" | "r" | "b" | "l", Set<string> | null>>();
   for (const i of items) {
     if (!boxed(i)) continue;
     const c = shown(i);
-    const other = (x: number, y: number) => {
-      const k = at.get(`${x},${y}`);
-      return k != null && k !== i.key ? 1 : 0;
+    const s = {
+      t: covered(i, c.x, c.y - 1, 1, 0, c.w),
+      r: covered(i, c.x + c.w, c.y, 0, 1, c.h),
+      b: covered(i, c.x, c.y + c.h, 1, 0, c.w),
+      l: covered(i, c.x - 1, c.y, 0, 1, c.h),
     };
-    const along = (f: (n: number) => number, n: number) => {
-      for (let k = 0; k < n; k++) if (f(k)) return 1;
-      return 0;
-    };
-    const r = c.x + c.w;
-    const b = c.y + c.h;
+    sides.set(i.key, s);
+    full.set(i.key, { t: !!s.t, r: !!s.r, b: !!s.b, l: !!s.l });
+  }
+  const facing = { t: "b", r: "l", b: "t", l: "r" } as const;
+  const out = new Map<string, Record<string, number>>();
+  for (const i of items) {
+    if (!boxed(i)) continue;
+    const s = sides.get(i.key)!;
+    const e = (d: "t" | "r" | "b" | "l") => (s[d] && [...s[d]!].every((k) => full.get(k)?.[facing[d]]) ? 1 : 0);
+    const [t, r, b, l] = [e("t"), e("r"), e("b"), e("l")];
     const j = {
-      "--jt": along((k) => other(c.x + k, c.y - 1), c.w),
-      "--jr": along((k) => other(r, c.y + k), c.h),
-      "--jb": along((k) => other(c.x + k, b), c.w),
-      "--jl": along((k) => other(c.x - 1, c.y + k), c.h),
-      "--ctl": 1 - Math.max(other(c.x - 1, c.y), other(c.x, c.y - 1)),
-      "--ctr": 1 - Math.max(other(r, c.y), other(r - 1, c.y - 1)),
-      "--cbr": 1 - Math.max(other(r, b - 1), other(r - 1, b)),
-      "--cbl": 1 - Math.max(other(c.x - 1, b - 1), other(c.x, b)),
+      "--jt": t,
+      "--jr": r,
+      "--jb": b,
+      "--jl": l,
+      "--ctl": 1 - Math.max(l, t),
+      "--ctr": 1 - Math.max(r, t),
+      "--cbr": 1 - Math.max(r, b),
+      "--cbl": 1 - Math.max(l, b),
     };
-    if (j["--jt"] || j["--jr"] || j["--jb"] || j["--jl"]) out.set(i.key, j);
+    if (t || r || b || l) out.set(i.key, j);
   }
   return out;
 }

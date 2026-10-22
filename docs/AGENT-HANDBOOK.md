@@ -161,6 +161,10 @@ Git and process
   guesses on 2026-10-21: "Chromium drops opacity-0 tiles" shipped and was reverted; the one-column drawer was "almost
   certainly" the recents strip - it was a stale shell.css pushed from another tree). Otherwise
   write "likely" and say what would confirm it.
+- Speed (manager, 2026-10-22): experts work IN PARALLEL - never wait behind another expert's task unless you touch
+  the same files. Bug fixes (alignment, scrolling, clipping, errors) SHIP as soon as they're gated and checked on the
+  device - send a screencap after, no mock review; only NEW designs (layouts, new UI) wait for the manager's mock OK.
+  Batch your shell pushes (each push reloads pages: churn and CPU).
 - Report progress on your board task as you go (the user watches it on the AI page): when you start, set the plan
   (`powos agents task set <t> --plan "a; b; c"` or `--progress 0/N`); at each step `--progress k/N --step "what now"`;
   link commits (`--commit <sha>`, or mention the task id in the message) and review images (`--image <path>`).
