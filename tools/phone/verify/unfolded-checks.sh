@@ -46,7 +46,13 @@ if kg | grep -q true; then
 fi
 if sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock"; then sh_ "input swipe $(x 500) $(y 900) $(x 500) $(y 250) 300"; sleep 1.5; fi
 chk lock
-step "home: merged tiles"; sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk home; shot home-unfolded
+step "home: merged tiles"; sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk home
+# The 22:25 capture was the app drawer, not home (the lock face's swipe up had opened it): Back closes it first.
+q() { "$T/cdp.sh" eval "" "$1" 2>/dev/null | tr -d '"\\'; }
+for _ in 1 2; do [ "$(q '!!document.querySelector(".home.open")')" = true ] || break; sh_ "input keyevent 4"; sleep 1; done; chk home-drawer
+shot home-unfolded
+# Read only: each merged face and seam piece (page px: left top right bottom), so the log says whether they join exactly.
+q 'JSON.stringify([...document.querySelectorAll(".page .home-tile.joined, .page .seam")].map(t=>{const p=t.closest(".page").getBoundingClientRect(),r=(t.querySelector(":scope > .tile")||t).getBoundingClientRect(),f=(n)=>Math.round(n*10)/10;return [(t.dataset.key||t.className).slice(0,24),f(r.left-p.left),f(r.top-p.top),f(r.right-p.left),f(r.bottom-p.top)]}))' | tee -a "$OUT/log.txt"
 
 field() { # page [need-ai] -> "x y" of the compose field's centre in device px, only if it is on screen (read only, CDP)
   "$T/cdp.sh" eval "$1" 'JSON.stringify((()=>{const e=document.querySelector(".ai-compose textarea, .ai-compose input");if(!e)return [0,0];'"${2:+const a=e.closest(\".ai-screen\");if(a&&!a.classList.contains(\"shown\"))return [0,0];}"'const r=e.getBoundingClientRect();if(r.width<20||r.height<10||r.x<0||r.y<0||r.x+r.width>innerWidth+1||r.y+r.height>innerHeight+1)return [0,0];return [Math.round((r.x+r.width/2)*devicePixelRatio),Math.round((r.y+r.height/2)*devicePixelRatio)]})())' 2>/dev/null | tr -dc '0-9,' | tr ',' ' '

@@ -185,6 +185,9 @@ const SCENES = [
   ["swipe-up-right", "home", "", "wallpaper", { from: [0.73, 0.72], to: [0.73, 0.28], ms: 220 }],
   ["swipe-up-left", "home", "", "wallpaper", { from: [0.25, 0.72], to: [0.25, 0.28], ms: 220 }],
   ["search-widget", "home", "await (await U('./bridge.ts')).powos.home.addPanel('search', 0, { x: 0, y: 4, w: 6, h: 1 }); await sleep(300);", "wallpaper"],
+  // The user's unfolded home as a mock (2026-10-22, never their real layout): a 3x3 beside a 3x2 over a 3x1 (one
+  // rectangle), and a 6x3 over a half-width 3x3 on the right page (the L), a row of apps under the first.
+  ["home-merged", "home", "{ const B = (await U('./bridge.ts')).powos; const h = await B.home.get(); const wide = innerWidth >= 700; const pg = h.pages[0] ?? 1; const R = wide ? 7 : 0; const P = wide ? pg : (h.pages[1] ?? pg + 1); await B.home.remove('terminal.owl'); let k = 0; for (const i of h.items.filter((i) => i.kind === 'app' && i.page === pg)) await B.home.place(i.key, { x: k++, y: 3, w: 1, h: 1 }, pg); for (const [key, c, p] of [['clock.owl', { x: 0, y: 0, w: 3, h: 3 }, pg], ['weather.owl', { x: 3, y: 0, w: 3, h: 2 }, pg], ['monitor.owl', { x: R, y: 0, w: 6, h: 3 }, P], ['glance.owl', { x: R + 3, y: 3, w: 3, h: 3 }, P]]) await B.home.place(key, c, p); await B.home.addPanel('app:local.lights/main', pg, { x: 3, y: 2, w: 3, h: 1 }); await sleep(600); }", "wallpaper"],
   ["pill-below-dock", "home", "(await U('./ui/searchwidget.tsx')).footBelow.value = '1';", "wallpaper"],
   ["ai-panel", "home", "S.openPanel('ai');", "wallpaper"],
   ["search-typing", "home", "const f = document.querySelector('.bar textarea, .bar input'); f?.focus(); if (f) { f.value = 'weather tomorrow in oslo and remind me to bring an umbrella'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
@@ -446,7 +449,7 @@ function seamOf(A, B, vertical) {
  * between them), and a partly-joined edge keeps its face where an unjoined edge's is (half a gutter in from its cell
  * line - a whole-edge extension there was the ragged step).
  */
-function seamProblems(A, B, vertical, { bridges, halfGap }) {
+function seamProblems(A, B, vertical, { bridges, halfGap, joined }) {
   const s = seamOf(A, B, vertical);
   if (!s) return [];
   const out = [];
@@ -456,13 +459,15 @@ function seamProblems(A, B, vertical, { bridges, halfGap }) {
     out.push(`partial join: ${A.name} ${s.side} edge not merged with ${B.name} (${Math.round(s.bStart - s.aEnd)} px gap along the shared span)`);
   const aSpan = vertical ? A.cell.bottom - A.cell.top : A.cell.right - A.cell.left;
   const want = (vertical ? A.cell.right : A.cell.bottom) - halfGap;
-  if (s.u1 - s.u0 < aSpan - 2 * halfGap - 2 && Math.abs(s.aEnd - want) > 1) out.push(`partial join: ${A.name} ${s.side} edge off its row line by ${Math.round(s.aEnd - want)} px`);
+  // Covered whole by its neighbours together (a 3x3 beside a 3x2 over a 3x1): that side reaches half the gutter, rightly.
+  const covered = joined.reduce((n, C) => n + (C === A ? 0 : ((c) => (c ? c.u1 - c.u0 : 0))(seamOf(A, C, vertical))), 0);
+  if (covered < aSpan - 2 * halfGap - 2 && Math.abs(s.aEnd - want) > 1) out.push(`partial join: ${A.name} ${s.side} edge off its row line by ${Math.round(s.aEnd - want)} px`);
   return out;
 }
 
 /** Every pair of merged tiles' seams, and no seam piece over a face (a fillet where a third tile fills the corner). */
 function joinProblems(joined, seams, halfGap) {
-  const ctx = { bridges: seams.filter((e) => e.bridge).map((e) => e.r), halfGap };
+  const ctx = { bridges: seams.filter((e) => e.bridge).map((e) => e.r), halfGap, joined };
   const pairs = joined.flatMap((A) => joined.filter((B) => B !== A).flatMap((B) => [...seamProblems(A, B, false, ctx), ...seamProblems(A, B, true, ctx)]));
   const over = seams.flatMap((e) => joined.filter((T) => overlap(e.r, T.face)).map((T) => `partial join: a seam piece (${e.cls.replace("tile seam ", "")}) over ${T.name}'s face`));
   return [...pairs, ...over];

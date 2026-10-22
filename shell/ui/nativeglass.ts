@@ -105,6 +105,16 @@ interface Shape {
 let shapes = new Map<Element, Shape>();
 let shapesDirty = true;
 
+/**
+ * A merged tile's sides joined to a neighbour. A seam's bridge (grid.tsx seams: the gutter along a shared span) joins
+ * the two faces along its long sides: it reaches into both, or the fractional device pixel where the wide tile's free
+ * bottom meets it showed a hairline of unblurred wallpaper through the merged L. Its ends stay put (the group's edge).
+ */
+function joinedSides(el: HTMLElement, j: (side: string) => number): [number, number, number, number] {
+  if (el.classList.contains("bridge")) return el.offsetWidth >= el.offsetHeight ? [1, 0, 1, 0] : [0, 1, 0, 1];
+  return el.parentElement?.classList.contains("joined") ? [j("t"), j("r"), j("b"), j("l")] : [0, 0, 0, 0];
+}
+
 function shapeOf(el: HTMLElement): Shape {
   const cs = getComputedStyle(el);
   const r = (v: string) => parseFloat(v) || 0;
@@ -120,7 +130,7 @@ function shapeOf(el: HTMLElement): Shape {
     radii: [r(cs.borderTopLeftRadius), r(cs.borderTopRightRadius), r(cs.borderBottomRightRadius), r(cs.borderBottomLeftRadius)],
     clips,
     chain,
-    joined: el.parentElement?.classList.contains("joined") ? [j("t"), j("r"), j("b"), j("l")] : [0, 0, 0, 0],
+    joined: joinedSides(el, j),
     blur: parseFloat(cs.getPropertyValue("--glass-blur-native")) || 0,
   };
 }
@@ -131,6 +141,10 @@ function reshape() {
   for (const el of document.querySelectorAll<HTMLElement>(SURFACES)) {
     // A surface inside another: a soft fill on that one's glass (theme.css), none of its own.
     if (el.parentElement?.closest(SURFACES)) continue;
+    // A merged group's inner-corner fillet (grid.tsx seams) is a square with a quarter circle cut out of its tint: the
+    // compositor's regions are rounded boxes only, so a region there blurred the whole square - a pale untinted
+    // quarter-moon poking into the gutter at the L's inner corner. The fillet is tint only (12 px of it).
+    if (el.classList.contains("fillet")) continue;
     // In the launcher (the pull-up AI panel's cards): soft fills on the launcher frame's glass - the frame's region
     // is the panel's one.
     if (el.closest(".launcher") && !el.classList.contains("launcher-frame")) continue;
