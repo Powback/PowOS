@@ -12,20 +12,24 @@
  *     context   the screen as context - the side button's (assist.tsx registers it: setAskContext), never the pet's
  * The side button's panel over an app (assist.tsx) is this same chat: the conversation (chat.tsx ChatView) and asks
  * through askQueued, with the screen, its circled part and live frames as context - its crop screen kept around it.
- *   askQueued(text)  asks; while a turn is under way it waits for it (PowosAiChat.send drops what's sent meanwhile)
+ *   askQueued(text)  asks; while a turn is under way it waits for it, shown as a queued bubble (waiting, unqueue)
  *
  * Autosend: when the dictation ends (~4 s with nothing heard, the mic tapped, a hold let go) the words show in the
  * pill for PREVIEW_MS, then go ("sending"); touching the pill in that moment - or typing, or tapping it while it
  * listens - keeps them there to edit (takeOver).
  */
-import { effect, signal } from "@preact/signals";
+import { computed, effect, signal } from "@preact/signals";
 import { chat, chatting, drawer, page, pullKind, query } from "../state.ts";
 import { dictate, interrupt, type MicTarget } from "./dictation.ts";
 import { powos } from "../bridge.ts";
 
-/** Asked while the manager was mid-turn: sent when that turn ends. */
-let queued: string | null = null;
-/** Sent: if another turn took the chat first (an agent's mail), it was dropped - queued again. */
+/**
+ * Asked while the manager was mid-turn. The host queues it (PowosAiChat.queued: one queue for every chat, this page's
+ * and the side button's); an older host drops it, so then this page keeps it here and sends it when the turn ends.
+ */
+const pageQueue = signal<string[]>([]);
+const hostQueues = () => Array.isArray(chat.peek().queued);
+/** Sent to a host that drops mid-turn asks: if another turn took the chat first (an agent's mail), queued again. */
 let sent: { text: string; at: number } | null = null;
 
 export function askQueued(text: string) {
@@ -33,8 +37,24 @@ export function askQueued(text: string) {
   if (!t) return;
   chatting.value = true;
   query.value = "";
-  if (chat.peek().busy) queued = queued ? `${queued}\n${t}` : t;
+  if (chat.peek().busy && !hostQueues()) pageQueue.value = [...pageQueue.value, t];
   else send(t);
+}
+
+/** Everything waiting for its turn, oldest first (the chats show each as a dimmed bubble with a x). */
+export const waiting = computed(() => {
+  const q = chat.value.queued;
+  return Array.isArray(q) ? q : pageQueue.value.map((text, i) => ({ id: -1 - i, text }));
+});
+
+/** Takes one back before its turn: out of the host's queue (it's never sent), or the page's own. */
+export function unqueue(id: number) {
+  if (id < 0) {
+    pageQueue.value = pageQueue.value.filter((_, i) => -1 - i !== id);
+    return;
+  }
+  chat.value = { ...chat.value, queued: (chat.value.queued ?? []).filter((q) => q.id !== id) };
+  powos.ai.unqueue?.(id);
 }
 
 /** What goes along with a question (the side button's screen, crop, live frames: assist.tsx); null: nothing. */
@@ -57,14 +77,13 @@ async function send(t: string) {
   powos.ai.send(askContext ? await askContext(t) : t, askRecents);
 }
 
-/** What's waiting to be asked (the chat shows it, greyed, until it goes). */
-export const waitingAsk = () => queued;
-
 effect(() => {
   const c = chat.value;
-  if (queued && !c.busy) {
-    const q = queued;
-    queued = null;
+  // The host queues: nothing for the page to do.
+  if (Array.isArray(c.queued)) return void (sent = null);
+  if (pageQueue.value.length && !c.busy) {
+    const [q, ...rest] = pageQueue.value;
+    pageQueue.value = rest;
     send(q);
     return;
   }
@@ -73,7 +92,7 @@ effect(() => {
   const ours = !!last && last.text.startsWith(sent.text);
   if (ours) sent = null;
   else if (c.busy && Date.now() - sent.at < 3000) {
-    queued = queued ? `${sent.text}\n${queued}` : sent.text;
+    pageQueue.value = [sent.text, ...pageQueue.value];
     sent = null;
   } else if (Date.now() - sent.at >= 3000) sent = null;
 });
