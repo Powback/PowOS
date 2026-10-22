@@ -26,6 +26,95 @@ export interface NetInit {
 }
 export type StreamState = "off" | "open" | "retry" | "closed" | "unavailable";
 
+/**
+ * A request that failed, said calmly (an island shows [message], one short line): [kind] what it was - "offline" (the
+ * host isn't reachable from this network: a LAN device away from home, no route, refused, DNS), "timeout", "auth"
+ * (the device answered 401/403), "other"; [detail] the raw text (an IP, the exception) - for the log and a long
+ * press, never the tile. A raw "failed to connect to (192.168.178.x...)" wrapped and cut mid-line on the user's tile.
+ */
+export class NetError extends Error {
+  constructor(
+    readonly kind: "offline" | "timeout" | "auth" | "other",
+    message: string,
+    readonly detail: string,
+  ) {
+    super(message);
+    this.name = "NetError";
+  }
+}
+const CALM: Record<NetError["kind"], string> = {
+  offline: "offline - not reachable from this network",
+  timeout: "not answering",
+  auth: "no longer knows this phone",
+  other: "couldn't reach it",
+};
+/** A raw failure as a NetError (an app throwing its own HTTP status gets the same treatment). */
+export function netError(e: unknown, status?: number): NetError {
+  if (e instanceof NetError) return e;
+  const raw = String((e as Error)?.message ?? e ?? "");
+  const kind: NetError["kind"] =
+    status === 401 || status === 403
+      ? "auth"
+      : /timed? ?out|no answer/i.test(raw)
+        ? "timeout"
+        : /failed to connect|unreachable|no route|refused|unknown ?host|unable to resolve|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED|not connected|network/i.test(raw)
+          ? "offline"
+          : "other";
+  return new NetError(kind, CALM[kind], raw);
+}
+
+/**
+ * The network changed (online again, another Wi-Fi, mobile data): a counter to retry on - the WebView's online event
+ * and its connection's change (Network Information), no native round trip.
+ */
+const netRev = { n: 0, users: new Set<() => void>() };
+const bump = () => {
+  netRev.n++;
+  netRev.users.forEach((u) => u());
+};
+addEventListener("online", bump);
+(navigator as unknown as { connection?: EventTarget }).connection?.addEventListener?.("change", bump);
+
+/**
+ * Retry [load] while [failing]: after 5 s, then 10, 20... up to 5 min (quiet - no spinner), at once when the network
+ * changes or the page is shown again; stops when it isn't failing. Returns retry(), for a tap.
+ */
+function useRetry(load: () => unknown, failing: boolean): () => void {
+  const fn = useRef(load);
+  fn.current = load;
+  const [, setRev] = useState(0);
+  useEffect(() => {
+    const u = () => setRev(netRev.n);
+    netRev.users.add(u);
+    return () => void netRev.users.delete(u);
+  }, []);
+  useEffect(() => {
+    if (!failing) return;
+    let wait = 5000;
+    let timer = 0;
+    const go = () => {
+      if (!document.hidden) fn.current();
+      wait = Math.min(wait * 2, 300_000);
+      timer = window.setTimeout(go, wait);
+    };
+    timer = window.setTimeout(go, wait);
+    const now = () => {
+      clearTimeout(timer);
+      wait = 5000;
+      go();
+    };
+    const shown = () => !document.hidden && now();
+    netRev.users.add(now);
+    document.addEventListener("visibilitychange", shown);
+    return () => {
+      clearTimeout(timer);
+      netRev.users.delete(now);
+      document.removeEventListener("visibilitychange", shown);
+    };
+  }, [failing]);
+  return () => fn.current();
+}
+
 export interface Net {
   fetch(app: string, url: string, init?: NetInit): Promise<NetResponse>;
   /** DNS-SD on the local network ("_hue._tcp"); needs "lan". */
@@ -35,6 +124,10 @@ export interface Net {
   forget(app: string, what: { host?: string; secret?: string }): Promise<void>;
   /** Server-sent events while the page is shown (closed 5 s after it's hidden or the last user goes). null: off. */
   useEvents(app: string, url: string | null, headers: Record<string, string>, onEvent: (data: string, event: string) => void): StreamState;
+  /** A failure as a calm NetError ([status]: the device's own answer). Islands show its message, log its detail. */
+  error(e: unknown, status?: number): NetError;
+  /** Retries [load] while [failing] - backoff 5 s to 5 min, at once on a network change or when shown; retry() for a tap. */
+  useRetry(load: () => unknown, failing: boolean): () => void;
 }
 
 const NO_NATIVE = "this PowOS app has no host.net yet (update the PowOS app)";
@@ -168,8 +261,15 @@ function useEvents(app: string, url: string | null, headers: Record<string, stri
 export const net: Net = {
   async fetch(app, url, init = {}) {
     const body = init.body === undefined ? undefined : typeof init.body === "string" ? init.body : JSON.stringify(init.body);
-    const r = await request("fetch", app, { url, method: init.method ?? "GET", headers: init.headers ?? {}, ...(body !== undefined ? { body } : {}), ...(init.capture ? { capture: init.capture } : {}) });
-    return { status: r.status, body: r.body, json: () => JSON.parse(r.body) };
+    try {
+      const r = await request("fetch", app, { url, method: init.method ?? "GET", headers: init.headers ?? {}, ...(body !== undefined ? { body } : {}), ...(init.capture ? { capture: init.capture } : {}) });
+      return { status: r.status, body: r.body, json: () => JSON.parse(r.body) };
+    } catch (e) {
+      // Calm for the tile, the raw text kept for the log (NetError.detail).
+      const err = netError(e);
+      console.warn(`net ${app}: ${err.kind} - ${err.detail}`);
+      throw err;
+    }
   },
   async mdns(app, type, ms = 3000) {
     return (await request("mdns", app, { type, ms })).services ?? [];
@@ -181,4 +281,6 @@ export const net: Net = {
     await request("forget", app, what);
   },
   useEvents,
+  error: netError,
+  useRetry,
 };
