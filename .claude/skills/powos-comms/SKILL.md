@@ -85,6 +85,14 @@ Shell tsc: a fresh worktree has no shell/node_modules - the gate skips tsc; syml
   - Commits are resolved in the CALLER's git repo before the relay (resolve_commits), plus commits of the last 30
     days whose message mentions the task id.
 - Owners: experts take tasks with `--owner <expert>`; `--unowned` = owner "" or the generic "coder".
+- Live state (shell/agents.ts boardState): a `working` row SAYS "working" (lit dot) only while a live agent holds it -
+  agentsd's agent row field `work` = the task id, set from the agent's own Bash `task set <id> --step/--progress/
+  --plan/--commit` (work_of(); assigning with --owner/--note claims nothing), cleared by `task done <id>` or
+  `queue.sh add .. <id>`; else a live agent whose role == owner and holds nothing. Live = working|needs_you, heard
+  < 30 min. Otherwise "awaiting check" (QUEUED_STEP), "stalled" (started, no activity 20 min; one setTimeout to the
+  boundary, useStallClock) or "queued". `work` rides the spool/mirror JSON only (STDB's AgentRow ignores it: no
+  schema change). Mac deploy = copy powos-agentsd to ~/.claude/hooks/powos-agents/ + kill its pid (next hook restarts).
+  Device check: tools/phone/verify/board-state.sh.
 - A schema change ships as: apps/build.sh agents; apps/vendor.sh agents (shell/vendor/powos-agents.js; the .d.ts is
   generic); `ADB="docker exec powos-vadb adb" apps/install.sh agents publish --note/...`; shell/push.sh
   vendor/powos-agents.js (bindings-check must say "matches"). A server with MORE columns than the shell's bindings
