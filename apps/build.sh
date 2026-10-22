@@ -15,6 +15,10 @@ D=$HERE/$APP
 [ -x "$D/assets.sh" ] && "$D/assets.sh"
 mkdir -p "$D/out"
 if [ -f "$D/module/Cargo.toml" ]; then
+# The complexity lint (tools/lint/rust-complexity.sh: clippy, cognitive 10 / 60 lines / 4 args / nesting 3; old debt in
+# tools/lint/rust-complexity-baseline.txt, which only shrinks): a module over it isn't built. Exit 2 (no docker) warns.
+cx=0; "$HERE/../tools/lint/rust-complexity.sh" "$(basename "$D")" || cx=$?
+if [ "$cx" = 1 ]; then echo "build: refusing $(basename "$D") - the complexity lint failed (above)" >&2; exit 4; fi
 VER=$(sed -n 's/^pkgver=//p' "$HERE/../targets/android/pkgs/spacetimedb-bin/PKGBUILD")
 SUM=$(sed -n "s/^sha256sums=('\(.*\)')/\1/p" "$HERE/../targets/android/pkgs/spacetimedb-bin/PKGBUILD")
 mkdir -p "$D/out"
