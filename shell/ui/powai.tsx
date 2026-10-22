@@ -205,7 +205,7 @@ function NeedsYou() {
             <button type="button" class="ai-need-act" onClick={() => answer(w, "skip")}>
               skip
             </button>
-            <button type="button" class="ai-need-act on" onClick={() => answer(w, "done")}>
+            <button type="button" class="ai-need-act" onClick={() => answer(w, "done")}>
               done
             </button>
           </span>

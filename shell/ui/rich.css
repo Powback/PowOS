@@ -150,9 +150,7 @@
 .ai-need-do { font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .ai-need-what { font-size: var(--text-small); overflow-wrap: anywhere; }
 .ai-need-acts { flex: none; display: flex; flex-direction: column; gap: 6px; }
-.ai-need-act { min-height: 32px; padding: 4px 14px; font: inherit; color: var(--color-foreground); background: var(--soft-fill); border: 0; border-radius: 20px; }
-.ai-need-act.on { color: var(--color-background); background: var(--color-accent); }
-.ai-need-act:not(.on) { background: none; }
+.ai-need-act { min-height: 32px; padding: 4px 14px; font: inherit; color: var(--color-foreground); background: none; border: 0; border-radius: 20px; }
 /* Folds on the wallpaper (not on a surface): a label's colour and shadow, as the page's headings. */
 .ai-screen .ai-fold:not(.tile *) { color: var(--on-wallpaper); text-shadow: var(--label-shadow); }
 
