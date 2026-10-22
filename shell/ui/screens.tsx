@@ -32,6 +32,7 @@ import {
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
+import { iconTint } from "./icontint.ts";
 import { PetToggle } from "./pet.tsx";
 
 /** Its touches are its own: home's swipes under it don't see them. */
@@ -501,6 +502,10 @@ function StyleScreen() {
         />
       </Section>
       <Section icon="apps" title="icons">
+        {/* The page's own (ui/icontint.ts): each icon redrawn once in the theme's accent, or as the app draws it. */}
+        <Option label="icon colours">
+          <Segmented options={["the apps'", "the theme's"]} picked={iconTint.value ? 1 : 0} onPick={(i) => (iconTint.value = i === 1 ? "mono" : "")} />
+        </Option>
         {s.flags.map((f) => (
           <Option key={f.key} label={f.label}>
             <Segmented options={[f.on, f.off]} picked={f.value ? 0 : 1} onPick={(i) => act("style", "flag", [f.key, i === 0])} />
