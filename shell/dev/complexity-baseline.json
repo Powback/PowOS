@@ -63,19 +63,16 @@
   },
   "dev/shots.mjs": {
     "complexity": {
-      "count": 5
-    },
-    "max-depth": {
       "count": 4
     },
     "max-lines-per-function": {
-      "count": 2
+      "count": 1
     },
     "max-params": {
       "count": 1
     },
     "sonarjs/cognitive-complexity": {
-      "count": 5
+      "count": 4
     }
   },
   "glasses/api.ts": {

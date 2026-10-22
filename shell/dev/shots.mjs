@@ -369,6 +369,109 @@ const collectText = () => {
   return out;
 };
 
+/** In the page: what the layout checks read - the tiles', the merged tiles' and the seams' boxes, the gutter, fonts. */
+const layoutBoxes = () => {
+  const box = (r) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width });
+  const nameOf = (t) => (t.querySelector("[data-key], .owl, .island-face, .ag-panel") ?? t).className.toString().slice(0, 24);
+  const all = (sel) => [...document.querySelectorAll(sel)];
+  const missing = performance
+    .getEntriesByType("resource")
+    .filter((e) => e.responseStatus >= 400 && /font|\.ttf|\.woff/.test(e.name))
+    .map((e) => e.name.replace(location.origin, ""));
+  return {
+    vw: innerWidth,
+    vh: innerHeight,
+    halfGap: (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 8) / 2,
+    desktop: document.documentElement.dataset.mode === "desktop",
+    tiles: all(".home-tile").map((t) => ({ name: nameOf(t) || t.className.slice(0, 24), r: box(t.getBoundingClientRect()) })),
+    joined: all(".home-tile.joined").map((t) => ({ name: nameOf(t), cell: box(t.getBoundingClientRect()), face: box((t.querySelector(":scope > .tile") ?? t).getBoundingClientRect()) })),
+    seams: all(".seam").map((e) => ({ cls: e.className, bridge: e.classList.contains("bridge"), r: box(e.getBoundingClientRect()) })),
+    glyphs: [...new Set([...[...document.fonts].filter((f) => f.status === "error").map((f) => f.family), ...missing])],
+  };
+};
+
+/** Two boxes overlapping by more than touching: the overlap's width and height, or null. */
+const overlap = (a, b) => {
+  const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+  const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  return w > 1 && h > 1 ? [w, h] : null;
+};
+
+/** Tiles that overlap (more than touching - merged tiles touch). */
+function tileOverlaps(tiles) {
+  const out = [];
+  tiles.forEach((A, i) =>
+    tiles.slice(i + 1).forEach((B) => {
+      const o = overlap(A.r, B.r);
+      if (o) out.push(`${A.name} x ${B.name} (${Math.round(o[0])}x${Math.round(o[1])} px)`);
+    }),
+  );
+  return out;
+}
+
+/** The seam between A and B (B under A, or right of A when [vertical]): its geometry, or null where they don't share one. */
+function seamOf(A, B, vertical) {
+  const meet = vertical ? Math.abs(B.cell.left - A.cell.right) <= 1 : Math.abs(B.cell.top - A.cell.bottom) <= 1;
+  if (!meet) return null;
+  const [a0, a1, b0, b1] = vertical ? [A.face.top, A.face.bottom, B.face.top, B.face.bottom] : [A.face.left, A.face.right, B.face.left, B.face.right];
+  const u0 = Math.max(a0, b0);
+  const u1 = Math.min(a1, b1);
+  if (u1 - u0 < 2) return null;
+  const [aEnd, bStart] = vertical ? [A.face.right, B.face.left] : [A.face.bottom, B.face.top];
+  return { u0, u1, aEnd, bStart, side: vertical ? "right" : "bottom" };
+}
+
+/**
+ * Merged tiles touching over PART of an edge (the user's steam-over-fetch, 2026-10-22) must still be one surface,
+ * their edges level: along the shared span the gutter is filled (the faces meet, or a .seam.bridge fills exactly
+ * between them), and a partly-joined edge keeps its face where an unjoined edge's is (half a gutter in from its cell
+ * line - a whole-edge extension there was the ragged step).
+ */
+function seamProblems(A, B, vertical, { bridges, halfGap }) {
+  const s = seamOf(A, B, vertical);
+  if (!s) return [];
+  const out = [];
+  const near = (r, x0, y0, x1, y1) => Math.abs(r.left - x0) <= 1 && Math.abs(r.right - x1) <= 1 && Math.abs(r.top - y0) <= 1 && Math.abs(r.bottom - y1) <= 1;
+  const span = vertical ? [s.aEnd, s.u0, s.bStart, s.u1] : [s.u0, s.aEnd, s.u1, s.bStart];
+  if (s.bStart - s.aEnd > 0.5 && !bridges.some((r) => near(r, ...span)))
+    out.push(`partial join: ${A.name} ${s.side} edge not merged with ${B.name} (${Math.round(s.bStart - s.aEnd)} px gap along the shared span)`);
+  const aSpan = vertical ? A.cell.bottom - A.cell.top : A.cell.right - A.cell.left;
+  const want = (vertical ? A.cell.right : A.cell.bottom) - halfGap;
+  if (s.u1 - s.u0 < aSpan - 2 * halfGap - 2 && Math.abs(s.aEnd - want) > 1) out.push(`partial join: ${A.name} ${s.side} edge off its row line by ${Math.round(s.aEnd - want)} px`);
+  return out;
+}
+
+/** Every pair of merged tiles' seams, and no seam piece over a face (a fillet where a third tile fills the corner). */
+function joinProblems(joined, seams, halfGap) {
+  const ctx = { bridges: seams.filter((e) => e.bridge).map((e) => e.r), halfGap };
+  const pairs = joined.flatMap((A) => joined.filter((B) => B !== A).flatMap((B) => [...seamProblems(A, B, false, ctx), ...seamProblems(A, B, true, ctx)]));
+  const over = seams.flatMap((e) => joined.filter((T) => overlap(e.r, T.face)).map((T) => `partial join: a seam piece (${e.cls.replace("tile seam ", "")}) over ${T.name}'s face`));
+  return [...pairs, ...over];
+}
+
+/** The desktop's grid: one even gutter between neighbouring tiles in a row (its tiles never merge or touch). */
+function desktopGutters(tiles) {
+  const rows = new Map();
+  for (const t of tiles) {
+    const k = [...rows.keys()].find((y) => Math.abs(y - t.r.top) <= 2) ?? t.r.top;
+    rows.set(k, [...(rows.get(k) ?? []), t.r]);
+  }
+  const gaps = [...rows.values()].flatMap((row) => row.sort((a, b) => a.left - b.left).slice(1).map((r, i) => Math.round(r.left - row[i].right)));
+  return gaps.length && Math.max(...gaps) - Math.min(...gaps) > 2 ? [`uneven gutters: ${gaps.join(", ")} px`] : [];
+}
+
+/**
+ * Layout checks: tiles that overlap, partly-merged tiles, seams over faces, the desktop's gutters, and glyphs that can't
+ * render (a font that failed or 404'd draws tofu). SHOTS_STRICT=1 fails the run on any.
+ */
+function layoutProblems(b) {
+  const onScreen = (r) => r.width > 0 && r.right > 0 && r.left < b.vw && r.bottom > 0 && r.top < b.vh;
+  const tiles = b.tiles.filter((t) => onScreen(t.r));
+  const joined = b.joined.filter(({ cell }) => cell.width > 0 && cell.right > 0 && cell.left < b.vw);
+  const overlaps = [...tileOverlaps(tiles), ...joinProblems(joined, b.seams, b.halfGap), ...(b.desktop ? desktopGutters(tiles) : [])];
+  return { overlaps, glyphs: b.glyphs };
+}
+
 /** In a blank page: each run's background (the average of the text-less shot under its box) and its contrast. */
 const contrastOf = async (png, runs) => {
   const img = new Image();
@@ -515,82 +618,8 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
       // Layout checks: tiles that overlap (more than touching - merged tiles touch) and glyphs that can't render
       // (a font that failed or 404'd draws tofu). SHOTS_STRICT=1 fails the run on either.
       const layout = await page
-        .evaluate(() => {
-          const vw = innerWidth;
-          const vh = innerHeight;
-          const tiles = [...document.querySelectorAll(".home-tile")]
-            .map((t) => ({ name: (t.querySelector("[data-key], .owl, .island-face, .ag-panel") ?? t).className.toString().slice(0, 24) || t.className.slice(0, 24), r: t.getBoundingClientRect() }))
-            .filter(({ r }) => r.width > 0 && r.right > 0 && r.left < vw && r.bottom > 0 && r.top < vh);
-          const overlaps = [];
-          for (let i = 0; i < tiles.length; i++)
-            for (let j = i + 1; j < tiles.length; j++) {
-              const a = tiles[i].r;
-              const b = tiles[j].r;
-              const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
-              const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-              if (w > 1 && h > 1) overlaps.push(`${tiles[i].name} x ${tiles[j].name} (${Math.round(w)}x${Math.round(h)} px)`);
-            }
-          // Merged tiles touching over PART of an edge (the user's steam-over-fetch, 2026-10-22) must still be one surface,
-          // their edges level: along the shared span the gutter is filled (the faces meet, or a .seam.bridge fills
-          // exactly between them), and a partly-joined edge keeps its face where an unjoined edge's is (half a gutter in
-          // from its cell line - a whole-edge extension there was the ragged step). Reported as "partial join: ...".
-          const halfGap = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 8) / 2;
-          const joinedTiles = [...document.querySelectorAll(".home-tile.joined")]
-            .map((t) => ({ name: (t.querySelector("[data-key], .owl, .island-face, .ag-panel") ?? t).className.toString().slice(0, 24), cell: t.getBoundingClientRect(), face: (t.querySelector(":scope > .tile") ?? t).getBoundingClientRect() }))
-            .filter(({ cell }) => cell.width > 0 && cell.right > 0 && cell.left < vw);
-          const bridges = [...document.querySelectorAll(".seam.bridge")].map((e) => e.getBoundingClientRect());
-          const filled = (x0, y0, x1, y1) => bridges.some((r) => Math.abs(r.left - x0) <= 1 && Math.abs(r.right - x1) <= 1 && Math.abs(r.top - y0) <= 1 && Math.abs(r.bottom - y1) <= 1);
-          for (const A of joinedTiles)
-            for (const B of joinedTiles) {
-              if (A === B) continue;
-              for (const vertical of [false, true]) {
-                // B under A (or right of A): their cell boxes meet, and they overlap along the seam.
-                const meet = vertical ? Math.abs(B.cell.left - A.cell.right) <= 1 : Math.abs(B.cell.top - A.cell.bottom) <= 1;
-                if (!meet) continue;
-                const [a0, a1, b0, b1] = vertical ? [A.face.top, A.face.bottom, B.face.top, B.face.bottom] : [A.face.left, A.face.right, B.face.left, B.face.right];
-                const u0 = Math.max(a0, b0);
-                const u1 = Math.min(a1, b1);
-                if (u1 - u0 < 2) continue;
-                const [aEnd, bStart] = vertical ? [A.face.right, B.face.left] : [A.face.bottom, B.face.top];
-                const side = vertical ? "right" : "bottom";
-                if (bStart - aEnd > 0.5 && !(vertical ? filled(aEnd, u0, bStart, u1) : filled(u0, aEnd, u1, bStart)))
-                  overlaps.push(`partial join: ${A.name} ${side} edge not merged with ${B.name} (${Math.round(bStart - aEnd)} px gap along the shared span)`);
-                // A partly-joined edge: its face where an unjoined one's is (level with its neighbours).
-                const aSpan = vertical ? [A.cell.top, A.cell.bottom] : [A.cell.left, A.cell.right];
-                const partial = u1 - u0 < aSpan[1] - aSpan[0] - 2 * halfGap - 2;
-                const want = (vertical ? A.cell.right : A.cell.bottom) - halfGap;
-                if (partial && Math.abs(aEnd - want) > 1) overlaps.push(`partial join: ${A.name} ${side} edge off its row line by ${Math.round(aEnd - want)} px`);
-              }
-            }
-          // No seam piece over a face (a fillet where a third tile already fills the corner: tint over tint).
-          for (const e of document.querySelectorAll(".seam")) {
-            const r = e.getBoundingClientRect();
-            for (const T of joinedTiles)
-              if (Math.min(r.right, T.face.right) - Math.max(r.left, T.face.left) > 1 && Math.min(r.bottom, T.face.bottom) - Math.max(r.top, T.face.top) > 1)
-                overlaps.push(`partial join: a seam piece (${e.className.replace("tile seam ", "")}) over ${T.name}'s face`);
-          }
-          // The desktop's grid: one even gutter between neighbouring tiles in a row (its tiles never merge or touch).
-          const gutters = [];
-          if (document.documentElement.dataset.mode === "desktop") {
-            const rows = new Map();
-            for (const t of tiles) {
-              const k = [...rows.keys()].find((y) => Math.abs(y - t.r.top) <= 2) ?? t.r.top;
-              rows.set(k, [...(rows.get(k) ?? []), t.r]);
-            }
-            const gaps = [];
-            for (const row of rows.values()) {
-              row.sort((a, b) => a.left - b.left);
-              for (let i = 1; i < row.length; i++) gaps.push(Math.round(row[i].left - row[i - 1].right));
-            }
-            if (gaps.length && Math.max(...gaps) - Math.min(...gaps) > 2) gutters.push(`uneven gutters: ${gaps.join(", ")} px`);
-          }
-          const fonts = [...document.fonts].filter((f) => f.status === "error").map((f) => f.family);
-          const missing = performance
-            .getEntriesByType("resource")
-            .filter((e) => e.responseStatus >= 400 && /font|\.ttf|\.woff/.test(e.name))
-            .map((e) => e.name.replace(location.origin, ""));
-          return { overlaps: [...overlaps, ...gutters], glyphs: [...new Set([...fonts, ...missing])] };
-        })
+        .evaluate(layoutBoxes)
+        .then(layoutProblems)
         .catch(() => ({ overlaps: [], glyphs: [] }));
       for (const o of layout.overlaps) errors.push(`overlap: ${o}`);
       for (const g of layout.glyphs) errors.push(`missing glyphs: ${g}`);
