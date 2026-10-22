@@ -339,11 +339,13 @@ function Review({ path }: { path: string }) {
 }
 
 /** The step it's on; a queued phone check ("testing…" once test now was tapped), or a check's result in one line. */
-function StepLine({ w }: { w: WorkRow }) {
+function StepLine({ w, count }: { w: WorkRow; count: string }) {
   const result = resultOf(w.step ?? "");
-  if (checkQueued(w)) return <span class="ai-item-step muted">{isTesting(w) ? "testing… don't touch the phone" : QUEUED_STEP}</span>;
-  if (!result) return <span class="ai-item-step">{w.step}</span>;
-  return <span class={`ai-item-step ai-result ${result.ok ? "ok" : "bad"}`}>{result.ok ? "check passed" : `check failed: ${result.line}`}</span>;
+  const pre = count && w.step ? `${count} · ` : count;
+  if (!w.step) return <span class="ai-item-step">{pre}</span>;
+  if (checkQueued(w)) return <span class="ai-item-step muted">{pre}{isTesting(w) ? "testing… don't touch the phone" : QUEUED_STEP}</span>;
+  if (!result) return <span class="ai-item-step">{pre}{w.step}</span>;
+  return <span class={`ai-item-step ai-result ${result.ok ? "ok" : "bad"}`}>{pre}{result.ok ? "check passed" : `check failed: ${result.line}`}</span>;
 }
 
 /** Under a row: "test now" while its phone check is queued; a failed check's screenshot (its last verify-*.png). */
@@ -379,10 +381,25 @@ function TestAll({ rows }: { rows: WorkRow[] }) {
 /** An open item's state in words ("working" only while a live agent holds it); null for blocked/waiting/done. */
 const rowState = (w: WorkRow) => (w.status === "working" ? boardState(w, checkQueued(w)) : null);
 
+/** Above a tracked row's title: the thin bar and "1/4 · the step". */
+function Progress({ w, done, total }: { w: WorkRow; done: number; total: number }) {
+  if (!total && !w.step) return null;
+  return (
+    <span class="ai-item-progress">
+      {total > 0 && (
+        <span class="ai-bar" role="progressbar" aria-valuenow={done} aria-valuemax={total}>
+          <span style={{ width: `${(100 * done) / total}%` }} />
+        </span>
+      )}
+      <StepLine w={w} count={total > 0 ? `${done}/${total}` : ""} />
+    </span>
+  );
+}
+
 /**
- * One open item: a dot, its title (up to two lines); when it's tracked, a thin bar, the current step and "3/10 · 2
- * commits · 2h ago" (else its age past a day). A tap shows its note, the steps done / now / next, the commits in plain
- * words and its review images.
+ * One open item: when it's tracked, a thin bar and "3/10 · <step>" above; a dot and its title (up to two lines);
+ * then "owner · 2 commits · 2h ago" (untracked: the owner, its age past a day). A tap shows its note, the steps done /
+ * now / next, the commits in plain words and its review images.
  */
 function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => void }) {
   const total = w.progressTotal ?? 0;
@@ -396,19 +413,14 @@ function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => 
   const who = !w.owner || w.owner === "coder" ? "free" : w.owner;
   // "working" only while a live agent holds it; else queued / awaiting check / stalled (agents.ts boardState).
   const state = rowState(w);
-  const facts = [state, who, total > 0 && `${done}/${total}`, commits.length > 0 && `${commits.length} commit${commits.length > 1 ? "s" : ""}`, ago(moved) === "now" ? "just now" : `${ago(moved)} ago`].filter(Boolean).join(" · ");
+  const facts = [state, who, commits.length > 0 && `${commits.length} commit${commits.length > 1 ? "s" : ""}`, ago(moved) === "now" ? "just now" : `${ago(moved)} ago`].filter(Boolean).join(" · ");
   return (
     <div class={`ai-item ${w.status}`}>
       <button type="button" class="ai-item-row" onClick={onTap} aria-expanded={open}>
+        <Progress w={w} done={done} total={total} />
         <span class={`ai-dot ${state === "working" ? "on" : ""}`} />
         <span class="ai-item-main">
           <span class="ai-item-title">{w.title}</span>
-          {total > 0 && (
-            <span class="ai-bar" role="progressbar" aria-valuenow={done} aria-valuemax={total}>
-              <span style={{ width: `${(100 * done) / total}%` }} />
-            </span>
-          )}
-          {w.step && <StepLine w={w} />}
           {tracked ? <span class="ai-item-facts">{facts}</span> : <span class="ai-item-facts">{[state, who].filter(Boolean).join(" · ")}</span>}
         </span>
         {!tracked && Date.now() / 1000 - moved > DAY_S && <span class="ai-item-age">{ago(moved)}</span>}
