@@ -21,7 +21,7 @@ import type { Cell, OwlNode, OwlOp, OwlRoot, ThemeColors } from "../types.ts";
  * half-way mix still measured 2.9-3.6:1 on a light theme).
  * Only text: rings, bars and fills keep the widget's colours.
  */
-let palette: { muted?: string; accent?: string; foreground?: string } = {};
+let palette: { muted: Set<string>; accent?: string; foreground?: string } = { muted: new Set() };
 const rgbKey = (c: string) => {
   const m = c.match(/rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i);
   if (m) return [m[1], m[2], m[3]].map((v) => Math.round(Number(v))).join(",");
@@ -34,7 +34,15 @@ const rgbKey = (c: string) => {
 };
 function learnTheme(t: ThemeColors | null) {
   if (!t) return;
-  palette = { muted: rgbKey(t.css.muted ?? ""), accent: rgbKey(t.css.accent ?? ""), foreground: rgbKey(t.css.foreground ?? "") };
+  // A theme's grey for secondary text comes under more than one name (the host's css.muted is its dark_foreground; a
+  // widget's `muted` can be the palette's own muted): any of them is the muted token (kanagawa's measured 4.06:1 as
+  // an unknown hue's mix).
+  const named = (t.colors ?? {}) as Record<string, string | undefined>;
+  palette = {
+    muted: new Set([t.css.muted, named.muted, named.dark_foreground].filter((c): c is string => !!c).map(rgbKey)),
+    accent: rgbKey(t.css.accent ?? ""),
+    foreground: rgbKey(t.css.foreground ?? ""),
+  };
 }
 powos.on("theme.changed", learnTheme);
 powos.theme.get().then(learnTheme, () => {});
@@ -42,7 +50,7 @@ powos.theme.get().then(learnTheme, () => {});
 export function textColor(c: unknown, fallback: string) {
   if (typeof c !== "string" || !c) return fallback;
   const k = rgbKey(c);
-  if (k === palette.muted) return "var(--color-muted)";
+  if (palette.muted.has(k)) return "var(--color-muted)";
   if (k === palette.accent) return "var(--accent-text)";
   if (k === palette.foreground) return "var(--color-foreground)";
   return `color-mix(in srgb, ${c} 35%, var(--color-foreground))`;
