@@ -124,9 +124,15 @@ class WindowFrame(
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         }
 
-    private fun barView(pkg: String?): LinearLayout {
+    private fun appLabel(pkg: String?): String {
         val pm = context.packageManager
-        val label = pkg?.let { runCatching { pm.getApplicationLabel(pm.getApplicationInfo(it, 0)).toString() }.getOrNull() } ?: pkg.orEmpty()
+        return pkg?.let { runCatching { pm.getApplicationLabel(pm.getApplicationInfo(it, 0)).toString() }.getOrNull() } ?: pkg.orEmpty()
+    }
+
+    private fun appIcon(pkg: String?) = pkg?.let { p -> runCatching { context.packageManager.getApplicationIcon(p) }.getOrNull() }
+
+    private fun barView(pkg: String?): LinearLayout {
+        val label = appLabel(pkg)
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -137,7 +143,7 @@ class WindowFrame(
                     val c = CORNER_DP * density
                     cornerRadii = floatArrayOf(c, c, c, c, 0f, 0f, 0f, 0f)
                 }
-            pkg?.let { p -> runCatching { pm.getApplicationIcon(p) }.getOrNull() }?.let { icon ->
+            appIcon(pkg)?.let { icon ->
                 addView(ImageView(context).apply { setImageDrawable(icon) }, LinearLayout.LayoutParams(dp(20f), dp(20f)).apply { marginEnd = dp(10f) })
             }
             addView(

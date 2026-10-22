@@ -209,7 +209,6 @@
     <ID>CyclomaticComplexMethod:G2Protocol.kt$G2Protocol$fun transcript(payload: ByteArray): Pair&lt;String, Boolean&gt;?</ID>
     <ID>CyclomaticComplexMethod:GestureMonitor.kt$GestureMonitor$private fun dispatch(e: MotionEvent)</ID>
     <ID>CyclomaticComplexMethod:GlassBlur.kt$GlassBlur$private fun set( regions: List&lt;Region&gt;, lag: Int, )</ID>
-    <ID>CyclomaticComplexMethod:GlassBlur.kt$GlassBlur.Companion$fun wholeWindowOf( view: View, radiusPx: Float, ): Boolean?</ID>
     <ID>CyclomaticComplexMethod:GlassBlur.kt$GlassBlur.Companion$private fun valid(c: Codec): Boolean</ID>
     <ID>CyclomaticComplexMethod:Glasses.kt$Glasses$fun state(): JSONObject</ID>
     <ID>CyclomaticComplexMethod:Glasses.kt$Glasses$private fun command(f: File)</ID>

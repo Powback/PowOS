@@ -186,50 +186,52 @@ object VerifyRun {
         fun show(s: JSONObject) {
             if (s.optString("task") != status.optString("task") || s.optInt("k") != status.optInt("k")) stopping = false
             status = s
-            val b = wm.currentWindowMetrics.bounds
-            val folded = b.width() < b.height() * 0.6f
-            val screen =
-                when {
-                    s.optString("screen") == "inner" && folded -> "unfold the phone for this one"
-                    s.optString("screen") == "cover" && !folded -> "fold the phone for this one"
-                    folded -> "testing on the cover screen"
-                    else -> "testing on the inner screen"
-                }
             title.text = "Testing: ${s.optString("name").ifBlank { s.optString("task") }}"
-            detail.text = "${s.optInt("k")} of ${s.optInt("n")} · $screen"
+            detail.text = "${s.optInt("k")} of ${s.optInt("n")} · ${screenLine(s.optString("screen"))}"
             hint.text = if (stopping) "stopping…" else "don't touch · tap to stop"
-            val params =
-                WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    TYPE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                        WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-                    PixelFormat.TRANSLUCENT,
-                ).apply {
-                    title = "PowOS verify status"
-                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                    fitInsetsTypes = 0
-                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                    // Below the status bar's clock and the camera, out of the way of the top row a check may pull.
-                    y = dp(TOP_DP)
-                }
-            runCatching {
-                if (added) {
-                    wm.updateViewLayout(root, params)
-                } else {
-                    wm.addView(root, params)
-                    added = true
-                    context.getSystemService(DisplayManager::class.java).registerDisplayListener(displays, main)
-                    root.post {
-                        blur.set(1f)
-                        skipScreenshot()
-                    }
-                }
-            }.onFailure { Log.w(TAG, "can't show the status pill", it) }
+            runCatching { if (added) wm.updateViewLayout(root, params()) else add() }.onFailure { Log.w(TAG, "can't show the status pill", it) }
             main.removeCallbacks(stale)
             main.postDelayed(stale, STALE_MS)
         }
+
+        /** The screen the check needs, said against the one in use (the cover is the tall, narrow one). */
+        private fun screenLine(need: String): String {
+            val b = wm.currentWindowMetrics.bounds
+            val folded = b.width() < b.height() * 0.6f
+            return when {
+                need == "inner" && folded -> "unfold the phone for this one"
+                need == "cover" && !folded -> "fold the phone for this one"
+                folded -> "testing on the cover screen"
+                else -> "testing on the inner screen"
+            }
+        }
+
+        private fun add() {
+            wm.addView(root, params())
+            added = true
+            context.getSystemService(DisplayManager::class.java).registerDisplayListener(displays, main)
+            root.post {
+                blur.set(1f)
+                skipScreenshot()
+            }
+        }
+
+        private fun params() =
+            WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                TYPE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                title = "PowOS verify status"
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                fitInsetsTypes = 0
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                // Below the status bar's clock and the camera, out of the way of the top row a check may pull.
+                y = dp(TOP_DP)
+            }
 
         /** The tap: the running check ends like a real touch did (exit 3, it stays queued). */
         private fun stop() {
