@@ -151,10 +151,10 @@ export const pullOverApps = stored("pullOverApps", "on");
 export const separatePanels = stored("separatePanels", "off");
 /**
  * The control center's layout (control.tsx): "v3" - one row of the most-used toggles, every control in one labelled
- * grid on a further pull - or the eight category tiles before it. An experiment until the manager approves: off by
- * default.
+ * grid on a further pull (the default, approved 2026-10-22) - or "classic", the eight category tiles before it
+ * (settings -> style -> home).
  */
-export const ccV3 = stored("ccV3", "off");
+export const ccV3 = stored("ccV3", "v3");
 // The plain value: store.set writes a string as a JSON string ("on" / "off"), what CornerPull.kt reads.
 effect(() => void powos.store.set("pullOverApps", pullOverApps.value).catch(() => {}));
 /**

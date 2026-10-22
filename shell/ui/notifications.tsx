@@ -10,7 +10,6 @@ import { effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel, separatePanels } from "../state.ts";
 import { ControlCenter } from "./control.tsx";
-import { ccExpanded, setExpanded } from "./ccexpand.ts";
 import { Icon } from "./icons.tsx";
 import { followNotif, notifOpen, notifShown } from "./gesture.ts";
 import { ago } from "./time.ts";
@@ -380,8 +379,6 @@ export function NotificationPanel() {
             <div
               class="notif-list"
               ref={listEl}
-              // Scrolling the notifications folds the control center's whole view (ccexpand.ts), the cards kept in place.
-              onScroll={(e) => ccExpanded.value && (e.currentTarget as HTMLElement).scrollTop > 0 && setExpanded(false, e.currentTarget as HTMLElement)}
             >
               <ControlCenter />
               {available && items.length > 0 && (

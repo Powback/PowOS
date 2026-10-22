@@ -301,7 +301,7 @@ try {
   // there, is saved, and is still there after the panel shut and opened again and in a page loaded afresh; a carry
   // cancelled (the system took the pointer) changes nothing.
   if (process.env.SHELL_PAGES !== "0") {
-    const ccOrder = () => [...document.querySelectorAll(".cc-main [data-key]")].map((e) => e.dataset.key);
+    const ccOrder = () => [...document.querySelectorAll(".cc3-quick [data-key]")].map((e) => e.dataset.key);
     runs.push(
       open(browser, `${ORIGIN}/index.html?mode=shade`, "cc-reorder").then(async (r) => {
         await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
@@ -312,10 +312,14 @@ try {
             const S = await importShim("./state.ts");
             const P = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerId: 9, isPrimary: true, pointerType: "touch" }));
             const mid = (el) => { const b = el.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
-            const item = (k) => document.querySelector(`.cc-main [data-key="${k}"]`);
+            const item = (k) => document.querySelector(`.cc3-quick [data-key="${k}"]`);
             const fails = [];
+            const X = await importShim("./ui/ccexpand.ts");
             S.notif.value = true;
             await sleep(900);
+            // v3: rearranging is edit mode's (the header's pencil); a long press outside it is the toggle's page.
+            X.ccEditing.value = true;
+            await sleep(200);
             const before = order();
             if (before.length < 3) return [`only ${before.length} categories in the control center`];
             // Cancelled: nothing changes.
@@ -344,6 +348,7 @@ try {
             const after = order();
             if (after[0] !== k0) fails.push(`carried ${k0} onto the first slot, it landed at ${after.indexOf(k0)} (${after.join(",")})`);
             if (document.querySelector(".cc .carried")) fails.push("the carried copy stayed after landing");
+            if (X.ccEditing.value !== true) fails.push("edit mode left by a carry");
             // Shut and opened again: still there.
             S.notif.value = false;
             await sleep(500);

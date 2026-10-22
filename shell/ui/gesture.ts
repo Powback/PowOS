@@ -348,9 +348,9 @@ export function homeGestures() {
       if (g.notif) {
         const vertical = Math.abs(dy) > Math.abs(dx);
         const together = separatePanels.value !== "on" && notifDrag.value == null;
-        // The one panel open, at its top: down shows the control center's whole view, up folds it (ccexpand.ts) -
-        // before up shuts the panel.
-        if (together && vertical && g.listTop && (dy > 0 ? !ccExpanded.value : ccExpanded.value)) g.mode = "ccAll";
+        // The one panel open: down at its top shows the control center's whole view; with it shown, the list scrolls
+        // through it all and the notifications, and up at the end folds it (ccexpand.ts) - before up shuts the panel.
+        if (together && vertical && (dy > 0 ? !ccExpanded.value && g.listTop : ccExpanded.value && (!g.inList || g.listBottom))) g.mode = "ccAll";
         // The notification panel down: up drags it shut (the list scrolls until its end); sideways is a card's.
         else if (dy < 0 && Math.abs(dy) > Math.abs(dx) && (!g.inList || g.listBottom)) g.mode = "notifClose";
         // Sideways, not on a notification (a card slides away by itself): between the notifications and the

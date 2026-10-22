@@ -806,8 +806,8 @@ const SECTIONS: { id: string; label: string; members: string[] }[] = [
     label: "connect",
     members: ["wifi", "cell", "airplane", "hotspot", "bt", "nfc", "app:com.google.android.gms|app:com.oneplus.oshare", "app:com.oplus.linker", GLASSES_ID, "location"],
   },
-  { id: "display", label: "display", members: ["rotation", "darkmode", "app:com.oplus.eyeprotect", "battery"] },
-  { id: "sound", label: "sound & focus", members: ["dnd"] },
+  // Focus with the screen's own (no sound-mode tiles to make a section of: the volume slider's icon is the ringer).
+  { id: "display", label: "display & focus", members: ["rotation", "darkmode", "app:com.oplus.eyeprotect", "dnd", "battery"] },
   { id: "tools", label: "tools", members: ["flashlight", "screenshot", "screenrecord", "calculator", "qr_code_scanner", "wallet", "controls"] },
 ];
 /** Each control's one word. */

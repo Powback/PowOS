@@ -33,6 +33,13 @@ powos.on("shade.settle", ({ open }: { open: boolean }) => {
   notif.value = open;
 });
 
+/**
+ * One strong frost under the panel: what's behind it (home's widgets, the search pill, the dock) can't be read. The
+ * compositor's radius at full openness, dp - its blur is only ~0.15-0.3 of it (the native-blur expert's measure).
+ */
+const BLUR_DP = 360;
+void powos.shade.blur?.(BLUR_DP).catch(() => {});
+
 /** The heads-up banner showing, or null. */
 const peek = signal<PhoneNotification | null>(null);
 powos.on("shade.peek", (n: PhoneNotification | null) => (peek.value = n));
