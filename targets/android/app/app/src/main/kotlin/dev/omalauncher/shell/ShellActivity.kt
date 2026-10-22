@@ -10,7 +10,6 @@ import android.util.Log
 import android.view.KeyEvent
 import androidx.compose.runtime.snapshotFlow
 import dev.omalauncher.App
-import dev.omalauncher.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -130,7 +129,7 @@ class ShellActivity : Activity() {
      * theme (scripts/collage-captures.sh).
      */
     private fun handleDebugExec(intent: Intent) {
-        if (!BuildConfig.DEBUG) return
+        if (!dev.omalauncher.AppVersion.debuggable(this)) return
         intent.getStringExtra("exec")?.let(runtime::launch)
         intent.getStringExtra("app")?.let { id ->
             scope.launch {

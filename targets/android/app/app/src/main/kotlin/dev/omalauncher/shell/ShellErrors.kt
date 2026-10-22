@@ -2,7 +2,6 @@ package dev.omalauncher.shell
 
 import android.content.Context
 import android.util.Log
-import dev.omalauncher.BuildConfig
 import dev.omalauncher.linux.RootedGuest
 import dev.omalauncher.linux.shellQuote
 import org.json.JSONObject
@@ -180,7 +179,7 @@ object ShellErrors {
                 val at = clock.format(Date(m.optLong("at") * 1000))
                 "last push $at from ${m.optString("from", "?")}: $names${if (m.optBoolean("rolledBack")) " (rolled back)" else ""}"
             } ?: "no push manifest"
-        return "APK ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}); overrides: ${if (files.isEmpty()) "none" else listed + more}; $push. " +
+        return "APK ${dev.omalauncher.AppVersion.name(context)} (${dev.omalauncher.AppVersion.code(context)}); overrides: ${if (files.isEmpty()) "none" else listed + more}; $push. " +
             "Log: powos shell errors."
     }
 

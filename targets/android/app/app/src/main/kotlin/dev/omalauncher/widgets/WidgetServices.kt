@@ -21,7 +21,6 @@ import android.view.Display
 import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.compose.ui.graphics.ImageBitmap
-import dev.omalauncher.BuildConfig
 import android.os.Process
 import android.os.SystemClock
 import android.os.UserHandle
@@ -260,7 +259,7 @@ class WidgetServices(
                 "patch" to Str(Build.VERSION.SECURITY_PATCH),
                 "locale" to Str(java.util.Locale.getDefault().toLanguageTag()),
                 "timezone" to Str(java.util.TimeZone.getDefault().id),
-                "launcher" to Str(BuildConfig.VERSION_NAME),
+                "launcher" to Str(dev.omalauncher.AppVersion.name(context)),
                 "theme" to (runtime.themes.current?.title?.let(::Str) ?: Null),
                 "apps" to num(runtime.androidApps.apps.size.toLong()),
             ),
