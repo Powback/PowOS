@@ -17,6 +17,7 @@ import { openUrl, power, useLayoutSize, useOnScreen, useQuiet } from "./onscreen
 import { useSurface, type Surface } from "./native.ts";
 import { openApp } from "./pages.ts";
 import { net, type Net } from "./net.ts";
+import { DetailSheet, type DetailSheetProps } from "./sheet.ts";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
 const GRACE_MS = 5000;
@@ -47,6 +48,8 @@ export interface IslandHost {
   openApp?(id: string): void;
   /** The devices and services the app's manifest declares in "net" (apps/net.ts): fetch, server-sent events, mDNS. */
   net?: Net;
+  /** The widget detail sheet (apps/sheet.ts): a widget's other controls in a frosted popup anchored to it. */
+  DetailSheet?: (p: DetailSheetProps) => null;
 }
 
 export interface Builder {
@@ -380,4 +383,5 @@ export const host: IslandHost = {
   useQuiet,
   openApp: (id) => openApp(id),
   net,
+  DetailSheet,
 };

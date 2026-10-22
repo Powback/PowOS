@@ -6,6 +6,7 @@
  * The panel's openness (gesture.ts) is one number, --p, on the stage: the frame's top edge and the clip that reveals
  * the drawer move with it in CSS, so a frame of the swipe moves an edge, not a re-laid-out list of apps.
  */
+import { WidgetSheet } from "./widgetsheet.tsx";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
@@ -315,6 +316,8 @@ export function Home() {
       <GlassesScreen />
       <AgentsScreen />
       <Screens />
+      {/* A widget's detail sheet (an island's long-pressed control): over home, its scrim taking the touches outside it. */}
+      <WidgetSheet />
       {/* The switcher: a layer over all of home (a swipe up over an app builds it; the overview button shows it). */}
       <Recents />
       {/* A tile or app carried by a finger, over everything it can be dropped on (the pages, the dock). */}
