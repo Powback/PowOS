@@ -27,13 +27,19 @@ run() {  # run <variant> <n>
   [ $v = fexcache ] && printf 'user_settings = {"FEX_ENABLECODECACHINGWIP": "1"}\n' > "$P/user_settings.py"
   st="steam $([ -d "/proc/$(steam_pid)" ] && { [ -n "$(cg)" ] && echo frozen || echo awake; } || echo off), wineserver $(pgrep -c wineserver)"
   echo "== $v #$2: at the tap: $st; $(sizes)"
+  gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0)
   mine=1; pill "cold start timing: $v #$2 - tap"; t0=$(now)
   ( open_task 400 "steam_app_$APP" > "$T/open.status" ) &
   for _ in $(seq 1600); do  # 400 s
     now_=$(ms "$t0" "$(now)")
     [ -n "$(pgrep -f 'steamwebhelper' | head -1)" ] && first steam "$now_"
     r=$(reaper); [ -n "$r" ] && first reaper "$now_"
-    [ -z "$r" ] && [ -n "${seen[reaper]:-}" ] && { seen[ended]=$now_; break; }  # the launch died: say so, don't wait 400 s
+    # The launch died: say so, don't wait 400 s. Only Steam's own word counts ("Remove <appid> from running list" in
+    # gameprocess_log since the tap): a cold Steam first runs the game's install script evaluator through the same
+    # reaper/Proton chain (console_log "Running install script evaluator", 15-40 s) and its end isn't the game's - taken
+    # for a death, the check closed the real launch a second later (2026-10-23: "exit code -1" = this check's kill).
+    [ -z "$r" ] && [ -n "${seen[reaper]:-}" ] && tail -n +$((gl + 1)) "$S/logs/gameprocess_log.txt" | grep -q "Remove $APP from running list" \
+      && { seen[ended]=$now_; break; }
     pgrep -f pv-adverb >/dev/null && first container "$now_"
     pgrep -f wineserver >/dev/null && first wineserver "$now_"
     [ -n "${seen[wineserver]:-}" ] && pgrep -f 'Broforce_beta.exe' | while read -r x; do grep -qa 'wine.*preloader\|^.*FEX' "/proc/$x/cmdline" && ! grep -qa 'proton\|reaper\|python\|pressure-vessel' "/proc/$x/cmdline" && echo y; done | grep -q y && first exe "$now_"

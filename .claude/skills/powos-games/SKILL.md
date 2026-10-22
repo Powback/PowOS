@@ -40,7 +40,7 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - units/phone/steam.json `sleepBusy.games: "pause"`: a game's windows map to Steam's root pid (app_pid: an ancestor's
   cmdline has `SteamLaunch`), so the game out of sight 15 s = Steam's whole tree frozen (game inside it). Start grace
   2m also from the game's reaper; the game's audio stream is ignored. Xwayland/KWin are CORE (never frozen).
-- Launch path: /usr/bin/steam (pkg `steam` pkgrel 20) on `steam://rungameid/<id>` with a running `reaper SteamLaunch
+- Launch path: /usr/bin/steam (pkg `steam` pkgrel 21) on `steam://rungameid/<id>` with a running `reaper SteamLaunch
   AppId=<id>` -> dbus `dev.powos.Sleep.Gui.Resume <id>` (thaw + raise, one-shot KWin script), exit 0; Steam never sees
   it. A Broforce left running makes the next launch a resume: bf-stop.sh first for cold-start/Proton checks.
 - Android paths (all resume a running game): drawer/home/shortcuts = Runtime.openRooted -> `powos-open-task --app-id
@@ -62,8 +62,7 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - Launch time by stage: `bf-coldstart.sh [cold|steam|fexcache]...` -> "STAGES" lines (tap->reaper->pv->wineserver->exe->
   window->frame, ms). fexcache = FEX_ENABLECODECACHINGWIP=1 via Proton user_settings.py (removed after) + FEXOfflineCompiler.
 - Baseline 2026-10-23 cold (2 runs, Steam off): Steam web UI 1-4 s, reaper 22-26 s, pv-adverb 26-29 s, wineserver 32 s;
-  then the chain DIED (gameprocess_log "no longer tracking ... exit code -1", ~16 s after wine) at 43/57 s, no window -
-  also the user's own 00:02 launch. Unexplained yet: the first thing to run (bf-coldstart now FAILs at once on it).
+  those runs then died (zeroed registry, see Causes). bf-coldstart FAILs at once when the chain ends without a window.
 - Still to measure (bf-coldstart.sh cold steam fexcache fexcache under the verify lock): warm-Steam launch, FEX code
   cache, pressure-vessel locale-gen (game env has LC_ALL=C + LANG=en_CH.UTF-8: PRESSURE_VESSEL_GENERATE_LOCALES=0 in
   /usr/bin/steam would skip it; pv->wineserver was ~3 s total). Persistent wineserver: Proton's waitforexitandrun waits
@@ -71,6 +70,16 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - adb.sh mounts each pushed path's dirname: a path with `..` pushes nothing ("cannot stat") - resolve it first.
 
 ## Causes found (don't re-investigate)
+- Every launch dies ~10-16 s into Wine, no window, gameprocess_log "exit code -1" (2026-10-23): the prefix's
+  pfx/{system,user,userdef}.reg were all NUL bytes (size kept): wineserver saves them without fsync and the phone
+  rebooted ~1 min after a save (f2fs /data). Check: `head -c 23 pfx/system.reg` != "WINE REGISTRY Version 2". Fix:
+  /usr/bin/steam (pkgrel 21) `reg_guard` at each Steam start (no Steam running): fsynced copy of every prefix's good
+  set in compatdata/<id>/powos-reg, restored over a broken one; no copy -> broken files to powos-reg-broken/ (+ log),
+  creation_sync_guard removed so Proton re-copies its default registry (drive_c, game saves kept; Wine keys reset).
+- A cold Steam runs the game's install script evaluator first through the same `reaper SteamLaunch AppId=<id>` /
+  Proton chain (console_log "Running install script evaluator", 15-40 s; not in gameprocess_log). Its end is not the
+  launch dying: bf-coldstart took it for one and its close killed the real launch ("exit code -1" 1 s later). A launch
+  ended = gameprocess_log "Remove <id> from running list" after the tap.
 - Session killed while gaming: Xwayland dma-buf leak via KGSL forced commits (fixed c8ab446, xwayland-kgsl 0007).
 - Controller dead in games: Steam's virtual pad /dev/input/eventN is root:1004; PowOS `input` group = Android gid 1004
   (powos-deploy.sh). Android also reads Valve pads: MainActivity drops their key events.
