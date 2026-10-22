@@ -1252,6 +1252,14 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 /* The panel, wide: its panes scroll, not it; its own pill under the conversation instead of home's bar. */
 .ai-panel.wide { overflow: hidden; }
 :is(.home, .pull-screen).open:has(.ai-panel.wide) > .bar { visibility: hidden; }
+/*
+ * Its pill where home's bar pill is, with or without the keyboard: the panel's window reaches down over the bar's place
+ * (no fade, no gap under it), so the pill's foot is --ai-foot's as on the AI page. Dragged, the bar (over the launcher)
+ * covers the pill riding into its place; open, the bar hides and the pill is there already.
+ */
+.home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * (48px + var(--strip-height))); mask-image: none; }
+.pull-screen:has(.ai-panel.wide) > .stage > .launcher-clip { bottom: -48px; }
+.home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip .launcher-inner { padding-bottom: 0; }
 .ai-view.wide > .ai-side { grid-column: 1; grid-row: 2 / 4; margin-bottom: var(--ai-foot); }
 .ai-view.wide > .ai-talk { grid-column: 2; grid-row: 2; }
 .ai-view.wide > .ai-compose { grid-column: 2; grid-row: 3; margin-bottom: var(--ai-foot); }
