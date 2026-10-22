@@ -2,6 +2,7 @@
 # tools/phone/verify/queue.sh: ONE queue for every on-device check, so no agent waits on the phone itself.
 #   queue.sh add <board-task> <cmd> [args...]   queue a Mac-side check (a tools/phone/verify/*.sh or any command that
 #                                               drives the phone) and return at once; starts the runner if none runs
+#        env vars: queue them through env, e.g. `queue.sh add t env PROFILE=1 shell/dev/perf/drag-raster.sh 12`
 #   queue.sh list                               queued, running and the last results
 #   queue.sh run                                the runner (started by add; exits when the queue is empty)
 # The runner waits for ONE free window (window-lock.sh: screen on, no touch for 120 s, then the verify lock), runs every
