@@ -9,6 +9,20 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
 - Every check runs through ONE queue: `tools/phone/verify/queue.sh add <board-task> <script> [args]` (returns at once;
   the runner takes one free window for all queued checks, LOCK_HELD=1, result on the board task; `queue.sh list`).
   A Mac-side check script uses window-lock.sh (honours LOCK_HELD) and exits 3 on a real touch (re-queued).
+- `add [--close] [--name TEXT] [--screen inner|cover] <task> <cmd>`: marks the task's step "phone check queued" (the AI
+  page's "test now"; the result's step replaces it). The runner stays up while jobs are queued (a window that didn't
+  come is waited for again) - "test now" needs one waiting. A job exiting 0 with a `^FAIL` line is a FAIL; a FAIL gets a
+  screenshot (design-qa/verify-<job>.png) as the task's review image. QUEUE_IDLE_S: the idle the window needs (120).
+- Test now: the page's verify.go (VerifyRun.kt) writes PowOS's /tmp/powos-verify-go (= /data/powos/root/tmp, mode 644,
+  readable by adb's shell user); `VERIFY_GO=1 idle.sh --wait` returns `go=<task|all>` at its next 5 s check; the runner
+  runs only those jobs and clears it. /run/powos-app is NOT readable by shell (SELinux) - flags go in /tmp.
+- Status pill (VerifyRun.kt, window "PowOS verify status", TYPE 2017, skip-screenshot): the runner writes
+  /run/powos-app/verify-status.json per job ({name,task,k,n,screen}; {done,summary} at the end -> a notification) through
+  `su -c 'sh /data/powos/powos-run.sh "echo B64 | base64 -d | bash"'` (one adb call), plus /tmp/powos-verify-job (the
+  job mark). The pill's tap writes /tmp/powos-verify-stop; the runner's per-job stop watcher (one held adb call, its loop
+  on the phone, ends when the job mark changes) kills the job: it stays queued, tries not counted. Check: test-now.sh.
+- A runner runs the queue.sh of the checkout that started it: edits take effect at the next runner start; never edit
+  the copy a running runner reads (bash reads as it goes).
 - Mac: `journey.sh` (one wait + verify lock + gest.sh runs + pull, `RUNS="A B C D"`), `frames.sh` (gaps / sheet / overview),
   `bf-run.sh` (Broforce ~10 min check; `NO_START=1` while the user plays it themselves).
 - Phone (pushed by the above, or `adb.sh push` + `su -c sh`): `gest.sh`, `cpu-sample.sh`, `bf-sample.sh`, `sf-latency.sh`;

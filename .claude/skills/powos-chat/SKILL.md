@@ -90,6 +90,16 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
 - Contrast: text on the AI page's frost reads ~4.0-4.4 over a bright wallpaper even in foreground - that's the frost
   (design owns it, token level); don't fix per text. Folds on the wallpaper get --on-wallpaper + --label-shadow.
 
+## Test now (queued phone checks) and the live board
+- A row whose step is exactly "phone check queued" (tools/phone/verify/queue.sh QUEUED_STEP; powai.tsx QUEUED_STEP) gets a
+  quiet "test now" under it, the header "test all"; the tap calls powos.ai.verifyGo(id|"all") (bridge verify.go,
+  VerifyRun.kt: writes PowOS's /tmp/powos-verify-go; the Mac's runner takes it within 5 s). "testing… don't touch the
+  phone" until the step changes (or 20 min). Result steps "verify PASS: .." -> "check passed", "verify FAIL rc=N: .."
+  -> "check failed: <line>" + the last design-qa/verify-*.png inline. An older APK: "test now needs the newer app".
+- The board went stale after edits: a socket Doze cut silently stays "connected". stdb.ts checkAlive(db, query): one
+  more subscription when the board comes into sight; not applied in 4 s -> a new connection. Scenes: test-now,
+  test-now-testing.
+
 ## Queued messages (one queue for every chat)
 - The app owns it: PowosAiChat.send while busy appends to `queued` (id, text, prompt) instead of dropping; at turn end
   the next one runs before the inbox's turn; `ai.chat` carries `queued`, `ai.unqueue(id)` takes one back. Lost on an
