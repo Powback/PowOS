@@ -14,6 +14,7 @@ public:
 
 private:
     void applyLayer() override;
+    void resizeEvent(QResizeEvent *e) override;
     /** "b.r <dpr> <n> [x y w h tl tr br bl alpha blur]..." (CSS px = this view's px): KWin blurs behind those. */
     void setGlass(const QString &regions);
     /** The last regions: set again on a re-created window (the first show's, see view.h). */

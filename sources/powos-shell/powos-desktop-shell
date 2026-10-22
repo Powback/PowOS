@@ -1,37 +1,58 @@
 #!/bin/bash
-# powos-desktop-shell start|stop|status - PowOS's desktop home (powos-shell's background surface: the web shell's
-# grid, widgets, PowOS AI's pill and the pet) on the running Plasma session, beside Plasma's own panel,
-# notifications and task switcher (docs/DESKTOP-SHELL.md). Additive: stop it and Plasma's desktop is as it was.
+# powos-desktop-shell start|stop|status|enable|disable - PowOS's desktop home (powos-shell: the web shell's grid,
+# widgets, PowOS AI's pill and the pet as a surface under every window) on the running Plasma session, beside
+# Plasma's own panel, notifications and task switcher (docs/DESKTOP-SHELL.md). Additive: stop it and Plasma's
+# desktop is as it was.
+#
+#   start | stop      now (start --auto: what the session's autostart runs - nothing when disabled)
+#   status            running or stopped, its pid, each surface's layer and size, the processes' RSS and CPU
+#   enable | disable  with the Plasma session (XDG autostart, powos-desktop-shell.desktop) or not; disable stops it
+#
 # Runs as the session user, in the session's environment (WAYLAND_DISPLAY etc.).
 set -u
-BIN=$(dirname "$(readlink -f "$0")")/powos-shell
+HERE=$(dirname "$(readlink -f "$0")")
+BIN=$HERE/powos-shell
+# The web shell installed next to it (the phone's build: /usr/lib/powos/desktop-shell/share/shell), else powos-shell's
+# own default (/usr/share/powos/shell).
+[ -z "${POWOS_SHELL_DIR:-}" ] && [ -f "$HERE/../share/shell/index.html" ] && export POWOS_SHELL_DIR=$HERE/../share/shell
 LOG=${XDG_STATE_HOME:-$HOME/.local/state}/powos/desktop-shell.log
+OFF=${XDG_CONFIG_HOME:-$HOME/.config}/powos/desktop-shell.off
 pids() { pgrep -u "$(id -u)" -f "^$BIN( |$)"; }
+start() {
+  if pids >/dev/null; then echo "running: $(pids | head -1)"; return 0; fi
+  mkdir -p "$(dirname "$LOG")"
+  : >"$LOG"
+  setsid "$BIN" ${POWOS_SHELL_ROLES:-home} >>"$LOG" 2>&1 </dev/null &
+  sleep 2
+  pids >/dev/null && echo "started: $(pids | head -1)" || { echo "did not start:"; tail -20 "$LOG"; return 1; }
+}
+stop() {
+  p=$(pids) || { echo "not running"; return 0; }
+  kill $p
+  for _ in 1 2 3 4 5 6 7 8 9 10; do pids >/dev/null || break; sleep 0.3; done
+  pids >/dev/null && kill -9 $(pids)
+  echo stopped
+}
 case "${1:-status}" in
   start)
-    if pids >/dev/null; then echo "running: $(pids | head -1)"; exit 0; fi
-    mkdir -p "$(dirname "$LOG")"
-    : >"$LOG"
-    setsid "$BIN" ${POWOS_SHELL_ROLES:-home} >>"$LOG" 2>&1 </dev/null &
-    sleep 2
-    pids >/dev/null && echo "started: $(pids | head -1)" || { echo "did not start:"; tail -20 "$LOG"; exit 1; }
+    if [ "${2:-}" = --auto ] && [ -e "$OFF" ]; then echo "disabled (powos-desktop-shell enable)"; exit 0; fi
+    start
     ;;
-  stop)
-    p=$(pids) || { echo "not running"; exit 0; }
-    kill $p
-    for _ in 1 2 3 4 5 6 7 8 9 10; do pids >/dev/null || break; sleep 0.3; done
-    pids >/dev/null && kill -9 $(pids)
-    echo stopped
-    ;;
+  stop) stop ;;
+  enable) rm -f "$OFF"; echo "enabled: starts with the Plasma session"; start ;;
+  disable) mkdir -p "$(dirname "$OFF")"; : >"$OFF"; echo "disabled: Plasma's desktop alone from now on"; stop ;;
   status)
-    p=$(pids | head -1) || { echo "not running"; exit 1; }
+    [ -e "$OFF" ] && echo "autostart: disabled" || echo "autostart: enabled"
+    p=$(pids | head -1) || { echo "stopped"; exit 1; }
+    echo "running: pid $p"
+    # Each surface as the host last laid it out (src/home.cpp logs it on every resize).
+    grep -a "surface:" "$LOG" | tail -4
     # The host and its Chromium children (renderer, GPU, zygotes): RSS and CPU ticks (utime+stime, HZ=100) each.
     for q in $p $(pgrep -P "$p") $(for c in $(pgrep -P "$p"); do pgrep -P "$c"; done); do
       [ -r /proc/$q/stat ] || continue
       printf '%7s %6s MB %8s ticks  %s\n' "$q" $(( $(awk '/VmRSS/{print $2}' /proc/$q/status) / 1024 )) \
         "$(awk '{print $14+$15}' /proc/$q/stat)" "$(tr '\0' ' ' </proc/$q/cmdline | cut -c1-90)"
     done
-    tail -5 "$LOG"
     ;;
-  *) sed -n '2,5p' "$0"; exit 2 ;;
+  *) sed -n '2,10p' "$0"; exit 2 ;;
 esac

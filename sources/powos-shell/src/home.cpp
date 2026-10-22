@@ -16,6 +16,16 @@ Home::Home(QScreen *screen, QWebEngineProfile *profile, const Services &services
     start();
 }
 
+void Home::resizeEvent(QResizeEvent *e)
+{
+    ShellView::resizeEvent(e);
+    // What `powos-desktop-shell status` shows: where KWin put the surface (anchored to every edge, inside the panels).
+    qInfo().noquote() << QStringLiteral("powos-shell surface: home %1x%2 on %3, layer %4, scope %5")
+                             .arg(width()).arg(height()).arg(m_screen->name(),
+                                  qEnvironmentVariable("POWOS_HOME_LAYER") == QLatin1String("background") ? QStringLiteral("background") : QStringLiteral("bottom"),
+                                  qEnvironmentVariable("POWOS_HOME_SCOPE", QStringLiteral("dock")));
+}
+
 void Home::applyLayer()
 {
     QWindow *window = windowHandle();

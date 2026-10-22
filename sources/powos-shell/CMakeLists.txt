@@ -38,6 +38,9 @@ install(TARGETS powos-shell RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES org.powos.shell.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 # The desktop home's switch (start|stop|status), next to the binary it runs.
 install(PROGRAMS powos-desktop-shell DESTINATION ${CMAKE_INSTALL_BINDIR})
+# With the Plasma session (start --auto: nothing while `powos-desktop-shell disable` holds).
+set(POWOS_SHELL_AUTOSTART "${CMAKE_INSTALL_FULL_SYSCONFDIR}/xdg/autostart" CACHE PATH "where the session autostart entry goes")
+install(FILES powos-desktop-shell.desktop DESTINATION ${POWOS_SHELL_AUTOSTART})
 
 # The web UI itself (shell/ of the repo), as the base the override folder (~/.config/powos/shell) sits over.
 set(POWOS_SHELL_WEB "" CACHE PATH "shell/ to install to share/powos/shell (empty: not installed)")
