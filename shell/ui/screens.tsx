@@ -31,7 +31,7 @@ import {
   useScreen,
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import { apps, pullOverApps, pullPanels, speechEngine } from "../state.ts";
+import { apps, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { PetToggle } from "./pet.tsx";
 
 /** Its touches are its own: home's swipes under it don't see them. */
@@ -484,6 +484,9 @@ function StyleScreen() {
         </Option>
         <Option label="swipe up from a bottom corner over apps: apps, PowOS AI">
           <Segmented options={["on", "off"]} picked={pullOverApps.value === "on" ? 0 : 1} onPick={(i) => (pullOverApps.value = i === 0 ? "on" : "off")} />
+        </Option>
+        <Option label="separate notifications & controls">
+          <Segmented options={["on", "off"]} picked={separatePanels.value === "on" ? 0 : 1} onPick={(i) => (separatePanels.value = i === 0 ? "on" : "off")} />
         </Option>
         {/* The pet (ui/pet.tsx; also `powos pet on|off`): off by default - off, it shows and runs nothing. */}
         <PetToggle

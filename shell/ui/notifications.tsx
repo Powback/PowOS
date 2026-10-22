@@ -8,7 +8,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { notif, panel } from "../state.ts";
+import { notif, panel, separatePanels } from "../state.ts";
 import { ControlCenter } from "./control.tsx";
 import { Icon } from "./icons.tsx";
 import { followNotif, notifOpen, notifShown } from "./gesture.ts";
@@ -305,6 +305,8 @@ function Stack({ g }: { g: Group }) {
 
 export function NotificationPanel() {
   const shown = notifOpen.value;
+  // The notifications and the control center: one panel (the default), or apart (settings -> style).
+  const together = separatePanels.value !== "on";
   // Shut: no reply left half-typed in it.
   useEffect(() => {
     if (!shown) replying.value = null;
@@ -319,7 +321,7 @@ export function NotificationPanel() {
   useLayoutEffect(() => {
     const p = panelEl.current;
     // The notifications: their list and its cards; the control center: the panel's body and its content - the same ride.
-    const control = panel.value === "control";
+    const control = !together && panel.value === "control";
     const l = control ? p?.querySelector<HTMLElement>(".panel-body") : listEl.current;
     const c = control ? p?.querySelector<HTMLElement>(".cc") : itemsEl.current;
     if (!l || !c || !p) return;
@@ -332,7 +334,27 @@ export function NotificationPanel() {
     ro.observe(l);
     ro.observe(c);
     return () => ro.disconnect();
-  }, [panel.value]);
+  }, [panel.value, together]);
+  // The cards, newest first, each group a row of the cascade (shell.css .cascade) from --i [from], after the rows above.
+  const items$ = (from: number) => (
+    <div class="notif-items" ref={itemsEl}>
+      {!available ? (
+        <button type="button" class="notif tile notif-access" onClick={() => powos.notifications.access()}>
+          allow the launcher to show your notifications here →
+        </button>
+      ) : items.length ? (
+        grouped(items).map((g, i) => (
+          <div key={g.id} class="cascade" style={{ "--i": from + i }}>
+            <Stack g={g} />
+          </div>
+        ))
+      ) : (
+        <div class="notif-empty muted cascade" style={{ "--i": from }}>
+          {together ? "no notifications" : "nothing new"}
+        </div>
+      )}
+    </div>
+  );
   return (
     <>
       <div
@@ -350,8 +372,27 @@ export function NotificationPanel() {
         }}
         aria-hidden={!shown}
       >
-        <div class="panel-body">
-          {panel.value === "control" ? (
+        <div class={`panel-body ${together ? "together" : ""}`}>
+          {together ? (
+            // One panel: the controls on top, the notifications under them - one list, one scroll, one cascade (the
+            // control center's rows first: its header 0 .. its second row of tiles 4, then these).
+            <div class="notif-list" ref={listEl}>
+              <ControlCenter />
+              {available && items.length > 0 && (
+                <div class="notif-bar cascade" style={{ "--i": 5 }}>
+                  <span class="muted">{`${items.length} notification${items.length > 1 ? "s" : ""}`}</span>
+                  {clearable && (
+                    <span class="notif-actions icons">
+                      <button type="button" aria-label="clear all" onClick={() => powos.notifications.clearAll()}>
+                        <Icon name="notificationClearAll" />
+                      </button>
+                    </span>
+                  )}
+                </div>
+              )}
+              {items$(6)}
+            </div>
+          ) : panel.value === "control" ? (
             <ControlCenter />
           ) : (
             <>
@@ -370,27 +411,8 @@ export function NotificationPanel() {
                   </button>
                 </span>
               </div>
-              {/*
-                * Open: top-aligned, the newest first. Pulled down: the cards ride on the sheet's bottom edge (under the
-                * finger) until their top is where it ends up, then stay there - --ride (shell.css), from --q.
-                */}
               <div class="notif-list" ref={listEl}>
-                <div class="notif-items" ref={itemsEl}>
-                {!available ? (
-                  <button type="button" class="notif tile notif-access" onClick={() => powos.notifications.access()}>
-                    allow the launcher to show your notifications here →
-                  </button>
-                ) : items.length ? (
-                  grouped(items).map((g, i) => (
-                    // A row of the cascade (shell.css .cascade): it slides in after the one above it.
-                    <div key={g.id} class="cascade" style={{ "--i": i + 1 }}>
-                      <Stack g={g} />
-                    </div>
-                  ))
-                ) : (
-                  <div class="notif-empty muted">nothing new</div>
-                )}
-                </div>
+                {items$(1)}
               </div>
             </>
           )}

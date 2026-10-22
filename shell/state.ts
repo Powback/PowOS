@@ -143,6 +143,12 @@ export const pullPanels = stored("pullPanels", "on");
  * store (files/shell-data/pullOverApps.json), so it's written there too. Off: no corner is claimed over apps.
  */
 export const pullOverApps = stored("pullOverApps", "on");
+/**
+ * Settings -> style -> home: "on" keeps the notifications and the control center apart (two panels, a sideways swipe
+ * between them, the status bar's right half pulls the control center); off, the default, they're one panel - the
+ * controls on top, the notifications under them - and a pull anywhere along the top brings it.
+ */
+export const separatePanels = stored("separatePanels", "off");
 // The plain value: store.set writes a string as a JSON string ("on" / "off"), what CornerPull.kt reads.
 effect(() => void powos.store.set("pullOverApps", pullOverApps.value).catch(() => {}));
 /**

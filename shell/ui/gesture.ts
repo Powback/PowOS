@@ -18,7 +18,7 @@
 import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
-import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, panel, pullKind, pullPanels, selected } from "../state.ts";
+import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
 /** px per ms: a flick, whatever the distance. */
@@ -348,8 +348,8 @@ export function homeGestures() {
         // The notification panel down: up drags it shut (the list scrolls until its end); sideways is a card's.
         if (dy < 0 && Math.abs(dy) > Math.abs(dx) && (!g.inList || g.listBottom)) g.mode = "notifClose";
         // Sideways, not on a notification (a card slides away by itself): between the notifications and the
-        // control center, as OnePlus's panels.
-        else if (Math.abs(dx) > Math.abs(dy) && !g.inStrip && !g.target.closest?.(".notif.tile:not(.notif-access)")) g.mode = "panel";
+        // control center, as OnePlus's panels - when they're apart (one panel: nothing to swipe to).
+        else if (separatePanels.value === "on" && Math.abs(dx) > Math.abs(dy) && !g.inStrip && !g.target.closest?.(".notif.tile:not(.notif-access)")) g.mode = "panel";
         else return (g = null);
       } else if (Math.abs(dy) > Math.abs(dx) && page.value === -1) {
         // PowOS AI's page: up and down are its own (it scrolls).

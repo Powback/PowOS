@@ -1068,6 +1068,17 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 /* Nothing new: the message in the middle of the (now always full-height) panel. */
 .notif-list:has(> .notif-items > .notif-empty) { display: flex; }
 .notif-grip { align-self: center; width: 44px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--color-border); }
+/*
+ * One panel (notifications.tsx, the default; settings -> style keeps them apart): the control center on top, the
+ * notifications under it, one list scrolling as one. As tall as what's in it, up to the panel's height - nothing to
+ * switch to, so no fixed height to hold.
+ */
+.notif-panel:has(> .panel-body.together) { height: auto; max-height: 88%; }
+.notif-panel .panel-body.together { flex: 0 1 auto; }
+.panel-body.together > .notif-list { gap: 10px; }
+.panel-body.together .cc { flex: none; overflow: visible; padding-bottom: 0; }
+.panel-body.together .cc + .notif-bar { padding-top: 10px; padding-bottom: 0; }
+.panel-body.together .notif-empty { padding: 14px 2px 6px; }
 
 /*
  * PowOS AI's page (powai.tsx), left of home: it and home slide as one (gesture.ts applyTrack sets both transforms) -

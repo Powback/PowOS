@@ -12,15 +12,17 @@
 import { signal } from "@preact/signals";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { powos } from "../bridge.ts";
-import { notif, panel } from "../state.ts";
+import { notif, panel, separatePanels } from "../state.ts";
 import type { PhoneNotification } from "../types.ts";
 import { homeGestures, notifDrag, notifOpen, notifShown } from "./gesture.ts";
 import { Actions, NotificationPanel } from "./notifications.tsx";
 
-// Which panel the pull brings: the status bar's right half the control center, the rest the notifications.
+// Which panel the pull brings: the status bar's right half the control center, the rest the notifications - when
+// they're apart (settings); together, it's the one panel wherever the pull starts.
 powos.on(
   "shade.panel",
-  ({ panel: p }: { panel: "notifications" | "control" }) => (panel.value = p),
+  ({ panel: p }: { panel: "notifications" | "control" }) =>
+    (panel.value = separatePanels.value === "on" ? p : "notifications"),
 );
 powos.on(
   "shade.drag",
