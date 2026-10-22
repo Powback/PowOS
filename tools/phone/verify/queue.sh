@@ -165,7 +165,10 @@ run)
   . "$here/window-lock.sh"
   board() {  # board <task> <text> [done] [image]: the result on the owner's task (closed too when done=1), as the session user
     local s; s=$(printf 'powos agents task set %q --step %q %s >/dev/null 2>&1 || true\n' "$1" "$2" "${4:+--image $(printf %q "$4")}"
-      printf 'powos comms send %q %q --from verify-queue >/dev/null 2>&1 || true\n' "${QUEUE_MAIL_TO:-coder}" "$1: $2"
+      # Mail only what needs acting on (a FAIL; QUEUE_MAIL_ALL=1 mails passes too): a pass is on the board already, and
+      # each mail wakes the coordinator for a full turn (the self-optimize round, 2026-10-23: the top token cost).
+      if [[ $2 != *PASS* ]] || [ "${QUEUE_MAIL_ALL:-0}" = 1 ]; then
+        printf 'powos comms send %q %q --from verify-queue >/dev/null 2>&1 || true\n' "${QUEUE_MAIL_TO:-coder}" "$1: $2"; fi
       [ "${3:-0}" = 1 ] && printf 'powos agents task done %q >/dev/null 2>&1 || true\n' "$1")
     user_sh "$s" || echo "board update failed for $1: $2"; }
   jstr() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '"%s"' "$s"; }
