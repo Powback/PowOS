@@ -93,6 +93,24 @@
   --glass-base: color-mix(in srgb, var(--color-foreground) 18%, var(--color-background));
   /* The one darkening for a page that is mostly text (PowOS AI's): more of the same tint, nothing else. */
   --glass-dim: 28%;
+  /*
+   * The frost (frost v2, 2026-10-22): one material for the surfaces you read through - PowOS AI's cards and panel, the
+   * control center. Its strength is the compositor's blur (--frost-blur-native: what's behind can't be read, not a
+   * darker fill), its colour the reference tint cooled, at the reference strength; text keeps its contrast with a soft
+   * scrim of its own (--frost-scrim, a halo behind each run), not a slab.
+   */
+  --frost-cool: var(--frost-cool-dark);
+  --frost-cool-light: #e8eef6;
+  --frost-cool-dark: #182230;
+  /* The frost over a wallpaper of the other tone takes the other tone (light glass, dark text; or the reverse). */
+  --frost-swap-cool: var(--frost-cool-light);
+  /* The text on light frost in a dark theme: its background colour (read before anything swaps it). */
+  --frost-ink: var(--color-background);
+  --frost-paper: var(--color-foreground);
+  --frost-base: color-mix(in oklab, var(--glass-base) 55%, var(--frost-cool));
+  --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 16%), transparent);
+  --frost-blur-native: 360px;
+  --frost-scrim: 0 0 3px color-mix(in srgb, var(--frost-base) 80%, transparent), 0 0 9px color-mix(in srgb, var(--frost-base) 55%, transparent);
   /* One material (docs/DESIGN-LANGUAGE.md): every surface is the reference fill - home's tiles as PowOS AI's cards. */
   --glass-fill: var(--text-fill);
   /*
@@ -127,6 +145,8 @@
   --on-wallpaper-halo: var(--color-foreground);
 }
 :root[data-light="true"] {
+  --frost-cool: var(--frost-cool-light);
+  --frost-swap-cool: var(--frost-cool-dark);
   --glass-tint: 50%;
   --glass-brightness: 1.08;
   --glass-veil: rgb(255 255 255 / 8%);

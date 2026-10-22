@@ -472,7 +472,7 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
               behind === "wallpaper"
                 ? glassMode === "page"
                   ? ""
-                  : `html { background: ${pic}; } .glass-native :is(.tile, .notif-panel):not(:is(.tile, .notif-panel) *) { backdrop-filter: blur(30px); }`
+                  : `html { background: ${pic}; } .glass-native :is(.tile, .notif-panel):not(:is(.tile, .notif-panel) *) { backdrop-filter: blur(calc(var(--glass-blur-native, 140px) * 0.22)); }`
                 : behind === "blurred"
                   ? `html::before { content: ""; position: fixed; inset: -40px; z-index: -1; background: ${pic}; filter: blur(30px) brightness(.8); }`
                   : `html { background: url("${window.__shotsApp}") 0 0 / 100% 100% no-repeat; }`;

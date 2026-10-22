@@ -331,11 +331,10 @@
 /* Over a wallpaper of the other tone (theme.css data-wallpaper): the root's deeper tint, the drawer's too. */
 :root[data-light="false"][data-wallpaper="light"] .home .launcher-frame, :root[data-light="true"][data-wallpaper="dark"] .home .launcher-frame { --glass-dim: 68%; }
 /*
- * The chat in the drawer (chat.tsx), and PowOS AI's pull-up panel (home's and over apps: .ai-panel, whatever its
- * content): a page of text over the frost - the frame takes the theme's background at 84% (as the assistant's panel),
- * so its text keeps 4.5:1 over a bright wallpaper (the reference fill measured 3.7-4.4, the AI panel's 4.0-4.45).
+ * The chat in the drawer (chat.tsx): a page of text over the frost - the frame takes the theme's background at 84%
+ * (as the assistant's panel), so its text keeps 4.5:1 over a bright wallpaper (the reference fill measured 3.7-4.4).
  */
-html:root .home:is(:has(.drawer .chat), :has(.ai-panel)) .launcher-frame.tile {
+html:root .home:has(.drawer .chat) .launcher-frame.tile {
   background: color-mix(in srgb, var(--color-background) var(--chat-fill, 84%), transparent);
 }
 /* Over a wallpaper of the other tone: nearly solid. */
@@ -1988,18 +1987,43 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
 }
 .ai-screen :is(.ai-top, .ai-mail-bar) * { color: inherit; }
 
-/* PowOS AI's cards: text-heavy - the widgets' tint (36% left small grey text at 4.0-4.3:1 over the crystal). */
-.ai-screen .tile {
-  --glass-dim: 42%;
-  --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
-  /* Its secondary lines (a session's project and age, a mail's sender) are the foreground itself, as a widget's: their
-     size says they're secondary - the see-through grey was 4.0:1 over the crystal. */
+/*
+ * PowOS AI (its page's cards, its pull-up panel) and the control center: the frost (theme.css, frost v2) - the
+ * compositor's stronger blur on each surface (nativeglass.ts reads --glass-blur-native per surface; the shade's
+ * window is blurred by its host: shade.tsx), the cool tint, and each text run's own soft scrim.
+ */
+.ai-screen .tile:not(.pill), html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3), .home:has(.ai-panel) .ai-panel {
+  /* Resolved here, from this surface's own --frost-base (a light frost swaps it below). */
+  /* Secondary lines the foreground itself, as a widget's: their size says they're secondary. */
   --color-muted: var(--color-foreground);
+  --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 16%), transparent);
+  --frost-scrim: 0 0 3px color-mix(in srgb, var(--frost-base) 80%, transparent), 0 0 9px color-mix(in srgb, var(--frost-base) 55%, transparent);
 }
-:root[data-light="false"][data-wallpaper="light"] .ai-screen .tile, :root[data-light="true"][data-wallpaper="dark"] .ai-screen .tile { --glass-dim: 68%; }
-/* A control on the wallpaper (the mail's "clear all"): a quiet pill of the same material - a halo isn't enough, it
-   was 3.2:1 over the crystal. */
-.ai-screen .ai-mail-bar .ai-mail-clear { padding: 4px 10px; border-radius: 999px; background: color-mix(in srgb, var(--color-background) 90%, transparent); color: var(--accent-text); text-shadow: none; }
+.ai-screen .tile:not(.pill), html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3) {
+  --glass-blur-native: var(--frost-blur-native);
+  background: linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+}
+html:not(.glass-native) .ai-screen .tile:not(.pill) { background: var(--frost-fill); }
+/*
+ * Over a wallpaper of the other tone (a dark theme over a bright picture, a light one over a dark): the frost takes
+ * the wallpaper's tone, its text the theme's two colours swapped - as the wallpaper's labels turn (theme.css
+ * data-wallpaper) - not a heavier fill.
+ */
+:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.ai-screen .tile:not(.pill), .home:has(.ai-panel) .launcher-frame.tile, .home:has(.ai-panel) .ai-panel, .notif-panel:has(.cc.v3)) {
+  --frost-base: color-mix(in oklab, var(--frost-paper) 70%, var(--frost-swap-cool));
+  --glass-veil: transparent;
+  --color-foreground: var(--frost-ink);
+  --color-muted: color-mix(in srgb, var(--frost-ink) 80%, transparent);
+  --accent-text: color-mix(in srgb, var(--color-accent) 45%, var(--frost-ink));
+  color: var(--frost-ink);
+}
+.ai-screen .tile:not(.pill), .home:has(.ai-panel) .ai-panel, .notif-panel:has(.cc.v3) { text-shadow: var(--frost-scrim); }
+/* A chip, a chip's icon, an accent button: a filled shape, no scrim on its text. */
+:is(.ai-screen .tile, .ai-panel, .notif-panel) :is(.cc3-t.on, .ai-work-chip.on, .cc-auto.on, button.on) { text-shadow: none; }
+/* A text control on the wallpaper ("clear all", "open"): a soft scrim of the halo's colour right behind its word. */
+.ai-screen :is(.ai-top, .ai-mail-bar) :is(button, a):not(.tile *) { border-radius: 999px; background: radial-gradient(closest-side, color-mix(in srgb, var(--on-wallpaper-halo) 85%, transparent), color-mix(in srgb, var(--on-wallpaper-halo) 45%, transparent) 75%, transparent); }
+/* Text straight on the wallpaper (the page's header, "at work", "from agents", "clear all"): the label's halo, wider. */
+.ai-screen :is(.ai-top, .ai-heading, .ai-empty, .ai-mail-bar):not(.tile *) { text-shadow: var(--label-shadow), 0 0 22px var(--on-wallpaper-halo), 0 0 34px color-mix(in srgb, var(--on-wallpaper-halo) 60%, transparent); }
 
 /*
  * The wide screen (the phone unfolded, 821 CSS px; hosts/wide.ts shows two of home's pages side by side at their

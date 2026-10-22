@@ -99,6 +99,8 @@ interface Shape {
   chain: Element[];
   /** Sides joined to a neighbour (a merged widget group: --jt/--jr/--jb/--jl), top, right, bottom, left: 1 or 0. */
   joined: [number, number, number, number];
+  /** Its own compositor radius (--glass-blur-native set on it: PowOS AI's frost, stronger than home's tiles), or 0. */
+  blur: number;
 }
 let shapes = new Map<Element, Shape>();
 let shapesDirty = true;
@@ -119,6 +121,7 @@ function shapeOf(el: HTMLElement): Shape {
     clips,
     chain,
     joined: el.parentElement?.classList.contains("joined") ? [j("t"), j("r"), j("b"), j("l")] : [0, 0, 0, 0],
+    blur: parseFloat(cs.getPropertyValue("--glass-blur-native")) || 0,
   };
 }
 
@@ -162,6 +165,8 @@ interface Raw {
   follower?: Element;
   /** Which of its clips move with that follower. */
   clipsFollow?: boolean[];
+  /** Its own compositor radius, or the theme's (0). */
+  blur?: number;
 }
 
 /** The theme's blur radius for the compositor, read when the theme or the shapes change (not every frame). */
@@ -209,6 +214,7 @@ function measureRaw(followers: Element[] = []): Raw[] {
       alpha,
       follower,
       clipsFollow: follower ? s.clips.map((c) => follower.contains(c)) : undefined,
+      blur: s.blur,
     });
   }
   // The strip under the bar (home's ::after, the navigation bar's band): square, along the screen's foot.
@@ -262,7 +268,7 @@ function format(raws: Raw[]): string {
     const R = x1 < g.own[2] - 0.25;
     const B = y1 < g.own[3] - 0.25;
     out.push(
-      `${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)} ${f(cut(L || T, tl))} ${f(cut(R || T, tr))} ${f(cut(R || B, br))} ${f(cut(L || B, bl))} ${g.alpha.toFixed(2)} ${blur}`,
+      `${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)} ${f(cut(L || T, tl))} ${f(cut(R || T, tr))} ${f(cut(R || B, br))} ${f(cut(L || B, bl))} ${g.alpha.toFixed(2)} ${g.blur || blur}`,
     );
   }
   return `${view.dpr} ${out.length}${out.length ? " " + out.join(" ") : ""}`;
