@@ -21,8 +21,13 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
   `su -c 'sh /data/powos/powos-run.sh "echo B64 | base64 -d | bash"'` (one adb call), plus /tmp/powos-verify-job (the
   job mark). The pill's tap writes /tmp/powos-verify-stop; the runner's per-job stop watcher (one held adb call, its loop
   on the phone, ends when the job mark changes) kills the job: it stays queued, tries not counted. Check: test-now.sh.
-- A runner runs the queue.sh of the checkout that started it: edits take effect at the next runner start; never edit
-  the copy a running runner reads (bash reads as it goes).
+- Jobs run in the runner's own checkout `.claude/worktrees/verify-runner` (made if missing, node_modules linked,
+  fast-forwarded - reset if dirty - to origin before each window): `add` stores cwd + command repo-relative when they
+  are inside any PowOS worktree (absolute only otherwise), and old jobs with a `.claude/worktrees/*` cwd are rewritten
+  at run time. So PUSH what the check needs before queueing; `worktree.sh done` right after is fine (it lists them).
+- The runner execs a private temp copy of verify-runner's queue.sh (code changes land at the next runner start; a pull
+  can't change it mid-run). Restart on new code: `kill $(cat ~/.cache/powos-verify-queue/runner.pid)` (its TERM trap
+  stops the window + check, frees the lock; the job stays queued), then any `queue.sh add` - or `queue.sh run` - starts it.
 - Mac: `journey.sh` (one wait + verify lock + gest.sh runs + pull, `RUNS="A B C D"`), `frames.sh` (gaps / sheet / overview),
   `bf-run.sh` (Broforce ~10 min check; `NO_START=1` while the user plays it themselves).
 - Phone (pushed by the above, or `adb.sh push` + `su -c sh`): `gest.sh`, `cpu-sample.sh`, `bf-sample.sh`, `sf-latency.sh`;

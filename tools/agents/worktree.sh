@@ -2,7 +2,8 @@
 # One worktree per task, removed when it is pushed.
 #   worktree.sh new <name>   worktree at .claude/worktrees/<name> on branch agent/<name>, from origin's tip,
 #                            shell/node_modules linked from powos-multiplatform (no per-worktree install)
-#   worktree.sh done <name>  remove it; refuses while it has uncommitted or unpushed work
+#   worktree.sh done <name>  remove it; refuses while it has uncommitted or unpushed work; lists the phone checks
+#                            queued from it (they run in the verify checkout, so removing it is fine)
 #   worktree.sh list         name, age of HEAD, commits not on origin (patch-id), dirty files
 set -euo pipefail
 BASE=worktree-powos-multiplatform
@@ -28,6 +29,8 @@ done)
   a=$(ahead "$d"); x=$(dirty "$d")
   [ "$a" = 0 ] && [ "$x" = 0 ] || { echo "refused: $n has $a unpushed commit(s), $x uncommitted file(s)" >&2; exit 1; }
   br=$(git -C "$d" symbolic-ref --short -q HEAD || true)
+  q=$(grep -lE "${d//./\\.}([/ )']|\$)" "$HOME"/.cache/powos-verify-queue/*.job 2>/dev/null || true)
+  [ -z "$q" ] || echo "queued phone checks from $n (they run from the verify checkout): $(for f in $q; do basename "$f" .job; done | tr '\n' ' ')"
   [ -L "$d/shell/node_modules" ] && rm "$d/shell/node_modules"
   git -C "$REPO" worktree remove "$d"
   [ -n "$br" ] && git -C "$REPO" branch -D "$br" >/dev/null

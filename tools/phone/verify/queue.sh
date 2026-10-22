@@ -18,14 +18,54 @@
 # but printed a line starting with FAIL is a FAIL. Each result goes onto the check's board task (`--step`, the log's
 # last line; a FAIL also gets a screenshot as its review image), a mail to the coder inbox (QUEUE_MAIL_TO) and the log
 # stays in ~/.cache/powos-verify-queue/done/. Queue a check and END YOUR TURN: the result shows on the board (handbook,
-# Efficiency).
+# Efficiency). Paths: a job queued from inside any PowOS worktree is stored repo-relative and runs in the runner's own
+# checkout (.claude/worktrees/verify-runner, fast-forwarded to origin before each window), so removing the worktree it
+# came from is fine - push before you queue. The runner runs a private copy of that checkout's queue.sh.
 set -uo pipefail
-here=$(cd "$(dirname "$0")" && pwd); phone=$(cd "$here/.." && pwd)
+here=${QUEUE_HERE:-$(cd "$(dirname "$0")" && pwd -P)}; unset QUEUE_HERE; phone=$(cd "$here/.." && pwd -P)
+BASE=worktree-powos-multiplatform
+REPO=$(cd "$here" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null && pwd -P || true)
+[ "$REPO" = / ] && REPO=
+VR=$REPO/.claude/worktrees/verify-runner   # the runner's checkout: only the runner touches it
 Q=$HOME/.cache/powos-verify-queue; mkdir -p "$Q/done"
 QUEUED_STEP="phone check queued"   # shell/ui/powai.tsx matches this text
 # user_sh <script text>: run it inside PowOS as the session user (its `powos ...`), quietly.
 user_sh() { local s; s=$(mktemp "$Q/user.XXXX"); printf '%s\n' "$1" > "$s"; "$phone/user.sh" "$s" >/dev/null 2>&1; local rc=$?; rm -f "$s"; return $rc; }
 runner_up() { kill -0 "$(cat "$Q/runner.pid" 2>/dev/null)" 2>/dev/null; }
+# wt_of <abs path>: the PowOS worktree it lies in (wroot) and the path under it (wsub, "" = the root); fails outside.
+wt_of() {
+  [ -n "$REPO" ] || return 1
+  case "$1/" in
+    "$REPO"/.claude/worktrees/?*/*) local s=${1#"$REPO"/.claude/worktrees/}; wroot=$REPO/.claude/worktrees/${s%%/*} ;;
+    "$REPO"/*) wroot=$REPO ;;
+    *) return 1 ;;
+  esac
+  wsub=${1#"$wroot"}; wsub=${wsub#/}
+}
+# relify <sub>: make the job (cmd, cwd) repo-relative: cwd = <sub>, every PowOS worktree path inside an argument
+# relative to it (a removed worktree's path then runs from the verify checkout). Sets rel=1.
+relify() {
+  local up= a R=${REPO//./\\.} out=()
+  [ -n "$1" ] && up=$(printf %s "$1/" | sed -E 's#[^/]+#..#g')
+  for a in "${cmd[@]}"; do
+    out+=("$(printf %s "$a" | sed -E "s#$R/\.claude/worktrees/[A-Za-z0-9._-]+/#$up#g; s#$R/\.claude/worktrees/[A-Za-z0-9._-]+\$#${up:-./}#; s#$R/#$up#g; s#^$R\$#${up:-./}#")")
+  done
+  cmd=("${out[@]}"); cwd=${1:-.}; rel=1
+}
+# verify_tree: the runner's checkout - made if missing (shell/node_modules linked from powos-multiplatform), then
+# fast-forwarded to origin's tip.
+verify_tree() {
+  git -C "$REPO" fetch -q origin "$BASE" || echo "verify checkout: fetch failed - running on what it has"
+  if [ ! -e "$VR/.git" ]; then
+    git -C "$REPO" worktree add -q --detach "$VR" "origin/$BASE" || { echo "verify checkout: can't create $VR"; return 1; }
+  else
+    # Only the runner uses it: a check that left files changed doesn't hold it back.
+    git -C "$VR" merge -q --ff-only "origin/$BASE" 2>/dev/null || { echo "verify checkout: not a fast-forward - reset to origin"
+      git -C "$VR" reset -q --hard "origin/$BASE"; }
+  fi
+  local nm=$REPO/.claude/worktrees/powos-multiplatform/shell/node_modules
+  [ -e "$VR/shell/node_modules" ] || [ ! -d "$nm" ] || ln -s "$nm" "$VR/shell/node_modules"
+}
 case "${1:-}" in
 add)
   shift; close=0; name=; screen=
@@ -40,8 +80,13 @@ add)
   if [ -z "$name" ]; then  # the script's name (past `env A=1 ...`)
     for a in "$@"; do case "$a" in */env|env|*=*) ;; *) name=$(basename "$a"); break ;; esac; done; name=${name%.sh}
   fi
+  # Repo-relative when queued from (or running a command inside) a PowOS worktree: it runs in the verify checkout.
+  cmd=("$@"); cwd=$(pwd -P); rel=0; from=
+  if wt_of "$cwd"; then from=$wroot; relify "$wsub"
+  else for a in "$@"; do wt_of "$a" && { from=$wroot; relify ""; break; }; done; fi
   j=$Q/$(date +%Y%m%d-%H%M%S)-$$-$task.job
-  { printf 'task=%q\nclose=%s\ntries=0\ncwd=%q\nname=%q\nscreen=%q\ncmd=(' "$task" "$close" "$PWD" "$name" "$screen"; printf '%q ' "$@"; printf ')\n'; } > "$j"
+  { printf 'task=%q\nclose=%s\ntries=0\ncwd=%q\nrel=%s\nfrom=%q\nname=%q\nscreen=%q\ncmd=(' "$task" "$close" "$cwd" "$rel" "$from" "$name" "$screen"
+    printf '%q ' "${cmd[@]}"; printf ')\n'; } > "$j"
   echo "queued $(basename "$j" .job) - the result goes to board task $task"
   if [ -z "${QUEUE_NO_RUN:-}" ]; then
     # The board marker: the AI page offers "test now" on a task whose step says so (the result's step replaces it).
@@ -53,6 +98,14 @@ list)
   echo "runner: $(runner_up && echo running || echo idle)"
   echo "last results:"; ls -t "$Q/done" 2>/dev/null | grep "\.log$" | head -8 | while read -r f; do echo "  $f: $(tail -1 "$Q/done/$f")"; done ;;
 run)
+  [ -n "$REPO" ] || { echo "queue.sh run: not in a PowOS checkout"; exit 2; }
+  if [ -z "${QUEUE_COPY:-}" ]; then
+    # A private copy of the verify checkout's queue.sh: bash reads a script as it runs, and checkouts get pulled into.
+    verify_tree || exit 1
+    c=$(mktemp "${TMPDIR:-/tmp}/powos-queue.XXXXXX") && cp "$VR/tools/phone/verify/queue.sh" "$c" || exit 1
+    QUEUE_COPY=$c QUEUE_HERE=$VR/tools/phone/verify exec bash "$c" run
+  fi
+  rm -f "$QUEUE_COPY"; unset QUEUE_COPY   # bash keeps it open
   . "$here/window-lock.sh"
   board() {  # board <task> <text> [done] [image]: the result on the owner's task (closed too when done=1), as the session user
     local s; s=$(printf 'powos agents task set %q --step %q %s >/dev/null 2>&1 || true\n' "$1" "$2" "${4:+--image $(printf %q "$4")}"
@@ -69,6 +122,8 @@ run)
     "$phone/adb.sh" shell "su -c 'sh /data/powos/powos-run.sh \"echo $b | base64 -d | bash\"'" >/dev/null 2>&1 || true
   }
   killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c"; done; kill "$1" 2>/dev/null; }
+  # `kill <runner.pid>` stops the window and its check too, and frees the verify lock if this runner held it.
+  trap 'for c in $(pgrep -P $$); do killtree $c; done; [ "$(cut -d" " -f1 "$HOME/.cache/powos-verify.lock/who" 2>/dev/null)" = verify-queue ] && rm -rf "$HOME/.cache/powos-verify.lock"; rm -f "$Q/runner.pid"; exit 143' TERM
   # stopwatch <job mark>: one held adb call per check, its loop on the phone (2 s): "stop" once the pill's tap wrote the
   # stop flag; ends by itself when the job mark changes (the next status). Again after a dropped connection.
   stopwatch() {
@@ -82,6 +137,7 @@ run)
   }
   # The runner stays while anything is queued (a "test now" needs one waiting): a window that didn't come is waited for again.
   while ls "$Q"/*.job >/dev/null 2>&1; do
+    verify_tree
     ( export VERIFY_GO=1
       window_lock verify-queue "${QUEUE_IDLE_S:-120}" "${WAIT_S:-7200}" >/dev/null || exit 3
       go=; case "${WL_GOT:-}" in go=*) go=${WL_GOT#go=}; go=${go%% *} ;; esac
@@ -96,7 +152,12 @@ run)
       [ -n "$go" ] && echo "$(date +%T) go from the phone: $go ($N checks)"
       for j in "${sel[@]}"; do
         [ -f "$j" ] || continue
-        task=; close=0; tries=0; cwd=$PWD; name=; screen=; cmd=(); . "$j"
+        task=; close=0; tries=0; cwd=$PWD; rel=0; from=; name=; screen=; cmd=(); . "$j"
+        # A job from before repo-relative jobs: its worktree may be gone - run it in the verify checkout instead.
+        if [ "$rel" != 1 ] && [[ "$cwd ${cmd[*]}" == *"$REPO/.claude/worktrees/"* ]]; then
+          if wt_of "$cwd"; then relify "$wsub"; else relify ""; fi
+        fi
+        [ "$rel" = 1 ] && cwd=$VR/$cwd
         n=$(basename "$j" .job); log=$Q/done/$n.log; k=$((k + 1))
         echo "$(date +%T) run $n: ${cmd[*]}"
         status "$n" "{\"name\":$(jstr "${name:-$task}"),\"task\":$(jstr "$task"),\"k\":$k,\"n\":$N,\"screen\":$(jstr "$screen"),\"ts\":$(date +%s)}" "$([ $k = 1 ] && echo 'rm -f /tmp/powos-verify-go')"
@@ -132,7 +193,7 @@ run)
         echo "$(date +%T) $n: $r"
       done
       sum="Phone checks: $pass passed"; [ $fail = 0 ] || sum="$sum, $fail failed ($first$([ $fail -gt 1 ] && echo ", ..."))"
-      status "" "{\"done\":true,\"summary\":$(jstr "$sum")}" )
+      status "" "{\"done\":true,\"summary\":$(jstr "$sum")}" ) & wait $!
     rc=$?; [ $rc = 3 ] && echo "$(date +%T) no free window in ${WAIT_S:-7200}s - waiting again"
   done
   rm -f "$Q/runner.pid" ;;
