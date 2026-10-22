@@ -49,6 +49,9 @@ minimal change and tell them.
   bridge): gate it on the bridge capability (feature-detect the method) so it stays hidden until the APK lands.
 - A task is DONE the moment it's shipped and checked (manager, 2026-10-22): never leave it at "3/3 working". If the
   device check is its last proof, queue it with `queue.sh add --close` so the pass closes the task.
+- One task per piece of work (manager, 2026-10-22): before adding a board task, search the board
+  (`powos agents task list`, grep the title) and reuse the manager's existing one with `task set`; create one only
+  when none exists.
 - Board wording (manager, 2026-10-22): notes are plain words for the user, no commit hashes; status `waiting` only for
   something the USER must do (it shows as a Needs-you card), never for a queued check or another agent.
 - Worktrees: `tools/agents/worktree.sh new <name>` (origin tip, shared node_modules), `done <name>` once pushed (refuses
