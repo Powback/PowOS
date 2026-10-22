@@ -1,0 +1,71 @@
+#!/bin/bash
+# unfolded-checks.sh [OUT]: the owed UNFOLDED checks in one go, for a phone left unattended (the user said so):
+#   inner screen forced (cmd device_state state 3 = open), PowOS's lock face swiped away (no PIN), home's merged tiles,
+#   the keyboard padding on PowOS AI's page and in the side-button overlay (assist), the chat's image thumbnails;
+#   every capture through tools/phone/shot.sh (the ON display; refuses off/black). Restores after: Back out of what it
+#   opened, home, `cmd device_state state reset` (the fold state follows the hinge again - not a forced 0, which would
+#   blank the inner screen of a phone that is physically open).
+# Injected input only; stops at once (and restores) if a real touch comes (touch-panel IRQs move).
+# Captures + log: OUT (default ~/.cache/powos-verify/unfolded-<time>), attached to the owners' board tasks.
+set -uo pipefail
+here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"; ROOT=$(cd "$T/../.." && pwd)
+OUT=${1:-$HOME/.cache/powos-verify/unfolded-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
+L=$HOME/.cache/powos-verify.lock
+B() { python3 "$ROOT/lib/ai/agents/powos-agents-cli" "$@" >/dev/null 2>&1; }
+sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
+restore() {
+  echo "== restore"
+  sh_ "input keyevent 4; input keyevent 4; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"
+  rm -rf "$L"
+}
+for k in $(seq 30); do mkdir "$L" 2>/dev/null && break; sleep 10; done
+[ -d "$L" ] || { echo "verify lock busy: $(cat "$L/who" 2>/dev/null)"; exit 4; }
+echo "powos-verify: unfolded checks (inner screen forced) $(date +%T), ~2 min" > "$L/who"; trap restore EXIT
+I0=$(irq)
+chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; exit 3; }; }
+shot() { "$T/shot.sh" "$OUT/$1.png" 2>&1 | tee -a "$OUT/log.txt"; }
+step() { echo "== $*" | tee -a "$OUT/log.txt"; }
+
+step "screen state"; s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1"); echo "$s"
+[ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
+step "inner screen"; sh_ "cmd device_state state 3"; sleep 3; chk unfold
+WH=$(sh_ "dumpsys display | grep -E \"^  DisplayDeviceInfo\" | sed -nE \"s/.*uniqueId=\\\"local:[0-9]+\\\", ([0-9]+) x ([0-9]+),.* state ON,.*/\\1 \\2/p\" | head -1")
+W=${WH% *}; H=${WH#* }; echo "on: ${W}x${H}"; [ "${W:-0}" -gt 2000 ] || echo "WARN: the ON display isn't the inner screen (${WH})"
+x() { echo $(( W * $1 / 1000 )); }; y() { echo $(( H * $1 / 1000 )); }
+
+step "lock face"; if sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qiE "Lock|Keyguard"; then
+  sh_ "input swipe $(x 500) $(y 900) $(x 500) $(y 250) 300"; sleep 1.5; chk lock
+  sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qiE "Lock|Keyguard" && { shot lock-still-showing; echo "lock face didn't go (a PIN?) - stopping"; exit 5; }
+fi
+step "home: merged tiles"; sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk home; shot home-unfolded
+
+field() { # page -> "x y" of the compose field's centre in device px (read only, CDP)
+  "$T/cdp.sh" eval "$1" 'JSON.stringify((()=>{const e=document.querySelector(".ai-compose textarea, .ai-compose input, textarea, input[type=text]");if(!e)return [0,0];const r=e.getBoundingClientRect();return [Math.round((r.x+r.width/2)*devicePixelRatio),Math.round((r.y+r.height/2)*devicePixelRatio)]})())' 2>/dev/null | tr -dc '0-9,' | tr ',' ' '
+}
+step "PowOS AI page + keyboard"; sh_ "input swipe $(x 300) $(y 500) $(x 900) $(y 500) 350"; sleep 1.5; chk ai
+shot ai-unfolded
+set -- $(field home); if [ "${1:-0}" -gt 0 ]; then
+  sh_ "input tap $1 $2"; sleep 1.5; chk kbd; shot ai-keyboard-unfolded; sh_ "input keyevent 4"; sleep 0.8
+else echo "no compose field found on the AI page"; fi
+step "chat thumbnails"; sh_ "input swipe $(x 500) $(y 400) $(x 500) $(y 750) 300"; sleep 1.2; chk chat; shot ai-chat-thumbnails-unfolded
+sh_ "input swipe $(x 900) $(y 500) $(x 150) $(y 500) 300"; sleep 1; chk back-home
+
+step "side-button overlay (assist) + keyboard"
+sh_ "cmd voiceinteraction show 2>/dev/null || am start -a android.intent.action.ASSIST >/dev/null"; sleep 2; chk assist
+shot assist-unfolded
+set -- $(field assist); if [ "${1:-0}" -gt 0 ]; then
+  sh_ "input tap $1 $2"; sleep 1.5; chk assist-kbd; shot assist-keyboard-unfolded; sh_ "input keyevent 4"; sleep 0.6
+else echo "no compose field found in the assist overlay"; fi
+sh_ "input keyevent 4"; sleep 0.8
+
+restore; trap - EXIT
+attach() { local t=$1; shift; for f in "$@"; do [ -f "$OUT/$f" ] || continue
+  "$T/review-image.sh" "$OUT/$f" >/dev/null && B task set "$t" --image "/home/powos/design-qa/$(basename "$f")" && echo "attached $f -> $t"; done; }
+for f in "$OUT"/*.png; do [ -f "$f" ] && mv "$f" "$OUT/unf-$(date +%H%M)-$(basename "$f")"; done
+cd "$OUT" || exit 1
+attach merged-widgets-misaligned-ragged-edges-unfolded *home-unfolded.png
+attach keyboard-compose-bottom-padding-in-ai-overlay *ai-keyboard-unfolded.png *assist-keyboard-unfolded.png *assist-unfolded.png
+attach chat-sent-images-as-thumbnails *ai-chat-thumbnails-unfolded.png
+attach owed-device-checks *home-unfolded.png *ai-unfolded.png
+echo "artefacts: $OUT"
