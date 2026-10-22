@@ -6,6 +6,9 @@ description: Use when verifying a PowOS phone fix on the device itself - idle wi
 Access and rules: the powos-phone skill (tools/phone/adb.sh, root.sh, idle.sh). This is the how-to for verifying.
 
 Scripts: `tools/phone/verify/` (header of each says where it runs).
+- Every check runs through ONE queue: `tools/phone/verify/queue.sh add <board-task> <script> [args]` (returns at once;
+  the runner takes one free window for all queued checks, LOCK_HELD=1, result on the board task; `queue.sh list`).
+  A Mac-side check script uses window-lock.sh (honours LOCK_HELD) and exits 3 on a real touch (re-queued).
 - Mac: `journey.sh` (one wait + verify lock + gest.sh runs + pull, `RUNS="A B C D"`), `frames.sh` (gaps / sheet / overview),
   `bf-run.sh` (Broforce ~10 min check; `NO_START=1` while the user plays it themselves).
 - Phone (pushed by the above, or `adb.sh push` + `su -c sh`): `gest.sh`, `cpu-sample.sh`, `bf-sample.sh`, `sf-latency.sh`;

@@ -4,10 +4,10 @@ Read this first; it replaces digging through the code. Keep it current when you 
 for (one line each). Cross-cutting rules live HERE once; expert skills (.claude/skills/powos-*) link to them.
 
 ## Which expert owns what
-Route work to the owner. If the owner already ran in this session, RESUME it (SendMessage to its id/name) with the new
-task - it keeps its context and its own findings - instead of starting a fresh agent; start a new one only when none
-exists, and it then begins from its skill. Changing another owner's file: message the owner (with numbers), or make
-the minimal change and tell them.
+Route work to the owner's SKILL, not to a long-lived agent: each task is a FRESH agent that loads the owner's skill
+(.claude/skills/<owner>/SKILL.md + .claude/agents/<owner>.md), does that one task, writes what it learned into the
+skill, and exits (see Efficiency). Changing another owner's file: message the owner (with numbers), or make the
+minimal change and tell them.
 
 | area | agent (skill of the same name) |
 |---|---|
@@ -29,6 +29,21 @@ the minimal change and tell them.
 | the desktop shell: powos-shell (Plasma host), hosts/desktop.ts, mode=desktop, dev/phone.sh | powos-desktop |
 | other shell (web UI) work no expert owns | powos-shell-dev |
 | other Android app (Kotlin) work no expert owns | powos-android-dev |
+
+## Efficiency (the user, 2026-10-22: "insanely inefficient" - measured: 534k context per call, 13% of tokens
+## waiting on the phone, 48% of commits process tooling; `tools/agents/efficiency.py` measures it, targets in its doc)
+- ONE task per agent run: pick up, ship the slice, put what you learned into your skill (facts, <=100 lines, no
+  history), the open rest into the board task's note, exit. Never stay alive waiting for mail, a window or a review.
+  A context past ~200k is the signal to write it down and hand off.
+- Phone checks: `tools/phone/verify/queue.sh add <board-task> <check script> [args]`, then END YOUR TURN. One runner
+  takes one free window for every queued check and writes the result onto the board task. Never `idle.sh --wait`,
+  sleep, `until` loops or re-reading a background job's output yourself; for your own background command, use its
+  completion notification.
+- Read narrowly (grep, then `sed -n a,b`); never re-read a file you read. Change code with targeted edits (Edit), not
+  whole-file heredocs.
+- Git: rebase only right before you commit/push, not before every command. Commit subject <= 72 chars, a short body.
+- No new process tooling (locks, gates, wrappers, handbook rules) unless something actually broke; say what broke.
+- Messages: shipped results or blockers only, one line.
 
 ## Reaching the phone (OnePlus Open, rooted)
 - `tools/phone/adb.sh <adb args>`: adb over the VPN (powos-vadb's server, 10.13.13.7:5555) from any session.
@@ -190,7 +205,7 @@ Git and process
      through its idle wait blocked every APK for 19 min, 2026-10-22).
   5. Device checks are automated (read-only CDP + a screencap in a free window) - never wait on the user for what a
      script can check.
-  6. Idle? Pick the next unowned board task yourself (`powos agents task list`), set yourself on it, go.
+  6. Done? Exit (Efficiency: one task per run); the coordinator starts a fresh agent for the next unowned task.
 - Speed (manager, 2026-10-22): experts work IN PARALLEL - never wait behind another expert's task unless you touch
   the same files. Bug fixes (alignment, scrolling, clipping, errors) SHIP as soon as they're gated and checked on the
   device - send a screencap after, no mock review; only NEW designs (layouts, new UI) wait for the manager's mock OK.
@@ -199,7 +214,7 @@ Git and process
   (`powos agents task set <t> --plan "a; b; c"` or `--progress 0/N`); at each step `--progress k/N --step "what now"`;
   link commits (`--commit <sha>`, or mention the task id in the message) and review images (`--image <path>`).
   `powos agents help` has the flags. Own what you take: `task set <t> --owner <your expert name>` (powos-widgets,
-  powos-design...); idle, pick up a free one from `powos agents task list --unowned`.
+  powos-design...).
 - A task waiting on the user gets a `--note` that is the ACTION, in plain imperative words ("Pull down on home to try
   the single shade", "Plug the phone into the Mac for the kernel test"), never a status ("in installed APK; user to
   try in edit mode"). The AI page shows the note as the card's action line (manager, 2026-10-22).
@@ -220,7 +235,7 @@ The phone
   connection and keeps the phone's radio awake - agents' polling was most of its WireGuard traffic and CPU, and the
   battery ran flat on 2026-10-21 with several agents polling all afternoon. Wait for an EVENT: comms mail
   (`powos comms watch`, wait_for_message), a push/ship result, shell-error mail; or make ONE check when you need it.
-  Waiting for a free phone is ONE `tools/phone/idle.sh --wait 120 MAX_S`. Batch commands into one adb call. Keep
+  A check that needs a free phone goes on `tools/phone/verify/queue.sh` (Efficiency), not a wait of yours. Batch commands into one adb call. Keep
   phone-side loops bounded and kill your probes (a stuck `tr` loop once ran at 100%).
 - Battery: NO battery-based rules - neither for agents' work nor in the product (the user's call, 2026-10-21 10:01).
   The product behaves the same at any battery level unless the user asks otherwise (Android's own battery saver
