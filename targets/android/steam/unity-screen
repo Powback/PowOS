@@ -1,0 +1,89 @@
+#!/bin/sh
+# unity-screen: a Unity game's Steam launch option - `<home>/.local/share/powos/unity-screen %command%` - that starts
+# the game fullscreen at the CURRENT screen size. Unity keeps the size it saved last time (Broforce: 1116x2440 from the
+# folded cover screen, stored in the Proton prefix's user.reg) and doesn't follow KWin's output when the phone is
+# unfolded/rotated (the output anland-1 follows the Android surface: one mode, resized). So each launch passes
+# `-screen-fullscreen 1 -screen-width W -screen-height H` (Unity player arguments) with W x H = the X root window now.
+#
+# Runs where Steam puts launch-option prefixes: inside the Steam Linux Runtime container, under FEX (x86). That runtime
+# has no xrandr and only `python3.13`, so the size comes from libX11 through ctypes; outside it the host's python3 does
+# the same. No display or no python: the game starts unchanged.
+#
+#   unity-screen --install <appid>...   (in the session, Steam NOT running) copy this file to
+#                                       ~/.local/share/powos/unity-screen and set it as the LaunchOptions of each appid
+#                                       in every Steam user's localconfig.vdf (backup: localconfig.vdf.powos-bak).
+#   unity-screen --remove <appid>...    drop those LaunchOptions again.
+# Steam rewrites localconfig.vdf from memory when it exits: an edit while it runs is lost (hence the check).
+if [ "${1:-}" = --install ] || [ "${1:-}" = --remove ]; then
+  mode=$1; shift
+  S=${XDG_DATA_HOME:-$HOME/.local/share}/Steam
+  case $(readlink "/proc/$(cat "$HOME/.steam/steam.pid" 2>/dev/null || echo 0)/exe" 2>/dev/null) in
+    */steam | */FEX*) echo "unity-screen: Steam is running - close it first (it rewrites localconfig.vdf on exit)" >&2; exit 1 ;;
+  esac
+  dst=${XDG_DATA_HOME:-$HOME/.local/share}/powos/unity-screen
+  [ "$mode" = --install ] && install -Dm755 "$0" "$dst"
+  for c in "$S"/userdata/*/config/localconfig.vdf; do
+    [ -f "$c" ] || continue
+    cp -p "$c" "$c.powos-bak"
+    python3 - "$c" "$mode" "$dst" "$@" <<'PY' || exit 1
+import re, sys
+path, mode, dst, appids = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+t = open(path, encoding="utf-8", errors="surrogateescape").read()
+# Tokens with positions: quoted strings, braces. Track the key path; edit only the app's own block in place, so the
+# rest of the file stays byte for byte.
+tok = [(m.start(), m.end(), m.group()) for m in re.finditer(r'"(?:[^"\\]|\\.)*"|[{}]', t)]
+want = ["userlocalconfigstore", "software", "valve", "steam", "apps"]
+edits, stack, key, i = [], [], None, 0
+while i < len(tok):
+    s, e, v = tok[i]
+    if v == "{":
+        stack.append((key or "").strip('"').lower()); key = None
+        if [k for k in stack[:-1]] == want and stack[-1] in appids:
+            depth, j, lo = 0, i, None
+            while j < len(tok):  # the block's end and a direct-child LaunchOptions
+                if tok[j][2] == "{": depth += 1
+                elif tok[j][2] == "}":
+                    depth -= 1
+                    if depth == 0: break
+                elif depth == 1 and tok[j][2].lower() == '"launchoptions"': lo = j
+                j += 1
+            ind = "\t" * len(stack)
+            val = '"%s %%command%%"' % dst
+            if lo is not None:
+                ls = t.rfind("\n", 0, tok[lo][0]) + 1
+                le = t.find("\n", tok[lo + 1][1]); le = len(t) if le < 0 else le + 1
+                edits.append((ls, le, "" if mode == "--remove" else '%s"LaunchOptions"\t\t%s\n' % (ind, val)))
+            elif mode == "--install":
+                cs = t.rfind("\n", 0, tok[j][0]) + 1
+                edits.append((cs, cs, '%s"LaunchOptions"\t\t%s\n' % (ind, val)))
+            print("%s: %s %s" % (path, stack[-1], "removed" if mode == "--remove" else "-> " + val))
+    elif v == "}":
+        stack.pop(); key = None
+    else:
+        key = v if key is None else None  # a key, or the value that ends a key/value pair
+    i += 1
+for s, e, r in sorted(edits, reverse=True):
+    t = t[:s] + r + t[e:]
+open(path, "w", encoding="utf-8", errors="surrogateescape").write(t)
+PY
+  done
+  exit 0
+fi
+
+py=$(command -v python3 || command -v python3.13)
+size=$([ -n "$py" ] && [ -n "${DISPLAY:-}" ] && "$py" -c '
+import ctypes
+x = ctypes.CDLL("libX11.so.6")
+x.XOpenDisplay.restype = ctypes.c_void_p; x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+for f in (x.XDisplayWidth, x.XDisplayHeight, x.XDefaultScreen): f.argtypes = [ctypes.c_void_p] + [ctypes.c_int] * (f is not x.XDefaultScreen)
+d = x.XOpenDisplay(None)
+if d:
+    n = x.XDefaultScreen(d); print(x.XDisplayWidth(d, n), x.XDisplayHeight(d, n))
+' 2>/dev/null)
+case $size in
+  [1-9]*' '[1-9]*)
+    echo "unity-screen: fullscreen ${size% *}x${size#* }" >&2
+    exec "$@" -screen-fullscreen 1 -screen-width "${size% *}" -screen-height "${size#* }" ;;
+esac
+echo "unity-screen: no screen size (DISPLAY=${DISPLAY:-unset}, python=${py:-none}) - starting unchanged" >&2
+exec "$@"
