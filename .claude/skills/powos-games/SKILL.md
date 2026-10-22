@@ -16,7 +16,13 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   `/run/powos-app/hyprland.log` (`Xwayland KGSL:` stats); Proton: `PROTON_LOG=1` in user_settings.py -> `~/steam-<id>.log`.
 
 ## Run and check Broforce (tools/phone/verify, header of each says where it runs)
-- `bf-start.sh` / `bf-stop.sh` (session user): never-sleep + `steam steam://rungameid/274190` / close all. `pgrep -f
+- `bf-start.sh` / `bf-stop.sh [--steam]` (session user): never-sleep + `steam steam://rungameid/274190` / close the game
+  (Steam stays resident, frozen out of sight: the next launch skips Steam's ~22 s start); `--steam` only for cold checks.
+- Close = `powos game <name|appid> stop [--steam]` (lib/game.sh `_game_steam_close`): game's chain (reaper trees +
+  environ SteamAppId/STEAM_COMPAT_APP_ID/WINEPREFIX = also orphans, wineserver) TERM, KILL at 2 s; Steam: Wake, `timeout
+  steam -shutdown`, KILL at 6 s, one sweep after. Worst case 6.6 s (stubborn client + hanging forwarder). The old
+  per-process pgrep loop took 16.5 s and bf-stop's `timeout 15` left Steam running: keep the wait loop to /proc stats.
+  /usr/bin/steam execs ./steam (no steam.sh restart loop). `pgrep -f
   Broforce_beta.exe` matches the launch chain too: wait for X window `"Broforce"` (XAUTHORITY = Xwayland's `-auth`).
 - Frame numbers: `bf-pacing.sh [base|cap60|fifo|nolatency]...` (~4 min/mode; queue it): 30 s SurfaceFlinger presents
   (bf-present.sh) + 20 s screenrecord -> bf-frames.py: fps, frame-time percentiles, % at 16.7 ms, dup/stale frames,
@@ -55,6 +61,13 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - Never auto-frozen before its first window (sleep-gui GAME_WINDOW_S 600): a cold start outlasts the 2 min grace.
 - Launch time by stage: `bf-coldstart.sh [cold|steam|fexcache]...` -> "STAGES" lines (tap->reaper->pv->wineserver->exe->
   window->frame, ms). fexcache = FEX_ENABLECODECACHINGWIP=1 via Proton user_settings.py (removed after) + FEXOfflineCompiler.
+- Baseline 2026-10-23 cold (2 runs, Steam off): Steam web UI 1-4 s, reaper 22-26 s, pv-adverb 26-29 s, wineserver 32 s;
+  then the chain DIED (gameprocess_log "no longer tracking ... exit code -1", ~16 s after wine) at 43/57 s, no window -
+  also the user's own 00:02 launch. Unexplained yet: the first thing to run (bf-coldstart now FAILs at once on it).
+- Still to measure (bf-coldstart.sh cold steam fexcache fexcache under the verify lock): warm-Steam launch, FEX code
+  cache, pressure-vessel locale-gen (game env has LC_ALL=C + LANG=en_CH.UTF-8: PRESSURE_VESSEL_GENERATE_LOCALES=0 in
+  /usr/bin/steam would skip it; pv->wineserver was ~3 s total). Persistent wineserver: Proton's waitforexitandrun waits
+  for the prefix's old wineserver to exit, so a lingering one delays a launch; a resident (frozen) game is the instant path.
 - adb.sh mounts each pushed path's dirname: a path with `..` pushes nothing ("cannot stat") - resolve it first.
 
 ## Causes found (don't re-investigate)

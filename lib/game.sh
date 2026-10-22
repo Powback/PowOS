@@ -284,6 +284,8 @@ Verbs (thin wrappers — each dispatches to the subsystem that owns it):
   play                    Launch the game
   freeze                  Freeze it now with Steam (0% CPU, kept in RAM)  → powos-sleep-gui (unified sleep)
   thaw                    Thaw it and raise its window (what launching it does while it runs)
+  stop [--steam]          Close it (its whole launch chain, wineserver too) within ~3 s; --steam closes Steam
+                          as well: asked to shut down, killed after 6 s (a frozen or dying client never stalls it)
   status                  (a Steam game outside the mod registry) running / frozen, CPU of its tree
 
 A Steam game out of sight for 15 s is frozen with Steam on its own and launching it again resumes it at once
@@ -327,6 +329,9 @@ cmd_game() {
     # A running Steam game's sleep (any installed Steam game, by name or appid - the mod registry not needed).
     case "${1:-}" in
         freeze|thaw) _game_sleep_dispatch "$name" "$@"; return $? ;;
+        stop|close)
+            local sapp; sapp="$(_game_steam_appid "$name")" || { perr "No installed Steam game called $name"; return 1; }
+            _game_steam_close "$sapp" "$([[ "${2:-}" == --steam ]] && echo 1 || echo 0)"; return $? ;;
     esac
 
     _game_need_mods
@@ -482,6 +487,75 @@ _game_sleep_dispatch() {
                 "$([[ $cg == *powos/sleep/* ]] && echo "FROZEN with Steam (${cg##*/sleep/})" || echo awake)" \
                 "$(wc -w <<<"$pids" | tr -d ' ')" "$(( (t1 - t0) * 100 / $(getconf CLK_TCK) / 2 ))" ;;
     esac
+}
+
+# Every process of a Steam game's launch: the trees of its reapers (also one a dead Steam left, ppid 1) and any process
+# of ours whose environment names the game or its Proton prefix (wineserver outlives the chain, reparented to 1).
+# One ps + one grep, no per-process forks: it runs in _game_steam_close's loop.
+_game_launch_pids() {  # <appid>
+    local roots
+    roots=$(pgrep -f "SteamLaunch AppId=$1( |\$)" | tr '\n' ' ' || true)
+    [[ -n "$roots" ]] && _game_descendants $roots
+    grep -lzx -e "SteamAppId=$1" -e "SteamGameId=$1" -e "STEAM_COMPAT_APP_ID=$1" -e "WINEPREFIX=.*/compatdata/$1/pfx/*" \
+        /proc/[0-9]*/environ 2>/dev/null | cut -d/ -f3 || true
+}
+
+# Steam itself: its client's tree, launchers (/usr/bin/steam, Valve's steam.sh: it restarts a killed client) and
+# every program run from Steam's dir (web helpers, FEX's wineserver) - by the program's path, so a shell that merely
+# names a Steam file isn't one.
+_game_steam_pids() {
+    local s; s="$(cat "$HOME/.steam/steam.pid" 2>/dev/null || true)"
+    [[ -n "$s" && -d /proc/$s ]] && _game_descendants "$s"
+    pgrep -u "$(id -u)" -f "^[^ ]*/\.local/share/Steam/|^\./steam( |\$)|^[^ ]*sh [^ ]*(/usr/bin/steam|/Steam/steam\.sh)( |\$)" || true
+}
+
+# <pid>...: them and all their descendants, one per line (one ps call).
+_game_descendants() {
+    ps -e -o pid=,ppid= 2>/dev/null | awk -v r=" $* " '{c[$2] = c[$2] " " $1}
+        END {n = split(r, q, " "); for (i = 1; i <= n; i++) {p = q[i]; if (p == "" || s[p]++) continue; print p
+             m = split(c[p], k, " "); for (j = 1; j <= m; j++) q[++n] = k[j]}}' || true
+}
+
+# _game_steam_close <appid> <1: Steam too>: closed within ~3 s (the game) / ~8 s (with Steam), for certain. TERM the
+# game's chain, KILL what's left after 2 s; Steam: thawed (a frozen client never answers), asked with -shutdown, KILLed
+# after 6 s; then one more sweep for anything a launcher started meanwhile. Never waits on a client: SIGKILL ends
+# frozen tasks too (cgroup v2), every wait is bounded, the wait loop only stats /proc.
+_game_steam_close() {
+    local app=$1 all=$2 t0 me g s="" i left how=""
+    t0=$(date +%s%N)
+    me=" $$ ${BASHPID:-} $PPID "
+    _gsc_set() { local p; for p in "$@"; do [[ "$me" == *" $p "* ]] || echo "$p"; done | sort -un | tr '\n' ' '; }
+    _gsc_alive() { local p; for p in $*; do [[ -d /proc/$p ]] && printf '%s ' "$p"; done; return 0; }
+    g=$(_gsc_set $(_game_launch_pids "$app"))
+    [[ -n "$g" ]] && kill -TERM $g 2>/dev/null || true
+    if [[ $all == 1 ]]; then
+        s=$(_gsc_set $(_game_steam_pids))
+        if [[ -n "$s" ]]; then
+            timeout 2 dbus-send --session --print-reply=literal --reply-timeout=1500 --dest=dev.powos.Sleep /Gui \
+                dev.powos.Sleep.Gui.Wake string:steam >/dev/null 2>&1 || true
+            # The forwarder can hang on a dying client (or start a new one): bounded, and swept with the rest.
+            (timeout -k 1 3 steam -shutdown >/dev/null 2>&1 </dev/null &)
+            how="Steam asked to shut down"
+        fi
+    fi
+    for i in $(seq 60); do  # 6 s
+        left=$(_gsc_alive $g ${s:-})
+        [[ -z "$left" ]] && break
+        (( i == 20 )) && { kill -KILL $(_gsc_alive $g) 2>/dev/null || true; }
+        sleep 0.1
+    done
+    [[ -n "$left" && $all == 1 ]] && how="${how:+$how, }killed after 6 s"
+    [[ -z "$left" && -n "$how" ]] && how="Steam shut down on request"
+    for i in 1 2 3; do  # the rest, and what a launcher started meanwhile
+        left=$(_gsc_alive $left $(_gsc_set $(_game_launch_pids "$app"; [[ $all != 1 ]] || _game_steam_pids)))
+        [[ -z "$left" ]] && break
+        kill -KILL $left 2>/dev/null || true; sleep 0.3
+    done
+    if [[ -n "$left" ]]; then
+        perr "still running after $(( ($(date +%s%N) - t0) / 1000000 )) ms: $(ps -o pid=,stat=,comm= -p "$(echo $left | tr ' ' ,)" 2>/dev/null | tr '\n' ';')"
+        return 1
+    fi
+    pok "$app$([[ $all == 1 ]] && echo ' + Steam') closed in $(( ($(date +%s%N) - t0) / 1000000 )) ms${how:+ ($how)}"
 }
 
 _game_tree() {
