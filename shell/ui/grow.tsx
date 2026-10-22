@@ -4,7 +4,7 @@
  * sent or cleared - it follows its value, so dictation filling it grows it too. Its height animates (shell.css
  * .grow); it grows upward from where it sits, laying nothing else out again (its container keeps its own height).
  */
-import { useLayoutEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import type { Ref } from "preact";
 
 interface Props {
@@ -18,8 +18,10 @@ interface Props {
 export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props) {
   const own = useRef<HTMLTextAreaElement>(null);
   const el = () => own.current;
-  // The height its text needs, between one row and [rows]: measured with the height let go for a moment.
-  useLayoutEffect(() => {
+  // The height its text needs, between one row and [rows]: measured with the height let go for a moment. Empty, it is
+  // one row whatever its width - its placeholder never wraps it taller (2026-10-22: the search widget, measured before
+  // its tile had a width, wrapped "search" a letter a line and stayed three rows tall: a pill two grid rows high).
+  const fit = () => {
     const t = el();
     if (!t) return;
     const cs = getComputedStyle(t);
@@ -28,7 +30,7 @@ export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props
     const was = t.style.height;
     t.style.transition = "none";
     t.style.height = "0px";
-    const need = t.scrollHeight;
+    const need = t.value ? t.scrollHeight : line + pad;
     t.style.height = was;
     void t.offsetHeight;
     t.style.transition = "";
@@ -37,7 +39,21 @@ export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props
     t.classList.toggle("scrolls", need > line * rows + pad + 1);
     // Past its rows, the newest words in view (dictation adds at the end).
     if (need > h && document.activeElement !== t) t.scrollTop = t.scrollHeight;
-  }, [value, rows]);
+  };
+  useLayoutEffect(fit, [value, rows]);
+  // Its width changing (laid out late, a fold, a widget resized) wraps its text again: measured again then.
+  useEffect(() => {
+    const t = el();
+    if (!t) return;
+    let w = t.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (t.clientWidth === w) return;
+      w = t.clientWidth;
+      fit();
+    });
+    ro.observe(t);
+    return () => ro.disconnect();
+  }, [rows]);
   return (
     <textarea
       {...rest}
