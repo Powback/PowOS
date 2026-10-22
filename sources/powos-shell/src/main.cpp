@@ -14,7 +14,10 @@
 
 #include <QApplication>
 #include <QMultiHash>
+#include <QIcon>
 #include <QJsonObject>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QScreen>
 #include <QWebEngineProfile>
 #include <QWebEngineScript>
@@ -54,6 +57,13 @@ int main(int argc, char **argv)
     app.setDesktopFileName(QStringLiteral("org.powos.shell"));
     app.setQuitOnLastWindowClosed(false);
 
+    // App icons by theme name (powos://icon/): Plasma's own icon theme (kdeglobals [Icons] Theme=), else breeze - a
+    // Qt process without Plasma's platform theme (started off the session, or off screen) would only search hicolor,
+    // where most KDE apps have no icon (Dolphin drew as the "missing" glyph).
+    if (QIcon::themeName().isEmpty() || QIcon::themeName() == QLatin1String("hicolor")) {
+        QSettings kdeglobals(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/kdeglobals"), QSettings::IniFormat);
+        QIcon::setThemeName(kdeglobals.value(QStringLiteral("Icons/Theme"), QStringLiteral("breeze")).toString());
+    }
     QStringList roles = app.arguments().mid(1);
     if (roles.isEmpty())
         roles = {QStringLiteral("home")};
