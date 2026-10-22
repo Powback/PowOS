@@ -41,9 +41,15 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
   per pixel HSL(accent hue, sat clamp 0.35-0.8, L 0.12+0.76*luminance), blob object URL, cached per mode|accent|src,
   cleared on theme/mode change; `ready` signal bumps per batch of 8. Icons are same-origin (shell.powos/_icon/...),
   canvas-readable. Near-black icons stay near-black (luminance kept). Style lint: no `hsl(` identifiers.
-- Slice 2 (next): mode "hue" - keep each icon's own saturation/lightness, map its hue onto the theme palette
-  (accent/red/green/yellow from --color-*: nearest-hue swap) so multi-colour icons stay multi-colour; a third
-  Segmented option; same cache. Then per-theme default (a theme can ask for mono).
+- Slice 2 (ca8c99e): mode "hue" ("theme hues"; Segmented ["the apps'", "theme hues", "accent"] = "", hue, mono via
+  screens.tsx TINTS). Palette = --color-accent, --color-red, --term-color1..6 (app.tsx sets term colours from the
+  theme; only accent+red are --color-*). Palette hues with sat <= 0.15 dropped; 360-entry nearest-hue table; pixels
+  with sat < 0.08 (greys) untouched; own s/l kept. Cache/clear key = mode|whole palette string.
+- Next: per-theme default (a theme can ask for mono/hue: theme field -> iconTint default when unset).
+- Check headless: SHOTS_PROBE `(async()=>{(await importShim("./ui/icontint.ts")).iconTint.value="hue"; await new
+  Promise(r=>setTimeout(r,3000)); return document.querySelectorAll('img[src^="blob:"]').length})()` (42 in the
+  mock), shots dir under $HOME and chmod 777 (Colima docker writes it; /tmp gave EACCES). Device:
+  tools/phone/verify/icon-hues.sh (pushes if the phone serves the old module, then read-only probe + screencap).
 
 ## Pitfalls hit
 - Inherited --p (and unregistered intermediates like --fade) restyled every cell per frame: register inherits:false.
