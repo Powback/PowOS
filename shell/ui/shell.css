@@ -195,12 +195,15 @@
   scrollbar-width: none;
   overscroll-behavior-x: contain;
   touch-action: pan-x;
+  container-type: inline-size;
 }
 .dock-pages::-webkit-scrollbar { display: none; }
 .dock-page { flex: 0 0 100%; display: flex; align-items: flex-start; gap: 4px; padding: 0 4px; scroll-snap-align: start; scroll-snap-stop: always; }
 /* The recent apps: one row as long as they are, each as wide as a pinned app (six to a width). */
 .dock-page.dock-recent { flex: 0 0 auto; scroll-snap-stop: normal; }
-.dock-recent .app { flex: 0 0 calc((100vw - 28px) / 6); }
+/* Sized from the dock's own width (a container: cqw), not the viewport's - in the WebView 100vw isn't the page's
+   width (2026-10-22: 688 px on the 404 px cover screen, a recent app 141 px wide, the row's last one cut off). */
+.dock-recent .app { flex: 0 0 calc((100cqw - 28px) / 6); }
 /* Faded at the edges where there's more to scroll, not cut: the right while there's more on, the left once scrolled
    (a scroll-driven mask, on the compositor; without that support only the right). */
 @property --dock-fade-l { syntax: "<length>"; inherits: false; initial-value: 0px; }
