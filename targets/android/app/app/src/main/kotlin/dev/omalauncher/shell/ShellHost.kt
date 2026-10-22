@@ -609,6 +609,9 @@ private object HotReload {
             held.clear()
             Log.i(TAG, "push committed: ${files.size} file(s)")
             overrides?.let { root -> files.forEach { changed(it, root, "") } }
+            // A page that died at boot never runs hot.ts, so files.changed can't reload it: after every push or reset,
+            // each page that isn't up loads again (APK 29878476, 2026-10-23: home stayed dead through every later push).
+            reloadAll()
         }
 
     private val releaseLater: Runnable = Runnable { release.run() }
