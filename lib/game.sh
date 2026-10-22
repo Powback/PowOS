@@ -435,7 +435,19 @@ _game_steam_appid() {
 }
 
 # The game's launcher process (Steam's reaper SteamLaunch AppId=<appid>), if it runs.
-_game_steam_reaper() { pgrep -f "SteamLaunch AppId=$1( |\$)" | head -1 || true; }  # bin/powos: errexit + pipefail
+# The one under the running Steam first: a launcher left behind by a dead Steam (ppid 1) isn't the game Steam runs.
+_game_steam_reaper() {  # bin/powos: errexit + pipefail
+    local s p a
+    s="$(cat "$HOME/.steam/steam.pid" 2>/dev/null || true)"
+    for p in $(pgrep -f "SteamLaunch AppId=$1( |\$)" || true); do
+        a=$p
+        while [[ -n "$a" && "$a" -gt 1 ]]; do
+            [[ "$a" == "$s" ]] && { echo "$p"; return 0; }
+            a="$(awk '{print $4}' "/proc/$a/stat" 2>/dev/null || true)"
+        done
+    done
+    pgrep -f "SteamLaunch AppId=$1( |\$)" | head -1 || true
+}
 
 _game_sleep_dispatch() {
     local name="$1" verb="$2" appid reaper r
@@ -453,7 +465,10 @@ _game_sleep_dispatch() {
         thaw)
             [[ -n "$reaper" ]] || { perr "$name ($appid) isn't running (start it: steam steam://rungameid/$appid)."; return 1; }
             r="$(powos-sleep-gui resume "$appid")" || return 1
-            pok "$name ($appid): $r" ;;
+            case $r in
+                *'"running": true'*) pok "$name ($appid): $r" ;;
+                *) perr "$name ($appid): not resumed (not a game of the running Steam): $r"; return 1 ;;
+            esac ;;
         status)
             if [[ -z "$reaper" ]]; then
                 echo "$name ($appid): not running"

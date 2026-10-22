@@ -66,6 +66,7 @@ SOCK = f"{common.STATE_DIR}/sleepd.sock"
 IDLE = common.seconds(os.environ.get("POWOS_SLEEP_GUI_IDLE", "10m"))
 GRACE = 60  # woken by D-Bus but still unfocused: asleep again after this
 SAMPLE = 5  # seconds of CPU/IO measured before freezing
+GAME_WINDOW_S = 600  # a game still without a window this long after its launch (hung) sleeps all the same
 # The desktop shell (plasmashell) while PowOS is off screen (phone): frozen this long after PowOS went off screen
 # ("off": never), thawed the moment it's back, and for DESKTOP_DRAIN s every DESKTOP_AWAKE s meanwhile - long enough
 # to read what KWin sent it (a Wayland client that never reads its socket is disconnected once the buffer fills).
@@ -767,7 +768,12 @@ class Gui(dbus.service.Object):
                 if r is u and game_launcher(r):
                     if grace and age(game) < grace:
                         return self.refuse(pid, f"starting a game{app}, {age(game):.0f}s ago", grace - age(game) + 1)
-                    game_pids |= set(tree(game))
+                    gp = set(tree(game))
+                    # A cold Proton start under FEX outlasts the grace (2-5 min): frozen before its first window,
+                    # the launch looked like it did nothing (2026-10-22). Not before it has one (up to GAME_WINDOW_S).
+                    if age(game) < GAME_WINDOW_S and not any(w["raw"] in gp for w in self.wins.values()):
+                        return self.refuse(pid, f"starting a game{app}: no window yet, {age(game):.0f}s", 30)
+                    game_pids |= gp
                     continue
                 return self.refuse(pid, f"running a game{app}", 60)
         job = fg_job(pids)

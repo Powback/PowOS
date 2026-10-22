@@ -16,22 +16,19 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   `/run/powos-app/hyprland.log` (`Xwayland KGSL:` stats); Proton: `PROTON_LOG=1` in user_settings.py -> `~/steam-<id>.log`.
 
 ## Run and check Broforce (tools/phone/verify, header of each says where it runs)
-- `bf-start.sh` / `bf-stop.sh` (session user via powos-run.sh): `powos sleep never steam` + `steam steam://rungameid/274190`;
-  stop closes game + Steam and removes the never entry. `pgrep -f Broforce_beta.exe` also matches the launch chain:
-  wait for the X window `"Broforce"` (xwininfo, DISPLAY=:0, XAUTHORITY from Xwayland's `-auth` arg) - ~1-2 min.
+- `bf-start.sh` / `bf-stop.sh` (session user): never-sleep + `steam steam://rungameid/274190` / close all. `pgrep -f
+  Broforce_beta.exe` matches the launch chain too: wait for X window `"Broforce"` (XAUTHORITY = Xwayland's `-auth`).
 - Frame numbers: `bf-pacing.sh [base|cap60|fifo|nolatency]...` (~4 min/mode; queue it): 30 s SurfaceFlinger presents
   (bf-present.sh) + 20 s screenrecord -> bf-frames.py: fps, frame-time percentiles, % at 16.7 ms, dup/stale frames,
   window vs screen, activity in front. Artefacts ~/.cache/powos-verify/bfp-<date>/<mode>/.
-- KWin opens every X/Wayland toplevel (the game too) as its own Android task, `PowosWindowActivity` (WindowTasks);
-  never `am start andro.marchy.MainActivity` to "show the game": that's the PowOS home/AI page.
-- Output anland-1 runs at 119.97 Hz unfolded (2268x2440): a 60 fps game = every 2nd vsync. CPU governor: `uag`.
-- Launch-option prefixes run INSIDE SLR_4 under FEX: no xrandr/python3, only `python3.13` (ctypes libX11); /home shared.
-- `bf-run.sh` (~10 min, memory + SF pacing + KGSL stats): `queue.sh add <board-task> bf-run.sh`, don't wait.
+- KWin shows every X toplevel (the game too) as its own Android task (PowosWindowActivity); never `am start andro.marchy.MainActivity` (PowOS home).
+- anland-1 119.97 Hz unfolded (2268x2440): 60 fps = every 2nd vsync; governor `uag`. `bf-run.sh` ~10 min (memory,
+  SF pacing, KGSL stats). Launch-option prefixes run INSIDE SLR_4 under FEX: only `python3.13` (ctypes libX11).
 - Xwayland's copy of a window: `ffmpeg -f x11grab -window_id <id> -i :0 -frames:v 1`. Half-drawn metric: dark pixels `c<30 && min4neighbours > c+50`.
 - Render bisect: `bf-checker.sh [variant]...` (~4 min each; TU_DEBUG via Proton user_settings.py, or dxvk.conf): 75 s of
   loading+menu, X copy + screencaps -> black-checker score (bf-checker.py), menu fps, DXVK log (DXVK_LOG_PATH).
-- Unity prefs: pfx `user.reg` `[Software\\Free Lives\\Broforce]` `Screenmanager Resolution Width/Height`, `Is Fullscreen mode`.
-- Steam login: a session crash can set `loginusers.vdf` AutoLogin 0 ("Service Unavailable") -> 1 with Steam off.
+- Unity prefs: pfx `user.reg` `[Software\\Free Lives\\Broforce]`. Steam login: a session crash can set loginusers.vdf
+  AutoLogin 0 ("Service Unavailable") -> 1 with Steam off.
 
 ## Freeze + instant resume (Steam and its game; docs/UNIFIED-SLEEP.md, lib/apps/powos-sleep-gui)
 - cgroup v2 freezer works on the phone's 5.15 (/sys/fs/cgroup/powos/sleep/<key>, powos-sleepd as root); SIGSTOP not used.
@@ -39,23 +36,26 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   cmdline has `SteamLaunch`), so the game out of sight 15 s = Steam's whole tree frozen (game inside it). Start grace
   2m also from the game's reaper; the game's audio stream is ignored. Xwayland/KWin are CORE (never frozen).
 - Launch path: /usr/bin/steam (pkg `steam` pkgrel 20) on `steam://rungameid/<id>` with a running `reaper SteamLaunch
-  AppId=<id>` -> dbus-send `dev.powos.Sleep.Gui.Resume <id>` (thaw + raise via one-shot KWin script) and exit 0; Steam
-  never sees the launch. So a Broforce left running makes the next `bf-start.sh` a resume, not a cold start:
-  bf-stop.sh first for cold-start/Proton checks.
-- Android launch paths (all resume, none cold-starts a running game): drawer/home/shortcuts = Runtime.openRooted ->
-  `powos-open-task --app-id <.desktop id> -- steam steam://rungameid/<id>`; games widget = Runtime.launch(command)
-  routes a rungameid command (rooted) to openAsTask with `--app-id steam_app_<id>` (no desktop pop). powos-open-task
-  parses the appid (command or steam_app_<id> id), calls Resume first and shows the window it names as a task; else
-  matches class steam_app_<id> (Proton's WM_CLASS) and waits 150 s for a cold start's window. Recents = the task's
-  focus -> KWin activates -> sleep-gui thaws on focus (no code). Check: `bf-launchpaths.sh` (installs powos-open-task).
-- CLI: `powos game <name|appid> freeze|thaw|status` (lib/game.sh, any installed Steam game; not the mods registry);
-  `powos-sleep-gui resume|sleep <x>`. Watcher log `/run/powos-app/powos-sleep-gui.log` ("resumed", "frozen in").
-- Ship: build-pkgs.sh steam needs out/pkgs/{fex-emu,gtk2}*.pkg (copy from a worktree that has them) and
-  pkgs/steam/sysvipc-emu.tar.gz (sha 205ee32a, gitignored). sleep-gui: install to /usr/lib/powos/apps, restart it as
-  powos (`setsid -f powos-sleep-gui >> /run/powos-app/powos-sleep-gui.log`; TERM thaws everything it froze).
-  /usr/lib/powos/game.sh is the facade on the phone.
-- Measure: `queue.sh add <task> bf-resume.sh` (cold vs thawed start to first new frame via x11grab framemd5, Steam
-  tree CPU awake-hidden vs frozen, X/KWin latency while frozen, Steam connection_log after a 90 s freeze).
+  AppId=<id>` -> dbus `dev.powos.Sleep.Gui.Resume <id>` (thaw + raise, one-shot KWin script), exit 0; Steam never sees
+  it. A Broforce left running makes the next launch a resume: bf-stop.sh first for cold-start/Proton checks.
+- Android paths (all resume a running game): drawer/home/shortcuts = Runtime.openRooted -> `powos-open-task --app-id
+  <.desktop id> -- steam steam://rungameid/<id>`; games widget = Runtime.launch -> openAsTask `--app-id steam_app_<id>`.
+  open-task: Resume first, shows the named window as a task; else class steam_app_<id>, waits 150 s for a cold start.
+  Recents = task focus -> KWin activates -> sleep-gui thaws on focus.
+- CLI: `powos game <name|appid> freeze|thaw|status` (lib/game.sh; /usr/lib/powos/game.sh on the phone),
+  `powos-sleep-gui resume|sleep <x>`. Log `/run/powos-app/powos-sleep-gui.log` ("resumed", "frozen in", "not frozen").
+- Ship: build-pkgs.sh steam needs out/pkgs/{fex-emu,gtk2}*.pkg + pkgs/steam/sysvipc-emu.tar.gz (sha 205ee32a,
+  gitignored). sleep-gui: install to /usr/lib/powos/apps, restart as powos (`pkill -TERM -f bin/powos-sleep-gui$`,
+  `setsid -f powos-sleep-gui >> /run/powos-app/powos-sleep-gui.log`; TERM thaws everything it froze).
+- Checks (`queue.sh add --close <task> bf-launchpaths.sh` / `bf-resume.sh`): steps in bf-lib.sh, each on the status
+  pill (rewrites verify-status.json's name) and asserted, else `FAIL <step>: <evidence>`: launch = open-task's path,
+  X window IsViewable + "powos-open-task: task"; freeze = cgroup.freeze 1 + events "frozen 1" + every task of the
+  reaper's tree in that cgroup + 0 CPU ticks in 2 s; resume = out of the cgroup, same reaper, window mapped, a new
+  x11grab frame <= RESUME_MS (3000). A touch / stop closes what the check started (exit 3). Launch chains outside
+  Steam's tree (ppid 1, a dead Steam's) are killed first: never frozen or resumed, they hold the prefix.
+- A game is never auto-frozen before its first window (sleep-gui GAME_WINDOW_S 600): a cold Proton start under FEX
+  outlasts the 2 min grace and was frozen mid-start ("the launch did nothing", 2026-10-22).
+- adb.sh mounts each pushed path's dirname: a path with `..` pushes nothing ("cannot stat") - resolve it first.
 
 ## Causes found (don't re-investigate)
 - Session killed while gaming: Xwayland dma-buf leak via KGSL forced commits (fixed c8ab446, xwayland-kgsl 0007).
