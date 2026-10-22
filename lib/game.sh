@@ -424,7 +424,8 @@ _game_steam_appid() {
         for f in "$lib"/appmanifest_*.acf; do
             [[ -f "$f" ]] || continue
             if awk -F'"' -v q="$(tr '[:upper:]' '[:lower:]' <<<"$q")" \
-                '$2 == "name" {n = tolower($4); gsub(/[^a-z0-9]/, "", n); g = q; gsub(/[^a-z0-9]/, "", g)
+                '$2 == "name" {n = tolower($4); if (n ~ /^proton|steam linux runtime|steamworks|^fex$/) exit 1
+                 gsub(/[^a-z0-9]/, "", n); g = q; gsub(/[^a-z0-9]/, "", g)
                  exit !(n == g || index(n, g) == 1)}' "$f"; then
                 f=${f##*appmanifest_}; echo "${f%.acf}"; return 0
             fi
@@ -434,7 +435,7 @@ _game_steam_appid() {
 }
 
 # The game's launcher process (Steam's reaper SteamLaunch AppId=<appid>), if it runs.
-_game_steam_reaper() { pgrep -f "SteamLaunch AppId=$1( |\$)" | head -1; }
+_game_steam_reaper() { pgrep -f "SteamLaunch AppId=$1( |\$)" | head -1 || true; }  # bin/powos: errexit + pipefail
 
 _game_sleep_dispatch() {
     local name="$1" verb="$2" appid reaper r
@@ -473,7 +474,7 @@ _game_tree() {
     local p
     while (( ${#todo[@]} )); do
         p=${todo[0]}; todo=("${todo[@]:1}"); out+=("$p")
-        todo+=($(pgrep -P "$p"))
+        todo+=($(pgrep -P "$p" || true))
     done
     echo "${out[*]}"
 }
