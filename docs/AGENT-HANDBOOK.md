@@ -99,6 +99,7 @@ minimal change and tell them.
 - push.sh refuses any file that isn't byte-for-byte origin's version: a file is pushed whole, so a stale copy of a
   shared file (shell.css, gesture.ts, theme.css) from your tree overwrites another agent's newer push (16:24: the
   drawer fell apart into one column). Never `--force` past that; rebase and push again.
+- It also refuses a file whose live copy on the phone is from a commit your HEAD lacks (phone's files/shell-commits.txt): "<file> on the phone is from <sha> (newer than your base): rebase first".
 - The gate (shell/dev/gate.sh: tsc + every page booted headless) runs on what the phone will serve: the installed
   APK's own shell + the phone's current overrides + your files. It refuses only failures your push ADDS. It also
   refuses when a page names a local file (href/src, "./ui/x.css") or imports a module the phone won't have: push a
@@ -113,8 +114,9 @@ minimal change and tell them.
   (refuses if it doesn't load); builds (build-app.sh refuses a dirty shell/ or targets/android/app); waits for a free
   phone with `idle.sh --wait 60` in 10-min chunks (up to SHIP_WAIT_MIN=60, holding while ~/.cache/powos-verify.lock
   exists; no window = exit 4, APK kept, nothing installed); installs; runs bindings-check; RESETS ALL shell overrides;
-  re-pushes (from origin's tip, through the gate) every shell file origin changed since the build commit; prints
+  re-pushes every shell file origin changed since the build commit; prints
   versionCode + any crash. `--now` skips the wait: only when the user asked for an immediate install.
+- Those newer shell files are gated BEFORE the install, at origin's tip (`push.sh --pre-gate`; fails = no install, exit 3), and pushed seconds after the reset with `--pre-gated=<stamp>` (only that file set at that tree); later ones are gated after (tools/phone/ship-order-test.sh).
 - The build is warm: build-app.sh builds in `powos-gradle-warm` (targets/android/tools/warm-builder.sh, unit
   units/mac/gradle-warm-mac.json), a long-lived builder whose Gradle daemon stays up, building every worktree from one
   rsync'd copy in /work (shared incremental state) - 6-11 s for a Kotlin or shell change, from any worktree, against

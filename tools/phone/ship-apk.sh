@@ -43,7 +43,8 @@ until mkdir "$lock" 2>/dev/null; do
   echo "ship-apk: waiting for $(cat "$lock/who" 2>/dev/null || echo another build)"; sleep 15
 done
 echo "$(git rev-parse --short HEAD) $(git branch --show-current) pid $$ $(date +%H:%M:%S)" > "$lock/who"
-trap 'rm -rf "$lock"' EXIT
+t=""   # the origin-tip tree the newer shell files are gated and pushed from (below)
+trap 'rm -rf "$lock"; [ -n "$t" ] && { git worktree remove --force "$t/tree" 2>/dev/null; rm -rf "$t"; }' EXIT
 # Queued ships coalesce: each one builds the origin tip it saw, so a ship whose HEAD is already IN the installed build
 # (another ship took the lock first and built a newer tip) has nothing left to install - 3 ships queued behind one idle
 # wait each rebuilt and reinstalled the same code (2026-10-22). Skip it instead of an ~8 min build + install.
@@ -71,6 +72,30 @@ if ! targets/android/build-app.sh > "$blog" 2>&1; then
 fi
 grep -E "^e: |BUILD|version code|refus|error:" "$blog" || true
 apk=$HOME/Projects/android-app-dev/output/powos.apk
+# The install resets every shell override to this APK's shell; shell files origin changed since the build must go back
+# on right after. Gated BEFORE the install, at origin's tip: gated after it, under a loaded Mac (load ~17, 23:09, APK
+# 29878377) the phone showed the old AI page for minutes. A set that doesn't load refuses the install.
+shell_delta() {   # shell files that differ between $1 and $2 and exist at $2 (no dev/test), relative to shell/
+  git diff --name-only "$1" "$2" -- shell/ 2>/dev/null | grep -vE '^shell/(dev|test)/' |
+    while read -r f; do git cat-file -e "$2:$f" 2>/dev/null && echo "${f#shell/}"; done || true
+}
+git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+tip=$(git rev-parse origin/worktree-powos-multiplatform)
+newer=$(shell_delta HEAD "$tip") stamp=""
+if [ -n "$newer" ]; then
+  t=$(mktemp -d "$HOME/.cache/powos-reapply.XXXXXX")
+  git worktree add -q --detach "$t/tree" "$tip" 2>/dev/null || { echo "ship-apk: REFUSED - couldn't check out origin's tip to gate the newer shell files" >&2; exit 3; }
+  [ -d shell/node_modules ] && ln -s "$PWD/shell/node_modules" "$t/tree/shell/node_modules"
+  echo "ship-apk: gating the shell files committed after the build, at $(git rev-parse --short "$tip"): $(echo $newer)"
+  pg=$(cd "$t/tree/shell" && READY_MS=${READY_MS:-60000} ./push.sh --pre-gate $newer 2>&1 || true)
+  stamp=$(echo "$pg" | sed -n 's/^pre-gated //p' | tail -1)
+  if [ -z "$stamp" ]; then
+    echo "$pg" | grep -vE "^ok " | tail -8 >&2
+    echo "ship-apk: REFUSED - not installing: the shell files origin changed since the build don't load at its tip (above)," >&2
+    echo "  and the install would leave the phone on this APK's older copies of them. Fix them on origin, ship again (APK built, kept)." >&2
+    exit 3
+  fi
+fi
 if [ -z "$now" ]; then
   # Never install over an active user (it restarts their session): wait up to SHIP_WAIT_MIN (default 60) minutes for
   # 60 s of idle (or the screen off); if none comes, leave the built APK for the next ship and exit 4 - don't install.
@@ -113,30 +138,36 @@ tools/phone/bindings-check.sh || echo "ship-apk: the shell's bindings don't matc
 # and assist at 09:47). Uncommitted pushes are lost by design - commit before you push.
 shell/push.sh --vpn --reset 2>&1 | tail -2
 # ...but a shell push committed WHILE this APK built (or waited to install) isn't in it, and the reset just removed it
-# (15:58: a360435 committed 31 s after the build of 366aa8e started; the 15:59 install wiped it). Push again every
-# shell file origin changed since the build commit, from origin's tip, through the gate as any push.
+# (15:58: a360435 committed 31 s after the build of 366aa8e started; the 15:59 install wiped it). Those gated above go
+# straight back on (no second gate: the stamp is for exactly them at that tree).
+if [ -n "$stamp" ]; then
+  echo "ship-apk: re-pushing shell changes committed after the build (pre-gated): $(echo $newer)"
+  out=$(cd "$t/tree/shell" && ./push.sh --vpn --pre-gated="$stamp" --silent $newer 2>&1 | tail -3); echo "$out"
+  echo "$out" | grep -q "^pushed " || echo "ship-apk: WARNING - newer shell files are NOT on the phone: (cd <origin-tip tree>/shell && ./push.sh --vpn --silent $newer)" >&2
+  rm -f "$stamp"
+fi
+# Anything origin got since that gate (during the idle wait or the install): from the new tip, gated as any push.
 git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
-newer=$(git diff --name-only HEAD origin/worktree-powos-multiplatform -- shell/ 2>/dev/null | grep -vE '^shell/(dev|test)/' |
-  while read -r f; do git cat-file -e "origin/worktree-powos-multiplatform:$f" 2>/dev/null && echo "${f#shell/}"; done || true)
-# (|| true: nothing newer - an APK built from the tip - makes grep exit 1, and set -e + pipefail ended the ship here,
-# skipping the checks below; 17:18, APK 29876595.)
-if [ -n "$newer" ]; then
-  t=$(mktemp -d "$HOME/.cache/powos-reapply.XXXXXX")
-  if git worktree add -q --detach "$t/tree" origin/worktree-powos-multiplatform 2>/dev/null; then
-    [ -d shell/node_modules ] && ln -s "$PWD/shell/node_modules" "$t/tree/shell/node_modules"
-    echo "ship-apk: re-pushing shell changes committed after the build: $(echo $newer)"
-    # The phone now runs the APK's (older) shell for these files: re-pushing them is not optional. A loaded Mac timed
-    # every page out at 30 s and the re-push was refused, leaving newer fixes off the phone (2026-10-22, 29878209):
-    # 60 s, one retry, and a loud line with the exact command if it still fails.
-    rp() { (cd "$t/tree/shell" && READY_MS=${READY_MS:-60000} ./push.sh --vpn --silent $newer 2>&1 | tail -3); }
+tip2=$(git rev-parse origin/worktree-powos-multiplatform)
+later=$(shell_delta "$tip" "$tip2")
+if [ -n "$later" ]; then
+  if [ -z "$t" ]; then
+    t=$(mktemp -d "$HOME/.cache/powos-reapply.XXXXXX"); git worktree add -q --detach "$t/tree" "$tip2" 2>/dev/null || true
+    [ -d shell/node_modules ] && [ -d "$t/tree/shell" ] && ln -s "$PWD/shell/node_modules" "$t/tree/shell/node_modules"
+  else
+    git -C "$t/tree" checkout -q --detach "$tip2" 2>/dev/null || true
+  fi
+  if [ -d "$t/tree/shell" ]; then
+    echo "ship-apk: re-pushing shell changes committed during the install: $(echo $later)"
+    # A loaded Mac timed every page out at 30 s and the re-push was refused (2026-10-22, 29878209): 60 s, one retry,
+    # and a loud line with the exact command if it still fails.
+    rp() { (cd "$t/tree/shell" && READY_MS=${READY_MS:-60000} ./push.sh --vpn --silent $later 2>&1 | tail -3); }
     out=$(rp); echo "$out"
     if ! echo "$out" | grep -q "^pushed "; then
       echo "ship-apk: re-push refused - retrying once" >&2; out=$(READY_MS=90000 rp); echo "$out"
-      echo "$out" | grep -q "^pushed " || echo "ship-apk: WARNING - newer shell files are NOT on the phone: (cd <origin-tip tree>/shell && ./push.sh --vpn --silent $newer)" >&2
+      echo "$out" | grep -q "^pushed " || echo "ship-apk: WARNING - newer shell files are NOT on the phone: (cd <origin-tip tree>/shell && ./push.sh --vpn --silent $later)" >&2
     fi
-    git worktree remove --force "$t/tree" 2>/dev/null
   fi
-  rm -rf "$t"
 fi
 sleep 15
 tools/phone/adb.sh shell "dumpsys package com.powos.app | grep -m1 versionCode; logcat -d -v time -T '$start.000' | grep -E 'gesture input on|Fatal signal|FATAL EXCEPTION' | tail -4"
