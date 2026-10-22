@@ -482,6 +482,19 @@ async function wideBarParked() {
   return Math.abs(parked.left - pill.left) > 2 || Math.abs(mid(parked) - mid(pill)) > 2 ? ["search widget on the grid: the bar's pill moved out of the bar's middle"] : [];
 }
 
+/** The folded dock's pinned apps never fade (the user, 2026-10-23): at rest on the pinned page its edges are unmasked. */
+async function dockPinnedNoFade() {
+  const S = await importShim("./state.ts");
+  const keys = [...S.byKey.value.keys()];
+  if (!S.dock.value.length) S.setDock(keys.slice(0, 4));
+  await new Promise((ok) => setTimeout(ok, 400));
+  const el = document.querySelector(".home > .dock.paged:not(.dock-tray) .dock-pages");
+  if (!el) return ["the folded dock isn't paged (pinned + recent apps) - nothing to check"];
+  const cs = getComputedStyle(el);
+  const fade = [cs.getPropertyValue("--dock-fade-l").trim(), cs.getPropertyValue("--dock-fade-r").trim()];
+  return el.scrollLeft < 1 && fade.some((v) => v !== "0px") ? [`the pinned dock fades at rest (left ${fade[0]}, right ${fade[1]})`] : [];
+}
+
 /**
  * In the page, in edit mode (the user, 2026-10-22, three reports): the search bar is ON the grid as a tile like the
  * others, the dock stays in view; moved, it becomes the search widget there (and leaves the foot); resized, it keeps
@@ -1556,6 +1569,9 @@ try {
         }
         return [];
       })));
+  // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
   // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
   // side-by-side pages without moving a tile.
   if (process.env.SHELL_PAGES !== "0")

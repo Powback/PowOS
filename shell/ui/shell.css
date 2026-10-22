@@ -221,6 +221,15 @@
   96% { --dock-fade-r: 24px; }
   100% { --dock-fade-l: 24px; --dock-fade-r: 0px; }
 }
+/* The pinned apps never fade (the user, 2026-10-23: the edge icon faded and cut): the dock's right edge fades only
+   once it scrolls into the recent apps; the recent apps' own tray (wide) keeps dock-fade. */
+.dock.paged:not(.dock-tray) .dock-pages { --dock-fade-r: 0px; animation-name: dock-fade-pinned; }
+@keyframes dock-fade-pinned {
+  0% { --dock-fade-l: 0px; --dock-fade-r: 0px; }
+  4% { --dock-fade-l: 24px; --dock-fade-r: 24px; }
+  96% { --dock-fade-r: 24px; }
+  100% { --dock-fade-l: 24px; --dock-fade-r: 0px; }
+}
 .dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
 .dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
 .dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
