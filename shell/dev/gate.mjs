@@ -593,15 +593,18 @@ async function folderMorphCheck() {
   await sleep(400);
   const card = document.querySelector(".page.library .lib-card");
   if (!card) return ["morph: no library card to open"];
+  // Waits on the state, not on time (a busy gate: frames lag the clock, a transition starts late and ends late).
+  const until = async (f, ms = 3000) => { for (const t0 = performance.now(); !f() && performance.now() - t0 < ms; ) await sleep(0); };
   card.click();
-  await sleep(40);
+  await until(() => document.querySelector(".folder-view .folder-bg"));
   const bg = document.querySelector(".folder-view .folder-bg");
   const fails = [];
   if (!bg || !bg.style.transition.includes("transform")) fails.push("morph: opening, the sheet doesn't ease from the tile (no transform transition)");
-  await sleep(450);
   const v = document.querySelector(".folder-view.open");
-  if (!v) return [...fails, "morph: the folder isn't open after 450 ms"];
-  const left = [...v.querySelectorAll("[style]")].filter((e) => e.style.transform || e.style.transition);
+  if (!v) return [...fails, "morph: the folder isn't open"];
+  const inline = () => [...v.querySelectorAll("[style]")].filter((e) => e.style.transform || e.style.transition);
+  await until(() => !inline().length);
+  const left = inline();
   if (left.length) fails.push(`morph: at rest ${left.length} parts keep an inline transform or transition`);
   // The sheet's own (an icon still loading pulses: icon-wait, not the morph's).
   const running = v.getAnimations({ subtree: true }).filter((a) => a.playState === "running" && a.animationName !== "icon-wait").length;
@@ -617,11 +620,12 @@ async function folderCloseCheck() {
   const S = await importShim("./state.ts");
   const sheet = document.querySelector(".folder-view .folder-sheet").getBoundingClientRect();
   const fails = Math.abs(sheet.left + sheet.width / 2 - innerWidth / 2) > 4 ? ["morph: the sheet isn't centred"] : [];
+  const until = async (f, ms = 3000) => { for (const t0 = performance.now(); !f() && performance.now() - t0 < ms; ) await sleep(0); };
   S.folder.value = null;
-  await sleep(40);
+  await until(() => !document.querySelector(".folder-view.open"));
   if (!document.querySelector(".folder-view:not(.open)")) fails.push("morph: closing, the sheet doesn't shrink back (gone at once)");
-  await sleep(450);
-  if (document.querySelector(".folder-view")) fails.push("morph: closed, the folder view is still there after 450 ms");
+  await until(() => !document.querySelector(".folder-view"));
+  if (document.querySelector(".folder-view")) fails.push("morph: closed, the folder view is still there after 3 s");
   return fails;
 }
 
@@ -634,7 +638,9 @@ async function libraryCheck() {
   const S = await importShim("./state.ts");
   const L = await importShim("./ui/library.tsx");
   S.page.value = S.pages.value.length;
-  await sleep(500);
+  // Until the track's slide is through (frames lag the clock on a busy gate), at most 3 s.
+  const at = () => document.querySelector(".page-track > .page.library")?.getBoundingClientRect().left ?? 1e9;
+  for (const t0 = performance.now(); Math.abs(at()) > 2 && performance.now() - t0 < 3000; ) await sleep(20);
   const lib = document.querySelector(".page-track > .page.library");
   if (!lib || lib !== document.querySelector(".page-track").lastElementChild) return ["the app library isn't home's last page"];
   const r = lib.getBoundingClientRect();

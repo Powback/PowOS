@@ -75,6 +75,12 @@ function rest(root: HTMLElement) {
   }
 }
 
+/** Once every transition in [el] has ended (or was cancelled); at once when none runs. */
+function transitionsEnded(el: HTMLElement) {
+  const moving = el.getAnimations({ subtree: true }).filter((a) => a instanceof CSSTransition);
+  return Promise.allSettled(moving.map((a) => a.finished));
+}
+
 /** Mounts the morph: grows out of the tile on open; when [folder] closes, shrinks back into it, then goes. */
 function useMorph(root: { current: HTMLElement | null }, closing: boolean, done: () => void) {
   useLayoutEffect(() => {
@@ -85,8 +91,11 @@ function useMorph(root: { current: HTMLElement | null }, closing: boolean, done:
       void el.offsetWidth;
       place(el, false, true);
     } else place(el, true, true);
-    const t = window.setTimeout(() => (closing ? done() : rest(el)), MORPH_MS + 40);
-    return () => clearTimeout(t);
+    // Ends when the transitions do, not on a clock: a timer of MORPH_MS + 40 fired before a late-starting transition
+    // (a busy frame on open) was through - it cut the sheet's last frames (a snap) and left the frost still fading.
+    let live = true;
+    void transitionsEnded(el).then(() => live && (closing ? done() : rest(el)));
+    return () => void (live = false);
   }, [closing]);
 }
 

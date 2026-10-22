@@ -172,11 +172,16 @@ strip only - not the cause when a drag in a tile fails.
 - Open folder = ui/folderview.tsx, mounted at Home level (grid.tsx Folders, beside Carried): position fixed inside the
   transformed .home-content left the status bar and dock unblurred. FLIP morph: .folder-bg (.tile, frost material via
   the AI-page frost selectors) scales from the tile's box, the first 4 icons fly from the tile's minis, inline styles
-  cleared at rest (rest()); closing keeps the last sheet mounted MORPH_MS+40. Focus: .folder-focus (fullscreen .tile,
+  cleared at rest (rest()); closing keeps the last sheet mounted until it shrank. Both ends wait on the transitions'
+  own `finished` (transitionsEnded), never a timer: a MORPH_MS+40 timer fired before a late-started transition ended
+  (a busy frame on open) - it cut the last frames (a snap, transitioncancel at ~220 of 240 ms with 6x CPU throttle)
+  and left the frost fading, which failed library-* on a loaded gate. Focus: .folder-focus (fullscreen .tile,
   frost blur + dim) fades in; home's .page/.bar/.dock fade out via html:has(.folder-view.open) - the compositor never
   blurs the page's own tiles. folder signal holds a home folder key or "lib:<cat>"; gesture.ts ignores home swipes
   while it's set. Library cards: 2x2 AppIcon minis, a count, the card is the tap; dedupe by name; HELPERS -> System.
-- Gate: home-select-*, home-folder-*, library-* (incl. folderMorph/folderCloseCheck) (synthetic PointerEvents dispatched on .pages - window-only dispatch
+- Gate: home-select-*, home-folder-*, library-* (incl. folderMorph/folderCloseCheck; these wait on the state with a
+  3 s bound, never a fixed sleep: under 2 gates at --cpu-shares 256 frames lag the clock, a page slide hadn't begun
+  500 ms in. Reproduce a load-only failure with Emulation.setCPUThrottlingRate 6 on that page) (synthetic PointerEvents dispatched on .pages - window-only dispatch
   never reaches element handlers). Device: tools/phone/verify/home-select.sh (transient only: picks, library; no
   layout change); folder-clip.sh records a morph (BOARD_TASK=<id> attaches frames). Renders: shots edit-chosen, folder-open, library.
 
