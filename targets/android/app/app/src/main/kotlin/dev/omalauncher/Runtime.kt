@@ -431,7 +431,7 @@ class Runtime(
                     event: Int,
                     path: String?,
                 ) {
-                    if (path == ".icon-names") scope.launch { refreshApps(export = false) }
+                    if (path == ".icon-names") scope.launch { reloadPowosApps() }
                 }
             }.also { it.startWatching() }
     }
@@ -499,26 +499,41 @@ class Runtime(
         if (screens == 0) proot.procShim.setActive(false)
     }
 
-    /** Rescans .desktop entries; the list only changes (and recomposes) when entries do. [export]: false = PowOS's list was just written. */
-    suspend fun refreshApps(export: Boolean = true) {
+    /** Rescans .desktop entries; the list only changes (and recomposes) when entries do. */
+    suspend fun refreshApps() = loadApps(export = true)
+
+    /** PowOS's list was just written (watchPowosApps): read it again without exporting it again. */
+    private suspend fun reloadPowosApps() = loadApps(export = false)
+
+    private suspend fun loadApps(export: Boolean) {
         // Rooted mode: PowOS's own apps, as its menu has them (powos-apps-export writes them to the run dir).
         val powos = !linux && rootedTerminals
         if (!linux && !powos) return
-        val apps =
-            withContext(Dispatchers.IO) {
-                if (powos) {
-                    if (export) RootedGuest.run("powos-apps-export")
-                    loadPowosApps(File(RootedGuest.runDir ?: return@withContext emptyList(), "powos-apps"))
-                } else {
-                    loadLinuxApps(proot)
-                }
-            }
+        val apps = withContext(Dispatchers.IO) { readApps(powos, export) }
         if (apps != linuxApps.toList()) {
             linuxApps.clear()
             linuxApps += apps
         }
         // And as Android's own shortcuts: the most used on the PowOS icon, pinned ones kept up to date.
         if (powos) withContext(Dispatchers.IO) { PowosShortcuts.publish(context, apps) { usage.score("l:" + it.id) } }
+        loadLinuxIcons(apps, powos)
+    }
+
+    /** The guest's entries (no-root Linux), or PowOS's list ([export]: written anew first). On the IO dispatcher. */
+    private fun readApps(
+        powos: Boolean,
+        export: Boolean,
+    ): List<LinuxApp> {
+        if (!powos) return loadLinuxApps(proot)
+        if (export) RootedGuest.run("powos-apps-export")
+        return loadPowosApps(File(RootedGuest.runDir ?: return emptyList(), "powos-apps"))
+    }
+
+    /** [apps]' icons not loaded yet, and the gone apps' ones dropped. */
+    private suspend fun loadLinuxIcons(
+        apps: List<LinuxApp>,
+        powos: Boolean,
+    ) {
         val ids = apps.mapTo(HashSet()) { it.id }
         linuxIcons.keys.retainAll(ids)
         linuxMasks.keys.retainAll(ids)

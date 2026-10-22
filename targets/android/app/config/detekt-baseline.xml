@@ -109,7 +109,6 @@
     <ID>CognitiveComplexMethod:Render.kt$@Composable private fun common( p: Props, parent: Any?, ): Modifier</ID>
     <ID>CognitiveComplexMethod:Review.kt$Review$fun markdown(): String</ID>
     <ID>CognitiveComplexMethod:Review.kt$Review$private fun run()</ID>
-    <ID>CognitiveComplexMethod:Runtime.kt$Runtime$suspend fun refreshApps()</ID>
     <ID>CognitiveComplexMethod:ShadeHost.kt$ShadeHost$fun start(): Boolean</ID>
     <ID>CognitiveComplexMethod:ShadeHost.kt$ShadeHost.Pull$fun move(e: MotionEvent): PullMove</ID>
     <ID>CognitiveComplexMethod:Share.kt$Share$fun decode(s: String): String</ID>
@@ -263,7 +262,6 @@
     <ID>CyclomaticComplexMethod:Render.kt$@Composable private fun TextNode( p: Props, mod: Modifier, )</ID>
     <ID>CyclomaticComplexMethod:Render.kt$@Composable private fun common( p: Props, parent: Any?, ): Modifier</ID>
     <ID>CyclomaticComplexMethod:Review.kt$Review$private fun run()</ID>
-    <ID>CyclomaticComplexMethod:Runtime.kt$Runtime$suspend fun refreshApps()</ID>
     <ID>CyclomaticComplexMethod:ShadeHost.kt$ShadeHost$fun start(): Boolean</ID>
     <ID>CyclomaticComplexMethod:ShadeHost.kt$ShadeHost$private fun pullable(y: Float): From?</ID>
     <ID>CyclomaticComplexMethod:ShadeHost.kt$ShadeHost.Pull$fun move(e: MotionEvent): PullMove</ID>
