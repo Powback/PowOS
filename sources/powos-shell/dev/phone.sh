@@ -9,6 +9,7 @@
 #   sources/powos-shell/dev/phone.sh page NAME    the home page as Chromium drew it (DevTools), over Android's still of
 #                                                 the wallpaper -> /home/powos/design-qa/desktop-NAME.png (+ a copy here)
 #   sources/powos-shell/dev/phone.sh cdp 'JS'     evaluate in the home page (read-only checks)
+#   sources/powos-shell/dev/phone.sh render NAME WxH [DPR]   the home with real data off screen at a desktop's size
 #   sources/powos-shell/dev/phone.sh theme        the phone home's picked theme -> the session's Omarchy current theme
 #   sources/powos-shell/dev/phone.sh wallpaper    Android's wallpaper still -> the desktop home's own wallpaper
 #   sources/powos-shell/dev/phone.sh shot NAME    KWin's whole output (spectacle); on the phone's Anland backend it
@@ -68,6 +69,30 @@ EOF
     # The desktop home's own wallpaper (src/server.cpp desktopWallpaper): Android's still of its (live) wallpaper,
     # copied root-side once - the session can't read Android's system files.
     "$adb" shell "su -c 'mkdir -p /data/powos/root/home/powos/.local/state/powos && cp /data/system/users/0/wallpaper_screenshot.png /data/powos/root/home/powos/.local/state/powos/desktop-wallpaper.jpg && chown 10359:10359 /data/powos/root/home/powos/.local/state/powos/desktop-wallpaper.jpg && echo copied || echo failed'"
+    ;;
+  render)
+    # The desktop home with the phone's REAL data at a desktop's size, off screen (the live session may be frozen, and
+    # a capture of a page must not be the mock): a second powos-shell, QT_QPA_PLATFORM=offscreen at WxH and DPR, its
+    # own browser profile and a temporary data home - the real PowOS apps (POWOS_APPS_DIR), theme and wallpaper
+    # (state home), a copy of host.net's secrets - so the user's instance and layout are never touched. Its page is
+    # captured over DevTools (127.0.0.1:9334); the instance and its temp are gone after.
+    name=${2:?usage: phone.sh render NAME WxH [DPR]}
+    size=${3:?usage: phone.sh render NAME WxH [DPR]}
+    dpr=${4:-1}
+    w=${size%x*} h=${size#*x}
+    out=/home/powos/design-qa/desktop-$name.png
+    {
+      echo 'T=$(mktemp -d /home/powos/.cache/powos-shell-render.XXXXXX)'
+      echo 'mkdir -p $T/powos/net && cp ~/.local/share/powos/net/secrets.json $T/powos/net/ 2>/dev/null; chmod -R go-rwx $T'
+      echo "printf '{\"screens\":[{\"name\":\"render\",\"x\":0,\"y\":0,\"width\":$w,\"height\":$h,\"logicalDpi\":96,\"logicalBaseDpi\":96,\"dpr\":$dpr}]}' >\$T/screens.json"
+      echo "XDG_DATA_HOME=\$T POWOS_APPS_DIR=/home/powos/.local/share/powos/apps POWOS_SHELL_PROFILE=powos-shell-render QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu QT_QPA_PLATFORM=offscreen:configfile=\$T/screens.json QTWEBENGINE_REMOTE_DEBUGGING=127.0.0.1:9334 POWOS_SHELL_DIR=$P/share/shell $P/bin/powos-shell home >\$T/log 2>&1 &"
+      echo 'pid=$!; sleep 30'
+      echo "PORT=9334 MODE=desktop $P/bin/powos-shell-cdp 'JSON.stringify({w: innerWidth, h: innerHeight, dpr: devicePixelRatio, alive: window.__powosAlive, tiles: document.querySelectorAll(\".home-tile\").length, errs: (window.__powosBoot || {}).errors})'"
+      echo "PORT=9334 MODE=desktop $P/bin/powos-shell-cdp --shot $out || tail -5 \$T/log"
+      echo 'kill $pid; sleep 1; kill -9 $pid 2>/dev/null; rm -rf $T'
+    } >"$cache/render.sh"
+    "$repo/tools/phone/user.sh" "$cache/render.sh" 2>&1 | grep -v ' pushed'
+    "$adb" exec-out "su -c cat /data/powos/root$out" >"$cache/desktop-$name.png" && echo "here: $cache/desktop-$name.png (real data, off screen at ${w}x$h x$dpr; no compositor)"
     ;;
   cdp)
     # As base64 in a script file: the JS reaches the page as written (no shell quoting on the way).

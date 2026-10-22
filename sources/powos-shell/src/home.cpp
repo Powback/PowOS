@@ -3,6 +3,7 @@
 
 #include <KWindowEffects>
 #include <LayerShellQt/Window>
+#include <QGuiApplication>
 #include <QPainterPath>
 #include <QRegion>
 #include <QScreen>
@@ -29,7 +30,8 @@ void Home::resizeEvent(QResizeEvent *e)
 void Home::applyLayer()
 {
     QWindow *window = windowHandle();
-    if (!window)
+    // Off screen (dev/phone.sh render: QT_QPA_PLATFORM=offscreen at a desktop's size): no compositor, no layer.
+    if (!window || QGuiApplication::platformName() != QLatin1String("wayland"))
         return;
     auto *layer = LayerShellQt::Window::get(window);
     // The bottom layer: over the desktop's wallpaper (plasmashell's desktop window, on KWin's desktop layer) and under
@@ -53,7 +55,7 @@ void Home::applyLayer()
 void Home::setGlass(const QString &regions)
 {
     QWindow *window = windowHandle();
-    if (!window)
+    if (!window || QGuiApplication::platformName() != QLatin1String("wayland"))
         return;
     const QStringList f = regions.split(QLatin1Char(' '), Qt::SkipEmptyParts);
     const int n = f.size() > 1 ? f[1].toInt() : 0;

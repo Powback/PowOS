@@ -28,7 +28,8 @@
 #      ~1-2 min.
 #   --shots DIR [--wallpaper FILE]: after the pages boot, every surface rendered at the phone's two screens into DIR
 #      (dev/shots.mjs: PNGs + report.json with each text's measured contrast) - design QA's renders, never a pass/fail.
-#      SHOTS_THEME / SHOTS_ONLY / SHOTS_SCALE / SHOTS_PROBE pass through.
+#      SHOTS_THEME / SHOTS_ONLY / SHOTS_SCALE / SHOTS_PROBE / SHOTS_STRICT pass through (STRICT=1: overlapping tiles
+#      or missing glyphs fail it).
 # Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker...). Time: ~5-10 s, the image cached.
 # GATE_IMAGE overrides the Chromium image. Docker's build cache and images are never pruned here.
 set -euo pipefail
@@ -151,9 +152,14 @@ fi
 if [ -n "$shots" ]; then
   smounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/shots.mjs:/usr/src/app/shots.mjs:ro" -v "$shots:/out")
   [ -n "$wallpaper" ] && smounts+=(-v "$wallpaper:/wallpaper.jpg:ro")
+  # The icon glyphs' font: shell/fonts/nerd_symbols.ttf is a link out of shell/ (the APK's res/font), which the
+  # container can't follow - without it every icon glyph renders as tofu.
+  nerd=$(cd "$SHELL_DIR/fonts" && cd "$(dirname "$(readlink nerd_symbols.ttf)")" 2>/dev/null && pwd -P)/nerd_symbols.ttf
+  [ -f "$nerd" ] && smounts+=(-v "$nerd:/fonts/nerd_symbols.ttf:ro")
   docker run --rm --platform linux/arm64 --shm-size 512m "${smounts[@]}" ${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} \
-    ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"} ${SHOTS_PROBE:+-e SHOTS_PROBE="$SHOTS_PROBE"} -w /usr/src/app --entrypoint node "$IMAGE" shots.mjs ||
-    echo "     shots: the render run failed"
+    ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"} ${SHOTS_PROBE:+-e SHOTS_PROBE="$SHOTS_PROBE"} ${SHOTS_STRICT:+-e SHOTS_STRICT="$SHOTS_STRICT"} -w /usr/src/app --entrypoint node "$IMAGE" shots.mjs ||
+    { echo "     shots: the render run failed$([ "${SHOTS_STRICT:-}" = 1 ] && echo " (strict: overlapping tiles or missing glyphs, report.json)")"
+      [ "${SHOTS_STRICT:-}" = 1 ] && fail=1; }
 fi
 [ $rc -le 1 ] || echo "FAIL gate: the browser run itself failed (exit $rc)"
 echo "gate: $([ $fail = 0 ] && echo pass || echo FAIL) in $(($(date +%s) - t0)) s ($base$([ -n "$overrides" ] && echo " + phone overrides")$([ ${#files[@]} -gt 0 ] && echo " + ${#files[@]} pushed file(s)"))"

@@ -66,13 +66,24 @@ def recv():
 
 if sys.argv[1] == "--shot":
     # Transparent where the page is (the wallpaper's place - a screenshot paints it white otherwise), for this
-    # capture only: the default background is put back right after.
+    # capture only: the defaults are put back right after. The metrics override makes Chromium draw a fresh frame of
+    # the whole page for the capture: a frozen session (no frame callbacks from KWin) or an off-screen instance draws
+    # none of its own.
     send({"id": 1, "method": "Emulation.setDefaultBackgroundColorOverride", "params": {"color": {"r": 0, "g": 0, "b": 0, "a": 0}}})
-    # captureBeyondViewport: a frame drawn for the capture itself - a frozen session (no frame callbacks from KWin)
-    # draws none of its own, and the override's repaint never reached the screen's frame.
+    send({"id": 4, "method": "Runtime.evaluate", "params": {"expression": "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])", "returnByValue": True}})
+    pending = {1, 4}
+    size = None
+    while pending:
+        msg = recv()
+        if msg.get("id") == 4:
+            size = json.loads(msg["result"]["result"]["value"])
+        pending.discard(msg.get("id"))
+    w, h, dpr = size
+    send({"id": 5, "method": "Emulation.setDeviceMetricsOverride", "params": {"width": w, "height": h, "deviceScaleFactor": dpr, "mobile": False}})
     send({"id": 2, "method": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": True}})
     send({"id": 3, "method": "Emulation.setDefaultBackgroundColorOverride", "params": {}})
-    pending = {2, 3}  # the screenshot answers after the reset: wait for both
+    send({"id": 6, "method": "Emulation.clearDeviceMetricsOverride", "params": {}})
+    pending = {2, 3, 5, 6}  # the screenshot answers after the others: wait for all
     while pending:
         msg = recv()
         if msg.get("id") == 2:

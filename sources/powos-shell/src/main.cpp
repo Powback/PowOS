@@ -60,7 +60,8 @@ int main(int argc, char **argv)
     auto *store = new Store(&app);
     Services services{new Apps(&app), new Windows(&app), store, new Theme(&app), new Ai(store, &app)};
 
-    auto *profile = new QWebEngineProfile(QStringLiteral("powos-shell"), &app);
+    // POWOS_SHELL_PROFILE: another instance's own storage (dev/phone.sh render runs one beside the session's).
+    auto *profile = new QWebEngineProfile(qEnvironmentVariable("POWOS_SHELL_PROFILE", QStringLiteral("powos-shell")), &app);
     profile->installUrlSchemeHandler("powos", new ShellServer(services.windows, &app));
     QWebEngineScript script;
     script.setName(QStringLiteral("powos-host"));

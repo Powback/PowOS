@@ -22,6 +22,8 @@ const ROOT = "/shell";
 const OUT = "/out";
 const SCALE = Number(process.env.SHOTS_SCALE || 1);
 const ONLY = process.env.SHOTS_ONLY ? new RegExp(process.env.SHOTS_ONLY) : null;
+/** A shot had overlapping tiles or missing glyphs (SHOTS_STRICT=1 fails the run on it). */
+let strictFailed = false;
 
 /** The phone's screens (OnePlus Open, density 442: 2.7625 px a CSS px) and its insets there. */
 const SIZES = {
@@ -277,6 +279,9 @@ function file(url) {
   if (p.split("/").includes("..")) return null;
   if (p === "__wallpaper.jpg" && WALLPAPER) return { path: WALLPAPER, name: p };
   if (p === "dev/sample-trees.json") return { path: TREES, name: p };
+  // The symbols font (gate.sh mounts the real file): theme.css's ./fonts/ and the host's /_font/symbols.
+  if ((p === "fonts/nerd_symbols.ttf" || p === "_font/symbols") && fs.existsSync("/fonts/nerd_symbols.ttf"))
+    return { path: "/fonts/nerd_symbols.ttf", name: "nerd_symbols.ttf" };
   const f = path.join(ROOT, p);
   return fs.existsSync(f) && fs.statSync(f).isFile() ? { path: f, name: p } : null;
 }
@@ -484,6 +489,35 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
       // SHOTS_PROBE: an expression evaluated in the page once it settled, its value printed (debugging a render).
       if (process.env.SHOTS_PROBE)
         console.log(`probe ${name}-${sizeName}:`, JSON.stringify(await page.evaluate(process.env.SHOTS_PROBE).catch((e) => e.message)));
+      // Layout checks: tiles that overlap (more than touching - merged tiles touch) and glyphs that can't render
+      // (a font that failed or 404'd draws tofu). SHOTS_STRICT=1 fails the run on either.
+      const layout = await page
+        .evaluate(() => {
+          const vw = innerWidth;
+          const vh = innerHeight;
+          const tiles = [...document.querySelectorAll(".home-tile")]
+            .map((t) => ({ name: (t.querySelector("[data-key], .owl, .island-face, .ag-panel") ?? t).className.toString().slice(0, 24) || t.className.slice(0, 24), r: t.getBoundingClientRect() }))
+            .filter(({ r }) => r.width > 0 && r.right > 0 && r.left < vw && r.bottom > 0 && r.top < vh);
+          const overlaps = [];
+          for (let i = 0; i < tiles.length; i++)
+            for (let j = i + 1; j < tiles.length; j++) {
+              const a = tiles[i].r;
+              const b = tiles[j].r;
+              const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+              const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+              if (w > 1 && h > 1) overlaps.push(`${tiles[i].name} x ${tiles[j].name} (${Math.round(w)}x${Math.round(h)} px)`);
+            }
+          const fonts = [...document.fonts].filter((f) => f.status === "error").map((f) => f.family);
+          const missing = performance
+            .getEntriesByType("resource")
+            .filter((e) => e.responseStatus >= 400 && /font|\.ttf|\.woff/.test(e.name))
+            .map((e) => e.name.replace(location.origin, ""));
+          return { overlaps, glyphs: [...new Set([...fonts, ...missing])] };
+        })
+        .catch(() => ({ overlaps: [], glyphs: [] }));
+      for (const o of layout.overlaps) errors.push(`overlap: ${o}`);
+      for (const g of layout.glyphs) errors.push(`missing glyphs: ${g}`);
+      if (layout.overlaps.length || layout.glyphs.length) strictFailed = true;
       const out = path.join(OUT, `${name}-${sizeName}.png`);
       await page.screenshot({ path: out });
       // Contrast: the same frame without its text, under each run of text.
