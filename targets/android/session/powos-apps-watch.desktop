@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=PowOS app list for Android
+Comment=Re-exports PowOS's apps to the PowOS app's drawer when KSycoca changes (powos-apps-watch)
+Exec=powos-apps-watch
+NoDisplay=true
+X-KDE-autostart-phase=2

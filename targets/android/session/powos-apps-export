@@ -12,7 +12,7 @@ included), the first of each id winning (XDG), without NoDisplay/Hidden ones, on
 Android apps (android-*.desktop, X-Android: the PowOS app made those from Android's own apps). Icons are only drawn
 when missing or their Icon= changed, so a run without new apps doesn't start Qt.
 
-Run by the PowOS app (rooted mode) when its drawer refreshes: `powos-apps-export`.
+Run by the PowOS app (rooted mode) when its drawer refreshes, and by powos-apps-watch when KSycoca changes.
 """
 import os
 import re
@@ -58,7 +58,8 @@ def shown(fields, desktop_id):
     if desktop_id.startswith("android-") or "X-Android" in fields.get("Categories", "").split(";"):
         return False
     only = [d for d in fields.get("OnlyShowIn", "").split(";") if d]
-    if only and "KDE" not in only:
+    # X-PowOS: entries only the PowOS app lists (session/plasma/org.powos.plasma.desktop: Plasma itself).
+    if only and "KDE" not in only and "X-PowOS" not in only:
         return False
     return "KDE" not in fields.get("NotShowIn", "").split(";")
 
@@ -184,7 +185,7 @@ def main():
             desktop_id, f["Name"], exec_line, "1" if f.get("Terminal") == "true" else "0",
             f.get("StartupWMClass", ""), f.get("Categories", ""),
         ]) + "\n")
-    tmp = os.path.join(OUT, "apps.tsv.tmp")
+    tmp = os.path.join(OUT, f"apps.tsv.{os.getpid()}.tmp")  # the app and powos-apps-watch may run at once
     with open(tmp, "w") as f:
         f.writelines(lines)
     os.replace(tmp, os.path.join(OUT, "apps.tsv"))

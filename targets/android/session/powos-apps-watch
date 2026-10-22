@@ -1,0 +1,16 @@
+#!/bin/bash
+# powos-apps-watch: PowOS's app list for Android kept current from KService's own change signal (rooted mode).
+#
+# Started with the desktop (/etc/xdg/autostart/powos-apps-watch.desktop). kded6 rebuilds the KSycoca database when an
+# application dir changes (a package, a Flatpak, a user's own .desktop file), and kbuildsycoca6 then broadcasts
+# org.kde.KSycoca.notifyDatabaseChanged on the session bus. On that signal this reruns powos-apps-export, which
+# renames apps.tsv into place in the PowOS app's run dir; the app's FileObserver there reloads its drawer.
+# Nothing polls: dbus-monitor and the read below block until the bus has that one signal (zero CPU at rest).
+# One export at start too, so a session that started with new apps has them listed.
+powos-apps-export >/dev/null 2>&1
+dbus-monitor --session "type='signal',interface='org.kde.KSycoca',member='notifyDatabaseChanged'" |
+  while read -r line; do
+    case $line in
+      *member=notifyDatabaseChanged*) powos-apps-export >/dev/null 2>&1 ;;
+    esac
+  done

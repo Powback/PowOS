@@ -24,24 +24,23 @@ home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the co
 - The monospace font is the theme's own --font, the same folded and unfolded. It is not a load failure.
 - The ">" dock icon is Konsole's real icon. Chrome's and Camera's white plates are their Android icons.
 
+## Plasma as an app + the web launcher's Linux backend (plan: docs/DESKTOP-WEB-SHELL.md, last section)
+- Drawer "Plasma" = l:org.powos.plasma (session/plasma/org.powos.plasma.desktop, OnlyShowIn=X-PowOS so Kickoff hides
+  it; the export accepts X-PowOS). Exec powos-plasma = PLASMA_COMMAND: Runtime.launch -> showDesktop() (MainActivity).
+- Linux list: powos-apps-export (KService's rules over XDG dirs) -> run/powos-apps. powos-apps-watch (autostart;
+  dbus-monitor on org.kde.KSycoca.notifyDatabaseChanged, kded6 -> kbuildsycoca6) reruns it; the app's FileObserver on
+  icons/.icon-names (MOVED_TO, the export's last step) -> refreshApps(export=false). Unit android-apps. Launch: powos-open-task.
+- Check: verify/plasma-app.sh (watcher idle, entry, emitted signal -> new export, apps.list, apps.launch -> MainActivity).
+
 ## Shot checks (shell/dev/shots.mjs, after each scene)
-- Errors per shot: overlapping tiles (> 1 px, touching doesn't count), partial joins (a merged edge 1-99% covered),
-  uneven gutters on mode=desktop, missing glyphs (a font face in error or a font 404). SHOTS_STRICT=1 fails the run
-  and gate.sh --shots with it. gate.sh mounts the real nerd_symbols.ttf (shell/fonts is a link out of shell/, which
-  the container can't follow; without it, tofu). Output dirs must be under $HOME (Colima shares only that).
+- Errors per shot: overlapping tiles (>1 px), partial joins, uneven gutters on mode=desktop, missing glyphs.
+  SHOTS_STRICT=1 fails the run and gate.sh --shots. gate.sh mounts the real nerd_symbols.ttf. Output dirs under $HOME.
 
 ## Paused Plasma host: what's left on the phone
-- powos-desktop-shell disable set ~/.config/powos/desktop-shell.off; the XDG autostart
-  (/etc/xdg/autostart/powos-desktop-shell.desktop, start --auto) does nothing while it's there. Code and unit stay.
-- Unified sleep (lib/apps/powos-sleepd, powos-sleep-gui) also freezes powos-shell's whole tree 15 s after PowOS leaves
-  the screen (measured 12 -> 0 ticks/60 s). Harmless while it's disabled.
-- Data it left: ~/.local/share/powos/shell-data/desktop-*, ~/.local/share/powos/net (a copy of the Hue key,
-  net-secret.sh remove takes it out), ~/.local/state/powos/desktop-wallpaper.jpg, and the session's Omarchy
-  current/theme. The last two come from `dev/phone.sh wallpaper|theme`, a HACK (registry row: dev/phone.sh); the
-  real fix is the Android app writing them into the rooted session.
-- dev/phone.sh render NAME WxH: an off-screen second powos-shell with real data (its own profile and temp store,
-  --disable-gpu, because offscreen GPU rasterised only part of the page). Captures override the device metrics and
-  the background (alpha), which draws a fresh frame even in a frozen session.
+- Off: ~/.config/powos/desktop-shell.off (autostart start --auto then does nothing); unified sleep freezes its tree.
+- Left data: shell-data/desktop-*, ~/.local/share/powos/net (Hue key copy; net-secret.sh remove), desktop-wallpaper.jpg
+  and Omarchy current/theme from `dev/phone.sh wallpaper|theme` (HACK row dev/phone.sh; fix: the app writes them).
+- dev/phone.sh render NAME WxH: off-screen second powos-shell (own profile, --disable-gpu), fresh frame when frozen.
 
 The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's rules: docs/AGENT-HANDBOOK.md.
 
@@ -103,7 +102,5 @@ The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's
   desktop host's own copy of shell/ only changes with dev/phone.sh build.
 
 ## Next
-Global hotkey (KGlobalAccel), dictation (GPU box STT), the phone's theme mirrored into the rooted session (Android
-app, Omarchy current/theme), a desktop widget picker, agents' mail into the page, x86 Plasma (image-build.sh), a user
-unit for autostart with powos-desktop-shell as its switch, an input region so clicks off the tiles reach Plasma's desktop,
-OWL widgets (weather, sysinfo) once the engine's JS port exists.
+Plasma backend slices 2-4 (Linux windows floating on home pages, Plasma notifications incl. KDE Connect in the shade,
+clipboard). Paused host: hotkey, dictation, theme mirror, widget picker, x86 Plasma, input region, OWL widgets.

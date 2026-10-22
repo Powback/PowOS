@@ -141,6 +141,9 @@ pacman -S --noconfirm --needed qmltermwidget
 install -m 755 "$P/session/powos-android-app" /usr/local/bin/powos-android-app
 install -m 755 "$P/session/powos-android-tasks" /usr/local/bin/powos-android-tasks
 install -m 755 "$P/session/powos-apps-export" /usr/local/bin/powos-apps-export
+install -m 755 "$P/session/powos-apps-watch" /usr/local/bin/powos-apps-watch
+install -Dm 644 "$P/session/powos-apps-watch.desktop" /etc/xdg/autostart/powos-apps-watch.desktop
+install -Dm 644 "$P/session/plasma/org.powos.plasma.desktop" /usr/share/applications/org.powos.plasma.desktop
 install -m 755 "$P/session/powos-open-task" /usr/local/bin/powos-open-task
 # The app's touch controls as a gamepad (started by powos-rooted-session).
 install -m 755 "$P/session/powos-padd" /usr/bin/powos-padd

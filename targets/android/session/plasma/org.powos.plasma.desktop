@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Plasma
+Comment=The full Plasma desktop
+Icon=start-here-kde-plasma
+# The PowOS app opens its Plasma desktop for this Exec (Runtime.launch, PLASMA_COMMAND); nothing runs in the session.
+Exec=powos-plasma
+Terminal=false
+Categories=System;
+# Only the PowOS app's drawer lists it (powos-apps-export): Plasma's own menus never show Plasma inside Plasma.
+OnlyShowIn=X-PowOS;

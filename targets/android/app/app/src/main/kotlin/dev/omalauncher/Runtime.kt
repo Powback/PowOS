@@ -24,6 +24,7 @@ import dev.omalauncher.linux.POWOS
 import dev.omalauncher.linux.AudioBridge
 import dev.omalauncher.linux.Bootstrap
 import dev.omalauncher.linux.FILES_COMMAND
+import dev.omalauncher.linux.PLASMA_COMMAND
 import dev.omalauncher.linux.Gpu
 import dev.omalauncher.linux.LinuxApp
 import dev.omalauncher.linux.OpenBridge
@@ -411,6 +412,28 @@ class Runtime(
         widgets.linuxChanged(true)
         // PowOS's apps in the drawer, search and Android's shortcuts.
         refreshApps()
+        watchPowosApps()
+    }
+
+    private var appsWatch: android.os.FileObserver? = null
+
+    /**
+     * Rooted mode: the drawer follows the session's app list without polling. powos-apps-watch reruns powos-apps-export
+     * on KSycoca's change signal; the export's last step renames icons/.icon-names into place (after apps.tsv and the
+     * icons), so that rename means "a complete list": read it again, without exporting again.
+     */
+    private fun watchPowosApps() {
+        if (appsWatch != null) return
+        val icons = File(RootedGuest.runDir ?: return, "powos-apps/icons").apply { mkdirs() }
+        appsWatch =
+            object : android.os.FileObserver(icons, MOVED_TO) {
+                override fun onEvent(
+                    event: Int,
+                    path: String?,
+                ) {
+                    if (path == ".icon-names") scope.launch { refreshApps(export = false) }
+                }
+            }.also { it.startWatching() }
     }
 
     /** Turns GPU acceleration on (installing and checking the driver) or off, for Linux apps started from then on. */
@@ -476,15 +499,15 @@ class Runtime(
         if (screens == 0) proot.procShim.setActive(false)
     }
 
-    /** Rescans .desktop entries; the list only changes (and recomposes) when entries do. */
-    suspend fun refreshApps() {
+    /** Rescans .desktop entries; the list only changes (and recomposes) when entries do. [export]: false = PowOS's list was just written. */
+    suspend fun refreshApps(export: Boolean = true) {
         // Rooted mode: PowOS's own apps, as its menu has them (powos-apps-export writes them to the run dir).
         val powos = !linux && rootedTerminals
         if (!linux && !powos) return
         val apps =
             withContext(Dispatchers.IO) {
                 if (powos) {
-                    RootedGuest.run("powos-apps-export")
+                    if (export) RootedGuest.run("powos-apps-export")
                     loadPowosApps(File(RootedGuest.runDir ?: return@withContext emptyList(), "powos-apps"))
                 } else {
                     loadLinuxApps(proot)
@@ -577,6 +600,8 @@ class Runtime(
     fun launch(app: LinuxApp) {
         // Our own Files app: open it directly rather than round-tripping through the guest.
         if (app.exec == FILES_COMMAND) return openFiles()
+        // Plasma itself, as an app: its full desktop (the "PowOS" activity), nothing started in the session.
+        if (app.exec == PLASMA_COMMAND) return showDesktop()
         if (app.terminal) return terminal(app.exec, app.name)
         // PowOS rooted mode: like a phone app, its window as its own Android task (KWin exports it), not the desktop.
         if (!linux && rootedTerminals) return openRooted(app)
