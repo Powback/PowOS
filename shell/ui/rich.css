@@ -155,12 +155,34 @@
 .ai-screen .ai-fold:not(.tile *) { color: var(--on-wallpaper); text-shadow: var(--label-shadow); }
 
 /* The board's rows: a dot, the title up to two lines, an age only past a day. */
-.ai-item { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 12px; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
-.ai-item .ai-dot { margin-top: 0.45em; }
+.ai-item { display: flex; flex-direction: column; }
+.ai-item-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 12px; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
+.ai-item-row .ai-dot { margin-top: 0.45em; }
 .ai-item-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ai-item-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.35; overflow-wrap: anywhere; }
-.ai-item[aria-expanded="true"] .ai-item-title { -webkit-line-clamp: unset; }
-.ai-item-note { font-size: var(--text-small); line-height: 1.4; overflow-wrap: anywhere; }
+.ai-item-row[aria-expanded="true"] .ai-item-title { -webkit-line-clamp: unset; }
+.ai-item-note { margin: 0; font-size: var(--text-small); line-height: 1.4; overflow-wrap: anywhere; }
+/* Tracked: a thin bar (how far along), the step it's on, then "3/10 · 2 commits · 2h ago". Secondary by size. */
+.ai-bar { display: block; height: 3px; margin: 4px 0 2px; border-radius: 2px; background: var(--soft-fill); overflow: hidden; }
+.ai-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--color-accent); }
+.ai-item-step, .ai-item-facts { font-size: var(--text-small); line-height: 1.35; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ai-item-facts { color: var(--color-muted); }
+/* Open: the note, the steps (done / now / next), the commits in plain words, the review images. */
+.ai-item-more { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 10px calc(12px + 8px + 10px); font-size: var(--text-small); line-height: 1.4; }
+.ai-steps, .ai-commits { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.ai-steps li { display: flex; gap: 8px; overflow-wrap: anywhere; }
+.ai-step-mark { flex: none; width: 1em; text-align: center; }
+/* Now: a filled dot; next: a ring (drawn, not glyphs - a font drew "●" as a coloured emoji). */
+.ai-steps li:not(.done) .ai-step-mark::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--color-foreground); }
+.ai-steps li.current .ai-step-mark::before { background: var(--color-foreground); }
+.ai-steps li.current { font-weight: 600; }
+.ai-steps li.next { color: var(--color-muted); }
+.ai-commits li { overflow-wrap: anywhere; }
+.ai-imgs { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-img { width: 72px; height: 128px; padding: 0; overflow: hidden; border: 0; border-radius: 8px; background: var(--soft-fill); }
+.ai-img img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.ai-img-name { padding: 2px 8px; border-radius: 8px; background: var(--soft-fill); overflow-wrap: anywhere; }
+.ai-img-full { display: block; max-width: 100%; margin: 0 auto; border-radius: 8px; }
 .ai-item-age { flex: none; font-size: var(--text-small); color: var(--color-muted); }
 .ai-item.done .ai-item-title { color: var(--color-muted); }
 .ai-group + .ai-group { margin-top: 6px; }

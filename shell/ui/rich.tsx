@@ -289,7 +289,8 @@ function Doc({ p, peek }: { p: Presented; peek: boolean }) {
 }
 
 /** The document full screen, over everything (Back or × closes it): drawn into the page's body, out of the chat. */
-function openPresented(p: Presented) {
+/** [title] and [body] full screen, over everything (Back or x closes it): drawn into the page's body, out of the chat. */
+export function openFull(title: string, body: preact.ComponentChild) {
   const host = document.createElement("div");
   document.body.append(host);
   const close = () => {
@@ -299,20 +300,20 @@ function openPresented(p: Presented) {
   };
   topBack.value = close;
   render(
-    <div class="present-full tile sheet" role="dialog" aria-label={p.title}>
+    <div class="present-full tile sheet" role="dialog" aria-label={title}>
       <div class="present-head">
-        <span class="present-title">{p.title}</span>
+        <span class="present-title">{title}</span>
         <button type="button" class="present-close" aria-label="close" onClick={close}>
           <Icon name="close" />
         </button>
       </div>
-      <div class="present-body">
-        <Doc p={p} peek={false} />
-      </div>
+      <div class="present-body">{body}</div>
     </div>,
     host,
   );
 }
+
+const openPresented = (p: Presented) => openFull(p.title, <Doc p={p} peek={false} />);
 
 /** A presented document in the chat: its title and its beginning; a tap opens it full screen. */
 export function PresentCard({ p }: { p: Presented }) {

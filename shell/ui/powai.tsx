@@ -19,7 +19,7 @@ import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
-import { Queued, Said, Thread, ToolRun, toolLabel } from "./rich.tsx";
+import { Queued, Said, Thread, ToolRun, openFull, toolLabel } from "./rich.tsx";
 import { askQueued, openAssistant, waiting } from "./assistant.ts";
 
 const sessions = signal<AgentSession[]>([]);
@@ -134,7 +134,32 @@ export interface WorkRow {
   done: bigint | number;
   /** "" on rows from before projects (the module's column default). */
   project: string;
+  /** How far along (`--progress N/M`; 0/0: no bar). Absent on bindings from before the progress columns. */
+  progressDone?: number;
+  progressTotal?: number;
+  /** The current step, one line ("" = none). */
+  step?: string;
+  /** JSON: [{text, state: "done" | "current" | "next"}] in order ("" = []). */
+  steps?: string;
+  /** JSON: [{sha, subject}] oldest first ("" = []). */
+  commits?: string;
+  /** JSON: [path] - review images, e.g. /home/powos/design-qa/x.png ("" = []). */
+  images?: string;
+  /** When it last moved (ms; 0 on old rows: `updated`). */
+  activity?: bigint | number;
 }
+
+/** A JSON-array column ("" or bad = none). */
+function list<T>(json: string | undefined): T[] {
+  try {
+    const v = JSON.parse(json || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+type Step = { text: string; state: "done" | "current" | "next" };
+type Commit = { sha: string; subject: string };
 /** The board as last seen: shown at once when the page comes back, before the socket has caught up. */
 export const board = signal<WorkRow[]>([]);
 const boardLive = signal(false);
@@ -225,18 +250,84 @@ function NeedsYou() {
   );
 }
 
-/** One open item: a dot, its title (up to two lines), its age past a day; a tap shows its note. */
-function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => void }) {
-  const at = sec(w.status === "done" && Number(w.done) ? w.done : w.updated);
+/** A review image as the page can load it (ShellHost's _qa/: design-qa's files by name), else null. */
+const qaUrl = (path: string) => (/^\/home\/powos\/design-qa\/[^/]+\.(png|jpe?g)$/i.test(path) ? `/_qa/${encodeURIComponent(path.split("/").pop()!)}` : null);
+const fileName = (path: string) => path.split("/").pop() ?? path;
+
+/** A review image: its picture (a tap: full screen), or its name where the page can't load it (an older host). */
+function Review({ path }: { path: string }) {
+  const [failed, setFailed] = useState(false);
+  const url = qaUrl(path);
+  if (!url || failed) return <span class="ai-img-name">{fileName(path)}</span>;
   return (
-    <button type="button" class={`ai-item ${w.status}`} onClick={onTap} aria-expanded={open}>
-      <span class={`ai-dot ${w.status === "working" ? "on" : ""}`} />
-      <span class="ai-item-main">
-        <span class="ai-item-title">{w.title}</span>
-        {open && w.note && <span class="ai-item-note">{w.note}</span>}
-      </span>
-      {Date.now() / 1000 - at > DAY_S && <span class="ai-item-age">{ago(at)}</span>}
+    <button type="button" class="ai-img" onClick={() => openFull(fileName(path), <img class="ai-img-full" src={url} alt="" />)}>
+      <img src={url} alt={fileName(path)} loading="lazy" onError={() => setFailed(true)} />
     </button>
+  );
+}
+
+/**
+ * One open item: a dot, its title (up to two lines); when it's tracked, a thin bar, the current step and "3/10 · 2
+ * commits · 2h ago" (else its age past a day). A tap shows its note, the steps done / now / next, the commits in plain
+ * words and its review images.
+ */
+function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => void }) {
+  const total = w.progressTotal ?? 0;
+  const done = Math.min(w.progressDone ?? 0, total);
+  const steps = list<Step>(w.steps);
+  const commits = list<Commit>(w.commits);
+  const images = list<string>(w.images);
+  const moved = sec(Number(w.activity) || (w.status === "done" && Number(w.done) ? w.done : w.updated));
+  const tracked = total > 0 || !!w.step || commits.length > 0;
+  const facts = [total > 0 && `${done}/${total}`, commits.length > 0 && `${commits.length} commit${commits.length > 1 ? "s" : ""}`, ago(moved) === "now" ? "just now" : `${ago(moved)} ago`].filter(Boolean).join(" · ");
+  return (
+    <div class={`ai-item ${w.status}`}>
+      <button type="button" class="ai-item-row" onClick={onTap} aria-expanded={open}>
+        <span class={`ai-dot ${w.status === "working" ? "on" : ""}`} />
+        <span class="ai-item-main">
+          <span class="ai-item-title">{w.title}</span>
+          {total > 0 && (
+            <span class="ai-bar" role="progressbar" aria-valuenow={done} aria-valuemax={total}>
+              <span style={{ width: `${(100 * done) / total}%` }} />
+            </span>
+          )}
+          {tracked && w.step && <span class="ai-item-step">{w.step}</span>}
+          {tracked && <span class="ai-item-facts">{facts}</span>}
+        </span>
+        {!tracked && Date.now() / 1000 - moved > DAY_S && <span class="ai-item-age">{ago(moved)}</span>}
+      </button>
+      {open && (
+        <div class="ai-item-more">
+          {w.note && <p class="ai-item-note">{w.note}</p>}
+          {steps.length > 0 && (
+            <ol class="ai-steps">
+              {steps.map((x, i) => (
+                <li key={i} class={x.state}>
+                  <span class="ai-step-mark">{x.state === "done" ? "✓" : ""}</span>
+                  {x.text}
+                </li>
+              ))}
+            </ol>
+          )}
+          {commits.length > 0 && (
+            <ul class="ai-commits">
+              {commits.map((c) => (
+                <li key={c.sha}>
+                  {c.subject || "a change"}
+                </li>
+              ))}
+            </ul>
+          )}
+          {images.length > 0 && (
+            <div class="ai-imgs">
+              {images.map((p) => (
+                <Review key={p} path={p} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

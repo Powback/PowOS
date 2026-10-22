@@ -148,7 +148,7 @@ const ACTIONS = JSON.stringify({
 });
 const board = (actions) =>
   `const B = ${BOARD}; const A = ${actions ? ACTIONS : "{}"}; const now = Date.now(); const P = await U('./ui/powai.tsx');` +
-  ` P.board.value = B.map((r) => ({ ...r, note: A[r.id] ?? r.note, created: now - r.createdAgo, updated: now - r.updatedAgo, done: r.doneAgo ? now - r.doneAgo : 0 }));` +
+  ` P.board.value = B.map((r) => ({ ...r, note: A[r.id] ?? r.note, created: now - r.createdAgo, updated: now - r.updatedAgo, done: r.doneAgo ? now - r.doneAgo : 0, activity: r.activityAgo ? now - r.activityAgo : 0 }));` +
   ` P.boardSeen.value = true; S.chat.value = { busy: false, items: [{ kind: "user", text: "what changed overnight?" }, { kind: "assistant", text: "Three pushes: the shade, the pet, the speech fix." }, ...${CHAT_SAMPLE}] }; S.page.value = -1; await sleep(300);`;
 
 /**
@@ -184,6 +184,8 @@ const SCENES = [
   ["ai-v2", "home", board(false), "wallpaper"],
   ["ai-v2-actions", "home", board(true), "wallpaper"],
   ["ai-v2-open", "home", board(true) + " document.querySelectorAll('.ai-work-list .ai-fold, .ai-history .ai-fold').forEach((b) => b.click()); await sleep(100); document.querySelector('.ai-screen .ai-item')?.click(); await sleep(100); document.querySelector('.ai-work-list').scrollIntoView();", "wallpaper"],
+  ["progress", "home", board(false) + " document.querySelector('.ai-work-list').scrollIntoView();", "wallpaper"],
+  ["progress-open", "home", board(false) + " [...document.querySelectorAll('.ai-item-row')].find((b) => /queued/i.test(b.textContent))?.click(); await sleep(300); document.querySelector('.ai-item-more')?.scrollIntoView({ block: 'center' }); await sleep(300);", "wallpaper"],
   ["ai-v2-calm", "home", board(true).replace("P.board.value = B.map", "P.board.value = B.filter((r) => r.status !== 'waiting').map"), "wallpaper"],
   ["queued", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["queued-ai", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.page.value = -1;`, "wallpaper"],
@@ -292,6 +294,11 @@ function file(url) {
   if (p.split("/").includes("..")) return null;
   if (p === "__wallpaper.jpg" && WALLPAPER) return { path: WALLPAPER, name: p };
   if (p === "dev/sample-trees.json") return { path: TREES, name: p };
+  // The host's review images (ShellHost _qa/: the phone's /home/powos/design-qa) from local copies in dev/.qa/ (untracked).
+  if (p.startsWith("_qa/")) {
+    const f = path.join(ROOT, "dev/.qa", path.basename(p));
+    return fs.existsSync(f) ? { path: f, name: path.basename(p) } : null;
+  }
   // The symbols font (gate.sh mounts the real file): theme.css's ./fonts/ and the host's /_font/symbols.
   if ((p === "fonts/nerd_symbols.ttf" || p === "_font/symbols") && fs.existsSync("/fonts/nerd_symbols.ttf"))
     return { path: "/fonts/nerd_symbols.ttf", name: "nerd_symbols.ttf" };
