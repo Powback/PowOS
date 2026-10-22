@@ -238,7 +238,8 @@ export function useReorder(
       now.forEach((k, i) => {
         if (k === p.key) return;
         const r = rects.current.get(k);
-        if (!r) return;
+        // Not shown (the first pull's hidden rest): no slot.
+        if (!r || !r.width) return;
         const dd = mid(r);
         if (dd < dist) ((dist = dd), (best = i));
       });

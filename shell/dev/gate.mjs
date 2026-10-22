@@ -529,7 +529,7 @@ try {
   // opened again and after a reload; a carry cancelled (the system took the pointer) changes nothing. Every step waits
   // on the state it needs, never on time - CC_THROTTLE (e.g. 6) slows the page's CPU to check that it holds.
   if (process.env.SHELL_PAGES !== "0") {
-    const ccOrder = () => [...document.querySelectorAll(".cc3-quick [data-key]")].map((e) => e.dataset.key);
+    const ccOrder = () => [...document.querySelectorAll(".cc3-list [data-key]")].filter((e) => e.getClientRects().length).map((e) => e.dataset.key);
     runs.push(
       open(browser, `${ORIGIN}/index.html?mode=shade`, "cc-reorder").then(async (r) => {
         const rate = Number(process.env.CC_THROTTLE || 1);
@@ -553,7 +553,7 @@ try {
             const { powos } = await importShim("./bridge.ts");
             const P = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerId: 9, isPrimary: true, pointerType: "touch" }));
             const mid = (el) => { const b = el.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
-            const item = (k) => document.querySelector(`.cc3-quick [data-key="${k}"]`);
+            const item = (k) => document.querySelector(`.cc3-list [data-key="${k}"]`);
             const fails = [];
             try {
               S.ccV3.value = "v3";
@@ -566,7 +566,7 @@ try {
               const lift = async () => {
                 const [x, y] = mid(item(k0));
                 P(item(k0), "pointerdown", x, y);
-                await until(() => document.querySelector(".cc3-quick .carried"), "the lift (a long press)");
+                await until(() => document.querySelector(".cc3-list .carried"), "the lift (a long press)");
                 return [x, y];
               };
               // Carried part of the way, then cancelled: nothing changes.
@@ -575,7 +575,7 @@ try {
               P(item(k0), "pointermove", (x + tx) / 2, (y + ty) / 2);
               await until(() => order().indexOf(k0) < 2, "the row making room", 5000).catch(() => {});
               P(item(k0), "pointercancel", tx, ty);
-              await until(() => !document.querySelector(".cc3-quick .carried"), "the copy gone after a cancel");
+              await until(() => !document.querySelector(".cc3-list .carried"), "the copy gone after a cancel");
               await until(() => order().join() === before.join(), "the order back after a cancel", 5000).catch(() => fails.push(`a cancelled carry changed the order: ${before.join(",")} -> ${order().join(",")}`));
               if (document.querySelector(".cc .lifted")) fails.push("a cancelled carry left its faint item behind");
               // Carried onto the first slot, a step at a time (each move after the row made room), and let go.
@@ -588,7 +588,7 @@ try {
               P(item(k0), "pointermove", tx, ty);
               await until(() => order()[0] === k0, "the row making room (slot 0)", 5000).catch(() => {});
               P(item(k0), "pointerup", tx, ty);
-              await until(() => !document.querySelector(".cc3-quick .carried"), "the copy gone after landing");
+              await until(() => !document.querySelector(".cc3-list .carried"), "the copy gone after landing");
               if (order()[0] !== k0) fails.push(`carried ${k0} onto the first slot, it landed at ${order().indexOf(k0)} (${order().join(",")})`);
               // Saved: the store has it first among the row's.
               const savedFirst = async () => {
@@ -598,6 +598,18 @@ try {
               const t0 = performance.now();
               while ((await savedFirst()) !== k0 && performance.now() - t0 < 10000) await sleep(50);
               if ((await savedFirst()) !== k0) fails.push(`saved order has ${await savedFirst()} first, not ${k0}`);
+              // The further pull reveals the rest under the row: the row's toggles don't move at all.
+              X.ccEditing.value = false;
+              const still = () => !document.getAnimations().some((an) => an.playState === "running" && an.effect?.target?.closest?.(".cc"));
+              await until(still, "the row settled after the drop");
+              const rowRects = () => order().slice(0, 6).map((k) => { const b = item(k).getBoundingClientRect(); return `${k}@${Math.round(b.left)},${Math.round(b.top)}`; }).join(" ");
+              const first = rowRects();
+              X.setExpanded(true);
+              await until(() => order().length > 6, "the rest revealed");
+              await until(still, "the reveal settled");
+              if (rowRects() !== first) fails.push(`the first row moved on the further pull: ${first} -> ${rowRects()}`);
+              X.setExpanded(false);
+              await until(() => order().length <= 6, "folded again");
               // Shut and opened again: still there.
               S.notif.value = false;
               await until(() => !document.querySelector(".notif-panel.shown"), "the panel shut", 5000).catch(() => {});

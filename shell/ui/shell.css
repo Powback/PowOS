@@ -2112,6 +2112,9 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .cc3-t.on .cc3-chip { background: var(--color-accent); color: var(--color-background); }
 .cc3-t:active .cc3-chip { filter: brightness(1.15); }
 .cc3-word { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The first pull shows the list's first six; the further pull reveals the rest under them, growing in. */
+.cc3-list:not(.whole) .cc3-cell:nth-child(n + 7) { display: none; }
+.cc3-list.whole .cc3-cell:nth-child(n + 7) { animation: cc-subs-in 220ms ease both; }
 .cc3-all { display: flex; flex-direction: column; gap: 14px; }
 .cc3-sec { display: flex; flex-direction: column; gap: 8px; animation: cc-subs-in 220ms ease both; }
 .cc3-head { margin: 0; padding: 0 2px; font: var(--text-small) var(--font); font-weight: normal; color: var(--color-muted); }

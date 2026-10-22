@@ -22,7 +22,7 @@ const EASE = "cubic-bezier(0.2, 0.9, 0.3, 1)";
 const panelEl = () => document.querySelector<HTMLElement>(".notif-panel");
 /** What moves: each row of tiles, and what's under the control center (the notifications' header and list). */
 const movers = () => [
-  ...document.querySelectorAll<HTMLElement>(".panel-body.together .cc-main > .cc-grid, .panel-body.together .cc ~ *, .panel-body.together .cc.v3 > :is(.cc3-quick, .cc3-all)"),
+  ...document.querySelectorAll<HTMLElement>(".panel-body.together .cc-main > .cc-grid, .panel-body.together .cc ~ *"),
 ];
 
 /** Following the finger: [dy] its travel, down to show (positive), up to fold (negative). */

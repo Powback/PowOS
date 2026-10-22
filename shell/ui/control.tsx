@@ -926,7 +926,9 @@ function Controls() {
   });
   sections[sections.length - 1].ts.push(...every.filter((t) => !placed.has(t)));
   const all = every.map((t) => t.id);
-  const row = ordered(pick(QUICK)).slice(0, 6);
+  // The curated default: the most used first, then every other control by kind; the user's order over it.
+  const quickTs = pick(QUICK);
+  const list = ordered([...quickTs, ...sections.flatMap((x) => x.ts).filter((t) => !quickTs.includes(t))]);
   const whole = ccExpanded.value;
   return (
     <div class={`cc v3 ${ccEditing.value ? "cc-editing" : ""} ${whole ? "whole" : ""}`}>
@@ -973,19 +975,13 @@ function Controls() {
         />
       </div>
       <MediaCard i={2} />
-      {whole ? (
-        // Every control in one grid, no sections (the user: "we don't need categories"), in the user's order - the
-        // sections' order where they haven't rearranged.
-        <div class="cc3-all cascade" style={{ "--i": 3 }}>
-          <div class="cc3-sec">
-            <ToggleGrid ts={ordered(sections.flatMap((x) => x.ts))} save={(ids) => saveOrder(all, ids)} />
-          </div>
-        </div>
-      ) : (
-        <div class="cc3-quick cascade" style={{ "--i": 3 }}>
-          <ToggleGrid ts={row} save={(ids) => saveOrder(all, ids)} class="row" />
-        </div>
-      )}
+      {/*
+        * One ordered list (the user's order; edit mode rearranges it): the first six are the first pull's row, and a
+        * further pull only reveals the rest under them - the row never moves (the user: icons mustn't reorganize).
+        */}
+      <div class={`cc3-list cascade ${whole ? "whole" : ""}`} style={{ "--i": 3 }}>
+        <ToggleGrid ts={list} save={(ids) => saveOrder(all, ids)} />
+      </div>
     </div>
   );
 }
