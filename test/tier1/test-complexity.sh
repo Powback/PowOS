@@ -7,6 +7,8 @@
 #   Kotlin (targets/android/app): targets/android/lint-complexity.sh - detekt, the same limits, baseline
 #     targets/android/app/config/detekt-baseline.xml (one id per function).
 #   Rust (apps/*/module): tools/lint/rust-complexity.sh - clippy, the same limits, tools/lint/rust-complexity-baseline.txt.
+#   Shell scripts (every tracked *.sh + bin/): build/complexity.py --check-length - 60 lines per function, old debt
+#     in build/function-length-budget.txt (a ratchet).
 #   Bash (bin/, lib/, build/): build/complexity.py --check (the CC ratchet, build/complexity-budget.txt).
 #
 # Needs shell/node_modules (npm ci in shell/) for the TS half; skipped (not failed) without it.
@@ -65,6 +67,11 @@ files=()   # bash 3.2 (the Mac): no mapfile
 while IFS= read -r f; do files+=("$f"); done < <( { grep -lE '^#!\s*(/usr)?/bin/(env +)?(ba)?sh\b' bin/* 2>/dev/null; git ls-files 'lib/**/*.sh' 'lib/*.sh' 'build/*.sh' 'sources/**/*.sh'; } | sort -u)
 if out=$(python3 build/complexity.py --check "${files[@]}" 2>&1); then ok "bash CC ratchet (build/complexity-budget.txt)"
 else bad "bash CC ratchet"; echo "$out" | tail -15 | sed 's/^/       /'; fi
+
+files=()
+while IFS= read -r f; do files+=("$f"); done < <( { git ls-files '*.sh' | grep -vE 'third_party|/reference/|/vendor/|node_modules'; grep -lE '^#!\s*(/usr)?/bin/(env +)?(ba)?sh\b' bin/* 2>/dev/null; } | sort -u)
+if out=$(python3 build/complexity.py --check-length "${files[@]}" 2>&1); then ok "shell function length <= 60 for new functions (build/function-length-budget.txt)"
+else bad "shell function length"; echo "$out" | grep -v "lower it" | tail -15 | sed 's/^/       /'; fi
 
 echo ""
 echo "== Results: $PASS passed, $FAIL failed =="

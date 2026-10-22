@@ -181,3 +181,12 @@ documentation.** I did the first and not the second.
 `shell/dev/lint-complexity.sh --apps --report 10` ranks the worst functions; `--prune` drops baseline entries a
 refactor paid off (commit the baseline with it). A baseline entry above HEAD's count fails: debt can be paid off, never added (no re-baselining past the
 limits).
+
+| Code | Tool | Limits | Baseline (only shrinks) | Enforced by |
+|---|---|---|---|---|
+| Kotlin: `targets/android/app` | detekt 1.23.8 CLI in the android builder image (`targets/android/lint-complexity.sh`, `app/config/detekt-complexity.yml`) | cyclomatic 10, cognitive 10, depth 3, 60 lines, 4 params | `app/config/detekt-baseline.xml` (one id per function) | `build-app.sh` (ship-apk), tier-1 |
+| Rust: `apps/*/module` | clippy in apps/build.sh's rust image (`tools/lint/rust-complexity.sh`, `tools/lint/clippy.toml`) | cognitive 10, 60 lines, 4 args, nesting 3 | `tools/lint/rust-complexity-baseline.txt` (per file+lint) | `apps/build.sh`, tier-1 |
+| Shell function length: every tracked `*.sh` + `bin/` | `build/complexity.py --check-length` | 60 lines | `build/function-length-budget.txt` | tier-1 (CI) |
+
+Raising any baseline needs `[baseline-reset]` and a reason in the commit message (`shell/dev/complexity-history.py`
+checks every commit that touched one).
