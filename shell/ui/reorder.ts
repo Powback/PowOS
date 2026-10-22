@@ -63,7 +63,11 @@ export function useReorder(
   } = {},
 ): Reorder {
   const box = useRef<HTMLElement>(null);
-  const [live, setLive] = useState<string[] | null>(null);
+  const [live, setLiveState] = useState<string[] | null>(null);
+  // The live order as of the last move, not the last render: moves come faster than renders on a busy phone, and one
+  // computed from a render behind put the item a slot off (the gate's cc-reorder under load, 2026-10-22).
+  const liveRef = useRef<string[] | null>(null);
+  const setLive = (v: string[] | null) => ((liveRef.current = v), setLiveState(v));
   const press = useRef<Press | null>(null);
   const swallow = useRef(false);
   const order = live ?? keys;
@@ -161,9 +165,10 @@ export function useReorder(
     // The release's own click (if any) is swallowed; one that never comes doesn't eat a later tap.
     swallow.current = true;
     window.setTimeout(() => (swallow.current = false), 0);
-    if (p.moved && live && live.join() !== keys.join()) {
+    const final = liveRef.current;
+    if (p.moved && final && final.join() !== keys.join()) {
       navigator.vibrate?.(10);
-      done(live);
+      done(final);
     } else if (!p.moved) opts.onSelect?.(p.key);
     opts.onLand?.();
     setLive(null);
@@ -214,7 +219,7 @@ export function useReorder(
       // The slot whose middle is nearest the finger is where it goes - measured from the laid-out boxes (rects, taken
       // before each FLIP), not mid-ease, and only when it's nearer than the carried one's own slot by a tenth of an
       // item: near a boundary it doesn't flip back and forth.
-      const now = live ?? order;
+      const now = liveRef.current ?? order;
       const mid = (r: DOMRect) => Math.hypot(r.left + r.width / 2 - p.x, r.top + r.height / 2 - p.y);
       let best = -1;
       let dist = Infinity;
