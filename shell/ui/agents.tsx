@@ -153,6 +153,20 @@ function Idle({ box }: { box: Box }) {
   );
 }
 
+/**
+ * Nobody at all, plainly: one muted line, no card - a small tile (3x2 and less: the card was most of it, a box in a
+ * box) and the desktop's home (the plate on a plate read as a nested grey box). The hint while it fits on the line.
+ */
+function IdleLine({ w, font }: { w: number; font: number }) {
+  // Monospace-safe: 0.62 em a character (the phone's font ~0.575).
+  const text = (HINT.length + 2) * 0.62 * font <= w ? HINT : "No agents";
+  return (
+    <div role="button" tabIndex={0} class="ag-idle-line muted" onPointerUp={takeTap} onClick={() => openAgents()}>
+      {text}
+    </div>
+  );
+}
+
 /** "3 running · 1 needs you" / "2 idle" / "none running". */
 function count(ids: string[]) {
   const states = ids.map((id) => agent(id)?.value.state);
@@ -171,8 +185,10 @@ function count(ids: string[]) {
  * counted in the head. Running ones first, then the sessions that finished lately (the spool keeps them a while), so
  * an idle home still shows what was done; nothing at all is one idle card. A one-row tile puts the head beside them.
  */
-export function AgentsPanel({ item: _item }: { item: HomeItem }) {
+export function AgentsPanel({ item }: { item: HomeItem }) {
   useAgents();
+  const [tw, th] = item.size ?? item.minSize ?? [4, 2];
+  const plain = document.documentElement.dataset.mode === "desktop" || (tw <= 3 && th <= 2);
   const ids = sessions.value;
   const done = agentIds.value
     .map((id) => agent(id)?.value)
@@ -219,7 +235,7 @@ export function AgentsPanel({ item: _item }: { item: HomeItem }) {
           {shown.map((id) => (
             <Card key={id} id={id} box={box} />
           ))}
-          {w > 0 && !all.length && <Idle box={box} />}
+          {w > 0 && !all.length && (plain ? <IdleLine w={w} font={font} /> : <Idle box={box} />)}
         </div>
       </div>
     </div>

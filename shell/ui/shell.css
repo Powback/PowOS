@@ -1839,6 +1839,8 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .ag-idle.big .ag-c1 { justify-content: center; }
 .ag-idle.big .ag-who { flex: none; }
 .ag-big { font-size: 2.2em; line-height: 1.2; color: var(--color-muted); }
+/* Nobody, on a small tile or the desktop (agents.tsx IdleLine): the line alone, no card - centred where the card was. */
+.ag-idle-line { display: flex; align-items: center; justify-content: center; text-align: center; min-height: 0; white-space: nowrap; cursor: pointer; }
 /* A one-row tile: the head beside the cards, its two parts stacked. */
 @container (max-height: 96px) {
   .ag-in { flex-direction: row; align-items: stretch; padding: 0.3em 0.4em 0.3em 0.7em; }
