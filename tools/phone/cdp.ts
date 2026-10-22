@@ -10,6 +10,14 @@
 // Read-only: nothing is drawn on the phone's screen (no paint flashing overlay).
 const [cmd = "pages", a1, a2] = process.argv.slice(2);
 const PORT = process.env.CDP_PORT ?? "9333";
+// A hard deadline for the whole run: an eval on a frozen/hidden WebView (or a promise that never settles) otherwise
+// waits forever - 2026-10-22 four such runs sat in bun containers for up to 31 h at ~80% of a Mac core each. Measuring
+// commands get their own duration + 60 s; anything else 120 s. CDP_TIMEOUT_S overrides (a deliberate long watch).
+{
+  const secs = Number([a1, a2].find((x) => x !== undefined && /^\d+$/.test(x)) ?? 0);
+  const limit = Number(process.env.CDP_TIMEOUT_S ?? (secs ? secs + 60 : 120));
+  setTimeout(() => (console.log(`cdp: no answer within ${limit} s - gave up (CDP_TIMEOUT_S to wait longer)`), process.exit(124)), limit * 1000);
+}
 
 type Page = { url: string; title: string; webSocketDebuggerUrl: string; type: string };
 const pages: Page[] = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).filter((p: Page) => p.type === "page");

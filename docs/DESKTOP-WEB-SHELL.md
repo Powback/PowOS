@@ -359,3 +359,35 @@ in a Fedora 44 container - `sources/powos-shell/dev/nested.sh`, because this Mac
 Not tested yet: a real Plasma session next to plasmashell (its own panel removed), a VM boot of the image, multiple
 screens, real GPU numbers. One `HACK:` (all of the process's windows are layer surfaces, `src/main.cpp`).
 
+
+## Windows over the PowOS home (plan, 2026-10-22)
+
+Board task `powos-home-as-the-desktop-linux-android-apps-as`. The desktop home (mode=desktop, `src/home.*`, a
+bottom-layer surface) is the desktop expert's; this is the windows side: apps as windows over it, a taskbar, focus,
+minimise, close, the switcher.
+
+**What exists**
+- Linux apps are KWin windows; the home is a bottom-layer surface, so every window is already over it.
+- Android apps as windows (the phone's rooted session): `powos-android-app <pkg>` gives the app its own Android virtual
+  display through scrcpy and shows it as a Wayland window (app_id `android-<pkg>`, KWin decorations, resize, input
+  back to the app). `powos-android-tasks` puts each app running on the phone's own screen in the taskbar as a
+  minimized stand-in window; activating the stand-in moves the app into a real window. The PowOS app writes an
+  `android-<pkg>.desktop` per app into `/run/powos-app/share/applications` (52 on the phone), which is on
+  powos-shell's `XDG_DATA_DIRS`: `apps.list` already lists them and `apps.launch` runs their Exec.
+- powos-shell: `Windows` over `TaskManager::TasksModel` (`windows.list/activate/minimize`, `windows.changed`,
+  coalesced 50 ms), granted `org_kde_plasma_window_management` by `org.powos.shell.desktop`; phase 0's `panel` role
+  (`src/panel.*`, `ui/panel.tsx`: a bottom layer surface with an exclusive zone, a launcher button and the window
+  list) - built, tested nested, not started on the phone (`POWOS_SHELL_ROLES` defaults to `home`).
+
+**What's missing (in order)**
+1. `windows.close` and an `android` flag on `DesktopWindow` (app id `android-*`; the stand-ins marked `standin`:
+   minimized placeholders, shown as "on the phone's screen").
+2. The taskbar on the phone's session, toggleable: `powos-desktop-shell taskbar on|off` (roles `home panel`).
+   Plasma's own panel stays until ours is proven; with both, ours sits above it (two exclusive zones).
+3. The taskbar's actions: click = activate / minimize the active one, middle click or the close button = close.
+   Android windows get a small badge.
+4. Proof: one Linux app (Konsole) and one Android app (a stand-in activated -> a scrcpy window) over the home, both in
+   the taskbar, recorded with Android's screencap of the activity (KWin's capture comes back empty on Anland) while
+   the user has the desktop open.
+5. Then: the switcher (Alt+Tab / a swipe) over `windows.*` with thumbnails (`KWin.ScreenShot2`), virtual desktops,
+   grouping, and replacing Plasma's panel.
