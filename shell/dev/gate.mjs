@@ -609,7 +609,9 @@ try {
               await until(still, "the reveal settled");
               if (rowRects() !== first) fails.push(`the first row moved on the further pull: ${first} -> ${rowRects()}`);
               X.setExpanded(false);
-              await until(() => order().length <= 6, "folded again");
+              await until(() => order().length <= 6, "folded again").catch((e) => {
+                throw new Error(`${e.message} (expanded ${X.ccExpanded.value}, .whole ${!!document.querySelector(".cc3-list.whole")}, shown ${order().length}, panel ${document.querySelector(".notif-panel")?.className})`);
+              });
               // Shut and opened again: still there.
               S.notif.value = false;
               await until(() => !document.querySelector(".notif-panel.shown"), "the panel shut", 5000).catch(() => {});
