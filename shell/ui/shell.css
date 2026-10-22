@@ -2278,3 +2278,35 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
   -webkit-appearance: none; appearance: none; width: 24px; height: 24px; border-radius: 50%;
   background: var(--color-foreground); box-shadow: var(--lift);
 }
+
+/*
+ * Picking several tiles in edit mode (ui/homeselect.ts): the rectangle drawn on empty space - a soft accent fill, no
+ * line - and a picked tile's mark, an accent dot with a tick at its corner. Both exist only while needed: nothing
+ * animates at rest.
+ */
+.marquee {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  border-radius: calc(var(--radius) / 2);
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+.home-tile.chosen::after {
+  content: "\2713";
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--color-accent);
+  color: var(--color-background);
+  box-shadow: var(--lift);
+}
+.home-tile.chosen > .tile { background-color: color-mix(in srgb, var(--color-accent) 14%, var(--glass-fill)); }

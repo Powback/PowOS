@@ -20,7 +20,8 @@ import { signal } from "@preact/signals";
 import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, selected, setDocked, type Carry } from "../state.ts";
 import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { powos } from "../bridge.ts";
-import { applyTrack, drawerOpen } from "./gesture.ts";
+import { applyTrack, drawerOpen, held } from "./gesture.ts";
+import { chosen, isChosen, marquee, MARQUEE_DWELL, partyCells, partyOf, startMarquee, toggleChosen } from "./homeselect.ts";
 import { OwlWidget } from "./owl.tsx";
 import { AppWidgetFace } from "./appwidget.tsx";
 import { Island } from "./island.tsx";
@@ -145,6 +146,27 @@ function aim(c: Carry): Aim | null {
   return others.some((i) => overlaps(shown(i), cell)) ? null : { cell, page: n };
 }
 
+/** The picked tiles carried with [c]'s item, and where each would land: null for a lone tile. */
+function partyAim(c: Carry): { party: HomeItem[]; cells: Map<string, Cell> | null; page: number } | null {
+  const n = pages.value[page.value];
+  const party = partyOf(c.item, itemsOn(c.item?.page ?? n));
+  if (!party) return null;
+  const g = geometry.value;
+  const lead = c.item!;
+  const x = Math.round((c.x - c.grab.x - g.pad) / g.cellW);
+  const y = Math.round((c.y - c.grab.y - g.pad) / g.cellH);
+  const others = itemsOn(n).filter((i) => !party.some((p) => p.key === i.key)).map(shown);
+  const cells = partyCells(party, { lead, cell: { ...lead.cell!, x, y } }, others, { columns: home.value.columns, rows: g.rows, shown });
+  return { party, cells, page: n };
+}
+
+/** Lets the carried party go: every tile to its cell (one after another: the host keeps one layout). */
+async function dropParty(t: NonNullable<ReturnType<typeof partyAim>>) {
+  if (!t.cells) return;
+  navigator.vibrate?.(10);
+  for (const [key, cell] of t.cells) await placeItem(key, cell, t.page);
+}
+
 /**
  * Where a new tile [wDp] x [hDp] goes (an Android widget from the picker): that many cells (at least one, at most the
  * grid), in the first free spot on the page on screen, else on a later page, else on a new page after the last; and
@@ -214,10 +236,12 @@ export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boo
     window.removeEventListener("pointercancel", up);
     clearInterval(turner);
     const c = carry.value;
-    if (ev.type !== "pointerup" || !c) {
+    // Picked tiles carried together: onto home only, all or none.
+    const party = c && ev.type === "pointerup" ? partyAim(c) : null;
+    if (ev.type !== "pointerup" || !c || party) {
       dockAim.value = null;
       carry.value = null;
-      return;
+      return party && dropParty(party);
     }
     // Let go over the dock: pinned there (dockdrop.ts) - not dropped on home under it.
     const docked = dropOnDock(c, ev.clientX, ev.clientY);
@@ -258,7 +282,8 @@ function useTilePress(item: HomeItem, onTap: () => void) {
       s.timer = window.setTimeout(() => {
         s.long = true;
         navigator.vibrate?.(10);
-        selected.value = item.key;
+        // One of several picked: they go together (partyAim), none of them selected on its own.
+        if (!partyOf(item, itemsOn(item.page))) selected.value = item.key;
         // Picking a tile up is editing home: the sheet and the empty page to move it to come with it.
         editing.value = true;
         startCarry({ item }, e, grab);
@@ -277,6 +302,8 @@ function useTilePress(item: HomeItem, onTap: () => void) {
       // An element of the widget took it (its own onTap, a terminal's focus).
       if (tapTaken(e)) return;
       if (selected.value) selected.value = null;
+      // Editing home, a tap picks the tile (or puts it back): picked ones move together, apps make a folder.
+      else if (editing.value) toggleChosen(item.key);
       else onTap();
     },
     onPointerCancel: cancel,
@@ -596,12 +623,13 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
     // A PowOS app's island takes its own taps (ui/island.tsx).
     // An Android widget's taps are its own (appwidget.tsx).
   });
-  const lifted = carry.value?.item?.key === item.key;
+  const c = carry.value;
+  const lifted = c?.item?.key === item.key || (!!c?.item && isChosen(item.key) && isChosen(c.item.key));
   const isSelected = selected.value === item.key;
   const b = box(shown(item));
   return (
     <div
-      class={`home-tile ${item.kind} ${isSelected ? "selected" : ""} ${lifted ? "lifted" : ""} ${join ? "joined" : ""}`}
+      class={`home-tile ${item.kind} ${isSelected ? "selected" : ""} ${isChosen(item.key) ? "chosen" : ""} ${lifted ? "lifted" : ""} ${join ? "joined" : ""}`}
       /* Its key: what finds it from outside (the pet perches on a tile by it - ui/petperch.ts). */
       data-key={item.key}
       style={{ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px`, ...join }}
@@ -728,9 +756,59 @@ function ResizeHandle({ item }: { item: HomeItem }) {
 function Preview() {
   const c = carry.value;
   if (!c) return null;
+  const party = partyAim(c);
+  if (party) return <>{[...(party.cells ?? new Map<string, Cell>()).entries()].map(([key, cell]) => <Spot key={key} cell={shownCell(party.party, key, cell)} />)}</>;
   const target = dockAim.value ? null : aim(c);
   const spot = target?.cell ? box(target.cell) : null;
   return spot && <div class="drop-spot" style={{ left: `${spot.left}px`, top: `${spot.top}px`, width: `${spot.width}px`, height: `${spot.height}px` }} />;
+}
+
+/** A picked tile's landing cell as it shows (apps and folders 1x1). */
+const shownCell = (party: HomeItem[], key: string, cell: Cell) => shown({ ...party.find((i) => i.key === key)!, cell });
+
+function Spot({ cell }: { cell: Cell }) {
+  const spot = box(cell);
+  return <div class="drop-spot" style={{ left: `${spot.left}px`, top: `${spot.top}px`, width: `${spot.width}px`, height: `${spot.height}px` }} />;
+}
+
+/** The selection rectangle being drawn on empty space (homeselect.ts): only while a finger draws it. */
+function Marquee() {
+  const r = marquee.value;
+  if (!r) return null;
+  const [l, t] = [Math.min(r.x0, r.x1), Math.min(r.y0, r.y1)];
+  return <div class="marquee" style={{ left: `${l}px`, top: `${t}px`, width: `${Math.abs(r.x1 - r.x0)}px`, height: `${Math.abs(r.y1 - r.y0)}px` }} />;
+}
+
+/** The other picked tiles carried with the lead one, where they sit beside it. */
+function PartyGhosts({ c }: { c: Carry }) {
+  const party = partyOf(c.item, itemsOn(c.item?.page ?? 0));
+  if (!party) return null;
+  const g = geometry.value;
+  const lead = box(shown(c.item!));
+  return (
+    <>
+      {party
+        .filter((i) => i.key !== c.item!.key)
+        .map((i) => {
+          const b = box(shown(i));
+          return (
+            <div class="carried" key={i.key} style={{ left: `${g.left + c.x - c.grab.x + b.left - lead.left}px`, top: `${g.top + c.y - c.grab.y + b.top - lead.top}px`, width: `${b.width}px`, height: `${b.height}px` }}>
+              <Face item={i} />
+            </div>
+          );
+        })}
+    </>
+  );
+}
+
+/** A carried tile's face: an app's icon, else its name on a plain face. */
+function Face({ item }: { item: HomeItem }) {
+  if (item.kind === "app") return <AppFace appKey={item.app!} label={item.label} />;
+  return (
+    <div class="tile widget-face focused">
+      <div class="widget-name">{item.name ?? "folder"}</div>
+    </div>
+  );
 }
 
 /**
@@ -743,20 +821,15 @@ export function Carried() {
   const g = geometry.value;
   const size = c.item?.resizable ? c.item.cell! : { w: 1, h: 1 };
   return (
-    <div
-      class="carried"
-      style={{ left: `${g.left + c.x - c.grab.x}px`, top: `${g.top + c.y - c.grab.y}px`, width: `${size.w * g.cellW}px`, height: `${size.h * g.cellH}px` }}
-    >
-      {c.app ? (
-        <AppFace appKey={c.app} />
-      ) : c.item!.kind === "app" ? (
-        <AppFace appKey={c.item!.app!} label={c.item!.label} />
-      ) : (
-        <div class="tile widget-face focused">
-          <div class="widget-name">{c.item!.name ?? "folder"}</div>
-        </div>
-      )}
-    </div>
+    <>
+      <div
+        class="carried"
+        style={{ left: `${g.left + c.x - c.grab.x}px`, top: `${g.top + c.y - c.grab.y}px`, width: `${size.w * g.cellW}px`, height: `${size.h * g.cellH}px` }}
+      >
+        {c.app ? <AppFace appKey={c.app} /> : <Face item={c.item!} />}
+      </div>
+      <PartyGhosts c={c} />
+    </>
   );
 }
 
@@ -793,34 +866,57 @@ const onEmpty = (e: Event) => {
  * Home's empty space: held, it's edit mode (state.ts editing - the home menu's sheet, an empty page to fill); a tap
  * ends a tile's edit, then edit mode, as on a stock launcher.
  */
+type EmptyPress = { x: number; y: number; timer: number; long: boolean; at: number; armed: number };
+
+/**
+ * Editing, a finger moved on empty space draws the selection rectangle (homeselect.ts) when it was held still first
+ * (then home's swipes hold off from that moment: gesture.ts held) or went up/down first; sideways at once it's the pages'.
+ */
+function marqueeFrom(p: EmptyPress, e: PointerEvent) {
+  const dwelt = performance.now() - p.at >= MARQUEE_DWELL;
+  if (!editing.value || !(dwelt || Math.abs(e.clientY - p.y) > Math.abs(e.clientX - p.x))) return;
+  const g = geometry.value;
+  const n = pages.value[page.value];
+  startMarquee(e, p, { origin: { left: g.left, top: g.top }, items: () => itemsOn(n), boxOf: (i) => box(shown(i)) });
+}
+
 function useEmptyPress() {
-  const s = useRef<{ x: number; y: number; timer: number; long: boolean } | null>(null);
+  const s = useRef<EmptyPress | null>(null);
   const cancel = () => {
     if (s.current) clearTimeout(s.current.timer);
+    if (s.current) clearTimeout(s.current.armed);
+    // Armed but never drawn: home's swipes are home's again.
+    if (s.current?.armed && !marquee.value) held.value = false;
     s.current = null;
   };
   return {
     onPointerDown: (e: PointerEvent) => {
       if (e.button || !onEmpty(e) || drawerOpen.value) return;
-      const p = { x: e.clientX, y: e.clientY, timer: 0, long: false };
-      p.timer = window.setTimeout(() => {
-        p.long = true;
-        navigator.vibrate?.(10);
-        selected.value = null;
-        editing.value = true;
-      }, LONG_PRESS_MS);
+      const p = { x: e.clientX, y: e.clientY, timer: 0, long: false, at: performance.now(), armed: 0 };
+      // Already editing: a hold arms the rectangle instead (nothing more to start).
+      if (editing.value) p.armed = window.setTimeout(() => (held.value = true), MARQUEE_DWELL);
+      else
+        p.timer = window.setTimeout(() => {
+          p.long = true;
+          navigator.vibrate?.(10);
+          selected.value = null;
+          editing.value = true;
+        }, LONG_PRESS_MS);
       s.current = p;
     },
     onPointerMove: (e: PointerEvent) => {
       const p = s.current;
-      // Moved: a swipe (pages, the drawer), not a hold.
-      if (p && !p.long && Math.hypot(e.clientX - p.x, e.clientY - p.y) > SLOP) cancel();
+      // Moved: a swipe (pages, the drawer), not a hold - or, editing, the rectangle.
+      if (!p || p.long || Math.hypot(e.clientX - p.x, e.clientY - p.y) <= SLOP) return;
+      marqueeFrom(p, e);
+      cancel();
     },
     onPointerUp: (e: PointerEvent) => {
       const p = s.current;
       cancel();
       if (!p || p.long || Math.hypot(e.clientX - p.x, e.clientY - p.y) > SLOP) return;
       if (selected.value) selected.value = null;
+      else if (chosen.value.length) chosen.value = [];
       else if (editing.value) editing.value = false;
     },
     onPointerCancel: cancel,
@@ -902,6 +998,7 @@ export function Pages() {
         ))}
       </div>
       <Preview />
+      <Marquee />
       <FolderPanel />
     </div>
   );

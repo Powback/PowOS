@@ -456,6 +456,99 @@ async function editSearchMoved() {
 }
 
 /**
+ * In the page, edit mode (the user, 2026-10-22): a finger held on empty space then dragged draws the selection
+ * rectangle and picks the two app tiles it touches; a quick sideways swipe there draws none (the page swipe's); out of
+ * edit mode none either. Mock home only (synthetic pointers on the headless page).
+ */
+async function marqueeCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const H = await importShim("./ui/homeselect.ts");
+  const G = await importShim("./ui/grid.tsx");
+  const fire = (type, x, y) => (type === "pointerdown" ? document.elementFromPoint(x, y) : document.querySelector(".pages")).dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true }));
+  const empty = (x, y) => document.elementFromPoint(x, y)?.matches?.(".page, .page-track, .pages");
+  const n = S.pages.value[S.page.value];
+  const apps = S.home.value.items.filter((i) => i.page === n && i.kind === "app" && i.cell);
+  const [a, b] = apps.sort((p, q) => p.cell.y - q.cell.y || p.cell.x - q.cell.x);
+  if (!b) return ["marquee: the mock's page has no two apps"];
+  const ra = document.querySelector(`.home-tile[data-key="${a.key}"]`).getBoundingClientRect();
+  const rb = document.querySelector(`.home-tile[data-key="${b.key}"]`).getBoundingClientRect();
+  const ch = G.geometry.value.cellH;
+  const start = [[ra.left + 4, Math.max(ra.bottom, rb.bottom) + ch / 2], [ra.left + 4, Math.min(ra.top, rb.top) - ch / 2]].find(([x, y]) => empty(x, y));
+  if (!start) return ["marquee: no empty spot beside the two apps to start from"];
+  const fails = [];
+  const draw = async ([x0, y0], [x1, y1], dwell) => {
+    fire("pointerdown", x0, y0);
+    await sleep(dwell);
+    for (let k = 1; k <= 6; k++) fire("pointermove", x0 + ((x1 - x0) * k) / 6, y0 + ((y1 - y0) * k) / 6);
+    await sleep(60);
+    const drawn = !!document.querySelector(".pages .marquee");
+    fire("pointerup", x1, y1);
+    await sleep(80);
+    return drawn;
+  };
+  const end = [rb.right - 4, rb.top + rb.height / 2];
+  if (await draw(start, end, 260)) fails.push("not editing: a drag on empty space drew a selection rectangle");
+  S.editing.value = true;
+  await sleep(300);
+  if (!(await draw(start, end, 260))) fails.push("edit mode: a held drag on empty space drew no selection rectangle");
+  if (document.querySelector(".pages .marquee")) fails.push("edit mode: the selection rectangle stays after the finger lifts");
+  if (!(H.chosen.value.includes(a.key) && H.chosen.value.includes(b.key))) fails.push(`edit mode: the rectangle over ${a.key} and ${b.key} picked [${H.chosen.value}]`);
+  if (document.querySelectorAll(".home-tile.chosen").length < 2) fails.push("edit mode: the picked tiles aren't marked");
+  const picked = H.chosen.value;
+  await draw(start, [start[0] + 90, start[1] + 2], 0);
+  if (H.chosen.value.join() !== picked.join()) fails.push("edit mode: a quick sideways swipe on empty space changed the picked tiles (it's the page swipe's)");
+  return fails;
+}
+
+/**
+ * In the page, after marqueeCheck (two apps picked): one of them long-pressed and dragged moves both by the same whole
+ * cells, the others stay; then a tap on one puts it back (unpicked).
+ */
+async function partyMoveCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const H = await importShim("./ui/homeselect.ts");
+  const G = await importShim("./ui/grid.tsx");
+  const fire = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 8, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true }));
+  const items = () => S.home.value.items.filter((i) => i.page === S.pages.value[S.page.value] && i.cell);
+  const party = items().filter((i) => H.chosen.value.includes(i.key));
+  if (party.length < 2) return ["group move: fewer than two picked tiles to move"];
+  const rows = G.geometry.value.rows;
+  const cellsOf = (c) => Array.from({ length: c.w * c.h }, (_, k) => `${c.x + (k % c.w)},${c.y + Math.floor(k / c.w)}`);
+  const taken = new Set(items().filter((i) => !party.includes(i)).flatMap((i) => cellsOf(i.resizable ? i.cell : { ...i.cell, w: 1, h: 1 })));
+  const fits = (dy) => party.every((i) => i.cell.y + dy < rows && !taken.has(`${i.cell.x},${i.cell.y + dy}`));
+  const dy = [2, 3, 4, 1].find(fits);
+  if (!dy) return ["group move: no free row below the picked tiles in the mock"];
+  const was = new Map(items().map((i) => [i.key, `${i.cell.x},${i.cell.y}`]));
+  const lead = document.querySelector(`.home-tile[data-key="${party[0].key}"]`);
+  const r = lead.getBoundingClientRect();
+  const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+  fire(lead, "pointerdown", x, y);
+  await sleep(520);
+  const pages = document.querySelector(".pages");
+  for (let k = 1; k <= 8; k++) fire(pages, "pointermove", x, y + (dy * G.geometry.value.cellH * k) / 8);
+  await sleep(60);
+  const ghosts = document.querySelectorAll(".carried").length;
+  fire(pages, "pointerup", x, y + dy * G.geometry.value.cellH);
+  await sleep(500);
+  const fails = ghosts < party.length ? [`group move: ${ghosts} carried tiles under the finger for ${party.length} picked`] : [];
+  const wanted = (i) => {
+    const [x0, y0] = was.get(i.key).split(",").map(Number);
+    return party.some((p) => p.key === i.key) ? `${x0},${y0 + dy}` : `${x0},${y0}`;
+  };
+  fails.push(...items().filter((i) => `${i.cell.x},${i.cell.y}` !== wanted(i)).map((i) => `group move by ${dy} rows: ${i.key} at ${i.cell.x},${i.cell.y}, expected ${wanted(i)}`));
+  if (document.querySelector(".carried, .pages .drop-spot")) fails.push("group move: a carried tile or drop spot stays after the drop");
+  const tile = document.querySelector(`.home-tile[data-key="${party[0].key}"]`);
+  const one = tile.getBoundingClientRect();
+  fire(tile, "pointerdown", one.left + 8, one.top + 8);
+  fire(tile, "pointerup", one.left + 8, one.top + 8);
+  await sleep(100);
+  if (H.chosen.value.includes(party[0].key)) fails.push("edit mode: a tap on a picked tile didn't put it back");
+  return fails;
+}
+
+/**
  * In the page: floating windows on home's pages (ui/desktops.ts) - the host stubbed (the mock has no floating
  * windows), two pages. A window opens on the page on screen; swiping pages hides the other page's windows
  * (floating.desktop's list); a window brought back from the dock (windows.raised) takes home to its page; one let go
@@ -872,6 +965,13 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `edit-search-${label}`, viewport).then((r) => whenReady(r, async () => [...(await r.page.evaluate(editSearchCheck)), ...(await r.page.evaluate(editSearchMoved))])));
+  // Edit mode: a rectangle drawn on empty space picks tiles, picked tiles move together (the user, 2026-10-22).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `home-select-${label}`, viewport).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(marqueeCheck);
+        return fails.length ? fails : r.page.evaluate(partyMoveCheck);
+      })));
   // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
   // side-by-side pages without moving a tile.
   if (process.env.SHELL_PAGES !== "0")
