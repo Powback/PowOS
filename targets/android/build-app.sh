@@ -33,7 +33,16 @@ want=/Projects${HERE#$HOME/Projects}/app
 link=$AAD/projects/powos
 [ "$(readlink "$link" 2>/dev/null)" = "$want" ] || { rm -f "$link"; ln -s "$want" "$link"; }
 stamp=$(mktemp)
-make -C "$AAD" build PROJECT=powos
+# The warm builder (tools/warm-builder.sh, unit gradle-warm-mac: a long-lived Gradle daemon - no cold JVM, Gradle and
+# Kotlin daemon per APK) when it starts and answers; android-app-dev's cold `make build` otherwise, or with
+# POWOS_COLD_BUILD=1. Both publish output/powos.apk + .ver + .pkg the same way.
+if [ "${POWOS_COLD_BUILD:-}" != 1 ] && "$HERE/tools/warm-builder.sh" start >/dev/null 2>&1; then
+  echo "build-app: warm builder"
+  "$HERE/tools/warm-builder.sh" build "$want" || { echo "build-app: the warm build failed - building cold" >&2; make -C "$AAD" build PROJECT=powos; }
+else
+  echo "build-app: cold build (android-app-dev make build)"
+  make -C "$AAD" build PROJECT=powos
+fi
 # HACK: android-app-dev's `make build` exits 0 when Gradle fails and leaves the previous output/powos.apk (seen
 # 2026-10-16: compile errors, "published" the old version code). Real fix: propagate the builder's exit status in
 # android-app-dev's Makefile. Until then: the APK must be newer than this run's start.
