@@ -1,0 +1,42 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<script type="importmap">{"imports":{"preact":"/v/preact.js","preact/hooks":"/v/preact-hooks.js","preact/jsx-runtime":"/v/preact-jsx-runtime.js","spacetimedb":"/v/spacetimedb.js"}}</script>
+</head><body style="margin:0">
+<script type="module">
+import { h, render } from "preact";
+import { useState, useEffect } from "preact/hooks";
+import Main from "/app/pages/main.js";
+const seed = JSON.parse(sessionStorage.getItem("seed") || '{"drawing":[],"stroke":[],"next":1}');
+const big = (r) => ({ ...r, id: BigInt(r.id), ...(r.drawing !== undefined ? { drawing: BigInt(r.drawing) } : {}) });
+const store = (window.store = { drawing: seed.drawing.map(big), stroke: seed.stroke.map(big), next: seed.next });
+window.calls = [];
+const L = new Set();
+const notify = () => L.forEach((f) => f());
+window.dump = () => JSON.stringify({ drawing: store.drawing, stroke: store.stroke, next: store.next }, (k, v) => (typeof v === "bigint" ? String(v) : v));
+const byKey = (key) => store.drawing.find((d) => d.key && d.key === key);
+const id = () => BigInt(store.next++);
+const reducers = {
+  async addStroke({ key, s }) {
+    calls.push("add_stroke");
+    let d = byKey(key);
+    if (!d) store.drawing.push((d = { id: id(), title: "Sketch", image: "", width: s.width, height: s.height, key, base: "" }));
+    if (!store.stroke.some((x) => x.drawing === d.id && x.uid === s.uid))
+      store.stroke.push({ id: id(), drawing: d.id, uid: s.uid, color: s.color, eraser: s.eraser, points: s.points, hidden: false });
+    notify();
+  },
+  async setHidden({ key, uids, hidden }) { calls.push("set_hidden"); const d = byKey(key); store.stroke.forEach((s) => s.drawing === d.id && uids.includes(s.uid) && (s.hidden = hidden)); notify(); },
+  async dropHidden({ key, uids }) { calls.push("drop_hidden"); const d = byKey(key); store.stroke = store.stroke.filter((s) => !(s.drawing === d.id && s.hidden && uids.includes(s.uid))); notify(); },
+  async adopt({ id, key }) { calls.push("adopt"); const d = store.drawing.find((x) => x.id === id); d.key = key; d.base = d.image; notify(); },
+  async thumb({ key, image }) { calls.push("thumb"); byKey(key).image = image; notify(); },
+  async remove({ id }) { calls.push("remove"); store.drawing = store.drawing.filter((d) => d.id !== id); notify(); },
+};
+const db = { conn: { reducers, db: { drawing: {}, stroke: {} } }, status: "connected", epoch: 1 };
+const host = {
+  useDb: () => db,
+  useRows: (_db, table) => {
+    const [, b] = useState(0);
+    useEffect(() => { const f = () => b((n) => n + 1); L.add(f); return () => L.delete(f); }, []);
+    return store[table].map((r) => ({ ...r }));
+  },
+};
+render(h(Main, { host, app: "local.sketch", base: "/app/", close: () => {} }), document.body);
+</script></body></html>

@@ -132,3 +132,16 @@ strip only - not the cause when a drag in a tile fails.
   app-src.sh push records the phone's md5s (a second push of the same file works). Device checks: queue them
   (tools/phone/verify/queue.sh add <task> <script>) and end the turn. Screencap ids: cover 4630946316123810436,
   inner 4630946704981769859 (a black frame = that display is off).
+
+## Sketch (local.sketch: apps/sketch, phone /home/powos/Projects/sketch, db local-sketch)
+- A drawing is vector data: `stroke` rows (x,y,width triples in the drawing's own space = the canvas's device px when
+  it was started: drawing.width x height), each written as it ends via an outbox (ui/lib/outbox.ts, kept in
+  localStorage while offline). Any resize resizes the backing store and repaints every stroke through a View fitted to
+  the drawing's extent (ui/lib/ink.ts): never crop. `image` is only the gallery/widget picture (reducer thumb); an older
+  raster drawing (key "") is adopted on its first new stroke: picture copied to `base`, drawn under the strokes.
+- Before 0.2.0 the page kept only canvas pixels (getImageData/putImageData at 0,0 on resize): rotating clipped the
+  drawing at the landscape height and the clipped raster was what got saved.
+- Test: apps/sketch/test/rotate.sh (headless, mock db). Device: tools/phone/verify/sketch-rotate.sh (fresh test
+  drawing, deleted after; window.__sketch is its read-only state). Ship: app-src.sh push the sources, then
+  `powos app install ~/Projects/sketch` there (module builds on the Mac builder over ssh); apps/build.sh doesn't bundle
+  pages or define __POWOS_SCHEMA__, so the phone's own install is the deploy path.

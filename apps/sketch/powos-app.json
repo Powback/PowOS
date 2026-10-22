@@ -1,0 +1,44 @@
+{
+  "id": "local.sketch",
+  "name": "Sketch",
+  "version": "0.2.0",
+  "description": "",
+  "icon": "icon.svg",
+  "ui": {
+    "dir": "out/ui/"
+  },
+  "page": {
+    "entry": "pages/main.js"
+  },
+  "module": {
+    "path": "module/",
+    "lang": "rust",
+    "database": "local-sketch",
+    "stdb": "2.12"
+  },
+  "backend": null,
+  "widgets": [
+    {
+      "id": "main",
+      "name": "Sketch",
+      "kind": "island",
+      "entry": "widgets/main.js",
+      "size": "4x2",
+      "minSize": "2x1"
+    }
+  ],
+  "surfaces": {
+    "launcher": true,
+    "desktop": true
+  },
+  "permissions": [],
+  "budget": {
+    "phone": {
+      "memMB": 16,
+      "idle": "unload"
+    },
+    "desktop": {
+      "memMB": 32
+    }
+  }
+}
