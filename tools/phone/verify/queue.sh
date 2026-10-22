@@ -245,6 +245,14 @@ EOS
       [ -n "$go" ] && echo "$(date +%T) go from the phone: $go ($N checks)"
       for j in "${sel[@]}"; do
         [ -f "$j" ] || continue
+        # An APK install waits for this window (ship-apk wrote wants-phone): yield before the next check - the install
+        # restarts the app anyway, and the rest run in the next window against the new build.
+        wp=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/wants-phone
+        if [ -f "$wp" ] && kill -0 "$(cat "$wp" 2>/dev/null)" 2>/dev/null; then
+          echo "$(date +%T) yielding the window to an APK install ($((N - k)) checks wait for the next window)"
+          status "" "{\"done\":true,\"summary\":$(jstr "Phone checks paused for an update install: $pass passed, $fail failed")}"
+          exit 4
+        fi
         # The checkout to origin's tip before EACH job, not just each window: a window can last an hour, and a check
         # pushed after it began was missing ("No such file", rc 126/127, 2026-10-23).
         verify_tree >/dev/null 2>&1 || true
@@ -317,7 +325,10 @@ EOS
       status "" "{\"done\":true,\"summary\":$(jstr "$sum")}" ) & wait $!
     rc=$?; [ $rc = 3 ] && echo "$(date +%T) no free window in ${WAIT_S:-7200}s - waiting again"
     [ $rc = 6 ] && { echo "$(date +%T) stopped from the phone - paused"; pause "Phone checks paused"; }
-    [ $rc = 7 ] && sleep "${NEED_POLL_S:-60}"   # every queued check waits for a ship: look again in a minute
+    [ $rc = 7 ] && sleep "${NEED_POLL_S:-60}"
+    # Yielded to an APK install: don't take the phone back until it's done (its wants-phone mark goes), 15 min at most.
+    wp=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/wants-phone
+    for _ in $(seq 90); do [ -f "$wp" ] && kill -0 "$(cat "$wp" 2>/dev/null)" 2>/dev/null || break; sleep 10; done   # every queued check waits for a ship: look again in a minute
   done
   RSTATE=idle phone_sh ':' >/dev/null
   rm -f "$Q/runner.pid"; rm -rf "$Q/runner.lock" ;;

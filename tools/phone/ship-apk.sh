@@ -59,7 +59,7 @@ until mkdir "$lock" 2>/dev/null; do
 done
 echo "$(git rev-parse --short HEAD) $(git branch --show-current) pid $$ $(date +%H:%M:%S)" > "$lock/who"
 t=""   # the origin-tip tree the newer shell files are gated and pushed from (below)
-trap 'rm -rf "$lock"; [ "$(cat "$sq/installing" 2>/dev/null)" = $$ ] && rm -f "$sq/installing"; [ -n "$t" ] && { git worktree remove --force "$t/tree" 2>/dev/null; rm -rf "$t"; }' EXIT
+trap 'rm -rf "$lock"; rm -f "$sq/wants-phone"; [ "$(cat "$sq/installing" 2>/dev/null)" = $$ ] && rm -f "$sq/installing"; [ -n "$t" ] && { git worktree remove --force "$t/tree" 2>/dev/null; rm -rf "$t"; }' EXIT
 # Queued ships coalesce: each one builds the origin tip it saw, so a ship whose HEAD is already IN the installed build
 # (another ship took the lock first and built a newer tip) has nothing left to install - 3 ships queued behind one idle
 # wait each rebuilt and reinstalled the same code (2026-10-22). Skip it instead of an ~8 min build + install.
@@ -132,6 +132,9 @@ if [ -z "$now" ]; then
     # idle or for the user to fold - 2026-10-22, twice, blocking every APK for 20+ min): warn and don't wait on it.
     vl="$HOME/.cache/powos-verify.lock"
     if [ -d "$vl" ] && [ $(( $(date +%s) - $(stat -f %m "$vl" 2>/dev/null || stat -c %Y "$vl") )) -lt 600 ]; then
+      # Ask the verify queue to yield: it ends its window before its next check (queue.sh, wants-phone), so the install
+      # waits one check, not the 10 min until the lock goes stale (01:56, 2026-10-23).
+      echo $$ > "$sq/wants-phone"
       sleep 15; waited=$((waited + 15)); continue
     fi
     [ -d "$vl" ] && echo "ship-apk: ignoring a stale verify lock (held 10+ min by: $(cat "$vl/who" 2>/dev/null)) - locks are for injected tests, not waits" >&2
