@@ -2,7 +2,9 @@
  * The desktop's panel (index.html?mode=panel): powos-shell shows it in a layer surface along each screen's bottom
  * edge, with the bar's height kept free of maximized windows (docs/DESKTOP-WEB-SHELL.md). A launcher button, then the
  * taskbar: one button per window - its icon and title, the active one marked, minimized ones dimmed. Clicking a
- * window activates it, or minimizes it when it's the active one. The launcher opens above the bar: the page asks the
+ * window activates it, or minimizes it when it's the active one; a middle click or its x closes it. An Android app's
+ * window carries a small phone mark (the phone's session: scrcpy windows, and stand-ins for apps still on the phone's
+ * own screen - clicking one moves the app into a window here). The launcher opens above the bar: the page asks the
  * host for a taller surface while it's open (panel.height) and gives it back when it closes.
  */
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
@@ -60,9 +62,26 @@ export function Panel() {
               class={`panel-task${w.active ? " active" : ""}${w.minimized ? " minimized" : ""}`}
               title={w.title}
               onClick={() => click(w)}
+              onAuxClick={(e) => e.button === 1 && powos.windows.close(w.id)}
             >
-              <img src={w.icon} alt="" width={24} height={24} draggable={false} />
-              <span>{w.title || w.appName}</span>
+              <span class="panel-task-icon">
+                <img src={w.icon} alt="" width={24} height={24} draggable={false} />
+                {w.android && <i class={`panel-task-android${w.onPhone ? " on-phone" : ""}`} title={w.onPhone ? "On the phone's screen" : "Android app"} />}
+              </span>
+              <span class="panel-task-title">{w.title || w.appName}</span>
+              {!w.onPhone && (
+                <span
+                  class="panel-task-close"
+                  role="button"
+                  aria-label={`Close ${w.title || w.appName}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    powos.windows.close(w.id);
+                  }}
+                >
+                  ×
+                </span>
+              )}
             </button>
           ))}
         </div>

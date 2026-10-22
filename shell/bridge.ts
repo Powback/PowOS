@@ -216,6 +216,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       list: () => call<DesktopWindow[]>("windows.list"),
       activate: (id) => call<boolean>("windows.activate", id),
       minimize: (id) => call<boolean>("windows.minimize", id),
+      close: (id) => call<boolean>("windows.close", id),
     },
     panel: { height: (px) => call("panel.height", px) },
     tasks: {
@@ -1024,6 +1025,8 @@ function mockWindows(events: Events, icon: (name: string) => string): Bridge["wi
     w("w2", "PowOS - Dolphin", "org.kde.dolphin", "Dolphin"),
     w("w3", "DESKTOP-WEB-SHELL.md - Kate", "org.kde.kate", "Kate"),
     w("w4", "Steam", "steam", "Steam", false, true),
+    { ...w("w5", "Chrome", "android-com.android.chrome", "Chrome"), android: true },
+    { ...w("w6", "Termux", "android-com.termux", "Termux", false, true), android: true, onPhone: true },
   ];
   const changed = () => events.emit("windows.changed", structuredClone(list));
   const find = (id: string) => list.find((x) => x.id === id);
@@ -1043,6 +1046,13 @@ function mockWindows(events: Events, icon: (name: string) => string): Bridge["wi
       target.minimized = !target.minimized;
       target.active = !target.minimized;
       if (target.minimized) for (const x of list) if (x !== target) x.active = false;
+      changed();
+      return true;
+    },
+    close: async (id) => {
+      const i = list.findIndex((x) => x.id === id);
+      if (i < 0) return false;
+      list.splice(i, 1);
       changed();
       return true;
     },

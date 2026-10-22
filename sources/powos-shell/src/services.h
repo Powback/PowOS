@@ -39,6 +39,8 @@ public:
     bool activate(const QString &id);
     /** Toggles: a minimized window comes back. */
     bool minimize(const QString &id);
+    /** Asks the window to close (the app may ask to save first). */
+    bool close(const QString &id);
     /** A window's icon when its theme has no name for it (served on powos://icon/_task/<id>). */
     QIcon icon(const QString &id) const;
 Q_SIGNALS:

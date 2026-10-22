@@ -106,6 +106,8 @@ QJsonValue Bridge::dispatch(const QString &method, const QJsonArray &a)
         return m_services.windows->activate(a.at(0).toString());
     if (method == QLatin1String("windows.minimize"))
         return m_services.windows->minimize(a.at(0).toString());
+    if (method == QLatin1String("windows.close"))
+        return m_services.windows->close(a.at(0).toString());
     if (method == QLatin1String("panel.height")) {
         Q_EMIT surfaceHeight(a.at(0).toInt());
         return QJsonValue::Null;

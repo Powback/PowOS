@@ -202,6 +202,10 @@ export interface DesktopWindow {
   icon: string;
   active: boolean;
   minimized: boolean;
+  /** An Android app's window (the phone's session: app id "android-<package>"). */
+  android?: boolean;
+  /** An Android app still on the phone's own screen: a stand-in - activating it moves the app into a window. */
+  onPhone?: boolean;
 }
 
 export interface NotificationList {
@@ -554,6 +558,8 @@ export interface Bridge {
     activate(id: string): Promise<boolean>;
     /** Minimizes it, or brings a minimized one back. */
     minimize(id: string): Promise<boolean>;
+    /** Asks it to close (the app may ask to save first); false: no such window. */
+    close(id: string): Promise<boolean>;
   };
   /**
    * The desktop panel's own surface (index.html?mode=panel, a layer surface along the screen's bottom edge): [px]
