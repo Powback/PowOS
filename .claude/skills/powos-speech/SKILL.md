@@ -71,6 +71,7 @@ gives `language`, `prompt`, `language`). `GET /health` returns `{"status":"ok",.
 - ASI connections: `dumpsys activity services com.google.android.as | grep AiAiSpeechRecognitionService`.
 
 ## Testing without the mic (the user may be using the phone)
+- Scripted: `tools/phone/verify/queue.sh add <task> tools/phone/verify/speech-test.sh [text] [mode]` (all of the below).
 - Server: `say -o /tmp/t.aiff "Testing one two three"; afconvert -f WAVE -d LEI16@16000 -c 1 /tmp/t.aiff /tmp/t.wav;
   curl -F file=@/tmp/t.wav -F model=whisper-1 http://stt.pow/v1/audio/transcriptions`.
 - On the phone (no mic, fine while the user is active): bridge `speech.test(name, mode)` calls
