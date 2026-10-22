@@ -273,9 +273,13 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
 :root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] { --chat-fill: 94%; }
 /* Home's widgets: their text is often small and plain - a touch more of the tint than the reference (4.0 -> 4.5:1). */
 .page .home-tile > .tile {
-  --glass-dim: 32%;
+  /* Measured over the crystal on the inner screen (the widgets' preview): 32% left plain text at 4.2:1, 42% reaches
+     4.5; secondary text in a widget is the foreground itself - its size says it's secondary, a see-through colour
+     there was 3.7:1. */
+  --glass-dim: 42%;
   --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
   --glass-fill: var(--text-fill);
+  --color-muted: var(--color-foreground);
 }
 :root[data-light="false"][data-wallpaper="light"] .page .home-tile > .tile, :root[data-light="true"][data-wallpaper="dark"] .page .home-tile > .tile { --glass-dim: 68%; }
 .dock { background: none; }
