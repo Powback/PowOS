@@ -26,19 +26,15 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   bf-frames.py: fps, frame-time p50/p95/p99/max, % at 16.7 ms, dup + stale-back frames (a frame equal to one 2-4
   back), window size vs screen, the activity in front. Artefacts ~/.cache/powos-verify/bfp-<date>/<mode>/.
 - KWin opens every X/Wayland toplevel (the game too) as its own Android task, `PowosWindowActivity` (WindowTasks);
-  never `am start andro.marchy.MainActivity` to "show the game": that's the PowOS home/AI page (the 2026-10-22 ab.sh
-  base/fifo recordings show the AI page, not Broforce; the grab-newkernel x11grab PNGs were all empty files).
+  never `am start andro.marchy.MainActivity` to "show the game": that's the PowOS home/AI page.
 - Output anland-1 runs at 119.97 Hz unfolded (2268x2440): a 60 fps game = every 2nd vsync. CPU governor: `uag`.
 - Steam launch-option prefixes run INSIDE the SLR_4 container under FEX: there is no xrandr/python3 there, only
   `python3.13` (libX11 via ctypes works); /home is shared, /usr is the runtime's.
-- `bf-run.sh` (~10 min, memory + SF pacing + KGSL stats). Queue it, don't wait for a window yourself:
-  `tools/phone/verify/queue.sh add <board-task> bf-run.sh` (result lands on the board task).
+- `bf-run.sh` (~10 min, memory + SF pacing + KGSL stats): `queue.sh add <board-task> bf-run.sh`, don't wait.
 - Grab Xwayland's copy of the window (independent of what's on screen): `ffmpeg -f x11grab -window_id <id> -i :0 -frames:v 1`.
-- Corruption metric (half-drawn frames): isolated dark pixels at game-pixel scale (holes.py in the 2026-10-22 run:
-  `c<30 && min4neighbours > c+50`); old kernel screenrecord: holes in ~57% of frames, ~8% heavily striped.
+- Corruption metric (half-drawn frames): isolated dark pixels, `c<30 && min4neighbours > c+50` (old kernel: ~57%).
 - Unity prefs: pfx `user.reg` `[Software\\Free Lives\\Broforce]` `Screenmanager Resolution Width/Height`, `Is Fullscreen mode`.
-- Steam login: a session crash can set `loginusers.vdf` AutoLogin 0 (logon "Service Unavailable") -> back to 1 with Steam off.
-- The cover pad (CoverPadActivity) starts in game mode when unfolded; it was the source of a session-killing ANR (fixed 425ac57).
+- Steam login: a session crash can set `loginusers.vdf` AutoLogin 0 ("Service Unavailable") -> 1 with Steam off.
 
 ## Freeze + instant resume (Steam and its game; docs/UNIFIED-SLEEP.md, lib/apps/powos-sleep-gui)
 - cgroup v2 freezer works on the phone's 5.15 (/sys/fs/cgroup/powos/sleep/<key>, powos-sleepd as root); SIGSTOP not used.
@@ -49,6 +45,12 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   AppId=<id>` -> dbus-send `dev.powos.Sleep.Gui.Resume <id>` (thaw + raise via one-shot KWin script) and exit 0; Steam
   never sees the launch. So a Broforce left running makes the next `bf-start.sh` a resume, not a cold start:
   bf-stop.sh first for cold-start/Proton checks.
+- Android launch paths (all resume, none cold-starts a running game): drawer/home/shortcuts = Runtime.openRooted ->
+  `powos-open-task --app-id <.desktop id> -- steam steam://rungameid/<id>`; games widget = Runtime.launch(command)
+  routes a rungameid command (rooted) to openAsTask with `--app-id steam_app_<id>` (no desktop pop). powos-open-task
+  parses the appid (command or steam_app_<id> id), calls Resume first and shows the window it names as a task; else
+  matches class steam_app_<id> (Proton's WM_CLASS) and waits 150 s for a cold start's window. Recents = the task's
+  focus -> KWin activates -> sleep-gui thaws on focus (no code). Check: `bf-launchpaths.sh` (installs powos-open-task).
 - CLI: `powos game <name|appid> freeze|thaw|status` (lib/game.sh, any installed Steam game; not the mods registry);
   `powos-sleep-gui resume|sleep <x>`. Watcher log `/run/powos-app/powos-sleep-gui.log` ("resumed", "frozen in").
 - Ship: build-pkgs.sh steam needs out/pkgs/{fex-emu,gtk2}*.pkg (copy from a worktree that has them) and
@@ -70,7 +72,7 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   Fix: `targets/android/steam/unity-screen` as the game's Steam LaunchOptions (`~/.local/share/powos/unity-screen
   %command%`) appends `-screen-fullscreen 1 -screen-width W -screen-height H` = the X root size at launch. Set with
   `unity-screen --install <appid>` / `--remove` in the session with Steam OFF (it rewrites localconfig.vdf on exit;
-  backup localconfig.vdf.powos-bak). Installed for 274190 on 2026-10-22. A fold/rotate mid-game still isn't followed.
+  backup localconfig.vdf.powos-bak). Installed for 274190. Fold/rotate mid-game NOT followed (X window resized, game not).
 
 ## Kernel (targets/android/kernel, docs/PHONE-KERNEL-CONTAINERS.md)
 - Build: `STOCK_BOOT=<stock boot_b.img> JOBS=12 ./build-containers-kernel.sh` (~2 h; the full-LTO link is single-threaded
@@ -94,5 +96,5 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 ## Xwayland package
 - `targets/android/build-pkgs.sh xwayland-kgsl` (BUILD_ON_ROOTFS: needs targets/android/out/powos-rootfs.tar.gz).
   Install: copy the .pkg.tar.xz into PowOS, `pacman -U` (root.sh); takes effect at the next session start.
-  Smoke test without restarting the session: extract the binary and run it as `:7 -rootless` in the session.
+  Smoke test without restarting the session: run the extracted binary as `:7 -rootless` in the session.
 - Patches 0001-0004 lfdevs (Andromarchy pin), 0005/0006 Present hangs, 0007 leak, 0008 fence wait. HACK in 0007 (registry).

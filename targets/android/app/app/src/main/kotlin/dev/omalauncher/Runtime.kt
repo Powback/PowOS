@@ -656,11 +656,22 @@ class Runtime(
             return
         }
         Log.i(TAG, "launch: $command")
+        // A Steam game (the games widget's steam://rungameid/<appid>), rooted: like the drawer, its window in its own
+        // task - powos-open-task resumes a running (maybe frozen) game at once and shows its window, a cold start's
+        // window when it comes; the desktop only where it can't be a task.
+        val game = if (rooted) STEAM_GAME.find(command)?.groupValues?.get(1) else null
         // Rooted mode: it opens on the PowOS desktop (RootedGuest), which comes to the front to show it.
-        if (rooted) showDesktop()
+        if (rooted && game == null) showDesktop()
         thread(name = "guest-launch", isDaemon = true) {
             val log: (String) -> Unit = { Log.i(TAG, "[${command.take(24)}] $it") }
-            val code = runCatching { if (rooted) RootedGuest.runOwn("exec $command", log) else proot.run("exec $command", log) }.getOrElse { -1 }
+            val code =
+                runCatching {
+                    when {
+                        game != null -> RootedGuest.openAsTask("steam_app_$game", null, command, ::showDesktop, log)
+                        rooted -> RootedGuest.runOwn("exec $command", log)
+                        else -> proot.run("exec $command", log)
+                    }
+                }.getOrElse { -1 }
             Log.i(TAG, "exited $code: $command")
             onExit()
         }
@@ -668,6 +679,7 @@ class Runtime(
 
     companion object {
         private const val TAG = "runtime"
+        private val STEAM_GAME = Regex("""steam://rungameid/(\d+)""")
         private const val SETUP_DONE = "setup_done"
         private const val SYSTEM_THEME_KEY = "system_theme_applied"
     }

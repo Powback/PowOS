@@ -16,8 +16,9 @@ widget "games" {
   let hero = first(games)
   let tints = [accent, magenta, cyan, green, orange, blue, yellow, red]
 
-  // Launching: app() starts `steam steam://rungameid/...` as a graphical app - it hands the game to the running Steam
-  // (or starts Steam) - and brings the PowOS desktop up, where the game opens.
+  // Launching: app() starts `steam steam://rungameid/...` - rooted, through powos-open-task (Runtime.launch): a game
+  // that already runs (maybe frozen with Steam) is resumed and its window shown as its own task at once; otherwise
+  // it hands the game to the running Steam (or starts Steam) and shows the game's window when it comes.
 
   component Ago(stamp, size = 11) {
     let d = now - stamp
