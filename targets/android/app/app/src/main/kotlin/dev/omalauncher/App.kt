@@ -22,6 +22,8 @@ class App : Application() {
             PowosAiChat.startWake(this, File(filesDir, "run"))
             // Which agents run and what they do (the Agents view): the spool PowOS's agentsd writes, and the notification.
             AgentsSpool.start(this, File(filesDir, "run"))
+            // The verify queue's status pill while it tests on the phone (tools/phone/verify/queue.sh).
+            dev.omalauncher.shell.VerifyRun.start(this, File(filesDir, "run"))
         }
     }
 }

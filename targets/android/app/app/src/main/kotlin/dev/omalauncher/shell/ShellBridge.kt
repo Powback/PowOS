@@ -281,6 +281,8 @@ class ShellBridge(
             "agents.takeOpen" -> dev.omalauncher.AgentsSpool.takeOpen()
             "agents.answer" -> dev.omalauncher.AgentsSpool.answer(a.getString(0), a.getString(1), a.optString(2).takeIf { it.isNotEmpty() && !a.isNull(2) })
             "agents.message" -> dev.omalauncher.AgentsSpool.message(a.getString(0), a.getString(1))
+            // "Test now" on the AI page: the verify queue's runner (on the Mac) takes that task's phone checks now.
+            "verify.go" -> VerifyRun.go(a.getString(0))
             "agents.interrupt" -> dev.omalauncher.AgentsSpool.interrupt(a.getString(0))
             "speech.start" -> listen(a.optBoolean(0))
             "speech.stop" -> speech.stop()
