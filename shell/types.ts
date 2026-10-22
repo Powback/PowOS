@@ -202,6 +202,8 @@ export interface AppWindow {
   minimised: boolean;
   /** On a home page not on screen (ui/desktops.ts): out of sight until home shows that page. */
   away?: boolean;
+  /** The shell's key of the PowOS (Linux) app it shows ("l:..."): its task is PowOS's own, so pkg says nothing. */
+  app?: string;
 }
 
 export interface RecentTask {

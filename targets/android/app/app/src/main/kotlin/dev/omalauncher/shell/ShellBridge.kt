@@ -27,6 +27,7 @@ import dev.omalauncher.ui.Palette
 import dev.omalauncher.widgets.runtime.MediaListener
 import dev.omalauncher.ui.Speech
 import dev.omalauncher.linux.Agent
+import dev.omalauncher.linux.matches
 import dev.omalauncher.linux.newAppCommand
 import dev.omalauncher.widgets.newWidgetCommand
 import androidx.compose.ui.graphics.Color
@@ -696,13 +697,34 @@ class ShellBridge(
         return keys.filter { it in have }
     }
 
-    /** The floating windows, top-most first: { id, pkg, label, minimised, away }. */
+    /**
+     * The floating windows, top-most first: { id, pkg, label, minimised, away, app }. app is the shell's key of a PowOS
+     * (Linux) app shown in the window (its task is PowOS's own, PowosWindowActivity: pkg says nothing), else absent.
+     */
     private fun windows(): JSONArray =
         JSONArray(
             dev.omalauncher.system.WindowFrames.running.value.map {
-                JSONObject().put("id", it.id).put("pkg", it.pkg ?: "").put("label", it.label).put("minimised", it.minimised).put("away", it.away)
+                val linux = linuxApp(it.id, it.pkg)
+                JSONObject().put("id", it.id).put("pkg", it.pkg ?: "").put("label", linux?.name ?: it.label).put("minimised", it.minimised).put("away", it.away)
+                    .apply { if (linux != null) put("app", "l:${linux.id}") }
             },
         )
+
+    /** The PowOS app whose window task [id] shows (a task of PowOS's own package only), or null. */
+    private fun linuxApp(
+        id: Int,
+        pkg: String?,
+    ): dev.omalauncher.linux.LinuxApp? {
+        if (pkg != context.packageName) return null
+        val appId = andro.marchy.WindowTasks.appIdOfTask(id)?.takeIf { it.isNotEmpty() } ?: return null
+        return runtime.linuxApps.firstOrNull { it.matches(appId) }
+    }
+
+    /** A PowOS app's floating window, if it has one (shown, minimised or on another page): brought back, its task. */
+    private fun restoreLinux(key: String): Int? {
+        val w = dev.omalauncher.system.WindowFrames.running.value.firstOrNull { linuxApp(it.id, it.pkg)?.let { a -> "l:${a.id}" } == key } ?: return null
+        return w.id.takeIf { dev.omalauncher.system.WindowFrames.current?.restore(it) == true }
+    }
 
     private fun android(key: String) = runtime.androidApps.apps.firstOrNull { "a:${it.key}" == key }
 
@@ -716,7 +738,10 @@ class ShellBridge(
                     val id = dev.omalauncher.system.WindowFrames.current?.restoreApp(app.component.packageName)
                     if (id != null) emit("windows.raised", id) else runtime.androidApps.open(app)
                 }
-            key.startsWith("l:") -> runtime.linuxApps.firstOrNull { "l:${it.id}" == key }?.let { runtime.launch(it) }
+            // A PowOS app's floating window likewise (unfolded: its task floats, WindowTasks), else it opens.
+            key.startsWith("l:") ->
+                restoreLinux(key)?.let { emit("windows.raised", it) }
+                    ?: runtime.linuxApps.firstOrNull { "l:${it.id}" == key }?.let { runtime.launch(it) }
         }
         // The strip shows it first next time home shows (the Compose launcher settles on stop, likewise).
         runtime.usage.settle()

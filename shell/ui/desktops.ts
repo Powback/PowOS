@@ -12,7 +12,7 @@
 import { batch, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { AppWindow } from "../types.ts";
-import { desktopPages, launch, page, pages, windows } from "../state.ts";
+import { byKey, desktopPages, launch, page, pages, windows } from "../state.ts";
 
 const STORE = "home.windows";
 /** Window ids kept for closed tasks at most (folded, the list is empty but the windows aren't gone). */
@@ -130,17 +130,28 @@ export async function startDesktops() {
  * A tap on an app in the dock, taskbar style (the user, 2026-10-22): its window open and in front (the top-most one
  * showing) goes into the dock (minimised); minimised, on another page or under another window, it comes back in front
  * (the host restores rather than launches: ShellBridge.launch, then "windows.raised"); no window, the app launches.
- * Linux (KWin) windows: HOOK - the same rule once the Plasma backend lists them to the web launcher (planned in
- * docs/DESKTOP-WEB-SHELL.md; Runtime.launch brings a running one to the front meanwhile).
+ * A PowOS (Linux) app's window floats as its own task too (WindowTasks): the same rule, by its app key (appOf).
+ * Linux windows still on the Plasma desktop: HOOK - the same rule once the Plasma backend lists them to the web
+ * launcher (planned in docs/DESKTOP-WEB-SHELL.md; Runtime.launch brings a running one to the front meanwhile).
  */
 export async function dockTap(key: string) {
-  const pkg = key.startsWith("a:") ? key.slice(2).split("/")[0] : null;
   const front = windows.value.find((w) => !w.minimised && !w.away);
-  if (pkg && front?.pkg === pkg && powos.floating?.minimise) {
+  if (front && isOf(front, key) && powos.floating?.minimise) {
     const done = await powos.floating.minimise(front.id).catch(() => false);
     if (done) return;
   }
   await launch(key);
+}
+
+/** Whether window [w] is app [key]'s: a PowOS (Linux) app's by its key, an Android app's by its package. */
+function isOf(w: AppWindow, key: string): boolean {
+  if (w.app) return w.app === key;
+  return key.startsWith("a:") && key.slice(2).split("/")[0] === w.pkg;
+}
+
+/** The app key window [w] is of: a PowOS (Linux) app's own ("l:...", the host says), else its Android package's. */
+export function appOf(w: AppWindow): string | undefined {
+  return w.app ?? [...byKey.value.keys()].find((k) => k.startsWith(`a:${w.pkg}/`));
 }
 
 /** The top of home's bottom bar (search pill, dock): the lowest edge a window may reach, told the host on change. */

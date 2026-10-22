@@ -27,7 +27,7 @@ import { EditSheet } from "./editsheet.tsx";
 import { AiView, PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
 import { Recents } from "./recents.tsx";
-import { dockTap } from "./desktops.ts";
+import { appOf, dockTap } from "./desktops.ts";
 import { footBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
 import { byKey, carry, dock, dockAim, dockDrag, drawer, editing, folder, menu, page, pullKind, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
@@ -179,8 +179,8 @@ function DockRecents({ count }: { count: number }) {
 const windowed = computed(() => {
   const out = new Map<string, string>();
   for (const w of windows.value) {
-    const key = [...byKey.value.keys()].find((k) => k.startsWith(`a:${w.pkg}/`));
-    if (key && !out.has(key)) out.set(key, w.minimised ? "minimised" : "running");
+    const key = appOf(w);
+    if (key && byKey.value.has(key) && !out.has(key)) out.set(key, w.minimised ? "minimised" : "running");
   }
   return out;
 });

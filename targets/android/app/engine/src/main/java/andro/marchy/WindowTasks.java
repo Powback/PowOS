@@ -34,6 +34,17 @@ public final class WindowTasks {
     private static final int CONTROL_MAX_PAYLOAD = 4096;
 
     private static volatile OutputStream out;
+    /** What KWin said it understands ("caps": " size export-new "); empty for an older KWin, or not connected. */
+    private static volatile String caps = "";
+    /** The "export-new" state KWin has (null: not told on this connection). */
+    private static volatile Boolean exportNewSent;
+
+    /**
+     * Whether apps float now (the app module's AppWindows.floating, set by Runtime: the unfolded home). KWin is told
+     * ("export-new"), so every new application window opens as its own task - a floating window - not on the desktop
+     * nothing shows then.
+     */
+    public static volatile java.util.function.Predicate<Context> floating = null;
     private static Thread thread;
     /** The window tasks on screen, by surface id: KWin's "close" and "title" reach them here. */
     static final Map<Integer, PowosWindowActivity> tasks = new ConcurrentHashMap<>();
@@ -45,9 +56,36 @@ public final class WindowTasks {
             return;
         Context app = context.getApplicationContext();
         String socket = SessionService.daemonSocket(app);
+        // Folded and unfolded: KWin told whether new windows float.
+        app.registerComponentCallbacks(new android.content.ComponentCallbacks() {
+            @Override
+            public void onConfigurationChanged(android.content.res.Configuration c) {
+                tellExportNew(app);
+            }
+
+            @Override
+            public void onLowMemory() {}
+        });
         thread = new Thread(() -> run(app, socket), "window-tasks");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    /** Whether KWin understands [cap] (its "caps" line on this connection). */
+    static boolean kwinCan(String cap) {
+        return caps.contains(" " + cap + " ");
+    }
+
+    /** KWin told whether apps float now ("export-new 1/0"), when it changed or KWin hasn't been told. */
+    static void tellExportNew(Context context) {
+        java.util.function.Predicate<Context> f = floating;
+        if (!kwinCan("export-new") || f == null)
+            return;
+        boolean on = f.test(context);
+        if (Boolean.valueOf(on).equals(exportNewSent))
+            return;
+        exportNewSent = on;
+        sendLine("export-new\t" + (on ? 1 : 0));
     }
 
     /** The control channel reached the display daemon. */
@@ -63,6 +101,8 @@ public final class WindowTasks {
                     throw new IOException("display socket " + socket + " is not this app's daemon");
                 OutputStream o = s.getOutputStream();
                 o.write(frame(CTRL_MSG_CONTROL_HELLO, le32(CONTROL_ROLE_APP)));
+                caps = "";
+                exportNewSent = null;
                 out = o;
                 Log.i(TAG, "control channel up");
                 read(context, s.getInputStream());
@@ -102,6 +142,13 @@ public final class WindowTasks {
             showAndroidApp(context, f[1]);
             return;
         }
+        if (f[0].equals("caps")) {
+            // KWin's first line on a connection: what it understands (an older one says nothing).
+            caps = f.length > 1 ? " " + f[1] + " " : "";
+            exportNewSent = null;
+            tellExportNew(context);
+            return;
+        }
         int id;
         try {
             id = Integer.parseInt(f.length > 1 ? f[1] : "");
@@ -112,14 +159,15 @@ public final class WindowTasks {
         switch (f[0]) {
             case "open": {
                 // A document task per surface id: its own card in Recents, split screen, floating window.
+                boolean fullScreen = f.length > 4 && f[4].equals("fullscreen");
                 Intent i = new Intent(context, PowosWindowActivity.class)
                         .setData(Uri.parse("powos-window://" + id))
                         .putExtra(PowosWindowActivity.EXTRA_APP_ID, f.length > 2 ? f[2] : "")
                         .putExtra(PowosWindowActivity.EXTRA_TITLE, f.length > 3 ? f[3] : "")
                         // The application went full screen (a game, Steam Big Picture): an immersive task.
-                        .putExtra(PowosWindowActivity.EXTRA_FULLSCREEN, f.length > 4 && f[4].equals("fullscreen"))
+                        .putExtra(PowosWindowActivity.EXTRA_FULLSCREEN, fullScreen)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
-                context.startActivity(i);
+                context.startActivity(i, fullScreen ? null : floatingOptions(context));
                 break;
             }
             case "title": {
@@ -137,6 +185,25 @@ public final class WindowTasks {
             default:
                 Log.w(TAG, "unknown control message: " + line);
         }
+    }
+
+    /**
+     * On the unfolded home (the PowOS desktop) a PowOS window's task floats like an Android app's - the same launch
+     * options (AppWindows: freeform, cascaded, above home's bar), so it gets PowOS's frame, the dock, the home pages and
+     * the running dot too. Every way one opens comes here: the launcher and dock (powos-open-task -> KWin's show),
+     * `android-request`, a window KWin exports. Folded, or a full-screen application (a game): null, full screen.
+     */
+    private static android.os.Bundle floatingOptions(Context context) {
+        java.util.function.Function<Context, android.os.Bundle> options = AndroidRequests.openOptions;
+        return options != null ? options.apply(context) : null;
+    }
+
+    /** The PowOS app id (desktop id / app id KWin gave "open") of the window shown in Android task [taskId], or null. */
+    public static String appIdOfTask(int taskId) {
+        for (PowosWindowActivity a : tasks.values())
+            if (a.getTaskId() == taskId)
+                return a.getIntent().getStringExtra(PowosWindowActivity.EXTRA_APP_ID);
+        return null;
     }
 
     /**
@@ -161,10 +228,15 @@ public final class WindowTasks {
 
     /** Sends {@code <verb>\t<id>} to KWin; dropped while the channel is down (KWin knows nothing to act on then). */
     static void send(String verb, int id) {
+        sendLine(verb + "\t" + id);
+    }
+
+    /** Sends one control line (tab-separated fields) to KWin; dropped while the channel is down. */
+    static void sendLine(String text) {
         OutputStream o = out;
         if (o == null)
             return;
-        byte[] line = (verb + "\t" + id).getBytes(StandardCharsets.UTF_8);
+        byte[] line = text.getBytes(StandardCharsets.UTF_8);
         try {
             synchronized (WindowTasks.class) {
                 o.write(frame(CTRL_MSG_CONTROL, line));

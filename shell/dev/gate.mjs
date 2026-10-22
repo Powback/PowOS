@@ -1042,6 +1042,11 @@ async function dockTapCheck() {
     S.windows.value = [win(101, { away: true }), win(102)];
     await tap("a:gate.app101/.Main", "launch a:gate.app101/.Main", "its window on another page");
     await tap("a:gate.app103/.Main", "launch a:gate.app103/.Main", "no window");
+    // A PowOS (Linux) app's window: its task is PowOS's own package, the host names the app (app: "l:...").
+    S.windows.value = [win(104, { pkg: "com.powos.app", app: "l:org.kde.dolphin" })];
+    await tap("l:org.kde.dolphin", "min 104", "a Linux app's window in front");
+    S.windows.value = [win(104, { pkg: "com.powos.app", app: "l:org.kde.dolphin", minimised: true })];
+    await tap("l:org.kde.dolphin", "launch l:org.kde.dolphin", "a Linux app's window minimised");
     // The dock's own cells tap through dockTap: a pinned app's cell, its window in front, minimises it.
     const cell = document.querySelector('.dock .app[data-key^="a:"]');
     if (!cell) fails.push("no Android app in the dock to tap");
