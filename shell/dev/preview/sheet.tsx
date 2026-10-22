@@ -108,6 +108,17 @@ function pageStorage(seed: Record<string, string>) {
   for (const [k, v] of Object.entries(seed)) stored.set(k, v);
 }
 
+function sheetProblems(sh: HTMLElement): string[] {
+  const r = sh.getBoundingClientRect();
+  const body = sh.querySelector<HTMLElement>(".wsheet-body");
+  const bad: string[] = [];
+  if (r.top < 0 || r.bottom > innerHeight + 0.5) bad.push(`detail sheet off the screen (${Math.round(r.top)}-${Math.round(r.bottom)} of ${innerHeight} px)`);
+  const last = body?.lastElementChild?.getBoundingClientRect();
+  const scrolls = !!body && body.scrollHeight > body.clientHeight + 1 && getComputedStyle(body).overflowY === "auto";
+  if (last && body && last.bottom > body.getBoundingClientRect().bottom + 0.5 && !scrolls) bad.push("detail sheet's last row cut off (no scroll to it)");
+  return bad;
+}
+
 function Island({ spec, cell }: { spec: Spec; cell: Cell }) {
   const [C, setC] = useState<ComponentType<any> | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -129,6 +140,12 @@ function Island({ spec, cell }: { spec: Spec; cell: Cell }) {
       const ev = (type: string) => new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 9, pointerType: "touch", isPrimary: true, clientX: r.left + 20, clientY: r.top + r.height / 2, buttons: type === "pointerdown" ? 1 : 0 });
       el.dispatchEvent(ev("pointerdown"));
       window.setTimeout(() => el.dispatchEvent(ev("pointercancel")), 700);
+      // The sheet it opened must fit the screen: inside it top to bottom, the last row reachable (shown, or the body
+      // scrolls to it) - a sheet running under the dock cut the last room off on the phone.
+      window.setTimeout(() => {
+        const sh = document.querySelector<HTMLElement>(".wsheet");
+        if (face.current) face.current.dataset.pvSheet = sh ? sheetProblems(sh).join("\n") : "the long press opened no sheet";
+      }, 1500);
     }, 300);
     return () => clearTimeout(t);
   }, [C]);
@@ -406,6 +423,7 @@ export function check(EMPTY = 0.12, COVER = 0.25) {
       if (bw >= 1 && cs.borderTopStyle !== "none" && !/rgba\(0, 0, 0, 0\)|transparent/.test(cs.borderTopColor)) problems.push("hard border");
     }
     // Other visible children (an element painted nothing but has size, e.g. a fixed-size Box) don't count as ink.
+    if (face.dataset.pvSheet) problems.push(...face.dataset.pvSheet.split("\n"));
     for (const t of clipped) problems.push(`clipped text "${t}"`);
     for (const t of cut) if (!clipped.has(t)) problems.push(`row cut in half "${t}"`);
     if (face.querySelector(".island-offline.alone")) {
