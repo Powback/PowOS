@@ -14,6 +14,13 @@ description: How the PowOS phone shell's design is built and checked - the desig
 - Home's blur is the native compositor (ui/nativeglass.ts regions, native-blur's). The in-page model (the page drawing
   the wallpaper + CSS backdrop-filter) was reverted: system.glass gave no picture on OxygenOS (screenshot file 0 bytes,
   mirror black). Don't retry it without a phone screencap the manager approves.
+- Edge to edge: home's window is fillxfill and the page is the full screen (innerHeight*dpr = the display), so the
+  wallpaper is behind the bars. What covered it was the decor's own bar views (Theme.Material: black
+  navigationBarBackground, 45 px folded / 0 unfolded; statusBarBackground 126 px) drawn OVER the WebView; ShellActivity
+  sets both bar colours transparent + contrast off. Diagnose with `dumpsys activity top` (grep BarBackground: V = drawn).
+  Device check: tools/phone/verify/nav-strip.sh cover|inner (bottom-rows pixel check).
+- Scrollbars: the phone's WebView ignores `scrollbar-width` (CSS.supports false); theme.css hides
+  `::-webkit-scrollbar` globally and the WebView's View scrollbars are off (ShellHost).
 - Assist (mode=assist) is the exception: the screen 1:1, its panel solid, no glass.
 
 ## Frost (PowOS AI, its pull-up panel, the control center: shell.css "frost v2", theme.css --frost-*)

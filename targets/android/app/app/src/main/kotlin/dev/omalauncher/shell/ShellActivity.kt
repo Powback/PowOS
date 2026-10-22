@@ -48,6 +48,16 @@ class ShellActivity : Activity() {
         // after a reboot or an update the launcher is often the first thing that runs. Already running: nothing.
         if (andro.marchy.RootMode.enabled()) andro.marchy.SessionService.start(this)
         window.setDecorFitsSystemWindows(false)
+        // Edge to edge for real: the page (and the wallpaper behind it) fills the whole screen, the bars draw nothing.
+        // Theme.Material's defaults left the decor's navigationBarBackground black over the gesture-nav strip (a black
+        // row under the dock, folded) and statusBarBackground over the status bar; the page keeps its own insets.
+        @Suppress("DEPRECATION")
+        run {
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
         host = ShellHost(this, this, runtime)
         setContentView(host.web)
         // The switcher is a layer of this page: the gestures and the overview button reach it here.

@@ -63,6 +63,9 @@ class ShellHost(
     val web: WebView =
         WebView(context).apply {
             setBackgroundColor(Color.TRANSPARENT)
+            // No View scrollbars over the page (a faint line at the right edge); the page scrolls on its own.
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             // Its tiles kept rasterized while it's out of sight (home behind an app): a swipe up shows it from its
