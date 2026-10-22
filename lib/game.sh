@@ -282,6 +282,12 @@ Verbs (thin wrappers — each dispatches to the subsystem that owns it):
   adopt                   Absorb a manually-modded game dir
   export | import         Portable mod list
   play                    Launch the game
+  freeze                  Freeze it now with Steam (0% CPU, kept in RAM)  → powos-sleep-gui (unified sleep)
+  thaw                    Thaw it and raise its window (what launching it does while it runs)
+  status                  (a Steam game outside the mod registry) running / frozen, CPU of its tree
+
+A Steam game out of sight for 15 s is frozen with Steam on its own and launching it again resumes it at once
+(units/phone/steam.json "games": "pause", docs/UNIFIED-SLEEP.md); freeze/thaw do it by hand.
 
 Names: any spelling the mod manager accepts — canonical id (gtav), alias
 (gta, gta5), or Steam appid (3240220). 'bf3' / 'vu' routes to Venice
@@ -318,10 +324,19 @@ cmd_game() {
         return $?
     fi
 
+    # A running Steam game's sleep (any installed Steam game, by name or appid - the mod registry not needed).
+    case "${1:-}" in
+        freeze|thaw) _game_sleep_dispatch "$name" "$@"; return $? ;;
+    esac
+
     _game_need_mods
 
     local id
     id="$(game_resolve "$name" 2>/dev/null || true)"
+    if [[ -z "$id" ]] && [[ "${1:-status}" == status ]] && _game_steam_appid "$name" >/dev/null; then
+        _game_sleep_dispatch "$name" status
+        return $?
+    fi
     if [[ -z "$id" ]]; then
         perr "Unknown game: $name"
         echo
@@ -389,6 +404,87 @@ cmd_game() {
 
         *) perr "Unknown: powos game $id $verb"; game_help; return 1 ;;
     esac
+}
+
+# ── A running Steam game's sleep (unified sleep: lib/apps/powos-sleep-gui, docs/UNIFIED-SLEEP.md) ──────────────
+# The facade owns nothing here: the session's watcher (powos-sleep-gui) freezes and thaws; this finds the game.
+
+# Steam's library folders (the default one and every "path" in libraryfolders.vdf).
+_game_steam_libs() {
+    local s="${XDG_DATA_HOME:-$HOME/.local/share}/Steam"
+    echo "$s/steamapps"
+    awk -F'"' '$2 == "path" {print $4 "/steamapps"}' "$s/steamapps/libraryfolders.vdf" 2>/dev/null
+}
+
+# <name or appid> -> appid of an installed Steam game ("broforce", "Broforce", "274190").
+_game_steam_appid() {
+    local q="$1" lib f
+    [[ "$q" =~ ^[0-9]+$ ]] && { echo "$q"; return 0; }
+    while read -r lib; do
+        for f in "$lib"/appmanifest_*.acf; do
+            [[ -f "$f" ]] || continue
+            if awk -F'"' -v q="$(tr '[:upper:]' '[:lower:]' <<<"$q")" \
+                '$2 == "name" {n = tolower($4); gsub(/[^a-z0-9]/, "", n); g = q; gsub(/[^a-z0-9]/, "", g)
+                 exit !(n == g || index(n, g) == 1)}' "$f"; then
+                f=${f##*appmanifest_}; echo "${f%.acf}"; return 0
+            fi
+        done
+    done < <(_game_steam_libs | sort -u)
+    return 1
+}
+
+# The game's launcher process (Steam's reaper SteamLaunch AppId=<appid>), if it runs.
+_game_steam_reaper() { pgrep -f "SteamLaunch AppId=$1( |\$)" | head -1; }
+
+_game_sleep_dispatch() {
+    local name="$1" verb="$2" appid reaper r
+    appid="$(_game_steam_appid "$name")" || { perr "No installed Steam game called $name"; return 1; }
+    reaper="$(_game_steam_reaper "$appid")"
+    case "$verb" in
+        freeze)
+            [[ -n "$reaper" ]] || { perr "$name ($appid) isn't running."; return 1; }
+            r="$(powos-sleep-gui sleep "$appid")" || return 1
+            case $r in
+                *pending*) pok "$name ($appid): its window minimized, frozen with Steam in a moment" ;;
+                *'"ok": true'*) pok "$name ($appid): frozen with Steam" ;;
+                *) perr "$name ($appid): not frozen: $r"; return 1 ;;
+            esac ;;
+        thaw)
+            [[ -n "$reaper" ]] || { perr "$name ($appid) isn't running (start it: steam steam://rungameid/$appid)."; return 1; }
+            r="$(powos-sleep-gui resume "$appid")" || return 1
+            pok "$name ($appid): $r" ;;
+        status)
+            if [[ -z "$reaper" ]]; then
+                echo "$name ($appid): not running"
+                return 0
+            fi
+            local cg pids t0 t1
+            cg="$(cat "/proc/$reaper/cgroup" 2>/dev/null)"
+            pids="$(_game_tree "$reaper")"
+            t0="$(_game_ticks $pids)"; sleep 2; t1="$(_game_ticks $pids)"
+            printf '%s (%s): running, %s; its tree %s processes, %s%% of a core (2 s)\n' "$name" "$appid" \
+                "$([[ $cg == *powos/sleep/* ]] && echo "FROZEN with Steam (${cg##*/sleep/})" || echo awake)" \
+                "$(wc -w <<<"$pids" | tr -d ' ')" "$(( (t1 - t0) * 100 / $(getconf CLK_TCK) / 2 ))" ;;
+    esac
+}
+
+_game_tree() {
+    local -a todo=("$1") out=()
+    local p
+    while (( ${#todo[@]} )); do
+        p=${todo[0]}; todo=("${todo[@]:1}"); out+=("$p")
+        todo+=($(pgrep -P "$p"))
+    done
+    echo "${out[*]}"
+}
+
+_game_ticks() {
+    local n=0 p f
+    for p in "$@"; do
+        f=$(cat "/proc/$p/stat" 2>/dev/null) || continue
+        f=${f##*) }; set -- $f; n=$(( n + ${12} + ${13} ))
+    done
+    echo "$n"
 }
 
 # Source the module that provides FN on demand, then call it. Keeps `powos

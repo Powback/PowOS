@@ -23,6 +23,21 @@ export LD_PRELOAD="$L/aarch64/libsysvipc-emu.so $L/i386/libsysvipc-emu.so $L/x86
 # helpers are all started by it. Running = the pid Steam keeps in ~/.steam/steam.pid is alive and is Steam's client (by
 # name, pgrep found this script: its process, and the subshells it forks, are called steam too).
 steam_pid=$(cat "$HOME/.steam/steam.pid" 2>/dev/null)
+# Instant start: a game launch (steam://rungameid/<appid>) for a game this Steam already runs - kept alive, frozen
+# with Steam while out of sight (units/phone/steam.json "games": "pause") - thaws it and raises the game's window
+# (powos-sleep-gui's Resume) instead of handing Steam a launch it has nothing to do for. Not running, or no watcher
+# (no PowOS session sleep): the launch goes on to Steam as always.
+case " $* " in
+  *" steam://rungameid/"*)
+    appid=${*##*steam://rungameid/}; appid=${appid%% *}
+    case $appid in *[!0-9]* | '') appid= ;; esac
+    if [ -n "$appid" ] && [ -d "/proc/${steam_pid:-0}" ] && pgrep -f "SteamLaunch AppId=$appid( |\$)" >/dev/null 2>&1; then
+      case $(dbus-send --session --print-reply=literal --reply-timeout=3000 --dest=dev.powos.Sleep /Gui \
+               dev.powos.Sleep.Gui.Resume string:"$appid" 2>/dev/null) in
+        *'"running": true'*) exit 0 ;;
+      esac
+    fi ;;
+esac
 # Instant resume: unified sleep freezes a Steam that's out of sight (units/phone/steam.json, docs/UNIFIED-SLEEP.md).
 # Thaw it first, so what this launch hands to it (a game, the window) reaches a running Steam instead of waiting on a
 # frozen one. dbus-send, not powos-sleep-gui wake: a C program, no Python start-up on the way to the window.

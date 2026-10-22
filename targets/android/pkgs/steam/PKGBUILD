@@ -3,7 +3,7 @@
 # Arch's steam PKGBUILD) stays as the STEAM_X86=1 fallback, through FEX.
 pkgname=steam
 pkgver=1.0.0.87
-pkgrel=19
+pkgrel=20
 pkgdesc="Steam: Valve's native ARM64 client (games through FEX) - PowOS phone build"
 arch=(any)
 url=https://steampowered.com/

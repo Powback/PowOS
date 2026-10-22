@@ -9,7 +9,7 @@ One config surface and one status command cover every kind of workload. Containe
 | app backend (native, sandbox) | `powos-sleepd` (root, system tier) | idle for the manifest's `autosleep.idle` (default 5m): no TCP connection to its listen ports and under 1% CPU (the supervisor's measure) | a connection to its port, `powos sleep wake <id>` | cgroup v2 freezer (pause), plus MADV_PAGEOUT (hibernate), or the supervisor stopping it (stop) |
 | GUI app in Plasma | `powos-sleep-gui` (session), frozen by `powos-sleepd` | no window focused for 10 min (`POWOS_SLEEP_GUI_IDLE`) | focus, raise or un-minimize (KWin), any D-Bus message addressed to it, `powos sleep wake` | cgroup v2 freezer |
 | the desktop shell (plasmashell, phone) | `powos-sleep-gui`, frozen by `powos-sleepd` (that process alone, though it's session core) | PowOS off screen for 15 s (`POWOS_SLEEP_DESKTOP_IDLE`, `off` = never) | PowOS back on screen, any D-Bus message to it (asleep again a minute later), 2 s every 5 min to read its Wayland socket | cgroup v2 freezer |
-| Steam (a GUI app with a unit) | the same | out of sight 15 s (unit `steam`: no game, no disk I/O, started over 2 min ago) | its launch paths (`/usr/bin/steam`, `powos-open-task`) before showing it, focus, PowOS back on screen | cgroup v2 freezer, the client's whole tree |
+| Steam and the game it runs (a GUI app with a unit) | the same | out of sight 15 s (unit `steam`: no disk I/O, Steam and the game started over 2 min ago) | its launch paths (`/usr/bin/steam`; a game's launch resumes the running game), `powos game <name> thaw`, focus, PowOS back on screen | cgroup v2 freezer, the client's whole tree (the game in it) |
 | container | `powos-autosleep` | see §13 there | a connection, `powos containers wake` | freezer or stop |
 | SpacetimeDB database | not slept one by one (see below) | - | - | the supervisor's whole-server idle restart |
 | shell island (app widget) | the shell (`shell/apps/onscreen.ts`) | off screen | on screen | its own pause; reported to status |
@@ -54,13 +54,16 @@ On the phone, focus also needs PowOS on screen. The PowOS app's display daemon p
 |---|---|---|
 | `autosleep.idle` | `15s` | out of sight for 15 s (unfocused, minimized, closed to the tray, PowOS off screen), then 5 s sampled, then frozen |
 | `processes[].pidfile` | `~/.steam/steam.pid` | the app is the client's whole tree: its windows belong to `steamwebhelper`, but the freeze takes `steam` and every helper at once, and it stays tracked with no window (tray) |
-| `sleepBusy.cmdline` | `SteamLaunch` | a game running (Steam's `reaper SteamLaunch AppId=...`) keeps Steam awake; the game's own windows are never frozen (games are a later phase) |
+| `sleepBusy.cmdline` | `SteamLaunch` | marks a game's launcher (Steam's `reaper SteamLaunch AppId=...`); without `games` a running game keeps Steam awake |
+| `sleepBusy.games` | `pause` | a game sleeps with Steam: its windows count as Steam's (the game focused = Steam focused), the whole tree freezes at once (client and game share memory and IPC: never one without the other), the game's own audio stream doesn't keep it awake, and it gets the start grace from its own launcher's start (Proton's start) |
 | `sleepBusy.io` | `disk` | busy = disk reads+writes over 256 KB/s (downloads, updates, installs); not `rchar/wchar`, which counts CEF's IPC |
 | `sleepBusy.cpu` | `false` | its idle CPU (~20% of a core, the webhelper) is what freezing saves, so it doesn't keep it awake |
-| `sleepBusy.startGrace` | `2m` | never frozen in its first 2 min: updating, logging in, and handing over the game it was started for |
+| `sleepBusy.startGrace` | `2m` | never frozen in its first 2 min, nor in a game's: updating, logging in, handing over the game it was started for, Proton starting it |
 
 Thawing comes before showing, on every way in:
 - `/usr/bin/steam` (the games widget, the launcher's Exec, `steam steam://...`): a Steam whose `/proc/<pid>/cgroup` says `powos/sleep` is woken first with `dbus-send ... dev.powos.Sleep.Gui.Wake string:steam` (`powos sleep wake <pid>` as the fallback), then the launch goes to the running Steam instead of waiting on a frozen one.
+- A game's launch while it runs (`steam steam://rungameid/<appid>`: the games widget, `.desktop` entries): `/usr/bin/steam` asks the watcher's `Resume <appid>` (dbus-send), which thaws Steam and the game and raises the game's window through a one-shot KWin script; the launch is not handed to Steam. Not running (or no watcher): the launch goes to Steam as always. That is the instant start: no Proton cold start.
+- `powos game <name> freeze|thaw|status` (lib/game.sh, any installed Steam game by name or appid): the watcher's `Sleep` (its focused windows minimized first, then frozen at once) and `Resume`; status = running/frozen and its tree's CPU.
 - `powos-open-task` (an app tapped in the PowOS app's launcher): the existing window's process is woken before KWin exports it as a task.
 - Focus (the taskbar, a task brought back from Recents, PowOS coming back on screen) thaws it as for any GUI app.
 - `powos sleep wake steam` thaws through powos-sleepd, which names the app to the watcher in its next reply (`"woken"`), so the watcher counts it as awake and lets it sleep again when idle.
