@@ -96,9 +96,10 @@ minimal change and tell them.
 - **Agents never ship themselves.** Commit, rebase, push to origin/worktree-powos-multiplatform, then
   `tools/phone/ship.sh request --note "plain words for the user"` (or `--silent`) and END YOUR TURN - nothing else.
   One ship service (launchd `com.powos.ship-runner`, unit ship-runner-mac, its own checkout
-  .claude/worktrees/ship-runner) waits until origin had no new commit for 60 s, then ships origin's TIP once:
-  ship-apk.sh when Kotlin/APK inputs changed since the installed build, else push.sh of exactly the shell files that
-  differ from what's live; every request's note in ONE notification. `ship.sh status` shows requests, what's live and
+  .claude/worktrees/ship-runner) ships origin's TIP in two parts: push.sh of exactly the shell files that differ
+  from what's live 10 s after the last commit, also while an APK is out; and, when Kotlin/APK inputs changed since the
+  installed build, ship-apk.sh 60 s after it, beside the loop in its own checkout (ship-runner-apk). The notes of what
+  each part makes visible go in ONE notification. `ship.sh status` shows requests, what's live and
   the last ships; a failed ship mails coder and waits for a fix on origin. ship-apk.sh and push.sh refuse to run
   outside the service; `--direct` (from origin's tip, logged to ~/.cache/powos-ship-queue/direct.log) is only for an
   emergency the user asked for. Why: per-agent ships raced (2026-10-23: ~6 APKs + ~15 pushes a night; an APK from an

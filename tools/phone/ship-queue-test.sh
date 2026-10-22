@@ -8,7 +8,7 @@ set -uo pipefail
 src=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/ship-queue-test.XXXXXX")
 export HOME=$T/home PHONE=$T/phone LOG=$T/log GIT_CONFIG_GLOBAL=$T/gitconfig SHIP_DIR=$T/home/.cache/powos-ship-queue
-export SHIP_QUIET_S=3 SHIP_POLL_S=1
+export SHIP_QUIET_S=3 SHIP_QUIET_SHELL_S=1 SHIP_POLL_S=1
 unset POWOS_SHIP_SERVICE SHIP_AGENT
 Q=$SHIP_DIR
 stop_runner() { local p; p=$(cat "$Q/runner.lock/pid" 2>/dev/null) && kill "$p" 2>/dev/null; pkill -f "$T/" 2>/dev/null; }
@@ -52,9 +52,15 @@ mkdir -p tools/phone shell/dev shell/ui targets/android/app
 cp "$src/tools/phone/ship.sh" "$src/tools/phone/ship-apk.sh" tools/phone/; cp "$src/shell/push.sh" shell/
 mv tools/phone/ship-apk.sh tools/phone/ship-apk.real.sh
 # The APK ship: records itself (tree, flags, service mark) and the installed commit, as the real one does.
+# It holds the ship lock, as the real one does, and waits while $HOME/hold-apk exists (a build / an idle wait).
 cat > tools/phone/ship-apk.sh <<'EOF'
 #!/bin/bash
+l=$HOME/.cache/powos-ship.lock; mkdir "$l" && echo "apk pid $$ x" > "$l/who"
+echo "APKSTART $(git rev-parse HEAD)" >> "$LOG"
+while [ -e "$HOME/hold-apk" ]; do sleep 0.3; done
+until mkdir "$l/phone" 2>/dev/null; do sleep 0.3; done
 echo "APK $(git rev-parse HEAD) svc=${POWOS_SHIP_SERVICE:-} $*" >> "$LOG"; git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"
+rm -rf "$l"
 EOF
 cat > shell/dev/gate.sh <<'EOF'
 #!/bin/bash
@@ -92,13 +98,26 @@ grep -q '"note":"A is new; B is new"' "$PHONE/files/shell-push.json" && ok "note
 [ "$(cat "$Q/live" 2>/dev/null)" = "$t1" ] && ok "live = origin's tip" || bad "live record"
 grep -q '^APK' "$LOG" && bad "an APK for shell-only" || ok "no APK for shell-only"
 
-# 2. Kotlin changed + a shell file: one APK ship from the tip, as the service, no separate shell push.
+# 2. Kotlin changed + a shell file: the shell file goes at once, then one APK ship from the tip, as the service.
 : > "$LOG"
 land targets/android/app/Main.kt 'class Main2' "kt"; land shell/ui/a.tsx 'export const a = 2' "a2"; req --silent; t2=$(tip)
 drained && ok "APK request served" || bad "APK request left"
 grep -q "^APK $t2 svc=1 --silent" "$LOG" && ok "ship-apk from the tip, by the service" || { bad "APK call"; cat "$LOG"; }
-grep -q '^PUSH' "$LOG" && bad "a shell push beside the APK" || ok "no shell push beside the APK"
+[ "$(grep -m1 -E '^(PUSH|APK )' "$LOG")" = PUSH ] && ok "shell pushed before the APK" || { bad "no shell push first"; cat "$LOG"; }
 [ "$(cat "$HOME/.cache/powos-installed-commit")" = "$t2" ] && [ "$(cat "$Q/live")" = "$t2" ] && ok "installed + live recorded" || bad "installed record"
+
+# 2b. While an APK builds / waits for idle, a later shell fix is pushed at once and its request is done; the Kotlin
+#     request waits for the install.
+: > "$LOG"; touch "$HOME/hold-apk"
+land targets/android/app/Main.kt 'class Main3' "kt3"; req --note "K"; tk=$(tip)
+for _ in $(seq 20); do grep -q '^APKSTART' "$LOG" && break; sleep 1; done
+land shell/ui/b.tsx 'export const b = 2' "b2"; req --note "B quick"; t3=$(tip)
+for _ in $(seq 15); do grep -q 'b = 2' "$PHONE/files/shell/ui/b.tsx" && break; sleep 1; done
+grep -q 'b = 2' "$PHONE/files/shell/ui/b.tsx" && ! grep -q '^APK ' "$LOG" && ok "shell pushed beside the APK ship" || { bad "shell waited for the APK"; cat "$LOG" "$Q/runner.log"; }
+grep -q '"note":"B quick"' "$PHONE/files/shell-push.json" && ok "its note alone" || { bad "note"; cat "$PHONE/files/shell-push.json"; }
+[ "$(ls "$Q"/*.req 2>/dev/null | wc -l | tr -d ' ')" = 2 ] && ok "both requests wait for the install (B sits on K)" || { bad "requests left: $(ls "$Q"/*.req 2>/dev/null)"; }
+rm -f "$HOME/hold-apk"
+drained && grep -q "^APK $tk svc=1 --note K\$" "$LOG" && ok "APK installed with K's note only, requests done" || { bad "APK not done"; cat "$LOG" "$Q/runner.log"; }
 
 # 3. The verify lock holds a shell ship; a deleted file is reset on the phone.
 : > "$LOG"; mkdir "$HOME/.cache/powos-verify.lock"; echo "verify-queue test" > "$HOME/.cache/powos-verify.lock/who"

@@ -134,6 +134,13 @@ if [ -z "$now" ]; then
   echo "ship-apk: $i2"
   [ -n "$ok" ] || { echo "ship-apk: the user stayed active for ${SHIP_WAIT_MIN:-60} min - NOT installing (APK built, kept)"; exit 4; }
 fi
+# The install and its re-pushes own the phone. The ship service pushes shell BESIDE this ship (during the build and the
+# idle wait) and holds $lock/phone while one push runs: wait for it, then hold it to the end (the trap removes $lock).
+# One left over 10 min (a killed push) is taken over.
+until mkdir "$lock/phone" 2>/dev/null; do
+  [ $(( $(date +%s) - $(stat -f %m "$lock/phone" 2>/dev/null || stat -c %Y "$lock/phone" 2>/dev/null || date +%s) )) -gt 600 ] && rm -rf "$lock/phone"
+  sleep 2
+done
 start=$(tools/phone/adb.sh shell 'date +%m-%d\ %H:%M:%S' | tr -d '\r')
 docker run --rm --network container:powos-vadb -v "$PWD/targets/android":/ta:ro -v "$apk":/powos.apk:ro --entrypoint bash \
   android-app-dev-android-builder:latest -c 'export PATH=$PATH:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/35.0.0
