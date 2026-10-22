@@ -38,10 +38,15 @@ away() { hcall windows.list "[]" "l=>(l.find(w=>w.pkg==='$PKG')||{away:'none'}).
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
 [ "$(sh_ "settings get global enable_freeform_support")" = 1 ] || fail "enable_freeform_support isn't 1"
-sh_ "cmd device_state state 3"; sleep 3; chk unfold
+# The committed state flips to OPENED before display 0 is the inner screen: 3 s once wasn't enough (right after
+# sketch-rotate, folded: OPENED, wm size still the cover's 1116x2484) - wait for the inner size, up to 15 s.
+sh_ "cmd device_state state 3"; sleep 2; chk unfold
 sh_ "dumpsys device_state | grep -m1 mCommittedState" | grep -q OPENED || fail "the inner screen didn't come on"
-WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
-W=${WH% *}; H=${WH#* }; echo "on: ${W}x${H}"
+wsize() { sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1; }
+t=0; WH=$(wsize)
+while [ "${WH%% *}" -le 2000 ] 2>/dev/null && [ $t -lt 13 ]; do sleep 1; t=$((t + 1)); WH=$(wsize); done
+chk unfold
+W=${WH% *}; H=${WH#* }; echo "on: ${W}x${H} ($((t + 2)) s after state 3)"
 [ "${W:-0}" -gt 2000 ] || { echo "no unfolded screen size ($WH) - stopping before any input"; exit 5; }
 kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
 if kg | grep -q true; then

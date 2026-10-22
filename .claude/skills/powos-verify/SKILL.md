@@ -99,6 +99,10 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
 - Inner screen without the hinge: `cmd device_state state 3` (OPENED); restore with `cmd device_state state reset`
   (not `state 0`: that blanks the inner screen of a phone that is physically open). Screen size: `wm size` (a dumpsys
   display parse once came back empty and every swipe went to 0,0 - refuse to inject without a size).
+  mCommittedState reads OPENED before display 0 switches: poll `wm size` for the inner size (>2000 wide, up to ~15 s),
+  don't trust a fixed sleep (float-desktops once read the cover's 1116x2484 3 s after state 3).
+- `cdp.sh eval` prints a JSON string (`"{\"marked\":4}"`): unescape before grepping `"key":value` (running-dot once
+  failed on a home with 4 marked cells).
 - Android's keyguard is the window `NotificationShade` (not named lock): while `dumpsys window policy` shows
   `mIsShowing=true` the screen dozes after ~10 s mid-run. No PIN: `wm dismiss-keyguard`, then PowOS's face
   (`PowosLockActivity`) is a swipe up.
