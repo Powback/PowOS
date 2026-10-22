@@ -30,6 +30,7 @@ touched() { [ "$(sh_ cat /data/local/tmp/powos-lasttouch)" != "$t0" ] && { echo 
 mine() { echo "$(sql "SELECT id, key, width, height, updated FROM drawing") $(sql "SELECT * FROM viewport") $(sql "SELECT uid, hidden FROM stroke")"; }
 before=$(mine); echo "$before" > "$OUT/before.json"
 ok=0; bad=0; res() { if [ "$1" = pass ]; then ok=$((ok+1)); else bad=$((bad+1)); fi; echo "$1 $2: $3" | tee -a "$OUT/result.txt"; }
+. "$(dirname "$0")/sketch-lib.sh"
 state() { js 'JSON.stringify(window.__sketch || null)'; }
 get() { python3 -c 'import json,sys; s=json.loads(sys.argv[1]); print(eval(sys.argv[2], {"s": s, "round": round}))' "$1" "$2" 2>/dev/null; }
 CANVAS='[...document.querySelectorAll("canvas")].sort((a, b) => b.width * b.height - a.width * a.height)[0]'
@@ -52,20 +53,15 @@ COLUMN="(() => { const c = $CANVAS, d = c.getContext('2d').getImageData(c.width 
 NOTBG="(() => { const c = $CANVAS, d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0, bad = 0;
   for (let i = 0; i < d.length; i += 4 * 97) { n++; if (Math.abs(d[i] - 18) > 2 || Math.abs(d[i + 1] - 18) > 2 || Math.abs(d[i + 2] - 22) > 2) bad++; }
   return JSON.stringify({ n, bad, transform: c.style.transform, page: getComputedStyle(c.parentElement).backgroundColor }); })()"
-sh_ input keyevent KEYCODE_HOME; sleep 1.5
-js '(window.__powosApps.openApp("local.sketch"), "open")' >/dev/null; sleep 3
-js '(document.querySelector("[aria-label=drawings]").click(), "gallery")' >/dev/null; sleep 1
-js '(document.querySelector("[aria-label=\"new drawing\"]").click(), "fresh")' >/dev/null; sleep 1
+sketch_fresh || exit 1
 js '(document.querySelector("[aria-label=\"color #ff5c5c\"]").click(), "red")' >/dev/null; sleep 0.5
-s0=$(state); echo "fresh: $s0" >> "$OUT/states.txt"; key=$(get "$s0" 's["key"]')
-[ -n "$key" ] || { res fail open "Sketch didn't open on a fresh drawing ($s0)"; exit 0; }
 read -r x0 y x1 <<<"$(js "(() => { const c = $CANVAS, r = c.getBoundingClientRect(), d = devicePixelRatio; return [r.left + r.width * 0.3, r.top + r.height / 2, r.left + r.width * 0.7].map((v) => Math.round(v * d)).join(' '); })()")"
 touched; sh_ input swipe "$x0" "$y" "$x1" "$y" 500; sleep 1.5
-s1=$(state); echo "drawn: $s1" >> "$OUT/states.txt"
+s1=$(state); echo "drawn: $s1" >> "$OUT/states.txt"; alive "$s1" "drawn"
 [ "$(get "$s1" 's["strokes"]')" = 1 ] && res pass draw "1 red line, scale $(get "$s1" 'round(s["view"]["s"],3)')" || { res fail draw "no stroke ($s1)"; }
 # In: 10x then 5x about the centre (the line runs through it).
 touched; pinch 20 200; pinch 40 200
-s2=$(state); echo "zoomed in: $s2" >> "$OUT/states.txt"; c2=$(js "$COLUMN"); echo "column: $c2" >> "$OUT/states.txt"
+s2=$(state); echo "zoomed in: $s2" >> "$OUT/states.txt"; alive "$s2" "zoomed in"; c2=$(js "$COLUMN"); echo "column: $c2" >> "$OUT/states.txt"
 "$here/shot.sh" "$OUT/sketch-zoom-in.png" >/dev/null 2>&1
 python3 - "$s1" "$s2" "$c2" <<'PY' && res pass "zoom in" "50x and crisp: $c2" || res fail "zoom in" "$(get "$s2" 'round(s["view"]["s"],2)') x, column $c2"
 import json,sys; a=json.loads(sys.argv[1]); b=json.loads(sys.argv[2]); c=json.loads(sys.argv[3])
@@ -74,15 +70,14 @@ sys.exit(0 if abs(r-50)<0.5 and c["hi"]>200 and c["on"]>100 and c["mid"]<=4 else
 PY
 # Out: to the 0.02x limit; the background covers every pixel but the (now tiny) line.
 touched; for i in 1 2 3 4; do pinch 200 20; done
-s3=$(state); echo "zoomed out: $s3" >> "$OUT/states.txt"; b3=$(js "$NOTBG"); echo "background: $b3" >> "$OUT/states.txt"
+s3=$(state); echo "zoomed out: $s3" >> "$OUT/states.txt"; alive "$s3" "zoomed out"; b3=$(js "$NOTBG"); echo "background: $b3" >> "$OUT/states.txt"
 "$here/shot.sh" "$OUT/sketch-zoom-out.png" >/dev/null 2>&1
 python3 - "$s3" "$b3" <<'PY' && res pass "zoom out" "0.02x, background over the whole viewport ($b3)" || res fail "zoom out" "scale $(get "$s3" 's["view"]["s"]'), $b3"
 import json,sys; s=json.loads(sys.argv[1]); b=json.loads(sys.argv[2])
 sys.exit(0 if abs(s["view"]["s"]-0.02)<1e-4 and b["bad"]<=2 and b["transform"]=="" and b["page"]=="rgb(18, 18, 22)" else 1)
 PY
 # Clean up: the test drawing deleted (its view with it); the user's drawings, strokes and views unchanged.
-js "(document.querySelector('[aria-label=drawings]').click(), 'g')" >/dev/null; sleep 1
-js "(document.querySelector('[data-drawing=\"$key\"] [aria-label^=delete]').click(), 'del')" >/dev/null; sleep 1.5
+echo "cleanup: $(drop)" >> "$OUT/states.txt"
 restore
 after=$(mine); echo "$after" > "$OUT/after.json"
 [ "$after" = "$before" ] && res pass "user's drawings" "drawings, strokes and views unchanged, test drawing removed" ||

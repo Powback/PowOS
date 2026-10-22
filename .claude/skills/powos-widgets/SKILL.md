@@ -208,5 +208,10 @@ strip only - not the cause when a drag in a tile fails.
   it's a raster, so it can't be crisp - only strokes are.
 - Test: apps/sketch/test/rotate.sh (headless, mock db; crispness vs the 1x render scaled, background at extreme
   pans). Device: tools/phone/verify/sketch-rotate.sh, sketch-canvas.sh, sketch-zoom.sh (fresh test drawing, deleted
-  after; window.__sketch is read-only). Ship: apps/build.sh sketch (bundles pages + __POWOS_SCHEMA__ since
+  after; window.__sketch is read-only). They open Sketch and make the test drawing through sketch-lib.sh only:
+  sketch_fresh waits ON THE PHONE (one async eval) for the gallery, clicks "new drawing" and refuses to draw unless
+  __sketch.key is none of the user's keys with 0 strokes; drop deletes only that key. Sleep-timed clicks once ran
+  before Sketch mounted and the check drew on the user's only drawing (2026-10-23, stroke 11 of drawing 1).
+  A null __sketch mid-check = every page reloaded (a shell push/install: home's "not ready" in `push.sh --vpn
+  --errors` at that minute) -> alive() cleans up, exit 3, the queue reruns it; not a Sketch bug. Ship: apps/build.sh sketch (bundles pages + __POWOS_SCHEMA__ since
   2026-10-23), then `ADB="docker exec powos-vadb adb -s 10.13.13.7:5555" apps/install.sh sketch ui --note ...`.

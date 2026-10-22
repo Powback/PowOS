@@ -35,6 +35,7 @@ touched() { [ "$(sh_ cat /data/local/tmp/powos-lasttouch)" != "$t0" ] && { echo 
 rot0=$(sh_ settings get system user_rotation); acc0=$(sh_ settings get system accelerometer_rotation)
 before=$(sql "SELECT id, key, width, height, updated FROM drawing"); echo "$before" > "$OUT/before.json"
 ok=0; bad=0; res() { if [ "$1" = pass ]; then ok=$((ok+1)); else bad=$((bad+1)); fi; echo "$1 $2: $3" | tee -a "$OUT/result.txt"; }
+. "$(dirname "$0")/sketch-lib.sh"
 state() { js 'JSON.stringify(window.__sketch || null)'; }
 fits() { # <state json>: canvas WxH, strokes, and the whole extent on the canvas
   python3 -c 'import json,sys; s=json.loads(sys.argv[1]); v=s["view"]; r=s["extent"]; w,h=s["size"]
@@ -43,28 +44,22 @@ print(w, h, s["strokes"], "fits" if ok else "CROPPED", round(v["s"],3))' "$1" 2>
 }
 # Portrait, home, Sketch open on a fresh drawing.
 sh_ settings put system accelerometer_rotation 0; sh_ settings put system user_rotation 0
-sh_ input keyevent KEYCODE_HOME; sleep 1.5
-js '(window.__powosApps.openApp("local.sketch"), "open")' >/dev/null; sleep 3
-js '(document.querySelector("[aria-label=drawings]").click(), "gallery")' >/dev/null; sleep 1
-js '(document.querySelector("[aria-label=\"new drawing\"]").click(), "fresh")' >/dev/null; sleep 1
-s0=$(state); echo "fresh: $s0" >> "$OUT/states.txt"
-key=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["key"])' "$s0" 2>/dev/null)
-[ -n "$key" ] || { res fail open "Sketch didn't open on a fresh drawing ($s0)"; exit 0; }
+sketch_fresh || exit 1
 # One long stroke with real touches, from the top third to the canvas's bottom (screen px = css px x dpr).
 read -r x0 y0 x1 y1 <<<"$(js '(() => { const c = [...document.querySelectorAll("canvas")].sort((a, b) => b.width * b.height - a.width * a.height)[0]; const r = c.getBoundingClientRect(), d = devicePixelRatio; return [r.left + r.width * 0.3, r.top + r.height * 0.3, r.left + r.width * 0.7, r.top + r.height * 0.86].map((v) => Math.round(v * d)).join(" "); })()')"
 touched; sh_ input swipe "$x0" "$y0" "$x1" "$y1" 600; sleep 1.5
-s1=$(state); echo "drawn: $s1" >> "$OUT/states.txt"; read -r w1 h1 n1 f1 _ <<<"$(fits "$s1")"
+s1=$(state); echo "drawn: $s1" >> "$OUT/states.txt"; alive "$s1" "drawn"; read -r w1 h1 n1 f1 _ <<<"$(fits "$s1")"
 [ "${n1:-0}" -ge 1 ] && res pass draw "${n1} stroke on ${w1}x${h1}" || res fail draw "no stroke recorded (swipe $x0,$y0 -> $x1,$y1; $s1)"
 sh_ "screencap -p /data/local/tmp/sk-portrait.png"; "$A" pull /data/local/tmp/sk-portrait.png "$OUT/" >/dev/null 2>&1
 # Landscape.
 touched; sh_ settings put system user_rotation 1; sleep 3
-s2=$(state); echo "landscape: $s2" >> "$OUT/states.txt"; read -r w2 h2 n2 f2 k2 <<<"$(fits "$s2")"
+s2=$(state); echo "landscape: $s2" >> "$OUT/states.txt"; alive "$s2" "landscape"; read -r w2 h2 n2 f2 k2 <<<"$(fits "$s2")"
 sh_ "screencap -p /data/local/tmp/sk-landscape.png"; "$A" pull /data/local/tmp/sk-landscape.png "$OUT/" >/dev/null 2>&1
 [ "$w2" != "$w1" ] && [ "$n2" = "$n1" ] && [ "$f2" = fits ] && res pass landscape "${w2}x${h2}, ${n2} stroke(s), whole drawing on screen (scale $k2)" ||
   res fail landscape "${w2}x${h2} (was ${w1}x${h1}), ${n2}/${n1} strokes, $f2"
 # Back to portrait.
 touched; sh_ settings put system user_rotation 0; sleep 3
-s3=$(state); echo "portrait: $s3" >> "$OUT/states.txt"; read -r w3 h3 n3 f3 k3 <<<"$(fits "$s3")"
+s3=$(state); echo "portrait: $s3" >> "$OUT/states.txt"; alive "$s3" "portrait"; read -r w3 h3 n3 f3 k3 <<<"$(fits "$s3")"
 [ "$w3" = "$w1" ] && [ "$n3" = "$n1" ] && [ "$f3" = fits ] && res pass "portrait again" "${w3}x${h3}, ${n3} stroke(s), scale $k3" ||
   res fail "portrait again" "${w3}x${h3}, ${n3}/${n1} strokes, $f3"
 # In the database (so a restart keeps it).
@@ -72,8 +67,7 @@ id=$(sql "SELECT id FROM drawing WHERE key = '$key'" | python3 -c 'import json,s
 cnt=$( [ -n "$id" ] && sql "SELECT id FROM stroke WHERE drawing = $id" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' 2>/dev/null)
 [ "${cnt:-0}" -ge 1 ] && res pass saved "test drawing $id has $cnt stroke(s) in local-sketch" || res fail saved "test drawing ${id:-missing}: ${cnt:-0} strokes in the database"
 # Clean up: the test drawing deleted from the gallery, then checked gone; the user's drawings unchanged.
-js "(document.querySelector('[aria-label=drawings]').click(), 'g')" >/dev/null; sleep 1
-js "(document.querySelector('[data-drawing=\"$key\"] [aria-label^=delete]').click(), 'del')" >/dev/null; sleep 1.5
+echo "cleanup: $(drop)" >> "$OUT/states.txt"
 after=$(sql "SELECT id, key, width, height, updated FROM drawing"); echo "$after" > "$OUT/after.json"
 [ "$after" = "$before" ] && res pass "user's drawings" "unchanged, test drawing removed" || res fail "user's drawings" "before/after differ: $OUT/before.json $OUT/after.json"
 sh_ rm -f /data/local/tmp/sk-portrait.png /data/local/tmp/sk-landscape.png
