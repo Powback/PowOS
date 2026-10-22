@@ -225,6 +225,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     floating: host.name === "powos" ? undefined : {
       list: () => call<AppWindow[]>("windows.list"),
       restore: (id: number) => call<boolean>("windows.restore", id),
+      desktop: (hide: number[]) => call<boolean>("windows.desktop", hide),
     },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),

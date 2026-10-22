@@ -374,6 +374,67 @@ async function relayout(page, to, from) {
   return bad;
 }
 
+/**
+ * In the page: floating windows on home's pages (ui/desktops.ts) - the host stubbed (the mock has no floating
+ * windows), two pages. A window opens on the page on screen; swiping pages hides the other page's windows
+ * (floating.desktop's list); a window brought back from the dock (windows.raised) takes home to its page.
+ */
+async function desktopsCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const D = await importShim("./ui/desktops.ts");
+  const { powos } = await importShim("./bridge.ts");
+  powos.floating = { list: async () => [], restore: async () => true, desktop: async (h) => ((window.__hid = h.join()), true) };
+  if (S.pages.value.length < 2) await powos.home.addPanel("recents", Math.max(...S.pages.value) + 1, { x: 0, y: 0, w: 3, h: 3 });
+  await sleep(300);
+  if (!D.ready()) return ["ui/desktops.ts never started (app.tsx startDesktops)"];
+  const [p0, p1] = S.pages.value;
+  const win = (id) => ({ id, pkg: `gate.app${id}`, label: `App ${id}`, minimised: false });
+  const fails = [];
+  const expect = async (what, hid) => {
+    await sleep(150);
+    if ((window.__hid ?? "") !== hid) fails.push(`${what}: hidden [${window.__hid}], not [${hid}]`);
+  };
+  S.page.value = 0;
+  S.windows.value = [win(101)];
+  await expect("a window opened on page 1", "");
+  if (D.placed.value[101] !== p0) fails.push(`the window opened on page 1 was put on page ${D.placed.value[101]}, not ${p0}`);
+  S.page.value = 1;
+  await expect("swiped to page 2", "101");
+  S.windows.value = [win(102), win(101)];
+  await expect("a window opened on page 2", "101");
+  if (D.placed.value[102] !== p1) fails.push(`the window opened on page 2 was put on page ${D.placed.value[102]}, not ${p1}`);
+  S.page.value = 0;
+  await expect("back on page 1", "102");
+  window.__mockEvents.emit("windows.raised", 102);
+  await sleep(150);
+  if (S.page.value !== 1) fails.push(`a window of page 2 brought back from the dock left home on page ${S.page.value + 1}`);
+  await expect("its page shown after windows.raised", "101");
+  const kept = await powos.store.get("home.windows");
+  if (kept?.[101] !== p0 || kept?.[102] !== p1) fails.push(`not stored per page: ${JSON.stringify(kept)}`);
+  S.page.value = 0;
+  return fails;
+}
+
+/** In the page, loaded afresh after desktopsCheck: the stored windows go back on their pages (page 2's hidden). */
+async function desktopsReloaded() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const D = await importShim("./ui/desktops.ts");
+  const { powos } = await importShim("./bridge.ts");
+  const t0 = performance.now();
+  while (!D.ready() && performance.now() - t0 < 5000) await sleep(50);
+  // The mock's layout isn't kept across a reload (the phone's is): page 2 again, as desktopsCheck made it.
+  const kept = await powos.store.get("home.windows");
+  if (S.pages.value.length < 2) await powos.home.addPanel("recents", kept?.[102] ?? 2, { x: 0, y: 0, w: 3, h: 3 });
+  await sleep(300);
+  powos.floating = { list: async () => [], restore: async () => true, desktop: async (h) => ((window.__hid = h.join()), true) };
+  S.page.value = 0;
+  S.windows.value = [101, 102].map((id) => ({ id, pkg: `gate.app${id}`, label: `App ${id}`, minimised: false }));
+  await sleep(200);
+  return window.__hid === "102" ? [] : [`after a reload on page 1, hidden [${window.__hid}], not page 2's [102] (placement not kept: pages ${S.pages.value}, ${JSON.stringify(D.placed.value)})`];
+}
+
 async function open(browser, url, name, viewport = { width: 412, height: 915 }) {
   // A context (a window) of its own: tabs side by side in one window are hidden but the front one - no frames.
   const page = await (await browser.createBrowserContext()).newPage();
@@ -621,6 +682,17 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 412, height: 915 }], ["unfolded", { width: 900, height: 1000 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `joins-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(joinsCheck))));
+  // Floating windows live on home's pages (ui/desktops.ts; the user's design, 2026-10-22): page switch hides and
+  // shows them, and the placement survives the page loading afresh.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "desktops", { width: 900, height: 1000 }).then(async (r) => {
+        const s = await whenReady(r, () => r.page.evaluate(desktopsCheck));
+        if (s.problems.length) return s;
+        await r.page.reload().catch(() => {});
+        return whenReady(r, () => r.page.evaluate(desktopsReloaded));
+      }),
+    );
   // Home after an app at another size (Broforce in landscape, 2026-10-22: back on home the widgets were tiny and squashed
   // at the top). Laid out at [from] while hidden and shown again at [to], turned there and back, and relaid in its own
   // column count after the other's at the same size: the tiles must sit where a fresh layout at [to] puts them, and the

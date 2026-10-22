@@ -242,7 +242,9 @@ class ShellBridge(
             "pull.launched" -> overlay?.launched()
             // The floating app windows for the dock (system/WindowFrames.kt), and one brought back.
             "windows.list" -> windows()
-            "windows.restore" -> dev.omalauncher.system.WindowFrames.current?.restore(a.getInt(0)) ?: false
+            "windows.restore" -> (dev.omalauncher.system.WindowFrames.current?.restore(a.getInt(0)) ?: false).also { if (it) emit("windows.raised", a.getInt(0)) }
+            // Home's pages are desktops (ui/desktops.ts): the windows of the pages not on screen, out of sight.
+            "windows.desktop" -> dev.omalauncher.system.WindowFrames.current?.desktop(a.getJSONArray(0).let { h -> (0 until h.length()).map { h.getInt(it) }.toSet() }) ?: false
             "tasks.list" -> tasks()
             "tasks.open" -> openTask(a.getInt(0), a.opt(1))
             "tasks.remove" -> dev.omalauncher.system.Tasks.remove(context, a.getInt(0)).also { appWidgets.heal() }
@@ -652,11 +654,11 @@ class ShellBridge(
         return keys.filter { it in have }
     }
 
-    /** The floating windows, top-most first: { id, pkg, label, minimised }. */
+    /** The floating windows, top-most first: { id, pkg, label, minimised, away }. */
     private fun windows(): JSONArray =
         JSONArray(
             dev.omalauncher.system.WindowFrames.running.value.map {
-                JSONObject().put("id", it.id).put("pkg", it.pkg ?: "").put("label", it.label).put("minimised", it.minimised)
+                JSONObject().put("id", it.id).put("pkg", it.pkg ?: "").put("label", it.label).put("minimised", it.minimised).put("away", it.away)
             },
         )
 
@@ -667,7 +669,11 @@ class ShellBridge(
         when {
             // An app with a floating window already (shown or minimised): that window comes back, no second launch.
             key.startsWith("a:") ->
-                android(key)?.let { if (dev.omalauncher.system.WindowFrames.current?.restoreApp(it.component.packageName) != true) runtime.androidApps.open(it) }
+                android(key)?.let { app ->
+                    // Brought back: home goes to the page it's on (windows.raised, ui/desktops.ts).
+                    val id = dev.omalauncher.system.WindowFrames.current?.restoreApp(app.component.packageName)
+                    if (id != null) emit("windows.raised", id) else runtime.androidApps.open(app)
+                }
             key.startsWith("l:") -> runtime.linuxApps.firstOrNull { "l:${it.id}" == key }?.let { runtime.launch(it) }
         }
         // The strip shows it first next time home shows (the Compose launcher settles on stop, likewise).

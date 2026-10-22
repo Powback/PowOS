@@ -187,6 +187,8 @@ export interface AppWindow {
   pkg: string;
   label: string;
   minimised: boolean;
+  /** On a home page not on screen (ui/desktops.ts): out of sight until home shows that page. */
+  away?: boolean;
 }
 
 export interface RecentTask {
@@ -606,8 +608,10 @@ export interface Bridge {
    */
   floating?: {
     list(): Promise<AppWindow[]>;
-    /** Brings it back (minimised, or under others) on top; false if it's gone. */
+    /** Brings it back (minimised, or under others) on top; false if it's gone. "windows.raised" (its id) after. */
     restore(id: number): Promise<boolean>;
+    /** Home's pages as desktops (ui/desktops.ts): [hide] are the other pages' windows, out of sight; the rest back. */
+    desktop(hide: number[]): Promise<boolean>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up

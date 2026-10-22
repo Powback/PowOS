@@ -57,9 +57,11 @@ class WindowFrames(
         val all = runCatching { FreeformTasks.list(context) }.onFailure { Log.w(TAG, "no floating windows", it) }.getOrDefault(emptyList())
         minimised.retainAll(all.map { it.id }.toSet())
         val floating = AppWindows.floating(context)
+        // Folded, the windows aren't listed but still belong to their pages: kept for the unfold.
+        if (floating) away.retainAll(all.map { it.id }.toSet())
         // Folded, apps aren't windows: the dock shows none.
         publish(if (floating) all else emptyList())
-        val show = if (keyguard || Switcher.open || !floating) emptyList() else uncovered(all.filter { it.visible && it.id !in minimised })
+        val show = if (keyguard || Switcher.open || !floating) emptyList() else uncovered(all.filter { it.visible && it.id !in minimised && it.id !in away })
         val ids = show.map { it.id }.toSet()
         frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
         // Bottom-most first, so a new frame's windows stack over the ones under it.
@@ -82,19 +84,43 @@ class WindowFrames(
         refresh()
     }
 
-    /** Task [id]'s window back where it was, on top (a tap on it in the dock). */
+    /**
+     * Home's pages are desktops (shell ui/desktops.ts): [hide] are the windows of the other pages. Those leave the
+     * screen as a minimise does (the task keeps running, no frame); the ones no longer in it come back, bottom-most
+     * first so the stack keeps its order. A window the user minimised stays minimised. Folded (apps full screen):
+     * nothing. On the main thread, like [refresh].
+     */
+    fun desktop(hide: Set<Int>): Boolean {
+        if (!AppWindows.floating(context)) return false
+        main.post { showOnly(hide) }
+        return true
+    }
+
+    private fun showOnly(hide: Set<Int>) {
+        val back = away - hide
+        away.clear()
+        away.addAll(hide)
+        // All of them, not only the new: after a fold and unfold Android may have raised them again.
+        hide.forEach { FreeformTasks.minimise(context, it) }
+        running.value.asReversed().filter { it.id in back && it.id !in minimised }.forEach { FreeformTasks.raise(context, it.id) }
+        main.removeCallbacks(refreshNow)
+        main.postDelayed(refreshNow, SETTLE_MS)
+    }
+
+    /** Task [id]'s window back where it was, on top (a tap on it in the dock; home goes to its page, windows.raised). */
     fun restore(id: Int): Boolean {
         minimised.remove(id)
+        away.remove(id)
         val ok = FreeformTasks.raise(context, id) || Tasks.open(context, id)
         main.postDelayed(refreshNow, SETTLE_MS)
         return ok
     }
 
-    /** [pkg]'s floating window back (a tap on its app anywhere on home), if it has one and apps float: false if not. */
-    fun restoreApp(pkg: String): Boolean {
-        if (!AppWindows.floating(context)) return false
-        val w = running.value.firstOrNull { it.pkg == pkg } ?: return false
-        return restore(w.id)
+    /** [pkg]'s floating window back (a tap on its app anywhere on home), if it has one and apps float: its task, or null. */
+    fun restoreApp(pkg: String): Int? {
+        if (!AppWindows.floating(context)) return null
+        val w = running.value.firstOrNull { it.pkg == pkg } ?: return null
+        return w.id.takeIf { restore(it) }
     }
 
     private fun publish(all: List<FreeformTasks.Window>) {
@@ -102,7 +128,7 @@ class WindowFrames(
         val next =
             all.map { w ->
                 val label = w.pkg?.let { p -> runCatching { pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString() }.getOrNull() }
-                Running(w.id, w.pkg, label ?: w.pkg.orEmpty(), w.id in minimised)
+                Running(w.id, w.pkg, label ?: w.pkg.orEmpty(), w.id in minimised, w.id in away)
             }
         if (next != running.value) running.value = next
     }
@@ -113,6 +139,8 @@ class WindowFrames(
         val pkg: String?,
         val label: String,
         val minimised: Boolean,
+        /** On another home page (desktop): out of sight until home shows that page. */
+        val away: Boolean = false,
     )
 
     companion object {
@@ -127,6 +155,9 @@ class WindowFrames(
 
         /** Minimised windows' tasks (kept across a service rebind: the windows are still minimised). */
         private val minimised = mutableSetOf<Int>()
+
+        /** Windows of the home pages not on screen ([desktop]); kept across a rebind like [minimised]. */
+        private val away = mutableSetOf<Int>()
 
         /** The floating windows, top-most first, for the dock (home's page reads it: windows.list / windows.changed). */
         val running = mutableStateOf<List<Running>>(emptyList())

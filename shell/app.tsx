@@ -111,6 +111,8 @@ if (mode === "aod") {
   render(<Assist />, document.body);
 } else {
   await load();
+  // Floating windows live on home's pages (one desktop per page).
+  void import("./ui/desktops.ts").then((d) => d.startDesktops());
   // Home's last frame (index.html) gives way to home itself once it's laid out: no blank frame between.
   handOff(() => render(<Home />, document.body));
   measureIcons(restored != null);
