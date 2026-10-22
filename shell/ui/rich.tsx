@@ -13,7 +13,7 @@ import { Fragment, render } from "preact";
 import { useState } from "preact/hooks";
 import type { ChatItem } from "../types.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import { askQueued, openAssistant } from "./assistant.ts";
+import { askQueued, openAssistant, unqueue, waiting } from "./assistant.ts";
 import { powos } from "../bridge.ts";
 import { topBack } from "../state.ts";
 import { openLink } from "../apps/native.ts";
@@ -347,6 +347,33 @@ export function Said({ text, reply }: { text: string; reply: string | null }) {
         // A block that can't be read: shown as what it is.
         return <div key={i} class="msg assistant md" dangerouslySetInnerHTML={{ __html: md("```\n" + p.body + "\n```") }} />;
       })}
+    </>
+  );
+}
+
+/** The question, not the screen text the side button sends along with it (assist.tsx). */
+const asked = (text: string) => text.split("\n\n[What's on my screen right now")[0];
+
+/**
+ * What the user sent while a turn was under way, oldest first: their words at once, right-aligned with no bubble yet,
+ * marked "queued", each with a x that takes it back. Its turn starting, it becomes a normal bubble (the chat's own).
+ */
+export function Queued() {
+  const q = waiting.value;
+  if (!q.length) return null;
+  return (
+    <>
+      {q.map((w) => (
+        <div key={w.id} class="msg user queued">
+          <span class="queued-text">{asked(w.text)}</span>
+          <span class="queued-mark">
+            queued
+            <button type="button" class="queued-x" aria-label="don't send" onClick={() => unqueue(w.id)}>
+              <Icon name="close" />
+            </button>
+          </span>
+        </div>
+      ))}
     </>
   );
 }

@@ -11,6 +11,7 @@ import { useEffect, useState } from "preact/hooks";
 import { powos } from "../../bridge.ts";
 import { OwlWidget } from "../../ui/owl.tsx";
 import { host as realHost } from "../../apps/stdb.ts";
+import { net } from "../../apps/net.ts";
 import type { HomeItem } from "../../types.ts";
 
 declare function importShim(url: string): Promise<any>;
@@ -35,7 +36,13 @@ export interface Spec {
   entry?: string;
   panel?: string;
   /** island: the mock data its host answers with (rows by table, net responses by URL pattern). */
-  data?: { rows?: Record<string, any[]>; net?: { match: string; status?: number; json?: unknown }[] };
+  data?: {
+    rows?: Record<string, any[]>;
+    /** By URL pattern: an answer ([status], [json]), or [error] - the request fails with that raw text, as the native layer's would (away from home: "failed to connect to (192.168.x.x...)"). */
+    net?: { match: string; status?: number; json?: unknown; error?: string }[];
+    /** The app's localStorage before it mounts (e.g. what it cached from an earlier visit). */
+    storage?: Record<string, string>;
+  };
   /** panel agents: the mock's agents replaced (preview.mjs's nobody-running variants). */
   agents?: { role: string; state: "working" | "idle" | "needs_you" | "blocked" | "paused" | "gone"; title: string; step: string; report: string; ago: number }[];
   cells: Cell[];
@@ -53,6 +60,7 @@ function mockHost(spec: Spec) {
   const db = { conn: { db: Object.fromEntries(Object.keys(rows).map((t) => [t, {}])), reducers: {} }, status: "connected", epoch: 1 };
   const answer = (url: string) => {
     const hit = spec.data?.net?.find((n) => new RegExp(n.match).test(url));
+    if (hit?.error !== undefined) throw net.error(new Error(hit.error));
     const body = hit?.json ?? null;
     return { status: hit ? (hit.status ?? 200) : 404, ok: !!hit, json: () => body, text: () => JSON.stringify(body), headers: {} };
   };
@@ -62,16 +70,42 @@ function mockHost(spec: Spec) {
     useRows: (_db: unknown, table: string) => rows[table] ?? [],
     openApp: () => {},
     net: {
+      ...net,
       fetch: async (_app: string, url: string) => answer(url),
-      useEvents: () => "open",
+      useEvents: (_app: string, url: string | null) => (url && spec.data?.net?.some((n) => n.error !== undefined && new RegExp(n.match).test(url)) ? "retry" : "open"),
     },
   };
+}
+
+/**
+ * The page's localStorage as this widget's own, seeded from its data: the sheets run side by side on one origin, and a
+ * variant's "what it cached last time" (or the plain one's fresh cache) mustn't leak into another's tiles.
+ */
+let stored: Map<string, string> | null = null;
+function pageStorage(seed: Record<string, string>) {
+  if (!stored) {
+    stored = new Map();
+    const m = stored;
+    const mem = {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, String(v)),
+      removeItem: (k: string) => void m.delete(k),
+      clear: () => m.clear(),
+      key: (i: number) => [...m.keys()][i] ?? null,
+      get length() {
+        return m.size;
+      },
+    };
+    Object.defineProperty(window, "localStorage", { value: mem, configurable: true });
+  }
+  for (const [k, v] of Object.entries(seed)) stored.set(k, v);
 }
 
 function Island({ spec, cell }: { spec: Spec; cell: Cell }) {
   const [C, setC] = useState<ComponentType<any> | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
+    pageStorage(spec.data?.storage ?? {});
     importShim(`./_app/${spec.app}/${spec.entry}`).then(
       (m) => setC(() => m.default),
       (e) => setErr(String(e?.message ?? e)),
@@ -228,6 +262,9 @@ const painted = (cs: CSSStyleDeclaration) =>
  * - a slider (a range, role=slider: a drag-to-dim pill) inside something that scrolls sideways;
  * - a sideways drag (touch-action none / pan-y) without the flag home's pager respects (role=slider, data-owns-gesture);
  * - hard border: a drawn 1px+ line round content (the design language: no lines).
+ * An island's shared offline state (.island-offline.alone: the app can't reach its device, nothing to show) is
+ * sparse by design - the user asked for one calm muted line, not a filled tile - so unfilled / small content don't
+ * apply to it; everything else (clipped text above all) does.
  */
 /** How much of each tile its content covered, %, by tile key: the last check()'s. */
 export const fills: Record<string, number> = {};
@@ -344,7 +381,9 @@ export function check(EMPTY = 0.12, COVER = 0.25) {
     // Other visible children (an element painted nothing but has size, e.g. a fixed-size Box) don't count as ink.
     for (const t of clipped) problems.push(`clipped text "${t}"`);
     for (const t of cut) if (!clipped.has(t)) problems.push(`row cut in half "${t}"`);
-    if (ink.right > ink.left) {
+    if (face.querySelector(".island-offline.alone")) {
+      if (!(ink.right > ink.left)) problems.push("nothing drawn");
+    } else if (ink.right > ink.left) {
       const W = inner.right - inner.left;
       const H = inner.bottom - inner.top;
       const gaps = {

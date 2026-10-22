@@ -169,3 +169,9 @@
 .ai-work-list > .ai-heading { margin: 4px 12px 2px; }
 /* A folded line: paused, done recently, the earlier conversation. */
 .ai-fold { align-self: flex-start; padding: 8px 12px; font: inherit; font-size: var(--text-small); color: var(--color-foreground); background: none; border: 0; }
+
+/* Sent mid-turn, waiting for its turn: the user's words, right-aligned with no bubble yet, "queued" and a x under it. */
+.msg.user.queued { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding-top: 2px; padding-bottom: 2px; text-align: end; color: var(--color-foreground); background: none; box-shadow: none; }
+.queued-mark { display: flex; align-items: center; gap: 4px; font-size: var(--text-small); }
+.queued-x { display: grid; place-items: center; width: 28px; height: 28px; margin: -6px -8px -6px 0; padding: 0; font-size: 14px; color: var(--color-foreground); background: none; border: 0; }
+.ai-queued { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }

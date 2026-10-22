@@ -129,6 +129,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     ai: {
       chat: () => call<Chat>("ai.chat"),
       send: (text, recents = true) => call("ai.send", text, recents),
+      unqueue: (id) => call("ai.unqueue", id),
       open: () => call("ai.open"),
       newApp: (description) => call<boolean>("ai.newApp", description),
       closeThread: () => call<boolean>("ai.closeThread"),
@@ -343,7 +344,7 @@ function mock(): Bridge {
   const recent = ["a:chrome", "l:konsole", "a:spotify", "a:signal", "l:dolphin", "a:youtube"];
   const data = (name: string) => `powos-shell:${name}`;
   let samples: Promise<Record<string, unknown>> | null = null;
-  let chat: Chat = { busy: false, items: [] };
+  let chat: Chat = { busy: false, items: [], queued: [] };
   let screen: WidgetScreen = { key: null };
   let liveMock = { on: false, frames: 0 };
   const pin = (name: string, x: number, y: number): HomeItem => {
@@ -484,8 +485,10 @@ function mock(): Bridge {
     // A stand-in that answers after a tool call, as a streamed turn does.
     ai: {
       chat: async () => chat,
-      send: async (text) => {
+      send: async function send(text: string): Promise<void> {
         const step = (next: Partial<Chat>) => events.emit("ai.changed", (chat = { ...chat, ...next }));
+        // Mid-turn: queued, as PowosAiChat does; the next turn when this one ends.
+        if (chat.busy) return void step({ queued: [...(chat.queued ?? []), { id: Date.now(), text }] });
         step({ busy: true, items: [...chat.items, { kind: "user", text }] });
         await new Promise((r) => setTimeout(r, 400));
         step({
@@ -501,7 +504,13 @@ function mock(): Bridge {
             { kind: "assistant", text: `(mock) You asked: ${text}` },
           ],
         });
+        const next = chat.queued?.[0];
+        if (next) {
+          step({ queued: chat.queued!.slice(1) });
+          await send(next.text);
+        }
       },
+      unqueue: async (id) => void events.emit("ai.changed", (chat = { ...chat, queued: (chat.queued ?? []).filter((q) => q.id !== id) })),
       open: async () => console.log("[mock] open PowOS AI"),
       newApp: async (description) => {
         const step = (next: Partial<Chat>) => events.emit("ai.changed", (chat = { ...chat, ...next }));

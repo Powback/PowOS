@@ -1,0 +1,35 @@
+{
+ "rows": {
+  "bridge": [
+   {
+    "id": 1,
+    "bridgeId": "001788fffe000000",
+    "ip": "192.168.50.20",
+    "name": "Hue Bridge"
+   }
+  ],
+  "pref": [
+   {
+    "rid": "room-0",
+    "hidden": false,
+    "order": 0
+   },
+   {
+    "rid": "room-1",
+    "hidden": true,
+    "order": 1
+   },
+   {
+    "rid": "room-2",
+    "hidden": true,
+    "order": 2
+   }
+  ]
+ },
+ "net": [
+  {
+   "match": "/clip/v2/resource",
+   "error": "failed to connect to /192.168.178.23 (port 443) from /10.84.12.7 (port 51344) after 10000ms: isConnected failed: ENETUNREACH (Network is unreachable)"
+  }
+ ]
+}

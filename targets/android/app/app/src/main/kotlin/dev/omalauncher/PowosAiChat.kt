@@ -56,6 +56,15 @@ object PowosAiChat {
     }
 
     val items = mutableStateListOf<Item>()
+
+    /** A message sent while a turn was under way: it waits here, in order, and becomes the next turn ([send]). */
+    data class Queued(val id: Long, val text: String, val prompt: String) {
+        fun json() = JSONObject().put("id", id).put("text", text)
+    }
+
+    /** What the user sent mid-turn, oldest first: every chat shows it (dimmed, cancellable) until its turn starts. */
+    val queued = mutableStateListOf<Queued>()
+    private var queuedId = 0L
     var busy by mutableStateOf(false)
         private set
     private var file: File? = null
@@ -151,7 +160,12 @@ object PowosAiChat {
         load(context)
         val shown = text.trim()
         val prompt = asked ?: shown
-        if (shown.isEmpty() || busy) return
+        if (shown.isEmpty()) return
+        // Mid-turn: queued (shown in every chat at once), sent when the turn under way ends - before the inbox's.
+        if (busy) {
+            queued.add(Queued(++queuedId, shown, prompt))
+            return
+        }
         add(Item.User(shown))
         if (!RootedGuest.enabled) {
             add(Item.Note("PowOS AI runs in the PowOS session (rooted mode), which isn't set up on this phone.", error = true))
@@ -159,6 +173,11 @@ object PowosAiChat {
         }
         busy = true
         Thread({ turn(prompt) }, "powos-ai").start()
+    }
+
+    /** Takes a queued message back before its turn starts: it's never sent. */
+    fun unqueue(id: Long) {
+        queued.removeAll { it.id == id }
     }
 
     /** A mail an agent sent the user, opened from its notification: in the chat, so it's read where it was opened. */
@@ -233,6 +252,12 @@ object PowosAiChat {
                 add(Item.Note("PowOS AI didn't answer" + (why?.let { ": $it" } ?: " (exit $exit)"), error = true))
             }
             busy = false
+            val next = queued.firstOrNull()
+            if (next != null) {
+                queued.removeAt(0)
+                appContext?.let { send(it, next.text, next.prompt) }
+                return@post
+            }
             if (inboxWaiting) {
                 inboxWaiting = false
                 appContext?.let(::inboxArrived)

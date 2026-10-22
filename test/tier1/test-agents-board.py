@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""The work board's progress (`powos agents task ... --progress/--step/--plan/--commit/--image`), hermetic.
+
+The real CLI (lib/ai/agents/powos-agents-cli) against a stand-in for the device's SpacetimeDB: an HTTP server that
+answers `SELECT * FROM work` in the server's shape and applies work_set / work_track / work_drop the way the module
+(apps/agents/module/src/lib.rs) does. Checks the columns the PowOS AI page reads: progress_done/progress_total, step,
+steps (the history: done / current / next), commits (by --commit and by a commit mentioning the task id, from the
+caller's git repo), images and activity.
+"""
+
+import http.server
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CLI = os.path.normpath(os.path.join(HERE, "..", "..", "lib", "ai", "agents", "powos-agents-cli"))
+COLS = ["id", "title", "owner", "status", "note", "created", "updated", "done", "project", "progress_done",
+        "progress_total", "step", "steps", "commits", "images", "activity"]
+
+
+class FakeStdb(http.server.BaseHTTPRequestHandler):
+    work = {}
+    clock = [1000]
+    calls = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.path.endswith("/sql"):
+            rows = [[w[c] for c in COLS] for w in self.work.values()]
+            out = [{"schema": {"elements": [{"name": {"some": c}} for c in COLS]}, "rows": rows}]
+            return self.reply(200, json.dumps(out))
+        name = self.path.rsplit("/", 1)[-1]
+        args = json.loads(body)
+        self.calls.append((name, args))
+        self.clock[0] += 1000
+        now = self.clock[0]
+        if name == "work_set":
+            wid, title, owner, status, note, project = args
+            o = self.work.get(wid)
+            if o is None:
+                if not title:
+                    return self.reply(400, "no title")
+                o = {c: "" for c in COLS} | {"id": wid, "created": now, "done": 0, "progress_done": 0,
+                                               "progress_total": 0, "status": "working"}
+            for k, v in (("title", title), ("owner", owner), ("status", status), ("note", note), ("project", project)):
+                if v:
+                    o[k] = v
+            o["done"] = (o["done"] or now) if o["status"] == "done" else 0
+            o["updated"] = o["activity"] = now
+            self.work[wid] = o
+        elif name == "work_track":
+            wid, pd, pt, step, steps, commits, images = args
+            if wid not in self.work or pd > pt:
+                return self.reply(400, "work_track: bad")
+            for s in (steps, commits, images):
+                if s:
+                    assert isinstance(json.loads(s), list)
+            self.work[wid].update(progress_done=pd, progress_total=pt, step=step, steps=steps, commits=commits,
+                                  images=images, updated=now, activity=now)
+        elif name == "work_drop":
+            self.work.pop(args[0], None)
+        return self.reply(200, "")
+
+    def reply(self, code, text):
+        data = text.encode()
+        self.send_response(code)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+class BoardTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeStdb)
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def setUp(self):
+        FakeStdb.work.clear()
+        FakeStdb.calls.clear()
+        self.tmp = tempfile.mkdtemp(prefix="board-test-")
+        os.makedirs(os.path.join(self.tmp, ".config", "spacetime"))
+        with open(os.path.join(self.tmp, ".config", "spacetime", "cli.toml"), "w") as f:
+            f.write('spacetimedb_token = "tok"\n')
+        self.repo = os.path.join(self.tmp, "repo")
+        os.makedirs(self.repo)
+        self.env = dict(os.environ, HOME=self.tmp, POWOS_STDB=f"http://127.0.0.1:{self.srv.server_address[1]}",
+                        POWOS_AGENTS_REMOTE="0", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                        GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_GLOBAL="/dev/null")
+        self.git("init", "-q")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def git(self, *a):
+        return subprocess.run(["git", *a], cwd=self.repo, env=self.env, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def commit(self, msg):
+        self.git("commit", "-q", "--allow-empty", "-m", msg)
+        return self.git("rev-parse", "HEAD")
+
+    def cli(self, *args, ok=True):
+        p = subprocess.run([sys.executable, CLI, "task", *args], cwd=self.repo, env=self.env, capture_output=True,
+                           text=True, timeout=30)
+        if ok:
+            self.assertEqual(p.returncode, 0, p.stderr)
+        return p
+
+    def row(self, wid="switcher"):
+        return FakeStdb.work[wid]
+
+    def steps(self, wid="switcher"):
+        return [(s["text"], s["state"]) for s in json.loads(self.row(wid)["steps"] or "[]")]
+
+    def test_plan_and_steps_history(self):
+        self.cli("add", "Switcher follows finger", "--id", "switcher", "--plan", "follow the finger; settle; test on device")
+        self.assertEqual(self.steps(), [("follow the finger", "next"), ("settle", "next"), ("test on device", "next")])
+        self.assertEqual((self.row()["progress_done"], self.row()["progress_total"]), (0, 3))
+        self.cli("set", "switcher", "--step", "follow the finger")
+        self.assertEqual(self.row()["step"], "follow the finger")
+        self.cli("set", "switcher", "--step", "settle")
+        self.assertEqual(self.steps(), [("follow the finger", "done"), ("settle", "current"), ("test on device", "next")])
+        self.assertEqual((self.row()["progress_done"], self.row()["progress_total"]), (1, 3))
+        # An unplanned step goes in as current, before what's still to come.
+        self.cli("set", "switcher", "--step", "fix the snap")
+        self.assertEqual(self.steps(), [("follow the finger", "done"), ("settle", "done"), ("fix the snap", "current"),
+                                        ("test on device", "next")])
+        self.assertEqual((self.row()["progress_done"], self.row()["progress_total"]), (2, 4))
+        self.cli("done", "switcher")
+        self.assertEqual(self.row()["status"], "done")
+        self.assertEqual(self.steps()[2], ("fix the snap", "done"))
+        self.assertEqual(self.row()["step"], "")
+        self.assertEqual((self.row()["progress_done"], self.row()["progress_total"]), (4, 4))
+
+    def test_explicit_progress_wins(self):
+        self.cli("add", "Kernel netfilter", "--id", "netfilter")
+        self.cli("set", "netfilter", "--progress", "3/10", "--step", "checking on device")
+        r = self.row("netfilter")
+        self.assertEqual((r["progress_done"], r["progress_total"], r["step"]), (3, 10, "checking on device"))
+        self.cli("set", "netfilter", "--step", "flashing")   # a step doesn't override an explicit count
+        self.assertEqual((self.row("netfilter")["progress_done"], self.row("netfilter")["progress_total"]), (3, 10))
+        self.assertEqual(self.steps("netfilter"), [("checking on device", "done"), ("flashing", "current")])
+        self.assertNotEqual(self.cli("set", "netfilter", "--progress", "11/10", ok=False).returncode, 0)
+        self.assertNotEqual(self.cli("set", "netfilter", "--progress", "three", ok=False).returncode, 0)
+
+    def test_commits_linked_and_mentioned(self):
+        a = self.commit("Switcher: follow the finger (task switcher)")
+        self.commit("unrelated work")
+        b = self.commit("Snap at the edges")
+        self.cli("add", "Switcher follows finger", "--id", "switcher")
+        self.cli("set", "switcher", "--commit", b[:7])
+        commits = json.loads(self.row()["commits"])
+        self.assertEqual([c["sha"] for c in commits], [a[:12], b[:12]])
+        self.assertEqual(commits[1]["subject"], "Snap at the edges")
+        self.cli("set", "switcher", "--commit", b)    # again: not twice
+        self.assertEqual(len(json.loads(self.row()["commits"])), 2)
+        self.assertNotEqual(self.cli("set", "switcher", "--commit", "not-a-sha", ok=False).returncode, 0)
+
+    def test_images_activity_and_list(self):
+        self.cli("add", "Glass on home", "--id", "glass", "--image", "/home/powos/design-qa/a.png")
+        self.cli("set", "glass", "--image", "/home/powos/design-qa/b.png", "--image", "/home/powos/design-qa/a.png",
+                 "--progress", "1/2", "--step", "review")
+        r = self.row("glass")
+        self.assertEqual(json.loads(r["images"]), ["/home/powos/design-qa/a.png", "/home/powos/design-qa/b.png"])
+        self.assertGreater(r["activity"], r["created"])
+        out = self.cli("list").stdout
+        self.assertIn("Glass on home 1/2 · review", out)
+
+    def test_nothing_changed_no_track_call(self):
+        self.cli("add", "Plain task", "--id", "plain")
+        self.cli("set", "plain", "--note", "just a note")
+        self.assertEqual([n for n, _ in FakeStdb.calls], ["work_set", "work_set"])
+
+    def test_help_documents_it(self):
+        out = subprocess.run([sys.executable, CLI, "help"], capture_output=True, text=True).stdout
+        for flag in ("--progress N/M", "--step TEXT", "--plan", "--commit SHA", "--image PATH"):
+            self.assertIn(flag, out)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

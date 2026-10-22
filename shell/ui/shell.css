@@ -13,11 +13,12 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  /* The host's insets (app.tsx), else the browser's safe areas; the keyboard lifts the bar above it. */
+  /* The host's insets (app.tsx), else the browser's safe areas; the keyboard lifts the bar above it, a pill's foot
+     clear of it (the pill sat flush on the keyboard's toolbar). */
   padding:
     var(--inset-top, env(safe-area-inset-top))
     var(--inset-right, env(safe-area-inset-right))
-    max(var(--inset-bottom, env(safe-area-inset-bottom)), var(--inset-keyboard, 0px))
+    max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot)))
     var(--inset-left, env(safe-area-inset-left));
 }
 
@@ -188,13 +189,35 @@
   display: flex;
   overflow-x: auto;
   overflow-y: hidden;
-  scroll-snap-type: x mandatory;
+  /* Proximity: the recent apps scroll freely with the finger (momentum), settling on the pinned page or the recents'
+     start only when let go near one. Sideways is the dock's own (gesture.ts inStrip), never home's page swipe. */
+  scroll-snap-type: x proximity;
   scrollbar-width: none;
   overscroll-behavior-x: contain;
   touch-action: pan-x;
 }
 .dock-pages::-webkit-scrollbar { display: none; }
 .dock-page { flex: 0 0 100%; display: flex; align-items: flex-start; gap: 4px; padding: 0 4px; scroll-snap-align: start; scroll-snap-stop: always; }
+/* The recent apps: one row as long as they are, each as wide as a pinned app (six to a width). */
+.dock-page.dock-recent { flex: 0 0 auto; scroll-snap-stop: normal; }
+.dock-recent .app { flex: 0 0 calc((100vw - 28px) / 6); }
+/* Faded at the edges where there's more to scroll, not cut: the right while there's more on, the left once scrolled
+   (a scroll-driven mask, on the compositor; without that support only the right). */
+@property --dock-fade-l { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --dock-fade-r { syntax: "<length>"; inherits: false; initial-value: 24px; }
+.dock.paged .dock-pages {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black var(--dock-fade-l), black calc(100% - var(--dock-fade-r)), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, black var(--dock-fade-l), black calc(100% - var(--dock-fade-r)), transparent 100%);
+}
+@supports (animation-timeline: scroll()) {
+  .dock.paged .dock-pages { animation: dock-fade linear both; animation-timeline: scroll(self x); }
+}
+@keyframes dock-fade {
+  0% { --dock-fade-l: 0px; --dock-fade-r: 24px; }
+  4% { --dock-fade-l: 24px; }
+  96% { --dock-fade-r: 24px; }
+  100% { --dock-fade-l: 24px; --dock-fade-r: 0px; }
+}
 .dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
 .dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
 .dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
@@ -588,6 +611,34 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 }
 .home-tile.joined[style*="--jt: 0"] > .tile { box-shadow: var(--lift-edge); }
 .group-shadow { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+
+/*
+ * A PowOS app island's network failure, shared by every app (host.net.error's message): one calm muted line - on a
+ * narrow tile it breaks between words ("Hue bridge / offline"), never mid-word or cut - sized to the tile's width; a
+ * tap retries (host.net.useRetry), a long press shows the raw detail (the log has it too). .alone: nothing else to
+ * show - it takes the tile's free space, centred, a little bigger, the app's icon (.island-offline-icon) greyed above.
+ */
+.island-offline {
+  container-type: inline-size; display: flex; align-items: center; gap: 0.45em; flex: none; align-self: stretch; min-width: 0;
+  color: var(--color-muted); background: none; border: 0; padding: 0; font: inherit; text-align: start; cursor: pointer;
+}
+.island-offline > span {
+  min-width: 0; overflow-wrap: normal; word-break: keep-all; text-wrap: balance; line-height: 1.25;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  font-size: clamp(11px, 6.5cqw, 13px);
+}
+.island-offline::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.6; }
+.island-offline.alone { container-type: size; flex: 1; flex-direction: column; justify-content: center; gap: 4px; }
+.island-offline.alone::before { display: none; }
+.island-offline.alone > span { font-size: clamp(11px, min(8cqw, 15cqh), 30px); text-align: center; }
+/* The app's own icon, greyed, above the line: what's offline at a glance (the line alone left a tile mostly blank). */
+.island-offline-icon { flex: none; width: min(50cqh, 38cqw); height: min(50cqh, 38cqw); max-width: none; max-height: none; opacity: 0.35; filter: grayscale(1); }
+/* A one-row phone tile: no room for the icon over two lines - the line alone, as big as the height allows. */
+@container (max-height: 70px) {
+  .island-offline-icon { display: none; }
+  .island-offline.alone > span { font-size: clamp(11px, min(7.5cqw, 30cqh), 20px); }
+}
+.island-stale { opacity: 0.45; filter: saturate(0.4); pointer-events: none; }
 
 /* The recent apps as a home widget (ui/recentwidget.tsx): a row (or rows) of icons, --recent-n to a row. */
 
@@ -1114,7 +1165,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 }
 html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 /* Its compose bar: the pill (.pill), where home's search sits. */
-.ai-screen .ai-compose { margin: 0 0 calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--pill-foot)); }
+.ai-screen .ai-compose { margin: 0 0 calc(max(var(--inset-bottom, 0px), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + var(--pill-foot)); }
 .ai-title { font-size: var(--text-item); font-weight: bold; }
 .ai-state { flex: 1; font-size: var(--text-small); color: var(--color-muted); }
 .ai-state.busy { color: var(--accent-text); }
@@ -1236,7 +1287,8 @@ html[data-mode="assist"] .assist {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  padding: 0 var(--edge) calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--edge));
+  /* Clear of the navigation handle and the keyboard by a pill's foot more than the edge (it sat tight on both). */
+  padding: 0 var(--edge) calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--pill-foot) + var(--edge));
   background: rgb(0 0 0 / 0.25);
 }
 /* Solid: over another app, what's under it would show through the field. */
@@ -1787,6 +1839,8 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .ag-idle.big .ag-c1 { justify-content: center; }
 .ag-idle.big .ag-who { flex: none; }
 .ag-big { font-size: 2.2em; line-height: 1.2; color: var(--color-muted); }
+/* Nobody, on a small tile or the desktop (agents.tsx IdleLine): the line alone, no card - centred where the card was. */
+.ag-idle-line { display: flex; align-items: center; justify-content: center; text-align: center; min-height: 0; white-space: nowrap; cursor: pointer; }
 /* A one-row tile: the head beside the cards, its two parts stacked. */
 @container (max-height: 96px) {
   .ag-in { flex-direction: row; align-items: stretch; padding: 0.3em 0.4em 0.3em 0.7em; }

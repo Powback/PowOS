@@ -2,8 +2,8 @@
  * The desktop's home (index.html?mode=desktop, powos-shell's surface under every window: docs/DESKTOP-SHELL.md):
  * the phone's home, its parts as they are - the grid of widgets, apps and PowOS apps' islands (grid.tsx, a tile's
  * corner resizes it), PowOS AI's pill with the launcher and the chat over it (bar.tsx, drawer.tsx: one conversation),
- * the pet on the tiles. Not the phone's: the dock, the pages beside home, the switcher, the shade - Plasma keeps its
- * own panel, notifications and task switcher.
+ * the pet on the tiles, the dock under the pill. Not the phone's: the pages beside home, the switcher, the shade -
+ * Plasma keeps its own panel, notifications and task switcher.
  *
  * The pill opens on a click (or "/" / Ctrl+Space while home has the keyboard); Escape or a click on home closes.
  */
@@ -12,6 +12,7 @@ import { effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { GlassSource } from "../types.ts";
 import { AppMenu } from "./apps.tsx";
+import { Dock } from "./home.tsx";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
 import { EditSheet } from "./editsheet.tsx";
@@ -82,6 +83,7 @@ export function Desktop() {
           </div>
         </div>
         <Bar />
+        <Dock />
         <AppMenu />
         <EditSheet />
       </div>

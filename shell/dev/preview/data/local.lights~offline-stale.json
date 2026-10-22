@@ -1,0 +1,38 @@
+{
+ "rows": {
+  "bridge": [
+   {
+    "id": 1,
+    "bridgeId": "001788fffe000000",
+    "ip": "192.168.50.20",
+    "name": "Hue Bridge"
+   }
+  ],
+  "pref": [
+   {
+    "rid": "room-0",
+    "hidden": false,
+    "order": 0
+   },
+   {
+    "rid": "room-1",
+    "hidden": true,
+    "order": 1
+   },
+   {
+    "rid": "room-2",
+    "hidden": true,
+    "order": 2
+   }
+  ]
+ },
+ "net": [
+  {
+   "match": "/clip/v2/resource",
+   "error": "failed to connect to /192.168.178.23 (port 443) from /10.84.12.7 (port 51344) after 10000ms: isConnected failed: ENETUNREACH (Network is unreachable)"
+  }
+ ],
+ "storage": {
+  "powos-lights:local.lights:resources": "[{\"id\": \"room-0\", \"type\": \"room\", \"metadata\": {\"name\": \"Living room\", \"archetype\": \"living_room\"}, \"children\": [{\"rid\": \"light-0\", \"rtype\": \"light\"}], \"services\": [{\"rid\": \"group-0\", \"rtype\": \"grouped_light\"}]}, {\"id\": \"group-0\", \"type\": \"grouped_light\", \"owner\": {\"rid\": \"room-0\", \"rtype\": \"room\"}, \"on\": {\"on\": true}, \"dimming\": {\"brightness\": 80}}, {\"id\": \"light-0\", \"type\": \"light\", \"metadata\": {\"name\": \"Living room lamp\"}, \"on\": {\"on\": true}, \"dimming\": {\"brightness\": 80}, \"color_temperature\": {\"mirek\": 366, \"mirek_valid\": true}}, {\"id\": \"room-1\", \"type\": \"room\", \"metadata\": {\"name\": \"Kitchen\", \"archetype\": \"kitchen\"}, \"children\": [{\"rid\": \"light-1\", \"rtype\": \"light\"}], \"services\": [{\"rid\": \"group-1\", \"rtype\": \"grouped_light\"}]}, {\"id\": \"group-1\", \"type\": \"grouped_light\", \"owner\": {\"rid\": \"room-1\", \"rtype\": \"room\"}, \"on\": {\"on\": true}, \"dimming\": {\"brightness\": 100}}, {\"id\": \"light-1\", \"type\": \"light\", \"metadata\": {\"name\": \"Kitchen lamp\"}, \"on\": {\"on\": true}, \"dimming\": {\"brightness\": 100}, \"color_temperature\": {\"mirek\": 366, \"mirek_valid\": true}}, {\"id\": \"room-2\", \"type\": \"room\", \"metadata\": {\"name\": \"Bedroom\", \"archetype\": \"bedroom\"}, \"children\": [{\"rid\": \"light-2\", \"rtype\": \"light\"}], \"services\": [{\"rid\": \"group-2\", \"rtype\": \"grouped_light\"}]}, {\"id\": \"group-2\", \"type\": \"grouped_light\", \"owner\": {\"rid\": \"room-2\", \"rtype\": \"room\"}, \"on\": {\"on\": false}, \"dimming\": {\"brightness\": 0}}, {\"id\": \"light-2\", \"type\": \"light\", \"metadata\": {\"name\": \"Bedroom lamp\"}, \"on\": {\"on\": false}, \"dimming\": {\"brightness\": 0}, \"color_temperature\": {\"mirek\": 366, \"mirek_valid\": true}}, {\"id\": \"room-3\", \"type\": \"room\", \"metadata\": {\"name\": \"Office\", \"archetype\": \"office\"}, \"children\": [{\"rid\": \"light-3\", \"rtype\": \"light\"}], \"services\": [{\"rid\": \"group-3\", \"rtype\": \"grouped_light\"}]}, {\"id\": \"group-3\", \"type\": \"grouped_light\", \"owner\": {\"rid\": \"room-3\", \"rtype\": \"room\"}, \"on\": {\"on\": true}, \"dimming\": {\"brightness\": 55}}, {\"id\": \"light-3\", \"type\": \"light\", \"metadata\": {\"name\": \"Office lamp\"}, \"on\": {\"on\": true}, \"dimming\": {\"brightness\": 55}, \"color_temperature\": {\"mirek\": 366, \"mirek_valid\": true}}, {\"id\": \"room-4\", \"type\": \"room\", \"metadata\": {\"name\": \"Hallway\", \"archetype\": \"other\"}, \"children\": [{\"rid\": \"light-4\", \"rtype\": \"light\"}], \"services\": [{\"rid\": \"group-4\", \"rtype\": \"grouped_light\"}]}, {\"id\": \"group-4\", \"type\": \"grouped_light\", \"owner\": {\"rid\": \"room-4\", \"rtype\": \"room\"}, \"on\": {\"on\": false}, \"dimming\": {\"brightness\": 0}}, {\"id\": \"light-4\", \"type\": \"light\", \"metadata\": {\"name\": \"Hallway lamp\"}, \"on\": {\"on\": false}, \"dimming\": {\"brightness\": 0}, \"color_temperature\": {\"mirek\": 366, \"mirek_valid\": true}}, {\"id\": \"scene-0\", \"type\": \"scene\", \"metadata\": {\"name\": \"Relax\"}, \"group\": {\"rid\": \"room-0\", \"rtype\": \"room\"}, \"status\": {\"active\": \"active\"}, \"palette\": {\"color\": [{\"color\": {\"xy\": {\"x\": 0.5, \"y\": 0.41}}}]}}, {\"id\": \"scene-1\", \"type\": \"scene\", \"metadata\": {\"name\": \"Concentrate\"}, \"group\": {\"rid\": \"room-0\", \"rtype\": \"room\"}, \"status\": {\"active\": \"inactive\"}, \"palette\": {\"color\": [{\"color\": {\"xy\": {\"x\": 0.37, \"y\": 0.37}}}]}}, {\"id\": \"scene-2\", \"type\": \"scene\", \"metadata\": {\"name\": \"Nightlight\"}, \"group\": {\"rid\": \"room-0\", \"rtype\": \"room\"}, \"status\": {\"active\": \"inactive\"}, \"palette\": {\"color\": [{\"color\": {\"xy\": {\"x\": 0.56, \"y\": 0.4}}}]}}, {\"id\": \"scene-3\", \"type\": \"scene\", \"metadata\": {\"name\": \"Energize\"}, \"group\": {\"rid\": \"room-0\", \"rtype\": \"room\"}, \"status\": {\"active\": \"inactive\"}, \"palette\": {\"color\": [{\"color\": {\"xy\": {\"x\": 0.32, \"y\": 0.33}}}]}}]"
+ }
+}

@@ -22,6 +22,8 @@ const ROOT = "/shell";
 const OUT = "/out";
 const SCALE = Number(process.env.SHOTS_SCALE || 1);
 const ONLY = process.env.SHOTS_ONLY ? new RegExp(process.env.SHOTS_ONLY) : null;
+/** A shot had overlapping tiles or missing glyphs (SHOTS_STRICT=1 fails the run on it). */
+let strictFailed = false;
 
 /** The phone's screens (OnePlus Open, density 442: 2.7625 px a CSS px) and its insets there. */
 const SIZES = {
@@ -183,6 +185,11 @@ const SCENES = [
   ["ai-v2-actions", "home", board(true), "wallpaper"],
   ["ai-v2-open", "home", board(true) + " document.querySelectorAll('.ai-work-list .ai-fold, .ai-history .ai-fold').forEach((b) => b.click()); await sleep(100); document.querySelector('.ai-screen .ai-item')?.click(); await sleep(100); document.querySelector('.ai-work-list').scrollIntoView();", "wallpaper"],
   ["ai-v2-calm", "home", board(true).replace("P.board.value = B.map", "P.board.value = B.filter((r) => r.status !== 'waiting').map"), "wallpaper"],
+  ["queued", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
+  ["queued-ai", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.page.value = -1;`, "wallpaper"],
+  ["kbd-chat", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
+  ["kbd-ai", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.page.value = -1;`, "wallpaper"],
+  ["kbd-assist", "assist", "E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 0 }); await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp });", "app"],
   ["ai-chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.page.value = -1;`, "wallpaper"],
   ["ai-compose", "home", "S.page.value = -1; await sleep(300); const f = document.querySelector('.ai-compose textarea, .ai-compose input'); f?.focus(); if (f) { f.value = 'summarise what the agents did overnight and what needs me'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
   ["widget-screen", "home", "const w = S.home.value.items.find((i) => i.kind === 'widget'); S.screen.value = { key: w.key, title: 'weather' };", "wallpaper"],
@@ -284,6 +291,9 @@ function file(url) {
   if (p.split("/").includes("..")) return null;
   if (p === "__wallpaper.jpg" && WALLPAPER) return { path: WALLPAPER, name: p };
   if (p === "dev/sample-trees.json") return { path: TREES, name: p };
+  // The symbols font (gate.sh mounts the real file): theme.css's ./fonts/ and the host's /_font/symbols.
+  if ((p === "fonts/nerd_symbols.ttf" || p === "_font/symbols") && fs.existsSync("/fonts/nerd_symbols.ttf"))
+    return { path: "/fonts/nerd_symbols.ttf", name: "nerd_symbols.ttf" };
   const f = path.join(ROOT, p);
   return fs.existsSync(f) && fs.statSync(f).isFile() ? { path: f, name: p } : null;
 }
@@ -399,7 +409,9 @@ try {
   fs.writeFileSync(path.join(OUT, "report.json"), JSON.stringify(report, null, 1));
   await browser.close();
   if (treesWrong) console.error(`shots: ${treesWrong} shot(s) drew mock OWL trees of another theme than ${THEME_NAME}`);
-  process.exit(treesWrong ? 1 : 0);
+  const strict = strictFailed && process.env.SHOTS_STRICT === "1";
+  if (strict) console.error("shots: FAIL - overlapping tiles, partial joins, uneven desktop gutters or missing glyphs (report.json)");
+  process.exit(treesWrong || strict ? 1 : 0);
 }
 
 async function shoot(name, mode, setup, behind, sizeName, size, touch) {
@@ -491,6 +503,75 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
       // SHOTS_PROBE: an expression evaluated in the page once it settled, its value printed (debugging a render).
       if (process.env.SHOTS_PROBE)
         console.log(`probe ${name}-${sizeName}:`, JSON.stringify(await page.evaluate(process.env.SHOTS_PROBE).catch((e) => e.message)));
+      // Layout checks: tiles that overlap (more than touching - merged tiles touch) and glyphs that can't render
+      // (a font that failed or 404'd draws tofu). SHOTS_STRICT=1 fails the run on either.
+      const layout = await page
+        .evaluate(() => {
+          const vw = innerWidth;
+          const vh = innerHeight;
+          const tiles = [...document.querySelectorAll(".home-tile")]
+            .map((t) => ({ name: (t.querySelector("[data-key], .owl, .island-face, .ag-panel") ?? t).className.toString().slice(0, 24) || t.className.slice(0, 24), r: t.getBoundingClientRect() }))
+            .filter(({ r }) => r.width > 0 && r.right > 0 && r.left < vw && r.bottom > 0 && r.top < vh);
+          const overlaps = [];
+          for (let i = 0; i < tiles.length; i++)
+            for (let j = i + 1; j < tiles.length; j++) {
+              const a = tiles[i].r;
+              const b = tiles[j].r;
+              const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+              const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+              if (w > 1 && h > 1) overlaps.push(`${tiles[i].name} x ${tiles[j].name} (${Math.round(w)}x${Math.round(h)} px)`);
+            }
+          // Merged tiles: an edge joined to a neighbour must be joined along all of it - a tile whose edge touches merged
+          // neighbours over part of it only draws that whole edge as joined, a ragged step at the seam (the user's
+          // circled games / fetch L, 2026-10-22).
+          const joinedTiles = [...document.querySelectorAll(".home-tile.joined")]
+            .map((t) => ({ name: (t.querySelector("[data-key], .owl, .island-face, .ag-panel") ?? t).className.toString().slice(0, 24), r: t.getBoundingClientRect() }))
+            .filter(({ r }) => r.width > 0 && r.right > 0 && r.left < vw);
+          const cover = (lo, hi, spans) => {
+            let c = 0;
+            let at = lo;
+            for (const [a, b] of spans.sort((p, q) => p[0] - q[0])) {
+              const s0 = Math.max(a, at);
+              const s1 = Math.min(b, hi);
+              if (s1 > s0) (c += s1 - s0), (at = s1);
+            }
+            return c / Math.max(1, hi - lo);
+          };
+          for (const A of joinedTiles) {
+            const a = A.r;
+            const below = joinedTiles.filter((B) => B !== A && Math.abs(B.r.top - a.bottom) <= 1).map((B) => [B.r.left, B.r.right]);
+            const right = joinedTiles.filter((B) => B !== A && Math.abs(B.r.left - a.right) <= 1).map((B) => [B.r.top, B.r.bottom]);
+            const cb = cover(a.left, a.right, below.filter(([l, r]) => r > a.left + 1 && l < a.right - 1));
+            const cr = cover(a.top, a.bottom, right.filter(([t, b]) => b > a.top + 1 && t < a.bottom - 1));
+            if (cb > 0.01 && cb < 0.99) overlaps.push(`partial join: ${A.name} bottom edge ${Math.round(cb * 100)}% joined`);
+            if (cr > 0.01 && cr < 0.99) overlaps.push(`partial join: ${A.name} right edge ${Math.round(cr * 100)}% joined`);
+          }
+          // The desktop's grid: one even gutter between neighbouring tiles in a row (its tiles never merge or touch).
+          const gutters = [];
+          if (document.documentElement.dataset.mode === "desktop") {
+            const rows = new Map();
+            for (const t of tiles) {
+              const k = [...rows.keys()].find((y) => Math.abs(y - t.r.top) <= 2) ?? t.r.top;
+              rows.set(k, [...(rows.get(k) ?? []), t.r]);
+            }
+            const gaps = [];
+            for (const row of rows.values()) {
+              row.sort((a, b) => a.left - b.left);
+              for (let i = 1; i < row.length; i++) gaps.push(Math.round(row[i].left - row[i - 1].right));
+            }
+            if (gaps.length && Math.max(...gaps) - Math.min(...gaps) > 2) gutters.push(`uneven gutters: ${gaps.join(", ")} px`);
+          }
+          const fonts = [...document.fonts].filter((f) => f.status === "error").map((f) => f.family);
+          const missing = performance
+            .getEntriesByType("resource")
+            .filter((e) => e.responseStatus >= 400 && /font|\.ttf|\.woff/.test(e.name))
+            .map((e) => e.name.replace(location.origin, ""));
+          return { overlaps: [...overlaps, ...gutters], glyphs: [...new Set([...fonts, ...missing])] };
+        })
+        .catch(() => ({ overlaps: [], glyphs: [] }));
+      for (const o of layout.overlaps) errors.push(`overlap: ${o}`);
+      for (const g of layout.glyphs) errors.push(`missing glyphs: ${g}`);
+      if (layout.overlaps.length || layout.glyphs.length) strictFailed = true;
       const out = path.join(OUT, `${name}-${sizeName}.png`);
       await page.screenshot({ path: out });
       // Contrast: the same frame without its text, under each run of text.

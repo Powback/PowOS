@@ -6,7 +6,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { chat, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import type { ChatItem } from "../types.ts";
-import { Said, Thread, ToolRun } from "./rich.tsx";
+import { Queued, Said, Thread, ToolRun } from "./rich.tsx";
 
 /** How much of the conversation the launcher shows; the rest is in PowOS AI's page (left of home). */
 const SHOWN = 40;
@@ -48,6 +48,7 @@ export function ChatView({ head = true }: { head?: boolean } = {}) {
       )}
       <Thread items={items.slice(-SHOWN)} render={(item, reply) => <Item item={item} reply={reply} />} />
       {busy && <div class="msg tool muted thinking">thinking…</div>}
+      <Queued />
       {typed && !busy && <div class="msg ask muted">↵ ask “{typed}”</div>}
       {!items.length && !typed && <div class="msg muted">Type anything that isn't an app to ask PowOS AI.</div>}
     </div>

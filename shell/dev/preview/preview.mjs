@@ -136,6 +136,13 @@ function plan() {
       const data = path.join(WORK, "data", `${m.id}.json`);
       widgets.push({ id: `${m.id}.${w.id}`, kind: "island", title: `${m.name ?? m.id}: ${w.name ?? w.id} (PowOS app island)`, app: m.id, entry: w.entry, minSize: min,
         data: fs.existsSync(data) ? JSON.parse(fs.readFileSync(data, "utf8")) : undefined });
+      // Island data variants too: data/<app>~<variant>.json (e.g. local.lights~offline - the bridge unreachable from
+      // mobile data: the calm line, never the raw "failed to connect to (192.168...)" wrapped and cut).
+      for (const d of fs.readdirSync(path.join(WORK, "data")).sort()) {
+        const v = d.match(new RegExp(`^${m.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}~([\\w-]+)\\.json$`));
+        if (v) widgets.push({ id: `${m.id}.${w.id}~${v[1]}`, kind: "island", title: `${m.name ?? m.id}: ${w.name ?? w.id}, ${v[1]} (PowOS app island)`, app: m.id, entry: w.entry,
+          minSize: min, data: JSON.parse(fs.readFileSync(path.join(WORK, "data", d), "utf8")) });
+      }
     }
   }
   for (const p of ["agents", "recents"]) widgets.push({ id: `panel.${p}`, kind: "panel", title: `${p} (shell panel)`, panel: p, minSize: [2, 1] });

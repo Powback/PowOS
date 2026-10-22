@@ -14,7 +14,7 @@ html[data-mode="desktop"] .home > .bar {
 html[data-mode="desktop"] .launcher {
   left: max(0px, calc(50% - var(--desk-column) / 2));
   right: max(0px, calc(50% - var(--desk-column) / 2));
-  bottom: calc(-1 * (48px + var(--edge)));
+  bottom: calc(-1 * (48px + var(--strip-height) + var(--edge)));
 }
 /*
  * The launcher and its chat float as a column over the whole wallpaper: the reference fill with a deeper dim under
@@ -51,4 +51,12 @@ html[data-mode="desktop"] .desk-wall {
   inset: 0;
   background: var(--color-background) center / cover no-repeat;
   pointer-events: none;
+}
+/* The dock under the pill: its icons at their folded spacing in the middle, not spread across a desktop. */
+html[data-mode="desktop"] .dock-page {
+  justify-content: center;
+  gap: 12px;
+}
+html[data-mode="desktop"] .dock .app {
+  flex: 0 0 72px;
 }

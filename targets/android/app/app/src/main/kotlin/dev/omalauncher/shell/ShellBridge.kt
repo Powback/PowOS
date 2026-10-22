@@ -209,6 +209,7 @@ class ShellBridge(
                 // conversation already, a swipe from home.
                 if (a.optBoolean(1, true)) PowosAiActivity.keepInRecents(context) else Unit
             }
+            "ai.unqueue" -> PowosAiChat.unqueue(a.getLong(0))
             "ai.open" -> PowosAiActivity.open(context, null)
             // "Create app": PowOS AI in a fresh thread of its own building it (PowosAiChat.newApp); back to the main one.
             "ai.newApp" -> PowosAiChat.newApp(context.applicationContext, a.getString(0))
@@ -621,6 +622,7 @@ class ShellBridge(
             .put("busy", PowosAiChat.busy)
             .put("items", JSONArray(PowosAiChat.items.map { it.json() }))
             .put("thread", PowosAiChat.thread?.json() ?: JSONObject.NULL)
+            .put("queued", JSONArray(PowosAiChat.queued.map { it.json() }))
 
     /**
      * [key]'s icon ("a:<key>" / "l:<id>"): its file's URL (ShellIcons), the same until the icon changes. One never

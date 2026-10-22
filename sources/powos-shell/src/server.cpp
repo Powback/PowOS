@@ -160,6 +160,23 @@ void ShellServer::icon(QWebEngineUrlRequestJob *job)
         icon = QIcon(path);
     else
         icon = QIcon::fromTheme(path);
+    if (icon.isNull() && !path.contains(QLatin1Char('/'))) {
+        // An app's own icon outside the theme's lookup (Dolphin's org.kde.dolphin is only an SVG in hicolor's scalable
+        // folder, which fromTheme missed): hicolor's sizes and /usr/share/pixmaps by file name, the largest first.
+        for (const QString &dir : {QStringLiteral("/usr/share/icons/hicolor/scalable/apps"), QStringLiteral("/usr/share/icons/hicolor/512x512/apps"),
+                                   QStringLiteral("/usr/share/icons/hicolor/256x256/apps"), QStringLiteral("/usr/share/icons/hicolor/128x128/apps"),
+                                   QStringLiteral("/usr/share/icons/hicolor/64x64/apps"), QStringLiteral("/usr/share/icons/hicolor/48x48/apps"),
+                                   QStringLiteral("/usr/share/pixmaps")}) {
+            for (const QString &ext : {QStringLiteral(".svg"), QStringLiteral(".png")}) {
+                if (QFileInfo(dir + QLatin1Char('/') + path + ext).isFile()) {
+                    icon = QIcon(dir + QLatin1Char('/') + path + ext);
+                    break;
+                }
+            }
+            if (!icon.isNull())
+                break;
+        }
+    }
     if (icon.isNull())
         icon = QIcon::fromTheme(QStringLiteral("application-x-executable"));
     auto *buffer = new QBuffer(job);

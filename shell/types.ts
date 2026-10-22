@@ -240,6 +240,11 @@ export interface Chat {
   items: ChatItem[];
   /** A thread of its own open instead of the main conversation (PowosAiChat.Thread): "create app"'s. */
   thread?: { dir: string; title: string; kind: string } | null;
+  /**
+   * Sent mid-turn, waiting for theirs, oldest first (PowosAiChat.queued): every chat shows them at once. Absent from a
+   * host that doesn't queue (an older APK): the page queues itself (assistant.ts).
+   */
+  queued?: { id: number; text: string }[];
 }
 
 export interface Bridge {
@@ -341,6 +346,8 @@ export interface Bridge {
     chat(): Promise<Chat>;
     /** Asks it: one turn, streamed into the chat. [recents] false: not also put into the app switcher (that briefly shows the chat activity over home). */
     send(text: string, recents?: boolean): Promise<void>;
+    /** Takes a queued message back before its turn: it's never sent (?: hosts from before the queue). */
+    unqueue?(id: number): Promise<void>;
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
     /**

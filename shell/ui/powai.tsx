@@ -19,8 +19,8 @@ import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
-import { Said, Thread, ToolRun, toolLabel } from "./rich.tsx";
-import { askQueued, openAssistant } from "./assistant.ts";
+import { Queued, Said, Thread, ToolRun, toolLabel } from "./rich.tsx";
+import { askQueued, openAssistant, waiting } from "./assistant.ts";
 
 const sessions = signal<AgentSession[]>([]);
 const mail = signal<AgentMail[]>([]);
@@ -43,8 +43,8 @@ const send = () => {
   const text = draft.value.trim();
   if (!text) return;
   draft.value = "";
-  // false: not into the app switcher - doing that briefly showed the chat activity over home (a black screen).
-  powos.ai.send(text, false);
+  // The one queue (assistant.ts): mid-turn it waits as a queued bubble, here and in every other chat.
+  askQueued(text);
 };
 
 const pageMic: MicTarget = {
@@ -92,6 +92,11 @@ export function Now() {
         </div>
       ))}
       {busy && !turn.answer && <div class="ai-thinking muted">thinking…</div>}
+      {waiting.value.length > 0 && (
+        <div class="ai-queued">
+          <Queued />
+        </div>
+      )}
     </section>
   );
 }
