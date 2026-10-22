@@ -41,6 +41,12 @@ Bridge::Bridge(const Services &services, QObject *parent)
 void Bridge::native(const QString &message)
 {
     if (message == QLatin1String("b.hello")) {
+        // The page draws its own wallpaper (system.glass): KWin's blur behind the window would be under that picture,
+        // so the page frosts it itself (ui/glass.ts), as the phone's home without live blur does.
+        if (!desktopWallpaper().isEmpty()) {
+            Q_EMIT nativeMessage(QStringLiteral("b.state 0"));
+            return;
+        }
         // The compositor blurs behind this page's surfaces when KWin's blur effect is on (the page tints only, then).
         const bool blur = KWindowEffects::isEffectAvailable(KWindowEffects::BlurBehind);
         Q_EMIT nativeMessage(blur ? QStringLiteral("b.state 1") : QStringLiteral("b.state 0"));
