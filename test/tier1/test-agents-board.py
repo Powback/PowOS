@@ -180,6 +180,29 @@ class BoardTest(unittest.TestCase):
         out = self.cli("list").stdout
         self.assertIn("Glass on home 1/2 · review", out)
 
+    def test_owner_unowned_and_new(self):
+        self.cli("new", "Drawer snaps", "--id", "drawer")
+        self.cli("add", "Widget sizes", "--id", "widgets", "--owner", "coder")
+        self.cli("add", "Lights app", "--id", "lights", "--owner", "powos-widgets")
+        free = self.cli("list", "--unowned").stdout
+        self.assertIn("[drawer]", free)
+        self.assertIn("[widgets]", free)
+        self.assertNotIn("[lights]", free)
+        self.cli("set", "drawer", "--owner", "powos-drawer")
+        self.assertEqual(self.row("drawer")["owner"], "powos-drawer")
+        self.assertNotIn("[drawer]", self.cli("list", "--unowned").stdout)
+        mine = self.cli("list", "--owner", "powos-drawer").stdout
+        self.assertIn("Drawer snaps", mine)
+        self.assertIn("powos-drawer", mine)
+        self.assertNotIn("[lights]", mine)
+
+    def test_image_rm(self):
+        self.cli("add", "Recents", "--id", "recents", "--image", "/Users/mac/dead.png", "--image", "/home/powos/design-qa/ok.png")
+        self.cli("set", "recents", "--image-rm", "/Users/mac/dead.png")
+        self.assertEqual(json.loads(self.row("recents")["images"]), ["/home/powos/design-qa/ok.png"])
+        self.cli("set", "recents", "--image-rm", "/home/powos/design-qa/ok.png")
+        self.assertEqual(self.row("recents")["images"], "")
+
     def test_nothing_changed_no_track_call(self):
         self.cli("add", "Plain task", "--id", "plain")
         self.cli("set", "plain", "--note", "just a note")
@@ -187,7 +210,8 @@ class BoardTest(unittest.TestCase):
 
     def test_help_documents_it(self):
         out = subprocess.run([sys.executable, CLI, "help"], capture_output=True, text=True).stdout
-        for flag in ("--progress N/M", "--step TEXT", "--plan", "--commit SHA", "--image PATH"):
+        for flag in ("--progress N/M", "--step TEXT", "--plan", "--commit SHA", "--image PATH", "--image-rm PATH",
+                     "--unowned", "add|new"):
             self.assertIn(flag, out)
 
 

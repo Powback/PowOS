@@ -33,14 +33,14 @@ the manager adds a task when it hands work out, and whoever owns it moves it (bl
 done). Titles are short and plain ("Switcher follows finger"), never a commit or a file name.
 
 Usage:
-  powos agents task add <title...> [--project P] [--owner ROLE] [--status S] [--note TEXT] [--id ID]
+  powos agents task add|new <title...> [--project P] [--owner ROLE] [--status S] [--note TEXT] [--id ID]
                                    Add a task (status default: working). Prints its id (from the title
                                    unless --id). A task that's already there - the same id, or an open
                                    task with a very similar title - isn't added twice: its id is printed
                                    (use set to change it). No --project: inferred from owner and title.
   powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT] [--project P]
                                    [--progress N/M] [--step TEXT] [--plan "a; b; c"] [--commit SHA]...
-                                   [--image PATH]...
+                                   [--image PATH]... [--image-rm PATH]...
                                    Change a task. <task>: its id, or words of its title (one match).
   powos agents task done <task> [--note TEXT] [--commit SHA]...
                                    Mark it done (stays under "done recently" for a week).
@@ -54,17 +54,21 @@ How far along (the page shows a bar, the steps done / now / next, the commits an
                    mentions the task id (git log of the repo you're in, last 30 days) are linked by themselves
                    on every add/set/done.
   --image PATH     a review image for it (repeatable; e.g. /home/powos/design-qa/<file>.png).
+  --image-rm PATH  drop an image entry (a dead path); repeatable.
   task done marks the current step done and fills the bar.
   powos agents task rm <task>      Remove one (a duplicate, a mistake).
-  powos agents task list [--all] [--json] [--project P]
-                                   The open tasks, by project (--all: with the done ones).
+  powos agents task list [--all] [--json] [--project P] [--unowned] [--owner ROLE]
+                                   The open tasks, by project (--all: with the done ones). --unowned: the
+                                   free ones (no owner, or only the generic "coder") - an idle expert takes
+                                   one with `task set <t> --owner <expert>`. --owner: one expert's.
   powos agents task infer          Give every task without a project the inferred one.
 
 Statuses: working | blocked | waiting (on the user) | done.
 Projects group the page: one per product or area, "<product> · <area>" for PowOS's parts -
 "PowOS · phone UI", "PowOS · kernel", "PowOS · apps platform", "Shopping app", "SpaceTimeAI".
 Reuse a project name that's on the board (task list shows them) rather than a new spelling.
---owner is the agent's role (switcher, manager, coder...); leave it off when nobody has it yet.
+--owner is the expert that has it (powos-widgets, powos-design, powos-drawer, powos-comms...): set it when
+you take a task, so everyone sees what's free (`task list --unowned`). Leave it off when nobody has it yet.
 
 Examples:
   powos agents task add "Switcher follows finger" --owner switcher --project "PowOS · phone UI"
@@ -240,7 +244,9 @@ def opts(argv, spec):
     return got, rest
 
 
-TRACK = ["progress", "step", "plan", "commit*", "image*", "commits-json"]
+TRACK = ["progress", "step", "plan", "commit*", "image*", "image-rm*", "commits-json"]
+# Owners that say nobody in particular has it: `task list --unowned` lists these as free.
+GENERIC_OWNERS = ("", "coder")
 
 
 def _jl(s):
@@ -263,7 +269,7 @@ def progress_of(s):
     return int(m.group(1)), int(m.group(2))
 
 
-def track(w, progress=None, step=None, plan=None, commits=(), images=(), done=False):
+def track(w, progress=None, step=None, plan=None, commits=(), images=(), done=False, images_rm=()):
     """The work row [w]'s progress columns after this change: the step history kept (the current step done when the
     next one starts), the count following the steps unless --progress set it. None when nothing changes."""
     steps = [{"text": _line(x.get("text", "")), "state": x.get("state", "next")} for x in _jl(w.get("steps", ""))
@@ -303,6 +309,7 @@ def track(w, progress=None, step=None, plan=None, commits=(), images=(), done=Fa
             cs.append({"sha": sha, "subject": _line(c.get("subject", ""))})
     ims = [p for p in _jl(w.get("images", "")) if isinstance(p, str)]
     ims += [p for p in images if p not in ims]
+    ims = [p for p in ims if p not in images_rm]
     new = {"progress_done": pd, "progress_total": pt, "step": cur,
            "steps": json.dumps(steps, ensure_ascii=False, separators=(",", ":")) if steps else "",
            "commits": json.dumps(cs, ensure_ascii=False, separators=(",", ":")) if cs else "",
@@ -343,9 +350,9 @@ def resolve_commits(argv):
     """Before anything else (the command may run on another host, the phone, where the caller's repo isn't): the
     --commit SHAs resolved here, in the caller's git repo, plus the commits there that mention the task's id (when the
     command names it by id, or add makes it), into one --commits-json. argv: after "task"."""
-    if not argv or argv[0] not in ("add", "set", "done"):
+    if not argv or argv[0] not in ("add", "new", "set", "done"):
         return argv
-    verb = argv[0]
+    verb = "add" if argv[0] == "new" else argv[0]
     o, rest = opts(argv[1:], ["owner", "status", "note", "title", "project", "id"] + TRACK)
     wid = o.get("id") or (slug(" ".join(rest)) if verb == "add" else " ".join(rest))
     mention = wid if re.fullmatch(r"[a-z0-9][a-z0-9._-]{3,63}", wid or "") else None
@@ -371,7 +378,7 @@ def apply_track(w, o, done=False):
     # Run where the repo is (a phone-side run has none; the caller's side resolved them already): its id's mentions.
     commits += git_commits([], mention=w["id"])
     new = track(w, progress_of(o["progress"]) if o.get("progress") else None, o.get("step"), o.get("plan"),
-                commits, o.get("image") or [], done=done)
+                commits, o.get("image") or [], done=done, images_rm=o.get("image-rm") or [])
     if new:
         call("work_track", w["id"], new["progress_done"], new["progress_total"], new["step"], new["steps"],
              new["commits"], new["images"])
@@ -380,6 +387,8 @@ def apply_track(w, o, done=False):
 def task(argv):
     verb = argv[0] if argv else "list"
     argv = argv[1:]
+    if verb == "new":
+        verb = "add"
     if verb == "add":
         o, rest = opts(argv, ["owner", "status", "note", "id", "project"] + TRACK)
         title = " ".join(rest).strip()
@@ -412,7 +421,7 @@ def task(argv):
         apply_track(w, o, done=st == "done")
         print(w["id"])
     elif verb == "done":
-        o, rest = opts(argv, ["note", "commit*", "image*", "commits-json"])
+        o, rest = opts(argv, ["note", "commit*", "image*", "image-rm*", "commits-json"])
         if not rest:
             die("usage: powos agents task done <task> [--note TEXT]")
         w = find(" ".join(rest))
@@ -433,9 +442,11 @@ def task(argv):
                 n += 1
         print(f"{n} task(s) given a project")
     elif verb in ("list", "ls"):
-        o, _ = opts(argv, ["all!", "json!", "project"])
+        o, _ = opts(argv, ["all!", "json!", "project", "unowned!", "owner"])
         ws = [w for w in rows() if (o.get("all") or w["status"] != "done")
-              and (not o.get("project") or w.get("project") == o["project"])]
+              and (not o.get("project") or w.get("project") == o["project"])
+              and (not o.get("unowned") or (w.get("owner") or "") in GENERIC_OWNERS)
+              and (not o.get("owner") or w.get("owner") == o["owner"])]
         ws.sort(key=lambda w: (w.get("project") or "~", w["status"] == "done", -int(w["updated"])))
         if o.get("json"):
             print(json.dumps(ws, indent=1))
