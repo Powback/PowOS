@@ -13,20 +13,25 @@ window_lock keyboard.sh 120
 ime() { "$A" shell "dumpsys input_method | grep -m1 -oE 'mInputShown=[a-z]+'" | tr -d '\r'; }
 user() { # a command in the PowOS session as its user, its output back
   local f=$OUT/.u.sh; printf '%s\n' "$1" > "$f"; "$here/user.sh" "$f" 2>/dev/null | grep -v "file pushed"; }
-check() { # check <name> <launch command (prints its pid)>
-  local name=$1 cmd=$2 pid
+# KWin's log (its stderr: "Android keyboard shown/hidden - <why>"), read as root from its fd 2.
+kwinlog() { "$A" shell "su -c 'k=\$(pidof kwin_wayland | cut -d\" \" -f1); f=\$(readlink /proc/\$k/fd/2); case \$f in /*) tail -n 400 /data/powos/root\$f 2>/dev/null || tail -n 400 \$f ;; esac'" | tr -d '\r' | grep -E "Android keyboard" | tail -4; }
+check() { # check <name> <command for the PowOS session, its args carrying the marker powos-kb-check>
+  local name=$1 cmd=$2
   "$A" shell logcat -c
   echo "== $name: before $(ime)"
-  pid=$(user "$cmd" | tail -1); echo "   started pid $pid"
-  sleep 6
+  # Opened as a launcher tap opens a Linux app (the debug build's exec extra): the PowOS desktop comes to the front with it.
+  "$A" shell am start -n com.powos.app/dev.omalauncher.shell.ShellActivity --es exec "'$cmd'" >/dev/null
+  sleep 8
   echo "   open: $(ime); focus: $("$A" shell 'dumpsys window | grep -m1 mCurrentFocus' | tr -d '\r' | sed 's/.*u0 //')"
-  "$A" shell "logcat -d -v time | grep -iE 'Android keyboard|SystemIME|setKeyboard|PowosKeyboard' | tail -5"
+  "$A" shell "logcat -d -v time | grep -iE 'Android keyboard|SystemIME|setKeyboard|PowosKeyboard|launch:' | tail -5"
+  kwinlog
   "$A" shell "screencap -p /data/local/tmp/kb-$name.png"; "$A" pull /data/local/tmp/kb-$name.png "$OUT/" >/dev/null 2>&1; "$A" shell rm -f /data/local/tmp/kb-$name.png
-  [ -n "$pid" ] && user "kill $pid 2>/dev/null; true" >/dev/null
+  # Only what this check opened (its marker in the command line).
+  user "pkill -f powos-kb-check; true" >/dev/null
   sleep 3
   echo "   closed: $(ime)"
 }
-check wayland 'XDG_RUNTIME_DIR=/run/powos-app WAYLAND_DISPLAY=wayland-0 QT_QPA_PLATFORM=wayland nohup kwrite >/dev/null 2>&1 & echo $!'
-check x11 'DISPLAY=:0 GDK_BACKEND=x11 nohup zenity --entry --title "keyboard check" --text "type here" >/dev/null 2>&1 & echo $!'
+check wayland 'kwrite /tmp/powos-kb-check.txt'
+check x11 'env GDK_BACKEND=x11 zenity --entry --title powos-kb-check --text type-here'
 "$A" shell input keyevent KEYCODE_HOME
 echo "out: $OUT"
