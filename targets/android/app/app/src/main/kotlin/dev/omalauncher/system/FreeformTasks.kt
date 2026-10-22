@@ -147,6 +147,7 @@ object FreeformTasks {
             val type = Class.forName("android.app.ITaskStackListener")
             val listener = Class.forName("android.app.ITaskStackListener\$Stub").getMethod("asInterface", IBinder::class.java).invoke(null, binder)
             atm().javaClass.getMethod("registerTaskStackListener", type).invoke(atm(), listener)
+            Log.i(TAG, "task stack listener on")
             val stop: () -> Unit = {
                 runCatching { atm().javaClass.getMethod("unregisterTaskStackListener", type).invoke(atm(), listener) }
             }

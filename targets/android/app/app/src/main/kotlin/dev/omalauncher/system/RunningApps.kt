@@ -1,5 +1,6 @@
 package dev.omalauncher.system
 
+import android.app.ActivityManager
 import android.content.Context
 import android.os.FileObserver
 import android.os.Handler
@@ -12,15 +13,16 @@ import java.io.File
 
 /**
  * Which apps run, for the dot under their icons (shell/ui/running.ts, "apps.running"): Android's are the apps with a
- * task in recents (the task stack listener says when one opens or goes - [FreeformTasks.listen]); the PowOS session's
+ * running task in any windowing mode (the task stack listener says when one opens or goes - [FreeformTasks.listen]); the PowOS session's
  * Linux apps, Steam and its games are what powos-sleep-gui writes to running/apps.json in the run dir whenever a
  * window comes or goes or an app freezes or thaws ({"classes": {windowClass: "running" | "frozen"}}). Nothing polls.
  */
 object RunningApps {
     private const val FILE = "apps.json"
     private const val SETTLE_MS = 120L
+    private const val MAX_TASKS = 64
 
-    /** Packages with a task in recents (PowOS's own aside: its tasks are Linux windows and its own screens). */
+    /** Packages with a running task, any windowing mode (PowOS's own aside: its tasks are Linux windows and its own screens). */
     val tasks = mutableStateOf<List<String>>(emptyList())
 
     /** powos-sleep-gui's running/apps.json, as it is ("{}" without a PowOS session). */
@@ -48,7 +50,11 @@ object RunningApps {
 
     private fun readTasks() {
         val c = app ?: return
-        val next = runCatching { Tasks.list(c) }.getOrDefault(emptyList()).mapNotNull { it.component?.packageName }.filter { it != c.packageName }.distinct()
+        // Tasks with a live activity, whatever their windowing mode (fullscreen, freeform, split): a recents entry
+        // whose activities are gone (force-stopped, swiped) is not running. The recents provider sees every user's.
+        @Suppress("DEPRECATION")
+        val running = runCatching { c.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
+        val next = running.filter { it.numActivities > 0 }.mapNotNull { (it.baseIntent.component ?: it.baseActivity ?: it.topActivity)?.packageName }.filter { it != c.packageName }.distinct()
         if (next != tasks.value) tasks.value = next
     }
 

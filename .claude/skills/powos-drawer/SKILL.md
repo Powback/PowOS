@@ -69,7 +69,11 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
   apps.changed). shell.css: `.app[data-run] .app-icon::after` 10x3 accent bar under the icon, a 1px ring of
   --color-background (the accent's own ground; the style lint allows `0 0 0 Npx var(--color-*)` rings, not new tokens; --on-wallpaper-halo failed light themes at 1.3:1); frozen 0.4.
   Floating windows (`.dock .app.windowed`) share the bar (the old foreground dot is gone). Home grid icons: none.
-- Sources (no polling): RunningApps.kt (system/): FreeformTasks.listen -> Tasks.list packages (own package left out);
+- Sources (no polling): RunningApps.kt (system/): FreeformTasks.listen -> getRunningTasks packages (live activity, any
+  windowing mode incl. freeform; a recents-only entry after force-stop is not running; own package left out). The
+  listener needs HiddenApi's "Landroid/app/ITaskStackListener" exemption (Stub.asInterface is hidden; without it the
+  map stayed at the start-up read: no event ever came). Logcat "PowosFreeform: task stack listener on" = registered;
+  the main buffer rotates in seconds (OplusTouch spam), so grep right after a restart.
   FileObserver on files/run/running/apps.json = powos-sleep-gui's `publish_running` ({"classes": {cls: state}},
   written on change from report/freeze/thaw/reset). ShellBridge `running()` maps: "a:<key>" by package, "l:<id>" by
   LinuxApp.matches or steam_app_<appid> -> an entry whose Exec has rungameid/<appid>.

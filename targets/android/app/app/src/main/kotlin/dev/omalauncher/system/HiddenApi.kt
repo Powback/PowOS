@@ -22,6 +22,9 @@ object HiddenApi {
         arrayOf(
             "Landroid/app/ActivityTaskManager",
             "Landroid/app/IActivityTaskManager",
+            // The task stack listener (FreeformTasks.listen): ITaskStackListener.Stub.asInterface is hidden; without the
+            // exemption the listener never registered (no task events for the running bar or the window frames).
+            "Landroid/app/ITaskStackListener",
             "Landroid/window/TaskSnapshot",
             "Landroid/app/StatusBarManager",
             // The gesture input (system/gesture/GestureMonitor): the display's input monitor and its receiver.
