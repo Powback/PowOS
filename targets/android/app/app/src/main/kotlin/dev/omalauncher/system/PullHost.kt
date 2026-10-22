@@ -38,7 +38,7 @@ class PullHost(
 
     /** A corner swipe started: the panel ([kind] "apps" or "ai") comes up with the finger. */
     fun pullBegin(kind: String) {
-        if (host == null) return
+        if (host == null || DeviceLock.locked(service)) return
         emit("pull.begin", JSONObject().put("kind", kind))
         show()
     }

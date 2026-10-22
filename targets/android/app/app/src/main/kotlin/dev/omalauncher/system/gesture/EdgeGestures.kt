@@ -97,12 +97,33 @@ class EdgeGestures(
             }
         }
 
+    /** The screen going off (the phone locks), on, and unlocked: the handles follow the lock at once. */
+    private val lockReceiver =
+        object : android.content.BroadcastReceiver() {
+            override fun onReceive(
+                context: Context,
+                intent: Intent,
+            ) {
+                handles()
+                // The lock face comes up a moment after the screen does: looked at again then.
+                main.postDelayed({ handles() }, LOCK_SETTLE_MS)
+            }
+        }
+
     fun start() {
         observer.startWatching()
+        service.registerReceiver(
+            lockReceiver,
+            android.content.IntentFilter(Intent.ACTION_SCREEN_OFF).apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            },
+        )
         handles()
     }
 
     fun stop() {
+        runCatching { service.unregisterReceiver(lockReceiver) }
         observer.stopWatching()
         leftHandle.remove()
         rightHandle.remove()
@@ -144,6 +165,8 @@ class EdgeGestures(
     }
 
     private fun locked(): Boolean {
+        // Asked live first (the lock face reports as OCCLUDED, not SHOWING): never a handle over a locked phone.
+        if (dev.omalauncher.system.DeviceLock.locked(service)) return true
         val s = systemUiState
         if (s and (SYSUI_KEYGUARD_SHOWING or SYSUI_BOUNCER_SHOWING or SYSUI_DEVICE_DOZING) != 0L) return true
         return s and SYSUI_KEYGUARD_OCCLUDED != 0L && PowosLockActivity.current != null
@@ -437,6 +460,7 @@ class EdgeGestures(
         const val TYPE_HANDLE = 2024
 
         const val HOLD_POLL_MS = 50L
+        const val LOCK_SETTLE_MS = 600L
         const val QT_TRAVEL_DP = 96f
         const val HANDLE_WINDOW_DP = 6f
         const val HANDLE_LINE_DP = 2.5f

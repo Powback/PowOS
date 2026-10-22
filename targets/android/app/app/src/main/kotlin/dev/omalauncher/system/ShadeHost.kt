@@ -273,7 +273,7 @@ class ShadeHost(
      */
     fun openPanel(control: Boolean): Boolean {
         val h = host ?: return false
-        if (keyguard || lent) return false
+        if (keyguard || lent || DeviceLock.locked(service)) return false
         tell("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
         show()
         settle(true)
@@ -299,6 +299,8 @@ class ShadeHost(
 
     /** Whether a finger down at [y] (display px) may be the shade's pull, and from where. */
     private fun pullable(y: Float): From? {
+        // Never over a locked phone (the lock face reports the keyguard OCCLUDED, which [keyguard] doesn't count).
+        if (DeviceLock.locked(service)) return null
         val edge = stripHeight.coerceAtLeast((24 * service.resources.displayMetrics.density).toInt())
         if (y > edge) {
             val home = homePull && Switcher.onHome && Switcher.homeVisible && !Switcher.open && host != null && !shown && !keyguard && !lent

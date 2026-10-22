@@ -30,7 +30,7 @@ class QuickToolsHost(
         y: Float,
         q: Float,
     ) {
-        if (host == null) return
+        if (host == null || DeviceLock.locked(service)) return
         show()
         val density = service.resources.displayMetrics.density
         emit("qt.drag", JSONObject().put("side", if (right) "right" else "left").put("y", (y / density).toDouble()).put("q", q.coerceIn(0f, 1f).toDouble()))
