@@ -26,6 +26,10 @@ echo "drag-raster $* $(date +%T) (pid $$)" > "$L/who"; trap 'rm -rf "$L"' EXIT
 AWAKE_ONLY=1 "$phone/idle.sh" --wait 120 1800 || { echo "drag-raster: no free window"; exit 3; }
 fg=$("$phone/adb.sh" shell "dumpsys activity activities | grep -m1 topResumedActivity")
 [[ "$fg" == *HomeShell* ]] || { echo "drag-raster: home isn't in front ($fg)"; exit 3; }
+# Only on a home the swipes can open the drawer on: not in edit mode, nothing over it, the drawer closed - else the
+# numbers are of something else (2026-10-22: two runs on an edit-mode home measured no drag at all).
+state=$("$phone/cdp.sh" eval home '(() => { const h = document.querySelector(".home"); return h.classList.contains("editing") ? "home is in edit mode" : h.classList.contains("open") ? "the drawer is open" : document.querySelector(".menu, .sheet:not(.pop)") ? "a menu or sheet is open" : "ok"; })()' | tr -d '"')
+[ "$state" = ok ] || { echo "drag-raster: $state - not measured (the user's state; nothing changed)"; exit 3; }
 read -r W H < <("$phone/cdp.sh" eval home 'Math.round(innerWidth*devicePixelRatio)+" "+Math.round(innerHeight*devicePixelRatio)' | tr -d '"')
 x=$((W * 3 / 4)) y0=$((H * 85 / 100)) y1=$((H * 30 / 100))
 run() {
