@@ -6,6 +6,43 @@ description: Use when building, fixing, testing or shipping the PowOS desktop sh
 **Paused by the user, 2026-10-22:** no work on the separate Plasma desktop (powos-shell); the desktop is the PowOS
 home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the code stays.
 
+## The desktop now (2026-10-22)
+- The desktop is the PowOS home unfolded/widescreen, with Android apps as floating windows. The windows side
+  (taskbar, focus/minimise/close, Android windows, switcher) belongs to the switcher skill (powos-switcher).
+- Wide home = shell/hosts/wide.ts, wrapped around the phone's bridge (bridge.ts) for home's page only (no ?mode=),
+  at >= 700 CSS px (inner display 821, cover 404). Two host pages are shown side by side as one page of cols*2+1
+  columns, with a free column between them so they never merge across the seam. Cells map both ways at the bridge
+  (right page x+cols+1; a move goes back to the half its middle is over), widgets.page maps to the pair's left page
+  (the host keeps a page's neighbours live), and fold/unfold emits home.changed. ShellHome.kt's GRID_COLUMNS (6) is
+  one layout for both screens, so never persist wide cells.
+- The wide pill (width min(560px, 100% - 2*edge)) and the centred dock are the @media (min-width: 700px) block at the
+  end of ui/shell.css. The pill's height is the drawer skill's.
+- Merging touching tiles: grid.tsx joins() joins only whole covered edges (widgets skill, fixed 2026-10-22). On
+  mode=desktop joins() returns nothing.
+- "Flat grey slabs" on the inner display are not missing blur: the user's wallpaper is pure black in its top third,
+  behind the tiles, and a frost of black is black. Blur regions are sent (glass-native, __glass.live.counts).
+- The monospace font is the theme's own --font, the same folded and unfolded. It is not a load failure.
+- The ">" dock icon is Konsole's real icon. Chrome's and Camera's white plates are their Android icons.
+
+## Shot checks (shell/dev/shots.mjs, after each scene)
+- Errors per shot: overlapping tiles (> 1 px, touching doesn't count), partial joins (a merged edge 1-99% covered),
+  uneven gutters on mode=desktop, missing glyphs (a font face in error or a font 404). SHOTS_STRICT=1 fails the run
+  and gate.sh --shots with it. gate.sh mounts the real nerd_symbols.ttf (shell/fonts is a link out of shell/, which
+  the container can't follow; without it, tofu). Output dirs must be under $HOME (Colima shares only that).
+
+## Paused Plasma host: what's left on the phone
+- powos-desktop-shell disable set ~/.config/powos/desktop-shell.off; the XDG autostart
+  (/etc/xdg/autostart/powos-desktop-shell.desktop, start --auto) does nothing while it's there. Code and unit stay.
+- Unified sleep (lib/apps/powos-sleepd, powos-sleep-gui) also freezes powos-shell's whole tree 15 s after PowOS leaves
+  the screen (measured 12 -> 0 ticks/60 s). Harmless while it's disabled.
+- Data it left: ~/.local/share/powos/shell-data/desktop-*, ~/.local/share/powos/net (a copy of the Hue key,
+  net-secret.sh remove takes it out), ~/.local/state/powos/desktop-wallpaper.jpg, and the session's Omarchy
+  current/theme. The last two come from `dev/phone.sh wallpaper|theme`, a HACK (registry row: dev/phone.sh); the
+  real fix is the Android app writing them into the rooted session.
+- dev/phone.sh render NAME WxH: an off-screen second powos-shell with real data (its own profile and temp store,
+  --disable-gpu, because offscreen GPU rasterised only part of the page). Captures override the device metrics and
+  the background (alpha), which draws a fresh frame even in a frozen session.
+
 The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's rules: docs/AGENT-HANDBOOK.md.
 
 ## How it fits
