@@ -1,0 +1,513 @@
+{
+  "agents.ts": {
+    "complexity": {
+      "count": 2
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "apps/net.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "apps/stdb.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-params": {
+      "count": 1
+    }
+  },
+  "bridge.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 8
+    },
+    "max-params": {
+      "count": 11
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "dev/gate.mjs": {
+    "complexity": {
+      "count": 3
+    },
+    "max-depth": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 2
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 2
+    }
+  },
+  "dev/perf/open.js": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "dev/petrec.mjs": {
+    "max-params": {
+      "count": 1
+    }
+  },
+  "dev/shots.mjs": {
+    "complexity": {
+      "count": 5
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "max-params": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 5
+    }
+  },
+  "glasses/api.ts": {
+    "max-depth": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "glasses/hud.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 2
+    }
+  },
+  "glasses/surface.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "hosts/desktop.ts": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "hosts/layout.ts": {
+    "max-depth": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "hosts/wide.ts": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "screens-mock.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "state.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "test/petphys.test.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-params": {
+      "count": 2
+    }
+  },
+  "ui/agents.tsx": {
+    "complexity": {
+      "count": 3
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/appbuild.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/appscreen.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/appwidget.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 2
+    }
+  },
+  "ui/assist.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/bar.tsx": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "ui/control.tsx": {
+    "complexity": {
+      "count": 4
+    },
+    "max-lines-per-function": {
+      "count": 2
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 5
+    }
+  },
+  "ui/editsheet.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "ui/gesture.ts": {
+    "complexity": {
+      "count": 4
+    },
+    "max-depth": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 4
+    }
+  },
+  "ui/glass.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "ui/glasses.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/grid.tsx": {
+    "complexity": {
+      "count": 5
+    },
+    "max-depth": {
+      "count": 1
+    },
+    "max-params": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 3
+    }
+  },
+  "ui/home.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/island.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/lock.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "ui/nativeglass.ts": {
+    "complexity": {
+      "count": 4
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 3
+    }
+  },
+  "ui/notifications.tsx": {
+    "complexity": {
+      "count": 3
+    },
+    "max-lines-per-function": {
+      "count": 2
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 3
+    }
+  },
+  "ui/owl.tsx": {
+    "complexity": {
+      "count": 4
+    },
+    "max-lines-per-function": {
+      "count": 2
+    },
+    "max-params": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 3
+    }
+  },
+  "ui/panel.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "ui/pet.tsx": {
+    "complexity": {
+      "count": 10
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 8
+    }
+  },
+  "ui/petai.ts": {
+    "complexity": {
+      "count": 4
+    },
+    "max-depth": {
+      "count": 4
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "max-params": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 4
+    }
+  },
+  "ui/petbody.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 2
+    }
+  },
+  "ui/petmove.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/petpath.ts": {
+    "complexity": {
+      "count": 2
+    },
+    "max-depth": {
+      "count": 3
+    },
+    "max-params": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 3
+    }
+  },
+  "ui/petperch.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-depth": {
+      "count": 2
+    },
+    "max-params": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/petphys.ts": {
+    "complexity": {
+      "count": 3
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 3
+    }
+  },
+  "ui/powai.tsx": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "ui/recents.tsx": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "ui/recentwidget.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/remote.tsx": {
+    "complexity": {
+      "count": 3
+    },
+    "max-lines-per-function": {
+      "count": 4
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 2
+    }
+  },
+  "ui/reorder.ts": {
+    "complexity": {
+      "count": 4
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/rich.tsx": {
+    "sonarjs/cognitive-complexity": {
+      "count": 1
+    }
+  },
+  "ui/screens.tsx": {
+    "complexity": {
+      "count": 9
+    },
+    "max-lines-per-function": {
+      "count": 6
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 7
+    }
+  },
+  "ui/shade.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "ui/snapshot.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "ui/switcher.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 2
+    }
+  },
+  "ui/terminal.tsx": {
+    "complexity": {
+      "count": 3
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 2
+    }
+  },
+  "ui/units.tsx": {
+    "complexity": {
+      "count": 2
+    }
+  },
+  "ui/widgetsheet.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  }
+}

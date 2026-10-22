@@ -12,7 +12,9 @@
 # shell/ are not part of it, as they aren't part of the phone. --tree: the working tree as it is instead; --dir: DIR
 # as it is (nothing composed).
 #   1. tsc --noEmit over that shell (the folder's own tsconfig and node_modules); the style lint (dev/lint-style.sh:
-#      a raw colour, a line or a shadow outside theme.css's tokens fails, dev/style-allow.txt the exceptions);
+#      a raw colour, a line or a shadow outside theme.css's tokens fails, dev/style-allow.txt the exceptions); the
+#      complexity lint (dev/lint-complexity.sh: a function over cyclomatic/cognitive 10, depth 3, 60 lines or 4 params
+#      fails unless it's old debt in dev/complexity-baseline.json, which only shrinks);
 #   2. every page of it (home, lock, shade, assist, aod, recents: each mode app.tsx renders) booted in a headless
 #      Chromium against the mock bridge, served as the phone's WebView serves it (shell/dev/gate.mjs): any uncaught
 #      error, failed module load, missing export or import-cycle error, or no ready (window.__powosAlive) in READY_MS
@@ -97,6 +99,11 @@ fi
 # 1b. The design language's style lint (docs/DESIGN-LANGUAGE.md): no raw colours, lines or shadows outside the tokens.
 # A push: the files it brings (what's already on the phone isn't this push's to answer for); otherwise all of the shell.
 if out=$("$SHELL_DIR/dev/lint-style.sh" "$S" ${files[@]+"${files[@]}"} 2>&1); then echo "$out"; else echo "$out" | head -30; fail=1; fi
+# 1b'. The complexity lint (dev/lint-complexity.sh: per function cyclomatic/cognitive 10, depth 3, 60 lines, 4 params;
+# old debt frozen in dev/complexity-baseline.json, which only shrinks). A push: the files it brings; else all.
+# --app: the PowOS apps' UIs too (apps/*/ui, their own baseline).
+cx=0; out=$("$SHELL_DIR/dev/lint-complexity.sh" --dir "$S" ${app:+--apps} ${files[@]+"${files[@]}"} 2>&1) || cx=$?
+case $cx in 0|2) echo "$out" ;; *) echo "$out" | head -45; fail=1 ;; esac
 # 1c. Every local file a page names (an html's href/src) or a script links in (a "./ui/x.css" it adds) is in what the
 # phone will serve: the boot check below doesn't fail a stylesheet that 404s (2026-10-21: index.html's override named
 # ui/rich.css before rich.css itself was on the phone - the assist page loaded without it). Push a page with what it
