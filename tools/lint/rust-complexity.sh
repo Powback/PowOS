@@ -9,7 +9,7 @@
 # rewrites it (commit it with the refactor); tier-1 checks history doesn't raise it without [baseline-reset].
 #
 #   tools/lint/rust-complexity.sh [--prune] [--report] [APP...]   APP: apps/<app> names (default: every module)
-# Exit 0 clean, 1 findings, 2 couldn't run (no docker).
+# Exit 0 clean, 1 findings or couldn't run (fail closed), 2 only when skipped on purpose (GATE_LINT=0).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
@@ -23,7 +23,9 @@ while [ $# -gt 0 ]; do
     *) apps+=("$(basename "$1")"); shift ;;
   esac
 done
-command -v docker >/dev/null || { echo "     rust complexity: skipped (no docker)"; exit 2; }
+# Fail closed: a missing tool or a failed clippy run fails the lint; only GATE_LINT=0 skips it (exit 2), explicitly.
+if [ "${GATE_LINT:-1}" = 0 ]; then echo "     rust complexity: skipped (GATE_LINT=0)"; exit 2; fi
+command -v docker >/dev/null || { echo "FAIL rust complexity: no docker (GATE_LINT=0 skips it explicitly)"; exit 1; }
 if [ ${#apps[@]} = 0 ]; then for m in "$ROOT"/apps/*/module/Cargo.toml; do [ -f "$m" ] && apps+=("$(basename "$(dirname "$(dirname "$m")")")"); done; fi
 [ ${#apps[@]} -gt 0 ] || { echo "ok   rust complexity lint (no modules)"; exit 0; }
 raw=$(docker run --rm --platform linux/arm64 --cpus 6 --memory 8g -v powos-apps-cargo:/cache -v "$ROOT/apps:/apps:ro" \
@@ -33,8 +35,10 @@ raw=$(docker run --rm --platform linux/arm64 --cpus 6 --memory 8g -v powos-apps-
   for a in $APPS; do cd /apps/$a/module || continue
     CARGO_TARGET_DIR=/cache/target-$a cargo clippy -q --release --target wasm32-unknown-unknown --message-format short -- \
       -A clippy::all -W clippy::cognitive_complexity -W clippy::too_many_lines -W clippy::too_many_arguments \
-      -W clippy::excessive_nesting 2>&1 | sed "s|^src/|apps/$a/module/src/|"
-  done' 2>&1) || { echo "     rust complexity: skipped (the clippy run failed)"; echo "$raw" | tail -5; exit 2; }
+      -W clippy::excessive_nesting > /tmp/c.txt 2>&1 || { cat /tmp/c.txt; echo "CLIPPY-FAILED $a"; }
+    sed "s|^src/|apps/$a/module/src/|" /tmp/c.txt
+  done' 2>&1) || { echo "FAIL rust complexity: the clippy run failed"; echo "$raw" | tail -5; exit 1; }
+if echo "$raw" | grep -q "^CLIPPY-FAILED"; then echo "FAIL rust complexity: clippy failed for $(echo "$raw" | sed -n 's/^CLIPPY-FAILED //p' | tr '\n' ' ')"; echo "$raw" | grep -E "^error" | head -5; exit 1; fi
 # "<file>:<l>:<c>: warning: <msg>" -> "<file> <lint>"
 counts=$(echo "$raw" | sed -nE 's/^([^:]+):[0-9]+:[0-9]+: warning: (this block is too nested|the function has a cognitive complexity|this function has too many lines|this function has too many arguments).*/\1 \2/p' |
   sed -e 's/this block is too nested/excessive_nesting/' -e 's/the function has a cognitive complexity/cognitive_complexity/' \
