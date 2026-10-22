@@ -28,7 +28,7 @@ import { AiContent, AiHeader, PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
 import { Recents } from "./recents.tsx";
 import { footBelow, hasSearchWidget } from "./searchwidget.tsx";
-import { byKey, carry, dock, dockAim, dockDrag, drawer, editing, folder, menu, page, pullKind, recent, screen, selected, sessionView, setDock } from "../state.ts";
+import { byKey, carry, dock, dockAim, dockDrag, drawer, editing, folder, menu, page, pullKind, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
 import { remoteOpen } from "../remote.ts";
@@ -170,6 +170,32 @@ function DockRecents({ count }: { count: number }) {
   );
 }
 
+/**
+ * The floating app windows (unfolded home) by the app they're of: app key -> "running" | "minimised" (a dot under its
+ * icon; a tap on it brings the window back - the host restores rather than launches, ShellBridge.launch).
+ */
+const windowed = computed(() => {
+  const out = new Map<string, string>();
+  for (const w of windows.value) {
+    const key = [...byKey.value.keys()].find((k) => k.startsWith(`a:${w.pkg}/`));
+    if (key && !out.has(key)) out.set(key, w.minimised ? "minimised" : "running");
+  }
+  return out;
+});
+
+/** After the pinned apps: the apps with a floating window that aren't pinned, so every window can be reached. */
+function DockWindows({ pinned }: { pinned: string[] }) {
+  const shown = [...windowed.value.entries()].filter(([k]) => !pinned.includes(k));
+  return (
+    <>
+      {shown.map(([k, state]) => {
+        const app = byKey.value.get(k);
+        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state}`} />;
+      })}
+    </>
+  );
+}
+
 /** Which of the dock's pages shows (0 pinned, 1 recent): its dots follow it, told when a scroll ends - never per frame. */
 const dockPage = signal(0);
 
@@ -220,7 +246,7 @@ export function Dock() {
         key={app.key}
         app={app}
         labels={false}
-        class={d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""}
+        class={`${d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""} ${windowed.value.has(app.key) ? `windowed ${windowed.value.get(app.key)}` : ""}`}
         style={style}
         onDrag={(e) => el.current && moveInDock(app.key, e, el.current)}
       />
@@ -244,6 +270,7 @@ export function Dock() {
               }}
             >
               {ghost && gap < 0 ? <div class="dock-empty">drop here to pin</div> : cells}
+              {!d && !carried && <DockWindows pinned={dock.value} />}
             </div>
           )}
           {(paged || (ghost && !carried)) && (

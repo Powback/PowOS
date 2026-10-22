@@ -153,6 +153,8 @@ class ShellBridge(
             snapshotFlow { listOf(runtime.androidApps.apps.size, runtime.linuxApps.size, ShellIcons.version.intValue) }.drop(1).collect { emit("apps.changed", null) }
         }
         scope.launch { runtime.refreshApps() }
+        // A floating window opened, minimised, brought back or closed: the dock shows the windows again.
+        scope.launch { snapshotFlow { dev.omalauncher.system.WindowFrames.running.value }.drop(1).collect { emit("windows.changed", windows()) } }
         // The home screen changed (here, in the Compose launcher, or a widget file arriving): the page re-reads it.
         scope.launch { snapshotFlow { home.fingerprint() }.drop(1).collect { emit("home.changed", null) } }
         // PowOS AI's conversation (shared with its own app): every item and the busy flag, as they stream in.
@@ -238,6 +240,9 @@ class ShellBridge(
             "shade.open" -> dev.omalauncher.system.ShadeHost.current?.let { s -> main.post { s.openPanel(control = false) } } ?: notifications(true)
             "overlay.closed", "pull.closed" -> overlay?.closed()
             "pull.launched" -> overlay?.launched()
+            // The floating app windows for the dock (system/WindowFrames.kt), and one brought back.
+            "windows.list" -> windows()
+            "windows.restore" -> dev.omalauncher.system.WindowFrames.current?.restore(a.getInt(0)) ?: false
             "tasks.list" -> tasks()
             "tasks.open" -> openTask(a.getInt(0), a.opt(1))
             "tasks.remove" -> dev.omalauncher.system.Tasks.remove(context, a.getInt(0)).also { appWidgets.heal() }
@@ -645,12 +650,22 @@ class ShellBridge(
         return keys.filter { it in have }
     }
 
+    /** The floating windows, top-most first: { id, pkg, label, minimised }. */
+    private fun windows(): JSONArray =
+        JSONArray(
+            dev.omalauncher.system.WindowFrames.running.value.map {
+                JSONObject().put("id", it.id).put("pkg", it.pkg ?: "").put("label", it.label).put("minimised", it.minimised)
+            },
+        )
+
     private fun android(key: String) = runtime.androidApps.apps.firstOrNull { "a:${it.key}" == key }
 
     private fun launch(key: String) {
         runtime.usage.record(key)
         when {
-            key.startsWith("a:") -> android(key)?.let { runtime.androidApps.open(it) }
+            // An app with a floating window already (shown or minimised): that window comes back, no second launch.
+            key.startsWith("a:") ->
+                android(key)?.let { if (dev.omalauncher.system.WindowFrames.current?.restoreApp(it.component.packageName) != true) runtime.androidApps.open(it) }
             key.startsWith("l:") -> runtime.linuxApps.firstOrNull { "l:${it.id}" == key }?.let { runtime.launch(it) }
         }
         // The strip shows it first next time home shows (the Compose launcher settles on stop, likewise).

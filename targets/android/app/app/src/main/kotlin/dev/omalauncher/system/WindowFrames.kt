@@ -56,8 +56,10 @@ class WindowFrames(
     fun refresh() {
         val all = runCatching { FreeformTasks.list(context) }.onFailure { Log.w(TAG, "no floating windows", it) }.getOrDefault(emptyList())
         minimised.retainAll(all.map { it.id }.toSet())
-        publish(all)
-        val show = if (keyguard || Switcher.open || !AppWindows.floating(context)) emptyList() else uncovered(all.filter { it.visible && it.id !in minimised })
+        val floating = AppWindows.floating(context)
+        // Folded, apps aren't windows: the dock shows none.
+        publish(if (floating) all else emptyList())
+        val show = if (keyguard || Switcher.open || !floating) emptyList() else uncovered(all.filter { it.visible && it.id !in minimised })
         val ids = show.map { it.id }.toSet()
         frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
         // Bottom-most first, so a new frame's windows stack over the ones under it.
@@ -86,6 +88,13 @@ class WindowFrames(
         val ok = FreeformTasks.raise(context, id) || Tasks.open(context, id)
         main.postDelayed(refreshNow, SETTLE_MS)
         return ok
+    }
+
+    /** [pkg]'s floating window back (a tap on its app anywhere on home), if it has one and apps float: false if not. */
+    fun restoreApp(pkg: String): Boolean {
+        if (!AppWindows.floating(context)) return false
+        val w = running.value.firstOrNull { it.pkg == pkg } ?: return false
+        return restore(w.id)
     }
 
     private fun publish(all: List<FreeformTasks.Window>) {

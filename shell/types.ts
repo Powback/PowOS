@@ -181,6 +181,14 @@ export interface PhoneNotification {
  * A recent task, as the switcher (ui/recents.tsx) shows it: [id] the system's, [key] and [icon] its app's in the drawer (null when it
  * isn't there), [snapshot] its last frame (a new URL each listing).
  */
+/** A floating app window on the unfolded home (system/WindowFrames.kt): its task, app, name, and whether it's minimised. */
+export interface AppWindow {
+  id: number;
+  pkg: string;
+  label: string;
+  minimised: boolean;
+}
+
 export interface RecentTask {
   id: number;
   label: string;
@@ -586,6 +594,12 @@ export interface Bridge {
     info(id: number): Promise<boolean>;
     /** Its last frame saved to Pictures/Screenshots: the file's name, or null. */
     screenshot(id: number): Promise<string | null>;
+  };
+  /** The floating app windows (unfolded home), top-most first, for the dock; "windows.changed" (AppWindow[]) after. */
+  windows?: {
+    list(): Promise<AppWindow[]>;
+    /** Brings it back (minimised, or under others) on top; false if it's gone. */
+    restore(id: number): Promise<boolean>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up

@@ -10,7 +10,7 @@ import { agentsView, closeAgents } from "./agents.ts";
 import { backScreen, closeScreens } from "./screens.ts";
 import { recentsBack, recentsHome } from "./ui/recents.tsx";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
-import type { App, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
+import type { App, AppWindow, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
 
 /** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
 const hostApps = signal<App[]>([]);
@@ -224,6 +224,13 @@ powos.on("apps.changed", async () => {
   hostApps.value = withKept(await powos.apps.list());
   await fetchRecent();
 });
+/** The floating app windows (unfolded home), top-most first: the dock marks and keeps them (ui/home.tsx). */
+export const windows = signal<AppWindow[]>([]);
+powos.on("windows.changed", (w: AppWindow[]) => (windows.value = w));
+void powos.windows?.list().then(
+  (w) => (windows.value = w),
+  () => undefined,
+);
 powos.on("ai.changed", (c: Chat) => (chat.value = c));
 powos.on("home.changed", async () => (home.value = await powos.home.get()));
 document.addEventListener("visibilitychange", async () => {

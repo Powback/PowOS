@@ -21,6 +21,7 @@ import type {
   NotificationList,
   PhoneNotification,
   RecentTask,
+  AppWindow,
   QuickState,
   TermState,
   ThemeChoice,
@@ -219,6 +220,10 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       close: (id) => call<boolean>("windows.close", id),
     },
     panel: { height: (px) => call("panel.height", px) },
+    windows: {
+      list: () => call<AppWindow[]>("windows.list"),
+      restore: (id) => call<boolean>("windows.restore", id),
+    },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),
       open: (id, from) => call<boolean>("tasks.open", id, from ?? null),
