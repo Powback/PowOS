@@ -26,6 +26,9 @@ const FLICK = 0.45;
 /** Up, opening the drawer: a short flick is enough (px per ms), or past this much of the way. */
 const OPEN_FLICK = 0.2;
 const OPEN_AT = 0.15;
+/** Down, closing it: let go above this much open and it stays open - half the (short, shell.css --rise) way: ~45 px
+    of finger at 15vh and 1.5x, about what 2/3 of the old 30vh rise took. */
+const CLOSE_KEEP = 0.5;
 /** The drawer moves this much faster than the finger (clamped at the top): it covers its rise in 2/3 of the swipe. */
 const GAIN = 1.5;
 /** What takes a tap in the launcher; a tap anywhere else in it closes it. */
@@ -318,8 +321,9 @@ export function homeGestures() {
         ".letter-bar, input[type=range], [role=slider], [data-owns-gesture], .resize-handle, .menu, .mic, .cc-editing, .aw-face.scrolls",
       ),
       height: document.querySelector(".home")?.clientHeight || innerHeight,
-      // The drawer's rise (shell.css --rise, a length: px computed), not its height - it opens from ~30% down.
-      travel: parseFloat(getComputedStyle(document.querySelector(".launcher") ?? document.documentElement).getPropertyValue("--rise")) || innerHeight * 0.3,
+      // The drawer's rise (shell.css --rise, a length: px computed), not its height - it opens from just below where it
+      // rests. Without one (a page with no --rise), its height.
+      travel: ((l) => (l && parseFloat(getComputedStyle(l).getPropertyValue("--rise"))) || l?.clientHeight || innerHeight)(document.querySelector<HTMLElement>(".launcher")),
     };
   };
 
@@ -398,7 +402,7 @@ export function homeGestures() {
       const p = drawerDrag.value ?? 0;
       drawerDrag.value = null;
       // A flick decides; otherwise where it was let go.
-      const open = v < -(mode === "open" ? OPEN_FLICK : FLICK) ? true : v > FLICK ? false : mode === "open" ? p > OPEN_AT : p > 0.67;
+      const open = v < -(mode === "open" ? OPEN_FLICK : FLICK) ? true : v > FLICK ? false : mode === "open" ? p > OPEN_AT : p > CLOSE_KEEP;
       if (open) drawer.value = 1;
       else closeDrawer();
     } else if (mode === "notifClose") {

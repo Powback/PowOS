@@ -34,14 +34,15 @@
   initial-value: 0;
 }
 .cc-media::after { --p: inherit; }
-/* How far the drawer rises as it opens (gesture.ts maps the finger onto it): from ~30% of the screen down, not from
-   its foot - it starts high up and comes in fading, the user's (2026-10-22). A length, so JS reads it in px. */
+/* How far the drawer rises as it opens - THE knob for where its open starts (gesture.ts maps the finger onto it, so a
+   shorter rise opens it with less finger too): from ~15% of the screen down, close to where it rests, fading in - the
+   user's (2026-10-22: 30vh, then "further up"). A length, so JS reads it in px. */
 @property --rise {
   syntax: "<length>";
   inherits: true;
   initial-value: 0px;
 }
-.home { --rise: 30vh; }
+.home { --rise: 15vh; }
 /* The launcher's fade (below), worked out from --p: not inherited either, for the same reason. */
 @property --fade {
   syntax: "<number>";
