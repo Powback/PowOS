@@ -302,68 +302,91 @@ try {
       }),
     );
   }
-  // The control center's rearranging (ui/reorder.ts, control.tsx): a tile held and carried onto the first slot lands
-  // there, is saved, and is still there after the panel shut and opened again and in a page loaded afresh; a carry
-  // cancelled (the system took the pointer) changes nothing.
+  // The control center's rearranging (ui/reorder.ts, control.tsx Controls): in edit mode a toggle held and carried onto
+  // the first slot of the row lands there, is saved (the store holds it), and is still there after the panel shut and
+  // opened again and after a reload; a carry cancelled (the system took the pointer) changes nothing. Every step waits
+  // on the state it needs, never on time - CC_THROTTLE (e.g. 6) slows the page's CPU to check that it holds.
   if (process.env.SHELL_PAGES !== "0") {
     const ccOrder = () => [...document.querySelectorAll(".cc3-quick [data-key]")].map((e) => e.dataset.key);
     runs.push(
       open(browser, `${ORIGIN}/index.html?mode=shade`, "cc-reorder").then(async (r) => {
+        const rate = Number(process.env.CC_THROTTLE || 1);
+        if (rate > 1) await (await r.page.target().createCDPSession()).send("Emulation.setCPUThrottlingRate", { rate }).catch(() => {});
         await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
         const out = await r.page
           .evaluate(async (orderSrc) => {
             const order = new Function(`return (${orderSrc})`)();
             const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+            // Until [f] holds (or [ms] pass: then the step fails with [what]).
+            const until = async (f, what, ms = 15000) => {
+              const t0 = performance.now();
+              while (!f()) {
+                if (performance.now() - t0 > ms) throw new Error(`timed out: ${what}`);
+                await sleep(20);
+              }
+            };
+            const frames = (n = 2) => new Promise((ok) => { const step = (k) => (k ? requestAnimationFrame(() => step(k - 1)) : ok()); step(n); });
             const S = await importShim("./state.ts");
+            const X = await importShim("./ui/ccexpand.ts");
+            const { powos } = await importShim("./bridge.ts");
             const P = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerId: 9, isPrimary: true, pointerType: "touch" }));
             const mid = (el) => { const b = el.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
             const item = (k) => document.querySelector(`.cc3-quick [data-key="${k}"]`);
             const fails = [];
-            const X = await importShim("./ui/ccexpand.ts");
-            S.notif.value = true;
-            await sleep(900);
-            // v3: rearranging is edit mode's (the header's pencil); a long press outside it is the toggle's page.
-            X.ccEditing.value = true;
-            await sleep(200);
-            const before = order();
-            if (before.length < 3) return [`only ${before.length} categories in the control center`];
-            // Cancelled: nothing changes.
-            const k0 = before[2];
-            let [x, y] = mid(item(k0));
-            P(item(k0), "pointerdown", x, y);
-            await sleep(520);
-            const [tx, ty] = mid(item(before[0]));
-            P(item(k0), "pointermove", (x + tx) / 2, (y + ty) / 2);
-            P(item(k0), "pointermove", tx, ty);
-            await sleep(250);
-            P(item(k0), "pointercancel", tx, ty);
-            await sleep(300);
-            if (order().join() !== before.join()) fails.push(`a cancelled carry changed the order: ${before.join(",")} -> ${order().join(",")}`);
-            if (document.querySelector(".cc .carried, .cc .lifted")) fails.push("a cancelled carry left its copy or its faint item behind");
-            // Carried onto the first slot and let go: it lands there.
-            [x, y] = mid(item(k0));
-            P(item(k0), "pointerdown", x, y);
-            await sleep(520);
-            P(item(k0), "pointermove", (x + tx) / 2, (y + ty) / 2);
-            await sleep(60);
-            P(item(k0), "pointermove", tx, ty);
-            await sleep(300);
-            P(item(k0), "pointerup", tx, ty);
-            await sleep(400);
-            const after = order();
-            if (after[0] !== k0) fails.push(`carried ${k0} onto the first slot, it landed at ${after.indexOf(k0)} (${after.join(",")})`);
-            if (document.querySelector(".cc .carried")) fails.push("the carried copy stayed after landing");
-            if (X.ccEditing.value !== true) fails.push("edit mode left by a carry");
-            // Shut and opened again: still there.
-            S.notif.value = false;
-            await sleep(500);
-            S.notif.value = true;
-            await sleep(700);
-            if (order()[0] !== k0) fails.push(`after the panel shut and opened again, ${k0} is at ${order().indexOf(k0)} (${order().join(",")})`);
-            const { powos } = await importShim("./bridge.ts");
-            const saved = await powos.store.get("controls.layout");
-            if (!saved?.order?.length) fails.push("nothing saved to controls.layout");
-            return { fails, k0 };
+            try {
+              S.ccV3.value = "v3";
+              S.notif.value = true;
+              await until(() => order().length >= 3, "the row of toggles");
+              X.ccEditing.value = true;
+              await frames();
+              const before = order();
+              const k0 = before[2];
+              const lift = async () => {
+                const [x, y] = mid(item(k0));
+                P(item(k0), "pointerdown", x, y);
+                await until(() => document.querySelector(".cc3-quick .carried"), "the lift (a long press)");
+                return [x, y];
+              };
+              // Carried part of the way, then cancelled: nothing changes.
+              let [x, y] = await lift();
+              let [tx, ty] = mid(item(before[0]));
+              P(item(k0), "pointermove", (x + tx) / 2, (y + ty) / 2);
+              await until(() => order().indexOf(k0) < 2, "the row making room", 5000).catch(() => {});
+              P(item(k0), "pointercancel", tx, ty);
+              await until(() => !document.querySelector(".cc3-quick .carried"), "the copy gone after a cancel");
+              await until(() => order().join() === before.join(), "the order back after a cancel", 5000).catch(() => fails.push(`a cancelled carry changed the order: ${before.join(",")} -> ${order().join(",")}`));
+              if (document.querySelector(".cc .lifted")) fails.push("a cancelled carry left its faint item behind");
+              // Carried onto the first slot, a step at a time (each move after the row made room), and let go.
+              [x, y] = await lift();
+              [tx, ty] = mid(item(before[0]));
+              P(item(k0), "pointermove", (x + tx) / 2, (y + ty) / 2);
+              await until(() => order().indexOf(k0) <= 1, "the row making room (slot 1)").catch((e) => fails.push(e.message));
+              await frames();
+              [tx, ty] = mid(item(before[0]));
+              P(item(k0), "pointermove", tx, ty);
+              await until(() => order()[0] === k0, "the row making room (slot 0)", 5000).catch(() => {});
+              P(item(k0), "pointerup", tx, ty);
+              await until(() => !document.querySelector(".cc3-quick .carried"), "the copy gone after landing");
+              if (order()[0] !== k0) fails.push(`carried ${k0} onto the first slot, it landed at ${order().indexOf(k0)} (${order().join(",")})`);
+              // Saved: the store has it first among the row's.
+              const savedFirst = async () => {
+                const l = await powos.store.get("controls.layout");
+                return (l?.order ?? []).filter((id) => before.includes(id))[0];
+              };
+              const t0 = performance.now();
+              while ((await savedFirst()) !== k0 && performance.now() - t0 < 10000) await sleep(50);
+              if ((await savedFirst()) !== k0) fails.push(`saved order has ${await savedFirst()} first, not ${k0}`);
+              // Shut and opened again: still there.
+              S.notif.value = false;
+              await until(() => !document.querySelector(".notif-panel.shown"), "the panel shut", 5000).catch(() => {});
+              S.notif.value = true;
+              await until(() => order().length >= 3, "the row again");
+              await frames();
+              if (order()[0] !== k0) fails.push(`after the panel shut and opened again, ${k0} is at ${order().indexOf(k0)} (${order().join(",")})`);
+              return { fails, k0 };
+            } catch (e) {
+              return { fails: [...fails, e.message] };
+            }
           }, ccOrder.toString())
           .catch((e) => ({ fails: [`evaluate: ${e.message.split("\n")[0]}`] }));
         r.problems.push(...(out.fails ?? []));
@@ -373,10 +396,13 @@ try {
           await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           const first = await r.page
             .evaluate(async (orderSrc) => {
+              const order = new Function(`return (${orderSrc})`)();
               const S = await importShim("./state.ts");
               S.notif.value = true;
-              await new Promise((ok) => setTimeout(ok, 900));
-              return new Function(`return (${orderSrc})`)()()[0];
+              const t0 = performance.now();
+              while (order().length < 3 && performance.now() - t0 < 15000) await new Promise((ok) => setTimeout(ok, 50));
+              await new Promise((ok) => setTimeout(ok, 300));
+              return order()[0];
             }, ccOrder.toString())
             .catch(() => null);
           if (first !== out.k0) r.problems.push(`the page loaded afresh shows ${first} first, not the rearranged ${out.k0}`);

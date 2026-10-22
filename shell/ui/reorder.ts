@@ -88,14 +88,23 @@ export function useReorder(
   };
 
   // FLIP: every item that moved since the last order eases from its old place; the lifted one keeps its faint ghost.
+  // Boxes relative to the container: the panel opening, scrolling or sliding under the finger moves them all at once,
+  // which is no move of theirs (measured on screen, a slot was missed while the shade was still opening - the gate's
+  // cc-reorder under load, 2026-10-22).
   const rects = useRef(new Map<string, DOMRect>());
+  const rel = (r: DOMRect) => {
+    const b = box.current?.getBoundingClientRect();
+    return b ? new DOMRect(r.left - b.left, r.top - b.top, r.width, r.height) : r;
+  };
   useLayoutEffect(() => {
     const next = new Map<string, DOMRect>();
     for (const k of order) {
       const el = item(k);
       if (!el) continue;
       if (press.current?.lifted && press.current.key === k) el.classList.add("lifted");
-      const r = el.getBoundingClientRect();
+      // Its laid-out box, not where a FLIP still under way shows it.
+      for (const an of el.getAnimations()) an.cancel();
+      const r = rel(el.getBoundingClientRect());
       next.set(k, r);
       const was = rects.current.get(k);
       if (live && was && (Math.abs(was.left - r.left) > 0.5 || Math.abs(was.top - r.top) > 0.5))
@@ -143,7 +152,7 @@ export function useReorder(
     el.parentElement?.appendChild(g);
     p.ghost = g;
     el.classList.add("lifted");
-    rects.current = new Map(order.map((k) => [k, item(k)?.getBoundingClientRect()]).filter((x): x is [string, DOMRect] => !!x[1]));
+    rects.current = new Map(order.map((k) => [k, item(k)]).filter((x): x is [string, HTMLElement] => !!x[1]).map(([k, e]) => [k, rel(e.getBoundingClientRect())]));
     follow();
     setLive([...order]);
   };
@@ -220,7 +229,10 @@ export function useReorder(
       // before each FLIP), not mid-ease, and only when it's nearer than the carried one's own slot by a tenth of an
       // item: near a boundary it doesn't flip back and forth.
       const now = liveRef.current ?? order;
-      const mid = (r: DOMRect) => Math.hypot(r.left + r.width / 2 - p.x, r.top + r.height / 2 - p.y);
+      const b = box.current?.getBoundingClientRect();
+      const fx = p.x - (b?.left ?? 0);
+      const fy = p.y - (b?.top ?? 0);
+      const mid = (r: DOMRect) => Math.hypot(r.left + r.width / 2 - fx, r.top + r.height / 2 - fy);
       let best = -1;
       let dist = Infinity;
       now.forEach((k, i) => {
