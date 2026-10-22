@@ -28,6 +28,9 @@ internal class WindowBlur(
     private var radius = -1
     private var broken = false
 
+    /** Frames waited for the window to be ready. */
+    private var retries = 0
+
     /** The openness last set (0..1): applied again when the radius changes. */
     private var amount = 0f
 
@@ -55,10 +58,19 @@ internal class WindowBlur(
         if (r == radius) return
         // A blur region over the window: the way this compositor blurs (the background
         // blur radius left home's widgets sharp under the shade, 2026-10-21). The page's own glass, on home, merges it.
-        val glassHandled = runCatching {
-                glass?.invoke(r.toFloat()) ?: (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU && GlassBlur.wholeWindowOf(v, r.toFloat()))
+        val handled: Boolean? =
+            runCatching {
+                glass?.invoke(r.toFloat())
+                    ?: if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) GlassBlur.wholeWindowOf(v, r.toFloat()) else false
             }.getOrDefault(false)
-        if (glassHandled) {
+        if (handled == null) {
+            // The window isn't ready (just shown: no surface, not laid out): again on its next frame, not cached -
+            // the shade opened by a tap got no blur at all (2026-10-22).
+            if (retries++ < 30) v.postOnAnimation { set(this.amount) }
+            return
+        }
+        retries = 0
+        if (handled) {
             radius = r
             return
         }

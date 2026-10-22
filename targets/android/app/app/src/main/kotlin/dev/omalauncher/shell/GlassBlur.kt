@@ -380,25 +380,43 @@ internal class GlassBlur(
      * The framework's own encoding of a blur region: one BackgroundBlurDrawable of the window (never drawn, so never
      * in the window's own blur aggregate), set to each region in turn, and BlurRegion(drawable).toFloatArray().
      */
+    /**
+     * The framework's own encoding of a blur region: one BackgroundBlurDrawable of the window, its fields set to each
+     * region in turn - written directly, never through its setters: a setter tells the window's own blur aggregator,
+     * which then sends the drawable as a region of the window's every frame (seen 2026-10-22: the test region on the
+     * pull-up panel's layer, and the shade's whole-window region overwritten - no blur under it) - and
+     * BlurRegion(drawable).toFloatArray().
+     */
     private class Codec(
         m: Methods,
         viewRoot: Any,
     ) {
         private val drawable: Any = m.createDrawable.invoke(viewRoot) ?: error("no blur drawable")
         private val cls = drawable.javaClass
-        private val setRadius = cls.getMethod("setBlurRadius", Int::class.javaPrimitiveType)
-        private val setCorners = cls.getMethod("setCornerRadius", Float::class.javaPrimitiveType, Float::class.javaPrimitiveType, Float::class.javaPrimitiveType, Float::class.javaPrimitiveType)
-        private val setAlpha = cls.getMethod("setAlpha", Int::class.javaPrimitiveType)
-        private val rect = cls.getDeclaredField("mRect").apply { isAccessible = true }.get(drawable) as android.graphics.Rect
+        private fun field(name: String) = cls.getDeclaredField(name).apply { isAccessible = true }
+        private val radius = field("mBlurRadius")
+        private val alpha = field("mAlpha")
+        private val tl = field("mCornerRadiusTL")
+        private val tr = field("mCornerRadiusTR")
+        private val bl = field("mCornerRadiusBL")
+        private val br = field("mCornerRadiusBR")
+        private val rect = field("mRect").get(drawable) as android.graphics.Rect
         private val region = Class.forName("${cls.name}\$BlurRegion")
         private val newRegion = region.getDeclaredConstructor(cls).apply { isAccessible = true }
         private val toFloatArray = region.getDeclaredMethod("toFloatArray").apply { isAccessible = true }
 
+        init {
+            // Never one of the window's own drawn blur drawables, whatever touches it.
+            runCatching { field("mVisible").setBoolean(drawable, false) }
+        }
+
         fun encode(r: Region): FloatArray {
-            setRadius.invoke(drawable, r.radius.toInt())
-            // The framework's order: top-left, top-right, bottom-left, bottom-right.
-            setCorners.invoke(drawable, r.tl, r.tr, r.bl, r.br)
-            setAlpha.invoke(drawable, (r.alpha.coerceIn(0f, 1f) * 255).toInt())
+            radius.setInt(drawable, r.radius.toInt())
+            alpha.setFloat(drawable, r.alpha.coerceIn(0f, 1f))
+            tl.setFloat(drawable, r.tl)
+            tr.setFloat(drawable, r.tr)
+            bl.setFloat(drawable, r.bl)
+            br.setFloat(drawable, r.br)
             rect.set(r.l.toInt(), r.t.toInt(), kotlin.math.ceil(r.r).toInt(), kotlin.math.ceil(r.b).toInt())
             return toFloatArray.invoke(newRegion.newInstance(drawable)) as FloatArray
         }
@@ -435,13 +453,14 @@ internal class GlassBlur(
         fun wholeWindowOf(
             view: View,
             radiusPx: Float,
-        ): Boolean {
+        ): Boolean? {
             val m = methods ?: return false
             return try {
-                val viewRoot = m.viewRoot.invoke(view) ?: return true
+                // Not in its window yet, its surface not made, not laid out (a window just shown): null - again later.
+                val viewRoot = m.viewRoot.invoke(view) ?: return null
                 if (viewRoot in badWindows) return false
-                val surface = m.surface.invoke(viewRoot) as SurfaceControl? ?: return true
-                if (!surface.isValid) return true
+                val surface = m.surface.invoke(viewRoot) as SurfaceControl? ?: return null
+                if (!surface.isValid || view.rootView.width <= 0 || view.rootView.height <= 0) return null
                 val c =
                     windowCodecs[viewRoot] ?: Codec(m, viewRoot).takeIf(::valid)?.also { windowCodecs[viewRoot] = it } ?: run {
                         badWindows.add(viewRoot)
