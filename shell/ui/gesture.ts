@@ -26,7 +26,7 @@ const FLICK = 0.45;
 /** Up, opening the drawer: a short flick is enough (px per ms), or past this much of the way. */
 const OPEN_FLICK = 0.2;
 const OPEN_AT = 0.15;
-/** The drawer moves this much faster than the finger (clamped at the top): its edge covers the screen in 2/3 of the swipe. */
+/** The drawer moves this much faster than the finger (clamped at the top): it covers its rise in 2/3 of the swipe. */
 const GAIN = 1.5;
 /** What takes a tap in the launcher; a tap anywhere else in it closes it. */
 const TAPPABLE = ".app, .letter-bar, .msg, .chat-head, button, input, textarea, a, .menu, .tile, [role=button], [role=slider]";
@@ -270,7 +270,7 @@ interface Gesture {
   target: Element;
   own: boolean;
   height: number;
-  /** The drawer's edge's way, closed to open: the launcher's height. */
+  /** The drawer's way, closed to open: its rise (shell.css --rise). */
   travel: number;
 }
 
@@ -318,7 +318,8 @@ export function homeGestures() {
         ".letter-bar, input[type=range], [role=slider], [data-owns-gesture], .resize-handle, .menu, .mic, .cc-editing, .aw-face.scrolls",
       ),
       height: document.querySelector(".home")?.clientHeight || innerHeight,
-      travel: document.querySelector(".launcher")?.clientHeight || innerHeight,
+      // The drawer's rise (shell.css --rise, a length: px computed), not its height - it opens from ~30% down.
+      travel: parseFloat(getComputedStyle(document.querySelector(".launcher") ?? document.documentElement).getPropertyValue("--rise")) || innerHeight * 0.3,
     };
   };
 

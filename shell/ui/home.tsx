@@ -279,18 +279,20 @@ export function Home() {
             <div class="home-content" data-p ref={followOpenness}>
               <Pages />
             </div>
-            <div class="launcher" data-p ref={followOpenness}>
-              <div class="launcher-frame tile" />
-              <div class="launcher-inner">
-                <div class="drawer-clip">
-                  {pullKind.value === "ai" ? (
-                    <div class="ai-panel">
-                      <AiHeader />
-                      <AiContent shown={drawerOpen.value} />
-                    </div>
-                  ) : (
-                    <Drawer />
-                  )}
+            <div class="launcher-frame tile" data-p ref={followOpenness} />
+            <div class="launcher-clip" data-p ref={followOpenness}>
+              <div class="launcher" data-p ref={followOpenness}>
+                <div class="launcher-inner">
+                  <div class="drawer-clip">
+                    {pullKind.value === "ai" ? (
+                      <div class="ai-panel">
+                        <AiHeader />
+                        <AiContent shown={drawerOpen.value} />
+                      </div>
+                    ) : (
+                      <Drawer />
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

@@ -34,6 +34,14 @@
   initial-value: 0;
 }
 .cc-media::after { --p: inherit; }
+/* How far the drawer rises as it opens (gesture.ts maps the finger onto it): from ~30% of the screen down, not from
+   its foot - it starts high up and comes in fading, the user's (2026-10-22). A length, so JS reads it in px. */
+@property --rise {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+.home { --rise: 30vh; }
 /* The launcher's fade (below), worked out from --p: not inherited either, for the same reason. */
 @property --fade {
   syntax: "<number>";
@@ -71,14 +79,21 @@
 .home.open .home-content { pointer-events: none; }
 
 /*
- * The panel: from the stage's top down to the screen's foot - over the dock's place, under the search pill and the
- * navigation bar - one frost behind all of the drawer. The drag moves it up from below the screen and fades it in
- * (an ease-out, 1 - (1 - p/0.8)^3: ~95% there half-way, whole by 80% of the way, the rest is motion only; closing the
- * same in reverse); its own compositor layer, so a frame of the drag is a transform and an opacity, nothing else.
+ * The panel. The drag moves it up by --rise and fades it in (an ease-out, 1 - (1 - p/0.8)^3: ~95% there half-way,
+ * whole by 80% of the way, the rest is motion only; closing the same in reverse) - each piece its own compositor
+ * layer, so a frame of the drag is transforms and opacities, nothing else. On the phone (home.tsx, pull.tsx) the frost
+ * (.stage > .launcher-frame) reaches the screen's foot, under the search pill and the navigation bar, while the drawer
+ * (.launcher-clip > .launcher) is cut off at the pill's top with a short fade - no app row ever under the pill, moving
+ * or at rest. The desktop (desktop.tsx) keeps the frost inside the launcher.
  */
-.launcher {
-  --foot: max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px));
+.stage, .launcher { --foot: max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)); }
+.launcher, .stage > .launcher-frame {
   --fade: calc(1 - min(1, var(--p) * 1.25));
+  transform: translateY(calc((1 - var(--p)) * var(--rise)));
+  opacity: calc(1 - var(--fade) * var(--fade) * var(--fade));
+  will-change: transform, opacity;
+}
+.launcher {
   position: absolute;
   left: 0;
   right: 0;
@@ -86,16 +101,33 @@
   bottom: calc(-1 * (48px + var(--strip-height) + var(--foot)));
   display: flex;
   flex-direction: column;
-  transform: translateY(calc((1 - var(--p)) * 100%));
-  opacity: calc(1 - var(--fade) * var(--fade) * var(--fade));
-  will-change: transform, opacity;
   pointer-events: none;
 }
-/* No search bar at the foot (the search widget): down over the dock's place only. Over an app (pull.tsx): no dock. */
-.home:not(:has(> .bar)) .launcher { bottom: calc(-1 * (var(--strip-height) + var(--foot))); }
-.pull-screen .launcher { bottom: calc(-1 * (48px + var(--foot))); }
-/* The frost (the compositor's blur under it fades with the panel: nativeglass.ts, a region's alpha is its opacity). */
+/* The frost (the compositor's blur under it fades with it: nativeglass.ts, a region's alpha is its opacity). */
 .launcher-frame { position: absolute; inset: 0; }
+.stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--strip-height) + var(--foot))); pointer-events: none; }
+/* The drawer's window: down to the search pill's top once the dock has given way (the pill's 44 px sit 2 px above the
+   bar's 48), its last 12 px fading out - what rides past it as the drawer moves goes under nothing. */
+.launcher-clip {
+  position: absolute;
+  inset: 0 0 calc(4px - var(--strip-height));
+  overflow: hidden;
+  pointer-events: none;
+  mask-image: linear-gradient(black calc(100% - 12px), transparent);
+}
+.launcher-clip > .launcher { bottom: 0; }
+/* Where the search bar slides down as the dock gives way (.home > .bar), the window's edge rides with the pill - it is
+   always at the pill's top - and the drawer in it is moved back by as much: transforms only, all of them. */
+.home > .stage > .launcher-clip { transform: translateY(calc((var(--p) - 1) * var(--strip-height))); will-change: transform; }
+.home > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * (var(--rise) + var(--strip-height)))); }
+:is(.home.pill-below, .pull-screen, .home:not(:has(> .bar))) > .stage > .launcher-clip { transform: none; }
+:is(.home.pill-below, .pull-screen, .home:not(:has(> .bar))) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
+/* No search bar at the foot (the search widget): down over the dock's place to the screen's foot, no pill to clear.
+   Over an app (pull.tsx): no dock - the pill right under the stage. */
+.home:not(:has(> .bar)) .launcher-clip { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); mask-image: none; }
+.home:not(:has(> .bar)) .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
+.pull-screen .launcher-clip { inset: 0 0 4px; }
+.pull-screen .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
 /* The reference material (theme.css --text-fill); home's content fades out under it (.home-content), nothing to blur. */
 .home .launcher-frame.tile {
   background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
@@ -110,7 +142,9 @@
   padding-bottom: calc(48px + var(--foot));
 }
 .home:not(:has(> .bar)) .launcher-inner { padding-bottom: var(--foot); }
-.home.open .launcher :is(.launcher-frame, .drawer, .ai-panel) { pointer-events: auto; }
+/* In the window: a gap over the pill (its fade above it), the last row clear of it. */
+.launcher-clip .launcher-inner { padding-bottom: 16px; }
+.home.open :is(.launcher-frame, .launcher .drawer, .launcher .ai-panel) { pointer-events: auto; }
 /* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
 .home > .bar { transform: translateY(calc(var(--p) * var(--strip-height))); }
 .home.pill-below > .bar, .pull-screen > .bar { transform: none; }
