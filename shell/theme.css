@@ -96,8 +96,8 @@
   /*
    * The frost (frost v2, 2026-10-22): one material for the surfaces you read through - PowOS AI's cards and panel, the
    * control center. Its strength is the compositor's blur (--frost-blur-native: what's behind can't be read, not a
-   * darker fill), its colour the reference tint cooled, at the reference strength; text keeps its contrast with a soft
-   * scrim of its own (--frost-scrim, a halo behind each run), not a slab.
+   * darker fill), its colour the reference tint cooled, at the reference strength; over a wallpaper of the other tone
+   * it takes that tone (shell.css), so text keeps its contrast without a slab or a halo.
    */
   --frost-cool: var(--frost-cool-dark);
   --frost-cool-light: #e8eef6;
@@ -110,7 +110,6 @@
   --frost-base: color-mix(in oklab, var(--glass-base) 55%, var(--frost-cool));
   --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 16%), transparent);
   --frost-blur-native: 360px;
-  --frost-scrim: 0 0 3px color-mix(in srgb, var(--frost-base) 80%, transparent), 0 0 9px color-mix(in srgb, var(--frost-base) 55%, transparent);
   /* One material (docs/DESIGN-LANGUAGE.md): every surface is the reference fill - home's tiles as PowOS AI's cards. */
   --glass-fill: var(--text-fill);
   /*
