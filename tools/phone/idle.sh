@@ -20,10 +20,15 @@
 #        phone in loops (docs/AGENT-HANDBOOK.md); this is what to call instead.
 #        AWAKE_ONLY=1: return only for Awake + idle (a check that needs the screen on waits through doze; never wakes it).
 #        VERIFY_GO=1: also return "go=<task|all> screen=<..>" at once when the AI page's "test now" wrote PowOS's
-#        /tmp/powos-verify-go (the user hands the phone over; tools/phone/verify/queue.sh's runner clears it).
+#        /tmp/powos-verify-go (the user hands the phone over; tools/phone/verify/queue.sh's runner clears it), and
+#        "stop screen=<..>" when the status pill's tap wrote /tmp/powos-verify-stop (the runner pauses).
+#        GO_ONLY=1 (the runner paused): return for the go flag only. VERIFY_STATE=<word>: the runner's state for the
+#        AI page (VerifyRun.kt state): written to /data/local/tmp/powos-verify-runner, touched at every 5 s check (its
+#        heartbeat: a dead runner's goes stale).
 here=$(dirname "$0")
 if [ "${1:-}" = "--wait" ]; then
-  need=${2:-60}; max=${3:-600}; awake=${AWAKE_ONLY:-0}; go=${VERIFY_GO:-0}
+  need=${2:-60}; max=${3:-600}; awake=${AWAKE_ONLY:-0}; go=${VERIFY_GO:-0}; only=${GO_ONLY:-0}
+  st=$(printf %s "${VERIFY_STATE:-}" | tr -cd 'a-z'); hb=/data/local/tmp/powos-verify-runner
   "$0" >/dev/null   # starts the touch watcher if it isn't running
   # Awake counts only once the screen has been ON for IDLE_S too: after a long sleep the last touch is hours old, so
   # "no touch for IDLE_S" alone said free the moment the user woke the phone to use it.
@@ -33,21 +38,23 @@ if [ "${1:-}" = "--wait" ]; then
   while :; do
   left=$(( deadline - $(date +%s) ))
   [ $left -gt 0 ] || { out=timeout; break; }
-  out=$("$here/adb.sh" shell "end=\$(( \$(date +%s) + $left )); on=0; while [ \$(date +%s) -lt \$end ]; do
-      touch /data/local/tmp/powos-touchmon.ask
+  out=$("$here/adb.sh" shell "end=\$(( \$(date +%s) + $left )); on=0; [ -n '$st' ] && printf %s '$st' > $hb
+    while [ \$(date +%s) -lt \$end ]; do
+      touch /data/local/tmp/powos-touchmon.ask; [ -n '$st' ] && touch $hb
       w=\$(dumpsys power | grep -m1 mWakefulness= | cut -d= -f2)
       t=\$(( \$(date +%s) - \$(cat /data/local/tmp/powos-lasttouch 2>/dev/null || date +%s) ))
       [ \$w = Awake ] && { [ \$on = 0 ] && on=\$(date +%s); } || on=0
       a=\$(( \$(date +%s) - on ))
       [ "$go" = 1 ] && [ -s /data/powos/root/tmp/powos-verify-go ] && { echo go=\$(head -c 64 /data/powos/root/tmp/powos-verify-go | tr -cd 'A-Za-z0-9_.:-') screen=\$w; exit 0; }
-      case \$w in Asleep|Dozing) [ "$awake" = 1 ] || { echo idle=\$t screen=\$w; exit 0; } ;; Awake) [ \$t -ge $need ] && [ \$a -ge $need ] && { echo idle=\$t screen=\$w; exit 0; } ;; esac
+      [ "$go" = 1 ] && [ "$only" != 1 ] && [ -e /data/powos/root/tmp/powos-verify-stop ] && { echo stop screen=\$w; exit 0; }
+      [ "$only" = 1 ] || case \$w in Asleep|Dozing) [ "$awake" = 1 ] || { echo idle=\$t screen=\$w; exit 0; } ;; Awake) [ \$t -ge $need ] && [ \$a -ge $need ] && { echo idle=\$t screen=\$w; exit 0; } ;; esac
       sleep 5
     done; echo timeout" 2>/dev/null | tr -d '\r' | tail -1)
   [ -n "$out" ] && break
   sleep 10
   done
   echo "$out"
-  case "$out" in idle=*|go=*) exit 0 ;; *) exit 1 ;; esac
+  case "$out" in idle=*|go=*|stop*) exit 0 ;; *) exit 1 ;; esac
 fi
 "$here/adb.sh" shell 'cat > /data/local/tmp/powos-touchmon.sh' <<'EOF'
 # powos-touchmon.sh: every 2 s, the epoch of the last touch-panel IRQ count change -> /data/local/tmp/powos-lasttouch

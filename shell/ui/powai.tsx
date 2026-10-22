@@ -15,7 +15,7 @@ import { ago } from "./time.ts";
 import { boardState, openAgents, useAgents, useStallClock } from "../agents.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { checkAlive, useDb, useRows } from "../apps/stdb.ts";
-import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
+import type { AgentMail, AgentSession, ChatItem, VerifyState } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
@@ -264,6 +264,31 @@ function testNow(id: string) {
   go(id).catch(failed);
 }
 
+/**
+ * The runner's state (VerifyRun.kt state: its heartbeat file on the phone): paused by the user (the pill's tap), or
+ * no beat for STALE_S (killed, the Mac asleep) - then the queued checks wait on nothing, and the header says
+ * "checks paused · resume". Hosts without verify.state never answer: nothing shows.
+ */
+const runner = signal<VerifyState | null>(null);
+powos.on("verify.state", (s: VerifyState) => (runner.value = s));
+const STALE_S = 45;
+const ASK_MS = 15_000;
+const isPaused = (s: VerifyState | null) => !!s && (s.state === "paused" || s.age < 0 || s.age > STALE_S);
+/** While checks are queued and the page shows: the runner's state now and every ASK_MS (one root `stat` each). */
+function useRunnerState(on: boolean) {
+  useEffect(() => {
+    if (!on) return;
+    const ask = () => document.hidden || powos.ai.verifyState?.().catch(() => undefined);
+    ask();
+    const t = setInterval(ask, ASK_MS);
+    document.addEventListener("visibilitychange", ask);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", ask);
+    };
+  }, [on]);
+}
+
 function TestError() {
   return testError.value ? <div class="ai-work-empty muted">{testError.value}</div> : null;
 }
@@ -364,11 +389,21 @@ function CheckActs({ w, images }: { w: WorkRow; images: string[] }) {
   ) : null;
 }
 
-/** "test all" on the in-progress header while phone checks are queued ("testing…" once tapped). */
+/**
+ * "test all" on the in-progress header while phone checks are queued ("testing…" once tapped); "checks paused · resume"
+ * instead while the runner is paused or silent - both write the go flag (verifyGo "all"), which also ends a pause.
+ */
 function TestAll({ rows }: { rows: WorkRow[] }) {
   const queued = rows.filter(checkQueued);
   useEffect(probeTest, []);
+  useRunnerState(queued.length > 0 && canTest.value);
   if (!queued.length || !canTest.value) return null;
+  if (isPaused(runner.value) && !queued.every(isTesting))
+    return (
+      <button type="button" class="ai-test ai-test-all" onClick={() => testNow("all")}>
+        checks paused · resume
+      </button>
+    );
   return queued.some((w) => !isTesting(w)) ? (
     <button type="button" class="ai-test ai-test-all" onClick={() => testNow("all")}>
       test all

@@ -46,6 +46,9 @@ object VerifyRun {
     private const val DIR = "verify"
     private const val STATUS = "status.json"
 
+    /** The runner's state word + heartbeat (tools/phone/verify/queue.sh, idle.sh VERIFY_STATE): adb's shell user's. */
+    private const val RUNNER = "/data/local/tmp/powos-verify-runner"
+
     /** WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL (hidden; the recents role's), as the pet's (PetOverlay). */
     private const val TYPE = 2017
 
@@ -84,6 +87,21 @@ object VerifyRun {
 
     /** "Test now" ([task]: a board task id, or "all"): the queue's runner takes it at its next 5 s check. */
     fun go(task: String) = flag("powos-verify-go", task)
+
+    /**
+     * The runner's state for the AI page ("checks paused · resume"): the word the Mac's runner keeps in
+     * /data/local/tmp/powos-verify-runner (waiting | paused | running | idle | stopped; its waits on the phone touch it
+     * every 5 s) and the seconds since (age, -1: no file - no runner has run). Android root (the file is adb's shell
+     * user's), off the main thread; the answer comes as [emit] (the page's "verify.state").
+     */
+    fun state(emit: (JSONObject) -> Unit) {
+        Thread({
+            val r = andro.marchy.RootShell.run("f=$RUNNER; [ -e \$f ] && { head -c 16 \$f | tr -cd a-z; echo; echo \$(( \$(date +%s) - \$(stat -c %Y \$f) )); }", null, 5_000)
+            val lines = r.output.lines()
+            val ok = r.code == 0 && lines.size >= 2
+            emit(JSONObject().put("state", if (ok) lines[0] else "").put("age", if (ok) lines[1].trim().toLongOrNull() ?: -1 else -1))
+        }, "verify-state").start()
+    }
 
     private fun flag(
         name: String,

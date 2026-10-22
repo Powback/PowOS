@@ -302,6 +302,8 @@ class ShellBridge(
             "agents.message" -> dev.omalauncher.AgentsSpool.message(a.getString(0), a.getString(1))
             // "Test now" on the AI page: the verify queue's runner (on the Mac) takes that task's phone checks now.
             "verify.go" -> VerifyRun.go(a.getString(0))
+            // The runner's state (paused, or its heartbeat stale): the page's "checks paused · resume", as "verify.state".
+            "verify.state" -> VerifyRun.state { emit("verify.state", it) }
             "agents.interrupt" -> dev.omalauncher.AgentsSpool.interrupt(a.getString(0))
             "speech.start" -> listen(a.optBoolean(0))
             "speech.stop" -> speech.stop()

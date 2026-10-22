@@ -21,8 +21,15 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
   started gets every event - a widget's watch on /run/powos-app once ate the pill's "done") as a heartbeat every HB_S
   (4) s while a check runs ({name,task,k,n,screen,el,budget,prev}; {done,summary} at the end -> a notification), each
   one adb call killed after 15 s. The pill ticks the elapsed time itself and hides with a "Phone test stopped"
-  notification after 30 s without a beat. Its tap (every tap) writes /tmp/powos-verify-stop; the next beat sees it,
-  the runner kills the check (TERM, KILL after 5 s): it stays queued, tries not counted. Check: test-now.sh.
+  notification after 30 s without a beat. Its tap (every tap) writes /tmp/powos-verify-stop; the next beat (or the
+  wait's 5 s look) sees it: the check is killed (TERM, KILL after 5 s), stays queued, tries not counted, and the runner
+  PAUSES (~/.cache/powos-verify-queue/paused): it stays up, its wait returns only for the go flag (GO_ONLY=1). The AI
+  page's "checks paused · resume" (or test all / test now) writes go, which ends the pause. Mac: `queue.sh pause|resume`.
+  Check: test-now.sh.
+- Runner state for the page: /data/local/tmp/powos-verify-runner (adb's shell user's: PowOS /tmp is not writable by
+  it) = waiting|paused|running|idle|stopped; idle.sh's wait (VERIFY_STATE) touches it every 5 s, phone_sh (RSTATE)
+  rewrites it. Bridge verify.state (VerifyRun.state, a root stat) -> "verify.state" {state, age}; paused or age > 45 s
+  -> "checks paused · resume" (hidden on hosts without verify.state).
 - Sub-steps: every beat carries the check's current step + how long it has run, shown on the pill's third line (the
   json's "prev", also "step"/"stepel"): "waiting for the game window · 45 s · tap to stop" under "Testing: <check>"
   and "k of N · m:ss". The step = PowOS's /tmp/powos-verify-step if the check wrote one (plain text, as the session
@@ -32,16 +39,26 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
 - Budget: `add --budget S` (job file `budget=`, default 300). Past it the runner kills the check: "FAIL timeout" on
   the board, the pill's next line (prev) and the summary. A runner TERM writes done too (the pill goes at once).
 - Clear a stuck pill (old APK): write `{"done":true}` to /run/powos-app/verify-status.json the way status() does.
-- Test the runner off the phone: QUEUE_DIR=<tmp> QUEUE_PHONE=<dir with stub adb.sh/user.sh/shot.sh> LOCK_HELD=1
-  QUEUE_COPY=<any file> QUEUE_HERE=<verify dir> bash queue.sh run (a stub adb.sh decodes the base64 and runs it with
-  /tmp and /run/powos-app mapped to a temp dir; map /tmp/ first).
+- Test the runner off the phone - ONLY with a temp HOME and queue (a test once took the real verify lock): HOME=<tmp>
+  QUEUE_DIR=<tmp> QUEUE_PHONE=<dir: stub adb.sh/user.sh/shot.sh + a copy of idle.sh> QUEUE_NO_TREE=1 (the real
+  verify-runner checkout untouched) QUEUE_COPY=<any file> QUEUE_HERE=<verify dir> bash queue.sh run. The stub adb.sh
+  runs `shell` commands with /data/local/tmp and /data/powos/root mapped to a temp dir, decodes phone_sh's base64 with
+  /tmp/ and /run/powos-app mapped, answers dumpsys with mWakefulness=Awake, no-ops the touchmon. launchd: a test label
+  (QUEUE_AGENT=<label>) whose plist sets HOME/QUEUE_* - never load a second real runner.
 - Jobs run in the runner's own checkout `.claude/worktrees/verify-runner` (made if missing, node_modules linked,
   fast-forwarded - reset if dirty - to origin before each window): `add` stores cwd + command repo-relative when they
   are inside any PowOS worktree (absolute only otherwise), and old jobs with a `.claude/worktrees/*` cwd are rewritten
   at run time. So PUSH what the check needs before queueing; `worktree.sh done` right after is fine (it lists them).
 - The runner execs a private temp copy of verify-runner's queue.sh (code changes land at the next runner start; a pull
-  can't change it mid-run). Restart on new code: `kill $(cat ~/.cache/powos-verify-queue/runner.pid)` (its TERM trap
-  stops the window + check, frees the lock; the job stays queued), then any `queue.sh add` - or `queue.sh run` - starts it.
+  can't change it mid-run). ONE runner, ever: lock dir ~/.cache/powos-verify-queue/runner.lock (its pid; a dead pid's
+  is taken over); a second `queue.sh run` exits "runner already running (pid N)".
+- It runs as the launchd agent com.powos.verify-runner (unit units/mac/verify-runner-mac.json, plist + deploy
+  tools/phone/verify/runner-deploy.sh install|remove|status), in the user/<uid> domain (headless Mac: no gui domain;
+  LimitLoadToSessionType Background), cwd the verify-runner checkout. `queue.sh add` kickstarts it (loads it first
+  after a reboot). KeepAlive SuccessfulExit=false: a kill/crash restarts it; nothing queued: it exits 0.
+  WatchPaths never fired in this domain (FSEvents; dir or file) - don't rely on it. Restart on new code:
+  `kill $(cat ~/.cache/powos-verify-queue/runner.pid)` (TERM trap: check stays queued, locks freed; launchd restarts
+  it). Stop for a while: `launchctl bootout user/$(id -u)/com.powos.verify-runner`; remove: `runner-deploy.sh remove`.
 - Mac: `journey.sh` (one wait + verify lock + gest.sh runs + pull, `RUNS="A B C D"`), `frames.sh` (gaps / sheet / overview),
   `bf-run.sh` (Broforce ~10 min check; `NO_START=1` while the user plays it themselves).
 - Phone (pushed by the above, or `adb.sh push` + `su -c sh`): `gest.sh`, `cpu-sample.sh`, `bf-sample.sh`, `sf-latency.sh`;

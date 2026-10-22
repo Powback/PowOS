@@ -8,8 +8,10 @@
 #        --name: what the phone's status pill says is being tested (default: the script's name)
 #        --screen: the screen it needs (the pill asks to fold / unfold); default either
 #        --budget: seconds it may run (default 300); past it the runner kills it: "FAIL timeout" on the board and pill
-#   queue.sh list                               queued, running and the last results
-#   queue.sh run                                the runner (started by add; stays while anything is queued)
+#   queue.sh list                               queued, running, paused and the last results
+#   queue.sh pause | resume                     pause the runner (what the pill's tap does) / resume it (go=all)
+#   queue.sh run                                the runner: launchd's agent com.powos.verify-runner (runner-deploy.sh)
+#        starts it when add kicks it (launchctl kickstart) and again if it dies; without the agent, add starts one. Stays while anything is queued.
 # The runner waits for ONE free window (window-lock.sh: screen on, no touch for 120 s, then the verify lock), runs every
 # queued check in it with LOCK_HELD=1, then releases the lock. "Test now" on the AI page (VerifyRun.kt) writes the phone's
 # go flag (/tmp/powos-verify-go in PowOS: a task id or "all"): the wait returns at once and only that task's checks run.
@@ -21,7 +23,10 @@
 # but printed a line starting with FAIL is a FAIL. Each result goes onto the check's board task (`--step`, the log's
 # last line; a FAIL also gets a screenshot as its review image), a mail to the coder inbox (QUEUE_MAIL_TO) and the log
 # stays in ~/.cache/powos-verify-queue/done/. Queue a check and END YOUR TURN: the result shows on the board (handbook,
-# Efficiency). Paths: a job queued from inside any PowOS worktree is stored repo-relative and runs in the runner's own
+# Efficiency). Paused (the pill's tap, `queue.sh pause`: ~/.cache/powos-verify-queue/paused): the runner stays up but
+# runs nothing until the phone's go flag (the AI page's "resume", "test all", "test now"); its state goes to the phone's
+# /data/local/tmp/powos-verify-runner (waiting | paused | running | idle), the waits touch it every 5 s (the heartbeat
+# the AI page reads: paused or stale -> "checks paused · resume"). Paths: a job queued from inside any PowOS worktree is stored repo-relative and runs in the runner's own
 # checkout (.claude/worktrees/verify-runner, fast-forwarded to origin before each window), so removing the worktree it
 # came from is fine - push before you queue. The runner runs a private copy of that checkout's queue.sh.
 set -uo pipefail
@@ -34,7 +39,23 @@ Q=${QUEUE_DIR:-$HOME/.cache/powos-verify-queue}; mkdir -p "$Q/done"
 QUEUED_STEP="phone check queued"   # shell/ui/powai.tsx matches this text
 # user_sh <script text>: run it inside PowOS as the session user (its `powos ...`), quietly.
 user_sh() { local s; s=$(mktemp "$Q/user.XXXX"); printf '%s\n' "$1" > "$s"; "$phone/user.sh" "$s" >/dev/null 2>&1; local rc=$?; rm -f "$s"; return $rc; }
-runner_up() { kill -0 "$(cat "$Q/runner.pid" 2>/dev/null)" 2>/dev/null; }
+# alive_runner <pid>: that pid runs a queue runner (not a recycled pid).
+alive_runner() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && ps -p "$1" -o command= 2>/dev/null | grep -q queue; }
+runner_up() { alive_runner "$(cat "$Q/runner.lock/pid" 2>/dev/null || cat "$Q/runner.pid" 2>/dev/null)"; }
+# The launchd agent (runner-deploy.sh): only for the real queue dir, or the test agent QUEUE_AGENT names.
+LABEL=${QUEUE_AGENT:-com.powos.verify-runner}
+agent_on() { [ -z "${QUEUE_DIR:-}" ] || [ -n "${QUEUE_AGENT:-}" ]; }
+agent_loaded() { agent_on && launchctl print "user/$(id -u)/$LABEL" >/dev/null 2>&1; }
+# agent_kick: start the agent's runner now (a no-op while it runs). Installed but not loaded (a reboot: this headless
+# Mac has no login session to load it): loaded here, which starts it. Fails without the agent.
+agent_kick() { local p=$HOME/Library/LaunchAgents/$LABEL.plist
+  agent_on || return 1
+  agent_loaded || { [ -f "$p" ] && launchctl bootstrap "user/$(id -u)" "$p" 2>/dev/null; } || return 1
+  launchctl kickstart "user/$(id -u)/$LABEL" >/dev/null 2>&1; }
+# phone_sh <script>: run it in PowOS as root; killed after 15 s (a hung adb never holds the runner). RSTATE set: the
+# runner's state word for the AI page goes to the phone's /data/local/tmp/powos-verify-runner first (its heartbeat).
+phone_sh() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
+  perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell "${RSTATE:+printf $RSTATE > /data/local/tmp/powos-verify-runner; }su -c 'sh /data/powos/powos-run.sh \"echo $b | base64 -d | bash\"'" 2>/dev/null; }
 # wt_of <abs path>: the PowOS worktree it lies in (wroot) and the path under it (wsub, "" = the root); fails outside.
 wt_of() {
   [ -n "$REPO" ] || return 1
@@ -58,6 +79,7 @@ relify() {
 # verify_tree: the runner's checkout - made if missing (shell/node_modules linked from powos-multiplatform), then
 # fast-forwarded to origin's tip.
 verify_tree() {
+  [ -z "${QUEUE_NO_TREE:-}" ] || return 0   # tests: never touch the real runner's checkout
   git -C "$REPO" fetch -q origin "$BASE" || echo "verify checkout: fetch failed - running on what it has"
   if [ ! -e "$VR/.git" ]; then
     git -C "$REPO" worktree add -q --detach "$VR" "origin/$BASE" || { echo "verify checkout: can't create $VR"; return 1; }
@@ -96,15 +118,44 @@ add)
   if [ -z "${QUEUE_NO_RUN:-}" ]; then
     # The board marker: the AI page offers "test now" on a task whose step says so (the result's step replaces it).
     ( user_sh "$(printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true' "$task" "$QUEUED_STEP")" & ) >/dev/null 2>&1
-    runner_up || { nohup "$0" run >> "$Q/runner.log" 2>&1 & echo $! > "$Q/runner.pid"; }
+    # The launchd agent's runner, started now; without the agent, a runner of our own.
+    runner_up || agent_kick || { nohup "$0" run >> "$Q/runner.log" 2>&1 & echo $! > "$Q/runner.pid"; }
   fi ;;
+pause)  # what the pill's tap does: the runner (waiting or mid-check) sees the phone's stop flag within 5 s
+  touch "$Q/paused"
+  runner_up && phone_sh 'umask 022; : > /tmp/powos-verify-stop'
+  echo "paused: nothing runs until resume (queue.sh resume, or resume / test all on the AI page)" ;;
+resume)  # the AI page's resume: the go flag (go=all) the runner's wait watches
+  rm -f "$Q/paused"
+  runner_up && phone_sh 'umask 022; printf all > /tmp/.powos-verify-go && mv -f /tmp/.powos-verify-go /tmp/powos-verify-go'
+  echo "resumed$(runner_up && echo ': every queued check runs now' || echo ' (no runner up: the next job starts one)')" ;;
 list)
   echo "queued:"; ls "$Q"/*.job 2>/dev/null | sed 's|.*/|  |' || true
-  echo "runner: $(runner_up && echo running || echo idle)"
+  echo "runner: $(runner_up && echo running || echo idle)$([ -e "$Q/paused" ] && echo ", PAUSED (queue.sh resume)")$(agent_loaded && echo " (launchd $LABEL)")"
   echo "last results:"; ls -t "$Q/done" 2>/dev/null | grep "\.log$" | head -8 | while read -r f; do echo "  $f: $(tail -1 "$Q/done/$f")"; done ;;
 run)
   [ -n "$REPO" ] || { echo "queue.sh run: not in a PowOS checkout"; exit 2; }
+  # Nothing queued (launchd starts it at load): gone again at once.
+  ls "$Q"/*.job >/dev/null 2>&1 || exit 0
+  # ONE runner, ever (launchd's or a hand-started one): the lock dir $Q/runner.lock holds its pid (exec keeps it, so
+  # the private copy below already holds it). A dead holder's lock is taken over; a live one's: exit at once.
+  L=$Q/runner.lock
+  if [ "$(cat "$L/pid" 2>/dev/null)" != $$ ]; then
+    # A runner from before the lock (only its runner.pid): running too.
+    p=$(cat "$Q/runner.pid" 2>/dev/null)
+    if [ ! -d "$L" ] && [ "$p" != $$ ] && alive_runner "$p"; then echo "$(date +%T) runner already running (pid $p)"; exit 0; fi
+    for _ in 1 2; do
+      mkdir "$L" 2>/dev/null && { echo $$ > "$L/pid"; break; }
+      p=$(cat "$L/pid" 2>/dev/null)
+      if alive_runner "$p"; then echo "$(date +%T) runner already running (pid $p)"; exit 0; fi
+      [ -z "$p" ] && sleep 1 && p=$(cat "$L/pid" 2>/dev/null) && [ -n "$p" ] && continue   # being taken right now
+      rm -rf "$L"   # stale: its runner is gone
+    done
+    [ "$(cat "$L/pid" 2>/dev/null)" = $$ ] || { echo "$(date +%T) runner lock $L busy - exiting"; exit 0; }
+  fi
+  echo $$ > "$Q/runner.pid"
   if [ -z "${QUEUE_COPY:-}" ]; then
+    cd "$VR" 2>/dev/null || cd "$HOME"   # never a worktree that may be removed under it (getcwd errors)
     # A private copy of the verify checkout's queue.sh: bash reads a script as it runs, and checkouts get pulled into.
     verify_tree || exit 1
     c=$(mktemp "${TMPDIR:-/tmp}/powos-queue.XXXXXX") && cp "$VR/tools/phone/verify/queue.sh" "$c" || exit 1
@@ -146,19 +197,22 @@ EOS
       s/^-- \d\d:\d\d:\d\d //; s/[[:cntrl:]"\\|&]//g; s/^\s+|\s+$//g;
       next if $_ eq "" || /\d+ files? (pushed|pulled|skipped)|bytes in [\d.]+ ?s\)|^\[\s*\d+%\]|^adb: |Broken pipe|^\d+(\.\d+)? [KM]B\/s/; $l = $_ }
       END { $l //= ""; print length($l) > 60 ? substr($l, 0, 59) . "\x{2026}" : $l }'; }
-  # phone_sh <script>: run it in PowOS as root; killed after 15 s (a hung adb never holds the runner).
-  phone_sh() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
-    perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell "su -c 'sh /data/powos/powos-run.sh \"echo $b | base64 -d | bash\"'" 2>/dev/null; }
   killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c" "${2:-TERM}"; done; kill -"${2:-TERM}" "$1" 2>/dev/null; }
   # endjob <pid>: TERM its tree, KILL what's left after 5 s.
   endjob() { killtree "$1"; for _ in 1 2 3 4 5; do kill -0 "$1" 2>/dev/null || return 0; sleep 1; done; killtree "$1" KILL; }
   # `kill <runner.pid>` stops the window and its check too, frees the verify lock if this runner held it, and hides the pill.
-  trap 'for c in $(pgrep -P $$); do killtree $c; done; [ "$(cut -d" " -f1 "$HOME/.cache/powos-verify.lock/who" 2>/dev/null)" = verify-queue ] && rm -rf "$HOME/.cache/powos-verify.lock"; status "" "{\"done\":true,\"summary\":\"Phone checks stopped (the runner was stopped)\"}"; rm -f "$Q/runner.pid"; exit 143' TERM
+  trap 'for c in $(pgrep -P $$); do killtree $c; done; [ "$(cut -d" " -f1 "$HOME/.cache/powos-verify.lock/who" 2>/dev/null)" = verify-queue ] && rm -rf "$HOME/.cache/powos-verify.lock"; RSTATE=stopped status "" "{\"done\":true,\"summary\":\"Phone checks stopped (the runner was stopped)\"}"; rm -f "$Q/runner.pid"; rm -rf "$Q/runner.lock"; exit 143' TERM
+  # pause <summary>: the user's stop - recorded (the runner stays, runs nothing until the phone's go flag), the pill gone.
+  pause() { touch "$Q/paused"; RSTATE=paused status "" "{\"done\":true,\"summary\":$(jstr "$1 · resume on the AI page")}"; }
   # The runner stays while anything is queued (a "test now" needs one waiting): a window that didn't come is waited for again.
   while ls "$Q"/*.job >/dev/null 2>&1; do
     verify_tree
-    ( export VERIFY_GO=1
+    # Paused: the wait returns for the go flag only (resume / test all / test now), never for a free window.
+    if [ -e "$Q/paused" ]; then export GO_ONLY=1 VERIFY_STATE=paused; echo "$(date +%T) paused - waiting for resume on the phone"
+    else unset GO_ONLY; export VERIFY_STATE=waiting; fi
+    ( export VERIFY_GO=1 WL_PHONE=$phone
       window_lock verify-queue "${QUEUE_IDLE_S:-120}" "${WAIT_S:-7200}" >/dev/null || exit 3
+      rm -f "$Q/paused"; RSTATE=running   # a go ends a pause
       go=; case "${WL_GOT:-}" in go=*) go=${WL_GOT#go=}; go=${go%% *} ;; esac
       sel=()
       for j in "$Q"/*.job; do
@@ -201,13 +255,13 @@ EOS
           echo "$(date +%T) $n: past its ${budget}s budget - killed"
         fi
         if [ "$why" = stop ]; then
-          echo "$(date +%T) $n: stopped from the phone - stays queued"
-          status "" "{\"done\":true,\"summary\":$(jstr "Phone checks stopped: $pass passed, $fail failed, $((N - k + 1)) still queued")}"
+          echo "$(date +%T) $n: stopped from the phone - stays queued, paused"
+          pause "Phone checks paused: $pass passed, $fail failed, $((N - k + 1)) still queued"
           exit 4
         fi
         if [ $rc = 3 ] && [ $tries -lt 2 ]; then
           sed -i '' "s/^tries=.*/tries=$((tries + 1))/" "$j"; echo "$(date +%T) $n: no window / touched (rc 3), again next window"
-          status "" "{\"done\":true,\"summary\":$(jstr "Phone checks paused (the phone was touched): $pass passed, $fail failed")}"
+          status "" "{\"done\":true,\"summary\":$(jstr "Phone checks wait for the next free window (the phone was touched): $pass passed, $fail failed")}"
           exit 4   # leave the window: the user is on the phone
         fi
         # A check that printed FAIL but exited 0 (float-windows did) failed.
@@ -230,7 +284,9 @@ EOS
       sum="Phone checks: $pass passed"; [ $fail = 0 ] || sum="$sum, $fail failed ($first$([ $fail -gt 1 ] && echo ", ..."))"
       status "" "{\"done\":true,\"summary\":$(jstr "$sum")}" ) & wait $!
     rc=$?; [ $rc = 3 ] && echo "$(date +%T) no free window in ${WAIT_S:-7200}s - waiting again"
+    [ $rc = 6 ] && { echo "$(date +%T) stopped from the phone - paused"; pause "Phone checks paused"; }
   done
-  rm -f "$Q/runner.pid" ;;
-*) sed -n 2,13p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  RSTATE=idle phone_sh ':' >/dev/null
+  rm -f "$Q/runner.pid"; rm -rf "$Q/runner.lock" ;;
+*) sed -n 2,15p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

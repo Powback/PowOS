@@ -134,6 +134,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       send: (text, recents = true) => call("ai.send", text, recents),
       unqueue: (id) => call("ai.unqueue", id),
       verifyGo: (task) => call("verify.go", task),
+      verifyState: () => call("verify.state"),
       open: () => call("ai.open"),
       newApp: (description) => call<boolean>("ai.newApp", description),
       closeThread: () => call<boolean>("ai.closeThread"),
@@ -529,6 +530,7 @@ function mock(): Bridge {
       },
       unqueue: async (id) => void events.emit("ai.changed", (chat = { ...chat, queued: (chat.queued ?? []).filter((q) => q.id !== id) })),
       verifyGo: async (task) => console.log(`[mock] test now: ${task}`),
+      verifyState: async () => events.emit("verify.state", { state: "waiting", age: 2 }),
       open: async () => console.log("[mock] open PowOS AI"),
       newApp: async (description) => {
         const step = (next: Partial<Chat>) => events.emit("ai.changed", (chat = { ...chat, ...next }));

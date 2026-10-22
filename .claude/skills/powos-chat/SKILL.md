@@ -101,6 +101,10 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
   VerifyRun.kt: writes PowOS's /tmp/powos-verify-go; the Mac's runner takes it within 5 s). "testing… don't touch the
   phone" until the step changes (or 20 min). Result steps "verify PASS: .." -> "check passed", "verify FAIL rc=N: .."
   -> "check failed: <line>" + the last design-qa/verify-*.png inline. An older APK: "test now needs the newer app".
+- The header says "checks paused · resume" instead of "test all" while checks are queued and the runner is paused
+  (the pill's tap) or silent (no beat for 45 s): powai.tsx asks powos.ai.verifyState() every 15 s while shown
+  (VerifyRun.state -> "verify.state" {state, age}); the tap is verifyGo("all"), which ends the pause. A host without
+  verify.state never answers: nothing shows.
 - The board went stale after edits: a socket Doze cut silently stays "connected". stdb.ts checkAlive(db, query): one
   more subscription when the board comes into sight; not applied in 4 s -> a new connection. Scenes: test-now,
   test-now-testing.

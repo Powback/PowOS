@@ -142,6 +142,15 @@ export interface AgentMail {
   priority?: string;
 }
 /** An agent at work: a tmux session in PowOS; [title] its pane's (Claude Code's: the task, a spinner while working). */
+/**
+ * The phone-check runner on the Mac (tools/phone/verify/queue.sh), as its heartbeat file on the phone says:
+ * state waiting | paused | running | idle | stopped ("" when unknown); age: seconds since its last beat (-1: none yet).
+ */
+export interface VerifyState {
+  state: string;
+  age: number;
+}
+
 export interface AgentSession {
   name: string;
   activity: number;
@@ -376,6 +385,11 @@ export interface Bridge {
      * ("all": every queued one), not waiting for the phone to sit idle. ?: hosts from before it.
      */
     verifyGo?(task: string): Promise<void>;
+    /**
+     * Asks for the verify runner's state; it comes as "verify.state" (VerifyState). ?: hosts from before it (their
+     * call rejects "no such call": the page then shows no "checks paused").
+     */
+    verifyState?(): Promise<void>;
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
     /**
@@ -725,7 +739,7 @@ export interface Bridge {
     glass(): Promise<GlassSource>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "qt.drag" ({ side, y, q }) / "qt.settle" ({ open }) (Quick Tools), "home.panel" ({ kind }: home with its pull-up panel up), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "system.glass" (GlassSource), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "qt.drag" ({ side, y, q }) / "qt.settle" ({ open }) (Quick Tools), "home.panel" ({ kind }: home with its pull-up panel up), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "verify.state" (VerifyState), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "system.glass" (GlassSource), "notifications.changed" (NotificationList),
    * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "windows.changed" (DesktopWindow[]), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

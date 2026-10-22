@@ -5,7 +5,9 @@ The rule (CLAUDE.md, capabilities.md "Units"): whatever a deploy puts on a host 
 registered as a unit with an owner, a purpose, limits and a way out. Without a check the rule rots the first time a
 deploy grows a line, so this reads every deploy script and fails on anything it installs that no unit in units/ claims.
 
-Deploy scripts: tracked shell files under targets/ named *deploy*.sh, or carrying the line `# powos-units: deploy`.
+Deploy scripts: tracked shell files under targets/ named *deploy*.sh, or under targets/ or tools/ carrying the line
+`# powos-units: deploy` (`# powos-units: deploy host=mac`: a script that installs on the Mac itself - its absolute
+paths and $HOME are the Mac's, checked against units/mac/).
 What counts as installing, line by line (inside quoted remote commands too): install, cp, ln -s, sed -i, a redirect
 (> / >>) to a path, pacman -S / -U, apt-get install, brew install. Variables are followed as the script assigns them
 ($R is PowOS's root on the phone -> host "phone"; other /data/... -> "phone-android"; /data/local/tmp, /tmp and /dev
@@ -90,10 +92,12 @@ def expand(word, env):
     return word.replace("\\", "")
 
 
-def host_of(path):
+def host_of(path, default="phone"):
     """(host, path on that host), or None for staging and things that are not paths."""
     if not path.startswith("/") and not path.startswith("*/"):
         return None
+    if default == "mac":
+        return None if path.startswith(("/tmp", "/dev/", "/private/tmp")) or path.startswith("*") else ("mac", path)
     if path.startswith("/data/powos/root/") or path == "/data/powos/root":
         p = path[len("/data/powos/root"):] or "/"
         return None if p.startswith(STAGING) or p == "/" else ("phone", p)
@@ -122,6 +126,9 @@ def installs(script):
     env = {"R": "/data/powos/root", "HOME": "/home/powos"}
     out, override = [], None
     lines = open(script, errors="replace").read().splitlines()
+    default = "mac" if any(re.match(r"^#\s*powos-units:\s*deploy\b.*\bhost=mac\b", ln) for ln in lines) else "phone"
+    if default == "mac":
+        env["HOME"] = os.path.expanduser("~")   # the units' ~/... paths expand the same way
     for n, raw in enumerate(lines, 1):
         line = raw.strip()
         m = re.match(r"^#\s*powos-units:\s*(.*)$", line)
@@ -168,33 +175,33 @@ def installs(script):
             found = [("file", f) for f in files] + [("package", p) for p in pkgs]
             override = None
             for kind, what in found:
-                h = host_of(what) if kind == "file" else ("phone", what)
+                h = host_of(what, default) if kind == "file" else (default, what)
                 if h:
                     out.append((n, kind, h[0], h[1]))
             continue
         for kind, what in found:
             if kind == "package":
-                out.append((n, kind, "phone", what))
+                out.append((n, kind, default, what))
                 continue
             dest = expand(what, env)
-            h = host_of(dest)
+            h = host_of(dest, default)
             if h:
                 out.append((n, kind, h[0], h[1].rstrip("/") or "/"))
     return list(dict.fromkeys(out))
 
 
 def deploy_scripts():
-    files = subprocess.run(["git", "-C", ROOT, "ls-files", "targets"], capture_output=True, text=True).stdout.split()
+    files = subprocess.run(["git", "-C", ROOT, "ls-files", "targets", "tools"], capture_output=True, text=True).stdout.split()
     out = []
     for f in files:
         p = os.path.join(ROOT, f)
-        if not f.endswith(".sh") and "rooted/" not in f:
+        if not f.endswith(".sh") and "rooted/" not in f or f.startswith("tools/") and not f.endswith(".sh"):
             continue
         try:
             text = open(p, errors="replace").read()
         except OSError:
             continue
-        if "deploy" in os.path.basename(f) and f.endswith(".sh") or "# powos-units: deploy" in text:
+        if f.startswith("targets/") and "deploy" in os.path.basename(f) and f.endswith(".sh") or "# powos-units: deploy" in text:
             out.append(p)
     return out
 
@@ -256,6 +263,17 @@ def main():
         ok("an unregistered install in a deploy script is caught (file and package)")
     else:
         bad(f"the checker missed an unregistered install: {miss}")
+
+    # A Mac deploy script (host=mac): its $HOME paths are the Mac's, checked against units/mac/.
+    with tempfile.NamedTemporaryFile("w", suffix="-deploy.sh", delete=False) as t:
+        t.write('# powos-units: deploy host=mac\nP=$HOME/Library/LaunchAgents/sneaky.plist\nsed s/a/b/ x.plist > "$P"\n'
+                'cp x.plist $HOME/Library/LaunchAgents/com.powos.verify-runner.plist\n')
+    miss = uncovered(t.name, ms)
+    os.unlink(t.name)
+    if len(miss) == 1 and "sneaky.plist (mac)" in miss[0]:
+        ok("a Mac deploy script's unregistered install is caught, its registered one claimed")
+    else:
+        bad(f"the Mac deploy check: {miss}")
 
     # The tool's own CLI: every verb its help documents dispatches (read from its table, never run here).
     out = subprocess.run([sys.executable, os.path.join(ROOT, "lib", "apps", "powos-units"), "--help"],
