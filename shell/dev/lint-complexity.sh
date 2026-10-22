@@ -14,7 +14,7 @@
 #     --apps      also apps/*/ui (the PowOS apps' UIs; tier-1 and apps/install.sh).
 #     --prune     drop baseline entries that are no longer needed (after a refactor), then check.
 #     --report N  the N worst functions over the limits (baseline ignored), with the totals.
-# Exit 0 clean, 1 findings, 2 couldn't run (no shell/node_modules: npm ci in shell/).
+# Exit 0 clean, 1 findings or couldn't run (fail closed), 2 only when skipped on purpose (GATE_LINT=0).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 SHELL_DIR=$(cd "$here/.." && pwd)
@@ -32,9 +32,23 @@ while [ $# -gt 0 ]; do
     *) files+=("$1"); shift ;;
   esac
 done
-eslint=$SHELL_DIR/node_modules/.bin/eslint
-[ -x "$eslint" ] || { echo "     complexity lint: skipped (no shell/node_modules - npm ci in shell/)"; exit 2; }
-cfg=$SHELL_DIR/eslint.config.mjs
+# Fail closed: the lint runs from its own install of shell/package-lock.json's devDeps, cached per lock hash under
+# ~/.cache/powos-lint (npm ci once, ~5 s; the project's dev deps - nothing global), never from whatever this tree's
+# node_modules happens to hold (absent, or a link to another worktree's). The config is copied next to it so its
+# imports resolve there. Only GATE_LINT=0 skips the lint (exit 2), explicitly.
+if [ "${GATE_LINT:-1}" = 0 ]; then echo "     complexity lint: skipped (GATE_LINT=0)"; exit 2; fi
+CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/powos-lint
+lockh=$(shasum -a 256 "$SHELL_DIR/package-lock.json" | cut -c1-16)
+NM=$CACHE/node-$lockh
+if [ ! -x "$NM/node_modules/.bin/eslint" ]; then
+  command -v npm >/dev/null || { echo "FAIL complexity: no npm to install the lint (GATE_LINT=0 skips it explicitly)"; exit 1; }
+  mkdir -p "$NM" && cp "$SHELL_DIR/package.json" "$SHELL_DIR/package-lock.json" "$NM/" &&
+    (cd "$NM" && npm ci --no-audit --no-fund --ignore-scripts >"$NM/install.log" 2>&1) && [ -x "$NM/node_modules/.bin/eslint" ] ||
+    { echo "FAIL complexity: npm ci of the lint's deps failed ($NM/install.log; GATE_LINT=0 skips it explicitly)"; tail -5 "$NM/install.log" 2>/dev/null; exit 1; }
+fi
+eslint=$NM/node_modules/.bin/eslint
+cp "$SHELL_DIR/eslint.config.mjs" "$NM/eslint.config.mjs"
+cfg=$NM/eslint.config.mjs
 targets=()
 if [ ${#files[@]} -gt 0 ]; then
   for f in "${files[@]}"; do case "$f" in (*.ts|*.tsx|*.mjs|*.js) [ -f "$dir/$f" ] && targets+=("$f") ;; esac; done

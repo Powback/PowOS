@@ -101,6 +101,7 @@ fi
 if out=$("$SHELL_DIR/dev/lint-style.sh" "$S" ${files[@]+"${files[@]}"} 2>&1); then echo "$out"; else echo "$out" | head -30; fail=1; fi
 # 1b'. The complexity lint (dev/lint-complexity.sh: per function cyclomatic/cognitive 10, depth 3, 60 lines, 4 params;
 # old debt frozen in dev/complexity-baseline.json, which only shrinks). A push: the files it brings; else all.
+# Fail closed: it installs its own deps if missing; only GATE_LINT=0 skips it.
 # --app: the PowOS apps' UIs too (apps/*/ui, their own baseline).
 cx=0; out=$("$SHELL_DIR/dev/lint-complexity.sh" --dir "$S" ${app:+--apps} ${files[@]+"${files[@]}"} 2>&1) || cx=$?
 case $cx in 0|2) echo "$out" ;; *) echo "$out" | head -45; fail=1 ;; esac

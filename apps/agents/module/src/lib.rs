@@ -420,147 +420,163 @@ fn drop_agent(ctx: &ReducerContext, id: &str) {
 pub fn sync(ctx: &ReducerContext, host: String, batch: String) -> Result<(), String> {
     may_write(ctx, &host)?;
     let b: Batch = serde_json::from_str(&batch).map_err(|e| format!("batch: {e}"))?;
-    let mine = |id: &str| id.starts_with(&format!("{host}:"));
-    for id in &b.dropped {
-        if mine(id) {
-            drop_agent(ctx, id);
-        }
+    let prefix = format!("{host}:");
+    let mine = |id: &str| id.starts_with(&prefix);
+    for id in b.dropped.iter().filter(|id| mine(id)) {
+        drop_agent(ctx, id);
     }
     if let Some(st) = b.state {
-        let keep: std::collections::HashSet<&str> = st.agents.iter().map(|a| a.id.as_str()).collect();
-        let gone: Vec<String> = ctx.db.agent().host().filter(&host).map(|a| a.id).filter(|id| !keep.contains(id.as_str())).collect();
-        for id in gone {
-            drop_agent(ctx, &id);
-        }
-        for a in st.agents {
-            if !mine(&a.id) {
-                continue;
-            }
-            // Unchanged rows (same rev) are left alone: no delta to subscribers.
-            if ctx.db.agent().id().find(a.id.clone()).is_some_and(|old| old.rev == a.rev && old.state == a.state) {
-                continue;
-            }
-            ctx.db.agent().id().delete(a.id.clone());
-            ctx.db.agent().insert(Agent {
-                id: a.id,
-                host: host.clone(),
-                role: cut(a.role, 64),
-                parent: a.parent,
-                state: cut(a.state, 16),
-                title: cut(a.title, 80),
-                step: cut(a.step, 60),
-                cwd: cut(a.cwd, 80),
-                pid: a.pid,
-                subs: a.subs,
-                unread: a.unread,
-                report: cut(a.report, 280),
-                started: a.started,
-                last: a.last,
-                rev: a.rev,
-            });
-        }
-        // Tasks and asks of this host's agents: replaced as a set.
-        let old_tasks: Vec<String> = ctx.db.task().iter().filter(|t| mine(&t.agent)).map(|t| t.id).collect();
-        for t in old_tasks {
-            ctx.db.task().id().delete(t);
-        }
-        let mut per: std::collections::HashMap<String, usize> = Default::default();
-        for t in st.tasks {
-            if !mine(&t.agent) {
-                continue;
-            }
-            let n = per.entry(t.agent.clone()).or_default();
-            *n += 1;
-            if *n > TASKS_PER_AGENT {
-                continue;
-            }
-            ctx.db.task().insert(Task {
-                id: t.id,
-                agent: t.agent,
-                subject: cut(t.subject, 100),
-                status: t.status,
-                order: t.order,
-                updated: t.updated,
-            });
-        }
-        let old_asks: Vec<String> = ctx.db.ask().iter().filter(|a| mine(&a.agent)).map(|a| a.id).collect();
-        for a in old_asks {
-            ctx.db.ask().id().delete(a);
-        }
-        for a in st.asks {
-            if !mine(&a.agent) {
-                continue;
-            }
-            ctx.db.ask().insert(Ask {
-                id: a.id,
-                agent: a.agent,
-                tool: cut(a.tool, 64),
-                summary: cut(a.summary, 200),
-                ts: a.ts,
-                expires: a.expires,
-                answer: a.answer,
-                reason: a.reason,
-                by: a.by,
-            });
-        }
+        sync_agents(ctx, &host, &mine, st.agents);
+        sync_tasks(ctx, &mine, st.tasks);
+        sync_asks(ctx, &mine, st.asks);
     }
-    for (aid, ring) in b.events {
-        if !mine(&aid) {
-            continue;
-        }
-        let have: std::collections::HashSet<String> = ctx.db.event().agent().filter(&aid).map(|e| e.key).collect();
-        let start = ring.len().saturating_sub(RING);
-        let mut want = std::collections::HashSet::new();
-        for e in ring.into_iter().skip(start) {
-            let key = format!("{aid}#{}", e.id);
-            want.insert(key.clone());
-            // A coalesced event (Read×6) changes in place: replaced.
-            ctx.db.event().key().delete(key.clone());
-            ctx.db.event().insert(Event {
-                key,
-                id: e.id,
-                agent: aid.clone(),
-                ts: e.ts,
-                kind: cut(e.kind, 16),
-                name: cut(e.name, 64),
-                hint: cut(e.hint, 60),
-                ok: e.ok,
-                n: e.n,
-                ms: e.ms,
-            });
-        }
-        for k in have.difference(&want) {
-            ctx.db.event().key().delete(k.clone());
-        }
+    for (aid, ring) in b.events.into_iter().filter(|(aid, _)| mine(aid)) {
+        sync_ring(ctx, &aid, ring);
     }
     if let Some(msgs) = b.messages {
-        for m in msgs {
-            if ctx.db.message().id().find(m.id.clone()).is_some_and(|old| old.read == m.read) {
-                continue;
-            }
-            ctx.db.message().id().delete(m.id.clone());
-            ctx.db.message().insert(Message {
-                id: m.id,
-                from: cut(m.from, 64),
-                to: cut(m.to, 64),
-                kind: m.kind,
-                priority: m.priority,
-                ts: m.ts,
-                // Whole: the view previews a line and opens the rest (a message is never cut on the way to the user).
-                body: m.body,
-                read: m.read,
-            });
-        }
-        let mut all: Vec<(u64, String)> = ctx.db.message().iter().map(|m| (m.ts, m.id)).collect();
-        if all.len() > MESSAGES {
-            all.sort();
-            let extra = all.len() - MESSAGES;
-            for (_, id) in all.into_iter().take(extra) {
-                ctx.db.message().id().delete(id);
-            }
-        }
+        sync_messages(ctx, msgs);
     }
     Ok(())
+}
+
+/// The host's agents: those not in the batch go (with their events and tasks), changed ones are replaced.
+fn sync_agents(ctx: &ReducerContext, host: &str, mine: &dyn Fn(&str) -> bool, agents: Vec<AgentRow>) {
+    let keep: std::collections::HashSet<&str> = agents.iter().map(|a| a.id.as_str()).collect();
+    let gone: Vec<String> =
+        ctx.db.agent().host().filter(&host.to_string()).map(|a| a.id).filter(|id| !keep.contains(id.as_str())).collect();
+    for id in gone {
+        drop_agent(ctx, &id);
+    }
+    for a in agents.into_iter().filter(|a| mine(&a.id)) {
+        // Unchanged rows (same rev) are left alone: no delta to subscribers.
+        if ctx.db.agent().id().find(a.id.clone()).is_some_and(|old| old.rev == a.rev && old.state == a.state) {
+            continue;
+        }
+        ctx.db.agent().id().delete(a.id.clone());
+        ctx.db.agent().insert(agent_of(host, a));
+    }
+}
+
+fn agent_of(host: &str, a: AgentRow) -> Agent {
+    Agent {
+        id: a.id,
+        host: host.to_string(),
+        role: cut(a.role, 64),
+        parent: a.parent,
+        state: cut(a.state, 16),
+        title: cut(a.title, 80),
+        step: cut(a.step, 60),
+        cwd: cut(a.cwd, 80),
+        pid: a.pid,
+        subs: a.subs,
+        unread: a.unread,
+        report: cut(a.report, 280),
+        started: a.started,
+        last: a.last,
+        rev: a.rev,
+    }
+}
+
+/// The host's agents' tasks, replaced as a set (at most TASKS_PER_AGENT each).
+fn sync_tasks(ctx: &ReducerContext, mine: &dyn Fn(&str) -> bool, tasks: Vec<TaskRow>) {
+    let old: Vec<String> = ctx.db.task().iter().filter(|t| mine(&t.agent)).map(|t| t.id).collect();
+    for t in old {
+        ctx.db.task().id().delete(t);
+    }
+    let mut per: std::collections::HashMap<String, usize> = Default::default();
+    for t in tasks.into_iter().filter(|t| mine(&t.agent)) {
+        let n = per.entry(t.agent.clone()).or_default();
+        *n += 1;
+        if *n > TASKS_PER_AGENT {
+            continue;
+        }
+        ctx.db.task().insert(Task {
+            id: t.id,
+            agent: t.agent,
+            subject: cut(t.subject, 100),
+            status: t.status,
+            order: t.order,
+            updated: t.updated,
+        });
+    }
+}
+
+/// The host's agents' asks, replaced as a set.
+fn sync_asks(ctx: &ReducerContext, mine: &dyn Fn(&str) -> bool, asks: Vec<AskRow>) {
+    let old: Vec<String> = ctx.db.ask().iter().filter(|a| mine(&a.agent)).map(|a| a.id).collect();
+    for a in old {
+        ctx.db.ask().id().delete(a);
+    }
+    for a in asks.into_iter().filter(|a| mine(&a.agent)) {
+        ctx.db.ask().insert(Ask {
+            id: a.id,
+            agent: a.agent,
+            tool: cut(a.tool, 64),
+            summary: cut(a.summary, 200),
+            ts: a.ts,
+            expires: a.expires,
+            answer: a.answer,
+            reason: a.reason,
+            by: a.by,
+        });
+    }
+}
+
+/// One agent's ring: its last RING events written (a coalesced one, Read×6, replaced in place), the rest dropped.
+fn sync_ring(ctx: &ReducerContext, aid: &str, ring: Vec<EventRow>) {
+    let have: std::collections::HashSet<String> = ctx.db.event().agent().filter(&aid.to_string()).map(|e| e.key).collect();
+    let start = ring.len().saturating_sub(RING);
+    let mut want = std::collections::HashSet::new();
+    for e in ring.into_iter().skip(start) {
+        let key = format!("{aid}#{}", e.id);
+        want.insert(key.clone());
+        ctx.db.event().key().delete(key.clone());
+        ctx.db.event().insert(Event {
+            key,
+            id: e.id,
+            agent: aid.to_string(),
+            ts: e.ts,
+            kind: cut(e.kind, 16),
+            name: cut(e.name, 64),
+            hint: cut(e.hint, 60),
+            ok: e.ok,
+            n: e.n,
+            ms: e.ms,
+        });
+    }
+    for k in have.difference(&want) {
+        ctx.db.event().key().delete(k.clone());
+    }
+}
+
+/// The latest messages: new or changed (read) ones written, whole; past MESSAGES the oldest go.
+fn sync_messages(ctx: &ReducerContext, msgs: Vec<MessageRow>) {
+    for m in msgs {
+        if ctx.db.message().id().find(m.id.clone()).is_some_and(|old| old.read == m.read) {
+            continue;
+        }
+        ctx.db.message().id().delete(m.id.clone());
+        ctx.db.message().insert(Message {
+            id: m.id,
+            from: cut(m.from, 64),
+            to: cut(m.to, 64),
+            kind: m.kind,
+            priority: m.priority,
+            ts: m.ts,
+            // Whole: the view previews a line and opens the rest (a message is never cut on the way to the user).
+            body: m.body,
+            read: m.read,
+        });
+    }
+    let mut all: Vec<(u64, String)> = ctx.db.message().iter().map(|m| (m.ts, m.id)).collect();
+    if all.len() <= MESSAGES {
+        return;
+    }
+    all.sort();
+    let extra = all.len() - MESSAGES;
+    for (_, id) in all.into_iter().take(extra) {
+        ctx.db.message().id().delete(id);
+    }
 }
 
 fn now_ms(ctx: &ReducerContext) -> u64 {
@@ -674,6 +690,47 @@ const WORK_STEPS_MAX: usize = 100;
 const WORK_COMMITS_MAX: usize = 50;
 const WORK_IMAGES_MAX: usize = 20;
 
+fn one_line(s: String, n: usize) -> String {
+    cut(s.split_whitespace().collect::<Vec<_>>().join(" "), n)
+}
+
+/// A JSON-array column: "" stays "", else parsed as [T], the oldest past [cap] dropped, each item [map]ped and the
+/// whole stored compact.
+fn json_list<T: serde::de::DeserializeOwned, F: Fn(T) -> Result<serde_json::Value, String>>(
+    s: &str,
+    what: &str,
+    cap: usize,
+    map: F,
+) -> Result<String, String> {
+    if s.trim().is_empty() {
+        return Ok(String::new());
+    }
+    let mut v: Vec<T> = serde_json::from_str(s).map_err(|e| format!("{what}: {e}"))?;
+    if v.len() > cap {
+        v.drain(..v.len() - cap);
+    }
+    let out = v.into_iter().map(map).collect::<Result<Vec<_>, _>>()?;
+    serde_json::to_string(&out).map_err(|e| e.to_string())
+}
+
+fn steps_json(s: &str) -> Result<String, String> {
+    json_list::<StepIn, _>(s, "steps", WORK_STEPS_MAX, |st| {
+        if !["done", "current", "next"].contains(&st.state.as_str()) {
+            return Err("steps: a state is done|current|next".into());
+        }
+        Ok(serde_json::json!({"text": one_line(st.text, 200), "state": st.state}))
+    })
+}
+
+fn commits_json(s: &str) -> Result<String, String> {
+    json_list::<CommitIn, _>(s, "commits", WORK_COMMITS_MAX, |c| {
+        if c.sha.is_empty() || !c.sha.chars().all(|ch| ch.is_ascii_hexdigit()) {
+            return Err("commits: a sha is hex".into());
+        }
+        Ok(serde_json::json!({"sha": cut(c.sha, 40), "subject": one_line(c.subject, 200)}))
+    })
+}
+
 /// A work item's progress, all of it at once (`powos agents task set --progress/--step/--plan/--commit/--image`: the
 /// CLI works out the step history from the row and writes the result). `steps`/`commits`/`images` are JSON arrays
 /// ("" = none), checked here and stored compact; the oldest past each cap go.
@@ -697,45 +754,9 @@ pub fn work_track(
     if progress_done > progress_total {
         return Err(format!("work_track: progress {progress_done}/{progress_total}"));
     }
-    let one_line = |s: String, n: usize| cut(s.split_whitespace().collect::<Vec<_>>().join(" "), n);
-    let steps = if steps.trim().is_empty() {
-        String::new()
-    } else {
-        let mut v: Vec<StepIn> = serde_json::from_str(&steps).map_err(|e| format!("steps: {e}"))?;
-        if v.iter().any(|s| !["done", "current", "next"].contains(&s.state.as_str())) {
-            return Err("steps: a state is done|current|next".into());
-        }
-        if v.len() > WORK_STEPS_MAX {
-            v.drain(..v.len() - WORK_STEPS_MAX);
-        }
-        let out: Vec<serde_json::Value> =
-            v.into_iter().map(|s| serde_json::json!({"text": one_line(s.text, 200), "state": s.state})).collect();
-        serde_json::to_string(&out).map_err(|e| e.to_string())?
-    };
-    let commits = if commits.trim().is_empty() {
-        String::new()
-    } else {
-        let mut v: Vec<CommitIn> = serde_json::from_str(&commits).map_err(|e| format!("commits: {e}"))?;
-        if v.iter().any(|c| c.sha.is_empty() || !c.sha.chars().all(|ch| ch.is_ascii_hexdigit())) {
-            return Err("commits: a sha is hex".into());
-        }
-        if v.len() > WORK_COMMITS_MAX {
-            v.drain(..v.len() - WORK_COMMITS_MAX);
-        }
-        let out: Vec<serde_json::Value> =
-            v.into_iter().map(|c| serde_json::json!({"sha": cut(c.sha, 40), "subject": one_line(c.subject, 200)})).collect();
-        serde_json::to_string(&out).map_err(|e| e.to_string())?
-    };
-    let images = if images.trim().is_empty() {
-        String::new()
-    } else {
-        let mut v: Vec<String> = serde_json::from_str(&images).map_err(|e| format!("images: {e}"))?;
-        if v.len() > WORK_IMAGES_MAX {
-            v.drain(..v.len() - WORK_IMAGES_MAX);
-        }
-        let v: Vec<String> = v.into_iter().map(|p| cut(p, 300)).collect();
-        serde_json::to_string(&v).map_err(|e| e.to_string())?
-    };
+    let steps = steps_json(&steps)?;
+    let commits = commits_json(&commits)?;
+    let images = json_list::<String, _>(&images, "images", WORK_IMAGES_MAX, |p| Ok(serde_json::json!(cut(p, 300))))?;
     let now = now_ms(ctx);
     ctx.db.work().id().delete(id.clone());
     ctx.db.work().insert(Work {

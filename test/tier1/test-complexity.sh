@@ -11,7 +11,7 @@
 #     in build/function-length-budget.txt (a ratchet).
 #   Bash (bin/, lib/, build/): build/complexity.py --check (the CC ratchet, build/complexity-budget.txt).
 #
-# Needs shell/node_modules (npm ci in shell/) for the TS half; skipped (not failed) without it.
+# Fail closed: each lint installs/fetches its own tools (cached); only GATE_LINT=0 skips them.
 # Usage:  bash test/tier1/test-complexity.sh
 
 set -u
@@ -41,7 +41,7 @@ rm -f "$probe"
 case $rc in
     1) echo "$out" | grep -q "max-params" && echo "$out" | grep -q "max-depth" \
          && ok "5 params + depth 4 in a new file fail" || bad "new violation failed without naming the rules" ;;
-    2) echo "  skip - no shell/node_modules" ;;
+    2) echo "  skip - GATE_LINT=0" ;;
     *) bad "a function with 5 params and depth 4 passed the lint" ;;
 esac
 

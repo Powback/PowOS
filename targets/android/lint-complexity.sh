@@ -13,7 +13,7 @@
 #   - an id not in HEAD's baseline fails (no re-baselining past the limits; tier-1 checks history too).
 #
 #   targets/android/lint-complexity.sh [--prune] [--report N]
-# Exit 0 clean, 1 findings, 2 couldn't run (no docker / builder image / download).
+# Exit 0 clean, 1 findings or couldn't run (fail closed), 2 only when skipped on purpose (GATE_LINT=0).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 APP=$HERE/app
@@ -34,13 +34,15 @@ while [ $# -gt 0 ]; do
     *) echo "unknown: $1" >&2; exit 2 ;;
   esac
 done
-command -v docker >/dev/null || { echo "     kotlin complexity: skipped (no docker)"; exit 2; }
-docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "     kotlin complexity: skipped (no $IMAGE)"; exit 2; }
+# Fail closed: a missing tool fails the lint; only GATE_LINT=0 skips it (exit 2), explicitly.
+if [ "${GATE_LINT:-1}" = 0 ]; then echo "     kotlin complexity: skipped (GATE_LINT=0)"; exit 2; fi
+command -v docker >/dev/null || { echo "FAIL kotlin complexity: no docker (GATE_LINT=0 skips it explicitly)"; exit 1; }
+docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "FAIL kotlin complexity: no $IMAGE (build android-app-dev's builder; GATE_LINT=0 skips)"; exit 1; }
 if [ ! -f "$JAR" ]; then
   mkdir -p "$CACHE"
   curl -sfLo "$JAR.part" "https://repo1.maven.org/maven2/io/gitlab/arturbosch/detekt/detekt-cli/$VER/detekt-cli-$VER-all.jar" \
-    || { echo "     kotlin complexity: skipped (couldn't fetch detekt $VER)"; exit 2; }
-  [ "$(shasum -a 256 "$JAR.part" | cut -d' ' -f1)" = "$SHA" ] || { rm -f "$JAR.part"; echo "FAIL kotlin complexity: detekt jar checksum mismatch"; exit 2; }
+    || { echo "FAIL kotlin complexity: couldn't fetch detekt $VER (GATE_LINT=0 skips it explicitly)"; exit 1; }
+  [ "$(shasum -a 256 "$JAR.part" | cut -d' ' -f1)" = "$SHA" ] || { rm -f "$JAR.part"; echo "FAIL kotlin complexity: detekt jar checksum mismatch"; exit 1; }
   mv "$JAR.part" "$JAR"
 fi
 out=$(mktemp -d "$CACHE/run.XXXXXX"); trap 'rm -rf "$out"' EXIT
@@ -78,7 +80,8 @@ if git -C "$ROOT" cat-file -e "HEAD:targets/android/app/$BASE" 2>/dev/null && [ 
   [ -z "$grew" ] || { echo "$grew" | head -20 | sed 's/^/FAIL kotlin complexity baseline grew (it only shrinks): /'; exit 1; }
 fi
 # 2. detekt against the baseline. Stale ids: detekt doesn't report them, so compare with a fresh baseline.
-detekt --create-baseline --baseline /out/now.xml >/dev/null 2>&1
+detekt --create-baseline --baseline /out/now.xml >"$out/run.log" 2>&1
+[ -s "$out/now.xml" ] || { echo "FAIL kotlin complexity: detekt didn't run"; tail -5 "$out/run.log"; exit 1; }
 ids() { sed -n 's|.*<ID>\(.*\)</ID>.*|\1|p' | sort -u; }
 new=$(comm -13 <(ids < "$APP/$BASE") <(ids < "$out/now.xml"))
 stale=$(comm -23 <(ids < "$APP/$BASE") <(ids < "$out/now.xml"))
