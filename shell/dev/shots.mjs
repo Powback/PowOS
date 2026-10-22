@@ -213,9 +213,20 @@ const collectText = () => {
     range.selectNodeContents(n);
     const r = range.getBoundingClientRect();
     if (r.width < 2 || r.height < 4 || r.right < 0 || r.bottom < 0 || r.left > innerWidth || r.top > innerHeight) continue;
-    // Clipped away (scrolled out of its list, under a panel): what's on top at its middle isn't it - not seen, not measured.
-    const at = document.elementFromPoint(Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)), Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)));
-    if (at && !el.contains(at) && !at.contains(el) && getComputedStyle(at).pointerEvents !== "none") continue;
+    // Clipped away (scrolled out of its list): its middle outside a clipping ancestor's box - not seen, not measured.
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    let clipped = false;
+    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+      const ps = getComputedStyle(p);
+      if (ps.overflowX === "visible" && ps.overflowY === "visible") continue;
+      const b = p.getBoundingClientRect();
+      if (cx < b.left || cx > b.right || cy < b.top || cy > b.bottom) {
+        clipped = true;
+        break;
+      }
+    }
+    if (clipped) continue;
     const cs = getComputedStyle(el);
     let o = 1;
     for (let a = el; a; a = a.parentElement) o *= parseFloat(getComputedStyle(a).opacity);

@@ -15,7 +15,7 @@
   --color-foreground: #dcd7ba;
   /* Secondary text: the foreground, a little see-through (app.tsx sets it from the theme the same way). */
   --color-muted: color-mix(in srgb, var(--color-foreground) var(--muted-text), transparent);
-  --muted-text: 88%;
+  --muted-text: 90%;
   --color-accent: #7e9cd8;
   --color-border: #54546d;
   --color-red: #e82424;
@@ -35,7 +35,7 @@
    * shadow it casts.
    */
   --line: transparent;
-  --soft-fill: color-mix(in srgb, var(--color-foreground) 6%, transparent);
+  --soft-fill: color-mix(in srgb, var(--color-foreground) 5%, transparent);
   /* --lift's parts, for a surface made of several (a merged widget group, the foot): its top edge, its shadow. */
   --lift-edge: inset 0 1px 0 rgb(255 255 255 / 7%);
   --lift-shadow: 0 6px 20px -10px rgb(0 0 0 / 50%);
@@ -45,7 +45,7 @@
   --lift-drop: drop-shadow(0 8px 16px rgb(0 0 0 / 40%));
   /* Labels straight on the wallpaper (home's app labels): the one text shadow, so they read on any picture. */
   /* A halo of the theme's background round text on the wallpaper (any picture, any theme): 4.5:1 where it's bright. */
-  --label-shadow: 0 0 2px var(--on-wallpaper-halo), 0 0 6px var(--on-wallpaper-halo), 0 0 12px color-mix(in srgb, var(--on-wallpaper-halo) 70%, transparent);
+  --label-shadow: 0 0 2px var(--on-wallpaper-halo), 0 0 4px var(--on-wallpaper-halo), 0 0 7px var(--on-wallpaper-halo), 0 0 14px color-mix(in srgb, var(--on-wallpaper-halo) 75%, transparent);
   /* Text straight on the wallpaper (home's app labels, PowOS AI's page header): the theme's foreground with a halo of
      its background - turned round over a wallpaper of the other tone (data-wallpaper, below), as iOS does. */
   --on-wallpaper: var(--color-foreground);
@@ -92,7 +92,7 @@
      a black slab), see-through by --glass-tint. */
   --glass-base: color-mix(in srgb, var(--color-foreground) 18%, var(--color-background));
   /* The one darkening for a page that is mostly text (PowOS AI's): more of the same tint, nothing else. */
-  --glass-dim: 26%;
+  --glass-dim: 28%;
   /* One material (docs/DESIGN-LANGUAGE.md): every surface is the reference fill - home's tiles as PowOS AI's cards. */
   --glass-fill: var(--text-fill);
   /*

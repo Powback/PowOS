@@ -267,8 +267,17 @@
  * (as the assistant's panel), so its text keeps 4.5:1 over a bright wallpaper (the reference fill measured 3.7-4.4).
  */
 html:root .home:has(.drawer .chat) .launcher-frame.tile {
-  background: color-mix(in srgb, var(--color-background) 84%, transparent);
+  background: color-mix(in srgb, var(--color-background) var(--chat-fill, 84%), transparent);
 }
+/* Over a wallpaper of the other tone: nearly solid. */
+:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] { --chat-fill: 94%; }
+/* Home's widgets: their text is often small and plain - a touch more of the tint than the reference (4.0 -> 4.5:1). */
+.page .home-tile > .tile {
+  --glass-dim: 32%;
+  --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
+  --glass-fill: var(--text-fill);
+}
+:root[data-light="false"][data-wallpaper="light"] .page .home-tile > .tile, :root[data-light="true"][data-wallpaper="dark"] .page .home-tile > .tile { --glass-dim: 68%; }
 .dock { background: none; }
 /* The dock: no slab and no plates - the icons bare on the wallpaper, as the search pill floats above them. */
 .launcher-frame { border-radius: var(--radius) var(--radius) 0 0; box-shadow: var(--lift-edge), var(--lift-shadow-up); }
@@ -388,7 +397,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   font-size: var(--text-small);
 }
 /* The drawer's labels can sit over the brightest part of the wallpaper: the label shadow, as home's. */
-.drawer :is(.app-label, .heading), .letter-bar span { text-shadow: 0 0 2px var(--color-background), 0 0 6px var(--color-background), 0 0 12px color-mix(in srgb, var(--color-background) 70%, transparent); }
+.drawer :is(.app-label, .heading), .letter-bar span { text-shadow: 0 0 2px var(--color-background), 0 0 4px var(--color-background), 0 0 7px var(--color-background), 0 0 12px color-mix(in srgb, var(--color-background) 70%, transparent); }
 .letter-bar span.on { color: var(--accent-text); transform: scale(1.5); }
 /* The letter under the finger, big, beside the bar. */
 .letter-bubble {
@@ -1798,8 +1807,17 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
 .qt-sliders { display: grid; gap: 8px; }
 
 /* Text straight on the wallpaper (PowOS AI's page header and headings, home's labels): the label shadow, any theme. */
-.ai-screen :is(.ai-top, .ai-heading, .ai-history > .ai-work-fold, .ai-empty, .ai-mail-bar):not(.tile *), .tile-app .app-label {
+.ai-screen :is(.ai-top, .ai-heading, .ai-empty, .ai-mail-bar):not(.tile *), .tile-app .app-label {
   color: var(--on-wallpaper);
   text-shadow: var(--label-shadow);
 }
 .ai-screen :is(.ai-top, .ai-mail-bar) * { color: inherit; }
+
+/* PowOS AI's cards: text-heavy - the widgets' touch more tint (4.3-4.4 -> 4.5:1 over the crystal). */
+.ai-screen .tile {
+  --glass-dim: 36%;
+  --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
+}
+:root[data-light="false"][data-wallpaper="light"] .ai-screen .tile, :root[data-light="true"][data-wallpaper="dark"] .ai-screen .tile { --glass-dim: 68%; }
+/* "the whole conversation" sits on the wallpaper as a control: a quiet pill of the same material (a halo isn't enough). */
+.ai-history > .ai-work-fold { align-self: flex-start; width: auto; padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--color-background) 90%, transparent); text-shadow: none; }
