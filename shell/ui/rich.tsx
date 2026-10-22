@@ -11,6 +11,7 @@
  */
 import { Fragment, render } from "preact";
 import { useState } from "preact/hooks";
+import { signal } from "@preact/signals";
 import type { ChatItem } from "../types.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { askQueued, openAssistant, unqueue, waiting } from "./assistant.ts";
@@ -391,14 +392,20 @@ export function sentImages(text: string): string[] {
   return [...new Set([...text.matchAll(SENT)].map((m) => m[1]))].filter((n) => !n.includes(".."));
 }
 
+/**
+ * The host serves /_shared/ (an image of it loaded): only then does a missing one mean "cleaned up" - an older app
+ * has no such route, and there the thumbnails simply don't show.
+ */
+const sharedServed = signal(false);
+
 /** One sent image: a thumbnail (a tap: full screen), or a quiet "no longer available" once it's been cleaned up. */
 function Sent({ name }: { name: string }) {
   const [gone, setGone] = useState(false);
   const url = `/_shared/${encodeURIComponent(name)}`;
-  if (gone) return <span class="sent-gone">image no longer available</span>;
+  if (gone) return sharedServed.value ? <span class="sent-gone">image no longer available</span> : null;
   return (
     <button type="button" class="sent-img" onClick={() => openFull("what you sent", <img class="ai-img-full" src={url} alt="" />)}>
-      <img src={url} alt="what you sent" loading="lazy" onError={() => setGone(true)} />
+      <img src={url} alt="what you sent" loading="lazy" onLoad={() => (sharedServed.value = true)} onError={() => setGone(true)} />
     </button>
   );
 }
