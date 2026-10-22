@@ -128,6 +128,16 @@ QJsonArray Windows::list() const
             continue;
         const QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
         m_icons.insert(id, icon);
+        // An Android app (the phone's rooted session: app id android-<package>, targets/android/session): in a window of
+        // its own when scrcpy draws it (powos-android-app), else a stand-in for an app on the phone's own screen
+        // (powos-android-tasks: activating it moves the app into a window).
+        const QString appId = index.data(AbstractTasksModel::AppId).toString();
+        const bool android = appId.startsWith(QLatin1String("android-"));
+        bool mirrored = false;
+        if (android) {
+            QFile comm(QStringLiteral("/proc/%1/comm").arg(index.data(AbstractTasksModel::AppPid).toUInt()));
+            mirrored = comm.open(QIODevice::ReadOnly) && comm.readAll().trimmed() == "scrcpy";
+        }
         // A theme name when the icon has one (cacheable, any size); else the window's own pixmap, by id.
         const QString url = !icon.name().isEmpty()
             ? iconUrl(icon.name())
@@ -140,6 +150,8 @@ QJsonArray Windows::list() const
             {QStringLiteral("icon"), url},
             {QStringLiteral("active"), index.data(AbstractTasksModel::IsActive).toBool()},
             {QStringLiteral("minimized"), index.data(AbstractTasksModel::IsMinimized).toBool()},
+            {QStringLiteral("android"), android},
+            {QStringLiteral("onPhone"), android && !mirrored},
         });
     }
     return out;
@@ -160,6 +172,15 @@ bool Windows::minimize(const QString &id)
     if (!index.isValid())
         return false;
     m_model->requestToggleMinimized(index);
+    return true;
+}
+
+bool Windows::close(const QString &id)
+{
+    const QModelIndex index = find(id);
+    if (!index.isValid())
+        return false;
+    m_model->requestClose(index);
     return true;
 }
 
