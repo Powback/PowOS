@@ -129,6 +129,26 @@ const PRESENT_SAMPLE = JSON.stringify([
   { kind: "assistant", text: "```present\n" + JSON.stringify({ title: "Review: chat cards", format: "html", body: SHEET_HTML }) + "\n```" },
 ]);
 
+/** The work board as it was live (dev/sample-board.json, ages as offsets), for PowOS AI's page. */
+const BOARD = (() => {
+  // In the render container the shell is at /shell (dev/shot.sh, gate.sh); run in place, next to this file.
+  for (const f of ["/shell/dev/sample-board.json", new URL("./sample-board.json", import.meta.url)])
+    try {
+      return fs.readFileSync(f, "utf8");
+    } catch {}
+  return "[]";
+})();
+/** The same, the waiting items' notes written as what to do (how agents are asked to write them). */
+const ACTIONS = JSON.stringify({
+  "phone-kernel-build-build-only": "Plug the phone into the Mac's USB once, for the kernel build",
+  "search-bar-as-a-movable-widget-below-dock-too": "Long-press home, then drag the search bar below the dock",
+  "broforce-doesn-t-start-proton-under-fex": "Play Broforce for ten minutes and say if it stutters",
+});
+const board = (actions) =>
+  `const B = ${BOARD}; const A = ${actions ? ACTIONS : "{}"}; const now = Date.now(); const P = await U('./ui/powai.tsx');` +
+  ` P.board.value = B.map((r) => ({ ...r, note: A[r.id] ?? r.note, created: now - r.createdAgo, updated: now - r.updatedAgo, done: r.doneAgo ? now - r.doneAgo : 0 }));` +
+  ` P.boardSeen.value = true; S.chat.value = { busy: false, items: [{ kind: "user", text: "what changed overnight?" }, { kind: "assistant", text: "Three pushes: the shade, the pet, the speech fix." }, ...${CHAT_SAMPLE}] }; S.page.value = -1; await sleep(300);`;
+
 /**
  * The scenes: [name, mode, setup] - setup runs in the page once it's ready (S: state.ts, U: an import by path, E: the
  * mock's events, sleep). `behind`: what the window is over - "wallpaper" (home: native glass), "blurred" (the shade,
@@ -159,6 +179,10 @@ const SCENES = [
   ["present", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["present-md", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[0]?.click();`, "wallpaper"],
   ["present-html", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[1]?.click(); await sleep(200);`, "wallpaper"],
+  ["ai-v2", "home", board(false), "wallpaper"],
+  ["ai-v2-actions", "home", board(true), "wallpaper"],
+  ["ai-v2-open", "home", board(true) + " document.querySelectorAll('.ai-work-list .ai-fold, .ai-history .ai-fold').forEach((b) => b.click()); await sleep(100); document.querySelector('.ai-screen .ai-item')?.click(); await sleep(100); document.querySelector('.ai-work-list').scrollIntoView();", "wallpaper"],
+  ["ai-v2-calm", "home", board(true).replace("P.board.value = B.map", "P.board.value = B.filter((r) => r.status !== 'waiting').map"), "wallpaper"],
   ["ai-chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.page.value = -1;`, "wallpaper"],
   ["ai-compose", "home", "S.page.value = -1; await sleep(300); const f = document.querySelector('.ai-compose textarea, .ai-compose input'); f?.focus(); if (f) { f.value = 'summarise what the agents did overnight and what needs me'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
   ["widget-screen", "home", "const w = S.home.value.items.find((i) => i.kind === 'widget'); S.screen.value = { key: w.key, title: 'weather' };", "wallpaper"],
