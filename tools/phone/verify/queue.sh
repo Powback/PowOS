@@ -284,6 +284,13 @@ EOS
         fi
         if [ $rc = 3 ] && [ $tries -lt 5 ]; then
           sed -i '' "s/^tries=.*/tries=$((tries + 1))/" "$j"; echo "$(date +%T) $n: no window / touched (rc 3), again next window"
+          # Leave the window only when the user really came back (a finger in the last QUEUE_IDLE_S): rc 3 also means
+          # "not on the phone yet" (plasma-notify: no PlasmaBridge in the APK), which ended every window at its first
+          # job while the user was away charging (01:46, 18 checks never ran).
+          idl=$("$phone/idle.sh" 2>/dev/null | sed -n 's/.*idle=\([0-9]*\).*/\1/p')
+          if [ -n "$idl" ] && [ "$idl" -ge "${QUEUE_IDLE_S:-120}" ]; then
+            echo "$(date +%T) $n: rc 3 but the phone is still idle (${idl}s) - next check"; continue
+          fi
           status "" "{\"done\":true,\"summary\":$(jstr "Phone checks wait for the next free window (the phone was touched): $pass passed, $fail failed")}"
           exit 4   # leave the window: the user is on the phone
         fi
