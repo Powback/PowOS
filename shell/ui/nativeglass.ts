@@ -498,9 +498,12 @@ new MutationObserver((records) => {
   if (moved) kick();
 }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class"] });
 
-// A finger moving: measured until still again (a drag that scrubs a paused animation by currentTime writes no style;
-// its touchmoves are what says it moved). A finger resting moves nothing: the loop stops after STILL_FRAMES.
-const touch = (e: Event) => (why(e.type), kick());
+// A finger moving the drawer: measured until still again (gesture.ts scrubs paused animations by currentTime - no
+// style written, nothing the observer above sees; its touchmoves are what says it moved). Only then: any other touch
+// that moves glass writes a style or class the observer sees (a page swipe's track, the shade's --q, home's
+// "dragging"), and a tap, a scroll of the drawer's list, a press on a widget moves none. 2026-10-22: every touch on
+// home measured every surface every frame (58 measures a second while the user used home).
+const touch = (e: Event) => (tracks || document.querySelector(".home.dragging")) && (why(e.type), kick());
 for (const ev of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) addEventListener(ev, touch, { capture: true, passive: true });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) why("shown"), changed();
