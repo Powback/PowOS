@@ -114,10 +114,7 @@ object Tasks {
         }.onFailure { Log.w(TAG, "can't split $first and $second", it) }.isSuccess
     }
 
-    /**
-     * Task [id] in a floating window (freeform: the OS's pop-up view), in the middle of the screen. HACK:
-     * ActivityOptions.setLaunchWindowingMode is hidden (reflected); real fix: none for an app.
-     */
+    /** Task [id] in a floating window (freeform: the OS's pop-up view), in the middle of the screen. */
     fun float(
         context: Context,
         id: Int,
@@ -125,12 +122,21 @@ object Tasks {
         val screen = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
         val w = screen.width() * 3 / 4
         val h = screen.height() / 2
-        val options = ActivityOptions.makeBasic().setLaunchBounds(android.graphics.Rect(screen.centerX() - w / 2, screen.centerY() - h / 2, screen.centerX() + w / 2, screen.centerY() + h / 2))
+        return open(context, id, freeformOptions(android.graphics.Rect(screen.centerX() - w / 2, screen.centerY() - h / 2, screen.centerX() + w / 2, screen.centerY() + h / 2)))
+    }
+
+    /**
+     * Launch options for a floating (freeform) window at [bounds] (screen px). HACK: ActivityOptions.setLaunchWindowingMode
+     * is hidden (reflected); real fix: none for an app. Without freeform support (enable_freeform_support off) Android
+     * opens the app full screen anyway.
+     */
+    fun freeformOptions(bounds: android.graphics.Rect): ActivityOptions {
+        val options = ActivityOptions.makeBasic().setLaunchBounds(bounds)
         runCatching {
             HiddenApi.allow()
             ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(options, WINDOWING_MODE_FREEFORM)
         }.onFailure { Log.w(TAG, "no freeform launch", it) }
-        return open(context, id, options)
+        return options
     }
 
     /** Task [id]'s app's info screen (Settings). */
