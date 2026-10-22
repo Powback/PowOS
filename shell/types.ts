@@ -595,8 +595,11 @@ export interface Bridge {
     /** Its last frame saved to Pictures/Screenshots: the file's name, or null. */
     screenshot(id: number): Promise<string | null>;
   };
-  /** The floating app windows (unfolded home), top-most first, for the dock; "windows.changed" (AppWindow[]) after. */
-  windows?: {
+  /**
+   * The floating app windows (unfolded home), top-most first, for the dock; "windows.changed" (AppWindow[]) after.
+   * The phone's only (wire calls "windows.list" / "windows.restore"): not `windows`, which is the desktop's taskbar.
+   */
+  floating?: {
     list(): Promise<AppWindow[]>;
     /** Brings it back (minimised, or under others) on top; false if it's gone. */
     restore(id: number): Promise<boolean>;

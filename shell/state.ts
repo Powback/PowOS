@@ -226,8 +226,9 @@ powos.on("apps.changed", async () => {
 });
 /** The floating app windows (unfolded home), top-most first: the dock marks and keeps them (ui/home.tsx). */
 export const windows = signal<AppWindow[]>([]);
-powos.on("windows.changed", (w: AppWindow[]) => (windows.value = w));
-void powos.windows?.list().then(
+// Only where the host has them: the desktop's "windows.changed" carries its taskbar's DesktopWindow[].
+if (powos.floating) powos.on("windows.changed", (w: AppWindow[]) => (windows.value = w));
+void powos.floating?.list().then(
   (w) => (windows.value = w),
   () => undefined,
 );

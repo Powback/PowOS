@@ -220,9 +220,10 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       close: (id) => call<boolean>("windows.close", id),
     },
     panel: { height: (px) => call("panel.height", px) },
-    windows: {
+    // The phone's floating windows; on the desktop host "windows.list" is the taskbar's (DesktopWindow[]).
+    floating: host.name === "powos" ? undefined : {
       list: () => call<AppWindow[]>("windows.list"),
-      restore: (id) => call<boolean>("windows.restore", id),
+      restore: (id: number) => call<boolean>("windows.restore", id),
     },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),

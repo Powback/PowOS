@@ -77,10 +77,16 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   - Dock: WindowFrames.running (Compose state) -> ShellBridge "windows.list"/"windows.changed"/"windows.restore";
     shell state.ts `windows`, home.tsx `windowed` dot (.dock .app.windowed[.minimised]) + DockWindows (unpinned
     apps with a window, after the pinned ones). ShellBridge.launch: an app with a window is restored, not relaunched.
-- Check: `tools/phone/verify/float-windows.sh` (forces the inner screen with `cmd device_state state 3`, swipes the
-  lock face, launches Calculator through home's powos.apps.launch over CDP, asserts mode=freeform; then the frame:
-  bar window, drag moves, grip resizes, minimise -> visible=false, launch restores, close; then
-  `cmd device_state state reset`). Queue it: `tools/phone/verify/queue.sh add <task> float-windows.sh`.
+- Check: `tools/phone/verify/float-windows.sh` (forces the inner screen with `cmd device_state state 3` - folded,
+  apps open full screen by design, so a folded "not freeform" proves nothing; swipes the lock face, launches
+  Calculator through home's bridge call apps.launch over CDP, asserts mode=freeform; then the frame: bar window, drag
+  moves, grip resizes, minimise -> visible=false, launch restores, close; always `cmd device_state state reset`).
+  Exits 1 + "FAIL:" on any step, 3 on a real touch. Queue it: `queue.sh add --close <task> float-windows.sh`.
+- `powos` is NOT a page global (bridge.ts's module export; CDP `powos.x()` = ReferenceError). From CDP call the
+  bridge as the page does: `PowosHost.postMessage(JSON.stringify([id, method, JSON.stringify(args)]))`, answer via
+  `__powosHost.resolve(id, v)` (float-windows.sh `hcall` wraps it). Under queue.sh (LOCK_HELD=1) window_lock sets no
+  EXIT trap, so WL_TRAP never runs: a check sets its own restore trap.
+- JS side: `powos.floating` (list/restore, the phone only); `powos.windows` is the desktop taskbar's (same wire name).
 
 ## Device-check rules learned
 - One `AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 MAX` call to wait (never loop adb); the verify lock
