@@ -40,7 +40,7 @@ home() {
 
 # The one bar, left to right on one line (wide only).
 bar() {
-  local r; r=$(q '(()=>{const b=(s)=>document.querySelector(s)?.getBoundingClientRect();const d=b(".home.wide > .dock:not(.dock-tray) .app"),p=b(".home.wide .bar-pill"),t=b(".home.wide > .dock-tray .app");if(!document.querySelector(".home.wide"))return "not wide";if(!p)return "no pill";const m=(r)=>r.top+r.height/2;const bad=[];if(d&&!(d.right<=p.left))bad.push("dock not left of the pill");if(t&&!(p.right<=t.left))bad.push("recents not right of the pill");for(const r of [d,t])if(r&&Math.abs(m(r)-m(p))>4)bad.push("not one line");return bad.join("; ")||"ok"})()')
+  local r; r=$(q '(()=>{const b=(s)=>document.querySelector(s)?.getBoundingClientRect();const d=b(".home.wide > .dock:not(.dock-tray) .app"),p=b(".home.wide .bar-pill"),t=b(".home.wide > .dock-tray .app");if(!document.querySelector(".home.wide"))return "not wide";const sw=!!document.querySelector(".home-tile[data-key=\"panel:search\"]");if(sw&&d&&t)return d.right<=t.left&&Math.abs(d.top+d.height/2-(t.top+t.height/2))<=4?"ok":"dock and recents not dock | recents on one line";if(!p)return "no pill";const m=(r)=>r.top+r.height/2;const bad=[];if(d&&!(d.right<=p.left))bad.push("dock not left of the pill");if(t&&!(p.right<=t.left))bad.push("recents not right of the pill");for(const r of [d,t])if(r&&Math.abs(m(r)-m(p))>4)bad.push("not one line");return bad.join("; ")||"ok"})()')
   echo "bar: $r" | tee -a "$OUT/log.txt"; [ "$r" = ok ] || fail "the wide bar: $r"
 }
 
@@ -60,7 +60,8 @@ if not wide: print("FAIL: no wide cells (home.wide)"); sys.exit()
 pages = sorted(host["pages"]); n = 0
 for it in host["items"]:
     c = it.get("cell")
-    if not c or it["page"] not in pages[:2]: continue
+    # The search widget is wherever the user put it (out of the bar, moved on the wide page): never judged here.
+    if not c or it["page"] not in pages[:2] or it["key"] == "panel:search": continue
     w = wide.get(it["key"]); want = (c["x"] + pages.index(it["page"]) * (host["columns"] + 1), c["y"])
     if not w or (w["x"], w["y"]) != want: print(f"FAIL: {it['key']} at {w and (w['x'], w['y'])}, side by side it was {want}")
     n += 1
@@ -72,7 +73,7 @@ PY
 
 # Edit mode by a long press on an empty spot of the page: the search bar a tile on the grid, the dock in view.
 edit() {
-  local at; at=$(q '(()=>{const pg=[...document.querySelectorAll(".page")].find(p=>{const r=p.getBoundingClientRect();return r.left>=-2&&r.left<innerWidth/2});if(!pg)return "";const r=pg.getBoundingClientRect(),tiles=[...pg.querySelectorAll(".home-tile")].map(t=>t.getBoundingClientRect());for(let y=r.bottom-60;y>r.top+60;y-=24)for(let x=r.left+40;x<r.right-40;x+=24)if(!tiles.some(t=>x>t.left-12&&x<t.right+12&&y>t.top-12&&y<t.bottom+12))return Math.round(x*devicePixelRatio)+" "+Math.round(y*devicePixelRatio);return ""})()')
+  local at; at=$(q '(()=>{const pg=[...document.querySelectorAll(".page")].find(p=>{const r=p.getBoundingClientRect();return r.left>=-2&&r.left<innerWidth/2});if(!pg)return "";const r=pg.getBoundingClientRect(),tiles=[...pg.querySelectorAll(".home-tile")].map(t=>t.getBoundingClientRect());const bare=(x,y)=>{const e=document.elementFromPoint(x,y);return !!e&&e.matches(".page, .page-track, .pages")};for(let y=r.bottom-60;y>r.top+60;y-=24)for(let x=r.left+40;x<r.right-40;x+=24)if(!tiles.some(t=>x>t.left-12&&x<t.right+12&&y>t.top-12&&y<t.bottom+12)&&bare(x,y))return Math.round(x*devicePixelRatio)+" "+Math.round(y*devicePixelRatio);return ""})()')
   [ -n "$at" ] || { fail "$1: no empty spot to long-press"; return; }
   sh_ "input swipe $at $at 900"; sleep 1.5; chk "edit-$1"
   local r; r=$(q '(()=>{const v=(e)=>!!e&&e.getClientRects().length>0&&getComputedStyle(e).visibility==="visible";if(!document.querySelector(".home.editing"))return "not in edit mode";const bad=[];if(!v(document.querySelector(".home-tile[data-key=\"panel:search\"] .bar-pill")))bad.push("no search bar tile on the grid");if(document.querySelector(".home > .dock")&&!v(document.querySelector(".home > .dock .app")))bad.push("the dock hidden");if(!v(document.querySelector(".edit-sheet")))bad.push("no edit sheet");return bad.join("; ")||"ok"})()')
