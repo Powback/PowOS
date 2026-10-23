@@ -263,7 +263,6 @@
     <ID>CyclomaticComplexMethod:Render.kt$@Composable private fun common( p: Props, parent: Any?, ): Modifier</ID>
     <ID>CyclomaticComplexMethod:Review.kt$Review$private fun run()</ID>
     <ID>CyclomaticComplexMethod:ShadeHost.kt$ShadeHost$fun start(): Boolean</ID>
-    <ID>CyclomaticComplexMethod:ShadeHost.kt$ShadeHost$private fun pullable(y: Float): From?</ID>
     <ID>CyclomaticComplexMethod:ShadeHost.kt$ShadeHost.Pull$fun move(e: MotionEvent): PullMove</ID>
     <ID>CyclomaticComplexMethod:Share.kt$Share$fun format(text: String): String</ID>
     <ID>CyclomaticComplexMethod:Share.kt$Share$fun prepare(text: String): String</ID>
