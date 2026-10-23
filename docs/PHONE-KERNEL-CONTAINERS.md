@@ -565,3 +565,9 @@ Test boot (user's yes; RAM only, nothing written): Mac USB-C, `adb reboot bootlo
 Xwayland's sync_file ioctl, then one game launch + close. Undo = reboot (boot_b keeps 0004's kernel, d969681e).
 Flash (user's yes): first save the live boot_b off the phone (d969681e isn't on the Mac), then
 `fastboot -s 8e5d600d flash boot_b out/boot-powos-flatfence.img`; a hang: power + volume-down, flash the saved one.
+
+**Flashed 2026-10-23 14:31** (the user's yes): test-booted from RAM first (`fastboot boot`). A cold launch of My Friend
+Pedro and its close (bf-coldstart app:557340, 14:27-14:30) left the phone up: no reboot, where every close of a
+rendering game rebooted it before. Then `fastboot flash boot_b out/boot-powos-flatfence.img` (sha256 3a125bc3...); it
+boots as #6 (Fri Oct 23 11:00:05 UTC) with root and the session. The way back: the boot_b taken just before,
+`out/boot_b-live-before-flatfence.img` (sha256 4bd07b2a..., kernel #5 of Oct 22) - `fastboot flash boot_b` it.
