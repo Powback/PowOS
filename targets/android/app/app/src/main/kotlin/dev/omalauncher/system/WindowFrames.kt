@@ -362,27 +362,32 @@ class WindowFrames(
         target: Rect,
         raise: Boolean,
     ): String {
-        if (!TaskLeash.enabled(context)) {
-            if (raise) FreeformTasks.raise(context, id)
-            return if (FreeformTasks.resize(id, target)) "resizeTask" else "resizeTask refused"
-        }
-        // Raised in the same transaction (one transition), never a moveTaskToFront first: that is a transition of its own
-        // (TO_FRONT) collecting while the change starts.
-        val start: (Any, (Int) -> Any?) -> Unit = { wct, token ->
-            token(id)?.let {
-                if (raise) TaskLeash.reorder(wct, it, true)
-                TaskLeash.setBounds(wct, it, target)
-            }
-        }
+        if (TaskLeash.enabled(context) && boundsLive(id, target, raise)) return "change transition${if (raise) " + raised" else ""}"
+        if (raise) FreeformTasks.raise(context, id)
+        return if (FreeformTasks.resize(id, target)) "resizeTask" else "resizeTask refused"
+    }
+
+    /**
+     * [boundsTo] through a change transition PowOS plays ([TaskLeash]); false if it couldn't start. Raised in the same
+     * transaction (one transition), never a moveTaskToFront first: that is a transition of its own (TO_FRONT), still
+     * collecting while the change starts.
+     */
+    private fun boundsLive(
+        id: Int,
+        target: Rect,
+        raise: Boolean,
+    ): Boolean {
         val set: (Any, (Int) -> Any?) -> Unit = { wct, token -> token(id)?.let { TaskLeash.setBounds(wct, it, target) } }
+        val start: (Any, (Int) -> Any?) -> Unit = { wct, token ->
+            if (raise) token(id)?.let { TaskLeash.reorder(wct, it, true) }
+            set(wct, token)
+        }
         val s = TaskLeash.Session(context, listOf(id), "task $id maximise")
         s.onReady = { live ->
             if (live) s.finish(mapOf(id to target), set) else Log.i(TAG, "task $id maximise: no leash, resizeTask ${FreeformTasks.resize(id, target)}")
             changed()
         }
-        if (s.start(start)) return "change transition${if (raise) " + raised" else ""}"
-        if (raise) FreeformTasks.raise(context, id)
-        return if (FreeformTasks.resize(id, target)) "resizeTask" else "refused"
+        return s.start(start)
     }
 
     /** Task [id]'s window is the top-most one showing (home's dock order, [running]): nothing to raise. */
