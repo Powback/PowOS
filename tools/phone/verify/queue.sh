@@ -281,7 +281,14 @@ EOS
           el=$(( $(date +%s) - t0 ))
           [ $el -ge "$budget" ] && { why=timeout; break; }
           l=$(logstep "$log"); [ "$l" = "$ls_" ] || { ls_=$l; lt=$(date +%s); }
-          [ "$(beat "$(js $el)" "$ls_" $(( $(date +%s) - lt )))" = stop ] && { why=stop; break; }
+          if [ "$(beat "$(js $el)" "$ls_" $(( $(date +%s) - lt )))" = stop ]; then
+            # A stop counts only from a real finger: an injected tap (the manager's QA agent driving the phone hit the
+            # pill at 04:09, no touch for 91 min) leaves the touch counters untouched (idle.sh), so it's ignored.
+            ti=$("$phone/idle.sh" 2>/dev/null | sed -n 's/.*idle=\([0-9]*\).*/\1/p')
+            if [ -n "$ti" ] && [ "$ti" -gt 30 ]; then
+              echo "$(date +%T) $n: stop flag without a real touch (idle ${ti}s) - ignored"; phone_sh 'rm -f /tmp/powos-verify-stop' >/dev/null
+            else why=stop; break; fi
+          fi
         done
         [ -n "$why" ] && endjob $jp
         wait $jp; rc=$?
