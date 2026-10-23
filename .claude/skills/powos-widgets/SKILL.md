@@ -215,3 +215,22 @@ strip only - not the cause when a drag in a tile fails.
   A null __sketch mid-check = every page reloaded (a shell push/install: home's "not ready" in `push.sh --vpn
   --errors` at that minute) -> alive() cleans up, exit 3, the queue reruns it; not a Sketch bug. Ship: apps/build.sh sketch (bundles pages + __POWOS_SCHEMA__ since
   2026-10-23), then `ADB="docker exec powos-vadb adb -s 10.13.13.7:5555" apps/install.sh sketch ui --note ...`.
+
+## App API (local.app-api: apps/app-api, board app-api-app-view-toggle-app-apis)
+- A page-only PowOS app over a LOCAL service: tools/app-api/appcap_serve.py on 127.0.0.1:3411 (system-tier service
+  lib/apps/services/app-api.json, unit units/phone/app-api.json), reached with host.net.fetch - manifest "net":
+  ["127.0.0.1"] (ShellNet's "lan" does NOT cover loopback). The service adds no logic: views = appcap_render.py,
+  calls = appcap_run.py --consumer app (the one safety path), toggles = the spec's `enabled` flags in
+  ~/.local/state/powos/app-api/specs (seeded once from examples/). Sends: read only; writes dry run; spend never.
+- Going live needs three separate steps, none of them the ship service (it ships only shell + APK):
+  apps/install.sh app-api (the UI), rooted.sh deploy (stages tools/app-api -> /usr/lib/powos/app-api), and a
+  system-tier restart (`rooted.sh system stop` + `on`): the supervisor reads services/ only at start, and
+  lock_ports (POWOS_PORTS) runs only then. That restart bounces SpacetimeDB: it needs the user's yes.
+- App-page styling: inline styles in theme tokens (--soft-fill, --color-accent/--accent-text, --color-muted, --font),
+  no root ground (the shell's frost shows), switches = role=switch buttons. lib/apps/templates/page uses 1px borders:
+  don't copy them.
+- Headless look: the built page module + preact from shell/node_modules + a mock host.net, in
+  zenika/alpine-chrome:with-puppeteer (mount the script INTO /usr/src/app so it finds puppeteer). Device check:
+  tools/phone/verify/app-api.sh (5 Hue actions + list_rooms dry run; never sends to the bridge).
+- apps/*/ui is covered by the pre-push complexity lint (shell/dev/lint-complexity.sh --apps): split tab switches and
+  `??` chains (each counts toward cyclomatic 10).
