@@ -60,6 +60,8 @@ class WindowFrame(
 
     private lateinit var maxButton: GlyphView
     private val frost = Frost.colors(context)
+    /** The bar's buttons and what each does, for [Drag]'s hit test (filled by [barView], so declared before it). */
+    private val buttons = mutableListOf<Pair<GlyphView, () -> Unit>>()
     private val bar = barView(app.pkg, app.title)
     private val grip = GripView(context, frost)
     private val barParams = params("PowOS window bar $id")
@@ -278,14 +280,26 @@ class WindowFrame(
         override fun getOpacity() = PixelFormat.TRANSLUCENT
     }
 
+    /**
+     * A button: a mark the bar's own touch handler ([Drag]) hit-tests and acts on at the lift, not a clickable view.
+     * Measured 2026-10-23 (window-max calc/kate, float-windows, 6 runs): a tap on a clickable button never reached its
+     * click listener (no "maximised" line at all), while taps on the bar itself (its double tap) always reached [Drag];
+     * every bar touch has one owner now.
+     */
     private fun button(
         glyph: Glyph,
         tap: () -> Unit,
     ): GlyphView =
         GlyphView(context, glyph, dp(HIT_DP).toFloat(), frost.ink).apply {
             contentDescription = glyph.name.lowercase()
-            setOnClickListener { tap() }
+            buttons.add(this to tap)
         }
+
+    /** The button under bar point ([x], [y]) (the bar view's px), if any. */
+    private fun buttonAt(
+        x: Float,
+        y: Float,
+    ): Pair<GlyphView, () -> Unit>? = buttons.firstOrNull { (v, _) -> x >= v.left && x < v.right && y >= v.top && y < v.bottom }
 
     /** A window's app: its package and, instead of the app's name, a PowOS (Linux) window's caption (its task is PowOS's own). */
     data class App(
@@ -387,6 +401,7 @@ class WindowFrame(
             v: View,
             e: MotionEvent,
         ): Boolean {
+            if (pressed != null) return pressing(e)
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> down(e)
                 MotionEvent.ACTION_MOVE -> moveTo(e)
@@ -398,7 +413,33 @@ class WindowFrame(
             return true
         }
 
+        /** The button a finger went down on: it acts at the lift if the finger is still on it; no drag from a button. */
+        private var pressed: Pair<GlyphView, () -> Unit>? = null
+
+        private fun pressing(e: MotionEvent): Boolean {
+            val (v, tap) = pressed ?: return true
+            val on = e.x >= v.left && e.x < v.right && e.y >= v.top && e.y < v.bottom
+            when (e.actionMasked) {
+                MotionEvent.ACTION_MOVE -> v.isPressed = on
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.isPressed = false
+                    pressed = null
+                    val act = on && e.actionMasked == MotionEvent.ACTION_UP
+                    android.util.Log.i("PowosWindowFrame", "task $id ${v.contentDescription}: ${if (act) "tapped" else "let go off it"}")
+                    if (act) tap()
+                }
+            }
+            return true
+        }
+
         private fun down(e: MotionEvent) {
+            if (move) {
+                buttonAt(e.x, e.y)?.let {
+                    pressed = it
+                    it.first.isPressed = true
+                    return
+                }
+            }
             x0 = e.rawX
             y0 = e.rawY
             from = Rect(bounds)
