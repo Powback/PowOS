@@ -61,14 +61,17 @@ floats() {  # $1 task, $2 name: freeform and smaller than the screen
   [ $((b3 - b1)) -lt $((W * 9 / 10)) ] || fail "$2's window is $((b3 - b1)) px wide on a $W px screen: full width"
 }
 # draws <task> <name>: a screencap; the task's window (its bounds, inset past the frame's edges) must not be black -
-# at least 20% of its pixels brighter than 24/255 (a KDE window is mostly light or mid-grey; a black one is ~0%).
+# at least 20% of its pixels brighter than 24/255 (a light KDE window), or at least 3% brighter than 64/255 (text and
+# icons of a DARK one: the Breeze dark theme since 2026-10-23 drew Dolphin fully at 18% over 24 - read as black).
+# A black window has ~0% of either.
 draws() {
   local png="$OUT/$2.png" b1 b2 b3 b4 f; read -r b1 b2 b3 b4 <<<"$(bounds "$1")"
   "$T/shot.sh" "$png" >/dev/null 2>&1 || fail "no screencap for $2 (shot.sh)"
   f=$(ffmpeg -v error -i "$png" -vf "crop=$((b3 - b1 - 40)):$((b4 - b2 - 40)):$((b1 + 20)):$((b2 + 20)),scale=200:-1,format=gray" \
-      -f rawvideo - 2>/dev/null | python3 -c 'import sys; d=sys.stdin.buffer.read(); print(sum(1 for b in d if b > 24) * 100 // max(len(d), 1))')
-  log "$2: ${f:-?}% of its window drawn (not black)"
-  [ "${f:-0}" -ge 20 ] || fail "$2's window is black (${f:-?}% drawn) - $png"
+      -f rawvideo - 2>/dev/null | python3 -c 'import sys; d=sys.stdin.buffer.read(); n=max(len(d), 1); print(sum(1 for b in d if b > 24) * 100 // n, sum(1 for b in d if b > 64) * 100 // n)')
+  local lit=${f#* }; f=${f%% *}
+  log "$2: ${f:-?}% of its window drawn (not black), ${lit:-?}% bright detail"
+  [ "${f:-0}" -ge 20 ] || [ "${lit:-0}" -ge 3 ] || fail "$2's window is black (${f:-?}% drawn, ${lit:-?}% bright detail) - $png"
 }
 
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
