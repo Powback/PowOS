@@ -1295,7 +1295,9 @@ async function dockTapCheck() {
   powos.floating.area = async (top) => ((area = top), true);
   const launchWas = powos.apps.launch;
   powos.apps.launch = async (key) => void did.push(`launch ${key}`);
-  const win = (id, extra = {}) => ({ id, pkg: `gate.app${id}`, label: `App ${id}`, minimised: false, ...extra });
+  // As the host lists them: a window showing has its bounds (device px). One without bounds isn't showing (a
+  // translucent task left in freeform) and is nobody's front (dockTap, e9e9e5aa).
+  const win = (id, extra = {}) => ({ id, pkg: `gate.app${id}`, label: `App ${id}`, minimised: false, bounds: [0, 0, 400, 300], ...extra });
   const tap = async (key, want, what) => {
     did.length = 0;
     await D.dockTap(key);
@@ -1311,6 +1313,8 @@ async function dockTapCheck() {
     S.windows.value = [win(101, { away: true }), win(102)];
     await tap("a:gate.app101/.Main", "launch a:gate.app101/.Main", "its window on another page");
     await tap("a:gate.app103/.Main", "launch a:gate.app103/.Main", "no window");
+    S.windows.value = [win(105, { bounds: undefined }), win(101)];
+    await tap("a:gate.app101/.Main", "min 101", "its window in front, under a listed task that isn't showing");
     // A PowOS (Linux) app's window: its task is PowOS's own package, the host names the app (app: "l:...").
     S.windows.value = [win(104, { pkg: "com.powos.app", app: "l:org.kde.dolphin" })];
     await tap("l:org.kde.dolphin", "min 104", "a Linux app's window in front");
@@ -1321,7 +1325,7 @@ async function dockTapCheck() {
     if (!cell) fails.push("no Android app in the dock to tap");
     else {
       const key = cell.dataset.key;
-      S.windows.value = [{ id: 201, pkg: key.slice(2).split("/")[0], label: "Docked", minimised: false }];
+      S.windows.value = [{ id: 201, pkg: key.slice(2).split("/")[0], label: "Docked", minimised: false, bounds: [0, 0, 400, 300] }];
       await window.__gw.frames(2);
       did.length = 0;
       const r = cell.getBoundingClientRect();
