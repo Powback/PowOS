@@ -503,6 +503,9 @@ def cmd_widget(a):
             m["name"] = m.setdefault("show", {})["title"] = o["--name"]
         if o.get("--id"):
             m["id"] = o["--id"]
+        first = (m.get("uses") or [{}])[0] if isinstance(m.get("uses"), list) else {}
+        if "open" not in m and isinstance(first, dict) and opener(specs().get(first.get("app"), {})):
+            m["open"] = opener(specs()[first["app"]])  # a tap opens the block's own app, as the word match does
         errs = check(m)
         if errs:
             log("PowOS AI's manifest broke the rules (" + "; ".join(errs) + ") - the word match instead")

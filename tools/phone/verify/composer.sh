@@ -5,7 +5,8 @@
 #      sheet lists under "PowOS apps" (ui/apppicker.tsx);
 #   2. its own database is published (the snapshot table answers) and its UI is installed;
 #   3. the shell serves its widget module (home's page fetches ./_app/<id>/widgets/main.js: 200);
-#   4. the widget's own read, as it makes it: App API /call as consumer "widget" for each block - a READ (list_rooms,
+#   4. the widget's own read, as it makes it (lib/compose.ts read: app/action in the query and the body): App API /call
+#      as consumer "widget" for each block - a READ (list_rooms,
 #      list_grouped_lights); an unlinked Hue answers "refused: needs bridge_ip" without contacting anything. No write
 #      action is ever called here (never set_room / recall_scene: the user's lights stay as they are);
 #   5. App API's audit since the check started: the widget consumer made reads only, nothing was sent that wasn't a read.
@@ -26,7 +27,8 @@ echo "DB \$(q $DB "SELECT source FROM snapshot")"
 [ -f /home/powos/.local/share/powos/apps/$ID/current/ui/widgets/main.js ] && echo "UI_OK"
 M=/home/powos/.local/share/powos/apps/$ID/current/powos-app.json
 for a in \$(python3 -c "import json;print(' '.join(u['app']+':'+u['action'] for u in json.load(open('\$M'))['composition']['uses']))" 2>/dev/null); do
-  r=\$(curl -s -m 30 -X POST -d '{"send":true,"consumer":"widget"}' "http://127.0.0.1:3411/call?app=\${a%%:*}&action=\${a#*:}" | head -c 300)
+  b="{\\"app\\":\\"\${a%%:*}\\",\\"action\\":\\"\${a#*:}\\",\\"args\\":{},\\"send\\":true,\\"consumer\\":\\"widget\\"}"
+  r=\$(curl -s -m 30 -X POST -d "\$b" "http://127.0.0.1:3411/call?app=\${a%%:*}&action=\${a#*:}" | head -c 300)
   echo "CALL \$a \$r"
 done
 python3 - "\$since" <<'PY'

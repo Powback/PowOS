@@ -173,8 +173,10 @@ class ComposerAI(unittest.TestCase):
         good = json.loads(self.e.run("widget", "hue rooms", "--no-install", "--json", "--no-ai",
                                      "--dir", os.path.join(self.e.root, "m")).stdout)["composition"]
         good.update({"name": "Rooms by AI", "id": "local.rooms-by-ai"})
+        good.pop("open")
         m, _ = self.compose(self.fake_ai(good))
         self.assertEqual((m["by"], m["id"]), ("ai", "local.rooms-by-ai"))
+        self.assertEqual(m["open"], "local.lights")  # the block's own app, filled in when the AI left it out
 
     def test_ai_write_refused_falls_back(self):
         bad = {"spec": "powos.compose/v1", "kind": "widget", "id": "local.lights-off", "name": "Off",
