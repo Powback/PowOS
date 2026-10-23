@@ -48,7 +48,9 @@ object FreeformTasks {
         @Suppress("DEPRECATION")
         val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
         return tasks.mapNotNull { t ->
-            val wc = runCatching { windowConfiguration(t) }.getOrNull() ?: return@mapNotNull null
+            val wc = runCatching { windowConfiguration(t) }.onFailure { if (!unreadable) Log.w(TAG, "can't read task ${t.taskId}'s window", it) }.getOrNull()
+            unreadable = wc == null
+            if (wc == null) return@mapNotNull null
             if (wc.javaClass.getMethod("getWindowingMode").invoke(wc) != FREEFORM) return@mapNotNull null
             val bounds = Rect(wc.javaClass.getMethod("getBounds").invoke(wc) as Rect)
             val visible = runCatching { android.app.TaskInfo::class.java.getField("isVisible").getBoolean(t) }.getOrDefault(true)
@@ -56,6 +58,9 @@ object FreeformTasks {
             Window(t.taskId, (t.baseActivity ?: t.topActivity)?.packageName, bounds, visible, dpi, t.taskDescription?.label?.toString())
         }
     }
+
+    /** The last task's window couldn't be read (logged once, not on every refresh). */
+    @Volatile private var unreadable = false
 
     private fun windowConfiguration(t: ActivityManager.RunningTaskInfo): Any {
         val c = android.app.TaskInfo::class.java.getField("configuration").get(t) as Configuration

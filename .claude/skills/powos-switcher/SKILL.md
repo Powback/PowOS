@@ -59,7 +59,14 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   WindowContainerTransaction.setDensityDpi(task token, dpi) via WindowOrganizer.applyTransaction (FreeformTasks.density;
   what AOSP desktop mode does). AppWindows.windowDpi = 0.8 x screen dpi (354): 60% width = 615 dp, tablet layout.
   WindowFrames.dense gives 0 (= screen's) back to a task that stops being a window (folded, made full screen).
-  Set on the first refresh after a launch it does NOT stick (2026-10-23, APK 29878432: call succeeds, task stays 442
+  REAL CAUSE (2026-10-23, APK 29878604): FreeformTasks.list() found NO windows in the app - Configuration.
+  windowConfiguration is hidden-API `blocked,test-api` and wasn't in HiddenApi's exemptions (logcat: "hiddenapi:
+  Accessing hidden field ...Configuration;->windowConfiguration ... from FreeformTasks ... denied"), so dense() never
+  ran (also no frames, empty windows.list). Now exempt (+ WindowConfiguration, TaskInfo, WindowContainerTransaction/
+  Token, WindowOrganizer); a failed read logs "can't read task N's window". New hidden call: check logcat for
+  `hiddenapi.*denied` from your class first. Linux windows (PowOS's own package) get no density (pixel-for-pixel).
+  Linux side measured the same day: KWin output scale 1 (kwinoutputconfig.json "scale":1), no QT/GDK scale env.
+  Earlier reading, likely wrong (the in-app call never ran): set on the first refresh after a launch it does NOT stick (2026-10-23, APK 29878432: call succeeds, task stays 442
   dpi, 492 dp; the same WCT from root 3 s later -> 354 dpi), so dense reads the task's configuration.densityDpi back
   (FreeformTasks.Window.dpi) and sets it again every 500 ms until it shows (8 tries; logcat PowosWindowFrames "task N
   at X dpi: set Y"). Root probe: ~/.cache/powos-fwdpi/src/Dpi.java (d8'd, `CLASSPATH=.. app_process /system/bin Dpi

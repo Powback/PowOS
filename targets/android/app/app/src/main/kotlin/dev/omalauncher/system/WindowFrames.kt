@@ -104,7 +104,8 @@ class WindowFrames(
         if (floating) away.retainAll(ids)
         // Folded, apps aren't windows: the dock shows none.
         publish(if (floating) all else emptyList())
-        dense(if (floating) all else emptyList())
+        // PowOS's own tasks (Linux windows, PowosWindowActivity) draw KWin's buffer pixel for pixel: no density.
+        dense(if (floating) all.filter { it.pkg != context.packageName } else emptyList())
         maximised.keys.retainAll { id -> all.any { it.id == id && it.bounds == maximised[id]?.second } }
     }
 

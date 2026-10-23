@@ -26,6 +26,15 @@ object HiddenApi {
             // exemption the listener never registered (no task events for the running bar or the window frames).
             "Landroid/app/ITaskStackListener",
             "Landroid/window/TaskSnapshot",
+            // The floating windows (FreeformTasks): a task's bounds and mode (Configuration.windowConfiguration is
+            // blocked: without it list() found no windows - no frames, no density, empty windows.list, 2026-10-23), its
+            // token and the WindowContainerTransactions (bounds, density, reorder) applied through WindowOrganizer.
+            "Landroid/content/res/Configuration;->windowConfiguration",
+            "Landroid/app/WindowConfiguration",
+            "Landroid/app/TaskInfo",
+            "Landroid/window/WindowContainerTransaction",
+            "Landroid/window/WindowContainerToken",
+            "Landroid/window/WindowOrganizer",
             "Landroid/app/StatusBarManager",
             // The gesture input (system/gesture/GestureMonitor): the display's input monitor and its receiver.
             "Landroid/hardware/input/InputManager",
