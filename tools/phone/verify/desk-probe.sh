@@ -29,11 +29,18 @@ ev "window.__pt||(window.__pt=[],addEventListener('touchstart',e=>__pt.push('s'+
 touches() { ev "JSON.stringify((window.__pt||[]).splice(0))"; }
 inwin() { ev "importShim('./ui/desktops.ts').then(m=>String(m.inWindow($1/devicePixelRatio,$2/devicePixelRatio)))"; }
 logc() { sh_ "rm -f /data/local/tmp/probe-$1.txt; (timeout 200 logcat -T 1 -v time -s PowosWindowFrames PowosWindowFrame PowosWindowResize PowosFreeform PowosOemCaption WindowTasks PowosTasks com.powos.app:W </dev/null >/data/local/tmp/probe-$1.txt 2>&1 &)"; }
-pulllog() { sh_ "cat /data/local/tmp/probe-$1.txt" > "$OUT/logcat-$1.txt"; log "logcat ($1): $(wc -l < "$OUT/logcat-$1.txt") lines -> $OUT/logcat-$1.txt"; }
+# + SystemUI's warnings and errors (WM Shell's window decoration lives there: a caption 0 dp high may throw).
+logc_sys() { ash <<EOF2
+rm -f /data/local/tmp/probe-sys-$1.txt; (timeout 200 logcat -T 1 -v time --pid=\$(pidof com.android.systemui) '*:W' </dev/null >/data/local/tmp/probe-sys-$1.txt 2>&1 &)
+EOF2
+}
+pulllog() { sh_ "cat /data/local/tmp/probe-$1.txt" > "$OUT/logcat-$1.txt"; sh_ "cat /data/local/tmp/probe-sys-$1.txt" > "$OUT/logcat-sys-$1.txt"
+  log "logcat ($1): $(wc -l < "$OUT/logcat-$1.txt") lines, SystemUI W/E $(wc -l < "$OUT/logcat-sys-$1.txt") -> $OUT/logcat-*$1.txt"
+  grep -iE "exception|decor|caption" "$OUT/logcat-sys-$1.txt" | head -8; }
 
 pass_() { # <tag>
   local tag=$1 CT b0 b1 p x y dx=$(dp 120) dy=$(dp 60)
-  logc "$tag"; touches >/dev/null
+  logc "$tag"; logc_sys "$tag"; touches >/dev/null
   note "[$tag] overlay: $(sh_ "cmd overlay list com.android.systemui" | grep Powos | xargs)"
   dock_tap "a:$CALC/" Calculator || return; sleep 2.5; chk calc; CT=$(waitwin $CALC 6)
   step "$tag-calc" "[$tag] Calculator from the dock"; where "$CT"
@@ -83,7 +90,7 @@ pass_() { # <tag>
 
 pass_ on
 # Dolphin's close button (a Linux window), once.
-logc dolphin
+logc dolphin; logc_sys dolphin
 dock_tap l:org.kde.dolphin Dolphin && { DT=$(waitwin l:org.kde.dolphin 30); chk dolphin; sleep 2
   step dolphin "Dolphin from the dock"; note "dolphin task $DT $(tbounds "$DT") bar $(wframe "PowOS window bar $DT}")"
   p=$(closebtn "$DT"); [ -n "$p" ] && { set -- $p; tap $1 $2 "Dolphin's close button"; sleep 3; chk dclose
