@@ -68,15 +68,20 @@ n=$(npages); echo "home pages: $n, on $(onpage)" | tee -a "$OUT/log.txt"
 
 bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ' | xargs; }
 # A spot on the page on screen with nothing under it (no tile, app, bar, dock) and outside the window: read-only CDP,
-# device px "x y" (a real swipe starts there, never on a widget).
+# device px "x y" (a real swipe starts there, never on a widget). $2 the swipe's way (-1 leftwards), $3 its length: a
+# spot with room for the whole swipe first. The 05:25 FAIL (2026-10-23) was the check's: the leftmost empty spot
+# (x 227, left of the window) clamped a leftward swipe to 207 px - under home's quarter-width turn and its flick
+# speed, so home rightly stayed on page 1.
 freept() {
-  "$T/cdp.sh" eval home "(()=>{const b='$1'.split(' ').map(Number),r=devicePixelRatio;for(let y=.2;y<=.75;y+=.05)for(let x=.1;x<=.9;x+=.04){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.app,.panel,.widget,.island,.owl,button,a,input,.bar,.dock,[data-key]'))continue;return Math.round(px)+' '+Math.round(py)}return 'none'})()" 2>&1 | tr -d '"\r' | tail -1
+  "$T/cdp.sh" eval home "(()=>{const b='$1'.split(' ').map(Number),r=devicePixelRatio,d=$2,len=$3,W=innerWidth*r;let best=null,room=-1;for(let y=.2;y<=.75;y+=.05)for(let x=.1;x<=.9;x+=.04){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.app,.panel,.widget,.island,.owl,button,a,input,.bar,.dock,[data-key]'))continue;const m=d<0?px-20:W-20-px;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()" 2>&1 | tr -d '"\r' | tail -1
 }
 # A real horizontal swipe on home from an empty spot: $1 -1 = to the next page (finger leftwards), 1 = back.
 swipe() {
-  local p; p=$(freept "$(bounds)"); [ "$p" != none ] && [ -n "$p" ] || { echo "no empty spot on page $(($(onpage) + 1)) to swipe from - stopping"; exit 5; }
-  local x=${p% *} y=${p#* } d=$((W * 35 / 100)); local to=$((x + $1 * d))
+  local d=$((W * 35 / 100)) p; p=$(freept "$(bounds)" "$1" "$d"); [ "$p" != none ] && [ -n "$p" ] || { echo "no empty spot on page $(($(onpage) + 1)) to swipe from - stopping"; exit 5; }
+  local x=${p% *} y=${p#* }; local to=$((x + $1 * d))
   [ $to -lt 20 ] && to=20; [ $to -gt $((W - 20)) ] && to=$((W - 20))
+  # Shorter than home turns a page for (a quarter of its width, no flick): the check's spot, not the product.
+  [ $(( (to - x) * $1 )) -ge $((W / 4 + 40)) ] || { echo "only a $(( (to - x) * $1 )) px swipe fits from $x,$y - stopping (not a product FAIL)"; exit 5; }
   echo "swipe $x,$y -> $to,$y" >>"$OUT/log.txt"
   sh_ "input swipe $x $y $to $y 250"; sleep 1.5
 }
