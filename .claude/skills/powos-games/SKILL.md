@@ -157,6 +157,17 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
     through powos-open-task now. A raw steam:// launch does NOT bring the game to the front.
   - Proton's user_settings.py: one file per Proton dir; checks that wrote their own (bf-checker, td-launch) replaced
     ours and a killed run left it (DXVK_LOG_PATH, 02:01). Checks put env in ~/.config/powos/proton-settings.json.
+- Where a cold start's ~32 s to the reaper went (MFP 14:27, Steam's own logs, ms-exact enough at 1 s): wrapper 2 s
+  (reg_guard reads 43 MB of prefix registries twice ~1.1 s, powos-steam-compat apply ~0.6 s) -> bootstrap: update
+  manifest 1 s + "Verifying all executable checksums" 0-4 s (-noverifyfiles skips it) -> client + web UI up 5 s ->
+  steamui_login "WaitingForNetwork" -> "Timed out waiting for network" 10 s (20 s on some starts) -> logon <1 s ->
+  library/UI ready 5 s -> ExecuteSteamURL -> ShowInterstitials 4 s (UI busy, continues by itself) -> CreatingProcess.
+  The network wait (213 of 222 logins): Steam reads NetworkManager through libnm, and libnm needs the D-Bus
+  ObjectManager at /org/freedesktop + the Devices/StateReason properties; Andromarchy's android-nm had neither, so
+  libnm saw "not running". Fixed in PowOS's copy targets/android/session/android-nm (deploy installs + restarts it).
+  Check what libnm sees: python gi NM.Client.new() with DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/powos-app/system_bus.
+- Steam logs per stage: bootstrap_log (update/verify), steamui_login (network wait), connection_log (CM logon),
+  console_log (ExecCommandLine, GameAction tasks), gameprocess_log (pids). Read them before strace.
 - Base state: Steam resident (pkgs/steam powos-steam-resident, session autostart, `steam -silent` 60 s after login,
   frozen by unified sleep; off: ~/.config/powos/steam-resident-off; log $XDG_RUNTIME_DIR/powos-steam-resident.log).
 - < 10 s needs the GAME resident: warm Steam + skipped evaluator still leaves ~4 s evaluator container + 9 s reaper->exe

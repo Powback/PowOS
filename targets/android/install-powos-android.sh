@@ -152,6 +152,8 @@ pacman -S --noconfirm --needed scrcpy android-tools pyside6
 # the image comes from, only has a Qt 5 one, so the RPM mapping can't bring it).
 pacman -S --noconfirm --needed qmltermwidget
 install -m 755 "$P/session/powos-android-app" /usr/local/bin/powos-android-app
+# Andromarchy's NetworkManager stand-in with the ObjectManager libnm reads (Steam's login waited 10-20 s without it).
+install -m 755 "$P/session/android-nm" /usr/local/bin/android-nm
 install -m 755 "$P/session/powos-android-tasks" /usr/local/bin/powos-android-tasks
 install -m 755 "$P/session/powos-apps-export" /usr/local/bin/powos-apps-export
 install -m 755 "$P/session/powos-apps-watch" /usr/local/bin/powos-apps-watch

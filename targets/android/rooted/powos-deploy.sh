@@ -38,6 +38,17 @@ install -m 644 $T/powos-android-tasks.desktop $R/etc/xdg/autostart/powos-android
 # here in the running session, once (it does nothing after its first run: the scale is the user's then).
 install -m 755 $T/powos-output-scale $R/usr/local/bin/powos-output-scale
 [ -f /data/powos/session.pid ] && WAYLAND_DISPLAY=wayland-0 sh /data/powos/powos-run.sh powos-output-scale || true
+# The session's NetworkManager stand-in (Andromarchy's, with the D-Bus ObjectManager libnm needs: without it libnm saw
+# no NetworkManager and Steam's login waited 10-20 s for a network at every start). A changed one replaces the running
+# one at once, with the environment the session gave it (powos-rooted-session starts it as root on the system bus).
+if ! cmp -s $T/android-nm $R/usr/local/bin/android-nm; then
+  install -m 755 $T/android-nm $R/usr/local/bin/android-nm
+  if pkill -f 'python3 /usr/local/bin/android-nm' 2>/dev/null; then
+    chroot $R /usr/bin/env -i HOME=/home/powos XDG_RUNTIME_DIR=/run/powos-app PATH=/usr/local/bin:/usr/bin:/usr/sbin \
+      DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/powos-app/system_bus DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus \
+      setsid -f sh -c 'exec android-nm >> /run/powos-app/android-nm.log 2>&1' < /dev/null > /dev/null 2>&1
+  fi
+fi
 # The phone's controller (Steam Deck over uhid) and the focus watcher, which the session starts (powos-rooted-session).
 install -m 755 $T/powos-padd $R/usr/bin/powos-padd
 install -m 755 $T/powos-focus-watch $R/usr/bin/powos-focus-watch
@@ -86,7 +97,7 @@ rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-sess
   $T/powos-units.sh \
   $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task \
   $T/powos-apps-watch $T/powos-apps-watch.desktop $T/powos-plasma-bridge $T/powos-plasma-bridge.desktop \
-  $T/powos-ime-bridge $T/powos-ime-bridge.desktop $T/powos-output-scale
+  $T/powos-ime-bridge $T/powos-ime-bridge.desktop $T/powos-output-scale $T/android-nm
 
 # The user: powos, as on every PowOS (password powos, sudo through wheel). Its uid is the PowOS app's Android uid:
 # the app's run dir (display socket, phone state) is then the user's own, as XDG_RUNTIME_DIR should be. Re-run
