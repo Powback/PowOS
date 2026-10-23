@@ -71,8 +71,18 @@ EOF
 rec_start() { sh_ "rm -f /data/local/tmp/wmax-$1.mp4; (screenrecord --display-id $DID --bit-rate 16000000 --time-limit ${2:-60} /data/local/tmp/wmax-$1.mp4 </dev/null >/dev/null 2>&1 &)"; sleep 1; }
 rec_stop() { sh_ "pkill -INT screenrecord"; sleep 2; "$A" exec-out "su -c 'cat /data/local/tmp/wmax-$1.mp4'" > "$REC/$1.mp4" 2>/dev/null; sh_ "rm -f /data/local/tmp/wmax-$1.mp4"
   log "recording: $REC/$1.mp4 ($(wc -c < "$REC/$1.mp4" | tr -d ' ') bytes)"; }
-logc() { sh_ "rm -f /data/local/tmp/wmax.log; (timeout 200 logcat -T 1 -v time -s PowosWindowFrames PowosWindowFrame PowosFreeform PowosTaskLeash WindowTasks PowosWindowActivity </dev/null >/data/local/tmp/wmax.log 2>&1 &)"; }
-logc_get() { sh_ "cat /data/local/tmp/wmax.log" > "$OUT/logcat.txt"; us "tail -n 60 /run/powos-app/hyprland.log 2>/dev/null | grep -iE 'window task|full|resiz|size' | tail -30" > "$OUT/kwin.txt"; }
+# The whole log (every tag) for the journey: what WM, WM Shell and OnePlus's window code did around each bounds change
+# (wm.txt), PowOS's own lines in logcat.txt as before.
+logc() { sh_ "rm -f /data/local/tmp/wmax.log; (timeout 300 logcat -T 1 -v time </dev/null >/data/local/tmp/wmax.log 2>&1 &)"; }
+logc_get() { sh_ "cat /data/local/tmp/wmax.log" > "$OUT/logcat-all.txt"
+  grep -E "PowosWindowFrames|PowosWindowFrame|PowosFreeform|PowosTaskLeash|PowosWindowResize|WindowTasks|PowosWindowActivity|beginning of" "$OUT/logcat-all.txt" > "$OUT/logcat.txt"
+  grep -iE "Powos(TaskLeash|WindowFrames|Freeform|WindowResize)|ShellTransitions|WindowManager|WindowOrganizer|Transition|Freeform|Flexible|wm_task|TaskOrganizer|resize|setBounds" "$OUT/logcat-all.txt" | grep -v "PowosWindowFrame(" > "$OUT/wm.txt"
+  us "tail -n 60 /run/powos-app/hyprland.log 2>/dev/null | grep -iE 'window task|full|resiz|size' | tail -30" > "$OUT/kwin.txt"; }
+# trace <task> <label>: the task's bounds (am stack list) sampled for ~2 s right after a change, with phone times, so a
+# change that lands and is then undone shows (window-max after 2026-10-23: WM listed the maximised bounds at +0.1 s,
+# the old ones again at +0.35 s).
+trace() { local t; t=$(sh_ "for i in \$(seq 18); do echo \$(date +%T.%N | cut -c1-12) \$(am stack list | grep -E \"taskId=$1:\" | grep -oE \"bounds=[^ ]+\" | head -1); done")
+  printf '%s\n' "$t" | sed "s/^/  $2 /" | tee -a "$OUT/log.txt"; }
 
 # --- maximise / restore ------------------------------------------------------------------------------------------
 maxbtn() { local b; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b; echo "$(($3 - $(dp 55))) $((($2 + $4) / 2))"; }
@@ -81,9 +91,10 @@ maxcheck() {
   local id=$1 lay=$2 app=$3 b0 b1 b2 c p r
   b0=$(tbounds "$id"); note "$app before: $(what "$id" "$lay")"
   p=$(maxbtn "$id"); [ -n "$p" ] || { fail "$app: no title bar to maximise from"; return; }
-  set -- $p; tap "$1" "$2" "$app's maximise" || return; sleep 0.35
-  note "$app 0.35 s after maximise: $(what "$id" "$lay")"
-  sleep 1.4; chk maximise
+  set -- $p; tap "$1" "$2" "$app's maximise" || return
+  trace "$id" "$app maximise"
+  note "$app ~2 s after maximise: $(what "$id" "$lay")"
+  chk maximise
   step "$app-max" "$app maximised from its title bar"; dumps "$app-max" "$id"
   b1=$(tbounds "$id"); c=$(sfrow "$lay"); note "$app maximised: $(what "$id" "$lay")"
   set -- $b1
@@ -96,9 +107,10 @@ maxcheck() {
     eqrect "$1 $2 $3 $4" "$b1" 4 && near $(($3 - $1)) "$5" 4 && near $(($4 - $2)) "$6" 4 &&
       pass "$app's content drawn at the maximised size ([$c])" || fail "$app's content [$c] isn't the maximised window [$b1] (stale or scaled)"
   else fail "$app: no content layer ($c)"; fi
-  p=$(maxbtn "$id"); set -- $p; tap "$1" "$2" "$app's restore" || return; sleep 0.35
-  note "$app 0.35 s after restore: $(what "$id" "$lay")"
-  sleep 1.4; chk restore
+  p=$(maxbtn "$id"); set -- $p; tap "$1" "$2" "$app's restore" || return
+  trace "$id" "$app restore"
+  note "$app ~2 s after restore: $(what "$id" "$lay")"
+  chk restore
   step "$app-restored" "$app restored from its title bar"
   b2=$(tbounds "$id"); c=$(sfrow "$lay"); note "$app restored: $(what "$id" "$lay")"
   [ "$b2" = "$b0" ] && pass "$app restored to exactly its bounds before ([$b2])" || fail "$app restored to [$b2], was [$b0]"
@@ -106,7 +118,7 @@ maxcheck() {
   # A double tap on the bar (the desktop convention): maximised, again: back.
   p=$(barpt "$id"); [ -n "$p" ] || return; set -- $p
   log "double tap $app's bar at $1,$2"; offpill "$1" "$2" "bar" || return
-  sh_ "input tap $1 $2; input tap $1 $2"; sleep 1.6; chk dtap
+  sh_ "input tap $1 $2; input tap $1 $2"; trace "$id" "$app dtap"; chk dtap
   b1=$(tbounds "$id"); step "$app-dtap" "$app's bar double-tapped"
   set -- $b1; [ $# -ge 4 ] && [ "$3" -ge $((W - TOL)) ] && [ "$1" -le "$TOL" ] && pass "$app: a double tap on the bar maximises ([$b1])" || fail "$app: a double tap on the bar left it at [$b1]"
   p=$(barpt "$id"); set -- $p; sh_ "input tap $1 $2; input tap $1 $2"; sleep 1.6; chk dtap2
