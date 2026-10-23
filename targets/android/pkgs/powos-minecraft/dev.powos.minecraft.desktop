@@ -1,1 +1,9 @@
-../../../../desktop/minecraft/dev.powos.minecraft.desktop
+[Desktop Entry]
+Type=Application
+Name=Minecraft
+GenericName=Create CC:T 1.21.1
+Comment=The PowStation modpack - the server's own pack.mrpack, synced at every start
+Exec=powos-minecraft launch
+Icon=org.prismlauncher.PrismLauncher
+Categories=Game;
+Keywords=minecraft;create;prism;

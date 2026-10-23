@@ -1,7 +1,6 @@
 # Minecraft modpacks as a PowOS app on the phone: Prism Launcher (Arch Linux ARM's, native aarch64 - its LWJGL has
-# linux-arm64 natives), Java 21, and powos-minecraft (bin/powos-minecraft: the server's .mrpack -> a Prism instance,
-# synced at every start). The same tool, packs and desktop entry as desktop PowOS (Containerfile), from the same files
-# (symlinks here; build-pkgs.sh copies them dereferenced).
+# linux-arm64 natives), Java 21, and powos-minecraft (the server's .mrpack -> a Prism instance, synced at every
+# start). An app package, not part of the PowOS image: nothing here goes into the desktop's Containerfile.
 pkgname=powos-minecraft
 pkgver=1.0
 pkgrel=1
