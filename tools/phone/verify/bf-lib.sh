@@ -236,7 +236,10 @@ first_frame() { xframes first "$WIN_NAME" "$1"; }  # first_frame <s>: the game's
 first_change() { xframes change "$1" "$2" "$3"; }  # first_change <window> <s> <fps>: its first new frame (xframes change)
 open_task() {  # open_task <timeout s> <app id>: the drawer's / widget's launch path; its status line
   # POWOS_NO_LAUNCH_RECORD: the check records its own measured launches for the compat policy (bf-coldstart), not twice.
-  POWOS_NO_LAUNCH_RECORD=1 timeout "$1" powos-open-task --app-id "$2" -- steam steam://rungameid/$APP >"$T/open.out" 2>&1 </dev/null
+  # setsid: a Steam this launch starts (cold, or /usr/bin/steam's restart fallback) is the check's descendant
+  # otherwise, in its session - the check then died silently at its close, no RESULT line (04:34 bf-coldstart, 06:32
+  # bf-launchpaths: every step passed, then "FAIL run: no RESULT line"); a Steam started from the drawer isn't either.
+  POWOS_NO_LAUNCH_RECORD=1 setsid -w timeout "$1" powos-open-task --app-id "$2" -- steam steam://rungameid/$APP >"$T/open.out" 2>&1 </dev/null
   grep -m1 '^powos-open-task:' "$T/open.out" || echo "no status line"; }
 
 # A launch chain outside Steam's tree (left by a dead Steam) is never frozen nor resumed and holds Proton's prefix: gone.
