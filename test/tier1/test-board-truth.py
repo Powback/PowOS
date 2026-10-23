@@ -259,7 +259,9 @@ class ScanTest(unittest.TestCase):
             for n, task, log in (("20261023-000001-2-b", "b", "ok\nPASS: all good\n"),
                                  ("20261023-000002-3-c", "c", "FAIL: rows missing\nmore\nFAIL rc=1: more\n"),
                                  ("20261023-000003-4-d", "d", "INVALID x: no window\nINVALID rc=1: no window\n")):
-                open(os.path.join(q, "done", n + ".job"), "w").write(f"task={task}\nname=chk-{task}\nneed=\nqt={qt}\n")
+                open(os.path.join(q, "done", n + ".job"), "w").write(
+                    f"task={task}\n" + (f"name=chk-{task}\n" if task != "d" else "") + f"need=\nqt={qt}\n"
+                    "cmd=(env PROFILE=1 /x/tools/phone/verify/bf-coldstart.sh 12 )\n")
                 open(os.path.join(q, "done", n + ".log"), "w").write(log)
             got = {c["task"]: c for c in cli.scan_queue(q, repo=q)}
             self.assertEqual(got["a"]["state"], "queued")
@@ -268,6 +270,7 @@ class ScanTest(unittest.TestCase):
             self.assertEqual((got["b"]["state"], got["b"]["line"]), ("PASS", "PASS: all good"))
             self.assertEqual((got["c"]["state"], got["c"]["line"]), ("FAIL", "FAIL: rows missing"))
             self.assertEqual(got["d"]["state"], "INVALID")
+            self.assertEqual(got["d"]["name"], "bf-coldstart", "no name= (an older job): its script's")
             self.assertTrue(all(c["shipped"] for c in got.values()), "no commit known: it runs anyway (shipped)")
         finally:
             shutil.rmtree(q)

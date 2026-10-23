@@ -790,6 +790,22 @@ def _sh_vars(text):
     return out
 
 
+def _script_of(job_text):
+    """A job file's cmd=(...) script, as queue.sh names it: past `env A=1`, its basename without .sh."""
+    import shlex
+
+    m = re.search(r"^cmd=\((.*)\)\s*$", job_text, re.M)
+    try:
+        toks = shlex.split(m.group(1)) if m else []
+    except ValueError:
+        toks = []
+    for t in toks:
+        if t == "env" or t.endswith("/env") or re.match(r"[A-Za-z_][A-Za-z0-9_]*=", t):
+            continue
+        return re.sub(r"\.sh$", "", os.path.basename(t))
+    return ""
+
+
 def _result_of(log):
     """(state, line, at) of a finished job's log: the runner appends "PASS|FAIL ...|SKIP ...: <last line>"."""
     try:
@@ -835,8 +851,11 @@ def scan_queue(qdir=None, repo=None, days=7):
         except OSError:
             continue
         for f in names:
-            v = _sh_vars(read(os.path.join(d, f)))
+            text = read(os.path.join(d, f))
+            v = _sh_vars(text)
             job = f[:-4]
+            if not v.get("name"):   # jobs from before --name: the script's name, as queue.sh's default
+                v["name"] = _script_of(text)
             if not v.get("task"):
                 continue
             row = {"job": job, "task": v["task"], "name": v.get("name", ""), "need": v.get("need", ""),
