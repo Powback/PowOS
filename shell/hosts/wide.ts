@@ -116,15 +116,10 @@ export function wide(n: Bridge): Bridge {
     hostPage = new Map(h.items.map((it) => [it.key, it.page]));
     const kept = await load(h);
     const { items, changed } = layOut(h, where, kept);
-    // Items gone from home (removed, folded or wide) leave the store; a list read empty (starting up) clears nothing.
-    let pruned = false;
-    if (h.items.length)
-      for (const key of Object.keys(kept))
-        if (!hostPage.has(key)) {
-          delete kept[key];
-          pruned = true;
-        }
-    if (changed || pruned) save();
+    // Items gone from home keep their wide cell: one that comes back (re-added, a host list read mid-change) takes its
+    // own place again instead of the first free cell - dropping it moved WireGuard to the middle column and Steam onto
+    // its spot (2026-10-23). An absent item's cell holds nothing: layOut only places the host's items.
+    if (changed) save();
     return { columns: cols * 2 + 1, pages: pairs.map((_, i) => i + 1), items };
   }
 

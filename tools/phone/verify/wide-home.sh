@@ -71,8 +71,19 @@ for it in host["items"]:
     # The search widget is wherever the user put it (out of the bar, moved on the wide page): never judged here.
     if not c or it["page"] not in pages[:2] or it["key"] == "panel:search": continue
     w = wide.get(it["key"]); want = (c["x"] + pages.index(it["page"]) * (host["columns"] + 1), c["y"])
-    if not w or (w["x"], w["y"]) != want: print(f"FAIL: {it['key']} at {w and (w['x'], w['y'])}, side by side it was {want}")
+    # A wide cell is the user's own once they move the tile on the wide page (hosts/wide.ts: folded it stays put), so a
+    # cell away from the side-by-side spot is a note, not a failure (Steam/WireGuard, 2026-10-23); a MISSING cell is.
+    if not w: print(f"FAIL: {it['key']} has no wide cell")
+    elif (w["x"], w["y"]) != want: print(f"note: {it['key']} at {(w['x'], w['y'])} wide, side by side it was {want}")
     n += 1
+# Two tiles on one cell of the wide page is a layout bug whoever moved them.
+seen = {}
+for k, c in wide.items():
+    if k not in {i["key"] for i in host["items"]}: continue
+    for x in range(c["x"], c["x"] + c["w"]):
+        for y in range(c["y"], c["y"] + c["h"]):
+            o = seen.setdefault((c.get("hp"), x, y), k)
+            if o != k: print(f"FAIL: {k} and {o} both on wide cell ({x}, {y})")
 print(f"migration: {n} tiles checked, {len(host['items'])} items")
 PY
 )
@@ -91,12 +102,24 @@ edit() {
   [ "$(q '!!document.querySelector(".home.editing")')" = true ] && { home; }
 }
 
-for screen in inner cover; do
+# The wide layout must survive a fold and unfold unchanged (the user's tiles keep their place): inner, cover, inner.
+kept() {
+  local now; now=$(hcall store.get "['home.wide']")
+  python3 - "$OUT/wide.json" "$now" <<'PY' | tee -a "$OUT/log.txt"
+import json, sys
+def rd(v):
+    v = json.loads(v.strip() or "null"); return json.loads(v) if isinstance(v, str) else v
+a, b = rd(open(sys.argv[1]).read()), rd(sys.argv[2])
+moved = [k for k in a if k in b and {x: a[k][x] for x in "xywh"} != {x: b[k][x] for x in "xywh"}]
+print("FAIL: moved by the fold and unfold: " + ", ".join(f"{k} {a[k]['x'],a[k]['y']} -> {b[k]['x'],b[k]['y']}" for k in moved) if moved else f"kept: {len(a)} wide cells unchanged across fold + unfold")
+PY
+}
+for screen in inner cover inner2; do
   st=3; [ $screen = cover ] && st=0
   step "$screen screen (device state $st)"; sh_ "cmd device_state state $st"; sleep 4; chk $screen
   unlock; chk "$screen-lock"; home; chk "$screen-home"
   "$T/shot.sh" "$OUT/home-$screen.png" 2>&1 | tee -a "$OUT/log.txt"
-  if [ $screen = inner ]; then bar; migrated; else nofade; fi
+  case $screen in inner) bar; migrated ;; cover) nofade ;; inner2) kept | grep -q "^FAIL" && FAILS=$((FAILS + 1)); continue ;; esac
   edit $screen
 done
 
