@@ -6,8 +6,11 @@
 # Mac side (bf-pacing.sh, bf-run.sh, bf-checker.sh, bf-fold.sh): `BF_ADB=<tools/phone/adb.sh> . bf-lib.sh` defines
 # only pill <text>: the same step file, written over adb as the session user (at most 15 s), and the log line.
 if [ -n "${BF_ADB:-}" ]; then
+  # `BF_ADB=$A . bf-lib.sh` sets BF_ADB only while this file is sourced: kept for pill(), which runs later (under
+  # set -u, "BF_ADB: unbound variable" failed every bf-pacing/bf-checker/bf-fold job, 2026-10-23 05:02).
+  BF_ADB_PATH=$BF_ADB
   pill() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
-    perl -e 'alarm shift; exec @ARGV' 15 "$BF_ADB" shell "su -c 'sh /data/powos/powos-run.sh \"umask 022; echo $b | base64 -d > /tmp/powos-verify-step\"'" >/dev/null 2>&1
+    perl -e 'alarm shift; exec @ARGV' 15 "$BF_ADB_PATH" shell "su -c 'sh /data/powos/powos-run.sh \"umask 022; echo $b | base64 -d > /tmp/powos-verify-step\"'" >/dev/null 2>&1
     echo "-- $(date +%T) $1"; }
   return 0
 fi
