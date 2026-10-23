@@ -74,8 +74,8 @@ setup() {  # setup <token>
 }
 # One Proton prefix per Wine architecture (as td-launch-phone.sh): a prefix ARM64 Proton set up breaks x86 Proton (its
 # VC++ runtime DLLs: c000007b, Teardown 2026-10-23 06:04). cfg:x86 / cfg:arm64 swap compatdata/<id> with
-# compatdata/<id>.powos-<family> (Steam is off in setup); the family found at the start comes back at the end - also
-# with keep: the user's game keeps its own prefix (its saves).
+# compatdata/<id>.powos-<family> (Steam is off in setup); the family found at the start comes back with the tool
+# at the end (not with keep: tool and prefix stay together; powos-family records which prefix is in place).
 CD0=$S/steamapps/compatdata/$APP PFX0=
 pfx_fam() { cat "$CD0/powos-family" 2>/dev/null || { case $($CFG get $APP) in *arm64*) echo arm64 ;; *) echo x86 ;; esac; }; }
 pfx_use() {
@@ -86,8 +86,8 @@ pfx_use() {
 }
 pfx_back() { [ -n "$PFX0" ] || return 0; bash /var/tmp/powos-bf-stop.sh --steam >/dev/null 2>&1; pfx_use "$PFX0"; PFX0=; }
 restore() {
+  [ $CHANGED = 1 ] && [ $KEEP = 0 ] || return 0  # keep: the tool AND its prefix stay (they belong together)
   pfx_back
-  [ $CHANGED = 1 ] && [ $KEEP = 0 ] || return 0
   CHANGED=0; bash /var/tmp/powos-bf-stop.sh --steam >/dev/null 2>&1
   $CFG set $APP "$ORIG_MODE" >/dev/null && $CFG opts $APP "$ORIG_OPTS" >/dev/null && echo "== restored: $($CFG get $APP), mode $($CFG mode $APP)"
 }
