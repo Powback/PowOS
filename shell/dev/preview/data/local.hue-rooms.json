@@ -1,0 +1,185 @@
+{
+ "rows": {
+  "snapshot": []
+ },
+ "net": [
+  {
+   "match": "/call\\?app=hue&action=list_rooms$",
+   "json": {
+    "preview": {
+     "consumer": "widget",
+     "app": "hue",
+     "action": "list_rooms",
+     "safety": "read",
+     "dry_run": false,
+     "sent": true,
+     "status": 200
+    },
+    "response": {
+     "errors": [],
+     "data": [
+      {
+       "id": "room-0",
+       "type": "room",
+       "metadata": {
+        "name": "Living room",
+        "archetype": "living_room"
+       },
+       "services": [
+        {
+         "rid": "gl-0",
+         "rtype": "grouped_light"
+        }
+       ]
+      },
+      {
+       "id": "room-1",
+       "type": "room",
+       "metadata": {
+        "name": "Kitchen",
+        "archetype": "living_room"
+       },
+       "services": [
+        {
+         "rid": "gl-1",
+         "rtype": "grouped_light"
+        }
+       ]
+      },
+      {
+       "id": "room-2",
+       "type": "room",
+       "metadata": {
+        "name": "Bedroom",
+        "archetype": "living_room"
+       },
+       "services": [
+        {
+         "rid": "gl-2",
+         "rtype": "grouped_light"
+        }
+       ]
+      },
+      {
+       "id": "room-3",
+       "type": "room",
+       "metadata": {
+        "name": "Office",
+        "archetype": "living_room"
+       },
+       "services": [
+        {
+         "rid": "gl-3",
+         "rtype": "grouped_light"
+        }
+       ]
+      },
+      {
+       "id": "room-4",
+       "type": "room",
+       "metadata": {
+        "name": "Hallway",
+        "archetype": "living_room"
+       },
+       "services": [
+        {
+         "rid": "gl-4",
+         "rtype": "grouped_light"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "match": "/call\\?app=hue&action=list_grouped_lights$",
+   "json": {
+    "preview": {
+     "consumer": "widget",
+     "app": "hue",
+     "action": "list_grouped_lights",
+     "safety": "read",
+     "dry_run": false,
+     "sent": true,
+     "status": 200
+    },
+    "response": {
+     "errors": [],
+     "data": [
+      {
+       "id": "gl-0",
+       "type": "grouped_light",
+       "owner": {
+        "rid": "room-0",
+        "rtype": "room"
+       },
+       "on": {
+        "on": true
+       },
+       "dimming": {
+        "brightness": 72.5
+       }
+      },
+      {
+       "id": "gl-1",
+       "type": "grouped_light",
+       "owner": {
+        "rid": "room-1",
+        "rtype": "room"
+       },
+       "on": {
+        "on": true
+       },
+       "dimming": {
+        "brightness": 40
+       }
+      },
+      {
+       "id": "gl-2",
+       "type": "grouped_light",
+       "owner": {
+        "rid": "room-2",
+        "rtype": "room"
+       },
+       "on": {
+        "on": false
+       },
+       "dimming": {
+        "brightness": 0
+       }
+      },
+      {
+       "id": "gl-3",
+       "type": "grouped_light",
+       "owner": {
+        "rid": "room-3",
+        "rtype": "room"
+       },
+       "on": {
+        "on": true
+       },
+       "dimming": {
+        "brightness": 100
+       }
+      },
+      {
+       "id": "gl-4",
+       "type": "grouped_light",
+       "owner": {
+        "rid": "room-4",
+        "rtype": "room"
+       },
+       "on": {
+        "on": false
+       },
+       "dimming": {
+        "brightness": 12
+       }
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -252,6 +252,10 @@ if [ -d $A ]; then
   install -m 755 $A/powos-glasses $L/powos-glasses
   # `powos pet` (the pet on home, the local.pet app): speaks through the app's module.
   install -m 755 $A/powos-pet $L/powos-pet
+  # `powos compose` (docs/COMPOSER.md): widgets made from building blocks, and the one module every composition runs
+  # (apps/composed: its source, and its build when rooted.sh had one - then nothing builds per composition).
+  install -m 755 $A/powos-compose $L/powos-compose
+  if [ -d $A/composed ]; then rm -rf $L/composed && cp -r $A/composed $L/composed && chmod -R a+rX $L/composed; fi
   # powos-units: /data/powos/root/usr/bin/powos-sleepd /data/powos/root/usr/bin/powos-sleep-gui
   for f in powos-sleepd powos-sleep-gui; do ln -sf /usr/lib/powos/apps/$f $R/usr/bin/$f; done
   rm -rf $L/sleep && cp -r $A/sleep $L/sleep && chmod -R a+rX $L/sleep

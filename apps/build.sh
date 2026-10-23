@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds a PowOS app's module (Rust -> wasm, in an arm64 Rust container: no Rust toolchain on the Mac or the phone)
 # and its TypeScript client bindings, with the SpacetimeDB CLI pinned in targets/android/pkgs/spacetimedb-bin.
-#   apps/build.sh <app>        e.g. apps/build.sh counter
+#   apps/build.sh <app|dir>    e.g. apps/build.sh counter, apps/build.sh ~/Projects/hue-rooms (any app folder)
 # Output: apps/<app>/out/module.wasm, and its TS bindings in apps/<app>/ui/bindings/ (the UI imports them; no UI:
 # out/bindings/, for apps/vendor.sh).
 # An app without a module (UI only: "module": null, e.g. stickman) skips that half. An app with an assets.sh runs it
@@ -10,11 +10,34 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 APP=${1:?usage: apps/build.sh <app>}
-D=$HERE/$APP
+# An app of the repo (apps/<app>) or any app folder by its path (a composed one: powos compose ... --no-install).
+case $APP in */*) D=$(cd "$APP" && pwd) ;; *) D=$HERE/$APP ;; esac
 [ -f "$D/module/Cargo.toml" ] || [ -d "$D/ui" ] || { echo "build.sh: $D has neither module/Cargo.toml nor ui/" >&2; exit 1; }
 [ -x "$D/assets.sh" ] && "$D/assets.sh"
 mkdir -p "$D/out"
-if [ -f "$D/module/Cargo.toml" ]; then
+# The module source's hash, as `powos app build` keeps it in out/.module.sha (lib/apps/powos-app tree_hash: target/
+# and Cargo.lock skipped).
+src_sha() {
+  python3 - "$D/module" <<'PY'
+import hashlib, os, sys
+d, h = sys.argv[1], hashlib.sha256()
+for root, dirs, files in os.walk(d):
+    dirs[:] = sorted(x for x in dirs if os.path.relpath(os.path.join(root, x), d) not in ("target", "Cargo.lock"))
+    for f in sorted(files):
+        p = os.path.join(root, f); rel = os.path.relpath(p, d)
+        if rel in ("target", "Cargo.lock"): continue
+        h.update(rel.encode() + b"\0"); h.update(open(p, "rb").read())
+print(h.hexdigest())
+PY
+}
+# A folder outside apps/ that already carries this module's build (a composed app: powos compose copies the shared
+# apps/composed build in, wasm + stamp + bindings) keeps it: only its UI is built.
+prebuilt=""
+if [ "${D#"$HERE"/}" = "$D" ] && [ -f "$D/out/module.wasm" ] && [ -f "$D/module/Cargo.toml" ] &&
+   [ "$(cat "$D/out/.module.sha" 2>/dev/null)" = "$(src_sha)" ] && { [ ! -d "$D/ui" ] || [ -d "$D/ui/bindings" ]; }; then
+  prebuilt=1; echo "module: this build already (out/.module.sha) - not rebuilt"
+fi
+if [ -f "$D/module/Cargo.toml" ] && [ -z "$prebuilt" ]; then
 # The complexity lint (tools/lint/rust-complexity.sh: clippy, cognitive 10 / 60 lines / 4 args / nesting 3; old debt in
 # tools/lint/rust-complexity-baseline.txt, which only shrinks): a module over it isn't built. Exit 2 (no docker) warns.
 cx=0; "$HERE/../tools/lint/rust-complexity.sh" "$(basename "$D")" || cx=$?
@@ -41,6 +64,8 @@ docker run --rm --platform linux/arm64 --cpus 6 --memory 8g -v powos-apps-cargo:
   rm -rf $B && $S/spacetimedb-cli generate --lang typescript --out-dir $B --bin-path /app/out/module.wasm -y >/dev/null
   chown -R $HOST_UID /app/out $B 2>/dev/null || true
   ls -la /app/out/module.wasm'
+# The source's hash beside the wasm (src_sha): a folder that carries this build isn't built again on the device.
+src_sha > "$D/out/.module.sha"
 fi
 # The UI: static files as they are, widgets and pages (ui/widgets/*.tsx, ui/pages/*.tsx) bundled one ES module each
 # with their bindings (pages were missed until 2026-10-23: a page change never shipped through here) -

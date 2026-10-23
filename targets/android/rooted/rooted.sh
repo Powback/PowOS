@@ -105,6 +105,13 @@ deploy)
   kw=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" kwin)
   if [ -n "$kw" ]; then adb push -q "$kw" "/data/local/tmp/powos-apps/${kw##*/}"
   else echo "rooted.sh: no kwin package (targets/android/build-pkgs.sh kwin) - KWin not updated"; fi
+  # The module every composed widget runs (apps/composed; apps/build.sh composed): its source, wasm, stamp, bindings.
+  cmp=$HERE/../../../apps/composed
+  adb shell mkdir -p /data/local/tmp/powos-apps/composed
+  adb push -q "$cmp/module" /data/local/tmp/powos-apps/composed/module
+  if [ -f "$cmp/out/module.wasm" ]; then
+    for f in module.wasm .module.sha bindings; do adb push -q "$cmp/out/$f" /data/local/tmp/powos-apps/composed/; done
+  else echo "rooted.sh: no apps/composed/out/module.wasm (apps/build.sh composed) - compositions build their module"; fi
   reg=$HERE/../../../apps/registry/out/module.wasm
   if [ -f "$reg" ]; then adb push -q "$reg" /data/local/tmp/powos-apps/registry.wasm
   else echo "rooted.sh: no apps/registry/out/module.wasm (apps/build.sh registry) - the registry not updated"; fi

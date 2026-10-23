@@ -1,7 +1,7 @@
 #!/bin/bash
 # Installs a built PowOS app (apps/build.sh) on the phone: the app's manifest and build output pushed into PowOS, then
 # `powos app install` there as the user powos (module published to the device's SpacetimeDB, UI in place, registry).
-#   apps/install.sh <app> [install|publish|ui] --note "what changed, for the user"
+#   apps/install.sh <app|dir> [install|publish|ui] --note "what changed, for the user"
 #                                    publish = only the module (hot swap); ui = only the UI (hot reload). The note is
 #                                    the phone's quiet "update applied" notification (`powos app ... --note`).
 # Runs adb from wherever adb reaches the phone: ADB="docker exec powos-vadb adb" (the VPN), or plain adb.
@@ -18,7 +18,7 @@ APP=${1:?usage: apps/install.sh <app> [install|publish|ui] --note "what changed,
 VERB=${2:-install}
 [ -n "${NOTE// }" ] || { echo "install.sh: --note \"what changed, for the user\" is required (the phone's update notification)" >&2; exit 2; }
 NOTE64=$(printf '%s' "$NOTE" | base64 | tr -d '\n')
-D=$HERE/$APP
+case $APP in */*) D=$(cd "$APP" && pwd) ;; *) D=$HERE/$APP ;; esac
 ADB=${ADB:-adb}
 # Built: the module (an app that has one) and the UI.
 [ -f "$D/powos-app.json" ] && { [ -f "$D/out/module.wasm" ] || [ ! -f "$D/module/Cargo.toml" ]; } && [ -d "$D/out" ] ||

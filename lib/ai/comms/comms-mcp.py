@@ -623,6 +623,78 @@ def tool_present(args):
     return f"Shown to the user in the chat as a card, '{args.get('title', '')}'; a tap opens it full screen."
 
 
+def _compose(*argv, timeout=600):
+    """`powos compose` (lib/apps/powos-compose, docs/COMPOSER.md): the installed CLI, else this checkout's."""
+    here = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "apps", "powos-compose")
+    cmd = ["powos", "compose"] if shutil.which("powos") else [sys.executable, here]
+    r = subprocess.run([*cmd, *argv], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    if r.returncode:
+        raise ValueError((r.stderr or r.stdout).strip()[-1500:] or f"powos compose exited {r.returncode}")
+    return r.stdout.strip(), r.stderr.strip()
+
+
+def tool_compose_blocks(args):
+    out, _ = _compose("blocks", "--json", *(["--all"] if args.get("all") else []), timeout=60)
+    return out
+
+
+def tool_compose_widget(args):
+    """A home widget from building blocks: your manifest (checked by the composer's rules), or the words alone (its
+    word match). Installed unless install=false."""
+    no_install = [] if args.get("install", True) else ["--no-install"]
+    m = args.get("manifest")
+    if m:
+        import tempfile
+        d = tempfile.mkdtemp(prefix="powos-compose-")
+        path = os.path.join(d, "composition.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(m, f)
+        _compose("check", path, timeout=60)
+        out, log_ = _compose("build", path)
+        if not no_install:
+            _compose("install", out.splitlines()[-1], "--note", f"New widget: {m.get('name', 'composed')}")
+        return f"{log_}\nmade {m.get('id')} in {out.splitlines()[-1]}" + ("" if no_install else ", installed: home's edit sheet lists it")
+    words_ = str(args.get("words") or "").strip()
+    if not words_:
+        raise ValueError("compose_widget needs words or a manifest")
+    argv = ["widget", words_, "--no-ai", "--json", *no_install]
+    for k, v in (args.get("args") or {}).items():
+        argv += ["--arg", f"{k}={v}"]
+    if args.get("name"):
+        argv += ["--name", str(args["name"])]
+    out, log_ = _compose(*argv)
+    return f"{log_}\n{out}"
+
+
+if AGENT_ID == "manager":
+    TOOLS["compose_blocks"] = {
+        "fn": tool_compose_blocks,
+        "description": (
+            "The building blocks a composed home widget may use (`powos compose blocks --json`): every app "
+            "capability's widget-safe read action, with its row hint (view) and the inputs it needs. Read this "
+            "before compose_widget with a manifest."),
+        "schema": {"type": "object", "properties": {"all": {"type": "boolean", "default": False,
+                                                            "description": "Every action, writes too (not usable)."}}},
+    }
+    TOOLS["compose_widget"] = {
+        "fn": tool_compose_widget,
+        "description": (
+            "Make (and install) a new home widget out of building blocks, when the user asks for one in plain words "
+            "(docs/COMPOSER.md). Best: read compose_blocks, then pass a powos.compose/v1 manifest you wrote "
+            "(`powos compose help` has its rules). Or pass only the words: the composer's word match picks. A widget "
+            "only reads - a block that writes or spends is refused. Lands in home's edit sheet, PowOS apps; the "
+            "user places it."),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "words": {"type": "string", "description": "What the user asked for, in their words."},
+                "manifest": {"type": "object", "description": "A powos.compose/v1 manifest (kind widget)."},
+                "args": {"type": "object", "description": "Inputs a block needs (lat, lon)."},
+                "name": {"type": "string", "description": "The widget's name."},
+                "install": {"type": "boolean", "default": True},
+            },
+        },
+    }
 if AGENT_ID == "manager":
     TOOLS["present_choices"] = {
         "fn": tool_present_choices,

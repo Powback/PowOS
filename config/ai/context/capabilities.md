@@ -381,6 +381,13 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
   `spacetime generate`. An app with a page is a launcher app (`p:<id>`: drawer, search, recent strip) and opens full
   screen inside home's page (`shell/ui/appscreen.tsx`); its widgets are in home's edit sheet → PowOS apps. Example:
   `~/Projects/shopping` on the phone (`local.shopping`, a shared shopping list + widget).
+- **Composed widgets** ✅ first slice (2026-10-23, `powos compose help` is the contract, docs/COMPOSER.md): a home
+  widget made of building blocks from plain words - `powos compose widget "which Hue rooms are on"` picks App API's
+  widget-safe read actions (PowOS AI, else a word match over `powos compose blocks`), writes one manifest
+  (composition.json, powos.compose/v1), generates an ordinary app (its own database `local-<name>` on the shared
+  apps/composed module - no Rust build -, net 127.0.0.1 only) and installs it: home's edit sheet → PowOS apps. A widget
+  only reads: a block that writes or spends is refused at compose time, and the runtime refuses it for consumer
+  `widget`. PowOS AI's tools: compose_blocks, compose_widget. Hue shows "Link Hue in App API" until Hue is linked there.
 - **Apps on the network** ✅ (2026-10-20, `host.net`, the PowOS app's `ShellNet.kt` - no process of the app's own):
   an app declares what it may reach in powos-app.json `"net": ["lan", "discovery.meethue.com"]` (exact hosts, or
   `"lan"` = any private address / `*.local`); nothing declared, nothing reachable. `host.net.fetch(app, url, {method,

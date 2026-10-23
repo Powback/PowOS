@@ -1,0 +1,584 @@
+#!/usr/bin/env python3
+"""powos compose - make a new PowOS widget (later: an app) out of the building blocks PowOS already has, from plain
+words (docs/COMPOSER.md). A composition is ONE manifest (composition.json, spec powos.compose/v1); the app made from
+it is an ordinary PowOS app with a database of its own, registered in powos-registry like any other.
+
+  powos compose blocks [--json] [--all]
+                       the building blocks a widget may use: every app capability's widget-safe `read` action (App
+                       API's specs, with their row hints), switched on or off. --all: every action, writes too.
+  powos compose widget "<plain words>" [--name N] [--id local.x] [--dir D] [--arg k=v]... [--no-ai] [--no-install]
+                       [--json]
+                       words -> a manifest (PowOS AI picks the blocks; without it, or with --no-ai, a word match over
+                       the blocks' names and summaries) -> checked -> an app folder (default ~/Projects/<name>) ->
+                       `powos app install` (module published to its own database, UI in place, registered: it shows
+                       in home's edit sheet, "PowOS apps"). --arg fills a block's required input (lat=59.9).
+                       --no-install: only the folder (then `powos compose install D`; from a Mac checkout
+                       `apps/build.sh D && apps/install.sh D --note "..."`). --json: the manifest and the folder.
+  powos compose check <composition.json|dir>      the manifest's rules (below); exit 1 with each broken one
+  powos compose build <composition.json|dir> [--dir D]
+                       the folder again from its manifest (after you edit composition.json)
+  powos compose install <dir> [--note "..."]      powos app install of a composed folder
+
+The rules (checked on every compose, build and install; C = composition):
+  C1 spec powos.compose/v1, kind "widget" (apps: next - docs/COMPOSER.md)
+  C2 id local.<a-z0-9->, a name, the show template "status-list"
+  C3 every block is an appcap action that exists, in an app and an action switched on in App API
+  C4 a widget only reads: every block is `read` and widget-safe (the spec's widget: true) - never a write, never spend
+  C5 a block's required inputs are given (args)
+  C6 rows/join name blocks of this composition; `as` names are a-z0-9_- and unique
+  C7 `open` is an installed app's id (a tap opens it - navigation only)
+The widget calls its blocks only through App API's call path as consumer "widget" (the runtime refuses anything but a
+read for it), reaches nothing but 127.0.0.1 (its manifest's "net"), and writes only its own database.
+"""
+from __future__ import annotations
+
+import glob
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+
+LIB = os.path.dirname(os.path.realpath(__file__))
+ROOT = os.path.normpath(os.path.join(LIB, "..", ".."))
+TEMPLATES = os.environ.get("POWOS_APP_TEMPLATES", os.path.join(LIB, "templates"))
+STATE = os.environ.get("POWOS_APPAPI_STATE") or os.path.expanduser("~/.local/state/powos/app-api")
+SPEC = "powos.compose/v1"
+AS = re.compile(r"^[a-z0-9_-]{1,32}$")
+ID = re.compile(r"^local\.[a-z0-9][a-z0-9-]{0,40}$")
+TEMPLATES_SHOW = ("status-list",)
+
+
+class Fail(Exception):
+    pass
+
+
+def die(msg):
+    raise Fail(msg)
+
+
+def log(msg):
+    print(msg, file=sys.stderr, flush=True)
+
+
+def first_dir(*cands):
+    for c in cands:
+        if c and os.path.isdir(c):
+            return c
+    return None
+
+
+def appapi_dir():
+    """App API's package (its example specs): the device's copy, else this checkout's."""
+    return first_dir(os.environ.get("POWOS_APPAPI_DIR"), "/usr/lib/powos/app-api", os.path.join(ROOT, "tools", "app-api"))
+
+
+def composed_dir():
+    """The shared module every composition runs (apps/composed; on a device /usr/lib/powos/apps/composed)."""
+    return first_dir(os.environ.get("POWOS_COMPOSED_DIR"), "/usr/lib/powos/apps/composed", os.path.join(ROOT, "apps", "composed"))
+
+
+def powos_app():
+    """lib/apps/powos-app as a module: its icon, tree hash and install - one implementation, not two."""
+    p = os.path.join(LIB, "powos-app")
+    loader = SourceFileLoader("powos_app", p)
+    m = module_from_spec(spec_from_loader("powos_app", loader))
+    loader.exec_module(m)
+    return m
+
+
+# ------------------------------------------------------------------------------------------------------- blocks
+
+
+def load_specs(d):
+    out = {}
+    for p in sorted(glob.glob(os.path.join(d, "*.appcap.json"))):
+        try:
+            with open(p, encoding="utf-8") as f:
+                s = json.load(f)
+            out[s["app"]] = s
+        except (OSError, ValueError, KeyError):
+            continue
+    return out
+
+
+def specs():
+    """Every app capability spec as App API's runtime will see it: the user's copies (their toggles) when there are
+    any, else the package's. A row hint (`view`) the user's older copy lacks comes from the package: hints aren't
+    safety, and the runtime adds them at its next start anyway (appcap_serve.py seed)."""
+    pkg_dir = os.environ.get("POWOS_COMPOSE_SPECS") or os.path.join(appapi_dir() or "", "examples")
+    pkg = load_specs(pkg_dir)
+    mine = load_specs(os.path.join(STATE, "specs")) if not os.environ.get("POWOS_COMPOSE_SPECS") else {}
+    if not mine:
+        return pkg
+    for app, s in mine.items():
+        for aid, a in (s.get("actions") or {}).items():
+            hint = (((pkg.get(app) or {}).get("actions") or {}).get(aid) or {}).get("view")
+            if hint and "view" not in a and a.get("safety") == "read":
+                a["view"] = hint
+    return mine
+
+
+def opener(spec):
+    """The app a tap opens: the spec's UI read action that routes to a PowOS app (app://local.lights)."""
+    for a in (spec.get("actions") or {}).values():
+        route = ((a.get("endpoint") or {}).get("ui") or {}).get("route", "")
+        if a.get("safety") == "read" and route.startswith("app://"):
+            return route[len("app://"):]
+    return None
+
+
+def blocks(all_actions=False):
+    rows = []
+    for app, s in sorted(specs().items()):
+        for aid, a in sorted((s.get("actions") or {}).items()):
+            usable = a.get("safety") == "read" and a.get("widget") is True
+            if not usable and not all_actions:
+                continue
+            rows.append({
+                "block": "appcap", "app": app, "name": s.get("name", app), "action": aid,
+                "summary": a.get("summary", ""), "safety": a.get("safety"), "widget": usable,
+                "on": bool(s.get("enabled")) and a.get("enabled", True) is not False,
+                "needs": list(((a.get("inputs") or {}).get("required")) or []), "view": a.get("view"),
+            })
+    return rows
+
+
+def cmd_blocks(a):
+    rows = blocks(all_actions="--all" in a)
+    if "--json" in a:
+        print(json.dumps({"blocks": rows}, indent=2))
+        return
+    for r in rows:
+        tag = "widget" if r["widget"] else r["safety"]
+        need = f"  needs {', '.join(r['needs'])}" if r["needs"] else ""
+        print(f"  {r['app'] + '.' + r['action']:34} {tag:16} {'on ' if r['on'] else 'OFF'}  {r['summary']}{need}")
+    if not rows:
+        print("no blocks: App API has no specs here (tools/app-api/examples, ~/.local/state/powos/app-api/specs)")
+
+
+# ------------------------------------------------------------------------------------------------------ manifest
+
+
+SYN = {"light": "hue", "lights": "hue", "lamp": "hue", "lamps": "hue", "bulb": "hue", "room": "rooms",
+       "weather": "forecast", "temperature": "forecast", "temp": "forecast", "outside": "forecast"}
+
+
+def words(text):
+    out = set()
+    for w in re.findall(r"[a-z0-9]+", text.lower()):
+        out.add(w)
+        out.add(w.rstrip("s"))
+        if w in SYN:
+            out.add(SYN[w])
+    return out - {"", "a", "the", "of", "my", "show", "me", "widget", "home", "and", "on", "is", "which", "what"}
+
+
+def score(want, b):
+    have = words(" ".join([b["app"], b["name"], b["action"].replace("_", " "), b["summary"]]))
+    return len(want & have)
+
+
+def noun(action):
+    return re.sub(r"^(list|get|read|show)_", "", action).replace("_", " ")
+
+
+def slug(text):
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", text.lower())).strip("-")[:40] or "composed"
+
+
+def use_of(b, args):
+    need = {k: args[k] for k in b["needs"] if k in args}
+    u = {"as": slug(noun(b["action"])).replace("-", "_")[:32], "block": "appcap", "app": b["app"], "action": b["action"],
+         "name": b["name"]}
+    if need:
+        u["args"] = need
+    return u
+
+
+def show_of(primary, joins, title):
+    v = primary["view"]
+    rows = {"from": primary["use"]["as"], "path": v.get("rows", ""), "label": v.get("label", "=" + title)}
+    for k in ("key", "fields", "unit"):
+        if v.get(k):
+            rows[k] = v[k]
+    join = [{"from": j["use"]["as"], "path": j["view"].get("rows", ""), "key": j["view"]["key"], "fields": j["view"].get("fields", {})}
+            for j in joins]
+    return {"template": "status-list", "title": title, "rows": rows, **({"join": join} if join else {}), "empty": "Nothing to show"}
+
+
+def match(text, args, name=None, ident=None):
+    """The offline composer: the best-matching widget-safe read with a row hint, plus the reads of the same app that
+    annotate its rows (view.of). Deterministic - what PowOS AI falls back to."""
+    want = words(text)
+    usable = [b for b in blocks() if b["on"] and b["view"]]
+    primaries = sorted((b for b in usable if not b["view"].get("of")), key=lambda b: -score(want, b))
+    if not primaries or score(want, primaries[0]) == 0:
+        die(f"no building block matches {text!r} - see `powos compose blocks`")
+    p = primaries[0]
+    joins = [b for b in usable if b["app"] == p["app"] and b["view"].get("of") == p["action"]]
+    p["use"] = use_of(p, args)
+    for j in joins:
+        j["use"] = use_of(j, args)
+    short = p["name"].split()[-1]
+    title = name or f"{short} {noun(p['action'])}"
+    spec = specs()[p["app"]]
+    refresh = [((spec["actions"][b["action"]].get("refresh") or {}).get("poll_s")) for b in [p, *joins]]
+    m = {"spec": SPEC, "kind": "widget", "id": ident or f"local.{slug(title)}", "name": title, "words": text, "by": "matcher",
+         "uses": [p["use"], *[j["use"] for j in joins]], "show": show_of(p, joins, title),
+         "refresh": {"poll_s": max(5, min([r for r in refresh if r] or [30]))},
+         "widget": {"size": "4x2", "minSize": "2x1"}}
+    if opener(spec):
+        m["open"] = opener(spec)
+    return m
+
+
+AI_PROMPT = """You compose a PowOS home widget from building blocks. Answer with ONE JSON object and nothing else.
+
+The user's words: {words}
+
+The blocks you may use (App API read actions a widget may call; "view" says how its result reads as rows:
+rows = path to the list, key = a row's id, label = a row's name or "=Literal", of = these rows annotate
+another action's rows, matched by key; fields on/level/value):
+{blocks}
+
+The manifest (powos.compose/v1):
+{{"spec": "powos.compose/v1", "kind": "widget", "id": "local.<a-z0-9->", "name": "<short name>", "words": "<the words>",
+ "uses": [{{"as": "<a-z0-9_>", "block": "appcap", "app": "<app>", "action": "<action>", "name": "<block name>", "args": {{}}}}],
+ "show": {{"template": "status-list", "title": "<title>",
+   "rows": {{"from": "<as>", "path": "<view.rows>", "key": "<view.key>", "label": "<view.label>", "fields": {{}}, "unit": ""}},
+   "join": [{{"from": "<as>", "path": "<view.rows>", "key": "<its view.key>", "fields": {{"on": "...", "level": "..."}}}}],
+   "empty": "<what an empty list says>"}},
+ "refresh": {{"poll_s": 10}}, "widget": {{"size": "4x2", "minSize": "2x1"}}}}
+Only blocks from the list. A widget only reads. Use a block's view paths as given. {args}"""
+
+
+def ai_manifest(text, args):
+    """PowOS AI's pick: the prompt to `powos ai` (POWOS_COMPOSE_AI: another command; "off": none). None + why when
+    there's no AI here or its answer isn't a manifest - the caller falls back to the matcher and says so."""
+    cmd = os.environ.get("POWOS_COMPOSE_AI")
+    if cmd == "off":
+        return None, "PowOS AI off (POWOS_COMPOSE_AI=off)"
+    argv = shlex.split(cmd) if cmd else (["powos", "ai"] if shutil.which("powos") else None)
+    if not argv:
+        return None, "no PowOS AI here"
+    usable = [{k: b[k] for k in ("app", "name", "action", "summary", "needs", "view")} for b in blocks() if b["on"]]
+    prompt = AI_PROMPT.format(words=json.dumps(text), blocks=json.dumps(usable, indent=1),
+                              args=f"Inputs the user gave: {json.dumps(args)}." if args else "")
+    try:
+        r = subprocess.run([*argv, prompt], capture_output=True, text=True, timeout=180, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"PowOS AI didn't answer ({type(e).__name__})"
+    m = re.search(r"\{.*\}", r.stdout, re.S)
+    try:
+        got = json.loads(m.group(0)) if m else None
+    except ValueError:
+        got = None
+    if not isinstance(got, dict):
+        return None, "PowOS AI's answer wasn't a manifest"
+    got.setdefault("words", text)
+    got["by"] = "ai"
+    return got, ""
+
+
+# --------------------------------------------------------------------------------------------------------- check
+
+
+def check_use(u, all_specs, seen):
+    errs = []
+    name = u.get("as", "?")
+    if not AS.match(str(u.get("as", ""))) or name in seen:
+        errs.append(f"block as={name!r}: a-z 0-9 _ -, unique [C6]")
+    seen.add(name)
+    if u.get("block") != "appcap":
+        return errs + [f"block {name}: only appcap blocks in this version [C3]"]
+    s = all_specs.get(u.get("app"))
+    a = ((s or {}).get("actions") or {}).get(u.get("action"))
+    if not s or not a:
+        return errs + [f"block {name}: no action {u.get('app')}.{u.get('action')} in App API [C3]"]
+    if not s.get("enabled") or a.get("enabled", True) is False:
+        errs.append(f"block {name}: {u['app']}.{u['action']} is switched off in App API [C3]")
+    if a.get("safety") != "read" or a.get("widget") is not True:
+        errs.append(f"block {name}: {u['app']}.{u['action']} is {a.get('safety')}"
+                    f"{'' if a.get('widget') else ', not widget-safe'} - a widget only reads [C4]")
+    need = [k for k in ((a.get("inputs") or {}).get("required") or []) if k not in (u.get("args") or {})]
+    if need:
+        errs.append(f"block {name}: needs {', '.join(need)} (--arg {need[0]}=...) [C5]")
+    return errs
+
+
+def check_show(m, names):
+    show = m.get("show") or {}
+    errs = []
+    if show.get("template") not in TEMPLATES_SHOW:
+        errs.append(f"show.template: one of {', '.join(TEMPLATES_SHOW)} [C2]")
+    rows = show.get("rows") or {}
+    if rows.get("from") not in names or not rows.get("label"):
+        errs.append("show.rows: from = one of the blocks, and a label [C6]")
+    for j in show.get("join") or []:
+        if j.get("from") not in names or not j.get("key"):
+            errs.append(f"show.join {j.get('from')!r}: from = one of the blocks, and a key [C6]")
+    return errs
+
+
+def check(m, installed=None):
+    """Every broken rule of [m], as lines (empty = good)."""
+    if not isinstance(m, dict):
+        return ["not a manifest (a JSON object) [C1]"]
+    errs = []
+    if m.get("spec") != SPEC:
+        errs.append(f"spec: {SPEC} [C1]")
+    if m.get("kind") != "widget":
+        errs.append("kind: \"widget\" (composed apps come next) [C1]")
+    if not ID.match(str(m.get("id", ""))):
+        errs.append("id: local.<a-z0-9-> [C2]")
+    if not str(m.get("name", "")).strip():
+        errs.append("name: needed [C2]")
+    uses = m.get("uses")
+    if not isinstance(uses, list) or not uses:
+        return errs + ["uses: at least one block [C3]"]
+    all_specs, seen = specs(), set()
+    for u in uses:
+        errs += check_use(u if isinstance(u, dict) else {}, all_specs, seen)
+    errs += check_show(m, seen)
+    if m.get("open") is not None and not re.match(r"^[a-z0-9][a-z0-9.-]{0,63}$", str(m["open"])):
+        errs.append("open: an app id [C7]")
+    elif m.get("open") and installed is not None and m["open"] not in installed:
+        errs.append(f"open: {m['open']} isn't installed here [C7]")
+    return errs
+
+
+# ------------------------------------------------------------------------------------------------------ generate
+
+
+def subst(text, m):
+    words_ = re.sub(r"[*/\\`$<>{}]", "", str(m.get("words") or m["name"]))[:200]
+    name = re.sub(r"[{}<>`\\\"$]", "", m["name"]).strip()
+    return (text.replace("__NAME__", name).replace("__ID__", m["id"]).replace("__DB__", m["id"].replace(".", "-"))
+            .replace("__WORDS__", words_))
+
+
+def write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def copy_template(src_root, rel, dest, m):
+    with open(os.path.join(src_root, rel), encoding="utf-8") as f:
+        write(os.path.join(dest, rel), subst(f.read(), m))
+
+
+def app_manifest(m):
+    db = m["id"].replace(".", "-")
+    w = m.get("widget") or {}
+    return {
+        "id": m["id"], "name": m["name"], "version": m.get("version", "0.1.0"),
+        "description": f"Composed by powos compose from: {m.get('words') or m['name']}"[:300],
+        "icon": "icon.svg", "ui": {"dir": "out/ui/"},
+        "module": {"path": "module/", "lang": "rust", "database": db, "stdb": "2.12"},
+        "backend": None,
+        # App API's runtime on this device and nothing else: the blocks are reached only through its call path.
+        "net": ["127.0.0.1"],
+        "widgets": [{"id": "main", "name": m["name"], "kind": "island", "entry": "widgets/main.js",
+                     "size": w.get("size", "4x2"), "minSize": w.get("minSize", "2x1")}],
+        "surfaces": {"launcher": False, "desktop": True},
+        "permissions": [],
+        "budget": {"phone": {"memMB": 8, "idle": "unload"}, "desktop": {"memMB": 16}},
+        "composition": m,
+    }
+
+
+def copy_module(dest):
+    """The shared module's source, and its build when there is one for exactly this source (wasm + stamp +
+    bindings): then nothing is built per composition."""
+    src = composed_dir()
+    if not src or not os.path.isdir(os.path.join(src, "module")):
+        die("no composed module here (apps/composed, /usr/lib/powos/apps/composed)")
+    mod = os.path.join(dest, "module")
+    shutil.rmtree(mod, ignore_errors=True)
+    shutil.copytree(os.path.join(src, "module"), mod, ignore=shutil.ignore_patterns("target"))
+    built = first_dir(os.path.join(src, "out"), src)
+    wasm, stamp = os.path.join(built, "module.wasm"), os.path.join(built, ".module.sha")
+    want = powos_app().tree_hash(mod, skip={"target", "Cargo.lock"})
+    try:
+        with open(stamp) as f:
+            fresh = os.path.isfile(wasm) and f.read().strip() == want
+    except OSError:
+        fresh = False
+    if not fresh:
+        log("module: no prebuilt one for this source - `powos app install` builds it (powos app builder)")
+        return
+    os.makedirs(os.path.join(dest, "out"), exist_ok=True)
+    shutil.copyfile(wasm, os.path.join(dest, "out", "module.wasm"))
+    write(os.path.join(dest, "out", ".module.sha"), want + "\n")
+    b = os.path.join(built, "bindings")
+    if os.path.isdir(b):
+        shutil.rmtree(os.path.join(dest, "ui", "bindings"), ignore_errors=True)
+        shutil.copytree(b, os.path.join(dest, "ui", "bindings"))
+
+
+def generate(m, dest):
+    """The app folder for [m]: a new one, or the same composition's again (its out/ and module build kept)."""
+    dest = os.path.abspath(os.path.expanduser(dest))
+    own = os.path.join(dest, "ui", "composition.json")
+    if os.path.exists(dest) and [x for x in os.listdir(dest) if not x.startswith(".")] and not os.path.isfile(own):
+        die(f"{dest} exists and isn't a composed app (--dir elsewhere)")
+    t = TEMPLATES
+    copy_template(os.path.join(t, "ui"), os.path.join("ui", "lib", "app.ts"), dest, m)
+    copy_template(os.path.join(t, "ui"), os.path.join("ui", "tsconfig.json"), dest, m)
+    for rel in (os.path.join("ui", "lib", "compose.ts"), os.path.join("ui", "widgets", "main.tsx")):
+        copy_template(os.path.join(t, "composed"), rel, dest, m)
+    write(own, json.dumps(m, indent=2) + "\n")
+    write(os.path.join(dest, "composition.json"), json.dumps(m, indent=2) + "\n")
+    write(os.path.join(dest, "powos-app.json"), json.dumps(app_manifest(m), indent=2) + "\n")
+    write(os.path.join(dest, "ui", "icon.svg"), powos_app().icon_svg(m["name"], m["id"]))
+    write(os.path.join(dest, ".gitignore"), "out/\nmodule/target/\nui/bindings/\n")
+    copy_module(dest)
+    return dest
+
+
+# -------------------------------------------------------------------------------------------------------- verbs
+
+
+def opts(a, spec):
+    out, rest, i = {"--arg": []}, [], 0
+    while i < len(a):
+        k = a[i]
+        if k in spec:
+            if spec[k]:
+                if i + 1 >= len(a):
+                    die(f"{k} needs a value")
+                if k == "--arg":
+                    out[k].append(a[i + 1])
+                else:
+                    out[k] = a[i + 1]
+                i += 2
+                continue
+            out[k] = True
+        elif k.startswith("--"):
+            die(f"unknown option {k} (powos compose help)")
+        else:
+            rest.append(k)
+        i += 1
+    return out, rest
+
+
+def args_of(pairs):
+    out = {}
+    for p in pairs:
+        if "=" not in p:
+            die(f"--arg {p}: k=v")
+        k, v = p.split("=", 1)
+        try:
+            out[k] = json.loads(v)
+        except ValueError:
+            out[k] = v
+    return out
+
+
+def fail_lines(errs):
+    die("the composition breaks the rules:\n  " + "\n  ".join(errs))
+
+
+def install(d, note=None):
+    pa = os.path.join(LIB, "powos-app")
+    r = subprocess.run([sys.executable, pa, "install", d, *(["--note", note] if note else [])])
+    if r.returncode:
+        die(f"powos app install {d} failed (above)")
+
+
+def cmd_widget(a):
+    o, rest = opts(a, {"--name": 1, "--id": 1, "--dir": 1, "--arg": 1, "--no-ai": 0, "--no-install": 0, "--json": 0, "--note": 1})
+    if not rest:
+        die('usage: powos compose widget "<plain words>" [--name N] [--dir D] [--arg k=v] [--no-ai] [--no-install]')
+    text, args = " ".join(rest), args_of(o["--arg"])
+    m, why = (None, "--no-ai") if o.get("--no-ai") else ai_manifest(text, args)
+    if m is not None:
+        if o.get("--name"):
+            m["name"] = m.setdefault("show", {})["title"] = o["--name"]
+        if o.get("--id"):
+            m["id"] = o["--id"]
+        errs = check(m)
+        if errs:
+            log("PowOS AI's manifest broke the rules (" + "; ".join(errs) + ") - the word match instead")
+            m = None
+    if m is None:
+        if why:
+            log(f"composing by word match ({why})")
+        m = match(text, args, o.get("--name"), o.get("--id"))
+    errs = check(m)
+    if errs:
+        fail_lines(errs)
+    d = generate(m, o.get("--dir") or os.path.join("~/Projects", m["id"].split(".", 1)[1]))
+    log(f"composed {m['id']} ({m['name']}) by {m['by']} in {d}: " + ", ".join(f"{u['app']}.{u['action']}" for u in m["uses"]))
+    if not o.get("--no-install"):
+        install(d, o.get("--note") or f"New widget: {m['name']}")
+    else:
+        log(f"next: powos compose install {d}   (from a Mac checkout: apps/build.sh {d} && apps/install.sh {d} --note \"...\")")
+    if o.get("--json"):
+        print(json.dumps({"dir": d, "installed": not o.get("--no-install"), "composition": m}, indent=2))
+
+
+def manifest_at(p):
+    p = os.path.abspath(os.path.expanduser(p))
+    f = os.path.join(p, "composition.json") if os.path.isdir(p) else p
+    try:
+        with open(f, encoding="utf-8") as fh:
+            return json.load(fh), p if os.path.isdir(p) else None
+    except (OSError, ValueError) as e:
+        die(f"{f}: {e}")
+
+
+def cmd_check(a):
+    if not a:
+        die("usage: powos compose check <composition.json|dir>")
+    m, _ = manifest_at(a[0])
+    errs = check(m)
+    if errs:
+        fail_lines(errs)
+    print(f"ok: {m['id']} - {len(m['uses'])} block(s), reads only")
+
+
+def cmd_build(a):
+    o, rest = opts(a, {"--dir": 1})
+    if not rest:
+        die("usage: powos compose build <composition.json|dir> [--dir D]")
+    m, d = manifest_at(rest[0])
+    errs = check(m)
+    if errs:
+        fail_lines(errs)
+    print(generate(m, o.get("--dir") or d or os.path.join("~/Projects", m["id"].split(".", 1)[1])))
+
+
+def cmd_install(a):
+    o, rest = opts(a, {"--note": 1})
+    if not rest:
+        die("usage: powos compose install <dir> [--note ...]")
+    m, d = manifest_at(rest[0])
+    errs = check(m)
+    if errs:
+        fail_lines(errs)
+    install(d, o.get("--note"))
+
+
+def main(a):
+    if not a or a[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return
+    verbs = {"blocks": cmd_blocks, "widget": cmd_widget, "check": cmd_check, "build": cmd_build, "install": cmd_install}
+    if a[0] not in verbs:
+        die(f"unknown: {a[0]} (powos compose help)")
+    verbs[a[0]](a[1:])
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except Fail as e:
+        print(f"powos compose: {e}", file=sys.stderr)
+        sys.exit(1)

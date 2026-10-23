@@ -179,6 +179,7 @@ Dev & AI:
   dev build|enable|disable <name>  Build / install (overlay) / remove a project
   dev update <name>   Pull upstream changes (forks only)
   app new|build|install|dev   PowOS apps (a SpacetimeDB module + a page/widgets): make, hot-reload (powos app help)
+  compose widget "<words>"    a home widget made of building blocks (apps' read actions) (powos compose help)
   ai "prompt"         Ask AI for help (uses default agent)
   ai --agent coder|devops|health   Pick an agent
   ai -i               Interactive chat mode
@@ -3112,6 +3113,12 @@ case "${1:-}" in
         # PowOS apps: install/publish/list, the runtime switch, the system tier (lib/apps/powos-app).
         shift
         exec "$POWOS_LIB/apps/powos-app" "$@"
+        ;;
+    compose)
+        # Widgets (later apps) made of the building blocks PowOS has, from plain words (lib/apps/powos-compose,
+        # docs/COMPOSER.md).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-compose" "$@"
         ;;
     sleep)
         # Unified sleep: everything that sleeps, of every kind (lib/apps/powos-sleep; `powos sleep --help`).
