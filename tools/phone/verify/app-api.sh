@@ -8,7 +8,12 @@ set -u
 cd "$(dirname "$0")/../../.." || exit 1
 ev() { tools/phone/cdp.sh eval home "$1" 2>&1 | tr -d '\\' | tail -1; }
 o=$(ev '(()=>{const A=window.__powosApps;if(!A)return "no-api";if(!A.installedApps.value.some(a=>a.id==="local.app-api"))return "not-installed";A.openApp("local.app-api");return "opened"})()')
+# cdp.sh prints the answer JSON-quoted ("opened"): unquote before matching - the quotes made a page that DID open read
+# as a failure (05:40, 2026-10-23; app-frost.sh's 26fddb7 fix).
+o=${o#\"}; o=${o%\"}
 [ "$o" = opened ] || { echo "FAIL: couldn't open App API ($o)"; exit 1; }
+# Whatever happens after the open, the page is closed again.
+trap "ev 'window.__powosApps&&window.__powosApps.closeApp(),1' >/dev/null" EXIT
 # One async eval on the phone: wait for the list, open Hue, open list_rooms, dry run, read the result.
 run='(async()=>{const s=document.querySelector(".app-screen");const until=async(f,n)=>{for(let i=0;i<n;i++){const v=f();if(v)return v;await new Promise(r=>setTimeout(r,250))}return null};
 const pick=(t)=>[...s.querySelectorAll("div")].reverse().find(d=>d.style.cursor==="pointer"&&d.textContent.includes(t));
