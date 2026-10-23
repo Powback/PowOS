@@ -6,7 +6,7 @@
 #   2. a long pull held at two heights: the content's lift follows the finger (rubber band); past the threshold, the
 #      finger STILL DOWN: search focused and the keyboard up (mInputShown) - before the UP; let go: both stay;
 #   3. the same pull past the threshold, then back below it, still held: the keyboard down and nothing focused; let go:
-#      the drawer open, no keyboard (stage 1);
+#      still no keyboard (the drawer goes the way the finger last moved);
 #   4. the drawer open, its list at its end (the A-Z bar's last letter), up again: search + keyboard.
 # Back closes the keyboard and the drawer after each. Nothing persistent changes.
 set -u
@@ -77,7 +77,8 @@ sleep 1
 c3=$(ev "$state"); kc3=$(ime)
 [[ "$kc1" == *true* ]] || fails+=("cancel: the keyboard wasn't up past the threshold ($kc1)")
 grep -q '"focus":false' <<<"$c2" && [[ "$kc2" == *false* ]] || fails+=("cancel: back below the threshold, still focused or keyboard up ($kc2)")
-grep -q '"open":true' <<<"$c3" && grep -q '"focus":false' <<<"$c3" && [[ "$kc3" == *false* ]] || fails+=("cancel: let go, not a plain open drawer ($kc3)")
+# Let go after moving back down: the drawer follows that last motion (open or shut, gesture.ts's flick), never a keyboard.
+grep -q '"focus":false' <<<"$c3" && [[ "$kc3" == *false* ]] || fails+=("cancel: let go, the search focused or the keyboard up ($kc3)")
 back
 
 # 4. open, the list at its end, up again
