@@ -1,6 +1,7 @@
 #!/bin/bash
 # bf-return-phone.sh launch|away|back|close: (in the PowOS session as powos; bf-return.sh pushes and runs it, one phase
-# per call, state in /tmp/bf-return.env) the user's own way back into a game they started: Broforce started through
+# per call, state in /tmp/bf-return.env; APP=<appid>, any Steam game: bf-lib.sh) the user's own way back into a game
+# they started: the game (default Broforce) started through
 # powos-open-task (the drawer's path), left (bf-return.sh sends Android's HOME intent between launch and away), frozen
 # in the background by unified sleep (not killed), its icon tapped again (powos-open-task) -> the first changed frame.
 #   launch  clean_stale + step_launch (bf-lib.sh), then until Unity's window is full screen (it maps 314x208 first) and
@@ -37,25 +38,25 @@ launch)
   rm -f $E; powos sleep never --remove steam >/dev/null 2>&1  # Steam sleepable, as the user has it
   r=$(reaper)
   if [ -n "$r" ]; then
-    if [ "$(cat "$(cg)/cgroup.freeze" 2>/dev/null)" = 1 ]; then echo "the user's Broforce, left frozen: used as it is, frozen again after"
-    else echo "SKIP: the user's Broforce runs awake (they play it?)"; exit 3; fi
+    if [ "$(cat "$(cg)/cgroup.freeze" 2>/dev/null)" = 1 ]; then echo "the user's $GAME, left frozen: used as it is, frozen again after"
+    else echo "SKIP: the user's $GAME runs awake (they play it?)"; exit 3; fi
   fi
   step_launch || { close_mine; exit 1; }
   R0=$(reaper)
-  pill "Broforce up: waiting for its full-screen window"
+  pill "$GAME up: waiting for its full-screen window"
   root=$(xwininfo -root | awk '/Width:/{w=$2} /Height:/{h=$2} END{print w "x" h}')
   for _ in $(seq 60); do W=$(gamewin); g=$(xwininfo -id "$W" 2>/dev/null | awk '/Width:/{w=$2} /Height:/{h=$2} END{print w "x" h}'); [ "$g" = "$root" ] && break; touched; sleep 0.5; done
   echo "launch: window $W $g on $root$([ "$g" = "$root" ] || echo ' (not full screen after 30 s)')"
   sleep 3; AUD0=$(audio); echo "launch: audio $AUD0"
   save ;;
 away)
-  touched; pill "Broforce left (home): waiting for it to sleep"
+  touched; pill "$GAME left (home): waiting for it to sleep"
   e=$(ps -o etimes= -p "$R0" 2>/dev/null | tr -d ' '); t0=$(now) auto=no
   # The start grace (2 min from the game's reaper) + 15 s out of sight + powos-sleep-gui's 5 s look.
   for _ in $(seq $((40 + (${e:-0} < 125 ? 125 - ${e:-0} : 0)))); do
     [ "$(cat "$(cg)/cgroup.freeze" 2>/dev/null)" = 1 ] && { auto=yes; break; }; touched; sleep 1; done
   AWAY=$(ms "$t0" "$(now)")
-  alive="same game $([ "$(reaper)" = "$R0" ] && echo yes || echo "no ($R0 -> $(reaper))"), Broforce_beta.exe $(pgrep -fc Broforce_beta.exe)"
+  alive="same game $([ "$(reaper)" = "$R0" ] && echo yes || echo "no ($R0 -> $(reaper))"), its chain $(tree "$R0" | wc -w) processes"
   if [ $auto = yes ] && freeze_ok; then echo "away: frozen by itself $AWAY ms after the check started waiting (game ${e:-?} s old) - $EVID; $alive"
   else
     [ $auto = yes ] && fail freeze-auto "$EVID; $alive" || fail freeze-auto "not frozen $AWAY ms out of sight (game ${e:-?} s old); $alive; watcher: $(watcher 3)"
@@ -75,7 +76,7 @@ back)
   save ;;
 close)
   if [ "${mine:-0}" = 1 ]; then close_mine
-  else pill "Broforce frozen again (the user's)"; echo "the user's Broforce: $(powos game $APP freeze 2>&1 | tail -1 | sed 's/\x1b\[[0-9;]*m//g')"; fi
+  else pill "$GAME frozen again (the user's)"; echo "the user's $GAME: $(powos game $APP freeze 2>&1 | tail -1 | sed 's/\x1b\[[0-9;]*m//g')"; fi
   rm -f $E ;;
 *) echo "usage: bf-return-phone.sh launch|away|back|close"; exit 2 ;;
 esac

@@ -11,8 +11,15 @@ if [ -n "${BF_ADB:-}" ]; then
     echo "-- $(date +%T) $1"; }
   return 0
 fi
-# APP / GAME / WIN_NAME: the game under test (default Broforce); td-launch-phone.sh sets Teardown's before sourcing.
-APP=${APP:-274190} GAME=${GAME:-Broforce} WIN_NAME=${WIN_NAME:-Broforce} GLOG=/run/powos-app/powos-sleep-gui.log
+# APP / GAME / WIN_NAME: the game under test - any Steam app id (default 274190, Broforce, the test case); GAME =
+# Steam's name for it (appmanifest), WIN_NAME = its X window's name (default GAME). td-launch-phone.sh sets Teardown's.
+steam_field() {  # steam_field <appid> <name|installdir>: from Steam's appmanifest (any library folder)
+  local S=$HOME/.local/share/Steam f
+  for f in "$S/steamapps/appmanifest_$1.acf" $(sed -nE 's/^\s*"path"\s*"(.*)"/\1/p' "$S/steamapps/libraryfolders.vdf" 2>/dev/null | sed "s|\$|/steamapps/appmanifest_$1.acf|"); do
+    [ -f "$f" ] && { sed -nE "s/^\s*\"$2\"\s*\"(.*)\"/\1/p" "$f" | head -1; return; }; done; }
+APP=${APP:-274190}
+GAME=${GAME:-$(steam_field "$APP" name)}; GAME=${GAME:-app $APP}
+WIN_NAME=${WIN_NAME:-$GAME} GLOG=/run/powos-app/powos-sleep-gui.log
 export APP
 RESUME_MS=${RESUME_MS:-3000}  # resume -> the game's first new frame, at most
 LAUNCH_S=${LAUNCH_S:-360}     # a cold start's window (Steam + Proton under FEX), at most
@@ -234,13 +241,13 @@ step_launch() {
     echo "a Broforce launch without a window for 10 min ($r) - closing it"; bash /var/tmp/powos-bf-stop.sh | tail -1; r=
   fi
   [ -z "$r" ] && mine=1
-  pill "launching Broforce$([ -n "$r" ] && echo ' (already running)')"
+  pill "launching $GAME$([ -n "$r" ] && echo ' (already running)')"
   t0=$(now)
   ( open_task $((LAUNCH_S + 10)) "steam_app_$APP" > "$T/open.status" ) &
   for _ in $(seq $((LAUNCH_S * 2))); do W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && break; touched; sleep 0.5; done
   LAUNCH=$(ms "$t0" "$(now)")
   if [ -z "$W" ] || [ "$(mapped "$W")" != IsViewable ]; then
-    fail launch "no mapped Broforce window ${LAUNCH} ms after the launch (window '${W:-none}' $(mapped "${W:-0}")); steam $(steam_pid) frozen '$(cg)', reaper '$(reaper)' $(tree "$(reaper)" | wc -w) processes, Broforce_beta.exe $(pgrep -fc 'Broforce_beta.exe' ), watcher: $(watcher 3)"
+    fail launch "no mapped $WIN_NAME window ${LAUNCH} ms after the launch (window '${W:-none}' $(mapped "${W:-0}")); steam $(steam_pid) frozen '$(cg)', reaper '$(reaper)' $(tree "$(reaper)" | wc -w) processes, watcher: $(watcher 3)"
     return 1
   fi
   for _ in $(seq 60); do [ -s "$T/open.status" ] && break; touched; sleep 0.5; done
@@ -262,7 +269,7 @@ freeze_ok() {
 
 # step_freeze: `powos game <appid> freeze` (its window minimized, Steam + the game frozen). Sets FREEZE.
 step_freeze() {
-  local t0 out; touched; pill "freezing Broforce"; t0=$(now)
+  local t0 out; touched; pill "freezing $GAME"; t0=$(now)
   out=$(powos game $APP freeze 2>&1 | tail -1)
   for _ in $(seq 20); do [ "$(cat "$(cg)/cgroup.freeze" 2>/dev/null)" = 1 ] && break; sleep 0.5; done
   FREEZE=$(ms "$t0" "$(now)")
@@ -273,7 +280,7 @@ step_freeze() {
 # step_resume <label> <how...>: the launch path given (a command; open_task's status line counts), then: Steam out of
 # its frozen cgroup, the same game, its window mapped, a new frame within RESUME_MS. Sets RES.
 step_resume() {
-  local label=$1 r0 t0 st f t; shift; touched; pill "resuming Broforce ($label)"
+  local label=$1 r0 t0 st f t; shift; touched; pill "resuming $GAME ($label)"
   r0=$(reaper); t0=$(now)
   st=$("$@" 2>&1 | tail -1)
   t=$(ms "$t0" "$(now)")

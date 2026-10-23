@@ -66,6 +66,9 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - The user's model (2026-10-23): a game is kept in the background ONLY after the user started it and navigated away
   (home, another app, fold) - frozen like Steam, a tap on its icon resumes it. No game is ever started for the user:
   ~/.config/powos/steam-resident-games stays EMPTY (powos-steam-resident still has the code that would start them).
+- Any game, not just Broforce (the user: same rules for every game/app they start): bf-lib/bf-return/bf-game/bf-start/
+  bf-stop/bf-pacing/bf-fold take APP=<appid> (default 274190, the test case; queue as `env APP=<id> ...`); GAME and
+  WIN_NAME come from Steam's appmanifest (bf-lib steam_field, any library folder). bf-checker stays Broforce's (Unity/DXVK).
 - The user's way back: `queue.sh add <task> bf-return.sh` (bf-return-phone.sh launch|away|back|close): open-task launch
   -> full-screen window -> Android HOME intent (`am start -a MAIN -c HOME`, from the Mac side: the session can't) ->
   frozen by itself (grace + 15 s) with the same game alive -> open-task again -> tap -> first changed frame (FAIL past

@@ -11,14 +11,14 @@
 #   bf-fold-phone.sh sleeplog      powos-sleep-gui's Steam lines of the last 2 min
 #   bf-fold-phone.sh logout        a fresh session (android-request power logout: the app restarts it)
 set -uo pipefail
-APP=274190
+APP=${APP:-274190} WIN_NAME=${WIN_NAME:-Broforce}  # any Steam game: APP + its window's name (bf-fold.sh passes them)
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/powos-app} DISPLAY=${DISPLAY:-:0}
 export DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}
 xw=$(pgrep -x Xwayland | head -1)
 [ -n "$xw" ] && { XAUTHORITY=$(tr '\0' '\n' < "/proc/$xw/cmdline" | grep -A1 -x -- -auth | tail -1); export XAUTHORITY; }
 reaper() { local p; for p in $(pgrep -f "SteamLaunch AppId=$APP( |\$)"); do  # not the install script evaluator's
   grep -qa 'Install=1' "/proc/$p/cmdline" 2>/dev/null || { echo "$p"; return; }; done; }
-gamewin() { xwininfo -root -tree 2>/dev/null | awk '/"Broforce"/ && !/has no name/ {print $1; exit}'; }
+gamewin() { xwininfo -root -tree 2>/dev/null | awk -v n="\"$WIN_NAME\"" 'index($0, n) && !/has no name/ {print $1; exit}'; }
 case ${1:-state} in
 state)
   w=$(gamewin); g=-

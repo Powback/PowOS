@@ -15,6 +15,8 @@
 #   a downgrade: an old kit's KWIN_PKG (3.21) once replaced the installed 3.22 (2026-10-23 02:02).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); P=$here/..; A=$P/adb.sh; repo=$(cd "$here/../../.." && pwd)
+APP=${APP:-274190} WIN_NAME=${WIN_NAME:-Broforce}  # any Steam game (one-word window name); default the test case
+case "$APP$WIN_NAME" in *[!A-Za-z0-9_.-]*) echo "APP / WIN_NAME: one word each"; exit 2 ;; esac
 OUT=${OUT:-$HOME/.cache/powos-verify/bf-fold-$(date +%F_%H%M)}; mkdir -p "$OUT"
 PKG=${KWIN_PKG:-} MIN=${KWIN_MIN:-6.7.5-3.21}
 WANT=$([ -n "$PKG" ] && basename "$PKG" | sed -E 's/^kwin-([^-]+-[^-]+)-.*/\1/')
@@ -31,7 +33,7 @@ pill "checking KWin's version"
 kwin() {  # kwin=<pid> kwin_new=<1|0>: 0 = it still runs a libkwin the package replaced (needs a fresh session)
   printf '%s\n' 'k=$(pgrep -x kwin_wayland | head -1); n=0; [ -n "$k" ] && ! grep -q "libkwin.*(deleted)" /proc/$k/maps && n=1; echo "kwin=${k:--} kwin_new=$n"' > "$OUT/kw.sh"
   "$P/root.sh" "$OUT/kw.sh" 2>/dev/null | tail -1 | tr -d '\r'; }
-ph() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"bash /var/tmp/powos-bf-fold-phone.sh $*\"'" | tr -d '\r'; }
+ph() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP WIN_NAME=$WIN_NAME bash /var/tmp/powos-bf-fold-phone.sh $*\"'" | tr -d '\r'; }
 irq() { "$A" shell "cat /proc/interrupts" | awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}'; }
 I0=$(irq); touched() { [ "$(irq)" != "$I0" ] && { log "user input - stopping"; return 0; }; return 1; }
 
@@ -58,7 +60,7 @@ elif [ -n "$PKG" ]; then log "installed $have is not older than $WANT: nothing i
 [ "$(vc "$have" "$MIN")" -ge 0 ] 2>/dev/null || { log "FAIL: KWin $have is older than $MIN (the fold fix, pkgs/kwin 0017)"; exit 1; }
 st="$(kwin) $(ph state)"; log "state: $st"
 if [[ $st != *kwin_new=1* ]]; then
-  [[ $st == *reaper=-* ]] || { log "a Broforce runs on the old KWin (the user's?): not restarting the session now"; exit 3; }
+  [[ $st == *reaper=-* ]] || { log "$WIN_NAME runs on the old KWin (the user's?): not restarting the session now"; exit 3; }
   touched && exit 3
   pill "fresh session for the new KWin"
   ph logout | tee -a "$OUT/run.txt"; sleep 20
@@ -74,14 +76,14 @@ fi
 
 # 2. Broforce up.
 touched && exit 3
-pill "Broforce up (Steam, the window, 2 min sleep grace)"
+pill "$WIN_NAME up (Steam, the window, 2 min sleep grace)"
 r=$(ph start); echo "$r" >> "$OUT/run.txt"; mine=$([[ $r == *mine=1* ]] && echo 1 || echo 0)
 stop() {  # what it started: closed; a Broforce the user had left (frozen in the background): frozen again
   if [ "$mine" = 1 ]; then pill "closing the game"
-    log "closed the Broforce it started: $("$A" shell "su -c 'sh /data/powos/powos-run.sh \"bash /var/tmp/powos-bf-stop.sh\"'" 2>&1 | tr -d '\r' | tail -1)"
-  elif [[ ${r:-} == *mine=0* ]]; then pill "freezing the user's Broforce again"; log "the user's Broforce: $(ph refreeze | tail -1)"; fi; }
+    log "closed the Broforce it started: $("$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP bash /var/tmp/powos-bf-stop.sh\"'" 2>&1 | tr -d '\r' | tail -1)"
+  elif [[ ${r:-} == *mine=0* ]]; then pill "freezing the user's $WIN_NAME again"; log "the user's $WIN_NAME: $(ph refreeze | tail -1)"; fi; }
 [[ $r == *"user input"* ]] && { log "user input during the start"; exit 3; }  # bf-lib closed what it started
-[[ $r == *FAIL* || $r != *mine=* ]] && { log "FAIL: Broforce didn't come up: $(echo "$r" | grep -m1 FAIL)"; stop; exit 1; }
+[[ $r == *FAIL* || $r != *mine=* ]] && { log "FAIL: $WIN_NAME didn't come up: $(echo "$r" | grep -m1 FAIL)"; stop; exit 1; }
 
 # SurfaceFlinger presents over 2 s, summed over the window tasks' SurfaceViews (the game's task is the busy one).
 sf() { "$A" shell 'L=$(dumpsys SurfaceFlinger --list | sed -E "s/^RequestedLayerState\{//; s/ parentId=.*//" | grep -E "SurfaceView\[com.powos.app/andro.marchy.PowosWindowActivity\]" | grep -vE "Background|Bounds|ActivityRecord" | head -4)

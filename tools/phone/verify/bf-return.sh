@@ -1,13 +1,14 @@
 #!/bin/bash
-# bf-return.sh: (Mac side; queue it: queue.sh add <board-task> bf-return.sh) a game the user started, left and taps
-# again comes back at once: Broforce started through powos-open-task (the drawer's path) -> its frame -> HOME (Android's
+# bf-return.sh: (Mac side; queue it: queue.sh add <board-task> [env APP=<appid>] bf-return.sh) a game the user started,
+# left and taps again comes back at once - any Steam game (APP, default 274190 Broforce, the test case): started through powos-open-task (the drawer's path) -> its frame -> HOME (Android's
 # HOME intent, as the user's home gesture) -> frozen in the background by unified sleep, not closed -> its icon tapped
 # again (powos-open-task) -> tap -> first changed frame, which must be under 10 s (goal: under 3 s, RESUME_MS), with the
 # game's task in front, its window focused and its audio back. Phases: bf-return-phone.sh; ~3-4 min (the 2 min start
-# grace). What it started is closed after; a Broforce the user had left frozen is frozen again; the front activity is
+# grace). What it started is closed after; a game the user had left frozen is frozen again; the front activity is
 # put back. Exit 3 on a real touch (re-queued). Artefacts ~/.cache/powos-verify/bf-return-<date>/run.txt.
 set -uo pipefail
-here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
+here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"; APP=${APP:-274190}
+case $APP in *[!0-9]*|"") echo "FAIL setup: APP must be a Steam app id ($APP)"; exit 2 ;; esac
 OUT=${OUT:-$HOME/.cache/powos-verify/bf-return-$(date +%F_%H%M)}; mkdir -p "$OUT"
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
 irq() { "$A" shell "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts" | tr -d '\r'; }
@@ -17,7 +18,7 @@ ot=$(cd "$here/../../../targets/android/session" && pwd)/powos-open-task
 "$A" push "$ot" /data/local/tmp/powos-open-task >/dev/null || { echo "FAIL setup: can't push $ot"; exit 1; }
 for f in bf-return-phone.sh bf-lib.sh bf-stop.sh; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "FAIL setup: can't push $f"; exit 1; }; done
 "$A" shell "su -c 'install -m 755 /data/local/tmp/powos-open-task /data/powos/root/usr/local/bin/powos-open-task && cp /data/local/tmp/powos-bf-return-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh'"
-ph() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"bash /var/tmp/powos-bf-return-phone.sh $1\"'" 2>&1 | grep -v sysvipc | tr -d '\r' | tee -a "$OUT/run.txt"; }
+ph() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP bash /var/tmp/powos-bf-return-phone.sh $1\"'" 2>&1 | grep -v sysvipc | tr -d '\r' | tee -a "$OUT/run.txt"; }
 front=$(top); echo "front before: ${front:-?}" | tee -a "$OUT/run.txt"
 closed=0
 finish() {  # once: the game closed (or the user's frozen again), the front activity back, the pushed files gone

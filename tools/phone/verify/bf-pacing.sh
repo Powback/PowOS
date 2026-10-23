@@ -12,16 +12,19 @@ here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 [ $# -gt 0 ] || set -- base
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
 OUT=${OUT:-$HOME/.cache/powos-verify/bfp-$(date +%F_%H%M)}; mkdir -p "$OUT"
-G=/home/powos/.local/share/Steam/steamapps/common/Broforce; LOG=/data/powos/root/run/powos-app/hyprland.log
+APP=${APP:-274190} WIN_NAME=${WIN_NAME:-Broforce}  # any Steam game (one-word window name); default the test case
+case "$APP$WIN_NAME" in *[!A-Za-z0-9_.-]*) echo "APP / WIN_NAME: one word each"; exit 2 ;; esac
+LOG=/data/powos/root/run/powos-app/hyprland.log
 irq() { "$A" shell "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts" | tr -d '\r'; }
 asuser() { local n=$1; shift
-  "$A" shell "su -c 'cp /data/local/tmp/powos-$n /data/powos/root/var/tmp/powos-$n; chmod 644 /data/powos/root/var/tmp/powos-$n; sh /data/powos/powos-run.sh \"sh /var/tmp/powos-$n $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
+  "$A" shell "su -c 'cp /data/local/tmp/powos-$n /data/powos/root/var/tmp/powos-$n; chmod 644 /data/powos/root/var/tmp/powos-$n; sh /data/powos/powos-run.sh \"APP=$APP WIN_NAME=$WIN_NAME sh /var/tmp/powos-$n $*\"'" 2>&1 | grep -v sysvipc | tr -d '\r'; }
 pill "checking the phone (a game already up? Steam?)"
 "$A" push "$here/bf-game.sh" /data/local/tmp/powos-bf-game.sh >/dev/null
 gs=$(asuser bf-game.sh state | tail -1); users=0
+G=$(asuser bf-game.sh dir | tail -1); [ -n "$G" ] || { echo "app $APP isn't installed (no Steam appmanifest)"; exit 5; }
 case $gs in
-  game=awake) echo "the user's Broforce is up and awake (they play it?) - skip"; exit 3 ;;
-  game=frozen) users=1; echo "the user's Broforce, left frozen: measured as it is (base only), frozen again after"
+  game=awake) echo "the user's $WIN_NAME is up and awake (they play it?) - skip"; exit 3 ;;
+  game=frozen) users=1; echo "the user's $WIN_NAME, left frozen: measured as it is (base only), frozen again after"
     [ "$*" = base ] || echo "modes other than base need a fresh start: skipped (${*})"; set -- base ;;
 esac
 front=$("$A" shell "dumpsys activity activities | grep -m1 topResumedActivity" | sed -nE 's#.* ([a-zA-Z0-9_.]+/[a-zA-Z0-9_.$]+) .*#\1#p')
@@ -32,7 +35,7 @@ for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-game.sh; do "$A" p
 restore() {
   pill "closing the game, putting Steam back"
   "$A" shell "su -c 'pkill -f powos-bf-present.sh; pkill -INT screenrecord'" >/dev/null 2>&1
-  if [ $users = 1 ]; then echo "the user's Broforce: $(asuser bf-game.sh freeze | tail -1)"; else asuser bf-stop.sh >/dev/null; fi
+  if [ $users = 1 ]; then echo "the user's $WIN_NAME: $(asuser bf-game.sh freeze | tail -1)"; else asuser bf-stop.sh >/dev/null; fi
   "$A" shell "su -c 'rm -f /data/powos/root$G/dxvk.conf'"
   [ -n "$steam_before" ] && "$A" shell "su -c 'sh /data/powos/powos-run.sh \"cd /home/powos; setsid -f steam -silent </dev/null >/dev/null 2>&1\"'" >/dev/null 2>&1
   [ -n "$front" ] && "$A" shell "am start -n $front >/dev/null 2>&1"
@@ -55,7 +58,7 @@ for mode in "$@"; do
   fi
   M=$OUT/$mode; mkdir -p "$M"; k0=$("$A" shell "su -c 'grep -c \"Xwayland KGSL\" $LOG'" | tr -d '\r')
   echo "== $mode $(date +%T)"
-  if [ -n "$("$A" shell "pgrep -f 'steam -cef'" | tr -d '\r')" ]; then pill "$lbl: launching Broforce"; else pill "$lbl: starting Steam + Broforce"; fi
+  if [ -n "$("$A" shell "pgrep -f 'steam -cef'" | tr -d '\r')" ]; then pill "$lbl: launching $WIN_NAME"; else pill "$lbl: starting Steam + $WIN_NAME"; fi
   asuser bf-start.sh >/dev/null
   pill "$lbl: waiting for the game window"
   win=""; for i in $(seq 48); do nap 1; win=$(asuser bf-window.sh | tail -1); case $win in win=[0-9]*) break ;; esac; done
@@ -68,7 +71,7 @@ for mode in "$@"; do
   win2=$(asuser bf-window.sh | tail -1); echo "$mode: after the settle: $win2"
   echo "$win2" | sed 's/win=/settled /; s/screen=/on /' >> "$M/window.txt"
   echo "$mode: in front: $top"; echo "front $top" >> "$M/window.txt"
-  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|Broforce|steam_app\" /data/local/tmp/bfp >/dev/null 2>&1 &'"
+  "$A" shell "su -c 'rm -rf /data/local/tmp/bfp; nohup sh /data/local/tmp/powos-bf-present.sh 30 \"PowosWindowActivity|SurfaceView|$WIN_NAME|steam_app\" /data/local/tmp/bfp >/dev/null 2>&1 &'"
   for s in 1 2 3 4 5 6; do pill "$lbl: measuring frames $(( (s - 1) * 5 ))/30 s"; nap 1; done
   pill "$lbl: finishing the screen recording"; nap 2
   pill "$lbl: collecting the numbers"
