@@ -139,6 +139,13 @@ run() {  # run <variant> <n>
     # build has no wineserver: the exe counts from the game's reaper on.
     [ -n "$r" ] && [ -z "$(iscript_reapers)" ] && game_exe "$r" && first exe "$now_"
     W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && { first window "$now_"; break; }
+    # Every 30 s, what the launch is doing (a run the budget kills still says where it stood - 2026-10-23 05:13: the
+    # native build's exe at 41 s, then nothing for 4 min): the newest processes under the launch, the game's own
+    # process (state, wchan, CPU s), its windows.
+    if [ $((i % 120)) = 119 ]; then
+      x=$(for q in $(tree "$r"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -1)
+      echo "   at ${now_} ms: $(tail -n 3 "$T/timeline" 2>/dev/null | cut -f3 | cut -c1-60 | tr '\n' '|') game ${x:-none}$([ -n "$x" ] && awk '{printf " state %s cpu %.1fs", $3, ($14+$15)/100}' /proc/$x/stat 2>/dev/null) wchan $(cat /proc/${x:-0}/wchan 2>/dev/null); X windows of it: $(xwininfo -root -tree 2>/dev/null | grep -c "$WIN_NAME")"
+    fi
     [ ${#seen[@]} != $k ] && k=${#seen[@]} && case " ${!seen[*]} " in
       *" exe "*) pill "cold start timing: $v - game starting" ;; *" wineserver "*) pill "cold start timing: $v - wine" ;;
       *" container "*) pill "cold start timing: $v - pressure-vessel" ;; *" reaper "*) pill "cold start timing: $v - launching" ;;
