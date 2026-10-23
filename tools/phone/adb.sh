@@ -11,8 +11,13 @@ if [ "$(docker exec powos-vadb adb -s 10.13.13.7:5555 get-state 2>/dev/null || t
   docker exec powos-vadb sh -c 'adb disconnect 10.13.13.7:5555 >/dev/null 2>&1; timeout 15 adb connect 10.13.13.7:5555 >/dev/null 2>&1' || true
 fi
 args=() mounts=()
+# A path with ".." in it (e.g. verify-runner/../powos-multiplatform/...) can't be walked inside the container, where
+# only the file's own directory is mounted: it failed "cannot stat" (kwin 3.23 never reached the phone, 2026-10-23).
+# Resolve every existing absolute path to its physical location first.
 for a in "$@"; do
-  if [[ -e "$a" && "$a" == /* ]]; then mounts+=(-v "$(dirname "$a"):$(dirname "$a")"); fi
+  if [[ -e "$a" && "$a" == /* ]]; then
+    d=$(cd "$(dirname "$a")" && pwd -P); a="$d/$(basename "$a")"; mounts+=(-v "$d:$d")
+  fi
   args+=("$a")
 done
 exec docker run --rm -i --network container:powos-vadb ${mounts[@]+"${mounts[@]}"} --entrypoint /opt/android-sdk/platform-tools/adb \
