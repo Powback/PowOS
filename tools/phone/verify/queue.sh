@@ -317,6 +317,12 @@ EOS
         done
         [ -n "$why" ] && endjob $jp
         wait $jp; rc=$?
+        # A killed check's phone side keeps running (td-launch-phone.sh outlived its budget kill by 2 min and overlapped
+        # the next check, 04:31): end every <check>-phone.sh of this job on the phone too.
+        if [ -n "$why" ]; then
+          for a in "${cmd[@]}"; do case "$a" in *.sh) b=$(basename "$a" .sh)
+            phone_sh "pkill -f '$b-phone.sh' 2>/dev/null; :" >/dev/null 2>&1 ;; esac; done
+        fi
         if [ "$why" = timeout ]; then
           rc=124; echo "FAIL timeout: still running after its ${budget}s budget - killed" >> "$log"
           echo "$(date +%T) $n: past its ${budget}s budget - killed"
