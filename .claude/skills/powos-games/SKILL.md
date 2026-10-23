@@ -62,6 +62,10 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   reaper's tree in that cgroup + 0 CPU ticks in 2 s; resume = out of the cgroup, same reaper, window mapped, a new
   x11grab frame <= RESUME_MS (3000). A touch / stop closes what the check started (exit 3). Launch chains outside
   Steam's tree (ppid 1, a dead Steam's) are killed first: never frozen or resumed, they hold the prefix.
+- /proc/<pid>/cgroup can list cgroup v1 hierarchies too (since the 02:07 boot: freezer, memory:/apps, cpuset, cpu,
+  blkio before `0::`): read only the `0::` line (bf-lib cg2). Reading the whole file as the path made bf-resume FAIL
+  freeze-auto/freeze at 02:58 although powos-sleep-gui had frozen Steam at 02:56:50 (start grace ended 02:56:44). The
+  product (sleepd cgroup_v2, game.sh, /usr/bin/steam) matched substrings / the 0:: line and was fine.
 - Lost launch 2026-10-23 02:42 (bf-launchpaths FAIL launch, 394 s, no reaper): Steam 27858 (`-silent`, started 02:37:32
   by powos-steam-resident) was NOT frozen (no sleep cgroup, no freeze line) and alive: open-task's URL went into
   ~/.steam/steam.pipe (mtime 02:42:47) but the client never logged it (console_log silent 02:38:05-02:53:57, no

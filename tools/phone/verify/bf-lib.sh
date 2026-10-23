@@ -75,7 +75,11 @@ ticks() { local n=0 p f; for p in "$@"; do f=$(cat "/proc/$p/stat" 2>/dev/null) 
 gamewin() { xwininfo -root -tree 2>/dev/null | awk -v n="\"$WIN_NAME\"" 'index($0, n) && !/has no name/ {print $1; exit}'; }
 mapped() { xwininfo -id "$1" 2>/dev/null | awk '/Map State/ {print $3}'; }
 active() { printf '%d' "$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | awk '{print $NF}')" 2>/dev/null; }
-cg() { local c; c=$(cat "/proc/$(steam_pid)/cgroup" 2>/dev/null); case $c in *powos/sleep/*) echo "/sys/fs/cgroup${c#0::}" ;; esac; }
+# cg2 <pid>: its cgroup v2 path (the "0::" line: since the 02:07 boot /proc/<pid>/cgroup also lists v1 hierarchies -
+# freezer, memory:/apps, cpuset, cpu, blkio - and the whole file read as the path made every freeze look missing:
+# bf-resume "FAIL freeze-auto" 02:58 while powos-sleep-gui had frozen Steam at 02:56:50).
+cg2() { sed -n 's/^0:://p' "/proc/$1/cgroup" 2>/dev/null; }
+cg() { local c; c=$(cg2 "$(steam_pid)"); case $c in */powos/sleep/*) echo "/sys/fs/cgroup$c" ;; esac; }
 watcher() { grep -i "steam\|app $APP" "$GLOG" | tail -${1:-2} | cut -c1-200 | tr '\n' '|'; }
 # Frames of an X window: Xlib's XGetImage from python3 + ctypes. Not ffmpeg's x11grab: FFmpeg 9 only grabs through
 # MIT-SHM, and Android's kernel has no System V shared memory - "Could not get shared memory buffer" / "Error during
@@ -279,7 +283,7 @@ step_launch() {
 # freeze_ok: Steam's sleep cgroup frozen, every task of the game's chain in it, none of them running (prints evidence).
 freeze_ok() {
   local c g n=0 in=0 p a b; c=$(cg); g=$(tree "$(reaper)")
-  for p in $g; do n=$((n + 1)); case $(cat "/proc/$p/cgroup" 2>/dev/null) in "0::${c#/sys/fs/cgroup}") in=$((in + 1)) ;; esac; done
+  for p in $g; do n=$((n + 1)); [ "$(cg2 "$p")" = "${c#/sys/fs/cgroup}" ] && in=$((in + 1)); done
   a=$(ticks $g); sleep 2; b=$(ticks $g)
   EVID="cgroup ${c:-none}: cgroup.freeze=$(cat "$c/cgroup.freeze" 2>/dev/null) events '$(grep frozen "$c/cgroup.events" 2>/dev/null)', game tasks in it $in/$n, game CPU ticks in 2 s $((b - a)), window $(mapped "$W")"
   [ -n "$c" ] && [ "$(cat "$c/cgroup.freeze")" = 1 ] && grep -qx "frozen 1" "$c/cgroup.events" && [ $n -gt 0 ] && [ $in = $n ] && [ $((b - a)) = 0 ]

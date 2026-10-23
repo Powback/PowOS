@@ -23,7 +23,7 @@ case ${1:-state} in
 state)
   w=$(gamewin); g=-
   [ -n "$w" ] && g=$(xwininfo -id "$w" 2>/dev/null | awk '/-geometry/{print $2}')
-  s=$(cat "/proc/$(cat ~/.steam/steam.pid 2>/dev/null)/cgroup" 2>/dev/null); case $s in *powos/sleep/*) f=yes ;; *) f=no ;; esac
+  s=$(sed -n 's/^0:://p' "/proc/$(cat ~/.steam/steam.pid 2>/dev/null)/cgroup" 2>/dev/null); case $s in */powos/sleep/*) f=yes ;; *) f=no ;; esac
   r=$(xwininfo -root 2>/dev/null | awk '/Width:/{w=$2} /Height:/{h=$2} END{print w "x" h}')
   echo "reaper=$(reaper | grep . || echo -) win=${w:--} geom=$g frozen=$f root=$r" ;;
 start)

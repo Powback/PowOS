@@ -15,8 +15,8 @@ case ${1:-state} in
 state)
   r=; for p in $(pgrep -f "SteamLaunch AppId=$APP( |\$)"); do grep -qa 'Install=1' "/proc/$p/cmdline" 2>/dev/null || r=$p; done
   [ -n "$r" ] || { echo game=none; exit 0; }
-  c=$(cat "/proc/$(cat ~/.steam/steam.pid 2>/dev/null)/cgroup" 2>/dev/null)
-  case $c in *powos/sleep/*) [ "$(cat "/sys/fs/cgroup${c#0::}/cgroup.freeze" 2>/dev/null)" = 1 ] && { echo game=frozen; exit 0; } ;; esac
+  c=$(sed -n 's/^0:://p' "/proc/$(cat ~/.steam/steam.pid 2>/dev/null)/cgroup" 2>/dev/null)  # the v2 line (v1 ones too)
+  case $c in */powos/sleep/*) [ "$(cat "/sys/fs/cgroup$c/cgroup.freeze" 2>/dev/null)" = 1 ] && { echo game=frozen; exit 0; } ;; esac
   echo game=awake ;;
 freeze)
   timeout 20 powos game "$APP" freeze 2>&1 | tail -1 | sed 's/\x1b\[[0-9;]*m//g' ;;
