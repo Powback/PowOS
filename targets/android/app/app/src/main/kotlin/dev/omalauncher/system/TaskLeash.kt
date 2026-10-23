@@ -289,6 +289,15 @@ object TaskLeash {
         wct.javaClass.getMethod("setBounds", token.javaClass, Rect::class.java).invoke(wct, token, bounds)
     }
 
+    /** WCT.reorder(token, onTop) (hidden): the task to the top (or bottom) in the same transition as its bounds. */
+    fun reorder(
+        wct: Any,
+        token: Any,
+        onTop: Boolean,
+    ) {
+        wct.javaClass.getMethod("reorder", token.javaClass, Boolean::class.javaPrimitiveType).invoke(wct, token, onTop)
+    }
+
     /** WCT.setDragResizing(token, on) (hidden). */
     fun setDragResizing(
         wct: Any,

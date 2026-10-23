@@ -443,7 +443,9 @@ class WindowFrame(
             x0 = e.rawX
             y0 = e.rawY
             from = Rect(bounds)
-            FreeformTasks.raise(context, id)
+            // Raised with the gesture's own change (a drag's transition, or at a tap's lift), never at the DOWN: a
+            // moveTaskToFront is a transition of its own, still collecting when the drag's change starts a few ms later.
+            raise = WindowFrames.current?.isFront(id) == false
             if (!move) showGrip(true)
         }
 
@@ -490,12 +492,12 @@ class WindowFrame(
     ) {
         moving = !resizing
         worker.execute { live = FreeformTasks.Live(context, id, resizing) }
-        // Resizes go the old way (live bounds per move, a plain end) unless `settings put global powos_leash_resize 1`:
-        // with the leash open, the per-move bounds and the end were unreliable (resize-probe 2026-10-23: one run kept
-        // the old bounds 5 s with the app's input window gone - touches fell to home; others left a "Transition Root"
-        // layer). Moves keep the leash (no WM call until the lift). Leash off 10/10 PASS on the same probe.
-        val leashResize = android.provider.Settings.Global.getInt(context.contentResolver, "powos_leash_resize", 0) == 1
-        leash = if (TaskLeash.enabled(context) && (!resizing || leashResize)) startLeash(resizing, target) else null
+        // Moves and resizes both through the leash. Without it a resize leaves the task's surface crop at the OLD size
+        // (WM Shell syncs the leash only in a transition on this ROM): resize-probe 2026-10-23 20:26, Calculator made
+        // bigger - its input window cropped to the old width, the new part blank and its touches going to home.
+        leash = if (TaskLeash.enabled(context)) startLeash(resizing, target, raise) else null
+        if (leash == null && raise) FreeformTasks.raise(context, id)
+        raise = false
         if (legacyDrag()) return
         val bitmapOf = { v: View -> runCatching { v.drawToBitmap() }.getOrNull() }
         val layer = DragLayer(context, bitmapOf(bar), if (resizing) bitmapOf(grip) else null, dp(BAR_DP + HIT_DP), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)
@@ -523,12 +525,14 @@ class WindowFrame(
     private fun startLeash(
         resizing: Boolean,
         target: Rect,
+        raise: Boolean,
     ): TaskLeash.Session? {
-        val s = TaskLeash.Session(context, listOf(id), "task $id ${if (resizing) "resize" else "move"}")
+        val s = TaskLeash.Session(context, listOf(id), "task $id ${if (resizing) "resize" else "move"}${if (raise) " (raised)" else ""}")
         s.onReady = { ok -> if (ok) drag?.outline = false }
         val started =
             s.start { wct, token ->
                 val tok = token(id) ?: error("no token for task $id")
+                if (raise) TaskLeash.reorder(wct, tok, true)
                 TaskLeash.setBounds(wct, tok, target)
                 if (resizing) TaskLeash.setDragResizing(wct, tok, true)
             }
@@ -629,11 +633,16 @@ class WindowFrame(
         } else if (dragging) {
             endDrag(Rect(bounds))
             settle(Rect(bounds))
-        } else if (move && e.actionMasked == MotionEvent.ACTION_UP) {
-            barTapped(e)
+        } else if (e.actionMasked == MotionEvent.ACTION_UP) {
+            if (raise) FreeformTasks.raise(context, id)
+            if (move) barTapped(e)
         }
+        raise = false
         dragging = false
     }
+
+    /** The finger's window wasn't the top-most one: it comes up with this gesture ([startDrag], or at the lift). */
+    private var raise = false
 
     /** The bar's last tap (uptime ms): a second one soon after is a double tap - maximise, or back (the desktop way). */
     private var lastBarTap = 0L

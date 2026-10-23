@@ -347,8 +347,7 @@ class WindowFrames(
         val target = back?.before ?: AppWindows.area(context)
         if (back == null) maximised[id] = Max(Rect(now), Rect(target), android.os.SystemClock.uptimeMillis())
         frames[id]?.showMaximised(back == null)
-        FreeformTasks.raise(context, id)
-        val how = boundsTo(id, target)
+        val how = boundsTo(id, target, raise = !isFront(id))
         Log.i(TAG, "task $id ${if (back == null) "maximised" else "restored"}: ${now.toShortString()} -> ${target.toShortString()} ($how)")
         changed()
     }
@@ -361,16 +360,33 @@ class WindowFrames(
     private fun boundsTo(
         id: Int,
         target: Rect,
+        raise: Boolean,
     ): String {
-        if (!TaskLeash.enabled(context)) return if (FreeformTasks.resize(id, target)) "resizeTask" else "resizeTask refused"
+        if (!TaskLeash.enabled(context)) {
+            if (raise) FreeformTasks.raise(context, id)
+            return if (FreeformTasks.resize(id, target)) "resizeTask" else "resizeTask refused"
+        }
+        // Raised in the same transaction (one transition), never a moveTaskToFront first: that is a transition of its own
+        // (TO_FRONT) collecting while the change starts.
+        val start: (Any, (Int) -> Any?) -> Unit = { wct, token ->
+            token(id)?.let {
+                if (raise) TaskLeash.reorder(wct, it, true)
+                TaskLeash.setBounds(wct, it, target)
+            }
+        }
         val set: (Any, (Int) -> Any?) -> Unit = { wct, token -> token(id)?.let { TaskLeash.setBounds(wct, it, target) } }
         val s = TaskLeash.Session(context, listOf(id), "task $id maximise")
         s.onReady = { live ->
             if (live) s.finish(mapOf(id to target), set) else Log.i(TAG, "task $id maximise: no leash, resizeTask ${FreeformTasks.resize(id, target)}")
             changed()
         }
-        return if (s.start(set)) "change transition" else if (FreeformTasks.resize(id, target)) "resizeTask" else "refused"
+        if (s.start(start)) return "change transition${if (raise) " + raised" else ""}"
+        if (raise) FreeformTasks.raise(context, id)
+        return if (FreeformTasks.resize(id, target)) "resizeTask" else "refused"
     }
+
+    /** Task [id]'s window is the top-most one showing (home's dock order, [running]): nothing to raise. */
+    fun isFront(id: Int): Boolean = running.value.firstOrNull { !it.minimised && !it.away }?.id == id
 
     /** A maximised window: its bounds [before], the maximised ones asked for, when, and the ones its task then [seen]. */
     private class Max(
