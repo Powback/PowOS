@@ -160,32 +160,40 @@ internal object ShellWallpaper {
                 return Triple(rev, "live") { shot }
             }
         }
-        if (andro.marchy.RootMode.enabled()) {
-            // HACK: another app's live wallpaper has no picture an app can ask for (WallpaperManager hands out still
-            // ones only); OxygenOS keeps a screenshot of it for its own previews, read here as root. Real fix: none in
-            // the platform API - on a ROM without that file, the wallpaper's thumbnail below.
-            val path = "/data/system/users/${android.os.Process.myUid() / 100000}/wallpaper_screenshot.png"
-            // Its time and size: OxygenOS sometimes leaves it empty (0 bytes, seen 2026-10-21) - then the thumbnail.
-            val stamp = andro.marchy.RootShell.run("stat -c '%Y %s' $path", null, 5_000)
-            val (time, size) = stamp.output.trim().split(' ').let { (it.getOrNull(0) ?: "") to (it.getOrNull(1)?.toLongOrNull() ?: 0L) }
-            if (stamp.code == 0 && time.isNotEmpty() && size > 0) {
-                return Triple("shot-${info.component.flattenToShortString().hashCode()}-$time", "screenshot") {
-                    // Copied as a file into our cache (ours: owner, mode, SELinux label) and decoded from there - its bytes
-                    // through the root shell's output came back garbled (ImageDecoder: "Input contained an error").
-                    val dst = java.io.File(context.cacheDir, "wallpaper-shot.png")
-                    val uid = android.os.Process.myUid()
-                    val r =
-                        andro.marchy.RootShell.run(
-                            "cat '$path' > '${dst.path}' && chown $uid:$uid '${dst.path}' && chmod 600 '${dst.path}' && restorecon '${dst.path}'",
-                            null,
-                            10_000,
-                        )
-                    check(r.code == 0) { "copy failed (${r.code}): ${r.output.take(200)}" }
-                    decode(ImageDecoder.createSource(dst), side)
-                }
+        if (andro.marchy.RootMode.enabled()) rootShot(context, info, side)?.let { return it }
+        return Triple("thumb-${info.component.flattenToShortString()}", "thumbnail") { info.loadThumbnail(context.packageManager)?.let { draw(it, side) } }
+    }
+
+    /** Rooted: OxygenOS's own screenshot of another app's live wallpaper (null: none, or an empty one). */
+    private fun rootShot(
+        context: Context,
+        info: android.app.WallpaperInfo,
+        side: Int,
+    ): Triple<String, String, () -> Bitmap?>? {
+        // HACK: another app's live wallpaper has no picture an app can ask for (WallpaperManager hands out still
+        // ones only); OxygenOS keeps a screenshot of it for its own previews, read here as root. Real fix: none in
+        // the platform API - on a ROM without that file, which() falls to the wallpaper's thumbnail.
+        val path = "/data/system/users/${android.os.Process.myUid() / 100000}/wallpaper_screenshot.png"
+        // Its time and size: OxygenOS sometimes leaves it empty (0 bytes, seen 2026-10-21) - then the thumbnail.
+        val stamp = andro.marchy.RootShell.run("stat -c '%Y %s' $path", null, 5_000)
+        val (time, size) = stamp.output.trim().split(' ').let { (it.getOrNull(0) ?: "") to (it.getOrNull(1)?.toLongOrNull() ?: 0L) }
+        if (stamp.code == 0 && time.isNotEmpty() && size > 0) {
+            return Triple("shot-${info.component.flattenToShortString().hashCode()}-$time", "screenshot") {
+                // Copied as a file into our cache (ours: owner, mode, SELinux label) and decoded from there - its bytes
+                // through the root shell's output came back garbled (ImageDecoder: "Input contained an error").
+                val dst = java.io.File(context.cacheDir, "wallpaper-shot.png")
+                val uid = android.os.Process.myUid()
+                val r =
+                    andro.marchy.RootShell.run(
+                        "cat '$path' > '${dst.path}' && chown $uid:$uid '${dst.path}' && chmod 600 '${dst.path}' && restorecon '${dst.path}'",
+                        null,
+                        10_000,
+                    )
+                check(r.code == 0) { "copy failed (${r.code}): ${r.output.take(200)}" }
+                decode(ImageDecoder.createSource(dst), side)
             }
         }
-        return Triple("thumb-${info.component.flattenToShortString()}", "thumbnail") { info.loadThumbnail(context.packageManager)?.let { draw(it, side) } }
+        return null
     }
 
     /** The live wallpaper's current frame, at most [side] (null: not this way). */

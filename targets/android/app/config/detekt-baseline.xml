@@ -284,7 +284,6 @@
     <ID>CyclomaticComplexMethod:ShellScreens.kt$ShellScreens$fun image( kind: String, id: String, ): Pair&lt;String, ByteArray&gt;?</ID>
     <ID>CyclomaticComplexMethod:ShellScreens.kt$ShellScreens$private fun opened(name: String)</ID>
     <ID>CyclomaticComplexMethod:ShellScreens.kt$ShellScreens$private fun style(): JSONObject</ID>
-    <ID>CyclomaticComplexMethod:ShellWallpaper.kt$ShellWallpaper$private fun which(context: Context): Triple&lt;String, String, () -&gt; Bitmap?&gt;?</ID>
     <ID>CyclomaticComplexMethod:ShellWords.kt$ShellWords$private fun firstProgram(segment: String): String?</ID>
     <ID>CyclomaticComplexMethod:ShellWords.kt$ShellWords$private fun segments(s: String): List&lt;String&gt;</ID>
     <ID>CyclomaticComplexMethod:Speech.kt$NativeSpeech$@androidx.annotation.RequiresApi(33) private fun decide( c: Context, onDev: RecognitionSupport?, reg: RecognitionSupport?, ): Plan</ID>
