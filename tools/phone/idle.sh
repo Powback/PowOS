@@ -47,6 +47,9 @@ if [ "${1:-}" = "--wait" ]; then
       a=\$(( \$(date +%s) - on ))
       [ "$go" = 1 ] && [ -s /data/powos/root/tmp/powos-verify-go ] && { echo go=\$(head -c 64 /data/powos/root/tmp/powos-verify-go | tr -cd 'A-Za-z0-9_.:-') screen=\$w; exit 0; }
       [ "$go" = 1 ] && [ "$only" != 1 ] && [ -e /data/powos/root/tmp/powos-verify-stop ] && { echo stop screen=\$w; exit 0; }
+      # A game running is the user playing, touched or not (23:51, 2026-10-23: a check closed My Friend Pedro mid-game
+      # because 2 min without a touch counted as free). Checks wait until it's closed; "test now" (go) still overrides.
+      pgrep -f 'reaper SteamLaunch' >/dev/null 2>&1 && { on=0; sleep 5; continue; }
       [ "$only" = 1 ] || case \$w in Asleep|Dozing) [ "$awake" = 1 ] || { echo idle=\$t screen=\$w; exit 0; } ;; Awake) [ \$t -ge $need ] && [ \$a -ge $need ] && { echo idle=\$t screen=\$w; exit 0; } ;; esac
       sleep 5
     done; echo timeout" 2>/dev/null | tr -d '\r' | tail -1)
