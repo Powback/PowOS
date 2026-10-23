@@ -27,8 +27,9 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
 - Stage 2 (ui/overpull.ts, board launcher-pull-further-up-search-keyboard): the "open" drag past the open place
   (finger d = -dy - travel/GAIN) or, drawer open + apps kind, up at the list's end / off the list (mode "over",
   claimOnOpen) lifts .launcher-inner on a rubber band (one paused WAAPI anim, max 48px, no style writes); past
-  max(120, 0.25*innerHeight) px a 10 ms vibrate; released there: foot textarea focus() + powos.keyboard.show() in the
-  touchend (ShellBridge -> showSoftInput, no Kotlin needed). The left-half (AI corner) "open" also over-pulls: on the
+  max(120, 0.25*innerHeight) px (read once per pull: the keyboard shrinks innerHeight) a 10 ms vibrate AND, finger still
+  down, foot textarea focus() then powos.keyboard.show() (ShellBridge -> showSoftInput); back 24 px below it before the
+  release: keyboard.hide() + blur() (stage 1). Released armed = drawer open, keyboard stays. The left-half (AI corner) "open" also over-pulls: on the
   wide home the AI panel hides the bar (visibility: hidden = unfocusable), so raiseSearch falls back to .ai-compose and
   shows the keyboard only when a field really has focus (keyboard up + nothing focused, e2e round 3, 2026-10-23). Short of it: stage 1, no keyboard. Headless probe:
   synthetic TouchEvents on .home via SHOTS_PROBE (~/.cache file, see verify/pullup-stage2.sh for the device check).
