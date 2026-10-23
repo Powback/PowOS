@@ -10,7 +10,8 @@ here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 envs="" args=()
 for a in "$@"; do case $a in
   app:[0-9]*) envs="$envs APP=${a#app:}" ;;
-  win:*) w=${a#win:}; envs="$envs WIN_NAME=$(printf %s "$w" | tr -cd 'A-Za-z0-9._-')" ;;  # no spaces/quotes through su -c
+  # Base64: a title with spaces ("RimWorld by Ludeon Studios") through su -c and powos-run.sh's quoting.
+  win:*) envs="$envs WIN_B64=$(printf %s "${a#win:}" | base64 | tr -d '\n')" ;;
   *) args+=("$a") ;; esac; done
 set -- "${args[@]+"${args[@]}"}"
 OUT=${OUT:-$HOME/.cache/powos-verify/bf-coldstart-$(date +%F_%H%M)}; mkdir -p "$OUT"

@@ -23,6 +23,7 @@
 set -uo pipefail
 # Any Steam game: APP=<appid> (bf-coldstart.sh app:<id>); GAME / WIN_NAME (its window's title) default to the name in
 # its appmanifest (bf-coldstart.sh win:<title> when the window is called something else).
+[ -n "${WIN_B64:-}" ] && { WIN_NAME=$(printf %s "$WIN_B64" | base64 -d); export WIN_NAME; }
 if [ -n "${APP:-}" ] && [ -z "${GAME:-}" ]; then
   GAME=$(sed -n 's/^[[:space:]]*"name"[[:space:]]*"\(.*\)"$/\1/p' "$HOME/.local/share/Steam/steamapps/appmanifest_$APP.acf" 2>/dev/null | head -1)
   export GAME=${GAME:-$APP} WIN_NAME=${WIN_NAME:-$GAME}
