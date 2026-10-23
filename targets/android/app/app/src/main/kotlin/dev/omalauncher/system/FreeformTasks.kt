@@ -52,16 +52,19 @@ object FreeformTasks {
         @Suppress("DEPRECATION")
         val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
         val z = stackOrder()?.withIndex()?.associate { (i, id) -> id to i }
-        return (if (z == null) tasks else tasks.sortedBy { z[it.taskId] ?: Int.MAX_VALUE }).mapNotNull { t ->
-            val wc = runCatching { windowConfiguration(t) }.onFailure { if (!unreadable) Log.w(TAG, "can't read task ${t.taskId}'s window", it) }.getOrNull()
-            unreadable = wc == null
-            if (wc == null) return@mapNotNull null
-            if (wc.javaClass.getMethod("getWindowingMode").invoke(wc) != FREEFORM) return@mapNotNull null
-            val bounds = Rect(wc.javaClass.getMethod("getBounds").invoke(wc) as Rect)
-            val visible = runCatching { android.app.TaskInfo::class.java.getField("isVisible").getBoolean(t) }.getOrDefault(true)
-            val dpi = runCatching { (android.app.TaskInfo::class.java.getField("configuration").get(t) as Configuration).densityDpi }.getOrDefault(0)
-            Window(t.taskId, (t.baseActivity ?: t.topActivity)?.packageName, bounds, visible, dpi, t.taskDescription?.label?.toString())
-        }
+        return (if (z == null) tasks else tasks.sortedBy { z[it.taskId] ?: Int.MAX_VALUE }).mapNotNull { window(it) }
+    }
+
+    /** Task [t] as a floating window, or null (another mode, or its window configuration unreadable). */
+    private fun window(t: ActivityManager.RunningTaskInfo): Window? {
+        val wc = runCatching { windowConfiguration(t) }.onFailure { if (!unreadable) Log.w(TAG, "can't read task ${t.taskId}'s window", it) }.getOrNull()
+        unreadable = wc == null
+        if (wc == null) return null
+        if (wc.javaClass.getMethod("getWindowingMode").invoke(wc) != FREEFORM) return null
+        val bounds = Rect(wc.javaClass.getMethod("getBounds").invoke(wc) as Rect)
+        val visible = runCatching { android.app.TaskInfo::class.java.getField("isVisible").getBoolean(t) }.getOrDefault(true)
+        val dpi = runCatching { (android.app.TaskInfo::class.java.getField("configuration").get(t) as Configuration).densityDpi }.getOrDefault(0)
+        return Window(t.taskId, (t.baseActivity ?: t.topActivity)?.packageName, bounds, visible, dpi, t.taskDescription?.label?.toString())
     }
 
     /**
