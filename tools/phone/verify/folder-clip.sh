@@ -34,7 +34,10 @@ done
 at=$(q '(()=>{const c=document.querySelector(".page.library .lib-card");if(!c||!document.querySelector(".lib-card .lib-count"))return "";const r=c.getBoundingClientRect(),d=devicePixelRatio;return Math.round((r.left+r.width/2)*d)+" "+Math.round((r.top+r.height/2)*d)})()')
 [ -n "$at" ] || { fail "no app library card with the new markup (the folder morph isn't live yet?)"; exit 1; }
 set -- $at
-sh_ "screenrecord --display-id $DID --bit-rate 20000000 --time-limit 6 /data/local/tmp/folder-clip.mp4 >/dev/null 2>&1 &"
+# The recording runs in an adb session held open from the Mac (as ai-send-flash.sh): one started with & inside su -c
+# died with its adb shell, so nothing was there to pull ("no recording pulled", 2026-10-23).
+"$A" shell "su -c 'rm -f /data/local/tmp/folder-clip.mp4; screenrecord --display-id $DID --bit-rate 20000000 --time-limit 7 /data/local/tmp/folder-clip.mp4'" >/dev/null 2>&1 &
+RP=$!
 sleep 1.2; sh_ "input tap $1 $2"; sleep 1.4; chk open
 [ "$(q '!!document.querySelector(".folder-view.open")')" = true ] || fail "the folder didn't open on a tap"
 [ "$(q '[...document.querySelectorAll(".folder-view.open [style]")].filter(e=>e.style.transform||e.style.transition).length')" = 0 ] || fail "the open folder kept its morph's inline styles (it never came to rest)"
@@ -42,7 +45,7 @@ sleep 1.2; sh_ "input tap $1 $2"; sleep 1.4; chk open
 # centred) and a tap on it is "stop" - this check paused the whole queue that way at every run (2026-10-23).
 sh_ "input tap $((W / 12)) $((H / 14))"; sleep 1.4; chk close
 [ "$(q '!!document.querySelector(".folder-view")')" = false ] || fail "a tap outside didn't close the folder"
-sleep 2.5
+wait "$RP" 2>/dev/null; sleep 0.5
 "$A" pull /data/local/tmp/folder-clip.mp4 "$OUT/clip.mp4" >/dev/null 2>&1; sh_ "rm -f /data/local/tmp/folder-clip.mp4"
 if [ -s "$OUT/clip.mp4" ]; then
   # Frames every 60 ms around the open and the close, scaled for review.
