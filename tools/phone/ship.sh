@@ -251,12 +251,15 @@ run)
       if [ -n "$d" ] && [ "$(cat "$Q/failed" 2>/dev/null)" != "$T" ]; then
         # Never inside a verify window. The phone is taken with $SL/phone while our own APK ship holds the ship
         # lock (ship-apk takes it for its install), else with the ship lock itself (a --direct ship).
-        if verify_held; then echo "$(date +%T) verify lock held ($(cat "$VL/who" 2>/dev/null)) - waiting"; sleep "$POLL"; continue; fi
+        # Held: ask the verify queue to yield before its next check (queue.sh reads wants-phone, as for ship-apk) - it
+        # touches its lock every heartbeat, so waiting for the lock alone held every ship for a whole window (15:07-15:41,
+        # 2026-10-23). Cleared below once the phone is ours and done.
+        if verify_held; then echo $$ > "$Q/wants-phone"; echo "$(date +%T) verify lock held ($(cat "$VL/who" 2>/dev/null)) - asked it to yield, waiting"; sleep "$POLL"; continue; fi
         if apk_alive && mkdir "$SL/phone" 2>/dev/null; then held="$SL/phone"
         elif ! apk_alive && ship_lock; then held=$SL
         else echo "$(date +%T) the phone is busy ($(cat "$SL/who" 2>/dev/null)$( [ -d "$SL/phone" ] && echo ', installing')) - waiting"; sleep "$POLL"; continue; fi
         echo $$ > "$Q/installing"
-        [ -e "$Q/paused" ] && { rm -f "$Q/installing"; rm -rf "$held"; continue; }
+        [ -e "$Q/paused" ] && { rm -f "$Q/installing"; rm -rf "$held"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"; continue; }
         sn=$(joined ${snotes[@]+"${snotes[@]}"})
         if [ -n "$sn" ]; then na=(--note "$sn"); else na=(--silent); fi
         log=$Q/done/$(date +%Y%m%d-%H%M%S)-${T:0:9}.log
@@ -270,7 +273,7 @@ run)
         if [ $rc = 0 ] && [ -n "$gone" ]; then
           (cd shell && POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship ./push.sh --vpn --reset $gone) >> "$log" 2>&1 || rc=$?
         fi
-        rm -rf "$held"; rm -f "$Q/installing"
+        rm -rf "$held"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
         if [ $rc = 0 ]; then
           echo "$T" > "$Q/live"; rm -f "$Q/failed"
           echo "$(date '+%F %T') ${T:0:9} shell ${#sreqs[@]} req ($who_s): ${sn:-(silent)}" >> "$Q/shipped.log"
