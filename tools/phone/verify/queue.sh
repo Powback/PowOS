@@ -335,6 +335,7 @@ EOS
     for _ in $(seq 90); do [ -f "$wp" ] && kill -0 "$(cat "$wp" 2>/dev/null)" 2>/dev/null || break; sleep 10; done   # every queued check waits for a ship: look again in a minute
   done
   RSTATE=idle phone_sh ':' >/dev/null
+  wl_sleep "$phone"   # the screen back off if the queue woke it (window-lock.sh)
   rm -f "$Q/runner.pid"; rm -rf "$Q/runner.lock" ;;
 *) sed -n 2,15p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

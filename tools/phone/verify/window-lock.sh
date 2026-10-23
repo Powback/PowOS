@@ -8,6 +8,22 @@
 # it ("idle=... screen=..." or "go=<task|all> screen=..."); the pill's stop flag ends it with exit 6 (the runner pauses).
 # WL_PHONE: the tools/phone dir to use (the runner's, a stub in tests). VERIFY_STATE set (the runner): while another
 # check holds the lock, its heartbeat file on the phone is touched at each 20 s look (idle.sh's).
+# wl_wake <phone dir>: wake the screen and dismiss the keyguard when it's off and nobody touched it for WAKE_IDLE_S;
+# marks ~/.cache/powos-verify-woke so the runner puts it back to sleep after (queue.sh, wl_sleep).
+wl_wake() {
+  local st i; st=$("$1/idle.sh" 2>/dev/null); i=$(sed -n 's/.*idle=\([0-9]*\).*/\1/p' <<<"$st")
+  case "$st" in *screen=Awake*) return 0 ;; esac
+  [ -n "$i" ] && [ "$i" -ge "${WAKE_IDLE_S:-600}" ] || return 0
+  "$1/adb.sh" shell 'input keyevent KEYCODE_WAKEUP; sleep 1; wm dismiss-keyguard' >/dev/null 2>&1 && touch "$HOME/.cache/powos-verify-woke"
+  echo "woke the screen for the checks (idle ${i}s)"
+}
+# wl_sleep <phone dir>: the screen back off if wl_wake woke it and still nobody touched it.
+wl_sleep() {
+  [ -e "$HOME/.cache/powos-verify-woke" ] || return 0
+  local i; i=$("$1/idle.sh" 2>/dev/null | sed -n 's/.*idle=\([0-9]*\).*/\1/p')
+  [ -n "$i" ] && [ "$i" -ge "${QUEUE_IDLE_S:-120}" ] && "$1/adb.sh" shell 'input keyevent KEYCODE_SLEEP' >/dev/null 2>&1
+  rm -f "$HOME/.cache/powos-verify-woke"
+}
 window_lock() {
   local name=$1 need=${2:-120} max=${3:-${WAIT_S:-7200}} phone end s
   [ "${LOCK_HELD:-0}" = 1 ] && return 0
@@ -17,7 +33,14 @@ window_lock() {
   while :; do
     local left=$(( end - $(date +%s) ))
     [ $left -gt 0 ] || { echo "$name: no free window in ${max}s"; exit 3; }
-    s=$(AWAKE_ONLY=1 "$phone/idle.sh" --wait "$need" "$left") || { echo "$name: no free window: $s"; exit 3; }
+    # In 5-min chunks: between them, a screen that is off with nobody touching it for WAKE_IDLE_S (600; 0 = never) is
+    # woken and its keyguard dismissed (no PIN) - the user's ask, 2026-10-23 ("so wake the screen"): checks waited
+    # all night for an Awake screen. The touch counters still decide idle, so any finger ends it as before.
+    local chunk=$left; [ "${WAKE_IDLE_S:-600}" -gt 0 ] && [ $chunk -gt 300 ] && chunk=300
+    if ! s=$(AWAKE_ONLY=1 "$phone/idle.sh" --wait "$need" "$chunk"); then
+      [ $chunk -lt $left ] || { echo "$name: no free window: $s"; exit 3; }
+      wl_wake "$phone"; continue
+    fi
     case "$s" in stop*) WL_GOT=$s; echo "$name: stopped from the phone"; exit 6 ;; esac
     if mkdir "$WL_LOCK" 2>/dev/null; then
       echo "$name $(date +%T) (pid $$)" > "$WL_LOCK/who"
