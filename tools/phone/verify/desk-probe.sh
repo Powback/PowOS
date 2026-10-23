@@ -60,8 +60,8 @@ pass_() { # <tag>
   else fail "[$tag] no bar"; fi
   # B: the grip, towards the side with room.
   local g; g=$(wframe "PowOS window grip $CT}")
-  if [ -n "$g" ]; then set -- $g; x=$((($1 + $3) / 2)); y=$((($2 + $4) / 2)); local s=1; [ $x -gt $((W - $(dp 140))) ] && s=-1
-    b0=$(tbounds "$CT"); mdown $x $y "the grip" && { mpath $x $y $((x + s * $(dp 100))) $((y + s * $(dp 60))) 6; sleep 0.8
+  if [ -n "$g" ]; then set -- $g; x=$((($1 + $3) / 2)); y=$((($2 + $4) / 2)); local s=1; { [ $x -gt $((W - $(dp 140))) ] || [ $y -gt $((H - $(dp 200))) ]; } && s=-1   # inwards near an edge
+    b0=$(tbounds "$CT"); mdown $x $y "the grip" && { note "[$tag] touch on the grip: $(touched)"; mpath $x $y $((x + s * $(dp 100))) $((y + s * $(dp 60))) 6; sleep 0.8
       step "$tag-resizing" "[$tag] the grip, finger down"; where "$CT"
       mup $((x + s * $(dp 100))) $((y + s * $(dp 60))); sleep 1.5; chk grip
       step "$tag-resized" "[$tag] the grip let go"; where "$CT"; b1=$(tbounds "$CT")

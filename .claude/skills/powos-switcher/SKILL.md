@@ -222,3 +222,14 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   caption overlay on, a sideways swipe in the app's top ~40 dp drags the TASK (system drag, not ours) and PowOS's bar
   and the list stay behind; and the bar's close left Calculator and Dolphin open (now logged: PowosWindowFrame
   "close task N: removed|NOT removed", PowosTasks "removeTask(N) said no").
+- Fixed (desk-r3, 2026-10-23): a 0 dp SystemUI caption gives its input window an EMPTY crop = no crop, so its
+  touchable region is the whole task and its root (the caption = DragDetector) drags the task from anywhere
+  (`dumpsys input | grep "Caption of Task"`). OemCaption makes it 1 px; WindowFrame's bar window reaches 1 px into the
+  task over it (OemCaption.CAPTION_PX). The 1 px captionBar inset is by design (float-windows checks its input row).
+- A task's bounds set with WindowOrganizer.applyTransaction move it in WM only: WM Shell owns the leash, so the app's
+  content AND its touches stayed at the old place until a minimise. Bar moves now go to WM once at the lift, as
+  WindowOrganizer.startNewTransition(TRANSIT_CHANGE, wct) (FreeformTasks.Live.end); live resizes keep applyTransaction.
+- The bar's close worked on 0f098c06 for Calculator, Dolphin, Gwenview (desk-probe r3 touch state: the bar window
+  gets the DOWN, nobody pilfers). The r2a failures (APK 367633db) stayed unexplained.
+- Touch evidence in a check: `input motionevent DOWN`, then `dumpsys input` TouchStatesByDisplay lists the windows
+  the finger went to + pilferingPointerIds, then UP (desk-probe dtap/touched).

@@ -115,14 +115,24 @@ bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]
 D=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1); px() { echo $(( $1 * D / 160 )); }
 bars=$(sh_ "dumpsys window windows | grep -c \"PowOS window bar\""); echo "frame bars: $bars" | tee -a "$OUT/mode.txt"
 [ "${bars:-0}" -ge 1 ] && pass "a title bar" || fail "no title bar"
-# ONE title bar: SystemUI's own caption (WM Shell CaptionWindowDecoration: back/min/max/close inside the task) is off
-# through the overlay system/OemCaption.kt registers - enabled, and no caption bar inset with any height on the screen.
+# ONE title bar: SystemUI's own caption (WM Shell CaptionWindowDecoration: back/min/max/close inside the task) is
+# shrunk to 1 px through the overlay system/OemCaption.kt registers (0 px made its input window the whole task: a drag
+# anywhere moved the window), and that 1 px row - its input window too - lies under PowOS's bar, which takes the touch.
 sh_ "cmd overlay list com.android.systemui" | grep -q '^\[x\] com.android.shell:PowosNoCaption' &&
   pass "the system's caption overlay is on" || fail "the system's caption overlay (com.android.shell:PowosNoCaption) isn't enabled"
 caps=$(sh_ "dumpsys window" | grep -oE 'type=captionBar frame=\[[0-9-]+,[0-9-]+\]\[[0-9-]+,[0-9-]+\]' | sort -u)
 echo "caption insets: ${caps:-none}" | tee -a "$OUT/mode.txt"
-tall=$(echo "$caps" | tr -c '0-9\n-' ' ' | awk 'NF>=4 && $4-$2>0' | wc -l | tr -d ' ')
-[ "${tall:-0}" = 0 ] && pass "one title bar: no system caption" || fail "the system's caption still has height: $caps"
+tall=$(echo "$caps" | tr -c '0-9\n-' ' ' | awk 'NF>=4 && $4-$2>1' | wc -l | tr -d ' ')
+[ "${tall:-0}" = 0 ] && pass "one title bar: the system's caption is at most 1 px" || fail "the system's caption is taller than 1 px: $caps"
+TIDC=$(sh_ "am stack list | grep -m1 $PKG" | grep -oE 'taskId=[0-9]+' | head -1 | tr -dc 0-9)
+CIN=$(sh_ "dumpsys input" | grep -m1 "Embedded{Caption of Task=$TIDC}" | grep -oE 'touchableRegion=(<empty>|\[-?[0-9]+,-?[0-9]+\]\[-?[0-9]+,-?[0-9]+\])' | head -1)
+CBAR=$(sh_ "dumpsys window windows" | awk -v p="PowOS window bar $TIDC}" '/^ *Window #/{f=(index($0,p)>0)} f' | grep -oE ' frame=\[-?[0-9]+,-?[0-9]+\]\[-?[0-9]+,-?[0-9]+\]' | head -1 | tr -c '0-9\n-' ' ')
+echo "caption input of task $TIDC: ${CIN:-none}; its bar: ${CBAR:-none}" | tee -a "$OUT/mode.txt"
+read -r CL CT CR CB <<<"$(echo "$CIN" | grep -oE '\[-?[0-9]+,-?[0-9]+\]\[-?[0-9]+,-?[0-9]+\]' | head -1 | tr -c '0-9\n-' ' ')"
+if [ -z "${CB:-}" ]; then pass "the system's caption takes no touches (no touchable region: ${CIN:-no input window})"
+elif [ $((CB - CT)) -le 1 ] && [ -n "$(echo $CBAR)" ] && set -- $CBAR && [ "$2" -le "$CT" ] && [ "$4" -ge "$CB" ] && [ "$1" -le "$CL" ] && [ "$3" -ge "$CR" ]; then
+  pass "the system's caption takes touches only in its 1 px row, under PowOS's bar ($CL $CT $CR $CB inside $*)"
+else fail "the system's caption takes touches outside PowOS's bar: $CIN (bar ${CBAR:-none})"; fi
 read -r XL XT XR XB <<<"$(bounds)"; echo "before: $XL $XT $XR $XB"
 [ -n "${XB:-}" ] || fail "no bounds for the task"
 # On THIS window's bar frame (its middle row): another window's bar cascaded over the same spot took the drag

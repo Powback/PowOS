@@ -218,6 +218,12 @@ e2e_restore() {
   [ -n "$kill" ] && us "for p in$kill; do pkill -x \$p; done; true" >/dev/null
   [ $FORCED = 1 ] && { sh_ "cmd device_state state reset"; sleep 1.5; }
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1
+  # Once more after home is up: a minimised window (under home) wasn't in the list the first read saw (e2e r3 part 1
+  # left Calculator 2494 open, "closed" never logged for it).
+  local id2 pkg2 vis2
+  while read -r id2 pkg2 vis2; do
+    [ -n "$id2" ] && ! grep -q "^$id2 " <<<"$TASKS0" && grep -qE "$E2E_APPS" <<<"$pkg2" && { sh_ "am stack remove $id2"; log "closed task $id2 ($pkg2): the journey opened it (second pass)"; }
+  done <<<"$(tasks)"
   [ -n "${PAGE0:-}" ] && setpage "$PAGE0"
   [ -n "${TOPT:-}" ] && [ -n "$(tasks | grep "^$TOPT ")" ] && { hcall tasks.open "[$TOPT]" "()=>'ok'" >/dev/null; log "the app in front at the start (task $TOPT) is back"; }
   log "restored"

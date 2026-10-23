@@ -134,7 +134,9 @@ export async function startDesktops() {
  * launcher (planned in docs/DESKTOP-WEB-SHELL.md; Runtime.launch brings a running one to the front meanwhile).
  */
 export async function dockTap(key: string) {
-  const front = windows.value.find((w) => !w.minimised && !w.away);
+  // The top-most one SHOWING: a listed task that isn't visible (no bounds - e.g. a translucent PowOS task left in
+  // freeform, seen 2026-10-23) is no one's front, or a tap on Chrome in front launched instead of minimising (e2e r3).
+  const front = windows.value.find((w) => !w.minimised && !w.away && !!w.bounds);
   if (front && isOf(front, key) && powos.floating?.minimise) {
     const done = await powos.floating.minimise(front.id).catch(() => false);
     if (done) return;

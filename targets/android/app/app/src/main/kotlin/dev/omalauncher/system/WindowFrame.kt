@@ -103,7 +103,8 @@ class WindowFrame(
                 wm.addView(grip, gripParams)
                 added = true
                 barBlur.set(1f)
-                gripBlur.set(1f)
+                // The grip shows only while a finger is on it (the user, 2026-10-23: no disc floating over other windows).
+                grip.alpha = 0f
                 // What the device check reads: the bar's size and its frost as drawn.
                 android.util.Log.i(
                     "PowosWindowFrame",
@@ -354,23 +355,31 @@ class WindowFrame(
             e: MotionEvent,
         ): Boolean {
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    x0 = e.rawX
-                    y0 = e.rawY
-                    from = Rect(bounds)
-                    FreeformTasks.raise(context, id)
+                MotionEvent.ACTION_DOWN -> down(e)
+                MotionEvent.ACTION_MOVE -> moveTo(e)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    release(e)
+                    if (!move) showGrip(false)
                 }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = (e.rawX - x0).toInt()
-                    val dy = (e.rawY - y0).toInt()
-                    if (!dragging && dx * dx + dy * dy < slop * slop) return true
-                    if (!dragging) startDrag(resizing = !move)
-                    dragging = true
-                    follow(if (move) moved(from, dx, dy) else resized(from, dx, dy), e)
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> release(e)
             }
             return true
+        }
+
+        private fun down(e: MotionEvent) {
+            x0 = e.rawX
+            y0 = e.rawY
+            from = Rect(bounds)
+            FreeformTasks.raise(context, id)
+            if (!move) showGrip(true)
+        }
+
+        private fun moveTo(e: MotionEvent) {
+            val dx = (e.rawX - x0).toInt()
+            val dy = (e.rawY - y0).toInt()
+            if (!dragging && dx * dx + dy * dy < slop * slop) return
+            if (!dragging) startDrag(resizing = !move)
+            dragging = true
+            follow(if (move) moved(from, dx, dy) else resized(from, dx, dy), e)
         }
     }
 
@@ -386,12 +395,22 @@ class WindowFrame(
      */
     private fun legacyDrag() = android.provider.Settings.Global.getInt(context.contentResolver, "powos_drag_legacy", 0) == 1
 
+    /** The grip's disc and frost on (a finger on it) or off. */
+    private fun showGrip(on: Boolean) {
+        grip.alpha = if (on) 1f else 0f
+        gripBlur.set(if (on) 1f else 0f)
+    }
+
+    /** A move (not a resize) is under way: the task moves once, when the finger lifts ([settle]). */
+    private var moving = false
+
     /** A drag starts: the task's bounds go live ([FreeformTasks.Live]); the frame's own windows step aside (drawn by the drag layer, no relayout per move). */
     private fun startDrag(resizing: Boolean) {
+        moving = !resizing
         worker.execute { live = FreeformTasks.Live(context, id, resizing) }
         if (legacyDrag()) return
         val bitmapOf = { v: View -> runCatching { v.drawToBitmap() }.getOrNull() }
-        drag = DragLayer(context, bitmapOf(bar), bitmapOf(grip), dp(BAR_DP + HIT_DP), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)
+        drag = DragLayer(context, bitmapOf(bar), if (resizing) bitmapOf(grip) else null, dp(BAR_DP + HIT_DP), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)
         bar.alpha = 0f
         grip.alpha = 0f
         barBlur.set(0f)
@@ -426,9 +445,7 @@ class WindowFrame(
         }
         drag = null
         bar.alpha = 1f
-        grip.alpha = 1f
         barBlur.set(1f)
-        gripBlur.set(1f)
         // The windows are there once this frame is drawn; the layer goes after it (no frame without one or the other).
         bar.postOnAnimation { layer.hide("task $id drag") }
     }
@@ -504,6 +521,10 @@ class WindowFrame(
 
     /** The task to [r]: the newest target only, one call at a time, off the main thread; live while a finger has it. */
     private fun resize(r: Rect) {
+        // A move goes to WM once, at the end, as a transition (FreeformTasks.Live.end): bounds set in WM on the way
+        // left the app's content - and its touches - where the window had been (e2e r3: bar at 887, content at 556),
+        // and the last of them would leave the end nothing to change.
+        if (moving) return
         if (pending.getAndSet(r) == null) {
             worker.execute {
                 val to = pending.getAndSet(null) ?: return@execute
@@ -523,6 +544,7 @@ class WindowFrame(
     /** The finger lifted, the task at [r]: its last live bounds, drag-resizing off, the drag's numbers logged. */
     private fun settle(r: Rect) {
         pending.set(null)
+        moving = false
         worker.execute {
             val l = live
             // The listed windows (home's windows.list, its gestures' no-go boxes) again: a bounds change of ours fires
@@ -568,10 +590,10 @@ class WindowFrame(
 
         /** A button's mark, across. */
         private const val GLYPH_DP = 8f
-        private const val GRIP_DP = 36f
+        private const val GRIP_DP = 28f
 
-        /** How far the grip reaches outside the window's corner. */
-        private const val GRIP_OUT_DP = 12f
+        /** How far the grip reaches outside the window's corner: none, it sits inside (the user, 2026-10-23). */
+        private const val GRIP_OUT_DP = 0f
         private const val KEEP_DP = 96f
 
         /** How near the screen's side a let-go is an edge drop (the next page). */

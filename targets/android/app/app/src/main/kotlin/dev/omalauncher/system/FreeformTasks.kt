@@ -156,7 +156,7 @@ object FreeformTasks {
         context: Context,
         id: Int,
         change: (Any, Any) -> Unit,
-    ): Result<Unit> = runCatching { apply(token(context, id), change) }
+    ): Result<Unit> = runCatching { apply(token(context, id), change = change) }
 
     /** Task [id]'s WindowContainerToken (TaskInfo.token, hidden). */
     private fun token(
@@ -169,15 +169,29 @@ object FreeformTasks {
         return android.app.TaskInfo::class.java.getField("token").get(info)!!
     }
 
+    /**
+     * Applies [change] to the window of [token]. [transition]: as a change transition (WindowOrganizer.startNewTransition,
+     * TRANSIT_CHANGE) that WM Shell plays, so its leash - where the app's content is drawn - goes to the new bounds too.
+     * A bare applyTransaction moves the task in WM only: WM Shell owns the task's surface position, and the content
+     * stayed drawn where the window had been until a minimise and restore (e2e r3 2026-10-23: bar at 887, the app at
+     * 556 after a bar drag).
+     */
     private fun apply(
         token: Any,
+        transition: Boolean = false,
         change: (Any, Any) -> Unit,
     ) {
         val wctClass = Class.forName("android.window.WindowContainerTransaction")
         val wct = wctClass.getConstructor().newInstance()
         change(wct, token)
         val organizer = Class.forName("android.window.WindowOrganizer")
-        organizer.getMethod("applyTransaction", wctClass).invoke(organizer.getConstructor().newInstance(), wct)
+        val o = organizer.getConstructor().newInstance()
+        if (transition) {
+            val started = runCatching { organizer.getMethod("startNewTransition", Int::class.javaPrimitiveType, wctClass).invoke(o, TRANSIT_CHANGE, wct) }
+            if (started.isSuccess) return
+            Log.w(TAG, "no change transition, the bounds without one", started.exceptionOrNull())
+        }
+        organizer.getMethod("applyTransaction", wctClass).invoke(o, wct)
     }
 
     /**
@@ -211,7 +225,8 @@ object FreeformTasks {
         ): Boolean {
             val t = token ?: return resize(id, bounds).let { false }
             return runCatching {
-                apply(t) { wct, tok ->
+                // The last one (the finger lifted) as a transition: WM Shell puts the app's content where the window is.
+                apply(t, transition = !drag) { wct, tok ->
                     wct.javaClass.getMethod("setBounds", tok.javaClass, Rect::class.java).invoke(wct, tok, bounds)
                     if (resizing && drag != started) wct.javaClass.getMethod("setDragResizing", tok.javaClass, Boolean::class.javaPrimitiveType).invoke(wct, tok, drag)
                 }
@@ -253,6 +268,9 @@ object FreeformTasks {
     }
 
     private const val MAX_TASKS = 24
+
+    /** WindowManager.TRANSIT_CHANGE (hidden). */
+    private const val TRANSIT_CHANGE = 6
 
     private fun atm(): Any = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!!
 }
