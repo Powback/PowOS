@@ -31,6 +31,9 @@ stop_phone() { "$A" shell "su -c 'pkill -TERM -f powos-bf-coldstart-phone.sh'" >
   | sed -l $'s/\r$//' | tee "$OUT/run.txt"; } &
 job=$!; trap stop_phone TERM INT HUP; wait "$job"; trap - TERM INT HUP
 "$A" shell "su -c 'rm -f /data/local/tmp/powos-open-task /data/local/tmp/powos-bf-coldstart-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-bf-coldstart-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-stop.sh'"
+# A Steam dialog the phone side grabbed (no launch chain: what Steam asked).
+"$A" exec-out "su -c 'tar -C /data/powos/root/tmp -cz bf-cold-dialog 2>/dev/null; rm -rf /data/powos/root/tmp/bf-cold-dialog'" 2>/dev/null | tar -C "$OUT" -xzf - 2>/dev/null \
+  && [ -d "$OUT/bf-cold-dialog" ] && echo "steam dialog: $OUT/bf-cold-dialog/"
 echo "artefacts: $OUT/run.txt"
 grep -q "^RESULT" "$OUT/run.txt" || { grep -q "^user input\|^stopped from outside\|^not ready" "$OUT/run.txt" && exit 3; echo "FAIL run: no RESULT line"; exit 1; }
 grep "^RESULT" "$OUT/run.txt" | tail -1

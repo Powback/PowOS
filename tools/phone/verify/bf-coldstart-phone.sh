@@ -172,6 +172,11 @@ run() {  # run <variant> <n>
       if [ -z "$r" ] && [ -z "$(iscript_reapers)" ] && [ "$now_" -gt 60000 ]; then
         echo "     no launch yet - X windows: $(xwininfo -root -tree 2>/dev/null | sed -nE 's/^ +0x[0-9a-f]+ "([^"]+)".* ([0-9]+x[0-9]+)\+.*/\1 \2/p' | sort | uniq -c | sort -rn | head -12 | awk '{$1=$1; print}' | tr '\n' '|')"
         echo "     console_log: $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -v '^\s*$' | tail -6 | cut -c1-150 | tr '\n' '|')"
+        # A Steam dialog up (ABZU 09:45: "Steam Dialog" 700x480 the whole time, no launch): its picture, once, for the
+        # Mac side to pull (bf-coldstart.sh copies /tmp/bf-cold-dialog into the artefacts).
+        if [ -z "${dialog_grabbed:-}" ] && xwininfo -root -tree 2>/dev/null | grep -q '"Steam Dialog"'; then
+          dialog_grabbed=1; rm -rf /tmp/bf-cold-dialog; xframes grab "Steam Dialog" 1 /tmp/bf-cold-dialog >/dev/null 2>&1
+          echo "     Steam Dialog grabbed: $(ls /tmp/bf-cold-dialog 2>/dev/null | tr '\n' ' ')"; fi
         echo "     downloading: $(ls "$S/steamapps/downloading" 2>/dev/null | tr '\n' ' ') content_log: $(tail -2 "$S/logs/content_log.txt" 2>/dev/null | cut -c1-150 | tr '\n' '|')"
       fi
       if [ -n "$(iscript_reapers)" ] && [ "$now_" -gt 60000 ]; then
