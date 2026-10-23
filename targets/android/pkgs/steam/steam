@@ -165,6 +165,10 @@ ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 # software rendering. Only the GPU process goes unsandboxed; pages and the rest stay sandboxed (was -no-cef-sandbox:
 # none at all; checked 2026-10-17: GPU process up and steady, renderers sandboxed). Real fix: the KGSL device in
 # Chromium's GPU sandbox broker allowlist (CEF/Valve side).
+# POWOS_STEAM_ARGS (steam-env / ~/.config/powos/steam-env, or a check's env): extra client options, word-split, e.g.
+# -noshaders (no shader pre-caching: Steam's "Processing Vulkan shaders" held RimWorld's launch 28 s, 2026-10-23 05:46,
+# fossilize under FEX). Set only once measured (bf-coldstart env:POWOS_STEAM_ARGS=-noshaders).
+POWOS_STEAM_ARGS=${POWOS_STEAM_ARGS:-}
 cd "$S/steamrtarm64" || exit 1
 # A steam:// URL for a client that already runs: Steam's own forwarding (this binary writes the command line into
 # ~/.steam/steam.pipe and exits) - and the running ARM64 client reads it and drops it: since 2026-10-20 no forwarded
@@ -181,7 +185,7 @@ client_up() { case $(readlink "/proc/$(cat "$HOME/.steam/steam.pid" 2>/dev/null 
 if [ -n "$url" ] && client_up; then
   CL=$S/logs/console_log.txt; n=$(wc -l < "$CL" 2>/dev/null || echo 0)
   taken() { local i; for i in $(seq $(($1 * 4))); do tail -n +$((n + 1)) "$CL" 2>/dev/null | grep -qF "$url" && return 0; sleep 0.25; done; return 1; }
-  ./steam -cef-disable-gpu-sandbox "$@"
+  ./steam -cef-disable-gpu-sandbox $POWOS_STEAM_ARGS "$@"
   taken "${HANDOFF_S:-5}" && exit 0
   echo "steam: the running client didn't take $url - writing it into steam.pipe" >&2
   printf "'%s' '-cef-disable-gpu-sandbox' '%s'\n" "$S/steamrtarm64/steam" "$url" | timeout 3 tee "$HOME/.steam/steam.pipe" > /dev/null
@@ -197,4 +201,4 @@ if [ -n "$url" ] && client_up; then
   for _ in $(seq 8); do [ -d "/proc/$p" ] || break; sleep 0.25; done
   exec "$0" "$@"   # the not-running path: IPC cleanup, registry guard, compat policy, then a client with the URL
 fi
-exec ./steam -cef-disable-gpu-sandbox "$@"
+exec ./steam -cef-disable-gpu-sandbox $POWOS_STEAM_ARGS "$@"
