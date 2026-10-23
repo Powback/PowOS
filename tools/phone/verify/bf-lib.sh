@@ -234,7 +234,17 @@ clean_stale() {
   for p in $s; do kill -9 $(tree "$p") 2>/dev/null; done; sleep 2
 }
 
-# step_launch: Broforce up through the drawer's path (a running one: brought up the same way). Sets W, LAUNCH.
+# handoff_diag: why a running Steam didn't take a steam:// launch: its state, its threads' states + the main thread's
+# wchan, its cgroup, steam.pipe's mtime (the URL was written into it then), the frozen sleep cgroups (a D-Bus / X peer
+# it may wait on), powos-sleep-gui's last lines. One line.
+handoff_diag() {
+  local p; p=$(steam_pid)
+  echo "steam $p $(awk '{print "state " $3}' "/proc/$p/stat" 2>/dev/null || echo gone) threads $(cat /proc/"$p"/task/*/stat 2>/dev/null | awk '{print $3}' | sort | uniq -c | tr -s ' \n' ' ')wchan $(cat "/proc/$p/wchan" 2>/dev/null) cgroup $(cut -d: -f3 "/proc/$p/cgroup" 2>/dev/null | tail -1) exe $(readlink "/proc/$p/exe" 2>/dev/null); pipe written $(date -r ~/.steam/steam.pipe +%T 2>/dev/null); frozen cgroups: $(for f in /sys/fs/cgroup/powos/sleep/*/cgroup.freeze; do [ "$(cat "$f" 2>/dev/null)" = 1 ] && printf '%s ' "$(basename "$(dirname "$f")")"; done); console_log last: $(tail -1 "$HOME/.local/share/Steam/logs/console_log.txt" | cut -c1-120); sleep-gui: $(tail -2 "$GLOG" | cut -c1-160 | tr '\n' '|')"; }
+
+# step_launch: the game up through the drawer's path (a running one: brought up the same way). Sets W, LAUNCH.
+# A Steam that runs (awake or frozen) logs the launch's URL at once ("ExecCommandLine ... steam://rungameid/<id>" in
+# console_log): nothing in HANDOFF_S (20) = the launch was lost (2026-10-23 02:42: a -silent resident Steam took the
+# URL into steam.pipe and never acted on it) - FAIL launch-handoff with handoff_diag, not a 6 min wait.
 step_launch() {
   clean_stale
   local r t0 st e; r=$(reaper); W=$(gamewin)
@@ -243,9 +253,16 @@ step_launch() {
   fi
   [ -z "$r" ] && mine=1
   pill "launching $GAME$([ -n "$r" ] && echo ' (already running)')"
+  local CL=$HOME/.local/share/Steam/logs/console_log.txt cl0 up i
+  cl0=$(wc -l < "$CL" 2>/dev/null || echo 0); up=$([ -z "$r" ] && [ -d "/proc/$(steam_pid)" ] && echo 1)
   t0=$(now)
   ( open_task $((LAUNCH_S + 10)) "steam_app_$APP" > "$T/open.status" ) &
-  for _ in $(seq $((LAUNCH_S * 2))); do W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && break; touched; sleep 0.5; done
+  for i in $(seq $((LAUNCH_S * 2))); do W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && break
+    if [ "$up" = 1 ] && [ "$i" = $((${HANDOFF_S:-20} * 2)) ]; then
+      if tail -n +$((cl0 + 1)) "$CL" 2>/dev/null | grep -q "steam://rungameid/$APP"; then up=; echo "launch: Steam took the URL"
+      else fail launch-handoff "the running Steam didn't log the launch's URL in ${HANDOFF_S:-20} s: $(handoff_diag); open-task: $(cat "$T/open.status" 2>/dev/null)"; return 1; fi
+    fi
+    touched; sleep 0.5; done
   LAUNCH=$(ms "$t0" "$(now)")
   if [ -z "$W" ] || [ "$(mapped "$W")" != IsViewable ]; then
     fail launch "no mapped $WIN_NAME window ${LAUNCH} ms after the launch (window '${W:-none}' $(mapped "${W:-0}")); steam $(steam_pid) frozen '$(cg)', reaper '$(reaper)' $(tree "$(reaper)" | wc -w) processes, watcher: $(watcher 3)"

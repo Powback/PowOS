@@ -62,6 +62,13 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   reaper's tree in that cgroup + 0 CPU ticks in 2 s; resume = out of the cgroup, same reaper, window mapped, a new
   x11grab frame <= RESUME_MS (3000). A touch / stop closes what the check started (exit 3). Launch chains outside
   Steam's tree (ppid 1, a dead Steam's) are killed first: never frozen or resumed, they hold the prefix.
+- Lost launch 2026-10-23 02:42 (bf-launchpaths FAIL launch, 394 s, no reaper): Steam 27858 (`-silent`, started 02:37:32
+  by powos-steam-resident) was NOT frozen (no sleep cgroup, no freeze line) and alive: open-task's URL went into
+  ~/.steam/steam.pipe (mtime 02:42:47) but the client never logged it (console_log silent 02:38:05-02:53:57, no
+  ExecCommandLine); the session restart at 02:53 replaced it and the next launch (a cold Steam) worked. Cause not
+  pinned yet: bf-lib step_launch now fails `launch-handoff` after 20 s with handoff_diag (thread states, wchan, frozen
+  sleep cgroups = a D-Bus/X peer it may wait on, pipe mtime). sleep-gui's log restarts with each session: read
+  watcher lines in the check log for older ones.
 - Never auto-frozen before its first window (sleep-gui GAME_WINDOW_S 600): a cold start outlasts the 2 min grace.
 - The user's model (2026-10-23): a game is kept in the background ONLY after the user started it and navigated away
   (home, another app, fold) - frozen like Steam, a tap on its icon resumes it. No game is ever started for the user:
