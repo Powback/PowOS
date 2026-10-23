@@ -54,8 +54,15 @@ export function overRelease(raise = true): boolean {
   return go;
 }
 
-/** The foot's search field focused and the keyboard asked for, now (bar.tsx's tap does the same). */
+/**
+ * The open panel's field focused, then the keyboard asked for (bar.tsx's tap does the same): the foot's search - or,
+ * on the wide home, PowOS AI's compose, since its panel hides the foot's bar (shell.css) and a hidden field takes no
+ * focus. No field took it: no keyboard (one with nothing to type into).
+ */
 function raiseSearch() {
-  document.querySelector<HTMLTextAreaElement>(".home > .bar textarea")?.focus();
-  void powos.keyboard.show();
+  for (const sel of [".home > .bar textarea", ".ai-panel .ai-compose textarea"]) {
+    const field = document.querySelector<HTMLTextAreaElement>(sel);
+    field?.focus();
+    if (field && document.activeElement === field) return void powos.keyboard.show();
+  }
 }

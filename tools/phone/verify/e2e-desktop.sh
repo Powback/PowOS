@@ -259,8 +259,9 @@ part3() {
   [ "$(isopen)" = true ] && [ "$(ev "document.activeElement&&document.activeElement.matches('.home > .bar textarea')?'yes':'no'")" = no ] && [[ "$(ime)" == *false* ]] &&
     pass "the drawer is up, the search isn't focused, no keyboard" || fail "stage 1: drawer open=$(isopen), $(ime)"
   back; back 0.6
-  # A clear spot low enough for a pull of 48 % of the screen, under no window (freept), like stage 1's.
-  local p2; p2=$(freept "" 0 0 .06 .5); Y0=0; [ "$p2" != none ] && [ -n "$p2" ] && { set -- $p2; X=$1; Y0=$2; }
+  # A clear spot low enough for a pull of 48 % of the screen, under no window (freept), on the right half like stage
+  # 1's: the left half is PowOS AI's pull-up corner (its compose, not the search, 12:48 round 3).
+  local p2; p2=$(freept "" 0 0 .54 .5); Y0=0; [ "$p2" != none ] && [ -n "$p2" ] && { set -- $p2; X=$1; Y0=$2; }
   if [ "${Y0:-0}" -gt 0 ] && offpill $X "$Y0" "empty space (the long pull)"; then
     # pullup-stage2.sh's pull: the DOWN and its move past the slop in ONE phone call (a DOWN held until the next adb
     # call is a long press: edit mode, rounds 2-3), then on up to 48 % of the screen, held, let go.
