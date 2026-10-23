@@ -270,7 +270,11 @@ hang_diag() {
   for t in /proc/$x/task/*; do printf '%s:%s/%s/%s\n' "$(cut -c1-12 $t/comm 2>/dev/null | tr ' ' _)" "$(sed 's/.*) //' $t/stat 2>/dev/null | cut -d' ' -f1)" \
     "$(cut -d' ' -f1 $t/syscall 2>/dev/null)" "$(cat $t/wchan 2>/dev/null)"; done | sort | uniq -c | sort -rn | awk '{printf " %s%s", $2, ($1 > 1 ? "x" $1 : "")}' | cut -c1-700
   printf '; fds:'; ls -l /proc/$x/fd 2>/dev/null | awk '{print $NF}' | sed -E 's/\[[0-9]+\]//' | sort | uniq -c | sort -rn | head -8 | awk '{printf " %s x%s", $2, $1}'
-  printf '; wrote:'; find "$HOME" -xdev -newer /proc/$x -type f ! -path '*/Steam/logs/*' ! -path '*/.cache/*' 2>/dev/null | head -5 | tr '\n' ' '; echo
+  # Not Steam's own files (its web UI's htmlcache filled all 5 slots and hid Unity's Player.log, 2026-10-23 09:36).
+  printf '; wrote:'; find "$HOME" -xdev -newer /proc/$x -type f ! -path '*/.local/share/Steam/*' ! -path '*/.cache/*' 2>/dev/null | head -8 | tr '\n' ' '; echo
+  # The game's own log, last lines (Unity: ~/.config/unity3d/<company>/<product>/Player.log): where its start stands.
+  local l; l=$(find "$HOME/.config" "$HOME/.local/share" -xdev -newer /proc/$x -type f \( -name '*.log' -o -name '*.txt' \) ! -path '*/Steam/*' 2>/dev/null | head -1)
+  [ -n "$l" ] && { echo "game log $l ($(wc -l < "$l") lines), last:"; tail -12 "$l" | tr -d '\r' | cut -c1-160 | sed 's/^/  | /'; }
 }
 # hang_stack <pid>: WHERE the busiest thread of a started game is (a busy main thread with no window: Broforce native
 # 2026-10-23, "exe" R at 100% for 4 min). gdb (in PowOS, no yama) attaches for one batch: the host backtrace (a thunked
@@ -339,14 +343,27 @@ print("stack: host pc %s" % (name(pc) or "%#x (JIT code / anonymous)" % pc))
 try:
     x28 = int(m.group(2), 16); mem = open("/proc/%s/mem" % pid, "rb")
     mem.seek(x28); q = struct.unpack("<17Q", mem.read(136))
-    rip, rsp = q[0], q[5]
-    print("stack: guest rip %s rsp %#x rax %#x rdi %#x rsi %#x" % (name(rip) or "%#x" % rip, rsp, q[1], q[8], q[7]))
-    mem.seek(rsp); st = struct.unpack("<1024Q", mem.read(8192)); n = 0
-    for v in st:
-        r = name(v)
-        if r:
-            print("stack:   guest ret? " + r); n += 1
-            if n >= 16: break
+    rip = q[0]
+    def region(v):
+        for a, b, perm, off, path in maps:
+            if a <= v < b: return "%s %s %dK" % (path or "anon", perm, (b - a) // 1024)
+        return "unmapped"
+    print("stack: guest rip %s [%s]; regs %s" % (name(rip) or "%#x" % rip, region(rip), " ".join("%#x" % v for v in q[1:])))
+    # Which greg is the stack pointer depends on FEX's CPUState layout: scan from every greg that points into rw
+    # anonymous memory (a stack), 8 KB up, for values inside file-backed executable mappings (return addresses).
+    seen, n = set(), 0
+    for v in q[1:]:
+        p, _, perm = where(v)
+        if not perm.startswith("rw") or p.startswith("/"): continue
+        try:
+            mem.seek(v & ~7); st = struct.unpack("<1024Q", mem.read(8192))
+        except Exception: continue
+        for w in st:
+            r = name(w)
+            if r and w not in seen:
+                seen.add(w); print("stack:   guest ret? " + r); n += 1
+            if n >= 20: break
+        if n >= 20: break
 except Exception as e:
     print("stack: no guest state at x28 (%s) - not in JIT code" % e)
 PY
