@@ -186,7 +186,10 @@ run)
       printf 'powos agents task set %q --step %q %s >/dev/null 2>&1 || true\n' "$1" "$2" "${4:+--image $(printf %q "$4")}"
       # Mail only what needs acting on (a FAIL, not a PASS or SKIP; QUEUE_MAIL_ALL=1 mails passes too): a pass is on the board already, and
       # each mail wakes the coordinator for a full turn (the self-optimize round, 2026-10-23: the top token cost).
-      if [[ $2 == *FAIL* ]] || [ "${QUEUE_MAIL_ALL:-0}" = 1 ]; then
+      # FAILs no longer mail the coordinator one by one: the board sweep's 10-min digest lists every FAIL nobody picked
+      # up (self-optimize round 4, 2026-10-23: per-FAIL mails were the coordinator's main wake-up, 808k ctx per turn).
+      # QUEUE_MAIL_FAILS=1 brings the per-FAIL mail back; QUEUE_MAIL_ALL=1 mails passes too.
+      if { [[ $2 == *FAIL* ]] && [ "${QUEUE_MAIL_FAILS:-0}" = 1 ]; } || [ "${QUEUE_MAIL_ALL:-0}" = 1 ]; then
         printf 'powos comms send %q %q --from verify-queue >/dev/null 2>&1 || true\n' "${QUEUE_MAIL_TO:-coder}" "$1: $2"; fi
       [ "${3:-0}" = 1 ] && printf 'powos agents task done %q >/dev/null 2>&1 || true\n' "$1")
     user_sh "$s" || echo "board update failed for $1: $2"; }
