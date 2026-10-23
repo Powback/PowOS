@@ -35,13 +35,19 @@ grep -q '"open":true' <<<"$s1" || fails+=("plain swipe: drawer not open")
 grep -q '"focus":false' <<<"$s1" && [[ "$k1" == *false* ]] || fails+=("plain swipe raised the keyboard ($k1)")
 back
 
-# 2. long pull, held at two heights
-$p/adb.sh shell input motionevent DOWN "$X" $((H * 88 / 100))
-for f in 80 72 64 56 48; do $p/adb.sh shell input motionevent MOVE "$X" $((H * f / 100)); done
+# 2. long pull, held at two heights. It starts on an EMPTY spot of the page (read over CDP), and the DOWN and its first
+# moves go in ONE phone call: a DOWN at 88% landed on the dock and, held a second until the next adb call, became an
+# icon's long press - no drawer drag at all ("lift 0 then 0", 2026-10-23), and a carried dock icon could move the
+# user's dock. Each phone call is a burst of moves; the holds between them are the finger held at a height.
+Y0=$(ev "(()=>{const d=devicePixelRatio,x=innerWidth*0.75;for(let f=0.72;f>=0.45;f-=0.03){const e=document.elementFromPoint(x,innerHeight*f);if(e&&!e.closest('.dock,.app,.bar,.tile,.home-tile,button,input,textarea,.panel,.island,.owl'))return Math.round(innerHeight*f*d)}return 0})()")
+[ "${Y0:-0}" -gt 0 ] || { echo "pullup-stage2: no empty spot to start the long pull from"; exit 3; }
+mv() { local c="" f; for f in "$@"; do c+="input motionevent MOVE $X $((Y0 - H * f / 100)); "; done; $p/adb.sh shell "$c"; }
+$p/adb.sh shell "input motionevent DOWN $X $Y0; input motionevent MOVE $X $((Y0 - H * 3 / 100))"
+mv 8 14 20 26 32
 a=$(ev "$state")
-for f in 40 32 26; do $p/adb.sh shell input motionevent MOVE "$X" $((H * f / 100)); done
+mv 38 44 48
 b=$(ev "$state")
-$p/adb.sh shell input motionevent UP "$X" $((H * 26 / 100))
+$p/adb.sh shell input motionevent UP "$X" $((Y0 - H * 48 / 100))
 sleep 1
 s2=$(ev "$state"); k2=$(ime)
 shot=$HOME/.cache/pullup-stage2/device-stage2.png; mkdir -p "$(dirname "$shot")"
@@ -55,12 +61,13 @@ back; back
 # 3. open, list flung to its end, up again
 $p/adb.sh shell input swipe "$X" $((H * 85 / 100)) "$X" $((H * 62 / 100)) 250
 sleep 0.8
-for _ in 1 2 3 4; do $p/adb.sh shell input swipe "$X" $((H * 75 / 100)) "$X" $((H * 25 / 100)) 80; done
+# Flings in one phone call (171 apps: four separate ones didn't reach the end, 2026-10-23).
+fl=""; for _ in 1 2 3 4 5 6 7 8 9 10; do fl+="input swipe $X $((H * 75 / 100)) $X $((H * 25 / 100)) 60; "; done; $p/adb.sh shell "$fl"
 sleep 1.5
 end=$(ev '(() => { const l = document.querySelector(".drawer-list"); return l ? (l.scrollTop + l.clientHeight >= l.scrollHeight - 1) : "none"; })()')
-$p/adb.sh shell input motionevent DOWN "$X" $((H * 70 / 100))
-for f in 62 54 46 38 30; do $p/adb.sh shell input motionevent MOVE "$X" $((H * f / 100)); done
-$p/adb.sh shell input motionevent UP "$X" $((H * 30 / 100))
+# One call: a DOWN on an app cell held until the next adb call would be its long press (menu / drag).
+c="input motionevent DOWN $X $((H * 70 / 100)); "; for f in 62 54 46 38 30; do c+="input motionevent MOVE $X $((H * f / 100)); "; done
+$p/adb.sh shell "$c input motionevent UP $X $((H * 30 / 100))"
 sleep 1
 s3=$(ev "$state"); k3=$(ime)
 t3=$(ev '(() => { const r = window.__pullRec; return Math.round(r.focus - r.end) + " " + (r.kb ? Math.round(r.kb - r.end) : -1); })()')
