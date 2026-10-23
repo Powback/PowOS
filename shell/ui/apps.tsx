@@ -8,8 +8,9 @@ import { running } from "./running.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { closeDrawer, dock, launch, menu, page, pages, setDocked } from "../state.ts";
 import { startCarry } from "./grid.tsx";
+import { closeApp, windowsOf } from "./desktops.ts";
 import { powos } from "../bridge.ts";
-import type { App } from "../types.ts";
+import type { App, AppWindow } from "../types.ts";
 
 const LONG_PRESS_MS = 420;
 const SLOP = 10;
@@ -161,18 +162,48 @@ export function AppIcon({ src, label }: { src: string; label?: string }) {
 const faceClass = (shape: Shape | null | undefined, missing: boolean) =>
   `app-icon-face${shape ? " placed" : ""}${shape?.kind === "plate" && !missing ? " plate" : ""}`;
 
+type Item = [string, () => void];
+
+/**
+ * A running app's window actions, first in its menu: close (the app ended: closeApp), minimise or restore its top-most
+ * window, and with two or more windows each of them, a tap bringing it to the front (the host's restore).
+ */
+function windowItems(key: string): Item[] {
+  const wins = windowsOf(key);
+  if (!running.value[key] && !wins.length) return [];
+  return [["close", () => void closeApp(key)], ...stateItem(wins[0]), ...(wins.length > 1 ? listItems(wins) : [])];
+}
+
+/** Restore for a window out of sight (minimised, on another page), else minimise; none without a window. */
+function stateItem(w: AppWindow | undefined): Item[] {
+  const f = powos.floating;
+  if (!f || !w) return [];
+  if (w.minimised || w.away) return [["restore", () => void f.restore(w.id)]];
+  return f.minimise ? [["minimise", () => void f.minimise!(w.id)]] : [];
+}
+
+/** Each window by its name (numbered when two share one); a tap brings it to the front. */
+function listItems(wins: AppWindow[]): Item[] {
+  const seen: Record<string, number> = {};
+  return wins.map((w) => {
+    const n = (seen[w.label] = (seen[w.label] ?? 0) + 1);
+    return [n > 1 ? `${w.label} ${n}` : w.label, () => void powos.floating?.restore(w.id)];
+  });
+}
+
 /** The open app menu, under (or, near the bottom, over) the app it belongs to. */
 export function AppMenu() {
   const m = menu.value;
   if (!m) return null;
   const { app, at } = m;
   const docked = dock.value.includes(app.key);
-  const items: [string, () => void][] = [
+  const items: Item[] = [
+    ...windowItems(app.key),
     [docked ? "unpin from dock" : "pin to dock", () => setDocked(app.key, !docked)],
     // On the page on screen, in its first free cell.
     ["add to home", () => powos.home.add(app.key, pages.value[page.value] ?? 1)],
-    ...(app.kind === "android" ? ([["app info", () => powos.apps.info(app.key)]] as [string, () => void][]) : []),
-    ...(app.kind === "android" && !app.system ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as [string, () => void][]) : []),
+    ...(app.kind === "android" ? ([["app info", () => powos.apps.info(app.key)]] as Item[]) : []),
+    ...(app.kind === "android" && !app.system ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
   ];
   const below = at.bottom + 48 * items.length + 16 < innerHeight;
   const left = Math.max(8, Math.min(innerWidth - 188, at.left + at.width / 2 - 90));
