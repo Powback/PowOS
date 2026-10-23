@@ -152,7 +152,8 @@ EOF
 }
 mail_manager() {
   printf 'powos comms send manager %q --from e2e\n' "E2E round $ROUND ready: $UDIR" > "$OUT/mail.sh"
-  "$T/user.sh" "$OUT/mail.sh" >/dev/null 2>&1 && log "mailed the manager: E2E round $ROUND ready: $UDIR" || log "mail to the manager failed"
+  # Capped: a hung `powos comms send` ran the App API journey past its 300 s budget after its last step (2026-10-23).
+  perl -e 'alarm shift; exec @ARGV' 20 "$T/user.sh" "$OUT/mail.sh" >/dev/null 2>&1 && log "mailed the manager: E2E round $ROUND ready: $UDIR" || log "mail to the manager failed"
 }
 
 # e2e_setup [inner]: screen awake (never woken), the lock face swiped (no PIN), home in front; what it started from

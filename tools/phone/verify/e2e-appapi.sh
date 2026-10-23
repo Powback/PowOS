@@ -136,7 +136,10 @@ hemit system.home null
 where=$(ev "(()=>{const e=[...document.querySelectorAll('.page-track [data-key]')].find(x=>/hue-rooms/.test(x.dataset.key));if(!e)return 'none';const pg=e.closest('.page-track > .page');return [...pg.parentElement.children].indexOf(pg)+' '+e.dataset.key})()")
 if [ "$where" = none ] || [ -z "$where" ]; then
   step hue-rooms "home: looking for the composed Hue rooms widget"
-  fail "the composed Hue rooms widget isn't on home (no local.hue-rooms* tile on any page; installed: $(ev "(window.__powosApps?window.__powosApps.installedApps.value.map(a=>a.id).filter(i=>/hue/.test(i)).join(' '):'?')")) - not placed by this journey (no layout changes)"
+  inst=$(ev "(window.__powosApps?window.__powosApps.installedApps.value.map(a=>a.id).filter(i=>/hue-rooms/.test(i)).join(' '):'?')")
+  # Installed but not on home is the user's layout choice, not a bug: this journey never changes the layout.
+  case $inst in ""|"?") fail "no composed Hue rooms widget installed (local.hue-rooms*: '$inst')" ;;
+    *) note "the composed Hue rooms widget is installed ($inst) but not on home - not placed by this journey (no layout changes)" ;; esac
 else
   set -- $where; WP=$1; WK=$2; d=$((W * 35 / 100)); i=0
   while [ "$(ev "String([...document.querySelectorAll('.page-track > .page')].findIndex(p=>!p.classList.contains('away')))")" -lt "$WP" ] && [ $i -lt 4 ]; do
