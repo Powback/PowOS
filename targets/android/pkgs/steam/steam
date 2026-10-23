@@ -170,42 +170,18 @@ ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 # fossilize under FEX). Set only once measured (bf-coldstart env:POWOS_STEAM_ARGS=-noshaders).
 POWOS_STEAM_ARGS=${POWOS_STEAM_ARGS:-}
 cd "$S/steamrtarm64" || exit 1
-# A steam:// URL for a client that already runs: Steam's own forwarding (this binary writes the command line into
-# ~/.steam/steam.pipe and exits) - and the running ARM64 client reads it and drops it: since 2026-10-20 no forwarded
-# command line was ever taken (console_log: every ExecCommandLine is a client's first; 2026-10-23 04:32: 0 bytes left
-# unread in the pipe, main loop healthy, a second forward dropped too). Every launch to a running Steam was lost.
-# HACK: so the hand-off is checked: the URL must show up in console_log ("ExecCommandLine ... <url>") within
-# HANDOFF_S (3) s; else - and only with no game of Steam's running (a frozen game the user left must not die) - Steam
-# is closed and started again with the URL on its own command line (a cold start, ~24 s, instead of a launch that
-# never happens). Writing into the pipe ourselves doesn't help (steam-pipe-probe.sh, 06:06): the forwarder's 64 bytes
-# are "'./steam' '-cef-disable-gpu-sandbox' 'steam://rungameid/274190'\n", the client's own format, and neither a
-# hand-written line nor those bytes replayed were taken. Real fix: Valve's ARM64 client acting on forwarded command
-# lines (report it with that probe's evidence).
+# A steam:// URL (or any command line) for a client that already runs: Steam's own single-instance forwarding - this
+# binary writes the command line into ~/.steam/steam.pipe and exits; the client reads it, stashes it in registry.vdf
+# (TempAppCmdLine), sets its named event (a System V semaphore) and runs it on its next frame (ExecCommandLine in
+# console_log). That event was why every launch to a running client was lost until pkgrel 28: the sysvipc-emu shim
+# left a semaphore's sempid at 0 after SETVAL, so the next Steam process to open the event took it for abandoned
+# (Valve's check: GETPID 0 or dead, nobody waiting) and IPC_RMID'd it under the running client - whose semop on it
+# then failed (EIDRM) for good. The shim sets sempid on SETVAL/SETALL now, as Linux does.
 # A tap on Steam itself (its launcher entry: `steam %U` with no URL = no arguments at all) must SHOW Steam's main
 # window, every time. A Steam that already runs may have none: the session's resident Steam (powos-steam-resident)
 # starts -silent, and a closed main window leaves the client in its tray. A bare `./steam` to a running client is a
-# forward with nothing in it (no window, 2026-10-23 14:42 "Steam won't boot"), so the tap asks for the window by URL:
-# forwarded, checked and, if the client drops it, Steam restarted with it below - the same path a game launch takes.
+# forward with nothing in it (no window, 2026-10-23 14:42 "Steam won't boot"), so the tap asks for the window by URL.
 # Not running: a client started with steam://open/main opens on its main window (never -silent). Only with no
 # arguments: -shutdown, -silent and every other caller's options are left as they are.
 [ $# -eq 0 ] && set -- steam://open/main
-url=; for a in "$@"; do case $a in steam://*) url=$a ;; esac; done
-client_up() { case $(readlink "/proc/$(cat "$HOME/.steam/steam.pid" 2>/dev/null || echo 0)/exe" 2>/dev/null) in
-  */steamrtarm64/steam) return 0 ;; esac; return 1; }
-if [ -n "$url" ] && client_up; then
-  CL=$S/logs/console_log.txt; n=$(wc -l < "$CL" 2>/dev/null || echo 0)
-  taken() { local i; for i in $(seq $(($1 * 4))); do tail -n +$((n + 1)) "$CL" 2>/dev/null | grep -qF "$url" && return 0; sleep 0.25; done; return 1; }
-  ./steam -cef-disable-gpu-sandbox $POWOS_STEAM_ARGS "$@"
-  taken "${HANDOFF_S:-3}" && exit 0
-  if pgrep -f 'SteamLaunch AppId=' > /dev/null; then
-    echo "steam: the running client didn't take $url, and a game runs under Steam: left as it is (launch lost)" >&2; exit 1
-  fi
-  echo "steam: the running client didn't take $url - restarting Steam with it" >&2
-  p=$(cat "$HOME/.steam/steam.pid")
-  kill -TERM "$p" 2>/dev/null
-  for _ in $(seq 24); do [ -d "/proc/$p" ] || break; sleep 0.25; done
-  kill -KILL "$p" 2>/dev/null; pkill -KILL -u "$(id -u)" -f 'steamrtarm64/steamwebhelper' 2>/dev/null
-  for _ in $(seq 8); do [ -d "/proc/$p" ] || break; sleep 0.25; done
-  exec "$0" "$@"   # the not-running path: IPC cleanup, registry guard, compat policy, then a client with the URL
-fi
 exec ./steam -cef-disable-gpu-sandbox $POWOS_STEAM_ARGS "$@"

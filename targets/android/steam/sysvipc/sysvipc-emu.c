@@ -261,13 +261,17 @@ int semctl(int semid, int semnum, int cmd, ...) {
     case GETZCNT: r = e[semnum].zcnt; break;
     case SETVAL:
         if (arg.val < 0 || arg.val > SEMVMX_) { r = -1; errno = ERANGE; break; }
-        e[semnum].val = arg.val; h->ctime = (uint32_t)time(NULL); xunlock(&h->lock); bump(&h->seq);
+        /* sempid = the setter, as Linux does (ipc/sem.c semctl_setval). Valve's named events judge a semaphore
+         * abandoned when GETPID is 0 or a dead pid and nobody waits (and IPC_RMID it): with sempid left at 0 the
+         * first other Steam process to open the running client's event removed it, and every launch forwarded
+         * to the client after that was lost (its semop: EIDRM). */
+        e[semnum].val = arg.val; e[semnum].pid = getpid(); h->ctime = (uint32_t)time(NULL); xunlock(&h->lock); bump(&h->seq);
         logf_("semctl(%d, %d, SETVAL, %d)", semid, semnum, arg.val); return 0;
     case GETALL: if (!arg.array) { r = -1; errno = EFAULT; break; } for (int i = 0; i < h->nsems; i++) arg.array[i] = (unsigned short)e[i].val; break;
     case SETALL:
         if (!arg.array) { r = -1; errno = EFAULT; break; }
         for (int i = 0; i < h->nsems; i++) if (arg.array[i] > SEMVMX_) { r = -1; errno = ERANGE; break; }
-        if (r == 0) { for (int i = 0; i < h->nsems; i++) e[i].val = arg.array[i]; h->ctime = (uint32_t)time(NULL); xunlock(&h->lock); bump(&h->seq); return 0; }
+        if (r == 0) { for (int i = 0; i < h->nsems; i++) { e[i].val = arg.array[i]; e[i].pid = getpid(); } h->ctime = (uint32_t)time(NULL); xunlock(&h->lock); bump(&h->seq); return 0; }
         break;
     default: r = -1; errno = EINVAL;
     }

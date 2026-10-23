@@ -20,7 +20,7 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   (Steam stays resident, frozen out of sight: the next launch skips Steam's ~22 s start); `--steam` only for cold checks.
 - Close = `powos game <name|appid> stop [--steam]` (lib/game.sh `_game_steam_close`): game's chain (reaper trees +
   environ SteamAppId/STEAM_COMPAT_APP_ID/WINEPREFIX = also orphans, wineserver) TERM, KILL at 2 s; Steam: Wake, `timeout
-  steam -shutdown`, KILL at 6 s, one sweep after. Worst case 6.6 s (stubborn client + hanging forwarder). The old
+  steam -shutdown`, KILL at 6 s, one sweep after (the KILL was always needed before pkgrel 28: forwards were lost). The old
   per-process pgrep loop took 16.5 s and bf-stop's `timeout 15` left Steam running: keep the wait loop to /proc stats.
   /usr/bin/steam execs ./steam (no steam.sh restart loop). `pgrep -f
   Broforce_beta.exe` matches the launch chain too: wait for X window `"Broforce"` (XAUTHORITY = Xwayland's `-auth`).
@@ -53,7 +53,7 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   Recents = task focus -> KWin activates -> sleep-gui thaws on focus.
 - CLI: `powos game <name|appid> freeze|thaw|status` (lib/game.sh; /usr/lib/powos/game.sh on the phone),
   `powos-sleep-gui resume|sleep <x>`. Log `/run/powos-app/powos-sleep-gui.log` ("resumed", "frozen in", "not frozen").
-- Ship: build-pkgs.sh steam needs out/pkgs/{fex-emu,gtk2}*.pkg + pkgs/steam/sysvipc-emu.tar.gz (sha 205ee32a,
+- Ship: build-pkgs.sh steam needs out/pkgs/{fex-emu,gtk2}*.pkg + pkgs/steam/sysvipc-emu.tar.gz (sha 7dab8e01, pkgrel 28;
   gitignored). sleep-gui: install to /usr/lib/powos/apps, restart as powos (`pkill -TERM -f bin/powos-sleep-gui$`,
   `setsid -f powos-sleep-gui >> /run/powos-app/powos-sleep-gui.log`; TERM thaws everything it froze).
 - Checks (`queue.sh add --close <task> bf-launchpaths.sh` / `bf-resume.sh`): steps in bf-lib.sh, each on the status
@@ -66,29 +66,21 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   blkio before `0::`): read only the `0::` line (bf-lib cg2). Reading the whole file as the path made bf-resume FAIL
   freeze-auto/freeze at 02:58 although powos-sleep-gui had frozen Steam at 02:56:50 (start grace ended 02:56:44). The
   product (sleepd cgroup_v2, game.sh, /usr/bin/steam) matched substrings / the 0:: line and was fine.
-- Lost launch 2026-10-23 02:42 (bf-launchpaths FAIL launch, 394 s, no reaper): Steam 27858 (`-silent`, started 02:37:32
-  by powos-steam-resident) was NOT frozen (no sleep cgroup, no freeze line) and alive: open-task's URL went into
-  ~/.steam/steam.pipe (mtime 02:42:47) but the client never logged it (console_log silent 02:38:05-02:53:57, no
-  ExecCommandLine); the session restart at 02:53 replaced it and the next launch (a cold Steam) worked. Cause not
-  pinned yet: bf-lib step_launch now fails `launch-handoff` after 20 s with handoff_diag (thread states, wchan, frozen
-  sleep cgroups = a D-Bus/X peer it may wait on, pipe mtime). sleep-gui's log restarts with each session: read
-  watcher lines in the check log for older ones.
-- Steam's ARM64 client and forwarded launches (2026-10-23 03:30, read off the phone): in console_log since 10-20 EVERY
-  `ExecCommandLine` is the first one after a "Client version" (a client start) - no launch forwarded through
-  ~/.steam/steam.pipe to a running client was ever taken (02:42 lost; the 02:53/02:58 warm INVALIDs too). The live
-  client holds the pipe (fd 5, O_RDONLY|O_NONBLOCK) but it is in NO poll set: main thread ppoll(X socket + eventfd, 50 ms,
-  ~24 wakeups/s), so it can only be read by a periodic non-blocking read. bf-lib handoff_detail (on every lost hand-off,
-  also bf-coldstart warm runs at 20 s -> FAIL handoff-<v>): unread bytes in the pipe (FIONREAD), main-thread syscall +
-  wakeups/s, the forwarder's output, gdb `bt` of thread 1 (gdb is in PowOS, no yama), and a second hand-off of the same
-  URL (TAKEN = the first write was lost). Read those lines before theorising. Passive probes that need no window:
-  /proc/<pid>/task/*/syscall + /proc/<pid>/mem (root) decode each thread's pollfd array.
-- PINNED 2026-10-23 (steam-pipe-probe.sh 06:06, the 04:32/05:09/05:00 hand-off evidence): the ARM64 client reads every
-  forwarded command line and DROPS it. The forwarder writes 64 bytes in the client's own format ("'./steam'
-  '-cef-disable-gpu-sandbox' 'steam://rungameid/<id>'\n"); neither a hand-written line nor those bytes replayed were
-  taken; main loop healthy (poll in vgui2_s <- steamui), shim semaphores untouched. `steam -shutdown` to a running client
-  never worked either (bf-stop always kills at 6 s). steam pkgrel 24 (/usr/bin/steam, HACK): forward, 3 s for the URL in
-  console_log, else restart Steam with the URL (only with no SteamLaunch running). So a warm launch = a cold Steam start
-  (~24 s) until Valve fixes it: the instant path is ONLY a resumed frozen game (sleep-gui Resume over D-Bus, no pipe).
+- Forwarded launches (`steam steam://rungameid/N`, `steam -shutdown` into a running client), ROOT CAUSE 2026-10-23 22:30:
+  the forwarder writes the command line into ~/.steam/steam.pipe; the client's bootstrapper (steamrtarm64/steam) reads
+  it, stores it as registry.vdf HKCU/Software/Valve/Steam/TempAppCmdLine and sets a NAMED EVENT = a SysV semaphore
+  (key 0xe93c17d9); steamui's CSteamBootstrapperController pump (SteamBootstrapper_GetForwardedCommandLine) waits on
+  that event (semop -1 IPC_NOWAIT), reads TempAppCmdLine, clears it and runs CSteamDoc::ExecCommandLine (console_log
+  "ExecCommandLine:"). Valve's event open/close calls a semaphore ABANDONED when GETNCNT+GETZCNT == 0 and GETPID is 0,
+  the caller, or a dead pid (kill(pid,0) ESRCH), and IPC_RMIDs + recreates it. sysvipc-emu left sempid 0 after SETVAL
+  (Linux sets it to the setter), so the next Steam process removed the live client's event: its semop -> EIDRM forever,
+  TempAppCmdLine stayed in registry.vdf, every forward lost. Fix: shim SETVAL/SETALL set sempid (steam pkgrel 28;
+  sysv-test checks it, kernel SysV passes the same test). pkgrel 24-27's restart-on-lost-hand-off is gone.
+  Check a live client passively (root, no window): /proc/<pid>/maps lists `y700-sysv/sem-<id> (deleted)` and the
+  header's removed=1 = the broken state; registry.vdf keeping TempAppCmdLine after a forward = not consumed. A client
+  started before the pkgrel-28 install keeps its removed event: it needs one restart.
+- The forward gate inside ExecCommandLine (steamui): CSteamDoc+0x1d1 set, and in state 0 (+0x1d8) IClientUser::
+  BNeedsSSANextSteamLogon false (CUser+0xcc8 bit 30); "-login" lines go another way. Read with /proc/<pid>/mem.
 - Never attach gdb to Steam in a check: a client frozen meanwhile never takes the attach's SIGSTOP; `timeout` killed gdb
   and the SIGSTOP stayed pending, delivered at the next thaw (state T, do_signal_stop: 04:40 -> 05:00). /usr/bin/steam
   (pkgrel 24) SIGCONTs a stopped client tree.
@@ -137,6 +129,7 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 ## Launch time (tap -> first frame; goal < 10 s; board task games-launch-instantly-steam-wine-resident-fex-s)
 - `bf-coldstart.sh [cold|steam|fexcache]...` -> "STAGES" lines, ms from the tap: steam-ui, iscript <start>-<end> (the
   install script evaluator), reaper (the GAME's), pv, wineserver, exe, window, frame; "evaluator:" = its log line.
+  Warm variants also print `handoff <ms>` (the running client logged the URL); a new client after the tap = FAIL restart-<v>.
   fexcache = FEX_ENABLECODECACHINGWIP=1 through ~/.config/powos/proton-settings.json + FEXOfflineCompiler between runs.
 - Cold 2026-10-23 01:17 (Steam off), read off console_log/gameprocess_log: tap -> ExecuteSteamURL 23 s (Steam's own
   start) -> CheckShaderDepotManifest 2 s -> install script evaluator 30 s (01:17:35-01:18:05; 6-42 s over 8 launches)

@@ -24,6 +24,9 @@ static int sop(int id, int num, int op, int flg) { struct sembuf b = {(unsigned 
 static void self_test(void) {
     int id = semget(IPC_PRIVATE, 2, IPC_CREAT | 0600); CHECK(id >= 0, "semget private");
     union semun a = {.val = 0}; CHECK(semctl(id, 0, SETVAL, a) == 0 && semctl(id, 0, GETVAL) == 0, "SETVAL/GETVAL");
+    /* Linux: SETVAL/SETALL set sempid to the caller. Steam's named events (steam.pipe's) call one abandoned - and
+     * IPC_RMID it - when GETPID is 0 or dead and nobody waits: a creator that only SETVALs must still own it. */
+    CHECK(semctl(id, 0, GETPID) == getpid(), "SETVAL sets sempid (GETPID = setter)");
     pid_t c = fork();
     if (c == 0) { int r = sop(id, 0, -1, 0); _exit(r == 0 ? 0 : 1); }            /* child blocks until the post */
     usleep(200000); CHECK(semctl(id, 0, GETNCNT) == 1, "waiter counted (GETNCNT)");
@@ -34,6 +37,7 @@ static void self_test(void) {
     CHECK(semtimedop(id, &b, 1, &to) < 0 && errno == EAGAIN && now() - t0 > 0.25, "semtimedop timeout");
     unsigned short in[2] = {3, 7}, out[2] = {0, 0}; union semun s1 = {.array = in}, s2 = {.array = out};
     CHECK(semctl(id, 0, SETALL, s1) == 0 && semctl(id, 0, GETALL, s2) == 0 && out[0] == 3 && out[1] == 7, "SETALL/GETALL");
+    CHECK(semctl(id, 1, GETPID) == getpid(), "SETALL sets sempid");
     struct sembuf two[2] = {{0, -3, 0}, {1, -8, IPC_NOWAIT}};
     CHECK(semop(id, two, 2) < 0 && errno == EAGAIN && semctl(id, 0, GETVAL) == 3, "multi-op is all-or-nothing");
     struct semid_ds ds; union semun s3 = {.buf = &ds}; CHECK(semctl(id, 0, IPC_STAT, s3) == 0 && ds.sem_nsems == 2, "IPC_STAT nsems");
