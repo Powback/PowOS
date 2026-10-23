@@ -65,8 +65,10 @@ n=$(npages); echo "home pages: $n, on $(onpage)" | tee -a "$OUT/log.txt"
 [ "$(onpage)" = 0 ] || fail "system.home didn't show page 1 ($(onpage))"
 
 bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ' | xargs; }
+# $2 a sideways swipe's way (-1 leftwards), $3 its length: a spot with room for the whole swipe first (the leftmost
+# spot, left of the window, once clamped a leftward swipe to 207 px - too short to turn a page; float-desktops 2026-10-23).
 freept() {
-  "$T/cdp.sh" eval home "(()=>{const b='$1'.split(' ').map(Number),r=devicePixelRatio;for(let y=.2;y<=.75;y+=.05)for(let x=.06;x<=.94;x+=.04){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.app,.panel,.widget,.island,.owl,button,a,input,.bar,.dock,[data-key]'))continue;return Math.round(px)+' '+Math.round(py)}return 'none'})()" 2>&1 | tr -d '"\r' | tail -1
+  "$T/cdp.sh" eval home "(()=>{const b='$1'.split(' ').map(Number),r=devicePixelRatio,d=${2:-0},len=${3:-0},W=innerWidth*r;let best=null,room=-1;for(let y=.2;y<=.75;y+=.05)for(let x=.06;x<=.94;x+=.04){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.app,.panel,.widget,.island,.owl,button,a,input,.bar,.dock,[data-key]'))continue;const m=d<0?px-20:d>0?W-20-px:len;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()" 2>&1 | tr -d '"\r' | tail -1
 }
 isopen() { "$T/cdp.sh" eval home "!!document.querySelector('.home.open')" 2>&1 | tr -d '"\r' | tail -1; }
 
@@ -95,8 +97,9 @@ o=$(isopen); [ "$o" = false ] && pass "a swipe up inside the window didn't open 
 "$T/shot.sh" "$OUT/1-after-inside.png"
 
 # (3) sideways beside the window: the next page, then back
-pt=$(freept "$WB"); [ "$pt" != none ] && [ -n "$pt" ] || { echo "no empty spot beside the window - stopping"; exit 5; }
-x=${pt% *}; y=${pt#* }; d=$((W * 35 / 100)); to=$((x - d)); [ $to -lt 20 ] && to=20
+d=$((W * 35 / 100)); pt=$(freept "$WB" -1 "$d"); [ "$pt" != none ] && [ -n "$pt" ] || { echo "no empty spot beside the window - stopping"; exit 5; }
+x=${pt% *}; y=${pt#* }; to=$((x - d)); [ $to -lt 20 ] && to=20
+[ $((x - to)) -ge $((W / 4 + 40)) ] || { echo "only a $((x - to)) px swipe fits beside the window - stopping (not a product FAIL)"; exit 5; }
 echo "beside: $x,$y -> $to,$y" >>"$OUT/log.txt"
 sh_ "input swipe $x $y $to $y 250"; sleep 1.5; chk beside
 p=$(onpage); [ "$p" = 1 ] && pass "a swipe beside the window showed page 2" || fail "a swipe beside the window: page $p (want 2)"
