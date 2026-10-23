@@ -166,7 +166,9 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   /sys/class/net/<if>, MAC, IP4Config with address/gateway/DNS, from `ip route get`). steamui.so waits on that
   manager (NetworkDeviceStateChange), not on NM State/Connectivity. android-nm is started by every session
   (powos-rooted-session `bg android-nm`, app mode SessionService); `pgrep android-nm` (comm) works since this fix,
-  before it was "python3" - use `pgrep -af android-nm`.
+  before it was "python3" - use `pgrep -af android-nm`. Measured MFP cold 23:52: steamui_login WaitingForNetwork ->
+  LogOn in the same second; steam-ui -> reaper 15.2 s (23:08: 26.0 s), reaper 26.5 s (31.7/33.9 s; this run's
+  checksum verify took 7 s). The idle wired device (android0, no interface) still logs one udev line: harmless.
 - Steam logs per stage: bootstrap_log (update/verify), steamui_login (network wait), connection_log (CM logon),
   console_log (ExecCommandLine, GameAction tasks), gameprocess_log (pids). Read them before strace.
 - Base state: Steam resident (pkgs/steam powos-steam-resident, session autostart, `steam -silent` 60 s after login,
