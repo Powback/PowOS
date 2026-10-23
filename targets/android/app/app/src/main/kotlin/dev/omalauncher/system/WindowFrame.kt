@@ -420,11 +420,25 @@ class WindowFrame(
         leash = if (TaskLeash.enabled(context)) startLeash(resizing, target) else null
         if (legacyDrag()) return
         val bitmapOf = { v: View -> runCatching { v.drawToBitmap() }.getOrNull() }
-        drag = DragLayer(context, bitmapOf(bar), if (resizing) bitmapOf(grip) else null, dp(BAR_DP + HIT_DP), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)
+        val layer = DragLayer(context, bitmapOf(bar), if (resizing) bitmapOf(grip) else null, dp(BAR_DP + HIT_DP), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)
+        drag = layer
+        // The frame's windows step aside once the layer draws them (a new window's first frame takes 2-3 frames: hidden
+        // at once, the bar blinked out at every drag's start), their blur after their own hidden frame (a blur region
+        // goes at once, a view's alpha with its next frame: a sharp bar for a frame).
+        layer.onShown = { if (drag === layer) stepAside(layer) }
+    }
+
+    /** The frame's own windows hidden while [layer] draws them: alpha now, their blur after that frame. */
+    private fun stepAside(layer: DragLayer) {
         bar.alpha = 0f
         grip.alpha = 0f
-        barBlur.set(0f)
-        gripBlur.set(0f)
+        bar.viewTreeObserver.registerFrameCommitCallback {
+            if (drag === layer) {
+                barBlur.set(0f)
+                gripBlur.set(0f)
+            }
+        }
+        bar.invalidate()
     }
 
     /** The app's content under PowOS's hand from the drag's first [target] on; null where it can't be. */
@@ -479,10 +493,42 @@ class WindowFrame(
             return
         }
         drag = null
-        bar.alpha = 1f
-        barBlur.set(1f)
-        // The windows are there once this frame is drawn; the layer goes after it (no frame without one or the other).
-        bar.postOnAnimation { layer.hide("task $id drag") }
+        // The bar shows again only once WM has its window at [r]: shown (and its blur region sent) at once, it flashed
+        // for a frame or two at the place the drag began - the region moves with the window, which moves when WM
+        // relays it out. Then the layer goes, after the bar's frame there (no frame without one or the other).
+        whenPlaced(r, 0) {
+            // Another drag began meanwhile: its own layer has the frame.
+            if (drag != null) {
+                layer.hide("task $id drag")
+                return@whenPlaced
+            }
+            bar.alpha = 1f
+            barBlur.set(1f)
+            bar.viewTreeObserver.registerFrameCommitCallback { bar.postOnAnimation { layer.hide("task $id drag") } }
+            bar.invalidate()
+        }
+    }
+
+    /** Whether WM has the bar's window over window bounds [r]. */
+    private fun barAt(r: Rect): Boolean {
+        val at = IntArray(2)
+        bar.getLocationOnScreen(at)
+        return at[0] == r.left && at[1] == r.top - dp(BAR_DP + HIT_DP)
+    }
+
+    /** [then] once the bar's window is at [r] (WM relaid it out), or after [PLACE_FRAMES] frames whatever it says. */
+    private fun whenPlaced(
+        r: Rect,
+        frames: Int,
+        then: () -> Unit,
+    ) {
+        val done = barAt(r) || frames >= PLACE_FRAMES || !added
+        if (!done) {
+            bar.postOnAnimation { whenPlaced(r, frames + 1, then) }
+            return
+        }
+        if (frames > 0) android.util.Log.i("PowosWindowDrag", "task $id: bar placed after $frames frame(s)" + if (frames >= PLACE_FRAMES) " (gave up waiting)" else "")
+        then()
     }
 
     /** A bitmap of [this] view as it looks now (its size). */
@@ -710,6 +756,9 @@ class WindowFrame(
         /** A button's mark, across. */
         private const val GLYPH_DP = 8f
         private const val GRIP_DP = 28f
+
+        /** The most frames a drag's end waits for WM to have the bar's window where the finger left it. */
+        private const val PLACE_FRAMES = 12
 
         /** How far the grip reaches outside the window's corner: none, it sits inside (the user, 2026-10-23). */
         private const val GRIP_OUT_DP = 0f

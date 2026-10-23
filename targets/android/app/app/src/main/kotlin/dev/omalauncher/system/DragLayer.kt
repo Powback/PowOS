@@ -56,6 +56,13 @@ internal class DragLayer(
         }
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
 
+    /**
+     * Called once, on the main thread, when the layer's first frame is on its way to the screen: only then may the
+     * frame's own windows step aside (hidden at once, the bar blinked out for the 2-3 frames a new window takes).
+     */
+    var onShown: (() -> Unit)? = null
+    private var shownSaid = false
+
     /** The newest touch event's time not drawn yet (System.nanoTime's clock), 0 if none. */
     private var pendingEventNs = 0L
     private val latencies = ArrayList<Long>()
@@ -100,7 +107,14 @@ internal class DragLayer(
         grip?.let { canvas.drawBitmap(it, (r.right - gripOffset).toFloat(), (r.bottom - gripOffset).toFloat(), bitmapPaint) }
         val ev = pendingEventNs
         pendingEventNs = 0L
-        if (ev != 0L) viewTreeObserver.registerFrameCommitCallback { latencies.add(System.nanoTime() - ev) }
+        val first = !shownSaid
+        shownSaid = true
+        if (ev != 0L || first) {
+            viewTreeObserver.registerFrameCommitCallback {
+                if (ev != 0L) latencies.add(System.nanoTime() - ev)
+                if (first) post { onShown?.invoke() }
+            }
+        }
     }
 
     /** The finger lifted: gone, and the drag's latencies logged. */
