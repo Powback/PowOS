@@ -285,6 +285,48 @@ def installed_games():
     return out
 
 
+def family(tool):
+    """The Wine architecture a tool's prefix is for: "arm64" (ARM64 Proton), "x86" (any other Proton), None (native)."""
+    if tool in ("-", "", None):
+        return None
+    return "arm64" if "arm64" in tool.lower() else "x86"
+
+
+def swap_prefix(appid, fam):
+    """compatdata/<id> holds the prefix of one Wine architecture: one ARM64 Proton set up breaks x86 Proton (its VC++
+    runtime DLLs, c000007b: Teardown 2026-10-23 06:04) and the reverse. On a change of family the prefix in place goes
+    to compatdata/<id>.powos-<its family> and the new family's comes back (or none: Proton makes a new one). Each keeps
+    its own saves; `powos game <x> compat` back brings them back. Steam must be off (apply's caller)."""
+    cd = os.path.join(S, "steamapps/compatdata", appid)
+    if fam is None or not os.path.isdir(cd):
+        return None
+    mark = os.path.join(cd, "powos-family")
+    try:
+        cur = open(mark).read().strip()
+    except OSError:
+        cur = None
+    if cur is None:  # first time: the prefix belongs to the tool Steam used it with so far
+        cur = family(get_tool(appid)) or "x86"
+        if not os.path.isdir(os.path.join(cd, "pfx")):
+            cur = fam
+        with open(mark, "w") as f:
+            f.write(cur + "\n")
+    if cur == fam:
+        return None
+    away = cd + ".powos-" + cur
+    if os.path.exists(away):
+        os.rename(away, away + ".old-%d" % int(time.time()))
+    os.rename(cd, away)
+    back = cd + ".powos-" + fam
+    if os.path.isdir(back):
+        os.rename(back, cd)
+    else:
+        os.makedirs(cd)
+    with open(os.path.join(cd, "powos-family"), "w") as f:
+        f.write(fam + "\n")
+    return "prefix %s -> %s (the %s one kept as compatdata/%s.powos-%s)" % (cur, fam, cur, appid, cur)
+
+
 def has_prefix(appid):
     return os.path.isdir(os.path.join(S, "steamapps/compatdata", appid, "pfx/drive_c/users"))
 
@@ -379,6 +421,9 @@ def cmd_apply(dry):
         if TOOL.get(want, want) != cur:
             print("%s %s: %s -> %s (%s)" % ("would set" if dry else "set", "%s %s" % (appid, name), short(cur), want, why))
             if not dry:
+                sw = swap_prefix(appid, family(TOOL.get(want, want)))
+                if sw:
+                    print("   %s: %s" % (appid, sw))
                 set_tool(appid, TOOL.get(want, want)); t = read(CONFIG)
                 a["applied"] = time.strftime("%F %T")
         a["why"] = why

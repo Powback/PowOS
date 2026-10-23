@@ -14,6 +14,7 @@ command -v python3 >/dev/null || { echo "skip: no python3"; exit 0; }
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 St=$T/Steam
 mkdir -p "$St/config" "$St/steamapps/common/Proton Experimental (ARM64)" "$St/steamapps/compatdata/100/pfx/drive_c/users"
+echo save > "$St/steamapps/compatdata/100/pfx/drive_c/users/save.dat"
 touch "$St/steamapps/common/Proton Experimental (ARM64)/proton"
 cat > "$St/config/config.vdf" <<'V'
 "InstallConfigStore"
@@ -58,8 +59,11 @@ C record 200 31000 >/dev/null
 check "measured launch is shown"                   'C status 200 | grep -q "x86 31000"'
 C set 100 auto >/dev/null
 check "auto on a kept game applies the policy"     '[ "$(C get 100)" = "tool=proton-experimental-arm64 opts=-" ]'
+CD="$St/steamapps/compatdata"
+check "x86 -> arm64 puts the x86 prefix aside"     '[ -f "$CD/100.powos-x86/pfx/drive_c/users/save.dat" ] && [ ! -e "$CD/100/pfx" ] && [ "$(cat "$CD/100/powos-family")" = arm64 ]'
 C record 100 40000 >/dev/null; C record 100 20000 --tool x86 >/dev/null; C apply >/dev/null
 check "the fastest measured tool wins"             '[ "$(C get 100)" = "tool=proton_experimental opts=-" ]'
+check "back to x86 brings its prefix (saves) back" '[ -f "$CD/100/pfx/drive_c/users/save.dat" ] && [ -d "$CD/100.powos-arm64" ] && [ "$(cat "$CD/100/powos-family")" = x86 ]'
 C set 100 kept:x86 >/dev/null
 check "mode round-trips through set"               '[ "$(C mode 100)" = kept:x86 ]'
 C set 200 native >/dev/null
