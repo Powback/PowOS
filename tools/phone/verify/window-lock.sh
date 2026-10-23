@@ -13,7 +13,7 @@
 wl_wake() {
   local st i; st=$("$1/idle.sh" 2>/dev/null); i=$(sed -n 's/.*idle=\([0-9]*\).*/\1/p' <<<"$st")
   case "$st" in *screen=Awake*) return 0 ;; esac
-  [ -n "$i" ] && [ "$i" -ge "${WAKE_IDLE_S:-600}" ] || return 0
+  [ -n "$i" ] && [ "$i" -ge "${WAKE_IDLE_S:-180}" ] || return 0
   "$1/adb.sh" shell 'input keyevent KEYCODE_WAKEUP; sleep 1; wm dismiss-keyguard' >/dev/null 2>&1 && touch "$HOME/.cache/powos-verify-woke"
   echo "woke the screen for the checks (idle ${i}s)"
 }
@@ -33,10 +33,10 @@ window_lock() {
   while :; do
     local left=$(( end - $(date +%s) ))
     [ $left -gt 0 ] || { echo "$name: no free window in ${max}s"; exit 3; }
-    # In 5-min chunks: between them, a screen that is off with nobody touching it for WAKE_IDLE_S (600; 0 = never) is
+    # In 3-min chunks (the user, 2026-10-23: "the testing ... mostly waiting"; was 10 min / 5-min chunks): between them, a screen that is off with nobody touching it for WAKE_IDLE_S (600; 0 = never) is
     # woken and its keyguard dismissed (no PIN) - the user's ask, 2026-10-23 ("so wake the screen"): checks waited
     # all night for an Awake screen. The touch counters still decide idle, so any finger ends it as before.
-    local chunk=$left; [ "${WAKE_IDLE_S:-600}" -gt 0 ] && [ $chunk -gt 300 ] && chunk=300
+    local chunk=$left; [ "${WAKE_IDLE_S:-180}" -gt 0 ] && [ $chunk -gt 180 ] && chunk=180
     if ! s=$(AWAKE_ONLY=1 "$phone/idle.sh" --wait "$need" "$chunk"); then
       [ $chunk -lt $left ] || { echo "$name: no free window: $s"; exit 3; }
       wl_wake "$phone"; continue

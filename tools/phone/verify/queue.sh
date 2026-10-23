@@ -112,6 +112,19 @@ add)
   if [ -z "$name" ]; then  # the script's name (past `env A=1 ...`)
     for a in "$@"; do case "$a" in */env|env|*=*) ;; *) name=$(basename "$a"); break ;; esac; done; name=${name%.sh}
   fi
+  # Broken checks never reach the phone (2026-10-23: about half the day's FAILs were the checks' own bugs - an unset
+  # $2/$3, a zsh-unsplit "id name" arriving as one argument plus an empty one): every .sh in the command must parse
+  # (bash -n; shellcheck at error level too when its image is here), and no argument may be empty unless meant.
+  for a in "$@"; do
+    [ -n "$a" ] || [ "${QUEUE_ALLOW_EMPTY:-0}" = 1 ] || { echo "queue.sh: an empty argument in: $* (zsh doesn't split \$var - write the words out; QUEUE_ALLOW_EMPTY=1 if meant)"; exit 2; }
+    case "$a" in *.sh) [ -f "$a" ] || continue
+      e=$(bash -n "$a" 2>&1) || { printf '%s\n' "$e" | head -3; echo "queue.sh: $a doesn't parse - not queued"; exit 2; }
+      if docker image inspect koalaman/shellcheck:stable >/dev/null 2>&1; then
+        d=$(cd "$(dirname "$a")" && pwd -P)
+        sc=$(docker run --rm -v "$d:$d:ro" koalaman/shellcheck:stable -S error -x "$d/$(basename "$a")" 2>&1 | head -12)
+        [ -z "$sc" ] || { echo "$sc"; echo "queue.sh: shellcheck errors in $a - not queued"; exit 2; }
+      fi ;; esac
+  done
   # Repo-relative when queued from (or running a command inside) a PowOS worktree: it runs in the verify checkout.
   cmd=("$@"); cwd=$(pwd -P); rel=0; from=
   if wt_of "$cwd"; then from=$wroot; relify "$wsub"
