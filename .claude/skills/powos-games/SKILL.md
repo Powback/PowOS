@@ -82,6 +82,35 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   wakeups/s, the forwarder's output, gdb `bt` of thread 1 (gdb is in PowOS, no yama), and a second hand-off of the same
   URL (TAKEN = the first write was lost). Read those lines before theorising. Passive probes that need no window:
   /proc/<pid>/task/*/syscall + /proc/<pid>/mem (root) decode each thread's pollfd array.
+- PINNED 2026-10-23 (steam-pipe-probe.sh 06:06, the 04:32/05:09/05:00 hand-off evidence): the ARM64 client reads every
+  forwarded command line and DROPS it. The forwarder writes 64 bytes in the client's own format ("'./steam'
+  '-cef-disable-gpu-sandbox' 'steam://rungameid/<id>'\n"); neither a hand-written line nor those bytes replayed were
+  taken; main loop healthy (poll in vgui2_s <- steamui), shim semaphores untouched. `steam -shutdown` to a running client
+  never worked either (bf-stop always kills at 6 s). steam pkgrel 24 (/usr/bin/steam, HACK): forward, 3 s for the URL in
+  console_log, else restart Steam with the URL (only with no SteamLaunch running). So a warm launch = a cold Steam start
+  (~24 s) until Valve fixes it: the instant path is ONLY a resumed frozen game (sleep-gui Resume over D-Bus, no pipe).
+- Never attach gdb to Steam in a check: a client frozen meanwhile never takes the attach's SIGSTOP; `timeout` killed gdb
+  and the SIGSTOP stayed pending, delivered at the next thaw (state T, do_signal_stop: 04:40 -> 05:00). /usr/bin/steam
+  (pkgrel 24) SIGCONTs a stopped client tree.
+- One Proton prefix per Wine architecture: a prefix ARM64 Proton set up (its VC++ redists) breaks x86 Proton
+  (VCRUNTIME140/MSVCP140 c000007b, Teardown 06:04). powos-steam-compat apply, td-launch and bf-coldstart cfg: swap
+  compatdata/<id> <-> compatdata/<id>.powos-<family> (powos-family file says which is in place; saves stay with theirs).
+- A compat tool change across native <-> Windows builds is a DEPOT SWAP (Steam downloads the other build; Broforce
+  arm64 after native: LaunchApp AppError_19 2 s in, 05:20). Checks: `fetch` token (bf-coldstart) / fetch_deps
+  (td-launch) download untimed before a timed run. Group check variants by depot.
+- Steam's "Processing Vulkan shaders" (ProcessingShaderCache, fossilize under FEX) held RimWorld's launch 28 s (05:46).
+  pkgrel 24: POWOS_STEAM_ARGS (steam-env) e.g. -noshaders; measure with bf-coldstart env:POWOS_STEAM_ARGS=-noshaders.
+- Check-script pitfalls fixed 2026-10-23: `cmd | tr -d '\r' | tee run.txt` block-buffers - a budget-killed check left an
+  EMPTY run.txt (use `sed -l $'s/\r$//'`); the runner's TERM killed only the Mac side, the phone script ran on (trap it,
+  pkill the phone side); bf-lib close_mine ran ON_CLOSE as one word (eval); `BF_ADB=$A . bf-lib.sh` scopes BF_ADB to the
+  source (pill keeps BF_ADB_PATH); root.sh/user.sh scripts must live under $HOME (adb.sh mounts the dirname: a
+  /var/folders mktemp "cannot stat" - every pkg-install FAILed); queue.sh needs the script's +x bit in git.
+- Fire-and-forget installs (steam-install.sh): appmanifest stubs (StateFlags 1026, name/installdir from appinfo.vdf)
+  with Steam off, one `steam -silent`, exit; Steam downloads in the background, game checks wait ("not ready", exit 3).
+- Measured 2026-10-23 (cold, tap -> window / first frame): Broforce x86 77.3/82.2 s (Steam 24, evaluator 32 even when
+  skipped, chain 20); Besiege x86 52.4/72.1 s; Teardown ARM64 63.4 s (38.8 s with a warm prefix), window BLACK 30 s
+  later (vkd3d device up, SM 6.6); Teardown x86: VC runtime c000007b (prefix); RimWorld x86: exe exits 49 s in, no
+  window; Broforce native: exe at 41 s, no window in 300 s.
 - A -silent Steam (powos-steam-resident) has no window, so sleep-gui never tracked it (tracked began at a window) and it
   was NEVER frozen: 12.7% of a core all session (127 ticks / 10 s, Steam tree + webhelpers). Fix c39ec1b: Gui.adopt every
   30 s tracks a unit's live pidfile root without a window (idle from then; its grace/busy rules). Install a lib/ file
