@@ -73,10 +73,15 @@ back() { sh_ "input keyevent 4"; sleep "${1:-0.8}"; }
 pt() { ev "(()=>{const e=($1);if(!e)return 'none';const r=e.getBoundingClientRect(),d=devicePixelRatio;if(r.width<2||r.height<2||r.bottom<1||r.top>innerHeight-1||r.right<1||r.left>innerWidth-1)return 'off';return Math.round((r.x+r.width/2)*d)+' '+Math.round((r.y+r.height/2)*d)})()"; }
 # A dock cell by its key prefix (read only).
 dockel() { echo "[...document.querySelectorAll('.home .dock .app[data-key]')].find(a=>a.dataset.key.startsWith('$1'))"; }
-# freept <window bounds or ""> <way -1|1|0> <length> [min x, 0..1]: an empty spot on home's page (no tile, app, bar, dock; outside the
-# window) with room for a sideways swipe that long (float-touch.sh's: a short swipe doesn't turn a page).
+# winrects: every window on screen now (windows.list: not minimised, not on another page), "l t r b,l t r b" in device px.
+winrects() { local v; v=$(hcall windows.list "[]" "l=>l.filter(w=>!w.minimised&&!w.away&&w.bounds).map(w=>w.bounds.join(' ')).join(',')"); case $v in ERR*) echo "" ;; *) echo "$v" ;; esac; }
+# freept <window bounds or ""> <way -1|1|0> <length> [min x, 0..1] [min y, 0..1]: an empty spot on home's page (no tile,
+# app, bar, dock; outside the window) with room for a sideways swipe that long (float-touch.sh's: a short swipe doesn't
+# turn a page). Never under ANY window on screen: elementFromPoint sees only home's page, so a spot under a floating
+# window (Chrome left up, a stray Kate) read as empty and the touch went to that window (the drawer's stages, rounds 1-3).
 freept() {
-  ev "(()=>{const b='$1'.split(' ').filter(Boolean).map(Number),r=devicePixelRatio,d=${2:-0},len=${3:-0},W=innerWidth*r;let best=null,room=-1;for(let y=.2;y<=.75;y+=.05)for(let x=${4:-.06};x<=.94;x+=.04){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.home-tile,.app,.panel,.widget,.island,.owl,button,a,input,textarea,.bar,.dock,[data-key]'))continue;const m=d<0?px-20:d>0?W-20-px:len;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()"
+  local ws; ws=$(winrects)
+  ev "(()=>{const b='$1'.split(' ').filter(Boolean).map(Number),ws='$ws'.split(',').filter(Boolean).map(s=>s.split(' ').map(Number)),r=devicePixelRatio,d=${2:-0},len=${3:-0},W=innerWidth*r;let best=null,room=-1;for(let y=${5:-.2};y<=.75;y+=.05)for(let x=${4:-.06};x<=.94;x+=.04){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;if(ws.some(w=>px>=w[0]-40&&px<=w[2]+40&&py>=w[1]-140&&py<=w[3]+40))continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.home-tile,.app,.panel,.widget,.island,.owl,button,a,input,textarea,.bar,.dock,[data-key]'))continue;const m=d<0?px-20:d>0?W-20-px:len;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()"
 }
 
 # Tasks and windows.

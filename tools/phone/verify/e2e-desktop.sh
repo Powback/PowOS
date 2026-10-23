@@ -259,10 +259,13 @@ part3() {
   [ "$(isopen)" = true ] && [ "$(ev "document.activeElement&&document.activeElement.matches('.home > .bar textarea')?'yes':'no'")" = no ] && [[ "$(ime)" == *false* ]] &&
     pass "the drawer is up, the search isn't focused, no keyboard" || fail "stage 1: drawer open=$(isopen), $(ime)"
   back; back 0.6
-  Y0=$(ev "(()=>{const d=devicePixelRatio,x=innerWidth*0.75;for(let f=0.72;f>=0.45;f-=0.03){const e=document.elementFromPoint(x,innerHeight*f);if(e&&!e.closest('.dock,.app,.bar,.tile,.home-tile,button,input,textarea,.panel,.island,.owl,[data-key]'))return String(Math.round(innerHeight*f*d))}return '0'})()")
-  if [ "${Y0:-0}" -gt 0 ] && mdown $X "$Y0" "empty space (the long pull)"; then
-    # pullup-stage2.sh's pull: past the slop at once, then on up to 48 % of the screen, held, let go.
-    mmove $X $((Y0 - H * 3 / 100)); mpath $X $((Y0 - H * 3 / 100)) $X $((Y0 - H * 48 / 100)) 8; sleep 0.3
+  # A clear spot low enough for a pull of 48 % of the screen, under no window (freept), like stage 1's.
+  local p2; p2=$(freept "" 0 0 .06 .5); Y0=0; [ "$p2" != none ] && [ -n "$p2" ] && { set -- $p2; X=$1; Y0=$2; }
+  if [ "${Y0:-0}" -gt 0 ] && offpill $X "$Y0" "empty space (the long pull)"; then
+    # pullup-stage2.sh's pull: the DOWN and its move past the slop in ONE phone call (a DOWN held until the next adb
+    # call is a long press: edit mode, rounds 2-3), then on up to 48 % of the screen, held, let go.
+    log "long pull from $X,$Y0 up 48 %"; sh_ "input motionevent DOWN $X $Y0; input motionevent MOVE $X $((Y0 - H * 3 / 100))"
+    mpath $X $((Y0 - H * 3 / 100)) $X $((Y0 - H * 48 / 100)) 8; sleep 0.3
     mup $X $((Y0 - H * 48 / 100)); sleep 1.5; chk pull2
     step search "stage 2: pulled further up - the search, with the keyboard"
     [ "$(ev "document.activeElement&&document.activeElement.matches('.home > .bar textarea')?'yes':'no'")" = yes ] && [[ "$(ime)" == *true* ]] &&
