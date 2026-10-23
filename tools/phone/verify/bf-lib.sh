@@ -32,7 +32,8 @@ now() { date +%s.%N; }
 ms() { awk -v a="$1" -v b="$2" 'BEGIN {printf "%d", (b - a) * 1000}'; }
 irq() { awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}' /proc/interrupts; }
 I0=$(irq)
-close_mine() { ${ON_CLOSE:-:}; [ $mine = 1 ] && { pill "closing $GAME (this check started it)"; echo "== closing what this check started"; bash /var/tmp/powos-bf-stop.sh | head -1; mine=0; }; rm -rf "$T" /tmp/powos-verify-step; }
+close_mine() { eval "${ON_CLOSE:-:}";  # eval: ON_CLOSE="fexcache_off; restore" ran as one word ("command not found"), restore never ran
+  [ $mine = 1 ] && { pill "closing $GAME (this check started it)"; echo "== closing what this check started"; bash /var/tmp/powos-bf-stop.sh | head -1; mine=0; }; rm -rf "$T" /tmp/powos-verify-step; }
 touched() { [ "$(irq)" != "$I0" ] || return 1; echo "user input $(date +%T) - stopping"; close_mine; exit 3; }
 trap 'echo "stopped from outside $(date +%T)"; close_mine; exit 3' HUP TERM INT
 fail() { echo "FAIL $1: $2"; FAILS="$FAILS $1"; }
