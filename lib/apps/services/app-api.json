@@ -5,12 +5,29 @@
   "description": "The App API app's local service (tools/app-api/appcap_serve.py): app capability specs, their toggles, dry runs and read calls through appcap_run.py, the audit and tracker logs. Loopback only; on the phone the port is locked to the PowOS uid (rooted/powos-start.sh). Unit: units/phone/app-api.json.",
   "backend": {
     "user": "powos",
-    "env": { "HOME": "/home/powos" },
-    "exec": ["/usr/bin/python3", "/usr/lib/powos/app-api/appcap_serve.py"]
+    "env": {
+      "HOME": "/home/powos"
+    },
+    "exec": [
+      "/usr/bin/python3",
+      "/usr/lib/powos/app-api/appcap_serve.py"
+    ]
   },
-  "needs": { "network": "host", "listen": ["127.0.0.1:3411"] },
+  "needs": {
+    "network": "host",
+    "listen": [
+      "127.0.0.1:3411"
+    ]
+  },
   "budget": {
-    "phone": { "memMB": 48, "cpuPct": 20, "nice": 10 },
-    "desktop": { "memMB": 64 }
-  }
+    "phone": {
+      "memMB": 48,
+      "cpuPct": 20,
+      "nice": 10
+    },
+    "desktop": {
+      "memMB": 64
+    }
+  },
+  "autosleep": "never"
 }
