@@ -52,6 +52,14 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   window keeps its bounds), Notifications.startOptions, AppWidgets click, TileHost, QuickSettings, WidgetServices
   url/androidApp, Media open, ShellNative/OpenBridge links, ShellScreens.start, PowosAiActivity.open, and the Linux
   side's `android-request open <pkg>` (engine AndroidRequests.openOptions, set by Runtime). New launch site: use it.
+- Launches PowOS doesn't make (another app, `am start`, a system notification) open full screen: WindowFrames.adopt
+  makes any visible full-screen standard task (not PowOS's own) a window (FreeformTasks.toWindow: WCT setWindowingMode
+  + setBounds), once per task per unfold (adopted, cleared folded); logcat "was full screen: now a window".
+  Checks: verify/launch-paths.sh (home launch, plain am start, recents after a fold), dock-taskbar.sh (focus /
+  minimise / restore by real dock taps), float-touch.sh (touches inside a window stay the app's).
+- Wide layout (hosts/wide.ts "home.wide"): an item missing from one host read keeps its wide cell (pruning it re-placed
+  WireGuard at the first free cell, the middle column). wide-home.sh asserts the cells survive fold + unfold and don't
+  overlap; a cell away from its side-by-side spot is the user's move (a note, never "fixed").
 - Size: 60% x 70% of the screen in AppWindows.area (under status + title bar, above home's bottom bar, whose top the
   page reports: desktops.ts tellBar -> "windows.area" -> AppWindows.barTop), cascaded 40 dp.
 - Density (the user: "content zoom too much"): a 1134 px window at 442 dpi is 410 dp = the app's PHONE layout, far

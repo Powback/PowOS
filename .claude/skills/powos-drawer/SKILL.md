@@ -30,6 +30,9 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
   max(120, 0.25*innerHeight) px a 10 ms vibrate; released there: foot textarea focus() + powos.keyboard.show() in the
   touchend (ShellBridge -> showSoftInput, no Kotlin needed). Short of it: stage 1, no keyboard. Headless probe:
   synthetic TouchEvents on .home via SHOTS_PROBE (~/.cache file, see verify/pullup-stage2.sh for the device check).
+- Device gestures: a held pull is ONE adb call per burst (`input motionevent DOWN..; MOVE..`) from an EMPTY spot read
+  over CDP - a DOWN on the dock held across adb calls (~1 s each) is an icon long press, not a drag (pullup-stage2,
+  2026-10-23). Never inject a DOWN on a tile/icon and wait.
 - Drawer: A-Z `.grid.az` in `.drawer-list` (padding-right --letter-bar). RecentRow (`.drawer-recents`) is OFF by
   default: `drawerRecents = stored("drawer.recents")`, "on" shows it; Settings > style > home > "recent apps in the
   drawer". The check is inside RecentRow (Drawer itself is at the cyclomatic limit).
