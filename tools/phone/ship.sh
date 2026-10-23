@@ -135,13 +135,15 @@ run)
   # is a few quick user.sh calls, never a reason to hold the ship loop. SHIP_E2E=0 turns it off (tests).
   e2e_round() { [ "${SHIP_E2E:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] && [ -x "$here/verify/e2e-queue.sh" ] || return 0
     ( "$here/verify/e2e-queue.sh" --if-idle >> "$Q/e2e.log" 2>&1 & ) ; echo "$(date +%T) e2e: a round of user journeys asked for ($Q/e2e.log)"; }
-  mail() { local s t ev; s=$(mktemp "$Q/mail.XXXX")
+  mail() { local s t ev kind; s=$(mktemp "$Q/mail.XXXX")
     printf 'powos comms send %q %q --from ship-queue >/dev/null 2>&1 || true\n' "${SHIP_MAIL_TO:-coder}" "$1" > "$s"
     # A failed/refused ship is friction too (powos friction: counted, so a recurring refusal shows up as the top item).
     t=${1%% - log *}; ev=${1##* - log }; ev=${ev%% on the Mac*}
+    # The kind first: a case inside $( ) inside a case branch is a syntax error in macOS's bash 3.2 (friction f33).
+    local kind=broken-tool; case "$1" in *REFUSED*|*refused*) kind=refused ;; esac
     case "$1" in *FAILED*|*REFUSED*|*refused*)
       printf 'powos friction add --area ship --kind %s %q --repro %q --evidence %q --by ship-queue >/dev/null 2>&1 || true\n' \
-        "$(case "$1" in *REFUSED*|*refused*) echo refused ;; *) echo broken-tool ;; esac)" "$t" \
+        "$kind" "$t" \
         "tools/phone/ship.sh request --silent on the same origin tip; the run's log: $ev" "$ev" >> "$s" ;; esac
     "$SR/tools/phone/user.sh" "$s" >/dev/null 2>&1 || echo "$(date +%T) mail failed: $1"; rm -f "$s"; }
   verify_held() { [ -d "$VL" ] && [ $(( $(date +%s) - $(stat -f %m "$VL" 2>/dev/null || stat -c %Y "$VL") )) -lt 600 ]; }

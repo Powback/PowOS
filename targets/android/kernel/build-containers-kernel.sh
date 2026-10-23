@@ -31,7 +31,9 @@ VMODS=out/vendor-modules
 mkdir -p out
 start=$(date +%s)
 docker build -q --platform linux/amd64 -t powos-gki-builder "$NATIVE/docker/gki" > /dev/null
-docker run --rm --platform linux/amd64 -v powos-gki-cache:/cache -v "$REPO":/repo -e BRANCH="$BRANCH" \
+# Capped (KERNEL_CPUS, default 8 of Colima's 14): uncapped, a build starved the Mac and the ship's shell gate timed
+# out every page (friction f30-f32, 2026-10-23).
+docker run --rm --cpus "${KERNEL_CPUS:-8}" --platform linux/amd64 -v powos-gki-cache:/cache -v "$REPO":/repo -e BRANCH="$BRANCH" \
   -e JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc)}" powos-gki-builder bash -euo pipefail -c '
   git config --global --add safe.directory "*"
   CLANG=/cache/clang-r450784e
