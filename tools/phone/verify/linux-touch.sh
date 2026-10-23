@@ -16,14 +16,15 @@ L=$HOME/.cache/powos-verify.lock
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-RC=0; KL0=0; LEASH0=""; MINE=""; REC=""
+RC=0; KL0=0; LEASH0=""; MINE=""; REC=""; PRE=""
 recstop() { [ -n "$REC" ] || return 0; sh_ "pkill -INT screenrecord"; sleep 2
   sh_ "chmod 644 /data/local/tmp/linux-touch-$REC.mp4"
   "$A" pull "/data/local/tmp/linux-touch-$REC.mp4" "$OUT/$REC.mp4" >/dev/null 2>&1; sh_ "rm -f /data/local/tmp/linux-touch-$REC.mp4"; REC=""; }
 rec() { recstop; REC=$1; "$A" shell "su -c 'screenrecord --time-limit 120 --bit-rate 6000000 /data/local/tmp/linux-touch-$1.mp4 >/dev/null 2>&1 &'" >/dev/null 2>&1; sleep 1; }
 restore() {
   recstop
-  [ -n "$MINE" ] && us "pkill -x kate; pkill -x dolphin; true"
+  [ -n "$MINE" ] && us "pkill -x kate; true"
+  [ -n "$MINE" ] && [[ $PRE != *dolphin* ]] && us "pkill -x dolphin; true"
   [ -n "$LEASH0" ] && { [ "$LEASH0" = null ] && sh_ "settings delete global powos_live_leash" || sh_ "settings put global powos_live_leash $LEASH0"; }
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
   echo "restored (leash ${LEASH0:-unchanged}); files in $OUT"
@@ -63,15 +64,12 @@ touched() {  # DOWN at $1 $2, the touch state while it is down, UP
 
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
-# A Kate/Dolphin started while the phone sat untouched is another check's leftover (closed); one older than the
-# user's last touch may be the user's: never closed, not now.
-IDLE=$("$T/idle.sh" | sed -nE 's/^idle=([0-9]+).*/\1/p'); IDLE=${IDLE:-0}
-for p in kate dolphin; do
-  age=$(us "ps -o etimes= -C $p | sort -n | tail -1" | tail -1 | tr -dc 0-9)
-  [ -z "$age" ] && continue
-  [ "$age" -lt "$IDLE" ] || { echo "$p runs since ${age}s, the user touched the phone ${IDLE}s ago (maybe theirs): not now"; exit 3; }
-  echo "$p left by a check (${age}s old, phone idle ${IDLE}s): closed"; us "pkill -x $p; true"; sleep 2
-done
+# A Kate already running may be the user's (typed-into windows can't be closed without asking): not now. A running
+# Dolphin is fine: ours opens as another window and only that window is closed (its task removed -> KWin closes it).
+PRE=""
+for p in kate dolphin; do [ -n "$(us "pgrep -x $p" | tail -1)" ] && PRE="$PRE $p"; done
+[[ $PRE == *kate* ]] && { echo "kate already runs (maybe the user's): not now"; exit 3; }
+[ -n "$PRE" ] && echo "already running:$PRE (only our windows get closed)"
 [ "$(us "pgrep -fc 'SteamLaunch AppId='" | tail -1)" = 0 ] || { echo "a game runs under Steam (the user's): not now"; exit 3; }
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1); W=${WH% *}
@@ -98,7 +96,7 @@ round() {  # $1 = round name, $2 = app key, $3 = process name [, $4 = wl: starte
     log "[$R/$proc] launch: $(hcall apps.launch "['$key']" "v=>'ok '+JSON.stringify(v)")"
   fi
   KT=""; for _ in $(seq 30); do sleep 1; KT=$(comm -13 <(echo "$before") <(tasks) | tail -1); [ -n "$KT" ] && break; done; chk "$R launch"
-  if [ -z "$KT" ]; then fail "[$R/$proc] no window task in 30 s"; us "pkill -x $proc; true"; recstop; return; fi
+  if [ -z "$KT" ]; then fail "[$R/$proc] no window task in 30 s"; [[ $PRE == *$proc* ]] || us "pkill -x $proc; true"; recstop; return; fi
   sleep 5; read -r l t r b <<<"$(tbounds "$KT")"
   log "[$R/$proc] task $KT bounds $l $t $r $b, focus: $(sh_ "dumpsys window | grep -m1 mCurrentFocus" | sed 's/^ *//')"
   "$T/shot.sh" "$OUT/$R-$proc-before.png" >/dev/null 2>&1
@@ -121,7 +119,7 @@ round() {  # $1 = round name, $2 = app key, $3 = process name [, $4 = wl: starte
   else
     [ "$h1" != "$h0" ] && [ "$h1" != none ] && pass "[$R/dolphin] a tap in the places panel changed Dolphin's window" || fail "[$R/dolphin] a tap changed nothing in Dolphin's window"
   fi
-  us "pkill -x $proc; true"; sleep 2; recstop
+  if [[ $PRE == *$proc* ]]; then sh_ "am stack remove $KT"; else us "pkill -x $proc; true"; fi; sleep 2; recstop
 }
 
 if [ "${LEASH:-both}" != off ]; then
