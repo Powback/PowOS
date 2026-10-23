@@ -87,7 +87,15 @@ run() {  # run <variant> <n>
   p="$S/steamapps/common/${PDIR[$v]}"
   [ -x "$p/proton" ] || { fail "start-$v" "$p has no proton (not installed)"; return; }
   mkdir -p ~/.config/powos
-  printf '{"PROTON_LOG": "1", "PROTON_LOG_DIR": "%s", "WINEDEBUG": "+loaddll,+seh,err+all,warn+module", "DXVK_LOG_LEVEL": "info", "VKD3D_DEBUG": "warn", "VKD3D_SHADER_DEBUG": "fixme"}\n' "$d" > ~/.config/powos/proton-settings.json
+  # TD_ENV=K=V[,K=V...]: extra environment for the game (a candidate fix, measured before it goes into steam-env).
+  python3 - "$d" "${TD_ENV:-}" > ~/.config/powos/proton-settings.json <<'PY'
+import json, sys
+s = {"PROTON_LOG": "1", "PROTON_LOG_DIR": sys.argv[1], "WINEDEBUG": "+loaddll,+seh,err+all,warn+module",
+     "DXVK_LOG_LEVEL": "info", "VKD3D_DEBUG": "warn", "VKD3D_SHADER_DEBUG": "fixme"}
+s.update(kv.split("=", 1) for kv in sys.argv[2].split(",") if "=" in kv)
+print(json.dumps(s))
+PY
+  [ -z "${TD_ENV:-}" ] || echo "   extra env: $TD_ENV"
   [ -f "$p/user_settings.py" ] || echo "   note: $p has no PowOS user_settings.py - the log settings won't apply there" 
   echo "== $v #$2: mapping $(mapping), $(cat "$p/version"), FEX $(head -1 "$S/steamapps/common/FEX-Emu/VERSIONS.txt" 2>/dev/null)"
   gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0)
@@ -132,6 +140,11 @@ run() {  # run <variant> <n>
   for x in "$d"/steam-$APP.log; do [ -f "$x" ] || continue
     echo "   --- $(basename "$x") ($(wc -l < "$x") lines): err/crash lines"
     grep -a -E 'err:|Unhandled|EXCEPTION|page fault|wine: |fixme:vkd3d|vkd3d|dxvk|D3D12|Vulkan|exited|Exited' "$x" | grep -v -E 'Loaded L"|loaddll' | sort | uniq -c | sort -rn | head -30 | cut -c1-240 | sed 's/^/   | /'
+    # A window that stays black can be a game that crashed and sits in its crash handler (Teardown 2026-10-23: a
+    # call through a NULL pointer after D3D12CreateDevice failed, crashpad keeping the window): say so first.
+    grep -a -m1 -E 'dispatch_exception code=c0000005|dispatch_exception code=c000001d' "$x" | sed 's/^/   CRASH: /' | cut -c1-200
+    grep -a -m6 -A0 'virtual_unwind backtrace' "$x" | sed 's/^/   CRASH   /' | cut -c1-200
+    grep -a -E 'Feature level 0x[0-9a-f]+ is not supported|Overriding feature level' "$x" | sort -u | sed 's/^/   vkd3d: /' | cut -c1-200
     echo "   --- last 25 lines:"; tail -25 "$x" | cut -c1-240 | sed 's/^/   | /'
   done
   [ -f "$d/steam-$APP.log" ] || echo "   no PROTON_LOG file: Proton's script never ran"
