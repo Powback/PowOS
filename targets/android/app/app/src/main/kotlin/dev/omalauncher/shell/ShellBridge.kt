@@ -488,13 +488,12 @@ class ShellBridge(
         return JSONArray(
             dev.omalauncher.system.Tasks.list(context).map { t ->
                 val w = windows[t.id]?.bounds
-                val pkg = t.component?.packageName
-                val app = runtime.androidApps.apps.firstOrNull { it.component == t.component && it.profile == null } ?: runtime.androidApps.apps.firstOrNull { it.component.packageName == pkg && it.profile == null }
+                val (key, name) = taskApp(t)
                 JSONObject()
                     .put("id", t.id)
-                    .put("label", t.label ?: app?.label ?: pkg ?: "")
-                    .put("key", app?.let { "a:${it.key}" } ?: JSONObject.NULL)
-                    .put("icon", app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
+                    .put("label", t.label ?: name ?: t.component?.packageName ?: "")
+                    .put("key", key ?: JSONObject.NULL)
+                    .put("icon", key?.let(::icon) ?: JSONObject.NULL)
                     // A window's picture is taken fresh as it's served (ShellHost): its version names its bounds too,
                     // so a window resized since is fetched again, not the cached one of its old size.
                     .put("snapshot", "${ShellHost.ORIGIN}/_task/${t.id}?v=${t.lastActive.takeIf { it > 0 } ?: stamp}${w?.let { "-${it.width()}x${it.height()}" } ?: ""}")
@@ -508,6 +507,27 @@ class ShellBridge(
                     }
             },
         )
+    }
+
+    /**
+     * Task [t]'s app in the drawer: (its key, its name), or nulls. A Linux window's task (PowosWindowActivity) and
+     * Plasma's desktop (MainActivity) are PowOS's own package, so the package says nothing there: the PowOS app they
+     * show, never PowOS's own launcher entry (the generic card the switcher showed for Dolphin before).
+     */
+    private fun taskApp(t: dev.omalauncher.system.Tasks.Task): Pair<String?, String?> {
+        val c = t.component
+        if (c?.packageName == context.packageName) {
+            val linux =
+                if (c.className == andro.marchy.MainActivity::class.java.name) {
+                    runtime.linuxApps.firstOrNull { it.exec == dev.omalauncher.linux.PLASMA_COMMAND }
+                } else {
+                    linuxApp(t.id, c.packageName, t.label)
+                }
+            if (linux != null || c.className == andro.marchy.PowosWindowActivity::class.java.name) return Pair(linux?.let { "l:${it.id}" }, linux?.name)
+        }
+        val apps = runtime.androidApps.apps.filter { it.profile == null }
+        val app = apps.firstOrNull { it.component == c } ?: apps.firstOrNull { it.component.packageName == c?.packageName }
+        return Pair(app?.let { "a:${it.key}" }, app?.label)
     }
 
     /** Which apps run, key -> "running" | "frozen" (RunningApps). */
@@ -725,26 +745,39 @@ class ShellBridge(
     private fun windows(): JSONArray =
         JSONArray(
             dev.omalauncher.system.WindowFrames.running.value.map {
-                val linux = linuxApp(it.id, it.pkg)
+                val linux = linuxApp(it.id, it.pkg, it.label)
                 JSONObject().put("id", it.id).put("pkg", it.pkg ?: "").put("label", linux?.name ?: it.label).put("minimised", it.minimised).put("away", it.away)
                     .apply { if (linux != null) put("app", "l:${linux.id}") }
                     .apply { it.bounds?.let { b -> put("bounds", JSONArray(listOf(b.left, b.top, b.right, b.bottom))) } }
             },
         )
 
-    /** The PowOS app whose window task [id] shows (a task of PowOS's own package only), or null. */
+    /**
+     * The PowOS app whose window task [id] shows (a task of PowOS's own package only), or null: by the app id KWin
+     * gave the window (its desktop file name), else - none given (an X11 app without one) or none matching - by its
+     * [caption]'s app name (KDE's captions end in " — <app>").
+     */
     private fun linuxApp(
         id: Int,
         pkg: String?,
+        caption: String?,
     ): dev.omalauncher.linux.LinuxApp? {
         if (pkg != context.packageName) return null
-        val appId = andro.marchy.WindowTasks.appIdOfTask(id)?.takeIf { it.isNotEmpty() } ?: return null
-        return runtime.linuxApps.firstOrNull { it.matches(appId) }
+        val appId = andro.marchy.WindowTasks.appIdOfTask(id) ?: return null
+        return runtime.linuxApps.firstOrNull { appId.isNotEmpty() && it.matches(appId) } ?: byCaption(caption)
+    }
+
+    /** The PowOS app a window's [caption] names: all of it, or its last " — " / " - " part (Plasma itself left out). */
+    private fun byCaption(caption: String?): dev.omalauncher.linux.LinuxApp? {
+        val c = caption?.trim().orEmpty()
+        if (c.isEmpty()) return null
+        val tail = c.substringAfterLast(" — ").substringAfterLast(" - ")
+        return runtime.linuxApps.firstOrNull { it.exec != dev.omalauncher.linux.PLASMA_COMMAND && (it.name.equals(c, true) || it.name.equals(tail, true)) }
     }
 
     /** A PowOS app's floating window, if it has one (shown, minimised or on another page): brought back, its task. */
     private fun restoreLinux(key: String): Int? {
-        val w = dev.omalauncher.system.WindowFrames.running.value.firstOrNull { linuxApp(it.id, it.pkg)?.let { a -> "l:${a.id}" } == key } ?: return null
+        val w = dev.omalauncher.system.WindowFrames.running.value.firstOrNull { linuxApp(it.id, it.pkg, it.label)?.let { a -> "l:${a.id}" } == key } ?: return null
         return w.id.takeIf { dev.omalauncher.system.WindowFrames.current?.restore(it) == true }
     }
 

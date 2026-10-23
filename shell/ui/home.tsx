@@ -157,7 +157,8 @@ function useGlide(el: { current: HTMLDivElement | null }, keys: string) {
  * them in a row that scrolls on with the finger (momentum, the browser's own), past what a page holds.
  */
 function DockRecents({ count }: { count: number }) {
-  const pinned = new Set(dock.value);
+  // An app with a floating window is in the pinned dock already (DockWindows): never twice in the dock.
+  const pinned = new Set([...dock.value, ...windowed.value.keys()]);
   const shown = recent.value
     .filter((k) => !pinned.has(k))
     .map((k) => byKey.value.get(k))
@@ -306,7 +307,7 @@ export function Dock() {
  * the finger past what fits. It gives way with the dock as the launcher opens (a .dock: the same fade and slide).
  */
 function DockTray() {
-  if (!recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k))) return null;
+  if (!recent.value.some((k) => !dock.value.includes(k) && !windowed.value.has(k) && byKey.value.has(k))) return null;
   return (
     <div class="dock dock-tray paged" data-p ref={followOpenness}>
       <div class="dock-pages">

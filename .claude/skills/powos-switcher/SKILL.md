@@ -68,7 +68,7 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   non-launcher callers anyway); `am compat` downscale (per package, not per window; not tried).
 - Dock taps are a taskbar's (desktops.ts dockTap, AppCell onTap): the app of the window in front (first non-minimised,
   non-away in windows.list) -> "windows.minimise"; else apps.launch (restores a window, ShellBridge.launch, or launches).
-  Linux/KWin windows: HOOK in dockTap until the Plasma backend lists them to the web launcher. Gate: dockTapCheck.
+  Linux windows: the same path by their `app` key (see Linux windows in the dock + switcher). Gate: dockTapCheck.
 - Title bar: minimise, maximise (WindowFrames.maximise: whole AppWindows.area, again = the bounds before; moved by hand
   = ordinary again), close. Tap offsets from the right: close 21 dp, maximise 55, minimise 89.
 - Dead ends (launching, measured): OnePlus FlexibleWindowManager.startAnyActivity/calculateFlexibleWindowBounds (empty
@@ -111,6 +111,16 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   `pacman -Q kwin` on the phone was 3.21 on 2026-10-23 (no caps, no export-new; each image Dolphin opened went to the
   hidden desktop: six Gwenview windows). 0018 on, existing desktop windows are all exported at once. KDE opens PNGs in
   Gwenview through KIO (`kioclient exec`) even though `xdg-mime query default image/png` says Brave.
+- Linux windows in the dock + switcher (slice 2, 2026-10-23): a Linux window's task is PowOS's own package
+  (PowosWindowActivity), so the package names nothing. ShellBridge.linuxApp(id, pkg, caption): WindowTasks.appIdOfTask
+  (KWin's desktopFileName from "open") -> LinuxApp.matches, else the caption's app name (KDE: "<doc> — <App>"; X11 apps
+  without a desktop file name). windows.list gets `app` "l:<id>" from it (dock: DockWindows, dockTap -> restoreLinux);
+  tasks() uses taskApp(t): a Linux window's card = its app's key + icon + caption, Plasma's desktop (MainActivity) =
+  l:org.powos.plasma, never PowOS's own launcher entry (the generic card before). Dock recents leave out apps that have
+  a window (else twice in the wide dock: DockWindows + DockTray). Closing a card (Tasks.remove) closes the KWin window
+  only with 0018 running (export-new: "closed" -> closeWindow); older KWin puts it back on the hidden desktop.
+  Check: verify/linux-dock.sh (dock cell once + icon, card key/icon/label, minimise + launch = focused, card close ->
+  no dolphin process). Queue with --close.
 - Check: verify/linux-float.sh (installs the newest built kwin pkg + a fresh session if older, Dolphin via
   apps.launch, an image via kioclient exec = one Gwenview task, freeform; close closes it). Queue with --close.
 - `powos` is NOT a page global: from CDP post `PowosHost.postMessage(JSON.stringify([id, method, JSON.stringify(args)]))`,

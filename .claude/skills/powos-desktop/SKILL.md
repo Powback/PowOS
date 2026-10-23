@@ -137,5 +137,6 @@ The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's
   desktop host's own copy of shell/ only changes with dev/phone.sh build.
 
 ## Next
-Plasma backend slice 2 (Linux windows floating on home pages); inline replies (NotificationReplied), images in
+Slice 2 (Linux windows in the dock + switcher) is done through WindowTasks, not the plasma-v1 bridge: KWin's "open"
+carries the app id; details in the switcher skill (Linux windows in the dock + switcher). Next: inline replies (NotificationReplied), images in
 clipboard/notifications. Paused host: hotkey, dictation, theme mirror, widget picker, x86 Plasma, input region, OWL widgets.
