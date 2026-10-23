@@ -319,9 +319,28 @@ class WindowFrames(
         if (back == null) maximised[id] = Max(Rect(now), Rect(target), android.os.SystemClock.uptimeMillis())
         frames[id]?.showMaximised(back == null)
         FreeformTasks.raise(context, id)
-        val ok = FreeformTasks.resize(id, target)
-        Log.i(TAG, "task $id ${if (back == null) "maximised" else "restored"}: ${now.toShortString()} -> ${target.toShortString()}${if (ok) "" else " (refused)"}")
+        val how = boundsTo(id, target)
+        Log.i(TAG, "task $id ${if (back == null) "maximised" else "restored"}: ${now.toShortString()} -> ${target.toShortString()} ($how)")
         changed()
+    }
+
+    /**
+     * Task [id]'s window to [target] in one change, the way a drag of its frame ends (TaskLeash: a change transition
+     * whose content PowOS places at the new bounds, then WM's bounds at its end). Measured 2026-10-23 (f468af79): the
+     * bare resizeTask the button used changed nothing - the window stayed where it was; it is only the fallback now.
+     */
+    private fun boundsTo(
+        id: Int,
+        target: Rect,
+    ): String {
+        if (!TaskLeash.enabled(context)) return if (FreeformTasks.resize(id, target)) "resizeTask" else "resizeTask refused"
+        val set: (Any, (Int) -> Any?) -> Unit = { wct, token -> token(id)?.let { TaskLeash.setBounds(wct, it, target) } }
+        val s = TaskLeash.Session(context, listOf(id), "task $id maximise")
+        s.onReady = { live ->
+            if (live) s.finish(mapOf(id to target), set) else Log.i(TAG, "task $id maximise: no leash, resizeTask ${FreeformTasks.resize(id, target)}")
+            changed()
+        }
+        return if (s.start(set)) "change transition" else if (FreeformTasks.resize(id, target)) "resizeTask" else "refused"
     }
 
     /** A maximised window: its bounds [before], the maximised ones asked for, when, and the ones its task then [seen]. */

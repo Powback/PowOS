@@ -27,10 +27,24 @@ TOL=${TOL:-3}
 # --- measuring ---------------------------------------------------------------------------------------------------
 # sfrow <layer name part>: "dl dt dr db cl ct cr cb" - where SurfaceFlinger composes the layer on the ON display (HWC
 # Disp Frame) and the part of its buffer it shows (Source Crop): equal sizes = the app drew at the window's size.
-sfrow() { sh_ "dumpsys SurfaceFlinger" | awk -v p="$1" '
+# HWC frames are in the PANEL's own orientation: the inner screen's panel is landscape (2440x2268) under a portrait
+# 2268x2440 display, so a screen rect (l t r b) shows as (t, W-r, b, W-l) there; turned back here (the crop stays as
+# the buffer is: only its size counts, compared with the panel-space frame's).
+sfrow() { sh_ "dumpsys SurfaceFlinger" | awk -v p="$1" -v W="$W" -v H="$H" '
   /\(active\) HWC layers:/ {on=1; next} /HWC layers:/ {on=0}
-  on && want {n=split($0, f, "|"); if (n >= 7) {print f[6], f[7]; exit} }
-  on && index($0, p) {want=1}' | tr -c '0-9.\n-' ' ' | xargs; }
+  on && want {n=split($0, f, "|"); if (n >= 7) {
+    split(f[6], d, " "); split(f[7], c, " "); cw = int(c[3] - c[1] + 0.5); ch = int(c[4] - c[2] + 0.5)
+    if (rot) print W - d[4], d[1], W - d[2], d[3], ch, cw; else print d[1], d[2], d[3], d[4], cw, ch
+    exit } }
+  on && !seen && /HomeShell/ {seen=1}
+  on && index($0, p) {want=1}
+  END {}' rot=$SFROT | xargs; }
+# The panel turned: home's own full-screen layer is H wide there (raw HWC Disp Frame right edge).
+SFROT=$(sh_ "dumpsys SurfaceFlinger" | awk -v W="$W" -v H="$H" '/\(active\) HWC layers:/ {on=1; next} /HWC layers:/ {on=0}
+  on && want {n=split($0, f, "|"); if (n >= 7) {split(f[6], d, " "); print (W != H && d[3] == H && d[4] == W) ? 1 : 0; exit}}
+  on && /HomeShell/ {want=1}')
+SFROT=${SFROT:-0}
+log "HWC frames in the panel's orientation turned: $SFROT"
 mode() { sh_ "dumpsys activity activities" | grep -E "^ *\* Task\{.* #$1 " | grep -oE "mode=[a-z-]+" | head -1 | cut -d= -f2; }
 near() { local d=$(($1 - $2)); [ ${d#-} -le "$3" ]; }
 # eqrect "a b c d" "e f g h" tol
@@ -74,8 +88,8 @@ maxcheck() {
   r=$(wframe "PowOS window bar $id}"); set -- $r
   # Its glass (under the bar window's clear 8 dp touch strip, which the status bar sits over in z-order) under the status bar.
   [ $# -ge 4 ] && [ $(($2 + $(dp 8))) -ge "${SB:-0}" ] && pass "$app's title bar glass stays under the status bar ($r)" || fail "$app's title bar [$r] covers the status bar (to ${SB:-?})"
-  set -- $c; if [ $# -ge 8 ]; then
-    eqrect "$1 $2 $3 $4" "$b1" 4 && near $(($3 - $1)) $(($7 - $5)) 4 && near $(($4 - $2)) $(($8 - $6)) 4 &&
+  set -- $c; if [ $# -ge 6 ]; then
+    eqrect "$1 $2 $3 $4" "$b1" 4 && near $(($3 - $1)) "$5" 4 && near $(($4 - $2)) "$6" 4 &&
       pass "$app's content drawn at the maximised size ([$c])" || fail "$app's content [$c] isn't the maximised window [$b1] (stale or scaled)"
   else fail "$app: no content layer ($c)"; fi
   p=$(maxbtn "$id"); set -- $p; tap "$1" "$2" "$app's restore" || return; sleep 0.35
@@ -84,7 +98,7 @@ maxcheck() {
   step "$app-restored" "$app restored from its title bar"
   b2=$(tbounds "$id"); c=$(sfrow "$lay"); note "$app restored: $(what "$id" "$lay")"
   [ "$b2" = "$b0" ] && pass "$app restored to exactly its bounds before ([$b2])" || fail "$app restored to [$b2], was [$b0]"
-  set -- $c; [ $# -ge 8 ] && eqrect "$1 $2 $3 $4" "$b2" 4 && near $(($3 - $1)) $(($7 - $5)) 4 && pass "$app's content back at its size ([$c])" || fail "$app's content [$c] after restore, window [$b2]"
+  set -- $c; [ $# -ge 6 ] && eqrect "$1 $2 $3 $4" "$b2" 4 && near $(($3 - $1)) "$5" 4 && pass "$app's content back at its size ([$c])" || fail "$app's content [$c] after restore, window [$b2]"
   # A double tap on the bar (the desktop convention): maximised, again: back.
   p=$(barpt "$id"); [ -n "$p" ] || return; set -- $p
   log "double tap $app's bar at $1,$2"; offpill "$1" "$2" "bar" || return
@@ -107,7 +121,7 @@ fscheck() {
   set -- $b1; [ $# -ge 4 ] && [ "$1" -le 0 ] && [ "$2" -le 0 ] && [ "$3" -ge "$W" ] && [ "$4" -ge "$H" ] && pass "$app full screen covers the whole screen ([$b1], $m)" || fail "$app full screen: [$b1] mode $m, want 0 0 $W $H"
   [ -z "$r" ] && pass "$app full screen has no PowOS title bar" || fail "$app full screen still has a title bar [$r]"
   [ "$hv" = false ] && pass "home (and its dock) out of sight under $app" || fail "home visible=$hv under $app's full screen"
-  set -- $(sfrow "$lay"); [ $# -ge 8 ] && [ $(($3 - $1)) -ge $((W - 4)) ] && pass "$app's content at full-screen size ($*)" || fail "$app's content [$*] isn't full screen"
+  set -- $(sfrow "$lay"); [ $# -ge 6 ] && [ $(($3 - $1)) -ge $((W - 4)) ] && [ $(($4 - $2)) -ge $((H - 4)) ] && pass "$app's content at full-screen size ($*)" || fail "$app's content [$*] isn't full screen"
   eval "$5"; sleep 0.5; note "$app 0.5 s after leaving full screen: $(what "$id" "$lay")"; sleep 1.8; chk leave
   step "$app-left-fullscreen" "$app left full screen"
   b2=$(tbounds "$id"); m=$(mode "$id"); note "$app after full screen: $(what "$id" "$lay")"
