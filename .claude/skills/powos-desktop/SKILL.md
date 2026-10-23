@@ -48,22 +48,20 @@ home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the co
 - Check: verify/plasma-notify.sh (bridge idle, notify-send -w -> shade list, notifications.dismiss -> gone + notify-send
   returns, Klipper <-> clipboard.read/write, the user's clip put back).
 
-## Plasma's desktop wallpaper (org.powos.transparent; fixed 2026-10-23, cb40fa5)
+## Plasma's desktop wallpaper (org.powos.transparent: TRANSPARENT, never a picture)
 - The containment keeps wallpaperplugin=org.powos.transparent (set once by the update script
-  session/plasma/powos-transparent-desktop.js). Since cb40fa5 it DRAWS PowOS home's picture: the app's ShellWallpaper
-  writes /run/powos-app/powos-wallpaper-<ms>.jpg (1600 px; a still wallpaper's picture, a live one's current frame;
-  the last two kept), the QML shows the newest via FolderListModel (inotify). No picture: transparent as before.
-  Nothing in Plasma's config is written at runtime; powos-shell (paused) never touched Plasma's config either.
-- Why not transparency alone: Android's TASK SNAPSHOT of the desktop's task leaves the wallpaper out. It is what
-  comes back first when the desktop task returns (snapshot starting window, AOSP ActivityRecord.addStartingWindow
-  uses it before any theme check), what recents / PowOS's switcher cards and the assist screenshot show: the
-  widgets on BLACK. Proof: /data/system_ce/0/snapshots/<task>.jpg of the MainActivity task (root to read). A fresh
-  launch (splash starting window, no snapshot) looked right - the black only shows when returning to the task.
-- Black desktop again? First look: containment's wallpaperplugin (appletsrc), `ls /run/powos-app/powos-wallpaper-*`,
-  plasmashell started after the QML's mtime (it loads the QML once), KWin script powos-translucent-desktop loaded.
+  session/plasma/powos-transparent-desktop.js). It draws NOTHING and clears the window's fill, so the real Android
+  wallpaper + frost show behind the app, seamless with home. The user wants this (2026-10-23, angry regression).
+- Never draw the wallpaper in Plasma: cb40fa5 showed ShellWallpaper's /run/powos-app/powos-wallpaper-<ms>.jpg there
+  (to fix black task snapshots); live that was a second crystal at another scale/offset (KWin scale 2.25), black at
+  the top. Reverted. The app still writes those files (unused). Task snapshots / recents of the desktop show its
+  widgets on black (Android leaves the wallpaper out) - open; fix it on the Android side, not with a Plasma picture.
+- Wrong desktop again? Look: containment's wallpaperplugin (appletsrc), the installed main.qml (no Image), plasmashell
+  started after the QML's mtime (it loads the QML once; rooted.sh deploy doesn't restart it, the check does),
+  KWin script powos-translucent-desktop loaded.
 - KWin's own capture works on the phone (2026-10-23): `spectacle -b -n -f -o FILE` as the session user gives a
   2268x2440 RGBA PNG WITH alpha (transparent desktop = alpha 0). The ScreenShot2 D-Bus API itself refuses a plain
-  python caller (NoAuthorized); PIL exists in PowOS for measuring. Check: verify/plasma-wallpaper.sh.
+  python caller (NoAuthorized); PIL exists in PowOS for measuring. Check: verify/plasma-transparent.sh (home shot vs desktop shot where KWin alpha=0).
 - A KWin capture taken while the session is frozen (desktop not in front) after a session start is ALL BLACK: the
   deleted ksplashqml window (stackingOrder, deleted=true) stays painted until frames resume. Bring the desktop up
   first. And a black frame "matches" a picture's black sky - compare only the picture's lit pixels.
