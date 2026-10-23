@@ -142,3 +142,11 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
   ~65/s; a down swipe made the hidden shade repaint ~73/s; nativeglass measure ~30-107 ms/s. Device profile with the
   15vh mask: app 57 / renderer 74 / SF 26 (% of a core; was 105/97/62, pet still on then). Headless 60-frame slow
   drag style recalc 260 -> 37 ms, layout 64 -> 0.
+
+## App menu window actions (parked 2026-10-23, window features frozen)
+- Done, gate-passing, NOT on the shared branch: origin branch `agent/dock-window-menu` (one commit). AppMenu
+  (ui/apps.tsx windowItems) puts close, minimise/restore, and with 2+ windows each window first for a running app;
+  desktops.ts windowsOf/closeApp (tasks.remove of its windows/tasks; l: keys try the new "apps.close" bridge call
+  first: ShellBridge.closeApp runs `powos game <appid> stop` or Steam's Wake + -shutdown). Gate: appMenuCheck.
+- To resume: rebase that branch, gate, push, ship (needs an APK for apps.close; old APKs reject it and the page
+  falls back to removing tasks), then queue the phone check on board task long-press-a-running-app-in-dock-recents-close-a.
