@@ -141,12 +141,23 @@ class WindowFrames(
      */
     private fun adopting(floating: Boolean): Boolean {
         // Folded, apps are full screen by design; unfolded again, they become windows again.
-        if (!floating) adopted.clear()
+        if (!floating) {
+            adopted.clear()
+            windowed.clear()
+            fullBefore.clear()
+        }
         return floating && !keyguard && !Switcher.open && adopt()
     }
 
     private fun adopt(): Boolean {
-        val stray = FreeformTasks.fullScreen(context).filter { (id, pkg) -> pkg != null && pkg != context.packageName && id !in adopted }
+        val full = FreeformTasks.fullScreen(context)
+        // A window that is full screen now went there by its app's own request (a video, a game: Activity.
+        // requestFullscreenMode): left so - no frame, no dock over it - and floats again where it was when it leaves.
+        full.filter { (id, _) -> id in windowed && id !in fullBefore }.forEach { (id, pkg) ->
+            fullBefore[id] = lastBounds[id] ?: Rect()
+            Log.i(TAG, "task $id ($pkg) went full screen by itself (was ${lastBounds[id]?.toShortString()})")
+        }
+        val stray = full.filter { (id, pkg) -> pkg != null && pkg != context.packageName && id !in adopted && id !in windowed }
         stray.forEach { (id, pkg) ->
             adopted.add(id)
             val ok = FreeformTasks.toWindow(context, id, AppWindows.nextBounds(context))
@@ -192,7 +203,72 @@ class WindowFrames(
         publish(if (floating) all else emptyList())
         // PowOS's own tasks (Linux windows, PowosWindowActivity) draw KWin's buffer pixel for pixel: no density.
         dense(if (floating) all.filter { it.pkg != context.packageName } else emptyList())
-        maximised.keys.retainAll { id -> all.any { it.id == id && it.bounds == maximised[id]?.second } }
+        keepMaximised(all)
+        if (floating) backFromFullScreen(all)
+    }
+
+    /**
+     * Maximised windows stay so until moved or resized by hand. Right after the button its task may still list the
+     * bounds before (the change's transition plays first): kept until it shows the new ones ([Max.seen]), then only
+     * while it keeps them; one that never changed in [MAX_SETTLE_MS] is ordinary again.
+     */
+    private fun keepMaximised(all: List<FreeformTasks.Window>) {
+        val now = android.os.SystemClock.uptimeMillis()
+        maximised.entries.removeAll { (id, m) ->
+            val w = all.firstOrNull { it.id == id } ?: return@removeAll true
+            val seen = m.seen
+            when {
+                seen != null -> w.bounds != seen
+                w.bounds != m.before -> false.also { m.seen = Rect(w.bounds) }
+                else -> now - m.at > MAX_SETTLE_MS
+            }
+        }
+    }
+
+    /**
+     * A window back from its app's own full screen ([fullBefore]): exactly where it was before. Android puts an
+     * Activity.requestFullscreenMode window back itself; a Linux window's (KWin's "fullscreen") or one Android put
+     * somewhere else is set back here.
+     */
+    private fun backFromFullScreen(all: List<FreeformTasks.Window>) {
+        all.forEach { w ->
+            windowed.add(w.id)
+            lastBounds[w.id] = Rect(w.bounds)
+            val before = fullBefore.remove(w.id) ?: return@forEach
+            val ok = before.isEmpty || w.bounds == before || FreeformTasks.resize(w.id, before)
+            Log.i(TAG, "task ${w.id} left full screen: at ${w.bounds.toShortString()}, was ${before.toShortString()}${if (ok) "" else " (can't put it back)"}")
+            if (!before.isEmpty && w.bounds != before) lastBounds[w.id] = Rect(before)
+        }
+        val ids = all.map { it.id }.toSet()
+        // Gone tasks; a full-screen one isn't listed (not floating) but keeps its entry.
+        windowed.retainAll { it in ids || it in fullBefore }
+        lastBounds.keys.retainAll { it in ids || it in fullBefore }
+    }
+
+    /**
+     * A Linux window's application went full screen by itself (KWin's "fullscreen", PowosWindowActivity) - [on] - or
+     * left it: its task [taskId] over the whole screen, then floating again at its bounds before. Any thread.
+     */
+    fun appFullScreen(
+        taskId: Int,
+        on: Boolean,
+    ) {
+        main.post {
+            if (!AppWindows.floating(context)) return@post
+            val ok = if (on) toFullScreen(taskId) else toWindowAgain(taskId)
+            Log.i(TAG, "task $taskId ${if (on) "full screen (its app's own)" else "a window again"}: ${fullBefore[taskId]?.toShortString()} ok=$ok")
+            changed()
+        }
+    }
+
+    private fun toFullScreen(taskId: Int): Boolean {
+        if (taskId !in fullBefore) fullBefore[taskId] = lastBounds[taskId] ?: running.value.firstOrNull { it.id == taskId }?.bounds ?: Rect()
+        return FreeformTasks.setFullScreen(context, taskId, true, null)
+    }
+
+    private fun toWindowAgain(taskId: Int): Boolean {
+        val before = fullBefore[taskId]?.takeIf { !it.isEmpty } ?: AppWindows.nextBounds(context)
+        return FreeformTasks.setFullScreen(context, taskId, false, before)
     }
 
     /**
@@ -234,12 +310,22 @@ class WindowFrames(
     fun maximise(id: Int) {
         val now = frames[id]?.bounds ?: FreeformTasks.list(context).firstOrNull { it.id == id }?.bounds ?: return
         val back = maximised.remove(id)
-        val target = back?.first ?: AppWindows.area(context)
-        if (back == null) maximised[id] = Rect(now) to Rect(target)
+        val target = back?.before ?: AppWindows.area(context)
+        if (back == null) maximised[id] = Max(Rect(now), Rect(target), android.os.SystemClock.uptimeMillis())
+        frames[id]?.showMaximised(back == null)
         FreeformTasks.raise(context, id)
-        FreeformTasks.resize(id, target)
-        main.removeCallbacks(refreshNow)
-        main.postDelayed(refreshNow, SETTLE_MS)
+        val ok = FreeformTasks.resize(id, target)
+        Log.i(TAG, "task $id ${if (back == null) "maximised" else "restored"}: ${now.toShortString()} -> ${target.toShortString()}${if (ok) "" else " (refused)"}")
+        changed()
+    }
+
+    /** A maximised window: its bounds [before], the maximised ones asked for, when, and the ones its task then [seen]. */
+    private class Max(
+        val before: Rect,
+        val target: Rect,
+        val at: Long,
+    ) {
+        var seen: Rect? = null
     }
 
     /** The windows (top-most first) whose title bar isn't under a window above them: a covered bar would float over it. */
@@ -360,8 +446,20 @@ class WindowFrames(
         /** Tasks [adopt] made windows (or tried to) since the last unfold: each once, so one that won't float isn't retried. */
         private val adopted = mutableSetOf<Int>()
 
-        /** Maximised windows: task -> (its bounds before, its maximised bounds). */
-        private val maximised = mutableMapOf<Int, Pair<Rect, Rect>>()
+        /** Maximised windows: task -> its bounds before and after ([Max]). */
+        private val maximised = mutableMapOf<Int, Max>()
+
+        /** How long a maximise may take to show in its task's bounds before it counts as not done. */
+        private const val MAX_SETTLE_MS = 3000L
+
+        /** Tasks seen as floating windows since the unfold: one of them full screen went there by itself. */
+        private val windowed = mutableSetOf<Int>()
+
+        /** Each window's last bounds while it floated (what a full-screen app goes back to). */
+        private val lastBounds = mutableMapOf<Int, Rect>()
+
+        /** Windows full screen by their app's own request -> their bounds before (empty: unknown). */
+        private val fullBefore = mutableMapOf<Int, Rect>()
 
         /** Windows of the home pages not on screen ([desktop]); kept across a rebind like [minimised]. */
         private val away = mutableSetOf<Int>()

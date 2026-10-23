@@ -72,7 +72,8 @@ maxcheck() {
   [ $# -ge 4 ] && [ "$1" -le "$TOL" ] && [ "$3" -ge $((W - TOL)) ] && [ "$2" -ge "${SB:-0}" ] && [ "$4" -le "${BARTOP:-$H}" ] && [ "$4" -ge $((${BARTOP:-$H} - $(dp 40))) ] &&
     pass "$app maximised fills the area: [$b1] (status bar to ${SB:-?}, home's bar at ${BARTOP:-?})" || fail "$app maximised to [$b1], want 0..$W wide, under ${SB:-?}, just above ${BARTOP:-?}"
   r=$(wframe "PowOS window bar $id}"); set -- $r
-  [ $# -ge 4 ] && [ "$2" -ge "${SB:-0}" ] && pass "$app's title bar stays under the status bar ($r)" || fail "$app's title bar [$r] covers the status bar (to ${SB:-?})"
+  # Its glass (under the bar window's clear 8 dp touch strip, which the status bar sits over in z-order) under the status bar.
+  [ $# -ge 4 ] && [ $(($2 + $(dp 8))) -ge "${SB:-0}" ] && pass "$app's title bar glass stays under the status bar ($r)" || fail "$app's title bar [$r] covers the status bar (to ${SB:-?})"
   set -- $c; if [ $# -ge 8 ]; then
     eqrect "$1 $2 $3 $4" "$b1" 4 && near $(($3 - $1)) $(($7 - $5)) 4 && near $(($4 - $2)) $(($8 - $6)) 4 &&
       pass "$app's content drawn at the maximised size ([$c])" || fail "$app's content [$c] isn't the maximised window [$b1] (stale or scaled)"

@@ -505,8 +505,22 @@ class WindowFrame(
         } else if (dragging) {
             endDrag(Rect(bounds))
             settle(Rect(bounds))
+        } else if (move && e.actionMasked == MotionEvent.ACTION_UP) {
+            barTapped(e)
         }
         dragging = false
+    }
+
+    /** The bar's last tap (uptime ms): a second one soon after is a double tap - maximise, or back (the desktop way). */
+    private var lastBarTap = 0L
+
+    private fun barTapped(e: MotionEvent) {
+        if (e.eventTime - lastBarTap <= ViewConfiguration.getDoubleTapTimeout()) {
+            lastBarTap = 0L
+            onMaximise(id)
+        } else {
+            lastBarTap = e.eventTime
+        }
     }
 
     /** -1 at the screen's left edge, 1 at its right, else 0. */

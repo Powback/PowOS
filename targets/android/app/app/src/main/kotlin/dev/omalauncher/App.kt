@@ -46,6 +46,9 @@ class App : Application() {
         // A PowOS window's task shown again (the launcher, the dock): to the front, floating if it was full screen.
         andro.marchy.WindowTasks.raiseTask =
             java.util.function.BiPredicate { c, id -> dev.omalauncher.system.Tasks.open(c, id, windows.taskOptions(c, id, android.app.ActivityOptions.makeBasic())) }
+        // A floating Linux window's app went full screen by itself (KWin "fullscreen"): its task covers the screen, then floats back.
+        andro.marchy.WindowTasks.fullScreenTask =
+            java.util.function.BiConsumer { id, on -> dev.omalauncher.system.WindowFrames.current?.appFullScreen(id, on) }
         // KWin opens every new application window as a floating task then (WindowTasks "export-new").
         andro.marchy.WindowTasks.setFloating(this, java.util.function.Predicate { windows.floating(it) })
     }

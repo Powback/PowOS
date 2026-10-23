@@ -98,6 +98,38 @@ object FreeformTasks {
             wct.javaClass.getMethod("setBounds", token.javaClass, Rect::class.java).invoke(wct, token, bounds)
         }.onFailure { Log.w(TAG, "can't make task $id a window", it) }.isSuccess
 
+    /**
+     * Task [id] over the whole screen ([on]: the app asked for full screen - a video, a game) or a floating window
+     * again at [bounds]. What WM Shell's desktop mode does to move a task to full screen and back (DesktopTasksController:
+     * windowing mode UNDEFINED = the display's full screen, bounds cleared; back: FREEFORM + its bounds), as a change
+     * transition so WM Shell puts the app's content (its leash) where the task is. HACK: hidden, reflected like
+     * [minimise]. Real fix: none for an app.
+     */
+    fun setFullScreen(
+        context: Context,
+        id: Int,
+        on: Boolean,
+        bounds: Rect?,
+    ): Boolean {
+        val mode = if (on) UNDEFINED else FREEFORM
+        val to = if (on) Rect() else bounds ?: Rect()
+        return runCatching { apply(token(context, id), transition = true) { wct, token -> modeAndBounds(wct, token, mode, to) } }
+            .onFailure { Log.w(TAG, "can't put task $id in windowing mode $mode", it) }.isSuccess
+    }
+
+    private fun modeAndBounds(
+        wct: Any,
+        token: Any,
+        mode: Int,
+        bounds: Rect,
+    ) {
+        wct.javaClass.getMethod("setWindowingMode", token.javaClass, Int::class.javaPrimitiveType).invoke(wct, token, mode)
+        wct.javaClass.getMethod("setBounds", token.javaClass, Rect::class.java).invoke(wct, token, bounds)
+    }
+
+    /** WindowConfiguration.WINDOWING_MODE_UNDEFINED: the display's own (full screen). */
+    private const val UNDEFINED = 0
+
     /** The last task's window couldn't be read (logged once, not on every refresh). */
     @Volatile private var unreadable = false
 

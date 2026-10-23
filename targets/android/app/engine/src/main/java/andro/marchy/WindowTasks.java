@@ -215,6 +215,16 @@ public final class WindowTasks {
                     a.runOnUiThread(a::closedByKWin);
                 break;
             }
+            case "fullscreen": {
+                // A floating window's application went full screen by itself (a game, a video, F11) - "1" - or left
+                // it ("0", KWin patch 0021): the same task covers the whole screen, then floats again where it was.
+                PowosWindowActivity a = tasks.get(id);
+                boolean on = f.length > 2 && f[2].equals("1");
+                Log.i(TAG, "fullscreen " + id + ": " + (on ? "on" : "off") + (a == null ? " (no task)" : ""));
+                if (a != null)
+                    a.runOnUiThread(() -> a.appFullScreen(on));
+                break;
+            }
             default:
                 Log.w(TAG, "unknown control message: " + line);
         }
@@ -236,6 +246,12 @@ public final class WindowTasks {
      * Tasks.open, set by App) - floating on the unfolded home even when it is full screen now. False: not set or failed.
      */
     public static volatile java.util.function.BiPredicate<Context, Integer> raiseTask = null;
+
+    /**
+     * Android task [taskId] (a PowOS window's) covering the whole screen (true) or floating again at its bounds before
+     * (false): the app module's (WindowFrames.appFullScreen, set by App). Null: the task stays as it is.
+     */
+    public static volatile java.util.function.BiConsumer<Integer, Boolean> fullScreenTask = null;
 
     private static boolean raise(Context context, int taskId) {
         java.util.function.BiPredicate<Context, Integer> r = raiseTask;

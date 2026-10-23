@@ -74,14 +74,37 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     /** A full-screen application (a game, Steam Big Picture): the whole screen, system bars only on a swipe. */
     private void immersive() {
-        getWindow().getAttributes().layoutInDisplayCutoutMode =
-                android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-        getWindow().setDecorFitsSystemWindows(false);
+        immersive(true);
+    }
+
+    /** System bars hidden (only on a swipe) and the content under them and the cutout [on], or back as a window's. */
+    private void immersive(boolean on) {
+        android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.layoutInDisplayCutoutMode = on ? android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                : android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+        getWindow().setAttributes(lp);
+        getWindow().setDecorFitsSystemWindows(!on);
         android.view.WindowInsetsController c = getWindow().getInsetsController();
-        if (c != null) {
+        if (c == null)
+            return;
+        if (on) {
             c.hide(android.view.WindowInsets.Type.systemBars());
             c.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        } else {
+            c.show(android.view.WindowInsets.Type.systemBars());
         }
+    }
+
+    /**
+     * The window's application went full screen by itself while it floats ([on]; KWin's "fullscreen"), or left it:
+     * immersive, and the task over the whole screen - then a floating window again at its bounds before
+     * (WindowTasks.fullScreenTask: the app module's frames, which own the floating windows).
+     */
+    void appFullScreen(boolean on) {
+        immersive(on);
+        java.util.function.BiConsumer<Integer, Boolean> f = WindowTasks.fullScreenTask;
+        if (f != null)
+            f.accept(getTaskId(), on);
     }
 
     /** The task's label (the window's caption) and icon (the app's, as PowOS shows it: powos-apps-export). */
