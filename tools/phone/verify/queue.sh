@@ -99,6 +99,11 @@ add)
     --budget) budget=${2:-}; shift 2 ;; *) break ;; esac; done
   [ $# -ge 2 ] || { echo "usage: queue.sh add [--close] [--name TEXT] [--screen inner|cover] [--budget S] <board-task> <cmd> [args...]"; exit 2; }
   [[ $budget =~ ^[1-9][0-9]*$ ]] || { echo "queue.sh: --budget <seconds>"; exit 2; }
+  # A budget over the 300 s default needs a reason (QUEUE_BUDGET_WHY): game checks were given 900/1500 s to "pass",
+  # and the user's rule is that a game check over 300 s is a FAIL, never a reason to wait longer (friction f7).
+  if [ "$budget" -gt 300 ] && [ -z "${QUEUE_BUDGET_WHY:-}" ]; then
+    echo "queue.sh: --budget $budget is over 300 s; a long check is a FAIL, not a reason to wait. Set QUEUE_BUDGET_WHY=\"...\" only for a check that is long by design (not a game launch)." >&2; exit 2
+  fi
   task=$1; shift
   [[ $task =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$ ]] || { echo "queue.sh: bad task id: $task"; exit 2; }
   case "$screen" in ""|inner|cover) ;; *) echo "queue.sh: --screen inner|cover"; exit 2 ;; esac
