@@ -99,7 +99,7 @@ object AppWindows {
     private const val GAP_DP = 8
 
     /** 60% of the screen's width x 70% of its height (inside [area]), cascading down and right from the upper left. */
-    private fun nextBounds(context: Context): Rect {
+    fun nextBounds(context: Context): Rect {
         val screen = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
         val a = area(context)
         val step = (STEP_DP * context.resources.displayMetrics.density).toInt() * cascade

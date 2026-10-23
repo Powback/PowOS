@@ -26,6 +26,10 @@ object FreeformTasks {
     /** WindowConfiguration.WINDOWING_MODE_FREEFORM. */
     private const val FREEFORM = 5
 
+    /** WindowConfiguration.WINDOWING_MODE_FULLSCREEN and ACTIVITY_TYPE_STANDARD (an app, not home/recents/assistant). */
+    private const val FULLSCREEN = 1
+    private const val ACTIVITY_TYPE_STANDARD = 1
+
     /** ActivityTaskManager.RESIZE_MODE_USER: the window kept (no relaunch) while it's moved or resized. */
     private const val RESIZE_MODE_USER = 1
 
@@ -58,6 +62,41 @@ object FreeformTasks {
             Window(t.taskId, (t.baseActivity ?: t.topActivity)?.packageName, bounds, visible, dpi, t.taskDescription?.label?.toString())
         }
     }
+
+    /**
+     * The app tasks showing full screen now (an ordinary activity: not home, recents, the assistant or a dream), top-most
+     * first, as task id -> its package: on the unfolded home every app is a window ([toWindow] makes one of them).
+     */
+    fun fullScreen(context: Context): List<Pair<Int, String?>> {
+        HiddenApi.allow()
+        @Suppress("DEPRECATION")
+        val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
+        return tasks.filter { isFullScreenApp(it) }.map { it.taskId to (it.baseActivity ?: it.topActivity)?.packageName }
+    }
+
+    private fun isFullScreenApp(t: ActivityManager.RunningTaskInfo): Boolean {
+        val wc = runCatching { windowConfiguration(t) }.getOrNull() ?: return false
+        val mode = wc.javaClass.getMethod("getWindowingMode").invoke(wc)
+        val type = wc.javaClass.getMethod("getActivityType").invoke(wc)
+        val visible = runCatching { android.app.TaskInfo::class.java.getField("isVisible").getBoolean(t) }.getOrDefault(false)
+        return mode == FULLSCREEN && type == ACTIVITY_TYPE_STANDARD && visible
+    }
+
+    /**
+     * Task [id] (full screen) made a floating window at [bounds] (screen px): WindowContainerTransaction.setWindowingMode
+     * + setBounds through WindowOrganizer, as WM Shell's desktop mode moves a task into a desktop. For an app opened
+     * WITHOUT PowOS's launch options (another app, a notification of the system's, `am start`): Android puts a task
+     * started with no source window full screen. HACK: hidden, reflected like [minimise]. Real fix: none for an app.
+     */
+    fun toWindow(
+        context: Context,
+        id: Int,
+        bounds: Rect,
+    ): Boolean =
+        transact(context, id) { wct, token ->
+            wct.javaClass.getMethod("setWindowingMode", token.javaClass, Int::class.javaPrimitiveType).invoke(wct, token, FREEFORM)
+            wct.javaClass.getMethod("setBounds", token.javaClass, Rect::class.java).invoke(wct, token, bounds)
+        }.onFailure { Log.w(TAG, "can't make task $id a window", it) }.isSuccess
 
     /** The last task's window couldn't be read (logged once, not on every refresh). */
     @Volatile private var unreadable = false

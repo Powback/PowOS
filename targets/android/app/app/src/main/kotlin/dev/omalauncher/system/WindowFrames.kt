@@ -63,6 +63,7 @@ class WindowFrames(
     fun refresh() {
         val all = runCatching { FreeformTasks.list(context) }.onFailure { Log.w(TAG, "no floating windows", it) }.getOrDefault(emptyList())
         val floating = AppWindows.floating(context)
+        if (adopting(floating)) return
         logChange(all, floating)
         track(all, floating)
         val show = if (keyguard || Switcher.open || !floating) emptyList() else uncovered(all.filter { it.visible && it.id !in minimised && it.id !in away })
@@ -70,6 +71,31 @@ class WindowFrames(
         frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
         // Bottom-most first, so a new frame's windows stack over the ones under it.
         show.asReversed().forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w)), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
+    }
+
+    /**
+     * Unfolded, every app is a window: an app task showing full screen - opened without PowOS's launch options (another
+     * app, a system notification, `am start`), or left full screen from the folded screen - is made one at the next
+     * cascaded place (FreeformTasks.toWindow). Each task once ([adopted]): one that won't float stays as it is. True when
+     * one changed (the task listener's refresh follows). PowOS's own tasks (Linux windows: WindowTasks decides) never.
+     */
+    private fun adopting(floating: Boolean): Boolean {
+        // Folded, apps are full screen by design; unfolded again, they become windows again.
+        if (!floating) adopted.clear()
+        return floating && !keyguard && !Switcher.open && adopt()
+    }
+
+    private fun adopt(): Boolean {
+        val stray = FreeformTasks.fullScreen(context).filter { (id, pkg) -> pkg != null && pkg != context.packageName && id !in adopted }
+        stray.forEach { (id, pkg) ->
+            adopted.add(id)
+            val ok = FreeformTasks.toWindow(context, id, AppWindows.nextBounds(context))
+            Log.i(TAG, "task $id ($pkg) was full screen: ${if (ok) "now a window" else "can't float it"}")
+        }
+        if (stray.isEmpty()) return false
+        main.removeCallbacks(refreshNow)
+        main.postDelayed(refreshNow, SETTLE_MS)
+        return true
     }
 
     /**
@@ -268,6 +294,9 @@ class WindowFrames(
 
         /** How often each window's density was set so far ([dense]: until its task says it). */
         private val denseTries = mutableMapOf<Int, Int>()
+
+        /** Tasks [adopt] made windows (or tried to) since the last unfold: each once, so one that won't float isn't retried. */
+        private val adopted = mutableSetOf<Int>()
 
         /** Maximised windows: task -> (its bounds before, its maximised bounds). */
         private val maximised = mutableMapOf<Int, Pair<Rect, Rect>>()
