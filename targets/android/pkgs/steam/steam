@@ -158,4 +158,36 @@ ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 # software rendering. Only the GPU process goes unsandboxed; pages and the rest stay sandboxed (was -no-cef-sandbox:
 # none at all; checked 2026-10-17: GPU process up and steady, renderers sandboxed). Real fix: the KGSL device in
 # Chromium's GPU sandbox broker allowlist (CEF/Valve side).
-cd "$S/steamrtarm64" && exec ./steam -cef-disable-gpu-sandbox "$@"
+cd "$S/steamrtarm64" || exit 1
+# A steam:// URL for a client that already runs: Steam's own forwarding (this binary writes the command line into
+# ~/.steam/steam.pipe and exits) - and the running ARM64 client reads it and drops it: since 2026-10-20 no forwarded
+# command line was ever taken (console_log: every ExecCommandLine is a client's first; 2026-10-23 04:32: 0 bytes left
+# unread in the pipe, main loop healthy, a second forward dropped too). Every launch to a running Steam was lost.
+# HACK: so the hand-off is checked: the URL must show up in console_log ("ExecCommandLine ... <url>") within
+# HANDOFF_S (5) s; else the line is written into the pipe by hand in the format the client logs; else - and only with
+# no game of Steam's running (a frozen game the user left must not die) - Steam is closed and started again with the
+# URL on its own command line (a cold start, ~23 s, instead of a launch that never happens). Real fix: Valve's ARM64
+# client acting on forwarded command lines (report it with tools/phone/verify/steam-pipe-probe.sh's evidence).
+url=; for a in "$@"; do case $a in steam://*) url=$a ;; esac; done
+client_up() { case $(readlink "/proc/$(cat "$HOME/.steam/steam.pid" 2>/dev/null || echo 0)/exe" 2>/dev/null) in
+  */steamrtarm64/steam) return 0 ;; esac; return 1; }
+if [ -n "$url" ] && client_up; then
+  CL=$S/logs/console_log.txt; n=$(wc -l < "$CL" 2>/dev/null || echo 0)
+  taken() { local i; for i in $(seq $(($1 * 4))); do tail -n +$((n + 1)) "$CL" 2>/dev/null | grep -qF "$url" && return 0; sleep 0.25; done; return 1; }
+  ./steam -cef-disable-gpu-sandbox "$@"
+  taken "${HANDOFF_S:-5}" && exit 0
+  echo "steam: the running client didn't take $url - writing it into steam.pipe" >&2
+  printf "'%s' '-cef-disable-gpu-sandbox' '%s'\n" "$S/steamrtarm64/steam" "$url" | timeout 3 tee "$HOME/.steam/steam.pipe" > /dev/null
+  taken 3 && { echo "steam: taken from the hand-written line" >&2; exit 0; }
+  if pgrep -f 'SteamLaunch AppId=' > /dev/null; then
+    echo "steam: not taken either, and a game runs under Steam: left as it is (launch lost)" >&2; exit 1
+  fi
+  echo "steam: not taken either - restarting Steam with $url" >&2
+  p=$(cat "$HOME/.steam/steam.pid")
+  kill -TERM "$p" 2>/dev/null
+  for _ in $(seq 24); do [ -d "/proc/$p" ] || break; sleep 0.25; done
+  kill -KILL "$p" 2>/dev/null; pkill -KILL -u "$(id -u)" -f 'steamrtarm64/steamwebhelper' 2>/dev/null
+  for _ in $(seq 8); do [ -d "/proc/$p" ] || break; sleep 0.25; done
+  exec "$0" "$@"   # the not-running path: IPC cleanup, registry guard, compat policy, then a client with the URL
+fi
+exec ./steam -cef-disable-gpu-sandbox "$@"
