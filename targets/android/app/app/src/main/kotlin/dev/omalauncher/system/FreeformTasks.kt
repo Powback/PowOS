@@ -225,8 +225,10 @@ object FreeformTasks {
         ): Boolean {
             val t = token ?: return resize(id, bounds).let { false }
             return runCatching {
-                // The last one (the finger lifted) as a transition: WM Shell puts the app's content where the window is.
-                apply(t, transition = !drag) { wct, tok ->
+                // A move's one call (the finger lifted) as a transition: WM Shell puts the app's content where the window
+                // is. Never a resize's: its end in a transition left the app at its old size in a white new-size
+                // window and WM at the old bounds (the user, 13:43 2026-10-23); resizes stay plain transactions.
+                apply(t, transition = !drag && !resizing) { wct, tok ->
                     wct.javaClass.getMethod("setBounds", tok.javaClass, Rect::class.java).invoke(wct, tok, bounds)
                     if (resizing && drag != started) wct.javaClass.getMethod("setDragResizing", tok.javaClass, Boolean::class.javaPrimitiveType).invoke(wct, tok, drag)
                 }
