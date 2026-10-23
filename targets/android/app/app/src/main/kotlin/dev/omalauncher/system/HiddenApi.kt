@@ -35,6 +35,12 @@ object HiddenApi {
             "Landroid/window/WindowContainerTransaction",
             "Landroid/window/WindowContainerToken",
             "Landroid/window/WindowOrganizer",
+            // A floating window's content under PowOS's hand while it's dragged (TaskLeash): the remote transition's
+            // filter, its parcel and what WM Shell hands it.
+            "Landroid/window/TransitionFilter",
+            "Landroid/window/RemoteTransition",
+            "Landroid/window/IRemoteTransition",
+            "Landroid/window/TransitionInfo",
             "Landroid/app/StatusBarManager",
             // The gesture input (system/gesture/GestureMonitor): the display's input monitor and its receiver.
             "Landroid/hardware/input/InputManager",

@@ -229,6 +229,19 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
 - A task's bounds set with WindowOrganizer.applyTransaction move it in WM only: WM Shell owns the leash, so the app's
   content AND its touches stayed at the old place until a minimise. Bar moves now go to WM once at the lift, as
   WindowOrganizer.startNewTransition(TRANSIT_CHANGE, wct) (FreeformTasks.Live.end); live resizes keep applyTransaction.
+- Live content (system/TaskLeash.kt, 2026-10-23, NOT yet measured on the device): at a drag's first move PowOS
+  registers a remote with WM Shell (IShellTransitions, bundle key = its descriptor "com.android.wm.shell.shared.
+  IShellTransitions"; codes from sysui dex: registerRemote 2, unregisterRemote 3; filter: type CHANGE, a freeform task
+  in mode CHANGE), starts a CHANGE transition that sets the first target bounds, and plays it itself: startAnimation
+  (IRemoteTransition code 1; framework dex: merge 2, takeOver 3, consumed 4, abort 5) gives the task leash; each move
+  sets its position + crop in a Transaction applied with the drag layer's draw (applyTransactionOnDraw); the lift
+  finishes it (IRemoteTransitionFinishedCallback 1: WCT setBounds final [+ setDragResizing off], sct = final place).
+  No leash in 600 ms = the old way (FreeformTasks.Live). Watchdog 15 s (an open transition holds all of WM Shell's
+  others). Off: `settings put global powos_live_leash 0`. Logcat PowosTaskLeash ("leashes [..] after N ms",
+  "finished (..) N live frames"); WM Shell logs "RemoteTransitionHandler: Found filter". Check: verify/window-live.sh
+  (SurfaceFlinger HWC "Disp Frame" of the app's layer mid-drag/mid-resize, finger still down; --page = mid-swipe).
+- Framework/SystemUI dex dumps for codes: ~/.cache/powos-caption/{framework,sysui}/*.dex (dexdump in powos-vadb:
+  `docker cp` the dex in, /opt/android-sdk/build-tools/35.0.0/dexdump -d).
 - The bar's close worked on 0f098c06 for Calculator, Dolphin, Gwenview (desk-probe r3 touch state: the bar window
   gets the DOWN, nobody pilfers). The r2a failures (APK 367633db) stayed unexplained.
 - Touch evidence in a check: `input motionevent DOWN`, then `dumpsys input` TouchStatesByDisplay lists the windows

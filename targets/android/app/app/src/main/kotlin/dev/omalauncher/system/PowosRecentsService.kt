@@ -82,6 +82,8 @@ class PowosRecentsService : Service() {
                 val recentTasks = params?.getBinder(RecentsTransition.RECENT_TASKS)
                 // The switcher's split screen (WM Shell's).
                 Tasks.splitScreen = params?.getBinder("com.android.wm.shell.splitscreen.ISplitScreen")
+                // WM Shell's transitions: a floating window's content follows a drag (TaskLeash).
+                TaskLeash.shell = params?.getBinder(TaskLeash.KEY)
                 Log.i(TAG, "SystemUI connected: ${params?.keySet()?.sorted()}")
                 main.post {
                     RecentsWatchdog.onConnected()
@@ -189,6 +191,7 @@ class PowosRecentsService : Service() {
         shade?.stop()
         shade = null
         systemUi = null
+        TaskLeash.shell = null
     }
 
     /** IRemoteCallback.sendResult(Bundle) on [callback] (a hidden interface: its one call, made by hand). */

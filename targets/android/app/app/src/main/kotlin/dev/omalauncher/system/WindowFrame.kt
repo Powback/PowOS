@@ -11,6 +11,7 @@ import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.SurfaceControl
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowInsets
@@ -377,9 +378,10 @@ class WindowFrame(
             val dx = (e.rawX - x0).toInt()
             val dy = (e.rawY - y0).toInt()
             if (!dragging && dx * dx + dy * dy < slop * slop) return
-            if (!dragging) startDrag(resizing = !move)
+            val target = if (move) moved(from, dx, dy) else resized(from, dx, dy)
+            if (!dragging) startDrag(resizing = !move, target)
             dragging = true
-            follow(if (move) moved(from, dx, dy) else resized(from, dx, dy), e)
+            follow(target, e)
         }
     }
 
@@ -404,10 +406,18 @@ class WindowFrame(
     /** A move (not a resize) is under way: the task moves once, when the finger lifts ([settle]). */
     private var moving = false
 
-    /** A drag starts: the task's bounds go live ([FreeformTasks.Live]); the frame's own windows step aside (drawn by the drag layer, no relayout per move). */
-    private fun startDrag(resizing: Boolean) {
+    /**
+     * A drag starts (its first [target]): the app's content goes under PowOS's hand ([TaskLeash]: moved and cropped with
+     * the frame every frame), the task's bounds go live for a resize ([FreeformTasks.Live]); the frame's own windows
+     * step aside (drawn by the drag layer, no relayout per move).
+     */
+    private fun startDrag(
+        resizing: Boolean,
+        target: Rect,
+    ) {
         moving = !resizing
         worker.execute { live = FreeformTasks.Live(context, id, resizing) }
+        leash = if (TaskLeash.enabled(context)) startLeash(resizing, target) else null
         if (legacyDrag()) return
         val bitmapOf = { v: View -> runCatching { v.drawToBitmap() }.getOrNull() }
         drag = DragLayer(context, bitmapOf(bar), if (resizing) bitmapOf(grip) else null, dp(BAR_DP + HIT_DP), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)
@@ -415,6 +425,22 @@ class WindowFrame(
         grip.alpha = 0f
         barBlur.set(0f)
         gripBlur.set(0f)
+    }
+
+    /** The app's content under PowOS's hand from the drag's first [target] on; null where it can't be. */
+    private fun startLeash(
+        resizing: Boolean,
+        target: Rect,
+    ): TaskLeash.Session? {
+        val s = TaskLeash.Session(context, listOf(id), "task $id ${if (resizing) "resize" else "move"}")
+        s.onReady = { ok -> if (ok) drag?.outline = false }
+        val started =
+            s.start { wct, token ->
+                val tok = token(id) ?: error("no token for task $id")
+                TaskLeash.setBounds(wct, tok, target)
+                if (resizing) TaskLeash.setDragResizing(wct, tok, true)
+            }
+        return s.takeIf { started }
     }
 
     /** The frame and the task to [target]: the frame on the next frame, the task as fast as it can. */
@@ -430,6 +456,15 @@ class WindowFrame(
         } else {
             layout(target)
             bar.viewTreeObserver.registerFrameCommitCallback { legacyLatencies.add(System.nanoTime() - eventNs) }
+        }
+        // The app's content with the frame, on the drag layer's next frame (one compositor transaction for both).
+        val s = leash
+        if (s != null) {
+            val t = SurfaceControl.Transaction()
+            if (s.frame(t, id, target)) {
+                val root = layer?.rootSurfaceControl
+                if (root != null) root.applyTransactionOnDraw(t) else t.apply()
+            }
         }
         resize(target)
     }
@@ -541,10 +576,69 @@ class WindowFrame(
         }
     }
 
-    /** The finger lifted, the task at [r]: its last live bounds, drag-resizing off, the drag's numbers logged. */
+    /**
+     * The finger lifted, the task at [r]: its last bounds, drag-resizing off, the drag's numbers logged. With the content
+     * under PowOS's hand ([TaskLeash]) its transition ends with them - after the live resize calls already queued; if
+     * it never got the content, the old way ([FreeformTasks.Live.end]).
+     */
     private fun settle(r: Rect) {
         pending.set(null)
+        val resizing = !moving
         moving = false
+        val s = leash
+        leash = null
+        if (s == null || !s.pending) {
+            settleTask(r)
+            return
+        }
+        settleLive(s, r, resizing)
+    }
+
+    /** The drag's end through its content's transition ([TaskLeash.Session.finish]). */
+    private fun settleLive(
+        s: TaskLeash.Session,
+        r: Rect,
+        resizing: Boolean,
+    ) {
+        // The leashes still coming: ended the moment they come (true), or the old way if they never do.
+        s.onReady = { ok -> if (ok) dropLive() else settleTask(r) }
+        // After the live resize calls already queued on the worker: the end's bounds are the last WM gets.
+        worker.execute {
+            logLive(r)
+            main.post { finishLive(s, r, resizing) }
+        }
+    }
+
+    /** The content's transition ends at [r] (main thread). */
+    private fun finishLive(
+        s: TaskLeash.Session,
+        r: Rect,
+        resizing: Boolean,
+    ) {
+        val wasLive = s.live
+        s.finish(mapOf(id to r)) { wct, token -> endBounds(wct, token(id), r, resizing) }
+        if (wasLive) dropLive()
+    }
+
+    private fun endBounds(
+        wct: Any,
+        tok: Any?,
+        r: Rect,
+        resizing: Boolean,
+    ) {
+        tok ?: return
+        TaskLeash.setBounds(wct, tok, r)
+        if (resizing) TaskLeash.setDragResizing(wct, tok, false)
+    }
+
+    /** The content's transition took the end: no live bounds left, home's window list read again. */
+    private fun dropLive() {
+        worker.execute { live = null }
+        WindowFrames.current?.changed()
+    }
+
+    /** The task to [r] the old way (no content under PowOS's hand). */
+    private fun settleTask(r: Rect) {
         worker.execute {
             val l = live
             // The listed windows (home's windows.list, its gestures' no-go boxes) again: a bounds change of ours fires
@@ -558,6 +652,13 @@ class WindowFrame(
             l.end(r)
             live = null
             WindowFrames.current?.changed()
+            logLive(r)
+        }
+    }
+
+    /** The drag's live bounds calls, one line (worker thread). */
+    private fun logLive(r: Rect) {
+        run {
             if (liveNs.isNotEmpty()) {
                 val ms = liveNs.map { it / 1_000_000.0 }.sorted()
                 val (w0, h0) = liveSizes.first()
@@ -575,6 +676,10 @@ class WindowFrame(
 
     /** The drag's live bounds (worker thread only). */
     private var live: FreeformTasks.Live? = null
+
+    /** The drag's app content under PowOS's hand (main thread); null: the content waits for the lift. */
+    private var leash: TaskLeash.Session? = null
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private val liveNs = ArrayList<Long>()
     private val liveSizes = ArrayList<Pair<Int, Int>>()
 

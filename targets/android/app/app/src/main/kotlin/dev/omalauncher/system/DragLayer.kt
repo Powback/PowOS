@@ -38,7 +38,17 @@ internal class DragLayer(
     private val density = context.resources.displayMetrics.density
     private var target = Rect()
     private var added = false
-    private val outline =
+
+    /**
+     * The window's outline drawn (the content isn't following: where it will go). Off once the app's own content moves
+     * with the frame ([TaskLeash]): no ghost of it.
+     */
+    var outline = true
+        set(v) {
+            field = v
+            invalidate()
+        }
+    private val outlinePaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 1.5f * density
@@ -85,7 +95,7 @@ internal class DragLayer(
 
     override fun onDraw(canvas: Canvas) {
         val r = target
-        canvas.drawRoundRect(RectF(r), corner, corner, outline)
+        if (outline) canvas.drawRoundRect(RectF(r), corner, corner, outlinePaint)
         bar?.let { canvas.drawBitmap(it, r.left.toFloat(), (r.top - barHeight).toFloat(), bitmapPaint) }
         grip?.let { canvas.drawBitmap(it, (r.right - gripOffset).toFloat(), (r.bottom - gripOffset).toFloat(), bitmapPaint) }
         val ev = pendingEventNs
