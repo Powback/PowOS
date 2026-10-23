@@ -19,6 +19,8 @@ one call path stays the only place that can say no), toggles are the spec's own 
   POST /trackers/allow {app, allow}            per-app "allow trackers" (trackers/policy.json, read by the proxy)
   GET|POST /rules, GET /recordings, GET /recording?name=, POST /recording/edit|replay   appcap_flows.py
   GET /files, GET|POST /files/override                                                 appcap_files.py
+  GET|POST /link                   a device paired in its own app, handed over by that app (appcap_link.py): the key
+                                   only ever in the x-powos-secret header, into the encrypted store, never returned
 
 State: appcap_store.STATE (~/.local/state/powos/app-api): specs/<app>.appcap.json (seeded from examples/ once),
 audit/<app>.jsonl, trackers/<app>.jsonl + trackers/policy.json. Stdlib only. Never prints or returns a token.
@@ -38,6 +40,7 @@ from urllib.parse import parse_qs, urlparse
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import appcap_files  # noqa: E402
+import appcap_link  # noqa: E402
 import appcap_flows  # noqa: E402
 import appcap_render  # noqa: E402
 import appcap_store  # noqa: E402
@@ -277,7 +280,7 @@ def trackers_allow(_q, b):
 
 ROUTES = {("GET", "/apps"): apps, ("GET", "/views"): views, ("POST", "/enable"): enable, ("POST", "/call"): call,
           ("GET", "/audit"): audit, ("GET", "/trackers"): trackers, ("POST", "/trackers/allow"): trackers_allow,
-          **appcap_flows.ROUTES, **appcap_files.ROUTES}
+          **appcap_flows.ROUTES, **appcap_files.ROUTES, **appcap_link.ROUTES}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -301,6 +304,9 @@ class Handler(BaseHTTPRequestHandler):
             if n > MAX_BODY:
                 return self.reply(413, {"error": "too big"})
             b = json.loads(self.rfile.read(n) or b"{}")
+            b.pop("_secret", None)
+            if u.path == "/link":  # the key rides only in this header (the PowOS app fills ${secret:..} in), never logged
+                b["_secret"] = self.headers.get("x-powos-secret", "")
         try:
             self.reply(200, fn(q, b))
         except (LookupError, KeyError) as e:

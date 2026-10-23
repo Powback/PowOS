@@ -50,6 +50,8 @@ import javax.net.ssl.X509TrustManager
  *   close  {sub}
  *   mdns   {type: "_hue._tcp", ms?}  -> {services: [{name, host, port, txt}]} (needs "lan")
  *   secret {name}               -> {has}
+ *   pin    {host, port?}        -> {sha256}: the certificate this app pinned for that host ("" = none) - a public
+ *                                  hash, so the app can hand its pairing to App API (docs/COMPOSER.md section 6)
  *   forget {host?, secret?}     drops a pin and/or a secret
  *
  * HACK: the app id is the island's word for itself - islands are imported into the shell page, one origin, so one
@@ -110,6 +112,10 @@ class ShellNet(
                 return ok.put("services", mdns(r.getString("type"), r.optLong("ms", 3000).coerceIn(500, 10_000)))
             }
             "secret" -> return ok.put("has", secrets.contains(key(app, r.getString("name"))))
+            "pin" -> {
+                val hostPort = r.getString("host").lowercase() + ":" + r.optInt("port", 443)
+                return ok.put("sha256", pins.getString(key(app, hostPort), "") ?: "")
+            }
             "forget" -> {
                 r.optString("host").takeIf { it.isNotEmpty() }?.let { h ->
                     pins.edit().apply { pins.all.keys.filter { it.startsWith("$app\u0000$h:") }.forEach { remove(it) } }.apply()

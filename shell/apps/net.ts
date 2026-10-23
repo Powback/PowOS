@@ -120,6 +120,9 @@ export interface Net {
   /** DNS-SD on the local network ("_hue._tcp"); needs "lan". */
   mdns(app: string, type: string, ms?: number): Promise<{ name: string; host: string; port: number; txt: Record<string, string> }[]>;
   hasSecret(app: string, name: string): Promise<boolean>;
+  /** The certificate this app pinned for [host] (sha-256 hex of its DER, "" = none): a public hash, e.g. for handing a
+   * pairing to App API. Older PowOS apps lack it (undefined). */
+  pin?(app: string, host: string, port?: number): Promise<string>;
   /** Drops a host's pinned certificate and/or a secret. */
   forget(app: string, what: { host?: string; secret?: string }): Promise<void>;
   /** Server-sent events while the page is shown (closed 5 s after it's hidden or the last user goes). null: off. */
@@ -276,6 +279,9 @@ export const net: Net = {
   },
   async hasSecret(app, name) {
     return !!(await request("secret", app, { name })).has;
+  },
+  async pin(app, host, port = 443) {
+    return String((await request("pin", app, { host, port })).sha256 ?? "");
   },
   async forget(app, what) {
     await request("forget", app, what);

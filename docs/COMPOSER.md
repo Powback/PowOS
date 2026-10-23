@@ -122,17 +122,35 @@ action's `confirm_template` (what and how much) and sends only on the user's exp
 Everything runs on PowOS itself: the composer, App API's runtime, the module and the widget. The Mac is only a build
 host (`powos app builder`) when a module has to be compiled, which a composition doesn't.
 
-## 6. Linking a device (what the Hue widget needs to show live rooms)
+## 6. A device already paired: handed over by its own app (Hue from Lights)
 
-The composed Hue widget reads through App API, not through the Lights app's own key (that secret is Lights'). Until
-Hue is linked in App API it shows one calm line, "Link Hue in App API", and the runtime refuses its reads ("needs
-bridge_ip"). Linking = the bridge's address and certificate pin in `<state>/state/hue.json`
-(`{"bridge_ip": "...", "tls_pin_sha256": "..."}`) and its key in the encrypted store (`appcap_store.py set hue`).
-The App API app's link step for this is the next piece of work (not in this slice).
+A device the user paired in its own PowOS app is not paired again. The app hands the pairing to App API itself,
+through its own interface (`tools/app-api/appcap_link.py`):
 
-App API's service picks up a newer package's actions and row hints (`list_grouped_lights`, `view`) into the user's
-spec copies at its start (`appcap_serve.py` seed: additive, toggles kept) - on the phone that's the next system-tier
-restart.
+- **Lights** (`~/Projects/lights`, `ui/lib/appapi.ts`), once its bridge answered, does `GET /link?app=hue` on App API
+  (`net` now declares `127.0.0.1`). If App API isn't linked to that bridge address yet, Lights sends
+  `POST /link {app: "hue", from: "local.lights", state: {bridge_ip, bridge_id}, pin}`. The key goes in the header
+  `x-powos-secret: ${secret:hue}`, and the PowOS app fills in the value on the way out (ShellNet.kt). Lights' code
+  never sees the key. The pin is the certificate host.net pinned for the bridge (`host.net.pin`, new in ShellNet; an
+  older PowOS app sends none). This happens once per shell session, and again when the address changes.
+- **App API** keeps the pairing only after checking it:
+  - The bridge's certificate must be the pin. Without a pin, its subject must be the bridge id Lights paired with,
+    and then that certificate is pinned.
+  - The key must read the bridge (`GET /resource/bridge`, nothing changes).
+
+  The key then goes into the encrypted store as `secret:hue`. The address and pin go into
+  `<state>/state/hue.json`, plus one audit line without the key. `GET /link` reports linked/pinned, never the key.
+- Nothing reads Lights' tables or its private storage. App API only receives what Lights chose to send. Without an
+  App API that has `/link` (a service started before this change), Lights' GET gets a 404 and nothing happens; the
+  next session tries again.
+- Known limit, the same as ShellNet's HACK about app ids: App API can't tell which app called `/link`. Any PowOS app
+  that declares `127.0.0.1` could send a pairing, though it must still pass the certificate and read checks.
+
+Until it's linked, the widget shows "Link Hue in App API", and the runtime refuses its reads ("needs bridge_ip").
+
+App API's service picks up a newer package's actions and row hints (`list_grouped_lights`, `view`) and `/link` at its
+start (`appcap_serve.py` seed is additive and keeps the toggles). On the phone that's the next start of the app-api
+service (a system-tier restart).
 
 ## 7. Tests
 
@@ -142,5 +160,10 @@ restart.
   unlinked and unpinned sends refused, a read's JSON parsed, consumer passthrough, the additive seed).
 - `tools/compose/render-check.sh`: composes the Hue widget, builds it and renders it in the widget preview at every
   size, both screens, two themes, against mocked App API answers (live, not linked, stale).
+- `test/tier1/test-appcap-link.py` (headless, a fake HTTPS bridge on loopback): link by header only, pin / bridge id /
+  key checks, nothing kept on a refusal, the key nowhere in the clear; then the widget's two reads reach the bridge and
+  a widget's write is refused (the bridge sees GETs only).
+- `tools/phone/verify/hue-link.sh`: on the phone, after App API's restart - linked by Lights and pinned, both reads
+  answer from the real bridge with rows, and the audit shows reads only.
 - `tools/phone/verify/composer.sh`: on the phone - installed and registered (the edit sheet's list), its module
   served to the shell, its database published, and App API's audit shows the widget's calls as reads only.
