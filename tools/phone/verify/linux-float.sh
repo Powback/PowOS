@@ -113,12 +113,14 @@ sleep 2; floats "$DT" Dolphin; "$T/shot.sh" "$OUT/dolphin.png"
 [ "$(app_of "$DT")" = l:org.kde.dolphin ] && pass "Dolphin from the launcher floats (task $DT), windows.list names it" ||
   fail "Dolphin's task $DT is '$(app_of "$DT")' in windows.list"
 
-# 3. An image opened the way Dolphin opens it.
+# 3. An image opened in Gwenview from the session (as Dolphin's Open With does).
 before=$(lin)
 # setsid: out of the user.sh session, whose end took a plain `nohup ... &` kioclient with it before Gwenview started
 # ("gwenview processes: 0", 2026-10-23 - likely; its log below says). KDE picks Gwenview (InitialPreference 8 over
-# Brave's 1 for image/png).
-us "setsid -f kioclient exec $IMG >/tmp/linux-float-kio.log 2>&1 < /dev/null"
+# Brave's 1 for image/png). Not any more (06:59): KIO opened the PNG in Brave (the user's file association - left
+# alone), which raised a KDE Wallet prompt as the new task ('none'). So the image is opened with Gwenview by name,
+# as Dolphin's "Open With > Gwenview" does: another app's window started from the session, the same path to a task.
+us "setsid -f gwenview $IMG >/tmp/linux-float-kio.log 2>&1 < /dev/null"
 GT=$(new_tasks 25 "$before"); sleep 3; chk gwenview
 log "kioclient said: $(us 'tail -3 /tmp/linux-float-kio.log' | tr '\n' ' ')"
 GT=$(comm -13 <(echo "$before") <(lin)); n=$(echo "$GT" | grep -c .)

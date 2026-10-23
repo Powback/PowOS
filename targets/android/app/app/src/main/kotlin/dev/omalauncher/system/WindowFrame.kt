@@ -485,8 +485,11 @@ class WindowFrame(
         dy: Int,
     ): Rect {
         val (s, _) = screen()
+        // Not down over home's bottom bar (AppWindows.area, as maximise): a corner dragged down ran under the dock
+        // (2026-10-23). A window already lower keeps its bottom as the limit.
+        val floor = maxOf(AppWindows.area(context).bottom.coerceAtMost(s.bottom), from.bottom)
         val right = (from.right + dx).coerceIn(from.left + dp(MIN_W_DP), maxOf(from.left + dp(MIN_W_DP), s.right))
-        val bottom = (from.bottom + dy).coerceIn(from.top + dp(MIN_H_DP), maxOf(from.top + dp(MIN_H_DP), s.bottom))
+        val bottom = (from.bottom + dy).coerceIn(from.top + dp(MIN_H_DP), maxOf(from.top + dp(MIN_H_DP), floor))
         return Rect(from.left, from.top, right, bottom)
     }
 

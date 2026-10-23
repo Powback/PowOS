@@ -75,7 +75,13 @@ read -r GL GT GR GB <<<"$(wframe 'PowOS window grip')"
 GX=$(((GL + GR) / 2)); GY=$(((GT + GB) / 2))
 echo "app window before: $AL $AT $AR $AB; grip at $GX,$GY" | tee -a "$OUT/log.txt"
 # One phone shell: the drag in the background, the app's frame read at its middle, then after.
-"$A" shell "su -c 'input swipe $GX $GY $((GX + $(px 160))) $((GY + $(px 120))) 2400'" >/dev/null 2>&1 &
+# The drag must stay on the screen: a window cascaded to the right (776..2136 of 2268, 06:58) hit the screen's edge
+# after ~130 px of a 442 px drag, so it was already at its last size mid-drag ("not live", the check's fault). With
+# less than 200 dp to the right it shrinks the window instead (up and left); mid-drag must lie between either way.
+DX=$(px 160); DY=$(px 120); SG=1
+[ $((W - GX)) -lt $(px 200) ] || [ $((H - GY)) -lt $(px 200) ] && { SG=-1; }
+echo "drag: ${SG}x(${DX},${DY}) px" | tee -a "$OUT/log.txt"
+"$A" shell "su -c 'input swipe $GX $GY $((GX + SG * DX)) $((GY + SG * DY)) 2400'" >/dev/null 2>&1 &
 SW=$!
 sleep 1.3
 read -r ML MT MR MB <<<"$(wframe "$PKG")"
@@ -86,7 +92,7 @@ echo "app window mid-drag: $ML $MT $MR $MB; after: $EL $ET $ER $EB" | tee -a "$O
 sh_ "logcat -d -s PowosWindowResize:I PowosWindowDrag:I PowosFreeform:W" | tail -6 | tee -a "$OUT/log.txt"
 "$T/shot.sh" "$OUT/after-resize.png" >/dev/null 2>&1
 W0=$((AR - AL)); WM=$((MR - ML)); W1=$((ER - EL))
-[ "$W1" -gt "$W0" ] || fail "the grip didn't resize the window ($W0 -> $W1 px wide)"
-[ "$WM" -gt "$W0" ] && [ "$WM" -lt "$W1" ] && pass "live resize: the app's window $W0 -> $WM (mid-drag) -> $W1 px wide" ||
+[ $(( (W1 - W0) * SG )) -gt 0 ] || fail "the grip didn't resize the window ($W0 -> $W1 px wide)"
+[ $(( (WM - W0) * SG )) -gt 0 ] && [ $(( (W1 - WM) * SG )) -gt 0 ] && pass "live resize: the app's window $W0 -> $WM (mid-drag) -> $W1 px wide" ||
   fail "not live: the app's window was $WM px wide mid-drag ($W0 before, $W1 after)"
 echo "all passed; artefacts: $OUT"
