@@ -278,3 +278,10 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   moving the drawer into an overlay window (big rewrite of home's gestures/state, the drawer owner's).
 - Open question for the build: home's content (1-p opacity) draws over the windows from the drawer's first frame; lift
   at drawer start (rule: panels always above) and check a mid-open frame for a pop.
+- Touch in a Linux window task (kwin 0020, 3.24): AnlandWindowTask::touchTarget picks a watched window in stacking
+  order that isShown, readyForPainting, opacity > 0 and hitTest(pos), else the task's window (by frame alone Steam's
+  steamwebhelper POPUP_MENU helpers, override-redirect, no WM_TRANSIENT_FOR, took taps). Note Xwayland delivers a
+  touch by X stacking at ROOT coords, not by the wl_surface KWin picked: every Kept X window on any desktop overlaps
+  there. KWin log lines: "touch at .. to ..", "also draws ..", "the window took .. itself .. sized back" (an X client's
+  own configure, e.g. Steam restoring 1659x1746, is permitted by X11Window::configureRequest; 0020 refits, 5 tries).
+  Check: verify/steam-input.sh (size = task +-4 px, LIBRARY tap, library scroll, Kate; OUT/steam.mp4, kate.mp4, kwin.txt).
