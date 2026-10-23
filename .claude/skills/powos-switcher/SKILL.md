@@ -261,6 +261,23 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   others). Off: `settings put global powos_live_leash 0`. Logcat PowosTaskLeash ("leashes [..] after N ms",
   "finished (..) N live frames"); WM Shell logs "RemoteTransitionHandler: Found filter". Check: verify/window-live.sh
   (SurfaceFlinger HWC "Disp Frame" of the app's layer mid-drag/mid-resize, finger still down; --page = mid-swipe).
+- Window bounds API facts (dex of this build, 2026-10-23, window-core #5): IShellTransitions has registerRemote(2),
+  unregisterRemote(3), registerRemoteForTakeover, getShellApplyToken, getHomeTaskOverlayContainer, setHome/Focus-
+  TransitionListener, forceCancelRecentsTransition, notifyLauncherStateChange, (un)registerRemoteTaskListener
+  (IOplusTaskListener), updateRemoteTransitionState - NO startTransition: a launcher can't have Shell start a WCT's
+  transition. WM core startNewTransition(type, wct) = new Transition + startCollectOrQueue + the WCT applied in it
+  (OnePlus hooks: shouldSkipStartTransition, fillExtendInfo); applyTransaction = ActionChain "applyTransactLegacy"
+  (collected into a transition only if one is collecting). Shell's onTransitionReady for a token it didn't start:
+  Log.wtf "Got transitionReady for non-pending transition" + a fallback ActiveTransition, then dispatchReady (remotes'
+  filters, handlers) - so that E line comes with EVERY startNewTransition PowOS makes; it is not itself the failure.
+- Maximise measured (window-max after, 18:16): WM listed the maximised bounds +0.1 s after the button (PowosWindowFrames
+  list), our remote got the leash and finished at +0.17 s, and `am stack list` had the OLD bounds again from +0.35 s
+  (calc and Kate). Who undoes it is not yet measured: window-max.sh now captures the whole logcat (wm.txt: WM, Shell,
+  OnePlus lines) and traces bounds every ~90 ms after each change (`trace`). Same family: the old resize end as a
+  transition ("WM at the old bounds", 13:43) and bare resizeTask maximise (changed nothing, f468af79) - a size change
+  through a change transition doesn't stick; position changes (bar move end) do.
+- Likely (not measured): a session holds its transition open for the whole gesture and ignores mergeAnimation, so every
+  other transition on Shell's track waits behind it (input window gone / old bounds 5 s while a resize leash was open).
 - Resizes are OFF the leash by default (68a3b4ed; `settings put global powos_leash_resize 1` = on): a leash-on resize
   once kept the old bounds 5 s with no app input window (resize-probe 1837), others left a "Transition Root: Task=N"
   layer; every leash start logs ShellTransitions E "transitionReady for non-pending" (WM Shell never asked for our
