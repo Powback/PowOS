@@ -35,7 +35,9 @@ PY
   [ -z "${1:-}" ] || mv -f "$CFG.td" "$CFG"; }
 steam_off() { pill "Teardown check: closing Steam"; APP=$APP bash /var/tmp/powos-bf-stop.sh --steam | head -1
   for _ in $(seq 20); do [ -d "/proc/$(steam_pid)" ] || break; sleep 0.5; done; }
-logs_off() { local v; for v in "${!PDIR[@]}"; do rm -f "$S/steamapps/common/${PDIR[$v]}/user_settings.py"; done; }
+# The logging settings go in ~/.config/powos/proton-settings.json, which PowOS's own user_settings.py (pkgs/steam: the
+# install-script evaluator skip) reads - never over or instead of that file (it removed it, 2026-10-23).
+logs_off() { rm -f ~/.config/powos/proton-settings.json; }
 restore() { logs_off; [ -n "${ORIG:-}" ] && [ "$(mapping)" != "$ORIG" ] && { steam_off; mapping "$ORIG"; echo "mapping put back: $ORIG"; }; ORIG=; }
 ON_CLOSE=restore
 run() {  # run <variant> <n>
@@ -46,7 +48,9 @@ run() {  # run <variant> <n>
   steam_off; mapping "${TOOL[$v]}"
   p="$S/steamapps/common/${PDIR[$v]}"
   [ -x "$p/proton" ] || { fail "start-$v" "$p has no proton (not installed)"; return; }
-  printf 'user_settings = {"PROTON_LOG": "1", "PROTON_LOG_DIR": "%s", "WINEDEBUG": "+loaddll,+seh,err+all,warn+module", "DXVK_LOG_LEVEL": "info", "VKD3D_DEBUG": "warn", "VKD3D_SHADER_DEBUG": "fixme"}\n' "$d" > "$p/user_settings.py"
+  mkdir -p ~/.config/powos
+  printf '{"PROTON_LOG": "1", "PROTON_LOG_DIR": "%s", "WINEDEBUG": "+loaddll,+seh,err+all,warn+module", "DXVK_LOG_LEVEL": "info", "VKD3D_DEBUG": "warn", "VKD3D_SHADER_DEBUG": "fixme"}\n' "$d" > ~/.config/powos/proton-settings.json
+  [ -f "$p/user_settings.py" ] || echo "   note: $p has no PowOS user_settings.py - the log settings won't apply there" 
   echo "== $v #$2: mapping $(mapping), $(cat "$p/version"), FEX $(head -1 "$S/steamapps/common/FEX-Emu/VERSIONS.txt" 2>/dev/null)"
   gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0)
   powos sleep never steam >/dev/null 2>&1
