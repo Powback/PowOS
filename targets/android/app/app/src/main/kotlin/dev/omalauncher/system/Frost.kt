@@ -35,22 +35,39 @@ internal object Frost {
         val bg = p.background.toArgb()
         val fg = p.foreground.toArgb()
         val light = p.isLight
-        // theme.css: --glass-base = srgb mix(foreground 18%, background); --frost-cool by the theme's tone.
-        val glassBase = srgbMix(fg, 0.18f, bg)
         val other = wallpaperTone(context)?.let { it != light } ?: false
-        val base =
-            when {
-                // shell.css: over the other tone, the wallpaper's: mix(--frost-paper (the foreground) 70%, --frost-swap-cool).
-                other -> oklabMix(fg, 0.7f, if (light) COOL_DARK else COOL_LIGHT)
-                light -> oklabMix(glassBase, 0.55f, COOL_LIGHT)
-                // A dark theme over a dark wallpaper: a touch lighter (shell.css), so the glass shows over pure black.
-                else -> oklabMix(glassBase, 0.5f, oklabMix(COOL_DARK, 0.8f, fg))
-            }
         // --glass-tint: 32% under html.glass-native (dark), 50% light; frost surfaces take 20% more.
         val tint = if (light) 0.50f else 0.32f
-        val veil = if (other) Color.TRANSPARENT else if (light) Color.argb(20, 255, 255, 255) else Color.argb(51, 0, 0, 0)
         val ink = if (other) bg else fg
-        return Colors(alpha(base, tint + 0.20f), veil, alpha(ink, 0.06f), Color.argb(18, 255, 255, 255), ink)
+        return Colors(alpha(base(fg, bg, light, other), tint + 0.20f), veil(light, other), alpha(ink, 0.06f), Color.argb(18, 255, 255, 255), ink)
+    }
+
+    /** --frost-base on a frost surface: theme.css's, as shell.css adjusts it per tone. */
+    private fun base(
+        fg: Int,
+        bg: Int,
+        light: Boolean,
+        other: Boolean,
+    ): Int {
+        // theme.css: --glass-base = srgb mix(foreground 18%, background); --frost-cool by the theme's tone.
+        val glassBase = srgbMix(fg, 0.18f, bg)
+        return when {
+            // shell.css: over the other tone, the wallpaper's: mix(--frost-paper (the foreground) 70%, --frost-swap-cool).
+            other -> oklabMix(fg, 0.7f, if (light) COOL_DARK else COOL_LIGHT)
+            light -> oklabMix(glassBase, 0.55f, COOL_LIGHT)
+            // A dark theme over a dark wallpaper: a touch lighter (shell.css), so the glass shows over pure black.
+            else -> oklabMix(glassBase, 0.5f, oklabMix(COOL_DARK, 0.8f, fg))
+        }
+    }
+
+    /** --glass-veil: under the tint; none over the other tone. */
+    private fun veil(
+        light: Boolean,
+        other: Boolean,
+    ) = when {
+        other -> Color.TRANSPARENT
+        light -> Color.argb(20, 255, 255, 255)
+        else -> Color.argb(51, 0, 0, 0)
     }
 
     /** The wallpaper light (true) or dark (false) by its own colour hints; null when it can't be read. */
