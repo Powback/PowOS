@@ -1405,6 +1405,17 @@ async function desktopsReloaded() {
   return window.__hid === "102" ? [] : [`after a reload on page 1, hidden [${window.__hid}], not page 2's [102] (placement not kept: pages ${S.pages.value}, ${JSON.stringify(D.placed.value)})`];
 }
 
+// Boot slots: at most GATE_BOOTS pages booting at once (default from the Mac's free CPU: 3..12). ~30 pages booting
+// together on a Mac at load ~20 (training runs + builds) timed every page out at READY_MS though the shell loads
+// (friction f30, 2026-10-23). A page's ready clock starts when it gets its slot; the slot frees when it's ready or
+// failed (or READY_MS passed), so the checks after boot still run side by side.
+const os = await import("node:os");
+const BOOTS = Number(process.env.GATE_BOOTS) || Math.max(3, Math.min(12, Math.round(os.cpus().length - os.loadavg()[0] + 4)));
+let booting = 0;
+const bootQueue = [];
+const bootSlot = () => new Promise((ok) => (booting < BOOTS ? (booting++, ok()) : bootQueue.push(ok)));
+const bootDone = () => (bootQueue.length ? bootQueue.shift()() : booting--);
+
 async function open(browser, url, name, viewport = { width: 412, height: 915 }) {
   if (ONLY && !ONLY.test(name)) throw SKIP;
   // A context (a window) of its own: tabs side by side in one window are hidden but the front one - no frames.
@@ -1529,8 +1540,11 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
     window.__gateRaf = 0;
     window.requestAnimationFrame = (cb) => raf((t) => (window.__gateRaf++, cb(t)));
   });
+  await bootSlot();
   const started = Date.now();
   await page.goto(url, { waitUntil: "domcontentloaded" }).catch((e) => problems.push(`navigation: ${e.message}`));
+  page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 100 })
+    .catch(() => {}).finally(bootDone);
   return { page, name, problems, warnings, uncaught, started };
 }
 
