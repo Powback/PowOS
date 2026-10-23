@@ -10,8 +10,11 @@
 # The mapping found at the start is put back at the end unless KEEP=<variant> (then that one stays). Logs go to
 # /tmp/td-logs/<variant>/ (td-launch.sh pulls them). "STAGES <variant> ..." lines, RESULT last.
 set -uo pipefail
-APP=1167630 GAME=Teardown WIN_NAME=Teardown
+# Any Proton game: APP=<appid> (default Teardown, 1167630, the case it was written for); GAME/WIN_NAME from bf-lib
+# (Steam's appmanifest), EXE = its exe's name pattern for the stage (default: any .exe under its install dir).
+APP=${APP:-1167630}; [ "$APP" = 1167630 ] && GAME=${GAME:-Teardown} WIN_NAME=${WIN_NAME:-Teardown}
 . /var/tmp/powos-bf-lib.sh
+IDIR=$(steam_field "$APP" installdir)
 S=$HOME/.local/share/Steam CFG=$S/config/config.vdf L=/tmp/td-logs
 # One variant per queue job (300 s budget, never raised): the launch gets 200 s, setup + evidence the rest. Runtimes
 # and depots are fetched before the timed launch (fetch_deps), so the time is the launch's.
@@ -35,7 +38,7 @@ else:  # no entry yet: one like Steam's own
 open(p + ".td", "w").write(s)
 PY
   [ -z "${1:-}" ] || mv -f "$CFG.td" "$CFG"; }
-steam_off() { pill "Teardown check: closing Steam"; APP=$APP bash /var/tmp/powos-bf-stop.sh --steam | head -1
+steam_off() { pill "$GAME check: closing Steam"; APP=$APP bash /var/tmp/powos-bf-stop.sh --steam | head -1
   for _ in $(seq 20); do [ -d "/proc/$(steam_pid)" ] || break; sleep 0.5; done; }
 # The logging settings go in ~/.config/powos/proton-settings.json, which PowOS's own user_settings.py (pkgs/steam: the
 # install-script evaluator skip) reads - never over or instead of that file (it removed it, 2026-10-23).
@@ -51,7 +54,7 @@ fetch_deps() {  # fetch_deps <variant>: 0 = all there; else Steam fetches them (
   local a miss=
   for a in ${DEPS[$1]}; do installed "$a" || miss="$miss $a"; done
   [ -z "$miss" ] && return 0
-  pill "Teardown $1: fetching$miss (untimed)"
+  pill "$GAME $1: fetching$miss (untimed)"
   # On a fresh Steam's own command line (Steam is off here): a URL forwarded to a running ARM64 client is never
   # taken (skill: powos-games, forwarded launches). One app per start.
   for a in $miss; do steam_off; ( cd "$HOME" && setsid steam -silent "steam://install/$a" > /dev/null 2>&1 < /dev/null & ); done
@@ -74,7 +77,7 @@ run() {  # run <variant> <n>
   echo "== $v #$2: mapping $(mapping), $(cat "$p/version"), FEX $(head -1 "$S/steamapps/common/FEX-Emu/VERSIONS.txt" 2>/dev/null)"
   gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0)
   powos sleep never steam >/dev/null 2>&1
-  mine=1; pill "Teardown $v #$2: tap"; t0=$(now)
+  mine=1; pill "$GAME $v #$2: tap"; t0=$(now)
   ( cd "$HOME" && exec setsid steam steam://rungameid/$APP > "$d/steam.out" 2>&1 < /dev/null ) &
   for _ in $(seq $((LAUNCH_S * 4))); do
     now_=$(ms "$t0" "$(now)")
@@ -85,16 +88,16 @@ run() {  # run <variant> <n>
     [ -n "$(ls -A "$S/steamapps/downloading" 2>/dev/null)" ] && first download "$now_"  # Steam updates first: not the launch's time
     pgrep -f pv-adverb >/dev/null && first container "$now_"
     pgrep -f wineserver >/dev/null && first wineserver "$now_"
-    [ -n "${seen[wineserver]:-}" ] && pgrep -f 'teardown.exe' | while read -r x; do ! grep -qa 'proton\|reaper\|python\|pressure-vessel\|steam-launch-wrapper' "/proc/$x/cmdline" && echo y; done | grep -q y && first exe "$now_"
+    [ -n "${seen[wineserver]:-}" ] && pgrep -f "${EXE:-common[\\/]$IDIR[\\/].*\.exe}" | while read -r x; do ! grep -qa 'proton\|reaper\|python\|pressure-vessel\|steam-launch-wrapper' "/proc/$x/cmdline" && echo y; done | grep -q y && first exe "$now_"
     W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && { first window "$now_"; break; }
-    [ ${#seen[@]} != $k ] && k=${#seen[@]} && pill "Teardown $v: $(for s in reaper container wineserver exe; do [ -n "${seen[$s]:-}" ] && last=$s; done; echo "${last:-Steam}")"
+    [ ${#seen[@]} != $k ] && k=${#seen[@]} && pill "$GAME $v: $(for s in reaper container wineserver exe; do [ -n "${seen[$s]:-}" ] && last=$s; done; echo "${last:-Steam}")"
     touched; sleep 0.25
   done
   if [ -n "${seen[window]:-}" ]; then
     x=$(first_change "$W" 30 10); [ "$x" != none ] && seen[frame]=$(ms "$t0" "$x")
-    pill "Teardown $v: running 30 s"; sleep 30; touched
+    pill "$GAME $v: running 30 s"; sleep 30; touched
     ffmpeg -nostdin -loglevel error -f x11grab -window_id "$W" -i "$DISPLAY" -frames:v 1 -y "$d/window.png" 2>/dev/null
-    echo "   window $W $(xwininfo -id "$W" | awk '/Width|Height/ {printf "%s ", $2}'), alive: $(pgrep -fc teardown.exe) teardown.exe"
+    echo "   window $W $(xwininfo -id "$W" | awk '/Width|Height/ {printf "%s ", $2}'), alive: $(pgrep -fc "${EXE:-common[\\/]$IDIR[\\/].*\.exe}") game exe"
   elif [ -n "${seen[ended]:-}" ]; then fail "start-$v" "the launch chain ended ${seen[ended]} ms after the tap, no window"
   else fail "start-$v" "no window in $LAUNCH_S s:$(for s in reaper container wineserver exe; do printf ' %s=%s' $s "${seen[$s]:--}"; done)"; fi
   [ -n "${seen[download]:-}" ] && echo "INVALID $v #$2: Steam downloaded an update during the launch (from ${seen[download]} ms) - the time isn't the launch's"
@@ -117,7 +120,7 @@ run() {  # run <variant> <n>
   sleep 3
 }
 RES_=""; ORIG=$(mapping)
-echo "== $(date +%T) Teardown launch check, $(pacman -Q steam), mapping at start: ${ORIG:-none}"
+echo "== $(date +%T) $GAME ($APP) launch check, $(pacman -Q steam), mapping at start: ${ORIG:-none}"
 [ $# -gt 0 ] || set -- arm64 x86
 n=0
 for v in "$@"; do n=$((n + 1)); run "$v" "$n"; done
