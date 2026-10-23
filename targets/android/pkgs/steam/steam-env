@@ -8,3 +8,12 @@
 #   PRESSURE_VESSEL_GENERATE_LOCALES=0   the container's locale-gen (pv-locale-gen under FEX) for the session's
 #                                        LANG=en_CH.UTF-8, which games run with LC_ALL=C anyway
 #   FEX_ENABLECODECACHINGWIP=1           FEX keeps the x86 code it compiled (per game, compatdata/<id>/fex-emu)
+
+# HACK: GL_ARB_buffer_storage on the phone's freedreno: the lfdevs Mesa (freedreno_screen.c fd_init_screen_caps) turns
+# buffer_map_persistent_coherent off on KGSL ("KGSL mappings are not coherent"), so GL stops at 4.3 without
+# ARB_buffer_storage; a game that calls glBufferStorage anyway jumps to NULL (Teardown 1167630: crash at
+# teardown.exe+0x5BCD63 creating its first uniform buffer, black window). Native KGSL BOs are write-combined
+# (uncached, coherent); only dma-heap shared/scanout BOs are cached. Measured 2026-10-23 08:51 (td-launch arm64 with
+# this line): no crash, Teardown draws its splash. Real fix: a PowOS Mesa build with the cap kept for native BOs
+# (only shared dma-heap BOs need the cache maintenance), then this line goes.
+MESA_EXTENSION_OVERRIDE=+GL_ARB_buffer_storage
