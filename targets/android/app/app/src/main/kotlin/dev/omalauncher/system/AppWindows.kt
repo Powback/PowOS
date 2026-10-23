@@ -52,6 +52,8 @@ object AppWindows {
         id: Int,
         base: ActivityOptions,
     ): ActivityOptions {
+        // Folded, a window left from the inner screen comes back full screen, not freeform off the cover's edge.
+        FoldedWindows.beforeOpen(context, id)
         if (!floating(context) || FreeformTasks.list(context).any { it.id == id }) return base
         return options(context, base) ?: base
     }

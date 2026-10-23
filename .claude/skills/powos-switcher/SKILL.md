@@ -226,6 +226,19 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
 - Wide dock: pinned + DockWindows share the bar's left end; past 6 cells they ran on under the search pill (a
   Calculator window's icon under it, the dock-taskbar tap opened the drawer). The page sets --cells, slots shrink.
 
+## Fold / unfold with apps and games running (2026-10-24, fold-launch)
+- Unfold used to make Plasma's desktop (HomeDesktop) Android's default home and start it (FoldWatcher.unfolded, setting
+  home_screen "auto"): it covered the web home; Android's recents transition then targeted HomeDesktop while PowOS's Home
+  brought HomeShell - home flipped between the two per gesture (events log 23:48:48-58: wm_task_to_front 2733/2742).
+  Now auto = HomeShell on both screens; FoldWatcher's fold/unfold moves only run when the "desktop" setting made
+  HomeDesktop home (HomeScreen.desktopIsHome). Check: no HomeDesktop task appears after `cmd device_state state 3`.
+- Android (OxygenOS 16) keeps a freeform task freeform through a FOLD, at its inner bounds (t2741 [556,366][1916,2074] on
+  the 1116 px cover, visible=false): its switcher card grew to that box. FoldedWindows (PowosRecentsService config change
+  + AppWindows.taskOptions) makes every freeform task full screen when !AppWindows.floating; logcat PowosFoldedWindows.
+- Main logcat rolls in ~2 min; the EVENTS buffer (wm_task_to_front, wm_create_activity, FoldScreenSwitching_*) keeps
+  ~15 min: `logcat -d -b events` for what happened when the user reports a state minutes later.
+- Check: verify/fold-launch.sh app:<id> (game launched folded, unfold, Home, refold, switcher on the cover).
+
 ## Device-check rules learned
 - Captures only via tools/phone/shot.sh (picks the ON display: inner 4630946704981769859, cover 4630946316123810436).
 - Home's foreground activity is com.powos.app/andro.marchy.HomeShell (alias of ShellActivity); HomeDesktop when the

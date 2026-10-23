@@ -10,8 +10,11 @@ import android.util.Log;
  * widgets; shell/). Two HOME aliases (.HomeDesktop in the engine's manifest, .HomeShell in the app's); exactly one is
  * enabled, so Home opens it directly. (A trampoline activity picking one per press showed the wallpaper first and
  * cost half a second.)
- *   auto      launcher on the cover screen (folded), desktop on the inner screen (FoldWatcher switches on fold)
- *   desktop   always the desktop
+ *   auto      the launcher on both screens: unfolded it is the PowOS desktop (wide home, apps in floating windows;
+ *             docs/DESKTOP-WEB-SHELL.md, 2026-10-22). It made Plasma's desktop home on the inner screen before: each
+ *             unfold then put HomeDesktop over the web home and Android's recents (the default home's task) and PowOS's
+ *             Home (the web home) fought - home flipped between the two per gesture (2026-10-23 23:48).
+ *   desktop   always the desktop (Plasma's)
  *   launcher  always the launcher
  * Chosen in Settings (Home screen), {@link #KEY_HOME_SCREEN} in the engine's preferences.
  */
@@ -21,14 +24,16 @@ final class HomeScreen {
     static final String[] HOME_SCREENS = {"auto", "desktop", "launcher"};
     /** The launcher's HOME alias (app module's manifest, on dev.omalauncher.shell.ShellActivity). */
     private static final String LAUNCHER = "HomeShell";
-    /** Below this smallest width (dp) a screen is phone-sized: the Open's cover screen is 343 dp, its inner 698. */
-    private static final int PHONE_MAX_DP = 600;
-
     private HomeScreen() {
     }
 
     /** The alias last made home ("HomeDesktop" or "HomeShell"; null before the first apply). */
     static volatile String current;
+
+    /** Plasma's desktop is Android's home now (the "desktop" setting): fold and unfold move it (FoldWatcher). */
+    static boolean desktopIsHome() {
+        return "HomeDesktop".equals(current);
+    }
 
     /**
      * Enable the alias that fits now. {@code unfolded}: the hinge state when known (FoldWatcher), else null -
@@ -43,8 +48,7 @@ final class HomeScreen {
         else if (mode.equals("launcher"))
             desktop = false;
         else
-            desktop = unfolded != null ? unfolded
-                : ctx.getResources().getConfiguration().smallestScreenWidthDp >= PHONE_MAX_DP;
+            desktop = false; // auto: the web home, wide when unfolded
         String home = desktop ? "HomeDesktop" : LAUNCHER;
         String component = ctx.getPackageName() + "/andro.marchy." + home;
         current = home;

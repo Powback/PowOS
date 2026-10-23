@@ -138,6 +138,8 @@ class PowosRecentsService : Service() {
         nav?.refresh()
         edge?.refresh()
         frames?.refresh()
+        // Folded: no floating window stays freeform at its inner-screen bounds on the cover.
+        FoldedWindows.displayChanged(this)
     }
 
     override fun onDestroy() {

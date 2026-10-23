@@ -9,9 +9,10 @@ import android.util.Log;
 import android.view.Display;
 
 /**
- * PowOS on a foldable (OnePlus Open): opening the phone shows the PowOS desktop - with the running apps in its
- * taskbar - wherever the cover screen was (the launcher, an Android app). Folding it is left to Android (the cover
- * screen shows the home screen). Runs with the PowOS session (SessionService).
+ * PowOS on a foldable (OnePlus Open): keeps Android's default home on the alias HomeScreen picks for the hinge. With
+ * Plasma's desktop as home (the "desktop" setting) opening the phone also shows that desktop - with the running apps
+ * in its taskbar - wherever the cover screen was; with the web home (auto, launcher) fold and unfold are Android's
+ * own (the app in front stays in front). Runs with the PowOS session (SessionService).
  *
  * Unfolding = the main display (id 0, which Android moves between the cover and the inner panel) going from
  * the cover panel to the inner one (its physical mode). (Android's
@@ -133,7 +134,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
      * app in use: the desktop comes onto the cover with it (desktopAppActive). Neither: the cover shows the launcher.
      */
     private void folded() {
-        if (!enabled())
+        // The web home (auto, launcher): Android's own fold - the app in front stays in front on the cover screen.
+        if (!enabled() || !HomeScreen.desktopIsHome())
             return;
         carried = null;
         try {
@@ -189,14 +191,13 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
      * app carried onto the cover goes back into its PowOS window behind it.
      */
     private void unfolded() {
-        if (!enabled())
+        // The web home is the desktop unfolded: nothing to bring up (a HomeDesktop started over it fought it).
+        if (!enabled() || !HomeScreen.desktopIsHome())
             return;
         // The home alias when it is the desktop: the same activity instance Home opens. By class name it was a
         // second instance of the desktop beside the home one, and the two fought over the one connection.
         // (Rooted, both aliases stay enabled - HomeScreen: which one is home is the one it made the default.)
-        boolean homeIsDesktop = "HomeDesktop".equals(HomeScreen.current);
-        su("am start --display 0 -n " + ctx.getPackageName() + "/"
-            + (homeIsDesktop ? "andro.marchy.HomeDesktop" : MainActivity.class.getName()));
+        su("am start --display 0 -n " + ctx.getPackageName() + "/andro.marchy.HomeDesktop");
         if (carried != null) {
             su("am display move-stack " + carried[0] + " " + carried[1]); // fails harmlessly if the window closed
             carried = null;
