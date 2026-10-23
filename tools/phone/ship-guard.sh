@@ -27,6 +27,15 @@ snapshot)
   cp "$HOME/.cache/powos-installed-commit" "$D/commit" 2>/dev/null || : > "$D/commit"
   echo "ship-guard: snapshot $D ($(du -h "$D/prev.apk" | cut -f1) APK, $(tar -tf "$D/overrides.tar" | grep -c '^shell/.*[^/]$') overrides)" ;;
 check)
+  # Pages don't boot while the screen dozes (the WebViews are paused): two APKs of good builds were rolled back at
+  # 09:22/09:5x with "not booted: home" on a Dozing phone (friction f25). Wake it for the check (installs only run on
+  # an idle phone), and put it back to sleep afterwards if this woke it.
+  woke=
+  if ! "$here/adb.sh" shell 'dumpsys power' 2>/dev/null | grep -q 'mWakefulness=Awake'; then
+    "$here/adb.sh" shell 'input keyevent KEYCODE_WAKEUP; sleep 1; wm dismiss-keyguard' >/dev/null 2>&1 && woke=1
+    echo "ship-guard: woke the dozing screen for the boot check"
+  fi
+  [ -n "$woke" ] && trap '"$here/adb.sh" shell "input keyevent KEYCODE_SLEEP" >/dev/null 2>&1' EXIT
   end=$(( $(date +%s) + ${2:-120} ))
   while :; do
     bad=""
