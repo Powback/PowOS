@@ -7,6 +7,10 @@
 # in front. Each step reads windows.list (the host's order: front first) and `am stack list`. Screencaps per step.
 # Restores: both stopped, home, `cmd device_state state reset`. Never touches the layout (no drag, no edit mode).
 # Exit: 0 pass; 1 FAIL: ...; 3 a real touch / no free window; 5 can't run (no unfolded size, a PIN).
+set -uo pipefail
+# (These lines were missing: no here/T/A, so window_lock wasn't found and every run read "the screen is  - not woken"
+# and went back on the queue as rc 3, 2026-10-23.)
+here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/dock-taskbar-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 PKG=com.oneplus.calculator

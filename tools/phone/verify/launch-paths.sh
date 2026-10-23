@@ -7,6 +7,12 @@
 # recents (tasks.open over CDP) after it was made full screen by the fold (cover screen, state 0, then inner again).
 # PASS each = `mode=freeform` in `am stack list` and the window inside the screen, not all of it.
 # Restores: Calculator stopped, home, `cmd device_state state reset`. Exit 0 pass, 1 FAIL, 3 touch, 5 can't run.
+set -uo pipefail
+# (These lines were missing: no here/T/A, so window_lock wasn't found and every run read "the screen is  - not woken"
+# and went back on the queue as rc 3, 2026-10-23.)
+here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
+OUT=${1:-$HOME/.cache/powos-verify/launch-paths-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
+L=$HOME/.cache/powos-verify.lock
 PKG=com.oneplus.calculator
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
