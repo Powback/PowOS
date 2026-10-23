@@ -44,9 +44,6 @@ hcall() { local v i; for i in 1 2 3 4; do v=$(hcall_once "$@"); case $v in ""|"c
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
 [ "$(sh_ "settings get global enable_freeform_support")" = 1 ] || fail "enable_freeform_support isn't 1 (OxygenOS coerces freeform to full screen)"
-# A dozing (folded, put away) phone: forcing state 3 still launched Calculator onto the cover display, full screen, and
-# failed "not freeform" (14:59, 2026-10-23). Not a run of this check - the queue retries it later (exit 3).
-sh_ "dumpsys power" | grep -q 'mWakefulness=Awake' || { echo "the screen is asleep (folded away?) - not now"; exit 3; }
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
 sh_ "dumpsys device_state | grep -m1 mCommittedState" | tee -a "$OUT/log.txt" | grep -q OPENED || fail "the inner screen didn't come on (device_state not OPENED)"
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
@@ -75,6 +72,11 @@ sleep 2.5; chk launch
 sh_ "dumpsys activity activities | grep -m1 -E \"Task\\{.*$PKG\" | grep -oE \"mode=[a-z-]+\"" | tee "$OUT/mode.txt"
 sh_ "am stack list | grep -m1 $PKG | grep -oE \"bounds=\\[[^ ]*\"" | tee -a "$OUT/mode.txt"
 "$T/shot.sh" "$OUT/floating.png"
+# Physically folded (its cover screen on): the forced state 3 still launched it on the cover display, full screen
+# [0,0][1116,2484] - "not freeform" (14:59, 2026-10-23). Folded, full screen is right: not now, the queue retries (exit 3).
+if ! grep -q 'mode=freeform' "$OUT/mode.txt" && grep -qE 'bounds=\[0,0\]\[1[0-9]{3},' "$OUT/mode.txt"; then
+  echo "it opened full screen on the cover display - the phone is folded; not now"; exit 3
+fi
 grep -q 'mode=freeform' "$OUT/mode.txt" && pass "a floating window" || fail "not freeform ($(head -1 "$OUT/mode.txt"))"
 
 # Its content at the windows' density (FreeformTasks.density, AppWindows.windowDpi): the task's own dpi, a real
