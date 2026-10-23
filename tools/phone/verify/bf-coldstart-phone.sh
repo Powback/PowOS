@@ -167,6 +167,13 @@ run() {  # run <variant> <n>
       [ -n "$x" ] && [ -n "${seen[exe]:-}" ] && echo "     $(hang_diag "$x")"
       # A first launch's install script past 60 s (ABZU 2026-10-23 08:16: still in the evaluator at 272 s, tabtip.exe
       # up = something showed a dialog): every process under the evaluator (state, CPU s) and the X windows' names.
+      # No launch chain 60 s after the tap (Desk Job 08:21: nothing for 284 s, no download seen): Steam's windows (a
+      # dialog waiting for an answer: launch-option picker, EULA, cloud conflict...) and its console since the tap.
+      if [ -z "$r" ] && [ -z "$(iscript_reapers)" ] && [ "$now_" -gt 60000 ]; then
+        echo "     no launch yet - X windows: $(xwininfo -root -tree 2>/dev/null | sed -nE 's/^ +0x[0-9a-f]+ "([^"]+)".* ([0-9]+x[0-9]+)\+.*/\1 \2/p' | sort | uniq -c | sort -rn | head -12 | awk '{$1=$1; print}' | tr '\n' '|')"
+        echo "     console_log: $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -v '^\s*$' | tail -6 | cut -c1-150 | tr '\n' '|')"
+        echo "     downloading: $(ls "$S/steamapps/downloading" 2>/dev/null | tr '\n' ' ') content_log: $(tail -2 "$S/logs/content_log.txt" 2>/dev/null | cut -c1-150 | tr '\n' '|')"
+      fi
       if [ -n "$(iscript_reapers)" ] && [ "$now_" -gt 60000 ]; then
         echo "     install script: $(for q in $(for e in $(iscript_reapers); do tree "$e"; done); do c=$(tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null) || continue
           case $c in *reaper*|*steam-launch-wrapper*|*pressure-vessel*|*pv-adverb*|*_v2-entry-point*) continue ;; esac
