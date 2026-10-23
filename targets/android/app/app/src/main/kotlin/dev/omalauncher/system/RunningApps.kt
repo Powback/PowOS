@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.FileObserver
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.compose.runtime.mutableStateOf
 import dev.omalauncher.linux.LinuxApp
 import dev.omalauncher.linux.matches
@@ -18,6 +19,7 @@ import java.io.File
  * window comes or goes or an app freezes or thaws ({"classes": {windowClass: "running" | "frozen"}}). Nothing polls.
  */
 object RunningApps {
+    private const val TAG = "PowosRunning"
     private const val FILE = "apps.json"
     private const val SETTLE_MS = 120L
     private const val MAX_TASKS = 64
@@ -40,10 +42,13 @@ object RunningApps {
     ) {
         if (app != null) return
         app = context.applicationContext
-        FreeformTasks.listen {
-            main.removeCallbacks(readTasksNow)
-            main.postDelayed(readTasksNow, SETTLE_MS)
-        }
+        // Logged under its own tag: WindowFrames registers a listener of its own, and both log PowosFreeform's line.
+        val listening =
+            FreeformTasks.listen {
+                main.removeCallbacks(readTasksNow)
+                main.postDelayed(readTasksNow, SETTLE_MS)
+            }
+        Log.i(TAG, if (listening != null) "task listener on" else "task listener MISSING: the dots keep the start-up read")
         readTasks()
         runDir?.let { watch(File(it, "running")) }
     }
@@ -55,7 +60,9 @@ object RunningApps {
         @Suppress("DEPRECATION")
         val running = runCatching { c.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
         val next = running.filter { it.numActivities > 0 }.mapNotNull { (it.baseIntent.component ?: it.baseActivity ?: it.topActivity)?.packageName }.filter { it != c.packageName }.distinct()
-        if (next != tasks.value) tasks.value = next
+        if (next == tasks.value) return
+        Log.i(TAG, "tasks: ${next.joinToString()}")
+        tasks.value = next
     }
 
     private fun watch(dir: File) {

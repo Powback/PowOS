@@ -98,6 +98,11 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
   FileObserver on files/run/running/apps.json = powos-sleep-gui's `publish_running` ({"classes": {cls: state}},
   written on change from report/freeze/thaw/reset). ShellBridge `running()` maps: "a:<key>" by package, "l:<id>" by
   LinuxApp.matches or steam_app_<appid> -> an entry whose Exec has rungameid/<appid>.
+- Logcat tag PowosRunning (RunningApps): "task listener on|MISSING" at the app's start, "tasks: <pkgs>" on every
+  change - grep it to tell a silent listener (no "tasks:" line after a launch) from an event lost on the way to the
+  page (line there, cells unmarked). PowosFreeform's "task stack listener on" is logged by WindowFrames' listener too.
+- The device check stops Calculator FIRST: the 01:43 PASS (2026-10-23) found it open, so it only re-read the
+  start-up map and never exercised an event. Its FAIL says which link broke (host map via apps.running vs cells).
 - Checks: gate scenes running-dock / running-drawer (mock: chrome, konsole, spotify, signal running; dolphin, steam
   frozen). Contrast bar vs its ring >= 5.9:1 (gruvbox, flexoki-light). Device: tools/phone/verify/running-dot.sh.
   sleep-gui on the phone: /data/powos/root/usr/lib/powos/apps/powos-sleep-gui (a session restart picks it up).
