@@ -15,6 +15,7 @@ import { footAim, footBelow, SEARCH_KEY, hasSearchWidget, putBackInBar } from ".
 import { startNewApp } from "./appbuild.tsx";
 import { AppList, findApps } from "./drawer.tsx";
 import { Pill, type MicTarget } from "./bar.tsx";
+import { dropKeyboard } from "./keyboard.ts";
 import type { App, AppWidgetProvider, ThemeChoice } from "../types.ts";
 
 const themes = signal<ThemeChoice[]>([]);
@@ -218,7 +219,7 @@ function AppPicker() {
   const [said, setSaid] = useState("tap apps to add them to this page");
   const queue = useRef(Promise.resolve());
   const mic: MicTarget = { typed: () => q, heard: (full) => setQ(full) };
-  const close = () => (appPicker.value = false);
+  const close = () => (dropKeyboard(), (appPicker.value = false));
   const stop = (e: Event) => e.stopPropagation();
   const place = (app: App) =>
     (queue.current = queue.current.then(async () => {

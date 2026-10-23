@@ -65,11 +65,16 @@ step "search: typing \"$NAME\" narrows the list"
 p=$(at ".app-picker textarea"); sh_ "input tap $p"; sleep 0.8; sh_ "input text $NAME"; sleep 1; chk search
 r=$(q "(()=>{const f=[...document.querySelectorAll('.app-picker .drawer-list.results .app')];const has=f.some(e=>e.dataset.key==='$KEY');return f.length&&f.length<$ALL&&has?'ok '+f.length:'shows '+f.length+' of $ALL, '+(has?'with':'without')+' it'})()")
 echo "search: $r" | tee -a "$OUT/log.txt"; case "$r" in ok*) ;; *) fail "search: $r" ;; esac
-sh_ "input keyevent 111"; sleep 0.6
+# The keyboard stays up, as for the user: the picker sits above it (--inset-keyboard). The 01:04 FAIL tapped the
+# result where the keyboard was (the picker under it): the tap typed an "s", "Besieges" found nothing.
+kb=$(q 'getComputedStyle(document.documentElement).getPropertyValue("--inset-keyboard").trim()')
+echo "keyboard: $(sh_ "dumpsys input_method | grep -m1 -oE 'mInputShown=[a-z]+'") inset $kb" | tee -a "$OUT/log.txt"
 
 step "a tap on $NAME puts it on the page in view"
 HK=$(echo "$KEY" | sed -e 's/^a:/app:/' -e 's/^l:/linux:/')
 p=$(at ".app-picker .drawer-list [data-key=\"$KEY\"]"); [ -n "$p" ] || { fail "$NAME isn't in the results to tap"; exit 1; }
+r=$(q "(()=>{const e=document.querySelector('.app-picker .drawer-list [data-key=\"$KEY\"]').getBoundingClientRect(),k=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--inset-keyboard'))||0;return e.bottom<=innerHeight-k?'clear':'under the keyboard ('+Math.round(e.bottom)+' > '+Math.round(innerHeight-k)+')'})()")
+[ "$r" = clear ] || { fail "$NAME's result is $r"; exit 1; }
 sh_ "input tap $p"; ADDED=$HK; sleep 1.5; chk pick
 r=$(q "(()=>{const t=document.querySelector('.home-tile[data-key=\"$HK\"]');if(!t)return 'no tile for it on home';if(!document.querySelector('.app-picker'))return 'the picker closed';const r=t.getBoundingClientRect();return r.right>0&&r.left<innerWidth?'ok on screen':'its tile is off screen (another page)'})()")
 echo "placed: $r" | tee -a "$OUT/log.txt"; case "$r" in ok*) ;; *) fail "the pick: $r" ;; esac

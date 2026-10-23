@@ -1982,7 +1982,9 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   z-index: 13;
   display: flex;
   align-items: flex-end;
-  padding: calc(var(--inset-top, 0px) + var(--edge)) var(--edge) calc(var(--inset-bottom, 0px) + var(--edge));
+  /* Above the keyboard: the app picker's search pill is at its foot (it sat under the keyboard, typing unseen). */
+  padding: calc(var(--inset-top, 0px) + var(--edge)) var(--edge)
+    calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--edge));
 }
 .aw-picker { width: 100%; max-height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }
 .aw-search {
