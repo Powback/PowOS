@@ -63,7 +63,8 @@ setup() {  # setup <token>
   case $1 in env:*=*) export "${1#env:}"; echo "== setup $1: exported for the Steam this check starts"; return 0 ;; esac
   pill "setup $1: closing Steam"; bash /var/tmp/powos-bf-stop.sh --steam | head -1
   case $1 in
-    cfg:x86 | cfg:arm64 | cfg:native) $CFG set $APP "${1#cfg:}" ;;
+    cfg:x86 | cfg:arm64) $CFG set $APP "${1#cfg:}"; pfx_use "${1#cfg:}" ;;
+    cfg:native) $CFG set $APP native ;;
     cfg:auto) $CFG set $APP auto ;;
     opt:vk) $CFG opts $APP "$(plus_opts -force-vulkan)" ;; opt:gl) $CFG opts $APP "$(plus_opts -force-glcore)" ;;
     opt:base) $CFG opts $APP "$(base_opts)" ;;
@@ -71,7 +72,21 @@ setup() {  # setup <token>
   esac
   CHANGED=1; echo "== setup $1: $($CFG get $APP), mode $($CFG mode $APP)"
 }
+# One Proton prefix per Wine architecture (as td-launch-phone.sh): a prefix ARM64 Proton set up breaks x86 Proton (its
+# VC++ runtime DLLs: c000007b, Teardown 2026-10-23 06:04). cfg:x86 / cfg:arm64 swap compatdata/<id> with
+# compatdata/<id>.powos-<family> (Steam is off in setup); the family found at the start comes back at the end - also
+# with keep: the user's game keeps its own prefix (its saves).
+CD0=$S/steamapps/compatdata/$APP PFX0=
+pfx_fam() { cat "$CD0/powos-family" 2>/dev/null || { case $($CFG get $APP) in *arm64*) echo arm64 ;; *) echo x86 ;; esac; }; }
+pfx_use() {
+  local cur; cur=$(pfx_fam); [ -n "$PFX0" ] || PFX0=$cur; [ "$cur" = "$1" ] && return 0
+  [ -d "$CD0" ] && { rm -rf "$CD0.powos-$cur.old"; [ -e "$CD0.powos-$cur" ] && mv "$CD0.powos-$cur" "$CD0.powos-$cur.old"; echo "$cur" > "$CD0/powos-family"; mv "$CD0" "$CD0.powos-$cur"; }
+  if [ -d "$CD0.powos-$1" ]; then mv "$CD0.powos-$1" "$CD0"; else mkdir -p "$CD0"; fi
+  echo "$1" > "$CD0/powos-family"; echo "   prefix: $1 (the $cur one kept as compatdata/$APP.powos-$cur)"
+}
+pfx_back() { [ -n "$PFX0" ] || return 0; bash /var/tmp/powos-bf-stop.sh --steam >/dev/null 2>&1; pfx_use "$PFX0"; PFX0=; }
 restore() {
+  pfx_back
   [ $CHANGED = 1 ] && [ $KEEP = 0 ] || return 0
   CHANGED=0; bash /var/tmp/powos-bf-stop.sh --steam >/dev/null 2>&1
   $CFG set $APP "$ORIG_MODE" >/dev/null && $CFG opts $APP "$ORIG_OPTS" >/dev/null && echo "== restored: $($CFG get $APP), mode $($CFG mode $APP)"
