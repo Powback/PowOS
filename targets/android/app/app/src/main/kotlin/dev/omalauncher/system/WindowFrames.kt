@@ -31,6 +31,8 @@ class WindowFrames(
 
     fun start(): Boolean {
         overlayGrant()
+        // The system's own caption would show under PowOS's bar on every window: off (OemCaption).
+        OemCaption.off(context)
         stopListening =
             FreeformTasks.listen {
                 events++

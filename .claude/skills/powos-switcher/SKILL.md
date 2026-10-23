@@ -97,8 +97,14 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   bounds), OplusZoomWindowManager.startZoomWindow: full screen unless OnePlus's launcher asks; startFlexibleWindowFor-
   RecentTasks = a split "pocket". Settings is on OnePlus's no-floating list (test with Calculator). Probe framework
   calls as root: d8'd class, `CLASSPATH=x.dex app_process /system/bin <Class>` (dexdump oplus-framework.jar first).
-- OxygenOS draws NO caption for freeform tasks: PowOS's own frames (system/WindowFrames.kt + WindowFrame.kt +
+- PowOS's own frames (system/WindowFrames.kt + WindowFrame.kt +
   FreeformTasks.kt), owned by the recents service (created in onInitialize, like the pet).
+  - The SYSTEM caption (back/min/max/close strip inside the task, under PowOS's bar) is AOSP WM Shell's
+    CaptionWindowDecoration in SystemUI: shown for EVERY freeform task, no launch flag turns it off (OnePlus's
+    FlexibleCaptionView/"androidx.activity.HasCaption" is only for its own flexible-window scenarios). Off via
+    system/OemCaption.kt: a root-registered fabricated overlay com.android.shell:PowosNoCaption sets SystemUI's
+    dimen/freeform_decor_caption_height to 0 dp (`cmd overlay fabricate` can't write dimensions; app_process from the
+    APK). Check `cmd overlay list com.android.systemui | grep Powos` = [x]; logcat PowosOemCaption.
   - Per visible freeform task, overlays "PowOS window bar <id>" (26 dp window above the task: 18 dp frost bar under an
     8 dp clear touch strip; buttons span both) / "PowOS window grip <id>" (36 dp disc, lower right). Material = frost v2
     (system/Frost.kt: theme.css's --frost-* formula in Kotlin from Palette + the wallpaper's colour hints for the tone
