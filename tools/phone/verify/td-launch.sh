@@ -14,7 +14,7 @@ for f in td-launch-phone.sh bf-lib.sh bf-stop.sh; do "$A" push "$here/$f" /data/
 # side too (its own TERM trap closes what it started).
 stop_phone() { "$A" shell "su -c 'pkill -TERM -f powos-td-launch-phone.sh'" >/dev/null 2>&1; kill "$job" 2>/dev/null; exit 3; }
 { "$A" shell "su -c 'cp /data/local/tmp/powos-td-launch-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-td-launch-phone.sh /data/powos/root/var/tmp/powos-bf-*.sh && sh /data/powos/powos-run.sh \"${KEEP:+KEEP=$KEEP }${LAUNCH_S:+LAUNCH_S=$LAUNCH_S }bash /var/tmp/powos-td-launch-phone.sh $*\"'" \
-  | tr -d '\r' | tee "$OUT/run.txt"; } &
+  | sed -l $'s/\r$//' | tee "$OUT/run.txt"; } &
 job=$!; trap stop_phone TERM INT HUP; wait "$job"; trap - TERM INT HUP
 "$A" exec-out "su -c 'tar -C /data/powos/root/tmp -cz td-logs 2>/dev/null'" > "$OUT/td-logs.tgz" && tar -C "$OUT" -xzf "$OUT/td-logs.tgz" 2>/dev/null && rm -f "$OUT/td-logs.tgz"
 "$A" shell "su -c 'rm -f /data/local/tmp/powos-td-launch-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/powos-td-launch-phone.sh'"

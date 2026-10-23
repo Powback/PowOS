@@ -28,7 +28,7 @@ for f in bf-coldstart-phone.sh bf-lib.sh bf-stop.sh; do "$A" push "$here/$f" /da
 # side too (its own TERM trap closes what it started).
 stop_phone() { "$A" shell "su -c 'pkill -TERM -f powos-bf-coldstart-phone.sh'" >/dev/null 2>&1; kill "$job" 2>/dev/null; exit 3; }
 { "$A" shell "su -c 'install -m 755 /data/local/tmp/powos-open-task /data/powos/root/usr/local/bin/powos-open-task && cp /data/local/tmp/powos-bf-coldstart-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-steam-compat && sh /data/powos/powos-run.sh \"env$envs bash /var/tmp/powos-bf-coldstart-phone.sh $*\"'" \
-  | tr -d '\r' | tee "$OUT/run.txt"; } &
+  | sed -l $'s/\r$//' | tee "$OUT/run.txt"; } &
 job=$!; trap stop_phone TERM INT HUP; wait "$job"; trap - TERM INT HUP
 "$A" shell "su -c 'rm -f /data/local/tmp/powos-open-task /data/local/tmp/powos-bf-coldstart-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-bf-coldstart-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-stop.sh'"
 echo "artefacts: $OUT/run.txt"

@@ -10,6 +10,7 @@
 #   fexcache  as steam, with FEX's code cache on for the game (FEX_ENABLECODECACHINGWIP=1 through PowOS's Proton
 #             user_settings.py: ~/.config/powos/proton-settings.json, removed after; a Proton without ours: its own
 #             user_settings.py, removed after) and FEXOfflineCompiler process-all between two such runs; lists the files FEX wrote
+#   fetch     untimed: a launch kept until Steam downloaded what the setup needs (a depot swap), then closed
 # Setup tokens, applied with Steam closed (bf-cfg.py, backups next to the files) before the runs that follow them:
 #   cfg:x86 | cfg:arm64 | cfg:native   compat tool: Proton Experimental (x86 Wine under FEX) | Proton Experimental
 #             (ARM64: Wine native, only the game's code through FEX) | none = the game's native Linux build (Steam swaps
@@ -172,13 +173,29 @@ run() {  # run <variant> <n>
   [ $v = fexcache ] && { echo "   FEX wrote: $(find "$CD/fex-emu" ~/.local/share/fex-emu ~/.cache -newer /tmp/bf-cold-mark -type f 2>/dev/null | grep -vi telemetry | head -8 | tr '\n' ' ')"; fexcache_off; }
   sleep 5
 }
+# fetch: what the setup needs from Steam's servers (a depot swap after cfg:native/back, a runtime), untimed: a launch,
+# kept until Steam's download is done (steamapps/downloading/<id> came and went) or a window shows, then closed. A
+# timed run after it measures the launch only (2026-10-23 05:03: cfg:native cold spent its 300 s on the depot).
+fetch() {
+  local i seen_dl=
+  pill "fetching what $GAME needs (untimed)"; bash /var/tmp/powos-bf-stop.sh --steam | head -1
+  mine=1; ( open_task 270 "steam_app_$APP" > "$T/open.status" ) &
+  for i in $(seq 260); do
+    [ -d "$S/steamapps/downloading/$APP" ] && seen_dl=1
+    [ -n "$seen_dl" ] && [ ! -d "$S/steamapps/downloading/$APP" ] && break
+    W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && break
+    touched; sleep 1
+  done
+  echo "FETCH: $([ -n "$seen_dl" ] && echo "downloaded" || echo "nothing to download"), ${i} s; $(grep -a "$APP" "$S/logs/content_log.txt" | tail -1 | cut -c1-120)"
+  close_game
+}
 touch /tmp/bf-cold-mark; RES_=""
 echo "== $(date +%T) $(pacman -Q steam), FEX $(head -1 "$F/VERSIONS.txt" 2>/dev/null)"
 powos sleep never --remove steam >/dev/null 2>&1
 n=0
 [ $# -gt 0 ] || set -- cold steam fexcache fexcache
 for v in "$@"; do
-  case $v in keep) KEEP=1; continue ;; cfg:* | opt:* | env:*) setup "$v" || break; continue ;; esac
+  case $v in keep) KEEP=1; continue ;; fetch) fetch; continue ;; cfg:* | opt:* | env:*) setup "$v" || break; continue ;; esac
   n=$((n + 1)); run "$v" "$n"
   if [ "$v" = fexcache ]; then
     pill "FEX: compiling the code cache"
