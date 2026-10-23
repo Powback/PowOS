@@ -25,12 +25,13 @@
   },
   "actions": {
     "list_rooms": {
-      "summary": "List rooms/zones with on-state and brightness.",
+      "summary": "List rooms/zones: names and ids (their on/off and brightness: list_grouped_lights).",
       "safety": "read",
       "origin": "official",
       "widget": true,
       "cache_ttl_s": 5,
       "refresh": { "poll_s": 10, "event_stream": "/eventstream/clip/v2" },
+      "view": { "rows": "data", "key": "id", "label": "metadata.name" },
       "inputs": { "type": "object", "properties": {} },
       "output": {
         "type": "object",
@@ -50,6 +51,34 @@
         }
       },
       "endpoint": { "method": "GET", "path": "/resource/room", "auth": "bridge" }
+    },
+    "list_grouped_lights": {
+      "summary": "Each room's and zone's grouped light: on/off and brightness, keyed by the room that owns it.",
+      "safety": "read",
+      "origin": "official",
+      "widget": true,
+      "cache_ttl_s": 5,
+      "refresh": { "poll_s": 10, "event_stream": "/eventstream/clip/v2" },
+      "view": { "rows": "data", "of": "list_rooms", "key": "owner.rid", "fields": { "on": "on.on", "level": "dimming.brightness" } },
+      "inputs": { "type": "object", "properties": {} },
+      "output": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "owner": { "type": "object", "properties": { "rid": { "type": "string" }, "rtype": { "type": "string" } } },
+                "on": { "type": "object", "properties": { "on": { "type": "boolean" } } },
+                "dimming": { "type": "object", "properties": { "brightness": { "type": "number" } } }
+              }
+            }
+          }
+        }
+      },
+      "endpoint": { "method": "GET", "path": "/resource/grouped_light", "auth": "bridge" }
     },
     "list_scenes": {
       "summary": "List scenes and which is active per room.",

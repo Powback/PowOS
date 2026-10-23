@@ -21,6 +21,14 @@ The safety rules live HERE, once, so no consumer can bypass them:
 Every call appends one line to <state>/audit/<app>.jsonl with secret-pattern
 args redacted; a token value is never logged or printed.
 
+Placeholders ({bridge_ip}) are filled from the args, then --state, then the app's
+linked state <state>/state/<app>.json (non-secret values the user's link step
+wrote, e.g. {"bridge_ip": "192.168.1.2", "tls_pin_sha256": "ab12..."}). A send
+with one still unfilled is refused ("needs bridge_ip") - it never goes to a
+literal "{bridge_ip}". base.tls "pinned" sends only with a tls_pin_sha256 that
+matches the device's certificate. A read's JSON answer comes back parsed in
+--json output as "response" (up to 512 KB), so a widget gets whole rows.
+
 Usage:
   appcap_run.py SPEC ACTION [--arg k=v]... [--state k=v]... \
       [--consumer ai|cli|sdk|widget|app] [--send] [--confirm TEXT] [--json]
@@ -42,6 +50,8 @@ import appcap_validate
 STATE = appcap_store.STATE
 SECRET_ARG = re.compile(r"(token|secret|session|auth|cookie|password|key|signature)", re.I)
 REFUSED = 3
+HOLE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+READ_MAX = 512 << 10
 
 
 def _audit(app: str, rec: dict):
@@ -89,6 +99,44 @@ def _fill(obj, args: dict):
     return obj
 
 
+def linked(app: str) -> dict:
+    """The app's linked, non-secret state (<state>/state/<app>.json); {} when it was never linked."""
+    try:
+        with open(os.path.join(STATE, "state", f"{os.path.basename(app)}.json"), encoding="utf-8") as f:
+            v = json.load(f)
+        return {k: str(x) for k, x in v.items()} if isinstance(v, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def holes(*parts) -> list:
+    return sorted({h for p in parts for h in HOLE.findall(json.dumps(p) if not isinstance(p, str) else p)})
+
+
+def pinned_open(req, pin: str, limit: int):
+    """An HTTPS request to a LAN device with a self-signed certificate: sent only when the certificate's sha256 is
+    [pin] (what the link step saw first), never on a CA's word or none."""
+    import hashlib
+    import http.client
+    import ssl
+    from urllib.parse import urlsplit
+
+    u = urlsplit(req.full_url)
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE  # no CA vouches for a LAN device: the pin below is the check
+    c = http.client.HTTPSConnection(u.hostname, u.port or 443, timeout=20, context=ctx)
+    c.connect()
+    got = hashlib.sha256(c.sock.getpeercert(binary_form=True)).hexdigest()
+    if got.lower() != pin.lower().replace(":", ""):
+        c.close()
+        raise PermissionError("the device's certificate isn't the pinned one")
+    c.request(req.get_method(), u.path + (("?" + u.query) if u.query else ""), body=req.data,
+              headers=dict(req.header_items()))
+    r = c.getresponse()
+    return r.status, r.read(limit).decode("utf-8", "replace")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="app-api runtime call path")
     ap.add_argument("spec")
@@ -110,8 +158,8 @@ def main() -> int:
         return REFUSED
     spec = json.load(open(a.spec, encoding="utf-8"))
     args = dict(p.split("=", 1) for p in a.arg)
-    state = dict(p.split("=", 1) for p in a.state)
     app = spec["app"]
+    state = {**linked(app), **dict(p.split("=", 1) for p in a.state)}
     act = spec["actions"].get(a.action)
 
     def refuse(why: str) -> int:
@@ -188,13 +236,21 @@ def main() -> int:
         if ep.get("body"):
             preview["body"] = _fill(ep["body"], ph)
 
+    missing = holes(preview.get("request", ""), preview.get("argv", []), preview.get("body", {}))
+    tls = (spec.get("base") or {}).get("tls")
+    pin = state.get("tls_pin_sha256", "")
+    if sending and missing:
+        return refuse(f"needs {', '.join(missing)} - link {spec.get('name', app)} in App API first")
+    if sending and tls == "pinned" and not ep.get("argv") and not pin:
+        return refuse(f"no pinned certificate for {spec.get('name', app)} yet - link it in App API first")
+    limit = READ_MAX if safety == "read" else 4000
     status, body = None, None
     if sending:
         t0 = time.time()
         if ep.get("argv"):
             import subprocess
             p = subprocess.run(preview["argv"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            status, body = p.returncode, p.stdout[:4000]
+            status, body = p.returncode, p.stdout[:limit]
         else:
             method = ep.get("method", "GET")
             url = _fill(base + ep.get("path", ""), ph)
@@ -209,8 +265,11 @@ def main() -> int:
                     val if t.get("type") != "bearer" or val.lower().startswith("bearer") else "Bearer " + val)
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=20) as r:
-                    status, body = r.status, r.read(4000).decode("utf-8", "replace")
+                if tls == "pinned":
+                    status, body = pinned_open(req, pin, limit)
+                else:
+                    with urllib.request.urlopen(req, timeout=20) as r:
+                        status, body = r.status, r.read(limit).decode("utf-8", "replace")
             except Exception as e:
                 status, body = "error", str(e)[:200]
         preview["sent"] = True
@@ -222,7 +281,12 @@ def main() -> int:
     _audit(app, {**preview, "sent": sending, "args": _redact(args)})
     out = {"preview": preview}
     if sending and body is not None:
-        out["response_sample"] = body
+        out["response_sample"] = body[:4000]
+        if safety == "read" and isinstance(status, int) and status < 400 and not ep.get("argv"):
+            try:
+                out["response"] = json.loads(body)
+            except ValueError:
+                pass
     print(json.dumps(out, indent=2) if a.json else json.dumps(preview, indent=2))
     return 0
 

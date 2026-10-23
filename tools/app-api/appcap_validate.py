@@ -19,6 +19,8 @@ Invariants enforced (each a hard error unless marked warn):
   S7  (warn) a reversible-write action should declare `undo`
   S8  a disabled app or disabled action is reported (not an error) so a
       generator knows to skip it
+  S10 a `view` (the composer's row binding, docs/COMPOSER.md) only on a `read`
+      action, and its `of` names another read action of the same app
 
 Usage:
   appcap_validate.py hue.appcap.json [more.json ...]
@@ -99,6 +101,15 @@ def validate(path: str, show_list: bool) -> list[str]:
         # S5: widget only for read
         if widget and safety != "read":
             errs.append(f"{path}:{aid}: widget=true only allowed for safety='read' [S5]")
+
+        # S10: a view binds rows for widgets and compositions: reads only
+        view = a.get("view")
+        if view is not None:
+            if safety != "read":
+                errs.append(f"{path}:{aid}: view only allowed for safety='read' [S10]")
+            of = (view or {}).get("of")
+            if of and ((actions.get(of) or {}).get("safety") != "read" or of == aid):
+                errs.append(f"{path}:{aid}: view.of '{of}' must name another read action [S10]")
 
         # S6: confirm needs a template
         if confirm and not a.get("confirm_template"):

@@ -14,6 +14,7 @@
       "origin": "official",
       "widget": true,
       "refresh": { "poll_s": 600 },
+      "view": { "rows": "current", "label": "=Now", "fields": { "value": "temperature_2m" }, "unit": "°C" },
       "inputs": { "type": "object", "required": ["lat","lon"], "properties": { "lat": {"type":"number"}, "lon": {"type":"number"} } },
       "output": { "type": "object" },
       "endpoint": { "method": "GET", "path": "/forecast?latitude={lat}&longitude={lon}&current=temperature_2m" }

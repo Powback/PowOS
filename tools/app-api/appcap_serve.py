@@ -11,7 +11,9 @@ one call path stays the only place that can say no), toggles are the spec's own 
   GET  /apps                       every spec: app, actions, safety, enabled (handles only, never a token)
   GET  /views?app=A                {api, tools, cli, widgets}: appcap_render.py's output
   POST /enable {app, action?, enabled}         the kill switch / the per-action allowlist (spec re-validated)
-  POST /call {app, action, args, send}         appcap_run.py; send only for `read` (first slice), never `spend`
+  POST /call {app, action, args, send, consumer}   appcap_run.py; send only for `read` (first slice), never `spend`;
+                                   consumer "widget" (a composed widget, docs/COMPOSER.md) = reads only, in the
+                                   runtime itself. app/action may also ride in the query (?app=hue&action=list_rooms)
   GET  /audit?app=A&n=100          the audit log, newest first
   GET  /trackers                   the proxy's tracker log, per app + a summary (empty until the proxy writes it)
   POST /trackers/allow {app, allow}            per-app "allow trackers" (trackers/policy.json, read by the proxy)
@@ -46,17 +48,59 @@ SPECS = os.path.join(STATE, "specs")
 TRACKERS = os.path.join(STATE, "trackers")
 PORT = int(os.environ.get("POWOS_APPAPI_PORT", "3411"))
 MAX_BODY = 64 << 10
-KEEP = ("summary", "safety", "origin", "promoted", "widget", "confirm", "confirm_template", "undo", "refresh",
+KEEP = ("summary", "safety", "origin", "promoted", "widget", "confirm", "confirm_template", "undo", "refresh", "view",
         "inputs", "output", "enabled")
 
 
+def merge_new(mine: dict, pkg: dict) -> bool:
+    """What a newer package spec adds - actions and fields the user's copy lacks - added to it; nothing the copy
+    already has is changed (its `enabled` toggles above all). True when something was added."""
+    added = False
+    for k, v in pkg.items():
+        if k not in mine:
+            mine[k] = v
+            added = True
+        elif k == "actions" and isinstance(v, dict) and isinstance(mine[k], dict):
+            for aid, act in v.items():
+                if aid not in mine[k]:
+                    mine[k][aid] = act
+                    added = True
+                    continue
+                for f, fv in act.items():
+                    if f not in mine[k][aid] and f != "enabled":
+                        mine[k][aid][f] = fv
+                        added = True
+    return added
+
+
 def seed():
-    """The package's example specs, copied once: from then on the state's copy is the user's (its toggles)."""
+    """The package's example specs, copied once: from then on the state's copy is the user's (its toggles). A newer
+    package's new actions and fields (a new read, a `view` hint) are added to that copy at start, its toggles kept;
+    a merge that wouldn't validate is left out."""
     os.makedirs(SPECS, mode=0o700, exist_ok=True)
     for src in glob.glob(os.path.join(HERE, "examples", "*.appcap.json")):
         dst = os.path.join(SPECS, os.path.basename(src))
         if not os.path.exists(dst):
             shutil.copyfile(src, dst)
+            continue
+        try:
+            with open(src, encoding="utf-8") as f:
+                pkg = json.load(f)
+            with open(dst, encoding="utf-8") as f:
+                mine = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not merge_new(mine, pkg):
+            continue
+        tmp = write_json(dst, mine)
+        try:
+            valid(tmp)
+            os.replace(tmp, dst)
+        except ValueError:
+            pass
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
 
 
 def spec_path(app: str) -> str:
@@ -143,18 +187,25 @@ def enable(_q, b):
     return summary(path)
 
 
-def call(_q, b):
+CONSUMERS = ("app", "widget")
+
+
+def call(q, b):
+    b = {**{k: q[k] for k in ("app", "action") if k in q}, **b}
     path = spec_path(b["app"])
     s = valid(path)
     act = s["actions"].get(b["action"])
     if not act:
         raise LookupError(f"no action '{b['action']}'")
+    consumer = b.get("consumer") or "app"
+    if consumer not in CONSUMERS:
+        raise ValueError(f"consumer: one of {', '.join(CONSUMERS)}")
     send = bool(b.get("send"))
     if send and act["safety"] == "spend":
         return {"refused": "confirm in chat: a spend action is never sent from this app"}
     if send and act["safety"] != "read":
         return {"refused": "writes are dry-run only in this version"}
-    argv = [sys.executable, os.path.join(HERE, "appcap_run.py"), path, b["action"], "--consumer", "app", "--json"]
+    argv = [sys.executable, os.path.join(HERE, "appcap_run.py"), path, b["action"], "--consumer", consumer, "--json"]
     for k, v in (b.get("args") or {}).items():
         if v not in (None, ""):
             argv += ["--arg", f"{k}={json.dumps(v) if isinstance(v, bool) else v}"]

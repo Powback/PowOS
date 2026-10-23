@@ -306,7 +306,9 @@ existing projects (§1): captured `endpoint`s point at operations in the
   shape and its `refresh` hint — poll every `poll_s`, or subscribe to
   `event_stream` for push (Hue's CLIP v2 event stream, so the Lights widget is
   live, not polled). A widget literally has no generated binding for any
-  write/spend action, so it cannot change anything.
+  write/spend action, so it cannot change anything. A read's optional `view`
+  (rows / key / label / of / fields, rule S10) says how its result reads as
+  rows: what `powos compose` builds widgets from (docs/COMPOSER.md).
 
 All four go through one call path — resolve action → check app+action enabled →
 enforce safety (confirm/undo/widget rules) → attach the token by handle → rate

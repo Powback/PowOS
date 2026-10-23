@@ -25,7 +25,7 @@ echo "app-api: $r shot=$shot"
 fail=
 n=$(grep -o 'list_rooms\|list_scenes\|set_room\|recall_scene\|open_lights_page' <<<"${r%%out*}" | sort -u | wc -l | tr -d ' ')
 [ "$n" = 5 ] || fail="$fail actions=$n(want 5)"
-grep -q 'GET https://{bridge_ip}/clip/v2/resource/room' <<<"$r" || fail="$fail no-request"
+grep -qE 'GET https://[^ /]+/clip/v2/resource/room' <<<"$r" || fail="$fail no-request"  # {bridge_ip}, or the linked address
 grep -q 'secret:hue' <<<"$r" || fail="$fail no-handle"
 grep -q 'dry run - nothing was sent' <<<"$r" || fail="$fail not-dry-run"
 [ -n "$fail" ] && { echo "FAIL:$fail"; exit 1; }

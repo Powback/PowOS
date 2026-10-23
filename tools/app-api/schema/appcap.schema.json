@@ -137,6 +137,23 @@
             "event_stream": { "type": "string", "description": "A push/SSE/WS endpoint to subscribe to instead of polling." }
           }
         },
+        "view": {
+          "type": "object",
+          "description": "How a read's result reads as rows - the composer's default binding (docs/COMPOSER.md). Paths are dotted ('metadata.name', 'data.0.id'); a label starting with '=' is literal text. Only on read actions.",
+          "additionalProperties": false,
+          "properties": {
+            "rows": { "type": "string", "description": "Path to the list of rows (an object there is one row); '' = the result itself." },
+            "key": { "type": "string", "description": "Path in a row to its id: what another action's `of` rows are matched on." },
+            "label": { "type": "string", "description": "Path in a row to its name, or '=Literal'." },
+            "of": { "type": "string", "description": "These rows annotate another read action's rows of the same app: matched by `key` against that action's `key`." },
+            "fields": {
+              "type": "object",
+              "description": "Named values a row shows: on (boolean), level (0-100), value (text or number).",
+              "additionalProperties": { "type": "string" }
+            },
+            "unit": { "type": "string", "description": "Shown after `value`." }
+          }
+        },
         "rate_limit": { "$ref": "#/$defs/policy/properties/rate_limit" },
         "cache_ttl_s": { "type": "integer", "minimum": 0 },
         "inputs": {
