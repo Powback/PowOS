@@ -42,7 +42,17 @@ for p in "${pkgs[@]}"; do
   # re-applies the patches onto an already patched tree. Always start clean, and clean up on exit.
   docker volume rm -f "powos-android-pkg-$p" >/dev/null 2>&1 || true
   trap 'docker volume rm -f "powos-android-pkg-'"$p"'" >/dev/null 2>&1 || true' EXIT
-  local_mount=(); [ "$src" = local ] && local_mount=(-v "$HERE/pkgs/$p:/pkg:ro")
+  # A package's files may be symlinks into the rest of the tree (pkgs/powos-minecraft: bin/powos-minecraft, the
+  # desktop's own files): they don't resolve inside the container, so the recipe goes in as a dereferenced copy
+  # (under out/: Colima shares $HOME, not the Mac's temp dir).
+  local_mount=()
+  if [ "$src" = local ]; then
+    pkgdir_in=$HERE/pkgs/$p
+    if [ -n "$(find "$pkgdir_in" -type l -print -quit)" ]; then
+      pkgdir_in=$HERE/out/recipe-$p; rm -rf "$pkgdir_in"; mkdir -p "$pkgdir_in"; cp -RL "$HERE/pkgs/$p/." "$pkgdir_in/"
+    fi
+    local_mount=(-v "$pkgdir_in:/pkg:ro")
+  fi
   forks=""
   if [ -f "$HERE/pkgs/$p/FORKS" ]; then
     while read -r fname fpath; do

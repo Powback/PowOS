@@ -1,0 +1,16 @@
+{
+  "id": "minecraft",
+  "name": "Minecraft (Prism Launcher, the PowStation pack)",
+  "kind": "app",
+  "owner": "agent:minecraft",
+  "purpose": "Minecraft modpacks as a PowOS app: Prism Launcher (Arch Linux ARM's aarch64 build; its LWJGL has linux-arm64 natives), Java 21 and powos-minecraft, which turns the server's own .mrpack (packs.json: create121 = http://mcpack.pow/pack/pack.mrpack, the file minecraft-create121's server installs from) into a Prism instance and re-syncs it at every start (only what changed; nothing changed = stat()s), so client and server never drift. Drawer entry dev.powos.minecraft.desktop -> `powos-minecraft launch` (joins 192.168.50.100:25565). The game runs on the phone's Mesa (freedreno GL 4.3 over KGSL, or zink on Turnip; /usr/share/powos/minecraft/env holds the measured choice). Data: ~/.local/share/PrismLauncher (instances, libraries, the user's Microsoft sign-in), ~/.cache/powos/minecraft (the .mrpack + a sha1 blob cache of the mods).",
+  "installedBy": "targets/android/pkgs/powos-minecraft (pacman -U through tools/phone/verify/pkg-install.sh, its repo dependencies from targets/android/out/pkgs-repo)",
+  "packages": ["powos-minecraft", "prismlauncher", "jre21-openjdk", "java-runtime-common", "qt6-networkauth", "tomlplusplus", "cmark"],
+  "files": ["/usr/bin/powos-minecraft", "/usr/share/powos/minecraft/packs.json", "/usr/share/powos/minecraft/env", "/usr/share/applications/dev.powos.minecraft.desktop"],
+  "processes": [{"match": "^/usr/bin/prismlauncher", "user": "powos"}, {"match": "java .*net.neoforged|java .*PrismLauncher", "user": "powos"}],
+  "unbounded": "the game's Java heap is bounded by -Xmx (powos-minecraft: 40% of RAM, 4-8 GB); a cgroup of its own would keep powos-sleepd from freezing it out of sight (it moves only processes in the root v2 cgroup)",
+  "remove": {
+    "commands": ["pacman -R powos-minecraft prismlauncher jre21-openjdk"],
+    "keep": ["/home/powos/.local/share/PrismLauncher", "/home/powos/.cache/powos/minecraft"]
+  }
+}

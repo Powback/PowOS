@@ -1,0 +1,575 @@
+#!/usr/bin/env python3
+"""powos-minecraft: a Minecraft modpack (.mrpack) as a PowOS app - the same pack the server runs, on the phone and
+on the desktop, through Prism Launcher.
+
+    powos-minecraft [launch] [PACK]     sync the pack, then start the game (joining the pack's server)
+    powos-minecraft sync [PACK]         make the Prism instance match the pack's .mrpack (only what changed)
+    powos-minecraft status [PACK]       pack, instance, files, what is not the pack's
+    powos-minecraft packs               the packs this machine knows
+
+A pack (packs.json: /usr/share/powos/minecraft/packs.json, then ~/.config/powos/minecraft/packs.json) names its
+.mrpack by URL - the file the server installs from (minecraft-create121: itzg's MODRINTH_MODPACK=/pack/pack.mrpack,
+served at http://mcpack.pow/pack/pack.mrpack). Client and server from ONE manifest: a client ahead of or behind the
+server fails the join with a packet-decode error, not a clear message.
+
+Sync: a conditional GET of the .mrpack (ETag; offline = the cached copy), then the instance's files follow its
+modrinth.index.json (client side only: env.client "unsupported" is skipped; each file sha1-checked, from a blob
+cache) and overrides/ + client-overrides/. Files the pack put there are the pack's (powos-pack.json in the instance):
+a pack update replaces/removes them; a file the user changed stays theirs until the pack changes that file. Mods
+the user added themselves are left alone. Nothing changed = stat()s only, well under a second.
+
+The instance (Prism's own format: instance.cfg + mmc-pack.json) gets the pack's Minecraft + loader versions, Java
+(a system Java 21 when there is one, else Prism's automatic Java download), memory sized to the machine, the
+machine's environment (/usr/share/powos/minecraft/env, then ~/.config/powos/minecraft/env: KEY=VALUE lines - the
+phone's GL driver choice lives there, measured; $POWOS_MINECRAFT_ENV names one more file on top), the pack's server joined on launch, and itself as the pre-launch
+command, so a start from Prism's own window syncs too.
+
+    --root DIR     another Prism data dir (tests: a separate root with its own accounts, the user's untouched)
+    --no-join      don't join the server on launch (this sync's instance setting)
+    --quiet        no progress window
+"""
+import concurrent.futures
+import hashlib
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+import zipfile
+
+HOME = os.path.expanduser("~")
+SYSTEM_PACKS = "/usr/share/powos/minecraft/packs.json"
+USER_PACKS = os.path.join(HOME, ".config/powos/minecraft/packs.json")
+SYSTEM_ENV = "/usr/share/powos/minecraft/env"
+USER_ENV = os.path.join(HOME, ".config/powos/minecraft/env")
+CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.join(HOME, ".cache")), "powos/minecraft")
+PRISM_ROOT = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.join(HOME, ".local/share")), "PrismLauncher")
+LOADERS = {"neoforge": "net.neoforged", "forge": "net.minecraftforge", "fabric-loader": "net.fabricmc.fabric-loader",
+           "quilt-loader": "org.quiltmc.quilt-loader"}
+STATE = "powos-pack.json"
+SELF = os.path.realpath(sys.argv[0]) if os.path.isabs(sys.argv[0]) else (shutil.which(sys.argv[0]) or sys.argv[0])
+
+
+def log(msg):
+    print(f"powos-minecraft: {msg}", file=sys.stderr, flush=True)
+
+
+# ── Packs and the machine ──────────────────────────────────────────────────────────────────────────────────────
+def packs():
+    out = {}
+    for f in (SYSTEM_PACKS, USER_PACKS):
+        try:
+            with open(f) as fh:
+                for k, v in json.load(fh).items():
+                    out[k] = {**out.get(k, {}), **v}
+        except FileNotFoundError:
+            pass
+        except ValueError as e:
+            log(f"{f}: {e} (skipped)")
+    return out
+
+
+def pick(name):
+    p = packs()
+    if not p:
+        sys.exit("powos-minecraft: no packs (" + SYSTEM_PACKS + ", " + USER_PACKS + ")")
+    name = name or next((k for k, v in p.items() if v.get("default")), None) or sorted(p)[0]
+    if name not in p:
+        sys.exit(f"powos-minecraft: no pack {name!r} (packs: {', '.join(sorted(p))})")
+    return name, p[name]
+
+
+def env_file(path):
+    env = {}
+    try:
+        for line in open(path):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip()
+    except FileNotFoundError:
+        pass
+    return env
+
+
+def game_env():
+    """The machine's environment for the game: system, user, then $POWOS_MINECRAFT_ENV's file (checks: one variant's
+    switches without touching the user's file). An empty value unsets."""
+    env = {**env_file(SYSTEM_ENV), **env_file(USER_ENV), **env_file(os.environ.get("POWOS_MINECRAFT_ENV", "/nonexistent"))}
+    return {k: v for k, v in env.items() if v != ""}
+
+
+def mem_total_mb():
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return 8192
+
+
+def heap_mb(pack):
+    """The pack's "memory" (MB), else 40% of the machine's RAM, 4-8 GB (a big Create pack wants ~5-6 GB)."""
+    m = pack.get("memory", "auto")
+    if isinstance(m, int) or str(m).isdigit():
+        return int(m)
+    return max(4096, min(8192, (mem_total_mb() * 2 // 5) // 512 * 512))
+
+
+def system_java(major=21):
+    for d in sorted(os.listdir("/usr/lib/jvm")) if os.path.isdir("/usr/lib/jvm") else []:
+        j = os.path.join("/usr/lib/jvm", d, "bin/java")
+        if re.search(rf"(^|[^0-9]){major}([^0-9]|$)", d) and os.access(j, os.X_OK):
+            return j
+    return None
+
+
+# ── Prism's settings files (QSettings INI: [General], quoted strings) ─────────────────────────────────────────────
+def ini_read(path):
+    vals = {}
+    try:
+        for line in open(path, encoding="utf-8"):
+            line = line.rstrip("\n")
+            if not line or line.startswith(("[", "#", ";")) or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            vals[k] = v
+    except FileNotFoundError:
+        pass
+    return vals
+
+
+def ini_quote(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    v = str(v)
+    if re.fullmatch(r"[A-Za-z0-9_./:@+-]*", v):
+        return v
+    return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def ini_update(path, values, only_missing=False):
+    """Sets keys in a Prism .cfg, keeping every other key (the user's settings) as it is."""
+    cur = ini_read(path)
+    changed = False
+    for k, v in values.items():
+        q = ini_quote(v)
+        if (only_missing and k in cur) or cur.get(k) == q:
+            continue
+        cur[k] = q
+        changed = True
+    if changed or not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".powos-tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("[General]\n" + "".join(f"{k}={v}\n" for k, v in sorted(cur.items())))
+        os.replace(tmp, path)
+    return changed
+
+
+# ── The .mrpack ──────────────────────────────────────────────────────────────────────────────────────────────
+def fetch_mrpack(name, pack, quiet):
+    """The pack's .mrpack in the cache, fetched only when the server's copy changed (ETag). Offline: the cached one."""
+    d = os.path.join(CACHE, name)
+    os.makedirs(d, exist_ok=True)
+    dst, meta_f = os.path.join(d, "pack.mrpack"), os.path.join(d, "pack.mrpack.json")
+    src = pack["mrpack"]
+    if not re.match(r"https?://", src):
+        return os.path.expanduser(src)
+    meta = {}
+    try:
+        meta = json.load(open(meta_f))
+    except (OSError, ValueError):
+        pass
+    req = urllib.request.Request(src, headers={"User-Agent": "powos-minecraft"})
+    if os.path.exists(dst) and meta.get("etag"):
+        req.add_header("If-None-Match", meta["etag"])
+    try:
+        with urllib.request.urlopen(req, timeout=float(pack.get("timeout", 6))) as r:
+            total = int(r.headers.get("Content-Length") or 0)
+            tmp = dst + ".part"
+            got, t0 = 0, time.time()
+            with open(tmp, "wb") as f:
+                while True:
+                    b = r.read(1 << 20)
+                    if not b:
+                        break
+                    f.write(b)
+                    got += len(b)
+                    progress(f"Downloading the pack ({got >> 20} of {total >> 20} MB)", got / total if total else 0)
+            os.replace(tmp, dst)
+            json.dump({"etag": r.headers.get("ETag"), "url": src, "time": time.time()}, open(meta_f, "w"))
+            log(f"pack {name}: fetched {got >> 20} MB in {time.time() - t0:.1f} s")
+    except urllib.error.HTTPError as e:
+        if e.code != 304:
+            if not os.path.exists(dst):
+                raise SystemExit(f"powos-minecraft: {src}: HTTP {e.code}")
+            log(f"{src}: HTTP {e.code}, using the cached pack")
+    except (urllib.error.URLError, OSError) as e:
+        if not os.path.exists(dst):
+            raise SystemExit(f"powos-minecraft: {src} unreachable ({e}) and no cached pack")
+        log(f"{src} unreachable ({getattr(e, 'reason', e)}), using the cached pack")
+    return dst
+
+
+def sha1_file(path):
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def safe_rel(p):
+    p = p.replace("\\", "/")
+    if p.startswith("/") or any(part in ("..", "") for part in p.split("/")):
+        raise ValueError(f"unsafe path in pack: {p!r}")
+    return p
+
+
+def pack_plan(mrpack):
+    """{relpath: {"sha1", "size", "url" | "zip"}} for the client, and the index's dependencies."""
+    z = zipfile.ZipFile(mrpack)
+    idx = json.loads(z.read("modrinth.index.json"))
+    plan = {}
+    for f in idx.get("files", []):
+        if (f.get("env") or {}).get("client") == "unsupported":
+            continue
+        plan[safe_rel(f["path"])] = {"sha1": f["hashes"]["sha1"], "sha512": f["hashes"].get("sha512"),
+                                     "size": f.get("fileSize"), "urls": f.get("downloads", [])}
+    for prefix in ("overrides/", "client-overrides/"):   # client-overrides last: it wins
+        for info in z.infolist():
+            if info.filename.startswith(prefix) and not info.is_dir():
+                rel = safe_rel(info.filename[len(prefix):])
+                plan[rel] = {"zip": info.filename, "size": info.file_size, "crc": info.CRC}
+    return idx, plan, z
+
+
+# ── Progress (a window when there is a screen and something to download) ────────────────────────────────────────
+_prog = None
+
+
+def progress(text, frac):
+    global _prog
+    if _prog is False:
+        return
+    if _prog is None:
+        if QUIET or not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) or not shutil.which("zenity"):
+            _prog = False
+            log(text)
+            return
+        _prog = subprocess.Popen(["zenity", "--progress", "--title=Minecraft", "--text=" + text, "--auto-close",
+                                  "--no-cancel", "--width=420"], stdin=subprocess.PIPE, text=True,
+                                 stderr=subprocess.DEVNULL)
+    try:
+        _prog.stdin.write(f"{int(frac * 99)}\n# {text}\n")
+        _prog.stdin.flush()
+    except (BrokenPipeError, OSError):
+        _prog = False
+
+
+def progress_done():
+    global _prog
+    if _prog:
+        try:
+            _prog.stdin.write("100\n")
+            _prog.stdin.close()
+            _prog.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            _prog.kill()
+    _prog = None
+
+
+def download(entry, blobs):
+    """A pack file into the blob cache (by sha1), verified; returns the blob's path."""
+    blob = os.path.join(blobs, entry["sha1"][:2], entry["sha1"])
+    if os.path.exists(blob):
+        return blob
+    os.makedirs(os.path.dirname(blob), exist_ok=True)
+    err = None
+    for url in entry["urls"]:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "powos-minecraft"})
+            with urllib.request.urlopen(req, timeout=60) as r, tempfile.NamedTemporaryFile(dir=os.path.dirname(blob),
+                                                                                             delete=False) as t:
+                h1, h5 = hashlib.sha1(), hashlib.sha512()
+                for b in iter(lambda: r.read(1 << 20), b""):
+                    t.write(b)
+                    h1.update(b)
+                    h5.update(b)
+            if h1.hexdigest() != entry["sha1"] or (entry.get("sha512") and h5.hexdigest() != entry["sha512"]):
+                os.unlink(t.name)
+                err = f"{url}: hash mismatch"
+                continue
+            os.replace(t.name, blob)
+            return blob
+        except (urllib.error.URLError, OSError) as e:
+            err = f"{url}: {e}"
+    raise RuntimeError(err or "no download URL")
+
+
+# ── Sync ───────────────────────────────────────────────────────────────────────────────────────────────────────
+def instance_dir(root, name):
+    return os.path.join(root, "instances", name)
+
+
+def sync(name, pack, root, join=True):
+    t0 = time.time()
+    mrpack = fetch_mrpack(name, pack, QUIET)
+    inst = instance_dir(root, name)
+    game = os.path.join(inst, "minecraft")
+    state_f = os.path.join(inst, STATE)
+    try:
+        state = json.load(open(state_f))
+    except (OSError, ValueError):
+        state = {}
+    st = os.stat(mrpack)
+    key = f"{st.st_size}:{int(st.st_mtime)}"
+    pack_sha = state.get("mrpack_sha256") if state.get("mrpack_key") == key else sha256_file(mrpack)
+    owned = state.get("files", {})
+    if pack_sha == state.get("mrpack_sha256") and all(
+            os.path.exists(os.path.join(game, p)) for p in owned):
+        changes = 0
+        idx = state.get("index", {})
+    else:
+        idx, plan, z = pack_plan(mrpack)
+        todo = {}
+        for rel, e in plan.items():
+            dst = os.path.join(game, rel)
+            new_id = e.get("sha1") or f"crc:{e['crc']}:{e['size']}"
+            old_id = owned.get(rel)
+            if os.path.exists(dst):
+                if old_id == new_id:
+                    continue          # the pack's file, unchanged in the pack (the user's edits to it stay)
+                if old_id is None and not rel.startswith("mods/"):
+                    if e.get("sha1") and sha1_file(dst) == e["sha1"]:
+                        continue
+            todo[rel] = (e, new_id)
+        # Downloads first (in parallel), then everything goes in place.
+        blobs = os.path.join(CACHE, "blobs")
+        dl = [(rel, e) for rel, (e, _) in todo.items() if "urls" in e]
+        done = 0
+        paths = {}
+        if dl:
+            with concurrent.futures.ThreadPoolExecutor(8) as ex:
+                futs = {ex.submit(download, e, blobs): rel for rel, e in dl}
+                for fut in concurrent.futures.as_completed(futs):
+                    paths[futs[fut]] = fut.result()
+                    done += 1
+                    progress(f"Downloading mods ({done} of {len(dl)})", done / len(dl))
+        for rel, (e, new_id) in todo.items():
+            dst = os.path.join(game, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            tmp = dst + ".powos-tmp"
+            if "zip" in e:
+                with z.open(e["zip"]) as s, open(tmp, "wb") as d:
+                    shutil.copyfileobj(s, d, 1 << 20)
+            else:
+                shutil.copyfile(paths[rel], tmp)
+            os.replace(tmp, dst)
+        # What the pack had and has no more: gone, unless the user changed it (then it is theirs).
+        new_ids = {rel: (e.get("sha1") or f"crc:{e['crc']}:{e['size']}") for rel, e in plan.items()}
+        removed = 0
+        for rel, old_id in owned.items():
+            if rel in new_ids:
+                continue
+            dst = os.path.join(game, rel)
+            if os.path.exists(dst) and (old_id.startswith("crc:") or sha1_file(dst) == old_id):
+                os.unlink(dst)
+                removed += 1
+            elif os.path.exists(dst):
+                log(f"kept {rel}: no longer in the pack, but changed here")
+        changes = len(todo) + removed
+        owned = new_ids
+        idx = {"name": idx.get("name"), "versionId": idx.get("versionId"), "dependencies": idx.get("dependencies", {})}
+    write_instance(name, pack, root, idx, join)
+    write_servers(game, pack)
+    os.makedirs(inst, exist_ok=True)
+    json.dump({"mrpack_sha256": pack_sha, "mrpack_key": key, "mrpack": pack["mrpack"], "index": idx,
+               "files": owned, "synced": time.time()}, open(state_f + ".tmp", "w"), indent=1)
+    os.replace(state_f + ".tmp", state_f)
+    progress_done()
+    log(f"pack {name}: {changes} file(s) changed, {len(owned)} the pack's, {time.time() - t0:.2f} s")
+    return inst
+
+
+def write_instance(name, pack, root, idx, join):
+    inst = instance_dir(root, name)
+    os.makedirs(os.path.join(inst, "minecraft"), exist_ok=True)
+    deps = idx.get("dependencies", {})
+    # mmc-pack.json: Minecraft + the pack's loader (Prism adds LWJGL - with its linux-arm64 natives - itself).
+    mp_f = os.path.join(inst, "mmc-pack.json")
+    try:
+        mp = json.load(open(mp_f))
+    except (OSError, ValueError):
+        mp = {"formatVersion": 1, "components": []}
+    want = [("net.minecraft", deps.get("minecraft"))] + [(uid, deps[k]) for k, uid in LOADERS.items() if k in deps]
+    comps = [c for c in mp.get("components", []) if c.get("uid") not in {u for u, _ in want}
+             and c.get("uid") not in LOADERS.values() and c.get("uid") != "org.lwjgl3"]
+    head = []
+    for uid, ver in want:
+        if ver:
+            c = {"uid": uid, "version": ver}
+            if uid == "net.minecraft":
+                c["important"] = True
+            head.append(c)
+    new = {"formatVersion": 1, "components": head + comps}
+    old_versions = [(c.get("uid"), c.get("version")) for c in mp.get("components", []) if c.get("uid") != "org.lwjgl3"]
+    if old_versions != [(c["uid"], c["version"]) for c in new["components"]]:
+        json.dump(new, open(mp_f, "w"), indent=4)
+    java = system_java(21)
+    env = game_env()
+    pre = f"{SELF} sync {name} --quiet" + (f" --root {root}" if root != PRISM_ROOT else "") + ("" if join else " --no-join")
+    cfg = {
+        "InstanceType": "OneSix",
+        "name": pack.get("name", name),
+        "iconKey": pack.get("icon", "gear"),
+        "OverrideMemory": True, "MaxMemAlloc": heap_mb(pack), "MinMemAlloc": 1024,
+        "OverrideJavaArgs": True, "JvmArgs": pack.get("jvmArgs", "-XX:+UseG1GC -XX:MaxGCPauseMillis=40"),
+        "OverrideCommands": True, "PreLaunchCommand": pre,
+        "OverrideMiscellaneous": True, "QuitAfterGameStop": True, "CloseAfterLaunch": False,
+        "OverrideWindow": True, "LaunchMaximized": True,
+        "OverrideEnv": True, "Env": json.dumps(env, separators=(",", ":")),
+        "JoinServerOnLaunch": bool(join and pack.get("server")),
+        "JoinServerOnLaunchAddress": pack.get("server", ""),
+    }
+    if java:
+        cfg.update({"OverrideJavaLocation": True, "JavaPath": java, "AutomaticJava": False})
+    else:
+        cfg.update({"OverrideJavaLocation": False, "AutomaticJava": True})
+    ini_update(os.path.join(inst, "instance.cfg"), cfg)
+    # Prism's own first-run wizard asks only what it must: language/theme/Java answered here, the Microsoft
+    # sign-in (no account yet) stays - that one is the user's.
+    glob_cfg = {"Language": "en_US", "ApplicationTheme": "system", "IconTheme": "pe_colored", "PastebinURL": "",
+                "AutomaticJavaDownload": java is None, "AutomaticJavaSwitch": java is None,
+                "UserAskedAboutAutomaticJavaDownload": True, "IgnoreJavaWizard": True, "ShowConsole": False,
+                "ShowConsoleOnError": True}
+    if java:
+        glob_cfg["JavaPath"] = java
+    ini_update(os.path.join(root, "prismlauncher.cfg"), glob_cfg, only_missing=True)
+
+
+def nbt_str(s):
+    b = s.encode()
+    return struct.pack(">H", len(b)) + b
+
+
+def write_servers(game, pack):
+    """The pack's server in the multiplayer list (servers.dat, only when there is none: the user's list is theirs)."""
+    f = os.path.join(game, "servers.dat")
+    if not pack.get("server") or os.path.exists(f):
+        return
+    entry = b"\x08" + nbt_str("name") + nbt_str(pack.get("serverName", pack.get("name", "Server"))) + \
+        b"\x08" + nbt_str("ip") + nbt_str(pack["server"]) + b"\x00"
+    data = b"\x0a" + nbt_str("") + b"\x09" + nbt_str("servers") + b"\x0a" + struct.pack(">i", 1) + entry + b"\x00"
+    open(f, "wb").write(data)
+
+
+# ── Commands ─────────────────────────────────────────────────────────────────────────────────────────────────
+def running(inst):
+    """The game's java (a process whose cwd is the instance's game dir), if it runs."""
+    game = os.path.realpath(os.path.join(inst, "minecraft"))
+    for p in os.listdir("/proc") if os.path.isdir("/proc") else []:
+        if p.isdigit():
+            try:
+                if os.path.realpath(os.readlink(f"/proc/{p}/cwd")) == game and \
+                        b"java" in open(f"/proc/{p}/cmdline", "rb").read().split(b"\0")[0]:
+                    return int(p)
+            except OSError:
+                pass
+    return None
+
+
+def cmd_launch(name, pack, root, join):
+    inst = instance_dir(root, name)
+    if running(inst):
+        log(f"{name} is running already")   # powos-open-task / the desktop brings its window back
+        return 0
+    t = time.time()
+    sync(name, pack, root, join)
+    prism = shutil.which("prismlauncher") or sys.exit("powos-minecraft: prismlauncher is not installed")
+    argv = [prism] + (["--dir", root] if root != PRISM_ROOT else []) + ["--launch", name]
+    if os.environ.get("POWOS_MC_OFFLINE"):
+        argv += ["--offline", os.environ["POWOS_MC_OFFLINE"]]
+    log(f"sync took {time.time() - t:.2f} s; starting {' '.join(argv)}")
+    os.execv(prism, argv)
+
+
+def cmd_status(name, pack, root):
+    inst = instance_dir(root, name)
+    print(f"pack      {name}: {pack.get('name', '')}  {pack['mrpack']}")
+    print(f"server    {pack.get('server', '-')}")
+    try:
+        s = json.load(open(os.path.join(inst, STATE)))
+    except (OSError, ValueError):
+        print(f"instance  {inst} (not synced yet)")
+        return 0
+    d = s.get("index", {}).get("dependencies", {})
+    print(f"instance  {inst}  ({', '.join(f'{k} {v}' for k, v in d.items())})")
+    print(f"synced    {time.strftime('%F %T', time.localtime(s.get('synced', 0)))}  {len(s['files'])} pack files")
+    mods = os.path.join(inst, "minecraft/mods")
+    extra = sorted(f for f in (os.listdir(mods) if os.path.isdir(mods) else []) if f"mods/{f}" not in s["files"])
+    if extra:
+        print("not the pack's (yours): " + ", ".join(extra))
+    pid = running(inst)
+    print(f"java      {system_java(21) or 'Prism automatic Java'}; heap {heap_mb(pack)} MB; "
+          f"{'running (pid %d)' % pid if pid else 'not running'}")
+    env = game_env()
+    print("env       " + (" ".join(f"{k}={v}" for k, v in env.items()) or "-"))
+    return 0
+
+
+def main(argv):
+    global QUIET
+    args, root, join = [], PRISM_ROOT, True
+    QUIET = False
+    it = iter(argv)
+    for a in it:
+        if a == "--root":
+            root = os.path.abspath(os.path.expanduser(next(it)))
+        elif a == "--no-join":
+            join = False
+        elif a == "--quiet":
+            QUIET = True
+        elif a in ("-h", "--help"):
+            print(__doc__)
+            return 0
+        else:
+            args.append(a)
+    cmd = args[0] if args and args[0] in ("launch", "sync", "status", "packs") else "launch"
+    rest = args[1:] if args and args[0] == cmd else args
+    if cmd == "packs":
+        for k, v in sorted(packs().items()):
+            print(f"{k:14} {v.get('name', ''):28} {v['mrpack']}  {v.get('server', '')}")
+        return 0
+    name, pack = pick(rest[0] if rest else None)
+    if cmd == "sync":
+        sync(name, pack, root, join)
+        return 0
+    if cmd == "status":
+        return cmd_status(name, pack, root)
+    return cmd_launch(name, pack, root, join)
+
+
+QUIET = False
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except RuntimeError as e:
+        progress_done()
+        sys.exit(f"powos-minecraft: {e}")

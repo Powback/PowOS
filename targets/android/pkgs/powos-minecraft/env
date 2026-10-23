@@ -1,0 +1,3 @@
+# The game's environment on the phone (powos-minecraft puts it into the Prism instance's Env; the user's
+# ~/.config/powos/minecraft/env goes on top, an empty value unsets). Only measured choices go here
+# (tools/phone/verify/mc-launch.sh).

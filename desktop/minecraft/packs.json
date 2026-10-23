@@ -1,0 +1,9 @@
+{
+  "create121": {
+    "name": "Create CC:T 1.21.1",
+    "mrpack": "http://mcpack.pow/pack/pack.mrpack",
+    "server": "192.168.50.100:25565",
+    "serverName": "PowStation",
+    "default": true
+  }
+}

@@ -188,6 +188,10 @@ COPY systemd/powos-safemode.service       /usr/lib/systemd/system/powos-safemode
 COPY systemd/powos-boot-entries.service   /usr/lib/systemd/system/powos-boot-entries.service
 COPY systemd/powos-firstboot-notice.service /usr/lib/systemd/system/powos-firstboot-notice.service
 COPY systemd/powos-initramfs-slim.service /usr/lib/systemd/system/powos-initramfs-slim.service
+# Minecraft modpacks (bin/powos-minecraft, shipped by COPY bin/ above): the packs this machine knows and the app's
+# menu entry - the same files the phone's package installs (targets/android/pkgs/powos-minecraft links to these).
+COPY desktop/minecraft/packs.json         /usr/share/powos/minecraft/packs.json
+COPY desktop/minecraft/dev.powos.minecraft.desktop /usr/share/applications/dev.powos.minecraft.desktop
 
 # LAST in this stage on purpose. .snapshot/ is a `git archive HEAD` extraction,
 # so it differs on every single commit. Anywhere earlier in the list and the
@@ -310,6 +314,13 @@ RUN . /etc/os-release; \
     rm -f /tmp/kzones.kwinscript && \
     dnf5 -y clean all && \
     systemctl enable ratbagd.service logid.service
+
+# Prism Launcher for powos-minecraft (the server's .mrpack -> a Prism instance; the phone runs the same tool through
+# Arch Linux ARM's prismlauncher). Fedora 44 has no Prism and no Java 21 (only 25, which NeoForge 1.21.1 does not
+# run on): Prism comes from Terra (11.1.1-1.fc44, checked 2026-10-23; Bazzite ships the repo, disabled), and Java
+# is Prism's own automatic download of Mojang's Java 21 runtime (powos-minecraft turns it on when the machine has no
+# Java 21). Its own layer, so a Prism update doesn't rebuild the packages above.
+RUN dnf5 -y install --setopt=install_weak_deps=False --enablerepo=terra prismlauncher && dnf5 -y clean all
 
 # tmux session persistence ACROSS REBOOT. The resume picker only ever survived a
 # closed tab, a logout or an SSH drop — the tmux server dies with the kernel, so
