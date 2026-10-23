@@ -17,3 +17,11 @@
 # this line): no crash, Teardown draws its splash. Real fix: a PowOS Mesa build with the cap kept for native BOs
 # (only shared dma-heap BOs need the cache maintenance), then this line goes.
 MESA_EXTENSION_OVERRIDE=+GL_ARB_buffer_storage
+
+# HACK: no System V IPC in native (Linux build) games: Android's kernel has none (semget -> ENOSYS) and the sysvipc
+# shim /usr/bin/steam preloads never reaches them - the game process's LD_PRELOAD is empty under Valve's FEX compat
+# tool + pressure-vessel (bf-coldstart hang_diag, 2026-10-23 10:36). Unity's old Mono retries semget forever in its
+# runtime init: Broforce native spun 4 min at 100% with no window (gdb: FEX's raw svc 190 every sample). Mono without
+# its shared-handle segment needs no semaphores. Measured 10:31: Broforce native window 36.6 s, first frame 44.9 s.
+# Real fix: the x86_64 shim inside native games (pass it through the FEX compat tool / pressure-vessel), then this goes.
+MONO_DISABLE_SHM=1
