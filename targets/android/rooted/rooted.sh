@@ -59,6 +59,12 @@ deploy)
       echo "rooted.sh deploy: waiting for the phone check ($(cat "$vl/who" 2>/dev/null)) to finish"; sleep 15
     done
   fi
+  # One deploy at a time: two at once raced on /data/local/tmp ("install: bad .../powos-open-task", 05:36, friction f20).
+  dl="$HOME/.cache/powos-deploy.lock"
+  for _ in $(seq 60); do mkdir "$dl" 2>/dev/null && break
+    [ $(( $(date +%s) - $(stat -f %m "$dl" 2>/dev/null || stat -c %Y "$dl") )) -gt 600 ] && { rm -rf "$dl"; continue; }
+    echo "rooted.sh deploy: another deploy is running - waiting"; sleep 5; done
+  trap 'rm -rf "$dl"' EXIT
   # The rooted-mode scripts (also part of install): the boot/mount script, the desktop session the PowOS app starts
   # (powos-session.sh -> /usr/bin/powos-rooted-session inside PowOS), and the flag the app checks
   # (persist.powos.root=1, set with Magisk's resetprop - readable without a root prompt).
