@@ -196,6 +196,9 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
     settled, so all 4 steps "moved". Measure only after restAt().
   - Preact useEffect runs after paint. editsheet.tsx's open effect sets `appPicker = false`. A click on "+ app"
     before that frame left the picker shut ("A-Z list has 0 apps"). Click only once the sheet is settled().
+  - An "empty spot on home" read with elementFromPoint ignores native windows: a floating window over it takes the
+    touch. Pick spots with e2e-lib.sh freept (skips every windows.list window + its title bar). Injected drags: the
+    DOWN and its first MOVE past slop in ONE adb call; a DOWN alone held to the next call is a long press (edit mode).
   - A long press is a timer (grid.tsx LONG_PRESS_MS 420, MARQUEE_DWELL 180): wait for `.carried` / gesture.ts
     `held`, not 520 ms. The hold itself (the scenario: dwell before the moves) can stay a sleep.
   - The reverse case: a synthetic drag on a tile must pass SLOP (10 px) in its FIRST move. Otherwise the long-press
