@@ -48,6 +48,25 @@ home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the co
 - Check: verify/plasma-notify.sh (bridge idle, notify-send -w -> shade list, notifications.dismiss -> gone + notify-send
   returns, Klipper <-> clipboard.read/write, the user's clip put back).
 
+## Plasma's desktop wallpaper (org.powos.transparent; fixed 2026-10-23, cb40fa5)
+- The containment keeps wallpaperplugin=org.powos.transparent (set once by the update script
+  session/plasma/powos-transparent-desktop.js). Since cb40fa5 it DRAWS PowOS home's picture: the app's ShellWallpaper
+  writes /run/powos-app/powos-wallpaper-<ms>.jpg (1600 px; a still wallpaper's picture, a live one's current frame;
+  the last two kept), the QML shows the newest via FolderListModel (inotify). No picture: transparent as before.
+  Nothing in Plasma's config is written at runtime; powos-shell (paused) never touched Plasma's config either.
+- Why not transparency alone: Android's TASK SNAPSHOT of the desktop's task leaves the wallpaper out. It is what
+  comes back first when the desktop task returns (snapshot starting window, AOSP ActivityRecord.addStartingWindow
+  uses it before any theme check), what recents / PowOS's switcher cards and the assist screenshot show: the
+  widgets on BLACK. Proof: /data/system_ce/0/snapshots/<task>.jpg of the MainActivity task (root to read). A fresh
+  launch (splash starting window, no snapshot) looked right - the black only shows when returning to the task.
+- Black desktop again? First look: containment's wallpaperplugin (appletsrc), `ls /run/powos-app/powos-wallpaper-*`,
+  plasmashell started after the QML's mtime (it loads the QML once), KWin script powos-translucent-desktop loaded.
+- KWin's own capture works on the phone (2026-10-23): `spectacle -b -n -f -o FILE` as the session user gives a
+  2268x2440 RGBA PNG WITH alpha (transparent desktop = alpha 0). The ScreenShot2 D-Bus API itself refuses a plain
+  python caller (NoAuthorized); PIL exists in PowOS for measuring. Check: verify/plasma-wallpaper.sh.
+- QML: /usr/lib/qt6/bin/qmllint in PowOS lints a deployed wallpaper; deploy rootfs files with
+  `PATH="$PWD/tools/phone/bin:$PATH" targets/android/rooted/rooted.sh deploy --note|--silent`.
+
 ## Shot checks (shell/dev/shots.mjs, after each scene)
 - Errors per shot: overlapping tiles (>1 px), partial joins, uneven gutters on mode=desktop, missing glyphs.
   SHOTS_STRICT=1 fails the run and gate.sh --shots. gate.sh mounts the real nerd_symbols.ttf. Output dirs under $HOME.
