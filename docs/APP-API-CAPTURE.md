@@ -383,22 +383,30 @@ The committed prototype of this surface is the CLI renderer and a standalone
 HTML viewer (`tools/app-api/viewer/`, §7); the production in-shell app with live
 capture toggles and persistence is the scheduled build (§8).
 
-### 1b.13 Bonus: blocking trackers and unwanted traffic
+### 1b.13 First-class feature: tracker identification + blocking
 
-The same local capture proxy sees the host + URL of every flow, so it is also a
-**request-level tracker/ad blocker** — complementing PowOS's existing Pi-hole
-(DNS-level) blocking with per-flow, per-app decisions Pi-hole can't make:
+The same local proxy sees the host + URL of every flow, so it is also a
+**request-level tracker blocker** — complementing PowOS's Pi-hole (DNS-level)
+with per-flow, per-app decisions Pi-hole can't make. **Built and tested**
+(`tools/app-api/appcap_block.py`):
 
-- the proxy classifies each flow (known-tracker blocklists by host/path, plus
-  "this domain isn't in any enabled app's allowlist") and can **drop** it;
-- `ssl-bypass-foundation`'s rewrite engine already supports block-by-pattern, so
-  this is a blocklist + a policy on top, not new interception;
-- it stays **observe-and-block only** — no account, spend or ToS risk — and runs
-  locally/offline like everything else here;
-- it reuses the audit log: you can see which apps phone home where, then block.
+- classifies every request as `tracker` / `analytics` / `functional` using
+  known lists (EasyPrivacy-style host rules + Exodus-style tracker signatures,
+  seeded in the file, refreshed on-device by a scheduled updater unit) plus what
+  was learned per app;
+- **trackers/analytics blocked by default; functional calls allowed**;
+- **per-app ALLOW switch** force-allows a host when blocking breaks an app;
+- a **per-app report** — which trackers, how many calls, how many bytes — for the
+  App API app to display (`appcap_block.py report` emits exactly that JSON;
+  coordinate with the shell agent building the app);
+- applies to enabled apps' flows, and optionally to all apps via the proxy/DNS;
+- **complements Pi-hole, does not replace it**; observe-and-block only — no
+  account, spend or ToS risk.
 
-This is a natural follow-on (a read/deny policy layer over the same capture), not
-part of the capability call path; scheduled alongside the capture engine work.
+Tested: `google-analytics.com`/`app-measurement.com`/`appsflyer.com`/
+`amplitude.com` → blocked; `api.open-meteo.com` → functional/allowed; a synthetic
+5-flow app report rolled up blocked vs allowed calls+bytes per host; a per-app
+`allow` override flipped one analytics host back to allowed.
 
 ---
 
@@ -688,8 +696,17 @@ logged-in app.
 spec + JSON Schema, the safety-invariant validator, the capture→OpenAPI
 converter, and the `appcap_render.py` generators that produce the API view, the
 AI tool list, the CLI listing, the widget bindings and a dry-run request preview
-— plus a standalone HTML viewer. The *model* and its *generators* exist and are
-tested; what remains is wiring them to the live capture and the phone.
+— plus a standalone HTML viewer; the **local encrypted token store**, the
+**runtime call path** (safety enforcement + handle-injected auth + audit), the
+**capture→appcap emitter**, and **tracker identification + blocking**
+(`appcap_block.py`, default-block trackers, per-app report + allow switch). The
+*model*, its *generators*, the runtime and the tracker blocker exist and are
+tested; what remains is wiring them to the live capture and the phone. The phone
+prep (CA + frida-server) is defined as reversible registered units
+(`units/phone-android/app-ca.json`, `app-frida.json`) with documented uninstall,
+to be installed + uninstall-tested ON-DEVICE by the on-device agent with the user
+present (not from the Mac); SELinux is never touched and interception applies
+only to apps on the per-app allowlist.
 
 **Build order (reuse-first):**
 

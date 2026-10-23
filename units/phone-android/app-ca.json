@@ -1,0 +1,24 @@
+{
+  "id": "app-ca",
+  "name": "App API local CA (system trust, for enabled apps only)",
+  "kind": "system",
+  "owner": "user",
+  "host": "phone-android",
+  "purpose": "lets the local PowOS capture proxy inspect HTTPS from apps the user has EXPLICITLY enabled, so their traffic can be learned into an appcap and classified for tracker-blocking. A Magisk module adds the PowOS-generated local CA to the system trust store. Per-app routing/allowlist means ONLY enabled apps' traffic is routed to the proxy; every other app's traffic passes untouched and is not intercepted.",
+  "installedBy": "targets/android/rooted/rooted.sh app-ca (Magisk module) — INSTALLED ON-DEVICE by the on-device agent with the user present; not installed from the Mac",
+  "files": [
+    "/data/adb/modules/powos-appca/",
+    "/data/powos/app-api/ca.crt"
+  ],
+  "selinux": "unchanged — this adds a CA to the trust store only; it does NOT set permissive or alter any policy",
+  "scope": "interception applies ONLY to apps on the per-app allowlist; the CA being trusted does not by itself route or capture anything",
+  "status": "NOT YET INSTALLED — manifest + uninstall are defined; on-device install + a one-time uninstall test are the on-device agent's step, user present",
+  "remove": {
+    "commands": [
+      "rm -rf /data/adb/modules/powos-appca",
+      "rm -f /data/powos/app-api/ca.crt",
+      "echo 'reboot to drop the CA from the trust store'"
+    ],
+    "note": "removing the Magisk module + reboot fully reverts the trust store; nothing else changes. Keep nothing."
+  }
+}

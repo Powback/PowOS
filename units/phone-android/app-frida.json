@@ -1,0 +1,24 @@
+{
+  "id": "app-frida",
+  "name": "App API frida-server (on-demand, enabled apps only)",
+  "kind": "system",
+  "owner": "user",
+  "host": "phone-android",
+  "purpose": "for apps the user enabled that pin TLS or sign requests, an in-app hook reads the request the way the app itself does (so we reuse the app's own auth/headers and never re-implement auth). frida-server is pushed but KEPT STOPPED; it runs only during an explicit capture window for a single enabled app, then stops.",
+  "installedBy": "targets/android/rooted/rooted.sh app-frida — INSTALLED ON-DEVICE by the on-device agent with the user present; not from the Mac",
+  "files": [
+    "/data/local/tmp/frida-server",
+    "/data/powos/app-api/frida.pid"
+  ],
+  "selinux": "unchanged — runs as a root process under Magisk; does NOT set permissive or alter policy",
+  "scope": "attaches ONLY to a package the user enabled, only during an active capture; detaches and the server stops afterwards. No other app is touched.",
+  "lifecycle": "default STOPPED; started per-capture; stopped on capture end and on idle",
+  "status": "NOT YET INSTALLED — manifest + uninstall are defined; on-device install + a one-time uninstall test are the on-device agent's step, user present",
+  "remove": {
+    "commands": [
+      "kill $(cat /data/powos/app-api/frida.pid 2>/dev/null) 2>/dev/null || true",
+      "rm -f /data/local/tmp/frida-server /data/powos/app-api/frida.pid"
+    ],
+    "note": "stop the process + delete the binary; nothing persists. Keep nothing."
+  }
+}
