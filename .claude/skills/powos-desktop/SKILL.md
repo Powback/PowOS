@@ -64,6 +64,9 @@ home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the co
 - KWin's own capture works on the phone (2026-10-23): `spectacle -b -n -f -o FILE` as the session user gives a
   2268x2440 RGBA PNG WITH alpha (transparent desktop = alpha 0). The ScreenShot2 D-Bus API itself refuses a plain
   python caller (NoAuthorized); PIL exists in PowOS for measuring. Check: verify/plasma-wallpaper.sh.
+- A KWin capture taken while the session is frozen (desktop not in front) after a session start is ALL BLACK: the
+  deleted ksplashqml window (stackingOrder, deleted=true) stays painted until frames resume. Bring the desktop up
+  first. And a black frame "matches" a picture's black sky - compare only the picture's lit pixels.
 - QML: /usr/lib/qt6/bin/qmllint in PowOS lints a deployed wallpaper; deploy rootfs files with
   `PATH="$PWD/tools/phone/bin:$PATH" targets/android/rooted/rooted.sh deploy --note|--silent`.
 
