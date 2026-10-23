@@ -162,3 +162,43 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
    - healthy: R == N, M <= 4, H rare.
 5. After ~10 min: close the game (`pkill -f Broforce_beta.exe`), `steam -shutdown` if Steam wasn't running before,
    `powos sleep never --remove steam`; one more memory line 60 s later (memory comes back?).
+
+## The shell gate under load (shell/dev/gate.mjs; learned 2026-10-23)
+- A gate run is ~25 pages in one headless Chromium. Under load (two agent gates at once at --cpu-shares 256, Mac
+  load 15-20) frames and timers fall behind the clock. A fixed `sleep(500)` before an assertion then fails with no
+  code change, and a failing gate blocks every ship (ship-apk pre-gates the tip). Rule: **no fixed wait before an
+  assertion.** Wait on the state the assertion needs, at most ~3 s, and keep the assertion as it was:
+  `window.__gw` is on every page (installed by open()): `until(f, ms=3000)` (f may be async; returns whether it
+  held), `settled(f, sel)` (f holds, no animation, then 2 frames), `steady(f, n=3)` (a JSON measure unchanged over
+  n frames: catches motion that scripts drive, which getAnimations() never sees), `still(sel)`, `frames(n)` (a
+  frame, or 500 ms without one), `mod(path)`.
+  Node side: `restAt(page, viewport, like)` for the relayout steps.
+- Pitfalls seen:
+  - still() went true before a transition had begun. shade-overpull measured its rest marks mid-open (68 px off).
+    So also wait for `.riding` to be gone and steady() the rects.
+  - A scroll-driven animation (the dock's `animation-timeline: scroll()` edge fade) is "running" forever. Count
+    only `a.timeline === document.timeline`. Before this fix every relayout-unfold wait ran its full 3 s (34 s).
+  - The relayout "fresh" layout was measured 800 ms after ready, before the tiles (and a widget's "$$$$" text)
+    settled, so all 4 steps "moved". Measure only after restAt().
+  - Preact useEffect runs after paint. editsheet.tsx's open effect sets `appPicker = false`. A click on "+ app"
+    before that frame left the picker shut ("A-Z list has 0 apps"). Click only once the sheet is settled().
+  - A long press is a timer (grid.tsx LONG_PRESS_MS 420, MARQUEE_DWELL 180): wait for `.carried` / gesture.ts
+    `held`, not 520 ms. The hold itself (the scenario: dwell before the moves) can stay a sleep.
+  - The reverse case: a synthetic drag on a tile must pass SLOP (10 px) in its FIRST move. Otherwise the long-press
+    timer stays armed. Under load one dispatch took ~770 ms, the timer fired, and the pull turned into a lift
+    (search-launcher: "pulled up from the widget: the drawer didn't open", editing on). Pace a finger's moves with
+    setTimeout(16), not frames: timers fire in deadline order, frames don't.
+  - "Promise was collected" (relayout-*, edit-search): evaluates that awaited `importShim("./state.ts")` again under
+    load. The checks import through `window.__gw.mod(path)` now (one import per page, cached); none have been seen
+    since. If it still happens, whenReady's checkOnce reloads the page and runs the check once more. The reload
+    matters: a retry on the same page found the first try's state (a search widget placed, edit mode on) and
+    failed on that.
+- Reproduce a load-only failure: `GATE_ONLY='^relayout-'` (a regex on run names; the rest are skipped) and
+  `GATE_THROTTLE=6` (CDP Emulation.setCPUThrottlingRate on every page), e.g.
+  `GATE_ONLY=relayout GATE_THROTTLE=6 READY_MS=60000 IDLE_MS=0 shell/dev/gate.sh --tree`. Throttling one case
+  alone is NOT the same load. The old search-launcher passed at 6x alone and failed only with many pages
+  contending, so also run two whole gates at once. Raise READY_MS (60-120 s) when throttling many pages, or boot
+  "not ready" hides the cases.
+- Left as times on purpose (scenario, not a wait before an assertion): the finger's hold before a drag
+  (marquee dwell, overpull's 120 ms), a finger's 16 ms move pacing, the pet's exercise pacing, SETTLE_MS (boot errors
+  after ready) and the idle check's own windows.

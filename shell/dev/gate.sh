@@ -33,7 +33,9 @@
 #      SHOTS_THEME / SHOTS_ONLY / SHOTS_SCALE / SHOTS_PROBE / SHOTS_STRICT pass through (STRICT=1: overlapping tiles
 #      or missing glyphs fail it).
 # Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker...). Time: ~5-10 s, the image cached.
-# GATE_IMAGE overrides the Chromium image. Docker's build cache and images are never pruned here.
+# GATE_ONLY=<regex>: only the browser runs so named (a case worked on alone); GATE_THROTTLE=N: every page's CPU slowed
+# N times (a loaded Mac on demand: a case's waits must hold at 6). GATE_IMAGE overrides the Chromium image. Docker's
+# build cache and images are never pruned here.
 set -euo pipefail
 SHELL_DIR=$(cd "$(dirname "$0")/.." && pwd)
 IMAGE=${GATE_IMAGE:-zenika/alpine-chrome:with-puppeteer}
@@ -51,7 +53,7 @@ while [ $# -gt 0 ]; do
     --shots) mkdir -p "$2"; shots=$(cd "$2" && pwd); shift 2 ;;
     --wallpaper) wallpaper=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"); shift 2 ;;
     --widgets) widgets=1; shift ;;
-    -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
     *) files+=("$1"); shift ;;
   esac
 done
@@ -175,6 +177,7 @@ fi
 set +e
 docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" -e READY_MS="${READY_MS:-8000}" \
   ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
+  ${GATE_ONLY:+-e GATE_ONLY="$GATE_ONLY"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"} \
   -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs
 rc=$?
 set -e

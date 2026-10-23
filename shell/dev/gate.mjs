@@ -147,7 +147,8 @@ async function whenReady(r, check) {
 /**
  * [check], again once if the page's context went from under it - not an assertion of the check's, the evaluate lost:
  * "Promise was collected" (2026-10-23, relayout-unfold on a loaded gate: the awaited promise gone with no result) or a
- * context destroyed by a navigation. Retried from the page up again; a second loss is the failure.
+ * context destroyed by a navigation. Retried on the page loaded afresh (the first try may have left its state behind:
+ * a search widget placed, edit mode on - the retry then failed on that, not on the code); a second loss is the failure.
  */
 const GONE = /Promise was collected|Execution context was destroyed|Cannot find context with specified id/;
 async function checkOnce(r, check) {
@@ -155,6 +156,7 @@ async function checkOnce(r, check) {
     return await check();
   } catch (e) {
     if (!GONE.test(e?.message ?? "")) throw e;
+    await r.page.reload().catch(() => {});
     await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
     return check();
   }
@@ -162,9 +164,8 @@ async function checkOnce(r, check) {
 
 /** In the page: steam (6x3) over fetch (3x3, the right half) on home's first page - merged, level, one surface? */
 async function joinsCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const { powos } = await importShim("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
   const h = await powos.home.get();
   for (const i of h.items) await powos.home.remove(i.key);
   const w = Math.min(6, h.columns || 6);
@@ -173,7 +174,10 @@ async function joinsCheck() {
   await powos.home.addPanel("agents", pg, { x: 0, y: 0, w, h: 3 });
   await powos.home.addPanel("recents", pg, { x: w - 3, y: 3, w: 3, h: 3 });
   S.page.value = 0;
-  await sleep(800);
+  // Both laid out and joined, at rest (the tiles' own moves and the seams after them).
+  const placed = () => [...document.querySelectorAll(".page:not(.away) .home-tile")];
+  await window.__gw.until(() => placed().length === 2 && placed().every((t) => t.classList.contains("joined")) && window.__gw.still());
+  await window.__gw.steady(() => placed().map((t) => t.querySelector(":scope > .tile")?.getBoundingClientRect().toJSON()));
   const half = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 8) / 2;
   const tiles = [...document.querySelectorAll(".page:not(.away) .home-tile")];
   if (tiles.length !== 2) return [`${tiles.length} tiles on the page, not the 2 placed`];
@@ -242,7 +246,7 @@ const hideAs = (page, hidden) =>
 /** Home's column count: the other's (the wide layout's, [wide]) or its own again. */
 const columnsAs = (page, wide) =>
   page.evaluate(async (k) => {
-    const S = await importShim("./state.ts");
+    const S = await window.__gw.mod("./state.ts");
     if (!window.__cols) window.__cols = S.home.value.columns;
     S.home.value = { ...S.home.value, columns: k ? window.__cols * 2 + 1 : window.__cols };
   }, wide);
@@ -295,13 +299,18 @@ async function overpullKit() {
     await until(() => !document.querySelector(".cc3-grid.cc-peek"), "the pull let go");
     await frames(2);
     await until(still, "settled after the pull");
+    await window.__gw.steady(() => [row(), under(), edge(), grip(), gap()], 4);
   };
-  const S = await importShim("./state.ts");
+  const S = await window.__gw.mod("./state.ts");
   S.ccV3.value = "v3";
   S.notif.value = true;
   try {
     await until(() => shown() >= 6 && document.querySelector(UNDER), "the row and the notifications' header");
     await until(still, "the panel open and settled");
+    // Its open eases --q and ends the ride on a timer: still() can hold before that begins (a late frame) - so also
+    // nothing riding and every measure steady over frames, else the rest marks are taken mid-open.
+    await until(() => !document.querySelector(".notif-panel.riding"), "the open's ride over");
+    if (!(await window.__gw.steady(() => [row(), under(), edge(), grip(), gap()], 4))) throw new Error("timed out: the panel at rest");
   } catch (e) {
     return [e.message];
   }
@@ -379,7 +388,9 @@ async function panelTracksFinger() {
   const seen = [];
   for (const q of [0.25, 0.5, 0.75]) {
     ev.emit("shade.drag", { q });
-    await o.sleep(380);
+    // Until the panel stands where the pull put it (--q eases there), not a time.
+    await window.__gw.settled(() => true, ".notif-panel");
+    await window.__gw.steady(() => [o.edge(), o.grip()], 4);
     const e = o.edge();
     seen.push(Math.round(e));
     if (e > o.edge0 - (1 - q) * full * 0.6) fails.push(`pulled to ${q}, the panel's edge is already at ${Math.round(e)} of ${Math.round(o.edge0)} (a static slab)`);
@@ -387,8 +398,8 @@ async function panelTracksFinger() {
   }
   if (!(seen[0] < seen[1] && seen[1] < seen[2])) fails.push(`the panel's edge didn't follow the pull down: ${seen.join(" -> ")}`);
   ev.emit("shade.settle", { open: true });
-  await o.sleep(450);
-  await o.frames(2);
+  await window.__gw.until(() => Math.abs(o.edge() - o.edge0) <= 1 && o.still());
+  await window.__gw.steady(() => [o.edge(), o.grip()], 4);
   if (Math.abs(o.edge() - o.edge0) > 1) fails.push(`settled open, the panel's edge is ${Math.round(o.edge() - o.edge0)} px off its place`);
   return fails;
 }
@@ -396,8 +407,9 @@ async function panelTracksFinger() {
 /** At rest: no animation in the panel, nothing the pull left inline. */
 async function overpullRest() {
   const o = window.__op;
-  await o.sleep(400);
-  const left = [...document.querySelectorAll(".notif-panel, .notif-panel [style]")].filter((e) => e.style.translate || e.style.getPropertyValue("--cc-k") || e.style.getPropertyValue("--cc-lift") || e.style.transition);
+  const inline = () => [...document.querySelectorAll(".notif-panel, .notif-panel [style]")].filter((e) => e.style.translate || e.style.getPropertyValue("--cc-k") || e.style.getPropertyValue("--cc-lift") || e.style.transition);
+  await window.__gw.until(() => o.still() && !inline().length);
+  const left = inline();
   return [...(o.still() ? [] : ["an animation still runs in the panel at rest"]), ...(left.length ? [`the pull left inline values on ${left.length} elements`] : [])];
 }
 
@@ -466,8 +478,8 @@ async function relayout(page, to, from) {
     if (now.join() !== fresh.join()) bad.push(`${what}: tiles not where a fresh layout puts them (${now.filter((x) => !fresh.includes(x)).slice(0, 2).join("; ")})`);
   }
   const cells = await page.evaluate(async () => {
-    const S = await importShim("./state.ts");
-    const g = (await importShim("./ui/grid.tsx")).geometry.value;
+    const S = await window.__gw.mod("./state.ts");
+    const g = (await window.__gw.mod("./ui/grid.tsx")).geometry.value;
     return { cols: S.home.value.columns, span: g.cellW * S.home.value.columns, across: g.width - 2 * g.pad };
   });
   if (Math.abs(cells.span - cells.across) > 1) bad.push(`the grid's cells span ${Math.round(cells.span)} px in ${cells.cols} columns, not its ${Math.round(cells.across)} px width`);
@@ -480,8 +492,8 @@ async function relayout(page, to, from) {
  * the middle stays there; one bar at the foot - the pinned dock left of the search pill, the recent apps right of it.
  */
 async function wideMigrated() {
-  const S = await importShim("./state.ts");
-  const { powos } = await importShim("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
   const host = (await powos.store.get("home.wide.backup"))?.home;
   if (!host?.items?.length) return ["no backup of the host's layout in the store (home.wide.backup)"];
   const pages = [...host.pages].sort((a, b) => a - b);
@@ -494,25 +506,28 @@ async function wideMigrated() {
 
 /** In the page, unfolded: a tile placed across the middle of the wide page stays there (one page, not two halves). */
 async function wideAcross() {
-  const S = await importShim("./state.ts");
-  const { powos } = await importShim("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
   const tile = S.home.value.items.find((i) => i.kind === "widget" && i.cell?.w === 3);
   if (!tile) return ["no 3-wide widget to place across the middle"];
   await powos.home.place(tile.key, { ...tile.cell, x: 5, y: 12 }, 1);
-  await new Promise((ok) => setTimeout(ok, 400));
+  const cell = () => S.home.value.items.find((i) => i.key === tile.key)?.cell;
+  await window.__gw.until(() => cell()?.x === 5 && cell()?.y === 12);
   const c = S.home.value.items.find((i) => i.key === tile.key)?.cell;
   return c?.x === 5 && c.y === 12 ? [] : [`${tile.key} placed across the middle at 5,12 shows at ${c?.x},${c?.y}`];
 }
 
 /** In the page: the wide screen's one bar - dock | search pill | recent apps, left to right, on one line. */
 async function wideBar() {
-  const S = await importShim("./state.ts");
+  const S = await window.__gw.mod("./state.ts");
   // Some pinned apps (the mock pins none), the recent ones left for the right end.
   if (!S.dock.value.length) S.setDock([...S.byKey.value.keys()].slice(0, 4));
-  await new Promise((ok) => setTimeout(ok, 300));
   const fails = [];
   const box = (q) => document.querySelector(q)?.getBoundingClientRect();
-  const [dock, pill, tray] = [box(".home.wide > .dock:not(.dock-tray) .app"), box(".home.wide > .bar .bar-pill"), box(".home.wide > .dock-tray .app")];
+  const parts = [".home.wide > .dock:not(.dock-tray) .app", ".home.wide > .bar .bar-pill", ".home.wide > .dock-tray .app"];
+  await window.__gw.settled(() => parts.every((q) => box(q)));
+  await window.__gw.steady(() => parts.map((q) => box(q)?.toJSON()));
+  const [dock, pill, tray] = parts.map(box);
   const lacks = [[dock, "the dock"], [pill, "the pill"], [tray, "the recent apps"]].filter(([r]) => !r).map(([, n]) => n);
   if (lacks.length) return [`the wide bar lacks ${lacks.join(", ")}`];
   if (!(dock.right <= pill.left && pill.right <= tray.left)) fails.push("the wide bar isn't dock | search | recent apps, left to right");
@@ -523,14 +538,16 @@ async function wideBar() {
 
 /** The user's search widget on the grid (the phone, 2026-10-23): the bar's own pill, parked, keeps the bar's middle. */
 async function wideBarParked() {
-  const S = await importShim("./state.ts");
-  const W = await importShim("./ui/searchwidget.tsx");
-  const { powos } = await importShim("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/searchwidget.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
   const box = () => document.querySelector(".home.wide > .bar .bar-pill")?.getBoundingClientRect();
   const mid = (r) => r.top + r.height / 2;
   const pill = box();
   await powos.home.addPanel("search", S.pages.value[S.page.value] ?? 1, { x: 5, y: 0, w: 3, h: 1 });
-  await new Promise((ok) => setTimeout(ok, 400));
+  // Parked and at rest (the bar's own pill keeps its slot), not a time.
+  await window.__gw.settled(() => document.querySelector(".home.wide.search-parked") && box());
+  await window.__gw.steady(() => box()?.toJSON());
   const parked = document.querySelector(".home.wide.search-parked") && box();
   await W.putBackInBar();
   if (!parked?.width) return ["search widget on the grid: the bar's pill lost its slot"];
@@ -539,11 +556,14 @@ async function wideBarParked() {
 
 /** The folded dock's pinned apps never fade (the user, 2026-10-23): at rest on the pinned page its edges are unmasked. */
 async function dockPinnedNoFade() {
-  const S = await importShim("./state.ts");
+  const S = await window.__gw.mod("./state.ts");
   const keys = [...S.byKey.value.keys()];
   if (!S.dock.value.length) S.setDock(keys.slice(0, 4));
-  await new Promise((ok) => setTimeout(ok, 400));
-  const el = document.querySelector(".home > .dock.paged:not(.dock-tray) .dock-pages");
+  const pages = () => document.querySelector(".home > .dock.paged:not(.dock-tray) .dock-pages");
+  // The dock paged and at rest: its scroll and the scroll-driven fade steady over frames.
+  await window.__gw.until(pages);
+  await window.__gw.steady(() => pages() && [pages().scrollLeft, getComputedStyle(pages()).getPropertyValue("--dock-fade-l"), getComputedStyle(pages()).getPropertyValue("--dock-fade-r")]);
+  const el = pages();
   if (!el) return ["the folded dock isn't paged (pinned + recent apps) - nothing to check"];
   const cs = getComputedStyle(el);
   const fade = [cs.getPropertyValue("--dock-fade-l").trim(), cs.getPropertyValue("--dock-fade-r").trim()];
@@ -556,13 +576,14 @@ async function dockPinnedNoFade() {
  * the new size. Folded and unfolded.
  */
 async function editSearchCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
+  const S = await window.__gw.mod("./state.ts");
   const shown = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible";
   S.editing.value = true;
-  await sleep(400);
+  // Edit mode in: the search bar's tile on the grid, the foot's bar gone (its fade over).
+  const tileOf = () => document.querySelector('.home-tile[data-key="panel:search"]');
+  await window.__gw.settled(() => shown(tileOf()?.querySelector(".bar-pill")) && !shown(document.querySelector(".home > .bar")));
   const fails = [];
-  const tile = document.querySelector('.home-tile[data-key="panel:search"]');
+  const tile = tileOf();
   if (!shown(tile?.querySelector(".bar-pill"))) fails.push("edit mode: no search bar tile on the grid");
   if (!shown(document.querySelector(".home > .dock .app"))) fails.push("edit mode: the dock isn't in view");
   if (shown(document.querySelector(".home > .bar"))) fails.push("edit mode: the foot's search bar still shows beside its tile");
@@ -571,15 +592,17 @@ async function editSearchCheck() {
 
 /** In the page, in edit mode after editSearchCheck: the search bar's tile moved and resized becomes the search widget. */
 async function editSearchMoved() {
-  const S = await importShim("./state.ts");
-  const W = await importShim("./ui/searchwidget.tsx");
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/searchwidget.tsx");
+  await window.__gw.until(() => W.footSearch.value);
   const was = W.footSearch.value;
-  if (!was) return ["edit mode: no foot search item (searchwidget.tsx footSearch)"];
+  if (!was) return [`edit mode: no foot search item (searchwidget.tsx footSearch; editing ${S.editing.value}, a search widget ${W.hasSearchWidget()}, page ${S.page.value})`];
   const to = { x: 0, y: Math.max(0, was.cell.y - 1), w: 2, h: 1 };
   await W.placeItem("panel:search", to, was.page);
-  await new Promise((ok) => setTimeout(ok, 500));
+  const placed = () => S.home.value.items.find((i) => i.kind === "panel" && i.name === "search");
+  await window.__gw.until(() => JSON.stringify(placed()?.cell ?? null) === JSON.stringify(to));
   S.editing.value = false;
-  const real = S.home.value.items.find((i) => i.kind === "panel" && i.name === "search");
+  const real = placed();
   const at = JSON.stringify(real?.cell ?? null);
   return at === JSON.stringify(to) ? [] : [`moved and resized to ${JSON.stringify(to)}, the search widget is at ${at}`];
 }
@@ -602,18 +625,19 @@ const addAppHelpers = `window.__aa = {
   },
   // Searched by its name, then tapped: a problem, or where it went (the first free cell, worked out first).
   pick: async (S, G, W, app, all) => {
-    const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
     const field = document.querySelector(".app-picker textarea");
     field.value = app.label;
     field.dispatchEvent(new Event("input", { bubbles: true }));
-    await sleep(200);
-    const found = [...document.querySelectorAll(".app-picker .drawer-list.results .app")];
+    const results = () => [...document.querySelectorAll(".app-picker .drawer-list.results .app")];
+    await window.__gw.until(() => results().some((c) => c.dataset.key === app.key) && results().length < all);
+    const found = results();
     const want = found.find((c) => c.dataset.key === app.key);
     if (!want || found.length >= all || found.some((c) => !c.textContent.toLowerCase().includes(app.label.toLowerCase())))
       return \`+ app: search "\${app.label}" shows \${found.length} of \${all}, \${want ? "with" : "without"} it\`;
     const spot = window.__aa.firstFree(S, G, W);
     window.__aa.tap(want);
-    await sleep(600);
+    await window.__gw.until(() => S.home.value.items.some((i) => i.app === app.key));
+    await window.__gw.frames(2);
     const item = S.home.value.items.find((i) => i.app === app.key);
     if (!item || item.page !== spot.page || item.cell?.x !== spot.x || item.cell?.y !== spot.y)
       return \`+ app: \${app.label} at \${JSON.stringify(item && { page: item.page, ...item.cell })}, the first free cell is \${JSON.stringify(spot)}\`;
@@ -627,19 +651,21 @@ const addAppHelpers = `window.__aa = {
  * a tap puts the app on the page in view at its first free cell, and the picker stays for the next. Two picked.
  */
 async function addAppCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const G = await importShim("./ui/grid.tsx");
-  const W = await importShim("./ui/searchwidget.tsx");
+  const S = await window.__gw.mod("./state.ts");
+  const G = await window.__gw.mod("./ui/grid.tsx");
+  const W = await window.__gw.mod("./ui/searchwidget.tsx");
   S.page.value = 0;
   S.editing.value = true;
-  await sleep(400);
-  const act = [...document.querySelectorAll(".edit-sheet .edit-act")].find((b) => b.textContent.trim() === "+ app");
+  const addAct = () => [...document.querySelectorAll(".edit-sheet .edit-act")].find((b) => b.textContent.trim() === "+ app");
+  // The sheet up and painted: its open effect (editsheet.tsx, after paint: appPicker = false) has run - a click before
+  // it (a late frame) had the picker shut again at once.
+  await window.__gw.settled(addAct);
+  const act = addAct();
   if (!act) return ['edit bar: no "+ app"'];
   act.click();
-  await sleep(300);
+  await window.__gw.until(() => document.querySelectorAll(".app-picker .grid.az .app").length >= 10);
   const all = document.querySelectorAll(".app-picker .grid.az .app").length;
-  if (all < 10) return [`+ app: the drawer's A-Z list has ${all} apps`];
+  if (all < 10) return [`+ app: the drawer's A-Z list has ${all} apps (${S.apps.value.length} installed, the picker ${document.querySelector(".app-picker") ? "open" : "not open"})`];
   const on = (a) => S.home.value.items.some((i) => i.app === a.key || i.apps?.some((x) => x.app === a.key));
   const free = S.apps.value.filter((a) => !on(a) && S.apps.value.filter((b) => b.label === a.label).length === 1).slice(0, 2);
   const placed = [];
@@ -650,18 +676,18 @@ async function addAppCheck() {
   }
   document.querySelector(".app-picker .sheet-done").click();
   S.editing.value = false;
-  await sleep(300);
+  await window.__gw.settled(() => !document.querySelector(".app-picker"));
   localStorage.setItem("gate.addApp", JSON.stringify(placed));
   return placed.length === 2 ? [] : [`+ app: only ${placed.length} apps free to add`];
 }
 
 /** In the page, reloaded after addAppCheck: both apps still where they were placed. */
 async function addAppReloaded() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  await sleep(600);
+  const S = await window.__gw.mod("./state.ts");
   const placed = JSON.parse(localStorage.getItem("gate.addApp") ?? "[]");
-  const lost = placed.filter((p) => !S.home.value.items.some((i) => i.app === p.app && i.page === p.page && i.cell?.x === p.x && i.cell?.y === p.y));
+  const missing = () => placed.filter((p) => !S.home.value.items.some((i) => i.app === p.app && i.page === p.page && i.cell?.x === p.x && i.cell?.y === p.y));
+  await window.__gw.until(() => !missing().length);
+  const lost = missing();
   return lost.length ? [`+ app after a reload: ${lost.map((p) => p.app).join(", ")} not where placed (${JSON.stringify(placed)})`] : [];
 }
 
@@ -672,9 +698,9 @@ async function addAppReloaded() {
  */
 async function folderMorphCheck() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
+  const S = await window.__gw.mod("./state.ts");
   S.page.value = S.pages.value.length;
-  await sleep(400);
+  await window.__gw.settled(() => document.querySelector(".page.library .lib-card"));
   const card = document.querySelector(".page.library .lib-card");
   if (!card) return ["morph: no library card to open"];
   // Waits on the state, not on time (a busy gate: frames lag the clock, a transition starts late and ends late).
@@ -701,7 +727,7 @@ async function folderMorphCheck() {
 /** In the page, after folderMorphCheck (a folder open): centred; closed, it shrinks back and goes. */
 async function folderCloseCheck() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
+  const S = await window.__gw.mod("./state.ts");
   const sheet = document.querySelector(".folder-view .folder-sheet").getBoundingClientRect();
   const fails = Math.abs(sheet.left + sheet.width / 2 - innerWidth / 2) > 4 ? ["morph: the sheet isn't centred"] : [];
   const until = async (f, ms = 3000) => { for (const t0 = performance.now(); !f() && performance.now() - t0 < ms; ) await sleep(0); };
@@ -719,8 +745,8 @@ async function folderCloseCheck() {
  */
 async function libraryCheck() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const L = await importShim("./ui/library.tsx");
+  const S = await window.__gw.mod("./state.ts");
+  const L = await window.__gw.mod("./ui/library.tsx");
   S.page.value = S.pages.value.length;
   // Until the track's slide is through (frames lag the clock on a busy gate), at most 3 s.
   const at = () => document.querySelector(".page-track > .page.library")?.getBoundingClientRect().left ?? 1e9;
@@ -741,17 +767,16 @@ async function libraryCheck() {
 
 /** In the page, on the app library (after libraryCheck): its search finds an app; an app installed or removed shows or goes at once. */
 async function libraryLiveCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const L = await importShim("./ui/library.tsx");
-  const { powos } = await importShim("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const L = await window.__gw.mod("./ui/library.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
   const lib = document.querySelector(".page.library");
   const fails = [];
   const input = lib.querySelector(".lib-search");
   const one = S.apps.value[0];
   input.value = one.label.slice(0, 4);
   input.dispatchEvent(new Event("input", { bubbles: true }));
-  await sleep(200);
+  await window.__gw.until(() => lib.querySelector(`.lib-results .app[data-key="${one.key}"]`));
   if (!lib.querySelector(`.lib-results .app[data-key="${one.key}"]`)) fails.push(`searching "${input.value}" doesn't find ${one.label}`);
   input.value = "";
   input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -759,43 +784,49 @@ async function libraryLiveCheck() {
   const fake = { key: "a:org.gate.chess/.Main", label: "Gate Chess", icon: "", kind: "android", category: 0 };
   powos.apps.list = async () => [...(await list()), fake];
   window.__mockEvents.emit("apps.changed", null);
-  await sleep(400);
+  const folderOf = () => L.library.value.find((f) => f.apps.some((a) => a.app === fake.key))?.key;
+  await window.__gw.until(() => folderOf() === "lib:games");
   if (L.library.value.find((f) => f.apps.some((a) => a.app === fake.key))?.key !== "lib:games") fails.push("an app installed (Android category game) isn't in the library's Games folder");
   powos.apps.list = list;
   window.__mockEvents.emit("apps.changed", null);
-  await sleep(400);
+  await window.__gw.until(() => !folderOf());
   if (L.library.value.some((f) => f.apps.some((a) => a.app === fake.key))) fails.push("an app removed stays in the library");
   return fails;
 }
 
 /** In the page, on the app library: an app held in a folder card and dragged to the screen's side turns to a real page and lands on home where it's let go. */
 async function libraryDragCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const G = await importShim("./ui/grid.tsx");
+  const S = await window.__gw.mod("./state.ts");
+  const G = await window.__gw.mod("./ui/grid.tsx");
   const fire = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 13, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true }));
   const onHome = new Set(S.home.value.items.map((i) => i.app).filter(Boolean));
   const card = [...document.querySelectorAll(".page.library .lib-card")].find((c) => !c.dataset.key.startsWith("folder:"));
   card?.click();
-  await sleep(450);
+  // Open and at rest: the morph's inline moves cleared (folderview.tsx rest()).
+  const view = () => document.querySelector(".folder-view.open");
+  await window.__gw.until(() => view() && !view().querySelector('[style*="transform"], [style*="transition"]') && window.__gw.still(".folder-view"));
   const el = [...document.querySelectorAll(".folder-view.open .folder-grid .app")].find((e) => !onHome.has(e.dataset.key));
   if (!el) return ["the library's folder opened shows no app that isn't on home already, to drag"];
   const key = el.dataset.key;
   const r = el.getBoundingClientRect();
   const pages = document.querySelector(".pages");
   fire(el, "pointerdown", r.left + r.width / 2, r.top + r.height / 2);
-  await sleep(520);
+  // The long press (grid.tsx LONG_PRESS_MS) lifted it: carried.
+  await window.__gw.until(() => document.querySelector(".carried"));
   const g = G.geometry.value;
   fire(pages, "pointermove", g.left + 4, r.top);
-  await sleep(1500);
+  // Held at the side until home turns from the library to a page, and the track's slide is over.
+  await window.__gw.until(() => S.page.value < S.pages.value.length);
+  await window.__gw.steady(() => document.querySelector(".page-track")?.getBoundingClientRect().left);
   if (S.page.value >= S.pages.value.length) return [`held at the side, the app library didn't turn to a home page (page ${S.page.value})`];
   const spot = G.placeNewCells(1, 1);
   const [x, y] = [g.left + g.pad + (spot.cell.x + 0.5) * g.cellW, g.top + g.pad + (spot.cell.y + 0.5) * g.cellH];
   for (let k = 1; k <= 4; k++) fire(pages, "pointermove", g.left + 4 + ((x - g.left - 4) * k) / 4, r.top + ((y - r.top) * k) / 4);
-  await sleep(60);
+  await window.__gw.frames(2);
   fire(pages, "pointerup", x, y);
-  await sleep(600);
-  const c = S.home.value.items.find((i) => i.app === key)?.cell;
+  const cellOf = () => S.home.value.items.find((i) => i.app === key)?.cell;
+  await window.__gw.until(() => cellOf()?.x === spot.cell.x && cellOf()?.y === spot.cell.y);
+  const c = cellOf();
   const at = c ? `${c.x},${c.y}` : "not on home";
   return at === `${spot.cell.x},${spot.cell.y}` ? [] : [`${key} dragged from the library to ${spot.cell.x},${spot.cell.y} is ${at}`];
 }
@@ -805,8 +836,8 @@ async function libraryDragCheck() {
  * by default the pill is in the bar and "+ widget" lists it; the drawer opened from it has the bar's pill to type in.
  */
 async function searchDefaultCheck() {
-  const S = await importShim("./state.ts");
-  const A = await importShim("./ui/appwidget.tsx");
+  const S = await window.__gw.mod("./state.ts");
+  const A = await window.__gw.mod("./ui/appwidget.tsx");
   const fails = [];
   const shown = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible" && +getComputedStyle(el).opacity > 0.5;
   if (S.home.value.items.some((i) => i.kind === "panel" && i.name === "search")) fails.push("the mock home starts with the search widget on the grid");
@@ -829,12 +860,15 @@ async function pullUpFrom(el) {
   const [x, y] = [r.left + r.width * 0.8, r.top + r.height / 2];
   const fire = (type, dy, buttons) => el.dispatchEvent(new PointerEvent(type, { pointerId: 9, pointerType: "mouse", clientX: x, clientY: y - dy, buttons, bubbles: true, isPrimary: true }));
   fire("pointerdown", 0, 1);
-  // A finger's pace: a move a frame.
-  for (let dy = 10; dy <= 220; dy += 30) {
+  // The first move already past SLOP (10 px): on a tile, pointerdown starts the long press (grid.tsx LONG_PRESS_MS,
+  // a 420 ms timer) and only a move past SLOP cancels it. A first move inside SLOP left it armed; on a loaded gate the
+  // next one came 800 ms later, after the lift ("pulled up from the widget: the drawer didn't open", editing on).
+  // A real finger's moves come as input, ahead of timers.
+  for (let dy = 15; dy <= 225; dy += 30) {
     fire("pointermove", dy, 1);
-    await window.__gw.frames(1);
+    await new Promise((ok) => setTimeout(ok, 16));
   }
-  fire("pointerup", 220, 0);
+  fire("pointerup", 225, 0);
   // Until it's open and come to rest - the bar's pill over it faded in (drawerWithPill's checks), at most 3 s.
   const bar = () => document.querySelector(".home > .bar");
   await window.__gw.settled(() => document.querySelector(".home.open") && bar() && +getComputedStyle(bar()).opacity >= 0.9);
@@ -855,7 +889,7 @@ function drawerWithPill(where) {
 
 /** Closes the drawer (Back's way) and waits for it to settle. */
 async function closeDrawerNow() {
-  const S = await importShim("./state.ts");
+  const S = await window.__gw.mod("./state.ts");
   S.closeDrawer?.();
   if (S.drawer.value) S.drawer.value = 0;
   await window.__gw.settled(() => !S.drawer.value && !document.querySelector(".home.open"));
@@ -866,8 +900,8 @@ async function closeDrawerNow() {
  * from or tapped, in the bar and on the grid; put back (the tile's button), it's the bar's again. Folded and unfolded.
  */
 async function searchLauncherCheck() {
-  const S = await importShim("./state.ts");
-  const W = await importShim("./ui/searchwidget.tsx");
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/searchwidget.tsx");
   const fails = [];
   const { pullUpFrom, drawerWithPill, closeDrawerNow, searchPutBack, searchToDock } = window.__sp;
   await pullUpFrom(document.querySelector(".home > .bar .bar-pill"));
@@ -903,9 +937,9 @@ async function searchLauncherCheck() {
  * go - the pill is in the foot under the dock (folded), back in the bar (unfolded), and the drawer still has it.
  */
 async function searchToDock() {
-  const S = await importShim("./state.ts");
-  const G = await importShim("./ui/grid.tsx");
-  const W = await importShim("./ui/searchwidget.tsx");
+  const S = await window.__gw.mod("./state.ts");
+  const G = await window.__gw.mod("./ui/grid.tsx");
+  const W = await window.__gw.mod("./ui/searchwidget.tsx");
   const wide = !!document.querySelector(".home.wide");
   S.editing.value = true;
   // Folded the dock's row (under the dock); wide the one bar's middle (no "under" there).
@@ -934,7 +968,7 @@ async function searchToDock() {
 
 /** The tile's "put back in bar": the widget leaves the grid, the bar has the pill at rest again. */
 async function searchPutBack() {
-  const S = await importShim("./state.ts");
+  const S = await window.__gw.mod("./state.ts");
   S.editing.value = true;
   S.selected.value = "panel:search";
   const putBack = () => [...document.querySelectorAll(".tile-actions button")].find((b) => b.textContent.trim() === "put back in bar");
@@ -959,9 +993,10 @@ async function searchPutBack() {
  */
 async function marqueeCheck() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const H = await importShim("./ui/homeselect.ts");
-  const G = await importShim("./ui/grid.tsx");
+  const S = await window.__gw.mod("./state.ts");
+  const H = await window.__gw.mod("./ui/homeselect.ts");
+  const G = await window.__gw.mod("./ui/grid.tsx");
+  const { held } = await window.__gw.mod("./ui/gesture.ts");
   const fire = (type, x, y) => (type === "pointerdown" ? document.elementFromPoint(x, y) : document.querySelector(".pages")).dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true }));
   const empty = (x, y) => document.elementFromPoint(x, y)?.matches?.(".page, .page-track, .pages");
   const n = S.pages.value[S.page.value];
@@ -974,20 +1009,23 @@ async function marqueeCheck() {
   const start = [[ra.left + 4, Math.max(ra.bottom, rb.bottom) + ch / 2], [ra.left + 4, Math.min(ra.top, rb.top) - ch / 2]].find(([x, y]) => empty(x, y));
   if (!start) return ["marquee: no empty spot beside the two apps to start from"];
   const fails = [];
+  // [dwell]: the finger held that long first (homeselect.ts MARQUEE_DWELL, 180 ms: a timer - a late one fires late, so
+  // in edit mode the hold waits until it armed, held, as a finger would); then rendered frames, never a time.
   const draw = async ([x0, y0], [x1, y1], dwell) => {
     fire("pointerdown", x0, y0);
     await sleep(dwell);
+    if (dwell && S.editing.value) await window.__gw.until(() => held.value);
     for (let k = 1; k <= 6; k++) fire("pointermove", x0 + ((x1 - x0) * k) / 6, y0 + ((y1 - y0) * k) / 6);
-    await sleep(60);
+    await window.__gw.frames(2);
     const drawn = !!document.querySelector(".pages .marquee");
     fire("pointerup", x1, y1);
-    await sleep(80);
+    await window.__gw.frames(2);
     return drawn;
   };
   const end = [rb.right - 4, rb.top + rb.height / 2];
   if (await draw(start, end, 260)) fails.push("not editing: a drag on empty space drew a selection rectangle");
   S.editing.value = true;
-  await sleep(300);
+  await window.__gw.settled(() => document.querySelector(".edit-sheet"));
   if (!(await draw(start, end, 260))) fails.push("edit mode: a held drag on empty space drew no selection rectangle");
   if (document.querySelector(".pages .marquee")) fails.push("edit mode: the selection rectangle stays after the finger lifts");
   if (!(H.chosen.value.includes(a.key) && H.chosen.value.includes(b.key))) fails.push(`edit mode: the rectangle over ${a.key} and ${b.key} picked [${H.chosen.value}]`);
@@ -1003,10 +1041,9 @@ async function marqueeCheck() {
  * cells, the others stay; then a tap on one puts it back (unpicked).
  */
 async function partyMoveCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const H = await importShim("./ui/homeselect.ts");
-  const G = await importShim("./ui/grid.tsx");
+  const S = await window.__gw.mod("./state.ts");
+  const H = await window.__gw.mod("./ui/homeselect.ts");
+  const G = await window.__gw.mod("./ui/grid.tsx");
   const fire = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 8, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true }));
   const items = () => S.home.value.items.filter((i) => i.page === S.pages.value[S.page.value] && i.cell);
   const party = items().filter((i) => H.chosen.value.includes(i.key));
@@ -1022,13 +1059,15 @@ async function partyMoveCheck() {
   const r = lead.getBoundingClientRect();
   const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
   fire(lead, "pointerdown", x, y);
-  await sleep(520);
+  // The long press (grid.tsx LONG_PRESS_MS) lifted it.
+  await window.__gw.until(() => document.querySelector(".carried"));
   const pages = document.querySelector(".pages");
   for (let k = 1; k <= 8; k++) fire(pages, "pointermove", x, y + (dy * G.geometry.value.cellH * k) / 8);
-  await sleep(60);
+  await window.__gw.until(() => document.querySelectorAll(".carried").length >= party.length);
   const ghosts = document.querySelectorAll(".carried").length;
   fire(pages, "pointerup", x, y + dy * G.geometry.value.cellH);
-  await sleep(500);
+  const wantedAll = () => items().every((i) => { const [x0, y0] = was.get(i.key).split(",").map(Number); return `${i.cell.x},${i.cell.y}` === (party.some((p) => p.key === i.key) ? `${x0},${y0 + dy}` : `${x0},${y0}`); });
+  await window.__gw.until(() => wantedAll() && !document.querySelector(".carried, .pages .drop-spot"));
   const fails = ghosts < party.length ? [`group move: ${ghosts} carried tiles under the finger for ${party.length} picked`] : [];
   const wanted = (i) => {
     const [x0, y0] = was.get(i.key).split(",").map(Number);
@@ -1040,7 +1079,7 @@ async function partyMoveCheck() {
   const one = tile.getBoundingClientRect();
   fire(tile, "pointerdown", one.left + 8, one.top + 8);
   fire(tile, "pointerup", one.left + 8, one.top + 8);
-  await sleep(100);
+  await window.__gw.until(() => !H.chosen.value.includes(party[0].key));
   if (H.chosen.value.includes(party[0].key)) fails.push("edit mode: a tap on a picked tile didn't put it back");
   return fails;
 }
@@ -1051,9 +1090,8 @@ async function partyMoveCheck() {
  * the tile opens it again (out of edit mode).
  */
 async function folderCreateCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const { powos } = await importShim("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
   const tap = (el) => {
     const r = el.getBoundingClientRect();
     for (const type of ["pointerdown", "pointerup"]) el.dispatchEvent(new PointerEvent(type, { pointerId: 9, pointerType: "touch", clientX: r.left + 8, clientY: r.top + 8, bubbles: true, isPrimary: true }));
@@ -1062,13 +1100,14 @@ async function folderCreateCheck() {
   const [a, b] = S.home.value.items.filter((i) => i.page === n && i.kind === "app" && i.cell).sort((p, q) => p.cell.y - q.cell.y || p.cell.x - q.cell.x);
   if (!b) return ["folder: the mock's page has no two apps"];
   S.editing.value = true;
-  await sleep(300);
+  await window.__gw.settled(() => document.querySelector(".edit-sheet"));
   for (const k of [a.key, b.key]) tap(document.querySelector(`.home-tile[data-key="${k}"]`));
-  await sleep(150);
+  await window.__gw.until(() => document.querySelector(".chosen-actions .group-folder"));
   const button = document.querySelector(".chosen-actions .group-folder");
   if (!button) return ["folder: two apps picked show no \"group into folder\""];
   button.click();
-  await sleep(600);
+  const made = () => S.home.value.items.find((i) => i.kind === "folder" && i.apps.some((x) => x.key === a.key));
+  await window.__gw.until(() => made() && document.querySelector(".folder-view.open .folder-name") && document.querySelectorAll(`.home-tile[data-key="${made().key}"] .folder-face img, .home-tile[data-key="${made().key}"] .folder-face span`).length === 2);
   const f = S.home.value.items.find((i) => i.kind === "folder" && i.apps.some((x) => x.key === a.key));
   if (!f) return ["folder: \"group into folder\" made no folder of the two apps"];
   const fails = [];
@@ -1081,9 +1120,8 @@ async function folderCreateCheck() {
 
 /** In the page, after folderCreateCheck (the folder open): its name edited is kept; closed, a tap on it opens it again. */
 async function folderNameCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const { powos } = await importShim("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
   const tap = (el) => {
     const r = el.getBoundingClientRect();
     for (const type of ["pointerdown", "pointerup"]) el.dispatchEvent(new PointerEvent(type, { pointerId: 11, pointerType: "touch", clientX: r.left + 8, clientY: r.top + 8, bubbles: true, isPrimary: true }));
@@ -1093,13 +1131,14 @@ async function folderNameCheck() {
   const fails = [];
   name.value = "Gate test";
   name.dispatchEvent(new Event("change", { bubbles: true }));
-  await sleep(200);
+  await window.__gw.until(async () => (await powos.store.get("home.folders"))?.[f.key] === "Gate test");
   if ((await powos.store.get("home.folders"))?.[f.key] !== "Gate test") fails.push("folder: its name isn't kept (store home.folders)");
   S.folder.value = null;
   S.editing.value = false;
-  await sleep(200);
+  // Closed (its morph shrank back and went) and out of edit mode, before the tap.
+  await window.__gw.settled(() => !document.querySelector(".folder-view") && !document.querySelector(".edit-sheet"));
   tap(document.querySelector(`.home-tile[data-key="${f.key}"]`));
-  await sleep(200);
+  await window.__gw.until(() => document.querySelector(".folder-view.open")?.dataset.key === f.key);
   if (document.querySelector(".folder-view.open")?.dataset.key !== f.key) fails.push("folder: a tap on its tile doesn't open it");
   else if (document.querySelector(".folder-view .folder-name")?.value !== "Gate test") fails.push("folder: opened again, its name is gone");
   return fails;
@@ -1110,9 +1149,8 @@ async function folderNameCheck() {
  * home there, out of the folder; the folder, left with one app, goes away - that app in its place.
  */
 async function folderDissolveCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const G = await importShim("./ui/grid.tsx");
+  const S = await window.__gw.mod("./state.ts");
+  const G = await window.__gw.mod("./ui/grid.tsx");
   const fire = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 10, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true }));
   const f = S.home.value.items.find((i) => i.key === S.folder.value);
   const el = document.querySelector(".folder-view.open .folder-grid .app");
@@ -1125,17 +1163,17 @@ async function folderDissolveCheck() {
   const free = [spot.cell.x, spot.cell.y];
   const r = el.getBoundingClientRect();
   fire(el, "pointerdown", r.left + r.width / 2, r.top + r.height / 2);
-  await sleep(520);
+  await window.__gw.until(() => document.querySelector(".carried"));
   const [tx, ty] = [g.left + g.pad + (free[0] + 0.5) * g.cellW, g.top + g.pad + (free[1] + 0.5) * g.cellH];
   const pages = document.querySelector(".pages");
   for (let k = 1; k <= 8; k++) fire(pages, "pointermove", r.left + ((tx - r.left) * k) / 8, r.top + ((ty - r.top) * k) / 8);
-  await sleep(60);
+  await window.__gw.frames(2);
   fire(pages, "pointerup", tx, ty);
-  await sleep(600);
   const where = (key) => {
     const c = S.home.value.items.find((i) => i.key === key && i.kind === "app")?.cell;
     return c ? `${c.x},${c.y}` : "nowhere on home";
   };
+  await window.__gw.until(() => where(out.key) === `${free[0]},${free[1]}` && !S.home.value.items.some((i) => i.key === f.key) && where(rest.key) === `${f.cell.x},${f.cell.y}`);
   const fails = [];
   if (where(out.key) !== `${free[0]},${free[1]}`) fails.push(`folder: ${out.key} dragged out to ${free} is at ${where(out.key)}`);
   if (S.home.value.items.some((i) => i.key === f.key)) fails.push("folder: left with one app, it's still there");
@@ -1150,19 +1188,20 @@ async function folderDissolveCheck() {
  * at a screen edge (windows.edge) moves to the next page with home.
  */
 async function desktopsCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const D = await importShim("./ui/desktops.ts");
-  const { powos } = await importShim("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const D = await window.__gw.mod("./ui/desktops.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
   powos.floating = { list: async () => [], restore: async () => true, desktop: async (h) => ((window.__hid = h.join()), true) };
   if (S.pages.value.length < 2) await powos.home.addPanel("recents", Math.max(...S.pages.value) + 1, { x: 0, y: 0, w: 3, h: 3 });
-  await sleep(300);
+  await window.__gw.until(() => D.ready() && S.pages.value.length >= 2);
   if (!D.ready()) return ["ui/desktops.ts never started (app.tsx startDesktops)"];
   const [p0, p1] = S.pages.value;
   const win = (id) => ({ id, pkg: `gate.app${id}`, label: `App ${id}`, minimised: false });
   const fails = [];
+  // Until the host was told that hidden list (at most 3 s), and still so two frames on.
   const expect = async (what, hid) => {
-    await sleep(150);
+    await window.__gw.until(() => (window.__hid ?? "") === hid);
+    await window.__gw.frames(2);
     if ((window.__hid ?? "") !== hid) fails.push(`${what}: hidden [${window.__hid}], not [${hid}]`);
   };
   // The wide part (900 px: the wide home, often one page of tiles): an empty desktop always follows the last page, and
@@ -1189,7 +1228,7 @@ async function desktopsCheck() {
   S.page.value = 0;
   await expect("back on page 1", "102");
   window.__mockEvents.emit("windows.raised", 102);
-  await sleep(150);
+  await window.__gw.until(() => S.page.value === 1);
   if (S.page.value !== 1) fails.push(`a window of page 2 brought back from the dock left home on page ${S.page.value + 1}`);
   await expect("its page shown after windows.raised", "101");
   const kept = await powos.store.get("home.windows");
@@ -1200,14 +1239,15 @@ async function desktopsCheck() {
 
 /** In the page, after desktopsCheck: a window let go at a screen edge (windows.edge) goes to the next page with home. */
 async function desktopsEdge() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const D = await importShim("./ui/desktops.ts");
-  const { powos } = await importShim("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const D = await window.__gw.mod("./ui/desktops.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
   const [, p1] = S.pages.value;
   const fails = [];
+  // Until the host was told that hidden list (at most 3 s), and still so two frames on.
   const expect = async (what, hid) => {
-    await sleep(150);
+    await window.__gw.until(() => (window.__hid ?? "") === hid);
+    await window.__gw.frames(2);
     if ((window.__hid ?? "") !== hid) fails.push(`${what}: hidden [${window.__hid}], not [${hid}]`);
   };
   // Window 101 (page 1) let go at the right edge while page 1 shows: it and home go to page 2, never hidden on the way.
@@ -1221,11 +1261,12 @@ async function desktopsEdge() {
   if (sent.some((h) => h.split(",").includes("101"))) fails.push(`the dropped window was hidden on its way to the next page (${sent.join(" | ")})`);
   // Unfolded, past the last page with tiles there is always the empty desktop: the drop takes the window there.
   window.__mockEvents.emit("windows.edge", { id: 101, side: 1 });
-  await sleep(150);
+  await window.__gw.until(() => S.page.value === 2 && D.placed.value[101] === S.pages.value[2]);
   if (S.page.value !== 2 || D.placed.value[101] !== S.pages.value[2]) fails.push(`a drop at the right edge of page 2 left home on page ${S.page.value + 1}, the window on ${D.placed.value[101]} (pages ${S.pages.value})`);
   for (let i = 0; i < 3 && S.page.value > 0; i++) {
+    const was = S.page.value;
     window.__mockEvents.emit("windows.edge", { id: 101, side: -1 });
-    await sleep(150);
+    await window.__gw.until(() => S.page.value < was);
   }
   await expect("101 dropped on the left edge back to page 1", "102");
   return fails;
@@ -1238,10 +1279,9 @@ async function desktopsEdge() {
  * windows open and maximise.
  */
 async function dockTapCheck() {
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const D = await importShim("./ui/desktops.ts");
-  const { powos } = await importShim("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const D = await window.__gw.mod("./ui/desktops.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
   const fails = [];
   const did = [];
   let area = null;
@@ -1253,7 +1293,7 @@ async function dockTapCheck() {
   const tap = async (key, want, what) => {
     did.length = 0;
     await D.dockTap(key);
-    await sleep(50);
+    await window.__gw.until(() => did.join() === want);
     if (did.join() !== want) fails.push(`${what}: [${did.join()}], not [${want}]`);
   };
   try {
@@ -1276,17 +1316,18 @@ async function dockTapCheck() {
     else {
       const key = cell.dataset.key;
       S.windows.value = [{ id: 201, pkg: key.slice(2).split("/")[0], label: "Docked", minimised: false }];
-      await sleep(50);
+      await window.__gw.frames(2);
       did.length = 0;
       const r = cell.getBoundingClientRect();
       const at = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, pointerId: 7, button: 0 };
       cell.dispatchEvent(new PointerEvent("pointerdown", at));
       cell.dispatchEvent(new PointerEvent("pointerup", at));
-      await sleep(100);
+      await window.__gw.until(() => did.join() === "min 201");
       if (did.join() !== "min 201") fails.push(`a tap on the dock's ${key}, its window in front: [${did.join()}], not [min 201]`);
     }
     dispatchEvent(new Event("resize"));
-    await sleep(200);
+    const barNow = () => Math.min(...[...document.querySelectorAll(".home > .bar, .home > .dock")].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => r.top));
+    await window.__gw.until(() => area !== null && Math.abs(area - barNow()) <= 1);
     const bar = Math.min(...[...document.querySelectorAll(".home > .bar, .home > .dock")].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => r.top));
     if (area !== null && Math.abs(area - bar) > 1) fails.push(`windows.area told ${area}, the bottom bar starts at ${Math.round(bar)}`);
     if (area === null && D.barTop() === null) fails.push("home found no bottom bar to keep windows above (windows.area never told)");
@@ -1337,19 +1378,19 @@ async function windowTouchCheck() {
 /** In the page, loaded afresh after desktopsCheck: the stored windows go back on their pages (page 2's hidden). */
 async function desktopsReloaded() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
-  const D = await importShim("./ui/desktops.ts");
-  const { powos } = await importShim("./bridge.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const D = await window.__gw.mod("./ui/desktops.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
   const t0 = performance.now();
   while (!D.ready() && performance.now() - t0 < 5000) await sleep(50);
   // The mock's layout isn't kept across a reload (the phone's is): page 2 again, as desktopsCheck made it.
   const kept = await powos.store.get("home.windows");
   if (S.pages.value.length < 2) await powos.home.addPanel("recents", kept?.[102] ?? 2, { x: 0, y: 0, w: 3, h: 3 });
-  await sleep(300);
+  await window.__gw.until(() => S.pages.value.length >= 2);
   powos.floating = { list: async () => [], restore: async () => true, desktop: async (h) => ((window.__hid = h.join()), true) };
   S.page.value = 0;
   S.windows.value = [101, 102].map((id) => ({ id, pkg: `gate.app${id}`, label: `App ${id}`, minimised: false }));
-  await sleep(200);
+  await window.__gw.until(() => window.__hid === "102");
   return window.__hid === "102" ? [] : [`after a reload on page 1, hidden [${window.__hid}], not page 2's [102] (placement not kept: pages ${S.pages.value}, ${JSON.stringify(D.placed.value)})`];
 }
 
@@ -1431,7 +1472,10 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
   // clock (under sel's elements); endless ones (a loading pulse) don't count - the idle check has those.
   await page.evaluateOnNewDocument(() => {
     const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-    const frames = (n = 2) => new Promise((ok) => { const step = (k) => (k ? requestAnimationFrame(() => step(k - 1)) : ok()); step(n); });
+    // A frame, or 500 ms without one: a wait only on rAF is a promise nothing but the frame holds - on a loaded gate
+    // the evaluate awaiting it failed "Promise was collected" (relayout-*); the timer keeps it reachable and bounded.
+    const frame = () => new Promise((ok) => (requestAnimationFrame(() => ok()), setTimeout(ok, 500)));
+    const frames = async (n = 2) => { for (let k = 0; k < n; k++) await frame(); };
     const until = async (f, ms = 3000) => {
       const t0 = performance.now();
       while (!(await f())) {
@@ -1459,7 +1503,14 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
       }
       return true;
     };
-    window.__gw = { sleep, frames, until, still, settled, steady };
+    // A shell module, imported once per page and kept: each check imported state.ts & co. again (importShim), and on a
+    // loaded gate such an evaluate failed "Promise was collected" (columnsAs, edit-search) - one import, then the cache.
+    const mods = new Map();
+    const mod = (path) => {
+      if (!mods.has(path)) mods.set(path, window.importShim(path).catch((e) => (mods.delete(path), Promise.reject(e))));
+      return mods.get(path);
+    };
+    window.__gw = { sleep, frames, until, still, settled, steady, mod };
   });
   // Counts the page's requestAnimationFrame callbacks (the idle check): counted as they run, nothing else changes.
   await page.evaluateOnNewDocument(() => {
@@ -1599,10 +1650,12 @@ try {
           .evaluate(async () => {
             const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
             const frames = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
-            const { powos } = await importShim("./bridge.ts");
+            const { powos } = await window.__gw.mod("./bridge.ts");
             const cells = [{ x: 0, y: 3, w: 6, h: 1 }, { x: 0, y: 5, w: 6, h: 2 }, { x: 0, y: 1, w: 2, h: 1 }];
             for (const c of cells) await Promise.race([powos.home.addPanel("search", 0, c), sleep(800)]).catch(() => {});
-            await sleep(600);
+            // The widgets mounted and measured (the field sizes itself over frames), at rest.
+            await window.__gw.settled(() => document.querySelectorAll(".search-face .pill").length >= cells.length);
+            await window.__gw.steady(() => [...document.querySelectorAll(".pill")].map((p) => p.clientHeight));
             const token = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--pill-height"));
             const where = (p) => (p.closest(".search-face") ? `the search widget (${p.closest(".home-tile")?.getBoundingClientRect().height | 0} px cell)` : p.closest(".ai-compose") ? "PowOS AI's compose" : p.closest(".home > .bar") ? "home's search" : "a pill");
             const check = (when) => {
@@ -1617,7 +1670,7 @@ try {
             const fails = check("");
             if (!document.querySelector(".search-face .pill")) fails.push("no search widget mounted to check (powos.home.addPanel)");
             // Measured while narrow (a fold, a relayout: the field measures as its text changes), then wide again.
-            const S = await importShim("./state.ts");
+            const S = await window.__gw.mod("./state.ts");
             for (const p of document.querySelectorAll(".pill")) p.style.width = "1px";
             await frames();
             S.query.value = "x";
@@ -1626,7 +1679,7 @@ try {
             await frames();
             for (const p of document.querySelectorAll(".pill")) p.style.width = "";
             await frames();
-            await sleep(300);
+            await window.__gw.steady(() => [...document.querySelectorAll(".pill")].map((p) => p.clientHeight));
             return [...fails, ...check(" after it was measured narrow and widened again")];
           })
           .catch((e) => [`evaluate: ${e.message.split("\n")[0]}`]);
@@ -1752,9 +1805,9 @@ try {
               }
             };
             const frames = (n = 2) => new Promise((ok) => { const step = (k) => (k ? requestAnimationFrame(() => step(k - 1)) : ok()); step(n); });
-            const S = await importShim("./state.ts");
-            const X = await importShim("./ui/ccexpand.ts");
-            const { powos } = await importShim("./bridge.ts");
+            const S = await window.__gw.mod("./state.ts");
+            const X = await window.__gw.mod("./ui/ccexpand.ts");
+            const { powos } = await window.__gw.mod("./bridge.ts");
             const P = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerId: 9, isPrimary: true, pointerType: "touch" }));
             const mid = (el) => { const b = el.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
             const item = (k) => document.querySelector(`.cc3-list [data-key="${k}"]`);
@@ -1846,11 +1899,11 @@ try {
           const first = await r.page
             .evaluate(async (orderSrc) => {
               const order = new Function(`return (${orderSrc})`)();
-              const S = await importShim("./state.ts");
+              const S = await window.__gw.mod("./state.ts");
               S.notif.value = true;
               const t0 = performance.now();
               while (order().length < 3 && performance.now() - t0 < 15000) await new Promise((ok) => setTimeout(ok, 50));
-              await new Promise((ok) => setTimeout(ok, 300));
+              await window.__gw.steady(() => order(), 4);
               return order()[0];
             }, ccOrder.toString())
             .catch(() => null);
@@ -1889,13 +1942,15 @@ try {
           .evaluate(async () => {
             const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
             const fails = [];
-            const P = await importShim("./apps/pages.ts");
+            const P = await window.__gw.mod("./apps/pages.ts");
             P.installedApps.value = [...P.installedApps.value, { id: "local.pet", name: "Pet", version: "0.1.0", database: "local-pet", tier: 0, manifest: "{}" }];
-            await sleep(600);
+            // The pet's module loaded (it sets window.__pet as it loads), then a render on: off, nothing may show.
+            await window.__gw.until(() => window.__pet);
+            await window.__gw.frames(2);
             // Off by default (the module's enabled; no SpacetimeDB here): installed but off must render nothing.
             if (document.querySelector(".pet")) return ["the pet rendered while it's off (enabled false)"];
             window.__pet?.on?.(true);
-            await sleep(600);
+            await window.__gw.until(() => document.querySelector(".pet"));
             const pet = document.querySelector(".pet");
             if (!pet) return ["the pet didn't mount with local.pet installed"];
             const at = pet.getBoundingClientRect();
