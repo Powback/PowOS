@@ -1,0 +1,7 @@
+# Captures hold live tokens — never commit them. The one exception is the
+# no-auth Open-Meteo demo sample under sample/.
+*.har
+*.openapi.json
+!sample/open-meteo.har
+!sample/open-meteo.openapi.json
+captures/
