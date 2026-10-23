@@ -295,6 +295,11 @@ EOS
         # The checkout to origin's tip before EACH job, not just each window: a window can last an hour, and a check
         # pushed after it began was missing ("No such file", rc 126/127, 2026-10-23).
         verify_tree >/dev/null 2>&1 || true
+        # The phone gone (VPN drop, reboot): leave the window with every job still queued instead of failing each one at
+        # its setup ("can't push powos-open-task" FAILs burned the test-set runs during the 06:28 reboot).
+        if ! perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell true >/dev/null 2>&1; then
+          echo "$(date +%T) the phone isn't reachable - leaving the window, jobs stay queued"; exit 3
+        fi
         task=; close=0; tries=0; cwd=$PWD; rel=0; from=; name=; screen=; budget=300; need=; qt=0; cmd=(); . "$j"
         # A job from before repo-relative jobs: its worktree may be gone - run it in the verify checkout instead.
         if [ "$rel" != 1 ] && [[ "$cwd ${cmd[*]}" == *"$REPO/.claude/worktrees/"* ]]; then
