@@ -94,6 +94,23 @@ class WindowFrames(
         main.postDelayed(refreshLate, LATE_MS)
     }
 
+    /**
+     * Whether screen point ([x], [y]) (px) is on a floating window showing now - its content or its title bar, where
+     * it is on the glass (one a finger is moving: where the finger has it). PowOS's own gestures over home (the shade's
+     * pull on home's body: ShadeHost) never start there: a scroll inside an app is the app's. Main thread.
+     */
+    fun covers(
+        x: Float,
+        y: Float,
+    ): Boolean {
+        val bar = (WindowFrame.BAR_DP + WindowFrame.HIT_DP) * context.resources.displayMetrics.density
+        val live = frames.values.filter { it.dragging }.associate { it.id to it.bounds }
+        return running.value.any { w ->
+            val b = live[w.id] ?: w.bounds
+            !w.minimised && !w.away && b != null && x >= b.left && x < b.right && y >= b.top - bar && y < b.bottom
+        }
+    }
+
     /** SystemUI's state flags: no frames over the lock screen. */
     fun systemUiState(flags: Long) {
         val k = flags and SYSUI_KEYGUARD_SHOWING != 0L && flags and SYSUI_KEYGUARD_OCCLUDED == 0L

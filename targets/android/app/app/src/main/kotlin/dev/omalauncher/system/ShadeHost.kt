@@ -297,15 +297,26 @@ class ShadeHost(
     /** Where a pull may start: the status bar (anywhere), or home's body (while [homePull]). */
     private enum class From { STATUS_BAR, HOME }
 
-    /** Whether a finger down at [y] (display px) may be the shade's pull, and from where. */
-    private fun pullable(y: Float): From? {
+    /** Whether a finger down on home's body at ([x], [y]) may be the shade's pull. */
+    private fun homePullable(
+        x: Float,
+        y: Float,
+    ): Boolean {
+        val home = homePull && Switcher.onHome && Switcher.homeVisible && !Switcher.open && host != null && !shown && !keyguard && !lent
+        // Never inside a floating window: home is "on" under every window, and the gesture input sees all touches - a
+        // scroll down in Chrome or Kate pulled the shade (the user, 2026-10-23).
+        return home && WindowFrames.current?.covers(x, y) != true
+    }
+
+    /** Whether a finger down at ([x], [y]) (display px) may be the shade's pull, and from where. */
+    private fun pullable(
+        x: Float,
+        y: Float,
+    ): From? {
         // Never over a locked phone (the lock face reports the keyguard OCCLUDED, which [keyguard] doesn't count).
         if (DeviceLock.locked(service)) return null
         val edge = stripHeight.coerceAtLeast((24 * service.resources.displayMetrics.density).toInt())
-        if (y > edge) {
-            val home = homePull && Switcher.onHome && Switcher.homeVisible && !Switcher.open && host != null && !shown && !keyguard && !lent
-            return if (home) From.HOME else null
-        }
+        if (y > edge) return if (homePullable(x, y)) From.HOME else null
         val ok = host != null && !shown && !keyguard && !lent && statusBarShown
         // A finger down on the status bar that isn't a pull: why, as it's the first thing to ask when the shade won't come.
         if (!ok) Log.i(TAG, "not pulling: host=${host != null} shown=$shown keyguard=$keyguard lent=$lent statusBarShown=$statusBarShown")
@@ -319,7 +330,7 @@ class ShadeHost(
     val pull =
         object : GestureConsumer {
             override fun onDown(e: MotionEvent): Boolean {
-                val from = pullable(e.rawY) ?: return false
+                val from = pullable(e.rawX, e.rawY) ?: return false
                 // The status bar's right half pulls the control center, the rest the notifications - as on OnePlus's.
                 // Down on home's body: the notifications, as a stock launcher's.
                 val control = from == From.STATUS_BAR && e.rawX > shadeWm.currentWindowMetrics.bounds.width() * CONTROL_SPLIT
