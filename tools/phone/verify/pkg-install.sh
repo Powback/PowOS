@@ -1,0 +1,29 @@
+#!/bin/bash
+# pkg-install.sh <pkg.tar.xz>...: (Mac side; queue it: queue.sh add <board-task> pkg-install.sh <abs path>) installs
+# rootfs packages built by targets/android/build-pkgs.sh into PowOS with pacman -U, each with a rollback tar of the
+# files the installed version had (/var/cache/powos/<name>-<old version>-files.tar: `tar -xf` it as root to go back).
+# Packages only: no session restart, no game touched. Prints "<name> <old> -> <new>"; FAIL when pacman refuses.
+set -uo pipefail
+here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"; R="$here/../root.sh"
+[ $# -gt 0 ] || { echo "usage: pkg-install.sh <pkg.tar.xz>..."; exit 2; }
+rc=0
+for p in "$@"; do
+  p=$(cd "$(dirname "$p")" && pwd)/$(basename "$p")   # adb.sh mounts the dirname: no ".." (skill: powos-games)
+  [ -f "$p" ] || { echo "FAIL install: no file $p"; rc=1; continue; }
+  b=$(basename "$p"); name=${b%-*-*-*.pkg.tar.*}
+  "$A" push "$p" "/data/local/tmp/$b" >/dev/null && "$A" shell "su -c 'mv /data/local/tmp/$b /data/powos/root/var/tmp/$b'" \
+    || { echo "FAIL install: can't push $b"; rc=1; continue; }
+  s=$(mktemp); cat > "$s" <<SH
+set -e
+old=\$(pacman -Q $name 2>/dev/null | cut -d' ' -f2 || true)
+if [ -n "\$old" ]; then mkdir -p /var/cache/powos
+  pacman -Qlq $name | while read -r f; do [ -f "\$f" ] && echo "\$f"; done | tar -cf /var/cache/powos/$name-\$old-files.tar -T - 2>/dev/null; fi
+pacman -U --noconfirm /var/tmp/$b >/dev/null
+rm -f /var/tmp/$b
+echo "$name \${old:-none} -> \$(pacman -Q $name | cut -d' ' -f2) (rollback: /var/cache/powos/$name-\${old:-none}-files.tar)"
+SH
+  out=$("$R" "$s" 2>&1); rm -f "$s"
+  echo "$out" | tail -3
+  echo "$out" | grep -q " -> " || { echo "FAIL install: $b"; rc=1; }
+done
+exit $rc
