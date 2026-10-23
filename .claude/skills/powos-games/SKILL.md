@@ -30,8 +30,11 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - KWin shows every X toplevel (the game too) as its own Android task (PowosWindowActivity); never `am start andro.marchy.MainActivity` (PowOS home).
 - anland-1 119.97 Hz unfolded (2268x2440): 60 fps = every 2nd vsync; governor `uag`. `bf-run.sh` ~10 min (memory,
   SF pacing, KGSL stats). Launch-option prefixes run INSIDE SLR_4 under FEX: only `python3.13` (ctypes libX11).
-- Xwayland's copy of a window: NOT ffmpeg x11grab (FFmpeg 9 needs MIT-SHM, none on Android): Xlib XGetImage (bf-lib xframes);
-  half-drawn = dark px `c<30 && min4nb>c+50`.
+- Xwayland's copy of a window: NOT ffmpeg x11grab (FFmpeg 9 needs MIT-SHM, none on Android): Xlib XGetImage, bf-lib
+  `xframes first|change|count|grab` (python ctypes; grab writes PNGs with zlib, no PIL). bf-checker's grab and bf-fold's
+  "changes" use it (both got no frame before). td-launch-phone.sh's window.png still uses x11grab. Half-drawn = dark px
+  `c<30 && min4nb>c+50`.
+- Budget 300 s per job (never raised): one bf-checker variant (~4 min) or one bf-pacing mode per job.
 - Render bisect: `bf-checker.sh [variant]...` (~4 min each; TU_DEBUG via Proton user_settings.py / dxvk.conf): black-checker score, menu fps, DXVK log.
 - Unity prefs: pfx `user.reg` `[Software\\Free Lives\\Broforce]`. Steam login: a session crash can set loginusers.vdf
   AutoLogin 0 ("Service Unavailable") -> 1 with Steam off.
@@ -60,6 +63,19 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   x11grab frame <= RESUME_MS (3000). A touch / stop closes what the check started (exit 3). Launch chains outside
   Steam's tree (ppid 1, a dead Steam's) are killed first: never frozen or resumed, they hold the prefix.
 - Never auto-frozen before its first window (sleep-gui GAME_WINDOW_S 600): a cold start outlasts the 2 min grace.
+- The user's model (2026-10-23): a game is kept in the background ONLY after the user started it and navigated away
+  (home, another app, fold) - frozen like Steam, a tap on its icon resumes it. No game is ever started for the user:
+  ~/.config/powos/steam-resident-games stays EMPTY (powos-steam-resident still has the code that would start them).
+- The user's way back: `queue.sh add <task> bf-return.sh` (bf-return-phone.sh launch|away|back|close): open-task launch
+  -> full-screen window -> Android HOME intent (`am start -a MAIN -c HOME`, from the Mac side: the session can't) ->
+  frozen by itself (grace + 15 s) with the same game alive -> open-task again -> tap -> first changed frame (FAIL past
+  10 s, goal < 3 s), the game's task in front (PowosWindowActivity), its X window focused, its pactl sink-inputs back
+  uncorked. "TIMES resume N ms ..." line. ~3-4 min.
+- A Broforce running before a check is the USER's (bf-game.sh state: game=frozen = they left it, game=awake = they
+  play it, a controller doesn't move the touch IRQs). awake: every check skips (exit 3). frozen: bf-pacing measures it
+  as it is (base only) and bf-fold uses it, both freeze it again after (`powos game 274190 freeze`), never close it;
+  bf-checker skips (it needs the loading screen). A game the check started is closed (bf-stop.sh: game only, Steam
+  stays). Between modes/variants: bf-stop.sh, not `pkill -f Broforce_beta.exe` (left the prefix's wineserver).
 ## Launch time (tap -> first frame; goal < 10 s; board task games-launch-instantly-steam-wine-resident-fex-s)
 - `bf-coldstart.sh [cold|steam|fexcache]...` -> "STAGES" lines, ms from the tap: steam-ui, iscript <start>-<end> (the
   install script evaluator), reaper (the GAME's), pv, wineserver, exe, window, frame; "evaluator:" = its log line.
@@ -80,15 +96,14 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
     `xframes` = Xlib XGetImage of 16 rows from python ctypes (first_frame <s> by window name, first_change <id> <s> <fps>).
   - Unity maps a 314x208 "Broforce" window first, then goes full screen (bf-window.sh read 314x208 at map).
   - bf-start.sh's bare `steam steam://rungameid` gave the game no task in front (bf-pacing measured HomeShell): it goes
-    through powos-open-task now. A raw steam:// launch does NOT bring the game to the front - resident games use that.
+    through powos-open-task now. A raw steam:// launch does NOT bring the game to the front.
   - Proton's user_settings.py: one file per Proton dir; checks that wrote their own (bf-checker, td-launch) replaced
     ours and a killed run left it (DXVK_LOG_PATH, 02:01). Checks put env in ~/.config/powos/proton-settings.json.
 - Base state: Steam resident (pkgs/steam powos-steam-resident, session autostart, `steam -silent` 60 s after login,
   frozen by unified sleep; off: ~/.config/powos/steam-resident-off; log $XDG_RUNTIME_DIR/powos-steam-resident.log).
 - < 10 s needs the GAME resident: warm Steam + skipped evaluator still leaves ~4 s evaluator container + 9 s reaper->exe
-  + 19 s exe->window under FEX. ~/.config/powos/steam-resident-games (app ids) = started out of sight after login and
-  frozen 3 s after its window maps; a tap then resumes it (RESUME_MS 3000). Empty by default (a game at every login
-  costs its RAM + start CPU: the user/manager decides which).
+  + 19 s exe->window under FEX. The user ruled out starting games at login (steam-resident-games
+  stays empty): the instant path is the game THEY started and left, frozen, resumed by its tap (bf-return.sh).
 - Still open: FEX code cache (fexcache never measured), pressure-vessel locale-gen (PRESSURE_VESSEL_GENERATE_LOCALES=0),
   Steam's CheckShaderDepotManifest 2 s. Persistent wineserver: Proton's waitforexitandrun waits for the prefix's
   wineserver to exit, so a resident one blocks the launch - a resident (frozen) game is the instant path.
@@ -141,8 +156,10 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   task (patch 0013) cropped it. 0017: exported full-screen windows keep their geometry (QObject property
   `powosKeepFullScreenGeometry` -> checkWorkspacePosition returns; ABI unchanged) and AnlandWindowTask::scale/viewport
   fit them, centred, letterboxed (touch too); scale 1 when buffer == window. Every full-screen task letterboxes now.
-- bf-fold.sh: pacman -U (rollback tar /var/cache/powos/kwin-<ver>-files.tar), `android-request power logout` (never
-  with Broforce up), state 3->0->+25s->3. kwin_wayland: pgrep as root; "libkwin (deleted)" in maps = old one running.
+- bf-fold.sh: needs KWin >= KWIN_MIN (6.7.5-3.21); installs only an explicit KWIN_PKG NEWER than the installed one
+  (vercmp). An old kit's KWIN_PKG=3.21 once DOWNGRADED the installed 3.22 (0018) (2026-10-23 02:02): never queue a kit
+  with a pinned package. Fresh session (`android-request power logout`, never with Broforce up) when the running KWin
+  maps a deleted libkwin; state 3->0->+25s->3; Broforce via bf-lib step_launch (open-task: a frozen one is resumed). kwin_wayland: pgrep as root; "libkwin (deleted)" in maps = old one running.
 - Logcat and powos-sleep-gui.log don't survive a reboot; hyprland.log is appended across sessions (no timestamps).
 
 ## Kernel (targets/android/kernel, docs/PHONE-KERNEL-CONTAINERS.md)

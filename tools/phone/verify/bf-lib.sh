@@ -70,23 +70,19 @@ mapped() { xwininfo -id "$1" 2>/dev/null | awk '/Map State/ {print $3}'; }
 active() { printf '%d' "$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | awk '{print $NF}')" 2>/dev/null; }
 cg() { local c; c=$(cat "/proc/$(steam_pid)/cgroup" 2>/dev/null); case $c in *powos/sleep/*) echo "/sys/fs/cgroup${c#0::}" ;; esac; }
 watcher() { grep -i "steam\|app $APP" "$GLOG" | tail -${1:-2} | cut -c1-200 | tr '\n' '|'; }
-first_change() {  # first_change <window> <seconds> <fps>: epoch s of the first grabbed frame that differs from the first
-  local s; s=$(now)
-  ffmpeg -nostdin -loglevel error -f x11grab -framerate "$3" -window_id "$1" -i "$DISPLAY" -t "$2" -copyts \
-      -f framemd5 - 2>/dev/null \
-    | awk -F', *' -v fps="$3" -v s="$s" '/^#tb 0:/ {split($0, t, /[: \/]+/); tn = t[3]; td = t[4]}
-        !/^#/ {n++; if (n == 1) h = $NF; else if ($NF != h) {x = (td ? $3 * tn / td : 0)
-          printf "%.3f", (x > 1e9 ? x : s + (n - 1) / fps); found = 1; exit}}
-        END {if (!found) printf "none"}'; }
-# Frames of an X window, for first_frame / first_change: Xlib's XGetImage on 16 rows of the window, every 64th pixel,
-# from python3 + ctypes. Not ffmpeg's x11grab: FFmpeg 9 only grabs through MIT-SHM, and Android's kernel has no System
-# V shared memory - "Could not get shared memory buffer" / "Error during demuxing: Permission denied", no frame ever
-# (every bf-coldstart "frame -", bf-checker's grabs, 2026-10-23; FFmpeg 8 still fell back to plain GetImage).
+# Frames of an X window: Xlib's XGetImage from python3 + ctypes. Not ffmpeg's x11grab: FFmpeg 9 only grabs through
+# MIT-SHM, and Android's kernel has no System V shared memory - "Could not get shared memory buffer" / "Error during
+# demuxing: Permission denied", no frame ever (every bf-coldstart "frame -", bf-checker's grabs, bf-fold's "changes",
+# 2026-10-23; FFmpeg 8 still fell back to plain GetImage). A sample = 16 rows of the window, every 64th pixel.
 #   xframes first <window name> <s>        epoch s of the named window's first drawn frame (looked up again each sample:
 #                                          Unity maps a 314x208 window, then goes full screen): a sample that isn't flat
 #                                          (brightest - darkest > 24) or differs from the window's first sample
 #   xframes change <window id> <s> <fps>   epoch s of the first sample that differs from the first one
-# "none" when nothing came in <s>. The time is the sample's start (a sample takes a few ms).
+#   xframes count <window id> <s> <fps>    the number of distinct samples in <s> s (1 = a still window, 0 = none)
+#   xframes grab <window name> <s> <dir>   whole frames as PNG for <s> s, 1 a second: <dir>/h%03d.png half size (every
+#                                          2nd pixel, as bf-checker.py scores), f<n>.png full size every 10 s, a line
+#                                          "<n> <time> <window> <WxH>" per 10 s in <dir>/grab.log, "done" at the end
+# "none" when nothing came in <s>. The time is the sample's start (a sample takes a few ms; a whole frame ~0.2 s).
 xframes() { python3 - "$@" <<'PY'
 import ctypes as C, sys, time
 X = C.CDLL("libX11.so.6")
@@ -143,9 +139,61 @@ def sample(w):
             px += [(row[x] + row[x + 1] + row[x + 2]) // 3 for x in range(0, a.width * 4, 256)]
         X.XFree(im.data); X.XFree(p)
     return px or None
+def frame(w, step):  # the whole window, every <step>th pixel and row, as RGB rows (PNG filter byte 0 each)
+    a = Attr()
+    if not X.XGetWindowAttributes(d, w, C.byref(a)) or a.map_state != 2 or a.width < 1 or a.height < 1:
+        return None
+    p = X.XGetImage(d, w, 0, 0, a.width, a.height, 0xFFFFFFFF, 2)
+    if not p:
+        return None
+    im = Img.from_address(p)
+    if im.bits_per_pixel != 32:
+        X.XFree(im.data); X.XFree(p); return None
+    buf = C.string_at(im.data, im.bytes_per_line * a.height)
+    X.XFree(im.data); X.XFree(p)
+    W = (a.width + step - 1) // step
+    out = bytearray()
+    for y in range(0, a.height, step):
+        r = buf[y * im.bytes_per_line:y * im.bytes_per_line + a.width * 4]
+        row = bytearray(W * 3)
+        row[0::3], row[1::3], row[2::3] = r[2::4 * step], r[1::4 * step], r[0::4 * step]  # BGRX -> RGB
+        out += b"\0" + row
+    return W, (a.height + step - 1) // step, bytes(out), a.width, a.height
+def png(path, f):
+    import struct, zlib
+    W, H, raw = f[0], f[1], f[2]
+    def chunk(t, b):
+        return struct.pack(">I", len(b)) + t + b + struct.pack(">I", zlib.crc32(t + b) & 0xFFFFFFFF)
+    with open(path, "wb") as o:
+        o.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(raw, 1)) + chunk(b"IEND", b""))
 mode, end = sys.argv[1], time.time() + float(sys.argv[3])
+if mode == "grab":
+    import os
+    out, n = sys.argv[4], 0
+    os.makedirs(out, exist_ok=True)
+    log = open(os.path.join(out, "grab.log"), "a")
+    while time.time() < end:
+        t = time.time()
+        ws = find(X.XDefaultRootWindow(d), sys.argv[2].encode(), [])
+        f = w = None
+        for w in ws:
+            f = frame(w, 2)
+            if f:
+                break
+        if n % 10 == 0:
+            log.write("%d %s %s %s\n" % (n // 10 + 1, time.strftime("%T"), hex(w) if f else "-", "%dx%d" % (f[3], f[4]) if f else "no window")); log.flush()
+            if f:
+                g = frame(w, 1)
+                if g:
+                    png(os.path.join(out, "f%d.png" % (n // 10 + 1)), g)
+        if f:
+            png(os.path.join(out, "h%03d.png" % n), f)
+        n += 1
+        time.sleep(max(0.0, 1.0 - (time.time() - t)))
+    log.write("done\n"); sys.exit()
 gap = 1.0 / float(sys.argv[4]) if len(sys.argv) > 4 else 0.1
-w, first = (0 if mode == "first" else int(sys.argv[2], 0)), None
+w, first, seen = (0 if mode == "first" else int(sys.argv[2], 0)), None, set()
 while time.time() < end:
     t = time.time()
     s = None
@@ -153,13 +201,15 @@ while time.time() < end:
         s = sample(w)  # the first mapped one
         if s:
             break
-    if s:
+    if s and mode == "count":
+        seen.add(tuple(s))
+    elif s:
         if (mode == "first" and max(s) - min(s) > 24) or (first is not None and s != first):
             print("%.3f" % t, end=""); sys.exit()
         if first is None:
             first = s
     time.sleep(max(0.0, gap - (time.time() - t)))
-print("none", end="")
+print(len(seen) if mode == "count" else "none", end="")
 PY
 }
 first_frame() { xframes first "$WIN_NAME" "$1"; }  # first_frame <s>: the game's first drawn frame (xframes first)

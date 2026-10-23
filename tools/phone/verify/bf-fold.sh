@@ -1,18 +1,23 @@
 #!/bin/bash
 # bf-fold.sh: (Mac side; queue it: queue.sh add [--close] <board-task> bf-fold.sh) Broforce survives folding the phone
 # mid-game (skill powos-games). In one free window: KWin 3.21+ (pkgs/kwin 0017: a full-screen window task keeps its
-# size and is scaled to fit) installed and running (pacman -U + a fresh session if needed - never while a Broforce
-# runs on the old KWin: exit 3, next window), Broforce up and past its sleep grace, then unfolded -> forced CLOSED
+# size and is scaled to fit) installed and running (a fresh session if the running one is older than the installed
+# one - never while a Broforce runs on the old KWin: exit 3, next window), Broforce up the way the user starts it
+# (powos-open-task: a Broforce the user started and left, frozen in the background, is resumed; else a launch) and
+# past its sleep grace, then unfolded -> forced CLOSED
 # (cmd device_state state 0) -> 25 s later (past the 15 s sleep timer) -> forced OPENED (state 3), each step: the
 # game's reaper + X window unchanged, its size kept, not frozen, its window changing (x11grab), SurfaceFlinger
 # presents of the window task, and a screencap's black bars (letterboxed on the cover). The forced state is always
-# reset; a Broforce it started is closed. Artefacts ~/.cache/powos-verify/bf-fold-<date>/. Exit 3 = no window/touched.
-#   KWIN_PKG=<pkg.tar.xz> (default: the newest targets/android/out/pkgs/kwin-*.pkg.tar.xz of this checkout)
+# reset; a Broforce it started is closed, one the user had left is frozen again (`powos game 274190 freeze`).
+# Artefacts ~/.cache/powos-verify/bf-fold-<date>/. Exit 3 = no window/touched.
+#   KWIN_MIN=<ver-rel> the oldest KWin with the fix (default 6.7.5-3.21); an older one installed: FAIL, nothing installed.
+#   KWIN_PKG=<pkg.tar.xz> installs that package first, only when it is NEWER than the installed KWin (pacman -U). Never
+#   a downgrade: an old kit's KWIN_PKG (3.21) once replaced the installed 3.22 (2026-10-23 02:02).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); P=$here/..; A=$P/adb.sh; repo=$(cd "$here/../../.." && pwd)
 OUT=${OUT:-$HOME/.cache/powos-verify/bf-fold-$(date +%F_%H%M)}; mkdir -p "$OUT"
-PKG=${KWIN_PKG:-$(ls -t "$repo"/targets/android/out/pkgs/kwin-*.pkg.tar.xz 2>/dev/null | head -1)}
-WANT=$(basename "$PKG" | sed -E 's/^kwin-([^-]+-[^-]+)-.*/\1/')
+PKG=${KWIN_PKG:-} MIN=${KWIN_MIN:-6.7.5-3.21}
+WANT=$([ -n "$PKG" ] && basename "$PKG" | sed -E 's/^kwin-([^-]+-[^-]+)-.*/\1/')
 WL_TRAP='"$A" shell cmd device_state state reset >/dev/null 2>&1'
 . "$here/window-lock.sh"; window_lock bf-fold.sh 120
 trap '"$A" shell cmd device_state state reset >/dev/null 2>&1; [ "${WL_LOCK:-}" ] && rm -rf "$WL_LOCK"' EXIT
@@ -21,7 +26,8 @@ BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
 pill "checking KWin's version"
 "$A" push "$here/bf-fold-phone.sh" /data/local/tmp/powos-bf-fold-phone.sh >/dev/null
 "$A" push "$here/bf-stop.sh" /data/local/tmp/powos-bf-stop.sh >/dev/null
-"$A" shell "su -c 'cp /data/local/tmp/powos-bf-fold-phone.sh /data/local/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh'"
+"$A" push "$here/bf-lib.sh" /data/local/tmp/powos-bf-lib.sh >/dev/null
+"$A" shell "su -c 'cp /data/local/tmp/powos-bf-fold-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh'"
 kwin() {  # kwin=<pid> kwin_new=<1|0>: 0 = it still runs a libkwin the package replaced (needs a fresh session)
   printf '%s\n' 'k=$(pgrep -x kwin_wayland | head -1); n=0; [ -n "$k" ] && ! grep -q "libkwin.*(deleted)" /proc/$k/maps && n=1; echo "kwin=${k:--} kwin_new=$n"' > "$OUT/kw.sh"
   "$P/root.sh" "$OUT/kw.sh" 2>/dev/null | tail -1 | tr -d '\r'; }
@@ -30,9 +36,10 @@ irq() { "$A" shell "cat /proc/interrupts" | awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+
 I0=$(irq); touched() { [ "$(irq)" != "$I0" ] && { log "user input - stopping"; return 0; }; return 1; }
 
 # 1. The KWin with the fix, installed and running.
+vc() { printf 'vercmp %s %s\n' "$1" "$2" > "$OUT/vc.sh"; "$P/root.sh" "$OUT/vc.sh" 2>/dev/null | tail -1 | tr -d '\r'; }
 have=$(printf 'pacman -Q kwin | cut -d" " -f2\n' > "$OUT/q.sh"; "$P/root.sh" "$OUT/q.sh" 2>/dev/null | tail -1 | tr -d '\r')
-log "kwin installed $have, want $WANT ($PKG)"
-if [ "$have" != "$WANT" ]; then
+log "kwin installed $have, needs >= $MIN${PKG:+, package $WANT ($PKG)}"
+if [ -n "$PKG" ] && [ "$(vc "$WANT" "$have")" -gt 0 ] 2>/dev/null; then
   [ -f "$PKG" ] || { log "no package $PKG"; exit 1; }
   pill "installing KWin $WANT"
   "$A" push "$PKG" /data/local/tmp/powos-kwin.pkg.tar.xz >/dev/null
@@ -46,7 +53,9 @@ pacman -U --noconfirm /var/tmp/powos-kwin.pkg.tar.xz >/dev/null && rm -f /var/tm
 pacman -Q kwin
 EOF
   "$P/root.sh" "$OUT/install.sh" 2>&1 | tail -2 | tee -a "$OUT/run.txt"
-fi
+  have=$WANT
+elif [ -n "$PKG" ]; then log "installed $have is not older than $WANT: nothing installed"; fi
+[ "$(vc "$have" "$MIN")" -ge 0 ] 2>/dev/null || { log "FAIL: KWin $have is older than $MIN (the fold fix, pkgs/kwin 0017)"; exit 1; }
 st="$(kwin) $(ph state)"; log "state: $st"
 if [[ $st != *kwin_new=1* ]]; then
   [[ $st == *reaper=-* ]] || { log "a Broforce runs on the old KWin (the user's?): not restarting the session now"; exit 3; }
@@ -67,8 +76,12 @@ fi
 touched && exit 3
 pill "Broforce up (Steam, the window, 2 min sleep grace)"
 r=$(ph start); echo "$r" >> "$OUT/run.txt"; mine=$([[ $r == *mine=1* ]] && echo 1 || echo 0)
-stop() { [ "$mine" = 1 ] && pill "closing the game" && ph_stop=$("$A" shell "su -c 'sh /data/powos/powos-run.sh \"bash /var/tmp/powos-bf-stop.sh\"'" 2>&1 | tail -1) && log "closed the Broforce it started: $ph_stop"; }
-[[ $r == *"no Broforce window"* ]] && { log "FAIL: Broforce didn't come up"; stop; exit 1; }
+stop() {  # what it started: closed; a Broforce the user had left (frozen in the background): frozen again
+  if [ "$mine" = 1 ]; then pill "closing the game"
+    log "closed the Broforce it started: $("$A" shell "su -c 'sh /data/powos/powos-run.sh \"bash /var/tmp/powos-bf-stop.sh\"'" 2>&1 | tr -d '\r' | tail -1)"
+  elif [[ ${r:-} == *mine=0* ]]; then pill "freezing the user's Broforce again"; log "the user's Broforce: $(ph refreeze | tail -1)"; fi; }
+[[ $r == *"user input"* ]] && { log "user input during the start"; exit 3; }  # bf-lib closed what it started
+[[ $r == *FAIL* || $r != *mine=* ]] && { log "FAIL: Broforce didn't come up: $(echo "$r" | grep -m1 FAIL)"; stop; exit 1; }
 
 # SurfaceFlinger presents over 2 s, summed over the window tasks' SurfaceViews (the game's task is the busy one).
 sf() { "$A" shell 'L=$(dumpsys SurfaceFlinger --list | sed -E "s/^RequestedLayerState\{//; s/ parentId=.*//" | grep -E "SurfaceView\[com.powos.app/andro.marchy.PowosWindowActivity\]" | grep -vE "Background|Bounds|ActivityRecord" | head -4)
@@ -111,7 +124,7 @@ probe() {  # probe <label> [cover|inner]
 }
 now=$("$A" shell cmd device_state print-state | tr -d '\r'); log "device state $now"
 [ "$now" = 3 ] || { "$A" shell cmd device_state state 3; sleep 6; }
-touched && { stop; exit 3; }
+touched && { [ "$mine" = 1 ] && stop; exit 3; }  # the user is back: a Broforce of theirs is left as it is
 probe unfolded inner
 pill "folding (forced CLOSED)"; "$A" shell cmd device_state state 0; sleep 6; log "forced CLOSED (cover)"
 probe folded cover
@@ -121,6 +134,7 @@ probe unfolded-again inner
 "$A" shell cmd device_state state reset >/dev/null 2>&1
 ph sleeplog >> "$OUT/run.txt"
 stop
+"$A" shell "su -c 'rm -f /data/local/tmp/powos-bf-fold-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-fold-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh'"
 r="RESULT bf-fold: $([ $fails = 0 ] && echo PASS || echo "FAIL ($fails bad steps)") - game kept $(echo "$first" | grep -o 'geom=[^ ]*') through fold/unfold; artefacts $OUT"
 log "$r"
 [ $fails = 0 ]
