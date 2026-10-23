@@ -49,6 +49,16 @@ install)
   "$0" deploy ${SILENT:+--silent} --note "$NOTE"
   echo "installed: /data/powos/root ($(asu 'du -sh /data/powos/root' | awk '{print $1}')), boot service in /data/adb/service.d" ;;
 deploy)
+  # A phone check holds the verify lock (~/.cache/powos-verify.lock): a deploy can restart the session under it and
+  # void the check (04:27:52: td-launch's launch was lost, friction f19). Wait up to 10 min for a lock fresher than
+  # 10 min, as ship-apk does; DEPLOY_NOW=1 skips the wait (an urgent fix).
+  vl="$HOME/.cache/powos-verify.lock"
+  if [ -z "${DEPLOY_NOW:-}" ]; then
+    for _ in $(seq 40); do
+      [ -d "$vl" ] && [ $(( $(date +%s) - $(stat -f %m "$vl" 2>/dev/null || stat -c %Y "$vl") )) -lt 600 ] || break
+      echo "rooted.sh deploy: waiting for the phone check ($(cat "$vl/who" 2>/dev/null)) to finish"; sleep 15
+    done
+  fi
   # The rooted-mode scripts (also part of install): the boot/mount script, the desktop session the PowOS app starts
   # (powos-session.sh -> /usr/bin/powos-rooted-session inside PowOS), and the flag the app checks
   # (persist.powos.root=1, set with Magisk's resetprop - readable without a root prompt).
