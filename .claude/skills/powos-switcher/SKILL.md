@@ -105,6 +105,8 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
     system/OemCaption.kt: a root-registered fabricated overlay com.android.shell:PowosNoCaption sets SystemUI's
     dimen/freeform_decor_caption_height to 0 dp (`cmd overlay fabricate` can't write dimensions; app_process from the
     APK). Check `cmd overlay list com.android.systemui | grep Powos` = [x]; logcat PowosOemCaption.
+    The same overlay zeroes WM Shell's drag-resize handles (freeform_resize_handle/_corner, edge_handle_in/outset,
+    desktop_mode_corner_resize_large): its 15 dp top-edge band sat where PowOS's bar is. `cmd overlay dump <id>` lists them.
   - Per visible freeform task, overlays "PowOS window bar <id>" (26 dp window above the task: 18 dp frost bar under an
     8 dp clear touch strip; buttons span both) / "PowOS window grip <id>" (36 dp disc, lower right). Material = frost v2
     (system/Frost.kt: theme.css's --frost-* formula in Kotlin from Palette + the wallpaper's colour hints for the tone

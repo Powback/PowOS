@@ -15,7 +15,10 @@ import andro.marchy.RootShell
  * overlay sets it to 0 dp: no caption surface, no caption insets, nothing to touch. The overlay lives in
  * /data/resource-cache and survives reboots; `cmd overlay disable com.android.shell:PowosNoCaption` brings the caption
  * back. `cmd overlay fabricate` can't write a dimension (int types only), so [main] registers it through the
- * framework's FabricatedOverlay, run as root with app_process from this APK.
+ * framework's FabricatedOverlay, run as root with app_process from this APK. The same decoration also puts its own
+ * drag-resize input handles around every freeform task (DragResizeInputListener: 15 dp edges, 44 dp corners, partly
+ * outside the task), which resize the task behind PowOS's frame (e2e 2026-10-23: frame and window split after a grip
+ * drag, likely this); their sizes ([HANDLES]) go to 0 dp in the same overlay, so only PowOS's grip resizes.
  *
  * HACK: a resource overlay on SystemUI from root (hidden FabricatedOverlay.setOwningPackage/IOverlayManager). Real fix:
  * PowOS as the window decor provider (its own WM Shell decor, or a preinstalled static overlay in /product/overlay).
@@ -26,12 +29,16 @@ object OemCaption {
     private const val TARGET = "com.android.systemui"
     private const val ID = "com.android.shell:$NAME"
 
-    /** Turns the caption off unless it already is (one root `cmd overlay list`), on a worker thread. */
+    /** WM Shell's drag-resize handle sizes (DragResizeWindowGeometry), 0 dp with the caption's height. */
+    private val HANDLES =
+        listOf("freeform_resize_handle", "freeform_edge_handle_outset", "freeform_edge_handle_inset", "freeform_resize_corner", "desktop_mode_corner_resize_large")
+
+    /** Turns the caption off unless the enabled overlay already has every value (one root call), on a worker thread. */
     fun off(context: Context) {
         val apk = context.applicationInfo.sourceDir
         Thread({
-            val listed = RootShell.run("cmd overlay list $TARGET")
-            if (listed.output.lineSequence().any { it.trim() == "[x] $ID" }) {
+            val listed = RootShell.run("cmd overlay list $TARGET | grep -F '$ID'; cmd overlay dump $ID | grep -F 'dimen/'").output
+            if (listed.contains("[x] $ID") && HANDLES.all { listed.contains("dimen/$it)") }) {
                 Log.i(TAG, "system caption already off")
                 return@Thread
             }
@@ -40,15 +47,16 @@ object OemCaption {
         }, "oem-caption").start()
     }
 
-    /** Root, from app_process: registers the overlay (dimen/freeform_decor_caption_height = 0 dp), owned by the shell. */
+    /** Root, from app_process: registers the overlay (caption height + [HANDLES] = 0 dp), owned by the shell. */
     @JvmStatic
     fun main(args: Array<String>) {
         val fo = Class.forName("android.content.om.FabricatedOverlay")
         val overlay = fo.getConstructor(String::class.java, String::class.java).newInstance(NAME, TARGET)
         fo.getMethod("setOwningPackage", String::class.java).invoke(overlay, "com.android.shell")
-        fo
-            .getMethod("setResourceValue", String::class.java, Float::class.javaPrimitiveType, Int::class.javaPrimitiveType, String::class.java)
-            .invoke(overlay, "$TARGET:dimen/freeform_decor_caption_height", 0f, 1 /* TypedValue.COMPLEX_UNIT_DIP */, null)
+        val set = fo.getMethod("setResourceValue", String::class.java, Float::class.javaPrimitiveType, Int::class.javaPrimitiveType, String::class.java)
+        for (name in listOf("freeform_decor_caption_height") + HANDLES) {
+            set.invoke(overlay, "$TARGET:dimen/$name", 0f, 1 /* TypedValue.COMPLEX_UNIT_DIP */, null)
+        }
         val tx = Class.forName("android.content.om.OverlayManagerTransaction")
         val transaction = tx.getMethod("newInstance").invoke(null)
         tx.getMethod("registerFabricatedOverlay", fo).invoke(transaction, overlay)
