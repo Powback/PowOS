@@ -44,6 +44,9 @@ hcall() { local v i; for i in 1 2 3 4; do v=$(hcall_once "$@"); case $v in ""|"c
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
 [ "$(sh_ "settings get global enable_freeform_support")" = 1 ] || fail "enable_freeform_support isn't 1 (OxygenOS coerces freeform to full screen)"
+# A dozing (folded, put away) phone: forcing state 3 still launched Calculator onto the cover display, full screen, and
+# failed "not freeform" (14:59, 2026-10-23). Not a run of this check - the queue retries it later (exit 3).
+sh_ "dumpsys power" | grep -q 'mWakefulness=Awake' || { echo "the screen is asleep (folded away?) - not now"; exit 3; }
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
 sh_ "dumpsys device_state | grep -m1 mCommittedState" | tee -a "$OUT/log.txt" | grep -q OPENED || fail "the inner screen didn't come on (device_state not OPENED)"
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
