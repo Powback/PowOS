@@ -6,9 +6,12 @@
 #      (never with a game up);
 #   2. Dolphin opened THROUGH HOME's launch path (apps.launch l:org.kde.dolphin, the bridge call a tap makes) is ONE
 #      floating task (PowosWindowActivity, freeform, smaller than the screen), windows.list names it;
-#   3. an image opened the way Dolphin opens one (kioclient exec: KIO's OpenUrlJob, KDE's own file association) comes
-#      up as exactly ONE more floating task, Gwenview's, and one Gwenview window in KWin (no duplicates, nothing left
-#      on the hidden desktop). Leftover Gwenview windows (six from 2026-10-23's tries) are closed first.
+#      Its window DRAWS: the task's part of the screen isn't black (Kate and Dolphin floated with black content,
+#      2026-10-23) - and so does Kate's, opened the same way;
+#   3. Gwenview opened from inside the session (the session's own environment, as Dolphin's "Open With" starts it: a
+#      Wayland window) comes up as exactly ONE more floating task, and closing it closes Gwenview; then again as an X11
+#      window (QT_QPA_PLATFORM=xcb: an Xwayland window gets its wl_surface after KWin adds it - kwin 0019).
+#      Leftover Gwenview windows (six from 2026-10-23's tries) are closed first.
 # Always restores: Gwenview closed, Dolphin closed if this started it, home, `cmd device_state state reset`.
 # Exit: 0 passed; 1 FAIL; 3 a real touch / no free window / not now (re-queued); 5 can't run.
 #   KWIN_PKG=<pkg.tar.xz> (default: the newest targets/android/out/pkgs/kwin-*.pkg.tar.xz of this checkout or a
@@ -22,11 +25,14 @@ PKG=${KWIN_PKG:-$(ls -t "$ROOT"/targets/android/out/pkgs/kwin-*.pkg.tar.xz "$ROO
 WANT=$(basename "${PKG:-none}" | sed -E 's/^kwin-([^-]+-[^-]+)-.*/\1/')
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
+# $1 run in the Plasma session's own environment (plasmashell's: WAYLAND_DISPLAY, XDG_SESSION_TYPE, XAUTHORITY...) -
+# user.sh's has none of them, so a Qt app started there was an X11 window (2026-10-23), not what the session starts.
+ses() { us "P=\$(pgrep -x plasmashell | head -1); while IFS= read -r -d '' kv; do export \"\$kv\"; done < /proc/\$P/environ; $1"; }
 rs() { printf '%s\n' "$1" > "$OUT/r.sh"; "$T/root.sh" "$OUT/r.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-DOLPHIN_MINE=0
+DOLPHIN_MINE=0 KATE_MINE=0
 restore() {
-  us "pkill -x gwenview; [ $DOLPHIN_MINE = 1 ] && pkill -x dolphin; true"
+  us "pkill -x gwenview; [ $DOLPHIN_MINE = 1 ] && pkill -x dolphin; [ $KATE_MINE = 1 ] && pkill -x kate; true"
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"
   sh_ "logcat -d -v time" | grep -E "WindowTasks|PowosWindow|PowosWindowFrames| runtime" > "$OUT/logcat.txt"
   echo "restored"
@@ -53,6 +59,16 @@ floats() {  # $1 task, $2 name: freeform and smaller than the screen
   local m b; m=$(mode "$1"); read -r b1 b2 b3 b4 <<<"$(bounds "$1")"; log "$2: task $1 $m bounds $b1,$b2 $b3,$b4"
   [ "$m" = mode=freeform ] || fail "$2's task $1 is $m, not a floating window"
   [ $((b3 - b1)) -lt $((W * 9 / 10)) ] || fail "$2's window is $((b3 - b1)) px wide on a $W px screen: full width"
+}
+# draws <task> <name>: a screencap; the task's window (its bounds, inset past the frame's edges) must not be black -
+# at least 20% of its pixels brighter than 24/255 (a KDE window is mostly light or mid-grey; a black one is ~0%).
+draws() {
+  local png="$OUT/$2.png" b1 b2 b3 b4 f; read -r b1 b2 b3 b4 <<<"$(bounds "$1")"
+  "$T/shot.sh" "$png" >/dev/null 2>&1 || fail "no screencap for $2 (shot.sh)"
+  f=$(ffmpeg -v error -i "$png" -vf "crop=$((b3 - b1 - 40)):$((b4 - b2 - 40)):$((b1 + 20)):$((b2 + 20)),scale=200:-1,format=gray" \
+      -f rawvideo - 2>/dev/null | python3 -c 'import sys; d=sys.stdin.buffer.read(); print(sum(1 for b in d if b > 24) * 100 // max(len(d), 1))')
+  log "$2: ${f:-?}% of its window drawn (not black)"
+  [ "${f:-0}" -ge 20 ] || fail "$2's window is black (${f:-?}% drawn) - $png"
 }
 
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
@@ -112,26 +128,37 @@ DT=$(new_tasks 30 "$before" | tail -1); chk dolphin
 sleep 2; floats "$DT" Dolphin; "$T/shot.sh" "$OUT/dolphin.png"
 [ "$(app_of "$DT")" = l:org.kde.dolphin ] && pass "Dolphin from the launcher floats (task $DT), windows.list names it" ||
   fail "Dolphin's task $DT is '$(app_of "$DT")' in windows.list"
+sleep 3; draws "$DT" dolphin; pass "Dolphin's window draws its content"
 
-# 3. An image opened in Gwenview from the session (as Dolphin's Open With does).
+# 2b. Kate from the launcher: floats and draws (e2e-desktop's 04-kate.png was black).
+[ "$(us 'pgrep -xc kate' | tail -1)" = 0 ] && KATE_MINE=1
 before=$(lin)
-# setsid: out of the user.sh session, whose end took a plain `nohup ... &` kioclient with it before Gwenview started
-# ("gwenview processes: 0", 2026-10-23 - likely; its log below says). KDE picks Gwenview (InitialPreference 8 over
-# Brave's 1 for image/png). Not any more (06:59): KIO opened the PNG in Brave (the user's file association - left
-# alone), which raised a KDE Wallet prompt as the new task ('none'). So the image is opened with Gwenview by name,
-# as Dolphin's "Open With > Gwenview" does: another app's window started from the session, the same path to a task.
-us "setsid -f gwenview $IMG >/tmp/linux-float-kio.log 2>&1 < /dev/null"
-GT=$(new_tasks 25 "$before"); sleep 3; chk gwenview
-log "kioclient said: $(us 'tail -3 /tmp/linux-float-kio.log' | tr '\n' ' ')"
-GT=$(comm -13 <(echo "$before") <(lin)); n=$(echo "$GT" | grep -c .)
-g=$(us 'pgrep -xc gwenview' | tail -1); log "new tasks: $(echo $GT) gwenview processes: $g"
-[ "$n" -ge 1 ] || fail "opening an image made no window task in 25 s (export-new?)"
-[ "$n" = 1 ] || fail "opening one image made $n tasks ($(echo $GT)): duplicates"
-GT=$(echo "$GT" | tail -1); floats "$GT" Gwenview; "$T/shot.sh" "$OUT/gwenview.png"
-ga=$(app_of "$GT"); [ "$ga" = l:org.kde.gwenview ] || fail "the image opened in '$ga' (task $GT), not Gwenview"
-[ "$g" = 1 ] || fail "$g Gwenview processes for one image"
-pass "an image opened from Dolphin's path floats as one Gwenview window (task $GT)"
-# Its frame's close: the task goes and, with export-new, so does the window.
-sh_ "am stack remove $GT"; sleep 2.5
-[ "$(us 'pgrep -xc gwenview' | tail -1)" = 0 ] && pass "closing its task closes Gwenview" || fail "Gwenview still runs after its task closed"
+r=$(hcall apps.launch "['l:org.kde.kate']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch l:org.kde.kate: $r"
+KT=$(new_tasks 30 "$before" | tail -1); chk kate
+[ -n "$KT" ] || fail "no window task for Kate within 30 s"
+sleep 4; floats "$KT" Kate; draws "$KT" kate; pass "Kate from the launcher floats (task $KT) and draws its content"
+
+# 3. Gwenview started from inside the session (Dolphin's "Open With > Gwenview": another app's window, no launch path
+# of PowOS's): one more floating task, and closing it closes Gwenview. Not through kioclient: KIO opened the PNG in
+# Brave (the user's file association - left alone). Once as the session starts it (a Wayland window), once as an X11
+# window (Xwayland: its wl_surface comes after KWin adds it, and export-new looked only then - kwin 0019).
+gwen() {  # $1 label, $2 extra environment
+  local before GT n g ga
+  before=$(lin)
+  ses "$2 setsid -f gwenview $IMG >/tmp/linux-float-gwen.log 2>&1 < /dev/null"
+  GT=$(new_tasks 25 "$before"); sleep 3; chk "gwenview $1"
+  GT=$(comm -13 <(echo "$before") <(lin)); n=$(echo "$GT" | grep -c .)
+  g=$(us 'pgrep -xc gwenview' | tail -1); log "Gwenview ($1): new tasks: $(echo $GT) gwenview processes: $g; it said: $(us 'grep -v -e udisks2 -e locale -e UTF-8 -e "more information" /tmp/linux-float-gwen.log | tail -3' | tr '\n' ' ')"
+  [ "$n" -ge 1 ] || fail "Gwenview ($1) made no window task in 25 s"
+  [ "$n" = 1 ] || fail "one Gwenview ($1) made $n tasks ($(echo $GT)): duplicates"
+  GT=$(echo "$GT" | tail -1); floats "$GT" "Gwenview ($1)"
+  ga=$(app_of "$GT"); [ "$ga" = l:org.kde.gwenview ] || fail "Gwenview ($1)'s task $GT is '$ga' in windows.list"
+  [ "$g" = 1 ] || fail "$g Gwenview processes for one image"
+  pass "Gwenview opened from the session ($1) floats as one window (task $GT)"
+  # Its frame's close: the task goes and, with export-new, so does the window.
+  sh_ "am stack remove $GT"; sleep 2.5
+  [ "$(us 'pgrep -xc gwenview' | tail -1)" = 0 ] && pass "closing its task closes Gwenview ($1)" || fail "Gwenview ($1) still runs after its task closed"
+}
+gwen wayland ""
+gwen x11 "QT_QPA_PLATFORM=xcb"
 echo "all passed; artefacts: $OUT"
