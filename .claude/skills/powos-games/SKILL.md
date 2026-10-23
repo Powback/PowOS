@@ -115,6 +115,34 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   <commit> tools/phone targets/android/session` copy (as bf-checker's job did) when the check needs only scripts.
 - adb.sh mounts each pushed path's dirname: a path with `..` pushes nothing ("cannot stat") - resolve it first.
 
+## Per-game compat policy: every Steam game, not just Broforce (pkgs/steam powos-steam-compat, pkgrel 23)
+- Each game runs one of: `native` (its Linux build, no compat tool: x86 under FEX, no Wine; FEX's GL/Vulkan thunks to
+  the phone's Mesa), `arm64` (proton-experimental-arm64, appid 4427310: Wine native, game code via arm64ec/wow64fex;
+  needs SLR 4 arm64 4185400, Steam fetches it at the first launch), `x86` (proton_experimental: all Wine under FEX).
+- Mode `auto` (new games): fastest MEASURED working tool (median tap->window, warm Steam samples first), else the
+  first the game has of native / arm64 / x86; a tool whose last launch failed is skipped. Mode `kept`: games that
+  already ran under Proton (compatdata/<id>/pfx/drive_c/users exists) keep their tool until `auto` - native would hide
+  saves kept in the prefix and swaps the depot. `pinned`: `powos game <x> compat native|arm64|x86`.
+- Builds per game come from appcache/appinfo.vdf (v29: string table at offset 8; launch entries' config.oslist).
+  2026-10-23: Broforce/RimWorld/Besiege linux+windows+macos, Teardown windows only; all four `kept`.
+- Written into config.vdf CompatToolMapping ONLY with Steam off: /usr/bin/steam runs `powos-steam-compat apply` in its
+  not-running branch (Steam rewrites config.vdf from memory at exit). A `set` while Steam runs waits for its next start
+  (resident Steam: `powos game <x> stop --steam`). State ~/.local/share/powos/steam-compat.json; config.vdf/localconfig.vdf
+  backups `<file>.powos-bak-<time>` (last 10).
+- Measured by powos-open-task (LaunchRecord: tap -> picked window, "fail" when none in WAIT_GAME_S; skipped when anything
+  downloaded meanwhile - steamapps/downloading non-empty or any manifest's LastUpdated changed - or for a resume;
+  POWOS_NO_LAUNCH_RECORD=1 off) and by bf-coldstart (`record` per run). `powos-steam-compat status` shows it all.
+- powos-open-task matches a game's window also by its process running under `reaper SteamLaunch AppId=<id>` (native
+  builds have their own class, e.g. Broforce.x86_64, not Proton's steam_app_<id>).
+- Environment for Steam and every game: /usr/lib/powos-steam/steam-env then ~/.config/powos/steam-env (KEY=VALUE,
+  empty value unsets), exported by /usr/bin/steam. Candidates go in only measured (bf-coldstart `env:K=V`).
+- Tests: test/tier1/test-steam-compat.sh (fake Steam tree). Install: build-pkgs.sh steam (needs pkgs/steam/
+  sysvipc-emu.tar.gz + out/pkgs/{fex-emu,gtk2} - copy from a checkout that has them, e.g. worktrees/games-launch),
+  then `queue.sh add <task> tools/phone/verify/pkg-install.sh <abs pkg path>` (pacman -U + rollback tar).
+- bf-coldstart works for any appid: `app:<id>` (`win:<title>` if the window isn't titled like the Steam name); the exe
+  stage = a process running a file from common/<installdir>/ whose exe is FEX or Wine. Setup tokens: cfg:x86|arm64|
+  native|auto, opt:vk|gl|base, env:K=V, keep (else mode + launch options are put back at the end).
+
 ## Causes found (don't re-investigate)
 - Every launch dies ~10-16 s into Wine, no window, gameprocess_log "exit code -1" (2026-10-23): the prefix's
   pfx/{system,user,userdef}.reg were all NUL bytes (size kept): wineserver saves them without fsync and the phone
