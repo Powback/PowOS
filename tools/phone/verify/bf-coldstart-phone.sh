@@ -15,6 +15,8 @@
 #             (ARM64: Wine native, only the game's code through FEX) | none = the game's native Linux build (Steam swaps
 #             the depot at the next launch: stage "update")
 #   opt:vk | opt:gl | opt:base         launch options: unity-screen + -force-vulkan | + -force-glcore | as installed
+#   env:K=V   K=V in the environment of the Steam this check starts (all it launches inherits it), e.g.
+#             env:PRESSURE_VESSEL_GENERATE_LOCALES=0
 #   keep      leave the last setup in place at the end (default: the compat tool + launch options as they were)
 # Also per run: Steam's state at the tap, shader cache sizes before/after, the Unity renderer (Player.log).
 # "STAGES <variant> ..." lines, RESULT last.
@@ -42,6 +44,7 @@ setup() {  # setup <token>
     cfg:native) $CFG tool $APP - ;;
     opt:vk) $CFG opts $APP "$(base_opts) -force-vulkan" ;; opt:gl) $CFG opts $APP "$(base_opts) -force-glcore" ;;
     opt:base) $CFG opts $APP "$(base_opts)" ;;
+    env:*=*) export "${1#env:}"; echo "== setup $1: exported for the Steam this check starts"; return 0 ;;
     *) fail setup "unknown setup token $1"; return 1 ;;
   esac
   CHANGED=1; echo "== setup $1: $($CFG get $APP)"
@@ -113,7 +116,7 @@ powos sleep never --remove steam >/dev/null 2>&1
 n=0
 [ $# -gt 0 ] || set -- cold steam fexcache fexcache
 for v in "$@"; do
-  case $v in keep) KEEP=1; continue ;; cfg:* | opt:*) setup "$v" || break; continue ;; esac
+  case $v in keep) KEEP=1; continue ;; cfg:* | opt:* | env:*) setup "$v" || break; continue ;; esac
   n=$((n + 1)); run "$v" "$n"
   if [ "$v" = fexcache ]; then
     pill "FEX: compiling the code cache"
