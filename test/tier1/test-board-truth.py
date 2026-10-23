@@ -441,10 +441,13 @@ class BoardTest(unittest.TestCase):
         self.assertIn("td-launch FAILED", m)
         self.assertNotIn("Broforce", m)
         self.assertIn("f1 x2", m)
-        # A dry run prints the digest but mails nothing and remembers nothing.
-        self.run_cli("check", "set", "chat-frost", "j4", "queued")
-        self.assertIn("nothing new", self.run_cli("sweep", "--dry-run").stdout)
+        # A dry run prints the digest but mails nothing and remembers nothing: the next real pass still mails it.
+        self.run_cli("task", "add", "Dry one")
+        self.old("dry-one")
+        self.assertIn("[stalled] Dry one", self.run_cli("sweep", "--dry-run").stdout)
         self.assertEqual(len(self.mails_sent()), 2)
+        self.run_cli("sweep")
+        self.assertIn("[stalled] Dry one", self.mails_sent()[2])
 
 
 class RefusalTest(unittest.TestCase):

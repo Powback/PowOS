@@ -940,6 +940,7 @@ coordinator lists new and recurring ones by count, and the top ones become perma
           KIND: refused | broken-tool | flaky-check | unclear-rule | slow | other
           AREA: what it's in - ship, gate, verify, board, comms, permissions, worktree, phone, apk, ...
           --repro is required: "none: <why it can't be reproduced>" when there's really no way.
+          --fixed SHA: logging one that's already fixed (a record of it; it reopens if it comes back).
   powos friction list [--all] [--fixed] [--area A] [--json]   open ones, most frequent first
   powos friction show <id>                     one, whole (details, repro, evidence)
   powos friction fix <id> --commit SHA [--note TEXT]   fixed for good; logged again later, it reopens
@@ -1077,10 +1078,11 @@ def sweep(now_ms=None, mail=True, to="coder"):
                            + ["send", to, "-", "--from", "board-sweep"], input=digest, text=True, capture_output=True)
         if r.returncode != 0:
             die(f"sweep: mail to {to} failed: {r.stderr.strip()}")
-    os.makedirs(os.path.dirname(sf), exist_ok=True)
-    with open(sf + ".tmp", "w") as f:
-        json.dump(seen, f)
-    os.replace(sf + ".tmp", sf)
+    if mail:   # a dry run remembers nothing: the next real pass still mails what it showed
+        os.makedirs(os.path.dirname(sf), exist_ok=True)
+        with open(sf + ".tmp", "w") as f:
+            json.dump(seen, f)
+        os.replace(sf + ".tmp", sf)
     return digest
 
 
