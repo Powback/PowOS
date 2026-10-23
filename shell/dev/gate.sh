@@ -218,4 +218,15 @@ if [ -n "$shots" ]; then
 fi
 [ $rc -le 1 ] || echo "FAIL gate: the browser run itself failed (exit $rc)"
 echo "gate: $([ $fail = 0 ] && echo pass || echo FAIL) in $(($(date +%s) - t0)) s ($base$([ -n "$overrides" ] && echo " + phone overrides")$([ ${#files[@]} -gt 0 ] && echo " + ${#files[@]} pushed file(s)"))"
+# A failure while the Mac is loaded (1-min load >= GATE_LOAD_FRICTION, 12) is friction: the gate may have failed for
+# the load, not the code (2026-10-23: loads 17-25 timed pages out). Logged in the background, never failing the gate.
+if [ $fail != 0 ]; then
+  load=$(sysctl -n vm.loadavg 2>/dev/null | awk '{print int($2)}'); [ -n "$load" ] || load=$(awk '{print int($1)}' /proc/loadavg 2>/dev/null)
+  cli=$SHELL_DIR/../lib/ai/agents/powos-agents-cli
+  if [ "${load:-0}" -ge "${GATE_LOAD_FRICTION:-12}" ] && [ -f "$cli" ] && [ -z "${GATE_NO_FRICTION:-}" ]; then
+    ( perl -e 'alarm 60; exec @ARGV' python3 "$cli" friction add --area gate --kind flaky-check \
+        "shell gate failed while the Mac's load was high" --repro "shell/dev/gate.sh ${files[*]:-} (load $load, ${GATE_PRIORITY:-agent} gate)" \
+        --details "gate FAIL at 1-min load $load after $(($(date +%s) - t0)) s; base $base" --by gate >/dev/null 2>&1 & ) 2>/dev/null
+  fi
+fi
 exit $fail

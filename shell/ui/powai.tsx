@@ -12,7 +12,7 @@ import { powos } from "../bridge.ts";
 import { chat, openSession, page, sessionView, stored } from "../state.ts";
 import { Pill, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
-import { boardState, openAgents, useAgents, useStallClock } from "../agents.ts";
+import { boardState, openAgents, useAgents, type BoardCheck } from "../agents.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { checkAlive, useDb, useRows } from "../apps/stdb.ts";
 import type { AgentMail, AgentSession, ChatItem, VerifyState } from "../types.ts";
@@ -221,6 +221,34 @@ const GROUP_OVER = 6;
 const sec = (ms: bigint | number) => Number(ms) / 1000;
 
 const WORK_QUERY = "SELECT * FROM work";
+/** The board's facts (apps/agents work_check: each task's phone checks, synced from the verify queue) and friction. */
+const checks = signal<BoardCheck[]>([]);
+/** A friction row (apps/agents `friction`: what got in an agent's way; `powos friction`). */
+interface FrictionRow {
+  id: string;
+  area: string;
+  kind: string;
+  title: string;
+  count: number;
+  status: string;
+  last: bigint | number;
+}
+const friction = signal<FrictionRow[]>([]);
+const CHECKS_QUERY = "SELECT * FROM work_check";
+const FRICTION_QUERY = "SELECT * FROM friction";
+
+/** The checks and friction while the board shows (no table on an older module: no rows, nothing breaks). */
+function FactsFeed({ db }: { db: ReturnType<typeof useDb> }) {
+  const cs = useRows<BoardCheck>(db, "work_check", CHECKS_QUERY);
+  const fr = useRows<FrictionRow>(db, "friction", FRICTION_QUERY);
+  useEffect(() => {
+    if (db.status === "connected") checks.value = cs;
+  }, [cs, db.status]);
+  useEffect(() => {
+    if (db.status === "connected") friction.value = fr;
+  }, [fr, db.status]);
+  return null;
+}
 
 /** Subscribed only while the page shows: the socket goes 5 s after it's left (apps/stdb.ts), so home holds none. */
 function WorkFeed() {
@@ -228,7 +256,6 @@ function WorkFeed() {
   const rows = useRows<WorkRow>(db, "work", WORK_QUERY);
   // Which agent holds which task (live, from the hooks): a row says "working" only while one does.
   useAgents();
-  useStallClock(board.value.filter((w) => w.status === "working"));
   useEffect(() => {
     if (db.status !== "connected") return;
     if (rows.length) {
@@ -255,7 +282,7 @@ function WorkFeed() {
     document.addEventListener("visibilitychange", look);
     return () => document.removeEventListener("visibilitychange", look);
   }, []);
-  return null;
+  return <FactsFeed db={db} />;
 }
 
 /**
@@ -451,7 +478,7 @@ function TestAll({ rows }: { rows: WorkRow[] }) {
 }
 
 /** An open item's state in words ("working" only while a live agent holds it); null for blocked/waiting/done. */
-const rowState = (w: WorkRow) => (w.status === "working" ? boardState(w, checkQueued(w)) : null);
+const rowState = (w: WorkRow) => (w.status === "working" ? boardState(w, checks.value) : null);
 
 /** Above a tracked row's title: the thin bar and "1/4 · the step". */
 function Progress({ w, done, total }: { w: WorkRow; done: number; total: number }) {
@@ -483,7 +510,7 @@ function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => 
   const tracked = total > 0 || !!w.step || commits.length > 0;
   // Who has it: "free" when nobody does (the board's "" or the catch-all "coder"), so a free task shows as one.
   const who = !w.owner || w.owner === "coder" ? "free" : w.owner;
-  // "working" only while a live agent holds it; else queued / awaiting check / stalled (agents.ts boardState).
+  // "working" only while a live agent holds it; else awaiting check / no check / stalled (agents.ts boardState).
   const state = rowState(w);
   const facts = [state, who, commits.length > 0 && `${commits.length} commit${commits.length > 1 ? "s" : ""}`, ago(moved) === "now" ? "just now" : `${ago(moved)} ago`].filter(Boolean).join(" · ");
   return (
@@ -546,6 +573,31 @@ function Fold({ label, rows, opened, tap }: { label: string; rows: WorkRow[]; op
 }
 
 const projectOf = (w: WorkRow) => w.project || "Other";
+/** Friction lines shown when the fold opens: the most frequent first. */
+const FRICTION_SHOWN = 8;
+
+/** "friction · N": what keeps getting in the agents' way (open, most frequent first) - a tap opens the list. */
+function Friction() {
+  const [open, setOpen] = useState(false);
+  const fs = friction.value.filter((f) => f.status === "open").sort((a, b) => b.count - a.count || Number(b.last) - Number(a.last));
+  if (!fs.length) return null;
+  return (
+    <>
+      <button type="button" class="ai-fold" onClick={() => setOpen(!open)} aria-expanded={open}>
+        {open ? "▾" : "▸"} friction · {fs.length}
+      </button>
+      {open &&
+        fs.slice(0, FRICTION_SHOWN).map((f) => (
+          <div key={f.id} class="ai-item">
+            <span class="ai-item-main">
+              <span class="ai-item-title">{f.title}</span>
+              <span class="ai-item-facts">{[`${f.count}×`, f.area, f.kind, `${ago(sec(f.last))} ago`].join(" · ")}</span>
+            </span>
+          </div>
+        ))}
+    </>
+  );
+}
 
 /**
  * In progress: what's being worked on, newest first - a dot and the title each. Grouped by project only when there are
@@ -585,6 +637,7 @@ function Work({ shown }: { shown: boolean }) {
       {!working.length && <div class="ai-work-empty muted">{boardSeen.value ? "nothing in progress" : "…"}</div>}
       <Fold label="paused" rows={paused} opened={opened} tap={tap} />
       <Fold label="done recently" rows={done} opened={opened} tap={tap} />
+      <Friction />
     </section>
   );
 }

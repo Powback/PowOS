@@ -165,29 +165,36 @@ export function since(ms: number) {
 }
 
 /**
- * A board task's state as the user should read it (the user, 2026-10-22: idle tasks showed "working"): "working" only
- * while a LIVE agent holds it - one whose `work` is the task (its own `task set <id> --step/--progress` calls,
- * powos-agentsd), else a live agent of the owner's role holding nothing else. Without one: "awaiting check" (the
- * verify queue's marker), "stalled" (started, nothing for STALL_MS) or "queued". Live = working or needs you, heard
- * from within agentsd's own 30-minute staleness (a mirror that stopped).
+ * A board task's state as the user should read it - the same rule as `powos agents task list` (lib/ai/agents/
+ * powos-agents-cli truth(); the user, 2026-10-23: "30 tasks show working while only 4 agents run"): "working" only while
+ * a LIVE agent holds it - one whose `work` is the task (its own `task set <id> --step/--progress` calls,
+ * powos-agentsd), else a live agent of the owner's role holding nothing else. Without one, from its phone checks (the
+ * module's work_check rows, synced from the verify queue): "awaiting check" (one queued), "no check" (nobody on it,
+ * nothing queued, but something to act on: a FAILED / INVALID / SKIPPED check, a pass nobody closed, a pushed fix
+ * with no check) or "stalled" (nothing at all: it needs an owner). Live = working or needs you, heard from within
+ * agentsd's own 30-minute staleness (a mirror that stopped).
  */
-export type BoardState = "working" | "queued" | "awaiting check" | "stalled";
+export type BoardState = "working" | "awaiting check" | "no check" | "stalled";
 export interface BoardTask {
   id: string;
   owner: string;
   step?: string;
-  steps?: string;
   commits?: string;
-  progressTotal?: number;
-  activity?: bigint | number;
-  updated: bigint | number;
 }
-export const STALL_MS = 20 * 60_000;
+/** A work_check row (apps/agents): a task's phone check, queued or its result. */
+export interface BoardCheck {
+  job: string;
+  task: string;
+  name: string;
+  state: string;
+  line: string;
+  at: bigint | number;
+  shipped: boolean;
+}
 const LIVE_MS = 30 * 60_000;
 const isLive = (a: Agent) => (a.state === "working" || a.state === "needs_you") && Date.now() - a.last < LIVE_MS;
-const movedAt = (w: BoardTask) => Number(w.activity) || Number(w.updated);
-/** Bumped at the next stall boundary (useStallClock): the only timer. */
-const stallClock = signal(0);
+/** tools/phone/verify/queue.sh's step marker: a check queued before the sweeper synced it. */
+export const QUEUED_STEP = "phone check queued";
 
 export function holder(w: BoardTask): Agent | null {
   let byRole: Agent | null = null;
@@ -200,26 +207,19 @@ export function holder(w: BoardTask): Agent | null {
   return byRole;
 }
 
-export function boardState(w: BoardTask, checkQueued: boolean): BoardState {
+/** [w]'s checks, oldest first. */
+export const checksOf = (w: BoardTask, checks: BoardCheck[]) =>
+  checks.filter((c) => c.task === w.id).sort((a, b) => Number(a.at) - Number(b.at));
+
+const RESULTS = new Set(["PASS", "FAIL", "SKIP", "INVALID", "none"]);
+
+export function boardState(w: BoardTask, checks: BoardCheck[]): BoardState {
   if (holder(w)) return "working";
-  if (checkQueued) return "awaiting check";
-  void stallClock.value;
-  return started(w) && Date.now() - movedAt(w) >= STALL_MS ? "stalled" : "queued";
-}
-
-/** Someone began it: a step, a bar, steps or commits. */
-const started = (w: BoardTask) => !!w.step || (w.progressTotal ?? 0) > 0 || [w.steps, w.commits].some((j) => !!j && j !== "[]");
-
-/** One timeout to the nearest moment one of [open] tasks turns stalled; nothing at rest. */
-export function useStallClock(open: BoardTask[]) {
-  const n = stallClock.value;
-  useEffect(() => {
-    const now = Date.now();
-    const next = Math.min(...open.map((w) => movedAt(w) + STALL_MS).filter((t) => t > now));
-    if (!Number.isFinite(next)) return;
-    const t = window.setTimeout(() => stallClock.value++, next - now + 50);
-    return () => clearTimeout(t);
-  }, [open, n]);
+  const mine = checksOf(w, checks);
+  if (mine.some((c) => c.state === "queued" || c.state === "running")) return "awaiting check";
+  if (!mine.length && w.step === QUEUED_STEP) return "awaiting check";
+  const pushed = !!w.commits && w.commits !== "[]";
+  return mine.some((c) => RESULTS.has(c.state)) || pushed ? "no check" : "stalled";
 }
 
 /** A state's mark (§1.1): working ●, idle ◐ (○ after 10 minutes), blocked ■, needs you !, paused ⏸, done ✓. */

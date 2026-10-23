@@ -130,8 +130,14 @@ run)
   trap 'if installing; then echo "$(date +%T) stopping: the install in flight finishes first"; while installing; do sleep 1; done; fi
     stop_ships $$; kill "$(cat "$Q/apk/pid" 2>/dev/null)" 2>/dev/null; rm -rf "$L"; exit 143' TERM
   SL=$HOME/.cache/powos-ship.lock VL=$HOME/.cache/powos-verify.lock
-  mail() { local s; s=$(mktemp "$Q/mail.XXXX")
+  mail() { local s t ev; s=$(mktemp "$Q/mail.XXXX")
     printf 'powos comms send %q %q --from ship-queue >/dev/null 2>&1 || true\n' "${SHIP_MAIL_TO:-coder}" "$1" > "$s"
+    # A failed/refused ship is friction too (powos friction: counted, so a recurring refusal shows up as the top item).
+    t=${1%% - log *}; ev=${1##* - log }; ev=${ev%% on the Mac*}
+    case "$1" in *FAILED*|*REFUSED*|*refused*)
+      printf 'powos friction add --area ship --kind %s %q --repro %q --evidence %q --by ship-queue >/dev/null 2>&1 || true\n' \
+        "$(case "$1" in *REFUSED*|*refused*) echo refused ;; *) echo broken-tool ;; esac)" "$t" \
+        "tools/phone/ship.sh request --silent on the same origin tip; the run's log: $ev" "$ev" >> "$s" ;; esac
     "$SR/tools/phone/user.sh" "$s" >/dev/null 2>&1 || echo "$(date +%T) mail failed: $1"; rm -f "$s"; }
   verify_held() { [ -d "$VL" ] && [ $(( $(date +%s) - $(stat -f %m "$VL" 2>/dev/null || stat -c %Y "$VL") )) -lt 600 ]; }
   ship_lock() {   # the cross-agent ship lock (ship-apk's): taken, or a dead holder's taken over

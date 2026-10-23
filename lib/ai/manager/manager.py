@@ -205,7 +205,37 @@ class Manager:
                 self._emit({"kind": "inbox", "text": text})
             else:
                 self._emit({"kind": "user", "text": text})
+                text = self._ask_turn(text)
             self._send_event(text)
+
+    def _ask_turn(self, text):
+        """A user turn as the user's ASK: recorded (the session store's asks.jsonl, then the board's user_ask table
+        through `powos agents ask add`, in the background) and sent with its id, so the manager links the task it
+        makes to it (the user, 2026-10-23: asks re-sent 3-5 times before one landed on the board). The chat shows the
+        user's words alone (the user event above). POWOS_MANAGER_ASKS=0 turns it off."""
+        if os.environ.get("POWOS_MANAGER_ASKS", "1") == "0" or not text.strip():
+            return text
+        aid = f"ask-{int(time.time() * 1000):x}"
+        rec = {"id": aid, "at": int(time.time() * 1000), "text": text, "by": self._agent_id or "manager"}
+        try:
+            with open(os.path.join(self.args.session_store, "asks.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+        def board():
+            cmd = (os.environ.get("POWOS_AGENTS_CMD") or "powos agents").split()
+            try:
+                subprocess.run(cmd + ["ask", "add", "--id", aid, "--by", rec["by"], "-"], input=text, text=True,
+                               encoding="utf-8", capture_output=True, timeout=20)
+            except (OSError, subprocess.SubprocessError):
+                pass   # asks.jsonl has it: the board sweeper's `ask sync` adds it later
+
+        threading.Thread(target=board, daemon=True).start()
+        return (f"{text}\n\n[user ask {aid}: if it asks for work, put it on the board linked to this ask - "
+                f"`powos agents task add \"<plain title>\" --owner <expert> --ask {aid}`, or "
+                f"`powos agents task set <existing task id> --ask {aid}` when it's already there; if it's not work "
+                f"(a question you answered, thanks), `powos agents ask none {aid} --reason \"...\"`.]")
 
     def take_inbox(self):
         """The manager's comms inbox as turn texts, oldest first, taken out of it. Each body whole - the turn is the

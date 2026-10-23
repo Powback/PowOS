@@ -205,6 +205,19 @@ def work_of(command):
     return out
 
 
+# The words of a permission refusal in a PostToolUseFailure's error (auto mode's classifier, a deny rule, a hook).
+REFUSAL = re.compile(r"permission|denied|not allowed|requires approval|was blocked|refused", re.I)
+
+
+def friction_cmd():
+    """`... friction add`: the agents CLI next to this file (the phone's /usr/lib/powos/ai/agents, the Mac's hooks
+    copy), POWOS_AGENTS_CLI, else `powos friction`."""
+    cli = os.environ.get("POWOS_AGENTS_CLI") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "powos-agents-cli")
+    if os.path.isfile(cli):
+        return [sys.executable, cli, "friction", "add"]
+    return ["powos", "friction", "add"]
+
+
 def safe_file(agent_id):
     return re.sub(r"[^A-Za-z0-9._-]", "_", agent_id)[:150]
 
@@ -226,6 +239,7 @@ class Spool:
         self.pending = {}  # tool_use_id -> (agent id, start ms)
         self.fails = {}  # agent id -> failures in a row
         self.described = {}  # session agent id -> [descriptions of Agent tool calls not started yet]
+        self.refused = {}  # (role, tool, hint) -> ms last logged as friction (one per hour)
         self.dirty_agents = set()
         self.dirty_rings = set()
         self.dirty_messages = False
@@ -331,6 +345,29 @@ class Spool:
             title = max(doing, key=lambda t: t["updated"])["subject"][:80]
             if a["title"] != title:
                 a["title"] = title
+
+    def refusal(self, me, tool, rec, ts):
+        """A tool call the permission system refused is friction (`powos friction add --kind refused`): logged once an
+        hour per (role, tool, hint) through the agents CLI, in the background. Only the whitelisted hint and the
+        refusal's own words (secrets cut) leave - never the tool's input or output."""
+        err = str(rec.get("error") or "")
+        if rec.get("is_interrupt") or not REFUSAL.search(err):
+            return
+        hint = hint_of(tool, rec.get("tool_input"))
+        role = me.get("role") or "agent"
+        key = (role, tool, hint)
+        if key in self.refused and ts - self.refused[key] < 3600_000:
+            return
+        self.refused[key] = ts
+        word = (hint.split() or [tool])[0]
+        cmd = friction_cmd() + ["--area", "permissions", "--kind", "refused",
+                                f"{tool} refused by the permission system: {word}",
+                                "--repro", f"{role} ran {tool}: {hint}", "--details", clean(scrub(err), 600), "--by", role]
+        try:
+            subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        except OSError:
+            pass
 
     def task(self, aid, tid, ts, subject=None, status=None, order=None):
         if not tid:
@@ -456,6 +493,7 @@ class Spool:
                 self.touch(me, ts, state="working" if me["state"] in ("blocked", "needs_you", "idle") else me["state"])
             else:
                 self.fails[aid] = self.fails.get(aid, 0) + 1
+                self.refusal(me, tool, rec, ts)
                 # §2: three failures in a row and it's stuck.
                 self.touch(me, ts, state="blocked" if self.fails[aid] >= 3 else "working")
         elif ev == "SubagentStart":

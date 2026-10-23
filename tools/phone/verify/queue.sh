@@ -120,7 +120,9 @@ add)
   echo "queued $(basename "$j" .job) - the result goes to board task $task"
   if [ -z "${QUEUE_NO_RUN:-}" ]; then
     # The board marker: the AI page offers "test now" on a task whose step says so (the result's step replaces it).
-    ( user_sh "$(printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true' "$task" "$QUEUED_STEP")" & ) >/dev/null 2>&1
+    # And the check itself (the board's work_check: its truthful "awaiting-check", and the done rule's facts).
+    ( user_sh "$(printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true\npowos agents check set %q %q queued --name %q --need %q >/dev/null 2>&1 || true' \
+        "$task" "$QUEUED_STEP" "$task" "$(basename "$j" .job)" "$name" "$need")" & ) >/dev/null 2>&1
     # The launchd agent's runner, started now; without the agent, a runner of our own.
     runner_up || agent_kick || { nohup "$0" run >> "$Q/runner.log" 2>&1 & echo $! > "$Q/runner.pid"; }
   fi ;;
@@ -167,7 +169,16 @@ run)
   rm -f "$QUEUE_COPY"; unset QUEUE_COPY   # bash keeps it open
   . "$here/window-lock.sh"
   board() {  # board <task> <text> [done] [image]: the result on the owner's task (closed too when done=1), as the session user
-    local s; s=$(printf 'powos agents task set %q --step %q %s >/dev/null 2>&1 || true\n' "$1" "$2" "${4:+--image $(printf %q "$4")}"
+    # First the check's result (work_check: the module's done rule reads it - "done" means this passed on a shipped
+    # build; the job's own vars: n, name, need, qt, r, line), then the step, then the close. An INVALID or SKIP result is
+    # friction too (a check that couldn't say yes or no).
+    local s st=${r%% *} sh=1; shipped "$need" "$qt" || sh=0
+    s=$(printf 'powos agents check set %q %q %q --name %q --line %q --need %q --shipped %s >/dev/null 2>&1 || true\n' \
+        "$1" "$n" "$st" "${name:-}" "$(printf %s "$line" | cut -c1-280)" "$need" "$sh"
+      if [ "$st" = SKIP ] || [ "$st" = INVALID ]; then
+        printf 'powos friction add --area verify --kind flaky-check %q --repro %q --evidence %q --by verify-queue >/dev/null 2>&1 || true\n' \
+          "check ${name:-$1} was $st: $(printf %s "$line" | cut -c1-100)" "tools/phone/verify/queue.sh add $1 $(printf %s "${cmd[*]}" | cut -c1-200)" "~/.cache/powos-verify-queue/done/$n.log"; fi
+      printf 'powos agents task set %q --step %q %s >/dev/null 2>&1 || true\n' "$1" "$2" "${4:+--image $(printf %q "$4")}"
       # Mail only what needs acting on (a FAIL, not a PASS or SKIP; QUEUE_MAIL_ALL=1 mails passes too): a pass is on the board already, and
       # each mail wakes the coordinator for a full turn (the self-optimize round, 2026-10-23: the top token cost).
       if [[ $2 == *FAIL* ]] || [ "${QUEUE_MAIL_ALL:-0}" = 1 ]; then
@@ -326,7 +337,7 @@ EOS
         [ $rc = 0 ] && grep -q '^FAIL' "$log" && rc=1
         mv "$j" "$Q/done/$n.job"
         # rc 3 six times = the user kept using the phone: a SKIP (no mail, not a fail), not a bug in the check.
-        if [ $rc = 3 ]; then r="SKIP phone in use"; else
+        if [ $rc = 3 ]; then r="SKIP phone in use"; elif [ $rc != 0 ] && grep -q '^INVALID' "$log"; then r="INVALID rc=$rc"; else
         r=$([ $rc = 0 ] && echo PASS || { [ "$why" = timeout ] && echo "FAIL timeout" || echo "FAIL rc=$rc"; }); fi; echo "$r: $(tail -1 "$log")" >> "$log"
         prev="${name:-$task}: $r"
         img=

@@ -44,8 +44,12 @@ Usage:
                                    Change a task. <task>: its exact id, or whole words of its title
                                    matching ONE task (an unknown id, a status word or
                                    several matches is refused).
-  powos agents task done <task> [--note TEXT] [--commit SHA]...
-                                   Mark it done (stays under "done recently" for a week).
+  powos agents task done <task> [--note TEXT] [--commit SHA]... [--no-check "<why>"]
+                                   Mark it done (stays under "done recently" for a week). Done means
+                                   its phone check PASSED on a shipped build: refused while its last
+                                   check FAILED or none passed, unless --no-check gives the reason no
+                                   device check is possible ("docs only", "Mac tooling, tier-1 tested").
+                                   queue.sh add --close <task> closes it on the pass by itself.
 
 How far along (the page shows a bar, the steps done / now / next, the commits and when it last moved):
   --progress N/M   step N of M (0/0 clears the bar). Without it, the count follows the steps (--plan/--step).
@@ -59,13 +63,38 @@ How far along (the page shows a bar, the steps done / now / next, the commits an
   --image-rm PATH  drop an image entry (a dead path); repeatable.
   task done marks the current step done and fills the bar.
   powos agents task rm <task>      Remove one (a duplicate, a mistake).
-  powos agents task list [--all] [--json] [--project P] [--unowned] [--owner ROLE]
-                                   The open tasks, by project (--all: with the done ones). --unowned: the
-                                   free ones (no owner, or only the generic "coder") - an idle expert takes
-                                   one with `task set <t> --owner <expert>`. --owner: one expert's.
+  powos agents task list [--all] [--json] [--project P] [--unowned] [--owner ROLE] [--state S] [--raw]
+                                   The open tasks, by project, each with its TRUE state and why (--all:
+                                   with the done ones; --raw: the status column as typed). --unowned:
+                                   the free ones (no owner, or only the generic "coder") - an idle expert
+                                   takes one with `task set <t> --owner <expert>`. --owner: one expert's.
+                                   --state: only one state (stalled, no-check, ...). --json adds
+                                   "truth" and "why" to each row.
   powos agents task infer          Give every task without a project the inferred one.
 
-Statuses: working | blocked | waiting (on the user) | done.
+Statuses (what you set): working | blocked | waiting (on the user) | done.
+The board shows each task's TRUE state, computed from facts - never from the status alone:
+  working         a live agent holds it: its own `task set <id> --step/--progress/--plan/--commit`
+                  (an agent claims a task by moving it; assigning --owner claims nothing), or a live
+                  agent of the owner's role that holds nothing else
+  awaiting-check  a phone check of it is queued (tools/phone/verify/queue.sh), maybe waiting for its ship
+  no-check        nobody on it, no check queued, but something to act on: a fix pushed with no check,
+                  a check that FAILED / was INVALID or SKIPPED, a pass nobody closed
+  stalled         nobody on it and no check at all - it needs an owner
+  blocked         status blocked or waiting (on the user), with the note as the reason
+  done            closed (its check passed, or --no-check)
+`powos agents sweep` (every 10 min from the Mac, tools/agents/board-sweep.sh) mails the coordinator ONE
+digest of the new or changed orphans (stalled / no-check), user asks with no task and new friction.
+
+Phone checks (the board's facts, written by the verify queue and the sweeper):
+  powos agents check list [<task>] [--json]   queued checks and results
+  powos agents check set <task> <job> <state> [--name N --line L --need SHA --shipped 0|1]
+  powos agents check sync <file|->            the queue as it is (`check scan` on the Mac makes it)
+The user's asks (the manager records each one; every ask becomes a task or is marked not work):
+  powos agents ask list [--untracked] [--json]   --untracked: the asks with no task
+  powos agents task add "<title>" --ask <ask-id> ...   (or task set <t> --ask <ask-id>)
+  powos agents ask link <ask-id> <task> | ask none <ask-id> --reason "a question, answered in chat"
+Friction (what got in the way, so it gets fixed for good): powos friction help.
 Projects group the page: one per product or area, "<product> · <area>" for PowOS's parts -
 "PowOS · phone UI", "PowOS · kernel", "PowOS · apps platform", "Shopping app", "SpaceTimeAI".
 Reuse a project name that's on the board (task list shows them) rather than a new spelling.
@@ -122,11 +151,16 @@ def call(reducer, *args):
     http(f"/v1/database/{DB}/call/{reducer}", json.dumps(list(args)).encode(), "application/json")
 
 
-def rows():
-    out = json.loads(http(f"/v1/database/{DB}/sql", b"SELECT * FROM work", "text/plain"))
+def table(name):
+    """Every row of one of the module's tables, as dicts."""
+    out = json.loads(http(f"/v1/database/{DB}/sql", f"SELECT * FROM {name}".encode(), "text/plain"))
     res = out[0]
     names = [e["name"]["some"] for e in res["schema"]["elements"]]
     return [dict(zip(names, r)) for r in res["rows"]]
+
+
+def rows():
+    return table("work")
 
 
 # Inference for a task given no --project: first match on owner, then on id + title words.
@@ -367,7 +401,7 @@ def resolve_commits(argv):
     if not argv or argv[0] not in ("add", "new", "set", "done"):
         return argv
     verb = "add" if argv[0] == "new" else argv[0]
-    o, rest = opts(argv[1:], ["owner", "status", "note", "title", "project", "id"] + TRACK)
+    o, rest = opts(argv[1:], ["owner", "status", "note", "title", "project", "id", "ask", "no-check"] + TRACK)
     wid = o.get("id") or (slug(" ".join(rest)) if verb == "add" else " ".join(rest))
     mention = wid if re.fullmatch(r"[a-z0-9][a-z0-9._-]{3,63}", wid or "") else None
     commits = (json.loads(o["commits-json"]) if o.get("commits-json") else []) + git_commits(o.get("commit") or [], mention)
@@ -398,13 +432,29 @@ def apply_track(w, o, done=False):
              new["commits"], new["images"])
 
 
+def no_check(wid, o):
+    """--no-check REASON: no device check is possible for it - recorded as its check (state none), which lets the
+    module's done rule close it."""
+    reason = (o.get("no-check") or "").strip()
+    if o.get("no-check") is not None and not reason:
+        die('--no-check needs the reason ("docs only", "Mac-side tooling, tested by test/tier1/...")')
+    if reason:
+        call("check_set", json.dumps({"job": f"nocheck:{wid}", "task": wid, "name": "no device check possible",
+                                      "state": "none", "line": reason}))
+
+
+def link_ask(o, wid):
+    if o.get("ask"):
+        call("user_ask_link", o["ask"], wid, "")
+
+
 def task(argv):
     verb = argv[0] if argv else "list"
     argv = argv[1:]
     if verb == "new":
         verb = "add"
     if verb == "add":
-        o, rest = opts(argv, ["owner", "status", "note", "id", "project"] + TRACK)
+        o, rest = opts(argv, ["owner", "status", "note", "id", "project", "ask", "no-check"] + TRACK)
         title = " ".join(rest).strip()
         if not title:
             die("usage: powos agents task add <title...> [--owner ROLE] [--status S] [--note TEXT]")
@@ -415,30 +465,39 @@ def task(argv):
         if dup:
             print(f"powos agents: already on the board: {dup['title']!r} [{dup['id']}] (task set to change it)",
                   file=sys.stderr)
+            link_ask(o, dup["id"])
             print(dup["id"])
             return
         owner = o.get("owner", "")
         project = o.get("project") or infer_project(owner, wid, title)
-        call("work_set", wid, title, owner, status_of(o.get("status")) or "working", o.get("note", ""), project)
+        st = status_of(o.get("status")) or "working"
+        if st == "done":
+            die("a new task isn't done: add it, then `task done` once its check passed")
+        call("work_set", wid, title, owner, st, o.get("note", ""), project)
         w = next((w for w in rows() if w["id"] == wid), None)
         if w:
             apply_track(w, o)
+        link_ask(o, wid)
         print(wid)
     elif verb == "set":
-        o, rest = opts(argv, ["owner", "status", "note", "title", "project"] + TRACK)
+        o, rest = opts(argv, ["owner", "status", "note", "title", "project", "ask", "no-check"] + TRACK)
         if not rest:
             die("usage: powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT]")
         w = find(" ".join(rest))
         st = status_of(o.get("status"))
+        if st == "done":
+            no_check(w["id"], o)
         call("work_set", w["id"], o.get("title", ""), o.get("owner", ""), st, o.get("note", ""),
              o.get("project", ""))
         apply_track(w, o, done=st == "done")
+        link_ask(o, w["id"])
         print(w["id"])
     elif verb == "done":
-        o, rest = opts(argv, ["note", "commit*", "image*", "image-rm*", "commits-json"])
+        o, rest = opts(argv, ["note", "commit*", "image*", "image-rm*", "commits-json", "no-check"])
         if not rest:
-            die("usage: powos agents task done <task> [--note TEXT]")
+            die('usage: powos agents task done <task> [--note TEXT] [--no-check "<why no device check is possible>"]')
         w = find(" ".join(rest))
+        no_check(w["id"], o)
         call("work_set", w["id"], "", "", "done", o.get("note", ""), "")
         apply_track(w, o, done=True)
         print(w["id"])
@@ -456,8 +515,11 @@ def task(argv):
                 n += 1
         print(f"{n} task(s) given a project")
     elif verb in ("list", "ls"):
-        o, _ = opts(argv, ["all!", "json!", "project", "unowned!", "owner"])
-        ws = [w for w in rows() if (o.get("all") or w["status"] != "done")
+        o, _ = opts(argv, ["all!", "json!", "project", "unowned!", "owner", "state", "raw!"])
+        if o.get("state") and o["state"] not in TRUTH:
+            die(f"--state is one of {' | '.join(TRUTH)}")
+        ws = [w for w in board_truth() if (o.get("all") or w["status"] != "done")
+              and (not o.get("state") or w["truth"] == o["state"])
               and (not o.get("project") or w.get("project") == o["project"])
               and (not o.get("unowned") or (w.get("owner") or "") in GENERIC_OWNERS)
               and (not o.get("owner") or w.get("owner") == o["owner"])]
@@ -467,6 +529,9 @@ def task(argv):
             return
         if not ws:
             print("no tasks (powos agents task add <title>)")
+        else:
+            c = counts(ws)
+            print("board: " + ", ".join(f"{c[s]} {s}" for s in TRUTH if c[s]) + "  (truth from agents, checks, ships)")
         last = None
         for w in ws:
             if w.get("project") != last:
@@ -477,11 +542,551 @@ def task(argv):
             at = int(w.get("activity") or 0) or int(w["updated"])
             bar = f" {w['progress_done']}/{w['progress_total']}" if int(w.get("progress_total") or 0) else ""
             step = f" · {w['step']}" if w.get("step") else ""
-            print(f"{w['status']:<8} {w['title']}{bar}{step}  ({owner}, {ago(at)})  [{w['id']}]{note}")
+            state = w["status"] if o.get("raw") else w["truth"]
+            print(f"{state:<14} {w['title']}{bar}{step}  ({owner}, {ago(at)})  [{w['id']}]{note}")
+            if not o.get("raw") and w["truth"] != "done":
+                print(f"               why: {w['why']}")
             for c in _jl(w.get("commits", "")):
                 print(f"           {c.get('sha', '')[:9]} {c.get('subject', '')}")
     else:
         die(f"unknown: task {verb} (powos agents help)")
+
+
+# ---- the board's truth: what each task really is, from facts (the user, 2026-10-23: "30 tasks show working while
+# only 4 agents run"; the status column is what someone once typed, not what is happening) ---------------------------
+
+# The states, in the order the board lists them.
+TRUTH = ("working", "awaiting-check", "no-check", "stalled", "blocked", "done")
+LIVE_MS = 30 * 60_000          # agentsd's own staleness: an agent heard from in the last 30 min is live
+CHECK_RESULTS = ("PASS", "FAIL", "SKIP", "INVALID", "none")
+QUEUED_STEP = "phone check queued"   # tools/phone/verify/queue.sh's marker (the board's fallback before a sync)
+
+
+def spool_files():
+    """The agents' spool snapshots this host sees: its own state.json and every mirrored host's (the Mac's agents on
+    the phone: mirror/mac.json). POWOS_AGENTS_SPOOLS (':'-separated files) overrides (tests)."""
+    if os.environ.get("POWOS_AGENTS_SPOOLS") is not None:
+        return [f for f in os.environ["POWOS_AGENTS_SPOOLS"].split(":") if f]
+    d = os.environ.get("POWOS_AGENTS_DIR")
+    if not d:
+        run = os.environ.get("XDG_RUNTIME_DIR")
+        user = os.environ.get("USER") or os.environ.get("LOGNAME") or "u"
+        d = os.path.join(run, "agents") if run else os.path.join(os.environ.get("TMPDIR") or "/tmp", f"powos-agents-{user}")
+    out = [os.path.join(d, "state.json")]
+    try:
+        out += sorted(os.path.join(d, "mirror", f) for f in os.listdir(os.path.join(d, "mirror")) if f.endswith(".json"))
+    except OSError:
+        pass
+    return out
+
+
+def live_agents(now_ms=None):
+    """Every live agent (working or needs you, heard from within LIVE_MS), from the spool files."""
+    now_ms = now_ms or int(time.time() * 1000)
+    out = []
+    for f in spool_files():
+        try:
+            with open(f) as fh:
+                snap = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        for a in snap.get("agents") or []:
+            if a.get("state") in ("working", "needs_you") and now_ms - int(a.get("last") or 0) < LIVE_MS:
+                out.append(a)
+    return out
+
+
+def holders(agents):
+    """task id -> who holds it: an agent whose `work` is the task (its own `task set <id> --step/--progress/--plan/
+    --commit`, powos-agentsd's work_of()), else a live agent of the owner's role holding nothing ("@role")."""
+    held, idle_roles = {}, {}
+    for a in agents:
+        who = a.get("title") or a.get("role") or a.get("id", "?")
+        if a.get("work"):
+            held.setdefault(a["work"], f"{a.get('role') or 'agent'}: {who}"[:80])
+        else:
+            idle_roles.setdefault(a.get("role") or "", f"{a.get('role')}: {who}"[:80])
+    return held, idle_roles
+
+
+def checks_by_task(checks):
+    out = {}
+    for c in checks:
+        out.setdefault(c.get("task", ""), []).append(c)
+    for v in out.values():
+        v.sort(key=lambda c: int(c.get("at") or 0))
+    return out
+
+
+def _check_name(c):
+    return c.get("name") or c.get("job", "?")
+
+
+def truth(w, held, idle_roles, checks, now_ms=None):
+    """(state, why) of one board row, from facts only: a live agent holding it, its phone checks (queued, results),
+    its commits, its status (blocked/waiting/done are the owner's word and stay). One of TRUTH."""
+    now_ms = now_ms or int(time.time() * 1000)
+    status, owner = w.get("status") or "working", (w.get("owner") or "")
+    if status == "done":
+        return "done", w.get("note") or ""
+    h = held.get(w["id"]) or (idle_roles.get(owner) if owner and owner not in GENERIC_OWNERS else None)
+    if h:
+        return "working", f"{h} has it"
+    if status in ("blocked", "waiting"):
+        why = w.get("note") or "no reason given"
+        return "blocked", ("waiting on the user: " if status == "waiting" else "") + why
+    queued = [c for c in checks if c.get("state") in ("queued", "running")]
+    if queued:
+        c = queued[-1]
+        ship = "" if c.get("shipped", True) else f", waits for its ship ({(c.get('need') or '')[:9]})"
+        return "awaiting-check", f"check {_check_name(c)} {c['state']}{ship}"
+    if not checks and w.get("step") == QUEUED_STEP:
+        return "awaiting-check", "check queued (the queue not synced yet)"
+    results = [c for c in checks if c.get("state") in CHECK_RESULTS]
+    last = results[-1] if results else None
+    if last and last["state"] in ("FAIL", "INVALID", "SKIP"):
+        word = {"FAIL": "FAILED", "INVALID": "was INVALID", "SKIP": "was SKIPPED"}[last["state"]]
+        return "no-check", f"last check {_check_name(last)} {word}: {last.get('line', '')[:120]} - nobody on it"
+    if last and last["state"] == "PASS":
+        return "no-check", f"check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago - close it or queue the next check"
+    if last and last["state"] == "none":
+        return "no-check", f"no device check possible ({last.get('line', '')[:80]}) - close it"
+    commits = _jl(w.get("commits", ""))
+    if commits:
+        return "no-check", f"fix pushed ({len(commits)} commit{'s' if len(commits) != 1 else ''}), no phone check queued"
+    gone = f"; owner {owner} isn't running" if owner and owner not in GENERIC_OWNERS else ""
+    return "stalled", f"nobody on it and no check{gone}"
+
+
+def board_truth(ws=None, checks=None, agents=None, now_ms=None):
+    """Every row with its `truth` and `why` (added to a copy of the row)."""
+    ws = rows() if ws is None else ws
+    if checks is None:
+        try:
+            checks = table("work_check")
+        except (Down, SystemExit):
+            checks = []
+    held, idle_roles = holders(live_agents(now_ms) if agents is None else agents)
+    by = checks_by_task(checks)
+    out = []
+    for w in ws:
+        st, why = truth(w, held, idle_roles, by.get(w["id"], []), now_ms)
+        out.append(dict(w, truth=st, why=why))
+    return out
+
+
+def counts(ws):
+    c = {s: 0 for s in TRUTH}
+    for w in ws:
+        c[w["truth"]] = c.get(w["truth"], 0) + 1
+    return c
+
+
+# ---- phone checks (the work_check table) ---------------------------------------------------------------------------
+
+
+def check_cmd(argv):
+    verb = argv[0] if argv else "list"
+    argv = argv[1:]
+    if verb == "set":
+        o, rest = opts(argv, ["name", "line", "need", "shipped", "at"])
+        if len(rest) != 3:
+            die("usage: powos agents check set <task> <job> <queued|running|PASS|FAIL|SKIP|INVALID|none> [--name N] [--line L] [--need SHA] [--shipped 0|1]")
+        task_, job, state = rest
+        c = {"job": job, "task": task_, "state": state, "name": o.get("name", ""), "line": o.get("line", ""),
+             "need": o.get("need", ""), "shipped": o.get("shipped", "1") != "0", "at": int(o.get("at") or 0)}
+        call("check_set", json.dumps(c))
+    elif verb == "sync":
+        if len(argv) != 2 or argv[0] != "--json-text":
+            die("usage: powos agents check sync <file.json|->  (a JSON array: `check scan` makes it)")
+        data = argv[1]
+        json.loads(data)
+        call("check_sync", data)
+        print(f"{len(json.loads(data))} check(s) synced")
+    elif verb == "scan":
+        o, _ = opts(argv, ["queue", "repo", "days"])
+        print(json.dumps(scan_queue(o.get("queue"), o.get("repo"), int(o.get("days") or 7))))
+    elif verb in ("list", "ls"):
+        o, rest = opts(argv, ["json!"])
+        cs = table("work_check")
+        if rest:
+            cs = [c for c in cs if c["task"] == rest[0]]
+        cs.sort(key=lambda c: int(c.get("at") or 0))
+        if o.get("json"):
+            print(json.dumps(cs, indent=1))
+            return
+        for c in cs:
+            print(f"{c['state']:<8} {c['task']}  {_check_name(c)}  {ago(int(c['at']))}  {c.get('line', '')[:100]}")
+    else:
+        die(f"unknown: check {verb} (powos agents help)")
+
+
+def _git_ok(repo, *a):
+    try:
+        return subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, timeout=20).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _git_out(repo, *a):
+    try:
+        r = subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, timeout=20)
+        return r.stdout if r.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def shipped(repo, need, live, inst):
+    """The commit [need] is on the phone: in the live shell ([live], the ship service's tip) - or what it changed is
+    none of the shell - and in the installed APK ([inst]) when it changed the APK's inputs. Unknown (no commit, not in
+    [repo]): True, as queue.sh's shipped() runs it anyway."""
+    if not need or not repo or not _git_ok(repo, "cat-file", "-e", f"{need}^{{commit}}"):
+        return True
+
+    def changed(a, b, path):
+        return [p for p in _git_out(repo, "diff", "--name-only", a, b, "--", path).split() if not p.endswith("version.properties")]
+
+    if inst and not _git_ok(repo, "merge-base", "--is-ancestor", need, inst) and (
+            changed(inst, need, "targets/android/app") or changed(inst, need, "targets/android/build-app.sh")):
+        return False
+    if not live or _git_ok(repo, "merge-base", "--is-ancestor", need, live):
+        return True
+    base = _git_out(repo, "merge-base", live, need).strip()
+    return not changed(base, need, "shell") if base else False
+
+
+def _sh_vars(text):
+    """A queue job file's task=/name=/need=/qt= lines (printf %q values, unquoted the simple way)."""
+    import shlex
+
+    out = {}
+    for line in text.splitlines():
+        k, eq, v = line.partition("=")
+        if eq and re.fullmatch(r"[a-z]+", k) and not v.startswith("("):
+            try:
+                out[k] = shlex.split(v)[0] if v.strip() else ""
+            except ValueError:
+                out[k] = v
+    return out
+
+
+def _result_of(log):
+    """(state, line, at) of a finished job's log: the runner appends "PASS|FAIL ...|SKIP ...: <last line>"."""
+    try:
+        with open(log, errors="replace") as f:
+            lines = [x.rstrip("\n") for x in f.readlines()[-400:]]
+        at = int(os.path.getmtime(log) * 1000)
+    except OSError:
+        return None
+    if not lines:
+        return None
+    tail = lines[-1]
+    m = re.match(r"(PASS|FAIL|SKIP|INVALID)\b", tail)
+    if not m:
+        return None
+    state = m.group(1)
+    if state == "FAIL" and any(x.startswith("INVALID") for x in lines):
+        state = "INVALID"
+    first_fail = next((x for x in lines if x.startswith(("FAIL", "INVALID"))), "")
+    line = first_fail if state in ("FAIL", "INVALID") and first_fail else tail
+    return state, line, at
+
+
+def scan_queue(qdir=None, repo=None, days=7):
+    """The verify queue as check rows (check_sync's input): every queued job (running: the one the runner's status
+    names), and every finished one of the last [days] days with its result. Run on the Mac (the queue's host)."""
+    q = qdir or os.path.expanduser("~/.cache/powos-verify-queue")
+    repo = repo or os.environ.get("POWOS_VERIFY_REPO") or os.path.expanduser(
+        "~/Projects/PowOS/.claude/worktrees/verify-runner")
+    ship = os.environ.get("SHIP_DIR") or os.path.expanduser("~/.cache/powos-ship-queue")
+
+    def read(p):
+        try:
+            with open(p) as f:
+                return f.read().strip()
+        except OSError:
+            return ""
+
+    live, inst = read(os.path.join(ship, "live")), read(os.path.expanduser("~/.cache/powos-installed-commit"))
+    out, cutoff = [], (time.time() - days * 86400) * 1000
+    for d, done in ((q, False), (os.path.join(q, "done"), True)):
+        try:
+            names = sorted(f for f in os.listdir(d) if f.endswith(".job"))
+        except OSError:
+            continue
+        for f in names:
+            v = _sh_vars(read(os.path.join(d, f)))
+            job = f[:-4]
+            if not v.get("task"):
+                continue
+            row = {"job": job, "task": v["task"], "name": v.get("name", ""), "need": v.get("need", ""),
+                   "at": int(v.get("qt") or 0) * 1000 or int(os.path.getmtime(os.path.join(d, f)) * 1000)}
+            if done:
+                r = _result_of(os.path.join(d, job + ".log"))
+                if not r or r[2] < cutoff:
+                    continue
+                row.update(state=r[0], line=r[1], at=r[2], shipped=shipped(repo, row["need"], live, inst))
+            else:
+                row.update(state="queued", line="", shipped=shipped(repo, row["need"], live, inst))
+            out.append(row)
+    return out
+
+
+# ---- the user's asks -----------------------------------------------------------------------------------------------
+
+
+def asks_file():
+    return os.environ.get("POWOS_ASKS_FILE") or os.path.join(
+        os.environ.get("AI_STATE_DIR") or os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "powos", "ai"),
+        "manager", "asks.jsonl")
+
+
+def ask_cmd(argv):
+    verb = argv[0] if argv else "list"
+    argv = argv[1:]
+    if verb == "add":
+        o, rest = opts(argv, ["id", "by"])
+        text = " ".join(rest)
+        aid = o.get("id") or f"ask-{int(time.time() * 1000):x}"
+        call("user_ask_add", json.dumps({"id": aid, "text": text, "by": o.get("by", "manager")}))
+        print(aid)
+    elif verb == "link":
+        if len(argv) != 2:
+            die("usage: powos agents ask link <ask-id> <task>")
+        w = find(argv[1])
+        call("user_ask_link", argv[0], w["id"], "")
+        print(f"{argv[0]} -> {w['id']}")
+    elif verb == "none":
+        o, rest = opts(argv, ["reason"])
+        if len(rest) != 1 or not o.get("reason"):
+            die('usage: powos agents ask none <ask-id> --reason "why it is not work (a question answered in chat)"')
+        call("user_ask_link", rest[0], "", o["reason"])
+    elif verb == "sync":
+        n = sync_asks()
+        print(f"{n} ask(s) recorded from {asks_file()}")
+    elif verb in ("list", "ls"):
+        o, _ = opts(argv, ["untracked!", "json!", "older"])
+        asks = untracked_asks(int(o.get("older") or 0)) if o.get("untracked") else sorted(table("user_ask"), key=lambda a: int(a["at"]))
+        if o.get("json"):
+            print(json.dumps(asks, indent=1))
+            return
+        if not asks:
+            print("no asks" + (" without a task" if o.get("untracked") else ""))
+        for a in asks:
+            link = a["task"] or (f"not work: {a['none']}" if a["none"] else "NO TASK")
+            print(f"{a['id']}  {ago(int(a['at']))} ago  [{link}]  {_line(a['text'])[:140]}")
+    else:
+        die(f"unknown: ask {verb} (powos agents help)")
+
+
+def sync_asks():
+    """The manager's own log of the user's asks (asks.jsonl, written before each turn) into the board - a turn whose
+    recording failed (the module was down) is not lost."""
+    try:
+        with open(asks_file()) as f:
+            mine = [json.loads(x) for x in f if x.strip()]
+    except (OSError, ValueError):
+        return 0
+    have = {a["id"] for a in table("user_ask")}
+    n = 0
+    for a in mine[-200:]:
+        if a.get("id") and a["id"] not in have and a.get("text"):
+            call("user_ask_add", json.dumps({"id": a["id"], "text": a["text"], "by": a.get("by", "manager"), "at": a.get("at", 0)}))
+            n += 1
+    return n
+
+
+def untracked_asks(older_s=0):
+    now = time.time() * 1000
+    return sorted((a for a in table("user_ask") if not a["task"] and not a["none"] and now - int(a["at"]) >= older_s * 1000),
+                  key=lambda a: int(a["at"]))
+
+
+# ---- friction ------------------------------------------------------------------------------------------------------
+
+FRICTION_KINDS = ("refused", "broken-tool", "flaky-check", "unclear-rule", "slow", "other")
+FRICTION_HELP = """powos friction - what got in the way, logged where it gets fixed for good
+
+Hit friction (a refusal, a broken or flaky tool, an unclear rule, something slow)? Log it BEFORE you work
+around it. The same area + kind + title counts up (no duplicates); the board sweeper's digest to the
+coordinator lists new and recurring ones by count, and the top ones become permanent fixes.
+
+  powos friction add --area AREA --kind KIND "<title: what happened, one line>"
+                     --repro "<how to make it happen again: the command or the steps>"
+                     [--details TEXT | --details -]   the whole story (stdin with -): what you did, what
+                                                      you saw, what you expected, how you got around it
+                     [--evidence PATH] [--by ROLE]
+          KIND: refused | broken-tool | flaky-check | unclear-rule | slow | other
+          AREA: what it's in - ship, gate, verify, board, comms, permissions, worktree, phone, apk, ...
+          --repro is required: "none: <why it can't be reproduced>" when there's really no way.
+  powos friction list [--all] [--fixed] [--area A] [--json]   open ones, most frequent first
+  powos friction show <id>                     one, whole (details, repro, evidence)
+  powos friction fix <id> --commit SHA [--note TEXT]   fixed for good; logged again later, it reopens
+
+Tools log their own: a ship refusal or failure (ship.sh), a shell gate failure under Mac load (gate.sh),
+an INVALID or SKIPPED phone check (queue.sh), a permission refusal of an agent's tool call (powos-agentsd).
+Off the phone (the Mac): python3 lib/ai/agents/powos-agents-cli friction ...  (tools/agents/friction).
+"""
+
+
+def friction_cmd(argv):
+    verb = argv[0] if argv else "list"
+    argv = argv[1:]
+    if verb in ("help", "--help", "-h"):
+        print(FRICTION_HELP, end="")
+    elif verb == "add":
+        friction_add(argv)
+    elif verb == "fix":
+        o, rest = opts(argv, ["commit", "note"])
+        if len(rest) != 1 or not o.get("commit"):
+            die("usage: powos friction fix <id> --commit SHA [--note TEXT]")
+        sha = git_commits([o["commit"]])[0]["sha"] if re.fullmatch(r"[0-9a-fA-F]{4,40}", o["commit"]) else die("--commit takes a sha")
+        call("friction_fix", rest[0], sha, o.get("note", ""))
+        print(rest[0])
+    elif verb == "show":
+        f = next((x for x in table("friction") if x["id"] in argv), None) or die(f"no friction {' '.join(argv)!r}")
+        for k in ("id", "status", "area", "kind", "title", "count", "reopened", "by", "repro", "evidence", "details",
+                  "fix_commit", "fix_note"):
+            if f.get(k) not in ("", 0, None) or k in ("repro",):
+                print(f"{k}: {f[k]}")
+        print(f"first: {ago(int(f['first']))} ago, last: {ago(int(f['last']))} ago")
+    elif verb in ("list", "ls"):
+        o, _ = opts(argv, ["all!", "fixed!", "area", "json!"])
+        fs = [f for f in table("friction") if (o.get("all") or (f["status"] == "fixed") == bool(o.get("fixed")))
+              and (not o.get("area") or f["area"] == o["area"])]
+        fs.sort(key=lambda f: (-int(f["count"]), -int(f["last"])))
+        if o.get("json"):
+            print(json.dumps(fs, indent=1))
+            return
+        if not fs:
+            print("no friction logged" if not o.get("fixed") else "nothing fixed yet")
+        for f in fs:
+            fixed = f"  fixed {f['fix_commit'][:9]}" if f["status"] == "fixed" else ""
+            back = f"  reopened x{f['reopened']}" if int(f.get("reopened") or 0) else ""
+            print(f"{f['id']:<5} x{f['count']:<3} [{f['area']}/{f['kind']}] {f['title']}  ({ago(int(f['last']))} ago){fixed}{back}")
+            if f.get("repro"):
+                print(f"            repro: {_line(f['repro'])[:150]}")
+    else:
+        die(f"unknown: friction {verb} (powos friction help)")
+
+
+def friction_add(argv):
+    o, rest = opts(argv, ["area", "kind", "repro", "details", "evidence", "by", "fixed"])
+    title = " ".join(rest).strip()
+    if not title or not o.get("area") or not o.get("kind"):
+        die('usage: powos friction add --area AREA --kind KIND "<title>" --repro "<how to reproduce>" [--details TEXT|-]')
+    if o["kind"] not in FRICTION_KINDS:
+        die(f"--kind is one of {' | '.join(FRICTION_KINDS)}")
+    if not (o.get("repro") or "").strip():
+        die('--repro is required (the command or steps that make it happen again; "none: <why>" if there is no way)')
+    details = o.get("details", "")
+    item = {"area": o["area"], "kind": o["kind"], "title": title, "details": details, "repro": o["repro"],
+            "evidence": o.get("evidence", ""), "by": o.get("by") or os.environ.get("COMMS_AGENT_ID") or "",
+            "fixed": o.get("fixed", "")}
+    call("friction_add", json.dumps(item, ensure_ascii=False))
+    f = next((x for x in table("friction") if x["title"] == _line(title)[:160] and x["area"] == o["area"].strip().lower()), None)
+    print(f"{f['id']} x{f['count']}" if f else "logged")
+
+
+# ---- the sweeper: what nobody is on, once, to the coordinator -------------------------------------------------------
+
+SWEEP_GRACE_MS = 10 * 60_000   # a task this fresh (just added, just moved) isn't an orphan yet
+ASK_GRACE_S = 10 * 60          # an ask the manager had 10 minutes to put on the board
+
+
+def sweep_state_file():
+    return os.environ.get("POWOS_SWEEP_STATE") or os.path.join(
+        os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "powos", "board-sweep.json")
+
+
+def orphans(ws, now_ms):
+    """The rows nobody is on: stalled or no-check (a FAIL/INVALID/SKIP nobody picked up, a pass not closed, a fix
+    with no check), and blocked ones without a reason; each past SWEEP_GRACE_MS since it last moved."""
+    out = []
+    for w in ws:
+        moved = int(w.get("activity") or 0) or int(w.get("updated") or 0)
+        if now_ms - moved < SWEEP_GRACE_MS:
+            continue
+        if w["truth"] in ("stalled", "no-check") or (w["truth"] == "blocked" and w["why"].endswith("no reason given")):
+            out.append(w)
+    return out
+
+
+def _sig(*parts):
+    return re.sub(r"\d+[smhd] ago", "", " | ".join(str(p) for p in parts))
+
+
+def sweep(now_ms=None, mail=True, to="coder"):
+    """One pass: the board's truth, its orphans, the user's asks without a task, new/recurring friction - and ONE
+    digest of what's new or changed since the last pass to [to]. Returns the digest ("" = nothing new)."""
+    now_ms = now_ms or int(time.time() * 1000)
+    try:
+        sync_asks()
+    except (Down, SystemExit):
+        pass
+    ws = board_truth(now_ms=now_ms)
+    open_ = [w for w in ws if w["truth"] != "done"]
+    sf = sweep_state_file()
+    try:
+        with open(sf) as f:
+            prev = json.load(f)
+    except (OSError, ValueError):
+        prev = {}
+    seen = {"tasks": {}, "asks": {}, "friction": {}}
+    new_tasks, new_asks, new_fr = [], [], []
+    for w in orphans(open_, now_ms):
+        sig = _sig(w["truth"], w["why"])
+        seen["tasks"][w["id"]] = sig
+        if prev.get("tasks", {}).get(w["id"]) != sig:
+            new_tasks.append(w)
+    for a in untracked_asks(ASK_GRACE_S):
+        seen["asks"][a["id"]] = 1
+        if a["id"] not in prev.get("asks", {}):
+            new_asks.append(a)
+    for f in table("friction"):
+        if f["status"] != "open":
+            continue
+        seen["friction"][f["id"]] = int(f["count"])
+        if int(f["count"]) > int(prev.get("friction", {}).get(f["id"], 0)):
+            new_fr.append(f)
+    new_fr.sort(key=lambda f: (-int(f["count"]), -int(f["last"])))
+    digest = digest_text(open_, new_tasks, new_asks, new_fr, len(seen["tasks"]), len(seen["asks"]))
+    if digest and mail:
+        r = subprocess.run((os.environ.get("POWOS_COMMS_CMD") or "powos comms").split()
+                           + ["send", to, "-", "--from", "board-sweep"], input=digest, text=True, capture_output=True)
+        if r.returncode != 0:
+            die(f"sweep: mail to {to} failed: {r.stderr.strip()}")
+    os.makedirs(os.path.dirname(sf), exist_ok=True)
+    with open(sf + ".tmp", "w") as f:
+        json.dump(seen, f)
+    os.replace(sf + ".tmp", sf)
+    return digest
+
+
+def digest_text(open_, tasks, asks, fr, n_orphans, n_asks):
+    if not (tasks or asks or fr):
+        return ""
+    c = counts(open_)
+    head = ", ".join(f"{c[s]} {s}" for s in TRUTH if s != "done" and c[s])
+    out = [f"Board sweep: {len(tasks)} task(s), {len(asks)} ask(s), {len(fr)} friction new or changed "
+           f"(open {len(open_)}: {head}; orphans {n_orphans}, asks without a task {n_asks}). Staff them: "
+           f"`powos agents task set <id> --owner <expert>` + a fresh agent that claims it with --step."]
+    if tasks:
+        out.append("\nNobody is on these:")
+        for w in sorted(tasks, key=lambda w: (TRUTH.index(w["truth"]), w.get("project") or "")):
+            owner = f", owner {w['owner']}" if w.get("owner") else ""
+            out.append(f"- [{w['truth']}] {w['title']} ({w['id']}{owner}) - {w['why']}")
+    if asks:
+        out.append("\nUser asks with no task (manager: task add --ask <id>, or ask none <id> --reason):")
+        for a in asks:
+            out.append(f"- {a['id']} ({ago(int(a['at']))} ago): {_line(a['text'])[:200]}")
+    if fr:
+        out.append("\nFriction, new or recurring (most frequent first; fix for good, then `powos friction fix <id> --commit`):")
+        for f in fr:
+            back = f", reopened x{f['reopened']}" if int(f.get("reopened") or 0) else ""
+            out.append(f"- {f['id']} x{f['count']} [{f['area']}/{f['kind']}] {f['title']}{back}"
+                       + (f" - repro: {_line(f['repro'])[:160]}" if f.get("repro") else ""))
+    return "\n".join(out) + "\n"
 
 
 def remote(argv):
@@ -500,6 +1105,18 @@ def remote(argv):
     sys.exit(r.returncode)
 
 
+def inline_stdin(argv):
+    """`--details -`, `ask add -`, `check sync <file|->`: the text read HERE, into argv - the command may run on the
+    phone (remote()), where neither this stdin nor this file is."""
+    out = list(argv)
+    for i, a in enumerate(out):
+        if a == "-" and i > 0 and (out[i - 1] == "--details" or out[:2] == ["ask", "add"]):
+            out[i] = sys.stdin.read()
+    if out[:2] == ["check", "sync"] and len(out) == 3:
+        out[2:] = ["--json-text", sys.stdin.read() if out[2] == "-" else open(out[2]).read()]
+    return out
+
+
 def main(argv):
     if argv[:1] == ["--argv-b64"] and len(argv) == 2:
         argv = json.loads(base64.b64decode(argv[1]))
@@ -513,6 +1130,27 @@ def main(argv):
         argv = argv[:1] + resolve_commits(argv[1:])
         try:
             task(argv[1:])
+        except Down as e:
+            if os.environ.get("POWOS_AGENTS_REMOTE", "1") != "0" and remote(argv):
+                return 0
+            die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+        return 0
+    argv = inline_stdin(argv)
+    sub = {"check": check_cmd, "checks": check_cmd, "ask": ask_cmd, "asks": ask_cmd, "friction": friction_cmd}
+    if argv[0] in sub or argv[0] == "sweep":
+        if argv[0] == "check" and argv[1:2] == ["scan"]:
+            check_cmd(argv[1:])   # local: the Mac's queue dir
+            return 0
+        if argv[0] == "friction" and argv[1:2] in (["help"], ["--help"], ["-h"], []):
+            print(FRICTION_HELP, end="")
+            return 0
+        try:
+            if argv[0] == "sweep":
+                o, _ = opts(argv[1:], ["dry-run!", "to"])
+                d = sweep(mail=not o.get("dry-run"), to=o.get("to") or "coder")
+                print(d or "board sweep: nothing new")
+            else:
+                sub[argv[0]](argv[1:])
         except Down as e:
             if os.environ.get("POWOS_AGENTS_REMOTE", "1") != "0" and remote(argv):
                 return 0

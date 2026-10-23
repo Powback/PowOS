@@ -190,6 +190,8 @@ Dev & AI:
   comms watch --agent R   Park until that role gets mail (yield, no polling)
   comms inbox|agents      Show an inbox / list all inboxes
   agents task add|set|done|list   The work board: what each agent is on (PowOS AI page)
+  agents sweep|check|ask    The board's truth: orphans digest, phone checks, user asks with no task
+  friction add|list|fix     What got in the way (log it before working around it): fixed for good
   android apps|open|running   (phone) Android's apps: list, open as a window or full screen, what runs
   android notifications|notify|screenshot   (phone) The phone's notifications, post one, its screen
   shell errors [N]    (phone) The web shell's last errors (each one also went to the manager's inbox)
@@ -3201,6 +3203,11 @@ SHELLHELP
         # The work board (lib/ai/agents/powos-agents-cli; `powos agents help`).
         shift
         exec python3 "$POWOS_LIB/ai/agents/powos-agents-cli" "$@"
+        ;;
+    friction)
+        # Friction log: what got in an agent's way, so it gets fixed for good (`powos friction help`).
+        shift
+        exec python3 "$POWOS_LIB/ai/agents/powos-agents-cli" friction "$@"
         ;;
     android)
         shift

@@ -606,6 +606,9 @@ pub fn work_set(
     if !status.is_empty() && !WORK_STATES.contains(&status.as_str()) {
         return Err(format!("work_set: status is one of {}", WORK_STATES.join("|")));
     }
+    if status == "done" && ctx.db.work().id().find(id.clone()).is_none_or(|o| o.status != "done") {
+        may_close(ctx, &id)?;
+    }
     let now = now_ms(ctx);
     let old = ctx.db.work().id().find(id.clone());
     let row = match old {
@@ -780,5 +783,417 @@ pub fn work_drop(ctx: &ReducerContext, id: String) -> Result<(), String> {
         return Err("not a reporter".into());
     }
     ctx.db.work().id().delete(id);
+    Ok(())
+}
+
+// ---- the board's facts: phone checks, friction, the user's asks ------------------------------------------------
+
+/// A board task's phone check (tools/phone/verify/queue.sh): queued, then its result. Written by the queue (check_set
+/// on each add and result) and the board sweeper (check_sync: the Mac's queue dir, every 10 min). The board's
+/// truthful state (`powos agents task list`, the AI page) and the done rule (work_set) read it.
+#[spacetimedb::table(accessor = work_check, public)]
+pub struct WorkCheck {
+    /// The queue's job name (`<date>-<pid>-<task>`), or `nocheck:<task>` for a "no device check possible" mark.
+    #[primary_key]
+    job: String,
+    #[index(btree)]
+    task: String,
+    /// What it checks (the script's name).
+    name: String,
+    /// queued | running | PASS | FAIL | SKIP | INVALID | none (no device check possible; [line] says why).
+    state: String,
+    /// The result's line (the log's FAIL line or last line), or the no-check reason.
+    line: String,
+    /// When it was queued, or when its result came (ms).
+    at: u64,
+    /// The commit it checks (the queuing tree's HEAD); "" unknown.
+    need: String,
+    /// That commit was on the phone (shipped) when it ran - or, queued, is now.
+    shipped: bool,
+}
+
+const CHECK_STATES: [&str; 7] = ["queued", "running", "PASS", "FAIL", "SKIP", "INVALID", "none"];
+const CHECKS_MAX: usize = 1500;
+const CHECK_KEEP_MS: u64 = 14 * 24 * 3600 * 1000;
+
+#[derive(Deserialize)]
+struct CheckIn {
+    job: String,
+    task: String,
+    #[serde(default)]
+    name: String,
+    state: String,
+    #[serde(default)]
+    line: String,
+    #[serde(default)]
+    at: u64,
+    #[serde(default)]
+    need: String,
+    #[serde(default = "yes")]
+    shipped: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_reporter(ctx: &ReducerContext) -> Result<(), String> {
+    match ctx.db.reporter().identity().find(ctx.sender()) {
+        Some(_) => Ok(()),
+        None => Err("not a reporter".into()),
+    }
+}
+
+/// "Done" means its phone check passed on a shipped build (the user, 2026-10-23: fixes were called done while not yet on
+/// the phone). Its latest result decides (SKIP/INVALID are no result); a `none` mark (no device check possible, with
+/// a reason) lets it close too.
+fn may_close(ctx: &ReducerContext, id: &str) -> Result<(), String> {
+    let last = ctx
+        .db
+        .work_check()
+        .task()
+        .filter(id)
+        .filter(|c| matches!(c.state.as_str(), "PASS" | "FAIL" | "none"))
+        .max_by_key(|c| c.at);
+    match last {
+        Some(c) if c.state == "none" || (c.state == "PASS" && c.shipped) => Ok(()),
+        Some(c) if c.state == "PASS" => Err(format!(
+            "'{id}' can't be done: its check {} passed against a build that wasn't on the phone yet - queue it again after the ship",
+            c.name
+        )),
+        Some(c) => Err(format!(
+            "'{id}' can't be done: its last phone check {} FAILED ({}) - fix it and queue the check again",
+            c.name,
+            cut(c.line, 120)
+        )),
+        None => Err(format!(
+            "'{id}' can't be done: no phone check passed for it - queue one (queue.sh add --close {id} <check>), or close it with --no-check \"<why no device check is possible>\""
+        )),
+    }
+}
+
+fn check_row(c: CheckIn, now: u64) -> Result<WorkCheck, String> {
+    if !CHECK_STATES.contains(&c.state.as_str()) {
+        return Err(format!("check: state is one of {}", CHECK_STATES.join("|")));
+    }
+    if c.job.trim().is_empty() || c.task.trim().is_empty() {
+        return Err("check: a job and a task".into());
+    }
+    Ok(WorkCheck {
+        job: cut(c.job.trim().to_string(), 120),
+        task: cut(c.task.trim().to_string(), 64),
+        name: cut(c.name, 64),
+        state: c.state,
+        line: one_line(c.line, 300),
+        at: if c.at > 0 { c.at } else { now },
+        need: cut(c.need, 40),
+        shipped: c.shipped,
+    })
+}
+
+fn put_check(ctx: &ReducerContext, row: WorkCheck) {
+    ctx.db.work_check().job().delete(row.job.clone());
+    ctx.db.work_check().insert(row);
+}
+
+/// One check, queued or its result (tools/phone/verify/queue.sh; `powos agents check set`). JSON CheckIn.
+#[spacetimedb::reducer]
+pub fn check_set(ctx: &ReducerContext, check: String) -> Result<(), String> {
+    is_reporter(ctx)?;
+    let c: CheckIn = serde_json::from_str(&check).map_err(|e| format!("check: {e}"))?;
+    put_check(ctx, check_row(c, now_ms(ctx))?);
+    prune_checks(ctx, now_ms(ctx));
+    Ok(())
+}
+
+/// The verify queue as it is (the board sweeper, from the Mac's ~/.cache/powos-verify-queue): every check in [checks]
+/// is written; a queued/running row the queue no longer has (a job removed by hand) goes. JSON [CheckIn].
+#[spacetimedb::reducer]
+pub fn check_sync(ctx: &ReducerContext, checks: String) -> Result<(), String> {
+    is_reporter(ctx)?;
+    let rows: Vec<CheckIn> = serde_json::from_str(&checks).map_err(|e| format!("checks: {e}"))?;
+    let now = now_ms(ctx);
+    let rows = rows.into_iter().map(|c| check_row(c, now)).collect::<Result<Vec<_>, _>>()?;
+    let have: std::collections::HashSet<String> = rows.iter().map(|r| r.job.clone()).collect();
+    let gone: Vec<String> = ctx
+        .db
+        .work_check()
+        .iter()
+        .filter(|c| matches!(c.state.as_str(), "queued" | "running") && !have.contains(&c.job))
+        .map(|c| c.job)
+        .collect();
+    for j in gone {
+        ctx.db.work_check().job().delete(j);
+    }
+    for r in rows {
+        put_check(ctx, r);
+    }
+    prune_checks(ctx, now);
+    Ok(())
+}
+
+/// Bounded: results older than two weeks go unless they're their task's latest; past CHECKS_MAX the oldest results.
+fn prune_checks(ctx: &ReducerContext, now: u64) {
+    let mut latest: std::collections::HashMap<String, (u64, String)> = std::collections::HashMap::new();
+    for c in ctx.db.work_check().iter() {
+        let e = latest.entry(c.task.clone()).or_insert((0, String::new()));
+        if c.at >= e.0 {
+            *e = (c.at, c.job.clone());
+        }
+    }
+    let keep: std::collections::HashSet<String> = latest.into_values().map(|(_, j)| j).collect();
+    let mut old: Vec<(u64, String)> = ctx
+        .db
+        .work_check()
+        .iter()
+        .filter(|c| !keep.contains(&c.job) && !matches!(c.state.as_str(), "queued" | "running" | "none"))
+        .map(|c| (c.at, c.job))
+        .collect();
+    old.sort();
+    let total = ctx.db.work_check().count() as usize;
+    let extra = total.saturating_sub(CHECKS_MAX);
+    for (i, (at, job)) in old.into_iter().enumerate() {
+        if i < extra || now.saturating_sub(at) > CHECK_KEEP_MS {
+            ctx.db.work_check().job().delete(job);
+        }
+    }
+}
+
+/// Friction: what got in an agent's way (a refusal, a broken tool, a flaky check, an unclear rule, slowness), logged
+/// BEFORE working around it (`powos friction add`), and by the tools themselves (ship refusals, gate failures under
+/// load, INVALID/SKIP checks, permission refusals). One row per problem: the same area, kind and normalized title
+/// count up. The coordinator turns the top ones into permanent fixes (`powos friction fix <id> --commit <sha>`); a fixed
+/// one that comes back reopens.
+#[spacetimedb::table(accessor = friction, public)]
+pub struct Friction {
+    /// "f<N>".
+    #[primary_key]
+    id: String,
+    /// area|kind|normalized title: the dedupe key.
+    #[index(btree)]
+    key: String,
+    area: String,
+    /// refused | broken-tool | flaky-check | unclear-rule | slow | other.
+    kind: String,
+    /// One line: what happened.
+    title: String,
+    /// The whole story (the latest occurrence's, else the first's).
+    details: String,
+    /// How to make it happen again: the command, the steps.
+    repro: String,
+    /// A log path or screenshot of the latest occurrence.
+    evidence: String,
+    /// Who logged it last (an agent role, a tool).
+    by: String,
+    count: u32,
+    first: u64,
+    last: u64,
+    /// open | fixed.
+    status: String,
+    fix_commit: String,
+    fix_note: String,
+    fixed_at: u64,
+    /// Times it came back after a fix.
+    reopened: u32,
+}
+
+const FRICTION_KINDS: [&str; 6] = ["refused", "broken-tool", "flaky-check", "unclear-rule", "slow", "other"];
+const FRICTION_MAX: usize = 500;
+
+#[derive(Deserialize)]
+struct FrictionIn {
+    area: String,
+    kind: String,
+    title: String,
+    #[serde(default)]
+    details: String,
+    #[serde(default)]
+    repro: String,
+    #[serde(default)]
+    evidence: String,
+    #[serde(default)]
+    by: String,
+    /// A seed's: the commit that already fixed it (logged as fixed).
+    #[serde(default)]
+    fixed: String,
+}
+
+/// The dedupe form of a title: lower case, numbers and hashes as '#', words only.
+fn norm(s: &str) -> String {
+    let words: Vec<String> = s
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| if w.chars().any(|c| c.is_ascii_digit()) { "#".to_string() } else { w.to_string() })
+        .collect();
+    words.join(" ")
+}
+
+fn friction_key(f: &FrictionIn) -> String {
+    format!("{}|{}|{}", norm(&f.area), f.kind, norm(&f.title))
+}
+
+fn friction_again(ctx: &ReducerContext, o: Friction, f: FrictionIn, now: u64) {
+    let back = o.status == "fixed" && f.fixed.is_empty();
+    ctx.db.friction().id().delete(o.id.clone());
+    ctx.db.friction().insert(Friction {
+        details: if f.details.trim().is_empty() { o.details } else { cut(f.details, 4000) },
+        repro: if o.repro.is_empty() { cut(f.repro, 2000) } else { o.repro },
+        evidence: if f.evidence.is_empty() { o.evidence } else { cut(f.evidence, 300) },
+        by: if f.by.is_empty() { o.by } else { cut(f.by, 64) },
+        count: o.count + 1,
+        last: now,
+        status: if back { "open".into() } else { o.status },
+        reopened: o.reopened + u32::from(back),
+        ..o
+    });
+}
+
+fn friction_new(ctx: &ReducerContext, f: FrictionIn, key: String, now: u64) {
+    let n = ctx.db.friction().iter().filter_map(|r| r.id.trim_start_matches('f').parse::<u32>().ok()).max().unwrap_or(0);
+    let fixed = !f.fixed.is_empty();
+    ctx.db.friction().insert(Friction {
+        id: format!("f{}", n + 1),
+        key,
+        area: cut(f.area.trim().to_lowercase(), 48),
+        kind: f.kind,
+        title: one_line(f.title, 160),
+        details: cut(f.details, 4000),
+        repro: cut(f.repro, 2000),
+        evidence: cut(f.evidence, 300),
+        by: cut(f.by, 64),
+        count: 1,
+        first: now,
+        last: now,
+        status: if fixed { "fixed".into() } else { "open".into() },
+        fix_commit: cut(f.fixed, 40),
+        fix_note: String::new(),
+        fixed_at: if fixed { now } else { 0 },
+        reopened: 0,
+    });
+}
+
+/// Logs one occurrence (`powos friction add`). JSON FrictionIn. The same area + kind + normalized title counts up.
+#[spacetimedb::reducer]
+pub fn friction_add(ctx: &ReducerContext, item: String) -> Result<(), String> {
+    is_reporter(ctx)?;
+    let f: FrictionIn = serde_json::from_str(&item).map_err(|e| format!("friction: {e}"))?;
+    if !FRICTION_KINDS.contains(&f.kind.as_str()) {
+        return Err(format!("friction: kind is one of {}", FRICTION_KINDS.join("|")));
+    }
+    if f.area.trim().is_empty() || norm(&f.title).is_empty() {
+        return Err("friction: an area and a title".into());
+    }
+    let now = now_ms(ctx);
+    let key = friction_key(&f);
+    let have = ctx.db.friction().key().filter(&key).next();
+    match have {
+        Some(o) => friction_again(ctx, o, f, now),
+        None => friction_new(ctx, f, key, now),
+    }
+    let mut fixed: Vec<(u64, String)> =
+        ctx.db.friction().iter().filter(|r| r.status == "fixed").map(|r| (r.last, r.id)).collect();
+    fixed.sort();
+    let extra = (ctx.db.friction().count() as usize).saturating_sub(FRICTION_MAX);
+    for (_, id) in fixed.into_iter().take(extra) {
+        ctx.db.friction().id().delete(id);
+    }
+    Ok(())
+}
+
+/// Marks one fixed (`powos friction fix <id> --commit <sha> [--note]`); it reopens if it's logged again.
+#[spacetimedb::reducer]
+pub fn friction_fix(ctx: &ReducerContext, id: String, commit: String, note: String) -> Result<(), String> {
+    is_reporter(ctx)?;
+    let Some(o) = ctx.db.friction().id().find(id.clone()) else {
+        return Err(format!("friction_fix: no friction '{id}'"));
+    };
+    if commit.is_empty() || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("friction_fix: --commit <sha> (the fix)".into());
+    }
+    ctx.db.friction().id().delete(id);
+    ctx.db.friction().insert(Friction {
+        status: "fixed".into(),
+        fix_commit: cut(commit, 40),
+        fix_note: one_line(note, 280),
+        fixed_at: now_ms(ctx),
+        ..o
+    });
+    Ok(())
+}
+
+/// The user's asks, as the manager got them (manager.py records each user turn): each one must become a board task
+/// (`powos agents task add ... --ask <id>`) or be marked not work (`powos agents ask none <id> --reason`).
+/// `powos agents ask list --untracked` and the board sweeper list the ones that didn't.
+#[spacetimedb::table(accessor = user_ask, public)]
+pub struct UserAsk {
+    #[primary_key]
+    id: String,
+    #[index(btree)]
+    at: u64,
+    /// The user's words, whole.
+    text: String,
+    /// Who heard it (manager).
+    by: String,
+    /// The board task it became; "" = none yet.
+    task: String,
+    /// Not work ("a question, answered in chat"): why no task.
+    none: String,
+}
+
+const ASKS_MAX: usize = 500;
+
+#[derive(Deserialize)]
+struct AskIn {
+    id: String,
+    text: String,
+    #[serde(default)]
+    by: String,
+    #[serde(default)]
+    at: u64,
+}
+
+/// Records one user ask (manager.py, each user turn). JSON AskIn. An id seen already keeps its link.
+#[spacetimedb::reducer]
+pub fn user_ask_add(ctx: &ReducerContext, ask: String) -> Result<(), String> {
+    is_reporter(ctx)?;
+    let a: AskIn = serde_json::from_str(&ask).map_err(|e| format!("ask: {e}"))?;
+    if a.id.trim().is_empty() || a.text.trim().is_empty() {
+        return Err("ask: an id and the text".into());
+    }
+    if ctx.db.user_ask().id().find(a.id.clone()).is_some() {
+        return Ok(());
+    }
+    let at = if a.at > 0 { a.at } else { now_ms(ctx) };
+    ctx.db.user_ask().insert(UserAsk { id: cut(a.id, 64), at, text: cut(a.text, 8000), by: cut(a.by, 64), task: String::new(), none: String::new() });
+    let mut all: Vec<(bool, u64, String)> =
+        ctx.db.user_ask().iter().map(|r| (r.task.is_empty() && r.none.is_empty(), r.at, r.id)).collect();
+    if all.len() > ASKS_MAX {
+        all.sort();
+        let extra = all.len() - ASKS_MAX;
+        for (_, _, id) in all.into_iter().take(extra) {
+            ctx.db.user_ask().id().delete(id);
+        }
+    }
+    Ok(())
+}
+
+/// Links an ask to the task it became ([task]), or marks it not work ([none] = why). `powos agents task add|set --ask`,
+/// `powos agents ask link|none`.
+#[spacetimedb::reducer]
+pub fn user_ask_link(ctx: &ReducerContext, id: String, task: String, none: String) -> Result<(), String> {
+    is_reporter(ctx)?;
+    let Some(o) = ctx.db.user_ask().id().find(id.clone()) else {
+        return Err(format!("user_ask_link: no ask '{id}' (powos agents ask list)"));
+    };
+    if task.is_empty() && none.trim().is_empty() {
+        return Err("user_ask_link: a task, or why it isn't work".into());
+    }
+    ctx.db.user_ask().id().delete(id);
+    ctx.db.user_ask().insert(UserAsk {
+        task: if task.is_empty() { o.task.clone() } else { cut(task, 64) },
+        none: if none.is_empty() { o.none.clone() } else { one_line(none, 280) },
+        ..o
+    });
     Ok(())
 }
