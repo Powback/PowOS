@@ -43,6 +43,8 @@ class WindowFrames(
         // Without the listener nothing is ever listed after this first read: no window gets a home page (2026-10-23).
         Log.i(TAG, "frames on, task listener ${if (stopListening != null) "on" else "MISSING"}")
         current = this
+        // Home's page swipes at its fast rate over the windows too (HighRefresh.wanted: the top-most window's mode wins).
+        dev.omalauncher.shell.HighRefresh.onWanted = { id -> frames.values.forEach { it.preferMode(id) } }
         refresh()
         return stopListening != null
     }
@@ -82,7 +84,10 @@ class WindowFrames(
         main.removeCallbacks(refreshLate)
         frames.values.forEach { it.remove() }
         frames.clear()
-        if (current === this) current = null
+        if (current === this) {
+            current = null
+            dev.omalauncher.shell.HighRefresh.onWanted = null
+        }
     }
 
     /** A window's bounds changed under PowOS's own hand (a bar drag, a grip resize): the list again, from any thread. */

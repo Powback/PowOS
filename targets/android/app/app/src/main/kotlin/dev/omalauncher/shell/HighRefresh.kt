@@ -53,28 +53,49 @@ internal class HighRefresh(
         }
     }
 
-    /** The display's fastest mode at its current resolution (0: none to ask for). */
-    private fun fastest(): Int {
-        val display = window.decorView.display ?: return 0
-        val now = display.mode
-        return display.supportedModes
-            .filter { it.physicalWidth == now.physicalWidth && it.physicalHeight == now.physicalHeight }
-            .maxByOrNull { it.refreshRate }
-            ?.modeId ?: 0
-    }
+    private fun fastest(): Int = fastest(window.decorView.display)
 
     private fun prefer(id: Int) {
         if (id == mode) return
         mode = id
-        window.attributes =
-            window.attributes.apply {
-                preferredDisplayModeId = id
-                preferredRefreshRate = if (id == 0) 0f else window.decorView.display?.supportedModes?.firstOrNull { it.modeId == id }?.refreshRate ?: 0f
-            }
+        window.attributes = window.attributes.apply { ask(this, window.decorView.display, id) }
+        wanted = id
+        onWanted?.invoke(id)
     }
 
-    private companion object {
+    companion object {
         /** After the finger lifts: a page swipe's settle, a fling, the drawer's spring. */
-        const val HOLD_MS = 1500L
+        private const val HOLD_MS = 1500L
+
+        /**
+         * The mode a page asks for now (0: none). WM takes the TOP-most window's preferred mode, so a floating app
+         * window over home (ColorOS's 60 Hz for it, or for PowOS's own Linux windows) capped home's page swipes at 60:
+         * PowOS's window frames, over every app window, ask for the same while home does (WindowFrames).
+         */
+        @Volatile var wanted = 0
+            private set
+
+        /** Told every change of [wanted] (main thread). */
+        var onWanted: ((Int) -> Unit)? = null
+
+        /** [display]'s fastest mode at its current resolution (0: none to ask for). */
+        fun fastest(display: android.view.Display?): Int {
+            display ?: return 0
+            val now = display.mode
+            return display.supportedModes
+                .filter { it.physicalWidth == now.physicalWidth && it.physicalHeight == now.physicalHeight }
+                .maxByOrNull { it.refreshRate }
+                ?.modeId ?: 0
+        }
+
+        /** Window attributes [p] asking for mode [id] of [display] (0: the system's choice again). */
+        fun ask(
+            p: android.view.WindowManager.LayoutParams,
+            display: android.view.Display?,
+            id: Int,
+        ) {
+            p.preferredDisplayModeId = id
+            p.preferredRefreshRate = if (id == 0) 0f else display?.supportedModes?.firstOrNull { it.modeId == id }?.refreshRate ?: 0f
+        }
     }
 }

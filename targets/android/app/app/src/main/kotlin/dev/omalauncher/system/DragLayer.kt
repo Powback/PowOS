@@ -91,6 +91,8 @@ internal class DragLayer(
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
                 setTitle("PowOS window drag")
+                // The drag at the display's fastest rate: over the app's window, the top-most window's ask wins.
+                dev.omalauncher.shell.HighRefresh.ask(this, context.display, dev.omalauncher.shell.HighRefresh.fastest(context.display))
                 fitInsetsTypes = 0
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
             }

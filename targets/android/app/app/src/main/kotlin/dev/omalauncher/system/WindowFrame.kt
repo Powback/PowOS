@@ -64,6 +64,10 @@ class WindowFrame(
     private val grip = GripView(context, frost)
     private val barParams = params("PowOS window bar $id")
     private val gripParams = params("PowOS window grip $id")
+
+    init {
+        dev.omalauncher.shell.HighRefresh.ask(barParams, context.display, dev.omalauncher.shell.HighRefresh.wanted)
+    }
     private var added = false
 
     private val barBlur = WindowBlur({ bar.rootView }, Frost.BLUR_DP, cornersDp = floatArrayOf(CORNER_DP, CORNER_DP, 0f, 0f), topDp = HIT_DP)
@@ -139,6 +143,16 @@ class WindowFrame(
         maxButton.glyph = glyph
         maxButton.contentDescription = glyph.name.lowercase()
         maxButton.invalidate()
+    }
+
+    /**
+     * The bar's window asks for display mode [id] (0: none), as home's page does while touched (HighRefresh): over the
+     * app's window, its ask is the top-most one, which WM takes - the app's own (ColorOS's 60 Hz) capped home's swipes.
+     */
+    fun preferMode(id: Int) {
+        if (barParams.preferredDisplayModeId == id) return
+        dev.omalauncher.shell.HighRefresh.ask(barParams, context.display, id)
+        if (added) runCatching { wm.updateViewLayout(bar, barParams) }
     }
 
     fun remove() {
