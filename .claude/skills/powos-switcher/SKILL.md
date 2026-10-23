@@ -318,3 +318,13 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   there. KWin log lines: "touch at .. to ..", "also draws ..", "the window took .. itself .. sized back" (an X client's
   own configure, e.g. Steam restoring 1659x1746, is permitted by X11Window::configureRequest; 0020 refits, 5 tries).
   Check: verify/steam-input.sh (size = task +-4 px, LIBRARY tap, library scroll, Kate; OUT/steam.mp4, kate.mp4, kwin.txt).
+- NO X11 window in a task took a tap (2026-10-23, Steam + its dialogs; kwin 0022, 3.26): exported windows live on the
+  "Android tasks" desktop, never current, so X11Window::updateVisibility made them Kept (hiddenPreview), and
+  Workspace::propagateWindows stacks Kept windows UNDER KWin's guard window: a root-sized, mapped, override-redirect
+  InputOnly X window (the first ids of KWin's X connection: 0x200000 null focus, 0x200001 guard). Xwayland picks the X
+  window for a touch/click by X stacking at root coordinates, so the guard took all of them (and internalKeep drops
+  input focus). Read it without input: `xwininfo -root -children` + `xwininfo -id <id>` (Class InputOnly, IsViewable).
+  0022: every window a task watches carries powosShownByTask -> shown (Mapped, stacked above the guard); focus() and a
+  touch on a dialog raise the window (all task windows overlap at the same root place, X takes the top one). Wayland
+  windows (Kate, Dolphin) never went through X: a failure there is something else.
+  Check: verify/linux-touch.sh (Kate/Dolphin via apps.launch, a WAYLAND_DEBUG Kate, an X11 Kate + X stacking; LEASH=off).
