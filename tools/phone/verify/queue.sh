@@ -72,6 +72,10 @@ relify() {
   local up= a R=${REPO//./\\.} out=()
   [ -n "$1" ] && up=$(printf %s "$1/" | sed -E 's#[^/]+#..#g')
   for a in "${cmd[@]}"; do
+    # An existing file git doesn't track (a built package in one worktree's out/, a scratch script) stays absolute:
+    # rewritten repo-relative it pointed into the verify checkout, where it doesn't exist (steam pkgrel 27 and 28
+    # "FAIL install: no file /steam-...", 2026-10-23).
+    if [[ "$a" == /* && -e "$a" ]] && ! git -C "$(dirname "$a")" ls-files --error-unmatch "$a" >/dev/null 2>&1; then out+=("$a"); continue; fi
     out+=("$(printf %s "$a" | sed -E "s#$R/\.claude/worktrees/[A-Za-z0-9._-]+/#$up#g; s#$R/\.claude/worktrees/[A-Za-z0-9._-]+\$#${up:-./}#; s#$R/#$up#g; s#^$R\$#${up:-./}#")")
   done
   cmd=("${out[@]}"); cwd=${1:-.}; rel=1
