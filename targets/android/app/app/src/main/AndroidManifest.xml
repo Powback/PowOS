@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- system/WindowFrames: the floating windows' title bars and grips are TYPE_APPLICATION_OVERLAY windows. Without
+         this declaration (dropped with the fold veil, 2026-10-16) the op reads "default" and `appops set ... allow` is a
+         silent no-op: no title bars at all ("permission denied for window type 2038"). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Remote input (shell/RemoteInput.kt): the phone as a Bluetooth keyboard and mouse (the HID device profile).
          Targeting SDK 28, these two; Android grants BLUETOOTH_CONNECT/ADVERTISE with them. -->
     <uses-permission android:name="android.permission.BLUETOOTH" />

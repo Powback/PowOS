@@ -48,8 +48,10 @@ class WindowFrames(
      * The frames are TYPE_APPLICATION_OVERLAY windows (over apps, UNDER the status bar and the shade - the recents role's
      * 2017 would sit over the shade), which need the "display over other apps" app op. It was found reset to default on
      * 2026-10-23 ("permission denied for window type 2038": no title bars at all), so it's granted again through root
-     * whenever it's missing, as QuickSettings does WRITE_SETTINGS. HACK: the user's grant done for them. Real fix: the
-     * grant in PowOS's setup (Settings > display over other apps), kept.
+     * whenever it's missing, as QuickSettings does WRITE_SETTINGS. The reset's cause: the manifest had stopped
+     * declaring SYSTEM_ALERT_WINDOW (2026-10-16), so the op fell back to "default" and `appops set` didn't take (rc 0,
+     * still default); declared again in AndroidManifest.xml. HACK: the user's grant done for them. Real fix: the grant
+     * in PowOS's setup (Settings > display over other apps), kept.
      */
     private fun overlayGrant() {
         if (Settings.canDrawOverlays(context)) return
