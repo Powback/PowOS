@@ -19,7 +19,7 @@ A Steam game (COMMAND has steam://rungameid/<appid>, or an app id steam_app_<app
 that already runs, maybe frozen with Steam (units/phone/steam.json games: pause), is resumed first - powos-sleep-gui's
 Resume thaws Steam + the game and names the game's window, which is shown - so the drawer, the games widget and
 Android shortcuts bring a running game back at once instead of a cold Proton start. Its window also counts by class
-(steam_app_<appid>), and a new game's window may take up to WAIT_GAME_S (Proton under FEX).
+(steam_app_<appid>) or by its process running under that game's Steam launch (a native Linux build's own class), and a new game's window may take up to WAIT_GAME_S (Proton under FEX).
 
 KWin reports windows to us through a KWin script (a script can't write files or answer, but it can call D-Bus), the
 way powos-android-tasks learns about focus.
@@ -95,6 +95,23 @@ def ancestors(pid):
     return seen
 
 
+def steam_launch_of(pid):
+    """The appid of the Steam launch (`reaper SteamLaunch AppId=<id> ...`) a process runs under, else None. A native
+    Linux game's window has the game's own class (Broforce.x86_64), not Proton's steam_app_<id>; its process still
+    runs under the launch's reaper."""
+    for p in ancestors(pid):
+        try:
+            with open(f"/proc/{p}/cmdline", "rb") as f:
+                argv = f.read().split(b"\0")
+        except OSError:
+            continue
+        if b"SteamLaunch" in argv and b"Install=1" not in argv:
+            for a in argv:
+                if a.startswith(b"AppId="):
+                    return a[6:].decode(errors="replace")
+    return None
+
+
 def main():
     args = sys.argv[1:]
     ids = set()
@@ -156,8 +173,10 @@ def main():
                 pass
         app.exit(0 if what == "task" else 2)
 
-    def matches(desktop_file, resource_class, resource_name):
-        return bool(ids & {desktop_file.lower(), resource_class.lower(), resource_name.lower()})
+    def matches(desktop_file, resource_class, resource_name, pid=""):
+        if ids & {desktop_file.lower(), resource_class.lower(), resource_name.lower()}:
+            return True
+        return bool(game) and pid.isdigit() and steam_launch_of(int(pid)) == game
 
     def wake(window):
         """Thaw the window's app if unified sleep froze it (no-op when it's awake or powos-sleep-gui isn't there)."""
@@ -194,13 +213,13 @@ def main():
         @Slot(str, str, str, str, str, str)
         def Window(self, window, pid, desktop_file, resource_class, resource_name, existing):  # noqa: N802
             if existing == "1":
-                if matches(desktop_file, resource_class, resource_name):
+                if matches(desktop_file, resource_class, resource_name, pid):
                     state["existing"].append(window)
                     state["pids"][window] = pid
                 return
             child = state["child"]
             ours = child is not None and child.pid in ancestors(int(pid) if pid.isdigit() else 0)
-            if ours or matches(desktop_file, resource_class, resource_name):
+            if ours or matches(desktop_file, resource_class, resource_name, pid):
                 pick(window)
 
         @Slot()
