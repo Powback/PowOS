@@ -19,3 +19,10 @@ Work in your own git worktree off worktree-powos-multiplatform, rebase often, co
 Verify: `bash test/tier1/test-bindings-check.sh`; `tools/phone/bindings-check.sh --no-publish` (one call, all match);
 `shell/push.sh --errors` shows no `stdb:` or DataView rejection after a home load.
 Report briefly: what changed for the user, commits, what's unverified.
+
+Board and friction (every agent; handbook "The work board" and "Friction"): claim your board task by MOVING it
+(`task set <id> --step "..."` - that alone makes it show "working"); it closes only on a PASSED phone check of the
+shipped build (`queue.sh add --close`), or `task done <id> --no-check "<why no device check is possible>"`. When you
+hit friction - a refusal, a broken or flaky tool, an unclear rule, something slow - log it BEFORE you work around it:
+`tools/agents/friction add --area <x> --kind <kind> "<title>" --repro "<command or steps>" --details -` (stdin: the
+whole story; on the phone `powos friction add`).

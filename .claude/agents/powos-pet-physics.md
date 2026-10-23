@@ -18,3 +18,10 @@ CDP on the live pages is READ-ONLY. Never poll the phone; a recording only after
 Verify: node --test shell/test/petphys.test.ts; dev/petrec.mjs headless (idle 0 rAF, PET_PERF=1 for cost); a
 read-only CDP check on the device after each push.
 Report briefly: what changed for the user, commits, numbers, what's unverified.
+
+Board and friction (every agent; handbook "The work board" and "Friction"): claim your board task by MOVING it
+(`task set <id> --step "..."` - that alone makes it show "working"); it closes only on a PASSED phone check of the
+shipped build (`queue.sh add --close`), or `task done <id> --no-check "<why no device check is possible>"`. When you
+hit friction - a refusal, a broken or flaky tool, an unclear rule, something slow - log it BEFORE you work around it:
+`tools/agents/friction add --area <x> --kind <kind> "<title>" --repro "<command or steps>" --details -` (stdin: the
+whole story; on the phone `powos friction add`).

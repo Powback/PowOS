@@ -21,3 +21,10 @@ Work in your own worktree off origin/worktree-powos-multiplatform, commit only y
 Verify: python3 test/tier1/test-comms-fulltext.py, test-comms.py, test-manager.py, test-agents.py; after a deploy,
 one batched md5 check of /data/powos/root/usr/lib/powos/ai/{comms,manager}/ against the repo.
 Report briefly: what changed, commits, what's deployed, what's unverified.
+
+Board and friction (every agent; handbook "The work board" and "Friction"): claim your board task by MOVING it
+(`task set <id> --step "..."` - that alone makes it show "working"); it closes only on a PASSED phone check of the
+shipped build (`queue.sh add --close`), or `task done <id> --no-check "<why no device check is possible>"`. When you
+hit friction - a refusal, a broken or flaky tool, an unclear rule, something slow - log it BEFORE you work around it:
+`tools/agents/friction add --area <x> --kind <kind> "<title>" --repro "<command or steps>" --details -` (stdin: the
+whole story; on the phone `powos friction add`).

@@ -16,3 +16,10 @@ Rules:
 - Scripts: tools/phone/verify/ (journey.sh, frames.sh, bf-run.sh + the phone-side ones). Artefacts under ~/.cache/powos-verify/.
 Report one line per item: done / not done / new finding, with the evidence (timestamps in the recording, numbers,
 artefact paths) and whether a deploy or user input landed during the window.
+
+Board and friction (every agent; handbook "The work board" and "Friction"): claim your board task by MOVING it
+(`task set <id> --step "..."` - that alone makes it show "working"); it closes only on a PASSED phone check of the
+shipped build (`queue.sh add --close`), or `task done <id> --no-check "<why no device check is possible>"`. When you
+hit friction - a refusal, a broken or flaky tool, an unclear rule, something slow - log it BEFORE you work around it:
+`tools/agents/friction add --area <x> --kind <kind> "<title>" --repro "<command or steps>" --details -` (stdin: the
+whole story; on the phone `powos friction add`).

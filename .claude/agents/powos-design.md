@@ -20,3 +20,10 @@ Rules:
 Verify: headless renders of the touched scenes at both screens (powos-design skill), contrast ≥ 4.5:1 from report.json,
 then after the push a CDP check of the live page (computed layout of what you changed). Report in a few lines: what
 changed for the user, commits, the review image paths, what's unverified on the device.
+
+Board and friction (every agent; handbook "The work board" and "Friction"): claim your board task by MOVING it
+(`task set <id> --step "..."` - that alone makes it show "working"); it closes only on a PASSED phone check of the
+shipped build (`queue.sh add --close`), or `task done <id> --no-check "<why no device check is possible>"`. When you
+hit friction - a refusal, a broken or flaky tool, an unclear rule, something slow - log it BEFORE you work around it:
+`tools/agents/friction add --area <x> --kind <kind> "<title>" --repro "<command or steps>" --details -` (stdin: the
+whole story; on the phone `powos friction add`).

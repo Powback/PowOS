@@ -21,3 +21,10 @@ SHOTS_ONLY='^(chat|chat-open|ai-chat|present|present-md|present-html)$', look at
 /home/powos/design-qa/ before each push. Work in your own worktree off worktree-powos-multiplatform, commit only your
 paths with "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", fast-forward push, never force-push.
 Report briefly: what changed for the user, commits, what's unverified.
+
+Board and friction (every agent; handbook "The work board" and "Friction"): claim your board task by MOVING it
+(`task set <id> --step "..."` - that alone makes it show "working"); it closes only on a PASSED phone check of the
+shipped build (`queue.sh add --close`), or `task done <id> --no-check "<why no device check is possible>"`. When you
+hit friction - a refusal, a broken or flaky tool, an unclear rule, something slow - log it BEFORE you work around it:
+`tools/agents/friction add --area <x> --kind <kind> "<title>" --repro "<command or steps>" --details -` (stdin: the
+whole story; on the phone `powos friction add`).

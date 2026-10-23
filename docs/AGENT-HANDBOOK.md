@@ -51,7 +51,7 @@ minimal change and tell them.
 - Never ship a UI control whose backend isn't installed (manager, 2026-10-22: a "test now" button shipped before its APK
   bridge): gate it on the bridge capability (feature-detect the method) so it stays hidden until the APK lands.
 - A task is DONE the moment it's shipped and checked (manager, 2026-10-22): never leave it at "3/3 working". If the
-  device check is its last proof, queue it with `queue.sh add --close` so the pass closes the task.
+  device check is its last proof, queue it with `queue.sh add --close` so the pass closes the task (The work board).
 - One task per piece of work (manager, 2026-10-22): before adding a board task, search the board
   (`powos agents task list`, grep the title) and reuse the manager's existing one with `task set`; create one only
   when none exists.
@@ -59,6 +59,42 @@ minimal change and tell them.
   something the USER must do (it shows as a Needs-you card), never for a queued check or another agent.
 - Worktrees: `tools/agents/worktree.sh new <name>` (origin tip, shared node_modules), `done <name>` once pushed (refuses
   unpushed/uncommitted work), `list`. Never leave a merged worktree behind.
+
+## The work board: nothing falls through (the user, 2026-10-23: "30 tasks show working, 4 agents run")
+- Each task's state is COMPUTED from facts (`task list` and the AI page; lib/ai/agents/powos-agents-cli truth(),
+  shell/agents.ts boardState): `working` only while a live agent holds it (its own `task set <id> --step/--progress/
+  --plan/--commit`; `--owner` claims nothing), `awaiting-check` (a phone check queued), `no-check` (nobody on it, no
+  check queued, but a FAIL/INVALID/SKIP, an unclosed pass or a pushed fix), `stalled` (nothing: it needs an owner),
+  `blocked` (blocked/waiting + the note as the reason), `done`. The status column is only what someone typed.
+- Claim by moving: the first thing a fresh agent does is `task set <id> --owner <expert> --step "<what now>"`. A
+  subagent's role is "general-purpose", so the owner-role fallback rarely finds it - the --step claim is what counts.
+- Done = its phone check PASSED on a shipped build (the module's work_set refuses anything else). Queue the last proof
+  with `queue.sh add --close <task> <check>` (the pass closes it); a task no device check can prove closes with
+  `task done <id> --no-check "<why>"` (docs, Mac tooling with a tier-1 test). Never report "done" for pushed/queued.
+- Facts: the verify queue writes each queued job and result to the module's work_check rows (`powos agents check
+  set`); the Mac's sweeper (launchd com.powos.board-sweep, tools/agents/board-sweep.sh, every 10 min) re-syncs the
+  whole queue dir (`check scan` -> `check sync`) and runs `powos agents sweep` on the phone.
+- The sweep mails the coordinator ("coder") ONE digest: orphans (stalled, no-check: FAILs nobody picked up),
+  blocked-without-reason, user asks with no task, new or recurring friction - only what's new or changed since the
+  last pass (state ~/.local/state/powos/board-sweep.json on the phone). The coordinator staffs each item: an owner +
+  a fresh agent that claims it. `tools/agents/board-sweep-deploy.sh run` sweeps now; `status` shows its log.
+- User asks: the manager records every user turn (asks.jsonl + the user_ask table) and gets its id with the turn; it
+  links the task it makes (`task add ... --ask <id>`) or marks it not work (`ask none <id> --reason`).
+  `powos agents ask list --untracked` = asks with no task.
+- Mac: `python3 lib/ai/agents/powos-agents-cli task list --state stalled` (it runs on the phone's board). Never
+  delete tasks to tidy the board (`task rm` is for a mistake/duplicate you made).
+
+## Friction: log it before you work around it
+- Hit a refusal, a broken or flaky tool, an unclear rule, something slow? FIRST `tools/agents/friction add --area
+  <ship|gate|verify|board|comms|permissions|worktree|phone|apk|...> --kind <refused|broken-tool|flaky-check|
+  unclear-rule|slow|other> "<title, one line>" --repro "<command or steps>" --details -` (stdin: what you did, saw,
+  expected, how you got around it; `--evidence <log>`). On the phone: `powos friction add`. --repro is required.
+- The same area + kind + title (numbers and hashes ignored) counts up instead of adding a row. `friction list` (most
+  frequent first), `friction show <id>`, `friction fix <id> --commit <sha>` once fixed for good - it reopens if it
+  happens again.
+- Logged by the tools themselves: ship failures/refusals (ship.sh), shell gate failures at Mac load >= 12 (gate.sh),
+  INVALID/SKIP checks (queue.sh), permission refusals of an agent's tool call (powos-agentsd, from the hook).
+- Triage: the sweep's digest lists new/recurring friction by count; the coordinator turns the top ones into fixes.
 
 ## Reaching the phone (OnePlus Open, rooted)
 - `tools/phone/adb.sh <adb args>`: adb over the VPN (powos-vadb's server, 10.13.13.7:5555) from any session.

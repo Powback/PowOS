@@ -11,3 +11,10 @@ Ship: commit, rebase, push to origin, then `tools/phone/ship.sh request --note "
 ship-apk.sh/push.sh yourself (handbook Shipping). CDP on live pages is read-only; never poll the phone.
 Check the change on the device after the push - headless passing is not proof.
 Report briefly: what changed for the user, commits, what's unverified.
+
+Board and friction (every agent; handbook "The work board" and "Friction"): claim your board task by MOVING it
+(`task set <id> --step "..."` - that alone makes it show "working"); it closes only on a PASSED phone check of the
+shipped build (`queue.sh add --close`), or `task done <id> --no-check "<why no device check is possible>"`. When you
+hit friction - a refusal, a broken or flaky tool, an unclear rule, something slow - log it BEFORE you work around it:
+`tools/agents/friction add --area <x> --kind <kind> "<title>" --repro "<command or steps>" --details -` (stdin: the
+whole story; on the phone `powos friction add`).

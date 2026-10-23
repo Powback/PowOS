@@ -22,3 +22,10 @@ Rules:
 Verify: open an app (am start), swipe home from home page 1, page 2 and PowOS AI's page; also hold for the switcher
 and swipe home from it. Home's content must be on screen in every frame; going home from an app keeps the page,
 a home gesture on home goes to page 1. Report: what changed for the user, APK version, commits, what's unverified.
+
+Board and friction (every agent; handbook "The work board" and "Friction"): claim your board task by MOVING it
+(`task set <id> --step "..."` - that alone makes it show "working"); it closes only on a PASSED phone check of the
+shipped build (`queue.sh add --close`), or `task done <id> --no-check "<why no device check is possible>"`. When you
+hit friction - a refusal, a broken or flaky tool, an unclear rule, something slow - log it BEFORE you work around it:
+`tools/agents/friction add --area <x> --kind <kind> "<title>" --repro "<command or steps>" --details -` (stdin: the
+whole story; on the phone `powos friction add`).

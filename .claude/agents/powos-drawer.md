@@ -20,3 +20,10 @@ Verify: review renders (gate --shots) to /home/powos/design-qa/ before pushing; 
 runner + on device, see the skill); after a push, check on the device via CDP (grid is display:grid with all apps,
 opacity/transform at set --p values).
 Report briefly: what changed for the user, commits, numbers, what's unverified.
+
+Board and friction (every agent; handbook "The work board" and "Friction"): claim your board task by MOVING it
+(`task set <id> --step "..."` - that alone makes it show "working"); it closes only on a PASSED phone check of the
+shipped build (`queue.sh add --close`), or `task done <id> --no-check "<why no device check is possible>"`. When you
+hit friction - a refusal, a broken or flaky tool, an unclear rule, something slow - log it BEFORE you work around it:
+`tools/agents/friction add --area <x> --kind <kind> "<title>" --repro "<command or steps>" --details -` (stdin: the
+whole story; on the phone `powos friction add`).

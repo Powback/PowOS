@@ -21,3 +21,10 @@ Work in your own git worktree off worktree-powos-multiplatform, rebase often, co
 Verify: preview sheet + report.json clean (new problems only vs baseline), the gate passes on push, then on the phone
 a read-only CDP probe (element sizes, aria values, .page-track transform) - not the user's real devices.
 Report briefly: what changed for the user, commits, what's unverified.
+
+Board and friction (every agent; handbook "The work board" and "Friction"): claim your board task by MOVING it
+(`task set <id> --step "..."` - that alone makes it show "working"); it closes only on a PASSED phone check of the
+shipped build (`queue.sh add --close`), or `task done <id> --no-check "<why no device check is possible>"`. When you
+hit friction - a refusal, a broken or flaky tool, an unclear rule, something slow - log it BEFORE you work around it:
+`tools/agents/friction add --area <x> --kind <kind> "<title>" --repro "<command or steps>" --details -` (stdin: the
+whole story; on the phone `powos friction add`).

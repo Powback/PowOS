@@ -42,6 +42,8 @@ output, not messages. agentsd still scrubs secret-shaped strings (deliberate).
   (tools/phone/bin/adb execs adb.sh with canonical paths - a `..` path "rooted/../session/..." failed "cannot stat").
 - The phone's manager runs one process per chat turn, so a deploy takes effect next turn (no restart).
 - Agents module changes need an STDB module publish (not done by rooted.sh deploy).
+- The Mac's agentsd: copy lib/ai/agents/powos-agentsd AND powos-agents-cli (its refusal friction calls the sibling) to
+  ~/.claude/hooks/powos-agents/, then kill its pid ($TMPDIR/powos-agents-$USER/in/pid; the next hook restarts it).
 - Verify with ONE batched adb call (md5sum the installed files). Never poll.
 
 ## Tests
@@ -92,21 +94,47 @@ Shell tsc: a fresh worktree has no shell/node_modules - the gate skips tsc; syml
   work_set/work_track whole via the installed CLI module as the session user (tools/phone/user.sh).
 - lib/ai CLI changes reach the phone via rooted.sh deploy (ship.sh ships only shell + APK). The Mac has no `powos`:
   run `python3 lib/ai/agents/powos-agents-cli task ...` (it relays argv to the phone's CLI, whose find() decides).
-- Live state (shell/agents.ts boardState): a `working` row SAYS "working" (lit dot) only while a live agent holds it -
-  agentsd's agent row field `work` = the task id, set from the agent's own Bash `task set <id> --step/--progress/
-  --plan/--commit` (work_of(); assigning with --owner/--note claims nothing), cleared by `task done <id>` or
-  `queue.sh add .. <id>`; else a live agent whose role == owner and holds nothing. Live = working|needs_you, heard
-  < 30 min. Otherwise "awaiting check" (QUEUED_STEP), "stalled" (started, no activity 20 min; one setTimeout to the
-  boundary, useStallClock) or "queued". `work` rides the spool/mirror JSON only (STDB's AgentRow ignores it: no
-  schema change). Mac deploy = copy powos-agentsd to ~/.claude/hooks/powos-agents/ + kill its pid (next hook restarts).
-  Device check: tools/phone/verify/board-state.sh.
+- Truth (2026-10-23, board-truth): `task list` and the AI page show a COMPUTED state per task - CLI truth() and
+  shell/agents.ts boardState, the same rule: working (a live agent's `work` == the id - agentsd work_of(), from its own
+  Bash `task set <id> --step/--progress/--plan/--commit`, cleared by `task done`/`queue.sh add .. <id>` - or a live
+  agent whose role == owner holding nothing; live = working|needs_you heard < 30 min), else awaiting-check (a
+  work_check row queued/running; the step marker QUEUED_STEP before a sync), no-check (a result FAIL/INVALID/SKIP/
+  PASS/none or commits linked), stalled (nothing), blocked (blocked|waiting + note), done. Holders come from the spool:
+  `$XDG_RUNTIME_DIR/agents/state.json` + `mirror/*.json` (the Mac's agents; POWOS_AGENTS_SPOOLS overrides in tests).
+  `task list --json` adds truth/why; `--state S`; `--raw` the typed status. No 20-min stall timer any more.
+- Tables beside `work` (apps/agents, additive: `work` itself unchanged, so old shells still decode it):
+  work_check (job pk, task idx, name, state queued|running|PASS|FAIL|SKIP|INVALID|none, line, at, need, shipped):
+  check_set(json) from queue.sh (add: queued; result: before the step/close), check_sync(json array) from the Mac
+  sweeper (drops queued rows the queue no longer has; results kept 14 d, the task's latest always); `none` =
+  `--no-check` reason. friction (id f<N>, key area|kind|norm(title) idx, title/details/repro/evidence/by, count,
+  first/last, status open|fixed, fix_commit/fix_note/fixed_at, reopened): friction_add(json) dedupes on key (norm:
+  lower case, words with a digit -> '#'), a fixed one logged again reopens; friction_fix(id, sha, note). user_ask (id,
+  at, text, by, task, none): user_ask_add(json) from manager.py's _ask_turn (each user turn; also
+  $session_store/asks.jsonl, `ask sync` replays it), user_ask_link(id, task, none). Reducers take JSON strings: the
+  Rust lint's 4-arg limit.
+- The done rule lives IN work_set (may_close): status -> done needs the task's latest PASS|FAIL|none check to be a
+  PASS with shipped=true, or none. The queue's --close path writes check_set PASS first (queue.sh board()).
+- Sweeper: Mac launchd com.powos.board-sweep (tools/agents/board-sweep.sh, every 600 s, unit board-sweep-mac): origin's
+  CLI `check scan` of ~/.cache/powos-verify-queue (queued *.job, done/*.log last line PASS|FAIL|SKIP|INVALID; shipped
+  = the job's need is in ship live/installed like queue.sh shipped()) -> one user.sh call: `check sync` + `powos agents
+  sweep`. sweep: orphans (stalled|no-check|blocked "no reason given", past a 10-min grace), untracked asks (> 10 min),
+  open friction whose count rose -> ONE `powos comms send coder -` digest, only items whose signature changed (state
+  file ~/.local/state/powos/board-sweep.json). `--dry-run` prints, mails nothing, keeps the state.
+- Auto friction: ship.sh mail() on FAILED/REFUSED; gate.sh fail at 1-min load >= 12 (background, the Mac CLI relay);
+  queue.sh SKIP/INVALID; agentsd refusal() on PostToolUseFailure whose `error` matches REFUSAL (once/h per role+tool+
+  hint; the sibling powos-agents-cli or POWOS_AGENTS_CLI). Mac: tools/agents/friction = the CLI's `friction`.
+- Relayed off the phone, stdin and files are read on the caller's side first (inline_stdin: `--details -`, `ask add -`,
+  `check sync <file>`), since remote() passes argv only.
+  Device check: tools/phone/verify/board-state.sh (states working / awaiting check / no check / stalled).
 - A schema change ships as: apps/build.sh agents; apps/vendor.sh agents (shell/vendor/powos-agents.js; the .d.ts is
   generic); `ADB="docker exec powos-vadb adb" apps/install.sh agents publish --note/...`; shell/push.sh
   vendor/powos-agents.js (bindings-check must say "matches"). A server with MORE columns than the shell's bindings
   breaks decoding too (seen with local-pet), so publish + push together.
 - Rust limits: tools/lint/rust-complexity.sh [--report|--prune] agents (cognitive 10, 60 lines, 4 args, nesting 3);
   sync() is split into sync_agents/tasks/asks/ring/messages; JSON columns go through json_list().
-- Tests: test/tier1/test-agents-board.py (stand-in STDB HTTP server modelling the reducers), test-agents.py.
+- Tests: test/tier1/test-agents-board.py (stand-in STDB HTTP server modelling the reducers), test-agents.py,
+  test-board-truth.py (truth, done rule, check scan, sweep digest/no-repeat, friction dedupe/reopen, agentsd
+  refusal, manager ask turn).
 
 ## Pitfalls seen
 - Shell gate under Mac load (~25): every page "not ready" - retry with READY_MS=60000 GATE_WIDGETS=0, never --force.

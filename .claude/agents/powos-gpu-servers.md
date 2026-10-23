@@ -19,3 +19,10 @@ Work in your own git worktree off worktree-powos-multiplatform, commit only your
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", rebase, fast-forward push; on the box `git pull --ff-only`.
 Verify: units register, curl health endpoints, llm-bench.py for tok/s, voice-bench.py ws for latency, stt.pow/health.
 Report briefly: what's live (URLs, models, tok/s, voice latency before/after), commits, what's unverified.
+
+Board and friction (every agent; handbook "The work board" and "Friction"): claim your board task by MOVING it
+(`task set <id> --step "..."` - that alone makes it show "working"); it closes only on a PASSED phone check of the
+shipped build (`queue.sh add --close`), or `task done <id> --no-check "<why no device check is possible>"`. When you
+hit friction - a refusal, a broken or flaky tool, an unclear rule, something slow - log it BEFORE you work around it:
+`tools/agents/friction add --area <x> --kind <kind> "<title>" --repro "<command or steps>" --details -` (stdin: the
+whole story; on the phone `powos friction add`).
