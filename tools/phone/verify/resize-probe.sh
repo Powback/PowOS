@@ -21,8 +21,7 @@ e2e_setup inner
 LEASH0=$(sh_ "settings get global powos_live_leash")
 [ -n "$LEASH" ] && { sh_ "settings put global powos_live_leash $LEASH"; log "powos_live_leash $LEASH (was $LEASH0)"; }
 putback() { [ -n "$LEASH" ] && { [ "$LEASH0" = null ] && sh_ "settings delete global powos_live_leash" || sh_ "settings put global powos_live_leash $LEASH0"; } >/dev/null; }
-LC="logcat -T 1 -v time -s PowosTaskLeash PowosWindowResize PowosWindowFrame PowosWindowFrames PowosWindowDrag PowosFreeform ShellTransitions RemoteTransitionHandler"
-sh_ "pkill -f \"$LC\"; rm -f /data/local/tmp/rp-logcat.txt; nohup timeout 280 $LC > /data/local/tmp/rp-logcat.txt 2>&1 &" >/dev/null
+TAGS="PowosTaskLeash PowosWindowResize PowosWindowFrame PowosWindowFrames PowosWindowDrag PowosFreeform ShellTransitions RemoteTransitionHandler"
 trap 'putback; e2e_abort' EXIT
 
 touched() { sh_ "dumpsys input" | sed -n '/TouchStatesByDisplay/,/CursorStatesByDisplay/p' | grep -oE "name='[^']*'" | sed -E "s/name='[0-9a-f]+ ?/'/" | tr '\n' ' ' | cut -c1-300; }
@@ -31,23 +30,28 @@ facts() {
   log "== $3: task $(tbounds "$1")"
   sh_ "dumpsys input" | grep "frame=" | grep -E "name=[0-9a-f]+ ($2|PowOS window (bar|grip) $1\}|com.powos.app/andro.marchy.Home)" | awk '!seen[$0]++' \
     | sed -E "s/.*name=[0-9a-f]+ ([^,]*), .*(inputConfig=[^,]*), .*(frame=\[[^]]*\]\[[^]]*\]), .*(touchableRegion=.*), ownerPid.*/  input: \1 \2 \3 \4/" | head -8 | tee -a "$OUT/log.txt"
+  sh_ "dumpsys SurfaceFlinger" | grep -E "Task=$1#|$2" | grep -vE "^ *\+|Composition|HWC" | awk '!seen[$0]++' | head -6 | cut -c1-260 | sed 's/^/  sf: /' | tee -a "$OUT/log.txt"
+  sh_ "dumpsys window" | grep -iE "collecting|playing|mSyncEngine|activeSync|Transition\{" | head -6 | cut -c1-200 | sed 's/^/  tr: /' | tee -a "$OUT/log.txt"
   sh_ "dumpsys window windows" | awk -v p="$2" '/^ *Window #/{f=(index($0,p)>0); if(f) print "  wm: " $0} f && /(mFrame=| frame=|Requested w=|isDragResizing|mDragResizing|Surface: shown)/{print "     " $0}' | head -12 | tee -a "$OUT/log.txt"
 }
 # probes <task> <pat> <what>: a DOWN/UP at four spots inside the task's bounds.
 probes() {
-  local b t; b=$(tbounds "$1"); [ -n "$b" ] || { fail "[$3] no bounds for task $1"; return; }; set -- $b "$2" "$3"
+  local b t id=$1 pat=$2 what=$3 sx sy sn; b=$(tbounds "$id"); [ -n "$b" ] || { fail "[$what] no bounds for task $id"; return; }; set -- $b
   local m=$(dp 30) cx=$((($1 + $3) / 2)) cy=$((($2 + $4) / 2)) s
   for s in "$(($1 + m)) $(($2 + m)) top-left" "$cx $cy middle" "$(($3 - m)) $(($4 - m)) bottom-right" "$cx $(($4 - m)) bottom-middle"; do
-    set -- $s "$5" "$6"
-    mdown "$1" "$2" "[$5] $3" || continue; t=$(touched); mup "$1" "$2"; sleep 0.3
-    case $t in *"$4"*) pass "[$5] $3 ($1,$2): the finger goes to the app ($t)" ;; *) fail "[$5] $3 ($1,$2): NOT the app's: $t" ;; esac
+    read -r sx sy sn <<<"$s"
+    mdown "$sx" "$sy" "[$what] $sn" || continue; t=$(touched)
+    [ -n "$t" ] || log "  touch state: $(sh_ "dumpsys input" | sed -n '/TouchStatesByDisplay/,/CursorStatesByDisplay/p' | head -6 | tr '\n' ' ' | cut -c1-400)"
+    mup "$sx" "$sy"; sleep 0.3
+    case $t in *"$pat"*) pass "[$what] $sn ($sx,$sy): the finger goes to the app ($t)" ;; *) fail "[$what] $sn ($sx,$sy): NOT the app's: $t" ;; esac
   done; chk probes; }
 # gripdrag <task> <dx> <dy>: its grip dragged by (dx, dy) px, the lift's time.
 gripdrag() { local g x y; g=$(wframe "PowOS window grip $1}"); [ -n "$g" ] || { fail "no grip for task $1 (frames: $(frames))"; return 1; }; set -- $g "$2" "$3"
   x=$((($1 + $3) / 2)); y=$((($2 + $4) / 2))
   mdown $x $y "the grip" && { mpath $x $y $((x + $5)) $((y + $6)) 10; mup $((x + $5)) $((y + $6)); chk resize; }; }
 frames() { sh_ "dumpsys window windows" | grep -oE "Window #[0-9]+ Window\{[0-9a-f]+ u0 PowOS window [a-z]+ [0-9]+\}" | sed -E 's/.*PowOS window //' | tr '\n' ',' ; }
-after() { sleep 0.5; facts "$1" "$2" "$3 +0.5s"; sleep 1.5; facts "$1" "$2" "$3 +2s"; sleep 3; facts "$1" "$2" "$3 +5s"; probes "$1" "$2" "$3"; }
+lc() { sh_ "logcat -d -v time -s $TAGS" | tail -${1:-25} | cut -c1-300 | sed 's/^/  log: /' | tee -a "$OUT/log.txt"; }
+after() { sleep 0.5; facts "$1" "$2" "$3 +0.5s"; sleep 1.5; facts "$1" "$2" "$3 +2s"; sleep 3; facts "$1" "$2" "$3 +5s"; lc 30; probes "$1" "$2" "$3"; }
 
 for app in $APPS; do
   case $app in
@@ -85,6 +89,4 @@ for app in $APPS; do
   sh_ "am stack remove $CT"; sleep 1
 done
 putback
-sh_ "pkill -f \"$LC\"" >/dev/null; sh_ "cat /data/local/tmp/rp-logcat.txt" > "$OUT/logcat.txt"
-log "logcat: $OUT/logcat.txt ($(wc -l < "$OUT/logcat.txt" 2>/dev/null) lines)"
 e2e_finish

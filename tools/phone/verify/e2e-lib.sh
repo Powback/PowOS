@@ -208,6 +208,9 @@ e2e_setup() {
 RESTORED=0
 e2e_restore() {
   [ $RESTORED = 1 ] && return 0; RESTORED=1
+  # Setup never read the start state (the screen asleep, no window): nothing of the journey's to close - without
+  # TASKS0 every task looked new and a user's Linux window was closed (resize-probe, 2026-10-23 18:38).
+  [ -n "${TASKS0+set}" ] || { log "nothing to restore (the journey never started)"; return 0; }
   sh_ "input motionevent CANCEL 1 1" >/dev/null 2>&1
   hemit system.home null; hemit system.home null
   local id pkg vis was
