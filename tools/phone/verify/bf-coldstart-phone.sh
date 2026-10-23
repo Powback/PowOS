@@ -117,6 +117,7 @@ run() {  # run <variant> <n>
   st="steam $([ -d "/proc/$(steam_pid)" ] && { [ -n "$(cg)" ] && echo frozen || echo awake; } || echo off), wineserver $(pgrep -c wineserver)"
   echo "== $v #$2: at the tap: $st; $(sizes)"
   gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0) cl=$(wc -l < "$S/logs/console_log.txt" 2>/dev/null || echo 0) i=0
+  local cb; cb=$(stat -c %s "$S/logs/console_log.txt" 2>/dev/null || echo 0)
   local up=; [ $v != cold ] && [ -d "/proc/$(steam_pid)" ] && up=1
   mine=1; pill "cold start timing: $v #$2 - tap"; t0=$(now)
   ( open_task 400 "steam_app_$APP" > "$T/open.status" ) &
@@ -128,12 +129,15 @@ run() {  # run <variant> <n>
     # The queue kills a job at 300 s: stop waiting at COLD_WAIT_MS (265 s) so a launch that never shows a window still
     # gets its HANG lines, STAGES and the restore below (2026-10-23 08:08: killed mid-wait, none of them printed).
     [ $v = cold ] && [ "$now_" -gt "${COLD_WAIT_MS:-265000}" ] && break
-    # A running Steam logs the URL at once (ExecCommandLine): nothing in 20 s = the hand-off was lost (bf-lib
-    # handoff_detail says where), not a slow tool - INVALID below, without waiting out the 150 s.
-    if [ "$up" = 1 ] && [ $i = 80 ]; then
-      # Taken, or /usr/bin/steam (pkgrel 24) restarting Steam with the URL (a new client's "Client version"): go on.
-      if tail -n +$((cl + 1)) "$S/logs/console_log.txt" | grep -q "rungameid/$APP\|Client version"; then up=
-      else seen[handoff]=lost; echo "   handoff lost: $(handoff_diag)"; handoff_detail | sed 's/^/   /'; break; fi
+    # A running Steam logs the URL at once (ExecCommandLine): stage "handoff" = when it did. A new client's "Client
+    # version" = Steam was restarted for the launch (what pkgrel 24-27 did; the hand-off works since pkgrel 28's
+    # sysvipc fix): FAIL restart below. Nothing in 20 s = the hand-off was lost (bf-lib handoff_detail says where).
+    if [ "$up" = 1 ]; then
+      case $(tail -c +$((cb + 1)) "$S/logs/console_log.txt" 2>/dev/null) in
+        *"Client version"*) first restart "$now_"; up= ;;
+        *"rungameid/$APP"*) first handoff_ms "$now_"; up= ;;
+        *) if [ $i = 80 ]; then seen[handoff]=lost; echo "   handoff lost: $(handoff_diag)"; handoff_detail | sed 's/^/   /'; break; fi ;;
+      esac
     fi
     [ -n "$(pgrep -f 'steamwebhelper' | head -1)" ] && first steam "$now_"
     # A depot swap (cfg:native / back): Steam downloads before the launch.
@@ -199,6 +203,8 @@ run() {  # run <variant> <n>
       *" iscript "*) pill "cold start timing: $v - install script" ;; *) pill "cold start timing: $v - Steam" ;; esac
     touched; sleep 0.25
   done
+  if [ -n "${seen[restart]:-}" ]; then fail "restart-$v" "the running Steam was restarted for the launch (a new client ${seen[restart]} ms after the tap) instead of taking it"
+  fi
   if [ -n "${seen[window]:-}" ]; then
     pill "cold start timing: $v - first frame"
     x=$(first_frame 90); [ "$x" != none ] && seen[frame]=$(ms "$t0" "$x")
@@ -214,7 +220,8 @@ run() {  # run <variant> <n>
     echo "   game output (Steam's stdout, last lines):"; grep -a -v -E 'LD_PRELOAD|^\s*$|steamwebhelper|cef_|chromium|SlowJSMethodCall' "$T/open.out" 2>/dev/null \
       | tail -25 | cut -c1-200 | sed 's/^/   | /'
     fail "start-$v" "no window in $([ $v = cold ] && echo $((${COLD_WAIT_MS:-265000} / 1000)) || echo 150) s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi
-  echo "STAGES $v #$2 (ms from the tap): steam-ui ${seen[steam]:--} update ${seen[update]:--}-${seen[update_end]:--} iscript ${seen[iscript]:--}-${seen[iscript_end]:--} reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--}; open-task: $(cat "$T/open.status" 2>/dev/null)"
+  local hv=${seen[handoff_ms]:-${seen[restart]:+restart@${seen[restart]}}}
+  echo "STAGES $v #$2 (ms from the tap):$([ $v != cold ] && echo " handoff ${hv:--}") steam-ui ${seen[steam]:--} update ${seen[update]:--}-${seen[update_end]:--} iscript ${seen[iscript]:--}-${seen[iscript_end]:--} reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--}; open-task: $(cat "$T/open.status" 2>/dev/null)"
   echo "   timeline (ms from the tap, first sight of each process under the launch; 4 Hz):"
   sort -t$'\t' -k2,2n "$T/timeline" 2>/dev/null | awk -F'\t' '!p[$1]++ && !a[$3]++ {printf "%6s %s\n", $2, $3}' \
     | sed -E 's|/home/powos/.local/share/Steam/|~S/|g' | head -45 | sed 's/^/     /'
