@@ -57,7 +57,11 @@ PY
 
 steam_pid() { cat ~/.steam/steam.pid 2>/dev/null; }
 under() { local a=$1; while [ -n "$a" ] && [ "$a" -gt 1 ]; do [ "$a" = "$2" ] && return 0; a=$(awk '{print $4}' "/proc/$a/stat" 2>/dev/null); done; return 1; }
-reapers() { pgrep -f "SteamLaunch AppId=$APP( |\$)"; }
+# The game's own launch chain. A Steam launch first runs the game's install script evaluator through the same reaper
+# (`SteamLaunch AppId=<id> Install=1`, Proton `run iscriptevaluator.exe`): that one is iscript_reapers, never the game's
+# (bf-coldstart took its pressure-vessel / wineserver for the game's, 2026-10-23).
+reapers() { local p; for p in $(pgrep -f "SteamLaunch AppId=$APP( |\$)"); do grep -qa 'Install=1' "/proc/$p/cmdline" 2>/dev/null || echo "$p"; done; }
+iscript_reapers() { pgrep -f "SteamLaunch AppId=$APP Install=1"; }
 reaper() { local p; for p in $(reapers); do under "$p" "$(steam_pid)" && { echo "$p"; return; }; done; }  # Steam's own
 tree() { local t=("$1") o=() p; while ((${#t[@]})); do p=${t[0]}; t=("${t[@]:1}"); [ -n "$p" ] && o+=("$p") && t+=($(pgrep -P "$p")); done; echo "${o[*]}"; }
 ticks() { local n=0 p f; for p in "$@"; do f=$(cat "/proc/$p/stat" 2>/dev/null) || continue; f=${f##*) }; set -- $f; n=$((n + ${12} + ${13})); done; echo "$n"; }
@@ -74,6 +78,92 @@ first_change() {  # first_change <window> <seconds> <fps>: epoch s of the first 
         !/^#/ {n++; if (n == 1) h = $NF; else if ($NF != h) {x = (td ? $3 * tn / td : 0)
           printf "%.3f", (x > 1e9 ? x : s + (n - 1) / fps); found = 1; exit}}
         END {if (!found) printf "none"}'; }
+# Frames of an X window, for first_frame / first_change: Xlib's XGetImage on 16 rows of the window, every 64th pixel,
+# from python3 + ctypes. Not ffmpeg's x11grab: FFmpeg 9 only grabs through MIT-SHM, and Android's kernel has no System
+# V shared memory - "Could not get shared memory buffer" / "Error during demuxing: Permission denied", no frame ever
+# (every bf-coldstart "frame -", bf-checker's grabs, 2026-10-23; FFmpeg 8 still fell back to plain GetImage).
+#   xframes first <window name> <s>        epoch s of the named window's first drawn frame (looked up again each sample:
+#                                          Unity maps a 314x208 window, then goes full screen): a sample that isn't flat
+#                                          (brightest - darkest > 24) or differs from the window's first sample
+#   xframes change <window id> <s> <fps>   epoch s of the first sample that differs from the first one
+# "none" when nothing came in <s>. The time is the sample's start (a sample takes a few ms).
+xframes() { python3 - "$@" <<'PY'
+import ctypes as C, sys, time
+X = C.CDLL("libX11.so.6")
+X.XOpenDisplay.restype = C.c_void_p; X.XOpenDisplay.argtypes = [C.c_char_p]
+X.XDefaultRootWindow.restype = C.c_ulong; X.XDefaultRootWindow.argtypes = [C.c_void_p]
+X.XQueryTree.argtypes = [C.c_void_p, C.c_ulong, C.POINTER(C.c_ulong), C.POINTER(C.c_ulong), C.POINTER(C.POINTER(C.c_ulong)), C.POINTER(C.c_uint)]
+X.XFetchName.argtypes = [C.c_void_p, C.c_ulong, C.POINTER(C.c_char_p)]
+X.XFree.argtypes = [C.c_void_p]
+X.XGetImage.restype = C.c_void_p
+X.XGetImage.argtypes = [C.c_void_p, C.c_ulong, C.c_int, C.c_int, C.c_uint, C.c_uint, C.c_ulong, C.c_int]
+class Attr(C.Structure):
+    _fields_ = [(n, C.c_int) for n in ("x", "y", "width", "height", "border_width", "depth")] + [("visual", C.c_void_p),
+        ("root", C.c_ulong), ("cls", C.c_int), ("bit_gravity", C.c_int), ("win_gravity", C.c_int), ("backing_store", C.c_int),
+        ("backing_planes", C.c_ulong), ("backing_pixel", C.c_ulong), ("save_under", C.c_int), ("colormap", C.c_ulong),
+        ("map_installed", C.c_int), ("map_state", C.c_int), ("all_event_masks", C.c_long), ("your_event_mask", C.c_long),
+        ("do_not_propagate_mask", C.c_long), ("override_redirect", C.c_int), ("screen", C.c_void_p)]
+class Img(C.Structure):
+    _fields_ = [("width", C.c_int), ("height", C.c_int), ("xoffset", C.c_int), ("format", C.c_int), ("data", C.c_void_p),
+        ("byte_order", C.c_int), ("bitmap_unit", C.c_int), ("bitmap_bit_order", C.c_int), ("bitmap_pad", C.c_int),
+        ("depth", C.c_int), ("bytes_per_line", C.c_int), ("bits_per_pixel", C.c_int)]
+X.XGetWindowAttributes.argtypes = [C.c_void_p, C.c_ulong, C.POINTER(Attr)]
+ERR = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(lambda d, e: 0)  # a window gone or resized mid-sample: no exit
+X.XSetErrorHandler(ERR)
+d = X.XOpenDisplay(None)
+if not d:
+    print("none", end=""); sys.exit()
+def find(w, name, out):  # every window of that name (Proton also has unmapped ones: "Steam" 400x300)
+    n = C.c_char_p()
+    if X.XFetchName(d, w, C.byref(n)) and n.value is not None:
+        if n.value == name:
+            out.append(w)
+        X.XFree(n)
+    r, p, k, c = C.c_ulong(), C.c_ulong(), C.POINTER(C.c_ulong)(), C.c_uint()
+    if not X.XQueryTree(d, w, C.byref(r), C.byref(p), C.byref(k), C.byref(c)):
+        return out
+    kids = [k[i] for i in range(c.value)]
+    if c.value:
+        X.XFree(k)
+    for kid in kids:
+        find(kid, name, out)
+    return out
+def sample(w):
+    a = Attr()
+    if not X.XGetWindowAttributes(d, w, C.byref(a)) or a.map_state != 2 or a.width < 1 or a.height < 1:
+        return None
+    px = []
+    for i in range(16):
+        p = X.XGetImage(d, w, 0, a.height * (2 * i + 1) // 32, a.width, 1, 0xFFFFFFFF, 2)  # ZPixmap
+        if not p:
+            return None
+        im = Img.from_address(p)
+        if im.bits_per_pixel == 32:
+            row = C.string_at(im.data, im.bytes_per_line)
+            px += [(row[x] + row[x + 1] + row[x + 2]) // 3 for x in range(0, a.width * 4, 256)]
+        X.XFree(im.data); X.XFree(p)
+    return px or None
+mode, end = sys.argv[1], time.time() + float(sys.argv[3])
+gap = 1.0 / float(sys.argv[4]) if len(sys.argv) > 4 else 0.1
+w, first = (0 if mode == "first" else int(sys.argv[2], 0)), None
+while time.time() < end:
+    t = time.time()
+    s = None
+    for w in (find(X.XDefaultRootWindow(d), sys.argv[2].encode(), []) if mode == "first" else [w]):
+        s = sample(w)  # the first mapped one
+        if s:
+            break
+    if s:
+        if (mode == "first" and max(s) - min(s) > 24) or (first is not None and s != first):
+            print("%.3f" % t, end=""); sys.exit()
+        if first is None:
+            first = s
+    time.sleep(max(0.0, gap - (time.time() - t)))
+print("none", end="")
+PY
+}
+first_frame() { xframes first "$WIN_NAME" "$1"; }  # first_frame <s>: the game's first drawn frame (xframes first)
+first_change() { xframes change "$1" "$2" "$3"; }  # first_change <window> <s> <fps>: its first new frame (xframes change)
 open_task() {  # open_task <timeout s> <app id>: the drawer's / widget's launch path; its status line
   timeout "$1" powos-open-task --app-id "$2" -- steam steam://rungameid/$APP >"$T/open.out" 2>&1 </dev/null
   grep -m1 '^powos-open-task:' "$T/open.out" || echo "no status line"; }

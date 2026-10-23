@@ -1,0 +1,15 @@
+#!/bin/sh
+# powos-steam-resident: (the session's autostart, /etc/xdg/autostart/powos-steam-resident.desktop) starts Steam once per
+# session, out of sight (-silent: no window, only its tray), so a game's first tap doesn't wait for Steam's own start
+# (~22 s cold on the phone, 2026-10-23: tap 01:17:10 -> Steam handles the launch 01:17:33). Unified sleep then freezes it
+# like any Steam out of sight (units/phone/steam.json: 2 min start grace, then 15 s out of sight; no CPU, kept in RAM),
+# and /usr/bin/steam thaws it on the tap.
+# Waits until the session settled (POWOS_STEAM_RESIDENT_DELAY, 60 s) so it doesn't compete with the session's own start.
+# Off: `touch ~/.config/powos/steam-resident-off` (or remove this package's autostart file). Nothing to do when Steam
+# already runs (the user started it, or a game launch did).
+[ -e "${XDG_CONFIG_HOME:-$HOME/.config}/powos/steam-resident-off" ] && exit 0
+command -v steam >/dev/null 2>&1 || exit 0
+sleep "${POWOS_STEAM_RESIDENT_DELAY:-60}"
+pid=$(cat "$HOME/.steam/steam.pid" 2>/dev/null)
+case $(readlink "/proc/${pid:-0}/exe" 2>/dev/null) in */steam | */FEX*) exit 0 ;; esac
+cd "$HOME" && exec steam -silent </dev/null >/dev/null 2>&1

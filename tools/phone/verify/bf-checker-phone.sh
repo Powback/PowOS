@@ -19,8 +19,15 @@ set)
     *) echo "unknown variant $2"; exit 2 ;;
   esac
   [ -d "$P" ] || { echo "no Proton dir $P"; exit 2; }
-  [ -e "$P/user_settings.py" ] && [ ! -e "$P/user_settings.py.powos-bak" ] && mv "$P/user_settings.py" "$P/user_settings.py.powos-bak"
-  { echo 'user_settings = {'; echo "    \"DXVK_LOG_PATH\": \"Z:$L\","; [ -n "$tu" ] && echo "    \"TU_DEBUG\": \"$tu\","; echo '}'; } > "$P/user_settings.py"
+  # PowOS's own user_settings.py (pkgs/steam) takes them from ~/.config/powos/proton-settings.json and stays in place
+  # (it also skips the install script evaluator); a Proton without it gets a user_settings.py of the check's own.
+  if head -1 "$P/user_settings.py" 2>/dev/null | grep -q '^# PowOS user_settings'; then
+    mkdir -p ~/.config/powos
+    { printf '{"DXVK_LOG_PATH": "Z:%s"' "$L"; [ -n "$tu" ] && printf ', "TU_DEBUG": "%s"' "$tu"; echo '}'; } > ~/.config/powos/proton-settings.json
+  else
+    [ -e "$P/user_settings.py" ] && [ ! -e "$P/user_settings.py.powos-bak" ] && mv "$P/user_settings.py" "$P/user_settings.py.powos-bak"
+    { echo 'user_settings = {'; echo "    \"DXVK_LOG_PATH\": \"Z:$L\","; [ -n "$tu" ] && echo "    \"TU_DEBUG\": \"$tu\","; echo '}'; } > "$P/user_settings.py"
+  fi
   rm -f "$G/dxvk.conf"; [ -n "$conf" ] && echo "$conf" > "$G/dxvk.conf"
   rm -rf "$L"; mkdir -p "$L"; echo "set $2: TU_DEBUG=${tu:-} dxvk.conf=${conf:-none}" ;;
 grab)
@@ -42,7 +49,8 @@ logs)
   u=$(find "$S/steamapps/compatdata/274190" "$G" -name 'output_log.txt' -o -name 'Player.log' 2>/dev/null | head -1)
   [ -n "$u" ] && tail -c 20000 "$u" > "$2/unity.txt"; echo "logs: $(wc -l < "$2/dxvk.txt") dxvk lines, unity ${u:-none}" ;;
 clean)
-  rm -f "$P/user_settings.py" "$G/dxvk.conf"
+  rm -f ~/.config/powos/proton-settings.json "$G/dxvk.conf"
+  head -1 "$P/user_settings.py" 2>/dev/null | grep -q '^# PowOS user_settings' || rm -f "$P/user_settings.py"
   [ -e "$P/user_settings.py.powos-bak" ] && mv "$P/user_settings.py.powos-bak" "$P/user_settings.py"
   rm -rf "$L"; echo clean ;;
 esac

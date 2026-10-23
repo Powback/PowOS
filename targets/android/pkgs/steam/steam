@@ -54,6 +54,8 @@ reg_guard() {
     fi
     [ -n "$bad" ] || continue
     mkdir -p "$c/powos-reg-broken" && for r in $bad; do mv -f "$p/$r.reg" "$c/powos-reg-broken/$r.reg"; done
+    # The install script evaluator's record (user_settings.py): its registry marks may be gone with the old registry.
+    rm -f "$c/powos-iscript.done"
     if reg_ok "$c/powos-reg/system.reg" && reg_ok "$c/powos-reg/user.reg" && reg_ok "$c/powos-reg/userdef.reg"; then
       for r in system user userdef; do cp -p "$c/powos-reg/$r.reg" "$p/$r.reg"; done
       echo "steam: ${c##*/}'s Wine registry was broken (${bad# }): restored the copy of $(date -r "$c/powos-reg/system.reg" '+%F %T')" | tee -a "$c/powos-reg-broken/log" >&2
@@ -96,7 +98,17 @@ case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
       pid=${f#/dev/shm/fex-}; pid=${pid%-stats}
       [ -e "$f" ] && [ ! -d "/proc/$pid" ] && rm -f "$f"
     done
-    reg_guard ;;
+    reg_guard
+    # PowOS's Proton user_settings.py (/usr/lib/powos-steam/user_settings.py: skips the install script evaluator when it
+    # has nothing to do, ~/.config/powos/proton-settings.json) in every Proton, unless that Proton has the user's own.
+    for d in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/common/Proton* \
+             "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/compatibilitytools.d/*; do
+      [ -f "$d/proton" ] && [ -f /usr/lib/powos-steam/user_settings.py ] || continue
+      if [ ! -e "$d/user_settings.py" ] || head -1 "$d/user_settings.py" | grep -q '^# PowOS user_settings'; then
+        cmp -s /usr/lib/powos-steam/user_settings.py "$d/user_settings.py" \
+          || install -m644 /usr/lib/powos-steam/user_settings.py "$d/user_settings.py"
+      fi
+    done ;;
 esac
 
 if [ -n "${STEAM_X86:-}" ]; then

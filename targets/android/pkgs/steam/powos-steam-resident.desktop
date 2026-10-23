@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Steam (resident)
+Comment=Starts Steam out of sight once per session, so games start without waiting for Steam (powos-steam-resident)
+Exec=/usr/lib/powos-steam/powos-steam-resident
+NoDisplay=true
+X-KDE-autostart-phase=2
