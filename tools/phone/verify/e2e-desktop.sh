@@ -24,9 +24,10 @@ IMG=/usr/share/wallpapers/Next/contents/images/1440x2960.png
 step start "the unfolded home, page 1 (the journey found home on page index $PAGE0; -1 = PowOS AI's)"
 note "found home on page index $PAGE0 (-1 = PowOS AI's page), ${W}x${H}; the journey runs from page 1 and goes back there at the end"
 
-# The drawer by a swipe up from empty space; 0 when it opened.
+# The drawer by a swipe up from empty space in home's right half (the left half's pull is PowOS AI's panel when the
+# pull-up corners are on: from the centre, 02-drawer got the AI panel, round 1); 0 when it opened.
 open_drawer() {
-  local p; p=$(freept "" 0 0); [ "$p" != none ] && [ -n "$p" ] || { fail "no empty spot on home to swipe up from"; return 1; }
+  local p; p=$(freept "" 0 0 .54); [ "$p" != none ] && [ -n "$p" ] || { fail "no empty spot on home to swipe up from"; return 1; }
   set -- $p; swipe "$1" "$2" "$1" $(($2 - H * 30 / 100)) 250 "up from empty space (the drawer)" || return 1
   sleep 1.2; chk drawer; [ "$(isopen)" = true ]
 }
@@ -245,7 +246,9 @@ part3() {
     swipe $x $y2 $x $y1 400 "down inside Chrome's page (scroll up)" && { sleep 1.5; chk scroll2; u2=$(ui)
       step scrolled-up "a swipe down inside Chrome: back up"
       [ "$u2" != "$u1" ] && pass "Chrome's content moved back" || fail "Chrome's content didn't move back"; }
-    if grep -q "^$CH " <<<"$TASKS0"; then put_away $CHROME "a:$CHROME/" Chrome chrome-away; else closebar "$CH" Chrome chrome-closed; fi
+    # Put away, not closed by its bar: the drawer's stages below pull on home, and Chrome left up (its close button
+    # under the verify pill, round 1) took both pulls - they started inside its window, so they were Chrome's.
+    put_away $CHROME "a:$CHROME/" Chrome chrome-away
   fi
 
   # The drawer's two stages (pullup-stage2.sh's moves): a plain swipe = the drawer, no keyboard; pulled further and

@@ -5,7 +5,7 @@
 #   1. a plain swipe up: the drawer opens, no keyboard (stage 1);
 #   2. a long pull held at two heights: the content's lift follows the finger (rubber band), let go: search focused,
 #      keyboard up; release -> focus and release -> first keyboard inset measured;
-#   3. the drawer open, its list flung to the end, up again: search + keyboard the same way.
+#   3. the drawer open, its list at its end (the A-Z bar's last letter), up again: search + keyboard the same way.
 # Back closes the keyboard and the drawer after each. Nothing persistent changes.
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
@@ -58,11 +58,14 @@ grep -q '"focus":true' <<<"$s2" && [[ "$k2" == *true* ]] || fails+=("long pull: 
 t2=$(ev '(() => { const r = window.__pullRec; return Math.round(r.focus - r.end) + " " + (r.kb ? Math.round(r.kb - r.end) : -1); })()')
 back; back
 
-# 3. open, list flung to its end, up again
+# 3. open, the list at its end, up again
 $p/adb.sh shell input swipe "$X" $((H * 85 / 100)) "$X" $((H * 62 / 100)) 250
 sleep 0.8
-# Flings in one phone call (171 apps: four separate ones didn't reach the end, 2026-10-23).
-fl=""; for _ in 1 2 3 4 5 6 7 8 9 10; do fl+="input swipe $X $((H * 75 / 100)) $X $((H * 25 / 100)) 60; "; done; $p/adb.sh shell "$fl"
+# The list's end by its A-Z bar's last letter (a tap: jump() scrolls at once, clamped at the end). Not flings: each
+# fling that starts at the end is itself the over-pull (search + keyboard) and the keyboard relaid the list (end=false,
+# 2026-10-23).
+lp=$(ev '(() => { const s = [...document.querySelectorAll(".drawer .letter-bar span")].pop(); if (!s) return "none"; const r = s.getBoundingClientRect(), d = devicePixelRatio; return Math.round((r.left + r.width / 2) * d) + " " + Math.round((r.top + r.height / 2) * d); })()')
+[ "$lp" != none ] && $p/adb.sh shell input tap $lp
 sleep 1.5
 end=$(ev '(() => { const l = document.querySelector(".drawer-list"); return l ? (l.scrollTop + l.clientHeight >= l.scrollHeight - 1) : "none"; })()')
 # One call: a DOWN on an app cell held until the next adb call would be its long press (menu / drag).
@@ -71,7 +74,7 @@ $p/adb.sh shell "$c input motionevent UP $X $((H * 30 / 100))"
 sleep 1
 s3=$(ev "$state"); k3=$(ime)
 t3=$(ev '(() => { const r = window.__pullRec; return Math.round(r.focus - r.end) + " " + (r.kb ? Math.round(r.kb - r.end) : -1); })()')
-[ "$end" = true ] || fails+=("couldn't fling the list to its end ($end)")
+[ "$end" = true ] || fails+=("the list didn't reach its end ($end)")
 grep -q '"focus":true' <<<"$s3" && [[ "$k3" == *true* ]] || fails+=("up at the list's end: no search + keyboard ($k3)")
 back; back
 
