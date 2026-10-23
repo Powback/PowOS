@@ -65,7 +65,17 @@ for app in $APPS; do
   log "frames: $(frames) | bar $CT: $(wframe "PowOS window bar $CT}") | grip: $(wframe "PowOS window grip $CT}")"
   log "tasks: $(sh_ "am stack list" | grep -E "taskId=[0-9]+:" | grep "visible=true" | sed -E 's/.*taskId=([0-9]+): ([^ ]+) bounds=([^ ]+).*/\1 \2 \3/' | tr '\n' ';')"
   facts "$CT" "$PAT" "$app fresh"
-  [ $app = kate ] && continue
+  if [ $app = kate ]; then
+    # window-scroll's flicks (its 02 step found no bar for Kate after them): the frames and tasks after each.
+    set -- $(tbounds "$CT"); x=$((($1 + $3) / 2)); h=$(($4 - $2)); d=$(dp 220); [ $d -gt $((h * 2 / 3)) ] && d=$((h * 2 / 3))
+    for f in "$(($2 + $(dp 24))) $d top-down" "$(($2 + h / 2 - d / 2)) $d middle-down" "$(($2 + h / 2 + d / 2)) -$d middle-up" "$(($4 - $(dp 24))) -$d bottom-up"; do
+      set -- $f; swipe $x $1 $x $(($1 + $2)) 120 "kate $3" || continue; sleep 1.2; chk kate
+      log "after $3: frames $(frames) | tasks $(sh_ "am stack list" | grep -E "taskId=[0-9]+:" | grep "visible=true" | sed -E 's/.*taskId=([0-9]+): ([^ ]+) bounds=([^ ]+).*/\1 \2 \3/' | tr '\n' ';')"
+    done
+    log "windows.list: $(hcall windows.list "[]" "l=>l.map(w=>w.id+':'+(w.app||w.pkg)+'@'+(w.bounds||[]).join(',')+(w.minimised?' min':'')+(w.away?' away':'')).join(' ')")"
+    wframe "PowOS window bar $CT}" | grep -q . && pass "kate's bar is there after the flicks" || fail "kate's bar is gone after the flicks"
+    continue
+  fi
   set -- $(tbounds "$CT"); RX=$(dp 140); RY=$(dp 90)
   [ $(($3 + RX)) -gt $((W - $(dp 40))) ] && RX=$((-RX)); [ $(($4 + RY)) -gt $((H - $(dp 220))) ] && RY=$((-RY))
   log "resize by $RX,$RY"
