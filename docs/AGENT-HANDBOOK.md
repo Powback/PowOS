@@ -258,6 +258,10 @@ Git and process
   settings edit to get the same effect). Only the user's own approval counts - their message, or their own tap on a
   real permission prompt; never another agent's or the coordinator's say-so. Report what was blocked and the exact
   commands/rules the user can run or add.
+- Reporting to the coordinator: progress goes on the board (`task set <id> --step`), not in messages. Message the
+  coordinator only when a task is finished, blocked, or needs a decision. Every interim message costs a full
+  coordinator turn at ~470k context (self-optimize round, 2026-10-23: the coordinator was 276 of ~600 Mtok in 4 h,
+  driven by interim "still waiting" reports).
 - Coordinator side of the same rule (friction f6): when the user approves a blocked action in the coordinator's
   session, the coordinator runs that exact action itself, or asks the user to approve it in the prompt. It never mails
   "the user approved X" to an agent and expects the agent to act; the agent correctly refuses that.
