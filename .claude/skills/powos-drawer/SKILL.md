@@ -33,6 +33,10 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
 - Device gestures: a held pull is ONE adb call per burst (`input motionevent DOWN..; MOVE..`) from an EMPTY spot read
   over CDP - a DOWN on the dock held across adb calls (~1 s each) is an icon long press, not a drag (pullup-stage2,
   2026-10-23). Never inject a DOWN on a tile/icon and wait.
+- A pull that "doesn't open" on the device: first check where it started. Inside a floating window (windows.list
+  bounds, ui/desktops.ts inWindow) it is the app's by design; left half with pull-up corners on = PowOS AI's panel.
+  CDP elementFromPoint can't see Android windows. List end in a check: tap the A-Z bar's last letter, not flings (a
+  fling starting at the end IS the over-pull: search + keyboard).
 - Drawer: A-Z `.grid.az` in `.drawer-list` (padding-right --letter-bar). RecentRow (`.drawer-recents`) is OFF by
   default: `drawerRecents = stored("drawer.recents")`, "on" shows it; Settings > style > home > "recent apps in the
   drawer". The check is inside RecentRow (Drawer itself is at the cyclomatic limit).
