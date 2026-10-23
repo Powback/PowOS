@@ -29,6 +29,9 @@ t=0; while grep -q running <<<"$(calcrun)" && [ $t -lt 10 ]; do sleep 0.5; t=$((
 grep -q running <<<"$(calcrun)" && { echo "FAIL running-dot: Calculator stopped before the launch, its mark stays"; exit 1; }
 key=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$PKG\\//.test(a.key))||{}).key||'ERR not in the list'")
 case $key in a:$PKG/*) ;; *) echo "FAIL running-dot: Calculator's key: $key"; exit 1 ;; esac
+# The main log rotates in seconds (256 KiB, OplusTouch spam): a `logcat -d` after the fact found nothing. Capture the
+# tags from the launch on, on the phone, bounded (timeout); hiddenapi denials log under the app's process name.
+sh_ "rm -f /data/local/tmp/rd-log.txt; (timeout 40 logcat -T 1 -v time -s PowosWindowFrames PowosFreeform PowosRunning com.powos.app:W </dev/null >/data/local/tmp/rd-log.txt 2>&1 &)"
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || { echo "FAIL running-dot: apps.launch: $r"; exit 1; }
 t=0; until grep -q running <<<"$(calcrun)" || [ $t -ge 20 ]; do sleep 0.5; t=$((t + 1)); done
 mode=$(sh_ "dumpsys activity activities" | grep -E "Task\\{.*$PKG" | grep -o "mode=[a-z-]*" | head -1)
@@ -48,7 +51,8 @@ echo "running-dot: dom $(tail -c 400 <<<"$out") linux $linux shot=$shot"
 if ! grep -q running <<<"$(calcrun)"; then
   case $host in *$PKG*) why="the host's map has it: the apps.running event didn't reach the page" ;;
   *) why="the host's map lacks it: no task read after the launch (logcat PowosRunning: listener on? tasks: ...)" ;; esac
-  echo "FAIL running-dot: Calculator open ($mode), its cells not marked running - $why"; exit 1
+  echo "FAIL running-dot: Calculator open ($mode), its cells not marked running - $why"
+  sh_ "tail -30 /data/local/tmp/rd-log.txt"; exit 1
 fi
 if ! grep -q '"marked":[1-9]' <<<"$out"; then echo "FAIL running-dot: no app icon marked running (APK without apps.running, or no task)"; exit 1; fi
 if ! grep -q '"anims":0' <<<"$out"; then echo "FAIL running-dot: marked cells animate at rest"; exit 1; fi

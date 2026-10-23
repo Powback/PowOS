@@ -25,6 +25,11 @@ object HiddenApi {
             // The task stack listener (FreeformTasks.listen): ITaskStackListener.Stub.asInterface is hidden; without the
             // exemption the listener never registered (no task events for the running bar or the window frames).
             "Landroid/app/ITaskStackListener",
+            // A task's windowing mode and bounds (FreeformTasks.list): Configuration.windowConfiguration and
+            // WindowConfiguration are test-api, blocked for apps - logcat "windowConfiguration ... denied", every task
+            // skipped, so windows.list was always empty (a floating Calculator on no home page, 2026-10-23).
+            "Landroid/content/res/Configuration;",
+            "Landroid/app/WindowConfiguration;",
             "Landroid/window/TaskSnapshot",
             // The floating windows (FreeformTasks): a task's bounds and mode (Configuration.windowConfiguration is
             // blocked: without it list() found no windows - no frames, no density, empty windows.list, 2026-10-23), its

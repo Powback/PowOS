@@ -79,12 +79,16 @@ swipe() {
 
 key=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$PKG\\//.test(a.key))||{}).key||'ERR not in the list'")
 case $key in a:$PKG/*) ;; *) fail "Calculator's key: $key" ;; esac
+# The main log rotates in seconds (256 KiB, OplusTouch spam): a `logcat -d` after the fact found nothing. Capture the
+# tags from the launch on, on the phone, bounded (timeout); hiddenapi denials log under the app's process name.
+sh_ "rm -f /data/local/tmp/fd-log.txt; (timeout 40 logcat -T 1 -v time -s PowosWindowFrames PowosFreeform PowosRunning com.powos.app:W </dev/null >/data/local/tmp/fd-log.txt 2>&1 &)"
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch: $r"
 sleep 2.5; chk launch
 id=$(hcall windows.list "[]" "l=>(l.find(w=>w.pkg==='$PKG')||{id:'none'}).id"); echo "window $id" | tee -a "$OUT/log.txt"
 if [ "$id" = none ]; then
   # The bug of 2026-10-23: a floating Calculator that windows.list didn't have (no page, never hidden) - the evidence.
-  sh_ "logcat -d -v time -s PowosWindowFrames PowosFreeform | tail -30; am stack list | grep -m3 -E 'calculator|mode'" >"$OUT/missing.txt"
+  # No single quotes inside sh_ (it wraps in su -c '...'): grep -E 'a|b' there ended the quote, piped all into "mode".
+  sh_ "tail -40 /data/local/tmp/fd-log.txt; am stack list | grep -m3 -e calculator -e mode" >"$OUT/missing.txt"
   fail "no Calculator in windows.list ($(vis)) - see missing.txt"
 fi
 [ "$(vis)" = visible=true ] || fail "Calculator's window isn't showing ($(vis))"

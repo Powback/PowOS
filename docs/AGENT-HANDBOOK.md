@@ -192,6 +192,8 @@ minimal change and tell them.
   differs from AOSP: `SurfaceControl.Transaction.setBlurRegions` takes 31 floats per region (AOSP 10 + blur colour +
   OPlus params) - a wrong array length aborts the whole app in JNI (home crash-looped). Encode through the framework's
   own class (BackgroundBlurDrawable.BlurRegion.toFloatArray) instead of building layouts by hand.
+- A hidden field/method is denied SILENTLY to runCatching code: grep logcat for "hiddenapi: ... denied" (tag = the
+  process name, com.powos.app) and add the class prefix to HiddenApi.kt (Configuration.windowConfiguration, 2026-10-23).
 - PowOS holds READ_FRAME_BUFFER (signature|recents) through the recents role: `IWindowManager.mirrorWallpaperSurface`
   + `ScreenCapture.captureLayers` work, but a mirror is boundless - pass a source crop or SF answers BAD_VALUE (-22).
 - Screenshots: two displays - `screencap -d <id>` with an id from `dumpsys SurfaceFlinger --display-id` (the cover

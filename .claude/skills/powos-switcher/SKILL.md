@@ -158,3 +158,9 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
 - Home's foreground activity is com.powos.app/andro.marchy.HomeShell (alias of ShellActivity); HomeDesktop when the
   engine's desktop is home. `dumpsys device_state` mCommittedState OPENED/CLOSED says folded or not.
 - shell/dev/gate.sh checks git HEAD (commit first), needs shell/node_modules; on a busy Mac READY_MS=40000.
+- windows.list empty (a floating Calculator on no page, 2026-10-23): FreeformTasks.list reads each task's
+  Configuration.windowConfiguration - test-api, DENIED for apps (logcat "hiddenapi: ... windowConfiguration ... denied"
+  under tag com.powos.app), so every task was skipped. HiddenApi.kt now exempts Configuration; + WindowConfiguration;.
+  The running bar was NOT this (it reads getRunningTasks only). Device checks: capture logcat live from the launch
+  (`timeout 40 logcat -T 1 -s ... &` on the phone): the 256 KiB main buffer rotates in seconds; and no single quotes
+  inside a `su -c '...'` helper (float-desktops' missing.txt was empty from that).
