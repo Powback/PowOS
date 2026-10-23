@@ -259,6 +259,19 @@ clean_stale() {
 handoff_diag() {
   local p; p=$(steam_pid)
   echo "steam $p $(awk '{print "state " $3}' "/proc/$p/stat" 2>/dev/null || echo gone) threads $(cat /proc/"$p"/task/*/stat 2>/dev/null | awk '{print $3}' | sort | uniq -c | tr -s ' \n' ' ')wchan $(cat "/proc/$p/wchan" 2>/dev/null) cgroup $(cut -d: -f3 "/proc/$p/cgroup" 2>/dev/null | tail -1) exe $(readlink "/proc/$p/exe" 2>/dev/null); pipe written $(date -r ~/.steam/steam.pipe +%T 2>/dev/null); frozen cgroups: $(for f in /sys/fs/cgroup/powos/sleep/*/cgroup.freeze; do [ "$(cat "$f" 2>/dev/null)" = 1 ] && printf '%s ' "$(basename "$(dirname "$f")")"; done); console_log last: $(tail -1 "$HOME/.local/share/Steam/logs/console_log.txt" | cut -c1-120); sleep-gui: $(tail -2 "$GLOG" | cut -c1-160 | tr '\n' '|')"; }
+# hang_diag <pid>: where a started game that shows no window stands - thread states, each thread's syscall number
+# (/proc/<pid>/task/*/syscall: 98 futex, 73 ppoll, 63 read, 101 nanosleep on arm64; "running" = busy), wchans, CPU s,
+# the sockets/pipes/files it has open (an X/Pulse/D-Bus peer it waits on), the newest files it wrote under $HOME.
+# For any game (native or Wine): a cheap "is it busy, waiting on someone, or stuck" before guessing.
+hang_diag() {
+  local x=$1 t
+  [ -d "/proc/$x" ] || { echo "pid $x gone"; return; }
+  printf 'pid %s %s cpu %ss threads' "$x" "$(tr '\0' ' ' < /proc/$x/cmdline | cut -c1-90)" "$(sed 's/.*) //' /proc/$x/stat | awk '{printf "%.1f", ($12+$13)/100}')"
+  for t in /proc/$x/task/*; do printf '%s:%s/%s/%s\n' "$(cut -c1-12 $t/comm 2>/dev/null | tr ' ' _)" "$(sed 's/.*) //' $t/stat 2>/dev/null | cut -d' ' -f1)" \
+    "$(cut -d' ' -f1 $t/syscall 2>/dev/null)" "$(cat $t/wchan 2>/dev/null)"; done | sort | uniq -c | sort -rn | awk '{printf " %s%s", $2, ($1 > 1 ? "x" $1 : "")}' | cut -c1-700
+  printf '; fds:'; ls -l /proc/$x/fd 2>/dev/null | awk '{print $NF}' | sed -E 's/\[[0-9]+\]//' | sort | uniq -c | sort -rn | head -8 | awk '{printf " %s x%s", $2, $1}'
+  printf '; wrote:'; find "$HOME" -xdev -newer /proc/$x -type f ! -path '*/Steam/logs/*' ! -path '*/.cache/*' 2>/dev/null | head -5 | tr '\n' ' '; echo
+}
 # sems: the sysvipc shim's semaphores (/dev/shm/y700-sysv/sem-<id>: key, change count, values) - Steam's hand-off
 # signal is one of them (the client's first, value 0 while idle).
 sems() { python3 - <<'PY' 2>/dev/null

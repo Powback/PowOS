@@ -160,6 +160,7 @@ run() {  # run <variant> <n>
     if [ $((i % 120)) = 119 ]; then
       x=$(for q in $(tree "$r"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -1)
       echo "   at ${now_} ms: $(tail -n 3 "$T/timeline" 2>/dev/null | cut -f3 | cut -c1-60 | tr '\n' '|') game ${x:-none}$([ -n "$x" ] && awk '{printf " state %s cpu %.1fs", $3, ($14+$15)/100}' /proc/$x/stat 2>/dev/null) wchan $(cat /proc/${x:-0}/wchan 2>/dev/null); X windows of it: $(xwininfo -root -tree 2>/dev/null | grep -c "$WIN_NAME")"
+      [ -n "$x" ] && [ -n "${seen[exe]:-}" ] && echo "     $(hang_diag "$x")"
     fi
     [ ${#seen[@]} != $k ] && k=${#seen[@]} && case " ${!seen[*]} " in
       *" exe "*) pill "cold start timing: $v - game starting" ;; *" wineserver "*) pill "cold start timing: $v - wine" ;;
@@ -172,7 +173,12 @@ run() {  # run <variant> <n>
     x=$(first_frame 90); [ "$x" != none ] && seen[frame]=$(ms "$t0" "$x")
   elif [ -n "${seen[handoff]:-}" ]; then fail "handoff-$v" "the running Steam didn't log the launch's URL in 20 s (handoff lines above)"
   elif [ -n "${seen[ended]:-}" ]; then fail "start-$v" "the launch chain ended ${seen[ended]} ms after the tap, no window; Steam: $(grep -a 'Game process removed\|exit code' "$S/logs/gameprocess_log.txt" | tail -2 | cut -c1-120 | tr '\n' '|')"
-  else fail "start-$v" "no window in $([ $v = cold ] && echo 400 || echo 150) s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi
+  else
+    # Started but no window: where its process stands, before the close kills it (native Broforce 2026-10-23: exe at
+    # 41 s, then nothing for 4 min and no Player.log).
+    for q in $(tree "$(reaper)"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -2 \
+      | while read -r q; do echo "   HANG $(hang_diag "$q")"; done
+    fail "start-$v" "no window in $([ $v = cold ] && echo 400 || echo 150) s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi
   echo "STAGES $v #$2 (ms from the tap): steam-ui ${seen[steam]:--} update ${seen[update]:--}-${seen[update_end]:--} iscript ${seen[iscript]:--}-${seen[iscript_end]:--} reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--}; open-task: $(cat "$T/open.status" 2>/dev/null)"
   echo "   timeline (ms from the tap, first sight of each process under the launch; 4 Hz):"
   sort -t$'\t' -k2,2n "$T/timeline" 2>/dev/null | awk -F'\t' '!p[$1]++ && !a[$3]++ {printf "%6s %s\n", $2, $3}' \
