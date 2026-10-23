@@ -46,6 +46,7 @@ minimal change and tell them.
   whole-file heredocs.
 - Git: rebase only right before you commit/push, not before every command. Commit subject <= 72 chars, a short body.
 - Tracked files under the gitignored `.claude/` (skills): `git add` refuses them; `git commit -m ... -- <path>` works.
+- Never edit a shell script while it runs (a build, the runner): bash reads it as it goes, so an insert shifts it and the rest runs garbage (the 2026-10-23 kernel build died at its last steps). Wait, or edit a copy.
 - Gates queue: 2 agent gates at once (niced), a 3rd waits for a slot; the ship's (GATE_PRIORITY=ship) never waits.
 - No new process tooling (locks, gates, wrappers, handbook rules) unless something actually broke; say what broke.
 - Messages: shipped results or blockers only, one line.
