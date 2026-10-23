@@ -96,7 +96,10 @@ run() {  # run <variant> <n>
   if [ -n "${seen[window]:-}" ]; then
     x=$(first_change "$W" 30 10); [ "$x" != none ] && seen[frame]=$(ms "$t0" "$x")
     pill "$GAME $v: running 30 s"; sleep 30; touched
-    ffmpeg -nostdin -loglevel error -f x11grab -window_id "$W" -i "$DISPLAY" -frames:v 1 -y "$d/window.png" 2>/dev/null
+    # The window as Xwayland has it (bf-lib xframes grab: XGetImage; x11grab needs MIT-SHM, which Android lacks), and
+    # whether it changes: a still black window is a render failure, not a slow start.
+    xframes grab "$WIN_NAME" 3 "$d/grab" >/dev/null 2>&1; cp "$d/grab/f1.png" "$d/window.png" 2>/dev/null
+    echo "   frames in 10 s: $(xframes count "$W" 10 5) distinct; window.png $([ -s "$d/window.png" ] && echo saved || echo none)"
     echo "   window $W $(xwininfo -id "$W" | awk '/Width|Height/ {printf "%s ", $2}'), alive: $(pgrep -fc "${EXE:-common[\\/]$IDIR[\\/].*\.exe}") game exe"
   elif [ -n "${seen[ended]:-}" ]; then fail "start-$v" "the launch chain ended ${seen[ended]} ms after the tap, no window"
   else fail "start-$v" "no window in $LAUNCH_S s:$(for s in reaper container wineserver exe; do printf ' %s=%s' $s "${seen[$s]:--}"; done)"; fi
