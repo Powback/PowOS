@@ -55,6 +55,10 @@ pagelag() { local p x y to d=1
   logc; sh_ "dumpsys gfxinfo com.powos.app reset >/dev/null"; rec "pages-$3" 10
   swipe $x $y $to $y 250 "pages ($3)"; sleep 1.2; hemit system.home null; sleep 0.8; chk "pages-$3"
   swipe $x $y $to $y 250 "pages again ($3)"; sleep 1.2; hemit system.home null; sleep 0.8; chk "pages-$3"
+  # The refresh rate while a finger moves the page (a slow swipe, sampled half way): the display mode, and the votes
+  # that cap it (an app window's request caps the whole display).
+  offpill $x $y "slow page swipe" && note "[$3] mid-swipe refresh: $(sh_ "(input swipe $x $y $to $y 1200 &); sleep 0.6; dumpsys SurfaceFlinger | grep -m1 -E \"activeMode=\" | grep -oE \"vsyncRate=[0-9.]+\"; dumpsys SurfaceFlinger | grep -m2 -E \"PrimaryRefreshRates|AppRequestRefreshRates\"; dumpsys display | grep -E \"PRIORITY_APP_REQUEST|PRIORITY_.*TOUCH|PRIORITY_.*IDLE|mActiveRenderFrameRate\"; sleep 0.8" | tr -s " " | tr "\n" ";")"
+  sleep 0.8; hemit system.home null; sleep 0.8; chk "pages-$3"
   recstop "pages-$3"; note "[$3] page swipes, home's frames: $(gfx)"
   sh_ "cat /data/local/tmp/rec.txt" > "$PRE-pages-$3-logcat.txt"
   note "[$3] window events during the swipes: $(grep -cE 'PowosWindowFrame' "$PRE-pages-$3-logcat.txt") PowosWindowFrame(s) lines, $(grep -c 'windows (' "$PRE-pages-$3-logcat.txt") refreshes"; }
