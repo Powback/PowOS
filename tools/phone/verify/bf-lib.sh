@@ -243,10 +243,27 @@ clean_stale() {
 
 # handoff_diag: why a running Steam didn't take a steam:// launch: its state, its threads' states + the main thread's
 # wchan, its cgroup, steam.pipe's mtime (the URL was written into it then), the frozen sleep cgroups (a D-Bus / X peer
-# it may wait on), powos-sleep-gui's last lines. One line.
+# it may wait on), powos-sleep-gui's last lines. One line. handoff_detail: the rest, as "handoff:" lines - what decides
+# where the URL got stuck: bytes still unread in steam.pipe (>0 = the client never read it; 0 = read and dropped), the
+# main thread's syscall + wakeups in 1 s (its loop runs ppoll 50 ms when healthy, ~20/s), the forwarder's output,
+# the main thread's stack (gdb), and a second hand-off of the same URL (taken = the first write was lost, not the client).
 handoff_diag() {
   local p; p=$(steam_pid)
   echo "steam $p $(awk '{print "state " $3}' "/proc/$p/stat" 2>/dev/null || echo gone) threads $(cat /proc/"$p"/task/*/stat 2>/dev/null | awk '{print $3}' | sort | uniq -c | tr -s ' \n' ' ')wchan $(cat "/proc/$p/wchan" 2>/dev/null) cgroup $(cut -d: -f3 "/proc/$p/cgroup" 2>/dev/null | tail -1) exe $(readlink "/proc/$p/exe" 2>/dev/null); pipe written $(date -r ~/.steam/steam.pipe +%T 2>/dev/null); frozen cgroups: $(for f in /sys/fs/cgroup/powos/sleep/*/cgroup.freeze; do [ "$(cat "$f" 2>/dev/null)" = 1 ] && printf '%s ' "$(basename "$(dirname "$f")")"; done); console_log last: $(tail -1 "$HOME/.local/share/Steam/logs/console_log.txt" | cut -c1-120); sleep-gui: $(tail -2 "$GLOG" | cut -c1-160 | tr '\n' '|')"; }
+handoff_detail() {
+  local p n0 n1 cl0; p=$(steam_pid)
+  echo "handoff: steam.pipe unread bytes $(python3 -c 'import os,fcntl,termios,struct,sys
+fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NONBLOCK); print(struct.unpack("i",fcntl.ioctl(fd,termios.FIONREAD,b"\0"*4))[0])' ~/.steam/steam.pipe 2>&1 | tail -1); held by $(for d in /proc/[0-9]*; do ls -l "$d/fd" 2>/dev/null | grep -q 'steam\.pipe' && printf '%s ' "${d#/proc/}"; done)"
+  n0=$(awk '/^voluntary/ {print $2}' "/proc/$p/status" 2>/dev/null); sleep 1; n1=$(awk '/^voluntary/ {print $2}' "/proc/$p/status" 2>/dev/null)
+  echo "handoff: main thread syscall '$(cut -d' ' -f1-3 "/proc/$p/syscall" 2>/dev/null)' wchan $(cat "/proc/$p/wchan" 2>/dev/null), $((${n1:-0} - ${n0:-0})) wakeups in 1 s; steam processes: $(pgrep -a -f 'steamrtarm64/steam|^\./steam' | cut -c1-70 | tr '\n' '|')"
+  echo "handoff: forwarder said: $(grep -v 'LD_PRELOAD\|^$' "$T/open.out" 2>/dev/null | tail -4 | cut -c1-140 | tr '\n' '|')"
+  command -v gdb >/dev/null && timeout 30 gdb -p "$p" -batch -nx -ex 'set pagination off' -ex 'thread 1' -ex 'bt 14' 2>/dev/null \
+    | grep '^#' | sed 's/^/handoff: bt /' | cut -c1-170
+  cl0=$(wc -l < "$HOME/.local/share/Steam/logs/console_log.txt")
+  ( cd ~ && timeout 20 steam "steam://rungameid/$APP" > "$T/retry.out" 2>&1 < /dev/null )
+  for _ in $(seq 20); do tail -n +$((cl0 + 1)) "$HOME/.local/share/Steam/logs/console_log.txt" | grep -q "rungameid/$APP" && break; sleep 0.5; done
+  echo "handoff: second hand-off (the same URL again): $(tail -n +$((cl0 + 1)) "$HOME/.local/share/Steam/logs/console_log.txt" | grep -q "rungameid/$APP" && echo "TAKEN" || echo "not taken either") - $(grep -v 'LD_PRELOAD\|^$' "$T/retry.out" | tail -2 | cut -c1-120 | tr '\n' '|')"
+}
 
 # step_launch: the game up through the drawer's path (a running one: brought up the same way). Sets W, LAUNCH.
 # A Steam that runs (awake or frozen) logs the launch's URL at once ("ExecCommandLine ... steam://rungameid/<id>" in
@@ -267,7 +284,7 @@ step_launch() {
   for i in $(seq $((LAUNCH_S * 2))); do W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && break
     if [ "$up" = 1 ] && [ "$i" = $((${HANDOFF_S:-20} * 2)) ]; then
       if tail -n +$((cl0 + 1)) "$CL" 2>/dev/null | grep -q "steam://rungameid/$APP"; then up=; echo "launch: Steam took the URL"
-      else fail launch-handoff "the running Steam didn't log the launch's URL in ${HANDOFF_S:-20} s: $(handoff_diag); open-task: $(cat "$T/open.status" 2>/dev/null)"; return 1; fi
+      else fail launch-handoff "the running Steam didn't log the launch's URL in ${HANDOFF_S:-20} s: $(handoff_diag); open-task: $(cat "$T/open.status" 2>/dev/null)"; handoff_detail; return 1; fi
     fi
     touched; sleep 0.5; done
   LAUNCH=$(ms "$t0" "$(now)")

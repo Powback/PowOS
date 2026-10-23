@@ -92,18 +92,27 @@ run() {  # run <variant> <n>
   case $v in
     cold) pill "cold start timing: closing Steam"; bash /var/tmp/powos-bf-stop.sh --steam | head -1 ;;
     *) close_game; [ "$(cat /proc/"$(steam_pid)"/comm 2>/dev/null)" = steam ] || { pill "starting Steam (for the warm runs)"; setsid -f steam -silent >/dev/null 2>&1 </dev/null; sleep 60; }
-       pill "waiting for Steam to sleep (out of sight)"; for _ in $(seq 60); do [ -n "$(cg)" ] && break; touched; sleep 1; done ;;
+       # A -silent Steam has no window, so unified sleep never freezes it (seen 2026-10-23: resident Steam awake 20 min
+       # after its start); a Steam the user had on screen is frozen 15 s after it went out of sight. 25 s at most.
+       pill "waiting for Steam to sleep (out of sight)"; for _ in $(seq 25); do [ -n "$(cg)" ] && break; touched; sleep 1; done ;;
   esac
   [ $v = fexcache ] && fexcache_on
   st="steam $([ -d "/proc/$(steam_pid)" ] && { [ -n "$(cg)" ] && echo frozen || echo awake; } || echo off), wineserver $(pgrep -c wineserver)"
   echo "== $v #$2: at the tap: $st; $(sizes)"
-  gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0)
+  gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0) cl=$(wc -l < "$S/logs/console_log.txt" 2>/dev/null || echo 0) i=0
+  local up=; [ $v != cold ] && [ -d "/proc/$(steam_pid)" ] && up=1
   mine=1; pill "cold start timing: $v #$2 - tap"; t0=$(now)
   ( open_task 400 "steam_app_$APP" > "$T/open.status" ) &
   # 400 s cold (Steam's start, maybe a depot download); 150 s warm (~35 s expected): past that it is Steam's
   # freeze/thaw hanging the launch (INVALID below), and the check stays inside its 300 s budget to say so.
   for _ in $(seq $([ $v = cold ] && echo 1600 || echo 600)); do
-    now_=$(ms "$t0" "$(now)")
+    now_=$(ms "$t0" "$(now)"); i=$((i + 1))
+    # A running Steam logs the URL at once (ExecCommandLine): nothing in 20 s = the hand-off was lost (bf-lib
+    # handoff_detail says where), not a slow tool - INVALID below, without waiting out the 150 s.
+    if [ "$up" = 1 ] && [ $i = 80 ]; then
+      if tail -n +$((cl + 1)) "$S/logs/console_log.txt" | grep -q "rungameid/$APP"; then up=
+      else seen[handoff]=lost; echo "   handoff lost: $(handoff_diag)"; handoff_detail | sed 's/^/   /'; break; fi
+    fi
     [ -n "$(pgrep -f 'steamwebhelper' | head -1)" ] && first steam "$now_"
     # A depot swap (cfg:native / back): Steam downloads before the launch.
     if [ -d "$S/steamapps/downloading/$APP" ]; then first update "$now_"; elif [ -n "${seen[update]:-}" ]; then first update_end "$now_"; fi
@@ -130,6 +139,7 @@ run() {  # run <variant> <n>
   if [ -n "${seen[window]:-}" ]; then
     pill "cold start timing: $v - first frame"
     x=$(first_frame 90); [ "$x" != none ] && seen[frame]=$(ms "$t0" "$x")
+  elif [ -n "${seen[handoff]:-}" ]; then fail "handoff-$v" "the running Steam didn't log the launch's URL in 20 s (handoff lines above)"
   elif [ -n "${seen[ended]:-}" ]; then fail "start-$v" "the launch chain ended ${seen[ended]} ms after the tap, no window; Steam: $(grep -a 'Game process removed\|exit code' "$S/logs/gameprocess_log.txt" | tail -2 | cut -c1-120 | tr '\n' '|')"
   else fail "start-$v" "no window in $([ $v = cold ] && echo 400 || echo 150) s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi
   echo "STAGES $v #$2 (ms from the tap): steam-ui ${seen[steam]:--} update ${seen[update]:--}-${seen[update_end]:--} iscript ${seen[iscript]:--}-${seen[iscript_end]:--} reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--}; open-task: $(cat "$T/open.status" 2>/dev/null)"
@@ -142,7 +152,7 @@ run() {  # run <variant> <n>
   # a launch (2026-10-23 02:53: a frozen Steam never thawed for the launch, no window in 394 s; 02:58: never frozen):
   # INVALID, not a failed way - re-queue it once unified sleep's fix is in. Only a cold run's failure counts.
   if [ -z "${seen[window]:-}" ] && [ $v != cold ]; then
-    echo "INVALID $v #$2: no window on a warm Steam (at the tap: $st; Steam's cgroup now '$(cg)') - Steam freeze/thaw, not the tool; not recorded"
+    echo "INVALID $v #$2: no window on a warm Steam (at the tap: $st; Steam's cgroup now '$(cg)'$([ -n "${seen[handoff]:-}" ] && echo "; Steam never took the URL")) - Steam's hand-off, not the tool; not recorded"
   elif [ -z "${seen[update]:-}" ]; then
     if [ -n "${seen[window]:-}" ]; then echo "   policy: $($CFG record $APP "${seen[window]}" $([ $v = cold ] && echo --cold))"
     elif [ -n "${seen[ended]:-}" ]; then echo "   policy: $($CFG record $APP fail)"; fi
