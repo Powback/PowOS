@@ -545,7 +545,7 @@ Flash (user's decision; same route as §7–§9):
    verified against the live boot_b) written back the same way; a boot that hangs: hold power + volume-down, then
    `fastboot flash boot_b <that image>` over USB.
 
-## 15. 0005: flat sync_file fences - the reboot at every game close (2026-10-23; built and checked, NOT booted)
+## 15. 0005: flat sync_file fences - the reboot at every game close (2026-10-23; flashed 14:31 after a passing test boot)
 
 0004's `dma_buf_resv_fence` put the buffer's fences, including the previous import's exclusive fence (itself an
 array), into a new `dma_fence_array` per call and kept signaled fences. Mesa's WSI imports a write fence for every
