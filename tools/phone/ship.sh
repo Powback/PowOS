@@ -249,7 +249,9 @@ run)
         echo "$(date +%T) ship ${T:0:9} as shell:$(echo $add)$([ -n "$gone" ] && echo " reset:$(echo $gone)") for $who_s$(apk_alive && echo ' (beside the APK ship)')"
         rc=0
         if [ -n "$add" ]; then
-          (cd shell && POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship READY_MS=${READY_MS:-30000} ./push.sh --vpn "${na[@]}" $add) > "$log" 2>&1 || rc=$?
+          # 60 s like ship-apk's pre-gate: a shell ship runs beside an APK build (Colima ~900% CPU), and at 30 s every
+          # page timed out "not ready" with no error (02:03, b56483e).
+          (cd shell && POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship READY_MS=${READY_MS:-60000} ./push.sh --vpn "${na[@]}" $add) > "$log" 2>&1 || rc=$?
         fi
         if [ $rc = 0 ] && [ -n "$gone" ]; then
           (cd shell && POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship ./push.sh --vpn --reset $gone) >> "$log" 2>&1 || rc=$?
