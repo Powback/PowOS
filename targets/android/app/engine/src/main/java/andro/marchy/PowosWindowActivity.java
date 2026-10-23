@@ -225,7 +225,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             WindowTasks.tasks.remove(id, this);
             // Closed for good (swiped from Recents, Back): KWin shows the window on the desktop again.
             if (isFinishing() && !closedByKWin)
-                WindowTasks.send("closed", id);
+                WindowTasks.closed(this, id);
         }
         super.onDestroy();
     }

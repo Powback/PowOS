@@ -92,6 +92,20 @@ public final class WindowTasks {
             return;
         exportNewSent = on;
         sendLine("export-new\t" + (on ? 1 : 0));
+        Log.i(TAG, "export-new " + (on ? 1 : 0) + (out == null ? ": channel down, dropped" : ""));
+    }
+
+    /**
+     * Task [id] closed for good (its card swiped, its title bar's close). KWin closes the window only while it has
+     * "export-new 1" (the unfolded home: nothing shows the desktop), else it puts the window back on the desktop. KWin's
+     * state is re-told first, unconditionally, on the same channel: a stale "0" there left Dolphin running on the
+     * hidden desktop after its card closed (linux-dock.sh, 2026-10-23).
+     */
+    static void closed(Context context, int id) {
+        exportNewSent = null;
+        tellExportNew(context.getApplicationContext());
+        send("closed", id);
+        Log.i(TAG, "closed " + id + " (caps:" + caps + "export-new " + exportNewSent + ")" + (out == null ? ": channel down, dropped" : ""));
     }
 
     /** The control channel reached the display daemon. */
@@ -151,6 +165,7 @@ public final class WindowTasks {
         if (f[0].equals("caps")) {
             // KWin's first line on a connection: what it understands (an older one says nothing).
             caps = f.length > 1 ? " " + f[1] + " " : "";
+            Log.i(TAG, "KWin caps:" + caps);
             exportNewSent = null;
             tellExportNew(context);
             return;

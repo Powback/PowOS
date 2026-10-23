@@ -100,10 +100,15 @@ f=$(sh_ "dumpsys window | grep -m1 mCurrentFocus"); log "after the tap: minimise
 pass "a dock tap brings the minimised Dolphin back, focused, no second task"
 
 # 5. Closed from the switcher: the Linux window closes.
+# The main log rotates in seconds: the app's side of the close (WindowTasks "closed N (caps: .. export-new ..)") is
+# captured live from here; KWin's side is its anland lines in the session log (QT_LOGGING_RULES, powos-rooted-session).
+sh_ "rm -f /data/local/tmp/ld-log.txt; (timeout 20 logcat -T 1 -v time -s WindowTasks PowosWindow </dev/null >/data/local/tmp/ld-log.txt 2>&1 &)"
 hcall tasks.remove "[$DT]" "()=>'ok'" >/dev/null
 gone=0; for _ in $(seq 8); do sleep 1; [ "$(us 'pgrep -xc dolphin' | tail -1)" = 0 ] && { gone=1; break; }; done
+sh_ "cat /data/local/tmp/ld-log.txt" > "$OUT/close-log.txt"
+rs 'tail -c 200000 /run/powos-app/hyprland.log | grep -a anland | tail -30' > "$OUT/kwin-close.txt"
 lin | grep -qx "$DT" && fail "Dolphin's task $DT is still there after its card closed"
-[ $gone = 1 ] || fail "Dolphin still runs after its card was closed (window back on the hidden desktop?)"
+[ $gone = 1 ] || fail "Dolphin still runs after its card was closed (window back on the hidden desktop?) - $(grep -m1 'closed' "$OUT/close-log.txt" | cut -c1-160)"
 MINE=0
 pass "closing Dolphin's card closes the Linux window"
 echo "all passed; artefacts: $OUT"

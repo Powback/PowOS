@@ -65,6 +65,9 @@ ulimit -n 1048576
 # No journald on a phone: Qt sends its messages (KWin, Plasma) there whenever stderr is not a terminal, so they
 # vanished. Into the session's logs instead.
 export QT_FORCE_STDERR_LOGGING=1
+# KWin's Android-task backend at info: which windows became tasks, "new windows as tasks: on/off", closes - without it
+# only its warnings showed and a Linux window left running after its card closed couldn't be traced (2026-10-23).
+export QT_LOGGING_RULES="kwin_backend_anland.info=true"
 
 bg() { local name=$1; shift; ( "$@" ) > "$R/$name.log" 2>&1 & }
 # The desktop is the user's, as on every PowOS: powos (uid = the PowOS app's Android uid, so it owns the app's run
