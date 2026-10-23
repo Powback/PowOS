@@ -57,6 +57,11 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   + setBounds), once per task per unfold (adopted, cleared folded); logcat "was full screen: now a window".
   Checks: verify/launch-paths.sh (home launch, plain am start, recents after a fold), dock-taskbar.sh (focus /
   minimise / restore by real dock taps), float-touch.sh (touches inside a window stay the app's).
+- No title bars at all + logcat "permission denied for window type 2038": the SYSTEM_ALERT_WINDOW app op was reset
+  (`appops get com.powos.app SYSTEM_ALERT_WINDOW` = default). WindowFrames.overlayGrant re-grants it through root
+  (start + a refused frame, once a minute). Frames stay type 2038 (under the shade); 2017 would cover the shade.
+- linux-float.sh's image open: KDE picks Gwenview (InitialPreference 8) though xdg-mime says Brave; launch kioclient
+  with `setsid -f` from user.sh - a nohup'd one died with the session (Gwenview never started).
 - Wide layout (hosts/wide.ts "home.wide"): an item missing from one host read keeps its wide cell (pruning it re-placed
   WireGuard at the first free cell, the middle column). wide-home.sh asserts the cells survive fold + unfold and don't
   overlap; a cell away from its side-by-side spot is the user's move (a note, never "fixed").
