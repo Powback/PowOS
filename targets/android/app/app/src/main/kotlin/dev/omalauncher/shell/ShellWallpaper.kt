@@ -38,6 +38,10 @@ internal object ShellWallpaper {
     private const val MAX_SIDE = 720
     private const val LIVE_SETTLE_MS = 2_500L
 
+    /** The session's copy ([writeSession]): the longest side, px - about the inner screen's at Plasma's scale 2. */
+    private const val SESSION_SIDE = 1600
+    private const val SESSION_PREFIX = "powos-wallpaper-"
+
     private class Pic(
         val rev: String,
         val source: String,
@@ -100,27 +104,57 @@ internal object ShellWallpaper {
         val changed = cached?.rev != rev
         cached = pic
         Log.i(TAG, "wallpaper picture: $source, ${jpeg.size / 1024} KB")
-        if (changed) main.post { onChange.forEach { it() } }
+        if (changed) {
+            main.post { onChange.forEach { it() } }
+            worker.execute { writeSession(context) }
+        }
         return pic
     }
 
+    /**
+     * The same picture for the PowOS session (Plasma's desktop, org.powos.transparent): the run dir's
+     * powos-wallpaper-<ms>.jpg (/run/powos-app in the session), sharper than the page's ([SESSION_SIDE]) - Plasma draws
+     * it full screen, not blurred. A new name per picture (written aside, then renamed; all but the last two deleted), so
+     * the wallpaper's folder watch sees a new file. Why the desktop draws it instead of staying transparent over Android's
+     * wallpaper: every snapshot Android takes of the desktop's task (the starting window when it comes back, recents,
+     * PowOS's switcher cards, the assist screenshot) leaves the wallpaper out, and showed the desktop on black.
+     */
+    private fun writeSession(context: Context) {
+        val read = which(context, SESSION_SIDE)?.third ?: return
+        val bitmap = runCatching { read() }.onFailure { Log.w(TAG, "no session picture", it) }.getOrNull() ?: return
+        runCatching {
+            val dir = andro.marchy.SessionService.runDir(context).apply { mkdirs() }
+            val name = "$SESSION_PREFIX${System.currentTimeMillis()}.jpg"
+            val tmp = java.io.File(dir, ".$name")
+            tmp.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            check(tmp.renameTo(java.io.File(dir, name))) { "rename failed" }
+            // The one before stays (Plasma shows it until the new one has loaded); older ones go.
+            dir.listFiles { f -> f.name.startsWith(SESSION_PREFIX) }?.sortedByDescending { it.name }?.drop(2)?.forEach { it.delete() }
+            Log.i(TAG, "session wallpaper: $name ${bitmap.width}x${bitmap.height}")
+        }.onFailure { Log.w(TAG, "can't write the session wallpaper", it) }
+        bitmap.recycle()
+    }
+
     /** The current wallpaper's revision, where it comes from, and how to read it. */
-    private fun which(context: Context): Triple<String, String, () -> Bitmap?>? {
+    private fun which(
+        context: Context,
+        side: Int = MAX_SIDE,
+    ): Triple<String, String, () -> Bitmap?>? {
         val wm = WallpaperManager.getInstance(context)
         val info = wm.wallpaperInfo
         if (info == null) {
             val id = wm.getWallpaperId(WallpaperManager.FLAG_SYSTEM)
-            return Triple("still-$id", "still") { wm.drawable?.let(::draw) }
+            return Triple("still-$id", "still") { wm.drawable?.let { draw(it, side) } }
         }
         if (info.packageName == context.packageName) {
             val file = ThemeStore.savedSelection(context)?.second ?: return null
-            return Triple("theme-${file.path.hashCode()}-${file.lastModified()}", "theme") { decode(ImageDecoder.createSource(file)) }
+            return Triple("theme-${file.path.hashCode()}-${file.lastModified()}", "theme") { decode(ImageDecoder.createSource(file), side) }
         }
         // Another app's live wallpaper (OxygenOS's video ones): the frame it shows now, from the compositor (its surface
         // mirrored - WallpaperBackdrop.still, READ_FRAME_BUFFER through the recents role). Its revision is the picture's
         // own (a sampled hash): another frame - after an unlock, a fold - is another picture; the same one isn't.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val shot = liveFrame(context)
+            val shot = liveFrame(context, side)
             if (shot != null) {
                 val rev = "live-${info.component.flattenToShortString().hashCode()}-${sample(shot)}"
                 return Triple(rev, "live") { shot }
@@ -147,22 +181,25 @@ internal object ShellWallpaper {
                             10_000,
                         )
                     check(r.code == 0) { "copy failed (${r.code}): ${r.output.take(200)}" }
-                    decode(ImageDecoder.createSource(dst))
+                    decode(ImageDecoder.createSource(dst), side)
                 }
             }
         }
-        return Triple("thumb-${info.component.flattenToShortString()}", "thumbnail") { info.loadThumbnail(context.packageManager)?.let(::draw) }
+        return Triple("thumb-${info.component.flattenToShortString()}", "thumbnail") { info.loadThumbnail(context.packageManager)?.let { draw(it, side) } }
     }
 
-    /** The live wallpaper's current frame, at most [MAX_SIDE] (null: not this way). */
+    /** The live wallpaper's current frame, at most [side] (null: not this way). */
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    private fun liveFrame(context: Context): Bitmap? {
+    private fun liveFrame(
+        context: Context,
+        side: Int,
+    ): Bitmap? {
         val display = context.getSystemService(android.hardware.display.DisplayManager::class.java).getDisplay(android.view.Display.DEFAULT_DISPLAY) ?: return null
         val size = android.graphics.Point()
         @Suppress("DEPRECATION")
         display.getRealSize(size)
         if (size.x <= 0 || size.y <= 0) return null
-        val scale = minOf(1f, MAX_SIDE.toFloat() / max(size.x, size.y))
+        val scale = minOf(1f, side.toFloat() / max(size.x, size.y))
         return WallpaperBackdrop.still(display.displayId, android.graphics.Rect(0, 0, size.x, size.y), scale)
     }
 
@@ -173,18 +210,24 @@ internal object ShellWallpaper {
         return h
     }
 
-    private fun decode(src: ImageDecoder.Source): Bitmap =
+    private fun decode(
+        src: ImageDecoder.Source,
+        side: Int,
+    ): Bitmap =
         ImageDecoder.decodeBitmap(src) { decoder, i, _ ->
-            val scale = MAX_SIDE.toFloat() / max(i.size.width, i.size.height)
+            val scale = side.toFloat() / max(i.size.width, i.size.height)
             if (scale < 1f) decoder.setTargetSize((i.size.width * scale).roundToInt(), (i.size.height * scale).roundToInt())
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
 
-    private fun draw(d: Drawable): Bitmap? {
+    private fun draw(
+        d: Drawable,
+        side: Int,
+    ): Bitmap? {
         val w = d.intrinsicWidth
         val h = d.intrinsicHeight
         if (w <= 0 || h <= 0) return null
-        val scale = minOf(1f, MAX_SIDE.toFloat() / max(w, h))
+        val scale = minOf(1f, side.toFloat() / max(w, h))
         val b = Bitmap.createBitmap((w * scale).roundToInt().coerceAtLeast(1), (h * scale).roundToInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         d.setBounds(0, 0, b.width, b.height)
         d.draw(Canvas(b))
