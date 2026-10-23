@@ -34,7 +34,11 @@ hcall_once() {
 hcall() { local v i; for i in 1 2 3 4; do v=$(hcall_once "$@"); case $v in ""|"cdp: adb"*|*"isn't running"*|"no page"*) echo "hcall $2: try $i: '${v}'" >&2; sleep 2 ;; *) echo "$v"; return ;; esac; done; echo "ERR no answer after 4 tries (${v:-empty})"; }
 # A host event into home's page, as ShellBridge.emit sends it; the page on screen (0-based, -1 none).
 hemit() { "$T/cdp.sh" eval home "(window.__powosHost.emit('$1', $2), 'ok')" >/dev/null 2>&1; sleep 1.2; }
-onpage() { "$T/cdp.sh" eval home "[...document.querySelectorAll('.page-track > .page')].findIndex(p=>!p.classList.contains('away'))" 2>&1 | tr -d '"\r' | tail -1; }
+# The page index on screen. Retried: right after home's app restarted, cdp.sh's answer can be another line (its pages
+# list ending in "]": "after the restart on page 2: page ]", 07:21 2026-10-23, while the window showed - the read, not home).
+onpage() { local v i; for i in 1 2 3 4; do
+  v=$("$T/cdp.sh" eval home "[...document.querySelectorAll('.page-track > .page')].findIndex(p=>!p.classList.contains('away'))" 2>&1 | tr -d '"\r' | tail -1)
+  case $v in -[0-9]*|[0-9]*) echo "$v"; return ;; esac; echo "onpage: try $i: '$v'" >&2; sleep 2; done; echo "?($v)"; }
 npages() { "$T/cdp.sh" eval home "document.querySelectorAll('.page-track > .page').length" 2>&1 | tr -d '"\r' | tail -1; }
 vis() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'visible=(true|false)'; }
 away() { hcall windows.list "[]" "l=>(l.find(w=>w.pkg==='$PKG')||{away:'none'}).away"; }
