@@ -17,6 +17,10 @@ args=() mounts=()
 for a in "$@"; do
   if [[ -e "$a" && "$a" == /* ]]; then
     d=$(cd "$(dirname "$a")" && pwd -P); a="$d/$(basename "$a")"; mounts+=(-v "$d:$d")
+  elif [[ "$a" == "$HOME"/* && -d "$(dirname "$a")" ]]; then
+    # A pull's new local file: its directory mounted, else the file stayed in the throwaway container (window-rec's
+    # recordings never reached the Mac, 2026-10-23). Only under $HOME: a phone path (/data/..., /tmp/...) is left be.
+    d=$(cd "$(dirname "$a")" && pwd -P); a="$d/$(basename "$a")"; mounts+=(-v "$d:$d")
   fi
   args+=("$a")
 done

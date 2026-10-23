@@ -95,6 +95,12 @@ waitwin() { local i id=none; for i in $(seq 1 "$2"); do id=$(win "$1" id); [ "$i
 # wframe <title text>: that window's frame (a plain substring: "PowOS window bar 12}" - the } ends the title).
 wframe() { sh_ "dumpsys window windows" | awk -v p="$1" '/^ *Window #/{f=(index($0,p)>0)} f' | grep -oE ' frame=\[-?[0-9]+,-?[0-9]+\]\[-?[0-9]+,-?[0-9]+\]' | head -1 | tr -c '0-9\n-' ' ' | xargs; }
 dp() { echo $(($1 * DENS / 160)); }
+# screenrect "l t r b": a SurfaceFlinger HWC rect (Disp Frame: the panel's own orientation) in screen px. The inner
+# screen is mounted at 270 (installOrientation 3): its raw rects are the window's turned (window-rec/window-live read
+# Calculator's content at "437 431 2145 1791" for a task at 477 437 1837 2145, 2026-10-23). Needs W, H (e2e_setup).
+screenrect() { set -- $1; [ $# -ge 4 ] || { echo "$*"; return; }
+  [ -n "${INST:-}" ] || INST=$(sh_ "dumpsys display" | grep -E "^  DisplayDeviceInfo" | grep " state ON," | grep -oE "installOrientation [0-3]" | head -1 | cut -d" " -f2)
+  case ${INST:-0} in 3) echo "$((W - $4)) $1 $((W - $2)) $3" ;; 1) echo "$2 $((H - $3)) $4 $((H - $1))" ;; 2) echo "$((W - $3)) $((H - $4)) $((W - $1)) $((H - $2))" ;; *) echo "$*" ;; esac; }
 # closebtn <task>: its title bar's close button (21 dp from the bar's right), "x y" or "".
 closebtn() { local b; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b; echo "$(($3 - $(dp 21))) $((($2 + $4) / 2))"; }
 # barpt <task>: a spot on its title bar for a drag: the left part, away from the buttons, clear of the pill if it can.

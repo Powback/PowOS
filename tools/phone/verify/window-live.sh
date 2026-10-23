@@ -25,7 +25,7 @@ sfframe() { sh_ "dumpsys SurfaceFlinger" | awk -v p="$1" '
   /\(active\) HWC layers:/ {on=1; next} /HWC layers:/ {on=0}
   on && want {n=split($0, f, "|"); if (n >= 6) {print f[6]; exit} }
   on && index($0, p) {want=1}' | xargs; }
-content() { sfframe "$CALC/"; }
+content() { screenrect "$(sfframe "$CALC/")"; }
 logc() { sh_ "rm -f /data/local/tmp/live.txt; (timeout 250 logcat -T 1 -v time -s PowosTaskLeash PowosWindowDrag PowosWindowResize PowosFreeform RemoteTransitionHandler </dev/null >/data/local/tmp/live.txt 2>&1 &)"; }
 near() { local d=$(($1 - $2)); [ ${d#-} -le "$3" ]; }
 

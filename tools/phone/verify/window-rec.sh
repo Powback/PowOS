@@ -37,7 +37,7 @@ sfframe() { sh_ "dumpsys SurfaceFlinger" | awk -v p="$1" '
   /\(active\) HWC layers:/ {on=1; next} /HWC layers:/ {on=0}
   on && want {n=split($0, f, "|"); if (n >= 6) {print f[6]; exit} }
   on && index($0, p) {want=1}' | xargs; }
-content() { sfframe "$LAYER"; }
+content() { screenrect "$(sfframe "$LAYER")"; }
 near() { local d=$(($1 - $2)); [ ${d#-} -le "$3" ]; }
 logc() { sh_ "rm -f /data/local/tmp/rec.txt; (timeout 280 logcat -T 1 -v time -s PowosTaskLeash PowosWindowDrag PowosWindowResize PowosWindowFrames PowosWindowFrame PowosFreeform WindowTasks RemoteTransitionHandler ShellTransitions </dev/null >/data/local/tmp/rec.txt 2>&1 &)"; }
 rec() { sh_ "rm -f /data/local/tmp/wc-$1.mp4; (screenrecord --display-id $DID --bit-rate 20000000 --time-limit ${2:-12} /data/local/tmp/wc-$1.mp4 </dev/null >/dev/null 2>&1 &)"; sleep 1.2; }
@@ -86,7 +86,7 @@ p=$(barpt "$CT"); if [ -n "$p" ]; then set -- $p; x=$1; y=$2; dx=$(dp 160); dy=$
     set -- $E; [ $# -ge 4 ] && near "$1" $((L0 + dx)) $TOL && near "$2" $((T0 + dy)) $TOL && pass "after the lift the content stays: $1,$2" || fail "after the lift the content is at ${E:-none} (want $((L0 + dx)),$((T0 + dy)))"
     set -- $(tbounds "$CT") $E; [ $# -ge 8 ] && near "$1" "$5" $TOL && near "$2" "$6" $TOL && pass "task bounds and content agree" || fail "task bounds ($1 $2 $3 $4) and content (${5:-} ${6:-}) differ"; }
   intap "$CT" "after the drag"
-else fail "no bar"; fi
+else fail "no bar for task $CT (frames: $(sh_ "dumpsys window windows" | grep -oE "PowOS window (bar|grip) [0-9]+" | sort -u | xargs))"; fi
 
 # Resize: the grip out (or in near an edge), held, let go.
 g=$(wframe "PowOS window grip $CT}"); if [ -n "$g" ]; then set -- $g; x=$((($1 + $3) / 2)); y=$((($2 + $4) / 2)); s=1
@@ -102,7 +102,7 @@ g=$(wframe "PowOS window grip $CT}"); if [ -n "$g" ]; then set -- $g; x=$((($1 +
     near $WE $TW 8 && near $HE $TH $((TH / 20 + 8)) && pass "after the lift the content fills the task (${WE}x$HE vs ${TW}x$TH)" || fail "after the lift the content (${WE}x$HE) doesn't fill the task (${TW}x$TH)"
     near $TW $((W0 + dx)) $(((W0 + dx) / 10)) && pass "the task took the new width ($TW)" || fail "the task is $TW wide (want $((W0 + dx)))"; }
   intap "$CT" "after the resize"
-else fail "no grip"; fi
+else fail "no grip for task $CT (frames: $(sh_ "dumpsys window windows" | grep -oE "PowOS window (bar|grip) [0-9]+" | sort -u | xargs))"; fi
 
 sh_ "cat /data/local/tmp/rec.txt" > "$PRE-logcat.txt"; cp "$OUT/log.txt" "$PRE-log.txt" 2>/dev/null
 log "logcat: $(wc -l < "$PRE-logcat.txt") lines -> $PRE-logcat.txt"; grep -E "PowosTaskLeash|PowosWindowResize|Found filter" "$PRE-logcat.txt" | tail -14 | tee -a "$OUT/log.txt"
