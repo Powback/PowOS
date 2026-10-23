@@ -35,9 +35,10 @@ import java.io.File
  *   "all"). The runner's one held wait (tools/phone/idle.sh, its loop on the phone) sees it and runs those checks now.
  * - The status pill: the runner writes [STATUS] (in the app's run dir, PowOS's /run/powos-app/verify) as a heartbeat
  *   every few seconds while a check runs - {name, task, k, n, screen, el (seconds in), budget, prev (the last result)}
- *   - and {done, summary} at the end. While beats come, a small glass pill at the top edge over everything says what's
- *   tested, "k of n", the time it's been running and the screen it needs. A tap writes /tmp/powos-verify-stop: the
- *   runner's next beat sees it, kills the check (it stays queued) and writes done. Done: the pill goes and the summary
+ *   - and {done, summary} at the end. While beats come, a small glass pill in the bottom-left corner says what's
+ *   tested, "k of n", the time it's been running and the screen it needs. It takes no touches (they go through to what
+ *   is under it): over window chrome it hid the close buttons from the checks (e2e round 2, 2026-10-23). Stop a run
+ *   with `queue.sh pause` or the AI page. Done: the pill goes and the summary
  *   is left as a quiet notification. No beat for [STALE_MS] (the runner killed, the Mac asleep): the pill goes and says
  *   so in a notification.
  */
@@ -185,31 +186,26 @@ object VerifyRun {
         private val context: Context = app.createDisplayContext(display).createWindowContext(TYPE, null)
         private val wm = context.getSystemService(WindowManager::class.java)
         private val density = context.resources.displayMetrics.density
-        private val title = text(13f, INK, bold = true)
-        private val detail = text(12f, SOFT, bold = false)
-        private val hint = text(12f, SOFT, bold = false).apply { text = "don't touch · tap to stop" }
+        /** One line: the check, k/n, its time, and the screen only when it's the wrong one. */
+        private val title = text(10f, INK, bold = true)
         private val root =
             LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_HORIZONTAL
-                val p = dp(14f)
-                setPadding(p, dp(8f), p, dp(9f))
+                gravity = Gravity.START
+                val p = dp(9f)
+                setPadding(p, dp(3f), p, dp(4f))
                 background = GradientDrawable().apply {
                     setColor(TINT)
                     cornerRadius = CORNER_DP * density
                 }
                 addView(title)
-                addView(detail)
-                addView(hint)
-                setOnClickListener { stop() }
             }
         private val blur = WindowBlur({ root.rootView }, BLUR_DP, cornersDp = FloatArray(4) { CORNER_DP })
         private var added = false
-        private var stopping = false
         private var status = JSONObject()
         private var at = 0L
 
-        /** The fold changed: the screen line again ("unfold the phone for this one" may be done now). */
+        /** The fold changed: the screen line again ("Unfold the phone" may be done now). */
         private val displays =
             object : DisplayManager.DisplayListener {
                 override fun onDisplayAdded(id: Int) {}
@@ -233,7 +229,7 @@ object VerifyRun {
             if (bold) typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            gravity = Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.START
             // Narrow: a long check name made it ~450 dp wide, over the floating windows' close buttons (e2e 2026-10-23).
             maxWidth = dp(PILL_MAX_DP)
         }
@@ -243,31 +239,29 @@ object VerifyRun {
             s: JSONObject,
             mtime: Long,
         ) {
-            if (s.optString("task") != status.optString("task") || s.optInt("k") != status.optInt("k")) stopping = false
             status = s
             at = mtime
-            title.text = "Testing: ${s.optString("name").ifBlank { s.optString("task") }}"
             tick(mtime)
-            val prev = s.optString("prev")
-            hint.text = if (stopping) "stopping…" else if (prev.isNotBlank()) "$prev · tap to stop" else "don't touch · tap to stop"
             runCatching { if (added) wm.updateViewLayout(root, params()) else add() }.onFailure { Log.w(TAG, "can't show the status pill", it) }
         }
 
         /** The elapsed time between beats: the beat's own, plus the time since it was written. */
         fun tick(mtime: Long) {
             val el = status.optLong("el") + ((System.currentTimeMillis() - mtime) / 1000).coerceAtLeast(0)
-            detail.text = "${status.optInt("k")} of ${status.optInt("n")} · ${el / 60}:${"%02d".format(el % 60)} · ${screenLine(status.optString("screen"))}"
+            val name = status.optString("name").ifBlank { status.optString("task") }
+            val line = "$name · ${status.optInt("k")}/${status.optInt("n")} · ${el / 60}:${"%02d".format(el % 60)}"
+            // The wrong screen first: the line is short and ends in an ellipsis.
+            title.text = screenLine(status.optString("screen"))?.let { "$it · $line" } ?: line
         }
 
-        /** The screen the check needs, said against the one in use (the cover is the tall, narrow one). */
-        private fun screenLine(need: String): String {
+        /** The screen the check needs when it isn't the one in use (the cover is the tall, narrow one); else null. */
+        private fun screenLine(need: String): String? {
             val b = wm.currentWindowMetrics.bounds
             val folded = b.width() < b.height() * 0.6f
             return when {
-                need == "inner" && folded -> "unfold the phone for this one"
-                need == "cover" && !folded -> "fold the phone for this one"
-                folded -> "testing on the cover screen"
-                else -> "testing on the inner screen"
+                need == "inner" && folded -> "Unfold the phone"
+                need == "cover" && !folded -> "Fold the phone"
+                else -> null
             }
         }
 
@@ -286,26 +280,19 @@ object VerifyRun {
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 TYPE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                // Not touchable: every touch goes to what's under it (a check's taps, the user's finger).
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT,
             ).apply {
                 title = "PowOS verify status"
-                // The top-right corner: a floating window opens 60% wide in the middle, its title bar's buttons left of it.
-                gravity = Gravity.TOP or Gravity.END
+                // The bottom-left corner, under the dock's row: away from every window's title bar and grip.
+                gravity = Gravity.BOTTOM or Gravity.START
                 x = dp(SIDE_DP)
                 fitInsetsTypes = 0
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                // Below the status bar's clock and the camera, out of the way of the top row a check may pull.
-                y = dp(TOP_DP)
+                y = dp(BOTTOM_DP)
             }
-
-        /** The tap, every time: the runner's next beat sees the flag, kills the check (it stays queued) and says done. */
-        private fun stop() {
-            stopping = true
-            hint.text = "stopping…"
-            flag("powos-verify-stop", status.optString("task").takeIf { it.matches(ID) } ?: "all")
-        }
 
         /**
          * Out of every screencap and recording's capture (SurfaceFlinger's skip-screenshot layer flag): the checks'
@@ -340,11 +327,10 @@ object VerifyRun {
 
     /** Home's glass (WindowFrame's): the compositor's blur under a dark tint. */
     private const val BLUR_DP = 140f
-    private const val CORNER_DP = 18f
-    private const val TOP_DP = 40f
-    private const val SIDE_DP = 12f
-    private const val PILL_MAX_DP = 170f
+    private const val CORNER_DP = 12f
+    private const val BOTTOM_DP = 2f
+    private const val SIDE_DP = 6f
+    private const val PILL_MAX_DP = 150f
     private val TINT = Color.argb(107, 18, 20, 26)
     private val INK = Color.argb(222, 255, 255, 255)
-    private val SOFT = Color.argb(170, 255, 255, 255)
 }

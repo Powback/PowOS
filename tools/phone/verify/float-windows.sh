@@ -125,14 +125,23 @@ tall=$(echo "$caps" | tr -c '0-9\n-' ' ' | awk 'NF>=4 && $4-$2>0' | wc -l | tr -
 [ "${tall:-0}" = 0 ] && pass "one title bar: no system caption" || fail "the system's caption still has height: $caps"
 read -r XL XT XR XB <<<"$(bounds)"; echo "before: $XL $XT $XR $XB"
 [ -n "${XB:-}" ] || fail "no bounds for the task"
-BY=$((XT - $(px 20))); sh_ "input swipe $((XL + (XR - XL) / 3)) $BY $((XL + (XR - XL) / 3 + 240)) $((BY + 180)) 700"; sleep 1.5; chk drag
+# On THIS window's bar frame (its middle row): another window's bar cascaded over the same spot took the drag
+# (09:12, 2026-10-23: three bars up, Calculator stayed put). Other visible windows are listed for the log.
+TID0=$(sh_ "am stack list | grep -m1 $PKG" | grep -oE 'taskId=[0-9]+' | head -1 | tr -dc 0-9)
+BF=$(sh_ "dumpsys window windows" | awk -v p="PowOS window bar $TID0}" '/^ *Window #/{f=(index($0,p)>0)} f' | grep -oE ' frame=\[-?[0-9]+,-?[0-9]+\]\[-?[0-9]+,-?[0-9]+\]' | head -1 | tr -c '0-9\n-' ' ')
+echo "bar of task $TID0: ${BF:-none}; windows: $(sh_ "am stack list" | grep -E 'mode=freeform|windowingMode=5' | grep -oE 'taskId=[0-9]+: [^ ]+' | xargs)" | tee -a "$OUT/mode.txt"
+BY=$((XT - $(px 20))); [ -n "$(echo $BF)" ] && set -- $BF && BY=$((($2 + $4) / 2))
+sh_ "input swipe $((XL + (XR - XL) / 3)) $BY $((XL + (XR - XL) / 3 + 240)) $((BY + 180)) 700"; sleep 1.5; chk drag
 read -r XL2 XT2 XR2 XB2 <<<"$(bounds)"; echo "after drag: $XL2 $XT2 $XR2 $XB2" | tee -a "$OUT/mode.txt"
 "$T/shot.sh" "$OUT/framed.png" && cp "$OUT/framed.png" "$OUT/float-framed.png" && "$T/review-image.sh" "$OUT/float-framed.png" >/dev/null 2>&1 &&
   python3 "$ROOT/lib/ai/agents/powos-agents-cli" task set "${BOARD_TASK:-powos-home-as-the-desktop-linux-android-apps-as}" --image /home/powos/design-qa/float-framed.png >/dev/null 2>&1
 [ "$XL2" != "$XL" ] && [ "$XT2" != "$XT" ] && pass "the bar moves it" || fail "the drag didn't move it"
-sh_ "input swipe $((XR2 - $(px 6))) $((XB2 - $(px 6))) $((XR2 + $(px 92))) $((XB2 + $(px 72))) 700"; sleep 1.5; chk grip
-read -r XL3 XT3 XR3 XB3 <<<"$(bounds)"; echo "after resize: $XL3 $XT3 $XR3 $XB3" | tee -a "$OUT/mode.txt"
-[ $((XR3 - XL3)) -gt $((XR2 - XL2)) ] && pass "the grip resizes it" || fail "the grip didn't resize it"
+# Out where there's room; a window the drag took to the screen's right edge can only get smaller (09:10, 2026-10-23:
+# 904..2264 of 2268 wide - a grow past the edge isn't a product FAIL).
+GS=1; [ $((XR2 + $(px 92))) -gt $((W - 8)) ] && GS=-1
+sh_ "input swipe $((XR2 - $(px 6))) $((XB2 - $(px 6))) $((XR2 - $(px 6) + GS * $(px 98))) $((XB2 - $(px 6) + GS * $(px 78))) 700"; sleep 1.5; chk grip
+read -r XL3 XT3 XR3 XB3 <<<"$(bounds)"; echo "after resize ($([ $GS = 1 ] && echo out || echo in)): $XL3 $XT3 $XR3 $XB3" | tee -a "$OUT/mode.txt"
+[ $(((XR3 - XL3 - XR2 + XL2) * GS)) -gt 0 ] && pass "the grip resizes it" || fail "the grip didn't resize it"
 # Maximise (the button before close: close 6 dp from the end, 30 dp buttons, 4 dp gaps): the whole width, above the
 # bottom bar; again: back where it was.
 sh_ "input tap $((XR3 - $(px 55))) $((XT3 - $(px 20)))"; sleep 1.5; chk maximise
