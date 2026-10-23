@@ -13,7 +13,7 @@ SCR=${1:-}; case $SCR in cover) ST=0 ;; inner) ST=3 ;; *) echo "usage: nav-strip
 OUT=${2:-$HOME/.cache/powos-verify/nav-strip-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 IMG=nav-strip-$SCR.png
 L=$HOME/.cache/powos-verify.lock
-TASK=home-black-strip-at-bottom-under-dock-wallpaper
+TASK=${TASK:-home-wallpaper-edge-to-edge-no-black-strip-under}
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 restore() { sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
@@ -37,6 +37,11 @@ fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
+# Home must be what's in front: a cover capture once showed Magisk (an app left open folded) and "passed".
+front() { sh_ "dumpsys window | grep -m1 mCurrentFocus"; }
+front | grep -q HomeShell || { sh_ "input keyevent KEYCODE_HOME"; sleep 2; chk home; }
+f=$(front); echo "front: ${f##*u0 }"
+case $f in *HomeShell*) ;; *) echo "FAIL: home isn't in front on the $SCR screen - nothing checked"; exit 1 ;; esac
 bars=$(sh_ "dumpsys activity top" | awk '/ACTIVITY com.powos.app\/andro.marchy.HomeShell/{f=1} f&&/BarBackground/{print; n++} n==2{exit}' | sed -E 's/.*\{[0-9a-f]+ ([A-Z.]+) .* ([0-9]+,[0-9]+-[0-9]+,[0-9]+) .*id\/([a-zA-Z]+).*/\3 \1 \2/')
 echo "decor bars: $(echo "$bars" | tr '\n' ';')"
 "$T/shot.sh" "$OUT/$IMG" >/dev/null 2>&1 || { echo "FAIL: no screencap of the $SCR screen"; exit 1; }
