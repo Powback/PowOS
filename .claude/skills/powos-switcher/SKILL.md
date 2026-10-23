@@ -276,6 +276,11 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   OnePlus lines) and traces bounds every ~90 ms after each change (`trace`). Same family: the old resize end as a
   transition ("WM at the old bounds", 13:43) and bare resizeTask maximise (changed nothing, f468af79) - a size change
   through a change transition doesn't stick; position changes (bar move end) do.
+- The user (2026-10-23, on "no launcher path"): "that's the beauty, we own the full stack". The phone is rooted, so a
+  missing Shell API is not a stopping point: fix at the platform level (memory: fix-at-platform-level). Candidates:
+  give WM Shell the entry point (a PowOS window-bounds handler running in SystemUI's process, so its transitions are
+  Shell's own pending ones and its drag owns the leash like desktop mode's DragPositioningCallback), or fix the WM
+  core / OnePlus code that undoes the size once the diag probes name it. Pick from the measurement, not a guess.
 - Likely (not measured): a session holds its transition open for the whole gesture and ignores mergeAnimation, so every
   other transition on Shell's track waits behind it (input window gone / old bounds 5 s while a resize leash was open).
 - Resizes are OFF the leash by default (68a3b4ed; `settings put global powos_leash_resize 1` = on): a leash-on resize
