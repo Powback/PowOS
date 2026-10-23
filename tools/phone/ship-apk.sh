@@ -72,8 +72,18 @@ fi
 # The commit's own shell must load before it's built in: the APK ships it whole, and an install resets the overrides
 # that may have covered for it (17:09: 5130d98's home.tsx imported a gesture.ts export only a later commit added -
 # every page failed to boot after the install). The gate on HEAD alone: tsc + every page booted.
-if ! GATE_PRIORITY=ship READY_MS=${READY_MS:-30000} IDLE_MS=0 bash shell/dev/gate.sh > "${TMPDIR:-/tmp}/ship-apk-gate.log" 2>&1; then
-  grep -vE "^ok " "${TMPDIR:-/tmp}/ship-apk-gate.log" | tail -8 >&2
+# Only "not ready" timeouts and no error: the Mac was busy (training runs + a kernel build, load ~20: refused 3cecf58d
+# and 5b23de9b, 2026-10-23, whose shell loaded) - once more with a longer wait, as shell/push.sh does. The log keeps
+# the FAIL lines themselves (a tail of the console warnings hid them).
+glog=${TMPDIR:-/tmp}/ship-apk-gate.log
+gate_head() { GATE_PRIORITY=ship READY_MS=$1 IDLE_MS=0 bash shell/dev/gate.sh > "$glog" 2>&1; }
+grc=0; gate_head "${READY_MS:-30000}" || grc=$?
+if [ $grc -ne 0 ] && grep -q '^FAIL' "$glog" && ! grep '^FAIL' "$glog" | grep -qv 'not ready'; then
+  echo "ship-apk: only boot timeouts - the Mac is busy? gating once more with READY_MS=90000" >&2
+  grc=0; gate_head 90000 || grc=$?
+fi
+if [ $grc -ne 0 ]; then
+  { grep -E '^FAIL|^gate:' "$glog" | head -12; grep -E '^(error|src/).*TS[0-9]' "$glog" | head -5; } >&2
   echo "ship-apk: REFUSED - this commit's shell doesn't load (above); fix it on origin first" >&2
   exit 3
 fi
