@@ -272,8 +272,10 @@ fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NONBLOCK); print(struct.unpack("i",fcntl
   n0=$(awk '/^voluntary/ {print $2}' "/proc/$p/status" 2>/dev/null); sleep 1; n1=$(awk '/^voluntary/ {print $2}' "/proc/$p/status" 2>/dev/null)
   echo "handoff: main thread syscall '$(cut -d' ' -f1-3 "/proc/$p/syscall" 2>/dev/null)' wchan $(cat "/proc/$p/wchan" 2>/dev/null), $((${n1:-0} - ${n0:-0})) wakeups in 1 s; steam processes: $(pgrep -a -f 'steamrtarm64/steam|^\./steam' | cut -c1-70 | tr '\n' '|')"
   echo "handoff: forwarder said: $(grep -v 'LD_PRELOAD\|^$' "$T/open.out" 2>/dev/null | tail -4 | cut -c1-140 | tr '\n' '|')"
-  command -v gdb >/dev/null && timeout 30 gdb -p "$p" -batch -nx -ex 'set pagination off' -ex 'thread 1' -ex 'bt 14' 2>/dev/null \
-    | grep '^#' | sed 's/^/handoff: bt /' | cut -c1-170
+  # No gdb here any more: its PTRACE_ATTACH sends SIGSTOP, and on a client unified sleep froze meanwhile gdb never got
+  # it, `timeout` killed gdb and the SIGSTOP stayed pending - delivered at the next thaw, Steam sat stopped (state T,
+  # do_signal_stop) and the next check's launch failed on that (2026-10-23 04:40 -> 04:59). The stack it gave twice
+  # (04:32, 05:00): main thread in poll() <- vgui2_s.so <- steamui.so, a healthy main loop.
   echo "handoff: semaphores before: $(sems)"
   cl0=$(wc -l < "$HOME/.local/share/Steam/logs/console_log.txt")
   # Y700_SYSV_DEBUG: the shim logs the forwarder's semget/semop (pkgs/steam's sysvipc-emu): does it post the client's?

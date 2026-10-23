@@ -90,6 +90,13 @@ case $(cat "/proc/${steam_pid:-0}/cgroup" 2>/dev/null) in
     dbus-send --session --print-reply=literal --reply-timeout=3000 --dest=dev.powos.Sleep /Gui \
       dev.powos.Sleep.Gui.Wake string:steam >/dev/null 2>&1 || powos sleep wake "$steam_pid" >/dev/null 2>&1 ;;
 esac
+# A client left stopped by a signal (state T: a debugger's attach that never finished left a SIGSTOP pending, 2026-10-23)
+# reads nothing either: SIGCONT to its tree (harmless to running processes; a cgroup-frozen one keeps sleeping).
+if [ -d "/proc/${steam_pid:-0}" ]; then
+  for t in $steam_pid $(pgrep -P "$steam_pid" 2>/dev/null); do
+    [ "$(awk '{print $3}' "/proc/$t/stat" 2>/dev/null)" = T ] && kill -CONT "$t" 2>/dev/null
+  done
+fi
 case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
   */steamrtarm64/steam | */FEX*) ;;  # the ARM64 client, or the x86 one (STEAM_X86) under FEX
   *)
