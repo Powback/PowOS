@@ -159,6 +159,9 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   {id, side} -> toEdge: window + home to the next page in one batch() (never hidden on the way); no page there: stays.
   Gate: desktops (gate.mjs desktopsCheck/Edge/Reloaded). Device: verify/float-desktops.sh (real page swipes from an
   empty spot found over read-only CDP, same bounds back, reopen from page 2, home's process killed and back).
+  A page turns at a quarter of .pages' width or a 0.45 css px/ms flick (gesture.ts settlePages): an injected swipe
+  must start where the whole 35%-width swipe fits (freept $2 way, $3 length) - the leftmost empty spot, left of a
+  window, clamped it to 207 px and home rightly stayed (float-desktops FAIL 05:25, 2026-10-23: the check's bug).
 - Windows never got a page (the user, twice, 2026-10-23): desktops.ts only places what windows.list has, and that is
   WindowFrames.running, refreshed ONLY by the task stack listener. ITaskStackListener wasn't hidden-API exempt
   (b8fd224), so the listener never registered: the list stayed at the service's start-up read (Calculator visible,
