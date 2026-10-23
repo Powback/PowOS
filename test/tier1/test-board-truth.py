@@ -348,6 +348,22 @@ class BoardTest(unittest.TestCase):
         self.run_cli("task", "done", "prompt-glyph")
         self.assertEqual(FakeStdb.db["work"]["prompt-glyph"]["status"], "done")
 
+    def test_sync_closes_a_passed_close_check(self):
+        self.run_cli("task", "add", "Running dot")
+        self.run_cli("task", "add", "Edit mode add")
+        self.run_cli("task", "add", "Reopened one")
+        at = FakeStdb.clock[0]
+        FakeStdb.db["work"]["reopened-one"]["updated"] = at + 3600_000   # its owner moved it after the pass
+        cs = [{"job": "j1", "task": "running-dot", "state": "PASS", "close": True, "shipped": True, "at": at},
+              {"job": "j2", "task": "edit-mode-add", "state": "PASS", "close": False, "shipped": True, "at": at},
+              {"job": "j3", "task": "reopened-one", "state": "PASS", "close": True, "shipped": True, "at": at}]
+        f = os.path.join(self.tmp, "c.json")
+        json.dump(cs, open(f, "w"))
+        self.assertIn("1 task(s) closed", self.run_cli("check", "sync", f).stdout)
+        self.assertEqual(FakeStdb.db["work"]["running-dot"]["status"], "done")
+        self.assertEqual(FakeStdb.db["work"]["edit-mode-add"]["status"], "working", "no --close: the owner closes it")
+        self.assertEqual(FakeStdb.db["work"]["reopened-one"]["status"], "working", "moved since the pass: its owner's")
+
     def test_done_with_no_check_reason(self):
         self.run_cli("task", "add", "Handbook board section")
         self.assertIn("needs the reason", self.run_cli("task", "done", "handbook-board-section", "--no-check", " ", ok=False).stderr)

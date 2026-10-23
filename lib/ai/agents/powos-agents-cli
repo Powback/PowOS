@@ -700,9 +700,9 @@ def check_cmd(argv):
         if len(argv) != 2 or argv[0] != "--json-text":
             die("usage: powos agents check sync <file.json|->  (a JSON array: `check scan` makes it)")
         data = argv[1]
-        json.loads(data)
+        cs = json.loads(data)
         call("check_sync", data)
-        print(f"{len(json.loads(data))} check(s) synced")
+        print(f"{len(cs)} check(s) synced; {close_passed(cs)} task(s) closed by their --close check")
     elif verb == "scan":
         o, _ = opts(argv, ["queue", "repo", "days"])
         print(json.dumps(scan_queue(o.get("queue"), o.get("repo"), int(o.get("days") or 7))))
@@ -719,6 +719,26 @@ def check_cmd(argv):
             print(f"{c['state']:<8} {c['task']}  {_check_name(c)}  {ago(int(c['at']))}  {c.get('line', '')[:100]}")
     else:
         die(f"unknown: check {verb} (powos agents help)")
+
+
+def close_passed(cs):
+    """Tasks whose LATEST result is a PASS of a shipped build from a `queue.sh add --close` job, still open and untouched
+    since: closed now (the runner's own close is refused when its check row wasn't written first - an older runner
+    copy - or failed)."""
+    latest = {}
+    for c in cs:
+        if c.get("state") in ("PASS", "FAIL", "none") and int(c.get("at") or 0) >= int(latest.get(c["task"], {}).get("at") or 0):
+            latest[c["task"]] = c
+    # Only while nothing happened to the task since that result (the runner's step write follows it within seconds): a
+    # task its owner reopened or moved after the pass is theirs.
+    open_ = {w["id"]: int(w.get("updated") or 0) for w in rows() if w["status"] != "done"}
+    n = 0
+    for t, c in latest.items():
+        if (t in open_ and c.get("close") and c["state"] == "PASS" and c.get("shipped", True)
+                and open_[t] - int(c.get("at") or 0) <= 300_000):
+            call("work_set", t, "", "", "done", "", "")
+            n += 1
+    return n
 
 
 def _git_ok(repo, *a):
@@ -820,6 +840,7 @@ def scan_queue(qdir=None, repo=None, days=7):
             if not v.get("task"):
                 continue
             row = {"job": job, "task": v["task"], "name": v.get("name", ""), "need": v.get("need", ""),
+                   "close": v.get("close") == "1",
                    "at": int(v.get("qt") or 0) * 1000 or int(os.path.getmtime(os.path.join(d, f)) * 1000)}
             if done:
                 r = _result_of(os.path.join(d, job + ".log"))

@@ -120,6 +120,8 @@ Shell tsc: a fresh worktree has no shell/node_modules - the gate skips tsc; syml
   sweep`. sweep: orphans (stalled|no-check|blocked "no reason given", past a 10-min grace), untracked asks (> 10 min),
   open friction whose count rose -> ONE `powos comms send coder -` digest, only items whose signature changed (state
   file ~/.local/state/powos/board-sweep.json). `--dry-run` prints, mails nothing, keeps the state.
+  `check sync` also closes a task whose latest result is a shipped PASS of a `--close` job (the scan's "close") when the
+  task wasn't touched > 5 min after it: an older runner copy's close was refused (no check row yet).
 - Auto friction: ship.sh mail() on FAILED/REFUSED; gate.sh fail at 1-min load >= 12 (background, the Mac CLI relay);
   queue.sh SKIP/INVALID; agentsd refusal() on PostToolUseFailure whose `error` matches REFUSAL (once/h per role+tool+
   hint; the sibling powos-agents-cli or POWOS_AGENTS_CLI). Mac: tools/agents/friction = the CLI's `friction`.
