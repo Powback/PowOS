@@ -95,7 +95,7 @@ run() {  # run <variant> <n>
   done
   if [ -n "${seen[window]:-}" ]; then
     x=$(first_change "$W" 30 10); [ "$x" != none ] && seen[frame]=$(ms "$t0" "$x")
-    pill "$GAME $v: running 30 s"; sleep 30; touched
+    pill "$GAME $v: running ${RUN_S:-30} s"; for _ in $(seq ${RUN_S:-30}); do touched; sleep 1; done
     # The window as Xwayland has it (bf-lib xframes grab: XGetImage; x11grab needs MIT-SHM, which Android lacks), and
     # whether it changes: a still black window is a render failure, not a slow start.
     xframes grab "$WIN_NAME" 3 "$d/grab" >/dev/null 2>&1; cp "$d/grab/f1.png" "$d/window.png" 2>/dev/null
