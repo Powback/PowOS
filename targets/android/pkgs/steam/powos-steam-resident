@@ -4,12 +4,48 @@
 # (~22 s cold on the phone, 2026-10-23: tap 01:17:10 -> Steam handles the launch 01:17:33). Unified sleep then freezes it
 # like any Steam out of sight (units/phone/steam.json: 2 min start grace, then 15 s out of sight; no CPU, kept in RAM),
 # and /usr/bin/steam thaws it on the tap.
+#
+# Resident games: each Steam app id in ~/.config/powos/steam-resident-games (one per line, `#` comments) is started too,
+# out of sight (a plain steam:// launch: no Android task, nothing comes to the front), and frozen with Steam as soon as
+# its window draws (`powos game <id> freeze`: window minimized, Steam + the game frozen). A tap on it is then a resume
+# (powos-open-task / /usr/bin/steam -> powos-sleep-gui Resume: thaw + raise, ~1-3 s) instead of a cold Proton start under
+# FEX (~35-80 s). Costs the game's memory while frozen, and its start's CPU once per session. Empty / no file: none.
+#
 # Waits until the session settled (POWOS_STEAM_RESIDENT_DELAY, 60 s) so it doesn't compete with the session's own start.
-# Off: `touch ~/.config/powos/steam-resident-off` (or remove this package's autostart file). Nothing to do when Steam
-# already runs (the user started it, or a game launch did).
-[ -e "${XDG_CONFIG_HOME:-$HOME/.config}/powos/steam-resident-off" ] && exit 0
+# Off: `touch ~/.config/powos/steam-resident-off` (or remove this package's autostart file). Steam already running (the
+# user started it, or a game launch did): nothing to do, also no resident games (the user is using Steam).
+C=${XDG_CONFIG_HOME:-$HOME/.config}/powos
+exec >> "${XDG_RUNTIME_DIR:-/tmp}/powos-steam-resident.log" 2>&1  # what it did, per session
+[ -e "$C/steam-resident-off" ] && exit 0
 command -v steam >/dev/null 2>&1 || exit 0
+log() { echo "$(date '+%F %T') powos-steam-resident: $*"; }
+running() { case $(readlink "/proc/$(cat "$HOME/.steam/steam.pid" 2>/dev/null || echo 0)/exe" 2>/dev/null) in
+  */steam | */FEX*) return 0 ;; esac; return 1; }
 sleep "${POWOS_STEAM_RESIDENT_DELAY:-60}"
-pid=$(cat "$HOME/.steam/steam.pid" 2>/dev/null)
-case $(readlink "/proc/${pid:-0}/exe" 2>/dev/null) in */steam | */FEX*) exit 0 ;; esac
-cd "$HOME" && exec steam -silent </dev/null >/dev/null 2>&1
+running && { log "Steam already runs"; exit 0; }
+cd "$HOME" || exit 0
+log "starting Steam out of sight"
+setsid -f steam -silent </dev/null >/dev/null 2>&1
+
+games=$(sed 's/#.*//' "$C/steam-resident-games" 2>/dev/null | tr -cs '0-9' '\n' | grep -x '[0-9]\{1,10\}')
+[ -n "$games" ] || exit 0
+# Steam up and logged in (its web UI's helper, then a bit): a launch handed to a Steam still logging in waits anyway.
+for _ in $(seq 120); do pgrep -u "$(id -u)" -f steamwebhelper >/dev/null && break; sleep 1; done
+sleep 20
+for id in $games; do
+  pgrep -f "SteamLaunch AppId=$id( --|\$)" >/dev/null && { log "$id already runs"; continue; }
+  log "starting $id out of sight"
+  setsid -f steam "steam://rungameid/$id" </dev/null >/dev/null 2>&1
+  # Its first window (Proton's class steam_app_<id>), mapped, then 3 s for its first frames: frozen before the game
+  # gets to its menu music. A game that hasn't shown a window in 6 min is left alone (unified sleep takes it later).
+  w=
+  for _ in $(seq 360); do
+    w=$(xwininfo -root -tree 2>/dev/null | awk -v c="\"steam_app_$id\"" 'index($0, c) && !/has no name/ && / [0-9]+x[0-9]+\+/ {print $1}' \
+          | while read -r x; do xwininfo -id "$x" 2>/dev/null | grep -q 'IsViewable' && { echo "$x"; break; }; done)
+    [ -n "$w" ] && break
+    sleep 1
+  done
+  [ -n "$w" ] || { log "$id: no window in 6 min - not frozen"; continue; }
+  sleep 3
+  log "$id: window $w up - $(powos game "$id" freeze 2>&1 | tail -1 | sed 's/\x1b\[[0-9;]*m//g')"
+done

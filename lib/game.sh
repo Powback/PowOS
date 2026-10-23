@@ -441,17 +441,19 @@ _game_steam_appid() {
 
 # The game's launcher process (Steam's reaper SteamLaunch AppId=<appid>), if it runs.
 # The one under the running Steam first: a launcher left behind by a dead Steam (ppid 1) isn't the game Steam runs.
+# Not the install script evaluator Steam runs before each launch (`SteamLaunch AppId=<id> Install=1 --`): that one
+# isn't the game (freeze/thaw said "running" while only the evaluator ran).
 _game_steam_reaper() {  # bin/powos: errexit + pipefail
     local s p a
     s="$(cat "$HOME/.steam/steam.pid" 2>/dev/null || true)"
-    for p in $(pgrep -f "SteamLaunch AppId=$1( |\$)" || true); do
+    for p in $(pgrep -f "SteamLaunch AppId=$1( --|\$)" || true); do
         a=$p
         while [[ -n "$a" && "$a" -gt 1 ]]; do
             [[ "$a" == "$s" ]] && { echo "$p"; return 0; }
             a="$(awk '{print $4}' "/proc/$a/stat" 2>/dev/null || true)"
         done
     done
-    pgrep -f "SteamLaunch AppId=$1( |\$)" | head -1 || true
+    pgrep -f "SteamLaunch AppId=$1( --|\$)" | head -1 || true
 }
 
 _game_sleep_dispatch() {

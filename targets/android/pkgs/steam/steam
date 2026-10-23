@@ -75,7 +75,7 @@ case " $* " in
   *" steam://rungameid/"*)
     appid=${*##*steam://rungameid/}; appid=${appid%% *}
     case $appid in *[!0-9]* | '') appid= ;; esac
-    if [ -n "$appid" ] && [ -d "/proc/${steam_pid:-0}" ] && pgrep -f "SteamLaunch AppId=$appid( |\$)" >/dev/null 2>&1; then
+    if [ -n "$appid" ] && [ -d "/proc/${steam_pid:-0}" ] && pgrep -f "SteamLaunch AppId=$appid( --|\$)" >/dev/null 2>&1; then  # the game's, not its install script's (Install=1)
       case $(dbus-send --session --print-reply=literal --reply-timeout=3000 --dest=dev.powos.Sleep /Gui \
                dev.powos.Sleep.Gui.Resume string:"$appid" 2>/dev/null) in
         *'"running": true'*) exit 0 ;;
