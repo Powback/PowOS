@@ -1,0 +1,46 @@
+#!/bin/bash
+# powos-output-scale [--wait]: the PowOS desktop's output scale on a rooted phone, where Linux apps are windows beside
+# Android apps (PowosWindowActivity tasks) - set ONCE, so their text and controls are the size of an Android app's
+# window on the same screen, then left to the user (System Settings > Display & Monitor; KWin keeps it in
+# kwinoutputconfig.json).
+#
+# Scale = the screen's physical dpi x 0.8 / 160, in quarter steps, 1..4: Android's density/160 is its px per dp, and
+# PowOS gives Android apps in a window 0.8 x the screen's density (AppWindows.windowDpi). powos-android-app makes the
+# same match the other way (an Android app in a PowOS window at scale x 160 dpi). OnePlus Open, inner screen: 2440 px
+# over 145 mm = 427 dpi -> 2.25 (Android: 442 dpi, 354 in a window = 2.21 px/dp). At the old scale 1 Kate's menus were
+# ~13 px against Android's ~31 px (e2e-desktop round 3, 2026-10-23).
+# The no-root app's full Plasma desktop keeps session/Hyprland's gentler dpi/270 (the user found dpi/180 too big for a
+# whole desktop on the S25, ddd2f347); in rooted mode Hyprland leaves the scale to this.
+#
+# Wayland apps (Qt, GTK) follow the output scale; X11 apps under Xwayland scale themselves from it (KWin's Xwayland
+# Scale and Xft.dpi follow the output's, KWin's default "apply scaling themselves"); tools/phone/verify/linux-look.sh
+# checks both.
+# Facts from: ANDROMARCHY_PHYSICAL_MM ("<long>x<short>" mm, powos-session.sh), else KWin's own environment (a run
+# from powos-deploy.sh through powos-run.sh has none of the session's); the current mode's pixels from kscreen-doctor.
+# --wait: KWin may not be up yet (the session's start): waits up to 2 min for plasmashell.
+# Marker: ~/.local/state/powos/output-scale-v2.done (the scale it set); POWOS_SCALE=<s> forces a scale (every run).
+set -u
+export WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0} XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/powos-app}
+mark=$HOME/.local/state/powos/output-scale-v2.done
+[ -z "${POWOS_SCALE:-}" ] && [ -e "$mark" ] && { echo "powos-output-scale: left to the user (set $(cat "$mark") once)"; exit 0; }
+if [ "${1:-}" = --wait ]; then
+  for _ in $(seq 600); do pgrep -x plasmashell >/dev/null && break; sleep 0.2; done
+  sleep 1
+fi
+mm=${ANDROMARCHY_PHYSICAL_MM:-}
+[ -n "$mm" ] || mm=$(tr '\0' '\n' < "/proc/$(pgrep -x kwin_wayland | head -1)/environ" 2>/dev/null | sed -n 's/^ANDROMARCHY_PHYSICAL_MM=//p')
+scale=${POWOS_SCALE:-}
+if [ -z "$scale" ]; then
+  long=${mm%%x*}
+  px=$(kscreen-doctor -j 2>/dev/null | jq -r '.outputs[0] as $o | ($o.modes[] | select(.id == $o.currentModeId) | [.size.width, .size.height] | max)' 2>/dev/null)
+  if [ -z "$px" ] || [ "$px" = null ] || [ "${long:-0}" -le 0 ] 2>/dev/null; then
+    echo "powos-output-scale: no screen size (mm=${mm:-?} px=${px:-?}) - scale unchanged" >&2; exit 1
+  fi
+  scale=$(awk -v px="$px" -v mm="$long" 'BEGIN { s = int(px / (mm / 25.4) * 0.8 / 160 * 4 + 0.5) / 4; if (s < 1) s = 1; if (s > 4) s = 4; print s }')
+fi
+if kscreen-doctor "output.1.scale.$scale" >/dev/null 2>&1; then
+  mkdir -p "${mark%/*}" && echo "$scale" > "$mark"
+  echo "powos-output-scale: output scale $scale (${mm:-?} mm)"
+else
+  echo "powos-output-scale: kscreen-doctor refused scale $scale" >&2; exit 1
+fi

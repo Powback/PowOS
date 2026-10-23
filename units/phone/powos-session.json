@@ -17,6 +17,7 @@
   ],
   "files": [
     "/usr/bin/powos-rooted-session",
+    "/usr/local/bin/powos-output-scale",
     "/usr/bin/powos-padd",
     "/usr/bin/powos-focus-watch",
     "/usr/bin/powos-panel-phone",

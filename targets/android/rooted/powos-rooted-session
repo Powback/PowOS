@@ -106,7 +106,11 @@ wait_sock "$R/pipewire-0"
 bg wireplumber as_user wireplumber
 bg pipewire-pulse as_user pipewire-pulse
 
-# The desktop: the same PowOS session as the app's (ANLAND_SOCKET, scale, services, startplasma-wayland).
+# Linux apps the size of Android apps' windows: the output scale, once, then the user's (see the file; session/Hyprland
+# leaves the scale to it in rooted mode).
+bg output-scale as_user env WAYLAND_DISPLAY=wayland-0 powos-output-scale --wait
+
+# The desktop: the same PowOS session as the app's (ANLAND_SOCKET, services, startplasma-wayland).
 export EGL_PLATFORM=surfaceless
 cd /home/powos
 exec "${AS_USER[@]}" /usr/bin/Hyprland >> "$R/hyprland.log" 2>&1

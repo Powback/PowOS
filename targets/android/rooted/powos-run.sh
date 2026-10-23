@@ -45,6 +45,14 @@ E=$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' /data/powos/root/etc/powos/se
 G=$( [ -n "$K" ] && tr '\0' '\n' < /proc/$K/environ 2>/dev/null |
   grep -E "^(${E}TURNIP_|FD_|MESA_|GALLIUM_|XWAYLAND_|ANDROMARCHY_|LIBVA_|TERMUX_VA_|POWOS_SESSION_MODE|QT_FORCE_STDERR_LOGGING)[A-Za-z0-9_]*=" |
   tr '\n' ' ')
+# The desktop's identity (KDE), as startplasma gives its own apps: without XDG_CURRENT_DESKTOP Qt loads no KDE platform
+# theme, so Kate/Dolphin/Gwenview from the PowOS drawer came up in plain Qt - Fusion, LIGHT (#efefef), Sans 9 - while
+# the session's colour scheme (the PowOS launcher's, SystemTheme.kt) is dark (measured 2026-10-23: Breeze, #121212,
+# Noto Sans 10 with it). XDG_CONFIG_DIRS carries kdedefaults (the look-and-feel's defaults). Not XDG_SESSION_TYPE:
+# that would move Chromium/Brave from X11 to Wayland. From plasmashell's environment, else KDE 6's values.
+D=$( [ -n "$P" ] && tr '\0' '\n' < /proc/$P/environ 2>/dev/null |
+  grep -E '^(XDG_CURRENT_DESKTOP|XDG_SESSION_DESKTOP|KDE_FULL_SESSION|KDE_SESSION_VERSION|XDG_MENU_PREFIX|XDG_CONFIG_DIRS)=' | tr '\n' ' ')
+[ -n "$D" ] || D="XDG_CURRENT_DESKTOP=KDE XDG_SESSION_DESKTOP=KDE KDE_FULL_SESSION=true KDE_SESSION_VERSION=6 XDG_MENU_PREFIX=plasma- XDG_CONFIG_DIRS=/home/powos/.config/kdedefaults:/etc/xdg"
 # The session's open-file limit (see powos-rooted-session: Proton's esync needs >= 524288), raised while still root.
 ulimit -n 1048576 2>/dev/null
 # On a terminal (the launcher's terminals: a pty the PowOS app owns, through su), a session of its own with that
@@ -59,5 +67,5 @@ exec nsenter -t "$PID" -m -- $CTTY /usr/bin/setpriv --reuid=powos --regid=powos 
   XDG_RUNTIME_DIR=/run/powos-app \
   DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus \
   DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/powos-app/system_bus \
-  ${WAYLAND_DISPLAY:+WAYLAND_DISPLAY="$WAYLAND_DISPLAY"} $X $G \
+  ${WAYLAND_DISPLAY:+WAYLAND_DISPLAY="$WAYLAND_DISPLAY"} $X $G $D \
   /bin/bash -lc "cd ~ && $1"

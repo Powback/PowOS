@@ -54,7 +54,9 @@ export FD_MESA_DEBUG=${FD_MESA_DEBUG:-noubwc}
 # clamped 1..4 (2x on a 6.9" 1440p phone, 1x on an 8-10" 1280p tablet; dpi/180 = 2.75x was too big).
 # After that the user's choice in System Settings > Display & Monitor (kscreen; KWin saves it in
 # kwinoutputconfig.json) is never overridden. POWOS_SCALE forces a scale on every start instead.
-(
+# Rooted mode (POWOS_SESSION_MODE=rooted): Linux apps are windows beside Android apps there, so powos-rooted-session's
+# powos-output-scale matches Android's window density instead.
+[ "${POWOS_SESSION_MODE:-}" = rooted ] || (
   for _ in $(seq 600); do pgrep -x plasmashell >/dev/null && break; sleep 0.2; done
   done_mark=$HOME/.local/state/powos/output-scale.done
   [ -z "${POWOS_SCALE:-}" ] && [ -e "$done_mark" ] && exit 0

@@ -80,7 +80,11 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   ran (also no frames, empty windows.list). Now exempt (+ WindowConfiguration, TaskInfo, WindowContainerTransaction/
   Token, WindowOrganizer); a failed read logs "can't read task N's window". New hidden call: check logcat for
   `hiddenapi.*denied` from your class first. Linux windows (PowOS's own package) get no density (pixel-for-pixel).
-  Linux side measured the same day: KWin output scale 1 (kwinoutputconfig.json "scale":1), no QT/GDK scale env.
+  Linux side: KWin output scale 2.25 since 2026-10-23 (session/powos-output-scale, once: physical dpi x 0.8 / 160 =
+  Android's window px/dp; then the user's). X11 follows (Xwayland Scale, Xft.dpi 216, GTK X11 scale 2 x 108 dpi); a
+  Wayland Qt app's QScreen dpr says 3 (wl_output's integer), its windows get 2.25. Apps from the drawer run in
+  powos-run.sh's env: it must carry XDG_CURRENT_DESKTOP=KDE etc. (from plasmashell), else Qt = Fusion, light, Sans 9.
+  Check: verify/linux-look.sh (FACTS_ONLY=1 = read-only part, fine outside the queue).
   Earlier reading, likely wrong (the in-app call never ran): set on the first refresh after a launch it does NOT stick (2026-10-23, APK 29878432: call succeeds, task stays 442
   dpi, 492 dp; the same WCT from root 3 s later -> 354 dpi), so dense reads the task's configuration.densityDpi back
   (FreeformTasks.Window.dpi) and sets it again every 500 ms until it shows (8 tries; logcat PowosWindowFrames "task N

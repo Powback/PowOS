@@ -34,6 +34,10 @@ install -m 644 $T/powos-plasma-bridge.desktop $R/etc/xdg/autostart/powos-plasma-
 # A PowOS app tapped on Android opens in its own Android task, like a phone app (the PowOS app runs this).
 install -m 755 $T/powos-open-task $R/usr/local/bin/powos-open-task
 install -m 644 $T/powos-android-tasks.desktop $R/etc/xdg/autostart/powos-android-tasks.desktop
+# Linux apps the size of Android apps' windows: the output scale, set once by the session (powos-rooted-session) - and
+# here in the running session, once (it does nothing after its first run: the scale is the user's then).
+install -m 755 $T/powos-output-scale $R/usr/local/bin/powos-output-scale
+[ -f /data/powos/session.pid ] && WAYLAND_DISPLAY=wayland-0 sh /data/powos/powos-run.sh powos-output-scale || true
 # The phone's controller (Steam Deck over uhid) and the focus watcher, which the session starts (powos-rooted-session).
 install -m 755 $T/powos-padd $R/usr/bin/powos-padd
 install -m 755 $T/powos-focus-watch $R/usr/bin/powos-focus-watch
@@ -82,7 +86,7 @@ rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-sess
   $T/powos-units.sh \
   $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task \
   $T/powos-apps-watch $T/powos-apps-watch.desktop $T/powos-plasma-bridge $T/powos-plasma-bridge.desktop \
-  $T/powos-ime-bridge $T/powos-ime-bridge.desktop
+  $T/powos-ime-bridge $T/powos-ime-bridge.desktop $T/powos-output-scale
 
 # The user: powos, as on every PowOS (password powos, sudo through wheel). Its uid is the PowOS app's Android uid:
 # the app's run dir (display socket, phone state) is then the user's own, as XDG_RUNTIME_DIR should be. Re-run
