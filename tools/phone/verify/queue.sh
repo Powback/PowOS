@@ -274,6 +274,16 @@ EOS
       [ -n "$go" ] && echo "$(date +%T) go from the phone: $go ($N checks)"
       for j in "${sel[@]}"; do
         [ -f "$j" ] || continue
+        # A runnable job that sorts before this one but came in after the window began (a job queued to go first, e.g.
+        # an install the next checks depend on) ends the window, and the next window re-picks in order. Before, it
+        # waited for the whole batch: 58 checks, hours (06:22).
+        for f in "$Q"/*.job; do
+          [ "$f" \< "$j" ] || break
+          case " ${sel[*]} " in *" $f "*) continue ;; esac
+          need=; qt=0; task=; . "$f"
+          if shipped "$need" "$qt"; then echo "$(date +%T) $(basename "$f" .job) queued to go first - re-picking the window"; exit 4; fi
+        done
+        task=; need=; qt=0
         # An APK install waits for this window (ship-apk wrote wants-phone): yield before the next check - the install
         # restarts the app anyway, and the rest run in the next window against the new build.
         wp=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/wants-phone
