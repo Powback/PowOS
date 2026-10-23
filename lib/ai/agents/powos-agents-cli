@@ -800,7 +800,8 @@ def _script_of(job_text):
     except ValueError:
         toks = []
     for t in toks:
-        if t == "env" or t.endswith("/env") or re.match(r"[A-Za-z_][A-Za-z0-9_]*=", t):
+        if os.path.basename(t) in ("env", "bash", "sh", "python3", "python", "perl", "nice") or t.startswith("-") \
+                or re.match(r"[A-Za-z_][A-Za-z0-9_]*=", t):
             continue
         return re.sub(r"\.sh$", "", os.path.basename(t))
     return ""
