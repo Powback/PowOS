@@ -256,6 +256,14 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   others). Off: `settings put global powos_live_leash 0`. Logcat PowosTaskLeash ("leashes [..] after N ms",
   "finished (..) N live frames"); WM Shell logs "RemoteTransitionHandler: Found filter". Check: verify/window-live.sh
   (SurfaceFlinger HWC "Disp Frame" of the app's layer mid-drag/mid-resize, finger still down; --page = mid-swipe).
+- Resizes are OFF the leash by default (68a3b4ed; `settings put global powos_leash_resize 1` = on): a leash-on resize
+  once kept the old bounds 5 s with no app input window (resize-probe 1837), others left a "Transition Root: Task=N"
+  layer; every leash start logs ShellTransitions E "transitionReady for non-pending" (WM Shell never asked for our
+  startNewTransition; it plays it through a fallback ActiveTransition). Leash-off shrink: Calculator's touchableRegion
+  stayed the OLD bigger size for 5 s+ (1844) - touches beside a shrunk window may still go to it; not yet fixed.
+- resize-probe.sh's `input:` grep needs the name right after the hex id: PowosWindowActivity (Kate) never matches, so
+  "no input window" for Kate there is the probe's, not the phone's. Kate's bar loss after the flicks: the window under it
+  (WireGuard) came to the front after the first flick (am stack order), so its bounds hid Kate's bar - who raised it is open.
 - Framework/SystemUI dex dumps for codes: ~/.cache/powos-caption/{framework,sysui}/*.dex (dexdump in powos-vadb:
   `docker cp` the dex in, /opt/android-sdk/build-tools/35.0.0/dexdump -d).
 - The bar's close worked on 0f098c06 for Calculator, Dolphin, Gwenview (desk-probe r3 touch state: the bar window
