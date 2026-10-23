@@ -272,6 +272,85 @@ hang_diag() {
   printf '; fds:'; ls -l /proc/$x/fd 2>/dev/null | awk '{print $NF}' | sed -E 's/\[[0-9]+\]//' | sort | uniq -c | sort -rn | head -8 | awk '{printf " %s x%s", $2, $1}'
   printf '; wrote:'; find "$HOME" -xdev -newer /proc/$x -type f ! -path '*/Steam/logs/*' ! -path '*/.cache/*' 2>/dev/null | head -5 | tr '\n' ' '; echo
 }
+# hang_stack <pid>: WHERE the busiest thread of a started game is (a busy main thread with no window: Broforce native
+# 2026-10-23, "exe" R at 100% for 4 min). gdb (in PowOS, no yama) attaches for one batch: the host backtrace (a thunked
+# host library - Mesa, libX11 - shows by name) + registers; under FEX x28 = the JIT's guest state frame (CPUState:
+# rip, then the 16 x86 gregs, rsp = gregs[4]), so the guest RIP and every guest return address on the x86 stack that
+# lands in a file mapping is printed as file+offset (+ the nearest ELF symbol). Never on a frozen process (a SIGSTOP
+# pending in a frozen cgroup outlives gdb: the Steam lesson of 04:40); SIGCONT after, in case gdb was killed. Lines
+# start "stack:".
+hang_stack() {
+  local x=$1 tid
+  [ -d "/proc/$x" ] || { echo "stack: pid $x gone"; return; }
+  case $(cg2 "$x") in */powos/sleep/*) [ "$(cat "/sys/fs/cgroup$(cg2 "$x")/cgroup.freeze" 2>/dev/null)" = 1 ] && { echo "stack: $x frozen - not attaching"; return; } ;; esac
+  command -v gdb >/dev/null || { echo "stack: no gdb"; return; }
+  tid=$(for t in /proc/$x/task/*; do sed 's/.*) //' $t/stat 2>/dev/null | awk -v t="${t##*/}" '{print $12 + $13, t}'; done | sort -rn | head -1 | cut -d' ' -f2)
+  timeout 25 gdb -q -batch -nx -p "$tid" -ex 'set pagination off' -ex 'bt 14' -ex 'p/x $pc' -ex 'p/x $x28' -ex 'p/x $sp' > "$T/gdb.$tid" 2>&1
+  kill -CONT "$x" 2>/dev/null
+  python3 - "$x" "$tid" "$T/gdb.$tid" <<'PY' 2>&1 | head -40
+import re, struct, sys
+pid, tid, out = sys.argv[1], sys.argv[2], open(sys.argv[3], errors="replace").read()
+print("stack: thread %s (%s), host frames:" % (tid, open("/proc/%s/task/%s/comm" % (pid, tid)).read().strip()))
+for l in out.splitlines():
+    if l.startswith("#"): print("stack:   " + re.sub(r"\s+", " ", l)[:200])
+maps = []
+for l in open("/proc/%s/maps" % pid):
+    f = l.split()
+    a, b = (int(v, 16) for v in f[0].split("-"))
+    maps.append((a, b, f[1], int(f[2], 16), f[5] if len(f) > 5 else ""))
+def where(v):
+    for a, b, perm, off, path in maps:
+        if a <= v < b: return path, v - a + off, perm
+    return None, 0, ""
+syms = {}
+def sym(path, foff):
+    if path not in syms:
+        s = []
+        try:
+            d = open(path, "rb").read()
+            if d[:4] == b"\x7fELF" and d[4] == 2:
+                phoff, shoff = struct.unpack_from("<QQ", d, 32); phn, shn = struct.unpack_from("<H", d, 56)[0], struct.unpack_from("<H", d, 60)[0]
+                loads = [struct.unpack_from("<IIQQQQ", d, phoff + 56 * i) for i in range(phn)]
+                sh = [struct.unpack_from("<IIQQQQIIQQ", d, shoff + 64 * i) for i in range(shn)]
+                for t in sh:
+                    if t[1] in (2, 11):  # SYMTAB / DYNSYM
+                        st = sh[t[6]]
+                        for j in range(t[5] // 24):
+                            nm, info, _, _, val, sz = struct.unpack_from("<IBBHQQ", d, t[4] + 24 * j)
+                            if info & 15 == 2 and val:
+                                e = d.index(b"\0", st[4] + nm); s.append((val, sz, d[st[4] + nm:e].decode(errors="replace")))
+                s.sort(); syms[path] = (s, [(l[2], l[3], l[5]) for l in loads if l[0] == 1])
+            else: syms[path] = ([], [])
+        except Exception: syms[path] = ([], [])
+    s, loads = syms[path]
+    va = next((foff - o + v for o, v, fs in loads if o <= foff < o + fs), None)
+    if va is None or not s: return ""
+    best = None
+    for val, sz, nm in s:
+        if val > va: break
+        best = (val, nm)
+    return " %s+%#x" % (best[1], va - best[0]) if best else ""
+def name(v):
+    path, foff, perm = where(v)
+    return "%#x %s+%#x%s" % (v, path.rsplit("/", 1)[-1], foff, sym(path, foff)) if path and path.startswith("/") and "x" in perm else None
+m = re.search(r"\$\d+ = (0x[0-9a-f]+)\n\$\d+ = (0x[0-9a-f]+)", out)
+pc = int(m.group(1), 16) if m else 0
+print("stack: host pc %s" % (name(pc) or "%#x (JIT code / anonymous)" % pc))
+try:
+    x28 = int(m.group(2), 16); mem = open("/proc/%s/mem" % pid, "rb")
+    mem.seek(x28); q = struct.unpack("<17Q", mem.read(136))
+    rip, rsp = q[0], q[5]
+    print("stack: guest rip %s rsp %#x rax %#x rdi %#x rsi %#x" % (name(rip) or "%#x" % rip, rsp, q[1], q[8], q[7]))
+    mem.seek(rsp); st = struct.unpack("<1024Q", mem.read(8192)); n = 0
+    for v in st:
+        r = name(v)
+        if r:
+            print("stack:   guest ret? " + r); n += 1
+            if n >= 16: break
+except Exception as e:
+    print("stack: no guest state at x28 (%s) - not in JIT code" % e)
+PY
+}
 # sems: the sysvipc shim's semaphores (/dev/shm/y700-sysv/sem-<id>: key, change count, values) - Steam's hand-off
 # signal is one of them (the client's first, value 0 while idle).
 sems() { python3 - <<'PY' 2>/dev/null

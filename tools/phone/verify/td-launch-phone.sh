@@ -92,7 +92,11 @@ run() {  # run <variant> <n>
 import json, sys
 s = {"PROTON_LOG": "1", "PROTON_LOG_DIR": sys.argv[1], "WINEDEBUG": "+loaddll,+seh,err+all,warn+module",
      "DXVK_LOG_LEVEL": "info", "VKD3D_DEBUG": "warn", "VKD3D_SHADER_DEBUG": "fixme"}
-s.update(kv.split("=", 1) for kv in sys.argv[2].split(",") if "=" in kv)
+# A token without "=" continues the previous value: TD_ENV=WINEDEBUG=+seh,+opengl,X=1 keeps WINEDEBUG's commas.
+k = None
+for kv in sys.argv[2].split(","):
+    if "=" in kv: k, v = kv.split("=", 1); s[k] = v
+    elif k and kv: s[k] += "," + kv
 print(json.dumps(s))
 PY
   [ -z "${TD_ENV:-}" ] || echo "   extra env: $TD_ENV"
@@ -101,7 +105,7 @@ PY
   gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0)
   powos sleep never steam >/dev/null 2>&1
   mine=1; pill "$GAME $v #$2: tap"; t0=$(now)
-  ( cd "$HOME" && exec setsid steam steam://rungameid/$APP > "$d/steam.out" 2>&1 < /dev/null ) &
+  touch "$d/.tap"; ( cd "$HOME" && exec setsid steam steam://rungameid/$APP > "$d/steam.out" 2>&1 < /dev/null ) &
   for _ in $(seq $((LAUNCH_S * 4))); do
     now_=$(ms "$t0" "$(now)")
     r=$(reaper); [ -n "$r" ] && first reaper "$now_"
@@ -139,7 +143,7 @@ PY
     | grep -v -E 'SlowJSMethodCall|steamwebhelper|cef_|chromium' | tail -40 | cut -c1-240 | sed 's/^/   | /'
   for x in "$d"/steam-$APP.log; do [ -f "$x" ] || continue
     echo "   --- $(basename "$x") ($(wc -l < "$x") lines): err/crash lines"
-    grep -a -E 'err:|Unhandled|EXCEPTION|page fault|wine: |fixme:vkd3d|vkd3d|dxvk|D3D12|Vulkan|exited|Exited' "$x" | grep -v -E 'Loaded L"|loaddll' | sort | uniq -c | sort -rn | head -30 | cut -c1-240 | sed 's/^/   | /'
+    grep -a -E 'err:|Unhandled|EXCEPTION|page fault|wine: |fixme:vkd3d|vkd3d|dxvk|D3D12|Vulkan|exited|Exited|warn:(opengl|wgl)|MESA|libGL|EGL|GL_VERSION|GL_RENDERER' "$x" | grep -v -E 'Loaded L"|loaddll' | sort | uniq -c | sort -rn | head -30 | cut -c1-240 | sed 's/^/   | /'
     # A window that stays black can be a game that crashed and sits in its crash handler (Teardown 2026-10-23: a
     # call through a NULL pointer after D3D12CreateDevice failed, crashpad keeping the window): say so first.
     grep -a -m1 -E 'dispatch_exception code=c0000005|dispatch_exception code=c000001d' "$x" | sed 's/^/   CRASH: /' | cut -c1-200
@@ -148,6 +152,9 @@ PY
     echo "   --- last 25 lines:"; tail -25 "$x" | cut -c1-240 | sed 's/^/   | /'
   done
   [ -f "$d/steam-$APP.log" ] || echo "   no PROTON_LOG file: Proton's script never ran"
+  # Crash dumps the game's own handler (crashpad/sentry, Unity, Unreal...) wrote in its prefix during this run.
+  find "$S/steamapps/compatdata/$APP/pfx/drive_c/users" -newer "$d/.tap" -type f \( -iname '*.dmp' -o -iname '*.mdmp' \) 2>/dev/null | head -4 \
+    | while read -r f; do cp "$f" "$d/" && echo "   crash dump: ${f#*/drive_c/} ($(stat -c %s "$f") bytes) -> td-logs/$v/$(basename "$f")"; done
   sleep 3
 }
 RES_=""; ORIG=$(mapping); PFX0=$(pfx_fam)

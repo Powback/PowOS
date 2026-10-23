@@ -122,8 +122,12 @@ run() {  # run <variant> <n>
   ( open_task 400 "steam_app_$APP" > "$T/open.status" ) &
   # 400 s cold (Steam's start, maybe a depot download); 150 s warm (~35 s expected): past that it is Steam's
   # freeze/thaw hanging the launch (INVALID below), and the check stays inside its 300 s budget to say so.
+  local stacks=0
   for _ in $(seq $([ $v = cold ] && echo 1600 || echo 600)); do
     now_=$(ms "$t0" "$(now)"); i=$((i + 1))
+    # The queue kills a job at 300 s: stop waiting at COLD_WAIT_MS (265 s) so a launch that never shows a window still
+    # gets its HANG lines, STAGES and the restore below (2026-10-23 08:08: killed mid-wait, none of them printed).
+    [ $v = cold ] && [ "$now_" -gt "${COLD_WAIT_MS:-265000}" ] && break
     # A running Steam logs the URL at once (ExecCommandLine): nothing in 20 s = the hand-off was lost (bf-lib
     # handoff_detail says where), not a slow tool - INVALID below, without waiting out the 150 s.
     if [ "$up" = 1 ] && [ $i = 80 ]; then
@@ -162,6 +166,11 @@ run() {  # run <variant> <n>
       echo "   at ${now_} ms: $(tail -n 3 "$T/timeline" 2>/dev/null | cut -f3 | cut -c1-60 | tr '\n' '|') game ${x:-none}$([ -n "$x" ] && awk '{printf " state %s cpu %.1fs", $3, ($14+$15)/100}' /proc/$x/stat 2>/dev/null) wchan $(cat /proc/${x:-0}/wchan 2>/dev/null); X windows of it: $(xwininfo -root -tree 2>/dev/null | grep -c "$WIN_NAME")"
       [ -n "$x" ] && [ -n "${seen[exe]:-}" ] && echo "     $(hang_diag "$x")"
     fi
+    # The exe up 45 s / 90 s and still no window: where its busiest thread is (two samples: a loop or progress).
+    if [ -n "${seen[exe]:-}" ] && [ $stacks -lt 2 ] && [ $((now_ - ${seen[exe]})) -gt $((45000 * (stacks + 1))) ]; then
+      x=$(for q in $(tree "$r"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -1)
+      stacks=$((stacks + 1)); [ -n "$x" ] && { echo "   at ${now_} ms, exe up $((now_ - ${seen[exe]})) ms, no window:"; hang_stack "$x" | sed 's/^/     /'; }
+    fi
     [ ${#seen[@]} != $k ] && k=${#seen[@]} && case " ${!seen[*]} " in
       *" exe "*) pill "cold start timing: $v - game starting" ;; *" wineserver "*) pill "cold start timing: $v - wine" ;;
       *" container "*) pill "cold start timing: $v - pressure-vessel" ;; *" reaper "*) pill "cold start timing: $v - launching" ;;
@@ -178,7 +187,10 @@ run() {  # run <variant> <n>
     # 41 s, then nothing for 4 min and no Player.log).
     for q in $(tree "$(reaper)"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -2 \
       | while read -r q; do echo "   HANG $(hang_diag "$q")"; done
-    fail "start-$v" "no window in $([ $v = cold ] && echo 400 || echo 150) s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi
+    # Steam's stdout (open-task started it) carries the game's own stdout/stderr too: the player's / FEX's last words.
+    echo "   game output (Steam's stdout, last lines):"; grep -a -v -E 'LD_PRELOAD|^\s*$|steamwebhelper|cef_|chromium|SlowJSMethodCall' "$T/open.out" 2>/dev/null \
+      | tail -25 | cut -c1-200 | sed 's/^/   | /'
+    fail "start-$v" "no window in $([ $v = cold ] && echo $((${COLD_WAIT_MS:-265000} / 1000)) || echo 150) s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi
   echo "STAGES $v #$2 (ms from the tap): steam-ui ${seen[steam]:--} update ${seen[update]:--}-${seen[update_end]:--} iscript ${seen[iscript]:--}-${seen[iscript_end]:--} reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--}; open-task: $(cat "$T/open.status" 2>/dev/null)"
   echo "   timeline (ms from the tap, first sight of each process under the launch; 4 Hz):"
   sort -t$'\t' -k2,2n "$T/timeline" 2>/dev/null | awk -F'\t' '!p[$1]++ && !a[$3]++ {printf "%6s %s\n", $2, $3}' \
