@@ -9,12 +9,14 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 envs="" args=()
 for a in "$@"; do case $a in
+  win:*) ;;   # a window title may hold spaces (handled below)
+  # Before app: (its glob takes the space too). Several words in one argument ("app:557340 steam": zsh doesn't split $var when queueing) - every run would be
+  # wasted (env: 'cold': No such file, 22:38, 2026-10-23, friction f46): refuse it plainly instead.
+  *[[:space:]]*) echo "FAIL setup: one argument holds several words: '$a' - pass each token separately"; exit 2 ;;
+  esac; case $a in
   app:[0-9]*) envs="$envs APP=${a#app:}" ;;
   # Base64: a title with spaces ("RimWorld by Ludeon Studios") through su -c and powos-run.sh's quoting.
   win:*) envs="$envs WIN_B64=$(printf %s "${a#win:}" | base64 | tr -d '\n')" ;;
-  # Several words in one argument ("app:557340 steam": zsh doesn't split $var when queueing) - every run would be
-  # wasted (env: 'cold': No such file, 22:38, 2026-10-23, friction f46): refuse it plainly instead.
-  *[[:space:]]*) echo "FAIL setup: one argument holds several words: '$a' - pass each token separately"; exit 2 ;;
   *) args+=("$a") ;; esac; done
 set -- "${args[@]+"${args[@]}"}"
 OUT=${OUT:-$HOME/.cache/powos-verify/bf-coldstart-$(date +%F_%H%M)}; mkdir -p "$OUT"
