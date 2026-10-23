@@ -27,6 +27,10 @@ where() { note "task $(tbounds "$1") | app window $(appframe) | bar $(wframe "Po
 # Home's touches, recorded (passive, capture) - what reached the page.
 ev "window.__pt||(window.__pt=[],addEventListener('touchstart',e=>__pt.push('s'+Math.round(e.touches[0].clientX*devicePixelRatio)+','+Math.round(e.touches[0].clientY*devicePixelRatio)),{capture:true,passive:true}),addEventListener('touchend',()=>__pt.push('e'),{capture:true,passive:true}),addEventListener('touchcancel',()=>__pt.push('c'),{capture:true,passive:true}));'ok'" >/dev/null
 touches() { ev "JSON.stringify((window.__pt||[]).splice(0))"; }
+# The windows a finger that is down right now went to (InputDispatcher's touch state): who takes a touch, who pilfered it.
+touched() { sh_ "dumpsys input" | sed -n '/TouchStatesByDisplay/,/CursorStatesByDisplay/p' | head -40 | tr -s ' ' | tr '\n' ' ' | cut -c1-1500; }
+# A tap as DOWN, the touch state, UP (a tap all the same: no move between).
+dtap() { mdown "$1" "$2" "$3" || return 1; log "tap $3 at $1,$2 (down, touch state, up)"; note "touch on $3: $(touched)"; mup "$1" "$2"; }
 inwin() { ev "importShim('./ui/desktops.ts').then(m=>String(m.inWindow($1/devicePixelRatio,$2/devicePixelRatio)))"; }
 logc() { sh_ "rm -f /data/local/tmp/probe-$1.txt; (timeout 200 logcat -T 1 -v time -s PowosWindowFrames PowosWindowFrame PowosWindowResize PowosFreeform PowosOemCaption WindowTasks PowosTasks com.powos.app:W </dev/null >/data/local/tmp/probe-$1.txt 2>&1 &)"; }
 # + SystemUI's warnings and errors (WM Shell's window decoration lives there: a caption 0 dp high may throw).
@@ -67,7 +71,7 @@ pass_() { # <tag>
   else fail "[$tag] no grip"; fi
   # C: a swipe in the top band of the app's content (where SystemUI's caption was).
   set -- $(tbounds "$CT"); b0="$*"; x=$((($1 + $3) / 2)); y=$(($2 + $(dp 40))); local to=$((x - $(dp 120)))
-  swipe $x $y $to $y 300 "the app's top band" && { sleep 1.5; chk band
+  mdown $x $y "the app's top band" && { note "[$tag] touch in the band: $(touched)"; mpath $x $y $to $y 6; mup $to $y; sleep 1.5; chk band
     step "$tag-band" "[$tag] a sideways swipe in the app's top band (y = top + 40 dp)"; where "$CT"; b1=$(tbounds "$CT")
     [ "$b1" = "$b0" ] && pass "[$tag] the window stayed put" || fail "[$tag] a swipe INSIDE the app moved the window: $b0 -> $b1"; }
   # D: a page swipe beside it, as long as fits.
@@ -81,7 +85,7 @@ pass_() { # <tag>
       [ "$(hpage)" != "$pg0" ] && { hemit system.home null; sleep 1; } ; }
   else fail "[$tag] no spot beside the window"; fi
   # E: the close button.
-  p=$(closebtn "$CT"); if [ -n "$p" ]; then set -- $p; tap $1 $2 "Calculator's close button"; sleep 2; chk close
+  p=$(closebtn "$CT"); if [ -n "$p" ]; then set -- $p; dtap $1 $2 "Calculator's close button"; sleep 2; chk close
     step "$tag-closed" "[$tag] Calculator's close button"
     [ -z "$(tasks | grep "^$CT ")" ] && pass "[$tag] closed" || fail "[$tag] task $CT still there after its close button"
   else fail "[$tag] no close button"; fi
@@ -93,7 +97,7 @@ pass_ on
 logc dolphin; logc_sys dolphin
 dock_tap l:org.kde.dolphin Dolphin && { DT=$(waitwin l:org.kde.dolphin 30); chk dolphin; sleep 2
   step dolphin "Dolphin from the dock"; note "dolphin task $DT $(tbounds "$DT") bar $(wframe "PowOS window bar $DT}")"
-  p=$(closebtn "$DT"); [ -n "$p" ] && { set -- $p; tap $1 $2 "Dolphin's close button"; sleep 3; chk dclose
+  p=$(closebtn "$DT"); [ -n "$p" ] && { set -- $p; dtap $1 $2 "Dolphin's close button"; sleep 3; chk dclose
     step dolphin-closed "Dolphin's close button"
     [ -z "$(tasks | grep "^$DT ")" ] && pass "Dolphin closed" || fail "Dolphin's task $DT still there"
     note "dolphin process: $(us 'pgrep -x dolphin || echo none' | xargs)"; }; }

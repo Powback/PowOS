@@ -86,7 +86,9 @@ class WindowFrame(
             x = r.left
             y = r.top - h
             width = r.width()
-            height = h
+            // Over SystemUI's caption too: its 1 px row at the task's top is an input window that drags the task
+            // (OemCaption); under the bar no touch reaches it.
+            height = h + OemCaption.CAPTION_PX
         }
         val g = dp(GRIP_DP)
         gripParams.apply {
