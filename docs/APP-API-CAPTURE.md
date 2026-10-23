@@ -666,6 +666,21 @@ And the **local runtime** (runs on PowOS, offline):
   on the Open-Meteo sample (2 reads enabled) and a synthetic cart capture
   (get_menu enabled; add_item + checkout present but OFF, checkout classed
   `spend`+confirm) — both validate.
+- **`appcap_proxy.py`** — the per-app capture + rules + tracker-blocking proxy
+  that FEEDS the Recordings / Rules / Trackers tabs. Runs as `--app NAME` (one
+  enabled app per session; only that app's traffic is routed to it). Per flow:
+  applies rules.json (block/rewrite via appcap_flows), classifies trackers
+  (appcap_block → tracker/analytics blocked by default unless the per-app
+  trackers/policy.json allows), logs every tracker decision to
+  trackers/<app>.jsonl, and records functional flows to recordings/<app>-*.har.
+  HTTPS CONNECT is blocked at host level for trackers, else tunneled (recording
+  HTTPS bodies needs the on-device CA). SELinux untouched. Tested locally: a
+  functional request through the proxy → 200 + recorded HAR; a tracker host →
+  403, logged `blocked`, no upstream call, nothing recorded; `decide()` flips
+  from block to allow when the per-app policy says allow.
+- **`appcap_draft.py`** — capture→draft: an app's recordings → a READ-ONLY draft
+  appcap (whole app `enabled:false`, reads enabled, writes disabled until the
+  user promotes). Tested: the Open-Meteo recording → 2 read actions, validates.
 
 **Verified (2026-10-23):**
 - real capture → spec: 4 Open-Meteo reads → 2 operations
