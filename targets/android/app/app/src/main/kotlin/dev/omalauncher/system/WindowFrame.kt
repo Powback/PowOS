@@ -37,7 +37,7 @@ class WindowFrame(
     private val context: Context,
     val id: Int,
     /** Its app: the bar's icon and name. */
-    app: App,
+    private val app: App,
     private val onMinimise: (Int) -> Unit,
     /** Let go at the screen's left (-1) or right (1) edge: the window goes to that home page (WindowFrames.edge). */
     private val onEdge: (Int, Int) -> Unit = { _, _ -> },
@@ -121,6 +121,13 @@ class WindowFrame(
         }
     }
 
+    /** The close button: the task removed, and said so (E2E round 2: a tap left Calculator and Dolphin open, unlogged). */
+    private fun close() {
+        val ok = Tasks.remove(context, id)
+        android.util.Log.i("PowosWindowFrame", "close task $id (${app.pkg}): ${if (ok) "removed" else "NOT removed"}")
+        WindowFrames.current?.changed()
+    }
+
     /** Maximised or not: its button shows "restore" (two squares) or "maximise" (one). */
     fun showMaximised(on: Boolean) {
         val glyph = if (on) Glyph.RESTORE else Glyph.MAXIMISE
@@ -199,7 +206,7 @@ class WindowFrame(
             addView(button(Glyph.MINIMISE) { onMinimise(id) }, LinearLayout.LayoutParams(dp(BUTTON_DP), full))
             maxButton = button(Glyph.MAXIMISE) { onMaximise(id) }
             addView(maxButton, LinearLayout.LayoutParams(dp(BUTTON_DP), full))
-            addView(button(Glyph.CLOSE) { Tasks.remove(context, id) }, LinearLayout.LayoutParams(dp(BUTTON_DP), full))
+            addView(button(Glyph.CLOSE) { close() }, LinearLayout.LayoutParams(dp(BUTTON_DP), full))
         }
     }
 
@@ -516,12 +523,17 @@ class WindowFrame(
         pending.set(null)
         worker.execute {
             val l = live
+            // The listed windows (home's windows.list, its gestures' no-go boxes) again: a bounds change of ours fires
+            // no task-stack event, so the list kept the bounds from the launch (E2E 2026-10-23: a page swipe beside a
+            // moved window was refused inside where it had been).
             if (l == null) {
                 FreeformTasks.resize(id, r)
+                WindowFrames.current?.changed()
                 return@execute
             }
             l.end(r)
             live = null
+            WindowFrames.current?.changed()
             if (liveNs.isNotEmpty()) {
                 val ms = liveNs.map { it / 1_000_000.0 }.sorted()
                 val (w0, h0) = liveSizes.first()

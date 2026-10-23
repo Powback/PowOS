@@ -28,6 +28,7 @@ class WindowFrames(
     private var stopListening: (() -> Unit)? = null
     private var keyguard = false
     private val refreshNow = Runnable { refresh() }
+    private val refreshLate = Runnable { refresh() }
 
     fun start(): Boolean {
         overlayGrant()
@@ -78,9 +79,19 @@ class WindowFrames(
         stopListening?.invoke()
         stopListening = null
         main.removeCallbacks(refreshNow)
+        main.removeCallbacks(refreshLate)
         frames.values.forEach { it.remove() }
         frames.clear()
         if (current === this) current = null
+    }
+
+    /** A window's bounds changed under PowOS's own hand (a bar drag, a grip resize): the list again, from any thread. */
+    fun changed() {
+        main.removeCallbacks(refreshNow)
+        main.postDelayed(refreshNow, SETTLE_MS)
+        // Once more after the change's transition has played: the task's bounds may still read the old ones at 80 ms.
+        main.removeCallbacks(refreshLate)
+        main.postDelayed(refreshLate, LATE_MS)
     }
 
     /** SystemUI's state flags: no frames over the lock screen. */
@@ -309,6 +320,7 @@ class WindowFrames(
     companion object {
         private const val TAG = "PowosWindowFrames"
         private const val SETTLE_MS = 80L
+        private const val LATE_MS = 600L
         private const val GRANT_EVERY_MS = 60_000L
         private const val DENSE_TRIES = 8
         private const val DENSE_RETRY_MS = 500L

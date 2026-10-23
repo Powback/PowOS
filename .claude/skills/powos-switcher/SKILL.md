@@ -212,3 +212,9 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   The running bar was NOT this (it reads getRunningTasks only). Device checks: capture logcat live from the launch
   (`timeout 40 logcat -T 1 -s ... &` on the phone): the 256 KiB main buffer rotates in seconds; and no single quotes
   inside a `su -c '...'` helper (float-desktops' missing.txt was empty from that).
+- E2E round 2 probe (verify/desk-probe.sh, 2026-10-23): windows.list bounds never changed after a bar drag or grip
+  resize (no task-stack event for a bounds change), so home's inWindow (907927a) refused page swipes inside where the
+  window HAD been. Now WindowFrame's lift calls WindowFrames.changed() (refresh at 80 + 600 ms). Still open: with the
+  caption overlay on, a sideways swipe in the app's top ~40 dp drags the TASK (system drag, not ours) and PowOS's bar
+  and the list stay behind; and the bar's close left Calculator and Dolphin open (now logged: PowosWindowFrame
+  "close task N: removed|NOT removed", PowosTasks "removeTask(N) said no").

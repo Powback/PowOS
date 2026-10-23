@@ -195,11 +195,12 @@ object Tasks {
         val pkg = task?.component?.packageName
         if (pkg == context.packageName) {
             val own = context.getSystemService(ActivityManager::class.java).appTasks.firstOrNull { runCatching { it.taskInfo?.taskId }.getOrNull() == id }
-            if (own != null) return runCatching { own.finishAndRemoveTask() }.isSuccess
+            if (own != null) return runCatching { own.finishAndRemoveTask() }.onFailure { Log.w(TAG, "can't finish own task $id", it) }.isSuccess
+            Log.w(TAG, "task $id is PowOS's own but not among its app tasks: removeTask")
         }
         return runCatching {
             HiddenApi.allow()
-            atm().javaClass.getMethod("removeTask", Int::class.javaPrimitiveType).invoke(atm(), id) as Boolean
+            (atm().javaClass.getMethod("removeTask", Int::class.javaPrimitiveType).invoke(atm(), id) as Boolean).also { if (!it) Log.w(TAG, "removeTask($id) said no (pkg $pkg, listed ${task != null})") }
         }.onFailure { Log.w(TAG, "can't remove task $id", it) }.getOrDefault(false)
     }
 
