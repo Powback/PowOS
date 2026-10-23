@@ -1,6 +1,6 @@
 ---
 name: powos-games
-description: Use for games on the PowOS phone (OnePlus Open) - Steam/Proton under FEX, Broforce runs and checks, Xwayland's KGSL patches (xwayland-kgsl), the phone kernel build + fastboot test boot + flash/rollback, and the dma-buf sync_file backport. Learned 2026-10-20..22.
+description: Use for games on the PowOS phone (OnePlus Open) - Steam/Proton under FEX, Broforce runs and checks, Xwayland's KGSL patches (xwayland-kgsl), the phone kernel build + fastboot test boot + flash/rollback, and the dma-buf sync_file backport. Learned 2026-10-20..23.
 ---
 
 Access, idle windows and on-device rules: the powos-phone and powos-verify skills. This is the games/kernel part.
@@ -30,7 +30,8 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - KWin shows every X toplevel (the game too) as its own Android task (PowosWindowActivity); never `am start andro.marchy.MainActivity` (PowOS home).
 - anland-1 119.97 Hz unfolded (2268x2440): 60 fps = every 2nd vsync; governor `uag`. `bf-run.sh` ~10 min (memory,
   SF pacing, KGSL stats). Launch-option prefixes run INSIDE SLR_4 under FEX: only `python3.13` (ctypes libX11).
-- Xwayland's copy of a window: `ffmpeg -f x11grab -window_id <id> -i :0 -frames:v 1`; half-drawn = dark px `c<30 && min4nb>c+50`.
+- Xwayland's copy of a window: NOT ffmpeg x11grab (FFmpeg 9 needs MIT-SHM, none on Android): Xlib XGetImage (bf-lib xframes);
+  half-drawn = dark px `c<30 && min4nb>c+50`.
 - Render bisect: `bf-checker.sh [variant]...` (~4 min each; TU_DEBUG via Proton user_settings.py / dxvk.conf): black-checker score, menu fps, DXVK log.
 - Unity prefs: pfx `user.reg` `[Software\\Free Lives\\Broforce]`. Steam login: a session crash can set loginusers.vdf
   AutoLogin 0 ("Service Unavailable") -> 1 with Steam off.
@@ -59,14 +60,41 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   x11grab frame <= RESUME_MS (3000). A touch / stop closes what the check started (exit 3). Launch chains outside
   Steam's tree (ppid 1, a dead Steam's) are killed first: never frozen or resumed, they hold the prefix.
 - Never auto-frozen before its first window (sleep-gui GAME_WINDOW_S 600): a cold start outlasts the 2 min grace.
-- Launch time by stage: `bf-coldstart.sh [cold|steam|fexcache]...` -> "STAGES" lines (tap->reaper->pv->wineserver->exe->
-  window->frame, ms). fexcache = FEX_ENABLECODECACHINGWIP=1 via Proton user_settings.py (removed after) + FEXOfflineCompiler.
-- Baseline 2026-10-23 cold (2 runs, Steam off): Steam web UI 1-4 s, reaper 22-26 s, pv-adverb 26-29 s, wineserver 32 s;
-  those runs then died (zeroed registry, see Causes). bf-coldstart FAILs at once when the chain ends without a window.
-- Still to measure (bf-coldstart.sh cold steam fexcache fexcache under the verify lock): warm-Steam launch, FEX code
-  cache, pressure-vessel locale-gen (game env has LC_ALL=C + LANG=en_CH.UTF-8: PRESSURE_VESSEL_GENERATE_LOCALES=0 in
-  /usr/bin/steam would skip it; pv->wineserver was ~3 s total). Persistent wineserver: Proton's waitforexitandrun waits
-  for the prefix's old wineserver to exit, so a lingering one delays a launch; a resident (frozen) game is the instant path.
+## Launch time (tap -> first frame; goal < 10 s; board task games-launch-instantly-steam-wine-resident-fex-s)
+- `bf-coldstart.sh [cold|steam|fexcache]...` -> "STAGES" lines, ms from the tap: steam-ui, iscript <start>-<end> (the
+  install script evaluator), reaper (the GAME's), pv, wineserver, exe, window, frame; "evaluator:" = its log line.
+  fexcache = FEX_ENABLECODECACHINGWIP=1 through ~/.config/powos/proton-settings.json + FEXOfflineCompiler between runs.
+- Cold 2026-10-23 01:17 (Steam off), read off console_log/gameprocess_log: tap -> ExecuteSteamURL 23 s (Steam's own
+  start) -> CheckShaderDepotManifest 2 s -> install script evaluator 30 s (01:17:35-01:18:05; 6-42 s over 8 launches)
+  -> SynchronizingCloud/Stats/controller ~1 s -> game reaper 55 s -> exe 64 s -> window 82 s (314x208, full screen a bit
+  later) -> frame never recorded. The old "reaper 25.7 / pv 28.7 / wineserver 33.9 s" were the EVALUATOR's chain.
+- Causes found (don't re-investigate):
+  - Steam runs `proton run legacycompat/iscriptevaluator.exe legacycompat\evaluatorscript_<id>.vdf` (its own reaper
+    `SteamLaunch AppId=<id> Install=1`) before EVERY launch, cold or warm Steam: a whole Wine boot under FEX, then the
+    game's `waitforexitandrun` waits for that wineserver. Fix: pkgs/steam/user_settings.py (Proton imports it after
+    the container is up, before Wine): exits 0 at once when script bytes + Proton version + prefix inode match the
+    last run that exited 0 (compatdata/<id>/powos-iscript.{done,log}); reg_guard deletes .done on a registry restore.
+    The container + Proton's own start (~3-5 s, x86 python under FEX) still happen: only a Valve-side change avoids them.
+  - frame "-": FFmpeg 9's x11grab needs MIT-SHM, Android has no SysV shm ("Could not get shared memory buffer",
+    "Error during demuxing: Permission denied") - every x11grab on the phone fails (bf-checker's grabs too). bf-lib
+    `xframes` = Xlib XGetImage of 16 rows from python ctypes (first_frame <s> by window name, first_change <id> <s> <fps>).
+  - Unity maps a 314x208 "Broforce" window first, then goes full screen (bf-window.sh read 314x208 at map).
+  - bf-start.sh's bare `steam steam://rungameid` gave the game no task in front (bf-pacing measured HomeShell): it goes
+    through powos-open-task now. A raw steam:// launch does NOT bring the game to the front - resident games use that.
+  - Proton's user_settings.py: one file per Proton dir; checks that wrote their own (bf-checker, td-launch) replaced
+    ours and a killed run left it (DXVK_LOG_PATH, 02:01). Checks put env in ~/.config/powos/proton-settings.json.
+- Base state: Steam resident (pkgs/steam powos-steam-resident, session autostart, `steam -silent` 60 s after login,
+  frozen by unified sleep; off: ~/.config/powos/steam-resident-off; log $XDG_RUNTIME_DIR/powos-steam-resident.log).
+- < 10 s needs the GAME resident: warm Steam + skipped evaluator still leaves ~4 s evaluator container + 9 s reaper->exe
+  + 19 s exe->window under FEX. ~/.config/powos/steam-resident-games (app ids) = started out of sight after login and
+  frozen 3 s after its window maps; a tap then resumes it (RESUME_MS 3000). Empty by default (a game at every login
+  costs its RAM + start CPU: the user/manager decides which).
+- Still open: FEX code cache (fexcache never measured), pressure-vessel locale-gen (PRESSURE_VESSEL_GENERATE_LOCALES=0),
+  Steam's CheckShaderDepotManifest 2 s. Persistent wineserver: Proton's waitforexitandrun waits for the prefix's
+  wineserver to exit, so a resident one blocks the launch - a resident (frozen) game is the instant path.
+- Verify queue gate: a job waits until its commit is in the live shell / installed APK; only shell/ and the APK's
+  inputs count (queue.sh ship_paths). A commit with others' unshipped shell/Kotlin still waits: queue a `git archive
+  <commit> tools/phone targets/android/session` copy (as bf-checker's job did) when the check needs only scripts.
 - adb.sh mounts each pushed path's dirname: a path with `..` pushes nothing ("cannot stat") - resolve it first.
 
 ## Causes found (don't re-investigate)
