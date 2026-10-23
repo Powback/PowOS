@@ -234,6 +234,8 @@ object VerifyRun {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER_HORIZONTAL
+            // Narrow: a long check name made it ~450 dp wide, over the floating windows' close buttons (e2e 2026-10-23).
+            maxWidth = dp(PILL_MAX_DP)
         }
 
         /** [s]: the runner's beat, written at [mtime] (phone clock). */
@@ -289,7 +291,9 @@ object VerifyRun {
                 PixelFormat.TRANSLUCENT,
             ).apply {
                 title = "PowOS verify status"
-                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                // The top-right corner: a floating window opens 60% wide in the middle, its title bar's buttons left of it.
+                gravity = Gravity.TOP or Gravity.END
+                x = dp(SIDE_DP)
                 fitInsetsTypes = 0
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                 // Below the status bar's clock and the camera, out of the way of the top row a check may pull.
@@ -338,6 +342,8 @@ object VerifyRun {
     private const val BLUR_DP = 140f
     private const val CORNER_DP = 18f
     private const val TOP_DP = 40f
+    private const val SIDE_DP = 12f
+    private const val PILL_MAX_DP = 170f
     private val TINT = Color.argb(107, 18, 20, 26)
     private val INK = Color.argb(222, 255, 255, 255)
     private val SOFT = Color.argb(170, 255, 255, 255)
