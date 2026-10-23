@@ -58,6 +58,15 @@ Control messages are one line of UTF-8 each, fields separated by tabs: `open <id
 `open` may end in `fullscreen`; `focus 0` is the desktop's task coming to the front (a window shown as its own task
 then gives up KWin's focus, so the taskbar activates it instead of minimizing it).
 
+Sessions (kwin 0023): window ids restart at 1 with every KWin, while Android keeps the old window tasks through a
+session restart. On connecting, and on the app's `hello 1` (its channel came up after KWin's, so the daemon dropped
+what KWin said), KWin sends `caps <words>` and `session <uuid> <id,id,...>`: a uuid made once per KWin process and
+the ids of the tasks it has. A task's data is `powos-window://<id>?session=<uuid>` (a new KWin's window 1 is a new
+document, not the old one's); WindowTasks finishes every window task - live activity or a Recents entry without one -
+that isn't one of the listed ids of that session, telling KWin nothing (`closed <id>` would close the new KWin's
+window of that id). Only a live window of the running session is raised again (`open` of a known id, the launcher's
+and dock's restoreLinux through WindowTasks.appIdOfTask); anything else opens fresh.
+
 ## From the launcher
 
 A PowOS app tapped in the PowOS app's launcher (drawer, home, search, the web shell: `Runtime.launch`) opens like a

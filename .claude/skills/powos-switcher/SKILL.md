@@ -184,6 +184,11 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
 - X11 child windows (kwin 0019, 3.23): an Xwayland window is added before it has its wl_surface, so export-new skipped
   it for good. user.sh's environment has no WAYLAND_DISPLAY/XDG_SESSION_TYPE: a Qt app started there is an X11 window,
   unlike the session's; run as the session does with plasmashell's /proc/<pid>/environ (linux-float.sh `ses`).
+- Session restarts (kwin 0023, 3.27): KWin's window ids restart at 1, Android keeps the old window tasks (seen 2678,
+  2679), and restoreLinux matched Kate to the dead one ("FAIL no window task in 30 s", launch "ok null"). KWin sends
+  `session <uuid> <ids>` (also on the app's `hello`); the task data carries `?session=`; WindowTasks.finishStale
+  removes every other window task without telling KWin; appIdOfTask / "open" only use live() activities. Logcat:
+  WindowTasks "KWin session ..", ".. not this KWin's, finished"; PowosWindow ".. not the running KWin's".
 - Check: verify/linux-float.sh (installs the newest built kwin pkg + a fresh session if older, Dolphin via
   apps.launch, an image via kioclient exec = one Gwenview task, freeform; close closes it). Queue with --close.
 - `powos` is NOT a page global: from CDP post `PowosHost.postMessage(JSON.stringify([id, method, JSON.stringify(args)]))`,

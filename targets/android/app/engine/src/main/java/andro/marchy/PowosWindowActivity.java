@@ -35,8 +35,11 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     private int id;
     /** The consumer (Native.nativeStartWindow), 0 while none: input is only sent while it's set. */
     private volatile long handle;
-    /** KWin closed the window: nothing to hand back on finishing. */
-    private boolean closedByKWin;
+    /**
+     * KWin closed the window, or the task is an earlier KWin's (staleSession): nothing to hand back on finishing - its
+     * id may be another window's of the running KWin. Set from the control thread, read on finishing.
+     */
+    private volatile boolean closedByKWin;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -44,6 +47,14 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         id = parseId();
         if (id <= 0) {
             finish();
+            return;
+        }
+        String running = WindowTasks.session;
+        if (running != null && !ofSession(running)) {
+            // A card of an earlier KWin's window (Recents kept it through a session restart): that window is gone.
+            Log.i(TAG, "window " + id + " is an earlier KWin's (session " + sessionOf(getIntent().getData()) + "): finished");
+            closedByKWin = true;
+            finishAndRemoveTask();
             return;
         }
         WindowTasks.tasks.put(id, this);
@@ -65,11 +76,47 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     }
 
     private int parseId() {
+        return idOf(getIntent().getData());
+    }
+
+    /** The window id in a window task's data (powos-window://id?session=uuid), 0 if none. */
+    static int idOf(android.net.Uri data) {
         try {
-            return getIntent().getData() != null ? Integer.parseInt(getIntent().getData().getHost()) : 0;
+            return data != null && data.getHost() != null ? Integer.parseInt(data.getHost()) : 0;
         } catch (NumberFormatException e) {
             return 0;
         }
+    }
+
+    /** The KWin session in a window task's data, "" for none (an older KWin's, or one from before sessions). */
+    static String sessionOf(android.net.Uri data) {
+        String s = data != null && data.isHierarchical() ? data.getQueryParameter("session") : null;
+        return s != null ? s : "";
+    }
+
+    int windowId() {
+        return id;
+    }
+
+    /** This task shows a window of KWin session [session]. */
+    boolean ofSession(String session) {
+        return session.equals(sessionOf(getIntent().getData()));
+    }
+
+    /**
+     * A window of the running KWin, still shown: not finishing, and of its session (when it says one) - what the
+     * launcher and dock may bring back instead of opening the app.
+     */
+    boolean live() {
+        String running = WindowTasks.session;
+        return !isFinishing() && !closedByKWin && (running == null || ofSession(running));
+    }
+
+    /** An earlier KWin's window (WindowTasks.finishStale): the task goes, telling KWin nothing (callable from any thread). */
+    void staleSession() {
+        closedByKWin = true;
+        Log.i(TAG, "window " + id + ": not the running KWin's, finished");
+        runOnUiThread(this::finishAndRemoveTask);
     }
 
     /** A full-screen application (a game, Steam Big Picture): the whole screen, system bars only on a swipe. */

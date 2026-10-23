@@ -1,0 +1,94 @@
+From cc18440feb61d1676249b3ab1c2c427ac6af83af Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Fri, 23 Oct 2026 21:33:30 +0200
+Subject: [PATCH] backends/anland: tell the app which KWin it is and its live
+ tasks
+
+Window task ids restart at 1 with every KWin, and the app's window tasks of an
+earlier KWin outlive it (a session restart: Android keeps the tasks and their
+activities). The app matched a launcher tap on Kate to the old session's dead
+Kate task and "restored" it, and a new window 1 hit the old window 1's task, so
+the tap did nothing. On connecting (and on the app's "hello", when its channel
+came up after ours and the daemon dropped what we said) KWin now sends
+"caps ... session" and "session <uuid> <id,id,...>": a uuid made once per KWin
+and the ids of the tasks it shows now. The app finishes every window task that
+isn't one of them and keys its tasks by session, so a new KWin's window 1 gets
+a task of its own.
+---
+ src/backends/anland/anland_window_task.cpp | 20 +++++++++++++++++++-
+ src/backends/anland/anland_window_task.h   |  5 +++++
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 21a72e7..f17e7d8 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -784,9 +784,22 @@ void AnlandWindowTasks::connectControl()
+     m_controlBuffer.clear();
+     m_controlNotifier = new QSocketNotifier(m_controlFd, QSocketNotifier::Read, this);
+     connect(m_controlNotifier, &QSocketNotifier::activated, this, &AnlandWindowTasks::onControlReadable);
++    announce();
++}
++
++void AnlandWindowTasks::announce()
++{
+     // What this KWin understands beyond "closed"/"focus": the app only sends it then (an older KWin, buffers of the
+     // task's size as before).
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session")});
++    // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
++    // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
++    // session restart, Kate's launcher tap raised the old session's dead Kate task).
++    QStringList live;
++    for (auto it = m_tasks.cbegin(); it != m_tasks.cend(); ++it) {
++        live.append(QString::number(it.key()));
++    }
++    send({QStringLiteral("session"), m_session, live.join(QLatin1Char(','))});
+ }
+ 
+ void AnlandWindowTasks::onControlReadable()
+@@ -835,6 +848,11 @@ void AnlandWindowTasks::handleLine(const QString &line)
+         setExportNew(f[1] == QLatin1String("1"));
+         return;
+     }
++    if (f[0] == QLatin1String("hello")) {
++        // The app's control channel (re)connected after ours: the daemon dropped what we said while it was away.
++        announce();
++        return;
++    }
+     const uint32_t id = f[1].toUInt();
+     if (id == 0 && f[0] == QLatin1String("focus")) {
+         // The desktop's task is in front again: a window shown as its own task gives up KWin's focus to the
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 1abed70..b798816 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -26,6 +26,7 @@
+ #include <QSet>
+ #include <QSize>
+ #include <QTimer>
++#include <QUuid>
+ 
+ #include <chrono>
+ #include <memory>
+@@ -219,6 +220,8 @@ private:
+     void watchFullScreen(Window *window);
+     void onFullScreenChanged(Window *window);
+     void connectControl();
++    /** "caps" and "session" (this KWin's id + the task ids it has) to the app: on connecting, and on its "hello". */
++    void announce();
+     void onControlReadable();
+     void handleLine(const QString &line);
+     void setExportNew(bool on);
+@@ -233,6 +236,8 @@ private:
+     QByteArray m_controlBuffer;
+     QHash<uint32_t, AnlandWindowTask *> m_tasks;
+     uint32_t m_nextId = 1;
++    // This KWin's own id on the control channel ("session"): the app tells its window tasks from an earlier KWin's.
++    const QString m_session = QUuid::createUuid().toString(QUuid::WithoutBraces);
+     // The app's "export-new 1" (the unfolded home, apps float): every application window opens as its own task.
+     bool m_exportNew = false;
+     QPointer<VirtualDesktop> m_desktop;
+-- 
+2.50.1 (Apple Git-155)
+

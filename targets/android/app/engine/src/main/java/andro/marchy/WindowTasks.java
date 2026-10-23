@@ -20,8 +20,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * PowOS: the app's end of the window control channel - PowOS windows KWin shows as their own Android tasks
  * (docs/powos-window-tasks.md). A connection to the display daemon in the control role ("app"); the daemon relays
  * one-line messages to and from KWin: {@code open <id> <app id> <caption> [fullscreen]}, {@code title <id> <caption>},
- * {@code close <id>}, {@code android <package>} from KWin; {@code closed <id>}, {@code focus <id>} to it
- * (tab-separated).
+ * {@code close <id>}, {@code android <package>}, {@code caps <words>}, {@code session <uuid> <id,id,...>} from KWin;
+ * {@code closed <id>}, {@code focus <id>}, {@code hello 1} to it (tab-separated).
  *
  * Runs for the session's life (SessionService), reconnecting while the daemon or KWin restart.
  */
@@ -36,6 +36,12 @@ public final class WindowTasks {
     private static volatile OutputStream out;
     /** What KWin said it understands ("caps": " size export-new "); empty for an older KWin, or not connected. */
     private static volatile String caps = "";
+    /**
+     * The running KWin's session ("session": a uuid per KWin process, kwin 0023), null while not told or for an older
+     * KWin. Window ids restart at 1 with each KWin: a window task belongs to the session in its intent's data
+     * (powos-window://id?session=uuid), and one of another session is finished, never shown or raised again.
+     */
+    static volatile String session;
     /** The "export-new" state KWin has (null: not told on this connection). */
     private static volatile Boolean exportNewSent;
 
@@ -122,8 +128,12 @@ public final class WindowTasks {
                 OutputStream o = s.getOutputStream();
                 o.write(frame(CTRL_MSG_CONTROL_HELLO, le32(CONTROL_ROLE_APP)));
                 caps = "";
+                session = null;
                 exportNewSent = null;
                 out = o;
+                // KWin says "caps" + "session" when it connects; if it came first, the daemon dropped them: ask again
+                // (an older KWin ignores it).
+                sendLine("hello\t1");
                 Log.i(TAG, "control channel up");
                 read(context, s.getInputStream());
             } catch (IOException e) {
@@ -170,6 +180,20 @@ public final class WindowTasks {
             tellExportNew(context);
             return;
         }
+        if (f[0].equals("session") && f.length > 1) {
+            session = f[1];
+            java.util.Set<Integer> live = new java.util.HashSet<>();
+            for (String s : (f.length > 2 ? f[2] : "").split(",")) {
+                try {
+                    live.add(Integer.parseInt(s));
+                } catch (NumberFormatException e) {
+                    // empty: no tasks
+                }
+            }
+            Log.i(TAG, "KWin session " + session + ", its tasks " + live);
+            finishStale(context, session, live);
+            return;
+        }
         int id;
         try {
             id = Integer.parseInt(f.length > 1 ? f[1] : "");
@@ -186,15 +210,17 @@ public final class WindowTasks {
                 // dock, a window activated the desktop way) brings that one back, never a second activity; one that
                 // is full screen floats then on the unfolded home (it opened folded, or before apps floated).
                 PowosWindowActivity existing = tasks.get(id);
-                if (existing != null && !existing.isFinishing() && !existing.getIntent().getBooleanExtra(PowosWindowActivity.EXTRA_FULLSCREEN, false)
+                if (existing != null && existing.live() && !existing.getIntent().getBooleanExtra(PowosWindowActivity.EXTRA_FULLSCREEN, false)
                         && raise(context, existing.getTaskId())) {
                     Log.i(TAG, "open " + id + " (" + appId + "): its task " + existing.getTaskId() + " back");
                     break;
                 }
                 android.os.Bundle options = fullScreen ? null : floatingOptions(context);
                 Log.i(TAG, "open " + id + " (" + appId + "): " + (fullScreen ? "full screen (the app's own)" : options != null ? "floating" : "full screen"));
+                String s = session;
                 Intent i = new Intent(context, PowosWindowActivity.class)
-                        .setData(Uri.parse("powos-window://" + id))
+                        // The session in the document's data too: a new KWin's window 1 is a new task, not the old one's.
+                        .setData(Uri.parse("powos-window://" + id + (s != null ? "?session=" + Uri.encode(s) : "")))
                         .putExtra(PowosWindowActivity.EXTRA_APP_ID, f.length > 2 ? f[2] : "")
                         .putExtra(PowosWindowActivity.EXTRA_TITLE, f.length > 3 ? f[3] : "")
                         // The application went full screen (a game, Steam Big Picture): an immersive task.
@@ -258,10 +284,45 @@ public final class WindowTasks {
         return r != null && taskId > 0 && r.test(context, taskId);
     }
 
+    /**
+     * Every window task that isn't one of KWin [current]'s [live] tasks finished and removed (a session restart: KWin's
+     * ids start at 1 again, so the old tasks would take the new windows' place - a launcher tap on Kate raised the old,
+     * dead Kate task). Covers the tasks Android kept without an activity (an app restart) as well as live activities;
+     * nothing is sent to KWin for them (their ids are this KWin's other windows' now).
+     */
+    private static void finishStale(Context context, String current, java.util.Set<Integer> live) {
+        for (PowosWindowActivity a : tasks.values()) {
+            if (!a.ofSession(current) || !live.contains(a.windowId())) {
+                tasks.remove(a.windowId(), a);
+                a.staleSession();
+            }
+        }
+        android.app.ActivityManager am = context.getSystemService(android.app.ActivityManager.class);
+        if (am == null)
+            return;
+        for (android.app.ActivityManager.AppTask t : am.getAppTasks()) {
+            android.app.ActivityManager.RecentTaskInfo info;
+            try {
+                info = t.getTaskInfo();
+            } catch (IllegalArgumentException e) {
+                continue; // gone meanwhile
+            }
+            Intent base = info.baseIntent;
+            Uri data = base != null ? base.getData() : null;
+            if (data == null || !"powos-window".equals(data.getScheme()))
+                continue;
+            int id = PowosWindowActivity.idOf(data);
+            if (current.equals(PowosWindowActivity.sessionOf(data)) && live.contains(id))
+                continue;
+            Log.i(TAG, "task " + info.taskId + " (window " + id + " of session " + PowosWindowActivity.sessionOf(data) + "): not this KWin's, finished");
+            t.finishAndRemoveTask();
+        }
+    }
+
     /** The PowOS app id (desktop id / app id KWin gave "open") of the window shown in Android task [taskId], or null. */
     public static String appIdOfTask(int taskId) {
         for (PowosWindowActivity a : tasks.values())
-            if (a.getTaskId() == taskId)
+            if (a.getTaskId() == taskId && a.live())
                 return a.getIntent().getStringExtra(PowosWindowActivity.EXTRA_APP_ID);
         return null;
     }
