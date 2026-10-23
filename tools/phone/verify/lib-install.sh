@@ -13,7 +13,7 @@ for f in "$@"; do
   [ -f "$L/$f" ] || { echo "FAIL install: no lib/$f"; rc=1; continue; }
   b=powos-lib-$(echo "$f" | tr / _)
   "$A" push "$L/$f" "/data/local/tmp/$b" >/dev/null || { echo "FAIL install: can't push $f"; rc=1; continue; }
-  s=$(mktemp); cat > "$s" <<SH
+  s=$(mkdir -p "$HOME/.cache/powos-verify" && mktemp "$HOME/.cache/powos-verify/install.XXXXXX"); cat > "$s" <<SH
 set -e
 d=/usr/lib/powos/$f t=\$(date +%Y%m%d-%H%M%S)
 mkdir -p /var/cache/powos
@@ -31,7 +31,7 @@ SH
   case $f in apps/powos-sleep-gui) gui=1 ;; esac
 done
 if [ -n "$gui" ]; then
-  s=$(mktemp); cat > "$s" <<'SH'
+  s=$(mkdir -p "$HOME/.cache/powos-verify" && mktemp "$HOME/.cache/powos-verify/install.XXXXXX"); cat > "$s" <<'SH'
 export XDG_RUNTIME_DIR=/run/powos-app DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus
 pkill -TERM -f 'bin/powos-sleep-gui$'; for _ in $(seq 20); do pgrep -f 'bin/powos-sleep-gui$' >/dev/null || break; sleep 0.5; done
 setsid -f powos-sleep-gui >> /run/powos-app/powos-sleep-gui.log 2>&1 < /dev/null

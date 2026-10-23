@@ -4,6 +4,8 @@
 # files the installed version had (/var/cache/powos/<name>-<old version>-files.tar: `tar -xf` it as root to go back).
 # Packages only: no session restart, no game touched. Prints "<name> <old> -> <new>"; FAIL when pacman refuses.
 set -uo pipefail
+# Scripts for root.sh/user.sh go under $HOME: adb.sh mounts the pushed file's directory into its container, and a
+# mktemp in /var/folders "cannot stat" (every pkg-install FAILed, 2026-10-23 05:29).
 here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"; R="$here/../root.sh"
 [ $# -gt 0 ] || { echo "usage: pkg-install.sh <pkg.tar.xz>..."; exit 2; }
 rc=0
@@ -13,7 +15,7 @@ for p in "$@"; do
   b=$(basename "$p"); name=${b%-*-*-*.pkg.tar.*}
   "$A" push "$p" "/data/local/tmp/$b" >/dev/null && "$A" shell "su -c 'mv /data/local/tmp/$b /data/powos/root/var/tmp/$b'" \
     || { echo "FAIL install: can't push $b"; rc=1; continue; }
-  s=$(mktemp); cat > "$s" <<SH
+  s=$(mkdir -p "$HOME/.cache/powos-verify" && mktemp "$HOME/.cache/powos-verify/install.XXXXXX"); cat > "$s" <<SH
 set -e
 old=\$(pacman -Q $name 2>/dev/null | cut -d' ' -f2 || true)
 if [ -n "\$old" ]; then mkdir -p /var/cache/powos
