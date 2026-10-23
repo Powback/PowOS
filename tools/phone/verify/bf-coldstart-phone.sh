@@ -203,6 +203,7 @@ run() {  # run <variant> <n>
     for q in $(tree "$(reaper)"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -2 \
       | while read -r q; do echo "   HANG $(hang_diag "$q")"; done
     # Steam's stdout (open-task started it) carries the game's own stdout/stderr too: the player's / FEX's last words.
+    for f in $(find /tmp -maxdepth 1 -name 'fex-game-*.log' -newer /tmp/bf-cold-mark 2>/dev/null | head -2); do echo "   FEX log $f ($(wc -l < "$f") lines), last:"; tail -15 "$f" | cut -c1-200 | sed 's/^/   | /'; done
     echo "   game output (Steam's stdout, last lines):"; grep -a -v -E 'LD_PRELOAD|^\s*$|steamwebhelper|cef_|chromium|SlowJSMethodCall' "$T/open.out" 2>/dev/null \
       | tail -25 | cut -c1-200 | sed 's/^/   | /'
     fail "start-$v" "no window in $([ $v = cold ] && echo $((${COLD_WAIT_MS:-265000} / 1000)) || echo 150) s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi

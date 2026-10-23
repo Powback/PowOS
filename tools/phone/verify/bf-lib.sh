@@ -289,7 +289,16 @@ hang_stack() {
   case $(cg2 "$x") in */powos/sleep/*) [ "$(cat "/sys/fs/cgroup$(cg2 "$x")/cgroup.freeze" 2>/dev/null)" = 1 ] && { echo "stack: $x frozen - not attaching"; return; } ;; esac
   command -v gdb >/dev/null || { echo "stack: no gdb"; return; }
   tid=$(for t in /proc/$x/task/*; do sed 's/.*) //' $t/stat 2>/dev/null | awk -v t="${t##*/}" '{print $12 + $13, t}'; done | sort -rn | head -1 | cut -d' ' -f2)
-  timeout 25 gdb -q -batch -nx -p "$tid" -ex 'set pagination off' -ex 'bt 14' -ex 'p/x $pc' -ex 'p/x $x28' -ex 'p/x $sp' > "$T/gdb.$tid" 2>&1
+  # Before gdb: what the busy thread does with the kernel for 3 s - context switches, signals it took (FEX handles
+  # unaligned atomics through SIGBUS), and the syscall mix (strace, when PowOS has it).
+  local c0 c1 s0 s1
+  c0=$(awk '/ctxt_switches/ {n += $2} END {print n}' /proc/$x/task/$tid/status 2>/dev/null); s0=$(awk '{print $10, $12}' /proc/$x/task/$tid/stat 2>/dev/null)
+  if command -v strace >/dev/null; then timeout 3 strace -f -c -p "$x" -o "$T/strace.$x" >/dev/null 2>&1; kill -CONT "$x" 2>/dev/null
+    echo "stack: syscalls in 3 s (strace -c): $(awk 'NR > 2 && $NF != "total" && $1 !~ /^-/ {print $NF "=" $4}' "$T/strace.$x" 2>/dev/null | head -12 | tr '\n' ' ')"
+  else sleep 3; echo "stack: no strace in PowOS"; fi
+  c1=$(awk '/ctxt_switches/ {n += $2} END {print n}' /proc/$x/task/$tid/status 2>/dev/null); s1=$(awk '{print $10, $12}' /proc/$x/task/$tid/stat 2>/dev/null)
+  echo "stack: thread $tid in 3 s: $((${c1:-0} - ${c0:-0})) context switches; minflt/majflt $s0 -> $s1; signals caught: $(grep SigCgt /proc/$x/status | awk '{print $2}')"
+  timeout 25 gdb -q -batch -nx -p "$tid" -ex 'set pagination off' -ex 'bt 14' -ex 'p/x $pc' -ex 'p/x $x28' -ex 'p/x $sp' -ex 'x/24i $pc-48' > "$T/gdb.$tid" 2>&1
   kill -CONT "$x" 2>/dev/null
   python3 - "$x" "$tid" "$T/gdb.$tid" <<'PY' 2>&1 | head -40
 import re, struct, sys
@@ -297,6 +306,7 @@ pid, tid, out = sys.argv[1], sys.argv[2], open(sys.argv[3], errors="replace").re
 print("stack: thread %s (%s), host frames:" % (tid, open("/proc/%s/task/%s/comm" % (pid, tid)).read().strip()))
 for l in out.splitlines():
     if l.startswith("#"): print("stack:   " + re.sub(r"\s+", " ", l)[:200])
+    elif re.match(r"\s*(=>)?\s*0x[0-9a-f]+.*:\t", l): print("stack:   asm " + re.sub(r"\s+", " ", l)[:120])
 maps = []
 for l in open("/proc/%s/maps" % pid):
     f = l.split()
