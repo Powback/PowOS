@@ -217,10 +217,19 @@ chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /usr/bin/setpriv --reuid=powos
 # the registry's module, and the CLI's front doors (`powos app`, `powos config app-runtime`). The system tier starts
 # from powos-start.sh (at boot, and now); its data and settings are the user's, under /var/lib/powos.
 A=$T/powos-apps
+# older <pkgname> <file>: true when <file> is older than the installed <pkgname>. A deploy installs the newest build in
+# ITS checkout's out/pkgs, which can be an old one: it downgraded xwayland-kgsl 24.1.13-2 -> -1 (friction f29,
+# 2026-10-23). Never downgrade here; POWOS_ALLOW_DOWNGRADE=1 to mean it.
+older() {
+  local have want; have=$(chroot $R /usr/bin/pacman -Q "$1" 2>/dev/null | cut -d' ' -f2); [ -n "$have" ] || return 1
+  want=$(basename "$2" | sed -E "s/^$1-//; s/-[^-]+\.pkg\.tar\..*$//")
+  [ "${POWOS_ALLOW_DOWNGRADE:-0}" != 1 ] && [ "$(chroot $R /usr/bin/vercmp "$want" "$have")" -lt 0 ] &&
+    echo "$1: keeping $have (this deploy's package is older: $want)"
+}
 if [ -d $A ]; then
   # powos-units: pkg:spacetimedb
   for p in $A/spacetimedb-*.pkg.tar.*; do
-    [ -e "$p" ] || continue
+    [ -e "$p" ] || continue; older spacetimedb "$p" && continue
     # --ask 4: the patched build replaces spacetimedb-bin (pacman's "remove the conflicting package?" answered yes).
     cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --ask 4 --needed /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
       echo "spacetimedb: $(chroot $R /usr/bin/spacetime --version 2>/dev/null | head -1)"
@@ -229,14 +238,14 @@ if [ -d $A ]; then
   # the copy an older rootfs's build left there unowned. The running session keeps its Xwayland until it restarts.
   # powos-units: pkg:xwayland-kgsl
   for p in $A/xwayland-kgsl-*.pkg.tar.*; do
-    [ -e "$p" ] || continue
+    [ -e "$p" ] || continue; older xwayland-kgsl "$p" && continue
     cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --needed --overwrite /usr/local/bin/Xwayland /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
       echo "xwayland-kgsl: $(chroot $R /usr/bin/pacman -Q xwayland-kgsl 2>/dev/null)"
   done
   # KWin, our package (pkgs/kwin: the Anland backend). The running session keeps its KWin until it restarts.
   # powos-units: pkg:kwin
   for p in $A/kwin-*.pkg.tar.*; do
-    [ -e "$p" ] || continue
+    [ -e "$p" ] || continue; older kwin "$p" && continue
     cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --needed /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
       echo "kwin: $(chroot $R /usr/bin/pacman -Q kwin 2>/dev/null)"
   done
