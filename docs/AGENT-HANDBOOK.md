@@ -74,7 +74,7 @@ minimal change and tell them.
   with `queue.sh add --close <task> <check>` (the pass closes it); a task no device check can prove closes with
   `task done <id> --no-check "<why>"` (docs, Mac tooling with a tier-1 test). Never report "done" for pushed/queued.
 - Facts: the verify queue writes each queued job and result to the module's work_check rows (`powos agents check
-  set`); the Mac's sweeper (launchd com.powos.board-sweep, tools/agents/board-sweep.sh, every 10 min) re-syncs the
+  set`); the Mac's sweeper (launchd com.powos.board-sweep, tools/agents/board-sweep.sh, every 30 min: each digest wakes the coordinator for a full turn) re-syncs the
   whole queue dir (`check scan` -> `check sync`) and runs `powos agents sweep` on the phone.
 - The sweep mails the coordinator ("coder") ONE digest: orphans (stalled, no-check: FAILs nobody picked up),
   blocked-without-reason, user asks with no task, new or recurring friction - only what's new or changed since the

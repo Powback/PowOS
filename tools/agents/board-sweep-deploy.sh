@@ -1,6 +1,6 @@
 #!/bin/bash
 # tools/agents/board-sweep-deploy.sh [install|remove|status|run] (Mac): the work board's orphan sweeper as the launchd
-# agent com.powos.board-sweep (every 10 min; its plist next to this; unit units/mac/board-sweep-mac.json).
+# agent com.powos.board-sweep (every 30 min; its plist next to this; unit units/mac/board-sweep-mac.json).
 #   install  the plist into ~/Library/LaunchAgents (paths filled in), (re)loaded - it sweeps once at load
 #   remove   unloaded and its plist deleted (~/.cache/powos-board-sweep, its state and log, kept)
 #   status   launchd's view of it and the last sweep's log lines
@@ -22,7 +22,7 @@ install)
   plutil -lint "$P" >/dev/null
   launchctl bootout "$D/$L" 2>/dev/null || true
   launchctl bootstrap "$D" "$P"
-  echo "installed $L (every 10 min, from $R)" ;;
+  echo "installed $L (every 30 min, from $R)" ;;
 remove)
   launchctl bootout "$D/$L" 2>/dev/null || true
   rm -f "$P"; echo "removed $L" ;;

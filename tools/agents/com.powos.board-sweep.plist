@@ -18,7 +18,7 @@
   <key>WorkingDirectory</key>
   <string>@R@</string>
   <key>StartInterval</key>
-  <integer>600</integer>
+  <integer>1800</integer>
   <key>RunAtLoad</key>
   <true/>
   <key>LimitLoadToSessionType</key>
