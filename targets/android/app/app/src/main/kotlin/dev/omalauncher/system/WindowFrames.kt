@@ -136,6 +136,35 @@ class WindowFrames(
         frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
         // Bottom-most first, so a new frame's windows stack over the ones under it.
         show.asReversed().forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w)), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
+        restack(show.asReversed().map { it.id })
+    }
+
+    /** The frames' ids bottom-most first, in the order their windows were added (overlays stack so). */
+    private val stack = mutableListOf<Int>()
+
+    /**
+     * The frames stacked as their tasks ([wanted], bottom-most first): a window raised after its frame was made (a
+     * restore, a tap, a desktop switch) had its bar under a lower window's (that bar took the drag: Chrome moved for
+     * Calculator, 2026-10-23). Re-added from the first one out of place up, only when one out of order overlaps
+     * another's bar or grip (a re-add blinks).
+     */
+    private fun restack(wanted: List<Int>) {
+        stack.retainAll(wanted.toSet())
+        wanted.filter { it !in stack }.forEach { stack.add(it) }
+        if (stack == wanted) return
+        val wrong =
+            wanted.indices.any { i ->
+                (i + 1 until wanted.size).any { j ->
+                    stack.indexOf(wanted[i]) > stack.indexOf(wanted[j]) && Rect.intersects(frames[wanted[i]]?.reach() ?: Rect(), frames[wanted[j]]?.reach() ?: Rect())
+                }
+            }
+        // Out of order but apart: left as they are (the real order stays recorded for when they meet).
+        if (!wrong) return
+        val from = wanted.indices.first { stack[it] != wanted[it] }
+        Log.i(TAG, "frames restacked from task ${wanted[from]}: ${wanted.joinToString(" ")} (were ${stack.joinToString(" ")})")
+        wanted.drop(from).forEach { frames[it]?.raise() }
+        stack.clear()
+        stack.addAll(wanted)
     }
 
     /**
@@ -371,7 +400,10 @@ class WindowFrames(
 
     /** Task [id]'s window off the screen, into the dock. */
     fun minimise(id: Int) {
-        if (!FreeformTasks.minimise(context, id)) return
+        val ok = FreeformTasks.minimise(context, id)
+        // What a dock tap did (the e2e's "a dock tap on Chrome in front: minimised=false" had no trace either way).
+        Log.i(TAG, "minimise task $id: ${if (ok) "done" else "refused"} (front was ${running.value.firstOrNull { !it.minimised && !it.away && it.bounds != null }?.id})")
+        if (!ok) return
         minimised.add(id)
         refresh()
     }

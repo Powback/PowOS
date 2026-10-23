@@ -51,7 +51,8 @@ object FreeformTasks {
         // getRunningTasks is deprecated for apps (their own tasks only); the recents provider sees them all.
         @Suppress("DEPRECATION")
         val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
-        return tasks.mapNotNull { t ->
+        val z = stackOrder()?.withIndex()?.associate { (i, id) -> id to i }
+        return (if (z == null) tasks else tasks.sortedBy { z[it.taskId] ?: Int.MAX_VALUE }).mapNotNull { t ->
             val wc = runCatching { windowConfiguration(t) }.onFailure { if (!unreadable) Log.w(TAG, "can't read task ${t.taskId}'s window", it) }.getOrNull()
             unreadable = wc == null
             if (wc == null) return@mapNotNull null
@@ -62,6 +63,23 @@ object FreeformTasks {
             Window(t.taskId, (t.baseActivity ?: t.topActivity)?.packageName, bounds, visible, dpi, t.taskDescription?.label?.toString())
         }
     }
+
+    /**
+     * Task ids top-most first as WM stacks them (IActivityTaskManager.getAllRootTaskInfos walks the root tasks top to
+     * bottom; a floating window's task is its own root), or null. getRunningTasks sorts by last-active time instead: a
+     * window raised by a reorder (restore, a desktop switch) kept its old place there, so the frames stacked a lower
+     * window's bar over the front one's (a drag on Calculator's bar moved Chrome, 2026-10-23) and the dock's "window in
+     * front" was the wrong one. HACK: hidden, reflected like [minimise] (MANAGE_ACTIVITY_TASKS, held as the recents
+     * provider). Real fix: none for an app.
+     */
+    private fun stackOrder(): List<Int>? =
+        runCatching {
+            val roots = atm().javaClass.getMethod("getAllRootTaskInfos").invoke(atm()) as List<*>
+            roots.map { android.app.TaskInfo::class.java.getField("taskId").getInt(it) }
+        }.onFailure { if (!noOrder) Log.w(TAG, "no stacking order: windows in last-active order", it) }
+            .also { noOrder = it.isFailure }.getOrNull()
+
+    @Volatile private var noOrder = false
 
     /**
      * The app tasks showing full screen now (an ordinary activity: not home, recents, the assistant or a dream), top-most

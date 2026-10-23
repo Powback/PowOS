@@ -155,6 +155,24 @@ class WindowFrame(
         if (added) runCatching { wm.updateViewLayout(bar, barParams) }
     }
 
+    /** Where its bar and grip take touches (screen px): a frame stacked over another's there takes that one's finger. */
+    fun reach(): Rect = Rect(bounds.left, bounds.top - dp(BAR_DP + HIT_DP), bounds.right + dp(GRIP_OUT_DP), bounds.bottom + dp(GRIP_OUT_DP))
+
+    /**
+     * Its two windows re-added, so they stack over PowOS's other overlays: overlays keep the order they were added in,
+     * not their tasks' (WindowFrames.restack). Never while a finger is on it (its touch stream would end).
+     */
+    fun raise() {
+        if (!added || dragging) return
+        runCatching {
+            wm.removeViewImmediate(bar)
+            wm.addView(bar, barParams)
+            wm.removeViewImmediate(grip)
+            wm.addView(grip, gripParams)
+            barBlur.set(1f)
+        }.onFailure { android.util.Log.w("PowosWindowFrame", "can't raise the frame of task $id", it) }
+    }
+
     fun remove() {
         if (!added) return
         added = false
