@@ -181,6 +181,14 @@ cd "$S/steamrtarm64" || exit 1
 # are "'./steam' '-cef-disable-gpu-sandbox' 'steam://rungameid/274190'\n", the client's own format, and neither a
 # hand-written line nor those bytes replayed were taken. Real fix: Valve's ARM64 client acting on forwarded command
 # lines (report it with that probe's evidence).
+# A tap on Steam itself (its launcher entry: `steam %U` with no URL = no arguments at all) must SHOW Steam's main
+# window, every time. A Steam that already runs may have none: the session's resident Steam (powos-steam-resident)
+# starts -silent, and a closed main window leaves the client in its tray. A bare `./steam` to a running client is a
+# forward with nothing in it (no window, 2026-10-23 14:42 "Steam won't boot"), so the tap asks for the window by URL:
+# forwarded, checked and, if the client drops it, Steam restarted with it below - the same path a game launch takes.
+# Not running: a client started with steam://open/main opens on its main window (never -silent). Only with no
+# arguments: -shutdown, -silent and every other caller's options are left as they are.
+[ $# -eq 0 ] && set -- steam://open/main
 url=; for a in "$@"; do case $a in steam://*) url=$a ;; esac; done
 client_up() { case $(readlink "/proc/$(cat "$HOME/.steam/steam.pid" 2>/dev/null || echo 0)/exe" 2>/dev/null) in
   */steamrtarm64/steam) return 0 ;; esac; return 1; }

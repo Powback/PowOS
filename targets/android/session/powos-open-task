@@ -56,6 +56,10 @@ RUN = os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app")
 WAIT_S = 30
 # A game's first window: Steam + Proton under FEX (Broforce ~1-2 min cold).
 WAIT_GAME_S = 150
+# Steam's own window (a tap on Steam, not a game): a Steam that runs out of sight (-silent, resident) drops a forwarded
+# URL, so /usr/bin/steam restarts it with steam://open/main - its kill + a cold start + login, ~25-40 s on the phone.
+# Past WAIT_S the helper said "desktop" and left, and the window came later behind home: no visible result.
+WAIT_STEAM_S = 120
 # A newly started app's shown window counts once it has lasted this long; one closing earlier is replaced by the next.
 SETTLE_S = 8
 # A show KWin refused for a new window: tried again this often, this far apart (its surface may come a moment later).
@@ -203,7 +207,8 @@ def main():
     game = next((m.group(1) or m.group(2) for m in map(STEAM_GAME.search, [command, *ids]) if m), None)
     if game:
         ids.add(f"steam_app_{game}")
-    wait_s = WAIT_GAME_S if game else WAIT_S
+    steam_client = not game and os.path.basename(command.split()[0]) == "steam"
+    wait_s = WAIT_GAME_S if game else WAIT_STEAM_S if steam_client else WAIT_S
 
     from PySide6.QtCore import ClassInfo, QCoreApplication, QObject, QTimer, Slot
     from PySide6.QtDBus import QDBus, QDBusConnection, QDBusMessage
