@@ -533,6 +533,10 @@ class Daemon:
         except OSError as e:
             log(f"{s.id}: couldn't sleep: {e}")
             s.why, s.quiet_since = f"couldn't sleep: {e}", None
+            # The borrowed listeners go back too: a copy kept here holds the backend's port open after the backend
+            # exits - its next start can't bind (EADDRINUSE) and every client hangs in a queue nobody accepts (App API,
+            # 2026-10-23: four failed sleeps, then a system-tier restart left 127.0.0.1:3411 held by powos-sleepd).
+            self.release_listeners(s)
             if s.frozen:
                 s.frozen.thaw()
                 s.frozen = None
@@ -542,15 +546,22 @@ class Daemon:
             + (f"; woken by a connection to :{', :'.join(map(str, sorted(s.ports)))}" if s.ports else ""))
         self.publish()
 
-    def wake_service(self, s, why):
-        t = time.monotonic()
+    def release_listeners(self, s):
+        """Close this daemon's copies of the backend's listening sockets (borrow_listeners), watched or not."""
         for fd in s.fds:
             try:
                 self.sel.unregister(fd)
             except (KeyError, ValueError):
                 pass
-            os.close(fd)
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         s.fds = []
+
+    def wake_service(self, s, why):
+        t = time.monotonic()
+        self.release_listeners(s)
         if s.frozen:
             s.frozen.thaw()
             s.frozen = None
