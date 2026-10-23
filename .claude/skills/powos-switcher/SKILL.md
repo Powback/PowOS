@@ -107,7 +107,7 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   PowosWindowActivity.appFullScreen (immersive) -> WindowTasks.fullScreenTask -> WindowFrames.appFullScreen ->
   FreeformTasks.setFullScreen (WCT mode UNDEFINED/FREEFORM + bounds as a change transition). Before 0021 an exported
   floating window going full screen stayed in its task, scaled down (0017 fitsWindow), frame + dock around it.
-  MEASURED (window-max before, f468af79): the button's bare resizeTask changed NOTHING (Calculator + Kate stayed put;
+  (f468af79 "bare resizeTask changed NOTHING": the button never fired - see CORRECTION below; Calculator + Kate stayed put;
   float-windows' maximise FAILed too) - maximise now runs a TaskLeash session (909be605), resizeTask only as fallback.
   HWC Disp Frame is in the inner panel's landscape space: screen (l t r b) = panel (t, W-r, b, W-l) (window-max sfrow).
   Not yet measured: whether WM grants Chrome's requestFullscreenMode with freeform tasks on a full-screen display. Check: verify/window-max.sh calc|kate|video
@@ -270,12 +270,24 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   (collected into a transition only if one is collecting). Shell's onTransitionReady for a token it didn't start:
   Log.wtf "Got transitionReady for non-pending transition" + a fallback ActiveTransition, then dispatchReady (remotes'
   filters, handlers) - so that E line comes with EVERY startNewTransition PowOS makes; it is not itself the failure.
-- Maximise measured (window-max after, 18:16): WM listed the maximised bounds +0.1 s after the button (PowosWindowFrames
-  list), our remote got the leash and finished at +0.17 s, and `am stack list` had the OLD bounds again from +0.35 s
-  (calc and Kate). Who undoes it is not yet measured: window-max.sh now captures the whole logcat (wm.txt: WM, Shell,
-  OnePlus lines) and traces bounds every ~90 ms after each change (`trace`). Same family: the old resize end as a
-  transition ("WM at the old bounds", 13:43) and bare resizeTask maximise (changed nothing, f468af79) - a size change
-  through a change transition doesn't stick; position changes (bar move end) do.
+- CORRECTION (window-core #6, 2026-10-23 23:30): there was NO maximise revert. The title bar's buttons never fired on a
+  tap in any device run (window-max calc/kate 18:16 + 23:10, float-windows 15:20: not one "maximised" line for a button
+  tap); every "maximised/restored" line in those logs was the DOUBLE TAP (bar path, 4 actions -> 2 lines, 8 s apart),
+  which always stuck. So "lands +0.1 s, old again +0.35 s" and "bare resizeTask changed nothing" (f468af79) measured a
+  button that did nothing. Why a clickable child of the bar never got its click is not known (the UP reached
+  com.powos.app); since 053f2d38 the buttons are marks the bar's own touch handler (Drag) hit-tests at the lift and
+  each tap logs PowosWindowFrame "task N <button>: tapped|let go off it".
+- Raising (4fc2f82f): a touch on a frame no longer calls moveTaskToFront at the DOWN (a TO_FRONT transition of its own,
+  still collecting when the drag's CHANGE started a few ms later; 2 empty TO_FRONT transitions per double tap in the
+  23:18 log). A window not in front (WindowFrames.isFront: first of `running`) comes up in the drag's start WCT or
+  maximise's (TaskLeash.reorder, same transition), a plain tap's at the lift.
+- Leash-off resize = stale crop (resize-probe 20:26, measured): WM had the new bounds, the app window too, but the
+  app's INPUT frame stayed cut to the old width (the task surface's crop: WM Shell syncs a freeform leash only inside a
+  transition on this ROM) - the new part blank, its touches to home. So resizes go through the leash again (the
+  68a3b4ed stopgap removed, `powos_leash_resize` unused).
+- window-max.sh (3dac79bd): one phone call per look (grab: bounds, mode, bar, HWC), WM/Shell/OnePlus logs via
+  `logcat -t <mark>` right after each change appended on the phone (wm.txt; the whole-logcat capture + 4 calls per
+  look ran both diag rounds past 300 s; each adb call over the VPN ~2.5 s), button taps as DOWN / touched windows / UP.
 - The user (2026-10-23, on "no launcher path"): "that's the beauty, we own the full stack". The phone is rooted, so a
   missing Shell API is not a stopping point: fix at the platform level (memory: fix-at-platform-level). Candidates:
   give WM Shell the entry point (a PowOS window-bounds handler running in SystemUI's process, so its transitions are
@@ -283,11 +295,9 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   core / OnePlus code that undoes the size once the diag probes name it. Pick from the measurement, not a guess.
 - Likely (not measured): a session holds its transition open for the whole gesture and ignores mergeAnimation, so every
   other transition on Shell's track waits behind it (input window gone / old bounds 5 s while a resize leash was open).
-- Resizes are OFF the leash by default (68a3b4ed; `settings put global powos_leash_resize 1` = on): a leash-on resize
-  once kept the old bounds 5 s with no app input window (resize-probe 1837), others left a "Transition Root: Task=N"
-  layer; every leash start logs ShellTransitions E "transitionReady for non-pending" (WM Shell never asked for our
-  startNewTransition; it plays it through a fallback ActiveTransition). Leash-off shrink: Calculator's touchableRegion
-  stayed the OLD bigger size for 5 s+ (1844) - touches beside a shrunk window may still go to it; not yet fixed.
+- Leash-on resize history: one run kept the old bounds 5 s with no app input window (resize-probe 1837, no logs kept),
+  others left a "Transition Root: Task=N" layer. Likely the DOWN's moveTaskToFront racing the drag's CHANGE (fixed in
+  4fc2f82f, not yet measured). Every leash start logs ShellTransitions E "transitionReady for non-pending" (expected).
 - resize-probe.sh's `input:` grep needs the name right after the hex id: PowosWindowActivity (Kate) never matches, so
   "no input window" for Kate there is the probe's, not the phone's. Kate's bar loss after the flicks: the window under it
   (WireGuard) came to the front after the first flick (am stack order), so its bounds hid Kate's bar - who raised it is open.
