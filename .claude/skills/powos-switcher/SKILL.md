@@ -107,8 +107,10 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   PowosWindowActivity.appFullScreen (immersive) -> WindowTasks.fullScreenTask -> WindowFrames.appFullScreen ->
   FreeformTasks.setFullScreen (WCT mode UNDEFINED/FREEFORM + bounds as a change transition). Before 0021 an exported
   floating window going full screen stayed in its task, scaled down (0017 fitsWindow), frame + dock around it.
-  NOT yet measured on the device: whether WM grants Chrome's request with freeform tasks on a full-screen display,
-  and whether resizeTask's maximise leaves a stale/white area. Check: verify/window-max.sh calc|kate|video
+  MEASURED (window-max before, f468af79): the button's bare resizeTask changed NOTHING (Calculator + Kate stayed put;
+  float-windows' maximise FAILed too) - maximise now runs a TaskLeash session (909be605), resizeTask only as fallback.
+  HWC Disp Frame is in the inner panel's landscape space: screen (l t r b) = panel (t, W-r, b, W-l) (window-max sfrow).
+  Not yet measured: whether WM grants Chrome's requestFullscreenMode with freeform tasks on a full-screen display. Check: verify/window-max.sh calc|kate|video
   (recordings in ~/.cache/powos-verify/window-max/<round>/). KWin installs through verify/linux-float.sh (newest
   out/pkgs/kwin-* in any worktree: never leave a stale same-version build there).
 - Dead ends (launching, measured): OnePlus FlexibleWindowManager.startAnyActivity/calculateFlexibleWindowBounds (empty
