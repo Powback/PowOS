@@ -73,6 +73,21 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   pinned yet: bf-lib step_launch now fails `launch-handoff` after 20 s with handoff_diag (thread states, wchan, frozen
   sleep cgroups = a D-Bus/X peer it may wait on, pipe mtime). sleep-gui's log restarts with each session: read
   watcher lines in the check log for older ones.
+- Steam's ARM64 client and forwarded launches (2026-10-23 03:30, read off the phone): in console_log since 10-20 EVERY
+  `ExecCommandLine` is the first one after a "Client version" (a client start) - no launch forwarded through
+  ~/.steam/steam.pipe to a running client was ever taken (02:42 lost; the 02:53/02:58 warm INVALIDs too). The live
+  client holds the pipe (fd 5, O_RDONLY|O_NONBLOCK) but it is in NO poll set: main thread ppoll(X socket + eventfd, 50 ms,
+  ~24 wakeups/s), so it can only be read by a periodic non-blocking read. bf-lib handoff_detail (on every lost hand-off,
+  also bf-coldstart warm runs at 20 s -> FAIL handoff-<v>): unread bytes in the pipe (FIONREAD), main-thread syscall +
+  wakeups/s, the forwarder's output, gdb `bt` of thread 1 (gdb is in PowOS, no yama), and a second hand-off of the same
+  URL (TAKEN = the first write was lost). Read those lines before theorising. Passive probes that need no window:
+  /proc/<pid>/task/*/syscall + /proc/<pid>/mem (root) decode each thread's pollfd array.
+- A -silent Steam (powos-steam-resident) has no window, so sleep-gui never tracked it (tracked began at a window) and it
+  was NEVER frozen: 12.7% of a core all session (127 ticks / 10 s, Steam tree + webhelpers). Fix c39ec1b: Gui.adopt every
+  30 s tracks a unit's live pidfile root without a window (idle from then; its grace/busy rules). Install a lib/ file
+  without a full deploy: `queue.sh add <task> tools/phone/verify/lib-install.sh apps/powos-sleep-gui game.sh`
+  (lib/<p> -> /usr/lib/powos/<p>, backup /var/cache/powos/lib-<name>.<time>.bak, restarts sleep-gui).
+- bf-coldstart `win:<title>` goes base64 (WIN_B64) through su -c: spaces kept (RimWorld = "RimWorld by Ludeon Studios").
 - Never auto-frozen before its first window (sleep-gui GAME_WINDOW_S 600): a cold start outlasts the 2 min grace.
 - The user's model (2026-10-23): a game is kept in the background ONLY after the user started it and navigated away
   (home, another app, fold) - frozen like Steam, a tap on its icon resumes it. No game is ever started for the user:
@@ -194,6 +209,8 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   .telem per x86 program at exit, mtime = when) shows the last x86 program to exit was pv-locale-gen; python3 (Proton's
   script), wineserver, wineboot, teardown.exe: no telem since the 10-16 install = the chain died inside pressure-vessel
   before Proton ran. Read Telemetry mtimes first when a launch dies without logs: cheap "how far did it get".
+- The last x86 programs of the 01:39 launch (Telemetry mtimes, UTC 23:39): x86_64-linux-gnu-detect-lib / -detect-platform
+  = pressure-vessel's graphics-stack probe under FEX; nothing after it. Next: td-launch's Steam stdout.
 - After that someone set Teardown to `proton-experimental-arm64` (CompatToolMapping priority 250, 01:39:43): Steam
   installed "Proton Experimental (ARM64)" (4427310; ships libarm64ecfex/libwow64fex) but it needs tool 4185400 (SLR 4
   arm64), not yet installed: the next launch downloads it.
