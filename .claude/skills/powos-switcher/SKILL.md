@@ -60,6 +60,8 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
 - No title bars at all + logcat "permission denied for window type 2038": the SYSTEM_ALERT_WINDOW app op was reset
   (`appops get com.powos.app SYSTEM_ALERT_WINDOW` = default). WindowFrames.overlayGrant re-grants it through root
   (start + a refused frame, once a minute). Frames stay type 2038 (under the shade); 2017 would cover the shade.
+  ROOT CAUSE (2026-10-23): the manifest had dropped `uses-permission SYSTEM_ALERT_WINDOW` (fold veil removal, 10-16):
+  then `appops set ... allow` returns 0 and the op STAYS default. Declared again in app/AndroidManifest.xml.
 - linux-float.sh's image open: KDE picks Gwenview (InitialPreference 8) though xdg-mime says Brave; launch kioclient
   with `setsid -f` from user.sh - a nohup'd one died with the session (Gwenview never started).
 - Wide layout (hosts/wide.ts "home.wide"): an item missing from one host read keeps its wide cell (pruning it re-placed
@@ -141,6 +143,10 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   only with 0018 running (export-new: "closed" -> closeWindow); older KWin puts it back on the hidden desktop.
   Check: verify/linux-dock.sh (dock cell once + icon, card key/icon/label, minimise + launch = focused, card close ->
   no dolphin process). Queue with --close.
+  KWin closes a window on "closed" only with export-new 1 (else: back on the hidden desktop, the app keeps running);
+  WindowTasks.closed re-sends export-new first. Logs: logcat WindowTasks "KWin caps:", "export-new N", "closed N";
+  KWin's anland info lines in /run/powos-app/hyprland.log (QT_LOGGING_RULES in powos-rooted-session); the display
+  daemon's control connects in the app's files/run/andromarchy.log.
 - Check: verify/linux-float.sh (installs the newest built kwin pkg + a fresh session if older, Dolphin via
   apps.launch, an image via kioclient exec = one Gwenview task, freeform; close closes it). Queue with --close.
 - `powos` is NOT a page global: from CDP post `PowosHost.postMessage(JSON.stringify([id, method, JSON.stringify(args)]))`,
