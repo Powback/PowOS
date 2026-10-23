@@ -250,6 +250,17 @@ clean_stale() {
 handoff_diag() {
   local p; p=$(steam_pid)
   echo "steam $p $(awk '{print "state " $3}' "/proc/$p/stat" 2>/dev/null || echo gone) threads $(cat /proc/"$p"/task/*/stat 2>/dev/null | awk '{print $3}' | sort | uniq -c | tr -s ' \n' ' ')wchan $(cat "/proc/$p/wchan" 2>/dev/null) cgroup $(cut -d: -f3 "/proc/$p/cgroup" 2>/dev/null | tail -1) exe $(readlink "/proc/$p/exe" 2>/dev/null); pipe written $(date -r ~/.steam/steam.pipe +%T 2>/dev/null); frozen cgroups: $(for f in /sys/fs/cgroup/powos/sleep/*/cgroup.freeze; do [ "$(cat "$f" 2>/dev/null)" = 1 ] && printf '%s ' "$(basename "$(dirname "$f")")"; done); console_log last: $(tail -1 "$HOME/.local/share/Steam/logs/console_log.txt" | cut -c1-120); sleep-gui: $(tail -2 "$GLOG" | cut -c1-160 | tr '\n' '|')"; }
+# sems: the sysvipc shim's semaphores (/dev/shm/y700-sysv/sem-<id>: key, change count, values) - Steam's hand-off
+# signal is one of them (the client's first, value 0 while idle).
+sems() { python3 - <<'PY' 2>/dev/null
+import glob, struct
+for f in sorted(glob.glob("/dev/shm/y700-sysv/sem-[0-9]*")):
+    b = open(f, "rb").read()
+    _, _, _, seq, rm, n, key, _ = struct.unpack("IIiIiiii", b[:32])
+    v = [struct.unpack("iiii", b[64 + 16 * i:80 + 16 * i])[0] for i in range(min(n, 4))]
+    print("%s key %#x seq %d val %s%s" % (f.rsplit("-", 1)[1], key & 0xffffffff, seq, v, " removed" if rm else ""), end="; ")
+PY
+}
 handoff_detail() {
   local p n0 n1 cl0; p=$(steam_pid)
   echo "handoff: steam.pipe unread bytes $(python3 -c 'import os,fcntl,termios,struct,sys
@@ -259,8 +270,11 @@ fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NONBLOCK); print(struct.unpack("i",fcntl
   echo "handoff: forwarder said: $(grep -v 'LD_PRELOAD\|^$' "$T/open.out" 2>/dev/null | tail -4 | cut -c1-140 | tr '\n' '|')"
   command -v gdb >/dev/null && timeout 30 gdb -p "$p" -batch -nx -ex 'set pagination off' -ex 'thread 1' -ex 'bt 14' 2>/dev/null \
     | grep '^#' | sed 's/^/handoff: bt /' | cut -c1-170
+  echo "handoff: semaphores before: $(sems)"
   cl0=$(wc -l < "$HOME/.local/share/Steam/logs/console_log.txt")
-  ( cd ~ && timeout 20 steam "steam://rungameid/$APP" > "$T/retry.out" 2>&1 < /dev/null )
+  # Y700_SYSV_DEBUG: the shim logs the forwarder's semget/semop (pkgs/steam's sysvipc-emu): does it post the client's?
+  ( cd ~ && Y700_SYSV_DEBUG=1 timeout 20 steam "steam://rungameid/$APP" > "$T/retry.out" 2>&1 < /dev/null )
+  echo "handoff: semaphores after the second hand-off: $(sems); forwarder's IPC: $(grep -a 'sysvipc-emu' "$T/retry.out" | sed 's/^\[sysvipc-emu [0-9]*\] //' | tail -8 | cut -c1-90 | tr '\n' '|')"
   for _ in $(seq 20); do tail -n +$((cl0 + 1)) "$HOME/.local/share/Steam/logs/console_log.txt" | grep -q "rungameid/$APP" && break; sleep 0.5; done
   echo "handoff: second hand-off (the same URL again): $(tail -n +$((cl0 + 1)) "$HOME/.local/share/Steam/logs/console_log.txt" | grep -q "rungameid/$APP" && echo "TAKEN" || echo "not taken either") - $(grep -v 'LD_PRELOAD\|^$' "$T/retry.out" | tail -2 | cut -c1-120 | tr '\n' '|')"
 }
