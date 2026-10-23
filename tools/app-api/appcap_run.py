@@ -23,7 +23,7 @@ args redacted; a token value is never logged or printed.
 
 Usage:
   appcap_run.py SPEC ACTION [--arg k=v]... [--state k=v]... \
-      [--consumer ai|cli|sdk|widget] [--send] [--confirm TEXT] [--json]
+      [--consumer ai|cli|sdk|widget|app] [--send] [--confirm TEXT] [--json]
 Default (no --send) = dry-run preview. Exit 0 ok, 3 = refused by safety/allowlist.
 """
 from __future__ import annotations
@@ -96,7 +96,7 @@ def main() -> int:
     ap.add_argument("--arg", action="append", default=[], metavar="k=v")
     ap.add_argument("--state", action="append", default=[], metavar="k=v",
                     help="placeholder values from PowOS app state (e.g. bridge_ip=...)")
-    ap.add_argument("--consumer", default="cli", choices=["ai", "cli", "sdk", "widget"])
+    ap.add_argument("--consumer", default="cli", choices=["ai", "cli", "sdk", "widget", "app"])
     ap.add_argument("--send", action="store_true", help="actually perform (default: dry-run)")
     ap.add_argument("--confirm", help="the user's typed confirmation for a spend action")
     ap.add_argument("--json", action="store_true")

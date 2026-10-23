@@ -379,9 +379,24 @@ The control + view surface is itself a PowOS app ("App API"):
   `appcap_render.py` (§7), live.
 - **Audit** tab: the per-app call log (§1b.5).
 
-The committed prototype of this surface is the CLI renderer and a standalone
-HTML viewer (`tools/app-api/viewer/`, §7); the production in-shell app with live
-capture toggles and persistence is the scheduled build (§8).
+Built (step 5): the PowOS app `apps/app-api` (local.app-api). Its page talks only
+to `tools/app-api/appcap_serve.py`, a loopback service on the device itself
+(127.0.0.1:3411, the system tier's `lib/apps/services/app-api.json`, port locked to
+the PowOS uid like SpacetimeDB's), through `host.net` - never the Mac. The service
+adds no logic: views are `appcap_render.py`'s, calls are `appcap_run.py`'s
+(consumer `app`), toggles write the spec's `enabled` flags in
+`~/.local/state/powos/app-api/specs/` (seeded once from `examples/`). First slice:
+only `read` actions can be sent; writes are dry-run only; `spend` is never sent
+from the app ("confirm in chat"). Tabs: Apps (per app: actions by safety class with
+typed inputs/outputs and allowlist switches, the API / AI tools / CLI / Widgets
+views, dry run), Audit (newest first), Trackers (§1b.13).
+
+Tracker data the app reads (proposed to the capture-proxy side; empty state until it
+exists): `~/.local/state/powos/app-api/trackers/<app>.jsonl`, one line per flow
+decision `{"ts", "app", "host", "tracker", "category", "list", "action":
+"blocked"|"allowed", "count"?}` (never a query or header value), and the per-app
+switch it writes, `trackers/policy.json` = `{"apps": {"<app>": {"allow": true}}}`
+(an app not listed: trackers blocked).
 
 ### 1b.13 First-class feature: tracker identification + blocking
 

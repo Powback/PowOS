@@ -1,0 +1,219 @@
+/**
+ * App API: what each of your apps can do, as one API (docs/APP-API-CAPTURE.md 1b.12). Switch an app or an action on
+ * and off (the spec's own `enabled` flags, the allowlist every consumer obeys), see the views generated from its spec
+ * (appcap_render.py: API, AI tools, CLI, widget bindings), dry-run an action, read the audit log and the trackers the
+ * capture proxy saw. All of it is the local runtime on this device (lib/api.ts).
+ */
+import { useEffect, useState } from "preact/hooks";
+import { ActionPanel } from "../lib/action";
+import { call, SAFETY, type AppSpec, type AuditRow, type Net, type Trackers, type Views } from "../lib/api";
+import { Files } from "../lib/files";
+import { Recordings } from "../lib/recordings";
+import { Rules } from "../lib/rules";
+import { Block, Muted, S, Seg, Switch } from "../lib/ui";
+
+interface Props {
+  host: { net?: Net };
+  app: string;
+  close?: () => void;
+}
+
+const TABS = ["Apps", "Audit", "Trackers", "Rules", "Recordings", "Files"];
+const VIEWS: [string, keyof Views | null][] = [["Actions", null], ["API", "api"], ["AI tools", "tools"], ["CLI", "cli"], ["Widgets", "widgets"]];
+
+/** One runtime read, again whenever [key] changes: [data, error, reload]. */
+function useRuntime<T>(net: Net | undefined, app: string, path: string | null, key = 0): [T | null, string | null, () => void] {
+  const [data, setData] = useState<T | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!path) return;
+    call<T>(net, app, path).then((d) => (setData(d), setErr(null)), (e) => setErr(String(e?.message ?? e)));
+  }, [path, key, n]);
+  // Live: re-read when the page is shown again (no timers at rest - visibility only).
+  useEffect(() => {
+    const onShow = () => document.visibilityState === "visible" && setN((x) => x + 1);
+    document.addEventListener("visibilitychange", onShow);
+    return () => document.removeEventListener("visibilitychange", onShow);
+  }, []);
+  return [data, err, () => setN(n + 1)];
+}
+
+function Unreachable({ err, retry }: { err: string; retry: () => void }) {
+  return (
+    <div style={S.card} onClick={retry}>
+      <div style={S.name}>The App API runtime isn't answering on this device.</div>
+      <Muted>{err} - tap to try again.</Muted>
+    </div>
+  );
+}
+
+function AppCard({ a, open, flip }: { a: AppSpec; open: () => void; flip: (on: boolean) => void }) {
+  const n = Object.keys(a.actions ?? {}).length;
+  return (
+    <div style={{ ...S.card, cursor: "pointer" }} onClick={open}>
+      <div style={S.row}>
+        <div style={S.grow}>
+          <div style={S.name}>{a.name}</div>
+          <Muted>{a.error ? `spec refused: ${a.error}` : `${n} action${n === 1 ? "" : "s"} · ${a.app}`}</Muted>
+        </div>
+        {!a.error && <Switch on={a.enabled} label={`${a.name} on`} onFlip={flip} />}
+      </div>
+    </div>
+  );
+}
+
+function ActionRow({ p, id }: { p: DetailProps; id: string }) {
+  const [open, setOpen] = useState(false);
+  const a = p.spec.actions[id];
+  return (
+    <div style={S.card}>
+      <div style={{ ...S.row, cursor: "pointer" }} onClick={() => setOpen(!open)}>
+        <div style={S.grow}>
+          <div style={S.id}>{id}</div>
+          <Muted>{a.summary}</Muted>
+        </div>
+        <Switch on={a.enabled} label={`${id} allowed`} onFlip={(on) => p.toggle(on, id)} />
+      </div>
+      {open && <ActionPanel net={p.net} app={p.app} spec={p.spec.app} id={id} a={a} />}
+    </div>
+  );
+}
+
+interface DetailProps {
+  net?: Net;
+  app: string;
+  spec: AppSpec;
+  toggle: (on: boolean, action?: string) => void;
+}
+
+function Actions(p: DetailProps) {
+  const ids = Object.keys(p.spec.actions).sort();
+  return (
+    <>
+      {SAFETY.map((g) => {
+        const mine = ids.filter((id) => p.spec.actions[id].safety === g.id);
+        if (!mine.length) return null;
+        return (
+          <section key={g.id} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <h2 style={S.group}>
+              {g.label} <span style={{ ...S.muted, fontWeight: 400 }}>{g.note}</span>
+            </h2>
+            {mine.map((id) => <ActionRow key={id} p={p} id={id} />)}
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+function Detail(p: DetailProps & { back: () => void }) {
+  const [view, setView] = useState("Actions");
+  const which = VIEWS.find(([v]) => v === view)?.[1] ?? null;
+  const [views, err] = useRuntime<Views>(p.net, p.app, which ? `/views?app=${encodeURIComponent(p.spec.app)}` : null, Number(p.spec.enabled));
+  return (
+    <>
+      <header style={S.head}>
+        <button style={S.back} onClick={p.back} aria-label="back">‹</button>
+        <h1 style={S.title}>{p.spec.name}</h1>
+        <Switch on={p.spec.enabled} label={`${p.spec.name} on`} onFlip={(on) => p.toggle(on)} />
+      </header>
+      {p.spec.description && <Muted>{p.spec.description}</Muted>}
+      <Seg options={VIEWS.map(([v]) => v)} picked={view} onPick={setView} />
+      {which ? <Block>{err ? `couldn't render: ${err}` : views ? views[which] : "…"}</Block> : <Actions {...p} />}
+    </>
+  );
+}
+
+function Audit({ net, app }: { net?: Net; app: string }) {
+  const [d, err] = useRuntime<{ rows: AuditRow[] }>(net, app, "/audit?n=100");
+  if (err) return <Muted>{err}</Muted>;
+  if (!d?.rows.length) return <Muted>Nothing has been called yet. Every call - dry run or sent, from the AI, the CLI, a widget or here - shows up here.</Muted>;
+  return (
+    <>
+      {d.rows.map((r, i) => (
+        <div key={i} style={S.card}>
+          <div style={S.row}>
+            <span style={{ ...S.id, ...S.grow }}>{`${r.app}.${r.action}`}</span>
+            <span style={S.muted}>{r.ts.replace("T", " ")}</span>
+          </div>
+          <Muted>
+            {r.safety ?? "?"} · {r.refused ? <span style={S.bad}>refused: {r.refused}</span> : r.sent ? `sent, ${r.status}` : "dry run"}
+          </Muted>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function TrackersView({ net, app }: { net?: Net; app: string }) {
+  const [d, err, reload] = useRuntime<Trackers>(net, app, "/trackers");
+  if (err) return <Muted>{err}</Muted>;
+  if (!d?.apps.length) return <Muted>No trackers seen yet. Once the capture proxy runs, the trackers each app contacts show up here, blocked unless you allow them.</Muted>;
+  const allow = (a: string, on: boolean) => call(net, app, "/trackers/allow", { app: a, allow: on }).then(reload);
+  const t = d.total;
+  return (
+    <>
+      <Muted>{`${t.trackers} trackers in ${t.apps} apps · ${t.blocked} calls blocked · ${t.allowed} allowed`}</Muted>
+      {d.apps.map((a) => (
+        <div key={a.app} style={S.card}>
+          <div style={S.row}>
+            <span style={{ ...S.name, ...S.grow }}>{a.app}</span>
+            <span style={S.muted}>allow trackers</span>
+            <Switch on={a.allow} label={`allow trackers in ${a.app}`} onFlip={(on) => allow(a.app, on)} />
+          </div>
+          {a.seen.map((s) => (
+            <Muted key={s.tracker + s.host}>{`${s.tracker} · ${s.host} · ${s.blocked} blocked, ${s.allowed} allowed`}</Muted>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+interface AppsProps {
+  net?: Net;
+  app: string;
+  d: { apps: AppSpec[] } | null;
+  err: string | null;
+  reload: () => void;
+  open: (id: string) => void;
+}
+
+function AppsTab({ net, app, d, err, reload, open }: AppsProps) {
+  const toggle = (spec: string) => (on: boolean, action?: string) =>
+    call(net, app, "/enable", { app: spec, action, enabled: on }).then(reload, reload);
+  if (err) return <Unreachable err={err} retry={reload} />;
+  return <>{d?.apps.map((a) => <AppCard key={a.app} a={a} open={() => open(a.app)} flip={toggle(a.app)} />)}</>;
+}
+
+const TAB: Record<string, (p: { net?: Net; app: string }) => preact.ComponentChild> = {
+  Audit, Trackers: TrackersView, Rules, Recordings, Files,
+};
+
+export default function Main({ host, app, close }: Props) {
+  const net = host.net;
+  const [tab, setTab] = useState("Apps");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [d, err, reload] = useRuntime<{ apps: AppSpec[] }>(net, app, "/apps");
+  const spec = d?.apps.find((a) => a.app === openId);
+  if (spec) {
+    const toggle = (on: boolean, action?: string) => call(net, app, "/enable", { app: spec.app, action, enabled: on }).then(reload, reload);
+    return (
+      <div style={S.page}>
+        <Detail net={net} app={app} spec={spec} toggle={toggle} back={() => setOpenId(null)} />
+      </div>
+    );
+  }
+  const Body = TAB[tab];
+  return (
+    <div style={S.page}>
+      <header style={S.head}>
+        <button style={S.back} onClick={close} aria-label="back">‹</button>
+        <h1 style={S.title}>App API</h1>
+      </header>
+      <Seg options={TABS} picked={tab} onPick={setTab} />
+      {tab === "Apps" ? <AppsTab net={net} app={app} d={d} err={err} reload={reload} open={setOpenId} /> : Body && <Body net={net} app={app} />}
+    </div>
+  );
+}

@@ -68,12 +68,12 @@ chroot "$R" /usr/bin/env -i PATH=/usr/bin:/usr/sbin HOME=/root /bin/sh -c '
   pgrep -x sshd >/dev/null || /usr/bin/sshd -p 2222
 ' && echo "sshd on 2222"
 
-# PowOS's local services' ports (SpacetimeDB 3410), for the PowOS app's uid only: Android's loopback is shared by
+# PowOS's local services' ports (SpacetimeDB 3410, the App API runtime 3411), for the PowOS app's uid only: Android's loopback is shared by
 # every app on the phone, and the PowOS user powos IS the app's uid - so the app's WebViews, the desktop session,
 # agents and root pass, every other Android app gets a reset (docs/POWOS-APPS-FEASIBILITY.md section 3). The uid
 # comes from Android's package list each time (it changes if the app is reinstalled). A changed rule set is built as
 # a new chain and swapped in, never flushed in place (that would leave the port open in between).
-POWOS_PORTS="3410"
+POWOS_PORTS="3410 3411"
 lock_ports() {
   u=$(awk '$1 == "com.powos.app" {print $2}' /data/system/packages.list)
   [ -n "$u" ] || { echo "port lock: com.powos.app not in packages.list"; return 1; }
