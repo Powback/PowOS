@@ -1345,7 +1345,7 @@ async function dockTapCheck() {
  */
 async function windowTouchCheck() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-  const S = await importShim("./state.ts");
+  const S = await window.__gw.mod("./state.ts");
   const home = document.querySelector(".home");
   const fails = [];
   const dpr = devicePixelRatio;
@@ -1360,7 +1360,8 @@ async function windowTouchCheck() {
       await sleep(16);
     }
     home.dispatchEvent(new TouchEvent("touchend", { touches: [], changedTouches: t(y1), bubbles: true, cancelable: true }));
-    await sleep(400);
+    // The swipe handled and whatever it started at rest (a drawer or shade that opened would show by then).
+    await window.__gw.settled();
   };
   try {
     await swipe(box[0] + 100, box[1] + 300, box[1] + 20);
