@@ -272,6 +272,9 @@ hang_diag() {
   printf '; fds:'; ls -l /proc/$x/fd 2>/dev/null | awk '{print $NF}' | sed -E 's/\[[0-9]+\]//' | sort | uniq -c | sort -rn | head -8 | awk '{printf " %s x%s", $2, $1}'
   # Not Steam's own files (its web UI's htmlcache filled all 5 slots and hid Unity's Player.log, 2026-10-23 09:36).
   printf '; wrote:'; find "$HOME" -xdev -newer /proc/$x -type f ! -path '*/.local/share/Steam/*' ! -path '*/.cache/*' 2>/dev/null | head -8 | tr '\n' ' '; echo
+  # Its preloads: LD_PRELOAD as it got it and which preloaded libraries it really mapped (the sysvipc shim: Android has
+  # no System V IPC; Broforce native 10:19 spun on semget -> ENOSYS under FEX).
+  echo "preload: env '$(tr '\0' '\n' < /proc/$x/environ 2>/dev/null | sed -n 's/^LD_PRELOAD=//p' | cut -c1-300)'; mapped: $(grep -o '[^/ ]*sysvipc[^ ]*\|[^/ ]*gameoverlayrenderer[^ ]*' /proc/$x/maps 2>/dev/null | sort -u | tr '\n' ' ')$(grep -c 'powos-sysvipc/x86_64' /proc/$x/maps 2>/dev/null) x86_64-shim maps"
   # The game's own log, last lines (Unity: ~/.config/unity3d/<company>/<product>/Player.log): where its start stands.
   local l; l=$(find "$HOME/.config" "$HOME/.local/share" -xdev -newer /proc/$x -type f \( -name '*.log' -o -name '*.txt' \) ! -path '*/Steam/*' 2>/dev/null | head -1)
   [ -n "$l" ] && { echo "game log $l ($(wc -l < "$l") lines), last:"; tail -12 "$l" | tr -d '\r' | cut -c1-160 | sed 's/^/  | /'; }
