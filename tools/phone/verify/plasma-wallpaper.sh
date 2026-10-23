@@ -46,7 +46,7 @@ s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 DESK='andro\.marchy\.(MainActivity|HomeDesktop)'
 sh_ "am start -W -n com.powos.app/andro.marchy.HomeShell >/dev/null"; sleep 2; chk webhome
 r=$(hcall apps.launch "['$KEY']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch: $r"
-sleep 4; chk launch
+sleep 6; chk launch   # thawed, and a session start's ksplash faded
 f=$(sh_ "dumpsys window | grep -m1 mCurrentFocus")
 grep -qE "$DESK" <<<"$f" || fail "Plasma's desktop isn't in front: $f"
 "$T/shot.sh" "$OUT/screen.png" >/dev/null 2>&1
@@ -58,23 +58,25 @@ import sys
 from PIL import Image, ImageOps
 cap = Image.open('/tmp/pw-desk.png').convert('RGBA')
 pic = ImageOps.fit(Image.open(sys.argv[1]).convert('RGB'), cap.size)
-W, H = cap.size; n = clear = diff = bg = 0
+# Only where the picture isn't near-black counts as proof of it (a black frame matches a black sky too).
+W, H = cap.size; n = clear = lit = bg = 0
 for y in range(0, H, H // 48):
     for x in range(0, W, W // 48):
         r, g, b, a = cap.getpixel((x, y)); n += 1
         if a == 0: clear += 1; continue
         pr, pg, pb = pic.getpixel((x, y))
-        d = abs(r - pr) + abs(g - pg) + abs(b - pb)
-        if d < 60: bg += 1          # the picture itself shows here
-print('clear=%.3f picture=%.3f' % (clear / n, bg / n))
+        if pr + pg + pb < 120: continue
+        lit += 1
+        if abs(r - pr) + abs(g - pg) + abs(b - pb) < 60: bg += 1   # the picture itself shows here
+print('clear=%.3f picture=%.3f' % (clear / n, bg / max(lit, 1)))
 PY
 rm -f /tmp/pw-desk.png" | tail -1)
 echo "kwin capture: $m" | tee -a "$OUT/log.txt"
 clear=$(sed -n 's/.*clear=\([0-9.]*\).*/\1/p' <<<"$m"); shown=$(sed -n 's/.*picture=\([0-9.]*\).*/\1/p' <<<"$m")
 [ -n "$clear" ] || fail "no KWin capture to measure ($m)"
 awk "BEGIN{exit !($clear < 0.02)}" || fail "Plasma's desktop is still transparent in KWin's frame: $clear of it at alpha 0 (Android's snapshots show that as black)"
-awk "BEGIN{exit !($shown > 0.3)}" || fail "the desktop's background isn't the picture: only $shown of the frame matches it"
-pass "KWin's frame of the desktop: opaque ($clear clear), $shown of it the picture itself"
+awk "BEGIN{exit !($shown > 0.4)}" || fail "the desktop's background isn't the picture: only $shown of the picture's lit cells show it (black: the frame is black, or KWin's last frame is a ksplash ghost)"
+pass "KWin's frame of the desktop: opaque ($clear clear), $shown of the picture's lit cells show it"
 
 # 4. Android's snapshot of the task, taken as it leaves.
 task=$(sh_ "dumpsys activity activities | grep -m1 -E \"Task\\{.*A=[0-9]+:com.powos.app U\"" | sed -n 's/.*#\([0-9]*\) .*/\1/p')
