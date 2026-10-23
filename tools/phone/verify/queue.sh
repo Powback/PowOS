@@ -209,16 +209,20 @@ EOS
   # `kill <runner.pid>` stops the window and its check too, frees the verify lock if this runner held it, and hides the pill.
   trap 'for c in $(pgrep -P $$); do killtree $c; done; [ "$(cut -d" " -f1 "$HOME/.cache/powos-verify.lock/who" 2>/dev/null)" = verify-queue ] && rm -rf "$HOME/.cache/powos-verify.lock"; RSTATE=stopped status "" "{\"done\":true,\"summary\":\"Phone checks stopped (the runner was stopped)\"}"; rm -f "$Q/runner.pid"; rm -rf "$Q/runner.lock"; exit 143' TERM
   # shipped <commit> <queued at>: 0 when the phone runs that commit - in the live shell (ship service's live), and in
-  # the installed APK too when targets/android differs from it. No commit, an unknown one (unpushed), or queued over
-  # NEED_MAX_S (2 h: a refused ship) ago: 0 - it runs anyway.
+  # the installed APK too when the APK's inputs differ from it. No commit, an unknown one (unpushed), or queued over
+  # NEED_MAX_S (2 h: a refused ship) ago: 0 - it runs anyway. Only what the ship service ships counts (ship.sh's
+  # apk_inputs, shell/): a commit of rootfs packages or check scripts (targets/android/pkgs, tools/) is never "shipped"
+  # by it - waiting for that held games checks for 2 h (all of targets/android counted for the APK, 2026-10-23).
+  ship_paths() { git -C "$VR" diff --name-only "$1" "$2" -- "$3" 2>/dev/null | grep -v 'app/version.properties$'; }
   shipped() {
     local c=$1 live inst; [ -n "$c" ] || return 0
     [ $(( $(date +%s) - ${2:-0} )) -lt "${NEED_MAX_S:-7200}" ] || return 0
     git -C "$VR" cat-file -e "$c^{commit}" 2>/dev/null || return 0
     live=$(cat "${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/live" 2>/dev/null); inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null)
     if [ -n "$inst" ] && ! git -C "$VR" merge-base --is-ancestor "$c" "$inst" 2>/dev/null \
-       && ! git -C "$VR" diff --quiet "$inst" "$c" -- targets/android 2>/dev/null; then return 1; fi
-    [ -z "$live" ] || git -C "$VR" merge-base --is-ancestor "$c" "$live" 2>/dev/null; }
+       && [ -n "$(ship_paths "$inst" "$c" targets/android/app; ship_paths "$inst" "$c" targets/android/build-app.sh)" ]; then return 1; fi
+    [ -z "$live" ] || git -C "$VR" merge-base --is-ancestor "$c" "$live" 2>/dev/null \
+      || [ -z "$(ship_paths "$(git -C "$VR" merge-base "$live" "$c" 2>/dev/null)" "$c" shell)" ]; }
   # pause <summary>: the user's stop - recorded (the runner stays, runs nothing until the phone's go flag), the pill gone.
   pause() { touch "$Q/paused"; RSTATE=paused status "" "{\"done\":true,\"summary\":$(jstr "$1 · resume on the AI page")}"; }
   # The runner stays while anything is queued (a "test now" needs one waiting): a window that didn't come is waited for again.
