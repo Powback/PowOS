@@ -94,6 +94,17 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   >= 600 dp, 60x70% above the bar (screencap onto the board task); bar, drag, grip, maximise/back, minimise, restore,
   dock icon tap minimise/restore, close, recents tasks.open of a full-screen task floats; always `state reset`).
   Exits 1 + "FAIL:" on any step, 3 on a real touch. Queue it: `queue.sh add --close <task> float-windows.sh`.
+- Linux windows (KWin's, pkgs/kwin 0013/0018 -> engine WindowTasks "open" -> PowosWindowActivity): the hooks
+  (AndroidRequests.openOptions, WindowTasks.raiseTask, WindowTasks.setFloating) are set in App.onCreate - set lazily
+  by Runtime, KWin's "caps" could come first and "export-new" was never sent. "open" for an id that has an activity
+  raises its task (Tasks.open + AppWindows.taskOptions: a full-screen one floats), never a second activity; logcat
+  WindowTasks "open N (app): floating | full screen | its task T back".
+- Child windows (Dolphin -> Gwenview, a 2nd window) float only with KWin 6.7.5-3.22+ (0018 "export-new") RUNNING:
+  `pacman -Q kwin` on the phone was 3.21 on 2026-10-23 (no caps, no export-new; each image Dolphin opened went to the
+  hidden desktop: six Gwenview windows). 0018 on, existing desktop windows are all exported at once. KDE opens PNGs in
+  Gwenview through KIO (`kioclient exec`) even though `xdg-mime query default image/png` says Brave.
+- Check: verify/linux-float.sh (installs the newest built kwin pkg + a fresh session if older, Dolphin via
+  apps.launch, an image via kioclient exec = one Gwenview task, freeform; close closes it). Queue with --close.
 - `powos` is NOT a page global: from CDP post `PowosHost.postMessage(JSON.stringify([id, method, JSON.stringify(args)]))`,
   answer via `__powosHost.resolve(id, v)` (float-windows.sh `hcall`). Under queue.sh a check sets its own EXIT trap.
 - JS side: `powos.floating` (list/restore/desktop/minimise/maximise/area, phone only); `powos.windows` = desktop taskbar.

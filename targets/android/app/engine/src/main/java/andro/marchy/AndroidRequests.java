@@ -17,7 +17,7 @@ public final class AndroidRequests extends FileObserver {
     private static final String TAG = "AndroidRequests";
 
     /**
-     * Launch options for "open <package>": the app module's (dev.omalauncher.system.AppWindows, set by Runtime) - a
+     * Launch options for "open <package>": the app module's (dev.omalauncher.system.AppWindows, set by App) - a
      * floating window on the unfolded home like every app opened there, null (full screen) folded. The engine can't
      * see the app module, so it hands it in. A PowOS window's own task (WindowTasks "open") takes the same.
      */

@@ -9,6 +9,10 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // PowOS windows (KWin's, WindowTasks) float on the unfolded home like Android apps. Set here, before the
+        // session's service connects to KWin - set lazily (by Runtime) KWin's "caps" could come first and it was never
+        // told to open new windows as tasks.
+        if (Application.getProcessName() == packageName) floatingWindows()
         // SystemUI's binding to the recents service (and with it the gesture input) back after the process dies.
         dev.omalauncher.system.RecentsWatchdog.start(this)
         // The smart glasses: reconnect if they were connected when the app last ran; `powos glasses`'s commands. In the
@@ -33,5 +37,16 @@ class App : Application() {
             // The verify queue's status pill while it tests on the phone (tools/phone/verify/queue.sh).
             dev.omalauncher.shell.VerifyRun.start(this, File(filesDir, "run"))
         }
+    }
+
+    private fun floatingWindows() {
+        val windows = dev.omalauncher.system.AppWindows
+        // The Linux side's "open <package>" (the AI, scripts) and a PowOS window's task: a floating window unfolded.
+        andro.marchy.AndroidRequests.openOptions = java.util.function.Function { windows.bundle(it) }
+        // A PowOS window's task shown again (the launcher, the dock): to the front, floating if it was full screen.
+        andro.marchy.WindowTasks.raiseTask =
+            java.util.function.BiPredicate { c, id -> dev.omalauncher.system.Tasks.open(c, id, windows.taskOptions(c, id, android.app.ActivityOptions.makeBasic())) }
+        // KWin opens every new application window as a floating task then (WindowTasks "export-new").
+        andro.marchy.WindowTasks.setFloating(this, java.util.function.Predicate { windows.floating(it) })
     }
 }

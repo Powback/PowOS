@@ -40,7 +40,7 @@ public final class WindowTasks {
     private static volatile Boolean exportNewSent;
 
     /**
-     * Whether apps float now (the app module's AppWindows.floating, set by Runtime: the unfolded home). KWin is told
+     * Whether apps float now (the app module's AppWindows.floating, set by App through setFloating: the unfolded home). KWin is told
      * ("export-new"), so every new application window opens as its own task - a floating window - not on the desktop
      * nothing shows then.
      */
@@ -69,6 +69,12 @@ public final class WindowTasks {
         thread = new Thread(() -> run(app, socket), "window-tasks");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    /** Sets [floating] and tells KWin at once (it may have said "caps" before the app module was up). */
+    public static void setFloating(Context context, java.util.function.Predicate<Context> f) {
+        floating = f;
+        tellExportNew(context.getApplicationContext());
     }
 
     /** Whether KWin understands [cap] (its "caps" line on this connection). */
@@ -160,6 +166,18 @@ public final class WindowTasks {
             case "open": {
                 // A document task per surface id: its own card in Recents, split screen, floating window.
                 boolean fullScreen = f.length > 4 && f[4].equals("fullscreen");
+                String appId = f.length > 2 ? f[2] : "";
+                // One task per KWin window: a window that has one already (KWin's show again - the launcher, the
+                // dock, a window activated the desktop way) brings that one back, never a second activity; one that
+                // is full screen floats then on the unfolded home (it opened folded, or before apps floated).
+                PowosWindowActivity existing = tasks.get(id);
+                if (existing != null && !existing.isFinishing() && !existing.getIntent().getBooleanExtra(PowosWindowActivity.EXTRA_FULLSCREEN, false)
+                        && raise(context, existing.getTaskId())) {
+                    Log.i(TAG, "open " + id + " (" + appId + "): its task " + existing.getTaskId() + " back");
+                    break;
+                }
+                android.os.Bundle options = fullScreen ? null : floatingOptions(context);
+                Log.i(TAG, "open " + id + " (" + appId + "): " + (fullScreen ? "full screen (the app's own)" : options != null ? "floating" : "full screen"));
                 Intent i = new Intent(context, PowosWindowActivity.class)
                         .setData(Uri.parse("powos-window://" + id))
                         .putExtra(PowosWindowActivity.EXTRA_APP_ID, f.length > 2 ? f[2] : "")
@@ -167,7 +185,7 @@ public final class WindowTasks {
                         // The application went full screen (a game, Steam Big Picture): an immersive task.
                         .putExtra(PowosWindowActivity.EXTRA_FULLSCREEN, fullScreen)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
-                context.startActivity(i, fullScreen ? null : floatingOptions(context));
+                context.startActivity(i, options);
                 break;
             }
             case "title": {
@@ -196,6 +214,17 @@ public final class WindowTasks {
     private static android.os.Bundle floatingOptions(Context context) {
         java.util.function.Function<Context, android.os.Bundle> options = AndroidRequests.openOptions;
         return options != null ? options.apply(context) : null;
+    }
+
+    /**
+     * Brings Android task [taskId] (a PowOS window's) to the front: the app module's (AppWindows.taskOptions through
+     * Tasks.open, set by App) - floating on the unfolded home even when it is full screen now. False: not set or failed.
+     */
+    public static volatile java.util.function.BiPredicate<Context, Integer> raiseTask = null;
+
+    private static boolean raise(Context context, int taskId) {
+        java.util.function.BiPredicate<Context, Integer> r = raiseTask;
+        return r != null && taskId > 0 && r.test(context, taskId);
     }
 
     /** The PowOS app id (desktop id / app id KWin gave "open") of the window shown in Android task [taskId], or null. */

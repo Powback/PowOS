@@ -154,10 +154,6 @@ class Runtime(
     var linuxWanted by mutableStateOf(false)
 
     init {
-        // The Linux side's "open <package>" (the AI, scripts): a floating window on the unfolded home, like the dock's.
-        andro.marchy.AndroidRequests.openOptions = java.util.function.Function { dev.omalauncher.system.AppWindows.bundle(it) }
-        // KWin opens every new application window as a floating task then (WindowTasks "export-new").
-        andro.marchy.WindowTasks.floating = java.util.function.Predicate { dev.omalauncher.system.AppWindows.floating(it) }
         // Saved, so removing Linux later doesn't bring the first-run screen back.
         if (launcherReady) prefs.edit().putBoolean(SETUP_DONE, true).apply()
         themes.loadPalette()
