@@ -67,6 +67,8 @@ IDLE = common.seconds(os.environ.get("POWOS_SLEEP_GUI_IDLE", "10m"))
 GRACE = 60  # woken by D-Bus but still unfocused: asleep again after this
 SAMPLE = 5  # seconds of CPU/IO measured before freezing
 GAME_WINDOW_S = 600  # a game still without a window this long after its launch (hung) sleeps all the same
+# A unit's app running without a window (Steam -silent) is adopted at most this long after it started (Gui.adopt)
+ADOPT_S = 30
 # The desktop shell (plasmashell) while PowOS is off screen (phone): frozen this long after PowOS went off screen
 # ("off": never), thawed the moment it's back, and for DESKTOP_DRAIN s every DESKTOP_AWAKE s meanwhile - long enough
 # to read what KWin sent it (a Wayland client that never reads its socket is disconnected once the buffer fills).
@@ -381,6 +383,25 @@ class Gui(dbus.service.Object):
         self.desk_timer = None
         self.screen = Screen(SCREEN_LOG, self.screen_changed)
         self.desktop(self.screen.on)  # started while PowOS is off screen: the desktop shell sleeps too
+        GLib.timeout_add_seconds(ADOPT_S, self.adopt)
+
+    def adopt(self):
+        """A unit's app that never showed a window (Steam started -silent by powos-steam-resident: only a tray icon) was
+        never tracked - tracked starts at a window - so it never slept: 12.7% of a core for as long as the session ran
+        (2026-10-23, resident Steam awake 20 min after its start). Its root process alive without a window: tracked,
+        idle from now; its unit's rules (start grace, busy, games) decide as for one that closed its window."""
+        for u in self.rules():
+            if not u["pidfile"] or not u["classes"] or u["rule"].get("never"):
+                continue
+            root = unit_root(u)
+            if root is None or root in self.tracked or any(w["pid"] == root for w in self.wins.values()):
+                continue
+            self.tracked[root] = sorted(u["classes"])[0]
+            self.idle_since.setdefault(root, time.time())
+            log(f"{self.tracked[root]} ({root}): running without a window - sleeps after {common.fmt(self.idle(root))} "
+                f"like one out of sight")
+            self.schedule()
+        return True
 
     # the apps' units --------------------------------------------------------
     def rules(self):
