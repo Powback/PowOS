@@ -116,6 +116,20 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
 - Seen in the assist overlay with nobody speaking: "Субтитры создавал DimaTorzok" in the field (a Whisper silence
   hallucination) - report to powos-speech if it recurs.
 
+## User journeys for the manager (`verify/e2e-desktop.sh`, `verify/e2e-appapi.sh`; 2026-10-23)
+- "Use the phone like a user" rounds: real injected taps/swipes at spots read over read-only CDP, one screenshot per
+  step on the phone (`/home/powos/design-qa/e2e-<journey>/<round>/NN-<step>.png` + `steps.txt`: file, what was done,
+  PASS/FAIL/NOTE), the manager reviews them as a user. The rules live in `verify/e2e-lib.sh` (step/pass/fail, publish,
+  restore): every DOWN is checked against the verify pill's window frame first ("PowOS verify status", top centre -
+  the floating windows' title bars run under it) and refused there; only new tasks of the journey's apps and Linux
+  apps it started are closed; the start page / the app in front come back; home.get + home.wide must hash the same.
+- Queue a round: `verify/e2e-queue.sh` (desktop parts 1-3 with --screen inner, then appapi; board task
+  manager-end-to-end-user-journeys-on-the-phone-qa, no --close; the last part of each mails the manager
+  "E2E round N ready: <dir>"). ship.sh queues one after every successful ship (`--if-idle`: never two waiting).
+- Over 300 s: split into parts (`--part K --of N`), each a job, steps numbered from (K-1)*25+1, a re-run replaces only
+  its own files and steps.txt lines.
+- A soft FAIL doesn't stop a journey (more screenshots); exit 0 with FAIL lines is the runner's FAIL.
+
 ## Reading a FAIL
 - First check which commit ran it: the runner's checkout (verify-runner) ff's per job, but a fix pushed after the job
   started isn't in it (`git -C .claude/worktrees/verify-runner reflog` vs the log's time). wide-home's 00:40 FAIL ran

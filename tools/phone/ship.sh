@@ -130,6 +130,11 @@ run)
   trap 'if installing; then echo "$(date +%T) stopping: the install in flight finishes first"; while installing; do sleep 1; done; fi
     stop_ships $$; kill "$(cat "$Q/apk/pid" 2>/dev/null)" 2>/dev/null; rm -rf "$L"; exit 143' TERM
   SL=$HOME/.cache/powos-ship.lock VL=$HOME/.cache/powos-verify.lock
+  # After every successful ship (shell or APK): a round of the manager's "use the phone like a user" journeys
+  # (verify/e2e-queue.sh: e2e-desktop parts 1-3 + e2e-appapi), unless one is still queued. In the background: queueing
+  # is a few quick user.sh calls, never a reason to hold the ship loop. SHIP_E2E=0 turns it off (tests).
+  e2e_round() { [ "${SHIP_E2E:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] && [ -x "$here/verify/e2e-queue.sh" ] || return 0
+    ( "$here/verify/e2e-queue.sh" --if-idle >> "$Q/e2e.log" 2>&1 & ) ; echo "$(date +%T) e2e: a round of user journeys asked for ($Q/e2e.log)"; }
   mail() { local s t ev; s=$(mktemp "$Q/mail.XXXX")
     printf 'powos comms send %q %q --from ship-queue >/dev/null 2>&1 || true\n' "${SHIP_MAIL_TO:-coder}" "$1" > "$s"
     # A failed/refused ship is friction too (powos friction: counted, so a recurring refusal shows up as the top item).
@@ -193,6 +198,7 @@ run)
           rm -f "$Q/failed-apk"
           echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
           echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
+          e2e_round
         elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
         elif [ -e "$Q/paused" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped by pause (rc $arc) - its requests are kept"
         else
@@ -269,6 +275,7 @@ run)
           for r in ${nreqs[@]+"${nreqs[@]}"}; do [ -f "$r" ] && echo "noted=1" >> "$r"; done
           for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "shipped:${T:0:9}:shell"; done
           echo "$(date +%T) ${T:0:9}: shipped (shell)"
+          e2e_round
         else
           git -C "$REPO" fetch -q origin "$BASE" 2>/dev/null
           if [ "$(git rev-parse "origin/$BASE")" != "$T" ]; then echo "$(date +%T) ${T:0:9}: shell ship ended rc $rc while origin moved on - shipping the new tip"; continue; fi
