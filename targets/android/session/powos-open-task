@@ -31,6 +31,13 @@ and the game's real window came up behind home - running, drawing, never in fron
 "launch-front", 2026-10-23: Broforce's window at 75 s, HomeShell in front). A show KWin refuses for a new window (an
 Xwayland window whose surface isn't there yet) is tried again for a few seconds.
 
+A game launch waits for the GAME's window: Steam's own windows (its client, started by a cold launch) don't count. A
+"Steam Dialog" that comes during it is Steam asking the user before the game can start - an interstitial (EULA,
+publisher notice), the launch-option picker, a cloud conflict; Steam logs "LaunchApp waiting for user response to
+ShowInterstitials" and starts nothing until it is answered. It is shown in front at once (before, it stayed behind
+home and the launch waited forever: ABZU and Desk Job 2026-10-23, no game in 265 s), and once it closes the helper
+waits WAIT_GAME_S again for the game's window.
+
 Prints one status line for the caller, then exits (COMMAND keeps running; its output goes on to ours):
     powos-open-task: task       shown as its own task
     powos-open-task: desktop    not as a task - no window tasks (the PowOS app isn't connected to KWin, KWin not up),
@@ -54,6 +61,7 @@ SETTLE_S = 8
 # A show KWin refused for a new window: tried again this often, this far apart (its surface may come a moment later).
 SHOW_TRIES = 10
 SHOW_RETRY_MS = 500
+STEAM_DIALOG = "Steam Dialog"  # the caption of Steam's modal dialogs (its web UI's popups)
 STEAM_GAME = re.compile(r"steam://rungameid/(\d+)|^steam_app_(\d+)$")
 
 REPORT_SCRIPT = """
@@ -63,7 +71,8 @@ function report(w, existing) {
         return;
     }
     callDBus(helper[0], helper[1], helper[2], "Window", w.internalId.toString(), String(w.pid),
-             String(w.desktopFileName), String(w.resourceClass), String(w.resourceName), existing ? "1" : "0");
+             String(w.desktopFileName), String(w.resourceClass), String(w.resourceName), existing ? "1" : "0",
+             String(w.caption));
 }
 for (const w of workspace.windowList()) {
     report(w, true);
@@ -206,7 +215,7 @@ def main():
     # picked: the window being shown; shown: a window of ours was shown as a task (the status said "task"); tries: shows
     # KWin refused for the picked window so far; picked_at: when it came (the launch record's time).
     state = {"child": None, "picked": None, "existing": [], "pids": {}, "done": False, "shown": False, "tries": 0,
-             "picked_at": None, "gen": 0, "seen": []}
+             "picked_at": None, "gen": 0, "seen": [], "dialog": None, "timer": 0}
 
     def start_command():
         if game:
@@ -290,7 +299,7 @@ def main():
 
     def settled(window):
         """The shown window of a launch lasted SETTLE_S: it's the app's - done."""
-        if state["picked"] != window or state["done"]:
+        if state["picked"] != window or state["done"] or window == state["dialog"]:
             return
         if state.get("launch"):
             state.pop("launch").done(True, state["picked_at"])
@@ -298,15 +307,24 @@ def main():
 
     @ClassInfo({"D-Bus Interface": "org.powos.OpenTask"})
     class Service(QObject):
-        @Slot(str, str, str, str, str, str)
-        def Window(self, window, pid, desktop_file, resource_class, resource_name, existing):  # noqa: N802
+        @Slot(str, str, str, str, str, str, str)
+        def Window(self, window, pid, desktop_file, resource_class, resource_name, existing, caption):  # noqa: N802
+            if existing != "1" and game and caption == STEAM_DIALOG and not state["done"]:
+                # Steam asks before the game starts: in front now, whatever was shown; the game's window after it.
+                print(f"powos-open-task: Steam asks before the game starts - its dialog {window} in front",
+                      file=sys.stderr, flush=True)
+                state["dialog"], state["picked"], state["pids"][window] = window, None, pid
+                state.pop("launch", None)  # the user's answer time isn't the launch's: not recorded
+                pick(window)
+                return
             if existing == "1":
                 if matches(desktop_file, resource_class, resource_name, pid):
                     state["existing"].append(window)
                     state["pids"][window] = pid
                 return
             child = state["child"]
-            ours = child is not None and child.pid in ancestors(int(pid) if pid.isdigit() else 0)
+            # A game launch: only the game's own windows (matches) - the Steam client a cold launch starts is ours too.
+            ours = not game and child is not None and child.pid in ancestors(int(pid) if pid.isdigit() else 0)
             if ours or matches(desktop_file, resource_class, resource_name, pid):
                 state["pids"][window] = pid
                 state["seen"].append(window)
@@ -317,6 +335,16 @@ def main():
             # The launch's window closed before it settled (a throwaway one): the next matching window is shown.
             if window in state["seen"]:
                 state["seen"].remove(window)
+            if window == state["dialog"] and not state["done"]:
+                # Answered: the game starts now (or the user said no) - its window gets a fresh WAIT_GAME_S.
+                state["dialog"] = None
+                if state["picked"] == window:
+                    state["picked"] = None
+                state["timer"] += 1
+                QTimer.singleShot(wait_s * 1000, lambda g=state["timer"]: g == state["timer"] and timed_out())
+                if state["seen"]:
+                    pick(state["seen"][-1])
+                return
             if window == state["picked"] and not state["done"]:
                 print(f"powos-open-task: window {window} closed {time.monotonic() - state['picked_at']:.1f} s after it came - "
                       "showing the next one", file=sys.stderr, flush=True)
@@ -336,7 +364,7 @@ def main():
                 pick(state["existing"][-1])
                 return
             start_command()
-            QTimer.singleShot(wait_s * 1000, timed_out)
+            QTimer.singleShot(wait_s * 1000, lambda g=state["timer"]: g == state["timer"] and timed_out())
 
         @Slot(str)
         def Shown(self, ok):  # noqa: N802
