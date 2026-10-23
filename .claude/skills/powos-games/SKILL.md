@@ -292,3 +292,16 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - `targets/android/build-pkgs.sh xwayland-kgsl` (BUILD_ON_ROOTFS: needs targets/android/out/powos-rootfs.tar.gz).
   Install: .pkg.tar.xz into PowOS, `pacman -U` (root.sh); next session start. Smoke test: the binary as `:7 -rootless`.
 - Patches 0001-0004 lfdevs (Andromarchy pin), 0005/0006 Present hangs, 0007 leak, 0008 fence wait. HACK in 0007 (registry).
+
+## Frame rate (board task games-fps-my-friend-pedro; MFP 557340 = proton-experimental-arm64, Unity x64 via arm64ec FEX)
+- `env APP=<id> bf-pacing.sh base|env:K=V[,K=V]|cap60|...` (one mode per job): SF presents + screenrecord + bf-prof.sh
+  ("prof <mode>:" lines: 25 busiest threads with process/thread/last cpu, per-cluster avg clock + min cap vs hw max,
+  GPU busy/clock/thermal_pwrlevel, hottest zones, cpuset of busy processes). WIN_NAME defaults to Steam's name.
+- Idle 2026-10-24 00:00: clusters CAPPED below hw (policy7 1708/3187 MHz, policy3 2054/2803, policy0 1459-1785/2016),
+  cooling devices all 0, uag soft_limit off: an OPlus scene cap (perf HAL), not thermal. /proc/game_opt (game_pid,
+  disable_cpufreq_limit, cpu_max_freq) is OPlus's game hook - game_pid=-1: PowOS games are not known to it. Check the
+  cap DURING a game (prof cluster lines) before acting.
+- Window path per frame (lfdevs 0003): DRI3 pixmap from the client's LINEAR dma-buf, its EGLImage re-created before
+  every Present copy (refresh_dri3_pixmap), Present flips disabled on KGSL -> glamor copy into the window pixmap ->
+  window buffer commit (a forced commit also replaces the wl_buffer = KWin re-imports) -> KWin AnlandWindowTask draws
+  the window item into the Android task buffer -> SurfaceFlinger. 2-3 full-screen copies + per-frame imports.
