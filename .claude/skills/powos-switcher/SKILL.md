@@ -155,6 +155,15 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   WindowTasks.closed re-sends export-new first. Logs: logcat WindowTasks "KWin caps:", "export-new N", "closed N";
   KWin's anland info lines in /run/powos-app/hyprland.log (QT_LOGGING_RULES in powos-rooted-session); the display
   daemon's control connects in the app's files/run/andromarchy.log.
+- BLACK Linux windows (Kate, Dolphin, games; 2026-10-23): the consumer's daemon address was set only by MainActivity
+  (the Plasma desktop) - after an app restart with no desktop opened, every window consumer tried the old socket FILE
+  every 500 ms (logcat Andromarchy "connecting to .../display_daemon.sock ... connect_to_deamon failed"; the app's
+  files/run/andromarchy.log shows "producer connected" but never "consumer connected" for the surface). Now
+  MainActivity.configureConsumer(ctx), also called by PowosWindowActivity.onCreate. KWin logs "window task N live" only
+  once a consumer connects: no such line = nothing reaches the window.
+- X11 child windows (kwin 0019, 3.23): an Xwayland window is added before it has its wl_surface, so export-new skipped
+  it for good. user.sh's environment has no WAYLAND_DISPLAY/XDG_SESSION_TYPE: a Qt app started there is an X11 window,
+  unlike the session's; run as the session does with plasmashell's /proc/<pid>/environ (linux-float.sh `ses`).
 - Check: verify/linux-float.sh (installs the newest built kwin pkg + a fresh session if older, Dolphin via
   apps.launch, an image via kioclient exec = one Gwenview task, freeform; close closes it). Queue with --close.
 - `powos` is NOT a page global: from CDP post `PowosHost.postMessage(JSON.stringify([id, method, JSON.stringify(args)]))`,

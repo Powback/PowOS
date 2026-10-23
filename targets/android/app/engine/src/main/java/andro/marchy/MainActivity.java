@@ -284,17 +284,7 @@ public class MainActivity extends Activity
     // Termux-side Binder bridge instead of calling connect() from this UID.
     private void applyConnectionConfig() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        String sock = prefs.getString(KEY_SOCKET_PATH, defaultSocketPath());
-        // PowOS: in rooted mode the daemon has no socket file any more (SessionService.DISPLAY_SOCKET); a saved path
-        // into this app's own run dir is a default from before, not a daemon of the user's.
-        if (sock == null || sock.trim().isEmpty() || (RootMode.enabled()
-                && sock.trim().startsWith(SessionService.runDir(this).getPath() + "/")))
-            sock = defaultSocketPath();
-        boolean useRoot = prefs.getBoolean(KEY_USE_ROOT, false);
-        String helperPath = getApplicationInfo().nativeLibraryDir + "/libfdhelper.so";
-        String bridgePath = getCacheDir().getAbsolutePath() + "/andromarchy_fdbridge.sock";
-        Native.nativeSetCompatibleMode(BuildConfig.COMPATIBLE);
-        Native.nativeConfigure(sock.trim(), useRoot, helperPath, bridgePath);
+        configureConsumer(this);
         if (BuildConfig.COMPATIBLE)
             attachCompatibleFd();
         int customW = prefs.getInt("custom_width", 0);
@@ -302,6 +292,28 @@ public class MainActivity extends Activity
         customScreenWidth = prefs.getInt("custom_width", 0);
         customScreenHeight = prefs.getInt("custom_height", 0);
         Native.nativeSetCustomResolution(customW, customH);
+    }
+
+    /**
+     * The consumer's connection settings (the daemon's socket, root mode) for every consumer of this process: the
+     * desktop's and each Linux window's (PowosWindowActivity). They were set only here, as the desktop opened - after
+     * an app restart with no desktop opened, window consumers tried the old socket file every 500 ms and every Linux
+     * window stayed black (2026-10-23: the daemon logged no consumer for any window surface since its start).
+     */
+    static void configureConsumer(Context ctx) {
+        SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String fallback = SessionService.daemonSocket(ctx);
+        String sock = prefs.getString(KEY_SOCKET_PATH, fallback);
+        // PowOS: in rooted mode the daemon has no socket file any more (SessionService.DISPLAY_SOCKET); a saved path
+        // into this app's own run dir is a default from before, not a daemon of the user's.
+        if (sock == null || sock.trim().isEmpty() || (RootMode.enabled()
+                && sock.trim().startsWith(SessionService.runDir(ctx).getPath() + "/")))
+            sock = fallback;
+        boolean useRoot = prefs.getBoolean(KEY_USE_ROOT, false);
+        String helperPath = ctx.getApplicationInfo().nativeLibraryDir + "/libfdhelper.so";
+        String bridgePath = ctx.getCacheDir().getAbsolutePath() + "/andromarchy_fdbridge.sock";
+        Native.nativeSetCompatibleMode(BuildConfig.COMPATIBLE);
+        Native.nativeConfigure(sock.trim(), useRoot, helperPath, bridgePath);
     }
 
     private void registerCompatibleReceiver() {

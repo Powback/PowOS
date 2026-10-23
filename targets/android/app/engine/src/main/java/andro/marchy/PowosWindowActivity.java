@@ -47,6 +47,8 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             return;
         }
         WindowTasks.tasks.put(id, this);
+        // The consumer's daemon connection, also when the desktop (MainActivity, which set it before) never opened.
+        MainActivity.configureConsumer(this);
         SurfaceView view = new SurfaceView(this);
         view.setFocusable(true);
         view.setFocusableInTouchMode(true);
