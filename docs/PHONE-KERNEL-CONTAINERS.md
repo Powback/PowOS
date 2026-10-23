@@ -544,3 +544,24 @@ Flash (user's decision; same route as §7–§9):
 3. Undo: `backups/oneplus-open/2026-10-22-before-dmabuf-kernel/boot_b.img` (`e8205808…`, the containers kernel,
    verified against the live boot_b) written back the same way; a boot that hangs: hold power + volume-down, then
    `fastboot flash boot_b <that image>` over USB.
+
+## 15. 0005: flat sync_file fences - the reboot at every game close (2026-10-23; built and checked, NOT booted)
+
+0004's `dma_buf_resv_fence` put the buffer's fences, including the previous import's exclusive fence (itself an
+array), into a new `dma_fence_array` per call and kept signaled fences. Mesa's WSI imports a write fence for every
+presented frame, so a game's swapchain buffer carried an array nested one level per frame; freeing it (the game or
+Steam closing) released the nest recursively on the kernel stack and the phone reset (10:33, 10:53, 10:58, 11:14,
+boot reason "reboot", pstore empty). `patches/0005-dma-buf-sync-file-flat-fences.patch` merges through upstream's
+`__dma_fence_unwrap_merge` (already in this tree, used by `sync_file_merge`): flat, signaled fences dropped, one per
+context. Host test: `test/tier1/test-kernel-dmabuf-fences.sh` (1000 frames: 0004 = 1000-deep release, 0005 = 1).
+
+Build (`./build-containers-kernel.sh`; its post-compile steps re-run by hand after another commit edited the
+script mid-run): config identical; layout `OK - every shared type has the same layout`; KMI `858 modules ... OK -
+the modules accept this kernel`; kernel round-trips. `out/boot-powos-flatfence.img` = `3a125bc3…` (Image
+`6fa6b504…`, 5.15.180-o-g298ff0fe2773-dirty).
+
+Test boot (user's yes; RAM only, nothing written): Mac USB-C, `adb reboot bootloader`,
+`~/Library/Android/sdk/platform-tools/fastboot -s 8e5d600d boot out/boot-powos-flatfence.img`; check root, session,
+Xwayland's sync_file ioctl, then one game launch + close. Undo = reboot (boot_b keeps 0004's kernel, d969681e).
+Flash (user's yes): first save the live boot_b off the phone (d969681e isn't on the Mac), then
+`fastboot -s 8e5d600d flash boot_b out/boot-powos-flatfence.img`; a hang: power + volume-down, flash the saved one.
