@@ -115,11 +115,20 @@ bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]
 D=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1); px() { echo $(( $1 * D / 160 )); }
 bars=$(sh_ "dumpsys window windows | grep -c \"PowOS window bar\""); echo "frame bars: $bars" | tee -a "$OUT/mode.txt"
 [ "${bars:-0}" -ge 1 ] && pass "a title bar" || fail "no title bar"
+# ONE title bar: SystemUI's own caption (WM Shell CaptionWindowDecoration: back/min/max/close inside the task) is off
+# through the overlay system/OemCaption.kt registers - enabled, and no caption bar inset with any height on the screen.
+sh_ "cmd overlay list com.android.systemui" | grep -q '^\[x\] com.android.shell:PowosNoCaption' &&
+  pass "the system's caption overlay is on" || fail "the system's caption overlay (com.android.shell:PowosNoCaption) isn't enabled"
+caps=$(sh_ "dumpsys window" | grep -oE 'type=captionBar frame=\[[0-9-]+,[0-9-]+\]\[[0-9-]+,[0-9-]+\]' | sort -u)
+echo "caption insets: ${caps:-none}" | tee -a "$OUT/mode.txt"
+tall=$(echo "$caps" | tr -c '0-9\n-' ' ' | awk 'NF>=4 && $4-$2>0' | wc -l | tr -d ' ')
+[ "${tall:-0}" = 0 ] && pass "one title bar: no system caption" || fail "the system's caption still has height: $caps"
 read -r XL XT XR XB <<<"$(bounds)"; echo "before: $XL $XT $XR $XB"
 [ -n "${XB:-}" ] || fail "no bounds for the task"
 BY=$((XT - $(px 20))); sh_ "input swipe $((XL + (XR - XL) / 3)) $BY $((XL + (XR - XL) / 3 + 240)) $((BY + 180)) 700"; sleep 1.5; chk drag
 read -r XL2 XT2 XR2 XB2 <<<"$(bounds)"; echo "after drag: $XL2 $XT2 $XR2 $XB2" | tee -a "$OUT/mode.txt"
-"$T/shot.sh" "$OUT/framed.png"
+"$T/shot.sh" "$OUT/framed.png" && cp "$OUT/framed.png" "$OUT/float-framed.png" && "$T/review-image.sh" "$OUT/float-framed.png" >/dev/null 2>&1 &&
+  python3 "$ROOT/lib/ai/agents/powos-agents-cli" task set "${BOARD_TASK:-powos-home-as-the-desktop-linux-android-apps-as}" --image /home/powos/design-qa/float-framed.png >/dev/null 2>&1
 [ "$XL2" != "$XL" ] && [ "$XT2" != "$XT" ] && pass "the bar moves it" || fail "the drag didn't move it"
 sh_ "input swipe $((XR2 - $(px 6))) $((XB2 - $(px 6))) $((XR2 + $(px 92))) $((XB2 + $(px 72))) 700"; sleep 1.5; chk grip
 read -r XL3 XT3 XR3 XB3 <<<"$(bounds)"; echo "after resize: $XL3 $XT3 $XR3 $XB3" | tee -a "$OUT/mode.txt"
