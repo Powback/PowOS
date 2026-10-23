@@ -79,7 +79,9 @@ ticks() { local n=0 p f; for p in "$@"; do f=$(cat "/proc/$p/stat" 2>/dev/null) 
 # gamewin: the game's X window - the one named WIN_NAME, else one whose name starts with "WIN_NAME " (games that put
 # their build in the title: Noita's "Noita - Build Aug 12 2024 - ..." under Steam's name "Noita").
 gamewin() { xwininfo -root -tree 2>/dev/null | awk -v n="\"$WIN_NAME\"" -v p="\"$WIN_NAME " '
-  /has no name/ {next} index($0, n) {print $1; f = 1; exit} !q && index($0, p) {q = $1} END {if (!f && q) print q}'; }
+  /has no name/ {next} index($0, n) {print $1; f = 1; exit} !q && index($0, p) {q = $1} END {if (!f && q) print q}' | grep . \
+  || xdotool search --onlyvisible --class "^steam_app_$APP\$" 2>/dev/null | head -1 | awk '{printf "0x%x\n", $1}'; }
+# (else Proton's class steam_app_<id>: a game whose title isn't its Steam name at all, e.g. ABZU's "AbzuGame")
 mapped() { xwininfo -id "$1" 2>/dev/null | awk '/Map State/ {print $3}'; }
 active() { printf '%d' "$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | awk '{print $NF}')" 2>/dev/null; }
 # cg2 <pid>: its cgroup v2 path (the "0::" line: since the 02:07 boot /proc/<pid>/cgroup also lists v1 hierarchies -
