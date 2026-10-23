@@ -162,7 +162,7 @@ run)
     # A private copy of the verify checkout's queue.sh: bash reads a script as it runs, and checkouts get pulled into.
     verify_tree || exit 1
     c=$(mktemp "${TMPDIR:-/tmp}/powos-queue.XXXXXX") && cp "$VR/tools/phone/verify/queue.sh" "$c" || exit 1
-    QUEUE_COPY=$c QUEUE_HERE=$VR/tools/phone/verify exec bash "$c" run
+    QUEUE_SUM=$(cksum < "$c") QUEUE_COPY=$c QUEUE_HERE=$VR/tools/phone/verify exec bash "$c" run
   fi
   rm -f "$QUEUE_COPY"; unset QUEUE_COPY   # bash keeps it open
   . "$here/window-lock.sh"
@@ -213,7 +213,9 @@ EOS
   # NEED_MAX_S (2 h: a refused ship) ago: 0 - it runs anyway. Only what the ship service ships counts (ship.sh's
   # apk_inputs, shell/): a commit of rootfs packages or check scripts (targets/android/pkgs, tools/) is never "shipped"
   # by it - waiting for that held games checks for 2 h (all of targets/android counted for the APK, 2026-10-23).
-  ship_paths() { git -C "$VR" diff --name-only "$1" "$2" -- "$3" 2>/dev/null | grep -v 'app/version.properties$'; }
+  # shell/dev and shell/test never reach the phone (ship.sh's delta skips them): a preview-data commit held every check
+  # queued after it for 2 h, waiting for a ship that never comes (2026-10-23, local.hue-rooms.json).
+  ship_paths() { git -C "$VR" diff --name-only "$1" "$2" -- "$3" 2>/dev/null | grep -vE 'app/version.properties$|^shell/(dev|test)/'; }
   shipped() {
     local c=$1 live inst; [ -n "$c" ] || return 0
     [ $(( $(date +%s) - ${2:-0} )) -lt "${NEED_MAX_S:-7200}" ] || return 0
@@ -228,6 +230,13 @@ EOS
   # The runner stays while anything is queued (a "test now" needs one waiting): a window that didn't come is waited for again.
   while ls "$Q"/*.job >/dev/null 2>&1; do
     verify_tree
+    # A fix to the runner itself takes effect between windows: the pulled queue.sh differs from the copy it started
+    # from -> start again from it (same pid: the runner lock stays ours). Before, a fix waited for the runner to end -
+    # with checks always queued, never (2026-10-23).
+    if [ -n "${QUEUE_SUM:-}" ] && [ -z "${QUEUE_NO_TREE:-}" ] && [ "$(cksum < "$VR/tools/phone/verify/queue.sh" 2>/dev/null)" != "$QUEUE_SUM" ]; then
+      echo "$(date +%T) queue.sh changed on origin - the runner starts again from it"; unset QUEUE_SUM
+      exec bash "$VR/tools/phone/verify/queue.sh" run
+    fi
     # Paused: the wait returns for the go flag only (resume / test all / test now), never for a free window.
     if [ -e "$Q/paused" ]; then export GO_ONLY=1 VERIFY_STATE=paused; echo "$(date +%T) paused - waiting for resume on the phone"
     else unset GO_ONLY; export VERIFY_STATE=waiting; fi
