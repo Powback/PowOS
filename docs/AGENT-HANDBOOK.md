@@ -80,6 +80,7 @@ minimal change and tell them.
   blocked-without-reason, user asks with no task, new or recurring friction - only what's new or changed since the
   last pass (state ~/.local/state/powos/board-sweep.json on the phone). The coordinator staffs each item: an owner +
   a fresh agent that claims it. `tools/agents/board-sweep-deploy.sh run` sweeps now; `status` shows its log.
+- Before EVERY SendMessage that adds work, check the agent's context in the last task notification (subagent_tokens / efficiency.py): past 250k, hand the work to a fresh agent instead (2026-10-23: I gave a 289k agent an urgent regression anyway).
 - Never resume (SendMessage) an agent whose average context is past 250k (`tools/agents/efficiency.py`): start a
   fresh one with its last report as the brief. Resuming the 365k games agent for a kernel fix cost ~58 Mtok in 4 h.
 - User asks: the manager records every user turn (asks.jsonl + the user_ask table) and gets its id with the turn; it
