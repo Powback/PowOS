@@ -74,15 +74,19 @@ DID=$(sh_ "dumpsys display" | sed -nE 's/.*uniqueId="local:([0-9]+)".* state ON,
 LEASH0=$(sh_ "settings get global powos_live_leash"); LEASH0=${LEASH0:-null}
 log "apk $(sh_ "dumpsys package com.powos.app | grep -m1 versionName" | sed 's/ *//'), kwin $(us 'pacman -Q kwin' | tail -1), powos_live_leash=$LEASH0"
 
+# The X server's own stacking (what a touch at root coordinates hits): viewable root children > 100 px, bottom to top.
+XS='export DISPLAY=:0 XAUTHORITY=$(pgrep -a Xwayland | grep -o -- "-auth [^ ]*" | head -1 | cut -d" " -f2)
+xwininfo -root -children 2>/dev/null | grep -E "^ +0x" | while read -r id rest; do xwininfo -id $id 2>/dev/null | awk -v id=$id -v n="$(echo "$rest" | cut -c1-40)" "/Absolute upper-left X/{x=\$4} /Absolute upper-left Y/{y=\$4} /Width:/{w=\$2} /Height:/{h=\$2} /Map State/{m=\$3} /Class:/{c=\$2} /Override Redirect State/{o=\$4} END{if(m==\"IsViewable\"&&w>100&&h>100)print id, n, x\",\"y, w\"x\"h, c, \"OR=\"o}"; done'
 round() {  # $1 = round name, $2 = app key, $3 = process name [, $4 = wl: started in the session with WAYLAND_DEBUG]
   local R=$1 key=$2 proc=$3 wl=${4:-} before KT l t r b h0 h1 h2 x y t0
   sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk "$R home"
   KL0=$(us "grep -a -c . /run/powos-app/hyprland.log" | tail -1); KL0=${KL0:-0}
   t0=$(sh_ "date +\"%m-%d %H:%M:%S.000\"")
   rec "$R-$proc"; before=$(tasks); MINE=1
-  if [ "$wl" = wl ]; then
-    us "P=\$(pgrep -x plasmashell | head -1); while IFS= read -r -d '' kv; do export \"\$kv\"; done < /proc/\$P/environ; WAYLAND_DEBUG=1 setsid $proc >/tmp/linux-touch-wl.log 2>&1 < /dev/null & sleep 1; echo started"
-    log "[$R/$proc] launched in the session with WAYLAND_DEBUG=1"
+  if [ -n "$wl" ]; then
+    local envs="WAYLAND_DEBUG=1"; [ "$wl" = x11 ] && envs="QT_QPA_PLATFORM=xcb"
+    us "P=\$(pgrep -x plasmashell | head -1); while IFS= read -r -d '' kv; do export \"\$kv\"; done < /proc/\$P/environ; $envs setsid $proc >/tmp/linux-touch-wl.log 2>&1 < /dev/null & sleep 1; echo started"
+    log "[$R/$proc] launched in the session with $envs"
   else
     log "[$R/$proc] launch: $(hcall apps.launch "['$key']" "v=>'ok '+JSON.stringify(v)")"
   fi
@@ -99,6 +103,7 @@ round() {  # $1 = round name, $2 = app key, $3 = process name [, $4 = wl: starte
   chk "$R tap"; h2=$(rhash "$l" "$((t + 80))" "$r" "$b")
   "$T/shot.sh" "$OUT/$R-$proc-after.png" >/dev/null 2>&1
   [ "$wl" = wl ] && log "[$R/$proc] wayland: $(us "grep -c wl_touch /tmp/linux-touch-wl.log; grep -a -E 'wl_touch#[0-9]+\\.(down|up|frame|cancel)' /tmp/linux-touch-wl.log | tail -4 | cut -c1-160; grep -a -E 'wl_keyboard#[0-9]+\\.(enter|key)' /tmp/linux-touch-wl.log | tail -2 | cut -c1-120" | tr '\n' '|')"
+  [ "$wl" = x11 ] && { log "[$R/$proc] X stacking (xwininfo -children order), viewable root children > 100 px:"; us "$XS" | sed 's/^/    /' | tee -a "$OUT/log.txt"; }
   log "[$R/$proc] window pixels: $h0 -> tap $h1 -> ${proc/dolphin/(no keys)} $h2"
   sh_ "logcat -d -T \"$t0\" -s PowosWindowActivity WindowTasks PowosTaskLeash PowosWindowFrames PowosWindowFrame InputDispatcher" > "$OUT/$R-$proc-logcat.txt"
   us "tail -n +$((KL0 + 1)) /run/powos-app/hyprland.log | grep -a kwin_backend_anland" > "$OUT/$R-$proc-kwin.txt"
@@ -116,6 +121,7 @@ if [ "${LEASH:-both}" != off ]; then
   round asis org.kde.kate kate
   round asis org.kde.dolphin dolphin
   round wl org.kde.kate kate wl
+  round x11 org.kde.kate kate x11
 fi
 if [ "${LEASH:-both}" != asis ]; then
   sh_ "settings put global powos_live_leash 0"; log "powos_live_leash -> 0"
