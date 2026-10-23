@@ -44,7 +44,22 @@ steam_off() { pill "$GAME check: closing Steam"; APP=$APP bash /var/tmp/powos-bf
 # install-script evaluator skip) reads - never over or instead of that file (it removed it, 2026-10-23).
 logs_off() { rm -f ~/.config/powos/proton-settings.json; }
 # `powos sleep never steam` was for the timed launch only: off again, or the resident Steam never sleeps.
-restore() { logs_off; powos sleep never --remove steam >/dev/null 2>&1; [ -n "${ORIG:-}" ] && [ "$(mapping)" != "$ORIG" ] && { steam_off; mapping "$ORIG"; echo "mapping put back: $ORIG"; }; ORIG=; }
+# One Proton prefix per Wine architecture: a prefix ARM64 Proton set up (its VC++ redist install) breaks x86 Proton -
+# teardown.exe's VCRUNTIME140/MSVCP140 "failed (error c000007b)", chain gone at 89 s (2026-10-23 06:04). Each variant
+# runs in a prefix of its own family: compatdata/<id> is swapped with compatdata/<id>.powos-<family> (Steam off), and
+# the family the check found is put back at the end. Saves inside a prefix stay with their family.
+CD=$S/steamapps/compatdata/$APP
+fam() { case $1 in arm64) echo arm64 ;; *) echo x86 ;; esac; }
+pfx_fam() { cat "$CD/powos-family" 2>/dev/null || { case $ORIG in *arm64*) echo arm64 ;; *) echo x86 ;; esac; }; }
+pfx_use() {  # pfx_use <family>
+  local cur; cur=$(pfx_fam); [ "$cur" = "$1" ] && return 0
+  steam_off
+  [ -d "$CD" ] && { rm -rf "$CD.powos-$cur.old"; [ -e "$CD.powos-$cur" ] && mv "$CD.powos-$cur" "$CD.powos-$cur.old"; echo "$cur" > "$CD/powos-family"; mv "$CD" "$CD.powos-$cur"; }
+  if [ -d "$CD.powos-$1" ]; then mv "$CD.powos-$1" "$CD"; else mkdir -p "$CD"; fi
+  echo "$1" > "$CD/powos-family"; echo "   prefix: $1 (the $cur one kept as compatdata/$APP.powos-$cur)"
+}
+PFX0=
+restore() { logs_off; [ -n "$PFX0" ] && { pfx_use "$PFX0"; PFX0=; }; powos sleep never --remove steam >/dev/null 2>&1; [ -n "${ORIG:-}" ] && [ "$(mapping)" != "$ORIG" ] && { steam_off; mapping "$ORIG"; echo "mapping put back: $ORIG"; }; ORIG=; }
 ON_CLOSE=restore
 # What a variant's launch needs from Steam, installed before its timed launch: arm64 = Steam Linux Runtime 4.0 (arm64),
 # 4185400 (the first arm64 launch fetched it, 2026-10-23 04:27-04:29 - its 300 s went on the download).
@@ -67,7 +82,7 @@ run() {  # run <variant> <n>
   declare -gA seen=()
   [ -n "${TOOL[$v]:-}" ] || { fail "variant-$v" "unknown variant (arm64 | x86)"; return; }
   rm -rf "$d"; mkdir -p "$d"
-  steam_off; mapping "${TOOL[$v]}"
+  steam_off; mapping "${TOOL[$v]}"; pfx_use "$(fam "$v")"
   fetch_deps "$v" || { echo "INVALID $v #$2: its runtime was fetched now, untimed - queue the variant again"; steam_off; return; }
   p="$S/steamapps/common/${PDIR[$v]}"
   [ -x "$p/proton" ] || { fail "start-$v" "$p has no proton (not installed)"; return; }
@@ -122,7 +137,7 @@ run() {  # run <variant> <n>
   [ -f "$d/steam-$APP.log" ] || echo "   no PROTON_LOG file: Proton's script never ran"
   sleep 3
 }
-RES_=""; ORIG=$(mapping)
+RES_=""; ORIG=$(mapping); PFX0=$(pfx_fam)
 echo "== $(date +%T) $GAME ($APP) launch check, $(pacman -Q steam), mapping at start: ${ORIG:-none}"
 [ $# -gt 0 ] || set -- arm64 x86
 n=0
