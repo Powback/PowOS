@@ -15,7 +15,9 @@ args=() mounts=()
 # only the file's own directory is mounted: it failed "cannot stat" (kwin 3.23 never reached the phone, 2026-10-23).
 # Resolve every existing absolute path to its physical location first.
 for a in "$@"; do
-  if [[ -e "$a" && "$a" == /* ]]; then
+  # Relative paths too (`KWIN_PKG=targets/android/out/pkgs/...`): unmounted, the push failed silently and kwin 3.26
+  # never installed (21:35, 2026-10-23). A word with a slash that exists here is a local path.
+  if [[ -e "$a" && ( "$a" == /* || "$a" == */* ) ]]; then
     d=$(cd "$(dirname "$a")" && pwd -P); a="$d/$(basename "$a")"; mounts+=(-v "$d:$d")
   elif [[ "$a" == "$HOME"/* && -d "$(dirname "$a")" ]]; then
     # A pull's new local file: its directory mounted, else the file stayed in the throwaway container (window-rec's
