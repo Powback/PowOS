@@ -3,7 +3,7 @@
 # Arch's steam PKGBUILD) stays as the STEAM_X86=1 fallback, through FEX.
 pkgname=steam
 pkgver=1.0.0.87
-pkgrel=22
+pkgrel=23
 pkgdesc="Steam: Valve's native ARM64 client (games through FEX) - PowOS phone build"
 arch=(any)
 url=https://steampowered.com/
@@ -13,10 +13,10 @@ depends=(bash python fex-emu curl unzip desktop-file-utils hicolor-icon-theme ls
 install=steam.install
 # sysvipc-emu.tar.gz: System V IPC for the native client and x86 programs (targets/android/steam/sysvipc/build.sh puts it here).
 source=("https://repo.steampowered.com/steam/archive/stable/steam_$pkgver.tar.gz" steam sysvipc-emu.tar.gz
-        user_settings.py powos-steam-resident powos-steam-resident.desktop)
+        user_settings.py powos-steam-resident powos-steam-resident.desktop powos-steam-compat steam-env)
 noextract=(sysvipc-emu.tar.gz)
 sha256sums=('649375d2f9377f8009aaf3e2ff09978041eb9114897d9c5a3886f1d82e27ba1f' SKIP
-            '205ee32a07213a8cad3c9bf67caa70361c5b4f9cdec2e71c216c967e651ae4af' SKIP SKIP SKIP)
+            '205ee32a07213a8cad3c9bf67caa70361c5b4f9cdec2e71c216c967e651ae4af' SKIP SKIP SKIP SKIP SKIP)
 
 package() {
   mkdir -p "$pkgdir/usr/lib/powos-sysvipc"
@@ -30,6 +30,11 @@ package() {
   install -m755 "$srcdir/steam" "$pkgdir/usr/bin/steam"
   # Proton's user_settings.py, put into each Proton by /usr/bin/steam (see the file).
   install -Dm644 "$srcdir/user_settings.py" "$pkgdir/usr/lib/powos-steam/user_settings.py"
+  # Which way each game runs (native Linux build / ARM64 Proton / x86 Proton), per game, measured (see the file);
+  # /usr/bin/steam applies it before each Steam start.
+  install -Dm755 "$srcdir/powos-steam-compat" "$pkgdir/usr/bin/powos-steam-compat"
+  # Environment for Steam and every game it starts (FEX, pressure-vessel switches; see the file).
+  install -Dm644 "$srcdir/steam-env" "$pkgdir/usr/lib/powos-steam/steam-env"
   # Steam started once per session, out of sight (then frozen by unified sleep): a game's tap skips Steam's start.
   install -Dm755 "$srcdir/powos-steam-resident" "$pkgdir/usr/lib/powos-steam/powos-steam-resident"
   install -Dm644 "$srcdir/powos-steam-resident.desktop" "$pkgdir/etc/xdg/autostart/powos-steam-resident.desktop"

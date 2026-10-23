@@ -29,6 +29,7 @@ Prints one status line for the caller, then exits (COMMAND keeps running; its ou
     powos-open-task: desktop    not as a task - no window tasks (the PowOS app isn't connected to KWin, KWin not up),
                                 a window KWin doesn't export, or no window in time: the caller shows the desktop
 """
+import glob
 import json
 import os
 import re
@@ -112,6 +113,51 @@ def steam_launch_of(pid):
     return None
 
 
+STEAM = os.path.expanduser("~/.local/share/Steam")
+
+
+def steam_alive():
+    try:
+        with open(os.path.expanduser("~/.steam/steam.pid")) as f:
+            return os.path.isdir(f"/proc/{int(f.read().strip())}")
+    except (OSError, ValueError):
+        return False
+
+
+def download_mark(game):
+    """What changes when Steam downloads anything (the game's depot swap or update, a runtime/Proton it needs first):
+    something in steamapps/downloading, every manifest's LastUpdated."""
+    d = os.path.join(STEAM, "steamapps/downloading")
+    mark = [bool(os.path.isdir(d) and os.listdir(d))]
+    for f in sorted(glob.glob(os.path.join(STEAM, "steamapps/appmanifest_*.acf"))):
+        try:
+            with open(f) as fh:
+                m = re.search(r'"LastUpdated"\s+"(\d+)"', fh.read())
+            mark.append(m.group(1) if m else "")
+        except OSError:
+            mark.append("")
+    return mark
+
+
+class LaunchRecord:
+    """A game's cold launch through us, measured for the steam package's per-game compat policy (powos-steam-compat
+    record: tap -> its window in ms, or "fail" when no window came in WAIT_GAME_S). Never a launch that waited for a
+    download (a depot swap or update: minutes that aren't the way it runs) and never a resumed game."""
+
+    def __init__(self, game):
+        self.game, self.t0, self.cold, self.mark = game, time.monotonic(), not steam_alive(), download_mark(game)
+
+    def done(self, ok):
+        if os.environ.get("POWOS_NO_LAUNCH_RECORD") or self.mark[0] or download_mark(self.game) != self.mark:
+            return
+        res = str(int((time.monotonic() - self.t0) * 1000)) if ok else "fail"
+        try:
+            subprocess.Popen(["powos-steam-compat", "record", self.game, res] + (["--cold"] if self.cold else []),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            pass
+
+
 def main():
     args = sys.argv[1:]
     ids = set()
@@ -141,6 +187,8 @@ def main():
     state = {"child": None, "picked": None, "existing": [], "pids": {}, "done": False}
 
     def start_command():
+        if game:
+            state["launch"] = LaunchRecord(game)
         state["child"] = subprocess.Popen(["/bin/bash", "-c", "exec " + command], start_new_session=True)
 
     def kwin(method, *call_args):
@@ -204,6 +252,8 @@ def main():
         if state["picked"]:
             return
         state["picked"] = window
+        if state.get("launch"):
+            state.pop("launch").done(True)
         wake(window)
         if not run_script("show", SHOW_SCRIPT % {"window": window, "service": name}):
             finish("desktop")
@@ -233,7 +283,7 @@ def main():
                 pick(state["existing"][-1])
                 return
             start_command()
-            QTimer.singleShot(wait_s * 1000, lambda: finish("desktop"))
+            QTimer.singleShot(wait_s * 1000, lambda: (state.get("launch") and state.pop("launch").done(False), finish("desktop")))
 
         @Slot(str)
         def Shown(self, ok):  # noqa: N802

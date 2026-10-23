@@ -1,0 +1,10 @@
+# /usr/lib/powos-steam/steam-env: environment for Steam and EVERY game it starts (native Linux builds and Proton
+# alike: Steam's children inherit it, pressure-vessel passes it into the container, FEX reads FEX_* as its config).
+# /usr/bin/steam exports each KEY=VALUE line; ~/.config/powos/steam-env (same format) comes after and wins, an empty
+# value there (KEY=) unsets a default. Applies from Steam's next start. Measured with tools/phone/verify/bf-coldstart.sh
+# (env:KEY=VALUE tokens) before a line goes in here.
+#
+# Candidates being measured (2026-10-23, Broforce + Teardown):
+#   PRESSURE_VESSEL_GENERATE_LOCALES=0   the container's locale-gen (pv-locale-gen under FEX) for the session's
+#                                        LANG=en_CH.UTF-8, which games run with LC_ALL=C anyway
+#   FEX_ENABLECODECACHINGWIP=1           FEX keeps the x86 code it compiled (per game, compatdata/<id>/fex-emu)

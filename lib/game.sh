@@ -287,6 +287,9 @@ Verbs (thin wrappers — each dispatches to the subsystem that owns it):
   stop [--steam]          Close it (its whole launch chain, wineserver too) within ~3 s; --steam closes Steam
                           as well: asked to shut down, killed after 6 s (a frozen or dying client never stalls it)
   status                  (a Steam game outside the mod registry) running / frozen, CPU of its tree
+  compat [status]         Which way it runs: native Linux build / ARM64 Proton / x86 Proton, what each launch measured
+  compat auto|native|arm64|x86   Pick: auto = the fastest that worked (native, arm64, x86 until measured), or pin one
+                          (written while Steam is off: at its next start)   → powos-steam-compat
 
 A Steam game out of sight for 15 s is frozen with Steam on its own and launching it again resumes it at once
 (units/phone/steam.json "games": "pause", docs/UNIFIED-SLEEP.md); freeze/thaw do it by hand.
@@ -329,6 +332,9 @@ cmd_game() {
     # A running Steam game's sleep (any installed Steam game, by name or appid - the mod registry not needed).
     case "${1:-}" in
         freeze|thaw) _game_sleep_dispatch "$name" "$@"; return $? ;;
+        compat)
+            local capp; capp="$(_game_steam_appid "$name")" || { perr "No installed Steam game called $name"; return 1; }
+            _game_compat "$capp" "${2:-status}"; return $? ;;
         stop|close)
             local sapp; sapp="$(_game_steam_appid "$name")" || { perr "No installed Steam game called $name"; return 1; }
             _game_steam_close "$sapp" "$([[ "${2:-}" == --steam ]] && echo 1 || echo 0)"; return $? ;;
@@ -454,6 +460,15 @@ _game_steam_reaper() {  # bin/powos: errexit + pipefail
         done
     done
     pgrep -f "SteamLaunch AppId=$1( --|\$)" | head -1 || true
+}
+
+# Which way a Steam game runs (native Linux build / ARM64 Proton / x86 Proton): the steam package's per-game policy.
+_game_compat() {  # <appid> status|auto|native|arm64|x86|<tool name>
+    command -v powos-steam-compat >/dev/null || { perr "powos-steam-compat isn't installed (package steam)"; return 1; }
+    case "$2" in
+        status) powos-steam-compat status "$1" ;;
+        *) powos-steam-compat set "$1" "$2" ;;
+    esac
 }
 
 _game_sleep_dispatch() {

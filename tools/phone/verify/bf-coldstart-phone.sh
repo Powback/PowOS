@@ -1,6 +1,6 @@
 #!/bin/bash
-# bf-coldstart-phone.sh <variant>...: (in the PowOS session as powos; bf-coldstart.sh pushes and runs it) a Broforce
-# launch through the drawer's path, timed by stage from 4 Hz process samples: tap -> Steam's web UI -> the install
+# bf-coldstart-phone.sh <variant>...: (in the PowOS session as powos; bf-coldstart.sh pushes and runs it) a Steam game's
+# (APP, default Broforce) launch through the drawer's path, timed by stage from 4 Hz process samples: tap -> Steam's web UI -> the install
 # script evaluator (iscript: its own reaper `Install=1` + Proton `run iscriptevaluator.exe`, start-end; skipped when
 # nothing changed since its last good run, pkgs/steam/user_settings.py) -> the game's launch (reaper) ->
 # pressure-vessel (pv-adverb) -> wineserver -> the game's exe -> its X window -> its first drawn frame (first_frame).
@@ -21,9 +21,17 @@
 # Also per run: Steam's state at the tap, shader cache sizes before/after, the Unity renderer (Player.log).
 # "STAGES <variant> ..." lines, RESULT last.
 set -uo pipefail
+# Any Steam game: APP=<appid> (bf-coldstart.sh app:<id>); GAME / WIN_NAME (its window's title) default to the name in
+# its appmanifest (bf-coldstart.sh win:<title> when the window is called something else).
+if [ -n "${APP:-}" ] && [ -z "${GAME:-}" ]; then
+  GAME=$(sed -n 's/^[[:space:]]*"name"[[:space:]]*"\(.*\)"$/\1/p' "$HOME/.local/share/Steam/steamapps/appmanifest_$APP.acf" 2>/dev/null | head -1)
+  export GAME=${GAME:-$APP} WIN_NAME=${WIN_NAME:-$GAME}
+fi
 . /var/tmp/powos-bf-lib.sh
 S=$HOME/.local/share/Steam P="$S/steamapps/common/Proton - Experimental" F=$S/steamapps/common/FEX-Emu
 CD=$S/steamapps/compatdata/$APP
+# The game's install dir: its own process is the one that runs a file from there (Wine's preloader / the native player).
+IDIR=$(sed -n 's/^[[:space:]]*"installdir"[[:space:]]*"\(.*\)"$/\1/p' "$S/steamapps/appmanifest_$APP.acf" 2>/dev/null | head -1)
 sizes() { echo "steam shadercache $(du -sk "$S/steamapps/shadercache/$APP" 2>/dev/null | cut -f1) KB, mesa $(du -sk ~/.cache/mesa_shader_cache 2>/dev/null | cut -f1) KB, fex $(du -sk "$CD/fex-emu" ~/.local/share/fex-emu 2>/dev/null | awk '{s+=$1} END{print s}') KB"; }
 first() { [ -n "${seen[$1]:-}" ] || seen[$1]=$2; }
 close_game() { echo "   close: $(powos game $APP stop 2>&1 | tail -1 | sed "s/\x1b\[[0-9;]*m//g")"; }
@@ -32,33 +40,41 @@ fexcache_on() {
   if ours; then mkdir -p ~/.config/powos && printf '{"FEX_ENABLECODECACHINGWIP": "1"}\n' > ~/.config/powos/proton-settings.json
   else printf 'user_settings = {"FEX_ENABLECODECACHINGWIP": "1"}\n' > "$P/user_settings.py"; fi; }
 fexcache_off() { rm -f ~/.config/powos/proton-settings.json; ours || rm -f "$P/user_settings.py"; }
-# Setup (cfg:/opt:/keep tokens). ORIG = the compat tool + launch options before this check; restored at the end.
-CFG="python3 /var/tmp/powos-bf-cfg.py" ORIG_TOOL="" ORIG_OPTS="" KEEP=0 CHANGED=0
+# Setup (cfg:/opt:/env:/keep tokens) through the steam package's powos-steam-compat (the copy bf-coldstart.sh pushed:
+# the phone's may be older). ORIG = the game's compat mode + launch options before this check, put back at the end.
+CFG="python3 /var/tmp/powos-steam-compat" ORIG_MODE="" ORIG_OPTS="" KEEP=0 CHANGED=0
 base_opts() { local o; o=$($CFG get $APP | sed -n 's/.* opts=//p'); o=${o%% -force-*}; echo "$o"; }
+plus_opts() { local b; b=$(base_opts); [ "$b" = - ] && b="%command%"; echo "$b $1"; }
 setup() {  # setup <token>
-  local cur; cur=$($CFG get $APP)
-  [ -n "$ORIG_TOOL" ] || { ORIG_TOOL=$(echo "$cur" | sed -n 's/^tool=\([^ ]*\) .*/\1/p'); ORIG_OPTS=$(echo "$cur" | sed -n 's/.* opts=//p'); }
+  [ -n "$ORIG_MODE" ] || { ORIG_MODE=$($CFG mode $APP); ORIG_OPTS=$($CFG get $APP | sed -n 's/.* opts=//p'); }
+  case $1 in env:*=*) export "${1#env:}"; echo "== setup $1: exported for the Steam this check starts"; return 0 ;; esac
   pill "setup $1: closing Steam"; bash /var/tmp/powos-bf-stop.sh --steam | head -1
   case $1 in
-    cfg:x86) $CFG tool $APP proton_experimental ;; cfg:arm64) $CFG tool $APP proton-experimental-arm64 ;;
-    cfg:native) $CFG tool $APP - ;;
-    opt:vk) $CFG opts $APP "$(base_opts) -force-vulkan" ;; opt:gl) $CFG opts $APP "$(base_opts) -force-glcore" ;;
+    cfg:x86 | cfg:arm64 | cfg:native) $CFG set $APP "${1#cfg:}" ;;
+    cfg:auto) $CFG set $APP auto ;;
+    opt:vk) $CFG opts $APP "$(plus_opts -force-vulkan)" ;; opt:gl) $CFG opts $APP "$(plus_opts -force-glcore)" ;;
     opt:base) $CFG opts $APP "$(base_opts)" ;;
-    env:*=*) export "${1#env:}"; echo "== setup $1: exported for the Steam this check starts"; return 0 ;;
     *) fail setup "unknown setup token $1"; return 1 ;;
   esac
-  CHANGED=1; echo "== setup $1: $($CFG get $APP)"
+  CHANGED=1; echo "== setup $1: $($CFG get $APP), mode $($CFG mode $APP)"
 }
 restore() {
   [ $CHANGED = 1 ] && [ $KEEP = 0 ] || return 0
   CHANGED=0; bash /var/tmp/powos-bf-stop.sh --steam >/dev/null 2>&1
-  $CFG tool $APP "$ORIG_TOOL" >/dev/null && $CFG opts $APP "$ORIG_OPTS" >/dev/null && echo "== restored: $($CFG get $APP)"
+  $CFG set $APP "$ORIG_MODE" >/dev/null && $CFG opts $APP "$ORIG_OPTS" >/dev/null && echo "== restored: $($CFG get $APP), mode $($CFG mode $APP)"
 }
-# The renderer Unity picked (its Player.log: Proton's prefix or the native build's ~/.config/unity3d).
-renderer() { local l; for l in "$CD/pfx/drive_c/users/steamuser/AppData/LocalLow/Free Lives/Broforce/output_log.txt" \
-    "$CD/pfx/drive_c/users/steamuser/AppData/LocalLow/Free Lives/Broforce/Player.log" "$HOME/.config/unity3d/Free Lives/Broforce/Player.log"; do
-    [ -f "$l" ] && [ "$l" -nt /tmp/bf-cold-mark ] && { grep -a -m3 -i 'renderer:\|GfxDevice:\|Direct3D\|OpenGL\|Vulkan' "$l" | tr -d '\r' | cut -c1-90 | tr '\n' '|'; return; }; done; echo "no new Player.log"; }
+# The renderer the game reported: the newest Unity Player.log / output_log.txt written since this check began (Proton's
+# prefix or the native build's ~/.config/unity3d).
+renderer() { local l; l=$(find "$CD/pfx/drive_c/users" "$HOME/.config/unity3d" \( -name Player.log -o -name output_log.txt \) -newer /tmp/bf-cold-mark 2>/dev/null | head -1)
+  [ -n "$l" ] && grep -a -m3 -i 'renderer:\|GfxDevice:\|Direct3D\|OpenGL\|Vulkan' "$l" | tr -d '\r' | cut -c1-90 | tr '\n' '|' || echo "no new Unity log"; }
 ON_CLOSE="fexcache_off; restore"
+# game_exe <reaper>: the game's own program runs under the launch - a process whose command line runs a file from
+# common/<installdir>/ (Unix or Wine's Windows spelling), run by FEX or Wine, that isn't one of the chain's wrappers.
+game_exe() { local x c; for x in $(tree "$1"); do c=$(tr '\0' ' ' < "/proc/$x/cmdline" 2>/dev/null) || continue
+    case $c in *"common/$IDIR/"* | *"common\\$IDIR\\"*) ;; *) continue ;; esac
+    case $(readlink "/proc/$x/exe") in *FEX* | *wine*) ;; *) continue ;; esac  # emulated (FEX) or in Wine (ARM64 Proton)
+    printf '%s' "$c" | grep -q 'proton\|reaper\|python\|pressure-vessel\|steam-launch-wrapper\|unity-screen\|entry-point\|steam-runtime\|steam\.exe\|SteamLaunch' && continue
+    return 0; done; return 1; }
 run() {  # run <variant> <n>
   local v=$1 t0 now_ st r=0 x k=-1
   declare -gA seen=()
@@ -90,7 +106,7 @@ run() {  # run <variant> <n>
     [ -n "$r" ] && [ -z "$(iscript_reapers)" ] && pgrep -f wineserver >/dev/null && first wineserver "$now_"
     # The game's own process (Wine's preloader / the native player, under FEX), not the chain's wrappers. The native
     # build has no wineserver: the exe counts from the game's reaper on.
-    [ -n "$r" ] && [ -z "$(iscript_reapers)" ] && pgrep -f 'Broforce_beta.exe|Broforce\.x86' | while read -r x; do grep -qa 'wine.*preloader\|^.*FEX' "/proc/$x/cmdline" && ! grep -qa 'proton\|reaper\|python\|pressure-vessel\|steam-launch-wrapper\|unity-screen\|entry-point\|steam-runtime\|steam\.exe' "/proc/$x/cmdline" && echo y; done | grep -q y && first exe "$now_"
+    [ -n "$r" ] && [ -z "$(iscript_reapers)" ] && game_exe "$r" && first exe "$now_"
     W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && { first window "$now_"; break; }
     [ ${#seen[@]} != $k ] && k=${#seen[@]} && case " ${!seen[*]} " in
       *" exe "*) pill "cold start timing: $v - game starting" ;; *" wineserver "*) pill "cold start timing: $v - wine" ;;
@@ -107,6 +123,12 @@ run() {  # run <variant> <n>
   echo "   tool: $($CFG get $APP); renderer: $(renderer)"
   echo "   after: $(sizes); evaluator: $(tail -1 "$CD/powos-iscript.log" 2>/dev/null | cut -c1-160)"
   RES_="$RES_ $v#$2 window ${seen[window]:--} frame ${seen[frame]:--};"
+  # The per-game compat policy learns from it (powos-steam-compat record): a window = a working launch of this tool;
+  # a chain that ended without one = a failed one. Not when Steam downloaded first (the time isn't the tool's).
+  if [ -z "${seen[update]:-}" ]; then
+    if [ -n "${seen[window]:-}" ]; then echo "   policy: $($CFG record $APP "${seen[window]}" $([ $v = cold ] && echo --cold))"
+    elif [ -n "${seen[ended]:-}" ]; then echo "   policy: $($CFG record $APP fail)"; fi
+  fi
   [ $v = fexcache ] && { echo "   FEX wrote: $(find "$CD/fex-emu" ~/.local/share/fex-emu ~/.cache -newer /tmp/bf-cold-mark -type f 2>/dev/null | grep -vi telemetry | head -8 | tr '\n' ' ')"; fexcache_off; }
   sleep 5
 }

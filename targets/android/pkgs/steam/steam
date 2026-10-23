@@ -99,6 +99,9 @@ case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
       [ -e "$f" ] && [ ! -d "/proc/$pid" ] && rm -f "$f"
     done
     reg_guard
+    # Which way each game runs - its native Linux build, ARM64 Proton or x86 Proton, the fastest that worked
+    # (powos-steam-compat: per-game policy, measured launches): written into config.vdf now, while no Steam runs.
+    command -v powos-steam-compat >/dev/null && timeout 20 powos-steam-compat apply 2>&1 | sed 's/^/steam: /' >&2
     # PowOS's Proton user_settings.py (/usr/lib/powos-steam/user_settings.py: skips the install script evaluator when it
     # has nothing to do, ~/.config/powos/proton-settings.json) in every Proton, unless that Proton has the user's own.
     for d in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/common/Proton* \
@@ -110,6 +113,17 @@ case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
       fi
     done ;;
 esac
+
+# Environment for Steam and every game it starts (/usr/lib/powos-steam/steam-env, then the user's
+# ~/.config/powos/steam-env; KEY=VALUE lines, # comments, an empty value unsets). Exported, not sourced: no code runs.
+for f in /usr/lib/powos-steam/steam-env "${XDG_CONFIG_HOME:-$HOME/.config}/powos/steam-env"; do
+  [ -f "$f" ] || continue
+  while IFS= read -r l || [ -n "$l" ]; do
+    case $l in '#'* | '') continue ;; [A-Za-z_]*=*) ;; *) continue ;; esac
+    k=${l%%=*}; case $k in *[!A-Za-z0-9_]*) continue ;; esac
+    if [ -n "${l#*=}" ]; then export "$k=${l#*=}"; else unset "$k"; fi
+  done < "$f"
+done
 
 if [ -n "${STEAM_X86:-}" ]; then
   # -cef-disable-gpu: the x86 web UI (CEF) software-renders; its x86 Mesa can't reach the Adreno GPU.
