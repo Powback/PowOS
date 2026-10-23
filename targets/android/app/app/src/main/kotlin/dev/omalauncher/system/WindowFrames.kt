@@ -29,7 +29,14 @@ class WindowFrames(
     private val refreshNow = Runnable { refresh() }
 
     fun start(): Boolean {
-        stopListening = FreeformTasks.listen { main.removeCallbacks(refreshNow); main.postDelayed(refreshNow, SETTLE_MS) }
+        stopListening =
+            FreeformTasks.listen {
+                events++
+                main.removeCallbacks(refreshNow)
+                main.postDelayed(refreshNow, SETTLE_MS)
+            }
+        // Without the listener nothing is ever listed after this first read: no window gets a home page (2026-10-23).
+        Log.i(TAG, "frames on, task listener ${if (stopListening != null) "on" else "MISSING"}")
         current = this
         refresh()
         return stopListening != null
@@ -56,6 +63,7 @@ class WindowFrames(
     fun refresh() {
         val all = runCatching { FreeformTasks.list(context) }.onFailure { Log.w(TAG, "no floating windows", it) }.getOrDefault(emptyList())
         val floating = AppWindows.floating(context)
+        logChange(all, floating)
         track(all, floating)
         val show = if (keyguard || Switcher.open || !floating) emptyList() else uncovered(all.filter { it.visible && it.id !in minimised && it.id !in away })
         val ids = show.map { it.id }.toSet()
@@ -63,6 +71,24 @@ class WindowFrames(
         // Bottom-most first, so a new frame's windows stack over the ones under it.
         show.asReversed().forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w)), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
     }
+
+    /**
+     * The floating windows as Android lists them (logcat PowosWindowFrames), once per change, with how many task events
+     * came since: a window that shows but isn't here never gets a home page (desktops.ts places what windows.list has).
+     */
+    private fun logChange(
+        all: List<FreeformTasks.Window>,
+        floating: Boolean,
+    ) {
+        val now = all.joinToString(" ") { "${it.id}:${it.pkg}${if (it.visible) "" else "(hidden)"}@${it.bounds.toShortString()}" }
+        val key = "$floating $keyguard $now"
+        if (key == logged) return
+        logged = key
+        Log.i(TAG, "windows (floating=$floating keyguard=$keyguard, $events task events): ${now.ifEmpty { "none" }}")
+    }
+
+    private var logged: String? = null
+    @Volatile private var events = 0
 
     /** A PowOS (Linux) window's caption for its bar: its task is PowOS's own (PowosWindowActivity), so not "PowOS". */
     private fun ownTitle(w: FreeformTasks.Window): String? = w.label.takeIf { w.pkg == context.packageName }

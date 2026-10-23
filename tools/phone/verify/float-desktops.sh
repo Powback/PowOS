@@ -2,11 +2,11 @@
 # float-desktops.sh [OUT]: floating windows live on home's pages, one desktop per page (shell ui/desktops.ts,
 # WindowFrames.desktop; board task floating-windows-live-on-home-pages-one-desktop). Needs the INNER screen (folded,
 # apps are full screen by design): forces it (cmd device_state state 3), swipes the lock face, home's first page.
-# Then, never touching the home layout (pages are only switched, through home's own host events, never by a swipe over
-# widgets): Calculator opened through home's launch call lands on page 1; "windows.edge" (what a drop at the right edge
-# sends) takes it and home to page 2; "system.home" (page 1) hides it - away in windows.list, visible=false - and the
-# store keeps it on page 2; its app's launch (a dock tap) brings home to page 2 with it shown; a REAL drag of its bar
-# to the left edge moves it back to page 1 (shown there after "system.home"). Always restores: Calculator stopped,
+# Then, never touching the home layout: Calculator opened through home's launch call lands on page 1 (in windows.list,
+# stored in home.windows - missing there was the bug of 2026-10-23, its logcat is kept); a REAL swipe from an empty
+# spot (read-only CDP finds one: no tile, outside the window) to page 2 hides it; swiping back shows it at the same
+# bounds; its app opened while page 2 shows moves it to page 2; home's app killed and back, it's still page 2's. Always
+# restores: Calculator stopped,
 # home's first page, `cmd device_state state reset`. Exit: 0 passed; 1 FAIL: ...; 3 a real touch / no free window;
 # 5 can't run (no screen size, a PIN, one home page only). Injected input only; a free window first, the lock then.
 set -uo pipefail
@@ -62,40 +62,69 @@ n=$(npages); echo "home pages: $n, on $(onpage)" | tee -a "$OUT/log.txt"
 [ "${n:-0}" -ge 2 ] || { echo "home has one page - nothing to switch between; stopping"; exit 5; }
 [ "$(onpage)" = 0 ] || fail "system.home didn't show page 1 ($(onpage))"
 
+bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ' | xargs; }
+# A spot on the page on screen with nothing under it (no tile, app, bar, dock) and outside the window: read-only CDP,
+# device px "x y" (a real swipe starts there, never on a widget).
+freept() {
+  "$T/cdp.sh" eval home "(()=>{const b='$1'.split(' ').map(Number),r=devicePixelRatio;for(let y=.2;y<=.75;y+=.05)for(let x=.1;x<=.9;x+=.04){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.app,.panel,.widget,.island,.owl,button,a,input,.bar,.dock,[data-key]'))continue;return Math.round(px)+' '+Math.round(py)}return 'none'})()" 2>&1 | tr -d '"\r' | tail -1
+}
+# A real horizontal swipe on home from an empty spot: $1 -1 = to the next page (finger leftwards), 1 = back.
+swipe() {
+  local p; p=$(freept "$(bounds)"); [ "$p" != none ] && [ -n "$p" ] || { echo "no empty spot on page $(($(onpage) + 1)) to swipe from - stopping"; exit 5; }
+  local x=${p% *} y=${p#* } d=$((W * 35 / 100)); local to=$((x + $1 * d))
+  [ $to -lt 20 ] && to=20; [ $to -gt $((W - 20)) ] && to=$((W - 20))
+  echo "swipe $x,$y -> $to,$y" >>"$OUT/log.txt"
+  sh_ "input swipe $x $y $to $y 250"; sleep 1.5
+}
+
 key=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$PKG\\//.test(a.key))||{}).key||'ERR not in the list'")
 case $key in a:$PKG/*) ;; *) fail "Calculator's key: $key" ;; esac
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch: $r"
 sleep 2.5; chk launch
 id=$(hcall windows.list "[]" "l=>(l.find(w=>w.pkg==='$PKG')||{id:'none'}).id"); echo "window $id" | tee -a "$OUT/log.txt"
-[ "$id" != none ] && [ "$(vis)" = visible=true ] || fail "no floating Calculator window on page 1 ($id, $(vis))"
-"$T/shot.sh" "$OUT/p1-open.png"; pass "opened on page 1"
+if [ "$id" = none ]; then
+  # The bug of 2026-10-23: a floating Calculator that windows.list didn't have (no page, never hidden) - the evidence.
+  sh_ "logcat -d -v time -s PowosWindowFrames PowosFreeform | tail -30; am stack list | grep -m3 -E 'calculator|mode'" >"$OUT/missing.txt"
+  fail "no Calculator in windows.list ($(vis)) - see missing.txt"
+fi
+[ "$(vis)" = visible=true ] || fail "Calculator's window isn't showing ($(vis))"
+B1=$(bounds); echo "bounds on page 1: $B1" | tee -a "$OUT/log.txt"
+P1=$(hcall store.get "['home.windows']" "m=>m&&m['$id']"); echo "stored page id: $P1" | tee -a "$OUT/log.txt"
+[ -n "$P1" ] && [ "$P1" != undefined ] && [ "$P1" != null ] || fail "the window got no page (home.windows has no $id)"
+"$T/shot.sh" "$OUT/1-open-page1.png"; pass "opened on page 1, stored on page id $P1"
 
-hemit windows.edge "{id:$id,side:1}"; chk edge
-[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=true ] && [ "$(away)" = false ] && pass "an edge drop takes it and home to page 2" \
-  || fail "after windows.edge: page $(onpage), $(vis), away=$(away)"
-hemit system.home null; sleep 0.8; chk page1
-"$T/shot.sh" "$OUT/p1-hidden.png"
-[ "$(onpage)" = 0 ] && [ "$(vis)" = visible=false ] && [ "$(away)" = true ] && pass "page 1 hides page 2's window" \
-  || fail "on page 1: page $(onpage), $(vis), away=$(away)"
-kept=$(hcall store.get "['home.windows']" "m=>m&&m['$id']")
-echo "stored page id: $kept" | tee -a "$OUT/log.txt"
-[ -n "$kept" ] && [ "$kept" != undefined ] && [ "$kept" != null ] && pass "kept per page in the store" || fail "not in the store's home.windows"
+swipe -1; chk swipe2
+"$T/shot.sh" "$OUT/2-page2-hidden.png"
+[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=false ] && [ "$(away)" = true ] && pass "swiped to page 2: hidden" \
+  || fail "on page 2: page $(onpage), $(vis), away=$(away)"
 
-r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch (restore): $r"
-sleep 1.8; chk restore
-"$T/shot.sh" "$OUT/p2-raised.png"
-[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=true ] && pass "its app's launch brings home to its page" || fail "after the launch: page $(onpage), $(vis)"
+swipe 1; chk swipe1
+"$T/shot.sh" "$OUT/3-page1-back.png"
+B2=$(bounds); echo "bounds back on page 1: $B2" | tee -a "$OUT/log.txt"
+[ "$(onpage)" = 0 ] && [ "$(vis)" = visible=true ] && [ "$(away)" = false ] || fail "back on page 1: page $(onpage), $(vis), away=$(away)"
+[ "$B2" = "$B1" ] && pass "swiped back to page 1: shown at the same bounds" || fail "back on page 1 at $B2, opened at $B1"
 
-# A real drag of its bar (BAR_DP 40 above the task's top) to the left edge: back to page 1, home with it.
-bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' '; }
-D=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1); px() { echo $(( $1 * D / 160 )); }
-read -r XL XT XR XB <<<"$(bounds)"; [ -n "${XB:-}" ] || fail "no bounds for the task"
-BY=$((XT - $(px 20))); BX=$((XL + (XR - XL) / 3))
-sh_ "input swipe $BX $BY 4 $BY 900"; sleep 2; chk drag
-"$T/shot.sh" "$OUT/dragged-left.png"
-read -r XL2 XT2 XR2 XB2 <<<"$(bounds)"; echo "after the edge drag: $XL2 $XT2 $XR2 $XB2 page $(onpage)" | tee -a "$OUT/log.txt"
-[ "$(onpage)" = 0 ] && [ "$(vis)" = visible=true ] && [ "${XL2:-0}" -ge 0 ] && pass "dragged to the left edge: page 1, whole on screen" \
-  || fail "after the edge drag: page $(onpage), $(vis), left $XL2"
-hemit system.home null; chk end
-[ "$(vis)" = visible=true ] && [ "$(away)" = false ] || fail "on page 1 after the drag: $(vis), away=$(away)"
+# Its app opened while page 2 shows: the window comes to page 2 (home stays there).
+swipe -1; chk swipe2b
+[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=false ] || fail "page 2 again: page $(onpage), $(vis)"
+r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch (from page 2): $r"
+sleep 1.8; chk relaunch
+"$T/shot.sh" "$OUT/4-opened-on-page2.png"
+P2=$(hcall store.get "['home.windows']" "m=>m&&m['$id']")
+[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=true ] && [ "$P2" != "$P1" ] && pass "opened again on page 2: moved there (page id $P2)" \
+  || fail "opened again from page 2: page $(onpage), $(vis), page id $P2 (was $P1)"
+
+# Survives home's app restarting: page 1 (it hides), the app killed, home back - still page 2's.
+hemit system.home null; chk home1
+[ "$(vis)" = visible=false ] || fail "page 1 after the move: $(vis)"
+sh_ "kill \$(pidof com.powos.app)"; t=0
+until [ "$(CDP_TIMEOUT_S=8 "$T/cdp.sh" eval home 'window.__powosAlive === true' 2>/dev/null | tr -d '\r' | tail -1)" = true ] || [ $t -ge 12 ]; do sleep 3; t=$((t + 1)); done
+sleep 2; chk restart
+P3=$(hcall store.get "['home.windows']" "m=>m&&m['$id']")
+"$T/shot.sh" "$OUT/5-after-restart-page1.png"
+[ "$P3" = "$P2" ] && [ "$(vis)" = visible=false ] && pass "after the app restarted: still page id $P3, hidden on page 1" \
+  || fail "after the app restarted: page id $P3 (want $P2), $(vis), page $(onpage)"
+swipe -1; chk swipe2c
+"$T/shot.sh" "$OUT/6-after-restart-page2.png"
+[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=true ] && pass "after the restart, page 2 shows it" || fail "after the restart on page 2: page $(onpage), $(vis)"
 echo "all passed; artefacts: $OUT"

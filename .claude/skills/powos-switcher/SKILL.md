@@ -125,9 +125,16 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   it opened on (`placed`, store "home.windows" task id -> page id; -1 = AI page; a gone page -> the page on screen).
   Page change -> `floating.desktop(hideIds)` -> WindowFrames.desktop: the others minimised (reorder to bottom), no
   frame, `away` in windows.list; the rest raised bottom-most first; a no-op folded. restore/launch -> "windows.raised"
-  -> home goes to its page. A bar let go within EDGE_DP (28) of a side -> WindowFrames.edges -> "windows.edge"
+  -> the window MOVES to the page on screen (2026-10-23; home no longer jumps to the window's page). A bar let go within EDGE_DP (28) of a side -> WindowFrames.edges -> "windows.edge"
   {id, side} -> toEdge: window + home to the next page in one batch() (never hidden on the way); no page there: stays.
-  Gate: desktops (gate.mjs desktopsCheck/Edge/Reloaded). Device: verify/float-desktops.sh (host events, no swipes).
+  Gate: desktops (gate.mjs desktopsCheck/Edge/Reloaded). Device: verify/float-desktops.sh (real page swipes from an
+  empty spot found over read-only CDP, same bounds back, reopen from page 2, home's process killed and back).
+- Windows never got a page (the user, twice, 2026-10-23): desktops.ts only places what windows.list has, and that is
+  WindowFrames.running, refreshed ONLY by the task stack listener. ITaskStackListener wasn't hidden-API exempt
+  (b8fd224), so the listener never registered: the list stayed at the service's start-up read (Calculator visible,
+  windows.list empty, nothing placed or hidden). Logcat PowosWindowFrames: "frames on, task listener on|MISSING" at
+  start, and "windows (floating=.. keyguard=.., N task events): id:pkg@bounds ..." on every change - N stuck at 0 or a
+  visible window absent = the listener again.
 
 ## Device-check rules learned
 - Captures only via tools/phone/shot.sh (picks the ON display: inner 4630946704981769859, cover 4630946316123810436).

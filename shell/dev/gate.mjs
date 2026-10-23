@@ -1184,7 +1184,7 @@ async function folderDissolveCheck() {
 /**
  * In the page: floating windows on home's pages (ui/desktops.ts) - the host stubbed (the mock has no floating
  * windows), two pages. A window opens on the page on screen; swiping pages hides the other page's windows
- * (floating.desktop's list); a window brought back from the dock (windows.raised) takes home to its page; one let go
+ * (floating.desktop's list); a window brought back from the dock (windows.raised) moves to the page on screen; one let go
  * at a screen edge (windows.edge) moves to the next page with home.
  */
 async function desktopsCheck() {
@@ -1215,6 +1215,16 @@ async function desktopsCheck() {
     if (D.placed.value[103] !== -2) fails.push(`a window opened on the app library was put on page ${D.placed.value[103]}, not the library's (-2)`);
     S.windows.value = [win(102), win(101)];
   };
+  // Its app opened on page 1 (windows.raised): the window comes to page 1, home stays there; then back on page 2.
+  const raisedHere = async () => {
+    window.__mockEvents.emit("windows.raised", 102);
+    await window.__gw.until(() => D.placed.value[102] === p0);
+    if (S.page.value !== 0) fails.push(`a window of page 2 brought back on page 1 took home to page ${S.page.value + 1}`);
+    if (D.placed.value[102] !== p0) fails.push(`a window of page 2 brought back on page 1 stayed on page ${D.placed.value[102]}, not ${p0}`);
+    await expect("brought back on page 1: shown there", "");
+    D.moveTo(102, p1);
+    await expect("102 back on page 2", "102");
+  };
   S.page.value = 0;
   S.windows.value = [win(101)];
   await expect("a window opened on page 1", "");
@@ -1227,13 +1237,9 @@ async function desktopsCheck() {
   await desktopsWide();
   S.page.value = 0;
   await expect("back on page 1", "102");
-  window.__mockEvents.emit("windows.raised", 102);
-  await window.__gw.until(() => S.page.value === 1);
-  if (S.page.value !== 1) fails.push(`a window of page 2 brought back from the dock left home on page ${S.page.value + 1}`);
-  await expect("its page shown after windows.raised", "101");
   const kept = await powos.store.get("home.windows");
   if (kept?.[101] !== p0 || kept?.[102] !== p1) fails.push(`not stored per page: ${JSON.stringify(kept)}`);
-  S.page.value = 0;
+  await raisedHere();
   return fails;
 }
 

@@ -2,7 +2,7 @@
  * Home's pages as desktops (unfolded home, the user's design 2026-10-22): every floating app window belongs to a home
  * page, like a widget - the page on screen when it opened. Swiping pages switches desktops: that page's windows show,
  * the others leave the screen (the host minimises them, the task keeps running: WindowFrames.desktop). A window
- * brought back from the dock or the drawer ("windows.raised") takes home to its page; one let go at the screen's side
+ * brought back from the dock or the drawer ("windows.raised") moves to the page on screen; one let go at the screen's side
  * ("windows.edge") moves to the page that way, and home goes with it. Folded, apps are full screen
  * and the host lists no windows: nothing here acts.
  *
@@ -118,11 +118,10 @@ export async function startDesktops() {
   addEventListener("resize", () => requestAnimationFrame(tellBar));
   const sized = new ResizeObserver(() => tellBar());
   for (const el of document.querySelectorAll(".home, .home > .bar, .home > .dock, .home > .bottom-bar")) sized.observe(el);
+  // Brought back from another page (its app opened, a dock tap): it moves to the page on screen - the user's page
+  // stays put, the window comes to them (the simpler of "move it" / "ask", 2026-10-23).
   powos.on("windows.raised", (id: number) => {
-    const p = placed.value[id];
-    const i = p === undefined ? null : indexOf(p);
-    if (i === null) return moveTo(id, pageId());
-    if (i !== page.value) page.value = i;
+    if (placed.value[id] !== pageId()) moveTo(id, pageId());
   });
 }
 
