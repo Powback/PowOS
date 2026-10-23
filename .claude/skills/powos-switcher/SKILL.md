@@ -258,6 +258,15 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   `docker cp` the dex in, /opt/android-sdk/build-tools/35.0.0/dexdump -d).
 - The bar's close worked on 0f098c06 for Calculator, Dolphin, Gwenview (desk-probe r3 touch state: the bar window
   gets the DOWN, nobody pilfers). The r2a failures (APK 367633db) stayed unexplained.
+- Stacking order (2026-10-23): getRunningTasks sorts by LAST-ACTIVE time, not z. A window raised by a WCT reorder
+  (restore, desktop switch) kept its old place, so a lower window's bar lay over the front one's (a drag on
+  Calculator's bar moved Chrome: PowosTaskLeash "task <other id> move") and the dock's front was wrong. FreeformTasks.list
+  now sorts by IActivityTaskManager.getAllRootTaskInfos (ATMS walks root tasks top to bottom; MANAGE_ACTIVITY_TASKS).
+  Overlay frames stack in ADD order: WindowFrames.restack re-adds out-of-order frames whose reach (bar + grip) overlap
+  (logcat PowosWindowFrames "frames restacked"). Minimise logs "minimise task N: done|refused (front was M)".
+- HWC "Disp Frame" rects are in the PANEL's orientation: the inner screen is installOrientation 3, so raw = the window
+  turned (l t r b = top, W-right, bottom, W-left). e2e-lib screenrect converts; window-rec/window-live use it.
+- tools/phone/adb.sh pull to a NEW local file: fixed (it mounted only existing paths; window-rec's mp4s were lost).
 - Touch evidence in a check: `input motionevent DOWN`, then `dumpsys input` TouchStatesByDisplay lists the windows
   the finger went to + pilferingPointerIds, then UP (desk-probe dtap/touched).
 
