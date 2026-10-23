@@ -295,6 +295,9 @@ EOS
         # The checkout to origin's tip before EACH job, not just each window: a window can last an hour, and a check
         # pushed after it began was missing ("No such file", rc 126/127, 2026-10-23).
         verify_tree >/dev/null 2>&1 || true
+        # Keep the verify lock fresh for the whole window: ship-apk and rooted.sh treat a lock untouched for 10 min as
+        # stale, so a long window let an APK install land mid-check (07:06:37, friction f22).
+        touch "$HOME/.cache/powos-verify.lock" 2>/dev/null
         # The phone gone (VPN drop, reboot): leave the window with every job still queued instead of failing each one at
         # its setup ("can't push powos-open-task" FAILs burned the test-set runs during the 06:28 reboot).
         if ! perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell true >/dev/null 2>&1; then
@@ -317,6 +320,7 @@ EOS
         t0=$(date +%s); why=; ls_=; lt=$t0
         while kill -0 $jp 2>/dev/null; do
           for _ in $(seq "${HB_S:-4}"); do kill -0 $jp 2>/dev/null || break; sleep 1; done
+          touch "$HOME/.cache/powos-verify.lock" 2>/dev/null   # fresh through a long check too (f22)
           kill -0 $jp 2>/dev/null || break
           el=$(( $(date +%s) - t0 ))
           [ $el -ge "$budget" ] && { why=timeout; break; }
