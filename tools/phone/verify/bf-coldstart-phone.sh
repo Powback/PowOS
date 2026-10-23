@@ -165,6 +165,14 @@ run() {  # run <variant> <n>
       x=$(for q in $(tree "$r"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -1)
       echo "   at ${now_} ms: $(tail -n 3 "$T/timeline" 2>/dev/null | cut -f3 | cut -c1-60 | tr '\n' '|') game ${x:-none}$([ -n "$x" ] && awk '{printf " state %s cpu %.1fs", $3, ($14+$15)/100}' /proc/$x/stat 2>/dev/null) wchan $(cat /proc/${x:-0}/wchan 2>/dev/null); X windows of it: $(xwininfo -root -tree 2>/dev/null | grep -c "$WIN_NAME")"
       [ -n "$x" ] && [ -n "${seen[exe]:-}" ] && echo "     $(hang_diag "$x")"
+      # A first launch's install script past 60 s (ABZU 2026-10-23 08:16: still in the evaluator at 272 s, tabtip.exe
+      # up = something showed a dialog): every process under the evaluator (state, CPU s) and the X windows' names.
+      if [ -n "$(iscript_reapers)" ] && [ "$now_" -gt 60000 ]; then
+        echo "     install script: $(for q in $(for e in $(iscript_reapers); do tree "$e"; done); do c=$(tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null) || continue
+          case $c in *reaper*|*steam-launch-wrapper*|*pressure-vessel*|*pv-adverb*|*_v2-entry-point*) continue ;; esac
+          printf '%s[%s %ss] ' "$(printf '%s' "$c" | sed -E 's|^[^ ]*[\\/]([^\\/ ]+)|\1|' | cut -c1-80)" "$(awk '{print $3}' /proc/$q/stat 2>/dev/null)" "$(awk '{printf "%.0f", ($14+$15)/100}' /proc/$q/stat 2>/dev/null)"; done | cut -c1-1400)"
+        echo "     X windows: $(xwininfo -root -tree 2>/dev/null | sed -nE 's/^ +0x[0-9a-f]+ "([^"]+)".* ([0-9]+x[0-9]+)\+.*/\1 \2/p' | sort | uniq -c | sort -rn | head -12 | awk '{$1=$1; print}' | tr '\n' '|')"
+      fi
     fi
     # The exe up 45 s / 90 s and still no window: where its busiest thread is (two samples: a loop or progress).
     if [ -n "${seen[exe]:-}" ] && [ $stacks -lt 2 ] && [ $((now_ - ${seen[exe]})) -gt $((45000 * (stacks + 1))) ]; then
