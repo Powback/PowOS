@@ -141,6 +141,9 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   POWOS_NO_LAUNCH_RECORD=1 off) and by bf-coldstart (`record` per run). `powos-steam-compat status` shows it all.
 - powos-open-task matches a game's window also by its process running under `reaper SteamLaunch AppId=<id>` (native
   builds have their own class, e.g. Broforce.x86_64, not Proton's steam_app_<id>).
+- Only a COLD launch (one that started Steam) can record a tool as failed: a warm launch without a window is Steam's
+  freeze/thaw (2026-10-23 02:53/02:58: frozen Steam never thawed / never frozen), bf-coldstart prints "INVALID ..."
+  (warm wait 150 s) and records nothing - re-queue those runs after unified sleep's fix.
 - Environment for Steam and every game: /usr/lib/powos-steam/steam-env then ~/.config/powos/steam-env (KEY=VALUE,
   empty value unsets), exported by /usr/bin/steam. Candidates go in only measured (bf-coldstart `env:K=V`).
 - Tests: test/tier1/test-steam-compat.sh (fake Steam tree). Install: build-pkgs.sh steam (needs pkgs/steam/
