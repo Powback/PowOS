@@ -6,7 +6,7 @@
 #   kate:  + `input text` -> the window's pixels or its caption change (a typed character).
 #   dolphin: a tap in its places panel -> the window's pixels change.
 #   logs:  logcat PowosWindowActivity/WindowTasks/PowosTaskLeash/PowosWindowFrames + KWin's new anland lines, per round.
-# LEASH=both (default) runs every round with powos_live_leash as it is AND with 0 (restored after); LEASH=asis only.
+# LEASH=both (default) runs every round with powos_live_leash as it is AND with 0 (restored after); LEASH=asis|off only.
 # Kate/Dolphin must not be running already (the user's: exit 3). Ours are closed (pkill), home at the end.
 # Exit: 0 pass; 1 FAIL; 3 a real touch / not now; 5 can't run. Files: OUT/<round>-<app>-{before,after}.png, OUT/*.txt
 set -uo pipefail
@@ -106,9 +106,11 @@ round() {  # $1 = round name, $2 = app key, $3 = process name
   us "pkill -x $proc; true"; sleep 2; recstop
 }
 
-round asis org.kde.kate kate
-round asis org.kde.dolphin dolphin
-if [ "${LEASH:-both}" = both ]; then
+if [ "${LEASH:-both}" != off ]; then
+  round asis org.kde.kate kate
+  round asis org.kde.dolphin dolphin
+fi
+if [ "${LEASH:-both}" != asis ]; then
   sh_ "settings put global powos_live_leash 0"; log "powos_live_leash -> 0"
   round leash0 org.kde.kate kate
   round leash0 org.kde.dolphin dolphin
