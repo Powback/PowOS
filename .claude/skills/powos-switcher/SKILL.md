@@ -183,6 +183,15 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   start, and "windows (floating=.. keyguard=.., N task events): id:pkg@bounds ..." on every change - N stuck at 0 or a
   visible window absent = the listener again.
 
+- A cold launch's window behind home (bf-return "launch-front", 2026-10-23): powos-open-task showed the FIRST matching
+  window - a throwaway one of the launch (Steam's, ~3 s after the tap, closed 4 s later; "open 1 ()" in WindowTasks)
+  - said "task" and exited; the game's real window (Unity, 55-75 s later) got no task (no WindowTasks "open" at all)
+  and drew behind HomeShell. Now a launch's shown window must last SETTLE_S (8 s); one closing first is replaced by
+  the next match, and a show KWin refuses is retried (an Xwayland window's surface comes late). stderr: "window N
+  closed ... showing the next one". Check: verify/launch-front.sh (glxgears: window, full screen, throwaway first).
+- Wide dock: pinned + DockWindows share the bar's left end; past 6 cells they ran on under the search pill (a
+  Calculator window's icon under it, the dock-taskbar tap opened the drawer). The page sets --cells, slots shrink.
+
 ## Device-check rules learned
 - Captures only via tools/phone/shot.sh (picks the ON display: inner 4630946704981769859, cover 4630946316123810436).
 - Home's foreground activity is com.powos.app/andro.marchy.HomeShell (alias of ShellActivity); HomeDesktop when the

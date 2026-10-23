@@ -24,6 +24,13 @@ Android shortcuts bring a running game back at once instead of a cold Proton sta
 KWin reports windows to us through a KWin script (a script can't write files or answer, but it can call D-Bus), the
 way powos-android-tasks learns about focus.
 
+A launch that started COMMAND stays until the window it showed has lasted SETTLE_S: one that closes first (a launch's
+throwaway window - Steam/Unity/Proton map a short-lived one seconds after the tap, then the game's own 1-2 min later)
+doesn't count, and the next matching window is shown in its place. Before, the throwaway was shown, the helper exited,
+and the game's real window came up behind home - running, drawing, never in front until a second tap (bf-return
+"launch-front", 2026-10-23: Broforce's window at 75 s, HomeShell in front). A show KWin refuses for a new window (an
+Xwayland window whose surface isn't there yet) is tried again for a few seconds.
+
 Prints one status line for the caller, then exits (COMMAND keeps running; its output goes on to ours):
     powos-open-task: task       shown as its own task
     powos-open-task: desktop    not as a task - no window tasks (the PowOS app isn't connected to KWin, KWin not up),
@@ -42,6 +49,11 @@ RUN = os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app")
 WAIT_S = 30
 # A game's first window: Steam + Proton under FEX (Broforce ~1-2 min cold).
 WAIT_GAME_S = 150
+# A newly started app's shown window counts once it has lasted this long; one closing earlier is replaced by the next.
+SETTLE_S = 8
+# A show KWin refused for a new window: tried again this often, this far apart (its surface may come a moment later).
+SHOW_TRIES = 10
+SHOW_RETRY_MS = 500
 STEAM_GAME = re.compile(r"steam://rungameid/(\d+)|^steam_app_(\d+)$")
 
 REPORT_SCRIPT = """
@@ -58,6 +70,9 @@ for (const w of workspace.windowList()) {
 }
 callDBus(helper[0], helper[1], helper[2], "Listed");
 workspace.windowAdded.connect(function (w) { report(w, false); });
+workspace.windowRemoved.connect(function (w) {
+    callDBus(helper[0], helper[1], helper[2], "Closed", w.internalId.toString());
+});
 """
 
 # A minimized window exports as nothing to draw: it comes up first.
@@ -147,14 +162,14 @@ class LaunchRecord:
     def __init__(self, game):
         self.game, self.t0, self.cold, self.mark = game, time.monotonic(), not steam_alive(), download_mark(game)
 
-    def done(self, ok):
+    def done(self, ok, at=None):
         if os.environ.get("POWOS_NO_LAUNCH_RECORD") or self.mark[0] or download_mark(self.game) != self.mark:
             return
         # No window on a Steam that was already running is Steam's (a frozen client not thawed for the launch, unified
         # sleep, 2026-10-23), not the game's way of running: only a launch that started Steam itself can fail a tool.
         if not ok and not self.cold:
             return
-        res = str(int((time.monotonic() - self.t0) * 1000)) if ok else "fail"
+        res = str(int(((at or time.monotonic()) - self.t0) * 1000)) if ok else "fail"
         try:
             subprocess.Popen(["powos-steam-compat", "record", self.game, res] + (["--cold"] if self.cold else []),
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -188,7 +203,10 @@ def main():
     bus = QDBusConnection.sessionBus()
     name = f"org.powos.OpenTask.p{os.getpid()}"
     scripts = []
-    state = {"child": None, "picked": None, "existing": [], "pids": {}, "done": False}
+    # picked: the window being shown; shown: a window of ours was shown as a task (the status said "task"); tries: shows
+    # KWin refused for the picked window so far; picked_at: when it came (the launch record's time).
+    state = {"child": None, "picked": None, "existing": [], "pids": {}, "done": False, "shown": False, "tries": 0,
+             "picked_at": None, "gen": 0, "seen": []}
 
     def start_command():
         if game:
@@ -203,6 +221,12 @@ def main():
 
     def run_script(tag, text):
         plugin = f"powos-open-task-{os.getpid()}-{tag}"
+        # A plugin of that name still loaded (an earlier show's): unloaded first, or KWin keeps the old one.
+        for i, (p, path) in enumerate(scripts):
+            if p == plugin:
+                kwin("unloadScript", p)
+                scripts.pop(i)
+                break
         path = os.path.join(RUN, plugin + ".js")
         with open(path, "w") as f:
             f.write(text)
@@ -252,15 +276,25 @@ def main():
             return None
         return r.get("window") if r.get("running") else None
 
+    def show(window):
+        state["gen"] += 1
+        if not run_script(f"show{state['gen']}", SHOW_SCRIPT % {"window": window, "service": name}):
+            finish("desktop")
+
     def pick(window):
         if state["picked"]:
             return
-        state["picked"] = window
-        if state.get("launch"):
-            state.pop("launch").done(True)
+        state["picked"], state["picked_at"], state["tries"] = window, time.monotonic(), 0
         wake(window)
-        if not run_script("show", SHOW_SCRIPT % {"window": window, "service": name}):
-            finish("desktop")
+        show(window)
+
+    def settled(window):
+        """The shown window of a launch lasted SETTLE_S: it's the app's - done."""
+        if state["picked"] != window or state["done"]:
+            return
+        if state.get("launch"):
+            state.pop("launch").done(True, state["picked_at"])
+        finish("task")
 
     @ClassInfo({"D-Bus Interface": "org.powos.OpenTask"})
     class Service(QObject):
@@ -274,7 +308,22 @@ def main():
             child = state["child"]
             ours = child is not None and child.pid in ancestors(int(pid) if pid.isdigit() else 0)
             if ours or matches(desktop_file, resource_class, resource_name, pid):
+                state["pids"][window] = pid
+                state["seen"].append(window)
                 pick(window)
+
+        @Slot(str)
+        def Closed(self, window):  # noqa: N802
+            # The launch's window closed before it settled (a throwaway one): the next matching window is shown.
+            if window in state["seen"]:
+                state["seen"].remove(window)
+            if window == state["picked"] and not state["done"]:
+                print(f"powos-open-task: window {window} closed {time.monotonic() - state['picked_at']:.1f} s after it came - "
+                      "showing the next one", file=sys.stderr, flush=True)
+                state["picked"] = None
+                # One that came meanwhile (the game's window while the throwaway was up), the newest; else the next.
+                if state["seen"]:
+                    pick(state["seen"][-1])
 
         @Slot()
         def Listed(self):  # noqa: N802
@@ -287,11 +336,36 @@ def main():
                 pick(state["existing"][-1])
                 return
             start_command()
-            QTimer.singleShot(wait_s * 1000, lambda: (state.get("launch") and state.pop("launch").done(False), finish("desktop")))
+            QTimer.singleShot(wait_s * 1000, timed_out)
 
         @Slot(str)
         def Shown(self, ok):  # noqa: N802
-            finish("task" if ok == "1" else "desktop")
+            window = state["picked"]
+            if state["child"] is None or window is None:
+                # An existing window brought back (nothing started): done at once.
+                finish("task" if ok == "1" else "desktop")
+                return
+            if ok != "1":
+                state["tries"] += 1
+                if state["tries"] < SHOW_TRIES:
+                    QTimer.singleShot(SHOW_RETRY_MS, lambda w=window: state["picked"] == w and not state["done"] and show(w))
+                elif state["shown"]:
+                    state["picked"] = None  # an earlier window showed: wait for the next
+                else:
+                    finish("desktop")
+                return
+            # Shown: the caller hears "task" now; the helper stays until the window has lasted SETTLE_S.
+            state["shown"] = True
+            status("task")
+            QTimer.singleShot(SETTLE_S * 1000, lambda w=window: settled(w))
+
+    def timed_out():
+        # No window that lasted came in time: a launch that showed one leaves it at that (the status said "task").
+        if state["done"]:
+            return
+        if state.get("launch"):
+            state.pop("launch").done(False)
+        finish("task" if state["shown"] else "desktop")
 
     service = Service()
     if not bus.isConnected() or not bus.registerService(name):
