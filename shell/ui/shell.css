@@ -1245,7 +1245,7 @@ input.folder-title:focus { background: var(--soft-fill); }
  * little after the one above it - its own progress --r from the same --q: nothing per frame but --q.
  */
 .notif-panel.riding :is(.cascade, .panel-body > .notif-bar) {
-  --s: calc(min(var(--i, 0), 8) * 0.06);
+  --s: calc(min(var(--i, 0) + var(--i0, 0), 8) * 0.06);
   --r: clamp(0, calc((var(--q) - var(--s)) / (1 - var(--s))), 1);
   transform: translateY(calc((1 - var(--r)) * -1 * (24px + min(var(--i, 0), 8) * 5px)));
   opacity: var(--r);
@@ -1300,6 +1300,13 @@ input.folder-title:focus { background: var(--soft-fill); }
 .panel-body.together .cc { flex: none; overflow: visible; padding-bottom: 0; }
 .panel-body.together .cc + .notif-bar { padding-top: 10px; padding-bottom: 0; }
 .panel-body.together .notif-empty { padding: 14px 2px 6px; }
+/*
+ * Unfolded (notifications.tsx wideShade): the same panel in two columns - the notifications left, the controls right,
+ * each scrolling on its own. The column the pull didn't come from cascades a few rows later (--i0).
+ */
+.panel-body.together.two { flex-direction: row; gap: var(--edge); }
+.panel-body.two > .notif-list { flex: 1 1 0; min-width: 0; }
+.panel-body.two[data-from="control"] > .notif-col, .panel-body.two[data-from="notifications"] > .cc-col { --i0: 3; }
 
 /*
  * PowOS AI's page (powai.tsx), left of home: it and home slide as one (gesture.ts applyTrack sets both transforms) -

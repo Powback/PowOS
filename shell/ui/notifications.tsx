@@ -18,6 +18,13 @@ import type { NotificationList, PhoneNotification } from "../types.ts";
 const list = signal<NotificationList>({ available: true, items: [] });
 
 /**
+ * Unfolded (wider than the cover's 404, as hosts/wide.ts's 700): the panel is two columns side by side - the
+ * notifications left, the control center right, each its own scroll. Folded it stays the one stacked list.
+ */
+export const wideShade = signal(innerWidth >= 700);
+addEventListener("resize", () => (wideShade.value = innerWidth >= 700));
+
+/**
  * Opening (pulled down from shut, until it's settled open): the cards ride on the sheet's bottom edge (shell.css
  * .notif-panel.riding). Closing - or a pull that started from open - they stay at their open place and go up with the
  * sheet. Decided per pull, so a pull that turns back keeps one rule all the way (no jump).
@@ -303,10 +310,28 @@ function Stack({ g }: { g: Group }) {
   );
 }
 
+/** The notifications' head in the two columns: how many, and clear all. */
+function notifBar(count: number, clearable: boolean) {
+  return (
+    <div class="notif-bar cascade" style={{ "--i": 0 }}>
+      <span class="muted">{count ? `${count} notification${count > 1 ? "s" : ""}` : "notifications"}</span>
+      {clearable && (
+        <span class="notif-actions icons">
+          <button type="button" aria-label="clear all" onClick={() => powos.notifications.clearAll()}>
+            <Icon name="notificationClearAll" />
+          </button>
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function NotificationPanel() {
   const shown = notifOpen.value;
-  // The notifications and the control center: one panel (the default), or apart (settings -> style).
-  const together = separatePanels.value !== "on";
+  // The notifications and the control center: one panel (the default), or apart (settings -> style); unfolded, side
+  // by side.
+  const two = wideShade.value;
+  const together = two || separatePanels.value !== "on";
   // Shut: no reply left half-typed in it.
   useEffect(() => {
     if (!shown) replying.value = null;
@@ -334,7 +359,7 @@ export function NotificationPanel() {
     ro.observe(l);
     ro.observe(c);
     return () => ro.disconnect();
-  }, [panel.value, together]);
+  }, [panel.value, together, two]);
   // The cards, newest first, each group a row of the cascade (shell.css .cascade) from --i [from], after the rows above.
   const items$ = (from: number) => (
     <div class="notif-items" ref={itemsEl}>
@@ -372,8 +397,20 @@ export function NotificationPanel() {
         }}
         aria-hidden={!shown}
       >
-        <div class={`panel-body ${together ? "together" : ""}`}>
-          {together ? (
+        <div class={`panel-body ${together ? "together" : ""} ${two ? "two" : ""}`} data-from={two ? panel.value : undefined}>
+          {two ? (
+            // Side by side: the notifications left, the controls right, each scrolling on its own. The column the pull
+            // came from (the status bar's half: shade.tsx) cascades first.
+            <>
+              <div class="notif-list notif-col" ref={listEl}>
+                {notifBar(items.length, clearable)}
+                {items$(1)}
+              </div>
+              <div class="notif-list cc-col">
+                <ControlCenter />
+              </div>
+            </>
+          ) : together ? (
             // One panel: the controls on top, the notifications under them - one list, one scroll, one cascade (the
             // control center's rows first: its header 0 .. its second row of tiles 4, then these).
             <div

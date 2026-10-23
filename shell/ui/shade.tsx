@@ -15,14 +15,15 @@ import { powos } from "../bridge.ts";
 import { notif, panel, separatePanels } from "../state.ts";
 import type { PhoneNotification } from "../types.ts";
 import { homeGestures, notifDrag, notifOpen, notifShown } from "./gesture.ts";
-import { Actions, NotificationPanel } from "./notifications.tsx";
+import { Actions, NotificationPanel, wideShade } from "./notifications.tsx";
 
 // Which panel the pull brings: the status bar's right half the control center, the rest the notifications - when
-// they're apart (settings); together, it's the one panel wherever the pull starts.
+// they're apart (settings); together, it's the one panel wherever the pull starts. Unfolded both show side by side;
+// the half it came from cascades first.
 powos.on(
   "shade.panel",
   ({ panel: p }: { panel: "notifications" | "control" }) =>
-    (panel.value = separatePanels.value === "on" ? p : "notifications"),
+    (panel.value = separatePanels.value === "on" || wideShade.value ? p : "notifications"),
 );
 powos.on(
   "shade.drag",

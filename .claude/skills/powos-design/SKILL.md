@@ -60,6 +60,10 @@ description: How the PowOS phone shell's design is built and checked - the desig
 ## Shade (ui/shade.tsx, notifications.tsx NotificationPanel)
 - One panel by default: control center on top, notifications under it, one `.notif-list` scroll; Settings > Style >
   "separate notifications & controls" (`separatePanels`) restores the split; shade.tsx maps the host's "control" pull.
+- Unfolded (`wideShade`, innerWidth >= 700, notifications.tsx): `.panel-body.together.two` = two `.notif-list` columns,
+  `.notif-col` (notifications) left, `.cc-col` (ControlCenter) right, each its own scroll, one frost panel. shade.tsx
+  keeps the host's "shade.panel" side in `panel` there: `data-from` delays the other column's cascade (`--i0`). Folded:
+  the stacked list. Gate shade-folded / shade-unfolded (shadeLayout in gate.mjs).
 - Open: short `--drop` (15vh) + cascade (`.cascade`, `--i` row index; CC rows first). Grouping `grouped()`; stacks.
 - The one panel's EDGE follows too (shell.css `--cc-lift` block): the panel translates up by (1-q)*--ph + --cc-lift,
   its body back down by the same, overflow-y clip; frost, edge and grip move, content doesn't. Gate shade-overpull

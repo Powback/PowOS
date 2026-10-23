@@ -318,6 +318,42 @@ async function overpullKit() {
   return [];
 }
 
+/**
+ * The shade's layout by width (notifications.tsx wideShade): unfolded two columns side by side - the notifications
+ * left, the control center right, each its own scroll, in the one frost panel; folded the one stacked list.
+ */
+async function shadeLayout() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  (await window.__gw.mod("./state.ts")).notif.value = true;
+  for (let t = 0; t < 150 && !document.querySelector(".notif-panel.shown .cc"); t++) await sleep(20);
+  await sleep(400);
+  const body = document.querySelector(".notif-panel .panel-body");
+  const box = (el) => el.getBoundingClientRect();
+  // Folded: the one list, the controls in it.
+  const folded = () => [
+    ...(body.classList.contains("two") ? [`folded (${innerWidth}px): two columns`] : []),
+    ...(body.querySelector(".notif-list > .cc") ? [] : ["folded: the controls aren't in the one list"]),
+  ];
+  // Unfolded: side by side, tops level, both a real width, each its own content and its own scroll.
+  const columns = (n, c) => {
+    const [bn, bc] = [box(n), box(c)];
+    const scrolls = (el) => ["auto", "scroll"].includes(getComputedStyle(el).overflowY);
+    return [
+      [bn.right <= bc.left + 1, `notifications not left of the controls (${bn.right} > ${bc.left})`],
+      [Math.abs(bn.top - bc.top) <= 2, `columns' tops differ (${bn.top} vs ${bc.top})`],
+      [Math.min(bn.width, bc.width) >= 300, `a column too narrow (${bn.width}, ${bc.width})`],
+      [c.querySelector(".cc") && !n.querySelector(".cc"), "the controls aren't (only) in the right column"],
+      [n.querySelector(".notif-items"), "the notifications aren't in the left column"],
+      [scrolls(n) && scrolls(c), "a column doesn't scroll on its own"],
+      [box(document.querySelector(".notif-panel")).width >= innerWidth - 40, "the panel isn't the screen's width"],
+    ].filter(([ok]) => !ok).map(([, why]) => why);
+  };
+  if (!body) return ["no panel body"];
+  if (innerWidth < 700) return folded();
+  const n = body.querySelector(":scope > .notif-col"), c = body.querySelector(":scope > .cc-col");
+  return body.classList.contains("two") && n && c ? columns(n, c) : [`unfolded (${innerWidth}px): not two columns`];
+}
+
 /** Part of the way: under the control center follows the finger 1:1, the rest starts to show; let go, all back. */
 async function overpullShort() {
   const o = window.__op;
@@ -1956,6 +1992,16 @@ try {
         return { ...r, ready: true, ms: Date.now() - r.started };
       }),
     );
+  // The shade folded (one stacked list) and unfolded (two columns: notifications left, controls right).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(
+        open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-${label}`, viewport).then(async (r) => {
+          await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+          r.problems.push(...((await r.page.evaluate(shadeLayout).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])) ?? []));
+          return { ...r, ready: true, ms: Date.now() - r.started };
+        }),
+      );
   // The pet (ui/pet.tsx): home with local.pet installed, driven through what the user does - shown, touched, each
   // state, a talk bubble, a deploy note, a move - so an error in its effects and timers (2026-10-21: a TDZ in the hop
   // timer's effect threw on every show) fails here; the plain home run never mounts it (the mock has no local.pet).
