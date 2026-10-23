@@ -86,8 +86,11 @@ pacman -Qlq kwin | while read -r f; do [ -f \"\$f\" ] && echo \"\$f\"; done | ta
 pacman -U --noconfirm /var/tmp/powos-kwin.pkg.tar.xz >/dev/null && rm -f /var/tmp/powos-kwin.pkg.tar.xz
 pacman -Q kwin" | tail -1 | tee -a "$OUT/log.txt"
 fi
-[ "$(rs 'grep -ac "export-new fullscreen session" /usr/lib/libkwin.so.6 2>/dev/null' | tail -1)" != 0 ] ||
-  fail "the installed KWin has no \"session\" (pkgs/kwin 0023, 3.27)"
+# By version, not a grep of the binary: QStringLiteral keeps "caps ... session" as UTF-16, which an ASCII grep never
+# matches (it failed a good 3.27 at 22:18, 2026-10-23).
+kv=$(rs 'pacman -Q kwin | cut -d" " -f2' | tail -1)
+[ "$(rs "vercmp '$kv' 6.7.5-3.27" | tail -1)" -ge 0 ] 2>/dev/null ||
+  fail "the installed KWin $kv is older than 6.7.5-3.27 (pkgs/kwin 0023: \"session\")"
 DID=$(sh_ "dumpsys display" | sed -nE 's/.*uniqueId="local:([0-9]+)".* state ON,.*/\1/p' | head -1)
 
 # An old-session Kate task: Kate through the launcher on the running KWin (when it's up; an old KWin's task is the
