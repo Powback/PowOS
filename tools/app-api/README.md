@@ -1,7 +1,40 @@
-# tools/app-api — capture → OpenAPI prototype
+# tools/app-api — capability spec + capture → OpenAPI prototype
 
-The capture → spec step of the PowOS "app → API" pipeline. Full design,
-threat model and the "enable an app" flow: [`docs/APP-API-CAPTURE.md`](../../docs/APP-API-CAPTURE.md).
+The PowOS "app → API" pipeline. Full design, the capability-spec model, the
+safety classes, the threat model and the "enable an app" flow:
+[`docs/APP-API-CAPTURE.md`](../../docs/APP-API-CAPTURE.md).
+
+## The capability spec (the core)
+
+One app-independent file per app — `*.appcap.json` — from which every consumer
+(AI tools, CLI, typed SDK, widget bindings) is generated, all enforcing the same
+safety class (`read` / `reversible-write` / `spend`). See §1b of the doc.
+
+- `schema/appcap.schema.json` — the JSON Schema.
+- `appcap_validate.py` — enforces the safety invariants S1–S9. `--list` prints
+  the action/safety table. A spec that fails is refused before any consumer is
+  built.
+- `appcap_render.py` — **view the resulting API**: `--api` (Markdown reference),
+  `--tools` (MCP/PowOS-AI tool list), `--cli`, `--widgets`, and
+  `--call <action> --arg k=v` to **dry-run preview** a request (it never sends,
+  so it's safe to run against any app, lights included).
+- `examples/hue.appcap.json` — full worked example (reads, reversible writes, a
+  UI-navigation action). `appcap_render.py examples/hue.appcap.json --api`.
+- `viewer/index.html` — standalone visual viewer (the toggle/view surface).
+  Open it, or drop any `*.appcap.json` onto it.
+
+```bash
+python3 appcap_validate.py --list examples/hue.appcap.json
+python3 appcap_render.py examples/hue.appcap.json --api --tools --widgets
+python3 appcap_render.py examples/hue.appcap.json --call set_room --arg group_id=X --arg on=true   # preview, never sends
+```
+
+Auth is never handled by us in the clear: `auth.tokens.*.store` is a handle
+(`secret:hue`, `store:<app>:session`) into the encrypted store; captured actions
+replay the app's own headers verbatim; the value is never in the spec, logs,
+tool output or git.
+
+## Capture → OpenAPI (the capture step)
 
 ## Files
 

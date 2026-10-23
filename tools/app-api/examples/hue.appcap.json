@@ -1,0 +1,116 @@
+{
+  "spec": "powos.appcap/v1",
+  "app": "hue",
+  "name": "Philips Hue",
+  "description": "Rooms, scenes and lights on the LAN via the bridge's CLIP v2 API. Official API, key held as the app secret 'hue'. The pattern every other app follows.",
+  "enabled": true,
+  "base": {
+    "kind": "lan",
+    "url": "https://{bridge_ip}/clip/v2",
+    "tls": "pinned"
+  },
+  "auth": {
+    "tokens": {
+      "bridge": {
+        "store": "secret:hue",
+        "type": "api-key",
+        "header": "hue-application-key",
+        "refresh": null
+      }
+    }
+  },
+  "defaults": {
+    "rate_limit": { "per_minute": 60 },
+    "cache_ttl_s": 2
+  },
+  "actions": {
+    "list_rooms": {
+      "summary": "List rooms/zones with on-state and brightness.",
+      "safety": "read",
+      "origin": "official",
+      "widget": true,
+      "cache_ttl_s": 5,
+      "refresh": { "poll_s": 10, "event_stream": "/eventstream/clip/v2" },
+      "inputs": { "type": "object", "properties": {} },
+      "output": {
+        "type": "object",
+        "properties": {
+          "rooms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "name": { "type": "string" },
+                "on": { "type": "boolean" },
+                "brightness": { "type": "number" }
+              }
+            }
+          }
+        }
+      },
+      "endpoint": { "method": "GET", "path": "/resource/room", "auth": "bridge" }
+    },
+    "list_scenes": {
+      "summary": "List scenes and which is active per room.",
+      "safety": "read",
+      "origin": "official",
+      "widget": true,
+      "cache_ttl_s": 30,
+      "inputs": { "type": "object", "properties": {} },
+      "output": { "type": "object", "properties": { "scenes": { "type": "array", "items": { "type": "object" } } } },
+      "endpoint": { "method": "GET", "path": "/resource/scene", "auth": "bridge" }
+    },
+    "set_room": {
+      "summary": "Turn a room's grouped light on/off and/or set brightness.",
+      "safety": "reversible-write",
+      "origin": "official",
+      "undo": "inverse",
+      "widget": false,
+      "inputs": {
+        "type": "object",
+        "required": ["group_id"],
+        "properties": {
+          "group_id": { "type": "string" },
+          "on": { "type": "boolean" },
+          "brightness": { "type": "number", "minimum": 0, "maximum": 100 }
+        }
+      },
+      "output": { "type": "object", "properties": { "ok": { "type": "boolean" } } },
+      "endpoint": {
+        "method": "PUT",
+        "path": "/resource/grouped_light/{group_id}",
+        "auth": "bridge",
+        "body": { "on": { "on": "{on}" }, "dimming": { "brightness": "{brightness}" } }
+      }
+    },
+    "recall_scene": {
+      "summary": "Activate a scene in its room.",
+      "safety": "reversible-write",
+      "origin": "official",
+      "undo": "recall_scene",
+      "widget": false,
+      "inputs": {
+        "type": "object",
+        "required": ["scene_id"],
+        "properties": { "scene_id": { "type": "string" } }
+      },
+      "output": { "type": "object", "properties": { "ok": { "type": "boolean" } } },
+      "endpoint": {
+        "method": "PUT",
+        "path": "/resource/scene/{scene_id}",
+        "auth": "bridge",
+        "body": { "recall": { "action": "active" } }
+      }
+    },
+    "open_lights_page": {
+      "summary": "Open the PowOS Lights app on its rooms screen (UI navigation, shows nothing is changed).",
+      "safety": "read",
+      "origin": "official",
+      "widget": false,
+      "inputs": { "type": "object", "properties": {} },
+      "output": { "type": "object", "properties": { "opened": { "type": "boolean" } } },
+      "endpoint": { "ui": { "route": "app://local.lights" } }
+    }
+  }
+}

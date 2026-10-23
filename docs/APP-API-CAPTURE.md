@@ -65,6 +65,303 @@ below is mostly *integration + a thin OpenAPI/tool-gen layer*, not new infra.
 
 ---
 
+## 1b. THE CORE: one capability spec, every consumer generated from it
+
+This is the heart of the design and the thing the user asked for: *"a clean spec
+so we can easily use apps via API or CLI or for widgets or whatever without
+compromising safety."*
+
+Each enabled app — Uber Eats, Hue, a weather app — is described **once** in a
+single app-independent file, the **App Capability Spec** (`*.appcap.json`). Every
+way of using the app is **generated** from that one file, so they can never
+disagree about what an action does or how dangerous it is:
+
+```
+                         <app>.appcap.json   (ONE source of truth)
+                                  │
+      ┌───────────────┬───────────┼────────────────┬──────────────────┐
+      ▼               ▼           ▼                ▼                  ▼
+  AI tools        CLI          typed SDK        widget bindings     audit log
+  (MCP /          powos app    (TS/Rust/py      (read actions +     (every call,
+   PowOS AI)      <app> <act>   for code)        refresh hints)      every app)
+      └───────────────┴───────────┴────────────────┴──────────────────┘
+                 all four enforce the SAME safety class, identically
+```
+
+The spec's JSON Schema is committed at
+[`tools/app-api/schema/appcap.schema.json`](../tools/app-api/schema/appcap.schema.json);
+a full worked example (Hue, whose API we already know) at
+[`tools/app-api/examples/hue.appcap.json`](../tools/app-api/examples/hue.appcap.json);
+and a validator that enforces the safety invariants at
+[`tools/app-api/appcap_validate.py`](../tools/app-api/appcap_validate.py). All
+three are real and tested (see §7).
+
+### 1b.1 What an action declares
+
+Each action in the spec carries exactly what every consumer needs:
+
+| Field | Meaning |
+|---|---|
+| `summary` | one-line human description (becomes the tool/CLI help) |
+| `inputs` / `output` | **typed** JSON Schema — drives the SDK types, CLI arg parsing, tool parameters and the widget's data shape |
+| `endpoint` | the mapping: HTTP `method`+`path` (or `operationId` into the captured OpenAPI spec, or an `argv` template when `base.kind=cli`), plus `origin: official \| captured` |
+| `endpoint.auth` | a **token handle** (`"bridge"` → `auth.tokens.bridge`), resolved to a value by the host at call time — the value is never in the spec |
+| `safety` | **the safety class every consumer enforces** (below) |
+| `rate_limit` / `cache_ttl_s` | per-action limits (fall back to `defaults`) |
+| `refresh` | for reads: `poll_s` and/or an `event_stream` endpoint — the widget's refresh hint |
+| `undo` | for reversible writes: the action id that reverts it (or `"inverse"` = call again with the prior state) |
+| `confirm` / `confirm_template` | per-call confirmation + the exact "what and how much" string shown |
+
+### 1b.2 The safety class (the whole safety model in one field)
+
+Every consumer reads `safety` and behaves the same way. It is not advisory — the
+generators and the runtime both key off it:
+
+| `safety` | Examples | AI tool | CLI | Widget | Runtime rule |
+|---|---|---|---|---|---|
+| **`read`** | list rooms, read cart, weather | free | free | **allowed** | cacheable (`cache_ttl_s`); no side effects |
+| **`reversible-write`** | add to cart, toggle a light, set brightness | allowed, **logged**, offers `undo` | allowed, `--undo` | **never** | changes state but is reversible and spends nothing |
+| **`spend`** | order, pay, send a message, delete, book | **blocked unless** an explicit per-call user **yes** showing `confirm_template` (what + total) | refuses without `--confirm` + prints the template | **never — a widget can never call it** | irreversible / costs money / contacts others; never automatic |
+
+Two invariants make this safe *by construction*, enforced by `appcap_validate.py`
+(so a bad spec fails before any consumer is generated):
+
+- **A widget can only ever bind to `read` actions** (S5). Widgets run
+  unattended, so they are physically unable to spend or even to make a
+  reversible change.
+- **`spend` forces `confirm: true` and forbids `widget: true`** (S4), and the
+  confirmation must carry a `confirm_template` (S6) so the user always sees
+  *what* and *how much* before approving.
+
+### 1b.3 Capture-generated actions start read-only
+
+An action learned by capture (`origin: "captured"`) is **born `read`-only**. To
+become `reversible-write` or `spend` it must be explicitly **promoted** by the
+user (`promoted: true`); the validator rejects a captured non-read action that
+isn't promoted (S3). So the pipeline from §4 can freely turn observed traffic
+into `read` actions the AI and widgets can use immediately, while anything that
+changes state waits for a deliberate human promotion. Official APIs we already
+trust (like Hue) can ship writes directly.
+
+### 1b.4 Tokens: handles only, never values
+
+`auth.tokens.<id>.store` is a **handle** — `secret:hue`, `store:ubereats:session`
+— into the encrypted local store (§5). The validator rejects anything that isn't
+a `secret:`/`store:` handle (S2), so a real token can never be committed into a
+spec by accident. The host resolves the handle and injects the value into the
+outbound request at call time, exactly like the Lights app's `${secret:hue}`;
+tool code, CLI output, widgets, logs and git never see it.
+
+**We never implement or touch auth ourselves — we reuse the app's own.** For a
+`captured` action, the token store holds the *exact* auth material the app itself
+sends (its `Authorization`/cookie/`x-api-key`, and any signed `x-*` headers the
+capture saw), and at call time the host replays those same headers verbatim. We
+do not log in, mint tokens, re-implement a login flow, or reverse-engineer a
+signing scheme by hand: whatever the app presents to its server, we present the
+same, pulled from the store by handle. (This is also why request-signing /
+attestation apps like Uber may need the on-device path — see §3 — since a
+signature that must be freshly minted per request can't be replayed from a stored
+header; there the app's own networking mints it and we ride along.) The user logs
+in once in the real app; everything after is handle-injected, never handled by us
+in the clear.
+
+### 1b.5 Enable / disable, allowlist, audit
+
+- **Enable an app:** `powos app <app> enable` flips the spec's top-level
+  `enabled` and walks the §4 capture/import flow. **Per-action allowlist:** every
+  action has its own `enabled` flag; the enable step turns them on one at a time
+  (`powos app <app> allow <action>` / `deny <action>`). A disabled app or action
+  is uncallable from *every* consumer — generators skip it, the runtime refuses
+  it.
+- **Disable:** `powos app <app> disable` makes the whole app uncallable at once
+  (kill switch); the spec and tokens stay so re-enabling is instant.
+- **Audit log:** every call through any consumer appends one JSON line to
+  `~/.local/state/powos/app-api/audit/<app>.jsonl` — timestamp, consumer
+  (ai/cli/sdk/widget), action, safety class, dry-run flag, whether a confirmation
+  was shown and its answer, result status and duration. **Inputs are recorded
+  with secret-pattern fields redacted; token values are never logged.** This is
+  the one place to see everything the AI (or anything) did on your behalf.
+
+### 1b.6 Dry-run everywhere
+
+Every consumer supports **dry-run**: it resolves the action, builds the exact
+request (method, URL, headers with the token shown only as `bridge→secret:hue`,
+body) and **shows it without sending**. `powos app hue set_room --room … --dry-run`,
+an AI tool argument `dry_run: true`, and an SDK `{dryRun:true}` all produce the
+same preview. Dry-run is the default the first time the AI touches a new
+`reversible-write` or `spend` action, so you always get to look before it fires.
+
+### 1b.7 The JSON Schema (committed; excerpt)
+
+Full file: `tools/app-api/schema/appcap.schema.json`. Shape:
+
+```jsonc
+{
+  "spec": "powos.appcap/v1",
+  "app": "hue",                       // CLI namespace + stable id
+  "name": "Philips Hue",
+  "enabled": true,
+  "base": { "kind": "lan", "url": "https://{bridge_ip}/clip/v2", "tls": "pinned" },
+  "auth": { "tokens": {               // HANDLES ONLY — never a value
+    "bridge": { "store": "secret:hue", "type": "api-key", "header": "hue-application-key" }
+  } },
+  "defaults": { "rate_limit": { "per_minute": 60 }, "cache_ttl_s": 2 },
+  "actions": {
+    "<action-id>": {
+      "summary": "…",
+      "safety": "read | reversible-write | spend",
+      "origin": "official | captured",
+      "promoted": false,              // captured non-read needs this true
+      "widget": false,                // only true when safety=read
+      "confirm": false,               // forced true when safety=spend
+      "confirm_template": "Order {item_count} items for {currency}{total}?",
+      "undo": "inverse",              // reversible-write: how to revert
+      "refresh": { "poll_s": 10, "event_stream": "/eventstream/clip/v2" },
+      "rate_limit": { "per_minute": 60 }, "cache_ttl_s": 5,
+      "inputs":  { "type": "object", "properties": { … } },
+      "output":  { "type": "object", "properties": { … } },
+      "endpoint": { "method": "GET", "path": "/resource/room", "auth": "bridge" }
+    }
+  }
+}
+```
+
+### 1b.8 Full example — Hue (committed, validated)
+
+`tools/app-api/examples/hue.appcap.json` describes four actions:
+`list_rooms` (read, widget-safe, 10s poll + CLIP v2 event stream),
+`list_scenes` (read, widget-safe), `set_room` (reversible-write, `undo:inverse`)
+and `recall_scene` (reversible-write). The bridge key is the handle
+`secret:hue`. `appcap_validate.py --list examples/hue.appcap.json` prints:
+
+```
+# hue: 4 action(s)  (app enabled=True)
+  list_rooms    read              official  on  widget
+  list_scenes   read              official  on  widget
+  recall_scene  reversible-write  official  on
+  set_room      reversible-write  official  on
+```
+
+Hue has no `spend` action. The **Uber Eats "prepare a basket"** flow (§6) is the
+same spec with the spend class exercised — the cart actions are
+`reversible-write` (no confirm, widget-false) and the only `spend` action is
+`place_order`, which the spec marks `confirm: true` with
+`confirm_template: "Order {item_count} items from {restaurant} for {currency}{total}?"`
+and `widget: false`. By S4/S5 a widget can never call it and no consumer fires it
+without the user's per-order yes — and in practice we prefer to hand checkout to
+the real app entirely (§6), so `place_order` can simply be left out of the
+allowlist (`enabled: false`).
+
+### 1b.9 How each consumer is generated from the spec
+
+One generator per consumer, all reading the same `*.appcap.json`. They reuse the
+existing projects (§1): captured `endpoint`s point at operations in the
+`har2openapi.py` OpenAPI output, and the request itself is issued/learned through
+`ssl-bypass-foundation`; `debug-proxy` replays them in tests.
+
+- **AI tools (MCP / PowOS AI).** Each `enabled` action becomes one tool named
+  `<app>__<action>`, its JSON-Schema `inputs` as the tool parameters, `summary`
+  as the description, plus a `dry_run` parameter. The generator **bakes the
+  safety class into the tool**: `read`/`reversible-write` tools run directly
+  (reversible-writes auto-logged, `undo` surfaced); `spend` tools are emitted so
+  the model *must* call `present_choices`/confirmation (the `powos-chat` skill's
+  present cards) with the `confirm_template` filled in before the call executes —
+  the runtime refuses an unconfirmed `spend`. Disabled actions emit no tool.
+- **CLI.** `powos app <app> <action> [--arg value …] [--dry-run] [--undo]`,
+  dispatching under one `powos app` facade (mirroring the `powos game` facade
+  pattern). `--help` is generated from `summary` + `inputs` (so, per the PowOS
+  `!cmd` rule, the agent reading `powos app <app> help` always sees the current
+  actions). A `spend` action refuses to run without `--confirm` and first prints
+  the `confirm_template` with the resolved total. `powos app list` /
+  `powos app <app> actions` show the allowlist + safety classes.
+- **Typed SDK (for code).** `inputs`/`output` schemas generate typed functions
+  (`hue.setRoom({groupId, on})`) in TS/Rust/Python; the type system carries the
+  safety class so a `spend` call won't compile without passing a confirmation
+  token obtained from a user prompt.
+- **Widget data bindings.** A widget may bind **only** to `read` actions (S5).
+  The generator exposes each read action as a data source with its `output`
+  shape and its `refresh` hint — poll every `poll_s`, or subscribe to
+  `event_stream` for push (Hue's CLIP v2 event stream, so the Lights widget is
+  live, not polled). A widget literally has no generated binding for any
+  write/spend action, so it cannot change anything.
+
+All four go through one call path — resolve action → check app+action enabled →
+enforce safety (confirm/undo/widget rules) → attach the token by handle → rate
+limit → (dry-run shows, else send) → **append the audit line**. The safety checks
+live in that shared path, not in each consumer, so there is exactly one place
+that can say no.
+
+### 1b.10 In-app UI automation ("show me a certain page")
+
+Not everything an app does is an API call. Sometimes the useful action is *open
+this screen* — show me my cart, jump to this restaurant, open the Lights page. An
+action models that with `endpoint.ui` instead of an HTTP mapping:
+
+```jsonc
+"endpoint": { "ui": {
+  "deep_link": "ubereats://cart",        // preferred: open the screen directly
+  "route": "app://local.lights",         // or a PowOS app surface
+  "steps": [                             // fallback when no deep link exists
+    { "do": "tap", "target": "Search" },
+    { "do": "type", "target": "Search", "text": "{query}" }
+  ]
+}}
+```
+
+- **Opening a screen is a `read` action** (it displays, it changes nothing), so
+  the AI and the CLI can do it freely and it is the natural end of the
+  "prepare a basket" flow (§6): the AI builds the cart over the API, then calls a
+  UI action to **open the real app on its cart screen** for the user to review
+  and check out. A UI action that *submits* a form takes the safety class of
+  what it submits (so a UI "place order" is still `spend`, still confirmed,
+  still never a widget).
+- **How it runs on the phone:** prefer the app's **deep link / intent** (one
+  jump, no scripted taps); the Android side already has the adb-to-itself window
+  (`units/phone-android/adb-self.json`) to surface the app. When no deep link
+  exists, `steps` replay through the phone's accessibility/automation path (the
+  `powos-phone` tooling), **never blind-tapping while the user is active** (the
+  no-touch-injection rule). This is strictly navigation/automation of the user's
+  own app on their own screen.
+
+### 1b.11 Native Linux apps — the easy case
+
+The same `*.appcap.json` model covers PowOS desktop's **native Linux apps**, and
+they are *easier* than mobile, not harder:
+
+- **Capture needs no root:** a user-trust CA plus an env/proxy var
+  (`HTTPS_PROXY`) through `ssl-bypass-foundation` is enough — no Magisk, no
+  system-partition CA, far less pinning in the wild.
+- **Many apps already expose an API you map as `official`:** a **D-Bus**
+  interface or a **CLI** (`base.kind: "cli"`, `endpoint.argv`) — map it directly,
+  no capture at all. (This is exactly how the Hue skill wraps the `openhue` CLI.)
+- **UI automation is first-class on Linux:** **AT-SPI** accessibility, D-Bus
+  activation, `wmctrl`/`ydotool` — so `endpoint.ui.steps` are more reliable than
+  on mobile.
+
+So a single enabled "app" can be a phone app, a Linux app, a web service or a
+LAN device — the spec, the safety model, the CLI (`powos app <app> <action>`),
+the tools, the widgets and the audit log are identical. That uniformity is the
+point of having one capability spec.
+
+### 1b.12 The "App API" app: toggle it, view the resulting API
+
+The control + view surface is itself a PowOS app ("App API"):
+
+- **Toggle** an app on/off and flip individual actions in its allowlist (writing
+  the `enabled` flags), kick off / re-run capture, and promote a captured action
+  past `read` — the one place the user grants capability.
+- **View the resulting API** for each enabled app: the rendered action list with
+  safety badges, the endpoint mapping, the auth handle (never the value), the
+  generated tool list and the widget-bindable reads — i.e. the output of
+  `appcap_render.py` (§7), live.
+- **Audit** tab: the per-app call log (§1b.5).
+
+The committed prototype of this surface is the CLI renderer and a standalone
+HTML viewer (`tools/app-api/viewer/`, §7); the production in-shell app with live
+capture toggles and persistence is the scheduled build (§8).
+
+---
+
 ## 2. Architecture
 
 ```
@@ -270,6 +567,24 @@ Under **`tools/app-api/`**:
   records."
 - **`sample/open-meteo.{har,openapi.json}`** — the committed, reproducible output.
 
+And the **capability-spec layer** (§1b) — the clean, app-independent spec and its
+generators:
+
+- **`schema/appcap.schema.json`** — the JSON Schema for `*.appcap.json`.
+- **`appcap_validate.py`** — enforces the safety invariants S1–S9 (widget⇒read,
+  spend⇒confirm+no-widget, captured-non-read⇒promoted, token handles only,
+  auth/endpoint resolve). No bad spec reaches a generator.
+- **`appcap_render.py`** — the **"view the resulting API"** generator: `--api`
+  (human reference), `--tools` (MCP/PowOS-AI tool list), `--cli`, `--widgets`,
+  and `--call <action> --arg k=v` which **dry-run previews** the exact request
+  (method, URL, the app's own header shown only as its handle, body) and **never
+  sends** — so it is safe to run against Hue without touching the lights.
+- **`examples/hue.appcap.json`** — the full worked example (5 actions: reads,
+  reversible writes, and a UI-navigation action that opens the Lights page).
+- **`viewer/index.html`** — standalone visual viewer (the toggle/view surface
+  prototype): renders each app's actions with safety badges, endpoint mapping,
+  auth handle and widget/refresh hints.
+
 **Verified (2026-10-23):**
 - real capture → spec: 4 Open-Meteo reads → 2 operations
   (`GET /v1/forecast`, `GET /v1/search`) with inferred nested response schemas;
@@ -278,7 +593,16 @@ Under **`tools/app-api/`**:
   scheme emitted);
 - **leak check passed**: a HAR carrying a Bearer token, a session cookie, a
   `session=` query value and a `token` response field produced a spec containing
-  **none** of those values.
+  **none** of those values;
+- the Hue spec validates and renders into all four consumer views; its 5 actions
+  classify correctly (3 read incl. the UI nav, 2 reversible-write);
+- safety invariants enforced: a crafted spec with a `spend`+widget action, a
+  spend with no confirm, a captured non-promoted write, an inline token value and
+  a dangling auth ref produced **6 errors** (S1–S5) and was refused;
+- **lights untouched:** `--call set_room/list_rooms/open_lights_page` built the
+  real requests (incl. the `hue-application-key` header resolved from `secret:hue`,
+  value never shown) and sent nothing — `appcap_render.py` is a previewer that
+  has no send path.
 
 Why HAR as the seam: mitmproxy, HTTP Toolkit, reqable and Chrome DevTools all
 export HAR, and `ssl-bypass-foundation` can emit it — so the converter is
@@ -301,29 +625,50 @@ logged-in app.
 
 ## 8. Recommendation + effort
 
+**Already built (this work, committed under `tools/app-api/`):** the capability
+spec + JSON Schema, the safety-invariant validator, the capture→OpenAPI
+converter, and the `appcap_render.py` generators that produce the API view, the
+AI tool list, the CLI listing, the widget bindings and a dry-run request preview
+— plus a standalone HTML viewer. The *model* and its *generators* exist and are
+tested; what remains is wiring them to the live capture and the phone.
+
 **Build order (reuse-first):**
 
 1. **Harden the token store** in `ssl-bypass-foundation` — encrypt the credential
    value at rest (age/libsodium), Keystore-wrapped on phone / `secrets/` on Mac,
-   `${app-api:…}` injection. **Blocker for any real account.** ~1–2 days.
-2. **Wire `har2openapi.py` onto the live capture** — add a HAR/`exchanges`
-   exporter to the proxy (the schema+route data already exists) so capture→spec
-   is one command. ~1 day. *(Converter already done — this prototype.)*
-3. **`toolgen`**: spec → PowOS AI tools (+ optional MCP server). Reads un-gated;
-   reversible mutations (cart) allowed; **checkout/pay/message operations dropped
-   entirely** so the AI *cannot* call them; token injected by handle. ~2–3 days.
-4. **"Enable an app" UX** (§4) + per-app record. ~2–3 days.
-5. **Prove "prepare a basket" end-to-end on a safe app** (grocery-list / a menu
-   app with a free cart), present-in-chat + hand-off to the real app. ~2 days.
-6. **Phone prep as units**: Magisk system-CA module + managed frida-server unit,
+   `${app-api:…}` / `store:` handle injection. **Blocker for any real account.** ~1–2 days.
+2. **Wire `har2openapi.py` onto the live capture**, then an **`appcap` emitter**:
+   capture → OpenAPI → a draft `*.appcap.json` with every action `read`/captured
+   (promotion left to the user). ~2 days. *(Converter + spec + validator already
+   done.)*
+3. **Runtime + `toolgen`**: the one shared call path (resolve → allowlist →
+   enforce safety → handle-inject auth → rate-limit → dry-run/send → audit) and
+   the four generators emitting against it. The render/validate logic is done;
+   this makes them *execute*. Reads un-gated; reversible writes logged with undo;
+   `spend` requires confirmation; `spend`/writes never reachable from a widget.
+   ~3–4 days.
+4. **The "App API" PowOS app** (§1b.12): toggle apps/actions, run capture, promote
+   captured actions, view the rendered API + audit. The CLI + HTML viewer are the
+   prototype; the in-shell app is this step. ~3–4 days.
+5. **UI automation** (§1b.10): deep-link/intent first; `steps` via the phone's
+   accessibility path (and AT-SPI/D-Bus for native Linux), honoring no-touch
+   -injection-while-active. ~2–3 days.
+6. **Prove "prepare a basket" end-to-end on a safe app** (grocery-list / a menu
+   app with a free cart), present-in-chat + hand-off to the real app's cart
+   screen via a UI action. ~2 days.
+7. **Phone prep as units**: Magisk system-CA module + managed frida-server unit,
    both with documented removal (§ below). ~1 day.
-7. **Only then, Uber Eats as an opt-in Frida target** — with the user's explicit
+8. **Native Linux apps** (§1b.11): user-CA MITM (no root), plus map D-Bus/CLI
+   surfaces directly as `official` actions. Lower-risk, can run in parallel. ~2 days.
+9. **Only then, Uber Eats as an opt-in Frida target** — with the user's explicit
    yes, the account-risk and ToS caveats of §3 stated, and the hand-off-to-app
    model of §6 as the default (no programmatic checkout).
 
-**Total to a safe, working "prepare a basket" on a friendly app: ~1.5–2 weeks**,
-most of it integration since the capture engine exists. Uber Eats is a separate,
-riskier increment on top.
+**Total to a safe, working "prepare a basket" + the toggle/view app on a friendly
+app: ~2.5–3 weeks**, most of it integration since the capture engine and the
+whole spec/generator layer already exist. Native Linux apps are the quickest win
+(no root, often a D-Bus/CLI to map directly). Uber Eats is a separate, riskier
+increment on top.
 
 **My recommendation:** build steps 1–6 and ship the "prepare a basket" flow on a
 **low-risk app first**. Keep Uber Eats behind the Frida path and the hand-off

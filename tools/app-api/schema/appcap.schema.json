@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://powos/appcap.schema.json",
+  "title": "PowOS App Capability Spec",
+  "description": "One app-independent description of an enabled app. Every consumer (AI tools, CLI, typed SDK, widget bindings) is generated from this ONE file. Safety is declared here and enforced identically by every consumer. Structural rules only; appcap_validate.py enforces the cross-field safety invariants that a plain schema cannot.",
+  "type": "object",
+  "required": ["spec", "app", "name", "auth", "actions"],
+  "additionalProperties": false,
+  "properties": {
+    "spec": { "const": "powos.appcap/v1" },
+    "app": {
+      "type": "string",
+      "description": "Stable app id (also the CLI namespace: `powos app <app> …`).",
+      "pattern": "^[a-z][a-z0-9-]{1,40}$"
+    },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "enabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "App-level master switch. Disabled = no consumer may call any action."
+    },
+    "base": {
+      "type": "object",
+      "description": "Where requests go.",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["lan", "internet", "cli", "on-device"] },
+        "url": { "type": "string", "description": "Base URL; may contain {placeholders} resolved from state (e.g. {bridge_ip})." },
+        "tls": { "enum": ["standard", "pinned", "none"], "default": "standard" }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "description": "Token handles only. A handle names a secret in the encrypted local store; the VALUE never appears here and is resolved by the host at call time.",
+      "required": ["tokens"],
+      "additionalProperties": false,
+      "properties": {
+        "tokens": {
+          "type": "object",
+          "minProperties": 0,
+          "additionalProperties": {
+            "type": "object",
+            "required": ["store", "type"],
+            "additionalProperties": false,
+            "properties": {
+              "store": {
+                "type": "string",
+                "description": "Handle into the encrypted store, e.g. 'secret:hue' or 'store:ubereats:session'. NEVER an inline token value.",
+                "pattern": "^(secret|store):[a-zA-Z0-9_.:-]+$"
+              },
+              "type": { "enum": ["api-key", "bearer", "cookie", "basic"] },
+              "header": { "type": "string", "description": "Header name the handle is injected into (api-key/bearer)." },
+              "query": { "type": "string", "description": "Query param name, if the token rides in the query instead of a header." },
+              "refresh": {
+                "type": ["object", "null"],
+                "description": "How a short-lived token is renewed. Replays a captured/official refresh flow; never prompts for a password.",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "defaults": { "$ref": "#/$defs/policy" },
+    "actions": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/action" }
+    }
+  },
+  "$defs": {
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rate_limit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "per_minute": { "type": "integer", "minimum": 1 },
+            "per_day": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "cache_ttl_s": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["summary", "safety", "origin", "endpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "summary": { "type": "string" },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Per-action allowlist entry. The enable step turns actions on one by one; a false here means no consumer may call it."
+        },
+        "safety": {
+          "enum": ["read", "reversible-write", "spend"],
+          "description": "read = free, cacheable, widget-safe. reversible-write = allowed, logged, undo where possible (add to cart, toggle a light). spend = spends money / sends a message / deletes / books — irreversible; never automatic, per-call user confirmation required, never callable by a widget."
+        },
+        "origin": {
+          "enum": ["official", "captured"],
+          "description": "official = a documented/first-party API. captured = learned by observing the app's traffic. Captured actions start read-only until the user promotes them (see 'promoted')."
+        },
+        "promoted": {
+          "type": "boolean",
+          "default": false,
+          "description": "Only meaningful for origin=captured: the user has reviewed and promoted this action beyond read. A captured action with safety other than 'read' MUST have promoted=true."
+        },
+        "widget": {
+          "type": "boolean",
+          "default": false,
+          "description": "May a home widget bind to this action? Only ever allowed for safety=read."
+        },
+        "confirm": {
+          "type": "boolean",
+          "default": false,
+          "description": "Require explicit per-call user confirmation. Forced true for safety=spend."
+        },
+        "confirm_template": {
+          "type": "string",
+          "description": "Human string shown at the confirmation, e.g. 'Order {item_count} items from {restaurant} for {currency}{total}?'. Required when confirm is true."
+        },
+        "undo": {
+          "type": "string",
+          "description": "Action id that undoes this one (for reversible-write), or 'inverse' when calling this action with the prior state reverts it."
+        },
+        "refresh": {
+          "type": "object",
+          "description": "Widget/read refresh hints.",
+          "additionalProperties": false,
+          "properties": {
+            "poll_s": { "type": "integer", "minimum": 1 },
+            "event_stream": { "type": "string", "description": "A push/SSE/WS endpoint to subscribe to instead of polling." }
+          }
+        },
+        "rate_limit": { "$ref": "#/$defs/policy/properties/rate_limit" },
+        "cache_ttl_s": { "type": "integer", "minimum": 0 },
+        "inputs": {
+          "type": "object",
+          "description": "JSON Schema for the action's arguments.",
+          "default": { "type": "object", "properties": {} }
+        },
+        "output": {
+          "type": "object",
+          "description": "JSON Schema for the result (shapes the typed SDK + widget binding)."
+        },
+        "endpoint": {
+          "type": "object",
+          "description": "How the action maps to a request. For base.kind=cli this is an argv template instead of HTTP.",
+          "additionalProperties": false,
+          "properties": {
+            "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] },
+            "path": { "type": "string", "description": "Path (may contain {input} placeholders). For captured actions this is the templated path from the OpenAPI spec; 'operationId' may reference it instead." },
+            "operationId": { "type": "string", "description": "Link to an operation in the captured OpenAPI spec (har2openapi.py output)." },
+            "auth": { "type": "string", "description": "Which auth.tokens entry to attach (omit for unauthenticated)." },
+            "argv": { "type": "array", "items": { "type": "string" }, "description": "CLI argv template when base.kind=cli." },
+            "body": { "type": "object", "description": "Static/templated request body for writes." },
+            "ui": {
+              "type": "object",
+              "description": "In-app UI automation instead of (or after) an API call: open a screen / drive the app's own UI. 'Show me a certain page' is a UI read action. A UI action that submits/changes data takes the safety class of what it does, same as an API action.",
+              "additionalProperties": false,
+              "properties": {
+                "deep_link": { "type": "string", "description": "A deep link / intent URI that opens the target screen directly (preferred: no scripted taps)." },
+                "route": { "type": "string", "description": "An in-PowOS route, e.g. 'app://local.lights', when the target is a PowOS app surface." },
+                "steps": {
+                  "type": "array",
+                  "description": "Fallback scripted UI steps when no deep link exists. Each step is replayed via the phone's accessibility/automation path (see docs).",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["do"],
+                    "properties": {
+                      "do": { "enum": ["tap", "type", "swipe", "wait", "assert_visible"] },
+                      "target": { "type": "string", "description": "Accessibility id / text / selector of the element." },
+                      "text": { "type": "string", "description": "Text to type (may contain {input} placeholders)." }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
