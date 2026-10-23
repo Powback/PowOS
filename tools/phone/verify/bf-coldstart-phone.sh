@@ -28,6 +28,17 @@ if [ -n "${APP:-}" ] && [ -z "${GAME:-}" ]; then
   export GAME=${GAME:-$APP} WIN_NAME=${WIN_NAME:-$GAME}
 fi
 . /var/tmp/powos-bf-lib.sh
+# Not ready: the game isn't fully installed yet, or Steam is still downloading something (a test set queued right after
+# its downloads, steam-install.sh). Exit 3 = the queue tries again in a later window: a launch timed during a
+# download measures Steam's network + disk, and the setup's Steam stop would cut the download off.
+not_ready() { local f fl busy=""
+  fl=$(steam_field "$APP" StateFlags); [ "${fl:-0}" = 4 ] || { echo "not ready: $GAME ($APP) not installed yet (StateFlags ${fl:--}) - again next window"; return 0; }
+  for f in "$HOME"/.local/share/Steam/steamapps/appmanifest_*.acf; do
+    fl=$(sed -nE 's/^\s*"StateFlags"\s*"([0-9]+)"/\1/p' "$f" | head -1)
+    [ $(( ${fl:-0} & (256 | 1024 | 1048576) )) = 0 ] || busy="$busy $(basename "$f" .acf | sed 's/appmanifest_//')"; done
+  [ -z "$busy" ] || { echo "not ready: Steam is downloading ($busy ) - again next window"; return 0; }
+  return 1; }
+not_ready && { rm -rf "$T"; exit 3; }
 S=$HOME/.local/share/Steam P="$S/steamapps/common/Proton - Experimental" F=$S/steamapps/common/FEX-Emu
 CD=$S/steamapps/compatdata/$APP
 # The game's install dir: its own process is the one that runs a file from there (Wine's preloader / the native player).

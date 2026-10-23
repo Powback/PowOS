@@ -72,7 +72,10 @@ iscript_reapers() { pgrep -f "SteamLaunch AppId=$APP Install=1"; }
 reaper() { local p; for p in $(reapers); do under "$p" "$(steam_pid)" && { echo "$p"; return; }; done; }  # Steam's own
 tree() { local t=("$1") o=() p; while ((${#t[@]})); do p=${t[0]}; t=("${t[@]:1}"); [ -n "$p" ] && o+=("$p") && t+=($(pgrep -P "$p")); done; echo "${o[*]}"; }
 ticks() { local n=0 p f; for p in "$@"; do f=$(cat "/proc/$p/stat" 2>/dev/null) || continue; f=${f##*) }; set -- $f; n=$((n + ${12} + ${13})); done; echo "$n"; }
-gamewin() { xwininfo -root -tree 2>/dev/null | awk -v n="\"$WIN_NAME\"" 'index($0, n) && !/has no name/ {print $1; exit}'; }
+# gamewin: the game's X window - the one named WIN_NAME, else one whose name starts with "WIN_NAME " (games that put
+# their build in the title: Noita's "Noita - Build Aug 12 2024 - ..." under Steam's name "Noita").
+gamewin() { xwininfo -root -tree 2>/dev/null | awk -v n="\"$WIN_NAME\"" -v p="\"$WIN_NAME " '
+  /has no name/ {next} index($0, n) {print $1; f = 1; exit} !q && index($0, p) {q = $1} END {if (!f && q) print q}'; }
 mapped() { xwininfo -id "$1" 2>/dev/null | awk '/Map State/ {print $3}'; }
 active() { printf '%d' "$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | awk '{print $NF}')" 2>/dev/null; }
 # cg2 <pid>: its cgroup v2 path (the "0::" line: since the 02:07 boot /proc/<pid>/cgroup also lists v1 hierarchies -
@@ -123,7 +126,7 @@ if not d:
 def find(w, name, out):  # every window of that name (Proton also has unmapped ones: "Steam" 400x300)
     n = C.c_char_p()
     if X.XFetchName(d, w, C.byref(n)) and n.value is not None:
-        if n.value == name:
+        if n.value == name or n.value.startswith(name + b" "):  # gamewin's rule: the name, or "<name> ..."
             out.append(w)
         X.XFree(n)
     r, p, k, c = C.c_ulong(), C.c_ulong(), C.POINTER(C.c_ulong)(), C.c_uint()

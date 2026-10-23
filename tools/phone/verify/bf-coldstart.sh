@@ -26,7 +26,7 @@ for f in bf-coldstart-phone.sh bf-lib.sh bf-stop.sh; do "$A" push "$here/$f" /da
   | tr -d '\r' | tee "$OUT/run.txt"
 "$A" shell "su -c 'rm -f /data/local/tmp/powos-open-task /data/local/tmp/powos-bf-coldstart-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-bf-coldstart-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-stop.sh'"
 echo "artefacts: $OUT/run.txt"
-grep -q "^RESULT" "$OUT/run.txt" || { grep -q "^user input\|^stopped from outside" "$OUT/run.txt" && exit 3; echo "FAIL run: no RESULT line"; exit 1; }
+grep -q "^RESULT" "$OUT/run.txt" || { grep -q "^user input\|^stopped from outside\|^not ready" "$OUT/run.txt" && exit 3; echo "FAIL run: no RESULT line"; exit 1; }
 grep "^RESULT" "$OUT/run.txt" | tail -1
 grep -q "^RESULT.*FAIL" "$OUT/run.txt" && exit 1
 exit 0

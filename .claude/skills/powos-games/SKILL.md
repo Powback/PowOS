@@ -156,6 +156,12 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - bf-coldstart works for any appid: `app:<id>` (`win:<title>` if the window isn't titled like the Steam name); the exe
   stage = a process running a file from common/<installdir>/ whose exe is FEX or Wine. Setup tokens: cfg:x86|arm64|
   native|auto, opt:vk|gl|base, env:K=V, keep (else mode + launch options are put back at the end).
+- New games for tests: `queue.sh add <task> steam-install.sh <appid>...` (steam-install-phone.sh: Steam's own
+  steam://install/<id>, Return on its install dialog, done when the appmanifest appears; closes the windows it raised;
+  never launches/buys). Then queue `bf-coldstart.sh app:<id> cfg:auto keep cold` per game: it exits 3 "not ready"
+  (retried next window) while the game isn't StateFlags 4 or any manifest has a download running (256|1024|1048576).
+  Window match (bf-lib gamewin / xframes): the Steam name, else a title starting "<name> " (Noita's has its build).
+  Test set 2026-10-23 (board "Game test set: varied engines", owned + single-player only): see that task.
 
 ## Causes found (don't re-investigate)
 - Every launch dies ~10-16 s into Wine, no window, gameprocess_log "exit code -1" (2026-10-23): the prefix's
