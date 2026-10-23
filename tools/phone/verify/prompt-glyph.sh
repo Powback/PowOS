@@ -34,7 +34,9 @@ sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >
 probe() {
   printf '%s' 'JSON.stringify((()=>{const p=document.querySelector("'"$1"'");if(!p)return {found:false};const f=p.querySelector("textarea"),g=p.querySelector(".prompt"),c=g&&getComputedStyle(g),t=f&&getComputedStyle(f);return {found:true,label:f&&f.getAttribute("aria-label"),ph:f&&f.placeholder,empty:f&&!f.value,glyph:g&&g.textContent,color:c&&c.color,font:c&&c.fontFamily.slice(0,40),size:c&&c.fontSize,textSize:t&&t.fontSize,muted:getComputedStyle(document.documentElement).getPropertyValue("--color-muted").trim()}})())'
 }
-read_() { "$T/cdp.sh" eval home "$(probe "$1")" 2>&1 | tr -d '\\' | tail -1; }
+# cdp.sh prints the probe's JSON string JSON-encoded: kept whole (escapes and all) and decoded twice in python - stripping
+# the backslashes broke it on the font name's own quotes ("JetBrainsMono Nerd Font", 2026-10-23).
+read_() { "$T/cdp.sh" eval home "$(probe "$1")" 2>&1 | tail -1; }
 home=$(read_ '.home > .bar .pill')
 "$T/shot.sh" "$OUT/prompt-glyph-home.png" >/dev/null 2>&1
 sh_ "input swipe $((W * 3 / 10)) $((H / 2)) $((W * 9 / 10)) $((H / 2)) 350"; sleep 1.5; chk ai
@@ -51,7 +53,9 @@ python3 - "$home" "$ai" <<'PY'
 import json, sys
 bad = []
 for raw, name, label in [(sys.argv[1], "home's pill", "Search"), (sys.argv[2], "the AI compose", "Ask PowOS AI")]:
-    try: p = json.loads(raw.strip('"'))
+    try:
+        p = json.loads(raw)
+        p = json.loads(p) if isinstance(p, str) else p
     except Exception: bad.append(f"{name}: nothing read over CDP ({raw[:120]})"); continue
     if not p.get("found"): bad.append(f"{name}: not on screen"); continue
     if p.get("label") != label: bad.append(f"{name}: aria-label {p.get('label')!r}, not {label!r}")

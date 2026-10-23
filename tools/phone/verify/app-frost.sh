@@ -14,7 +14,12 @@ const a=L.find(x=>x.id==="local.lights")||L.find(ok);if(!a)return "no-app";A.ope
 probe='JSON.stringify((()=>{const e=document.querySelector(".app-screen");if(!e)return {open:false};const c=getComputedStyle(e);
 return {open:true,app:e.dataset.app,tile:e.classList.contains("tile"),blur:c.getPropertyValue("--glass-blur-native").trim(),
 frost:c.getPropertyValue("--frost-blur-native").trim(),bg:c.backgroundImage.slice(0,160)}})())'
+# Whatever happens after the open, the page is closed again (a failed run once left Lights open on the user's screen).
+trap "ev 'window.__powosApps&&window.__powosApps.closeApp(),1' >/dev/null" EXIT
 o=$(ev "$open")
+# cdp.sh prints the answer JSON-quoted ("opened local.lights"): unquote before matching - the quotes made a page that
+# DID open read as a failure (2026-10-23).
+o=${o#\"}; o=${o%\"}
 case "$o" in opened*) ;; *) echo "FAIL: couldn't open an app page ($o)"; exit 1 ;; esac
 sleep 1.2
 p=$(ev "$probe")
