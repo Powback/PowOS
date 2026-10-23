@@ -159,6 +159,14 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   ObjectManager at /org/freedesktop + the Devices/StateReason properties; Andromarchy's android-nm had neither, so
   libnm saw "not running". Fixed in PowOS's copy targets/android/session/android-nm (deploy installs + restarts it).
   Check what libnm sees: python gi NM.Client.new() with DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/powos-app/system_bus.
+  That alone did NOT end the wait (2026-10-23 23:04): steamrtarm64/steamclient.so (CNetworkDeviceManagerLinux, the
+  only libnm user) opens each NM device with libudev from its Udi as a sysfs path and DROPS it on failure -
+  console_log "Init: failed to open udev_device for wlan0 (sysfs path: /org/freedesktop/NetworkManager/Devices/1)" -
+  and reads the IP from nm_device_get_ip4_config. android-nm now serves the real interface (Udi = realpath of
+  /sys/class/net/<if>, MAC, IP4Config with address/gateway/DNS, from `ip route get`). steamui.so waits on that
+  manager (NetworkDeviceStateChange), not on NM State/Connectivity. android-nm is started by every session
+  (powos-rooted-session `bg android-nm`, app mode SessionService); `pgrep android-nm` (comm) works since this fix,
+  before it was "python3" - use `pgrep -af android-nm`.
 - Steam logs per stage: bootstrap_log (update/verify), steamui_login (network wait), connection_log (CM logon),
   console_log (ExecCommandLine, GameAction tasks), gameprocess_log (pids). Read them before strace.
 - Base state: Steam resident (pkgs/steam powos-steam-resident, session autostart, `steam -silent` 60 s after login,

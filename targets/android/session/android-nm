@@ -11,7 +11,16 @@
 # ObjectManager at /org/freedesktop (GetManagedObjects + InterfacesAdded/Removed) and the Devices properties: without
 # them it saw "NetworkManager not running", no device, state unknown - and Steam's login waited 10-20 s for a network
 # at every start ("Timed out waiting for network", steamui_login.txt, 213 of 222 logins until 2026-10-23).
+# Steam's network device manager (steamclient.so, CNetworkDeviceManagerLinux) then opens every NM device with libudev
+# from its Udi as a SYSFS path and drops the device when that fails ("Init: failed to open udev_device for wlan0
+# (sysfs path: /org/freedesktop/NetworkManager/Devices/1)", console_log.txt), and takes the device's address from its
+# IP4Config: with D-Bus paths as Udi and no IP4Config it saw no device up, so the login still waited 10 s. So each
+# device is the REAL interface (its sysfs path as Udi, its MAC) with a real IP4Config (address, gateway, DNS), as
+# NetworkManager serves it; where the interfaces can't be read (the app's unprivileged session), the old values stay.
 import os
+import re
+import socket
+import struct
 import subprocess
 import uuid
 import warnings
@@ -99,6 +108,21 @@ XML = f"""<node>
  <interface name="{P}.Device.Wired">
   <property name="Speed" type="u" access="read"/>
  </interface>
+ <interface name="{P}.IP4Config">
+  <property name="Addresses" type="aau" access="read"/>
+  <property name="AddressData" type="aa{{sv}}" access="read"/>
+  <property name="Gateway" type="s" access="read"/>
+  <property name="Routes" type="aau" access="read"/>
+  <property name="RouteData" type="aa{{sv}}" access="read"/>
+  <property name="Nameservers" type="au" access="read"/>
+  <property name="NameserverData" type="aa{{sv}}" access="read"/>
+  <property name="Domains" type="as" access="read"/>
+  <property name="Searches" type="as" access="read"/>
+  <property name="DnsOptions" type="as" access="read"/>
+  <property name="DnsPriority" type="i" access="read"/>
+  <property name="WinsServers" type="au" access="read"/>
+  <property name="WinsServerData" type="as" access="read"/>
+ </interface>
  <interface name="{P}.AccessPoint">
   <property name="Ssid" type="ay" access="read"/>
   <property name="Strength" type="y" access="read"/>
@@ -135,6 +159,12 @@ XML = f"""<node>
 INFO = {i.name: i for i in Gio.DBusNodeInfo.new_for_xml(XML).interfaces}
 
 kind, strength, ssid = "none", 0, ""
+IP4 = {WIFI: NM + "/IP4Config/1", WIRED: NM + "/IP4Config/2"}
+SYS_NET = "/sys/class/net"
+# Per device: the real interface behind it (name, sysfs path, MAC, IPv4 addresses, gateway); refreshed by update().
+FALLBACK = {WIFI: {"iface": "wlan0", "hw": "00:00:00:00:00:01"}, WIRED: {"iface": "android0", "hw": "00:00:00:00:00:02"}}
+link = {d: dict(v, udi=d, addrs=[], gw="") for d, v in FALLBACK.items()}
+dns = []
 gen = 0  # bumped per Wi-Fi network: new object paths, so Quickshell registers the new SSID
 conn = None
 registered = []
@@ -156,6 +186,60 @@ def read_state():
         kind, strength, ssid = "wifi", max(0, min(100, int(parts[1]))), (parts[2] if len(parts) > 2 else "") or "Wi-Fi"
     elif parts[0] in ("wired", "none"):
         kind = parts[0]
+
+
+def run(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def wireless(name):
+    return os.path.isdir(os.path.join(SYS_NET, name, "wireless"))
+
+
+def iface_info(dev, name, gw):
+    sysfs = os.path.join(SYS_NET, name)
+    if not name or not os.path.exists(sysfs):
+        return dict(FALLBACK[dev], udi=dev, addrs=[], gw="")
+    try:
+        with open(os.path.join(sysfs, "address")) as f:
+            hw = f.read().strip().upper()
+    except OSError:
+        hw = FALLBACK[dev]["hw"]
+    addrs = [(a, int(n)) for a, n in re.findall(r"inet (\d+\.\d+\.\d+\.\d+)/(\d+)", run("ip", "-o", "-4", "addr", "show", "dev", name))]
+    return {"iface": name, "udi": os.path.realpath(sysfs), "hw": hw, "addrs": addrs, "gw": gw}
+
+
+def read_links():  # the interfaces Android routes through (as root: the rooted session; else the fallbacks)
+    global dns
+    route = run("ip", "-o", "-4", "route", "get", "1.1.1.1")
+    dev = (re.search(r"\bdev (\S+)", route) or [None, ""])[1]
+    via = (re.search(r"\bvia (\S+)", route) or [None, ""])[1]
+    try:
+        radios = sorted(n for n in os.listdir(SYS_NET) if wireless(n))
+    except OSError:
+        radios = []
+    # The Wi-Fi device: the routed interface when it is a radio, else the station one (wlan*, not p2p/aware).
+    wlan = dev if dev in radios else next((n for n in radios if n.startswith("wlan")), radios[0] if radios else "")
+    wired = dev if dev and dev not in radios else ""
+    new = {WIFI: iface_info(WIFI, wlan, via if dev == wlan else ""),
+           WIRED: iface_info(WIRED, wired, via if dev == wired else "")}
+    try:
+        with open(DNS_FILE) as f:
+            dns = [a for a in f.read().split() if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", a)]
+    except OSError:
+        dns = []
+    return new
+
+
+def u32(addr):  # NetworkManager's legacy "au"/"aau" address form: the address bytes as a native uint32
+    return struct.unpack("=I", socket.inet_aton(addr))[0]
+
+
+def ip4_up(dev):
+    return (kind == "wifi" if dev == WIFI else kind == "wired") and bool(link[dev]["addrs"])
 
 
 def props(path, iface):
@@ -186,16 +270,15 @@ def props(path, iface):
         up = wifi_up if wifi else wired_up
         return {
             "DeviceType": GLib.Variant("u", 2 if wifi else 1),  # wifi / ethernet
-            "Interface": GLib.Variant("s", "wlan0" if wifi else "android0"),
-            "HwAddress": GLib.Variant("s", "00:00:00:00:00:0" + ("1" if wifi else "2")),
+            "Interface": GLib.Variant("s", link[path]["iface"]), "HwAddress": GLib.Variant("s", link[path]["hw"]),
             "Managed": GLib.Variant("b", True), "State": GLib.Variant("u", 100 if up else 30),  # activated / disconnected
             "StateReason": GLib.Variant("(uu)", (100 if up else 30, 0)),  # libnm takes the state from here
             "Autoconnect": GLib.Variant("b", True),
             "AvailableConnections": GLib.Variant("ao", [p["settings"]] if wifi and wifi_up else []),
             "ActiveConnection": o((p["active"] if wifi else p["wired_active"]) if up else "/"),
             "InterfaceFlags": GLib.Variant("u", 0x10003 if up else 0x1),  # up, lower up, carrier
-            "Ip4Config": o("/"), "Ip6Config": o("/"), "Driver": GLib.Variant("s", "android"),
-            "Udi": GLib.Variant("s", path), "Real": GLib.Variant("b", True),
+            "Ip4Config": o(IP4[path] if ip4_up(path) else "/"), "Ip6Config": o("/"), "Driver": GLib.Variant("s", "android"),
+            "Udi": GLib.Variant("s", link[path]["udi"]), "Real": GLib.Variant("b", True),
         }
     if iface == P + ".Device.Wireless":
         aps = [p["ap"]] if wifi_up else []
@@ -206,6 +289,20 @@ def props(path, iface):
         }
     if iface == P + ".Device.Wired":
         return {"Speed": GLib.Variant("u", 0)}
+    if iface == P + ".IP4Config":
+        dev = WIFI if path == IP4[WIFI] else WIRED
+        l, gw = link[dev], link[dev]["gw"]
+        return {
+            "Addresses": GLib.Variant("aau", [[u32(a), n, u32(gw) if gw else 0] for a, n in l["addrs"]]),
+            "AddressData": GLib.Variant("aa{sv}", [{"address": GLib.Variant("s", a), "prefix": GLib.Variant("u", n)}
+                                                   for a, n in l["addrs"]]),
+            "Gateway": GLib.Variant("s", gw), "Routes": GLib.Variant("aau", []), "RouteData": GLib.Variant("aa{sv}", []),
+            "Nameservers": GLib.Variant("au", [u32(a) for a in dns]),
+            "NameserverData": GLib.Variant("aa{sv}", [{"address": GLib.Variant("s", a)} for a in dns]),
+            "Domains": GLib.Variant("as", []), "Searches": GLib.Variant("as", []), "DnsOptions": GLib.Variant("as", []),
+            "DnsPriority": GLib.Variant("i", 100), "WinsServers": GLib.Variant("au", []),
+            "WinsServerData": GLib.Variant("as", []),
+        }
     if iface == P + ".AccessPoint":
         return {
             "Ssid": GLib.Variant("ay", ssid.encode()), "Strength": GLib.Variant("y", strength),
@@ -220,7 +317,8 @@ def props(path, iface):
             "Id": GLib.Variant("s", "Android" if wired else ssid), "Devices": GLib.Variant("ao", [WIRED if wired else WIFI]),
             "Uuid": GLib.Variant("s", str(uuid.uuid5(uuid.NAMESPACE_DNS, "Android" if wired else ssid))),
             "Default": GLib.Variant("b", path == primary_path()), "Default6": GLib.Variant("b", False),
-            "SpecificObject": o("/" if wired else p["ap"]), "Ip4Config": o("/"), "Ip6Config": o("/"),
+            "SpecificObject": o("/" if wired else p["ap"]), "Ip6Config": o("/"),
+            "Ip4Config": o(IP4[WIRED if wired else WIFI] if ip4_up(WIRED if wired else WIFI) else "/"),
         }
     return {}
 
@@ -234,7 +332,8 @@ def objects():  # what GetManagedObjects lists: path -> interfaces (the current 
     p = paths()
     return {NM: [P], NM + "/Settings": [P + ".Settings"], WIFI: [P + ".Device", P + ".Device.Wireless"],
             WIRED: [P + ".Device", P + ".Device.Wired"], p["wired_active"]: [P + ".Connection.Active"],
-            p["ap"]: [P + ".AccessPoint"], p["settings"]: [P + ".Settings.Connection"], p["active"]: [P + ".Connection.Active"]}
+            p["ap"]: [P + ".AccessPoint"], p["settings"]: [P + ".Settings.Connection"], p["active"]: [P + ".Connection.Active"],
+            IP4[WIFI]: [P + ".IP4Config"], IP4[WIRED]: [P + ".IP4Config"]}
 
 
 def managed(path, ifaces):
@@ -313,12 +412,18 @@ def follow_dhcp_dns():  # resolv.conf on "DHCP" (omarchy-dns) follows the DNS of
     dns_seen = dns
 
 
+ticks = 0
+
+
 def update():
-    global gen
+    global gen, link, ticks
     follow_dhcp_dns()
-    old = (kind, strength, ssid)
+    old, old_link, old_dns = (kind, strength, ssid), link, dns
     read_state()
-    if (kind, strength, ssid) == old:
+    ticks += 1
+    if (kind, strength, ssid) != old or ticks % 10 == 0:  # the interfaces: on a network change, else every 30 s (DHCP)
+        link = read_links()
+    if (kind, strength, ssid) == old and (link, dns) == (old_link, old_dns):
         return True
     if kind == "wifi" and (old[0] != "wifi" or old[2] != ssid):  # another network: fresh objects for its SSID
         if old[0] == "wifi":
@@ -338,7 +443,8 @@ def update():
         emit_changed(paths()["ap"], P + ".AccessPoint")
     for path, iface in ((WIFI, P + ".Device"), (WIFI, P + ".Device.Wireless"), (WIRED, P + ".Device"), (NM, P),
                         (NM + "/Settings", P + ".Settings"), (paths()["active"], P + ".Connection.Active"),
-                        (paths()["wired_active"], P + ".Connection.Active")):
+                        (paths()["wired_active"], P + ".Connection.Active"), (IP4[WIFI], P + ".IP4Config"),
+                        (IP4[WIRED], P + ".IP4Config")):
         emit_changed(path, iface)
     return True
 
@@ -353,10 +459,18 @@ def on_bus(c, name):
         for i in ifaces:
             c.register_object(path, INFO[i], on_call, on_get, on_set)
     c.register_object(paths()["wired_active"], INFO[P + ".Connection.Active"], on_call, on_get, on_set)
+    for path in IP4.values():
+        c.register_object(path, INFO[P + ".IP4Config"], on_call, on_get, on_set)
     register_network_objects()
     GLib.timeout_add_seconds(3, update)
 
 
+try:  # the process's name: `pgrep android-nm` found nothing (it was "python3"), so a running one looked missing
+    with open("/proc/self/comm", "w") as f:
+        f.write("android-nm")
+except OSError:
+    pass
 read_state()
+link = read_links()
 Gio.bus_own_name(Gio.BusType.SYSTEM, P, Gio.BusNameOwnerFlags.NONE, on_bus, None, None)
 GLib.MainLoop().run()
