@@ -108,7 +108,11 @@ class WindowFrame(
                     "task $id bar ${barParams.height} px (${BAR_DP + HIT_DP} dp, glass $BAR_DP) frost blur ${Frost.BLUR_DP} dp fill=#%08x veil=#%08x sheen=#%08x edge=#%08x ink=#%08x"
                         .format(frost.fill, frost.veil, frost.sheen, frost.edge, frost.ink),
                 )
-            }.onFailure { android.util.Log.w("PowosWindowFrame", "can't add the frame of task $id", it) }
+            }.onFailure {
+                android.util.Log.w("PowosWindowFrame", "can't add the frame of task $id", it)
+                // Refused (the overlay app op reset): granted again, the next refresh adds it.
+                WindowFrames.current?.frameRefused()
+            }
         } else {
             runCatching {
                 wm.updateViewLayout(bar, barParams)

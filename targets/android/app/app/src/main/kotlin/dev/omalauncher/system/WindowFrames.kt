@@ -5,6 +5,7 @@ import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import android.view.WindowManager
@@ -29,6 +30,7 @@ class WindowFrames(
     private val refreshNow = Runnable { refresh() }
 
     fun start(): Boolean {
+        overlayGrant()
         stopListening =
             FreeformTasks.listen {
                 events++
@@ -41,6 +43,32 @@ class WindowFrames(
         refresh()
         return stopListening != null
     }
+
+    /**
+     * The frames are TYPE_APPLICATION_OVERLAY windows (over apps, UNDER the status bar and the shade - the recents role's
+     * 2017 would sit over the shade), which need the "display over other apps" app op. It was found reset to default on
+     * 2026-10-23 ("permission denied for window type 2038": no title bars at all), so it's granted again through root
+     * whenever it's missing, as QuickSettings does WRITE_SETTINGS. HACK: the user's grant done for them. Real fix: the
+     * grant in PowOS's setup (Settings > display over other apps), kept.
+     */
+    private fun overlayGrant() {
+        if (Settings.canDrawOverlays(context)) return
+        Thread {
+            val r = runCatching { andro.marchy.RootShell.run("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow") }.getOrNull()
+            Log.i(TAG, "overlay app op was off: granted again (${r?.code ?: "no root"})")
+            main.post(refreshNow)
+        }.start()
+    }
+
+    /** A frame couldn't be added (WindowFrame): the app op again, at most once a minute. */
+    fun frameRefused() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastGrant < GRANT_EVERY_MS) return
+        lastGrant = now
+        overlayGrant()
+    }
+
+    private var lastGrant = 0L
 
     fun stop() {
         stopListening?.invoke()
@@ -277,6 +305,7 @@ class WindowFrames(
     companion object {
         private const val TAG = "PowosWindowFrames"
         private const val SETTLE_MS = 80L
+        private const val GRANT_EVERY_MS = 60_000L
         private const val DENSE_TRIES = 8
         private const val DENSE_RETRY_MS = 500L
         private const val SYSUI_KEYGUARD_SHOWING = 1L shl 6

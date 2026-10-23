@@ -115,8 +115,12 @@ sleep 2; floats "$DT" Dolphin; "$T/shot.sh" "$OUT/dolphin.png"
 
 # 3. An image opened the way Dolphin opens it.
 before=$(lin)
-us "nohup kioclient exec $IMG >/dev/null 2>&1 &"
+# setsid: out of the user.sh session, whose end took a plain `nohup ... &` kioclient with it before Gwenview started
+# ("gwenview processes: 0", 2026-10-23 - likely; its log below says). KDE picks Gwenview (InitialPreference 8 over
+# Brave's 1 for image/png).
+us "setsid -f kioclient exec $IMG >/tmp/linux-float-kio.log 2>&1 < /dev/null"
 GT=$(new_tasks 25 "$before"); sleep 3; chk gwenview
+log "kioclient said: $(us 'tail -3 /tmp/linux-float-kio.log' | tr '\n' ' ')"
 GT=$(comm -13 <(echo "$before") <(lin)); n=$(echo "$GT" | grep -c .)
 g=$(us 'pgrep -xc gwenview' | tail -1); log "new tasks: $(echo $GT) gwenview processes: $g"
 [ "$n" -ge 1 ] || fail "opening an image made no window task in 25 s (export-new?)"
