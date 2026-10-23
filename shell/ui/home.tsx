@@ -186,9 +186,14 @@ const windowed = computed(() => {
   return out;
 });
 
+/** The apps with a floating window that aren't in [pinned]: (key, "running" | "minimised"). */
+function windowedOnly(pinned: string[]): [string, string][] {
+  return [...windowed.value.entries()].filter(([k]) => !pinned.includes(k) && byKey.value.has(k));
+}
+
 /** After the pinned apps: the apps with a floating window that aren't pinned, so every window can be reached. */
 function DockWindows({ pinned }: { pinned: string[] }) {
-  const shown = [...windowed.value.entries()].filter(([k]) => !pinned.includes(k));
+  const shown = windowedOnly(pinned);
   return (
     <>
       {shown.map(([k, state]) => {
@@ -271,6 +276,10 @@ export function Dock() {
           {(!ghost || carried) && (
             <div
               class="dock-page"
+              // Wide, the cells share the bar's left end: more than six (the windows' apps after the pinned ones) get
+              // narrower slots instead of running on under the pill (shell.css --cells; a Calculator window's icon
+              // sat under the pill, its tap opened the drawer: dock-taskbar FAIL 2026-10-23).
+              style={{ "--cells": String(slots + (!d && !carried ? windowedOnly(dock.value).length : 0)) }}
               ref={(node) => {
                 el.current = node;
               }}
