@@ -449,7 +449,12 @@ class WindowFrame(
     ) {
         moving = !resizing
         worker.execute { live = FreeformTasks.Live(context, id, resizing) }
-        leash = if (TaskLeash.enabled(context)) startLeash(resizing, target) else null
+        // Resizes go the old way (live bounds per move, a plain end) unless `settings put global powos_leash_resize 1`:
+        // with the leash open, the per-move bounds and the end were unreliable (resize-probe 2026-10-23: one run kept
+        // the old bounds 5 s with the app's input window gone - touches fell to home; others left a "Transition Root"
+        // layer). Moves keep the leash (no WM call until the lift). Leash off 10/10 PASS on the same probe.
+        val leashResize = android.provider.Settings.Global.getInt(context.contentResolver, "powos_leash_resize", 0) == 1
+        leash = if (TaskLeash.enabled(context) && (!resizing || leashResize)) startLeash(resizing, target) else null
         if (legacyDrag()) return
         val bitmapOf = { v: View -> runCatching { v.drawToBitmap() }.getOrNull() }
         val layer = DragLayer(context, bitmapOf(bar), if (resizing) bitmapOf(grip) else null, dp(BAR_DP + HIT_DP), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)

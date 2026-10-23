@@ -136,7 +136,9 @@ export async function startDesktops() {
 export async function dockTap(key: string) {
   // The top-most one SHOWING: a listed task that isn't visible (no bounds - e.g. a translucent PowOS task left in
   // freeform, seen 2026-10-23) is no one's front, or a tap on Chrome in front launched instead of minimising (e2e r3).
-  const front = windows.value.find((w) => !w.minimised && !w.away && !!w.bounds);
+  // PowOS's own non-Linux tasks (no app key: a translucent host left in freeform) are no one's front either - likely why
+  // a dock tap on Chrome in front launched it again (e2e 1023-1807: minimised=false); dock-taskbar.sh measures it.
+  const front = windows.value.find((w) => !w.minimised && !w.away && !!w.bounds && (!!w.app || w.pkg !== "com.powos.app"));
   if (front && isOf(front, key) && powos.floating?.minimise) {
     const done = await powos.floating.minimise(front.id).catch(() => false);
     if (done) return;
