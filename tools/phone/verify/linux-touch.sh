@@ -63,8 +63,15 @@ touched() {  # DOWN at $1 $2, the touch state while it is down, UP
 
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
-run=$(us "pgrep -x kate; pgrep -x dolphin" | tail -2)
-[ -z "$run" ] || { echo "kate or dolphin already runs (the user's: never closed): not now"; exit 3; }
+# A Kate/Dolphin started while the phone sat untouched is another check's leftover (closed); one older than the
+# user's last touch may be the user's: never closed, not now.
+IDLE=$("$T/idle.sh" | sed -nE 's/^idle=([0-9]+).*/\1/p'); IDLE=${IDLE:-0}
+for p in kate dolphin; do
+  age=$(us "ps -o etimes= -C $p | sort -n | tail -1" | tail -1 | tr -dc 0-9)
+  [ -z "$age" ] && continue
+  [ "$age" -lt "$IDLE" ] || { echo "$p runs since ${age}s, the user touched the phone ${IDLE}s ago (maybe theirs): not now"; exit 3; }
+  echo "$p left by a check (${age}s old, phone idle ${IDLE}s): closed"; us "pkill -x $p; true"; sleep 2
+done
 [ "$(us "pgrep -fc 'SteamLaunch AppId='" | tail -1)" = 0 ] || { echo "a game runs under Steam (the user's): not now"; exit 3; }
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1); W=${WH% *}
