@@ -7,6 +7,9 @@
 #          buffer not scaled); restore -> EXACTLY the bounds before; a double tap on the bar does the same.
 #   kate:  Kate (a Linux window): the same maximise / restore; then Kate's own full screen (Ctrl+Shift+F): the task covers
 #          the whole screen (no PowOS bar, home and its dock not shown); Ctrl+Shift+F again: back floating at its bounds.
+#   ffplay: a test video in ffplay as an X11 window (SDL through Xwayland and KWin, the way Proton games draw): `f`
+#          makes it full screen by its own request - the task covers the screen, no bar, no dock; `f` again: back
+#          floating at exactly its bounds.
 #   video: a page in Chrome (window-max-video.html, served on the phone's 127.0.0.1) whose video asks for full screen on a
 #          tap: the task covers the whole screen, no bar, no dock; Back leaves it: floating at its bounds again.
 # Only what it opened is closed (e2e-lib: Calculator/Chrome tasks it started, Kate if it started it; a stage whose app
@@ -14,9 +17,10 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 STAGE=${1:-calc}; shift || true
-case $STAGE in calc|kate|video) ;; *) echo "stage: calc | kate | video"; exit 2 ;; esac
+case $STAGE in calc|kate|video|ffplay) ;; *) echo "stage: calc | kate | video | ffplay"; exit 2 ;; esac
 . "$here/e2e-lib.sh"
 e2e_args "$@"
+E2E_LINUX="dolphin kate gwenview ffplay"
 e2e_init "max-$STAGE"
 e2e_setup inner
 REC=$HOME/.cache/powos-verify/window-max/$ROUND; mkdir -p "$REC"
@@ -172,6 +176,19 @@ video)
   else fail "no Chrome window"; fi
   us "pkill -f 'http.server 8765'; rm -rf /tmp/wmax; true" >/dev/null
   rec_stop video ;;
+ffplay)
+  [ -n "$(us 'pgrep -x ffplay' | tail -1)" ] && { note "ffplay was already running (the user's): the stage skipped"; e2e_finish; exit 0; }
+  rec_start ffplay 90
+  # In the Plasma session's own environment (plasmashell's), as an X11 client: Xwayland, like a Proton game.
+  us "P=\$(pgrep -x plasmashell | head -1); while IFS= read -r -d '' kv; do export \"\$kv\"; done < /proc/\$P/environ; SDL_VIDEODRIVER=x11 setsid -f ffplay -loglevel error -window_title PowOS-check-video -x 960 -y 540 -f lavfi testsrc2=size=1280x720:rate=30 >/tmp/wmax-ffplay.log 2>&1 </dev/null; echo started" >/dev/null
+  FT=none; for _ in $(seq 1 15); do FT=$(tasks | awk '/PowosWindowActivity/{print $1}' | while read -r t; do grep -q "^$t " <<<"$TASKS0" || echo "$t"; done | head -1); [ -n "$FT" ] && break; FT=none; sleep 1; done
+  chk ffplay; step ffplay "ffplay's video in a window"
+  if [ "$FT" != none ]; then
+    sleep 1.5; set -- $(tbounds "$FT"); tap $((($1 + $3) / 2)) $((($2 + $4) / 2)) "the video (its focus)"; sleep 0.6
+    fscheck "$FT" "SurfaceView[com.powos.app/andro.marchy.PowosWindowActivity" ffplay "sh_ 'input keyevent KEYCODE_F'" "sh_ 'input keyevent KEYCODE_F'"
+  else fail "no ffplay window task ($(us 'cat /tmp/wmax-ffplay.log' | tail -2))"; fi
+  us "pkill -x ffplay; true" >/dev/null
+  rec_stop ffplay ;;
 esac
 logc_get
 grep -E "maximis|full screen|now a window|PowosFreeform" "$OUT/logcat.txt" | tail -12 | tee -a "$OUT/log.txt"
