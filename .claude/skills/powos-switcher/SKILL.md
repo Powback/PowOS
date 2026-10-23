@@ -97,6 +97,20 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   Linux windows: the same path by their `app` key (see Linux windows in the dock + switcher). Gate: dockTapCheck.
 - Title bar: minimise, maximise (WindowFrames.maximise: whole AppWindows.area, again = the bounds before; moved by hand
   = ordinary again), close. Tap offsets from the right: close 21 dp, maximise 55, minimise 89.
+- Maximise / app full screen (window-max, 2026-10-23): maximise = resizeTask to AppWindows.area; the restore entry
+  (WindowFrames.Max) is kept until the task LISTS the new bounds (at 80 ms it often still lists the old: the old
+  retainAll dropped it there, so restore did nothing), then while it keeps them. Double tap on the bar = maximise
+  (WindowFrame.barTapped, in release). App's own full screen: Chrome's HTML full screen calls
+  Activity.requestFullscreenMode (dex: "DisplayEdgeToEdgeFullscreen" feature gate); adopt() used to float any visible
+  full-screen task back - now tasks seen floating (`windowed`) are left full screen, their bounds kept (`fullBefore`)
+  and set back when they float again (backFromFullScreen). Linux: KWin 0021 "fullscreen <id> 1|0" (cap fullscreen) ->
+  PowosWindowActivity.appFullScreen (immersive) -> WindowTasks.fullScreenTask -> WindowFrames.appFullScreen ->
+  FreeformTasks.setFullScreen (WCT mode UNDEFINED/FREEFORM + bounds as a change transition). Before 0021 an exported
+  floating window going full screen stayed in its task, scaled down (0017 fitsWindow), frame + dock around it.
+  NOT yet measured on the device: whether WM grants Chrome's request with freeform tasks on a full-screen display,
+  and whether resizeTask's maximise leaves a stale/white area. Check: verify/window-max.sh calc|kate|video
+  (recordings in ~/.cache/powos-verify/window-max/<round>/). KWin installs through verify/linux-float.sh (newest
+  out/pkgs/kwin-* in any worktree: never leave a stale same-version build there).
 - Dead ends (launching, measured): OnePlus FlexibleWindowManager.startAnyActivity/calculateFlexibleWindowBounds (empty
   bounds), OplusZoomWindowManager.startZoomWindow: full screen unless OnePlus's launcher asks; startFlexibleWindowFor-
   RecentTasks = a split "pocket". Settings is on OnePlus's no-floating list (test with Calculator). Probe framework
