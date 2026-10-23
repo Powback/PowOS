@@ -11,13 +11,19 @@ OUT=${1:-$HOME/.cache/powos-verify/lights-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-restore() { sh_ "input keyevent 4; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; echo "restored"; }
+restore() { sh_ "input keyevent 4; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
 . "$here/window-lock.sh"; window_lock lights-popup.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
 I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; exit 3; }; }
 [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" = Awake ] || { echo "screen not awake - nothing done"; exit 3; }
 sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\"" | grep -q true && { echo "keyguard showing - nothing done"; exit 3; }
+# The Lights island is on the unfolded (wide) home's first page; folded, page 1 has none (rc 5 at 05:54, run on the
+# cover screen). Forced to the inner screen as the desktop checks do (float-desktops.sh), reset on exit.
+sh_ "cmd device_state state 3"; t=0
+while [ "$(sh_ "wm size" | sed -nE "s/.*(Override|Physical) size: ([0-9]+)x.*/\\2/p" | tail -1)" -le 2000 ] 2>/dev/null && [ $t -lt 15 ]; do sleep 1; t=$((t + 1)); done
+chk unfold
+sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\"" | grep -q true && { sh_ "wm dismiss-keyguard"; sleep 1.5; }
 sh_ "cmd statusbar collapse; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk home
 "$T/cdp.sh" eval home "(window.__powosHost.emit('system.home', null), 'ok')" >/dev/null 2>&1; sleep 1.2
 # The Lights island's room name on the page on screen, device px (the leaf whose text says room, not a control).
