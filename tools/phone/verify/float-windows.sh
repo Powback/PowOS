@@ -105,7 +105,7 @@ echo "opened at $L0 $T0 $R0 $B0; bottom bar from y=$BAR" | tee -a "$OUT/mode.txt
   python3 "$ROOT/lib/ai/agents/powos-agents-cli" task set "${BOARD_TASK:-powos-home-as-the-desktop-linux-android-apps-as}" --image /home/powos/design-qa/float-density.png >/dev/null 2>&1 &&
   echo "screencap on the board task" | tee -a "$OUT/log.txt"
 
-# PowOS's frame on it (system/WindowFrame.kt): the bar is BAR_DP (40) above the task's top; close is its last button
+# PowOS's frame on it (system/WindowFrame.kt): the bar window is 26 dp above the task's top; close is its last button
 # (30 dp, 6 dp from the end), minimise the one before it (4 dp gap); the grip disc sits on the lower-right corner.
 bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' '; }
 D=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1); px() { echo $(( $1 * D / 160 )); }

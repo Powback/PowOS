@@ -77,14 +77,22 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   calls as root: d8'd class, `CLASSPATH=x.dex app_process /system/bin <Class>` (dexdump oplus-framework.jar first).
 - OxygenOS draws NO caption for freeform tasks: PowOS's own frames (system/WindowFrames.kt + WindowFrame.kt +
   FreeformTasks.kt), owned by the recents service (created in onInitialize, like the pet).
-  - Per visible freeform task, overlays "PowOS window bar <id>" (40 dp glass bar above the task) / "PowOS window grip
-    <id>" (36 dp disc, lower right). Glass = WindowBlur(cornersDp) + 42% dark tint.
+  - Per visible freeform task, overlays "PowOS window bar <id>" (26 dp window above the task: 18 dp frost bar under an
+    8 dp clear touch strip; buttons span both) / "PowOS window grip <id>" (36 dp disc, lower right). Material = frost v2
+    (system/Frost.kt: theme.css's --frost-* formula in Kotlin from Palette + the wallpaper's colour hints for the tone
+    flip; blur 360 dp, veil, tint, sheen, 1 px lit edge). Keep Frost.kt in step with theme.css/shell.css frost; check it
+    against the page: CDP computed backgroundImage of `.ai-screen .tile` (matched to 0.01, 2026-10-23). Each new frame
+    logs `PowosWindowFrame task N bar <px> ... fill=#..` (what verify/window-chrome.sh reads).
   - Tracking: a hand-made ITaskStackListener Binder (any transaction = "changed", debounced 80 ms) -> getRunningTasks
     (recents provider sees all) -> TaskInfo.configuration.windowConfiguration bounds/mode (reflected). A bar under a
     higher window's bounds is hidden (overlays sit above every app). None while keyguard, Switcher.open (its setter
     refreshes), or not AppWindows.floating.
-  - Drag: the frame moves at once, IActivityTaskManager.resizeTask(id, rect, RESIZE_MODE_USER=1) coalesced on one
-    worker thread. Close = Tasks.remove. Minimise = WindowContainerTransaction.reorder(TaskInfo.token, false) via
+  - Drag: the frame moves at once (DragLayer, in-process per frame), the task through FreeformTasks.Live: per move
+    WindowContainerTransaction.setBounds (+ setDragResizing on while resizing) via WindowOrganizer.applyTransaction,
+    newest target only, one worker thread; the lift sets the last bounds + drag-resizing off. Through resizeTask the
+    app's content only took the new size after the lift (likely a queued change transition per call). Logcat
+    PowosWindowResize: live calls per drag, sizes on the way, call ms. Check: verify/window-chrome.sh (bar px, frost
+    line, app window mid-drag between before and after). Close = Tasks.remove. Minimise = WindowContainerTransaction.reorder(TaskInfo.token, false) via
     WindowOrganizer.applyTransaction (FreeformTasks.transact, shared with density).
   - Dock: WindowFrames.running (Compose state) -> ShellBridge "windows.list"/"windows.changed"/"windows.restore";
     shell state.ts `windows`, home.tsx `windowed` dot (.dock .app.windowed[.minimised]) + DockWindows (unpinned

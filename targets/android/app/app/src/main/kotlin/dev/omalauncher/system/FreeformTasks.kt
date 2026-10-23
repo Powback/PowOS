@@ -112,19 +112,70 @@ object FreeformTasks {
         context: Context,
         id: Int,
         change: (Any, Any) -> Unit,
-    ): Result<Unit> =
-        runCatching {
-            HiddenApi.allow()
-            @Suppress("DEPRECATION")
-            val info = context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS).firstOrNull { it.taskId == id } ?: error("no task $id")
-            val token = android.app.TaskInfo::class.java.getField("token").get(info)!!
-            val wctClass = Class.forName("android.window.WindowContainerTransaction")
-            val wct = wctClass.getConstructor().newInstance()
-            change(wct, token)
-            val organizer = Class.forName("android.window.WindowOrganizer")
-            organizer.getMethod("applyTransaction", wctClass).invoke(organizer.getConstructor().newInstance(), wct)
-            Unit
+    ): Result<Unit> = runCatching { apply(token(context, id), change) }
+
+    /** Task [id]'s WindowContainerToken (TaskInfo.token, hidden). */
+    private fun token(
+        context: Context,
+        id: Int,
+    ): Any {
+        HiddenApi.allow()
+        @Suppress("DEPRECATION")
+        val info = context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS).firstOrNull { it.taskId == id } ?: error("no task $id")
+        return android.app.TaskInfo::class.java.getField("token").get(info)!!
+    }
+
+    private fun apply(
+        token: Any,
+        change: (Any, Any) -> Unit,
+    ) {
+        val wctClass = Class.forName("android.window.WindowContainerTransaction")
+        val wct = wctClass.getConstructor().newInstance()
+        change(wct, token)
+        val organizer = Class.forName("android.window.WindowOrganizer")
+        organizer.getMethod("applyTransaction", wctClass).invoke(organizer.getConstructor().newInstance(), wct)
+    }
+
+    /**
+     * A finger moving or resizing task [id]'s window: its bounds set straight through WindowOrganizer each move, as WM
+     * Shell's desktop mode does (FluidResizeTaskPositioner: WindowContainerTransaction.setBounds, drag-resizing on
+     * while it's resized), so the app lays itself out at the new size as the finger goes. Through resizeTask the app's
+     * content took the new size only after the finger lifted (the user, 2026-10-23); likely its change transition per
+     * call queueing - logcat PowosWindowResize has the live path's numbers per drag.
+     * HACK: the token and the transaction's setBounds/setDragResizing are hidden, reflected like [minimise]; a
+     * failure falls back to [resize]. Real fix: none for an app.
+     */
+    class Live(
+        context: Context,
+        private val id: Int,
+        private val resizing: Boolean,
+    ) {
+        private val token = runCatching { token(context, id) }.onFailure { Log.w(TAG, "no live bounds for task $id", it) }.getOrNull()
+        private var started = false
+
+        /** The window to [bounds] now: true when applied (a fallback to resizeTask says false). */
+        fun to(bounds: Rect): Boolean = set(bounds, drag = true)
+
+        /** The finger lifted, the window at [bounds]: drag-resizing off. */
+        fun end(bounds: Rect) {
+            if (!set(bounds, drag = false)) resize(id, bounds)
         }
+
+        private fun set(
+            bounds: Rect,
+            drag: Boolean,
+        ): Boolean {
+            val t = token ?: return resize(id, bounds).let { false }
+            return runCatching {
+                apply(t) { wct, tok ->
+                    wct.javaClass.getMethod("setBounds", tok.javaClass, Rect::class.java).invoke(wct, tok, bounds)
+                    if (resizing && drag != started) wct.javaClass.getMethod("setDragResizing", tok.javaClass, Boolean::class.javaPrimitiveType).invoke(wct, tok, drag)
+                }
+                started = drag
+                true
+            }.onFailure { Log.w(TAG, "can't set task $id's bounds", it) }.getOrElse { resize(id, bounds).let { false } }
+        }
+    }
 
     /**
      * Calls [changed] (on a binder thread) whenever Android's tasks change - opened, raised, moved, closed; a handle to

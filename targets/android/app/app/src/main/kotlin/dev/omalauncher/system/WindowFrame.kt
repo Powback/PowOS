@@ -27,9 +27,10 @@ import java.util.concurrent.atomic.AtomicReference
  * icon and name, minimise, maximise and close - that a finger drags to move it, and a grip on its lower right corner that resizes
  * it. Two small overlay windows (TYPE_APPLICATION_OVERLAY: over apps, under the status bar and the shade) placed on the
  * task's bounds; the task follows the finger through [FreeformTasks.resize], at most one call in flight.
- * Design language (powos-design): the glass is the compositor's blur plus a dark tint, no borders, small marks. The bar
- * is [BAR_DP] (the user, 2026-10-23: half the old 40); its window reaches [HIT_DP] higher, unblurred and clear, so the
- * buttons and the drag keep a finger-sized target.
+ * Design language (powos-design): the glass is the frost ([Frost], frost v2 as the shell's app pages: the compositor's
+ * blur, a cool tint, a lit top edge), no borders, small marks. The bar is [BAR_DP] glass under a clear [HIT_DP] strip,
+ * [BAR_DP] + [HIT_DP] in all (the user, 2026-10-23: half again); the strip and the buttons' full height keep it easy
+ * to grab. A resize drag resizes the app's window as the finger goes ([FreeformTasks.Live]).
  */
 @SuppressLint("ClickableViewAccessibility", "ViewConstructor")
 class WindowFrame(
@@ -57,14 +58,15 @@ class WindowFrame(
         private set
 
     private lateinit var maxButton: GlyphView
+    private val frost = Frost.colors(context)
     private val bar = barView(app.pkg, app.title)
-    private val grip = GripView(context)
+    private val grip = GripView(context, frost)
     private val barParams = params("PowOS window bar $id")
     private val gripParams = params("PowOS window grip $id")
     private var added = false
 
-    private val barBlur = WindowBlur({ bar.rootView }, BLUR_DP, cornersDp = floatArrayOf(CORNER_DP, CORNER_DP, 0f, 0f), topDp = HIT_DP)
-    private val gripBlur = WindowBlur({ grip.rootView }, BLUR_DP, cornersDp = FloatArray(4) { GRIP_DP / 2 })
+    private val barBlur = WindowBlur({ bar.rootView }, Frost.BLUR_DP, cornersDp = floatArrayOf(CORNER_DP, CORNER_DP, 0f, 0f), topDp = HIT_DP)
+    private val gripBlur = WindowBlur({ grip.rootView }, Frost.BLUR_DP, cornersDp = FloatArray(4) { GRIP_DP / 2 })
 
     init {
         bar.setOnTouchListener(Drag(move = true))
@@ -100,6 +102,12 @@ class WindowFrame(
                 added = true
                 barBlur.set(1f)
                 gripBlur.set(1f)
+                // What the device check reads: the bar's size and its frost as drawn.
+                android.util.Log.i(
+                    "PowosWindowFrame",
+                    "task $id bar ${barParams.height} px (${BAR_DP + HIT_DP} dp, glass $BAR_DP) frost blur ${Frost.BLUR_DP} dp fill=#%08x veil=#%08x sheen=#%08x edge=#%08x ink=#%08x"
+                        .format(frost.fill, frost.veil, frost.sheen, frost.edge, frost.ink),
+                )
             }.onFailure { android.util.Log.w("PowosWindowFrame", "can't add the frame of task $id", it) }
         } else {
             runCatching {
@@ -160,7 +168,7 @@ class WindowFrame(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.BOTTOM
             setPadding(dp(10f), 0, dp(2f), 0)
-            background = BarGlass(dp(HIT_DP).toFloat(), CORNER_DP * density)
+            background = BarGlass(dp(HIT_DP).toFloat(), CORNER_DP * density, frost)
             val strip = dp(HIT_DP)
             appIcon(pkg)?.let { icon ->
                 addView(
@@ -174,8 +182,8 @@ class WindowFrame(
             addView(
                 TextView(context).apply {
                     text = label
-                    setTextColor(INK)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+                    setTextColor(frost.ink)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
                     typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.END
@@ -191,19 +199,24 @@ class WindowFrame(
         }
     }
 
-    /** The bar's glass tint, below the window's clear touch strip ([top] px), its upper corners rounded. */
+    /** The bar's frost below the window's clear touch strip ([top] px), its upper corners rounded: veil, tint, sheen, lit edge. */
     private class BarGlass(
         private val top: Float,
         private val corner: Float,
+        private val frost: Frost.Colors,
     ) : android.graphics.drawable.Drawable() {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = TINT }
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val path = android.graphics.Path()
 
         override fun draw(canvas: Canvas) {
             val b = bounds
+            val t = b.top + top
             path.reset()
-            path.addRoundRect(b.left.toFloat(), b.top + top, b.right.toFloat(), b.bottom.toFloat(), floatArrayOf(corner, corner, corner, corner, 0f, 0f, 0f, 0f), android.graphics.Path.Direction.CW)
-            canvas.drawPath(path, paint)
+            path.addRoundRect(b.left.toFloat(), t, b.right.toFloat(), b.bottom.toFloat(), floatArrayOf(corner, corner, corner, corner, 0f, 0f, 0f, 0f), android.graphics.Path.Direction.CW)
+            canvas.save()
+            canvas.clipPath(path)
+            frostLayers(canvas, paint, frost, b.left.toFloat(), t, b.right.toFloat(), b.bottom.toFloat())
+            canvas.restore()
         }
 
         override fun setAlpha(alpha: Int) {
@@ -222,7 +235,7 @@ class WindowFrame(
         glyph: Glyph,
         tap: () -> Unit,
     ): GlyphView =
-        GlyphView(context, glyph, dp(HIT_DP).toFloat()).apply {
+        GlyphView(context, glyph, dp(HIT_DP).toFloat(), frost.ink).apply {
             contentDescription = glyph.name.lowercase()
             setOnClickListener { tap() }
         }
@@ -243,16 +256,17 @@ class WindowFrame(
         context: Context,
         var glyph: Glyph,
         private val strip: Float,
+        ink: Int,
     ) : View(context) {
         private val d = context.resources.displayMetrics.density
         private val paint =
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = INK
+                color = ink
                 strokeWidth = 1.3f * d
                 strokeCap = Paint.Cap.ROUND
                 style = Paint.Style.STROKE
             }
-        private val pressedFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SOFT_FILL }
+        private val pressedFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = (ink and 0xFFFFFF) or (26 shl 24) }
 
         override fun drawableStateChanged() {
             super.drawableStateChanged()
@@ -281,14 +295,16 @@ class WindowFrame(
         }
     }
 
-    /** The resize grip: a glass disc with two short diagonal strokes. */
+    /** The resize grip: a frost disc with two short diagonal strokes. */
     private class GripView(
         context: Context,
+        private val frost: Frost.Colors,
     ) : View(context) {
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = TINT }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val disc = android.graphics.Path()
         private val mark =
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = INK
+                color = frost.ink
                 strokeWidth = 1.6f * context.resources.displayMetrics.density
                 strokeCap = Paint.Cap.ROUND
             }
@@ -299,7 +315,12 @@ class WindowFrame(
 
         override fun onDraw(canvas: Canvas) {
             val r = width / 2f
-            canvas.drawCircle(r, r, r, fill)
+            disc.reset()
+            disc.addCircle(r, r, r, android.graphics.Path.Direction.CW)
+            canvas.save()
+            canvas.clipPath(disc)
+            frostLayers(canvas, fill, frost, 0f, 0f, width.toFloat(), height.toFloat())
+            canvas.restore()
             val a = r * 0.35f
             canvas.drawLine(r + a, r - a * 0.2f, r - a * 0.2f, r + a, mark)
             canvas.drawLine(r + a, r + a * 0.45f, r + a * 0.45f, r + a, mark)
@@ -330,7 +351,7 @@ class WindowFrame(
                     val dx = (e.rawX - x0).toInt()
                     val dy = (e.rawY - y0).toInt()
                     if (!dragging && dx * dx + dy * dy < slop * slop) return true
-                    if (!dragging) startDrag()
+                    if (!dragging) startDrag(resizing = !move)
                     dragging = true
                     follow(if (move) moved(from, dx, dy) else resized(from, dx, dy), e)
                 }
@@ -352,8 +373,9 @@ class WindowFrame(
      */
     private fun legacyDrag() = android.provider.Settings.Global.getInt(context.contentResolver, "powos_drag_legacy", 0) == 1
 
-    /** A drag starts: the frame's own windows step aside (drawn by the drag layer, no relayout per move). */
-    private fun startDrag() {
+    /** A drag starts: the task's bounds go live ([FreeformTasks.Live]); the frame's own windows step aside (drawn by the drag layer, no relayout per move). */
+    private fun startDrag(resizing: Boolean) {
+        worker.execute { live = FreeformTasks.Live(context, id, resizing) }
         if (legacyDrag()) return
         val bitmapOf = { v: View -> runCatching { v.drawToBitmap() }.getOrNull() }
         drag = DragLayer(context, bitmapOf(bar), bitmapOf(grip), dp(BAR_DP + HIT_DP), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)
@@ -413,11 +435,11 @@ class WindowFrame(
             val left = bounds.left.coerceIn(s.left, maxOf(s.left, s.right - bounds.width()))
             val back = Rect(left, bounds.top, left + bounds.width(), bounds.bottom)
             endDrag(back)
-            resize(back)
+            settle(back)
             onEdge(id, side)
         } else if (dragging) {
             endDrag(Rect(bounds))
-            resize(Rect(bounds))
+            settle(Rect(bounds))
         }
         dragging = false
     }
@@ -464,25 +486,67 @@ class WindowFrame(
         return Rect(from.left, from.top, right, bottom)
     }
 
-    /** The task to [r]: the newest target only, one call at a time, off the main thread. */
+    /** The task to [r]: the newest target only, one call at a time, off the main thread; live while a finger has it. */
     private fun resize(r: Rect) {
-        if (pending.getAndSet(r) == null) worker.execute { pending.getAndSet(null)?.let { FreeformTasks.resize(id, it) } }
+        if (pending.getAndSet(r) == null) {
+            worker.execute {
+                val to = pending.getAndSet(null) ?: return@execute
+                val l = live
+                if (l == null) {
+                    FreeformTasks.resize(id, to)
+                    return@execute
+                }
+                val t0 = System.nanoTime()
+                l.to(to)
+                liveNs.add(System.nanoTime() - t0)
+                liveSizes.add(to.width() to to.height())
+            }
+        }
+    }
+
+    /** The finger lifted, the task at [r]: its last live bounds, drag-resizing off, the drag's numbers logged. */
+    private fun settle(r: Rect) {
+        pending.set(null)
+        worker.execute {
+            val l = live
+            if (l == null) {
+                FreeformTasks.resize(id, r)
+                return@execute
+            }
+            l.end(r)
+            live = null
+            if (liveNs.isNotEmpty()) {
+                val ms = liveNs.map { it / 1_000_000.0 }.sorted()
+                val (w0, h0) = liveSizes.first()
+                android.util.Log.i(
+                    "PowosWindowResize",
+                    "task $id: ${ms.size} live bounds on the way (${liveSizes.distinct().size} sizes) ${w0}x$h0 -> ${r.width()}x${r.height()}, call median %.1f ms, max %.1f ms".format(ms[ms.size / 2], ms.last()),
+                )
+            }
+            liveNs.clear()
+            liveSizes.clear()
+        }
     }
 
     private val pending = AtomicReference<Rect?>(null)
 
+    /** The drag's live bounds (worker thread only). */
+    private var live: FreeformTasks.Live? = null
+    private val liveNs = ArrayList<Long>()
+    private val liveSizes = ArrayList<Pair<Int, Int>>()
+
     companion object {
-        /** The glass bar's height (the user, 2026-10-23: about half the 40 it was). */
-        const val BAR_DP = 26f
+        /** The glass bar's height (the user, 2026-10-23: about half the 26 + 10 it was; 26 dp in all with [HIT_DP]). */
+        const val BAR_DP = 18f
 
         /** The bar window's clear touch strip above the glass: the buttons' and the drag's target reaches it too. */
-        const val HIT_DP = 10f
+        const val HIT_DP = 8f
         private const val CORNER_DP = 10f
         private const val BUTTON_DP = 34f
-        private const val ICON_DP = 15f
+        private const val ICON_DP = 12f
 
         /** A button's mark, across. */
-        private const val GLYPH_DP = 9f
+        private const val GLYPH_DP = 8f
         private const val GRIP_DP = 36f
 
         /** How far the grip reaches outside the window's corner. */
@@ -494,11 +558,30 @@ class WindowFrame(
         private const val MIN_W_DP = 280f
         private const val MIN_H_DP = 200f
 
-        /** Home's glass: the compositor's blur (theme.css --glass-blur-native) under a dark tint (--glass-tint 42%). */
-        private const val BLUR_DP = 140f
-        private val TINT = Color.argb(107, 18, 20, 26)
-        private val SOFT_FILL = Color.argb(26, 255, 255, 255)
-        private val INK = Color.argb(222, 255, 255, 255)
+        /**
+         * The frost's layers in [l, t, r, b] (the caller clips the shape), as shell.css paints a frost surface: the veil,
+         * the tint, a sheen from the top to clear at 45%, a 1 px lit edge along the top (--lift-edge).
+         */
+        private fun frostLayers(
+            canvas: Canvas,
+            paint: Paint,
+            frost: Frost.Colors,
+            l: Float,
+            t: Float,
+            r: Float,
+            b: Float,
+        ) {
+            paint.shader = null
+            paint.color = frost.veil
+            canvas.drawRect(l, t, r, b, paint)
+            paint.color = frost.fill
+            canvas.drawRect(l, t, r, b, paint)
+            paint.shader = android.graphics.LinearGradient(0f, t, 0f, t + (b - t) * 0.45f, frost.sheen, Color.TRANSPARENT, android.graphics.Shader.TileMode.CLAMP)
+            canvas.drawRect(l, t, r, b, paint)
+            paint.shader = null
+            paint.color = frost.edge
+            canvas.drawRect(l, t, r, t + 1f, paint)
+        }
 
         /** Every frame's task calls, one at a time (a move sends many; only the newest matters). */
         private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "powos-window-frames") }
