@@ -1,0 +1,219 @@
+From d2ac8d547f15ec1207969ca253f6eb0eadaee43a Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Fri, 23 Oct 2026 15:05:20 +0200
+Subject: [PATCH] backends/anland: touches go to windows that take them, the
+ task's size wins
+
+A touch in a window task went to any window the task draws whose frame
+was under the finger. Now it is picked as KWin's own input picks: in
+stacking order, shown, painted, not see-through, and its input region
+(hitTest: an X window's shape) under the finger; else the task's window.
+
+A window that resizes itself while its task is live (an X client's own
+configure: Steam came back at 1659x1746 in a 1351 px wide task) is sized
+back to the task, up to five times in a row; one that keeps its own size
+is logged with its min size. Touches that don't go to the task's window,
+and the windows a task also draws, are logged.
+---
+ src/backends/anland/anland_window_task.cpp | 103 +++++++++++++++++++--
+ src/backends/anland/anland_window_task.h   |   7 ++
+ 2 files changed, 100 insertions(+), 10 deletions(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 09c6b20..e288b3a 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -34,6 +34,7 @@
+ #include <QSocketNotifier>
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <chrono>
+ #include <sys/eventfd.h>
+ #include <sys/socket.h>
+@@ -84,6 +85,13 @@ AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uin
+         m_resizeLatencies.clear();
+     });
+     connect(window, &Window::frameGeometryChanged, this, &AnlandWindowTask::noteResized);
++    // The task's size wins over the window's own: an X client may configure itself to a size it remembers (Steam:
++    // 1659x1746 in a 1351 px wide floating task, its right part cut off) - KWin permits that for a normal window, so
++    // it is sized back to the task (a few times; one that keeps refusing is logged).
++    m_refit.setSingleShot(true);
++    m_refit.setInterval(50);
++    connect(&m_refit, &QTimer::timeout, this, &AnlandWindowTask::refit);
++    connect(window, &Window::frameGeometryChanged, this, &AnlandWindowTask::keepTaskSize);
+     m_keepalive.setSingleShot(true);
+     m_keepalive.setInterval(s_keepaliveMs);
+     connect(&m_keepalive, &QTimer::timeout, this, [this]() {
+@@ -224,6 +232,7 @@ void AnlandWindowTask::goLive()
+     // them - centred on it), and moved with it: they live with it on the tasks desktop.
+     m_popupAdded = connect(workspace(), &Workspace::windowAdded, this, [this](Window *added) {
+         if (added->transientFor() && watching(added->transientFor())) {
++            qCInfo(KWIN_ANLAND) << "window task" << m_id << "also draws" << describe(added);
+             watchWindow(added);
+             attach(added);
+         }
+@@ -278,6 +287,7 @@ void AnlandWindowTask::attach(Window *window)
+     // [window]'s transients (popups, menus, dialogs, theirs in turn), already open: drawn into the task with it.
+     for (Window *child : window->transients()) {
+         if (!child->isDeleted() && !watching(child)) {
++            qCInfo(KWIN_ANLAND) << "window task" << m_id << "also draws" << describe(child);
+             watchWindow(child);
+             attach(child);
+         }
+@@ -413,6 +423,51 @@ void AnlandWindowTask::resizeTo(const QSize &taskSize)
+         return;
+     }
+     m_taskSize = taskSize;
++    m_refits = 0;
++    fitWindow();
++}
++
++QSizeF AnlandWindowTask::wantedClientSize() const
++{
++    return QSizeF(taskSize()) / scale();
++}
++
++static bool sameSize(const QSizeF &a, const QSizeF &b)
++{
++    // Within half a logical pixel: X11 geometry goes through X's integer pixels (Xcb::toXNative) and back.
++    return std::abs(a.width() - b.width()) < 0.5 && std::abs(a.height() - b.height()) < 0.5;
++}
++
++void AnlandWindowTask::keepTaskSize()
++{
++    if (m_state != State::Live || !m_window || m_window->isDeleted() || m_window->isFullScreen() || m_bufferSize.isEmpty()) {
++        return;
++    }
++    if (sameSize(m_window->clientGeometry().size(), wantedClientSize())) {
++        m_refits = 0;
++        return;
++    }
++    m_refit.start(); // the latest geometry decides, 50 ms on (a client's configure may come in steps)
++}
++
++void AnlandWindowTask::refit()
++{
++    if (m_state != State::Live || !m_window || m_window->isDeleted() || m_window->isFullScreen()) {
++        return;
++    }
++    const QSizeF has = m_window->clientGeometry().size();
++    const QSizeF wanted = wantedClientSize();
++    if (sameSize(has, wanted)) {
++        return;
++    }
++    if (++m_refits > 5) {
++        if (m_refits == 6) {
++            qCWarning(KWIN_ANLAND) << "window task" << m_id << "keeps" << has << "(the task's" << wanted << ", its min size"
++                                   << m_window->minSize() << "): left so";
++        }
++        return;
++    }
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "the window took" << has << "itself, the task is" << wanted << ": sized back";
+     fitWindow();
+ }
+ 
+@@ -425,8 +480,8 @@ void AnlandWindowTask::fitWindow()
+     // The window takes the task's size (split screen, floating window, fold): its client area fills the task. The
+     // latest size wins - KWin configures the client, which commits when it has laid itself out (render() draws
+     // whatever it has meanwhile, at its real size from the top left: never stretched).
+-    const QSizeF client = QSizeF(taskSize()) / scale();
+-    if (m_window->clientGeometry().size() != client) {
++    const QSizeF client = wantedClientSize();
++    if (!sameSize(m_window->clientGeometry().size(), client)) {
+         m_resizeAsked = std::chrono::steady_clock::now();
+         m_resizeWanted = client;
+         m_window->moveResize(RectF(m_window->frameGeometry().topLeft(), m_window->clientSizeToFrameSize(client)));
+@@ -554,14 +609,7 @@ void AnlandWindowTask::processInputEvent(const InputEvent &ev)
+             // Straight to the window or popup under the finger (no hit test against the desktop, where this window
+             // isn't). A touch outside an open popup dismisses it, as KWin's popup filter does.
+             const QList<Window *> windows = paintedWindows();
+-            Window *target = m_window;
+-            for (auto it = windows.crbegin(); it != windows.crend(); ++it) {
+-                // The top-most of its popups and dialogs under the finger (they're drawn over it, in this order).
+-                if (*it != m_window && (*it)->frameGeometry().contains(pos)) {
+-                    target = *it;
+-                    break;
+-                }
+-            }
++            Window *target = touchTarget(pos);
+             if (!target->isPopupWindow()) {
+                 for (Window *w : windows) {
+                     if (w->isPopupWindow()) {
+@@ -573,6 +621,10 @@ void AnlandWindowTask::processInputEvent(const InputEvent &ev)
+             if (target != m_window && !target->isPopupWindow()) {
+                 workspace()->requestFocus(target, true); // a dialog: its fields take the keys
+             }
++            if (target != m_window || !m_window->hitTest(pos)) {
++                qCInfo(KWIN_ANLAND) << "window task" << m_id << "touch at" << pos << "to" << describe(target)
++                                    << (target == m_window ? "(outside its input region)" : "");
++            }
+             if (seat->notifyTouchDown(target->surface(), target->bufferGeometry().topLeft(), id, pos)) {
+                 m_touches.insert(id);
+             }
+@@ -595,6 +647,37 @@ void AnlandWindowTask::processInputEvent(const InputEvent &ev)
+     }
+ }
+ 
++Window *AnlandWindowTask::touchTarget(const QPointF &pos) const
++{
++    // The top-most of its popups and dialogs that takes input at [pos], picked the way KWin's own input does
++    // (InputRedirection::findToplevel): in stacking order, shown (not minimised or hidden), painted, not see-through,
++    // and its input region under the finger (hitTest: an X window's shape and its surface's input region). Else the
++    // window itself. By frame geometry alone a helper window counted too: Steam keeps a dozen nameless steamwebhelper
++    // windows (menus it has made and keeps for later) over its tab row and content - taps went to them.
++    const QList<Window *> stacking = workspace()->stackingOrder();
++    for (auto it = stacking.crbegin(); it != stacking.crend(); ++it) {
++        Window *w = *it;
++        if (w == m_window || !watching(w) || !w->isShown() || !w->readyForPainting() || w->opacity() <= 0.0) {
++            continue;
++        }
++        if (w->hitTest(pos)) {
++            return w;
++        }
++    }
++    return m_window;
++}
++
++QString AnlandWindowTask::describe(const Window *w)
++{
++    // For the logs: which window, by what a person (or xwininfo) would see of it.
++    const RectF g = w->frameGeometry();
++    return QStringLiteral("\"%1\" (%2%3, %4x%5+%6+%7%8%9)")
++        .arg(w->caption(), w->resourceClass(), w->isPopupWindow() ? QStringLiteral(", popup") : QString())
++        .arg(g.width()).arg(g.height()).arg(g.x()).arg(g.y())
++        .arg(w->isShown() ? QString() : QStringLiteral(", not shown"))
++        .arg(w->opacity() < 1.0 ? QStringLiteral(", opacity %1").arg(w->opacity()) : QString());
++}
++
+ void AnlandWindowTask::cancelTouches()
+ {
+     if (m_touches.isEmpty()) {
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 4bd6a98..02cccaa 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -109,6 +109,11 @@ private:
+     QSize taskSize() const;
+     void fitWindow();
+     void noteResized();
++    QSizeF wantedClientSize() const;
++    void keepTaskSize();
++    void refit();
++    Window *touchTarget(const QPointF &pos) const;
++    static QString describe(const Window *window);
+     void cancelTouches();
+ 
+     AnlandWindowTasks *m_tasks;
+@@ -134,6 +139,8 @@ private:
+     QSizeF m_resizeWanted;
+     QList<int> m_resizeLatencies;
+     QTimer m_resizeReport;
++    QTimer m_refit; // sizes the window back to the task after it resized itself (keepTaskSize)
++    int m_refits = 0; // in a row without the window keeping the task's size; gives up after 5
+     bool m_offered = false; // the consumer handed us a buffer to fill (buf_ready) and waits for it
+     bool m_renderScheduled = false;
+ 
+-- 
+2.50.1 (Apple Git-155)
+
