@@ -82,10 +82,12 @@ def validate(path: str, show_list: bool) -> list[str]:
         if not (ep.get("method") or ep.get("argv") or ep.get("operationId") or ep.get("ui")):
             errs.append(f"{path}:{aid}: endpoint maps to nothing (need method / argv / operationId / ui) [S9]")
 
-        # S3: captured starts read-only until promoted
-        if origin == "captured" and safety != "read" and not promoted:
-            errs.append(f"{path}:{aid}: captured action with safety='{safety}' needs promoted=true "
-                        f"(capture-generated actions start read-only) [S3]")
+        # S3: captured starts read-only until promoted. A freshly captured write
+        # may sit in the spec as a DISABLED draft (not in the allowlist); it only
+        # needs promotion once someone wants to enable+call it.
+        if origin == "captured" and safety != "read" and not promoted and enabled:
+            errs.append(f"{path}:{aid}: enabled captured action with safety='{safety}' needs promoted=true "
+                        f"(capture-generated writes start disabled + read-only) [S3]")
 
         # S4: spend => confirm, never widget
         if safety == "spend":

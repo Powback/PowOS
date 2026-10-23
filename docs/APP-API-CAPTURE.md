@@ -96,6 +96,29 @@ and a validator that enforces the safety invariants at
 [`tools/app-api/appcap_validate.py`](../tools/app-api/appcap_validate.py). All
 three are real and tested (see §7).
 
+### 1b.0 Everything runs locally on PowOS (no Mac, no cloud at runtime)
+
+The whole pipeline runs **on PowOS itself** — the phone's own Linux side and
+desktop PowOS — **offline / LAN-only**. The Mac is development + builds only.
+
+- On the phone/desktop: the capture proxy (mitmproxy-equivalent inside PowOS,
+  the Android app's traffic routed to it locally), the **encrypted token store**
+  (`appcap_store.py`, §5 — no cloud ever holds a token), the **runtime + call
+  path** (`appcap_run.py`), the `powos app` CLI, the phone's PowOS AI/MCP tools,
+  the widget bindings and the App API app.
+- Packaging: ships as PowOS rootfs packages/units (`targets/android/build-pkgs.sh`
+  + a registered unit, `units/phone-android/app-api.json`) that also work on
+  desktop PowOS. Dependencies are stdlib Python + `openssl` (already present); no
+  unmanaged system installs.
+- The store lives under `~/.local/state/powos/app-api/` (0600); on the phone the
+  keyfile is wrapped by Android Keystore. Nothing leaves the LAN.
+
+The earlier prototype pieces that assumed a Mac proxy are superseded: the token
+store is the local `appcap_store.py` (not the Mac `ssl-bypass-foundation` SQLite
+column, which was plaintext); capture + runtime + tools all execute on-device.
+The Mac-side converter/validator/renderer are the same Python files, which run
+unchanged on PowOS.
+
 ### 1b.1 What an action declares
 
 Each action in the spec carries exactly what every consumer needs:
@@ -360,6 +383,23 @@ The committed prototype of this surface is the CLI renderer and a standalone
 HTML viewer (`tools/app-api/viewer/`, §7); the production in-shell app with live
 capture toggles and persistence is the scheduled build (§8).
 
+### 1b.13 Bonus: blocking trackers and unwanted traffic
+
+The same local capture proxy sees the host + URL of every flow, so it is also a
+**request-level tracker/ad blocker** — complementing PowOS's existing Pi-hole
+(DNS-level) blocking with per-flow, per-app decisions Pi-hole can't make:
+
+- the proxy classifies each flow (known-tracker blocklists by host/path, plus
+  "this domain isn't in any enabled app's allowlist") and can **drop** it;
+- `ssl-bypass-foundation`'s rewrite engine already supports block-by-pattern, so
+  this is a blocklist + a policy on top, not new interception;
+- it stays **observe-and-block only** — no account, spend or ToS risk — and runs
+  locally/offline like everything else here;
+- it reuses the audit log: you can see which apps phone home where, then block.
+
+This is a natural follow-on (a read/deny policy layer over the same capture), not
+part of the capability call path; scheduled alongside the capture engine work.
+
 ---
 
 ## 2. Architecture
@@ -584,6 +624,25 @@ generators:
 - **`viewer/index.html`** — standalone visual viewer (the toggle/view surface
   prototype): renders each app's actions with safety badges, endpoint mapping,
   auth handle and widget/refresh hints.
+
+And the **local runtime** (runs on PowOS, offline):
+
+- **`appcap_store.py`** — the encrypted-at-rest token store (openssl AES-256-CBC
+  encrypt-then-MAC, 0600 keyfile, values never printed; `set` reads from stdin,
+  `migrate --from-json` imports a plaintext source without printing). Tested:
+  set/list/get roundtrip, no plaintext in the DB file, tamper rejected, migrate.
+- **`appcap_run.py`** — the one shared call path: resolve → allowlist → enforce
+  safety class → inject auth by handle → rate-limit → dry-run/send → audit.
+  Default is dry-run; `--send` performs; `spend` needs `--send --confirm`; a
+  `widget` consumer may only call reads. Tested: Hue writes stay dry-run (lights
+  untouched), widget-write refused, spend-without-confirm refused, a real read
+  send to Open-Meteo returned 200, a native-CLI action (`base.kind=cli`) ran, and
+  the audit log recorded each call with secret args redacted.
+- **`openapi2appcap.py`** — capture→appcap emitter: a captured OpenAPI becomes a
+  DRAFT appcap with reads enabled and every write disabled-until-promoted. Tested
+  on the Open-Meteo sample (2 reads enabled) and a synthetic cart capture
+  (get_menu enabled; add_item + checkout present but OFF, checkout classed
+  `spend`+confirm) — both validate.
 
 **Verified (2026-10-23):**
 - real capture → spec: 4 Open-Meteo reads → 2 operations
