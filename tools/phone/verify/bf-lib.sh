@@ -299,6 +299,7 @@ step_launch() {
   for i in $(seq $((LAUNCH_S * 2))); do W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && break
     if [ "$up" = 1 ] && [ "$i" = $((${HANDOFF_S:-20} * 2)) ]; then
       if tail -n +$((cl0 + 1)) "$CL" 2>/dev/null | grep -q "steam://rungameid/$APP"; then up=; echo "launch: Steam took the URL"
+      elif tail -n +$((cl0 + 1)) "$CL" 2>/dev/null | grep -q "Client version"; then up=; echo "launch: Steam restarted with the URL (/usr/bin/steam's fallback: $(grep '^steam: ' "$T/open.out" | tail -1))"
       else fail launch-handoff "the running Steam didn't log the launch's URL in ${HANDOFF_S:-20} s: $(handoff_diag); open-task: $(cat "$T/open.status" 2>/dev/null)"; handoff_detail; return 1; fi
     fi
     touched; sleep 0.5; done

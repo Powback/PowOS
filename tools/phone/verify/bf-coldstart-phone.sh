@@ -111,7 +111,8 @@ run() {  # run <variant> <n>
     # A running Steam logs the URL at once (ExecCommandLine): nothing in 20 s = the hand-off was lost (bf-lib
     # handoff_detail says where), not a slow tool - INVALID below, without waiting out the 150 s.
     if [ "$up" = 1 ] && [ $i = 80 ]; then
-      if tail -n +$((cl + 1)) "$S/logs/console_log.txt" | grep -q "rungameid/$APP"; then up=
+      # Taken, or /usr/bin/steam (pkgrel 24) restarting Steam with the URL (a new client's "Client version"): go on.
+      if tail -n +$((cl + 1)) "$S/logs/console_log.txt" | grep -q "rungameid/$APP\|Client version"; then up=
       else seen[handoff]=lost; echo "   handoff lost: $(handoff_diag)"; handoff_detail | sed 's/^/   /'; break; fi
     fi
     [ -n "$(pgrep -f 'steamwebhelper' | head -1)" ] && first steam "$now_"
