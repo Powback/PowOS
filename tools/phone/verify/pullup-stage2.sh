@@ -39,12 +39,12 @@ grep -q '"open":true' <<<"$s1" || fails+=("plain swipe: drawer not open")
 grep -q '"focus":false' <<<"$s1" && [[ "$k1" == *false* ]] || fails+=("plain swipe raised the keyboard ($k1)")
 back
 
-# 2. long pull, held at two heights. It starts on an EMPTY spot of the page (read over CDP), and the DOWN and its first
-# moves go in ONE phone call: a DOWN at 88% landed on the dock and, held a second until the next adb call, became an
-# icon's long press - no drawer drag at all ("lift 0 then 0", 2026-10-23), and a carried dock icon could move the
-# user's dock. Each phone call is a burst of moves; the holds between them are the finger held at a height.
-Y0=$(ev "(()=>{const d=devicePixelRatio,x=innerWidth*0.75;for(let f=0.72;f>=0.45;f-=0.03){const e=document.elementFromPoint(x,innerHeight*f);if(e&&!e.closest('.dock,.app,.bar,.tile,.home-tile,button,input,textarea,.panel,.island,.owl'))return Math.round(innerHeight*f*d)}return 0})()")
-[ "${Y0:-0}" -gt 0 ] || { echo "pullup-stage2: no empty spot to start the long pull from"; exit 3; }
+# 2. long pull, held at two heights. It starts from a spot that is always free (footpt.js: a gap in the dock's or the
+# bottom bar's row, right half, never an icon or the pill) - with windows open home has no empty spot above (e2e
+# 15:11), and a DOWN on an icon held until the next adb call is its long press. The DOWN and its first moves go in ONE
+# phone call; each later call is a burst of moves, the holds between them the finger held at a height.
+read -r X Y0 < <(ev "$(cat tools/phone/verify/footpt.js)")
+[ "${Y0:-0}" -gt 0 ] 2>/dev/null || { echo "pullup-stage2: no free spot in the dock's or the bar's row ($X)"; exit 3; }
 mv() { local c="" f; for f in "$@"; do c+="input motionevent MOVE $X $((Y0 - H * f / 100)); "; done; $p/adb.sh shell "$c"; }
 $p/adb.sh shell "input motionevent DOWN $X $Y0; input motionevent MOVE $X $((Y0 - H * 3 / 100))"
 mv 8 14 20 26 32
