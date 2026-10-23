@@ -47,7 +47,8 @@ search_open() { # <text> <result key> <name>
   step "search-$1" "\"$1\" typed into the search pill: the results"
   local p; p=$(pt "document.querySelector('.drawer-list.results .app[data-key=\"$2\"]')")
   case $p in none|off|"") fail "no $3 in the search results ($p)"; back; back; return 1 ;; esac
-  pass "$3 in the search results"; set -- $p; tap "$1" "$2" "$3 in the results"
+  # The name first: `set -- $p` replaces $3 (it was unbound under set -u and ended the journey at step 2, 2026-10-23).
+  local name=$3; pass "$name in the search results"; set -- $p; tap "$1" "$2" "$name in the results"
 }
 
 # 1. App API from the dock.
