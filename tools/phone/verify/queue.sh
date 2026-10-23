@@ -132,6 +132,15 @@ add)
   # need: the queuing tree's commit - the check waits until the phone runs it (see shipped below), so a check queued
   # right after `ship.sh request` doesn't FAIL against the old build (prompt-glyph, icon-norm, 2026-10-23).
   need=; [ -n "$from" ] && need=$(git -C "$from" rev-parse HEAD 2>/dev/null || true)
+  # The same check already waiting (same task, same command): no second copy - one agent's urgent check waited ~80 min
+  # behind 8 duplicates (friction f41, 2026-10-23). QUEUE_DUP=1 queues it anyway.
+  cl="cmd=($(printf '%q ' "${cmd[@]}")"
+  if [ "${QUEUE_DUP:-0}" != 1 ]; then
+    for o in "$Q"/*.job; do
+      [ -f "$o" ] || continue
+      grep -qxF "task=$(printf '%q' "$task")" "$o" && grep -qF "$cl" "$o" && { echo "already queued as $(basename "$o" .job) - not added again (QUEUE_DUP=1 to add anyway)"; exit 0; }
+    done
+  fi
   j=$Q/$(date +%Y%m%d-%H%M%S)-$$-$task.job
   { printf 'task=%q\nclose=%s\ntries=0\ncwd=%q\nrel=%s\nfrom=%q\nname=%q\nscreen=%q\nbudget=%s\nneed=%s\nqt=%s\ncmd=(' "$task" "$close" "$cwd" "$rel" "$from" "$name" "$screen" "$budget" "$need" "$(date +%s)"
     printf '%q ' "${cmd[@]}"; printf ')\n'; } > "$j"
