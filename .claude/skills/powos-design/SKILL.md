@@ -23,7 +23,9 @@ description: How the PowOS phone shell's design is built and checked - the desig
   wallpaper is behind the bars. What covered it was the decor's own bar views (Theme.Material: black
   navigationBarBackground, 45 px folded / 0 unfolded; statusBarBackground 126 px) drawn OVER the WebView; ShellActivity
   sets both bar colours transparent + contrast off. Diagnose with `dumpsys activity top` (grep BarBackground: V = drawn).
-  Device check: tools/phone/verify/nav-strip.sh cover|inner (bottom-rows pixel check).
+  Device check: tools/phone/verify/nav-strip.sh cover|inner (bottom-rows pixel check). Its first cover "PASS"
+  (2026-10-23 00:15) was a screencap of Magisk, not home: open the PNG, never trust a pixel PASS alone; the check now
+  fails unless mCurrentFocus is HomeShell.
 - Scrollbars: the phone's WebView ignores `scrollbar-width` (CSS.supports false); theme.css hides
   `::-webkit-scrollbar` globally and the WebView's View scrollbars are off (ShellHost).
 - Assist (mode=assist) is the exception: the screen 1:1, its panel solid, no glass.
