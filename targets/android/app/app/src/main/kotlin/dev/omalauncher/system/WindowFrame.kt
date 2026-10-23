@@ -215,7 +215,7 @@ class WindowFrame(
             path.addRoundRect(b.left.toFloat(), t, b.right.toFloat(), b.bottom.toFloat(), floatArrayOf(corner, corner, corner, corner, 0f, 0f, 0f, 0f), android.graphics.Path.Direction.CW)
             canvas.save()
             canvas.clipPath(path)
-            frostLayers(canvas, paint, frost, b.left.toFloat(), t, b.right.toFloat(), b.bottom.toFloat())
+            frostLayers(canvas, paint, frost, android.graphics.RectF(b.left.toFloat(), t, b.right.toFloat(), b.bottom.toFloat()))
             canvas.restore()
         }
 
@@ -319,7 +319,7 @@ class WindowFrame(
             disc.addCircle(r, r, r, android.graphics.Path.Direction.CW)
             canvas.save()
             canvas.clipPath(disc)
-            frostLayers(canvas, fill, frost, 0f, 0f, width.toFloat(), height.toFloat())
+            frostLayers(canvas, fill, frost, android.graphics.RectF(0f, 0f, width.toFloat(), height.toFloat()))
             canvas.restore()
             val a = r * 0.35f
             canvas.drawLine(r + a, r - a * 0.2f, r - a * 0.2f, r + a, mark)
@@ -559,28 +559,25 @@ class WindowFrame(
         private const val MIN_H_DP = 200f
 
         /**
-         * The frost's layers in [l, t, r, b] (the caller clips the shape), as shell.css paints a frost surface: the veil,
+         * The frost's layers in [box] (the caller clips the shape), as shell.css paints a frost surface: the veil,
          * the tint, a sheen from the top to clear at 45%, a 1 px lit edge along the top (--lift-edge).
          */
         private fun frostLayers(
             canvas: Canvas,
             paint: Paint,
             frost: Frost.Colors,
-            l: Float,
-            t: Float,
-            r: Float,
-            b: Float,
+            box: android.graphics.RectF,
         ) {
             paint.shader = null
             paint.color = frost.veil
-            canvas.drawRect(l, t, r, b, paint)
+            canvas.drawRect(box, paint)
             paint.color = frost.fill
-            canvas.drawRect(l, t, r, b, paint)
-            paint.shader = android.graphics.LinearGradient(0f, t, 0f, t + (b - t) * 0.45f, frost.sheen, Color.TRANSPARENT, android.graphics.Shader.TileMode.CLAMP)
-            canvas.drawRect(l, t, r, b, paint)
+            canvas.drawRect(box, paint)
+            paint.shader = android.graphics.LinearGradient(0f, box.top, 0f, box.top + box.height() * 0.45f, frost.sheen, Color.TRANSPARENT, android.graphics.Shader.TileMode.CLAMP)
+            canvas.drawRect(box, paint)
             paint.shader = null
             paint.color = frost.edge
-            canvas.drawRect(l, t, r, t + 1f, paint)
+            canvas.drawRect(box.left, box.top, box.right, box.top + 1f, paint)
         }
 
         /** Every frame's task calls, one at a time (a move sends many; only the newest matters). */
