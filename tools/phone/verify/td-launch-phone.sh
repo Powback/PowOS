@@ -13,7 +13,9 @@ set -uo pipefail
 APP=1167630 GAME=Teardown WIN_NAME=Teardown
 . /var/tmp/powos-bf-lib.sh
 S=$HOME/.local/share/Steam CFG=$S/config/config.vdf L=/tmp/td-logs
-LAUNCH_S=${LAUNCH_S:-600}  # a first arm64 launch also downloads Steam Linux Runtime 4.0 (arm64)
+# One variant per queue job (300 s budget, never raised): the launch gets 200 s, setup + evidence the rest. Runtimes
+# and depots are fetched before the timed launch (fetch_deps), so the time is the launch's.
+LAUNCH_S=${LAUNCH_S:-200}
 declare -A TOOL=([arm64]=proton-experimental-arm64 [x86]=proton_experimental)
 declare -A PDIR=([arm64]="Proton Experimental (ARM64)" [x86]="Proton - Experimental")
 first() { [ -n "${seen[$1]:-}" ] || seen[$1]=$2; }
@@ -38,14 +40,32 @@ steam_off() { pill "Teardown check: closing Steam"; APP=$APP bash /var/tmp/powos
 # The logging settings go in ~/.config/powos/proton-settings.json, which PowOS's own user_settings.py (pkgs/steam: the
 # install-script evaluator skip) reads - never over or instead of that file (it removed it, 2026-10-23).
 logs_off() { rm -f ~/.config/powos/proton-settings.json; }
-restore() { logs_off; [ -n "${ORIG:-}" ] && [ "$(mapping)" != "$ORIG" ] && { steam_off; mapping "$ORIG"; echo "mapping put back: $ORIG"; }; ORIG=; }
+# `powos sleep never steam` was for the timed launch only: off again, or the resident Steam never sleeps.
+restore() { logs_off; powos sleep never --remove steam >/dev/null 2>&1; [ -n "${ORIG:-}" ] && [ "$(mapping)" != "$ORIG" ] && { steam_off; mapping "$ORIG"; echo "mapping put back: $ORIG"; }; ORIG=; }
 ON_CLOSE=restore
+# What a variant's launch needs from Steam, installed before its timed launch: arm64 = Steam Linux Runtime 4.0 (arm64),
+# 4185400 (the first arm64 launch fetched it, 2026-10-23 04:27-04:29 - its 300 s went on the download).
+declare -A DEPS=([arm64]=4185400 [x86]="")
+installed() { local f=$S/steamapps/appmanifest_$1.acf; [ -f "$f" ] && grep -q '"StateFlags"[[:space:]]*"4"' "$f"; }
+fetch_deps() {  # fetch_deps <variant>: 0 = all there; else Steam fetches them (steam://install) and this run is untimed
+  local a miss=
+  for a in ${DEPS[$1]}; do installed "$a" || miss="$miss $a"; done
+  [ -z "$miss" ] && return 0
+  pill "Teardown $1: fetching$miss (untimed)"
+  # On a fresh Steam's own command line (Steam is off here): a URL forwarded to a running ARM64 client is never
+  # taken (skill: powos-games, forwarded launches). One app per start.
+  for a in $miss; do steam_off; ( cd "$HOME" && setsid steam -silent "steam://install/$a" > /dev/null 2>&1 < /dev/null & ); done
+  for _ in $(seq 150); do miss2=; for a in $miss; do installed "$a" || miss2="$miss2 $a"; done; [ -z "$miss2" ] && break; touched; sleep 1; done
+  echo "   fetched before the launch:$miss -> $([ -z "$miss2" ] && echo installed || echo "still missing$miss2")"
+  return 1
+}
 run() {  # run <variant> <n>
   local v=$1 t0 now_ r x k=-1 gl d=$L/$1 p
   declare -gA seen=()
   [ -n "${TOOL[$v]:-}" ] || { fail "variant-$v" "unknown variant (arm64 | x86)"; return; }
   rm -rf "$d"; mkdir -p "$d"
   steam_off; mapping "${TOOL[$v]}"
+  fetch_deps "$v" || { echo "INVALID $v #$2: its runtime was fetched now, untimed - queue the variant again"; steam_off; return; }
   p="$S/steamapps/common/${PDIR[$v]}"
   [ -x "$p/proton" ] || { fail "start-$v" "$p has no proton (not installed)"; return; }
   mkdir -p ~/.config/powos
@@ -62,6 +82,7 @@ run() {  # run <variant> <n>
     # Ended = Steam's own word only (a cold Steam first runs the install script evaluator through the same chain).
     [ -z "$r" ] && [ -n "${seen[reaper]:-}" ] && tail -n +$((gl + 1)) "$S/logs/gameprocess_log.txt" | grep -q "Remove $APP from running list" \
       && { seen[ended]=$now_; break; }
+    [ -n "$(ls -A "$S/steamapps/downloading" 2>/dev/null)" ] && first download "$now_"  # Steam updates first: not the launch's time
     pgrep -f pv-adverb >/dev/null && first container "$now_"
     pgrep -f wineserver >/dev/null && first wineserver "$now_"
     [ -n "${seen[wineserver]:-}" ] && pgrep -f 'teardown.exe' | while read -r x; do ! grep -qa 'proton\|reaper\|python\|pressure-vessel\|steam-launch-wrapper' "/proc/$x/cmdline" && echo y; done | grep -q y && first exe "$now_"
@@ -76,7 +97,8 @@ run() {  # run <variant> <n>
     echo "   window $W $(xwininfo -id "$W" | awk '/Width|Height/ {printf "%s ", $2}'), alive: $(pgrep -fc teardown.exe) teardown.exe"
   elif [ -n "${seen[ended]:-}" ]; then fail "start-$v" "the launch chain ended ${seen[ended]} ms after the tap, no window"
   else fail "start-$v" "no window in $LAUNCH_S s:$(for s in reaper container wineserver exe; do printf ' %s=%s' $s "${seen[$s]:--}"; done)"; fi
-  echo "STAGES $v #$2 (ms from the tap): reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--} ended ${seen[ended]:--}"
+  [ -n "${seen[download]:-}" ] && echo "INVALID $v #$2: Steam downloaded an update during the launch (from ${seen[download]} ms) - the time isn't the launch's"
+  echo "STAGES $v #$2 (ms from the tap): download ${seen[download]:--} reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--} ended ${seen[ended]:--}"
   RES_="$RES_ $v window ${seen[window]:--} frame ${seen[frame]:--};"
   # Evidence, before the close kills anything: what Steam, pressure-vessel, Proton and Wine said.
   tail -n +$((gl + 1)) "$S/logs/gameprocess_log.txt" > "$d/gameprocess.txt"
