@@ -150,6 +150,10 @@ class LaunchRecord:
     def done(self, ok):
         if os.environ.get("POWOS_NO_LAUNCH_RECORD") or self.mark[0] or download_mark(self.game) != self.mark:
             return
+        # No window on a Steam that was already running is Steam's (a frozen client not thawed for the launch, unified
+        # sleep, 2026-10-23), not the game's way of running: only a launch that started Steam itself can fail a tool.
+        if not ok and not self.cold:
+            return
         res = str(int((time.monotonic() - self.t0) * 1000)) if ok else "fail"
         try:
             subprocess.Popen(["powos-steam-compat", "record", self.game, res] + (["--cold"] if self.cold else []),

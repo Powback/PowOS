@@ -89,7 +89,9 @@ run() {  # run <variant> <n>
   gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0)
   mine=1; pill "cold start timing: $v #$2 - tap"; t0=$(now)
   ( open_task 400 "steam_app_$APP" > "$T/open.status" ) &
-  for _ in $(seq 1600); do  # 400 s
+  # 400 s cold (Steam's start, maybe a depot download); 150 s warm (~35 s expected): past that it is Steam's
+  # freeze/thaw hanging the launch (INVALID below), and the check stays inside its 300 s budget to say so.
+  for _ in $(seq $([ $v = cold ] && echo 1600 || echo 600)); do
     now_=$(ms "$t0" "$(now)")
     [ -n "$(pgrep -f 'steamwebhelper' | head -1)" ] && first steam "$now_"
     # A depot swap (cfg:native / back): Steam downloads before the launch.
@@ -118,14 +120,19 @@ run() {  # run <variant> <n>
     pill "cold start timing: $v - first frame"
     x=$(first_frame 90); [ "$x" != none ] && seen[frame]=$(ms "$t0" "$x")
   elif [ -n "${seen[ended]:-}" ]; then fail "start-$v" "the launch chain ended ${seen[ended]} ms after the tap, no window; Steam: $(grep -a 'Game process removed\|exit code' "$S/logs/gameprocess_log.txt" | tail -2 | cut -c1-120 | tr '\n' '|')"
-  else fail "start-$v" "no window in 400 s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi
+  else fail "start-$v" "no window in $([ $v = cold ] && echo 400 || echo 150) s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi
   echo "STAGES $v #$2 (ms from the tap): steam-ui ${seen[steam]:--} update ${seen[update]:--}-${seen[update_end]:--} iscript ${seen[iscript]:--}-${seen[iscript_end]:--} reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--}; open-task: $(cat "$T/open.status" 2>/dev/null)"
   echo "   tool: $($CFG get $APP); renderer: $(renderer)"
   echo "   after: $(sizes); evaluator: $(tail -1 "$CD/powos-iscript.log" 2>/dev/null | cut -c1-160)"
   RES_="$RES_ $v#$2 window ${seen[window]:--} frame ${seen[frame]:--};"
   # The per-game compat policy learns from it (powos-steam-compat record): a window = a working launch of this tool;
   # a chain that ended without one = a failed one. Not when Steam downloaded first (the time isn't the tool's).
-  if [ -z "${seen[update]:-}" ]; then
+  # A warm run (Steam left running) without a window says nothing about the tool while Steam's freeze/thaw can hang
+  # a launch (2026-10-23 02:53: a frozen Steam never thawed for the launch, no window in 394 s; 02:58: never frozen):
+  # INVALID, not a failed way - re-queue it once unified sleep's fix is in. Only a cold run's failure counts.
+  if [ -z "${seen[window]:-}" ] && [ $v != cold ]; then
+    echo "INVALID $v #$2: no window on a warm Steam (at the tap: $st; Steam's cgroup now '$(cg)') - Steam freeze/thaw, not the tool; not recorded"
+  elif [ -z "${seen[update]:-}" ]; then
     if [ -n "${seen[window]:-}" ]; then echo "   policy: $($CFG record $APP "${seen[window]}" $([ $v = cold ] && echo --cold))"
     elif [ -n "${seen[ended]:-}" ]; then echo "   policy: $($CFG record $APP fail)"; fi
   fi
