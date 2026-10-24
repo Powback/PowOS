@@ -18,7 +18,7 @@ import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
-import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.LinkedBlockingDeque
 import kotlin.math.log10
 import kotlin.math.sqrt
 
@@ -325,15 +325,24 @@ internal class FileSource(
 /**
  * Audio for Android's recognizer from PowOS's own recording (RecognizerIntent.EXTRA_AUDIO_SOURCE, API 33+): what was
  * recorded before the fallback first ([backlog]), then live. A pipe per listen ([open]); the recognizer reads it at its
- * pace, a writer thread keeps the recorder from ever blocking.
+ * pace.
+ *
+ * Only the "speech-feed" thread ever writes a pipe. A pipe holds 64 KB (2 s of 16 kHz PCM) and its reader - the
+ * recognizer - starts only after [open] returned (the read end goes in its intent), so any write on [open]'s caller
+ * (main) with more than that queued blocks forever: the whole app froze (ANRs 2026-10-23/24, main in
+ * FileOutputStream.write under AudioFeed.open, from the side-button assist's dictation fallback with its backlog).
  */
 internal class AudioFeed(
     backlog: ByteArray,
 ) {
-    private val q = LinkedBlockingQueue<ByteArray>()
+    private val q = LinkedBlockingDeque<ByteArray>()
     private val eof = ByteArray(0)
 
-    @Volatile private var out: OutputStream? = null
+    /** The current listen's pipe; null between two listens. Guarded by this. */
+    private var out: OutputStream? = null
+
+    /** Audio that came while no listen was reading, oldest first: the next [open]'s pipe gets it first. Guarded by this. */
+    private val pendingWhileClosed = ArrayList<ByteArray>()
 
     @Volatile var done = false
         private set
@@ -348,16 +357,24 @@ internal class AudioFeed(
                     done = true
                     return@Thread
                 }
-                val o = synchronized(this) { out }
-                if (o == null) {
-                    // Nothing listening yet (between two listens): kept for the next one, in order.
-                    synchronized(this) { pendingWhileClosed.add(b) }
-                    continue
-                }
+                // The check and the park in one lock: an open() between them would otherwise leave b behind newer audio.
+                val o =
+                    synchronized(this) {
+                        out ?: run {
+                            pendingWhileClosed.add(b)
+                            null
+                        }
+                    } ?: continue
                 try {
-                    o.write(b)
+                    o.write(b) // blocks while the recognizer is behind: only ever this thread
                 } catch (e: IOException) {
-                    synchronized(this) { if (out === o) out = null }
+                    synchronized(this) {
+                        if (out === o) {
+                            out = null // the recognizer closed it: b waits for the next listen
+                        }
+                    }
+                    // A newer listen replaced this pipe mid-write: b goes to it (or is parked), in order.
+                    q.putFirst(b)
                 }
             }
         }, "speech-feed").apply {
@@ -366,18 +383,15 @@ internal class AudioFeed(
         }
     }
 
-    private val pendingWhileClosed = ArrayList<ByteArray>()
-
-    /** A new pipe for one listen: its read end goes in the intent. */
+    /** A new pipe for one listen: its read end goes in the intent. Never blocks (no write here). */
     fun open(): ParcelFileDescriptor {
         val (r, w) = ParcelFileDescriptor.createPipe()
         synchronized(this) {
             runCatching { out?.close() }
-            val o = ParcelFileDescriptor.AutoCloseOutputStream(w)
-            // What came while no listen was reading, first.
-            runCatching { for (b in pendingWhileClosed) o.write(b) }
+            out = ParcelFileDescriptor.AutoCloseOutputStream(w)
+            // What came while no listen was reading goes ahead of everything queued, for the feed thread to write.
+            for (i in pendingWhileClosed.indices.reversed()) q.putFirst(pendingWhileClosed[i])
             pendingWhileClosed.clear()
-            out = o
         }
         return r
     }
