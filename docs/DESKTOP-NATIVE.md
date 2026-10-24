@@ -1,6 +1,8 @@
 # Native desktop architecture: who composites, and where the PowOS shell runs
 
-Status: design note for the user's review, 2026-10-24. Board task "Native desktop architecture: KWin composites,
+Status: **accepted by the user, 2026-10-24** (two compositors: Android draws the PowOS shell, KWin draws Plasma
+apps, a window lives in one world unless the user moves it). The provisional hold is lifted: work that locks in
+this architecture may proceed. Written 2026-10-24 as a design note; Board task "Native desktop architecture: KWin composites,
 PowOS shell as Plasma shell". It builds on `docs/DESKTOP-WEB-SHELL.md` (powos-shell, the paused Qt host) and
 `targets/android/docs/powos-window-tasks.md` (Linux windows as Android tasks).
 
@@ -72,7 +74,7 @@ the surface.
 | Work to "perfect" | finish the seam (popups, ownership, checks) - weeks | powos-shell paused at phase 0; plasmashell replacement estimated 3-4 months | B's months plus A's weeks |
 | Risk | known, measured, checks exist | Android apps and system UI regress | two shells to keep equal |
 
-## 4. Recommendation
+## 4. Recommendation (accepted 2026-10-24)
 
 **Keep A as the architecture, and make the seam a rule instead of a pile of patches. Do not start B now.**
 
