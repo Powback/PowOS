@@ -832,7 +832,10 @@ class WindowFrame(
 
     /**
      * [from] moved by (dx, dy), its whole bar window (glass + touch strip) kept under the status bar - the status bar's
-     * window is above every overlay, so a bar reaching into it lost its touches there - and a hand's width on screen.
+     * window is above every overlay, so a bar reaching into it lost its touches there - and a hand's width on screen
+     * sideways. Down, its bottom stops at home's bottom bar (AppWindows.area, as opening, maximise and resize do): home
+     * is in the task area under every window, so a window moved down over the dock took the dock's taps (2026-10-24).
+     * A window already lower (placed before the bar was known) keeps its top as the limit, so it never jumps.
      */
     private fun moved(
         from: Rect,
@@ -842,7 +845,10 @@ class WindowFrame(
         val (s, statusBar) = screen()
         val keep = dp(KEEP_DP)
         val left = (from.left + dx).coerceIn(s.left - from.width() + keep, s.right - keep)
-        val top = (from.top + dy).coerceIn(s.top + statusBar + barHeight(), s.bottom - keep)
+        val highest = s.top + statusBar + barHeight()
+        val floor = AppWindows.area(context).bottom.coerceAtMost(s.bottom)
+        val lowest = maxOf(highest, minOf(s.bottom - keep, maxOf(floor - from.height(), from.top)))
+        val top = (from.top + dy).coerceIn(highest, lowest)
         return Rect(left, top, left + from.width(), top + from.height())
     }
 
