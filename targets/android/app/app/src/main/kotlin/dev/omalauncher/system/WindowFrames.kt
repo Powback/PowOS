@@ -185,7 +185,6 @@ class WindowFrames(
         frame(show.filter { it.id !in sliding })
         if (sliding.isNotEmpty()) return
         restack(show.asReversed().map { it.id })
-        unhideSlid()
     }
 
     /**
@@ -196,8 +195,11 @@ class WindowFrames(
      */
     private val sliding = mutableMapOf<Int, Float>()
 
-    /** Bars [slideEnd] hid with their window: shown again by the next refresh that still frames them (a change refused). */
-    private val slideHidden = mutableSetOf<Int>()
+    /** The tasks of the slide (id -> task), to frame them anew at its end. */
+    private val slideTasks = mutableMapOf<Int, FreeformTasks.Window>()
+
+    /** Windows whose bar and grip surfaces are children of their task's leash now ([slideMove]). */
+    private val reparented = mutableSetOf<Int>()
 
     /**
      * A page swipe starts moving [tasks]. A window coming from another page has no frame (away): it gets one now, at
@@ -205,60 +207,76 @@ class WindowFrames(
      */
     fun slideStart(tasks: List<FreeformTasks.Window>) {
         sliding.clear()
-        tasks.forEach { sliding[it.id] = 0f }
+        reparented.clear()
+        slideTasks.clear()
+        tasks.forEach { sliding[it.id] = 0f; slideTasks[it.id] = it }
         if (keyguard || Switcher.open || !AppWindows.floating(context)) return
         tasks.filter { it.id !in frames && it.id !in minimised && mayFrame(it) }.forEach { w ->
             frames[w.id] = newFrame(w).apply { veiled = true }.also { it.place(w.bounds) }
         }
     }
 
-    /** One slide frame: every sliding window's bar and grip at its leash's offset [dx] (screen px), in [t] (the leashes'). */
+    /**
+     * One slide frame, in [t] (the leashes' transaction, leashes already placed): the first time a window's leash is
+     * here its bar and grip surfaces become the leash's children (so they move with it by construction, no per-frame
+     * writes) and the leash's crop widens to hold them (placing cropped it to the task).
+     */
     fun slideMove(
         t: android.view.SurfaceControl.Transaction,
         dx: Map<Int, Float>,
+        leash: (Int) -> android.view.SurfaceControl?,
     ) {
         for ((id, x) in dx) {
             val f = frames[id] ?: continue
-            val s = f.surfaces()
-            s.forEach { t.setPosition(it, x, 0f) }
-            if (slideHidden.remove(id)) s.forEach { t.setVisibility(it, true) }
+            val l = leash(id)?.takeIf { it.isValid } ?: continue
             sliding[id] = x
-            // Unveiled once its surfaces are offset: the next draw, after [t] is applied.
-            if (f.veiled && s.size == f.panelViews.size && s.isNotEmpty()) main.post { f.veiled = false }
+            if (id !in reparented) adopt(t, id, f, l)
+            t.setCrop(l, f.leashReach())
         }
     }
 
+    /** [f]'s bar and grip surfaces made children of [leash] (once), placed from its corner. */
+    private fun adopt(
+        t: android.view.SurfaceControl.Transaction,
+        id: Int,
+        f: WindowFrame,
+        leash: android.view.SurfaceControl,
+    ) {
+        val s = f.surfaces()
+        if (s.isEmpty() || s.size != f.panelViews.size) return
+        s.forEach { (sc, at) ->
+            t.reparent(sc, leash)
+            t.setPosition(sc, at.x.toFloat(), at.y.toFloat())
+        }
+        reparented += id
+        Log.i(TAG, "slide: bar of $id under its leash")
+        if (f.veiled) main.post { f.veiled = false }
+    }
+
     /**
-     * The slide ended ([committed]: landed - the page change follows through [desktop]; else called off): bars back at
-     * their window surfaces' origin (where a landed window is), the ones going with their window ([gone]) hidden, at once.
+     * The slide ended ([committed]: landed - the page change follows through [desktop]; else called off). A bar under
+     * a leash goes with it when the transition finishes (no API tells its old parent, so it can't be reparented back):
+     * the windows staying get a new frame now, the ones going ([gone]) none.
      */
     fun slideEnd(
         gone: Set<Int>,
         committed: Boolean,
     ) {
-        val t = android.view.SurfaceControl.Transaction()
-        for (id in sliding.keys) {
-            val f = frames[id] ?: continue
-            f.surfaces().forEach {
-                t.setPosition(it, 0f, 0f)
-                if (id in gone) t.setVisibility(it, false)
+        for (id in reparented) {
+            val old = frames[id] ?: continue
+            if (id in gone) {
+                frames.remove(id)?.remove()
+                continue
             }
-            if (id in gone) slideHidden += id else f.veiled = false
+            val task = slideTasks[id] ?: continue
+            frames[id] = newFrame(task).also { it.place(old.bounds) }
+            main.post { old.remove() }
         }
-        t.apply()
-        Log.i(TAG, "slide end: bars of ${sliding.entries.joinToString { "${it.key}@${it.value.toInt()}" }}, hidden ${gone.ifEmpty { "none" }}")
+        reparented.clear()
+        Log.i(TAG, "slide end: bars of ${sliding.entries.joinToString { "${it.key}@${it.value.toInt()}" }}, gone ${gone.ifEmpty { "none" }}")
         if (committed) return
         sliding.clear()
         main.post(refreshNow)
-    }
-
-    /** Bars [slideEnd] hid whose frame stayed (the page change refused): shown again. */
-    private fun unhideSlid() {
-        if (slideHidden.isEmpty()) return
-        val t = android.view.SurfaceControl.Transaction()
-        slideHidden.mapNotNull { frames[it] }.forEach { f -> f.surfaces().forEach { t.setVisibility(it, true) } }
-        t.apply()
-        slideHidden.clear()
     }
 
     private var unreadableRetries = 0

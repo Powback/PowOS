@@ -251,19 +251,26 @@ class WindowFrame(
     val panelViews: List<android.view.View> get() = if (!added) emptyList() else if (app.ownBar) listOf(grip) else listOf(bar, grip)
 
     /**
-     * Its bar's and grip's window surfaces, the valid ones (WindowFrames.slideMove offsets them with a page swipe, in
-     * the task leashes' transaction). HACK: ViewRootImpl.getSurfaceControl is hidden (reflected past the checks,
-     * HiddenApi): an overlay window's own position belongs to WM (a relayout per frame lagged the drag: DragLayer), so
-     * the slide offsets its surface under WM's position instead. Real fix: the bars inside the task (a caption the
-     * task's surface carries, as desktop mode's), or a PowOS compositor owning both.
+     * Its bar's and grip's window surfaces (the valid ones) with where each sits from the window's top-left corner (px):
+     * WindowFrames.slideMove reparents them to the task's leash for a page swipe and places them there. HACK:
+     * ViewRootImpl.getSurfaceControl is hidden (reflected past the checks, HiddenApi). WM owns an overlay window's own
+     * position (a per-frame setPosition was overwritten, the bar stood still: job 20261024-194358), a child of the
+     * leash follows it by construction. Real fix: the bars inside the task (a caption the task's surface carries, as
+     * desktop mode's), or a PowOS compositor owning both.
      */
-    fun surfaces(): List<SurfaceControl> =
+    fun surfaces(): List<Pair<SurfaceControl, android.graphics.Point>> =
         panelViews.mapNotNull { v ->
-            runCatching {
-                HiddenApi.allow()
-                v.parent?.let { root -> root.javaClass.getMethod("getSurfaceControl").invoke(root) as? SurfaceControl }
-            }.getOrNull()?.takeIf { it.isValid }
+            val sc =
+                runCatching {
+                    HiddenApi.allow()
+                    v.parent?.let { root -> root.javaClass.getMethod("getSurfaceControl").invoke(root) as? SurfaceControl }
+                }.getOrNull()?.takeIf { it.isValid } ?: return@mapNotNull null
+            val p = if (v === bar) barParams else gripParams
+            sc to android.graphics.Point(p.x - bounds.left, p.y - bounds.top)
         }
+
+    /** Its bar's, grip's and window's area from the window's top-left corner (a leash crop that doesn't clip them). */
+    fun leashReach(): Rect = reach().apply { offset(-bounds.left, -bounds.top); inset(-8, -8) }
 
     /**
      * Made for a page swipe's arriving window (WindowFrames.slideStart): its bar drawn clear and unblurred until its

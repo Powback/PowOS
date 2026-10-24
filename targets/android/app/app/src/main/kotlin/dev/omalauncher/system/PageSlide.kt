@@ -278,7 +278,7 @@ object PageSlide {
             if (s.frame(t, w.id, at(w))) moved = true
         }
         if (moved) {
-            WindowFrames.current?.slideMove(t, wins.associate { it.id to dx(it).toFloat() })
+            WindowFrames.current?.slideMove(t, wins.associate { it.id to dx(it).toFloat() }) { s.leash(it) }
             frames++
         }
         t.apply()
