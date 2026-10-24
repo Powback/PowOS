@@ -78,7 +78,9 @@ qdbus6 org.kde.KWin /Scripting/Script$id org.kde.kwin.Script.run >/dev/null 2>&1
 qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript pmq >/dev/null 2>&1
 tail -n +$((n + 1)) /run/powos-app/hyprland.log | grep -a -oE "PM[SW]\|.*"' | tee "$OUT/kwin-$1.txt"
 }
-win() { grep -a "^PMW|[^|]*|$2|" "$OUT/kwin-$1.txt" | grep -av "|true$" | grep -av "|true|false$" | head -1; }  # $2 = class
+# $2 = class, bare or reverse-DNS: KWin reports Kate as org.kde.kate (the desktop-file id), so a bare `kate` never
+# matched and every mode said "no Kate window in KWin" while Kate's window was in the list (2026-10-24, kwin 3.31).
+win() { grep -aE "^PMW\|[^|]*\|([^|]*\.)?$2\|" "$OUT/kwin-$1.txt" | grep -av "|true$" | grep -av "|true|false$" | head -1; }
 field() { cut -d'|' -f"$2" <<<"$1"; }
 SCALE=1
 px() { awk -v v="$1" -v s="$SCALE" 'BEGIN{printf "%d", v * s}'; }
