@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["numpy"]
+# ///
 """bf-frames.py <dir> <mode>...: (Mac) frame pacing + stale frames of a bf-pacing.sh run. Per <dir>/<mode>/:
   L<n>.txt (bf-present.sh: SurfaceFlinger present times, ns) - the layer with the most presents = the game's surface:
     fps, frame-time percentiles, % of frames at one 60 Hz period (14.7-18.7 ms), % short (<12 ms), % long (>25 ms).

@@ -97,4 +97,5 @@ for mode in "$@"; do
 done
 echo "== done $(date +%T)"; restore
 pill "comparing $(echo "$*" | sed 's/ / vs /g')"
-python3 "$here/bf-frames.py" "$OUT" "$@"
+# uv runs it with its own numpy (the script's inline deps, uv's cache): nothing installed into the Mac's python.
+uv run --quiet --script "$here/bf-frames.py" "$OUT" "$@"
