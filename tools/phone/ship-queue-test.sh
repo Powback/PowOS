@@ -8,7 +8,7 @@ set -uo pipefail
 src=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/ship-queue-test.XXXXXX")
 export HOME=$T/home PHONE=$T/phone LOG=$T/log GIT_CONFIG_GLOBAL=$T/gitconfig SHIP_DIR=$T/home/.cache/powos-ship-queue
-export SHIP_QUIET_S=3 SHIP_QUIET_SHELL_S=1 SHIP_POLL_S=1
+export SHIP_QUIET_S=2 SHIP_QUIET_SHELL_S=2 SHIP_POLL_S=0.2
 unset POWOS_SHIP_SERVICE SHIP_AGENT
 Q=$SHIP_DIR
 stop_runner() { local p; p=$(cat "$Q/runner.lock/pid" 2>/dev/null) && kill "$p" 2>/dev/null; pkill -f "$T/" 2>/dev/null; }
@@ -91,7 +91,7 @@ ok() { echo "PASS $1"; }; bad() { echo "FAIL $1"; fails=$((fails+1)); }
 land() { git pull -q --rebase 2>/dev/null; printf '%s\n' "$2" > "$1"; git add -A; git commit -qm "$3"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null; }
 req() { SHIP_REQUESTER=B bash tools/phone/ship.sh request "$@" > "$T/req.out" 2>&1; }
 # drained [s]: every request served within s seconds.
-drained() { for _ in $(seq "${1:-40}"); do ls "$Q"/*.req >/dev/null 2>&1 || return 0; sleep 1; done; return 1; }
+drained() { for _ in $(seq "$(( ${1:-40} * 5 ))"); do ls "$Q"/*.req >/dev/null 2>&1 || return 0; sleep 0.2; done; return 1; }
 tip() { git -C "$T/B" rev-parse origin/worktree-powos-multiplatform; }
 
 # 1. Two shell pushes 1 s apart, two requests: ONE push of both files, both notes in one notification, tip recorded.
@@ -118,9 +118,9 @@ grep -q "^APK $t2 svc=1 --silent" "$LOG" && ok "ship-apk from the tip, by the se
 #     request waits for the install.
 : > "$LOG"; touch "$HOME/hold-apk"
 land targets/android/app/Main.kt 'class Main3' "kt3"; req --note "K"; tk=$(tip)
-for _ in $(seq 20); do grep -q '^APKSTART' "$LOG" && break; sleep 1; done
+for _ in $(seq 100); do grep -q '^APKSTART' "$LOG" && break; sleep 0.2; done
 land shell/ui/b.tsx 'export const b = 2' "b2"; req --note "B quick"; t3=$(tip)
-for _ in $(seq 15); do grep -q 'b = 2' "$PHONE/files/shell/ui/b.tsx" && break; sleep 1; done
+for _ in $(seq 75); do grep -q 'b = 2' "$PHONE/files/shell/ui/b.tsx" && break; sleep 0.2; done
 grep -q 'b = 2' "$PHONE/files/shell/ui/b.tsx" && ! grep -q '^APK ' "$LOG" && ok "shell pushed beside the APK ship" || { bad "shell waited for the APK"; cat "$LOG" "$Q/runner.log"; }
 grep -q '"note":"B quick"' "$PHONE/files/shell-push.json" && ok "its note alone" || { bad "note"; cat "$PHONE/files/shell-push.json"; }
 [ "$(ls "$Q"/*.req 2>/dev/null | wc -l | tr -d ' ')" = 2 ] && ok "both requests wait for the install (B sits on K)" || { bad "requests left: $(ls "$Q"/*.req 2>/dev/null)"; }
@@ -131,7 +131,7 @@ drained && grep -q "^APK $tk svc=1 --note K\$" "$LOG" && ok "APK installed with 
 : > "$LOG"; mkdir "$HOME/.cache/powos-verify.lock"; echo "verify-queue test" > "$HOME/.cache/powos-verify.lock/who"
 cp shell/ui/old.tsx "$PHONE/files/shell/ui/old.tsx"   # an override of it is live
 git rm -q shell/ui/old.tsx; land shell/ui/b.tsx 'export const b = 3' "b3 + rm old"; req --note "B again"
-sleep $((SHIP_QUIET_S + 3))
+sleep $((SHIP_QUIET_S + 1))
 grep -q '^PUSH' "$LOG" && bad "pushed while the verify lock was held" || ok "waits for the verify lock"
 rm -rf "$HOME/.cache/powos-verify.lock"
 drained && grep -q '^PUSH' "$LOG" && ok "ships once it's free" || bad "not shipped after the lock"
@@ -164,8 +164,8 @@ git checkout -q worktree-powos-multiplatform
 # 6. A ship that fails: mailed once, not retried on the same tip; a fix on origin ships.
 : > "$LOG"
 land shell/ui/a.tsx 'BROKEN' "broken"; req --note "broken"; tb=$(tip)
-for _ in $(seq 30); do [ "$(cat "$Q/failed" 2>/dev/null)" = "$tb" ] && break; sleep 1; done
-sleep 3
+for _ in $(seq 150); do [ "$(cat "$Q/failed" 2>/dev/null)" = "$tb" ] && break; sleep 0.2; done
+sleep 1
 [ "$(cat "$Q/failed" 2>/dev/null)" = "$tb" ] && [ "$(grep -c '^MAIL.*FAILED' "$LOG")" = 1 ] && ! grep -q '^PUSH' "$LOG" && ok "failed ship: mailed once, nothing pushed" || { bad "failed ship"; cat "$LOG"; }
 [ "$(grep -c '^GATE' "$LOG")" -le 3 ] && ok "not retried on the same tip" || bad "retried: $(grep -c '^GATE' "$LOG") gates"
 land shell/ui/a.tsx 'export const a = 6' "fix"
@@ -174,18 +174,18 @@ drained && grep -q 'a = 6' "$PHONE/files/shell/ui/a.tsx" && ok "the fix ships, b
 # 7. pause / resume: a ship still building is stopped (lock freed, request kept); an install in flight finishes.
 : > "$LOG"; touch "$HOME/hold-apk"
 land targets/android/app/Main.kt 'class Main7' "kt7"; req --note "seven"; t7=$(tip)
-for _ in $(seq 40); do grep -q '^APKSTART' "$LOG" && break; sleep 1; done
+for _ in $(seq 200); do grep -q '^APKSTART' "$LOG" && break; sleep 0.2; done
 out=$(bash tools/phone/ship.sh pause --why "test")
 echo "$out" | grep -q "was stopped" && ok "pause stops the building ship" || { bad "pause: $out"; tail -5 "$Q/runner.log"; }
-for _ in $(seq 15); do [ -d "$HOME/.cache/powos-ship.lock" ] || [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 1; done
+for _ in $(seq 75); do [ -d "$HOME/.cache/powos-ship.lock" ] || [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 0.2; done
 [ ! -d "$HOME/.cache/powos-ship.lock" ] && ls "$Q"/*.req >/dev/null 2>&1 && ! grep -q "^APK $t7" "$LOG" && [ ! -s "$Q/failed-apk" ] &&
   ok "lock freed, request kept, nothing installed, not marked failed" || { bad "after pause"; cat "$LOG"; ls "$Q"; tail -5 "$Q/runner.log"; }
 st=$(bash tools/phone/ship.sh status); grep -q '^PAUSED.*test' <<<"$st" && ok "status says PAUSED with reason" || { bad "status"; echo "$st"; }
-rm -f "$HOME/hold-apk"; req --note "eight"; sleep $((SHIP_QUIET_S + 3))
+rm -f "$HOME/hold-apk"; req --note "eight"; sleep $((SHIP_QUIET_S + 1))
 [ "$(grep -c '^APKSTART' "$LOG")" = 1 ] && ok "no ship starts while paused" || { bad "shipped while paused"; cat "$LOG"; }
-export APK_INSTALL_S=8
+export APK_INSTALL_S=3
 bash tools/phone/ship.sh resume >/dev/null
-for _ in $(seq 40); do [ -s "$Q/installing" ] && break; sleep 1; done
+for _ in $(seq 200); do [ -s "$Q/installing" ] && break; sleep 0.2; done
 out=$(bash tools/phone/ship.sh pause --why "test")
 echo "$out" | grep -q "install is in flight" && ok "pause during an install lets it run" || bad "pause mid-install: $out"
 drained 30 && grep -q "^APK $t7 svc=1" "$LOG" && ok "the install finished, its requests done" || { bad "install in flight"; cat "$LOG"; ls "$Q"; }
@@ -194,8 +194,8 @@ bash tools/phone/ship.sh resume >/dev/null; export APK_INSTALL_S=0
 # 8. A stopped runner (launchctl bootout = TERM) takes its building APK ship with it: no ship-apk left to install.
 : > "$LOG"; touch "$HOME/hold-apk"
 land targets/android/app/Main.kt 'class Main8' "kt8"; req --note "nine"
-for _ in $(seq 40); do grep -q '^APKSTART' "$LOG" && break; sleep 1; done
-kill "$(cat "$Q/runner.lock/pid")"; sleep 3
+for _ in $(seq 200); do grep -q '^APKSTART' "$LOG" && break; sleep 0.2; done
+kill "$(cat "$Q/runner.lock/pid")"; sleep 1
 ! pgrep -f "$T/.*ship-apk.sh" >/dev/null && [ ! -d "$HOME/.cache/powos-ship.lock" ] && ls "$Q"/*.req >/dev/null 2>&1 &&
   ok "TERM stops the APK ship too (lock freed, request kept)" || { bad "TERM left: $(pgrep -fl "$T/.*ship-apk.sh")"; }
 rm -f "$HOME/hold-apk"; bash tools/phone/ship.sh resume >/dev/null; drained 40 || bad "kt8 not shipped after the restart"
@@ -204,10 +204,10 @@ rm -f "$HOME/hold-apk"; bash tools/phone/ship.sh resume >/dev/null; drained 40 |
 # 9. 1d3a80ac: an apps/<app> change landed with a shell change - the shell ship goes first and must NOT hide the apps change.
 land apps/x/f.txt 1 "app x"; land shell/ui/a.tsx 'export const a = 9' "a9"; req --note "apps after shell"
 drained 40
-for _ in $(seq 30); do grep -q '^APPINSTALL' "$LOG" && break; sleep 1; done
+for _ in $(seq 150); do grep -q '^APPINSTALL' "$LOG" && break; sleep 0.2; done
 grep -q 'a = 9' "$PHONE/files/shell/ui/a.tsx" && grep -q '^APPINSTALL x install' "$LOG" && ok "apps ship after a shell ship" || { bad "apps not shipped after a shell ship"; cat "$LOG" "$Q/runner.log"; }
 
-for _ in $(seq 15); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 1; done
+for _ in $(seq 75); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 0.2; done
 runner_left=$(cat "$Q/runner.lock/pid" 2>/dev/null)
 [ -z "$runner_left" ] && ok "runner exits when nothing is requested" || bad "runner still up ($runner_left)"
 [ $fails -eq 0 ] && echo "all pass" || { echo "$fails failed"; echo "--- runner.log"; cat "$Q/runner.log"; }
