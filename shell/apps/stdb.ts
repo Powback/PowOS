@@ -15,7 +15,9 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { openUrl, power, useLayoutSize, useOnScreen, useQuiet } from "./onscreen.ts";
 import { useSurface, type Surface } from "./native.ts";
-import { openApp } from "./pages.ts";
+import { closeApp, openApp } from "./pages.ts";
+import { powos } from "../bridge.ts";
+import type { AppLinks } from "../types.ts";
 import { net, type Net } from "./net.ts";
 import { DetailSheet, type DetailSheetProps } from "./sheet.ts";
 
@@ -50,6 +52,36 @@ export interface IslandHost {
   net?: Net;
   /** The widget detail sheet (apps/sheet.ts): a widget's other controls in a frosted popup anchored to it. */
   DetailSheet?: (p: DetailSheetProps) => null;
+  /**
+   * The app closes and PowOS AI's chat opens with [text] in its field, ready - the user reads it and sends it
+   * themselves (App API's "describe it": the model runs in PowOS AI, never in an app's backend).
+   */
+  askAssistant?(text: string): void;
+  /** The installed Android apps (launcher entries, one per package): App API's "+ add app". */
+  androidApps?(): Promise<{ pkg: string; label: string }[]>;
+  /** An Android app's deep links, read from its manifest - nothing fired (bridge apps.links); rejects on an older APK. */
+  appLinks?(pkg: string): Promise<AppLinks>;
+}
+
+/** Launcher entries -> one per Android package ("a:<pkg>/<activity>[@profile]", the owner's profile only). */
+async function androidApps() {
+  const seen = new Map<string, string>();
+  for (const a of await powos.apps.list()) {
+    const m = a.kind === "android" && !a.key.includes("@") ? /^a:([^/]+)\//.exec(a.key) : null;
+    if (m && !seen.has(m[1])) seen.set(m[1], a.label);
+  }
+  return [...seen].map(([pkg, label]) => ({ pkg, label })).sort((x, y) => x.label.localeCompare(y.label));
+}
+
+function appLinks(pkg: string): Promise<AppLinks> {
+  if (!powos.apps.links) return Promise.reject(new Error("this host can't read an app's links"));
+  return powos.apps.links(pkg);
+}
+
+function askAssistant(text: string) {
+  closeApp();
+  // Loaded when asked: the chat surface's module (and what it pulls in) stays out of pages that never ask.
+  void import("../ui/assistant.ts").then((m) => m.openAssistant({ text }));
 }
 
 export interface Builder {
@@ -419,4 +451,7 @@ export const host: IslandHost = {
   openApp: (id) => openApp(id),
   net,
   DetailSheet,
+  askAssistant,
+  androidApps,
+  appLinks,
 };

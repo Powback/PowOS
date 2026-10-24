@@ -11,9 +11,13 @@ one call path stays the only place that can say no), toggles are the spec's own 
   GET  /apps                       every spec: app, actions, safety, enabled (handles only, never a token)
   GET  /views?app=A                {api, tools, cli, widgets}: appcap_render.py's output
   POST /enable {app, action?, enabled}         the kill switch / the per-action allowlist (spec re-validated)
-  POST /call {app, action, args, send, consumer}   appcap_run.py; send only for `read` (first slice), never `spend`;
-                                   consumer "widget" (a composed widget, docs/COMPOSER.md) = reads only, in the
-                                   runtime itself. app/action may also ride in the query (?app=hue&action=list_rooms)
+  POST /enable: switching ON a non-read `captured`/`drafted` action promotes it (promoted:true) - that is the review
+  POST /call {app, action, args, send, consumer, draft}   appcap_run.py; send only for `read` (first slice), never
+                                   `spend`; consumer "widget" (a composed widget, docs/COMPOSER.md) = reads only, in the
+                                   runtime itself. app/action may also ride in the query (?app=hue&action=list_rooms).
+                                   draft:true = a draft under review (drafts/): only ever a dry run (--draft)
+  GET /drafts, GET /draft?app=, GET /installed, POST /draft/import|installed|add|discard   "+ add app" (appcap_add.py):
+                                   drafts live in drafts/, never specs/, until "Add to my apps" moves one in (app off)
   GET  /audit?app=A&n=100          the audit log, newest first
   GET  /trackers                   the proxy's tracker log, per app + a summary (empty until the proxy writes it)
   POST /trackers/allow {app, allow}            per-app "allow trackers" (trackers/policy.json, read by the proxy)
@@ -23,6 +27,7 @@ one call path stays the only place that can say no), toggles are the spec's own 
                                    only ever in the x-powos-secret header, into the encrypted store, never returned
 
 State: appcap_store.STATE (~/.local/state/powos/app-api): specs/<app>.appcap.json (seeded from examples/ once),
+drafts/<app>.appcap.json (appcap_add.py),
 audit/<app>.jsonl, trackers/<app>.jsonl + trackers/policy.json. Stdlib only. Never prints or returns a token.
 """
 from __future__ import annotations
@@ -39,6 +44,7 @@ from urllib.parse import parse_qs, urlparse
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
+import appcap_add  # noqa: E402
 import appcap_files  # noqa: E402
 import appcap_link  # noqa: E402
 import appcap_flows  # noqa: E402
@@ -51,6 +57,7 @@ SPECS = os.path.join(STATE, "specs")
 TRACKERS = os.path.join(STATE, "trackers")
 PORT = int(os.environ.get("POWOS_APPAPI_PORT", "3411"))
 MAX_BODY = 64 << 10
+BIG_BODY = appcap_add.FETCH_MAX + (64 << 10)  # a picked/pasted API document (appcap_add.BIG)
 KEEP = ("summary", "safety", "origin", "promoted", "widget", "confirm", "confirm_template", "undo", "refresh", "view",
         "inputs", "output", "enabled")
 
@@ -177,7 +184,11 @@ def enable(_q, b):
     if b.get("action"):
         if b["action"] not in s["actions"]:
             raise LookupError(f"no action '{b['action']}'")
-        s["actions"][b["action"]]["enabled"] = on
+        act = s["actions"][b["action"]]
+        act["enabled"] = on
+        # The user switching a captured/drafted write on IS its review: promoted (S3), and it stays so when off again.
+        if on and act.get("safety") != "read" and act.get("origin") in appcap_validate.UNREVIEWED:
+            act["promoted"] = True
     else:
         s["enabled"] = on
     tmp = write_json(path, s)
@@ -195,7 +206,12 @@ CONSUMERS = ("app", "widget")
 
 def call(q, b):
     b = {**{k: q[k] for k in ("app", "action") if k in q}, **b}
-    path = spec_path(b["app"])
+    draft = bool(b.get("draft"))
+    if draft and b.get("send"):
+        return {"refused": "a draft is only previewed - add it to your apps first"}
+    path = appcap_add.draft_path(b["app"]) if draft else spec_path(b["app"])
+    if draft and not os.path.exists(path):
+        raise LookupError(f"no draft '{b['app']}'")
     s = valid(path)
     act = s["actions"].get(b["action"])
     if not act:
@@ -214,10 +230,20 @@ def call(q, b):
             argv += ["--arg", f"{k}={json.dumps(v) if isinstance(v, bool) else v}"]
     if send:
         argv.append("--send")
+    if draft:
+        argv.append("--draft")
     p = subprocess.run(argv, capture_output=True, text=True, timeout=30)
     if p.returncode:
         return {"refused": (p.stderr.strip().splitlines() or ["refused"])[-1]}
     return json.loads(p.stdout)
+
+
+def draft(q, _b):
+    """One draft as /apps shows an app: its actions to review (dry runs only)."""
+    path = appcap_add.draft_path(q["app"])
+    if not os.path.exists(path):
+        raise LookupError(f"no draft '{q['app']}'")
+    return summary(path)
 
 
 def tail(path: str, n: int) -> list:
@@ -279,8 +305,9 @@ def trackers_allow(_q, b):
 
 
 ROUTES = {("GET", "/apps"): apps, ("GET", "/views"): views, ("POST", "/enable"): enable, ("POST", "/call"): call,
-          ("GET", "/audit"): audit, ("GET", "/trackers"): trackers, ("POST", "/trackers/allow"): trackers_allow,
-          **appcap_flows.ROUTES, **appcap_files.ROUTES, **appcap_link.ROUTES}
+          ("GET", "/audit"): audit, ("GET", "/draft"): draft, ("GET", "/trackers"): trackers, ("POST", "/trackers/allow"): trackers_allow,
+          **appcap_flows.ROUTES, **appcap_files.ROUTES, **appcap_link.ROUTES,
+          **appcap_add.ROUTES}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -301,7 +328,7 @@ class Handler(BaseHTTPRequestHandler):
         b = {}
         if method == "POST":
             n = int(self.headers.get("content-length") or 0)
-            if n > MAX_BODY:
+            if n > (BIG_BODY if u.path in appcap_add.BIG else MAX_BODY):
                 return self.reply(413, {"error": "too big"})
             b = json.loads(self.rfile.read(n) or b"{}")
             b.pop("_secret", None)
@@ -326,6 +353,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     seed()
+    appcap_add.migrate()
     appcap_flows.seed()
     HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 

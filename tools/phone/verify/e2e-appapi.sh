@@ -4,9 +4,10 @@
 # /home/powos/design-qa/e2e-appapi/<round>/, never the verify pill, only what it opened closed).
 #   App API from the dock (search if it isn't there): the Apps tab, Philips Hue's actions, "List rooms" opened and
 #   "Dry run" (a dry run: nothing is sent, the bridge never contacted), back, the Audit tab (the dry run on top), the
-#   Trackers tab; closed. Lights opened once from search (it hands its pairing to App API: /link?app=hue linked) and
+#   Trackers tab; "+ add app": its three paths, the bundled Open-Meteo OpenAPI sample imported into a draft, a dry run
+#   of it, discarded (nothing sent, nothing added); closed. Lights opened once from search (it hands its pairing to App API: /link?app=hue linked) and
 #   closed - nothing inside it touched. The composed Hue rooms widget (local.hue-rooms*) looked at on home.
-# NEVER: a switch (role=switch), "Send", a field, a light, a setting - every tap's target is checked over CDP first
+# NEVER: a switch (role=switch), "Send", a field, "Ask PowOS AI", "Add to my apps", a light, a setting - every tap's target is checked over CDP first
 # (the element under the spot must be the one meant, and not inside a switch, input or textarea).
 # Exit: 0 (FAIL lines = a FAIL); 3 a real touch / no window (re-queued); 5 can't run.
 set -uo pipefail
@@ -49,6 +50,54 @@ search_open() { # <text> <result key> <name>
   case $p in none|off|"") fail "no $3 in the search results ($p)"; back; back; return 1 ;; esac
   # The name first: `set -- $p` replaces $3 (it was unbound under set -u and ended the journey at step 2, 2026-10-23).
   local name=$3; pass "$name in the search results"; set -- $p; tap "$1" "$2" "$name in the results"
+}
+
+# The "+ add app" part (from the Apps tab, App API open): three paths, the sample imported, a dry run, discarded.
+btn() { echo "[...$SCR.querySelectorAll('button')].find(b=>b.textContent.trim()==='$1')"; }
+add_app_journey() {
+  tapel "[...$SCR.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Apps')" "the Apps tab" || return 0
+  sleep 1; chk apps-again
+  local ADD="$SCR.querySelector('[data-add-app]')" t out
+  reveal "$ADD"
+  tapel "$ADD" "the + add app card" || return 0
+  sleep 1.2; chk add-app
+  step add-app "+ add app: describe it, an installed app, or import its API - and the drafts"
+  t=$(ev "[...$SCR.querySelectorAll('[data-add-path]')].map(e=>e.dataset.addPath).join('|')")
+  [ "$t" = "Describe it|From an installed app|Import its API" ] && pass "the three paths: $t" || fail "the add paths: '$t'"
+  [ "$(ev "!!($(btn 'Ask PowOS AI'))")" = true ] && pass "Describe it hands PowOS AI a ready prompt (not tapped here)" ||
+    note "no Ask PowOS AI button (a shell without askAssistant)"
+  local SAMPLE; SAMPLE=$(btn 'Try the Open-Meteo sample')
+  reveal "$SAMPLE"
+  tapel "$SAMPLE" "Try the Open-Meteo sample" || return 0
+  until_js "$SCR.innerText.includes('Open-Meteo (demo capture)')&&!!($(btn 'Discard'))" 8 || { fail "the sample made no draft: $(ev "$SCR.innerText.slice(0,160)")"; return 0; }
+  chk draft
+  step draft "the Open-Meteo sample as a draft: its actions, dry runs only, Add to my apps / Discard"
+  pass "the sample is a draft under review (Add to my apps, Discard)"
+  [ "$(ev "!!$SCR.querySelector('[role=switch]')")" = false ] && pass "a draft has no switches" || fail "the draft review shows switches"
+  local FC="[...$SCR.querySelectorAll('div')].find(d=>d.textContent==='Get v1 forecast'&&!d.children.length)" DRY
+  reveal "$FC"
+  if tapel "$FC" "Get v1 forecast"; then sleep 1; chk forecast
+    DRY=$(btn 'Dry run'); until_js "$DRY" 5 || fail "the draft's action opened no Dry run"
+    reveal "$DRY"
+    if tapel "$DRY" "Dry run (draft)"; then
+      until_js "[...$SCR.querySelectorAll('pre')].some(p=>/nothing was sent|refused|couldn/.test(p.textContent))" 8; chk draft-dry
+      out=$(ev "([...$SCR.querySelectorAll('pre')].pop()||{}).textContent||''")
+      reveal "[...$SCR.querySelectorAll('pre')].pop()"
+      step draft-dry-run "the draft's dry run: the request it would make, nothing sent"
+      grep -q 'dry run - nothing was sent' <<<"$out" && grep -q 'GET https://api.open-meteo.com/v1/forecast' <<<"$out" &&
+        pass "the draft dry-runs GET https://api.open-meteo.com/v1/forecast, nothing sent" || fail "the draft's dry run said: $(head -c 200 <<<"$out")"
+      [ "$(ev "!!($(btn 'Send'))")" = false ] && pass "no Send on a draft" || fail "a draft offers Send"
+    fi
+  fi
+  local DISC; DISC=$(btn 'Discard')
+  reveal "$DISC"
+  tapel "$DISC" "Discard" || return 0
+  until_js "$SCR.innerText.includes('Add an app')" 6; sleep 0.8; chk discarded
+  step discarded "Discard: back on + add app, the draft gone"
+  [ "$(ev "!!$SCR.querySelector('[data-draft=\"open-meteo-demo-capture\"]')")" = false ] && pass "the draft is gone from Drafts" || fail "the discarded draft is still listed"
+  tapel "$SCR.querySelector('button[aria-label=back]')" "+ add app's back" && sleep 1
+  until_js "$SCR&&[...$SCR.querySelectorAll('[role=tab]')].some(t=>t.textContent==='Apps')" 4 || fail "back from + add app: no tabs"
+  [ "$(ev "$SCR.innerText.includes('Open-Meteo (demo capture)')")" = false ] && pass "the sample never became one of the apps" || fail "the sample is in the Apps list"
 }
 
 # 1. App API from the dock.
@@ -114,6 +163,9 @@ if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&$SCR.innerText.includes('
     t=$(ev "$SCR.innerText.replace(/\\n/g,' | ').slice(0,200)")
     grep -qE 'trackers in|No trackers seen yet' <<<"$t" && pass "the Trackers tab answers: $(cut -c1-120 <<<"${t#*Files | }")" || fail "the Trackers tab: $t"
   fi
+  # 6. "+ add app": its three paths; the bundled Open-Meteo OpenAPI sample imported into a draft, one dry run, discarded.
+  #    Nothing is sent and nothing is added to the apps: a draft only previews (appcap_add.py).
+  add_app_journey
   back 1.2; chk close-api
   step api-closed "Back: App API closed, home again"
   [ "$(screen_app)" = none ] && pass "App API is closed" || { fail "App API still open ($(screen_app))"; ev "window.__powosApps&&window.__powosApps.closeApp(),'x'" >/dev/null; }
@@ -121,7 +173,7 @@ else
   step app-api "App API tapped"; fail "App API didn't open ($(screen_app))"
 fi
 
-# 6. Lights, once: its pairing to App API. Nothing inside it is touched.
+# 7. Lights, once: its pairing to App API. Nothing inside it is touched.
 if search_open lights p:local.lights Lights; then
   sleep 1.5; chk lights
   until_js "$SCR&&$SCR.dataset.app==='local.lights'" 6
@@ -137,7 +189,7 @@ if search_open lights p:local.lights Lights; then
   [ "$(screen_app)" = none ] && pass "Lights is closed" || fail "Lights still open ($(screen_app))"
 fi
 
-# 7. The composed Hue rooms widget on home: its page shown (real swipes from empty space), looked at, back.
+# 8. The composed Hue rooms widget on home: its page shown (real swipes from empty space), looked at, back.
 hemit system.home null
 where=$(ev "(()=>{const e=[...document.querySelectorAll('.page-track [data-key]')].find(x=>/hue-rooms/.test(x.dataset.key));if(!e)return 'none';const pg=e.closest('.page-track > .page');return [...pg.parentElement.children].indexOf(pg)+' '+e.dataset.key})()")
 if [ "$where" = none ] || [ -z "$where" ]; then

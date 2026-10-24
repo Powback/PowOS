@@ -17,6 +17,9 @@ The safety rules live HERE, once, so no consumer can bypass them:
   - captured + non-read : refused unless the action is promoted.
   - DEFAULT IS DRY-RUN  : without --send nothing leaves the machine; the exact
                           request is previewed (auth shown only as its handle).
+  - --draft             : a draft (appcap_add.py, <state>/drafts/) under review:
+                          a dry run past the allowlist and the promotion check
+                          (nothing is sent: --send is refused with it).
 
 Every call appends one line to <state>/audit/<app>.jsonl with secret-pattern
 args redacted; a token value is never logged or printed.
@@ -31,7 +34,7 @@ matches the device's certificate. A read's JSON answer comes back parsed in
 
 Usage:
   appcap_run.py SPEC ACTION [--arg k=v]... [--state k=v]... \
-      [--consumer ai|cli|sdk|widget|app] [--send] [--confirm TEXT] [--json]
+      [--consumer ai|cli|sdk|widget|app] [--send] [--confirm TEXT] [--draft] [--json]
 Default (no --send) = dry-run preview. Exit 0 ok, 3 = refused by safety/allowlist.
 """
 from __future__ import annotations
@@ -147,6 +150,7 @@ def main() -> int:
     ap.add_argument("--consumer", default="cli", choices=["ai", "cli", "sdk", "widget", "app"])
     ap.add_argument("--send", action="store_true", help="actually perform (default: dry-run)")
     ap.add_argument("--confirm", help="the user's typed confirmation for a spend action")
+    ap.add_argument("--draft", action="store_true", help="preview a draft under review: dry run only, allowlist skipped")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
 
@@ -174,15 +178,19 @@ def main() -> int:
         return REFUSED
     safety = act["safety"]
 
-    # ---- allowlist ----
-    if not spec.get("enabled", False):
+    # ---- a draft: only ever previewed ----
+    if a.draft and a.send:
+        return refuse("a draft is only previewed - add it to your apps first")
+
+    # ---- allowlist (a draft's dry run looks past it: nothing is sent) ----
+    if not a.draft and not spec.get("enabled", False):
         return refuse(f"app '{app}' is not enabled")
-    if act.get("enabled", True) is False:
+    if not a.draft and act.get("enabled", True) is False:
         return refuse(f"action '{a.action}' is not in the allowlist")
 
     # ---- safety class ----
-    if act["origin"] == "captured" and safety != "read" and not act.get("promoted"):
-        return refuse("captured action is read-only until promoted")
+    if not a.draft and act["origin"] in appcap_validate.UNREVIEWED and safety != "read" and not act.get("promoted"):
+        return refuse(f"{act['origin']} action is read-only until promoted")
     if a.consumer == "widget" and safety != "read":
         return refuse("a widget may only call read actions")
 
@@ -205,7 +213,7 @@ def main() -> int:
     ep = act["endpoint"]
     ph = {**state, **args}
     preview = {"consumer": a.consumer, "app": app, "action": a.action, "safety": safety,
-               "dry_run": not sending}
+               "dry_run": not sending, **({"draft": True} if a.draft else {})}
     headers = {}
     tok_handle = None
     auth = ep.get("auth")
@@ -256,8 +264,9 @@ def main() -> int:
             url = _fill(base + ep.get("path", ""), ph)
             data = None
             if ep.get("body"):
-                data = json.dumps(_fill(ep["body"], ph)).encode()
-                headers["content-type"] = "application/json"
+                b = _fill(ep["body"], ph)  # a string body (an SQL read) goes as text, an object as JSON
+                data = (b if isinstance(b, str) else json.dumps(b)).encode()
+                headers["content-type"] = "text/plain" if isinstance(b, str) else "application/json"
             if auth and tok_handle:                      # resolve in-process, never print
                 val = appcap_store.get_secret(tok_handle).decode()
                 t = (spec.get("auth") or {}).get("tokens", {}).get(auth, {})

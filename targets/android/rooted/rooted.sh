@@ -117,9 +117,11 @@ deploy)
   adb push -q "$HERE/../../../lib/ai/agents" /data/local/tmp/powos-agents
   adb push -q "$HERE/../../../lib/ai/comms/comms-mcp.py" /data/local/tmp/comms-mcp.py
   # App API's runtime (tools/app-api, unit app-api): the specs' tools + appcap_serve.py, the App API app's local service.
-  adb shell rm -rf /data/local/tmp/powos-app-api && adb shell mkdir -p /data/local/tmp/powos-app-api/examples
+  adb shell rm -rf /data/local/tmp/powos-app-api && adb shell mkdir -p /data/local/tmp/powos-app-api/examples /data/local/tmp/powos-app-api/sample
   adb push -q "$HERE"/../../../tools/app-api/*.py /data/local/tmp/powos-app-api/
   adb push -q "$HERE"/../../../tools/app-api/examples/*.appcap.json /data/local/tmp/powos-app-api/examples/
+  # "+ add app"'s import sample (appcap_add.py, POST /draft/import {sample}).
+  adb push -q "$HERE"/../../../tools/app-api/sample/*.openapi.json /data/local/tmp/powos-app-api/sample/
   # The manager (lib/ai/manager: PowOS AI's chat runs a turn of it per message, so a new one takes the next turn).
   adb shell rm -rf /data/local/tmp/powos-manager
   adb push -q "$HERE/../../../lib/ai/manager" /data/local/tmp/powos-manager

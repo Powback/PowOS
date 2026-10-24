@@ -211,6 +211,8 @@ class ShellBridge(
             "apps.launch" -> launch(a.getString(0))
             "apps.info" -> android(a.getString(0))?.let { runtime.androidApps.openInfo(it) }
             "apps.uninstall" -> android(a.getString(0))?.let { runtime.androidApps.uninstall(it) }
+            // App API's "+ add app": the deep links an app opens, read from its manifest - nothing fired (AppLinks.kt).
+            "apps.links" -> AppLinks.read(context, a.getString(0))
             "usage.recent" -> JSONArray(installed(runtime.usage.recent).take(a.optInt(0, 5)))
             "store.get" -> store(a.getString(0)).takeIf { it.isFile }?.readText()?.let { RawJson(it) }
             "store.set" -> store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })

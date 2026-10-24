@@ -233,9 +233,12 @@ fi
 # App API's runtime (unit app-api, docs/APP-API-CAPTURE.md 1b.0): appcap_*.py and the example specs, run by the system
 # tier's app-api service (lib/apps/services/app-api.json: appcap_serve.py on 127.0.0.1:3411, port-locked).
 if [ -d $T/powos-app-api ]; then
-  rm -rf $R/usr/lib/powos/app-api && mkdir -p $R/usr/lib/powos/app-api/examples
+  rm -rf $R/usr/lib/powos/app-api && mkdir -p $R/usr/lib/powos/app-api/examples $R/usr/lib/powos/app-api/sample
   install -m 644 $T/powos-app-api/*.py $R/usr/lib/powos/app-api/
   install -m 644 $T/powos-app-api/examples/*.appcap.json $R/usr/lib/powos/app-api/examples/
+  if ls $T/powos-app-api/sample/*.openapi.json >/dev/null 2>&1; then
+    install -m 644 $T/powos-app-api/sample/*.openapi.json $R/usr/lib/powos/app-api/sample/
+  fi
   rm -rf $T/powos-app-api
 fi
 chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- \

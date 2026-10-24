@@ -15,7 +15,9 @@
     "/usr/lib/powos/app-api/openapi2appcap.py",
     "/usr/lib/powos/app-api/har2openapi.py",
     "/usr/lib/powos/app-api/appcap_serve.py",
+    "/usr/lib/powos/app-api/appcap_add.py",
     "/usr/lib/powos/app-api/examples",
+    "/usr/lib/powos/app-api/sample",
     "/usr/lib/powos/apps/services/app-api.json",
     "/home/powos/.local/state/powos/app-api/"
   ],

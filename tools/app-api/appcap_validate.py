@@ -11,8 +11,10 @@ Invariants enforced (each a hard error unless marked warn):
   S1  every action's `endpoint.auth` names a token that exists in auth.tokens
   S2  no token `store` is an inline value — it must be a secret:/store: handle
       (defence in depth: a real token must never land in the spec file)
-  S3  a `captured`-origin action may only be `read` unless `promoted: true`
-      (capture-generated actions start read-only until the user promotes them)
+  S3  a `captured`- or `drafted`-origin action may only be enabled as a `read`
+      unless `promoted: true` (capture-generated and drafted actions - the
+      "+ add app" flow's, appcap_add.py - start read-only until the user
+      promotes them by switching one on)
   S4  a `spend` action MUST have confirm:true and MUST NOT have widget:true
   S5  only `read` actions may set widget:true
   S6  confirm:true requires a confirm_template (what + how much is shown)
@@ -35,7 +37,8 @@ import sys
 
 HANDLE = re.compile(r"^(secret|store):[A-Za-z0-9_.:-]+$")
 SAFETY = {"read", "reversible-write", "spend"}
-ORIGIN = {"official", "captured"}
+ORIGIN = {"official", "captured", "drafted"}
+UNREVIEWED = {"captured", "drafted"}  # origins whose writes need the user's promotion (S3)
 
 
 def validate(path: str, show_list: bool) -> list[str]:
@@ -84,12 +87,12 @@ def validate(path: str, show_list: bool) -> list[str]:
         if not (ep.get("method") or ep.get("argv") or ep.get("operationId") or ep.get("ui")):
             errs.append(f"{path}:{aid}: endpoint maps to nothing (need method / argv / operationId / ui) [S9]")
 
-        # S3: captured starts read-only until promoted. A freshly captured write
+        # S3: captured/drafted starts read-only until promoted. A freshly captured or drafted write
         # may sit in the spec as a DISABLED draft (not in the allowlist); it only
         # needs promotion once someone wants to enable+call it.
-        if origin == "captured" and safety != "read" and not promoted and enabled:
-            errs.append(f"{path}:{aid}: enabled captured action with safety='{safety}' needs promoted=true "
-                        f"(capture-generated writes start disabled + read-only) [S3]")
+        if origin in UNREVIEWED and safety != "read" and not promoted and enabled:
+            errs.append(f"{path}:{aid}: enabled {origin} action with safety='{safety}' needs promoted=true "
+                        f"(capture-generated and drafted writes start disabled + read-only) [S3]")
 
         # S4: spend => confirm, never widget
         if safety == "spend":

@@ -4,40 +4,24 @@
  * (appcap_render.py: API, AI tools, CLI, widget bindings), dry-run an action, read the audit log and the trackers the
  * capture proxy saw. All of it is the local runtime on this device (lib/api.ts).
  */
-import { useEffect, useState } from "preact/hooks";
-import { ActionPanel } from "../lib/action";
-import { call, SAFETY, type AppSpec, type AuditRow, type Net, type Trackers, type Views } from "../lib/api";
+import { useState } from "preact/hooks";
+import { Actions, type DetailProps } from "../lib/action";
+import { AddApp } from "../lib/add";
+import { call, type AppSpec, type AuditRow, type Host, type Net, type Trackers, type Views } from "../lib/api";
 import { Files } from "../lib/files";
 import { Recordings } from "../lib/recordings";
 import { Rules } from "../lib/rules";
+import { useRuntime } from "../lib/runtime";
 import { Block, Muted, S, Seg, Switch, title } from "../lib/ui";
 
 interface Props {
-  host: { net?: Net };
+  host: Host;
   app: string;
   close?: () => void;
 }
 
 const TABS = ["Apps", "Audit", "Trackers", "Rules", "Recordings", "Files"];
 const VIEWS: [string, keyof Views | null][] = [["Actions", null], ["API", "api"], ["AI tools", "tools"], ["CLI", "cli"], ["Widgets", "widgets"]];
-
-/** One runtime read, again whenever [key] changes: [data, error, reload]. */
-function useRuntime<T>(net: Net | undefined, app: string, path: string | null, key = 0): [T | null, string | null, () => void] {
-  const [data, setData] = useState<T | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [n, setN] = useState(0);
-  useEffect(() => {
-    if (!path) return;
-    call<T>(net, app, path).then((d) => (setData(d), setErr(null)), (e) => setErr(String(e?.message ?? e)));
-  }, [path, key, n]);
-  // Live: re-read when the page is shown again (no timers at rest - visibility only).
-  useEffect(() => {
-    const onShow = () => document.visibilityState === "visible" && setN((x) => x + 1);
-    document.addEventListener("visibilitychange", onShow);
-    return () => document.removeEventListener("visibilitychange", onShow);
-  }, []);
-  return [data, err, () => setN(n + 1)];
-}
 
 function Unreachable({ err, retry }: { err: string; retry: () => void }) {
   return (
@@ -63,52 +47,7 @@ function AppCard({ a, open, flip }: { a: AppSpec; open: () => void; flip: (on: b
   );
 }
 
-function ActionRow({ p, id }: { p: DetailProps; id: string }) {
-  const [open, setOpen] = useState(false);
-  const a = p.spec.actions[id];
-  return (
-    <div style={S.card}>
-      <div style={{ ...S.row, cursor: "pointer" }} onClick={() => setOpen(!open)}>
-        <div style={S.grow}>
-          <div style={S.name}>{title(id)}</div>
-          <div style={S.idMuted}>{id}</div>
-          <Muted>{a.summary}</Muted>
-        </div>
-        <Switch on={a.enabled} label={`${title(id)} allowed`} onFlip={(on) => p.toggle(on, id)} />
-      </div>
-      {open && <ActionPanel net={p.net} app={p.app} spec={p.spec.app} id={id} a={a} />}
-    </div>
-  );
-}
-
-interface DetailProps {
-  net?: Net;
-  app: string;
-  spec: AppSpec;
-  toggle: (on: boolean, action?: string) => void;
-}
-
-function Actions(p: DetailProps) {
-  const ids = Object.keys(p.spec.actions).sort();
-  return (
-    <>
-      {SAFETY.map((g) => {
-        const mine = ids.filter((id) => p.spec.actions[id].safety === g.id);
-        if (!mine.length) return null;
-        return (
-          <section key={g.id} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            <h2 style={S.group}>
-              {g.label} <span style={{ ...S.muted, fontWeight: 400 }}>{g.note}</span>
-            </h2>
-            {mine.map((id) => <ActionRow key={id} p={p} id={id} />)}
-          </section>
-        );
-      })}
-    </>
-  );
-}
-
-function Detail(p: DetailProps & { back: () => void }) {
+function Detail(p: DetailProps & { toggle: (on: boolean, action?: string) => void; back: () => void }) {
   const [view, setView] = useState("Actions");
   const which = VIEWS.find(([v]) => v === view)?.[1] ?? null;
   const [views, err] = useRuntime<Views>(p.net, p.app, which ? `/views?app=${encodeURIComponent(p.spec.app)}` : null, Number(p.spec.enabled));
@@ -180,13 +119,29 @@ interface AppsProps {
   err: string | null;
   reload: () => void;
   open: (id: string) => void;
+  add: () => void;
 }
 
-function AppsTab({ net, app, d, err, reload, open }: AppsProps) {
+/** "+ add app": describe one to PowOS AI, pick an installed one, or import its API (lib/add.tsx); drafts wait there. */
+function AddCard({ add }: { add: () => void }) {
+  return (
+    <div style={{ ...S.card, cursor: "pointer" }} onClick={add} data-add-app="">
+      <div style={S.name}>+ add app</div>
+      <Muted>Describe it, pick an installed app, or import its API. It waits as a draft until you add it.</Muted>
+    </div>
+  );
+}
+
+function AppsTab({ net, app, d, err, reload, open, add }: AppsProps) {
   const toggle = (spec: string) => (on: boolean, action?: string) =>
     call(net, app, "/enable", { app: spec, action, enabled: on }).then(reload, reload);
   if (err) return <Unreachable err={err} retry={reload} />;
-  return <>{d?.apps.map((a) => <AppCard key={a.app} a={a} open={() => open(a.app)} flip={toggle(a.app)} />)}</>;
+  return (
+    <>
+      {d?.apps.map((a) => <AppCard key={a.app} a={a} open={() => open(a.app)} flip={toggle(a.app)} />)}
+      <AddCard add={add} />
+    </>
+  );
 }
 
 const TAB: Record<string, (p: { net?: Net; app: string }) => preact.ComponentChild> = {
@@ -197,8 +152,17 @@ export default function Main({ host, app, close }: Props) {
   const net = host.net;
   const [tab, setTab] = useState("Apps");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [d, err, reload] = useRuntime<{ apps: AppSpec[] }>(net, app, "/apps");
   const spec = d?.apps.find((a) => a.app === openId);
+  if (adding && !spec) {
+    const added = (id: string) => (setAdding(false), setOpenId(id), reload());
+    return (
+      <div style={S.page}>
+        <AddApp host={host} app={app} back={() => setAdding(false)} added={added} />
+      </div>
+    );
+  }
   if (spec) {
     const toggle = (on: boolean, action?: string) => call(net, app, "/enable", { app: spec.app, action, enabled: on }).then(reload, reload);
     return (
@@ -215,7 +179,7 @@ export default function Main({ host, app, close }: Props) {
         <h1 style={S.title}>App API</h1>
       </header>
       <Seg options={TABS} picked={tab} onPick={setTab} />
-      {tab === "Apps" ? <AppsTab net={net} app={app} d={d} err={err} reload={reload} open={setOpenId} /> : Body && <Body net={net} app={app} />}
+      {tab === "Apps" ? <AppsTab net={net} app={app} d={d} err={err} reload={reload} open={setOpenId} add={() => setAdding(true)} /> : Body && <Body net={net} app={app} />}
     </div>
   );
 }

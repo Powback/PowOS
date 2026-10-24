@@ -102,13 +102,13 @@
           "description": "read = free, cacheable, widget-safe. reversible-write = allowed, logged, undo where possible (add to cart, toggle a light). spend = spends money / sends a message / deletes / books — irreversible; never automatic, per-call user confirmation required, never callable by a widget."
         },
         "origin": {
-          "enum": ["official", "captured"],
-          "description": "official = a documented/first-party API. captured = learned by observing the app's traffic. Captured actions start read-only until the user promotes them (see 'promoted')."
+          "enum": ["official", "captured", "drafted"],
+          "description": "official = a documented/first-party API. captured = learned by observing the app's traffic. drafted = written by the \"+ add app\" flow (appcap_add.py: described to PowOS AI, generated from an installed app, or imported from a file/URL) and not reviewed yet. Captured and drafted actions start read-only until the user promotes them (see 'promoted')."
         },
         "promoted": {
           "type": "boolean",
           "default": false,
-          "description": "Only meaningful for origin=captured: the user has reviewed and promoted this action beyond read. A captured action with safety other than 'read' MUST have promoted=true."
+          "description": "Only meaningful for origin=captured/drafted: the user has reviewed and promoted this action beyond read (switching it on in App API does that). An enabled captured or drafted action with safety other than 'read' MUST have promoted=true."
         },
         "widget": {
           "type": "boolean",
@@ -175,7 +175,7 @@
             "operationId": { "type": "string", "description": "Link to an operation in the captured OpenAPI spec (har2openapi.py output)." },
             "auth": { "type": "string", "description": "Which auth.tokens entry to attach (omit for unauthenticated)." },
             "argv": { "type": "array", "items": { "type": "string" }, "description": "CLI argv template when base.kind=cli." },
-            "body": { "type": "object", "description": "Static/templated request body for writes." },
+            "body": { "type": ["object", "string"], "description": "Static/templated request body: an object is sent as JSON, a string as text/plain (e.g. a SpacetimeDB SQL read)." },
             "ui": {
               "type": "object",
               "description": "In-app UI automation instead of (or after) an API call: open a screen / drive the app's own UI. 'Show me a certain page' is a UI read action. A UI action that submits/changes data takes the safety class of what it does, same as an API action.",

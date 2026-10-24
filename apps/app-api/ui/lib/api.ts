@@ -76,6 +76,38 @@ export interface Trackers {
   total: { apps: number; trackers: number; blocked: number; allowed: number };
 }
 
+/** A draft in review ("+ add app", appcap_add.py): never one of your apps until added. */
+export interface DraftInfo {
+  app: string;
+  name: string;
+  description: string;
+  actions: number;
+  reads: number;
+  writes: number;
+  /** An app of this id is in your apps already: adding is refused. */
+  exists: boolean;
+}
+
+export interface InstalledPowos {
+  id: string;
+  name: string;
+  database: string;
+}
+
+export interface AppLinks {
+  pkg: string;
+  label: string;
+  links: { uri: string; activity?: string }[];
+}
+
+/** What App API's page gets from the shell (apps/stdb.ts IslandHost): the runtime's net, and "+ add app"'s helpers. */
+export interface Host {
+  net?: Net;
+  askAssistant?(text: string): void;
+  androidApps?(): Promise<{ pkg: string; label: string }[]>;
+  appLinks?(pkg: string): Promise<AppLinks>;
+}
+
 export interface Net {
   fetch(app: string, url: string, init?: { method?: string; headers?: Record<string, string>; body?: string | object }): Promise<{
     status: number;

@@ -3,6 +3,13 @@
  * Android WebView, ShellBridge.kt) or PowOS's desktop host. Calls are async; events come through `on`. A browser
  * without a host gets bridge.ts's mock, so the shell runs anywhere.
  */
+/** apps.links: an Android app's deep links (a prefix or pattern path ends in ".*"), with the activity each opens. */
+export interface AppLinks {
+  pkg: string;
+  label: string;
+  links: { uri: string; activity?: string }[];
+}
+
 export interface App {
   /** Stable id: "a:<package/activity[@profile]>" (Android), "l:<desktop id>" (Linux / PowOS), "p:<app id>" (a PowOS app). */
   key: string;
@@ -298,6 +305,11 @@ export interface Bridge {
      * Only where the host knows it.
      */
     running?(): Promise<Record<string, RunState>>;
+    /**
+     * An Android app's deep links (App API's "+ add app"): the URIs its exported VIEW/BROWSABLE intent filters open,
+     * read from its manifest - nothing is fired. Android only; an older APK rejects it ("no such call").
+     */
+    links?(pkg: string): Promise<AppLinks>;
   };
   usage: {
     /** Keys, last opened first. */

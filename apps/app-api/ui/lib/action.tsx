@@ -1,11 +1,12 @@
 /**
- * One action, opened: its typed inputs as fields, its output's shape, and a dry run through the runtime
- * (appcap_run.py: the exact request, auth shown only as its handle). Sends: `read` only in this first slice; a
- * reversible write stays a dry run; a spend is never sent from here - it is confirmed in chat.
+ * An app's actions by safety class, and one action opened: its typed inputs as fields, its output's shape, and a dry
+ * run through the runtime (appcap_run.py: the exact request, auth shown only as its handle). Sends: `read` only in this
+ * first slice; a reversible write stays a dry run; a spend is never sent from here - it is confirmed in chat. A draft
+ * (`draft`: "+ add app" review) has no switches and only ever dry-runs (/call draft:true, appcap_run.py --draft).
  */
 import { useState } from "preact/hooks";
-import { call, shape, type Action, type CallResult, type Net, type Schema } from "./api";
-import { Block, Muted, S } from "./ui";
+import { call, SAFETY, shape, type Action, type AppSpec, type CallResult, type Net, type Schema } from "./api";
+import { Block, Muted, S, Switch, title } from "./ui";
 
 type Args = Record<string, string | boolean>;
 
@@ -50,7 +51,8 @@ function request(r: CallResult): string {
   return lines.join("\n");
 }
 
-function SendButton({ a, busy, run }: { a: Action; busy: boolean; run: (send: boolean) => void }) {
+function SendButton({ a, busy, run, draft }: { a: Action; busy: boolean; run: (send: boolean) => void; draft?: boolean }) {
+  if (draft) return <Muted>A draft only dry-runs: add it to your apps to use it.</Muted>;
   if (a.safety === "spend") return <Muted>Confirm in chat - a spend is never sent from here.</Muted>;
   if (a.safety !== "read") return <Muted>Writes are dry run only for now.</Muted>;
   return (
@@ -60,14 +62,14 @@ function SendButton({ a, busy, run }: { a: Action; busy: boolean; run: (send: bo
   );
 }
 
-export function ActionPanel(p: { net?: Net; app: string; spec: string; id: string; a: Action }) {
+export function ActionPanel(p: { net?: Net; app: string; spec: string; id: string; a: Action; draft?: boolean }) {
   const [args, setArgs] = useState<Args>({});
   const [out, setOut] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const props = p.a.inputs?.properties ?? {};
   const run = (send: boolean) => {
     setBusy(true);
-    call<CallResult>(p.net, p.app, "/call", { app: p.spec, action: p.id, args, send })
+    call<CallResult>(p.net, p.app, "/call", { app: p.spec, action: p.id, args, send: send && !p.draft, draft: !!p.draft })
       .then((r) => setOut(request(r)), (e) => setOut(`couldn't run it: ${e?.message ?? e}`))
       .finally(() => setBusy(false));
   };
@@ -85,9 +87,57 @@ export function ActionPanel(p: { net?: Net; app: string; spec: string; id: strin
         <button type="button" style={{ ...S.btn, ...S.btnOn }} disabled={busy} onClick={() => run(false)}>
           Dry run
         </button>
-        <SendButton a={p.a} busy={busy} run={run} />
+        <SendButton a={p.a} busy={busy} run={run} draft={p.draft} />
       </div>
       {out && <Block>{out}</Block>}
     </div>
+  );
+}
+
+export interface DetailProps {
+  net?: Net;
+  app: string;
+  spec: AppSpec;
+  /** The action's switch (the allowlist); none in a draft's review. */
+  toggle?: (on: boolean, action?: string) => void;
+  draft?: boolean;
+}
+
+function ActionRow({ p, id }: { p: DetailProps; id: string }) {
+  const [open, setOpen] = useState(false);
+  const a = p.spec.actions[id];
+  const toggle = p.toggle;
+  return (
+    <div style={S.card}>
+      <div style={{ ...S.row, cursor: "pointer" }} onClick={() => setOpen(!open)}>
+        <div style={S.grow}>
+          <div style={S.name}>{title(id)}</div>
+          <div style={S.idMuted}>{id}</div>
+          <Muted>{a.summary}</Muted>
+        </div>
+        {toggle ? <Switch on={a.enabled} label={`${title(id)} allowed`} onFlip={(on) => toggle(on, id)} /> : <span style={S.muted}>{a.enabled ? "on when added" : "off"}</span>}
+      </div>
+      {open && <ActionPanel net={p.net} app={p.app} spec={p.spec.app} id={id} a={a} draft={p.draft} />}
+    </div>
+  );
+}
+
+export function Actions(p: DetailProps) {
+  const ids = Object.keys(p.spec.actions).sort();
+  return (
+    <>
+      {SAFETY.map((g) => {
+        const mine = ids.filter((id) => p.spec.actions[id].safety === g.id);
+        if (!mine.length) return null;
+        return (
+          <section key={g.id} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <h2 style={S.group}>
+              {g.label} <span style={{ ...S.muted, fontWeight: 400 }}>{g.note}</span>
+            </h2>
+            {mine.map((id) => <ActionRow key={id} p={p} id={id} />)}
+          </section>
+        );
+      })}
+    </>
   );
 }

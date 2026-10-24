@@ -34,6 +34,26 @@ Auth is never handled by us in the clear: `auth.tokens.*.store` is a handle
 replay the app's own headers verbatim; the value is never in the spec, logs,
 tool output or git.
 
+## "+ add app": drafts (`appcap_add.py`)
+
+The App API app's "+ add app" makes a **draft**: `<state>/drafts/<app>.appcap.json`, never in `specs/`, so no
+consumer sees it; it is only ever previewed (`/call` with `draft:true` = `appcap_run.py --draft`, a dry run past the
+allowlist that can't send). "Add to my apps" (`POST /draft/add`) moves it into `specs/` with the whole app off.
+Three sources, one `normalize()` (app off, reads on, writes off + unpromoted, origin `drafted`, spend confirmed,
+auth only as `store:<app>:session` / `secret:<app>` handles, credentials in URLs/bodies made `{placeholders}`), then
+`appcap_validate` before anything is written:
+
+- **describe**: PowOS AI gets a ready prompt (the shell's `host.askAssistant`) and runs
+  `appcap_add.py put --source describe FILE` - the model never runs in this runtime (its memory budget is 48 MB);
+- **an installed app**: a PowOS app's page (`app://<id>`) + its own database's public tables (SQL reads) and
+  reducers (writes, off); an Android app's exported VIEW/BROWSABLE deep links (the bridge's `apps.links`, read from
+  its manifest, nothing fired) as UI reads;
+- **import**: an OpenAPI document (`openapi2appcap.convert`) or a capability spec, from a URL (fetched here, no
+  credentials accepted) or a file; `{"sample": "open-meteo"}` imports `sample/open-meteo.openapi.json`.
+
+Switching a `captured`/`drafted` write on in App API (`/enable`) promotes it (S3). Tests:
+`test/tier1/test-appcap-add.py`.
+
 ## Capture → OpenAPI (the capture step)
 
 ## Files
