@@ -209,7 +209,7 @@ class WindowFrames(
 
     private fun frameArrivals(tasks: List<FreeformTasks.Window>) {
         tasks.filter { it.id !in frames && it.id !in minimised && mayFrame(it) }.forEach { w ->
-            frames[w.id] = newFrame(w).apply { veiled = true }.also { it.place(w.bounds) }
+            frames[w.id] = newFrame(w).apply { veiled = true; if (HIDE_BAR_DURING_SLIDE) slideHide() }.also { it.place(w.bounds) }
         }
     }
 

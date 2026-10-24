@@ -176,7 +176,7 @@ class WindowFrame(
     private fun addViews() {
         var ok = true
         if (!app.ownBar && !barAdded) {
-            runCatching { wm.addView(bar, barParams); barAdded = true; barBlur.set(if (veiled) 0f else 1f) }
+            runCatching { wm.addView(bar, barParams); barAdded = true; barBlur.set(blurLevel()) }
                 .onFailure { ok = false; android.util.Log.w("PowosWindowFrame", "can't add the bar of task $id", it) }
         }
         if (!gripAdded) {
@@ -269,7 +269,9 @@ class WindowFrame(
      * floating-window-title-bars-z-ordered-with-their). The grip is clear at rest (shown only under a finger).
      */
     fun slideHide() {
-        if (app.ownBar || !barAdded) return
+        slideHidden = true
+        if (app.ownBar) return
+        if (!barAdded) { bar.animate().cancel(); bar.alpha = 0f; return }
         bar.animate().cancel()
         bar.animate().alpha(0f).setDuration(SLIDE_FADE_OUT_MS).withEndAction { if (barAdded) barBlur.set(0f) }.start()
     }
@@ -277,6 +279,7 @@ class WindowFrame(
     /** The slide ended: the bar (already at its window's final place, [layout]) fades back in; blur first, behind a clear bar. */
     fun slideShow() {
         veiled = false
+        slideHidden = false
         if (app.ownBar || !barAdded) return
         bar.animate().cancel()
         barBlur.set(1f)
@@ -287,14 +290,20 @@ class WindowFrame(
      * Made for a page swipe's arriving window (WindowFrames.slideStart): its bar drawn clear and unblurred until its
      * surface is where the slide has the window - its first frame lands at the real bounds, on the page still showing.
      */
+    /** Hidden for a page slide ([slideHide]) until [slideShow]: nothing else (a late add, a raise) un-hides it. */
+    private var slideHidden = false
+
+    private fun blurLevel() = if (veiled || slideHidden) 0f else 1f
+
     var veiled = false
         set(v) {
             if (field == v) return
             field = v
             if (app.ownBar) return
             bar.animate().cancel()
-            bar.alpha = if (v) 0f else 1f
-            if (barAdded) barBlur.set(if (v) 0f else 1f)
+            val hide = v || slideHidden
+            bar.alpha = if (hide) 0f else 1f
+            if (barAdded) barBlur.set(if (hide) 0f else 1f)
         }
     /** Where its bar and grip take touches (screen px): a frame stacked over another's there takes that one's finger. */
     fun reach(): Rect = Rect(bounds.left, bounds.top - barHeight(), bounds.right + dp(GRIP_OUT_DP), bounds.bottom + dp(GRIP_OUT_DP))
@@ -312,7 +321,7 @@ class WindowFrame(
             }
             wm.removeViewImmediate(grip)
             wm.addView(grip, gripParams)
-            if (!app.ownBar) barBlur.set(if (veiled) 0f else 1f)
+            if (!app.ownBar) barBlur.set(blurLevel())
         }.onFailure { android.util.Log.w("PowosWindowFrame", "can't raise the frame of task $id", it) }
     }
 
@@ -782,7 +791,7 @@ class WindowFrame(
                 leave(layer, "task $id drag")
                 return@whenPlaced
             }
-            if (!app.ownBar) {
+            if (!app.ownBar && !slideHidden) {
                 bar.alpha = 1f
                 barBlur.set(1f)
             }
