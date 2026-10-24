@@ -120,6 +120,15 @@ if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&$SCR.innerText.includes('
     ids=$(ev "['list_rooms','list_scenes','set_room','recall_scene','open_lights_page'].filter(a=>$SCR.innerText.includes(a)).join(' ')")
     [ "$(wc -w <<<"$ids" | tr -d ' ')" = 5 ] && pass "Hue's 5 actions listed: $ids" || fail "Hue's actions: '$ids' (want 5)"
 
+    # 2b. The detail is one page: the 5 actions and the app's own Audit section, no extra tap (reveal() scrolls, never taps).
+    AUDH="[...$SCR.querySelectorAll('h2')].find(h=>h.textContent==='Audit')"
+    reveal "$AUDH"
+    step hue-audit "Philips Hue's detail: the 5 actions still shown, plus its own Audit section below them"
+    [ "$(ev "!!($AUDH)")" = true ] && pass "an Audit section is part of Hue's detail (no tab switch needed)" || fail "no Audit heading in Hue's detail"
+    audtxt=$(ev "(()=>{const s=($AUDH)&&($AUDH).parentElement;return s?s.innerText.replace(/\\n/g,' | ').slice(0,160):''})()")
+    [ -n "$audtxt" ] && pass "the Audit section rendered: $audtxt" || fail "the Audit section under Hue never rendered"
+    reveal "$HUENAME"
+
     # 3. list_rooms opened, a dry run.
     # Titles are plain words, the raw id muted under them (manager's design notes, 2026-10-24).
     LR="[...$SCR.querySelectorAll('div')].find(d=>d.textContent==='List rooms'&&!d.children.length)"
