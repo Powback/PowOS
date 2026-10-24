@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: emu phone
+# needs: ship:apps
 # e2e-appapi.sh --round R: the App API app and the Hue widgets used like a user, READ-ONLY, for the manager's review
 # (board manager-end-to-end-user-journeys-on-the-phone-qa; e2e-lib.sh has the rules: screenshots + steps.txt in
 # /home/powos/design-qa/e2e-appapi/<round>/, never the verify pill, only what it opened closed).

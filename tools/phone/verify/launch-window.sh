@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: phone
+# needs: kwin
 # launch-window.sh [OUT] (board launch-window-instant-placeholder-splash-until-t): a tap on an app shows its window at
 # once, at its final size and place, which then becomes the app's real window with no jump - on the unfolded home:
 #   1. Steam (a cold start: 25-40 s to its first window): tapped (its dock cell, else home's launch call), a new window

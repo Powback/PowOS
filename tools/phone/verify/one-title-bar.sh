@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: phone
+# needs: kwin
 # one-title-bar.sh [OUT] (board one-title-bar-per-window-no-duplicate-on-csd-app): one title bar per window on the
 # unfolded home, for a phone left unattended:
 #   1. KWin with "decor" (pkgs/kwin 0026, 6.7.5-3.30+) running: linux-float.sh installs the newest built kwin package

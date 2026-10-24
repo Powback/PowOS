@@ -1,5 +1,6 @@
 #!/bin/bash
 # lanes: emu phone
+# needs: ship:apps
 # app-api.sh (Mac side, board app-api-app-view-toggle-app-apis): the App API app on the device. In the runner's free
 # window: opens local.app-api from home's devtools, opens Philips Hue, counts its actions, opens list_rooms and taps
 # "Dry run" (a dry run only: nothing is sent, the Hue bridge is never contacted), reads the request it shows, takes a

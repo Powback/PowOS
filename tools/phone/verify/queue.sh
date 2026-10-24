@@ -542,7 +542,7 @@ EOS
         js() { printf '{"name":%s,"task":%s,"k":%s,"n":%s,"screen":%s,"el":%s,"budget":%s,"prev":"@@HINT@@","step":"@@STEP@@","stepel":@@STEPEL@@}' \
           "$(jstr "${name:-$task}")" "$(jstr "$task")" $k $N "$(jstr "$screen")" "$1" "$budget"; }
         status "$n" "$(js 0)" "$([ $k = 1 ] && echo 'rm -f /tmp/powos-verify-go')"
-        ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 && exec "${cmd[@]}" ) > "$log" 2>&1 & jp=$!
+        ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 && "$here/preflight.sh" "${cmd[@]}" && exec "${cmd[@]}" ) > "$log" 2>&1 & jp=$!   # preflight: rc 5 + "ENV: why" when the phone cannot run it
         # The heartbeat: every HB_S s the pill hears check, k/N, elapsed; a tap's stop flag or the budget ends the check.
         # The sub-step: the check's own (put) or its log's last line, timed from when that line first showed.
         t0=$(date +%s); why=; ls_=; lt=$t0
@@ -600,13 +600,14 @@ EOS
         fi
         # A check that printed FAIL but exited 0 (float-windows did) failed.
         [ $rc = 0 ] && grep -q '^FAIL' "$log" && rc=1
+        envskip=0; [ $rc = 5 ] && grep -q '^ENV:' "$log" && envskip=1   # preflight.sh: the phone cannot run it
         mv "$j" "$Q/done/$n.job"
         # rc 3 six times = the user kept using the phone: a SKIP (no mail, not a fail), not a bug in the check.
-        if [ $rc = 3 ]; then r="SKIP phone in use"; elif [ $rc != 0 ] && grep -q '^INVALID' "$log"; then r="INVALID rc=$rc"; else
+        if [ $envskip = 1 ]; then r="SKIP can't run (ENV): $(sed -n 's/^ENV: //p' "$log" | head -1)"; elif [ $rc = 3 ]; then r="SKIP phone in use"; elif [ $rc != 0 ] && grep -q '^INVALID' "$log"; then r="INVALID rc=$rc"; else
         r=$([ $rc = 0 ] && echo PASS || { [ "$why" = timeout ] && echo "FAIL timeout" || echo "FAIL rc=$rc"; }); fi; echo "$r: $(tail -1 "$log")" >> "$log"
         prev="${name:-$task}: $r"
         img=
-        if [ $rc != 0 ] && [ $rc != 3 ]; then
+        if [ $rc != 0 ] && [ $rc != 3 ] && [ $envskip = 0 ]; then
           fail=$((fail + 1)); [ -n "$first" ] || first=${name:-$task}$([ "$why" = timeout ] && echo ": timeout")
           # What the screen showed when it failed: the board task's review image (the pill keeps out of screencaps).
           f=verify-$(printf %s "$n" | tr -c 'A-Za-z0-9._-' '-').png
