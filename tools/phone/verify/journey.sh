@@ -8,7 +8,15 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 RUNS=${RUNS:-A B C}; OUT=${OUT:-$HOME/.cache/powos-verify/$(date +%F_%H%M)}; L=$HOME/.cache/powos-verify.lock
 mkdir -p "$OUT"
-s=$("$T/idle.sh" --wait 120 ${MAX_WAIT:-3600}) || { echo "phone not free: $s"; exit 4; }
+# Chunked at 240s (AGENT-HANDBOOK.md, Caps): one idle.sh call never blocks past ~4 min.
+max_wait=${MAX_WAIT:-3600}; waited=0; ok=; s=
+while [ $waited -lt $max_wait ]; do
+  chunk=$(( max_wait - waited )); [ $chunk -gt 240 ] && chunk=240
+  if s=$("$T/idle.sh" --wait 120 "$chunk"); then ok=1; break; fi
+  waited=$(( waited + chunk ))
+  [ $waited -lt $max_wait ] && echo "journey: still waiting for a free window (${waited}/${max_wait}s): $s"
+done
+[ -n "$ok" ] || { echo "phone not free: $s"; exit 4; }
 case "$s" in *Awake*) ;; *) echo "screen off ($s): no journey (never wake it)"; exit 4 ;; esac
 mkdir "$L" 2>/dev/null || { echo "verify lock busy: $(cat "$L/who" 2>/dev/null)"; exit 4; }
 echo "powos-verify journey ($RUNS) $(date +%T)" > "$L/who"; trap 'rm -rf "$L"' EXIT

@@ -35,13 +35,24 @@ minimal change and tell them.
 ## waiting on the phone, 48% of commits process tooling; `tools/agents/efficiency.py` measures it, targets in its doc)
 - ONE task per agent run: pick up, ship the slice, put what you learned into your skill (facts, <=100 lines, no
   history), the open rest into the board task's note, exit. Never stay alive waiting for mail, a window or a review.
-  A context past ~200k is the signal to write it down and hand off.
-- Phone checks: `tools/phone/verify/queue.sh add <board-task> <check script> [args]`, then END YOUR TURN. One runner
-  takes one free window for every queued check and writes the result onto the board task. Never `idle.sh --wait`,
-  sleep, `until` loops or re-reading a background job's output yourself; for your own background command, use its
-  completion notification.
-- Ships: push to origin, `tools/phone/ship.sh request --note "..."`, END YOUR TURN (Shipping). Never wait on an
-  install or run ship-apk.sh / push.sh yourself: one service ships the merged tip.
+  A context past ~150k-200k is the signal to write it down and hand off: a hand-back note is <=400 words - what's
+  done, what's left, the exact next command - not a transcript (nofate/br goliath: restarting from a note around
+  there cut cost per match from $1.57 to $0.62). `tools/agents/efficiency.py`'s per-agent `restarts_needed` counts
+  calls that ran past 150k instead of handing off.
+- Land with ONE call: `tools/agents/land.sh "msg" -- <paths> [--task <id> --step "..."] [--ship "note"] [--queue
+  <check args>]` commits your paths, rebases once and pushes, moves the board task, requests a ship and queues a
+  phone/emulator check - then END YOUR TURN. It replaces the old five-call recipe (commit, rebase, push, task set,
+  ship request, queue add separately) that drove 122 git-sync calls + 73 commit/push in 4h (efficiency.py). Never
+  `idle.sh --wait`, sleep, `until` loops, run ship-apk.sh/push.sh yourself, or re-read a verify-queue/ship result
+  yourself - the PostToolUse hook (.claude/hooks/agent-notices.py) puts new comms mail, finished verify-queue
+  results and ship results on your next tool result once, instead of you polling for them.
+- Caps: tool output over ~8k chars goes to a file with a 3k head kept inline - read the file for the rest only if
+  the head isn't enough (on nofate/br's trial, results over 8k were 23% of all result text, and agents read past
+  the head in only 22% of cases: most of that was wasted context). A background job's output rides on your next
+  tool result too (the PostToolUse hook, above), capped at ~2.5k chars per job. Scripts that wait on the phone
+  via `idle.sh --wait` (ship-apk.sh, perf-window.sh, journey.sh, window-lock.sh) chunk it at ~4 min per call and
+  print a progress line between chunks, instead of holding one Bash call past the model's 5-min prompt-cache
+  window - follow that pattern for any new wait, never pass `idle.sh --wait` a multi-minute budget directly.
 - Read narrowly (grep, then `sed -n a,b`); never re-read a file you read. Change code with targeted edits (Edit), not
   whole-file heredocs.
 - Git: rebase only right before you commit/push, not before every command. Commit subject <= 72 chars, a short body.
@@ -61,6 +72,16 @@ minimal change and tell them.
   something the USER must do (it shows as a Needs-you card), never for a queued check or another agent.
 - Worktrees: `tools/agents/worktree.sh new <name>` (origin tip, shared node_modules), `done <name>` once pushed (refuses
   unpushed/uncommitted work), `list`. Never leave a merged worktree behind.
+
+## Overhead lessons (nofate/br, SpaceTimeAI)
+- Cost is dominated by re-reading context, not by doing the work - every call pays again for everything already
+  said, so the fix is always "say it fewer times," not "think harder."
+- Restart from a short note around 150k-200k context, not a live hand-off (nofate goliath: $1.57 -> $0.62/match).
+- Notes (mail, finished checks, ship results) ride on the NEXT tool result (the PostToolUse hook) instead of a
+  poll or a wait.
+- One `tools/agents/land.sh` call instead of a commit/rebase/push/task/ship/queue sequence.
+- Waits are capped (~4 min/call) and resumable, never a single call held for an hour.
+- Routine, high-volume agents use a cheaper model; save the expensive one for judgment calls.
 
 ## The work board: nothing falls through (the user, 2026-10-23: "30 tasks show working, 4 agents run")
 - Each task's state is COMPUTED from facts (`task list` and the AI page; lib/ai/agents/powos-agents-cli truth(),
@@ -135,9 +156,11 @@ minimal change and tell them.
   frames, edge.sh, Broforce). Every helper an agent relies on lives in the repo, never in ~/.cache or job tmp (Rules).
 
 ## Shipping
-- **Agents never ship themselves.** Commit, rebase, push to origin/worktree-powos-multiplatform, then
-  `tools/phone/ship.sh request --note "plain words for the user"` (or `--silent`) and END YOUR TURN - nothing else.
-  One ship service (launchd `com.powos.ship-runner`, unit ship-runner-mac, its own checkout
+- **Agents never ship themselves.** Land with `tools/agents/land.sh "msg" -- <paths> --ship "plain words for the
+  user"` (Efficiency, above) and END YOUR TURN - nothing else. That one call does what used to be spelled out here
+  step by step: commit by pathspec, rebase once, push to origin/worktree-powos-multiplatform, then
+  `tools/phone/ship.sh request --note "..."` (or `--silent` with no `--ship`). One ship service (launchd
+  `com.powos.ship-runner`, unit ship-runner-mac, its own checkout
   .claude/worktrees/ship-runner) ships origin's TIP in two parts: push.sh of exactly the shell files that differ
   from what's live 10 s after the last commit, also while an APK is out; and, when Kotlin/APK inputs changed since the
   installed build, ship-apk.sh 60 s after it, beside the loop in its own checkout (ship-runner-apk). The notes of what

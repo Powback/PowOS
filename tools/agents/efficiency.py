@@ -82,8 +82,11 @@ def main():
         'overhead_pct': round(100 * sum(cats[k] for k in OVERHEAD) / tot),
         'wait_pct': round(100 * cats['wait/poll'] / tot),
         'by_category': {k: {'calls': n[k], 'pct': round(100 * v / tot, 1)} for k, v in cats.most_common()},
+        # restarts_needed: calls past 150k context (handbook, Overhead lessons: restart from notes around there) -
+        # how many times this agent should have handed off instead of ploughing on.
         'by_agent': sorted(({'agent': k, 'calls': len(v), 'avg_ctx_k': round(sum(c[0] for c in v.values()) / len(v) / 1e3),
-                             'Mtok': round(sum(c[0] for c in v.values()) / 1e6)} for k, v in agents.items()),
+                             'Mtok': round(sum(c[0] for c in v.values()) / 1e6),
+                             'restarts_needed': sum(1 for c in v.values() if c[0] > 150_000)} for k, v in agents.items()),
                            key=lambda r: -r['Mtok']),
     }
     misses = []
@@ -98,7 +101,9 @@ def main():
           f"{out['commits']} commits ({out['Mtok_per_commit']} Mtok each, {out['process_commits_pct']}% process)")
     for k, v in out['by_category'].items(): print(f"  {k:16} {v['calls']:5} calls {v['pct']:5.1f}%")
     print("top agents by tokens:")
-    for r in out['by_agent'][:8]: print(f"  {r['agent'][:36]:36} {r['calls']:5} calls avg {r['avg_ctx_k']:4}k  {r['Mtok']} Mtok")
+    for r in out['by_agent'][:8]:
+        extra = f"  restarts_needed={r['restarts_needed']}" if r['restarts_needed'] else ''
+        print(f"  {r['agent'][:36]:36} {r['calls']:5} calls avg {r['avg_ctx_k']:4}k  {r['Mtok']} Mtok{extra}")
     print("misses:" if misses else "all targets met"); [print('  - ' + m) for m in misses]
 
 

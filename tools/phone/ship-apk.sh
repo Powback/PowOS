@@ -149,14 +149,15 @@ if [ -z "$now" ]; then
     fi
     [ -d "$vl" ] && echo "ship-apk: ignoring a stale verify lock (held 10+ min by: $(cat "$vl/who" 2>/dev/null)) - locks are for injected tests, not waits" >&2
     # One held call that returns when the phone is free (the waiting runs on the phone: no poll over the VPN), in
-    # 10-min chunks so the verify lock above is seen. Screen off (Asleep/Dozing) = safe at once; Awake = only after 60 s
-    # without a touch; anything else (an empty or unreadable state) = NOT safe - it installed over an active user once
-    # when the state came back empty.
-    chunk=$(( ${SHIP_WAIT_MIN:-60} * 60 - waited )); [ $chunk -gt 600 ] && chunk=600
+    # 4-min chunks (AGENT-HANDBOOK.md, Caps: no repo wait helper blocks past ~4 min in one call) so the verify lock
+    # above is seen. Screen off (Asleep/Dozing) = safe at once; Awake = only after 60 s without a touch; anything else
+    # (an empty or unreadable state) = NOT safe - it installed over an active user once when the state came back empty.
+    chunk=$(( ${SHIP_WAIT_MIN:-60} * 60 - waited )); [ $chunk -gt 240 ] && chunk=240
     # exit 1 = this chunk passed without a free phone: wait the next one (set -e would end the whole ship here).
     i2=$(tools/phone/idle.sh --wait 60 $chunk || true)
     case "$i2" in *screen=Asleep*|*screen=Dozing*|*screen=Awake*) ok=1; break ;; esac
     waited=$((waited + chunk))
+    echo "ship-apk: waiting for a free phone ($waited/$(( ${SHIP_WAIT_MIN:-60} * 60 ))s): $i2"
   done
   echo "ship-apk: $i2"
   [ "$i2" = offline ] && [ -z "$ok" ] && { echo "ship-apk: the phone is offline (stale VPN handshake, tools/phone/adb.sh --vpn-state) - NOT installing (APK built, kept)"; exit 4; }

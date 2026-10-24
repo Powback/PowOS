@@ -8,9 +8,18 @@
 #      A: region sends on; B: sends held (__glass.live.hold) - is sending the blur regions per move a real cost?
 # Leaves the drawer closed and the sends on. "perf-window.sh [max_wait_s=3600]". Injected input only inside the
 # window; stops at once if a finger comes (touch idle drops).
+# The wait is chunked at 240s (AGENT-HANDBOOK.md, Caps): one idle.sh call never blocks past ~4 min, so it returns
+# within the model's prompt-cache window if a live agent ever runs this directly instead of queuing it.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-AWAKE_ONLY=1 "$here/idle.sh" --wait 120 "${1:-3600}" || { echo "perf-window: no free window"; exit 3; }
+max=${1:-3600}; waited=0; ok=; got=
+while [ $waited -lt $max ]; do
+  chunk=$(( max - waited )); [ $chunk -gt 240 ] && chunk=240
+  if got=$(AWAKE_ONLY=1 "$here/idle.sh" --wait 120 "$chunk"); then ok=1; break; fi
+  waited=$(( waited + chunk ))
+  [ $waited -lt $max ] && echo "perf-window: still waiting for a free window (${waited}/${max}s): $got"
+done
+[ -n "$ok" ] || { echo "perf-window: no free window"; exit 3; }
 fg=$("$here/adb.sh" shell "dumpsys activity activities | grep -m1 topResumedActivity")
 [[ "$fg" == *HomeShell* ]] || { echo "perf-window: home isn't in front ($fg)"; exit 3; }
 echo "== 1. idle sample"; "$here/idle-sample.sh" 30 | grep -vE '^ *"(beginFrames|timers|layouts|styleRecalcs)'
