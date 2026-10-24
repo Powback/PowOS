@@ -38,6 +38,12 @@ export function Seg({ options, picked, onPick }: { options: string[]; picked: st
 /** Generated text (a view, a request): monospace, wrapped - never a sideways scroll. */
 export const Block = ({ children }: { children: ComponentChildren }) => <pre style={S.block}>{children}</pre>;
 
+/** An action id as a plain title: "list_rooms" -> "List rooms" (the id itself shows muted under it). */
+export const title = (id: string) => {
+  const t = id.replace(/[_-]+/g, " ").trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
 export const Muted = ({ children }: { children: ComponentChildren }) => <div style={S.muted}>{children}</div>;
 
 export const S: Record<string, Record<string, string | number>> = {
@@ -49,17 +55,20 @@ export const S: Record<string, Record<string, string | number>> = {
   row: { display: "flex", alignItems: "center", gap: "12px" },
   grow: { flex: 1, minWidth: 0 },
   name: { fontWeight: 600 },
+  // The accent fill carries the dark foreground (the background colour), as the shell's own on-states do
+  // (rich.css .choice-opt.on): --accent-text is accent-tinted text for neutral ground, pale on the fill.
   id: { fontFamily: "var(--font, monospace)", fontWeight: 600, overflowWrap: "anywhere" },
+  idMuted: { fontFamily: "var(--font, monospace)", color: "var(--color-muted)", fontSize: "var(--text-small, 0.85em)", overflowWrap: "anywhere" },
   muted: { color: "var(--color-muted)", fontSize: "var(--text-small, 0.9em)" },
   group: { margin: "8px 0 0", fontSize: "1em", fontWeight: 600 },
   track: { position: "relative", flex: "none", width: "44px", height: "26px", borderRadius: "13px", border: 0, padding: 0 },
   knob: { position: "absolute", top: "3px", left: "3px", width: "20px", height: "20px", borderRadius: "50%", background: "var(--color-foreground)", transition: "transform 160ms" },
   seg: { display: "flex", gap: "4px", padding: "4px", borderRadius: "20px", background: "var(--soft-fill)", flexWrap: "wrap" },
   segBtn: { flex: "1 0 auto", font: "inherit", padding: "8px 12px", borderRadius: "16px", border: 0, background: "none", color: "inherit" },
-  segOn: { background: "var(--color-accent)", color: "var(--accent-text, var(--color-background))" },
+  segOn: { background: "var(--color-accent)", color: "var(--color-background)" },
   block: { margin: 0, padding: "10px 12px", borderRadius: "8px", background: "var(--soft-fill)", fontFamily: "var(--font, monospace)", fontSize: "var(--text-small, 0.85em)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
   btn: { font: "inherit", padding: "10px 16px", borderRadius: "20px", border: 0, background: "var(--soft-fill)", color: "inherit" },
-  btnOn: { background: "var(--color-accent)", color: "var(--accent-text, var(--color-background))" },
+  btnOn: { background: "var(--color-accent)", color: "var(--color-background)" },
   field: { flex: 1, minWidth: 0, font: "inherit", padding: "8px 12px", borderRadius: "8px", border: 0, background: "var(--soft-fill)", color: "inherit" },
   bad: { color: "var(--color-red)" },
 };

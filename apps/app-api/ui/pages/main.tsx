@@ -10,7 +10,7 @@ import { call, SAFETY, type AppSpec, type AuditRow, type Net, type Trackers, typ
 import { Files } from "../lib/files";
 import { Recordings } from "../lib/recordings";
 import { Rules } from "../lib/rules";
-import { Block, Muted, S, Seg, Switch } from "../lib/ui";
+import { Block, Muted, S, Seg, Switch, title } from "../lib/ui";
 
 interface Props {
   host: { net?: Net };
@@ -70,10 +70,11 @@ function ActionRow({ p, id }: { p: DetailProps; id: string }) {
     <div style={S.card}>
       <div style={{ ...S.row, cursor: "pointer" }} onClick={() => setOpen(!open)}>
         <div style={S.grow}>
-          <div style={S.id}>{id}</div>
+          <div style={S.name}>{title(id)}</div>
+          <div style={S.idMuted}>{id}</div>
           <Muted>{a.summary}</Muted>
         </div>
-        <Switch on={a.enabled} label={`${id} allowed`} onFlip={(on) => p.toggle(on, id)} />
+        <Switch on={a.enabled} label={`${title(id)} allowed`} onFlip={(on) => p.toggle(on, id)} />
       </div>
       {open && <ActionPanel net={p.net} app={p.app} spec={p.spec.app} id={id} a={a} />}
     </div>
@@ -134,9 +135,10 @@ function Audit({ net, app }: { net?: Net; app: string }) {
       {d.rows.map((r, i) => (
         <div key={i} style={S.card}>
           <div style={S.row}>
-            <span style={{ ...S.id, ...S.grow }}>{`${r.app}.${r.action}`}</span>
+            <span style={{ ...S.name, ...S.grow }}>{title(r.action)}</span>
             <span style={S.muted}>{r.ts.replace("T", " ")}</span>
           </div>
+          <div style={S.idMuted}>{`${r.app}.${r.action}`}</div>
           <Muted>
             {r.safety ?? "?"} · {r.refused ? <span style={S.bad}>refused: {r.refused}</span> : r.sent ? `sent, ${r.status}` : "dry run"}
           </Muted>

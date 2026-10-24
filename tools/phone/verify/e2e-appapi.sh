@@ -2,7 +2,7 @@
 # e2e-appapi.sh --round R: the App API app and the Hue widgets used like a user, READ-ONLY, for the manager's review
 # (board manager-end-to-end-user-journeys-on-the-phone-qa; e2e-lib.sh has the rules: screenshots + steps.txt in
 # /home/powos/design-qa/e2e-appapi/<round>/, never the verify pill, only what it opened closed).
-#   App API from the dock (search if it isn't there): the Apps tab, Philips Hue's actions, list_rooms opened and
+#   App API from the dock (search if it isn't there): the Apps tab, Philips Hue's actions, "List rooms" opened and
 #   "Dry run" (a dry run: nothing is sent, the bridge never contacted), back, the Audit tab (the dry run on top), the
 #   Trackers tab; closed. Lights opened once from search (it hands its pairing to App API: /link?app=hue linked) and
 #   closed - nothing inside it touched. The composed Hue rooms widget (local.hue-rooms*) looked at on home.
@@ -71,7 +71,13 @@ if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&$SCR.innerText.includes('
     [ "$(wc -w <<<"$ids" | tr -d ' ')" = 5 ] && pass "Hue's 5 actions listed: $ids" || fail "Hue's actions: '$ids' (want 5)"
 
     # 3. list_rooms opened, a dry run.
-    LR="[...$SCR.querySelectorAll('div')].find(d=>d.textContent==='list_rooms'&&!d.children.length)"
+    # Titles are plain words, the raw id muted under them (manager's design notes, 2026-10-24).
+    LR="[...$SCR.querySelectorAll('div')].find(d=>d.textContent==='List rooms'&&!d.children.length)"
+    [ "$(ev "!!($LR)&&!![...$SCR.querySelectorAll('div')].find(d=>d.textContent==='list_rooms'&&!d.children.length)")" = true ] &&
+      pass "list_rooms shows as the title 'List rooms', its id muted under it" || fail "no plain 'List rooms' title with the id under it"
+    # The active view tab: the dark foreground on the accent fill (not accent-tinted text on it).
+    tc=$(ev "(()=>{const t=[...$SCR.querySelectorAll('[role=tab][aria-selected=true]')].find(x=>x.textContent==='Actions');if(!t)return 'none';const c=getComputedStyle(t),b=getComputedStyle(document.documentElement).getPropertyValue('--color-background').trim();return c.color+' on '+c.backgroundColor+' | bg '+b})()")
+    note "the active Actions tab: $tc"
     reveal "$LR"
     if tapel "$LR" "list_rooms"; then sleep 1; chk list-rooms
       DRY="[...$SCR.querySelectorAll('button')].find(b=>b.textContent==='Dry run')"
