@@ -34,6 +34,37 @@ description: How the PowOS phone shell's design is built and checked - the desig
   A scroll-driven animation is "running" for good: anything waiting for "no running animations" must filter
   `a.timeline === document.timeline` (nativeglass `moving()`, the gate's still()), else it never rests. Gate scroll-fade.
 
+## Pending states (ui/pending.tsx) - the default for anything that takes a moment
+
+A user-triggered change that shows nothing for more than ~100ms is a bug (2026-10-24). One shared building block
+covers both halves of that rule:
+
+- **Optimistic** (most actions: a toggle, a move, a rename, an install click): `optimistic(apply, commit, rollback)`.
+  `apply()` runs at once - the UI already shows the result, as if it had already worked. `commit()` does the real
+  thing in the background; a rejection calls `rollback(err)` (undo in place, a short reason, often a Retry) and still
+  propagates. Used in app-api's `apps/app-api/ui/lib/add.tsx` ("Add to my apps" reads as added at once, reverts on a
+  failed write) - that app can't import shell/ui (its own esbuild bundle), so it carries its own tiny copy; a shell-side
+  use imports `optimistic` directly.
+- **Placeholder/progress** (something that doesn't exist yet - a new app's build, a new widget's first data; an
+  optimistic guess at content that isn't there would be wrong, not fast): `PendingState` (id, kind, title, status
+  running/done/failed, steps, a log tail, an error) + `ProgressRing`/`ProgressBar`/`StepList`/`LogTail` to draw it,
+  `PendingIconBadge` (an icon with a ring at its corner - the drawer's app-being-built cell) and `SkeletonWidgetTile`
+  (a home placeholder at the real tile size: skeleton rows, a spinner, a progress bar). `PendingDetailSheet` opens
+  the being-built view anchored to the tile (apps/sheet.ts's one popover - tap outside/swipe down/Back closes it),
+  with Retry/Discard once it's failed.
+- Fed live, never polled: app creation from PowOS AI's chat steps (`ui/appbuild.tsx`'s `pendingApp`, read by both the
+  drawer placeholder and the being-built card, so they can't disagree about done); widget creation from
+  powos-registry's `creation`/`creation_step`/`creation_log` tables (`apps/registry.ts` watchCreations/creationRows,
+  written by `lib/apps/powos-compose` as it runs) through `ui/creationwidgets.tsx`'s client-side overlay (a reserved
+  cell, never through the host's own layout, so nothing is lost if the build never finishes - itemsOn in grid.tsx
+  merges it in exactly like searchwidget.tsx's footSearch already does).
+- Swap in place, no flash: the placeholder and the real thing are two branches of ONE derived value (same signals,
+  same render pass) - never two independently-arriving states that could both be visible, or neither, for a frame.
+- Tokens only: `--color-accent` for the ring/bar fill, `--soft-fill` for the track and skeleton rows, `--color-red`
+  for failed. Motion is calm and BOUNDED to the time something is actually building - an indeterminate ring/bar
+  spins only while its component is mounted (a finite build), never a forever animation on a settled tile (the same
+  reason `.app-icon.loading`'s pulse caps itself at ~10s: a spinning compositor layer costs battery at idle).
+
 ## Frost (PowOS AI, its pull-up panel, the control center: shell.css "frost v2", theme.css --frost-*)
 - One material: the compositor's blur per surface (nativeglass.ts reads `--glass-blur-native` per element; 360 on
   these, 140 elsewhere; the shade window's radius is the page's: `powos.shade.blur(dp)` in shade.tsx), a cool tint

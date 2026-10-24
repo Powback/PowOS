@@ -10,6 +10,8 @@ import { AppCell } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
 import { drawerOpen } from "./gesture.ts";
 import { apps, byKey, chatting, query, recent, stored } from "../state.ts";
+import { pendingApp } from "./appbuild.tsx";
+import { PendingDetailSheet, PendingIconBadge } from "./pending.tsx";
 import type { App } from "../types.ts";
 
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
@@ -153,10 +155,33 @@ export function AppList({ found, onTap }: { found: App[] | null; onTap?: (app: A
     <>
       {/* Searching: by the bar, bottom-up - the best match nearest to it (shell.css .results). */}
       <div class={`drawer-list ${found ? "results" : ""}`} ref={list}>
+        {/* A new app being built (ui/appbuild.tsx pendingApp): shown at once, gone the moment it's ready - by then the
+            real app is already in [apps] (installedApps -> powosApps -> apps, state.ts), so there's no separate
+            "new app" tile to remove, only this one to stop drawing. */}
+        {!found && pendingApp.value && pendingApp.value.status !== "done" && <PendingAppCell />}
         <div class={found ? "grid" : "grid az"}>{(found ?? sorted.value.list).map(cell)}</div>
       </div>
       {!found && <LetterBar onPick={jump} />}
     </>
+  );
+}
+
+/** The drawer's placeholder for an app PowOS AI is building: a generic icon with a progress ring, tap for the being-built view. */
+function PendingAppCell() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const state = pendingApp.value;
+  if (!state) return null;
+  return (
+    <div class="app pending-app" ref={ref} onClick={() => setOpen(true)}>
+      <PendingIconBadge state={state}>
+        <div class="app-icon initials" aria-hidden="true">
+          +
+        </div>
+      </PendingIconBadge>
+      <div class="app-label">{state.status === "failed" ? "couldn't build" : "building…"}</div>
+      {open && <PendingDetailSheet anchor={ref.current} state={state} onClose={() => setOpen(false)} />}
+    </div>
   );
 }
 

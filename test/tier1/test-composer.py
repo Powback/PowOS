@@ -389,5 +389,24 @@ class Runtime(unittest.TestCase):
         self.assertEqual(Hue.hits, [])
 
 
+class CreationProgress(unittest.TestCase):
+    """The placeholder-widget telemetry (docs/AGENT-HANDBOOK.md, "live creation"): a provisional id, and best-effort
+    registry calls that never block or break a composition when there's nothing to report to."""
+
+    def setUp(self):
+        self.c = load(COMPOSE, "powos_compose_creation_t")
+
+    def test_creation_id_is_slugged_and_unique(self):
+        a, b = self.c.creation_id_of("show which Hue rooms are on"), self.c.creation_id_of("show which Hue rooms are on")
+        for cid in (a, b):
+            self.assertRegex(cid, r"^widget:[a-z0-9-]+-[0-9a-f]{6}$")
+        self.assertNotEqual(a, b)  # two compositions of the same words don't collide
+
+    def test_registry_call_failure_never_raises(self):
+        self.c.powos_app = lambda: (_ for _ in ()).throw(RuntimeError("no stdb here"))
+        self.c._registry_ready = False
+        self.c._creation("creation_begin", "widget:x-000000", "a widget", ["one"])  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

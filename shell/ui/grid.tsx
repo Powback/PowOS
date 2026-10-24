@@ -32,6 +32,8 @@ import { AgentsPanel } from "./agents.tsx";
 import { migrateRecents, RecentsPanel } from "./recentwidget.tsx";
 import { dropSearchOnFoot, footSearch, hoverFoot, isFootSearch, placeItem, putBackInBar, SEARCH_KEY, SearchPanel } from "./searchwidget.tsx";
 import { openAgents } from "../agents.ts";
+import { creationIdOf, creationWidgets, discardWidgetCreation, watchCreations } from "./creationwidgets.tsx";
+import { PendingDetailSheet, SkeletonWidgetTile } from "./pending.tsx";
 import type { Cell, HomeItem } from "../types.ts";
 
 const LONG_PRESS_MS = 420;
@@ -122,8 +124,10 @@ function box(c: Cell) {
 const overlaps = (a: Cell, b: Cell) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 /** Items on the page number [n] (home.pages' numbers, not indices). */
-/** Page [n]'s placed items - in edit mode with the foot's search pill on the grid too (searchwidget.tsx footSearch). */
-const itemsOn = (n: number) => (footSearch.value ? [...home.value.items, footSearch.value] : home.value.items).filter((i) => i.page === n && i.cell);
+/** Page [n]'s placed items - in edit mode with the foot's search pill on the grid too (searchwidget.tsx footSearch),
+ * plus any widget still being composed (creationwidgets.tsx: client-only until it's done, never through the host). */
+const itemsOn = (n: number) =>
+  [...home.value.items, ...(footSearch.value ? [footSearch.value] : []), ...creationWidgets.value.items].filter((i) => i.page === n && i.cell);
 
 /** A tile's cell as shown: apps and folders are always 1x1. */
 const shown = (i: HomeItem): Cell => (i.resizable ? i.cell! : { ...i.cell!, w: 1, h: 1 });
@@ -645,6 +649,40 @@ function PageGlass({ items, joined, index }: { items: HomeItem[]; joined: Map<st
   );
 }
 
+/** A widget being composed: no drag/resize/edit-mode (it isn't a real home item yet), just a tap to see progress. */
+function CreationTile({ item }: { item: HomeItem }) {
+  const id = creationIdOf(item.key);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const state = id ? creationWidgets.value.byId.get(id) : undefined;
+  const b = box(shown(item));
+  if (!state) return null;
+  return (
+    <div
+      class="home-tile panel"
+      data-key={item.key}
+      ref={ref}
+      style={{ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` }}
+      onClick={() => setOpen(true)}
+    >
+      <SkeletonWidgetTile state={state} />
+      {open && (
+        <PendingDetailSheet
+          anchor={ref.current}
+          state={state}
+          onClose={() => setOpen(false)}
+          onDiscard={state.status === "failed" ? () => (setOpen(false), discardWidgetCreation(id!)) : undefined}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Dispatches a page's item to its tile (the map call site, never inside Tile itself - keeping Tile's own branching
+ * where it already was, under the complexity lint). */
+const renderTile = (item: HomeItem, join?: Record<string, number>) =>
+  item.kind === "panel" && item.name === "creation" ? <CreationTile key={item.key} item={item} /> : <Tile key={item.key} item={item} join={join} />;
+
 function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> }) {
   const press = useTilePress(item, () => {
     if (item.kind === "app") launch(item.app!);
@@ -1017,6 +1055,7 @@ export function Pages() {
     if (rows > 0 && home.value.items.some((i) => !i.cell)) powos.home.arrange(home.value.columns, rows);
   }, [home.value, rows]);
   useEffect(loadFolderNames, []);
+  useEffect(watchCreations, []);
   // The recent apps row, once, as a widget of home's (ui/recentwidget.tsx), at the bottom of the first page.
   useEffect(() => void migrateRecents(rows), [rows]);
   // Also each render: a page's glass layer just mounted takes the track's place at once.
@@ -1040,9 +1079,7 @@ export function Pages() {
                   <PageGlass items={on} joined={joined} index={i} />
                   <GroupShadow items={on} joined={joined} id={String(n)} />
                   <Seams items={on} joined={joined} />
-                  {on.map((item) => (
-                    <Tile key={item.key} item={item} join={joined.get(item.key)} />
-                  ))}
+                  {on.map((item) => renderTile(item, joined.get(item.key)))}
                 </>
               );
             })(itemsOn(n))}

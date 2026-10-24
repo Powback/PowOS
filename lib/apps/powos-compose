@@ -40,6 +40,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import uuid
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 
@@ -89,6 +90,33 @@ def powos_app():
     m = module_from_spec(spec_from_loader("powos_app", loader))
     loader.exec_module(m)
     return m
+
+
+# --------------------------------------------------------------------------------------------------- live creation
+#
+# The shell shows a placeholder widget while this runs (docs/AGENT-HANDBOOK.md, "live creation"; the shared pending
+# model is shell/ui/pending.tsx) - rows in powos-registry's `creation`/`creation_step`/`creation_log` tables, written
+# as each phase starts and ends. Best-effort: a registry call that fails (no registry published yet, device offline,
+# the Mac with no stdb reachable at all - this script also runs there for tests) never blocks or breaks composing.
+_registry_ready = False
+
+
+def _creation(name, *args):
+    global _registry_ready
+    try:
+        pa = powos_app()
+        if not _registry_ready:
+            pa.ensure_registry()
+            _registry_ready = True
+        pa.spacetime("call", "-s", pa.SERVER, pa.REGISTRY, name, *[json.dumps(a) for a in args], quiet=True)
+    except Exception as e:  # noqa: BLE001 - telemetry only
+        log(f"(creation progress not recorded: {e})")
+
+
+def creation_id_of(text):
+    """A provisional id for the placeholder, before the composition's own `local.<name>` is known."""
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "widget"
+    return f"widget:{slug}-{uuid.uuid4().hex[:6]}"
 
 
 # ------------------------------------------------------------------------------------------------------- blocks
@@ -492,11 +520,29 @@ def install(d, note=None):
         die(f"powos app install {d} failed (above)")
 
 
+WIDGET_STEPS = ["Choosing what it uses", "Building the widget", "Installing"]
+
+
 def cmd_widget(a):
     o, rest = opts(a, {"--name": 1, "--id": 1, "--dir": 1, "--arg": 1, "--no-ai": 0, "--no-install": 0, "--json": 0, "--note": 1})
     if not rest:
         die('usage: powos compose widget "<plain words>" [--name N] [--dir D] [--arg k=v] [--no-ai] [--no-install]')
     text, args = " ".join(rest), args_of(o["--arg"])
+    cid = creation_id_of(text)
+    _creation("creation_begin", cid, text, WIDGET_STEPS)
+    try:
+        m = _widget_manifest(o, text, args, cid)
+        d = _widget_build(o, m, cid)
+        _widget_install(o, m, d, cid)
+    except Fail as e:
+        _creation("creation_failed", cid, str(e))
+        raise
+    if o.get("--json"):
+        print(json.dumps({"dir": d, "installed": not o.get("--no-install"), "composition": m}, indent=2))
+
+
+def _widget_manifest(o, text, args, cid):
+    """Step 0: PowOS AI's manifest, or the word match - whichever passes the rules."""
     m, why = (None, "--no-ai") if o.get("--no-ai") else ai_manifest(text, args)
     if m is not None:
         if o.get("--name"):
@@ -509,6 +555,7 @@ def cmd_widget(a):
         errs = check(m)
         if errs:
             log("PowOS AI's manifest broke the rules (" + "; ".join(errs) + ") - the word match instead")
+            _creation("creation_add_log", cid, "PowOS AI's manifest broke the rules - using the word match instead")
             m = None
     if m is None:
         if why:
@@ -517,14 +564,28 @@ def cmd_widget(a):
     errs = check(m)
     if errs:
         fail_lines(errs)
+    uses_desc = ", ".join(f"{u['app']}.{u['action']}" for u in m["uses"])
+    _creation("creation_add_log", cid, f"uses {uses_desc}")
+    _creation("creation_step_done", cid, 0)
+    return m
+
+
+def _widget_build(o, m, cid):
+    """Step 1: the app folder from the manifest (module + UI)."""
     d = generate(m, o.get("--dir") or os.path.join("~/Projects", m["id"].split(".", 1)[1]))
     log(f"composed {m['id']} ({m['name']}) by {m['by']} in {d}: " + ", ".join(f"{u['app']}.{u['action']}" for u in m["uses"]))
+    _creation("creation_step_done", cid, 1)
+    return d
+
+
+def _widget_install(o, m, d, cid):
+    """Step 2: `powos app install` (module published, UI in place, registered in powos-registry)."""
     if not o.get("--no-install"):
         install(d, o.get("--note") or f"New widget: {m['name']}")
+        _creation("creation_done", cid, f"{m['id']}/main")  # generate() always names the widget "main"
     else:
         log(f"next: powos compose install {d}   (from a Mac checkout: apps/build.sh {d} && apps/install.sh {d} --note \"...\")")
-    if o.get("--json"):
-        print(json.dumps({"dir": d, "installed": not o.get("--no-install"), "composition": m}, indent=2))
+        _creation("creation_done", cid, "")
 
 
 def manifest_at(p):

@@ -827,6 +827,106 @@ async function addAppReloaded() {
 }
 
 /**
+ * App creation, live (the user, 2026-10-24: "show the app icon early with a spinner... when you open it, you can see
+ * the work in progress"): a mock build from scratch (ui/appbuild.tsx's chat-driven pendingApp) - the placeholder
+ * appears the moment the thread starts, its progress advances as mock tool-call events land, tapping it shows the
+ * being-built view, and once it's installed the placeholder gives way to the real app in the same settle (never a
+ * frame with both, never a frame with neither).
+ */
+async function pendingAppCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const B = await window.__gw.mod("./ui/appbuild.tsx");
+  const P = await window.__gw.mod("./apps/pages.ts");
+  const fails = [];
+  S.chat.value = { busy: true, items: [{ kind: "user", text: "a shopping list" }], thread: { dir: "/tmp/gate-app", title: "a shopping list", kind: "app" } };
+  await window.__gw.settled(() => document.querySelector(".pending-app"));
+  if (!document.querySelector(".pending-app")) fails.push("app creation: no placeholder in the drawer at the start");
+  if (B.pendingApp.value?.status !== "running") fails.push(`app creation: pendingApp.status is ${B.pendingApp.value?.status} at the start, not "running"`);
+  S.chat.value = { ...S.chat.value, items: [...S.chat.value.items, { kind: "tool", name: "Bash", hint: "powos app new shop", ok: true }] };
+  await window.__gw.settled(() => B.pendingApp.value?.steps.some((s) => s.state === "done"));
+  if (!B.pendingApp.value?.steps.some((s) => s.state === "done")) fails.push("app creation: a finished mock tool call never marks a step done");
+  document.querySelector(".pending-app")?.click();
+  await window.__gw.settled(() => document.querySelector(".pending-build"));
+  if (!document.querySelector(".pending-build .pending-steps .pending-step")) fails.push("app creation: tapping the placeholder shows no being-built view (progress bar + step list)");
+  document.body.click();
+  P.installedApps.value = [...P.installedApps.value, { id: "local.shop", name: "Shop", version: "0.1.0", database: "local-shop", tier: 0, manifest: "{}" }];
+  S.chat.value = { ...S.chat.value, busy: false, items: [...S.chat.value.items, { kind: "tool", name: "Bash", hint: "powos app install /tmp/gate-app", ok: true }] };
+  await window.__gw.settled(() => !document.querySelector(".pending-app"));
+  if (document.querySelector(".pending-app")) fails.push("app creation: the placeholder is still up once the app is installed - no in-place swap");
+  P.installedApps.value = P.installedApps.value.filter((a) => a.id !== "local.shop");
+  S.chat.value = { busy: false, items: [] };
+  return fails;
+}
+
+/**
+ * Widget creation, live (docs/COMPOSER.md; ui/creationwidgets.tsx): a mock `creation` row from scratch (as
+ * lib/apps/powos-compose writes to powos-registry) - a placeholder reserves a spot on home at once, its progress
+ * advances as mock step events land, tapping it shows the being-built view, and once it's done the real widget is
+ * placed at THAT SAME reserved spot (no jump) with the placeholder gone in the same settle.
+ */
+async function pendingWidgetCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const R = await window.__gw.mod("./apps/registry.ts");
+  const Bridge = await window.__gw.mod("./bridge.ts");
+  const C = await window.__gw.mod("./ui/creationwidgets.tsx");
+  const cid = "widget:gate-test-123456";
+  const tile = () => document.querySelector(`.home-tile[data-key="creation:${cid}"]`);
+
+  async function started() {
+    S.page.value = 0;
+    R.creationRows.value = {
+      creations: [{ id: cid, kind: "widget", title: "a test widget", status: "running", step: "Choosing what it uses", stepIndex: 0, stepCount: 2, error: "", appId: "" }],
+      steps: [
+        { id: `${cid}:0`, creationId: cid, idx: 0, label: "Choosing what it uses", state: "active" },
+        { id: `${cid}:1`, creationId: cid, idx: 1, label: "Installing", state: "pending" },
+      ],
+      logs: [],
+    };
+    await window.__gw.settled(() => tile());
+    const fails = [];
+    if (!tile()) fails.push("widget creation: no placeholder tile reserved on home at the start");
+    const spot = C.reservedSpotFor(cid);
+    if (!spot) fails.push("widget creation: no spot reserved for the running creation");
+    return { fails, spot };
+  }
+
+  async function advanced() {
+    R.creationRows.value = { ...R.creationRows.value, steps: R.creationRows.value.steps.map((s) => ({ ...s, state: s.idx === 0 ? "done" : "active" })) };
+    await window.__gw.settled(() => tile()?.querySelector(".pending-bar-fill")?.style.width && tile().querySelector(".pending-bar-fill").style.width !== "0%");
+    const fill = tile()?.querySelector(".pending-bar-fill")?.style.width;
+    return fill && fill !== "0%" ? [] : ["widget creation: progress never advances on a mock step event"];
+  }
+
+  async function buildingViewShown() {
+    tile()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await window.__gw.settled(() => document.querySelector(".pending-build"));
+    const ok = document.querySelector(".pending-build .pending-steps .pending-step");
+    document.body.click();
+    return ok ? [] : ["widget creation: tapping the placeholder shows no being-built view"];
+  }
+
+  async function swappedInPlace(spot) {
+    let added = null;
+    const origAdd = Bridge.powos.home.addPanel;
+    Bridge.powos.home.addPanel = (...a) => ((added = a), Promise.resolve());
+    R.creationRows.value = { ...R.creationRows.value, creations: [{ ...R.creationRows.value.creations[0], status: "done", appId: "local.gate-test/main" }] };
+    await window.__gw.settled(() => !tile());
+    Bridge.powos.home.addPanel = origAdd;
+    const fails = [];
+    if (tile()) fails.push("widget creation: the placeholder is still up once it's done - no in-place swap");
+    if (!added || added[0] !== "app:local.gate-test/main") fails.push(`widget creation: the real widget wasn't placed once done (addPanel args ${JSON.stringify(added)})`);
+    if (added && spot && (added[1] !== spot.page || JSON.stringify(added[2]) !== JSON.stringify(spot.cell)))
+      fails.push(`widget creation: the real widget landed at page ${added[1]} ${JSON.stringify(added[2])}, not the reserved spot ${spot.page} ${JSON.stringify(spot.cell)} - a jump`);
+    return fails;
+  }
+
+  const { fails: f1, spot } = await started();
+  const fails = [...f1, ...(await advanced()), ...(await buildingViewShown()), ...(await swappedInPlace(spot))];
+  R.creationRows.value = { creations: [], steps: [], logs: [] };
+  return fails;
+}
+
+/**
  * In the page: a folder opens as a morph (the user, 2026-10-23: "so jarring") - moving at first (the sheet drawn at the
  * tile, easing out), then at rest with nothing left inline and no animation running, home's pages faded behind a
  * page-sized frost; closed, it shrinks back and goes.
@@ -1885,6 +1985,10 @@ try {
         await r.page.reload().catch(() => {});
         return whenReady(r, () => r.page.evaluate(addAppReloaded));
       }));
+  // App and widget creation, live (the user, 2026-10-24): the drawer/home placeholder at the start, progress on mock
+  // step events, the being-built view, and the in-place swap with no gap or overlap.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "pending-creation", { width: 404, height: 900 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(pendingAppCheck)), ...(await r.page.evaluate(pendingWidgetCheck))])));
   // The app library: home's last page (the user, 2026-10-23). Both screens.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])

@@ -1439,6 +1439,48 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-answer { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; user-select: text; max-height: 40vh; overflow-y: auto; }
 .ai-note, .ai-thinking { font-size: var(--text-small); }
 .ai-empty { padding: 30px 6px; text-align: center; font-size: var(--text-small); }
+
+/* ui/pending.tsx: the shared "being made" building block - app/widget creation placeholders, and the being-built
+   view (apps/sheet.ts's popover). Accent for progress, muted for everything secondary; no borders, no raw colors. */
+.pending-ring-track { stroke: var(--color-accent); stroke-opacity: 0.22; }
+.pending-ring-fill { stroke: var(--color-accent); transition: stroke-dashoffset 220ms ease; }
+/* Indeterminate only (a running build with no step fraction yet): spins while mounted - never on a settled tile. */
+.pending-ring.spin { animation: pending-spin 1.1s linear infinite; }
+@keyframes pending-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pending-ring.spin { animation: none; } }
+.pending-bar { height: 3px; border-radius: 2px; background: var(--soft-fill); overflow: hidden; }
+.pending-bar-fill { height: 100%; border-radius: inherit; background: var(--color-accent); transition: width 220ms ease; }
+.pending-bar.indeterminate .pending-bar-fill { width: 38%; animation: pending-slide 1.4s ease-in-out infinite; }
+@keyframes pending-slide { 0% { margin-left: -38%; } 100% { margin-left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .pending-bar.indeterminate .pending-bar-fill { animation: none; margin-left: 0; } }
+.pending-steps { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-small); }
+.pending-step { display: flex; align-items: baseline; gap: 8px; }
+.pending-step-mark { width: 1.2em; text-align: center; color: var(--color-muted); }
+.pending-step.done .pending-step-mark { color: var(--accent-text); }
+.pending-step.failed .pending-step-mark, .pending-step.failed { color: var(--color-red); }
+.pending-step.pending { color: var(--color-muted); }
+.pending-log { font-size: var(--text-small); line-height: 1.35; max-height: 4.6em; overflow-y: auto; }
+.pending-log-line { overflow-wrap: anywhere; }
+.pending-preview { border-radius: var(--radius); overflow: hidden; }
+.pending-build { display: flex; flex-direction: column; gap: 10px; min-width: 220px; }
+.pending-failed { display: flex; flex-direction: column; gap: 8px; }
+.pending-error { color: var(--color-red); font-size: var(--text-small); }
+.pending-actions { display: flex; gap: 8px; justify-content: flex-end; }
+/* The drawer placeholder: an icon (real once known, else the generic plate) with a ring at its corner. */
+.pending-badge { position: relative; display: inline-flex; }
+.pending-badge-ring { position: absolute; right: -4px; bottom: -4px; display: flex; border-radius: 50%; background: var(--color-background); padding: 1px; }
+.pending-badge.failed .pending-ring-fill { stroke: var(--color-red); }
+/* The home widget placeholder: skeleton rows, a spinner and a progress bar, at the tile's real size. */
+.pending-widget { display: flex; flex-direction: column; justify-content: space-between; gap: 8px; padding: 12px; height: 100%; box-sizing: border-box; }
+.pending-skel-rows { display: flex; flex-direction: column; gap: 7px; }
+.pending-skel-row { height: 0.85em; border-radius: 5px; background: var(--soft-fill); }
+.pending-widget-foot { display: flex; align-items: center; gap: 8px; font-size: var(--text-small); }
+.pending-widget-step { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending-widget.failed .pending-ring-fill, .pending-widget.failed .pending-bar-fill { background: var(--color-red); stroke: var(--color-red); }
+/* The drawer's one placeholder app cell (ui/drawer.tsx PendingAppCell): sits above the A-Z grid, same cell width,
+   left-aligned like the grid's own first column. */
+.pending-app { align-self: flex-start; margin: 2px 0 10px; width: var(--cell); }
+.pending-app .app-icon.initials { display: flex; align-items: center; justify-content: center; font-size: 1.3em; color: var(--color-muted); background: var(--soft-fill); }
 .ai-session {
   width: 100%;
   display: flex;

@@ -169,20 +169,35 @@ interface ReviewProps {
   added: (id: string) => void;
 }
 
-/** Add to my apps / Discard - refused (and said why) when an app of the draft's id is in your apps already. */
+/**
+ * Add to my apps / Discard - refused (and said why) when an app of the draft's id is in your apps already.
+ * "Added" shows at once (optimistic: the user already decided, the write is what's still catching up) - a failure
+ * reverts it in place with the reason, button and all back to normal, instead of leaving "Added" up over an error.
+ */
 function Decide({ net, app, draft, back, added, ready }: ReviewProps & { ready: boolean }) {
   const [busy, err, run] = useAct();
+  const [addedNow, setAddedNow] = useState(false);
   const [list] = useRuntime<{ drafts: DraftInfo[] }>(net, app, "/drafts");
   const exists = !!list?.drafts.find((x) => x.app === draft)?.exists;
-  const add = () => run(() => call(net, app, "/draft/add", { app: draft }).then(() => added(draft)));
+  const add = () => {
+    setAddedNow(true);
+    run(() =>
+      call(net, app, "/draft/add", { app: draft })
+        .then(() => added(draft))
+        .catch((e) => {
+          setAddedNow(false);
+          throw e;
+        }),
+    );
+  };
   const discard = () => run(() => call(net, app, "/draft/discard", { app: draft }).then(back));
   return (
     <>
       <div style={S.row}>
-        <button type="button" style={{ ...S.btn, ...S.btnOn }} disabled={busy || exists || !ready} onClick={add}>
-          Add to my apps
+        <button type="button" style={{ ...S.btn, ...S.btnOn }} disabled={busy || exists || !ready || addedNow} onClick={add}>
+          {addedNow ? "Added" : "Add to my apps"}
         </button>
-        <button type="button" style={S.btn} disabled={busy} onClick={discard}>
+        <button type="button" style={S.btn} disabled={busy || addedNow} onClick={discard}>
           Discard
         </button>
       </div>
