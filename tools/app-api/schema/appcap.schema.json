@@ -15,6 +15,10 @@
     },
     "name": { "type": "string" },
     "description": { "type": "string" },
+    "origin": {
+      "enum": ["official", "captured", "drafted"],
+      "description": "App-level summary of its actions' origin (same values as action.origin). Set by appcap_add.py's normalize() when it builds a draft/capture; a spec written before this field existed omits it and appcap_serve.py derives it from the actions instead."
+    },
     "enabled": {
       "type": "boolean",
       "default": false,
@@ -37,6 +41,10 @@
       "required": ["tokens"],
       "additionalProperties": false,
       "properties": {
+        "handle": {
+          "type": "string",
+          "description": "App-level summary: the token handle every action that needs auth shares (same string as that action's resolved endpoint.auth), or 'mixed' when they differ. Set by appcap_add.py's normalize(); a spec written before this field existed omits it and appcap_serve.py derives it from the actions instead."
+        },
         "tokens": {
           "type": "object",
           "minProperties": 0,

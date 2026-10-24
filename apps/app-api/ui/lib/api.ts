@@ -36,6 +36,10 @@ export interface AppSpec {
   description: string;
   enabled: boolean;
   base: string;
+  /** This app's origin (official/captured/drafted), and its auth handle if any - appcap_serve.summary() sets
+   * both (from the spec's own app-level fields, or derived from its actions for a spec that predates them). */
+  origin: string;
+  auth: string | null;
   actions: Record<string, Action>;
   error?: string;
 }

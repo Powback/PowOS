@@ -48,20 +48,6 @@ function AppCard({ a, open, flip }: { a: AppSpec; open: () => void; flip: (on: b
   );
 }
 
-/** This app's origin(s), from its actions (official / captured / drafted - docs/APP-API-CAPTURE.md): usually one
- * value, joined when an app mixes a hand-written action with a captured or drafted one. */
-function originOf(spec: AppSpec): string {
-  const vals = [...new Set(Object.values(spec.actions ?? {}).map((a) => a.origin).filter(Boolean))].sort();
-  return vals.join("/") || "unknown";
-}
-
-/** This app's auth handle(s) - secret:<app> or store:<app>:session, never a value (appcap_serve.summary already
- * strips it to the handle before this ever reaches the UI). null when no action needs auth. */
-function authOf(spec: AppSpec): string | null {
-  const vals = [...new Set(Object.values(spec.actions ?? {}).map((a) => a.auth).filter((a): a is string => !!a))].sort();
-  return vals.length ? vals.join(", ") : null;
-}
-
 /** [spec] with an action's (or the app's own, key "_app") `enabled` optimistically overridden, for Detail's flip(). */
 function withOverride(spec: AppSpec, overrides: Record<string, boolean>): AppSpec {
   if (!Object.keys(overrides).length) return spec;
@@ -94,8 +80,8 @@ function Detail(p: DetailProps & { toggle: (on: boolean, action?: string) => voi
       },
     );
   };
-  const origin = originOf(spec);
-  const auth = authOf(spec);
+  const origin = spec.origin;
+  const auth = spec.auth;
   return (
     <>
       <header style={S.head}>

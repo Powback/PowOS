@@ -8,7 +8,8 @@ page reaches it with host.net.fetch("http://127.0.0.1:3411/..."); on the phone t
 It adds no logic of its own: views are appcap_render.py's, calls are appcap_run.py's (one subprocess per call, so the
 one call path stays the only place that can say no), toggles are the spec's own `enabled` flags.
 
-  GET  /apps                       every spec: app, actions, safety, enabled (handles only, never a token)
+  GET  /apps                       every spec: app, actions, safety, enabled, app-level origin/auth (derived for
+                                   an older spec that predates those two fields) (handles only, never a token)
   GET  /views?app=A                {api, tools, cli, widgets}: appcap_render.py's output
   POST /enable {app, action?, enabled}         the kill switch / the per-action allowlist (spec re-validated)
   POST /enable: switching ON a non-read `captured`/`drafted` action promotes it (promoted:true) - that is the review
@@ -137,6 +138,29 @@ def endpoint_text(ep: dict) -> str:
     return f"{ep.get('method', 'GET')} {ep.get('path') or ep.get('operationId', '?')}"
 
 
+def app_origin(s: dict, acts: dict) -> str:
+    """The app-level origin (schema/appcap.schema.json): appcap_add.py's normalize() sets it on every draft/capture.
+    A spec written before that field existed has none, so it's derived from its actions - same values, joined, as
+    the detail page (apps/app-api/ui/pages/main.tsx) used to compute client-side."""
+    top = s.get("origin")
+    if top in appcap_validate.ORIGIN:
+        return top
+    vals = sorted({a["origin"] for a in acts.values() if a.get("origin")})
+    return "/".join(vals) if vals else "unknown"
+
+
+def app_auth(s: dict, acts: dict) -> str | None:
+    """The app-level auth handle: normalize() sets auth.handle; an older spec without it is derived from its
+    actions' own (already-resolved) handles - one shared handle, or 'mixed' when they differ, same as normalize()."""
+    handle = (s.get("auth") or {}).get("handle")
+    if handle:
+        return handle
+    vals = sorted({a["auth"] for a in acts.values() if a.get("auth")})
+    if not vals:
+        return None
+    return vals[0] if len(vals) == 1 else "mixed"
+
+
 def summary(path: str) -> dict:
     s = valid(path)
     toks = (s.get("auth") or {}).get("tokens", {})
@@ -149,7 +173,8 @@ def summary(path: str) -> dict:
         if auth in toks:
             acts[aid]["auth"] = toks[auth].get("store")  # the handle, never a value
     return {"app": s["app"], "name": s.get("name", s["app"]), "description": s.get("description", ""),
-            "enabled": s.get("enabled", False), "base": (s.get("base") or {}).get("url", ""), "actions": acts}
+            "enabled": s.get("enabled", False), "base": (s.get("base") or {}).get("url", ""),
+            "origin": app_origin(s, acts), "auth": app_auth(s, acts), "actions": acts}
 
 
 def apps(_q, _b):

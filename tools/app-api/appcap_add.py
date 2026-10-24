@@ -132,6 +132,16 @@ def _safety(a: dict, ep: dict) -> str:
     return s
 
 
+def _app_auth_handle(actions: dict, tokens: dict) -> str | None:
+    """The app-level auth.handle normalize() sets: the one handle every action that needs auth resolves to
+    (endpoint.auth -> tokens[...].store), or 'mixed' when they differ. None when no action needs auth - the
+    detail page then shows no auth line, same as today."""
+    handles = {tokens[a["endpoint"]["auth"]]["store"] for a in actions.values() if a["endpoint"].get("auth") in tokens}
+    if not handles:
+        return None
+    return next(iter(handles)) if len(handles) == 1 else "mixed"
+
+
 def _action(aid: str, a: dict, origin: str, tokens: dict, ids: set) -> dict:
     if not isinstance(a, dict):
         raise ValueError(f"action {aid!r} isn't an object")
@@ -175,6 +185,13 @@ def normalize(spec: dict, source: str, app: str | None = None) -> dict:
     ids = {slug(k, "_") or "action" for k in spec["actions"]}
     out["actions"] = {slug(k, "_") or "action": _action(slug(k, "_") or "action", a, origin, tokens, ids)
                       for k, a in spec["actions"].items()}
+    # App-level origin/auth (schema/appcap.schema.json): every action here shares [origin] (normalize() is one
+    # source per draft); the handle is the one every action that needs auth resolves to, or 'mixed'. The detail
+    # page (apps/app-api/ui/pages/main.tsx) reads these instead of deriving them client-side.
+    out["origin"] = origin
+    handle = _app_auth_handle(out["actions"], tokens)
+    if handle:
+        out["auth"]["handle"] = handle
     return out
 
 

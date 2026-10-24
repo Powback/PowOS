@@ -23,6 +23,10 @@ Invariants enforced (each a hard error unless marked warn):
       generator knows to skip it
   S10 a `view` (the composer's row binding, docs/COMPOSER.md) only on a `read`
       action, and its `of` names another read action of the same app
+  S11 the optional app-level `origin` and `auth.handle` summaries (appcap_add.py's
+      normalize() sets them; appcap_serve.py derives them for a spec that predates
+      them), if present, must look like the real thing: `origin` one of ORIGIN,
+      `auth.handle` a secret:/store: handle or 'mixed'
 
 Usage:
   appcap_validate.py hue.appcap.json [more.json ...]
@@ -59,6 +63,14 @@ def validate(path: str, show_list: bool) -> list[str]:
         store = (t or {}).get("store", "")
         if not HANDLE.match(store):
             errs.append(f"{path}: token '{tid}' store must be a secret:/store: handle, not an inline value [S2]")
+
+    # S11: the optional app-level origin/auth.handle summaries, if present, must look right
+    top_origin = spec.get("origin")
+    if top_origin is not None and top_origin not in ORIGIN:
+        errs.append(f"{path}: app-level origin must be one of {sorted(ORIGIN)} [S11]")
+    handle = (spec.get("auth") or {}).get("handle")
+    if handle is not None and handle != "mixed" and not HANDLE.match(handle):
+        errs.append(f"{path}: app-level auth.handle must be a secret:/store: handle or 'mixed' [S11]")
 
     actions = spec.get("actions") or {}
     if not actions:

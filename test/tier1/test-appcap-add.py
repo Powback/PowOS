@@ -121,6 +121,24 @@ class Normalize(unittest.TestCase):
         d = self.add.normalize(json.loads(json.dumps(SPEC)), "capture", "shop")
         self.assertEqual({x["origin"] for x in d["actions"].values()}, {"captured"})
 
+    def test_app_level_origin_and_auth(self):
+        """normalize() sets the app-level origin/auth.handle (schema/appcap.schema.json) the detail page reads
+        instead of deriving them client-side: origin matches every action's; auth.handle is the one handle shared
+        by every action that needs one, 'mixed' when they differ, absent when none do."""
+        d = self.add.normalize(json.loads(json.dumps(SPEC)), "describe")
+        self.assertEqual(d["origin"], "drafted")
+        self.assertEqual({x["origin"] for x in d["actions"].values()}, {d["origin"]})
+        self.assertEqual(d["auth"]["handle"], "store:shop-app:session")  # list_items is the only action using auth
+        d2 = self.add.normalize({"actions": {
+            "a": {"safety": "read", "endpoint": {"method": "GET", "path": "/a", "auth": "x"}},
+            "b": {"safety": "read", "endpoint": {"method": "GET", "path": "/b", "auth": "y"}},
+        }, "auth": {"tokens": {"x": {"store": "secret:two-app"}, "y": {"store": "store:two-app:session"}}}},
+            "describe", "two-app")
+        self.assertEqual(d2["auth"]["handle"], "mixed")
+        d3 = self.add.normalize({"actions": {"a": {"safety": "read", "endpoint": {"method": "GET", "path": "/a"}}}},
+                                 "describe", "no-auth-app")
+        self.assertNotIn("handle", d3["auth"])  # nothing here needs auth
+
     def test_refused(self):
         with self.assertRaises(ValueError):
             self.add.normalize({"actions": {}}, "appcap", "x-app")
