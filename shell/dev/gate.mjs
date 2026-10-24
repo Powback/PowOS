@@ -28,6 +28,11 @@ const ORIGIN = "https://shell.powos";
 const ROOT = "/shell";
 const APPS = "/apps";
 const READY_MS = Number(process.env.READY_MS || 8000);
+/** Every puppeteer-side wait (launch, newPage's target wait, goto, waitFor*): its fixed 30 s defaults scaled with the
+ * load like READY_MS (f30) - a starved Mac (load ~15 from training runs) timed out before any case ran. */
+const PUPPETEER_MS = Math.max(30000, READY_MS * 2);
+/** Names the startup call that failed: a bare "Timed out after waiting 30000ms" (rxjs, util.js) says nothing (f30). */
+const step = (name, promise) => promise.catch((e) => { e.message = `[${name}] ${e.message}`; throw e; });
 /** After ready: errors this soon after the first render are boot errors too (an effect throwing, a lazy import). */
 const SETTLE_MS = Number(process.env.SETTLE_MS || 400);
 const IDLE_MS = Number(process.env.IDLE_MS ?? 2000);
@@ -1656,9 +1661,13 @@ const bootDone = () => (bootQueue.length ? bootQueue.shift()() : booting--);
 async function open(browser, url, name, viewport = { width: 412, height: 915 }) {
   if (ONLY && !ONLY.test(name)) throw SKIP;
   // A context (a window) of its own: tabs side by side in one window are hidden but the front one - no frames.
-  const page = await (await browser.createBrowserContext()).newPage();
-  await page.setViewport({ ...viewport, deviceScaleFactor: 1 });
-  if (THROTTLE > 1) await (await page.target().createCDPSession()).send("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
+  const context = await step(`${name}: createBrowserContext`, browser.createBrowserContext());
+  const page = await step(`${name}: newPage`, context.newPage());
+  // puppeteer's own 30 s defaults (goto, waitFor*) are fixed too: scale them with the load like READY_MS (f30).
+  page.setDefaultTimeout(PUPPETEER_MS);
+  page.setDefaultNavigationTimeout(PUPPETEER_MS);
+  await step(`${name}: setViewport`, page.setViewport({ ...viewport, deviceScaleFactor: 1 }));
+  if (THROTTLE > 1) await step(`${name}: throttle`, page.target().createCDPSession().then((c) => c.send("Emulation.setCPUThrottlingRate", { rate: THROTTLE })));
   const problems = [];
   const warnings = [];
   await page.setRequestInterception(true);
@@ -1725,17 +1734,25 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
     });
   // The checks' waits (window.__gw), on every page before its scripts. A check waits on the STATE its assertion needs,
   // never a fixed time: on a loaded Mac (two gates at --cpu-shares 256) frames lag the clock - a slide hadn't begun
-  // 500 ms in, a transition started a frame late ended late. until(f, ms = 3000): until f() (may be async) holds or ms
-  // pass - true if it held; the assertion after it is the one that fails. steady(f): f()'s measure unchanged over
+  // 500 ms in, a transition started a frame late ended late. until(f, ms = checkMs): until f() (may be async) holds
+  // or ms pass - true if it held; the assertion after it is the one that fails. checkMs is READY_MS (gate.sh's
+  // load-scaled boot budget), not a fixed 3000 - at 1-min load 25 a fixed 3000 ms failed checks like
+  // dockTapCheck's tap() though the app was fine, the same cause READY_MS was already scaled for (f30).
+  // steady(f): f()'s measure unchanged over
   // frames (script-driven motion included). still(sel): no finite animation or transition running on the document's
   // clock (under sel's elements); endless ones (a loading pulse) don't count - the idle check has those.
-  await page.evaluateOnNewDocument(() => {
+  await page.evaluateOnNewDocument((checkMs) => {
     const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
     // A frame, or 500 ms without one: a wait only on rAF is a promise nothing but the frame holds - on a loaded gate
     // the evaluate awaiting it failed "Promise was collected" (relayout-*); the timer keeps it reachable and bounded.
     const frame = () => new Promise((ok) => (requestAnimationFrame(() => ok()), setTimeout(ok, 500)));
     const frames = async (n = 2) => { for (let k = 0; k < n; k++) await frame(); };
-    const until = async (f, ms = 3000) => {
+    // Default ms: checkMs (READY_MS, load-scaled by gate.sh - f30) instead of a fixed 3000. At 1-min load 25
+    // (agent-swarm load, same cause as the boot wait) frames lagged the clock past 3 s though the app was fine -
+    // dockTapCheck's tap() (desktops.ts) and others never reached their state within the fixed budget and the
+    // gate FAILed "its window in front" though nothing was wrong with the code. READY_MS already scales for this
+    // (gate.sh: load*1500, floor 8000, cap 60000); reusing it here covers these in-page waits the same way.
+    const until = async (f, ms = checkMs) => {
       const t0 = performance.now();
       while (!(await f())) {
         if (performance.now() - t0 > ms) return false;
@@ -1754,10 +1771,10 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
     // has those.
     const still = (sel) => !documentAnimations(sel).some((a) => a.effect?.getComputedTiming().endTime !== Infinity);
     // Settled: f() holds, then no animation (under sel) and two frames on - the layout after the last one done.
-    const settled = async (f = () => true, sel, ms = 3000) => (await until(async () => (await f()) && still(sel), ms)) && (await frames(2), true);
+    const settled = async (f = () => true, sel, ms = checkMs) => (await until(async () => (await f()) && still(sel), ms)) && (await frames(2), true);
     // Steady: f()'s value (a JSON-able measure: rects, an order) the same over n frames running - motion a script drives
     // (a spring, a rAF tween) that getAnimations() never sees has stopped. True if it got there within ms.
-    const steady = async (f, n = 3, ms = 3000) => {
+    const steady = async (f, n = 3, ms = checkMs) => {
       const t0 = performance.now();
       let last = JSON.stringify(await f()), same = 0;
       while (same < n) {
@@ -1777,7 +1794,7 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
       return mods.get(path);
     };
     window.__gw = { sleep, frames, until, still, settled, steady, mod, documentAnimations };
-  });
+  }, READY_MS);
   // Counts the page's requestAnimationFrame callbacks (the idle check): counted as they run, nothing else changes.
   await page.evaluateOnNewDocument(() => {
     const raf = window.requestAnimationFrame.bind(window);
@@ -1888,11 +1905,20 @@ async function idleWindow(run) {
 const browser = await puppeteer.launch({
   executablePath: process.env.CHROME || "/usr/bin/chromium-browser",
   headless: true,
+  // Load-scaled like the page waits (f30): puppeteer's own launch wait is a fixed 30 s ("Timed out ... waiting for the
+  // WS endpoint URL") and chromium took ~12 s to start at load 13, so a starved Mac failed the gate before any page.
+  timeout: PUPPETEER_MS,
+  protocolTimeout: Math.max(180000, PUPPETEER_MS * 2),
   // Every page drawn as if on screen (the pages run side by side): a backgrounded or occluded one gets no frames, and
   // the idle check would see nothing.
   args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--mute-audio",
     "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--disable-background-timer-throttling"],
 });
+// HACK: newPage() waits for its target with browser.waitForTarget's fixed 30 s default (puppeteer 22.9 api/Browser.js)
+// and takes no timeout option - at load ~15 that wait is what died before any case (f30). Default it to PUPPETEER_MS
+// here; real fix: upstream a timeout option on newPage / createBrowserContext.
+const waitForTarget = browser.waitForTarget.bind(browser);
+browser.waitForTarget = (predicate, options = {}) => waitForTarget(predicate, { timeout: PUPPETEER_MS, ...options });
 let failed = 0;
 try {
   const runs = [];
