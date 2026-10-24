@@ -337,12 +337,7 @@ object PageSlide {
         // does), the same moment their leash is hidden: before, only their bounds went in it, WM showed them again as
         // it finished and the minimise came a transition later - the old page's windows flashed on the new one.
         s.finish(wins.associate { it.id to Rect(it.bounds) }) { wct, token ->
-            for (w in wins) {
-                val tok = token(w.id) ?: continue
-                TaskLeash.setBounds(wct, tok, w.bounds)
-                if (w.rel != 0) TaskLeash.setFocusable(wct, tok, true)
-                if (w.id in gone) TaskLeash.reorder(wct, tok, false)
-            }
+            restore(wct, token, gone)
         }
         Log.i(
             TAG,
@@ -350,6 +345,20 @@ object PageSlide {
                 "leash after $readyAfter ms, moves late avg ${if (lateN > 0) lateSum / lateN else -1} max $lateMax ms ($lateN), settle late $settleLate ms at ${SystemClock.elapsedRealtime()}",
         )
         wins = emptyList()
+    }
+
+    /** The finish change: every window's own bounds back, the other pages' focusable again, the [gone] ones under home. */
+    private fun restore(
+        wct: Any,
+        token: (Int) -> Any?,
+        gone: Set<Int>,
+    ) {
+        for (w in wins) {
+            val tok = token(w.id) ?: continue
+            TaskLeash.setBounds(wct, tok, w.bounds)
+            if (w.rel != 0) TaskLeash.setFocusable(wct, tok, true)
+            if (w.id in gone) TaskLeash.reorder(wct, tok, false)
+        }
     }
 
     private fun at(w: Win): Rect = Rect(w.bounds).apply { offset(dx(w), 0) }
