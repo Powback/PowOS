@@ -183,7 +183,7 @@ def _time_notice(inp, seen, new_seen, cache_path):
     if mins is None:
         return None
     if mins >= TIME_HARD_MIN:
-        return "[time] past 5 min: land and hand back NOW"
+        return "[time] past 5 min: land and hand back NOW. If you'll miss 5 min, end your hand-back with a Time line: minutes taken, the top 3 time sinks (what, how long, why, with evidence) and what would have made it fit (a recipe line, a tool, a doc)."
     if mins >= TIME_WARN_MIN:
         sess = inp.get("session_id") or "nosession"
         key = f"timebucket:{sess}:4min"
@@ -191,7 +191,7 @@ def _time_notice(inp, seen, new_seen, cache_path):
             return None
         new_seen.add(key)
         return ("[time] 4 min: land what works now with tools/agents/land.sh; put what's left in "
-                "≤200-word hand-off notes plus a Friction & missing info list; hand back")
+                "≤200-word hand-off notes plus a Friction & missing info list; hand back. If you'll miss 5 min, end your hand-back with a Time line: minutes taken, the top 3 time sinks (what, how long, why, with evidence) and what would have made it fit (a recipe line, a tool, a doc).")
     return None
 
 
