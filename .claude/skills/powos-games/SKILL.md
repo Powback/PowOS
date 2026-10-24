@@ -332,3 +332,15 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   every Present copy (refresh_dri3_pixmap), Present flips disabled on KGSL -> glamor copy into the window pixmap ->
   window buffer commit (a forced commit also replaces the wl_buffer = KWin re-imports) -> KWin AnlandWindowTask draws
   the window item into the Android task buffer -> SurfaceFlinger. 2-3 full-screen copies + per-frame imports.
+
+## Latest hand-off
+2026-10-24 05:35 (steam-launch-drop). State: steam pkgrel 29 (ca94c10e) waits, in /usr/bin/steam, for a resident
+client's logon before forwarding a rungameid (dead CM link after a long freeze -> cloud "syncfailed" prompt hidden in
+Steam's window -> every later launch of that game joins it). Queued: pkg-install 29, `bf-coldstart.sh cold steam`
+(cold first: the live Steam still holds Broforce's stuck action), `via:steam steam`, Desk Job answer.sh (--close).
+Gotchas: "no launch yet" with ExecuteSteamURL logged = a waiting game action, grep console_log 'waiting for user
+response' + connection_log/cloud_log; bf-coldstart's dump hides it (f89). Package inputs (sysvipc-emu.tar.gz 7dab8e01,
+out/pkgs fex-emu/gtk2) only in powos-multiplatform/bf-fast (f76); answer.sh is in ~/.cache/powos-verify (f88).
+Next: (1) dead-link launches now take Steam's 9-19 s backoff: keeping a frozen Steam's CM link alive is a unified-sleep
+decision (manager); (2) powos-open-task should raise Steam's main window when a launch logs "waiting for user
+response" with no Steam Dialog window; (3) Desk Job = a real ShowInterstitials notice, separate.
