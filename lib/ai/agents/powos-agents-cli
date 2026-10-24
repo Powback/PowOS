@@ -41,15 +41,26 @@ Usage:
   powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT] [--project P]
                                    [--progress N/M] [--step TEXT] [--plan "a; b; c"] [--commit SHA]...
                                    [--image PATH]... [--image-rm PATH]...
-                                   Change a task. <task>: its exact id, or whole words of its title
-                                   matching ONE task (an unknown id, a status word or
-                                   several matches is refused).
+                                   Change a task. <task> (same for set/done/rm/merge): its exact id, a
+                                   unique PREFIX of an id, or whole words of its title matching ONE
+                                   open task - never guessed: a prefix several ids share, an unknown
+                                   id, a status word or several title matches lists the candidates and
+                                   is refused.
   powos agents task done <task> [--note TEXT] [--commit SHA]... [--no-check "<why>"]
                                    Mark it done (stays under "done recently" for a week). Done means
                                    its phone check PASSED on a shipped build: refused while its last
                                    check FAILED or none passed, unless --no-check gives the reason no
                                    device check is possible ("docs only", "Mac tooling, tier-1 tested").
                                    queue.sh add --close <task> closes it on the pass by itself.
+  powos agents task merge <dup...> --into <task> [--note TEXT]
+                                   Fold one or more duplicates into <task>: each dup's title, note and
+                                   still-open steps land on <task> (its commits and images carried over
+                                   too), then the dup is marked done, note "merged into <task>" - no
+                                   device check needed, its scope moved there. Refused: a dup named as
+                                   its own target, or <task> already done.
+  powos agents task dupes [--json]
+                                   Open tasks that look like the same thing twice (similar title), as
+                                   merge suggestions you can paste: `task merge <dup> --into <task>`.
 
 How far along (the page shows a bar, the steps done / now / next, the commits and when it last moved):
   --progress N/M   step N of M (0/0 clears the bar). Without it, the count follows the steps (--plan/--step).
@@ -207,6 +218,13 @@ def similar(a, b):
     return jac >= 0.75 or difflib.SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio() >= 0.85
 
 
+def likely_dupes(ws):
+    """Open tasks whose titles are [similar] enough to be the same task twice, as (a, b) merge-suggestion pairs - a
+    is the older one (the natural merge target), b the newer."""
+    open_ = sorted((w for w in ws if w["status"] != "done"), key=lambda w: int(w.get("created") or w.get("updated") or 0))
+    return [(a, b) for i, a in enumerate(open_) for b in open_[i + 1:] if similar(a["title"], b["title"])]
+
+
 def slug(title):
     s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
     return s[:48].rstrip("-") or f"task-{int(time.time())}"
@@ -225,10 +243,11 @@ def status_of(s):
 
 
 def find(key):
-    """The ONE task <key> names: its exact id, or whole words of its title matching one open task (else one task at
-    all). Refused, never guessed (2026-10-23: a games agent scraped the status column, ran `task set working --step
-    ...` and the old substring match put its Broforce step on "Board shows real agent state (working only ...)"):
-    an id-shaped key (one token with a '-') that isn't an id, a key of only status words, more than one match."""
+    """The ONE task <key> names: its exact id, a unique PREFIX of an id, or whole words of its title matching one
+    open task (else one task at all). Refused, never guessed (2026-10-23: a games agent scraped the status column,
+    ran `task set working --step ...` and the old substring match put its Broforce step on "Board shows real agent
+    state (working only ...)"): an id-shaped key (one token with a '-') that isn't an id or a unique prefix of one
+    (several ids share the prefix: listed, not guessed), a key of only status words, more than one title match."""
     all_ = rows()
     key = key.strip()
     for w in all_:
@@ -237,9 +256,15 @@ def find(key):
     if not key:
         die("no task given (powos agents task list)")
     if " " not in key and "-" in key:
-        near = [w["id"] for w in all_ if w["id"].startswith(key) or key.startswith(w["id"])][:3]
+        pre = [w for w in all_ if w["id"].startswith(key)]
+        if pre:
+            open_pre = [w for w in pre if w["status"] != "done"] or pre
+            if len(open_pre) == 1:
+                return open_pre[0]
+            die(f"{key!r} matches {len(open_pre)} task ids, name one: " + ", ".join(w["id"] for w in open_pre))
+        near = [w["id"] for w in all_ if key.startswith(w["id"])][:3]
         die(f"no task has the id {key!r}" + (f" (did you mean {', '.join(near)}?)" if near else "")
-            + " - use the exact id from `powos agents task list --json`")
+            + " - use the exact id (or a unique prefix of it) from `powos agents task list --json`")
     words = re.findall(r"[a-z0-9]+", key.lower())
     if not words or all(x in STATES or x in ALIASES for x in words):
         die(f"{key!r} is a status, not a task: name the task by its id (powos agents task list --json)")
@@ -432,6 +457,38 @@ def apply_track(w, o, done=False):
              new["commits"], new["images"])
 
 
+def merge_into(target, dups, note):
+    """Fold [dups] into [target]: each dup's title/note and still-open steps, plus its commits and images, land on
+    [target]; each dup is then marked done, its note "merged into <target>" (no device check needed - its scope
+    moved to the target, the same reason --no-check gives for Mac-only work)."""
+    bits, commits, images = [], [], []
+    plan = [s["text"] for s in _jl(target.get("steps", "")) if isinstance(s, dict) and s.get("state") == "next"]
+    for w in dups:
+        bits.append(f"{w['title']} [{w['id']}]" + (f": {w['note']}" if w.get("note") else ""))
+        for s in _jl(w.get("steps", "")):
+            if isinstance(s, dict) and s.get("state") in ("current", "next"):
+                t = _line(s.get("text", ""))
+                if t and t not in plan:
+                    plan.append(t)
+        commits += [c for c in _jl(w.get("commits", "")) if isinstance(c, dict) and c.get("sha")]
+        images += [p for p in _jl(w.get("images", "")) if isinstance(p, str)]
+    merged = "merged in: " + "; ".join(bits)
+    full_note = f"{note.strip()} ({merged})" if note.strip() else merged
+    if target.get("note"):
+        full_note = f"{target['note']} | {full_note}"
+    call("work_set", target["id"], "", "", "", full_note, "")
+    tgt = next((w for w in rows() if w["id"] == target["id"]), target)
+    new = track(tgt, plan="; ".join(plan) if plan else None, commits=commits, images=images)
+    if new:
+        call("work_track", tgt["id"], new["progress_done"], new["progress_total"], new["step"], new["steps"],
+             new["commits"], new["images"])
+    for w in dups:
+        call("work_set", w["id"], "", "", "done", f"merged into {target['id']}", "")
+        call("check_set", json.dumps({"job": f"nocheck:{w['id']}", "task": w["id"],
+                                      "name": "no device check possible", "state": "none",
+                                      "line": f"merged into {target['id']}"}))
+
+
 def no_check(wid, o):
     """--no-check REASON: no device check is possible for it - recorded as its check (state none), which lets the
     module's done rule close it."""
@@ -501,6 +558,34 @@ def task(argv):
         call("work_set", w["id"], "", "", "done", o.get("note", ""), "")
         apply_track(w, o, done=True)
         print(w["id"])
+    elif verb == "merge":
+        o, rest = opts(argv, ["into", "note"])
+        if not rest or not o.get("into"):
+            die('usage: powos agents task merge <dup...> --into <task> [--note TEXT]')
+        target = find(o["into"])
+        if target["status"] == "done":
+            die(f"{target['id']!r} is already done - merge into an open task")
+        dups = []
+        for key in rest:
+            w = find(key)
+            if w["id"] == target["id"]:
+                die(f"can't merge {w['id']!r} into itself")
+            dups.append(w)
+        merge_into(target, dups, o.get("note", ""))
+        print(target["id"])
+    elif verb in ("dupes", "dup", "duplicates"):
+        o, _ = opts(argv, ["json!"])
+        pairs = likely_dupes(rows())
+        if o.get("json"):
+            print(json.dumps([{"a": a["id"], "b": b["id"], "a_title": a["title"], "b_title": b["title"]}
+                              for a, b in pairs], indent=1))
+            return
+        if not pairs:
+            print("no likely duplicates (powos agents task list)")
+        for a, b in pairs:
+            print(f"{a['id']}  ~  {b['id']}")
+            print(f"    {a['title']!r}  /  {b['title']!r}")
+            print(f"    powos agents task merge {b['id']} --into {a['id']}")
     elif verb in ("rm", "remove", "drop"):
         if not argv:
             die("usage: powos agents task rm <task>")

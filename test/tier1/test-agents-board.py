@@ -214,19 +214,89 @@ class BoardTest(unittest.TestCase):
         self.cli("add", "Games launch instantly", "--id", "games-launch-instantly")
         self.cli("add", "Games freeze on resume", "--id", "games-freeze")
         before = dict(self.row("board-live"))
-        for key in ("working", "Working", "games-launch", "games-launch-instantly-x", "Games", "stat", "nope"):
+        for key in ("working", "Working", "games-launch-instantly-x", "Games", "stat", "nope"):
             p = self.cli("set", key, "--step", "measuring Broforce", ok=False)
             self.assertNotEqual(p.returncode, 0, key)
         self.assertEqual(self.row("board-live"), before)
-        self.assertIn("games-launch-instantly", self.cli("set", "games-launch", "--step", "x", ok=False).stderr)
-        self.assertEqual(self.cli("set", "games-launch-instantly", "--step", "x").stdout.strip(), "games-launch-instantly")
         self.assertEqual(self.cli("set", "agent state", "--step", "y").stdout.strip(), "board-live")
         self.assertEqual(self.cli("done", "freeze resume").stdout.strip(), "games-freeze")
+
+    def test_id_prefix_resolves_uniquely_else_lists_candidates(self):
+        """A unique id prefix ('broforce-black' -> 'broforce-black-checkerboard-on-loading-menu') resolves; a
+        prefix shared by several ids is refused and LISTS them, never guesses one (the friction this replaces:
+        'no task has the id broforce-bla' with no way to act on the 'did you mean' short of retyping it exactly)."""
+        self.cli("add", "Games launch instantly", "--id", "games-launch-instantly")
+        self.cli("add", "Games freeze on resume", "--id", "games-freeze")
+        # Unique prefix: resolves without needing the exact id.
+        self.assertEqual(self.cli("set", "games-launch", "--step", "x").stdout.strip(), "games-launch-instantly")
+        # A prefix several ids share: refused, candidates listed (not the first one picked).
+        p = self.cli("set", "games-", "--step", "x", ok=False)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("games-launch-instantly", p.stderr)
+        self.assertIn("games-freeze", p.stderr)
+        # A longer, misspelled id still gets a "did you mean" rather than a bare refusal.
+        p = self.cli("set", "games-launch-instantly-x", "--step", "x", ok=False)
+        self.assertIn("games-launch-instantly", p.stderr)
+
+    def test_merge_folds_dup_into_target(self):
+        """`task merge <dup> --into <target>`: the dup's title/note and open steps/commits/images land on the
+        target, then the dup is marked done ("merged into <target>") with no device check needed."""
+        a = self.commit("fix the checkerboard flash")
+        self.cli("add", "Broforce checkerboard on loading menu", "--id", "broforce-a", "--owner", "powos-games",
+                 "--plan", "repro on device; patch the shader")
+        self.cli("add", "Broforce shows a checkerboard while loading", "--id", "broforce-b", "--note", "seen on gpu-195",
+                 "--image", "/home/powos/design-qa/checker.png")
+        self.cli("set", "broforce-b", "--commit", a[:7])
+        out = self.cli("merge", "broforce-b", "--into", "broforce-a", "--note", "same bug")
+        self.assertEqual(out.stdout.strip(), "broforce-a")
+        dup = self.row("broforce-b")
+        self.assertEqual(dup["status"], "done")
+        self.assertIn("merged into broforce-a", dup["note"])
+        checks = [json.loads(c[1][0]) for c in FakeStdb.calls if c[0] == "check_set"]
+        mine = [c for c in checks if c["task"] == "broforce-b"]
+        self.assertEqual(len(mine), 1)
+        self.assertEqual(mine[0]["state"], "none")
+        self.assertIn("merged into broforce-a", mine[0]["line"])
+        target = self.row("broforce-a")
+        self.assertIn("same bug", target["note"])
+        self.assertIn("Broforce shows a checkerboard while loading", target["note"])
+        self.assertIn("seen on gpu-195", target["note"])
+        steps = [s[0] for s in self.steps("broforce-a")]
+        self.assertIn("repro on device", steps)
+        self.assertIn("patch the shader", steps, "the target's own plan is kept, not wiped by the merge")
+        self.assertEqual(json.loads(target["images"]), ["/home/powos/design-qa/checker.png"])
+        self.assertEqual([c["sha"] for c in json.loads(target["commits"])], [a[:12]])
+        # Refused: a dup can't be merged into itself, and a done target refuses further merges.
+        self.cli("add", "Another dup", "--id", "broforce-c")
+        self.assertNotEqual(self.cli("merge", "broforce-a", "--into", "broforce-a", ok=False).returncode, 0)
+        self.cli("done", "broforce-c", "--no-check", "docs only")
+        self.assertNotEqual(self.cli("merge", "broforce-a", "--into", "broforce-c", ok=False).returncode, 0)
+
+    def test_dupes_lists_similar_open_tasks_only(self):
+        self.cli("add", "Broforce checkerboard on loading menu", "--id", "broforce-a")
+        self.cli("add", "Totally unrelated task", "--id", "unrelated")
+        base = int(self.row("broforce-a")["created"])
+        # Near-duplicates (inserted directly: `task add` itself refuses to create a second open duplicate, so
+        # this is how two end up on the board for real - two agents racing past that check, or an old task
+        # predating it) - one open (a merge candidate), one already done (must NOT be suggested).
+        FakeStdb.work["broforce-b"] = {c: "" for c in COLS} | {
+            "id": "broforce-b", "title": "Broforce checkerboard on the loading menu", "status": "working",
+            "created": base + 100, "updated": base + 100, "done": 0, "progress_done": 0, "progress_total": 0}
+        FakeStdb.work["broforce-c"] = {c: "" for c in COLS} | {
+            "id": "broforce-c", "title": "Broforce checkerboard on the loading menus", "status": "done",
+            "created": base - 100, "updated": base - 100, "done": base - 100, "progress_done": 0, "progress_total": 0}
+        out = self.cli("dupes").stdout
+        self.assertIn("broforce-a", out)
+        self.assertIn("broforce-b", out)
+        self.assertNotIn("unrelated", out)
+        self.assertNotIn("broforce-c", out, "a done task is not a merge suggestion")
+        pairs = json.loads(self.cli("dupes", "--json").stdout)
+        self.assertEqual([(p["a"], p["b"]) for p in pairs], [("broforce-a", "broforce-b")])
 
     def test_help_documents_it(self):
         out = subprocess.run([sys.executable, CLI, "help"], capture_output=True, text=True).stdout
         for flag in ("--progress N/M", "--step TEXT", "--plan", "--commit SHA", "--image PATH", "--image-rm PATH",
-                     "--unowned", "add|new"):
+                     "--unowned", "add|new", "task merge", "--into", "task dupes"):
             self.assertIn(flag, out)
 
 
