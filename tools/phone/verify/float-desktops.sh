@@ -120,8 +120,27 @@ swipe() {
   # Shorter than home turns a page for (a quarter of its width, no flick): the check's spot, not the product.
   [ $(( (to - x) * $1 )) -ge $((W / 4 + 40)) ] || { echo "ENV: only a $(( (to - x) * $1 )) px swipe fits from $x,$y - stopping (not a product FAIL)"; exit 5; }
   LASTSWIPE="$x,$y -> $to,$y"; echo "swipe $LASTSWIPE" >>"$OUT/log.txt"
+  # The flash probe (2026-10-24: "the windows of the previous page appear for a split second" on the new page): on the
+  # device, every SurfaceFlinger composition list for ~2.5 s from the swipe, each sample "<end lines so far> <layers of
+  # $PKG composited>". A sample taken after the slide's end line that still composites the window = the flash.
+  sh_ "rm -f /data/local/tmp/fd-flash.txt; (i=0; while [ \$i -lt 40 ]; do e=\$(grep -c \"PowosPageSlide.*end (\" /data/local/tmp/fd-log.txt); v=\$(dumpsys SurfaceFlinger | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\" | grep -c $PKG); echo \$e \$v >>/data/local/tmp/fd-flash.txt; i=\$((i+1)); done </dev/null >/dev/null 2>&1 &)"
   sh_ "input swipe $x $y $to $y 250"; sleep 1.5
 }
+
+# After a swipe that leaves the window behind: was it composited after the slide ended? $1 the step; $2 the end-line
+# count before this swipe. Seen before the end but never after = no flash; never seen at all = the probe can't tell.
+flash() {
+  sleep 1.2
+  local f; f=$(sh_ "cat /data/local/tmp/fd-flash.txt"); echo "flash probe $1: $(echo $f | tr '\n' ' ')" >>"$OUT/log.txt"
+  local before after n
+  before=$(echo "$f" | awk -v k="$2" '$1==k && $2>0' | wc -l | tr -d ' ')
+  after=$(echo "$f" | awk -v k="$2" '$1>k && $2>0' | wc -l | tr -d ' ')
+  n=$(echo "$f" | awk -v k="$2" '$1>k' | wc -l | tr -d ' ')
+  if [ "$before" -eq 0 ]; then echo "NOTE $1: flash probe can't tell (the window never in SurfaceFlinger's composition list)" | tee -a "$OUT/log.txt"
+  elif [ "$after" -gt 0 ]; then fail "$1: the old page's window flashed - composited in $after of $n samples after the slide ended"
+  else pass "$1: no flash - the window was composited in $before samples during the slide, 0 of $n after it ended"; fi
+}
+ends() { sh_ "grep -c \"PowosPageSlide.*end (\" /data/local/tmp/fd-log.txt"; }
 
 key=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$PKG\\//.test(a.key))||{}).key||'ERR not in the list'")
 case $key in a:$PKG/*) ;; *) fail "Calculator's key: $key" ;; esac
@@ -151,6 +170,9 @@ slid() {
   echo "slide $1: ${l:-none}" >>"$OUT/log.txt"
   [ "$l" != "$SLID" ] && [ -n "$l" ] || fail "$1: the window didn't slide with the page (no PowosPageSlide end line)"
   SLID=$l
+  # The lag's parts (PageSlide.kt): how long the windows stood still for their leashes, how late home's moves and
+  # its settle came - each is how far the windows trail the page.
+  echo "$1 timing: $(echo "$l" | sed -n 's/.*\(leash after.*\)/\1/p')" | tee -a "$OUT/log.txt"
   case $l in *"(landed)"*) ;; *) fail "$1: the slide didn't land: $l" ;; esac
   ms=$(echo "$l" | sed -n 's/.* after \([0-9]*\) ms: \([0-9]*\) frames.*/\1/p'); fr=$(echo "$l" | sed -n 's/.* ms: \([0-9]*\) frames.*/\1/p')
   [ -n "$ms" ] && [ -n "$fr" ] && [ "$ms" -gt 0 ] || fail "$1: unreadable slide line: $l"
@@ -158,8 +180,9 @@ slid() {
 }
 SLID=
 
-swipe -1; chk swipe2
+E0=$(ends); swipe -1; chk swipe2
 slid "swipe to page 2"
+flash "swipe to page 2" "$E0"
 "$T/shot.sh" "$OUT/2-page2-hidden.png"
 [ "$(onpage)" = 1 ] && [ "$(vis)" = visible=false ] && [ "$(away)" = true ] && pass "swiped to page 2: hidden" \
   || fail "on page 2: page $(onpage), $(vis), away=$(away); $(ctx)"

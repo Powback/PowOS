@@ -105,10 +105,13 @@ function slideFollow(dx: number | null) {
   if (!f?.slide) return;
   if (dx == null) {
     // The finger let go: settlePages sets the page right after the drag ends; read it once both are in.
-    if (slide === "on") queueMicrotask(slideSettle);
+    // Its time now: the track's settle starts in this frame, and the host runs its curve from then (PageSlide.settle).
+    const at = Date.now();
+    if (slide === "on") queueMicrotask(() => slideSettle(at));
     return;
   }
-  if (slide === "on") return void f.slide("move", dx).catch(() => {});
+  // t: when the track was there (the host logs how late each move came - the windows' lag behind the page).
+  if (slide === "on") return void f.slide("move", { x: dx, t: Date.now() }).catch(() => {});
   slideStart(dx);
 }
 
@@ -149,12 +152,12 @@ function trackCurve(): { ms: number; curve?: number[] } {
 }
 
 /** The track's settle and the desktop change after it. */
-function slideSettle() {
+function slideSettle(at: number) {
   slide = "off";
   const { ms, curve } = trackCurve();
   const hide = hidden();
   sent = hide.join();
-  powos.floating?.slide?.("settle", { to: (slideFrom - page.value) * pagesWidth(), ms, curve, hide }).catch(() => {
+  powos.floating?.slide?.("settle", { to: (slideFrom - page.value) * pagesWidth(), ms, curve, hide, at }).catch(() => {
     // An app without the slide: the change as before, once the page has landed.
     setTimeout(() => powos.floating?.desktop(hide).catch(() => (sent = null)), ms);
   });

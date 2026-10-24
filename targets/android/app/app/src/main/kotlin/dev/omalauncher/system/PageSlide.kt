@@ -60,7 +60,12 @@ object PageSlide {
     ): Boolean =
         when (a.getString(0)) {
             "start" -> start(context, a.getJSONObject(1), d)
-            "move" -> true.also { move((a.getDouble(1) * d).toFloat()) }
+            "move" ->
+                true.also {
+                    val m = a.optJSONObject(1)
+                    m?.let { sent(it.optLong("t")) }
+                    move(((m?.getDouble("x") ?: a.getDouble(1)) * d).toFloat())
+                }
             "settle" -> true.also { settle(a.getJSONObject(1), d) }
             else -> true.also { cancel("home") }
         }
@@ -82,7 +87,23 @@ object PageSlide {
         val c = o.optJSONArray("curve")?.let { j -> FloatArray(j.length()) { j.getDouble(it).toFloat() } }
         val h = o.optJSONArray("hide")
         val hide = (0 until (h?.length() ?: 0)).map { h!!.getInt(it) }.toSet()
-        settle((o.getDouble("to") * d).toFloat(), o.optLong("ms", 280), c, hide)
+        settle((o.getDouble("to") * d).toFloat(), o.optLong("ms", 280), c, hide, o.optLong("at"))
+    }
+
+    // Evidence for the lag (logged at the end): how late home's moves come (its Date.now() at the move vs ours), how
+    // long the leashes took (the windows stand still until then), how late the settle's message came.
+    private var lateSum = 0L
+    private var lateMax = 0L
+    private var lateN = 0
+    private var readyAfter = -1L
+    private var settleLate = -1L
+
+    private fun sent(t: Long) {
+        if (t <= 0) return
+        val late = (System.currentTimeMillis() - t).coerceAtLeast(0)
+        lateSum += late
+        lateN++
+        if (late > lateMax) lateMax = late
     }
 
     /**
@@ -129,6 +150,11 @@ object PageSlide {
         wins = list
         frames = 0
         startedAt = SystemClock.uptimeMillis()
+        lateSum = 0
+        lateMax = 0
+        lateN = 0
+        readyAfter = -1
+        settleLate = -1
         hide = null
     }
 
@@ -157,7 +183,10 @@ object PageSlide {
         list: List<Win>,
     ): Boolean {
         val s = TaskLeash.Session(context, list.map { it.id }, "page slide", TaskLeash.SLIDE_MODES)
-        s.onReady = { ok -> if (session === s && ok) draw() else if (session === s) cancel("no leash") }
+        s.onReady = { ok ->
+            if (session === s) readyAfter = SystemClock.uptimeMillis() - startedAt
+            if (session === s && ok) draw() else if (session === s) cancel("no leash")
+        }
         // WM's bounds where each window is on the glass now (a real change for each: an unchanged task isn't in the
         // transition, so it gets no leash); another page's window comes up from under home in the same transition.
         val started =
@@ -185,13 +214,16 @@ object PageSlide {
 
     /**
      * The finger let go: the track goes to [to] (screen px; 0 = the page it started on, -width = the next) over [d]
-     * ms on cubic-bezier [c]; then [hidden] (home's hide list for the page it lands on) is committed.
+     * ms on cubic-bezier [c]; then [hidden] (home's hide list for the page it lands on) is committed. [at]: home's
+     * Date.now() when its track's settle began - the curve runs from then, not from when this message came (it came a
+     * main-thread hop or more later, and the windows trailed the page all through the settle and landed after it).
      */
     fun settle(
         to: Float,
         d: Long,
         c: FloatArray?,
         hidden: Set<Int>,
+        at: Long = 0,
     ) {
         if (session == null) {
             // Nothing slid (no leash): the change as before, but once the page has landed, not under its settle.
@@ -203,8 +235,11 @@ object PageSlide {
         ms = d.coerceIn(0, 2000)
         if (c != null && c.size == 4) curve = c
         hide = hidden
-        settleAt = SystemClock.uptimeMillis()
-        Choreographer.getInstance().postFrameCallback(tick)
+        val late = if (at > 0) (System.currentTimeMillis() - at).coerceIn(0, ms) else 0
+        settleLate = late
+        settleAt = SystemClock.uptimeMillis() - late
+        // This frame already where the track is now, not one frame later.
+        tick.doFrame(System.nanoTime())
     }
 
     private val tick =
@@ -262,11 +297,22 @@ object PageSlide {
         val gone = wins.filter { it.id in hidden || (why != "landed" && it.rel != 0) }.map { it.id }.toSet()
         resetBars(gone)
         s.hidden = gone
+        // The windows left on another page go under home in the transition's own finish change (what a minimise
+        // does), the same moment their leash is hidden: before, only their bounds went in it, WM showed them again as
+        // it finished and the minimise came a transition later - the old page's windows flashed on the new one.
         s.finish(wins.associate { it.id to Rect(it.bounds) }) { wct, token ->
-            for (w in wins) token(w.id)?.let { TaskLeash.setBounds(wct, it, w.bounds) }
+            for (w in wins) {
+                val tok = token(w.id) ?: continue
+                TaskLeash.setBounds(wct, tok, w.bounds)
+                if (w.id in gone) TaskLeash.reorder(wct, tok, false)
+            }
         }
         if (gone.isNotEmpty()) reshowBars(wins.filter { it.id in gone })
-        Log.i(TAG, "end ($why) after ${SystemClock.uptimeMillis() - startedAt} ms: $frames frames, x $x, hidden ${gone.ifEmpty { "none" }}")
+        Log.i(
+            TAG,
+            "end ($why) after ${SystemClock.uptimeMillis() - startedAt} ms: $frames frames, x $x, hidden ${gone.ifEmpty { "none" }}, " +
+                "leash after $readyAfter ms, moves late avg ${if (lateN > 0) lateSum / lateN else -1} max $lateMax ms ($lateN), settle late $settleLate ms",
+        )
         wins = emptyList()
     }
 
