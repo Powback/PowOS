@@ -168,9 +168,17 @@ def _elapsed_minutes(inp, cache_path):
     return (datetime.datetime.now(datetime.timezone.utc) - start).total_seconds() / 60.0
 
 
+def _is_subagent(inp):
+    """Budgets are for subagents only: the user's own sessions and the manager are long-lived by design.
+    A subagent's transcript lives under <session>/subagents/."""
+    return "/subagents/" in (inp.get("transcript_path") or "")
+
+
 def _time_notice(inp, seen, new_seen, cache_path):
     """Wall-clock budget (the user: "aim for max 5 min per agent per task"). At 4 min: once, land what
     works now. From 5 min: every call, land NOW - never deduped, same as the hard 150k context notice."""
+    if not _is_subagent(inp):
+        return None
     mins = _elapsed_minutes(inp, cache_path)
     if mins is None:
         return None
@@ -192,7 +200,7 @@ def _ctx_notice(inp, seen, new_seen):
     past 150k). Past 150k: every call. 120k-150k: once per 20k bucket (deduped via the shared seen set,
     keyed by this session so a fresh session starts its own count)."""
     tpath = inp.get("transcript_path")
-    if not tpath:
+    if not tpath or not _is_subagent(inp):
         return None
     ctx = _latest_usage(tpath)
     if ctx is None or ctx < 120_000:

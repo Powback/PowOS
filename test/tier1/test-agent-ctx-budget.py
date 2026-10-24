@@ -42,19 +42,31 @@ def usage_line(input_tokens, cache_read=0, cache_creation=0):
 
 
 class ContextBudgetTests(unittest.TestCase):
+    def test_main_session_gets_no_budget_notes(self):
+        """The user's own sessions and the manager are long-lived: no context or time budget notes."""
+        path = os.path.join(self.tmp, "main.jsonl")
+        with open(path, "w") as f:
+            f.write(usage_line(160_000) + "\n")
+        out = self.run_hook(path)
+        self.assertNotIn("budget", out)
+        self.assertNotIn("[time]", out)
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.home = os.path.join(self.tmp, "home")
         os.makedirs(self.home, exist_ok=True)
         self.cwd = os.path.join(self.tmp, "worktree")
         os.makedirs(self.cwd, exist_ok=True)
+        # Budgets apply to subagents only: their transcripts live under <session>/subagents/.
+        self.sub = os.path.join(self.tmp, "sess", "subagents")
+        os.makedirs(self.sub, exist_ok=True)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def write_transcript(self, name, *ctx_tokens):
         """One line per ctx value, in order - the hook must use the LAST one (the latest assistant msg)."""
-        path = os.path.join(self.tmp, name)
+        path = os.path.join(self.sub, name)
         with open(path, "w") as f:
             for ctx in ctx_tokens:
                 f.write(usage_line(ctx) + "\n")
@@ -64,7 +76,7 @@ class ContextBudgetTests(unittest.TestCase):
         """A transcript whose FIRST entry's timestamp is `minutes_ago` minutes before real now (the
         wall-clock budget is measured from that first entry) - a second, later line is low on context
         so only the time budget notice can fire, never the context one."""
-        path = os.path.join(self.tmp, name)
+        path = os.path.join(self.sub, name)
         first_ts = (datetime.datetime.now(datetime.timezone.utc)
                     - datetime.timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         with open(path, "w") as f:
@@ -208,7 +220,7 @@ class ContextBudgetTests(unittest.TestCase):
 
     # -- reads only the TAIL, so this stays fast even on a very large transcript -----------------------
     def test_reads_only_the_tail_of_a_huge_transcript(self):
-        path = os.path.join(self.tmp, "huge.jsonl")
+        path = os.path.join(self.sub, "huge.jsonl")
         with open(path, "w") as f:
             for _ in range(2000):
                 f.write(json.dumps({"type": "assistant", "message": {"usage": {
