@@ -382,6 +382,16 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
 - Not on the emulator: the Linux session (rootfs 6+ GB unpacked, KWin on KGSL/Turnip; no room in the 12 GB budget),
   OnePlus framework behaviour (OxygenOS's flexible windows, its 31-float blur regions), real fps, the physical cover
   screen, the mic. A PASS there is not a PASS for those.
+- How emu.sh works (hand-off): AVD powos-open (~/.android/avd, android-36 google_apis arm64, serial emulator-5584),
+  headless, software GL, started from snapshot `powos-ready` with nothing saved on stop. `start` = boot or reuse,
+  restart if Android is wedged/offline (cmd package fails), build origin's tip if the emulator runs another commit
+  (warm builder PUBLISH=0, never android-app-dev/output; commit in /data/local/tmp/powos-emu-commit), grants, then
+  wait for home's `window.__powosAlive`. `create` re-makes everything (~10 min): sdkmanager runs in the
+  android-builder image (the Mac has no Java), su from tools/emu/su.c (NDK in powos-gradle-warm), priv-app +
+  allowlist + recents RRO on remounted /system, persist.powos.root=1, freeform on, SELinux permissive, test client.
+  Real size ~14.4 GB: the emulator forces 4 GB RAM into the snapshot. adb waits are bounded (120 s). The phone may
+  also be on the Mac's USB: always `adb -s emulator-5584`. Logs: ~/.cache/powos-emu/emulator.log,
+  ~/.cache/powos-verify-queue/emu/runner.log.
 
 ## Where things live
 - Shell: shell/ (Preact+TS). Pages = modes (`index.html?mode=lock|shade|assist|glasses`, home = no mode). Bridge
