@@ -158,7 +158,7 @@ mode_shell() {
   bars=$(sh_ "dumpsys window windows" | grep -cE "Window #.*PowosWindowFrame|Window #.*powos.*frame" || true)
   log "PowOS frame windows: $bars (window tasks: $(tasks | wc -l | tr -d ' '))"
   [ "${bars:-0}" -le "$(tasks | wc -l | tr -d ' ')" ] && pass "one PowOS title bar at most per window task" || fail "more PowOS title bars ($bars) than window tasks"
-  read -r l t r b <<<"$(sh_ "am stack list | grep -E \"taskId=$KT[^0-9]\"" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ')"
+  read -r l t r b <<<"$(sh_ "am stack list | grep -E \"taskId=${KT}[^0-9]\"" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ')"
   c0=$(field "$W" 2); "$T/shot.sh" "$OUT/shell-kate.png" >/dev/null 2>&1
   typed $(( (l + r) / 2 )) $(( (t + b) / 2 )); chk type
   kwin_q typed >/dev/null; W=$(win typed kate)
