@@ -38,22 +38,26 @@ TOL=${TOL:-3}
 # as pre-rotated it showed "1707x1360 for a 1360x1708 window", 2026-10-24).
 sfrow() { sh_ "dumpsys SurfaceFlinger" | sfrow_of "$1"; }
 # sfrow_of <layer name part>: the same from a SurfaceFlinger dump on stdin.
-sfrow_of() { awk -v p="$1" -v W="$W" -v H="$H" '
+# Columns from the table's own header (OxygenOS has one more than AOSP's, e.g. the emulator: Disp Frame is the 6th
+# field there, the 5th here); the phone's places when no header is seen.
+HWCCOLS='BEGIN {dc = 6; cc = 7; tc = 5}
+  on && /Disp Frame/ {n = split($0, h, "|"); for (i = 1; i <= n; i++) {if (h[i] ~ /Disp Frame/) dc = i; if (h[i] ~ /Source Crop/) cc = i; if (h[i] ~ /Transform/) tc = i}; next}'
+sfrow_of() { awk -v p="$1" -v W="$W" -v H="$H" "$HWCCOLS"'
   /\(active\) HWC layers:/ {on=1; next} /HWC layers:/ {on=0}
-  on && want {n=split($0, f, "|"); if (n >= 7) {
-    split(f[6], d, " "); split(f[7], c, " "); cw = int(c[3] - c[1] + 0.5); ch = int(c[4] - c[2] + 0.5)
+  on && want {n=split($0, f, "|"); if (n >= cc) {
+    split(f[dc], d, " "); split(f[cc], c, " "); cw = int(c[3] - c[1] + 0.5); ch = int(c[4] - c[2] + 0.5)
     # The crop is in the BUFFER: a buffer the app pre-rotated for the panel (Transform 0: HWUI apps, home) reads
     # turned against the screen, one SurfaceFlinger turns (ROT_90/270: the SurfaceView of a Linux window, its consumer
     # draws upright) reads as the screen does. Swapped only when exactly one of the two turns it.
-    t = (f[5] ~ /ROT_90|ROT_270/) ? 1 : 0; sw = (rot != t)
+    t = (f[tc] ~ /ROT_90|ROT_270/) ? 1 : 0; sw = (rot != t)
     if (rot) print W - d[4], d[1], W - d[2], d[3], (sw ? ch : cw), (sw ? cw : ch); else print d[1], d[2], d[3], d[4], (sw ? ch : cw), (sw ? cw : ch)
     exit } }
   on && !seen && /HomeShell/ {seen=1}
   on && index($0, p) {want=1}
   END {}' rot=$SFROT | xargs; }
 # The panel turned: home's own full-screen layer is H wide there (raw HWC Disp Frame right edge).
-SFROT=$(sh_ "dumpsys SurfaceFlinger" | awk -v W="$W" -v H="$H" '/\(active\) HWC layers:/ {on=1; next} /HWC layers:/ {on=0}
-  on && want {n=split($0, f, "|"); if (n >= 7) {split(f[6], d, " "); print (W != H && d[3] == H && d[4] == W) ? 1 : 0; exit}}
+SFROT=$(sh_ "dumpsys SurfaceFlinger" | awk -v W="$W" -v H="$H" "$HWCCOLS"'/\(active\) HWC layers:/ {on=1; next} /HWC layers:/ {on=0}
+  on && want {n=split($0, f, "|"); if (n >= cc) {split(f[dc], d, " "); print (W != H && d[3] == H && d[4] == W) ? 1 : 0; exit}}
   on && /HomeShell/ {want=1}')
 SFROT=${SFROT:-0}
 log "HWC frames in the panel's orientation turned: $SFROT"
