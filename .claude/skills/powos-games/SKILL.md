@@ -344,3 +344,15 @@ out/pkgs fex-emu/gtk2) only in powos-multiplatform/bf-fast (f76); answer.sh is i
 Next: (1) dead-link launches now take Steam's 9-19 s backoff: keeping a frozen Steam's CM link alive is a unified-sleep
 decision (manager); (2) powos-open-task should raise Steam's main window when a launch logs "waiting for user
 response" with no Steam Dialog window; (3) Desk Job = a real ShowInterstitials notice, separate.
+
+## Latest hand-off (fps)
+- State 2026-10-24: no valid fps number yet. The 03:58 "low fps" evidence was Broforce (no APP=) measured with the
+  screen off: no task surface, so no frame callbacks and Xwayland forced ~2 commits/s. KWin's live task path does send
+  callbacks (0013 render -> framePainted); the "no callbacks for exported windows" hypothesis is rejected.
+- Landed: bf-pacing INVALID unless the game is on screen; fits 300 s (phone-side waits); prints xwl commits/forced +
+  kwin.txt; full-screen tasks FLAG_KEEP_SCREEN_ON (APK, ships after the service resumes).
+- Gotchas: toybox grep has no BRE `\|`; each adb.sh call ~2.5 s; queue fps jobs with `env APP=<id>`; the runner
+  doesn't keep the screen on through long windows.
+- Next: read jobs 20261024-041624-8926 (MFP) and -041626-9196 (Broforce). Low fps with few forced commits = CPU/GPU
+  (OPlus cluster caps, game_opt game_pid=-1; Xwayland 2-3 copies/frame; xalia). Mostly forced while on screen = a real
+  KWin callback gap: separate kwin patch after the in-flight 0025s. INVALID every night = keep the screen on in the runner.
