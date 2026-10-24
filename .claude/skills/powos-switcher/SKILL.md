@@ -411,3 +411,15 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   worktree needs out/powos-rootfs.tar.gz symlinked from powos-multiplatform before `build-pkgs.sh kwin` (f87).
   The checks install the newest kwin pkg from this or a sibling worktree: keep popup-dock's out/pkgs until they ran.
 - Open: X11 override-redirect menus (Steam) place themselves and still clip.
+
+## Latest hand-off (Linux session)
+- 2026-10-24: logout (`android-request power logout`) was silently lost: two FileObservers on the run dir share one
+  inotify watch (last started gets every event; any stopWatching ends both). Fixed by engine DirWatch (79b0867f), used
+  by AndroidRequests, MainActivity's focused-window watch and widgets' file(). Likely the 22:42 trigger, not measured;
+  confirm: close the desktop task, `android-request socket-test`, socket-test.log must update.
+- Rooted logout path: power() kills the app -> Restarter -> MainActivity -> SessionService -> new `su` session;
+  powos-rooted-session kills the old pgid. A manual logout brought up a new KWin in < 45 s.
+- Checks: verify/kwin-up.sh (kwin_install / kwin_restart / kwin_up MIN, gate 6.7.5-3.28) in linux-session,
+  linux-touch, steam-input. Queued: linux-session (--close), linux-touch LEASH=asis (--close), steam-input.
+- Open: X11 taps on 3.28 (0022) unproven; floating-windows PASS also needs Dolphin + Steam typing in a recording;
+  logout brings the Plasma desktop to front (web-shell-only mode may not want it).
