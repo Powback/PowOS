@@ -108,13 +108,14 @@ bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]
 # (x 227, left of the window) clamped a leftward swipe to 207 px - under home's quarter-width turn and its flick
 # speed, so home rightly stayed on page 1.
 freept() {
-  "$T/cdp.sh" eval home "(()=>{const b='$1'.split(' ').map(Number),r=devicePixelRatio,d=$2,len=$3,W=innerWidth*r;let best=null,room=-1;for(let y=.2;y<=.9;y+=.05)for(let x=.1;x<=.9;x+=.04){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.app,.panel,.widget,.island,.owl,button,a,input,.bar,.bottom-bar,.dock,[data-key]'))continue;const m=d<0?px-20:W-20-px;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()" 2>&1 | tr -d '"\r' | tail -1
+  "$T/cdp.sh" eval home "(()=>{const b='$1'.split(' ').map(Number),r=devicePixelRatio,d=$2,len=$3,W=innerWidth*r;let best=null,room=-1;for(let y=.15;y<=.92;y+=.03)for(let x=.04;x<=.96;x+=.02){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.app,.panel,.widget,.island,.owl,button,a,input,.bar,.bottom-bar,.dock,[data-key]'))continue;if(px<60||px>W-60)continue;const m=d<0?px-20:W-20-px;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()" 2>&1 | tr -d '"\r' | tail -1
 }
 # A real horizontal swipe on home from an empty spot: $1 -1 = to the next page (finger leftwards), 1 = back.
 swipe() {
   # The window's box is kept clear only while it shows: on page 2 it's hidden (its bounds still listed), and keeping
   # its box clear there left no spot with room for the swipe back (05:57: 570 px from x 1678).
-  local d=$((W * 35 / 100)) p b=; [ "$(vis)" = visible=true ] && b=$(bounds); p=$(freept "$b" "$1" "$d"); [ "$p" != none ] && [ -n "$p" ] || { echo "ENV: no empty spot on page $(($(onpage) + 1)) to swipe from - stopping"; exit 5; }
+  local d=$((W * 30 / 100)) p b=;  # 30% (680 px of 2268): above the quarter-width turn (+40), and the scan covers the whole page width from the far edge in
+  [ "$(vis)" = visible=true ] && b=$(bounds); p=$(freept "$b" "$1" "$d"); [ "$p" != none ] && [ -n "$p" ] || { echo "ENV: no empty spot on page $(($(onpage) + 1)) to swipe from - stopping"; exit 5; }
   local x=${p% *} y=${p#* }; local to=$((x + $1 * d))
   [ $to -lt 20 ] && to=20; [ $to -gt $((W - 20)) ] && to=$((W - 20))
   # Shorter than home turns a page for (a quarter of its width, no flick): the check's spot, not the product.

@@ -97,7 +97,10 @@ E1=$(edges "$OUT/1-drawer.png"); echo "under the drawer: edge energy $E1" | tee 
 sh_ "logcat -t '$MARK' -s PowosPanelLift:I PowosPanelLift:W" | tail -5 | tee -a "$OUT/log.txt" > "$OUT/lift-log.txt"
 [ "$(lifted open)" = yes ] && pass "drawer open: home's window is stacked over the task area (SurfaceFlinger: $(head -c 160 "$OUT/sf-open-rel.txt" | tr '\n' ' '))" ||
   fail "drawer open but home's window isn't relative to the anchor (sf-open.txt; PanelLift: $(tail -1 "$OUT/lift-log.txt"))"
-grep -q "home over the windows" "$OUT/lift-log.txt" && pass "PanelLift: $(grep "home over the windows" "$OUT/lift-log.txt" | tail -1 | sed 's/.*: //')" || fail "no 'home over the windows' line from PanelLift"
+# The state above (home's surface relative to the anchor, from SurfaceFlinger) is the assertion; the log line is only
+# a note: it is absent when the lift happened before MARK or rolled out of logcat (2026-10-24 20261024-155708-850 FAILed
+# on the missing line while the z-order PASSed).
+grep -q "home over the windows" "$OUT/lift-log.txt" && pass "PanelLift: $(grep "home over the windows" "$OUT/lift-log.txt" | tail -1 | sed 's/.*: //')" || note "no 'home over the windows' line in logcat since the swipe (the z-order above is the check)"
 awk -v a="$E0" -v b="$E1" 'BEGIN{exit !(b < a * 0.6)}' && pass "the window under the drawer is blurred (edge energy $E0 -> $E1)" ||
   fail "the window under the drawer isn't blurred (edge energy $E0 -> $E1; 1-drawer.png)"
 case $st in *over-windows*) pass "home's pages hidden over the window" ;; *) note "home's pages not marked over-windows ($st)" ;; esac
@@ -118,7 +121,7 @@ case $st in shut*) ;; *) fail "Back didn't close the drawer ($st)" ;; esac
 E2=$(edges "$OUT/2-shut.png"); echo "after close: edge energy $E2" | tee -a "$OUT/log.txt"
 awk -v a="$E0" -v b="$E2" 'BEGIN{exit !(b > a * 0.8)}' && pass "the window is sharp again (edge energy $E2, was $E0)" || fail "the window isn't sharp after the drawer closed (edge energy $E2, was $E0; 2-shut.png)"
 [ -n "$(wframe 'PowOS window bar')" ] && pass "its title bar is back" || fail "no title bar after the drawer closed"
-sh_ "logcat -t '$MARK' -s PowosPanelLift:I" | grep -q "home under the windows again" && pass "PanelLift: home under the windows again" || fail "no 'home under the windows again' line"
+sh_ "logcat -t '$MARK' -s PowosPanelLift:I" | grep -q "home under the windows again" && pass "PanelLift: home under the windows again" || note "no 'home under the windows again' line in logcat (the z-order above is the check)"
 
 # 3. The shade over the window.
 sh_ "input swipe $SX 4 $SX $((H * 60 / 100)) 260"; sleep 1.8; chk shade
