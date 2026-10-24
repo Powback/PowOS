@@ -64,6 +64,10 @@ while ls "$E"/*.job >/dev/null 2>&1; do
     task=; close=0; cwd=$ER; rel=0; from=; name=; budget=300; need=; cmd=(); . "$j"
     [ "$rel" = 1 ] && cwd=$ER/$cwd
     n=$(basename "$j" .job); log=$Q/done/$n.log
+    # Nobody is watching the emulator between jobs (unlike the phone, where sleeping is the user's choice): keep its
+    # screen on right before every job, not just at boot - the phone's "never wake the screen" rule in e2e-lib.sh
+    # must never apply here (f72, 2026-10-24).
+    emu wake
     # The ship wait: a job from a commit the emulator's build lacks (pushed after it) gets origin's newer tip first.
     if [ -n "$need" ] && git -C "$ER" cat-file -e "$need^{commit}" 2>/dev/null && ! git -C "$ER" merge-base --is-ancestor "$need" "$ec" 2>/dev/null; then
       verify_tree "$ET" >/dev/null 2>&1 || true; echo "$(date +%T) $n: needs ${need:0:9} - building origin's tip for the emulator"; emu install; ec=$(emu_commit)

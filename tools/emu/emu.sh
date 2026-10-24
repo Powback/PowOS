@@ -16,6 +16,9 @@
 #                          phone) from a clean checkout of it (.claude/worktrees/emu-build) and `adb install -r` it over
 #                          the system copy, as the phone's installs go; its commit goes to /data/local/tmp on the emulator
 #   emu.sh remove          stop, then delete the AVD, its snapshot and the build checkout (the system image stays)
+#   emu.sh wake            the screen kept on, now (queue-emu.sh runs this before each job: nobody is watching the
+#                          emulator, so unlike the phone it must never be left to decide a check can't run because
+#                          its screen slept)
 # Checks run against it with POWOS_DEVICE=emu (tools/phone/adb.sh picks the emulator); the queue's lane:
 # `queue.sh add --dev emu <task> <check> ...` runs at once (tools/phone/verify/queue.sh).
 # Disk: refuses to create or start below EMU_MIN_FREE_GB (default 25) free - the Mac's watchdog mails at 15 GB, and
@@ -49,7 +52,12 @@ free_gb() { df -g "$HOME" | awk 'NR == 2 {print $4}'; }
 space_guard() { local f; f=$(free_gb)
   [ "${f:-0}" -ge "${EMU_MIN_FREE_GB:-25}" ] || die "only ${f} GB free on the Mac (< ${EMU_MIN_FREE_GB:-25} GB): not $1 (the emulator grows; the watchdog mails at 15 GB)" 4; }
 running() { a get-state 2>/dev/null | grep -qx device; }
-booted() { [ "$(a shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; }
+# booted: sys.boot_completed=1 AND the package service actually answers. boot_completed can flip true before
+# PackageManagerService (and friends) finish registering on a snapshot resume - a pm/am/appops call made right then
+# fails ("Can't find service: package"; appops' "getCurrentUserId() on a null object reference"). `install`'s `adb
+# install` hit exactly that right after a reboot-and-retry, killing the whole start ("the emulator didn't start",
+# f73 2026-10-24) and every queued job with it.
+booted() { [ "$(a shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && a shell 'cmd package path android' >/dev/null 2>&1; }
 wait_boot() { local i; for i in $(seq "${1:-300}"); do booted && return 0; sleep 1; done; die "no boot within ${1:-300} s (log: $STATE/emulator.log)"; }
 emu_commit() { a shell cat "$COMMIT_FILE" 2>/dev/null | tr -d '\r'; }
 tip() { git -C "$REPO" fetch -q origin worktree-powos-multiplatform 2>/dev/null; git -C "$REPO" rev-parse origin/worktree-powos-multiplatform; }
@@ -214,6 +222,11 @@ grants_like_phone() {
     pm disable-user --user 0 com.google.android.apps.nexuslauncher >/dev/null 2>&1
     pm disable-user --user 0 com.google.android.as >/dev/null 2>&1; true'
 }
+# stay_awake: the emulator's screen on and staying on. Nobody is looking at it (unlike the phone, whose checks must
+# NEVER wake the screen - a real person may be asleep next to it): the emulator lane owns the opposite rule, and
+# must enforce it itself rather than trust a setting baked into the snapshot to survive every reboot/reset (f72,
+# 2026-10-24: an emulator check SKIPped rc 3 - "the screen isn't awake" - because it hit the PHONE's don't-wake rule).
+stay_awake() { a shell 'svc power stayon true; input keyevent KEYCODE_WAKEUP' >/dev/null 2>&1; }
 testwin() {
   local apk; apk=$("$here/testwin/build.sh") || die "the test window client didn't build"
   a install -r "$apk" >/dev/null || die "the test window client didn't install"
@@ -229,9 +242,21 @@ install() {
 # home_ready: home's page booted (window.__powosAlive, as ship-apk waits for) - right after an install or a snapshot
 # load the page takes 10-20 s on the software renderer, and a check started before read errors as home's state (the
 # layout hash at its start was an error's, "home layout CHANGED", 2026-10-24). 120 s at most.
-home_ready() { local i
+# "alive" isn't "ready": the page can answer before its OWN layout (bottom bar, dock) has actually rendered - a
+# check that launches an app right then gets a task, but WindowFrames gives it no title bar yet ("no title bar to
+# maximise from", home's bar unmeasurable, f71 2026-10-24: the first job right after an install/boot raced this).
+# So also wait for the bar to be a real rect, unchanged across two reads 1.5 s apart (home stopped moving).
+BARSEL='[...document.querySelectorAll(".home > .bar, .home > .dock, .home > .bottom-bar")].map(e=>{const r=e.getBoundingClientRect();return [Math.round(r.top),Math.round(r.height)]}).filter(r=>r[1]>0)'
+bar_rect() { POWOS_DEVICE=emu CDP_TIMEOUT_S=5 "$ROOT/tools/phone/cdp.sh" eval home "JSON.stringify($BARSEL)" 2>/dev/null | tr -d '\r'; }
+home_ready() { local i bar1 bar2
   for i in $(seq 60); do
-    [ "$(POWOS_DEVICE=emu CDP_TIMEOUT_S=5 "$ROOT/tools/phone/cdp.sh" eval home 'String(window.__powosAlive)' 2>/dev/null | tr -d '"\r')" = true ] && return 0
+    if [ "$(POWOS_DEVICE=emu CDP_TIMEOUT_S=5 "$ROOT/tools/phone/cdp.sh" eval home 'String(window.__powosAlive)' 2>/dev/null | tr -d '"\r')" = true ]; then
+      bar1=$(bar_rect)
+      if [ -n "$bar1" ] && [ "$bar1" != '[]' ]; then
+        sleep 1.5; bar2=$(bar_rect)
+        [ "$bar1" = "$bar2" ] && return 0
+      fi
+    fi
     sleep 2; done
   say "home's page didn't answer within 120 s"; return 1; }
 # up_to_date: the APK of origin's tip (or EMU_COMMIT) on the emulator.
@@ -267,9 +292,9 @@ start)
     say "the emulator runs but Android doesn't answer (wedged or offline) - starting again from $SNAP"; halt; fi
   if ! running; then space_guard "starting"; boot -snapshot "$SNAP" -no-snapshot-save; fi
   root_up; selinux_permissive
-  up_to_date; grants_like_phone
+  up_to_date; grants_like_phone; stay_awake
   if ! home_ready; then say "starting again from $SNAP"; halt; boot -snapshot "$SNAP" -no-snapshot-save; root_up; selinux_permissive
-    up_to_date; grants_like_phone; home_ready || die "home's page doesn't come up on the emulator ($STATE/emulator.log)"; fi
+    up_to_date; grants_like_phone; stay_awake; home_ready || die "home's page doesn't come up on the emulator ($STATE/emulator.log)"; fi
   say "up on $SERIAL (POWOS_DEVICE=emu)"
   ;;
 stop) if running || pgrep -f -- "-avd $AVD( |$)" >/dev/null; then halt; say "stopped"; else say "not running"; fi ;;
@@ -279,10 +304,11 @@ status)
   ;;
 reset)
   running || exec "$0" start
-  a emu avd snapshot load "$SNAP" | tr -d '\r' | grep -v '^OK$'; wait_dev; wait_boot 120; root_up; selinux_permissive; up_to_date; grants_like_phone; home_ready
+  a emu avd snapshot load "$SNAP" | tr -d '\r' | grep -v '^OK$'; wait_dev; wait_boot 120; root_up; selinux_permissive; up_to_date; grants_like_phone; stay_awake; home_ready
   say "reset to $SNAP"
   ;;
-install) running || die "not running: emu.sh start" 2; root_up; install "${2:-}"; grants_like_phone; home_ready ;;
+install) running || die "not running: emu.sh start" 2; root_up; install "${2:-}"; grants_like_phone; stay_awake; home_ready ;;
+wake) running || die "not running: emu.sh start" 2; stay_awake ;;
 remove)
   halt
   rm -rf "$AVD_HOME/$AVD.avd" "$AVD_HOME/$AVD.ini" "$STATE"

@@ -179,7 +179,18 @@ e2e_setup() {
   window_lock "e2e-$JOURNEY" 120
   trap 'e2e_abort' EXIT
   I0=$(irq)
-  [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" = Awake ] || { echo "the screen isn't awake - not woken (rule); nothing done"; exit 3; }
+  if [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" != Awake ]; then
+    # The "never wake the screen" rule is for the PHONE - someone may genuinely be asleep next to it, and a check
+    # waking it is the bug. Nobody is ever "asleep next to" the emulator: the emulator lane owns the opposite rule
+    # (tools/emu/emu.sh stay_awake, run before every job) and waking it HERE, if it still isn't awake, is correct -
+    # applying the phone's rule to it instead SKIPped a real check for no reason (f72, 2026-10-24).
+    if [ "${POWOS_DEVICE:-phone}" = emu ]; then
+      sh_ "svc power stayon true; input keyevent KEYCODE_WAKEUP"; sleep 1
+      [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" = Awake ] || { echo "FAIL: the emulator's screen won't wake"; exit 1; }
+    else
+      echo "the screen isn't awake - not woken (rule); nothing done"; exit 3
+    fi
+  fi
   TOP=$(sh_ "dumpsys activity activities | grep -m1 topResumedActivity")
   TOPT=$(sed -nE 's/.* t([0-9]+)\}.*/\1/p' <<<"$TOP"); case $TOP in *HomeShell*|*HomeDesktop*|*PowosLock*|"") TOPT= ;; esac
   TASKS0=$(tasks); LIN0=$(us "for p in $E2E_LINUX; do pgrep -x \$p >/dev/null && echo \$p; done; true")

@@ -275,11 +275,14 @@ run)
   board() {  # board <task> <text> [done] [image]: the result on the owner's task (closed too when done=1), as the session user
     # First the check's result (work_check: the module's done rule reads it - "done" means this passed on a shipped
     # build; the job's own vars: n, name, need, qt, r, line), then the step, then the close. An INVALID or SKIP result is
-    # friction too (a check that couldn't say yes or no).
+    # friction too (a check that couldn't say yes or no) - EXCEPT "SKIP phone in use": that's the retry loop (below,
+    # rc=3) having re-queued it up to 5 times and finally giving up for THIS window, which is correct behaviour (the
+    # user was on the phone), not a bug in the check - filing it as flaky-check friction every time someone uses
+    # their own phone was noise, not signal (f50, f56, 2026-10-24).
     local s st=${r%% *} sh=1; shipped "$need" "$qt" || sh=0
     s=$(printf 'powos agents check set %q %q %q --name %q --line %q --need %q --shipped %s >/dev/null 2>&1 || true\n' \
         "$1" "$n" "$st" "${name:-}" "$(printf %s "$line" | cut -c1-280)" "$need" "$sh"
-      if [ "$st" = SKIP ] || [ "$st" = INVALID ]; then
+      if { [ "$st" = SKIP ] || [ "$st" = INVALID ]; } && [ "$r" != "SKIP phone in use" ]; then
         printf 'powos friction add --area verify --kind flaky-check %q --repro %q --evidence %q --by verify-queue >/dev/null 2>&1 || true\n' \
           "check ${name:-$1} was $st: $(printf %s "$line" | cut -c1-100)" "tools/phone/verify/queue.sh add $1 $(printf %s "${cmd[*]}" | cut -c1-200)" "~/.cache/powos-verify-queue/done/$n.log"; fi
       printf 'powos agents task set %q --step %q %s >/dev/null 2>&1 || true\n' "$1" "$2" "${4:+--image $(printf %q "$4")}"
