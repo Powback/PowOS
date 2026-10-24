@@ -82,6 +82,17 @@ public final class SystemIME {
                 super.onCreateInputConnection(outAttrs); // fills outAttrs only
                 return new ForwardingInputConnection(this);
             }
+
+            // Key events (a hardware keyboard, `input text`/keyevent, an IME's unmapped sendKeyEvent) are never
+            // ours: as an EditText this view typed printable keys into its own invisible buffer, so with the
+            // keyboard up (KWin asks for it when a text field takes the focus, which focuses this view) letters
+            // never reached Linux while Ctrl+N - no TextView key - fell through. Unhandled here, every key goes on
+            // to the activity's onKeyDown/onKeyUp, which forwards it exactly as with the surface focused (the
+            // Plasma app, 2026-10-24: plasma-modes plasma 'a tap + keys changed nothing in Kate').
+            @Override
+            public boolean dispatchKeyEvent(KeyEvent event) {
+                return false;
+            }
         };
         hiddenInput.setBackgroundColor(Color.TRANSPARENT);
         hiddenInput.setCursorVisible(false);
