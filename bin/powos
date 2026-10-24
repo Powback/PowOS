@@ -39,7 +39,12 @@ experimental_warn() {
     echo -e "${YELLOW}  See the Feature Status table in CLAUDE.md.${NC}" >&2
 }
 
+# The help text, one function per group of sections (a function stays short enough to read).
 usage() {
+    _usage_core; _usage_sync; _usage_dev; _usage_more
+}
+
+_usage_core() {
     cat << EOF
 PowOS - Install-to-disk daily-driver that dual-boots Windows
 
@@ -97,6 +102,11 @@ Boot / dual-boot:
   cuda enable         Set up the CUDA toolkit in a GPU-passthrough container
   cuda status         Container / toolkit / GPU visibility
 
+EOF
+}
+
+_usage_sync() {
+    cat << EOF
 Controllers (analog stick-drift fixer — any joystick/gamepad):
   controller list                  Detected controllers + deadzone + idle drift
   controller deadzone <dev> <pct>  Set & persist a driver-level deadzone (now)
@@ -146,6 +156,11 @@ Updating — one question: whose code?
   console --live      Live read-only mirrors instead of snapshots
   zones               KZones window snapping: status / list layouts / edit
 
+EOF
+}
+
+_usage_dev() {
+    cat << EOF
 Layers & rollback:
   layers              Show active layers
   layers status       Detailed layer status
@@ -201,6 +216,11 @@ Dev & AI:
   pet say "<text>" [--mood M]   (phone) Speak through the pet on home (powos pet help)
   transcribe FILE|- [--lang xx] [--json]   Speech to text on the GPU server (stt.pow) (powos transcribe --help)
 
+EOF
+}
+
+_usage_more() {
+    cat << EOF
 ═══ EXPERIMENTAL (unvalidated — may not work) ═══════════════════════
 These features are half-built or hardware-only and are NOT part of the
 primary install-to-disk story. They print a warning when run. See the
@@ -474,7 +494,7 @@ cmd_status() {
     echo ""
     # A phone has no USB drive, layers or RAM overlay to report (lib/phone.sh).
     if declare -f powos_is_phone >/dev/null && powos_is_phone; then
-        _status_phone
+        _phone_status
         return
     fi
     _status_layers

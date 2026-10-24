@@ -37,7 +37,8 @@ _phone_android_windows() {
 
 _phone_fex_rootfs() { sed -n 's/.*"RootFS":"\([^"]*\)".*/\1/p' /usr/share/fex-emu/Config.json 2>/dev/null; }
 
-_status_phone() {
+# The phone's whole status report, instead of bin/powos's _status_* sections (the PC report: layers, USB, ...).
+_phone_status() {
     local run bat net
     run=$(_phone_run)
     echo -e "${CYAN}Phone${NC}"

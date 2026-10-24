@@ -5,7 +5,6 @@ bin/powos:_update_self 81
 bin/powos:cmd_build 74
 bin/powos:cmd_build_iso 100
 bin/powos:cmd_rollback 64
-bin/powos:usage 207
 bin/powos-askpass:parse_sudo_argv 63
 bin/powos-firstboot-apply:fb_apply_user 67
 bin/powos-welcome:menu_loop 86
@@ -47,7 +46,7 @@ lib/dev-commands.sh:dev_new_ai 145
 lib/dev-commands.sh:dev_new_docker 106
 lib/dev-commands.sh:dev_new_docker_basic 139
 lib/dev-commands.sh:dev_override 61
-lib/game.sh:cmd_game 93
+lib/game.sh:cmd_game 69
 lib/games-sync.sh:cmd_games_sync 97
 lib/games-sync.sh:gsy_pull 64
 lib/games-sync.sh:gsy_push 77
