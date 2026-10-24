@@ -355,6 +355,13 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
   older tip twice wiped newer shell pushes). Hold all ships (a recovery on the phone): `ship.sh pause` - nothing new
   starts, a ship not yet installing is killed with its whole tree (lock freed, requests kept), an install in flight
   finishes; `ship.sh resume`. Remove it: `tools/phone/ship-deploy.sh remove`. Test: tools/phone/ship-queue-test.sh. What the service runs is below.
+- Two more parts, both after the APK, each tracked by its own last-shipped tip (`$Q/apps-live`, `$Q/rooted-live`)
+  and failed-tip marker (`$Q/failed-apps`, `$Q/failed-rooted`) rather than by closing specific requests: apps
+  (`apps_changed()` - `apps/<app>/` changed since the last apps ship: `apps/build.sh` + `apps/install.sh install`,
+  f105 part 2) and rooted (`rooted_inputs()` - `targets/android/rooted/*` or the other small files
+  `targets/android/rooted/rooted.sh deploy` installs changed since the last rooted ship: `rooted.sh deploy`, f105
+  part 1 - the apps-tier pieces `rooted.sh deploy` also pushes are the apps part above, not this one). Test:
+  `test/tier1/test-ship-rooted.sh`.
 - Notes are only for what the user can SEE. A change they can't (refactor, lint, tooling, "behaviour unchanged")
   ships with `--silent` instead of `--note` (ship.sh request, and what it runs: shell/push.sh, ship-apk.sh, install-app.sh, deploy-note.sh): no
   notification, only a line in comms' quiet log (`powos comms quiet`).

@@ -190,6 +190,14 @@ run)
   # differ between A and B.
   apps_changed() { git diff --name-only "$1" "$2" -- apps 2>/dev/null | sed -n 's#^apps/\([^/]*\)/.*#\1#p' | sort -u |
     while read -r a; do [ -f "apps/$a/powos-app.json" ] && echo "$a"; done; }
+  # rooted_inputs A B: what changed between A and B that targets/android/rooted/rooted.sh deploy installs (the
+  # rooted-mode part only - its own scripts/session + the small PowOS-side pieces it pushes; the apps-tier pieces
+  # it also pushes, lib/apps/bin/powos/the spacetimedb/xwayland/kwin packages, are the "apps" kind above, f105 part
+  # 2 - this is part 1). `deploy`, never `install` (which also re-pushes the rootfs tarball - a human step).
+  rooted_inputs() { git diff --name-only "$1" "$2" -- targets/android/rooted targets/android/session \
+    targets/android/pkgs/fex-emu bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop \
+    lib/powos-tmux-shell config/etc/profile.d/60-powos-picker-key.sh lib/ai/agents lib/ai/comms/comms-mcp.py \
+    tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid 2>/dev/null | grep -v '^lib/ai/sandbox/node_modules/'; }
   # The APK ship runs BESIDE the loop, in its own checkout (it builds from it for minutes while ship_tree resets $SR),
   # so a shell change never queues behind an APK's build or idle wait (2026-10-23: shell fixes waited 25-30 min behind
   # one APK). State in $Q/apk/: tip, pid, rc (written when it ends).
@@ -364,6 +372,31 @@ run)
             echo "$T" > "$Q/failed-apps"
             echo "$(date +%T) ${T:0:9}: apps ship FAILED rc $arc (log $alog) - waiting for a new origin commit"
             mail "ship ${T:0:9} (apps:$achg) FAILED rc $arc: $(tail -1 "$alog" | cut -c1-200) - log $alog on the Mac; fix it on origin, then ship.sh request again"
+          fi
+        fi
+      fi
+      # 4. The rooted-mode deploy (targets/android/rooted/rooted.sh deploy, f105 part 1): rooted_inputs changed
+      #    since the last rooted-mode ship, built... nothing to build, just pushed - after the APK, under the
+      #    same debounce and phone-busy rules as the apps step above.
+      rchg=$(rooted_inputs "$(cat "$Q/rooted-live" 2>/dev/null || echo "$T~1")" "$T")
+      if [ -n "$rchg" ] && ! apk_alive && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-rooted" 2>/dev/null)" != "$T" ]; then
+        if verify_held; then echo $$ > "$Q/wants-phone"
+        elif ship_lock; then
+          echo $$ > "$Q/installing"
+          rn=$(joined ${snotes[@]+"${snotes[@]}"} ${anotes[@]+"${anotes[@]}"}); rn=${rn:-"rooted update"}
+          rlog=$Q/done/$(date +%Y%m%d-%H%M%S)-${T:0:9}-rooted.log
+          echo "$(date +%T) ship ${T:0:9} as a rooted deploy ($rchg) for $who_s" | tee -a "$rlog" >/dev/null
+          rrc=0
+          ( PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 targets/android/rooted/rooted.sh deploy --note "$rn" ) >> "$rlog" 2>&1 || rrc=$?
+          rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
+          if [ $rrc = 0 ]; then
+            echo "$T" > "$Q/rooted-live"; rm -f "$Q/failed-rooted"
+            echo "$(date '+%F %T') ${T:0:9} rooted ($rchg) for $who_s: $rn" >> "$Q/shipped.log"
+            echo "$(date +%T) ${T:0:9}: rooted deploy done ($rchg)"
+          else
+            echo "$T" > "$Q/failed-rooted"
+            echo "$(date +%T) ${T:0:9}: rooted deploy FAILED rc $rrc (log $rlog) - waiting for a new origin commit"
+            mail "ship ${T:0:9} (rooted:$rchg) FAILED rc $rrc: $(tail -1 "$rlog" | cut -c1-200) - log $rlog on the Mac; fix it on origin, then ship.sh request again"
           fi
         fi
       fi
