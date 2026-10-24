@@ -82,11 +82,14 @@ def main():
         'overhead_pct': round(100 * sum(cats[k] for k in OVERHEAD) / tot),
         'wait_pct': round(100 * cats['wait/poll'] / tot),
         'by_category': {k: {'calls': n[k], 'pct': round(100 * v / tot, 1)} for k, v in cats.most_common()},
-        # restarts_needed: calls past 150k context (handbook, Overhead lessons: restart from notes around there) -
-        # how many times this agent should have handed off instead of ploughing on.
+        # restarts_needed/over_budget: calls past 150k context (AGENT-HANDBOOK.md, Efficiency: hand back by 120k,
+        # never resume an agent past 150k) - how many times this agent should have handed off instead of ploughing
+        # on, and whether it happened at all this window (over_budget is what gates a resume: never SendMessage an
+        # agent with over_budget true - start fresh from its last report instead).
         'by_agent': sorted(({'agent': k, 'calls': len(v), 'avg_ctx_k': round(sum(c[0] for c in v.values()) / len(v) / 1e3),
                              'Mtok': round(sum(c[0] for c in v.values()) / 1e6),
-                             'restarts_needed': sum(1 for c in v.values() if c[0] > 150_000)} for k, v in agents.items()),
+                             'restarts_needed': sum(1 for c in v.values() if c[0] > 150_000),
+                             'over_budget': any(c[0] > 150_000 for c in v.values())} for k, v in agents.items()),
                            key=lambda r: -r['Mtok']),
     }
     misses = []
@@ -94,6 +97,9 @@ def main():
     if out['wait_pct'] > 5: misses.append(f"waiting/polling {out['wait_pct']}% > 5%: queue phone checks (verify/queue.sh), no poll loops")
     if out['overhead_pct'] > 15: misses.append(f"coordination {out['overhead_pct']}% > 15%: fewer messages, rebase only to push")
     if out['process_commits_pct'] > 25: misses.append(f"process/tooling commits {out['process_commits_pct']}% > 25%: tooling only when something broke")
+    over = [r['agent'] for r in out['by_agent'] if r['over_budget']]
+    if over: misses.append(f"{len(over)} agent(s) passed the 150k hard budget this window: {', '.join(over[:5])}"
+                            f"{' ...' if len(over) > 5 else ''} - never resume them (SendMessage), start fresh from their hand-back notes")
     out['misses'] = misses
     if a.json:
         json.dump(out, sys.stdout, indent=1); print(); return
@@ -102,7 +108,7 @@ def main():
     for k, v in out['by_category'].items(): print(f"  {k:16} {v['calls']:5} calls {v['pct']:5.1f}%")
     print("top agents by tokens:")
     for r in out['by_agent'][:8]:
-        extra = f"  restarts_needed={r['restarts_needed']}" if r['restarts_needed'] else ''
+        extra = f"  restarts_needed={r['restarts_needed']} OVER_BUDGET" if r['over_budget'] else ''
         print(f"  {r['agent'][:36]:36} {r['calls']:5} calls avg {r['avg_ctx_k']:4}k  {r['Mtok']} Mtok{extra}")
     print("misses:" if misses else "all targets met"); [print('  - ' + m) for m in misses]
 

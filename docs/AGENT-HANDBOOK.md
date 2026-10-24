@@ -7,7 +7,10 @@ for (one line each). Cross-cutting rules live HERE once; expert skills (.claude/
 Route work to the owner's SKILL, not to a long-lived agent: each task is a FRESH agent that loads the owner's skill
 (.claude/skills/<owner>/SKILL.md + .claude/agents/<owner>.md), does that one task, writes what it learned into the
 skill, and exits (see Efficiency). Changing another owner's file: message the owner (with numbers), or make the
-minimal change and tell them.
+minimal change and tell them. Default subagent model is **Sonnet**; reach for Opus only for hard debugging (a root
+cause that resists two Sonnet passes), not routine work - it costs more and the context budget below is the same
+either way. Keep briefs SHORT: point at this handbook and the owner's skill rather than re-explaining what they
+already cover; a brief that restates handbook/skill content is itself a hand-off that will drift from the source.
 
 | area | agent (skill of the same name) |
 |---|---|
@@ -35,10 +38,14 @@ minimal change and tell them.
 ## waiting on the phone, 48% of commits process tooling; `tools/agents/efficiency.py` measures it, targets in its doc)
 - ONE task per agent run: pick up, ship the slice, put what you learned into your skill (facts, <=100 lines, no
   history), the open rest into the board task's note, exit. Never stay alive waiting for mail, a window or a review.
-  A context past ~150k-200k is the signal to write it down and hand off: a hand-back note is <=400 words - what's
-  done, what's left, the exact next command - not a transcript (nofate/br goliath: restarting from a note around
-  there cut cost per match from $1.57 to $0.62). `tools/agents/efficiency.py`'s per-agent `restarts_needed` counts
-  calls that ran past 150k instead of handing off.
+  Context budgets are now MECHANICAL, not something to self-police: **hand back by 120k, never resume an agent past
+  150k.** `.claude/hooks/agent-notices.py` reads your own transcript on every tool call and reminds you on your next
+  tool result - once per 20k over 120k, then on EVERY call once you're over 150k - so you don't have to track the
+  number yourself; the coordinator session gets the exact same reminder. A hand-back note is <=400 words: what's
+  done, what's left, the exact next command, and a **"Friction & missing info" list** (below) - not a transcript
+  (nofate/br goliath: restarting from a note around there cut cost per match from $1.57 to $0.62).
+  `tools/agents/efficiency.py` flags any agent whose calls went past 150k (`over_budget`) in its per-agent report and
+  in its misses.
 - Land with ONE call: `tools/agents/land.sh "msg" -- <paths> [--task <id> --step "..."] [--ship "note"] [--queue
   <check args>]` commits your paths, rebases once and pushes, moves the board task, requests a ship and queues a
   phone/emulator check - then END YOUR TURN. It replaces the old five-call recipe (commit, rebase, push, task set,
@@ -76,7 +83,7 @@ minimal change and tell them.
 ## Overhead lessons (nofate/br, SpaceTimeAI)
 - Cost is dominated by re-reading context, not by doing the work - every call pays again for everything already
   said, so the fix is always "say it fewer times," not "think harder."
-- Restart from a short note around 150k-200k context, not a live hand-off (nofate goliath: $1.57 -> $0.62/match).
+- Restart from a short note around 120k-150k context, not a live hand-off (nofate goliath: $1.57 -> $0.62/match).
 - Notes (mail, finished checks, ship results) ride on the NEXT tool result (the PostToolUse hook) instead of a
   poll or a wait.
 - One `tools/agents/land.sh` call instead of a commit/rebase/push/task/ship/queue sequence.
@@ -102,9 +109,10 @@ minimal change and tell them.
   last pass (state ~/.local/state/powos/board-sweep.json on the phone). The coordinator staffs each item: an owner +
   a fresh agent that claims it. `tools/agents/board-sweep-deploy.sh run` sweeps now; `status` shows its log.
 - Queued phone checks: at most ONE watcher per job (no duplicate until-loops on the same log). If the checks need more than ~10 min (a ship plus a free window), don't idle: hand back with the job ids and what each one proves; whoever continues reads the results (2026-10-23: one agent ran 5 watchers on one job, and another woke 8+ times waiting, wait/poll at 18%).
-- Before EVERY SendMessage that adds work, check the agent's context in the last task notification (subagent_tokens / efficiency.py): past 250k, hand the work to a fresh agent instead (2026-10-23: I gave a 289k agent an urgent regression anyway).
-- Never resume (SendMessage) an agent whose average context is past 250k (`tools/agents/efficiency.py`): start a
-  fresh one with its last report as the brief. Resuming the 365k games agent for a kernel fix cost ~58 Mtok in 4 h.
+- Before EVERY SendMessage that adds work, check the agent's context in the last task notification (subagent_tokens / efficiency.py): past 150k, hand the work to a fresh agent instead (2026-10-23: I gave a 289k agent an urgent regression anyway).
+- Never resume (SendMessage) an agent whose context is past 150k (`tools/agents/efficiency.py`'s `over_budget`): start a
+  fresh one with its last report (including its Friction & missing info list) as the brief. Resuming the 365k games
+  agent for a kernel fix cost ~58 Mtok in 4 h.
 - User asks: the manager records every user turn (asks.jsonl + the user_ask table) and gets its id with the turn; it
   links the task it makes (`task add ... --ask <id>`) or marks it not work (`ask none <id> --reason`).
   `powos agents ask list --untracked` = asks with no task.
@@ -122,6 +130,16 @@ minimal change and tell them.
 - Logged by the tools themselves: ship failures/refusals (ship.sh), shell gate failures at Mac load >= 12 (gate.sh),
   INVALID/SKIP checks (queue.sh), permission refusals of an agent's tool call (powos-agentsd, from the hook).
 - Triage: the sweep's digest lists new/recurring friction by count; the coordinator turns the top ones into fixes.
+- **Every hand-back does a full review of its own friction, before handing back, not just when something broke
+  outright.** Go back over the task and ask: which tool fought me, which check misled me, which piece of info did I
+  have to dig for that should have been one lookup? Log each one with `friction add` as you find it - a tool that
+  refused or was flaky is `--kind refused`/`broken-tool`/`flaky-check`; a piece of info that should have been in a
+  skill, this handbook, or a command's `--help` but wasn't (or was wrong/stale) is `--kind unclear-rule`, area = the
+  skill/doc/command it belongs in; something that took far longer than it should is `--kind slow`.
+- Your hand-back note ends with a **"Friction & missing info" list**: one line per item - what fought you, the
+  friction id you logged it under, and where the info should have lived (skill name, handbook section, or "`<cmd>
+  --help`"). The list is a summary of friction you ALREADY logged with `friction add`, not a substitute for logging
+  it - log first, then list what you logged. Nothing to report = say so ("none this task"), don't skip the section.
 
 ## Reaching the phone (OnePlus Open, rooted)
 - `tools/phone/adb.sh <adb args>`: adb over the VPN (powos-vadb's server, 10.13.13.7:5555) from any session.
