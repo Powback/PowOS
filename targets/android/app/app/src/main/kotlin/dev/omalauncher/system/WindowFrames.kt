@@ -191,7 +191,7 @@ class WindowFrames(
             val own = ownBar(w)
             // Who draws its title bar changed (a launch window became Steam's, KWin's "decor"): a new frame, between touches.
             frames[w.id]?.takeIf { it.ownBar != own && !it.held && !it.dragging }?.let { frames.remove(w.id)?.remove() }
-            frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w), own), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds)
+            frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w), own), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds, spans[w.id])
         }
     }
 
@@ -538,13 +538,42 @@ class WindowFrames(
         var seen: Rect? = null
     }
 
-    /** The windows (top-most first) whose title bar isn't under a window above them: a covered bar would float over it. */
+    /**
+     * The windows (top-most first) whose title bar shows: all of it, or a part no window above covers that's wide enough
+     * for its buttons ([spans]: that part). A bar under a window above would float over it (overlays are over every
+     * task), and dropping every partly covered one left the lower windows bar-less once a raise kept them showing
+     * (moveTaskToFront, 2026-10-24: "i dont see the titlebars for floating windows anymore").
+     */
     private fun uncovered(windows: List<FreeformTasks.Window>): List<FreeformTasks.Window> {
-        val bar = (WindowFrame.BAR_DP * context.resources.displayMetrics.density).toInt()
+        val density = context.resources.displayMetrics.density
+        val bar = (WindowFrame.BAR_DP * density).toInt()
+        val min = (MIN_BAR_DP * density).toInt()
+        spans.clear()
         return windows.filterIndexed { i, w ->
             val strip = Rect(w.bounds.left, w.bounds.top - bar, w.bounds.right, w.bounds.top)
-            windows.take(i).none { Rect.intersects(it.bounds, strip) }
+            val over = windows.take(i).map { it.bounds }.filter { Rect.intersects(it, strip) }
+            if (over.isEmpty()) return@filterIndexed true
+            val free = widestFree(strip.left, strip.right, over) ?: return@filterIndexed false
+            if (free.last - free.first < min) return@filterIndexed false
+            spans[w.id] = free
+            true
         }
+    }
+
+    /** The bars that show only in part ([uncovered]), by task: the screen x span each takes. */
+    private val spans = mutableMapOf<Int, IntRange>()
+
+    /** The widest piece of [left]..[right] that none of [over] covers (end exclusive), or null. */
+    private fun widestFree(
+        left: Int,
+        right: Int,
+        over: List<Rect>,
+    ): IntRange? {
+        var pieces = listOf(left..right)
+        for (o in over) {
+            pieces = pieces.flatMap { p -> listOf(p.first..minOf(p.last, o.left), maxOf(p.first, o.right)..p.last).filter { it.last > it.first } }
+        }
+        return pieces.maxByOrNull { it.last - it.first }
     }
 
     /** Task [id]'s window let go at the screen's [side] edge: home takes it to the next page (shell windows.edge). */
@@ -636,6 +665,9 @@ class WindowFrames(
     companion object {
         private const val TAG = "PowosWindowFrames"
         private const val SETTLE_MS = 80L
+
+        /** The least of a partly covered bar that still shows (its buttons fit), dp: less, it has none ([uncovered]). */
+        private const val MIN_BAR_DP = 96
         private const val LOWERED_MAX = 256
         private const val LATE_MS = 600L
         private const val GRANT_EVERY_MS = 60_000L

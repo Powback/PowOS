@@ -159,7 +159,21 @@ both() {  # $1 how: both tasks visible, $2 the raised one on top (windows.list: 
   local top; top=$(hcall windows.list "[]" "l=>String((l.filter(w=>w.id===$DT||w.id===$KT)[0]||{}).id)")
   log "$1: of Dolphin/Kate, task ${top:-?} is on top"
   [ "$top" = "$2" ] || fail "$1: task $2 asked for the front, task ${top:-?} is on top"
-  pass "$1: task $2 raised, Dolphin and Kate both still visible"
+  bars "$1"
+  pass "$1: task $2 raised, Dolphin and Kate both still visible, each with its title bar"
+}
+# Each showing window keeps its PowOS title bar above its task after a raise (2026-10-24 18:22, "i dont see the
+# titlebars for floating windows anymore": the window left under the raised one lost its bar - a bar partly under the
+# window above was dropped). SurfaceFlinger's composited layers, bottom-most first: the bar's after its task's.
+bars() {
+  local sf id t b
+  sf=$(sh_ "dumpsys SurfaceFlinger" | grep -E -- "- Output Layer" | grep -nE "\((Task=[0-9]+|PowOS window bar [0-9]+)#")
+  for id in "$DT" "$KT"; do
+    t=$(echo "$sf" | grep -m1 "(Task=$id#" | cut -d: -f1); b=$(echo "$sf" | grep -m1 "(PowOS window bar $id#" | cut -d: -f1)
+    log "$1: task $id layer #${t:-none}, its bar #${b:-none}"
+    [ -n "$b" ] || fail "$1: task $id shows with no PowOS title bar on screen"
+    [ -z "$t" ] || [ "$b" -gt "$t" ] || fail "$1: task $id's title bar (layer #$b) is under its task (#$t)"
+  done
 }
 r=$(hcall windows.restore "[$DT]" "v=>String(v)"); log "windows.restore $DT: $r"; both "dock tap on Dolphin (behind Kate)" "$DT"
 r=$(hcall tasks.open "[$KT,'instant']" "v=>String(v)"); log "tasks.open $KT: $r"; both "switcher card of Kate (behind Dolphin)" "$KT"

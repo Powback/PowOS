@@ -60,6 +60,14 @@ sleep 3; chk launch
 D=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1); px() { echo $(( $1 * D / 160 )); }
 read -r BL BT BR BB <<<"$(wframe 'PowOS window bar')"
 [ -n "${BB:-}" ] || fail "no title bar window"
+# On screen and over its own task (2026-10-24: windows showed with no title bar after a raise). Composited layers,
+# bottom-most first: the bar's after its task's.
+SFL=$(sh_ "dumpsys SurfaceFlinger" | grep -E -- "- Output Layer" | grep -nE "\\((Task=[0-9]+|PowOS window bar [0-9]+)#")
+BID=$(echo "$SFL" | grep -m1 -oE "PowOS window bar [0-9]+" | grep -oE "[0-9]+$")
+[ -n "$BID" ] || fail "the title bar isn't composited (SurfaceFlinger output layers)"
+TL=$(echo "$SFL" | grep -m1 "(Task=$BID#" | cut -d: -f1); BLN=$(echo "$SFL" | grep -m1 "(PowOS window bar $BID#" | cut -d: -f1)
+[ -z "$TL" ] || [ "$BLN" -gt "$TL" ] || fail "task $BID's title bar (layer #$BLN) is under its task (#$TL)"
+pass "task $BID's title bar is on screen, over its task"
 BH=$((BB - BT)); BDP=$((BH * 160 / D))
 echo "bar window: ${BH} px = ${BDP} dp (density $D)" | tee -a "$OUT/log.txt"
 [ "$BDP" -ge 24 ] && [ "$BDP" -le 28 ] && pass "the title bar is ${BH} px (${BDP} dp)" || fail "the title bar is ${BH} px (${BDP} dp), want 24-28 dp"

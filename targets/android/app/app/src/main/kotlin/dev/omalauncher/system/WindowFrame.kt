@@ -128,19 +128,34 @@ class WindowFrame(
         return true
     }
 
-    /** The task is at [r] now (its report): the frame there, unless a finger is moving it. */
-    fun place(r: Rect) {
-        if (dragging || (r == bounds && added)) return
-        layout(r)
+    /**
+     * The task is at [r] now (its report): the frame there, unless a finger is moving it. [free]: the screen x span of
+     * its bar row no window above covers (WindowFrames.barSpan) - the bar takes only that, so a window under another
+     * keeps the visible part of its title bar (and its buttons) instead of losing it, and never floats over the window
+     * above (overlays are over every task). Null: the whole width.
+     */
+    fun place(
+        r: Rect,
+        free: IntRange? = null,
+    ) {
+        if (dragging || (r == bounds && free == span && added)) return
+        layout(r, free)
     }
 
-    private fun layout(r: Rect) {
+    /** The bar's x span (screen px) when only part of its row shows ([place]); null: the window's whole width. */
+    private var span: IntRange? = null
+
+    private fun layout(
+        r: Rect,
+        free: IntRange? = null,
+    ) {
         bounds = Rect(r)
+        span = free
         val h = barHeight()
         barParams.apply {
-            x = r.left
+            x = free?.first ?: r.left
             y = r.top - h
-            width = r.width()
+            width = free?.let { it.last - it.first } ?: r.width()
             // Over SystemUI's caption too: its 1 px row at the task's top is an input window that drags the task
             // (OemCaption); under the bar no touch reaches it.
             height = h + OemCaption.CAPTION_PX
