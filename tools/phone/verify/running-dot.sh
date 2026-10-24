@@ -21,11 +21,11 @@ hcall() {
 calcrun() { ev "[...document.querySelectorAll('.app[data-key^=\"a:$PKG/\"]')].map(e=>e.dataset.run||'-').join(',')"; }
 . tools/phone/verify/window-lock.sh
 window_lock running-dot.sh 120
-restore() { sh_ "am force-stop $PKG"; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; }
+restore() { release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; }
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$HOME/.cache/powos-verify.lock"' EXIT
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
-sh_ "am force-stop $PKG"
+claim_pkg $PKG
 t=0; while grep -q running <<<"$(calcrun)" && [ $t -lt 10 ]; do sleep 0.5; t=$((t + 1)); done
 grep -q running <<<"$(calcrun)" && { echo "FAIL running-dot: Calculator stopped before the launch, its mark stays"; exit 1; }
 key=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$PKG\\//.test(a.key))||{}).key||'ERR not in the list'")
@@ -58,7 +58,7 @@ fi
 if ! grep -q '"marked":[1-9]' <<<"$out"; then echo "FAIL running-dot: no app icon marked running (APK without apps.running, or no task)"; exit 1; fi
 if ! grep -q '"anims":0' <<<"$out"; then echo "FAIL running-dot: marked cells animate at rest"; exit 1; fi
 {
-  sh_ "am force-stop $PKG"
+  release_pkgs $PKG
   t=0; while grep -q running <<<"$(calcrun)" && [ $t -lt 20 ]; do sleep 0.5; t=$((t + 1)); done
   grep -q running <<<"$(calcrun)" && { echo "FAIL running-dot: Calculator stopped, its mark stays ($(calcrun))"; exit 1; }
   echo "running-dot: Calculator stopped, its mark went after $((t * 5 / 10)) s"

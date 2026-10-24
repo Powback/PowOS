@@ -17,7 +17,7 @@ L=$HOME/.cache/powos-verify.lock
 PKG=${TEST_APP:-com.oneplus.calculator}
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-restore() { sh_ "am force-stop $PKG; am force-stop com.android.settings; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
+restore() { release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
 . "$here/window-lock.sh"
 window_lock launch-paths.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
@@ -61,7 +61,8 @@ if kg | grep -q true; then
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock" && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock
-sh_ "am force-stop $PKG; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
+claim_pkg $PKG
+sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 hemit system.home null
 CMP=$(sh_ "cmd package resolve-activity --brief $PKG | tail -1")
 case $CMP in */*) ;; *) fail "no launcher activity for $PKG ($CMP)" ;; esac
@@ -77,7 +78,7 @@ case $key in a:$PKG/*) ;; *) fail "Calculator's key: $key" ;; esac
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch: $r"
 sleep 2.5; chk launch1; floats "a dock/drawer/search tap" 1-home-launch
 # (2) a launch without PowOS's options
-sh_ "am force-stop $PKG"; sleep 1
+release_pkgs $PKG; sleep 1
 sh_ "am start -n $CMP >/dev/null"; sleep 3; chk launch2; floats "a plain am start (another app, a notification)" 2-am-start
 # (3) recents: full screen while folded, then unfolded and opened from recents
 id=$(sh_ "am stack list | grep -m1 $PKG" | sed -nE 's/.*taskId=([0-9]+).*/\1/p')

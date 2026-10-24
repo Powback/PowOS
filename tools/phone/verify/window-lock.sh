@@ -55,3 +55,25 @@ window_lock() {
       [ -z "${VERIFY_STATE:-}" ] || "$phone/adb.sh" shell "touch /data/local/tmp/powos-verify-runner" >/dev/null 2>&1; done
   done
 }
+
+# Checks never close the user's apps (rule, 2026-10-24). Needs the script's sh_ (adb shell as root).
+#   claim_pkg <pkg>: <pkg> must NOT be running at check start (a process or an `am stack` task) - else it may be the
+#     user's: print "<pkg> already runs (maybe the user's): not now", exit 3 (the EXIT trap's restore runs; it stops only
+#     claimed packages). Not running: recorded as ours in CLAIMED.
+#   release_pkgs [pkg...]: force-stop the claimed packages (only those among the args, if given). Others are never touched.
+CLAIMED=""
+claim_pkg() {
+  local p=$1
+  case " $CLAIMED " in *" $p "*) return 0 ;; esac
+  if [ -n "$(sh_ "pidof $p")" ] || [ -n "$(sh_ "am stack list" | grep -F "$p")" ]; then
+    echo "$p already runs (maybe the user's): not now"; exit 3
+  fi
+  CLAIMED="$CLAIMED $p"
+}
+release_pkgs() {
+  local p w
+  for p in $CLAIMED; do
+    if [ $# -gt 0 ]; then w=0; for a in "$@"; do [ "$a" = "$p" ] && w=1; done; [ $w = 1 ] || continue; fi
+    sh_ "am force-stop $p"
+  done
+}

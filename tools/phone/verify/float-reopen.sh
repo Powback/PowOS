@@ -14,7 +14,7 @@ L=$HOME/.cache/powos-verify.lock
 PKG=${TEST_APP:-com.oneplus.calculator}
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-restore() { sh_ "am force-stop $PKG; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
+restore() { release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
 . "$here/window-lock.sh"
 window_lock float-reopen.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
@@ -53,7 +53,8 @@ if kg | grep -q true; then
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock" && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock
-sh_ "am force-stop $PKG; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
+claim_pkg $PKG
+sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 # The fix's APK not installed yet (its tasks carry "floats" unfolded): no verdict, again next window (rc 3).
 fl=$(hcall tasks.list "[]" "l=>l.some(t=>t.floats)?'yes':'no'")
 [ "$fl" = yes ] || { echo "the installed APK has no floating-task data in tasks.list ($fl) - not shipped yet, again next window"; exit 3; }

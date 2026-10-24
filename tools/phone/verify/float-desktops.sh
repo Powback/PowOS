@@ -28,7 +28,7 @@ device_state_set() {
 device_state_reset() {
   case "${POWOS_DEVICE:-phone}" in emu) ;; *) sh_ "cmd device_state state reset" ;; esac
 }
-restore() { sh_ "am force-stop $PKG; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; device_state_reset; echo "restored"; }
+restore() { release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; device_state_reset; echo "restored"; }
 . "$here/window-lock.sh"
 window_lock float-desktops.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
@@ -95,7 +95,8 @@ if kg | grep -q true; then
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock" && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock
-sh_ "am force-stop $PKG; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
+claim_pkg $PKG
+sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 hemit system.home null
 n=$(npages); echo "home pages: $n, on $(onpage)" | tee -a "$OUT/log.txt"
 [ "${n:-0}" -ge 2 ] || { echo "ENV: home has one page - nothing to switch between; stopping"; exit 5; }
