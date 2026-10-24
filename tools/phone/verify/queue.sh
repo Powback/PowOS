@@ -20,6 +20,8 @@
 #             TOLD, not guessed, to be Android-only: a literal --android-only in the command, OR (window-max.sh) its
 #             first argument is calc or video - and no argument names a Linux app/stage either way (kate, dolphin,
 #             gwenview, ffplay, steam, kwin). Else phone. Handbook "The emulator lane" has the table, per check.
+#   queue.sh summary [--since HH:MM]            one line per finished job: time, id, PASS/FAIL/SKIP, first FAIL line
+#   queue.sh wait <job-id> [max_s]              block until that job's result; prints its PASS/FAIL/SKIP lines only
 #   queue.sh list                               queued, running, paused (who/why/until, if given) and the last results
 #   queue.sh pause --why TEXT [--until WHEN]    pause the runner (what the pill's tap does, with its own reason) / resume
 #        it (go=all). Records who paused (the caller's worktree/agent, or QUEUE_REQUESTER), why, and optionally until
@@ -339,6 +341,25 @@ list)
   # Filenames sort chronologically (date-prefixed, see `add`'s `j=...`), so ls's default sort IS run order.
   ls "$E"/*.job >/dev/null 2>&1 && { i=0; for ej in $(ls "$E"/*.job | sort); do i=$((i + 1)); echo "    $i) $(basename "$ej" .job)"; done; }
   echo "last results:"; { ls -t "$Q/done" 2>/dev/null | grep "\.log$" | head -8 | while read -r f; do echo "  $f: $(tail -1 "$Q/done/$f")"; done; } || echo "  no results yet" ;;
+summary)  # one line per finished job: finish time, id, PASS/FAIL/SKIP, first FAIL line (<=160 chars). Never grep runner.log.
+  shift; since=; [ "${1:-}" = --since ] && since=${2:-}
+  for lg in $(ls -tr "$Q/done" 2>/dev/null | grep '\.log$'); do
+    f=$Q/done/$lg; id=${lg%.log}; t=$(date -r "$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")" +%H:%M)
+    [ -z "$since" ] || [[ "$t" > "$since" || "$t" == "$since" ]] || continue
+    if grep -qE '^FAIL' "$f"; then v=FAIL; d=$(grep -m1 -E '^FAIL' "$f"); elif grep -qE '^SKIP' "$f"; then v=SKIP; d=$(grep -m1 -E '^SKIP' "$f")
+    elif tail -1 "$f" | grep -qE '^PASS'; then v=PASS; d=; else v=PASS?; d=$(tail -1 "$f"); fi
+    echo "$t $id $v${d:+ ${d:0:160}}"
+  done ;;
+wait)  # queue.sh wait <job-id|prefix> [max_s=1500]: block until that job has a result, print its PASS/FAIL/SKIP lines only.
+  id=${2:-}; max=${3:-1500}; [ -n "$id" ] || { echo "queue.sh wait <job-id> [max_s]"; exit 2; }
+  end=$((SECONDS + max)); id=${id%.job}
+  while :; do
+    lg=$(ls "$Q/done/$id"*.log 2>/dev/null | head -1)
+    if [ -n "$lg" ]; then grep -E '^(PASS|FAIL|SKIP)' "$lg" | cut -c1-200 | head -20 || true; grep -qE '^(PASS|FAIL|SKIP)' "$lg" || tail -1 "$lg"; grep -qE '^FAIL' "$lg" && exit 1; exit 0; fi
+    ls "$Q/$id"*.job "$E/$id"*.job >/dev/null 2>&1 || { echo "queue.sh wait: no queued or finished job '$id' (see queue.sh list)"; exit 2; }
+    [ "$SECONDS" -lt "$end" ] || { echo "queue.sh wait: $id still queued/running after ${max}s - hand back with the job id"; exit 3; }
+    sleep 5
+  done ;;
 run)
   [ -n "$REPO" ] || { echo "queue.sh run: not in a PowOS checkout"; exit 2; }
   # Nothing queued (launchd starts it at load): gone again at once.
@@ -635,5 +656,5 @@ EOS
   wl_sleep "$phone"   # the screen back off if the queue woke it (window-lock.sh)
   rm -f "$Q/runner.pid"; rm -rf "$Q/runner.lock" ;;
 run-emu) . "${QUEUE_COPY:-$here}/queue-emu.sh" ;;
-*) sed -n 2,21p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+*) sed -n 2,23p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

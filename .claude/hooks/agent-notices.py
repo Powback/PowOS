@@ -226,6 +226,13 @@ def _ctx_notice(inp, seen, new_seen):
             f"(<=400 words: {HANDBACK_HINT}) and hand back")
 
 
+def _agent_card():
+    """docs/AGENT-CARD.md of this checkout (the hook lives in .claude/hooks/ of the same tree), or None."""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    with open(os.path.join(root, "docs", "AGENT-CARD.md")) as f:
+        return "[agent-card]\n" + f.read().strip()
+
+
 def main():
     try:
         inp = json.load(sys.stdin)
@@ -250,6 +257,19 @@ def main():
         seen = set()
     new_seen = set(seen)
     notices = []
+
+    # 0. the agent card: ONCE, on a subagent's first tool call, replaces reading the handbook/SKILL for the
+    # generic rules (docs/AGENT-CARD.md). Deduped through the seen-state like every other notice.
+    try:
+        if _is_subagent(inp):
+            card_key = "zcard:" + (inp.get("session_id") or "nosession")
+            if card_key not in seen:
+                new_seen.add(card_key)
+                card = _agent_card()
+                if card:
+                    notices.append(card)
+    except Exception:
+        pass
 
     # 0a. wall-clock budget - checked first (with context) so it's never crowded out (MAX_NOTICES below).
     try:
@@ -331,7 +351,8 @@ def main():
 
     if not notices:
         return
-    text = "\n".join(notices[:MAX_NOTICES])
+    # the card is multi-line and first; it is not one of the MAX_NOTICES one-liners
+    text = "\n".join(notices[:MAX_NOTICES + (1 if notices and notices[0].startswith("[agent-card]") else 0)])
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}}))
 
 

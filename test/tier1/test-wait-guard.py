@@ -137,7 +137,7 @@ class WaitGuardTests(unittest.TestCase):
     def test_non_bash_tool_is_ignored(self):
         payload = {
             "hook_event_name": "PreToolUse",
-            "tool_name": "Read",
+            "tool_name": "Glob",
             "tool_input": {"file_path": "/tmp/x"},
             "transcript_path": SUB_TRANSCRIPT,
             "cwd": "/home/user/pw/some-worktree",
