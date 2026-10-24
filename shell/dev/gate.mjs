@@ -360,8 +360,27 @@ async function overpullHalf() {
         const badge = card.querySelector(".notif-more");
         const op = badge ? Number(getComputedStyle(badge).opacity) : NaN;
         if (!(op > 0.05 && op < 0.95)) fails.push(`${way} half way (k ${k.toFixed(2)}), the top card's +N badge's opacity is ${op} (not between 0 and 1)`);
+        o.headLook(fails, way, k, card);
+        o.half[way] = [...(o.half[way] ?? []), o.topPart(st)];
       }
     };
+  };
+  o.half = {};
+  // The group header look morphs too: the icon's partly faded half way; and the part above the rest (head band + card)
+  // is the height it has settled - no layout change mid-pull, none at the settle ([settled] compares after it).
+  o.headLook = (fails, way, k, card) => {
+    const icon = card.querySelector(".notif-icon");
+    const io = icon ? Number(getComputedStyle(icon).opacity) : NaN;
+    if (icon && !(io > 0.05 && io < 0.95)) fails.push(`${way} half way (k ${k.toFixed(2)}), the top card's icon opacity is ${io} (not between 0 and 1)`);
+  };
+  // What sits above a stack's rest (the head and the top card), in px.
+  o.topPart = (st) => st.querySelector(":scope > .notif-rest").offsetTop; // (not the rect: a folding rest is translated)
+  // After the settle: each stack's [topPart] within 2 px of what it was half way (the layout didn't jump on the commit).
+  o.settled = (fails, way) => {
+    const now = [...document.querySelectorAll(".panel-body.together .notif-stack")].map(o.topPart);
+    (o.half[way] ?? []).forEach((h, i) => {
+      if (now[i] !== undefined && Math.abs(now[i] - h) >= 2) fails.push(`${way}: a stack's top part was ${h.toFixed(1)} px half way and ${now[i].toFixed(1)} px settled (a jump)`);
+    });
   };
   return [];
 }
@@ -430,6 +449,7 @@ async function overpullExpand() {
   const fails = [];
   await o.drag(260, null, o.midPull(fails, "pulling down"));
   o.h = o.under() - o.under0;
+  o.settled(fails, "pulling down");
   if (!document.querySelector(".cc3-list.whole")) fails.push("pulled 260 px further, the rest isn't shown");
   if (o.h < 40) fails.push(`expanded, what's under the control center moved only ${Math.round(o.h)} px`);
   if (o.row() !== o.row0) fails.push(`the first row moved on the expand: ${o.row0} -> ${o.row()}`);
@@ -478,6 +498,7 @@ async function overpullFold() {
     const d = o.under() - from;
     if (Math.abs(d + Math.min(80, o.h)) > 3) fails.push(`folding 80 px, what's under the control center moved ${Math.round(d)} px`);
   }, o.midPull(fails, "folding back up"));
+  o.settled(fails, "folding back up");
   if (document.querySelector(".cc3-list.whole") || o.shown() !== o.n0) fails.push(`pulled up 80 px, still ${o.shown()} toggles shown`);
   if (document.querySelector(".panel-body.together .notif-stack.open")) fails.push("folded, notification stacks stay unfolded");
   list.scrollTop = 0;

@@ -71,32 +71,51 @@ function parts(stack: HTMLElement) {
   };
 }
 
-/** Opening: the rest unfolds in place, the head grows in, the peeking cards fade into the rest. */
-function openPeek(stack: HTMLElement) {
+/** Opening: the rest unfolds in place, the head fades in, the peeking cards fade into the rest. */
+function openPeek(stack: HTMLElement, card: HTMLElement | null) {
   const { rest, head, gap } = parts(stack);
   peekAnim(stack, [{ marginBottom: `${gap}px` }, { marginBottom: "0px" }]);
   peekAnim(rest, [{ gridTemplateRows: "0fr", opacity: 0 }, { gridTemplateRows: "1fr", opacity: 1 }]);
-  peekAnim(head, [{ maxHeight: "0px", opacity: 0, overflow: "hidden" }, { maxHeight: "64px", opacity: 1, overflow: "hidden" }]);
+  peekAnim(head, [{ opacity: 0 }, { opacity: 1 }]);
   peekAnim(stack, [{ opacity: 1 }, { opacity: 0 }], { pseudo: "::before" });
   peekAnim(stack, [{ opacity: 0.6 }, { opacity: 0 }], { pseudo: "::after" });
+  headMorph(card, head);
+}
+
+/**
+ * The top card's group-header look, folded .. group (k 0..1), both ways, no layout: while "peek" the card lays out its
+ * header row (icon, name, time) and the group head is out of flow over the same band (notifications.css), both as tall
+ * as the head row the group look puts above the card - so the settle moves nothing. The icon and name fade, the card's
+ * top edge slides down past the band (clip-path), the time slides from its row to the corner (measured once, now).
+ */
+function headMorph(card: HTMLElement | null, head: HTMLElement | null) {
+  if (!card) return;
+  const band = head?.offsetHeight ?? 0;
+  const time = card.querySelector<HTMLElement>(".notif-time");
+  peekAnim(card.querySelector(".notif-icon"), [{ opacity: 1 }, { opacity: 0 }]);
+  peekAnim(card.querySelector(".notif-app"), [{ opacity: 1 }, { opacity: 0 }]);
+  peekAnim(card, [{ clipPath: "inset(0px -60px -60px -60px)" }, { clipPath: `inset(${band}px -60px -60px -60px)` }]);
+  if (time) {
+    const dy = band + 9 - (time.getBoundingClientRect().top - card.getBoundingClientRect().top);
+    peekAnim(time, [{ transform: "none" }, { transform: `translateY(${dy}px)` }]);
+  }
 }
 
 /** Folding: transforms only (heights measured once, now - laid out open), what follows up by the running offset. */
 function foldPeek(stack: HTMLElement, card: HTMLElement | null) {
   const { rest, head, gap } = parts(stack);
-  const hh = head?.offsetHeight ?? 0;
   const hr = rest?.offsetHeight ?? 0;
   const up = (px: number) => `translateY(${-px}px)`;
-  peekAnim(head, [{ opacity: 0, transform: up(hh) }, { opacity: 1, transform: "none" }]);
-  peekAnim(card, [{ transform: up(hh) }, { transform: "none" }]);
+  peekAnim(head, [{ opacity: 0 }, { opacity: 1 }]);
+  headMorph(card, head);
   peekAnim(rest, [
-    { opacity: 0, transform: up(hh + hr), clipPath: `inset(${hr}px 0px 0px 0px)` },
+    { opacity: 0, transform: up(hr), clipPath: `inset(${hr}px 0px 0px 0px)` },
     { opacity: 1, transform: "none", clipPath: "inset(0px 0px 0px 0px)" },
   ]);
-  peekAnim(stack, [{ opacity: 1, transform: up(hh + hr) }, { opacity: 0, transform: "none" }], { pseudo: "::before" });
-  peekAnim(stack, [{ opacity: 0.6, transform: up(hh + hr) }, { opacity: 0, transform: "none" }], { pseudo: "::after" });
+  peekAnim(stack, [{ opacity: 1, transform: up(hr) }, { opacity: 0, transform: "none" }], { pseudo: "::before" });
+  peekAnim(stack, [{ opacity: 0.6, transform: up(hr) }, { opacity: 0, transform: "none" }], { pseudo: "::after" });
   for (let el = stack.nextElementSibling; el; el = el.nextElementSibling) {
-    peekAnim(el, [{ translate: `0px ${gap - hh - hr}px` }, { translate: "0px 0px" }], { add: true });
+    peekAnim(el, [{ translate: `0px ${gap - hr}px` }, { translate: "0px 0px" }], { add: true });
   }
 }
 

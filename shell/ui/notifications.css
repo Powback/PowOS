@@ -91,7 +91,10 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px 4px 6px;
+  /* (As tall as a card's header row and its gap to the title - the pull's morph relies on it: ccexpand.ts headMorph.) */
+  box-sizing: border-box;
+  height: 23px;
+  padding: 0 4px;
   font: var(--text-small) var(--font);
   color: var(--color-foreground);
   background: none;
@@ -100,7 +103,11 @@
 }
 .notif-fold { flex: none; color: var(--color-muted); }
 /* Inside an open group the head is the group's: each card keeps only its time. */
+/* While a pull drives the stack: the card lays out its header row, the head floats over the same band. */
+.notif-stack.peek > .notif-group-head { position: absolute; top: 0; left: 0; right: 0; z-index: 2; }
+.notif-stack.peek > .notif .notif-title { padding-right: 40px; }
 .notif.in-group .notif-icon, .notif.in-group .notif-app { display: none; }
 .notif.in-group { position: relative; }
 .notif.in-group .notif-head { position: absolute; top: 9px; right: 12px; }
 .notif.in-group .notif-title { margin-top: 0; padding-right: 40px; }
+.notif.in-group .notif-head + .notif-text { margin-top: 0; }

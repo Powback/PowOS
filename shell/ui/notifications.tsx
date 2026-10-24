@@ -298,7 +298,7 @@ function useStackOpen(id: string) {
   }, [peek, shown]);
   // The stack's classes, and whether the top card keeps its folded look ("+N"): folded, or driven by the pull.
   const cls = `notif-stack ${shown ? "open" : ""} ${driven ? "peek" : ""}`;
-  return { open, shown, cls, folded: !open || driven, ref };
+  return { open, shown, driven, cls, folded: !open || driven, ref };
 }
 
 /**
@@ -308,7 +308,7 @@ function useStackOpen(id: string) {
  */
 function Stack({ g }: { g: Group }) {
   const [top, ...rest] = g.items;
-  const { open, shown, cls, folded, ref } = useStackOpen(g.id);
+  const { open, shown, driven, cls, folded, ref } = useStackOpen(g.id);
   if (!rest.length) return <Card n={top} name={g.name !== top.app ? g.name : undefined} />;
   const clearAll = () => g.items.filter((n) => n.clearable).forEach((n) => powos.notifications.dismiss(n.key));
   return (
@@ -323,7 +323,7 @@ function Stack({ g }: { g: Group }) {
       <Card
         n={top}
         name={g.name}
-        class={open ? "in-group" : ""}
+        class={open && !driven ? "in-group" : ""}
         more={folded ? rest.length : 0}
         onTap={open ? undefined : () => toggle(g.id)}
         onDismiss={open ? undefined : clearAll}

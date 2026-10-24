@@ -1276,10 +1276,12 @@ input.folder-title:focus { background: var(--soft-fill); }
 }
 .notif-list:has(> .notif-items > .notif-empty) .notif-items { flex: 1; justify-content: center; }
 .notif { padding: 9px 12px; touch-action: pan-y; user-select: none; flex: none; }
-.notif-head { display: flex; align-items: center; gap: 6px; font-size: var(--text-small); }
+.notif-head { display: flex; align-items: center; min-height: 18px; gap: 6px; font-size: var(--text-small); }
 .notif-icon { width: 18px; height: 18px; border-radius: 5px; }
 .notif-app { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); }
 .notif-title { margin-top: 5px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* (A card with no title: its text keeps the title's gap under the row - the group look drops that gap, ccexpand.ts headMorph.) */
+.notif-head + .notif-text { margin-top: 5px; }
 .notif-text {
   margin-top: 2px;
   color: color-mix(in srgb, var(--color-foreground) 80%, transparent);
