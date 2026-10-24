@@ -65,11 +65,17 @@ def norm_cmd(tool):
 
 def load(path):
     """One pass over the transcript: tool_use calls (in order) joined to their tool_result, plus raw text
-    events for the misled-check scan. Returns (calls, raw_texts) - calls is a list of dicts."""
+    events for the misled-check scan. Also times each call (AGENT-HANDBOOK.md, Efficiency / the user,
+    2026-10-24: model time 661h vs tool time 131h measured across the fleet by walking tool_use/tool_result
+    timestamps in order - same method as efficiency.py's call_timings(), reused here so the two tools agree):
+    `model_s` is the gap between the previous tool_result and this tool_use (credited once per assistant
+    turn - a turn's other, parallel tool_use calls get 0 so the gap isn't counted twice); `tool_s` is this
+    call's own tool_use -> tool_result gap. Returns (calls, raw_texts) - calls is a list of dicts."""
     pending = {}  # tool_use id -> call dict (name, input, msg_id, ctx)
     calls = []
     raw_texts = []
     msg_ctx = {}
+    last_result_ts = None
     with open(path, errors='replace') as f:
         for line in f:
             try:
@@ -77,20 +83,27 @@ def load(path):
             except ValueError:
                 continue
             etype = e.get('type')
+            ts = eff.parse_ts(e.get('timestamp'))
             m = e.get('message') or {}
             if etype == 'assistant':
                 u = m.get('usage') or {}
                 ctx = u.get('input_tokens', 0) + u.get('cache_read_input_tokens', 0) + u.get('cache_creation_input_tokens', 0)
                 mid = m.get('id')
                 msg_ctx[mid] = ctx
-                for x in m.get('content') or []:
+                content = m.get('content') or []
+                turn_tool_uses = [x for x in content if isinstance(x, dict) and x.get('type') == 'tool_use']
+                turn_model_s = (max(0.0, (ts - last_result_ts).total_seconds())
+                                 if turn_tool_uses and ts is not None and last_result_ts is not None else 0.0)
+                for x in content:
                     if not isinstance(x, dict):
                         continue
                     if x.get('type') == 'text':
                         raw_texts.append(redact(x.get('text', ''))[:4000])
                     elif x.get('type') == 'tool_use':
                         c = {'id': x.get('id'), 'name': x.get('name'), 'input': x.get('input') or {},
-                             'msg_id': mid, 'ctx': ctx, 'is_error': None, 'result': ''}
+                             'msg_id': mid, 'ctx': ctx, 'is_error': None, 'result': '',
+                             'issued_ts': ts, 'model_s': turn_model_s, 'tool_s': 0.0}
+                        turn_model_s = 0.0  # only the first tool_use of a turn is charged the gap
                         pending[x.get('id')] = c
                         calls.append(c)
             elif etype == 'user':
@@ -102,6 +115,10 @@ def load(path):
                             if c is not None:
                                 c['is_error'] = bool(x.get('is_error'))
                                 c['result'] = text_of(x.get('content'))
+                                if ts is not None and c.get('issued_ts') is not None:
+                                    c['tool_s'] = max(0.0, (ts - c['issued_ts']).total_seconds())
+                    if ts is not None:
+                        last_result_ts = ts
     for c in calls:  # ctx already set per message id
         c['ctx'] = msg_ctx.get(c['msg_id'], c['ctx'])
     return calls, raw_texts
@@ -250,6 +267,18 @@ def analyze(path, since=''):
     fr_titles = friction_logged(calls)
     fr_status = board_fixed_status(fr_titles)
 
+    # Time: model_s (thinking between a tool_result and the next tool_use) vs tool_s (tool_use -> its own
+    # tool_result), summed from load()'s per-call timing - same method as efficiency.py's call_timings(),
+    # so a number here means the same thing there. time_by_cat is tool_s grouped by eff.cat_of(), which is
+    # the "where the minutes went" breakdown: a category can be cheap in tokens (wait/poll barely shows up
+    # in a ctx_tokens total) and still be most of the wall clock, which is exactly what a busy-wait or a
+    # hand-rolled sleep loop looks like.
+    model_s = sum(c.get('model_s', 0.0) for c in calls)
+    tool_s = sum(c.get('tool_s', 0.0) for c in calls)
+    time_by_cat = collections.Counter()
+    for c in calls:
+        time_by_cat[c['cat']] += c.get('tool_s', 0.0)
+
     tot_ctx = sum(c['ctx'] for c in {c['msg_id']: c for c in calls}.values()) or 0
     return {
         'path': path, 'calls': len(calls), 'ctx_tokens': tot_ctx, 'wasted_tokens': wasted_tokens,
@@ -261,12 +290,20 @@ def analyze(path, since=''):
         'waits': len(waits), 'long_sleeps': [short_cmd(c) for c in long_sleeps],
         'misled': misled[:5],
         'friction': [{'title': t, 'status': fr_status.get(t, 'unknown')} for t in fr_titles],
+        'model_s': round(model_s), 'tool_s': round(tool_s),
+        'sec_per_call': round(tool_s / len(calls), 1) if calls else 0.0,
+        'time_by_cat': [(k, round(v)) for k, v in time_by_cat.most_common(6) if v > 0],
     }
 
 
 def render(d, lines_budget=MAX_LINES):
     out = [f"retro: {os.path.basename(d['path'])} - {d['calls']} calls, {d['ctx_tokens']//1000}k context, "
            f"~{d['wasted_tokens']//1000}k wasted on friction"]
+    if d.get('calls'):
+        top_cat = ', '.join(f"{k} {v}s" for k, v in d.get('time_by_cat', [])[:3])
+        out.append(f"Time: {d.get('model_s', 0)}s model thinking / {d.get('tool_s', 0)}s tool "
+                    f"({d.get('sec_per_call', 0.0)}s/call tool)"
+                    + (f"; where the minutes went: {top_cat}" if top_cat else ""))
     if d['permissions']:
         out.append("permission refusals:")
         for cmd, n in d['permissions']:

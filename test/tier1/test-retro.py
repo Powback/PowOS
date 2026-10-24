@@ -15,18 +15,27 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RETRO = os.path.normpath(os.path.join(HERE, "..", "..", "tools", "agents", "retro.py"))
 
 
+_SECOND = [0]  # a ticking clock, not a fixed timestamp - so model_s/tool_s (real gaps) are non-zero and
+                 # actually exercised, rather than degenerating to 0-0=0 on every call
+
+
+def _tick():
+    _SECOND[0] += 1
+    return f"2026-10-24T00:{_SECOND[0] // 60:02d}:{_SECOND[0] % 60:02d}Z"
+
+
 def msg(mid, tool_uses=None, text=None, usage=None):
     content = []
     if text is not None:
         content.append({"type": "text", "text": text})
     for tu in tool_uses or []:
         content.append({"type": "tool_use", "id": tu["id"], "name": tu["name"], "input": tu["input"]})
-    return json.dumps({"type": "assistant", "timestamp": "2026-10-24T00:00",
+    return json.dumps({"type": "assistant", "timestamp": _tick(),
                         "message": {"id": mid, "usage": usage or {"input_tokens": 100}, "content": content}})
 
 
 def result(tool_use_id, text, is_error=False):
-    return json.dumps({"type": "user", "timestamp": "2026-10-24T00:00",
+    return json.dumps({"type": "user", "timestamp": _tick(),
                         "message": {"content": [{"type": "tool_result", "tool_use_id": tool_use_id,
                                                   "is_error": is_error, "content": text}]}})
 
@@ -101,6 +110,12 @@ class TestRetro(unittest.TestCase):
         self.assertTrue(d["misled"])
         self.assertEqual(len(d["friction"]), 1)
         self.assertIn("gate took 9 minutes", d["friction"][0]["title"])
+        # Time: model_s/tool_s walked from the transcript's own (ticking) timestamps - both must be real,
+        # non-zero numbers, and the per-category wall-clock breakdown must include the long sleep's category.
+        self.assertGreater(d["model_s"], 0)
+        self.assertGreater(d["tool_s"], 0)
+        self.assertEqual(d["sec_per_call"], round(d["tool_s"] / d["calls"], 1))
+        self.assertTrue(any(cat == "wait/poll" for cat, _ in d["time_by_cat"]))
 
     def test_text_digest_is_short_and_redacts_secrets(self):
         out = self.run_retro()
@@ -110,6 +125,8 @@ class TestRetro(unittest.TestCase):
         self.assertIn("[REDACTED]", out)  # the secret command/error must be redacted, not just omitted
         self.assertIn("permission refusals", out)
         self.assertIn("retries", out)
+        self.assertIn("Time:", out)
+        self.assertIn("model thinking", out)
 
     def test_unknown_ref_fails_cleanly(self):
         out = subprocess.run([sys.executable, RETRO, "no-such-agent-id-xyz"],

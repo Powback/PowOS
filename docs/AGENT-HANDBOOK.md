@@ -93,7 +93,11 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
   `until ...; do sleep ...; done`): it's the same polling the hook above already replaces, just written by hand.
   Put the long-running thing in the background and let the PostToolUse hook deliver the result on your NEXT tool
   call instead of blocking a call on it. `tools/agents/retro.py` categorizes this as `wait/poll` either way, so it
-  shows up in the digest whether it was `idle.sh --wait` or a hand-written loop.
+  shows up in the digest whether it was `idle.sh --wait` or a hand-written loop. This is now enforced, not just
+  written down: `.claude/hooks/wait-guard.py` (a PreToolUse hook, subagents only) DENIES a busy spin loop (`do :;`/
+  `do true;`, no sleep - never useful, backgrounded or not) and denies an `until`/`while` sleep loop that isn't run
+  with `run_in_background` (that exact shape, backgrounded, is the correct pattern and is allowed) - 374 transcripts
+  had hundreds of these, many hitting the Bash tool's 10-min cap while just sitting there waiting.
 - Caps: tool output over ~8k chars goes to a file with a 3k head kept inline - read the file for the rest only if
   the head isn't enough (on nofate/br's trial, results over 8k were 23% of all result text, and agents read past
   the head in only 22% of cases: most of that was wasted context). A background job's output rides on your next
@@ -256,6 +260,14 @@ never a hardcoded root.
   file re-read 3+ times - these are a missing skill/handbook line), waits/long sleeps, checks that misled it
   (a FAIL later called "not a real failure"), and the friction it logged itself (+ whether already fixed).
   The agent-id is the transcript's filename minus `agent-`/`.jsonl` (same id efficiency.py's by_agent uses).
+- Both tools now also say WHERE THE TIME WENT, not just tokens: model time (the gap between a tool_result
+  landing and the next tool_use - the model thinking) vs tool time (tool_use -> its own tool_result - the
+  tool actually running), walked from the transcript's own timestamps in order. `efficiency.py`'s by_agent
+  rows carry `model_s`/`tool_s`/`sec_per_call`/`reads_before_edit`/`files_reread`, and its header line prints
+  the fleet totals (`model_time_h` vs `tool_time_h` - measured 2026-10-24 at 661h vs 131h). `retro.py` prints
+  a one-line "Time:" section per agent with the same two numbers plus the top categories by wall-clock
+  (`time_by_cat`) - a category can be cheap in tokens and still be most of the real time, which is exactly
+  what a busy-wait or a hand-rolled sleep loop looks like (see wait-guard.py above).
 - `tools/agents/retro.py --since 4h --all` digests every agent finished in the window, ranked by tokens
   wasted, for a periodic sweep instead of a per-agent one.
 - `tools/agents/retro-apply.md` is the procedure: a short Haiku/Sonnet agent reads the digest, makes the
