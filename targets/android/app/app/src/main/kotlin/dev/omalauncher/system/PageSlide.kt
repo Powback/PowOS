@@ -322,7 +322,7 @@ object PageSlide {
         Log.i(
             TAG,
             "end ($why) after ${SystemClock.uptimeMillis() - startedAt} ms: $frames frames, x $x, hidden ${gone.ifEmpty { "none" }}, " +
-                "leash after $readyAfter ms, moves late avg ${if (lateN > 0) lateSum / lateN else -1} max $lateMax ms ($lateN), settle late $settleLate ms",
+                "leash after $readyAfter ms, moves late avg ${if (lateN > 0) lateSum / lateN else -1} max $lateMax ms ($lateN), settle late $settleLate ms at ${SystemClock.elapsedRealtime()}",
         )
         wins = emptyList()
     }

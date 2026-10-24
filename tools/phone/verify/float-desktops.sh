@@ -123,22 +123,28 @@ swipe() {
   [ $(( (to - x) * $1 )) -ge $((W / 4 + 40)) ] || { echo "ENV: only a $(( (to - x) * $1 )) px swipe fits from $x,$y - stopping (not a product FAIL)"; exit 5; }
   LASTSWIPE="$x,$y -> $to,$y"; echo "swipe $LASTSWIPE" >>"$OUT/log.txt"
   # The flash probe (2026-10-24: "the windows of the previous page appear for a split second" on the new page): on the
-  # device, every SurfaceFlinger composition list from the swipe until 15 samples after the slide's end line (150 at most), each sample "<end lines so far> <layers of
-  # $PKG composited>". A sample taken after the slide's end line that still composites the window = the flash.
-  local e0; e0=$(ends)
-  sh_ "rm -f /data/local/tmp/fd-flash.txt; (i=0; j=0; while [ \$i -lt 150 ] && [ \$j -lt 15 ]; do e=\$(grep -c \"PowosPageSlide.*end (\" /data/local/tmp/fd-log.txt); [ \$e -gt $e0 ] && j=\$((j+1)); v=\$(dumpsys SurfaceFlinger | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\" | grep -c $PKG); echo \$e \$v >>/data/local/tmp/fd-flash.txt; i=\$((i+1)); done </dev/null >/dev/null 2>&1 &)"
+  # device, a SurfaceFlinger composition list every ~0.4 s for 10 s from the swipe, each sample "<device uptime cs>
+  # <layers of $PKG composited>". The uptime is /proc/uptime (CLOCK_BOOTTIME), the clock of the slide's end line
+  # ("at <elapsedRealtime>", PageSlide.kt), so flash() splits the samples at the end without a wall-clock or a log
+  # count (06:5x: the probe counted end lines in the log, saw 0 in all 150 samples, and ran past the logcat's timeout).
+  # A sample after the end that still composites the window = the flash.
+  sh_ "rm -f /data/local/tmp/fd-flash.txt; (read u0 r </proc/uptime; u0=\${u0%.*}; while :; do read u r </proc/uptime; [ \${u%.*} -ge \$((u0 + 10)) ] && break; v=\$(dumpsys SurfaceFlinger | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\" | grep -c $PKG); echo \${u%.*}\${u#*.} \$v >>/data/local/tmp/fd-flash.txt; done </dev/null >/dev/null 2>&1 &)"
   sh_ "input swipe $x $y $to $y 250"; sleep 1.5
 }
 
-# After a swipe that leaves the window behind: was it composited after the slide ended? $1 the step; $2 the end-line
-# count before this swipe. Seen before the end but never after = no flash; never seen at all = the probe can't tell.
+# After a swipe that leaves the window behind: was it composited after the slide ended? $1 the step. The end time is
+# the swipe's last PowosPageSlide end line ("at <ms>", device elapsedRealtime), the samples' clock is /proc/uptime in
+# centiseconds. Seen before the end but never after = no flash; no sample on either side = the probe can't tell.
 flash() {
-  sleep 2
-  local f; f=$(sh_ "cat /data/local/tmp/fd-flash.txt"); echo "flash probe $1: $(echo $f | tr '\n' ' ')" >>"$OUT/log.txt"
-  local before after n
-  before=$(echo "$f" | awk -v k="$2" '$1==k && $2>0' | wc -l | tr -d ' ')
-  after=$(echo "$f" | awk -v k="$2" '$1>k && $2>0' | wc -l | tr -d ' ')
-  n=$(echo "$f" | awk -v k="$2" '$1>k' | wc -l | tr -d ' ')
+  sleep 9
+  local f l end before after n; f=$(sh_ "cat /data/local/tmp/fd-flash.txt")
+  l=$(sh_ "grep PowosPageSlide /data/local/tmp/fd-log.txt | grep -F \"end (\" | tail -1")
+  end=$(echo "$l" | sed -n 's/.* at \([0-9]*\)$/\1/p')
+  echo "flash probe $1: end at ${end:-?} ms; samples (uptime cs, layers): $(echo $f | tr '\n' ' ')" >>"$OUT/log.txt"
+  if [ -z "$end" ]; then echo "NOTE $1: flash probe can't tell (the end line has no 'at' time: $l)" | tee -a "$OUT/log.txt"; return; fi
+  before=$(echo "$f" | awk -v e="$end" '$1*10<e && $2>0' | wc -l | tr -d ' ')
+  after=$(echo "$f" | awk -v e="$end" '$1*10>=e && $2>0' | wc -l | tr -d ' ')
+  n=$(echo "$f" | awk -v e="$end" '$1*10>=e' | wc -l | tr -d ' ')
   if [ "$before" -eq 0 ] || [ "$n" -eq 0 ]; then echo "NOTE $1: flash probe can't tell ($before samples with the window before the end, $n after it)" | tee -a "$OUT/log.txt"
   elif [ "$after" -gt 0 ]; then fail "$1: the old page's window flashed - composited in $after of $n samples after the slide ended"
   else pass "$1: no flash - the window was composited in $before samples during the slide, 0 of $n after it ended"; fi
@@ -149,7 +155,7 @@ key=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$PKG\\//.test(a.key))||{}).key||'E
 case $key in a:$PKG/*) ;; *) fail "Calculator's key: $key" ;; esac
 # The main log rotates in seconds (256 KiB, OplusTouch spam): a `logcat -d` after the fact found nothing. Capture the
 # tags from the launch on, on the phone, bounded (timeout); hiddenapi denials log under the app's process name.
-sh_ "rm -f /data/local/tmp/fd-log.txt; (timeout 40 logcat -T 1 -v time -s PowosWindowFrames PowosFreeform PowosRunning PowosPageSlide com.powos.app:W </dev/null >/data/local/tmp/fd-log.txt 2>&1 &)"
+sh_ "rm -f /data/local/tmp/fd-log.txt; (timeout 240 logcat -T 1 -v time -s PowosWindowFrames PowosFreeform PowosRunning PowosPageSlide com.powos.app:W </dev/null >/data/local/tmp/fd-log.txt 2>&1 &)"
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch: $r"
 sleep 2.5; chk launch
 id=$(hcall windows.list "[]" "l=>(l.find(w=>w.pkg==='$PKG')||{id:'none'}).id"); echo "window $id" | tee -a "$OUT/log.txt"
