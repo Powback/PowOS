@@ -90,6 +90,21 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
 - Waits are capped (~4 min/call) and resumable, never a single call held for an hour.
 - Routine, high-volume agents use a cheaper model; save the expensive one for judgment calls.
 
+**Hand-off (2026-10-24, the three pieces above):**
+- The hook (`.claude/hooks/agent-notices.py`, PostToolUse, project `.claude/settings.json`) reads three LOCAL
+  files only - no adb, no network - so it stays fast and safe on every call: your comms inbox
+  (`~/.local/state/powos/comms/agents/<role>/inbox`, role = `COMMS_AGENT_ID`/`POWOS_AGENTS_ROLE`/your worktree's
+  basename - a git-worktree agent has neither env var set by default, friction f135), finished verify-queue jobs
+  whose `from=` is your worktree root, and ship results whose `who=` is your worktree's basename (both fields
+  exist already in queue.sh/ship.sh, undocumented until now - friction f139). Dedup state:
+  `~/.cache/powos-agent-notices/<worktree>.json`.
+- `land.sh` validates a path via `git status --porcelain --ignored=matching` (plain `--porcelain` hides an
+  ignored-but-meant-to-be-tracked new file, e.g. under `.claude/`) and stages with `git add -f` for the same
+  reason. One retry on a push race only; a real rebase conflict aborts and keeps your commit local.
+- Caps: only perf-window.sh and journey.sh needed chunking (window-lock.sh/ship-apk.sh/edge.sh already chunked,
+  at 180s/600s/180s - lowered ship-apk.sh's to 240s). `idle.sh` itself is still unbounded if called directly
+  with a large budget - chunk at the call site, following window-lock.sh's loop.
+
 ## The work board: nothing falls through (the user, 2026-10-23: "30 tasks show working, 4 agents run")
 - Each task's state is COMPUTED from facts (`task list` and the AI page; lib/ai/agents/powos-agents-cli truth(),
   shell/agents.ts boardState): `working` only while a live agent holds it (its own `task set <id> --step/--progress/
