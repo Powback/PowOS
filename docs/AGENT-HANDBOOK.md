@@ -11,6 +11,7 @@ section. The index below gives the line ranges.
 - Loading a skill from a worktree (top, before any `## `) — the scoped-skill-name workaround.
 - Which expert owns what — the area -> skill table; route work here first.
 - Efficiency — one task per agent, context budgets (hand back 120k/150k), `land.sh`, caps, read narrowly.
+- Testing — tier-1 and phone checks.
 - Done (f130/f131) — agent worktrees moved to `~/pw/<name>`, outside `~/Projects` (why, what still uses the old path).
 - Done (wt-move-rest) — runner checkouts + the shared base checkout (`powos-multiplatform`) moved to `~/pw/<name>`
   too; `emu-build` stays under the repo (warm builder mounts only `~/Projects`).
@@ -94,11 +95,6 @@ column names the file to load; `.claude/skills/<skill>/SKILL.md` has a `## <old-
   `idle.sh --wait`, sleep, `until` loops, run ship-apk.sh/push.sh yourself, or re-read a verify-queue/ship result
   yourself - the PostToolUse hook (.claude/hooks/agent-notices.py) puts new comms mail, finished verify-queue
   results and ship results on your next tool result once, instead of you polling for them.
-- Before landing, run tier-1 on the Mac with `tools/agents/tier1.sh [test-name...]` - one command, in a correct
-  container (the Mac's own bash 3.2 can't run `test/tier1/run-all.sh` at all, friction f84): builds/reuses a small
-  cached `powos-tier1:latest` image, mounts the worktree + its main repo's `.git` and the docker socket only when
-  a selected test needs it, and prints run-all.sh's own summary. `tier1.sh` alone runs the whole suite; `tier1.sh
-  test-land.sh` runs just that one.
 - Never hand-roll a wait loop (`while kill -0 <pid>; do sleep N; done`, a bare `sleep 60` before checking again, any
   `until ...; do sleep ...; done`): it's the same polling the hook above already replaces, just written by hand.
   Put the long-running thing in the background and let the PostToolUse hook deliver the result on your NEXT tool
@@ -143,6 +139,12 @@ column names the file to load; `.claude/skills/<skill>/SKILL.md` has a `## <old-
   (default `~/pw/<name>`), OUTSIDE `~/Projects` entirely - no ancestor `~/Projects/CLAUDE.md`, no `PowOS/CLAUDE.md`,
   no sibling worktrees' `.claude/skills` to scan from there (f130/f131, done - see below). `done`/`list` still find
   worktrees at the old `.claude/worktrees/<name>` location too, for ones made before the move.
+
+## Testing
+- `tools/agents/tier1.sh [test…]` runs tier-1 in the right container; `tier1.sh` alone runs the whole suite, `tier1.sh test-land.sh` runs just one.
+- Run single tests with `python3 test/tier1/x.py` or `bash test/tier1/x.sh` when they don't need bash 4.
+- Phone checks only via `tools/phone/verify/queue.sh`, with the emulator first (`--dev emu`).
+- Colima's docker socket to mount into containers is `/var/run/docker.sock` (inside the VM); `~/.colima/default/docker.sock` is a Mac-side relay and can't be mounted.
 
 ## Done (f130/f131): agent worktrees moved out of the repo folder
 `worktree.sh new` now creates at `$POWOS_WT_ROOT/<name>` (default `~/pw/<name>`, NOT `~/Projects/PowOS-wt/<name>` as
@@ -707,6 +709,7 @@ Pipeline scripts (bash)
 - Never edit a script while a run is executing it: bash reads the file as it goes, so the running copy executes a
   mix (a build script crashed mid-run that way). Edit in your worktree, let the run finish, then commit. ship-apk.sh
   runs origin's copy from a temp file, so a ship in progress is not affected by later commits to it.
+- `bash -x` profiling under bash 3.2 plus `set -e` can exit silently mid-trace, and bash 3.2 has no EPOCHREALTIME; use `PS4='+ $(date +%s.%N 2>/dev/null) '` via python3 or perl timestamps, or temporarily `set +e`.
 The phone
 - NEVER poll the phone in a loop (no 10 s / 60 s adb checks, no "until idle" loops from the Mac): each call is a new VPN
   connection and keeps the phone's radio awake - agents' polling was most of its WireGuard traffic and CPU, and the
