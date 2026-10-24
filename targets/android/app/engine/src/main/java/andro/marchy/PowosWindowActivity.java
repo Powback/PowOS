@@ -21,6 +21,9 @@ import java.io.File;
  *
  * Started and finished by KWin over the control channel (WindowTasks: "open", "close"); tells it when it gets the
  * focus (KWin activates the window) and when it is closed for good (KWin shows the window on the desktop again).
+ *
+ * A launch window (LaunchWindows: powos-window://launch, opened at the tap on the app) shows the app's icon and name
+ * until KWin opens the app's window, which it then becomes ([become]): the same task, where it already is.
  */
 public class PowosWindowActivity extends Activity implements SurfaceHolder.Callback {
     private static final String TAG = "PowosWindow";
@@ -44,7 +47,24 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        // A launch window that became a window ([become]), recreated (the app restarted): Android gives back the launch
+        // intent, so the window's own data comes from the saved state; one recreated before its window came is over.
+        String saved = state != null ? state.getString(STATE_WINDOW) : null;
+        android.net.Uri became = saved != null ? android.net.Uri.parse(saved) : null;
+        if (became != null)
+            setIntent(new android.content.Intent(getIntent()).setData(became).putExtra(EXTRA_APP_ID, state.getString(EXTRA_APP_ID)));
+        else if (state != null && LaunchWindows.isLaunch(getIntent().getData())) {
+            finishAndRemoveTask();
+            return;
+        }
         id = parseId();
+        if (id <= 0 && LaunchWindows.isLaunch(getIntent().getData())) {
+            // Opened at the tap (LaunchWindows): the app's icon and name until its window comes ([become]).
+            LaunchWindows.add(this);
+            content(true);
+            setTitleText(getIntent().getStringExtra(EXTRA_TITLE));
+            return;
+        }
         if (id <= 0) {
             finish();
             return;
@@ -60,19 +80,103 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         WindowTasks.tasks.put(id, this);
         // The consumer's daemon connection, also when the desktop (MainActivity, which set it before) never opened.
         MainActivity.configureConsumer(this);
+        content(false);
+        if (getIntent().getBooleanExtra(EXTRA_FULLSCREEN, false))
+            immersive();
+        setTitleText(getIntent().getStringExtra(EXTRA_TITLE));
+    }
+
+    /** The window's surface (KWin's pixels, its touches to KWin) - under a [splash] for a launch window. */
+    private void content(boolean launch) {
         SurfaceView view = new SurfaceView(this);
         view.setFocusable(true);
         view.setFocusableInTouchMode(true);
         view.getHolder().addCallback(this);
         view.setOnTouchListener((v, e) -> {
-            sendTouch(e);
+            touch(e);
             return true;
         });
-        setContentView(view);
+        if (launch) {
+            android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+            root.addView(view);
+            splash = LaunchWindows.splash(this, getIntent().getStringExtra(EXTRA_TITLE), icon());
+            root.addView(splash);
+            setContentView(root);
+        } else {
+            setContentView(view);
+        }
         view.requestFocus();
-        if (getIntent().getBooleanExtra(EXTRA_FULLSCREEN, false))
-            immersive();
-        setTitleText(getIntent().getStringExtra(EXTRA_TITLE));
+    }
+
+    private static final String STATE_WINDOW = "powos_window";
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        // A launch window that became window [id]: its window's data, for a recreation from the launch intent (onCreate).
+        if (id > 0 && LaunchWindows.isLaunch(baseData())) {
+            out.putString(STATE_WINDOW, String.valueOf(getIntent().getData()));
+            out.putString(EXTRA_APP_ID, getIntent().getStringExtra(EXTRA_APP_ID));
+        }
+    }
+
+    /** The data this task was started with (a launch window keeps its launch data after [become]). */
+    private android.net.Uri baseData() {
+        ActivityManager am = getSystemService(ActivityManager.class);
+        if (am != null)
+            for (ActivityManager.AppTask t : am.getAppTasks()) {
+                try {
+                    ActivityManager.RecentTaskInfo info = t.getTaskInfo();
+                    if (info.taskId == getTaskId() && info.baseIntent != null)
+                        return info.baseIntent.getData();
+                } catch (IllegalArgumentException e) {
+                    // gone meanwhile
+                }
+            }
+        return null;
+    }
+
+    /** A launch window's icon and name over the surface until the window's first frames are there ([started]). */
+    private android.view.View splash;
+
+    /**
+     * The launch window becomes window [windowId] (KWin's "open" for its app: [data], [appId], [title]) - in this task,
+     * where it is: registered, the consumer on the surface it has, the splash gone once that runs. [orElse] if this
+     * activity is finishing meanwhile (closed by hand): the window opens in a task of its own after all. Main thread.
+     */
+    void become(int windowId, android.net.Uri data, String appId, String title, Runnable orElse) {
+        if (isFinishing() || isDestroyed()) {
+            orElse.run();
+            return;
+        }
+        setIntent(new android.content.Intent(getIntent()).setData(data).putExtra(EXTRA_APP_ID, appId).putExtra(EXTRA_TITLE, title));
+        id = windowId;
+        WindowTasks.tasks.put(id, this);
+        MainActivity.configureConsumer(this);
+        setTitleText(title);
+        Log.i(TAG, "launch window: now window " + id + " (" + appId + ")");
+        if (holder != null && cropW > 0 && cropH > 0)
+            surfaceChanged(holder, 0, cropW, cropH);
+        // Its frame again: the bar may go (a window with its own title bar, "decor 0").
+        Runnable r = WindowTasks.barChanged;
+        if (r != null)
+            r.run();
+    }
+
+    /** The app's launch ended with no window for this launch window (LaunchWindows.done): it goes. */
+    void launchEnded() {
+        if (id <= 0)
+            finishAndRemoveTask();
+    }
+
+    /** The splash off, faded, a moment after the consumer is up (its first frames on the surface). */
+    private void dropSplash() {
+        android.view.View s = splash;
+        if (s == null)
+            return;
+        splash = null;
+        s.animate().alpha(0f).setStartDelay(LaunchWindows.SPLASH_HOLD_MS).setDuration(LaunchWindows.SPLASH_FADE_MS)
+                .withEndAction(() -> ((android.view.ViewGroup) s.getParent()).removeView(s)).start();
     }
 
     private int parseId() {
@@ -163,14 +267,16 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     /** The task's label (the window's caption) and icon (the app's, as PowOS shows it: powos-apps-export). */
     void setTitleText(String title) {
+        setTaskDescription(new ActivityManager.TaskDescription(title == null || title.isEmpty() ? null : title, icon()));
+    }
+
+    /** The app's icon as PowOS shows it (powos-apps-export), null if none. */
+    private Bitmap icon() {
         String appId = getIntent().getStringExtra(EXTRA_APP_ID);
-        Bitmap icon = null;
-        if (appId != null && !appId.isEmpty()) {
-            File png = new File(SessionService.runDir(this), "powos-apps/icons/" + appId + ".png");
-            if (png.isFile())
-                icon = BitmapFactory.decodeFile(png.getPath());
-        }
-        setTaskDescription(new ActivityManager.TaskDescription(title == null || title.isEmpty() ? null : title, icon));
+        if (appId == null || appId.isEmpty())
+            return null;
+        File png = new File(SessionService.runDir(this), "powos-apps/icons/" + appId + ".png");
+        return png.isFile() ? BitmapFactory.decodeFile(png.getPath()) : null;
     }
 
     /** The size of the consumer's buffers (buffersFor), while [handle] is set. */
@@ -186,7 +292,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) {
+        if (hasFocus && id > 0) {
             WindowTasks.send("focus", id);
             // PowOS: Android's clipboard to the session as this Linux window takes focus (the app can read it now;
             // the desktop's MainActivity does the same through KWin). Set by the app (PlasmaBridge.pushClip).
@@ -205,6 +311,13 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+        this.holder = holder;
+        if (id <= 0) {
+            // A launch window: no window yet - the consumer starts on this surface once it has one ([become]).
+            cropW = width;
+            cropH = height;
+            return;
+        }
         // A window's buffers are the screen's size (a full-screen application's: the surface's - KWin scales it to
         // fit them). A new size inside them - a floating window resized, step by step while its frame is dragged - is
         // no new buffers: KWin resizes the window to it ("size", the client lays itself out and commits) and the
@@ -257,6 +370,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         if (rate > 0)
             Native.nativeSetWindowRefreshRate(h, rate);
         handle = h;
+        dropSplash();
     }
 
     /** The consumer's buffer size for a surface of [width] x [height]: the screen's (as large as it can get). */
@@ -268,8 +382,12 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         return new int[] {Math.max(width, max.width()), Math.max(height, max.height())};
     }
 
+    /** The surface now (surfaceChanged), null once it's gone: a launch window's consumer starts on it ([become]). */
+    private SurfaceHolder holder;
+
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
+        this.holder = null;
         surfaceGen++;
         stopConsumer();
     }
@@ -314,6 +432,58 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     /** The surface's size now: the consumer's crop (main thread). */
     private int cropW;
     private int cropH;
+
+    /** A finger is on the window (from a DOWN to the last pointer's lift). */
+    private boolean touching;
+    /** KWin's "move" came: the rest of this touch moves the task ([moveTask]), not the window's content. */
+    private boolean moving;
+
+    /** A touch on the window: to KWin, or - once the window's own title bar asked to be moved ([appMove]) - to its task. */
+    private void touch(MotionEvent e) {
+        int a = e.getActionMasked();
+        if (a == MotionEvent.ACTION_DOWN)
+            touching = true;
+        boolean last = a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL;
+        if (moving)
+            moveTask(e, last);
+        else
+            sendTouch(e);
+        if (last)
+            touching = false;
+    }
+
+    /**
+     * The window's own title bar is being dragged (KWin's "move", kwin 0026: a client-side bar - Steam's - asked for a
+     * move, which KWin cancelled): the rest of the touch moves the task. A "move" after the finger lifted is ignored.
+     */
+    void appMove() {
+        if (!touching || moving)
+            return;
+        moving = true;
+        liftAll();
+    }
+
+    /** [e] to the task's frame (WindowTasks.moveTask: the app's WindowFrames) until the lift ([last]). */
+    private void moveTask(MotionEvent e, boolean last) {
+        java.util.function.BiPredicate<Integer, MotionEvent> m = WindowTasks.moveTask;
+        boolean took = m != null && m.test(getTaskId(), e);
+        if (last || !took)
+            moving = false;
+        if (!took)
+            Log.i(TAG, "window " + id + ": its title bar's move not taken (no frame)");
+    }
+
+    /** Every pointer KWin has lifted (its touch ends there; the window's own press is over). */
+    private void liftAll() {
+        long h = handle;
+        if (h == 0)
+            return;
+        for (int p = 0; p < MAX_POINTERS; p++)
+            Native.nativeSendWindowTouch(h, 1, 0f, 0f, p);
+        Native.nativeSendWindowTouchFrame(h);
+    }
+
+    private static final int MAX_POINTERS = 10;
 
     /** Every pointer of [e] as the desktop sends them (protocol.h INPUT_ACTION_DOWN/UP/MOVE), then a frame. */
     private void sendTouch(MotionEvent e) {
@@ -360,6 +530,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     @Override
     protected void onDestroy() {
+        LaunchWindows.remove(this);
         surfaceGen++;
         stopConsumer();
         consumerThread.shutdown();

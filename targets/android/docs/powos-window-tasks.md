@@ -67,6 +67,12 @@ that isn't one of the listed ids of that session, telling KWin nothing (`closed 
 window of that id). Only a live window of the running session is raised again (`open` of a known id, the launcher's
 and dock's restoreLinux through WindowTasks.appIdOfTask); anything else opens fresh.
 
+Title bars (kwin 0026): a task shows the window's client area only, so the app's frame (WindowFrames) adds a bar -
+unless the window draws its own. KWin says which before `open` and whenever it changes: `decor <id> 1` (KWin's
+decoration: Kate, Dolphin) or `decor <id> 0` (client-side: Steam, GTK header bars - no frame bar, only the grip),
+again for every task on `hello`. A drag on a window's own bar asks KWin for an interactive move; KWin cancels it and
+sends `move <id>`: the task's activity hands the rest of that touch to the frame's drag (KWin's touch lifted first).
+
 ## From the launcher
 
 A PowOS app tapped in the PowOS app's launcher (drawer, home, search, the web shell: `Runtime.launch`) opens like a
@@ -76,6 +82,12 @@ then each new one); if the app already has a window (by app id: desktop file nam
 shown - again a task, or brought to the front if it is one - and nothing starts; else the command starts and its
 first normal window (by app id, or by being one of the command's processes) is shown. "Shown" is
 `org.powos.WindowTasks.show` (un-minimized first), the same as the title bar's maximize.
+
+The tap also opens the app's launch window at once (LaunchWindows, when the app has no window task): a window task
+`powos-window://launch?app=<id>` at the place its window will be, the app's icon and name on it. KWin's first `open`
+for that app (its app id matched like the launcher's) becomes that task (PowosWindowActivity.become: the consumer on
+its surface), no second task; a full-screen window (a game) gets its own and the launch window goes, as it does when
+the helper ends with no window. Android apps have the system's starting window for this.
 
 It prints `powos-open-task: desktop` when the app opens on the desktop instead, and the app then brings the desktop
 up: no window tasks (the app isn't connected to KWin), a window KWin doesn't export, nothing within 30 s, or an older

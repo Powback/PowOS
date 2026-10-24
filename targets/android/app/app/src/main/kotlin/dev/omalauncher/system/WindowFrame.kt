@@ -32,6 +32,8 @@ import java.util.concurrent.atomic.AtomicReference
  * blur, a cool tint, a lit top edge), no borders, small marks. The bar is [BAR_DP] glass under a clear [HIT_DP] strip,
  * [BAR_DP] + [HIT_DP] in all (the user, 2026-10-23: half again); the strip and the buttons' full height keep it easy
  * to grab. A resize drag resizes the app's window as the finger goes ([FreeformTasks.Live]).
+ * A window that draws its own title bar ([App.ownBar]: a Linux app with client-side decorations, Steam) gets no bar,
+ * only the grip: its own bar moves it ([appMove], KWin's "move").
  */
 @SuppressLint("ClickableViewAccessibility", "ViewConstructor")
 class WindowFrame(
@@ -89,6 +91,37 @@ class WindowFrame(
         grip.setOnTouchListener(Drag(move = false))
     }
 
+    /** The window draws its own title bar ([App.ownBar]): no bar of ours, only the grip. */
+    val ownBar: Boolean get() = app.ownBar
+
+    /** Our bar's height above the window (px): none for a window with its own. */
+    private fun barHeight(): Int = if (app.ownBar) 0 else dp(BAR_DP + HIT_DP)
+
+    /** The frame's view that is always shown (the bar, or the grip of a window with its own bar). */
+    private val anchor: View get() = if (app.ownBar) grip else bar
+
+    /** The drag a window's own title bar started (KWin's "move": [appMove]), fed the rest of that touch. */
+    private val appDrag = Drag(move = true, buttons = false)
+    private var appMoving = false
+
+    /**
+     * The window's own title bar is being dragged (PowosWindowActivity got KWin's "move"): [e] and the rest of that
+     * touch move the window as a drag of our bar would (the first event is the drag's start). False: no frame shows.
+     */
+    fun appMove(e: MotionEvent): Boolean {
+        if (!added) return false
+        if (!appMoving) {
+            appMoving = true
+            val down = MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_DOWN }
+            appDrag.onTouch(anchor, down)
+            down.recycle()
+            android.util.Log.i("PowosWindowFrame", "task $id moved by its own title bar")
+        }
+        appDrag.onTouch(anchor, e)
+        if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) appMoving = false
+        return true
+    }
+
     /** The task is at [r] now (its report): the frame there, unless a finger is moving it. */
     fun place(r: Rect) {
         if (dragging || (r == bounds && added)) return
@@ -97,7 +130,7 @@ class WindowFrame(
 
     private fun layout(r: Rect) {
         bounds = Rect(r)
-        val h = dp(BAR_DP + HIT_DP)
+        val h = barHeight()
         barParams.apply {
             x = r.left
             y = r.top - h
@@ -113,30 +146,43 @@ class WindowFrame(
             width = g
             height = g
         }
-        if (!added) {
-            runCatching {
-                wm.addView(bar, barParams)
-                wm.addView(grip, gripParams)
-                added = true
-                barBlur.set(1f)
-                // The grip shows only while a finger is on it (the user, 2026-10-23: no disc floating over other windows).
-                grip.alpha = 0f
-                // What the device check reads: the bar's size and its frost as drawn.
-                android.util.Log.i(
-                    "PowosWindowFrame",
-                    "task $id bar ${barParams.height} px (${BAR_DP + HIT_DP} dp, glass $BAR_DP) frost blur ${Frost.BLUR_DP} dp fill=#%08x veil=#%08x sheen=#%08x edge=#%08x ink=#%08x"
-                        .format(frost.fill, frost.veil, frost.sheen, frost.edge, frost.ink),
-                )
-            }.onFailure {
-                android.util.Log.w("PowosWindowFrame", "can't add the frame of task $id", it)
-                // Refused (the overlay app op reset): granted again, the next refresh adds it.
-                WindowFrames.current?.frameRefused()
-            }
-        } else {
-            runCatching {
-                wm.updateViewLayout(bar, barParams)
-                wm.updateViewLayout(grip, gripParams)
-            }
+        if (!added) addViews() else updateViews()
+    }
+
+    /** The frame's windows added (the bar only for a window without its own), once. */
+    private fun addViews() {
+        runCatching {
+            if (!app.ownBar) wm.addView(bar, barParams)
+            wm.addView(grip, gripParams)
+            added = true
+            if (!app.ownBar) barBlur.set(1f)
+            // The grip shows only while a finger is on it (the user, 2026-10-23: no disc floating over other windows).
+            grip.alpha = 0f
+            logAdded()
+        }.onFailure {
+            android.util.Log.w("PowosWindowFrame", "can't add the frame of task $id", it)
+            // Refused (the overlay app op reset): granted again, the next refresh adds it.
+            WindowFrames.current?.frameRefused()
+        }
+    }
+
+    /** What the device check reads: the bar's size and its frost as drawn (or that the window has its own bar). */
+    private fun logAdded() {
+        if (app.ownBar) {
+            android.util.Log.i("PowosWindowFrame", "task $id: its own title bar, no bar (grip only)")
+            return
+        }
+        android.util.Log.i(
+            "PowosWindowFrame",
+            "task $id bar ${barParams.height} px (${BAR_DP + HIT_DP} dp, glass $BAR_DP) frost blur ${Frost.BLUR_DP} dp fill=#%08x veil=#%08x sheen=#%08x edge=#%08x ink=#%08x"
+                .format(frost.fill, frost.veil, frost.sheen, frost.edge, frost.ink),
+        )
+    }
+
+    private fun updateViews() {
+        runCatching {
+            if (!app.ownBar) wm.updateViewLayout(bar, barParams)
+            wm.updateViewLayout(grip, gripParams)
         }
     }
 
@@ -167,16 +213,17 @@ class WindowFrame(
      * app's window, its ask is the top-most one, which WM takes - the app's own (ColorOS's 60 Hz) capped home's swipes.
      */
     fun preferMode(id: Int) {
-        if (barParams.preferredDisplayModeId == id) return
-        dev.omalauncher.shell.HighRefresh.ask(barParams, context.display, id)
-        if (added) runCatching { wm.updateViewLayout(bar, barParams) }
+        val p = if (app.ownBar) gripParams else barParams
+        if (p.preferredDisplayModeId == id) return
+        dev.omalauncher.shell.HighRefresh.ask(p, context.display, id)
+        if (added) runCatching { wm.updateViewLayout(anchor, p) }
     }
 
     /** Its bar's and grip's views while shown (shell/PanelLift stacks their surfaces under home under a home panel; PageSlide moves them with a page swipe). */
-    val panelViews: List<android.view.View> get() = if (added) listOf(bar, grip) else emptyList()
+    val panelViews: List<android.view.View> get() = if (!added) emptyList() else if (app.ownBar) listOf(grip) else listOf(bar, grip)
 
     /** Where its bar and grip take touches (screen px): a frame stacked over another's there takes that one's finger. */
-    fun reach(): Rect = Rect(bounds.left, bounds.top - dp(BAR_DP + HIT_DP), bounds.right + dp(GRIP_OUT_DP), bounds.bottom + dp(GRIP_OUT_DP))
+    fun reach(): Rect = Rect(bounds.left, bounds.top - barHeight(), bounds.right + dp(GRIP_OUT_DP), bounds.bottom + dp(GRIP_OUT_DP))
 
     /**
      * Its two windows re-added, so they stack over PowOS's other overlays: overlays keep the order they were added in,
@@ -185,11 +232,13 @@ class WindowFrame(
     fun raise() {
         if (!added || dragging || held) return
         runCatching {
-            wm.removeViewImmediate(bar)
-            wm.addView(bar, barParams)
+            if (!app.ownBar) {
+                wm.removeViewImmediate(bar)
+                wm.addView(bar, barParams)
+            }
             wm.removeViewImmediate(grip)
             wm.addView(grip, gripParams)
-            barBlur.set(1f)
+            if (!app.ownBar) barBlur.set(1f)
         }.onFailure { android.util.Log.w("PowosWindowFrame", "can't raise the frame of task $id", it) }
     }
 
@@ -199,7 +248,7 @@ class WindowFrame(
         abandonGesture()
         if (!added) return
         added = false
-        runCatching { wm.removeViewImmediate(bar) }
+        if (!app.ownBar) runCatching { wm.removeViewImmediate(bar) }
         runCatching { wm.removeViewImmediate(grip) }
     }
 
@@ -328,6 +377,8 @@ class WindowFrame(
     data class App(
         val pkg: String?,
         val title: String? = null,
+        /** The window draws its own title bar (KWin's "decor 0": client-side decorations): no bar of ours. */
+        val ownBar: Boolean = false,
     )
 
     private enum class Glyph { MINIMISE, MAXIMISE, RESTORE, CLOSE }
@@ -414,6 +465,8 @@ class WindowFrame(
     /** A finger on the bar (move) or the grip (resize): the frame follows at once, the task as fast as it can. */
     private inner class Drag(
         val move: Boolean,
+        /** Its bar's buttons take a tap (not for a drag the window's own bar started: [appMove]). */
+        val buttons: Boolean = true,
     ) : View.OnTouchListener {
         private var x0 = 0f
         private var y0 = 0f
@@ -496,7 +549,7 @@ class WindowFrame(
             x0 = e.rawX
             y0 = e.rawY
             from = Rect(bounds)
-            if (move) {
+            if (move && buttons) {
                 buttonAt(e.x, e.y)?.let {
                     pressed = it
                     it.first.isPressed = true
@@ -561,8 +614,7 @@ class WindowFrame(
         if (leash == null && raise) FreeformTasks.raise(context, id)
         raise = false
         if (legacyDrag()) return
-        val bitmapOf = { v: View -> runCatching { v.drawToBitmap() }.getOrNull() }
-        val layer = DragLayer(context, bitmapOf(bar), if (resizing) bitmapOf(grip) else null, dp(BAR_DP + HIT_DP), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)
+        val layer = dragLayer(resizing)
         drag = layer
         // The frame's windows step aside once the layer draws them (a new window's first frame takes 2-3 frames: hidden
         // at once, the bar blinked out at every drag's start), their blur after their own hidden frame (a blur region
@@ -570,17 +622,24 @@ class WindowFrame(
         layer.onShown = { if (drag === layer) stepAside(layer) }
     }
 
+    /** The layer that draws the frame where the finger has it: our bar (none for a window with its own), the grip resizing. */
+    private fun dragLayer(resizing: Boolean): DragLayer {
+        val bitmapOf = { v: View -> runCatching { v.drawToBitmap() }.getOrNull() }
+        val barPicture = if (app.ownBar) null else bitmapOf(bar)
+        return DragLayer(context, barPicture, if (resizing) bitmapOf(grip) else null, barHeight(), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)
+    }
+
     /** The frame's own windows hidden while [layer] draws them: alpha now, their blur after that frame. */
     private fun stepAside(layer: DragLayer) {
         bar.alpha = 0f
         grip.alpha = 0f
-        bar.viewTreeObserver.registerFrameCommitCallback {
+        anchor.viewTreeObserver.registerFrameCommitCallback {
             if (drag === layer) {
                 barBlur.set(0f)
                 gripBlur.set(0f)
             }
         }
-        bar.invalidate()
+        anchor.invalidate()
     }
 
     /** The app's content under PowOS's hand from the drag's first [target] on; null where it can't be. */
@@ -650,10 +709,12 @@ class WindowFrame(
                 leave(layer, "task $id drag")
                 return@whenPlaced
             }
-            bar.alpha = 1f
-            barBlur.set(1f)
-            bar.viewTreeObserver.registerFrameCommitCallback { bar.postOnAnimation { leave(layer, "task $id drag") } }
-            bar.invalidate()
+            if (!app.ownBar) {
+                bar.alpha = 1f
+                barBlur.set(1f)
+            }
+            anchor.viewTreeObserver.registerFrameCommitCallback { anchor.postOnAnimation { leave(layer, "task $id drag") } }
+            anchor.invalidate()
         }
     }
 
@@ -689,8 +750,9 @@ class WindowFrame(
     /** Whether WM has the bar's window over window bounds [r]. */
     private fun barAt(r: Rect): Boolean {
         val at = IntArray(2)
-        bar.getLocationOnScreen(at)
-        return at[0] == r.left && at[1] == r.top - dp(BAR_DP + HIT_DP)
+        anchor.getLocationOnScreen(at)
+        if (app.ownBar) return at[0] == r.right - dp(GRIP_DP) + dp(GRIP_OUT_DP) && at[1] == r.bottom - dp(GRIP_DP) + dp(GRIP_OUT_DP)
+        return at[0] == r.left && at[1] == r.top - barHeight()
     }
 
     /** [then] once the bar's window is at [r] (WM relaid it out), or after [PLACE_FRAMES] frames whatever it says. */
@@ -701,7 +763,7 @@ class WindowFrame(
     ) {
         val done = barAt(r) || frames >= PLACE_FRAMES || !added
         if (!done) {
-            bar.postOnAnimation { whenPlaced(r, frames + 1, then) }
+            anchor.postOnAnimation { whenPlaced(r, frames + 1, then) }
             return
         }
         if (frames > 0) android.util.Log.i("PowosWindowDrag", "task $id: bar placed after $frames frame(s)" + if (frames >= PLACE_FRAMES) " (gave up waiting)" else "")
@@ -780,7 +842,7 @@ class WindowFrame(
         val (s, statusBar) = screen()
         val keep = dp(KEEP_DP)
         val left = (from.left + dx).coerceIn(s.left - from.width() + keep, s.right - keep)
-        val top = (from.top + dy).coerceIn(s.top + statusBar + dp(BAR_DP + HIT_DP), s.bottom - keep)
+        val top = (from.top + dy).coerceIn(s.top + statusBar + barHeight(), s.bottom - keep)
         return Rect(left, top, left + from.width(), top + from.height())
     }
 

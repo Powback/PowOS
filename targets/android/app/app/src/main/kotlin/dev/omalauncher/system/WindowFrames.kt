@@ -112,7 +112,8 @@ class WindowFrames(
         val live = frames.values.filter { it.dragging }.associate { it.id to it.bounds }
         return running.value.any { w ->
             val b = live[w.id] ?: w.bounds
-            !w.minimised && !w.away && b != null && x >= b.left && x < b.right && y >= b.top - bar && y < b.bottom
+            val top = if (frames[w.id]?.ownBar == true) 0f else bar
+            !w.minimised && !w.away && b != null && x >= b.left && x < b.right && y >= b.top - top && y < b.bottom
         }
     }
 
@@ -165,8 +166,28 @@ class WindowFrames(
      * the ones under it. Under a home panel, a new one waits (underPanel).
      */
     private fun frame(show: List<FreeformTasks.Window>) {
-        show.asReversed().filter(::mayFrame).forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w)), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
+        show.asReversed().filter(::mayFrame).forEach { w ->
+            val own = ownBar(w)
+            // Who draws its title bar changed (a launch window became Steam's, KWin's "decor"): a new frame, between touches.
+            frames[w.id]?.takeIf { it.ownBar != own && !it.held && !it.dragging }?.let { frames.remove(w.id)?.remove() }
+            frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w), own), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds)
+        }
     }
+
+    /**
+     * [w] draws its own title bar: a Linux window with client-side decorations (Steam, GTK header bars; KWin says,
+     * WindowTasks "decor"), so its frame has none - one title bar per window. Android apps never (their caption is off).
+     */
+    private fun ownBar(w: FreeformTasks.Window) = w.pkg == context.packageName && andro.marchy.WindowTasks.drawsOwnBar(w.id)
+
+    /**
+     * The window's own title bar is being dragged ([e]: from KWin's "move" to the lift, PowosWindowActivity): its frame
+     * moves it like a drag of our bar. False when it has no frame now. Main thread.
+     */
+    fun appMove(
+        taskId: Int,
+        e: android.view.MotionEvent,
+    ): Boolean = frames[taskId]?.appMove(e) ?: false
 
     /**
      * The frames a finger has, while their task is there ([all]) and frames show at all ([on]): they stay even when the

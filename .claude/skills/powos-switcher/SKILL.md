@@ -231,6 +231,16 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
 - Wide dock: pinned + DockWindows share the bar's left end; past 6 cells they ran on under the search pill (a
   Calculator window's icon under it, the dock-taskbar tap opened the drawer). The page sets --cells, slots shrink.
 
+- One title bar per window (kwin 0026, 3.30): KWin's `decor <id> 1|0` (isDecorated: xdg-decoration/server-decoration
+  mode, _MOTIF_WM_HINTS, _GTK_FRAME_EXTENTS) -> WindowTasks.kwinBar -> WindowFrames.ownBar -> WindowFrame.App.ownBar:
+  no bar window, grip only. Its own bar's drag: KWin cancels the interactive move, sends `move <id>` ->
+  PowosWindowActivity.appMove -> WindowFrames.appMove -> WindowFrame's Drag (buttons off). Logcat WindowTasks "decor N",
+  "move N", PowosWindowFrame "its own title bar, no bar", "moved by its own title bar". Check: verify/one-title-bar.sh.
+- Launch windows (LaunchWindows.java): Runtime.openRooted opens one at the tap (no window task for the app yet); KWin's
+  first `open` for the app id becomes it (logcat WindowTasks "open N (id): in its launch window", PowosWindow "launch
+  window: now window N"); the helper's exit + 3 s ends one still waiting. Not yet for games (Runtime.launch).
+  Check: verify/launch-window.sh (task within 1.5 s of the tap, same task + bounds once Steam's window comes).
+
 ## Fold / unfold with apps and games running (2026-10-24, fold-launch)
 - Unfold used to make Plasma's desktop (HomeDesktop) Android's default home and start it (FoldWatcher.unfolded, setting
   home_screen "auto"): it covered the web home; Android's recents transition then targeted HomeDesktop while PowOS's Home

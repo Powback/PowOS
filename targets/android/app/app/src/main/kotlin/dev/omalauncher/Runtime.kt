@@ -635,10 +635,20 @@ class Runtime(
      */
     private fun openRooted(app: LinuxApp) {
         Log.i(TAG, "open as task: ${app.id}")
+        // Its launch window at once, where its window will be (LaunchWindows): the app's first window becomes it.
+        val ids = listOfNotNull(app.id, app.wmClass).filter { it.isNotBlank() }.toTypedArray()
+        if (!andro.marchy.WindowTasks.hasWindow(ids)) andro.marchy.LaunchWindows.open(context, app.id, ids, app.name)
         thread(name = "guest-open", isDaemon = true) {
             val log: (String) -> Unit = { Log.i(TAG, "[${app.id.take(24)}] $it") }
-            val code = runCatching { RootedGuest.openAsTask(app.id, app.wmClass, app.exec, ::showDesktop, log) }.getOrElse { -1 }
+            val desktop = {
+                andro.marchy.LaunchWindows.done(app.id)
+                showDesktop()
+            }
+            val code = runCatching { RootedGuest.openAsTask(app.id, app.wmClass, app.exec, desktop, log) }.getOrElse { -1 }
             Log.i(TAG, "exited $code: ${app.exec}")
+            // Its window's "open" may still be on its way from KWin: a moment, then a launch window still waiting goes.
+            Thread.sleep(LAUNCH_GRACE_MS)
+            andro.marchy.LaunchWindows.done(app.id)
         }
     }
 
@@ -719,6 +729,7 @@ class Runtime(
 
     companion object {
         private const val TAG = "runtime"
+        private const val LAUNCH_GRACE_MS = 3000L
         private val STEAM_GAME = Regex("""steam://rungameid/(\d+)""")
         private const val SETUP_DONE = "setup_done"
         private const val SYSTEM_THEME_KEY = "system_theme_applied"
