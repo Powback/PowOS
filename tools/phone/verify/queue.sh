@@ -49,6 +49,7 @@ BASE=worktree-powos-multiplatform
 REPO=$(cd "$here" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null && pwd -P || true)
 [ "$REPO" = / ] && REPO=
 VR=$REPO/.claude/worktrees/verify-runner   # the runner's checkout: only the runner touches it
+WTR=${POWOS_WT_ROOT:-$HOME/pw}   # where tools/agents/worktree.sh new puts agent worktrees (outside the repo)
 Q=${QUEUE_DIR:-$HOME/.cache/powos-verify-queue}; mkdir -p "$Q/done"
 QUEUED_STEP="phone check queued"   # shell/ui/powai.tsx matches this text
 # user_sh <script text>: run it inside PowOS as the session user (its `powos ...`), quietly.
@@ -97,7 +98,13 @@ android_only_request() {
   return 1
 }
 # wt_of <abs path>: the PowOS worktree it lies in (wroot) and the path under it (wsub, "" = the root); fails outside.
+# Agent worktrees made by tools/agents/worktree.sh new now live under $WTR (default ~/pw), outside $REPO - checked
+# first since that path doesn't overlap $REPO at all. Runner/base checkouts (verify-runner, emu-runner,
+# ship-runner*, powos-multiplatform) stay under $REPO/.claude/worktrees, so that branch is still needed too.
 wt_of() {
+  case "$1/" in
+    "$WTR"/?*/*) local s=${1#"$WTR"/}; wroot=$WTR/${s%%/*}; wsub=${1#"$wroot"}; wsub=${wsub#/}; return 0 ;;
+  esac
   [ -n "$REPO" ] || return 1
   case "$1/" in
     "$REPO"/.claude/worktrees/?*/*) local s=${1#"$REPO"/.claude/worktrees/}; wroot=$REPO/.claude/worktrees/${s%%/*} ;;
@@ -109,14 +116,15 @@ wt_of() {
 # relify <sub>: make the job (cmd, cwd) repo-relative: cwd = <sub>, every PowOS worktree path inside an argument
 # relative to it (a removed worktree's path then runs from the verify checkout). Sets rel=1.
 relify() {
-  local up= a R=${REPO//./\\.} out=()
+  local up= a R=${REPO//./\\.} W=${WTR//./\\.} out=()
   [ -n "$1" ] && up=$(printf %s "$1/" | sed -E 's#[^/]+#..#g')
   for a in "${cmd[@]}"; do
     # An existing file git doesn't track (a built package in one worktree's out/, a scratch script) stays absolute:
     # rewritten repo-relative it pointed into the verify checkout, where it doesn't exist (steam pkgrel 27 and 28
     # "FAIL install: no file /steam-...", 2026-10-23).
     if [[ "$a" == /* && -e "$a" ]] && ! git -C "$(dirname "$a")" ls-files --error-unmatch "$a" >/dev/null 2>&1; then out+=("$a"); continue; fi
-    out+=("$(printf %s "$a" | sed -E "s#$R/\.claude/worktrees/[A-Za-z0-9._-]+/#$up#g; s#$R/\.claude/worktrees/[A-Za-z0-9._-]+\$#${up:-./}#; s#$R/#$up#g; s#^$R\$#${up:-./}#")")
+    # $WTR/<name>/... (agent worktrees, outside the repo) strips the same way as the old $REPO/.claude/worktrees/<name>/...
+    out+=("$(printf %s "$a" | sed -E "s#$W/[A-Za-z0-9._-]+/#$up#g; s#$W/[A-Za-z0-9._-]+\$#${up:-./}#; s#$R/\.claude/worktrees/[A-Za-z0-9._-]+/#$up#g; s#$R/\.claude/worktrees/[A-Za-z0-9._-]+\$#${up:-./}#; s#$R/#$up#g; s#^$R\$#${up:-./}#")")
   done
   cmd=("${out[@]}"); cwd=${1:-.}; rel=1
 }
