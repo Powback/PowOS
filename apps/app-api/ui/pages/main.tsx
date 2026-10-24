@@ -181,11 +181,11 @@ function TrackersView({ net, app }: { net?: Net; app: string }) {
   );
 }
 
-/** This app's trackers, embedded in its detail: the Trackers tab's own route (/trackers has no per-app filter -
- * appcap_serve.trackers always returns every app), filtered here to the one the detail is open on. */
+/** This app's trackers, embedded in its detail (same route as the Trackers tab, filtered server-side:
+ * GET /trackers?app=<id>, appcap_serve.trackers). */
 function AppTrackers({ net, app, specApp }: { net?: Net; app: string; specApp: string }) {
-  const [d, err, reload] = useRuntime<Trackers>(net, app, "/trackers");
-  const mine = d?.apps.find((a) => a.app === specApp);
+  const [d, err, reload] = useRuntime<Trackers>(net, app, `/trackers?app=${encodeURIComponent(specApp)}`);
+  const mine = d?.apps[0];
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
       <h2 style={S.group}>Trackers</h2>

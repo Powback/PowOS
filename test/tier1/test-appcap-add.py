@@ -270,6 +270,18 @@ class Routes(unittest.TestCase):
         self.assertEqual(acts["open"]["endpoint"], "open android-app://com.example.shop")
         self.assertEqual(self.req("/draft/installed", {"kind": "android", "pkg": "../x"})[0], 400)
 
+    def test_trackers_filter_by_app(self):
+        code, d = self.req("/draft/import", {"sample": "open-meteo"})
+        self.assertEqual(code, 200, d)
+        app = d["app"]
+        # Both /trackers (no filter) and /trackers?app=<id> should work.
+        code, all_trackers = self.req("/trackers")
+        self.assertEqual(code, 200)
+        code, app_trackers = self.req(f"/trackers?app={app}")
+        self.assertEqual(code, 200)
+        # When filtered by app, result only contains that app (or is empty).
+        self.assertTrue(all(a["app"] == app for a in app_trackers["apps"]))
+
     def test_powos_app(self):
         apps = tempfile.mkdtemp(prefix="add-apps-")
         try:

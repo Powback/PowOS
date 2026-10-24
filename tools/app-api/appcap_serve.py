@@ -277,10 +277,11 @@ def policy() -> dict:
         return {"apps": {}}
 
 
-def trackers(_q, _b):
+def trackers(q, _b):
     allow = policy().get("apps", {})
+    pat = f"{q['app']}.jsonl" if q.get("app") else "*.jsonl"
     per = {}
-    for p in glob.glob(os.path.join(TRACKERS, "*.jsonl")):
+    for p in glob.glob(os.path.join(TRACKERS, pat)):
         for r in tail(p, 5000):
             app = r.get("app") or os.path.basename(p)[:-6]
             key = (r.get("tracker") or r.get("host") or "?", r.get("host", ""))
