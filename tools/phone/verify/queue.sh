@@ -125,8 +125,8 @@ add)
     case "$a" in *.sh) [ -f "$a" ] || continue
       e=$(bash -n "$a" 2>&1) || { printf '%s\n' "$e" | head -3; echo "queue.sh: $a doesn't parse - not queued"; exit 2; }
       if docker image inspect koalaman/shellcheck:stable >/dev/null 2>&1; then
-        d=$(cd "$(dirname "$a")" && pwd -P)
-        sc=$(docker run --rm -v "$d:$d:ro" koalaman/shellcheck:stable -S error -x "$d/$(basename "$a")" 2>&1 | head -12)
+        # The script goes in on stdin: a bind mount of a Mac path fails under Colima unless that path is shared (f63).
+        sc=$(docker run --rm -i koalaman/shellcheck:stable -S error -s bash - < "$a" 2>&1 | head -12)
         [ -z "$sc" ] || { echo "$sc"; echo "queue.sh: shellcheck errors in $a - not queued"; exit 2; }
       fi ;; esac
   done
