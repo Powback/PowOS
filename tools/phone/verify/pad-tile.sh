@@ -15,11 +15,14 @@ L=$HOME/.cache/powos-verify.lock
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 q() { "$T/cdp.sh" eval shade "$1" 2>/dev/null | tail -1 | tr -d '"\\\r'; }
-state() { q 'window.powos.pad.state().then(String, () => "err")'; }
+# window.powos is a module export, not a global: the page's bridge is window.PowosHost + window.__powosHost (as
+# e2e-lib.sh hcall does). PB(method, args-json) -> Promise of the host's answer; defined inline in each eval.
+PB='((m,a)=>new Promise((ok,no)=>{const h=window.__powosHost,P=window.PowosHost;if(!h||!P||!P.postMessage)return no("no bridge");const r=h.resolve,j=h.reject,id=950000+Math.floor(Math.random()*9000);const done=f=>v=>{h.resolve=r;h.reject=j;f(v)};h.resolve=(i,v)=>i===id?done(ok)(v):r(i,v);h.reject=(i,x)=>i===id?done(no)(x):j(i,x);setTimeout(()=>done(no)("no answer"),8000);P.postMessage(JSON.stringify([id,m,JSON.stringify(a)]))}))'
+state() { q "$PB('pad.state',[]).then(String, () => 'err')"; }
 flip() { [ "$1" = true ] && echo false || echo true; }
 . "$here/window-lock.sh"; window_lock pad-tile 120 "${MAX_WAIT:-10800}"
 restore() {
-  if [ -n "${S0:-}" ] && [ "$(state)" != "$S0" ]; then q "window.powos.pad.overlay($S0).then(String)" >/dev/null; fi
+  if [ -n "${S0:-}" ] && [ "$(state)" != "$S0" ]; then q "$PB('pad.overlay',[$S0]).then(String)" >/dev/null; fi
   sh_ "cmd statusbar collapse; input keyevent 4; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
 }
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
@@ -63,7 +66,7 @@ case "$label" in "controller: on") tl=true ;; "controller: off") tl=false ;; *) 
 
 # Arm the page: a pointerdown on the tile stamps the tap; a watcher polls pad.state() until it changes.
 arm() {
-  q "(()=>{const w=window;if(w.__padH)document.removeEventListener('pointerdown',w.__padH,true);w.__padW={tap:null,flip:null,v:null};w.__padH=e=>{if(w.__padW.tap==null&&e.target.closest&&e.target.closest('[data-key=\"powos.pad\"]'))w.__padW.tap=performance.now()};document.addEventListener('pointerdown',w.__padH,true);const from=String($1);(async()=>{const t0=performance.now();while(performance.now()-t0<4000&&w.__padW.flip==null){const v=await w.powos.pad.state();if(String(v)!==from){w.__padW.flip=performance.now();w.__padW.v=String(v);break}await new Promise(r=>setTimeout(r,15))}})();return 'armed'})()" >/dev/null
+  q "(()=>{const w=window;if(w.__padH)document.removeEventListener('pointerdown',w.__padH,true);w.__padW={tap:null,flip:null,v:null};w.__padH=e=>{if(w.__padW.tap==null&&e.target.closest&&e.target.closest('[data-key=\"powos.pad\"]'))w.__padW.tap=performance.now()};document.addEventListener('pointerdown',w.__padH,true);const PBF=$PB;const from=String($1);(async()=>{const t0=performance.now();while(performance.now()-t0<4000&&w.__padW.flip==null){const v=await PBF('pad.state',[]);if(String(v)!==from){w.__padW.flip=performance.now();w.__padW.v=String(v);break}await new Promise(r=>setTimeout(r,15))}})();return 'armed'})()" >/dev/null
 }
 res() { q "[String(window.__padW.tap),String(window.__padW.flip),String(window.__padW.v)].join(' ')"; }
 # tap_tile FROM: taps the tile once; sets NEW to the state it reached, logs the tap-to-change time.
@@ -89,7 +92,7 @@ tap_tile "$A1"; B1=$NEW
 [ "$B1" = "$S0" ] || fail "tapped again, pad.state() is ${B1:-nothing}, not back to $S0"
 
 # Leave the overlay as it was (restore is a no-op when the taps did it), then close the shade.
-[ "$(state)" = "$S0" ] || { q "window.powos.pad.overlay($S0).then(String)" >/dev/null; sleep 0.5; }
+[ "$(state)" = "$S0" ] || { q "$PB('pad.overlay',[$S0]).then(String)" >/dev/null; sleep 0.5; }
 log "pad.state at end: $(state)"
 [ "$(state)" = "$S0" ] || fail "the overlay isn't back to its start state ($S0)"
 sh_ "cmd statusbar collapse; input keyevent 4; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1; chk close

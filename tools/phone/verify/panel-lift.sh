@@ -75,6 +75,12 @@ echo "window: $AL $AT $AR $AB (screen ${W}x${H})" | tee -a "$OUT/log.txt"
 # The window's middle, inset: its content, not its edges.
 CX=$((AL + (AR - AL) / 8)); CY=$((AT + (AB - AT) / 8)); CW=$(((AR - AL) * 3 / 4)); CH=$(((AB - AT) * 3 / 4))
 "$T/shot.sh" "$OUT/0-window.png" >/dev/null 2>&1 || fail "no screencap"
+# The drawer paints its own icons over the window (sharp by themselves: the whole-window crop read 2.7 -> 7.5 with the
+# window fully hidden, 20261024-181447-41425). So the drawer check measures a strip at the window's right, in the gutter
+# between the icon grid and the A-Z index, where only the blurred backdrop shows. (A rise there = window unblurred.)
+SX0=$((AR - (AR - AL) / 8)); SW=$(((AR - AL) / 20)); SY=$((AT + (AB - AT) / 5)); SH=$(((AB - AT) * 3 / 5))
+estrip() { "$FF" -loglevel error -i "$1" -vf "crop=$SW:$SH:$SX0:$SY,edgedetect=low=0.1:high=0.3,signalstats,metadata=print:file=-" -f null - 2>/dev/null | sed -n 's/.*YAVG=//p' | head -1; }
+S0=$(estrip "$OUT/0-window.png")
 E0=$(edges "$OUT/0-window.png"); echo "window sharp: edge energy $E0" | tee -a "$OUT/log.txt"
 [ "$(lifted before)" = no ] || fail "home is already over the windows before any panel"
 
@@ -94,7 +100,7 @@ sleep 3.6; chk drawer
 st=$(homeState); echo "home: $st" | tee -a "$OUT/log.txt"
 case $st in open*) ;; *) fail "the swipe up beside the window didn't open the drawer ($st)" ;; esac
 "$T/shot.sh" "$OUT/1-drawer.png" >/dev/null 2>&1
-E1=$(edges "$OUT/1-drawer.png"); echo "under the drawer: edge energy $E1" | tee -a "$OUT/log.txt"
+E1=$(edges "$OUT/1-drawer.png"); S1=$(estrip "$OUT/1-drawer.png"); echo "under the drawer: whole-window edge energy $E1 (icons count, not used); gutter strip $S0 -> $S1" | tee -a "$OUT/log.txt"
 sh_ "logcat -t '$MARK' -s PowosPanelLift:I PowosPanelLift:W" | tail -5 | tee -a "$OUT/log.txt" > "$OUT/lift-log.txt"
 [ "$(lifted open)" = yes ] && pass "drawer open: home's window is stacked over the task area (SurfaceFlinger: $(head -c 160 "$OUT/sf-open-rel.txt" | tr '\n' ' '))" ||
   fail "drawer open but home's window isn't relative to the anchor (sf-open.txt; PanelLift: $(tail -1 "$OUT/lift-log.txt"))"
@@ -102,8 +108,9 @@ sh_ "logcat -t '$MARK' -s PowosPanelLift:I PowosPanelLift:W" | tail -5 | tee -a 
 # a note: it is absent when the lift happened before MARK or rolled out of logcat (2026-10-24 20261024-155708-850 FAILed
 # on the missing line while the z-order PASSed).
 grep -q "home over the windows" "$OUT/lift-log.txt" && pass "PanelLift: $(grep "home over the windows" "$OUT/lift-log.txt" | tail -1 | sed 's/.*: //')" || note "no 'home over the windows' line in logcat since the swipe (the z-order above is the check)"
-awk -v a="$E0" -v b="$E1" 'BEGIN{exit !(b < a * 0.6)}' && pass "the window under the drawer is blurred (edge energy $E0 -> $E1)" ||
-  fail "the window under the drawer isn't blurred (edge energy $E0 -> $E1; 1-drawer.png)"
+awk -v a="$S0" 'BEGIN{exit !(a > 1)}' || note "the window's gutter strip is flat even sharp ($S0): the blur check below proves little"
+awk -v a="$S0" -v b="$S1" 'BEGIN{exit !(b < a * 0.6)}' && pass "the window under the drawer is blurred (gutter strip edge energy $S0 -> $S1)" ||
+  fail "the window under the drawer isn't blurred (gutter strip edge energy $S0 -> $S1; 1-drawer.png)"
 case $st in *over-windows*) pass "home's pages hidden over the window" ;; *) note "home's pages not marked over-windows ($st)" ;; esac
 "$A" pull /data/local/tmp/pl-open.mp4 "$OUT/open.mp4" >/dev/null 2>&1 && {
   "$FF" -loglevel error -y -i "$OUT/open.mp4" -vf "select='between(t\,0.3\,1.3)',scale=180:-1,drawtext=text='%{n} %{pts\:flt}':x=2:y=2:fontsize=12:fontcolor=yellow:box=1:boxcolor=black,tile=10x4" -fps_mode passthrough -frames:v 1 "$OUT/open-sheet.png" 2>/dev/null
