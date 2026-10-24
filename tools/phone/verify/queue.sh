@@ -178,13 +178,25 @@ add)
   # f112: a board task id that doesn't exist was accepted and queued anyway - its result then had nowhere real to
   # land. Refuse it, with a did-you-mean from the open board, unless QUEUE_NEW_TASK=1 (the task is made for real,
   # `powos agents task add`, before or right after - never implicitly by queuing a check against a name nobody added).
+  # f164: when the board is unreachable, try the offline cache (lib/ai/agents/powos-agents-cli has one as of commit
+  # 1e618e92); only if that's also gone, allow with a warning.
   if [ -n "$REPO" ] && [ -z "${QUEUE_NEW_TASK:-}" ] && command -v python3 >/dev/null; then
     ids=$(python3 "$REPO/lib/ai/agents/powos-agents-cli" task list --all --json 2>/dev/null | python3 -c 'import json,sys
 try: print("\n".join(t.get("id","") for t in json.load(sys.stdin)))
 except Exception: pass' 2>/dev/null)
+    board_answered=1
+    if [ -z "$ids" ]; then
+      # Board may be unreachable; try the offline cache
+      ids=$(python3 "$REPO/lib/ai/agents/powos-agents-cli" task list --all --json --offline 2>/dev/null | python3 -c 'import json,sys
+try: print("\n".join(t.get("id","") for t in json.load(sys.stdin)))
+except Exception: pass' 2>/dev/null) || ids=
+      board_answered=0
+    fi
     if [ -n "$ids" ] && ! grep -qxF "$task" <<<"$ids"; then
       like=$(grep -i "${task:0:8}" <<<"$ids" | head -3 | tr '\n' ' ')
       echo "queue.sh: no board task '$task'${like:+ - did you mean: $like}. Add it first (powos agents task add ...), or QUEUE_NEW_TASK=1 to queue against it anyway." >&2; exit 2
+    elif [ -z "$ids" ] && [ $board_answered = 0 ]; then
+      echo "queue.sh: board not reachable and no offline cache - queuing $task anyway, but the result may not land if it doesn't exist." >&2
     fi
   fi
   case "$screen" in ""|inner|cover) ;; *) echo "queue.sh: --screen inner|cover"; exit 2 ;; esac
@@ -300,7 +312,7 @@ list)
   pi=$(paused_info)
   echo "runner: $(runner_up && echo running || echo idle)$([ -z "$pi" ] || echo ", PAUSED $pi (queue.sh resume)")$(agent_loaded && echo " (launchd $LABEL)")"
   echo "emulator lane: $(ls "$E"/*.job 2>/dev/null | wc -l | tr -d ' ') queued, runner $(alive_runner "$(cat "$E/runner.lock/pid" 2>/dev/null)" && echo running || echo idle)$(n=$(ls "$E"/pending/*.sh 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || echo ", $n results waiting for the board")"
-  echo "last results:"; ls -t "$Q/done" 2>/dev/null | grep "\.log$" | head -8 | while read -r f; do echo "  $f: $(tail -1 "$Q/done/$f")"; done ;;
+  echo "last results:"; { ls -t "$Q/done" 2>/dev/null | grep "\.log$" | head -8 | while read -r f; do echo "  $f: $(tail -1 "$Q/done/$f")"; done; } || echo "  no results yet" ;;
 run)
   [ -n "$REPO" ] || { echo "queue.sh run: not in a PowOS checkout"; exit 2; }
   # Nothing queued (launchd starts it at load): gone again at once.
