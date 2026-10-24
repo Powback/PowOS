@@ -87,6 +87,44 @@ class WaitGuardTests(unittest.TestCase):
         out = self.run_hook("for f in a b c; do process \"$f\"; done", run_in_background=True)
         self.assertAllowed(out)
 
+    # -- direct phone input (f24): adb.sh/user.sh input tap/swipe/keyevent outside the queue ----------
+    def test_adb_input_tap_is_denied(self):
+        out = self.run_hook("tools/phone/adb.sh shell input tap 500 500")
+        self.assertDenied(out, "verify queue")
+
+    def test_adb_input_swipe_is_denied(self):
+        out = self.run_hook("tools/phone/adb.sh shell input swipe 100 1000 100 500")
+        self.assertDenied(out, "verify queue")
+
+    def test_adb_input_keyevent_is_denied(self):
+        out = self.run_hook("tools/phone/adb.sh shell input keyevent 4")
+        self.assertDenied(out, "verify queue")
+
+    def test_user_sh_input_tap_is_denied(self):
+        out = self.run_hook("tools/phone/user.sh input tap 10 10")
+        self.assertDenied(out, "verify queue")
+
+    def test_adb_input_tap_with_lock_held_is_allowed(self):
+        out = self.run_hook("LOCK_HELD=1 tools/phone/adb.sh shell input tap 500 500")
+        self.assertAllowed(out)
+
+    def test_adb_input_tap_with_lock_held_zero_is_still_denied(self):
+        # LOCK_HELD=0 is the documented "not held" value (window-lock.sh etc.) - not a bypass.
+        out = self.run_hook("LOCK_HELD=0 tools/phone/adb.sh shell input tap 500 500")
+        self.assertDenied(out, "verify queue")
+
+    def test_emu_lock_held_bypass_is_allowed(self):
+        out = self.run_hook("POWOS_DEVICE=emu LOCK_HELD=1 tools/phone/adb.sh shell input tap 1 1")
+        self.assertAllowed(out)
+
+    def test_adb_shell_without_input_is_allowed(self):
+        out = self.run_hook("tools/phone/adb.sh shell dumpsys power | head")
+        self.assertAllowed(out)
+
+    def test_main_session_allowed_for_direct_phone_input(self):
+        out = self.run_hook("tools/phone/adb.sh shell input tap 500 500", transcript_path=MAIN_TRANSCRIPT)
+        self.assertAllowed(out)
+
     # -- scoping: subagents only, Bash only ---------------------------------------------------------
     def test_main_session_is_allowed_even_for_a_spin_loop(self):
         out = self.run_hook("while pgrep -f some-job >/dev/null; do :; done", transcript_path=MAIN_TRANSCRIPT)

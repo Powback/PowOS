@@ -18,7 +18,7 @@ For files: agents edit files in the SHARED checkout (powos-multiplatform) or run
 emu-runner, ship-runner, ship-runner-apk; marked by .powos-runner-checkout), and only find out when land.sh
 refuses to land. This hook prevents that early, requiring agents to make their own worktree instead.
 
-Denies three shapes, for SUBAGENTS only:
+Denies four shapes, for SUBAGENTS only:
   1. A busy spin loop (Bash): `while`/`until` ... `do :;` or `do true;` ... with no `sleep` anywhere in the
      command at all. Always denied (even backgrounded - it just pegs CPU for nothing).
   2. A blocking sleep loop (Bash): `while`/`until` loop whose body sleeps (`do ... sleep N ... done`), when
@@ -27,6 +27,12 @@ Denies three shapes, for SUBAGENTS only:
      allowed.
   3. A file edit (Edit/Write/MultiEdit): `file_path` is inside powos-multiplatform or inside a checkout with
      a .powos-runner-checkout marker in one of its parent dirs.
+  4. A direct phone input (Bash): adb.sh/user.sh running `input tap`/`input swipe`/`input keyevent` straight
+     at the device, outside the verify queue (f24: a desktop agent's direct input during a live E2E round
+     invalidated that round's page-swipe step - nothing stopped it from racing a check mid-run in a locked
+     window). `LOCK_HELD=<nonzero>` anywhere in the command is the documented escape hatch - the same text
+     convention tools/phone/verify/*.sh scripts and .claude/skills/powos-phone/SKILL.md already use for "I
+     hold the lock (or don't need it, e.g. the emulator) - run anyway"; trusted here at the same level.
 
 Anything else (not a subagent, not Bash/Edit/Write/MultiEdit, no loop, or a backgrounded sleep loop, or a
 non-shared file path): prints nothing and exits 0, which is "defer" - the normal permission flow decides. This
@@ -53,6 +59,12 @@ SLEEP_WORD_RE = re.compile(r'\bsleep\b')
 
 # while/until ... do ... sleep N ... done - fine backgrounded, blocks the call otherwise.
 SLEEP_LOOP_RE = re.compile(r'\b(?:while|until)\b[\s\S]{0,400}?\bdo\b[\s\S]{0,400}?\bsleep\s+\d')
+
+# adb.sh/user.sh driving the phone's touchscreen/keys directly (f24) - the thing the verify queue
+# exists to serialize. Bounded lookahead so a long unrelated command can't make this pathological.
+PHONE_INPUT_RE = re.compile(r'\b(?:adb|user)\.sh\b[\s\S]{0,200}?\binput\s+(?:tap|swipe|keyevent)\b')
+# The documented bypass: LOCK_HELD=1 (or any non-"0" value) anywhere in the command.
+LOCK_HELD_SET_RE = re.compile(r'\bLOCK_HELD=(?!0\b)\S')
 
 
 def _is_subagent(inp):
@@ -125,6 +137,13 @@ def main():
             _deny("Blocking wait loop (while/until ... sleep ... done) denied - not run with "
                   "run_in_background, so it blocks this call until the loop exits (and can hit the 10-min "
                   "cap while waiting on a background job). " + REFUSAL_TAIL)
+            return
+
+        if PHONE_INPUT_RE.search(cmd) and not LOCK_HELD_SET_RE.search(cmd):
+            _deny("Direct phone input (adb.sh/user.sh input tap/swipe/keyevent) denied outside the verify "
+                  "queue - it can race a check running in a locked window (f24). Queue it instead: "
+                  "tools/phone/verify/queue.sh add <task> <check>; or, only once you've checked the lock "
+                  "yourself (or you're on the emulator), prefix the command with LOCK_HELD=1.")
             return
 
     # Handle Edit/Write/MultiEdit tools: shared checkout checks
