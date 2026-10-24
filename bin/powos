@@ -202,7 +202,8 @@ Dev & AI:
   ai --session <id>   Resume a conversation
   ai manager          Persistent PowOS manager (streaming, per-dir memory, live inbox; --help: its flags)
   sandbox run|caps|setup   TypeScript jobs in the manager's sandbox, with limits (powos sandbox help)
-  comms send <to> <msg>   Message another agent's inbox (health/coder/devops...)
+  comms send <to> <msg|-> Message another agent's inbox (health/coder/devops...); - reads stdin
+                          (backticks/$() in msg: use `- <<'EOF' ... EOF`, never inline - f18)
   comms watch --agent R   Park until that role gets mail (yield, no polling)
   comms inbox|agents      Show an inbox / list all inboxes
   agents task add|set|done|list   The work board: what each agent is on (PowOS AI page)

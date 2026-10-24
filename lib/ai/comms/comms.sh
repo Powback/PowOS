@@ -97,8 +97,11 @@ list_agents. wait_for_message BLOCKS until mail arrives (yield-while-idle, no
 polling); the model can also Monitor the inbox path directly.
 
 Usage:
-  powos comms send <to> <message...> [--priority low|normal|high|urgent]
-                                     Send to an agent role's inbox.
+  powos comms send <to> <message...|-> [--priority low|normal|high|urgent]
+                                     Send to an agent role's inbox. -: the message from stdin
+                                     (f18: a body with backticks/$(...) typed inline gets expanded
+                                     by YOUR shell before send ever sees it - use `send <to> - <<'EOF'
+                                     ... EOF` so the quoted heredoc passes it through literally).
   powos comms notify <message...|-> [--priority P] [--from NAME] [--batch KEY [--window S]] [--silent]
                                      Notify the human user (+ desktop toast, phone notification).
                                      -: the message from stdin. --batch: notices with the same key
