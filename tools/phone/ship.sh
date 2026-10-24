@@ -355,7 +355,9 @@ run)
       alv=$(cat "$Q/apps-live" 2>/dev/null || true)
       abase=$inst
       [ -n "$alv" ] && abase=$alv
-      [ -n "$live" ] && [ -n "$abase" ] && git merge-base --is-ancestor "$abase" "$live" 2>/dev/null && abase=$live
+      # HACK-fix (2026-10-24): this used to advance abase to the SHELL-live tip, which hid every apps/<app>/ change from
+      # the apps ship (shell ships never build apps; app-api's detail page + add-app fix sat unshipped, journey failed).
+      # abase moves only when an apps ship records $Q/apps-live (or the APK was installed).
       achg=; [ -n "$abase" ] && git cat-file -e "$abase^{commit}" 2>/dev/null && achg=$(apps_changed "$abase" "$T")
       if [ -n "$achg" ] && ! apk_alive && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ]; then
         if verify_held; then echo $$ > "$Q/wants-phone"
