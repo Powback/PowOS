@@ -72,6 +72,7 @@ s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$(sh_ "settings get global enable_freeform_support")" = 1 ] || fail "enable_freeform_support isn't 1"
 # The committed state flips to OPENED before display 0 is the inner screen: 3 s once wasn't enough (right after
 # sketch-rotate, folded: OPENED, wm size still the cover's 1116x2484) - wait for the inner size, up to 15 s.
+claim_pkg $PKG
 device_state_set 3; sleep 2; chk unfold
 # mCommittedState can take longer than 2 s to reach OPENED on the emulator's software renderer (2026-10-24: still
 # CLOSED at 2 s there) - up to 10 s more, as wsize's loop below already allows for the screen size.
@@ -95,7 +96,6 @@ if kg | grep -q true; then
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock" && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock
-claim_pkg $PKG
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 hemit system.home null
 n=$(npages); echo "home pages: $n, on $(onpage)" | tee -a "$OUT/log.txt"

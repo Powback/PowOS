@@ -37,6 +37,7 @@ s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$(sh_ "settings get global enable_freeform_support")" = 1 ] || fail "enable_freeform_support isn't 1"
 # The committed state flips to OPENED before display 0 is the inner screen: 3 s once wasn't enough (right after
 # sketch-rotate, folded: OPENED, wm size still the cover's 1116x2484) - wait for the inner size, up to 15 s.
+claim_pkg $PKG
 sh_ "cmd device_state state 3"; sleep 2; chk unfold
 sh_ "dumpsys device_state | grep -m1 mCommittedState" | grep -q OPENED || fail "the inner screen didn't come on"
 wsize() { sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1; }
@@ -53,7 +54,6 @@ if kg | grep -q true; then
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock" && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock
-claim_pkg $PKG
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 # The fix's APK not installed yet (its tasks carry "floats" unfolded): no verdict, again next window (rc 3).
 fl=$(hcall tasks.list "[]" "l=>l.some(t=>t.floats)?'yes':'no'")

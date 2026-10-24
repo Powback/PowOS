@@ -49,6 +49,7 @@ lifted() {
 
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
+claim_pkg $PKG
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
 W=${WH% *}; H=${WH#* }
@@ -61,7 +62,6 @@ if kg | grep -q true; then
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock" && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock
-claim_pkg $PKG
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; logcat -c"; sleep 2; chk home
 case $(homeState) in open*) sh_ "input keyevent BACK"; sleep 1 ;; esac
 key=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$PKG\\//.test(a.key))||{}).key||'ERR not in the list'")

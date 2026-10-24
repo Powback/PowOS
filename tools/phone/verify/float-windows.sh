@@ -45,6 +45,7 @@ hcall() { local v i; for i in 1 2 3 4; do v=$(hcall_once "$@"); case $v in ""|"c
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
 [ "$(sh_ "settings get global enable_freeform_support")" = 1 ] || fail "enable_freeform_support isn't 1 (OxygenOS coerces freeform to full screen)"
+claim_pkg $PKG
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
 sh_ "dumpsys device_state | grep -m1 mCommittedState" | tee -a "$OUT/log.txt" | grep -q OPENED || fail "the inner screen didn't come on (device_state not OPENED)"
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
@@ -61,7 +62,6 @@ if sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock"; then
   sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5
 fi
 chk lock
-claim_pkg $PKG
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -q "com.powos.app" || fail "home isn't in front after the home intent"
 "$T/shot.sh" "$OUT/home.png"
