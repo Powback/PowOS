@@ -30,6 +30,13 @@ trap 'emu_lock_release; rm -rf "$QUEUE_COPY" "$L"' EXIT
 trap 'for c in $(pgrep -P $$); do killtree $c; done; exit 143' TERM
 ER=$(cd "$here/../../.." && pwd -P)   # the checkout the jobs run in (the lane's, or this one under QUEUE_NO_TREE)
 emu() { "$ER/tools/emu/emu.sh" "$@" >> "$E/runner.log" 2>&1; }
+# runner_note: $E/runner.log (adb/emu.sh's own output, Android's own stack traces) is the ONLY place an
+# INVALID/SKIP's real cause lives - nothing in emu.sh's own usage text points to it (f128, f148). Every INVALID/SKIP
+# result line now carries its path plus its last 3 error-ish lines inline, instead of an agent reading it by hand.
+runner_note() { local t
+  t=$(tail -c 8000 "$E/runner.log" 2>/dev/null | grep -iE 'error|exception|fatal|fail' | tail -3)
+  [ -n "$t" ] || t=$(tail -3 "$E/runner.log" 2>/dev/null)
+  printf '%s (%s)' "$E/runner.log" "$(printf '%s' "$t" | tr '\n' ';' | sed 's/;$//; s/^; *//')"; }
 emu_commit() { POWOS_DEVICE=emu "$phone/adb.sh" shell cat /data/local/tmp/powos-emu-commit 2>/dev/null | tr -d '\r'; }
 # emu_lock_acquire: hold the emulator lock for the entire job run (prevents other agents from interfering).
 emu_lock_acquire() {
@@ -76,7 +83,7 @@ while ls "$E"/*.job >/dev/null 2>&1; do
     for j in "$E"/*.job; do [ -f "$j" ] || continue
       task=; close=0; name=; need=; cmd=(); . "$j"; n=$(basename "$j" .job)
       echo "INVALID: the emulator didn't start (tools/emu/emu.sh start; $E/runner.log)" > "$Q/done/$n.log"
-      mv "$j" "$Q/done/$n.job"; result "$j" "$n" "INVALID" "the emulator didn't start" 0; done
+      mv "$j" "$Q/done/$n.job"; result "$j" "$n" "INVALID" "the emulator didn't start - $(runner_note)" 0; done
     flush; break
   fi
   ec=$(emu_commit)
@@ -106,6 +113,7 @@ while ls "$E"/*.job >/dev/null 2>&1; do
     echo "$r: $(tail -1 "$log")" >> "$log"
     mv "$j" "$Q/done/$n.job"
     line=$(grep '^FAIL' "$log" | head -1); [ $rc != 0 ] && [ -n "$line" ] || line=$(tail -2 "$log" | head -1)
+    case $r in INVALID*|SKIP*) line="$line - $(runner_note)" ;; esac
     result "$j" "$n" "$r" "$line" "$sh"; flush
     echo "$(date +%T) $n: $r"
   done

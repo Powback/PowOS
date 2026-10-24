@@ -334,6 +334,10 @@ list)
   pi=$(paused_info)
   echo "runner: $(runner_up && echo running || echo idle)$([ -z "$pi" ] || echo ", PAUSED $pi (queue.sh resume)")$(agent_loaded && echo " (launchd $LABEL)")"
   echo "emulator lane: $(ls "$E"/*.job 2>/dev/null | wc -l | tr -d ' ') queued, runner $(alive_runner "$(cat "$E/runner.lock/pid" 2>/dev/null)" && echo running || echo idle)$(n=$(ls "$E"/pending/*.sh 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || echo ", $n results waiting for the board")"
+  # Depth alone (above) doesn't say where YOUR job sits - the queue is FIFO across every agent (f149), so a job
+  # queued behind someone else's batch had no way to tell "3rd in line" from "30th" without listing done/ by hand.
+  # Filenames sort chronologically (date-prefixed, see `add`'s `j=...`), so ls's default sort IS run order.
+  ls "$E"/*.job >/dev/null 2>&1 && { i=0; for ej in $(ls "$E"/*.job | sort); do i=$((i + 1)); echo "    $i) $(basename "$ej" .job)"; done; }
   echo "last results:"; { ls -t "$Q/done" 2>/dev/null | grep "\.log$" | head -8 | while read -r f; do echo "  $f: $(tail -1 "$Q/done/$f")"; done; } || echo "  no results yet" ;;
 run)
   [ -n "$REPO" ] || { echo "queue.sh run: not in a PowOS checkout"; exit 2; }
