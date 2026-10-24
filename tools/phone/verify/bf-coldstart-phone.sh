@@ -19,6 +19,12 @@
 #   env:K=V   K=V in the environment of the Steam this check starts (all it launches inherits it), e.g.
 #             env:PRESSURE_VESSEL_GENERATE_LOCALES=0
 #   keep      leave the last setup in place at the end (default: the compat tool + launch options as they were)
+#   via:steam the runs that follow launch the way Steam's own Library does (`steam steam://rungameid/<id>` into Steam,
+#             no powos-open-task): only KWin's own export can show the game then (2026-10-24: Broforce ran unseen)
+#             via:drawer back to the default
+# Every run asserts the game's window became an Android task (KWin's "window task N live ... for <title>" in
+# hyprland.log, FAIL export-<variant> otherwise, with the window's X state) and asks the Mac side for a screenshot
+# ("SHOT <name>", bf-coldstart.sh takes it with shot.sh).
 # Also per run: Steam's state at the tap, shader cache sizes before/after, the Unity renderer (Player.log).
 # "STAGES <variant> ..." lines, RESULT last.
 set -uo pipefail
@@ -103,6 +109,26 @@ game_exe() { local x c; for x in $(tree "$1"); do c=$(tr '\0' ' ' < "/proc/$x/cm
     case $(readlink "/proc/$x/exe") in *FEX* | *wine*) ;; *) continue ;; esac  # emulated (FEX) or in Wine (ARM64 Proton)
     printf '%s' "$c" | grep -q 'proton\|reaper\|python\|pressure-vessel\|steam-launch-wrapper\|unity-screen\|entry-point\|steam-runtime\|steam\.exe\|SteamLaunch' && continue
     return 0; done; return 1; }
+HYPR=/run/powos-app/hyprland.log
+# exported <variant> <hyprland.log line at the tap> <X window>: the game's window is an Android task (KWin's word: its
+# task went live, a PowosWindowActivity drew it) within 20 s of the window, else FAIL export-<variant> + its X state.
+exported() {
+  local t line=""
+  for t in $(seq 80); do
+    # awk, not tail | grep -m1: grep's early exit SIGPIPEs tail and pipefail calls the match a miss
+    line=$(awk -v n="$(($2 + 1))" -v k="live, " -v w="for \"$WIN_NAME" 'NR >= n && index($0, k) && index($0, w) {print; exit}' "$HYPR" 2>/dev/null)
+    [ -n "$line" ] && break
+    touched; sleep 0.25
+  done
+  if [ -n "$line" ]; then
+    echo "   exported: ${line#*kwin_backend_anland: }"
+    echo "SHOT ${1}-$(date +%H%M%S)"; sleep 6   # the Mac side's screenshot of the game on screen
+  else
+    fail "export-$1" "the game's window is no Android task 20 s after it showed (nothing on the phone shows it)"
+  fi
+  echo "   KWin: $(tail -n +"$(($2 + 1))" "$HYPR" 2>/dev/null | grep -a -E 'has its surface|full-screen window|opened as a task|window task [0-9]+ live|new windows as tasks' | sed 's/kwin_backend_anland: //' | tail -6 | cut -c1-160 | tr '\n' '|')"
+  echo "   X: $(xwininfo -id "$3" 2>/dev/null | awk '/Map State|Override Redirect|Width|Height/ {$1=$1; printf "%s; ", $0}')$(xprop -id "$3" _NET_WM_STATE _NET_WM_WINDOW_TYPE WM_TRANSIENT_FOR 2>/dev/null | tr '\n' ' ')"
+}
 run() {  # run <variant> <n>
   local v=$1 t0 now_ st r=0 x k=-1
   declare -gA seen=()
@@ -120,7 +146,12 @@ run() {  # run <variant> <n>
   local cb; cb=$(stat -c %s "$S/logs/console_log.txt" 2>/dev/null || echo 0)
   local up=; [ $v != cold ] && [ -d "/proc/$(steam_pid)" ] && up=1
   mine=1; pill "cold start timing: $v #$2 - tap"; t0=$(now)
-  ( open_task 400 "steam_app_$APP" > "$T/open.status" ) &
+  local hl; hl=$(wc -l < "$HYPR" 2>/dev/null || echo 0)
+  if [ "${VIA:-drawer}" = steam ]; then
+    ( setsid -f steam "steam://rungameid/$APP" >"$T/open.out" 2>&1 </dev/null; echo "none (Steam's own launch, the Library's path)" > "$T/open.status" ) &
+  else
+    ( open_task 400 "steam_app_$APP" > "$T/open.status" ) &
+  fi
   # 400 s cold (Steam's start, maybe a depot download); 150 s warm (~35 s expected): past that it is Steam's
   # freeze/thaw hanging the launch (INVALID below), and the check stays inside its 300 s budget to say so.
   local stacks=0
@@ -206,6 +237,7 @@ run() {  # run <variant> <n>
   if [ -n "${seen[restart]:-}" ]; then fail "restart-$v" "the running Steam was restarted for the launch (a new client ${seen[restart]} ms after the tap) instead of taking it"
   fi
   if [ -n "${seen[window]:-}" ]; then
+    exported "$v" "$hl" "$W"
     pill "cold start timing: $v - first frame"
     x=$(first_frame 90); [ "$x" != none ] && seen[frame]=$(ms "$t0" "$x")
   elif [ -n "${seen[handoff]:-}" ]; then fail "handoff-$v" "the running Steam didn't log the launch's URL in 20 s (handoff lines above)"
@@ -265,7 +297,7 @@ powos sleep never --remove steam >/dev/null 2>&1
 n=0
 [ $# -gt 0 ] || set -- cold steam fexcache fexcache
 for v in "$@"; do
-  case $v in keep) KEEP=1; continue ;; fetch) fetch; continue ;; cfg:* | opt:* | env:*) setup "$v" || break; continue ;; esac
+  case $v in keep) KEEP=1; continue ;; fetch) fetch; continue ;; via:*) VIA=${v#via:}; echo "== launch via $VIA"; continue ;; cfg:* | opt:* | env:*) setup "$v" || break; continue ;; esac
   n=$((n + 1)); run "$v" "$n"
   if [ "$v" = fexcache ]; then
     pill "FEX: compiling the code cache"

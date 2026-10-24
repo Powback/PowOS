@@ -2,7 +2,7 @@
 # bf-coldstart.sh [app:<appid>] [win:<window title>] [setup tokens] [cold|steam|fexcache]...: (Mac side, queue it:
 # queue.sh add <board-task> bf-coldstart.sh) where a Steam game's launch time goes (default Broforce 274190; any
 # installed game with app:<id>, e.g. app:1167630 Teardown; its window title defaults to its Steam name): per variant, tap (the drawer's path) -> Steam's launch -> pressure-vessel -> wineserver
-# -> the game's exe -> its window -> its first new frame, Steam's state at the tap and the shader/FEX cache sizes
+# -> the game's exe -> its window -> its Android task (+ a screenshot) -> its first new frame, Steam's state at the tap and the shader/FEX cache sizes
 # (bf-coldstart-phone.sh). Default: cold steam fexcache fexcache (~15 min). Closes Steam + the game after. Exit 3 on a
 # real touch.
 set -uo pipefail
@@ -34,12 +34,23 @@ for f in bf-coldstart-phone.sh bf-lib.sh bf-stop.sh; do "$A" push "$here/$f" /da
 stop_phone() { "$A" shell "su -c 'pkill -TERM -f powos-bf-coldstart-phone.sh'" >/dev/null 2>&1; kill "$job" 2>/dev/null; exit 3; }
 { "$A" shell "su -c 'install -m 755 /data/local/tmp/powos-open-task /data/powos/root/usr/local/bin/powos-open-task && cp /data/local/tmp/powos-bf-coldstart-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-steam-compat && sh /data/powos/powos-run.sh \"env$envs bash /var/tmp/powos-bf-coldstart-phone.sh $*\"'" \
   | sed -l $'s/\r$//' | tee "$OUT/run.txt"; } &
-job=$!; trap stop_phone TERM INT HUP; wait "$job"; trap - TERM INT HUP
+job=$!
+# "SHOT <name>" from the phone side (the game's window just became a task): a screenshot of what the user would see.
+shots() { local n=0 k name
+  while kill -0 "$job" 2>/dev/null; do
+    k=$(grep -c '^SHOT ' "$OUT/run.txt" 2>/dev/null); k=${k:-0}
+    while [ "$n" -lt "$k" ]; do n=$((n + 1))
+      name=$(grep '^SHOT ' "$OUT/run.txt" | sed -n "${n}p" | cut -d' ' -f2 | tr -cd 'A-Za-z0-9#:_-')
+      "$here/../shot.sh" "$OUT/$name.png" >/dev/null 2>&1; echo "screenshot $name: $OUT/$name.png (shot.sh exit $?)" >> "$OUT/shots.txt"
+    done; sleep 1
+  done; }
+shots & shooter=$!
+trap stop_phone TERM INT HUP; wait "$job"; trap - TERM INT HUP; kill "$shooter" 2>/dev/null
 "$A" shell "su -c 'rm -f /data/local/tmp/powos-open-task /data/local/tmp/powos-bf-coldstart-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-bf-coldstart-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-stop.sh'"
 # A Steam dialog the phone side grabbed (no launch chain: what Steam asked).
 "$A" exec-out "su -c 'tar -C /data/powos/root/tmp -cz bf-cold-dialog 2>/dev/null; rm -rf /data/powos/root/tmp/bf-cold-dialog'" 2>/dev/null | tar -C "$OUT" -xzf - 2>/dev/null \
   && [ -d "$OUT/bf-cold-dialog" ] && echo "steam dialog: $OUT/bf-cold-dialog/"
-echo "artefacts: $OUT/run.txt"
+echo "artefacts: $OUT/run.txt"; cat "$OUT/shots.txt" 2>/dev/null
 grep -q "^RESULT" "$OUT/run.txt" || { grep -q "^user input\|^stopped from outside\|^not ready" "$OUT/run.txt" && exit 3; echo "FAIL run: no RESULT line"; exit 1; }
 grep "^RESULT" "$OUT/run.txt" | tail -1
 grep -q "^RESULT.*FAIL" "$OUT/run.txt" && exit 1

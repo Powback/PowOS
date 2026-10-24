@@ -24,6 +24,8 @@
 #               the guard every touch) and raised with their task, so taps reach Steam, its dialogs, any X11 window
 #   0023        ours: KWin tells the app its session (a uuid per KWin) and the task ids it has ("session"), also on the
 #               app's "hello": the app finishes window tasks of an earlier KWin instead of showing new windows in them
+#   0024        ours: an Xwayland window that goes full screen before it has its wl_surface (a game) still opens as a
+#               task: one wait per window re-runs the full-screen / new-window decision once the surface is there
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -33,7 +35,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.27
+pkgrel=3.28
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -72,11 +74,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0020-backends-anland-touches-go-to-windows-that-take-them.patch
           0021-backends-anland-a-floating-window-task-s-own-full-screen.patch
           0022-backends-anland-windows-a-task-shows-are-shown-to-X-too.patch
-          0023-backends-anland-tell-the-app-which-KWin-it-is-and-its-live-tasks.patch)
+          0023-backends-anland-tell-the-app-which-KWin-it-is-and-its-live-tasks.patch
+          0024-backends-anland-a-window-full-screen-before-its-surface-opens-as-a-task.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver
