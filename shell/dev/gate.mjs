@@ -270,7 +270,9 @@ async function overpullKit() {
   const frames = (n = 2) => new Promise((ok) => { const step = (k) => (k ? requestAnimationFrame(() => step(k - 1)) : ok()); step(n); });
   const cells = () => [...document.querySelectorAll(".cc3-list .cc3-cell")];
   const shown = () => cells().filter((e) => e.getClientRects().length && Number(getComputedStyle(e).opacity) > 0.05).length;
-  const UNDER = ".panel-body.together .cc ~ .notif-bar";
+  // The notifications list: always there, even empty (the emulator has no notifications, so their count bar is absent).
+  // tools/phone/verify/shade-overpull.sh reads the same node - keep them the same.
+  const UNDER = ".panel-body.together .cc ~ .notif-items";
   const under = () => document.querySelector(UNDER)?.getBoundingClientRect().top ?? NaN;
   const row = () => cells().slice(0, 6).map((e) => Math.round(e.getBoundingClientRect().top)).join();
   // The panel's own edge on screen (its frost's bottom), its grip, and the last thing in it (the gap under that).

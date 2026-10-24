@@ -2,7 +2,7 @@
 # lanes: emu phone
 # shade-overpull.sh (Mac side, board "shade over-pull moves the whole panel"): opens the shade (an injected pull on
 # the status bar's right half), then pulls further with a held finger (motionevents) and reads over CDP while it's
-# held: what's under the control center (the notifications' header) must have moved down with the finger and more
+# held: what's under the control center (the notifications list, there even empty) must have moved down with the finger and more
 # toggles than the row must show, the row itself in place. Let go past the threshold: the rest stays shown. Back
 # closes it. Changes no setting (controls.layout is never touched). Exit 3 on a real touch.
 set -u
@@ -15,7 +15,7 @@ read -r W H < <(adb shell wm size | sed -nE 's/.*: ([0-9]+)x([0-9]+).*/\1 \2/p' 
 W=${W:-1116}; H=${H:-2484}
 probe='JSON.stringify({v3:!!document.querySelector(".cc.v3"),whole:!!document.querySelector(".cc3-list.whole"),
 peek:!!document.querySelector(".cc3-grid.cc-peek"),
-under:Math.round(document.querySelector(".panel-body.together .cc ~ .notif-bar")?.getBoundingClientRect().top??-1),
+under:Math.round(document.querySelector(".panel-body.together .cc ~ .notif-items")?.getBoundingClientRect().top??-1),
 row:[...document.querySelectorAll(".cc3-list .cc3-cell")].slice(0,6).map(e=>Math.round(e.getBoundingClientRect().y)).join("_"),
 shown:[...document.querySelectorAll(".cc3-list .cc3-cell")].filter(e=>e.getBoundingClientRect().height>0&&+getComputedStyle(e).opacity>0.05).length})'
 val() { sed -nE "s/.*\"$1\":\"?([^,\"}]*).*/\1/p" <<<"$2"; }
