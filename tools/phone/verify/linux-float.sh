@@ -143,6 +143,12 @@ r=$(hcall apps.launch "['l:org.kde.kate']" "()=>'ok'"); [ "$r" = ok ] || fail "a
 KT=$(new_tasks 30 "$before" | tail -1); chk kate
 [ -n "$KT" ] || fail "no window task for Kate within 30 s"
 sleep 4; floats "$KT" Kate; draws "$KT" kate; pass "Kate from the launcher floats (task $KT) and draws its content"
+# 2c. Opening Kate leaves Dolphin as it was (2026-10-24: KWin's second "open" for Kate raised its task from recents,
+# which sent Dolphin's task TO_BACK - Dolphin minimised as Kate showed). Both stay visible, neither minimised.
+vis() { sh_ "dumpsys activity activities" | grep -m1 -E "Task\{[^ ]* #$1 " | grep -oE " visible=[a-z]+" | tr -d ' '; }
+[ "$(vis "$DT")" = visible=true ] || fail "Dolphin's task $DT went $(vis "$DT") when Kate opened: minimised by Kate's launch"
+[ "$(vis "$KT")" = visible=true ] || fail "Kate's task $KT is $(vis "$KT") after opening"
+pass "Dolphin then Kate: both stay visible, neither minimised"
 
 # 3. Gwenview started from inside the session (Dolphin's "Open With > Gwenview": another app's window, no launch path
 # of PowOS's): one more floating task, and closing it closes Gwenview. Not through kioclient: KIO opened the PNG in

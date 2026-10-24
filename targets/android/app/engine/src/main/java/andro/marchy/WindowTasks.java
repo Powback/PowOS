@@ -280,8 +280,15 @@ public final class WindowTasks {
         // dock, a window activated the desktop way) brings that one back, never a second activity; one that
         // is full screen floats then on the unfolded home (it opened folded, or before apps floated).
         PowosWindowActivity existing = tasks.get(id);
-        if (existing != null && existing.live() && !existing.getIntent().getBooleanExtra(PowosWindowActivity.EXTRA_FULLSCREEN, false)
-                && raise(context, existing.getTaskId())) {
+        boolean reusable = existing != null && existing.live() && !existing.getIntent().getBooleanExtra(PowosWindowActivity.EXTRA_FULLSCREEN, false);
+        // Already the front task (KWin shows a window again right after it opened in its launch window): nothing to
+        // raise. A raise is startActivityFromRecents, which sent every other floating task to the back (TO_BACK in
+        // the TO_FRONT transition): opening Kate after Dolphin minimised Dolphin.
+        if (reusable && existing.inFront()) {
+            Log.i(TAG, "open " + id + " (" + appId + "): its task " + existing.getTaskId() + " is in front already");
+            return;
+        }
+        if (reusable && raise(context, existing.getTaskId())) {
             Log.i(TAG, "open " + id + " (" + appId + "): its task " + existing.getTaskId() + " back");
             return;
         }

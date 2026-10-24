@@ -289,6 +289,19 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         finishAndRemoveTask();
     }
 
+    /** This window's task is the front one (Android's top resumed activity): a "show again" has nothing to raise. */
+    private volatile boolean front;
+
+    boolean inFront() {
+        return front;
+    }
+
+    @Override
+    public void onTopResumedActivityChanged(boolean isTop) {
+        super.onTopResumedActivityChanged(isTop);
+        front = isTop;
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
