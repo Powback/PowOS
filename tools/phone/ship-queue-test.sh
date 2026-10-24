@@ -127,6 +127,20 @@ grep -q '"note":"B quick"' "$PHONE/files/shell-push.json" && ok "its note alone"
 rm -f "$HOME/hold-apk"
 drained && grep -q "^APK $tk svc=1 --note K\$" "$LOG" && ok "APK installed with K's note only, requests done" || { bad "APK not done"; cat "$LOG" "$Q/runner.log"; }
 
+# 2c. f252: the shell work is done (no request left) while the APK ship is still out and ends afterwards: the runner
+#     stays for it, records it (shipped.log, requests done) and only then leaves.
+: > "$LOG"; touch "$HOME/hold-apk"
+land targets/android/app/Main.kt 'class Main4' "kt4"; req --note "K4"; t4=$(tip)
+for _ in $(seq 100); do grep -q '^APKSTART' "$LOG" && break; sleep 0.2; done
+mkdir -p "$Q/done"; for r in "$Q"/*.req; do [ -f "$r" ] && mv "$r" "$Q/done/c2c-$(basename "$r")"; done
+sleep 2   # the runner would have left by now (idle, APK out)
+[ -d "$Q/runner.lock" ] && ok "runner stays while the APK ship is out" || bad "runner left with the APK out"
+rm -f "$HOME/hold-apk"
+for _ in $(seq 75); do grep -q "${t4:0:9} apk" "$Q/shipped.log" 2>/dev/null && break; sleep 0.2; done
+grep -q "${t4:0:9} apk" "$Q/shipped.log" && grep -q "${t4:0:9}: APK installed" "$Q/runner.log" && ok "APK ending after the shell work is recorded" || { bad "APK not recorded"; cat "$Q/runner.log"; }
+for _ in $(seq 50); do [ -d "$Q/runner.lock" ] || break; sleep 0.2; done
+[ ! -d "$Q/runner.lock" ] && ok "runner left after recording" || bad "runner still running"
+
 # 3. The verify lock holds a shell ship; a deleted file is reset on the phone.
 : > "$LOG"; mkdir "$HOME/.cache/powos-verify.lock"; echo "verify-queue test" > "$HOME/.cache/powos-verify.lock/who"
 cp shell/ui/old.tsx "$PHONE/files/shell/ui/old.tsx"   # an override of it is live

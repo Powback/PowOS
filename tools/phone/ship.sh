@@ -231,34 +231,44 @@ run)
   # then), even while someone else's Kotlin below it waits for the APK; `noted=1` keeps the APK from repeating it.
   pending_apk() { [ -z "$inst" ] || { ! git merge-base --is-ancestor "$1" "$inst" 2>/dev/null && [ -n "$(apk_inputs "$inst" "$1")" ]; }; }
   own_apk() { [ -n "$(apk_inputs "$1~1" "$1")" ]; }
+  # reap_apk: an APK ship that ended (rc exists) is recorded + its requests done. Called every loop turn, at the
+  # runner start (a previous runner's finished APK) and before it exits (f252: the runner left while the APK was
+  # out, so a finished install was never recorded and phone checks kept waiting for their ship).
+  reap_apk() {
+    local inst A arc alog n r sha live
+    inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
+    # An APK ship that ended: its requests are done (installed is installed - its exit is its last check's: a logcat
+    # grep with no match was 1, 2026-10-23), or it's tried again (the user stayed active), or it failed.
+    if [ -f "$Q/apk/rc" ]; then
+      A=$(cat "$Q/apk/tip") arc=$(cat "$Q/apk/rc") alog=$(cat "$Q/apk/log")
+      if [ "$arc" = 0 ] || [ "$inst" = "$A" ]; then
+        n=0; for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
+          git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "shipped:${A:0:9}:apk"; n=$((n+1)); }; done
+        live=$(cat "$Q/live" 2>/dev/null || true)
+        # The install reset the overrides and re-pushed origin's newer shell: live is at least A.
+        { [ -n "$live" ] && git merge-base --is-ancestor "$A" "$live" 2>/dev/null; } || echo "$A" > "$Q/live"
+        rm -f "$Q/failed-apk"
+        echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
+        echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
+        e2e_round
+      elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
+      elif [ -e "$Q/paused" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped by pause (rc $arc) - its requests are kept"
+      else
+        echo "$A" > "$Q/failed-apk"
+        echo "$(date +%T) ${A:0:9}: APK ship FAILED rc $arc (log $alog) - waiting for a new origin commit"
+        mail "ship ${A:0:9} (apk) FAILED rc $arc: $(grep -E 'REFUSED|refused|FAIL|error' "$alog" | tail -1 | cut -c1-200) - log $alog on the Mac; fix it on origin, then ship.sh request again"
+      fi
+      rm -rf "$Q/apk"; inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
+    fi
+  }
+  reap_apk   # runner start: a previous runner's finished APK
   while :; do
     while ls "$Q"/*.req >/dev/null 2>&1; do
       ship_tree >/dev/null || { sleep "$POLL"; continue; }
       T=$(git rev-parse HEAD)
       inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
-      # An APK ship that ended: its requests are done (installed is installed - its exit is its last check's: a logcat
-      # grep with no match was 1, 2026-10-23), or it's tried again (the user stayed active), or it failed.
-      if [ -f "$Q/apk/rc" ]; then
-        A=$(cat "$Q/apk/tip") arc=$(cat "$Q/apk/rc") alog=$(cat "$Q/apk/log")
-        if [ "$arc" = 0 ] || [ "$inst" = "$A" ]; then
-          n=0; for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
-            git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "shipped:${A:0:9}:apk"; n=$((n+1)); }; done
-          live=$(cat "$Q/live" 2>/dev/null || true)
-          # The install reset the overrides and re-pushed origin's newer shell: live is at least A.
-          { [ -n "$live" ] && git merge-base --is-ancestor "$A" "$live" 2>/dev/null; } || echo "$A" > "$Q/live"
-          rm -f "$Q/failed-apk"
-          echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
-          echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
-          e2e_round
-        elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
-        elif [ -e "$Q/paused" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped by pause (rc $arc) - its requests are kept"
-        else
-          echo "$A" > "$Q/failed-apk"
-          echo "$(date +%T) ${A:0:9}: APK ship FAILED rc $arc (log $alog) - waiting for a new origin commit"
-          mail "ship ${A:0:9} (apk) FAILED rc $arc: $(grep -E 'REFUSED|refused|FAIL|error' "$alog" | tail -1 | cut -c1-200) - log $alog on the Mac; fix it on origin, then ship.sh request again"
-        fi
-        rm -rf "$Q/apk"; inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
-      fi
+      reap_apk
+      inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
       # Paused: nothing new starts; an APK ship still out (installing) is reaped first.
       if [ -e "$Q/paused" ]; then
         apk_alive && { sleep "$POLL"; continue; }
@@ -414,7 +424,9 @@ run)
       fi
       ! ls "$Q"/*.req >/dev/null 2>&1 || sleep "$POLL"
     done
-    apk_alive && { sleep "$POLL"; continue; }   # an APK still out: reap it before leaving
+    # An APK ship still out: stay and reap it (the loop above reaps once its rc exists) before the idle exit.
+    apk_alive && { sleep "$POLL"; continue; }
+    [ -f "$Q/apk/rc" ] && { reap_apk; continue; }
     rm -rf "$L"
     [ -e "$Q/paused" ] && break
     # A request written while this runner was on its way out: take the lock again and serve it.
