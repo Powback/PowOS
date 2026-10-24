@@ -28,7 +28,15 @@ Also: context budget (docs/AGENT-HANDBOOK.md, Efficiency) - the hand-off numbers
    path (message.usage.{input,cache_read_input,cache_creation_input}_tokens) isn't in Anthropic's public
    hook docs, but it's the same path tools/agents/efficiency.py already parses from the same transcripts -
    matching that, not inventing a second way to read the same file.
+
+Also: a wall-clock budget (the user: "aim for max 5 min per agent per task") - measured from the
+   transcript's FIRST entry's timestamp (every JSONL event carries one), not from context size, since a
+   short task can still run long in real time. The first-entry timestamp never changes once written, so
+   it is read from the HEAD once per session and cached to disk (state_dir/<basename>.starts.json, keyed
+   by session_id) - every later hook call for that session reuses the cached value instead of re-reading
+   the head. At 4 minutes elapsed: once, land-what-works-now. From 5 minutes: every call, land NOW.
 """
+import datetime
 import glob
 import json
 import os
@@ -38,6 +46,8 @@ MAX_NOTICES = 8
 MAX_SEEN = 500
 TAIL_BYTES = 200_000     # enough to hold the latest assistant message's usage even with a big tool call
 HANDBACK_HINT = "done, commits, next steps, Friction & missing info (powos friction add, then list it)"
+TIME_WARN_MIN = 4        # once: land what works now
+TIME_HARD_MIN = 5        # every call from here: land and hand back NOW
 
 
 def _fields(path):
@@ -94,6 +104,89 @@ def _latest_usage(transcript_path):
     return None
 
 
+def _first_entry_timestamp(transcript_path):
+    """The transcript's FIRST line's `timestamp` field (every JSONL event carries one) - read from the
+    HEAD only, stops at the first line that parses and has one. None on any error."""
+    try:
+        with open(transcript_path, errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except Exception:
+                    continue
+                ts = e.get("timestamp")
+                return ts if ts else None
+    except OSError:
+        return None
+    return None
+
+
+def _parse_ts(ts):
+    try:
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        d = datetime.datetime.fromisoformat(ts)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=datetime.timezone.utc)
+        return d
+    except Exception:
+        return None
+
+
+def _elapsed_minutes(inp, cache_path):
+    """Minutes since the transcript's first entry. The first-entry timestamp never changes, so it's read
+    from the transcript HEAD once per session_id and cached to cache_path - every later call for that
+    session reuses the cached value (fail-silent: a cache read/write error just means re-reading the head)."""
+    tpath = inp.get("transcript_path")
+    if not tpath:
+        return None
+    sess = inp.get("session_id") or "nosession"
+    try:
+        with open(cache_path) as f:
+            cache = json.load(f)
+    except Exception:
+        cache = {}
+    first_ts = cache.get(sess)
+    if not first_ts:
+        first_ts = _first_entry_timestamp(tpath)
+        if not first_ts:
+            return None
+        cache[sess] = first_ts
+        try:
+            tmp = cache_path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(cache, f)
+            os.replace(tmp, cache_path)
+        except OSError:
+            pass
+    start = _parse_ts(first_ts)
+    if start is None:
+        return None
+    return (datetime.datetime.now(datetime.timezone.utc) - start).total_seconds() / 60.0
+
+
+def _time_notice(inp, seen, new_seen, cache_path):
+    """Wall-clock budget (the user: "aim for max 5 min per agent per task"). At 4 min: once, land what
+    works now. From 5 min: every call, land NOW - never deduped, same as the hard 150k context notice."""
+    mins = _elapsed_minutes(inp, cache_path)
+    if mins is None:
+        return None
+    if mins >= TIME_HARD_MIN:
+        return "[time] past 5 min: land and hand back NOW"
+    if mins >= TIME_WARN_MIN:
+        sess = inp.get("session_id") or "nosession"
+        key = f"timebucket:{sess}:4min"
+        if key in seen:
+            return None
+        new_seen.add(key)
+        return ("[time] 4 min: land what works now with tools/agents/land.sh; put what's left in "
+                "≤200-word hand-off notes plus a Friction & missing info list; hand back")
+    return None
+
+
 def _ctx_notice(inp, seen, new_seen):
     """Mechanical context-budget reminder (AGENT-HANDBOOK.md, Efficiency: hand back by 120k, never resume
     past 150k). Past 150k: every call. 120k-150k: once per 20k bucket (deduped via the shared seen set,
@@ -133,6 +226,7 @@ def main():
     except OSError:
         return
     state_path = os.path.join(state_dir, basename + ".json")
+    starts_path = os.path.join(state_dir, basename + ".starts.json")
     try:
         with open(state_path) as f:
             seen = set(json.load(f))
@@ -141,7 +235,15 @@ def main():
     new_seen = set(seen)
     notices = []
 
-    # 0. context budget - checked first so it's never crowded out by other notices (MAX_NOTICES below).
+    # 0a. wall-clock budget - checked first (with context) so it's never crowded out (MAX_NOTICES below).
+    try:
+        time_notice = _time_notice(inp, seen, new_seen, starts_path)
+        if time_notice:
+            notices.append(time_notice)
+    except Exception:
+        pass
+
+    # 0b. context budget.
     try:
         ctx_notice = _ctx_notice(inp, seen, new_seen)
         if ctx_notice:

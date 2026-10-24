@@ -38,6 +38,8 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
 ## waiting on the phone, 48% of commits process tooling; `tools/agents/efficiency.py` measures it, targets in its doc)
 - ONE task per agent run: pick up, ship the slice, put what you learned into your skill (facts, <=100 lines, no
   history), the open rest into the board task's note, exit. Never stay alive waiting for mail, a window or a review.
+  Tasks are scoped to ~5 min: one finding or one fix; leftovers go to a fresh agent via the hand-off (`.claude/hooks/
+  agent-notices.py` reminds at 4 min, then every call past 5 - `tools/agents/efficiency.py` flags agents over 5 min).
   Context budgets are now MECHANICAL, not something to self-police: **hand back by 120k, never resume an agent past
   150k.** `.claude/hooks/agent-notices.py` reads your own transcript on every tool call and reminds you on your next
   tool result - once per 20k over 120k, then on EVERY call once you're over 150k - so you don't have to track the

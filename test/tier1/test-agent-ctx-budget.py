@@ -7,6 +7,7 @@ transcript file (a JSONL file with one assistant-message line carrying a given `
 HOME (so a real ~/.cache/powos-agent-notices or comms/verify/ship state never leaks in or out).
 """
 
+import datetime
 import json
 import os
 import shutil
@@ -21,9 +22,13 @@ HOOK = os.path.join(REPO, ".claude", "hooks", "agent-notices.py")
 
 
 def usage_line(input_tokens, cache_read=0, cache_creation=0):
+    # Real "now", not a fixed past date: these transcripts exist only to test the CONTEXT budget, and
+    # with the wall-clock budget hook reading real elapsed time, a stale timestamp would spuriously
+    # trip the time notice (the 4/5-min budget) on every one of these.
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     return json.dumps({
         "type": "assistant",
-        "timestamp": "2026-10-24T00:00:00Z",
+        "timestamp": now,
         "message": {
             "id": "msg_1",
             "usage": {
@@ -53,6 +58,20 @@ class ContextBudgetTests(unittest.TestCase):
         with open(path, "w") as f:
             for ctx in ctx_tokens:
                 f.write(usage_line(ctx) + "\n")
+        return path
+
+    def write_aged_transcript(self, name, minutes_ago, ctx_tokens=10_000):
+        """A transcript whose FIRST entry's timestamp is `minutes_ago` minutes before real now (the
+        wall-clock budget is measured from that first entry) - a second, later line is low on context
+        so only the time budget notice can fire, never the context one."""
+        path = os.path.join(self.tmp, name)
+        first_ts = (datetime.datetime.now(datetime.timezone.utc)
+                    - datetime.timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        with open(path, "w") as f:
+            f.write(json.dumps({"type": "user", "timestamp": first_ts, "message": {}}) + "\n")
+            line = json.loads(usage_line(ctx_tokens))
+            line["timestamp"] = first_ts
+            f.write(json.dumps(line) + "\n")
         return path
 
     def run_hook(self, transcript_path=None, session_id="sess-1", extra=None):
@@ -124,6 +143,48 @@ class ContextBudgetTests(unittest.TestCase):
         t = self.write_transcript("tmulti.jsonl", 10_000, 160_000, 50_000)
         text = self.notice_text(self.run_hook(t, session_id="sess-latest"))
         self.assertEqual(text, "", "the LAST line (50k) is under budget, so no notice - an earlier 160k line must not leak through")
+
+    # -- wall-clock budget (the user: "aim for max 5 min per agent per task"), measured from the
+    # transcript's first entry timestamp - a separate axis from context size. --------------------------
+    def test_under_4min_is_silent(self):
+        t = self.write_aged_transcript("w3.jsonl", 3)
+        self.assertEqual(self.run_hook(t, session_id="sess-w3"), "", "no time notice under 4 min")
+
+    def test_over_4min_under_5min_reminds_once(self):
+        t = self.write_aged_transcript("w4_5.jsonl", 4.5)
+        out = self.run_hook(t, session_id="sess-w4")
+        text = self.notice_text(out)
+        self.assertIn("[time]", text)
+        self.assertIn("4 min", text)
+        self.assertIn("land what works now", text)
+        self.assertIn("tools/agents/land.sh", text)
+        self.assertIn("Friction & missing info", text)
+        # same session, called again still between 4 and 5 min -> deduped, no repeat.
+        out2 = self.run_hook(t, session_id="sess-w4")
+        self.assertEqual(out2, "", "the 4-min notice is reported only once per session")
+        # a DIFFERENT session re-reads the head and starts its own count -> reminded again.
+        out3 = self.run_hook(t, session_id="sess-w4b")
+        self.assertIn("4 min", self.notice_text(out3))
+
+    def test_over_5min_fires_every_call(self):
+        t = self.write_aged_transcript("w6.jsonl", 6)
+        for _ in range(3):
+            text = self.notice_text(self.run_hook(t, session_id="sess-w6"))
+            self.assertIn("[time]", text)
+            self.assertIn("past 5 min", text)
+            self.assertIn("land and hand back NOW", text)
+
+    def test_time_budget_caches_first_timestamp_per_session(self):
+        """The hook reads the transcript HEAD once per session (cached to disk - every hook call is a
+        fresh process) - appending more lines after the first read must not move the cached start time."""
+        t = self.write_aged_transcript("wcache.jsonl", 4.5)
+        first = self.notice_text(self.run_hook(t, session_id="sess-cache"))
+        self.assertIn("4 min", first)
+        # Append a line as if the transcript grew; the FIRST entry (what the cache keyed off) is unchanged,
+        # so a second call in the same 4-5min bucket for this session is still deduped, not re-triggered.
+        with open(t, "a") as f:
+            f.write(usage_line(10_000) + "\n")
+        self.assertEqual(self.run_hook(t, session_id="sess-cache"), "")
 
     # -- fail-silent edges: never a crash, never stderr, exit 0 ----------------------------------------
     def test_no_transcript_path_is_silent(self):
