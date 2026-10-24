@@ -3,6 +3,15 @@ name: powos-phone
 description: Use whenever you need to reach, inspect, test, or ship to the PowOS phone (OnePlus Open) - adb over the VPN, root inside PowOS, the user-idle check, WebView devtools, logcat tags, shell pushes and the locked APK build/install queue.
 ---
 
+## Quick recipe
+- Files: `tools/phone/{adb,root,user,idle,cdp,ship,ship-apk,shot}.sh` (one adb call each).
+- Build: n/a — this skill is phone ACCESS/shipping, not a build target itself.
+- Check (emu first, then phone): `tools/phone/idle.sh` (idle=<s> screen=<state>); read-only state via
+  `tools/phone/cdp.sh eval <page> '<js>'`; a real device check goes through
+  `tools/phone/verify/queue.sh add [--dev emu|auto] <task> <check.sh>` (never run one by hand outside a window).
+- Ship/land: `tools/agents/land.sh "msg" -- <paths> [--ship "note"]` then END YOUR TURN. Never ship-apk/push yourself.
+- Friction: `tools/agents/friction add --area phone --kind <refused|broken-tool|flaky-check|unclear-rule|slow> "<title>" --repro "<cmd>"`.
+
 Read `docs/AGENT-HANDBOOK.md` (repo root) first - it is the map of how the phone pieces connect, who owns what, and
 the cross-cutting rules (Shipping, Rules that bite). This is the short form.
 

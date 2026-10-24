@@ -3,6 +3,16 @@ name: powos-stdb
 description: Use for the PowOS phone's SpacetimeDB - its modules and databases, the shell's vendored bindings (shell/vendor/<db>.js), shell/apps/stdb.ts, decode errors on home, tools/phone/bindings-check.sh, apps/vendor.sh and publishing a module.
 ---
 
+## Quick recipe
+- Files: `apps/<app>/src/lib.rs` (the module), `shell/vendor/<db>.js`+`.d.ts`+`VERSIONS`, `shell/apps/stdb.ts`.
+- Build/regen bindings: `apps/vendor.sh <app>` (must reproduce committed vendor files byte-for-byte; commit, then push).
+- Check (no device needed first): `tools/phone/bindings-check.sh --no-publish`; tier-1
+  `bash test/tier1/test-bindings-check.sh`. Device: phone (reads the phone's live STDB over adb).
+- Publish a module change: `ADB="docker exec powos-vadb adb" apps/install.sh <app> publish --note "plain words"`
+  (additive columns need `#[default(...)]`) — module change ships WITH its re-vendored bindings, same commit.
+- Land: `tools/agents/land.sh "msg" -- <paths> --ship "..."`.
+- Friction: `tools/agents/friction add --area stdb --kind <...> "<title>" --repro "<cmd>"`.
+
 # The phone's SpacetimeDB
 
 ## What runs

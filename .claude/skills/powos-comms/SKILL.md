@@ -3,6 +3,16 @@ name: powos-comms
 description: Use when working on PowOS inter-agent comms - `powos comms` (send/watch/inbox/read/notify/quiet), the comms MCP tools, the work board (`powos agents task`, the agents module's `work` table), silent deploys, the manager's inbox injection (manager.py --once-inbox / live), powos-agentsd and the agents module's message feed, or the phone's agent-mail notifications. The model, the truncation pitfalls, deploy and tests.
 ---
 
+## Quick recipe
+- Files: `lib/ai/comms/{comms.sh,comms-mcp.py}`, `lib/ai/agents/{powos-agents-cli,powos-agentsd}`,
+  `lib/ai/manager/manager.py`, Kotlin `AgentMail.kt`.
+- Build/deploy to phone: `PATH="$PWD/tools/phone/bin:$PATH" targets/android/rooted/rooted.sh deploy --note "..."`
+  (plain `adb` inside rooted.sh needs that PATH prefix). Mac agentsd: copy to `~/.claude/hooks/powos-agents/`, kill its pid.
+- Check (tier-1, no device window needed): `python3 test/tier1/test-comms.py`, `test-comms-fulltext.py`,
+  `test-manager.py`, `test-agents.py`, `test-board-truth.py`. Device check: `tools/phone/verify/board-state.sh`.
+- Land: `tools/agents/land.sh "msg" -- <paths> --ship "..."` (schema changes to apps/agents also need a publish — see powos-stdb).
+- Friction: `tools/agents/friction add --area comms --kind <...> "<title>" --repro "<cmd>"`.
+
 # PowOS comms: how it works and what bites
 
 ## Model

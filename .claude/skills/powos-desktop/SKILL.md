@@ -3,6 +3,16 @@ name: powos-desktop
 description: Use when building, fixing, testing or shipping the PowOS desktop shell - powos-shell (sources/powos-shell, the Qt/QtWebEngine/LayerShellQt host), its desktop bridge (shell/hosts/desktop.ts, layout.ts), the desktop home (mode=desktop, shell/ui/desktop.tsx/.css), on the phone's Plasma session or x86 Plasma.
 ---
 
+## Quick recipe
+- Files: `sources/powos-shell/` (Qt/QtWebEngine host, src/{view,home,bridge}.cpp), `shell/hosts/desktop.ts`+`layout.ts`,
+  `shell/ui/desktop.tsx`/`.css`. Paused host — most new work is the windows side, owned by powos-switcher.
+- Build (on-phone, ~20s): `sources/powos-shell/dev/phone.sh build`; status/render: `dev/phone.sh status|cdp 'JS'|page NAME|shot NAME`.
+- Check: PHONE ONLY (Plasma session) — `tools/phone/verify/queue.sh add <task> plasma-modes.sh plasma|shell|together`
+  (needs `kwin-up.sh MIN` queued first if KWin is behind), `plasma-transparent.sh`, `plasma-notify.sh`, `plasma-app.sh`.
+- Land/ship shell files as usual: `tools/agents/land.sh "msg" -- <paths> --ship "..."`; desktop host's own shell copy
+  needs `dev/phone.sh build` separately.
+- Friction: `tools/agents/friction add --area desktop --kind <...> "<title>" --repro "<cmd>"`.
+
 **Paused by the user, 2026-10-22:** no work on the separate Plasma desktop (powos-shell); the desktop is the PowOS
 home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the code stays.
 

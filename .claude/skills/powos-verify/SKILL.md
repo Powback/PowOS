@@ -3,6 +3,15 @@ name: powos-verify
 description: Use when verifying a PowOS phone fix on the device itself - idle windows, injected gesture journeys with screenrecord and frame-stepping, gesture-monitor/dup checks, idle CPU samples, and game checks (Broforce frame pacing, Xwayland dma-buf). Learned 2026-10-21.
 ---
 
+## Quick recipe
+- Files: `tools/phone/verify/*.sh` (131 checks, header says where it runs), `queue.sh`, shared libs `e2e-lib.sh`/`bf-lib.sh`.
+- Build: n/a (bash checks; no compile step). A check needing a fresh KWin: queue `kwin-install.sh MIN` first, same task.
+- Check, emulator first: `tools/phone/verify/queue.sh add --dev emu <task> <check.sh> [args]` (or `--dev auto` to let
+  the check's `# lanes:` header pick); phone-only checks (games/fold/kernel/Linux session) refuse `--dev emu`.
+  Run by hand off-queue: `POWOS_DEVICE=emu LOCK_HELD=1 tools/phone/verify/<check>.sh ...`.
+- Land: `tools/agents/land.sh "msg" -- <paths> --queue <check args>` (queues the check as part of landing).
+- Friction: `tools/agents/friction add --area verify --kind <flaky-check|unclear-rule|...> "<title>" --repro "<cmd>"`.
+
 Access and rules: the powos-phone skill (tools/phone/adb.sh, root.sh, idle.sh). This is the how-to for verifying.
 
 Scripts: `tools/phone/verify/` (header of each says where it runs).

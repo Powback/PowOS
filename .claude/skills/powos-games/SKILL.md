@@ -3,6 +3,16 @@ name: powos-games
 description: Use for games on the PowOS phone (OnePlus Open) - Steam/Proton under FEX, Broforce runs and checks, Xwayland's KGSL patches (xwayland-kgsl), the phone kernel build + fastboot test boot + flash/rollback, and the dma-buf sync_file backport. Learned 2026-10-20..23.
 ---
 
+## Quick recipe
+- Files: `targets/android/steam/*` (fex-compat-tool, sysvipc), `targets/android/pkgs/steam`, `lib/game.sh`,
+  `targets/android/kernel/` (dma-buf patches), checks in `tools/phone/verify/bf-*.sh` / `td-launch.sh`.
+- Build: `targets/android/build-pkgs.sh steam` (needs gitignored inputs from the shared build-inputs cache);
+  kernel: `STOCK_BOOT=<img> JOBS=12 ./build-containers-kernel.sh` (~2h, see Kernel section for test-boot/flash).
+- Check: PHONE ONLY (hardware/GPU driver) — `tools/phone/verify/queue.sh add --close <task> bf-run.sh` /
+  `bf-pacing.sh <mode>` / `bf-coldstart.sh [cold|steam]` / `td-launch.sh`. No emulator lane for games.
+- Land/install a package: `tools/phone/verify/pkg-install.sh <abs pkg path>` queued, same task as the feature check.
+- Friction: `tools/agents/friction add --area games --kind <...> "<title>" --repro "<cmd>"`.
+
 Access, idle windows and on-device rules: the powos-phone and powos-verify skills. This is the games/kernel part.
 
 ## The stack a Proton game runs on

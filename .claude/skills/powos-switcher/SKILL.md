@@ -3,6 +3,18 @@ name: powos-switcher
 description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher, the recents transition, home's switcher layer (recents.tsx), home's page after going home, or the live-wallpaper picture capture - the event flow, known pitfalls, and the record-and-frame-step verification workflow.
 ---
 
+## Quick recipe
+- Files: `targets/android/app/.../system/{WindowFrames,FreeformTasks,NavGesture,RecentsTransition}.kt`,
+  `shell/ui/recents.tsx`, `shell/hosts/wide.ts`. KWin side: `targets/android/pkgs/kwin/` (see powos-desktop's
+  "Writing a KWin patch" for patch/number workflow).
+- Build: Kotlin compile check before pushing to origin: `tools/phone/compile-check.sh`; ship/install:
+  `tools/phone/ship-apk.sh --note "..."` (never build by hand).
+- Check, emu first then phone: `tools/phone/verify/queue.sh add --dev auto <task> window-max.sh calc` /
+  `float-desktops.sh` / `float-windows.sh` (window/recents UI is emu+phone); phone-only: `linux-float.sh`,
+  `fold.sh`, `one-title-bar.sh`, anything needing the Linux session or a KWin install (`kwin-install.sh MIN` first).
+- Land: `tools/agents/land.sh "msg" -- <paths> --ship "..." --queue <check args>`.
+- Friction: `tools/agents/friction add --area switcher --kind <...> "<title>" --repro "<cmd>"`.
+
 ## How a swipe up works (gesture -> page)
 - NavGesture.kt (input monitor, PowOS is the recents provider) asks WM Shell's recents transition on the finger's DOWN
   (RecentsTransition.start), so the app's window follows from the first pixel. RecentsWatchdog.kt keeps SystemUI

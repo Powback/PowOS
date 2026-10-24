@@ -3,6 +3,16 @@ name: powos-design
 description: How the PowOS phone shell's design is built and checked - the design language, the glass material, the shade/notifications and control center internals, the headless render + contrast harness, and the pitfalls already hit. Load before any visual change or design QA on shell/.
 ---
 
+## Quick recipe
+- Files: `shell/theme.css`/`shell/ui/shell.css` (tokens, frost/CC/shade), `shell/ui/{shade,control,pending}.tsx`,
+  `docs/DESIGN-LANGUAGE.md` (spec), native blur: `targets/android/app/.../shell/{GlassBlur,Frost}.kt`.
+- Build/render: `shell/dev/shot.sh OUTDIR 'REGEX' [SHELL_DIR] [WALLPAPER]` (targeted render + contrast report.json);
+  whole sweep: `shell/dev/gate.sh --tree --shots DIR --wallpaper FILE` (tsc + headless boot + shots + style lint).
+- Check, emu first then phone: `tools/phone/verify/queue.sh add <task> cc-toprow.sh` / `shade-panel.sh` /
+  `shade-overpull.sh` (most design checks are emu+phone); read-only CDP for live computed styles.
+- Land/ship: `tools/agents/land.sh "msg" -- <paths> --ship "plain words for the user"`.
+- Friction: `tools/agents/friction add --area design --kind <...> "<title>" --repro "<cmd>"`.
+
 # PowOS shell design: what's known
 
 ## The material (docs/DESIGN-LANGUAGE.md is the spec)
