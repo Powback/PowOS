@@ -195,13 +195,31 @@ set +e
 # starved one - at load 25 pages missed READY_MS and the gate failed "not ready" though nothing was wrong
 # with the code (f30, reopened x3 after GATE_BOOTS alone). Queueing for the slot instead of racing for CPU
 # fixes the cause instead of raising the timeout.
-"$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" -- \
-docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" -e READY_MS="${READY_MS:-$ready_default}" \
-  ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
-  ${GATE_ONLY:+-e GATE_ONLY="$GATE_ONLY"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"} \
-  -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs
-rc=$?
-set -e
+# One browser run; GATE_BOOTS / READY_MS / GATE_ONLY come from the caller's environment of this function.
+browser_run() {
+  "$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" -- \
+  docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" -e READY_MS="$1" \
+    ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
+    ${2:+-e GATE_ONLY="$2"} ${3:+-e GATE_BOOTS="$3"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"} \
+    -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs
+}
+ready_ms=${READY_MS:-$ready_default}
+browser_log="$work/browser.log"
+browser_run "$ready_ms" "${GATE_ONLY:-}" "${GATE_BOOTS:-}" 2>&1 | tee "$browser_log"
+rc=${PIPESTATUS[0]}
+# A starved Mac (load 17-25, 2026-10-24: 12 cases "not ready" after 30-186 s though a lone run boots in 2 s and the whole
+# gate passed minutes later) can miss the ready budget with nothing wrong in the code. When EVERY failure of the run is
+# a "not ready" (no console/uncaught/module error, no other check), run just those cases once more, two pages at a
+# time with twice the budget. A real boot error is not "not ready" alone (the boot guard names it) and fails again.
+if [ $rc -eq 1 ] && grep -q '^FAIL ' "$browser_log" && ! grep '^FAIL ' "$browser_log" | grep -qv '^FAIL [^:]*: not ready (window.__powosAlive)'; then
+  names=$(grep '^FAIL ' "$browser_log" | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u | sed 's/[][\.*+?^${}()|]/\\&/g; s/^/^/; s/$/$/' | paste -sd'|' -)
+  echo "gate: only 'not ready' failures at load $load - retrying those cases alone (2 pages at a time, READY_MS x2)"
+  retry=$(( ready_ms * 2 )); [ "$retry" -le 120000 ] || retry=120000
+  set +e
+  browser_run "$retry" "$names" 2 2>&1 | tee "$work/browser-retry.log"
+  rc=${PIPESTATUS[0]}
+  set -e
+fi
 [ $rc -eq 0 ] || fail=1
 # 2b. The widgets' fit (dev/preview.sh): when this push brings what draws them, or asked.
 if [ -z "$widgets" ]; then

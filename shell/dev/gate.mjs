@@ -1699,7 +1699,14 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
   // Uncaught errors: the boot guard (index.html) records them with their file - these only when it didn't (no guard).
   const uncaught = [];
   page.on("pageerror", (e) => uncaught.push(`uncaught: ${e.message.split("\n")[0]}`));
+  // The page's last console lines + pageerrors + failed requests, printed under a "not ready" FAIL (the missing evidence
+  // when nothing booted: a JS error before __powosAlive, or just slow).
+  const tail = [];
+  const note = (t) => (tail.push(t.slice(0, 300)), tail.length > 12 && tail.shift());
+  page.on("pageerror", (e) => note(`pageerror: ${String(e.stack ?? e.message).split("\n").slice(0, 4).join(" | ")}`));
+  page.on("requestfailed", (q) => note(`requestfailed: ${q.url().slice(-80)} ${q.failure()?.errorText ?? ""}`));
   page.on("console", (m) => {
+    note(`console.${m.type()}: ${m.text()}`);
     if (m.type() !== "error") return;
     const text = m.text();
     // Module-loading failures es-module-shims logs (its onerror's default is console.error) are failures; the rest of
@@ -1806,7 +1813,13 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
   await page.goto(url, { waitUntil: "domcontentloaded" }).catch((e) => problems.push(`navigation: ${e.message}`));
   page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 100 })
     .catch(() => {}).finally(bootDone);
-  return { page, name, problems, warnings, uncaught, started };
+  return { page, name, problems, warnings, uncaught, started, tail };
+}
+
+/** A "not ready" FAIL's evidence: what the page said before it gave up. */
+function printTail(r) {
+  if (!r.problems.some((p) => p.startsWith("not ready"))) return;
+  for (const t of r.tail ?? []) console.log(`     ${r.name} page: ${t}`);
 }
 
 /** Waits for the page's ready (or [check]), then collects the boot guard's own record of its errors. */
@@ -2331,6 +2344,7 @@ try {
     if (r.problems.length) {
       failed++;
       for (const p of r.problems) console.log(`FAIL ${r.name}: ${p}`);
+      printTail(r);
     } else console.log(`ok   ${r.name} (${r.ms} ms)`);
     for (const w of r.warnings.slice(0, 3)) console.log(`     ${r.name} console: ${w.slice(0, 200)}`);
   }
