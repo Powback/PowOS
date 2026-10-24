@@ -28,12 +28,12 @@ sh_ "cmd device_state state $ST"; sleep 3; chk fold
 # The ON display's size (cover folded, inner unfolded).
 WH=$(sh_ "dumpsys display | grep -E \"DisplayDeviceInfo.*state ON\" | head -1" | sed -nE 's/.* ([0-9]+) x ([0-9]+),.*/\1 \2/p')
 W=${WH% *}; H=${WH#* }; echo "on: ${W}x${H} ($SCR)"
-[ -n "$W" ] && [ "$W" -gt 0 ] 2>/dev/null || { echo "can't read the ON display's size"; exit 5; }
+[ -n "$W" ] && [ "$W" -gt 0 ] 2>/dev/null || { echo "ENV: can't read the ON display's size"; exit 5; }
 kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
 if kg | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5
   kg | grep -q true && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
-  kg | grep -q true && { echo "the keyguard didn't go (a PIN?) - stopping"; exit 5; }
+  kg | grep -q true && { echo "ENV: the keyguard didn't go (a PIN?) - stopping"; exit 5; }
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock

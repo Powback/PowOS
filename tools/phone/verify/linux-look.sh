@@ -50,7 +50,7 @@ echo "env: XDG_CURRENT_DESKTOP=$XDG_CURRENT_DESKTOP KDE_FULL_SESSION=$KDE_FULL_S
 printf '%s\n' "$F" > "$OUT/facts.txt"; log "android density ${dens:-?} -> ${TGT} px/dp in a window"; log "$F"
 line() { grep -m1 "^$1" <<<"$F"; }
 SC=$(kv scale "$(line scale=)"); XFT=$(line xft= | cut -d= -f2); QW=$(line qtwl:); QX=$(line qtx11:); GW=$(line gtkwl:); GX=$(line gtkx11:)
-[ "${dens:-0}" -gt 0 ] || { echo "no Android density (wm density)"; exit 5; }
+[ "${dens:-0}" -gt 0 ] || { echo "ENV: no Android density (wm density)"; exit 5; }
 
 # Size.
 within "${SC:-0}" "$TGT" && pass "KWin output scale ${SC} matches Android's window ${TGT} px/dp (Wayland apps)" ||
@@ -100,7 +100,7 @@ kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
 if kg | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5
   kg | grep -q true && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
-  kg | grep -q true && { echo "the keyguard didn't go (a PIN?)"; exit 5; }
+  kg | grep -q true && { echo "ENV: the keyguard didn't go (a PIN?)"; exit 5; }
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home

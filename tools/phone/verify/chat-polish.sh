@@ -21,7 +21,7 @@ I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; exit 3; }; }
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
-sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\"" | grep -q true && { echo "locked - stopping"; exit 5; }
+sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\"" | grep -q true && { echo "ENV: locked - stopping"; exit 5; }
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
 W=${WH% *}; H=${WH#* }; echo "on: ${W}x${H}"
 # The visible pill under SEL: the scope's own .ai-compose, else home's bar pill. Its rect, the keyboard inset, the mail.

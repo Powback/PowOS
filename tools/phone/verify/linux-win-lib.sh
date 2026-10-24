@@ -40,7 +40,7 @@ unfolded_home() {
   if sh_ "dumpsys window policy | grep -m1 mIsShowing=" | grep -q true; then
     sh_ "wm dismiss-keyguard"; sleep 1.5
     sh_ "dumpsys window policy | grep -m1 mIsShowing=" | grep -q true && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
-    sh_ "dumpsys window policy | grep -m1 mIsShowing=" | grep -q true && { echo "the keyguard didn't go (a PIN?)"; exit 5; }
+    sh_ "dumpsys window policy | grep -m1 mIsShowing=" | grep -q true && { echo "ENV: the keyguard didn't go (a PIN?)"; exit 5; }
   fi
   sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 }

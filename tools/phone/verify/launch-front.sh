@@ -46,7 +46,7 @@ WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/
 if kg | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5
   kg | grep -q true && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
-  kg | grep -q true && { echo "the keyguard didn't go (a PIN?)"; exit 5; }
+  kg | grep -q true && { echo "ENV: the keyguard didn't go (a PIN?)"; exit 5; }
 fi
 
 fails=0

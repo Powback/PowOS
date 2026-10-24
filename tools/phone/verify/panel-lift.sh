@@ -52,12 +52,12 @@ s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
 W=${WH% *}; H=${WH#* }
-[ "${W:-0}" -gt 2000 ] || { echo "display 0 is ${W:-?}x${H:-?}, not the inner screen - stopping before any input"; exit 5; }
+[ "${W:-0}" -gt 2000 ] || { echo "ENV: display 0 is ${W:-?}x${H:-?}, not the inner screen - stopping before any input"; exit 5; }
 kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
 if kg | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5
   kg | grep -q true && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
-  kg | grep -q true && { echo "the keyguard didn't go (a PIN?) - stopping"; exit 5; }
+  kg | grep -q true && { echo "ENV: the keyguard didn't go (a PIN?) - stopping"; exit 5; }
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock" && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock

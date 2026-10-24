@@ -32,7 +32,7 @@ step "screen state"; s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head
 step "inner screen"; sh_ "cmd device_state state 3"; sleep 3; chk unfold
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
 W=${WH% *}; H=${WH#* }; echo "on: ${W}x${H}"
-[ "${W:-0}" -gt 0 ] && [ "${H:-0}" -gt 0 ] || { echo "no screen size (wm size) - stopping before any input"; exit 5; }
+[ "${W:-0}" -gt 0 ] && [ "${H:-0}" -gt 0 ] || { echo "ENV: no screen size (wm size) - stopping before any input"; exit 5; }
 [ "$W" -gt 2000 ] || echo "WARN: display 0 isn't the inner screen (${W}x${H})"
 x() { echo $(( W * $1 / 1000 )); }; y() { echo $(( H * $1 / 1000 )); }
 
@@ -43,7 +43,7 @@ kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
 if kg | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5
   kg | grep -q true && { sh_ "input swipe $(x 500) $(y 900) $(x 500) $(y 250) 300"; sleep 1.5; }
-  kg | grep -q true && { shot lock-still-showing; echo "the keyguard didn't go (a PIN?) - stopping"; exit 5; }
+  kg | grep -q true && { shot lock-still-showing; echo "ENV: the keyguard didn't go (a PIN?) - stopping"; exit 5; }
 fi
 if sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock"; then sh_ "input swipe $(x 500) $(y 900) $(x 500) $(y 250) 300"; sleep 1.5; fi
 chk lock

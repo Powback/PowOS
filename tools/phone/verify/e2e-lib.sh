@@ -228,14 +228,14 @@ e2e_setup() {
   local t=0 WH; WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
   while [ "${1:-}" = inner ] && [ "${WH%% *}" -le 2000 ] 2>/dev/null && [ $t -lt 13 ]; do sleep 1; t=$((t + 1)); WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1); done
   W=${WH% *}; H=${WH#* }
-  [ "${W:-0}" -gt 500 ] || { echo "no screen size ($WH) - stopping before any input"; exit 5; }
-  [ "${1:-}" != inner ] || [ "$W" -gt 2000 ] || { echo "the inner screen didn't come on ($WH) - stopping"; exit 5; }
+  [ "${W:-0}" -gt 500 ] || { echo "ENV: no screen size ($WH) - stopping before any input"; exit 5; }
+  [ "${1:-}" != inner ] || [ "$W" -gt 2000 ] || { echo "ENV: the inner screen didn't come on ($WH) - stopping"; exit 5; }
   DENS=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1)
   kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
   if kg | grep -q true; then
     sh_ "wm dismiss-keyguard"; sleep 1.5
     kg | grep -q true && { swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300 "the lock face"; sleep 1.5; }
-    kg | grep -q true && { echo "the keyguard didn't go (a PIN?) - stopping"; exit 5; }
+    kg | grep -q true && { echo "ENV: the keyguard didn't go (a PIN?) - stopping"; exit 5; }
   fi
   sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && { swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300 "the lock face"; sleep 1.5; }
   chk lock

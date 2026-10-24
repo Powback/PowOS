@@ -45,7 +45,7 @@ lin() { sh_ "am stack list | grep PowosWindowActivity" | grep -oE 'taskId=[0-9]+
 
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
-[ "$(rs 'grep -ac "export-new" /usr/lib/libkwin.so.6 2>/dev/null' | tail -1)" != 0 ] || { echo "KWin has no export-new: run linux-float.sh first"; exit 5; }
+[ "$(rs 'grep -ac "export-new" /usr/lib/libkwin.so.6 2>/dev/null' | tail -1)" != 0 ] || { echo "ENV: KWin has no export-new: run linux-float.sh first"; exit 5; }
 [ "$(us 'pgrep -xc dolphin' | tail -1)" = 0 ] || { echo "Dolphin runs already (the user's?): not now"; exit 3; }
 
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
@@ -55,7 +55,7 @@ kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
 if kg | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5
   kg | grep -q true && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
-  kg | grep -q true && { echo "the keyguard didn't go (a PIN?)"; exit 5; }
+  kg | grep -q true && { echo "ENV: the keyguard didn't go (a PIN?)"; exit 5; }
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home

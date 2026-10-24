@@ -50,19 +50,19 @@ t=0; WH=$(wsize)
 while [ "${WH%% *}" -le 2000 ] 2>/dev/null && [ $t -lt 13 ]; do sleep 1; t=$((t + 1)); WH=$(wsize); done
 chk unfold
 W=${WH% *}; H=${WH#* }; echo "on: ${W}x${H} ($((t + 2)) s after state 3)"
-[ "${W:-0}" -gt 2000 ] || { echo "no unfolded screen size ($WH) - stopping before any input"; exit 5; }
+[ "${W:-0}" -gt 2000 ] || { echo "ENV: no unfolded screen size ($WH) - stopping before any input"; exit 5; }
 kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
 if kg | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5
   kg | grep -q true && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
-  kg | grep -q true && { echo "the keyguard didn't go (a PIN?) - stopping"; exit 5; }
+  kg | grep -q true && { echo "ENV: the keyguard didn't go (a PIN?) - stopping"; exit 5; }
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock" && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock
 sh_ "am force-stop $PKG; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 hemit system.home null
 n=$(npages); echo "home pages: $n, on $(onpage)" | tee -a "$OUT/log.txt"
-[ "${n:-0}" -ge 2 ] || { echo "home has one page - nothing to switch between; stopping"; exit 5; }
+[ "${n:-0}" -ge 2 ] || { echo "ENV: home has one page - nothing to switch between; stopping"; exit 5; }
 [ "$(onpage)" = 0 ] || fail "system.home didn't show page 1 ($(onpage))"
 
 bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ' | xargs; }
@@ -98,9 +98,9 @@ o=$(isopen); [ "$o" = false ] && pass "a swipe up inside the window didn't open 
 "$T/shot.sh" "$OUT/1-after-inside.png"
 
 # (3) sideways beside the window: the next page, then back
-d=$((W * 35 / 100)); pt=$(freept "$WB" -1 "$d"); [ "$pt" != none ] && [ -n "$pt" ] || { echo "no empty spot beside the window - stopping"; exit 5; }
+d=$((W * 35 / 100)); pt=$(freept "$WB" -1 "$d"); [ "$pt" != none ] && [ -n "$pt" ] || { echo "ENV: no empty spot beside the window - stopping"; exit 5; }
 x=${pt% *}; y=${pt#* }; to=$((x - d)); [ $to -lt 20 ] && to=20
-[ $((x - to)) -ge $((W / 4 + 40)) ] || { echo "only a $((x - to)) px swipe fits beside the window - stopping (not a product FAIL)"; exit 5; }
+[ $((x - to)) -ge $((W / 4 + 40)) ] || { echo "ENV: only a $((x - to)) px swipe fits beside the window - stopping (not a product FAIL)"; exit 5; }
 echo "beside: $x,$y -> $to,$y" >>"$OUT/log.txt"
 sh_ "input swipe $x $y $to $y 250"; sleep 1.5; chk beside
 p=$(onpage); [ "$p" = 1 ] && pass "a swipe beside the window showed page 2" || fail "a swipe beside the window: page $p (want 2)"
@@ -108,7 +108,7 @@ p=$(onpage); [ "$p" = 1 ] && pass "a swipe beside the window showed page 2" || f
 hemit system.home null; chk home1
 [ "$(onpage)" = 0 ] || fail "home didn't come back to page 1"
 # (4) up from empty space beside the window
-pt=$(freept "$(bounds)"); [ "$pt" != none ] && [ -n "$pt" ] || { echo "no empty spot on page 1 - stopping"; exit 5; }
+pt=$(freept "$(bounds)"); [ "$pt" != none ] && [ -n "$pt" ] || { echo "ENV: no empty spot on page 1 - stopping"; exit 5; }
 x=${pt% *}; y=${pt#* }; y1=$((y - H * 30 / 100)); [ $y1 -lt 60 ] && y1=60
 sh_ "input swipe $x $y $x $y1 250"; sleep 1.2; chk empty-up
 o=$(isopen); "$T/shot.sh" "$OUT/3-launcher.png"

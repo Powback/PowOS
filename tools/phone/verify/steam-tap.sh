@@ -110,12 +110,12 @@ s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$(us "pgrep -fc 'SteamLaunch AppId='" | tail -1)" = 0 ] || { echo "a game runs under Steam (the user's): not now"; exit 3; }
 sh_ "cmd device_state state 3"; sleep 3; chk unfold
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1); W=${WH% *}; H=${WH#* }
-[ "${W:-0}" -gt 2000 ] || { echo "display is ${W:-?}x${H:-?}, not the unfolded inner screen"; exit 5; }
+[ "${W:-0}" -gt 2000 ] || { echo "ENV: display is ${W:-?}x${H:-?}, not the unfolded inner screen"; exit 5; }
 kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
 if kg | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5
   kg | grep -q true && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
-  kg | grep -q true && { echo "the keyguard didn't go (a PIN?)"; exit 5; }
+  kg | grep -q true && { echo "ENV: the keyguard didn't go (a PIN?)"; exit 5; }
 fi
 home() { sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; }
 home; chk home

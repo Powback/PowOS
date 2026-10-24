@@ -46,9 +46,9 @@ pill "checking the phone (a game already up? Steam?)"
 # Every phone-side script in ONE push (each adb.sh call is a docker run over the VPN, ~2-3 s).
 st=$OUT/push; mkdir -p "$st"; for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-prof.sh bf-game.sh bf-nap.sh; do
   cp "$here/$f" "$st/powos-$f"; done
-"$A" push "$st"/powos-bf-*.sh /data/local/tmp/ >/dev/null || { echo "can't push the check's scripts"; exit 5; }
+"$A" push "$st"/powos-bf-*.sh /data/local/tmp/ >/dev/null || { echo "ENV: can't push the check's scripts"; exit 5; }
 gs=$(asuser bf-game.sh state | tail -1); users=0
-G=$(asuser bf-game.sh dir | tail -1); [ -n "$G" ] || { echo "app $APP isn't installed (no Steam appmanifest)"; exit 5; }
+G=$(asuser bf-game.sh dir | tail -1); [ -n "$G" ] || { echo "ENV: app $APP isn't installed (no Steam appmanifest)"; exit 5; }
 case $gs in
   game=awake) echo "the user's $NAME is up and awake (they play it?) - skip"; exit 3 ;;
   game=frozen) users=1; echo "the user's $NAME, left frozen: measured as it is (base only), frozen again after"
