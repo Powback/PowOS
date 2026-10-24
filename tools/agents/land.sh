@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/agents/land.sh "msg" -- <paths> [--task <id> --step "..."] [--ship "note"] [--queue <check args>]
+# tools/agents/land.sh "msg" -- <paths> [--task <id> --step "..."] [--ship "note" | --no-ship] [--queue <check args>]
 #
 # ONE call that replaces the landing recipe (docs/AGENT-HANDBOOK.md used to spell out commit -> rebase ->
 # push -> task set -> ship request -> queue as five+ separate calls, 122 git-sync calls + 73 commit/push in
@@ -19,7 +19,8 @@
 #      landed meanwhile) it fetches + rebases + pushes ONE more time, then gives up rather than loop;
 #   5. sets the board task's step (python3 lib/ai/agents/powos-agents-cli task set), skipped with a note if
 #      the board isn't reachable - never fails the landing over that;
-#   6. requests a ship (tools/phone/ship.sh request), if asked;
+#   6. requests a ship automatically for critical paths (shell/, targets/android/, apps/, lib/, tools/app-api/),
+#      or if --ship "note" is given; use --no-ship to suppress automatic ship requests.
 #   7. queues phone/emulator checks (tools/phone/verify/queue.sh add), if asked - arguments after --queue are
 #      passed on as separate words, not one quoted string.
 # Prints ONE summary line per step it ran. Never touches the shared base worktree (powos-multiplatform; old
@@ -30,8 +31,8 @@
 #   tools/agents/land.sh "shorten the drawer's fade" -- shell/ui/drawer.tsx shell/ui/drawer.css
 #   tools/agents/land.sh "fix widget preview crash" -- shell/ui/owl.tsx \
 #       --task widget-preview-crash --step "shipped, queued a check" \
-#       --ship "widget preview no longer crashes on empty data" \
 #       --queue widget-preview-crash tools/phone/verify/widget-check.sh --round 1
+#   tools/agents/land.sh "update docs" -- docs/AGENT-HANDBOOK.md --no-ship
 #
 # Env overrides (tests): LAND_BASE (default worktree-powos-multiplatform), LAND_AGENTS_CLI, LAND_SHIP,
 # LAND_QUEUE, LAND_REMOTE (default origin).
@@ -52,12 +53,13 @@ msg=$1; shift
 shift
 
 paths=()
-task_id= step_text= ship_note= ship_set=0 queue_args=()
+task_id= step_text= ship_note= ship_set=0 ship_suppress=0 queue_args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --task) task_id=${2:?--task needs an id}; shift 2 ;;
     --step) step_text=${2:?--step needs text}; shift 2 ;;
     --ship) ship_note=${2-}; ship_set=1; shift 2 ;;
+    --no-ship) ship_suppress=1; shift ;;
     --queue) shift; queue_args=("$@"); set -- ;;
     --) echo "land.sh: unexpected extra --" >&2; exit 2 ;;
     -*) echo "land.sh: unknown flag $1" >&2; exit 2 ;;
@@ -82,6 +84,9 @@ cd "$top"
 # Rules) that plain --porcelain would hide and this script would then wrongly refuse as "not yours".
 for p in "${paths[@]}"; do
   case "$p" in /*|../*|*/../*) echo "land.sh: refused - '$p' isn't a repo-relative path" >&2; exit 2 ;; esac
+  # Several paths in ONE word: zsh doesn't word-split an unquoted $VAR, so `land.sh msg -- $FILES` arrives as one
+  # path (f261, f266) - say that instead of the misleading "no uncommitted change".
+  case "$p" in *" "*) [ -e "$p" ] || { echo "land.sh: refused - '$p' looks like several paths in one argument (zsh doesn't split \$VAR): pass each path as its own word, e.g. \`git diff --name-only | xargs tools/agents/land.sh \"msg\" --\`" >&2; exit 2; } ;; esac
   [ -n "$(git status --porcelain --ignored=matching -- "$p" 2>/dev/null)" ] || {
     echo "land.sh: refused - '$p' has no uncommitted change in this worktree (not yours to land)" >&2; exit 3; }
 done
@@ -209,6 +214,21 @@ fi
 final_sha=$(git rev-parse --short HEAD)
 final_subj=$(git log -1 --format=%s)
 echo "land: pushed $final_sha $final_subj"
+
+# Auto-request ship for critical paths (shell/, targets/android/, apps/, lib/, tools/app-api/)
+# unless --no-ship is given or --ship was already explicitly set.
+if [ "$ship_set" = 0 ] && [ "$ship_suppress" = 0 ]; then
+  needs_ship=0
+  for p in "${paths[@]}"; do
+    case "$p" in
+      shell/*|targets/android/*|apps/*|lib/*|tools/app-api/*) needs_ship=1; break ;;
+    esac
+  done
+  if [ $needs_ship -eq 1 ]; then
+    ship_note="$final_subj"
+    ship_set=1
+  fi
+fi
 
 # 4.5. warn about untracked files left in the worktree (excluding gitignored and symlinks)
 untracked=()

@@ -354,7 +354,7 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
 - **Agents never ship themselves.** Land with `tools/agents/land.sh "msg" -- <paths> --ship "plain words for the
   user"` (Efficiency, above) and END YOUR TURN - nothing else. That one call does what used to be spelled out here
   step by step: commit by pathspec, rebase once, push to origin/worktree-powos-multiplatform, then
-  `tools/phone/ship.sh request --note "..."` (or `--silent` with no `--ship`). One ship service (launchd
+  `tools/phone/ship.sh request --note "..."` (or `--silent` with no `--ship`). Critical paths (`shell/`, `targets/android/`, `apps/`, `lib/`, `tools/app-api/`) auto-request a ship by default; use `--no-ship` to suppress it for docs-only or non-shipping changes. One ship service (launchd
   `com.powos.ship-runner`, unit ship-runner-mac, its own checkout
   .claude/worktrees/ship-runner) ships origin's TIP in two parts: push.sh of exactly the shell files that differ
   from what's live 10 s after the last commit, also while an APK is out; and, when Kotlin/APK inputs changed since the

@@ -232,6 +232,59 @@ pushed_line=$(echo "$out" | grep "^land: pushed")
 last_line=$(echo "$out" | tail -1)
 echo "$last_line" | grep -q "^land: pushed" && ok "final SHA is the last output line" || bad "final SHA is the last output line" "last_line=$last_line"
 
+# == 11. auto-ship for shell/ changes: a shell/ path triggers automatic ship request ===
+W11="$TMP/w11"; new_worktree "$W11"
+mkdir -p "$W11/shell/ui"
+echo change11 > "$W11/shell/ui/test.tsx"
+STUB_SHIP_11="$TMP/ship11.sh"; stub "$STUB_SHIP_11"
+out=$(cd "$W11" && LAND_SHIP="$STUB_SHIP_11" "$LAND" "shell change" -- shell/ui/test.tsx 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "auto-ship for shell/ lands successfully" || bad "auto-ship for shell/ lands successfully" "rc=$rc: $out"
+grep -q "ship requested" <<<"$out" && ok "shell/ change triggers automatic ship request" || bad "shell/ change triggers automatic ship request" "$out"
+grep -q "shell change" "$STUB_SHIP_11.log" 2>/dev/null && ok "auto-ship uses commit subject as note" || bad "auto-ship uses commit subject as note" "$(cat "$STUB_SHIP_11.log" 2>/dev/null)"
+
+# == 12. no auto-ship for docs-only changes: a docs/ path does not trigger automatic ship request ===
+W12="$TMP/w12"; new_worktree "$W12"
+mkdir -p "$W12/docs"
+echo change12 > "$W12/docs/test.md"
+STUB_SHIP_12="$TMP/ship12.sh"; stub "$STUB_SHIP_12"
+out=$(cd "$W12" && LAND_SHIP="$STUB_SHIP_12" "$LAND" "docs change" -- docs/test.md 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "docs-only change lands successfully" || bad "docs-only change lands successfully" "rc=$rc: $out"
+grep -q "ship requested" <<<"$out" && bad "docs-only change must not trigger auto-ship" "$out" \
+  || ok "docs-only change does not trigger automatic ship request"
+[ ! -f "$STUB_SHIP_12.log" ] && ok "ship was not called for docs-only change" || bad "ship was not called for docs-only change" "$(cat "$STUB_SHIP_12.log" 2>/dev/null)"
+
+# == 13. --no-ship suppresses auto-ship: a shell/ path with --no-ship does not request ship ===
+W13="$TMP/w13"; new_worktree "$W13"
+mkdir -p "$W13/shell/ui"
+echo change13 > "$W13/shell/ui/test.tsx"
+STUB_SHIP_13="$TMP/ship13.sh"; stub "$STUB_SHIP_13"
+out=$(cd "$W13" && LAND_SHIP="$STUB_SHIP_13" "$LAND" "shell change with no-ship" -- shell/ui/test.tsx --no-ship 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "--no-ship suppresses auto-ship" || bad "--no-ship suppresses auto-ship" "rc=$rc: $out"
+grep -q "ship requested" <<<"$out" && bad "--no-ship must suppress auto-ship" "$out" \
+  || ok "--no-ship prevents automatic ship request for shell/ changes"
+[ ! -f "$STUB_SHIP_13.log" ] && ok "ship was not called with --no-ship" || bad "ship was not called with --no-ship" "$(cat "$STUB_SHIP_13.log" 2>/dev/null)"
+
+# == 14. explicit --ship overrides auto-ship note: --ship "custom" uses custom note even for auto-triggered ships ===
+W14="$TMP/w14"; new_worktree "$W14"
+mkdir -p "$W14/shell/ui"
+echo change14 > "$W14/shell/ui/test.tsx"
+STUB_SHIP_14="$TMP/ship14.sh"; stub "$STUB_SHIP_14"
+out=$(cd "$W14" && LAND_SHIP="$STUB_SHIP_14" "$LAND" "shell change" -- shell/ui/test.tsx --ship "custom note" 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "explicit --ship overrides auto-ship" || bad "explicit --ship overrides auto-ship" "rc=$rc: $out"
+grep -q "custom note" "$STUB_SHIP_14.log" 2>/dev/null && ok "explicit --ship note is used instead of commit subject" || bad "explicit --ship note is used" "$(cat "$STUB_SHIP_14.log" 2>/dev/null)"
+
+# == 15. auto-ship for targets/android/, apps/, lib/, tools/app-api/ paths ===
+for path_prefix in "targets/android" "apps" "lib" "tools/app-api"; do
+  idx=$((15 + $(echo "$path_prefix" | tr -cd '/' | wc -c)))
+  W_AUTO="$TMP/w_auto_$idx"; new_worktree "$W_AUTO"
+  mkdir -p "$W_AUTO/$path_prefix/test"
+  echo "change_$idx" > "$W_AUTO/$path_prefix/test/file.txt"
+  STUB_SHIP_AUTO="$TMP/ship_auto_$idx.sh"; stub "$STUB_SHIP_AUTO"
+  out=$(cd "$W_AUTO" && LAND_SHIP="$STUB_SHIP_AUTO" "$LAND" "change in $path_prefix" -- "$path_prefix/test/file.txt" 2>&1); rc=$?
+  [ $rc -eq 0 ] && ok "auto-ship for $path_prefix/ lands successfully" || bad "auto-ship for $path_prefix/ lands successfully" "rc=$rc: $out"
+  grep -q "ship requested" <<<"$out" && ok "$path_prefix/ change triggers automatic ship request" || bad "$path_prefix/ change triggers automatic ship request" "$out"
+done
+
 echo ""
 echo "== Results: $PASS passed, $FAIL failed =="
 [ $FAIL -eq 0 ]
