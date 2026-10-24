@@ -15,7 +15,7 @@
 # Why (2026-10-23): every agent ran ship-apk.sh / push.sh from its own worktree - ~6 APKs and ~15 shell pushes in one
 # night, racing; twice an APK built from an older tip landed after newer shell pushes and wiped them on the phone.
 # The service, in its own checkout ($POWOS_RUN_ROOT/ship-runner, default ~/pw/ship-runner, only it touches it;
-# old path .claude/worktrees/ship-runner kept as a fallback while it moves - wt-move-rest), ships origin's TIP in two parts:
+# no .claude/worktrees fallback - wt-move-rest moved it for good, f190), ships origin's TIP in two parts:
 #   - shell, once origin stayed SHIP_QUIET_SHELL_S (10) s on the tip: shell/push.sh --vpn of exactly the shell files
 #     that differ from what's live (the last tip it shipped, or the installed build), --reset of the ones the tip
 #     deleted - ALSO while an APK ship is out (2026-10-23: shell fixes waited 25-30 min behind one APK's build and idle
@@ -34,11 +34,13 @@ here=${SHIP_HERE:-$(cd "$(dirname "$0")" && pwd -P)}; unset SHIP_HERE
 BASE=worktree-powos-multiplatform
 REPO=$(cd "$here" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null && pwd -P || true)
 [ "$REPO" = / ] && REPO=
-# This checkout is moving to $POWOS_RUN_ROOT/ship-runner (wt-move-rest) - prefer that, fall back to the old
-# $REPO/.claude/worktrees/ship-runner while it still has the real checkout (so run still works mid-move).
+# The service's checkout: only the service touches it. $POWOS_RUN_ROOT/ship-runner, period - the old
+# $REPO/.claude/worktrees/ship-runner fallback (wt-move-rest) is gone now that the runners live in ~/pw (f190: a
+# lagging agent worktree's stale pre-move copy of THIS script, with no $POWOS_RUN_ROOT concept at all, is what
+# used to resurrect the old path - a fallback here can't fix that, and removing it stops this script, once an
+# agent rebases onto this tip, from ever choosing that path again).
 POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
-SR=$POWOS_RUN_ROOT/ship-runner   # the service's checkout: only the service touches it
-[ -e "$SR/.git" ] || [ ! -e "$REPO/.claude/worktrees/ship-runner/.git" ] || SR=$REPO/.claude/worktrees/ship-runner
+SR=$POWOS_RUN_ROOT/ship-runner
 Q=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}; mkdir -p "$Q/done"
 LABEL=${SHIP_AGENT:-com.powos.ship-runner}
 QUIET=${SHIP_QUIET_S:-60} QS=${SHIP_QUIET_SHELL_S:-10} POLL=${SHIP_POLL_S:-10}
@@ -201,10 +203,8 @@ run)
   # The APK ship runs BESIDE the loop, in its own checkout (it builds from it for minutes while ship_tree resets $SR),
   # so a shell change never queues behind an APK's build or idle wait (2026-10-23: shell fixes waited 25-30 min behind
   # one APK). State in $Q/apk/: tip, pid, rc (written when it ends).
-  # Moving to $POWOS_RUN_ROOT/ship-runner-apk (wt-move-rest) - prefer that, fall back to the old
-  # $REPO/.claude/worktrees/ship-runner-apk while it still has the real checkout.
+  # $POWOS_RUN_ROOT/ship-runner-apk, period (f190: no .claude/worktrees fallback - see SR above).
   SA=$POWOS_RUN_ROOT/ship-runner-apk
-  [ -e "$SA/.git" ] || [ ! -e "$REPO/.claude/worktrees/ship-runner-apk/.git" ] || SA=$REPO/.claude/worktrees/ship-runner-apk
   apk_alive() {   # an APK ship out; one whose runner died (killed, restarted) without an rc goes again (rc 4)
     [ -d "$Q/apk" ] && [ ! -f "$Q/apk/rc" ] || return 1
     kill -0 "$(cat "$Q/apk/pid" 2>/dev/null)" 2>/dev/null && return 0

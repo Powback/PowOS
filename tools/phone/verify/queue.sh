@@ -53,11 +53,13 @@ BASE=worktree-powos-multiplatform
 REPO=$(cd "$here" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null && pwd -P || true)
 [ "$REPO" = / ] && REPO=
 WTR=${POWOS_WT_ROOT:-$HOME/pw}   # where tools/agents/worktree.sh new puts agent worktrees (outside the repo)
-# The runner's checkout: only the runner touches it. Moving to $POWOS_RUN_ROOT/verify-runner (wt-move-rest) -
-# prefer that, fall back to the old $REPO/.claude/worktrees/verify-runner while it still has the real checkout.
+# The runner's checkout: only the runner touches it. $POWOS_RUN_ROOT/verify-runner, period - the old
+# $REPO/.claude/worktrees/verify-runner fallback (wt-move-rest) is gone now that the runners live in ~/pw (f190:
+# a lagging agent worktree's stale pre-move copy of THIS script, with no $POWOS_RUN_ROOT concept at all, is what
+# used to resurrect the old path - a fallback here can't fix that, and removing it stops this script, once an
+# agent rebases onto this tip, from ever choosing that path again).
 POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
 VR=$POWOS_RUN_ROOT/verify-runner
-[ -e "$VR/.git" ] || [ ! -e "$REPO/.claude/worktrees/verify-runner/.git" ] || VR=$REPO/.claude/worktrees/verify-runner
 Q=${QUEUE_DIR:-$HOME/.cache/powos-verify-queue}; mkdir -p "$Q/done"
 QUEUED_STEP="phone check queued"   # shell/ui/powai.tsx matches this text
 # user_sh <script text>: run it inside PowOS as the session user (its `powos ...`), quietly.
@@ -97,10 +99,8 @@ endjob() { killtree "$1"; for _ in $(seq 10); do kill -0 "$1" 2>/dev/null || ret
 # hinge) and "unfolded-checks.sh" (device_state-simulated, same as every e2e_setup inner check) matched the old
 # unbounded "fold" and were wrongly refused --dev emu (2026-10-24).
 E=$Q/emu
-# emu-runner's checkout: moving to $POWOS_RUN_ROOT/emu-runner (wt-move-rest) - prefer that, fall back to the
-# old $REPO/.claude/worktrees/emu-runner while it still has the real checkout.
+# emu-runner's checkout: $POWOS_RUN_ROOT/emu-runner, period (f190: no .claude/worktrees fallback - see VR above).
 ET=$POWOS_RUN_ROOT/emu-runner
-[ -e "$ET/.git" ] || [ ! -e "$REPO/.claude/worktrees/emu-runner/.git" ] || ET=$REPO/.claude/worktrees/emu-runner
 HW_ONLY='^(bf-|steam-|td-launch|mc-launch|games?-)|fps|(^|[^a-z])fold([^a-z]|$)|kernel'
 # LINUX_ONLY: an argument naming a Linux app or stage the emulator has no session for - --dev auto never picks emu
 # when one of these appears literally in the command (window-max.sh's STAGE, --apps "... kate ...", etc).
