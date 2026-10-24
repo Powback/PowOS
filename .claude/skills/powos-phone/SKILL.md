@@ -17,6 +17,7 @@ description: Use to reach, inspect, ship to, verify, or measure perf on the PowO
   (budget ~3% of one core idle on home, screen on; 0 frames/paints/rAF at rest).
 - Ship/land: `tools/agents/land.sh "msg" -- <paths> [--ship "note"] [--queue <check args>]` then END YOUR TURN.
   Never ship-apk/push/queue-wait yourself.
+- Evidence off PowOS's root: `tools/phone/pull-root.sh <path-under-/data/powos/root> <mac-dir>` (plain `adb.sh pull` there is Permission denied; it copies via `su cp` to /data/local/tmp first).
 - Friction: `tools/agents/friction add --area phone --kind <refused|broken-tool|flaky-check|unclear-rule|slow> "<title>" --repro "<cmd>"`.
 
 ## powos-phone

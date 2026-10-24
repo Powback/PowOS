@@ -13,6 +13,8 @@
 #        prints it - it's the number to put in PKGBUILD's pkgrel=, not a confirmation of one already written.
 #   pkg-claim.sh claims <pkgdir>           the ledger's reservations for this pkgdir (never pruned - a stale one
 #        only pushes the next number a little higher, never lower, so there is nothing unsafe about keeping it).
+#   --dry-run (with reserve-patch or reserve-pkgrel): prints the number it WOULD reserve; writes nothing (no claim,
+#        no lock). Use it to test this script - a real reserve permanently burns that number.
 #
 # CLAIMS=${POWOS_PKG_CLAIMS:-~/.cache/powos-pkg-claims}. BASE=${LAND_BASE:-worktree-powos-multiplatform}.
 set -euo pipefail
@@ -20,7 +22,7 @@ CLAIMS=${POWOS_PKG_CLAIMS:-$HOME/.cache/powos-pkg-claims}
 BASE=${LAND_BASE:-worktree-powos-multiplatform}
 mkdir -p "$CLAIMS"
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,/^# CLAIMS=/p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # patch_max <pkgdir> <repo>: the highest NNNN among pkgdir/NNNN-*.patch, on disk here AND on origin/$BASE
 # (another agent's landed patch this worktree hasn't fetched); 0 if none either place.
@@ -74,6 +76,9 @@ claim_lock() {
   trap 'rmdir "'"$lock"'" 2>/dev/null || true' EXIT
 }
 
+dry=0; rest=()
+for x in "$@"; do if [ "$x" = --dry-run ]; then dry=1; else rest+=("$x"); fi; done
+set -- ${rest[@]+"${rest[@]}"}
 [ $# -ge 2 ] || { usage >&2; exit 2; }
 cmd=$1; pkgdir=${2%/}
 [ -d "$pkgdir" ] || { echo "pkg-claim.sh: no such package dir: $pkgdir" >&2; exit 2; }
@@ -82,16 +87,18 @@ repo=$(git -C "$pkgdir" rev-parse --show-toplevel 2>/dev/null || true)
 
 case "$cmd" in
 reserve-patch)
-  claim_lock "$pkg-patch"
+  [ $dry = 1 ] || claim_lock "$pkg-patch"
   m1=$(patch_max "$pkgdir" "$repo"); m2=$(claims_patch_max "$pkg")
   next=$(( (m1 > m2 ? m1 : m2) + 1 ))
+  if [ $dry = 1 ]; then printf '%04d\n' "$next"; echo "pkg-claim.sh: --dry-run, nothing reserved" >&2; exit 0; fi
   printf '%04d %s %s\n' "$next" "${repo:+$(basename "$repo")}" "$(date +%s)" >> "$CLAIMS/$pkg-patch.claims"
   printf '%04d\n' "$next" ;;
 reserve-pkgrel)
-  claim_lock "$pkg-pkgrel"
+  [ $dry = 1 ] || claim_lock "$pkg-pkgrel"
   m1=$(pkgrel_max "$pkgdir" "$repo"); m2=$(claims_pkgrel_max "$pkg")
   hi=$(printf '%s\n%s\n' "$m1" "${m2:-0}" | sort -V | tail -1)
   next=$(bump_pkgrel "$hi")
+  if [ $dry = 1 ]; then printf '%s\n' "$next"; echo "pkg-claim.sh: --dry-run, nothing reserved" >&2; exit 0; fi
   printf '%s %s\n' "$next" "$(date +%s)" >> "$CLAIMS/$pkg-pkgrel.claims"
   printf '%s\n' "$next" ;;
 claims)

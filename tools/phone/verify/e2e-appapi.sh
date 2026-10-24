@@ -71,7 +71,7 @@ add_app_journey() {
   local SAMPLE; SAMPLE=$(btn 'Try the Open-Meteo sample')
   reveal "$SAMPLE"
   tapel "$SAMPLE" "Try the Open-Meteo sample" || return 0
-  until_js "$SCR.innerText.includes('Open-Meteo (demo capture)')&&!!($(btn 'Discard'))" 8 || { fail "the sample made no draft: $(ev "$SCR.innerText.slice(0,160)")"; return 0; }
+  until_js "$SCR.innerText.includes('Open-Meteo (demo capture)')&&!!($(btn 'Discard'))" 8 || { fail "the sample made no draft: $(ev "$SCR.innerText.slice(0,1200)")"; return 0; }
   chk draft
   step draft "the Open-Meteo sample as a draft: its actions, dry runs only, Add to my apps / Discard"
   pass "the sample is a draft under review (Add to my apps, Discard)"
