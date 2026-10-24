@@ -159,6 +159,10 @@ run)
   delta() { git diff --name-only "$1" "$2" -- shell/ 2>/dev/null | grep -vE '^shell/(dev|test)/' |
     while read -r f; do git cat-file -e "$2:$f" 2>/dev/null && echo "+${f#shell/}" || echo "-${f#shell/}"; done; }
   apk_inputs() { git diff --name-only "$1" "$2" -- targets/android/app targets/android/build-app.sh 2>/dev/null | grep -v 'app/version.properties$'; }
+  # apps_changed A B: apps/<app>/ dirs (ones with a powos-app.json - never apps/build.sh, apps/registry etc.) that
+  # differ between A and B.
+  apps_changed() { git diff --name-only "$1" "$2" -- apps 2>/dev/null | sed -n 's#^apps/\([^/]*\)/.*#\1#p' | sort -u |
+    while read -r a; do [ -f "apps/$a/powos-app.json" ] && echo "$a"; done; }
   # The APK ship runs BESIDE the loop, in its own checkout (it builds from it for minutes while ship_tree resets $SR),
   # so a shell change never queues behind an APK's build or idle wait (2026-10-23: shell fixes waited 25-30 min behind
   # one APK). State in $Q/apk/: tip, pid, rc (written when it ends).
@@ -304,6 +308,33 @@ run)
         why="no record of the installed build"; [ -n "$inst" ] && why="APK inputs changed: $(apk_inputs "$inst" "$T" | head -3 | paste -sd' ' -)"
         echo "$(date +%T) ship ${T:0:9} as an APK ($why) for $who_s - beside the loop"
         apk_launch "$T" "${na[@]}" && echo "note=${an:-(silent)}" > "$Q/apk/notes" || echo "$(date +%T) ${T:0:9}: couldn't check out $SA for the APK"
+      fi
+      # 3. Apps: apps/<app>/ changed since the last apps ship, built + installed on the phone - after the APK
+      #    (never while one's out, same debounce as the shell ship above so this never waits on an open request
+      #    the shell section already closed) and under the shell ship's own phone-busy rules (never inside a
+      #    verify window, never during another install).
+      achg=$(apps_changed "$(cat "$Q/apps-live" 2>/dev/null || echo "$T~1")" "$T")
+      if [ -n "$achg" ] && ! apk_alive && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ]; then
+        if verify_held; then echo $$ > "$Q/wants-phone"
+        elif ship_lock; then
+          echo $$ > "$Q/installing"
+          an=$(joined ${snotes[@]+"${snotes[@]}"} ${anotes[@]+"${anotes[@]}"}); an=${an:-"app update"}
+          alog=$Q/done/$(date +%Y%m%d-%H%M%S)-${T:0:9}-apps.log; arc=0
+          echo "$(date +%T) ship ${T:0:9} as apps ($achg) for $who_s" | tee -a "$alog" >/dev/null
+          for a in $achg; do
+            ( PATH="$here/bin:$PATH" apps/build.sh "$a" && PATH="$here/bin:$PATH" apps/install.sh "$a" install --note "$an" ) >> "$alog" 2>&1 || { arc=$?; break; }
+          done
+          rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
+          if [ $arc = 0 ]; then
+            echo "$T" > "$Q/apps-live"; rm -f "$Q/failed-apps"
+            echo "$(date '+%F %T') ${T:0:9} apps ($achg) for $who_s: $an" >> "$Q/shipped.log"
+            echo "$(date +%T) ${T:0:9}: apps shipped ($achg)"
+          else
+            echo "$T" > "$Q/failed-apps"
+            echo "$(date +%T) ${T:0:9}: apps ship FAILED rc $arc (log $alog) - waiting for a new origin commit"
+            mail "ship ${T:0:9} (apps:$achg) FAILED rc $arc: $(tail -1 "$alog" | cut -c1-200) - log $alog on the Mac; fix it on origin, then ship.sh request again"
+          fi
+        fi
       fi
       ! ls "$Q"/*.req >/dev/null 2>&1 || sleep "$POLL"
     done

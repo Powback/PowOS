@@ -315,6 +315,9 @@ never a hardcoded root.
   agent's next ship: `tools/phone/compile-check.sh` (your worktree, a throwaway builder; never touches the shared APK
   output, safe while a ship runs; prints the compiler's errors, exit 0 = compiles). Found someone else's broken tip? Tell its author/the coordinator with
   the compiler error; don't ship around it.
+- Apps: a shipped commit that changes `apps/<app>/` (e.g. `apps/app-api`) gets `apps/build.sh <app>` then
+  `apps/install.sh <app> install --note "<ship note>"` for each changed app, after the APK and under the same
+  phone-busy rules as the shell ship above (never inside a verify window, never during another install).
 ### PowOS (Linux) side
 - lib/ai (manager, comms): `PATH="$PWD/tools/phone/bin:$PATH" targets/android/rooted/rooted.sh deploy --note "..."`
   (rooted.sh calls plain adb; tools/phone/bin/adb routes it through adb.sh over the VPN). Other PowOS files through the deploy
