@@ -46,6 +46,9 @@ and the latest start wins.
 - stt.pow gives 200 `{"text":""}` for silence and clips under 0.5 s (since 2df111b; it used to answer 500). GpuSession
   tolerates a real 500 twice (no words from that request) and fails over on the third in a row.
 - Release with GPU: the last ~300 ms before release can be missing (partials are chunked).
+- Never write an AudioFeed pipe on main: a pipe holds 64 KB (2 s of PCM) and the recognizer reads only after
+  startListening, so a write in open() with a fallback backlog froze the app for good (7 ANRs, 2026-10-23/24). Only the
+  speech-feed thread writes. Check: tools/phone/verify/assist-freeze.sh (5 assist shows, fallback with a >2 s replay).
 
 ## stt.pow facts
 stt-batch (whisper-fast large-v3-turbo, gpu-195 GPU1 :8001, Traefik `http://stt.pow`, LAN/VPN, no auth).
