@@ -116,7 +116,10 @@ halt() { local i
   a emu kill >/dev/null 2>&1
   for i in $(seq 30); do pgrep -f -- "-avd $AVD( |$)" >/dev/null || return 0; sleep 1; done
   pkill -9 -f -- "-avd $AVD( |$)"; sleep 1; }
-root_up() { a root >/dev/null 2>&1; sleep 2; a wait-for-device; wait_boot 120; }
+# wait_dev [s]: adb sees the emulator as a device (never adb's own unbounded wait-for-device: it held `start` 20 min on a
+# dead emulator, 2026-10-24).
+wait_dev() { local i; for i in $(seq "${1:-120}"); do running && return 0; sleep 1; done; die "the emulator isn't an adb device after ${1:-120} s"; }
+root_up() { a root >/dev/null 2>&1; sleep 2; wait_dev; wait_boot 120; }
 
 # --- PowOS as the phone has it -------------------------------------------------------------------------------------
 # build REF: the APK of REF from the normal build system, into $STATE/apk/<commit>.apk; prints its path.
@@ -159,7 +162,7 @@ priv() {
     echo "$deny" | grep . | sed 's/.*/        <deny-permission name="&"\/>/'
     echo '    </privapp-permissions>'; echo '</permissions>'; } > "$x"
   say "priv-app: allowlisted $(echo "$allow" | grep -c .), denied (asked, not on the reviewed list) $(echo "$deny" | grep -c .)"
-  a remount 2>&1 | grep -qi 'reboot' && { say "first remount: rebooting once"; a reboot; a wait-for-device; wait_boot 300; root_up; a remount >/dev/null 2>&1; }
+  a remount 2>&1 | grep -qi 'reboot' && { say "first remount: rebooting once"; a reboot; wait_dev; wait_boot 300; root_up; a remount >/dev/null 2>&1; }
   a shell mkdir -p /system/priv-app/PowOS || die "/system isn't writable (remount failed)"
   a push "$apk" /system/priv-app/PowOS/PowOS.apk >/dev/null 2>&1 && a push "$x" /system/etc/permissions/privapp-permissions-com.powos.app.xml >/dev/null 2>&1 || die "push to /system failed"
   a shell 'chmod 644 /system/priv-app/PowOS/PowOS.apk /system/etc/permissions/privapp-permissions-com.powos.app.xml; chcon u:object_r:system_file:s0 /system/priv-app/PowOS /system/priv-app/PowOS/PowOS.apk /system/etc/permissions/privapp-permissions-com.powos.app.xml'
@@ -242,11 +245,11 @@ create)
   boot -no-snapshot-load -no-snapshot-save
   root_up
   # The first remount on a fresh AVD turns verity off and needs a reboot.
-  a remount 2>&1 | grep -qi reboot && { say "remount: rebooting once (verity off)"; a reboot; a wait-for-device; wait_boot 300; root_up; a remount >/dev/null 2>&1; }
+  a remount 2>&1 | grep -qi reboot && { say "remount: rebooting once (verity off)"; a reboot; wait_dev; wait_boot 300; root_up; a remount >/dev/null 2>&1; }
   su_install
   apk=$(build "${2:-}") || exit 1
   priv "$apk"; recents_overlay; settings_like_phone
-  say "rebooting with PowOS as a system app"; a reboot; a wait-for-device; wait_boot 300; root_up
+  say "rebooting with PowOS as a system app"; a reboot; wait_dev; wait_boot 300; root_up
   # powos-units: ~/.android/avd/powos-open.avd/*
   a shell "echo $(basename "$apk" .apk) > $COMMIT_FILE"
   selinux_permissive; grants_like_phone; testwin
@@ -260,7 +263,8 @@ start)
   # A wedged emulator (system_server killed by its watchdog in a loop: its renderer stuck in
   # HardwareRenderer.setStopped, "Can't find service: package", 2026-10-24 04:29) answers adb but not as Android:
   # its package service is asked first, and a dead one is stopped and started again from the snapshot.
-  if running && ! a shell cmd package path com.powos.app >/dev/null 2>&1; then say "Android doesn't answer (wedged) - starting again from $SNAP"; halt; fi
+  if pgrep -f -- "-avd $AVD( |$)" >/dev/null && { ! running || ! a shell cmd package path com.powos.app >/dev/null 2>&1; }; then
+    say "the emulator runs but Android doesn't answer (wedged or offline) - starting again from $SNAP"; halt; fi
   if ! running; then space_guard "starting"; boot -snapshot "$SNAP" -no-snapshot-save; fi
   root_up; selinux_permissive
   up_to_date; grants_like_phone
@@ -275,7 +279,7 @@ status)
   ;;
 reset)
   running || exec "$0" start
-  a emu avd snapshot load "$SNAP" | tr -d '\r' | grep -v '^OK$'; a wait-for-device; wait_boot 120; root_up; selinux_permissive; up_to_date; grants_like_phone; home_ready
+  a emu avd snapshot load "$SNAP" | tr -d '\r' | grep -v '^OK$'; wait_dev; wait_boot 120; root_up; selinux_permissive; up_to_date; grants_like_phone; home_ready
   say "reset to $SNAP"
   ;;
 install) running || die "not running: emu.sh start" 2; root_up; install "${2:-}"; grants_like_phone; home_ready ;;
