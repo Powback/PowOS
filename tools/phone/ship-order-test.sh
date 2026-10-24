@@ -56,7 +56,7 @@ chmod +x "$T/bin/"*; export PATH="$T/bin:$PATH"
 # --- the repo: origin (bare), the shipper's clone A, another agent's clone B ---
 git init -q --bare "$T/origin.git"
 git clone -q "$T/origin.git" "$T/seed" 2>/dev/null; cd "$T/seed"; git checkout -q -b worktree-powos-multiplatform
-mkdir -p tools/phone shell/dev shell/ui targets/android
+mkdir -p tools/phone tools/lib shell/dev shell/ui targets/android; cp "$src/tools/lib/need-docker.sh" tools/lib/
 cp "$src/tools/phone/ship-apk.sh" "$src/tools/phone/ship-guard.sh" tools/phone/; cp "$src/shell/push.sh" shell/
 cat > shell/dev/gate.sh <<'EOF'
 #!/bin/bash

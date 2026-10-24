@@ -48,7 +48,7 @@ EOF
 chmod +x "$T/bin/"*; export PATH="$T/bin:$PATH"
 git init -q --bare "$T/origin.git"
 git clone -q "$T/origin.git" "$T/seed" 2>/dev/null; cd "$T/seed"; git checkout -q -b worktree-powos-multiplatform
-mkdir -p tools/phone shell/dev shell/ui targets/android/app
+mkdir -p tools/phone tools/lib shell/dev shell/ui targets/android/app; cp "$src/tools/lib/need-docker.sh" tools/lib/
 cp "$src/tools/phone/ship.sh" "$src/tools/phone/ship-apk.sh" tools/phone/; cp "$src/shell/push.sh" shell/
 mv tools/phone/ship-apk.sh tools/phone/ship-apk.real.sh
 # The APK ship: records itself (tree, flags, service mark) and the installed commit, as the real one does.
@@ -77,7 +77,11 @@ printf '#!/bin/bash\necho "MAIL $(cat "$1")" >> "$LOG"\n' > tools/phone/user.sh
 printf '.claude/\n' > .gitignore
 echo 'export const a = 0' > shell/ui/a.tsx; echo 'export const b = 0' > shell/ui/b.tsx; echo 'export const old = 0' > shell/ui/old.tsx
 echo 'class Main' > targets/android/app/Main.kt
-chmod +x tools/phone/*.sh shell/dev/gate.sh shell/push.sh
+# apps tier stubs: build/install just log (an app = apps/<name>/ with a powos-app.json)
+mkdir -p apps/x; echo '{}' > apps/x/powos-app.json; echo 0 > apps/x/f.txt
+printf '#!/bin/bash\necho "APPBUILD $*" >> "$LOG"\n' > apps/build.sh
+printf '#!/bin/bash\necho "APPINSTALL $*" >> "$LOG"\n' > apps/install.sh
+chmod +x tools/phone/*.sh shell/dev/gate.sh shell/push.sh apps/*.sh
 git add -A; git commit -qm base; git push -q origin worktree-powos-multiplatform 2>/dev/null
 git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"   # the phone runs base's APK
 git clone -q -b worktree-powos-multiplatform "$T/origin.git" "$T/B" 2>/dev/null
@@ -195,6 +199,13 @@ kill "$(cat "$Q/runner.lock/pid")"; sleep 3
 ! pgrep -f "$T/.*ship-apk.sh" >/dev/null && [ ! -d "$HOME/.cache/powos-ship.lock" ] && ls "$Q"/*.req >/dev/null 2>&1 &&
   ok "TERM stops the APK ship too (lock freed, request kept)" || { bad "TERM left: $(pgrep -fl "$T/.*ship-apk.sh")"; }
 rm -f "$HOME/hold-apk"; bash tools/phone/ship.sh resume >/dev/null; drained 40 || bad "kt8 not shipped after the restart"
+
+: > "$LOG"
+# 9. 1d3a80ac: an apps/<app> change landed with a shell change - the shell ship goes first and must NOT hide the apps change.
+land apps/x/f.txt 1 "app x"; land shell/ui/a.tsx 'export const a = 9' "a9"; req --note "apps after shell"
+drained 40
+for _ in $(seq 30); do grep -q '^APPINSTALL' "$LOG" && break; sleep 1; done
+grep -q 'a = 9' "$PHONE/files/shell/ui/a.tsx" && grep -q '^APPINSTALL x install' "$LOG" && ok "apps ship after a shell ship" || { bad "apps not shipped after a shell ship"; cat "$LOG" "$Q/runner.log"; }
 
 for _ in $(seq 15); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 1; done
 runner_left=$(cat "$Q/runner.lock/pid" 2>/dev/null)
