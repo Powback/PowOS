@@ -184,4 +184,35 @@ cd "$S/steamrtarm64" || exit 1
 # Not running: a client started with steam://open/main opens on its main window (never -silent). Only with no
 # arguments: -shutdown, -silent and every other caller's options are left as they are.
 [ $# -eq 0 ] && set -- steam://open/main
+# A game launch forwarded into a running client waits until that client is logged on to Steam over a live link.
+# A client frozen out of sight (unified sleep) for a while loses its connection: Steam's server drops it, and the
+# client only notices at the thaw - which is this launch ("Disconnected By Remote Host", then a 9-19 s reconnect
+# backoff, connection_log). A launch that reached it meanwhile ran its cloud sync logged off, which failed, and
+# Steam then waited for the user to answer "syncfailed" inside its own window, out of sight; every later launch of
+# that game joined the same waiting action, so nothing ever started (Broforce 2026-10-24 05:09:56 and 05:15:43,
+# console_log "LaunchApp waiting for user response to SynchronizingCloud "syncfailed"", cloud_log "[login=false]").
+# The link's state is read from the kernel (no guess from timing): the local port of the client's newest
+# connection (connection_log ConnectionCompleted) must be an ESTABLISHED socket and its newest state Logged On. A
+# client that isn't trying to log on (user logoff, offline mode, no log) is not waited for; at most 30 s otherwise.
+cm_link() {  # 0 logged on over a live link, 1 not yet (reconnecting, or its link died while frozen), 2 not trying
+  t=$(tail -c 262144 "$1" 2>/dev/null)
+  case $(printf '%s\n' "$t" | grep -a -o -E '\] \[(Logged On|Logged Off|Connecting|Connected|Logging On), [0-9]+' | tail -1) in
+    '' | *'Logged Off, 0') return 2 ;;
+    *'Logged On,'*) ;;
+    *) return 1 ;;
+  esac
+  lp=$(printf '%s\n' "$t" | grep -a -o -E 'ConnectionCompleted\(\) \([^)]*\) local address \([^)]*:[0-9]+\)' | tail -1 \
+       | sed -E 's/.*:([0-9]+)\)$/\1/')
+  [ -n "$lp" ] || return 0
+  awk -v p=":$(printf '%04X' "$lp")" 'FNR > 1 && substr($2, length($2) - 4) == p && $4 == "01" { f = 1 } END { exit !f }' \
+    /proc/net/tcp /proc/net/tcp6 2>/dev/null || return 1
+}
+case " $* " in
+  *" steam://rungameid/"*)
+    case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in */steamrtarm64/steam)
+      t0=$(date +%s); r=0
+      while cm_link "$S/logs/connection_log.txt"; r=$?; [ $r -eq 1 ] && [ $(($(date +%s) - t0)) -lt 30 ]; do sleep 0.25; done
+      [ $(($(date +%s) - t0)) -gt 0 ] && echo "steam: waited $(($(date +%s) - t0)) s for Steam to log on again before the launch$([ $r -eq 1 ] && echo ' (still not logged on: forwarded anyway)')" >&2 ;;
+    esac ;;
+esac
 exec ./steam -cef-disable-gpu-sandbox $POWOS_STEAM_ARGS "$@"

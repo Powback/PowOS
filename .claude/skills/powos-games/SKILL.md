@@ -86,6 +86,14 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   started before the pkgrel-28 install keeps its removed event: it needs one restart.
 - The forward gate inside ExecCommandLine (steamui): CSteamDoc+0x1d1 set, and in state 0 (+0x1d8) IClientUser::
   BNeedsSSANextSteamLogon false (CUser+0xcc8 bit 30); "-login" lines go another way. Read with /proc/<pid>/mem.
+- "Forward lost" but console_log HAS ExecuteSteamURL and no GameAction line after it = the game already has a launch
+  action waiting for the user (an earlier one): read `grep 'waiting for user response' console_log` (skip
+  ShowInterstitials/CreatingProcess that "continues" at once). 2026-10-24 05:10 Broforce: Steam frozen ~30 min lost
+  its CM link (connection_log "Disconnected By Remote Host" at the thaw = the tap, reconnect backoff 9-19 s); the
+  launch's cloud sync ran logged off (cloud_log "[login=false]") -> "SynchronizingCloud "syncfailed"" waits in
+  Steam's own (hidden) window, and every later launch of that game joins it until Steam restarts. Fix (pkgrel 29,
+  /usr/bin/steam): a rungameid forward waits for Logged On over a live link (kernel socket of connection_log's newest
+  ConnectionCompleted local port ESTABLISHED), max 30 s. Such a launch takes the backoff (~10-20 s); a live link 0 s.
 - Never attach gdb to Steam in a check: a client frozen meanwhile never takes the attach's SIGSTOP; `timeout` killed gdb
   and the SIGSTOP stayed pending, delivered at the next thaw (state T, do_signal_stop: 04:40 -> 05:00). /usr/bin/steam
   (pkgrel 24) SIGCONTs a stopped client tree.
