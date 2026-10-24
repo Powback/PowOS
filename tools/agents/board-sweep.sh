@@ -25,6 +25,13 @@ echo $$ > "$S/lock/pid"; trap 'rm -rf "$S/lock"' EXIT
 git -C "$R" fetch -q origin "$BASE" 2>/dev/null
 cli=$S/powos-agents-cli
 git -C "$R" show "origin/$BASE:lib/ai/agents/powos-agents-cli" > "$cli.tmp" 2>/dev/null && mv "$cli.tmp" "$cli" || cp "$R/lib/ai/agents/powos-agents-cli" "$cli"
+# Dead agent worktrees (f3): fetch + run origin's current worktree.sh gc, same "fetch the latest copy, run that"
+# pattern as the CLI above - a fix there reaches every sweep without every worktree rebasing by hand. --dry-run
+# here follows this script's own (no real sweep's --dry-run run should delete anything either). Never fatal: a
+# worktree-removal bug must not take down the board sweep itself.
+wt=$S/worktree.sh
+git -C "$R" show "origin/$BASE:tools/agents/worktree.sh" > "$wt.tmp" 2>/dev/null && mv "$wt.tmp" "$wt" || cp "$R/tools/agents/worktree.sh" "$wt"
+( cd "$R" && bash "$wt" gc $dry ) >> "$S/gc.log" 2>&1 || echo "$(date '+%F %T') worktree gc failed (see $S/gc.log)" >> "$S/sweep.log"
 # verify-runner's checkout: moving to $POWOS_RUN_ROOT/verify-runner (wt-move-rest) - prefer that, fall back to
 # the old $REPO/.claude/worktrees/verify-runner while it still has the real checkout.
 POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
