@@ -71,6 +71,18 @@ claim_pkg() {
   fi
   CLAIMED="$CLAIMED $p"; TOUCHED=1
 }
+# claim_pkgs <pkg>...: all of them or none - every <pkg> is checked first (not running), and only then recorded as ours; a
+#   running one exits 3 ("not now") before any claim, so TOUCHED stays 0 and the restore does nothing.
+claim_pkgs() {
+  local p
+  for p in "$@"; do
+    case " $CLAIMED " in *" $p "*) continue ;; esac
+    if [ -n "$(sh_ "pidof $p")" ] || [ -n "$(sh_ "am stack list" | grep -F "$p")" ]; then
+      echo "$p already runs (maybe the user's): not now"; exit 3
+    fi
+  done
+  for p in "$@"; do claim_pkg "$p"; done
+}
 release_pkgs() {
   local p w
   for p in $CLAIMED; do
