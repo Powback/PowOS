@@ -14,14 +14,15 @@
 #        request starts one of its own. ONE runner ever (lock dir <queue>/runner.lock, as the verify runner's).
 # Why (2026-10-23): every agent ran ship-apk.sh / push.sh from its own worktree - ~6 APKs and ~15 shell pushes in one
 # night, racing; twice an APK built from an older tip landed after newer shell pushes and wiped them on the phone.
-# The service, in its own checkout (.claude/worktrees/ship-runner, only it touches it), ships origin's TIP in two parts:
+# The service, in its own checkout ($POWOS_RUN_ROOT/ship-runner, default ~/pw/ship-runner, only it touches it;
+# old path .claude/worktrees/ship-runner kept as a fallback while it moves - wt-move-rest), ships origin's TIP in two parts:
 #   - shell, once origin stayed SHIP_QUIET_SHELL_S (10) s on the tip: shell/push.sh --vpn of exactly the shell files
 #     that differ from what's live (the last tip it shipped, or the installed build), --reset of the ones the tip
 #     deleted - ALSO while an APK ship is out (2026-10-23: shell fixes waited 25-30 min behind one APK's build and idle
 #     wait). Never while the verify lock (~/.cache/powos-verify.lock, < 10 min old) is held, never during an install
 #     (ship-apk holds <ship lock>/phone for it; the shell push takes the same dir while it pushes);
 #   - an APK when Kotlin / APK inputs changed since the installed build (~/.cache/powos-installed-commit), once origin
-#     stayed SHIP_QUIET_S (60) s on the tip: ship-apk.sh from the tip in its own checkout (.claude/worktrees/
+#     stayed SHIP_QUIET_S (60) s on the tip: ship-apk.sh from the tip in its own checkout ($POWOS_RUN_ROOT/
 #     ship-runner-apk), BESIDE the loop, one at a time (it pre-gates, waits for the verify lock and a free phone, resets
 #     the overrides and re-pushes newer shell). A request whose commit has Kotlin is done once the APK is installed.
 #   The notes of the requests a part finishes go into ONE update notification ("a; b"; all --silent = silent). The tip shipped
@@ -33,7 +34,11 @@ here=${SHIP_HERE:-$(cd "$(dirname "$0")" && pwd -P)}; unset SHIP_HERE
 BASE=worktree-powos-multiplatform
 REPO=$(cd "$here" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null && pwd -P || true)
 [ "$REPO" = / ] && REPO=
-SR=$REPO/.claude/worktrees/ship-runner   # the service's checkout: only the service touches it
+# This checkout is moving to $POWOS_RUN_ROOT/ship-runner (wt-move-rest) - prefer that, fall back to the old
+# $REPO/.claude/worktrees/ship-runner while it still has the real checkout (so run still works mid-move).
+POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
+SR=$POWOS_RUN_ROOT/ship-runner   # the service's checkout: only the service touches it
+[ -e "$SR/.git" ] || [ ! -e "$REPO/.claude/worktrees/ship-runner/.git" ] || SR=$REPO/.claude/worktrees/ship-runner
 Q=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}; mkdir -p "$Q/done"
 LABEL=${SHIP_AGENT:-com.powos.ship-runner}
 QUIET=${SHIP_QUIET_S:-60} QS=${SHIP_QUIET_SHELL_S:-10} POLL=${SHIP_POLL_S:-10}
@@ -136,7 +141,8 @@ run)
     else
       git -C "$SR" reset -q --hard "origin/$BASE"   # only the service uses it
     fi
-    local nm=$REPO/.claude/worktrees/powos-multiplatform/shell/node_modules
+    local nm=$POWOS_RUN_ROOT/powos-multiplatform/shell/node_modules
+    [ -d "$nm" ] || nm=$REPO/.claude/worktrees/powos-multiplatform/shell/node_modules
     [ -e "$SR/shell/node_modules" ] || [ ! -d "$nm" ] || ln -s "$nm" "$SR/shell/node_modules"
   }
   if [ -z "${SHIP_COPY:-}" ]; then
@@ -187,7 +193,10 @@ run)
   # The APK ship runs BESIDE the loop, in its own checkout (it builds from it for minutes while ship_tree resets $SR),
   # so a shell change never queues behind an APK's build or idle wait (2026-10-23: shell fixes waited 25-30 min behind
   # one APK). State in $Q/apk/: tip, pid, rc (written when it ends).
-  SA=$REPO/.claude/worktrees/ship-runner-apk
+  # Moving to $POWOS_RUN_ROOT/ship-runner-apk (wt-move-rest) - prefer that, fall back to the old
+  # $REPO/.claude/worktrees/ship-runner-apk while it still has the real checkout.
+  SA=$POWOS_RUN_ROOT/ship-runner-apk
+  [ -e "$SA/.git" ] || [ ! -e "$REPO/.claude/worktrees/ship-runner-apk/.git" ] || SA=$REPO/.claude/worktrees/ship-runner-apk
   apk_alive() {   # an APK ship out; one whose runner died (killed, restarted) without an rc goes again (rc 4)
     [ -d "$Q/apk" ] && [ ! -f "$Q/apk/rc" ] || return 1
     kill -0 "$(cat "$Q/apk/pid" 2>/dev/null)" 2>/dev/null && return 0
@@ -198,7 +207,8 @@ run)
       git -C "$REPO" worktree add -q --detach "$SA" "$a" || return 1
       echo "the APK ship service (tools/phone/ship.sh)" > "$SA/.powos-runner-checkout"
     else git -C "$SA" reset -q --hard "$a" || return 1; fi
-    local nm=$REPO/.claude/worktrees/powos-multiplatform/shell/node_modules
+    local nm=$POWOS_RUN_ROOT/powos-multiplatform/shell/node_modules
+    [ -d "$nm" ] || nm=$REPO/.claude/worktrees/powos-multiplatform/shell/node_modules
     [ -e "$SA/shell/node_modules" ] || [ ! -d "$nm" ] || ln -s "$nm" "$SA/shell/node_modules"
     rm -rf "$Q/apk"; mkdir -p "$Q/apk"; echo "$a" > "$Q/apk/tip"; echo "$Q/done/$(date +%Y%m%d-%H%M%S)-${a:0:9}-apk.log" > "$Q/apk/log"
     ( cd "$SA" && POWOS_SHIP_SERVICE=1 SHIP_DIR=$Q GATE_PRIORITY=ship bash tools/phone/ship-apk.sh "$@" > "$(cat "$Q/apk/log")" 2>&1; echo $? > "$Q/apk/rc" ) &

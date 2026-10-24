@@ -4,7 +4,7 @@
   "kind": "service",
   "owner": "system:powos-verify",
   "host": "mac",
-  "purpose": "the verify queue's runner (tools/phone/verify/queue.sh run, from the .claude/worktrees/verify-runner checkout) as the launchd agent com.powos.verify-runner: started when a job lands in ~/.cache/powos-verify-queue (WatchPaths, no polling) and again if it dies (KeepAlive), so queued phone checks never stall on a stopped process. A user stop from the phone is a pause inside it (resume on the AI page). Exits by itself when nothing is queued",
+  "purpose": "the verify queue's runner (tools/phone/verify/queue.sh run, from the $POWOS_RUN_ROOT/verify-runner checkout, default ~/pw/verify-runner) as the launchd agent com.powos.verify-runner: started when a job lands in ~/.cache/powos-verify-queue (WatchPaths, no polling) and again if it dies (KeepAlive), so queued phone checks never stall on a stopped process. A user stop from the phone is a pause inside it (resume on the AI page). Exits by itself when nothing is queued",
   "installedBy": "tools/phone/verify/runner-deploy.sh install",
   "files": [
     "~/Library/LaunchAgents/com.powos.verify-runner.plist"

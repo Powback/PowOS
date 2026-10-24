@@ -25,7 +25,13 @@ echo $$ > "$S/lock/pid"; trap 'rm -rf "$S/lock"' EXIT
 git -C "$R" fetch -q origin "$BASE" 2>/dev/null
 cli=$S/powos-agents-cli
 git -C "$R" show "origin/$BASE:lib/ai/agents/powos-agents-cli" > "$cli.tmp" 2>/dev/null && mv "$cli.tmp" "$cli" || cp "$R/lib/ai/agents/powos-agents-cli" "$cli"
-POWOS_VERIFY_REPO=${POWOS_VERIFY_REPO:-$(cd "$R" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")" && pwd -P)/.claude/worktrees/verify-runner} \
+# verify-runner's checkout: moving to $POWOS_RUN_ROOT/verify-runner (wt-move-rest) - prefer that, fall back to
+# the old $REPO/.claude/worktrees/verify-runner while it still has the real checkout.
+POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
+VR_DEFAULT=$POWOS_RUN_ROOT/verify-runner
+OLD_VR=$(cd "$R" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")" && pwd -P)/.claude/worktrees/verify-runner
+[ -e "$VR_DEFAULT/.git" ] || [ ! -e "$OLD_VR/.git" ] || VR_DEFAULT=$OLD_VR
+POWOS_VERIFY_REPO=${POWOS_VERIFY_REPO:-$VR_DEFAULT} \
   python3 "$cli" check scan > "$S/checks.json" || { echo "$(date '+%F %T') check scan failed"; exit 1; }
 { echo 'set -u; f=$(mktemp); cat > "$f" <<'"'"'POWOS_CHECKS_JSON'"'"
   cat "$S/checks.json"; echo; echo 'POWOS_CHECKS_JSON'

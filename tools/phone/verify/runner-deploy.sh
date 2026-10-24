@@ -15,7 +15,11 @@ set -euo pipefail
 L=com.powos.verify-runner
 here=$(cd "$(dirname "$0")" && pwd -P)
 REPO=$(cd "$(dirname "$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)")" && pwd -P)
-VR=$REPO/.claude/worktrees/verify-runner
+# This checkout is moving to $POWOS_RUN_ROOT/verify-runner (wt-move-rest) - prefer that, fall back to the old
+# $REPO/.claude/worktrees/verify-runner while it still has the real checkout (so install still works mid-move).
+POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
+VR=$POWOS_RUN_ROOT/verify-runner
+[ -e "$VR/.git" ] || [ ! -e "$REPO/.claude/worktrees/verify-runner/.git" ] || VR=$REPO/.claude/worktrees/verify-runner
 Q=$HOME/.cache/powos-verify-queue
 P=$HOME/Library/LaunchAgents/$L.plist
 D=user/$(id -u)   # headless Mac: no gui domain; the plist is LimitLoadToSessionType Background

@@ -11,7 +11,7 @@
 #        --dev emu: the EMULATOR lane (tools/emu/emu.sh, the AVD shaped like the Open's inner screen): runs at once, no
 #             free phone window waited for, with POWOS_DEVICE=emu (adb.sh & co. reach the emulator); the emulator is
 #             started from its snapshot and runs the APK of origin's tip (its build is the ship wait). One emu runner,
-#             jobs in turn, own checkout (.claude/worktrees/emu-runner). Hardware checks stay phone-only (refused here:
+#             jobs in turn, own checkout ($POWOS_RUN_ROOT/emu-runner). Hardware checks stay phone-only (refused here:
 #             games, Steam, fps, fold, kernel). Results: the board as for phone checks (step "emulator PASS: ..."),
 #             kept and sent again later when the board (on the phone) can't be reached.
 #        --dev auto: never errors either way; reads the check's own `# lanes:` header line (its first ~6 lines) and
@@ -45,15 +45,19 @@
 # runs nothing until the phone's go flag (the AI page's "resume", "test all", "test now"); its state goes to the phone's
 # /data/local/tmp/powos-verify-runner (waiting | paused | running | idle), the waits touch it every 5 s (the heartbeat
 # the AI page reads: paused or stale -> "checks paused · resume"). Paths: a job queued from inside any PowOS worktree is stored repo-relative and runs in the runner's own
-# checkout (.claude/worktrees/verify-runner, fast-forwarded to origin before each window), so removing the worktree it
+# checkout ($POWOS_RUN_ROOT/verify-runner, fast-forwarded to origin before each window), so removing the worktree it
 # came from is fine - push before you queue. The runner runs a private copy of that checkout's queue.sh.
 set -uo pipefail
 here=${QUEUE_HERE:-$(cd "$(dirname "$0")" && pwd -P)}; unset QUEUE_HERE; phone=${QUEUE_PHONE:-$(cd "$here/.." && pwd -P)}
 BASE=worktree-powos-multiplatform
 REPO=$(cd "$here" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null && pwd -P || true)
 [ "$REPO" = / ] && REPO=
-VR=$REPO/.claude/worktrees/verify-runner   # the runner's checkout: only the runner touches it
 WTR=${POWOS_WT_ROOT:-$HOME/pw}   # where tools/agents/worktree.sh new puts agent worktrees (outside the repo)
+# The runner's checkout: only the runner touches it. Moving to $POWOS_RUN_ROOT/verify-runner (wt-move-rest) -
+# prefer that, fall back to the old $REPO/.claude/worktrees/verify-runner while it still has the real checkout.
+POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
+VR=$POWOS_RUN_ROOT/verify-runner
+[ -e "$VR/.git" ] || [ ! -e "$REPO/.claude/worktrees/verify-runner/.git" ] || VR=$REPO/.claude/worktrees/verify-runner
 Q=${QUEUE_DIR:-$HOME/.cache/powos-verify-queue}; mkdir -p "$Q/done"
 QUEUED_STEP="phone check queued"   # shell/ui/powai.tsx matches this text
 # user_sh <script text>: run it inside PowOS as the session user (its `powos ...`), quietly.
@@ -91,7 +95,11 @@ endjob() { killtree "$1"; for _ in 1 2 3 4 5; do kill -0 "$1" 2>/dev/null || ret
 # word-bounded (grep -E, no \b for portability): "folder-clip.sh" (an app-drawer folder, nothing to do with the
 # hinge) and "unfolded-checks.sh" (device_state-simulated, same as every e2e_setup inner check) matched the old
 # unbounded "fold" and were wrongly refused --dev emu (2026-10-24).
-E=$Q/emu; ET=$REPO/.claude/worktrees/emu-runner
+E=$Q/emu
+# emu-runner's checkout: moving to $POWOS_RUN_ROOT/emu-runner (wt-move-rest) - prefer that, fall back to the
+# old $REPO/.claude/worktrees/emu-runner while it still has the real checkout.
+ET=$POWOS_RUN_ROOT/emu-runner
+[ -e "$ET/.git" ] || [ ! -e "$REPO/.claude/worktrees/emu-runner/.git" ] || ET=$REPO/.claude/worktrees/emu-runner
 HW_ONLY='^(bf-|steam-|td-launch|mc-launch|games?-)|fps|(^|[^a-z])fold([^a-z]|$)|kernel'
 # LINUX_ONLY: an argument naming a Linux app or stage the emulator has no session for - --dev auto never picks emu
 # when one of these appears literally in the command (window-max.sh's STAGE, --apps "... kate ...", etc).
@@ -112,8 +120,10 @@ android_only_request() {
 }
 # wt_of <abs path>: the PowOS worktree it lies in (wroot) and the path under it (wsub, "" = the root); fails outside.
 # Agent worktrees made by tools/agents/worktree.sh new now live under $WTR (default ~/pw), outside $REPO - checked
-# first since that path doesn't overlap $REPO at all. Runner/base checkouts (verify-runner, emu-runner,
-# ship-runner*, powos-multiplatform) stay under $REPO/.claude/worktrees, so that branch is still needed too.
+# first since that path doesn't overlap $REPO at all. This is about a JOB's cmd/cwd referencing an agent worktree
+# that's since been removed, never about the runner/base checkouts themselves (verify-runner, emu-runner,
+# ship-runner*, powos-multiplatform - moving to $POWOS_RUN_ROOT, wt-move-rest), so the old $REPO/.claude/worktrees
+# branch below is legacy-job compat only: a job queued before the agent-worktree move still names that path.
 wt_of() {
   case "$1/" in
     "$WTR"/?*/*) local s=${1#"$WTR"/}; wroot=$WTR/${s%%/*}; wsub=${1#"$wroot"}; wsub=${wsub#/}; return 0 ;;
@@ -156,7 +166,8 @@ verify_tree() {
     git -C "$VR" merge -q --ff-only "origin/$BASE" 2>/dev/null || { echo "verify checkout: not a fast-forward - reset to origin"
       git -C "$VR" reset -q --hard "origin/$BASE"; }
   fi
-  local nm=$REPO/.claude/worktrees/powos-multiplatform/shell/node_modules
+  local nm=$POWOS_RUN_ROOT/powos-multiplatform/shell/node_modules
+  [ -d "$nm" ] || nm=$REPO/.claude/worktrees/powos-multiplatform/shell/node_modules
   [ -e "$VR/shell/node_modules" ] || [ ! -d "$nm" ] || ln -s "$nm" "$VR/shell/node_modules"
 }
 case "${1:-}" in

@@ -20,9 +20,12 @@ REPO=$(cd "$(dirname "$gcd")" && pwd)
 WT=$REPO/.claude/worktrees
 # New agent worktrees live outside the repo (default ~/pw) so they have no ancestor CLAUDE.md/.claude/skills to
 # load - the old $WT/<name> location put every agent worktree under the repo's own tree, which is also the parent
-# of 40+ sibling worktrees' skill catalogs. Runner checkouts (verify-runner, emu-runner, ship-runner*) and the
-# shared base checkout (powos-multiplatform) are unaffected - they stay under $WT.
+# of 40+ sibling worktrees' skill catalogs.
 WTR=${POWOS_WT_ROOT:-$HOME/pw}
+# Runner checkouts (verify-runner, emu-runner, ship-runner*) and the shared base checkout (powos-multiplatform)
+# are moving out from under $WT too (wt-move-rest), to $POWOS_RUN_ROOT (default ~/pw, same default dir as
+# $WTR - two separate knobs for two separate kinds of checkout). Old $WT/<name> kept as a fallback while they move.
+POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
 # A runner's own checkout (verify-runner, ship-runner, ship-runner-apk): marked by .powos-runner-checkout when the
 # runner creates it (friction f57). An agent whose cwd landed there (this script resolves its own location, not
 # $PWD) must make its own worktree instead of operating on the runner's.
@@ -46,7 +49,11 @@ new)
   git -C "$REPO" worktree add -q --track -b "agent/$n" "$d" "origin/$BASE"
   # Absolute symlink target: $d is no longer a fixed two-levels-deep sibling of powos-multiplatform (it can be
   # anywhere under $WTR), so the old relative "../../powos-multiplatform/..." target would resolve wrong.
-  [ -d "$WT/powos-multiplatform/shell/node_modules" ] && ln -s "$WT/powos-multiplatform/shell/node_modules" "$d/shell/node_modules"
+  # powos-multiplatform itself is moving to $POWOS_RUN_ROOT/powos-multiplatform (wt-move-rest); prefer that,
+  # fall back to the old $WT location while it still has the real checkout.
+  PMP=$POWOS_RUN_ROOT/powos-multiplatform
+  [ -d "$PMP/shell/node_modules" ] || [ ! -d "$WT/powos-multiplatform/shell/node_modules" ] || PMP=$WT/powos-multiplatform
+  [ -d "$PMP/shell/node_modules" ] && ln -s "$PMP/shell/node_modules" "$d/shell/node_modules"
   # Android package build inputs git ignores (out/powos-rootfs.tar.gz, pkgs/steam/sysvipc-emu.tar.gz): a fresh
   # worktree had neither, and agents hard-linked them by hand from another worktree (friction f76, f87). The
   # shared Mac-side cache (tools/agents/build-inputs-cache.sh, content-addressed, never pruned) has them once;

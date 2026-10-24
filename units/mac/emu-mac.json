@@ -4,7 +4,7 @@
   "kind": "service",
   "owner": "system:powos-verify",
   "host": "mac",
-  "purpose": "the emulator lane for window and app checks that don't need the phone's hardware: an arm64 Android 16 AVD (powos-open) shaped like the OnePlus Open's inner screen (2268x2440, 442 dpi), headless from its powos-ready snapshot, PowOS installed as a privileged system app the way the phone's system module does it, plus the test window client. Checks reach it with POWOS_DEVICE=emu (tools/phone/adb.sh); queue.sh add --dev emu runs them at once (its runner: queue.sh run-emu, own checkout .claude/worktrees/emu-runner). Builds go through the warm builder with PUBLISH=0 (never into android-app-dev/output, which PowApps serves). Disk: data partition 6 GB (written whole: the AVD is ~9.4 GB, ~13.7 GB with the image); emu.sh refuses to create or start below 25 GB free on the Mac (EMU_MIN_FREE_GB)",
+  "purpose": "the emulator lane for window and app checks that don't need the phone's hardware: an arm64 Android 16 AVD (powos-open) shaped like the OnePlus Open's inner screen (2268x2440, 442 dpi), headless from its powos-ready snapshot, PowOS installed as a privileged system app the way the phone's system module does it, plus the test window client. Checks reach it with POWOS_DEVICE=emu (tools/phone/adb.sh); queue.sh add --dev emu runs them at once (its runner: queue.sh run-emu, own checkout $POWOS_RUN_ROOT/emu-runner, default ~/pw/emu-runner). Builds go through the warm builder with PUBLISH=0 (never into android-app-dev/output, which PowApps serves), from its own build checkout .claude/worktrees/emu-build - kept INSIDE the repo (not moved by wt-move-rest) because the warm builder's container mounts only ~/Projects (emu.sh dies with 'isn't under ~/Projects' otherwise). Disk: data partition 6 GB (written whole: the AVD is ~9.4 GB, ~13.7 GB with the image); emu.sh refuses to create or start below 25 GB free on the Mac (EMU_MIN_FREE_GB)",
   "installedBy": "tools/emu/emu.sh create (once); emu.sh start / queue.sh add --dev emu (on demand)",
   "files": [
     "~/Library/Android/sdk/system-images/android-36/google_apis/arm64-v8a (the system image, ~4.3 GB)",
@@ -13,7 +13,7 @@
     "~/.cache/powos-emu",
     "~/.cache/powos-verify-queue/emu",
     ".claude/worktrees/emu-build",
-    ".claude/worktrees/emu-runner"
+    "~/pw/emu-runner"
   ],
   "processes": [
     {

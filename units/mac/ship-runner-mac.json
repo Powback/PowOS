@@ -4,7 +4,7 @@
   "kind": "service",
   "owner": "system:powos-ship",
   "host": "mac",
-  "purpose": "the ONE shipper to the phone (tools/phone/ship.sh run, from the .claude/worktrees/ship-runner checkout) as the launchd agent com.powos.ship-runner: agents push to origin and `ship.sh request`; it waits for 60 s without a new origin commit, then ships origin's tip once - ship-apk.sh when Kotlin/APK inputs changed since the installed build, else shell/push.sh of the shell files that differ from what's live - with every request's note in one notification. Kicked by request (launchctl kickstart), restarted if it dies (KeepAlive), exits by itself when nothing is requested",
+  "purpose": "the ONE shipper to the phone (tools/phone/ship.sh run, from the $POWOS_RUN_ROOT/ship-runner checkout, default ~/pw/ship-runner) as the launchd agent com.powos.ship-runner: agents push to origin and `ship.sh request`; it waits for 60 s without a new origin commit, then ships origin's tip once - ship-apk.sh when Kotlin/APK inputs changed since the installed build, else shell/push.sh of the shell files that differ from what's live - with every request's note in one notification. Kicked by request (launchctl kickstart), restarted if it dies (KeepAlive), exits by itself when nothing is requested",
   "installedBy": "tools/phone/ship-deploy.sh install",
   "files": [
     "~/Library/LaunchAgents/com.powos.ship-runner.plist"

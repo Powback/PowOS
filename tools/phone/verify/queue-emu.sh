@@ -6,7 +6,7 @@
 # newer build first (the lane's ship wait). Same budget kill, same PASS / FAIL / INVALID rules and logs
 # ($Q/done/<job>.log) as the phone's runner; each result goes onto the board task (the board lives on the phone: when it
 # can't be reached, the result waits in $Q/emu/pending/ and is sent with the next one). One runner (its lock
-# $Q/emu/runner.lock), in its own checkout (.claude/worktrees/emu-runner, at origin's tip), from a private copy.
+# $Q/emu/runner.lock), in its own checkout ($POWOS_RUN_ROOT/emu-runner, at origin's tip), from a private copy.
 [ -n "$REPO" ] || { echo "queue.sh run-emu: not in a PowOS checkout"; exit 2; }
 mkdir -p "$E/pending" "$Q/done"
 ls "$E"/*.job >/dev/null 2>&1 || exit 0

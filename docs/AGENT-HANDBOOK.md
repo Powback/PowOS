@@ -12,6 +12,8 @@ section. The index below gives the line ranges.
 - Which expert owns what — the area -> skill table; route work here first.
 - Efficiency — one task per agent, context budgets (hand back 120k/150k), `land.sh`, caps, read narrowly.
 - Done (f130/f131) — agent worktrees moved to `~/pw/<name>`, outside `~/Projects` (why, what still uses the old path).
+- Done (wt-move-rest) — runner checkouts + the shared base checkout (`powos-multiplatform`) moved to `~/pw/<name>`
+  too; `emu-build` stays under the repo (warm builder mounts only `~/Projects`).
 - KWin patches and the Android package build — `src-tree.sh`, `pkg-claim.sh`, the shared build-inputs cache.
 - Overhead lessons — why cost is dominated by re-reading context; the fixes already landed.
 - The work board — computed task states, claiming by `task set --step`, done rule, the sweep digest.
@@ -143,12 +145,29 @@ updated to recognize both the new root and the old `.claude/worktrees/<name>` pa
 resolve); the node_modules symlink `worktree.sh new` makes is now an absolute path (the old relative
 `../../powos-multiplatform/...` assumed a fixed two-levels-deep location, which `$POWOS_WT_ROOT` breaks). `land.sh`
 needed no change (its only path check is the shared base checkout, which hasn't moved).
-**Still at the old location, deliberately (out of scope for this pass):** runner checkouts (`verify-runner`,
-`emu-runner`, `ship-runner`, `ship-runner-apk`) and the shared base checkout (`powos-multiplatform`) - so
-`board-sweep.sh`/`board-sweep-deploy.sh`, `tools/emu/emu.sh`, `tools/phone/ship.sh`/`ship-deploy.sh`,
-`tools/phone/verify/queue-emu.sh`/`runner-deploy.sh`, and the `units/mac/*.json` doc strings naming them got no
-change. `agent-notices.py` needed no change either - it keys off `basename(cwd)` and exact `from=`/`who=` equality,
+`agent-notices.py` needed no change either - it keys off `basename(cwd)` and exact `from=`/`who=` equality,
 never a hardcoded root.
+
+## Done (wt-move-rest): runner checkouts and the shared base checkout moved too
+The previous pass (f130/f131, above) left runner checkouts (`verify-runner`, `emu-runner`, `ship-runner`,
+`ship-runner-apk`) and the shared base checkout (`powos-multiplatform`) under `$REPO/.claude/worktrees/<name>`
+deliberately, out of scope for that pass - each still carried its own `.claude/skills` copy, which is most of
+why a fresh session saw 375 skill entries (339 duplicates). This pass finishes the move: every script that
+hard-coded one of those paths (`tools/agents/worktree.sh`, `land.sh`, `board-sweep.sh`, `board-sweep-deploy.sh`,
+`tools/phone/verify/runner-deploy.sh`, `queue.sh`, `tools/phone/ship.sh`, `ship-deploy.sh`) now resolves it as
+`$POWOS_RUN_ROOT/<name>` (default `~/pw/<name>` - same default directory as `$POWOS_WT_ROOT`, but a separate
+knob, since these are a different kind of checkout: one runner/shared tree, not one per agent task), falling
+back to the old `$REPO/.claude/worktrees/<name>` only when the new location doesn't have it yet and the old one
+does - so install/run keeps working at every point during the move. `land.sh`'s refusal to run from the shared
+base worktree now matches both the old and new `powos-multiplatform` path. The `units/mac/*.json` purpose
+strings and `emu-mac.json`'s `files` list were updated to match.
+
+**`emu-build` stays under the repo, on purpose - it did NOT move with its sibling `emu-runner`:** `tools/emu/
+emu.sh`'s `install` builds the Android APK via the warm builder, whose container mounts only `~/Projects` -
+`emu.sh` itself refuses (`"isn't under ~/Projects"`) if its build checkout (`BUILD_TREE`, hard-coded at
+`$REPO/.claude/worktrees/emu-build`) is ever anywhere else. Moving it would need the warm builder's mount
+widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change - it has no reference to
+`emu-runner`'s own path (that lives only in `queue.sh`/`queue-emu.sh`).
 
 ## KWin patches and the Android package build (friction f76, f86, f87, f98, f111, f116, f121)
 - **Writing a new patch:** `targets/android/pkgs/kwin/src-tree.sh` gives you a patched kwin-6.7.5 git tree in one

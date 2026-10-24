@@ -22,8 +22,9 @@
 #   6. requests a ship (tools/phone/ship.sh request), if asked;
 #   7. queues phone/emulator checks (tools/phone/verify/queue.sh add), if asked - arguments after --queue are
 #      passed on as separate words, not one quoted string.
-# Prints ONE summary line per step it ran. Never touches .claude/worktrees/powos-multiplatform directly -
-# this is a per-agent worktree tool (tools/agents/worktree.sh new <name>).
+# Prints ONE summary line per step it ran. Never touches the shared base worktree (powos-multiplatform; old
+# path .claude/worktrees/powos-multiplatform, new $POWOS_RUN_ROOT/powos-multiplatform) directly - this is a
+# per-agent worktree tool (tools/agents/worktree.sh new <name>).
 #
 # Usage:
 #   tools/agents/land.sh "shorten the drawer's fade" -- shell/ui/drawer.tsx shell/ui/drawer.css
@@ -38,6 +39,10 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P)
 BASE=${LAND_BASE:-worktree-powos-multiplatform}
 REMOTE=${LAND_REMOTE:-origin}
+RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}   # powos-multiplatform's new home (wt-move-rest); old path still matched below
+# Resolved the same way `git rev-parse --show-toplevel` resolves $top below (symlink components, e.g. macOS's
+# /var -> /private/var) - an unresolved RUN_ROOT would never match a resolved $top.
+[ -d "$RUN_ROOT" ] && RUN_ROOT=$(cd "$RUN_ROOT" && pwd -P)
 
 usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; }
 [ $# -ge 1 ] || { usage >&2; exit 2; }
@@ -65,7 +70,7 @@ if { [ -n "$task_id" ] && [ -z "$step_text" ]; } || { [ -z "$task_id" ] && [ -n 
 fi
 
 top=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "land.sh: run it inside a PowOS git worktree" >&2; exit 2; }
-case "$top" in */.claude/worktrees/powos-multiplatform) echo "land.sh: refused - that is the shared base worktree, never land from it (tools/agents/worktree.sh new <name>)" >&2; exit 2 ;; esac
+case "$top" in */.claude/worktrees/powos-multiplatform|"$RUN_ROOT"/powos-multiplatform) echo "land.sh: refused - that is the shared base worktree, never land from it (tools/agents/worktree.sh new <name>)" >&2; exit 2 ;; esac
 # A runner's own checkout (verify-runner, ship-runner, ship-runner-apk): marked by .powos-runner-checkout when the
 # runner creates it (friction f57 - an agent launched with its cwd pointed at one of these got reset/overwritten
 # under it mid-edit). Only the runner that owns it ever touches it.

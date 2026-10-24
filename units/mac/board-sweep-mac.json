@@ -4,7 +4,7 @@
   "kind": "service",
   "owner": "system:powos-board",
   "host": "mac",
-  "purpose": "every 10 min (launchd com.powos.board-sweep, tools/agents/board-sweep.sh from the .claude/worktrees/verify-runner checkout): syncs the verify queue's jobs and results into the board's work_check rows and runs `powos agents sweep` on the phone, which mails the coordinator ONE digest of new or changed orphan tasks (stalled, no-check, FAILs nobody picked up), user asks with no task and new friction. One adb call per pass, then it exits",
+  "purpose": "every 10 min (launchd com.powos.board-sweep, tools/agents/board-sweep.sh from the $POWOS_RUN_ROOT/verify-runner checkout, default ~/pw/verify-runner): syncs the verify queue's jobs and results into the board's work_check rows and runs `powos agents sweep` on the phone, which mails the coordinator ONE digest of new or changed orphan tasks (stalled, no-check, FAILs nobody picked up), user asks with no task and new friction. One adb call per pass, then it exits",
   "installedBy": "tools/agents/board-sweep-deploy.sh install",
   "files": [
     "~/Library/LaunchAgents/com.powos.board-sweep.plist"

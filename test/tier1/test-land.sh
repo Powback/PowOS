@@ -84,13 +84,21 @@ grep -q "nothing changed" <<<"$remote_log" \
   && bad "an unchanged-path landing must not reach the remote" \
   || ok "an unchanged-path landing never reaches the remote"
 
-# == 3. refuses to run from the shared worktree path =====================================================
+# == 3. refuses to run from the shared worktree path, old location =======================================
 GUARD="$TMP/.claude/worktrees/powos-multiplatform"; mkdir -p "$(dirname "$GUARD")"
 new_worktree "$GUARD"
 out=$(cd "$GUARD" && "$LAND" "msg" -- tracked.txt 2>&1); rc=$?
 [ $rc -ne 0 ] && grep -qi "shared base worktree" <<<"$out" \
   && ok "refuses to run from .claude/worktrees/powos-multiplatform" \
   || bad "refuses to run from .claude/worktrees/powos-multiplatform" "rc=$rc: $out"
+
+# == 3b. refuses to run from the shared worktree path, new location ($POWOS_RUN_ROOT - wt-move-rest) =====
+GUARD2="$TMP/pw/powos-multiplatform"; mkdir -p "$(dirname "$GUARD2")"
+new_worktree "$GUARD2"
+out=$(cd "$GUARD2" && POWOS_RUN_ROOT="$TMP/pw" "$LAND" "msg" -- tracked.txt 2>&1); rc=$?
+[ $rc -ne 0 ] && grep -qi "shared base worktree" <<<"$out" \
+  && ok "refuses to run from \$POWOS_RUN_ROOT/powos-multiplatform" \
+  || bad "refuses to run from \$POWOS_RUN_ROOT/powos-multiplatform" "rc=$rc: $out"
 
 # == 4. a push race: land.sh fetches, rebases cleanly (its own commit touches a different file than the
 # rival's, so no content conflict), and only THEN - between its rebase and its push, simulating real

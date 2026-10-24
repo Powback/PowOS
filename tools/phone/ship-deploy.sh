@@ -13,7 +13,11 @@ set -euo pipefail
 L=com.powos.ship-runner
 here=$(cd "$(dirname "$0")" && pwd -P)
 REPO=$(cd "$(dirname "$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)")" && pwd -P)
-SR=$REPO/.claude/worktrees/ship-runner
+# This checkout is moving to $POWOS_RUN_ROOT/ship-runner (wt-move-rest) - prefer that, fall back to the old
+# $REPO/.claude/worktrees/ship-runner while it still has the real checkout (so install still works mid-move).
+POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
+SR=$POWOS_RUN_ROOT/ship-runner
+[ -e "$SR/.git" ] || [ ! -e "$REPO/.claude/worktrees/ship-runner/.git" ] || SR=$REPO/.claude/worktrees/ship-runner
 Q=$HOME/.cache/powos-ship-queue
 P=$HOME/Library/LaunchAgents/$L.plist
 D=user/$(id -u)   # headless Mac: no gui domain; the plist is LimitLoadToSessionType Background

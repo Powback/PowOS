@@ -10,7 +10,11 @@ set -euo pipefail
 L=com.powos.board-sweep
 here=$(cd "$(dirname "$0")" && pwd -P)
 REPO=$(cd "$(dirname "$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)")" && pwd -P)
-R=$REPO/.claude/worktrees/verify-runner
+# verify-runner's checkout: moving to $POWOS_RUN_ROOT/verify-runner (wt-move-rest) - prefer that, fall back to
+# the old $REPO/.claude/worktrees/verify-runner while it still has the real checkout.
+POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
+R=$POWOS_RUN_ROOT/verify-runner
+[ -e "$R/.git" ] || [ ! -e "$REPO/.claude/worktrees/verify-runner/.git" ] || R=$REPO/.claude/worktrees/verify-runner
 P=$HOME/Library/LaunchAgents/$L.plist
 D=user/$(id -u)
 case "${1:-install}" in
