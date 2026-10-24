@@ -84,6 +84,11 @@ g_bounds() { sed -n 's/^@@B //p' "$OUT/snap.txt" | tr -c '0-9\n' ' ' | xargs; }
 g_mode() { sed -n 's/^@@M mode=//p' "$OUT/snap.txt"; }
 g_bar() { sed -n 's/^@@W //p' "$OUT/snap.txt" | tr -c '0-9\n-' ' ' | xargs; }
 g_sf() { grep -v '^@@' "$OUT/snap.txt" | sfrow_of "$1"; }
+# content <task> <layer> <label>: the layer's row when the first look had none - the change transition still playing
+# (on the emulator's software renderer its leash came 2.4 s late): a fresh dump every 1.5 s, three at most; none at
+# all keeps the dump ($OUT/<label>-nolayer.txt).
+content() { local c=; for _ in 1 2 3; do sleep 1.5; grab "$1"; c=$(g_sf "$2"); [ -n "$c" ] && break; done
+  [ -n "$c" ] || cp "$OUT/snap.txt" "$OUT/$(printf %s "$3" | tr ' ' -)-nolayer.txt"; echo "$c"; }
 what() { grab "$1"; echo "mode=$(g_mode) task=[$(g_bounds)] content=[$(g_sf "$2")] bar=[$(g_bar)]"; }
 # dumps <name> <task>: the raw facts behind a state, for the record.
 dumps() { ash <<EOF > "$OUT/$1.txt"
@@ -137,6 +142,7 @@ maxcheck() {
   chk maximise
   step "$app-max" "$app maximised from its title bar"; dumps "$app-max" "$id"
   note "$app maximised: $(what "$id" "$lay")"; b1=$(g_bounds); c=$(g_sf "$lay")
+  [ -n "$c" ] || { c=$(content "$id" "$lay" "$app maximised"); b1=$(g_bounds); }
   set -- $b1
   [ $# -ge 4 ] && [ "$1" -le "$TOL" ] && [ "$3" -ge $((W - TOL)) ] && [ "$2" -ge "${SB:-0}" ] && [ "$4" -le "${BARTOP:-$H}" ] && [ "$4" -ge $((${BARTOP:-$H} - $(dp 40))) ] &&
     pass "$app maximised fills the area: [$b1] (status bar to ${SB:-?}, home's bar at ${BARTOP:-?})" || fail "$app maximised to [$b1], want 0..$W wide, under ${SB:-?}, just above ${BARTOP:-?}"
@@ -152,6 +158,7 @@ maxcheck() {
   chk restore
   step "$app-restored" "$app restored from its title bar"
   note "$app restored: $(what "$id" "$lay")"; b2=$(g_bounds); c=$(g_sf "$lay")
+  [ -n "$c" ] || { c=$(content "$id" "$lay" "$app restored"); b2=$(g_bounds); }
   [ "$b2" = "$b0" ] && pass "$app restored to exactly its bounds before ([$b2])" || fail "$app restored to [$b2], was [$b0]"
   set -- $c; [ $# -ge 6 ] && eqrect "$1 $2 $3 $4" "$b2" 4 && near $(($3 - $1)) "$5" 4 && pass "$app's content back at its size ([$c])" || fail "$app's content [$c] after restore, window [$b2]"
   # A double tap on the bar (the desktop convention): maximised, again: back.

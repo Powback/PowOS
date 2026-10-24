@@ -223,6 +223,14 @@ install() {
   a shell 'pm enable com.powos.app/andro.marchy.HomeShell >/dev/null 2>&1; cmd package set-home-activity --user 0 com.powos.app/andro.marchy.HomeShell >/dev/null 2>&1; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null'
   say "PowOS from $(git -C "$REPO" rev-parse --short "$c") installed ($(a shell dumpsys package com.powos.app | tr -d '\r' | grep -m1 -o 'versionCode=[0-9]*'))"
 }
+# home_ready: home's page booted (window.__powosAlive, as ship-apk waits for) - right after an install or a snapshot
+# load the page takes 10-20 s on the software renderer, and a check started before read errors as home's state (the
+# layout hash at its start was an error's, "home layout CHANGED", 2026-10-24). 120 s at most.
+home_ready() { local i
+  for i in $(seq 60); do
+    [ "$(POWOS_DEVICE=emu CDP_TIMEOUT_S=5 "$ROOT/tools/phone/cdp.sh" eval home 'String(window.__powosAlive)' 2>/dev/null | tr -d '"\r')" = true ] && return 0
+    sleep 2; done
+  say "home's page didn't answer within 120 s"; return 1; }
 # up_to_date: the APK of origin's tip (or EMU_COMMIT) on the emulator.
 up_to_date() { local want=${EMU_COMMIT:-$(tip)}; [ "$(emu_commit)" = "$want" ] || install "$want"; }
 
@@ -251,7 +259,7 @@ start)
   [ -f "$AVD_HOME/$AVD.avd/config.ini" ] || die "no AVD: emu.sh create" 2
   if ! running; then space_guard "starting"; boot -snapshot "$SNAP" -no-snapshot-save; fi
   root_up; selinux_permissive
-  up_to_date; grants_like_phone
+  up_to_date; grants_like_phone; home_ready
   say "up on $SERIAL (POWOS_DEVICE=emu)"
   ;;
 stop) if running || pgrep -f -- "-avd $AVD( |$)" >/dev/null; then halt; say "stopped"; else say "not running"; fi ;;
@@ -261,10 +269,10 @@ status)
   ;;
 reset)
   running || exec "$0" start
-  a emu avd snapshot load "$SNAP" | tr -d '\r' | grep -v '^OK$'; a wait-for-device; wait_boot 120; root_up; selinux_permissive; up_to_date; grants_like_phone
+  a emu avd snapshot load "$SNAP" | tr -d '\r' | grep -v '^OK$'; a wait-for-device; wait_boot 120; root_up; selinux_permissive; up_to_date; grants_like_phone; home_ready
   say "reset to $SNAP"
   ;;
-install) running || die "not running: emu.sh start" 2; root_up; install "${2:-}"; grants_like_phone ;;
+install) running || die "not running: emu.sh start" 2; root_up; install "${2:-}"; grants_like_phone; home_ready ;;
 remove)
   halt
   rm -rf "$AVD_HOME/$AVD.avd" "$AVD_HOME/$AVD.ini" "$STATE"
