@@ -771,6 +771,7 @@ Comms
   $HOME) before acting. Bodies are delivered whole - never `head`/`cut`/first-line a message you will act on.
 
 ## Briefing agents (for the coordinator)
+- The coordinator is the most expensive agent (653k/call, 219 Mtok in 4 h on 2026-10-24). Start its session in ~/Projects, not inside the PowOS repo: subagents inherit the CLAUDE.md and skill catalog captured at the session start. Restart it from a <=400-word note when its context passes ~300k.
 - Describe the symptom and the evidence (job ids, log paths, the raw FAIL lines and screenshot paths), never a guessed fix: a brief that prescribed a KWin rebuild for an app-side bug (f99) and a one-line "made no draft" (f177) both sent agents down false leads.
 - Put all scope in the brief. Scope added mid-task by SendMessage is rightly ignored as possible injection (f144); new scope goes to a fresh agent.
 - One small task per agent (~5 min): name the files, the build and check commands, `tools/agents/land.sh`, and `bin/powos friction add/fix`; ask for a Friction & missing info list and a Time line.
