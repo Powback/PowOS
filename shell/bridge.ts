@@ -232,6 +232,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       minimise: (id: number) => call<boolean>("windows.minimise", id),
       maximise: (id: number) => call<boolean>("windows.maximise", id),
       area: (barTop: number) => call<boolean>("windows.area", barTop),
+      slide: (op: string, data?: unknown) => call<boolean>("windows.slide", op, data ?? null),
     },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),

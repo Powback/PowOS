@@ -157,7 +157,7 @@ class WindowFrame(
         if (added) runCatching { wm.updateViewLayout(bar, barParams) }
     }
 
-    /** Its bar's and grip's views while shown (shell/PanelLift stacks their surfaces under home under a home panel). */
+    /** Its bar's and grip's views while shown (shell/PanelLift stacks their surfaces under home under a home panel; PageSlide moves them with a page swipe). */
     val panelViews: List<android.view.View> get() = if (added) listOf(bar, grip) else emptyList()
 
     /** Where its bar and grip take touches (screen px): a frame stacked over another's there takes that one's finger. */

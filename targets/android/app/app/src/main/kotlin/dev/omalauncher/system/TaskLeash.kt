@@ -60,6 +60,8 @@ object TaskLeash {
         private val context: Context,
         private val ids: List<Int>,
         private val what: String,
+        /** The task change modes its remote takes (a page slide's: windows brought up from under home too). */
+        private val modes: IntArray = intArrayOf(TRANSIT_CHANGE),
     ) {
         private enum class State { STARTING, LIVE, DONE, GAVE_UP }
 
@@ -74,6 +76,8 @@ object TaskLeash {
         /** The bounds each task should end at (the newest frame's, or [finish]'s). */
         private val last = HashMap<Int, Rect>()
         private var released = false
+        /** Leashes hidden as it finishes (a page slide's windows left on another page: WM hides those tasks next). */
+        var hidden: Set<Int> = emptySet()
         private var endChange: ((Any, (Int) -> Any?) -> Unit)? = null
 
         /** True once the leashes are PowOS's: [frame] moves the content. */
@@ -106,7 +110,7 @@ object TaskLeash {
                 val rt = remoteTransition(remote)
                 remoteParcel = rt
                 shellCall(binder, REGISTER_REMOTE) {
-                    it.writeTypedObject(filter() as Parcelable, 0)
+                    it.writeTypedObject(filter(modes) as Parcelable, 0)
                     it.writeTypedObject(rt as Parcelable, 0)
                 }
                 val tokens = tokens()
@@ -244,6 +248,7 @@ object TaskLeash {
             val cb = finishCallback
             val sct = SurfaceControl.Transaction()
             for ((id, leash) in leashes) if (leash.isValid) last[id]?.let { place(sct, leash, it) }
+            for ((id, leash) in leashes) if (leash.isValid && id in hidden) sct.setVisibility(leash, false)
             val wct = runCatching { endTransaction() }.onFailure { Log.w(TAG, "$what: no end transaction", it) }.getOrNull()
             if (cb != null) runCatching { finished(cb, wct, sct) }.onFailure { Log.w(TAG, "$what: can't finish the transition", it) }
             unregister()
@@ -313,11 +318,11 @@ object TaskLeash {
     }
 
     /** A change transition (type CHANGE) with a floating task changed in it. */
-    private fun filter(): Any {
+    private fun filter(modes: IntArray): Any {
         val fc = Class.forName("android.window.TransitionFilter")
         val rc = Class.forName("android.window.TransitionFilter\$Requirement")
         val r = rc.getConstructor().newInstance()
-        rc.getField("mModes").set(r, intArrayOf(TRANSIT_CHANGE))
+        rc.getField("mModes").set(r, modes)
         rc.getField("mMustBeTask").setBoolean(r, true)
         rc.getField("mWindowingMode").setInt(r, FREEFORM)
         val reqs = java.lang.reflect.Array.newInstance(rc, 1)
@@ -438,6 +443,9 @@ object TaskLeash {
     /** WindowManager.TRANSIT_CHANGE and TransitionInfo's TRANSIT_CHANGE mode (both 6), WINDOWING_MODE_FREEFORM. */
     private const val TRANSIT_CHANGE = 6
     private const val FREEFORM = 5
+
+    /** A page slide's task modes (PageSlide): changed, and brought up from under home (TRANSIT_OPEN 1, TO_FRONT 3). */
+    val SLIDE_MODES = intArrayOf(TRANSIT_CHANGE, 1, 3)
     private const val MAX_TASKS = 24
 
     /** How long WM Shell may take to hand the leashes over before the drag goes the old way. */

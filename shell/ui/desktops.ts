@@ -9,10 +9,11 @@
  * Kept in the store ("home.windows": task id -> page id, next to the dock's pins), so a reload of the page (an update,
  * a hot reload) puts each window back on its page. Page ids are the layout's (Home.pages; -1 is PowOS AI's page).
  */
-import { batch, effect, signal } from "@preact/signals";
+import { batch, effect, signal, untracked } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { AppWindow } from "../types.ts";
 import { byKey, desktopPages, launch, page, pages, windows } from "../state.ts";
+import { pageDrag } from "./gesture.ts";
 
 const STORE = "home.windows";
 /** Window ids kept for closed tasks at most (folded, the list is empty but the windows aren't gone). */
@@ -89,6 +90,57 @@ function hidden(): number[] {
   return windows.value.filter((w) => (placed.value[w.id] ?? cur) !== cur).map((w) => w.id).sort((a, b) => a - b);
 }
 
+/**
+ * Windows slide with their page (the user, 2026-10-23/24: they stayed put and popped at the end): a page swipe hands
+ * the host the windows of the page on screen and of its neighbours, the track's offset at each move and its settle;
+ * the host moves their surfaces frame by frame (PageSlide.kt) and commits the desktop change (hidden()) once the
+ * page has landed - never in the middle of the settle, where the minimise/raise work made it stutter.
+ */
+let slide: "off" | "on" = "off";
+/** The page the slide started on. */
+let slideFrom = 0;
+
+function slideFollow(dx: number | null) {
+  const f = powos.floating;
+  if (!f?.slide) return;
+  if (dx == null) {
+    // The finger let go: settlePages sets the page right after the drag ends; read it once both are in.
+    if (slide === "on") queueMicrotask(slideSettle);
+    return;
+  }
+  if (slide === "on") return void f.slide("move", dx).catch(() => {});
+  const cur = page.value;
+  const rels: Record<number, number> = {};
+  for (const w of windows.value) {
+    const i = indexOf(placed.value[w.id] ?? pageId());
+    if (w.minimised || i === null || Math.abs(i - cur) > 1 || (i === cur && w.away)) continue;
+    rels[w.id] = i - cur;
+  }
+  if (!Object.keys(rels).length) return;
+  slide = "on";
+  slideFrom = cur;
+  const width = document.querySelector(".pages")?.clientWidth || innerWidth;
+  f.slide("start", { rels, width, x: dx }).catch(() => false).then((ok) => {
+    if (!ok && slide === "on" && pageDrag.peek() != null) slide = "off";
+  });
+}
+
+/** The track's settle (its CSS transition, read so the host runs the same curve) and the desktop change after it. */
+function slideSettle() {
+  slide = "off";
+  const width = document.querySelector(".pages")?.clientWidth || innerWidth;
+  const track = document.querySelector<HTMLElement>(".page-track");
+  const cs = track ? getComputedStyle(track) : null;
+  const ms = cs ? parseFloat(cs.transitionDuration) * (cs.transitionDuration.endsWith("ms") ? 1 : 1000) : 280;
+  const curve = cs?.transitionTimingFunction.match(/cubic-bezier\(([^)]+)\)/)?.[1].split(",").map(Number);
+  const hide = hidden();
+  sent = hide.join();
+  powos.floating?.slide?.("settle", { to: (slideFrom - page.value) * width, ms: ms || 280, curve, hide }).catch(() => {
+    // An app without the slide: the change as before, once the page has landed.
+    setTimeout(() => powos.floating?.desktop(hide).catch(() => (sent = null)), ms || 280);
+  });
+}
+
 /** Home's page only (app.tsx, after load(): the layout's pages must be known before a window's page is judged gone). */
 export async function startDesktops() {
   const kept = await powos.store.get<Record<number, number>>(STORE).catch(() => null);
@@ -108,9 +160,14 @@ export async function startDesktops() {
     const key = hide.join();
     // No windows listed (folded, or none open): told again once they're back, as Android may have raised them.
     if (!windows.value.length) sent = null;
-    if (key === sent || !powos.floating) return;
+    // A page slide commits the change itself, once it has landed (slideSettle).
+    if (key === sent || !powos.floating || slide !== "off") return;
     sent = key;
     powos.floating.desktop(hide).catch(() => (sent = null));
+  });
+  effect(() => {
+    const dx = pageDrag.value;
+    untracked(() => slideFollow(dx));
   });
   powos.on("windows.edge", (d: { id: number; side: number }) => toEdge(d.id, d.side));
   // Read from the page, never assumed: the bottom bar's layout is home's (one wide bar unfolded, pill + dock folded).

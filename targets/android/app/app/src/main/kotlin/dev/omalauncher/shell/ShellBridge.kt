@@ -263,6 +263,8 @@ class ShellBridge(
             "windows.area" -> { dev.omalauncher.system.AppWindows.barTop = screenRect(JSONObject().put("left", 0).put("top", a.getDouble(0)).put("width", 0).put("height", 0)).top; true }
             // Home's pages are desktops (ui/desktops.ts): the windows of the pages not on screen, out of sight.
             "windows.desktop" -> dev.omalauncher.system.WindowFrames.current?.desktop(a.getJSONArray(0).let { h -> (0 until h.length()).map { h.getInt(it) }.toSet() }) ?: false
+            // A page swipe moves the windows of the pages it shows with them, frame by frame (system/PageSlide.kt).
+            "windows.slide" -> dev.omalauncher.system.PageSlide.call(context, a, density())
             "tasks.list" -> tasks()
             "tasks.open" -> openTask(a.getInt(0), a.opt(1))
             "tasks.remove" -> dev.omalauncher.system.Tasks.remove(context, a.getInt(0)).also { appWidgets.heal() }

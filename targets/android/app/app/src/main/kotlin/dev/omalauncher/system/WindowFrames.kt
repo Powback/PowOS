@@ -409,6 +409,9 @@ class WindowFrames(
         return s.start(start)
     }
 
+    /** Task [id]'s frame (its bar and grip), if it shows one. */
+    fun frame(id: Int): WindowFrame? = frames[id]
+
     /** Task [id]'s window is the top-most one showing (home's dock order, [running]): nothing to raise. */
     fun isFront(id: Int): Boolean = running.value.firstOrNull { !it.minimised && !it.away }?.id == id
 

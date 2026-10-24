@@ -652,6 +652,13 @@ export interface Bridge {
     maximise?(id: number): Promise<boolean>;
     /** Where home's bottom bar starts (CSS px from the top): windows open and maximise above it, never over it. */
     area?(barTop: number): Promise<boolean>;
+    /**
+     * A page swipe moving the windows of the pages it shows (ui/desktops.ts, the host's PageSlide), CSS px: "start"
+     * { rels: task id -> page offset -1/0/1, width, x } (false: nothing slides), "move" x (the track's offset from the
+     * page it started on), "settle" { to, ms, curve: cubic-bezier, hide } (the track's own transition; [hide] is the
+     * desktop change, committed when it lands), "cancel".
+     */
+    slide?(op: "start" | "move" | "settle" | "cancel", data?: unknown): Promise<boolean>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up
