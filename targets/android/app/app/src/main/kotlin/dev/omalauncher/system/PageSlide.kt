@@ -278,11 +278,7 @@ object PageSlide {
             if (s.frame(t, w.id, at(w))) moved = true
         }
         if (moved) {
-            WindowFrames.current?.slideMove(
-                wins.associate { it.id to dx(it).toFloat() },
-                // Settling: the dx each window lands at (the bar's lead stops there); dragging: no end yet.
-                if (settleAt != 0L) wins.associate { it.id to (it.rel * width + toX).toInt().toFloat() } else emptyMap(),
-            )
+            WindowFrames.current?.slideMove(wins.associate { it.id to dx(it).toFloat() })
             frames++
         }
         t.apply()

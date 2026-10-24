@@ -263,6 +263,27 @@ class WindowFrame(
     }
 
     /**
+     * HACK: a page slide hides the bar (overlay windows can't track a task's leash per frame: WM applies their layout
+     * a frame late, the bar trailed by up to 183 px, job 20261024-213609-68435) - faded out at the slide's start,
+     * faded back in at its final place when it ends. Real fix: title bars inside the task's own layer (board task
+     * floating-window-title-bars-z-ordered-with-their). The grip is clear at rest (shown only under a finger).
+     */
+    fun slideHide() {
+        if (app.ownBar || !barAdded) return
+        bar.animate().cancel()
+        bar.animate().alpha(0f).setDuration(SLIDE_FADE_OUT_MS).withEndAction { if (barAdded) barBlur.set(0f) }.start()
+    }
+
+    /** The slide ended: the bar (already at its window's final place, [layout]) fades back in; blur first, behind a clear bar. */
+    fun slideShow() {
+        veiled = false
+        if (app.ownBar || !barAdded) return
+        bar.animate().cancel()
+        barBlur.set(1f)
+        bar.animate().alpha(1f).setDuration(SLIDE_FADE_IN_MS).start()
+    }
+
+    /**
      * Made for a page swipe's arriving window (WindowFrames.slideStart): its bar drawn clear and unblurred until its
      * surface is where the slide has the window - its first frame lands at the real bounds, on the page still showing.
      */
@@ -271,10 +292,10 @@ class WindowFrame(
             if (field == v) return
             field = v
             if (app.ownBar) return
+            bar.animate().cancel()
             bar.alpha = if (v) 0f else 1f
             if (barAdded) barBlur.set(if (v) 0f else 1f)
         }
-
     /** Where its bar and grip take touches (screen px): a frame stacked over another's there takes that one's finger. */
     fun reach(): Rect = Rect(bounds.left, bounds.top - barHeight(), bounds.right + dp(GRIP_OUT_DP), bounds.bottom + dp(GRIP_OUT_DP))
 
@@ -1049,6 +1070,9 @@ class WindowFrame(
     private val liveSizes = ArrayList<Pair<Int, Int>>()
 
     companion object {
+        private const val SLIDE_FADE_OUT_MS = 80L
+        private const val SLIDE_FADE_IN_MS = 120L
+
         /** The glass bar's height (the user, 2026-10-23: about half the 26 + 10 it was; 26 dp in all with [HIT_DP]). */
         const val BAR_DP = 18f
 

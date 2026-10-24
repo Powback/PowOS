@@ -163,26 +163,36 @@ barcheck() {
   [ -n "$k" ] || { echo "NOTE $1: bar probe can't tell (the end line has no 'at' time: $l)" | tee -a "$OUT/log.txt"; return 0; }
   r=$(printf '%s\n' "$f" | awk -v k="$k" -v id="window bar $id" '
     function df(l,  a, i, n) { n = split(l, a, "|"); for (i = 1; i <= n; i++) if (a[i] ~ /^ *-?[0-9]+ +-?[0-9]+ +-?[0-9]+ +-?[0-9]+ *$/) return a[i]; return "" }
-    function flush(  i, d, m) { if (e < k && T != "" && B != "") { split(T, t, " "); split(B, b, " "); if (!based) { for (i = 1; i <= 4; i++) base[i] = b[i] - t[i]; based = 1 }
-        for (i = 1; i <= 4; i++) { d = b[i] - t[i] - base[i]; if (d < 0) d = -d; if (i % 2 == 0) { if (d > ws) ws = d } else if (d > wv) wv = d }
-        # Peak window speed along the slide axis (px per ms between samples) x 16.7 ms = one 60 Hz frame dx.
-        if (n > 0 && e > pe) { v = t[2] - pt; if (v < 0) v = -v; v = v / (e - pe); if (v > pv) pv = v }
-        pt = t[2]; pe = e; n++ }
+    function flush(  i, d, m, dv, ds) {
+      if (T != "" && B != "") { split(T, t, " "); split(B, b, " "); if (!based) { for (i = 1; i <= 4; i++) base[i] = b[i] - t[i]; based = 1 }
+        dv = 0; ds = 0
+        for (i = 1; i <= 4; i++) { d = b[i] - t[i] - base[i]; if (d < 0) d = -d; if (i % 2 == 0) { if (d > ds) ds = d } else if (d > dv) dv = d }
+        # The slide hides the bar (WindowFrames.HIDE_BAR_DURING_SLIDE): its first 150 ms are the fade-out (and the late layout of WM).
+        # Later, a composited bar must be exactly with its window. Then 300 ms after the end it is back, in place.
+        if (e < k && e >= e0 + 150) { if (ds > ws) ws = ds; if (dv > wv) wv = dv
+          # Peak window speed along the slide axis (px per ms between samples) x 16.7 ms = one 60 Hz frame dx.
+          if (n > 0 && e > pe) { v = t[2] - pt; if (v < 0) v = -v; v = v / (e - pe); if (v > pv) pv = v }
+          pt = t[2]; pe = e; n++ }
+        if (e >= k + 300) { lateN++; if (ds > lateS) lateS = ds; if (dv > lateV) lateV = dv } }
       if (e >= k) { after++; if (B != "") barAfter++; lastBar = (B != "") } }
-    /^@ / { if (started) flush(); started = 1; e = $2; T = ""; B = ""; nm = ""; next }
+    /^@ / { if (started) flush(); if (!started) e0 = $2; started = 1; e = $2; T = ""; B = ""; nm = ""; next }
     /\|/ { if (nm ~ id) { if (B == "") B = df($0) } else if (T == "") T = df($0); nm = ""; next }
     /^--$/ { next }
     { nm = $0 }
-    END { if (started) flush(); printf "%d %d %d %d %d %d %d\n", n, ws, after, barAfter, lastBar, wv, pv * 16.7 + 0.5 }')
+    END { if (started) flush(); printf "%d %d %d %d %d %d %d %d %d %d\n", n, ws, after, barAfter, lastBar, wv, pv * 16.7 + 0.5, lateN, lateV, lateS }')
   set -- "$1" "$2" "$3" $r; echo "bar probe $1: samples $4, worst bar-window offset: slide axis $5 px (limit: one frame's dx of this slide, ${10:-0} px), vertical ${9:-0} px (limit 4), after the end $6 samples, bar in $7, last ${8:-?}" | tee -a "$OUT/log.txt"
-  if [ "${4:-0}" -lt 2 ]; then echo "NOTE $1: bar probe can't tell (${4:-0} samples with bar and window during the slide)" | tee -a "$OUT/log.txt"
+  # Contract: hidden during the slide (not composited with its window after the fade-out) or exactly with it.
+  if [ "${4:-0}" -lt 2 ]; then pass "$1: the title bar was hidden during the slide (${4:-0} samples with bar and window after the fade-out)"
   elif [ "${9:-0}" -gt 4 ]; then fail "$1: the title bar was misplaced - ${9} px off its window across the slide (bar-$3.txt)"
-  elif [ "$5" -gt "${10:-0}" ]; then fail "$1: the title bar lagged its window by ${5} px along the slide, more than a frame's dx (${10:-0} px; bar-$3.txt)"
-  else pass "$1: the title bar slid with its window ($4 samples, slide axis within $5 px of ${10:-0}, vertical within ${9:-0})"; fi
+  elif [ "$5" -gt 4 ]; then fail "$1: the title bar stayed visible and trailed its window by ${5} px along the slide (bar-$3.txt)"
+  else pass "$1: the title bar stayed exactly with its window ($4 samples, within $5 px)"; fi
   [ "${6:-0}" -gt 0 ] || return 0
   case $3 in
     hidden) [ "$7" = 0 ] && pass "$1: the bar went with its window" || fail "$1: the bar stayed after its window left - composited in $7 of $6 samples after the end" ;;
-    shown) [ "$8" = 1 ] && pass "$1: the bar arrived with its window" || fail "$1: the window arrived without its bar (last sample after the end has none)" ;;
+    shown) if [ "$8" != 1 ]; then fail "$1: the window arrived without its bar (last sample after the end has none)"
+      elif [ "${11:-0}" -lt 1 ]; then echo "NOTE $1: bar probe can't tell where the bar landed (no sample with both 300 ms after the end)" | tee -a "$OUT/log.txt"
+      elif [ "${12:-0}" -gt 4 ] || [ "${13:-0}" -gt 4 ]; then fail "$1: the bar landed off its window (vertical ${12} px, slide axis ${13} px, limit 4; bar-$3.txt)"
+      else pass "$1: the bar faded back in at its window (${11} samples, vertical ${12} px, slide axis ${13} px)"; fi ;;
   esac
 }
 ends() { sh_ "grep -c \"PowosPageSlide.*end (\" /data/local/tmp/fd-log.txt"; }

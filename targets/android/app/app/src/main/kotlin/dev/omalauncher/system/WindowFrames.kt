@@ -195,42 +195,38 @@ class WindowFrames(
      */
     private val sliding = mutableMapOf<Int, Float>()
 
-    /** Each sliding task's leash offset in the frame before (slideMove's velocity). */
-    private val lastDx = mutableMapOf<Int, Float>()
-
     /**
      * A page swipe starts moving [tasks]. A window coming from another page has no frame (away): it gets one now, at
      * its real bounds, veiled (drawn clear, unblurred) until its windows are where the slide has the window.
      */
     fun slideStart(tasks: List<FreeformTasks.Window>) {
         sliding.clear()
-        lastDx.clear()
         tasks.forEach { sliding[it.id] = 0f }
         if (keyguard || Switcher.open || !AppWindows.floating(context)) return
+        frameArrivals(tasks)
+        hideBars(tasks)
+    }
+
+    private fun frameArrivals(tasks: List<FreeformTasks.Window>) {
         tasks.filter { it.id !in frames && it.id !in minimised && mayFrame(it) }.forEach { w ->
             frames[w.id] = newFrame(w).apply { veiled = true }.also { it.place(w.bounds) }
         }
     }
 
+    private fun hideBars(tasks: List<FreeformTasks.Window>) {
+        if (HIDE_BAR_DURING_SLIDE) tasks.forEach { frames[it.id]?.slideHide() }
+    }
+
     /**
-     * One slide frame: every sliding window's bar and grip at its leash's offset [dx] (screen px), placed through the
-     * window manager (their overlay windows' layout x, [WindowFrame.slideTo]) - WM owns an overlay window's surface, a
-     * surface write of ours (setPosition, a reparent) was overwritten or mis-placed (jobs 20261024-194358, -210409).
+     * One slide frame: with [HIDE_BAR_DURING_SLIDE] the bars are hidden and only the windows' offsets are kept. Off:
+     * every bar at its leash's offset [dx] through WM (HACK: trails its window by a frame or more).
      */
-    fun slideMove(dx: Map<Int, Float>, end: Map<Int, Float> = emptyMap()) {
+    fun slideMove(dx: Map<Int, Float>) {
         for ((id, x) in dx) {
             val f = frames[id] ?: continue
-            // HACK: WM applies an overlay's LayoutParams one frame after our leash transaction, so the bar trailed its
-            // window by one frame's dx (phone, APK fae1ba4f: 23 px, then 69 px). Place it one frame AHEAD: dx + v, v =
-            // this frame's dx - the last one's (0 on the first frame), never past the slide's landing dx [end] (the
-            // slide's end places it exactly: slideEnd). Real fix: title bars inside the task's own layer (board task
-            // floating-window-title-bars-z-ordered-with-their).
-            val v = lastDx[id]?.let { x - it } ?: 0f
-            lastDx[id] = x
-            var lead = x + v
-            end[id]?.let { e -> lead = if (v >= 0f) minOf(lead, maxOf(e, x)) else maxOf(lead, minOf(e, x)) }
             sliding[id] = x
-            f.slideTo(lead.toInt())
+            if (HIDE_BAR_DURING_SLIDE) continue
+            f.slideTo(x.toInt())
             // Unveiled once WM has the offset: the next draw.
             if (f.veiled) main.post { f.veiled = false }
         }
@@ -246,9 +242,8 @@ class WindowFrames(
         committed: Boolean,
     ) {
         for (id in sliding.keys) {
-            if (id in gone) frames.remove(id)?.remove() else frames[id]?.apply { slideTo(0); veiled = false }
+            if (id in gone) frames.remove(id)?.remove() else frames[id]?.apply { slideTo(0); slideShow() }
         }
-        lastDx.clear()
         Log.i(TAG, "slide end: bars of ${sliding.entries.joinToString { "${it.key}@${it.value.toInt()}" }}, gone ${gone.ifEmpty { "none" }}")
         if (committed) return
         sliding.clear()
@@ -746,6 +741,13 @@ class WindowFrames(
     )
 
     companion object {
+        /**
+         * HACK: hide each sliding window's title bar for the slide and fade it back in at its final place (overlay
+         * windows can't track a leash per frame). false: the bar trails its window. Real fix: bars in the task's layer.
+         */
+        const val HIDE_BAR_DURING_SLIDE = true
+
+
         private const val TAG = "PowosWindowFrames"
         private const val SETTLE_MS = 80L
 
