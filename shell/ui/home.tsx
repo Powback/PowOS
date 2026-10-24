@@ -235,8 +235,10 @@ export function Dock() {
     node.addEventListener("scrollend", settle);
     return () => node.removeEventListener("scrollend", settle);
   });
-  // Nothing pinned at all (not just the one carried out of it): no pinned page, only the drop zone while carrying.
-  const ghost = !dock.value.some((k) => byKey.value.has(k));
+  // Nothing pinned AND no floating window either (not just the one carried out of it): no pinned page, only the drop
+  // zone while carrying. A window with nothing pinned (possible with an empty dock, e.g. a fresh install - 2026-10-24
+  // emulator FAIL "no dock cell for Calculator") still needs the pinned page: it's the only place DockWindows renders.
+  const ghost = !dock.value.some((k) => byKey.value.has(k)) && windowed.value.size === 0;
   // Wide (unfolded), the recent apps are the bar's right end (DockTray): the dock is its pinned apps only.
   const wide = wideHome.value;
   const recents = !wide && recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k));
