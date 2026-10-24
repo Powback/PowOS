@@ -123,35 +123,36 @@ swipe() {
   [ $(( (to - x) * $1 )) -ge $((W / 4 + 40)) ] || { echo "ENV: only a $(( (to - x) * $1 )) px swipe fits from $x,$y - stopping (not a product FAIL)"; exit 5; }
   LASTSWIPE="$x,$y -> $to,$y"; echo "swipe $LASTSWIPE" >>"$OUT/log.txt"
   # The flash probe (2026-10-24: "the windows of the previous page appear for a split second" on the new page): on the
-  # device, a SurfaceFlinger composition list every ~0.4 s for 10 s from the swipe, each sample "<device uptime cs>
+  # device, a SurfaceFlinger composition list every ~0.4 s for 10 s from the swipe, each sample "<device uptime ms>
   # <layers of $PKG composited>". The uptime is /proc/uptime (CLOCK_BOOTTIME), the clock of the slide's end line
   # ("at <elapsedRealtime>", PageSlide.kt), so flash() splits the samples at the end without a wall-clock or a log
   # count (06:5x: the probe counted end lines in the log, saw 0 in all 150 samples, and ran past the logcat's timeout).
   # A sample after the end that still composites the window = the flash. The same samples' $PKG and title bar rows go
-  # to fd-bar.txt (barcheck).
-  sh_ "rm -f /data/local/tmp/fd-flash.txt /data/local/tmp/fd-bar.txt; (read u0 r </proc/uptime; u0=\${u0%.*}; while :; do read u r </proc/uptime; [ \${u%.*} -ge \$((u0 + 10)) ] && break; h=\$(dumpsys SurfaceFlinger | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\"); v=\$(echo \"\$h\" | grep -c $PKG); echo \${u%.*}\${u#*.} \$v >>/data/local/tmp/fd-flash.txt; echo \"@ \${u%.*}\${u#*.}\" >>/data/local/tmp/fd-bar.txt; echo \"\$h\" | grep -A1 -e $PKG -e \"window bar ${id:-x}\" >>/data/local/tmp/fd-bar.txt; done </dev/null >/dev/null 2>&1 &)"
-  sh_ "input swipe $x $y $to $y 250"; sleep 1.5
+  # to fd-bar.txt (barcheck). The swipe runs in the same device call, right after the sampler starts: as a separate
+  # call it came only once the sampler's 10 s were over (job 20261024-190606-57880: every sample 10-0.6 s before the
+  # slide's end line - 56 before / 0 after, and 0 bar samples during the 332 ms swipe back).
+  sh_ "rm -f /data/local/tmp/fd-flash.txt /data/local/tmp/fd-bar.txt; (read u0 r </proc/uptime; u0=\${u0%.*}; while :; do read u r </proc/uptime; [ \${u%.*} -ge \$((u0 + 10)) ] && break; h=\$(dumpsys SurfaceFlinger | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\"); v=\$(echo \"\$h\" | grep -c $PKG); echo \${u%.*}\${u#*.}0 \$v >>/data/local/tmp/fd-flash.txt; echo \"@ \${u%.*}\${u#*.}0\" >>/data/local/tmp/fd-bar.txt; echo \"\$h\" | grep -A1 -e $PKG -e \"window bar ${id:-x}\" >>/data/local/tmp/fd-bar.txt; done </dev/null >/dev/null 2>&1 &); input swipe $x $y $to $y 250"; sleep 1.5
 }
 
 # After a swipe that leaves the window behind: was it composited after the slide ended? $1 the step. The end time is
-# the swipe's last PowosPageSlide end line ("at <ms>", device elapsedRealtime), the samples' clock is /proc/uptime in
-# centiseconds. Seen before the end but never after = no flash; no sample on either side = the probe can't tell.
+# the swipe's last PowosPageSlide end line ("at <ms>", device elapsedRealtime), the samples' clock is /proc/uptime,
+# stamped in ms too (the same clock: CLOCK_BOOTTIME). Seen before the end but never after = no flash; no sample on either side = the probe can't tell.
 flash() {
   sleep 9
   local f l end before after n; f=$(sh_ "cat /data/local/tmp/fd-flash.txt")
   l=$(sh_ "grep PowosPageSlide /data/local/tmp/fd-log.txt | grep -F \"end (\" | tail -1")
   end=$(echo "$l" | sed -n 's/.* at \([0-9]*\)$/\1/p')
-  echo "flash probe $1: end at ${end:-?} ms; samples (uptime cs, layers): $(echo $f | tr '\n' ' ')" >>"$OUT/log.txt"
+  echo "flash probe $1: end at ${end:-?} ms; samples (uptime ms, layers): $(echo $f | tr '\n' ' ')" >>"$OUT/log.txt"
   if [ -z "$end" ]; then echo "NOTE $1: flash probe can't tell (the end line has no 'at' time: $l)" | tee -a "$OUT/log.txt"; return; fi
-  before=$(echo "$f" | awk -v e="$end" '$1*10<e && $2>0' | wc -l | tr -d ' ')
-  after=$(echo "$f" | awk -v e="$end" '$1*10>=e && $2>0' | wc -l | tr -d ' ')
-  n=$(echo "$f" | awk -v e="$end" '$1*10>=e' | wc -l | tr -d ' ')
+  before=$(echo "$f" | awk -v e="$end" '$1<e && $2>0' | wc -l | tr -d ' ')
+  after=$(echo "$f" | awk -v e="$end" '$1>=e && $2>0' | wc -l | tr -d ' ')
+  n=$(echo "$f" | awk -v e="$end" '$1>=e' | wc -l | tr -d ' ')
   if [ "$before" -eq 0 ] || [ "$n" -eq 0 ]; then echo "NOTE $1: flash probe can't tell ($before samples with the window before the end, $n after it)" | tee -a "$OUT/log.txt"
   elif [ "$after" -gt 0 ]; then fail "$1: the old page's window flashed - composited in $after of $n samples after the slide ended"
   else pass "$1: no flash - the window was composited in $before samples during the slide, 0 of $n after it ended"; fi
 }
 # The title bar slid with its window (WindowFrames.slideMove, in the leashes' transaction): from the same samples
-# (fd-bar.txt: "@ <uptime cs>", then each composited $PKG / "PowOS window bar <task>" layer's name and row), the
+# (fd-bar.txt: "@ <uptime ms>", then each composited $PKG / "PowOS window bar <task>" layer's name and row), the
 # bar's HWC Disp Frame minus the window's, against the first sample with both, stays within 4 px through the slide (both
 # clip alike at the screen's edge: the bar spans the window's width), split at the end line's "at" like flash(). $1 the
 # step; $3 hidden|shown: the bar after the slide ended (gone with its window, or there with it).
@@ -161,9 +162,9 @@ barcheck() {
   [ -n "$k" ] || { echo "NOTE $1: bar probe can't tell (the end line has no 'at' time: $l)" | tee -a "$OUT/log.txt"; return 0; }
   r=$(printf '%s\n' "$f" | awk -v k="$k" -v id="window bar $id" '
     function df(l,  a, i, n) { n = split(l, a, "|"); for (i = 1; i <= n; i++) if (a[i] ~ /^ *-?[0-9]+ +-?[0-9]+ +-?[0-9]+ +-?[0-9]+ *$/) return a[i]; return "" }
-    function flush(  i, d, m) { if (e * 10 < k && T != "" && B != "") { split(T, t, " "); split(B, b, " "); if (!based) { for (i = 1; i <= 4; i++) base[i] = b[i] - t[i]; based = 1 }
+    function flush(  i, d, m) { if (e < k && T != "" && B != "") { split(T, t, " "); split(B, b, " "); if (!based) { for (i = 1; i <= 4; i++) base[i] = b[i] - t[i]; based = 1 }
         m = 0; for (i = 1; i <= 4; i++) { d = b[i] - t[i] - base[i]; if (d < 0) d = -d; if (d > m) m = d }; if (m > worst) worst = m; n++ }
-      if (e * 10 >= k) { after++; if (B != "") barAfter++; lastBar = (B != "") } }
+      if (e >= k) { after++; if (B != "") barAfter++; lastBar = (B != "") } }
     /^@ / { if (started) flush(); started = 1; e = $2; T = ""; B = ""; nm = ""; next }
     /\|/ { if (nm ~ id) { if (B == "") B = df($0) } else if (T == "") T = df($0); nm = ""; next }
     /^--$/ { next }

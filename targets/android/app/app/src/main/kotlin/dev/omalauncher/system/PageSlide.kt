@@ -288,10 +288,29 @@ object PageSlide {
         main.post { WindowFrames.current?.desktop(hidden) }
     }
 
+    /**
+     * Home's hide list changed while the slide settles (home's page changed after it sent the settle - job
+     * 20261024-190606-57880: the swipe back settled with page 2's list [3001], home was on page 1 before it landed, and
+     * the landing's stale list hid page 1's window over the newer one): the newest list is the one committed when it
+     * lands. True: taken (main thread, as [WindowFrames.desktop] posts it).
+     */
+    fun later(hidden: Set<Int>): Boolean {
+        if (session == null || settleAt == 0L) return false
+        hide = hidden
+        newer = true
+        return true
+    }
+
+    /** [later] took a list the landing has not committed yet. */
+    private var newer = false
+
     /** Stopped before it landed (a new slide, the page reloaded, no leash): everything back where WM has it. */
     fun cancel(why: String) {
         val s = session ?: return
+        val pending = hide.takeIf { newer }
         finish(s, emptySet(), why)
+        // Home's list that came during the settle: committed still, after the windows went back.
+        if (pending != null) main.post { WindowFrames.current?.desktop(pending) }
         // The other pages' windows it brought up go back under home (home's hide list is unchanged).
         val back = wins.filter { it.rel != 0 }.map { it.id }.toSet()
         val c = context ?: return
@@ -305,6 +324,7 @@ object PageSlide {
     ) {
         session = null
         settleAt = 0L
+        newer = false
         Choreographer.getInstance().removeFrameCallback(tick)
         val gone = wins.filter { it.id in hidden || (why != "landed" && it.rel != 0) }.map { it.id }.toSet()
         WindowFrames.current?.slideEnd(gone, why == "landed")

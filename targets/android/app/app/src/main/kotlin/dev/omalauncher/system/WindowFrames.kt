@@ -688,7 +688,8 @@ class WindowFrames(
      */
     fun desktop(hide: Set<Int>): Boolean {
         if (!AppWindows.floating(context)) return false
-        main.post { showOnly(hide) }
+        // A page slide settling commits it when it lands, not under it (PageSlide.later).
+        main.post { if (!PageSlide.later(hide)) showOnly(hide) }
         return true
     }
 
