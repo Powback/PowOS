@@ -33,14 +33,20 @@ TOL=${TOL:-3}
 # Disp Frame) and the part of its buffer it shows (Source Crop): equal sizes = the app drew at the window's size.
 # HWC frames are in the PANEL's own orientation: the inner screen's panel is landscape (2440x2268) under a portrait
 # 2268x2440 display, so a screen rect (l t r b) shows as (t, W-r, b, W-l) there; turned back here (the crop stays as
-# the buffer is: only its size counts, compared with the panel-space frame's).
+# the buffer is: only its size counts, compared with the panel-space frame's). The size printed is the screen's way
+# round, after the layer's Transform (a Linux window's SurfaceView is ROT_270: its 1360x1707 crop IS 1360 wide; read
+# as pre-rotated it showed "1707x1360 for a 1360x1708 window", 2026-10-24).
 sfrow() { sh_ "dumpsys SurfaceFlinger" | sfrow_of "$1"; }
 # sfrow_of <layer name part>: the same from a SurfaceFlinger dump on stdin.
 sfrow_of() { awk -v p="$1" -v W="$W" -v H="$H" '
   /\(active\) HWC layers:/ {on=1; next} /HWC layers:/ {on=0}
   on && want {n=split($0, f, "|"); if (n >= 7) {
     split(f[6], d, " "); split(f[7], c, " "); cw = int(c[3] - c[1] + 0.5); ch = int(c[4] - c[2] + 0.5)
-    if (rot) print W - d[4], d[1], W - d[2], d[3], ch, cw; else print d[1], d[2], d[3], d[4], cw, ch
+    # The crop is in the BUFFER: a buffer the app pre-rotated for the panel (Transform 0: HWUI apps, home) reads
+    # turned against the screen, one SurfaceFlinger turns (ROT_90/270: a Linux window's SurfaceView, its consumer
+    # draws upright) reads as the screen does. Swapped only when exactly one of the two turns it.
+    t = (f[5] ~ /ROT_90|ROT_270/) ? 1 : 0; sw = (rot != t)
+    if (rot) print W - d[4], d[1], W - d[2], d[3], (sw ? ch : cw), (sw ? cw : ch); else print d[1], d[2], d[3], d[4], (sw ? ch : cw), (sw ? cw : ch)
     exit } }
   on && !seen && /HomeShell/ {seen=1}
   on && index($0, p) {want=1}

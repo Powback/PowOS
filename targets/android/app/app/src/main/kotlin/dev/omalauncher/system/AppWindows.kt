@@ -94,7 +94,9 @@ object AppWindows {
         val screen = wm.maximumWindowMetrics.bounds
         val density = context.resources.displayMetrics.density
         val status = runCatching { wm.currentWindowMetrics.windowInsets.getInsets(android.view.WindowInsets.Type.statusBars()).top }.getOrDefault(0)
-        val top = screen.top + status + (WindowFrame.BAR_DP * density).toInt()
+        // The frame's whole bar window (glass + touch strip) under the status bar: above every overlay, it took the
+        // touches of a bar reaching into it, and a window there read as a bar over the status bar (2026-10-24).
+        val top = screen.top + status + ((WindowFrame.BAR_DP + WindowFrame.HIT_DP) * density).toInt()
         val gap = (GAP_DP * density).toInt()
         val bottom = (if (barTop > top) barTop else screen.bottom - screen.height() / 6) - gap
         return Rect(screen.left, top, screen.right, maxOf(top + 1, bottom))

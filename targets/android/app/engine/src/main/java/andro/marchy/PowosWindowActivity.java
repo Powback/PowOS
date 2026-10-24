@@ -206,23 +206,49 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         int[] buffers = buffersFor(width, height);
         if (WindowTasks.kwinCan("size"))
             WindowTasks.sendLine("size\t" + id + "\t" + width + "\t" + height);
+        cropW = width;
+        cropH = height;
         long running = handle;
-        if (running != 0 && buffers[0] == buffersW && buffers[1] == buffersH) {
-            Native.nativeSetWindowCrop(running, width, height);
+        if ((running != 0 || starting) && buffers[0] == buffersW && buffers[1] == buffersH) {
+            // Starting: the crop goes on as the consumer is there (started).
+            if (running != 0)
+                Native.nativeSetWindowCrop(running, width, height);
             return;
         }
         Log.i(TAG, "surface " + id + ": " + width + "x" + height + " in " + buffers[0] + "x" + buffers[1]);
         stopConsumer();
-        long h = Native.nativeStartWindow(holder.getSurface(), id, buffers[0], buffers[1]);
+        final int gen = ++surfaceGen;
+        final android.view.Surface surface = holder.getSurface();
+        final float rate = getDisplay() != null ? getDisplay().getRefreshRate() : 0f;
+        final int bw = buffers[0];
+        final int bh = buffers[1];
+        buffersW = bw;
+        buffersH = bh;
+        starting = true;
+        onConsumerThread(() -> {
+            // A newer surface (or none) by now: this one is not started at all.
+            if (gen != surfaceGen)
+                return;
+            long h = Native.nativeStartWindow(surface, id, bw, bh);
+            main.post(() -> started(gen, h, rate));
+        });
+    }
+
+    /** The consumer for surface [gen] is up ([h], 0 = it failed): live, unless that surface is gone (main thread). */
+    private void started(int gen, long h, float rate) {
+        if (gen != surfaceGen || isDestroyed()) {
+            if (h != 0)
+                stopLater(h);
+            return;
+        }
+        starting = false;
         if (h == 0) {
             Log.e(TAG, "window consumer did not start");
             return;
         }
-        Native.nativeSetWindowCrop(h, width, height);
-        if (getDisplay() != null)
-            Native.nativeSetWindowRefreshRate(h, getDisplay().getRefreshRate());
-        buffersW = buffers[0];
-        buffersH = buffers[1];
+        Native.nativeSetWindowCrop(h, cropW, cropH);
+        if (rate > 0)
+            Native.nativeSetWindowRefreshRate(h, rate);
         handle = h;
     }
 
@@ -237,15 +263,50 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
+        surfaceGen++;
         stopConsumer();
     }
 
+    /** The consumer off: input stops at once (main thread), the consumer itself stops on its own thread. */
     private void stopConsumer() {
         long h = handle;
         handle = 0;
+        starting = false;
         if (h != 0)
-            Native.nativeStopWindow(h);
+            stopLater(h);
     }
+
+    private void stopLater(long h) {
+        onConsumerThread(() -> Native.nativeStopWindow(h));
+    }
+
+    /**
+     * The consumer's starts and stops, off the main thread, one at a time and in order (a stop before the next start on
+     * a surface: one producer connection at a time). A stop joins the consumer's render thread, which can sit in a
+     * daemon connect (polls of up to 30 s) or a buffer wait: on main that was an ANR (15:32, HomeShell's main thread in
+     * Native.nativeStopWindow from surfaceDestroyed). After surfaceDestroyed the old consumer may touch its surface a
+     * moment longer: it holds its own ANativeWindow reference, and an abandoned surface only fails its calls.
+     */
+    private final java.util.concurrent.ExecutorService consumerThread =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(r, "PowosWindow consumer"));
+
+    private void onConsumerThread(Runnable r) {
+        try {
+            consumerThread.execute(r);
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            // After onDestroy (a surface callback late): its own thread, still off main.
+            new Thread(r, "PowosWindow consumer (late)").start();
+        }
+    }
+
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    /** The surface the consumer is for; bumped as it changes or goes, so a start for an older one never goes live. */
+    private volatile int surfaceGen;
+    /** A start is on its way for buffers [buffersW] x [buffersH] (main thread). */
+    private boolean starting;
+    /** The surface's size now: the consumer's crop (main thread). */
+    private int cropW;
+    private int cropH;
 
     /** Every pointer of [e] as the desktop sends them (protocol.h INPUT_ACTION_DOWN/UP/MOVE), then a frame. */
     private void sendTouch(MotionEvent e) {
@@ -292,7 +353,9 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     @Override
     protected void onDestroy() {
+        surfaceGen++;
         stopConsumer();
+        consumerThread.shutdown();
         if (id > 0) {
             WindowTasks.tasks.remove(id, this);
             // Closed for good (swiped from Recents, Back): KWin shows the window on the desktop again.

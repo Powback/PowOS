@@ -58,6 +58,15 @@ class WindowFrame(
     var dragging = false
         private set
 
+    /**
+     * A finger is on its bar or grip (from the DOWN to the lift), dragging or not yet: its windows are never re-added
+     * or removed meanwhile ([raise], WindowFrames.refresh) - that ends the touch stream, so the drag never starts (the
+     * user, 2026-10-24: title bars couldn't be dragged; a restack 80 ms after the DOWN, before the finger passed the
+     * touch slop, re-added the bar under it).
+     */
+    var held = false
+        private set
+
     private lateinit var maxButton: GlyphView
     private val frost = Frost.colors(context)
     /** The bar's buttons and what each does, for [Drag]'s hit test (filled by [barView], so declared before it). */
@@ -168,7 +177,7 @@ class WindowFrame(
      * not their tasks' (WindowFrames.restack). Never while a finger is on it (its touch stream would end).
      */
     fun raise() {
-        if (!added || dragging) return
+        if (!added || dragging || held) return
         runCatching {
             wm.removeViewImmediate(bar)
             wm.addView(bar, barParams)
@@ -179,6 +188,9 @@ class WindowFrame(
     }
 
     fun remove() {
+        // A gesture under way ends with the frame: its drag layer (the bar drawn where the finger had it) never outlives
+        // the frame - left over, it was a title bar with no window under it (the 01:47 "Home - Dolphin" bar).
+        abandonGesture()
         if (!added) return
         added = false
         runCatching { wm.removeViewImmediate(bar) }
@@ -404,6 +416,12 @@ class WindowFrame(
             v: View,
             e: MotionEvent,
         ): Boolean {
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                // A new finger: whatever an earlier stream left (a press whose lift never came) is over.
+                pressed?.first?.isPressed = false
+                pressed = null
+                held = true
+            }
             if (pressed != null) return pressing(e)
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> down(e)
@@ -411,41 +429,74 @@ class WindowFrame(
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     release(e)
                     if (!move) showGrip(false)
+                    let()
                 }
             }
             return true
         }
 
+        /** The finger is off the frame: a restack that waited for it runs now (WindowFrames.touchEnded). */
+        private fun let() {
+            held = false
+            WindowFrames.current?.touchEnded()
+        }
+
         /** The button a finger went down on: it acts at the lift if the finger is still on it; no drag from a button. */
         private var pressed: Pair<GlyphView, () -> Unit>? = null
 
+        /**
+         * A finger that went down on a button: a tap (lifted within the touch slop, on it) presses it; past the slop it
+         * is a drag of the window like anywhere else on the bar (tap vs drag by slop, as desktop title bars do).
+         */
         private fun pressing(e: MotionEvent): Boolean {
             val (v, tap) = pressed ?: return true
             val on = e.x >= v.left && e.x < v.right && e.y >= v.top && e.y < v.bottom
             when (e.actionMasked) {
-                MotionEvent.ACTION_MOVE -> v.isPressed = on
+                MotionEvent.ACTION_MOVE -> pressMoved(v, on, e)
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     v.isPressed = false
                     pressed = null
                     val act = on && e.actionMasked == MotionEvent.ACTION_UP
                     android.util.Log.i("PowosWindowFrame", "task $id ${v.contentDescription}: ${if (act) "tapped" else "let go off it"}")
+                    raise = false
+                    let()
                     if (act) tap()
                 }
             }
             return true
         }
 
+        /** The finger on button [v] moved: still a press within the touch slop ([on] it or not), past it a move. */
+        private fun pressMoved(
+            v: GlyphView,
+            on: Boolean,
+            e: MotionEvent,
+        ) {
+            val dx = e.rawX - x0
+            val dy = e.rawY - y0
+            if (dx * dx + dy * dy < slop * slop) {
+                v.isPressed = on
+                return
+            }
+            v.isPressed = false
+            pressed = null
+            android.util.Log.i("PowosWindowFrame", "task $id ${v.contentDescription}: dragged off it, a move")
+            moveTo(e)
+        }
+
         private fun down(e: MotionEvent) {
+            x0 = e.rawX
+            y0 = e.rawY
+            from = Rect(bounds)
             if (move) {
                 buttonAt(e.x, e.y)?.let {
                     pressed = it
                     it.first.isPressed = true
+                    // Raised if it turns into a drag (the drag's change), like any bar drag.
+                    raise = WindowFrames.current?.isFront(id) == false
                     return
                 }
             }
-            x0 = e.rawX
-            y0 = e.rawY
-            from = Rect(bounds)
             // Raised with the gesture's own change (a drag's transition, or at a tap's lift), never at the DOWN: a
             // moveTaskToFront is a transition of its own, still collecting when the drag's change starts a few ms later.
             raise = WindowFrames.current?.isFront(id) == false
@@ -578,20 +629,53 @@ class WindowFrame(
             return
         }
         drag = null
+        leaving = layer
+        // Whatever happens to the bar meanwhile (removed, not drawn: an edge drop to another page, a minimise), the layer
+        // goes: a layer left behind is a title bar with no window under it.
+        main.postDelayed({ leave(layer, "task $id drag (bar not drawn in ${LEAVE_MS} ms)") }, LEAVE_MS)
         // The bar shows again only once WM has its window at [r]: shown (and its blur region sent) at once, it flashed
         // for a frame or two at the place the drag began - the region moves with the window, which moves when WM
         // relays it out. Then the layer goes, after the bar's frame there (no frame without one or the other).
         whenPlaced(r, 0) {
-            // Another drag began meanwhile: its own layer has the frame.
-            if (drag != null) {
-                layer.hide("task $id drag")
+            // Another drag began meanwhile (its own layer has the frame), or the frame is gone.
+            if (drag != null || !added) {
+                leave(layer, "task $id drag")
                 return@whenPlaced
             }
             bar.alpha = 1f
             barBlur.set(1f)
-            bar.viewTreeObserver.registerFrameCommitCallback { bar.postOnAnimation { layer.hide("task $id drag") } }
+            bar.viewTreeObserver.registerFrameCommitCallback { bar.postOnAnimation { leave(layer, "task $id drag") } }
             bar.invalidate()
         }
+    }
+
+    /** A drag's layer that ended, until the bar is drawn back at its place ([endDrag]); hidden with the frame. */
+    private var leaving: DragLayer? = null
+
+    /** [layer] gone (once). */
+    private fun leave(
+        layer: DragLayer,
+        what: String,
+    ) {
+        if (leaving !== layer) return
+        leaving = null
+        layer.hide(what)
+    }
+
+    /**
+     * The frame goes while a finger has it, or a drag's layer is still up: the layer hidden, the drag ended where the
+     * finger had it (its content's transition finished), nothing left on the screen without its window.
+     */
+    private fun abandonGesture() {
+        held = false
+        leaving?.let { leave(it, "task $id drag (frame removed)") }
+        val layer = drag
+        drag = null
+        layer?.hide("task $id drag (frame removed)")
+        if (!dragging) return
+        dragging = false
+        settle(Rect(bounds))
+        android.util.Log.i("PowosWindowFrame", "task $id: frame removed mid-drag, the drag ended at ${bounds.toShortString()}")
     }
 
     /** Whether WM has the bar's window over window bounds [r]. */
@@ -676,7 +760,10 @@ class WindowFrame(
         return m.bounds to top
     }
 
-    /** [from] moved by (dx, dy), its bar kept under the status bar and a hand's width of it on screen. */
+    /**
+     * [from] moved by (dx, dy), its whole bar window (glass + touch strip) kept under the status bar - the status bar's
+     * window is above every overlay, so a bar reaching into it lost its touches there - and a hand's width on screen.
+     */
     private fun moved(
         from: Rect,
         dx: Int,
@@ -685,7 +772,7 @@ class WindowFrame(
         val (s, statusBar) = screen()
         val keep = dp(KEEP_DP)
         val left = (from.left + dx).coerceIn(s.left - from.width() + keep, s.right - keep)
-        val top = (from.top + dy).coerceIn(s.top + statusBar + dp(BAR_DP), s.bottom - keep)
+        val top = (from.top + dy).coerceIn(s.top + statusBar + dp(BAR_DP + HIT_DP), s.bottom - keep)
         return Rect(left, top, left + from.width(), top + from.height())
     }
 
@@ -856,6 +943,9 @@ class WindowFrame(
 
         /** How near the screen's side a let-go is an edge drop (the next page). */
         private const val EDGE_DP = 28f
+
+        /** At most this long after a drag's lift its layer stays up waiting for the bar to be drawn in place (ms). */
+        private const val LEAVE_MS = 500L
         private const val MIN_W_DP = 280f
         private const val MIN_H_DP = 200f
 

@@ -138,6 +138,20 @@ object FreeformTasks {
             .onFailure { Log.w(TAG, "can't put task $id in windowing mode $mode", it) }.isSuccess
     }
 
+    /**
+     * Floating task [id] to [bounds] (screen px) as a change transition WM Shell plays, so the app's content (its
+     * leash) and its touches go there too - a bare applyTransaction moved the task in WM only. HACK: hidden, reflected
+     * like [minimise]. Real fix: none for an app.
+     */
+    fun moveTo(
+        context: Context,
+        id: Int,
+        bounds: Rect,
+    ): Boolean =
+        runCatching {
+            apply(token(context, id), transition = true) { wct, token -> wct.javaClass.getMethod("setBounds", token.javaClass, Rect::class.java).invoke(wct, token, bounds) }
+        }.onFailure { Log.w(TAG, "can't move task $id", it) }.isSuccess
+
     private fun modeAndBounds(
         wct: Any,
         token: Any,

@@ -148,14 +148,76 @@ class WindowFrames(
         if (adopting(floating)) return
         logChange(all, floating)
         track(all, floating)
-        val show = if (keyguard || Switcher.open || !floating) emptyList() else uncovered(all.filter { it.visible && it.id !in minimised && it.id !in away })
-        val ids = show.map { it.id }.toSet()
+        val framed = floating && !keyguard && !Switcher.open
+        val show = if (framed) shown(all) else emptyList()
+        val ids = show.map { it.id }.toSet() + held(all, floating && !keyguard)
         frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
-        // Bottom-most first, so a new frame's windows stack over the ones under it.
-        // Under a home panel, a new one waits (underPanel).
-        show.asReversed().filter(::mayFrame).forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w)), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
+        if (framed) belowStatusBar(show)
+        frame(show)
         restack(show.asReversed().map { it.id })
     }
+
+    /** The windows that get a frame: showing, not minimised or away, their bar not under a window above. */
+    private fun shown(all: List<FreeformTasks.Window>) = uncovered(all.filter { it.visible && it.id !in minimised && it.id !in away })
+
+    /**
+     * Every window of [show] (top-most first) framed and placed: bottom-most first, so a new frame's windows stack over
+     * the ones under it. Under a home panel, a new one waits (underPanel).
+     */
+    private fun frame(show: List<FreeformTasks.Window>) {
+        show.asReversed().filter(::mayFrame).forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w)), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
+    }
+
+    /**
+     * The frames a finger has, while their task is there ([all]) and frames show at all ([on]): they stay even when the
+     * task isn't shown (its report lags the finger, or a transition of the drag's hides it for a moment) - removed,
+     * the touch stream ended and the drag with it.
+     */
+    private fun held(
+        all: List<FreeformTasks.Window>,
+        on: Boolean,
+    ): Set<Int> {
+        if (!on) return emptySet()
+        val listed = all.map { it.id }.toSet()
+        return frames.filter { (id, f) -> (f.held || f.dragging) && id in listed }.keys
+    }
+
+    /** A restack waited for a finger to lift ([touchEnded]). */
+    private var restackWaiting = false
+
+    /** A finger left a frame (WindowFrame): a restack that waited for it, now. */
+    fun touchEnded() {
+        if (restackWaiting) changed()
+    }
+
+    /**
+     * Every window's whole bar under the status bar (AppWindows.area's top): the status bar's window is above every
+     * overlay, so a bar reaching into it lost its touches there and sat over the status bar (01:47, a bar at y 60-100).
+     * Whoever placed it (an app's own bounds, a Linux window, Android after a mode change), it moves down once, with
+     * its content (a change transition). Not while a finger has it or maximised (the area's own top).
+     */
+    private fun belowStatusBar(show: List<FreeformTasks.Window>) {
+        val top = AppWindows.area(context).top
+        for (w in show.filter { lowerable(it, top) }) {
+            if (!lowered.add("${w.id}@${w.bounds.flattenToString()}")) continue
+            val to = Rect(w.bounds).apply { offset(0, top - w.bounds.top) }
+            val ok = FreeformTasks.moveTo(context, w.id, to)
+            Log.i(TAG, "task ${w.id} was under the status bar (${w.bounds.toShortString()}): moved to ${to.toShortString()} ok=$ok")
+        }
+        if (lowered.size > LOWERED_MAX) lowered.clear()
+    }
+
+    /** [w] reaches above [top] and nobody else has it (a finger, maximise). */
+    private fun lowerable(
+        w: FreeformTasks.Window,
+        top: Int,
+    ): Boolean {
+        val f = frames[w.id] ?: return false
+        return w.bounds.top < top && !f.held && !f.dragging && w.id !in maximised
+    }
+
+    /** Windows moved out from under the status bar, by task and the bounds they had (each once). */
+    private val lowered = mutableSetOf<String>()
 
     /** The frames' ids bottom-most first, in the order their windows were added (overlays stack so). */
     private val stack = mutableListOf<Int>()
@@ -168,6 +230,12 @@ class WindowFrames(
      */
     private fun restack(wanted: List<Int>) {
         if (underPanel) return
+        // Never under a finger: a re-added bar loses its touch stream (the drag never starts). Again at the lift.
+        if (frames.values.any { it.held || it.dragging }) {
+            restackWaiting = true
+            return
+        }
+        restackWaiting = false
         stack.retainAll(wanted.toSet())
         wanted.filter { it !in stack }.forEach { stack.add(it) }
         if (stack == wanted) return
@@ -522,6 +590,7 @@ class WindowFrames(
     companion object {
         private const val TAG = "PowosWindowFrames"
         private const val SETTLE_MS = 80L
+        private const val LOWERED_MAX = 256
         private const val LATE_MS = 600L
         private const val GRANT_EVERY_MS = 60_000L
         private const val DENSE_TRIES = 8

@@ -2,7 +2,7 @@
 # tools/phone/verify/resize-probe.sh: where a floating window's touches go right after a grip resize, and why (window-
 # scroll.sh FAIL 2026-10-23: after a resize the finger went to home or the window under it, not the app). For each app
 # (Calculator, Chrome; Kate for its frame lookup): launched in a window, then the grip dragged out (bigger) and back
-# (smaller); at 0.5, 2 and 5 s after each lift the facts: the task's bounds (am stack list), the app's and the frame's
+# (smaller); at 0.5, 2 and 5 s after each lift the facts, and at 2 s where SurfaceFlinger draws it (drawn): the task's bounds (am stack list), the app's and the frame's
 # input windows (dumpsys input: frame, touchable region), the app window's frame in WM, and a DOWN/UP probe at four
 # spots inside the new bounds (which window the finger goes to). Logcat (PowosTaskLeash, PowosWindowResize,
 # PowosWindowFrame(s), ShellTransitions) is kept for the run. --leash 0 runs it with the old path
@@ -34,6 +34,24 @@ facts() {
   sh_ "dumpsys window" | grep -iE "collecting|playing|mSyncEngine|activeSync|Transition\{" | head -6 | cut -c1-200 | sed 's/^/  tr: /' | tee -a "$OUT/log.txt"
   sh_ "dumpsys window windows" | awk -v p="$2" '/^ *Window #/{f=(index($0,p)>0); if(f) print "  wm: " $0} f && /(mFrame=| frame=|Requested w=|isDragResizing|mDragResizing|Surface: shown)/{print "     " $0}' | head -12 | tee -a "$OUT/log.txt"
 }
+# drawn <task> <pat> <what>: where SurfaceFlinger draws the window (HWC Disp Frames of the app's layers - its window
+# and, for a Linux window, its SurfaceView - turned to the screen; not the Task=N layer: that one is the freeform
+# shadow, ~110 px past the bounds on every side): nothing of it outside the task's bounds - a shrink left the OLD area painted (black for
+# Dolphin, white then clear for Calculator, 22:26) - and its content over the whole of them - a grow drawn at the old
+# size ("+386 wide", still ~1360 px). Outside the window = home's pixels, inside = the app's.
+drawn() {
+  local id=$1 pat=$2 what=$3 b L T R B tol=$(dp 6) r l t rr bb wmax=0 hmax=0 out=""; b=$(tbounds "$id"); [ -n "$b" ] || { fail "[$what] no bounds for task $id"; return; }
+  set -- $b; L=$1; T=$2; R=$3; B=$4
+  while read -r r; do
+    [ -n "$r" ] || continue; set -- $(screenrect "$r"); [ $# -ge 4 ] || continue; l=$1; t=$2; rr=$3; bb=$4
+    { [ $l -lt $((L - tol)) ] || [ $t -lt $((T - tol)) ] || [ $rr -gt $((R + tol)) ] || [ $bb -gt $((B + tol)) ]; } && out="$out [$l $t $rr $bb]"
+    [ $((rr - l)) -gt $wmax ] && wmax=$((rr - l)); [ $((bb - t)) -gt $hmax ] && hmax=$((bb - t))
+  done <<<"$(sh_ "dumpsys SurfaceFlinger" | awk -v p="$pat" '/\(active\) HWC layers:/ {on=1; next} /HWC layers:/ {on=0}
+    on && /^ [^ -]/ {want=(index($0, p) > 0); next} on && want && /\|/ {n=split($0, f, "|"); if (n >= 7) print f[6]; want=0}')"
+  log "  drawn: task $L $T $R $B, widest layer ${wmax}x$hmax${out:+, outside:$out}"
+  [ -z "$out" ] && pass "[$what] nothing of the window drawn outside its bounds" || fail "[$what] drawn outside the window's bounds ($L $T $R $B):$out"
+  [ $wmax -ge $((R - L - tol)) ] && [ $hmax -ge $((B - T - tol)) ] && pass "[$what] its content covers the window (${wmax}x$hmax for $((R - L))x$((B - T)))" \
+    || fail "[$what] its content is ${wmax}x$hmax, the window $((R - L))x$((B - T))"; }
 # probes <task> <pat> <what>: a DOWN/UP at four spots inside the task's bounds.
 probes() {
   local b t id=$1 pat=$2 what=$3 sx sy sn; b=$(tbounds "$id"); [ -n "$b" ] || { fail "[$what] no bounds for task $id"; return; }; set -- $b
@@ -51,7 +69,7 @@ gripdrag() { local g x y; g=$(wframe "PowOS window grip $1}"); [ -n "$g" ] || { 
   mdown $x $y "the grip" && { mpath $x $y $((x + $5)) $((y + $6)) 10; mup $((x + $5)) $((y + $6)); chk resize; }; }
 frames() { sh_ "dumpsys window windows" | grep -oE "Window #[0-9]+ Window\{[0-9a-f]+ u0 PowOS window [a-z]+ [0-9]+\}" | sed -E 's/.*PowOS window //' | tr '\n' ',' ; }
 lc() { sh_ "logcat -d -v time -s $TAGS" | tail -${1:-25} | cut -c1-300 | sed 's/^/  log: /' | tee -a "$OUT/log.txt"; }
-after() { sleep 0.5; facts "$1" "$2" "$3 +0.5s"; sleep 1.5; facts "$1" "$2" "$3 +2s"; sleep 3; facts "$1" "$2" "$3 +5s"; lc 30; probes "$1" "$2" "$3"; }
+after() { sleep 0.5; facts "$1" "$2" "$3 +0.5s"; sleep 1.5; facts "$1" "$2" "$3 +2s"; drawn "$1" "$2" "$3 +2s"; sleep 3; facts "$1" "$2" "$3 +5s"; lc 30; probes "$1" "$2" "$3"; }
 
 for app in $APPS; do
   case $app in
@@ -78,7 +96,7 @@ for app in $APPS; do
     done
     log "windows.list: $(hcall windows.list "[]" "l=>l.map(w=>w.id+':'+(w.app||w.pkg)+'@'+(w.bounds||[]).join(',')+(w.minimised?' min':'')+(w.away?' away':'')).join(' ')")"
     wframe "PowOS window bar $CT}" | grep -q . && pass "kate's bar is there after the flicks" || fail "kate's bar is gone after the flicks"
-    continue
+    # Then resized like the others (a Linux window: the old area left painted after a shrink, 22:26).
   fi
   set -- $(tbounds "$CT"); RX=$(dp 140); RY=$(dp 90)
   [ $(($3 + RX)) -gt $((W - $(dp 40))) ] && RX=$((-RX)); [ $(($4 + RY)) -gt $((H - $(dp 220))) ] && RY=$((-RY))
