@@ -9,7 +9,7 @@ description: Use for the PowOS phone's SpacetimeDB (modules, vendored bindings, 
   `lib/ai/manager/manager.py`, Kotlin `AgentMail.kt`; chat rendering: `shell/ui/{rich,chat,powai}.tsx`.
 - Build/regen bindings: `apps/vendor.sh <app>` (must reproduce committed vendor files byte-for-byte; commit, then push).
 - Check (no device needed first): `tools/phone/bindings-check.sh --no-publish`; tier-1
-  `python3 test/tier1/test-{bindings-check,comms,comms-fulltext,manager,agents,board-truth}.py`. Device:
+  `python3 test/tier1/test-{comms,comms-fulltext,manager,agents,board-truth}.py` and `bash test/tier1/test-bindings-check.sh` (bindings-check is .sh only). Device:
   `tools/phone/verify/board-state.sh` (board states); phone reads STDB live over adb.
 - Publish a module change: `ADB="docker exec powos-vadb adb" apps/install.sh <app> publish --note "plain words"`
   (additive columns need `#[default(...)]`) — ships WITH its re-vendored bindings, same commit. lib/ai (comms,
@@ -17,19 +17,15 @@ description: Use for the PowOS phone's SpacetimeDB (modules, vendored bindings, 
 - Land: `tools/agents/land.sh "msg" -- <paths> --ship "..."` (schema changes to apps/agents also need a publish).
 - Friction: `tools/agents/friction add --area <stdb|comms|chat> --kind <...> "<title>" --repro "<cmd>"`.
 
+### stdb
+- Module-only manifest template: `apps/agents/powos-app.json` (no UI/backend, f157).
+
+### comms
+- Mac agentsd: copy to `~/.claude/hooks/powos-agents/`, then kill its pid. `rooted.sh` plain `adb` needs the `PATH="$PWD/tools/phone/bin:$PATH"` prefix above.
+
 ## stdb
 
 
-## Quick recipe
-- Files: `apps/<app>/src/lib.rs` (the module), `shell/vendor/<db>.js`+`.d.ts`+`VERSIONS`, `shell/apps/stdb.ts`.
-- Module-only manifest template: `apps/agents/powos-app.json` (no UI/backend, f157).
-- Build/regen bindings: `apps/vendor.sh <app>` (must reproduce committed vendor files byte-for-byte; commit, then push).
-- Check (no device needed first): `tools/phone/bindings-check.sh --no-publish`; tier-1
-  `bash test/tier1/test-bindings-check.sh`. Device: phone (reads the phone's live STDB over adb).
-- Publish a module change: `ADB="docker exec powos-vadb adb" apps/install.sh <app> publish --note "plain words"`
-  (additive columns need `#[default(...)]`) — module change ships WITH its re-vendored bindings, same commit.
-- Land: `tools/agents/land.sh "msg" -- <paths> --ship "..."`.
-- Friction: `tools/agents/friction add --area stdb --kind <...> "<title>" --repro "<cmd>"`.
 
 # The phone's SpacetimeDB
 
@@ -106,15 +102,6 @@ It recurs on every page load, because the initial subscription fails. It is not 
 ## comms
 
 
-## Quick recipe
-- Files: `lib/ai/comms/{comms.sh,comms-mcp.py}`, `lib/ai/agents/{powos-agents-cli,powos-agentsd}`,
-  `lib/ai/manager/manager.py`, Kotlin `AgentMail.kt`.
-- Build/deploy to phone: `PATH="$PWD/tools/phone/bin:$PATH" targets/android/rooted/rooted.sh deploy --note "..."`
-  (plain `adb` inside rooted.sh needs that PATH prefix). Mac agentsd: copy to `~/.claude/hooks/powos-agents/`, kill its pid.
-- Check (tier-1, no device window needed): `python3 test/tier1/test-comms.py`, `test-comms-fulltext.py`,
-  `test-manager.py`, `test-agents.py`, `test-board-truth.py`. Device check: `tools/phone/verify/board-state.sh`.
-- Land: `tools/agents/land.sh "msg" -- <paths> --ship "..."` (schema changes to apps/agents also need a publish — see the stdb section above).
-- Friction: `tools/agents/friction add --area comms --kind <...> "<title>" --repro "<cmd>"`.
 
 # PowOS comms: how it works and what bites
 

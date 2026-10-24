@@ -17,20 +17,13 @@ description: Use when working on PowOS window tasks - floating Android windows (
 - Land: `tools/agents/land.sh "msg" -- <paths> --ship "..." --queue <check args>`.
 - Friction: `tools/agents/friction add --area <switcher|desktop> --kind <...> "<title>" --repro "<cmd>"`.
 
+### desktop (paused 2026-10-22)
+- Plasma checks are PHONE ONLY (Plasma session). After landing shell files, the desktop host's own shell copy needs `sources/powos-shell/dev/phone.sh build` separately.
+- Friction: `tools/agents/friction add --area desktop ...`.
+
 ## switcher
 
 
-## Quick recipe
-- Files: `targets/android/app/.../system/{WindowFrames,FreeformTasks,NavGesture,RecentsTransition}.kt`,
-  `shell/ui/recents.tsx`, `shell/hosts/wide.ts`. KWin side: `targets/android/pkgs/kwin/` (see the desktop section's
-  "Writing a KWin patch" for patch/number workflow).
-- Build: Kotlin compile check before pushing to origin: `tools/phone/compile-check.sh`; ship/install:
-  `tools/phone/ship-apk.sh --note "..."` (never build by hand).
-- Check, emu first then phone: `tools/phone/verify/queue.sh add --dev auto <task> window-max.sh calc` /
-  `float-desktops.sh` / `float-windows.sh` (window/recents UI is emu+phone); phone-only: `linux-float.sh`,
-  `fold.sh`, `one-title-bar.sh`, anything needing the Linux session or a KWin install (`kwin-install.sh MIN` first).
-- Land: `tools/agents/land.sh "msg" -- <paths> --ship "..." --queue <check args>`.
-- Friction: `tools/agents/friction add --area switcher --kind <...> "<title>" --repro "<cmd>"`.
 
 ## How a swipe up works (gesture -> page)
 - NavGesture.kt (input monitor, PowOS is the recents provider) asks WM Shell's recents transition on the finger's DOWN
@@ -468,15 +461,6 @@ description: Use when working on PowOS window tasks - floating Android windows (
 ## desktop
 
 
-## Quick recipe
-- Files: `sources/powos-shell/` (Qt/QtWebEngine host, src/{view,home,bridge}.cpp), `shell/hosts/desktop.ts`+`layout.ts`,
-  `shell/ui/desktop.tsx`/`.css`. Paused host — most new work is the windows side, owned by this skill's switcher section.
-- Build (on-phone, ~20s): `sources/powos-shell/dev/phone.sh build`; status/render: `dev/phone.sh status|cdp 'JS'|page NAME|shot NAME`.
-- Check: PHONE ONLY (Plasma session) — `tools/phone/verify/queue.sh add <task> plasma-modes.sh plasma|shell|together`
-  (needs `kwin-up.sh MIN` queued first if KWin is behind), `plasma-transparent.sh`, `plasma-notify.sh`, `plasma-app.sh`.
-- Land/ship shell files as usual: `tools/agents/land.sh "msg" -- <paths> --ship "..."`; desktop host's own shell copy
-  needs `dev/phone.sh build` separately.
-- Friction: `tools/agents/friction add --area desktop --kind <...> "<title>" --repro "<cmd>"`.
 
 **Paused by the user, 2026-10-22:** no work on the separate Plasma desktop (powos-shell); the desktop is the PowOS
 home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the code stays.

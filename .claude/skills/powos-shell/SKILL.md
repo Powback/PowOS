@@ -19,18 +19,13 @@ description: Use before any visual change on the PowOS phone shell - design lang
 - Gate debugging: puppeteer lives only in the gate image zenika/alpine-chrome:with-puppeteer; read its source with `docker run --rm --entrypoint sh zenika/alpine-chrome:with-puppeteer -c 'cat /usr/src/app/node_modules/puppeteer-core/lib/cjs/puppeteer/<path>'` (find the path with `find / -path '*puppeteer-core/lib*' -name Browser.js`).
 - Don't set NODE_OPTIONS=--async-stack-traces for the gate: it breaks tsc and complexity. A failed startup step already names itself ([case: step]) since 1f18ecc2.
 
+### design
+- Files: `docs/DESIGN-LANGUAGE.md` (spec); native blur: `targets/android/app/.../shell/{GlassBlur,Frost}.kt`.
+- Check: `shade-overpull.sh` (shade over-pull) in addition to the list above.
+
 ## design
 
 
-## Quick recipe
-- Files: `shell/theme.css`/`shell/ui/shell.css` (tokens, frost/CC/shade), `shell/ui/{shade,control,pending}.tsx`,
-  `docs/DESIGN-LANGUAGE.md` (spec), native blur: `targets/android/app/.../shell/{GlassBlur,Frost}.kt`.
-- Build/render: `shell/dev/shot.sh OUTDIR 'REGEX' [SHELL_DIR] [WALLPAPER]` (targeted render + contrast report.json);
-  whole sweep: `shell/dev/gate.sh --tree --shots DIR --wallpaper FILE` (tsc + headless boot + shots + style lint).
-- Check, emu first then phone: `tools/phone/verify/queue.sh add <task> cc-toprow.sh` / `shade-panel.sh` /
-  `shade-overpull.sh` (most design checks are emu+phone); read-only CDP for live computed styles.
-- Land/ship: `tools/agents/land.sh "msg" -- <paths> --ship "plain words for the user"`.
-- Friction: `tools/agents/friction add --area design --kind <...> "<title>" --repro "<cmd>"`.
 
 # PowOS shell design: what's known
 

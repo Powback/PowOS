@@ -7,8 +7,8 @@ description: Use to reach, inspect, ship to, verify, or measure perf on the PowO
 - Files: `tools/phone/{adb,root,user,idle,cdp,ship,ship-apk,shot,cpu,idle-sample,review-image,app-src,bindings-check,bridge-check}.sh`
   (one adb call each), `tools/phone/verify/*.sh` (131 checks, header says where it runs), `queue.sh`, shared libs
   `e2e-lib.sh`/`bf-lib.sh`.
-- Build: n/a — this skill is phone ACCESS/shipping/verifying/perf, not a build target itself. A check needing a
-  fresh KWin: queue `kwin-install.sh MIN` first, same task.
+- Build: n/a (bash checks, no compile step); this skill is phone ACCESS/shipping/verifying/perf, not a build target.
+  A check needing a fresh KWin: queue `kwin-install.sh MIN` first, same task.
 - Check (emu first, then phone): `tools/phone/idle.sh` (idle=<s> screen=<state>); read-only state via
   `tools/phone/cdp.sh eval <page> '<js>'`; a real device check goes through
   `tools/phone/verify/queue.sh add [--dev emu|auto] <task> <check.sh>` (never run one by hand outside a window);
@@ -20,17 +20,13 @@ description: Use to reach, inspect, ship to, verify, or measure perf on the PowO
 - Evidence off PowOS's root: `tools/phone/pull-root.sh <path-under-/data/powos/root> <mac-dir>` (plain `adb.sh pull` there is Permission denied; it copies via `su cp` to /data/local/tmp first).
 - Friction: `tools/agents/friction add --area phone --kind <refused|broken-tool|flaky-check|unclear-rule|slow> "<title>" --repro "<cmd>"`.
 
+### verify
+- `queue.sh add --dev emu <task> <check.sh> [args]` (or `--dev auto`: the check's `# lanes:` header picks); phone-only checks (games/fold/kernel/Linux session) refuse `--dev emu`.
+- Friction: `tools/agents/friction add --area verify --kind <flaky-check|unclear-rule|...> "<title>" --repro "<cmd>"`.
+
 ## powos-phone
 
 
-## Quick recipe
-- Files: `tools/phone/{adb,root,user,idle,cdp,ship,ship-apk,shot}.sh` (one adb call each).
-- Build: n/a — this skill is phone ACCESS/shipping, not a build target itself.
-- Check (emu first, then phone): `tools/phone/idle.sh` (idle=<s> screen=<state>); read-only state via
-  `tools/phone/cdp.sh eval <page> '<js>'`; a real device check goes through
-  `tools/phone/verify/queue.sh add [--dev emu|auto] <task> <check.sh>` (never run one by hand outside a window).
-- Ship/land: `tools/agents/land.sh "msg" -- <paths> [--ship "note"]` then END YOUR TURN. Never ship-apk/push yourself.
-- Friction: `tools/agents/friction add --area phone --kind <refused|broken-tool|flaky-check|unclear-rule|slow> "<title>" --repro "<cmd>"`.
 
 Read `docs/AGENT-HANDBOOK.md` (repo root) first - it is the map of how the phone pieces connect, who owns what, and
 the cross-cutting rules (Shipping, Rules that bite). This is the short form.
@@ -58,14 +54,6 @@ file that isn't origin's, force-push, unregistered host installs, bypass the gat
 
 ## verify
 
-## Quick recipe
-- Files: `tools/phone/verify/*.sh` (131 checks, header says where it runs), `queue.sh`, shared libs `e2e-lib.sh`/`bf-lib.sh`.
-- Build: n/a (bash checks; no compile step). A check needing a fresh KWin: queue `kwin-install.sh MIN` first, same task.
-- Check, emulator first: `tools/phone/verify/queue.sh add --dev emu <task> <check.sh> [args]` (or `--dev auto` to let
-  the check's `# lanes:` header pick); phone-only checks (games/fold/kernel/Linux session) refuse `--dev emu`.
-  Run by hand off-queue: `POWOS_DEVICE=emu LOCK_HELD=1 tools/phone/verify/<check>.sh ...`.
-- Land: `tools/agents/land.sh "msg" -- <paths> --queue <check args>` (queues the check as part of landing).
-- Friction: `tools/agents/friction add --area verify --kind <flaky-check|unclear-rule|...> "<title>" --repro "<cmd>"`.
 
 Access and rules: the powos-phone skill (tools/phone/adb.sh, root.sh, idle.sh). This is the how-to for verifying.
 
