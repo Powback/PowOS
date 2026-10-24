@@ -695,6 +695,16 @@ Git and process
 - `shell/.gitignore` ignores `node_modules` (no trailing slash) so a SYMLINKED shell/node_modules (from another
   worktree, for tsc) is ignored too; `node_modules/` matched only a directory and the link made the tree dirty for
   build-app.sh. Write ignore rules that match a symlink when one may be linked.
+- `git ls-tree` on a directory pathspec needs `-r`: without it, `git ls-tree --name-only <ref> -- some/dir` prints
+  only `some/dir` itself (the tree entry), not the files inside it - silently, no error. Bit both land.sh's duplicate-
+  change check and pkg-claim.sh's patch/pkgrel-max scan until an end-to-end test caught it (friction f166). Always
+  `-r` when the pathspec is (or might be) a directory.
+- `git worktree move` refuses unconditionally on ANY submodule gitlink in the worktree's index - even after
+  `git submodule deinit -f <path>` on it (git 2.50.1), and unlike `worktree remove` it has no `--force` that gets
+  past this. The fix `git worktree move` itself documents: `mv` the directory by hand, then `git worktree repair
+  <newpath>` from the main checkout (fixes `.git/worktrees/<name>/gitdir`), then (if the submodule was deinit'd)
+  `git submodule update --init` to repopulate it at the new location. Used for powos-multiplatform's own move
+  (targets/web/third_party/qemu-wasm) in wt-move-rest (friction f191).
 Pipeline scripts (bash)
 - The Mac's bash is 3.2: no `declare -A`, guard empty arrays under `set -u` (`${a[@]+"${a[@]}"}`)
 - The Mac has no `timeout`; use `perl -e 'alarm N; exec @ARGV' cmd …` instead (f162).
