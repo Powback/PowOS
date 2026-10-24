@@ -20,6 +20,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$HERE/out/pkgs
 mkdir -p "$OUT"
 IMAGE=menci/archlinuxarm:latest
+# This run's own id: the scratch volume is named with it (f70 - two worktrees building the same package
+# shared ONE docker volume named only after the package, so one run's start-clean rm deleted the other's
+# live build tree mid-build). Different build-pkgs.sh processes always get different pids.
+RUN_ID=$$
 # PowOS's rootfs as an image (once per rootfs build, named after its checksum), for BUILD_ON_ROOTFS packages.
 rootfs_image() {
   local tar=$HERE/out/powos-rootfs.tar.gz img
@@ -40,8 +44,10 @@ for p in "${pkgs[@]}"; do
   [ -n "$src" ] || { echo "build-pkgs: $p is neither in pkgs/ nor in recipes.list" >&2; exit 1; }
   # A failed run leaves its scratch volume (set -e exits before the rm below); a stale src/ then
   # re-applies the patches onto an already patched tree. Always start clean, and clean up on exit.
-  docker volume rm -f "powos-android-pkg-$p" >/dev/null 2>&1 || true
-  trap 'docker volume rm -f "powos-android-pkg-'"$p"'" >/dev/null 2>&1 || true' EXIT
+  # Named with this run's pid (RUN_ID): a volume named only "...-$p" is shared by every concurrent build of
+  # that package, so one run's start-clean rm or exit-trap rm deletes another run's live build tree (f70).
+  docker volume rm -f "powos-android-pkg-$p-$RUN_ID" >/dev/null 2>&1 || true
+  trap 'docker volume rm -f "powos-android-pkg-'"$p-$RUN_ID"'" >/dev/null 2>&1 || true' EXIT
   local_mount=(); [ "$src" = local ] && local_mount=(-v "$HERE/pkgs/$p:/pkg:ro")
   forks=""
   if [ -f "$HERE/pkgs/$p/FORKS" ]; then
@@ -54,14 +60,17 @@ for p in "${pkgs[@]}"; do
   fi
   image=$IMAGE base=repo
   if [ -f "$HERE/pkgs/$p/BUILD_ON_ROOTFS" ]; then image=$(rootfs_image) base=rootfs; fi
-  scratch="powos-android-pkg-$p"
+  scratch="powos-android-pkg-$p-$RUN_ID"
   if [ -n "${PKG_SCRATCH:-}" ]; then
-    scratch=$PKG_SCRATCH/$p; wipe_scratch
+    scratch=$PKG_SCRATCH/$p-$RUN_ID; wipe_scratch
   fi
   # Resource caps: shares the Colima VM with live services. A volume keeps makepkg's src/ off the
   # macOS bind mount (faster, and keeps Linux ownership).
   # Compiler cache across builds (a volume shared by every package): the source tree is fresh each time (a reused
   # one re-applied the patches), so without it a one-file change to KWin recompiled all of it (~20 min).
+  # The Mac-wide build slot (tools/agents/build-slot.sh): this is one of the heavy CPU-bound builds that
+  # piled up concurrently and starved the shell gate and compile-check (f30, f62/f66-69).
+  "$HERE/../../tools/agents/build-slot.sh" "build-pkgs $p ($HERE)" -- \
   docker run --rm --platform linux/arm64 --cpus 8 --memory 16g ${local_mount[@]+"${local_mount[@]}"} \
     -v powos-android-ccache:/ccache \
     -e PKG="$p" -e SRC="$src" -e BASE="$base" -e FORKS="$forks" -v "$HERE/recipes:/fixups:ro" -v "$HERE/tools:/tools:ro" -v "$OUT:/out" -v "$scratch:/build" "$image" bash -c '
@@ -116,7 +125,7 @@ for p in "${pkgs[@]}"; do
         CCACHE_BASEDIR=/build makepkg -sf --noconfirm --skippgpcheck --nocheck $ignorearch
       cp /build/*.pkg.tar.* /out/'
   # Scratch only (KWin's build tree is several GB) on the Docker disk shared with live services.
-  docker volume rm -f "powos-android-pkg-$p" >/dev/null 2>&1 || true
+  docker volume rm -f "powos-android-pkg-$p-$RUN_ID" >/dev/null 2>&1 || true
   [ -z "${PKG_SCRATCH:-}" ] || wipe_scratch
 done
 ls -la "$OUT"

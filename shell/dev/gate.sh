@@ -59,6 +59,13 @@ while [ $# -gt 0 ]; do
 done
 [ -n "${GATE_STUB_SLEEP:-}" ] || command -v docker >/dev/null || { echo "gate: no docker" >&2; exit 2; }
 t0=$(date +%s)
+# The Mac's 1-min load, measured once up front: a fixed READY_MS can't tell a slow page from a starved one,
+# and under real agent-swarm load (f30: load 25) a page that would boot fine at load 2 missed a fixed 8000 ms
+# and failed the gate though nothing was wrong with the code - even after GATE_SLOTS/build-slot stop OUR OWN
+# builds from piling on each other, OTHER agents' unrelated work still raises ambient load. So the ready
+# budget scales with the load actually measured at this run, instead of a constant every run guesses at.
+load=$(sysctl -n vm.loadavg 2>/dev/null | awk '{print int($2)}'); [ -n "$load" ] || load=$(awk '{print int($1)}' /proc/loadavg 2>/dev/null)
+load=${load:-0}
 # Under $HOME, not $TMPDIR: Colima's VM mounts the home folder only (a /var/folders path is empty in the container).
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate"
 # The slots (2026-10-23: ~8 agents gated at once, Mac load 17 - pages timed out and retried with longer READY_MS, and
@@ -163,6 +170,11 @@ missing=$(cd "$S" && {
 if [ -z "$missing" ]; then echo "ok   referenced files"
 else echo "$missing" | sed 's/^/FAIL missing: /; s/$/ (not in what the phone will serve: push it with this)/'; fail=1; fi
 # 2. The pages, booted.
+# Load-scaled ready budget (an explicit READY_MS still wins): 1500 ms/load-point, floor 8000 - calibrated off
+# f30's own history (GATE_BOOTS alone passed at load 18.8 with the hand-set READY_MS=30000 workaround:
+# 1500*18.8=28200, close enough), capped at 60000 so a truly wedged page still fails instead of hanging.
+ready_default=$(( load * 1500 )); [ "$ready_default" -ge 8000 ] || ready_default=8000
+[ "$ready_default" -le 60000 ] || ready_default=60000
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
 # The shared transpile's cache (gate.mjs transpiled()): by source hash, so it never goes stale; pruned of week-old files.
 tx="${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/tx"
@@ -175,7 +187,13 @@ if [ -n "$app" ]; then
   mounts+=(-v "$app/powos-app.json:/apps/$id/powos-app.json:ro" -v "$app/out/ui:/apps/$id/ui:ro")
 fi
 set +e
-docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" -e READY_MS="${READY_MS:-8000}" \
+# The Mac-wide build slot (tools/agents/build-slot.sh): booting the pages competes for CPU with
+# compile-check/build-pkgs/warm-builder's docker runs, and a fixed READY_MS can't tell a slow page from a
+# starved one - at load 25 pages missed READY_MS and the gate failed "not ready" though nothing was wrong
+# with the code (f30, reopened x3 after GATE_BOOTS alone). Queueing for the slot instead of racing for CPU
+# fixes the cause instead of raising the timeout.
+"$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" -- \
+docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" -e READY_MS="${READY_MS:-$ready_default}" \
   ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
   ${GATE_ONLY:+-e GATE_ONLY="$GATE_ONLY"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"} \
   -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs

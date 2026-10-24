@@ -4,12 +4,14 @@
 #   tools/phone/compile-check.sh        exit 0 = compiles; otherwise the compiler's errors (e: ...) and exit 1
 # A throwaway android-builder container on this worktree only: it never touches android-app-dev's shared
 # projects/powos link or output/powos.apk (that's build-app.sh's, via ship-apk), so it's safe while a ship runs.
-# The gradle cache is the shared volume (its own locks make concurrent use safe).
+# The gradle cache is the shared volume - but its own file locks only wait, they don't queue, so two
+# concurrent --no-daemon runs can both time out waiting on the journal cache lock (f62/f66-69). Serialized
+# through the Mac-wide build slot (tools/agents/build-slot.sh) instead, with the rest of the heavy builds.
 set -uo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 case "$root" in "$HOME"/Projects/*) ;; *) echo "compile-check: the worktree must be under ~/Projects (mounted into the builder)" >&2; exit 2 ;; esac
 app=/Projects${root#$HOME/Projects}/targets/android/app
-out=$(docker run --rm -v "$HOME/Projects:/Projects" -v android-app-dev_gradle-cache:/root/.gradle \
+out=$("$root/tools/agents/build-slot.sh" "compile-check $root" -- docker run --rm -v "$HOME/Projects:/Projects" -v android-app-dev_gradle-cache:/root/.gradle \
   -e ANDROID_SDK_ROOT=/opt/android-sdk -w "$app" --entrypoint bash android-app-dev-android-builder:latest -c '
     echo sdk.dir=/opt/android-sdk > local.properties
     [ -f app/version.properties ] || printf "versionCode=1\nversionName=check\n" > app/version.properties

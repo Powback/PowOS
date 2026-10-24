@@ -13,6 +13,7 @@
 # Limits: 8 GB memory, 6 CPUs (docker); the daemon exits after 3 h without a build (org.gradle.daemon.idletimeout),
 # and the container after 6 h without one (its own idle loop) - the next build-app.sh starts it again.
 set -euo pipefail
+REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 NAME=powos-gradle-warm
 IMAGE=android-app-dev-android-builder:latest
 AAD=${ANDROID_APP_DEV:-$HOME/Projects/android-app-dev}
@@ -64,6 +65,11 @@ build() {
   local dir=$1 project=${PROJECT:-powos} publish=${PUBLISH:-1}
   build_lock
   start
+  # The Mac-wide build slot (tools/agents/build-slot.sh): this container's gradle build is one of the heavy
+  # CPU-bound builds that piled up concurrently with compile-check/build-pkgs/the gate and starved them
+  # (f30, f62/f66-69). build_lock above already keeps warm-builder's OWN builds to one at a time; this also
+  # keeps it from running alongside everyone else's.
+  "$REPO/tools/agents/build-slot.sh" "warm-builder $dir" -- \
   docker exec -e PROJECT="$project" -e PUBLISH="$publish" "$NAME" bash -c '
     set -euo pipefail
     touch /tmp/last-build
