@@ -177,6 +177,12 @@ never a hardcoded root.
   `blocked` (blocked/waiting + the note as the reason), `done`. The status column is only what someone typed.
 - Claim by moving: the first thing a fresh agent does is `task set <id> --owner <expert> --step "<what now>"`. A
   subagent's role is "general-purpose", so the owner-role fallback rarely finds it - the --step claim is what counts.
+- Multi-item batches live on the board, not in the brief: put the full item list on the task with
+  `task set <id> --plan "item 1; item 2; ..."`, and write briefs that say "see board task <id>" instead of
+  re-listing the items. A resumed/restarted agent (SendMessage to a dead agent's id starts fresh, no memory) had
+  no way to recover a batch's items except the dead agent's transcript (friction f126) - `task list --id <id>
+  --json` (or `--raw`) gives a fresh agent the task's `steps` (done/current/next) the same as a live one would
+  have had, without dumping the whole board.
 - Done = its phone check PASSED on a shipped build (the module's work_set refuses anything else). Queue the last proof
   with `queue.sh add --close <task> <check>` (the pass closes it); a task no device check can prove closes with
   `task done <id> --no-check "<why>"` (docs, Mac tooling with a tier-1 test). Never report "done" for pushed/queued.
@@ -308,6 +314,11 @@ never a hardcoded root.
   APK's own shell + the phone's current overrides + your files. It refuses only failures your push ADDS. It also
   refuses when a page names a local file (href/src, "./ui/x.css") or imports a module the phone won't have: push a
   file with everything it imports or names, in ONE push. Never bypass the gate.
+- A scroll-driven CSS animation (`animation-timeline: scroll()`/`view()`, e.g. the dock's edge fade) is "running"
+  for as long as it exists on `document.getAnimations()` - it never finishes, so a still/settled wait that doesn't
+  exclude it times out, and an at-rest check that doesn't false-fails forever (friction f125). `gate.mjs`'s checks
+  all go through one helper now, `window.__gw.documentAnimations(sel)` (filters to `document.timeline` only); use
+  it instead of calling `document.getAnimations()` / `el.getAnimations()` directly in a new check.
 - Then the bindings check (see SpacetimeDB below) in the same phone call.
 - `shell/push.sh --errors [N]` = the phone's shell errors; `--reset [files]` removes overrides. A page that fails to
   boot within 2 min of a push is rolled back by the app and the manager told.
@@ -347,6 +358,9 @@ never a hardcoded root.
   unmanaged host installs.
 - PowOS apps: `powos app new|build|install|ui|publish|dev` (lib/apps/powos-app), run inside PowOS; the repo's apps/*
   with apps/build.sh + `apps/install.sh <app> [install|publish|ui] --note "..."`.
+- Typechecking an app's UI (preact/tsx): `apps/typecheck.sh <app>` - needs shell/node_modules (`npm ci` in shell/
+  if missing), and a built module first if the UI imports its generated bindings (`apps/build.sh <app>`). There
+  was no recipe for this at all before (friction f109).
 
 ## The emulator lane: first for window and app checks, the phone only for hardware
 - Window, app, home and shell checks go to the EMULATOR first: `tools/phone/verify/queue.sh add --dev emu <task>

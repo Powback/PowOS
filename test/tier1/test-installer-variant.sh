@@ -65,7 +65,7 @@ echo "== Containerfile installer wiring =="
 # The POWOS_INSTALLER build-arg machinery (installer kargs, firstboot-disk
 # masking, the /usr /etc /var restorecon relabel) was deliberately REMOVED from
 # the Containerfile in 75dd0e4 "strip: minimum viable PowOS layer" — the
-# canonical installer is the Anaconda ISO now (see CLAUDE.md's install section).
+# canonical installer is the Anaconda ISO now (see docs/REFERENCE-X86.md's install section).
 #
 # These assertions kept demanding that removed machinery and had been failing
 # ever since. Nobody noticed, because this file was missing from CI's

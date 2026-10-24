@@ -10,7 +10,13 @@
 #   worktree.sh list         name, age of HEAD, commits not on origin (patch-id), dirty files; both locations
 set -euo pipefail
 BASE=worktree-powos-multiplatform
-REPO=$(cd "$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")" && pwd)
+# Resolve from CWD (git-common-dir is identical across every worktree of this repo, main or not), never from $0:
+# $0 is wherever this script's BYTES happen to sit (a /tmp copy, "bash" when piped via `bash -s`, a worktree's own
+# tools/agents/) - resolving the repo root from it nests a new worktree inside whichever worktree you ran this
+# FROM instead of the repo's main root (friction f124). cd into any checkout of this repo before running it.
+gcd=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+  { echo "worktree.sh: cd into a PowOS checkout (any worktree) first" >&2; exit 1; }
+REPO=$(cd "$(dirname "$gcd")" && pwd)
 WT=$REPO/.claude/worktrees
 # New agent worktrees live outside the repo (default ~/pw) so they have no ancestor CLAUDE.md/.claude/skills to
 # load - the old $WT/<name> location put every agent worktree under the repo's own tree, which is also the parent

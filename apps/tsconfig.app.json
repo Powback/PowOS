@@ -1,0 +1,19 @@
+{
+  // Default type-check config for an app's ui/ (apps/typecheck.sh, friction f109) when the app has no tsconfig.json
+  // of its own. app-api/pet/sketch hand-wrote a shorter version of this; this one also adds shell/tsconfig.json's
+  // allowImportingTsExtensions + lib ES2023 - an app's ui commonly imports a shell type by its .ts path (e.g.
+  // `import("../../../../shell/apps/stdb.ts").IslandHost`), which pulls much of shell/ into the check otherwise.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true
+  }
+}

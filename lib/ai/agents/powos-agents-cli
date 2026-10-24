@@ -75,6 +75,9 @@ How far along (the page shows a bar, the steps done / now / next, the commits an
   task done marks the current step done and fills the bar.
   powos agents task rm <task>      Remove one (a duplicate, a mistake).
   powos agents task list [--all] [--json] [--project P] [--unowned] [--owner ROLE] [--state S] [--raw]
+                          [--id ID ...]
+                                   --id: just these (repeatable) - a fresh agent recovering a batch's plan from
+                                   its board task doesn't need the whole board; try --json too for the raw steps.
                                    The open tasks, by project, each with its TRUE state and why (--all:
                                    with the done ones; --raw: the status column as typed). --unowned:
                                    the free ones (no owner, or only the generic "coder") - an idle expert
@@ -600,10 +603,12 @@ def task(argv):
                 n += 1
         print(f"{n} task(s) given a project")
     elif verb in ("list", "ls"):
-        o, _ = opts(argv, ["all!", "json!", "project", "unowned!", "owner", "state", "raw!"])
+        o, _ = opts(argv, ["all!", "json!", "project", "unowned!", "owner", "state", "raw!", "id*"])
         if o.get("state") and o["state"] not in TRUTH:
             die(f"--state is one of {' | '.join(TRUTH)}")
-        ws = [w for w in board_truth() if (o.get("all") or w["status"] != "done")
+        ids = set(o.get("id") or [])
+        ws = [w for w in board_truth() if (ids or o.get("all") or w["status"] != "done")
+              and (not ids or w["id"] in ids)
               and (not o.get("state") or w["truth"] == o["state"])
               and (not o.get("project") or w.get("project") == o["project"])
               and (not o.get("unowned") or (w.get("owner") or "") in GENERIC_OWNERS)
@@ -1046,7 +1051,8 @@ coordinator lists new and recurring ones by count, and the top ones become perma
           AREA: what it's in - ship, gate, verify, board, comms, permissions, worktree, phone, apk, ...
           --repro is required: "none: <why it can't be reproduced>" when there's really no way.
           --fixed SHA: logging one that's already fixed (a record of it; it reopens if it comes back).
-  powos friction list [--all] [--fixed] [--area A] [--json]   open ones, most frequent first
+  powos friction list [--all] [--fixed] [--area A] [--id ID ...] [--json]   open ones, most frequent first
+                     --id: just these ids (repeatable) - a cluster's status in one call, not the whole dump
   powos friction show <id>                     one, whole (details, repro, evidence)
   powos friction fix <id> --commit SHA [--note TEXT]   fixed for good; logged again later, it reopens
 
@@ -1078,9 +1084,10 @@ def friction_cmd(argv):
                 print(f"{k}: {f[k]}")
         print(f"first: {ago(int(f['first']))} ago, last: {ago(int(f['last']))} ago")
     elif verb in ("list", "ls"):
-        o, _ = opts(argv, ["all!", "fixed!", "area", "json!"])
-        fs = [f for f in table("friction") if (o.get("all") or (f["status"] == "fixed") == bool(o.get("fixed")))
-              and (not o.get("area") or f["area"] == o["area"])]
+        o, _ = opts(argv, ["all!", "fixed!", "area", "id*", "json!"])
+        ids = set(o.get("id") or [])
+        fs = [f for f in table("friction") if (ids or o.get("all") or (f["status"] == "fixed") == bool(o.get("fixed")))
+              and (not o.get("area") or f["area"] == o["area"]) and (not ids or f["id"] in ids)]
         fs.sort(key=lambda f: (-int(f["count"]), -int(f["last"])))
         if o.get("json"):
             print(json.dumps(fs, indent=1))

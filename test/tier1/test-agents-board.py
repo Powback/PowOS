@@ -91,6 +91,7 @@ class BoardTest(unittest.TestCase):
     def setUp(self):
         FakeStdb.work.clear()
         FakeStdb.calls.clear()
+        FakeStdb.clock[0] = 1000  # class-level, mutated in place by do_POST - reset so tests don't see each other's time (f93)
         self.tmp = tempfile.mkdtemp(prefix="board-test-")
         os.makedirs(os.path.join(self.tmp, ".config", "spacetime"))
         with open(os.path.join(self.tmp, ".config", "spacetime", "cli.toml"), "w") as f:

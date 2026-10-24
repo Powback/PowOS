@@ -276,8 +276,9 @@ async function overpullKit() {
     return els.length ? Math.max(...els.map((e) => e.getBoundingClientRect().bottom)) : NaN;
   };
   const gap = () => edge() - last();
-  // Time-driven ones only: the list's edge fades (shell.css scroll-fade) are scroll-driven, "running" for good.
-  const still = () => !document.getAnimations().some((a) => a.playState === "running" && a.timeline === document.timeline && a.effect?.target?.closest?.(".notif-panel"));
+  // Time-driven ones only: the list's edge fades (shell.css scroll-fade) are scroll-driven, "running" for good -
+  // window.__gw.documentAnimations already excludes those (friction f125).
+  const still = () => !window.__gw.documentAnimations(".notif-panel").length;
   const at = { x: 0, y: 0 };
   const P = (type, y) =>
     document.querySelector(".cc > .notif-bar").dispatchEvent(
@@ -951,8 +952,9 @@ async function folderMorphCheck() {
   await until(() => !inline().length);
   const left = inline();
   if (left.length) fails.push(`morph: at rest ${left.length} parts keep an inline transform or transition`);
-  // The sheet's own (an icon still loading pulses: icon-wait, not the morph's).
-  const running = v.getAnimations({ subtree: true }).filter((a) => a.playState === "running" && a.animationName !== "icon-wait").length;
+  // The sheet's own (an icon still loading pulses: icon-wait, not the morph's); documentAnimations already
+  // excludes a scroll-driven one under the sheet, which otherwise "runs" forever and never settles (friction f125).
+  const running = window.__gw.documentAnimations(".folder-view.open").filter((a) => a.animationName !== "icon-wait").length;
   if (running) fails.push(`morph: at rest ${running} animations still running in the sheet`);
   if (!v.querySelector(".folder-focus.tile")) fails.push("morph: no page-sized frost behind the sheet");
   if (getComputedStyle(document.querySelector(".page-track > .page")).opacity !== "0") fails.push("morph: home's pages still show behind the open folder");
@@ -1741,9 +1743,16 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
       }
       return true;
     };
-    // (A scroll-driven one - animation-timeline: scroll(), the dock's edge fade - runs as long as it exists: not motion.)
-    const still = (sel) =>
-      !document.getAnimations().some((a) => a.playState === "running" && a.timeline === document.timeline && a.effect?.getComputedTiming().endTime !== Infinity && (!sel || a.effect?.target?.closest?.(sel)));
+    // The shared "what's actually animating" helper (friction f125): a scroll-driven effect (animation-timeline:
+    // scroll()/view(), the dock's edge fade) is "running" for as long as it exists - document.timeline is the only
+    // one real motion plays on, so every still/idle/at-rest check in the gate filters on it HERE, once, instead of
+    // each reimplementing (and some forgetting) the same filter - that's how a scroll-driven effect made a "nothing
+    // is animating" wait never finish, or an at-rest check false-fail, at the other call sites before this.
+    const documentAnimations = (sel) =>
+      document.getAnimations().filter((a) => a.playState === "running" && a.timeline === document.timeline && (!sel || a.effect?.target?.closest?.(sel)));
+    // still: a FINITE one under sel actually running; endless ones (a loading pulse) don't count - the idle check
+    // has those.
+    const still = (sel) => !documentAnimations(sel).some((a) => a.effect?.getComputedTiming().endTime !== Infinity);
     // Settled: f() holds, then no animation (under sel) and two frames on - the layout after the last one done.
     const settled = async (f = () => true, sel, ms = 3000) => (await until(async () => (await f()) && still(sel), ms)) && (await frames(2), true);
     // Steady: f()'s value (a JSON-able measure: rects, an order) the same over n frames running - motion a script drives
@@ -1767,7 +1776,7 @@ async function open(browser, url, name, viewport = { width: 412, height: 915 }) 
       if (!mods.has(path)) mods.set(path, window.importShim(path).catch((e) => (mods.delete(path), Promise.reject(e))));
       return mods.get(path);
     };
-    window.__gw = { sleep, frames, until, still, settled, steady, mod };
+    window.__gw = { sleep, frames, until, still, settled, steady, mod, documentAnimations };
   });
   // Counts the page's requestAnimationFrame callbacks (the idle check): counted as they run, nothing else changes.
   await page.evaluateOnNewDocument(() => {
@@ -1839,10 +1848,12 @@ async function idleWindow(run) {
   const { raf, anims } = await page
     .evaluate(() => ({
       raf: window.__gateRaf,
-      // Running and endless (an iteration count of Infinity): a finite one ends by itself.
-      anims: document
-        .getAnimations()
-        .filter((a) => a.playState === "running" && a.effect?.getComputedTiming().endTime === Infinity)
+      // Running and endless (an iteration count of Infinity): a finite one ends by itself. documentAnimations
+      // already excludes a scroll-driven one (friction f125: it also reports endTime Infinity, "running" for as
+      // long as it exists - without the timeline filter it false-failed every idle check on a page with one, e.g.
+      // the dock's edge fade).
+      anims: window.__gw.documentAnimations()
+        .filter((a) => a.effect?.getComputedTiming().endTime === Infinity)
         .map((a) => {
           const t = a.effect?.target;
           const cls = t && typeof t.className === "string" ? "." + t.className.trim().split(/\s+/).join(".") : "";
@@ -2125,7 +2136,7 @@ try {
               // The further pull reveals the rest under the row: the row's toggles don't move at all.
               const revealAndFold = async () => {
                 X.ccEditing.value = false;
-                const still = () => !document.getAnimations().some((an) => an.playState === "running" && an.timeline === document.timeline && an.effect?.target?.closest?.(".cc"));
+                const still = () => !window.__gw.documentAnimations(".cc").length;
                 await until(still, "the row settled after the drop");
                 const rowRects = () => order().slice(0, 6).map((k) => { const b = item(k).getBoundingClientRect(); return `${k}@${Math.round(b.left)},${Math.round(b.top)}`; }).join(" ");
                 const first = rowRects();

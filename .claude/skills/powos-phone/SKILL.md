@@ -19,6 +19,9 @@ Tools (repo `tools/phone/`, all one adb call each):
   from what's live, all notes in one notification. `ship.sh status` = requests, live sha, last ships; `ship.sh pause|resume` holds every ship (recoveries). ship-apk.sh and
   push.sh refuse to run outside it (`--direct` = a logged emergency). `shell/push.sh --errors` = the phone's shell errors.
 - Also: cpu.sh, idle-sample.sh, review-image.sh, app-src.sh, bindings-check.sh, bridge-check.sh, record/, verify/.
+- `sdkmanager`/`avdmanager` need a Java the Mac doesn't have: `sdkmanager` runs inside the `android-builder`
+  image (`tools/phone/compile-check.sh`, `targets/android/tools/warm-builder.sh`); `tools/emu/emu.sh create`
+  sidesteps `avdmanager` entirely by writing the AVD config file by hand instead (f102).
 
 Never: poll the phone, mutate live pages over CDP, touch real devices (lights) without the user's say, sudo via
 powos-run.sh, inject input while the user is active, wake the screen, ship Kotlin you haven't compiled, push a shell
