@@ -178,3 +178,14 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   `dumpsys SurfaceFlinger` - the layer shows `blurRegions.size()=N` and `{radius=..u, ... rect=[...]}`; screencap
   with `-d <id>` for the display in use (unfolded = the 2268-wide one) and pull inside powos-vadb (tools/phone/adb.sh
   loses pulls to paths that don't exist yet). Logcat tags: PowosGlassBlur, PowosBackdrop, PowosWallpaper.
+
+## Latest hand-off
+- 2026-10-24, shell-desk-fade (1d61a0c0, pushed; ship requested while the service was PAUSED - not on the phone yet):
+  wide launcher above the bar (start menu, bar stays tappable); scroll edge fades (drawer, AI panes, shade, chat);
+  over-pull unfolds notification stacks; "tests" stop/resume control in v3 Tools (ui/tests.ts, bridge verify.stop -
+  needs the new APK, hidden until its dry probe answers).
+- Gate: wideLauncherBar (wide-home), scroll-fade (404x560 so the mock list scrolls), stacks in overpullExpand/Fold,
+  overpullTests. Stillness helpers must ignore scroll-timeline animations (see Scrollbars note above).
+- Open: no device check yet - queue one per change after the ship (wide drawer + bar, edge fades in drawer and PowOS
+  AI, over-pull stacks, tests control after the APK). No board task was claimed (board unreachable at the time).
+- Unreviewed choices: tests control hidden while the runner is idle/silent (unless paused); v3 only, not classic.
