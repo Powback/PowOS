@@ -189,31 +189,19 @@ class WindowFrames(
 
     /**
      * A page swipe's windows (PageSlide: task id -> its leash's offset in the last frame). Their bars and grips (their
-     * own overlay windows) move with them in the leashes' transaction ([slideMove]); [refresh] neither moves, re-adds
+     * own overlay windows) move with them through WM ([slideMove]); [refresh] neither moves, re-adds
      * nor drops their frames meanwhile (a re-add - restack's raise - made new surfaces and the bar stood still while its
      * window slid, the user 2026-10-24) until the page change is committed ([showOnly]) or the slide is called off.
      */
     private val sliding = mutableMapOf<Int, Float>()
 
-    /** The tasks of the slide (id -> task), to frame them anew at its end. */
-    private val slideTasks = mutableMapOf<Int, FreeformTasks.Window>()
-
-    /** Windows whose bar and grip surfaces are children of their task's leash now ([slideMove]). */
-    private val reparented = mutableSetOf<Int>()
-
-    /** The reparented surfaces and where each sits from its leash's corner (logical px: the bar's y is negative, above the task). */
-    private val slideSurfaces = mutableMapOf<Int, List<Pair<android.view.SurfaceControl, android.graphics.Point>>>()
-
     /**
      * A page swipe starts moving [tasks]. A window coming from another page has no frame (away): it gets one now, at
-     * its real bounds, veiled (drawn clear, unblurred) until its surfaces are where the slide has the window.
+     * its real bounds, veiled (drawn clear, unblurred) until its windows are where the slide has the window.
      */
     fun slideStart(tasks: List<FreeformTasks.Window>) {
         sliding.clear()
-        reparented.clear()
-        slideSurfaces.clear()
-        slideTasks.clear()
-        tasks.forEach { sliding[it.id] = 0f; slideTasks[it.id] = it }
+        tasks.forEach { sliding[it.id] = 0f }
         if (keyguard || Switcher.open || !AppWindows.floating(context)) return
         tasks.filter { it.id !in frames && it.id !in minimised && mayFrame(it) }.forEach { w ->
             frames[w.id] = newFrame(w).apply { veiled = true }.also { it.place(w.bounds) }
@@ -221,67 +209,32 @@ class WindowFrames(
     }
 
     /**
-     * One slide frame, in [t] (the leashes' transaction, leashes already placed): the first time a window's leash is
-     * here its bar and grip surfaces become the leash's children (so they move with it by construction, no per-frame
-     * writes) and the leash's crop widens to hold them (placing cropped it to the task).
+     * One slide frame: every sliding window's bar and grip at its leash's offset [dx] (screen px), placed through the
+     * window manager (their overlay windows' layout x, [WindowFrame.slideTo]) - WM owns an overlay window's surface, a
+     * surface write of ours (setPosition, a reparent) was overwritten or mis-placed (jobs 20261024-194358, -210409).
      */
-    fun slideMove(
-        t: android.view.SurfaceControl.Transaction,
-        dx: Map<Int, Float>,
-        leash: (Int) -> android.view.SurfaceControl?,
-    ) {
+    fun slideMove(dx: Map<Int, Float>) {
         for ((id, x) in dx) {
             val f = frames[id] ?: continue
-            val l = leash(id)?.takeIf { it.isValid } ?: continue
             sliding[id] = x
-            if (id !in reparented) adopt(t, id, f, l)
-            // Every frame, not only at adoption: WM re-placing a reparented overlay put the bar at the leash's corner
-            // (job 20261024-204132: y 0 instead of -bar height, so it covered the window's top).
-            slideSurfaces[id]?.forEach { (sc, at) -> if (sc.isValid) t.setPosition(sc, at.x.toFloat(), at.y.toFloat()) }
-            t.setCrop(l, f.leashReach())
+            f.slideTo(x.toInt())
+            // Unveiled once WM has the offset: the next draw.
+            if (f.veiled) main.post { f.veiled = false }
         }
-    }
-
-    /** [f]'s bar and grip surfaces made children of [leash] (once), placed from its corner. */
-    private fun adopt(
-        t: android.view.SurfaceControl.Transaction,
-        id: Int,
-        f: WindowFrame,
-        leash: android.view.SurfaceControl,
-    ) {
-        val s = f.surfaces()
-        if (s.isEmpty() || s.size != f.panelViews.size) return
-        s.forEach { (sc, at) ->
-            t.reparent(sc, leash)
-            t.setPosition(sc, at.x.toFloat(), at.y.toFloat())
-        }
-        reparented += id
-        slideSurfaces[id] = s
-        Log.i(TAG, "slide: bar of $id under its leash, at ${s.joinToString { "${it.second.x},${it.second.y}" }}, crop ${f.leashReach()}")
-        if (f.veiled) main.post { f.veiled = false }
     }
 
     /**
-     * The slide ended ([committed]: landed - the page change follows through [desktop]; else called off). A bar under
-     * a leash goes with it when the transition finishes (no API tells its old parent, so it can't be reparented back):
-     * the windows staying get a new frame now, the ones going ([gone]) none.
+     * The slide ended ([committed]: landed - the page change follows through [desktop]; else called off): the bars
+     * of windows staying back at their real place, once (no jump: their leash is at 0 too), the ones going ([gone])
+     * removed with their window.
      */
     fun slideEnd(
         gone: Set<Int>,
         committed: Boolean,
     ) {
-        for (id in reparented) {
-            val old = frames[id] ?: continue
-            if (id in gone) {
-                frames.remove(id)?.remove()
-                continue
-            }
-            val task = slideTasks[id] ?: continue
-            frames[id] = newFrame(task).also { it.place(old.bounds) }
-            main.post { old.remove() }
+        for (id in sliding.keys) {
+            if (id in gone) frames.remove(id)?.remove() else frames[id]?.apply { slideTo(0); veiled = false }
         }
-        reparented.clear()
-        slideSurfaces.clear()
         Log.i(TAG, "slide end: bars of ${sliding.entries.joinToString { "${it.key}@${it.value.toInt()}" }}, gone ${gone.ifEmpty { "none" }}")
         if (committed) return
         sliding.clear()

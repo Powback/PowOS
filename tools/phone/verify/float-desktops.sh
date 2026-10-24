@@ -186,7 +186,7 @@ key=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$PKG\\//.test(a.key))||{}).key||'E
 case $key in a:$PKG/*) ;; *) fail "Calculator's key: $key" ;; esac
 # The main log rotates in seconds (256 KiB, OplusTouch spam): a `logcat -d` after the fact found nothing. Capture the
 # tags from the launch on, on the phone, bounded (timeout); hiddenapi denials log under the app's process name.
-sh_ "rm -f /data/local/tmp/fd-log.txt; (timeout 240 logcat -T 1 -v time -s PowosWindowFrames PowosFreeform PowosRunning PowosPageSlide com.powos.app:W </dev/null >/data/local/tmp/fd-log.txt 2>&1 &)"
+sh_ "rm -f /data/local/tmp/fd-log.txt; (timeout 240 logcat -T 1 -v time -s PowosWindowFrames PowosWindowFrame PowosFreeform PowosRunning PowosPageSlide com.powos.app:W </dev/null >/data/local/tmp/fd-log.txt 2>&1 &)"
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch: $r"
 sleep 2.5; chk launch
 id=$(hcall windows.list "[]" "l=>(l.find(w=>w.pkg==='$PKG')||{id:'none'}).id"); echo "window $id" | tee -a "$OUT/log.txt"

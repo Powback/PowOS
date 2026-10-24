@@ -129,9 +129,6 @@ object TaskLeash {
             }.getOrDefault(false)
         }
 
-        /** Task [id]'s leash while it is PowOS's (live), else null. */
-        fun leash(id: Int): SurfaceControl? = leashes[id]?.takeIf { state == State.LIVE }
-
         /**
          * Task [id]'s content to [bounds] (screen px) in [t] (applied by the caller with its own frame): false while the
          * leash isn't PowOS's (yet).
