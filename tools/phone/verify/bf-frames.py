@@ -6,10 +6,11 @@
 """bf-frames.py <dir> <mode>...: (Mac) frame pacing + stale frames of a bf-pacing.sh run. Per <dir>/<mode>/:
   L<n>.txt (bf-present.sh: SurfaceFlinger present times, ns) - the layer with the most presents = the game's surface:
     fps, frame-time percentiles, % of frames at one 60 Hz period (14.7-18.7 ms), % short (<12 ms), % long (>25 ms).
+  kgsl.txt (the session log's "Xwayland KGSL" lines) - commits per 30 s and how many were forced (no frame callback).
   rec.mp4 (screenrecord) - every composited frame, downscaled 8x to grey: dup = same as the previous frame,
     stale = a frame that goes BACK to one of the 2-4 frames before it (the "jittering back and forth" bug).
 Prints one line per mode; the last line is the summary for the board."""
-import os, subprocess, sys
+import os, re, subprocess, sys
 import numpy as np
 
 FF = ["docker", "run", "--rm", "-v", "{d}:/w", "-w", "/w", "--entrypoint", "{e}", "linuxserver/ffmpeg:latest"]
@@ -70,6 +71,15 @@ def stale(md):
     return dict(frames=len(f), dup=dup, back=back, secs=(pts[-1] - pts[0]) if len(pts) > 1 else 0)
 
 
+def xwl(md):
+    """Xwayland's last KGSL line of the run (kgsl.txt): its commits and how many went out past a frame callback that
+    never came - the frame callbacks KWin sends after each frame it draws of the window (a task drawn = none forced)."""
+    f = os.path.join(md, "kgsl.txt")
+    lines = [l for l in open(f)] if os.path.exists(f) else []
+    m = re.search(r"last (\d+)s: (\d+) commits \((\d+) forced", lines[-1]) if lines else None
+    return "xwl %s commits/%ss, %s forced" % (m.group(2), m.group(1), m.group(3)) if m else None
+
+
 def main():
     d, modes, out = sys.argv[1], sys.argv[2:], []
     for m in modes:
@@ -84,6 +94,9 @@ def main():
             line += " no presents"
         if s:
             line += ", rec %(frames)d fr/%(secs).0fs: dup %(dup)d, stale-back %(back)d" % s
+        x = xwl(md)
+        if x:
+            line += ", " + x
         print(line)
         out.append(line)
     print(" | ".join(out))

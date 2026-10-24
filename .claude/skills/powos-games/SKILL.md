@@ -306,6 +306,20 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   cooling devices all 0, uag soft_limit off: an OPlus scene cap (perf HAL), not thermal. /proc/game_opt (game_pid,
   disable_cpufreq_limit, cpu_max_freq) is OPlus's game hook - game_pid=-1: PowOS games are not known to it. Check the
   cap DURING a game (prof cluster lines) before acting.
+- Frame callbacks of a window task (kwin 0013 AnlandWindowTask::render): KWin sends them after every frame it draws
+  into the task's buffer (framePainted), paced by the consumer offering a buffer (native_consumer.c render thread:
+  dequeueBuffer -> select_dmabuf -> refresh_done). No task surface (activity stopped: screen off, task behind) = task
+  in the background = no callbacks: Xwayland's KGSL line then shows ~all commits "forced" (~2/s: one per 64 damage
+  passes) - that is a game nobody sees, not a compositor fault. The 2026-10-24 03:58 "evidence" run was that (no
+  SurfaceView layer, nothing resumed, no screenrecord). bf-pacing now says INVALID unless display ON + PowosWindowActivity
+  resumed + its SurfaceView layer, before and after the 30 s; prints the KGSL commits/forced and KWin's "window task"
+  lines (kwin.txt). Toybox grep has no BRE `\|` (bf-present picked container layers with no buffer: "no presents").
+- Full-screen window tasks keep the screen on (PowosWindowActivity.immersive: FLAG_KEEP_SCREEN_ON): a controller's
+  input goes to Linux, never Android's user-activity timer, so the screen timed out mid-game.
+- bf-pacing time (300 s budget, one mode/job): each adb.sh call is a docker run over the VPN (~2.5 s); waits are one
+  phone-side call each (bf-nap.sh, `bf-window.sh wait <s> <irq>`), the window waited only while the rest fits
+  (AFTER_WIN_S 165; "FAIL no game window" instead of a budget kill). MFP runs 02:19/02:55 waited 3.5+ min for a window
+  that never came, past the budget.
 - Window path per frame (lfdevs 0003): DRI3 pixmap from the client's LINEAR dma-buf, its EGLImage re-created before
   every Present copy (refresh_dri3_pixmap), Present flips disabled on KGSL -> glamor copy into the window pixmap ->
   window buffer commit (a forced commit also replaces the wl_buffer = KWin re-imports) -> KWin AnlandWindowTask draws

@@ -8,17 +8,19 @@
 # A cap below hw = someone (thermal, the vendor's performance HAL) limits that cluster while the game runs.
 s=${1:-30} out=${2:-/data/local/tmp/bfprof}; mkdir -p "$out"; f=$out/prof.txt; : > "$f"
 snap() { for t in /proc/[0-9]*/task/[0-9]*; do read -r l < "$t/stat" 2>/dev/null && echo "${t#/proc/} $l"; done 2>/dev/null; }
-snap > "$out/s1"; K=/sys/class/kgsl/kgsl-3d0; P=/sys/devices/system/cpu/cpufreq
-i=0; : > "$out/samples"
-while [ $i -lt "$s" ]; do
-  i=$((i + 1))
+snap > "$out/s1"; t1=$(date +%s); K=/sys/class/kgsl/kgsl-3d0; P=/sys/devices/system/cpu/cpufreq
+: > "$out/samples"; rm -f "$out/done"
+# By the clock, not a count of 1 s sleeps: reading ~80 thermal zones + the clocks takes a while per sample, and the
+# counted loop ran well past <secs> - bf-pacing read prof.txt before it was written (empty, 2026-10-24 03:58).
+end=$(( $(date +%s) + s ))
+while [ "$(date +%s)" -lt $end ]; do
   for c in $P/policy*; do echo "C ${c##*/} $(cat "$c/scaling_cur_freq") $(cat "$c/scaling_max_freq")"; done >> "$out/samples"
   echo "G $(cat $K/gpu_busy_percentage | tr -dc 0-9) $(cat $K/gpuclk) $(cat $K/thermal_pwrlevel) $(cat $K/throttling)" >> "$out/samples"
   for z in /sys/class/thermal/thermal_zone*; do t=$(cat "$z/temp" 2>/dev/null) && [ "${t:-0}" -gt 1000 ] && echo "T $(cat "$z/type") $t"; done >> "$out/samples"
   sleep 1
 done
-snap > "$out/s2"
-awk -v s="$s" 'function v(l,  r, a) { r = substr(l, index(l, ") ") + 2); split(r, a, " "); return a[12] + a[13] }
+t2=$(date +%s); snap > "$out/s2"
+awk -v s="$(( t2 > t1 ? t2 - t1 : 1 ))" 'function v(l,  r, a) { r = substr(l, index(l, ") ") + 2); split(r, a, " "); return a[12] + a[13] }
   function lc(l,  r, a) { r = substr(l, index(l, ") ") + 2); split(r, a, " "); return a[37] }
   function cm(l) { return substr(l, index(l, "(") + 1, index(l, ") ") - index(l, "(") - 1) }
   NR == FNR { b[$1] = v($0); n[$1] = cm($0); next }
@@ -34,4 +36,4 @@ awk '$1 == "T" { if ($3 > m[$2]) m[$2] = $3 } END { for (z in m) printf "temp %s
 for p in $(awk '$1 == "thread" && $2 > 20 {print $3}' "$f" | sort -u); do
   echo "cgroup $p $(cat /proc/$p/comm 2>/dev/null) $(grep -m1 ':cpuset:' /proc/$p/cgroup 2>/dev/null) allowed=$(awk '/Cpus_allowed_list/ {print $2}' /proc/$p/status 2>/dev/null)"
 done >> "$f"
-rm -f "$out/s1" "$out/s2"; chmod -R 755 "$out"
+rm -f "$out/s1" "$out/s2"; : > "$out/done"; chmod -R 755 "$out"
