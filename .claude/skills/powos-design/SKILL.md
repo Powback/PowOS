@@ -29,6 +29,10 @@ description: How the PowOS phone shell's design is built and checked - the desig
 - Scrollbars: the phone's WebView ignores `scrollbar-width` (CSS.supports false); theme.css hides
   `::-webkit-scrollbar` globally and the WebView's View scrollbars are off (ShellHost).
 - Assist (mode=assist) is the exception: the screen 1:1, its panel solid, no glass.
+- Scrolling under chrome fades, never cuts (2026-10-24): shell.css `--scroll-fade-t/-b`, one scroll-driven mask on
+  .drawer-list/.chat/.ai-panel/.ai-scroll/.notif-list; nativeglass.ts ends a fading clip's blur half-way into the fade.
+  A scroll-driven animation is "running" for good: anything waiting for "no running animations" must filter
+  `a.timeline === document.timeline` (nativeglass `moving()`, the gate's still()), else it never rests. Gate scroll-fade.
 
 ## Frost (PowOS AI, its pull-up panel, the control center: shell.css "frost v2", theme.css --frost-*)
 - One material: the compositor's blur per surface (nativeglass.ts reads `--glass-blur-native` per element; 360 on
@@ -65,6 +69,9 @@ description: How the PowOS phone shell's design is built and checked - the desig
   keeps the host's "shade.panel" side in `panel` there: `data-from` delays the other column's cascade (`--i0`). Folded:
   the stacked list. Gate shade-folded / shade-unfolded (shadeLayout in gate.mjs).
 - Open: short `--drop` (15vh) + cascade (`.cascade`, `--i` row index; CC rows first). Grouping `grouped()`; stacks.
+  The further pull (ccExpanded) unfolds every stack too; a tap then folds one (`expanded` holds the exceptions, reset on
+  each change). The phone checks' stop/resume control sits in v3's Tools (ui/tests.ts, bridge verify.stop, gate
+  overpullTests): shown only while the runner runs/waits/is paused and the host answers verify.stop's dry probe.
 - The one panel's EDGE follows too (shell.css `--cc-lift` block): the panel translates up by (1-q)*--ph + --cc-lift,
   its body back down by the same, overflow-y clip; frost, edge and grip move, content doesn't. Gate shade-overpull
   asserts edge/grip/no empty slab; device: tools/phone/verify/shade-panel.sh (recording + SF blur-region coverage).

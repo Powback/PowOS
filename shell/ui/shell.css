@@ -232,6 +232,28 @@
   96% { --dock-fade-r: 24px; }
   100% { --dock-fade-l: 24px; --dock-fade-r: 0px; }
 }
+/*
+ * Content scrolling under chrome (the drawer's apps under the status bar and over the pill, PowOS AI's panes under its
+ * header and over the compose, the shade's list, the chat) fades out at an edge where there's more to scroll, never
+ * cut (the user, 2026-10-24): one scroll-driven mask on the scroll container, the dock's way, both ends --scroll-fade.
+ * Nothing to scroll, or no scroll timelines: no fade, as before.
+ */
+@property --scroll-fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --scroll-fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
+:is(.drawer-list, .chat, .ai-panel, .ai-scroll, .notif-list) {
+  --scroll-fade: 24px;
+  -webkit-mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
+  mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
+}
+@supports (animation-timeline: scroll()) {
+  :is(.drawer-list, .chat, .ai-panel, .ai-scroll, .notif-list) {
+    animation: scroll-fade-t linear both, scroll-fade-b linear both;
+    animation-timeline: scroll(self y), scroll(self y);
+    animation-range: 0 var(--scroll-fade), calc(100% - var(--scroll-fade)) 100%;
+  }
+}
+@keyframes scroll-fade-t { from { --scroll-fade-t: 0px; } to { --scroll-fade-t: var(--scroll-fade); } }
+@keyframes scroll-fade-b { from { --scroll-fade-b: var(--scroll-fade); } to { --scroll-fade-b: 0px; } }
 .dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
 .dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
 .dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
@@ -2277,8 +2299,8 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 /*
  * The wide screen (the phone unfolded, 821 CSS px; hosts/wide.ts: one wide page; home.tsx .home.wide): one bar at the
  * foot - the dock's pinned apps on the left, the search pill in the middle, the recent apps (DockTray) on the right,
- * every icon at one slot's width (a sixth of a side, at most 60 px). Opening the launcher, both sides give way (the
- * dock's slide and fade) and the pill stays where it is: the drawer's window ends at its top.
+ * every icon at one slot's width (a sixth of a side, at most 60 px). The launcher opens above that bar like a desktop's
+ * start menu (the user, 2026-10-24): the whole bar stays in place and in use, the drawer ends at the bar's top.
  */
 .home.wide {
   --wide-pill: clamp(220px, 30%, 360px);
@@ -2297,11 +2319,13 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .home.wide .dock :is(.app, .dock-gap), .home.wide .dock .dock-recent .app { flex: 0 0 var(--slot); }
 .home.wide > .dock:not(.dock-tray) { margin-left: 8px; }
 .home.wide > .dock-tray { margin-right: 8px; }
-/* The launcher over a one-row foot: the frost to the screen's foot, the drawer's window to the pill's top, no slide. */
-.home.wide > .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
-.home.wide > .stage > .launcher-clip { inset: 0 0 calc(4px - var(--pill-mid)); transform: none; }
+/* The launcher above the one-row foot: the frost and the drawer's window end at the stage's foot (the bar's top). */
+.home.wide:not(:has(.ai-panel.wide)) > .stage > .launcher-frame { inset: 0; border-radius: var(--radius); }
+.home.wide:has(.ai-panel.wide) > .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
+.home.wide > .stage > .launcher-clip, .home.wide:not(:has(> .bar)) > .stage > .launcher-clip { inset: 0; transform: none; }
 .home.wide > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
-.home.wide:not(:has(> .bar)) > .stage > .launcher-clip { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
+/* The bar under it stays: no slide, no fade, still tappable (PowOS AI's wide panel still covers the foot). */
+.home.wide:not(:has(.ai-panel.wide)) > .dock { transform: none; opacity: 1; pointer-events: auto; }
 
 /*
  * The control center, v3 (control.tsx Controls, state.ts ccV3): one row of the most-used toggles, every control in a

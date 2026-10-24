@@ -108,8 +108,11 @@ object VerifyRun {
     /** "Test now" ([task]: a board task id, or "all"): the queue's runner takes it at its next 5 s check. */
     fun go(task: String) = flag("powos-verify-go", task)
 
-    /** The pill's x: the runner kills the running check and pauses the queue (queue.sh, its beat / idle.sh's wait). */
-    private fun stop() = flag("powos-verify-stop", "1")
+    /**
+     * The pill's x and the shade's "tests" control (bridge verify.stop): the runner kills the running check and pauses
+     * the queue (queue.sh, its beat / idle.sh's wait).
+     */
+    fun stop() = flag("powos-verify-stop", "1")
 
     /**
      * The runner's state for the AI page ("checks paused · resume"): the word the Mac's runner keeps in

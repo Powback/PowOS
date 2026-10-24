@@ -61,7 +61,9 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
 - .home is a grid: stage over a one-row foot (strip-height): Dock (pinned only, no recents page) | .bar (pill column
   --wide-pill clamp(220px, 30%, 360px), pill centred in the row: --pill-mid) | DockTray (recents, a .dock.paged row).
   Slots --slot min(60px, (100cqw - 28px)/6); the pinned .dock-page is as long as its icons (dockdrop slotAt measures it).
-- Drawer over it: frame to the screen foot, window to the pill's top, no slide (the pill stays; the dock sides fade).
+- Drawer above it like a start menu (the user, 2026-10-24): frame and window end at the stage's foot (the bar's top);
+  the whole bar stays in place, shown and tappable (no slide, no fade). PowOS AI's wide panel still covers the foot.
+  Gate wide-home wideLauncherBar.
 - The search widget on the grid (.search-parked) parks the bar's pill (opacity 0 at rest) but it KEEPS the bar's middle
   slot: measure the bar with `.home.wide > .bar .bar-pill`, never the first `.bar-pill` (that's the widget's tile).
 - Pinned dock never fades (the user): `.dock.paged:not(.dock-tray)` runs dock-fade-pinned (right fade 0 at rest,

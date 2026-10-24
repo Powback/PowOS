@@ -401,6 +401,12 @@ export interface Bridge {
      * call rejects "no such call": the page then shows no "checks paused").
      */
     verifyState?(): Promise<void>;
+    /**
+     * Stops the phone checks: the runner kills the running one and pauses the queue (the test pill's x; verifyGo "all"
+     * resumes). [dry]: nothing stopped - it only answers, so a page can tell this host has it (older ones reject "no
+     * such call"). ?: hosts from before it.
+     */
+    verifyStop?(dry?: boolean): Promise<void>;
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
     /**

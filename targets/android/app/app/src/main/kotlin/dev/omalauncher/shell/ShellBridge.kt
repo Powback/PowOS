@@ -307,6 +307,8 @@ class ShellBridge(
             "verify.go" -> VerifyRun.go(a.getString(0))
             // The runner's state (paused, or its heartbeat stale): the page's "checks paused · resume", as "verify.state".
             "verify.state" -> VerifyRun.state { emit("verify.state", it) }
+            // The shade's "tests" control: stop the checks (resume = verify.go "all"); dry = only "this host has it".
+            "verify.stop" -> if (a.optBoolean(0)) Unit else VerifyRun.stop()
             "agents.interrupt" -> dev.omalauncher.AgentsSpool.interrupt(a.getString(0))
             "speech.start" -> listen(a.optBoolean(0))
             "speech.stop" -> speech.stop()

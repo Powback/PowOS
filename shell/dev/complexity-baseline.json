@@ -212,7 +212,7 @@
       "count": 2
     },
     "sonarjs/cognitive-complexity": {
-      "count": 5
+      "count": 4
     }
   },
   "ui/editsheet.tsx": {

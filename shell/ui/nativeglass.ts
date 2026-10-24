@@ -203,6 +203,18 @@ function measureRaw(followers: Element[] = []): Raw[] {
     if (o === undefined) seen.set(e, (o = parseFloat(getComputedStyle(e).opacity) || 0));
     return o;
   };
+  // A clip that fades its edges (shell.css --scroll-fade-t/-b, where there's more to scroll): the blur ends half-way
+  // into each fade, where the surface's tint is half gone - neither a hard blur edge past the fade nor a tint on bare
+  // wallpaper before it. Read once a frame per clip.
+  const fades = new Map<Element, [number, number]>();
+  const fadeOf = (c: Element) => {
+    let f = fades.get(c);
+    if (!f) {
+      const cs = getComputedStyle(c);
+      fades.set(c, (f = [parseFloat(cs.getPropertyValue("--scroll-fade-t")) / 2 || 0, parseFloat(cs.getPropertyValue("--scroll-fade-b")) / 2 || 0]));
+    }
+    return f;
+  };
   const followerOf = (e: Element) => followers.find((f) => f.contains(e));
   for (const [el, s] of shapes) {
     if (!el.isConnected) continue;
@@ -222,7 +234,8 @@ function measureRaw(followers: Element[] = []): Raw[] {
       own: [r.left, r.top, r.right, r.bottom],
       clips: s.clips.map((c) => {
         const q = c.getBoundingClientRect();
-        return [q.left, q.top, q.right, q.bottom] as [number, number, number, number];
+        const [ft, fb] = fadeOf(c);
+        return [q.left, q.top + ft, q.right, q.bottom - fb] as [number, number, number, number];
       }),
       radii: s.radii.map((v) => v * k),
       alpha,
@@ -445,8 +458,13 @@ const carries = (t: EventTarget | Node | null | undefined): boolean => {
   // data-glass-ignore: an overlay that moves on its own and whose glass (the pet's bubble) the host doesn't blur.
   return !!e && !e.closest("[data-glass-ignore]") && (e.matches(SURFACES) || !!e.querySelector(SURFACES));
 };
-/** A running animation (CSS or a Web Animation, scrubbed or playing) on something that carries glass. */
-const moving = () => document.getAnimations().some((a) => a.playState === "running" && carries((a.effect as KeyframeEffect | null)?.target));
+/**
+ * A running animation (CSS or a Web Animation, scrubbed or playing) on something that carries glass. A scroll-driven
+ * one (shell.css's edge fades) is "running" for good but moves only with its scroll, which kicks a measure itself: its
+ * timeline isn't the document's, and it counts here never - else a page holding one measured every frame at rest.
+ */
+const moving = () =>
+  document.getAnimations().some((a) => a.playState === "running" && a.timeline === document.timeline && carries((a.effect as KeyframeEffect | null)?.target));
 
 function frame() {
   if (!nativeGlass.value) {

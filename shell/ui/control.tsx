@@ -17,6 +17,7 @@ import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
 import { openGlasses } from "../glasses/open.ts";
 import { useMinuteClock } from "./time.ts";
+import { TESTS_ID, askTests, testsTile, toggleTests } from "./tests.ts";
 import type { GlassesState, MediaState, QuickState, QuickTile, RemoteState, RemoteTarget } from "../types.ts";
 
 /** The phone's quick settings, kept up to date ("qs.changed"): the control center's and the notification panel's row. */
@@ -52,7 +53,7 @@ const LEAVES = new Set([
 ]);
 
 /** Tiles that are only an action: nothing to open on a hold. */
-const NO_PAGE = new Set(["lockscreen", "screenshot"]);
+const NO_PAGE = new Set(["lockscreen", "screenshot", TESTS_ID]);
 
 const RINGER = ["silent", "vibrate", "ring"];
 
@@ -79,6 +80,8 @@ const TILE_ICONS: Record<string, IconName | [IconName, IconName]> = {
   qr_code_scanner: "qrcodeScan",
   [REMOTE_ID]: "keyboardOutline",
   [GLASSES_ID]: "glasses",
+  // The phone checks (tests.ts): off = paused, a tap resumes; on = running or waiting, a tap stops.
+  [TESTS_ID]: ["play", "pause"],
 };
 
 /** Other apps' tiles by their app: the icon that says what they do. */
@@ -816,7 +819,7 @@ const SECTIONS: { id: string; label: string; members: string[] }[] = [
   },
   // Focus with the screen's own (no sound-mode tiles to make a section of: the volume slider's icon is the ringer).
   { id: "display", label: "display & focus", members: ["rotation", "darkmode", "app:com.oplus.eyeprotect", "dnd", "battery"] },
-  { id: "tools", label: "tools", members: ["flashlight", "screenshot", "screenrecord", "calculator", "qr_code_scanner", "wallet", "controls"] },
+  { id: "tools", label: "tools", members: ["flashlight", "screenshot", "screenrecord", "calculator", "qr_code_scanner", "wallet", "controls", TESTS_ID] },
 ];
 /** Each control's one word. */
 const WORD: Record<string, string> = {
@@ -842,12 +845,23 @@ const WORD: Record<string, string> = {
   [REMOTE_ID]: "remote",
 };
 const WORD_APP: Record<string, string> = { "com.oplus.eyeprotect": "eye", "com.google.android.gms": "share", "com.oneplus.oshare": "share", "com.oplus.linker": "cast" };
-const word = (t: QuickTile) => WORD[t.id] ?? (t.app && WORD_APP[t.app]) ?? t.label.toLowerCase().split(/\s+/)[0];
+// The phone checks' word is their state (tests.ts).
+const word = (t: QuickTile) => (t.id === TESTS_ID ? t.label : null) ?? WORD[t.id] ?? (t.app && WORD_APP[t.app]) ?? t.label.toLowerCase().split(/\s+/)[0];
+
+/** Controls with a screen of their own: a tap shuts the panel and opens it. */
+const SCREENS: Record<string, () => void> = { [GLASSES_ID]: openGlasses, [REMOTE_ID]: openRemote };
+
+/** What a tap on a control does: the phone checks stop or resume in place (the shade stays), a screen opens, or [own]. */
+function tapOf(t: QuickTile, own: () => void): () => void {
+  if (t.id === TESTS_ID) return toggleTests;
+  const open = SCREENS[t.id];
+  return open ? () => (shut(), open()) : own;
+}
 
 /** One control: its icon on a chip (the accent when on), its word under it. A long press opens its page. */
 function Toggle({ t }: { t: QuickTile }) {
   const press = usePress(t, !ccEditing.value);
-  const special = t.id === GLASSES_ID ? openGlasses : t.id === REMOTE_ID ? openRemote : null;
+  const click = tapOf(t, press.onClick);
   return (
     <div class={`cc3-cell ${ccEditing.value && chosen.value === t.id ? "chosen" : ""}`} data-key={t.id}>
       <Chosen id={t.id} page={t.id} />
@@ -857,7 +871,7 @@ function Toggle({ t }: { t: QuickTile }) {
         aria-label={`${t.label}${t.on == null ? "" : t.on ? ": on" : ": off"}`}
         aria-pressed={t.on == null ? undefined : t.on}
         {...press}
-        onClick={special ? () => (shut(), special()) : press.onClick}
+        onClick={click}
       >
         <span class="cc3-chip">
           <Icon name={tileIcon(t)} />
@@ -906,7 +920,8 @@ function Controls() {
     loadLayout();
     powos.qs.listening(true);
     askRemote();
-    const timer = window.setInterval(() => document.hidden || askRemote(), 3000);
+    askTests();
+    const timer = window.setInterval(() => document.hidden || (askRemote(), askTests()), 3000);
     return () => {
       powos.qs.listening(false);
       clearInterval(timer);
@@ -917,7 +932,8 @@ function Controls() {
     };
   }, [open]);
   const q = quick.value;
-  const every = [...(q.tiles ?? []), ...(glasses.value ? [glassesTile()] : [])].filter((t) => !leftOut(t));
+  const tests = testsTile();
+  const every = [...(q.tiles ?? []), ...(glasses.value ? [glassesTile()] : []), ...(tests ? [tests] : [])].filter((t) => !leftOut(t));
   const b = q.brightness ?? { value: 0.5, auto: false };
   const v = q.volume ?? { value: 0.5, ringer: 2 };
   // The user's order (controls.layout) within each group; the curated order after.

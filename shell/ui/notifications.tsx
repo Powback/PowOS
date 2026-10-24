@@ -10,6 +10,7 @@ import { effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel, separatePanels } from "../state.ts";
 import { ControlCenter } from "./control.tsx";
+import { ccExpanded } from "./ccexpand.ts";
 import { Icon } from "./icons.tsx";
 import { followNotif, notifOpen, notifShown } from "./gesture.ts";
 import { ago } from "./time.ts";
@@ -262,8 +263,16 @@ function grouped(items: GroupedNotification[]): Group[] {
   return [...convos.map((n) => ({ id: `c:${n.key}`, name: n.app, items: [n] })), ...groups];
 }
 
-/** The stacks open (expanded), by group: a tap on a stack opens it, a tap on its head closes it. */
+/**
+ * The stacks tapped out of their resting state, by group: a tap on a stack opens it, a tap on its head closes it. At
+ * rest every stack is folded; the shade's further pull (ccexpand.ts ccExpanded) shows everything, so then every stack
+ * is open and these are the ones folded again. Each change of that state starts them over.
+ */
 const expanded = signal<Set<string>>(new Set());
+effect(() => {
+  void ccExpanded.value;
+  expanded.value = new Set();
+});
 const toggle = (id: string) => {
   const s = new Set(expanded.value);
   if (s.has(id)) s.delete(id);
@@ -279,7 +288,7 @@ const toggle = (id: string) => {
 function Stack({ g }: { g: Group }) {
   const [top, ...rest] = g.items;
   if (!rest.length) return <Card n={top} name={g.name !== top.app ? g.name : undefined} />;
-  const open = expanded.value.has(g.id);
+  const open = expanded.value.has(g.id) !== ccExpanded.value;
   const clearAll = () => g.items.filter((n) => n.clearable).forEach((n) => powos.notifications.dismiss(n.key));
   return (
     <div class={`notif-stack ${open ? "open" : ""}`} data-depth={Math.min(2, rest.length)}>

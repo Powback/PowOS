@@ -276,7 +276,8 @@ async function overpullKit() {
     return els.length ? Math.max(...els.map((e) => e.getBoundingClientRect().bottom)) : NaN;
   };
   const gap = () => edge() - last();
-  const still = () => !document.getAnimations().some((a) => a.playState === "running" && a.effect?.target?.closest?.(".notif-panel"));
+  // Time-driven ones only: the list's edge fades (shell.css scroll-fade) are scroll-driven, "running" for good.
+  const still = () => !document.getAnimations().some((a) => a.playState === "running" && a.timeline === document.timeline && a.effect?.target?.closest?.(".notif-panel"));
   const at = { x: 0, y: 0 };
   const P = (type, y) =>
     document.querySelector(".cc > .notif-bar").dispatchEvent(
@@ -386,6 +387,34 @@ async function overpullExpand() {
   if (o.row() !== o.row0) fails.push(`the first row moved on the expand: ${o.row0} -> ${o.row()}`);
   // (At its max height the list scrolls: the notifications may go on under the edge - never empty frost under them.)
   if (o.gap() - o.gap0 > 3) fails.push(`expanded, ${Math.round(o.gap())} px of empty panel under the notifications (at rest ${Math.round(o.gap0)})`);
+  // The notifications show everything too (the user, 2026-10-24): every grouped stack unfolded into its cards.
+  const stacks = [...document.querySelectorAll(".panel-body.together .notif-stack")];
+  if (!stacks.length) fails.push("no grouped notifications in the shade to unfold");
+  else if (stacks.some((g) => !g.classList.contains("open"))) fails.push(`expanded, ${stacks.filter((g) => !g.classList.contains("open")).length} of ${stacks.length} notification stacks stay folded`);
+  return fails;
+}
+
+/**
+ * The phone checks in the expanded Tools (ui/tests.ts; the user, 2026-10-24): the runner's state as the control's word,
+ * a tap stops them (the test pill's x: verify.stop) and another resumes them (verify.go all), the shade staying open.
+ */
+async function overpullTests() {
+  const cell = () => document.querySelector('.cc3-list [data-key="powos.tests"]');
+  const word = () => cell()?.querySelector(".cc3-word")?.textContent ?? "";
+  const pressed = () => cell()?.querySelector("button")?.getAttribute("aria-pressed");
+  if (!(await window.__gw.until(() => cell(), 8000))) return ["expanded, no tests control in the controls (the mock's runner waits)"];
+  const fails = [];
+  const tap = async (want, on) => {
+    cell().querySelector("button").click();
+    if (!(await window.__gw.until(() => word() === want && pressed() === on))) fails.push(`tapped the tests control: it says "${word()}" (pressed ${pressed()}), not "${want}"`);
+    // Over the runner's next answers (asked every 3 s), not flipped back.
+    await window.__gw.sleep(3500);
+    if (word() !== want) fails.push(`tapped the tests control: "${want}" went back to "${word()}"`);
+  };
+  if (word() !== "tests wait") fails.push(`the tests control says "${word()}", not "tests wait" (the mock's runner waits)`);
+  await tap("tests paused", "false");
+  await tap("tests wait", "true");
+  if (!document.querySelector(".notif-panel.shown")) fails.push("a tap on the tests control closed the shade");
   return fails;
 }
 
@@ -402,6 +431,7 @@ async function overpullFold() {
     if (Math.abs(d + Math.min(80, o.h)) > 3) fails.push(`folding 80 px, what's under the control center moved ${Math.round(d)} px`);
   });
   if (document.querySelector(".cc3-list.whole") || o.shown() !== o.n0) fails.push(`pulled up 80 px, still ${o.shown()} toggles shown`);
+  if (document.querySelector(".panel-body.together .notif-stack.open")) fails.push("folded, notification stacks stay unfolded");
   list.scrollTop = 0;
   await o.frames(2);
   if (Math.abs(o.under() - o.under0) > 1) fails.push(`folded, what's under the control center is ${Math.round(o.under() - o.under0)} px off its place`);
@@ -572,6 +602,43 @@ async function wideBar() {
   return fails;
 }
 
+/**
+ * Unfolded, the launcher opens above the bar like a desktop's start menu (the user, 2026-10-24): the dock, the pill and
+ * the recent apps stay where they were, shown and tappable, and the drawer ends at the bar's top.
+ */
+async function wideLauncherBar() {
+  // (Defined in here: the check runs in the page.)
+  const seen = (el) => { let o = 1; for (let e = el; e; e = e.parentElement) o *= +getComputedStyle(e).opacity; return o; };
+  const topmost = (el, r) => { const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!hit && (el.contains(hit) || hit.contains(el)); };
+  /** With the launcher open, a part of the wide bar ([q], at [b] before): where it was, not faded, the topmost there. */
+  const barPartOpen = (q, b) => {
+    const el = document.querySelector(q), r = el?.getBoundingClientRect();
+    if (!r) return [`launcher open: ${q} is gone`];
+    return [
+      [Math.abs(r.left - b.left) <= 1 && Math.abs(r.top - b.top) <= 1, `launcher open: ${q} moved ${Math.round(r.left - b.left)},${Math.round(r.top - b.top)} px`],
+      [seen(el) >= 0.9, `launcher open: ${q} faded (${seen(el).toFixed(2)})`],
+      [topmost(el, r), `launcher open: ${q} isn't tappable (something over it)`],
+    ].filter(([ok]) => !ok).map(([, why]) => why);
+  };
+  const S = await window.__gw.mod("./state.ts");
+  const parts = [".home.wide > .dock:not(.dock-tray) .app", ".home.wide > .bar .bar-pill", ".home.wide > .dock-tray .app"];
+  const box = (q) => document.querySelector(q)?.getBoundingClientRect();
+  const clip = () => box(".home.wide .launcher-clip");
+  const before = parts.map(box);
+  if (before.some((r) => !r)) return ["the wide bar lacks a part before the launcher opens"];
+  S.drawer.value = 1;
+  await window.__gw.settled(() => document.querySelector(".home.open"));
+  await window.__gw.steady(() => [...parts.map((q) => box(q)?.toJSON()), clip()?.toJSON()]);
+  if (!document.querySelector(".home.open")) return ["the wide launcher didn't open"];
+  const fails = [];
+  parts.forEach((q, i) => fails.push(...barPartOpen(q, before[i])));
+  const top = Math.min(...parts.map((q) => box(q)?.top ?? Infinity));
+  if (clip() && clip().bottom > top + 2) fails.push(`launcher open: the drawer runs ${Math.round(clip().bottom - top)} px into the bar`);
+  S.drawer.value = 0;
+  await window.__gw.settled(() => !document.querySelector(".home.open"));
+  return fails;
+}
+
 /** The user's search widget on the grid (the phone, 2026-10-23): the bar's own pill, parked, keeps the bar's middle. */
 async function wideBarParked() {
   const S = await window.__gw.mod("./state.ts");
@@ -588,6 +655,38 @@ async function wideBarParked() {
   await W.putBackInBar();
   if (!parked?.width) return ["search widget on the grid: the bar's pill lost its slot"];
   return Math.abs(parked.left - pill.left) > 2 || Math.abs(mid(parked) - mid(pill)) > 2 ? ["search widget on the grid: the bar's pill moved out of the bar's middle"] : [];
+}
+
+/**
+ * In the page: content scrolling under chrome fades out at an edge with more to scroll, never cut (shell.css
+ * scroll-fade; the user, 2026-10-24) - the drawer's apps: at the top only the foot fades, part-way both ends, at the end
+ * only the top. Then closed again.
+ */
+async function scrollFadeCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  S.drawer.value = 1;
+  await window.__gw.settled(() => document.querySelector(".home.open .drawer-list"));
+  const list = document.querySelector(".home .drawer-list");
+  const fails = [];
+  if (!list) return ["the open drawer has no app list"];
+  if (!/gradient/.test(getComputedStyle(list).maskImage || getComputedStyle(list).webkitMaskImage || "")) fails.push("the drawer's list has no edge mask");
+  if (list.scrollHeight - list.clientHeight < 80) fails.push(`the drawer's list doesn't scroll (${list.scrollHeight} in ${list.clientHeight}): nothing to check the fade on`);
+  const fade = () => ["--scroll-fade-t", "--scroll-fade-b"].map((v) => Math.round(parseFloat(getComputedStyle(list).getPropertyValue(v)) || 0));
+  const at = async (top, want, where) => {
+    list.scrollTop = top;
+    await window.__gw.steady(fade);
+    const [t, b] = fade();
+    if (t !== want[0] || b !== want[1]) fails.push(`${where}: the list's edge fades are ${t}/${b} px (top/foot), not ${want.join("/")}`);
+  };
+  if (!fails.length) {
+    await at(0, [0, 24], "at the top");
+    await at((list.scrollHeight - list.clientHeight) / 2, [24, 24], "part-way");
+    await at(list.scrollHeight, [24, 0], "at the end");
+    list.scrollTop = 0;
+  }
+  S.drawer.value = 0;
+  await window.__gw.settled(() => !document.querySelector(".home.open"));
+  return fails;
 }
 
 /** The folded dock's pinned apps never fade (the user, 2026-10-23): at rest on the pinned page its edges are unmasked. */
@@ -1827,10 +1926,13 @@ try {
   // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
+  // The drawer's list fades at an edge with more to scroll (2026-10-24): a short screen, so the mock's apps scroll.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "scroll-fade", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(scrollFadeCheck))));
   // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
   // side-by-side pages without moving a tile.
   if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar)), ...(await r.page.evaluate(wideBarParked))])));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar)), ...(await r.page.evaluate(wideLauncherBar)), ...(await r.page.evaluate(wideBarParked))])));
   // Home after an app at another size (Broforce in landscape, 2026-10-22: back on home the widgets were tiny and squashed
   // at the top). Laid out at [from] while hidden and shown again at [to], turned there and back, and relaid in its own
   // column count after the other's at the same size: the tiles must sit where a fresh layout at [to] puts them, and the
@@ -1919,7 +2021,7 @@ try {
               // The further pull reveals the rest under the row: the row's toggles don't move at all.
               const revealAndFold = async () => {
                 X.ccEditing.value = false;
-                const still = () => !document.getAnimations().some((an) => an.playState === "running" && an.effect?.target?.closest?.(".cc"));
+                const still = () => !document.getAnimations().some((an) => an.playState === "running" && an.timeline === document.timeline && an.effect?.target?.closest?.(".cc"));
                 await until(still, "the row settled after the drop");
                 const rowRects = () => order().slice(0, 6).map((k) => { const b = item(k).getBoundingClientRect(); return `${k}@${Math.round(b.left)},${Math.round(b.top)}`; }).join(" ");
                 const first = rowRects();
@@ -1983,7 +2085,7 @@ try {
       open(browser, `${ORIGIN}/index.html?mode=shade`, "shade-overpull").then(async (r) => {
         await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
         const fails = [];
-        for (const step of [overpullKit, overpullShort, overpullExpand, overpullFold, panelTracksFinger, overpullRest]) {
+        for (const step of [overpullKit, overpullShort, overpullExpand, overpullTests, overpullFold, panelTracksFinger, overpullRest]) {
           const out = await r.page.evaluate(step).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`]);
           fails.push(...(out ?? []));
           if (fails.length) break;
