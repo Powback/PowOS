@@ -40,6 +40,18 @@ _manager_mcp_config() {
     _manager_merge_mcp "${servers[@]}" > "$1"
 }
 
+# The manager's own CLI: this launcher's checkout (lib/ai/manager -> repo bin/, or /usr/bin when installed), first on
+# PATH and in POWOS_BIN, so its `powos` calls (the persona's !cmd lines, its board/friction tool calls) match the code
+# it runs under, not whatever stale checkout the shell's PATH points at (f215).
+_manager_use_own_cli() {
+    local bin
+    bin="$(cd "$_MANAGER_DIR/../../../bin" 2>/dev/null && pwd)" || return 0
+    [[ -x "$bin/powos" ]] || return 0
+    export POWOS_BIN="$bin/powos"
+    PATH="$bin:$PATH"
+    export PATH
+}
+
 # powos ai manager [--safe] [--no-sandbox]  — start / resume the persistent manager session (--help: its flags).
 manager_run() {
     command -v python3 &>/dev/null || { echo "manager needs python3" >&2; return 1; }
@@ -68,6 +80,8 @@ manager_run() {
         python3 "$MANAGER_SERVER" --agent-id manager --session-store "$store" --list-json
         return
     fi
+
+    _manager_use_own_cli
 
     # Load the manager persona. _ai_load_agent expands the !cmd lines, so the
     # system prompt carries the CURRENT `powos help` / `powos comms help`.
