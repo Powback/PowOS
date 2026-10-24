@@ -161,10 +161,11 @@ class WindowFrames(
         // ends - slideEnd / showOnly post one refresh after it. HACK: whole refresh deferred, not per window (a refresh
         // mid-slide re-placed the arriving bar at the window's off-screen slide-start bounds, 2026-10-24); the real fix
         // would be a per-window skip in every path (track/keepMaximised/dense), which are many.
-        if (sliding.isNotEmpty()) {
-            Log.i(TAG, "refresh during slide: skipped ${sliding.size}")
+        if (sliding.isNotEmpty() && !clearStaleSlide()) {
+            skipForSlide()
             return
         }
+        refreshSkipped = false
         val all = runCatching { FreeformTasks.list(context) }.onFailure { Log.w(TAG, "no floating windows", it) }.getOrDefault(emptyList())
         if (FreeformTasks.hadUnreadableTask && unreadableRetries < UNREADABLE_RETRIES_MAX) {
             unreadableRetries++
@@ -203,6 +204,12 @@ class WindowFrames(
      */
     private val sliding = mutableMapOf<Int, Float>()
 
+    /** When [sliding] last became non-empty (uptime ms): a slide still set after [SLIDE_STALE_MS] never ended. */
+    private var slidingSince = 0L
+
+    /** A refresh was skipped during a slide: one runs once the slide is over (or the watchdog clears it). */
+    private var refreshSkipped = false
+
     /**
      * A page swipe starts moving [tasks]. A window coming from another page has no frame (away): it gets one now, at
      * its real bounds, veiled (drawn clear, unblurred) until its windows are where the slide has the window.
@@ -210,6 +217,7 @@ class WindowFrames(
     fun slideStart(tasks: List<FreeformTasks.Window>) {
         sliding.clear()
         tasks.forEach { sliding[it.id] = 0f }
+        if (sliding.isNotEmpty()) slidingSince = android.os.SystemClock.uptimeMillis()
         if (keyguard || Switcher.open || !AppWindows.floating(context)) return
         frameArrivals(tasks)
         hideBars(tasks)
@@ -232,6 +240,7 @@ class WindowFrames(
     fun slideMove(dx: Map<Int, Float>) {
         for ((id, x) in dx) {
             val f = frames[id] ?: continue
+            if (sliding.isEmpty()) slidingSince = android.os.SystemClock.uptimeMillis()
             sliding[id] = x
             if (HIDE_BAR_DURING_SLIDE) continue
             f.slideTo(x.toInt())
@@ -262,6 +271,27 @@ class WindowFrames(
 
     /** The windows that get a frame: showing, not minimised or away, their bar not under a window above. */
     private fun shown(all: List<FreeformTasks.Window>) = uncovered(all.filter { it.visible && it.id !in minimised && it.id !in away })
+
+    /**
+     * Watchdog: a slide still set after [SLIDE_STALE_MS] never ended (a crash in PageSlide, a lost transition). Its
+     * windows' bars are shown at their places and [sliding] cleared, so refreshes run again. True if it cleared.
+     */
+    private fun clearStaleSlide(): Boolean {
+        val age = android.os.SystemClock.uptimeMillis() - slidingSince
+        if (age <= SLIDE_STALE_MS) return false
+        Log.w(TAG, "slide watchdog: clearing stale sliding ${sliding.keys.toList()} after $age ms")
+        sliding.keys.forEach { frames[it]?.apply { slideTo(0); slideShow() } }
+        sliding.clear()
+        return true
+    }
+
+    /** A refresh skipped mid-slide: remembered, and one more posted for after the watchdog's limit in case nothing else does. */
+    private fun skipForSlide() {
+        Log.i(TAG, "refresh during slide: skipped ${sliding.size}")
+        if (refreshSkipped) return
+        refreshSkipped = true
+        main.postDelayed(refreshNow, SLIDE_STALE_MS)
+    }
 
     /**
      * Every window of [show] (top-most first) framed and placed: bottom-most first, so a new frame's windows stack over
@@ -758,6 +788,7 @@ class WindowFrames(
 
         private const val TAG = "PowosWindowFrames"
         private const val SETTLE_MS = 80L
+        private const val SLIDE_STALE_MS = 2000L
 
         /** The least of a partly covered bar that still shows (its buttons fit), dp: less, it has none ([uncovered]). */
         private const val MIN_BAR_DP = 96
