@@ -87,7 +87,8 @@ object PageSlide {
         val c = o.optJSONArray("curve")?.let { j -> FloatArray(j.length()) { j.getDouble(it).toFloat() } }
         val h = o.optJSONArray("hide")
         val hide = (0 until (h?.length() ?: 0)).map { h!!.getInt(it) }.toSet()
-        settle((o.getDouble("to") * d).toFloat(), o.optLong("ms", 280), c, hide, o.optLong("at"))
+        startedAtHome = o.optLong("at")
+        settle((o.getDouble("to") * d).toFloat(), o.optLong("ms", 280), c, hide)
     }
 
     // Evidence for the lag (logged at the end): how late home's moves come (its Date.now() at the move vs ours), how
@@ -97,6 +98,9 @@ object PageSlide {
     private var lateN = 0
     private var readyAfter = -1L
     private var settleLate = -1L
+
+    /** Home's Date.now() when its track's settle began (0: not given), for the next [settle]. */
+    private var startedAtHome = 0L
 
     private fun sent(t: Long) {
         if (t <= 0) return
@@ -183,10 +187,7 @@ object PageSlide {
         list: List<Win>,
     ): Boolean {
         val s = TaskLeash.Session(context, list.map { it.id }, "page slide", TaskLeash.SLIDE_MODES)
-        s.onReady = { ok ->
-            if (session === s) readyAfter = SystemClock.uptimeMillis() - startedAt
-            if (session === s && ok) draw() else if (session === s) cancel("no leash")
-        }
+        s.onReady = { ok -> ready(s, ok) }
         // WM's bounds where each window is on the glass now (a real change for each: an unchanged task isn't in the
         // transition, so it gets no leash); another page's window comes up from under home in the same transition.
         val started =
@@ -205,6 +206,16 @@ object PageSlide {
         return true
     }
 
+    /** The leashes came ([ok]) or never will, for session [s]. */
+    private fun ready(
+        s: TaskLeash.Session,
+        ok: Boolean,
+    ) {
+        if (session !== s) return
+        readyAfter = SystemClock.uptimeMillis() - startedAt
+        if (ok) draw() else cancel("no leash")
+    }
+
     /** The track's offset [x0] (screen px) under the finger. */
     fun move(x0: Float) {
         if (session == null || settleAt != 0L) return
@@ -214,8 +225,8 @@ object PageSlide {
 
     /**
      * The finger let go: the track goes to [to] (screen px; 0 = the page it started on, -width = the next) over [d]
-     * ms on cubic-bezier [c]; then [hidden] (home's hide list for the page it lands on) is committed. [at]: home's
-     * Date.now() when its track's settle began - the curve runs from then, not from when this message came (it came a
+     * ms on cubic-bezier [c]; then [hidden] (home's hide list for the page it lands on) is committed. From
+     * [startedAtHome] (home's Date.now() when its track's settle began): the curve runs from then, not from when this message came (it came a
      * main-thread hop or more later, and the windows trailed the page all through the settle and landed after it).
      */
     fun settle(
@@ -223,8 +234,8 @@ object PageSlide {
         d: Long,
         c: FloatArray?,
         hidden: Set<Int>,
-        at: Long = 0,
     ) {
+        val at = startedAtHome.also { startedAtHome = 0 }
         if (session == null) {
             // Nothing slid (no leash): the change as before, but once the page has landed, not under its settle.
             main.postDelayed({ WindowFrames.current?.desktop(hidden) }, d.coerceIn(0, 2000))
