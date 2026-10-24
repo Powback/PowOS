@@ -127,8 +127,9 @@ swipe() {
   # <layers of $PKG composited>". The uptime is /proc/uptime (CLOCK_BOOTTIME), the clock of the slide's end line
   # ("at <elapsedRealtime>", PageSlide.kt), so flash() splits the samples at the end without a wall-clock or a log
   # count (06:5x: the probe counted end lines in the log, saw 0 in all 150 samples, and ran past the logcat's timeout).
-  # A sample after the end that still composites the window = the flash.
-  sh_ "rm -f /data/local/tmp/fd-flash.txt; (read u0 r </proc/uptime; u0=\${u0%.*}; while :; do read u r </proc/uptime; [ \${u%.*} -ge \$((u0 + 10)) ] && break; v=\$(dumpsys SurfaceFlinger | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\" | grep -c $PKG); echo \${u%.*}\${u#*.} \$v >>/data/local/tmp/fd-flash.txt; done </dev/null >/dev/null 2>&1 &)"
+  # A sample after the end that still composites the window = the flash. The same samples' $PKG and title bar rows go
+  # to fd-bar.txt (barcheck).
+  sh_ "rm -f /data/local/tmp/fd-flash.txt /data/local/tmp/fd-bar.txt; (read u0 r </proc/uptime; u0=\${u0%.*}; while :; do read u r </proc/uptime; [ \${u%.*} -ge \$((u0 + 10)) ] && break; h=\$(dumpsys SurfaceFlinger | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\"); v=\$(echo \"\$h\" | grep -c $PKG); echo \${u%.*}\${u#*.} \$v >>/data/local/tmp/fd-flash.txt; echo \"@ \${u%.*}\${u#*.}\" >>/data/local/tmp/fd-bar.txt; echo \"\$h\" | grep -A1 -e $PKG -e \"window bar ${id:-x}\" >>/data/local/tmp/fd-bar.txt; done </dev/null >/dev/null 2>&1 &)"
   sh_ "input swipe $x $y $to $y 250"; sleep 1.5
 }
 
@@ -148,6 +149,35 @@ flash() {
   if [ "$before" -eq 0 ] || [ "$n" -eq 0 ]; then echo "NOTE $1: flash probe can't tell ($before samples with the window before the end, $n after it)" | tee -a "$OUT/log.txt"
   elif [ "$after" -gt 0 ]; then fail "$1: the old page's window flashed - composited in $after of $n samples after the slide ended"
   else pass "$1: no flash - the window was composited in $before samples during the slide, 0 of $n after it ended"; fi
+}
+# The title bar slid with its window (WindowFrames.slideMove, in the leashes' transaction): from the same samples
+# (fd-bar.txt: "@ <uptime cs>", then each composited $PKG / "PowOS window bar <task>" layer's name and row), the
+# bar's HWC Disp Frame minus the window's, against the first sample with both, stays within 4 px through the slide (both
+# clip alike at the screen's edge: the bar spans the window's width), split at the end line's "at" like flash(). $1 the
+# step; $3 hidden|shown: the bar after the slide ended (gone with its window, or there with it).
+barcheck() {
+  local f r l k; f=$(sh_ "cat /data/local/tmp/fd-bar.txt"); printf '%s\n' "$f" >"$OUT/bar-$3.txt"
+  l=$(sh_ "grep PowosPageSlide /data/local/tmp/fd-log.txt | grep -F \"end (\" | tail -1"); k=$(echo "$l" | sed -n 's/.* at \([0-9]*\)$/\1/p')
+  [ -n "$k" ] || { echo "NOTE $1: bar probe can't tell (the end line has no 'at' time: $l)" | tee -a "$OUT/log.txt"; return 0; }
+  r=$(printf '%s\n' "$f" | awk -v k="$k" -v id="window bar $id" '
+    function df(l,  a, i, n) { n = split(l, a, "|"); for (i = 1; i <= n; i++) if (a[i] ~ /^ *-?[0-9]+ +-?[0-9]+ +-?[0-9]+ +-?[0-9]+ *$/) return a[i]; return "" }
+    function flush(  i, d, m) { if (e * 10 < k && T != "" && B != "") { split(T, t, " "); split(B, b, " "); if (!based) { for (i = 1; i <= 4; i++) base[i] = b[i] - t[i]; based = 1 }
+        m = 0; for (i = 1; i <= 4; i++) { d = b[i] - t[i] - base[i]; if (d < 0) d = -d; if (d > m) m = d }; if (m > worst) worst = m; n++ }
+      if (e * 10 >= k) { after++; if (B != "") barAfter++; lastBar = (B != "") } }
+    /^@ / { if (started) flush(); started = 1; e = $2; T = ""; B = ""; nm = ""; next }
+    /\|/ { if (nm ~ id) { if (B == "") B = df($0) } else if (T == "") T = df($0); nm = ""; next }
+    /^--$/ { next }
+    { nm = $0 }
+    END { if (started) flush(); printf "%d %d %d %d %d\n", n, worst, after, barAfter, lastBar }')
+  set -- "$1" "$2" "$3" $r; echo "bar probe $1: samples $4, worst bar-window offset $5 px, after the end $6 samples, bar in $7, last ${8:-?}" | tee -a "$OUT/log.txt"
+  if [ "${4:-0}" -lt 2 ]; then echo "NOTE $1: bar probe can't tell (${4:-0} samples with bar and window during the slide)" | tee -a "$OUT/log.txt"
+  elif [ "$5" -gt 4 ]; then fail "$1: the title bar didn't keep to its window - ${5} px apart during the slide (bar-$3.txt)"
+  else pass "$1: the title bar slid with its window ($4 samples, within $5 px)"; fi
+  [ "${6:-0}" -gt 0 ] || return 0
+  case $3 in
+    hidden) [ "$7" = 0 ] && pass "$1: the bar went with its window" || fail "$1: the bar stayed after its window left - composited in $7 of $6 samples after the end" ;;
+    shown) [ "$8" = 1 ] && pass "$1: the bar arrived with its window" || fail "$1: the window arrived without its bar (last sample after the end has none)" ;;
+  esac
 }
 ends() { sh_ "grep -c \"PowosPageSlide.*end (\" /data/local/tmp/fd-log.txt"; }
 
@@ -192,12 +222,14 @@ SLID=
 E0=$(ends); swipe -1; chk swipe2
 slid "swipe to page 2"
 flash "swipe to page 2" "$E0"
+barcheck "swipe to page 2" - hidden
 "$T/shot.sh" "$OUT/2-page2-hidden.png"
 [ "$(onpage)" = 1 ] && [ "$(vis)" = visible=false ] && [ "$(away)" = true ] && pass "swiped to page 2: hidden" \
   || fail "on page 2: page $(onpage), $(vis), away=$(away); $(ctx)"
 
 swipe 1; chk swipe1
 slid "swipe back to page 1"
+sleep 2; barcheck "swipe back to page 1" - shown
 "$T/shot.sh" "$OUT/3-page1-back.png"
 B2=$(bounds); echo "bounds back on page 1: $B2" | tee -a "$OUT/log.txt"
 [ "$(onpage)" = 0 ] && [ "$(vis)" = visible=true ] && [ "$(away)" = false ] || fail "back on page 1: page $(onpage), $(vis), away=$(away); $(ctx)"

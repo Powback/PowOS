@@ -8,7 +8,6 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.Choreographer
 import android.view.SurfaceControl
-import android.view.View
 
 /**
  * Floating windows slide with home's page, frame by frame (unfolded home: every window belongs to a page, like a
@@ -32,7 +31,7 @@ object PageSlide {
     private const val TAG = "PowosPageSlide"
     private val main = Handler(Looper.getMainLooper())
 
-    private class Win(val id: Int, val rel: Int, val bounds: Rect, val surfaces: List<SurfaceControl>)
+    private class Win(val id: Int, val rel: Int, val bounds: Rect, val task: FreeformTasks.Window)
 
     private var session: TaskLeash.Session? = null
     private var context: Context? = null
@@ -130,6 +129,8 @@ object PageSlide {
             wins = emptyList()
             return false
         }
+        // Their bars and grips (WindowFrames): framed for the slide, moved in [draw]'s transaction.
+        WindowFrames.current?.slideStart(list.map { it.task })
         Log.i(TAG, "start: ${list.joinToString { "${it.id}${if (it.rel != 0) "@${it.rel}" else ""}" }} width $w x $x")
         return true
     }
@@ -170,14 +171,14 @@ object PageSlide {
         context: Context,
         rels: Map<Int, Int>,
     ): List<Win>? {
-        val frames = WindowFrames.current ?: return null
+        WindowFrames.current ?: return null
         val running = WindowFrames.running.value.associateBy { it.id }
         return FreeformTasks.list(context).asReversed().mapNotNull { t ->
             val rel = rels[t.id] ?: return@mapNotNull null
             val r = running[t.id] ?: return@mapNotNull null
             // A window the user minimised stays in the dock; the page's own ones must be showing.
             val skip = r.minimised || (rel == 0 && (r.away || !t.visible)) || t.bounds.isEmpty
-            if (skip) null else Win(t.id, rel.coerceIn(-1, 1), Rect(t.bounds), frames.frame(t.id)?.let { surfacesOf(it) }.orEmpty())
+            if (skip) null else Win(t.id, rel.coerceIn(-1, 1), Rect(t.bounds), t)
         }
     }
 
@@ -273,7 +274,7 @@ object PageSlide {
             if (s.frame(t, w.id, at(w))) moved = true
         }
         if (moved) {
-            wins.forEach { w -> w.surfaces.filter { it.isValid }.forEach { t.setPosition(it, w.rel * width + x, 0f) } }
+            WindowFrames.current?.slideMove(t, wins.associate { it.id to dx(it).toFloat() })
             frames++
         }
         t.apply()
@@ -306,7 +307,7 @@ object PageSlide {
         settleAt = 0L
         Choreographer.getInstance().removeFrameCallback(tick)
         val gone = wins.filter { it.id in hidden || (why != "landed" && it.rel != 0) }.map { it.id }.toSet()
-        resetBars(gone)
+        WindowFrames.current?.slideEnd(gone, why == "landed")
         s.hidden = gone
         // The windows left on another page go under home in the transition's own finish change (what a minimise
         // does), the same moment their leash is hidden: before, only their bounds went in it, WM showed them again as
@@ -318,7 +319,6 @@ object PageSlide {
                 if (w.id in gone) TaskLeash.reorder(wct, tok, false)
             }
         }
-        if (gone.isNotEmpty()) reshowBars(wins.filter { it.id in gone })
         Log.i(
             TAG,
             "end ($why) after ${SystemClock.uptimeMillis() - startedAt} ms: $frames frames, x $x, hidden ${gone.ifEmpty { "none" }}, " +
@@ -327,45 +327,10 @@ object PageSlide {
         wins = emptyList()
     }
 
-    /** Bars and grips back at 0,0; a bar going with its window ([gone]) hidden until WindowFrames' next refresh. */
-    private fun resetBars(gone: Set<Int>) {
-        val t = SurfaceControl.Transaction()
-        for (w in wins) {
-            for (sc in w.surfaces.filter { it.isValid }) {
-                t.setPosition(sc, 0f, 0f)
-                if (w.id in gone) t.setVisibility(sc, false)
-            }
-        }
-        t.apply()
-    }
+    private fun at(w: Win): Rect = Rect(w.bounds).apply { offset(dx(w), 0) }
 
-    /** A bar hidden by [resetBars] whose frame stayed (the change refused): shown again. */
-    private fun reshowBars(left: List<Win>) {
-        main.postDelayed({
-            val t = SurfaceControl.Transaction()
-            left.filter { WindowFrames.current?.frame(it.id) != null }.forEach { w ->
-                w.surfaces.filter { it.isValid }.forEach { t.setVisibility(it, true) }
-            }
-            t.apply()
-        }, 1500)
-    }
-
-    private fun at(w: Win): Rect = Rect(w.bounds).apply { offset((w.rel * width + x).toInt(), 0) }
-
-    /**
-     * A frame's bar and grip surfaces. HACK: ViewRootImpl.getSurfaceControl is hidden (reflected): an overlay window's
-     * own position belongs to WM (a relayout per frame lagged the drag: DragLayer), so the slide offsets its surface
-     * in the same transaction as the task leashes and puts it back at 0,0 at the end. Real fix: the bars inside the
-     * task (a caption the app's task surface carries, as desktop mode's), or a PowOS compositor owning both.
-     */
-    private fun surfacesOf(f: WindowFrame): List<SurfaceControl> =
-        f.panelViews.mapNotNull { v: View -> runCatching { surfaceOf(v) }.onFailure { Log.w(TAG, "no surface for a frame of task ${f.id}", it) }.getOrNull() }
-
-    private fun surfaceOf(v: View): SurfaceControl? {
-        HiddenApi.allow()
-        val root = v.rootView?.parent ?: return null
-        return root.javaClass.getMethod("getSurfaceControl").invoke(root) as? SurfaceControl
-    }
+    /** Window [w]'s offset now (screen px): its leash's, and its bar's and grip's. */
+    private fun dx(w: Win): Int = (w.rel * width + x).toInt()
 
     /** CSS cubic-bezier(x1, y1, x2, y2) at time [t] (0..1). */
     private fun bezier(t: Float): Float {

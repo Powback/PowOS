@@ -168,13 +168,97 @@ class WindowFrames(
         if (adopting(floating)) return
         logChange(all, floating)
         track(all, floating)
+        reframe(all, floating)
+    }
+
+    /** The frames for windows [all]: dropped, added, placed and stacked as they show now. */
+    private fun reframe(
+        all: List<FreeformTasks.Window>,
+        floating: Boolean,
+    ) {
         val framed = floating && !keyguard && !Switcher.open
         val show = if (framed) shown(all) else emptyList()
-        val ids = show.map { it.id }.toSet() + held(all, floating && !keyguard)
+        // A page swipe's windows keep their frames where they are till the page change is committed ([sliding]).
+        val ids = show.map { it.id }.toSet() + held(all, floating && !keyguard) + sliding.keys
         frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
         if (framed) belowStatusBar(show)
-        frame(show)
+        frame(show.filter { it.id !in sliding })
+        if (sliding.isNotEmpty()) return
         restack(show.asReversed().map { it.id })
+        unhideSlid()
+    }
+
+    /**
+     * A page swipe's windows (PageSlide: task id -> its leash's offset in the last frame). Their bars and grips (their
+     * own overlay windows) move with them in the leashes' transaction ([slideMove]); [refresh] neither moves, re-adds
+     * nor drops their frames meanwhile (a re-add - restack's raise - made new surfaces and the bar stood still while its
+     * window slid, the user 2026-10-24) until the page change is committed ([showOnly]) or the slide is called off.
+     */
+    private val sliding = mutableMapOf<Int, Float>()
+
+    /** Bars [slideEnd] hid with their window: shown again by the next refresh that still frames them (a change refused). */
+    private val slideHidden = mutableSetOf<Int>()
+
+    /**
+     * A page swipe starts moving [tasks]. A window coming from another page has no frame (away): it gets one now, at
+     * its real bounds, veiled (drawn clear, unblurred) until its surfaces are where the slide has the window.
+     */
+    fun slideStart(tasks: List<FreeformTasks.Window>) {
+        sliding.clear()
+        tasks.forEach { sliding[it.id] = 0f }
+        if (keyguard || Switcher.open || !AppWindows.floating(context)) return
+        tasks.filter { it.id !in frames && it.id !in minimised && mayFrame(it) }.forEach { w ->
+            frames[w.id] = newFrame(w).apply { veiled = true }.also { it.place(w.bounds) }
+        }
+    }
+
+    /** One slide frame: every sliding window's bar and grip at its leash's offset [dx] (screen px), in [t] (the leashes'). */
+    fun slideMove(
+        t: android.view.SurfaceControl.Transaction,
+        dx: Map<Int, Float>,
+    ) {
+        for ((id, x) in dx) {
+            val f = frames[id] ?: continue
+            val s = f.surfaces()
+            s.forEach { t.setPosition(it, x, 0f) }
+            if (slideHidden.remove(id)) s.forEach { t.setVisibility(it, true) }
+            sliding[id] = x
+            // Unveiled once its surfaces are offset: the next draw, after [t] is applied.
+            if (f.veiled && s.size == f.panelViews.size && s.isNotEmpty()) main.post { f.veiled = false }
+        }
+    }
+
+    /**
+     * The slide ended ([committed]: landed - the page change follows through [desktop]; else called off): bars back at
+     * their window surfaces' origin (where a landed window is), the ones going with their window ([gone]) hidden, at once.
+     */
+    fun slideEnd(
+        gone: Set<Int>,
+        committed: Boolean,
+    ) {
+        val t = android.view.SurfaceControl.Transaction()
+        for (id in sliding.keys) {
+            val f = frames[id] ?: continue
+            f.surfaces().forEach {
+                t.setPosition(it, 0f, 0f)
+                if (id in gone) t.setVisibility(it, false)
+            }
+            if (id in gone) slideHidden += id else f.veiled = false
+        }
+        t.apply()
+        Log.i(TAG, "slide end: bars of ${sliding.entries.joinToString { "${it.key}@${it.value.toInt()}" }}, hidden ${gone.ifEmpty { "none" }}")
+        if (committed) return
+        sliding.clear()
+        main.post(refreshNow)
+    }
+
+    /** Bars [slideEnd] hid whose frame stayed (the page change refused): shown again. */
+    private fun unhideSlid() {
+        if (slideHidden.isEmpty()) return
+        val t = android.view.SurfaceControl.Transaction()
+        slideHidden.mapNotNull { frames[it] }.forEach { f -> f.surfaces().forEach { t.setVisibility(it, true) } }
+        t.apply()
+        slideHidden.clear()
     }
 
     private var unreadableRetries = 0
@@ -191,9 +275,11 @@ class WindowFrames(
             val own = ownBar(w)
             // Who draws its title bar changed (a launch window became Steam's, KWin's "decor"): a new frame, between touches.
             frames[w.id]?.takeIf { it.ownBar != own && !it.held && !it.dragging }?.let { frames.remove(w.id)?.remove() }
-            frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w), own), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds, spans[w.id])
+            frames.getOrPut(w.id) { newFrame(w) }.apply { showMaximised(w.id in maximised) }.place(w.bounds, spans[w.id])
         }
     }
+
+    private fun newFrame(w: FreeformTasks.Window) = WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w), ownBar(w)), ::minimise, ::edge, ::maximise)
 
     /**
      * [w] draws its own title bar: a Linux window with client-side decorations (Steam, GTK header bars; KWin says,
@@ -607,6 +693,8 @@ class WindowFrames(
     }
 
     private fun showOnly(hide: Set<Int>) {
+        // A page swipe's change committed: its frames are ordinary again (the refresh below frames the new page).
+        sliding.clear()
         val back = away - hide
         away.clear()
         away.addAll(hide)

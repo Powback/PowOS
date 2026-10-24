@@ -176,7 +176,7 @@ class WindowFrame(
     private fun addViews() {
         var ok = true
         if (!app.ownBar && !barAdded) {
-            runCatching { wm.addView(bar, barParams); barAdded = true; barBlur.set(1f) }
+            runCatching { wm.addView(bar, barParams); barAdded = true; barBlur.set(if (veiled) 0f else 1f) }
                 .onFailure { ok = false; android.util.Log.w("PowosWindowFrame", "can't add the bar of task $id", it) }
         }
         if (!gripAdded) {
@@ -250,6 +250,34 @@ class WindowFrame(
     /** Its bar's and grip's views while shown (shell/PanelLift stacks their surfaces under home under a home panel; PageSlide moves them with a page swipe). */
     val panelViews: List<android.view.View> get() = if (!added) emptyList() else if (app.ownBar) listOf(grip) else listOf(bar, grip)
 
+    /**
+     * Its bar's and grip's window surfaces, the valid ones (WindowFrames.slideMove offsets them with a page swipe, in
+     * the task leashes' transaction). HACK: ViewRootImpl.getSurfaceControl is hidden (reflected past the checks,
+     * HiddenApi): an overlay window's own position belongs to WM (a relayout per frame lagged the drag: DragLayer), so
+     * the slide offsets its surface under WM's position instead. Real fix: the bars inside the task (a caption the
+     * task's surface carries, as desktop mode's), or a PowOS compositor owning both.
+     */
+    fun surfaces(): List<SurfaceControl> =
+        panelViews.mapNotNull { v ->
+            runCatching {
+                HiddenApi.allow()
+                v.parent?.let { root -> root.javaClass.getMethod("getSurfaceControl").invoke(root) as? SurfaceControl }
+            }.getOrNull()?.takeIf { it.isValid }
+        }
+
+    /**
+     * Made for a page swipe's arriving window (WindowFrames.slideStart): its bar drawn clear and unblurred until its
+     * surface is where the slide has the window - its first frame lands at the real bounds, on the page still showing.
+     */
+    var veiled = false
+        set(v) {
+            if (field == v) return
+            field = v
+            if (app.ownBar) return
+            bar.alpha = if (v) 0f else 1f
+            if (barAdded) barBlur.set(if (v) 0f else 1f)
+        }
+
     /** Where its bar and grip take touches (screen px): a frame stacked over another's there takes that one's finger. */
     fun reach(): Rect = Rect(bounds.left, bounds.top - barHeight(), bounds.right + dp(GRIP_OUT_DP), bounds.bottom + dp(GRIP_OUT_DP))
 
@@ -266,7 +294,7 @@ class WindowFrame(
             }
             wm.removeViewImmediate(grip)
             wm.addView(grip, gripParams)
-            if (!app.ownBar) barBlur.set(1f)
+            if (!app.ownBar) barBlur.set(if (veiled) 0f else 1f)
         }.onFailure { android.util.Log.w("PowosWindowFrame", "can't raise the frame of task $id", it) }
     }
 
