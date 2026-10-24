@@ -42,6 +42,17 @@ import json
 import os
 import sys
 
+# One ISO-timestamp parser, shared with tools/agents/retro.py (f171): both used to carry their own
+# ad-hoc fromisoformat/"Z"-suffix copy of this. Fail-silent if the import itself ever breaks (e.g. an
+# install layout without tools/agents/ alongside this hook) - a broken reporter must never break a
+# session, so timestamps just come back unparsed (None) rather than crashing.
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                                     "tools", "agents"))
+    from efficiency import parse_ts as _shared_parse_ts
+except Exception:
+    _shared_parse_ts = lambda ts: None
+
 MAX_NOTICES = 8
 MAX_SEEN = 500
 TAIL_BYTES = 200_000     # enough to hold the latest assistant message's usage even with a big tool call
@@ -125,15 +136,12 @@ def _first_entry_timestamp(transcript_path):
 
 
 def _parse_ts(ts):
-    try:
-        if ts.endswith("Z"):
-            ts = ts[:-1] + "+00:00"
-        d = datetime.datetime.fromisoformat(ts)
-        if d.tzinfo is None:
-            d = d.replace(tzinfo=datetime.timezone.utc)
-        return d
-    except Exception:
-        return None
+    """efficiency.parse_ts, plus: a naive result defaults to UTC (this file always compares against an
+    aware `now`, so a bare datetime here would raise rather than fail silently)."""
+    d = _shared_parse_ts(ts)
+    if d is not None and d.tzinfo is None:
+        d = d.replace(tzinfo=datetime.timezone.utc)
+    return d
 
 
 def _elapsed_minutes(inp, cache_path):

@@ -152,14 +152,10 @@ def call_timings(path, since=''):
 def _span_minutes(lo, hi):
     """Wall-clock minutes between two ISO timestamps (the transcript's first and last in-window entries) -
     0 when either is missing or unparseable, never a crash on a malformed timestamp."""
-    if not lo or not hi:
+    a, b = parse_ts(lo), parse_ts(hi)
+    if a is None or b is None:
         return 0.0
-    try:
-        def parse(t):
-            return dt.datetime.fromisoformat(t[:-1] + '+00:00' if t.endswith('Z') else t)
-        return max(0.0, (parse(hi) - parse(lo)).total_seconds() / 60.0)
-    except Exception:
-        return 0.0
+    return max(0.0, (b - a).total_seconds() / 60.0)
 
 
 def main():
