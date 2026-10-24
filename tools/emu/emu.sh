@@ -51,6 +51,28 @@ die() { echo "emu: $*" >&2; exit "${2:-1}"; }
 free_gb() { df -g "$HOME" | awk 'NR == 2 {print $4}'; }
 space_guard() { local f; f=$(free_gb)
   [ "${f:-0}" -ge "${EMU_MIN_FREE_GB:-25}" ] || die "only ${f} GB free on the Mac (< ${EMU_MIN_FREE_GB:-25} GB): not $1 (the emulator grows; the watchdog mails at 15 GB)" 4; }
+lock="${XDG_CACHE_HOME:-$HOME/.cache}/powos-emu.lock"
+# emu_lock_acquire [label]: exclusive lock for install/reset/remove/stop, modeled on build-slot.sh. If LOCK_HELD=1
+# (queue-emu.sh or a job running under it), does nothing - the lock is already held. Waits up to 4 min for a live holder
+# (max 240 sleeps at 1s), then refuses. A dead holder's lock is reclaimed. Set a trap to release: trap 'emu_lock_release' EXIT.
+emu_lock_acquire() { local label=${1:-emu.sh} holder_name waiting
+  [ "${LOCK_HELD:-}" = 1 ] && return 0   # already held by parent (queue-emu.sh)
+  mkdir -p "$(dirname "$lock")"
+  waiting=0
+  for i in $(seq 240); do   # 4 min max
+    if mkdir "$lock" 2>/dev/null; then echo $$ > "$lock/pid"; echo "$label" > "$lock/label"; return 0; fi
+    # Dead holder's lock is reclaimed.
+    local p; p=$(cat "$lock/pid" 2>/dev/null) || p=""
+    if [ -z "$p" ] || ! kill -0 "$p" 2>/dev/null; then rm -rf "$lock" 2>/dev/null; continue; fi
+    if [ $waiting -eq 0 ]; then
+      holder_name=$(cat "$lock/label" 2>/dev/null || echo "?")
+      echo "emulator busy: $holder_name (since $(date +%H:%M)), waiting" >&2; waiting=1
+    fi
+    sleep 1
+  done
+  die "emulator lock not available after 4 min - giving up" 4
+}
+emu_lock_release() { rm -rf "$lock" 2>/dev/null; }
 running() { a get-state 2>/dev/null | grep -qx device; }
 # booted: sys.boot_completed=1 AND the package service actually answers. boot_completed can flip true before
 # PackageManagerService (and friends) finish registering on a snapshot resume - a pm/am/appops call made right then
@@ -264,6 +286,8 @@ up_to_date() { local want=${EMU_COMMIT:-$(tip)}; [ "$(emu_commit)" = "$want" ] |
 
 case "${1:-}" in
 create)
+  emu_lock_acquire "create"
+  trap 'emu_lock_release' EXIT
   space_guard "creating the AVD"
   image; halt
   rm -rf "$AVD_HOME/$AVD.avd"; avd_files
@@ -297,19 +321,29 @@ start)
     up_to_date; grants_like_phone; stay_awake; home_ready || die "home's page doesn't come up on the emulator ($STATE/emulator.log)"; fi
   say "up on $SERIAL (POWOS_DEVICE=emu)"
   ;;
-stop) if running || pgrep -f -- "-avd $AVD( |$)" >/dev/null; then halt; say "stopped"; else say "not running"; fi ;;
+stop)
+  emu_lock_acquire "stop"
+  trap 'emu_lock_release' EXIT
+  if running || pgrep -f -- "-avd $AVD( |$)" >/dev/null; then halt; say "stopped"; else say "not running"; fi ;;
 status)
   if running; then echo "running on $SERIAL, booted=$(booted && echo yes || echo no), PowOS from $(emu_commit | cut -c1-9)"; else echo "not running"; fi
   echo "disk: AVD $(du -sh "$AVD_HOME/$AVD.avd" 2>/dev/null | cut -f1), image $(du -sh "$SDK/$IMG_DIR" 2>/dev/null | cut -f1), Mac free $(free_gb) GB"
   ;;
 reset)
+  emu_lock_acquire "reset"
+  trap 'emu_lock_release' EXIT
   running || exec "$0" start
   a emu avd snapshot load "$SNAP" | tr -d '\r' | grep -v '^OK$'; wait_dev; wait_boot 120; root_up; selinux_permissive; up_to_date; grants_like_phone; stay_awake; home_ready
   say "reset to $SNAP"
   ;;
-install) running || die "not running: emu.sh start" 2; root_up; install "${2:-}"; grants_like_phone; stay_awake; home_ready ;;
+install)
+  emu_lock_acquire "install"
+  trap 'emu_lock_release' EXIT
+  running || die "not running: emu.sh start" 2; root_up; install "${2:-}"; grants_like_phone; stay_awake; home_ready ;;
 wake) running || die "not running: emu.sh start" 2; stay_awake ;;
 remove)
+  emu_lock_acquire "remove"
+  trap 'emu_lock_release' EXIT
   halt
   rm -rf "$AVD_HOME/$AVD.avd" "$AVD_HOME/$AVD.ini" "$STATE"
   [ -e "$BUILD_TREE/.git" ] && git -C "$REPO" worktree remove --force "$BUILD_TREE"

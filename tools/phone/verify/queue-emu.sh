@@ -26,11 +26,27 @@ if [ -z "${QUEUE_COPY:-}" ]; then
   c=$(mktemp -d "${TMPDIR:-/tmp}/powos-queue-emu.XXXXXX") && cp "$src/queue.sh" "$src/queue-emu.sh" "$c/" || exit 1
   QUEUE_COPY=$c QUEUE_HERE=$src exec bash "$c/queue.sh" run-emu
 fi
-trap 'rm -rf "$QUEUE_COPY" "$L"' EXIT
+trap 'emu_lock_release; rm -rf "$QUEUE_COPY" "$L"' EXIT
 trap 'for c in $(pgrep -P $$); do killtree $c; done; exit 143' TERM
 ER=$(cd "$here/../../.." && pwd -P)   # the checkout the jobs run in (the lane's, or this one under QUEUE_NO_TREE)
 emu() { "$ER/tools/emu/emu.sh" "$@" >> "$E/runner.log" 2>&1; }
 emu_commit() { POWOS_DEVICE=emu "$phone/adb.sh" shell cat /data/local/tmp/powos-emu-commit 2>/dev/null | tr -d '\r'; }
+# emu_lock_acquire: hold the emulator lock for the entire job run (prevents other agents from interfering).
+emu_lock_acquire() {
+  local label=${1:-queue-emu.sh}
+  local lock="${XDG_CACHE_HOME:-$HOME/.cache}/powos-emu.lock"
+  mkdir -p "$(dirname "$lock")"
+  for i in $(seq 240); do   # 4 min max
+    if mkdir "$lock" 2>/dev/null; then echo $$ > "$lock/pid"; echo "$label" > "$lock/label"; return 0; fi
+    # Dead holder's lock is reclaimed.
+    local p; p=$(cat "$lock/pid" 2>/dev/null) || p=""
+    if [ -z "$p" ] || ! kill -0 "$p" 2>/dev/null; then rm -rf "$lock" 2>/dev/null; continue; fi
+    sleep 1
+  done
+  return 1
+}
+emu_lock_release() { rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/powos-emu.lock" 2>/dev/null; }
+export LOCK_HELD=1  # signal to emu.sh and job checks that we hold the lock
 # flush: the results the board hasn't taken yet, oldest first (the phone may be off the VPN).
 flush() { local f
   for f in "$E"/pending/*.sh; do [ -f "$f" ] || continue
@@ -47,6 +63,11 @@ result() { local s st=${3%% *}
     [ "$st" = PASS ] && [ "$close" = 1 ] && printf 'powos agents task done %q >/dev/null 2>&1 || true\n' "$task")
   printf '%s\n' "$s" > "$E/pending/$2.sh"; }
 flush
+# Acquire the emulator lock once for the entire job run (prevents install/reset/remove/stop interference).
+if ! emu_lock_acquire "queue-emu.sh"; then
+  echo "$(date +%T) could not acquire emulator lock - aborting"; exit 1
+fi
+trap 'emu_lock_release' EXIT
 while ls "$E"/*.job >/dev/null 2>&1; do
   verify_tree "$ET" >/dev/null 2>&1 || true
   echo "$(date +%T) emulator up (origin's tip)"
