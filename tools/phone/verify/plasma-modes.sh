@@ -178,7 +178,7 @@ mode_together() {
   kate_task || return
   open_plasma || return
   kwin_q desk >/dev/null; W=$(win desk kate)
-  [ "$(field "$W" 4)" = false ] && pass "in Plasma, Kate stays its task (not also on Plasma's desktop: no duplicate)" || fail "Kate shows on Plasma's desktop as well as in its task: $W"
+  [ "$(field "$W" 4)" = false ] && pass "in Plasma, Kate stays its task (not also on Plasma's desktop: no duplicate)" || fail "Kate shows on Plasma's desktop as well as in its task: ${W:-no kate window found by kwin_q desk (empty answer)}"
   sh_ "dumpsys SurfaceFlinger" > "$OUT/sf.txt"
   sf=$(awk '/Composition list \(bottom to top\)/{p=1} p&&/^  Layer \[/{print}' "$OUT/sf.txt" | head -4)
   log "bottom layers: $(tr '\n' '|' <<<"$sf")"

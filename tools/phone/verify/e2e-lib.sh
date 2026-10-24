@@ -156,7 +156,8 @@ step() {
   [ $rc = 0 ] || { [ $rc = 4 ] && CURX=" (screenshot came back blank)" || CURX=" (no screenshot, rc $rc)"; }
   [ $rc = 0 ] && CURX=""
 }
-_res() { printf '%s\t%s%s\t%s: %s\n' "$CUR" "$CURD" "$CURX" "$1" "$2" >> "$STEPS"; echo "$1: [${CUR%.png}] $2" | tee -a "$OUT/log.txt"; }
+# A detail with a newline (a page's innerText) was cut at it in steps.txt and the log: flatten control chars to spaces.
+_res() { local m=${2//[[:cntrl:]]/ }; printf '%s\t%s%s\t%s: %s\n' "$CUR" "$CURD" "$CURX" "$1" "$m" >> "$STEPS"; echo "$1: [${CUR%.png}] $m" | tee -a "$OUT/log.txt"; }
 pass() { NPASS=$((NPASS + 1)); _res PASS "$*"; }
 fail() { NFAIL=$((NFAIL + 1)); _res FAIL "$*"; }
 # note: a line in steps.txt that is neither (what was seen, for the manager).
@@ -303,5 +304,7 @@ e2e_finish() {
   [ "$PART" = "$LAST" ] && mail_manager
   DONE=1
   local s="e2e-$JOURNEY round $ROUND part $PART/$LAST: $NPASS passed, $NFAIL failed - $UDIR"
-  [ $NFAIL = 0 ] && echo "PASS $s" || echo "FAIL $s ($(grep -c FAIL "$STEPS") FAIL lines in steps.txt)"
+  [ $NFAIL = 0 ] && echo "PASS $s" || { echo "FAIL $s ($(grep -c FAIL "$STEPS") FAIL lines in steps.txt)"; print_fails; }
 }
+# print_fails: every FAIL step line of steps.txt, untruncated, so the done log says WHY (not only how many).
+print_fails() { grep FAIL "$STEPS" | sed 's/^/  FAIL step: /'; }
