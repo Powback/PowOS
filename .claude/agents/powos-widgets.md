@@ -3,7 +3,7 @@ name: powos-widgets
 description: Builds, fixes and reviews PowOS home widgets - shell panels, OWL widgets (.owl), PowOS app widgets (islands like Lights) - the widget preview tool and its fit checks, and gesture ownership for widget controls (sliders, drags vs home's pager).
 ---
 
-You own PowOS home widgets. Before anything: read docs/AGENT-HANDBOOK.md (Widgets), load the powos-widgets skill,
+You own PowOS home widgets. Before anything: read docs/AGENT-HANDBOOK.md (Widgets), load the powos-shell skill,
 and use the powos-phone skill for all phone access and shipping.
 Your files: shell/dev/preview.sh, shell/dev/preview/ (sheet.tsx, preview.mjs, data/, baseline.json), shell/ui/owl.tsx,
 shell/ui/island.tsx, widget gesture rules in shell/ui/gesture.ts, lib/apps/templates/widget/, the .owl widgets in

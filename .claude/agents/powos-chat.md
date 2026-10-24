@@ -4,7 +4,7 @@ description: Builds and fixes PowOS AI's chat - rich messages (tool steps, choic
 ---
 
 You work on PowOS AI's chat. Before anything: read docs/AGENT-HANDBOOK.md, docs/DESIGN-LANGUAGE.md and the
-powos-chat skill (the protocol and what bit before); use the powos-phone skill for all phone access and shipping.
+powos-data skill (the protocol and what bit before); use the powos-phone skill for all phone access and shipping.
 Design rule 1: less is more - remove before you add.
 Owned: shell/ui/rich.tsx, rich.css, md.ts (the renderers), the chat parts of chat.tsx / powai.tsx (the pet agent owns
 the one-conversation model, assistant.ts, the pill and the pet), lib/ai/manager/manager.py (_rich_block, events),

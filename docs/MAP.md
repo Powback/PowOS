@@ -11,7 +11,7 @@ tree cold. Full detail per subsystem lives in the named skill's SKILL.md — loa
 - Build/check: `shell/dev/gate.sh --tree` (tsc + headless boot of every page).
 - Ship: `shell/push.sh --vpn --note "..." <files>` (phone), queued device check below.
 - Device check: emu/phone — `tools/phone/verify/queue.sh add --dev auto <task> <check.sh>` (most shell-only checks run `emu + phone`, see handbook's lane table).
-- Skill: powos-design (material/shade/CC), powos-drawer, powos-widgets, powos-switcher, powos-chat, powos-gestures.
+- Skill: powos-shell (material/shade/CC, drawer, widgets, gestures), powos-windows (switcher), powos-data (chat).
 
 ## Android app — Kotlin (windows, system services)
 - `targets/android/app/app/` — the Kotlin source (system/WindowFrames.kt, WindowFrame.kt, FreeformTasks.kt,
@@ -21,7 +21,7 @@ tree cold. Full detail per subsystem lives in the named skill's SKILL.md — loa
   `tools/phone/compile-check.sh` (throwaway builder, never touches shared APK output).
 - Ship/install: `tools/phone/ship-apk.sh --note "..."` (ONLY way to build+install; never build-app.sh+install by hand).
 - Device check: phone only for hardware/fold/games; most window/app UI checks run emu+phone (see handbook table).
-- Skill: powos-switcher (windows/recents), powos-widgets, powos-bridge-security, powos-android-dev (unowned Kotlin).
+- Skill: powos-windows (windows/recents), powos-shell (widgets, bridge-security), powos-android-dev (unowned Kotlin).
 
 ## KWin / Linux packages
 - `targets/android/pkgs/kwin/` (PKGBUILD + 0001..00NN patches), `pkgs/steam`, `pkgs/xwayland-kgsl`, `pkgs/breeze`, etc.
@@ -29,28 +29,28 @@ tree cold. Full detail per subsystem lives in the named skill's SKILL.md — loa
 - Reserve a number: `tools/agents/pkg-claim.sh reserve-patch|reserve-pkgrel targets/android/pkgs/kwin`.
 - Build: `targets/android/build-pkgs.sh kwin` (inputs/outputs live in shared cache `~/.cache/powos-build-inputs`).
 - Install/check: `tools/phone/verify/pkg-install.sh <pkg>` or `kwin-up.sh MIN` (queue ahead of a feature check, same task).
-- Skill: powos-switcher (KWin patches section), powos-desktop, powos-games.
+- Skill: powos-windows (KWin patches section, desktop), powos-games.
 
 ## Linux session / rooted
 - `targets/android/rooted/` (rooted.sh, powos-session.sh, powos-run.sh, powos-deploy.sh) — chroot of `/data/powos/root`.
 - `targets/android/session/` (first-session.sh, plasma/*, powos-plasma-bridge, powos-output-scale).
 - Deploy: `PATH="$PWD/tools/phone/bin:$PATH" targets/android/rooted/rooted.sh deploy --note "..."` (plain adb needs that PATH prefix).
 - Check: phone only — `tools/phone/verify/linux-session.sh`, `kwin-up.sh`, `linux-float.sh`, `linux-touch.sh`.
-- Skill: powos-desktop, powos-switcher, powos-games.
+- Skill: powos-windows, powos-games.
 
 ## Verify checks
 - `tools/phone/verify/*.sh` (131 scripts), `queue.sh` (the one queue), `e2e-lib.sh`/`bf-lib.sh` (shared helpers).
 - Queue a check: `tools/phone/verify/queue.sh add [--dev emu|auto] [--close] <board-task> <script> [args]` (returns at once).
 - Build/compile: n/a (bash scripts) — lint with the repo's shellcheck-equivalent if present; no separate build step.
 - Check command: the script itself, run through `queue.sh`; never run a device-touching check by hand outside a free window.
-- Skill: powos-verify (the how-to: idle windows, journeys, frame-stepping, gesture-monitor dup checks, FAIL reading rules).
+- Skill: powos-phone (the how-to: idle windows, journeys, frame-stepping, gesture-monitor dup checks, FAIL reading rules).
 
 ## Emulator lane
 - `tools/emu/emu.sh` (start|stop|status|reset|create|install|remove), `tools/emu/testwin/` (Calculator test client).
 - Build/prep: `tools/emu/emu.sh create` (~10 min, once) then `start` (boots or reuses `powos-ready` snapshot).
 - Check: `tools/phone/verify/queue.sh add --dev emu <task> <check> [args]` or `--dev auto` to let lane detection pick;
   run by hand: `POWOS_DEVICE=emu LOCK_HELD=1 tools/phone/verify/<check>.sh ...`.
-- Skill: powos-verify (lane table + `# lanes:` header convention), powos-games (what's phone-only: Steam/fold/kernel).
+- Skill: powos-phone (lane table + `# lanes:` header convention), powos-games (what's phone-only: Steam/fold/kernel).
 
 ## Ship
 - `tools/agents/land.sh "msg" -- <paths> [--task <id> --step "..."] [--ship "note"] [--queue <check args>]` — THE
@@ -58,7 +58,7 @@ tree cold. Full detail per subsystem lives in the named skill's SKILL.md — loa
 - `tools/phone/ship.sh` (request/status/pause/resume/done_req), `shell/push.sh`, `tools/phone/ship-apk.sh`.
 - Build: implicit in ship-apk.sh (warm Gradle builder) / push.sh (gate.sh).
 - Check: queued automatically by `land.sh --queue`, or `queue.sh add` separately.
-- Skill: powos-phone (shipping summary), powos-verify, handbook "Shipping" section (full detail, rarely needs re-reading).
+- Skill: powos-phone (shipping summary, incl. verify), handbook "Shipping" section (full detail, rarely needs re-reading).
 
 ## Board / comms / friction
 - `lib/ai/agents/powos-agents-cli`, `powos-agentsd`, `lib/ai/comms/comms.sh`+`comms-mcp.py`, `lib/ai/manager/manager.py`.
@@ -67,20 +67,20 @@ tree cold. Full detail per subsystem lives in the named skill's SKILL.md — loa
 - Comms: `powos comms send|watch|inbox --peek|notify|quiet`.
 - Friction: `tools/agents/friction add --area <a> --kind <k> "<title>" --repro "<cmd>" --details -`.
 - Check/test: `python3 test/tier1/test-agents.py`, `test-board-truth.py`, `test-comms.py`, `test-comms-fulltext.py`.
-- Skill: powos-comms.
+- Skill: powos-data.
 
 ## App API
 - `apps/app-api/` (powos-app.json, ui/lib/{action,add,api,files,recordings,rules,runtime,ui}.tsx), `tools/app-api/`.
 - Build: `apps/build.sh app-api`; publish/install: `apps/install.sh app-api install|publish --note "..."`.
 - Check: emu+phone — `tools/phone/verify/app-api.sh`, `e2e-appapi.sh`.
-- Skill: powos-stdb (App API hand-off lives there), powos-widgets (islands).
+- Skill: powos-data (App API hand-off lives there), powos-shell (islands).
 
 ## STDB modules
 - `apps/<app>/` (Rust module, `src/lib.rs`), `shell/vendor/<db>.js`+`.d.ts`+`VERSIONS`, `shell/apps/stdb.ts`.
 - Regenerate bindings: `apps/vendor.sh <app>` (must reproduce committed files byte-for-byte).
 - Publish: `ADB="docker exec powos-vadb adb" apps/install.sh <app> publish --note "..."`.
 - Check: `tools/phone/bindings-check.sh --no-publish`; tier-1 `test/tier1/test-bindings-check.sh`.
-- Skill: powos-stdb.
+- Skill: powos-data.
 
 ## Games / Steam
 - `targets/android/steam/` (fex-compat-tool, sysvipc), `targets/android/pkgs/steam`, `targets/android/kernel/`.
@@ -93,5 +93,5 @@ tree cold. Full detail per subsystem lives in the named skill's SKILL.md — loa
 - `lib/ai/manager/manager.py`+`.sh` (chat turns, inbox injection), `lib/ai/sandbox/` (engine/, caps.ts, job.ts, main.ts).
 - Build: sandbox is TS (`lib/ai/sandbox/package.json`); no separate compile step noted — runs via manager.
 - Check/test: `python3 test/tier1/test-manager.py`.
-- Note: the sandbox runtime is capped at 48 MB — never run a model in it (powos-stdb hand-off).
-- Skill: powos-comms (manager inbox section); no dedicated sandbox skill — see powos-android-dev/general for gaps.
+- Note: the sandbox runtime is capped at 48 MB — never run a model in it (powos-data hand-off).
+- Skill: powos-data (manager inbox section); no dedicated sandbox skill — see powos-android-dev/general for gaps.

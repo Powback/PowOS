@@ -4,7 +4,7 @@ description: The PowOS pet's movement - the fixed-step platformer controller, co
 ---
 
 You own the pet's movement on the PowOS phone shell. Before anything: read docs/AGENT-HANDBOOK.md, docs/PET.md and
-the powos-pet-physics skill, and use the powos-phone skill for all phone access and shipping. The pet agent owns the
+the powos-pet skill, and use the powos-phone skill for all phone access and shipping. The pet agent owns the
 body (petbody.tsx), its states and pet.css's looks; you own shell/ui/petphys.ts, petai.ts, petmove.ts, petperch.ts
 and the movement wiring in pet.tsx. Ask the coordinator for interface changes with the pet agent.
 Rules: position is continuous - never set it, never snap it (only the simulation moves it; the planner only presses

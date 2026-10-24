@@ -1,11 +1,29 @@
 ---
-name: powos-switcher
-description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher, the recents transition, home's switcher layer (recents.tsx), home's page after going home, or the live-wallpaper picture capture - the event flow, known pitfalls, and the record-and-frame-step verification workflow.
+name: powos-windows
+description: Use when working on PowOS window tasks - floating Android windows (taskbar, title bar, maximise/resize/density), the swipe-up switcher and recents transition, desktop/Plasma modes (powos-shell host, KWin), or Linux windows in the dock/switcher - including writing and landing a KWin patch.
 ---
 
 ## Quick recipe
+- Files: `targets/android/app/.../system/{WindowFrames,FreeformTasks,NavGesture,RecentsTransition,AppWindows,
+  TaskLeash,WindowTasks,OemCaption}.kt`, `shell/ui/recents.tsx`, `shell/hosts/wide.ts`, `sources/powos-shell/` (Qt
+  desktop host), `shell/hosts/desktop.ts`+`layout.ts`, `shell/ui/desktop.tsx`/`.css`. KWin:
+  `targets/android/pkgs/kwin/` (see "Writing a KWin patch" below for the patch/number workflow).
+- Build: Kotlin compile check before pushing to origin: `tools/phone/compile-check.sh`; ship/install:
+  `tools/phone/ship-apk.sh --note "..."` (never build by hand). Desktop host (on-phone, ~20s):
+  `sources/powos-shell/dev/phone.sh build`; status/render: `dev/phone.sh status|cdp 'JS'|page NAME|shot NAME`.
+- Check, emu first then phone: `tools/phone/verify/queue.sh add --dev auto <task> window-max.sh calc` /
+  `float-desktops.sh` / `float-windows.sh` (window/recents UI is emu+phone); phone-only (Linux session, KWin
+  install): `linux-float.sh`, `fold.sh`, `one-title-bar.sh`, `plasma-modes.sh plasma|shell|together`,
+  `plasma-transparent.sh`, `plasma-notify.sh`, `plasma-app.sh` (queue `kwin-install.sh MIN` first if KWin is behind).
+- Land: `tools/agents/land.sh "msg" -- <paths> --ship "..." --queue <check args>`.
+- Friction: `tools/agents/friction add --area <switcher|desktop> --kind <...> "<title>" --repro "<cmd>"`.
+
+## switcher
+
+
+## Quick recipe
 - Files: `targets/android/app/.../system/{WindowFrames,FreeformTasks,NavGesture,RecentsTransition}.kt`,
-  `shell/ui/recents.tsx`, `shell/hosts/wide.ts`. KWin side: `targets/android/pkgs/kwin/` (see powos-desktop's
+  `shell/ui/recents.tsx`, `shell/hosts/wide.ts`. KWin side: `targets/android/pkgs/kwin/` (see the desktop section's
   "Writing a KWin patch" for patch/number workflow).
 - Build: Kotlin compile check before pushing to origin: `tools/phone/compile-check.sh`; ship/install:
   `tools/phone/ship-apk.sh --note "..."` (never build by hand).
@@ -447,3 +465,210 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   linux-touch, steam-input. Queued: linux-session (--close), linux-touch LEASH=asis (--close), steam-input.
 - Open: X11 taps on 3.28 (0022) unproven; floating-windows PASS also needs Dolphin + Steam typing in a recording;
   logout brings the Plasma desktop to front (web-shell-only mode may not want it).
+
+## desktop
+
+
+## Quick recipe
+- Files: `sources/powos-shell/` (Qt/QtWebEngine host, src/{view,home,bridge}.cpp), `shell/hosts/desktop.ts`+`layout.ts`,
+  `shell/ui/desktop.tsx`/`.css`. Paused host — most new work is the windows side, owned by this skill's switcher section.
+- Build (on-phone, ~20s): `sources/powos-shell/dev/phone.sh build`; status/render: `dev/phone.sh status|cdp 'JS'|page NAME|shot NAME`.
+- Check: PHONE ONLY (Plasma session) — `tools/phone/verify/queue.sh add <task> plasma-modes.sh plasma|shell|together`
+  (needs `kwin-up.sh MIN` queued first if KWin is behind), `plasma-transparent.sh`, `plasma-notify.sh`, `plasma-app.sh`.
+- Land/ship shell files as usual: `tools/agents/land.sh "msg" -- <paths> --ship "..."`; desktop host's own shell copy
+  needs `dev/phone.sh build` separately.
+- Friction: `tools/agents/friction add --area desktop --kind <...> "<title>" --repro "<cmd>"`.
+
+**Paused by the user, 2026-10-22:** no work on the separate Plasma desktop (powos-shell); the desktop is the PowOS
+home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the code stays.
+
+## The desktop now (2026-10-22)
+- The desktop is the PowOS home unfolded/widescreen, with Android apps as floating windows. The windows side
+  (taskbar, focus/minimise/close, Android windows, switcher) belongs to this skill's switcher section (above).
+- Wide home = shell/hosts/wide.ts, wrapped around the phone's bridge (bridge.ts) for home's page only (no ?mode=),
+  at >= 700 CSS px (inner display 821, cover 404). Two host pages are shown side by side as one page of cols*2+1
+  columns, with a free column between them so they never merge across the seam. Cells map both ways at the bridge
+  (right page x+cols+1; a move goes back to the half its middle is over), widgets.page maps to the pair's left page
+  (the host keeps a page's neighbours live), and fold/unfold emits home.changed. ShellHome.kt's GRID_COLUMNS (6) is
+  one layout for both screens, so never persist wide cells.
+- The wide pill (width min(560px, 100% - 2*edge)) and the centred dock are the @media (min-width: 700px) block at the
+  end of ui/shell.css. The pill's height is the drawer skill's.
+- Merging touching tiles: grid.tsx joins() joins only whole covered edges (widgets skill, fixed 2026-10-22). On
+  mode=desktop joins() returns nothing.
+- "Flat grey slabs" on the inner display are not missing blur: the user's wallpaper is pure black in its top third,
+  behind the tiles, and a frost of black is black. Blur regions are sent (glass-native, __glass.live.counts).
+- The monospace font is the theme's own --font, the same folded and unfolded. It is not a load failure.
+- The ">" dock icon is Konsole's real icon. Chrome's and Camera's white plates are their Android icons.
+
+## Plasma as an app + the web launcher's Linux backend (plan: docs/DESKTOP-WEB-SHELL.md, last section)
+- Drawer "Plasma" = l:org.powos.plasma (session/plasma/org.powos.plasma.desktop, OnlyShowIn=X-PowOS so Kickoff hides
+  it; the export accepts X-PowOS). Exec powos-plasma = PLASMA_COMMAND: Runtime.launch -> showDesktop() (MainActivity).
+- Linux list: powos-apps-export (KService's rules over XDG dirs) -> run/powos-apps. powos-apps-watch (autostart,
+  python inotify on ~/.cache ksycoca6_*, which kded6 rebuilds on an app dir change) reruns it; the app's FileObserver
+  on icons/.icon-names (the export's last rename) -> reloadPowosApps(). Unit android-apps. Launch: powos-open-task.
+- KF6 6.31 sends NO org.kde.KSycoca.notifyDatabaseChanged on D-Bus (kbuildsycoca6 measured silent): watch the file.
+- Check: verify/plasma-app.sh (watcher idle, entry, kbuildsycoca6 -> new export, apps.list, apps.launch from HomeShell -> MainActivity or its alias HomeDesktop + plasmashell/KWin up, powos-shell not).
+- Slice 3 (unit plasma-bridge): session/powos-plasma-bridge (python-dbus + GLib, autostart) <-> run/plasma/{out,in}/*.json
+  (".name" then rename) <-> PlasmaBridge.kt (FileObserver, main process only). Notifications: a WATCHER of Plasma's
+  server (org.kde.NotificationManager.RegisterWatcher; it calls our /NotificationWatcher org.kde.NotificationWatcher
+  .Notify(u s u s s s as a{sv} i) with its id), posted as Android notifications tag "plasma", id = Plasma's id, extras
+  powos.linux.app/entry/icon -> Notifications.item's app name, notificationJson's icon (linux app by entry/Icon=/name,
+  else l:org.powos.plasma) and pkg "linux:<entry|app>" (else the shade groups it as PowOS's own). Closing: Plasma sends
+  NotificationClosed TARGETED to the sender only, so a monitor-only connection (BecomeMonitor, one match rule) reads it;
+  reason 1 (popup timed out) keeps it on Android. Android swipe = delete intent -> CloseNotification; buttons/tap ->
+  org.kde.NotificationManager.InvokeAction. Skipped: app "PowOS agents" (comms-mcp already posts AgentMail).
+- Clipboard: Klipper (inside plasmashell, org.kde.klipper /klipper) clipboardHistoryUpdated/get/setClipboardContents.
+  Android reads the clip only while one of the app's windows has focus (READ_CLIPBOARD_IN_BACKGROUND is signature|role,
+  the IME is SwipeKeyboard): listener + PowosWindowActivity.focusHook. KWin's Anland path also syncs while MainActivity
+  is up; both dedupe on the last text. KDE Connect is in the rootfs, 0 devices paired: its notifications ride the watcher.
+- Check: verify/plasma-notify.sh (bridge idle, notify-send -w -> shade list, notifications.dismiss -> gone + notify-send
+  returns, Klipper <-> clipboard.read/write, the user's clip put back).
+
+## Three modes (the user, 2026-10-24: Plasma and the web shell both first-class, alone and together)
+- Rule: a window lives in ONE world. Opened in the Plasma app = a KDE window on Plasma's desktop (stays there after
+  going home); opened from the web shell = an Android window task. Design + recommendation: docs/DESKTOP-NATIVE.md.
+- App -> KWin "desktop 1|0" (MainActivity onStart/onStop -> WindowTasks.desktopShown; cap "desktop", kwin 0025,
+  6.7.5-3.29): while on screen new windows stay on the desktop, maximize is KWin's, its windows get powosDesktopOwned
+  and export-new's sweep skips them. Older KWin: the app sends export-new 0 while the desktop is on screen.
+- Restarter (logout/reboot from the session): reopens MainActivity only if the desktop was on screen, else starts
+  SessionService behind the web shell.
+- Checks: verify/plasma-modes.sh plasma|shell|together (kwin_up 3.29 first; KWin facts via a loaded KWin script ->
+  "PMW|..." lines in /run/powos-app/hyprland.log).
+
+## Plasma's desktop wallpaper (org.powos.transparent: TRANSPARENT, never a picture)
+- The containment keeps wallpaperplugin=org.powos.transparent (set once by the update script
+  session/plasma/powos-transparent-desktop.js). It draws NOTHING and clears the window's fill, so the real Android
+  wallpaper + frost show behind the app, seamless with home. The user wants this (2026-10-23, angry regression).
+- Never draw the wallpaper in Plasma: cb40fa5 showed ShellWallpaper's /run/powos-app/powos-wallpaper-<ms>.jpg there
+  (to fix black task snapshots); live that was a second crystal at another scale/offset (KWin scale 2.25), black at
+  the top. Reverted. The app still writes those files (unused). Task snapshots / recents of the desktop show its
+  widgets on black (Android leaves the wallpaper out) - open; fix it on the Android side, not with a Plasma picture.
+- Wrong desktop again? Look: containment's wallpaperplugin (appletsrc), the installed main.qml (no Image), plasmashell
+  started after the QML's mtime (it loads the QML once; rooted.sh deploy doesn't restart it, the check does),
+  KWin script powos-translucent-desktop loaded.
+- The wallpaper is OxygenOS's LIVE video wallpaper (FoldN3OpBlueWallpaper): its frame changes (a clip on unlock/fold),
+  and home's widgets/status text are lit over its black sky - neither is a reference for "black". The 10-23 FAIL
+  (0.117 black) was exactly that; measured 2026-10-24 with home's UI rects left out: 0.991 match, 0.009 black.
+  SurfaceFlinger's stack is the structural proof: Wallpaper, then MainActivity's SurfaceView (isOpaque=false).
+- KWin's own capture works on the phone (2026-10-23): `spectacle -b -n -f -o FILE` as the session user gives a
+  2268x2440 RGBA PNG WITH alpha (transparent desktop = alpha 0). The ScreenShot2 D-Bus API itself refuses a plain
+  python caller (NoAuthorized); PIL exists in PowOS for measuring. Check: verify/plasma-transparent.sh (home shot vs desktop shot where KWin alpha=0).
+- A KWin capture taken while the session is frozen (desktop not in front) after a session start is ALL BLACK: the
+  deleted ksplashqml window (stackingOrder, deleted=true) stays painted until frames resume. Bring the desktop up
+  first. And a black frame "matches" a picture's black sky - compare only the picture's lit pixels.
+- QML: /usr/lib/qt6/bin/qmllint in PowOS lints a deployed wallpaper; deploy rootfs files with
+  `PATH="$PWD/tools/phone/bin:$PATH" targets/android/rooted/rooted.sh deploy --note|--silent`.
+
+## Shot checks (shell/dev/shots.mjs, after each scene)
+- Errors per shot: overlapping tiles (>1 px), partial joins, uneven gutters on mode=desktop, missing glyphs.
+  SHOTS_STRICT=1 fails the run and gate.sh --shots. gate.sh mounts the real nerd_symbols.ttf. Output dirs under $HOME.
+
+## Paused Plasma host: what's left on the phone
+- Off: ~/.config/powos/desktop-shell.off (autostart start --auto then does nothing); unified sleep freezes its tree.
+- Left data: shell-data/desktop-*, ~/.local/share/powos/net (Hue key copy; net-secret.sh remove), desktop-wallpaper.jpg
+  and Omarchy current/theme from `dev/phone.sh wallpaper|theme` (HACK row dev/phone.sh; fix: the app writes them).
+- dev/phone.sh render NAME WxH: off-screen second powos-shell (own profile, --disable-gpu), fresh frame when frozen.
+
+The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's rules: docs/AGENT-HANDBOOK.md.
+
+## How it fits
+- powos-shell (C++/Qt 6): one QWebEngineView per role per screen, made a layer surface by LayerShellQt (src/view.*:
+  ShellView; src/home.*: the home; src/panel.*: phase 0's bar, not started by default). Serves shell/ on
+  powos://shell/ (base $POWOS_SHELL_DIR, overrides ~/.config/powos/shell, hot reload), _app/<id>/ from
+  ~/.local/share/powos/apps/<id>/current/ui, _font/symbols through fontconfig, icons on powos://icon/.
+- Home: bottom layer, every edge, exclusive zone 0, keyboard on demand, scope "dock" (KWin: a special window: not
+  a task, not an Android task, blurred). The background layer shares KWin's desktop layer with plasmashell's window.
+  POWOS_HOME_LAYER=background / POWOS_HOME_SCOPE=... try others.
+- Bridge (src/bridge.cpp): the phone's contract, PowosHost.call(id, method, argsJson) over QWebChannel, plus the native
+  port (PowosNative + MessagePort): b.hello -> b.state, b.r -> KWindowEffects::enableBlurBehind (KWin 6.7:
+  ext_background_effect_v1; the capability arrives ~0.5 s late, so a "no" is re-asked - HACK). Natively: apps (KSycoca,
+  ApplicationLauncherJob), windows (TasksModel), store (~/.local/share/powos/shell-data, the phone's names), theme
+  (~/.local/state/omarchy/current/theme/colors.toml, mapped as ui/Theme.kt), ai (`powos manager --once-stdin
+  --json-events`, items kept in store desktop-chat).
+- In the page (shell/hosts/desktop.ts, picked when PowosHost.name === "powos"): home layout + recents over the store
+  (hosts/layout.ts, shared with the mock), keyboard/speech/widget screens as no-ops.
+- STDB: the page's own ws://127.0.0.1:3410 (shell/apps/stdb.ts), unchanged. One failed first connect per database at
+  start, then connected: not a loop. The page's fetch() to STDB's HTTP fails from powos: (CORS): no evidence of anything.
+
+## On the phone (KWin on the Anland backend, rooted session)
+    sources/powos-shell/dev/phone.sh build          # this tree -> built on the phone (~20 s), /usr/lib/powos/desktop-shell
+    sources/powos-shell/dev/phone.sh start|stop|status   # status: RSS + CPU ticks per process (host, zygotes, renderer)
+    sources/powos-shell/dev/phone.sh cdp 'JS'       # evaluate in the desktop page (DevTools on 127.0.0.1:9333, dev runs only)
+    sources/powos-shell/dev/phone.sh page NAME      # Chromium's render -> /home/powos/design-qa/desktop-NAME.png
+    sources/powos-shell/dev/phone.sh shot NAME      # KWin's capture (spectacle)
+- The phone's Qt is 6.12 with QtWebEngine 6.11, which works (measured). Install nothing: units/phone/powos-desktop-shell.json.
+- While the "PowOS" activity isn't in front, the session is frozen: KWin sends no frame callbacks, a newly started
+  surface never commits, and KWin's capture shows the last painted frame (Plasma's clock stuck, ghosts of closed
+  windows: deleted=true in stackingOrder). Report it; never unfreeze it or bring the activity up yourself. Android's
+  screencap of the activity then shows only the wallpaper (Plasma's own panel isn't in it either).
+- KWin scripts for window facts (workspace.stackingOrder: caption, resourceClass, dock, deleted, frameGeometry); their
+  print() lands in /run/powos-app/hyprland.log (KWin's stdout, read via tools/phone/user.sh). Never call
+  org.kde.KWin showDebugConsole: it opens a window on the desktop.
+- QtWebEngine draws classic scrollbars (the phone's WebView overlays its own): desktop.css hides them, scrolling stays.
+- Rest cost, measured 2026-10-21 over 60 s settled: host 3 ticks, renderer 0, zygotes 0; ~250 + 230 + 145 MB RSS.
+
+## Renders and checks
+- shell/dev/gate.sh boots mode=desktop with the other pages, idle check included.
+- `SHOTS_ONLY='^desktop' shell/dev/gate.sh --tree --shots DIR --wallpaper FILE`: desktop, desktop-launcher,
+  desktop-chat at plasma (558x1198) and laptop (1280x800) sizes; report.json has contrast per text.
+  Use the phone's real wallpaper too, not only the light fallback. The desktop scenes drop the launcher's transform
+  and will-change, else the emulated backdrop blur never reaches the wallpaper (an unblurred render under-states
+  contrast). SHOTS_PROBE='JS' prints a value per shot (e.g. 404s from performance entries). Islands show their fault
+  tile headless (no STDB); real island data only from `dev/phone.sh page`.
+  Headless-only errors: STDB refused (no STDB in the container), /_font/symbols 404 (the mock doesn't serve it).
+- The launcher on the desktop has a deeper dim (tint + 42%, desktop.css), measured with the blur emulated: the
+  reference fill left 54 of 67 labels under 4.5:1 over a light wallpaper. Contrast wins over the reference look;
+  re-measure (both wallpapers, three themes) before changing it.
+- host.net (src/net.cpp, apps/net.ts's n.req over the native port) mirrors ShellNet.kt. Its secrets and pins are
+  the desktop's own (~/.local/share/powos/net, 0600, key "<app>/<name>"). On the phone the Hue key was copied from
+  the Android app's store with the user's say (2026-10-21), root-side and never printed:
+      sources/powos-shell/dev/net-secret.sh copy local.lights hue      # -> "copied"
+      sources/powos-shell/dev/net-secret.sh remove local.lights hue    # the way back -> "removed"
+  Lights then loads its rooms and scenes. Never pair, switch, toggle or dim a light yourself; read state only.
+- Shell files ship as usual: commit, rebase, push to origin, `tools/phone/ship.sh request --note "..."`; the
+  desktop host's own copy of shell/ only changes with dev/phone.sh build.
+
+## Next
+Slice 2 (Linux windows in the dock + switcher) is done through WindowTasks, not the plasma-v1 bridge: KWin's "open"
+carries the app id; details in the switcher skill (Linux windows in the dock + switcher). Next: inline replies (NotificationReplied), images in
+clipboard/notifications. Paused host: hotkey, dictation, theme mirror, widget picker, x86 Plasma, input region, OWL widgets.
+
+## Writing a KWin patch, reserving a number, and finding a built package (friction f76/f86/f87/f98/f111/f116/f121)
+- **Never download kwin-6.7.5 and hand-apply 0001..00NN to write patch 00NN+1.** Run
+  `targets/android/pkgs/kwin/src-tree.sh` - it reads PKGBUILD's own `_patches` list (never drifts from the real
+  set), downloads the pristine source through the shared Mac-side cache (cached after the first call, on any
+  worktree), applies every existing patch as its own git commit, and prints the tree path plus the next free
+  patch number. Edit in that tree, then `git diff` (or `git format-patch -1 HEAD`, renumbered) for the new patch.
+- **Reserve the number before you write it into a filename or PKGBUILD's pkgrel:**
+  `tools/agents/pkg-claim.sh reserve-patch targets/android/pkgs/kwin` / `reserve-pkgrel targets/android/pkgs/kwin`
+  - it checks this worktree, origin, AND a shared claims ledger together, so two agents in two worktrees never
+    both land patch 0025 / pkgrel 3.29 (that happened once: different filenames, so git saw no conflict and both
+    merged). `tools/agents/land.sh` also refuses a push whose patch number or pkgrel doesn't clear origin's, as a
+    backstop if a reservation gets skipped.
+- **Build inputs `build-pkgs.sh` needs that git ignores** (`out/powos-rootfs.tar.gz`, `pkgs/steam/sysvipc-emu.tar.gz`)
+  and **every package it builds** (kwin, steam, fex-emu, gtk2, ...) live in a shared, content-addressed cache
+  (`tools/agents/build-inputs-cache.sh`, `~/.cache/powos-build-inputs`, never pruned - hardlinked, so keeping
+  every version costs no real disk space). `worktree.sh new` links the gitignored inputs into a fresh worktree
+  automatically; `build-pkgs.sh` fills in anything still missing and lands every build there too, so the kwin
+  3.29/3.30/3.31 and steam 29 packages are findable even after the worktree that built them is gone.
+- **Installing a newest build:** `kwin-up.sh`'s and `linux-float.sh`'s lookups, and `pkg-install.sh <name>` (a
+  bare name, not just a path - e.g. `pkg-install.sh kwin`), all check the shared cache as well as sibling
+  worktrees. You don't need to keep a worktree alive, or hand-hardlink a package out of one, just to install it.
+- **A check that needs a new KWin installed first:** queue `tools/phone/verify/kwin-install.sh MIN` ahead of the
+  feature check, same board task - queue.sh runs a window's jobs in queue order, so the feature check finds KWin
+  already there instead of paying for the install + session restart inside its own budget.
+
+## Latest hand-off
+2026-10-24 (plasma-modes): three modes landed (30d37122 kwin 0025/3.29, ed129de0 app `desktop 1|0` + Restarter,
+08671d8d checks + docs/DESKTOP-NATIVE.md). Nothing phone-verified: ship + verify queue were paused by the user.
+- Queued: plasma-transparent.sh (--close transparent task), plasma-modes.sh plasma (--close) / shell / together on
+  in-the-plasma-app-linux-windows-show-as-normal-k. plasma/together need the new APK AND kwin 3.29 (kwin-up.sh's
+  lookup now also checks the shared build-inputs cache, ~/.cache/powos-build-inputs/pkgs - 3.29/3.30/3.31 are all
+  there, so worktree plasma-modes no longer needs to stay alive just to hold 3.29; see "Writing a KWin patch" below).
+- Gotchas: the wallpaper is a live video; home's UI is no pixel reference. The Docker data disk was full: build kwin with
+  PKG_SCRATCH=/var/tmp/powos-pkgs. KWin source for a new patch: `targets/android/pkgs/kwin/src-tree.sh` (see
+  "Writing a KWin patch" above the hand-off) - never hand-apply 0001-00NN again.
+- Unverified: a restart from home starts SessionService without MainActivity; KWin must come up without the desktop's
+  surface (check linux-session.sh). Full-screen apps from Plasma still become their own tasks (deliberate).
+- Next: popups of task windows clipped (DESKTOP-NATIVE slice 4, KWin); user's decision on the design note (board
+  native-desktop-architecture, waiting).

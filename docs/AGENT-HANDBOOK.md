@@ -30,44 +30,48 @@ section. The index below gives the line ranges.
 
 **Loading a skill from inside a worktree:** `.claude/skills/<name>` is a tracked directory, so every
 `tools/agents/worktree.sh new` checkout gets its own on-disk copy - with dozens of worktrees alive at once, the bare
-name (`powos-design`) has no single unscoped owner and `Skill` refuses it ("Unknown skill: powos-design"). Call it
+name (`powos-shell`) has no single unscoped owner and `Skill` refuses it ("Unknown skill: powos-shell"). Call it
 with YOUR OWN worktree's scoped name instead: `<repo-dir>/.claude/worktrees/<your-worktree-name>:<skill-name>` (e.g.
-`PowOS/.claude/worktrees/emu-lanes:powos-design`) - find the exact spelling for your worktree in the Skill tool's
+`PowOS/.claude/worktrees/emu-lanes:powos-shell`) - find the exact spelling for your worktree in the Skill tool's
 available-skills listing before calling it, never guess the bare name.
 
 ## Which expert owns what
 Route work to the owner's SKILL, not to a long-lived agent: each task is a FRESH agent that loads the owner's skill
-(.claude/skills/<owner>/SKILL.md + .claude/agents/<owner>.md), does that one task, writes what it learned into the
+(.claude/skills/<skill>/SKILL.md + .claude/agents/<agent>.md), does that one task, writes what it learned into the
 skill, and exits (see Efficiency). The Skill tool's catalog is fixed at session start, so it can't see a worktree
 `tools/agents/worktree.sh new` just created in THIS session - it errors "Unknown skill" or lists only other
 worktrees' scoped variants even though the new worktree has an identical SKILL.md; `Read` the file directly
-(`.claude/skills/<owner>/SKILL.md`) instead of waiting on the Skill tool (friction f143). Changing another owner's file: message the owner (with numbers), or make the
+(`.claude/skills/<skill>/SKILL.md`) instead of waiting on the Skill tool (friction f143). Changing another owner's file: message the owner (with numbers), or make the
 minimal change and tell them. Default subagent model is **Sonnet**; reach for Opus only for hard debugging (a root
 cause that resists two Sonnet passes), not routine work - it costs more and the context budget below is the same
 either way. Keep briefs SHORT: point at this handbook and the owner's skill rather than re-explaining what they
 already cover; a brief that restates handbook/skill content is itself a hand-off that will drift from the source.
 
-| area | agent (skill of the same name) |
-|---|---|
-| app drawer / launcher panel, its drag + fade, recents row, A-Z bar, search pill spacing | powos-drawer |
-| look and feel: design language, theme tokens, shade + notifications, control center, contrast, review renders | powos-design |
-| the pet's body, states, bubbles, local.pet app + `powos pet`, pet-over-apps window | powos-pet |
-| the pet's movement: petphys/petai/petmove/petperch, its frame cost | powos-pet-physics |
-| dictation: Speech.kt, GpuSpeech.kt, dictation.ts, push-to-talk, side button | powos-speech |
-| idle CPU, frames at rest, nativeglass.ts cost, profiling tools (cpu.sh, cdp.sh, idle-sample.sh) | powos-perf |
-| GPU servers gpu-195 / .58, llm.pow / stt.pow / voiceagent.pow, model loads, benches | powos-gpu-servers |
-| home widgets: shell panels, OWL (.owl), app islands (Lights), preview tool, widget gesture ownership | powos-widgets |
-| edge gestures, Quick Tools, corner pull-ups over apps, overlay window hosts, home pull -> shade | powos-gestures |
-| inter-agent comms (`powos comms`, MCP), manager inbox, agentsd, agent-mail notifications | powos-comms |
-| SpacetimeDB modules, vendored bindings, shell/apps/stdb.ts, bindings-check, publishes | powos-stdb |
-| games: Steam/Proton/FEX on the phone, Broforce checks, xwayland-kgsl, phone kernel build/test boot/flash/rollback | powos-games |
-| swipe home, recents switcher, NavGesture/RecentsTransition, page-after-home, wallpaper capture | powos-switcher |
-| native bridge security: PowosHost/Native/Boot, ShellOrigin, iframes, bridge-check.sh | powos-bridge-security |
-| PowOS AI's chat: rich messages, present/present_choices, PowosAiChat items | powos-chat |
-| on-device verification (journeys, frame-stepping, idle CPU samples, Broforce), closing board items with evidence | powos-verify |
-| the desktop shell: powos-shell (Plasma host), hosts/desktop.ts, mode=desktop, dev/phone.sh | powos-desktop |
-| other shell (web UI) work no expert owns | powos-shell-dev |
-| other Android app (Kotlin) work no expert owns | powos-android-dev |
+**2026-10-24: 18 skills merged into 7** (`.claude/skills/`) - agent names below are unchanged, but several now
+load a skill with a different, shared name (the skill covers more than one agent's area). The table's "skill"
+column names the file to load; `.claude/skills/<skill>/SKILL.md` has a `## <old-name>` section per folded-in area.
+
+| area | agent | skill |
+|---|---|---|
+| app drawer / launcher panel, its drag + fade, recents row, A-Z bar, search pill spacing | powos-drawer | powos-shell |
+| look and feel: design language, theme tokens, shade + notifications, control center, contrast, review renders | powos-design | powos-shell |
+| the pet's body, states, bubbles, local.pet app + `powos pet`, pet-over-apps window | powos-pet | powos-pet |
+| the pet's movement: petphys/petai/petmove/petperch, its frame cost | powos-pet-physics | powos-pet |
+| dictation: Speech.kt, GpuSpeech.kt, dictation.ts, push-to-talk, side button | powos-speech | powos-voice |
+| idle CPU, frames at rest, nativeglass.ts cost, profiling tools (cpu.sh, cdp.sh, idle-sample.sh) | powos-perf | powos-phone |
+| GPU servers gpu-195 / .58, llm.pow / stt.pow / voiceagent.pow, model loads, benches | powos-gpu-servers | powos-voice |
+| home widgets: shell panels, OWL (.owl), app islands (Lights), preview tool, widget gesture ownership | powos-widgets | powos-shell |
+| edge gestures, Quick Tools, corner pull-ups over apps, overlay window hosts, home pull -> shade | powos-gestures | powos-shell |
+| inter-agent comms (`powos comms`, MCP), manager inbox, agentsd, agent-mail notifications | powos-comms | powos-data |
+| SpacetimeDB modules, vendored bindings, shell/apps/stdb.ts, bindings-check, publishes | powos-stdb | powos-data |
+| games: Steam/Proton/FEX on the phone, Broforce checks, xwayland-kgsl, phone kernel build/test boot/flash/rollback | powos-games | powos-games |
+| swipe home, recents switcher, NavGesture/RecentsTransition, page-after-home, wallpaper capture | powos-switcher | powos-windows |
+| native bridge security: PowosHost/Native/Boot, ShellOrigin, iframes, bridge-check.sh | powos-bridge-security | powos-shell |
+| PowOS AI's chat: rich messages, present/present_choices, PowosAiChat items | powos-chat | powos-data |
+| on-device verification (journeys, frame-stepping, idle CPU samples, Broforce), closing board items with evidence | powos-verify | powos-phone |
+| the desktop shell: powos-shell (Plasma host), hosts/desktop.ts, mode=desktop, dev/phone.sh | powos-desktop | powos-windows |
+| other shell (web UI) work no expert owns | powos-shell-dev | powos-shell |
+| other Android app (Kotlin) work no expert owns | powos-android-dev | powos-phone |
 
 ## Efficiency (f168: user, 2026-10-22: "insanely inefficient"; measured 534k context per call, 13% waiting, 48% tooling)
 - ONE task per agent run: pick up, ship the slice, put what you learned into your skill (facts, <=100 lines, no
@@ -575,7 +579,7 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
   GlassBlur.kt (SurfaceFlinger blur regions); liquid refraction LiquidGlass.kt + WallpaperBackdrop.kt (OFF by default).
 - Widgets: shell built-ins (shell/ui panels), OWL widgets (.owl: evaluated by the Kotlin engine, drawn by
   shell/ui/owl.tsx from the trees it sends), PowOS-app islands (apps' ui/widgets). See EVERY widget at every size:
-  `shell/dev/preview.sh` (or `powos app preview <dir|file.owl|id>`) - details in the powos-widgets skill; the gate runs
+  `shell/dev/preview.sh` (or `powos app preview <dir|file.owl|id>`) - details in the powos-shell skill; the gate runs
   it (--fast) when a push touches what draws widgets.
 - Speech: one shared recognizer (targets/android/app .../ui/Speech.kt), bridge events speech.state/done/permission.
 - Assist overlay: VoiceInteractionService session (PowosAssistSession.kt) hosting shell mode=assist.
@@ -591,7 +595,7 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
   table: shell-errors shows `Offset is outside the bounds of the DataView` (vendor/spacetimedb.js) or
   `stdb: <db>: ... bindings stale for <table>`. push.sh and ship-apk run tools/phone/bindings-check.sh (one phone
   call): bindings ahead of the live module are published from this commit's module, anything else refuses with the
-  fix. A new local board-CLI flag can silently fall through to the phone's older installed copy when the Mac's SpacetimeDB is unreachable (remote()/handle_down()), giving the same "unknown option" error (f170). Details: powos-stdb skill.
+  fix. A new local board-CLI flag can silently fall through to the phone's older installed copy when the Mac's SpacetimeDB is unreachable (remote()/handle_down()), giving the same "unknown option" error (f170). Details: powos-data skill.
 - GPU box 192.168.50.195: voice stack units (hosts/gpu-195/, units/gpu-195/), voiceagent.pow; plan docs/GPU-SERVERS-PLAN.md.
 
 ## Native/hidden-API work (learned the hard way)

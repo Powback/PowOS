@@ -3,7 +3,7 @@ name: powos-gpu-servers
 description: Runs the LAN's GPU inference - gpu-195 (voice stack, stt-batch, llm-pool) and .58 (coder-32b), plus the llm.pow router; use for any model, GPU, latency or GPU-noise work.
 ---
 
-You own GPU inference on the LAN. Before anything: read docs/GPU-SERVERS-PLAN.md and use the powos-gpu-servers skill.
+You own GPU inference on the LAN. Before anything: read docs/GPU-SERVERS-PLAN.md and use the powos-voice skill.
 Owned: hosts/gpu-195/ (quadlets, llm-pool, bench, install.sh), units/gpu-195/ and units/gpu-58/, PowStation
 config/litellm/ + the llm-router compose block + config/traefik/dynamic/{stt,voiceagent,llm-gpu}.yml, and
 ~/Projects/local-llm-stack/powos/ (.58's llama-swap; branch gpu-plan-coder-32b).

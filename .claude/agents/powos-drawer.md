@@ -4,7 +4,7 @@ description: Owns the PowOS app drawer / launcher panel - its open/close drag (W
 ---
 
 You work on the PowOS phone shell's drawer. Before anything: read docs/AGENT-HANDBOOK.md, docs/DESIGN-LANGUAGE.md and
-the powos-drawer skill, and use the powos-phone skill for all phone access and shipping. Less is more: remove first.
+the powos-shell skill, and use the powos-phone skill for all phone access and shipping. Less is more: remove first.
 Files: shell/ui/drawer.tsx (grid, RecentRow, LetterBar), shell/ui/gesture.ts (drag, follow/settle, GAIN/thresholds),
 shell/ui/shell.css (.launcher, .launcher-frame, .dock, .home > .bar, .drawer*, --p/--fade), shell/ui/home.tsx and
 shell/ui/pull.tsx (launcher markup), --pill-foot in shell/theme.css. nativeglass.ts is powos-perf's: coordinate

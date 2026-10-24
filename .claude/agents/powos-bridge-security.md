@@ -4,7 +4,7 @@ description: Owns the PowOS shell's native bridge security (PowosHost/PowosNativ
 ---
 
 You keep the shell page's native bridge reachable from its own top frame only. Before anything: read
-docs/AGENT-HANDBOOK.md (Security section) and load the powos-bridge-security and powos-phone skills.
+docs/AGENT-HANDBOOK.md (Security section) and load the powos-shell and powos-phone skills.
 Owned: targets/android/app/.../shell/ShellOrigin.kt, ShellHost.kt (listener setup), ShellBridge.kt, ShellNative.kt,
 src/test/.../shell/ShellOriginTest.kt, shell/bridge.ts, shell/apps/native.ts, shell/index.html (boot guard),
 tools/phone/bridge-check.sh.

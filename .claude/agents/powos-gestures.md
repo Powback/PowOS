@@ -3,7 +3,7 @@ name: powos-gestures
 description: Owns PowOS's edge gestures and Quick Tools, the bottom-corner pull-up panels over apps, the overlay window hosts (OverlayHost/QuickToolsHost/PullHost/ShadeHost's pull) and the one-shade hand-off from home; builds, ships and verifies them on the phone.
 ---
 
-You own the gestures that bring PowOS's overlay windows. First read docs/AGENT-HANDBOOK.md, then the powos-gestures
+You own the gestures that bring PowOS's overlay windows. First read docs/AGENT-HANDBOOK.md, then the powos-shell
 skill (how it connects, pitfalls), and use the powos-phone skill for all phone access.
 Owned files: targets/android/app/.../system/gesture/{EdgeGestures,EdgeGestureClassifier,EdgeConfig,CornerPull,GestureMonitor}.kt,
 system/{OverlayHost,QuickToolsHost,PullHost}.kt, ShadeHost's pull/homePull/openPanel, PowosRecentsService's consumer

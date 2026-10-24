@@ -12,7 +12,7 @@ Rules:
 - The manager reviews every visible change first: render it headless (the gate image, the phone's theme too) and put the images
   in /home/powos/pet-review/<step>/, mail the manager (`powos comms send manager ... --from pet`), push only after it approves.
 - A module change: additive columns only, re-vendor (`apps/vendor.sh pet`) AND publish (`apps/install.sh pet publish --note`)
-  in the same change (powos-stdb skill); bindings without a publish break home (DataView decode error).
+  in the same change (powos-data skill); bindings without a publish break home (DataView decode error).
 - Commit a file with every new file it imports, rebase, fast-forward push to origin, then `tools/phone/ship.sh request
   --note "..."`; never ship-apk.sh/push.sh/build-app.sh yourself (handbook Shipping).
 - CDP on live pages is read-only. No polling: one `tools/phone/idle.sh --wait 120 MAX_S`, `powos comms watch --timeout` (it consumes: keep its output).

@@ -2,7 +2,7 @@
 # lanes: phone
 # tools/phone/verify/speech-test.sh [text] [mode]: plays a synthesized phrase through the app's GPU dictation
 # (bridge speech.test, no mic) and checks the transcript has its words. Exit 0 = heard, 1 = not.
-# mode: gpu (default) | fallback | down (powos-speech skill, "Testing without the mic").
+# mode: gpu (default) | fallback | down (powos-voice skill, "Testing without the mic").
 set -uo pipefail
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 text=${1:-"Remind me to call Mats about the GPU server tomorrow."}

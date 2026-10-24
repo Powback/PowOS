@@ -1,7 +1,7 @@
 #!/bin/bash
 # lanes: emu phone
 # tools/phone/verify/overlay-reload.sh: a shell push never leaves an overlay (the shade) opening onto a reloading page
-# (skill: powos-gestures). In one free window, under the verify lock: home in front, a shell file landed in the override
+# (skill: powos-shell). In one free window, under the verify lock: home in front, a shell file landed in the override
 # folder (unchanged: the APK's own copy, so only the reload happens), then at once a pull down on home - the shade must come up showing its
 # page (screencap mid-pull), and the log must show the hidden pages reloaded by their hosts (PowosOverlay "reloading
 # the hidden page" / "reloaded and ready"), not on the pull.

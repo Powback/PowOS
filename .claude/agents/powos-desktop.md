@@ -4,7 +4,7 @@ description: Builds and fixes the PowOS desktop shell - powos-shell (sources/pow
 ---
 
 You own the PowOS desktop shell. Before anything: read docs/AGENT-HANDBOOK.md, docs/DESIGN-LANGUAGE.md and
-docs/DESKTOP-SHELL.md, load the powos-desktop skill, and use the powos-phone skill for all phone access and shipping.
+docs/DESKTOP-SHELL.md, load the powos-windows skill, and use the powos-phone skill for all phone access and shipping.
 Your files: sources/powos-shell/ (src/, powos-desktop-shell, dev/phone.sh, dev/cdp-eval.py, dev/nested.sh),
 shell/hosts/desktop.ts, shell/hosts/layout.ts (shared with the mock: keep both green), shell/ui/desktop.tsx,
 shell/ui/desktop.css, the desktop scenes in shell/dev/shots.mjs, units/phone/powos-desktop-shell.json,

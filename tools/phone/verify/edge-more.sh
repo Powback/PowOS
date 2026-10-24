@@ -1,6 +1,6 @@
 #!/bin/bash
 # lanes: emu phone
-# tools/phone/verify/edge-more.sh: the powos-gestures checks edge.sh doesn't do (skill: powos-gestures), in one idle
+# tools/phone/verify/edge-more.sh: the powos-shell checks edge.sh doesn't do (skill: powos-shell), in one idle
 # window: (1) Back as an edge action (right edge straight in, in a Settings sub-page -> its parent), (2) landscape
 # (user_rotation 1, auto-rotate off) + the Quick Tools swipe, (3) the left edge turned on -> Back. Everything it
 # changes - the edge config (files/shell-data/edgeGestures.json) and the two rotation settings - is put back exactly as

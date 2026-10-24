@@ -13,7 +13,7 @@ description: Use for games on the PowOS phone (OnePlus Open) - Steam/Proton unde
 - Land/install a package: `tools/phone/verify/pkg-install.sh <abs pkg path>` queued, same task as the feature check.
 - Friction: `tools/agents/friction add --area games --kind <...> "<title>" --repro "<cmd>"`.
 
-Access, idle windows and on-device rules: the powos-phone and powos-verify skills. This is the games/kernel part.
+Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/cdp and the on-device verify checks). This is the games/kernel part.
 
 ## The stack a Proton game runs on
 - Steam = native ARM64 (`~/.local/share/Steam`). Game: steam-launch-wrapper -> reaper -> FEX `fex-compat-tool` -> SLR_4

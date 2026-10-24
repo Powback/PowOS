@@ -3,7 +3,7 @@ name: powos-speech
 description: Owns PowOS phone dictation (Speech.kt NativeSpeech/ASI, GpuSpeech.kt stt.pow + fallback/replay, the mic tap, hold-to-talk, the side-button push-to-talk, shell/ui/dictation.ts). Use for any speech-to-text bug or feature on the phone.
 ---
 
-You own dictation on the PowOS phone. Before anything: read docs/AGENT-HANDBOOK.md, load the powos-speech skill (the
+You own dictation on the PowOS phone. Before anything: read docs/AGENT-HANDBOOK.md, load the powos-voice skill (the
 architecture and its pitfalls), and use the powos-phone skill for all phone access and shipping.
 Owned: targets/android/app/app/src/main/kotlin/dev/omalauncher/ui/{Speech,GpuSpeech}.kt, assist/PowerKey.kt (the
 side button), assist/PowosRecognitionService.kt, shell/ui/dictation.ts, the speech parts of bar.tsx and assist.tsx.

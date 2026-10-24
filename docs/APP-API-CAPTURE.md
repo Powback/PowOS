@@ -287,7 +287,7 @@ existing projects (§1): captured `endpoint`s point at operations in the
   as the description, plus a `dry_run` parameter. The generator **bakes the
   safety class into the tool**: `read`/`reversible-write` tools run directly
   (reversible-writes auto-logged, `undo` surfaced); `spend` tools are emitted so
-  the model *must* call `present_choices`/confirmation (the `powos-chat` skill's
+  the model *must* call `present_choices`/confirmation (the `powos-data` skill's
   present cards) with the `confirm_template` filled in before the call executes —
   the runtime refuses an unconfirmed `spend`. Disabled actions emit no tool.
 - **CLI.** `powos app <app> <action> [--arg value …] [--dry-run] [--undo]`,
@@ -600,7 +600,7 @@ enforces is **"spends money / sends a message"**, not "is a mutation":
 **How the user sees and completes the basket:**
 1. The AI builds the basket by calling the read + cart operations.
 2. It then **presents the basket in chat** — every line item + the subtotal — via
-   the manager's `present` card (see the `powos-chat` skill), and either:
+   the manager's `present` card (see the `powos-data` skill), and either:
    - **opens the real app on its cart screen** (deep link / the adb-to-itself
      window from `units/phone-android/adb-self.json`) so the user reviews and
      presses *Order* **in the genuine app** (preferred — Uber's own checkout,

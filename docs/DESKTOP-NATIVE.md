@@ -109,7 +109,7 @@ the surface.
 5. **One title bar per window in the web shell** (in progress elsewhere: Window core #7, CSD apps): a task draws the
    client area only; KDE's decoration never shows there.
 6. **Shared look**: the Plasma app's desktop uses the same wallpaper (done: transparent) and, later, the web shell's
-   theme colours through the theme mirror (powos-desktop skill, paused list).
+   theme colours through the theme mirror (powos-windows skill, paused list).
 7. **Measure for C**: input latency and frame cost of a Kate window in both modes (plasma-modes.sh records the
    evidence), before any decision about running `shell/` inside KWin.
 

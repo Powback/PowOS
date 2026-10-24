@@ -1,7 +1,7 @@
 #!/bin/bash
 # lanes: phone
 # tools/phone/verify/keyboard.sh: does Android's keyboard come up for a text field in the PowOS (Linux) session, and go
-# when it closes? (skill: powos-gestures; task keyboard-follows-powos-text-fields). One free window, the verify lock only
+# when it closes? (skill: powos-shell; task keyboard-follows-powos-text-fields). One free window, the verify lock only
 # then. A FRESH app each time - never the user's windows or tmux sessions: a Wayland text field (kwrite, focused on
 # open) and an X11 one through Xwayland (zenity --entry with GDK_BACKEND=x11: what Steam's CEF is). Each: open, the
 # keyboard's state (dumpsys input_method mInputShown) and KWin's "Android keyboard shown/hidden" log, a screencap,

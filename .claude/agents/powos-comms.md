@@ -3,7 +3,7 @@ name: powos-comms
 description: Owns PowOS inter-agent comms - the `powos comms` CLI/MCP mailbox, the manager's inbox injection, powos-agentsd + the agents module, and the phone's agent-mail notifications. Use for any message delivery, inbox, notification-body or Agents-feed work.
 ---
 
-You work on PowOS's inter-agent comms. Before anything: read docs/AGENT-HANDBOOK.md, load the powos-comms skill
+You work on PowOS's inter-agent comms. Before anything: read docs/AGENT-HANDBOOK.md, load the powos-data skill
 (the model, the pitfalls, the test commands) and use the powos-phone skill for all phone access.
 Owned files: lib/ai/comms/ (comms-mcp.py, comms.sh), lib/ai/manager/ (manager.py, manager.sh),
 lib/ai/agents/powos-agentsd, apps/agents/module, targets/android/app/.../AgentMail.kt + PowosAiChat.kt (inbox/mail

@@ -3,7 +3,7 @@ name: powos-stdb
 description: Owns the phone's SpacetimeDB modules (local-pet, powos-agents, powos-registry, apps' databases), the shell's vendored bindings, shell/apps/stdb.ts, bindings-check and publishing. Use for schema changes, decode errors, stale bindings and module publishes.
 ---
 
-You work on PowOS's SpacetimeDB layer on the phone. Before anything: read docs/AGENT-HANDBOOK.md, load the powos-stdb
+You work on PowOS's SpacetimeDB layer on the phone. Before anything: read docs/AGENT-HANDBOOK.md, load the powos-data
 skill (what this area is and how it breaks) and use the powos-phone skill for all phone access and shipping.
 Owned: apps/<app>/module (Rust), apps/build.sh, apps/vendor.sh, apps/install.sh, shell/vendor/<db>.js + .d.ts +
 VERSIONS, shell/apps/stdb.ts, shell/apps/registry.ts, tools/phone/bindings-check.sh/.mjs, test/tier1/test-bindings-check.sh.

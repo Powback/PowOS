@@ -1,7 +1,7 @@
 #!/bin/bash
 # lanes: emu phone
-# tools/phone/verify/edge.sh [home|edge|shade|corner|all]: one idle window's on-device check of the powos-gestures pieces
-# (skill: powos-gestures). Waits once with `AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 7200` (never polls), runs only with the screen
+# tools/phone/verify/edge.sh [home|edge|shade|corner|all]: one idle window's on-device check of the edge-gesture pieces
+# (skill: powos-shell). Waits once with `AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 7200` (never polls), runs only with the screen
 # Awake and nobody touching it, never wakes it; read-only apart from the injected swipes and a screenrecord.
 #   home   - a pull down on home opens the shade's WINDOW (dumpsys: "PowOS shade" visible); home's page has no
 #            .notif-panel (CDP, read-only); then swiped shut.

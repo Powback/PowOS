@@ -1,6 +1,6 @@
 #!/bin/bash
 # lanes: phone
-# tools/phone/verify/fold.sh: the powos-gestures pieces on the other screen of the foldable (skill: powos-gestures) -
+# tools/phone/verify/fold.sh: the powos-shell pieces on the other screen of the foldable (skill: powos-shell) -
 # the device state forced (cmd device_state: 3 OPENED = the inner screen, 0 CLOSED = the cover) for one run of
 # verify/edge.sh there (home pull, edge -> Quick Tools, shade over an app, corner pull), plus where the edge handles'
 # windows sit after the switch. In one free window, the verify lock taken only then; the forced state is always reset at the end
