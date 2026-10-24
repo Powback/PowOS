@@ -131,6 +131,13 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
                 : android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
         getWindow().setAttributes(lp);
         getWindow().setDecorFitsSystemWindows(!on);
+        // A full-screen application (a game played with a controller, a video) keeps the screen on while its task
+        // shows, as Android games do: a controller's input goes to Linux, never Android's user-activity timer, so the
+        // screen timed out mid-game - the task's surface went with it and KWin stopped drawing the game.
+        if (on)
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else
+            getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         android.view.WindowInsetsController c = getWindow().getInsetsController();
         if (c == null)
             return;
