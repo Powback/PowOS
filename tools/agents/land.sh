@@ -11,7 +11,10 @@
 #      got a commit, since this worktree's merge-base, touching the same files AND overlapping line ranges as
 #      this landing's own diff - "origin already changed <file> lines X-Y in <sha> <subject>: check you're not
 #      duplicating it" (friction f115: two agents fixed the same bug in parallel, found only at rebase);
-#   3. fetches origin/worktree-powos-multiplatform and rebases ONCE, right before the push;
+#   3. fetches origin/worktree-powos-multiplatform, refuses a package patch number or pkgrel that's a duplicate
+#      of what's already there (friction f111: two agents landed pkgs/kwin/0025-*.patch and pkgrel 3.29 at the
+#      same time - different filenames, no git conflict, so it merged silently), then rebases ONCE, right
+#      before the push - tools/agents/pkg-claim.sh reserves a free one ahead of time so this never fires;
 #   4. pushes to origin/worktree-powos-multiplatform (never main, never --force); on a push race (someone
 #      landed meanwhile) it fetches + rebases + pushes ONE more time, then gives up rather than loop;
 #   5. sets the board task's step (python3 lib/ai/agents/powos-agents-cli task set), skipped with a note if
@@ -138,9 +141,41 @@ warn_overlap() {
 }
 warn_overlap
 
-# 3+4. fetch, rebase once, push - one retry on a race (someone else landed between fetch and push).
+# Package patch number / pkgrel collision (friction f111): a NEW patch file whose NNNN prefix origin/$BASE
+# already has under a DIFFERENT name (same number, different patch - no git conflict, since they're different
+# filenames), or a PKGBUILD whose pkgrel doesn't come out strictly ahead of origin's. Checked against whatever
+# $REMOTE/$BASE is at the moment of the fetch inside try_land, so a late check (right before each push attempt,
+# including the retry) catches a collision that landed between this worktree's last fetch and now.
+check_pkg_dupes() {
+  local f dir num existing newrel oldrel
+  for f in "${paths[@]}"; do
+    case "$f" in
+    */pkgs/*/[0-9][0-9][0-9][0-9]-*.patch)
+      dir=$(dirname "$f"); num=$(basename "$f" | cut -c1-4)
+      existing=$(git ls-tree -r --name-only "$REMOTE/$BASE" -- "$dir" 2>/dev/null | grep -E "^${dir}/${num}-" || true)
+      if [ -n "$existing" ] && [ "$existing" != "$f" ]; then
+        echo "land.sh: refused - $dir already has patch $num on $REMOTE/$BASE as $(basename "$existing") (you have $(basename "$f")) - reserve a free number: tools/agents/pkg-claim.sh reserve-patch $dir" >&2
+        return 1
+      fi ;;
+    */pkgs/*/PKGBUILD)
+      dir=$(dirname "$f")
+      newrel=$(sed -n 's/^pkgrel=//p' "$f" | head -1)
+      oldrel=$(git show "$REMOTE/$BASE:$f" 2>/dev/null | sed -n 's/^pkgrel=//p' | head -1)
+      [ -n "$newrel" ] && [ -n "$oldrel" ] || continue
+      if [ "$(printf '%s\n%s\n' "$newrel" "$oldrel" | sort -V | tail -1)" != "$newrel" ] || [ "$newrel" = "$oldrel" ]; then
+        echo "land.sh: refused - $f's pkgrel=$newrel doesn't clear $REMOTE/$BASE's pkgrel=$oldrel - reserve a free one: tools/agents/pkg-claim.sh reserve-pkgrel $dir" >&2
+        return 1
+      fi ;;
+    esac
+  done
+  return 0
+}
+
+# 3+4. fetch, check for a package number/pkgrel collision, rebase once, push - one retry on a race (someone else
+# landed between fetch and push).
 try_land() {
   git fetch -q "$REMOTE" "$BASE" || { echo "land.sh: fetch failed" >&2; return 1; }
+  check_pkg_dupes || return 3
   if ! git rebase -q "$REMOTE/$BASE" >/tmp/land-rebase.$$ 2>&1; then
     git rebase --abort >/dev/null 2>&1
     echo "land.sh: rebase onto $REMOTE/$BASE conflicts - resolve by hand, your commit is still local ($sha)" >&2
@@ -155,6 +190,7 @@ if try_land; then
 else
   rc=$?
   [ $rc -eq 2 ] && exit 3
+  [ $rc -eq 3 ] && exit 3   # a real duplicate (check_pkg_dupes) - not a push race, retrying won't help
   echo "land: push raced - fetching and rebasing once more"
   if try_land; then
     echo "land: rebased onto $REMOTE/$BASE and pushed to $BASE (after one retry)"

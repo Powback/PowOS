@@ -157,14 +157,41 @@ Slice 2 (Linux windows in the dock + switcher) is done through WindowTasks, not 
 carries the app id; details in the switcher skill (Linux windows in the dock + switcher). Next: inline replies (NotificationReplied), images in
 clipboard/notifications. Paused host: hotkey, dictation, theme mirror, widget picker, x86 Plasma, input region, OWL widgets.
 
+## Writing a KWin patch, reserving a number, and finding a built package (friction f76/f86/f87/f98/f111/f116/f121)
+- **Never download kwin-6.7.5 and hand-apply 0001..00NN to write patch 00NN+1.** Run
+  `targets/android/pkgs/kwin/src-tree.sh` - it reads PKGBUILD's own `_patches` list (never drifts from the real
+  set), downloads the pristine source through the shared Mac-side cache (cached after the first call, on any
+  worktree), applies every existing patch as its own git commit, and prints the tree path plus the next free
+  patch number. Edit in that tree, then `git diff` (or `git format-patch -1 HEAD`, renumbered) for the new patch.
+- **Reserve the number before you write it into a filename or PKGBUILD's pkgrel:**
+  `tools/agents/pkg-claim.sh reserve-patch targets/android/pkgs/kwin` / `reserve-pkgrel targets/android/pkgs/kwin`
+  - it checks this worktree, origin, AND a shared claims ledger together, so two agents in two worktrees never
+    both land patch 0025 / pkgrel 3.29 (that happened once: different filenames, so git saw no conflict and both
+    merged). `tools/agents/land.sh` also refuses a push whose patch number or pkgrel doesn't clear origin's, as a
+    backstop if a reservation gets skipped.
+- **Build inputs `build-pkgs.sh` needs that git ignores** (`out/powos-rootfs.tar.gz`, `pkgs/steam/sysvipc-emu.tar.gz`)
+  and **every package it builds** (kwin, steam, fex-emu, gtk2, ...) live in a shared, content-addressed cache
+  (`tools/agents/build-inputs-cache.sh`, `~/.cache/powos-build-inputs`, never pruned - hardlinked, so keeping
+  every version costs no real disk space). `worktree.sh new` links the gitignored inputs into a fresh worktree
+  automatically; `build-pkgs.sh` fills in anything still missing and lands every build there too, so the kwin
+  3.29/3.30/3.31 and steam 29 packages are findable even after the worktree that built them is gone.
+- **Installing a newest build:** `kwin-up.sh`'s and `linux-float.sh`'s lookups, and `pkg-install.sh <name>` (a
+  bare name, not just a path - e.g. `pkg-install.sh kwin`), all check the shared cache as well as sibling
+  worktrees. You don't need to keep a worktree alive, or hand-hardlink a package out of one, just to install it.
+- **A check that needs a new KWin installed first:** queue `tools/phone/verify/kwin-install.sh MIN` ahead of the
+  feature check, same board task - queue.sh runs a window's jobs in queue order, so the feature check finds KWin
+  already there instead of paying for the install + session restart inside its own budget.
+
 ## Latest hand-off
 2026-10-24 (plasma-modes): three modes landed (30d37122 kwin 0025/3.29, ed129de0 app `desktop 1|0` + Restarter,
 08671d8d checks + docs/DESKTOP-NATIVE.md). Nothing phone-verified: ship + verify queue were paused by the user.
 - Queued: plasma-transparent.sh (--close transparent task), plasma-modes.sh plasma (--close) / shell / together on
-  in-the-plasma-app-linux-windows-show-as-normal-k. plasma/together need the new APK AND kwin 3.29 (kwin-up.sh installs
-  the newest built pkg from sibling worktrees: keep worktree plasma-modes until 3.29 is installed).
+  in-the-plasma-app-linux-windows-show-as-normal-k. plasma/together need the new APK AND kwin 3.29 (kwin-up.sh's
+  lookup now also checks the shared build-inputs cache, ~/.cache/powos-build-inputs/pkgs - 3.29/3.30/3.31 are all
+  there, so worktree plasma-modes no longer needs to stay alive just to hold 3.29; see "Writing a KWin patch" below).
 - Gotchas: the wallpaper is a live video; home's UI is no pixel reference. The Docker data disk was full: build kwin with
-  PKG_SCRATCH=/var/tmp/powos-pkgs. KWin source for a new patch: download 6.7.5, apply 0001-0025, format-patch.
+  PKG_SCRATCH=/var/tmp/powos-pkgs. KWin source for a new patch: `targets/android/pkgs/kwin/src-tree.sh` (see
+  "Writing a KWin patch" above the hand-off) - never hand-apply 0001-00NN again.
 - Unverified: a restart from home starts SessionService without MainActivity; KWin must come up without the desktop's
   surface (check linux-session.sh). Full-screen apps from Plasma still become their own tasks (deliberate).
 - Next: popups of task windows clipped (DESKTOP-NATIVE slice 4, KWin); user's decision on the design note (board

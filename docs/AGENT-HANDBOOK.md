@@ -95,7 +95,8 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
   when none exists.
 - Board wording (manager, 2026-10-22): notes are plain words for the user, no commit hashes; status `waiting` only for
   something the USER must do (it shows as a Needs-you card), never for a queued check or another agent.
-- Worktrees: `tools/agents/worktree.sh new <name>` (origin tip, shared node_modules), `done <name>` once pushed (refuses
+- Worktrees: `tools/agents/worktree.sh new <name>` (origin tip, shared node_modules, and the Android build's
+  gitignored inputs linked from the shared cache - see "KWin patches" below), `done <name>` once pushed (refuses
   unpushed/uncommitted work), `list`. Never leave a merged worktree behind. It exists only on
   `origin/worktree-powos-multiplatform`, not on `master` (friction f132) - from a bare master checkout (or anywhere
   outside a PowOS worktree), bootstrap it first: `cd ~/Projects/PowOS && git fetch origin worktree-powos-multiplatform
@@ -122,6 +123,26 @@ needed no change (its only path check is the shared base checkout, which hasn't 
 `tools/phone/verify/queue-emu.sh`/`runner-deploy.sh`, and the `units/mac/*.json` doc strings naming them got no
 change. `agent-notices.py` needed no change either - it keys off `basename(cwd)` and exact `from=`/`who=` equality,
 never a hardcoded root.
+
+## KWin patches and the Android package build (friction f76, f86, f87, f98, f111, f116, f121)
+- **Writing a new patch:** `targets/android/pkgs/kwin/src-tree.sh` gives you a patched kwin-6.7.5 git tree in one
+  call - it downloads the pristine source (cached: a second worktree's run doesn't refetch it), applies every
+  existing patch from PKGBUILD's own `_patches` list as its own commit, and prints the tree path plus the next
+  free patch number. Never hand-apply 0001..00NN yourself to get there. Edit in the tree it prints, `git diff` (or
+  `format-patch`) for the new patch.
+- **Reserve before you write a number down:** `tools/agents/pkg-claim.sh reserve-patch targets/android/pkgs/kwin`
+  and `reserve-pkgrel` take the next free patch number / pkgrel across this worktree, origin, AND a shared claims
+  ledger, so two agents in two worktrees never both pick 0025 / pkgrel 3.29. `tools/agents/land.sh` also refuses a
+  push whose patch number or pkgrel doesn't clear origin's, as a backstop.
+- **Build inputs that git ignores** (`out/powos-rootfs.tar.gz`, `pkgs/steam/sysvipc-emu.tar.gz`) and **every
+  package `build-pkgs.sh` builds** live in a shared, content-addressed Mac-side cache
+  (`tools/agents/build-inputs-cache.sh`, `~/.cache/powos-build-inputs`, never pruned). `worktree.sh new` links the
+  gitignored inputs in; `build-pkgs.sh` fills in whatever's still missing and lands every build it produces there
+  too. `kwin-up.sh`, `linux-float.sh` and `pkg-install.sh` (a bare package name, e.g. `pkg-install.sh kwin`) all
+  look there, so a worktree kept alive only to hold a built package (the old way) can now be removed safely.
+- **A check that needs a new KWin:** queue `tools/phone/verify/kwin-install.sh MIN` first (same board task), THEN
+  the feature check - queue.sh runs a window's jobs in queue order, so the feature check finds KWin already
+  there instead of paying for the install + session restart inside its own budget (friction f121).
 
 ## Overhead lessons (nofate/br, SpaceTimeAI)
 - Cost is dominated by re-reading context, not by doing the work - every call pays again for everything already
@@ -427,6 +448,7 @@ never a hardcoded root.
 | `fold.sh` | phone only | the hinge's CLOSED state = the physical cover screen, a second display the emulator doesn't have |
 | `journey.sh` | phone only | runs gest.sh - cover-screen gesture journeys, a second physical display the emulator doesn't have |
 | `keyboard.sh` | phone only | the keyboard over a Linux (Wayland) text field - needs the session |
+| `kwin-install.sh` | phone only | installs/restarts KWin alone - needs the session (queue it first, same task, so a check after it in the same window doesn't pay for the install inside its own budget - friction f121) |
 | `launch-front.sh` | phone only | a PowOS (Linux) app's window coming to front - needs the session |
 | `launch-window.sh` | phone only | stage 1 is Steam's cold-start launch window - phone hardware/GPU driver (not caught by the filename-based HW_ONLY check; its own marker is) |
 | `lib-install.sh` | phone only | deploys lib/ files onto the phone's Linux rootfs - not on the emulator |

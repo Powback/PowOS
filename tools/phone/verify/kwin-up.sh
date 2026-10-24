@@ -2,9 +2,12 @@
 # the running KWin is a process of it - a check of a fix on an older or stale KWin proves nothing (linux-touch.sh ran
 # on 3.25 while named "kwin 3.26", 2026-10-23).
 #   . "$here/kwin-up.sh"   (needs $T = tools/phone, $OUT; the caller's log/fail if defined)
-#   kwin_install MIN        the newest built kwin pkg (KWIN_PKG, else targets/android/out/pkgs/kwin-* here or in a
-#                           sibling worktree) installed if newer than the installed one (rollback tar of the old files in
-#                           /var/cache/powos); then FAIL if the installed one is older than MIN. KWIN_HAD = the version before.
+#   kwin_install MIN        the newest built kwin pkg (KWIN_PKG, else targets/android/out/pkgs/kwin-* here, in a
+#                           sibling worktree, or in the shared build-inputs cache - a build-pkgs.sh kwin build
+#                           lands there too, friction f87/f116: a worktree kept alive only to hold a built
+#                           package can be removed once it has) installed if newer than the installed one
+#                           (rollback tar of the old files in /var/cache/powos); then FAIL if the installed one
+#                           is older than MIN. KWIN_HAD = the version before.
 #   kwin_restart            a fresh session (`android-request power logout`): returns 0 once a NEW kwin_wayland of the
 #                           installed package runs (no deleted libkwin mapped); 1 with the reason in KWIN_WHY (whether the
 #                           app took the request, whether a new session started - /data/powos/session.log).
@@ -21,7 +24,8 @@ kwin_installed() { _kw_rs 'pacman -Q kwin | cut -d" " -f2' | tail -1; }
 
 kwin_install() {
   local min=$1 pkg want
-  pkg=${KWIN_PKG:-$(ls -t "$KWIN_ROOT"/targets/android/out/pkgs/kwin-*.pkg.tar.xz "$KWIN_ROOT"/../*/targets/android/out/pkgs/kwin-*.pkg.tar.xz 2>/dev/null | head -1)}
+  pkg=${KWIN_PKG:-$(ls -t "$KWIN_ROOT"/targets/android/out/pkgs/kwin-*.pkg.tar.xz "$KWIN_ROOT"/../*/targets/android/out/pkgs/kwin-*.pkg.tar.xz \
+    "${POWOS_BUILD_INPUTS_CACHE:-$HOME/.cache/powos-build-inputs}"/pkgs/kwin-*.pkg.tar.xz 2>/dev/null | head -1)}
   want=$(basename "${pkg:-none}" | sed -E 's/^kwin-([^-]+-[^-]+)-.*/\1/')
   KWIN_HAD=$(kwin_installed)
   _kw_log "kwin installed $KWIN_HAD, newest package $want (${pkg:-none})"

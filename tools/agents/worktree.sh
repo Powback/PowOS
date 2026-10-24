@@ -41,6 +41,18 @@ new)
   # Absolute symlink target: $d is no longer a fixed two-levels-deep sibling of powos-multiplatform (it can be
   # anywhere under $WTR), so the old relative "../../powos-multiplatform/..." target would resolve wrong.
   [ -d "$WT/powos-multiplatform/shell/node_modules" ] && ln -s "$WT/powos-multiplatform/shell/node_modules" "$d/shell/node_modules"
+  # Android package build inputs git ignores (out/powos-rootfs.tar.gz, pkgs/steam/sysvipc-emu.tar.gz): a fresh
+  # worktree had neither, and agents hard-linked them by hand from another worktree (friction f76, f87). The
+  # shared Mac-side cache (tools/agents/build-inputs-cache.sh, content-addressed, never pruned) has them once;
+  # link them in here the way shell/node_modules is linked above. Best-effort: a worktree that never builds
+  # Android packages, or a cache that's empty (no rootfs built yet), is fine without either.
+  bic=$REPO/tools/agents/build-inputs-cache.sh
+  if [ -x "$bic" ]; then
+    mkdir -p "$d/targets/android/out" "$d/targets/android/pkgs/steam"
+    { "$bic" get powos-rootfs.tar.gz "$d/targets/android/out/powos-rootfs.tar.gz" &&
+      "$bic" get powos-rootfs.tar.gz.sha256 "$d/targets/android/out/powos-rootfs.tar.gz.sha256"; } >/dev/null 2>&1 || true
+    "$bic" get steam-sysvipc-emu.tar.gz "$d/targets/android/pkgs/steam/sysvipc-emu.tar.gz" >/dev/null 2>&1 || true
+  fi
   echo "$d" ;;
 done)
   n=${2:?name}; d=$(find_wt "$n")
