@@ -156,3 +156,16 @@ The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's
 Slice 2 (Linux windows in the dock + switcher) is done through WindowTasks, not the plasma-v1 bridge: KWin's "open"
 carries the app id; details in the switcher skill (Linux windows in the dock + switcher). Next: inline replies (NotificationReplied), images in
 clipboard/notifications. Paused host: hotkey, dictation, theme mirror, widget picker, x86 Plasma, input region, OWL widgets.
+
+## Latest hand-off
+2026-10-24 (plasma-modes): three modes landed (30d37122 kwin 0025/3.29, ed129de0 app `desktop 1|0` + Restarter,
+08671d8d checks + docs/DESKTOP-NATIVE.md). Nothing phone-verified: ship + verify queue were paused by the user.
+- Queued: plasma-transparent.sh (--close transparent task), plasma-modes.sh plasma (--close) / shell / together on
+  in-the-plasma-app-linux-windows-show-as-normal-k. plasma/together need the new APK AND kwin 3.29 (kwin-up.sh installs
+  the newest built pkg from sibling worktrees: keep worktree plasma-modes until 3.29 is installed).
+- Gotchas: the wallpaper is a live video; home's UI is no pixel reference. The Docker data disk was full: build kwin with
+  PKG_SCRATCH=/var/tmp/powos-pkgs. KWin source for a new patch: download 6.7.5, apply 0001-0025, format-patch.
+- Unverified: a restart from home starts SessionService without MainActivity; KWin must come up without the desktop's
+  surface (check linux-session.sh). Full-screen apps from Plasma still become their own tasks (deliberate).
+- Next: popups of task windows clipped (DESKTOP-NATIVE slice 4, KWin); user's decision on the design note (board
+  native-desktop-architecture, waiting).
