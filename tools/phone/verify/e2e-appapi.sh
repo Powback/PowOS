@@ -110,7 +110,7 @@ sleep 1.5; chk app-api
 if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&$SCR.innerText.includes('Apps')" 8; then
   step apps "App API: the Apps tab - every app's spec, its actions and its switch"
   n=$(ev "String([...$SCR.querySelectorAll('div')].filter(d=>d.style.cursor==='pointer').length)")
-  until_js "$SCR.innerText.includes('Philips Hue')" 6 && pass "the Apps tab lists $n app(s), Philips Hue among them" || fail "no Philips Hue in the Apps tab ($n cards): $(ev "$SCR.innerText.slice(0,120)")"
+  until_js "$SCR.innerText.includes('Philips Hue')" 6 && pass "the Apps tab lists $n app(s), Philips Hue among them" || fail "no Philips Hue in the Apps tab ($n cards): $(ev "$SCR.innerText.slice(0,1200)")"
 
   # 2. Philips Hue: its actions.
   HUE="[...$SCR.querySelectorAll('div')].filter(d=>d.style.cursor==='pointer'&&d.textContent.includes('Philips Hue')).pop()"
