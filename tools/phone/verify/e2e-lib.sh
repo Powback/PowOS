@@ -162,6 +162,15 @@ fail() { NFAIL=$((NFAIL + 1)); _res FAIL "$*"; }
 # note: a line in steps.txt that is neither (what was seen, for the manager).
 note() { _res NOTE "$*"; }
 ok() { local c=$1; shift; [ "$c" = 0 ] && pass "$*" || fail "$*"; }
+# fps_gate <step_name> <frame_count> <duration_ms> <min_fps>: check FPS threshold; on emu, print NOTE; on phone, PASS/FAIL.
+fps_gate() {
+  local step_name="$1" frame_count="$2" duration_ms="$3" min_fps="$4"
+  local fps=$((frame_count * 1000 / duration_ms))
+  case "${POWOS_DEVICE:-phone}" in
+    emu) note "$step_name: $frame_count frames in $duration_ms ms ($fps fps) - emu note: fps gates apply on the phone only)" ;;
+    *) [ "$fps" -ge "$min_fps" ] && pass "$step_name: $frame_count frames in $duration_ms ms ($fps fps)" || fail "$step_name: $frame_count frames in $duration_ms ms ($fps fps, want >= $min_fps)" ;;
+  esac
+}
 
 # steps.txt on the phone: the other parts' lines kept, this part's replaced; the folder the session user's.
 publish() {

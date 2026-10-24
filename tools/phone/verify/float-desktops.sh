@@ -36,6 +36,15 @@ I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; exit 3; }; }
 fail() { echo "FAIL: $*" | tee -a "$OUT/log.txt"; "$T/shot.sh" "$OUT/fail.png" >/dev/null 2>&1; exit 1; }
 pass() { echo "PASS: $*" | tee -a "$OUT/log.txt"; }
+# fps_gate <step_name> <frame_count> <duration_ms> <min_fps>: check FPS threshold; on emu, print NOTE; on phone, PASS/FAIL.
+fps_gate() {
+  local step_name="$1" frame_count="$2" duration_ms="$3" min_fps="$4"
+  local fps=$((frame_count * 1000 / duration_ms))
+  case "${POWOS_DEVICE:-phone}" in
+    emu) echo "NOTE emu: $frame_count frames in $duration_ms ms ($fps fps, fps gates apply on the phone only)" | tee -a "$OUT/log.txt" ;;
+    *) [ "$fps" -ge "$min_fps" ] && pass "$step_name: slid with the page, $frame_count frames in $duration_ms ms ($fps fps)" || fail "$step_name: the slide lagged - $frame_count frames in $duration_ms ms ($fps fps, want >= $min_fps)" ;;
+  esac
+}
 # A call on home's bridge as the page makes it (float-windows.sh hcall): $1 method, $2 JSON args, $3 JS fn of the answer.
 hcall_once() {
   "$T/cdp.sh" eval home "new Promise(ok=>{const h=window.__powosHost,P=window.PowosHost;if(!h||!P||!P.postMessage)return ok('ERR no bridge');const r=h.resolve,j=h.reject,id=910300+Math.floor(Math.random()*9000);const done=v=>{h.resolve=r;h.reject=j;ok(v)};h.resolve=(i,v)=>i===id?done(v):r(i,v);h.reject=(i,m)=>i===id?done('ERR '+m):j(i,m);setTimeout(()=>done('ERR no answer'),8000);P.postMessage(JSON.stringify([id,'$1',JSON.stringify($2)]))}).then(v=>typeof v==='string'&&v.startsWith('ERR')?v:($3)(v))" 2>&1 | tr -d '"\r' | tail -1
@@ -142,8 +151,7 @@ slid() {
   case $l in *"(landed)"*) ;; *) fail "$1: the slide didn't land: $l" ;; esac
   ms=$(echo "$l" | sed -n 's/.* after \([0-9]*\) ms: \([0-9]*\) frames.*/\1/p'); fr=$(echo "$l" | sed -n 's/.* ms: \([0-9]*\) frames.*/\1/p')
   [ -n "$ms" ] && [ -n "$fr" ] && [ "$ms" -gt 0 ] || fail "$1: unreadable slide line: $l"
-  [ $((fr * 1000 / ms)) -ge 40 ] && pass "$1: slid with the page, $fr frames in $ms ms ($((fr * 1000 / ms)) fps)" \
-    || fail "$1: the slide lagged - $fr frames in $ms ms ($((fr * 1000 / ms)) fps, want >= 40)"
+  fps_gate "$1" "$fr" "$ms" 40
 }
 SLID=
 
