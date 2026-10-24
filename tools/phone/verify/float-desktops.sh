@@ -184,6 +184,9 @@ hemit system.home null; chk home1
 sh_ "kill \$(pidof com.powos.app)"; t=0
 until [ "$(CDP_TIMEOUT_S=8 "$T/cdp.sh" eval home 'window.__powosAlive === true' 2>/dev/null | tr -d '\r' | tail -1)" = true ] || [ $t -ge 12 ]; do sleep 3; t=$((t + 1)); done
 sleep 2; chk restart
+# Home's pages come back in two steps (the layout, then the pages live windows are on: ui/desktops.ts startDesktops, after
+# the store is read). A swipe in between (1024 07:28: page 0 after it, no turn) is no product claim: wait for the pages.
+t=0; until [ "$(npages)" -ge 3 ] 2>/dev/null || [ $t -ge 10 ]; do sleep 1; t=$((t + 1)); done; sleep 1
 P3=$(hcall store.get "['home.windows']" "m=>m&&m['$id']")
 "$T/shot.sh" "$OUT/5-after-restart-page1.png"
 [ "$P3" = "$P2" ] && [ "$(vis)" = visible=false ] && pass "after the app restarted: still page id $P3, hidden on page 1" \
