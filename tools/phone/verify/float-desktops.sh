@@ -79,7 +79,7 @@ device_state_set 3; sleep 2; chk unfold
 # Skip on emu (no device_state support); otherwise wait for OPENED state.
 if [ "${POWOS_DEVICE:-phone}" != emu ]; then
   t=0; until sh_ "dumpsys device_state | grep -m1 mCommittedState" | grep -q OPENED; do
-    [ $t -lt 10 ] || fail "the inner screen didn't come on"; sleep 1; t=$((t + 1))
+    [ $t -lt 10 ] || { echo "ENV: phone locked/folded - floating desktop not available (the inner screen didn't come on: device_state not OPENED)" | tee -a "$OUT/log.txt"; exit 5; }; sleep 1; t=$((t + 1))
   done
 fi
 wsize() { sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1; }
@@ -87,12 +87,12 @@ t=0; WH=$(wsize)
 while [ "${WH%% *}" -le 2000 ] 2>/dev/null && [ $t -lt 13 ]; do sleep 1; t=$((t + 1)); WH=$(wsize); done
 chk unfold
 W=${WH% *}; H=${WH#* }; echo "on: ${W}x${H} ($((t + 2)) s after state 3)"
-[ "${W:-0}" -gt 2000 ] || { echo "ENV: no unfolded screen size ($WH) - stopping before any input"; exit 5; }
+[ "${W:-0}" -gt 2000 ] || { echo "ENV: phone locked/folded - floating desktop not available (no unfolded screen size: $WH) - stopping before any input"; exit 5; }
 kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
 if kg | grep -q true; then
   sh_ "wm dismiss-keyguard"; sleep 1.5
   kg | grep -q true && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
-  kg | grep -q true && { echo "ENV: the keyguard didn't go (a PIN?) - stopping"; exit 5; }
+  kg | grep -q true && { echo "ENV: phone locked/folded - floating desktop not available (the keyguard didn't go, a PIN?) - stopping"; exit 5; }
 fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock" && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock
@@ -115,6 +115,7 @@ freept() {
 swipe() {
   # The window's box is kept clear only while it shows: on page 2 it's hidden (its bounds still listed), and keeping
   # its box clear there left no spot with room for the swipe back (05:57: 570 px from x 1678).
+  kg | grep -q true && { echo "ENV: phone locked mid-run (keyguard)" | tee -a "$OUT/log.txt"; exit 5; }
   local d=$((W * 30 / 100)) p b=;  # 30% (680 px of 2268): above the quarter-width turn (+40), and the scan covers the whole page width from the far edge in
   [ "$(vis)" = visible=true ] && b=$(bounds); p=$(freept "$b" "$1" "$d"); [ "$p" != none ] && [ -n "$p" ] || { echo "ENV: no empty spot on page $(($(onpage) + 1)) to swipe from - stopping"; exit 5; }
   local x=${p% *} y=${p#* }; local to=$((x + $1 * d))
@@ -198,6 +199,7 @@ if [ "$id" = none ]; then
   # The bug of 2026-10-23: a floating Calculator that windows.list didn't have (no page, never hidden) - the evidence.
   # No single quotes inside sh_ (it wraps in su -c '...'): grep -E 'a|b' there ended the quote, piped all into "mode".
   sh_ "tail -40 /data/local/tmp/fd-log.txt; am stack list | grep -m3 -e calculator -e mode" >"$OUT/missing.txt"
+  kg | grep -q true && { echo "ENV: phone locked mid-run (keyguard)" | tee -a "$OUT/log.txt"; exit 5; }
   fail "no Calculator in windows.list ($(vis)) - see missing.txt"
 fi
 [ "$(vis)" = visible=true ] || fail "Calculator's window isn't showing ($(vis))"
@@ -212,7 +214,7 @@ slid() {
   local l ms fr; sleep 0.5
   l=$(sh_ "grep PowosPageSlide /data/local/tmp/fd-log.txt | grep -F \"end (\" | tail -1")
   echo "slide $1: ${l:-none}" >>"$OUT/log.txt"
-  [ "$l" != "$SLID" ] && [ -n "$l" ] || fail "$1: the window didn't slide with the page (no PowosPageSlide end line)"
+  [ "$l" != "$SLID" ] && [ -n "$l" ] || { kg | grep -q true && { echo "ENV: phone locked mid-run (keyguard)" | tee -a "$OUT/log.txt"; exit 5; }; fail "$1: the window didn't slide with the page (no PowosPageSlide end line)"; }
   SLID=$l
   # The lag's parts (PageSlide.kt): how long the windows stood still for their leashes, how late home's moves and
   # its settle came - each is how far the windows trail the page.
