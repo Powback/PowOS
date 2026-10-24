@@ -1,3 +1,4 @@
+# lanes: phone
 # bf-sample.sh <secs> <out>: (on the phone, root) every 15 s: MemAvailable, DMA-BUF total, Xwayland dma-buf fds, Broforce pid
 end=$(( $(date +%s) + $1 ))
 while [ $(date +%s) -le $end ]; do

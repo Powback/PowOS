@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # prompt-glyph.sh [OUT] (board prompt-glyph): the pill's empty face is a ">" prompt glyph, not placeholder words, on
 # home's search pill and PowOS AI's compose. On the screen in use: keyguard swiped (no PIN), home, a read-only CDP read
 # of home's pill + a screencap, the page swipe to the AI page, the same read of its compose + a screencap, swipe back.

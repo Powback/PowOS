@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # board-state.sh [TITLE] (board board-shows-real-agent-state-working-only-if-an; queue: queue.sh add --close <task>
 # board-state.sh): the AI page's in-progress rows say working / queued / awaiting check / stalled, a lit dot only on
 # "working" ones (the states: working / awaiting check / no check / stalled, agents.ts boardState), and the row titled TITLE (default: this task's, queued for this check) says "awaiting check".

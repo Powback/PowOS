@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # pkg-install.sh <pkg.tar.xz>...: (Mac side; queue it: queue.sh add <board-task> pkg-install.sh <abs path>) installs
 # rootfs packages built by targets/android/build-pkgs.sh into PowOS with pacman -U, each with a rollback tar of the
 # files the installed version had (/var/cache/powos/<name>-<old version>-files.tar: `tar -xf` it as root to go back).

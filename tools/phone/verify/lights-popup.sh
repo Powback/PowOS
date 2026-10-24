@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # lights-popup.sh [OUT] (board lights-popup-shows-all-rooms): a held press on the Lights island's room name opens its
 # detail sheet (shell/ui/widgetsheet.tsx) with EVERY room: one row per room with its brightness slider,
 # the last row on screen or scrollable to (the sheet never runs under home's foot). On the screen the phone is on.

@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # bf-fold.sh: (Mac side; queue it: queue.sh add [--close] <board-task> bf-fold.sh) Broforce survives folding the phone
 # mid-game (skill powos-games). In one free window: KWin 3.21+ (pkgs/kwin 0017: a full-screen window task keeps its
 # size and is scaled to fit) installed and running (a fresh session if the running one is older than the installed

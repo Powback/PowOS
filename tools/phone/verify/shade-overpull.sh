@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # shade-overpull.sh (Mac side, board "shade over-pull moves the whole panel"): opens the shade (an injected pull on
 # the status bar's right half), then pulls further with a held finger (motionevents) and reads over CDP while it's
 # held: what's under the control center (the notifications' header) must have moved down with the finger and more

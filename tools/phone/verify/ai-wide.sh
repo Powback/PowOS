@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # ai-wide.sh [--panel] [OUT] (board ai-page-two-pane-wide-layout): PowOS AI on the INNER screen is two panes - its
 # page (default) or, --panel, its pull-up panel on home (a swipe up from home's left half; the same AiView). Forces the
 # inner screen (cmd device_state state 3, as unfolded-checks.sh), dismisses the keyguard / swipes the lock face (no PIN),

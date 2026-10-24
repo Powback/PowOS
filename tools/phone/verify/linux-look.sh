@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # linux-look.sh [OUT]: Linux apps on the phone are the size of Android apps and dark like PowOS (board: e2e round 3,
 # "Linux apps render TINY" + "Linux apps use the LIGHT Breeze theme"). Runs on the Mac, queued:
 #   queue.sh add [--close] <task> tools/phone/verify/linux-look.sh

@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # chat-polish.sh [OUT] (board agent-mail-in-chat-as-tidy-folded-cards): the pill's gap above the keyboard on the AI page
 # and in the AI pull-up panel (home's bar folded, the panel's own pill when wide), and agents' mail folded to one line.
 # On the screen the phone is on. Home, the page swipe to the AI page, a tap on its pill (the keyboard comes up), reads the

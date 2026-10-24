@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # folder-clip.sh [OUT]: a short screen recording of an app library folder opening (the morph out of its card) and
 # closing (a tap outside) on the screen that's on, its frames for review (frame-*.png, the board task's --image when
 # BOARD_TASK is set). Transient only: swipes to the last page, opens and closes a folder, Home after; no layout change.

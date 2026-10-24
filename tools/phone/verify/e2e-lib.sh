@@ -110,12 +110,18 @@ barpt() { local b x r; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return
   echo "$x $((($2 + $4) / 2))"; }
 
 # --- the journey's frame -----------------------------------------------------------------------------------------
-# e2e_args "$@": --round R (default: a time stamp) --part K --of LAST
+# e2e_args "$@": --round R (default: a time stamp) --part K --of LAST --android-only (skip any Linux-session step:
+# the emulator lane has no KWin/Kate/Plasma; ANDROID_ONLY=1 for the journey to check and skip by, noting why instead
+# of failing - handbook "The emulator lane").
 e2e_args() {
-  ROUND=$(date +%m%d-%H%M); PART=1; LAST=1
-  while [ $# -gt 0 ]; do case "$1" in --round) ROUND=$2; shift 2 ;; --part) PART=$2; shift 2 ;; --of) LAST=$2; shift 2 ;; *) shift ;; esac; done
+  ROUND=$(date +%m%d-%H%M); PART=1; LAST=1; ANDROID_ONLY=0
+  while [ $# -gt 0 ]; do case "$1" in --round) ROUND=$2; shift 2 ;; --part) PART=$2; shift 2 ;; --of) LAST=$2; shift 2 ;;
+    --android-only) ANDROID_ONLY=1; shift ;; *) shift ;; esac; done
   [[ $ROUND =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad --round $ROUND"; exit 2; }
 }
+# skip_linux <slug> <what it would have done>: --android-only's way of leaving out a Linux-session step - a NOTE, not
+# a FAIL (the emulator has no Linux session to test it with; the phone run still covers it).
+skip_linux() { step "$1" "$2"; note "skipped: --android-only (no Linux session on this lane)"; }
 e2e_init() {
   JOURNEY=$1; LO=$(((PART - 1) * 25 + 1)); HI=$((PART * 25)); N=$((LO - 1)); NPASS=0; NFAIL=0; DONE=0
   CUR=setup; CURD=setup; CURX=

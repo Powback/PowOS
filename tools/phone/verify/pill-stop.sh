@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # tools/phone/verify/pill-stop.sh <token> (Mac; queue it: `queue.sh add --close <task> --budget 400
 #   tools/phone/verify/pill-stop.sh $(date +%s)`): the status pill's stop + resume, end to end on the real runner.
 # This check is itself the long check that gets stopped:

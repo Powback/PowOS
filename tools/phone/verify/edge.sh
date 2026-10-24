@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # tools/phone/verify/edge.sh [home|edge|shade|corner|all]: one idle window's on-device check of the powos-gestures pieces
 # (skill: powos-gestures). Waits once with `AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 7200` (never polls), runs only with the screen
 # Awake and nobody touching it, never wakes it; read-only apart from the injected swipes and a screenrecord.

@@ -1,3 +1,4 @@
+# lanes: phone
 # bf-start.sh: (in the PowOS session as powos) keep Steam awake for the test and start Steam + the game (APP, default 274190) the
 # way the drawer does - powos-open-task, so the game's window is shown as its own Android task in front. A bare
 # `steam steam://rungameid/...` left the game's window as no task in front: bf-pacing measured PowOS's home

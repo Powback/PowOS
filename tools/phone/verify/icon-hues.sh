@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # Themed icons slice 2 (board theme-recolor-icons) on the phone: asks the ship service for origin's tip if the
 # phone still serves an old ui/icontint.ts (waits up to 3 min), then READ-ONLY: the served module has the
 # "hue" mode, the user's current setting, how many icons are recoloured copies, and a screencap.

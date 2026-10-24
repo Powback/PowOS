@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # td-launch.sh [arm64|x86]...: (Mac side, queue it: queue.sh add --budget 1500 <board-task> td-launch.sh) Teardown
 # (1167630) cold launches with every log on, one per variant = the Proton it runs on (td-launch-phone.sh: arm64 =
 # Proton Experimental (ARM64), x86 = Proton Experimental under FEX), default arm64 x86 (~10-20 min). Per variant: the

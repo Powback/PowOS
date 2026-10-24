@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # linux-touch.sh [OUT] (board linux-windows-take-no-taps-kate-dolphin-steam-kd; Mac side, queue it): where a real tap
 # inside a Linux window goes, for Kate and Dolphin (never Steam), each opened through home's launch call (apps.launch):
 #   tap:   `input motionevent DOWN` in the window's content, then `dumpsys input` TouchStatesByDisplay (which windows

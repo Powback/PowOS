@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # float-reopen.sh [OUT]: reopening a resized floating window from the switcher leaves no full-screen ghost (board task
 # reopening-a-floating-window-from-switcher-leaves). Unfolded (cmd device_state state 3), lock swiped, home: Calculator
 # opened through home's launch call floats; its grip resized (a real injected drag); the switcher shown (the overview

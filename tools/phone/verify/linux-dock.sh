@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # linux-dock.sh [OUT]: a Linux window is in the dock and the switcher like an Android app (board task "Plasma: Linux
 # windows in the dock, Plasma notifications in the shade"), on the unfolded home, for a phone left unattended:
 #   1. Dolphin opened through home's launch path (apps.launch l:org.kde.dolphin) is one floating task;

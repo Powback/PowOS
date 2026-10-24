@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # tools/phone/verify/fold-launch.sh [app:<steam id>]: a game launched FOLDED, then unfolded and folded again with it
 # running - the user's "ui is in a really bad state after launching some games" (2026-10-23 23:49). Queue it:
 #   queue.sh add <board-task> fold-launch.sh app:557340

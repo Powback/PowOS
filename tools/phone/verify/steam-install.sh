@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # steam-install.sh <appid>...: (Mac side, queue it: queue.sh add <board-task> steam-install.sh <appid>...) Steam's own
 # install (steam://install/<appid>) of games the user already owns, in a free window (steam-install-phone.sh): queues
 # the downloads and leaves Steam downloading in the background. Never launches a game. Queue the games' checks

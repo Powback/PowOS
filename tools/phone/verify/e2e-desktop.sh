@@ -1,5 +1,9 @@
 #!/bin/bash
-# e2e-desktop.sh --round R --part 1|2|3 [--of 3]: the unfolded home used like a user, for the manager's review
+# lanes: emu? phone
+# e2e-desktop.sh --round R --part 1|2|3 [--of 3] [--android-only]: the unfolded home used like a user, for the
+# manager's review. --android-only (the emulator lane, no KWin/Kate/Plasma): skips Kate-from-search and Dolphin/
+# Gwenview in part 1 (a NOTE, not a FAIL); parts 2 (Calculator only) and 3 (Chrome - on the emulator's image too -
+# plus the drawer/edit mode) need no Linux session and run unchanged.
 # (board manager-end-to-end-user-journeys-on-the-phone-qa; e2e-lib.sh has the rules: screenshots + steps.txt in
 # /home/powos/design-qa/e2e-desktop/<round>/, never the verify pill, only its own windows closed, layout untouched).
 # Queue it (tools/phone/verify/e2e-queue.sh queues a whole round: the 3 parts of this one, then e2e-appapi.sh).
@@ -78,7 +82,11 @@ part1() {
     fi
   else fail "a swipe up from empty space didn't open the drawer"; fi
 
-  # Kate from search: the pill's field (focused before anything is typed - never into a terminal).
+  # Kate from search: the pill's field (focused before anything is typed - never into a terminal). --android-only:
+  # no Linux session on this lane - skipped, a NOTE not a FAIL.
+  if [ "$ANDROID_ONLY" = 1 ]; then
+    skip_linux search-kate "Kate from search (needs the Linux session)"
+  else
   local f; f=$(pt "document.querySelector('.home > .bar textarea')")
   case $f in none|off|"") fail "no search pill on home ($f)" ;; *)
     set -- $f; tap "$1" "$2" "the search pill"; sleep 1.2; chk pill
@@ -100,12 +108,17 @@ part1() {
       step search "the search pill tapped"; fail "the search pill didn't take the focus - nothing typed"; back
     fi ;;
   esac
+  fi
 
-  # Calculator and Dolphin from the dock.
+  # Calculator from the dock (Android, every lane); Dolphin + the image it opens (Gwenview) need the Linux session -
+  # --android-only skips them, a NOTE not a FAIL.
   dock_tap "a:$CALC/" Calculator && { sleep 2.5; chk calc
     CT=$(waitwin $CALC 6); step calculator "Calculator opened from the dock"
     [ "$CT" != none ] && floating "$CT" Calculator && pass "Calculator opened as a floating window (task $CT)" || fail "Calculator from the dock: window $CT"
     [ "$CT" != none ] && put_away $CALC "a:$CALC/" Calculator calculator-away; }
+  if [ "$ANDROID_ONLY" = 1 ]; then
+    skip_linux dolphin "Dolphin from the dock, and an image opened from it (Gwenview) - needs the Linux session"
+  else
   dock_tap l:org.kde.dolphin Dolphin && {
     DT=$(waitwin l:org.kde.dolphin 30); chk dolphin; sleep 2
     step dolphin "Dolphin opened from the dock"
@@ -121,6 +134,7 @@ part1() {
     [ "$GT" != none ] && floating "$GT" Gwenview && pass "the image opened in a floating Gwenview window (task $GT)" || fail "the image from Dolphin: Gwenview window $GT ($(us 'tail -2 /tmp/e2e-kio.log' | tr '\n' ' '))"
     [ "$GT" != none ] && closebar "$GT" Gwenview image-closed
     closebar "$DT" Dolphin dolphin-closed
+  fi
   fi
 }
 

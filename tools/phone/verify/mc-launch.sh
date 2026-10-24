@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # mc-launch.sh [base|zink|glthread|zink-glthread]...: (Mac side; queue it: queue.sh add <board-task> mc-launch.sh ...)
 # Minecraft (the PowStation pack, powos-minecraft + Prism Launcher) launched the drawer's way on the phone, once per
 # GL variant (mc-launch-phone.sh: default base): STAGES (tap -> Prism -> Java -> NeoForge's window -> title screen),

@@ -1,6 +1,6 @@
 #!/bin/bash
 # tools/phone/verify/queue.sh: ONE queue for every on-device check, so no agent waits on the phone itself.
-#   queue.sh add [--close] [--dev phone|emu] [--name TEXT] [--screen inner|cover] [--budget S] <board-task> <cmd> [args...]
+#   queue.sh add [--close] [--dev phone|emu|auto] [--name TEXT] [--screen inner|cover] [--budget S] <board-task> <cmd> [args...]
 #        queue a Mac-side check (a tools/phone/verify/*.sh or any command that drives the phone) and return at once;
 #        starts the runner if none runs, and marks the board task's step "phone check queued" (the AI page's "test now")
 #        env vars: queue them through env, e.g. `queue.sh add t env PROFILE=1 shell/dev/perf/drag-raster.sh 12`
@@ -14,6 +14,12 @@
 #             jobs in turn, own checkout (.claude/worktrees/emu-runner). Hardware checks stay phone-only (refused here:
 #             games, Steam, fps, fold, kernel). Results: the board as for phone checks (step "emulator PASS: ..."),
 #             kept and sent again later when the board (on the phone) can't be reached.
+#        --dev auto: never errors either way; reads the check's own `# lanes:` header line (its first ~6 lines) and
+#             picks emu when it says "emu" (every check's does, or "phone" - what the emulator's AVD can ever stand
+#             in for: no Linux session, no hardware), or when it says "emu?" (conditionally capable) AND the run was
+#             TOLD, not guessed, to be Android-only: a literal --android-only in the command, OR (window-max.sh) its
+#             first argument is calc or video - and no argument names a Linux app/stage either way (kate, dolphin,
+#             gwenview, ffplay, steam, kwin). Else phone. Handbook "The emulator lane" has the table, per check.
 #   queue.sh list                               queued, running, paused and the last results
 #   queue.sh pause | resume                     pause the runner (what the pill's tap does) / resume it (go=all)
 #   queue.sh run                                the runner: launchd's agent com.powos.verify-runner (runner-deploy.sh)
@@ -67,9 +73,29 @@ phone_sh() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
 killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c" "${2:-TERM}"; done; kill -"${2:-TERM}" "$1" 2>/dev/null; }
 # endjob <pid>: TERM its tree, KILL what's left after 5 s.
 endjob() { killtree "$1"; for _ in 1 2 3 4 5; do kill -0 "$1" 2>/dev/null || return 0; sleep 1; done; killtree "$1" KILL; }
-# The emulator lane: its jobs, its runner's checkout. HW_ONLY: what only the phone's hardware can answer.
+# The emulator lane: its jobs, its runner's checkout. HW_ONLY: what only the phone's hardware can answer. "fold" is
+# word-bounded (grep -E, no \b for portability): "folder-clip.sh" (an app-drawer folder, nothing to do with the
+# hinge) and "unfolded-checks.sh" (device_state-simulated, same as every e2e_setup inner check) matched the old
+# unbounded "fold" and were wrongly refused --dev emu (2026-10-24).
 E=$Q/emu; ET=$REPO/.claude/worktrees/emu-runner
-HW_ONLY='^(bf-|steam-|td-launch|mc-launch|games?-)|fps|fold|kernel'
+HW_ONLY='^(bf-|steam-|td-launch|mc-launch|games?-)|fps|(^|[^a-z])fold([^a-z]|$)|kernel'
+# LINUX_ONLY: an argument naming a Linux app or stage the emulator has no session for - --dev auto never picks emu
+# when one of these appears literally in the command (window-max.sh's STAGE, --apps "... kate ...", etc).
+LINUX_ONLY='^(kate|dolphin|gwenview|ffplay|steam|kwin)$'
+# lanes_marker <script>: its "# lanes:" header line (first 6 lines), "" if it has none. "emu" = runs on the
+# emulator as invoked, no further condition; "emu?" = only for an Android-only invocation (android_only_request);
+# plain "phone" = never (handbook "The emulator lane" has the table and why, per check).
+lanes_marker() { [ -f "$1" ] && awk 'NR<=6 && /^# lanes:/{sub(/^# lanes: */,""); print; exit}' "$1"; }
+# android_only_request <script> <args...>: --dev auto's second condition - told, not guessed, that this run is
+# Android-only: a literal --android-only, or (window-max.sh) a first argument of calc or video; and no argument
+# names a Linux app/stage either way.
+android_only_request() {
+  local script=$1; shift; local a ao=0
+  for a in "$@"; do case "$a" in --android-only) ao=1 ;; esac; grep -qE "$LINUX_ONLY" <<<"$(tr 'A-Z' 'a-z' <<<"$a")" && return 1; done
+  [ $ao = 1 ] && return 0
+  case "$(basename -- "$script")" in window-max.sh) case "${1:-}" in calc|video) return 0 ;; esac ;; esac
+  return 1
+}
 # wt_of <abs path>: the PowOS worktree it lies in (wroot) and the path under it (wsub, "" = the root); fails outside.
 wt_of() {
   [ -n "$REPO" ] || return 1
@@ -116,7 +142,7 @@ add)
   while :; do case "${1:-}" in
     --close) close=1; shift ;; --name) name=${2:-}; shift 2 ;; --screen) screen=${2:-}; shift 2 ;; --dev) dev=${2:-}; shift 2 ;;
     --budget) budget=${2:-}; shift 2 ;; *) break ;; esac; done
-  case "$dev" in phone|emu) ;; *) echo "queue.sh: --dev phone|emu"; exit 2 ;; esac
+  case "$dev" in phone|emu|auto) ;; *) echo "queue.sh: --dev phone|emu|auto"; exit 2 ;; esac
   [ $# -ge 2 ] || { echo "usage: queue.sh add [--close] [--dev phone|emu] [--name TEXT] [--screen inner|cover] [--budget S] <board-task> <cmd> [args...]"; exit 2; }
   [[ $budget =~ ^[1-9][0-9]*$ ]] || { echo "queue.sh: --budget <seconds>"; exit 2; }
   # A budget over the 300 s default needs a reason (QUEUE_BUDGET_WHY): game checks were given 900/1500 s to "pass",
@@ -132,11 +158,27 @@ add)
   if [ -z "$name" ]; then  # the script's name (past `env A=1 ...`)
     for a in "$@"; do case "$a" in */env|env|*=*) ;; *) name=$(basename "$a"); break ;; esac; done; name=${name%.sh}
   fi
+  # --dev auto: emu only when the check's own marker allows it AND the run was told (not guessed) to be
+  # Android-only - never errors either way (see the header; the table is in the handbook).
+  if [ "$dev" = auto ]; then
+    dev=phone
+    if ! basename -- "$1" 2>/dev/null | grep -qiE "$HW_ONLY"; then
+      case " $(lanes_marker "$1") " in
+        *" emu "*) dev=emu ;;                                                        # unconditional
+        *" emu? "*) android_only_request "$1" "${@:2}" && dev=emu ;;                 # only if told so
+      esac
+    fi
+    echo "queue.sh: --dev auto picked $dev for $(basename -- "$1")"
+  fi
   # The emulator has no phone hardware: a game, Steam, frame pacing, the hinge or the phone's kernel is the phone's.
+  # Past the filename check (launch-window.sh's Steam cold-start stage isn't named steam-*): a check that carries its
+  # OWN "# lanes:" marker and says "phone" only (no "emu") is refused too - the marker knows what the filename can't.
   if [ "$dev" = emu ]; then
     for a in "$name" "$@"; do
       if basename -- "$a" 2>/dev/null | grep -qiE "$HW_ONLY"; then echo "queue.sh: $(basename -- "$a") is a phone-hardware check (games, Steam, fps, fold, kernel) - queue it without --dev emu"; exit 2; fi
     done
+    lm=$(lanes_marker "$1")
+    [ -z "$lm" ] || case " $lm " in *" emu "*|*" emu? "*) ;; *) echo "queue.sh: $(basename -- "$1")'s own lanes marker ('$lm') says phone only - queue it without --dev emu"; exit 2 ;; esac
   fi
   # Broken checks never reach the phone (2026-10-23: about half the day's FAILs were the checks' own bugs - an unset
   # $2/$3, a zsh-unsplit "id name" arriving as one argument plus an empty one): every .sh in the command must parse

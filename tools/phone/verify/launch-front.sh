@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # launch-front.sh [OUT]: a PowOS (Linux) app launched from home comes up IN FRONT on the launch that started it - its
 # task (PowosWindowActivity) is the top resumed activity, home is not - on the unfolded home (windows float), also when
 # its window maps late (a game's cold start: Broforce's window came 75 s after the tap and stayed behind home until a

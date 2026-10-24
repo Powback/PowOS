@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # plasma-transparent.sh [OUT]: Plasma's desktop (the Linux desktop app) is TRANSPARENT over the real PowOS wallpaper
 # (board task "Plasma transparent again", 2026-10-23). Guards against the regression of cb40fa50, where
 # org.powos.transparent drew its own copy of the wallpaper: a second crystal at another scale and offset (KWin at

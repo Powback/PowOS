@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # app-frost.sh (Mac side, board app-screens-default-to-frost-blur-not-brown): a PowOS app's page wears the frost. In the
 # runner's free window: opens one installed app page (local.lights if there, else the first without its own ground)
 # from home's devtools, reads the page's computed material over CDP and the compositor's blur regions, takes a

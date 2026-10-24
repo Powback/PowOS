@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # tools/phone/verify/window-live.sh: does a floating window's CONTENT follow the finger, live (system/TaskLeash.kt)?
 # Samples where SurfaceFlinger draws the app (the HWC layer table's Disp Frame of Calculator's window - what is on
 # the glass, not WM's idea of it) while an injected finger is still down:

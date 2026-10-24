@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # tools/phone/verify/desk-probe.sh: evidence for E2E round 2's floating-window failures (2026-10-23), run twice - with
 # SystemUI's caption overlay (com.android.shell:PowosNoCaption, system/OemCaption.kt) on, then off (the bisect), the
 # overlay on again at the end. Per pass, on a Calculator window: the bar drag (where the task, the app's own window

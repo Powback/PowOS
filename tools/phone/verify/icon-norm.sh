@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # Uniform app icons (board "Uniform app icons", ui/iconshape.ts) on the phone, in a free window (queue.sh, LOCK_HELD=1):
 # screencaps of the dock (home) and the drawer (opened with a swipe, Back closes it) onto the board task, labelled
 # before/after by whether the phone serves ui/iconshape.ts yet, plus a read-only count of the icons it placed and plated.

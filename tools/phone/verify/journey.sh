@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # journey.sh [RUNS=A B C] [OUT=~/.cache/powos-verify/<date>]: one verification window, from the Mac.
 #   waits ONCE for the phone (idle.sh --wait 120, screen Awake - never polls, never wakes it), holds
 #   ~/.cache/powos-verify.lock (ship-apk.sh won't install over it), runs gest.sh per run on the phone, voids the window

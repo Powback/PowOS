@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu? phone
 # tools/phone/verify/window-scroll.sh: a scroll inside a floating window is the app's - never home's shade pull or
 # drawer (the user, 2026-10-23: "scrolling inside a window opens the notifications or the launcher"). For Calculator,
 # Kate (a Linux window) and Chrome: quick swipes (as a finger flicks) down near the window's top edge, down and up in its
@@ -6,11 +7,13 @@
 # pull-up panel and home's drawer still shut. Steam too (its window; resident Steam is never killed). At each spot a
 # DOWN first: which windows InputDispatcher gave the finger (the app's, or home's under it). Each move and resize is
 # undone after its scrolls: a window the user had open keeps its place and size.
-#   queue.sh add --close <task> tools/phone/verify/window-scroll.sh [--apps "calc kate chrome steam"]
+#   queue.sh add --close <task> tools/phone/verify/window-scroll.sh [--apps "calc kate chrome steam"] [--android-only]
+# --android-only (the emulator lane, no Kate/Steam): same as --apps "calc chrome"; --apps overrides it.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-APPS="calc kate chrome steam"; ARGS=()
-while [ $# -gt 0 ]; do case $1 in --apps) APPS=$2; shift 2 ;; *) ARGS+=("$1"); shift ;; esac; done
+APPS="calc kate chrome steam"; ARGS=(); APPS_SET=0; AO=0
+while [ $# -gt 0 ]; do case $1 in --apps) APPS=$2; APPS_SET=1; shift 2 ;; --android-only) AO=1; shift ;; *) ARGS+=("$1"); shift ;; esac; done
+[ $AO = 1 ] && [ $APPS_SET = 0 ] && APPS="calc chrome"
 . "$here/e2e-lib.sh"
 e2e_args ${ARGS[@]+"${ARGS[@]}"}; LAST=2
 E2E_APPS='com.oneplus.calculator|PowosWindowActivity|com.android.chrome'; E2E_LINUX='kate'

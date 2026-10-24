@@ -1,3 +1,4 @@
+# lanes: phone
 # bf-game.sh state|freeze: (in the PowOS session as powos; bf-pacing.sh / bf-checker.sh push and run it) a Broforce
 # (APP=<appid>: that game) that runs before a check is the USER's: they started it and left it (navigated away: unified
 # sleep froze it with Steam) or they play it (awake: a controller doesn't move the touch IRQs the idle window counts).

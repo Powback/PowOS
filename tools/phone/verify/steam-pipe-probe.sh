@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # steam-pipe-probe.sh: (Mac side, queue it) runs steam-pipe-probe-phone.sh: what Steam's forwarder writes into steam.pipe and
 # whether the running ARM64 client takes a hand-written / replayed line (header of the phone script). Exit 3 on a touch.
 set -uo pipefail

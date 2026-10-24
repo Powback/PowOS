@@ -1,3 +1,4 @@
+# lanes: phone
 # bf-nap.sh <secs> <touch irq count>: (on the phone, adb shell; bf-pacing.sh) wait <secs> s in ONE adb call, printing
 # "touched" and returning at once when the touch-panel IRQs move from <count> (the user is back). bf-pacing's waits were
 # a 5 s sleep + an adb call each, ~8 s per "5 s": a 45 s settle took 68 s and the check ran out of its 300 s budget.

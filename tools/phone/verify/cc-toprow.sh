@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # cc-toprow.sh (Mac side, board control-center-top-row-stays-put-on-expand-one-o): the control center on the phone -
 # opens the shade (injected pull on the status bar's right half), reads the first six toggles' boxes over CDP, pulls
 # further, reads again. PASS = v3, no section headings, the first six don't move (the saved order is printed

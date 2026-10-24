@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # bf-pacing.sh [mode...]: (Mac; queue it: queue.sh add <task> bf-pacing.sh base cap60) Broforce frame pacing + stale
 # frames, ~3-4 min of screen per mode. Per mode: dxvk.conf in the game dir (base = none; cap60 = dxgi.maxFrameRate 60;
 # fifo = syncInterval 1; nolatency = maxFrameLatency 1; env:K=V[,K=V] = those in the game's environment through

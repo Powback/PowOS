@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # plasma-notify.sh [OUT]: Plasma's notifications in PowOS's shade and the clipboard both ways (board task "Plasma as
 # app + backend for the web launcher", slice 3; docs/DESKTOP-WEB-SHELL.md). Steps:
 #   1. the session runs powos-plasma-bridge (started as its autostart would, if the session predates the deploy),

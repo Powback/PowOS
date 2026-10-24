@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # bf-resume.sh: (Mac side, queue it: queue.sh add <board-task> bf-resume.sh) Broforce's instant start - a game kept
 # alive and frozen with Steam out of sight (units/phone/steam.json "games": "pause", docs/UNIFIED-SLEEP.md), resumed
 # by its launch. Measures cold start vs thawed start (the launch command -> the game's window focused -> its first new

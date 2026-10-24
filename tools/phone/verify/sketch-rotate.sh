@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # tools/phone/verify/sketch-rotate.sh: Sketch (local.sketch) keeps a drawing across rotation (skill: powos-widgets). In
 # one free window: opens Sketch on home, starts a FRESH test drawing from its gallery (the user's own drawings are never
 # drawn on), draws one long stroke down to the bottom of the portrait canvas with real touches, rotates to landscape

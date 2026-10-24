@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # plasma-modes.sh MODE [OUT]: Plasma and the PowOS web shell each work on their own and together (the user,
 # 2026-10-24: "both plasma and our webui should both work perfectly independently and together"; docs/DESKTOP-NATIVE.md).
 # Mac side, queue it: queue.sh add <board-task> tools/phone/verify/plasma-modes.sh <plasma|shell|together>

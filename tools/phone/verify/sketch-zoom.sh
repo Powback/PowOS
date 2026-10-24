@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # tools/phone/verify/sketch-zoom.sh [board-task]: Sketch's infinite zoom on the device (skill: powos-widgets). In one free
 # window: opens Sketch on a FRESH test drawing (the user's own drawings are never drawn on or moved), draws one red line
 # across the centre with a real touch, pinches in to 50x (pointer events dispatched on the canvas: `input` has no

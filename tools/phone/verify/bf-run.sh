@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # bf-run.sh: Broforce ~10 min check (game takes the screen ~14 min: only when the user is away with the screen on, or
 # run it while the user plays - then skip bf-start/bf-stop). Samples memory every 15 s and SurfaceFlinger frame pacing
 # every 30 s, collects the new "Xwayland KGSL" stats lines from the session log, closes the game + Steam after, and

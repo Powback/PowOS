@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # float-touch.sh [OUT] (board floating-window-blocks-swiping-home-pages-touch; shell ui/desktops.ts inWindow, gesture.ts
 # startGesture): with a floating window open on the unfolded home, touches inside it are the app's and never home's
 # swipes; beside it, home's swipes work. Forces the inner screen (cmd device_state state 3), swipes the lock face, home's

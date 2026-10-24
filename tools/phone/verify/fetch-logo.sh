@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # fetch widget logo after a restart (board fetch-widget-broken-logo-white-box): READ-ONLY on home - the served owl.tsx
 # has the fix (canvas contain: size, MAX_CANVAS, Image onError), the fetch tile's logo canvas stays inside its box
 # (it grew into a 28 px bar down the tile at dpr 2.76), no OWL tile shows a broken image, plus a screencap of home.

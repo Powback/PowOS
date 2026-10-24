@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # tools/phone/verify/sketch-canvas.sh: Sketch's infinite canvas on the device (skill: powos-widgets). In one free window:
 # opens Sketch, starts a FRESH test drawing from its gallery (the user's own drawings are never drawn on or moved),
 # draws one stroke with a real touch, then two-finger pinch and pan (pointer events dispatched on the canvas: `input`

@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # bf-return.sh: (Mac side; queue it: queue.sh add <board-task> [env APP=<appid>] bf-return.sh) a game the user started,
 # left and taps again comes back at once - any Steam game (APP, default 274190 Broforce, the test case): started through powos-open-task (the drawer's path) -> its frame -> HOME (Android's
 # HOME intent, as the user's home gesture) -> frozen in the background by unified sleep, not closed -> its icon tapped

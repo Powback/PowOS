@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # search-dock.sh [OUT]: the user's own move with the search bar (2026-10-23, the 4th and 5th reports), on the screen
 # that's on: edit mode -> long-press the search bar's tile -> drag it onto the dock -> let go -> Back. Then:
 #   - it's in the foot: folded under the dock (search.belowDock "1"), unfolded in the bar's middle; not on the grid;

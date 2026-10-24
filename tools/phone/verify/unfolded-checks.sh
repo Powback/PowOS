@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # unfolded-checks.sh [OUT]: the owed UNFOLDED checks in one go, for a phone left unattended (the user said so):
 #   inner screen forced (cmd device_state state 3 = open), PowOS's lock face swiped away (no PIN), home's merged tiles,
 #   the keyboard padding on PowOS AI's page and in the side-button overlay (assist), the chat's image thumbnails;

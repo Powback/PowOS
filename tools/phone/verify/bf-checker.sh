@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # bf-checker.sh [variant...]: (Mac; queue it: queue.sh add <task> bf-checker.sh) bisect Broforce's black checkerboard
 # on the loading + menu screens over render variants, ~4 min of screen each. Variants (bf-checker-phone.sh set):
 # base, TU_DEBUG = noubwc | sysmem | flushall | nolrz (Proton user_settings.py), dxvk.conf = nomsaa (d3d11.disableMsaa)

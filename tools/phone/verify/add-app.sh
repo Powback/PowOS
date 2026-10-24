@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # add-app.sh [OUT]: edit mode's "+ app" on the phone, on the screen that's on (folded or unfolded):
 #   1. edit mode by a long press on a bare spot of the page;
 #   2. "+ app" opens the drawer's list (A-Z) in a picker; typing an app's name narrows it to matches;

@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu? phone (calc, video - android, run on either lane; kate, ffplay need the Linux session - phone only)
 # tools/phone/verify/window-max.sh <calc|kate|video> [--round R]: a floating window's maximise / restore and an app's
 # OWN full screen on the unfolded home (WindowFrames.maximise, FreeformTasks; KWin patch for Linux windows), with a
 # screen recording of each stage for review (~/.cache/powos-verify/window-max/<round>/<stage>.mp4).
@@ -85,9 +86,11 @@ g_mode() { sed -n 's/^@@M mode=//p' "$OUT/snap.txt"; }
 g_bar() { sed -n 's/^@@W //p' "$OUT/snap.txt" | tr -c '0-9\n-' ' ' | xargs; }
 g_sf() { grep -v '^@@' "$OUT/snap.txt" | sfrow_of "$1"; }
 # content <task> <layer> <label>: the layer's row when the first look had none - the change transition still playing
-# (on the emulator's software renderer its leash came 2.4 s late): a fresh dump every 1.5 s, three at most; none at
-# all keeps the dump ($OUT/<label>-nolayer.txt).
-content() { local c=; for _ in 1 2 3; do sleep 1.5; grab "$1"; c=$(g_sf "$2"); [ -n "$c" ] && break; done
+# (on the emulator's software renderer its leash came 2.4 s late, and a RESTORE's first redraw at the shrunk size can
+# take longer still, 2026-10-24 wc7: still empty at 4.5 s): a fresh dump every 1.5 s, six at most (9 s) on the
+# emulator, three (4.5 s) on the phone; none at all keeps the dump ($OUT/<label>-nolayer.txt).
+content() { local c= n=3; [ "${POWOS_DEVICE:-}" = emu ] && n=6
+  for _ in $(seq 1 "$n"); do sleep 1.5; grab "$1"; c=$(g_sf "$2"); [ -n "$c" ] && break; done
   [ -n "$c" ] || cp "$OUT/snap.txt" "$OUT/$(printf %s "$3" | tr ' ' -)-nolayer.txt"; echo "$c"; }
 what() { grab "$1"; echo "mode=$(g_mode) task=[$(g_bounds)] content=[$(g_sf "$2")] bar=[$(g_bar)]"; }
 # dumps <name> <task>: the raw facts behind a state, for the record.

@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # panel-lift.sh [OUT]: home's panels above the floating windows (shell/PanelLift.kt, ui/panellift.ts; board task
 # launcher-shade-and-system-panels-always-above-fl). Unfolds, swipes the lock face away, opens Calculator through
 # home's own launch path (a floating window), then:
@@ -80,7 +81,12 @@ E0=$(edges "$OUT/0-window.png"); echo "window sharp: edge energy $E0" | tee -a "
 if [ "$AL" -gt $((W - AR)) ]; then SX=$((AL / 2)); else SX=$(((AR + W) / 2)); fi
 [ $((SX < AL || SX > AR)) = 1 ] || fail "no room beside the window for a swipe"
 
-# 1. The drawer over the window, recorded from just before the swipe.
+# 1. The drawer over the window, recorded from just before the swipe. The PowosPanelLift line is read from a time
+# MARK taken right before the swipe (logcat -t), not the "-c" clear back at the home launch: the main buffer can roll
+# over well inside that longer window on the emulator's noisier logcat (far more Choreographer/Skia lines under its
+# software renderer), which lost the tagged line even though the SurfaceFlinger check right below it passed - a false
+# FAIL on the emulator lane, 2026-10-24 (panel-lift task desktop-mode-stabilisation-move-resize-maximise).
+MARK=$(sh_ "date +'%m-%d %H:%M:%S.000'")
 sh_ "rm -f /data/local/tmp/pl-open.mp4; (screenrecord --time-limit 4 /data/local/tmp/pl-open.mp4 >/dev/null 2>&1 &)"; sleep 0.6
 sh_ "input swipe $SX $((H * 80 / 100)) $SX $((H * 30 / 100)) 220"
 sleep 3.6; chk drawer
@@ -88,7 +94,7 @@ st=$(homeState); echo "home: $st" | tee -a "$OUT/log.txt"
 case $st in open*) ;; *) fail "the swipe up beside the window didn't open the drawer ($st)" ;; esac
 "$T/shot.sh" "$OUT/1-drawer.png" >/dev/null 2>&1
 E1=$(edges "$OUT/1-drawer.png"); echo "under the drawer: edge energy $E1" | tee -a "$OUT/log.txt"
-sh_ "logcat -d -s PowosPanelLift:I PowosPanelLift:W" | tail -5 | tee -a "$OUT/log.txt" > "$OUT/lift-log.txt"
+sh_ "logcat -t '$MARK' -s PowosPanelLift:I PowosPanelLift:W" | tail -5 | tee -a "$OUT/log.txt" > "$OUT/lift-log.txt"
 [ "$(lifted open)" = yes ] && pass "drawer open: home's window is stacked over the task area (SurfaceFlinger: $(head -c 160 "$OUT/sf-open-rel.txt" | tr '\n' ' '))" ||
   fail "drawer open but home's window isn't relative to the anchor (sf-open.txt; PanelLift: $(tail -1 "$OUT/lift-log.txt"))"
 grep -q "home over the windows" "$OUT/lift-log.txt" && pass "PanelLift: $(grep "home over the windows" "$OUT/lift-log.txt" | tail -1 | sed 's/.*: //')" || fail "no 'home over the windows' line from PanelLift"
@@ -103,6 +109,7 @@ case $st in *over-windows*) pass "home's pages hidden over the window" ;; *) not
 } || note "no recording of the opening"
 
 # 2. Back closes it: home under the window again.
+MARK=$(sh_ "date +'%m-%d %H:%M:%S.000'")
 sh_ "input keyevent BACK"; sleep 2; chk back
 st=$(homeState); echo "home: $st" | tee -a "$OUT/log.txt"
 case $st in shut*) ;; *) fail "Back didn't close the drawer ($st)" ;; esac
@@ -111,7 +118,7 @@ case $st in shut*) ;; *) fail "Back didn't close the drawer ($st)" ;; esac
 E2=$(edges "$OUT/2-shut.png"); echo "after close: edge energy $E2" | tee -a "$OUT/log.txt"
 awk -v a="$E0" -v b="$E2" 'BEGIN{exit !(b > a * 0.8)}' && pass "the window is sharp again (edge energy $E2, was $E0)" || fail "the window isn't sharp after the drawer closed (edge energy $E2, was $E0; 2-shut.png)"
 [ -n "$(wframe 'PowOS window bar')" ] && pass "its title bar is back" || fail "no title bar after the drawer closed"
-sh_ "logcat -d -s PowosPanelLift:I" | grep -q "home under the windows again" && pass "PanelLift: home under the windows again" || fail "no 'home under the windows again' line"
+sh_ "logcat -t '$MARK' -s PowosPanelLift:I" | grep -q "home under the windows again" && pass "PanelLift: home under the windows again" || fail "no 'home under the windows again' line"
 
 # 3. The shade over the window.
 sh_ "input swipe $SX 4 $SX $((H * 60 / 100)) 260"; sleep 1.8; chk shade

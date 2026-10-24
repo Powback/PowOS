@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # bf-launchpaths.sh: (Mac side, queue it: queue.sh add <board-task> bf-launchpaths.sh) a running, frozen Broforce
 # brought back by the Android launch paths - powos-open-task as the drawer runs it (--app-id <.desktop id>) and as the
 # games widget runs it (Runtime.launch: --app-id steam_app_<appid>): each must resume (thaw Steam + the game) and show

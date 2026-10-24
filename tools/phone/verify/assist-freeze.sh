@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # tools/phone/verify/assist-freeze.sh [N]: the side-button assistant must never freeze the app's UI.
 # N times (default 5): shows the assistant the way the side button does (`cmd voiceinteraction show`: the
 # VoiceInteraction session, shell mode=assist), runs a dictation in it that falls back to the on-device recognizer

@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # home-select.sh [OUT]: edit mode's selection rectangle and home's app library on the phone, on the screen that's on
 # (folded or unfolded), without changing the user's layout: picking tiles is transient (no tile moves, no folder is
 # made - those are gated headless: shell/dev/gate.mjs home-select-*, home-folder-*, library-*).

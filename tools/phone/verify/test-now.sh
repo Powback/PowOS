@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # tools/phone/verify/test-now.sh <board-task> (Mac; queue it: `queue.sh add --close <task> test-now.sh <task>`):
 # the verify queue's phone side while it runs this very check -
 #   1. the status pill is up (window "PowOS verify status") and its surface is out of screencaps (skip-screenshot);

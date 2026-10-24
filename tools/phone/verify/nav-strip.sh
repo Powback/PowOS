@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # nav-strip.sh <cover|inner> [OUT] (board home-black-strip-at-bottom-under-dock-wallpaper): home's wallpaper reaches
 # the bottom edge, under the gesture-nav handle - no black rows there (the decor's navigationBarBackground, black by
 # Theme.Material's default, sat over the page until ShellActivity made the bars transparent).

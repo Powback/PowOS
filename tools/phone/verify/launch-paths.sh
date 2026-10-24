@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # launch-paths.sh [OUT] (board desktop-mode-every-android-launch-path-opens-flo; system/AppWindows.options on every
 # PowOS launch site, WindowFrames.adopt for the rest): on the unfolded home every way an Android app opens gives a
 # floating window. Forces the inner screen, swipes the lock face, home's first page. Then, each time with Calculator

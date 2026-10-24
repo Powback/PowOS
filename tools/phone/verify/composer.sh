@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # composer.sh [APP_ID] (Mac side, docs/COMPOSER.md): a composed widget on the device (default local.hue-rooms, made by
 # `powos compose widget "which Hue rooms are on"`). Read-only probes, no input, nothing on home moved:
 #   1. powos-registry has the app (its manifest carries the composition) and its island widget - the rows home's edit

@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu? phone
 # tools/phone/verify/resize-probe.sh: where a floating window's touches go right after a grip resize, and why (window-
 # scroll.sh FAIL 2026-10-23: after a resize the finger went to home or the window under it, not the app). For each app
 # (Calculator, Chrome; Kate for its frame lookup): launched in a window, then the grip dragged out (bigger) and back
@@ -7,11 +8,14 @@
 # spots inside the new bounds (which window the finger goes to). Logcat (PowosTaskLeash, PowosWindowResize,
 # PowosWindowFrame(s), ShellTransitions) is kept for the run. --leash 0 runs it with the old path
 # (settings global powos_live_leash 0, put back after). Facts only: FAIL lines where a probe misses the app.
-#   queue.sh add <task> tools/phone/verify/resize-probe.sh [--apps "calc chrome kate"] [--leash 0|1]
+#   queue.sh add <task> tools/phone/verify/resize-probe.sh [--apps "calc chrome kate"] [--leash 0|1] [--android-only]
+# --android-only (the emulator lane, no Kate): same as --apps "calc chrome" (Kate stays out); --apps overrides it.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-APPS="calc chrome kate"; LEASH=""; ARGS=()
-while [ $# -gt 0 ]; do case $1 in --apps) APPS=$2; shift 2 ;; --leash) LEASH=$2; shift 2 ;; *) ARGS+=("$1"); shift ;; esac; done
+APPS="calc chrome kate"; LEASH=""; ARGS=(); APPS_SET=0; AO=0
+while [ $# -gt 0 ]; do case $1 in --apps) APPS=$2; APPS_SET=1; shift 2 ;; --leash) LEASH=$2; shift 2 ;;
+  --android-only) AO=1; shift ;; *) ARGS+=("$1"); shift ;; esac; done
+[ $AO = 1 ] && [ $APPS_SET = 0 ] && APPS="calc chrome"
 . "$here/e2e-lib.sh"
 e2e_args ${ARGS[@]+"${ARGS[@]}"}
 E2E_APPS='com.oneplus.calculator|PowosWindowActivity|com.android.chrome'; E2E_LINUX='kate'

@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # steam-input.sh [OUT] (board tapping-steam-shows-its-window-resident-steam-ru; Mac side, queue it after linux-float.sh
 # has put the newest kwin on): input inside Linux windows on the unfolded home, kwin 0020 (touch target = a shown
 # window taking input there; a window that resized itself is sized back to its task). Recorded (OUT/steam.mp4, kate.mp4):

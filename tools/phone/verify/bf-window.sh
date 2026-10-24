@@ -1,3 +1,4 @@
+# lanes: phone
 # bf-window.sh [wait <secs> <touch irq count>]: (in the PowOS session as powos; APP=<appid>, WIN_NAME=<its window's
 # name>, default Steam's name for the app from its appmanifest) the game's X window size vs the X screen - prints
 # "win=WxH screen=WxH", win= empty while there's no window yet. Matches the name exactly or a title starting "<name> "

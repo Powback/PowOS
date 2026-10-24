@@ -1,3 +1,4 @@
+# lanes: phone
 # bf-prof.sh <secs> <outdir>: (on the phone, root; bf-pacing.sh runs it beside bf-present.sh) where a running game's
 # time goes, read-only: <outdir>/prof.txt =
 #   thread  <%cpu> <pid> <tid> <process>/<thread> cpu=<last cpu>   the 25 busiest threads over <secs> (any process)

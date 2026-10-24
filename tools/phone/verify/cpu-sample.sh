@@ -1,3 +1,4 @@
+# lanes: emu phone
 # cpu-sample.sh <secs>: (on the phone, root) CPU % of one core for com.powos.app, its WebView renderer and the PowOS session tree, plus touch IRQs during the window (non-zero = not an idle sample)
 D=${1:-150}
 APP=$(pidof com.powos.app); WV=$(ps -A -o pid,args | awk '/webview:sandboxed_process/ && !/awk/{print $1}')

@@ -1,3 +1,4 @@
+# lanes: phone
 # bf-present.sh <secs> <layer-regex> <outdir> [rec secs, default 20; 0 = none]: (on the phone, root) SurfaceFlinger present times (ns, `--latency`
 # column 3) of every layer matching the regex, polled every 0.5 s for <secs> s, and a 20 s screenrecord of the ON
 # display (<outdir>/rec.mp4) from 4 s in. Each poll returns the layer's last ~127 frames, so polls overlap: the

@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # float-windows.sh [OUT]: floating app windows on the unfolded home (board task powos-home-as-the-desktop-...), for a
 # phone left unattended. Folded, apps open full screen by design, so the check needs the INNER screen: it forces it
 # (cmd device_state state 3, as unfolded-checks.sh does), dismisses the keyguard / swipes the lock face (no PIN), home,

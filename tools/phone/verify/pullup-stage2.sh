@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # Two-stage pull-up (board launcher-pull-further-up-search-keyboard, shell/ui/overpull.ts) on the phone, in a free
 # window (run by queue.sh with LOCK_HELD=1). A read-only recorder on home (event listeners only: touchstart, touchend,
 # focusin, the bridge's keyboard insets) times the pull's start -> focus -> keyboard -> release. Then, injected fingers:

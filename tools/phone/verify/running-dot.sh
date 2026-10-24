@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # The running bar under app icons (board "running indicator on app icons") on the phone: Calculator opened through
 # home's own launch call (apps.launch over CDP, no touch) gets its cells marked by the "apps.running" event (cells
 # .app[data-run], from the host's apps.running: Android tasks, powos-sleep-gui's running/apps.json), their bar is the

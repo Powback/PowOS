@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # wide-home.sh [OUT]: unfolded home is ONE wide page with one bar (dock | search | recent apps), its tiles where the two
 # side-by-side pages had them (the host's layout backed up first), and edit mode keeps the dock and shows the search bar
 # as a tile on the grid - on the inner screen (forced: cmd device_state state 3) and on the cover (state 0).

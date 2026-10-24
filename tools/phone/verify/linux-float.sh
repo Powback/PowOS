@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # linux-float.sh [OUT]: Linux apps float on the unfolded home (board tasks "Linux apps from the launcher open floating"
 # and "Linux apps opened by other apps ... get floating windows"), for a phone left unattended:
 #   1. KWin 6.7.5-3.22+ (pkgs/kwin 0018: "export-new", new windows open as tasks) installed AND running - installed

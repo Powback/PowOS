@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # window-chrome.sh [OUT]: a floating window's chrome (system/WindowFrame.kt; board task floating-windows-live-resize-
 # half-height-title-b), for a phone left unattended. Unfolds (cmd device_state state 3), swipes the lock face away, opens
 # Calculator through home's own launch path (as float-windows.sh), then:

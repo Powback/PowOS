@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # owed-checks.sh [MAX_WAIT_S]: one AWAKE_ONLY free window for the batch of owed on-device checks (verify/owed.sh):
 # one idle.sh --wait (never polls, never wakes), the verify lock, the Lights tile's position read over CDP (read only),
 # the run, the screencaps pulled to OUT (~/.cache/powos-verify/owed-<time>) and put in design-qa on the phone, each

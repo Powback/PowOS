@@ -1,4 +1,6 @@
 #!/bin/bash
+# lanes: emu? phone (--app calc, no --two or --two --android-only; --app kate, or --two without --android-only,
+# needs the Linux session - phone only)
 # tools/phone/verify/window-rec.sh: screen recordings of a floating window's bar drag and grip resize (the
 # window-core review: content follows live, no flicker or ghost, no white/empty area), with where SurfaceFlinger draws
 # the app (HWC Disp Frame) mid-gesture and after, logcat PowosTaskLeash & co, and touches into the window after each
@@ -7,6 +9,7 @@
 #   --off            the same with the live leash off (settings put global powos_live_leash 0; put back after)
 #   --pages          page-swipe frame times (gfxinfo of com.powos.app) without and with the window open
 #   --two            a second window open too (Kate with calc, Calculator with kate) for the page swipes
+#   --android-only   with --app calc --two: Chrome instead of Kate as the second window (the emulator lane)
 #   --pages-only     only the page swipes (no drag/resize)
 #   --trace          a perfetto trace of the with-window swipes (sched, gfx/view/wm/am/input/binder atrace, SF frame
 #                    timeline) -> <PRE>-pages-win.pftrace; tools/phone/verify/page-trace.py reads it
@@ -88,7 +91,10 @@ step open "$APP in a window ($r)"
 C0=$(content); note "task $CT $(tbounds "$CT"), content $C0"
 intap "$CT" before
 if [ $TWO = 1 ]; then
-  case $APP in calc) K2=l:org.kde.kate; W2=l:org.kde.kate ;; *) K2=a:com.oneplus.calculator/; W2=com.oneplus.calculator ;; esac
+  # --android-only (the emulator lane, no Kate): Chrome instead, present on the emulator's image too.
+  if [ $APP = calc ] && [ "$ANDROID_ONLY" = 1 ]; then K2=a:com.android.chrome/; W2=com.android.chrome
+  else case $APP in calc) K2=l:org.kde.kate; W2=l:org.kde.kate ;; *) K2=a:com.oneplus.calculator/; W2=com.oneplus.calculator ;; esac
+  fi
   r2=$(hcall apps.launch "['$(hcall apps.list "[]" "l=>(l.find(a=>a.key.startsWith('$K2'))||{}).key||'none'")']" "()=>'ok'")
   CT2=$(waitwin "$W2" 40); sleep 2; chk open2
   [ "$CT2" != none ] && [ -n "$CT2" ] && step open2 "a second window: $W2 task $CT2 $(tbounds "$CT2") ($r2)" || fail "no second window ($W2)"

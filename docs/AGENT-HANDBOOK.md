@@ -228,14 +228,127 @@ minimal change and tell them.
   phone (the board) is unreachable it waits in ~/.cache/powos-verify-queue/emu/pending/. `queue.sh list` shows the lane.
 - The phone (no `--dev`) only for what needs its hardware or Linux session: games, Steam, fps/frame pacing, the fold
   and cover screen, the kernel, Linux windows (kate, ffplay, Plasma), speech, real touch timing. `--dev emu` refuses
-  games/Steam/fps/fold/kernel checks.
+  games/Steam/fps/fold/kernel checks by filename AND refuses any check whose own `# lanes:` marker (below) says
+  "phone" only, even when the filename doesn't give it away (launch-window.sh's Steam stage).
+- `--dev auto` picks the lane for you and never errors either way: emu when the check's `# lanes:` header line (its
+  first ~6 lines) says "emu" (no condition) or "emu?" AND the run was TOLD, not guessed, to be Android-only (a literal
+  `--android-only`, or window-max.sh's STAGE being calc/video) with no Linux app/stage named anywhere in the command;
+  else phone. `queue.sh add --dev auto <task> tools/phone/verify/window-max.sh calc` picks emu; the same check with
+  `kate` picks phone; a check with no marker at all (something outside this table) always picks phone.
+- Every check under `tools/phone/verify/` that gets queued directly carries a `# lanes: emu|emu?|phone [...]` header
+  line (its 2nd line) that `--dev auto`/`--dev emu` read: `emu` = runs on the emulator as queued, no condition; `emu?`
+  = only for an explicitly Android-only invocation; `phone` = never (Linux session, physical hardware, or a
+  lane-only mechanism, e.g. the status pill, that the emulator lane doesn't have). Internal libraries (`e2e-lib.sh`,
+  `bf-lib.sh`, `window-lock.sh`, `kwin-up.sh`, `linux-win-lib.sh`), the on-phone companions of a Mac-side check
+  (`*-phone.sh`, `gest.sh`, `owed.sh`), ad-hoc root snippets (`sf-latency.sh`) and non-check tools (`queue.sh`,
+  `queue-emu.sh`, `e2e-queue.sh`, `runner-deploy.sh`) aren't queued directly and carry no marker.
+- `--android-only` (e2e-lib.sh's `e2e_args`, and added individually to resize-probe.sh, window-scroll.sh and
+  window-rec.sh) skips or substitutes a check's Linux-only steps instead of failing them: e2e-desktop.sh's part 1
+  notes (not fails) past Kate-from-search and Dolphin/Gwenview; resize-probe.sh/window-scroll.sh drop Kate (and
+  window-scroll.sh's Steam) from their `--apps` default; window-rec.sh's `--app calc --two` opens Chrome instead of
+  Kate as the second window (Chrome IS on the emulator's `google_apis` image, confirmed by `pm list packages`).
+  window-max.sh needs no flag - its STAGE argument (calc/video vs kate/ffplay) already says which lane.
+- The classification below is every check under `tools/phone/verify/` that is queued directly (`queue.sh add <task>
+  <this> ...`), one row each, with its lane and why. Proven on the emulator with real PASS output (2026-10-24):
+  `resize-probe.sh --apps calc`, `window-scroll.sh --android-only`, `e2e-desktop.sh --part 2 --of 3` and
+  `--part 1 --of 3 --android-only`. Three bugs this pass also fixed and re-proved on the emulator lane (none in
+  window Kotlin - check-script timing/robustness only): `float-desktops.sh` (a `device_state` OPENED race - the
+  emulator's software renderer can take longer than 2 s to commit the state, same class of lag as the maximise/restore
+  content delay below), `panel-lift.sh` (its PanelLift logcat line was read from a long-cleared buffer the emulator's
+  noisier logcat - far more Choreographer/Skia lines under software rendering - could roll past before the read; now
+  read from a time-mark instead), and `window-max.sh`'s post-restore content retry budget (doubled for the emulator).
+
+| Check | Lane | Why |
+|---|---|---|
+| *(runs on the emulator as it is queued)* |  |  |
+| `add-app.sh` | emu + phone | the + app sheet (edit mode) - Android UI only |
+| `ai-send-flash.sh` | emu + phone | PowOS AI page send/flash animation - web shell only |
+| `ai-wide.sh` | emu + phone | PowOS AI page on the wide/unfolded layout - web shell, device_state-simulated |
+| `app-api.sh` | emu + phone | the App API app's own UI - an installed PowOS app, no Linux |
+| `app-frost.sh` | emu + phone | home's frost/glass material - compositor blur, Android only |
+| `assist-freeze.sh` | emu + phone | the assist overlay - an Android VoiceInteractionService session |
+| `az-scrub.sh` | emu + phone | the drawer's A-Z scrub bar - web shell only |
+| `board-state.sh` | emu + phone | the AI page's board rendering - web shell only |
+| `cc-toprow.sh` | emu + phone | control centre's top row - web shell only |
+| `chat-polish.sh` | emu + phone | chat bubbles/markdown rendering - web shell only |
+| `composer.sh` | emu + phone | the chat composer - web shell only |
+| `cpu-sample.sh` | emu + phone | reads /proc stat over adb root - no app dependency at all |
+| `dock-taskbar.sh` | emu + phone | Calculator in the dock-as-taskbar - Android app window only |
+| `e2e-appapi.sh` | emu + phone | the App API + Hue widgets journey - an installed PowOS app and web shell, no Linux app anywhere |
+| `edge-more.sh` | emu + phone | edge-gesture handles - Android input injection only |
+| `edge.sh` | emu + phone | edge-gesture handles - Android input injection only |
+| `fetch-logo.sh` | emu + phone | an app icon fetch - web shell only |
+| `float-desktops.sh` | emu + phone | floating windows across home's pages (Calculator only) - needed a retry loop for `device_state`'s OPENED commit, which can lag past 2 s on the emulator's software renderer (fixed, proven) |
+| `float-reopen.sh` | emu + phone | reopening a floating Android window from recents - no Linux |
+| `float-touch.sh` | emu + phone | touch routing into a floating Android window - no Linux |
+| `folder-clip.sh` | emu + phone | an app-library folder morph - web shell only (filename false-matched the old unbounded "fold" HW regex; fixed) |
+| `home-select.sh` | emu + phone | edit mode's selection rectangle - web shell only |
+| `hue-link.sh` | emu + phone | the Hue pairing link flow - web shell + network, no Linux |
+| `icon-hues.sh` | emu + phone | themed app icon colours - web shell only |
+| `icon-norm.sh` | emu + phone | icon normalisation - web shell only |
+| `launch-paths.sh` | emu + phone | every Android launch path (apps.launch, am start, recents) - WM state via device_state, no cover-screen pixels inspected |
+| `lights-popup.sh` | emu + phone | the Lights popup, forced to the inner screen like float-desktops.sh - web shell only |
+| `nav-strip.sh` | emu + phone | the gesture-nav black-strip check - Android/web shell only |
+| `overlay-reload.sh` | emu + phone | a shell-file hot reload - web shell only |
+| `owed-checks.sh` | emu + phone | home's tiles, Lights popup, control centre, AI page - the "ON display" adapts to whichever is on, no cover-screen content read |
+| `panel-lift.sh` | emu + phone | home's panels lifted above a Calculator window - the PanelLift logcat line is now read from a time-mark instead of a long-cleared buffer, which the emulator's noisier logcat (more Choreographer/Skia lines) could roll past before the read (fixed) |
+| `prompt-glyph.sh` | emu + phone | a chat prompt glyph - web shell only |
+| `pullup-stage2.sh` | emu + phone | the drawer's second pull-up stage - web shell only |
+| `running-dot.sh` | emu + phone | the dock's running-app dot - web shell only |
+| `search-dock.sh` | emu + phone | the dock's search pill - web shell only |
+| `shade-overpull.sh` | emu + phone | the shade's over-pull - web shell only |
+| `shade-panel.sh` | emu + phone | the shade panel - web shell only |
+| `shade-wide.sh` | emu + phone | the shade on the wide layout - web shell only |
+| `sketch-canvas.sh` | emu + phone | the sketch app canvas - an Android app, no Linux |
+| `sketch-rotate.sh` | emu + phone | the sketch app rotate gesture - Android app, no Linux |
+| `sketch-zoom.sh` | emu + phone | the sketch app zoom gesture - Android app, no Linux |
+| `unfolded-checks.sh` | emu + phone | the owed unfolded-home batch - device_state-simulated inner screen, same as e2e_setup; filename matched the old unbounded "fold" HW regex (fixed) |
+| `wide-home.sh` | emu + phone | the unfolded wide-home layout - device_state-simulated, web shell only |
+| `window-chrome.sh` | emu + phone | a floating window's chrome (bar/grip) on Calculator - Android app only |
+| `window-live.sh` | emu + phone | a floating window's live content follow, on Calculator only (E2E_APPS has no Linux entry) |
+| *(runs on the emulator only for an Android-only invocation - `--android-only` or, for window-max.sh, its STAGE)* |  |  |
+| `e2e-desktop.sh` | emu? + phone | `--android-only` skips part 1's Kate-from-search and Dolphin/Gwenview steps (a NOTE, not a FAIL); parts 2 (Calculator) and 3 (Chrome + drawer) need no Linux at all even without the flag - **proven: `--part 1 --android-only` and `--part 2`** |
+| `resize-probe.sh` | emu? + phone | its own `--apps` picks the app; `--apps calc` (or the new `--android-only`, same as `--apps "calc chrome"`) stays Android-only; default includes Kate (phone only) - **proven: `--apps calc`** |
+| `window-max.sh` | emu? + phone | its STAGE picks the lane by construction: `calc`/`video` are Android apps (Chrome IS on the emulator's image), `kate`/`ffplay` need the Linux session - **proven: `calc`** |
+| `window-rec.sh` | emu? + phone | `--app calc --two --android-only` opens Chrome instead of Kate as the second window; `--app kate`, or `--two` without the flag, still need Kate |
+| `window-scroll.sh` | emu? + phone | same `--apps` split as resize-probe.sh (`--android-only` = `--apps "calc chrome"`, drops Kate and Steam) - **proven: `--android-only`** |
+| *(phone only - Linux session, physical hardware, or a lane-only mechanism the emulator doesn't have)* |  |  |
+| `bf-checker.sh` .. `bf-window.sh` (16 scripts) | phone only | Broforce run/measurement - phone hardware/GPU driver (queue.sh's HW_ONLY) |
+| `desk-probe.sh` | phone only | mostly Calculator, but one Dolphin section at the end - not split yet |
+| `float-windows.sh` | phone only | opens Dolphin/Kate as part of its run |
+| `fold-launch.sh` | phone only | a Steam game launched folded/unfolded - hardware fold + Steam |
+| `fold.sh` | phone only | the hinge's CLOSED state = the physical cover screen, a second display the emulator doesn't have |
+| `journey.sh` | phone only | runs gest.sh - cover-screen gesture journeys, a second physical display the emulator doesn't have |
+| `keyboard.sh` | phone only | the keyboard over a Linux (Wayland) text field - needs the session |
+| `launch-front.sh` | phone only | a PowOS (Linux) app's window coming to front - needs the session |
+| `launch-window.sh` | phone only | stage 1 is Steam's cold-start launch window - phone hardware/GPU driver (not caught by the filename-based HW_ONLY check; its own marker is) |
+| `lib-install.sh` | phone only | deploys lib/ files onto the phone's Linux rootfs - not on the emulator |
+| `linux-dock.sh` | phone only | Dolphin in the dock/switcher - needs the session |
+| `linux-float.sh` | phone only | Linux apps floating via KWin - needs the session |
+| `linux-look.sh` | phone only | Linux apps' size/theme (Breeze dark) - needs the session |
+| `linux-session.sh` | phone only | a KWin session restart - needs the session |
+| `linux-touch.sh` | phone only | taps into Kate/Dolphin content - needs the session |
+| `mc-launch.sh` | phone only | Minecraft via a launcher - Steam/game, phone hardware (queue.sh's HW_ONLY) |
+| `one-title-bar.sh` | phone only | KWin's "decor" title bar on Linux windows - needs the session |
+| `pill-stop.sh` | phone only | the phone lane's status pill + runner pause/resume - the emulator lane has no pill (queue-emu.sh) |
+| `pkg-install.sh` | phone only | installs rootfs packages (pacman) into the Linux session - not on the emulator |
+| `plasma-app.sh` | phone only | Plasma as a drawer app/backend (KSycoca) - needs the session |
+| `plasma-modes.sh` | phone only | Plasma MODE (plasma\|shell\|together) - needs the session |
+| `plasma-notify.sh` | phone only | Plasma notifications via powos-plasma-bridge - needs the session |
+| `plasma-transparent.sh` | phone only | the Linux desktop app's transparency over the wallpaper - needs the session |
+| `speech-test.sh` | phone only | real GPU dictation through the mic pipeline; kept phone-only (not attempted on the emulator) |
+| `steam-input.sh`, `steam-pipe-probe.sh`, `steam-tap.sh` | phone only | Steam hardware/IPC/Linux rootfs (queue.sh's HW_ONLY) |
+| `steam-install.sh` | phone only | installs the Steam package into the Linux rootfs - not on the emulator (queue.sh's HW_ONLY) |
+| `td-launch.sh` | phone only | Teardown via Steam - Steam/game, phone hardware (queue.sh's HW_ONLY) |
+| `test-now.sh` | phone only | the phone lane's status pill while "test now" runs - no pill on the emulator lane |
+
 - Any check runs unchanged against it by hand: `POWOS_DEVICE=emu LOCK_HELD=1 tools/phone/verify/window-max.sh calc`
   (adb.sh, cdp.sh, idle.sh, shot.sh, root.sh follow POWOS_DEVICE). `tools/emu/emu.sh start|stop|status|reset|install`;
   `create` once (~10 min), `remove` to drop it (unit units/mac/emu-mac.json, ~13.7 GB with the system image; refuses
   below 25 GB free). The Calculator there is a test window client under the Calculator's package (tools/emu/testwin).
 - Not on the emulator: the Linux session (rootfs 6+ GB unpacked, KWin on KGSL/Turnip; no room in the 12 GB budget),
-  OnePlus framework behaviour (OxygenOS's flexible windows, its 31-float blur regions), real fps. A PASS there is not a
-  PASS for those.
+  OnePlus framework behaviour (OxygenOS's flexible windows, its 31-float blur regions), real fps, the physical cover
+  screen, the mic. A PASS there is not a PASS for those.
 
 ## Where things live
 - Shell: shell/ (Preact+TS). Pages = modes (`index.html?mode=lock|shade|assist|glasses`, home = no mode). Bridge

@@ -1,3 +1,4 @@
+# lanes: phone
 # bf-stop.sh [--steam]: (in the PowOS session as powos) close Broforce (APP=<appid>: that game) within ~3 s, and with --steam Steam too within
 # ~10 s, and drop the never-sleep entry. Steam stays resident by default: out of sight it is frozen (unified sleep), so
 # the next launch skips Steam's cold start; --steam only for cold-start checks.

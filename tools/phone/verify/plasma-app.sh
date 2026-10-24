@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # plasma-app.sh [OUT]: Plasma as a drawer app + the Linux app list from KSycoca's change signal (board task "Plasma as
 # app + backend for the web launcher", slice 1; docs/DESKTOP-WEB-SHELL.md). Steps:
 #   1. the session runs powos-apps-watch (inotify on ~/.cache's ksycoca6_*), idle at rest;

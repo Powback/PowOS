@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # hue-link.sh (Mac side, docs/COMPOSER.md section 6): Lights' Hue pairing handed to App API, and a composed widget's
 # reads of the real bridge through it. Read-only: no input, nothing on home moved, and only READ actions are called
 # (list_rooms, list_grouped_lights as consumer "widget") - never set_room / recall_scene: the lights stay as they are.

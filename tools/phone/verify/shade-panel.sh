@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # shade-panel.sh [OUT] (Mac side; board "shade over-pull moves the whole panel"): the shade's PANEL follows the finger,
 # not only what's in it, and the blur covers it. A held finger (motionevents) opens the shade from the status bar,
 # pulls further on the control center, folds it back up and pushes the shade shut, while a screen recording runs.

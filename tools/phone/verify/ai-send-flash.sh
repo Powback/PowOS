@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # ai-send-flash.sh [OUT] (board ai-page-black-flash-after-sending-a-message): sending on home's AI page stays in place.
 # Home, the swipe to the AI page, then while the ON display is screenrecorded: one harmless test message typed into the
 # page's own field and submitted (CDP: the field's value + its form's submit, the same send() the send button runs).

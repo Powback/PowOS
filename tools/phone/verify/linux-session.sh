@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # linux-session.sh [OUT] (board linux-stale-window-tasks; Mac side, queue it): Linux apps open again after a session
 # restart. KWin's window ids restart at 1 with each KWin while Android kept the old window tasks, so a launcher tap on
 # Kate "restored" the old session's dead Kate task and nothing opened (2026-10-23: tasks 2678, 2679; "no window task in

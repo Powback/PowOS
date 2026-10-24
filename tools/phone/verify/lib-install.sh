@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # lib-install.sh <lib path>...: (Mac side; queue it: queue.sh add <board-task> tools/phone/verify/lib-install.sh
 # apps/powos-sleep-gui game.sh) puts single files of lib/ (this checkout's) on the phone the way powos-deploy.sh does:
 # lib/<path> -> PowOS's /usr/lib/powos/<path>, mode kept, the old file kept as /var/cache/powos/lib-<name>.<time>.bak

@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # A-Z scrub highlight (board "A-Z scrub highlights the letter's apps", drawer.tsx highlight) on the phone, in a free
 # window (run by queue.sh with LOCK_HELD=1): opens the drawer with a swipe, holds an injected finger on the A-Z bar at M,
 # reads which cells are lit / how dim the rest are, screencaps, lifts the finger, checks everything eased back, then

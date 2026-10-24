@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # dock-taskbar.sh [OUT] (board dock-as-taskbar-tap-focused-app-minimises-tap-ag; shell ui/desktops.ts dockTap, home.tsx
 # DockWindows): on the unfolded home the dock is a taskbar. Forces the inner screen (cmd device_state state 3), swipes
 # the lock face, home's first page; opens Calculator, then Settings, through home's launch call (apps.launch over CDP,

@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # tools/phone/verify/fold.sh: the powos-gestures pieces on the other screen of the foldable (skill: powos-gestures) -
 # the device state forced (cmd device_state: 3 OPENED = the inner screen, 0 CLOSED = the cover) for one run of
 # verify/edge.sh there (home pull, edge -> Quick Tools, shade over an app, corner pull), plus where the edge handles'

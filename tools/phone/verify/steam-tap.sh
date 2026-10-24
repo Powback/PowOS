@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: phone
 # steam-tap.sh [OUT] (board tapping-steam-shows-its-window-resident-steam-ru; Mac side, queue it with --budget 900):
 # a tap on Steam's own launcher entry SHOWS Steam's main window, from cold and from a resident (-silent) Steam, and
 # taps inside the floating Steam window reach it. On the unfolded home, recorded (screenrecord per phase, OUT/*.mp4):

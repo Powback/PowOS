@@ -1,4 +1,5 @@
 #!/bin/bash
+# lanes: emu phone
 # shade-wide.sh (board "Unfolded shade: notifications left, controls right"; queue.sh runs it with LOCK_HELD=1): the
 # unfolded shade is two columns. A finger from the status bar's left part, then its right part, opens it; each time,
 # over CDP (read-only): .panel-body.two, the notifications column left of the controls, data-from = the side pulled.
