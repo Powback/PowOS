@@ -33,9 +33,9 @@ us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | 
 ses() { us "P=\$(pgrep -x plasmashell | head -1); while IFS= read -r -d '' kv; do export \"\$kv\"; done < /proc/\$P/environ; $1"; }
 rs() { printf '%s\n' "$1" > "$OUT/r.sh"; "$T/root.sh" "$OUT/r.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-DOLPHIN_MINE=0 KATE_MINE=0
+DOLPHIN_MINE=0 KATE_MINE=0 GWEN_MINE=0
 restore() {
-  us "pkill -x gwenview; [ $DOLPHIN_MINE = 1 ] && pkill -x dolphin; [ $KATE_MINE = 1 ] && pkill -x kate; true"
+  us "[ $GWEN_MINE = 1 ] && pkill -x gwenview; [ $DOLPHIN_MINE = 1 ] && pkill -x dolphin; [ $KATE_MINE = 1 ] && pkill -x kate; true"
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"
   sh_ "logcat -d -v time" | grep -E "WindowTasks|PowosWindow|PowosWindowFrames| runtime" > "$OUT/logcat.txt"
   echo "restored"
@@ -120,9 +120,11 @@ sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && { sh_ "inp
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 sh_ "logcat -c"
 
-# Leftover Gwenview windows (each try that showed nothing left one on the hidden desktop): closed.
+# A Gwenview already running may be the user's: never closed (rule) - not now. Only the ones this check starts are
+# closed at the end (GWEN_MINE), like Dolphin and Kate.
 g=$(us 'pgrep -xc gwenview' | tail -1); log "gwenview processes before: ${g:-0}"
-[ "${g:-0}" = 0 ] || { us "pkill -x gwenview"; sleep 2; }
+[ "${g:-0}" = 0 ] || { echo "gwenview already runs (maybe the user's): not now"; exit 3; }
+GWEN_MINE=1
 
 # 2. Dolphin from the launcher.
 [ "$(us 'pgrep -xc dolphin' | tail -1)" = 0 ] && DOLPHIN_MINE=1
