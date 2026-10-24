@@ -364,9 +364,11 @@ wait)  # queue.sh wait <job-id|prefix> [max_s=1500]: block until that job has a 
   end=$((SECONDS + max)); id=${id%.job}
   while :; do
     lg=$(ls "$Q/done/$id"*.log 2>/dev/null | head -1)
-    if [ -n "$lg" ]; then grep -E '^(PASS|FAIL|SKIP)' "$lg" | cut -c1-200 | head -20 || true; grep -qE '^(PASS|FAIL|SKIP)' "$lg" || tail -1 "$lg"; grep -qE '^FAIL' "$lg" && exit 1; exit 0; fi
+    # A log exists from the moment the job STARTS: it's finished only once its .job left the queue.
+    queued=0; { ls "$Q/$id"*.job || ls "$E/$id"*.job; } >/dev/null 2>&1 && queued=1
+    if [ -n "$lg" ] && [ $queued = 0 ]; then grep -E '^(PASS|FAIL|SKIP)' "$lg" | cut -c1-200 | head -20 || true; grep -qE '^(PASS|FAIL|SKIP)' "$lg" || tail -1 "$lg"; grep -qE '^FAIL' "$lg" && exit 1; exit 0; fi
     # each lane alone: one unmatched glob made ls fail and wait said "no job" for every phone job
-    { ls "$Q/$id"*.job || ls "$E/$id"*.job; } >/dev/null 2>&1 || { echo "queue.sh wait: no queued or finished job '$id' (see queue.sh list)"; exit 2; }
+    [ $queued = 1 ] || [ -n "$lg" ] || { echo "queue.sh wait: no queued or finished job '$id' (see queue.sh list)"; exit 2; }
     [ "$SECONDS" -lt "$end" ] || { echo "queue.sh wait: $id still queued/running after ${max}s - hand back with the job id"; exit 3; }
     sleep 5
   done ;;
