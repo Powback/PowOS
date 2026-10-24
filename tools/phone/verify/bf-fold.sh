@@ -30,7 +30,9 @@ pill "checking KWin's version"
 "$A" push "$here/bf-fold-phone.sh" /data/local/tmp/powos-bf-fold-phone.sh >/dev/null
 "$A" push "$here/bf-stop.sh" /data/local/tmp/powos-bf-stop.sh >/dev/null
 "$A" push "$here/bf-lib.sh" /data/local/tmp/powos-bf-lib.sh >/dev/null
-"$A" shell "su -c 'cp /data/local/tmp/powos-bf-fold-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh'"
+# bf-lib.sh's xframes body is bf-xframes.py (split out for test-complexity.sh's length budget), also pushed here.
+"$A" push "$here/bf-xframes.py" /data/local/tmp/powos-bf-xframes.py >/dev/null
+"$A" shell "su -c 'cp /data/local/tmp/powos-bf-fold-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-xframes.py'"
 kwin() {  # kwin=<pid> kwin_new=<1|0>: 0 = it still runs a libkwin the package replaced (needs a fresh session)
   printf '%s\n' 'k=$(pgrep -x kwin_wayland | head -1); n=0; [ -n "$k" ] && ! grep -q "libkwin.*(deleted)" /proc/$k/maps && n=1; echo "kwin=${k:--} kwin_new=$n"' > "$OUT/kw.sh"
   "$P/root.sh" "$OUT/kw.sh" 2>/dev/null | tail -1 | tr -d '\r'; }
@@ -137,7 +139,7 @@ probe unfolded-again inner
 "$A" shell cmd device_state state reset >/dev/null 2>&1
 ph sleeplog >> "$OUT/run.txt"
 stop
-"$A" shell "su -c 'rm -f /data/local/tmp/powos-bf-fold-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-fold-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh'"
+"$A" shell "su -c 'rm -f /data/local/tmp/powos-bf-fold-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/powos-bf-fold-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-xframes.py'"
 r="RESULT bf-fold: $([ $fails = 0 ] && echo PASS || echo "FAIL ($fails bad steps)") - game kept $(echo "$first" | grep -o 'geom=[^ ]*') through fold/unfold; artefacts $OUT"
 log "$r"
 [ $fails = 0 ]

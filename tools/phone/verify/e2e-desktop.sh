@@ -57,8 +57,9 @@ floating() { # <task> <name>: a window smaller than the screen
   [ $# -ge 6 ] && [ $(($5 - $3)) -lt $((W * 9 / 10)) ] && [ $(($5 - $3)) -gt 200 ]
 }
 
-part1() {
-  # Chrome from the drawer: its A-Z cell (the letter bar's C first when it's off screen).
+# Chrome from the drawer: its A-Z cell (the letter bar's C first when it's off screen). Split out of part1() to
+# keep it under the length budget (test-complexity.sh) - same steps, same CH global part2/part3 read.
+part1_chrome() {
   if open_drawer; then
     step drawer "the drawer, pulled up from home"
     pass "the drawer opened"
@@ -81,12 +82,15 @@ part1() {
       fail "Chrome's drawer cell isn't on screen ($p)"; back
     fi
   else fail "a swipe up from empty space didn't open the drawer"; fi
-
-  # Kate from search: the pill's field (focused before anything is typed - never into a terminal). --android-only:
-  # no Linux session on this lane - skipped, a NOTE not a FAIL.
+}
+# Kate from search: the pill's field (focused before anything is typed - never into a terminal). --android-only:
+# no Linux session on this lane - skipped, a NOTE not a FAIL. Split out of part1() to keep it under the length
+# budget (test-complexity.sh) - same steps, same KT global.
+part1_search_kate() {
   if [ "$ANDROID_ONLY" = 1 ]; then
     skip_linux search-kate "Kate from search (needs the Linux session)"
-  else
+    return
+  fi
   local f; f=$(pt "document.querySelector('.home > .bar textarea')")
   case $f in none|off|"") fail "no search pill on home ($f)" ;; *)
     set -- $f; tap "$1" "$2" "the search pill"; sleep 1.2; chk pill
@@ -108,10 +112,11 @@ part1() {
       step search "the search pill tapped"; fail "the search pill didn't take the focus - nothing typed"; back
     fi ;;
   esac
-  fi
-
-  # Calculator from the dock (Android, every lane); Dolphin + the image it opens (Gwenview) need the Linux session -
-  # --android-only skips them, a NOTE not a FAIL.
+}
+# Calculator from the dock (Android, every lane); Dolphin + the image it opens (Gwenview) need the Linux session -
+# --android-only skips them, a NOTE not a FAIL. Split out of part1() to keep it under the length budget - same
+# steps, same CT/DT/GT globals part2/part3 read.
+part1_dock_and_image() {
   dock_tap "a:$CALC/" Calculator && { sleep 2.5; chk calc
     CT=$(waitwin $CALC 6); step calculator "Calculator opened from the dock"
     [ "$CT" != none ] && floating "$CT" Calculator && pass "Calculator opened as a floating window (task $CT)" || fail "Calculator from the dock: window $CT"
@@ -124,7 +129,6 @@ part1() {
     step dolphin "Dolphin opened from the dock"
     [ "$DT" != none ] && floating "$DT" Dolphin && pass "Dolphin opened as a floating window (task $DT)" || fail "Dolphin from the dock: window $DT"; }
 
-  # An image opened the way Dolphin opens one: KIO's OpenUrlJob (kioclient exec), KDE's file association (Gwenview).
   if [ "${DT:-none}" != none ]; then
     local before; before=$(tasks)
     log "open $IMG via kioclient exec (Dolphin's open)"
@@ -136,6 +140,11 @@ part1() {
     closebar "$DT" Dolphin dolphin-closed
   fi
   fi
+}
+part1() {
+  part1_chrome
+  part1_search_kate
+  part1_dock_and_image
 }
 
 part2() {

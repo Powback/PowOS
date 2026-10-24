@@ -10,11 +10,12 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 OUT=${OUT:-$HOME/.cache/powos-verify/mc-launch-$(date +%F_%H%M)}; mkdir -p "$OUT"
-for f in mc-launch-phone.sh bf-lib.sh; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "FAIL setup: can't push $f"; exit 1; }; done
-"$A" shell "su -c 'cp /data/local/tmp/powos-mc-launch-phone.sh /data/local/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-mc-launch-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh && sh /data/powos/powos-run.sh \"${LAUNCH_S:+LAUNCH_S=$LAUNCH_S }${FPS_S:+FPS_S=$FPS_S }bash /var/tmp/powos-mc-launch-phone.sh $*\"'" \
+# bf-lib.sh's xframes body is bf-xframes.py (split out for test-complexity.sh's length budget), also pushed here.
+for f in mc-launch-phone.sh bf-lib.sh bf-xframes.py; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "FAIL setup: can't push $f"; exit 1; }; done
+"$A" shell "su -c 'cp /data/local/tmp/powos-mc-launch-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-mc-launch-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-xframes.py && sh /data/powos/powos-run.sh \"${LAUNCH_S:+LAUNCH_S=$LAUNCH_S }${FPS_S:+FPS_S=$FPS_S }bash /var/tmp/powos-mc-launch-phone.sh $*\"'" \
   | tr -d '\r' | tee "$OUT/run.txt"
 "$A" exec-out "su -c 'tar -C /data/powos/root/tmp -cz mc-logs 2>/dev/null'" > "$OUT/mc-logs.tgz" && tar -C "$OUT" -xzf "$OUT/mc-logs.tgz" 2>/dev/null && rm -f "$OUT/mc-logs.tgz"
-"$A" shell "su -c 'rm -f /data/local/tmp/powos-mc-launch-phone.sh /data/local/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-mc-launch-phone.sh'"
+"$A" shell "su -c 'rm -f /data/local/tmp/powos-mc-launch-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/powos-mc-launch-phone.sh'"
 echo "artefacts: $OUT/ (run.txt, mc-logs/<variant>/)"
 grep -q "^RESULT" "$OUT/run.txt" || { grep -q "^user input\|^stopped from outside\|skipped$" "$OUT/run.txt" && exit 3; echo "FAIL run: no RESULT line"; exit 1; }
 grep -q "^RESULT.*FAIL" "$OUT/run.txt" && exit 1

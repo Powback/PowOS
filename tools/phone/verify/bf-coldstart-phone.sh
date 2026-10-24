@@ -129,32 +129,64 @@ exported() {
   echo "   KWin: $(tail -n +"$(($2 + 1))" "$HYPR" 2>/dev/null | grep -a -E 'has its surface|full-screen window|opened as a task|window task [0-9]+ live|new windows as tasks' | sed 's/kwin_backend_anland: //' | tail -6 | cut -c1-160 | tr '\n' '|')"
   echo "   X: $(xwininfo -id "$3" 2>/dev/null | awk '/Map State|Override Redirect|Width|Height/ {$1=$1; printf "%s; ", $0}')$(xprop -id "$3" _NET_WM_STATE _NET_WM_WINDOW_TYPE WM_TRANSIENT_FOR 2>/dev/null | tr '\n' ' ')"
 }
-run() {  # run <variant> <n>
-  local v=$1 t0 now_ st r=0 x k=-1
-  declare -gA seen=()
-  case $v in
+# cs_ready_steam <variant>: get Steam into the state the variant needs before the tap (closed for cold, left
+# running and asleep for the warm variants). Split out of run() to keep it under the length budget
+# (test-complexity.sh) - same steps, same messages.
+cs_ready_steam() {
+  case $1 in
     cold) pill "cold start timing: closing Steam"; bash /var/tmp/powos-bf-stop.sh --steam | head -1 ;;
     *) close_game; [ "$(cat /proc/"$(steam_pid)"/comm 2>/dev/null)" = steam ] || { pill "starting Steam (for the warm runs)"; setsid -f steam -silent >/dev/null 2>&1 </dev/null; sleep 60; }
        # A -silent Steam has no window, so unified sleep never freezes it (seen 2026-10-23: resident Steam awake 20 min
        # after its start); a Steam the user had on screen is frozen 15 s after it went out of sight. 25 s at most.
        pill "waiting for Steam to sleep (out of sight)"; for _ in $(seq 25); do [ -n "$(cg)" ] && break; touched; sleep 1; done ;;
   esac
-  [ $v = fexcache ] && fexcache_on
-  st="steam $([ -d "/proc/$(steam_pid)" ] && { [ -n "$(cg)" ] && echo frozen || echo awake; } || echo off), wineserver $(pgrep -c wineserver)"
-  echo "== $v #$2: at the tap: $st; $(sizes)"
-  gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0) cl=$(wc -l < "$S/logs/console_log.txt" 2>/dev/null || echo 0) i=0
-  local cb; cb=$(stat -c %s "$S/logs/console_log.txt" 2>/dev/null || echo 0)
-  local up=; [ $v != cold ] && [ -d "/proc/$(steam_pid)" ] && up=1
-  mine=1; pill "cold start timing: $v #$2 - tap"; t0=$(now)
-  local hl; hl=$(wc -l < "$HYPR" 2>/dev/null || echo 0)
-  if [ "${VIA:-drawer}" = steam ]; then
-    ( setsid -f steam "steam://rungameid/$APP" >"$T/open.out" 2>&1 </dev/null; echo "none (Steam's own launch, the Library's path)" > "$T/open.status" ) &
-  else
-    ( open_task 400 "steam_app_$APP" > "$T/open.status" ) &
+}
+# cs_poll_launch: poll the launch's process tree / windows / logs for stage timestamps (into the global `seen`
+# array) until a window shows, the chain ends, or the budget runs out. Split out of run() to keep it under the
+# length budget (test-complexity.sh) - reads/writes run()'s locals (v, t0, gl, cl, cb, up) by bash's normal
+# dynamic scoping (a function sees its caller's locals), same as the rest of this file's helpers do with `seen`.
+# cs_poll_diag: every 30 s of cs_poll_launch's loop (i % 120 == 119, at 4 Hz), what the launch is doing (a run the
+# budget kills still says where it stood - 2026-10-23 05:13: the native build's exe at 41 s, then nothing for 4
+# min): the newest processes under the launch, the game's own process (state, wchan, CPU s), its windows. Split
+# out of cs_poll_launch to keep it under the length budget (test-complexity.sh) - reads/writes cs_poll_launch's
+# locals (now_, r, i) by bash's normal dynamic scoping, same as the rest of this file's helpers do with `seen`.
+cs_poll_diag() {
+  local xw
+  x=$(for q in $(tree "$r"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -1)
+  echo "   at ${now_} ms: $(tail -n 3 "$T/timeline" 2>/dev/null | cut -f3 | cut -c1-60 | tr '\n' '|') game ${x:-none}$([ -n "$x" ] && awk '{printf " state %s cpu %.1fs", $3, ($14+$15)/100}' /proc/$x/stat 2>/dev/null) wchan $(cat /proc/${x:-0}/wchan 2>/dev/null); X windows of it: $(xwininfo -root -tree 2>/dev/null | grep -c "$WIN_NAME")"
+  [ -n "$x" ] && [ -n "${seen[exe]:-}" ] && echo "     $(hang_diag "$x")"
+  # A first launch's install script past 60 s (ABZU 2026-10-23 08:16: still in the evaluator at 272 s, tabtip.exe
+  # up = something showed a dialog): every process under the evaluator (state, CPU s) and the X windows' names.
+  # No launch chain 60 s after the tap (Desk Job 08:21: nothing for 284 s, no download seen): Steam's windows (a
+  # dialog waiting for an answer: launch-option picker, EULA, cloud conflict...) and its console since the tap.
+  if [ -z "$r" ] && [ -z "$(iscript_reapers)" ] && [ "$now_" -gt 60000 ]; then
+    echo "     no launch yet - X windows: $(xwininfo -root -tree 2>/dev/null | sed -nE 's/^ +0x[0-9a-f]+ "([^"]+)".* ([0-9]+x[0-9]+)\+.*/\1 \2/p' | sort | uniq -c | sort -rn | head -12 | awk '{$1=$1; print}' | tr '\n' '|')"
+    echo "     console_log: $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -v '^\s*$' | tail -6 | cut -c1-150 | tr '\n' '|')"
+    # f89: "no launch yet" used to print only SlowJSMethodCall noise (the periodic timeline, below) - never the
+    # one line that actually says why: Steam waiting on the user (a EULA/launch-option/cloud-save dialog) or
+    # offline/logging in. Both read straight from Steam's own logs, no guessing.
+    echo "     waiting for user response: $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -i 'waiting for user response' | tail -3 | cut -c1-150 | tr '\n' '|')"
+    echo "     connection: $(tail -2 "$S/logs/connection_log.txt" 2>/dev/null | cut -c1-150 | tr '\n' '|')"
+    # A Steam dialog up (ABZU 09:45: "Steam Dialog" 700x480 the whole time, no launch): its picture, once, for the
+    # Mac side to pull (bf-coldstart.sh copies /tmp/bf-cold-dialog into the artefacts).
+    # (not `xwininfo | grep -q`: grep -q closes the pipe early, xwininfo dies of SIGPIPE, pipefail says no match)
+    xw=$(xwininfo -root -tree 2>/dev/null)
+    if [ -z "${dialog_grabbed:-}" ] && [[ $xw == *'"Steam Dialog"'* ]]; then
+      dialog_grabbed=1; rm -rf /tmp/bf-cold-dialog; xframes grab "Steam Dialog" 1 /tmp/bf-cold-dialog >/dev/null 2>&1
+      echo "     Steam Dialog grabbed: $(ls /tmp/bf-cold-dialog 2>/dev/null | tr '\n' ' ')"; fi
+    echo "     downloading: $(ls "$S/steamapps/downloading" 2>/dev/null | tr '\n' ' ') content_log: $(tail -2 "$S/logs/content_log.txt" 2>/dev/null | cut -c1-150 | tr '\n' '|')"
   fi
+  if [ -n "$(iscript_reapers)" ] && [ "$now_" -gt 60000 ]; then
+    echo "     install script: $(for q in $(for e in $(iscript_reapers); do tree "$e"; done); do c=$(tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null) || continue
+      case $c in *reaper*|*steam-launch-wrapper*|*pressure-vessel*|*pv-adverb*|*_v2-entry-point*) continue ;; esac
+      printf '%s[%s %ss] ' "$(printf '%s' "$c" | sed -E 's|^[^ ]*[\\/]([^\\/ ]+)|\1|' | cut -c1-80)" "$(awk '{print $3}' /proc/$q/stat 2>/dev/null)" "$(awk '{printf "%.0f", ($14+$15)/100}' /proc/$q/stat 2>/dev/null)"; done | cut -c1-1400)"
+    echo "     X windows: $(xwininfo -root -tree 2>/dev/null | sed -nE 's/^ +0x[0-9a-f]+ "([^"]+)".* ([0-9]+x[0-9]+)\+.*/\1 \2/p' | sort | uniq -c | sort -rn | head -12 | awk '{$1=$1; print}' | tr '\n' '|')"
+  fi
+}
+cs_poll_launch() {
+  local now_ r=0 x k=-1 stacks=0
   # 400 s cold (Steam's start, maybe a depot download); 150 s warm (~35 s expected): past that it is Steam's
   # freeze/thaw hanging the launch (INVALID below), and the check stays inside its 300 s budget to say so.
-  local stacks=0
   for _ in $(seq $([ $v = cold ] && echo 1600 || echo 600)); do
     now_=$(ms "$t0" "$(now)"); i=$((i + 1))
     # The queue kills a job at 300 s: stop waiting at COLD_WAIT_MS (265 s) so a launch that never shows a window still
@@ -193,41 +225,7 @@ run() {  # run <variant> <n>
     # build has no wineserver: the exe counts from the game's reaper on.
     [ -n "$r" ] && [ -z "$(iscript_reapers)" ] && game_exe "$r" && first exe "$now_"
     W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && { first window "$now_"; break; }
-    # Every 30 s, what the launch is doing (a run the budget kills still says where it stood - 2026-10-23 05:13: the
-    # native build's exe at 41 s, then nothing for 4 min): the newest processes under the launch, the game's own
-    # process (state, wchan, CPU s), its windows.
-    if [ $((i % 120)) = 119 ]; then
-      x=$(for q in $(tree "$r"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -1)
-      echo "   at ${now_} ms: $(tail -n 3 "$T/timeline" 2>/dev/null | cut -f3 | cut -c1-60 | tr '\n' '|') game ${x:-none}$([ -n "$x" ] && awk '{printf " state %s cpu %.1fs", $3, ($14+$15)/100}' /proc/$x/stat 2>/dev/null) wchan $(cat /proc/${x:-0}/wchan 2>/dev/null); X windows of it: $(xwininfo -root -tree 2>/dev/null | grep -c "$WIN_NAME")"
-      [ -n "$x" ] && [ -n "${seen[exe]:-}" ] && echo "     $(hang_diag "$x")"
-      # A first launch's install script past 60 s (ABZU 2026-10-23 08:16: still in the evaluator at 272 s, tabtip.exe
-      # up = something showed a dialog): every process under the evaluator (state, CPU s) and the X windows' names.
-      # No launch chain 60 s after the tap (Desk Job 08:21: nothing for 284 s, no download seen): Steam's windows (a
-      # dialog waiting for an answer: launch-option picker, EULA, cloud conflict...) and its console since the tap.
-      if [ -z "$r" ] && [ -z "$(iscript_reapers)" ] && [ "$now_" -gt 60000 ]; then
-        echo "     no launch yet - X windows: $(xwininfo -root -tree 2>/dev/null | sed -nE 's/^ +0x[0-9a-f]+ "([^"]+)".* ([0-9]+x[0-9]+)\+.*/\1 \2/p' | sort | uniq -c | sort -rn | head -12 | awk '{$1=$1; print}' | tr '\n' '|')"
-        echo "     console_log: $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -v '^\s*$' | tail -6 | cut -c1-150 | tr '\n' '|')"
-        # f89: "no launch yet" used to print only SlowJSMethodCall noise (the periodic timeline, below) - never the
-        # one line that actually says why: Steam waiting on the user (a EULA/launch-option/cloud-save dialog) or
-        # offline/logging in. Both read straight from Steam's own logs, no guessing.
-        echo "     waiting for user response: $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -i 'waiting for user response' | tail -3 | cut -c1-150 | tr '\n' '|')"
-        echo "     connection: $(tail -2 "$S/logs/connection_log.txt" 2>/dev/null | cut -c1-150 | tr '\n' '|')"
-        # A Steam dialog up (ABZU 09:45: "Steam Dialog" 700x480 the whole time, no launch): its picture, once, for the
-        # Mac side to pull (bf-coldstart.sh copies /tmp/bf-cold-dialog into the artefacts).
-        # (not `xwininfo | grep -q`: grep -q closes the pipe early, xwininfo dies of SIGPIPE, pipefail says no match)
-        xw=$(xwininfo -root -tree 2>/dev/null)
-        if [ -z "${dialog_grabbed:-}" ] && [[ $xw == *'"Steam Dialog"'* ]]; then
-          dialog_grabbed=1; rm -rf /tmp/bf-cold-dialog; xframes grab "Steam Dialog" 1 /tmp/bf-cold-dialog >/dev/null 2>&1
-          echo "     Steam Dialog grabbed: $(ls /tmp/bf-cold-dialog 2>/dev/null | tr '\n' ' ')"; fi
-        echo "     downloading: $(ls "$S/steamapps/downloading" 2>/dev/null | tr '\n' ' ') content_log: $(tail -2 "$S/logs/content_log.txt" 2>/dev/null | cut -c1-150 | tr '\n' '|')"
-      fi
-      if [ -n "$(iscript_reapers)" ] && [ "$now_" -gt 60000 ]; then
-        echo "     install script: $(for q in $(for e in $(iscript_reapers); do tree "$e"; done); do c=$(tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null) || continue
-          case $c in *reaper*|*steam-launch-wrapper*|*pressure-vessel*|*pv-adverb*|*_v2-entry-point*) continue ;; esac
-          printf '%s[%s %ss] ' "$(printf '%s' "$c" | sed -E 's|^[^ ]*[\\/]([^\\/ ]+)|\1|' | cut -c1-80)" "$(awk '{print $3}' /proc/$q/stat 2>/dev/null)" "$(awk '{printf "%.0f", ($14+$15)/100}' /proc/$q/stat 2>/dev/null)"; done | cut -c1-1400)"
-        echo "     X windows: $(xwininfo -root -tree 2>/dev/null | sed -nE 's/^ +0x[0-9a-f]+ "([^"]+)".* ([0-9]+x[0-9]+)\+.*/\1 \2/p' | sort | uniq -c | sort -rn | head -12 | awk '{$1=$1; print}' | tr '\n' '|')"
-      fi
-    fi
+    [ $((i % 120)) = 119 ] && cs_poll_diag
     # The exe up 45 s / 90 s and still no window: where its busiest thread is (two samples: a loop or progress).
     if [ -n "${seen[exe]:-}" ] && [ $stacks -lt 2 ] && [ $((now_ - ${seen[exe]})) -gt $((45000 * (stacks + 1))) ]; then
       x=$(for q in $(tree "$r"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -1)
@@ -239,6 +237,43 @@ run() {  # run <variant> <n>
       *" iscript "*) pill "cold start timing: $v - install script" ;; *) pill "cold start timing: $v - Steam" ;; esac
     touched; sleep 0.25
   done
+}
+# cs_no_window_evidence: a launch that started but showed no window - where its process stands, Steam's stdout,
+# and (f89) whether it's stuck waiting on a Steam dialog rather than actually hung. Split out of run() to keep it
+# under the length budget (test-complexity.sh) - reads run()'s locals (v is unused here, IDIR/cl/S/T are globals).
+cs_no_window_evidence() {
+  # Started but no window: where its process stands, before the close kills it (native Broforce 2026-10-23: exe at
+  # 41 s, then nothing for 4 min and no Player.log).
+  for q in $(tree "$(reaper)"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -2 \
+    | while read -r q; do echo "   HANG $(hang_diag "$q")"; done
+  # Steam's stdout (open-task started it) carries the game's own stdout/stderr too: the player's / FEX's last words.
+  for f in $(find /tmp -maxdepth 1 -name 'fex-game-*.log' -newer /tmp/bf-cold-mark 2>/dev/null | head -2); do echo "   FEX log $f ($(wc -l < "$f") lines), last:"; tail -15 "$f" | cut -c1-200 | sed 's/^/   | /'; done
+  echo "   game output (Steam's stdout, last lines):"; grep -a -v -E 'LD_PRELOAD|^\s*$|steamwebhelper|cef_|chromium|SlowJSMethodCall' "$T/open.out" 2>/dev/null \
+    | tail -25 | cut -c1-200 | sed 's/^/   | /'
+  # f89: Steam's own stdout is mostly SlowJSMethodCall noise (the grep above drops it, but a launch waiting on a
+  # Steam dialog can leave nothing else there) - print the actual "waiting for user response" lines and the
+  # connection state too, or a launch stuck on a Steam prompt reads exactly like a dropped forward.
+  echo "   console_log (waiting for user response, since the tap): $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -i 'waiting for user response' | tail -6 | cut -c1-150 | tr '\n' '|')"
+  echo "   connection_log (latest state): $(tail -3 "$S/logs/connection_log.txt" 2>/dev/null | cut -c1-150 | tr '\n' '|')"
+}
+run() {  # run <variant> <n>
+  local v=$1 t0 st
+  declare -gA seen=()
+  cs_ready_steam "$v"
+  [ $v = fexcache ] && fexcache_on
+  st="steam $([ -d "/proc/$(steam_pid)" ] && { [ -n "$(cg)" ] && echo frozen || echo awake; } || echo off), wineserver $(pgrep -c wineserver)"
+  echo "== $v #$2: at the tap: $st; $(sizes)"
+  gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0) cl=$(wc -l < "$S/logs/console_log.txt" 2>/dev/null || echo 0) i=0
+  local cb; cb=$(stat -c %s "$S/logs/console_log.txt" 2>/dev/null || echo 0)
+  local up=; [ $v != cold ] && [ -d "/proc/$(steam_pid)" ] && up=1
+  mine=1; pill "cold start timing: $v #$2 - tap"; t0=$(now)
+  local hl; hl=$(wc -l < "$HYPR" 2>/dev/null || echo 0)
+  if [ "${VIA:-drawer}" = steam ]; then
+    ( setsid -f steam "steam://rungameid/$APP" >"$T/open.out" 2>&1 </dev/null; echo "none (Steam's own launch, the Library's path)" > "$T/open.status" ) &
+  else
+    ( open_task 400 "steam_app_$APP" > "$T/open.status" ) &
+  fi
+  cs_poll_launch
   if [ -n "${seen[restart]:-}" ]; then fail "restart-$v" "the running Steam was restarted for the launch (a new client ${seen[restart]} ms after the tap) instead of taking it"
   fi
   if [ -n "${seen[window]:-}" ]; then
@@ -248,19 +283,7 @@ run() {  # run <variant> <n>
   elif [ -n "${seen[handoff]:-}" ]; then fail "handoff-$v" "the running Steam didn't log the launch's URL in 20 s (handoff lines above)"
   elif [ -n "${seen[ended]:-}" ]; then fail "start-$v" "the launch chain ended ${seen[ended]} ms after the tap, no window; Steam: $(grep -a 'Game process removed\|exit code' "$S/logs/gameprocess_log.txt" | tail -2 | cut -c1-120 | tr '\n' '|')"
   else
-    # Started but no window: where its process stands, before the close kills it (native Broforce 2026-10-23: exe at
-    # 41 s, then nothing for 4 min and no Player.log).
-    for q in $(tree "$(reaper)"); do tr '\0' ' ' < /proc/$q/cmdline 2>/dev/null | grep -qF "common/$IDIR/" && echo $q; done | tail -2 \
-      | while read -r q; do echo "   HANG $(hang_diag "$q")"; done
-    # Steam's stdout (open-task started it) carries the game's own stdout/stderr too: the player's / FEX's last words.
-    for f in $(find /tmp -maxdepth 1 -name 'fex-game-*.log' -newer /tmp/bf-cold-mark 2>/dev/null | head -2); do echo "   FEX log $f ($(wc -l < "$f") lines), last:"; tail -15 "$f" | cut -c1-200 | sed 's/^/   | /'; done
-    echo "   game output (Steam's stdout, last lines):"; grep -a -v -E 'LD_PRELOAD|^\s*$|steamwebhelper|cef_|chromium|SlowJSMethodCall' "$T/open.out" 2>/dev/null \
-      | tail -25 | cut -c1-200 | sed 's/^/   | /'
-    # f89: Steam's own stdout is mostly SlowJSMethodCall noise (the grep above drops it, but a launch waiting on a
-    # Steam dialog can leave nothing else there) - print the actual "waiting for user response" lines and the
-    # connection state too, or a launch stuck on a Steam prompt reads exactly like a dropped forward.
-    echo "   console_log (waiting for user response, since the tap): $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -i 'waiting for user response' | tail -6 | cut -c1-150 | tr '\n' '|')"
-    echo "   connection_log (latest state): $(tail -3 "$S/logs/connection_log.txt" 2>/dev/null | cut -c1-150 | tr '\n' '|')"
+    cs_no_window_evidence
     fail "start-$v" "no window in $([ $v = cold ] && echo $((${COLD_WAIT_MS:-265000} / 1000)) || echo 150) s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi
   local hv=${seen[handoff_ms]:-${seen[restart]:+restart@${seen[restart]}}}
   echo "STAGES $v #$2 (ms from the tap):$([ $v != cold ] && echo " handoff ${hv:--}") steam-ui ${seen[steam]:--} update ${seen[update]:--}-${seen[update_end]:--} iscript ${seen[iscript]:--}-${seen[iscript_end]:--} reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--}; open-task: $(cat "$T/open.status" 2>/dev/null)"

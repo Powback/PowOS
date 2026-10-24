@@ -9,16 +9,17 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 OUT=${OUT:-$HOME/.cache/powos-verify/td-launch-$(date +%F_%H%M)}; mkdir -p "$OUT"
-for f in td-launch-phone.sh bf-lib.sh bf-stop.sh; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "FAIL setup: can't push $f"; exit 1; }; done
+# bf-lib.sh's xframes body is bf-xframes.py (split out for test-complexity.sh's length budget), also pushed here.
+for f in td-launch-phone.sh bf-lib.sh bf-xframes.py bf-stop.sh; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "FAIL setup: can't push $f"; exit 1; }; done
 # The runner's budget kill (TERM) ends only this Mac side: the phone side ran on (2026-10-23 04:31: td-launch-phone kept
 # launching Teardown while the next check ran). So the adb run waits in the background and a TERM stops the phone
 # side too (its own TERM trap closes what it started).
 stop_phone() { "$A" shell "su -c 'pkill -TERM -f powos-td-launch-phone.sh'" >/dev/null 2>&1; kill "$job" 2>/dev/null; exit 3; }
-{ "$A" shell "su -c 'cp /data/local/tmp/powos-td-launch-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-td-launch-phone.sh /data/powos/root/var/tmp/powos-bf-*.sh && sh /data/powos/powos-run.sh \"${APP:+APP=$APP }${RUN_S:+RUN_S=$RUN_S }${KEEP:+KEEP=$KEEP }${LAUNCH_S:+LAUNCH_S=$LAUNCH_S }${TD_ENV:+TD_ENV=$TD_ENV }bash /var/tmp/powos-td-launch-phone.sh $*\"'" \
+{ "$A" shell "su -c 'cp /data/local/tmp/powos-td-launch-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/local/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-td-launch-phone.sh /data/powos/root/var/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-xframes.py && sh /data/powos/powos-run.sh \"${APP:+APP=$APP }${RUN_S:+RUN_S=$RUN_S }${KEEP:+KEEP=$KEEP }${LAUNCH_S:+LAUNCH_S=$LAUNCH_S }${TD_ENV:+TD_ENV=$TD_ENV }bash /var/tmp/powos-td-launch-phone.sh $*\"'" \
   | sed -l $'s/\r$//' | tee "$OUT/run.txt"; } &
 job=$!; trap stop_phone TERM INT HUP; wait "$job"; trap - TERM INT HUP
 "$A" exec-out "su -c 'tar -C /data/powos/root/tmp -cz td-logs 2>/dev/null'" > "$OUT/td-logs.tgz" && tar -C "$OUT" -xzf "$OUT/td-logs.tgz" 2>/dev/null && rm -f "$OUT/td-logs.tgz"
-"$A" shell "su -c 'rm -f /data/local/tmp/powos-td-launch-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/powos-td-launch-phone.sh'"
+"$A" shell "su -c 'rm -f /data/local/tmp/powos-td-launch-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/local/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/powos-td-launch-phone.sh'"
 echo "artefacts: $OUT/ (run.txt, td-logs/<variant>/: steam.out, steam-1167630.log, gameprocess, console, fex-telemetry, window.png)"
 grep -q "^RESULT" "$OUT/run.txt" || { grep -q "^user input\|^stopped from outside" "$OUT/run.txt" && exit 3; echo "FAIL run: no RESULT line"; exit 1; }
 grep "^RESULT" "$OUT/run.txt" | tail -1

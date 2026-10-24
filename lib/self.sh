@@ -449,8 +449,8 @@ self_push() {
         git -C "$src" add -- "${paths[@]}" || { perr "git add failed."; return 1; }
     else
         # Someone else's staged changes in the index: `add -A` + commit would ship them under this message. A tree
-        # several agents share must commit by path.
-        if ! git -C "$src" diff --cached --quiet 2>/dev/null; then
+        # several agents share must commit by path (status --porcelain's index column: diff --cached --quiet below is the post-add-A check, not this one).
+        if git -C "$src" status --porcelain 2>/dev/null | grep -qE '^[^ ?]'; then
             perr "Other changes are already staged in $src (another agent or tool?):"
             git -C "$src" diff --cached --name-status 2>/dev/null | self_indent
             perr "Commit only yours:  powos self push -m \"message\" -- <your files>"

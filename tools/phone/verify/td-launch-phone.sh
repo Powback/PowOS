@@ -77,17 +77,11 @@ fetch_deps() {  # fetch_deps <variant>: 0 = all there; else Steam fetches them (
   echo "   fetched before the launch:$miss -> $([ -z "$miss2" ] && echo installed || echo "still missing$miss2")"
   return 1
 }
-run() {  # run <variant> <n>
-  local v=$1 t0 now_ r x k=-1 gl d=$L/$1 p
-  declare -gA seen=()
-  [ -n "${TOOL[$v]:-}" ] || { fail "variant-$v" "unknown variant (arm64 | x86)"; return; }
-  rm -rf "$d"; mkdir -p "$d"
-  steam_off; mapping "${TOOL[$v]}"; pfx_use "$(fam "$v")"
-  fetch_deps "$v" || { echo "INVALID $v #$2: its runtime was fetched now, untimed - queue the variant again"; steam_off; return; }
-  p="$S/steamapps/common/${PDIR[$v]}"
-  [ -x "$p/proton" ] || { fail "start-$v" "$p has no proton (not installed)"; return; }
+# TD_ENV=K=V[,K=V...]: extra environment for the game (a candidate fix, measured before it goes into steam-env).
+# Split out of run() to keep it under the length budget (test-complexity.sh) - same settings file, same messages.
+td_write_settings() {  # td_write_settings <d> <p>
+  local d=$1 p=$2
   mkdir -p ~/.config/powos
-  # TD_ENV=K=V[,K=V...]: extra environment for the game (a candidate fix, measured before it goes into steam-env).
   python3 - "$d" "${TD_ENV:-}" > ~/.config/powos/proton-settings.json <<'PY'
 import json, sys
 s = {"PROTON_LOG": "1", "PROTON_LOG_DIR": sys.argv[1], "WINEDEBUG": "+loaddll,+seh,err+all,warn+module",
@@ -100,7 +94,44 @@ for kv in sys.argv[2].split(","):
 print(json.dumps(s))
 PY
   [ -z "${TD_ENV:-}" ] || echo "   extra env: $TD_ENV"
-  [ -f "$p/user_settings.py" ] || echo "   note: $p has no PowOS user_settings.py - the log settings won't apply there" 
+  [ -f "$p/user_settings.py" ] || echo "   note: $p has no PowOS user_settings.py - the log settings won't apply there"
+}
+# Evidence, before the close kills anything: what Steam, pressure-vessel, Proton and Wine said. Split out of run()
+# to keep it under the length budget - same files, same messages.
+td_evidence() {  # td_evidence <v> <d> <gl>
+  local v=$1 d=$2 gl=$3 x
+  tail -n +$((gl + 1)) "$S/logs/gameprocess_log.txt" > "$d/gameprocess.txt"
+  tail -n 400 "$S/logs/console_log.txt" > "$d/console.txt"; tail -n 60 "$S/logs/compat_log.txt" > "$d/compat.txt"
+  ls -t /tmp/fex-compat-tool-*.log 2>/dev/null | head -3 | xargs -r cp -t "$d/" 2>/dev/null
+  ls -lt --time-style=+%T "$S/steamapps/compatdata/$APP/fex-emu/Telemetry" 2>/dev/null | head -12 > "$d/fex-telemetry.txt"
+  echo "   --- Steam stdout (pressure-vessel / Proton / Wine), the lines that matter:"
+  grep -a -i -E 'error|fail|abort|crash|segv|signal|unhandled|not found|cannot|unable|err:|vkd3d|dxvk|vulkan|D3D12|pressure-vessel|pv-|proton|wine' "$d/steam.out" \
+    | grep -v -E 'SlowJSMethodCall|steamwebhelper|cef_|chromium' | tail -40 | cut -c1-240 | sed 's/^/   | /'
+  for x in "$d"/steam-$APP.log; do [ -f "$x" ] || continue
+    echo "   --- $(basename "$x") ($(wc -l < "$x") lines): err/crash lines"
+    grep -a -E 'err:|Unhandled|EXCEPTION|page fault|wine: |fixme:vkd3d|vkd3d|dxvk|D3D12|Vulkan|exited|Exited|warn:(opengl|wgl)|MESA|libGL|EGL|GL_VERSION|GL_RENDERER' "$x" | grep -v -E 'Loaded L"|loaddll' | sort | uniq -c | sort -rn | head -30 | cut -c1-240 | sed 's/^/   | /'
+    # A window that stays black can be a game that crashed and sits in its crash handler (Teardown 2026-10-23: a
+    # call through a NULL pointer after D3D12CreateDevice failed, crashpad keeping the window): say so first.
+    grep -a -m1 -E 'dispatch_exception code=c0000005|dispatch_exception code=c000001d' "$x" | sed 's/^/   CRASH: /' | cut -c1-200
+    grep -a -m6 -A0 'virtual_unwind backtrace' "$x" | sed 's/^/   CRASH   /' | cut -c1-200
+    grep -a -E 'Feature level 0x[0-9a-f]+ is not supported|Overriding feature level' "$x" | sort -u | sed 's/^/   vkd3d: /' | cut -c1-200
+    echo "   --- last 25 lines:"; tail -25 "$x" | cut -c1-240 | sed 's/^/   | /'
+  done
+  [ -f "$d/steam-$APP.log" ] || echo "   no PROTON_LOG file: Proton's script never ran"
+  # Crash dumps the game's own handler (crashpad/sentry, Unity, Unreal...) wrote in its prefix during this run.
+  find "$S/steamapps/compatdata/$APP/pfx/drive_c/users" -newer "$d/.tap" -type f \( -iname '*.dmp' -o -iname '*.mdmp' \) 2>/dev/null | head -4 \
+    | while read -r f; do cp "$f" "$d/" && echo "   crash dump: ${f#*/drive_c/} ($(stat -c %s "$f") bytes) -> td-logs/$v/$(basename "$f")"; done
+}
+run() {  # run <variant> <n>
+  local v=$1 t0 now_ r x k=-1 gl d=$L/$1 p
+  declare -gA seen=()
+  [ -n "${TOOL[$v]:-}" ] || { fail "variant-$v" "unknown variant (arm64 | x86)"; return; }
+  rm -rf "$d"; mkdir -p "$d"
+  steam_off; mapping "${TOOL[$v]}"; pfx_use "$(fam "$v")"
+  fetch_deps "$v" || { echo "INVALID $v #$2: its runtime was fetched now, untimed - queue the variant again"; steam_off; return; }
+  p="$S/steamapps/common/${PDIR[$v]}"
+  [ -x "$p/proton" ] || { fail "start-$v" "$p has no proton (not installed)"; return; }
+  td_write_settings "$d" "$p"
   echo "== $v #$2: mapping $(mapping), $(cat "$p/version"), FEX $(head -1 "$S/steamapps/common/FEX-Emu/VERSIONS.txt" 2>/dev/null)"
   gl=$(wc -l < "$S/logs/gameprocess_log.txt" 2>/dev/null || echo 0)
   powos sleep never steam >/dev/null 2>&1
@@ -133,28 +164,7 @@ PY
   [ -n "${seen[download]:-}" ] && echo "INVALID $v #$2: Steam downloaded an update during the launch (from ${seen[download]} ms) - the time isn't the launch's"
   echo "STAGES $v #$2 (ms from the tap): download ${seen[download]:--} reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--} ended ${seen[ended]:--}"
   RES_="$RES_ $v window ${seen[window]:--} frame ${seen[frame]:--};"
-  # Evidence, before the close kills anything: what Steam, pressure-vessel, Proton and Wine said.
-  tail -n +$((gl + 1)) "$S/logs/gameprocess_log.txt" > "$d/gameprocess.txt"
-  tail -n 400 "$S/logs/console_log.txt" > "$d/console.txt"; tail -n 60 "$S/logs/compat_log.txt" > "$d/compat.txt"
-  ls -t /tmp/fex-compat-tool-*.log 2>/dev/null | head -3 | xargs -r cp -t "$d/" 2>/dev/null
-  ls -lt --time-style=+%T "$S/steamapps/compatdata/$APP/fex-emu/Telemetry" 2>/dev/null | head -12 > "$d/fex-telemetry.txt"
-  echo "   --- Steam stdout (pressure-vessel / Proton / Wine), the lines that matter:"
-  grep -a -i -E 'error|fail|abort|crash|segv|signal|unhandled|not found|cannot|unable|err:|vkd3d|dxvk|vulkan|D3D12|pressure-vessel|pv-|proton|wine' "$d/steam.out" \
-    | grep -v -E 'SlowJSMethodCall|steamwebhelper|cef_|chromium' | tail -40 | cut -c1-240 | sed 's/^/   | /'
-  for x in "$d"/steam-$APP.log; do [ -f "$x" ] || continue
-    echo "   --- $(basename "$x") ($(wc -l < "$x") lines): err/crash lines"
-    grep -a -E 'err:|Unhandled|EXCEPTION|page fault|wine: |fixme:vkd3d|vkd3d|dxvk|D3D12|Vulkan|exited|Exited|warn:(opengl|wgl)|MESA|libGL|EGL|GL_VERSION|GL_RENDERER' "$x" | grep -v -E 'Loaded L"|loaddll' | sort | uniq -c | sort -rn | head -30 | cut -c1-240 | sed 's/^/   | /'
-    # A window that stays black can be a game that crashed and sits in its crash handler (Teardown 2026-10-23: a
-    # call through a NULL pointer after D3D12CreateDevice failed, crashpad keeping the window): say so first.
-    grep -a -m1 -E 'dispatch_exception code=c0000005|dispatch_exception code=c000001d' "$x" | sed 's/^/   CRASH: /' | cut -c1-200
-    grep -a -m6 -A0 'virtual_unwind backtrace' "$x" | sed 's/^/   CRASH   /' | cut -c1-200
-    grep -a -E 'Feature level 0x[0-9a-f]+ is not supported|Overriding feature level' "$x" | sort -u | sed 's/^/   vkd3d: /' | cut -c1-200
-    echo "   --- last 25 lines:"; tail -25 "$x" | cut -c1-240 | sed 's/^/   | /'
-  done
-  [ -f "$d/steam-$APP.log" ] || echo "   no PROTON_LOG file: Proton's script never ran"
-  # Crash dumps the game's own handler (crashpad/sentry, Unity, Unreal...) wrote in its prefix during this run.
-  find "$S/steamapps/compatdata/$APP/pfx/drive_c/users" -newer "$d/.tap" -type f \( -iname '*.dmp' -o -iname '*.mdmp' \) 2>/dev/null | head -4 \
-    | while read -r f; do cp "$f" "$d/" && echo "   crash dump: ${f#*/drive_c/} ($(stat -c %s "$f") bytes) -> td-logs/$v/$(basename "$f")"; done
+  td_evidence "$v" "$d" "$gl"
   sleep 3
 }
 RES_=""; ORIG=$(mapping); PFX0=$(pfx_fam)

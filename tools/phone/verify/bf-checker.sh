@@ -28,12 +28,13 @@ front=$("$A" shell "dumpsys activity activities | grep -m1 topResumedActivity" |
 steam_before=$("$A" shell "pgrep -f 'steam -cef'" | tr -d '\r')
 fold=$("$A" shell "dumpsys device_state | grep -m1 mCommittedState" | sed -nE "s/.*name='([A-Z_]+)'.*/\1/p")
 echo "front=${front:-?} steam_before=${steam_before:+yes} fold=$fold out=$OUT"
-for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-checker-phone.sh bf-lib.sh; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null; done
-# bf-checker-phone.sh's grab sources bf-lib.sh (xframes grab: Xlib frames; x11grab gets none on Android, no MIT-SHM)
-"$A" shell "su -c 'cp /data/local/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-lib.sh'"
+for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-checker-phone.sh bf-lib.sh bf-xframes.py; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null; done
+# bf-checker-phone.sh's grab sources bf-lib.sh (xframes grab: Xlib frames; x11grab gets none on Android, no MIT-SHM) -
+# xframes' body is bf-xframes.py (split out for test-complexity.sh's length budget), also pushed here.
+"$A" shell "su -c 'cp /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-xframes.py'"
 restore() {
   pill "closing the game, putting Steam + settings back"
-  "$A" shell "su -c 'pkill -f powos-bf-present.sh; pkill -f \"powos-bf-checker-phone.sh grabloop\"; pkill -f \"python3 - grab Broforce\"'" >/dev/null 2>&1
+  "$A" shell "su -c 'pkill -f powos-bf-present.sh; pkill -f \"powos-bf-checker-phone.sh grabloop\"; pkill -f \"bf-xframes.py grab Broforce\"'" >/dev/null 2>&1
   asuser bf-checker-phone.sh clean >/dev/null; asuser bf-stop.sh >/dev/null
   [ -n "$steam_before" ] && "$A" shell "su -c 'sh /data/powos/powos-run.sh \"cd /home/powos; setsid -f steam -silent </dev/null >/dev/null 2>&1\"'" >/dev/null 2>&1
   [ -n "$front" ] && "$A" shell "am start -n $front >/dev/null 2>&1"

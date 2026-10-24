@@ -46,7 +46,7 @@ sandbox_setup() {
 
 sandbox_exec() {
     local rt
-    rt=$(sandbox_runtime) || { echo "powos sandbox: needs bun or node >= 22.18" >&2; return 1; }
+    rt=$(sandbox_runtime) || { echo "powos sandbox: needs bun or node >= 22.18: powos sandbox setup" >&2; return 1; }
     sandbox_deps_ok || { echo "powos sandbox: its deps are missing or stale: powos sandbox setup" >&2; return 1; }
     [[ $rt == node ]] && exec node --no-warnings "$_SANDBOX_DIR/main.ts" "$@"
     exec bun "$_SANDBOX_DIR/main.ts" "$@"

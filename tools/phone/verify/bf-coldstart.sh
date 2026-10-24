@@ -28,12 +28,14 @@ ot=$(cd "$here/../../../targets/android/session" && pwd)/powos-open-task
 # powos-steam-compat from the repo (the steam package's per-game compat policy; the phone's may be older).
 pc=$(cd "$here/../../../targets/android/pkgs/steam" && pwd)/powos-steam-compat
 "$A" push "$pc" /data/local/tmp/powos-steam-compat >/dev/null || { echo "FAIL setup: can't push $pc"; exit 1; }
-for f in bf-coldstart-phone.sh bf-lib.sh bf-stop.sh; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "FAIL setup: can't push $f"; exit 1; }; done
+# bf-lib.sh's xframes/hang_stack bodies are bf-xframes.py/bf-stack-syms.py (split out for test-complexity.sh's
+# length budget) - pushed alongside it.
+for f in bf-coldstart-phone.sh bf-lib.sh bf-xframes.py bf-stack-syms.py bf-stop.sh; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "FAIL setup: can't push $f"; exit 1; }; done
 # The runner's budget kill (TERM) ends only this Mac side: the phone side ran on (2026-10-23 04:31: td-launch-phone kept
 # launching Teardown while the next check ran). So the adb run waits in the background and a TERM stops the phone
 # side too (its own TERM trap closes what it started).
 stop_phone() { "$A" shell "su -c 'pkill -TERM -f powos-bf-coldstart-phone.sh'" >/dev/null 2>&1; kill "$job" 2>/dev/null; exit 3; }
-{ "$A" shell "su -c 'install -m 755 /data/local/tmp/powos-open-task /data/powos/root/usr/local/bin/powos-open-task && cp /data/local/tmp/powos-bf-coldstart-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-steam-compat && sh /data/powos/powos-run.sh \"env$envs bash /var/tmp/powos-bf-coldstart-phone.sh $*\"'" \
+{ "$A" shell "su -c 'install -m 755 /data/local/tmp/powos-open-task /data/powos/root/usr/local/bin/powos-open-task && cp /data/local/tmp/powos-bf-coldstart-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/local/tmp/powos-bf-stack-syms.py /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-*.py /data/powos/root/var/tmp/powos-steam-compat && sh /data/powos/powos-run.sh \"env$envs bash /var/tmp/powos-bf-coldstart-phone.sh $*\"'" \
   | sed -l $'s/\r$//' | tee "$OUT/run.txt"; } &
 job=$!
 # "SHOT <name>" from the phone side (the game's window just became a task): a screenshot of what the user would see.
@@ -47,7 +49,7 @@ shots() { local n=0 k name
   done; }
 shots & shooter=$!
 trap stop_phone TERM INT HUP; wait "$job"; trap - TERM INT HUP; kill "$shooter" 2>/dev/null
-"$A" shell "su -c 'rm -f /data/local/tmp/powos-open-task /data/local/tmp/powos-bf-coldstart-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-bf-coldstart-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-stop.sh'"
+"$A" shell "su -c 'rm -f /data/local/tmp/powos-open-task /data/local/tmp/powos-bf-coldstart-phone.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/local/tmp/powos-bf-stack-syms.py /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-steam-compat /data/powos/root/var/tmp/powos-bf-coldstart-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/powos-bf-stack-syms.py /data/powos/root/var/tmp/powos-bf-stop.sh'"
 # A Steam dialog the phone side grabbed (no launch chain: what Steam asked).
 "$A" exec-out "su -c 'tar -C /data/powos/root/tmp -cz bf-cold-dialog 2>/dev/null; rm -rf /data/powos/root/tmp/bf-cold-dialog'" 2>/dev/null | tar -C "$OUT" -xzf - 2>/dev/null \
   && [ -d "$OUT/bf-cold-dialog" ] && echo "steam dialog: $OUT/bf-cold-dialog/"
