@@ -121,22 +121,23 @@ swipe() {
   [ $(( (to - x) * $1 )) -ge $((W / 4 + 40)) ] || { echo "ENV: only a $(( (to - x) * $1 )) px swipe fits from $x,$y - stopping (not a product FAIL)"; exit 5; }
   LASTSWIPE="$x,$y -> $to,$y"; echo "swipe $LASTSWIPE" >>"$OUT/log.txt"
   # The flash probe (2026-10-24: "the windows of the previous page appear for a split second" on the new page): on the
-  # device, every SurfaceFlinger composition list for ~2.5 s from the swipe, each sample "<end lines so far> <layers of
+  # device, every SurfaceFlinger composition list from the swipe until 15 samples after the slide's end line (150 at most), each sample "<end lines so far> <layers of
   # $PKG composited>". A sample taken after the slide's end line that still composites the window = the flash.
-  sh_ "rm -f /data/local/tmp/fd-flash.txt; (i=0; while [ \$i -lt 40 ]; do e=\$(grep -c \"PowosPageSlide.*end (\" /data/local/tmp/fd-log.txt); v=\$(dumpsys SurfaceFlinger | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\" | grep -c $PKG); echo \$e \$v >>/data/local/tmp/fd-flash.txt; i=\$((i+1)); done </dev/null >/dev/null 2>&1 &)"
+  local e0; e0=$(ends)
+  sh_ "rm -f /data/local/tmp/fd-flash.txt; (i=0; j=0; while [ \$i -lt 150 ] && [ \$j -lt 15 ]; do e=\$(grep -c \"PowosPageSlide.*end (\" /data/local/tmp/fd-log.txt); [ \$e -gt $e0 ] && j=\$((j+1)); v=\$(dumpsys SurfaceFlinger | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\" | grep -c $PKG); echo \$e \$v >>/data/local/tmp/fd-flash.txt; i=\$((i+1)); done </dev/null >/dev/null 2>&1 &)"
   sh_ "input swipe $x $y $to $y 250"; sleep 1.5
 }
 
 # After a swipe that leaves the window behind: was it composited after the slide ended? $1 the step; $2 the end-line
 # count before this swipe. Seen before the end but never after = no flash; never seen at all = the probe can't tell.
 flash() {
-  sleep 1.2
+  sleep 2
   local f; f=$(sh_ "cat /data/local/tmp/fd-flash.txt"); echo "flash probe $1: $(echo $f | tr '\n' ' ')" >>"$OUT/log.txt"
   local before after n
   before=$(echo "$f" | awk -v k="$2" '$1==k && $2>0' | wc -l | tr -d ' ')
   after=$(echo "$f" | awk -v k="$2" '$1>k && $2>0' | wc -l | tr -d ' ')
   n=$(echo "$f" | awk -v k="$2" '$1>k' | wc -l | tr -d ' ')
-  if [ "$before" -eq 0 ]; then echo "NOTE $1: flash probe can't tell (the window never in SurfaceFlinger's composition list)" | tee -a "$OUT/log.txt"
+  if [ "$before" -eq 0 ] || [ "$n" -eq 0 ]; then echo "NOTE $1: flash probe can't tell ($before samples with the window before the end, $n after it)" | tee -a "$OUT/log.txt"
   elif [ "$after" -gt 0 ]; then fail "$1: the old page's window flashed - composited in $after of $n samples after the slide ended"
   else pass "$1: no flash - the window was composited in $before samples during the slide, 0 of $n after it ended"; fi
 }
