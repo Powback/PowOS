@@ -28,6 +28,11 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   (bf-present.sh) + 20 s screenrecord -> bf-frames.py: fps, frame-time percentiles, % at 16.7 ms, dup/stale frames,
   window vs screen, activity in front. Artefacts ~/.cache/powos-verify/bfp-<date>/<mode>/.
 - KWin shows every X toplevel (the game too) as its own Android task (PowosWindowActivity); never `am start andro.marchy.MainActivity` (PowOS home).
+- Export gap (fixed kwin 0024, 3.28): an Xwayland window gets its wl_surface AFTER KWin manages it; a game that goes full
+  screen in between (Unity/Wine) was dropped by both export paths and ran unseen (from Steam's Library nothing else calls
+  show; powos-open-task's show masked it). hyprland.log: "has its surface now (full screen)", "full-screen window X opened
+  as a task" / "... not a task: normal .. skipTaskbar .." (why). Check the Library path: `bf-coldstart.sh [app:<id>]
+  via:steam steam` (asserts "window task N live .. for <title>" = FAIL export-<v> else, + a SHOT screenshot).
 - anland-1 119.97 Hz unfolded (2268x2440): 60 fps = every 2nd vsync; governor `uag`. `bf-run.sh` ~10 min (memory,
   SF pacing, KGSL stats). Launch-option prefixes run INSIDE SLR_4 under FEX: only `python3.13` (ctypes libX11).
 - Xwayland's copy of a window: NOT ffmpeg x11grab (FFmpeg 9 needs MIT-SHM, none on Android): Xlib XGetImage, bf-lib
