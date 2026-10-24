@@ -42,7 +42,7 @@ for i in 1 2; do
   sh_ "input swipe $((W * 3 / 10)) $((H / 2)) $((W * 9 / 10)) $((H / 2)) 350"; sleep 1.5; chk page
   s=$(st); case $s in *'\"shown\":true'*) break;; esac
 done
-case $s in *'\"shown\":true'*) ;; *) echo "the AI page's field isn't showing: $s"; exit 5;; esac
+case $s in *'\"shown\":true'*) ;; *) echo "FAIL: the AI page's field isn't showing: $s"; exit 1;; esac
 since=$(sh_ "date +%m-%d\ %H:%M:%S.000")
 V=/data/local/tmp/ai-send-flash.mp4
 "$A" shell "su -c 'rm -f $V; screenrecord --display-id $DID --bit-rate 20000000 --time-limit 7 $V'" >/dev/null 2>&1 &

@@ -52,7 +52,7 @@ for v in "$@"; do
   asuser bf-start.sh >/dev/null
   pill "$lbl: waiting for the game window"
   win=""; for i in $(seq 48); do nap 1; win=$(asuser bf-window.sh | tail -1); case $win in win=[0-9]*) break ;; esac; done
-  case $win in win=[0-9]*) ;; *) echo "$v: no game window in 4 min ($win)"; restore; exit 5 ;; esac
+  case $win in win=[0-9]*) ;; *) echo "FAIL $v: no game window in 4 min ($win)"; restore; exit 1 ;; esac
   echo "$v: window after $((i * 5)) s: $win"; echo "$win" > "$M/window.txt"
   asuser bf-checker-phone.sh grab 80 /var/tmp/bfc/$v >/dev/null; t0=$(date +%s); n=0
   while [ $(( $(date +%s) - t0 )) -lt 92 ]; do
