@@ -182,6 +182,16 @@ class WindowFrames(
         return frames.filter { (id, f) -> (f.held || f.dragging) && id in listed }.keys
     }
 
+    /**
+     * Frames may be re-added now: not under a home panel (underPanel), and never under a finger - a re-added bar loses
+     * its touch stream (the drag never starts); that restack runs at the lift ([touchEnded]).
+     */
+    private fun mayRestack(): Boolean {
+        if (underPanel) return false
+        restackWaiting = frames.values.any { it.held || it.dragging }
+        return !restackWaiting
+    }
+
     /** A restack waited for a finger to lift ([touchEnded]). */
     private var restackWaiting = false
 
@@ -229,13 +239,7 @@ class WindowFrames(
      * another's bar or grip (a re-add blinks).
      */
     private fun restack(wanted: List<Int>) {
-        if (underPanel) return
-        // Never under a finger: a re-added bar loses its touch stream (the drag never starts). Again at the lift.
-        if (frames.values.any { it.held || it.dragging }) {
-            restackWaiting = true
-            return
-        }
-        restackWaiting = false
+        if (!mayRestack()) return
         stack.retainAll(wanted.toSet())
         wanted.filter { it !in stack }.forEach { stack.add(it) }
         if (stack == wanted) return
