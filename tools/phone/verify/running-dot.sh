@@ -21,7 +21,7 @@ hcall() {
 calcrun() { ev "[...document.querySelectorAll('.app[data-key^=\"a:$PKG/\"]')].map(e=>e.dataset.run||'-').join(',')"; }
 . tools/phone/verify/window-lock.sh
 window_lock running-dot.sh 120
-restore() { release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; }
+restore() { [ "${TOUCHED:-0}" = 1 ] || return 0; release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; }
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$HOME/.cache/powos-verify.lock"' EXIT
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }

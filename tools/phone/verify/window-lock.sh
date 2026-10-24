@@ -62,13 +62,14 @@ window_lock() {
 #     claimed packages). Not running: recorded as ours in CLAIMED.
 #   release_pkgs [pkg...]: force-stop the claimed packages (only those among the args, if given). Others are never touched.
 CLAIMED=""
+TOUCHED=0
 claim_pkg() {
   local p=$1
   case " $CLAIMED " in *" $p "*) return 0 ;; esac
   if [ -n "$(sh_ "pidof $p")" ] || [ -n "$(sh_ "am stack list" | grep -F "$p")" ]; then
     echo "$p already runs (maybe the user's): not now"; exit 3
   fi
-  CLAIMED="$CLAIMED $p"
+  CLAIMED="$CLAIMED $p"; TOUCHED=1
 }
 release_pkgs() {
   local p w

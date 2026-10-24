@@ -28,7 +28,7 @@ device_state_set() {
 device_state_reset() {
   case "${POWOS_DEVICE:-phone}" in emu) ;; *) sh_ "cmd device_state state reset" ;; esac
 }
-restore() { release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; device_state_reset; echo "restored"; }
+restore() { [ "${TOUCHED:-0}" = 1 ] || return 0; release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; device_state_reset; echo "restored"; }
 . "$here/window-lock.sh"
 window_lock float-desktops.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
