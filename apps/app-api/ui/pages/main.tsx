@@ -5,11 +5,11 @@
  * capture proxy saw. All of it is the local runtime on this device (lib/api.ts).
  */
 import { useState } from "preact/hooks";
+import { optimistic } from "@powos/shared/pending";
 import { Actions, type DetailProps } from "../lib/action";
 import { AddApp } from "../lib/add";
 import { call, type AppSpec, type AuditRow, type Host, type Net, type Trackers, type Views } from "../lib/api";
 import { Files } from "../lib/files";
-import { optimistic } from "../lib/pending";
 import { Recordings } from "../lib/recordings";
 import { Rules } from "../lib/rules";
 import { useRuntime } from "../lib/runtime";
@@ -80,7 +80,7 @@ function Detail(p: DetailProps & { toggle: (on: boolean, action?: string) => voi
   const which = VIEWS.find(([v]) => v === view)?.[1] ?? null;
   const [views, err] = useRuntime<Views>(p.net, p.app, which ? `/views?app=${encodeURIComponent(spec.app)}` : null, Number(spec.enabled));
   // The switch's own optimistic apply: it flips now, /enable runs in the background, a failure rolls it back with
-  // why (optimistic(), lib/pending.tsx - same shape "+ add app" uses for its installed-app drafts).
+  // why (optimistic(), @powos/shared/pending - same shape "+ add app" uses for its installed-app drafts).
   const flip = (on: boolean, action?: string) => {
     const key = action ?? "_app";
     const prev = action ? p.spec.actions[action].enabled : p.spec.enabled;

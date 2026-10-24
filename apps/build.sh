@@ -9,6 +9,7 @@
 # Installing on the phone: apps/install.sh <app> (the module published, the UI and manifest in place, the registry).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$HERE/.." && pwd)
 APP=${1:?usage: apps/build.sh <app>}
 # An app of the repo (apps/<app>) or any app folder by its path (a composed one: powos compose ... --no-install).
 case $APP in */*) D=$(cd "$APP" && pwd) ;; *) D=$HERE/$APP ;; esac
@@ -73,6 +74,9 @@ fi
 # Workers (ui/workers/*.ts) are bundled whole: a worker has no import map.
 # __POWOS_SCHEMA__: the bindings' fingerprint, as `powos app build` defines it (lib/apps/powos-app tree_hash, 16 hex):
 # a new schema makes the host reconnect with the new bindings.
+# shell/ui/shared (friction f179): mounted read-only at /shared and aliased to @powos/shared, so an app's own UI
+# can import the shell's framework-neutral building blocks (e.g. @powos/shared/pending) instead of forking them -
+# the app's own folder is still the only thing mounted writable, so a bundled app can't reach into or modify shell/.
 if [ -d "$D/ui" ]; then
   SCHEMA=$(python3 - "$D/ui/bindings" <<'PY'
 import hashlib, os, sys
@@ -85,7 +89,8 @@ for root, dirs, files in os.walk(d):
 print(h.hexdigest()[:16])
 PY
 )
-  docker run --rm --platform linux/arm64 -v powos-apps-cargo:/cache -v "$D:/app" -e HOST_UID="$(id -u)" -e SCHEMA="$SCHEMA" node:22 bash -c '
+  docker run --rm --platform linux/arm64 -v powos-apps-cargo:/cache -v "$D:/app" -v "$REPO/shell/ui/shared:/shared:ro" \
+    -e HOST_UID="$(id -u)" -e SCHEMA="$SCHEMA" node:22 bash -c '
     set -euo pipefail
     E=/cache/esbuild-0.25; [ -x $E/node_modules/.bin/esbuild ] || (mkdir -p $E && cd $E && npm i -s esbuild@0.25 >/dev/null 2>&1)
     rm -rf /app/out/ui && mkdir -p /app/out/ui
@@ -93,8 +98,9 @@ PY
     w=$(ls widgets/*.tsx pages/*.tsx 2>/dev/null || true)
     [ -z "$w" ] || $E/node_modules/.bin/esbuild $w --bundle --format=esm --target=es2022 --jsx=automatic --jsx-import-source=preact \
       --external:preact --external:preact/hooks --external:preact/jsx-runtime --external:@preact/signals --external:spacetimedb \
+      --alias:@powos/shared=/shared \
       --define:__POWOS_SCHEMA__="\"$SCHEMA\"" --minify --outdir=/app/out/ui --outbase=/app/ui --log-level=warning
     k=$(ls workers/*.ts 2>/dev/null || true)
-    [ -z "$k" ] || $E/node_modules/.bin/esbuild $k --bundle --format=esm --target=es2022 --minify --outdir=/app/out/ui/workers --log-level=warning
+    [ -z "$k" ] || $E/node_modules/.bin/esbuild $k --bundle --format=esm --target=es2022 --minify --alias:@powos/shared=/shared --outdir=/app/out/ui/workers --log-level=warning
     chown -R $HOST_UID /app/out/ui; ls -la /app/out/ui/widgets /app/out/ui/pages 2>/dev/null || true'
 fi

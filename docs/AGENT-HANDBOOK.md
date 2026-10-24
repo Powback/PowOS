@@ -425,6 +425,11 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
 - Typechecking an app's UI (preact/tsx): `apps/typecheck.sh <app>` - needs shell/node_modules (`npm ci` in shell/
   if missing), and a built module first if the UI imports its generated bindings (`apps/build.sh <app>`). There
   was no recipe for this at all before (friction f109).
+- An app's own UI importing shell code: apps build in isolation (apps/build.sh mounts only the app's own folder),
+  so only `shell/ui/shared/` is reachable, as `@powos/shared/*` - an esbuild alias in apps/build.sh, mirrored as a
+  tsc `paths` mapping in apps/tsconfig.app.json (and an app's own ui/tsconfig.json, e.g. app-api's) for
+  apps/typecheck.sh. Add to it instead of forking a shell module into an app (friction f179: app-api had its own
+  copy of shell/ui/pending.tsx before this existed).
 
 ## The emulator lane: first for window and app checks, the phone only for hardware
 - Window, app, home and shell checks go to the EMULATOR first: `tools/phone/verify/queue.sh add --dev emu <task>

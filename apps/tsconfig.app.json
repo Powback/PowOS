@@ -14,6 +14,11 @@
     "strict": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    // @powos/shared: apps/build.sh's esbuild alias for shell/ui/shared (friction f179) - mirrored here so tsc
+    // resolves the same import. This file lands at apps/<app>/ui/.typecheck-tsconfig.json, 3 levels under the repo
+    // root, so the path back to shell/ui/shared is the same for every app.
+    "baseUrl": ".",
+    "paths": { "@powos/shared/*": ["../../../shell/ui/shared/*"] }
   }
 }

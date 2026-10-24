@@ -6,6 +6,7 @@ tree cold. Full detail per subsystem lives in the named skill's SKILL.md — loa
 ## Shell UI (web, Preact+TS)
 - `shell/app.tsx`, `shell/state.ts`, `shell/bridge.ts`+`shell/types.ts` — the page, state, Kotlin bridge.
 - `shell/ui/*` (85 files) — panels/widgets (drawer, shade, control center, switcher, desktops, nativeglass.ts).
+- `shell/ui/shared/` — framework-neutral building blocks a PowOS app's own UI can import too, as `@powos/shared/*` (`apps/build.sh` mounts it read-only + an esbuild alias, `apps/tsconfig.app.json`/an app's own `ui/tsconfig.json` mirror it for `apps/typecheck.sh`); e.g. `pending.tsx` (PendingState/steps, ProgressRing, StepList, optimistic — fixed friction f179, was forked into `apps/app-api`).
 - `shell/theme.css`, `shell/DESIGN.md`, `docs/DESIGN-LANGUAGE.md` — material/tokens.
 - `shell/dev/gate.sh`, `shell/dev/shot.sh` — headless build-check + renders.
 - Build/check: `shell/dev/gate.sh --tree` (tsc + headless boot of every page).

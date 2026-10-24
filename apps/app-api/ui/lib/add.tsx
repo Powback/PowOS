@@ -4,16 +4,16 @@
  *      appcap_add.py - the user sends it; the model never runs in App API's runtime.
  *   2. An installed app: one searchable list (PowOS apps from the registry's "/installed", Android apps from the
  *      shell bridge's apps.list via host.androidApps). Tapping one adds a placeholder card to Drafts at once, with
- *      live progress (lib/pending.tsx), while the runtime builds the draft (host.appLinks for an Android app's deep
+ *      live progress (@powos/shared/pending), while the runtime builds the draft (host.appLinks for an Android app's deep
  *      links, or the PowOS app's own database); the card turns into the real draft in place, no navigation.
  *   3. Import its API: an OpenAPI document or a capability spec, from a URL (the runtime fetches it; no credentials)
  *      or a file, or the bundled Open-Meteo sample.
  * A draft is never one of your apps: its review is dry runs only; "Add to my apps" moves it in with the app off.
  */
 import { useEffect, useState } from "preact/hooks";
+import { optimistic, ProgressRing, StepList, stepsProgress, type PendingState, type PendingStep } from "@powos/shared/pending";
 import { Actions } from "./action";
 import { call, type AppSpec, type DraftInfo, type Host, type InstalledPowos, type Net } from "./api";
-import { optimistic, ProgressRing, StepList, stepsProgress, type PendingState, type PendingStep } from "./pending";
 import { useRuntime } from "./runtime";
 import { Muted, S } from "./ui";
 

@@ -10,6 +10,13 @@
  *   - `optimistic()`, for everything else: a toggle, a move, a rename, an install - the UI applies the change at
  *     once, as if it already worked, and only a failure rolls it back in place with a reason and Retry.
  *
+ * The model itself (PendingState/PendingStep, stepsProgress, ProgressRing, StepList, optimistic) lives in
+ * ./shared/pending.tsx and is re-exported below unchanged - that's `@powos/shared/pending` to a PowOS app's own UI
+ * (apps/build.sh mounts shell/ui/shared read-only and aliases it; friction f179, fixed here, was apps/app-api
+ * forking a subset of this file because apps build in isolation and couldn't import across the folder boundary).
+ * What's left in this file needs more than that module: ProgressBar, LogTail, and the badge/skeleton/building/sheet
+ * views, the last of which anchors to apps/sheet.ts's popover - shell-only, not something an app's own UI has.
+ *
  * Fed live: app creation from PowOS AI's chat steps (ui/appbuild.tsx), widget creation from powos-registry's
  * `creation`/`creation_step`/`creation_log` tables (apps/registry.ts useCreations, written by lib/apps/powos-compose
  * as it runs - docs/COMPOSER.md). Design: shell/theme.css tokens only (--color-accent, --soft-fill, --color-muted);
@@ -19,81 +26,18 @@
  */
 import type { ComponentChildren } from "preact";
 import { DetailSheet } from "../apps/sheet.ts";
+import { ProgressRing, StepList, stepsProgress, type PendingState } from "./shared/pending.tsx";
 
-export type StepState = "pending" | "active" | "done" | "failed";
-
-export interface PendingStep {
-  label: string;
-  state: StepState;
-}
-
-export interface PendingState {
-  id: string;
-  kind: "app" | "widget" | string;
-  /** What the user asked for; also what Retry re-sends. */
-  title: string;
-  status: "running" | "done" | "failed";
-  steps: PendingStep[];
-  /** The latest few lines, oldest first; callers show the tail. */
-  log: string[];
-  error?: string | null;
-  /** The real thing's id, once known (an app id, or "<app>/<widget>" key). */
-  resultId?: string | null;
-}
-
-/** Steps done (+half credit for the active one) over the total; null (indeterminate) only with no steps at all. */
-export function stepsProgress(steps: PendingStep[]): number | null {
-  if (!steps.length) return null;
-  const done = steps.filter((s) => s.state === "done").length;
-  const active = steps.some((s) => s.state === "active") ? 0.5 : 0;
-  return Math.min(1, (done + active) / steps.length);
-}
+export { stepsProgress, ProgressRing, StepList, optimistic } from "./shared/pending.tsx";
+export type { StepState, PendingStep, PendingState } from "./shared/pending.tsx";
 
 /** A failed state always reads as "full and stopped" (a filled ring/bar), never as more progress hiding the error. */
 const shown = (state: PendingState, progress: number | null) => (state.status === "failed" ? 1 : progress);
-
-/** progress == null spins (indeterminate); a number draws the ring filled to there, accent on muted track. */
-export function ProgressRing({ progress, size = 20 }: { progress: number | null; size?: number }) {
-  const r = (size - 3) / 2;
-  const c = 2 * Math.PI * r;
-  return (
-    <svg class={`pending-ring ${progress == null ? "spin" : ""}`} width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
-      <circle cx={size / 2} cy={size / 2} r={r} class="pending-ring-track" fill="none" stroke-width="2.5" />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={r}
-        class="pending-ring-fill"
-        fill="none"
-        stroke-width="2.5"
-        stroke-linecap="round"
-        stroke-dasharray={c}
-        stroke-dashoffset={c * (1 - (progress ?? 0.22))}
-        transform={`rotate(-90 ${size / 2} ${size / 2})`}
-      />
-    </svg>
-  );
-}
 
 export function ProgressBar({ progress }: { progress: number | null }) {
   return (
     <div class={`pending-bar ${progress == null ? "indeterminate" : ""}`}>
       <div class="pending-bar-fill" style={progress == null ? undefined : { width: `${Math.round(progress * 100)}%` }} />
-    </div>
-  );
-}
-
-const MARK: Record<StepState, string> = { done: "✓", failed: "✗", active: "", pending: "" };
-
-export function StepList({ steps }: { steps: PendingStep[] }) {
-  return (
-    <div class="pending-steps">
-      {steps.map((s, i) => (
-        <div key={i} class={`pending-step ${s.state}`}>
-          <span class="pending-step-mark">{MARK[s.state]}</span>
-          <span>{s.label}</span>
-        </div>
-      ))}
     </div>
   );
 }
@@ -162,7 +106,7 @@ export function BuildingView({
       <ProgressBar progress={progress} />
       <StepList steps={state.steps} />
       {preview && <div class="pending-preview">{preview}</div>}
-      <LogTail lines={state.log} />
+      <LogTail lines={state.log ?? []} />
       {state.status === "failed" && (
         <div class="pending-failed">
           <div class="pending-error">{state.error || "something went wrong"}</div>
@@ -205,22 +149,4 @@ export function PendingDetailSheet({
       <BuildingView state={state} preview={preview} onRetry={onRetry} onDiscard={onDiscard} />
     </DetailSheet>
   );
-}
-
-/**
- * Optimistic action: [apply] runs now - the UI already shows the result, as if it had already succeeded (a toggle
- * flipped, an item added/moved/removed, a name changed). [commit] does the real work in the background; its
- * rejection calls [rollback] (undo in place, a short reason) and still propagates, so a caller that wants to know
- * can await it. For anything reversible and fully knowable right away. Something that doesn't exist yet until the
- * real work finishes (a new app, a new widget's first data) gets a placeholder (above) instead, not an optimistic
- * guess at content that isn't there.
- */
-export async function optimistic<T>(apply: () => void, commit: () => Promise<T>, rollback: (err: unknown) => void): Promise<T> {
-  apply();
-  try {
-    return await commit();
-  } catch (err) {
-    rollback(err);
-    throw err;
-  }
 }
