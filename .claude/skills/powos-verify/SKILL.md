@@ -21,11 +21,16 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
   started gets every event - a widget's watch on /run/powos-app once ate the pill's "done") as a heartbeat every HB_S
   (4) s while a check runs ({name,task,k,n,screen,el,budget,prev}; {done,summary} at the end -> a notification), each
   one adb call killed after 15 s. The pill ticks the elapsed time itself and hides with a "Phone test stopped"
-  notification after 30 s without a beat. Its tap (every tap) writes /tmp/powos-verify-stop; the next beat (or the
-  wait's 5 s look) sees it: the check is killed (TERM, KILL after 5 s), stays queued, tries not counted, and the runner
-  PAUSES (~/.cache/powos-verify-queue/paused): it stays up, its wait returns only for the go flag (GO_ONLY=1). The AI
-  page's "checks paused · resume" (or test all / test now) writes go, which ends the pause. Mac: `queue.sh pause|resume`.
-  Check: test-now.sh.
+  notification after 30 s without a beat. Its ONLY touch target is the x at its right end (AttachedSurfaceControl
+  setTouchableRegion, Android 14+; the rest is touch-through): it writes /tmp/powos-verify-stop; the next beat (or the
+  wait's 5 s look) sees it - injected or real, no touch-counter guard any more: the check is killed (TERM, KILL after
+  5 s), stays queued, tries not counted, and the runner PAUSES (~/.cache/powos-verify-queue/paused): it stays up, its
+  wait returns only for the go flag (GO_ONLY=1). pause() writes {done,paused,summary}: the pill says "Tests paused
+  [Resume]" for 15 s (Resume = go=all), then only the notification + the AI page's "checks paused · resume" are left.
+  While runnable checks wait for a window > 10 s (the user on the phone, a game), wait_pill writes {done,wait,n,ttl}:
+  "Tests wait · phone in use" + x (ttl 200 s, rewritten every 150 s). `done:true` on both: older APKs just hide.
+  The pill logs each state change (logcat PowosVerify "pill PAUSED: Tests paused [Resume]", "pill tap: stop").
+  Mac: `queue.sh pause|resume`. Checks: test-now.sh, pill-stop.sh (taps x on itself, a detached asserter checks).
 - Runner state for the page: /data/local/tmp/powos-verify-runner (adb's shell user's: PowOS /tmp is not writable by
   it) = waiting|paused|running|idle|stopped; idle.sh's wait (VERIFY_STATE) touches it every 5 s, phone_sh (RSTATE)
   rewrites it. Bridge verify.state (VerifyRun.state, a root stat) -> "verify.state" {state, age}; paused or age > 45 s

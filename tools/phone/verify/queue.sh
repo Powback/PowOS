@@ -17,8 +17,9 @@
 # go flag (/tmp/powos-verify-go in PowOS: a task id or "all"): the wait returns at once and only that task's checks run.
 # While a check runs, the phone shows a status pill (VerifyRun.kt, fed /run/powos-app/verify/status.json): a heartbeat
 # every HB_S (4) s carries the check, k/N, elapsed time and the SUB-STEP with its own time ("waiting for the game window
-# · 45 s": the check's /tmp/powos-verify-step - bf-lib.sh pill - else its log's last line); no beat for 30 s and the pill hides itself. Its tap writes
-# /tmp/powos-verify-stop, which the next beat sees: the check is killed and stays queued. A check that exits 3 (a real touch, no window)
+# · 45 s": the check's /tmp/powos-verify-step - bf-lib.sh pill - else its log's last line); no beat for 30 s and the pill hides itself. Its x writes
+# /tmp/powos-verify-stop, which the next beat sees: the check is killed and stays queued. While runnable checks wait for
+# the user (a touch in the last QUEUE_IDLE_S, a game running) the pill says "Tests wait · phone in use" (wait_pill). A check that exits 3 (a real touch, no window)
 # goes back on the queue for the next window, at most 3 tries (a stop from the pill doesn't count). A check that exits 0
 # but printed a line starting with FAIL is a FAIL. Each result goes onto the check's board task (`--step`, the log's
 # last line; a FAIL also gets a screenshot as its review image), a mail to the coder inbox (QUEUE_MAIL_TO) and the log
@@ -271,7 +272,16 @@ EOS
     [ -z "$live" ] || git -C "$VR" merge-base --is-ancestor "$c" "$live" 2>/dev/null \
       || [ -z "$(ship_paths "$(git -C "$VR" merge-base "$live" "$c" 2>/dev/null)" "$c" shell)" ]; }
   # pause <summary>: the user's stop - recorded (the runner stays, runs nothing until the phone's go flag), the pill gone.
-  pause() { touch "$Q/paused"; RSTATE=paused status "" "{\"done\":true,\"summary\":$(jstr "$1 · resume on the AI page")}"; }
+  pause() { touch "$Q/paused"; RSTATE=paused status "" "{\"done\":true,\"paused\":true,\"summary\":$(jstr "$1 · resume on the AI page")}"; }
+  # wait_pill: while the wait for a window lasts past WAIT_PILL_S (the user is on the phone: a free phone ends it at
+  # once) and checks could run, the pill says they wait - rewritten every 150 s with a 200 s life (VerifyRun's ttl), so
+  # a runner gone without a word leaves it at most that long. Only the pill's file: the stop flag stays for the wait.
+  # Runs in the background; the wait's end (or the window's) kills it.
+  wait_pill() { local r=0 j
+    for j in "$Q"/*.job; do [ -f "$j" ] && ( need=; qt=0; . "$j"; shipped "$need" "$qt" ) && r=$((r + 1)); done
+    [ $r -gt 0 ] || return 0
+    sleep "${WAIT_PILL_S:-10}"
+    while :; do phone_sh "umask 022; $(put "{\"done\":true,\"wait\":true,\"n\":$r,\"ttl\":200}")" >/dev/null; sleep 150 & wait $!; done; }
   # The runner stays while anything is queued (a "test now" needs one waiting): a window that didn't come is waited for again.
   while ls "$Q"/*.job >/dev/null 2>&1; do
     verify_tree
@@ -285,8 +295,10 @@ EOS
     # Paused: the wait returns for the go flag only (resume / test all / test now), never for a free window.
     if [ -e "$Q/paused" ]; then export GO_ONLY=1 VERIFY_STATE=paused; echo "$(date +%T) paused - waiting for resume on the phone"
     else unset GO_ONLY; export VERIFY_STATE=waiting; fi
+    wpp=; [ -n "${GO_ONLY:-}" ] || { wait_pill & wpp=$!; }
     ( export VERIFY_GO=1 WL_PHONE=$phone
       window_lock verify-queue "${QUEUE_IDLE_S:-120}" "${WAIT_S:-7200}" >/dev/null || exit 3
+      [ -n "$wpp" ] && endjob "$wpp"
       rm -f "$Q/paused"; RSTATE=running   # a go ends a pause
       go=; case "${WL_GOT:-}" in go=*) go=${WL_GOT#go=}; go=${go%% *} ;; esac
       sel=(); held=0
@@ -354,14 +366,9 @@ EOS
           el=$(( $(date +%s) - t0 ))
           [ $el -ge "$budget" ] && { why=timeout; break; }
           l=$(logstep "$log"); [ "$l" = "$ls_" ] || { ls_=$l; lt=$(date +%s); }
-          if [ "$(beat "$(js $el)" "$ls_" $(( $(date +%s) - lt )))" = stop ]; then
-            # A stop counts only from a real finger: an injected tap (the manager's QA agent driving the phone hit the
-            # pill at 04:09, no touch for 91 min) leaves the touch counters untouched (idle.sh), so it's ignored.
-            ti=$("$phone/idle.sh" 2>/dev/null | sed -n 's/.*idle=\([0-9]*\).*/\1/p')
-            if [ -n "$ti" ] && [ "$ti" -gt 30 ]; then
-              echo "$(date +%T) $n: stop flag without a real touch (idle ${ti}s) - ignored"; phone_sh 'rm -f /tmp/powos-verify-stop' >/dev/null
-            else why=stop; break; fi
-          fi
+          # The pill's x (its only touch target since the whole pill stopped taking touches; e2e-lib refuses taps on
+          # the pill's frame) - injected or real, a stop is a stop: verify/pill-stop.sh taps it.
+          [ "$(beat "$(js $el)" "$ls_" $(( $(date +%s) - lt )))" = stop ] && { why=stop; break; }
         done
         [ -n "$why" ] && endjob $jp
         wait $jp; rc=$?
@@ -413,7 +420,8 @@ EOS
       done
       sum="Phone checks: $pass passed"; [ $fail = 0 ] || sum="$sum, $fail failed ($first$([ $fail -gt 1 ] && echo ", ..."))"
       status "" "{\"done\":true,\"summary\":$(jstr "$sum")}" ) & wait $!
-    rc=$?; [ $rc = 3 ] && echo "$(date +%T) no free window in ${WAIT_S:-7200}s - waiting again"
+    rc=$?; [ -n "$wpp" ] && endjob "$wpp"   # the wait ended without a window (exit 3/6): its pill writes end before pause's
+    [ $rc = 3 ] && echo "$(date +%T) no free window in ${WAIT_S:-7200}s - waiting again"
     [ $rc = 6 ] && { echo "$(date +%T) stopped from the phone - paused"; pause "Phone checks paused"; }
     [ $rc = 7 ] && sleep "${NEED_POLL_S:-60}"
     # Yielded to an APK install: don't take the phone back until it's done (its wants-phone mark goes), 15 min at most.
