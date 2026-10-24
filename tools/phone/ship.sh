@@ -203,8 +203,10 @@ run)
   # The APK ship runs BESIDE the loop, in its own checkout (it builds from it for minutes while ship_tree resets $SR),
   # so a shell change never queues behind an APK's build or idle wait (2026-10-23: shell fixes waited 25-30 min behind
   # one APK). State in $Q/apk/: tip, pid, rc (written when it ends).
-  # $POWOS_RUN_ROOT/ship-runner-apk, period (f190: no .claude/worktrees fallback - see SR above).
-  SA=$POWOS_RUN_ROOT/ship-runner-apk
+  # Under ~/Projects, NOT $POWOS_RUN_ROOT (~/pw): the APK builds in android-app-dev's container, which mounts only
+  # ~/Projects as /Projects - from ~/pw every APK ship failed ("Project 'powos' not found", 2026-10-24 06:30-15:30).
+  # It is no agent's cwd, so it doesn't add to agents' context (f190: still no .claude/worktrees fallback).
+  SA=${POWOS_APK_RUN:-$HOME/Projects/.powos-runners/ship-runner-apk}
   apk_alive() {   # an APK ship out; one whose runner died (killed, restarted) without an rc goes again (rc 4)
     [ -d "$Q/apk" ] && [ ! -f "$Q/apk/rc" ] || return 1
     kill -0 "$(cat "$Q/apk/pid" 2>/dev/null)" 2>/dev/null && return 0

@@ -29,6 +29,9 @@ if [ "${POWOS_SKIP_COMPLEXITY:-}" != 1 ]; then
   if [ "$cx" = 1 ]; then echo "build-app: refusing - the complexity lint failed (above)" >&2; exit 4; fi
 fi
 AAD=${ANDROID_APP_DEV:-$HOME/Projects/android-app-dev}
+# android-app-dev's builder mounts only ~/Projects (as /Projects): a checkout elsewhere (~/pw) can't build there.
+case "$HERE/" in "$HOME/Projects/"*) ;; *)
+  echo "build-app: refusing - $HERE is outside ~/Projects, the only dir the APK builder mounts; build from a checkout under ~/Projects" >&2; exit 5 ;; esac
 want=/Projects${HERE#$HOME/Projects}/app
 link=$AAD/projects/powos
 [ "$(readlink "$link" 2>/dev/null)" = "$want" ] || { rm -f "$link"; ln -s "$want" "$link"; }
