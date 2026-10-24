@@ -17,7 +17,7 @@ sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 restore() { [ "${TOUCHED:-0}" = 1 ] || return 0; release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
 . "$here/window-lock.sh"
-window_lock float-desktops.sh 120
+window_lock float-touch.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
 I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; exit 3; }; }
