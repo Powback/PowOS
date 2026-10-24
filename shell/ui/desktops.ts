@@ -109,35 +109,54 @@ function slideFollow(dx: number | null) {
     return;
   }
   if (slide === "on") return void f.slide("move", dx).catch(() => {});
-  const cur = page.value;
+  slideStart(dx);
+}
+
+/** The windows that ride the swipe: window id -> its page offset from the page on screen (-1, 0, 1). */
+function slideRels(cur: number): Record<number, number> {
   const rels: Record<number, number> = {};
   for (const w of windows.value) {
     const i = indexOf(placed.value[w.id] ?? pageId());
     if (w.minimised || i === null || Math.abs(i - cur) > 1 || (i === cur && w.away)) continue;
     rels[w.id] = i - cur;
   }
+  return rels;
+}
+
+function pagesWidth() {
+  return document.querySelector(".pages")?.clientWidth || innerWidth;
+}
+
+function slideStart(dx: number) {
+  const cur = page.value;
+  const rels = slideRels(cur);
   if (!Object.keys(rels).length) return;
   slide = "on";
   slideFrom = cur;
-  const width = document.querySelector(".pages")?.clientWidth || innerWidth;
-  f.slide("start", { rels, width, x: dx }).catch(() => false).then((ok) => {
+  powos.floating?.slide?.("start", { rels, width: pagesWidth(), x: dx }).catch(() => false).then((ok) => {
     if (!ok && slide === "on" && pageDrag.peek() != null) slide = "off";
   });
 }
 
-/** The track's settle (its CSS transition, read so the host runs the same curve) and the desktop change after it. */
+/** The track's CSS transition (duration ms, cubic-bezier points), read so the host runs the same curve. */
+function trackCurve(): { ms: number; curve?: number[] } {
+  const track = document.querySelector<HTMLElement>(".page-track");
+  if (!track) return { ms: 280 };
+  const cs = getComputedStyle(track);
+  const d = cs.transitionDuration;
+  const ms = parseFloat(d) * (d.endsWith("ms") ? 1 : 1000) || 280;
+  return { ms, curve: cs.transitionTimingFunction.match(/cubic-bezier\(([^)]+)\)/)?.[1].split(",").map(Number) };
+}
+
+/** The track's settle and the desktop change after it. */
 function slideSettle() {
   slide = "off";
-  const width = document.querySelector(".pages")?.clientWidth || innerWidth;
-  const track = document.querySelector<HTMLElement>(".page-track");
-  const cs = track ? getComputedStyle(track) : null;
-  const ms = cs ? parseFloat(cs.transitionDuration) * (cs.transitionDuration.endsWith("ms") ? 1 : 1000) : 280;
-  const curve = cs?.transitionTimingFunction.match(/cubic-bezier\(([^)]+)\)/)?.[1].split(",").map(Number);
+  const { ms, curve } = trackCurve();
   const hide = hidden();
   sent = hide.join();
-  powos.floating?.slide?.("settle", { to: (slideFrom - page.value) * width, ms: ms || 280, curve, hide }).catch(() => {
+  powos.floating?.slide?.("settle", { to: (slideFrom - page.value) * pagesWidth(), ms, curve, hide }).catch(() => {
     // An app without the slide: the change as before, once the page has landed.
-    setTimeout(() => powos.floating?.desktop(hide).catch(() => (sent = null)), ms || 280);
+    setTimeout(() => powos.floating?.desktop(hide).catch(() => (sent = null)), ms);
   });
 }
 

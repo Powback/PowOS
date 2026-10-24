@@ -95,40 +95,69 @@ object PageSlide {
         w: Int,
         x0: Float,
     ): Boolean {
-        // A finger down again mid-settle: that one lands at once (its change committed), this one starts from there.
-        if (session != null && settleAt != 0L) {
-            x = toX
-            draw()
-            land()
-        }
+        landNow()
         cancel("a new slide")
-        val frames = WindowFrames.current ?: return false
         if (!AppWindows.floating(context) || !TaskLeash.enabled(context) || w <= 0) return false
-        val running = WindowFrames.running.value.associateBy { it.id }
-        // Bounds from WM (home's list has none for a window away on another page), top-most first: brought up
-        // bottom-most first, so they keep their order.
-        val list =
-            FreeformTasks.list(context).asReversed().mapNotNull { t ->
-                val rel = rels[t.id] ?: return@mapNotNull null
-                val r = running[t.id] ?: return@mapNotNull null
-                // A window the user minimised stays in the dock; the page's own ones must be showing.
-                if (r.minimised || (rel == 0 && (r.away || !t.visible)) || t.bounds.isEmpty) return@mapNotNull null
-                Win(t.id, rel.coerceIn(-1, 1), Rect(t.bounds), frames.frame(t.id)?.let { surfacesOf(it) }.orEmpty())
-            }
-        if (list.isEmpty()) return false
+        val list = slideWins(context, rels)
+        if (list.isNullOrEmpty()) return false
+        reset(context, list, w, x0)
+        if (!begin(context, list)) {
+            wins = emptyList()
+            return false
+        }
+        Log.i(TAG, "start: ${list.joinToString { "${it.id}${if (it.rel != 0) "@${it.rel}" else ""}" }} width $w x $x")
+        return true
+    }
+
+    /** A finger down again mid-settle: that one lands at once (its change committed), the new one starts from there. */
+    private fun landNow() {
+        if (session == null || settleAt == 0L) return
+        x = toX
+        draw()
+        land()
+    }
+
+    private fun reset(
+        context: Context,
+        list: List<Win>,
+        w: Int,
+        x0: Float,
+    ) {
         this.context = context.applicationContext
         width = w
         x = x0.takeIf { kotlin.math.abs(it) >= 1f } ?: 1f
         wins = list
-        this.frames = 0
+        frames = 0
         startedAt = SystemClock.uptimeMillis()
         hide = null
-        val s = TaskLeash.Session(context, list.map { it.id }, "page slide", TaskLeash.SLIDE_MODES)
-        s.onReady = { ok ->
-            if (session === s) {
-                if (ok) draw() else cancel("no leash")
-            }
+    }
+
+    /**
+     * The windows that slide, with WM's bounds (home's list has none for a window away on another page), top-most
+     * first: brought up bottom-most first, so they keep their order. Null: no frames (folded).
+     */
+    private fun slideWins(
+        context: Context,
+        rels: Map<Int, Int>,
+    ): List<Win>? {
+        val frames = WindowFrames.current ?: return null
+        val running = WindowFrames.running.value.associateBy { it.id }
+        return FreeformTasks.list(context).asReversed().mapNotNull { t ->
+            val rel = rels[t.id] ?: return@mapNotNull null
+            val r = running[t.id] ?: return@mapNotNull null
+            // A window the user minimised stays in the dock; the page's own ones must be showing.
+            val skip = r.minimised || (rel == 0 && (r.away || !t.visible)) || t.bounds.isEmpty
+            if (skip) null else Win(t.id, rel.coerceIn(-1, 1), Rect(t.bounds), frames.frame(t.id)?.let { surfacesOf(it) }.orEmpty())
         }
+    }
+
+    /** One leash session over [list]; false when the transition couldn't start. */
+    private fun begin(
+        context: Context,
+        list: List<Win>,
+    ): Boolean {
+        val s = TaskLeash.Session(context, list.map { it.id }, "page slide", TaskLeash.SLIDE_MODES)
+        s.onReady = { ok -> if (session === s && ok) draw() else if (session === s) cancel("no leash") }
         // WM's bounds where each window is on the glass now (a real change for each: an unchanged task isn't in the
         // transition, so it gets no leash); another page's window comes up from under home in the same transition.
         val started =
@@ -139,15 +168,11 @@ object PageSlide {
                     TaskLeash.setBounds(wct, tok, at(win))
                 }
             }
-        if (!started) {
-            wins = emptyList()
-            return false
-        }
+        if (!started) return false
         session = s
         // Where the leashes go the moment they come (TaskLeash applies the last frame given).
         val t = SurfaceControl.Transaction()
         list.forEach { s.frame(t, it.id, at(it)) }
-        Log.i(TAG, "start: ${list.joinToString { "${it.id}${if (it.rel != 0) "@${it.rel}" else ""}" }} width $w x $x")
         return true
     }
 
@@ -235,31 +260,37 @@ object PageSlide {
         settleAt = 0L
         Choreographer.getInstance().removeFrameCallback(tick)
         val gone = wins.filter { it.id in hidden || (why != "landed" && it.rel != 0) }.map { it.id }.toSet()
-        val t = SurfaceControl.Transaction()
-        for (w in wins) {
-            w.surfaces.forEach { sc ->
-                if (!sc.isValid) return@forEach
-                t.setPosition(sc, 0f, 0f)
-                // A bar going with its window: hidden until its frame is removed (WindowFrames' next refresh).
-                if (w.id in gone) t.setVisibility(sc, false)
-            }
-        }
-        t.apply()
+        resetBars(gone)
         s.hidden = gone
         s.finish(wins.associate { it.id to Rect(it.bounds) }) { wct, token ->
             for (w in wins) token(w.id)?.let { TaskLeash.setBounds(wct, it, w.bounds) }
         }
-        // A bar hidden above whose frame stayed (the change refused): shown again.
-        if (gone.isNotEmpty()) {
-            val left = wins.filter { it.id in gone }
-            main.postDelayed({
-                val tt = SurfaceControl.Transaction()
-                left.forEach { w -> if (WindowFrames.current?.frame(w.id) != null) w.surfaces.forEach { if (it.isValid) tt.setVisibility(it, true) } }
-                tt.apply()
-            }, 1500)
-        }
+        if (gone.isNotEmpty()) reshowBars(wins.filter { it.id in gone })
         Log.i(TAG, "end ($why) after ${SystemClock.uptimeMillis() - startedAt} ms: $frames frames, x $x, hidden ${gone.ifEmpty { "none" }}")
         wins = emptyList()
+    }
+
+    /** Bars and grips back at 0,0; a bar going with its window ([gone]) hidden until WindowFrames' next refresh. */
+    private fun resetBars(gone: Set<Int>) {
+        val t = SurfaceControl.Transaction()
+        for (w in wins) {
+            for (sc in w.surfaces.filter { it.isValid }) {
+                t.setPosition(sc, 0f, 0f)
+                if (w.id in gone) t.setVisibility(sc, false)
+            }
+        }
+        t.apply()
+    }
+
+    /** A bar hidden by [resetBars] whose frame stayed (the change refused): shown again. */
+    private fun reshowBars(left: List<Win>) {
+        main.postDelayed({
+            val t = SurfaceControl.Transaction()
+            left.filter { WindowFrames.current?.frame(it.id) != null }.forEach { w ->
+                w.surfaces.filter { it.isValid }.forEach { t.setVisibility(it, true) }
+            }
+            t.apply()
+        }, 1500)
     }
 
     private fun at(w: Win): Rect = Rect(w.bounds).apply { offset((w.rel * width + x).toInt(), 0) }
