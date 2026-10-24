@@ -21,7 +21,7 @@ APP=calc; OFF=0; PAGES=0; TWO=0; ONLY=0; TRACE=0; ARGS=()
 while [ $# -gt 0 ]; do case $1 in --app) APP=$2; shift 2 ;; --off) OFF=1; shift ;; --pages) PAGES=1; shift ;; --two) TWO=1; shift ;; --pages-only) PAGES=1; ONLY=1; shift ;; --trace) TRACE=1; shift ;; *) ARGS+=("$1"); shift ;; esac; done
 . "$here/e2e-lib.sh"
 e2e_args ${ARGS[@]+"${ARGS[@]}"}; LAST=2
-E2E_APPS='com.oneplus.calculator|PowosWindowActivity'; E2E_LINUX='kate'
+E2E_APPS="${TEST_APP:-com.oneplus.calculator}|PowosWindowActivity"; E2E_LINUX='kate'
 TAG=$APP$([ $OFF = 1 ] && echo -off)
 e2e_init "rec-$TAG"
 e2e_setup inner
@@ -35,7 +35,7 @@ note "live leash setting: was ${LEASH0:-unset}, now $(sh_ "settings get global p
 DID=$(sh_ "dumpsys display" | grep -E "^  DisplayDeviceInfo" | sed -nE 's/.*uniqueId="local:([0-9]+)",.* state ON,.*/\1/p' | head -1)
 
 case $APP in
-  calc) KEY=a:com.oneplus.calculator/; LAYER=com.oneplus.calculator/; WKEY=com.oneplus.calculator ;;
+  calc) KEY=a:${TEST_APP:-com.oneplus.calculator}/; LAYER=${TEST_APP:-com.oneplus.calculator}/; WKEY=${TEST_APP:-com.oneplus.calculator} ;;
   kate) KEY=l:org.kde.kate; LAYER=PowosWindowActivity; WKEY=l:org.kde.kate ;;
   *) echo "unknown --app $APP"; exit 2 ;;
 esac
@@ -93,7 +93,7 @@ intap "$CT" before
 if [ $TWO = 1 ]; then
   # --android-only (the emulator lane, no Kate): Chrome instead, present on the emulator's image too.
   if [ $APP = calc ] && [ "$ANDROID_ONLY" = 1 ]; then K2=a:com.android.chrome/; W2=com.android.chrome
-  else case $APP in calc) K2=l:org.kde.kate; W2=l:org.kde.kate ;; *) K2=a:com.oneplus.calculator/; W2=com.oneplus.calculator ;; esac
+  else case $APP in calc) K2=l:org.kde.kate; W2=l:org.kde.kate ;; *) K2=a:${TEST_APP:-com.oneplus.calculator}/; W2=${TEST_APP:-com.oneplus.calculator} ;; esac
   fi
   r2=$(hcall apps.launch "['$(hcall apps.list "[]" "l=>(l.find(a=>a.key.startsWith('$K2'))||{}).key||'none'")']" "()=>'ok'")
   CT2=$(waitwin "$W2" 40); sleep 2; chk open2

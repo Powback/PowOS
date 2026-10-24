@@ -16,7 +16,7 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/panel-lift-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
-PKG=com.oneplus.calculator
+PKG=${TEST_APP:-com.oneplus.calculator}
 FF=$(command -v ffmpeg || echo /opt/homebrew/bin/ffmpeg)
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }

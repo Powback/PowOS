@@ -141,6 +141,18 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
   a pre-fix copy.
 - A query by class (`.bar-pill`) matches the user's own widgets too: scope it to the element you mean (`> .bar`).
 - Before blaming a check for user data, compare with the backup the feature made (wide: home.wide.backup).
+- **Every `FAIL` line names the stage that failed and its evidence - never just the symptom.** "KWin didn't come
+  back" once hid that the logout request never reached the app at all (f91); report each stage a multi-step check
+  passes through (request written / app saw it / session restarted / new pid, or whatever the check's own stages
+  are) as it's reached, and on failure say which stage and what was seen there, not only the final symptom.
+- Toybox's `grep` has no `\|` alternation in a basic regex (no `-E`): `grep -v "a\|b"` silently drops nothing -
+  bf-present once picked 6 buffer-less container layers this way and read "no presents" as a compositor fault
+  (f101, fixed in 616fdd94). Use `grep -E`/`grep -iE` for alternation, always.
+- A reference screenshot/hash for a visual check must exclude **live and UI-owned pixels** - a moving live
+  wallpaper, or chrome the checking UI itself draws (home's own overlay, the verify pill) - or a frame of motion
+  or the check's own furniture fails the comparison for reasons that have nothing to do with the thing under test
+  (plasma-transparent's reference once included home's UI and a moving live wallpaper, fixed in 08671d8d). Crop or
+  mask those regions out before hashing/diffing, and say so in the check's header.
 
 ## Frame-stepping (`verify/frames.sh <mp4> gaps|sheet T0 T1|overview`; ffmpeg in a container, files under $HOME)
 - `docker run --rm -v "$PWD":/w -w /w --entrypoint ffmpeg linuxserver/ffmpeg:latest ...` (ffprobe the same way).

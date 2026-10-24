@@ -22,10 +22,13 @@ here=$(cd "$(dirname "$0")" && pwd); A="$here/../adb.sh"
 [ $# -gt 0 ] || set -- base
 BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
 OUT=${OUT:-$HOME/.cache/powos-verify/bfp-$(date +%F_%H%M)}; mkdir -p "$OUT"
-APP=${APP:-274190} WIN_NAME=${WIN_NAME:-}  # any Steam game; default the test case. WIN_NAME (one word) only when its
-# window isn't titled like Steam's name for it (bf-window.sh reads that name from the appmanifest).
+APP_GIVEN=${APP:+1}; APP=${APP:-274190} WIN_NAME=${WIN_NAME:-}  # any Steam game; default the test case. WIN_NAME
+# (one word) only when its window isn't titled like Steam's name for it (bf-window.sh reads that name from the appmanifest).
 case "$APP$WIN_NAME" in *[!A-Za-z0-9_.-]*) echo "APP / WIN_NAME: one word each"; exit 2 ;; esac
 NAME=${WIN_NAME:-app $APP}
+# f103: a fps job queued without APP= silently measured Broforce (the default) - say it loud, as the first line, so
+# "fps job under task X" never reads as "measured game Y" by accident.
+echo "measuring: $NAME$([ -z "$APP_GIVEN" ] && echo " (APP= not given - defaulted to Broforce $APP)")"
 PS=/data/powos/root/home/powos/.config/powos/proton-settings.json
 settings() {  # settings <K=V,K=V | empty>: the game's extra environment for this mode (none = file removed)
   "$A" shell "su -c 'rm -f $PS'"; [ -n "$1" ] || return 0

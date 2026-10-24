@@ -198,7 +198,7 @@ HOMET=$(tasks | awk '/HomeShell/{print $1; exit}')
 logc
 case $STAGE in
 calc)
-  CALC=com.oneplus.calculator
+  CALC=${TEST_APP:-com.oneplus.calculator}
   grep -q " $CALC" <<<"$TASKS0" && { note "Calculator was already open (the user's): the stage skipped"; e2e_finish; exit 0; }
   rec_start calc 70
   r=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$CALC\\//.test(a.key))||{}).key||'none'"); hcall apps.launch "['$r']" "()=>'ok'" >/dev/null

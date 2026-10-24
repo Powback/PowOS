@@ -15,6 +15,10 @@
 here=${here:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}; T=$here/..; A="$T/adb.sh"
 E2E_UID=10359   # the PowOS session user (review-image.sh)
 L=$HOME/.cache/powos-verify.lock
+# TEST_APP (f107): the one window-checks test app, instead of 15+ checks each hard-coding com.oneplus.calculator.
+# Same default on the phone and the emulator: tools/emu/testwin is built AS this package id, so --dev emu needs no
+# override; a check that doesn't source e2e-lib.sh still falls back to the same default (${TEST_APP:-...}).
+TEST_APP=${TEST_APP:-com.oneplus.calculator}
 
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 # ash: a script on stdin as Android root (any quoting inside).
@@ -171,7 +175,7 @@ mail_manager() {
 # e2e_setup [inner]: screen awake (never woken), the lock face swiped (no PIN), home in front; what it started from
 # recorded (the app in front, home's page, the tasks, the Linux apps running, the layout). inner: the inner screen
 # forced (cmd device_state state 3; reset at the end).
-E2E_APPS='com.oneplus.calculator|com.android.chrome|PowosWindowActivity'
+E2E_APPS="$TEST_APP|com.android.chrome|PowosWindowActivity"
 E2E_LINUX='dolphin kate gwenview'
 FORCED=0
 e2e_setup() {

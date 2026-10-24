@@ -22,7 +22,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 e2e_args "$@"; [ "$LAST" = 1 ] && LAST=3
 e2e_init desktop
 e2e_setup inner
-CALC=com.oneplus.calculator CHROME=com.android.chrome
+CALC=${TEST_APP:-com.oneplus.calculator} CHROME=com.android.chrome
 IMG=/usr/share/wallpapers/Next/contents/images/1440x2960.png
 
 step start "the unfolded home, page 1 (the journey found home on page index $PAGE0; -1 = PowOS AI's)"

@@ -207,6 +207,11 @@ run() {  # run <variant> <n>
       if [ -z "$r" ] && [ -z "$(iscript_reapers)" ] && [ "$now_" -gt 60000 ]; then
         echo "     no launch yet - X windows: $(xwininfo -root -tree 2>/dev/null | sed -nE 's/^ +0x[0-9a-f]+ "([^"]+)".* ([0-9]+x[0-9]+)\+.*/\1 \2/p' | sort | uniq -c | sort -rn | head -12 | awk '{$1=$1; print}' | tr '\n' '|')"
         echo "     console_log: $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -v '^\s*$' | tail -6 | cut -c1-150 | tr '\n' '|')"
+        # f89: "no launch yet" used to print only SlowJSMethodCall noise (the periodic timeline, below) - never the
+        # one line that actually says why: Steam waiting on the user (a EULA/launch-option/cloud-save dialog) or
+        # offline/logging in. Both read straight from Steam's own logs, no guessing.
+        echo "     waiting for user response: $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -i 'waiting for user response' | tail -3 | cut -c1-150 | tr '\n' '|')"
+        echo "     connection: $(tail -2 "$S/logs/connection_log.txt" 2>/dev/null | cut -c1-150 | tr '\n' '|')"
         # A Steam dialog up (ABZU 09:45: "Steam Dialog" 700x480 the whole time, no launch): its picture, once, for the
         # Mac side to pull (bf-coldstart.sh copies /tmp/bf-cold-dialog into the artefacts).
         # (not `xwininfo | grep -q`: grep -q closes the pipe early, xwininfo dies of SIGPIPE, pipefail says no match)
@@ -251,6 +256,11 @@ run() {  # run <variant> <n>
     for f in $(find /tmp -maxdepth 1 -name 'fex-game-*.log' -newer /tmp/bf-cold-mark 2>/dev/null | head -2); do echo "   FEX log $f ($(wc -l < "$f") lines), last:"; tail -15 "$f" | cut -c1-200 | sed 's/^/   | /'; done
     echo "   game output (Steam's stdout, last lines):"; grep -a -v -E 'LD_PRELOAD|^\s*$|steamwebhelper|cef_|chromium|SlowJSMethodCall' "$T/open.out" 2>/dev/null \
       | tail -25 | cut -c1-200 | sed 's/^/   | /'
+    # f89: Steam's own stdout is mostly SlowJSMethodCall noise (the grep above drops it, but a launch waiting on a
+    # Steam dialog can leave nothing else there) - print the actual "waiting for user response" lines and the
+    # connection state too, or a launch stuck on a Steam prompt reads exactly like a dropped forward.
+    echo "   console_log (waiting for user response, since the tap): $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -i 'waiting for user response' | tail -6 | cut -c1-150 | tr '\n' '|')"
+    echo "   connection_log (latest state): $(tail -3 "$S/logs/connection_log.txt" 2>/dev/null | cut -c1-150 | tr '\n' '|')"
     fail "start-$v" "no window in $([ $v = cold ] && echo $((${COLD_WAIT_MS:-265000} / 1000)) || echo 150) s:$(for k in steam reaper container wineserver exe; do printf '%s=%s ' $k "${seen[$k]:--}"; done)"; fi
   local hv=${seen[handoff_ms]:-${seen[restart]:+restart@${seen[restart]}}}
   echo "STAGES $v #$2 (ms from the tap):$([ $v != cold ] && echo " handoff ${hv:--}") steam-ui ${seen[steam]:--} update ${seen[update]:--}-${seen[update_end]:--} iscript ${seen[iscript]:--}-${seen[iscript_end]:--} reaper ${seen[reaper]:--} pv ${seen[container]:--} wineserver ${seen[wineserver]:--} exe ${seen[exe]:--} window ${seen[window]:--} frame ${seen[frame]:--}; open-task: $(cat "$T/open.status" 2>/dev/null)"

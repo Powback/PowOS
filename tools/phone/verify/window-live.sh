@@ -15,10 +15,10 @@ PAGE_STAGE=0; ARGS=()
 for a in "$@"; do [ "$a" = --page ] && PAGE_STAGE=1 || ARGS+=("$a"); done
 . "$here/e2e-lib.sh"
 e2e_args ${ARGS[@]+"${ARGS[@]}"}; LAST=2
-E2E_APPS='com.oneplus.calculator'
+E2E_APPS="${TEST_APP:-com.oneplus.calculator}"
 e2e_init live
 e2e_setup inner
-CALC=com.oneplus.calculator
+CALC=${TEST_APP:-com.oneplus.calculator}
 TOL=${TOL:-40}
 
 # sfframe <layer name part>: "l t r b" where SurfaceFlinger composes it on the ON display (HWC layers, Disp Frame).

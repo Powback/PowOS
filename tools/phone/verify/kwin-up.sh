@@ -38,24 +38,39 @@ pacman -Q kwin" | tail -1 | while read -r l; do _kw_log "installed: $l"; done
 }
 
 kwin_restart() {
-  local st0 k0 st k s0 s1 req
+  # Reports each of the 4 stages as it's reached (f91: a bare "KWin didn't come back" hid that stage 1 (the request
+  # never reached the app) was the real failure) - callers' FAIL then carries the stage, not just the symptom.
+  local st0 k0 st k s0 s1 req seen gone=0
   st0=$(kwin_state); k0=${st0#kwin=}; k0=${k0%% *}
   s0=$(_kw_sh "grep -c -- \"^--- \" /data/powos/session.log")
-  _kw_log "fresh session (android-request power logout); before: $st0"
-  _kw_us "android-request power logout"; sleep 20
-  for _ in $(seq 30); do
+  _kw_us "android-request power logout"
+  req=$(_kw_sh "cat /data/user/0/com.powos.app/files/run/android-request")
+  _kw_log "stage 1/4 request written: android-request power logout (file now holds '$req'); before: $st0, session starts so far: $s0"
+  for _ in $(seq 10); do
+    [ -n "$k0" ] && [ "$k0" != - ] && _kw_sh "[ -d /proc/$k0 ] && echo y" | grep -q y || { gone=1; break; }
+    sleep 2
+  done
+  [ "$gone" = 1 ] && seen="yes - old kwin_wayland (pid ${k0:-none}) is gone" || seen="UNKNOWN - old kwin_wayland (pid ${k0:-none}) is still mapped after 20 s"
+  _kw_log "stage 2/4 app saw it: $seen"
+  for _ in $(seq 24); do
     st=$(kwin_state); k=${st#kwin=}; k=${k%% *}
-    [[ $st == *kwin_new=1* ]] && [ "$k" != "$k0" ] && [ "$k" != - ] && { _kw_log "after the restart: $st"; return 0; }
+    if [[ $st == *kwin_new=1* ]] && [ "$k" != "$k0" ] && [ "$k" != - ]; then
+      s1=$(_kw_sh "grep -c -- \"^--- \" /data/powos/session.log")
+      _kw_log "stage 3/4 session restarted: yes (session.log starts $s0 -> $s1)"
+      _kw_log "stage 4/4 KWin new pid: $st"
+      return 0
+    fi
     sleep 5
   done
   s1=$(_kw_sh "grep -c -- \"^--- \" /data/powos/session.log")
-  req=$(_kw_sh "cat /data/user/0/com.powos.app/files/run/android-request")
   if [ "${s1:-0}" = "${s0:-0}" ]; then
-    KWIN_WHY="no new session started (session.log: $s0 starts before and after; the request file says '$req') - the app didn't act on the logout request"
+    _kw_log "stage 3/4 session restarted: no (session.log: $s0 starts before and after)"
+    KWIN_WHY="the logout request never reached the app, or it never acted on it - stage 2 ($seen), stage 3 no new session (session.log stuck at $s0 starts; request file: '$req')"
   else
-    KWIN_WHY="a new session started but no new KWin of the installed package runs ($st, was kwin=$k0)"
+    _kw_log "stage 3/4 session restarted: yes (session.log starts $s0 -> $s1)"
+    _kw_log "stage 4/4 KWin new pid: NO ($st, was kwin=$k0)"
+    KWIN_WHY="stage 4 failed - a new session started ($s0 -> $s1) but no new KWin of the installed package runs ($st, was kwin=$k0)"
   fi
-  _kw_log "after the restart: $st - $KWIN_WHY"
   return 1
 }
 

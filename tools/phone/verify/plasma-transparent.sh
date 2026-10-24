@@ -17,6 +17,10 @@
 #      (video) wallpaper changed between the home shots before and after (OxygenOS's plays a clip on unlock/fold);
 #   5. SurfaceFlinger composes the wallpaper directly under the desktop's surface, and that surface is translucent:
 #      nothing between them could show black.
+# WARNING (f92, 2026-10-24): the reference shot for this check (and any check comparing against a screenshot) must
+# never include pixels the check's OWN UI draws (home's widgets, status bar) or pixels a LIVE source can change on
+# its own (the video wallpaper plays unprompted) - either one fails the comparison for reasons that have nothing to
+# do with transparency. Step 4 is where that's excluded; touch it only to exclude MORE, never less.
 # Always restores: the web home. Exit: 0 passed; 1 FAIL; 3 a real touch / not awake (re-queued).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"

@@ -16,7 +16,7 @@ while [ $# -gt 0 ]; do case $1 in --apps) APPS=$2; APPS_SET=1; shift 2 ;; --andr
 [ $AO = 1 ] && [ $APPS_SET = 0 ] && APPS="calc chrome"
 . "$here/e2e-lib.sh"
 e2e_args ${ARGS[@]+"${ARGS[@]}"}; LAST=2
-E2E_APPS='com.oneplus.calculator|PowosWindowActivity|com.android.chrome'; E2E_LINUX='kate'
+E2E_APPS="${TEST_APP:-com.oneplus.calculator}|PowosWindowActivity|com.android.chrome"; E2E_LINUX='kate'
 e2e_init scroll
 e2e_setup inner
 
@@ -54,7 +54,7 @@ ways() { set -- $(tbounds "$1"); MX=$(dp 120); MY=$(dp 60); [ $(($3 + MX)) -gt $
 
 for app in $APPS; do
   case $app in
-    calc) KEY=a:com.oneplus.calculator/; WKEY=com.oneplus.calculator; PAT=calculator ;;
+    calc) KEY=a:${TEST_APP:-com.oneplus.calculator}/; WKEY=${TEST_APP:-com.oneplus.calculator}; PAT=${TEST_APP:-calculator} ;;
     kate) KEY=l:org.kde.kate; WKEY=l:org.kde.kate; PAT=PowosWindowActivity ;;
     chrome) KEY=a:com.android.chrome/; WKEY=com.android.chrome; PAT=chrome ;;
     steam) KEY=l:steam; WKEY=l:steam; PAT=PowosWindowActivity ;;

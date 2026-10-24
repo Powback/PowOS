@@ -11,11 +11,11 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 e2e_args "$@"; LAST=2   # one part; LAST != PART: no mail to the manager
-E2E_APPS='com.oneplus.calculator|PowosWindowActivity'
+E2E_APPS="${TEST_APP:-com.oneplus.calculator}|PowosWindowActivity"
 E2E_LINUX='dolphin'
 e2e_init probe
 e2e_setup inner
-CALC=com.oneplus.calculator
+CALC=${TEST_APP:-com.oneplus.calculator}
 OVL=com.android.shell:PowosNoCaption
 # The overlay on again whatever ends the run (a touch, the budget).
 trap 'rc=$?; sh_ "cmd overlay enable $OVL" >/dev/null; (exit $rc); e2e_abort' EXIT

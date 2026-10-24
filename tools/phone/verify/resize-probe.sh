@@ -18,7 +18,7 @@ while [ $# -gt 0 ]; do case $1 in --apps) APPS=$2; APPS_SET=1; shift 2 ;; --leas
 [ $AO = 1 ] && [ $APPS_SET = 0 ] && APPS="calc chrome"
 . "$here/e2e-lib.sh"
 e2e_args ${ARGS[@]+"${ARGS[@]}"}
-E2E_APPS='com.oneplus.calculator|PowosWindowActivity|com.android.chrome'; E2E_LINUX='kate'
+E2E_APPS="${TEST_APP:-com.oneplus.calculator}|PowosWindowActivity|com.android.chrome"; E2E_LINUX='kate'
 e2e_init resize-probe
 e2e_setup inner
 
@@ -77,7 +77,7 @@ after() { sleep 0.5; facts "$1" "$2" "$3 +0.5s"; sleep 1.5; facts "$1" "$2" "$3 
 
 for app in $APPS; do
   case $app in
-    calc) KEY=a:com.oneplus.calculator/; WKEY=com.oneplus.calculator; PAT=com.oneplus.calculator ;;
+    calc) KEY=a:${TEST_APP:-com.oneplus.calculator}/; WKEY=${TEST_APP:-com.oneplus.calculator}; PAT=${TEST_APP:-com.oneplus.calculator} ;;
     chrome) KEY=a:com.android.chrome/; WKEY=com.android.chrome; PAT=com.android.chrome ;;
     kate) KEY=l:org.kde.kate; WKEY=l:org.kde.kate; PAT=PowosWindowActivity ;;
     *) fail "unknown app $app"; continue ;;

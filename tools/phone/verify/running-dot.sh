@@ -10,7 +10,7 @@
 # Always restores: Calculator stopped, home. Exit 3: no free window.
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
-PKG=com.oneplus.calculator
+PKG=${TEST_APP:-com.oneplus.calculator}
 sh_() { tools/phone/adb.sh shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 # cdp.sh prints the result as a JSON string: drop the escaping so plain greps match.
 ev() { tools/phone/cdp.sh eval home "$1" 2>&1 | tr -d '\n\r' | sed 's/\\"/"/g; s/^"//; s/"$//'; }

@@ -162,12 +162,34 @@ add)
   fi
   task=$1; shift
   [[ $task =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$ ]] || { echo "queue.sh: bad task id: $task"; exit 2; }
+  # f112: a board task id that doesn't exist was accepted and queued anyway - its result then had nowhere real to
+  # land. Refuse it, with a did-you-mean from the open board, unless QUEUE_NEW_TASK=1 (the task is made for real,
+  # `powos agents task add`, before or right after - never implicitly by queuing a check against a name nobody added).
+  if [ -n "$REPO" ] && [ -z "${QUEUE_NEW_TASK:-}" ] && command -v python3 >/dev/null; then
+    ids=$(python3 "$REPO/lib/ai/agents/powos-agents-cli" task list --all --json 2>/dev/null | python3 -c 'import json,sys
+try: print("\n".join(t.get("id","") for t in json.load(sys.stdin)))
+except Exception: pass' 2>/dev/null)
+    if [ -n "$ids" ] && ! grep -qxF "$task" <<<"$ids"; then
+      like=$(grep -i "${task:0:8}" <<<"$ids" | head -3 | tr '\n' ' ')
+      echo "queue.sh: no board task '$task'${like:+ - did you mean: $like}. Add it first (powos agents task add ...), or QUEUE_NEW_TASK=1 to queue against it anyway." >&2; exit 2
+    fi
+  fi
   case "$screen" in ""|inner|cover) ;; *) echo "queue.sh: --screen inner|cover"; exit 2 ;; esac
   [ -x "$1" ] || [ -x "$here/$1" ] || command -v "$1" >/dev/null || { echo "queue.sh: not runnable: $1"; exit 2; }
   [ -x "$here/$1" ] && [ ! -x "$1" ] && set -- "$here/$1" "${@:2}"
   if [ -z "$name" ]; then  # the script's name (past `env A=1 ...`)
     for a in "$@"; do case "$a" in */env|env|*=*) ;; *) name=$(basename "$a"); break ;; esac; done; name=${name%.sh}
   fi
+  # f94: a check queued as "kwin 3.26" ran on 3.25 - naming a version in --name/the task proves nothing unless the
+  # check itself checks it. Refuse a version-looking claim (N.N) unless the command either enforces it (sources
+  # kwin-up.sh's kwin_install/kwin_up, which FAILs when the installed one is older) or prints what it actually ran
+  # on as its own first output line ("VERSION ..." - the runner then records that line with the result, below).
+  for v in "$name" "$task"; do
+    [[ "$v" =~ [0-9]+\.[0-9]+ ]] || continue
+    vok=0
+    for a in "$@"; do [ -f "$a" ] && grep -qE 'kwin_install|kwin_up|(^|[^#[:alnum:]_])(echo|printf)[[:space:]]+.VERSION ' "$a" && vok=1; done
+    [ $vok = 1 ] || { echo "queue.sh: '$v' names a version, but nothing in the command enforces it (kwin_install/kwin_up) or prints it (a first output line \"VERSION ...\") - that's exactly how a check named 3.26 ran on 3.25"; exit 2; }
+  done
   # --dev auto: emu only when the check's own marker allows it AND the run was told (not guessed) to be
   # Android-only - never errors either way (see the header; the table is in the handbook).
   if [ "$dev" = auto ]; then
@@ -402,6 +424,14 @@ EOS
       [ -n "$go" ] && echo "$(date +%T) go from the phone: $go ($N checks)"
       for j in "${sel[@]}"; do
         [ -f "$j" ] || continue
+        # f97: a `queue.sh pause` mid-window (its stop flag only reaches a check that's ALREADY running, via beat's
+        # look below) used to leave the runner chewing through the rest of this window's jobs regardless, holding
+        # the lock the whole time while the phone dozed and the queue already said paused. A paused (or now-idle,
+        # nothing left selected) runner gives the window back at once instead of finishing it out.
+        if [ -e "$Q/paused" ]; then
+          echo "$(date +%T) paused mid-window - releasing it now ($((N - k)) still queued)"
+          pause "Phone checks paused: $pass passed, $fail failed, $((N - k)) still queued"; exit 4
+        fi
         # A runnable job that sorts before this one but came in after the window began (a job queued to go first, e.g.
         # an install the next checks depend on) ends the window, and the next window re-picks in order. Before, it
         # waited for the whole batch: 58 checks, hours (06:22).
@@ -437,6 +467,11 @@ EOS
           if wt_of "$cwd"; then relify "$wsub"; else relify ""; fi
         fi
         [ "$rel" = 1 ] && cwd=$VR/$cwd
+        # f106: a game check (Broforce etc, ~14 min) saw the screen go off mid-window - the runner only woke it once,
+        # at the window's start (wl_wake, window-lock.sh). PowosWindowActivity's own keep-on only covers a
+        # full-screen task once it has one; the setup/measure gaps around it need the same wl_wake, kept up for as
+        # long as this job runs, the same way wl_sleep already restores sleep once the whole window ends.
+        game=0; for a in "${cmd[@]}"; do basename -- "$a" 2>/dev/null | grep -qiE "$HW_ONLY" && game=1; done
         n=$(basename "$j" .job); log=$Q/done/$n.log; k=$((k + 1))
         echo "$(date +%T) run $n: ${cmd[*]}"
         js() { printf '{"name":%s,"task":%s,"k":%s,"n":%s,"screen":%s,"el":%s,"budget":%s,"prev":"@@HINT@@","step":"@@STEP@@","stepel":@@STEPEL@@}' \
@@ -446,10 +481,19 @@ EOS
         # The heartbeat: every HB_S s the pill hears check, k/N, elapsed; a tap's stop flag or the budget ends the check.
         # The sub-step: the check's own (put) or its log's last line, timed from when that line first showed.
         t0=$(date +%s); why=; ls_=; lt=$t0
+        # f117: the budget kill once came ~20 min late because a hung adb call (inside beat, below) blocked this
+        # whole loop - el was only ever checked AFTER beat returned. Its own timer now watches wall time and kills
+        # jp directly, no adb, so a stuck beat can delay the heartbeat but never the kill.
+        rm -f "$log.timedout"
+        ( while kill -0 $jp 2>/dev/null; do
+            [ $(( $(date +%s) - t0 )) -lt "$budget" ] || { : > "$log.timedout"; killtree $jp; break; }
+            sleep 2
+          done ) & budp=$!
         while kill -0 $jp 2>/dev/null; do
           for _ in $(seq "${HB_S:-4}"); do kill -0 $jp 2>/dev/null || break; sleep 1; done
           touch "$HOME/.cache/powos-verify.lock" 2>/dev/null   # fresh through a long check too (f22)
           kill -0 $jp 2>/dev/null || break
+          [ "$game" = 1 ] && wl_wake "$phone" >/dev/null 2>&1   # f106: keep the screen on through the whole check
           el=$(( $(date +%s) - t0 ))
           [ $el -ge "$budget" ] && { why=timeout; break; }
           l=$(logstep "$log"); [ "$l" = "$ls_" ] || { ls_=$l; lt=$(date +%s); }
@@ -457,6 +501,8 @@ EOS
           # the pill's frame) - injected or real, a stop is a stop: verify/pill-stop.sh taps it.
           [ "$(beat "$(js $el)" "$ls_" $(( $(date +%s) - lt )))" = stop ] && { why=stop; break; }
         done
+        kill "$budp" 2>/dev/null; wait "$budp" 2>/dev/null
+        [ -n "$why" ] || [ ! -e "$log.timedout" ] || why=timeout; rm -f "$log.timedout"
         [ -n "$why" ] && endjob $jp
         wait $jp; rc=$?
         # A killed check's phone side keeps running (td-launch-phone.sh outlived its budget kill by 2 min and overlapped
@@ -502,7 +548,10 @@ EOS
           "$phone/shot.sh" --phone "/data/powos/root/home/powos/design-qa/$f" >/dev/null 2>&1 && img=/home/powos/design-qa/$f
         else pass=$((pass + 1)); fi
         line=$(grep '^FAIL' "$log" | head -1); [ $rc != 0 ] && [ -n "$line" ] || line=$(tail -2 "$log" | head -1)
-        board "$task" "verify $r: $(printf %s "$line" | cut -c1-160) (log ~/.cache/powos-verify-queue/done/$n.log)" "$([ $rc = 0 ] && echo $close || echo 0)" "$img"
+        # f94: a check that prints its real version ("VERSION ...", its first line) gets that recorded with the
+        # result - so a name that claims a version is checkable against what it actually says it ran on.
+        ver=$(head -1 "$log" 2>/dev/null | grep -oE '^VERSION .*' | cut -c1-80)
+        board "$task" "verify $r: $(printf %s "$line" | cut -c1-160)${ver:+ ($ver)} (log ~/.cache/powos-verify-queue/done/$n.log)" "$([ $rc = 0 ] && echo $close || echo 0)" "$img"
         echo "$(date +%T) $n: $r"
       done
       sum="Phone checks: $pass passed"; [ $fail = 0 ] || sum="$sum, $fail failed ($first$([ $fail -gt 1 ] && echo ", ..."))"
