@@ -17,7 +17,18 @@ L=$HOME/.cache/powos-verify.lock
 PKG=${TEST_APP:-com.oneplus.calculator}
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-restore() { sh_ "am force-stop $PKG; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
+# device_state_set <state>: set fold state; on emu, state 3 (inner) is a no-op, state 0 (cover) prints SKIP.
+device_state_set() {
+  case "${POWOS_DEVICE:-phone}" in
+    emu) case $1 in 3|inner|unfolded) ;; 0|cover|folded) echo "SKIP emu has no cover screen" ;; *) ;; esac ;;
+    *) sh_ "cmd device_state state $1" ;;
+  esac
+}
+# device_state_reset: reset fold state to hinge; on emu, a no-op.
+device_state_reset() {
+  case "${POWOS_DEVICE:-phone}" in emu) ;; *) sh_ "cmd device_state state reset" ;; esac
+}
+restore() { sh_ "am force-stop $PKG; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; device_state_reset; echo "restored"; }
 . "$here/window-lock.sh"
 window_lock float-desktops.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
@@ -49,12 +60,15 @@ s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$(sh_ "settings get global enable_freeform_support")" = 1 ] || fail "enable_freeform_support isn't 1"
 # The committed state flips to OPENED before display 0 is the inner screen: 3 s once wasn't enough (right after
 # sketch-rotate, folded: OPENED, wm size still the cover's 1116x2484) - wait for the inner size, up to 15 s.
-sh_ "cmd device_state state 3"; sleep 2; chk unfold
+device_state_set 3; sleep 2; chk unfold
 # mCommittedState can take longer than 2 s to reach OPENED on the emulator's software renderer (2026-10-24: still
 # CLOSED at 2 s there) - up to 10 s more, as wsize's loop below already allows for the screen size.
-t=0; until sh_ "dumpsys device_state | grep -m1 mCommittedState" | grep -q OPENED; do
-  [ $t -lt 10 ] || fail "the inner screen didn't come on"; sleep 1; t=$((t + 1))
-done
+# Skip on emu (no device_state support); otherwise wait for OPENED state.
+if [ "${POWOS_DEVICE:-phone}" != emu ]; then
+  t=0; until sh_ "dumpsys device_state | grep -m1 mCommittedState" | grep -q OPENED; do
+    [ $t -lt 10 ] || fail "the inner screen didn't come on"; sleep 1; t=$((t + 1))
+  done
+fi
 wsize() { sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1; }
 t=0; WH=$(wsize)
 while [ "${WH%% *}" -le 2000 ] 2>/dev/null && [ $t -lt 13 ]; do sleep 1; t=$((t + 1)); WH=$(wsize); done

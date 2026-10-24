@@ -23,6 +23,17 @@ TEST_APP=${TEST_APP:-com.oneplus.calculator}
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 # ash: a script on stdin as Android root (any quoting inside).
 ash() { "$A" shell "su -c 'sh -s'" 2>/dev/null | tr -d '\r'; }
+# device_state_set <state>: set fold state; on emu, state 3 (inner) is a no-op, state 0 (cover) prints SKIP.
+device_state_set() {
+  case "${POWOS_DEVICE:-phone}" in
+    emu) case $1 in 3|inner|unfolded) ;; 0|cover|folded) echo "SKIP emu has no cover screen" ;; *) ;; esac ;;
+    *) sh_ "cmd device_state state $1" ;;
+  esac
+}
+# device_state_reset: reset fold state to hinge; on emu, a no-op.
+device_state_reset() {
+  case "${POWOS_DEVICE:-phone}" in emu) ;; *) sh_ "cmd device_state state reset" ;; esac
+}
 # us: a script text inside PowOS as the session user (user.sh).
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
@@ -202,7 +213,7 @@ e2e_setup() {
   if [ "${1:-}" = inner ]; then
     [ "$(sh_ "settings get global enable_freeform_support")" = 1 ] || { echo "FAIL: enable_freeform_support isn't 1"; exit 1; }
     # Forced even when already open (as every unfolded check): `state reset` at the end hands it back to the hinge.
-    FORCED=1; sh_ "cmd device_state state 3"; sleep 2; chk unfold
+    FORCED=1; device_state_set 3; sleep 2; chk unfold
   fi
   local t=0 WH; WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
   while [ "${1:-}" = inner ] && [ "${WH%% *}" -le 2000 ] 2>/dev/null && [ $t -lt 13 ]; do sleep 1; t=$((t + 1)); WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1); done
@@ -247,7 +258,7 @@ e2e_restore() {
   done <<<"$(tasks)"
   local p kill=""; for p in $E2E_LINUX; do grep -qx "$p" <<<"$LIN0" || kill="$kill $p"; done
   [ -n "$kill" ] && us "for p in$kill; do pkill -x \$p; done; true" >/dev/null
-  [ $FORCED = 1 ] && { sh_ "cmd device_state state reset"; sleep 1.5; }
+  [ $FORCED = 1 ] && { device_state_reset; sleep 1.5; }
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1
   # Once more after home is up: a minimised window (under home) wasn't in the list the first read saw (e2e r3 part 1
   # left Calculator 2494 open, "closed" never logged for it).
