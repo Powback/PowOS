@@ -98,7 +98,7 @@ wait_for "[ \"\$(cat \"\$Q/failed-rooted\" 2>/dev/null)\" = \"\$tb\" ]" 20
 [ "$(cat "$Q/failed-rooted" 2>/dev/null)" = "$tb" ] && ok "failed rooted deploy recorded against this tip" || { bad "not marked failed"; cat "$LOG"; }
 wait_for "grep -q '^MAIL.*rooted.*FAILED' \"\$LOG\"" 10   # failed-rooted is written just before mail()
 [ "$(grep -c '^MAIL.*rooted.*FAILED' "$LOG")" = 1 ] && ok "mailed once" || { bad "mail count"; cat "$LOG"; }
-sleep 3
+wait_for "[ \"\$(grep -c '^ROOTED' \"\$LOG\")\" = 1 ]" 10
 [ "$(grep -c '^ROOTED' "$LOG")" = 1 ] && ok "not retried on the same (failed) tip" || bad "retried: $(grep -c '^ROOTED' "$LOG") calls"
 # request completion is decoupled from the rooted step (it closes via the ordinary shell "nothing differs" path
 # regardless of rooted's outcome, same as the "apps" kind above it) - so the broken request is already done_req'd

@@ -52,6 +52,7 @@ grep -q "^BUILD app-api $t" "$LOG" && ok "build.sh ran for the changed app, at t
 grep -q "^INSTALL app-api install note=app-api got better" "$LOG" && ok "install.sh ran with the ship note" || { bad "install.sh"; cat "$LOG"; }
 [ "$(grep -c '^BUILD' "$LOG")" = 1 ] && ok "built exactly once" || bad "built $(grep -c '^BUILD' "$LOG") times"
 [ "$(cat "$Q/apps-live" 2>/dev/null)" = "$t" ] && ok "apps-live recorded at the shipped tip" || bad "apps-live not recorded"
+for _ in $(seq 10); do grep -q "${t:0:9} apps (app-api)" "$Q/shipped.log" 2>/dev/null && break; sleep 1; done
 grep -q "${t:0:9} apps (app-api)" "$Q/shipped.log" 2>/dev/null && ok "shipped.log has the apps line" || { bad "shipped.log"; cat "$Q/shipped.log" 2>/dev/null; }
 
 # A second request on the SAME tip (nothing new in apps/): no second build.
