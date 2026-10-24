@@ -67,8 +67,7 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
 | other shell (web UI) work no expert owns | powos-shell-dev |
 | other Android app (Kotlin) work no expert owns | powos-android-dev |
 
-## Efficiency (the user, 2026-10-22: "insanely inefficient" - measured: 534k context per call, 13% of tokens
-## waiting on the phone, 48% of commits process tooling; `tools/agents/efficiency.py` measures it, targets in its doc)
+## Efficiency (f168: user, 2026-10-22: "insanely inefficient"; measured 534k context per call, 13% waiting, 48% tooling)
 - ONE task per agent run: pick up, ship the slice, put what you learned into your skill (facts, <=100 lines, no
   history), the open rest into the board task's note, exit. Never stay alive waiting for mail, a window or a review.
   Tasks are scoped to ~5 min: one finding or one fix; leftovers go to a fresh agent via the hand-off (`.claude/hooks/
@@ -97,7 +96,7 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
   written down: `.claude/hooks/wait-guard.py` (a PreToolUse hook, subagents only) DENIES a busy spin loop (`do :;`/
   `do true;`, no sleep - never useful, backgrounded or not) and denies an `until`/`while` sleep loop that isn't run
   with `run_in_background` (that exact shape, backgrounded, is the correct pattern and is allowed) - 374 transcripts
-  had hundreds of these, many hitting the Bash tool's 10-min cap while just sitting there waiting.
+  had hundreds of these, many hitting the Bash tool's 10-min cap while just sitting there waiting. PreToolUse deny output shape: `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"…"}}` (f172; see wait-guard.py).
 - Caps: tool output over ~8k chars goes to a file with a 3k head kept inline - read the file for the rest only if
   the head isn't enough (on nofate/br's trial, results over 8k were 23% of all result text, and agents read past
   the head in only 22% of cases: most of that was wasted context). A background job's output rides on your next
@@ -282,7 +281,7 @@ never a hardcoded root.
 
 ## Reaching the phone (OnePlus Open, rooted)
 - `tools/phone/adb.sh <adb args>`: adb over the VPN (powos-vadb's server, 10.13.13.7:5555) from any session.
-  Files you push must be under `$HOME` (Colima shares only the home directory). After a Colima restart powos-vadb may
+  Files you push must be under `$HOME` (Colima shares only the home directory); write files containers read/write under the repo or $HOME, never /tmp (f158). After a Colima restart powos-vadb may
   be stopped: `docker start powos-vadb`.
 - `tools/phone/root.sh <script>`: run a local bash script as root INSIDE PowOS (chroot of /data/powos/root).
 - `tools/phone/user.sh <script>`: the same as the session user powos (its comms inbox, spacetime token, `powos ...`).
@@ -313,7 +312,7 @@ never a hardcoded root.
   PowosPet. Batch several commands into ONE adb.sh call.
 - Other tools: `tools/phone/cpu.sh` (per-process CPU), `idle-sample.sh` (perf), `review-image.sh FILE...` (review
   images -> /home/powos/design-qa/), `app-src.sh pull|push <app>` (a phone app's sources), `bindings-check.sh`,
-  `bridge-check.sh`, `tools/phone/record/run.sh <tag>` (swipe-home recording), `tools/phone/verify/` (journeys,
+  `bridge-check.sh`, `tools/phone/record/run.sh <tag>` (swipe-home recording), `lint-complexity.sh --only` (f176: takes app-relative path like app/src/main/kotlin/..., not package path), `tools/phone/verify/` (journeys,
   frames, edge.sh, Broforce). Every helper an agent relies on lives in the repo, never in ~/.cache or job tmp (Rules).
 
 ## Shipping
@@ -566,7 +565,7 @@ never a hardcoded root.
   table: shell-errors shows `Offset is outside the bounds of the DataView` (vendor/spacetimedb.js) or
   `stdb: <db>: ... bindings stale for <table>`. push.sh and ship-apk run tools/phone/bindings-check.sh (one phone
   call): bindings ahead of the live module are published from this commit's module, anything else refuses with the
-  fix. Details: powos-stdb skill.
+  fix. A new local board-CLI flag can silently fall through to the phone's older installed copy when the Mac's SpacetimeDB is unreachable (remote()/handle_down()), giving the same "unknown option" error (f170). Details: powos-stdb skill.
 - GPU box 192.168.50.195: voice stack units (hosts/gpu-195/, units/gpu-195/), voiceagent.pow; plan docs/GPU-SERVERS-PLAN.md.
 
 ## Native/hidden-API work (learned the hard way)
@@ -655,7 +654,8 @@ Git and process
   worktree, for tsc) is ignored too; `node_modules/` matched only a directory and the link made the tree dirty for
   build-app.sh. Write ignore rules that match a symlink when one may be linked.
 Pipeline scripts (bash)
-- The Mac's bash is 3.2: no `declare -A`, guard empty arrays under `set -u` (`${a[@]+"${a[@]}"}`).
+- The Mac's bash is 3.2: no `declare -A`, guard empty arrays under `set -u` (`${a[@]+"${a[@]}"}`)
+- The Mac has no `timeout`; use `perl -e 'alarm N; exec @ARGV' cmd …` instead (f162).
 - Under `set -e` + `pipefail` a command that "fails" normally ends the whole script: `grep` with no match (exit 1)
   inside `x=$(... | grep ...)` aborted ship-apk before its post-install checks (72d60d5), and `idle.sh --wait`'s timeout
   exit 1 aborted it mid-wait (a39e103). Add `|| true` (or `if ...; then`) where "no match"/"not yet" is a normal

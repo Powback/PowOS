@@ -5,6 +5,7 @@ description: Use for the PowOS phone's SpacetimeDB - its modules and databases, 
 
 ## Quick recipe
 - Files: `apps/<app>/src/lib.rs` (the module), `shell/vendor/<db>.js`+`.d.ts`+`VERSIONS`, `shell/apps/stdb.ts`.
+- Module-only manifest template: `apps/agents/powos-app.json` (no UI/backend, f157).
 - Build/regen bindings: `apps/vendor.sh <app>` (must reproduce committed vendor files byte-for-byte; commit, then push).
 - Check (no device needed first): `tools/phone/bindings-check.sh --no-publish`; tier-1
   `bash test/tier1/test-bindings-check.sh`. Device: phone (reads the phone's live STDB over adb).
@@ -67,7 +68,7 @@ It recurs on every page load, because the initial subscription fails. It is not 
 - Regenerate bindings: `apps/vendor.sh <app>` (apps/build.sh in the rust container, then esbuild of the bindings'
   index.ts, spacetimedb external). It reproduces the committed files byte for byte. Commit them, then push `vendor/<db>.js`.
 - Publish a module: `ADB="docker exec powos-vadb adb" apps/install.sh <app> publish --note "plain words"` (a hot swap;
-  additive columns need `#[default(...)]`).
+  additive columns need `#[default(...)]`); for module-only apps use `publish`, not `install` (f155).
 - Check: `tools/phone/bindings-check.sh --no-publish`; tier-1: `bash test/tier1/test-bindings-check.sh`.
 - Row peek on the phone (root.sh script): `curl -s -X POST -d "SELECT * FROM pet" http://127.0.0.1:3410/v1/database/local-pet/sql`.
 - Inside PowOS, avoid `journalctl` and `/logs` endpoints in root.sh scripts; they hung for minutes.
