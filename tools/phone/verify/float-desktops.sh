@@ -63,6 +63,9 @@ onpage() { local v i; for i in 1 2 3 4; do
 npages() { "$T/cdp.sh" eval home "document.querySelectorAll('.page-track > .page').length" 2>&1 | tr -d '"\r' | tail -1; }
 vis() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'visible=(true|false)'; }
 away() { hcall windows.list "[]" "l=>(l.find(w=>w.pkg==='$PKG')||{away:'none'}).away"; }
+# Context for a FAIL on a page check: home's page count (n, set at start / after the restart) and the last swipe's
+# start,end px (LASTSWIPE, set by swipe()). Uses only values the script already holds - no extra CDP call.
+ctx() { echo "home pages ${n:-?}, last swipe ${LASTSWIPE:-none}"; }
 
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
@@ -116,7 +119,7 @@ swipe() {
   [ $to -lt 20 ] && to=20; [ $to -gt $((W - 20)) ] && to=$((W - 20))
   # Shorter than home turns a page for (a quarter of its width, no flick): the check's spot, not the product.
   [ $(( (to - x) * $1 )) -ge $((W / 4 + 40)) ] || { echo "only a $(( (to - x) * $1 )) px swipe fits from $x,$y - stopping (not a product FAIL)"; exit 5; }
-  echo "swipe $x,$y -> $to,$y" >>"$OUT/log.txt"
+  LASTSWIPE="$x,$y -> $to,$y"; echo "swipe $LASTSWIPE" >>"$OUT/log.txt"
   sh_ "input swipe $x $y $to $y 250"; sleep 1.5
 }
 
@@ -159,24 +162,24 @@ swipe -1; chk swipe2
 slid "swipe to page 2"
 "$T/shot.sh" "$OUT/2-page2-hidden.png"
 [ "$(onpage)" = 1 ] && [ "$(vis)" = visible=false ] && [ "$(away)" = true ] && pass "swiped to page 2: hidden" \
-  || fail "on page 2: page $(onpage), $(vis), away=$(away)"
+  || fail "on page 2: page $(onpage), $(vis), away=$(away); $(ctx)"
 
 swipe 1; chk swipe1
 slid "swipe back to page 1"
 "$T/shot.sh" "$OUT/3-page1-back.png"
 B2=$(bounds); echo "bounds back on page 1: $B2" | tee -a "$OUT/log.txt"
-[ "$(onpage)" = 0 ] && [ "$(vis)" = visible=true ] && [ "$(away)" = false ] || fail "back on page 1: page $(onpage), $(vis), away=$(away)"
+[ "$(onpage)" = 0 ] && [ "$(vis)" = visible=true ] && [ "$(away)" = false ] || fail "back on page 1: page $(onpage), $(vis), away=$(away); $(ctx)"
 [ "$B2" = "$B1" ] && pass "swiped back to page 1: shown at the same bounds" || fail "back on page 1 at $B2, opened at $B1"
 
 # Its app opened while page 2 shows: the window comes to page 2 (home stays there).
 swipe -1; chk swipe2b
-[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=false ] || fail "page 2 again: page $(onpage), $(vis)"
+[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=false ] || fail "page 2 again: page $(onpage), $(vis); $(ctx)"
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch (from page 2): $r"
 sleep 1.8; chk relaunch
 "$T/shot.sh" "$OUT/4-opened-on-page2.png"
 P2=$(hcall store.get "['home.windows']" "m=>m&&m['$id']")
 [ "$(onpage)" = 1 ] && [ "$(vis)" = visible=true ] && [ "$P2" != "$P1" ] && pass "opened again on page 2: moved there (page id $P2)" \
-  || fail "opened again from page 2: page $(onpage), $(vis), page id $P2 (was $P1)"
+  || fail "opened again from page 2: page $(onpage), $(vis), page id $P2 (was $P1); $(ctx)"
 
 # Survives home's app restarting: page 1 (it hides), the app killed, home back - still page 2's.
 hemit system.home null; chk home1
@@ -187,11 +190,11 @@ sleep 2; chk restart
 # Home's pages come back in two steps (the layout, then the pages live windows are on: ui/desktops.ts startDesktops, after
 # the store is read). A swipe in between (1024 07:28: page 0 after it, no turn) is no product claim: wait for the pages.
 t=0; until [ "$(npages)" -ge 3 ] 2>/dev/null || [ $t -ge 10 ]; do sleep 1; t=$((t + 1)); done; sleep 1
-P3=$(hcall store.get "['home.windows']" "m=>m&&m['$id']")
+n=$(npages); P3=$(hcall store.get "['home.windows']" "m=>m&&m['$id']")
 "$T/shot.sh" "$OUT/5-after-restart-page1.png"
 [ "$P3" = "$P2" ] && [ "$(vis)" = visible=false ] && pass "after the app restarted: still page id $P3, hidden on page 1" \
-  || fail "after the app restarted: page id $P3 (want $P2), $(vis), page $(onpage)"
+  || fail "after the app restarted: page id $P3 (want $P2), $(vis), page $(onpage); $(ctx)"
 swipe -1; chk swipe2c
 "$T/shot.sh" "$OUT/6-after-restart-page2.png"
-[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=true ] && pass "after the restart, page 2 shows it" || fail "after the restart on page 2: page $(onpage), $(vis)"
+[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=true ] && pass "after the restart, page 2 shows it" || fail "after the restart on page 2: page $(onpage), $(vis); $(ctx)"
 echo "all passed; artefacts: $OUT"

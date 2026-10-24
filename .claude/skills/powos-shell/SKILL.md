@@ -16,6 +16,8 @@ description: Use before any visual change on the PowOS phone shell - design lang
   styles - never inject into a live page.
 - Land/ship: `tools/agents/land.sh "msg" -- <paths> --ship "plain words for the user"`.
 - Friction: `tools/agents/friction add --area <design|drawer|widgets|gestures|bridge-security> --kind <...> "<title>" --repro "<cmd>"`.
+- Gate debugging: puppeteer lives only in the gate image zenika/alpine-chrome:with-puppeteer; read its source with `docker run --rm --entrypoint sh zenika/alpine-chrome:with-puppeteer -c 'cat /usr/src/app/node_modules/puppeteer-core/lib/cjs/puppeteer/<path>'` (find the path with `find / -path '*puppeteer-core/lib*' -name Browser.js`).
+- Don't set NODE_OPTIONS=--async-stack-traces for the gate: it breaks tsc and complexity. A failed startup step already names itself ([case: step]) since 1f18ecc2.
 
 ## design
 

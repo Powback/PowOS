@@ -775,4 +775,6 @@ Comms
 - Describe the symptom and the evidence (job ids, log paths, the raw FAIL lines and screenshot paths), never a guessed fix: a brief that prescribed a KWin rebuild for an app-side bug (f99) and a one-line "made no draft" (f177) both sent agents down false leads.
 - Put all scope in the brief. Scope added mid-task by SendMessage is rightly ignored as possible injection (f144); new scope goes to a fresh agent.
 - One small task per agent (~5 min): name the files, the build and check commands, `tools/agents/land.sh`, and `bin/powos friction add/fix`; ask for a Friction & missing info list and a Time line.
+- Agents read area skills with Read on `.claude/skills/<name>/SKILL.md`; the Skill tool doesn't load them from ~/pw worktrees (f212).
+- `friction --kind` is one of refused | broken-tool | flaky-check | unclear-rule | slow | other.
 - The powgraph-generated skills (claude-hooks etc.) are disabled: moved from ~/Projects/.claude/skills to ~/Projects/.powgraph/disabled-skills on 2026-10-24 (f173/f174).

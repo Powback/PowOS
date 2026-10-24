@@ -11,8 +11,7 @@ description: Use when working on PowOS window tasks - floating Android windows (
 - Build: Kotlin compile check before pushing to origin: `tools/phone/compile-check.sh`; ship/install:
   `tools/phone/ship-apk.sh --note "..."` (never build by hand). Desktop host (on-phone, ~20s):
   `sources/powos-shell/dev/phone.sh build`; status/render: `dev/phone.sh status|cdp 'JS'|page NAME|shot NAME`.
-- Check, emu first then phone: `tools/phone/verify/queue.sh add --dev auto <task> window-max.sh calc` /
-  `float-desktops.sh` / `float-windows.sh` (window/recents UI is emu+phone); phone-only (Linux session, KWin
+- Check, emu first then phone: `tools/phone/verify/queue.sh add --dev emu <board-task-slug> <script>.sh` (example: `add --dev emu desktop-mode-stabilisation-move-resize-maximise float-desktops.sh`; result lands in ~/.cache/powos-verify-queue/done/<id>.log, partial while running). Window/recents UI is emu+phone; phone-only (Linux session, KWin
   install): `linux-float.sh`, `fold.sh`, `one-title-bar.sh`, `plasma-modes.sh plasma|shell|together`,
   `plasma-transparent.sh`, `plasma-notify.sh`, `plasma-app.sh` (queue `kwin-install.sh MIN` first if KWin is behind).
 - Land: `tools/agents/land.sh "msg" -- <paths> --ship "..." --queue <check args>`.
