@@ -246,6 +246,9 @@ minimal change and tell them.
 - GPU box 192.168.50.195: voice stack units (hosts/gpu-195/, units/gpu-195/), voiceagent.pow; plan docs/GPU-SERVERS-PLAN.md.
 
 ## Native/hidden-API work (learned the hard way)
+- android.os.FileObserver can't share a folder: inotify gives one descriptor per inode, the last observer started gets
+  every event and any one's stopWatching ends all (logout requests were lost that way). Watch a folder others may
+  watch (the run dir, shell-data) through engine `andro.marchy.DirWatch`.
 - Check an OEM framework call's real shape BEFORE coding against it: pull `/system/framework/framework.jar` with
   adb.sh, unzip classes*.dex, `dexdump -d` it in powos-vadb (`/opt/android-sdk/build-tools/35.0.0/dexdump`). OxygenOS 16
   differs from AOSP: `SurfaceControl.Transaction.setBlurRegions` takes 31 floats per region (AOSP 10 + blur colour +

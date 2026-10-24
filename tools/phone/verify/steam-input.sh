@@ -31,6 +31,7 @@ restore() {
   echo "restored; recordings: $(ls "$OUT"/*.mp4 2>/dev/null | tr '\n' ' ')"
 }
 . "$here/window-lock.sh"
+. "$here/kwin-up.sh"
 window_lock steam-input.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
 I0=$(irq)
@@ -78,6 +79,9 @@ fi
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 DID=$(sh_ "dumpsys display" | sed -nE 's/.*uniqueId="local:([0-9]+)".* state ON,.*/\1/p' | head -1)
 KL0=$(us "grep -a -c . /run/powos-app/hyprland.log" | tail -1); KL0=${KL0:-0}
+# The newest built KWin, running (kwin-up.sh): a check on an older or stale KWin proves nothing (this one ran on 3.25
+# as "kwin 3.26", 2026-10-23). KWIN_MIN: 0022 (X11 windows take taps), 0023 (sessions), 0024.
+kwin_up "${KWIN_MIN:-6.7.5-3.28}"
 log "kwin: $(us 'pacman -Q kwin' | tail -1), session kwin started $(us 'ps -o lstart= -C kwin_wayland | head -1' | tail -1)"
 
 # show

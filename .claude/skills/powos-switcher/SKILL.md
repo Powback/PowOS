@@ -184,6 +184,11 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
 - X11 child windows (kwin 0019, 3.23): an Xwayland window is added before it has its wl_surface, so export-new skipped
   it for good. user.sh's environment has no WAYLAND_DISPLAY/XDG_SESSION_TYPE: a Qt app started there is an X11 window,
   unlike the session's; run as the session does with plasmashell's /proc/<pid>/environ (linux-float.sh `ses`).
+- `android-request power logout` (the checks' fresh session) did nothing on 2026-10-23 22:42: no new session.log
+  start, same KWin pid. The run dir had two FileObservers (AndroidRequests + MainActivity's focused-window): one
+  inotify descriptor, the last started takes every event, and either one's stopWatching ends both. Run-dir watches go
+  through engine DirWatch (one shared watch per folder). Checks restart/install KWin via verify/kwin-up.sh (kwin_up
+  MIN; its FAIL says whether the app took the request).
 - Session restarts (kwin 0023, 3.27): KWin's window ids restart at 1, Android keeps the old window tasks (seen 2678,
   2679), and restoreLinux matched Kate to the dead one ("FAIL no window task in 30 s", launch "ok null"). KWin sends
   `session <uuid> <ids>` (also on the app's `hello`); the task data carries `?session=`; WindowTasks.finishStale

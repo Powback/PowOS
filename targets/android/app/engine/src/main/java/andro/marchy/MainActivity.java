@@ -119,7 +119,7 @@ public class MainActivity extends Activity
         }
     }
     private GamepadOverlay mGamepadOverlay;
-    private android.os.FileObserver mFocusWatcher;
+    private DirWatch.Handle mFocusWatcher;
 
     private static String readFocusedWindow(java.io.File runDir) {
         try {
@@ -569,16 +569,14 @@ public class MainActivity extends Activity
         mGamepadOverlay.setMouse(new OverlayMouse());
         // Per-game layouts: powos-focus-watch (PowOS) writes the focused window's class into the run dir.
         java.io.File runDir = SessionService.runDir(this);
-        mFocusWatcher = new android.os.FileObserver(runDir,
-                android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
-            @Override
-            public void onEvent(int event, String path) {
-                if (!"focused-window".equals(path)) return;
-                String key = readFocusedWindow(runDir);
-                runOnUiThread(() -> mGamepadOverlay.setGame(key));
-            }
-        };
-        mFocusWatcher.startWatching();
+        // Through DirWatch: the run dir's android-request is watched too, and a FileObserver of its own here took that
+        // watch's events and, at onDestroy, ended it (logout did nothing).
+        mFocusWatcher = DirWatch.watch(runDir,
+                android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO, (event, path) -> {
+                    if (!"focused-window".equals(path)) return;
+                    String key = readFocusedWindow(runDir);
+                    runOnUiThread(() -> mGamepadOverlay.setGame(key));
+                });
         mGamepadOverlay.setGame(readFocusedWindow(runDir));
         root.addView(mGamepadOverlay, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -1123,7 +1121,7 @@ public class MainActivity extends Activity
             CameraServices.nativeDestroyCameraService();
             cameraInited = false;
         }
-        if (mFocusWatcher != null) mFocusWatcher.stopWatching();
+        if (mFocusWatcher != null) mFocusWatcher.stop();
         if (sInstance == this)
             sInstance = null;
         super.onDestroy();

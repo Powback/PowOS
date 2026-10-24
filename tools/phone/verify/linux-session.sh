@@ -3,7 +3,7 @@
 # restart. KWin's window ids restart at 1 with each KWin while Android kept the old window tasks, so a launcher tap on
 # Kate "restored" the old session's dead Kate task and nothing opened (2026-10-23: tasks 2678, 2679; "no window task in
 # 30 s"). kwin 0023 (3.27) sends "session <uuid> <ids>", the app finishes every other window task.
-#   1. KWin 3.27+ installed (the newest built kwin pkg, as linux-float.sh) and Kate opened through home's launch call
+#   1. KWin KWIN_MIN+ installed (kwin-up.sh: the newest built kwin pkg) and Kate opened through home's launch call
 #      (apps.launch l:org.kde.kate) on the running session: its task is the OLD one;
 #   2. a fresh session (`android-request power logout`, as linux-float.sh) - the restart that left the stale tasks;
 #   3. the app heard the new session (logcat WindowTasks "KWin session") and the old Kate task is gone (am stack list,
@@ -12,13 +12,13 @@
 #      window (linux-touch.sh's test).
 # Kate must not be running before (the user's: exit 3). Ours is closed at the end, home in front.
 # Exit: 0 passed; 1 FAIL; 3 a real touch / no free window / not now (re-queued); 5 can't run.
-#   KWIN_PKG=<pkg.tar.xz> (default: the newest targets/android/out/pkgs/kwin-*.pkg.tar.xz here or in a sibling worktree)
+#   KWIN_PKG=<pkg.tar.xz> (default: the newest targets/android/out/pkgs/kwin-*.pkg.tar.xz here or in a sibling worktree),
+#   KWIN_MIN (default 6.7.5-3.28: 0023 sessions + 0024). The restart's FAIL says whether the app took the request.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"; ROOT=$(cd "$T/../.." && pwd)
 OUT=${1:-$HOME/.cache/powos-verify/linux-session-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
-PKG=${KWIN_PKG:-$(ls -t "$ROOT"/targets/android/out/pkgs/kwin-*.pkg.tar.xz "$ROOT"/../*/targets/android/out/pkgs/kwin-*.pkg.tar.xz 2>/dev/null | head -1)}
-WANT=$(basename "${PKG:-none}" | sed -E 's/^kwin-([^-]+-[^-]+)-.*/\1/')
+KWIN_MIN=${KWIN_MIN:-6.7.5-3.28}
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 rs() { printf '%s\n' "$1" > "$OUT/r.sh"; "$T/root.sh" "$OUT/r.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
@@ -31,6 +31,7 @@ restore() {
   echo "restored; files in $OUT"
 }
 . "$here/window-lock.sh"
+. "$here/kwin-up.sh"
 window_lock linux-session.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
 I0=$(irq)
@@ -48,7 +49,6 @@ new_task() { local n="" i; for i in $(seq 1 "$1"); do sleep 1; n=$(comm -13 <(ec
 # Recents' window tasks: "<taskId> <data>" (dumpsys activity recents: a "* Recent #n: Task{.. #<id>" block's unredacted
 # "intent={dat=powos-window://<id>?session=.." line; the "Visible recent tasks" part redacts it to "/...").
 recents() { sh_ "dumpsys activity recents" | awk '/\* Recent #/{t=$0; sub(/.*#[0-9]+: Task\{[^ ]* #/,"",t); sub(/ .*/,"",t)} / intent=\{dat=powos-window:/ {d=$0; sub(/.*intent=\{dat=/,"",d); sub(/ .*/,"",d); print t, d}' | sort -u; }
-kw() { rs 'k=$(pgrep -x kwin_wayland | head -1); n=0; [ -n "$k" ] && ! grep -q "libkwin.*(deleted)" /proc/$k/maps && n=1; echo "kwin=${k:--} kwin_new=$n"' | tail -1; }
 # md5 of the region "L T R B" of the ON display's screencap (linux-touch.sh's rhash).
 rhash() {
   sh_ "screencap -d ${DID:-0} /data/powos/root/var/tmp/linux-session.raw" >/dev/null
@@ -75,28 +75,15 @@ s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$(us "pgrep -fc 'SteamLaunch AppId='" | tail -1)" = 0 ] || { echo "a game runs under Steam (the user's): not now"; exit 3; }
 log "apk $(sh_ "dumpsys package com.powos.app | grep -m1 versionCode" | sed 's/^ *//')"
 
-# 1. KWin 3.27+ installed (rollback tar of the old files, as linux-float.sh).
-have=$(rs 'pacman -Q kwin | cut -d" " -f2' | tail -1)
-log "kwin installed $have, package $WANT (${PKG:-none})"
-if [ -n "${PKG:-}" ] && [ "$have" != "$WANT" ] && [ "$(printf '%s\n%s\n' "$have" "$WANT" | sort -V | tail -1)" = "$WANT" ]; then
-  "$A" push "$PKG" /data/local/tmp/powos-kwin.pkg.tar.xz >/dev/null
-  sh_ "mv /data/local/tmp/powos-kwin.pkg.tar.xz /data/powos/root/var/tmp/"
-  rs "set -e; mkdir -p /var/cache/powos
-pacman -Qlq kwin | while read -r f; do [ -f \"\$f\" ] && echo \"\$f\"; done | tar -cf /var/cache/powos/kwin-$have-files.tar -T -
-pacman -U --noconfirm /var/tmp/powos-kwin.pkg.tar.xz >/dev/null && rm -f /var/tmp/powos-kwin.pkg.tar.xz
-pacman -Q kwin" | tail -1 | tee -a "$OUT/log.txt"
-fi
-# By version, not a grep of the binary: QStringLiteral keeps "caps ... session" as UTF-16, which an ASCII grep never
-# matches (it failed a good 3.27 at 22:18, 2026-10-23).
-kv=$(rs 'pacman -Q kwin | cut -d" " -f2' | tail -1)
-[ "$(rs "vercmp '$kv' 6.7.5-3.27" | tail -1)" -ge 0 ] 2>/dev/null ||
-  fail "the installed KWin $kv is older than 6.7.5-3.27 (pkgs/kwin 0023: \"session\")"
+# 1. KWin 3.28+ installed (kwin-up.sh: the newest built package, a rollback tar of the old files). By version, not a
+# grep of the binary: QStringLiteral keeps "caps ... session" as UTF-16, which an ASCII grep never matches.
+kwin_install "$KWIN_MIN"
 DID=$(sh_ "dumpsys display" | sed -nE 's/.*uniqueId="local:([0-9]+)".* state ON,.*/\1/p' | head -1)
 
 # An old-session Kate task: Kate through the launcher on the running KWin (when it's up; an old KWin's task is the
 # bug's case exactly).
 home "before"
-st=$(kw); log "running before the restart: $st"
+log "running before the restart: $(kwin_state)"
 before=$(lin); MINE=1
 log "launch Kate on the old session: $(hcall apps.launch "['l:org.kde.kate']" "()=>'ok'")"
 OLD=$(new_task 30 "$before"); chk "old kate"
@@ -105,12 +92,7 @@ log "recents' window tasks before: $(recents | tr '\n' ';')"
 
 # 2. A fresh session.
 sh_ "logcat -c"
-log "fresh session (android-request power logout)"
-us "android-request power logout"; sleep 20
-k0=${st#kwin=}; k0=${k0%% *}
-for _ in $(seq 30); do st=$(kw); k=${st#kwin=}; k=${k%% *}; [[ $st == *kwin_new=1* ]] && [ "$k" != "$k0" ] && [ "$k" != - ] && break; sleep 5; done
-log "after the restart: $st (was kwin=$k0)"
-[[ $st == *kwin_new=1* ]] && [ "$k" != "$k0" ] || fail "KWin didn't come back as a new process on the new package (rollback: tar -xf /var/cache/powos/kwin-$have-files.tar -C /)"
+kwin_restart || fail "KWin didn't come back as a new process on the new package: $KWIN_WHY (rollback: tar -xf /var/cache/powos/kwin-$KWIN_HAD-files.tar -C /)"
 MINE=0
 SES=""; for _ in $(seq 30); do SES=$(sh_ "logcat -d -s WindowTasks" | sed -nE 's/.*KWin session ([0-9a-f-]+),.*/\1/p' | tail -1); [ -n "$SES" ] && break; sleep 2; done
 caps=$(sh_ "logcat -d -s WindowTasks" | grep "KWin caps:" | tail -1)

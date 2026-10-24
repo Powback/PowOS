@@ -13,7 +13,7 @@ import java.nio.file.Files;
  * Requests from the Linux session for things only Android can do, written to run/android-request by the
  * android-request helper (atomically, by rename): "wifi-panel", "open <package>" (full screen; a floating window on the unfolded home, [openOptions]), "split <package>" (beside Andromarchy), "float <package>" (floating window).
  */
-public final class AndroidRequests extends FileObserver {
+public final class AndroidRequests implements DirWatch.Listener {
     private static final String TAG = "AndroidRequests";
 
     /**
@@ -24,11 +24,23 @@ public final class AndroidRequests extends FileObserver {
     public static volatile java.util.function.Function<Context, android.os.Bundle> openOptions = null;
     private final Context ctx;
     private final File file;
+    private DirWatch.Handle watch;
 
     AndroidRequests(Context ctx, File runDir) {
-        super(runDir, MOVED_TO | CLOSE_WRITE);
         this.ctx = ctx;
         this.file = new File(runDir, "android-request");
+    }
+
+    /** The run dir is watched by others too (focused-window, ...): through DirWatch, never a FileObserver of its own. */
+    void startWatching() {
+        if (watch == null)
+            watch = DirWatch.watch(file.getParentFile(), FileObserver.MOVED_TO | FileObserver.CLOSE_WRITE, this);
+    }
+
+    void stopWatching() {
+        if (watch != null)
+            watch.stop();
+        watch = null;
     }
 
     /**

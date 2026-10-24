@@ -30,6 +30,7 @@ restore() {
   echo "restored (leash ${LEASH0:-unchanged}); files in $OUT"
 }
 . "$here/window-lock.sh"
+. "$here/kwin-up.sh"
 window_lock linux-touch.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
 I0=$(irq)
@@ -77,6 +78,10 @@ WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/
 if sh_ "dumpsys window policy | grep -m1 mIsShowing=" | grep -q true; then sh_ "wm dismiss-keyguard"; sleep 1.5; fi
 DID=$(sh_ "dumpsys display" | sed -nE 's/.*uniqueId="local:([0-9]+)".* state ON,.*/\1/p' | head -1)
 LEASH0=$(sh_ "settings get global powos_live_leash"); LEASH0=${LEASH0:-null}
+# The newest built KWin, running (kwin-up.sh): a check on an older or stale KWin proves nothing (this one ran on 3.25
+# as "kwin 3.26", 2026-10-23). KWIN_MIN: 0022 (X11 windows take taps), 0023 (sessions), 0024.
+kwin_up "${KWIN_MIN:-6.7.5-3.28}"
+PRE=""; for p in kate dolphin; do [ -n "$(us "pgrep -x $p" | tail -1)" ] && PRE="$PRE $p"; done  # a restart ended them
 log "apk $(sh_ "dumpsys package com.powos.app | grep -m1 versionName" | sed 's/ *//'), kwin $(us 'pacman -Q kwin' | tail -1), powos_live_leash=$LEASH0"
 
 # The X server's own stacking (what a touch at root coordinates hits): viewable root children > 100 px, bottom to top.
