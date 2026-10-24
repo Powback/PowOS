@@ -43,6 +43,16 @@ It recurs on every page load, because the initial subscription fails. It is not 
   (`apps/install.sh <app> publish`); else refuse with the fix. `differs` (any other shape, e.g. the phone's module is newer):
   refuse, never publish. `--no-publish` refuses on ahead too. Test hooks: BINDINGS_ADB / BINDINGS_VENDOR / BINDINGS_PUBLISH.
 
+## Codegen gap: a struct used ONLY as a reducer param
+- A `#[derive(SpacetimeType)] struct Foo{...}` that's used only as a reducer argument (never also a table column)
+  may not round-trip through `spacetimedb-cli generate --lang typescript`: the Rust side builds fine, but
+  `apps/vendor.sh`'s esbuild step fails ("No matching export") because the generated `*_reducer.ts` imports `Foo`
+  from `./types`, while that same generation run's `types.ts` never defines it. Reproduced against apps/registry
+  (`creation_begin`); apps/sketch's `ViewIn`/`StrokeIn` structs work fine as table-column types, so this is specific
+  to reducer-only structs. Workaround: avoid the struct-only-param shape entirely (e.g. fold the extra value into an
+  existing string param instead of adding a struct arg) and verify any new reducer-param struct with a real
+  `apps/vendor.sh <app>` build before relying on it (friction f137).
+
 ## Commands
 - Regenerate bindings: `apps/vendor.sh <app>` (apps/build.sh in the rust container, then esbuild of the bindings'
   index.ts, spacetimedb external). It reproduces the committed files byte for byte. Commit them, then push `vendor/<db>.js`.

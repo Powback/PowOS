@@ -18,6 +18,12 @@ description: Use when working on PowOS inter-agent comms - `powos comms` (send/w
   `[inbox message from agent 'X' (P)]: <body>\n\nHandle this: ...`; live mode polls it 1 s, `--once-inbox` joins all
   with `\n\n`; `--json-events` emits `{"kind":"inbox","text":...}` which PowosAiChat shows as a note.
 
+## Role resolution for a Mac worktree agent
+- `COMMS_AGENT_ID` is only set by `comms_export_identity` when `powos ai` launches a role; a Claude Code agent
+  started via `tools/agents/worktree.sh` (not through `powos ai`) gets neither it nor `POWOS_AGENTS_ROLE`. Resolve
+  its comms role as `${COMMS_AGENT_ID:-$POWOS_AGENTS_ROLE}`, else fall back to the worktree's basename (friction
+  f135; also in AGENT-HANDBOOK.md's Comms section).
+
 ## CLI facts
 - `watch` and `inbox` (without `--peek`) CONSUME the messages; a crash or a cut-off output after the read loses them.
   Use `--peek` to look; consume with `--json` into a file you keep (handbook, Comms).

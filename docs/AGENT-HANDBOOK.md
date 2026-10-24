@@ -6,7 +6,10 @@ for (one line each). Cross-cutting rules live HERE once; expert skills (.claude/
 ## Which expert owns what
 Route work to the owner's SKILL, not to a long-lived agent: each task is a FRESH agent that loads the owner's skill
 (.claude/skills/<owner>/SKILL.md + .claude/agents/<owner>.md), does that one task, writes what it learned into the
-skill, and exits (see Efficiency). Changing another owner's file: message the owner (with numbers), or make the
+skill, and exits (see Efficiency). The Skill tool's catalog is fixed at session start, so it can't see a worktree
+`tools/agents/worktree.sh new` just created in THIS session - it errors "Unknown skill" or lists only other
+worktrees' scoped variants even though the new worktree has an identical SKILL.md; `Read` the file directly
+(`.claude/skills/<owner>/SKILL.md`) instead of waiting on the Skill tool (friction f143). Changing another owner's file: message the owner (with numbers), or make the
 minimal change and tell them. Default subagent model is **Sonnet**; reach for Opus only for hard debugging (a root
 cause that resists two Sonnet passes), not routine work - it costs more and the context budget below is the same
 either way. Keep briefs SHORT: point at this handbook and the owner's skill rather than re-explaining what they
@@ -80,7 +83,12 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
 - Board wording (manager, 2026-10-22): notes are plain words for the user, no commit hashes; status `waiting` only for
   something the USER must do (it shows as a Needs-you card), never for a queued check or another agent.
 - Worktrees: `tools/agents/worktree.sh new <name>` (origin tip, shared node_modules), `done <name>` once pushed (refuses
-  unpushed/uncommitted work), `list`. Never leave a merged worktree behind.
+  unpushed/uncommitted work), `list`. Never leave a merged worktree behind. It exists only on
+  `origin/worktree-powos-multiplatform`, not on `master` (friction f132) - from a bare master checkout (or anywhere
+  outside a PowOS worktree), bootstrap it first: `cd ~/Projects/PowOS && git fetch origin worktree-powos-multiplatform
+  && git show origin/worktree-powos-multiplatform:tools/agents/worktree.sh | bash -s new <name>` (the `cd` matters:
+  the piped script resolves its own repo from `$PWD`, not from a `git -C` on the `show` half alone - run from
+  elsewhere and it fails "not a git repository").
 
 ## Overhead lessons (nofate/br, SpaceTimeAI)
 - Cost is dominated by re-reading context, not by doing the work - every call pays again for everything already
@@ -194,6 +202,10 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
   It also returns at once when the screen is off (fine for installs); for work that needs the screen on (recordings,
   journeys, CDP idle samples, screencaps) use `AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 MAX_S` (waits through doze,
   never wakes it).
+  `idle.sh --wait` itself is unbounded if given a large budget directly - chunk at the CALL SITE, one call at most
+  ~240s, with a progress line printed between chunks (never hold one Bash call past the model's 5-min prompt-cache
+  window). Chunking callers: `ship-apk.sh` (240s), `window-lock.sh`/`edge.sh` (180s), `perf-window.sh`, `journey.sh`.
+  Any new wait helper follows the same pattern (friction f136).
 - WebView devtools: `tools/phone/cdp.sh pages | eval <page> '<js>' | idle [secs] [page] | raster [secs]` (forwards
   the app's devtools socket again each call - the pid changes per install - and runs tools/phone/cdp.ts in
   powos-vadb's network; page = home/"" , lock, shade, assist, ...). READ-ONLY on live pages (see Rules).
@@ -206,6 +218,11 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
   frames, edge.sh, Broforce). Every helper an agent relies on lives in the repo, never in ~/.cache or job tmp (Rules).
 
 ## Shipping
+- Correlation fields an agent can read directly, no board query needed: a queued verify job's `from=` is the
+  worktree root that queued it, and a ship request's `who=` is the worktree's basename - both already written by
+  `tools/phone/verify/queue.sh`'s `add()` and `tools/phone/ship.sh`'s `request()`/`done_req()`. The PostToolUse hook
+  (`.claude/hooks/agent-notices.py`) uses them to match finished jobs/ships back to the worktree that caused them
+  (friction f139).
 - **Agents never ship themselves.** Land with `tools/agents/land.sh "msg" -- <paths> --ship "plain words for the
   user"` (Efficiency, above) and END YOUR TURN - nothing else. That one call does what used to be spelled out here
   step by step: commit by pathspec, rebase once, push to origin/worktree-powos-multiplatform, then
@@ -473,6 +490,11 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
 ## Rules that bite
 Git and process
 - Commit only your paths; never force-push; rebase once, right before you push (several agents edit shell/ui at once; a fetch/rebase/status loop while working is the top coordination cost).
+- The one exception: also rebase once at the START of a worktree, if a tool you need isn't there yet. A worktree
+  branches from origin's tip at creation time; if origin gains a tool shortly after (e.g. `tools/agents/land.sh`
+  landed moments after a worktree branched without it), the worktree won't have it until it rebases - `ls` failing
+  on a tool the handbook says should exist is the signal to `git fetch && git rebase origin/worktree-powos-multiplatform`
+  before doing anything else, not to hand-roll the tool's logic (friction f138).
 - `git push` runs tools/git-hooks/pre-push (core.hooksPath): the complexity lint on the pushed files; a failure is
   yours to split, never `--no-verify` (e9af512's lint failure blocked every ship-apk, 2026-10-22).
 - `HACK:` markers need a row in docs/REMOTE-POWOS.md section 4 in the same commit (test-hack-registry).
@@ -527,6 +549,10 @@ Pipeline scripts (bash)
   inside `x=$(... | grep ...)` aborted ship-apk before its post-install checks (72d60d5), and `idle.sh --wait`'s timeout
   exit 1 aborted it mid-wait (a39e103). Add `|| true` (or `if ...; then`) where "no match"/"not yet" is a normal
   outcome, and test that path, not just the happy one.
+- Under `set -o pipefail`, `cmd | grep -q pattern` can flake FAIL even when `cmd` actually produced a match: once
+  `grep -q` finds it, it exits before reading the rest of the pipe, and the upstream writer can get SIGPIPE and
+  report that as the pipeline's exit status instead of `cmd`'s real one. Use `grep -q pattern <<<"$(cmd)"` (command
+  substitution finishes first) or `cmd | grep pattern >/dev/null` (no early exit) instead (friction f141).
 - Never edit a script while a run is executing it: bash reads the file as it goes, so the running copy executes a
   mix (a build script crashed mid-run that way). Edit in your worktree, let the run finish, then commit. ship-apk.sh
   runs origin's copy from a temp file, so a ship in progress is not affected by later commits to it.
@@ -573,6 +599,9 @@ The Mac
 - Gate timing on a loaded Mac: `READY_MS=30000` (ship-apk's default); a single flaky "not ready" - rerun before
   blaming your change.
 Comms
+- How a Mac worktree agent learns its own comms role (`COMMS_AGENT_ID` is only set by `powos ai`'s
+  `comms_export_identity`, which a `tools/agents/worktree.sh`-created agent never goes through): resolve it as
+  `${COMMS_AGENT_ID:-$POWOS_AGENTS_ROLE}`, else fall back to the worktree's basename (friction f135).
 - `powos comms watch` and `inbox` (without `--peek`) CONSUME the messages: a crash or a cut-off output after the read
   loses them. Look with `inbox --peek`; when you consume, use `--json` and keep the output (append it to a file under
   $HOME) before acting. Bodies are delivered whole - never `head`/`cut`/first-line a message you will act on.
