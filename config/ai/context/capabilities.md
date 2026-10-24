@@ -187,7 +187,8 @@ Key facts an agent should CHECK before starting:
   (`~/.local/state/powos/sandbox/jobs.jsonl`). Its deps (quickjs-emscripten, typescript) live inside the app
   (`powos sandbox setup` = `npm ci --ignore-scripts` into `lib/ai/sandbox/node_modules`), never on the host; without
   them (or bun / node >= 22.18) the manager starts without it. `powos sandbox status|help`; `--no-sandbox` or
-  `POWOS_SANDBOX_ENABLED=0` opts out. ✅ Mac (not deployed to the phone yet)
+  `POWOS_SANDBOX_ENABLED=0` opts out. ✅ Mac; phone: `rooted.sh deploy` ships it with its deps built from
+  the lock (unit ai-sandbox; the phone has no npm, PowOS's bun runs it)
 - Inter-agent comms (`powos comms` + a `comms` MCP auto-wired into every `powos ai`
   agent): a daemonless **mailbox** so agents talk to each other. Each agent runs as a
   role (health/coder/devops/...); mail addressed to a role lands in that role's durable

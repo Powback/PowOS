@@ -213,6 +213,23 @@ if [ -d $T/powos-manager ]; then
   install -m 644 $T/powos-manager/manager.py $T/powos-manager/manager.sh $R/usr/lib/powos/ai/manager/
 fi
 rm -rf $T/powos-agents $T/comms-mcp.py $T/powos-manager
+# The manager's TypeScript sandbox (unit ai-sandbox): its sources plus its deps from its lock, which rooted.sh built
+# (sandbox.sh setup, stamped) - unpacked beside the old one, then swapped in whole (a running sandbox server keeps
+# what it loaded). PowOS's bun runs it; manager.sh wires it in when `powos sandbox status` says deps ok.
+# powos-units: /data/powos/root/usr/lib/powos/ai/sandbox
+if [ -f $T/powos-sandbox.tar.gz ]; then
+  S=$R/usr/lib/powos/ai
+  rm -rf $S/.sandbox.new $S/.sandbox.old && mkdir -p $S/.sandbox.new
+  if tar -xzf $T/powos-sandbox.tar.gz -C $S/.sandbox.new && [ -f $S/.sandbox.new/sandbox/node_modules/.powos-lock ]; then
+    chown -R 0:0 $S/.sandbox.new && chmod -R a+rX,go-w $S/.sandbox.new
+    [ -d $S/sandbox ] && mv $S/sandbox $S/.sandbox.old
+    mv $S/.sandbox.new/sandbox $S/sandbox
+    echo "sandbox: $(du -sh $S/sandbox | cut -f1) in /usr/lib/powos/ai/sandbox"
+  else
+    echo "sandbox: the tarball didn't unpack - the old one kept"
+  fi
+  rm -rf $S/.sandbox.new $S/.sandbox.old $T/powos-sandbox.tar.gz
+fi
 # App API's runtime (unit app-api, docs/APP-API-CAPTURE.md 1b.0): appcap_*.py and the example specs, run by the system
 # tier's app-api service (lib/apps/services/app-api.json: appcap_serve.py on 127.0.0.1:3411, port-locked).
 if [ -d $T/powos-app-api ]; then

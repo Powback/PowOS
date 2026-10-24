@@ -12,6 +12,7 @@
 #   system [status|stop|off|on]   PowOS's system tier (SpacetimeDB under the supervisor, the uid-locked port)
 #   wifi      adb over Wi-Fi (port 5555, kept across reboots): unplug the cable
 #   widevine-l3 [remove]   Netflix etc. in SD on the unlocked phone (targets/native/widevine-l3.sh)
+#   sandbox-bundle  build only the manager sandbox's tarball deploy pushes (deps from its lock; no phone)
 #   module <zip>  stage the PowOS system module (system-module/build-module.sh's zip) in Magisk: on at the next reboot
 # install, deploy and module take --note "what changed, for the user" (required): the phone's quiet "update applied"
 # notification (tools/deploy-note.sh) - or --silent for a change the user can't see (only comms' quiet log).
@@ -31,6 +32,33 @@ esac
 # After a deploy: the phone's "update applied" notification (batched: install's own deploy makes the same one).
 noted() { ADB=adb "$HERE/../tools/deploy-note.sh" ${SILENT:+--silent} "${NOTE:-rooted deploy}"; }
 ROOTFS=${ROOTFS:-$HERE/../out/powos-rootfs.tar.gz}
+
+# The sandbox's tarball for the phone (deploy, below): lib/ai/sandbox without its local node_modules, plus the deps
+# from its lock, built once per lock hash under ~/.cache/powos-sandbox (under $HOME: tools/phone/bin/adb pushes only
+# from there). Prints the tarball's path; fails (nothing printed) when the deps don't build.
+sandbox_bundle() {
+  local src="$HERE/../../../lib/ai/sandbox" c="$HOME/.cache/powos-sandbox" h dep st
+  h=$(shasum -a 256 < "$src/package-lock.json" | cut -c1-16)
+  dep=$c/deps-$h
+  if [ ! -f "$dep/node_modules/.powos-lock" ]; then
+    rm -rf "$dep" "$dep.tmp" && mkdir -p "$dep.tmp"
+    cp "$src/sandbox.sh" "$src/package.json" "$src/package-lock.json" "$dep.tmp/"
+    bash "$dep.tmp/sandbox.sh" setup >&2 || { rm -rf "$dep.tmp"; return 1; }
+    mv "$dep.tmp" "$dep"
+  fi
+  st=$c/stage
+  rm -rf "$st" && mkdir -p "$st/sandbox"
+  (cd "$src" && find . -name node_modules -prune -o -type f -print | sed 's|^\./||' \
+    | COPYFILE_DISABLE=1 tar -cf - --no-xattrs -T -) | tar -xf - -C "$st/sandbox" || return 1
+  cp -R "$dep/node_modules" "$st/sandbox/node_modules" || return 1
+  COPYFILE_DISABLE=1 tar -czf "$c/powos-sandbox.tar.gz" --no-xattrs --uid 0 --gid 0 -C "$st" sandbox || return 1
+  rm -rf "$st"
+  echo "$c/powos-sandbox.tar.gz"
+}
+if [ "${1:-}" = sandbox-bundle ]; then
+  # Build the sandbox's tarball only (what deploy pushes; no phone needed): a dry run of that part of the deploy.
+  t=$(sandbox_bundle) && echo "$t ($(du -h "$t" | cut -f1), $(tar -tzf "$t" | grep -c .) entries)"; exit $?
+fi
 
 # Magisk's su: on PATH once Magisk finished its setup, always at /debug_ramdisk/su while it runs.
 SU=$(adb shell 'command -v su || echo /debug_ramdisk/su' | tr -d '\r')
@@ -95,6 +123,14 @@ deploy)
   # The manager (lib/ai/manager: PowOS AI's chat runs a turn of it per message, so a new one takes the next turn).
   adb shell rm -rf /data/local/tmp/powos-manager
   adb push -q "$HERE/../../../lib/ai/manager" /data/local/tmp/powos-manager
+  # The manager's TypeScript sandbox (lib/ai/sandbox, unit ai-sandbox): its sources plus its deps, which stay inside
+  # the app (never on the phone's host). The deps are built HERE from its lock (package-lock.json: quickjs-emscripten +
+  # typescript, JavaScript and WebAssembly only - the same files on arm64; no install scripts) by the sandbox's own
+  # `setup` (npm ci --ignore-scripts, stamped with the lock's hash), once per lock into ~/.cache/powos-sandbox/<hash>,
+  # and go over as one tarball (thousands of small files). The phone has no npm; PowOS's bun runs it.
+  adb shell rm -f /data/local/tmp/powos-sandbox.tar.gz
+  if sbx_tgz=$(sandbox_bundle); then adb push -q "$sbx_tgz" /data/local/tmp/powos-sandbox.tar.gz
+  else echo "rooted.sh: the sandbox's deps didn't build (above) - the sandbox not updated"; fi
   adb push -q "$HERE/../pkgs/fex-emu/Config.json" /data/local/tmp/fex-Config.json
   adb push -q "$HERE/../pkgs/fex-emu/thunks.json" /data/local/tmp/fex-thunks.json
   adb shell rm -rf /data/local/tmp/powos-plasma
@@ -190,5 +226,5 @@ widevine-l3)
     echo "Widevine L3 forced (now and at every boot)"
   fi ;;
 *)
-  sed -n '2,18p' "$0"; exit 1 ;;
+  sed -n '2,19p' "$0"; exit 1 ;;
 esac
