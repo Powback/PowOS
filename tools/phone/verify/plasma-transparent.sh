@@ -10,6 +10,12 @@
 #   3. KWin's frame: a good share of the desktop is at alpha 0 (transparent: no picture of its own);
 #   4. where KWin's frame is transparent and home shows lit wallpaper, the Plasma screenshot's pixels are home's
 #      (same wallpaper, same place; both shots box-downscaled 8x so frost/blur and small UI don't count), and not black.
+#      Home's own UI is no reference (2026-10-24: the 0.117 "black" of the 10-23 FAIL was home's widgets and status bar
+#      text - lit - over the wallpaper's black sky; the desktop showed the wallpaper right): cells under anything home's
+#      page paints (its rects, read-only over CDP) and the status bar band are left out, and so are cells where the live
+#      (video) wallpaper changed between the home shots before and after (OxygenOS's plays a clip on unlock/fold);
+#   5. SurfaceFlinger composes the wallpaper directly under the desktop's surface, and that surface is translucent:
+#      nothing between them could show black.
 # Always restores: the web home. Exit: 0 passed; 1 FAIL; 3 a real touch / not awake (re-queued).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
@@ -22,7 +28,11 @@ sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 # As the session user (its bus): a script file run by tools/phone/user.sh. Never sudo through it.
 us_() { printf '%s\n' "$1" > "$OUT/us.sh"; "$T/user.sh" "$OUT/us.sh" 2>/dev/null | grep -av -e "locale" -e "Qt depends" -e "If this causes" -e "for more information" -e "pushed"; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-restore() { sh_ "am start -n com.powos.app/andro.marchy.HomeShell >/dev/null"; sh_ "rm -f $PT/pt-home.png $PT/pt-desk.png $PT/pt-kwin.png"; echo "restored"; }
+restore() { sh_ "am start -n com.powos.app/andro.marchy.HomeShell >/dev/null"; sh_ "rm -f $PT/pt-home.png $PT/pt-home2.png $PT/pt-desk.png $PT/pt-kwin.png $PT/pt-ui.txt"; echo "restored"; }
+# A file in the chroot (root-only dirs) to OUT on the Mac: the shots stay as evidence.
+pull() { sh_ "cp $PT/$1 /data/local/tmp/pt-pull && chmod 644 /data/local/tmp/pt-pull"; "$A" pull /data/local/tmp/pt-pull "$OUT/$1" >/dev/null 2>&1; sh_ "rm -f /data/local/tmp/pt-pull"; }
+# Everything home's page paints (backgrounds, text, images, glass) in screen pixels, "l,t,r,b" each: no wallpaper there.
+UIJS='(()=>{const d=devicePixelRatio,r=[];for(const e of document.querySelectorAll("body *")){const s=getComputedStyle(e);if(s.visibility!=="visible"||+s.opacity===0)continue;const b=e.getBoundingClientRect();if(b.width<2||b.height<2||b.bottom<0||b.top>innerHeight)continue;const bg=s.backgroundColor,txt=[...e.childNodes].some(n=>n.nodeType===3&&n.textContent.trim());if((bg&&bg!=="transparent"&&!/, *0\)$/.test(bg))||s.backgroundImage!=="none"||(s.backdropFilter&&s.backdropFilter!=="none")||/^(IMG|svg|CANVAS|VIDEO)$/.test(e.tagName)||txt)r.push([b.left,b.top,b.right,b.bottom].map(v=>Math.round(v*d)).join(","))}return r.join(" ")})()'
 fail() { echo "FAIL: $*" | tee -a "$OUT/log.txt"; "$T/shot.sh" "$OUT/fail.png" >/dev/null 2>&1; exit 1; }
 pass() { echo "PASS: $*" | tee -a "$OUT/log.txt"; }
 
@@ -54,40 +64,55 @@ pass "plasmashell runs the installed org.powos.transparent"
 DESK='andro\.marchy\.(MainActivity|HomeDesktop)'
 sh_ "am start -W -n com.powos.app/andro.marchy.HomeShell >/dev/null"; sleep 3; chk webhome
 "$T/shot.sh" "$PT/pt-home.png" --phone >/dev/null 2>&1 || fail "no screenshot of home"
+"$T/cdp.sh" eval home "$UIJS" 2>/dev/null | tr -d '"\r' | tail -1 > "$OUT/pt-ui.txt"
+grep -q ',' "$OUT/pt-ui.txt" || fail "no rects of home's UI over CDP (cdp.sh eval home): $(head -c 200 "$OUT/pt-ui.txt")"
+"$A" push "$OUT/pt-ui.txt" /data/local/tmp/pt-ui.txt >/dev/null 2>&1; sh_ "mv /data/local/tmp/pt-ui.txt $PT/pt-ui.txt; chmod 644 $PT/pt-ui.txt"
 r=$(hcall apps.launch "['$KEY']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch: $r"
 sleep 6; chk launch   # thawed, and a session start's ksplash faded
 f=$(sh_ "dumpsys window | grep -m1 mCurrentFocus")
 grep -qE "$DESK" <<<"$f" || fail "Plasma's desktop isn't in front: $f"
 "$T/shot.sh" "$PT/pt-desk.png" --phone >/dev/null 2>&1 || fail "no screenshot of Plasma's desktop"
-sh_ "chmod 644 $PT/pt-home.png $PT/pt-desk.png"
-"$A" pull "$PT/pt-desk.png" "$OUT" >/dev/null 2>&1; "$A" pull "$PT/pt-home.png" "$OUT" >/dev/null 2>&1
+sh_ "dumpsys SurfaceFlinger" > "$OUT/sf.txt"
+# KWin's frame now (the desktop in front), then home again: a second reference for the live wallpaper's frame.
+us_ "rm -f /tmp/pt-kwin.png; timeout 30 spectacle -b -n -f -o /tmp/pt-kwin.png >/dev/null 2>&1; chmod 644 /tmp/pt-kwin.png" >/dev/null
+sh_ "am start -W -n com.powos.app/andro.marchy.HomeShell >/dev/null"; sleep 3
+"$T/shot.sh" "$PT/pt-home2.png" --phone >/dev/null 2>&1 || fail "no second screenshot of home"
+sh_ "chmod 644 $PT/pt-home.png $PT/pt-home2.png $PT/pt-desk.png"
 chk shots
 
-# 3-4. measured inside PowOS (python3 + PIL there).
-m=$(us_ "rm -f /tmp/pt-kwin.png; timeout 30 spectacle -b -n -f -o /tmp/pt-kwin.png >/dev/null 2>&1
-python3 - <<'PY'
+# 3-5. measured inside PowOS (python3 + PIL there).
+m=$(us_ "python3 - <<'PY'
 from PIL import Image
 home = Image.open('/tmp/pt-home.png').convert('RGB')
+home2 = Image.open('/tmp/pt-home2.png').convert('RGB')
 desk = Image.open('/tmp/pt-desk.png').convert('RGB')
 kwin = Image.open('/tmp/pt-kwin.png').convert('RGBA').resize(desk.size, Image.NEAREST)
-if home.size != desk.size: print('ERR sizes home %s desk %s (folded/unfolded between shots)' % (home.size, desk.size)); raise SystemExit
+if home.size != desk.size or home2.size != desk.size: print('ERR sizes home %s %s desk %s (folded/unfolded between shots)' % (home.size, home2.size, desk.size)); raise SystemExit
 s = (max(1, desk.size[0] // 8), max(1, desk.size[1] // 8))
-h8, d8 = home.resize(s, Image.BOX), desk.resize(s, Image.BOX)
+h8, g8, d8 = home.resize(s, Image.BOX), home2.resize(s, Image.BOX), desk.resize(s, Image.BOX)
 alpha = kwin.split()[3].resize(s, Image.BOX)   # a cell counts as transparent only when all of it is
-W, H = s; n = clear = lit = same = black = 0
+# Home's UI (cells under anything its page paints, one cell of margin) and the status bar band: no wallpaper there.
+W, H = s; skip = set(); bar = max(1, desk.size[1] * 4 // 100 // 8)
+for r in open('/tmp/pt-ui.txt').read().split():
+    l, t, rr, b = [int(v) // 8 for v in r.split(',')]
+    for y in range(max(0, t - 1), min(H, b + 2)):
+        for x in range(max(0, l - 1), min(W, rr + 2)): skip.add((x, y))
+n = clear = lit = same = black = ui = moving = 0
 for y in range(0, H, max(1, H // 64)):
     for x in range(0, W, max(1, W // 64)):
         n += 1
         if alpha.getpixel((x, y)) > 0: continue
         clear += 1
-        hr, hg, hb = h8.getpixel((x, y)); dr, dg, db = d8.getpixel((x, y))
+        if (x, y) in skip or y < bar: ui += 1; continue
+        hr, hg, hb = h8.getpixel((x, y)); gr, gg, gb = g8.getpixel((x, y)); dr, dg, db = d8.getpixel((x, y))
+        if abs(hr - gr) + abs(hg - gg) + abs(hb - gb) >= 60: moving += 1; continue   # the live wallpaper moved here
         if hr + hg + hb < 120: continue   # home's wallpaper is dark here: a black frame would match it too
         lit += 1
         if abs(hr - dr) + abs(hg - dg) + abs(hb - db) < 90: same += 1
         if dr + dg + db < 40: black += 1
-print('clear=%.3f lit=%d same=%.3f black=%.3f' % (clear / n, lit, same / max(lit, 1), black / max(lit, 1)))
-PY
-rm -f /tmp/pt-kwin.png" | tail -1)
+print('clear=%.3f lit=%d same=%.3f black=%.3f ui=%d moving=%d' % (clear / n, lit, same / max(lit, 1), black / max(lit, 1), ui, moving))
+PY" | tail -1)
+pull pt-desk.png; pull pt-home.png; pull pt-home2.png; pull pt-kwin.png
 echo "measure: $m" | tee -a "$OUT/log.txt"
 case "$m" in ERR*) fail "$m" ;; esac
 v() { sed -n "s/.*$1=\([0-9.]*\).*/\1/p" <<<"$m"; }
@@ -99,5 +124,11 @@ pass "KWin's frame of the desktop: $clear of it transparent"
 awk "BEGIN{exit !($black <= 0.10)}" || fail "$black of the transparent desktop is black where home's wallpaper is lit"
 awk "BEGIN{exit !($same >= 0.60)}" || fail "the desktop shows another picture than home's wallpaper: only $same of $lit lit cells match home's (a second copy, another scale/offset)"
 pass "Plasma's desktop shows home's own wallpaper behind it: $same of $lit lit cells match, $black black"
+sf=$(awk '/Composition list \(bottom to top\)/{p=1} p&&/^  Layer \[/{print}' "$OUT/sf.txt" | head -2)
+sed -n 1p <<<"$sf" | grep -q Wallpaper && sed -n 2p <<<"$sf" | grep -qE 'SurfaceView\[com\.powos\.app/andro\.marchy\.(MainActivity|HomeDesktop)' \
+  || fail "SurfaceFlinger has something between the wallpaper and the desktop's surface: $(tr '\n' '|' <<<"$sf")"
+awk '/SurfaceView\[com\.powos\.app\/andro\.marchy\.(MainActivity|HomeDesktop)\]/{p=1} p&&/isOpaque=/{print; exit}' "$OUT/sf.txt" | grep -q 'isOpaque=false' \
+  || fail "the desktop's surface is opaque in SurfaceFlinger: Android draws black where Plasma is transparent"
+pass "SurfaceFlinger: the wallpaper directly under the desktop's translucent surface"
 chk end
 pass "Plasma's desktop is transparent over the PowOS wallpaper ($OUT)"

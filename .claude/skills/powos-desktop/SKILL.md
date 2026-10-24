@@ -48,6 +48,17 @@ home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the co
 - Check: verify/plasma-notify.sh (bridge idle, notify-send -w -> shade list, notifications.dismiss -> gone + notify-send
   returns, Klipper <-> clipboard.read/write, the user's clip put back).
 
+## Three modes (the user, 2026-10-24: Plasma and the web shell both first-class, alone and together)
+- Rule: a window lives in ONE world. Opened in the Plasma app = a KDE window on Plasma's desktop (stays there after
+  going home); opened from the web shell = an Android window task. Design + recommendation: docs/DESKTOP-NATIVE.md.
+- App -> KWin "desktop 1|0" (MainActivity onStart/onStop -> WindowTasks.desktopShown; cap "desktop", kwin 0025,
+  6.7.5-3.29): while on screen new windows stay on the desktop, maximize is KWin's, its windows get powosDesktopOwned
+  and export-new's sweep skips them. Older KWin: the app sends export-new 0 while the desktop is on screen.
+- Restarter (logout/reboot from the session): reopens MainActivity only if the desktop was on screen, else starts
+  SessionService behind the web shell.
+- Checks: verify/plasma-modes.sh plasma|shell|together (kwin_up 3.29 first; KWin facts via a loaded KWin script ->
+  "PMW|..." lines in /run/powos-app/hyprland.log).
+
 ## Plasma's desktop wallpaper (org.powos.transparent: TRANSPARENT, never a picture)
 - The containment keeps wallpaperplugin=org.powos.transparent (set once by the update script
   session/plasma/powos-transparent-desktop.js). It draws NOTHING and clears the window's fill, so the real Android
@@ -59,6 +70,10 @@ home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the co
 - Wrong desktop again? Look: containment's wallpaperplugin (appletsrc), the installed main.qml (no Image), plasmashell
   started after the QML's mtime (it loads the QML once; rooted.sh deploy doesn't restart it, the check does),
   KWin script powos-translucent-desktop loaded.
+- The wallpaper is OxygenOS's LIVE video wallpaper (FoldN3OpBlueWallpaper): its frame changes (a clip on unlock/fold),
+  and home's widgets/status text are lit over its black sky - neither is a reference for "black". The 10-23 FAIL
+  (0.117 black) was exactly that; measured 2026-10-24 with home's UI rects left out: 0.991 match, 0.009 black.
+  SurfaceFlinger's stack is the structural proof: Wallpaper, then MainActivity's SurfaceView (isOpaque=false).
 - KWin's own capture works on the phone (2026-10-23): `spectacle -b -n -f -o FILE` as the session user gives a
   2268x2440 RGBA PNG WITH alpha (transparent desktop = alpha 0). The ScreenShot2 D-Bus API itself refuses a plain
   python caller (NoAuthorized); PIL exists in PowOS for measuring. Check: verify/plasma-transparent.sh (home shot vs desktop shot where KWin alpha=0).
