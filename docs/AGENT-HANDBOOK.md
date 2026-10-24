@@ -3,6 +3,29 @@
 Read this first; it replaces digging through the code. Keep it current when you learn something an agent had to dig
 for (one line each). Cross-cutting rules live HERE once; expert skills (.claude/skills/powos-*) link to them.
 
+**Don't `cat` this whole file.** Read `docs/MAP.md` first (repo map: key files/build/check/skill per subsystem).
+If you still need a handbook rule, `grep -n '^## ' docs/AGENT-HANDBOOK.md` then `sed -n 'START,ENDp'` just that
+section. The index below gives the line ranges.
+
+## Index (`grep -n '^## ' docs/AGENT-HANDBOOK.md` to get live line numbers; ranges below are approximate)
+- Loading a skill from a worktree (top, before any `## `) — the scoped-skill-name workaround.
+- Which expert owns what — the area -> skill table; route work here first.
+- Efficiency — one task per agent, context budgets (hand back 120k/150k), `land.sh`, caps, read narrowly.
+- Done (f130/f131) — agent worktrees moved to `~/pw/<name>`, outside `~/Projects` (why, what still uses the old path).
+- KWin patches and the Android package build — `src-tree.sh`, `pkg-claim.sh`, the shared build-inputs cache.
+- Overhead lessons — why cost is dominated by re-reading context; the fixes already landed.
+- The work board — computed task states, claiming by `task set --step`, done rule, the sweep digest.
+- Friction: log it before you work around it — `friction add` usage, dedupe, the hand-back list format.
+- Retro after every agent — `tools/agents/retro.py`, what it digests, `retro-apply.md`.
+- Reaching the phone — adb.sh/root.sh/user.sh/idle.sh/cdp.sh, screencaps, logs, logcat tags.
+- Shipping — `land.sh`/ship.sh/ship-apk.sh/push.sh mechanics, silent vs noted ships, bindings-check.
+- The emulator lane — when emu vs phone, `# lanes:` header convention, the full per-check lane table.
+- Where things live — shell/bridge/theme/widgets/speech/assist/agents/SpacetimeDB file map.
+- Native/hidden-API work — FileObserver sharing, OEM framework shape checks, hidden-API denial signature.
+- Security — the shell bridge's origin checks, never add addJavascriptInterface.
+- Rules that bite — git/process, pipeline bash (set -e/pipefail gotchas), the phone (never poll), rendering cost,
+  the Mac (disk watchdog), comms (role resolution, consuming reads).
+
 **Loading a skill from inside a worktree:** `.claude/skills/<name>` is a tracked directory, so every
 `tools/agents/worktree.sh new` checkout gets its own on-disk copy - with dozens of worktrees alive at once, the bare
 name (`powos-design`) has no single unscoped owner and `Skill` refuses it ("Unknown skill: powos-design"). Call it
