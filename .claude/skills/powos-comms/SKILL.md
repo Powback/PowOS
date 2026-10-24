@@ -141,3 +141,13 @@ Shell tsc: a fresh worktree has no shell/node_modules - the gate skips tsc; syml
 ## Pitfalls seen
 - Shell gate under Mac load (~25): every page "not ready" - retry with READY_MS=60000 GATE_WIDGETS=0, never --force.
 - The worktree has no shell/node_modules: push.sh skips tsc; symlink another worktree's for `tsc --noEmit -p .`.
+
+## Latest hand-off (board CLI)
+Added `task merge <dup>... --into <task> [--note]` and `task dupes` to `powos-agents-cli` (CLI-only, no module
+schema change): merge copies title/note/open-steps/commits/images onto the target, marks dups done ("merged into
+<id>") with a check_set(none) so the done-rule needs no phone check; `find()` now accepts a unique id PREFIX,
+listing candidates on ambiguity instead of refusing blind. Friction f75 fixed. New friction worth checking before
+your next board-CLI task: f90 (a directory-scoped skill can't load until its worktree exists - `cat` the SKILL.md
+of a sibling worktree instead), f93 (test-agents-board.py's `FakeStdb.clock` is class-level, not reset per test -
+derive timestamps from a row you just created, never hardcode small literals), f96 (no friction-id lookup besides
+`friction list --all`), f100 (both CLAUDE.md copies, ~18k tokens, load every turn regardless of relevance).
