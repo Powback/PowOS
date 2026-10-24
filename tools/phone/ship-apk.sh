@@ -159,6 +159,7 @@ if [ -z "$now" ]; then
     waited=$((waited + chunk))
   done
   echo "ship-apk: $i2"
+  [ "$i2" = offline ] && [ -z "$ok" ] && { echo "ship-apk: the phone is offline (stale VPN handshake, tools/phone/adb.sh --vpn-state) - NOT installing (APK built, kept)"; exit 4; }
   [ -n "$ok" ] || { echo "ship-apk: the user stayed active for ${SHIP_WAIT_MIN:-60} min - NOT installing (APK built, kept)"; exit 4; }
 fi
 # The install and its re-pushes own the phone. The ship service pushes shell BESIDE this ship (during the build and the

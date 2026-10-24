@@ -26,6 +26,9 @@
 #        AI page (VerifyRun.kt state): written to /data/local/tmp/powos-verify-runner, touched at every 5 s check (its
 #        heartbeat: a dead runner's goes stale).
 here=$(dirname "$0")
+# Off the VPN (a stale WireGuard handshake, tools/phone/adb.sh --vpn-state): "offline", exit 69 - never an empty state
+# that reads as busy or free. --wait keeps waiting for it to come back (checked every 30 s on the Mac, no adb call).
+if [ "${1:-}" != "--wait" ] && ! "$here/adb.sh" --vpn-state >/dev/null; then echo "offline"; exit 69; fi
 if [ "${1:-}" = "--wait" ]; then
   need=${2:-60}; max=${3:-600}; awake=${AWAKE_ONLY:-0}; go=${VERIFY_GO:-0}; only=${GO_ONLY:-0}
   st=$(printf %s "${VERIFY_STATE:-}" | tr -cd 'a-z'); hb=/data/local/tmp/powos-verify-runner
@@ -37,7 +40,8 @@ if [ "${1:-}" = "--wait" ]; then
   deadline=$(( $(date +%s) + max ))
   while :; do
   left=$(( deadline - $(date +%s) ))
-  [ $left -gt 0 ] || { out=timeout; break; }
+  [ $left -gt 0 ] || { out=${off:-timeout}; break; }
+  if ! "$here/adb.sh" --vpn-state >/dev/null; then off=offline; sleep $(( left < 30 ? left : 30 )); continue; fi; off=
   out=$("$here/adb.sh" shell "end=\$(( \$(date +%s) + $left )); on=0; [ -n '$st' ] && printf %s '$st' > $hb
     while [ \$(date +%s) -lt \$end ]; do
       touch /data/local/tmp/powos-touchmon.ask; [ -n '$st' ] && touch $hb

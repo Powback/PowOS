@@ -4,6 +4,26 @@
 # Paths given to push/pull are on the Mac (under $HOME: Colima only shares the home directory, not /tmp); they're mounted into a throwaway android-builder container sharing
 # powos-vadb's network, so any session or agent can use it (no per-session mounts).
 set -euo pipefail
+# Fail fast when the phone is off the VPN. adb keeps listing the device after the tunnel died, and every call then
+# HANGS (2026-10-23/24: drops at ~13:40, 16:0x, 19:5x, 02:56 held the ship service, the check queue and the board).
+# Both ends send a keepalive every 25 s, so a live tunnel re-handshakes about every 2 min; a handshake older than
+# PHONE_WG_STALE_S (default 180 s, WireGuard's own reject-after time) means no packet can reach the phone. Exit 69
+# (EX_UNAVAILABLE) with "phone offline" on stderr, without touching adb. Unreadable (wireguard container down or not
+# ours): carry on as before - the command then fails on its own.
+wg_age() {
+  docker exec wireguard wg show wg0 dump 2>/dev/null | awk -F'\t' -v now="$(date +%s)" \
+    'NR > 1 && $4 ~ /(^|,)10\.13\.13\.7\/32(,|$)/ { print ($5 == 0 ? "never" : now - $5); exit }'
+}
+if [ "${1:-}" = --vpn-state ]; then
+  a=$(wg_age); [ -n "$a" ] || { echo "vpn=unknown"; exit 0; }
+  [ "$a" != never ] && [ "$a" -le "${PHONE_WG_STALE_S:-180}" ] && { echo "vpn=up handshake=${a}s"; exit 0; }
+  echo "vpn=offline handshake=$a$([ "$a" = never ] || echo s)"; exit 69
+fi
+age=$(wg_age)
+if [ -n "$age" ] && { [ "$age" = never ] || [ "$age" -gt "${PHONE_WG_STALE_S:-180}" ]; }; then
+  echo "adb.sh: phone offline: its WireGuard handshake is $([ "$age" = never ] && echo "missing" || echo "${age}s old") (> ${PHONE_WG_STALE_S:-180}s) - not running adb (docker exec wireguard wg show)" >&2
+  exit 69
+fi
 # A network change on the phone (wifi <-> mobile) leaves powos-vadb's adb connection stale ("offline", "device not
 # found") although the VPN is up: every agent's next call then fails. Not "device"? Drop it and connect afresh, once,
 # before the command (a pre-check, not a retry: the command itself never runs twice).
