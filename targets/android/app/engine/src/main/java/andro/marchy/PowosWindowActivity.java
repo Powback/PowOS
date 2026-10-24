@@ -77,7 +77,13 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             finishAndRemoveTask();
             return;
         }
-        WindowTasks.tasks.put(id, this);
+        if (!WindowTasks.register(id, this)) {
+            // Another task shows this window already: this one would stay black (nothing feeds its surface).
+            Log.i(TAG, "window " + id + " has its task already: this second one finished");
+            closedByKWin = true; // the window stays, in its other task: nothing to tell KWin
+            finishAndRemoveTask();
+            return;
+        }
         // The consumer's daemon connection, also when the desktop (MainActivity, which set it before) never opened.
         MainActivity.configureConsumer(this);
         content(false);
@@ -151,7 +157,12 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         }
         setIntent(new android.content.Intent(getIntent()).setData(data).putExtra(EXTRA_APP_ID, appId).putExtra(EXTRA_TITLE, title));
         id = windowId;
-        WindowTasks.tasks.put(id, this);
+        if (!WindowTasks.register(id, this)) {
+            Log.i(TAG, "launch window: window " + id + " has its task already, this one goes");
+            closedByKWin = true;
+            finishAndRemoveTask();
+            return;
+        }
         MainActivity.configureConsumer(this);
         setTitleText(title);
         Log.i(TAG, "launch window: now window " + id + " (" + appId + ")");
@@ -220,6 +231,13 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     void staleSession() {
         closedByKWin = true;
         Log.i(TAG, "window " + id + ": not the running KWin's, finished");
+        runOnUiThread(this::finishAndRemoveTask);
+    }
+
+    /** Its window moved to another task (WindowTasks.register): this one goes, telling KWin nothing (any thread). */
+    void replaced() {
+        closedByKWin = true;
+        Log.i(TAG, "window " + id + ": in another task now, this one finished");
         runOnUiThread(this::finishAndRemoveTask);
     }
 

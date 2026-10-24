@@ -178,6 +178,26 @@ bars() {
 r=$(hcall windows.restore "[$DT]" "v=>String(v)"); log "windows.restore $DT: $r"; both "dock tap on Dolphin (behind Kate)" "$DT"
 r=$(hcall tasks.open "[$KT,'instant']" "v=>String(v)"); log "tasks.open $KT: $r"; both "switcher card of Kate (behind Dolphin)" "$KT"
 r=$(hcall apps.launch "['l:org.kde.dolphin']" "()=>'ok'"); log "apps.launch dolphin again: $r"; both "launcher tap on open Dolphin (behind Kate)" "$DT"
+# 2e. One task per Linux window, none without its window (2026-10-24 18:33, "i got two kate windows now one black":
+# KWin's second "open 2" came before the adopted launch window registered and started task 2970 for window 2 too).
+# One Dolphin and one Kate window are open: windows.list names exactly one task for each, every PowOS window task is
+# one of the two, and each draws (a task with nothing feeding its surface is black).
+one_each() {
+  local all t a nd=0 nk=0
+  all=$(lin); log "after the launches and raises: window tasks $(echo $all)"
+  for t in $all; do
+    a=$(app_of "$t"); log "task $t: $a"
+    case "$a" in
+      l:org.kde.dolphin) nd=$((nd + 1)) ;;
+      l:org.kde.kate) nk=$((nk + 1)) ;;
+      *) fail "task $t ('$a') is no Dolphin or Kate window: a task without its KWin window" ;;
+    esac
+    draws "$t" "one-each-$t"
+  done
+  [ "$nd" = 1 ] && [ "$nk" = 1 ] || fail "$nd Dolphin and $nk Kate tasks for one window each: duplicates"
+  pass "one task per Linux window (Dolphin $DT, Kate $KT), each drawing"
+}
+one_each
 
 # 3. Gwenview started from inside the session (Dolphin's "Open With > Gwenview": another app's window, no launch path
 # of PowOS's): one more floating task, and closing it closes Gwenview. Not through kioclient: KIO opened the PNG in

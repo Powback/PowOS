@@ -64,6 +64,39 @@ public final class WindowTasks {
     /** The window tasks on screen, by surface id: KWin's "close" and "title" reach them here. */
     static final Map<Integer, PowosWindowActivity> tasks = new ConcurrentHashMap<>();
     /**
+     * The windows an "open" is making a task for (startActivity, or a launch window's become posted to its UI thread)
+     * until that task registers ([register]): KWin's second "open" for the same window ~50-80 ms later then finds it
+     * here, not nothing - it started a second task for Kate (2026-10-24: the launch window became window 2 and a
+     * fresh task 2970 opened for it too; one of the two stayed black). Reader thread puts, any thread removes.
+     */
+    private static final Map<Integer, Long> opening = new ConcurrentHashMap<>();
+    /** An "open" whose task never registered (startActivity refused, the app died) stops holding its window after this. */
+    private static final long OPENING_MS = 5000;
+
+    /**
+     * [a] shows window [id] now: false when another live task shows it already - then [a] must go (one task per KWin
+     * window, always). Every registration comes here (onCreate, a launch window's become).
+     */
+    static boolean register(int id, PowosWindowActivity a) {
+        opening.remove(id);
+        PowosWindowActivity prev = tasks.putIfAbsent(id, a);
+        if (prev == null || prev == a)
+            return true;
+        boolean live = prev.live() && !prev.isDestroyed();
+        // A full-screen task's window floating again on the unfolded home ([open]: not reusable) moves to [a]'s task.
+        boolean refloat = fullScreen(prev) && !fullScreen(a);
+        if (live && !refloat)
+            return false;
+        tasks.put(id, a);
+        if (live)
+            prev.replaced(); // never left behind black
+        return true;
+    }
+
+    private static boolean fullScreen(PowosWindowActivity a) {
+        return a.getIntent().getBooleanExtra(PowosWindowActivity.EXTRA_FULLSCREEN, false);
+    }
+    /**
      * Who draws each window's title bar, by surface id ("decor", kwin 0026): true KWin's decoration (which a task
      * doesn't show - PowOS's frame adds its bar), false the window's own (client-side: Steam, GTK header bars - no
      * second bar). Told before "open"; none for an older KWin (a bar, as before).
@@ -292,9 +325,21 @@ public final class WindowTasks {
             Log.i(TAG, "open " + id + " (" + appId + "): its task " + existing.getTaskId() + " back");
             return;
         }
+        // A task for this window is on its way already (KWin's repeat "open" before it registered): no second one.
+        Long since = opening.get(id);
+        long now = android.os.SystemClock.uptimeMillis();
+        if (existing == null && since != null && now - since < OPENING_MS) {
+            Log.i(TAG, "open " + id + " (" + appId + "): its task is opening already");
+            return;
+        }
+        opening.put(id, now);
         Uri data = windowData(id);
         // The launch window of its app (LaunchWindows: opened at the tap) becomes this window: same task, same place.
-        if (LaunchWindows.adopt(appId, fullScreen, a -> a.runOnUiThread(() -> a.become(id, data, appId, title, () -> open(context, id, f))))) {
+        Runnable orElse = () -> {
+            opening.remove(id);
+            open(context, id, f);
+        };
+        if (LaunchWindows.adopt(appId, fullScreen, a -> a.runOnUiThread(() -> a.become(id, data, appId, title, orElse)))) {
             Log.i(TAG, "open " + id + " (" + appId + "): in its launch window");
             return;
         }
@@ -422,6 +467,7 @@ public final class WindowTasks {
         java.util.Set<Integer> kept = new java.util.HashSet<>(LaunchWindows.taskIds());
         for (PowosWindowActivity a : tasks.values())
             kept.add(a.getTaskId());
+        java.util.Set<Integer> seen = new java.util.HashSet<>();
         for (android.app.ActivityManager.AppTask t : am.getAppTasks()) {
             android.app.ActivityManager.RecentTaskInfo info;
             try {
@@ -434,7 +480,9 @@ public final class WindowTasks {
             if (data == null || !"powos-window".equals(data.getScheme()) || kept.contains(info.taskId))
                 continue;
             int id = PowosWindowActivity.idOf(data);
-            if (current.equals(PowosWindowActivity.sessionOf(data)) && live.contains(id))
+            // One task per live window: a second (a duplicate "open" before this fix, kept by Recents) goes too.
+            boolean dup = tasks.containsKey(id) || !seen.add(id);
+            if (current.equals(PowosWindowActivity.sessionOf(data)) && live.contains(id) && !dup)
                 continue;
             Log.i(TAG, "task " + info.taskId + " (window " + id + " of session " + PowosWindowActivity.sessionOf(data) + "): not this KWin's, finished");
             t.finishAndRemoveTask();
