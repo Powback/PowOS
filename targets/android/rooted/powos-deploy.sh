@@ -240,6 +240,9 @@ if [ -d $T/powos-app-api ]; then
     install -m 644 $T/powos-app-api/sample/*.openapi.json $R/usr/lib/powos/app-api/sample/
   fi
   rm -rf $T/powos-app-api
+  # The service loaded its routes at start: new files under a running appcap_serve.py gave "no such route" for every
+  # new endpoint (+ add app, 2026-10-24). The system tier's supervisor restarts a service that exits.
+  pkill -f 'python3 /usr/lib/powos/app-api/appcap_serve.py' 2>/dev/null && echo "app-api: service restarted onto the new files"
 fi
 chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- \
   /usr/bin/env HOME=/home/powos python3 /usr/lib/powos/ai/agents/install-hooks.py /home/powos/.claude/settings.json \
