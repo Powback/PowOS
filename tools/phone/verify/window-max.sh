@@ -1,6 +1,6 @@
 #!/bin/bash
 # lanes: emu? phone (calc, video - android, run on either lane; kate, ffplay need the Linux session - phone only)
-# tools/phone/verify/window-max.sh <calc|kate|video> [--round R]: a floating window's maximise / restore and an app's
+# tools/phone/verify/window-max.sh <calc|kate|video> [--round R] [--leash-off]: a floating window's maximise / restore and an app's
 # OWN full screen on the unfolded home (WindowFrames.maximise, FreeformTasks; KWin patch for Linux windows), with a
 # screen recording of each stage for review (~/.cache/powos-verify/window-max/<round>/<stage>.mp4).
 #   calc:  Calculator from home: the bar's maximise -> the window fills the area under the status bar and above home's
@@ -15,6 +15,9 @@
 #          tap: the task covers the whole screen, no bar, no dock; Back leaves it: floating at its bounds again.
 # Only what it opened is closed (e2e-lib: Calculator/Chrome tasks it started, Kate if it started it; a stage whose app
 # was already running is skipped - the user's). Queue each stage: queue.sh add [--close] <task> <this> <stage>.
+# --leash-off: the A/B run - `settings put global powos_live_leash 0` (TaskLeash off: resizeTask, the old way) for the
+# journey, the value before ALWAYS put back on exit. After each restore the task's SurfaceFlinger layer state (its
+# layers, their parents, visible/alpha/crop/position, offscreen ones) goes to $OUT/<app>-layers.txt, one line in the log.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 STAGE=${1:-calc}; shift || true
@@ -26,7 +29,11 @@ e2e_init "max-$STAGE"
 e2e_setup inner
 REC=$HOME/.cache/powos-verify/window-max/$ROUND; mkdir -p "$REC"
 DID=$(sh_ "dumpsys display" | grep -E "^  DisplayDeviceInfo" | sed -nE 's/.*uniqueId="local:([0-9]+)",.* state ON,.*/\1/p' | head -1)
-trap 'sh_ "pkill -INT screenrecord" >/dev/null 2>&1; e2e_abort' EXIT
+LEASH0=; case " $* " in *" --leash-off "*) LEASH0=$(sh_ "settings get global powos_live_leash"); LEASH0=${LEASH0:-null}
+  sh_ "settings put global powos_live_leash 0"; log "A/B: powos_live_leash 0 for this run (was $LEASH0)" ;; esac
+leash_back() { [ -n "$LEASH0" ] || return 0; if [ "$LEASH0" = null ]; then sh_ "settings delete global powos_live_leash" >/dev/null; else sh_ "settings put global powos_live_leash $LEASH0"; fi
+  log "A/B: powos_live_leash back to $LEASH0 ($(sh_ "settings get global powos_live_leash"))"; LEASH0=; }
+trap 'sh_ "pkill -INT screenrecord" >/dev/null 2>&1; leash_back; e2e_abort' EXIT
 TOL=${TOL:-3}
 
 # --- measuring ---------------------------------------------------------------------------------------------------
@@ -101,6 +108,26 @@ echo ---; dumpsys window windows | grep -E "Window #|isVisible|mHasSurface" | gr
 EOF
 }
 
+# layerstate <task> <package> <label>: SurfaceFlinger's state of the task's layers ($OUT/<label>-layers.txt): the
+# hierarchy around Task=<id> (its parents and children, and any of its layers left in the Offscreen Hierarchy), each
+# such layer's state block (visible/invisible reason, color alpha, bounds, toDisplayTransform, geomCrop) and every
+# leash / snapshot / screenshot layer there is; one summary line in the log.
+layerstate() { local f="$OUT/$3-layers.txt"
+  sh_ "dumpsys SurfaceFlinger" > "$OUT/$3-sf.txt"
+  awk -v id="$1" -v pk="$2" '
+    function mine(l) { return index(l, "Task=" id "#") || index(l, " t" id "}") || index(l, " " id "#") || (pk != "" && index(l, pk)) || l ~ /[Ll]eash|[Ss]napshot|creenshot/ }
+    /^Layer Hierarchy/ {tree=1; print "== hierarchy"; next} /^Offscreen Hierarchy/ {off=1; print "== offscreen"; next}
+    tree && /^[^ │├└]/ && !/^ / {tree=0; off=0}
+    tree { d = index($0, "─"); n++; L[n] = $0; D[n] = d
+      if (index($0, "Task=" id "#")) { m = d; P = ""; for (k = n - 1; k > 0 && m > 4; k--) if (D[k] < m) { P = L[k] "\n" P; m = D[k] }; printf "%s", P; print $0; sub_ = d; next }
+      if (sub_ && d > sub_) { print; next } sub_ = 0
+      if (off && mine($0)) print; next }
+    /^  Layer \[/ { blk = mine($0); if (blk) {print "== " $0; c = 0}; next }
+    blk && c++ < 14 && /reason|color|bounds=|geomCrop|alpha|isOpaque/ { print }
+  ' "$OUT/$3-sf.txt" > "$f"
+  local t; t=$(awk -v k="Task=$1#" '/^== /{f=index($0, "] " k) > 0; if (f) n++; next} f && n == 1' "$f" | grep -oE "(in)?visible reason=[^|]*|tx=[-0-9.]+ ty=[-0-9.]+|geomCrop=\[[^]]*\]|alpha=[0-9.]+" | tr '\n' ' ')
+  log "layers $3: task $1: ${t:-NO Task=$1 layer state}; parent: $(awk '/^== hierarchy/{h=1;next} /^== /{h=0} h' "$f" | grep -B1 -m1 "─ Task=$1#" | head -1 | sed -E 's/^[ │├└─]*//' | cut -c1-60); in the offscreen hierarchy: $(awk '/^== offscreen/{o=1;next} /^== /{o=0} o' "$f" | grep -c "$1"); leash/snapshot layers: $(grep -E '^== .*([Ll]eash|[Ss]napshot|creenshot)' "$f" | sort -u | wc -l | tr -d ' ') ($f)"; }
+
 # --- recording ---------------------------------------------------------------------------------------------------
 rec_start() { sh_ "rm -f /data/local/tmp/wmax-$1.mp4; (screenrecord --display-id $DID --bit-rate 16000000 --time-limit ${2:-60} /data/local/tmp/wmax-$1.mp4 </dev/null >/dev/null 2>&1 &)"; sleep 1; }
 rec_stop() { sh_ "pkill -INT screenrecord"; sleep 2; "$A" exec-out "su -c 'cat /data/local/tmp/wmax-$1.mp4'" > "$REC/$1.mp4" 2>/dev/null; sh_ "rm -f /data/local/tmp/wmax-$1.mp4"
@@ -163,6 +190,7 @@ maxcheck() {
   note "$app restored: $(what "$id" "$lay")"; b2=$(g_bounds); c=$(g_sf "$lay")
   [ -n "$c" ] || { c=$(content "$id" "$lay" "$app restored"); b2=$(g_bounds); }
   [ "$b2" = "$b0" ] && pass "$app restored to exactly its bounds before ([$b2])" || fail "$app restored to [$b2], was [$b0]"
+  layerstate "$id" "${lay%/}" "$app-restored"
   set -- $c; [ $# -ge 6 ] && eqrect "$1 $2 $3 $4" "$b2" 4 && near $(($3 - $1)) "$5" 4 && pass "$app's content back at its size ([$c])" || fail "$app's content [$c] after restore, window [$b2]"
   # A double tap on the bar (the desktop convention): maximised, again: back.
   p=$(barpt "$id"); [ -n "$p" ] || return; set -- $p
@@ -251,6 +279,7 @@ ffplay)
   us "pkill -x ffplay; true" >/dev/null
   rec_stop ffplay ;;
 esac
+leash_back
 logc_get
 grep -E "maximis|full screen|now a window|PowosFreeform" "$OUT/logcat.txt" | tail -12 | tee -a "$OUT/log.txt"
 log "facts: $OUT (dumps, logcat.txt, kwin.txt); recordings: $REC"
