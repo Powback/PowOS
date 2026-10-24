@@ -271,17 +271,31 @@ class WindowFrame(
     fun slideHide() {
         slideHidden = true
         if (app.ownBar) return
-        if (!barAdded) { bar.animate().cancel(); bar.alpha = 0f; return }
+        if (!barAdded) { bar.animate().cancel(); bar.alpha = 0f; wmAlpha(0f); return }
         bar.animate().cancel()
-        bar.animate().alpha(0f).setDuration(SLIDE_FADE_OUT_MS).withEndAction { if (barAdded) barBlur.set(0f) }.start()
+        bar.animate().alpha(0f).setDuration(SLIDE_FADE_OUT_MS).withEndAction {
+            if (barAdded) barBlur.set(0f)
+            // The view is clear: now the windows themselves, so WM stops drawing them and SurfaceFlinger drops the layers.
+            if (slideHidden) wmAlpha(0f)
+        }.start()
+    }
+
+    /** The bar and grip overlay windows' own alpha (LayoutParams.alpha): 0 = the compositor has nothing to draw for them. */
+    private fun wmAlpha(a: Float) {
+        if (app.ownBar) return
+        if (barParams.alpha == a && gripParams.alpha == a) return
+        barParams.alpha = a
+        gripParams.alpha = a
+        if (added) updateViews()
     }
 
     /** The slide ended: the bar (already at its window's final place, [layout]) fades back in; blur first, behind a clear bar. */
     fun slideShow() {
         veiled = false
         slideHidden = false
-        if (app.ownBar || !barAdded) return
+        if (app.ownBar || !barAdded) { wmAlpha(1f); return }
         bar.animate().cancel()
+        wmAlpha(1f) // at the final place first (the view is still clear), then fade the view in
         barBlur.set(1f)
         bar.animate().alpha(1f).setDuration(SLIDE_FADE_IN_MS).start()
     }

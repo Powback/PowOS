@@ -132,7 +132,7 @@ swipe() {
   # to fd-bar.txt (barcheck). The swipe runs in the same device call, right after the sampler starts: as a separate
   # call it came only once the sampler's 10 s were over (job 20261024-190606-57880: every sample 10-0.6 s before the
   # slide's end line - 56 before / 0 after, and 0 bar samples during the 332 ms swipe back).
-  sh_ "rm -f /data/local/tmp/fd-flash.txt /data/local/tmp/fd-bar.txt; (read u0 r </proc/uptime; u0=\${u0%.*}; while :; do read u r </proc/uptime; [ \${u%.*} -ge \$((u0 + 10)) ] && break; h=\$(dumpsys SurfaceFlinger | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\"); v=\$(echo \"\$h\" | grep -c $PKG); echo \${u%.*}\${u#*.}0 \$v >>/data/local/tmp/fd-flash.txt; echo \"@ \${u%.*}\${u#*.}0\" >>/data/local/tmp/fd-bar.txt; echo \"\$h\" | grep -A1 -e $PKG -e \"window bar ${id:-x}\" >>/data/local/tmp/fd-bar.txt; done </dev/null >/dev/null 2>&1 &); input swipe $x $y $to $y 250"; sleep 1.5
+  sh_ "rm -f /data/local/tmp/fd-flash.txt /data/local/tmp/fd-bar.txt; (read u0 r </proc/uptime; u0=\${u0%.*}; while :; do read u r </proc/uptime; [ \${u%.*} -ge \$((u0 + 10)) ] && break; d=\$(dumpsys SurfaceFlinger); h=\$(echo \"\$d\" | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\"); v=\$(echo \"\$h\" | grep -c $PKG); echo \${u%.*}\${u#*.}0 \$v >>/data/local/tmp/fd-flash.txt; echo \"@ \${u%.*}\${u#*.}0\" >>/data/local/tmp/fd-bar.txt; bl=\$(echo \"\$d\" | grep -A22 \"Layer .*window bar ${id:-x}#\"); ba=\$(echo \"\$bl\" | grep -o -m1 \"alpha=[0-9.]*\"); bv=\$(echo \"\$bl\" | grep -o -m1 \"isVisible=[a-z]*\"); echo \"=A \${ba:-none} \${bv:-none}\" >>/data/local/tmp/fd-bar.txt; echo \"\$h\" | grep -A1 -e $PKG -e \"window bar ${id:-x}\" >>/data/local/tmp/fd-bar.txt; done </dev/null >/dev/null 2>&1 &); input swipe $x $y $to $y 250"; sleep 1.5
 }
 
 # After a swipe that leaves the window behind: was it composited after the slide ended? $1 the step. The end time is
@@ -164,6 +164,8 @@ barcheck() {
   r=$(printf '%s\n' "$f" | awk -v k="$k" -v id="window bar $id" '
     function df(l,  a, i, n) { n = split(l, a, "|"); for (i = 1; i <= n; i++) if (a[i] ~ /^ *-?[0-9]+ +-?[0-9]+ +-?[0-9]+ +-?[0-9]+ *$/) return a[i]; return "" }
     function flush(  i, d, m, dv, ds) {
+      # The SF layer of the bar (alpha= / isVisible= from dumpsys SurfaceFlinger): alpha < 0.05 or not visible = hidden at the compositor.
+      if (e < k && e >= e0 + 150 && B != "" && AV == 0) { B = ""; sup++ }
       if (T != "" && B != "") { split(T, t, " "); split(B, b, " "); if (!based) { for (i = 1; i <= 4; i++) base[i] = b[i] - t[i]; based = 1 }
         dv = 0; ds = 0
         for (i = 1; i <= 4; i++) { d = b[i] - t[i] - base[i]; if (d < 0) d = -d; if (i % 2 == 0) { if (d > ds) ds = d } else if (d > dv) dv = d }
@@ -175,14 +177,20 @@ barcheck() {
           pt = t[2]; pe = e; n++ }
         if (e >= k + 300) { lateN++; if (ds > lateS) lateS = ds; if (dv > lateV) lateV = dv } }
       if (e >= k) { after++; if (B != "") barAfter++; lastBar = (B != "") } }
-    /^@ / { if (started) flush(); if (!started) e0 = $2; started = 1; e = $2; T = ""; B = ""; nm = ""; next }
+    /^@ / { if (started) flush(); if (!started) e0 = $2; started = 1; e = $2; T = ""; B = ""; nm = ""; AV = 1; next }
+    /^=A / { a = $2; v = $3; sub(/alpha=/, "", a); AV = 1
+      if (a == "none") { AV = 0; if (e >= e0 + 150 && e < k) noL++ }
+      else if (a + 0 < 0.05) { AV = 0; if (e >= e0 + 150 && e < k) loA++ }
+      else if (v != "isVisible=true") { AV = 0; if (e >= e0 + 150 && e < k) loV++ }
+      else if (e >= e0 + 150 && e < k) shn++
+      next }
     /\|/ { if (nm ~ id) { if (B == "") B = df($0) } else if (T == "") T = df($0); nm = ""; next }
     /^--$/ { next }
     { nm = $0 }
-    END { if (started) flush(); printf "%d %d %d %d %d %d %d %d %d %d\n", n, ws, after, barAfter, lastBar, wv, pv * 16.7 + 0.5, lateN, lateV, lateS }')
-  set -- "$1" "$2" "$3" $r; echo "bar probe $1: samples $4, worst bar-window offset: slide axis $5 px (limit: one frame's dx of this slide, ${10:-0} px), vertical ${9:-0} px (limit 4), after the end $6 samples, bar in $7, last ${8:-?}" | tee -a "$OUT/log.txt"
+    END { if (started) flush(); printf "%d %d %d %d %d %d %d %d %d %d %d %d %d %d\n", n, ws, after, barAfter, lastBar, wv, pv * 16.7 + 0.5, lateN, lateV, lateS, noL, loA, loV, shn }')
+  set -- "$1" "$2" "$3" $r; echo "bar probe $1: samples $4, worst bar-window offset: slide axis $5 px (limit: one frame's dx of this slide, ${10:-0} px), vertical ${9:-0} px (limit 4), after the end $6 samples, bar in $7, last ${8:-?}; SF bar layer during the slide (after the fade-out): absent ${14:-0}, alpha<0.05 ${15:-0}, not visible ${16:-0}, shown ${17:-0} samples" | tee -a "$OUT/log.txt"
   # Contract: hidden during the slide (not composited with its window after the fade-out) or exactly with it.
-  if [ "${4:-0}" -lt 2 ]; then pass "$1: the title bar was hidden during the slide (${4:-0} samples with bar and window after the fade-out)"
+  if [ "${4:-0}" -lt 2 ]; then pass "$1: the title bar was hidden during the slide (${4:-0} visible samples with bar and window after the fade-out; decided by SF layer: absent ${14:-0}, alpha<0.05 ${15:-0}, not visible ${16:-0}, shown ${17:-0})"
   elif [ "${9:-0}" -gt 4 ]; then fail "$1: the title bar was misplaced - ${9} px off its window across the slide (bar-$3.txt)"
   elif [ "$5" -gt 4 ]; then fail "$1: the title bar stayed visible and trailed its window by ${5} px along the slide (bar-$3.txt)"
   else pass "$1: the title bar stayed exactly with its window ($4 samples, within $5 px)"; fi
