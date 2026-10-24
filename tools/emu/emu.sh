@@ -257,9 +257,15 @@ create)
   ;;
 start)
   [ -f "$AVD_HOME/$AVD.avd/config.ini" ] || die "no AVD: emu.sh create" 2
+  # A wedged emulator (system_server killed by its watchdog in a loop: its renderer stuck in
+  # HardwareRenderer.setStopped, "Can't find service: package", 2026-10-24 04:29) answers adb but not as Android:
+  # its package service is asked first, and a dead one is stopped and started again from the snapshot.
+  if running && ! a shell cmd package path com.powos.app >/dev/null 2>&1; then say "Android doesn't answer (wedged) - starting again from $SNAP"; halt; fi
   if ! running; then space_guard "starting"; boot -snapshot "$SNAP" -no-snapshot-save; fi
   root_up; selinux_permissive
-  up_to_date; grants_like_phone; home_ready
+  up_to_date; grants_like_phone
+  if ! home_ready; then say "starting again from $SNAP"; halt; boot -snapshot "$SNAP" -no-snapshot-save; root_up; selinux_permissive
+    up_to_date; grants_like_phone; home_ready || die "home's page doesn't come up on the emulator ($STATE/emulator.log)"; fi
   say "up on $SERIAL (POWOS_DEVICE=emu)"
   ;;
 stop) if running || pgrep -f -- "-avd $AVD( |$)" >/dev/null; then halt; say "stopped"; else say "not running"; fi ;;
