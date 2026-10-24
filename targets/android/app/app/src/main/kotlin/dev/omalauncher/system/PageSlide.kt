@@ -195,7 +195,11 @@ object PageSlide {
             s.start { wct, token ->
                 for (win in list) {
                     val tok = token(win.id) ?: continue
-                    if (win.rel != 0) TaskLeash.reorder(wct, tok, true)
+                    if (win.rel != 0) {
+                        // Not focusable while it slides: raising it must not move focus off home (touch stream).
+                        TaskLeash.setFocusable(wct, tok, false)
+                        TaskLeash.reorder(wct, tok, true)
+                    }
                     TaskLeash.setBounds(wct, tok, at(win))
                 }
             }
@@ -336,6 +340,7 @@ object PageSlide {
             for (w in wins) {
                 val tok = token(w.id) ?: continue
                 TaskLeash.setBounds(wct, tok, w.bounds)
+                if (w.rel != 0) TaskLeash.setFocusable(wct, tok, true)
                 if (w.id in gone) TaskLeash.reorder(wct, tok, false)
             }
         }

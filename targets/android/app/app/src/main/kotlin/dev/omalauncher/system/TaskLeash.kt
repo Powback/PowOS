@@ -303,6 +303,23 @@ object TaskLeash {
         wct.javaClass.getMethod("reorder", token.javaClass, Boolean::class.javaPrimitiveType).invoke(wct, token, onTop)
     }
 
+    /**
+     * WCT.setFocusable(token, focusable) (hidden): a non-focusable task is shown and stacked but never takes input
+     * focus. HACK: hidden API, reflected. Real fix: none for an app. Used by the page slide so the windows it brings
+     * up don't pull focus from home (that cut home's touch stream and the swipe lost its finger moves).
+     */
+    fun setFocusable(
+        wct: Any,
+        token: Any,
+        focusable: Boolean,
+    ) {
+        try {
+            wct.javaClass.getMethod("setFocusable", token.javaClass, Boolean::class.javaPrimitiveType).invoke(wct, token, focusable)
+        } catch (e: ReflectiveOperationException) {
+            android.util.Log.w("TaskLeash", "setFocusable unavailable: $e")
+        }
+    }
+
     /** WCT.setDragResizing(token, on) (hidden). */
     fun setDragResizing(
         wct: Any,
