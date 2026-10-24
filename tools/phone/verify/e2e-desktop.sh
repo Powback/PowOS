@@ -155,13 +155,17 @@ part2() {
 
   # Drag by the title bar.
   local b0 b1 p x y i dx=$(dp 120) dy=$(dp 60); b0=$(tbounds "$CT"); p=$(barpt "$CT")
+  # The product stops a window's bottom at home's bottom bar (WindowFrame.moved, by design): a 70%-tall window has
+  # ~65 px of room down, so dragging down 165 "failed" by exactly the clamp. With less room than the drag, go UP.
+  local dock room; dock=$(pt "$(dockel "a:$CALC/")"); set -- $b0; room=$(( ${dock#* } - ${4:-0} ))
+  if [ -n "${dock#* }" ] && [ "$room" -lt $((dy * 2)) ] 2>/dev/null; then dy=$((-dy)); fi
   if [ -n "$p" ]; then set -- $p; x=$1; y=$2
     if mdown $x $y "Calculator's title bar"; then
       mpath $x $y $((x + dx)) $((y + dy)) 6
       sleep 0.3; mup $((x + dx)) $((y + dy)); sleep 1.2; chk drag
       b1=$(tbounds "$CT"); step dragged "Calculator dragged by its title bar ($dx,$dy px)"
       set -- $b0 $b1
-      [ $# -ge 8 ] && [ $(($5 - $1)) -ge $((dx * 7 / 10)) ] && [ $(($6 - $2)) -ge $((dy * 5 / 10)) ] && pass "it moved with the finger: $b0 -> $b1" || fail "dragged $dx,$dy: $b0 -> $b1"
+      [ $# -ge 8 ] && [ $(($5 - $1)) -ge $((dx * 7 / 10)) ] && [ $((($6 - $2) * ${dy#-} / dy)) -ge $((${dy#-} * 5 / 10)) ] && pass "it moved with the finger: $b0 -> $b1" || fail "dragged $dx,$dy: $b0 -> $b1"
     fi
   else fail "no title bar on Calculator's window"; fi
 
