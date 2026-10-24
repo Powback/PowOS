@@ -282,8 +282,8 @@ const toggle = (id: string) => {
 
 /**
  * Whether a stack is [open] (tapped, or the shade's whole view), and [shown] open: also while a pull of the shade
- * (ccexpand.ts) is about to unfold it - then its rest rides the finger (its top card keeps its folded look until the
- * pull is settled, so the height only grows by what unfolds).
+ * (ccexpand.ts) is about to unfold it - then its rest rides the finger. [driven]: the pull drives it either way (its
+ * "peek": the top card's "+N" and the peeking cards under it are kept, faded by the finger - ccexpand.ts attachPeek).
  */
 function useStackOpen(id: string) {
   const has = expanded.value.has(id);
@@ -291,10 +291,14 @@ function useStackOpen(id: string) {
   const open = has !== ccExpanded.value;
   const shown = open || (peek === "open" && !has);
   const ref = useRef<HTMLDivElement>(null);
+  // Driven by the pull: the stacks it unfolds, or folds (shown open, not tapped open on their own).
+  const driven = !!peek && shown && !has;
   useLayoutEffect(() => {
-    if (peek && shown && !has && ref.current) attachPeek(ref.current);
+    if (driven && ref.current) attachPeek(ref.current);
   }, [peek, shown]);
-  return { open, shown, ref };
+  // The stack's classes, and whether the top card keeps its folded look ("+N"): folded, or driven by the pull.
+  const cls = `notif-stack ${shown ? "open" : ""} ${driven ? "peek" : ""}`;
+  return { open, shown, cls, folded: !open || driven, ref };
 }
 
 /**
@@ -304,11 +308,11 @@ function useStackOpen(id: string) {
  */
 function Stack({ g }: { g: Group }) {
   const [top, ...rest] = g.items;
-  const { open, shown, ref } = useStackOpen(g.id);
+  const { open, shown, cls, folded, ref } = useStackOpen(g.id);
   if (!rest.length) return <Card n={top} name={g.name !== top.app ? g.name : undefined} />;
   const clearAll = () => g.items.filter((n) => n.clearable).forEach((n) => powos.notifications.dismiss(n.key));
   return (
-    <div ref={ref} class={`notif-stack ${shown ? "open" : ""}`} data-depth={Math.min(2, rest.length)}>
+    <div ref={ref} class={cls} data-depth={Math.min(2, rest.length)}>
       {shown ? (
         <button type="button" class="notif-group-head" onClick={() => toggle(g.id)}>
           <span class="notif-app">{g.name}</span>
@@ -320,7 +324,7 @@ function Stack({ g }: { g: Group }) {
         n={top}
         name={g.name}
         class={open ? "in-group" : ""}
-        more={open ? 0 : rest.length}
+        more={folded ? rest.length : 0}
         onTap={open ? undefined : () => toggle(g.id)}
         onDismiss={open ? undefined : clearAll}
         clearable={open ? top.clearable : g.items.some((n) => n.clearable)}

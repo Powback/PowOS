@@ -289,17 +289,17 @@ async function overpullKit() {
     document.querySelector(".cc > .notif-bar").dispatchEvent(
       new PointerEvent(type, { bubbles: true, clientX: at.x, clientY: y, pointerId: 1, isPrimary: true, pointerType: "mouse", buttons: type === "pointerup" ? 0 : 1 }),
     );
-  // A finger down on the control center's header, moved [dy] in six frames, [check]ed there, held still, let go.
-  const drag = async (dy, check) => {
+  // A finger down on the control center's header ([mid]: half way first), moved [dy] in six frames, [check]ed, let go.
+  const drag = async (dy, check, mid) => {
     const b = document.querySelector(".cc > .notif-bar").getBoundingClientRect();
     Object.assign(at, { x: b.left + b.width / 2, y: b.top + b.height / 2 });
     P("pointerdown", at.y);
+    if (mid) await window.__op.toHalf((y) => P("pointermove", at.y + y), dy, mid);
     for (let i = 1; i <= 6; i++) {
       P("pointermove", at.y + (dy * i) / 6);
       await frames(1);
     }
-    await frames(2);
-    await check?.();
+    await frames(2).then(() => check?.());
     await sleep(120);
     P("pointermove", at.y + dy + Math.sign(dy));
     P("pointerup", at.y + dy + Math.sign(dy));
@@ -322,6 +322,47 @@ async function overpullKit() {
     return [e.message];
   }
   window.__op = { sleep, frames, shown, under, row, still, drag, edge, grip, gap, n0: shown(), under0: under(), row0: row(), edge0: edge(), grip0: grip(), gap0: gap() };
+  return [];
+}
+
+/** The shade-overpull case's half-way tools (window.__op): the finger to k about 0.5 ([toHalf]), what's checked there. */
+async function overpullHalf() {
+  const o = window.__op;
+  const ccK = () => Number(document.querySelector(".cc3-grid")?.style.getPropertyValue("--cc-k") || NaN);
+  // A step a frame [move]d toward [dy]'s side until the pull's k (the grid's --cc-k) is about half way, [mid] there.
+  o.toHalf = async (move, dy, mid) => {
+    for (let y = 0; Math.abs(y) < 600; ) {
+      y += Math.sign(dy) * 3;
+      move(y);
+      await o.frames(1);
+      if (dy > 0 ? ccK() >= 0.45 : ccK() <= 0.55) {
+        await o.frames(2);
+        return mid(ccK());
+      }
+    }
+    return mid(ccK()); // (never half way: checked where it got to - a fail, not a silent skip)
+  };
+
+  /**
+   * Half way (k about 0.5), down or back up: every stack the pull drives is partly unfolded - its rest's visible part
+   * (the rest's bottom on screen under the top card's) neither none nor all of it - and the top card's "+N" partly faded:
+   * both follow the finger, not switched at the settle.
+   */
+  o.midPull = (fails, way) => {
+    return (k) => {
+      const stacks = [...document.querySelectorAll(".panel-body.together .notif-stack.peek")];
+      if (!stacks.length) return fails.push(`${way} half way (k ${k.toFixed(2)}), no notification stack follows the pull`);
+      for (const st of stacks) {
+        const rest = st.querySelector(":scope > .notif-rest"), card = st.querySelector(":scope > .notif");
+        const full = rest.firstElementChild.scrollHeight;
+        const f = (rest.getBoundingClientRect().bottom - card.getBoundingClientRect().bottom) / full;
+        if (!(f > 0.1 && f < 0.9)) fails.push(`${way} half way (k ${k.toFixed(2)}), a stack is ${Math.round(f * 100)}% unfolded (not between)`);
+        const badge = card.querySelector(".notif-more");
+        const op = badge ? Number(getComputedStyle(badge).opacity) : NaN;
+        if (!(op > 0.05 && op < 0.95)) fails.push(`${way} half way (k ${k.toFixed(2)}), the top card's +N badge's opacity is ${op} (not between 0 and 1)`);
+      }
+    };
+  };
   return [];
 }
 
@@ -386,9 +427,9 @@ async function overpullShort() {
 /** All the way: the rest shown and laid out, what's under it below the rest, the row still. */
 async function overpullExpand() {
   const o = window.__op;
-  await o.drag(260);
-  o.h = o.under() - o.under0;
   const fails = [];
+  await o.drag(260, null, o.midPull(fails, "pulling down"));
+  o.h = o.under() - o.under0;
   if (!document.querySelector(".cc3-list.whole")) fails.push("pulled 260 px further, the rest isn't shown");
   if (o.h < 40) fails.push(`expanded, what's under the control center moved only ${Math.round(o.h)} px`);
   if (o.row() !== o.row0) fails.push(`the first row moved on the expand: ${o.row0} -> ${o.row()}`);
@@ -436,7 +477,7 @@ async function overpullFold() {
   await o.drag(-80, () => {
     const d = o.under() - from;
     if (Math.abs(d + Math.min(80, o.h)) > 3) fails.push(`folding 80 px, what's under the control center moved ${Math.round(d)} px`);
-  });
+  }, o.midPull(fails, "folding back up"));
   if (document.querySelector(".cc3-list.whole") || o.shown() !== o.n0) fails.push(`pulled up 80 px, still ${o.shown()} toggles shown`);
   if (document.querySelector(".panel-body.together .notif-stack.open")) fails.push("folded, notification stacks stay unfolded");
   list.scrollTop = 0;
@@ -2240,7 +2281,7 @@ try {
       open(browser, `${ORIGIN}/index.html?mode=shade`, "shade-overpull").then(async (r) => {
         await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
         const fails = [];
-        for (const step of [overpullKit, overpullShort, overpullExpand, overpullTests, overpullFold, panelTracksFinger, overpullRest]) {
+        for (const step of [overpullKit, overpullHalf, overpullShort, overpullExpand, overpullTests, overpullFold, panelTracksFinger, overpullRest]) {
           const out = await r.page.evaluate(step).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`]);
           fails.push(...(out ?? []));
           if (fails.length) break;

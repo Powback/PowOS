@@ -63,7 +63,8 @@
 .notif-stack { position: relative; flex: none; display: flex; flex-direction: column; }
 .notif-stack > .notif { position: relative; z-index: 1; }
 /* The peeking cards: the stack's own pseudo layers under the top card, narrower and lower each. */
-.notif-stack:not(.open)::before, .notif-stack:not(.open)[data-depth="2"]::after {
+/* (Also while a pull of the shade drives it - "peek": faded by the finger, ccexpand.ts attachPeek.) */
+.notif-stack:is(:not(.open), .peek)::before, .notif-stack:is(:not(.open), .peek)[data-depth="2"]::after {
   content: "";
   position: absolute;
   left: 10px;
@@ -74,7 +75,7 @@
   background: var(--soft-fill);
   box-shadow: var(--lift-shadow);
 }
-.notif-stack:not(.open)[data-depth="2"]::after { left: 20px; right: 20px; bottom: -10px; opacity: 0.6; }
+.notif-stack:is(:not(.open), .peek)[data-depth="2"]::after { left: 20px; right: 20px; bottom: -10px; opacity: 0.6; }
 .notif-stack:not(.open)[data-depth="2"] { margin-bottom: 10px; }
 .notif-stack:not(.open)[data-depth="1"] { margin-bottom: 5px; }
 /* The rest: folded to nothing, unfolded to its height (a grid row from 0fr to 1fr - an animated auto height). */

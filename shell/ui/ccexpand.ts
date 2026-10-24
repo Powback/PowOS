@@ -27,31 +27,110 @@ export const ccExpanded = signal(false);
  * [attachPeek], so the groups unfold with the finger exactly as the control center's rest does.
  */
 export const ccPeeking = signal<null | "open" | "fold">(null);
-/** The paused animations tied to the finger (a stack's rest and head), by the pull's progress k (0..1). */
+/** The paused animations tied to the finger (a stack's rest, head, top card, what follows it), by the pull's progress k. */
 const peekAnims = new Set<Animation>();
+/** The stacks already tied in this pull (a re-render hands them again). */
+const peeked = new Set<HTMLElement>();
 let peekK = 0;
-/** [stack]'s rest (and group head) tied to the pull's progress: one paused Web Animation each, no style per frame. */
-export function attachPeek(stack: HTMLElement) {
-  if (!pull?.grid) return;
-  const rest = stack.querySelector<HTMLElement>(".notif-rest");
-  const head = stack.querySelector<HTMLElement>(".notif-group-head");
-  const add = (el: HTMLElement | null, frames: Keyframe[]) => {
-    if (!el || el.getAnimations().some((a) => a.id === "ccpeek")) return;
-    const a = el.animate(frames, { duration: MS, fill: "both", easing: "linear", id: "ccpeek" });
-    a.pause();
-    a.currentTime = peekK * MS;
-    peekAnims.add(a);
-  };
-  // Folding: only fade - a shrinking list would clamp the scroll under the finger; the height folds at the settle (finish).
-  if (pull.was) {
-    add(rest, [{ opacity: 0 }, { opacity: 1 }]);
-    return add(head, [{ opacity: 0 }, { opacity: 1 }]);
+/** One paused, finger-driven animation on [el] (or its [pseudo]); [add]: summed with the others on it (the offsets). */
+function peekAnim(el: Element | null | undefined, frames: Keyframe[], o: { pseudo?: string; add?: boolean } = {}) {
+  if (!el) return;
+  let a: Animation;
+  try {
+    a = el.animate(frames, { duration: MS, fill: "both", easing: "linear", id: "ccpeek", pseudoElement: o.pseudo, composite: o.add ? "add" : "replace" });
+  } catch {
+    return; // (A host without pseudo-element animations: those peeking cards switch at the settle.)
   }
-  // The folded stack's peeking cards leave room under it (notifications.css); open has none - eased out with the rest.
-  const gap = Number(stack.dataset.depth) === 2 ? 10 : 5;
-  add(stack, [{ marginBottom: `${gap}px` }, { marginBottom: "0px" }]);
-  add(rest, [{ gridTemplateRows: "0fr", opacity: 0 }, { gridTemplateRows: "1fr", opacity: 1 }]);
-  add(head, [{ maxHeight: "0px", opacity: 0, overflow: "hidden" }, { maxHeight: "64px", opacity: 1, overflow: "hidden" }]);
+  a.pause();
+  a.currentTime = peekK * MS;
+  peekAnims.add(a);
+}
+/**
+ * [stack] tied to the pull's progress k (0 folded .. 1 unfolded): one paused Web Animation per part, no style per frame.
+ * Both ways the top card morphs with k: its "+N" badge shrinks away, the peeking cards under it (the stack's pseudos,
+ * notifications.css "peek") fade into the rest. Opening, the rest unfolds in place (its layout grows: it can't clamp a
+ * scroll). Folding, nothing is laid out until the settle - a shrinking list would clamp the scroll under the finger: the
+ * head, top card and rest slide up (the rest clipped under the card) by transforms only, and everything after the stack
+ * comes up with it by the same running offset (composited "add", so each stack before one adds its own); at the settle
+ * the folded layout is committed in the same frame the animations are cancelled - the k=0 frame is that layout.
+ */
+export function attachPeek(stack: HTMLElement) {
+  if (!pull?.grid || peeked.has(stack)) return;
+  peeked.add(stack);
+  const card = stack.querySelector<HTMLElement>(":scope > .notif");
+  peekAnim(card?.querySelector(".notif-more"), [{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(0.6)" }]);
+  (pull.was ? foldPeek : openPeek)(stack, card);
+}
+
+/** The stack's parts, and the room its folded peeking cards leave under it (notifications.css; open has none). */
+function parts(stack: HTMLElement) {
+  return {
+    rest: stack.querySelector<HTMLElement>(":scope > .notif-rest"),
+    head: stack.querySelector<HTMLElement>(":scope > .notif-group-head"),
+    gap: Number(stack.dataset.depth) === 2 ? 10 : 5,
+  };
+}
+
+/** Opening: the rest unfolds in place, the head grows in, the peeking cards fade into the rest. */
+function openPeek(stack: HTMLElement) {
+  const { rest, head, gap } = parts(stack);
+  peekAnim(stack, [{ marginBottom: `${gap}px` }, { marginBottom: "0px" }]);
+  peekAnim(rest, [{ gridTemplateRows: "0fr", opacity: 0 }, { gridTemplateRows: "1fr", opacity: 1 }]);
+  peekAnim(head, [{ maxHeight: "0px", opacity: 0, overflow: "hidden" }, { maxHeight: "64px", opacity: 1, overflow: "hidden" }]);
+  peekAnim(stack, [{ opacity: 1 }, { opacity: 0 }], { pseudo: "::before" });
+  peekAnim(stack, [{ opacity: 0.6 }, { opacity: 0 }], { pseudo: "::after" });
+}
+
+/** Folding: transforms only (heights measured once, now - laid out open), what follows up by the running offset. */
+function foldPeek(stack: HTMLElement, card: HTMLElement | null) {
+  const { rest, head, gap } = parts(stack);
+  const hh = head?.offsetHeight ?? 0;
+  const hr = rest?.offsetHeight ?? 0;
+  const up = (px: number) => `translateY(${-px}px)`;
+  peekAnim(head, [{ opacity: 0, transform: up(hh) }, { opacity: 1, transform: "none" }]);
+  peekAnim(card, [{ transform: up(hh) }, { transform: "none" }]);
+  peekAnim(rest, [
+    { opacity: 0, transform: up(hh + hr), clipPath: `inset(${hr}px 0px 0px 0px)` },
+    { opacity: 1, transform: "none", clipPath: "inset(0px 0px 0px 0px)" },
+  ]);
+  peekAnim(stack, [{ opacity: 1, transform: up(hh + hr) }, { opacity: 0, transform: "none" }], { pseudo: "::before" });
+  peekAnim(stack, [{ opacity: 0.6, transform: up(hh + hr) }, { opacity: 0, transform: "none" }], { pseudo: "::after" });
+  for (let el = stack.nextElementSibling; el; el = el.nextElementSibling) {
+    peekAnim(el, [{ translate: `0px ${gap - hh - hr}px` }, { translate: "0px 0px" }], { add: true });
+  }
+}
+
+/** The peek's progress k on every tied animation. */
+function peekTo(k: number) {
+  peekK = k;
+  for (const a of peekAnims) a.currentTime = k * MS;
+}
+
+/** EASE as a function of time (0..1): the cubic bezier solved for x (Newton, then bisection). */
+function eased(t: number) {
+  const [x1, y1, x2, y2] = [0.2, 0.9, 0.3, 1];
+  const bz = (s: number, a: number, b: number) => 3 * a * s * (1 - s) ** 2 + 3 * b * s * s * (1 - s) + s ** 3;
+  let lo = 0, hi = 1, s = t;
+  for (let i = 0; i < 20; i++) {
+    const x = bz(s, x1, x2) - t;
+    if (Math.abs(x) < 1e-5) break;
+    if (x > 0) hi = s;
+    else lo = s;
+    s = (lo + hi) / 2;
+  }
+  return bz(s, y1, y2);
+}
+let rideFrame = 0;
+/** The tied animations from k [from] to [to] on the translate's own curve and duration (one currentTime a frame). */
+function ride(from: number, to: number) {
+  cancelAnimationFrame(rideFrame);
+  const t0 = performance.now();
+  const step = (now: number) => {
+    const t = Math.min(1, Math.max(0, (now - t0) / MS));
+    peekTo(from + (to - from) * eased(t));
+    if (t < 1) rideFrame = requestAnimationFrame(step);
+  };
+  rideFrame = requestAnimationFrame(step);
 }
 
 /** The control center's edit mode (ui/reorder.ts, as home's): entered by a long press on a tile, left by its "done". */
@@ -161,8 +240,7 @@ function place(p: Pull, r: number) {
   if (p.grid) {
     const k = p.h > 0 ? Math.min(1, Math.max(0, r / p.h)) : 1;
     p.grid.style.setProperty("--cc-k", String(k));
-    peekK = k;
-    for (const a of peekAnims) a.currentTime = k * MS;
+    peekTo(k);
     for (const m of p.movers) m.el.style.translate = `0 ${r - p.h}px`;
     p.panel?.style.setProperty("--cc-lift", `${Math.max(0, p.g - r)}px`);
     return;
@@ -200,11 +278,12 @@ function ease(p: Pull, r: number, on: boolean) {
   // The panel's own --q keeps its transition (shell.css [data-q]); its lift eases with the rest.
   p.panel?.style.setProperty("transition", `--q 280ms ${EASE}, --cc-lift ${MS}ms ${EASE}`);
   p.to = on;
-  place(p, r);
   // The groups ride the same ease, from where the finger left them to the end (at the translate's duration).
-  for (const a of peekAnims) {
-    a.playbackRate = on ? 1 : -1;
-    a.play();
+  const k0 = peekK;
+  place(p, r);
+  if (p.grid) {
+    peekTo(k0);
+    ride(k0, on ? 1 : 0);
   }
   clearTimeout(doneTimer);
   doneTimer = window.setTimeout(() => finish(p, on), MS + 40);
@@ -231,8 +310,10 @@ function clearInline(p: Pull) {
     el.style.removeProperty("--cc-k");
   }
   p.grid?.classList.remove("cc-peek");
+  cancelAnimationFrame(rideFrame);
   for (const a of peekAnims) a.cancel();
   peekAnims.clear();
+  peeked.clear();
   peekK = 0;
   ccPeeking.value = null;
   for (const k of ["--cc-lift", "transition"]) p.panel?.style.removeProperty(k);
