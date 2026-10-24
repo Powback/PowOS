@@ -241,6 +241,18 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   window: now window N"); the helper's exit + 3 s ends one still waiting. Not yet for games (Runtime.launch).
   Check: verify/launch-window.sh (task within 1.5 s of the tap, same task + bounds once Steam's window comes).
 
+## Latest hand-off
+- State (2026-10-24): one title bar (kwin 0026, pkg 6.7.5-3.30: "decor"/"move") + launch windows (LaunchWindows.java)
+  are on origin; nothing ran on the phone (ships/queue paused). Queued: one-title-bar.sh (installs 3.30 via
+  linux-float.sh first) and launch-window.sh, both --close on their board tasks.
+- Gotchas: the 3.30 package lives only in csd-launch's out/pkgs (keep it until the check ran). kwin patch numbers
+  collide between agents (0025 was taken twice): look at origin's pkgs/kwin right before you add one. Steam's own bar
+  may not ask KWin for a move (unmeasured): then only the grip resizes, nothing moves it. An adopted launch window keeps
+  its launch data as the task's base intent (finishStale/kept, onSaveInstanceState carry the window's own).
+- Next: read both check results; if no "move N" in logcat on a Steam bar drag, find how Steam moves itself (X
+  configure requests?) and map that to the task; launch windows for games (Runtime.launch); Steam's own
+  minimise/maximise buttons on a task.
+
 ## Fold / unfold with apps and games running (2026-10-24, fold-launch)
 - Unfold used to make Plasma's desktop (HomeDesktop) Android's default home and start it (FoldWatcher.unfolded, setting
   home_screen "auto"): it covered the web home; Android's recents transition then targeted HomeDesktop while PowOS's Home
