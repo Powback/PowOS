@@ -42,13 +42,25 @@ sq=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}   # the ship service's dir: its pa
 # Ship only what's already on origin/worktree-powos-multiplatform: a build from an unpushed commit (8f2a606) left
 # every other agent's next build refused for lacking it.
 git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+# Only refuse a request whose own commit isn't on origin at all (force-pushed away, or never pushed). A commit that
+# IS on origin but origin has since moved past is NOT refused here (friction f36: "HEAD is behind origin" refused
+# ships from the service's own checkout lagging origin by the time the build started - the service's whole job is
+# to ship origin's TIP, never its own stale snapshot).
 if ! git merge-base --is-ancestor HEAD origin/worktree-powos-multiplatform 2>/dev/null; then
   echo "ship-apk: REFUSED - HEAD isn't on origin/worktree-powos-multiplatform yet: fast-forward/rebase and push first" >&2; exit 3
 fi
-# ...and it must BE that tip: the install resets every shell override, so a build missing a newer shell-only push (a
-# revert that brought the blur back, 10:15) silently undid it on the phone at 10:17.
+# ...and the BUILD must be at that tip: the install resets every shell override, so a build missing a newer
+# shell-only push (a revert that brought the blur back, 10:15) silently undid it on the phone at 10:17. The service
+# (POWOS_SHIP_SERVICE=1) catches itself up to origin's tip instead of refusing - it just confirmed above that HEAD's
+# own commit is still in origin's history, so this only ever fast-forwards. A human's --direct ship still refuses
+# and asks them to pull/rebase by hand (an emergency ship from an old snapshot should be deliberate).
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/worktree-powos-multiplatform)" ]; then
-  echo "ship-apk: REFUSED - HEAD is behind origin/worktree-powos-multiplatform: git pull --ff-only (or rebase) first" >&2; exit 3
+  if [ "${POWOS_SHIP_SERVICE:-}" = 1 ]; then
+    echo "ship-apk: HEAD was behind origin/worktree-powos-multiplatform - catching up to its tip before building"
+    git reset -q --hard origin/worktree-powos-multiplatform
+  else
+    echo "ship-apk: REFUSED - HEAD is behind origin/worktree-powos-multiplatform: git pull --ff-only (or rebase) first" >&2; exit 3
+  fi
 fi
 last=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
 if [ -n "$last" ] && ! git merge-base --is-ancestor "$last" HEAD 2>/dev/null; then
