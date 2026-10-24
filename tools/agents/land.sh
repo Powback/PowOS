@@ -205,6 +205,11 @@ else
   fi
 fi
 
+# After the push succeeds, capture and print the final SHA (after rebase) and subject
+final_sha=$(git rev-parse --short HEAD)
+final_subj=$(git log -1 --format=%s)
+echo "land: pushed $final_sha $final_subj"
+
 # 4.5. warn about untracked files left in the worktree (excluding gitignored and symlinks)
 untracked=()
 while IFS= read -r f; do

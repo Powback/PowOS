@@ -263,6 +263,88 @@ class WaitGuardTests(unittest.TestCase):
         out = p.stdout.strip()
         self.assertAllowed(out)
 
+    # -- git commands in powos-multiplatform checkouts (f201) -------------------------------------------
+    def test_git_commit_with_cd_into_powos_multiplatform_is_denied(self):
+        """git commit with 'cd powos-multiplatform &&' is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && git commit -m 'fix'")
+        self.assertDenied(out, "make your own worktree")
+
+    def test_git_push_with_cd_into_powos_multiplatform_is_denied(self):
+        """git push with 'cd powos-multiplatform &&' is denied."""
+        out = self.run_hook("cd /home/user/pw/powos-multiplatform && git push origin main")
+        self.assertDenied(out, "make your own worktree")
+
+    def test_git_rebase_with_cd_into_powos_multiplatform_is_denied(self):
+        """git rebase with 'cd powos-multiplatform &&' is denied."""
+        out = self.run_hook("cd /some/path/powos-multiplatform && git rebase origin/main")
+        self.assertDenied(out, "make your own worktree")
+
+    def test_git_merge_with_cd_into_powos_multiplatform_is_denied(self):
+        """git merge with 'cd powos-multiplatform &&' is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && git merge feature-branch")
+        self.assertDenied(out, "make your own worktree")
+
+    def test_git_commit_with_c_flag_into_powos_multiplatform_is_denied(self):
+        """git commit with 'git -C powos-multiplatform' is denied."""
+        out = self.run_hook("git -C /Users/macback/pw/powos-multiplatform commit -m 'fix'")
+        self.assertDenied(out, "make your own worktree")
+
+    def test_git_push_with_c_flag_into_powos_multiplatform_is_denied(self):
+        """git push with 'git -C powos-multiplatform' is denied."""
+        out = self.run_hook("git -C /home/user/pw/powos-multiplatform push origin main")
+        self.assertDenied(out, "make your own worktree")
+
+    def test_git_rebase_with_c_flag_into_powos_multiplatform_is_denied(self):
+        """git rebase with 'git -C powos-multiplatform' is denied."""
+        out = self.run_hook("git -C /some/path/powos-multiplatform rebase origin/main")
+        self.assertDenied(out, "make your own worktree")
+
+    def test_git_merge_with_c_flag_into_powos_multiplatform_is_denied(self):
+        """git merge with 'git -C powos-multiplatform' is denied."""
+        out = self.run_hook("git -C /Users/macback/pw/powos-multiplatform merge feature")
+        self.assertDenied(out, "make your own worktree")
+
+    def test_git_log_in_powos_multiplatform_is_allowed(self):
+        """git log (read-only) in powos-multiplatform is allowed."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && git log --oneline")
+        self.assertAllowed(out)
+
+    def test_git_status_in_powos_multiplatform_is_allowed(self):
+        """git status (read-only) in powos-multiplatform is allowed."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && git status")
+        self.assertAllowed(out)
+
+    def test_git_diff_in_powos_multiplatform_is_allowed(self):
+        """git diff (read-only) in powos-multiplatform is allowed."""
+        out = self.run_hook("git -C /Users/macback/pw/powos-multiplatform diff HEAD")
+        self.assertAllowed(out)
+
+    def test_git_show_in_powos_multiplatform_is_allowed(self):
+        """git show (read-only) in powos-multiplatform is allowed."""
+        out = self.run_hook("git -C /Users/macback/pw/powos-multiplatform show HEAD:file.txt")
+        self.assertAllowed(out)
+
+    def test_git_fetch_in_powos_multiplatform_is_allowed(self):
+        """git fetch (read-only) in powos-multiplatform is allowed."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && git fetch origin")
+        self.assertAllowed(out)
+
+    def test_git_commit_in_agent_worktree_is_allowed(self):
+        """git commit in agent's own worktree is allowed."""
+        out = self.run_hook("cd /Users/macback/pw/my-agent-task && git commit -m 'fix'")
+        self.assertAllowed(out)
+
+    def test_git_push_in_agent_worktree_is_allowed(self):
+        """git push in agent's own worktree is allowed."""
+        out = self.run_hook("cd /Users/macback/pw/my-task && git push origin main")
+        self.assertAllowed(out)
+
+    def test_main_session_git_commit_in_powos_multiplatform_is_allowed(self):
+        """Main session is allowed to commit in powos-multiplatform (no guard)."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && git commit -m 'fix'",
+                            transcript_path=MAIN_TRANSCRIPT)
+        self.assertAllowed(out)
+
 
 if __name__ == "__main__":
     unittest.main()

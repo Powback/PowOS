@@ -219,6 +219,19 @@ out=$(cd "$W9" && "$LAND" "test with untracked file" -- tracked.txt 2>&1); rc=$?
 grep -q "untracked file" <<<"$out" && ok "warns about untracked files" || bad "warns about untracked files" "$out"
 grep -q "test_x.sh" <<<"$out" && ok "names the untracked test file" || bad "names the untracked test file" "$out"
 
+# == 10. final SHA is printed: land.sh must print the final SHA (after rebase) as the last line for agents to use
+# when closing friction items - the SHA changes during rebase, so the committed SHA is stale (f203) ==============
+W10="$TMP/w10"; new_worktree "$W10"
+echo change10 > "$W10/tracked.txt"
+out=$(cd "$W10" && "$LAND" "final sha test" -- tracked.txt 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "final SHA test lands successfully" || bad "final SHA test lands successfully" "rc=$rc: $out"
+# The output must contain a line like "land: pushed <sha> <subject>" as the final summary line
+pushed_line=$(echo "$out" | grep "^land: pushed")
+[ -n "$pushed_line" ] && ok "prints the final SHA with 'land: pushed' format" || bad "prints the final SHA with 'land: pushed' format" "$(echo "$out" | tail -5)"
+# The pushed line should be the last line of the output (after the rebased/pushed line)
+last_line=$(echo "$out" | tail -1)
+echo "$last_line" | grep -q "^land: pushed" && ok "final SHA is the last output line" || bad "final SHA is the last output line" "last_line=$last_line"
+
 echo ""
 echo "== Results: $PASS passed, $FAIL failed =="
 [ $FAIL -eq 0 ]

@@ -66,6 +66,10 @@ PHONE_INPUT_RE = re.compile(r'\b(?:adb|user)\.sh\b[\s\S]{0,200}?\binput\s+(?:tap
 # The documented bypass: LOCK_HELD=1 (or any non-"0" value) anywhere in the command.
 LOCK_HELD_SET_RE = re.compile(r'\bLOCK_HELD=(?!0\b)\S')
 
+# git commit/push/rebase/merge commands - check if running in powos-multiplatform checkout
+# Allows for git -C <path> flags
+GIT_CMD_RE = re.compile(r'\bgit\s+(?:-C\s+\S+\s+)?(?:commit|push|rebase|merge)\b')
+
 
 def _is_subagent(inp):
     """Same rule as agent-notices.py: budgets/guards are for subagents only - the user's own sessions
@@ -110,6 +114,62 @@ def _is_in_runner_checkout(file_path):
     return False
 
 
+def _extract_git_cwd(cmd):
+    """Extract the working directory for a git command.
+
+    Handles:
+      - cd X && git ...
+      - git -C X ...
+      - implicit cwd
+
+    Returns the cwd as a string, or None if not extractable.
+    """
+    # Check for 'cd X &&' pattern
+    cd_match = re.search(r'\bcd\s+(\S+)\s*&&', cmd)
+    if cd_match:
+        path = cd_match.group(1)
+        # Strip quotes if present
+        if path.startswith(("'", '"')) and path.endswith(path[0]):
+            path = path[1:-1]
+        return path
+
+    # Check for 'git -C X' pattern
+    git_c_match = re.search(r'\bgit\s+-C\s+(\S+)', cmd)
+    if git_c_match:
+        path = git_c_match.group(1)
+        # Strip quotes if present
+        if path.startswith(("'", '"')) and path.endswith(path[0]):
+            path = path[1:-1]
+        return path
+
+    # No explicit cwd in the command
+    return None
+
+
+def _is_dangerous_git_in_powos_multiplatform(cmd):
+    """Check if command runs git commit/push/rebase/merge in a powos-multiplatform checkout.
+
+    Returns True (deny) if:
+      - Contains 'git commit', 'git push', 'git rebase', or 'git merge'
+      - AND (explicit cwd is in powos-multiplatform OR implicit cwd via .git detection)
+    """
+    if not GIT_CMD_RE.search(cmd):
+        return False
+
+    # Extract explicit cwd if present
+    explicit_cwd = _extract_git_cwd(cmd)
+    if explicit_cwd:
+        return _is_in_powos_multiplatform(explicit_cwd) or _is_in_runner_checkout(explicit_cwd)
+
+    # No explicit cwd; check if the command itself indicates a cwd
+    # In most cases, implicit commands run in the current shell cwd which we can't know.
+    # However, if there's no explicit cwd, we have to be conservative and not deny
+    # (the agent might be running from a safe worktree).
+    # But if the command starts with 'cd powos-multiplatform && git' we catch it above.
+    # For now, be safe and don't deny commands without explicit cwd markers.
+    return False
+
+
 def main():
     try:
         inp = json.load(sys.stdin)
@@ -144,6 +204,11 @@ def main():
                   "queue - it can race a check running in a locked window (f24). Queue it instead: "
                   "tools/phone/verify/queue.sh add <task> <check>; or, only once you've checked the lock "
                   "yourself (or you're on the emulator), prefix the command with LOCK_HELD=1.")
+            return
+
+        # Check for dangerous git commands in powos-multiplatform checkouts
+        if _is_dangerous_git_in_powos_multiplatform(cmd):
+            _deny("make your own worktree: tools/agents/worktree.sh new <name>")
             return
 
     # Handle Edit/Write/MultiEdit tools: shared checkout checks
