@@ -7,7 +7,7 @@
 # spot (read-only CDP finds one: no tile, outside the window) to page 2 hides it; swiping back shows it at the same
 # bounds; its app opened while page 2 shows moves it to page 2; home's app killed and back, it's still page 2's. Always
 # restores: Calculator stopped,
-# home's first page, `cmd device_state state reset`. Exit: 0 passed; 1 FAIL: ...; 3 a real touch / no free window;
+# home's first page, `cmd device_state state reset`. Both first swipes must slide the window with the page (slid). Exit: 0 passed; 1 FAIL: ...; 3 a real touch / no free window;
 # 5 can't run (no screen size, a PIN, one home page only). Injected input only; a free window first, the lock then.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
@@ -96,7 +96,7 @@ key=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$PKG\\//.test(a.key))||{}).key||'E
 case $key in a:$PKG/*) ;; *) fail "Calculator's key: $key" ;; esac
 # The main log rotates in seconds (256 KiB, OplusTouch spam): a `logcat -d` after the fact found nothing. Capture the
 # tags from the launch on, on the phone, bounded (timeout); hiddenapi denials log under the app's process name.
-sh_ "rm -f /data/local/tmp/fd-log.txt; (timeout 40 logcat -T 1 -v time -s PowosWindowFrames PowosFreeform PowosRunning com.powos.app:W </dev/null >/data/local/tmp/fd-log.txt 2>&1 &)"
+sh_ "rm -f /data/local/tmp/fd-log.txt; (timeout 40 logcat -T 1 -v time -s PowosWindowFrames PowosFreeform PowosRunning PowosPageSlide com.powos.app:W </dev/null >/data/local/tmp/fd-log.txt 2>&1 &)"
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch: $r"
 sleep 2.5; chk launch
 id=$(hcall windows.list "[]" "l=>(l.find(w=>w.pkg==='$PKG')||{id:'none'}).id"); echo "window $id" | tee -a "$OUT/log.txt"
@@ -112,12 +112,30 @@ P1=$(hcall store.get "['home.windows']" "m=>m&&m['$id']"); echo "stored page id:
 [ -n "$P1" ] && [ "$P1" != undefined ] && [ "$P1" != null ] || fail "the window got no page (home.windows has no $id)"
 "$T/shot.sh" "$OUT/1-open-page1.png"; pass "opened on page 1, stored on page id $P1"
 
+# The window slid with the page (PageSlide.kt, one leash transaction per frame): its swipe's PowosPageSlide end line
+# says it landed, after how long and how many frames moved; under 40 frames/s over the swipe it lagged the finger.
+slid() {
+  local l ms fr; sleep 0.5
+  l=$(sh_ "grep PowosPageSlide /data/local/tmp/fd-log.txt | grep -F \"end (\" | tail -1")
+  echo "slide $1: ${l:-none}" >>"$OUT/log.txt"
+  [ "$l" != "$SLID" ] && [ -n "$l" ] || fail "$1: the window didn't slide with the page (no PowosPageSlide end line)"
+  SLID=$l
+  case $l in *"(landed)"*) ;; *) fail "$1: the slide didn't land: $l" ;; esac
+  ms=$(echo "$l" | sed -n 's/.* after \([0-9]*\) ms: \([0-9]*\) frames.*/\1/p'); fr=$(echo "$l" | sed -n 's/.* ms: \([0-9]*\) frames.*/\1/p')
+  [ -n "$ms" ] && [ -n "$fr" ] && [ "$ms" -gt 0 ] || fail "$1: unreadable slide line: $l"
+  [ $((fr * 1000 / ms)) -ge 40 ] && pass "$1: slid with the page, $fr frames in $ms ms ($((fr * 1000 / ms)) fps)" \
+    || fail "$1: the slide lagged - $fr frames in $ms ms ($((fr * 1000 / ms)) fps, want >= 40)"
+}
+SLID=
+
 swipe -1; chk swipe2
+slid "swipe to page 2"
 "$T/shot.sh" "$OUT/2-page2-hidden.png"
 [ "$(onpage)" = 1 ] && [ "$(vis)" = visible=false ] && [ "$(away)" = true ] && pass "swiped to page 2: hidden" \
   || fail "on page 2: page $(onpage), $(vis), away=$(away)"
 
 swipe 1; chk swipe1
+slid "swipe back to page 1"
 "$T/shot.sh" "$OUT/3-page1-back.png"
 B2=$(bounds); echo "bounds back on page 1: $B2" | tee -a "$OUT/log.txt"
 [ "$(onpage)" = 0 ] && [ "$(vis)" = visible=true ] && [ "$(away)" = false ] || fail "back on page 1: page $(onpage), $(vis), away=$(away)"
