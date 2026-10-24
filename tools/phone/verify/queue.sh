@@ -1,6 +1,6 @@
 #!/bin/bash
 # tools/phone/verify/queue.sh: ONE queue for every on-device check, so no agent waits on the phone itself.
-#   queue.sh add [--close] [--name TEXT] [--screen inner|cover] [--budget S] <board-task> <cmd> [args...]
+#   queue.sh add [--close] [--dev phone|emu] [--name TEXT] [--screen inner|cover] [--budget S] <board-task> <cmd> [args...]
 #        queue a Mac-side check (a tools/phone/verify/*.sh or any command that drives the phone) and return at once;
 #        starts the runner if none runs, and marks the board task's step "phone check queued" (the AI page's "test now")
 #        env vars: queue them through env, e.g. `queue.sh add t env PROFILE=1 shell/dev/perf/drag-raster.sh 12`
@@ -8,9 +8,16 @@
 #        --name: what the phone's status pill says is being tested (default: the script's name)
 #        --screen: the screen it needs (the pill asks to fold / unfold); default either
 #        --budget: seconds it may run (default 300); past it the runner kills it: "FAIL timeout" on the board and pill
+#        --dev emu: the EMULATOR lane (tools/emu/emu.sh, the AVD shaped like the Open's inner screen): runs at once, no
+#             free phone window waited for, with POWOS_DEVICE=emu (adb.sh & co. reach the emulator); the emulator is
+#             started from its snapshot and runs the APK of origin's tip (its build is the ship wait). One emu runner,
+#             jobs in turn, own checkout (.claude/worktrees/emu-runner). Hardware checks stay phone-only (refused here:
+#             games, Steam, fps, fold, kernel). Results: the board as for phone checks (step "emulator PASS: ..."),
+#             kept and sent again later when the board (on the phone) can't be reached.
 #   queue.sh list                               queued, running, paused and the last results
 #   queue.sh pause | resume                     pause the runner (what the pill's tap does) / resume it (go=all)
 #   queue.sh run                                the runner: launchd's agent com.powos.verify-runner (runner-deploy.sh)
+#   queue.sh run-emu                            the emulator lane's runner (add --dev emu starts it; ends when nothing waits)
 #        starts it when add kicks it (launchctl kickstart) and again if it dies; without the agent, add starts one. Stays while anything is queued.
 # The runner waits for ONE free window (window-lock.sh: screen on, no touch for 120 s, then the verify lock), runs every
 # queued check in it with LOCK_HELD=1, then releases the lock. "Test now" on the AI page (VerifyRun.kt) writes the phone's
@@ -57,6 +64,12 @@ agent_kick() { local p=$HOME/Library/LaunchAgents/$LABEL.plist
 # runner's state word for the AI page goes to the phone's /data/local/tmp/powos-verify-runner first (its heartbeat).
 phone_sh() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
   perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell "${RSTATE:+printf $RSTATE > /data/local/tmp/powos-verify-runner; }su -c 'sh /data/powos/powos-run.sh \"echo $b | base64 -d | bash\"'" 2>/dev/null; }
+killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c" "${2:-TERM}"; done; kill -"${2:-TERM}" "$1" 2>/dev/null; }
+# endjob <pid>: TERM its tree, KILL what's left after 5 s.
+endjob() { killtree "$1"; for _ in 1 2 3 4 5; do kill -0 "$1" 2>/dev/null || return 0; sleep 1; done; killtree "$1" KILL; }
+# The emulator lane: its jobs, its runner's checkout. HW_ONLY: what only the phone's hardware can answer.
+E=$Q/emu; ET=$REPO/.claude/worktrees/emu-runner
+HW_ONLY='^(bf-|steam-|td-launch|mc-launch|games?-)|fps|fold|kernel'
 # wt_of <abs path>: the PowOS worktree it lies in (wroot) and the path under it (wsub, "" = the root); fails outside.
 wt_of() {
   [ -n "$REPO" ] || return 1
@@ -84,6 +97,7 @@ relify() {
 # verify_tree: the runner's checkout - made if missing (shell/node_modules linked from powos-multiplatform), then
 # fast-forwarded to origin's tip.
 verify_tree() {
+  local VR=${1:-$VR}
   [ -z "${QUEUE_NO_TREE:-}" ] || return 0   # tests: never touch the real runner's checkout
   git -C "$REPO" fetch -q origin "$BASE" || echo "verify checkout: fetch failed - running on what it has"
   if [ ! -e "$VR/.git" ]; then
@@ -98,11 +112,12 @@ verify_tree() {
 }
 case "${1:-}" in
 add)
-  shift; close=0; name=; screen=; budget=300
+  shift; close=0; name=; screen=; budget=300; dev=phone
   while :; do case "${1:-}" in
-    --close) close=1; shift ;; --name) name=${2:-}; shift 2 ;; --screen) screen=${2:-}; shift 2 ;;
+    --close) close=1; shift ;; --name) name=${2:-}; shift 2 ;; --screen) screen=${2:-}; shift 2 ;; --dev) dev=${2:-}; shift 2 ;;
     --budget) budget=${2:-}; shift 2 ;; *) break ;; esac; done
-  [ $# -ge 2 ] || { echo "usage: queue.sh add [--close] [--name TEXT] [--screen inner|cover] [--budget S] <board-task> <cmd> [args...]"; exit 2; }
+  case "$dev" in phone|emu) ;; *) echo "queue.sh: --dev phone|emu"; exit 2 ;; esac
+  [ $# -ge 2 ] || { echo "usage: queue.sh add [--close] [--dev phone|emu] [--name TEXT] [--screen inner|cover] [--budget S] <board-task> <cmd> [args...]"; exit 2; }
   [[ $budget =~ ^[1-9][0-9]*$ ]] || { echo "queue.sh: --budget <seconds>"; exit 2; }
   # A budget over the 300 s default needs a reason (QUEUE_BUDGET_WHY): game checks were given 900/1500 s to "pass",
   # and the user's rule is that a game check over 300 s is a FAIL, never a reason to wait longer (friction f7).
@@ -116,6 +131,12 @@ add)
   [ -x "$here/$1" ] && [ ! -x "$1" ] && set -- "$here/$1" "${@:2}"
   if [ -z "$name" ]; then  # the script's name (past `env A=1 ...`)
     for a in "$@"; do case "$a" in */env|env|*=*) ;; *) name=$(basename "$a"); break ;; esac; done; name=${name%.sh}
+  fi
+  # The emulator has no phone hardware: a game, Steam, frame pacing, the hinge or the phone's kernel is the phone's.
+  if [ "$dev" = emu ]; then
+    for a in "$name" "$@"; do
+      if basename -- "$a" 2>/dev/null | grep -qiE "$HW_ONLY"; then echo "queue.sh: $(basename -- "$a") is a phone-hardware check (games, Steam, fps, fold, kernel) - queue it without --dev emu"; exit 2; fi
+    done
   fi
   # Broken checks never reach the phone (2026-10-23: about half the day's FAILs were the checks' own bugs - an unset
   # $2/$3, a zsh-unsplit "id name" arriving as one argument plus an empty one): every .sh in the command must parse
@@ -141,16 +162,22 @@ add)
   # behind 8 duplicates (friction f41, 2026-10-23). QUEUE_DUP=1 queues it anyway.
   cl="cmd=($(printf '%q ' "${cmd[@]}")"
   if [ "${QUEUE_DUP:-0}" != 1 ]; then
-    for o in "$Q"/*.job; do
+    qd=$Q; [ "$dev" = emu ] && qd=$E   # per lane: the same check on the phone and on the emulator is two answers
+    for o in "$qd"/*.job; do
       [ -f "$o" ] || continue
       grep -qxF "task=$(printf '%q' "$task")" "$o" && grep -qF "$cl" "$o" && { echo "already queued as $(basename "$o" .job) - not added again (QUEUE_DUP=1 to add anyway)"; exit 0; }
     done
   fi
-  j=$Q/$(date +%Y%m%d-%H%M%S)-$$-$task.job
+  qd=$Q; [ "$dev" = emu ] && { qd=$E; mkdir -p "$E"; }
+  j=$qd/$(date +%Y%m%d-%H%M%S)-$$-$task.job
   { printf 'task=%q\nclose=%s\ntries=0\ncwd=%q\nrel=%s\nfrom=%q\nname=%q\nscreen=%q\nbudget=%s\nneed=%s\nqt=%s\ncmd=(' "$task" "$close" "$cwd" "$rel" "$from" "$name" "$screen" "$budget" "$need" "$(date +%s)"
     printf '%q ' "${cmd[@]}"; printf ')\n'; } > "$j"
-  echo "queued $(basename "$j" .job) - the result goes to board task $task"
-  if [ -z "${QUEUE_NO_RUN:-}" ]; then
+  echo "queued $(basename "$j" .job)$([ "$dev" = emu ] && echo " on the emulator (runs now)") - the result goes to board task $task"
+  if [ "$dev" = emu ] && [ -z "${QUEUE_NO_RUN:-}" ]; then
+    ( user_sh "$(printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true\npowos agents check set %q %q queued --name %q --need %q >/dev/null 2>&1 || true' \
+        "$task" "emulator check queued" "$task" "$(basename "$j" .job)" "emu:$name" "$need")" & ) >/dev/null 2>&1
+    alive_runner "$(cat "$E/runner.lock/pid" 2>/dev/null)" || { nohup "$0" run-emu >> "$E/runner.log" 2>&1 & }
+  elif [ -z "${QUEUE_NO_RUN:-}" ]; then
     # The board marker: the AI page offers "test now" on a task whose step says so (the result's step replaces it).
     # And the check itself (the board's work_check: its truthful "awaiting-check", and the done rule's facts).
     ( user_sh "$(printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true\npowos agents check set %q %q queued --name %q --need %q >/dev/null 2>&1 || true' \
@@ -169,6 +196,7 @@ resume)  # the AI page's resume: the go flag (go=all) the runner's wait watches
 list)
   echo "queued:"; ls "$Q"/*.job 2>/dev/null | sed 's|.*/|  |' || true
   echo "runner: $(runner_up && echo running || echo idle)$([ -e "$Q/paused" ] && echo ", PAUSED (queue.sh resume)")$(agent_loaded && echo " (launchd $LABEL)")"
+  echo "emulator lane: $(ls "$E"/*.job 2>/dev/null | wc -l | tr -d ' ') queued, runner $(alive_runner "$(cat "$E/runner.lock/pid" 2>/dev/null)" && echo running || echo idle)$(n=$(ls "$E"/pending/*.sh 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || echo ", $n results waiting for the board")"
   echo "last results:"; ls -t "$Q/done" 2>/dev/null | grep "\.log$" | head -8 | while read -r f; do echo "  $f: $(tail -1 "$Q/done/$f")"; done ;;
 run)
   [ -n "$REPO" ] || { echo "queue.sh run: not in a PowOS checkout"; exit 2; }
@@ -249,9 +277,6 @@ EOS
       s/^-- \d\d:\d\d:\d\d //; s/[[:cntrl:]"\\|&]//g; s/^\s+|\s+$//g;
       next if $_ eq "" || /\d+ files? (pushed|pulled|skipped)|bytes in [\d.]+ ?s\)|^\[\s*\d+%\]|^adb: |Broken pipe|^\d+(\.\d+)? [KM]B\/s/; $l = $_ }
       END { $l //= ""; print length($l) > 60 ? substr($l, 0, 59) . "\x{2026}" : $l }'; }
-  killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c" "${2:-TERM}"; done; kill -"${2:-TERM}" "$1" 2>/dev/null; }
-  # endjob <pid>: TERM its tree, KILL what's left after 5 s.
-  endjob() { killtree "$1"; for _ in 1 2 3 4 5; do kill -0 "$1" 2>/dev/null || return 0; sleep 1; done; killtree "$1" KILL; }
   # `kill <runner.pid>` stops the window and its check too, frees the verify lock if this runner held it, and hides the pill.
   trap 'for c in $(pgrep -P $$); do killtree $c; done; [ "$(cut -d" " -f1 "$HOME/.cache/powos-verify.lock/who" 2>/dev/null)" = verify-queue ] && rm -rf "$HOME/.cache/powos-verify.lock"; RSTATE=stopped status "" "{\"done\":true,\"summary\":\"Phone checks stopped (the runner was stopped)\"}"; rm -f "$Q/runner.pid"; rm -rf "$Q/runner.lock"; exit 143' TERM
   # shipped <commit> <queued at>: 0 when the phone runs that commit - in the live shell (ship service's live), and in
@@ -431,5 +456,6 @@ EOS
   RSTATE=idle phone_sh ':' >/dev/null
   wl_sleep "$phone"   # the screen back off if the queue woke it (window-lock.sh)
   rm -f "$Q/runner.pid"; rm -rf "$Q/runner.lock" ;;
-*) sed -n 2,15p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+run-emu) . "${QUEUE_COPY:-$here}/queue-emu.sh" ;;
+*) sed -n 2,21p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

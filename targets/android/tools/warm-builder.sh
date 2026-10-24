@@ -45,8 +45,24 @@ start() {
   fi
 }
 
+# One build at a time: every build mirrors into the same /work and Gradle writes the same /tmp/gradle-build, so the
+# emulator lane's build (tools/emu/emu.sh, PUBLISH=0) and a ship's would mix. A held lock is waited for (its holder
+# dead: taken over), up to 20 min.
+build_lock() {
+  local l=$HOME/.cache/powos-warm-build.lock i
+  mkdir -p "$HOME/.cache"
+  for i in $(seq 1200); do
+    if mkdir "$l" 2>/dev/null; then echo $$ > "$l/pid"; trap 'rm -rf "$HOME/.cache/powos-warm-build.lock"' EXIT; return 0; fi
+    kill -0 "$(cat "$l/pid" 2>/dev/null)" 2>/dev/null || { sleep 1; kill -0 "$(cat "$l/pid" 2>/dev/null)" 2>/dev/null || rm -rf "$l"; continue; }
+    [ "$i" = 1 ] && echo "warm-builder: another build runs (pid $(cat "$l/pid" 2>/dev/null)) - waiting" >&2
+    sleep 1
+  done
+  echo "warm-builder: the build lock stayed held for 20 min" >&2; return 1
+}
+
 build() {
   local dir=$1 project=${PROJECT:-powos} publish=${PUBLISH:-1}
+  build_lock
   start
   docker exec -e PROJECT="$project" -e PUBLISH="$publish" "$NAME" bash -c '
     set -euo pipefail

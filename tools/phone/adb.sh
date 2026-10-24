@@ -4,6 +4,16 @@
 # Paths given to push/pull are on the Mac (under $HOME: Colima only shares the home directory, not /tmp); they're mounted into a throwaway android-builder container sharing
 # powos-vadb's network, so any session or agent can use it (no per-session mounts).
 set -euo pipefail
+# The device: POWOS_DEVICE=phone (default) or emu - the emulator lane (tools/emu/emu.sh: the AVD shaped like the Open's
+# inner screen), through the SDK's own adb on the Mac. Every check that goes through adb.sh (and cdp.sh, idle.sh,
+# root.sh, user.sh, shot.sh) runs unchanged against it.
+case "${POWOS_DEVICE:-phone}" in
+  phone) ;;
+  emu)
+    [ "${1:-}" = --vpn-state ] && { echo "vpn=emu (the emulator, no VPN)"; exit 0; }
+    exec "${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}/platform-tools/adb" -s "emulator-${EMU_PORT:-5584}" "$@" ;;
+  *) echo "adb.sh: POWOS_DEVICE=${POWOS_DEVICE} - phone or emu" >&2; exit 2 ;;
+esac
 # Fail fast when the phone is off the VPN. adb keeps listing the device after the tunnel died, and every call then
 # HANGS (2026-10-23/24: drops at ~13:40, 16:0x, 19:5x, 02:56 held the ship service, the check queue and the board).
 # Both ends send a keepalive every 25 s, so a live tunnel re-handshakes about every 2 min; a handshake older than

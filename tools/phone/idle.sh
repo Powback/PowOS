@@ -26,6 +26,8 @@
 #        AI page (VerifyRun.kt state): written to /data/local/tmp/powos-verify-runner, touched at every 5 s check (its
 #        heartbeat: a dead runner's goes stale).
 here=$(dirname "$0")
+# The emulator lane (POWOS_DEVICE=emu): nobody touches it - always free, screen on (it never sleeps: emu.sh).
+if [ "${POWOS_DEVICE:-phone}" = emu ]; then echo "idle=86400 screen=Awake act=86400"; exit 0; fi
 # Off the VPN (a stale WireGuard handshake, tools/phone/adb.sh --vpn-state): "offline", exit 69 - never an empty state
 # that reads as busy or free. --wait keeps waiting for it to come back (checked every 30 s on the Mac, no adb call).
 if [ "${1:-}" != "--wait" ] && ! "$here/adb.sh" --vpn-state >/dev/null; then echo "offline"; exit 69; fi

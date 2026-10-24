@@ -431,6 +431,9 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/web/linux-wasm/support/powos-wasm-support.c:20` | C++ exception entry points stubbed as fatal (libc++abi built without exceptions). | Wasm exception handling (-fwasm-exceptions) in libc++abi and the runtime. |
 | `targets/web/rootfs-in-container.sh:9` | Same pacman Landlock-sandbox workaround in Docker. | Same as build-pkgs.sh. |
 | `units/gpu-195/powos-units-shim.json:8` | The unit for that shim (its purpose names the hack). | Same; then `powos units unregister powos-units-shim`. |
+| `tools/emu/su.c:4` | The emulator lane's su is a small setuid binary of ours granting root to adb's shell and the PowOS app (as the phone's Magisk does): there is no Magisk on the AVD. | Magisk's own su on the AVD (a rootAVD-style ramdisk patch in `emu.sh create`), the phone's binary and grant policy. |
+| `tools/emu/emu.sh:201` | The emulator runs SELinux permissive (`setenforce 0` at each start): the AVD's policy has no rules for the app's su children, which the phone's Magisk policy patches in. | Magisk's sepolicy patches on the AVD with its su (above), then enforcing. |
+| `tools/emu/testwin/AndroidManifest.xml:5` | The emulator's test window client takes the package name of the phone's Calculator (`com.oneplus.calculator`), so the window checks that hard-code it run unchanged; the AVD has no OnePlus Calculator. | One test-app setting the checks read (e.g. `E2E_APP` in e2e-lib.sh, default the Calculator; the emulator's client under its own package). |
 <!-- hack-registry:end -->
 
 ---

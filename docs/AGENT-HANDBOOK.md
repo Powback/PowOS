@@ -197,6 +197,23 @@ minimal change and tell them.
 - PowOS apps: `powos app new|build|install|ui|publish|dev` (lib/apps/powos-app), run inside PowOS; the repo's apps/*
   with apps/build.sh + `apps/install.sh <app> [install|publish|ui] --note "..."`.
 
+## The emulator lane: first for window and app checks, the phone only for hardware
+- Window, app, home and shell checks go to the EMULATOR first: `tools/phone/verify/queue.sh add --dev emu <task>
+  <check> [args]` runs at once (no free-phone window, no ship wait beyond its own build), against an arm64 Android 16
+  AVD shaped like the Open's inner screen (2268x2440, 442 dpi) with PowOS as a privileged system app + the recents
+  overlay, as on the phone. The result goes onto the board task like a phone check ("emulator PASS: ..."); while the
+  phone (the board) is unreachable it waits in ~/.cache/powos-verify-queue/emu/pending/. `queue.sh list` shows the lane.
+- The phone (no `--dev`) only for what needs its hardware or Linux session: games, Steam, fps/frame pacing, the fold
+  and cover screen, the kernel, Linux windows (kate, ffplay, Plasma), speech, real touch timing. `--dev emu` refuses
+  games/Steam/fps/fold/kernel checks.
+- Any check runs unchanged against it by hand: `POWOS_DEVICE=emu LOCK_HELD=1 tools/phone/verify/window-max.sh calc`
+  (adb.sh, cdp.sh, idle.sh, shot.sh, root.sh follow POWOS_DEVICE). `tools/emu/emu.sh start|stop|status|reset|install`;
+  `create` once (~10 min), `remove` to drop it (unit units/mac/emu-mac.json, ~13.7 GB with the system image; refuses
+  below 25 GB free). The Calculator there is a test window client under the Calculator's package (tools/emu/testwin).
+- Not on the emulator: the Linux session (rootfs 6+ GB unpacked, KWin on KGSL/Turnip; no room in the 12 GB budget),
+  OnePlus framework behaviour (OxygenOS's flexible windows, its 31-float blur regions), real fps. A PASS there is not a
+  PASS for those.
+
 ## Where things live
 - Shell: shell/ (Preact+TS). Pages = modes (`index.html?mode=lock|shade|assist|glasses`, home = no mode). Bridge
   JS<->Kotlin: shell/bridge.ts + shell/types.ts (events list); Kotlin side ShellBridge.kt.
