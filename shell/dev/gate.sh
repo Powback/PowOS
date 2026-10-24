@@ -57,7 +57,10 @@ while [ $# -gt 0 ]; do
     *) files+=("$1"); shift ;;
   esac
 done
-[ -n "${GATE_STUB_SLEEP:-}" ] || command -v docker >/dev/null || { echo "gate: no docker" >&2; exit 2; }
+if [ -z "${GATE_STUB_SLEEP:-}" ]; then
+  . "$SHELL_DIR/../tools/lib/need-docker.sh"
+  need_docker || { echo "gate: no docker" >&2; exit 2; }
+fi
 t0=$(date +%s)
 # The Mac's 1-min load, measured once up front: a fixed READY_MS can't tell a slow page from a starved one,
 # and under real agent-swarm load (f30: load 25) a page that would boot fine at load 2 missed a fixed 8000 ms

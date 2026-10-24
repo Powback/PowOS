@@ -32,6 +32,11 @@ if [ ${#files[@]} -gt 0 ] && [ "${GATE_LINT:-1}" != 0 ]; then
   fi
 fi
 if [ -n "$kt" ]; then
+  # need_docker (f35: brew upgrade unlinks docker, lint-complexity.sh's own `command -v docker` then fails "no
+  # docker" even though the binary's still in the Cellar) fixes PATH for THIS shell, which lint-complexity.sh
+  # inherits as a child process - one check here covers it without duplicating the probe in every lint script.
+  . "$root/tools/lib/need-docker.sh"
+  need_docker
   k=0; "$root/targets/android/lint-complexity.sh" --only "$kt" || k=$?
   [ $k = 1 ] && s=1
 fi

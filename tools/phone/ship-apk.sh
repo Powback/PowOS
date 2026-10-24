@@ -21,6 +21,11 @@ if [ -z "${SHIP_APK_CURRENT:-}" ]; then
   if [ -s "$cur" ] && ! cmp -s "$cur" "$0"; then SHIP_APK_CURRENT=1 exec bash "$cur" "$@"; fi
   rm -f "$cur"
 fi
+# need_docker (f34, f35: brew upgrade unlinks docker; build-app.sh and the verify `docker run` below both need
+# it, and a bare "command not found" deep in either is a worse failure than catching it here, up front, with
+# the exact fix).
+. tools/lib/need-docker.sh   # cwd is the repo root (cd'd above) - not dirname "$0", which is /tmp after the re-exec
+need_docker || { echo "ship-apk: REFUSED - no docker" >&2; exit 2; }
 note="" now="" silent="" direct=""
 while [ $# -gt 0 ]; do case "$1" in --note) note=$2; shift 2;; --silent) silent=1; shift;; --now) now=1; shift;; --direct) direct=1; shift;; *) echo "unknown: $1" >&2; exit 2;; esac; done
 [ -n "${note// }" ] || [ -n "$silent" ] || { echo "ship-apk: --note \"...\" (or --silent for a change the user can't see) required" >&2; exit 2; }
