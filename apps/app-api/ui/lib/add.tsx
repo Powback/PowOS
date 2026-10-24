@@ -2,15 +2,18 @@
  * "+ add app" (tools/app-api/appcap_add.py): three ways to a draft, and the drafts waiting for review.
  *   1. Describe it: PowOS AI gets a ready prompt in its field (host.askAssistant) and writes the draft itself with
  *      appcap_add.py - the user sends it; the model never runs in App API's runtime.
- *   2. An installed app: a PowOS app (its page + its own database's API) or an Android app (the screens its links open,
- *      host.appLinks - read from its manifest, nothing fired).
+ *   2. An installed app: one searchable list (PowOS apps from the registry's "/installed", Android apps from the
+ *      shell bridge's apps.list via host.androidApps). Tapping one adds a placeholder card to Drafts at once, with
+ *      live progress (lib/pending.tsx), while the runtime builds the draft (host.appLinks for an Android app's deep
+ *      links, or the PowOS app's own database); the card turns into the real draft in place, no navigation.
  *   3. Import its API: an OpenAPI document or a capability spec, from a URL (the runtime fetches it; no credentials)
  *      or a file, or the bundled Open-Meteo sample.
  * A draft is never one of your apps: its review is dry runs only; "Add to my apps" moves it in with the app off.
  */
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { Actions } from "./action";
 import { call, type AppSpec, type DraftInfo, type Host, type InstalledPowos, type Net } from "./api";
+import { optimistic, ProgressRing, StepList, stepsProgress, type PendingState, type PendingStep } from "./pending";
 import { useRuntime } from "./runtime";
 import { Muted, S } from "./ui";
 
@@ -19,6 +22,8 @@ interface Ctx {
   app: string;
   /** A draft was made: review it. */
   review: (draft: string) => void;
+  /** An installed app was picked: a placeholder in Drafts at once, [run] (the real draft) in the background. */
+  startInstalled: (label: string, steps: PendingStep[], run: () => Promise<DraftInfo>) => void;
 }
 
 const PROMPT = (what: string) =>
@@ -76,44 +81,54 @@ function Pick({ label, busy, onPick }: { label: string; busy: boolean; onPick: (
   );
 }
 
-function PowosApps({ host, app, review }: Ctx) {
-  const [d, err] = useRuntime<{ powos: InstalledPowos[] }>(host.net, app, "/installed");
-  const [busy, perr, run] = useAct();
-  const pick = (id: string) => run(() => call<DraftInfo>(host.net, app, "/draft/installed", { id }).then((r) => review(r.app)));
-  if (err) return <Muted>{err}</Muted>;
-  return (
-    <>
-      <div style={S.group}>PowOS apps</div>
-      {d?.powos.length === 0 && <Muted>No PowOS apps installed.</Muted>}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-        {d?.powos.map((a) => <Pick key={a.id} label={a.name} busy={busy} onPick={() => pick(a.id)} />)}
-      </div>
-      {perr && <Muted>{perr}</Muted>}
-    </>
-  );
+interface InstalledEntry {
+  kind: "powos" | "android";
+  key: string;
+  label: string;
 }
 
-function AndroidApps({ host, app, review }: Ctx) {
-  const [list, setList] = useState<{ pkg: string; label: string }[] | null>(null);
+/**
+ * One searchable list, PowOS apps (the registry's "/installed") and Android apps (host.androidApps, the shell
+ * bridge's apps.list) together. Tapping one starts building its draft at once (Ctx.startInstalled): a placeholder
+ * card appears in Drafts immediately, with live progress, while this runs in the background - no navigation, no
+ * wait before something shows.
+ */
+function InstalledApps({ host, app, startInstalled }: Ctx) {
   const [q, setQ] = useState("");
-  const [busy, err, run] = useAct();
-  const { androidApps, appLinks } = host;
-  if (!androidApps || !appLinks) return null;
-  const pick = (pkg: string) =>
-    run(async () => {
-      const l = await appLinks(pkg).catch(() => Promise.reject(new Error("reading an app's links needs the newer PowOS app")));
-      review((await call<DraftInfo>(host.net, app, "/draft/installed", { kind: "android", ...l })).app);
-    });
-  if (!list) return <Pick label="Android apps…" busy={busy} onPick={() => run(() => androidApps().then(setList))} />;
-  const shown = list.filter((a) => a.label.toLowerCase().includes(q.toLowerCase())).slice(0, 24);
+  const [d, err] = useRuntime<{ powos: InstalledPowos[] }>(host.net, app, "/installed");
+  const [android, setAndroid] = useState<{ pkg: string; label: string }[] | null>(null);
+  useEffect(() => {
+    if (host.androidApps) host.androidApps().then(setAndroid, () => setAndroid([]));
+    else setAndroid([]);
+    // host.androidApps is read once at mount (the bridge's own list doesn't change while this is open).
+  }, []);
+  const entries: InstalledEntry[] = [
+    ...(d?.powos ?? []).map((a): InstalledEntry => ({ kind: "powos", key: a.id, label: a.name })),
+    ...(android ?? []).map((a): InstalledEntry => ({ kind: "android", key: a.pkg, label: a.label })),
+  ];
+  const shown = (q ? entries.filter((e) => e.label.toLowerCase().includes(q.toLowerCase())) : entries).slice(0, 40);
+  const pick = (e: InstalledEntry) => {
+    if (e.kind === "powos") {
+      startInstalled(e.label, [{ label: "Building the draft", state: "active" }],
+        () => call<DraftInfo>(host.net, app, "/draft/installed", { id: e.key }));
+      return;
+    }
+    startInstalled(e.label, [{ label: "Reading its links", state: "active" }, { label: "Building the draft", state: "pending" }],
+      async () => {
+        if (!host.appLinks) throw new Error("reading an app's links needs the newer PowOS app");
+        const l = await host.appLinks(e.key);
+        return call<DraftInfo>(host.net, app, "/draft/installed", { kind: "android", ...l });
+      });
+  };
+  if (err) return <Muted>{err}</Muted>;
+  if (!d && android === null) return <Muted>…</Muted>;
   return (
     <>
-      <div style={S.group}>Android apps</div>
-      <input style={S.field} placeholder="find an app" value={q} onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
+      <input style={S.field} placeholder="find an installed app" value={q} onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
+      {!entries.length && <Muted>No installed apps found.</Muted>}
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-        {shown.map((a) => <Pick key={a.pkg} label={a.label} busy={busy} onPick={() => pick(a.pkg)} />)}
+        {shown.map((e) => <Pick key={`${e.kind}:${e.key}`} label={e.label} busy={false} onPick={() => pick(e)} />)}
       </div>
-      {err && <Muted>{err}</Muted>}
     </>
   );
 }
@@ -145,13 +160,46 @@ function Import({ host, app, review }: Ctx) {
   );
 }
 
-function Drafts({ host, app, review }: Ctx) {
+/** A placeholder card: the install still building (ProgressRing + StepList), or stopped with a reason to discard. */
+function PendingDraftCard({ state, onDiscard }: { state: PendingState; onDiscard: () => void }) {
+  const progress = state.status === "failed" ? 1 : stepsProgress(state.steps);
+  return (
+    <div style={S.card} data-pending-draft={state.title}>
+      <div style={S.row}>
+        <ProgressRing progress={progress} />
+        <div style={S.grow}>
+          <div style={S.name}>{state.title}</div>
+          <StepList steps={state.steps} />
+        </div>
+      </div>
+      {state.status === "failed" && (
+        <div style={S.row}>
+          <Muted>{state.error || "couldn't build the draft"}</Muted>
+          <button type="button" style={S.btn} onClick={onDiscard}>
+            Discard
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Drafts({ host, app, review, pending, justAdded, discardPending }: Ctx & {
+  pending: PendingState[];
+  justAdded: Record<string, DraftInfo>;
+  discardPending: (id: string) => void;
+}) {
   const [d, err] = useRuntime<{ drafts: DraftInfo[] }>(host.net, app, "/drafts");
   if (err) return <Muted>{err}</Muted>;
-  if (!d?.drafts.length) return <Muted>No drafts waiting.</Muted>;
+  const known = new Set((d?.drafts ?? []).map((x) => x.app));
+  // justAdded: a draft the runtime just finished, shown here at once - the real list catches up to it on its own
+  // next poll (useRuntime's visibilitychange reload); no flash either way, since this dedupes by app id.
+  const list = [...Object.values(justAdded).filter((x) => !known.has(x.app)), ...(d?.drafts ?? [])];
+  if (!pending.length && !list.length) return <Muted>No drafts waiting.</Muted>;
   return (
     <>
-      {d.drafts.map((x) => (
+      {pending.map((s) => <PendingDraftCard key={s.id} state={s} onDiscard={() => discardPending(s.id)} />)}
+      {list.map((x) => (
         <div key={x.app} style={{ ...S.card, cursor: "pointer" }} onClick={() => review(x.app)} data-draft={x.app}>
           <div style={S.name}>{x.name}</div>
           <Muted>{`${x.reads} read${x.reads === 1 ? "" : "s"} · ${x.writes} write${x.writes === 1 ? "" : "s"} · ${x.app}`}</Muted>
@@ -226,8 +274,39 @@ function Review(p: ReviewProps) {
 
 export function AddApp({ host, app, back, added }: { host: Host; app: string; back: () => void; added: (id: string) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [pending, setPending] = useState<Record<string, PendingState>>({});
+  const [justAdded, setJustAdded] = useState<Record<string, DraftInfo>>({});
+
+  const discardPending = (id: string) => setPending((p) => { const { [id]: _drop, ...rest } = p; return rest; });
+
+  /** Optimistic: a placeholder in Drafts the instant [label] is tapped, [run]'s real draft swapped in in place -
+   * a failure leaves the card up with its reason and a Discard, instead of nothing having shown at all. */
+  const startInstalled = (label: string, steps: PendingStep[], run: () => Promise<DraftInfo>) => {
+    const id = `pending:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    void optimistic<DraftInfo>(
+      () => setPending((p) => ({ ...p, [id]: { id, title: label, status: "running", steps } })),
+      run,
+      (err) =>
+        setPending((p) => ({
+          ...p,
+          [id]: {
+            ...p[id],
+            status: "failed",
+            error: String((err as { message?: string } | undefined)?.message ?? err),
+            steps: p[id].steps.map((s) => (s.state === "active" ? { ...s, state: "failed" } : s)),
+          },
+        })),
+    ).then(
+      (info) => {
+        discardPending(id);
+        setJustAdded((j) => ({ ...j, [info.app]: info }));
+      },
+      () => {}, // already reflected in `pending` (status "failed", Discard there) - nothing else to do
+    );
+  };
+
   if (draft) return <Review net={host.net} app={app} draft={draft} back={() => setDraft(null)} added={added} />;
-  const ctx: Ctx = { host, app, review: setDraft };
+  const ctx: Ctx = { host, app, review: setDraft, startInstalled };
   return (
     <>
       <header style={S.head}>
@@ -237,15 +316,14 @@ export function AddApp({ host, app, back, added }: { host: Host; app: string; ba
       <Path title="Describe it" note="PowOS AI reads the app's docs and writes the draft.">
         <Describe {...ctx} />
       </Path>
-      <Path title="From an installed app" note="What it already opens or offers - its screens, or a PowOS app's own data.">
-        <PowosApps {...ctx} />
-        <AndroidApps {...ctx} />
+      <Path title="From an installed app" note="Search what's installed. Tap one: it starts building at once, live, below in Drafts.">
+        <InstalledApps {...ctx} />
       </Path>
       <Path title="Import its API" note="An OpenAPI document or a capability spec, from a link or a file. Never a password or a token.">
         <Import {...ctx} />
       </Path>
       <h2 style={S.group}>Drafts</h2>
-      <Drafts {...ctx} />
+      <Drafts {...ctx} pending={Object.values(pending)} justAdded={justAdded} discardPending={discardPending} />
     </>
   );
 }

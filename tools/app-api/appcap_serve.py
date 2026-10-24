@@ -340,6 +340,12 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(404, {"error": str(e).strip("'\"")})
         except (ValueError, TypeError, subprocess.TimeoutExpired) as e:
             self.reply(400, {"error": str(e)[:300]})
+        except OSError as e:
+            # A draft/spec write that can't land (disk full, a permission wall, the destination already a
+            # directory, ...): appcap_add.put()/_commit() cleans up its temp file either way, so this is never
+            # a half-written draft - but left uncaught it drops the connection with no response at all, which
+            # looks to the UI exactly like "the sample made no draft" (no JSON error to show, nothing to catch).
+            self.reply(500, {"error": f"couldn't write it: {e}"[:300]})
 
     def do_GET(self):
         self.handle_one("GET")

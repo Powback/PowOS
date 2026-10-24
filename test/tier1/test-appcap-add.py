@@ -220,6 +220,18 @@ class Routes(unittest.TestCase):
         self.assertEqual(self.req("/drafts")[1]["drafts"], [])
         self.assertEqual(self.req("/draft/discard", {"app": app})[0], 404)
 
+    def test_import_write_failure_answers_instead_of_hanging(self):
+        """A draft write that can't land (here: the destination is already a directory, not a file - e.g. left
+        over from an older tool) is an OSError appcap_add.put() doesn't raise as ValueError/LookupError. Before
+        the fix, handle_one didn't catch OSError: the connection just dropped with no response - which looks,
+        from the UI, exactly like "the sample made no draft" (no JSON error to catch and show). It must come
+        back as a clean error instead, and leave no half-written draft behind."""
+        os.makedirs(os.path.join(self.state, "drafts", "open-meteo-demo-capture.appcap.json"))
+        code, d = self.req("/draft/import", {"sample": "open-meteo"})
+        self.assertEqual(code, 500, d)
+        self.assertIn("error", d)
+        self.assertEqual(self.req("/drafts")[1]["drafts"], [])
+
     def test_add_then_switch_on_promotes(self):
         code, d = self.req("/draft/import", {"doc": json.dumps(SPEC)})
         self.assertEqual(code, 200, d)
