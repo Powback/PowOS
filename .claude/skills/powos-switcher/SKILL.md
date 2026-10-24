@@ -397,3 +397,17 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   touch on a dialog raise the window (all task windows overlap at the same root place, X takes the top one). Wayland
   windows (Kate, Dolphin) never went through X: a failure there is something else.
   Check: verify/linux-touch.sh (Kate/Dolphin via apps.launch, a WAYLAND_DEBUG Kate, an X11 Kate + X stacking; LEASH=off).
+
+## Latest hand-off
+2026-10-24, popup-dock (kwin 0027 + move clamp; both on origin, ship requested).
+- State: `WindowFrame.moved()` stops a window's bottom at `AppWindows.area().bottom` (home's dock top, the same limit
+  opening, maximise and resize use); a window already lower keeps its top as the limit (no jump). kwin 0027 (6.7.5-3.31):
+  `Workspace::setPopupAreaHandler` -> xdg_popup placement inside `AnlandWindowTask::area()` for task windows, their
+  dialogs and their popups; desktop (Plasma app) windows keep the output's area.
+- Checks: `window-dock.sh` (emulator, task floating-window-never-covers-dock) FAILED only on "no title bar window"
+  (Calculator's missing bar, the other agent's regression) - re-queue it with `--dev emu --close` once that lands.
+  `plasma-modes.sh popup` (closes linux-window-popups-not-clipped) + `plasma` queued on the phone.
+- Gotchas: no patched KWin tree exists - fetch kwin-6.7.5.tar.xz, apply 0001-00NN, diff (friction f86). A fresh
+  worktree needs out/powos-rootfs.tar.gz symlinked from powos-multiplatform before `build-pkgs.sh kwin` (f87).
+  The checks install the newest kwin pkg from this or a sibling worktree: keep popup-dock's out/pkgs until they ran.
+- Open: X11 override-redirect menus (Steam) place themselves and still clip.
