@@ -3,10 +3,12 @@
 #   ship.sh request --note "what changed, for the user"   after your push to origin - and nothing else. Returns at once.
 #   ship.sh request --silent                              a change the user can't see (refactor, lint, tooling)
 #   ship.sh status                                        queued requests, the service, what's live, the last ships
-#   ship.sh pause | resume                                pause: no new ship starts; a ship in flight that hasn't begun
+#   ship.sh pause --why TEXT [--until WHEN]               pause: no new ship starts; a ship in flight that hasn't begun
 #        installing is stopped (its ship-apk / build / gate killed, the ship lock freed, its requests kept); an install
-#        or shell push in flight finishes, then nothing more. resume: go on. (2026-10-23: `launchctl bootout` left the
-#        runner's ship-apk building, about to install in the middle of a home recovery.)
+#        or shell push in flight finishes, then nothing more. Records who paused (the caller's worktree/agent, or
+#        SHIP_REQUESTER), why, and optionally until when - status, request (before it queues) and queue.sh list all
+#        show it (friction f114: a paused queue with no reason or owner shown). resume: go on. (2026-10-23:
+#        `launchctl bootout` left the runner's ship-apk building, about to install in the middle of a home recovery.)
 #   ship.sh run                                           the service: launchd agent com.powos.ship-runner
 #        (tools/phone/ship-deploy.sh; unit units/mac/ship-runner-mac.json). `request` kicks it; without the agent,
 #        request starts one of its own. ONE runner ever (lock dir <queue>/runner.lock, as the verify runner's).
@@ -54,6 +56,14 @@ agent_kick() { local p=$HOME/Library/LaunchAgents/$LABEL.plist
   agent_on || return 1
   agent_loaded || { [ -f "$p" ] && launchctl bootstrap "user/$(id -u)" "$p" 2>/dev/null; } || return 1
   launchctl kickstart "user/$(id -u)/$LABEL" >/dev/null 2>&1; }
+# who_default: the caller's worktree/agent, so pause/request never records an anonymous pause (friction f114).
+who_default() { echo "${SHIP_REQUESTER:-$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)}"; }
+# paused_info: "" if not paused, else "by WHO: WHY (until UNTIL)" - shared by status, request and queue.sh's peers.
+paused_info() {
+  [ -e "$Q/paused" ] || return 0
+  local who= why= until=; . "$Q/paused" 2>/dev/null
+  printf 'by %s%s%s' "${who:-unknown}" "${why:+: $why}" "${until:+ (until $until)}"
+}
 case "${1:-}" in
 request)
   shift; note= silent=
@@ -66,24 +76,35 @@ request)
   sha=$(git rev-parse HEAD)
   git merge-base --is-ancestor "$sha" "origin/$BASE" 2>/dev/null ||
     { echo "ship.sh request: REFUSED - HEAD ${sha:0:9} isn't on origin/$BASE: push it first (git push origin HEAD:$BASE)" >&2; exit 3; }
+  # Before queueing: if the service is paused, say who and why now - not only after the request is already on disk
+  # (friction f114: nothing at task start said the queue was paused, so the deploy order couldn't be planned).
+  pi=$(paused_info); [ -z "$pi" ] || echo "ship.sh request: the ship service is PAUSED $pi - this ships after tools/phone/ship.sh resume"
   r=$Q/$(date +%Y%m%d-%H%M%S)-$$.req
   printf 'sha=%q\nnote=%q\nsilent=%s\nwho=%q\nat=%s\n' "$sha" "$note" "${silent:-0}" "${SHIP_REQUESTER:-$(basename "$top")}" "$(date +%s)" > "$r.tmp" && mv "$r.tmp" "$r"
   # The request is on disk before the runner check: a runner on its way out sees it (run's last look).
   runner_up || agent_kick || { nohup bash "$here/ship.sh" run >> "$Q/runner.log" 2>&1 & }
-  [ -e "$Q/paused" ] && echo "ship.sh request: the ship service is PAUSED - this ships after tools/phone/ship.sh resume"
   echo "ship requested (${sha:0:9}): the ship service ships origin's tip after ${QUIET}s without new commits - nothing else to do (status: tools/phone/ship.sh status)" ;;
 pause)
-  touch "$Q/paused"
-  if installing; then echo "paused: an install is in flight (pid $(cat "$Q/installing")) - it finishes (install + its push), then nothing new starts"
+  shift; why= until=
+  while [ $# -gt 0 ]; do case "$1" in
+    --why) why=${2:-}; shift 2 || shift ;; --why=*) why=${1#--why=}; shift ;;
+    --until) until=${2:-}; shift 2 || shift ;; --until=*) until=${1#--until=}; shift ;;
+    *) echo "ship.sh pause: unknown $1" >&2; exit 2 ;; esac; done
+  [ -n "${why// }" ] || { echo "ship.sh pause: --why TEXT required (who's pausing and why, for status/request/queue.sh list - friction f114)" >&2; exit 2; }
+  who=$(who_default); who=${who:-unknown}
+  printf 'who=%q\nwhy=%q\nuntil=%q\nat=%s\n' "$who" "$why" "$until" "$(date +%s)" > "$Q/paused"
+  pi="(by $who: $why${until:+, until $until})"
+  if installing; then echo "paused $pi - an install is in flight (pid $(cat "$Q/installing")) - it finishes (install + its push), then nothing new starts"
   elif runner_up; then stop_ships "$(cat "$Q/runner.lock/pid")"
-    echo "paused: the ship in flight was stopped (its requests are kept); nothing ships until tools/phone/ship.sh resume"
-  else echo "paused: nothing ships until tools/phone/ship.sh resume"; fi ;;
+    echo "paused $pi - the ship in flight was stopped (its requests are kept); nothing ships until tools/phone/ship.sh resume"
+  else echo "paused $pi - nothing ships until tools/phone/ship.sh resume"; fi ;;
 resume)
   rm -f "$Q/paused"
   ls "$Q"/*.req >/dev/null 2>&1 && { runner_up || agent_kick || { nohup bash "$here/ship.sh" run >> "$Q/runner.log" 2>&1 & }; }
   echo "resumed$(ls "$Q"/*.req >/dev/null 2>&1 && echo ": $(ls "$Q"/*.req | wc -l | tr -d ' ') request(s) ship now")" ;;
 status)
-  [ -e "$Q/paused" ] && echo "PAUSED since $(date -r "$(stat -f %m "$Q/paused" 2>/dev/null || stat -c %Y "$Q/paused")" +%H:%M) - tools/phone/ship.sh resume$(installing && echo " (an install in flight finishes first)")"
+  pi=$(paused_info)
+  [ -z "$pi" ] || echo "PAUSED $pi since $(date -r "$(stat -f %m "$Q/paused" 2>/dev/null || stat -c %Y "$Q/paused")" +%H:%M) - tools/phone/ship.sh resume$(installing && echo " (an install in flight finishes first)")"
   echo "requests:"; for r in "$Q"/*.req; do [ -f "$r" ] || continue; ( . "$r"; echo "  ${sha:0:9} $who: $([ "$silent" = 1 ] && echo '(silent)' || echo "$note")" ); done
   echo "service: $(runner_up && echo "running (pid $(cat "$Q/runner.lock/pid"))" || echo idle)$(agent_loaded && echo " (launchd $LABEL)")"
   echo "live: $(cut -c1-9 "$Q/live" 2>/dev/null || echo -)  installed APK: $(cut -c1-9 "$HOME/.cache/powos-installed-commit" 2>/dev/null || echo -)$([ -s "$Q/failed" ] && echo "  failed at: $(cut -c1-9 "$Q/failed") (waits for a new origin commit)")"
@@ -345,5 +366,5 @@ run)
     ls "$Q"/*.req >/dev/null 2>&1 || break
     mkdir "$L" 2>/dev/null && echo $$ > "$L/pid" || break
   done ;;
-*) sed -n 2,8p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+*) sed -n 2,14p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

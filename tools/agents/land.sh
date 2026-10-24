@@ -7,7 +7,10 @@
 #   1. checks every path is actually changed in THIS worktree (refuses an unchanged path or one outside the
 #      repo - never lands something that isn't yours by accident);
 #   2. commits those paths ONLY, by pathspec (never -a, never -A: other agents' uncommitted work can be in
-#      the same tree - docs/AGENT-HANDBOOK.md, Shared checkouts);
+#      the same tree - docs/AGENT-HANDBOOK.md, Shared checkouts); then WARNS (never blocks) when origin already
+#      got a commit, since this worktree's merge-base, touching the same files AND overlapping line ranges as
+#      this landing's own diff - "origin already changed <file> lines X-Y in <sha> <subject>: check you're not
+#      duplicating it" (friction f115: two agents fixed the same bug in parallel, found only at rebase);
 #   3. fetches origin/worktree-powos-multiplatform and rebases ONCE, right before the push;
 #   4. pushes to origin/worktree-powos-multiplatform (never main, never --force); on a push race (someone
 #      landed meanwhile) it fetches + rebases + pushes ONE more time, then gives up rather than loop;
@@ -33,7 +36,7 @@ here=$(cd "$(dirname "$0")" && pwd -P)
 BASE=${LAND_BASE:-worktree-powos-multiplatform}
 REMOTE=${LAND_REMOTE:-origin}
 
-usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; }
 [ $# -ge 1 ] || { usage >&2; exit 2; }
 case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 msg=$1; shift
@@ -84,6 +87,56 @@ if ! git commit -q -m "$msg" -- "${paths[@]}"; then
 fi
 sha=$(git rev-parse --short HEAD)
 echo "land: committed $sha \"$msg\" (${#paths[@]} path(s))"
+
+# 2.5. Warn (never block - friction f115: two agents fixed the same bug in parallel, found only at rebase) when
+# origin picked up a commit, since this worktree's merge-base with it, that touches the same files AND overlapping
+# line ranges as this landing's own diff. "Overlapping" is new-side (+) line ranges from `git diff -U0`, which
+# catches two agents converging on the identical fix (no textual rebase conflict at all) as well as a real one.
+hunk_ranges() {   # hunk_ranges REFA REFB -- PATH...: "file:start-end" per added/changed hunk, new-side line numbers
+  local a=$1 b=$2; shift 2
+  local f=
+  git diff -U0 "$a" "$b" -- "$@" 2>/dev/null | while IFS= read -r line; do
+    case "$line" in
+      '+++ '*) f=${line#+++ b/} ;;
+      '@@ '*)
+        plus=$(printf '%s' "$line" | sed -n 's/^@@ -[0-9,]* +\([0-9][0-9]*\)\(,[0-9]*\)\{0,1\} @@.*/\1\2/p')
+        [ -n "$plus" ] || continue
+        start=${plus%%,*}
+        if [ "$plus" = "$start" ]; then cnt=1; else cnt=${plus#*,}; fi
+        [ "$cnt" -gt 0 ] || continue   # a pure deletion adds nothing on the new side
+        printf '%s:%s-%s\n' "$f" "$start" "$((start + cnt - 1))"
+        ;;
+    esac
+  done
+}
+range_overlap() {   # range_overlap file:s1-e1 file:s2-e2 -> 0 iff same file and the ranges overlap
+  local f1=${1%%:*} r1=${1#*:} f2=${2%%:*} r2=${2#*:}
+  [ "$f1" = "$f2" ] || return 1
+  local s1=${r1%-*} e1=${r1#*-} s2=${r2%-*} e2=${r2#*-}
+  [ "$s1" -le "$e2" ] && [ "$s2" -le "$e1" ]
+}
+warn_overlap() {
+  git fetch -q "$REMOTE" "$BASE" >/dev/null 2>&1 || return 0
+  local mb; mb=$(git merge-base HEAD "$REMOTE/$BASE" 2>/dev/null) || return 0
+  [ -n "$mb" ] || return 0
+  local ours; ours=$(hunk_ranges "$mb" HEAD -- "${paths[@]}")
+  [ -n "$ours" ] || return 0
+  local c subj theirs o r
+  for c in $(git rev-list --reverse "$mb..$REMOTE/$BASE" -- "${paths[@]}" 2>/dev/null); do
+    theirs=$(hunk_ranges "$c~1" "$c" -- "${paths[@]}")
+    [ -n "$theirs" ] || continue
+    subj=$(git log -1 --format=%s "$c" 2>/dev/null)
+    while IFS= read -r o; do
+      [ -n "$o" ] || continue
+      while IFS= read -r r; do
+        [ -n "$r" ] || continue
+        range_overlap "$o" "$r" || continue
+        echo "land: origin already changed ${r%%:*} lines ${r#*:} in ${c:0:9} $subj: check you're not duplicating it"
+      done <<< "$theirs"
+    done <<< "$ours"
+  done
+}
+warn_overlap
 
 # 3+4. fetch, rebase once, push - one retry on a race (someone else landed between fetch and push).
 try_land() {

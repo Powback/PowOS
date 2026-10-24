@@ -150,6 +150,58 @@ grep -q "land a gitignored file" <<<"$remote_log" \
   && ok "the gitignored file's commit reached $LAND_BASE" \
   || bad "the gitignored file's commit reached $LAND_BASE" "$remote_log"
 
+# == 7. warns (without blocking) when origin already changed the SAME lines, in a commit pushed while this
+# worktree was working - the two-agents-fixed-the-same-bug case (f115). Both sides make the identical textual
+# fix, so git's rebase sees no real conflict (the result the patch wants is already there) and the land still
+# succeeds; the warning is the only way either agent would notice they just did the same work twice.
+WSETUP7="$TMP/w-setup7"; new_worktree "$WSETUP7"
+printf 'l1\nl2\nold\nl4\nl5\n' > "$WSETUP7/shared.txt"
+git -C "$WSETUP7" add shared.txt; git -C "$WSETUP7" commit -q -m "add shared.txt"
+git -C "$WSETUP7" push -q origin "$LAND_BASE"
+
+W7="$TMP/w7"; new_worktree "$W7"   # branches from the tip that already has shared.txt
+sed -i '' 's/^old$/new/' "$W7/shared.txt" 2>/dev/null || sed -i 's/^old$/new/' "$W7/shared.txt"   # edits line 3
+
+W7B="$TMP/w7-rival"; new_worktree "$W7B"   # a rival lands the identical fix first
+sed -i '' 's/^old$/new/' "$W7B/shared.txt" 2>/dev/null || sed -i 's/^old$/new/' "$W7B/shared.txt"
+git -C "$W7B" add shared.txt
+git -C "$W7B" commit -q -m "fix the typo in shared.txt"
+git -C "$W7B" push -q origin "$LAND_BASE"
+
+out=$(cd "$W7" && "$LAND" "same fix, done in parallel" -- shared.txt 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "lands cleanly even though origin had the identical change" \
+  || bad "lands cleanly even though origin had the identical change" "rc=$rc: $out"
+grep -qi "origin already changed shared.txt lines 3-3" <<<"$out" \
+  && ok "warns about the file and line range origin already changed" \
+  || bad "warns about the file and line range origin already changed" "$out"
+grep -qi "fix the typo in shared.txt" <<<"$out" && ok "names the overlapping origin commit's subject" \
+  || bad "names the overlapping origin commit's subject" "$out"
+grep -qi "check you're not duplicating it" <<<"$out" && ok "explains why it's warning" \
+  || bad "explains why it's warning" "$out"
+final=$(git -C "$BARE" show "$LAND_BASE:shared.txt")
+grep -q "^new$" <<<"$final" \
+  && ok "the fix is live on $LAND_BASE regardless of which agent's commit carried it" \
+  || bad "the fix is live on $LAND_BASE regardless of which agent's commit carried it" "$final"
+
+# == 8. no warning for a commit that changed a DIFFERENT, non-overlapping part of the same file =======================
+WSETUP8="$TMP/w-setup8"; new_worktree "$WSETUP8"
+printf 'a1\na2\na3\na4\na5\na6\na7\na8\n' > "$WSETUP8/shared2.txt"
+git -C "$WSETUP8" add shared2.txt; git -C "$WSETUP8" commit -q -m "add shared2.txt"
+git -C "$WSETUP8" push -q origin "$LAND_BASE"
+
+W8="$TMP/w8"; new_worktree "$W8"
+sed -i '' 's/^a1$/a1x/' "$W8/shared2.txt" 2>/dev/null || sed -i 's/^a1$/a1x/' "$W8/shared2.txt"   # line 1
+
+W8B="$TMP/w8-rival"; new_worktree "$W8B"
+sed -i '' 's/^a8$/a8x/' "$W8B/shared2.txt" 2>/dev/null || sed -i 's/^a8$/a8x/' "$W8B/shared2.txt"   # line 8, no overlap
+git -C "$W8B" add shared2.txt; git -C "$W8B" commit -q -m "unrelated fix elsewhere in shared2.txt"
+git -C "$W8B" push -q origin "$LAND_BASE"
+
+out=$(cd "$W8" && "$LAND" "a different line, no overlap" -- shared2.txt 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "lands cleanly for a non-overlapping change" || bad "lands cleanly for a non-overlapping change" "rc=$rc: $out"
+grep -qi "origin already changed" <<<"$out" && bad "a non-overlapping origin commit must not warn" "$out" \
+  || ok "no false warning for a non-overlapping origin commit"
+
 echo ""
 echo "== Results: $PASS passed, $FAIL failed =="
 [ $FAIL -eq 0 ]

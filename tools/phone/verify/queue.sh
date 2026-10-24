@@ -20,8 +20,12 @@
 #             TOLD, not guessed, to be Android-only: a literal --android-only in the command, OR (window-max.sh) its
 #             first argument is calc or video - and no argument names a Linux app/stage either way (kate, dolphin,
 #             gwenview, ffplay, steam, kwin). Else phone. Handbook "The emulator lane" has the table, per check.
-#   queue.sh list                               queued, running, paused and the last results
-#   queue.sh pause | resume                     pause the runner (what the pill's tap does) / resume it (go=all)
+#   queue.sh list                               queued, running, paused (who/why/until, if given) and the last results
+#   queue.sh pause --why TEXT [--until WHEN]    pause the runner (what the pill's tap does, with its own reason) / resume
+#        it (go=all). Records who paused (the caller's worktree/agent, or QUEUE_REQUESTER), why, and optionally until
+#        when - `list` and ship.sh's own status/request show it too (friction f114: a paused queue with no reason or
+#        owner shown left an agent unable to plan the deploy order).
+#   queue.sh resume
 #   queue.sh run                                the runner: launchd's agent com.powos.verify-runner (runner-deploy.sh)
 #   queue.sh run-emu                            the emulator lane's runner (add --dev emu starts it; ends when nothing waits)
 #        starts it when add kicks it (launchctl kickstart) and again if it dies; without the agent, add starts one. Stays while anything is queued.
@@ -67,6 +71,15 @@ agent_kick() { local p=$HOME/Library/LaunchAgents/$LABEL.plist
   agent_on || return 1
   agent_loaded || { [ -f "$p" ] && launchctl bootstrap "user/$(id -u)" "$p" 2>/dev/null; } || return 1
   launchctl kickstart "user/$(id -u)/$LABEL" >/dev/null 2>&1; }
+# who_default: the caller's worktree/agent, so a CLI pause never records an anonymous owner (friction f114).
+who_default() { echo "${QUEUE_REQUESTER:-$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)}"; }
+# paused_info: "" if not paused, else "by WHO: WHY (until UNTIL)" - shared by list and whatever else checks $Q/paused.
+# Tolerates a bare `touch` (no who=/why=/until= lines) too, same as before this file carried any content.
+paused_info() {
+  [ -e "$Q/paused" ] || return 0
+  local who= why= until=; . "$Q/paused" 2>/dev/null
+  printf 'by %s%s%s' "${who:-unknown}" "${why:+: $why}" "${until:+ (until $until)}"
+}
 # phone_sh <script>: run it in PowOS as root; killed after 15 s (a hung adb never holds the runner). RSTATE set: the
 # runner's state word for the AI page goes to the phone's /data/local/tmp/powos-verify-runner first (its heartbeat).
 phone_sh() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
@@ -266,17 +279,26 @@ except Exception: pass' 2>/dev/null)
     # The launchd agent's runner, started now; without the agent, a runner of our own.
     runner_up || agent_kick || { nohup "$0" run >> "$Q/runner.log" 2>&1 & echo $! > "$Q/runner.pid"; }
   fi ;;
-pause)  # what the pill's tap does: the runner (waiting or mid-check) sees the phone's stop flag within 5 s
-  touch "$Q/paused"
+pause)  # the CLI pause (also what the pill's tap writes, with its own why): the runner (waiting or mid-check) sees
+  # the phone's stop flag within 5 s
+  shift; why= until=
+  while [ $# -gt 0 ]; do case "$1" in
+    --why) why=${2:-}; shift 2 || shift ;; --why=*) why=${1#--why=}; shift ;;
+    --until) until=${2:-}; shift 2 || shift ;; --until=*) until=${1#--until=}; shift ;;
+    *) echo "queue.sh pause: unknown $1" >&2; exit 2 ;; esac; done
+  [ -n "${why// }" ] || { echo "queue.sh pause: --why TEXT required (who's pausing and why, for list/ship.sh status - friction f114)" >&2; exit 2; }
+  who=$(who_default); who=${who:-unknown}
+  printf 'who=%q\nwhy=%q\nuntil=%q\nat=%s\n' "$who" "$why" "$until" "$(date +%s)" > "$Q/paused"
   runner_up && phone_sh 'umask 022; : > /tmp/powos-verify-stop'
-  echo "paused: nothing runs until resume (queue.sh resume, or resume / test all on the AI page)" ;;
+  echo "paused (by $who: $why${until:+, until $until}): nothing runs until resume (queue.sh resume, or resume / test all on the AI page)" ;;
 resume)  # the AI page's resume: the go flag (go=all) the runner's wait watches
   rm -f "$Q/paused"
   runner_up && phone_sh 'umask 022; printf all > /tmp/.powos-verify-go && mv -f /tmp/.powos-verify-go /tmp/powos-verify-go'
   echo "resumed$(runner_up && echo ': every queued check runs now' || echo ' (no runner up: the next job starts one)')" ;;
 list)
   echo "queued:"; ls "$Q"/*.job 2>/dev/null | sed 's|.*/|  |' || true
-  echo "runner: $(runner_up && echo running || echo idle)$([ -e "$Q/paused" ] && echo ", PAUSED (queue.sh resume)")$(agent_loaded && echo " (launchd $LABEL)")"
+  pi=$(paused_info)
+  echo "runner: $(runner_up && echo running || echo idle)$([ -z "$pi" ] || echo ", PAUSED $pi (queue.sh resume)")$(agent_loaded && echo " (launchd $LABEL)")"
   echo "emulator lane: $(ls "$E"/*.job 2>/dev/null | wc -l | tr -d ' ') queued, runner $(alive_runner "$(cat "$E/runner.lock/pid" 2>/dev/null)" && echo running || echo idle)$(n=$(ls "$E"/pending/*.sh 2>/dev/null | wc -l | tr -d ' '); [ "$n" = 0 ] || echo ", $n results waiting for the board")"
   echo "last results:"; ls -t "$Q/done" 2>/dev/null | grep "\.log$" | head -8 | while read -r f; do echo "  $f: $(tail -1 "$Q/done/$f")"; done ;;
 run)
@@ -381,7 +403,10 @@ EOS
     [ -z "$live" ] || git -C "$VR" merge-base --is-ancestor "$c" "$live" 2>/dev/null \
       || [ -z "$(ship_paths "$(git -C "$VR" merge-base "$live" "$c" 2>/dev/null)" "$c" shell)" ]; }
   # pause <summary>: the user's stop - recorded (the runner stays, runs nothing until the phone's go flag), the pill gone.
-  pause() { touch "$Q/paused"; RSTATE=paused status "" "{\"done\":true,\"paused\":true,\"summary\":$(jstr "$1 · resume on the AI page")}"; }
+  # who=the phone: this pause comes from the status pill's tap, not a CLI caller - still gets a why (friction f114:
+  # a paused queue with no reason or owner shown).
+  pause() { printf 'who=the phone\nwhy=%q\nuntil=\nat=%s\n' "$1" "$(date +%s)" > "$Q/paused"
+    RSTATE=paused status "" "{\"done\":true,\"paused\":true,\"summary\":$(jstr "$1 · resume on the AI page")}"; }
   # wait_pill: while the wait for a window lasts past WAIT_PILL_S (the user is on the phone: a free phone ends it at
   # once) and checks could run, the pill says they wait - rewritten every 150 s with a 200 s life (VerifyRun's ttl), so
   # a runner gone without a word leaves it at most that long. Only the pill's file: the stop flag stays for the wait.
