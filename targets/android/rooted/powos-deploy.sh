@@ -19,6 +19,9 @@ install -m 755 $T/powos-appdata.sh /data/powos/powos-appdata.sh
 install -m 755 $T/powos-idle-sysupdate.sh /data/powos/powos-idle-sysupdate.sh
 # `powos units` for Android's side (Magisk, /data/powos, /data/local/tmp), PowOS's python run from there.
 install -m 755 $T/powos-units.sh /data/powos/powos-units.sh
+# The VPN client kept running while the phone rests (unit vpn-keep): applied now, and at every boot by powos-start.sh.
+install -m 755 $T/powos-vpn-keep.sh /data/powos/powos-vpn-keep.sh
+sh /data/powos/powos-vpn-keep.sh apply || true
 install -m 755 $T/powos-rooted-session $R/usr/bin/powos-rooted-session
 install -m 755 $T/powos-android-app $R/usr/local/bin/powos-android-app
 install -m 755 $T/powos-android-tasks $R/usr/local/bin/powos-android-tasks
@@ -94,7 +97,7 @@ install -Dm644 $T/fex-Config.json $R/usr/share/fex-emu/Config.json
 install -Dm644 $T/fex-thunks.json $R/usr/share/fex-emu/thunks.json
 rm -f $T/fex-Config.json $T/fex-thunks.json
 rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
-  $T/powos-units.sh \
+  $T/powos-units.sh $T/powos-vpn-keep.sh \
   $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task \
   $T/powos-apps-watch $T/powos-apps-watch.desktop $T/powos-plasma-bridge $T/powos-plasma-bridge.desktop \
   $T/powos-ime-bridge $T/powos-ime-bridge.desktop $T/powos-output-scale $T/android-nm

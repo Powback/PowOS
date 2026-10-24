@@ -62,6 +62,13 @@ printf 'nameserver %s\nnameserver 1.1.1.1\n' "$dns" > "$R/etc/resolv.conf"
 # docs/APP-DATA-BACKUP.md): an app-data wipe then loses at most that hour.
 [ -f /data/powos/powos-appdata.sh ] && (sh /data/powos/powos-appdata.sh watch > /dev/null 2>&1 < /dev/null &)
 
+# The VPN client (the WireGuard app) exempt from Doze and background limits, once Android's services are up
+# (powos-vpn-keep.sh, unit vpn-keep): else the tunnel stops while the phone rests and the Mac loses the phone.
+# The whole wait runs in the background: Magisk's service.d starts this before boot completes, and the mounts + sshd
+# below must not wait for it (bounded: gives up after 10 min).
+[ -f /data/powos/powos-vpn-keep.sh ] && ( i=0; until [ "$(getprop sys.boot_completed)" = 1 ] || [ $i -ge 120 ]; do
+  sleep 5; i=$((i + 1)); done; sh /data/powos/powos-vpn-keep.sh apply ) > /dev/null 2>&1 < /dev/null &
+
 # SSH into PowOS (port 2222: Android may use 22). Keys are generated on first start.
 chroot "$R" /usr/bin/env -i PATH=/usr/bin:/usr/sbin HOME=/root /bin/sh -c '
   [ -f /etc/ssh/ssh_host_ed25519_key ] || ssh-keygen -A

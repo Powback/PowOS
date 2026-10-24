@@ -1,0 +1,22 @@
+{
+  "id": "vpn-keep",
+  "name": "VPN client kept running",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "host": "phone-android",
+  "purpose": "keeps the WireGuard app (the phone's VPN peer 10.13.13.7) running while the phone rests: deviceidle power-save allowlist, background appops allowed, always-on VPN (no lockdown); applied at every boot by powos-start.sh and at deploy",
+  "installedBy": "targets/android/rooted/powos-deploy.sh",
+  "files": [
+    "/data/powos/powos-vpn-keep.sh"
+  ],
+  "processes": [
+    {
+      "match": "powos-vpn-keep\\.sh"
+    }
+  ],
+  "remove": {
+    "commands": [
+      "sh /data/powos/powos-vpn-keep.sh remove"
+    ]
+  }
+}
