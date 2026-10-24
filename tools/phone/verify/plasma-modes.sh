@@ -63,9 +63,11 @@ workspace.windowList().forEach(function (w) {
   if (!(w.normalWindow || w.popupWindow || w.dialog) || w.specialWindow) return;
   var g = w.frameGeometry, m = workspace.clientArea(KWin.MaximizeArea, w);
   var onCur = w.desktops.length === 0;
-  for (var i = 0; i < w.desktops.length; i++) if (cur && w.desktops[i].id === cur.id) onCur = true;
+  var dn = [];
+  for (var i = 0; i < w.desktops.length; i++) { dn.push(w.desktops[i].name); if (cur && (w.desktops[i] === cur || w.desktops[i].id === cur.id || w.desktops[i].name === cur.name)) onCur = true; }
+  if (w.onAllDesktops) onCur = true;
   var maxd = Math.abs(g.x - m.x) < 2 && Math.abs(g.y - m.y) < 2 && Math.abs(g.width - m.width) < 2 && Math.abs(g.height - m.height) < 2;
-  print("PMW|" + w.caption + "|" + w.resourceClass + "|" + onCur + "|" + w.noBorder + "|" + [Math.round(g.x), Math.round(g.y), Math.round(g.width), Math.round(g.height)].join(",") + "|" + maxd + "|" + w.popupWindow + "|" + w.deleted);
+  print("PMW|" + w.caption + "|" + w.resourceClass + "|" + onCur + "|" + w.noBorder + "|" + [Math.round(g.x), Math.round(g.y), Math.round(g.width), Math.round(g.height)].join(",") + "|" + maxd + "|" + w.popupWindow + "|" + w.deleted + "|" + dn.join(","));
   var c = w.clientGeometry;
   if (c && !w.popupWindow) print("PMC|" + w.resourceClass + "|" + [Math.round(c.x), Math.round(c.y), Math.round(c.width), Math.round(c.height)].join(","));
 });'
@@ -80,7 +82,7 @@ tail -n +$((n + 1)) /run/powos-app/hyprland.log | grep -a -oE "PM[SW]\|.*"' | te
 }
 # $2 = class, bare or reverse-DNS: KWin reports Kate as org.kde.kate (the desktop-file id), so a bare `kate` never
 # matched and every mode said "no Kate window in KWin" while Kate's window was in the list (2026-10-24, kwin 3.31).
-win() { grep -aE "^PMW\|[^|]*\|([^|]*\.)?$2\|" "$OUT/kwin-$1.txt" | grep -av "|true$" | grep -av "|true|false$" | head -1; }
+win() { grep -aE "^PMW\|[^|]*\|([^|]*\.)?$2\|" "$OUT/kwin-$1.txt" | grep -avE "\|true\|[^|]*$" | grep -avE "\|true\|false\|[^|]*$" | head -1; }
 field() { cut -d'|' -f"$2" <<<"$1"; }
 SCALE=1
 px() { awk -v v="$1" -v s="$SCALE" 'BEGIN{printf "%d", v * s}'; }
@@ -106,6 +108,12 @@ open_plasma() {
 wait_win() {  # $1 class, $2 tag -> W (its line) within 25 s
   W=""; for i in $(seq 8); do sleep 3; kwin_q "$2-$i" >/dev/null; W=$(win "$2-$i" "$1"); [ -n "$W" ] && { cp "$OUT/kwin-$2-$i.txt" "$OUT/kwin-$2.txt"; return 0; }; done; return 1
 }
+# Kate opens on a Welcome page with no text view: keys have nowhere to go and the caption can't change. Ctrl+N (after
+# a tap that focuses the window) opens an empty document first; c0 is read after it.
+newdoc() {  # $1 x, $2 y (physical) -> W, c0
+  sh_ "input tap $1 $2"; sleep 1; sh_ "input keycombination 113 42"; sleep 2
+  kwin_q doc >/dev/null; W=$(win doc kate); c0=$(field "$W" 2)
+}
 typed() {  # $1 x, $2 y (physical): tap there, type; Kate's caption gets its modified mark
   sh_ "input tap $1 $2"; sleep 1; sh_ "input text powosmodes"; sleep 2
 }
@@ -119,7 +127,8 @@ mode_plasma() {
   after=$(tasks); [ "$before" = "$after" ] && pass "Kate opened in Plasma is no Android window task" || fail "Kate opened in Plasma became a window task ($(comm -13 <(echo "$before") <(echo "$after") | tr '\n' ' '))"
   [ "$(field "$W" 4)" = true ] && pass "Kate is on Plasma's current desktop" || fail "Kate isn't on Plasma's current desktop: $W"
   [ "$(field "$W" 5)" = false ] && pass "Kate has KDE's decoration (noBorder false)" || fail "Kate has no KDE decoration: $W"
-  IFS=, read -r x y w h <<<"$(field "$W" 6)"; c0=$(field "$W" 2)
+  IFS=, read -r x y w h <<<"$(field "$W" 6)"
+  newdoc "$(px $((x + w / 2)))" "$(px $((y + h / 2)))"; log "Kate's new document: '$c0'"
   "$T/shot.sh" "$OUT/plasma-kate.png" >/dev/null 2>&1
   typed "$(px $((x + w / 2)))" "$(px $((y + h / 2)))"; chk type
   kwin_q typed >/dev/null; W=$(win typed kate)
@@ -170,7 +179,7 @@ mode_shell() {
   log "PowOS frame windows: $bars (window tasks: $(tasks | wc -l | tr -d ' '))"
   [ "${bars:-0}" -le "$(tasks | wc -l | tr -d ' ')" ] && pass "one PowOS title bar at most per window task" || fail "more PowOS title bars ($bars) than window tasks"
   read -r l t r b <<<"$(sh_ "am stack list | grep -E \"taskId=${KT}[^0-9]\"" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ')"
-  c0=$(field "$W" 2); "$T/shot.sh" "$OUT/shell-kate.png" >/dev/null 2>&1
+  newdoc $(( (l + r) / 2 )) $(( (t + b) / 2 )); log "Kate's new document: '$c0'"; "$T/shot.sh" "$OUT/shell-kate.png" >/dev/null 2>&1
   typed $(( (l + r) / 2 )) $(( (t + b) / 2 )); chk type
   kwin_q typed >/dev/null; W=$(win typed kate)
   [ "$(field "$W" 2)" != "$c0" ] && pass "a tap + keys reached Kate's task (caption '$c0' -> '$(field "$W" 2)')" || fail "a tap + keys changed nothing in Kate's task ('$c0')"
