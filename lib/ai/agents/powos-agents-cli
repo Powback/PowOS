@@ -16,6 +16,13 @@ import time
 import urllib.error
 import urllib.request
 
+# Bump this whenever a CLI-parsed flag/verb is added (f199/f170: the Mac forwards a Down request's raw argv
+# to whatever copy of THIS script is installed on the phone over adb - an older phone copy rejects a flag
+# the Mac just finished validating for itself, and that parse error reads as a real bug. __cli_version__
+# (below) lets the Mac tell "phone copy is stale" apart from "the command itself is wrong" before passing
+# an error through.
+CLI_VERSION = 2
+
 DB = "powos-agents"
 SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
 STATES = ("working", "blocked", "waiting", "done")
@@ -1239,6 +1246,32 @@ def _remote_run(argv, timeout=30):
     return r.returncode, r.stdout, r.stderr
 
 
+_UNKNOWN_ARGV_RE = re.compile(r"unknown option --|unknown: ")
+
+
+def _stale_phone_stderr(rc, stderr):
+    """None normally. If `stderr` looks like THIS script's own parse-error ("unknown option --x" / "unknown:
+    verb") coming back from a remote run, that's suspicious: opts()/main() parse argv locally before ever
+    touching the module, so the Mac itself already accepted this argv - a parse rejection can only come from
+    an older copy running on the phone (f199/f170: f96 added `friction list --id` here; the phone's copy
+    hadn't been redeployed, so the SAME flag came back "unknown"). Probe the phone's CLI_VERSION with one
+    more round-trip and, if it's behind, return the clear replacement message instead of the confusing one."""
+    if rc == 0 or not _UNKNOWN_ARGV_RE.search(stderr or ""):
+        return None
+    probe = _remote_run(["__cli_version__"])
+    remote_v = 0   # couldn't even run __cli_version__ (even older than the probe itself): treat as 0
+    if probe is not None:
+        prc, pout, _ = probe
+        if prc == 0:
+            try:
+                remote_v = int(pout.strip())
+            except ValueError:
+                remote_v = 0
+    if remote_v < CLI_VERSION:
+        return f"phone CLI is older (v{remote_v} < v{CLI_VERSION}): run rooted.sh deploy\n"
+    return None
+
+
 def remote(argv):
     """HACK: off the phone (the Mac's agents, the manager's coders) there is no local powos-agents module yet, so the
     command runs on the phone over the dev channel (powos-vadb). Real fix: each host's own module plus the Phase 2
@@ -1247,6 +1280,10 @@ def remote(argv):
     if out is None:
         return False
     rc, stdout, stderr = out
+    stale = _stale_phone_stderr(rc, stderr)
+    if stale is not None:
+        sys.stderr.write(stale)
+        sys.exit(rc)
     sys.stdout.write(stdout)
     sys.stderr.write(stderr)
     sys.exit(rc)
@@ -1359,6 +1396,10 @@ def handle_down(argv):
         out = _remote_run(argv)
         if out is not None:
             rc, stdout, stderr = out
+            stale = _stale_phone_stderr(rc, stderr)
+            if stale is not None:
+                sys.stderr.write(stale)
+                sys.exit(rc)
             sys.stdout.write(stdout)
             sys.stderr.write(stderr)
             if rc == 0 and not is_write(argv):
@@ -1392,6 +1433,11 @@ def inline_stdin(argv):
 def main(argv):
     if argv[:1] == ["--argv-b64"] and len(argv) == 2:
         argv = json.loads(base64.b64decode(argv[1]))
+    if argv == ["__cli_version__"]:
+        # Answered locally, no module/network access - so it works on a phone copy even when its own
+        # powos-agents module is unreachable, and works on an old copy too (it'll just be the old number).
+        print(CLI_VERSION)
+        return 0
     if not argv or argv[0] in ("help", "--help", "-h"):
         print(HELP, end="")
         return 0
