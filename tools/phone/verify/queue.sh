@@ -89,8 +89,9 @@ paused_info() {
 phone_sh() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
   perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell "${RSTATE:+printf $RSTATE > /data/local/tmp/powos-verify-runner; }su -c 'sh /data/powos/powos-run.sh \"echo $b | base64 -d | bash\"'" 2>/dev/null; }
 killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c" "${2:-TERM}"; done; kill -"${2:-TERM}" "$1" 2>/dev/null; }
-# endjob <pid>: TERM its tree, KILL what's left after 5 s.
-endjob() { killtree "$1"; for _ in 1 2 3 4 5; do kill -0 "$1" 2>/dev/null || return 0; sleep 1; done; killtree "$1" KILL; }
+# endjob <pid>: TERM its tree, KILL what's left after 10 s (f44: 5 s cut off a check's restore
+# trap - EXIT/TERM traps that undo a setting change need real wall time to run their adb calls).
+endjob() { killtree "$1"; for _ in $(seq 10); do kill -0 "$1" 2>/dev/null || return 0; sleep 1; done; killtree "$1" KILL; }
 # The emulator lane: its jobs, its runner's checkout. HW_ONLY: what only the phone's hardware can answer. "fold" is
 # word-bounded (grep -E, no \b for portability): "folder-clip.sh" (an app-drawer folder, nothing to do with the
 # hinge) and "unfolded-checks.sh" (device_state-simulated, same as every e2e_setup inner check) matched the old
