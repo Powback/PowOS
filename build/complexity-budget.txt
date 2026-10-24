@@ -40,7 +40,7 @@ lib/dev-commands.sh:dev_override 17
 lib/dev-commands.sh:dev_patch 16
 lib/doctor.sh:cmd_doctor 17
 lib/dracut/90powos-ramboot/ramboot-setup.sh:powos_select_base_variant 16
-lib/game.sh:cmd_game 45
+lib/game.sh:cmd_game 25
 lib/games-sync.sh:cmd_games_sync 28
 lib/games-sync.sh:gsy_push 16
 lib/games.sh:cmd_games 32

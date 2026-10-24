@@ -329,15 +329,9 @@ cmd_game() {
         return $?
     fi
 
-    # A running Steam game's sleep (any installed Steam game, by name or appid - the mod registry not needed).
+    # A running Steam game's verbs (any installed Steam game, by name or appid - the mod registry not needed).
     case "${1:-}" in
-        freeze|thaw) _game_sleep_dispatch "$name" "$@"; return $? ;;
-        compat)
-            local capp; capp="$(_game_steam_appid "$name")" || { perr "No installed Steam game called $name"; return 1; }
-            _game_compat "$capp" "${2:-status}"; return $? ;;
-        stop|close)
-            local sapp; sapp="$(_game_steam_appid "$name")" || { perr "No installed Steam game called $name"; return 1; }
-            _game_steam_close "$sapp" "$([[ "${2:-}" == --steam ]] && echo 1 || echo 0)"; return $? ;;
+        freeze|thaw|compat|stop|close) _game_steam_verb "$name" "$@"; return $? ;;
     esac
 
     _game_need_mods
@@ -348,15 +342,7 @@ cmd_game() {
         _game_sleep_dispatch "$name" status
         return $?
     fi
-    if [[ -z "$id" ]]; then
-        perr "Unknown game: $name"
-        echo
-        plog "Known games:"
-        game_registry_ids | sed 's/^/    /'
-        echo "    bf3   (Venice Unleashed)"
-        plog "Aliases like 'gta', 'cyberpunk' or a Steam appid also work."
-        return 1
-    fi
+    [[ -n "$id" ]] || { _game_unknown "$name"; return 1; }
 
     local verb="${1:-status}"; shift 2>/dev/null || true
 
@@ -366,29 +352,12 @@ cmd_game() {
 
         # `mod` is the sub-noun so `game <n> mod install` reads naturally;
         # `mods` is accepted because everyone types it.
-        mod|mods)
-            local mverb="${1:-list}"; shift 2>/dev/null || true
-            local _m
-            case "$mverb" in
-                install)   powos_game_call mods_install_smart_cmd "$id" "$@" ;;
-                list|ls)   powos_game_call mods_manifest_list "$id" ;;
-                # These act per-mod, so the facade loops the same way the
-                # `powos mods` dispatcher does.
-                enable)    for _m in "$@"; do powos_game_call mods_enable_mod  "$id" "$_m" || return 1; done ;;
-                disable)   for _m in "$@"; do powos_game_call mods_disable_mod "$id" "$_m" || return 1; done ;;
-                remove|rm) for _m in "$@"; do powos_game_call mods_remove_mod  "$id" "$_m" || return 1; done ;;
-                *) perr "Unknown: powos game $id mod $mverb"; game_help; return 1 ;;
-            esac ;;
+        mod|mods)  _game_mod "$id" "$@" ;;
 
-        deploy)    powos_game_call mods_deploy_cmd    "$id" "$@" ;;
-        undeploy)  powos_game_call mods_undeploy_cmd  "$id" "$@" ;;
-        setup)     powos_game_call mods_setup_cmd     "$id" "$@" ;;
-        verify)    powos_game_call harness_verify_cmd "$id" "$@" ;;
-        bisect)    powos_game_call harness_bisect_cmd "$id" "$@" ;;
-        rollback)  powos_game_call mods_rollback_cmd  "$id" "$@" ;;
-        adopt)     powos_game_call mods_adopt_cmd     "$id" "$@" ;;
-        export)    powos_game_call mods_export_cmd    "$id" "$@" ;;
-        import)    powos_game_call mods_import_cmd    "$id" "$@" ;;
+        # mods_deploy_cmd, mods_undeploy_cmd, mods_setup_cmd, mods_rollback_cmd, mods_adopt_cmd, mods_export_cmd,
+        # mods_import_cmd; harness_verify_cmd, harness_bisect_cmd.
+        deploy|undeploy|setup|rollback|adopt|export|import) powos_game_call "mods_${verb}_cmd" "$id" "$@" ;;
+        verify|bisect) powos_game_call "harness_${verb}_cmd" "$id" "$@" ;;
 
         snapshot)
             if [[ "${1:-}" == "list" ]]; then
@@ -403,17 +372,57 @@ cmd_game() {
             local averb="${1:-list}"; shift 2>/dev/null || true
             powos_game_call asi_dispatch "$averb" "$id" "$@" ;;
 
-        play|launch)
-            local appid; appid="$(game_conf_get "$id" GAME_APPID 2>/dev/null || true)"
-            if [[ -z "$appid" ]]; then
-                perr "No Steam appid for $id — can't launch it."
-                return 1
-            fi
-            plog "Launching $id (steam appid $appid)…"
-            xdg-open "steam://rungameid/$appid" >/dev/null 2>&1 \
-                || { perr "Couldn't hand off to Steam."; return 1; } ;;
+        play|launch) _game_play "$id" ;;
 
         *) perr "Unknown: powos game $id $verb"; game_help; return 1 ;;
+    esac
+}
+
+_game_unknown() {
+    perr "Unknown game: $1"
+    echo
+    plog "Known games:"
+    game_registry_ids | sed 's/^/    /'
+    echo "    bf3   (Venice Unleashed)"
+    plog "Aliases like 'gta', 'cyberpunk' or a Steam appid also work."
+}
+
+# powos game <id> mod <verb> [mod...]
+_game_mod() {
+    local id="$1" mverb="${2:-list}" _m
+    shift; shift 2>/dev/null || true
+    case "$mverb" in
+        install)   powos_game_call mods_install_smart_cmd "$id" "$@" ;;
+        list|ls)   powos_game_call mods_manifest_list "$id" ;;
+        # These act per-mod, so the facade loops the same way the
+        # `powos mods` dispatcher does.
+        enable)    for _m in "$@"; do powos_game_call mods_enable_mod  "$id" "$_m" || return 1; done ;;
+        disable)   for _m in "$@"; do powos_game_call mods_disable_mod "$id" "$_m" || return 1; done ;;
+        remove|rm) for _m in "$@"; do powos_game_call mods_remove_mod  "$id" "$_m" || return 1; done ;;
+        *) perr "Unknown: powos game $id mod $mverb"; game_help; return 1 ;;
+    esac
+}
+
+_game_play() {
+    local id="$1" appid
+    appid="$(game_conf_get "$id" GAME_APPID 2>/dev/null || true)"
+    if [[ -z "$appid" ]]; then
+        perr "No Steam appid for $id — can't launch it."
+        return 1
+    fi
+    plog "Launching $id (steam appid $appid)…"
+    xdg-open "steam://rungameid/$appid" >/dev/null 2>&1 \
+        || { perr "Couldn't hand off to Steam."; return 1; }
+}
+
+# powos game <name> freeze|thaw|compat|stop|close: an installed Steam game, by name or appid.
+_game_steam_verb() {
+    local name="$1" verb="$2" app
+    case "$verb" in freeze|thaw) _game_sleep_dispatch "$name" "$verb"; return $? ;; esac
+    app="$(_game_steam_appid "$name")" || { perr "No installed Steam game called $name"; return 1; }
+    case "$verb" in
+        compat) _game_compat "$app" "${3:-status}" ;;
+        *) _game_steam_close "$app" "$([[ "${3:-}" == --steam ]] && echo 1 || echo 0)" ;;
     esac
 }
 
@@ -472,38 +481,46 @@ _game_compat() {  # <appid> status|auto|native|arm64|x86|<tool name>
 }
 
 _game_sleep_dispatch() {
-    local name="$1" verb="$2" appid reaper r
+    local name="$1" verb="$2" appid reaper
     appid="$(_game_steam_appid "$name")" || { perr "No installed Steam game called $name"; return 1; }
     reaper="$(_game_steam_reaper "$appid")"
     case "$verb" in
-        freeze)
-            [[ -n "$reaper" ]] || { perr "$name ($appid) isn't running."; return 1; }
-            r="$(powos-sleep-gui sleep "$appid")" || return 1
-            case $r in
-                *pending*) pok "$name ($appid): its window minimized, frozen with Steam in a moment" ;;
-                *'"ok": true'*) pok "$name ($appid): frozen with Steam" ;;
-                *) perr "$name ($appid): not frozen: $r"; return 1 ;;
-            esac ;;
-        thaw)
-            [[ -n "$reaper" ]] || { perr "$name ($appid) isn't running (start it: steam steam://rungameid/$appid)."; return 1; }
-            r="$(powos-sleep-gui resume "$appid")" || return 1
-            case $r in
-                *'"running": true'*) pok "$name ($appid): $r" ;;
-                *) perr "$name ($appid): not resumed (not a game of the running Steam): $r"; return 1 ;;
-            esac ;;
-        status)
-            if [[ -z "$reaper" ]]; then
-                echo "$name ($appid): not running"
-                return 0
-            fi
-            local cg pids t0 t1
-            cg="$(cat "/proc/$reaper/cgroup" 2>/dev/null)"
-            pids="$(_game_tree "$reaper")"
-            t0="$(_game_ticks $pids)"; sleep 2; t1="$(_game_ticks $pids)"
-            printf '%s (%s): running, %s; its tree %s processes, %s%% of a core (2 s)\n' "$name" "$appid" \
-                "$([[ $cg == *powos/sleep/* ]] && echo "FROZEN with Steam (${cg##*/sleep/})" || echo awake)" \
-                "$(wc -w <<<"$pids" | tr -d ' ')" "$(( (t1 - t0) * 100 / $(getconf CLK_TCK) / 2 ))" ;;
+        freeze) _game_freeze "$name ($appid)" "$appid" "$reaper" ;;
+        thaw)   _game_thaw "$name ($appid)" "$appid" "$reaper" ;;
+        status) _game_sleep_status "$name ($appid)" "$reaper" ;;
     esac
+}
+
+_game_freeze() {  # <label> <appid> <reaper>
+    local r
+    [[ -n "$3" ]] || { perr "$1 isn't running."; return 1; }
+    r="$(powos-sleep-gui sleep "$2")" || return 1
+    case $r in
+        *pending*) pok "$1: its window minimized, frozen with Steam in a moment" ;;
+        *'"ok": true'*) pok "$1: frozen with Steam" ;;
+        *) perr "$1: not frozen: $r"; return 1 ;;
+    esac
+}
+
+_game_thaw() {  # <label> <appid> <reaper>
+    local r
+    [[ -n "$3" ]] || { perr "$1 isn't running (start it: steam steam://rungameid/$2)."; return 1; }
+    r="$(powos-sleep-gui resume "$2")" || return 1
+    case $r in
+        *'"running": true'*) pok "$1: $r" ;;
+        *) perr "$1: not resumed (not a game of the running Steam): $r"; return 1 ;;
+    esac
+}
+
+_game_sleep_status() {  # <label> <reaper>
+    local cg pids t0 t1
+    [[ -n "$2" ]] || { echo "$1: not running"; return 0; }
+    cg="$(cat "/proc/$2/cgroup" 2>/dev/null)"
+    pids="$(_game_tree "$2")"
+    t0="$(_game_ticks $pids)"; sleep 2; t1="$(_game_ticks $pids)"
+    printf '%s: running, %s; its tree %s processes, %s%% of a core (2 s)\n' "$1" \
+        "$([[ $cg == *powos/sleep/* ]] && echo "FROZEN with Steam (${cg##*/sleep/})" || echo awake)" \
+        "$(wc -w <<<"$pids" | tr -d ' ')" "$(( (t1 - t0) * 100 / $(getconf CLK_TCK) / 2 ))"
 }
 
 # Every process of a Steam game's launch: the trees of its reapers (also one a dead Steam left, ppid 1) and any process
@@ -538,41 +555,61 @@ _game_descendants() {
 # after 6 s; then one more sweep for anything a launcher started meanwhile. Never waits on a client: SIGKILL ends
 # frozen tasks too (cgroup v2), every wait is bounded, the wait loop only stats /proc.
 _game_steam_close() {
-    local app=$1 all=$2 t0 me g s="" i left how=""
+    local app=$1 all=$2 t0 g s="" left how="" me=" $$ ${BASHPID:-} $PPID "  # me: never kill ourselves (_gsc_set)
     t0=$(date +%s%N)
-    me=" $$ ${BASHPID:-} $PPID "
-    _gsc_set() { local p; for p in "$@"; do [[ "$me" == *" $p "* ]] || echo "$p"; done | sort -un | tr '\n' ' '; }
-    _gsc_alive() { local p; for p in $*; do [[ -d /proc/$p ]] && printf '%s ' "$p"; done; return 0; }
     g=$(_gsc_set $(_game_launch_pids "$app"))
     [[ -n "$g" ]] && kill -TERM $g 2>/dev/null || true
     if [[ $all == 1 ]]; then
         s=$(_gsc_set $(_game_steam_pids))
-        if [[ -n "$s" ]]; then
-            timeout 2 dbus-send --session --print-reply=literal --reply-timeout=1500 --dest=dev.powos.Sleep /Gui \
-                dev.powos.Sleep.Gui.Wake string:steam >/dev/null 2>&1 || true
-            # The forwarder can hang on a dying client (or start a new one): bounded, and swept with the rest.
-            (timeout -k 1 3 steam -shutdown >/dev/null 2>&1 </dev/null &)
-            how="Steam asked to shut down"
-        fi
+        [[ -z "$s" ]] || { _gsc_steam_shutdown; how="Steam asked to shut down"; }
     fi
-    for i in $(seq 60); do  # 6 s
-        left=$(_gsc_alive $g ${s:-})
-        [[ -z "$left" ]] && break
-        (( i == 20 )) && { kill -KILL $(_gsc_alive $g) 2>/dev/null || true; }
-        sleep 0.1
-    done
+    left=$(_gsc_wait "$g" "$s")
     [[ -n "$left" && $all == 1 ]] && how="${how:+$how, }killed after 6 s"
     [[ -z "$left" && -n "$how" ]] && how="Steam shut down on request"
-    for i in 1 2 3; do  # the rest, and what a launcher started meanwhile
-        left=$(_gsc_alive $left $(_gsc_set $(_game_launch_pids "$app"; [[ $all != 1 ]] || _game_steam_pids)))
-        [[ -z "$left" ]] && break
-        kill -KILL $left 2>/dev/null || true; sleep 0.3
-    done
+    left=$(_gsc_sweep "$app" "$all" "$left")
     if [[ -n "$left" ]]; then
         perr "still running after $(( ($(date +%s%N) - t0) / 1000000 )) ms: $(ps -o pid=,stat=,comm= -p "$(echo $left | tr ' ' ,)" 2>/dev/null | tr '\n' ';')"
         return 1
     fi
     pok "$app$([[ $all == 1 ]] && echo ' + Steam') closed in $(( ($(date +%s%N) - t0) / 1000000 )) ms${how:+ ($how)}"
+}
+
+# <pid>...: the set, sorted, without $me (_game_steam_close's shell and its parent), on one line.
+_gsc_set() {
+    local p
+    for p in "$@"; do [[ "$me" == *" $p "* ]] || echo "$p"; done | sort -un | tr '\n' ' '
+}
+_gsc_alive() { local p; for p in $*; do [[ -d /proc/$p ]] && printf '%s ' "$p"; done; return 0; }
+
+# Steam thawed (a frozen client never answers) and asked to shut down.
+_gsc_steam_shutdown() {
+    timeout 2 dbus-send --session --print-reply=literal --reply-timeout=1500 --dest=dev.powos.Sleep /Gui \
+        dev.powos.Sleep.Gui.Wake string:steam >/dev/null 2>&1 || true
+    # The forwarder can hang on a dying client (or start a new one): bounded, and swept with the rest.
+    (timeout -k 1 3 steam -shutdown >/dev/null 2>&1 </dev/null &)
+}
+
+# <game pids> <steam pids>: up to 6 s for them to end, the game's KILLed at 2 s; prints what is left.
+_gsc_wait() {
+    local i left
+    for i in $(seq 60); do
+        left=$(_gsc_alive $1 $2)
+        [[ -z "$left" ]] && break
+        (( i == 20 )) && { kill -KILL $(_gsc_alive $1) 2>/dev/null || true; }
+        sleep 0.1
+    done
+    echo "$left"
+}
+
+# <appid> <1: Steam too> <left>: KILL the rest and what a launcher started meanwhile (3 rounds); prints what is left.
+_gsc_sweep() {
+    local i left=$3
+    for i in 1 2 3; do
+        left=$(_gsc_alive $left $(_gsc_set $(_game_launch_pids "$1"; [[ $2 != 1 ]] || _game_steam_pids)))
+        [[ -z "$left" ]] && break
+        kill -KILL $left 2>/dev/null || true; sleep 0.3
+    done
+    echo "$left"
 }
 
 _game_tree() {
