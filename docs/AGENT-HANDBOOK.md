@@ -276,7 +276,7 @@ minimal change and tell them.
 
 ## Rules that bite
 Git and process
-- Commit only your paths; never force-push; rebase often (several agents edit shell/ui at once).
+- Commit only your paths; never force-push; rebase once, right before you push (several agents edit shell/ui at once; a fetch/rebase/status loop while working is the top coordination cost).
 - `git push` runs tools/git-hooks/pre-push (core.hooksPath): the complexity lint on the pushed files; a failure is
   yours to split, never `--no-verify` (e9af512's lint failure blocked every ship-apk, 2026-10-22).
 - `HACK:` markers need a row in docs/REMOTE-POWOS.md section 4 in the same commit (test-hack-registry).
