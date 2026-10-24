@@ -38,7 +38,14 @@ I0=$(irq)
 close_mine() { eval "${ON_CLOSE:-:}";  # eval: ON_CLOSE="fexcache_off; restore" ran as one word ("command not found"), restore never ran
   [ $mine = 1 ] && { pill "closing $GAME (this check started it)"; echo "== closing what this check started"; bash /var/tmp/powos-bf-stop.sh | head -1; mine=0; }; rm -rf "$T" /tmp/powos-verify-step; }
 touched() { [ "$(irq)" != "$I0" ] || return 1; echo "user input $(date +%T) - stopping"; close_mine; exit 3; }
-trap 'echo "stopped from outside $(date +%T)"; close_mine; exit 3' HUP TERM INT
+# HACK: the Mac side (queue.sh's budget kill) ends adb first, so this script's stdout is a dead pipe before its TERM comes:
+# the next pill/echo got SIGPIPE and bash died WITHOUT running this trap, leaving the game it started running
+# (Broforce, 2026-10-24 06:50/06:55, blocked idle.sh --wait for hours). So PIPE is trapped too, and the handler
+# first points its own output at a file. Real fix would be a phone-side watchdog independent of the adb pipe.
+stopped() { trap '' HUP TERM INT PIPE; exec >>/tmp/powos-bf-trap.log 2>&1 </dev/null
+  echo "stopped from outside ($1) $(date +%T)"; close_mine; exit 3; }
+trap 'stopped TERM' HUP TERM INT
+trap 'stopped PIPE' PIPE
 fail() { echo "FAIL $1: $2"; FAILS="$FAILS $1"; }
 
 # pill <text>: the check's current sub-step while the queue runs it: the runner's heartbeat shows
