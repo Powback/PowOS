@@ -29,16 +29,30 @@ if [ "${1:-}" = --vpn-state ]; then
   [ "$a" != never ] && [ "$a" -le "${PHONE_WG_STALE_S:-180}" ] && { echo "vpn=up handshake=${a}s"; exit 0; }
   echo "vpn=offline handshake=$a$([ "$a" = never ] || echo s)"; exit 69
 fi
-age=$(wg_age)
-if [ -n "$age" ] && { [ "$age" = never ] || [ "$age" -gt "${PHONE_WG_STALE_S:-180}" ]; }; then
-  echo "adb.sh: phone offline: its WireGuard handshake is $([ "$age" = never ] && echo "missing" || echo "${age}s old") (> ${PHONE_WG_STALE_S:-180}s) - not running adb (docker exec wireguard wg show)" >&2
-  exit 69
+# The handshake-age check and the adb connect-state check below each cost a `docker exec` (~0.2-0.3s apiece,
+# measured 2026-10-24 - the dominant cost of every adb.sh call: tools/agents/friction f78, 2.5-4.7s/call vs 0.33s
+# for a raw `docker exec powos-vadb adb ...`). A live tunnel only drops its handshake every ~2 min, and the adb
+# connection only goes stale after a real network change on the phone, so a GOOD result is cached for
+# ADB_STATE_CACHE_S (default 30s); anything else (no cache yet, cache expired, or the last check failed) always
+# re-checks live - a failure is never papered over by a stale "ok".
+state_file=${POWOS_ADB_STATE_FILE:-/tmp/.powos-adb-state}
+now=$(date +%s); cached_ok=
+if read -r c_epoch c_status 2>/dev/null < "$state_file"; then
+  [ "$c_status" = ok ] && [ $(( now - c_epoch )) -lt "${ADB_STATE_CACHE_S:-30}" ] && cached_ok=1
 fi
-# A network change on the phone (wifi <-> mobile) leaves powos-vadb's adb connection stale ("offline", "device not
-# found") although the VPN is up: every agent's next call then fails. Not "device"? Drop it and connect afresh, once,
-# before the command (a pre-check, not a retry: the command itself never runs twice).
-if [ "$(docker exec powos-vadb adb -s 10.13.13.7:5555 get-state 2>/dev/null || true)" != device ]; then
-  docker exec powos-vadb sh -c 'adb disconnect 10.13.13.7:5555 >/dev/null 2>&1; timeout 15 adb connect 10.13.13.7:5555 >/dev/null 2>&1' || true
+if [ -z "$cached_ok" ]; then
+  age=$(wg_age)
+  if [ -n "$age" ] && { [ "$age" = never ] || [ "$age" -gt "${PHONE_WG_STALE_S:-180}" ]; }; then
+    echo "adb.sh: phone offline: its WireGuard handshake is $([ "$age" = never ] && echo "missing" || echo "${age}s old") (> ${PHONE_WG_STALE_S:-180}s) - not running adb (docker exec wireguard wg show)" >&2
+    exit 69
+  fi
+  # A network change on the phone (wifi <-> mobile) leaves powos-vadb's adb connection stale ("offline", "device
+  # not found") although the VPN is up: every agent's next call then fails. Not "device"? Drop it and connect
+  # afresh, once, before the command (a pre-check, not a retry: the command itself never runs twice).
+  if [ "$(docker exec powos-vadb adb -s 10.13.13.7:5555 get-state 2>/dev/null || true)" != device ]; then
+    docker exec powos-vadb sh -c 'adb disconnect 10.13.13.7:5555 >/dev/null 2>&1; timeout 15 adb connect 10.13.13.7:5555 >/dev/null 2>&1' || true
+  fi
+  printf '%s ok\n' "$now" > "$state_file.$$" && mv -f "$state_file.$$" "$state_file"
 fi
 # Local paths: only a file command's own arguments are (push's sources, pull's destination, install's APKs) - a
 # `shell cat /etc/hosts` word that happens to exist on the Mac is the phone's path and is left be.
@@ -74,6 +88,13 @@ for a in "$@"; do
   fi
   args+=("$a")
 done
+# Argument-only commands (shell, logcat, devices, forward, ...) touch no host path at all: skip the throwaway
+# android-builder container and its `docker run` create/teardown entirely - that's the other big chunk of the
+# per-call cost in friction f78 - and exec straight into powos-vadb's own, already-running, already-connected adb:
+# the same one-`docker exec` path the 0.33s benchmark used.
+if [ ${#mounts[@]} -eq 0 ] && [ ${#cp_in[@]} -eq 0 ] && [ ${#cp_out[@]} -eq 0 ]; then
+  exec docker exec -i powos-vadb adb -s 10.13.13.7:5555 "${args[@]}"
+fi
 run=(--network container:powos-vadb ${mounts[@]+"${mounts[@]}"} --entrypoint /opt/android-sdk/platform-tools/adb
   android-app-dev-android-builder:latest -s 10.13.13.7:5555 "${args[@]}")
 [ ${#cp_in[@]} -eq 0 ] && [ ${#cp_out[@]} -eq 0 ] && exec docker run --rm -i "${run[@]}"
