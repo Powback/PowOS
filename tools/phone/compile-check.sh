@@ -9,9 +9,17 @@
 # through the Mac-wide build slot (tools/agents/build-slot.sh) instead, with the rest of the heavy builds.
 set -uo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
-case "$root" in "$HOME"/Projects/*) ;; *) echo "compile-check: the worktree must be under ~/Projects (mounted into the builder)" >&2; exit 2 ;; esac
-app=/Projects${root#$HOME/Projects}/targets/android/app
-out=$("$root/tools/agents/build-slot.sh" "compile-check $root" -- docker run --rm -v "$HOME/Projects:/Projects" -v android-app-dev_gradle-cache:/root/.gradle \
+# Worktrees moved from ~/Projects/PowOS/.claude/worktrees/<name> to $POWOS_RUN_ROOT (default ~/pw) under
+# wt-move-rest (see tools/agents/worktree.sh); this guard/mount only knew ~/Projects, so every worktree
+# created since the move got an instant "must be under ~/Projects" refusal instead of a real compile (f45).
+RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
+case "$root" in
+    "$HOME"/Projects/*) mnt="$HOME/Projects" ;;
+    "$RUN_ROOT"/*)       mnt="$RUN_ROOT" ;;
+    *) echo "compile-check: the worktree must be under ~/Projects or $RUN_ROOT (mounted into the builder)" >&2; exit 2 ;;
+esac
+app=/Projects${root#$mnt}/targets/android/app
+out=$("$root/tools/agents/build-slot.sh" "compile-check $root" -- docker run --rm -v "$mnt:/Projects" -v android-app-dev_gradle-cache:/root/.gradle \
   -e ANDROID_SDK_ROOT=/opt/android-sdk -w "$app" --entrypoint bash android-app-dev-android-builder:latest -c '
     echo sdk.dir=/opt/android-sdk > local.properties
     [ -f app/version.properties ] || printf "versionCode=1\nversionName=check\n" > app/version.properties
