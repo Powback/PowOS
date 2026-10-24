@@ -141,6 +141,21 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
   --help`"). The list is a summary of friction you ALREADY logged with `friction add`, not a substitute for logging
   it - log first, then list what you logged. Nothing to report = say so ("none this task"), don't skip the section.
 
+## Retro after every agent (the user, 2026-10-24: "remove all future friction the agent encountered")
+- When an agent hands back, run `tools/agents/retro.py <agent-id> [--json]` on its transcript before staffing
+  the next piece of work - it digests what got in that agent's way in <=60 lines: permission refusals, tool
+  errors grouped by cause, retries/loops, information hunts (a read/grep/find run before the first edit, a
+  file re-read 3+ times - these are a missing skill/handbook line), waits/long sleeps, checks that misled it
+  (a FAIL later called "not a real failure"), and the friction it logged itself (+ whether already fixed).
+  The agent-id is the transcript's filename minus `agent-`/`.jsonl` (same id efficiency.py's by_agent uses).
+- `tools/agents/retro.py --since 4h --all` digests every agent finished in the window, ranked by tokens
+  wasted, for a periodic sweep instead of a per-agent one.
+- `tools/agents/retro-apply.md` is the procedure: a short Haiku/Sonnet agent reads the digest, makes the
+  small doc/skill fixes itself, and logs everything else as a friction cluster (`tools/agents/friction add`)
+  rather than patching code inline - never a long-lived agent for this.
+- Never print a transcript's raw tokens or secrets; `retro.py` redacts known secret shapes - if you extend it,
+  keep that.
+
 ## Reaching the phone (OnePlus Open, rooted)
 - `tools/phone/adb.sh <adb args>`: adb over the VPN (powos-vadb's server, 10.13.13.7:5555) from any session.
   Files you push must be under `$HOME` (Colima shares only the home directory). After a Colima restart powos-vadb may
