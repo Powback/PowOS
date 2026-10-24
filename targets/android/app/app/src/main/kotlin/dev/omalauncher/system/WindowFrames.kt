@@ -195,12 +195,16 @@ class WindowFrames(
      */
     private val sliding = mutableMapOf<Int, Float>()
 
+    /** Each sliding task's leash offset in the frame before (slideMove's velocity). */
+    private val lastDx = mutableMapOf<Int, Float>()
+
     /**
      * A page swipe starts moving [tasks]. A window coming from another page has no frame (away): it gets one now, at
      * its real bounds, veiled (drawn clear, unblurred) until its windows are where the slide has the window.
      */
     fun slideStart(tasks: List<FreeformTasks.Window>) {
         sliding.clear()
+        lastDx.clear()
         tasks.forEach { sliding[it.id] = 0f }
         if (keyguard || Switcher.open || !AppWindows.floating(context)) return
         tasks.filter { it.id !in frames && it.id !in minimised && mayFrame(it) }.forEach { w ->
@@ -213,11 +217,20 @@ class WindowFrames(
      * window manager (their overlay windows' layout x, [WindowFrame.slideTo]) - WM owns an overlay window's surface, a
      * surface write of ours (setPosition, a reparent) was overwritten or mis-placed (jobs 20261024-194358, -210409).
      */
-    fun slideMove(dx: Map<Int, Float>) {
+    fun slideMove(dx: Map<Int, Float>, end: Map<Int, Float> = emptyMap()) {
         for ((id, x) in dx) {
             val f = frames[id] ?: continue
+            // HACK: WM applies an overlay's LayoutParams one frame after our leash transaction, so the bar trailed its
+            // window by one frame's dx (phone, APK fae1ba4f: 23 px, then 69 px). Place it one frame AHEAD: dx + v, v =
+            // this frame's dx - the last one's (0 on the first frame), never past the slide's landing dx [end] (the
+            // slide's end places it exactly: slideEnd). Real fix: title bars inside the task's own layer (board task
+            // floating-window-title-bars-z-ordered-with-their).
+            val v = lastDx[id]?.let { x - it } ?: 0f
+            lastDx[id] = x
+            var lead = x + v
+            end[id]?.let { e -> lead = if (v >= 0f) minOf(lead, maxOf(e, x)) else maxOf(lead, minOf(e, x)) }
             sliding[id] = x
-            f.slideTo(x.toInt())
+            f.slideTo(lead.toInt())
             // Unveiled once WM has the offset: the next draw.
             if (f.veiled) main.post { f.veiled = false }
         }
@@ -235,6 +248,7 @@ class WindowFrames(
         for (id in sliding.keys) {
             if (id in gone) frames.remove(id)?.remove() else frames[id]?.apply { slideTo(0); veiled = false }
         }
+        lastDx.clear()
         Log.i(TAG, "slide end: bars of ${sliding.entries.joinToString { "${it.key}@${it.value.toInt()}" }}, gone ${gone.ifEmpty { "none" }}")
         if (committed) return
         sliding.clear()

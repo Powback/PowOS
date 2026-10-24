@@ -163,17 +163,21 @@ barcheck() {
   r=$(printf '%s\n' "$f" | awk -v k="$k" -v id="window bar $id" '
     function df(l,  a, i, n) { n = split(l, a, "|"); for (i = 1; i <= n; i++) if (a[i] ~ /^ *-?[0-9]+ +-?[0-9]+ +-?[0-9]+ +-?[0-9]+ *$/) return a[i]; return "" }
     function flush(  i, d, m) { if (e < k && T != "" && B != "") { split(T, t, " "); split(B, b, " "); if (!based) { for (i = 1; i <= 4; i++) base[i] = b[i] - t[i]; based = 1 }
-        m = 0; for (i = 1; i <= 4; i++) { d = b[i] - t[i] - base[i]; if (d < 0) d = -d; if (d > m) m = d }; if (m > worst) worst = m; n++ }
+        for (i = 1; i <= 4; i++) { d = b[i] - t[i] - base[i]; if (d < 0) d = -d; if (i % 2 == 0) { if (d > ws) ws = d } else if (d > wv) wv = d }
+        # Peak window speed along the slide axis (px per ms between samples) x 16.7 ms = one 60 Hz frame dx.
+        if (n > 0 && e > pe) { v = t[2] - pt; if (v < 0) v = -v; v = v / (e - pe); if (v > pv) pv = v }
+        pt = t[2]; pe = e; n++ }
       if (e >= k) { after++; if (B != "") barAfter++; lastBar = (B != "") } }
     /^@ / { if (started) flush(); started = 1; e = $2; T = ""; B = ""; nm = ""; next }
     /\|/ { if (nm ~ id) { if (B == "") B = df($0) } else if (T == "") T = df($0); nm = ""; next }
     /^--$/ { next }
     { nm = $0 }
-    END { if (started) flush(); printf "%d %d %d %d %d\n", n, worst, after, barAfter, lastBar }')
-  set -- "$1" "$2" "$3" $r; echo "bar probe $1: samples $4, worst bar-window offset $5 px, after the end $6 samples, bar in $7, last ${8:-?}" | tee -a "$OUT/log.txt"
+    END { if (started) flush(); printf "%d %d %d %d %d %d %d\n", n, ws, after, barAfter, lastBar, wv, pv * 16.7 + 0.5 }')
+  set -- "$1" "$2" "$3" $r; echo "bar probe $1: samples $4, worst bar-window offset: slide axis $5 px (limit: one frame's dx of this slide, ${10:-0} px), vertical ${9:-0} px (limit 4), after the end $6 samples, bar in $7, last ${8:-?}" | tee -a "$OUT/log.txt"
   if [ "${4:-0}" -lt 2 ]; then echo "NOTE $1: bar probe can't tell (${4:-0} samples with bar and window during the slide)" | tee -a "$OUT/log.txt"
-  elif [ "$5" -gt 4 ]; then fail "$1: the title bar didn't keep to its window - ${5} px apart during the slide (bar-$3.txt)"
-  else pass "$1: the title bar slid with its window ($4 samples, within $5 px)"; fi
+  elif [ "${9:-0}" -gt 4 ]; then fail "$1: the title bar was misplaced - ${9} px off its window across the slide (bar-$3.txt)"
+  elif [ "$5" -gt "${10:-0}" ]; then fail "$1: the title bar lagged its window by ${5} px along the slide, more than a frame's dx (${10:-0} px; bar-$3.txt)"
+  else pass "$1: the title bar slid with its window ($4 samples, slide axis within $5 px of ${10:-0}, vertical within ${9:-0})"; fi
   [ "${6:-0}" -gt 0 ] || return 0
   case $3 in
     hidden) [ "$7" = 0 ] && pass "$1: the bar went with its window" || fail "$1: the bar stayed after its window left - composited in $7 of $6 samples after the end" ;;
