@@ -37,7 +37,9 @@ it runs. There is no list to update, anywhere.
 **`run-all.sh` needs bash 4+** (`declare -A`, `mapfile`) — the Mac's `/bin/bash` is 3.2 (Apple ships the last
 GPLv2 release) and has neither, failing with `declare: -A: invalid option` before a single test runs (friction
 f84). On the Mac, run it in the container instead: `just test-container` (`docker compose --profile test run
---rm test-runner`) — CI (Ubuntu) and the phone both already have bash 4+, so this only bites on the Mac.
+--rm test-runner`) — CI (Ubuntu) and the phone both already have bash 4+, so this only bites on the Mac. Or,
+from any worktree, `tools/agents/tier1.sh [test-name...]` — a small cached `powos-tier1:latest` image (not
+the full OS image `test-container` builds), mounting the docker socket only for the tests that need it.
 
 **Do not reintroduce a hand-written list of tests.** The old CI enumerated
 them, drifted, and ran 10 of 31 suites — which is how `powos sync` shipped

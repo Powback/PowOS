@@ -59,6 +59,8 @@ tree cold. Full detail per subsystem lives in the named skill's SKILL.md — loa
 - `tools/phone/ship.sh` (request/status/pause/resume/done_req), `shell/push.sh`, `tools/phone/ship-apk.sh`.
 - Build: implicit in ship-apk.sh (warm Gradle builder) / push.sh (gate.sh).
 - Check: queued automatically by `land.sh --queue`, or `queue.sh add` separately.
+- Before landing: `tools/agents/tier1.sh [test-name...]` — run tier-1 (`test/tier1/run-all.sh`) from the Mac in a
+  correct, cached container (the Mac's bash 3.2 can't run run-all.sh itself).
 - Skill: powos-phone (shipping summary, incl. verify), handbook "Shipping" section (full detail, rarely needs re-reading).
 
 ## Board / comms / friction

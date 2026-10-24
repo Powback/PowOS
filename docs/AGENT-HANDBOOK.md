@@ -94,6 +94,11 @@ column names the file to load; `.claude/skills/<skill>/SKILL.md` has a `## <old-
   `idle.sh --wait`, sleep, `until` loops, run ship-apk.sh/push.sh yourself, or re-read a verify-queue/ship result
   yourself - the PostToolUse hook (.claude/hooks/agent-notices.py) puts new comms mail, finished verify-queue
   results and ship results on your next tool result once, instead of you polling for them.
+- Before landing, run tier-1 on the Mac with `tools/agents/tier1.sh [test-name...]` - one command, in a correct
+  container (the Mac's own bash 3.2 can't run `test/tier1/run-all.sh` at all, friction f84): builds/reuses a small
+  cached `powos-tier1:latest` image, mounts the worktree + its main repo's `.git` and the docker socket only when
+  a selected test needs it, and prints run-all.sh's own summary. `tier1.sh` alone runs the whole suite; `tier1.sh
+  test-land.sh` runs just that one.
 - Never hand-roll a wait loop (`while kill -0 <pid>; do sleep N; done`, a bare `sleep 60` before checking again, any
   `until ...; do sleep ...; done`): it's the same polling the hook above already replaces, just written by hand.
   Put the long-running thing in the background and let the PostToolUse hook deliver the result on your NEXT tool
