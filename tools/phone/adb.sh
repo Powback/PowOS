@@ -1,7 +1,7 @@
 #!/bin/bash
 # adb to the phone over the VPN (the powos-vadb container's adb server, 10.13.13.7:5555), from the Mac:
 #   tools/phone/adb.sh shell 'dumpsys power | head'      tools/phone/adb.sh push FILE /data/local/tmp/
-# Paths given to push/pull are on the Mac (under $HOME: Colima only shares the home directory, not /tmp); they're mounted into a throwaway android-builder container sharing
+# Paths given to push/pull/install are on the Mac, anywhere (temp dirs too); they reach a throwaway android-builder container sharing
 # powos-vadb's network, so any session or agent can use it (no per-session mounts).
 set -euo pipefail
 # The device: POWOS_DEVICE=phone (default) or emu - the emulator lane (tools/emu/emu.sh: the AVD shaped like the Open's
@@ -40,21 +40,49 @@ fi
 if [ "$(docker exec powos-vadb adb -s 10.13.13.7:5555 get-state 2>/dev/null || true)" != device ]; then
   docker exec powos-vadb sh -c 'adb disconnect 10.13.13.7:5555 >/dev/null 2>&1; timeout 15 adb connect 10.13.13.7:5555 >/dev/null 2>&1' || true
 fi
-args=() mounts=()
-# A path with ".." in it (e.g. verify-runner/../powos-multiplatform/...) can't be walked inside the container, where
-# only the file's own directory is mounted: it failed "cannot stat" (kwin 3.23 never reached the phone, 2026-10-23).
-# Resolve every existing absolute path to its physical location first.
+# Local paths: only a file command's own arguments are (push's sources, pull's destination, install's APKs) - a
+# `shell cat /etc/hosts` word that happens to exist on the Mac is the phone's path and is left be.
+# Under $HOME the file's directory is bind-mounted (Colima shares only the home directory into its VM). Anywhere else
+# (mktemp's /var/folders/.../T, /tmp) a mount would be an empty directory in the VM and adb said "cannot stat"
+# (user.sh with a /tmp script, apps/install.sh's mktemp stage, 2026-10-24), so the file is copied in with `docker cp`,
+# which reads through the Docker client on the Mac, and a pull's result is copied back out the same way.
+sub=; for a in "$@"; do [[ "$a" == -* ]] || { sub=$a; break; }; done
+shared() { [[ "$1" == "$HOME" || "$1" == "$HOME"/* ]]; }
+args=() mounts=() cp_in=() cp_out=() i=0
 for a in "$@"; do
-  # Relative paths too (`KWIN_PKG=targets/android/out/pkgs/...`): unmounted, the push failed silently and kwin 3.26
-  # never installed (21:35, 2026-10-23). A word with a slash that exists here is a local path.
-  if [[ -e "$a" && ( "$a" == /* || "$a" == */* ) ]]; then
-    d=$(cd "$(dirname "$a")" && pwd -P); a="$d/$(basename "$a")"; mounts+=(-v "$d:$d")
-  elif [[ "$a" == "$HOME"/* && -d "$(dirname "$a")" ]]; then
-    # A pull's new local file: its directory mounted, else the file stayed in the throwaway container (window-rec's
-    # recordings never reached the Mac, 2026-10-23). Only under $HOME: a phone path (/data/..., /tmp/...) is left be.
-    d=$(cd "$(dirname "$a")" && pwd -P); a="$d/$(basename "$a")"; mounts+=(-v "$d:$d")
+  i=$((i + 1)); role=
+  case "$sub" in
+    push) [ "$i" -lt "$#" ] && [ "$a" != push ] && [[ "$a" != -* ]] && role=in ;;
+    pull) [ "$i" = "$#" ] && [ "$i" -gt 2 ] && role=out ;;
+    install|install-multiple|install-multi-package|sideload) [ "$a" != "$sub" ] && [[ "$a" != -* ]] && role=in ;;
+  esac
+  # A path with ".." in it (e.g. verify-runner/../powos-multiplatform/...) can't be walked inside the container:
+  # it failed "cannot stat" (kwin 3.23 never reached the phone, 2026-10-23). Relative paths too
+  # (`KWIN_PKG=targets/android/out/pkgs/...`): unmounted, the push failed silently (kwin 3.26, 21:35, 2026-10-23).
+  # So every local path is resolved to its physical location first.
+  if [ "$role" = in ] && [ -e "$a" ]; then
+    d=$(cd "$(dirname "$a")" && pwd -P); a="$d/$(basename "$a")"
+    if shared "$d"; then mounts+=(-v "$d:$d")
+    else cp_in+=("$a" "/stage/in/$i"); a="/stage/in/$i/$(basename "$a")"; fi
+  elif [ "$role" = out ] && [ -d "$(dirname "$a")" ]; then
+    # A pull's new local file (or an existing directory): its directory mounted, else the file stayed in the
+    # throwaway container (window-rec's recordings never reached the Mac, 2026-10-23).
+    d=$(cd "$(dirname "$a")" && pwd -P); a="$d/$(basename "$a")"
+    if shared "$d"; then mounts+=(-v "$d:$d")
+    elif [ -d "$a" ]; then cp_out+=("/stage/out/." "$a"); a=/stage/out/
+    else cp_out+=("/stage/out/$(basename "$a")" "$a"); a="/stage/out/$(basename "$a")"; fi
   fi
   args+=("$a")
 done
-exec docker run --rm -i --network container:powos-vadb ${mounts[@]+"${mounts[@]}"} --entrypoint /opt/android-sdk/platform-tools/adb \
-  android-app-dev-android-builder:latest -s 10.13.13.7:5555 "${args[@]}"
+run=(--network container:powos-vadb ${mounts[@]+"${mounts[@]}"} --entrypoint /opt/android-sdk/platform-tools/adb
+  android-app-dev-android-builder:latest -s 10.13.13.7:5555 "${args[@]}")
+[ ${#cp_in[@]} -eq 0 ] && [ ${#cp_out[@]} -eq 0 ] && exec docker run --rm -i "${run[@]}"
+# docker cp: create the container, copy the files in, run it attached, copy results out, remove it.
+c=$(docker create -i "${run[@]}"); sk=$(mktemp -d)
+trap 'docker rm -f "$c" >/dev/null 2>&1 || true; rm -rf "$sk"' EXIT
+mkdir -p "$sk/stage/out"; for ((j = 1; j < ${#cp_in[@]}; j += 2)); do mkdir -p "$sk${cp_in[j]}"; done
+docker cp -q "$sk/stage" "$c:/stage"
+for ((j = 0; j < ${#cp_in[@]}; j += 2)); do docker cp -q "${cp_in[j]}" "$c:${cp_in[j + 1]}/"; done
+rc=0; docker start -ai "$c" || rc=$?
+for ((j = 0; j < ${#cp_out[@]}; j += 2)); do docker cp -q "$c:${cp_out[j]}" "${cp_out[j + 1]}" || { [ "$rc" != 0 ] || rc=1; }; done
+exit "$rc"
