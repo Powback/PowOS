@@ -171,18 +171,18 @@ drained && grep -q 'a = 6' "$PHONE/files/shell/ui/a.tsx" && ok "the fix ships, b
 : > "$LOG"; touch "$HOME/hold-apk"
 land targets/android/app/Main.kt 'class Main7' "kt7"; req --note "seven"; t7=$(tip)
 for _ in $(seq 40); do grep -q '^APKSTART' "$LOG" && break; sleep 1; done
-out=$(bash tools/phone/ship.sh pause)
+out=$(bash tools/phone/ship.sh pause --why "test")
 echo "$out" | grep -q "was stopped" && ok "pause stops the building ship" || { bad "pause: $out"; tail -5 "$Q/runner.log"; }
 for _ in $(seq 15); do [ -d "$HOME/.cache/powos-ship.lock" ] || [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 1; done
 [ ! -d "$HOME/.cache/powos-ship.lock" ] && ls "$Q"/*.req >/dev/null 2>&1 && ! grep -q "^APK $t7" "$LOG" && [ ! -s "$Q/failed-apk" ] &&
   ok "lock freed, request kept, nothing installed, not marked failed" || { bad "after pause"; cat "$LOG"; ls "$Q"; tail -5 "$Q/runner.log"; }
-st=$(bash tools/phone/ship.sh status); grep -q '^PAUSED' <<<"$st" && ok "status says PAUSED" || { bad "status"; echo "$st"; }
+st=$(bash tools/phone/ship.sh status); grep -q '^PAUSED.*test' <<<"$st" && ok "status says PAUSED with reason" || { bad "status"; echo "$st"; }
 rm -f "$HOME/hold-apk"; req --note "eight"; sleep $((SHIP_QUIET_S + 3))
 [ "$(grep -c '^APKSTART' "$LOG")" = 1 ] && ok "no ship starts while paused" || { bad "shipped while paused"; cat "$LOG"; }
 export APK_INSTALL_S=8
 bash tools/phone/ship.sh resume >/dev/null
 for _ in $(seq 40); do [ -s "$Q/installing" ] && break; sleep 1; done
-out=$(bash tools/phone/ship.sh pause)
+out=$(bash tools/phone/ship.sh pause --why "test")
 echo "$out" | grep -q "install is in flight" && ok "pause during an install lets it run" || bad "pause mid-install: $out"
 drained 30 && grep -q "^APK $t7 svc=1" "$LOG" && ok "the install finished, its requests done" || { bad "install in flight"; cat "$LOG"; ls "$Q"; }
 bash tools/phone/ship.sh resume >/dev/null; export APK_INSTALL_S=0
