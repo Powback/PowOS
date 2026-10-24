@@ -191,16 +191,26 @@ add)
   # `powos agents task add`, before or right after - never implicitly by queuing a check against a name nobody added).
   # f164: when the board is unreachable, try the offline cache (lib/ai/agents/powos-agents-cli has one as of commit
   # 1e618e92); only if that's also gone, allow with a warning.
-  if [ -n "$REPO" ] && [ -z "${QUEUE_NEW_TASK:-}" ] && command -v python3 >/dev/null; then
-    ids=$(python3 "$REPO/lib/ai/agents/powos-agents-cli" task list --all --json 2>/dev/null | python3 -c 'import json,sys
+  if [ -z "${QUEUE_NEW_TASK:-}" ] && command -v python3 >/dev/null; then
+    # Get the CLI from the current worktree's root (git rev-parse --show-toplevel), not $REPO (the original repo),
+    # so the lookup works even if the CLI is only on the current worktree's branch, not yet merged to main.
+    WT=$(git rev-parse --show-toplevel 2>/dev/null) || WT=
+    CLI=${WT:+$WT/lib/ai/agents/powos-agents-cli}
+    [ -z "$CLI" ] || [ ! -f "$CLI" ] && CLI=${REPO:+$REPO/lib/ai/agents/powos-agents-cli}
+    if [ -f "$CLI" ]; then
+      ids=$("$CLI" task list --json 2>/dev/null | python3 -c 'import json,sys
 try: print("\n".join(t.get("id","") for t in json.load(sys.stdin)))
 except Exception: pass' 2>/dev/null)
-    board_answered=1
-    if [ -z "$ids" ]; then
-      # Board may be unreachable; try the offline cache
-      ids=$(python3 "$REPO/lib/ai/agents/powos-agents-cli" task list --all --json --offline 2>/dev/null | python3 -c 'import json,sys
+      board_answered=1
+      if [ -z "$ids" ]; then
+        # Board may be unreachable; try the offline cache
+        ids=$("$CLI" task list --json --offline 2>/dev/null | python3 -c 'import json,sys
 try: print("\n".join(t.get("id","") for t in json.load(sys.stdin)))
 except Exception: pass' 2>/dev/null) || ids=
+        board_answered=0
+      fi
+    else
+      ids=
       board_answered=0
     fi
     if [ -n "$ids" ] && ! grep -qxF "$task" <<<"$ids"; then

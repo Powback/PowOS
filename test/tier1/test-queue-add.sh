@@ -43,7 +43,8 @@ import os
 
 state = open(os.environ.get("BOARD_STATE", "/dev/null")).read().strip() if os.environ.get("BOARD_STATE") else "up"
 
-if len(sys.argv) > 1 and sys.argv[1:4] == ['task', 'list', '--all']:
+# Handle both 'task list' and 'task list --all' / 'task list --json'
+if len(sys.argv) > 2 and sys.argv[1] == 'task' and sys.argv[2] == 'list':
     if state == "down":
         sys.exit(1)
     tasks = [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}]
