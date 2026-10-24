@@ -295,7 +295,16 @@ except Exception: pass' 2>/dev/null) || ids=
     qd=$Q; [ "$dev" = emu ] && qd=$E   # per lane: the same check on the phone and on the emulator is two answers
     for o in "$qd"/*.job; do
       [ -f "$o" ] || continue
-      grep -qxF "task=$(printf '%q' "$task")" "$o" && grep -qF "$cl" "$o" && { echo "already queued as $(basename "$o" .job) - not added again (QUEUE_DUP=1 to add anyway)"; exit 0; }
+      grep -qxF "task=$(printf '%q' "$task")" "$o" && grep -qF "$cl" "$o" || continue
+      # Same task+command, but the waiting job's need= is OLDER than this add's (it waits for an older ship; a re-add
+      # after a newer ship is the agent asking to test the newer build): replace it, don't refuse (f258). A true
+      # duplicate (its need equals or is a descendant of ours, or either side has none) is still refused.
+      onid=$(sed -n 's/^need=//p' "$o" | head -1)
+      if [ -n "$need" ] && [ -n "$onid" ] && [ "$onid" != "$need" ] && ! git -C "$from" merge-base --is-ancestor "$need" "$onid" 2>/dev/null; then
+        echo "replacing queued $(basename "$o" .job) (waits for older ship ${onid:0:9}) with this add (needs ${need:0:9})"
+        rm -f "$o"; continue
+      fi
+      echo "already queued as $(basename "$o" .job) - not added again (QUEUE_DUP=1 to add anyway)"; exit 0
     done
   fi
   qd=$Q; [ "$dev" = emu ] && { qd=$E; mkdir -p "$E"; }

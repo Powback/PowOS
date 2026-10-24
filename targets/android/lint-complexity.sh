@@ -52,7 +52,16 @@ fi
 out=$(mktemp -d "$CACHE/run.XXXXXX"); trap 'rm -rf "$out"' EXIT
 inputs=app/src/main,owl/src/main
 [ -d "$APP/engine" ] && inputs+=,engine
-[ -n "$only" ] && inputs=$only
+# --only paths may be relative to targets/android/app (the hook's form), repo-relative, or absolute (f294: only the
+# first form matched, the others said "nothing to lint"): normalize all to app-relative.
+if [ -n "$only" ]; then
+  norm=""
+  for f in $(echo "$only" | tr ',' ' '); do
+    f=${f#"$APP"/}; f=${f#"$ROOT"/}; f=${f#targets/android/app/}; f=${f#./}
+    norm+="${norm:+,}$f"
+  done
+  only=$norm; inputs=$only
+fi
 detekt() {
   docker run --rm -v "$CACHE:/lint:ro" -v "$APP:/src:ro" -v "$out:/out" -w /src --entrypoint java "$IMAGE" \
     -jar "/lint/$(basename "$JAR")" --input "$inputs" --config "$CFG" --excludes '**/build/**,**/test/**' "$@"

@@ -29,6 +29,17 @@ rc=$(echo "$out" | grep -o 'gradle-exit=[0-9]*' | tail -1 | cut -d= -f2)
 echo "$out" | grep -E "^e: |error:" | head -40
 # Not a compile error (a gradle lock held by a concurrent build, a dependency fetch): say what gradle said.
 echo "$out" | grep -q "^e: " || echo "$out" | grep -A10 "What went wrong" | head -14
-if [ "${rc:-1}" = 0 ]; then echo "compile-check: OK"; exit 0; fi
-echo "compile-check: FAILED (gradle exit ${rc:-?})" >&2
-exit 1
+if [ "${rc:-1}" != 0 ]; then echo "compile-check: FAILED (gradle exit ${rc:-?})" >&2; exit 1; fi
+# The complexity lint land.sh's pre-push hook runs (tools/git-hooks/pre-push: lint-complexity.sh --only <changed .kt>,
+# limit cognitive 10): it only ran at push, so a change that compiled here was refused there 4+ times on 2026-10-24
+# (f245). Same invocation, on the Kotlin files changed against origin's tip (committed + uncommitted).
+kt=""
+while IFS= read -r f; do
+    case "$f" in targets/android/app/*.kt) kt+="${kt:+,}${f#targets/android/app/}" ;; esac
+done < <(git -C "$root" diff --name-only --diff-filter=AM "$(git -C "$root" merge-base HEAD origin/worktree-powos-multiplatform 2>/dev/null || echo HEAD)" 2>/dev/null)
+if [ -n "$kt" ] && [ "${GATE_LINT:-1}" != 0 ]; then
+    . "$root/tools/lib/need-docker.sh"; need_docker
+    lint=$("$root/targets/android/lint-complexity.sh" --only "$kt" 2>&1); lrc=$?
+    if [ $lrc = 1 ]; then echo "$lint"; echo "compile-check: FAILED - compiles, but the complexity lint (the push gate) refuses it" >&2; exit 1; fi
+fi
+echo "compile-check: OK"; exit 0

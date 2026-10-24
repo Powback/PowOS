@@ -100,6 +100,21 @@ echo "PASS: test log" > "$VQ/done/test.log"
 out=$(run_queue list); rc=$?
 [ $rc -eq 0 ] && ok "f165: list exits 0 with done logs" || bad "f165: list exits 0 with done logs" "rc=$rc"
 
+# ============================================= f258: stale-need duplicate is replaced ========
+rm -rf "$VQ"; mkdir -p "$VQ"; echo "up" > "$BOARD_STATE"
+out=$(run_queue add t1 dummy.sh echo dup 2>&1); j1=$(ls "$VQ"/*.job 2>/dev/null | head -1)
+out=$(run_queue add t1 dummy.sh echo dup 2>&1)
+{ grep -q "already queued" <<<"$out" && [ "$(ls "$VQ"/*.job | wc -l | tr -d " ")" = 1 ]; } && ok "f258: same need is still a duplicate" || bad "f258: same need is still a duplicate" "$out"
+(cd "$VA" && echo x > x && git add x && git commit -qm newer)
+sleep 1
+out=$(run_queue add t1 dummy.sh echo dup 2>&1)
+new=$(git -C "$VA" rev-parse HEAD)
+{ grep -q "replacing queued" <<<"$out" && [ "$(ls "$VQ"/*.job | wc -l | tr -d " ")" = 1 ] && grep -qx "need=$new" "$VQ"/*.job; } \
+  && ok "f258: older-need job replaced by newer add" || bad "f258: older-need job replaced by newer add" "$out"
+(cd "$VA" && git reset -q --hard HEAD~1)
+out=$(run_queue add t1 dummy.sh echo dup 2>&1)
+grep -q "already queued" <<<"$out" && ok "f258: newer-need job kept against an older add" || bad "f258: newer-need job kept against an older add" "$out"
+
 # Final result
 echo ""
 if [ $fails -eq 0 ]; then
