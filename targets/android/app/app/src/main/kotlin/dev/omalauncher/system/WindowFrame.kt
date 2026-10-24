@@ -81,7 +81,13 @@ class WindowFrame(
     init {
         dev.omalauncher.shell.HighRefresh.ask(barParams, context.display, dev.omalauncher.shell.HighRefresh.wanted)
     }
-    private var added = false
+    // Tracked separately, not as one `added` flag: addViews can add one view and fail on the other (WM throws, the
+    // overlay op resets mid-add) - a retry must only add what's still missing, never re-add an already-attached view
+    // (a second addView on it throws "View ... has already been added", which silently ate the retry: a bar that
+    // failed once never got another try, 2026-10-24 - "no title bar to close it by" after a dock minimise/restore).
+    private var barAdded = false
+    private var gripAdded = false
+    private val added: Boolean get() = gripAdded && (app.ownBar || barAdded)
 
     private val barBlur = WindowBlur({ bar.rootView }, Frost.BLUR_DP, cornersDp = floatArrayOf(CORNER_DP, CORNER_DP, 0f, 0f), topDp = HIT_DP)
     private val gripBlur = WindowBlur({ grip.rootView }, Frost.BLUR_DP, cornersDp = FloatArray(4) { GRIP_DP / 2 })
@@ -149,19 +155,26 @@ class WindowFrame(
         if (!added) addViews() else updateViews()
     }
 
-    /** The frame's windows added (the bar only for a window without its own), once. */
+    /** The frame's windows added (the bar only for a window without its own): each independently, so one failing
+     * (WindowFrames.frameRefused asks for a retry) never blocks the other, and a retry never re-adds one that's
+     * already up. */
     private fun addViews() {
-        runCatching {
-            if (!app.ownBar) wm.addView(bar, barParams)
-            wm.addView(grip, gripParams)
-            added = true
-            if (!app.ownBar) barBlur.set(1f)
-            // The grip shows only while a finger is on it (the user, 2026-10-23: no disc floating over other windows).
-            grip.alpha = 0f
+        var ok = true
+        if (!app.ownBar && !barAdded) {
+            runCatching { wm.addView(bar, barParams); barAdded = true; barBlur.set(1f) }
+                .onFailure { ok = false; android.util.Log.w("PowosWindowFrame", "can't add the bar of task $id", it) }
+        }
+        if (!gripAdded) {
+            runCatching {
+                wm.addView(grip, gripParams); gripAdded = true
+                // The grip shows only while a finger is on it (the user, 2026-10-23: no disc floating over other windows).
+                grip.alpha = 0f
+            }.onFailure { ok = false; android.util.Log.w("PowosWindowFrame", "can't add the grip of task $id", it) }
+        }
+        if (ok) {
             logAdded()
-        }.onFailure {
-            android.util.Log.w("PowosWindowFrame", "can't add the frame of task $id", it)
-            // Refused (the overlay app op reset): granted again, the next refresh adds it.
+        } else {
+            // Refused (the overlay app op reset, or a transient WM error): granted again, and a retry regardless.
             WindowFrames.current?.frameRefused()
         }
     }
@@ -246,10 +259,9 @@ class WindowFrame(
         // A gesture under way ends with the frame: its drag layer (the bar drawn where the finger had it) never outlives
         // the frame - left over, it was a title bar with no window under it (the 01:47 "Home - Dolphin" bar).
         abandonGesture()
-        if (!added) return
-        added = false
-        if (!app.ownBar) runCatching { wm.removeViewImmediate(bar) }
-        runCatching { wm.removeViewImmediate(grip) }
+        if (!barAdded && !gripAdded) return
+        if (barAdded) { barAdded = false; runCatching { wm.removeViewImmediate(bar) } }
+        if (gripAdded) { gripAdded = false; runCatching { wm.removeViewImmediate(grip) } }
     }
 
     private fun params(title: String) =

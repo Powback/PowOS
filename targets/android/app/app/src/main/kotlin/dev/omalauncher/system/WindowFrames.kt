@@ -67,12 +67,19 @@ class WindowFrames(
         }.start()
     }
 
-    /** A frame couldn't be added (WindowFrame): the app op again, at most once a minute. */
+    /**
+     * A frame couldn't be added (WindowFrame.addViews): the app op again, at most once a minute - but [overlayGrant]
+     * does nothing when the op is already on (the common case: a transient add failure right after a task's own
+     * change, not a reset op), so without this a lost bar stayed lost until an unrelated event rebuilt its frame from
+     * scratch (a dock minimise/restore right after a window opened: no title bar to close it by, 2026-10-24). Retry
+     * the refresh regardless of why the add failed.
+     */
     fun frameRefused() {
         val now = android.os.SystemClock.uptimeMillis()
         if (now - lastGrant < GRANT_EVERY_MS) return
         lastGrant = now
         overlayGrant()
+        main.postDelayed(refreshNow, RETRY_MS)
     }
 
     private var lastGrant = 0L
@@ -618,6 +625,7 @@ class WindowFrames(
         private const val LOWERED_MAX = 256
         private const val LATE_MS = 600L
         private const val GRANT_EVERY_MS = 60_000L
+        private const val RETRY_MS = 1_000L
         private const val DENSE_TRIES = 8
         private const val DENSE_RETRY_MS = 500L
         private const val SYSUI_KEYGUARD_SHOWING = 1L shl 6
