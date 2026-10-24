@@ -201,6 +201,9 @@ class WindowFrames(
     /** Windows whose bar and grip surfaces are children of their task's leash now ([slideMove]). */
     private val reparented = mutableSetOf<Int>()
 
+    /** The reparented surfaces and where each sits from its leash's corner (logical px: the bar's y is negative, above the task). */
+    private val slideSurfaces = mutableMapOf<Int, List<Pair<android.view.SurfaceControl, android.graphics.Point>>>()
+
     /**
      * A page swipe starts moving [tasks]. A window coming from another page has no frame (away): it gets one now, at
      * its real bounds, veiled (drawn clear, unblurred) until its surfaces are where the slide has the window.
@@ -208,6 +211,7 @@ class WindowFrames(
     fun slideStart(tasks: List<FreeformTasks.Window>) {
         sliding.clear()
         reparented.clear()
+        slideSurfaces.clear()
         slideTasks.clear()
         tasks.forEach { sliding[it.id] = 0f; slideTasks[it.id] = it }
         if (keyguard || Switcher.open || !AppWindows.floating(context)) return
@@ -231,6 +235,9 @@ class WindowFrames(
             val l = leash(id)?.takeIf { it.isValid } ?: continue
             sliding[id] = x
             if (id !in reparented) adopt(t, id, f, l)
+            // Every frame, not only at adoption: WM re-placing a reparented overlay put the bar at the leash's corner
+            // (job 20261024-204132: y 0 instead of -bar height, so it covered the window's top).
+            slideSurfaces[id]?.forEach { (sc, at) -> if (sc.isValid) t.setPosition(sc, at.x.toFloat(), at.y.toFloat()) }
             t.setCrop(l, f.leashReach())
         }
     }
@@ -249,7 +256,8 @@ class WindowFrames(
             t.setPosition(sc, at.x.toFloat(), at.y.toFloat())
         }
         reparented += id
-        Log.i(TAG, "slide: bar of $id under its leash")
+        slideSurfaces[id] = s
+        Log.i(TAG, "slide: bar of $id under its leash, at ${s.joinToString { "${it.second.x},${it.second.y}" }}, crop ${f.leashReach()}")
         if (f.veiled) main.post { f.veiled = false }
     }
 
@@ -273,6 +281,7 @@ class WindowFrames(
             main.post { old.remove() }
         }
         reparented.clear()
+        slideSurfaces.clear()
         Log.i(TAG, "slide end: bars of ${sliding.entries.joinToString { "${it.key}@${it.value.toInt()}" }}, gone ${gone.ifEmpty { "none" }}")
         if (committed) return
         sliding.clear()
