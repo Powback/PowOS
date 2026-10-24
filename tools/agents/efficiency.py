@@ -2,7 +2,7 @@
 """tools/agents/efficiency.py: how efficiently the PowOS agents worked - tokens per commit, context per call, where
 the calls went. Reads Claude Code transcripts (each model call counted once, by message id).
 
-  tools/agents/efficiency.py [--since 2026-10-22T00:00] [--hours N] [--root DIR] [--repo DIR] [--json]
+  tools/agents/efficiency.py [--since 2026-10-22T00:00] [--hours N] [--root DIR] [--repo DIR] [--json] [--tools]
 
 Targets (handbook, Efficiency): avg context per call < 200k, waiting/polling < 5% of tokens, coordination (board,
 messages, git sync) < 10%, process/tooling commits < 25%, wall-clock per agent task <= 5 min (the user: "aim for
@@ -158,15 +158,167 @@ def _span_minutes(lo, hi):
     return max(0.0, (b - a).total_seconds() / 60.0)
 
 
+# ---- --tools: per-tool OUTPUT size and waste (the user, 2026-10-24: "dont just look at tool count but look at the
+# actual tools they use and the response length of the tools and how much is useful or wasted") ----
+TOK_RE = re.compile(r'[A-Za-z0-9_./:-]{6,}')
+ERR_RE = re.compile(r'command not found|no matches found|^usage:|No such file or directory|Traceback \(most recent|'
+                    r'Permission denied|error: |fatal: |Exit code [1-9]|File does not exist|InputValidationError', re.I | re.M)
+TRUNC_RE = re.compile(r'truncated|\[\.\.\. ?\d+|output too large|Output was too long|exceeds maximum', re.I)
+
+
+def _text(c):
+    if isinstance(c, str):
+        return c
+    return ''.join(x.get('text', '') if isinstance(x, dict) else str(x) for x in c or [])
+
+
+def _pattern(name, inp):
+    """A short, groupable label for WHAT produced a result (the waste-source key)."""
+    if name == 'Bash':
+        cmd = (inp.get('command') or '').strip()
+        cmd = re.sub(r'^(cd \S+ *(&&|;) *)+', '', cmd)
+        if re.search(r'idle\.sh|--wait|sleep \d|until |tasks/\w+\.output|get-state', cmd): return 'Bash: wait/poll'
+        m = re.match(r'(?:\w+=\S+ )*(\S+)(?: (\S+))?', cmd)
+        w = os.path.basename(m.group(1)) if m else '?'
+        if w in ('git', 'powos', 'adb', 'docker') and m.group(2): w += ' ' + m.group(2)
+        return 'Bash: ' + w
+    if name == 'Read':
+        i = inp or {}
+        return 'Read: ' + ('range' if i.get('offset') or i.get('limit') else 'whole file')
+    return name
+
+
+def tool_waste(path, since=''):
+    """One transcript -> list of per-result records {tool, pattern, chars, tok, ctx_add, later_calls, err, trunc,
+    dup, referenced, useful, label} plus the agent's totals. `referenced` heuristic: >=2 distinctive tokens (6+ chars,
+    not present in the tool's own input) from the result reappear in any LATER assistant text or tool_use input.
+    Small results (<1k tokens) count as useful unless they errored: their cost is the call, not the output.
+    ctx_add * later_calls = the tokens this result is re-read as context by every later call (cache reads)."""
+    evs = []
+    for line in open(path, errors='replace'):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if (e.get('timestamp') or '') >= since and e.get('type') in ('assistant', 'user'):
+            evs.append(e)
+    uses, later_txt, offs, pos = {}, [], [], 0
+    seen_ids, order = set(), []   # order: (event index, call index)
+    ncalls = 0
+    call_ctx = []
+    for i, e in enumerate(evs):
+        m = e.get('message') or {}
+        if e['type'] == 'assistant':
+            mid = m.get('id')
+            u = m.get('usage') or {}
+            if mid not in seen_ids:
+                seen_ids.add(mid); call_ctx.append(u.get('input_tokens', 0) + u.get('cache_read_input_tokens', 0) + u.get('cache_creation_input_tokens', 0)); ncalls += 1
+            for x in m.get('content') or []:
+                if not isinstance(x, dict): continue
+                if x['type'] == 'tool_use':
+                    uses[x['id']] = (x['name'], x.get('input') or {}, ncalls, i)
+                    t = json.dumps(x.get('input') or {})
+                elif x['type'] == 'text': t = x.get('text', '')
+                else: continue
+                offs.append((pos, i)); later_txt.append(t); pos += len(t) + 1
+    corpus = '\n'.join(later_txt)
+    recs, firstseen = [], collections.Counter()
+    for i, e in enumerate(evs):
+        if e['type'] != 'user' or not isinstance(e['message'].get('content'), list): continue
+        for x in e['message']['content']:
+            if not (isinstance(x, dict) and x.get('type') == 'tool_result'): continue
+            name, inp, cidx, ui = uses.get(x.get('tool_use_id'), ('?', {}, 0, i))
+            txt = _text(x.get('content'))
+            chars = len(txt)
+            tok = chars // 4
+            err = bool(x.get('is_error')) or (chars < 2000 and bool(ERR_RE.search(txt)))
+            pat = _pattern(name, inp)
+            key = (name, json.dumps(inp, sort_keys=True)[:300])
+            firstseen[key] += 1
+            dup = firstseen[key] > 1 and name in ('Read', 'Bash', 'Grep', 'Glob') and 'wait/poll' not in pat
+            ref = True; util = 1.0
+            if tok >= 1000 and not err:
+                own = set(TOK_RE.findall(json.dumps(inp)))
+                toks = {t for t in TOK_RE.findall(txt[:60000]) if t not in own}
+                start = next((o for o, ei in offs if ei > i), len(corpus))
+                later = corpus[start:]
+                samp = sorted(toks)[:: max(1, len(toks) // 400)][:400]
+                hits = sum(1 for t in samp if t in later)
+                util = hits / max(len(samp), 1)
+                # referenced = at least 2 tokens reused AND >=10% of the sampled distinct tokens (a whole-file Read
+                # where one function got used is mostly dead weight, even though it "was referenced")
+                ref = hits >= 2 and util >= 0.10
+            later_calls = max(0, ncalls - cidx)
+            label = (inp.get('command') or inp.get('file_path') or inp.get('pattern') or json.dumps(inp))[:110].replace('\n', ' ')
+            polls = 'wait/poll' in pat
+            waste = err or dup or polls or (tok >= 1000 and not ref)
+            recs.append({'tool': name, 'pattern': pat, 'chars': chars, 'tok': tok, 'err': err, 'dup': dup,
+                         'trunc': bool(TRUNC_RE.search(txt[-400:] + txt[:200])), 'referenced': ref, 'util': round(util, 2), 'waste': waste,
+                         'carry': tok * later_calls, 'label': label,
+                         'whole_big_read': name == 'Read' and not (inp.get('offset') or inp.get('limit')) and tok >= 5000})
+    return recs, call_ctx
+
+
+def tools_report(files, since, as_json=False):
+    per_tool, per_pat, per_agent, allrecs = {}, {}, {}, []
+    for f in files:
+        recs, ctx = tool_waste(f, since)
+        if not recs: continue
+        name = os.path.basename(f)[:-6].replace('agent-', '')
+        a = per_agent.setdefault(name, {'results': 0, 'tok': 0, 'waste_tok': 0, 'err': 0, 'calls': len(ctx), 'ctx_k': round(sum(ctx) / max(len(ctx), 1) / 1e3), 'ctx0_k': round(ctx[0] / 1e3) if ctx else 0, 'carry': 0, 'lowuse_tok': 0})
+        for r in recs:
+            r['agent'] = name
+            a['results'] += 1; a['tok'] += r['tok']; a['err'] += r['err']; a['carry'] += r['carry']
+            if r['tok'] >= 1000 and r['util'] < 0.3: a['lowuse_tok'] += r['tok']   # <30% of the result's tokens ever reused
+            if r['waste']: a['waste_tok'] += r['tok']
+            t = per_tool.setdefault(r['tool'], {'carry': 0, 'calls': 0, 'toks': [], 'errors': 0, 'dups': 0, 'trunc': 0, 'waste_tok': 0})
+            t['carry'] += r['carry']; t['calls'] += 1; t['toks'].append(r['tok']); t['errors'] += r['err']; t['dups'] += r['dup']; t['trunc'] += r['trunc']
+            t['waste_tok'] += r['tok'] if r['waste'] else 0
+            p = per_pat.setdefault(r['pattern'], {'n': 0, 'tok': 0, 'waste_tok': 0, 'carry_waste': 0, 'err': 0, 'dup': 0, 'unref': 0, 'ex': None})
+            p['n'] += 1; p['tok'] += r['tok']; p['err'] += r['err']; p['dup'] += r['dup']; p['unref'] += (not r['referenced'])
+            if r['waste']:
+                p['waste_tok'] += r['tok']; p['carry_waste'] += r['carry']
+                if p['ex'] is None or r['tok'] > p['ex'][0]: p['ex'] = (r['tok'], r['label'], name)
+            allrecs.append(r)
+    for t in per_tool.values():
+        s = sorted(t.pop('toks')); t['tok_total'] = sum(s); t['tok_median'] = s[len(s) // 2] if s else 0; t['tok_max'] = s[-1] if s else 0
+    top = sorted(allrecs, key=lambda r: -r['tok'])[:10]
+    from_files = collections.Counter(); fcount = collections.Counter()
+    for r in allrecs:
+        if r['tool'] == 'Read':
+            k = os.path.basename(r['label']); from_files[k] += r['tok']; fcount[k] += 1
+    out = {'reread_across_agents': [(k, fcount[k], v) for k, v in from_files.most_common(12)], 'per_tool': per_tool, 'patterns': dict(sorted(per_pat.items(), key=lambda kv: -kv[1]['carry_waste'])),
+           'agents': dict(sorted(per_agent.items(), key=lambda kv: -kv[1]['tok'])), 'top_results': top}
+    if as_json:
+        json.dump(out, sys.stdout, indent=1); print(); return
+    print(f"{'tool':14}{'calls':>7}{'out tok':>10}{'median':>8}{'max':>8}{'err':>6}{'dup':>6}{'trunc':>6}{'waste tok':>11}")
+    for k, t in sorted(per_tool.items(), key=lambda kv: -kv[1]['tok_total'])[:15]:
+        print(f"{k[:14]:14}{t['calls']:7}{t['tok_total']:10}{t['tok_median']:8}{t['tok_max']:8}{t['errors']:6}{t['dups']:6}{t['trunc']:6}{t['waste_tok']:11}")
+    print('\nwaste sources (ranked by carry = wasted result tokens x later calls that re-read them):')
+    for k, p in list(out['patterns'].items())[:15]:
+        if p['waste_tok']:
+            print(f"  {k[:30]:30} n={p['n']:5} out={p['tok']:8} waste={p['waste_tok']:8} carryM={p['carry_waste']/1e6:8.1f} err={p['err']} dup={p['dup']} unref={p['unref']}  e.g. {p['ex'][1][:70]}")
+    print('\ncarry (result tokens x later calls that re-read them), Mtok:', {k: round(t['carry'] / 1e6) for k, t in per_tool.items() if t['carry'] > 5e5})
+    print('most-Read files (file, reads, tokens):', out['reread_across_agents'][:8])
+    print('\ntop results:')
+    for r in top: print(f"  {r['tok']:7} tok {r['tool']:6} {r['agent'][:10]} {r['label'][:90]}")
+    print('\nper agent (top 10 by output tokens): useful/waste')
+    for k, a in list(out['agents'].items())[:10]:
+        print(f"  {k[:12]:12} calls={a['calls']:4} ctx={a['ctx_k']}k (first {a['ctx0_k']}k) carryM={a['carry']/1e6:.0f} results={a['results']:4} out={a['tok']:7} waste={a['waste_tok']:7} ({100*a['waste_tok']//max(a['tok'],1)}%) lowuse={a['lowuse_tok']:7} ({100*a['lowuse_tok']//max(a['tok'],1)}%) errs={a['err']}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--since'); ap.add_argument('--hours', type=float, default=24)
     ap.add_argument('--root', default=os.path.expanduser('~/.claude/projects'))
     ap.add_argument('--repo', default=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     ap.add_argument('--branch', default='origin/worktree-powos-multiplatform'); ap.add_argument('--json', action='store_true')
+    ap.add_argument('--tools', action='store_true', help='per-tool OUTPUT size + waste (errors, repeats, unreferenced, polls)')
     a = ap.parse_args()
     since = a.since or (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=a.hours)).strftime('%Y-%m-%dT%H:%M')
     files = [f for f in glob.glob(a.root + '/*PowOS*/**/*.jsonl', recursive=True) if os.path.getmtime(f) > 0]
+    if a.tools:
+        tools_report(files, since, a.json); return
     agents, minutes, timings, cats, n = {}, {}, {}, collections.Counter(), collections.Counter()
     for f in files:
         calls, mins = scan(f, since)
