@@ -64,7 +64,7 @@ the surface.
 
 | | A: two compositors | B: KWin composites all | C: per form factor |
 |---|---|---|---|
-| Linux windows: decorations, popups, X11 input, resize | patched seam (0013-0024), popups clipped to the task | native KWin | native when unfolded |
+| Linux windows: decorations, popups, X11 input, resize | patched seam (0013-0027), popups placed inside the task | native KWin | native when unfolded |
 | Android apps | native (freeform, split, PiP, Recents) | second class (virtual display: latency, IME, no Recents) | native folded, second class unfolded |
 | Android system UI (shade, notifications, IME, gestures) | native | must be bridged into KWin | mixed |
 | The web shell's look (glass over the live wallpaper) | native (SurfaceFlinger blur regions) | KWin blur over a transparent output, wallpaper from Android | both paths to keep |
@@ -98,9 +98,14 @@ the surface.
    and status bar (lit) over the wallpaper's black sky. plasma-transparent.sh now leaves home's UI out (its rects over
    CDP), skips cells where the live wallpaper moved, and checks SurfaceFlinger's stack: wallpaper directly under the
    desktop's translucent surface. Measured on the phone: 0.99 of the lit wallpaper cells match, 0.009 black.
-4. **Popups of task windows** (next, KWin): a popup (Kate's menus) is placed by KWin against the output, then
-   clipped by the task's buffer. Constrain popup placement to the task's area (xdg_positioner / X11 override-redirect
-   placement against the task window's bounds), so menus flip or shift inside the task like on a small screen.
+4. **Popups of task windows** (kwin 0027, 6.7.5-3.31; check `plasma-modes.sh popup`): a popup (Kate's menus) was
+   placed by KWin against the output, then clipped by the task's buffer. Now `Workspace::setPopupAreaHandler` gives
+   the xdg_positioner the task's area (AnlandWindowTask::area: the client area at the task's size) for a window in a
+   task, its dialogs and their popups, so menus flip or slide inside the task like on a small screen. Chosen over a
+   task per popup (a second Android window per menu, its input grab and dismissal across two tasks) and over growing
+   the parent's task (the window would jump and cover home under it): placement is KWin's own mechanism, one seam.
+   The desktop's windows keep the output's area (Plasma's popups unchanged). Open: X11 override-redirect menus
+   (Steam's) place themselves; they still clip.
 5. **One title bar per window in the web shell** (in progress elsewhere: Window core #7, CSD apps): a task draws the
    client area only; KDE's decoration never shows there.
 6. **Shared look**: the Plasma app's desktop uses the same wallpaper (done: transparent) and, later, the web shell's
@@ -117,6 +122,7 @@ the surface.
   popup lies inside the screen.
 - shell: Kate from home's launch call is one window task on the hidden tasks desktop (not on Plasma's), at most one
   PowOS title bar per task, a tap + keys reach it.
+- popup: Kate's context menu at the bottom line of its task lies inside the task (kwin 0027).
 - together: a Kate task stays a task in the Plasma app (no duplicate); SurfaceFlinger has the wallpaper directly
   under the desktop's translucent surface; Dolphin started in Plasma stays a KWin window there, also after going home.
 

@@ -10,6 +10,10 @@
 #   shell     the web shell alone (home): Kate from home's launch call (apps.launch l:org.kde.kate) is ONE window task
 #             (PowosWindowActivity), its KWin window on the hidden tasks desktop (not on Plasma's), one PowOS title
 #             bar for it, and a tap + keys reach it (caption marked modified).
+#   popup     a task's popups stay inside it (kwin 0027, >= 6.7.5-3.31): Kate from home as a window task, its cursor
+#             taken to the bottom line of the view (Enter x 60), then the Menu key's context menu - placed against the
+#             output it ran below the task and was cut off. PASS when the popup's frame lies inside Kate's client area
+#             (what the task shows), 1 logical px slack.
 #   together  both: Kate as a task from home, then the Plasma app: Kate stays its task (not also on Plasma's desktop),
 #             SurfaceFlinger composes Android's wallpaper directly under the desktop's translucent surface (no layer
 #             that could show black between them); Dolphin started inside Plasma stays a KWin window, and going home
@@ -19,10 +23,10 @@
 # Exit: 0 passed; 1 FAIL; 3 a real touch / not now (re-queued); 5 can't run.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
-MODE=${1:-}; case "$MODE" in plasma|shell|together) ;; *) sed -n 2,20p "$0"; exit 5 ;; esac
+MODE=${1:-}; case "$MODE" in plasma|shell|together|popup) ;; *) sed -n 2,24p "$0"; exit 5 ;; esac
 OUT=${2:-$HOME/.cache/powos-verify/plasma-modes-$MODE-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
-KWIN_MIN=6.7.5-3.29
+KWIN_MIN=6.7.5-3.29; [ "$MODE" = popup ] && KWIN_MIN=6.7.5-3.31
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -av -e "file pushed" -e locale -e "Qt depends" -e "If this causes" -e "for more information" | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
@@ -48,7 +52,8 @@ tasks() { sh_ "am stack list | grep PowosWindowActivity" | grep -oE 'taskId=[0-9
 focus() { sh_ "dumpsys window | grep -m1 mCurrentFocus" | sed 's/^ *//'; }
 
 # KWin's view (a script; its print() lands in KWin's stdout, /run/powos-app/hyprland.log): one line per application
-# window "PMW|caption|class|onCurrentDesktop|noBorder|x,y,w,h|maximized|popup|deleted", then "PMS|scale|current desktop".
+# window "PMW|caption|class|onCurrentDesktop|noBorder|x,y,w,h|maximized|popup|deleted" and "PMC|class|x,y,w,h" (its
+# client area), then "PMS|scale|current desktop".
 KJS='var cur = workspace.currentDesktop, scr = workspace.activeScreen, tag = "PMQ-" + Date.now();
 var sc = scr ? (2268 / scr.geometry.width) : 0;
 print("PMS|" + sc.toFixed(3) + "|" + (cur ? cur.name : "?"));
@@ -59,6 +64,8 @@ workspace.windowList().forEach(function (w) {
   for (var i = 0; i < w.desktops.length; i++) if (cur && w.desktops[i].id === cur.id) onCur = true;
   var maxd = Math.abs(g.x - m.x) < 2 && Math.abs(g.y - m.y) < 2 && Math.abs(g.width - m.width) < 2 && Math.abs(g.height - m.height) < 2;
   print("PMW|" + w.caption + "|" + w.resourceClass + "|" + onCur + "|" + w.noBorder + "|" + [Math.round(g.x), Math.round(g.y), Math.round(g.width), Math.round(g.height)].join(",") + "|" + maxd + "|" + w.popupWindow + "|" + w.deleted);
+  var c = w.clientGeometry;
+  if (c && !w.popupWindow) print("PMC|" + w.resourceClass + "|" + [Math.round(c.x), Math.round(c.y), Math.round(c.width), Math.round(c.height)].join(","));
 });'
 kwin_q() {  # -> OUT/kwin-<n>.txt; prints its PMW/PMS lines
   printf '%s\n' "$KJS" > "$OUT/pm.js"
@@ -187,6 +194,29 @@ mode_together() {
   after=$(tasks); kwin_q home >/dev/null; W=$(win home dolphin)
   [ "$before" = "$after" ] && [ "$(field "$W" 4)" = true ] && pass "going home leaves Dolphin on Plasma's desktop (not pulled out into a floating task)" || fail "going home pulled Dolphin out of Plasma: $W, tasks $(echo "$after" | tr '\n' ' ')"
   "$T/shot.sh" "$OUT/together-home.png" >/dev/null 2>&1
+}
+
+mode_popup() {
+  local l t r b x y w h cx cy cw ch p
+  kate_task || return
+  wait_win kate kate || { fail "no Kate window in KWin"; return; }
+  read -r l t r b <<<"$(sh_ "am stack list | grep -E \"taskId=${KT}[^0-9]\"" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ')"
+  [ -n "${b:-}" ] || { fail "no bounds for Kate's task $KT"; return; }
+  sh_ "input tap $(( (l + r) / 2 )) $(( (t + b) / 2 ))"; sleep 1
+  sh_ "input keyevent $(printf '66 %.0s' $(seq 60))"; sleep 1.5
+  sh_ "input keyevent KEYCODE_MENU"; sleep 2; chk popup
+  kwin_q popup >/dev/null
+  IFS=, read -r cx cy cw ch <<<"$(grep -a '^PMC|kate|' "$OUT/kwin-popup.txt" | head -1 | cut -d'|' -f3)"
+  p=$(grep -a '^PMW|' "$OUT/kwin-popup.txt" | awk -F'|' '$8=="true" && $9!="true"' | tail -1)
+  "$T/shot.sh" "$OUT/popup-kate.png" >/dev/null 2>&1
+  [ -n "${ch:-}" ] || { fail "no client area for Kate in KWin's answer"; sh_ "input keyevent KEYCODE_ESCAPE"; return; }
+  [ -n "$p" ] || { fail "no popup came up for the Menu key in Kate's task (nothing to measure)"; return; }
+  IFS=, read -r x y w h <<<"$(field "$p" 6)"
+  log "Kate's client area $cx,$cy ${cw}x$ch; popup $x,$y ${w}x$h (KWin logical px)"
+  [ "$x" -ge $((cx - 1)) ] && [ "$y" -ge $((cy - 1)) ] && [ $((x + w)) -le $((cx + cw + 1)) ] && [ $((y + h)) -le $((cy + ch + 1)) ] \
+    && pass "Kate's context menu lies inside its task ($x,$y ${w}x$h in $cx,$cy ${cw}x$ch)" \
+    || fail "Kate's context menu runs out of its task and is cut off ($x,$y ${w}x$h, task $cx,$cy ${cw}x$ch)"
+  sh_ "input keyevent KEYCODE_ESCAPE"
 }
 
 "mode_$MODE"

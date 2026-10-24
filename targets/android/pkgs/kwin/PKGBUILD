@@ -31,6 +31,8 @@
 #   0026        ours: KWin tells the app who draws a task's title bar ("decor <id> 1|0": KWin's decoration or the
 #               window's own - Steam, GTK header bars - so the app adds no second bar), and a drag on a window's own
 #               bar moves the task ("move <id>"), not the window on the hidden desktop
+#   0027        ours: a task's window's popups (menus, combo boxes, tooltips) are placed inside the task, not against the
+#               output (Workspace::setPopupAreaHandler): past the window's edge they were cut off; desktop windows unchanged
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -40,7 +42,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.30
+pkgrel=3.31
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -82,11 +84,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0023-backends-anland-tell-the-app-which-KWin-it-is-and-its-live-tasks.patch
           0024-backends-anland-a-window-full-screen-before-its-surface-opens-as-a-task.patch
           0025-backends-anland-the-desktop-s-own-windows-stay-on-it.patch
-          0026-backends-anland-who-draws-a-task-s-title-bar-and-its-own-bar-s-drag.patch)
+          0026-backends-anland-who-draws-a-task-s-title-bar-and-its-own-bar-s-drag.patch
+          0027-backends-anland-popups-of-a-task-s-window-stay-inside-the-task.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

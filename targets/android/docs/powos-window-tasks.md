@@ -67,6 +67,10 @@ that isn't one of the listed ids of that session, telling KWin nothing (`closed 
 window of that id). Only a live window of the running session is raised again (`open` of a known id, the launcher's
 and dock's restoreLinux through WindowTasks.appIdOfTask); anything else opens fresh.
 
+Popups (kwin 0027): a task shows nothing beyond the window's client area, so a window's popups (menus, combo boxes,
+tooltips: xdg_popup) are placed inside its task - `Workspace::setPopupAreaHandler` hands the positioner the task's
+area instead of the output's, for the window, its dialogs and their popups; the desktop's windows keep the output's.
+
 Title bars (kwin 0026): a task shows the window's client area only, so the app's frame (WindowFrames) adds a bar -
 unless the window draws its own. KWin says which before `open` and whenever it changes: `decor <id> 1` (KWin's
 decoration: Kate, Dolphin) or `decor <id> 0` (client-side: Steam, GTK header bars - no frame bar, only the grip),
