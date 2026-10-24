@@ -128,6 +128,8 @@ verify_tree() {
   git -C "$REPO" fetch -q origin "$BASE" || echo "verify checkout: fetch failed - running on what it has"
   if [ ! -e "$VR/.git" ]; then
     git -C "$REPO" worktree add -q --detach "$VR" "origin/$BASE" || { echo "verify checkout: can't create $VR"; return 1; }
+    # Marker land.sh and worktree.sh check (friction f57): only the verify runner touches this checkout.
+    echo "the verify runner (tools/phone/verify/queue.sh)" > "$VR/.powos-runner-checkout"
   else
     # Only the runner uses it: a check that left files changed doesn't hold it back.
     git -C "$VR" merge -q --ff-only "origin/$BASE" 2>/dev/null || { echo "verify checkout: not a fast-forward - reset to origin"

@@ -64,5 +64,9 @@ sources/*/upstream/
 # Local agent/session config, not part of the OS.
 .claude/
 
+# Marker a runner checkout (ship/verify services) drops at its own root - land.sh/worktree.sh refuse to run
+# from a directory that has one (friction f57). Never committed; each service writes its own on creation.
+/.powos-runner-checkout
+
 # Build-tier bookkeeping (raw cache key, gate record, timings)
 build/.cache/

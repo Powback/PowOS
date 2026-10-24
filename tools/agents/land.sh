@@ -60,6 +60,10 @@ fi
 
 top=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "land.sh: run it inside a PowOS git worktree" >&2; exit 2; }
 case "$top" in */.claude/worktrees/powos-multiplatform) echo "land.sh: refused - that is the shared base worktree, never land from it (tools/agents/worktree.sh new <name>)" >&2; exit 2 ;; esac
+# A runner's own checkout (verify-runner, ship-runner, ship-runner-apk): marked by .powos-runner-checkout when the
+# runner creates it (friction f57 - an agent launched with its cwd pointed at one of these got reset/overwritten
+# under it mid-edit). Only the runner that owns it ever touches it.
+[ -f "$top/.powos-runner-checkout" ] && { echo "land.sh: refused - $(cat "$top/.powos-runner-checkout") owns this checkout, never land from it (tools/agents/worktree.sh new <name>)" >&2; exit 2; }
 cd "$top"
 
 # 1. every path is a real, relative, in-repo change - never an untouched file, never one that escapes the repo.

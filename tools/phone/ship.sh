@@ -110,6 +110,8 @@ run)
     git -C "$REPO" fetch -q origin "$BASE" || echo "$(date +%T) fetch failed - on what it has"
     if [ ! -e "$SR/.git" ]; then
       git -C "$REPO" worktree add -q --detach "$SR" "origin/$BASE" || { echo "ship checkout: can't create $SR"; return 1; }
+      # Marker land.sh and worktree.sh check (friction f57): only the ship service touches this checkout.
+      echo "the ship service (tools/phone/ship.sh)" > "$SR/.powos-runner-checkout"
     else
       git -C "$SR" reset -q --hard "origin/$BASE"   # only the service uses it
     fi
@@ -167,7 +169,9 @@ run)
     echo 4 > "$Q/apk/rc"; return 1; }
   apk_launch() {   # $1 tip, rest: --note/--silent
     local a=$1; shift
-    if [ ! -e "$SA/.git" ]; then git -C "$REPO" worktree add -q --detach "$SA" "$a" || return 1
+    if [ ! -e "$SA/.git" ]; then
+      git -C "$REPO" worktree add -q --detach "$SA" "$a" || return 1
+      echo "the APK ship service (tools/phone/ship.sh)" > "$SA/.powos-runner-checkout"
     else git -C "$SA" reset -q --hard "$a" || return 1; fi
     local nm=$REPO/.claude/worktrees/powos-multiplatform/shell/node_modules
     [ -e "$SA/shell/node_modules" ] || [ ! -d "$nm" ] || ln -s "$nm" "$SA/shell/node_modules"

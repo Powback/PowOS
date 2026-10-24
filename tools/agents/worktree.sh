@@ -9,6 +9,12 @@ set -euo pipefail
 BASE=worktree-powos-multiplatform
 REPO=$(cd "$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")" && pwd)
 WT=$REPO/.claude/worktrees
+# A runner's own checkout (verify-runner, ship-runner, ship-runner-apk): marked by .powos-runner-checkout when the
+# runner creates it (friction f57). An agent whose cwd landed there (this script resolves its own location, not
+# $PWD) must make its own worktree instead of operating on the runner's.
+here_top=$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null) || here_top=
+[ -z "$here_top" ] || [ ! -f "$here_top/.powos-runner-checkout" ] ||
+  { echo "worktree.sh: refused - $(cat "$here_top/.powos-runner-checkout") owns $here_top, never run worktree.sh from it (use your own worktree)" >&2; exit 1; }
 
 ahead() { git -C "$1" cherry "origin/$BASE" HEAD 2>/dev/null | grep -c '^+' || true; }
 # The node_modules symlink shows as untracked (.gitignore's node_modules/ doesn't match a link); it is not work.
