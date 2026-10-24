@@ -51,3 +51,16 @@ It recurs on every page load, because the initial subscription fails. It is not 
 - Check: `tools/phone/bindings-check.sh --no-publish`; tier-1: `bash test/tier1/test-bindings-check.sh`.
 - Row peek on the phone (root.sh script): `curl -s -X POST -d "SELECT * FROM pet" http://127.0.0.1:3410/v1/database/local-pet/sql`.
 - Inside PowOS, avoid `journalctl` and `/logs` endpoints in root.sh scripts; they hung for minutes.
+
+## Latest hand-off (App API)
+- State (29c3ca50, on origin, NOT on the phone yet - ships + verify were paused): "+ add app" in apps/app-api. Drafts
+  in STATE/drafts/ (never specs/) via tools/app-api/appcap_add.py: one normalize() + appcap_validate; routes /drafts,
+  /draft, /installed, /draft/import|installed|add|discard; /call draft:true = appcap_run --draft (dry run only).
+  Origin "drafted" + S3; /enable on a write promotes it. Shell: host.askAssistant/androidApps/appLinks (apps/stdb.ts);
+  Kotlin apps.links (shell/AppLinks.kt, base.apk manifest parse, nothing fired). Tests: test/tier1/test-appcap-add.py.
+- Deploy (the ship service does NOT do these): 1) ship.sh resume (APK + shell); 2) PATH=$PWD/tools/phone/bin:$PATH
+  targets/android/rooted/rooted.sh deploy --note "..." then restart the app-api service; 3) apps/build.sh app-api &&
+  apps/install.sh app-api install --note "...". Then e2e job 20261024-034701-19743 (e2e-appapi --round add-app).
+- Gotchas: the runtime is capped at 48 MB (never run a model in it). A PowOS app's tables/reducers come from its OWN db
+  only (layer separation). Unverified: AppLinks on a real APK, STDB HTTP sql/call bodies, the PowOS AI hand-off.
+  App UI tsc: a temp tsconfig mapping preact -> shell/node_modules/preact.
