@@ -445,7 +445,11 @@ public final class WindowTasks {
     /** The PowOS app id (desktop id / app id KWin gave "open") of the window shown in Android task [taskId], or null. */
     public static String appIdOfTask(int taskId) {
         for (PowosWindowActivity a : tasks.values())
-            if (a.getTaskId() == taskId && a.live())
+            // HACK: no a.live() here (added by 1437a4b5): this names the app a window SHOWS (the dock's listing), not
+            // whether the launcher may reuse it; a task that failed live() lost its app key, so dockTap's front filter
+            // (desktops.ts) dropped a front Kate and the tap launched instead of minimising. Real fix: prove why live()
+            // is false for a shown window (f240 evidence in e2e-desktop.sh put_away).
+            if (a.getTaskId() == taskId)
                 return a.getIntent().getStringExtra(PowosWindowActivity.EXTRA_APP_ID);
         return null;
     }

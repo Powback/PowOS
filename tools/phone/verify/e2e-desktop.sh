@@ -40,10 +40,14 @@ dock_tap() { local p; p=$(pt "$(dockel "$1")"); case $p in none|off|"") fail "no
   set -- $p "$2"; tap "$1" "$2" "$3's dock cell"; }
 # put_away <window key> <dock key prefix> <name>: a dock tap on the focused window's app minimises it.
 put_away() {
+  local wl='l=>JSON.stringify(l.map(w=>({id:w.id,pkg:w.pkg,app:w.app,min:w.minimised,away:w.away,b:w.bounds})))'
+  local before after; before=$(hcall windows.list "[]" "$wl")
   dock_tap "$2" "$3" || return 1; sleep 1.8; chk "minimise $3"
+  after=$(hcall windows.list "[]" "$wl")
+  note "windows.list before the dock tap: $before"; note "windows.list after: $after"
   step "$4" "$3 put away: a tap on its dock cell while its window is in front"
   local m; m=$(win "$1" minimised)
-  [ "$m" = true ] && pass "$3 minimised into the dock" || fail "$3 after a dock tap on it in front: minimised=$m"
+  [ "$m" = true ] && pass "$3 minimised into the dock" || fail "$3 after a dock tap on it in front: minimised=$m (windows.list before: $before; after: $after)"
 }
 # closebar <task> <name> <slug>: its title bar's close button, a real tap.
 closebar() {
