@@ -32,6 +32,7 @@ Mac/zsh gotchas
 - Test output: `... 2>&1 | tail -15`; re-run only the failing test file.
 
 Friction (log every one, then list in your hand-back)
+(run every `bin/powos …` from YOUR worktree, `cd ~/pw/<name> && bin/powos …` — ~/Projects/PowOS is a stale master whose bin/powos has no friction/agents commands)
 `bin/powos friction add --area <area> --kind <refused|broken-tool|flaky-check|unclear-rule|slow|other> "text" --repro "cmd"`
 refused = a hook/tool denied valid work; broken-tool = script/tool errored; flaky-check = result changed with no code change;
 unclear-rule = docs contradict/omit; slow = waited >1 min; other.
