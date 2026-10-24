@@ -185,7 +185,8 @@ Dev & AI:
   ai -i               Interactive chat mode
   ai --continue       Resume the last chat here (incl. plain claude-CLI sessions)
   ai --session <id>   Resume a conversation
-  ai manager          Persistent PowOS manager (streaming, per-dir memory, live inbox)
+  ai manager          Persistent PowOS manager (streaming, per-dir memory, live inbox; --help: its flags)
+  sandbox run|caps|setup   TypeScript jobs in the manager's sandbox, with limits (powos sandbox help)
   comms send <to> <msg>   Message another agent's inbox (health/coder/devops...)
   comms watch --agent R   Park until that role gets mail (yield, no polling)
   comms inbox|agents      Show an inbox / list all inboxes
@@ -3146,6 +3147,12 @@ case "${1:-}" in
         # Everything installed or running on this host, with owner, purpose, limits and removal (lib/apps/powos-units).
         shift
         exec python3 "$POWOS_LIB/apps/powos-units" "$@"
+        ;;
+    sandbox)
+        # The manager's TypeScript sandbox (lib/ai/sandbox: QuickJS + a type check, granted capabilities only).
+        shift
+        [[ -f "$POWOS_LIB/ai/sandbox/sandbox.sh" ]] || { echo "powos sandbox: not on this host (no $POWOS_LIB/ai/sandbox)"; exit 1; }
+        exec bash "$POWOS_LIB/ai/sandbox/sandbox.sh" "$@"
         ;;
     comms)
         shift

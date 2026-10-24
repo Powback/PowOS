@@ -488,7 +488,20 @@ def list_json(args):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="powos-manager")
+    ap = argparse.ArgumentParser(
+        prog="powos ai manager",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="The standing PowOS manager: one persistent claude session (per-directory memory, live inbox).",
+        epilog="""launcher flags (powos ai manager, lib/ai/manager/manager.sh):
+  --safe          claude asks before acting (no --dangerously-skip-permissions)
+  --no-sandbox    start without the TypeScript sandbox (same as POWOS_SANDBOX_ENABLED=0)
+
+MCP servers the launcher gives it (--mcp-config-file):
+  comms     mail, the board's handoffs, present/present_choices (powos comms help)
+  sandbox   TypeScript jobs with limits (lib/ai/sandbox, ported from SpaceTimeAI's code mode): the tools
+            sandbox eval (run code or a saved script, with the capabilities granted to that job only) and
+            sandbox declarations (the exact types a set of grants gives the code). Only when its runtime
+            (bun, or node >= 22.18) and in-app deps are here: powos sandbox status / setup / help.""")
     ap.add_argument("--agent-id", default="manager")
     ap.add_argument("--system-prompt-file")
     ap.add_argument("--mcp-config-file")

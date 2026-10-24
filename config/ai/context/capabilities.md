@@ -179,6 +179,15 @@ Key facts an agent should CHECK before starting:
   the default escalation target: specialist agents report UP to it. `--safe` keeps
   permission prompts. `powos ai --continue` now also resumes raw `claude` CLI sessions in
   the current dir. ✅ (Phase 1; widget is Phase 2)
+- The manager's **TypeScript sandbox** (`powos sandbox`, `lib/ai/sandbox`, ported from SpaceTimeAI's code mode):
+  the manager gets MCP tools `sandbox eval` / `sandbox declarations` and runs one TypeScript job instead of a long
+  tool-call chain. The code is type-checked against only the functions of the capabilities granted to that job
+  (comms.read/send, board.read/write, checks.queue, phone.read), then runs in QuickJS (WebAssembly) with no process,
+  file, network, env or secret; limits per job: deadline, heap, host calls, 5 phone reads. Every job is logged
+  (`~/.local/state/powos/sandbox/jobs.jsonl`). Its deps (quickjs-emscripten, typescript) live inside the app
+  (`powos sandbox setup` = `npm ci --ignore-scripts` into `lib/ai/sandbox/node_modules`), never on the host; without
+  them (or bun / node >= 22.18) the manager starts without it. `powos sandbox status|help`; `--no-sandbox` or
+  `POWOS_SANDBOX_ENABLED=0` opts out. ✅ Mac (not deployed to the phone yet)
 - Inter-agent comms (`powos comms` + a `comms` MCP auto-wired into every `powos ai`
   agent): a daemonless **mailbox** so agents talk to each other. Each agent runs as a
   role (health/coder/devops/...); mail addressed to a role lands in that role's durable
