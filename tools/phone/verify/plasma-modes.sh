@@ -37,7 +37,9 @@ fail() { echo "FAIL [$MODE] $*" | tee -a "$OUT/log.txt"; RC=1; }
 pass() { echo "PASS [$MODE] $*" | tee -a "$OUT/log.txt"; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 restore() {
-  for p in $MINE; do us "pkill -x $p; true" >/dev/null; done
+  # Kate holds the check's typed document: SIGTERM asks "save changes?" and Kate stays up with that dialog in front -
+  # the next check found it ("linux apps up: kate"; e2e r7 08-kate-away minimised=false, 2026-10-24). Ours to drop: -9.
+  for p in $MINE; do us "pkill -x $p; sleep 2; pkill -9 -x $p; true" >/dev/null; done
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
   sh_ "logcat -d -v time" | grep -aE "WindowTasks|PowosWindow" | tail -200 > "$OUT/logcat.txt"
   echo "restored; files in $OUT"
@@ -71,14 +73,17 @@ workspace.windowList().forEach(function (w) {
   var c = w.clientGeometry;
   if (c && !w.popupWindow) print("PMC|" + w.resourceClass + "|" + [Math.round(c.x), Math.round(c.y), Math.round(c.width), Math.round(c.height)].join(","));
 });'
-kwin_q() {  # -> OUT/kwin-<n>.txt; prints its PMW/PMS lines
+kwin_q() {  # -> OUT/kwin-<n>.txt; prints its PMW/PMS lines (the newest block only)
+  # The offset was `grep -ac .` (non-empty lines) but tail counts every line, so the dump began with OLDER queries'
+  # blocks and win()'s head -1 read a stale caption: Kate showed 'Untitled (powosmodes) *' in the last block while the
+  # check said 'keys changed nothing' (2026-10-24, job 20261024-141135-38801). wc -l + keep only the last PMS block.
   printf '%s\n' "$KJS" > "$OUT/pm.js"
   "$A" push "$OUT/pm.js" /data/local/tmp/pm.js >/dev/null 2>&1; sh_ "mv /data/local/tmp/pm.js /data/powos/root/tmp/pm.js; chmod 644 /data/powos/root/tmp/pm.js"
-  us 'n=$(grep -ac . /run/powos-app/hyprland.log); qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript pmq >/dev/null 2>&1
+  us 'n=$(wc -l < /run/powos-app/hyprland.log); qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript pmq >/dev/null 2>&1
 id=$(qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript /tmp/pm.js pmq 2>/dev/null)
 qdbus6 org.kde.KWin /Scripting/Script$id org.kde.kwin.Script.run >/dev/null 2>&1; sleep 1
 qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript pmq >/dev/null 2>&1
-tail -n +$((n + 1)) /run/powos-app/hyprland.log | grep -a -oE "PM[SW]\|.*"' | tee "$OUT/kwin-$1.txt"
+tail -n +$((n + 1)) /run/powos-app/hyprland.log | grep -a -oE "PM[SWC]\|.*"' | awk '/^PMS\|/ { n = 0 } { l[n++] = $0 } END { for (i = 0; i < n; i++) print l[i] }' | tee "$OUT/kwin-$1.txt"
 }
 # $2 = class, bare or reverse-DNS: KWin reports Kate as org.kde.kate (the desktop-file id), so a bare `kate` never
 # matched and every mode said "no Kate window in KWin" while Kate's window was in the list (2026-10-24, kwin 3.31).
@@ -219,7 +224,7 @@ mode_popup() {
   sh_ "input keyevent $(printf '66 %.0s' $(seq 60))"; sleep 1.5
   sh_ "input keyevent KEYCODE_MENU"; sleep 2; chk popup
   kwin_q popup >/dev/null
-  IFS=, read -r cx cy cw ch <<<"$(grep -a '^PMC|kate|' "$OUT/kwin-popup.txt" | head -1 | cut -d'|' -f3)"
+  IFS=, read -r cx cy cw ch <<<"$(grep -aE '^PMC\|([^|]*\.)?kate\|' "$OUT/kwin-popup.txt" | head -1 | cut -d'|' -f3)"
   p=$(grep -a '^PMW|' "$OUT/kwin-popup.txt" | awk -F'|' '$8=="true" && $9!="true"' | tail -1)
   "$T/shot.sh" "$OUT/popup-kate.png" >/dev/null 2>&1
   [ -n "${ch:-}" ] || { fail "no client area for Kate in KWin's answer"; sh_ "input keyevent KEYCODE_ESCAPE"; return; }
