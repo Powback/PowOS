@@ -120,34 +120,47 @@ internal class PanelLift(
     private fun lift(tries: Int) {
         if (!wanted || lifted != null) return
         // Folded, apps are full screen: no window is over home's panels.
-        if (!AppWindows.floating(context)) return tell("p.lifted 0")
-        val set = relativeLayer ?: return tell("p.lifted 0")
+        val set = relativeLayer?.takeIf { AppWindows.floating(context) } ?: return tell("p.lifted 0")
         val home = GlassBlur.surfaceOf(web) ?: return tell("p.lifted 0")
-        val over = anchor?.let(GlassBlur::surfaceOf)
-        if (over == null) {
-            // The anchor's window isn't drawn yet (just made): its surface a frame or two later.
-            makeAnchor()
-            if (tries > 0) main.postDelayed({ lift(tries - 1) }, FRAME_MS) else tell("p.lifted 0").also { Log.w(TAG, "no anchor window: not lifted") }
-            return
-        }
+        val over = anchor?.let(GlassBlur::surfaceOf) ?: return waitForAnchor(tries)
         val frames = WindowFrames.current
         frames?.underPanel = true
         val bars = frames?.frameViews().orEmpty().mapNotNull(GlassBlur::surfaceOf)
+        val ok = stack(set, home, over, bars)
+        if (!ok) frames?.underPanel = false
+        if (ok) lifted = listOf(home) + bars
+        tell(if (ok) "p.lifted 1" else "p.lifted 0")
+    }
+
+    /** The anchor's window isn't drawn yet (just made): its surface a frame or two later. */
+    private fun waitForAnchor(tries: Int) {
+        makeAnchor()
+        if (tries > 0) {
+            main.postDelayed({ lift(tries - 1) }, FRAME_MS)
+            return
+        }
+        Log.w(TAG, "no anchor window: not lifted")
+        tell("p.lifted 0")
+    }
+
+    /** One transaction: [home] just under [over], the frames' [bars] under home, bottom-most first. */
+    private fun stack(
+        set: java.lang.reflect.Method,
+        home: SurfaceControl,
+        over: SurfaceControl,
+        bars: List<SurfaceControl>,
+    ): Boolean =
         try {
             SurfaceControl.Transaction().apply {
                 set.invoke(this, home, over, -1)
-                // Bottom-most first: each frame keeps its place among the others, all under home.
                 bars.forEachIndexed { i, b -> set.invoke(this, b, home, i - bars.size) }
             }.apply()
+            Log.i(TAG, "home over the windows (${bars.size} frame windows under it)")
+            true
         } catch (e: Exception) {
             Log.w(TAG, "can't lift home over the windows", e)
-            frames?.underPanel = false
-            return tell("p.lifted 0")
+            false
         }
-        lifted = listOf(home) + bars
-        Log.i(TAG, "home over the windows (${bars.size} frame windows under it)")
-        tell("p.lifted 1")
-    }
 
     private fun makeAnchor() {
         if (anchor != null) return

@@ -127,6 +127,9 @@ class WindowFrames(
             if (!v) main.post(refreshNow)
         }
 
+    /** Window [w] may have a frame now: not a new one under a home panel ([underPanel]). */
+    private fun mayFrame(w: FreeformTasks.Window) = !underPanel || w.id in frames
+
     /** The frames' windows' views, bottom-most frame first (see [underPanel]). */
     fun frameViews(): List<android.view.View> = stack.mapNotNull { frames[it] }.flatMap { it.panelViews }
 
@@ -150,8 +153,8 @@ class WindowFrames(
         frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
         // Bottom-most first, so a new frame's windows stack over the ones under it.
         // Under a home panel, a new one waits (underPanel).
-        show.asReversed().filter { !underPanel || it.id in frames }.forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w)), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
-        if (!underPanel) restack(show.asReversed().map { it.id })
+        show.asReversed().filter(::mayFrame).forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w)), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
+        restack(show.asReversed().map { it.id })
     }
 
     /** The frames' ids bottom-most first, in the order their windows were added (overlays stack so). */
@@ -164,6 +167,7 @@ class WindowFrames(
      * another's bar or grip (a re-add blinks).
      */
     private fun restack(wanted: List<Int>) {
+        if (underPanel) return
         stack.retainAll(wanted.toSet())
         wanted.filter { it !in stack }.forEach { stack.add(it) }
         if (stack == wanted) return
