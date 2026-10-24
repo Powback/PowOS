@@ -157,6 +157,9 @@ class WindowFrame(
         if (added) runCatching { wm.updateViewLayout(bar, barParams) }
     }
 
+    /** Its bar's and grip's views while shown (shell/PanelLift stacks their surfaces under home under a home panel). */
+    val panelViews: List<android.view.View> get() = if (added) listOf(bar, grip) else emptyList()
+
     /** Where its bar and grip take touches (screen px): a frame stacked over another's there takes that one's finger. */
     fun reach(): Rect = Rect(bounds.left, bounds.top - dp(BAR_DP + HIT_DP), bounds.right + dp(GRIP_OUT_DP), bounds.bottom + dp(GRIP_OUT_DP))
 

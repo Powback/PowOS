@@ -132,6 +132,10 @@ object Switcher {
         private set(v) {
             if (field == v) return
             field = v
+            // Home's panels aren't over the windows while the switcher is up (PanelLift); back after, if still open.
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                if (v) dev.omalauncher.shell.PanelLift.dropNow("switcher") else dev.omalauncher.shell.PanelLift.current?.again()
+            }
             // The floating windows' frames go while the switcher is up, and come back after.
             WindowFrames.current?.let { f -> android.os.Handler(android.os.Looper.getMainLooper()).post { f.refresh() } }
         }

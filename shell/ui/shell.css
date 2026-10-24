@@ -85,6 +85,8 @@
   transform: scale(calc(1 - var(--p) * 0.04));
 }
 .home.open .home-content { pointer-events: none; }
+/* Lifted over the floating windows (ui/panellift.ts): home's pages are behind the windows, so they don't draw over them. */
+.home.over-windows > .stage > .home-content { visibility: hidden; }
 
 /*
  * The panel. The drag moves it up by --rise and fades it in (an ease-out, 1 - (1 - p/0.8)^3: ~95% there half-way,

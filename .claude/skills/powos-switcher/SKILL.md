@@ -346,7 +346,8 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   it only blurs what is under HOME (the wallpaper), never the windows.
 - Page signal for "a home panel is open": gesture.ts `drawerOpen` (search and chat are drawer states) || state.ts
   `editing`. pull.tsx (the pull-up panel over apps, its own 2017 window) has drawerOpen too: send only from home.
-- Fix chosen (not built; window features frozen): while a home panel is open, put HOME's window surface above the
+- BUILT 2026-10-24 (shell/PanelLift.kt, page side ui/panellift.ts, "p.hello"/"p.lift 1|0"/"p.lifted 1|0" on the
+  native port; check verify/panel-lift.sh): while a home panel is open, put HOME's window surface above the
   tasks instead of moving the tasks (no task leash needed, windows stay live and resumed, WM state untouched):
   `Transaction.setRelativeLayer(home#631, anchor, -1)` with `anchor` = a 1x1 transparent, not-touchable 2038 window
   of PowOS's own (in Leaf:3:12, above the task area, below the status bar/shade). Then home's frost blur region blurs
@@ -359,8 +360,11 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   Rejected: reorder/minimise windows behind home (WM makes them invisible: no live content, nothing to blur); task
   leash z via a remote transition (an open transition blocks WM Shell; restoring needs WM's z for each task);
   moving the drawer into an overlay window (big rewrite of home's gestures/state, the drawer owner's).
-- Open question for the build: home's content (1-p opacity) draws over the windows from the drawer's first frame; lift
-  at drawer start (rule: panels always above) and check a mid-open frame for a pop.
+- Home's own pages would draw over the windows once lifted: .home.over-windows hides .home-content (visibility, not
+  opacity - gesture.ts reads opacity keyframes from CSS) while windows show, set BEFORE the lift (lift waits 2 rAF) and
+  cleared only after "p.lifted 0". The bars are relative-layered UNDER home (blurred with their windows), not alpha 0;
+  their WindowState surface (ViewRootImpl.getSurfaceControl) has z 0 in its own token, like home's, so setLayer(0)
+  restores both. WindowFrames.underPanel holds new frames/raises meanwhile.
 - Touch in a Linux window task (kwin 0020, 3.24): AnlandWindowTask::touchTarget picks a watched window in stacking
   order that isShown, readyForPainting, opacity > 0 and hitTest(pos), else the task's window (by frame alone Steam's
   steamwebhelper POPUP_MENU helpers, override-redirect, no WM_TRANSIENT_FOR, took taps). Note Xwayland delivers a

@@ -116,6 +116,20 @@ class WindowFrames(
         }
     }
 
+    /**
+     * A home panel is over the windows (shell/PanelLift): the frames' windows are stacked under home then, so none is
+     * added or re-added meanwhile (a new overlay would stack over the panel); the ones missed come with the refresh after.
+     */
+    var underPanel = false
+        set(v) {
+            if (field == v) return
+            field = v
+            if (!v) main.post(refreshNow)
+        }
+
+    /** The frames' windows' views, bottom-most frame first (see [underPanel]). */
+    fun frameViews(): List<android.view.View> = stack.mapNotNull { frames[it] }.flatMap { it.panelViews }
+
     /** SystemUI's state flags: no frames over the lock screen. */
     fun systemUiState(flags: Long) {
         val k = flags and SYSUI_KEYGUARD_SHOWING != 0L && flags and SYSUI_KEYGUARD_OCCLUDED == 0L
@@ -135,8 +149,9 @@ class WindowFrames(
         val ids = show.map { it.id }.toSet()
         frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
         // Bottom-most first, so a new frame's windows stack over the ones under it.
-        show.asReversed().forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w)), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
-        restack(show.asReversed().map { it.id })
+        // Under a home panel, a new one waits (underPanel).
+        show.asReversed().filter { !underPanel || it.id in frames }.forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w)), ::minimise, ::edge, ::maximise) }.apply { showMaximised(w.id in maximised) }.place(w.bounds) }
+        if (!underPanel) restack(show.asReversed().map { it.id })
     }
 
     /** The frames' ids bottom-most first, in the order their windows were added (overlays stack so). */

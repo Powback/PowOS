@@ -220,6 +220,8 @@ class ShellActivity : Activity() {
     override fun onStart() {
         super.onStart()
         if (::host.isInitialized) dev.omalauncher.system.Switcher.homeStarted(host.bridge)
+        // Back in front with a home panel still open: over the windows again (PanelLift).
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) PanelLift.current?.again()
         // A hosted widget that lost its drawing while home was away (its provider killed, a display gone): again.
         AppWidgets.get(this).heal()
         runtime.widgets.homeStarted()
@@ -230,6 +232,7 @@ class ShellActivity : Activity() {
         super.onStop()
         // Out of sight: the switcher layer goes (an app was opened from it, or came up over it).
         if (::host.isInitialized) dev.omalauncher.system.Switcher.homeStopped(host.bridge)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) PanelLift.dropNow("home stopped")
         // An app was just opened from home: it moves to the front of the recent apps, out of sight.
         runtime.usage.settle()
         runtime.widgets.homeStopped()

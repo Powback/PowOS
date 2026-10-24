@@ -40,6 +40,8 @@ object AppWindows {
         base: ActivityOptions? = null,
     ): ActivityOptions? {
         if (!floating(context)) return base
+        // The app comes up over home: home's panels go back under the windows (shell/PanelLift).
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) dev.omalauncher.shell.PanelLift.dropNow("launch")
         return Tasks.freeformOptions(nextBounds(context), base)
     }
 

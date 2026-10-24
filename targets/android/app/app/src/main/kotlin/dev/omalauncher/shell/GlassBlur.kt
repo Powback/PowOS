@@ -432,6 +432,10 @@ internal class GlassBlur(
     companion object {
         private const val TAG = "PowosGlassBlur"
 
+        /** [view]'s window surface (ViewRootImpl.getSurfaceControl: WM's surface of the window), valid, or null. */
+        fun surfaceOf(view: View): SurfaceControl? =
+            methods?.let { m -> runCatching { m.viewRoot.invoke(view)?.let { m.surface.invoke(it) as SurfaceControl? } }.getOrNull() }?.takeIf { it.isValid }
+
         /** A test region must come back with its values where AOSP's layout has them (the OEM's extras after them). */
         private fun valid(c: Codec): Boolean {
             val a = c.encode(Region(10f, 20f, 110f, 220f, 1f, 2f, 3f, 4f, 0.5f, 30f))

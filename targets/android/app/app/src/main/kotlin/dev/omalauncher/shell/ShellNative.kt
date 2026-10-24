@@ -95,7 +95,11 @@ class ShellNative(
         }
     }
 
+    /** Home's panels over the floating windows: made at home's page's "p.hello". */
+    @Volatile private var lift: PanelLift? = null
+
     fun close() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) main.post { lift?.close() }
         main.post {
             port?.close()
             port = null
@@ -115,6 +119,9 @@ class ShellNative(
             when (verb) {
                 "open" -> open(rest.trim())
                 "n.req" -> net.command(rest)
+                // Home's panels over the floating windows (PanelLift; only home's page sends these).
+                "p.hello" -> if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) main.post { (lift ?: PanelLift(web) { t -> main.post { port?.postMessage(WebMessage(t)) } }.also { lift = it }).hello() }
+                "p.lift" -> if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) lift?.want(rest.trim() == "1")
                 "b.hello" -> if (glass != null) glass.hello() else main.post { port?.postMessage(WebMessage("b.state 0")) }
                 "b.r" -> glass?.command(rest)
                 "b.lag" -> glass?.let { it.lag = rest.trim().toInt() }
