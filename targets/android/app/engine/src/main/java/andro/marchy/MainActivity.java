@@ -1364,6 +1364,38 @@ public class MainActivity extends Activity
      * A drag moves it (anywhere on screen) out of the way of what's underneath.
      */
     /** Round 🎮 toggle for the game controls, top-right (the keyboard button keeps the bottom); long-press edits. */
+    private TextView mGamepadButton;
+
+    /** The game controls on or off (the 🎮 button's tap, and the control centre's Controller tile): saved, back screen follows. */
+    private void setPadShown(boolean show) {
+        mGamepadOverlay.setShown(show);
+        if (mGamepadButton != null) mGamepadButton.setAlpha(show ? 1f : 0.6f);
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
+        applyBackScreen(show);
+    }
+
+    /** Whether the game controls are on: the live overlay's state, else what was saved (it is restored at the next start). */
+    public static boolean padShown(Context c) {
+        MainActivity m = sInstance;
+        if (m != null && m.mGamepadOverlay != null) return m.mGamepadOverlay.getVisibility() == View.VISIBLE;
+        return c.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_GAMEPAD_SHOWN, false);
+    }
+
+    /** The control centre's Controller tile: on/off. With no session up it is saved and applies at the next start. */
+    public static void padShow(Context c, boolean show) {
+        MainActivity m = sInstance;
+        if (m != null && m.mGamepadOverlay != null) m.runOnUiThread(() -> m.setPadShown(show));
+        else c.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
+    }
+
+    /** The tile's long press: the layout editor. False when no session is up to edit on. */
+    public static boolean padEdit() {
+        MainActivity m = sInstance;
+        if (m == null || m.mGamepadOverlay == null) return false;
+        m.runOnUiThread(() -> m.mGamepadOverlay.setEditing(true, () -> m.setPadShown(true)));
+        return true;
+    }
+
     private void addGamepadButton(FrameLayout root) {
         int size = Math.round(44 * mDensity);
         int margin = Math.round(12 * mDensity);
@@ -1380,13 +1412,8 @@ public class MainActivity extends Activity
         b.setContentDescription("Game controls");
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         b.setAlpha(mGamepadOverlay.getVisibility() == View.VISIBLE ? 1f : 0.6f);
-        b.setOnClickListener(v -> {
-            boolean show = mGamepadOverlay.getVisibility() != View.VISIBLE;
-            mGamepadOverlay.setShown(show);
-            v.setAlpha(show ? 1f : 0.6f);
-            prefs.edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
-            applyBackScreen(show);
-        });
+        mGamepadButton = b;
+        b.setOnClickListener(v -> setPadShown(mGamepadOverlay.getVisibility() != View.VISIBLE));
         // Long-press: a menu - the layout editor and the back screen's toggles.
         b.setOnLongClickListener(v -> {
             v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);

@@ -241,6 +241,10 @@ class ShellBridge(
             "qs.open" -> quick.open(a.getString(0))
             "qs.set" -> quick.set(a.getString(0), a.getDouble(1)).let { quick.state() }
             "qs.listening" -> quick.listening(a.getBoolean(0))
+            // The touch controller overlay (andro.marchy.GamepadOverlay): the control centre's Controller tile.
+            "pad.state" -> andro.marchy.MainActivity.padShown(context)
+            "pad.overlay" -> a.getBoolean(0).let { andro.marchy.MainActivity.padShow(context, it); it }
+            "pad.edit" -> andro.marchy.MainActivity.padEdit()
             "media.state" -> media.state()
             "media.control" -> media.control(a.getString(0))
             "media.output" -> media.output(a.optString(0).takeIf { it.isNotEmpty() })

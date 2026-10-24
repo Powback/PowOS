@@ -17,6 +17,7 @@ import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
 import { openGlasses } from "../glasses/open.ts";
 import { useMinuteClock } from "./time.ts";
+import { PAD_ID, askPad, editPad, padTile, togglePad } from "./padtile.ts";
 import { TESTS_ID, askTests, testsTile, toggleTests } from "./tests.ts";
 import type { GlassesState, MediaState, QuickState, QuickTile, RemoteState, RemoteTarget } from "../types.ts";
 
@@ -80,6 +81,7 @@ const TILE_ICONS: Record<string, IconName | [IconName, IconName]> = {
   qr_code_scanner: "qrcodeScan",
   [REMOTE_ID]: "keyboardOutline",
   [GLASSES_ID]: "glasses",
+  [PAD_ID]: "gamepad",
   // The phone checks (tests.ts): off = paused, a tap resumes; on = running or waiting, a tap stops.
   [TESTS_ID]: ["play", "pause"],
 };
@@ -121,6 +123,8 @@ function usePress(t: QuickTile, hold = true) {
     // An action with no page of its own (Lock, Screenshot): a hold is nothing - the host has no page to open
     // ("no quick setting lockscreen", 2026-10-21 home rejection).
     if (NO_PAGE.has(t.id)) return;
+    // The Controller tile's hold is the overlay's layout editor, not a page in Settings.
+    if (t.id === PAD_ID) return editPad();
     shut();
     powos.qs.open(t.id).catch((e) => console.warn("qs: no page for", t.id, e));
   };
@@ -819,7 +823,7 @@ const SECTIONS: { id: string; label: string; members: string[] }[] = [
   },
   // Focus with the screen's own (no sound-mode tiles to make a section of: the volume slider's icon is the ringer).
   { id: "display", label: "display & focus", members: ["rotation", "darkmode", "app:com.oplus.eyeprotect", "dnd", "battery"] },
-  { id: "tools", label: "tools", members: ["flashlight", "screenshot", "screenrecord", "calculator", "qr_code_scanner", "wallet", "controls", TESTS_ID] },
+  { id: "tools", label: "tools", members: ["flashlight", "screenshot", "screenrecord", "calculator", "qr_code_scanner", "wallet", "controls", PAD_ID, TESTS_ID] },
 ];
 /** Each control's one word. */
 const WORD: Record<string, string> = {
@@ -843,10 +847,11 @@ const WORD: Record<string, string> = {
   controls: "devices",
   [GLASSES_ID]: "glasses",
   [REMOTE_ID]: "remote",
+  [PAD_ID]: "controller",
 };
 const WORD_APP: Record<string, string> = { "com.oplus.eyeprotect": "eye", "com.google.android.gms": "share", "com.oneplus.oshare": "share", "com.oplus.linker": "cast" };
 // The phone checks' word is their state (tests.ts).
-const word = (t: QuickTile) => (t.id === TESTS_ID ? t.label : null) ?? WORD[t.id] ?? (t.app && WORD_APP[t.app]) ?? t.label.toLowerCase().split(/\s+/)[0];
+const word = (t: QuickTile) => (t.id === TESTS_ID || t.id === PAD_ID ? t.label : null) ?? WORD[t.id] ?? (t.app && WORD_APP[t.app]) ?? t.label.toLowerCase().split(/\s+/)[0];
 
 /** Controls with a screen of their own: a tap shuts the panel and opens it. */
 const SCREENS: Record<string, () => void> = { [GLASSES_ID]: openGlasses, [REMOTE_ID]: openRemote };
@@ -854,6 +859,7 @@ const SCREENS: Record<string, () => void> = { [GLASSES_ID]: openGlasses, [REMOTE
 /** What a tap on a control does: the phone checks stop or resume in place (the shade stays), a screen opens, or [own]. */
 function tapOf(t: QuickTile, own: () => void): () => void {
   if (t.id === TESTS_ID) return toggleTests;
+  if (t.id === PAD_ID) return togglePad;
   const open = SCREENS[t.id];
   return open ? () => (shut(), open()) : own;
 }
@@ -921,7 +927,8 @@ function Controls() {
     powos.qs.listening(true);
     askRemote();
     askTests();
-    const timer = window.setInterval(() => document.hidden || (askRemote(), askTests()), 3000);
+    askPad();
+    const timer = window.setInterval(() => document.hidden || (askRemote(), askTests(), askPad()), 3000);
     return () => {
       powos.qs.listening(false);
       clearInterval(timer);
@@ -933,7 +940,8 @@ function Controls() {
   }, [open]);
   const q = quick.value;
   const tests = testsTile();
-  const every = [...(q.tiles ?? []), ...(glasses.value ? [glassesTile()] : []), ...(tests ? [tests] : [])].filter((t) => !leftOut(t));
+  const pad = padTile();
+  const every = [...(q.tiles ?? []), ...(glasses.value ? [glassesTile()] : []), ...(pad ? [pad] : []), ...(tests ? [tests] : [])].filter((t) => !leftOut(t));
   const b = q.brightness ?? { value: 0.5, auto: false };
   const v = q.volume ?? { value: 0.5, ringer: 2 };
   // The user's order (controls.layout) within each group; the curated order after.

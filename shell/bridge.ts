@@ -193,6 +193,11 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       action: (key, index, text) => call("notifications.action", key, index, text ?? null),
     },
     lock: { unlock: () => call("lock.unlock") },
+    pad: {
+      state: () => call<boolean>("pad.state"),
+      overlay: (on) => call<boolean>("pad.overlay", on),
+      edit: () => call<boolean>("pad.edit"),
+    },
     media: {
       state: () => call<MediaState>("media.state"),
       control: (command) => call("media.control", command),
@@ -632,6 +637,14 @@ function mock(): Bridge {
     remote: mockRemote(events),
     glasses: mockGlasses(events),
     lock: { unlock: async () => console.log("[mock] unlock") },
+    pad: (() => {
+      let on = false;
+      return {
+        state: async () => on,
+        overlay: async (v: boolean) => (on = v),
+        edit: async () => (console.log("[mock] controller layout editor"), true),
+      };
+    })(),
     media: (() => {
       let st: MediaState = {
         available: true,

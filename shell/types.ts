@@ -558,6 +558,15 @@ export interface Bridge {
    * The control center (and the notification panel's row): every tile the phone's own control center has, switched
    * here, and its sliders. "qs.changed" brings the state again.
    */
+  /** The touch controller overlay (GamepadOverlay), for the control centre's Controller tile. */
+  pad: {
+    /** Whether the overlay is on (live, else what was saved for the next start). */
+    state(): Promise<boolean>;
+    /** Shows or hides it; resolves to the new state. Rejects where the phone has no overlay. */
+    overlay(on: boolean): Promise<boolean>;
+    /** Opens its layout editor. False: no game session up to edit on. */
+    edit(): Promise<boolean>;
+  };
   /** What's playing ("media.changed" brings it again once asked): the control center's media card. */
   media: {
     state(): Promise<MediaState>;
