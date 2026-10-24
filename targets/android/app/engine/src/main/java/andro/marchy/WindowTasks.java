@@ -44,6 +44,14 @@ public final class WindowTasks {
     static volatile String session;
     /** The "export-new" state KWin has (null: not told on this connection). */
     private static volatile Boolean exportNewSent;
+    /**
+     * The desktop's activities on screen (MainActivity and its home alias HomeDesktop, started..stopped): the Plasma
+     * app is showing KWin's desktop, so windows belong there - KDE windows with KDE's decoration, opened from Kickoff,
+     * maximized the KDE way. KWin is told ("desktop 1|0", kwin 0025); an older KWin gets "export-new 0" meanwhile.
+     */
+    private static int desktopStarted;
+    /** The "desktop" state KWin has (null: not told on this connection). */
+    private static volatile Boolean desktopSent;
 
     /**
      * Whether apps float now (the app module's AppWindows.floating, set by App through setFloating: the unfolded home). KWin is told
@@ -88,12 +96,43 @@ public final class WindowTasks {
         return caps.contains(" " + cap + " ");
     }
 
+    /** The desktop's activity [started] (true) or stopped (false): KWin told whether the desktop is on screen. */
+    static void desktopShown(Context context, boolean started) {
+        synchronized (WindowTasks.class) {
+            desktopStarted = Math.max(0, desktopStarted + (started ? 1 : -1));
+        }
+        Context app = context.getApplicationContext();
+        tellDesktop();
+        tellExportNew(app);
+    }
+
+    /** Whether the desktop (the Plasma app) is on screen now. */
+    public static boolean desktopOnScreen() {
+        synchronized (WindowTasks.class) {
+            return desktopStarted > 0;
+        }
+    }
+
+    /** KWin told whether the desktop is on screen ("desktop 1/0", kwin 0025), when it changed or KWin hasn't been told. */
+    static void tellDesktop() {
+        if (!kwinCan("desktop"))
+            return;
+        boolean on = desktopOnScreen();
+        if (Boolean.valueOf(on).equals(desktopSent))
+            return;
+        desktopSent = on;
+        sendLine("desktop\t" + (on ? 1 : 0));
+        Log.i(TAG, "desktop " + (on ? 1 : 0) + (out == null ? ": channel down, dropped" : ""));
+    }
+
     /** KWin told whether apps float now ("export-new 1/0"), when it changed or KWin hasn't been told. */
     static void tellExportNew(Context context) {
         java.util.function.Predicate<Context> f = floating;
         if (!kwinCan("export-new") || f == null)
             return;
-        boolean on = f.test(context);
+        // A KWin without "desktop" (before 0025) would take new windows out of the Plasma app into floating tasks: it
+        // gets "export-new 0" while the desktop is on screen.
+        boolean on = f.test(context) && (kwinCan("desktop") || !desktopOnScreen());
         if (Boolean.valueOf(on).equals(exportNewSent))
             return;
         exportNewSent = on;
@@ -130,6 +169,7 @@ public final class WindowTasks {
                 caps = "";
                 session = null;
                 exportNewSent = null;
+                desktopSent = null;
                 out = o;
                 // KWin says "caps" + "session" when it connects; if it came first, the daemon dropped them: ask again
                 // (an older KWin ignores it).
@@ -177,6 +217,8 @@ public final class WindowTasks {
             caps = f.length > 1 ? " " + f[1] + " " : "";
             Log.i(TAG, "KWin caps:" + caps);
             exportNewSent = null;
+            desktopSent = null;
+            tellDesktop();
             tellExportNew(context);
             return;
         }

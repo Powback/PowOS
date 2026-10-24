@@ -861,8 +861,16 @@ public class MainActivity extends Activity
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        // PowOS: the desktop (the Plasma app) is on screen - its windows are KDE windows on it, not floating tasks.
+        WindowTasks.desktopShown(this, true);
+    }
+
+    @Override
     protected void onStop() {
         super.onStop();
+        WindowTasks.desktopShown(this, false);
         // Left: folded, the next time it steps aside again (unless asked for again).
         sShownOnPurpose = false;
     }
