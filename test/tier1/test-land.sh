@@ -210,6 +210,15 @@ out=$(cd "$W8" && "$LAND" "a different line, no overlap" -- shared2.txt 2>&1); r
 grep -qi "origin already changed" <<<"$out" && bad "a non-overlapping origin commit must not warn" "$out" \
   || ok "no false warning for a non-overlapping origin commit"
 
+# == 9. untracked files warning: with an untracked test file present, the warning names it ===============
+W9="$TMP/w9"; new_worktree "$W9"
+echo change9 > "$W9/tracked.txt"
+echo test_code > "$W9/test_x.sh"   # untracked test file
+out=$(cd "$W9" && "$LAND" "test with untracked file" -- tracked.txt 2>&1); rc=$?
+[ $rc -eq 0 ] && ok "lands successfully with untracked files present" || bad "lands successfully with untracked files present" "rc=$rc: $out"
+grep -q "untracked file" <<<"$out" && ok "warns about untracked files" || bad "warns about untracked files" "$out"
+grep -q "test_x.sh" <<<"$out" && ok "names the untracked test file" || bad "names the untracked test file" "$out"
+
 echo ""
 echo "== Results: $PASS passed, $FAIL failed =="
 [ $FAIL -eq 0 ]

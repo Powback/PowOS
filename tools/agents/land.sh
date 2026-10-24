@@ -205,6 +205,20 @@ else
   fi
 fi
 
+# 4.5. warn about untracked files left in the worktree (excluding gitignored and symlinks)
+untracked=()
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  # Skip gitignored files
+  if git check-ignore -q "$f" 2>/dev/null; then continue; fi
+  # Skip symlinks (e.g., shell/node_modules)
+  [ -L "$f" ] && continue
+  untracked+=("$f")
+done < <(git status --porcelain | grep '^??' | sed 's/^?? //')
+if [ ${#untracked[@]} -gt 0 ]; then
+  echo "land: ${#untracked[@]} untracked file(s) left: ${untracked[*]} - commit them (tests belong in test/tier1/test-*.sh) or delete them"
+fi
+
 # 5. board task step - never fails the landing; the board can be unreachable.
 if [ -n "$task_id" ]; then
   cli=${LAND_AGENTS_CLI:-"$top/lib/ai/agents/powos-agents-cli"}
