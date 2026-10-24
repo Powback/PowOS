@@ -43,7 +43,7 @@ sfrow_of() { awk -v p="$1" -v W="$W" -v H="$H" '
   on && want {n=split($0, f, "|"); if (n >= 7) {
     split(f[6], d, " "); split(f[7], c, " "); cw = int(c[3] - c[1] + 0.5); ch = int(c[4] - c[2] + 0.5)
     # The crop is in the BUFFER: a buffer the app pre-rotated for the panel (Transform 0: HWUI apps, home) reads
-    # turned against the screen, one SurfaceFlinger turns (ROT_90/270: a Linux window's SurfaceView, its consumer
+    # turned against the screen, one SurfaceFlinger turns (ROT_90/270: the SurfaceView of a Linux window, its consumer
     # draws upright) reads as the screen does. Swapped only when exactly one of the two turns it.
     t = (f[5] ~ /ROT_90|ROT_270/) ? 1 : 0; sw = (rot != t)
     if (rot) print W - d[4], d[1], W - d[2], d[3], (sw ? ch : cw), (sw ? cw : ch); else print d[1], d[2], d[3], d[4], (sw ? ch : cw), (sw ? cw : ch)
