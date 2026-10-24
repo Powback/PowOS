@@ -149,6 +149,21 @@ vis() { sh_ "dumpsys activity activities" | grep -m1 -E "Task\{[^ ]* #$1 " | gre
 [ "$(vis "$DT")" = visible=true ] || fail "Dolphin's task $DT went $(vis "$DT") when Kate opened: minimised by Kate's launch"
 [ "$(vis "$KT")" = visible=true ] || fail "Kate's task $KT is $(vis "$KT") after opening"
 pass "Dolphin then Kate: both stay visible, neither minimised"
+# 2d. Raising the window behind keeps the other one (2026-10-24, f257: a raise was startActivityFromRecents, a TO_FRONT
+# that sent every other floating task TO_BACK). Through home's bridge as the page calls it: the dock (windows.restore),
+# the switcher's card (tasks.open) and a launcher tap on an app whose window is open (apps.launch).
+both() {  # $1 how: both tasks visible, $2 the raised one on top (windows.list: top-most first)
+  sleep 2.5
+  [ "$(vis "$DT")" = visible=true ] || fail "$1: Dolphin's task $DT went $(vis "$DT")"
+  [ "$(vis "$KT")" = visible=true ] || fail "$1: Kate's task $KT went $(vis "$KT")"
+  local top; top=$(hcall windows.list "[]" "l=>String((l.filter(w=>w.id===$DT||w.id===$KT)[0]||{}).id)")
+  log "$1: of Dolphin/Kate, task ${top:-?} is on top"
+  [ "$top" = "$2" ] || fail "$1: task $2 asked for the front, task ${top:-?} is on top"
+  pass "$1: task $2 raised, Dolphin and Kate both still visible"
+}
+r=$(hcall windows.restore "[$DT]" "v=>String(v)"); log "windows.restore $DT: $r"; both "dock tap on Dolphin (behind Kate)" "$DT"
+r=$(hcall tasks.open "[$KT,'instant']" "v=>String(v)"); log "tasks.open $KT: $r"; both "switcher card of Kate (behind Dolphin)" "$KT"
+r=$(hcall apps.launch "['l:org.kde.dolphin']" "()=>'ok'"); log "apps.launch dolphin again: $r"; both "launcher tap on open Dolphin (behind Kate)" "$DT"
 
 # 3. Gwenview started from inside the session (Dolphin's "Open With > Gwenview": another app's window, no launch path
 # of PowOS's): one more floating task, and closing it closes Gwenview. Not through kioclient: KIO opened the PNG in

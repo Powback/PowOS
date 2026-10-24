@@ -64,6 +64,16 @@ object Tasks {
         id: Int,
         options: ActivityOptions = ActivityOptions.makeBasic(),
     ): Boolean {
+        // A floating window that is there already (unfolded home): raised alone. startActivityFromRecents of a freeform
+        // task on this ROM is a TO_FRONT transition that sends every other floating task TO_BACK - the other windows
+        // vanished (logcat 2026-10-24 #901: TO_FRONT t2915, t2909 m=TO_BACK), where moveTaskToFront of the same kind of
+        // task moved only that one (#902: t2909 TO_FRONT, nothing else in the change). The dock, the switcher, a launcher
+        // tap on an open Linux window and the quick switch all come through here. A task of another mode (full screen,
+        // folded, gone) still takes startActivityFromRecents: it restarts a dead task and applies [options]' bounds.
+        if (AppWindows.floating(context) && FreeformTasks.list(context).any { it.id == id } && FreeformTasks.raise(context, id)) {
+            Log.i(TAG, "task $id raised (moveTaskToFront: the other floating windows stay)")
+            return true
+        }
         val result =
             runCatching {
                 HiddenApi.allow()
