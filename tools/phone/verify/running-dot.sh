@@ -32,7 +32,7 @@ key=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$PKG\\//.test(a.key))||{}).key||'E
 case $key in a:$PKG/*) ;; *) echo "FAIL running-dot: Calculator's key: $key"; exit 1 ;; esac
 # The main log rotates in seconds (256 KiB, OplusTouch spam): a `logcat -d` after the fact found nothing. Capture the
 # tags from the launch on, on the phone, bounded (timeout); hiddenapi denials log under the app's process name.
-sh_ "rm -f /data/local/tmp/rd-log.txt; (timeout 40 logcat -T 1 -v time -s PowosWindowFrames PowosFreeform PowosRunning com.powos.app:W </dev/null >/data/local/tmp/rd-log.txt 2>&1 &)"
+sh_ "rm -f /data/local/tmp/rd-log.txt; (timeout 240 logcat -T 1 -v time -s PowosWindowFrames PowosFreeform PowosRunning com.powos.app:W </dev/null >/data/local/tmp/rd-log.txt 2>&1 &)"
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || { echo "FAIL running-dot: apps.launch: $r"; exit 1; }
 t=0; until grep -q running <<<"$(calcrun)" || [ $t -ge 20 ]; do sleep 0.5; t=$((t + 1)); done
 mode=$(sh_ "dumpsys activity activities" | grep -E "Task\\{.*$PKG" | grep -o "mode=[a-z-]*" | head -1)
