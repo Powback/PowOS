@@ -2,6 +2,11 @@
 # tools/emu/testwin/build.sh: builds the emulator's test window client (AndroidManifest.xml + src/) with the SDK in
 # the android-builder image (javac, d8, aapt2, apksigner; its own throwaway signing key under ~/.cache/powos-emu) and
 # prints the APK's path. Rebuilt only when a source is newer than the APK.
+# Already exists - don't hand-roll this app again with mkdir+cat; edit src/ and re-run this script.
+# javac MUST stay `-source 8 -target 8 ... -bootclasspath` (android.jar has no module system): `-target 11` or
+# `--release` rejects -bootclasspath, and a lambda (`v -> ...`) in src/ fails ("cannot find symbol ...
+# LambdaMetafactory.metafactory") because android.jar's bootclasspath has no invokedynamic desugaring - write
+# anonymous inner classes in src/*.java instead of lambdas (hit + fixed 2026-10-24, 8 build retries).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P)
 out=$HOME/.cache/powos-emu/testwin; apk=$out/testwin.apk; mkdir -p "$out"

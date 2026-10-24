@@ -49,6 +49,9 @@ def scan(path, since):
         if e.get('type') != 'assistant' or ts < since:
             continue
         m = e.get('message') or {}
+        # The transcript JSONL's per-call usage field (undocumented upstream - see docs/AGENT-HANDBOOK.md, Retro):
+        # message.usage.{input_tokens,cache_read_input_tokens,cache_creation_input_tokens,output_tokens} on every
+        # type:"assistant" line. This is the one place that reads it; don't re-derive it elsewhere.
         u = m.get('usage') or {}
         ctx = u.get('input_tokens', 0) + u.get('cache_read_input_tokens', 0) + u.get('cache_creation_input_tokens', 0)
         c = calls.setdefault(m.get('id'), [ctx, None, u.get('output_tokens', 0)])

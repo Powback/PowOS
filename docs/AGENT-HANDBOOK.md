@@ -3,6 +3,13 @@
 Read this first; it replaces digging through the code. Keep it current when you learn something an agent had to dig
 for (one line each). Cross-cutting rules live HERE once; expert skills (.claude/skills/powos-*) link to them.
 
+**Loading a skill from inside a worktree:** `.claude/skills/<name>` is a tracked directory, so every
+`tools/agents/worktree.sh new` checkout gets its own on-disk copy - with dozens of worktrees alive at once, the bare
+name (`powos-design`) has no single unscoped owner and `Skill` refuses it ("Unknown skill: powos-design"). Call it
+with YOUR OWN worktree's scoped name instead: `<repo-dir>/.claude/worktrees/<your-worktree-name>:<skill-name>` (e.g.
+`PowOS/.claude/worktrees/emu-lanes:powos-design`) - find the exact spelling for your worktree in the Skill tool's
+available-skills listing before calling it, never guess the bare name.
+
 ## Which expert owns what
 Route work to the owner's SKILL, not to a long-lived agent: each task is a FRESH agent that loads the owner's skill
 (.claude/skills/<owner>/SKILL.md + .claude/agents/<owner>.md), does that one task, writes what it learned into the
@@ -58,6 +65,11 @@ already cover; a brief that restates handbook/skill content is itself a hand-off
   `idle.sh --wait`, sleep, `until` loops, run ship-apk.sh/push.sh yourself, or re-read a verify-queue/ship result
   yourself - the PostToolUse hook (.claude/hooks/agent-notices.py) puts new comms mail, finished verify-queue
   results and ship results on your next tool result once, instead of you polling for them.
+- Never hand-roll a wait loop (`while kill -0 <pid>; do sleep N; done`, a bare `sleep 60` before checking again, any
+  `until ...; do sleep ...; done`): it's the same polling the hook above already replaces, just written by hand.
+  Put the long-running thing in the background and let the PostToolUse hook deliver the result on your NEXT tool
+  call instead of blocking a call on it. `tools/agents/retro.py` categorizes this as `wait/poll` either way, so it
+  shows up in the digest whether it was `idle.sh --wait` or a hand-written loop.
 - Caps: tool output over ~8k chars goes to a file with a 3k head kept inline - read the file for the rest only if
   the head isn't enough (on nofate/br's trial, results over 8k were 23% of all result text, and agents read past
   the head in only 22% of cases: most of that was wasted context). A background job's output rides on your next
@@ -192,6 +204,10 @@ ship-runner,verify-runner}.plist`. Do the move in a quiet window (no worktree mi
   rather than patching code inline - never a long-lived agent for this.
 - Never print a transcript's raw tokens or secrets; `retro.py` redacts known secret shapes - if you extend it,
   keep that.
+- Per-call context tokens live at `message.usage.input_tokens` + `message.usage.cache_read_input_tokens` +
+  `message.usage.cache_creation_input_tokens` on each `type: "assistant"` line of the transcript JSONL (output
+  tokens: `message.usage.output_tokens`) - undocumented in Anthropic's own hook docs, only in
+  `tools/agents/efficiency.py`'s `scan()`. Don't re-derive it; read it from there.
 
 ## Reaching the phone (OnePlus Open, rooted)
 - `tools/phone/adb.sh <adb args>`: adb over the VPN (powos-vadb's server, 10.13.13.7:5555) from any session.

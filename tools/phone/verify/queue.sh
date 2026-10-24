@@ -176,9 +176,16 @@ add)
   # Past the filename check (launch-window.sh's Steam cold-start stage isn't named steam-*): a check that carries its
   # OWN "# lanes:" marker and says "phone" only (no "emu") is refused too - the marker knows what the filename can't.
   if [ "$dev" = emu ]; then
+    # Report every offending name in one shot (not just the first): exiting on the first match made an agent with
+    # several bad args in one `add` fix them one at a time, re-running and hitting the next - 8 retries of the same
+    # command for what was really one fix (friction: queue.sh add retried 8x by one agent, 2026-10-24).
+    bad=()
     for a in "$name" "$@"; do
-      if basename -- "$a" 2>/dev/null | grep -qiE "$HW_ONLY"; then echo "queue.sh: $(basename -- "$a") is a phone-hardware check (games, Steam, fps, fold, kernel) - queue it without --dev emu"; exit 2; fi
+      basename -- "$a" 2>/dev/null | grep -qiE "$HW_ONLY" && bad+=("$(basename -- "$a")")
     done
+    if [ ${#bad[@]} -gt 0 ]; then
+      echo "queue.sh: phone-hardware check(s) (games, Steam, fps, fold, kernel) - queue ALL of these without --dev emu: ${bad[*]}"; exit 2
+    fi
     lm=$(lanes_marker "$1")
     [ -z "$lm" ] || case " $lm " in *" emu "*|*" emu? "*) ;; *) echo "queue.sh: $(basename -- "$1")'s own lanes marker ('$lm') says phone only - queue it without --dev emu"; exit 2 ;; esac
   fi

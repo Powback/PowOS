@@ -1326,6 +1326,10 @@ systemd-sysext refresh
 `test/tier1/test-*.{sh,py}`. CI runs that same script. Drop a test file in and
 it runs. There is no list to update, anywhere.
 
+**`run-all.sh` needs bash 4+ (`declare -A`, `mapfile`) - the Mac's own `/bin/bash` is 3.2, so running it raw on the
+Mac shell fails with `declare: -A: invalid option` / `mapfile: command not found`.** Run it in the Docker test
+container instead: `docker compose up --build -d && docker exec powos bash /var/lib/powos/src/test/tier1/run-all.sh`.
+
 **Do not reintroduce a hand-written list of tests.** The old CI enumerated
 them, drifted, and ran 10 of 31 suites — which is how `powos sync` shipped
 silently running the cloud backup instead of the sync.

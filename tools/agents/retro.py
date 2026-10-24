@@ -125,6 +125,9 @@ def cause_of(result):
     return r[:80]
 
 
+POLL_LOOP_RE = re.compile(r'\b(while|until)\b.*\bsleep\s+\d+\b|\bsleep\s+\d+\b.*;\s*done\b')
+
+
 def suggest(kind, detail=''):
     d = detail.lower()
     if kind == 'permission':
@@ -136,6 +139,9 @@ def suggest(kind, detail=''):
             return 'script/doc: path drifted - fix the script or the doc that named it'
         return 'script: make the command fail with a clearer message, or add to its --help'
     if kind == 'retry':
+        if POLL_LOOP_RE.search(detail):
+            return ('ad-hoc poll loop, not a real retry: handbook Efficiency section - run it in the background '
+                    'and let the PostToolUse hook deliver the result instead of re-running this loop')
         return 'script: make the command idempotent, or document why it needs a retry'
     if kind == 'info-hunt':
         return 'skill or handbook "Where things live": add the line so the next agent does not re-hunt'
@@ -272,7 +278,7 @@ def render(d, lines_budget=MAX_LINES):
     if d['retries']:
         out.append("retries (same command 2+ times):")
         for cmd, n in d['retries']:
-            out.append(f"  x{n}  {cmd}  -> {suggest('retry')}")
+            out.append(f"  x{n}  {cmd}  -> {suggest('retry', cmd)}")
     if d['hunt_before_edit'] >= 5:
         out.append(f"information hunt: {d['hunt_before_edit']} read/grep/find calls before the first edit "
                     f"(of {d['first_edit_idx']} calls)  -> {suggest('info-hunt')}")
