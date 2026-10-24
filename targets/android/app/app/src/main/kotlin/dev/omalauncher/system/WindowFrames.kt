@@ -149,9 +149,21 @@ class WindowFrames(
         refresh()
     }
 
-    /** Folded/unfolded, rotated: the frames again. */
+    /**
+     * Folded/unfolded, rotated: the frames again. A task whose window briefly couldn't be read (right after it opens
+     * or changes - FreeformTasks.list's hadUnreadableTask) is missing from [all] for no real reason: acting on that
+     * would drop its frame and tell the dock it closed (a dock tap on a window that just opened: no title bar to
+     * close it by, minimised=false - the window never actually moved or closed, the read did). Retried a few times,
+     * close together; past that, better a degraded read than never refreshing again.
+     */
     fun refresh() {
         val all = runCatching { FreeformTasks.list(context) }.onFailure { Log.w(TAG, "no floating windows", it) }.getOrDefault(emptyList())
+        if (FreeformTasks.hadUnreadableTask && unreadableRetries < UNREADABLE_RETRIES_MAX) {
+            unreadableRetries++
+            main.postDelayed(refreshNow, RETRY_MS)
+            return
+        }
+        unreadableRetries = 0
         val floating = AppWindows.floating(context)
         if (adopting(floating)) return
         logChange(all, floating)
@@ -164,6 +176,8 @@ class WindowFrames(
         frame(show)
         restack(show.asReversed().map { it.id })
     }
+
+    private var unreadableRetries = 0
 
     /** The windows that get a frame: showing, not minimised or away, their bar not under a window above. */
     private fun shown(all: List<FreeformTasks.Window>) = uncovered(all.filter { it.visible && it.id !in minimised && it.id !in away })
@@ -626,6 +640,7 @@ class WindowFrames(
         private const val LATE_MS = 600L
         private const val GRANT_EVERY_MS = 60_000L
         private const val RETRY_MS = 1_000L
+        private const val UNREADABLE_RETRIES_MAX = 5
         private const val DENSE_TRIES = 8
         private const val DENSE_RETRY_MS = 500L
         private const val SYSUI_KEYGUARD_SHOWING = 1L shl 6
