@@ -21,6 +21,39 @@ import { signal } from "@preact/signals";
 
 /** Every category's members shown (only in the one panel, only while it's open). */
 export const ccExpanded = signal(false);
+/**
+ * v3 pull under way: "open" (stacks are shown unfolded for the pull, their rest driven by the finger) or "fold" (the
+ * open ones are driven back down). null at rest. notifications.tsx's Stack reads it and hands its elements to
+ * [attachPeek], so the groups unfold with the finger exactly as the control center's rest does.
+ */
+export const ccPeeking = signal<null | "open" | "fold">(null);
+/** The paused animations tied to the finger (a stack's rest and head), by the pull's progress k (0..1). */
+const peekAnims = new Set<Animation>();
+let peekK = 0;
+/** [stack]'s rest (and group head) tied to the pull's progress: one paused Web Animation each, no style per frame. */
+export function attachPeek(stack: HTMLElement) {
+  if (!pull?.grid) return;
+  const rest = stack.querySelector<HTMLElement>(".notif-rest");
+  const head = stack.querySelector<HTMLElement>(".notif-group-head");
+  const add = (el: HTMLElement | null, frames: Keyframe[]) => {
+    if (!el || el.getAnimations().some((a) => a.id === "ccpeek")) return;
+    const a = el.animate(frames, { duration: MS, fill: "both", easing: "linear", id: "ccpeek" });
+    a.pause();
+    a.currentTime = peekK * MS;
+    peekAnims.add(a);
+  };
+  // Folding: only fade - a shrinking list would clamp the scroll under the finger; the height folds at the settle (finish).
+  if (pull.was) {
+    add(rest, [{ opacity: 0 }, { opacity: 1 }]);
+    return add(head, [{ opacity: 0 }, { opacity: 1 }]);
+  }
+  // The folded stack's peeking cards leave room under it (notifications.css); open has none - eased out with the rest.
+  const gap = Number(stack.dataset.depth) === 2 ? 10 : 5;
+  add(stack, [{ marginBottom: `${gap}px` }, { marginBottom: "0px" }]);
+  add(rest, [{ gridTemplateRows: "0fr", opacity: 0 }, { gridTemplateRows: "1fr", opacity: 1 }]);
+  add(head, [{ maxHeight: "0px", opacity: 0, overflow: "hidden" }, { maxHeight: "64px", opacity: 1, overflow: "hidden" }]);
+}
+
 /** The control center's edit mode (ui/reorder.ts, as home's): entered by a long press on a tile, left by its "done". */
 export const ccEditing = signal(false);
 
@@ -73,7 +106,13 @@ function begin(): Pull {
   const p = peekPull() ?? classicPull();
   for (const el of inline(p)) el.style.transition = "none";
   place(p, p.list && p.was ? p.h : 0);
-  return (pull = p);
+  return (pull = peeking(p));
+}
+
+/** v3: the notifications' stacks show what the pull unfolds (see [ccPeeking]). */
+function peeking(p: Pull) {
+  if (p.grid) ccPeeking.value = p.was ? "fold" : "open";
+  return p;
 }
 
 /** What a pull writes inline: its movers, v3's grid. */
@@ -122,6 +161,8 @@ function place(p: Pull, r: number) {
   if (p.grid) {
     const k = p.h > 0 ? Math.min(1, Math.max(0, r / p.h)) : 1;
     p.grid.style.setProperty("--cc-k", String(k));
+    peekK = k;
+    for (const a of peekAnims) a.currentTime = k * MS;
     for (const m of p.movers) m.el.style.translate = `0 ${r - p.h}px`;
     p.panel?.style.setProperty("--cc-lift", `${Math.max(0, p.g - r)}px`);
     return;
@@ -160,6 +201,11 @@ function ease(p: Pull, r: number, on: boolean) {
   p.panel?.style.setProperty("transition", `--q 280ms ${EASE}, --cc-lift ${MS}ms ${EASE}`);
   p.to = on;
   place(p, r);
+  // The groups ride the same ease, from where the finger left them to the end (at the translate's duration).
+  for (const a of peekAnims) {
+    a.playbackRate = on ? 1 : -1;
+    a.play();
+  }
   clearTimeout(doneTimer);
   doneTimer = window.setTimeout(() => finish(p, on), MS + 40);
 }
@@ -185,6 +231,10 @@ function clearInline(p: Pull) {
     el.style.removeProperty("--cc-k");
   }
   p.grid?.classList.remove("cc-peek");
+  for (const a of peekAnims) a.cancel();
+  peekAnims.clear();
+  peekK = 0;
+  ccPeeking.value = null;
   for (const k of ["--cc-lift", "transition"]) p.panel?.style.removeProperty(k);
 }
 

@@ -374,7 +374,8 @@ async function overpullShort() {
     const e = o.edge() - o.edge0;
     if (Math.abs(e - 30) > 3) fails.push(`pulled 30 px further, the panel's edge moved ${Math.round(e)} px (a static slab)`);
     if (Math.abs(o.grip() - o.grip0 - 30) > 3) fails.push(`pulled 30 px further, the panel's grip moved ${Math.round(o.grip() - o.grip0)} px`);
-    if (Math.abs(o.gap() - o.gap0) > 3) fails.push(`pulled 30 px further, ${Math.round(o.gap())} px of empty panel under the notifications (at rest ${Math.round(o.gap0)})`);
+    // (The groups unfold with the finger too, so the notifications may grow past the edge - only empty frost is a fail.)
+    if (o.gap() - o.gap0 > 3) fails.push(`pulled 30 px further, ${Math.round(o.gap())} px of empty panel under the notifications (at rest ${Math.round(o.gap0)})`);
   });
   if (Math.abs(o.edge() - o.edge0) > 1) fails.push(`let go short, the panel's edge is ${Math.round(o.edge() - o.edge0)} px off its place`);
   if (Math.abs(o.under() - o.under0) > 1) fails.push(`let go short, what's under the control center is ${Math.round(o.under() - o.under0)} px off its place`);

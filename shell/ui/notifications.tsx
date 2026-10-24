@@ -10,7 +10,7 @@ import { effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel, separatePanels } from "../state.ts";
 import { ControlCenter } from "./control.tsx";
-import { ccExpanded } from "./ccexpand.ts";
+import { attachPeek, ccExpanded, ccPeeking } from "./ccexpand.ts";
 import { Icon } from "./icons.tsx";
 import { followNotif, notifOpen, notifShown } from "./gesture.ts";
 import { ago } from "./time.ts";
@@ -281,18 +281,35 @@ const toggle = (id: string) => {
 };
 
 /**
+ * Whether a stack is [open] (tapped, or the shade's whole view), and [shown] open: also while a pull of the shade
+ * (ccexpand.ts) is about to unfold it - then its rest rides the finger (its top card keeps its folded look until the
+ * pull is settled, so the height only grows by what unfolds).
+ */
+function useStackOpen(id: string) {
+  const has = expanded.value.has(id);
+  const peek = ccPeeking.value;
+  const open = has !== ccExpanded.value;
+  const shown = open || (peek === "open" && !has);
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (peek && shown && !has && ref.current) attachPeek(ref.current);
+  }, [peek, shown]);
+  return { open, shown, ref };
+}
+
+/**
  * One group: a single notification is its card. More than one: a stack - its newest on top with the group's name and
  * "+N", two slim cards peeking under it; a tap opens it in place (the others unfold under the newest, no jump), its
  * head closes it again. Slid away, a closed stack dismisses the whole group; open, each card goes on its own.
  */
 function Stack({ g }: { g: Group }) {
   const [top, ...rest] = g.items;
+  const { open, shown, ref } = useStackOpen(g.id);
   if (!rest.length) return <Card n={top} name={g.name !== top.app ? g.name : undefined} />;
-  const open = expanded.value.has(g.id) !== ccExpanded.value;
   const clearAll = () => g.items.filter((n) => n.clearable).forEach((n) => powos.notifications.dismiss(n.key));
   return (
-    <div class={`notif-stack ${open ? "open" : ""}`} data-depth={Math.min(2, rest.length)}>
-      {open ? (
+    <div ref={ref} class={`notif-stack ${shown ? "open" : ""}`} data-depth={Math.min(2, rest.length)}>
+      {shown ? (
         <button type="button" class="notif-group-head" onClick={() => toggle(g.id)}>
           <span class="notif-app">{g.name}</span>
           <span class="notif-more">{g.items.length}</span>
