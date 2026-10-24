@@ -147,6 +147,12 @@ class WindowFrame(
         WindowFrames.current?.changed()
     }
 
+    /** Its window over the windows' whole area, or back: the maximise button and the bar's double tap, one path. */
+    private fun maximise() = onMaximise(id)
+
+    /** Its window off the screen, into the dock (the minimise button). */
+    private fun minimise() = onMinimise(id)
+
     /** Maximised or not: its button shows "restore" (two squares) or "maximise" (one). */
     fun showMaximised(on: Boolean) {
         val glyph = if (on) Glyph.RESTORE else Glyph.MAXIMISE
@@ -256,10 +262,12 @@ class WindowFrame(
                 LinearLayout.LayoutParams(0, dp(BAR_DP), 1f),
             )
             val full = dp(BAR_DP) + strip
-            addView(button(Glyph.MINIMISE) { onMinimise(id) }, LinearLayout.LayoutParams(dp(BUTTON_DP), full))
-            maxButton = button(Glyph.MAXIMISE) { onMaximise(id) }
+            // Never `id` in here: inside this apply it is the LinearLayout's View id (NO_ID, -1), not the task's - the
+            // button maximised task -1, which WindowFrames.maximise dropped without a line (2026-10-24, window-max calc).
+            addView(button(Glyph.MINIMISE, ::minimise), LinearLayout.LayoutParams(dp(BUTTON_DP), full))
+            maxButton = button(Glyph.MAXIMISE, ::maximise)
             addView(maxButton, LinearLayout.LayoutParams(dp(BUTTON_DP), full))
-            addView(button(Glyph.CLOSE) { close() }, LinearLayout.LayoutParams(dp(BUTTON_DP), full))
+            addView(button(Glyph.CLOSE, ::close), LinearLayout.LayoutParams(dp(BUTTON_DP), full))
         }
     }
 
@@ -737,7 +745,7 @@ class WindowFrame(
     private fun barTapped(e: MotionEvent) {
         if (e.eventTime - lastBarTap <= ViewConfiguration.getDoubleTapTimeout()) {
             lastBarTap = 0L
-            onMaximise(id)
+            maximise()
         } else {
             lastBarTap = e.eventTime
         }
