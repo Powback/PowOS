@@ -6,12 +6,16 @@
 #   --app calc|kate  Calculator (Android, default) or Kate (a Linux window, PowosWindowActivity)
 #   --off            the same with the live leash off (settings put global powos_live_leash 0; put back after)
 #   --pages          page-swipe frame times (gfxinfo of com.powos.app) without and with the window open
+#   --two            a second window open too (Kate with calc, Calculator with kate) for the page swipes
+#   --pages-only     only the page swipes (no drag/resize)
+#   --trace          a perfetto trace of the with-window swipes (sched, gfx/view/wm/am/input/binder atrace, SF frame
+#                    timeline) -> <PRE>-pages-win.pftrace; tools/phone/verify/page-trace.py reads it
 # Recordings: ~/.cache/powos-verify/window-core/<MMDD-HHMM>-<app>[-off]-{drag,resize,pages}.mp4 (+ logcat, log).
 #   queue.sh add --budget 300 <task> tools/phone/verify/window-rec.sh --app kate [--off] [--pages]
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-APP=calc; OFF=0; PAGES=0; ARGS=()
-while [ $# -gt 0 ]; do case $1 in --app) APP=$2; shift 2 ;; --off) OFF=1; shift ;; --pages) PAGES=1; shift ;; *) ARGS+=("$1"); shift ;; esac; done
+APP=calc; OFF=0; PAGES=0; TWO=0; ONLY=0; TRACE=0; ARGS=()
+while [ $# -gt 0 ]; do case $1 in --app) APP=$2; shift 2 ;; --off) OFF=1; shift ;; --pages) PAGES=1; shift ;; --two) TWO=1; shift ;; --pages-only) PAGES=1; ONLY=1; shift ;; --trace) TRACE=1; shift ;; *) ARGS+=("$1"); shift ;; esac; done
 . "$here/e2e-lib.sh"
 e2e_args ${ARGS[@]+"${ARGS[@]}"}; LAST=2
 E2E_APPS='com.oneplus.calculator|PowosWindowActivity'; E2E_LINUX='kate'
@@ -47,12 +51,23 @@ touched() { sh_ "dumpsys input" | sed -n '/TouchStatesByDisplay/,/CursorStatesBy
 intap() { local b w=$2; b=$(tbounds "$1"); [ -n "$b" ] || return; set -- $b; local x=$(($1 + ($3 - $1) / 4)) y=$(($2 + ($4 - $2) / 3))
   mdown $x $y "inside the window" || return; local t; t=$(touched); mup $x $y
   case $t in *PowosWindowActivity*|*calculator*|*Calculator*) pass "[$w] a tap inside goes to the app: $t" ;; *) fail "[$w] a tap inside did NOT reach the app's window: $t" ;; esac; sleep 0.6; }
+# perfetto around the swipes: scheduling, the framework's atrace (com.powos.app's too), SurfaceFlinger's frame timeline.
+trace_on() { printf '%s\n' 'buffers { size_kb: 65536 fill_policy: RING_BUFFER }' \
+  'data_sources { config { name: "linux.ftrace" ftrace_config { ftrace_events: "sched/sched_switch" ftrace_events: "sched/sched_wakeup" ftrace_events: "power/cpu_frequency" atrace_categories: "gfx" atrace_categories: "view" atrace_categories: "wm" atrace_categories: "am" atrace_categories: "input" atrace_categories: "binder_driver" atrace_apps: "com.powos.app" atrace_apps: "com.android.systemui" } } }' \
+  'data_sources { config { name: "android.surfaceflinger.frametimeline" } }' \
+  'data_sources { config { name: "linux.process_stats" target_buffer: 0 process_stats_config { scan_all_processes_on_start: true } } }' \
+  'duration_ms: 20000' > "$OUT/trace.cfg"
+  "$A" push "$OUT/trace.cfg" /data/local/tmp/ps-trace.cfg >/dev/null 2>&1
+  sh_ "rm -f /data/misc/perfetto-traces/ps.pftrace; cat /data/local/tmp/ps-trace.cfg | perfetto --txt -c - -o /data/misc/perfetto-traces/ps.pftrace --background" >/dev/null; sleep 1; }
+trace_off() { sh_ "pkill -INT perfetto"; sleep 2; sh_ "cp /data/misc/perfetto-traces/ps.pftrace /data/local/tmp/ps.pftrace; chmod 644 /data/local/tmp/ps.pftrace"
+  "$A" pull /data/local/tmp/ps.pftrace "$1" >/dev/null 2>&1 && log "trace: $1 ($(du -k "$1" | cut -f1) KB)" || fail "no trace"; sh_ "rm -f /data/local/tmp/ps.pftrace"; }
 gfx() { sh_ "dumpsys gfxinfo com.powos.app" | grep -m6 -E "Total frames rendered|Janky frames|50th percentile|90th percentile|99th percentile|Number Missed Vsync" | xargs; }
 pagelag() { local p x y to d=1
   p=$(freept "$(win "$WKEY" bounds 2>/dev/null)" $d $((W * 35 / 100))); [ "$p" = none ] || [ -z "$p" ] && { d=-1; p=$(freept "$(win "$WKEY" bounds 2>/dev/null)" $d $((W * 35 / 100))); }
   [ "$p" != none ] && [ -n "$p" ] || { fail "[$1] no spot for a page swipe"; return; }
   set -- $p "$1"; x=$1; y=$2; to=$((x + d * W * 35 / 100))
   logc; sh_ "dumpsys gfxinfo com.powos.app reset >/dev/null"; rec "pages-$3" 10
+  [ $TRACE = 1 ] && [ "$3" = win ] && trace_on
   swipe $x $y $to $y 250 "pages ($3)"; sleep 1.2; hemit system.home null; sleep 0.8; chk "pages-$3"
   swipe $x $y $to $y 250 "pages again ($3)"; sleep 1.2; hemit system.home null; sleep 0.8; chk "pages-$3"
   # The refresh rate while a finger moves the page (a slow swipe, sampled half way): the display mode, and the votes
@@ -60,6 +75,7 @@ pagelag() { local p x y to d=1
   offpill $x $y "slow page swipe" && note "[$3] mid-swipe refresh: $(sh_ "(input swipe $x $y $to $y 1200 &); sleep 0.6; dumpsys SurfaceFlinger | grep -m1 -E \"activeMode=\" | grep -oE \"vsyncRate=[0-9.]+\"; dumpsys SurfaceFlinger | grep -m2 -E \"PrimaryRefreshRates|AppRequestRefreshRates\"; dumpsys display | grep -E \"PRIORITY_APP_REQUEST|PRIORITY_.*TOUCH|PRIORITY_.*IDLE|mActiveRenderFrameRate\"; sleep 0.8" | tr -s " " | tr "\n" ";")"
   sleep 0.8; hemit system.home null; sleep 0.8; chk "pages-$3"
   recstop "pages-$3"; note "[$3] page swipes, home's frames: $(gfx)"
+  [ $TRACE = 1 ] && [ "$3" = win ] && trace_off "$PRE-pages-$3.pftrace"
   sh_ "cat /data/local/tmp/rec.txt" > "$PRE-pages-$3-logcat.txt"
   note "[$3] window events during the swipes: $(grep -cE 'PowosWindowFrame' "$PRE-pages-$3-logcat.txt") PowosWindowFrame(s) lines, $(grep -c 'windows (' "$PRE-pages-$3-logcat.txt") refreshes"; }
 
@@ -71,7 +87,14 @@ step open "$APP in a window ($r)"
 [ "$CT" != none ] && [ -n "$CT" ] || { fail "no $APP window"; e2e_finish; exit 0; }
 C0=$(content); note "task $CT $(tbounds "$CT"), content $C0"
 intap "$CT" before
+if [ $TWO = 1 ]; then
+  case $APP in calc) K2=l:org.kde.kate; W2=l:org.kde.kate ;; *) K2=a:com.oneplus.calculator/; W2=com.oneplus.calculator ;; esac
+  r2=$(hcall apps.launch "['$(hcall apps.list "[]" "l=>(l.find(a=>a.key.startsWith('$K2'))||{}).key||'none'")']" "()=>'ok'")
+  CT2=$(waitwin "$W2" 40); sleep 2; chk open2
+  [ "$CT2" != none ] && [ -n "$CT2" ] && step open2 "a second window: $W2 task $CT2 $(tbounds "$CT2") ($r2)" || fail "no second window ($W2)"
+fi
 [ $PAGES = 1 ] && pagelag win
+[ $ONLY = 1 ] && { sh_ "cat /data/local/tmp/rec.txt" > "$PRE-logcat.txt"; e2e_finish; cp "$OUT/log.txt" "$PRE-log.txt" 2>/dev/null; exit 0; }
 
 # Move: out, part way back, held, let go.
 p=$(barpt "$CT"); if [ -n "$p" ]; then set -- $p; x=$1; y=$2; dx=$(dp 160); dy=$(dp 80)
