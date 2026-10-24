@@ -37,7 +37,10 @@ DOLPHIN_MINE=0 KATE_MINE=0 GWEN_MINE=0
 restore() {
   us "[ $GWEN_MINE = 1 ] && pkill -x gwenview; [ $DOLPHIN_MINE = 1 ] && pkill -x dolphin; [ $KATE_MINE = 1 ] && pkill -x kate; true"
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"
-  sh_ "logcat -d -v time" | grep -E "WindowTasks|PowosWindow|PowosWindowFrames| runtime" > "$OUT/logcat.txt"
+  # The window lines, streamed since the start (LOGPID): a dump at the end lost them - the OnePlus main ring buffer
+  # rolls over in ~1 min under system_server's D-level spam (f276: the run's own "open"/"surface" lines missing).
+  [ -n "${LOGPID:-}" ] && kill "$LOGPID" 2>/dev/null
+  [ -s "$OUT/logcat.txt" ] || sh_ "logcat -d -v time" | grep -E "WindowTasks|PowosWindow|PowosWindowFrames| runtime" > "$OUT/logcat.txt"
   echo "restored"
 }
 . "$here/window-lock.sh"
@@ -65,16 +68,19 @@ floats() {  # $1 task, $2 name: freeform and smaller than the screen
 }
 # draws <task> <name>: a screencap; the task's window (its bounds, inset past the frame's edges) must not be black -
 # at least 20% of its pixels brighter than 24/255 (a light KDE window), or at least 3% brighter than 64/255 (text and
-# icons of a DARK one: the Breeze dark theme since 2026-10-23 drew Dolphin fully at 18% over 24 - read as black).
-# A black window has ~0% of either.
+# icons of a DARK one: the Breeze dark theme since 2026-10-23 drew Dolphin fully at 18% over 24 - read as black), or
+# a dark theme's base colour nearly everywhere (90% over 8: Breeze dark's view is 13/255) with some detail (1% over
+# 64). Dolphin in a near-empty folder (it reopens the last one: sketch/out/ui/pages, one file) was fully drawn at 5%
+# over 24 and 2% over 64 - three false "black" FAILs 2026-10-24 18:27-18:50. A black window has ~0% of all of them.
 draws() {
   local png="$OUT/$2.png" b1 b2 b3 b4 f; read -r b1 b2 b3 b4 <<<"$(bounds "$1")"
   "$T/shot.sh" "$png" >/dev/null 2>&1 || fail "no screencap for $2 (shot.sh)"
   f=$(ffmpeg -v error -i "$png" -vf "crop=$((b3 - b1 - 40)):$((b4 - b2 - 40)):$((b1 + 20)):$((b2 + 20)),scale=200:-1,format=gray" \
-      -f rawvideo - 2>/dev/null | python3 -c 'import sys; d=sys.stdin.buffer.read(); n=max(len(d), 1); print(sum(1 for b in d if b > 24) * 100 // n, sum(1 for b in d if b > 64) * 100 // n)')
-  local lit=${f#* }; f=${f%% *}
-  log "$2: ${f:-?}% of its window drawn (not black), ${lit:-?}% bright detail"
-  [ "${f:-0}" -ge 20 ] || [ "${lit:-0}" -ge 3 ] || fail "$2's window is black (${f:-?}% drawn, ${lit:-?}% bright detail) - $png"
+      -f rawvideo - 2>/dev/null | python3 -c 'import sys; d=sys.stdin.buffer.read(); n=max(len(d), 1); print(sum(1 for b in d if b > 24) * 100 // n, sum(1 for b in d if b > 64) * 100 // n, sum(1 for b in d if b > 8) * 100 // n)')
+  local base=${f##* }; f=${f% *}; local lit=${f#* }; f=${f%% *}
+  log "$2: ${f:-?}% of its window drawn (not black), ${lit:-?}% bright detail, ${base:-?}% dark-theme base"
+  [ "${f:-0}" -ge 20 ] || [ "${lit:-0}" -ge 3 ] || { [ "${base:-0}" -ge 90 ] && [ "${lit:-0}" -ge 1 ]; } ||
+    fail "$2's window is black (${f:-?}% drawn, ${lit:-?}% bright detail, ${base:-?}% base) - $png"
 }
 
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
@@ -119,6 +125,8 @@ fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
 sh_ "logcat -c"
+"$A" shell "su -c 'logcat -v time -s WindowTasks:V PowosWindow:V PowosWindowFrames:V PowosWindowFrame:V LaunchWindows:V AndroidRuntime:E'" 2>/dev/null \
+  | tr -d '\r' > "$OUT/logcat.txt" & LOGPID=$!
 
 # A Gwenview already running may be the user's: never closed (rule) - not now. Only the ones this check starts are
 # closed at the end (GWEN_MINE), like Dolphin and Kate.
