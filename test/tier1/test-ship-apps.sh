@@ -61,5 +61,17 @@ req --silent
 drained 20 && ok "no-op request served" || bad "no-op request left queued"
 [ -z "$(cat "$LOG" 2>/dev/null)" ] && ok "nothing rebuilt when apps/ didn't change" || { bad "rebuilt with no apps change"; cat "$LOG"; }
 
+# A third request: delete apps-live, make another change, ship should reinstall
+: > "$LOG"
+rm -f "$Q/apps-live"
+echo "marker 2" > apps/app-api/marker.txt; git add -A; git commit -qm "app-api change 2"
+git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null
+t=$(git rev-parse HEAD)
+req --note "app-api improved again"
+drained 40 && ok "request after deleting apps-live served" || { bad "request after deleting apps-live left queued"; cat "$Q/runner.log" 2>/dev/null; }
+for _ in $(seq 20); do grep -q '^INSTALL' "$LOG" 2>/dev/null && break; sleep 1; done
+grep -q "^BUILD app-api $t" "$LOG" && ok "rebuilt after apps-live deleted" || { bad "rebuild after apps-live deleted"; cat "$LOG"; }
+grep -q "^INSTALL app-api install note=app-api improved again" "$LOG" && ok "reinstalled after apps-live deleted" || { bad "reinstall"; cat "$LOG"; }
+
 echo "---"
 [ "$fails" = 0 ] && { echo "ALL PASS"; exit 0; } || { echo "$fails FAILED"; exit 1; }

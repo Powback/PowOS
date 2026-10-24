@@ -352,7 +352,11 @@ run)
       #    (never while one's out, same debounce as the shell ship above so this never waits on an open request
       #    the shell section already closed) and under the shell ship's own phone-busy rules (never inside a
       #    verify window, never during another install).
-      achg=$(apps_changed "$(cat "$Q/apps-live" 2>/dev/null || echo "$T~1")" "$T")
+      alv=$(cat "$Q/apps-live" 2>/dev/null || true)
+      abase=$inst
+      [ -n "$alv" ] && abase=$alv
+      [ -n "$live" ] && [ -n "$abase" ] && git merge-base --is-ancestor "$abase" "$live" 2>/dev/null && abase=$live
+      achg=; [ -n "$abase" ] && git cat-file -e "$abase^{commit}" 2>/dev/null && achg=$(apps_changed "$abase" "$T")
       if [ -n "$achg" ] && ! apk_alive && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ]; then
         if verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
@@ -378,7 +382,11 @@ run)
       # 4. The rooted-mode deploy (targets/android/rooted/rooted.sh deploy, f105 part 1): rooted_inputs changed
       #    since the last rooted-mode ship, built... nothing to build, just pushed - after the APK, under the
       #    same debounce and phone-busy rules as the apps step above.
-      rchg=$(rooted_inputs "$(cat "$Q/rooted-live" 2>/dev/null || echo "$T~1")" "$T")
+      rlv=$(cat "$Q/rooted-live" 2>/dev/null || true)
+      rbase=$inst
+      [ -n "$rlv" ] && rbase=$rlv
+      [ -n "$live" ] && [ -n "$rbase" ] && git merge-base --is-ancestor "$rbase" "$live" 2>/dev/null && rbase=$live
+      rchg=; [ -n "$rbase" ] && git cat-file -e "$rbase^{commit}" 2>/dev/null && rchg=$(rooted_inputs "$rbase" "$T")
       if [ -n "$rchg" ] && ! apk_alive && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-rooted" 2>/dev/null)" != "$T" ]; then
         if verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
