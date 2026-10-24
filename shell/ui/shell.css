@@ -1577,6 +1577,11 @@ html[data-mode="assist"] .assist {
 }
 /* Solid: over another app, what's under it would show through the field. */
 .assist-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; max-height: 75%; background: var(--color-background); }
+.assist-grip { display: flex; justify-content: center; padding: 2px 0 6px; margin-top: -6px; touch-action: none; }
+.assist-grip span { width: 36px; height: 4px; border-radius: 2px; background: var(--color-border); }
+.assist-head { touch-action: none; }
+/* The strip along the bottom edge: a swipe up from it closes the overlay (assist.tsx swipeAway). */
+.assist-edge { position: fixed; left: 0; right: 0; bottom: 0; height: 28px; touch-action: none; z-index: 2; }
 .assist-head { display: flex; align-items: center; gap: 10px; }
 .assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; border: var(--frame) solid var(--color-border); }
 .assist-shot.blank { background: var(--color-surface); }

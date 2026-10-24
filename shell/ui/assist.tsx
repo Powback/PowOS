@@ -232,8 +232,58 @@ function takeOver() {
   interrupt(mic);
 }
 
+/** A swipe up this far (px) puts the panel away on release; or a fling this fast (px/ms) from any distance over MIN. */
+const SWIPE_CLOSE_PX = 90;
+const SWIPE_FLING = 0.6;
+const SWIPE_MIN = 24;
+
+/**
+ * Swipe up to put the panel away (the handle, the header and the strip along the bottom edge take it; the screen
+ * above is for circling, the chat for scrolling). The panel follows the finger at once, completes on release past
+ * a threshold or a fling, else snaps back.
+ */
+function swipeAway(panel: { current: HTMLDivElement | null }) {
+  let y0 = 0;
+  let t0 = 0;
+  let dy = 0;
+  let on = false;
+  const move = (dyPx: number, animate: boolean) => {
+    const el = panel.current;
+    if (!el) return;
+    el.style.transition = animate ? "transform 0.18s ease-out, opacity 0.18s ease-out" : "none";
+    el.style.transform = dyPx ? `translateY(${dyPx}px)` : "";
+    el.style.opacity = dyPx ? String(Math.max(0.25, 1 - Math.abs(dyPx) / 400)) : "";
+  };
+  return {
+    onPointerDown: (e: PointerEvent) => {
+      if (e.target instanceof Element && e.target.closest("button, input, textarea")) return;
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      y0 = e.clientY;
+      t0 = e.timeStamp;
+      dy = 0;
+      on = true;
+    },
+    onPointerMove: (e: PointerEvent) => {
+      if (!on) return;
+      dy = Math.min(0, e.clientY - y0); // up only
+      move(dy, false);
+    },
+    onPointerUp: (e: PointerEvent) => {
+      if (!on) return;
+      on = false;
+      const fling = -dy / Math.max(1, e.timeStamp - t0);
+      if (-dy >= SWIPE_CLOSE_PX || (-dy >= SWIPE_MIN && fling >= SWIPE_FLING)) {
+        move(-window.innerHeight, true);
+        window.setTimeout(() => (powos.assist.close(), move(0, false)), 180);
+      } else move(0, true);
+    },
+    onPointerCancel: () => ((on = false), move(0, true)),
+  };
+}
+
 export function Assist() {
   const panel = useRef<HTMLDivElement>(null);
+  const swipe = swipeAway(panel);
   // Over an app, asks carry the screen and put the chat in the app switcher. Registered on mount, never at import:
   // app.tsx imports this module in every mode, and home's sends then started PowosAiActivity (keepInRecents) - its
   // window covered home for a moment, a black flash on every send from the AI page.
@@ -267,7 +317,8 @@ export function Assist() {
     <div class={`assist ${on ? "live" : ""}`}>
       {!on && <Draw src={s?.screenshot ?? undefined} />}
       <div class="assist-panel tile" ref={panel}>
-        <div class="assist-head">
+        <div class="assist-grip" {...swipe} aria-hidden="true"><span /></div>
+        <div class="assist-head" {...swipe}>
           {!on && s?.screenshot ? (
             <img class="assist-shot" src={region.value ?? s.screenshot} alt="" />
           ) : (
@@ -322,6 +373,7 @@ export function Assist() {
           />
         </form>
       </div>
+      <div class="assist-edge" {...swipe} aria-hidden="true" />
     </div>
   );
 }
