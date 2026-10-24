@@ -157,6 +157,14 @@ class WindowFrames(
      * close together; past that, better a degraded read than never refreshing again.
      */
     fun refresh() {
+        // A page swipe is moving windows: no refresh touches any frame (place, raise, veil, create, remove) until the slide
+        // ends - slideEnd / showOnly post one refresh after it. HACK: whole refresh deferred, not per window (a refresh
+        // mid-slide re-placed the arriving bar at the window's off-screen slide-start bounds, 2026-10-24); the real fix
+        // would be a per-window skip in every path (track/keepMaximised/dense), which are many.
+        if (sliding.isNotEmpty()) {
+            Log.i(TAG, "refresh during slide: skipped ${sliding.size}")
+            return
+        }
         val all = runCatching { FreeformTasks.list(context) }.onFailure { Log.w(TAG, "no floating windows", it) }.getOrDefault(emptyList())
         if (FreeformTasks.hadUnreadableTask && unreadableRetries < UNREADABLE_RETRIES_MAX) {
             unreadableRetries++
