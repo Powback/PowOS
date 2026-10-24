@@ -1217,20 +1217,157 @@ def digest_text(open_, tasks, asks, fr, n_orphans, n_asks):
     return "\n".join(out) + "\n"
 
 
-def remote(argv):
-    """HACK: off the phone (the Mac's agents, the manager's coders) there is no local powos-agents module yet, so the
-    command runs on the phone over the dev channel (powos-vadb). Real fix: each host's own module plus the Phase 2
-    mirror (docs/AGENTS-VIEW-DESIGN.md §8), the hub merging hosts' boards."""
+def _remote_run(argv, timeout=30):
+    """One round-trip to the phone's module over the dev channel (powos-vadb). Returns (rc, stdout, stderr), or
+    None if the attempt itself couldn't be made (no docker, or it timed out/erred before replying)."""
     if not shutil.which("docker"):
-        return False
+        return None
     b = base64.b64encode(json.dumps(argv).encode()).decode()
     inner = f"powos agents --argv-b64 {b}"
     cmd = ["docker", "exec", "powos-vadb", "adb", "shell", f"su -c \"sh /data/powos/powos-run.sh '{inner}'\""]
     try:
-        r = subprocess.run(cmd, timeout=30)
+        r = subprocess.run(cmd, timeout=timeout, capture_output=True, text=True)
     except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.returncode, r.stdout, r.stderr
+
+
+def remote(argv):
+    """HACK: off the phone (the Mac's agents, the manager's coders) there is no local powos-agents module yet, so the
+    command runs on the phone over the dev channel (powos-vadb). Real fix: each host's own module plus the Phase 2
+    mirror (docs/AGENTS-VIEW-DESIGN.md §8), the hub merging hosts' boards."""
+    out = _remote_run(argv)
+    if out is None:
         return False
-    sys.exit(r.returncode)
+    rc, stdout, stderr = out
+    sys.stdout.write(stdout)
+    sys.stderr.write(stderr)
+    sys.exit(rc)
+
+
+# ---- offline outbox (friction f61/f64): the board and friction live on the phone's SpacetimeDB (remote(), above),
+# so both were unreachable - with no recovery - whenever the phone was off the VPN: a write just died, a read had
+# nothing to fall back to, and remote()'s own docker-exec sat out its whole 30s timeout before failing. Writes now
+# queue to a local outbox, in order, sent the next time anything checks in while the phone's reachable; reads fall
+# back to the last cached board snapshot. phone_reachable() fails fast on adb.sh's own WireGuard-staleness check
+# (sub-second) instead of waiting out a doomed round-trip every time.
+OUTBOX_DIR = os.environ.get("POWOS_AGENTS_OUTBOX") or os.path.expanduser("~/.cache/powos-verify-queue/agents-outbox")
+PENDING_DIR = os.path.join(OUTBOX_DIR, "pending")
+CACHE_DIR = os.path.join(OUTBOX_DIR, "cache")
+WRITE_VERBS = {
+    ("task", "add"), ("task", "new"), ("task", "set"), ("task", "done"), ("task", "rm"), ("task", "infer"),
+    ("check", "set"), ("check", "sync"), ("ask", "link"), ("ask", "none"), ("ask", "add"),
+    ("friction", "add"), ("friction", "fix"),
+}
+
+
+def is_write(argv):
+    if not argv:
+        return False
+    if argv[0] == "units":
+        return True   # units sync is the only verb, always a write
+    return (argv[0], argv[1] if len(argv) > 1 else "") in WRITE_VERBS
+
+
+def _cache_key(argv):
+    return re.sub(r"[^a-z0-9]+", "-", "-".join(argv).lower()).strip("-") or "root"
+
+
+def _adb_sh():
+    override = os.environ.get("POWOS_AGENTS_ADB")
+    if override:
+        return override
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(root, "tools", "phone", "adb.sh")
+
+
+def phone_reachable():
+    adb = _adb_sh()
+    if not os.path.exists(adb):
+        return True   # not the Mac (no adb.sh here, e.g. running ON the phone): let remote() try as before
+    try:
+        r = subprocess.run([adb, "--vpn-state"], capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return True   # unknown - don't invent an offline verdict we can't back up
+    return r.returncode != 69
+
+
+def outbox_enqueue(argv):
+    os.makedirs(PENDING_DIR, exist_ok=True)
+    path = os.path.join(PENDING_DIR, f"{time.time():020.6f}-{os.getpid()}.json")
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"argv": argv, "at": time.time()}, f)
+    os.rename(tmp, path)
+
+
+def outbox_pending():
+    os.makedirs(PENDING_DIR, exist_ok=True)
+    return sorted(os.path.join(PENDING_DIR, n) for n in os.listdir(PENDING_DIR) if n.endswith(".json"))
+
+
+def outbox_flush():
+    """Every queued write, oldest first, while the phone's reachable. Stops at the first one still unreachable
+    (the phone dropped again mid-flush) - it and everything after it stay queued, in order."""
+    if not phone_reachable():
+        return
+    for path in outbox_pending():
+        try:
+            with open(path) as f:
+                item = json.load(f)
+        except (OSError, ValueError):
+            os.remove(path)   # corrupt entry: never block the queue on it
+            continue
+        out = _remote_run(item["argv"])
+        if out is None:
+            break
+        os.remove(path)
+
+
+def cache_save(argv, text):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    path = os.path.join(CACHE_DIR, _cache_key(argv) + ".txt")
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.rename(tmp, path)
+
+
+def cache_load(argv):
+    path = os.path.join(CACHE_DIR, _cache_key(argv) + ".txt")
+    try:
+        with open(path) as f:
+            text = f.read()
+        when = time.strftime("%H:%M", time.localtime(os.path.getmtime(path)))
+    except OSError:
+        return None
+    return text, when
+
+
+def handle_down(argv):
+    """The module isn't reachable locally (always true off the phone - remote()'s own HACK). Try the phone; off
+    the VPN, queue a write for later or serve a read from the last cached snapshot - never just die."""
+    outbox_flush()   # clear any backlog first, in order, so this call lands after whatever came before it
+    if phone_reachable():
+        out = _remote_run(argv)
+        if out is not None:
+            rc, stdout, stderr = out
+            sys.stdout.write(stdout)
+            sys.stderr.write(stderr)
+            if rc == 0 and not is_write(argv):
+                cache_save(argv, stdout)
+            sys.exit(rc)
+    if is_write(argv):
+        outbox_enqueue(argv)
+        print("queued (offline): sent once the phone's back on the VPN")
+        return 0
+    cached = cache_load(argv)
+    if cached:
+        text, when = cached
+        sys.stdout.write(text)
+        print(f"(offline, as of {when})")
+        return 0
+    die(f"the powos-agents module isn't reachable at {SERVER} (phone offline, no cached board yet)")
 
 
 def inline_stdin(argv):
@@ -1259,9 +1396,9 @@ def main(argv):
         try:
             task(argv[1:])
         except Down as e:
-            if os.environ.get("POWOS_AGENTS_REMOTE", "1") != "0" and remote(argv):
-                return 0
-            die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+            if os.environ.get("POWOS_AGENTS_REMOTE", "1") == "0":
+                die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+            return handle_down(argv)
         return 0
     argv = inline_stdin(argv)
     sub = {"check": check_cmd, "checks": check_cmd, "ask": ask_cmd, "asks": ask_cmd, "friction": friction_cmd}
@@ -1280,9 +1417,9 @@ def main(argv):
             else:
                 sub[argv[0]](argv[1:])
         except Down as e:
-            if os.environ.get("POWOS_AGENTS_REMOTE", "1") != "0" and remote(argv):
-                return 0
-            die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+            if os.environ.get("POWOS_AGENTS_REMOTE", "1") == "0":
+                die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+            return handle_down(argv)
         return 0
     if argv[0] == "units":
         # powos units publish: one host's units (lib/apps/powos-units snapshot) replace that host's rows in the `unit`
@@ -1293,9 +1430,9 @@ def main(argv):
             body = json.loads(base64.b64decode(argv[2]))
             call("unit_sync", body["host"], json.dumps(body["units"], separators=(",", ":")))
         except Down as e:
-            if os.environ.get("POWOS_AGENTS_REMOTE", "1") != "0" and remote(argv):
-                return 0
-            die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+            if os.environ.get("POWOS_AGENTS_REMOTE", "1") == "0":
+                die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+            return handle_down(argv)
         except (ValueError, KeyError) as e:
             die(f"units sync: {e}")
         return 0
