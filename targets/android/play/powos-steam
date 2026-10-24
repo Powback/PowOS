@@ -56,6 +56,7 @@ cd "$S/steamrtarm64"
 # HACK: the dynamic loader is not fakechroot-aware: LD_LIBRARY_PATH entries must be HOST paths (the rootfs's own
 # are, set by the app's launcher). Without the prefix, steamui.so bound the rootfs's older SDL3 instead of Steam's
 # ("undefined symbol: SDL_TryLockJoysticks"). FAKECHROOT_BASE is empty outside the runtime.
+# Real fix: a fakechroot-aware dynamic loader, or a real chroot.
 export LD_LIBRARY_PATH=${FAKECHROOT_BASE:-}$S/steamrtarm64:${FAKECHROOT_BASE:-}$S/steamrtarm64/libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 # STEAMOS/STEAM_RUNTIME as the Steam Frame setup uses them. -no-cef-sandbox: Chromium's sandbox needs user
 # namespaces or a setuid helper, neither exists for an Android app.
