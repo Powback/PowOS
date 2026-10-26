@@ -3,7 +3,7 @@
     "repository": "https://github.com/Zagitta/gpu-unlock.git",
     "revision": "af28cbbfd3d922a659227ecfb7369adfd924cf03",
     "version": "1.0.0",
-    "release": "2",
+    "release": "3",
     "test_target": "test",
     "devices": {"0x2204": "RTX 3090"}
   },
@@ -11,7 +11,7 @@
     "repository": "https://github.com/JustAResearcher/gpu-unlock-ada.git",
     "revision": "a63cf8060f10ef94d29aa0aeaad37b7cf499dac0",
     "version": "1.1.1",
-    "release": "1",
+    "release": "2",
     "test_target": "test-full",
     "devices": {"0x2204": "RTX 3090", "0x2684": "RTX 4090"}
   }

@@ -20,6 +20,17 @@ validate again after power-state transitions rather than assuming it stays unloc
 The toggle is a next-boot setting. **None of these scripts reboots the host.**
 No live `modprobe`, driver unload, GPU reset or service restart is performed.
 
+After the one-time package setup, the normal interface is simply:
+
+```sh
+sudo powos-gpu-unlock enable
+sudo powos-gpu-unlock disable
+powos-gpu-unlock status
+```
+
+`enable` reuses the deployed profile and verifies the initramfs. No RPM path is
+needed unless installing the package initially or explicitly updating it.
+
 ## Build and enable
 
 Run on gpu-195 in a checkout containing this integration:
@@ -27,7 +38,7 @@ Run on gpu-195 in a checkout containing this integration:
 ```sh
 bash hosts/gpu-195/gpu-unlock/build.sh ampere
 sudo python3 hosts/gpu-195/gpu-unlock/control.py enable \
-  --rpm "$HOME/.cache/powos-gpu-unlock/ampere/rpmbuild/RPMS/x86_64/powos-gpu-unlock-1.0.0-2.x86_64.rpm"
+  --rpm "$HOME/.cache/powos-gpu-unlock/ampere/rpmbuild/RPMS/x86_64/powos-gpu-unlock-1.0.0-3.x86_64.rpm"
 python3 hosts/gpu-195/gpu-unlock/control.py status
 ```
 
@@ -36,7 +47,7 @@ For a desktop RTX 4090 host, build **on that host** against its kernel headers:
 ```sh
 bash hosts/gpu-195/gpu-unlock/build.sh ada
 sudo python3 hosts/gpu-195/gpu-unlock/control.py enable \
-  --rpm "$HOME/.cache/powos-gpu-unlock/ada/rpmbuild/RPMS/x86_64/powos-gpu-unlock-1.1.1-1.x86_64.rpm"
+  --rpm "$HOME/.cache/powos-gpu-unlock/ada/rpmbuild/RPMS/x86_64/powos-gpu-unlock-1.1.1-2.x86_64.rpm"
 ```
 
 To select one card, add `--targets <full PCI address from lspci -D>`.

@@ -100,6 +100,36 @@ class ToggleTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'differs'):
                     control.check_profile({}, 'ada')
 
+    def test_enable_without_rpm_reuses_deployed_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            metadata = Path(tmp) / 'usr/share/powos/gpu-unlock'
+            metadata.mkdir(parents=True)
+            for key, value in {'profile': 'ampere', 'kernel': control.os.uname().release,
+                               'upstream-revision': control.PROFILES['ampere']['revision']}.items():
+                (metadata / key).write_text(value)
+            state = {'kargs': 'quiet'}
+            def read(*args):
+                if args == ('rpm-ostree', 'status', '--json'):
+                    return json.dumps({'deployments': [{'booted': True}]})
+                if args == ('mokutil', '--sb-state'):
+                    return 'SecureBoot disabled'
+                if args == ('rpm-ostree', 'kargs'):
+                    return state['kargs']
+                raise AssertionError(args)
+            def mutate(*args):
+                if args[:2] == ('rpm-ostree', 'kargs'):
+                    state['kargs'] = 'quiet gpu_unlock.targets=all'
+            with patch.object(control.sys, 'argv', ['control.py', 'enable']), \
+                    patch.object(control.os, 'geteuid', return_value=0), \
+                    patch.object(control, 'deployment_root', return_value=Path(tmp)), \
+                    patch.object(control, 'gpu_devices', return_value={'0000:01:00.0': '0x2204'}), \
+                    patch.object(control, 'run', side_effect=read), \
+                    patch.object(control, 'change', side_effect=mutate) as changes, \
+                    patch.object(control, 'check_image'):
+                control.main()
+            self.assertEqual([c.args[:2] for c in changes.call_args_list], [
+                ('rpm-ostree', 'initramfs'), ('rpm-ostree', 'kargs')])
+
 
 class BenchmarkTests(unittest.TestCase):
     def reports(self):

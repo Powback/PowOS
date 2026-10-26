@@ -104,7 +104,7 @@ def status():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['status', 'enable', 'disable'])
-    parser.add_argument('--rpm', type=Path, help='Built RPM (required for enable)')
+    parser.add_argument('--rpm', type=Path, help='Built RPM for first install or a profile update; otherwise use the deployed package')
     parser.add_argument('--targets', default='all', help='all (default) or comma-separated full PCI addresses')
     args = parser.parse_args()
     if args.action == 'status':
@@ -113,37 +113,50 @@ def main():
     if os.geteuid() != 0:
         parser.error('Run enable/disable with sudo on the server. Neither command reboots.')
     if args.action == 'enable':
-        if not args.rpm or not args.rpm.is_file():
-            parser.error('enable requires --rpm /absolute/path/to/package.rpm')
-        rpm = str(args.rpm.resolve())
-        if run('rpm', '-qp', '--qf', '%{NAME}', rpm) != PACKAGE:
-            parser.error('Not a PowOS GPU unlock package')
-        provides = run('rpm', '-qp', '--provides', rpm).splitlines()
-        profiles = [p for p in PROFILES if 'powos-gpu-unlock-profile-' + p in provides]
-        if len(profiles) != 1:
-            parser.error('RPM has no unambiguous GPU profile; rebuild with the current build.sh')
-        try:
-            args.targets, chosen = validate_selection(profiles[0], args.targets, gpu_devices())
-        except ValueError as exc:
-            parser.error(str(exc))
-        print('Profile:', profiles[0], 'PCI targets:', ', '.join(chosen))
-        kernel = os.uname().release
-        if 'kernel-core-uname-r = ' + kernel not in run('rpm', '-qp', '--requires', rpm).splitlines():
-            parser.error('RPM does not match the running kernel')
-        if 'SecureBoot enabled' in run('mokutil', '--sb-state'):
-            parser.error('Unsigned module: Secure Boot must be handled before enabling')
         deployments = json.loads(run('rpm-ostree', 'status', '--json'))['deployments']
         pending = deployments[0]
+        kernel = os.uname().release
+        rpm = None
+        if args.rpm:
+            if not args.rpm.is_file():
+                parser.error('RPM file does not exist')
+            rpm = str(args.rpm.resolve())
+            if run('rpm', '-qp', '--qf', '%{NAME}', rpm) != PACKAGE:
+                parser.error('Not a PowOS GPU unlock package')
+            provides = run('rpm', '-qp', '--provides', rpm).splitlines()
+            profiles = [p for p in PROFILES if 'powos-gpu-unlock-profile-' + p in provides]
+            if len(profiles) != 1:
+                parser.error('RPM has no unambiguous GPU profile; rebuild with the current build.sh')
+            profile = profiles[0]
+            if 'kernel-core-uname-r = ' + kernel not in run('rpm', '-qp', '--requires', rpm).splitlines():
+                parser.error('RPM does not match the running kernel')
+        else:
+            metadata = deployment_root(pending) / 'usr/share/powos/gpu-unlock'
+            if not (metadata / 'profile').is_file():
+                parser.error('First-time setup needs --rpm <built package>; subsequent toggles need no path')
+            profile = (metadata / 'profile').read_text().strip()
+            if profile not in PROFILES or (metadata / 'kernel').read_text().strip() != kernel:
+                parser.error('Deployed package has an unknown profile or different kernel; rebuild first')
+            check_profile(pending, profile)
+        try:
+            args.targets, chosen = validate_selection(profile, args.targets, gpu_devices())
+        except ValueError as exc:
+            parser.error(str(exc))
+        print('Profile:', profile, 'PCI targets:', ', '.join(chosen))
+        if 'SecureBoot enabled' in run('mokutil', '--sb-state'):
+            parser.error('Unsigned module: Secure Boot must be handled before enabling')
         if not pending.get('booted') and not any(PACKAGE in p for p in pending.get('requested-local-packages', [])):
             parser.error('Another deployment is pending; resolve it before staging GPU unlock')
         # Replace a previously layered variant in one deployment transaction.
-        replacement = ['--uninstall=' + PACKAGE] if any(
-            PACKAGE in p for p in pending.get('requested-local-packages', [])) else []
-        change('rpm-ostree', 'install', '--idempotent', *replacement, rpm)
-        change('rpm-ostree', 'initramfs', '--enable')
+        if rpm:
+            replacement = ['--uninstall=' + PACKAGE] if any(
+                PACKAGE in p for p in pending.get('requested-local-packages', [])) else []
+            change('rpm-ostree', 'install', '--idempotent', *replacement, rpm)
+        if not pending.get('regenerate-initramfs'):
+            change('rpm-ostree', 'initramfs', '--enable')
         pending = json.loads(run('rpm-ostree', 'status', '--json'))['deployments'][0]
         check_image(pending, kernel)
-        check_profile(pending, profiles[0])
+        check_profile(pending, profile)
     flags = karg_changes(run('rpm-ostree', 'kargs'), args.action == 'enable', args.targets)
     if flags:
         change('rpm-ostree', 'kargs', *flags)
