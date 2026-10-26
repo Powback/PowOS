@@ -11,13 +11,10 @@ STORE=${1:-$HOME/Projects/android-app-dev/output}
 REPO=$STORE/repo
 mkdir -p "$REPO"
 # Only the newest build of each package: out/pkgs keeps earlier ones (kwin 3.2 next to 3.3).
-docker run --rm --platform linux/arm64 -v "$HERE/out/pkgs:/pkgs:ro" -v "$REPO:/repo" menci/archlinuxarm:latest bash -c '
+docker run --rm --platform linux/arm64 -v "$HERE/out/pkgs:/pkgs:ro" -v "$HERE/tools/newest-pkgs.sh:/newest-pkgs.sh:ro" -v "$REPO:/repo" menci/archlinuxarm:latest bash -c '
   set -euo pipefail
   rm -f /repo/*.pkg.tar.* /repo/powos.*
-  for f in $(ls -tr /pkgs/*.pkg.tar.*); do
-    n=$(bsdtar -xOf "$f" .PKGINFO | sed -n "s/^pkgname = //p")
-    echo "$n $f"
-  done | awk "{last[\$1]=\$2} END {for (n in last) print last[n]}" | while read -r f; do cp "$f" /repo/; done
+  /newest-pkgs.sh /pkgs | while read -r f; do cp "$f" /repo/; done
   repo-add -q /repo/powos.db.tar.gz /repo/*.pkg.tar.*
   # nginx serves symlinks as their target only when it can follow them; plain copies are safer.
   for l in powos.db powos.files; do rm -f /repo/$l; cp /repo/$l.tar.gz /repo/$l; done
