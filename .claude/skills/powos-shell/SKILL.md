@@ -110,8 +110,9 @@ covers both halves of that rule:
   the picture-glass fallback keeps its frosted picture. Opt-out: manifest `page.background: "own"` drops `.tile` (no
   compositor region under a page that paints its own ground, e.g. Sketch's canvas; Sketch is opaque anyway).
 - Lights/Shopping pages paint no root ground (the shell's is what shows); Sketch's page is `position: fixed` #121216,
-  its chrome inline in the app - the shell can't restyle it. Floating-window chrome is Kotlin only (WindowFrame.kt), in frost v2 via system/Frost.kt (theme.css's formula
-  ported: change the frost tokens -> change Frost.kt too).
+  its chrome inline in the app - the shell can't restyle it. Floating-window and status chrome use shared `shell/ui/chrome.tsx` + `chrome.css` (user direction, 2026-10-26).
+  Android `FrameChrome`/`StatusChrome` host those pages; `WindowFrame` keeps continuous native drag input and task
+  operations. Chrome uses the shared frost selector lists and small-label tint strength; check `chrome-*` scenes.
 - Scene `app-page` (shots.mjs) opens local.lights over home (empty headless: no registry) - the material check.
   Test wallpapers: make light/dark JPGs with `uv run --with pillow python` (no PIL on the Mac); an exported tree for
   /a renders needs shell/fonts/nerd_symbols.ttf linked (git archive drops it, shot.sh then exits silently).

@@ -27,5 +27,5 @@ html:root .window-chrome { background: none; box-shadow: none; }
 html:root .chrome-surface { --frost-fill: color-mix(in srgb, var(--frost-base) 82%, transparent); }
 /* At caption sizes keep the base frost tint: the large-card lift makes small text too faint over a bright app. */
 :root[data-light="false"]:not([data-wallpaper="light"]) .chrome-surface {
-  --frost-base: color-mix(in oklab, var(--glass-base) 25%, var(--frost-cool));
+  --frost-fill: color-mix(in srgb, color-mix(in oklab, var(--glass-base) 25%, var(--frost-cool)) 82%, transparent);
 }

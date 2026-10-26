@@ -76,6 +76,7 @@ object TaskLeash {
         /** The bounds each task should end at (the newest frame's, or [finish]'s). */
         private val last = HashMap<Int, Rect>()
         private var released = false
+        private var committed = false
         /** Leashes hidden as it finishes (a page slide's windows left on another page: WM hides those tasks next). */
         var hidden: Set<Int> = emptySet()
         private var endChange: ((Any, (Int) -> Any?) -> Unit)? = null
@@ -140,7 +141,7 @@ object TaskLeash {
         ): Boolean {
             last[id] = Rect(bounds)
             val leash = leashes[id] ?: return false
-            if (state != State.LIVE || !leash.isValid) return false
+            if (state != State.LIVE || !committed || !leash.isValid) return false
             place(t, leash, bounds)
             frames++
             return true
@@ -157,7 +158,7 @@ object TaskLeash {
             last.putAll(bounds.mapValues { Rect(it.value) })
             endChange = change
             released = true
-            if (state == State.LIVE) end("released")
+            if (state == State.LIVE && committed) end("released")
         }
 
         private fun place(
@@ -192,10 +193,20 @@ object TaskLeash {
                 passThrough(t, callback)
                 return
             }
-            take(info, t, callback)
+            val start = take(info, t, callback)
             val gaveUp = state == State.GAVE_UP
             state = State.LIVE
             Log.i(TAG, "$what: leashes ${leashes.keys} after ${SystemClock.uptimeMillis() - startedAt} ms (root offset $offset)${if (gaveUp) ", late" else ""}")
+            // A zero-frame resize may finish immediately. Wait until SF commits the start transaction before
+            // giving the caller its leash: otherwise the finish reparent can overtake this process's start
+            // reparent, leaving the app under a detached transition root (maximise, emulator 2026-10-26).
+            start.addTransactionCommittedListener({ main.post(it) }) { startCommitted(gaveUp) }
+            start.apply()
+        }
+
+        private fun startCommitted(gaveUp: Boolean) {
+            if (state != State.LIVE) return
+            committed = true
             when {
                 leashes.isEmpty() -> end("no leash in it")
                 released -> end("released before")
@@ -219,7 +230,7 @@ object TaskLeash {
             info: Any?,
             t: SurfaceControl.Transaction?,
             callback: IBinder?,
-        ) {
+        ): SurfaceControl.Transaction {
             finishCallback = callback
             if (info != null) {
                 offset = runCatching { rootOffset(info) }.getOrDefault(Point())
@@ -227,7 +238,7 @@ object TaskLeash {
             }
             val st = t ?: SurfaceControl.Transaction()
             for ((id, leash) in leashes) last[id]?.let { place(st, leash, it) }
-            st.apply()
+            return st
         }
 
         /** WM Shell called it off (consumed/aborted): nothing to finish. */

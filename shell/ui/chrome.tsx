@@ -10,6 +10,7 @@ function Mark({ kind }: { kind: string }) {
     close: "M5 5l14 14M5 19L19 5", resize: "M9 17l8-8M15 18l3-3",
     wifi: "M3 8a15 15 0 0 1 18 0M6 12a10 10 0 0 1 12 0M9 16a5 5 0 0 1 6 0M12 20h.01",
     cellular: "M4 20v-3M9 20v-7M14 20V9M19 20V4", ethernet: "M4 5h16v10H4zM12 15v5M8 20h8",
+    charging: "M14 2L5 13h7l-2 9 9-13h-7z",
     offline: "M5 5l14 14M5 19L19 5", vpn: "M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5z",
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[kind] ?? paths.offline} /></svg>;
@@ -79,7 +80,7 @@ function Indicators({ state, battery }: { state: ChromeState; battery: number | 
   return <>
       {state.vpn && <span title="VPN connected"><Mark kind="vpn" /></span>}
       {state.network && <span title={state.network}><Mark kind={state.network} /></span>}
-      {battery != null && <span class="status-battery"><svg viewBox="0 0 28 16" aria-hidden="true"><rect x="1" y="2" width="22" height="12" rx="3" /><path d="M26 6v4" /><rect class="battery-level" x="3" y="4" width={18 * battery / 100} height="8" rx="1" /></svg><span>{state.charging ? "ϟ " : ""}{battery}%</span></span>}
+      {battery != null && <span class="status-battery"><svg viewBox="0 0 28 16" aria-hidden="true"><rect x="1" y="2" width="22" height="12" rx="3" /><path d="M26 6v4" /><rect class="battery-level" x="3" y="4" width={18 * battery / 100} height="8" rx="1" /></svg>{state.charging && <Mark kind="charging" />}<span>{battery}%</span></span>}
       {state.network == null && battery == null && <span>Controls</span>}
   </>;
 }

@@ -6,13 +6,32 @@
 >
 > **UI direction, 2026-10-26:** the user wants the web version only, including the top status bar, title bars and
 > window controls. The host-owned bars described below are the current implementation, not the requested end state.
-> Their migration to shared web UI is still pending.
+> Android now uses the shared web chrome described below. The separate Plasma host still needs its chrome integration.
 
 
 Goal: one codebase for a widget or a PowOS app on the phone and on the desktop. The desktop runs the same `shell/`
 (theme tokens, glass, widgets, PowOS apps' islands, PowOS AI's chat, the pet) as a native Plasma surface, not a
 browser tab. It is added to Plasma and can be switched off; it replaces nothing. The research behind it, and the
 longer road (replacing plasmashell), is `docs/DESKTOP-WEB-SHELL.md`.
+
+## Shared system chrome
+
+`shell/ui/chrome.tsx` draws status, title and resize controls. `entry.ts` loads the small `chrome.tsx` entry for
+`statusbar`, `windowbar` and `windowgrip`, avoiding the home/widget boot in each small window. The same components
+and theme loader run in a browser or either embedded web engine. `chrome.state`, `chrome.changed`, `chrome.ready`,
+`chrome.action` and `chrome.regions` are the host contract; this is scoped to the owning chrome surface on Android.
+
+Android's `StatusChrome` supplies clock format, battery, network, notification count and cutout spacing. `ShadeHost`
+embeds that page above the stock bar, hides the stock clock/icons only after the web page renders, and restores
+SystemUI on lock, when lending its panel, or if the page stops responding. SystemUI retains underlying services and
+privacy indicators. Clock and indicator taps open PowOS's existing shared shade. `FrameChrome` replaces the native
+Canvas titlebar and grip; DOM rectangles define button hit targets while `WindowFrame` retains raw continuous drag
+input and task operations. The bars use the shell's frost tokens with small-label contrast, SVG marks and no font
+symbols for system controls.
+
+Browser gates exercise all titlebar actions, restore state, status actions and cutout spacing. Chrome render scenes
+cover narrow/wide windows, a long title, the grip and folded/unfolded status bars. The Qt/Plasma host does not yet
+create these chrome surfaces: desktop browser component checks do not establish native PC window integration.
 
 ## Host: powos-shell (Qt 6 + QtWebEngine + LayerShellQt)
 

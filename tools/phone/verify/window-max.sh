@@ -184,7 +184,7 @@ maxcheck() {
   set -- $c; if [ $# -ge 6 ]; then
     eqrect "$1 $2 $3 $4" "$b1" 4 && near $(($3 - $1)) "$5" 4 && near $(($4 - $2)) "$6" 4 &&
       pass "$app's content drawn at the maximised size ([$c])" || fail "$app's content [$c] isn't the maximised window [$b1] (stale or scaled)"
-  else fail "$app: no content layer ($c)"; fi
+  else layerstate "$id" "$lay" "$app-maximised-missing"; fail "$app: no content layer ($c)"; fi
   p=$(maxbtn "$id"); set -- $p; mark; ttap "$1" "$2" "$app's restore" || return
   trace "$id" "$app restore"
   chk restore
