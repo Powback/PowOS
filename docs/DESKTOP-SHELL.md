@@ -96,8 +96,10 @@ Android bridge is untouched. bridge.ts picks `desktop(native(host))` when `Powos
   chrome checks and dark/light visual scenes pass; native screenshots show one title bar and readable status pills.
   Maximise now waits for the start transaction's compositor commit before finishing the transition, preventing an
   app surface from being stranded offscreen. Frame WebViews no longer allocate duplicate page blur, and the native
-  blur capability probe clears its test rectangle. Software-emulator motion remains slow (roughly 8–15 fps and
-  150–200 ms touch latency); these checks do not establish physical-device performance or Qt/Plasma integration.
+  blur capability probe clears its test rectangle. The drag snapshot now follows the resized window width with
+  unscaled web-rendered controls; `chrome-1026-0609` captures were inspected during and after resizing, followed by
+  passing minimise/close taps. Software-emulator motion remains slow (roughly 8–15 fps and 150–230 ms median touch
+  latency); these checks do not establish physical-device performance or Qt/Plasma integration.
 - Desktop browser visual review, 2026-10-26: the recent-app row clipped its first icons off the left edge when no
   apps were pinned. `desktop.css` now sizes that row to its content with a viewport minimum and safe centering.
   Screenshots at 558x1198 and 1280x800 show all six recent icons centered and visible. Type checking and the two
