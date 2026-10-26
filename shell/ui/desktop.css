@@ -54,8 +54,14 @@ html[data-mode="desktop"] .desk-wall {
 }
 /* The dock under the pill: its icons at their folded spacing in the middle, not spread across a desktop. */
 html[data-mode="desktop"] .dock-page {
-  justify-content: center;
+  justify-content: safe center;
   gap: 12px;
+}
+/* Recents can be the only page when nothing is pinned. Its flex children have fixed slots: size the row from
+ * those slots, with at least a viewport of space, so centering never pushes its first apps outside the scroller. */
+html[data-mode="desktop"] .dock-page.dock-recent {
+  width: max-content;
+  min-width: 100%;
 }
 html[data-mode="desktop"] .dock .app {
   flex: 0 0 72px;

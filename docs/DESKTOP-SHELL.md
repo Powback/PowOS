@@ -3,6 +3,10 @@
 > **Resumed by the user, 2026-10-26:** PC desktop development and Plasma-on-Android integration are both in scope.
 > The separate Plasma host (powos-shell) remains disabled on the phone until explicitly enabled. Android's unfolded
 > home and Plasma keep the independent window ownership described in `docs/DESKTOP-NATIVE.md`.
+>
+> **UI direction, 2026-10-26:** the user wants the web version only, including the top status bar, title bars and
+> window controls. The host-owned bars described below are the current implementation, not the requested end state.
+> Their migration to shared web UI is still pending.
 
 
 Goal: one codebase for a widget or a PowOS app on the phone and on the desktop. The desktop runs the same `shell/`
@@ -67,6 +71,11 @@ Android bridge is untouched. bridge.ts picks `desktop(native(host))` when `Powos
 
 ## Perf and checks
 
+- Desktop browser visual review, 2026-10-26: the recent-app row clipped its first icons off the left edge when no
+  apps were pinned. `desktop.css` now sizes that row to its content with a viewport minimum and safe centering.
+  Screenshots at 558x1198 and 1280x800 show all six recent icons centered and visible. Type checking and the two
+  desktop startup tests pass. The isolated renderer has no SpacetimeDB service, so Lights and Shopping show connection
+  errors; these renders do not validate their live integration or the pending web status/window bars.
 - Emulator review, 2026-10-26: page switching previously ignored the final touch/mouse release coordinates when
   WebView coalesced moves. `gesture.ts` now uses that position before settling; the `desktops` browser regression
   fails against the previous implementation for both input types. Android also cancelled the DOM swipe when an
@@ -80,6 +89,7 @@ Android bridge is untouched. bridge.ts picks `desktop(native(host))` when `Powos
   adb root. The app's own root helper remains unreliable on this non-Magisk image; `run-as ... su` succeeding is not
   proof of app-process root access. Captures after the overlay show one title bar. This does not validate the rooted
   Linux/Plasma session or replace native PC testing. The PC shell's browser gate, type checking and startup tests pass.
+- To check unlanded emulator setup changes, run queued checks with `QUEUE_NO_TREE=1 EMU_COMMIT=$(git rev-parse HEAD) tools/phone/verify/queue.sh run-emu`; the default runner uses origin's setup scripts even when a local APK commit is selected.
 - `cd shell && npm run test:desktop` (Node 22.18+) checks the native host's asynchronous startup without a device:
   early resizes must preserve the saved layout, and early launches must preserve recent-app history.
 - 0 frames at rest, the same rule as the phone. Measured on the phone over 60 s once settled: host 3 ticks,
