@@ -37,6 +37,12 @@ trap 'rm -rf "$PAYLOAD"' EXIT
 mkdir -p "$PAYLOAD/usr/lib/modules/$KVER/extra"
 install -m644 "$SRC/kernel/gpu_unlock/gpu_unlock.ko" "$PAYLOAD/usr/lib/modules/$KVER/extra/"
 make -C "$SRC" DESTDIR="$PAYLOAD" ASSETS="$WORK/assets-$REV" install-firmware install-dracut install-licenses
+# Bazzite force-loads NVIDIA too: append would run the unlock after it binds.
+cat > "$PAYLOAD/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf" <<'EOF'
+force_drivers=" gpu_unlock ${force_drivers:-} "
+EOF
+mkdir -p "$PAYLOAD/usr/lib/modprobe.d"
+echo 'softdep nvidia pre: gpu_unlock' > "$PAYLOAD/usr/lib/modprobe.d/gpu-unlock.conf"
 mkdir -p "$PAYLOAD/usr/share/powos/gpu-unlock"
 printf '%s\n' "$REV" > "$PAYLOAD/usr/share/powos/gpu-unlock/upstream-revision"
 printf '%s\n' "$KVER" > "$PAYLOAD/usr/share/powos/gpu-unlock/kernel"

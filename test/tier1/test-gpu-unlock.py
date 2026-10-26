@@ -60,6 +60,20 @@ class ToggleTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'missing firmware'):
                 control.check_image(deployment, 'test-kernel')
 
+    def test_nvidia_forced_before_unlock_rejected(self):
+        deployment = {'osname': 'default', 'checksum': 'abc', 'serial': 0}
+        for commandline in ['rd.driver.pre=nvidia rd.driver.pre=gpu_unlock',
+                            'rd.driver.pre=nvidia_drm,gpu_unlock']:
+            with patch.object(control, 'run', side_effect=['gpu_unlock.ko', '', commandline]):
+                with self.assertRaisesRegex(RuntimeError, 'before gpu_unlock'):
+                    control.check_image(deployment, 'test-kernel')
+
+    def test_unlock_forced_before_nvidia_accepted(self):
+        deployment = {'osname': 'default', 'checksum': 'abc', 'serial': 0}
+        with patch.object(control, 'run', side_effect=[
+                'gpu_unlock.ko', '', 'rd.driver.pre=gpu_unlock rd.driver.pre=nvidia']):
+            control.check_image(deployment, 'test-kernel')
+
     def test_4090_requires_ada_profile(self):
         devices = {'0000:01:00.0': '0x2684'}
         with self.assertRaisesRegex(ValueError, 'unsupported'):

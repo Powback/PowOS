@@ -79,8 +79,14 @@ def check_image(deployment, kernel):
     for firmware in run('modinfo', '-F', 'firmware', str(module)).splitlines():
         if firmware not in contents:
             raise RuntimeError('Staged initramfs is missing firmware: ' + firmware)
-    if 'rd.driver.pre=gpu_unlock' not in run('lsinitrd', '-f', 'etc/cmdline.d/20-force_drivers.conf', str(image)):
+    forced = run('lsinitrd', '-f', 'etc/cmdline.d/20-force_drivers.conf', str(image))
+    drivers = [driver for arg in forced.split() if arg.startswith('rd.driver.pre=')
+               for driver in arg.split('=', 1)[1].split(',')]
+    if 'gpu_unlock' not in drivers:
         raise RuntimeError('Staged initramfs does not force gpu_unlock before normal driver probing.')
+    if any(driver.startswith('nvidia') or driver == 'nouveau'
+           for driver in drivers[:drivers.index('gpu_unlock')]):
+        raise RuntimeError('Staged initramfs loads a GPU driver before gpu_unlock; rebuild the package.')
     print('Verified staged initramfs: module, all firmware, and early driver loading.')
 
 
