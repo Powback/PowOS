@@ -45,7 +45,8 @@ echo "$*" >> "$GIT_LOG"
 a=("$@")
 if [[ "${a[0]:-}" == "-C" ]]; then sub="${a[2]:-}"; else sub="${a[0]:-}"; fi
 case "$sub" in
-    status)   [[ "${FAKE_GIT_DIRTY:-0}" == 1 ]] && echo " M bin/powos"; exit 0 ;;
+    status)   [[ "${FAKE_GIT_STAGED:-0}" == 1 ]] && echo "M  bin/powos"
+              [[ "${FAKE_GIT_DIRTY:-0}" == 1 ]] && echo " M bin/powos"; exit 0 ;;
     diff)     exit "${FAKE_GIT_DIFF_RC:-1}" ;;   # --cached --quiet: 1 = staged changes
     push)     [[ -n "${FAKE_GIT_PUSH_ERR:-}" ]] && echo "$FAKE_GIT_PUSH_ERR" >&2
               exit "${FAKE_GIT_PUSH_RC:-0}" ;;
@@ -123,7 +124,7 @@ grep -q "add -- bin/powos" "$GIT_LOG" && ok "stages only the named path" || bad 
 
 echo "== self_push: no paths + something already staged → refuses, commits nothing =="
 : > "$GIT_LOG"
-out="$(self_push "$PUSHSRC" "msg" 2>&1)"
+out="$(FAKE_GIT_STAGED=1 self_push "$PUSHSRC" "msg" 2>&1)"
 rc=$?
 [[ $rc -ne 0 ]] && ok "refuses a path-less push over staged changes" || bad "swept up others' staged changes"
 grep -q -- "-- <your files>" <<<"$out" && ok "says how to commit only yours" || bad "no per-path hint"
