@@ -529,7 +529,7 @@ class WindowFrame(
     private fun dragLayer(resizing: Boolean): DragLayer {
         val bitmapOf = { v: View -> runCatching { v.drawToBitmap() }.getOrNull() }
         val barPicture = if (app.ownBar) null else bitmapOf(bar)
-        return DragLayer(context, barPicture, if (resizing) bitmapOf(grip) else null, barHeight(), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density)
+        return DragLayer(context, barPicture, if (resizing) bitmapOf(grip) else null, barHeight(), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density).apply { controlsWidth = barChrome.controlsWidth }
     }
 
     /** The frame's own windows hidden while [layer] draws them: alpha now, their blur after that frame. */

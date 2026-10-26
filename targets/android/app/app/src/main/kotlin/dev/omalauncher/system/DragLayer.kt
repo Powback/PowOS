@@ -34,6 +34,7 @@ internal class DragLayer(
     private val gripOffset: Int,
     private val corner: Float,
 ) : View(context) {
+    var controlsWidth: Int = 0
     private val wm = context.getSystemService(WindowManager::class.java)
     private val density = context.resources.displayMetrics.density
     private var target = Rect()
@@ -105,7 +106,7 @@ internal class DragLayer(
     override fun onDraw(canvas: Canvas) {
         val r = target
         if (outline) canvas.drawRoundRect(RectF(r), corner, corner, outlinePaint)
-        bar?.let { canvas.drawBitmap(it, r.left.toFloat(), (r.top - barHeight).toFloat(), bitmapPaint) }
+        bar?.let { drawBar(canvas, it, r) }
         grip?.let { canvas.drawBitmap(it, (r.right - gripOffset).toFloat(), (r.bottom - gripOffset).toFloat(), bitmapPaint) }
         val ev = pendingEventNs
         pendingEventNs = 0L
@@ -117,6 +118,22 @@ internal class DragLayer(
                 if (first) post { onShown?.invoke() }
             }
         }
+    }
+
+    /** Resize the web snapshot without stretching its text or buttons; the live DOM relayout takes over at lift. */
+    private fun drawBar(canvas: Canvas, picture: Bitmap, r: Rect) {
+        val controls = controlsWidth.coerceIn(0, minOf(picture.width - 1, r.width()))
+        val split = picture.width - controls
+        val caption = r.width() - controls
+        val y = r.top - barHeight
+        fun slice(left: Int, right: Int, destLeft: Int, destRight: Int) {
+            if (right <= left || destRight <= destLeft) return
+            canvas.drawBitmap(picture, Rect(left, 0, right, picture.height), Rect(r.left + destLeft, y, r.left + destRight, y + picture.height), bitmapPaint)
+        }
+        slice(0, minOf(split, caption), 0, minOf(split, caption))
+        // The gap before the controls supplies the web background when a window grows.
+        if (caption > split) slice(split - 1, split, split, caption)
+        slice(split, picture.width, caption, r.width())
     }
 
     /** The finger lifted: gone, and the drag's latencies logged. */

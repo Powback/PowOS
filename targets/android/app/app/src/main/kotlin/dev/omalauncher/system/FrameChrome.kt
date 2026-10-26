@@ -15,6 +15,8 @@ class FrameChrome(context: Context, kind: String, private val app: WindowFrame.A
     private val host = ShellHost(context, null, (context.applicationContext as App).runtime, if (kind == "grip") "windowgrip" else "windowbar")
     val web get() = host.web
     private var targets = emptyList<Button>()
+    /** Keep the web-rendered controls at their natural size in the temporary drag snapshot. */
+    val controlsWidth get() = targets.minOfOrNull { it.left }?.let { (web.width - it).toInt() } ?: 0
 
     init { host.bridge.chrome = this }
     override fun state(): JSONObject {
