@@ -23,6 +23,80 @@ export LD_PRELOAD="$L/aarch64/libsysvipc-emu.so $L/i386/libsysvipc-emu.so $L/x86
 # helpers are all started by it. Running = the pid Steam keeps in ~/.steam/steam.pid is alive and is Steam's client (by
 # name, pgrep found this script: its process, and the subshells it forks, are called steam too).
 steam_pid=$(cat "$HOME/.steam/steam.pid" 2>/dev/null)
+
+# Proton prefixes' registries after a reboot or crash (checked while no Steam runs, so no wineserver writes them):
+# wineserver saves system/user/userdef.reg (temp file + rename) without fsync, and on the phone's f2fs (/data) a reboot
+# within a minute or so of a save can keep the files' size and lose their data - all NUL bytes. Wine then can't load
+# its registry and the game's whole launch chain dies ~10-16 s in, no window, every time (Broforce, 2026-10-22: saved
+# 23:57:58, rebooted 23:59). Each Steam start keeps an fsynced copy of every prefix's last good set (compatdata/<id>/
+# powos-reg) and puts it back over a broken one; with no copy, Proton rebuilds the registry itself (its creation path:
+# no creation_sync_guard -> the default prefix's files are copied in, drive_c and the game's data stay). Every Wine
+# key the game changed since the copy is lost, nothing else.
+reg_ok() { [ "$(head -c 23 "$1" 2>/dev/null | tr -d '\0')" = "WINE REGISTRY Version 2" ] && ! LC_ALL=C grep -qaP '\x00' "$1"; }
+reg_guard() {
+  local p c r ok bad
+  for p in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/compatdata/*/pfx; do
+    [ -f "$p/system.reg" ] || continue
+    c=${p%/pfx}
+    # The last rebuild's tracked_files (Proton's copy_pfx rewrote it with only what it copied): merged back.
+    [ -f "$c/tracked_files.powos-keep" ] && [ -e "$p/creation_sync_guard" ] \
+      && sort -u "$c/tracked_files.powos-keep" "$c/tracked_files" -o "$c/tracked_files" && rm -f "$c/tracked_files.powos-keep"
+    ok=1 bad=
+    for r in system user userdef; do reg_ok "$p/$r.reg" || { ok=; [ -e "$p/$r.reg" ] && bad="$bad $r"; }; done
+    if [ -n "$ok" ]; then
+      for r in system user userdef; do
+        cmp -s "$p/$r.reg" "$c/powos-reg/$r.reg" && continue
+        mkdir -p "$c/powos-reg" && cp -p "$p/$r.reg" "$c/powos-reg/$r.reg.tmp" && sync "$c/powos-reg/$r.reg.tmp" \
+          && mv -f "$c/powos-reg/$r.reg.tmp" "$c/powos-reg/$r.reg"
+      done
+      sync "$c/powos-reg" 2>/dev/null
+      continue
+    fi
+    [ -n "$bad" ] || continue
+    mkdir -p "$c/powos-reg-broken" && for r in $bad; do mv -f "$p/$r.reg" "$c/powos-reg-broken/$r.reg"; done
+    # The install script evaluator's record (user_settings.py): its registry marks may be gone with the old registry.
+    rm -f "$c/powos-iscript.done"
+    if reg_ok "$c/powos-reg/system.reg" && reg_ok "$c/powos-reg/user.reg" && reg_ok "$c/powos-reg/userdef.reg"; then
+      for r in system user userdef; do cp -p "$c/powos-reg/$r.reg" "$p/$r.reg"; done
+      echo "steam: ${c##*/}'s Wine registry was broken (${bad# }): restored the copy of $(date -r "$c/powos-reg/system.reg" '+%F %T')" | tee -a "$c/powos-reg-broken/log" >&2
+    else
+      for r in system user userdef; do [ -e "$p/$r.reg" ] && mv -f "$p/$r.reg" "$c/powos-reg-broken/$r.reg"; done
+      cp -p "$c/tracked_files" "$c/tracked_files.powos-keep" 2>/dev/null; rm -f "$p/creation_sync_guard"
+      echo "steam: ${c##*/}'s Wine registry was broken (${bad# }), no good copy: Proton rebuilds it at the next launch" | tee -a "$c/powos-reg-broken/log" >&2
+    fi
+    sync "$p" "$c/powos-reg-broken"
+  done
+}
+# Instant start: a game launch (steam://rungameid/<appid>) for a game this Steam already runs - kept alive, frozen
+# with Steam while out of sight (units/phone/steam.json "games": "pause") - thaws it and raises the game's window
+# (powos-sleep-gui's Resume) instead of handing Steam a launch it has nothing to do for. Not running, or no watcher
+# (no PowOS session sleep): the launch goes on to Steam as always.
+case " $* " in
+  *" steam://rungameid/"*)
+    appid=${*##*steam://rungameid/}; appid=${appid%% *}
+    case $appid in *[!0-9]* | '') appid= ;; esac
+    if [ -n "$appid" ] && [ -d "/proc/${steam_pid:-0}" ] && pgrep -f "SteamLaunch AppId=$appid( --|\$)" >/dev/null 2>&1; then  # the game's, not its install script's (Install=1)
+      case $(dbus-send --session --print-reply=literal --reply-timeout=3000 --dest=dev.powos.Sleep /Gui \
+               dev.powos.Sleep.Gui.Resume string:"$appid" 2>/dev/null) in
+        *'"running": true'*) exit 0 ;;
+      esac
+    fi ;;
+esac
+# Instant resume: unified sleep freezes a Steam that's out of sight (units/phone/steam.json, docs/UNIFIED-SLEEP.md).
+# Thaw it first, so what this launch hands to it (a game, the window) reaches a running Steam instead of waiting on a
+# frozen one. dbus-send, not powos-sleep-gui wake: a C program, no Python start-up on the way to the window.
+case $(cat "/proc/${steam_pid:-0}/cgroup" 2>/dev/null) in
+  *powos/sleep/*)
+    dbus-send --session --print-reply=literal --reply-timeout=3000 --dest=dev.powos.Sleep /Gui \
+      dev.powos.Sleep.Gui.Wake string:steam >/dev/null 2>&1 || powos sleep wake "$steam_pid" >/dev/null 2>&1 ;;
+esac
+# A client left stopped by a signal (state T: a debugger's attach that never finished left a SIGSTOP pending, 2026-10-23)
+# reads nothing either: SIGCONT to its tree (harmless to running processes; a cgroup-frozen one keeps sleeping).
+if [ -d "/proc/${steam_pid:-0}" ]; then
+  for t in $steam_pid $(pgrep -P "$steam_pid" 2>/dev/null); do
+    [ "$(awk '{print $3}' "/proc/$t/stat" 2>/dev/null)" = T ] && kill -CONT "$t" 2>/dev/null
+  done
+fi
 case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
   */steamrtarm64/steam | */FEX*) ;;  # the ARM64 client, or the x86 one (STEAM_X86) under FEX
   *)
@@ -30,8 +104,33 @@ case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
     for f in /dev/shm/fex-*-stats; do
       pid=${f#/dev/shm/fex-}; pid=${pid%-stats}
       [ -e "$f" ] && [ ! -d "/proc/$pid" ] && rm -f "$f"
+    done
+    reg_guard
+    # Which way each game runs - its native Linux build, ARM64 Proton or x86 Proton, the fastest that worked
+    # (powos-steam-compat: per-game policy, measured launches): written into config.vdf now, while no Steam runs.
+    command -v powos-steam-compat >/dev/null && timeout 20 powos-steam-compat apply 2>&1 | sed 's/^/steam: /' >&2
+    # PowOS's Proton user_settings.py (/usr/lib/powos-steam/user_settings.py: skips the install script evaluator when it
+    # has nothing to do, ~/.config/powos/proton-settings.json) in every Proton, unless that Proton has the user's own.
+    for d in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/common/Proton* \
+             "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/compatibilitytools.d/*; do
+      [ -f "$d/proton" ] && [ -f /usr/lib/powos-steam/user_settings.py ] || continue
+      if [ ! -e "$d/user_settings.py" ] || head -1 "$d/user_settings.py" | grep -q '^# PowOS user_settings'; then
+        cmp -s /usr/lib/powos-steam/user_settings.py "$d/user_settings.py" \
+          || install -m644 /usr/lib/powos-steam/user_settings.py "$d/user_settings.py"
+      fi
     done ;;
 esac
+
+# Environment for Steam and every game it starts (/usr/lib/powos-steam/steam-env, then the user's
+# ~/.config/powos/steam-env; KEY=VALUE lines, # comments, an empty value unsets). Exported, not sourced: no code runs.
+for f in /usr/lib/powos-steam/steam-env "${XDG_CONFIG_HOME:-$HOME/.config}/powos/steam-env"; do
+  [ -f "$f" ] || continue
+  while IFS= read -r l || [ -n "$l" ]; do
+    case $l in '#'* | '') continue ;; [A-Za-z_]*=*) ;; *) continue ;; esac
+    k=${l%%=*}; case $k in *[!A-Za-z0-9_]*) continue ;; esac
+    if [ -n "${l#*=}" ]; then export "$k=${l#*=}"; else unset "$k"; fi
+  done < "$f"
+done
 
 if [ -n "${STEAM_X86:-}" ]; then
   # -cef-disable-gpu: the x86 web UI (CEF) software-renders; its x86 Mesa can't reach the Adreno GPU.
@@ -66,4 +165,54 @@ ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 # software rendering. Only the GPU process goes unsandboxed; pages and the rest stay sandboxed (was -no-cef-sandbox:
 # none at all; checked 2026-10-17: GPU process up and steady, renderers sandboxed). Real fix: the KGSL device in
 # Chromium's GPU sandbox broker allowlist (CEF/Valve side).
-cd "$S/steamrtarm64" && exec ./steam -cef-disable-gpu-sandbox "$@"
+# POWOS_STEAM_ARGS (steam-env / ~/.config/powos/steam-env, or a check's env): extra client options, word-split, e.g.
+# -noshaders (no shader pre-caching: Steam's "Processing Vulkan shaders" held RimWorld's launch 28 s, 2026-10-23 05:46,
+# fossilize under FEX). Set only once measured (bf-coldstart env:POWOS_STEAM_ARGS=-noshaders).
+POWOS_STEAM_ARGS=${POWOS_STEAM_ARGS:-}
+cd "$S/steamrtarm64" || exit 1
+# A steam:// URL (or any command line) for a client that already runs: Steam's own single-instance forwarding - this
+# binary writes the command line into ~/.steam/steam.pipe and exits; the client reads it, stashes it in registry.vdf
+# (TempAppCmdLine), sets its named event (a System V semaphore) and runs it on its next frame (ExecCommandLine in
+# console_log). That event was why every launch to a running client was lost until pkgrel 28: the sysvipc-emu shim
+# left a semaphore's sempid at 0 after SETVAL, so the next Steam process to open the event took it for abandoned
+# (Valve's check: GETPID 0 or dead, nobody waiting) and IPC_RMID'd it under the running client - whose semop on it
+# then failed (EIDRM) for good. The shim sets sempid on SETVAL/SETALL now, as Linux does.
+# A tap on Steam itself (its launcher entry: `steam %U` with no URL = no arguments at all) must SHOW Steam's main
+# window, every time. A Steam that already runs may have none: the session's resident Steam (powos-steam-resident)
+# starts -silent, and a closed main window leaves the client in its tray. A bare `./steam` to a running client is a
+# forward with nothing in it (no window, 2026-10-23 14:42 "Steam won't boot"), so the tap asks for the window by URL.
+# Not running: a client started with steam://open/main opens on its main window (never -silent). Only with no
+# arguments: -shutdown, -silent and every other caller's options are left as they are.
+[ $# -eq 0 ] && set -- steam://open/main
+# A game launch forwarded into a running client waits until that client is logged on to Steam over a live link.
+# A client frozen out of sight (unified sleep) for a while loses its connection: Steam's server drops it, and the
+# client only notices at the thaw - which is this launch ("Disconnected By Remote Host", then a 9-19 s reconnect
+# backoff, connection_log). A launch that reached it meanwhile ran its cloud sync logged off, which failed, and
+# Steam then waited for the user to answer "syncfailed" inside its own window, out of sight; every later launch of
+# that game joined the same waiting action, so nothing ever started (Broforce 2026-10-24 05:09:56 and 05:15:43,
+# console_log "LaunchApp waiting for user response to SynchronizingCloud "syncfailed"", cloud_log "[login=false]").
+# The link's state is read from the kernel (no guess from timing): the local port of the client's newest
+# connection (connection_log ConnectionCompleted) must be an ESTABLISHED socket and its newest state Logged On. A
+# client that isn't trying to log on (user logoff, offline mode, no log) is not waited for; at most 30 s otherwise.
+cm_link() {  # 0 logged on over a live link, 1 not yet (reconnecting, or its link died while frozen), 2 not trying
+  t=$(tail -c 262144 "$1" 2>/dev/null)
+  case $(printf '%s\n' "$t" | grep -a -o -E '\] \[(Logged On|Logged Off|Connecting|Connected|Logging On), [0-9]+' | tail -1) in
+    '' | *'Logged Off, 0') return 2 ;;
+    *'Logged On,'*) ;;
+    *) return 1 ;;
+  esac
+  lp=$(printf '%s\n' "$t" | grep -a -o -E 'ConnectionCompleted\(\) \([^)]*\) local address \([^)]*:[0-9]+\)' | tail -1 \
+       | sed -E 's/.*:([0-9]+)\)$/\1/')
+  [ -n "$lp" ] || return 0
+  awk -v p=":$(printf '%04X' "$lp")" 'FNR > 1 && substr($2, length($2) - 4) == p && $4 == "01" { f = 1 } END { exit !f }' \
+    /proc/net/tcp /proc/net/tcp6 2>/dev/null || return 1
+}
+case " $* " in
+  *" steam://rungameid/"*)
+    case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in */steamrtarm64/steam)
+      t0=$(date +%s); r=0
+      while cm_link "$S/logs/connection_log.txt"; r=$?; [ $r -eq 1 ] && [ $(($(date +%s) - t0)) -lt 30 ]; do sleep 0.25; done
+      [ $(($(date +%s) - t0)) -gt 0 ] && echo "steam: waited $(($(date +%s) - t0)) s for Steam to log on again before the launch$([ $r -eq 1 ] && echo ' (still not logged on: forwarded anyway)')" >&2 ;;
+    esac ;;
+esac
+exec ./steam -cef-disable-gpu-sandbox $POWOS_STEAM_ARGS "$@"

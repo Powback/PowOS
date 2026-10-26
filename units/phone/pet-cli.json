@@ -1,0 +1,14 @@
+{
+  "id": "pet-cli",
+  "name": "powos pet",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "`powos pet`: speak through the pet on home (the local.pet app's module, over the device's SpacetimeDB HTTP API) - say, mood, feed, name, status, log; a command-line tool, nothing running",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (lib/apps/powos-pet)",
+  "files": [
+    "/usr/lib/powos/apps/powos-pet"
+  ],
+  "remove": {
+    "commands": []
+  }
+}

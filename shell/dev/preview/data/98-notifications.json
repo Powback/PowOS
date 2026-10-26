@@ -1,0 +1,40 @@
+{
+ "n": {
+  "available": true,
+  "count": 4,
+  "items": [
+   {
+    "key": "1",
+    "app": "org.thoughtcrime.securesms",
+    "title": "Anna",
+    "text": "Dinner at 7?",
+    "time": 1792574280,
+    "clearable": true
+   },
+   {
+    "key": "2",
+    "app": "com.google.android.gm",
+    "title": "GitHub",
+    "text": "[PowOS] widget preview merged",
+    "time": 1792573080,
+    "clearable": true
+   },
+   {
+    "key": "3",
+    "app": "com.spotify.music",
+    "title": "Weightless",
+    "text": "Marconi Union",
+    "time": 1792571280,
+    "clearable": false
+   },
+   {
+    "key": "4",
+    "app": "com.android.vending",
+    "title": "3 updates",
+    "text": "Chrome, Signal, Maps",
+    "time": 1792567680,
+    "clearable": true
+   }
+  ]
+ }
+}

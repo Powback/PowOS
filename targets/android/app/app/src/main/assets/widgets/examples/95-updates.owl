@@ -3,6 +3,7 @@ widget "updates" {
   order: 2
   size: 3x3
   minSize: 2x2
+  meta { owl: 6 }
 
   // Syncs a private copy of the package databases in /tmp (what checkupdates does, without
   // fakeroot), so the real ones stay untouched and pacman's lock is never taken.
@@ -18,16 +19,55 @@ widget "updates" {
 
   onTap: terminal("pacman -Syu", "updates")
 
+  // Sized from the tile, never fixed (monospace: 0.6 em a character, a line 1.4 em budgeted): the label, the count
+  // big, then the packages as soft chips in a grid - columns from the width, rows from the height left, whole chips
+  // only, the rest a "+N" chip. No lines.
+  let iw = tileWidth == null ? 154 : tileWidth - 24
+  let ih = tileHeight == null ? 154 : tileHeight - 24
+  let ls = clamp(floor(min(ih * 0.08, iw / (8 * 0.6))), 10, 20)
+  let tz = clamp(floor(min(iw / (3 * 0.6), ih * 0.3 / 1.4)), 16, 110)
+  let n = list == null ? 0 : len(list)
+  let longest = n == 0 ? 10 : min(18, max(list.map(p => len(p))))
+  let base = clamp(floor(min(ih * 0.07, iw / 12)), 10, 22)
+  let c = clamp(floor((iw + 6) / (longest * 0.6 * base + 22)), 1, 4)
+  let chipW = (iw - (c - 1) * 6) / c
+  let ps = clamp(floor(min(base, (chipW - 16) / (longest * 0.6))), 8, 22)
+  let rowsH = ih - (ls + tz) * 1.4 - 8
+  let r = max(1, floor((rowsH + 6) / (ps * 1.4 + 16 + 6)))
+  let room = r * c
+  let shown = n <= room ? n : room - 1
+  // All of them fit: the rows they take share the height.
+  let used = n <= room ? max(1, ceil(n / c)) : r
+  let chipH = floor((rowsH - (used - 1) * 6) / used)
+
   Column {
-    gap: 2
-    Text { text: "updates"; style: muted }
+    gap: 0; fill: height
+    Text { text: "updates"; fontSize: ls; color: muted; maxLines: 1 }
     Text {
-      text: failed ? "offline" : list == null ? "…" : "${len(list)}"
-      style: title
-      color: failed || list == null ? muted : len(list) > 0 ? yellow : green
+      text: failed ? "offline" : list == null ? "…" : "${n}"
+      fontSize: tz; maxLines: 1
+      color: failed || list == null ? muted : n > 0 ? yellow : green
     }
     if list != null {
-      Text { text: len(list) == 0 ? "up to date" : join(list.take(4), " "); style: small; maxLines: 2 }
+      if n == 0 {
+        Text { text: "up to date"; fontSize: ps; color: muted; maxLines: 1 }
+      }
+      Spacer { size: 8 }
+      Grid {
+        columns: c; gap: 6
+        for p in list.take(shown) key p {
+          Box {
+            height: chipH; fill: width; align: center; background: alpha(foreground, 0.07); radius: 6 * corners
+            Text { text: p; fontSize: ps; align: center; maxLines: 1 }
+          }
+        }
+        if shown < n {
+          Box {
+            height: chipH; fill: width; align: center; background: alpha(foreground, 0.04); radius: 6 * corners
+            Text { text: "+${n - shown}"; fontSize: ps; color: muted; align: center; maxLines: 1 }
+          }
+        }
+      }
     }
   }
 }

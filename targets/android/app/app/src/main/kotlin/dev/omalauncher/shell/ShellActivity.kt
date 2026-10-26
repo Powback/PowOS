@@ -10,12 +10,14 @@ import android.util.Log
 import android.view.KeyEvent
 import androidx.compose.runtime.snapshotFlow
 import dev.omalauncher.App
-import dev.omalauncher.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+/** Home with its pull-up panel up ("apps" or "ai"): an edge gesture's (EdgeGestures). */
+const val EXTRA_HOME_PANEL = "dev.omalauncher.shell.panel"
 
 /**
  * The launcher: a full-screen [ShellHost] over the wallpaper (the shell's home), as the Home app - the only one (the
@@ -24,12 +26,17 @@ import kotlinx.coroutines.launch
  */
 class ShellActivity : Activity() {
     private lateinit var host: ShellHost
+
+    /** Home is the app in front (resumed): only then is the display without its window the wallpaper. */
+    @Volatile private var inFront = false
     private val scope: CoroutineScope = MainScope()
 
     private val runtime get() = (application as App).runtime
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Each home made, and why (the manager saw home's task change: an app update, a recreation, a second home).
+        Log.i(TAG, "home created: task $taskId, restored ${savedInstanceState != null}, intent ${intent.component?.shortClassName} ${intent.categories} ${intent.extras?.keySet()}, from ${referrer}")
         if (toHome()) return
         dropOtherHomes()
         // The launcher's runtime (themes, widgets, the PowOS session); started once.
@@ -41,8 +48,29 @@ class ShellActivity : Activity() {
         // after a reboot or an update the launcher is often the first thing that runs. Already running: nothing.
         if (andro.marchy.RootMode.enabled()) andro.marchy.SessionService.start(this)
         window.setDecorFitsSystemWindows(false)
+        // Edge to edge for real: the page (and the wallpaper behind it) fills the whole screen, the bars draw nothing.
+        // Theme.Material's defaults left the decor's navigationBarBackground black over the gesture-nav strip (a black
+        // row under the dock, folded) and statusBarBackground over the status bar; the page keeps its own insets.
+        @Suppress("DEPRECATION")
+        run {
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
         host = ShellHost(this, this, runtime)
         setContentView(host.web)
+        // The switcher is a layer of this page: the gestures and the overview button reach it here.
+        val blur = WindowBlur(window, glass = host::wholeWindow)
+        // Home's window, left out when the wallpaper's picture is taken from the display (WallpaperBackdrop.still).
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            WallpaperBackdrop.homeWindow = { if (inFront) host.windowSurface() else null }
+            WallpaperBackdrop.homeBars = {
+                val bars = window.decorView.rootWindowInsets?.getInsets(android.view.WindowInsets.Type.systemBars())
+                (bars?.top ?: 0) to (bars?.bottom ?: 0)
+            }
+        }
+        dev.omalauncher.system.Switcher.attach(host.bridge, { host.highRefresh?.boost(it) }, blur::set)
         // Opened from the agents' notification: the page opens the Agents screen.
         dev.omalauncher.AgentsSpool.opened(intent)
         handleDebugExec(intent)
@@ -66,7 +94,9 @@ class ShellActivity : Activity() {
         startActivity(
             Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_HOME)
-                .setPackage(packageName)
+                // The launcher's alias itself: rooted, both home aliases stay on (HomeScreen) and the default home may
+                // be the desktop - a HOME intent for the package would open that.
+                .setComponent(alias)
                 .putExtras(intent)
                 .putExtra(EXTRA_REDIRECTED, true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -109,7 +139,7 @@ class ShellActivity : Activity() {
      * theme (scripts/collage-captures.sh).
      */
     private fun handleDebugExec(intent: Intent) {
-        if (!BuildConfig.DEBUG) return
+        if (!dev.omalauncher.AppVersion.debuggable(this)) return
         intent.getStringExtra("exec")?.let(runtime::launch)
         intent.getStringExtra("app")?.let { id ->
             scope.launch {
@@ -124,14 +154,24 @@ class ShellActivity : Activity() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        inFront = false
+    }
+
     override fun onResume() {
         super.onResume()
+        inFront = true
         runtime.wm.focus(null)
         removeStaleWindowTasks()
         // Back from the engine's installer (or anything else): whether PowOS is installed now.
         runtime.refreshLinuxState()
         // The user may have set or replaced the wallpaper while we were in the background.
         scope.launch { runtime.themes.refreshLiveWallpaper() }
+        // A live wallpaper shows another frame after an unlock or a fold (OxygenOS's video ones play then): the page's
+        // picture of it again now, and once more when that has played out.
+        ShellWallpaper.refresh(this)
+        ShellWallpaper.refresh(this, WALLPAPER_SETTLE_MS)
     }
 
     /** Drops Recents cards whose Linux window no longer exists (app exited or process restarted). */
@@ -161,8 +201,12 @@ class ShellActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // Home pressed - not a notification's or the app entry's way here (toHome), which carries what it opens.
-        if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED)) host.bridge.emit("system.home", null)
+        // Nor the recents transition's launch of home or the switcher's (Switcher.EXTRA_RECENTS): its layer is coming up.
+        val recents = intent.getBooleanExtra(dev.omalauncher.system.Switcher.EXTRA_RECENTS, false)
+        if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED) && !recents) host.bridge.emit("system.home", null)
         dev.omalauncher.AgentsSpool.opened(intent)
+        // An edge gesture's "app drawer": home with its pull-up panel up.
+        intent.getStringExtra(EXTRA_HOME_PANEL)?.let { host.bridge.emit("home.panel", org.json.JSONObject().put("kind", it)) }
         handleDebugExec(intent)
     }
 
@@ -175,12 +219,20 @@ class ShellActivity : Activity() {
     // A home screen showing: widgets' sources run (they pause while no home is visible), the guest's on-screen helpers.
     override fun onStart() {
         super.onStart()
+        if (::host.isInitialized) dev.omalauncher.system.Switcher.homeStarted(host.bridge)
+        // Back in front with a home panel still open: over the windows again (PanelLift).
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) PanelLift.current?.again()
+        // A hosted widget that lost its drawing while home was away (its provider killed, a display gone): again.
+        AppWidgets.get(this).heal()
         runtime.widgets.homeStarted()
         runtime.screenStarted()
     }
 
     override fun onStop() {
         super.onStop()
+        // Out of sight: the switcher layer goes (an app was opened from it, or came up over it).
+        if (::host.isInitialized) dev.omalauncher.system.Switcher.homeStopped(host.bridge)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) PanelLift.dropNow("home stopped")
         // An app was just opened from home: it moves to the front of the recent apps, out of sight.
         runtime.usage.settle()
         runtime.widgets.homeStopped()
@@ -208,9 +260,15 @@ class ShellActivity : Activity() {
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "home destroyed: task $taskId, finishing $isFinishing, config change $isChangingConfigurations")
         scope.cancel()
         // Not there when it went on to the home screen's instance (toHome).
-        if (::host.isInitialized) host.destroy()
+        if (::host.isInitialized) {
+            dev.omalauncher.system.Switcher.detach(host.bridge)
+            host.destroy()
+            // Not just recreated: a swipe up shouldn't find no home - made again in the background.
+            if (isFinishing && !isChangingConfigurations) dev.omalauncher.system.Switcher.homeGone(this)
+        }
         super.onDestroy()
     }
 
@@ -219,6 +277,8 @@ class ShellActivity : Activity() {
         const val TAG = "PowosShell"
 
         /** On a HOME intent that [toHome] sent: not Home pressed. */
+        /** How long OxygenOS's video wallpapers play after an unlock or a fold. */
+        const val WALLPAPER_SETTLE_MS = 2_500L
         const val EXTRA_REDIRECTED = "dev.omalauncher.shell.redirected"
     }
 }

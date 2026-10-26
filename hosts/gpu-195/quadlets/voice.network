@@ -1,0 +1,4 @@
+# gpu-195: the voice path's own podman network (rootless quadlet). The voice units reach each other by container name
+# (voice-stt, voice-tts, voice-llm, voice-agent) on it; the LAN reaches the ports each unit publishes.
+[Network]
+NetworkName=voice

@@ -1,0 +1,37 @@
+# gpu-195 voice core: speech to text. faster-whisper (CUDA) large-v3-turbo, float16, resident on GPU0 (~2 GB).
+# OpenAI API: POST /v1/audio/transcriptions (VoiceAgent sends no model, so WHISPER__MODEL is the one used).
+# Image: whisper-fast (~/Projects/VoiceAgent services/whisper-fast, built by install.sh on top of
+# faster-whisper-server's CUDA image): greedy, no timestamps, encoder window sized to the audio. A 2 s turn
+# transcribes in ~105 ms instead of faster-whisper-server's ~250-300 ms (beam 5, timestamps, 30 s window).
+# Unit: powos units show voice-stt  (repo units/gpu-195/voice-stt.json)
+[Unit]
+Description=PowOS voice core - STT (faster-whisper large-v3-turbo, GPU0)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=voice-stt
+Image=localhost/voice-stt-fast:latest
+Network=voice.network
+PublishPort=8000:8000
+AddDevice=nvidia.com/gpu=0
+SecurityLabelDisable=true
+Volume=/var/lib/powos/models/hf:/root/.cache/huggingface
+Environment=WHISPER__MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
+Environment=WHISPER__INFERENCE_DEVICE=cuda
+Environment=WHISPER__COMPUTE_TYPE=float16
+Environment=WHISPER_BEAM=1
+Environment=WHISPER_MIN_WINDOW=10
+# CPU side (mel features, numpy): 4 threads inside a 4-CPU quota; with --cpus=2 the final transcript of a 2 s turn
+# took ~190 ms instead of ~60 ms (CFS throttling).
+Environment=OMP_NUM_THREADS=4
+Label=io.powos.unit=voice-stt
+PodmanArgs=--memory=6g --memory-swap=6g --cpus=4 --pids-limit=512
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

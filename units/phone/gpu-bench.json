@@ -1,0 +1,30 @@
+{
+  "id": "gpu-bench",
+  "name": "GPU benchmarks (container)",
+  "kind": "container",
+  "owner": "user",
+  "purpose": "glmark2 and vkmark in a container instead of on the host: localhost/powos-gpu-bench, built on the phone from its own KGSL Mesa (powos-gpu-bench build); run one with `powos-gpu-bench vk` (headless vkmark) or `powos-gpu-bench gl` (glmark2 on the session's Wayland). --rm, nothing stays running",
+  "host": "phone",
+  "installedBy": "targets/android/containers/gpu-bench/powos-gpu-bench (by hand: adb push to /usr/local/bin, then powos-gpu-bench build)",
+  "packages": [],
+  "files": [
+    "/usr/local/bin/powos-gpu-bench"
+  ],
+  "processes": [
+    {
+      "container": "gpu-bench"
+    }
+  ],
+  "limits": {
+    "memory": "1g",
+    "cpus": 4,
+    "pids": 256
+  },
+  "autosleep": "never",
+  "remove": {
+    "stop": [
+      "powos containers rm -f gpu-bench 2>/dev/null || true",
+      "powos-gpu-bench rmi"
+    ]
+  }
+}

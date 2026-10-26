@@ -11,6 +11,11 @@
 # The GPU variables (KGSL Mesa) are set for every process by the engine's arch-native.sh.
 set -u
 
+# Semaphores emulated by the runtime (Andromarchy patch 0004: SysV sets in /tmp/.sysv, named ones in /tmp/.shm) live
+# in files that outlive the processes; the kernel would drop them on reboot. Each session starts clean, so a set left
+# by a killed Steam cannot make the next one wait forever.
+rm -rf /tmp/.sysv /tmp/.shm/sem.* 2>/dev/null
+
 # KWin picks its Anland backend whenever ANLAND_SOCKET is set (patched main_wayland.cpp). Same daemon,
 # same wire protocol as Andromarchy's (protocol.h structs identical; checked 2026-10-13).
 export ANLAND_SOCKET="$ANDROMARCHY_SOCKET"
@@ -49,7 +54,9 @@ export FD_MESA_DEBUG=${FD_MESA_DEBUG:-noubwc}
 # clamped 1..4 (2x on a 6.9" 1440p phone, 1x on an 8-10" 1280p tablet; dpi/180 = 2.75x was too big).
 # After that the user's choice in System Settings > Display & Monitor (kscreen; KWin saves it in
 # kwinoutputconfig.json) is never overridden. POWOS_SCALE forces a scale on every start instead.
-(
+# Rooted mode (POWOS_SESSION_MODE=rooted): Linux apps are windows beside Android apps there, so powos-rooted-session's
+# powos-output-scale matches Android's window density instead.
+[ "${POWOS_SESSION_MODE:-}" = rooted ] || (
   for _ in $(seq 600); do pgrep -x plasmashell >/dev/null && break; sleep 0.2; done
   done_mark=$HOME/.local/state/powos/output-scale.done
   [ -z "${POWOS_SCALE:-}" ] && [ -e "$done_mark" ] && exit 0
@@ -89,6 +96,11 @@ fi
 sudo env SYSTEMD_DEFAULT_TARGET=multi-user.target systemctl default >"$XDG_RUNTIME_DIR/powos-system-units.log" 2>&1 &
 pgrep -f 'pytho[n].*systemctl --user init' >/dev/null ||
   systemctl --user init >"$XDG_RUNTIME_DIR/powos-user-units.log" 2>&1 &
+
+# adb's way into the session for tools/device-test.sh (only adb's uid is accepted; see the file). HACK: until the
+# PowOS app has its own command service.
+pgrep -f 'powos-devtest-agen[t]' >/dev/null ||
+  /usr/lib/powos/phone/powos-devtest-agent >"$XDG_RUNTIME_DIR/powos-devtest-agent.log" 2>&1 &
 
 # First session of this rootfs (Flatpak remote, theme defaults); idempotent, marks itself done.
 /opt/powos/first-session.sh >"$XDG_RUNTIME_DIR/powos-first-session.log" 2>&1 &

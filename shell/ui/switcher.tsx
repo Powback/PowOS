@@ -1,73 +1,120 @@
 /**
- * The switcher (index.html?mode=switcher): Android's recents screen, PowOS's when it's the recents provider (the
- * native host is SwitcherActivity, the overview button brings it up). The recent tasks side by side, newest first, each
- * its app and its last frame: a tap switches to it, a swipe up removes it, "clear all" removes them all. A tap beside
- * the cards goes home; Back (and the overview button again, to the task before) goes back.
+ * A task's card in the switcher (recents.tsx, a layer of home): its app's icon and label above its last frame. A tap
+ * opens it (the card grows to the screen, then the app is there); flung or pushed up it's removed, carried on at the
+ * finger's speed; let go short of that it springs back; sideways the row scrolls (the browser's, with momentum). The
+ * icon (or a long press) opens its menu.
  */
-import { useEffect, useRef } from "preact/hooks";
-import { signal } from "@preact/signals";
-import { powos } from "../bridge.ts";
+import { useRef } from "preact/hooks";
 import type { RecentTask } from "../types.ts";
+import { spring } from "./spring.ts";
 
-const tasks = signal<RecentTask[]>([]);
-/** The task the switcher was opened over (null: home). */
-const from = signal<number | null>(null);
-
-const refresh = () => powos.tasks.list().then((t) => (tasks.value = t));
-
-/** The host's events, while the switcher is the page (app.tsx loads this module in every mode). */
-function listen(row: () => HTMLElement | null) {
-  const offs = [
-    powos.on("switcher.shown", (e: { from: number | null }) => {
-      from.value = e.from;
-      refresh();
-      // Each time it comes up, the newest card first in view.
-      row()?.scrollTo({ left: 0 });
-    }),
-    // The overview button again: the task before the one it was opened over (or the newest, from home), as Android's.
-    powos.on("switcher.toggle", () => {
-      const list = tasks.value;
-      const next = list[0]?.id === from.value ? list[1] : list[0];
-      if (next) open(next.id);
-      else powos.switcher.close();
-    }),
-    // Back: what was under it, the app or home.
-    powos.on("system.back", () => powos.switcher.close()),
-  ];
-  refresh();
-  return () => offs.forEach((off) => off());
-}
-
-/** Slid up this far (of its height), or flicked (px/ms), a card is removed. */
-const REMOVE = 0.3;
-const FLICK = 0.6;
+/** Pushed up this far (of its height), or flicked up (px/ms), a card is removed. */
+const REMOVE = 0.4;
+const FLICK = 0.5;
 const SLOP = 10;
+/** Held this long without moving: the card's menu (Android's long-press timeout). */
+const LONG_PRESS = 450;
 
-function open(id: number) {
-  powos.tasks.open(id).then((ok) => void (ok || refresh()));
+export interface Rect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
-function remove(id: number) {
-  powos.tasks.remove(id).then(refresh);
-  tasks.value = tasks.value.filter((t) => t.id !== id);
-}
-
-function Card({ t }: { t: RecentTask }) {
+export function TaskCard({
+  t,
+  current,
+  eager,
+  pinned,
+  picked,
+  load = true,
+  onOpen,
+  onRemove,
+  onMenu,
+}: {
+  t: RecentTask;
+  /** The first card: where the window of the app the switcher was opened over lands (recents.tsx). */
+  current?: boolean;
+  /** Its snapshot loaded at once (the cards in view), not when scrolled to. */
+  eager?: boolean;
+  /** Kept on "clear all" (a pin on its head). */
+  pinned?: boolean;
+  /** Picked as split screen's first app (the second is being picked). */
+  picked?: boolean;
+  /**
+   * Its snapshot in the page: off while the switcher is closed - a hidden layer of decoded snapshots took the page's
+   * GPU memory from home's own tiles (hosted widgets blanked mid-swipe). They're in the HTTP cache for the next time.
+   */
+  load?: boolean;
+  onOpen: (id: number, shot: HTMLElement) => void;
+  /** False: it stays (the card springs back). */
+  onRemove: (id: number) => boolean | void;
+  onMenu: (id: number, card: HTMLElement) => void;
+}) {
   const el = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ x: number; y: number; t: number; dy: number; up: boolean | null } | null>(null);
-  const settle = (dy: number) => {
+  const shot = useRef<HTMLImageElement>(null);
+  const drag = useRef<{
+    x: number;
+    y: number;
+    dy: number;
+    up: boolean | null;
+    samples: { y: number; t: number }[];
+    press: number;
+  } | null>(null);
+  const gone = useRef(false);
+
+  /** Back to its place, as a spring from where the finger left it. */
+  const springBack = (dy: number) => {
     const card = el.current!;
-    card.style.transition = "transform 180ms ease, opacity 180ms ease";
-    card.style.transform = dy ? `translateY(${dy}px)` : "";
-    card.style.opacity = dy ? "0" : "";
+    card.style.transform = "";
+    card.style.opacity = "";
+    card.animate(
+      [
+        { transform: `translateY(${dy}px)`, opacity: String(1 - Math.min(1, -dy / card.clientHeight)) },
+        { transform: "none", opacity: "1" },
+      ],
+      { duration: spring.ms, easing: spring.easing },
+    );
   };
+
+  /** Removed: on up and out at the finger's speed (at least a brisk one), then gone from the list. */
+  const flingAway = (dy: number, v: number) => {
+    const card = el.current!;
+    gone.current = true;
+    const to = -(card.getBoundingClientRect().bottom + 40);
+    const speed = Math.max(Math.abs(v), 1.6); // px/ms
+    const ms = Math.min(260, Math.max(120, (dy - to) / speed));
+    card.style.transform = "";
+    card.animate(
+      [
+        { transform: `translateY(${dy}px)`, opacity: String(1 - Math.min(1, -dy / card.clientHeight)) },
+        { transform: `translateY(${to}px)`, opacity: "0" },
+      ],
+      { duration: ms, easing: "cubic-bezier(0.3, 0.6, 0.6, 1)", fill: "forwards" },
+    ).onfinish = () => onRemove(t.id);
+  };
+
+  const cancelPress = () => {
+    const d = drag.current;
+    if (d?.press) clearTimeout(d.press);
+    if (d) d.press = 0;
+  };
+
   return (
     <div
       ref={el}
-      class="task"
+      class={`task ${current ? "current" : ""} ${pinned ? "pinned" : ""} ${picked ? "picked" : ""}`}
+      data-task={t.id}
       onPointerDown={(e) => {
-        drag.current = { x: e.clientX, y: e.clientY, t: performance.now(), dy: 0, up: null };
-        el.current!.style.transition = "none";
+        if (gone.current) return;
+        const press = window.setTimeout(() => {
+          // Held still: its menu, and the touch is the menu's now.
+          drag.current = null;
+          navigator.vibrate?.(10);
+          onMenu(t.id, el.current!);
+        }, LONG_PRESS);
+        drag.current = { x: e.clientX, y: e.clientY, dy: 0, up: null, samples: [{ y: e.clientY, t: e.timeStamp }], press };
       }}
       onPointerMove={(e) => {
         const d = drag.current;
@@ -75,68 +122,77 @@ function Card({ t }: { t: RecentTask }) {
         const dx = e.clientX - d.x;
         const dy = e.clientY - d.y;
         if (d.up == null && Math.hypot(dx, dy) > SLOP) {
+          cancelPress();
           // Up: the card's (removing it); sideways: the row scrolls (the browser has it, touch-action pan-x).
           d.up = dy < 0 && Math.abs(dy) > Math.abs(dx);
           if (d.up) el.current!.setPointerCapture(e.pointerId);
+          else drag.current = null;
         }
         if (!d.up) return;
-        d.dy = Math.min(0, dy);
+        // Down past its place it barely moves (a rubber band), up it follows the finger.
+        d.dy = dy < 0 ? dy : dy * 0.15;
+        d.samples.push({ y: e.clientY, t: e.timeStamp });
+        while (d.samples.length > 2 && e.timeStamp - d.samples[0].t > 80) d.samples.shift();
         el.current!.style.transform = `translateY(${d.dy}px)`;
-        el.current!.style.opacity = String(1 - Math.min(1, -d.dy / el.current!.clientHeight));
+        el.current!.style.opacity = String(1 - Math.min(1, Math.max(0, -d.dy) / el.current!.clientHeight));
       }}
       onPointerUp={(e) => {
         const d = drag.current;
+        cancelPress();
         drag.current = null;
-        if (!d) return;
+        if (!d || gone.current) return;
+        const mx = e.clientX - d.x;
+        const my = e.clientY - d.y;
+        // Moved without the moves coming in (a quick swipe whose moves the page got coalesced into the release): what
+        // it was is decided now, from where it ended - up a long way is a removal, not a tap.
+        if (d.up == null && Math.hypot(mx, my) > SLOP) {
+          if (my < 0 && Math.abs(my) > Math.abs(mx)) {
+            d.up = true;
+            d.dy = my;
+            d.samples.push({ y: e.clientY, t: e.timeStamp });
+          } else return; // sideways: the row's scroll
+        }
         if (d.up) {
+          // The click this release makes (on whatever is under it now - the layer beside the cards, which closes the
+          // switcher) isn't one: swallowed.
+          // (Only the click of this release: one that never came is no longer waited for at the next touch.)
+          const swallow = (c: MouseEvent) => c.stopPropagation();
+          window.addEventListener("click", swallow, { capture: true, once: true });
+          window.addEventListener("pointerdown", () => window.removeEventListener("click", swallow, true), { capture: true, once: true });
+          const first = d.samples[0];
+          const v = (e.clientY - first.y) / Math.max(1, e.timeStamp - first.t);
           const h = el.current!.clientHeight;
-          const v = d.dy / Math.max(1, performance.now() - d.t);
-          if (-d.dy > h * REMOVE || v < -FLICK) {
-            settle(-h);
-            setTimeout(() => remove(t.id), 180);
-          } else settle(0);
-        } else if (d.up == null && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= SLOP) {
-          open(t.id);
+          if (v < -FLICK || (-d.dy > h * REMOVE && v < 0.3)) flingAway(d.dy, v);
+          else springBack(d.dy);
+        } else if (d.up == null) {
+          // A tap: on the icon, its menu; elsewhere, the app.
+          if ((e.target as HTMLElement).closest(".task-icon")) onMenu(t.id, el.current!);
+          else onOpen(t.id, shot.current!);
         }
       }}
       onPointerCancel={() => {
+        const d = drag.current;
+        cancelPress();
         drag.current = null;
-        settle(0);
+        if (d?.up) springBack(d.dy);
       }}
+      onContextMenu={(e) => e.preventDefault()}
     >
       <div class="task-head">
-        {t.icon ? <img class="task-icon" src={t.icon} alt="" /> : <span class="task-icon blank" />}
+        {t.icon ? <img class="task-icon" src={t.icon} alt="" draggable={false} /> : <span class="task-icon blank" />}
         <span class="task-label">{t.label}</span>
       </div>
-      <img class="task-shot" src={t.snapshot} alt="" draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")} />
-    </div>
-  );
-}
-
-export function Switcher() {
-  const row = useRef<HTMLDivElement>(null);
-  const list = tasks.value;
-  useEffect(() => listen(() => row.current), []);
-  return (
-    <div
-      class="switcher"
-      style={{ "--screen-ratio": `${innerWidth} / ${innerHeight}` }}
-      onClick={(e) => e.target === e.currentTarget && powos.switcher.home()}
-    >
-      {list.length ? (
-        <>
-          <div class="task-row" ref={row} onClick={(e) => e.target === e.currentTarget && powos.switcher.home()}>
-            {list.map((t) => (
-              <Card key={t.id} t={t} />
-            ))}
-          </div>
-          <button type="button" class="task-clear" onClick={() => list.forEach((t) => remove(t.id))}>
-            clear all
-          </button>
-        </>
-      ) : (
-        <div class="task-empty muted">no recent apps</div>
-      )}
+      <img
+        ref={shot}
+        class="task-shot"
+        src={load ? t.snapshot : undefined}
+        alt=""
+        draggable={false}
+        decoding="async"
+        loading={eager || current ? "eager" : "lazy"}
+        onLoad={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "")}
+        onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")}
+      />
     </div>
   );
 }

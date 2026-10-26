@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- system/WindowFrames: the floating windows' title bars and grips are TYPE_APPLICATION_OVERLAY windows. Without
+         this declaration (dropped with the fold veil, 2026-10-16) the op reads "default" and `appops set ... allow` is a
+         silent no-op: no title bars at all ("permission denied for window type 2038"). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Remote input (shell/RemoteInput.kt): the phone as a Bluetooth keyboard and mouse (the HID device profile).
          Targeting SDK 28, these two; Android grants BLUETOOTH_CONNECT/ADVERTISE with them. -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
@@ -11,6 +15,8 @@
     <!-- PowOS AI's live mode: the screen, with the user's consent each session (assist/LiveCapture.kt). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Urgent agent mail on a silent ringer: the system drops its channel's vibration there (AgentMail.buzzOnSilent). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Speech input for the agent prompt bar; only recognized text reaches Linux. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Home's swipe down pulls the notification shade down. -->
@@ -40,16 +46,25 @@
     <!-- The control center's third-party tiles, hosted as SystemUI hosts them (shell/TileHost.kt): every TileService
          requires it of its binder. signature|recents on the phone, as the two above. -->
     <uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE" />
+    <!-- Android widgets on home bound silently (shell/AppWidgets.kt: bindAppWidgetIdIfAllowed): signature|privileged,
+         granted through the system module's privapp allowlist (privapp-permissions-com.powos.app.xml, on the phone since
+         powos-system 29873839). The phone enforces that allowlist: an APK asking for a privileged permission the mounted
+         module doesn't list stops the phone at the boot screen - install-app.sh refuses such an APK. -->
+    <uses-permission android:name="android.permission.BIND_APPWIDGET" />
+
+    <!-- Smart glasses (glasses/, docs/GLASSES.md): BLE links to the arms (BLUETOOTH/BLUETOOTH_ADMIN above), paired through
+         Android's companion flow (no location permission: the system scans), which also tells PowOS when they're in
+         range again (OBSERVE_..._PRESENCE); a connected-device foreground service while connected. All normal
+         (install-time) permissions - none privileged, none on system-module/privileged-perms.txt. -->
+    <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-feature
+        android:name="android.software.companion_device_setup"
+        android:required="false" />
 
     <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
-    <!-- Android widgets on home bound silently (shell/AppWidgets.kt: bindAppWidgetIdIfAllowed) needs
-         android.permission.BIND_APPWIDGET (signature|privileged). NOT requested yet: the phone enforces the privapp
-         allowlist (ro.control_privapp_permissions=enforce), and an installed APK asking for it before the system module
-         that allowlists it is installed AND booted once stops the phone at the boot screen. Add the uses-permission back
-         only after `dumpsys package com.powos.app` / the mounted module xml show it allowlisted; install-app.sh refuses
-         an APK that asks for a privileged permission the phone's module doesn't list. -->
     <uses-feature
         android:name="android.software.live_wallpaper"
         android:required="false" />
@@ -75,12 +90,14 @@
 
         <!-- The launcher: a web UI (shell/, see shell/DESIGN.md), the home screen (through .HomeShell) and its own app
              entry. Its own task (taskAffinity): sharing the desktop's, each singleTask switch to the desktop finished
-             it. The page lays itself out around the keyboard (adjustNothing). -->
+             it. The page lays itself out around the keyboard (adjustNothing). resourcesUnused: picking a theme sets the
+             system palette (SystemTheme), an overlay change - asset paths - that relaunched home, and the page with it,
+             on every pick; the page uses no Android resources, it recolors itself (theme.changed). -->
         <activity
             android:name=".shell.ShellActivity"
             android:label="PowOS Launcher"
             android:taskAffinity="com.powos.app.shell"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|resourcesUnused"
             android:exported="true"
             android:launchMode="singleTask"
             android:resizeableActivity="true"
@@ -90,6 +107,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
         <!-- Android's home screen when it should be the launcher (andro.marchy.HomeScreen switches this and the
              engine's .HomeDesktop alias; one is enabled). -->
         <activity-alias
@@ -178,8 +196,9 @@
         </service>
 
         <!-- PowOS as the recents provider (the system module's recents overlay names this package): SystemUI binds the
-             service (only it holds STATUS_BAR_SERVICE) and hands it the overview button; the activity is the switcher,
-             the system's recents screen (config_recentsComponentName). -->
+             service (only it holds STATUS_BAR_SERVICE) and hands it the overview button. The activity is the one
+             config_recentsComponentName names: the switcher is a layer of home's page, so it only brings home up with
+             it shown - unless the desktop is home, then it shows the layer itself (system/Switcher.kt). -->
         <service
             android:name="dev.omalauncher.system.PowosRecentsService"
             android:exported="true"
@@ -244,6 +263,10 @@
         </service>
         <receiver
             android:name=".AgentMail$Reply"
+            android:exported="false" />
+        <!-- Plasma's notifications mirrored here: their buttons, tap and swipe back to the session (PlasmaBridge). -->
+        <receiver
+            android:name=".PlasmaBridge$Receiver"
             android:exported="false" />
 
         <!-- PowOS (rooted mode): a terminal the launcher draws, one task each (PowosTerminalActivity). -->
@@ -401,6 +424,27 @@
             android:name=".widgets.recon.ReconReceiver"
             android:exported="true"
             android:permission="android.permission.DUMP" />
+
+        <!-- Smart glasses (glasses/): the connection's foreground service, the companion pairing flow (invisible: only the
+             system's dialogs), and the companion presence callbacks (the system binds it; the permission says so). -->
+        <service
+            android:name=".glasses.GlassesService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+        <activity
+            android:name=".glasses.GlassesPairActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity="com.powos.app.glasses"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service
+            android:name=".glasses.GlassesPresenceService"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
+            <intent-filter>
+                <action android:name="android.companion.CompanionDeviceService" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".LinuxService"

@@ -7,6 +7,9 @@ import java.io.File
 /** Exec of the Files entry; the launcher opens its own Files app for it (see OpenBridge's shim). */
 const val FILES_COMMAND = "omarchy-files"
 
+/** Exec of PowOS's "Plasma" entry (session/plasma/org.powos.plasma.desktop): the launcher opens its Plasma desktop. */
+const val PLASMA_COMMAND = "powos-plasma"
+
 private fun entry(
     name: String,
     exec: String,

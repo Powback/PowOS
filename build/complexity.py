@@ -85,6 +85,42 @@ def load_budget():
         pass
     return b
 
+# ── function length (--check-length / --length-budget) ────────────
+# The same ratchet for length: a function in build/function-length-budget.txt may not grow past its recorded lines,
+# anything else may not exceed LEN_CAP (60, the limit the TS/Kotlin/Rust lints use). test/tier1/test-complexity.sh
+# runs it over every tracked shell script.
+LEN_BUDGET = os.path.join(os.path.dirname(os.path.abspath(__file__)), "function-length-budget.txt")
+LEN_CAP = 60
+
+if "--check-length" in sys.argv or "--length-budget" in sys.argv:
+    lb = {}
+    try:
+        for line in open(LEN_BUDGET, encoding="utf-8"):
+            line = line.split("#")[0].strip()
+            if line:
+                k, v = line.rsplit(None, 1); lb[k] = int(v)
+    except OSError:
+        pass
+    if "--length-budget" in sys.argv:
+        for f, n, c, ln in sorted(rows, key=lambda r: (r[0], r[1])):
+            if ln > LEN_CAP:
+                print("%s:%s %d" % (f, n, ln))
+        sys.exit(0)
+    fails, lower = [], []
+    for f, n, c, ln in rows:
+        key = "%s:%s" % (f, n)
+        if key in lb:
+            if ln > lb[key]: fails.append("  %-56s %d lines > budgeted %d" % (key, ln, lb[key]))
+            elif ln < lb[key]: lower.append("  %-56s %d lines (budget %d - lower it)" % (key, ln, lb[key]))
+        elif ln > LEN_CAP:
+            fails.append("  %-56s %d lines > %d (new code)" % (key, ln, LEN_CAP))
+    for d in lower: print(d)
+    if fails:
+        print("\nfunction length: FAIL\n" + "\n".join(fails) + "\n\nSplit the function. See docs/complexity.md.")
+        sys.exit(1)
+    print("function length: ok (%d functions, cap %d for new code)" % (len(rows), LEN_CAP))
+    sys.exit(0)
+
 if "--check" in sys.argv:
     budget, fails, drifted = load_budget(), [], []
     for f, n, c, ln in rows:

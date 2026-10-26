@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""powos glasses - the smart glasses (Even Realities G2 / G1) the phone's PowOS app drives (docs/GLASSES.md).
+
+The app owns the glasses (their BLE link, their screen); this reaches it the way agent mail does: through the app's
+run dir, which is PowOS's XDG_RUNTIME_DIR on the phone (/run/powos-app = the app's files/run). A command is a JSON file
+moved into glasses/cmd/ (the app watches it: no polling on its side); the app answers in glasses/status.json - its
+state, and "last": the outcome of the latest command.
+
+Usage:
+  powos glasses [status] [--json]   The glasses: which pair, connected or not, each arm, worn, battery, mic
+  powos glasses show TEXT... [--seconds N]
+                                    TEXT on the glasses: over their screen until a tap or N seconds (default 30) -
+                                    straight to the glasses when their screen page isn't up
+  powos glasses clear               Blank the display
+  powos glasses connect             Connect the paired glasses (and keep reconnecting)
+  powos glasses disconnect          Disconnect them
+  powos glasses mic on|off          The glasses' microphone (G2: its own speech recognition feeds the glasses' HUD)
+
+Pairing needs the phone: the control center's glasses tile -> pair (Android's companion dialogs, one per arm).
+Exit status: 0 done, 1 the app said no (not paired, not connected), 2 no app here / it didn't answer.
+"""
+import json
+import os
+import sys
+import time
+
+RUN = os.environ.get("POWOS_GLASSES_DIR") or os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/run/powos-app", "glasses")
+STATUS = os.path.join(RUN, "status.json")
+CMD = os.path.join(RUN, "cmd")
+WAIT_S = float(os.environ.get("POWOS_GLASSES_WAIT", "5"))
+
+
+def die(msg, code=2):
+    print(f"powos glasses: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def status():
+    try:
+        with open(STATUS) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        die(f"no glasses status at {STATUS} - is this the phone, with the PowOS app running?")
+    except (OSError, ValueError) as e:
+        die(f"can't read {STATUS}: {e}")
+
+
+def describe(s):
+    out = []
+    p = s.get("paired")
+    if not s.get("available", True):
+        return "No Bluetooth on this phone."
+    if not p:
+        return "No glasses paired. Pair them on the phone: control center -> glasses -> pair."
+    phase = s.get("phase", "off")
+    head = f"{p['model']} {p.get('pairId', '')}: " + {
+        "ready": "connected",
+        "connecting": "connecting",
+    }.get(phase, "waiting to be in range" if s.get("wanted") else "not connected")
+    if not s.get("enabled", True):
+        head += " (Bluetooth is off)"
+    out.append(head)
+    for side in ("left", "right"):
+        a = s.get(side)
+        if a:
+            out.append(f"  {side:<5} {a.get('address', '?')}  {a.get('phase', '?'):<14} {a.get('name') or ''}")
+    if s.get("worn") is not None:
+        out.append(f"  worn  {'yes' if s['worn'] else 'no'}")
+    if s.get("battery"):
+        out.append("  battery " + ", ".join(f"{k} {v}%" for k, v in s["battery"].items()))
+    if s.get("mic"):
+        out.append("  microphone on")
+    c = s.get("canvas")
+    if c:
+        img = s.get("image", {})
+        how = "pictures" if img.get("usable") else "text (pictures: g2Raster option, unverified)"
+        out.append(f"  display {c['width']}x{c['height']}, {c['bits']}-bit; sent as {how}")
+    if s.get("error"):
+        out.append(f"  error: {s['error']}")
+    return "\n".join(out)
+
+
+def send(cmd):
+    """Writes [cmd] for the app, waits for its answer in status.json's "last". Returns its ok."""
+    if not os.path.isdir(CMD):
+        die(f"no {CMD} - is this the phone, with the PowOS app running?")
+    cid = f"{int(time.time() * 1000)}-{os.getpid()}"
+    tmp = os.path.join(CMD, f".{cid}.tmp")
+    with open(tmp, "w") as f:
+        json.dump(cmd, f)
+    os.chmod(tmp, 0o644)
+    # Moved into place whole: the app sees it once, complete (MOVED_TO).
+    os.rename(tmp, os.path.join(CMD, f"{cid}.json"))
+    # HACK: the answer is awaited by re-reading status.json every 100 ms, 5 s at most - a bounded wait, but a poll.
+    # Real fix: a reply to block on (an inotify watch on status.json, or the app answering on a socket).
+    end = time.time() + WAIT_S
+    while time.time() < end:
+        try:
+            with open(STATUS) as f:
+                last = json.load(f).get("last") or {}
+            if last.get("id") == cid:
+                return bool(last.get("ok"))
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.1)
+    die("the PowOS app didn't answer (is it running?)")
+
+
+def main(argv):
+    if not argv or argv[0] in ("status", "--json"):
+        s = status()
+        if "--json" in argv:
+            print(json.dumps(s, indent=2))
+        else:
+            print(describe(s))
+        return 0
+    verb, rest = argv[0], argv[1:]
+    if verb in ("help", "--help", "-h"):
+        print(__doc__.strip())
+        return 0
+    if verb == "show":
+        seconds = 30
+        if "--seconds" in rest:
+            i = rest.index("--seconds")
+            try:
+                seconds = int(rest[i + 1])
+            except (IndexError, ValueError):
+                die("--seconds N", 1)
+            rest = rest[:i] + rest[i + 2:]
+        text = " ".join(rest).strip()
+        if not text and not sys.stdin.isatty():
+            text = sys.stdin.read().strip()
+        if not text:
+            die("show what? (powos glasses show TEXT)", 1)
+        ok = send({"op": "show", "text": text, "seconds": seconds})
+    elif verb in ("clear", "connect", "disconnect"):
+        ok = send({"op": verb})
+    elif verb == "mic":
+        if not rest or rest[0] not in ("on", "off"):
+            die("mic on|off", 1)
+        ok = send({"op": "mic", "on": rest[0] == "on"})
+    else:
+        die(f"unknown command: {verb} (powos glasses help)", 1)
+    if not ok:
+        print(f"powos glasses: {verb}: not done - {describe(status()).splitlines()[0]}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

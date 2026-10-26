@@ -1,0 +1,32 @@
+{
+  "id": "gpu-unlock",
+  "name": "RTX 3090 / RTX 4090 FP16/BF16 unlock (next boot)",
+  "kind": "package",
+  "host": "desktop",
+  "hostNote": "PowOS x86_64/rpm-ostree GPU host; gpu-195 has two RTX 3090s. The opt-in Ada build also supports desktop RTX 4090 (2684).",
+  "owner": "system:gpu-195",
+  "purpose": "Pinned Ampere or Ada upstream profile, built for the exact host kernel and loaded from initramfs before NVIDIA. The CLI validates PCI targets; Blackwell and experimental Ada IDs are rejected. Enable/disable affect a later boot only; never reboot or live-load a module.",
+  "installedBy": "hosts/gpu-195/gpu-unlock/control.py enable --rpm <built RPM> [--targets all|PCI,...]",
+  "packages": ["powos-gpu-unlock"],
+  "files": [
+    "/usr/lib/modules/*/extra/gpu_unlock.ko",
+    "/usr/lib/firmware/gpu-unlock",
+    "/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf",
+    "/usr/share/powos/gpu-unlock",
+    "/usr/share/licenses/gpu-unlock",
+    "/usr/share/licenses/gpu-unlock-firmware",
+    "/usr/bin/powos-gpu-unlock",
+    "/etc/powos/units.d/gpu-unlock.json",
+    "/var/home/powos/.cache/powos-gpu-unlock"
+  ],
+  "unbounded": "Kernel module, no userspace daemon. Build cache and rootless builder image only; no ongoing GPU workload.",
+  "remove": {
+    "stop": [],
+    "commands": [
+      "sudo powos-gpu-unlock disable",
+      "sudo rpm-ostree uninstall powos-gpu-unlock"
+    ],
+    "keep": ["/var/home/powos/.cache/powos-gpu-unlock"]
+  },
+  "decide": "Removal takes effect after a separately requested reboot. Rebuild for a new kernel before updating: the RPM depends on the exact kernel-core-uname-r. Local initramfs regeneration remains enabled because other packages may need it."
+}

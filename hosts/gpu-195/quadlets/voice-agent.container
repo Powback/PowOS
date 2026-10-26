@@ -1,0 +1,32 @@
+# gpu-195: the VoiceAgent backend (~/Projects/VoiceAgent, VoiceAgentWeb/services/voice-agent): FastAPI on :9000,
+# WebSocket /ws (the voice conversation) and /transcribe. VAD, diarization and recall run on the CPU; STT, TTS and the
+# LLM are the voice-stt / voice-tts / voice-llm units. Image built on the box from the repo (install.sh), no bind
+# mount of the code, no --reload. Config: ~/.config/voiceagent/voiceagent.env (+ secrets.env, mode 600).
+# Unit: powos units show voice-agent  (repo units/gpu-195/voice-agent.json)
+[Unit]
+Description=PowOS voice - VoiceAgent backend (/ws, /transcribe)
+After=voice-stt.service voice-tts.service voice-llm.service
+Wants=voice-stt.service voice-tts.service voice-llm.service
+
+[Container]
+ContainerName=voice-agent
+Image=localhost/voiceagent-backend:latest
+Network=voice.network
+PublishPort=9000:9000
+# The shared model cache and /logs are host dirs; like the GPU units, no SELinux relabel of a shared dir.
+SecurityLabelDisable=true
+EnvironmentFile=%h/.config/voiceagent/voiceagent.env
+EnvironmentFile=%h/.config/voiceagent/secrets.env
+Volume=/var/lib/powos/voiceagent:/logs
+Volume=/var/lib/powos/models/hf:/root/.cache/huggingface
+Volume=/var/lib/powos/models/torch:/root/.cache/torch
+Label=io.powos.unit=voice-agent
+PodmanArgs=--memory=6g --memory-swap=6g --cpus=4 --pids-limit=1024
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=600
+
+[Install]
+WantedBy=default.target

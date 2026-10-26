@@ -22,9 +22,11 @@ class OpenPowosApp : Activity() {
                 PowosTerminalActivity.open(this, exec, name)
             } else {
                 andro.marchy.MainActivity.show(this)
+                // Plasma itself (dev.omalauncher.linux.PLASMA_COMMAND): its desktop is all there is to open.
+                if (exec == dev.omalauncher.linux.PLASMA_COMMAND) return finish()
                 // powos-run waits for the session if the desktop is still starting it.
                 thread(name = "powos-open", isDaemon = true) {
-                    val code = runCatching { RootedGuest.run("exec $exec") }.getOrElse { -1 }
+                    val code = runCatching { RootedGuest.runOwn("exec $exec") }.getOrElse { -1 }
                     Log.i("OpenPowosApp", "$name exited $code")
                 }
             }

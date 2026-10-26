@@ -1,0 +1,15 @@
+{
+ "bat": {
+  "level": 64,
+  "charging": false
+ },
+ "m": {
+  "available": true,
+  "playing": true,
+  "title": "Weightless"
+ },
+ "born": 1791900000,
+ "fed": 1792581480,
+ "pets": 12,
+ "now": 1792591200
+}

@@ -1,0 +1,45 @@
+#!/bin/bash
+# Refuses a push whose shell/apps TypeScript fails the complexity lint (shell/dev/lint-complexity.sh) or tsc --noEmit
+# (~2 s; d30be04), or whose Kotlin fails targets/android/lint-complexity.sh --only (~4 s; WindowFrame.barView), so a
+# broken tip can't block every agent's ship-apk again (e9af512, 2026-10-22). Only the files changed in the pushed range; the lint
+# reads them from the working tree (push a clean tree). Wired for every worktree by `git config core.hooksPath
+# tools/git-hooks`. Skip once: GATE_LINT=0 git push.
+set -uo pipefail
+root=$(git rev-parse --show-toplevel)
+zero=0000000000000000000000000000000000000000
+files=() apps="" kt=""
+while read -r _lref lsha _rref rsha; do
+  [ "$lsha" = "$zero" ] && continue
+  base=$rsha
+  [ "$rsha" = "$zero" ] && base=$(git merge-base "$lsha" origin/worktree-powos-multiplatform 2>/dev/null || echo "$lsha")
+  while IFS= read -r f; do
+    case "$f" in
+      shell/*.ts|shell/*.tsx|shell/*.mjs|shell/*.js) files+=("${f#shell/}") ;;
+      apps/*/ui/*) apps=--apps ;;
+      targets/android/app/*/test/*) ;;
+      targets/android/app/*.kt) kt+="${kt:+,}${f#targets/android/app/}" ;;
+    esac
+  done < <(git diff --name-only --diff-filter=AM "$base" "$lsha" 2>/dev/null)
+done
+s=0
+if [ ${#files[@]} -gt 0 ] || [ -n "$apps" ]; then
+  "$root/shell/dev/lint-complexity.sh" $apps ${files[@]+"${files[@]}"} || s=$?
+fi
+if [ ${#files[@]} -gt 0 ] && [ "${GATE_LINT:-1}" != 0 ]; then
+  tsc=$root/shell/node_modules/.bin/tsc
+  if [ ! -x "$tsc" ]; then echo "pre-push: tsc skipped (no shell/node_modules)" >&2
+  elif ! out=$(cd "$root/shell" && "$tsc" --noEmit -p . 2>&1); then echo "$out" | grep -v '^ ' | head -30 | sed 's/^/FAIL tsc: /'; s=1
+  fi
+fi
+if [ -n "$kt" ]; then
+  # need_docker (f35: brew upgrade unlinks docker, lint-complexity.sh's own `command -v docker` then fails "no
+  # docker" even though the binary's still in the Cellar) fixes PATH for THIS shell, which lint-complexity.sh
+  # inherits as a child process - one check here covers it without duplicating the probe in every lint script.
+  . "$root/tools/lib/need-docker.sh"
+  need_docker
+  k=0; "$root/targets/android/lint-complexity.sh" --only "$kt" || k=$?
+  [ $k = 1 ] && s=1
+fi
+[ $s = 1 ] && echo "pre-push: refused - the lint / tsc fails on what you push (above)." >&2
+[ $s = 1 ] && exit 1
+exit 0

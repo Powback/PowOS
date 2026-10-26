@@ -10,27 +10,55 @@ widget "quick" {
   source a = android.alarm
   source m = android.modes
 
+  // The next alarm over the phone's modes, sized from the tile, never fixed (monospace: 0.6 em a character, a line
+  // 1.4 em budgeted): the alarm's time as big as the top part's width and height allow, its clock app beside it;
+  // under it a row of soft chips sharing the width - the ringer / Do Not Disturb, battery saver when on, the torch
+  // switch - in the height the alarm leaves. No lines.
+  let iw = tileWidth == null ? 230 : tileWidth - 24
+  let ih = tileHeight == null ? 110 : tileHeight - 24
+  let when = a.set ? fmtTime(a.time, "EEE HH:mm") : "none"
+  // The alarm takes what its width allows (at most two thirds of the height); the chips the height left under it.
+  let ls = clamp(floor(ih * 0.07), 10, 22)
+  let icon = a.app != null ? clamp(floor(ih * 0.22), 24, 72) : 0
+  let tz = clamp(floor(min((ih * 0.66 - ls * 1.4) / 1.4, (iw - icon - 8) / (len(when) * 0.6))), 14, 120)
+  let chipH = clamp(floor(ih - (ls + tz) * 1.4 - 6), 28, 600)
+  let mode = m.dnd ? "do not disturb" : m.ringer
+  let chips = 1 + (m.saver ? 1 : 0) + (m.torch != null ? 1 : 0)
+  let chipW = (iw - (chips - 1) * 6) / chips
+  let longest = max(len(mode), m.torch != null ? len(m.torch ? "torch off" : "torch") : 0, m.saver ? 5 : 0)
+  let cs = clamp(floor(min(chipH * 0.4, (chipW - 16) / (longest * 0.6))), 10, 32)
+
   Column {
-    gap: 6
-    fill: true
+    gap: 6; fill: height
     Row {
-      align: center
+      align: center; weight: 1
       Column {
-        gap: 0
-        weight: 1
-        Text { text: "next alarm"; style: label }
-        Text { text: a.set ? fmtTime(a.time, "EEE HH:mm") : "none"; style: title; color: a.set ? foreground : muted }
+        gap: 0; weight: 1
+        Text { text: "next alarm"; fontSize: ls; color: muted; maxLines: 1 }
+        Text { text: when; fontSize: tz; color: a.set ? foreground : muted; maxLines: 1 }
       }
       if a.app != null {
-        Image { src: "app:${a.app}"; size: 28; onTap: { haptic(); androidApp(a.app) } }
+        Image { src: "app:${a.app}"; size: icon; onTap: { haptic(); androidApp(a.app) } }
       }
     }
     Row {
-      gap: 6
-      Text { text: m.dnd ? "do not disturb" : m.ringer; style: small; color: m.dnd || m.ringer != "normal" ? yellow : muted; weight: 1 }
-      if m.saver { Text { text: "saver"; style: small; color: orange; width: 40 } }
+      gap: 6; height: chipH
+      Box {
+        weight: 1; fill: height; align: center; background: alpha(foreground, 0.08); radius: 8 * corners
+        Text { text: mode; fontSize: cs; color: m.dnd || m.ringer != "normal" ? yellow : muted; align: center; maxLines: 1 }
+      }
+      if m.saver {
+        Box {
+          weight: 1; fill: height; align: center; background: alpha(foreground, 0.08); radius: 8 * corners
+          Text { text: "saver"; fontSize: cs; color: orange; align: center; maxLines: 1 }
+        }
+      }
       if m.torch != null {
-        Button { text: m.torch ? "torch off" : "torch"; color: m.torch ? accent : muted; onTap: { haptic(); torch("toggle") } }
+        Box {
+          weight: 1; fill: height; align: center; background: m.torch ? alpha(accent, 0.25) : alpha(foreground, 0.08); radius: 8 * corners
+          onTap: { haptic(); torch("toggle") }
+          Text { text: m.torch ? "torch off" : "torch"; fontSize: cs; color: m.torch ? accent : foreground; align: center; maxLines: 1 }
+        }
       }
     }
   }

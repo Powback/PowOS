@@ -1,41 +1,140 @@
 #!/usr/bin/env python3
-"""powos app - install and run PowOS apps (docs/POWOS-APPS-FEASIBILITY.md section 5).
+"""powos app - make, build, install and hot-reload PowOS apps (docs/POWOS-APPS-FEASIBILITY.md section 5).
 
-An app is a directory with powos-app.json (the manifest), its module (out/module.wasm, a SpacetimeDB module) and
-its UI (ui/: static files - widgets are ES modules the shell's one shared host page imports). Installed apps live in
-~/.local/share/powos/apps/<id>/<version>/ with a `current` link; on the phone that directory is the PowOS app's own
-files/apps (bound by rooted/powos-session.sh), which the shell serves at https://shell.powos/_app/<id>/ and watches.
+An app is a directory: powos-app.json (the manifest), module/ (Rust -> a SpacetimeDB module: the app's state and
+logic, in the device's own SpacetimeDB) and ui/ (Preact TSX the shell renders: a full-screen page in ui/pages/, home
+widgets in ui/widgets/). No process of its own (Tier 0). An app with a page is an app in the launcher: the drawer,
+search and the recent apps open it full screen; its widgets go on home from the edit sheet ("PowOS apps").
 
+Make one (the whole loop, from a sentence to the phone - each step is one command):
+  powos app new <name|id> [--name "Shown name"] [--template T] [--dir D]
+                                     scaffold D (default ~/Projects/<name>): powos-app.json, module/src/lib.rs,
+                                     ui/lib/app.ts, ui/pages/main.tsx, ui/widgets/main.tsx, ui/icon.svg.
+                                     T: spacetimedb-astro (default: module + page + widget), widget (module +
+                                     widget, no page), module-only (module, no UI). <name> without a dot gets the
+                                     id local.<name>; the database is the id with dashes.
+  powos app build <dir> [--local|--remote [user@host]] [--module|--ui]
+                                     module -> out/module.wasm (+ TS bindings in ui/bindings), ui -> out/ui (bun).
+                                     The module (Rust -> wasm) builds on the app builder (powos app builder) over
+                                     ssh when one is set, else here if cargo + wasm32 are installed; the UI always
+                                     builds here (bun, ~0.1 s). An unchanged module isn't rebuilt.
+  powos app install <dir>            build (what changed), publish the module (unless the device's live module is this
+                                     very build - checked against the database, not the local build), put the UI
+                                     in place, register it
+  powos app dev <dir>                hot reload while you edit: every save rebuilds what changed and pushes it -
+                                     ui/ -> the open page and the widgets update in place (no restart, the data
+                                     and the connection kept); module/ -> republished (schema kept, additive changes
+                                     migrate), clients stay connected. Prints each step's time. Ctrl-C stops.
+  powos app builder [user@host|local|off]
+                                     where modules cross-compile: an ssh host with docker (or cargo + wasm32),
+                                     e.g. the hub; the phone sends the module's source and gets the wasm back, so
+                                     Rust never builds on its battery. Shown without an argument.
+
+Change one:
+  powos app publish <dir>            only the module again (rebuilt first if it changed): a hot swap, clients stay
+                                     connected (logic hot reload)
+  powos app ui <dir>                 only the UI again (rebuilt first; a new dir, `current` flipped atomically): the
+                                     shell hot-reloads it
+  powos app preview <dir|file.owl|widget-id> [--live] [--out D]
+                                     every widget of it at every size it allows (minSize to 4x4), on the phone's
+                                     cover and inner screens, in two themes, against mock data (shell/dev/preview/
+                                     data/<id>.json): one contact sheet per widget, and the fit checks (clipped text,
+                                     a row cut in half, a side >12% empty, content <25% of the tile, scrolling, a
+                                     slider in a sideways scroller, hard borders). Exit 1 on a problem, each with its
+                                     size. Runs shell/dev/preview.sh - where docker is (the Mac, a PowStation), from a
+                                     PowOS checkout (POWOS_PREVIEW=<its preview.sh> elsewhere). A widget id is an OWL
+                                     file's name (10-today), an app's widget (local.lights.main) or a panel (panel.agents).
+  --note "..."                       on install/publish/ui: what changed, in plain words - the phone's quiet
+                                     "update applied" notification (default: "<Name> app installed/updated")
   powos app list                     installed apps and widgets (from the registry)
-  powos app install <dir>            publish its module, put its UI in place (current -> this version), register it
-  powos app publish <dir>            only the module again: a hot swap, clients stay connected (logic hot reload)
-  powos app ui <dir>                 only the UI again: the shell reloads it (UI hot reload)
-  powos app remove <id>              unregister it and remove its files (its database stays; --data drops it too)
+  powos app remove <id> [--data]     unregister it and remove its files (its database stays; --data drops it too)
+
+Writing one (what to edit after `new`):
+  module/src/lib.rs   tables (#[spacetimedb::table(accessor = x, public)]) and reducers (#[spacetimedb::reducer]).
+                      Keep schema changes additive: new tables, new columns at the END with #[default(..)];
+                      a renamed/removed column is refused (then: new database name in powos-app.json).
+  ui/pages/main.tsx   the full-screen page: export default function ({ host, close }) - app.useTable("x"),
+                      app.useReducer("y") from ui/lib/app.ts. Reducer args are an object: add({ text }); u64 is
+                      a bigint; snake_case fields arrive camelCase.
+  ui/widgets/*.tsx    a home widget each (list it in powos-app.json "widgets"): ({ host, app, cells }). Make it
+                      USABLE IN PLACE, not a preview: its actions inline (tick, -/+, remove), an add field, and
+                      the header opening the page (host.openApp(app)); controls stop pointerdown propagating.
+  The network:         "net": ["lan", "host.example"] in powos-app.json: what the app may reach ("lan" = any private
+                      address). host.net.fetch(app, url, {method, headers, body}), host.net.useEvents(app, url,
+                      headers, onEvent) (server-sent events, only while shown), host.net.mdns(app, "_x._tcp").
+                      No CORS; a LAN device's self-signed certificate is pinned on first use. Keys stay in the
+                      PowOS app: {capture: {secret: "k", path: "0.success.username"}} keeps one from a response,
+                      "${secret:k}" in a header sends it. Example: ~/Projects/lights (Philips Hue).
+  Styling: inline styles with the shell's theme variables (var(--color-accent), var(--color-foreground), ...).
+  Imports: preact, preact/hooks, @preact/signals and spacetimedb come from the shell; anything else is bundled.
+
+The system side:
   powos app runtime [<id> [<mode>]]  how an app's process runs: native | sandbox | container (powos-runtime)
   powos app services                 the system tier (powos-supervisor status)
   powos app check                    what this machine's runtimes can do (powos-runtime check)
+
+Installed apps live in ~/.local/share/powos/apps/<id>/<version>/ with a `current` link; on the phone that directory
+is the PowOS app's own files/apps (bound by rooted/powos-session.sh), which the shell serves at
+https://shell.powos/_app/<id>/ and watches (a change there is the hot reload).
 """
+import hashlib
+import io
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
+import time
 
 SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
 REGISTRY = "powos-registry"
 REGISTRY_WASM = os.environ.get("POWOS_REGISTRY_WASM", "/usr/lib/powos/apps/registry/module.wasm")
 APPS = os.path.expanduser(os.environ.get("POWOS_APPS_DIR", "~/.local/share/powos/apps"))
 LIB = os.path.dirname(os.path.realpath(__file__))
+TEMPLATES = os.environ.get("POWOS_APP_TEMPLATES", os.path.join(LIB, "templates"))
+# Where modules cross-compile (powos app builder): "user@host" (ssh), "local", or unset (here if the toolchain is).
+BUILDER_CONF = os.path.expanduser(os.environ.get("POWOS_APP_BUILDER_CONF", "~/.config/powos/app-builder"))
+# The cargo registry, the git checkouts and one shared target dir, on the builder: every app's dependencies (the
+# spacetimedb crate and its ~90 others) compile once there, not once per app. apps/build.sh uses the same volume.
+CACHE_VOLUME = "powos-apps-cargo"
+BUILDER_IMAGE = "powos-app-builder"
+LOCAL_TARGET = os.path.expanduser("~/.cache/powos/app-target")
+# Parts of a template (lib/apps/templates/<part>/), copied in this order.
+TEMPLATE_SETS = {
+    "spacetimedb-astro": ["module", "ui", "page", "widget"],
+    "widget": ["module", "ui", "widget"],
+    "module-only": ["module"],
+}
+# What the shell's import map gives every page and widget (shell/index.html): one copy each for the whole shell.
+UI_EXTERNALS = ["preact", "preact/hooks", "preact/jsx-runtime", "@preact/signals", "@preact/signals-core", "spacetimedb"]
+APP_ID = re.compile(r"^[a-z0-9][a-z0-9.-]{0,63}$")
+
+
+class Fail(Exception):
+    pass
 
 
 def die(msg):
-    print(f"powos app: {msg}", file=sys.stderr)
-    sys.exit(1)
+    raise Fail(msg)
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def ms(t0):
+    return int((time.monotonic() - t0) * 1000)
 
 
 def spacetime(*args, check=True, quiet=False):
-    r = subprocess.run(["spacetime", *args], capture_output=True, text=True)
+    try:
+        r = subprocess.run(["spacetime", *args], capture_output=True, text=True)
+    except FileNotFoundError:
+        die("no spacetime CLI here (PowOS ships it: the spacetimedb package)")
     out = "\n".join(line for line in (r.stdout + r.stderr).splitlines() if "UNSTABLE" not in line and line.strip())
     if check and r.returncode != 0:
         die(f"spacetime {args[0]} failed:\n{out}")
@@ -69,43 +168,532 @@ def manifest(d):
         die(f"{p}: {e}")
 
 
+# ---------------------------------------------------------------------------------------------------------- new
+
+
+def icon_svg(name, app_id):
+    """A rounded square in a colour of its own (from the id) with the name's first letter: replace ui/icon.svg."""
+    hue = int(hashlib.sha256(app_id.encode()).hexdigest()[:4], 16) % 360
+    letter = (name.strip()[:1] or "?").upper().replace("&", "&amp;").replace("<", "&lt;")
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">'
+        f'<rect width="96" height="96" rx="24" fill="hsl({hue} 55% 45%)"/>'
+        '<text x="48" y="64" font-family="sans-serif" font-size="48" font-weight="600" fill="#fff" '
+        f'text-anchor="middle">{letter}</text></svg>\n'
+    )
+
+
+def cmd_new(a):
+    if not a or a[0].startswith("-"):
+        die("usage: powos app new <name|id> [--name \"Shown name\"] [--template spacetimedb-astro|widget|module-only] [--dir D]")
+    ident = a[0].lower()
+    opts = flags(a[1:], {"--name": 1, "--template": 1, "--dir": 1})
+    app_id = ident if "." in ident else f"local.{ident}"
+    if not APP_ID.match(app_id) or ".." in app_id:
+        die(f"bad id {app_id!r}: a-z 0-9 . - only, starting with a letter or digit")
+    slug = app_id.rsplit(".", 1)[-1]
+    if not slug:
+        die(f"bad id {app_id!r}")
+    template = opts.get("--template", "spacetimedb-astro")
+    if template not in TEMPLATE_SETS:
+        die(f"no template {template!r} ({', '.join(TEMPLATE_SETS)})")
+    name = opts.get("--name") or slug.replace("-", " ").title()
+    # It goes into TSX text and a Rust comment: nothing that would break either.
+    name = re.sub(r"[{}<>`\\\"$]", "", name).strip() or slug
+    d = os.path.abspath(os.path.expanduser(opts.get("--dir") or os.path.join("~/Projects", slug)))
+    # Dotfiles don't count (an agent's own state in its fresh working directory).
+    if os.path.exists(d) and [x for x in os.listdir(d) if not x.startswith(".")]:
+        die(f"{d} exists and isn't empty (--dir elsewhere)")
+    db = app_id.replace(".", "-")
+    crate = "powos-app-" + slug
+    subst = {"__NAME__": name, "__ID__": app_id, "__DB__": db, "__CRATE__": crate}
+    parts = TEMPLATE_SETS[template]
+    for part in parts:
+        src = os.path.join(TEMPLATES, part)
+        if not os.path.isdir(src):
+            die(f"{src} missing (the PowOS install's app templates)")
+        for root, _, files in os.walk(src):
+            for f in files:
+                rel = os.path.relpath(os.path.join(root, f), src)
+                with open(os.path.join(root, f)) as fh:
+                    text = fh.read()
+                for k, v in subst.items():
+                    text = text.replace(k, v)
+                out = os.path.join(d, rel)
+                os.makedirs(os.path.dirname(out), exist_ok=True)
+                with open(out, "w") as fh:
+                    fh.write(text)
+    has_ui = "ui" in parts
+    m = {
+        "id": app_id,
+        "name": name,
+        "version": "0.1.0",
+        "description": "",
+        **({"icon": "icon.svg"} if has_ui else {}),
+        "ui": {"dir": "out/ui/"} if has_ui else None,
+        **({"page": {"entry": "pages/main.js"}} if "page" in parts else {}),
+        "module": {"path": "module/", "lang": "rust", "database": db, "stdb": "2.12"},
+        "backend": None,
+        "widgets": [
+            {"id": "main", "name": name, "kind": "island", "entry": "widgets/main.js", "size": "4x2", "minSize": "2x1"}
+        ]
+        if "widget" in parts
+        else [],
+        "surfaces": {"launcher": "page" in parts, "desktop": True},
+        "permissions": [],
+        "budget": {"phone": {"memMB": 16, "idle": "unload"}, "desktop": {"memMB": 32}},
+    }
+    with open(os.path.join(d, "powos-app.json"), "w") as f:
+        json.dump(m, f, indent=2)
+        f.write("\n")
+    if has_ui:
+        with open(os.path.join(d, "ui", "icon.svg"), "w") as f:
+            f.write(icon_svg(name, app_id))
+    with open(os.path.join(d, ".gitignore"), "w") as f:
+        f.write("out/\nmodule/target/\nui/bindings/\n")
+    log(f"made {app_id} ({name}, template {template}) in {d}")
+    log(f"  database {db}; module/src/lib.rs" + (", ui/pages/main.tsx" if "page" in parts else "")
+        + (", ui/widgets/main.tsx" if "widget" in parts else ""))
+    log(f"next: powos app install {d}   then: powos app dev {d} (hot reload while you edit)")
+
+
+def flags(a, spec):
+    """--flag value pairs (spec: flag -> 1 takes a value, 0 doesn't); anything else is refused."""
+    out, i = {}, 0
+    while i < len(a):
+        k = a[i]
+        if k not in spec:
+            die(f"unknown option {k} (powos app help)")
+        if spec[k]:
+            if i + 1 >= len(a):
+                die(f"{k} needs a value")
+            out[k] = a[i + 1]
+            i += 2
+        else:
+            out[k] = True
+            i += 1
+    return out
+
+
+# -------------------------------------------------------------------------------------------------------- build
+
+
+def builder():
+    v = os.environ.get("POWOS_APP_BUILDER")
+    if v is None:
+        try:
+            with open(BUILDER_CONF) as f:
+                v = f.read().strip()
+        except OSError:
+            v = ""
+    return v or None
+
+
+def cmd_builder(a):
+    if not a:
+        b = builder()
+        log(b or f"not set: modules build here {'(cargo + wasm32 found)' if local_rust() else '- but there is no cargo + wasm32 here: set one'}")
+        return
+    v = a[0]
+    if v not in ("local", "off") and not re.match(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._:-]+$", v):
+        die("powos app builder user@host | local | off")
+    os.makedirs(os.path.dirname(BUILDER_CONF), exist_ok=True)
+    if v == "off":
+        if os.path.exists(BUILDER_CONF):
+            os.unlink(BUILDER_CONF)
+        log("app builder: not set")
+        return
+    with open(BUILDER_CONF, "w") as f:
+        f.write(v + "\n")
+    if v != "local":
+        t0 = time.monotonic()
+        r = subprocess.run(ssh_cmd(v, "export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH; docker version -f {{.Server.Version}} || cargo --version"),
+                           capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if r.returncode != 0:
+            log(f"note: {v} didn't answer ({(r.stderr or r.stdout).strip()[:200]}); it's set anyway")
+        else:
+            log(f"app builder: {v} (docker {r.stdout.strip()}, {ms(t0)} ms round trip)")
+            return
+    log(f"app builder: {v}")
+
+
+def ssh_cmd(target, command):
+    return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ServerAliveInterval=15", target, command]
+
+
+def local_rust():
+    if not shutil.which("cargo") or not shutil.which("rustc"):
+        return False
+    r = subprocess.run(["rustc", "--print", "sysroot"], capture_output=True, text=True)
+    return r.returncode == 0 and os.path.isdir(os.path.join(r.stdout.strip(), "lib", "rustlib", "wasm32-unknown-unknown"))
+
+
+def tree_hash(d, skip=()):
+    h = hashlib.sha256()
+    if not os.path.isdir(d):
+        return "none"
+    for root, dirs, files in os.walk(d):
+        dirs[:] = sorted(x for x in dirs if os.path.relpath(os.path.join(root, x), d) not in skip)
+        for f in sorted(files):
+            p = os.path.join(root, f)
+            rel = os.path.relpath(p, d)
+            if rel in skip:
+                continue
+            h.update(rel.encode() + b"\0")
+            with open(p, "rb") as fh:
+                h.update(fh.read())
+    return h.hexdigest()
+
+
+def crate_name(mod_dir):
+    with open(os.path.join(mod_dir, "Cargo.toml")) as f:
+        m = re.search(r'^name\s*=\s*"([^"]+)"', f.read(), re.M)
+    if not m:
+        die(f"{mod_dir}/Cargo.toml: no package name")
+    return m.group(1).replace("-", "_")
+
+
+# Runs on the builder (bash, over ssh): the module's source comes in on stdin (a tar), the wasm goes out on stdout
+# (a tar: module.wasm and the Cargo.lock cargo settled on), cargo's messages on stderr. In a container with the cargo
+# cache volume - nothing of the app's is left on the builder - or with the builder's own cargo when it has no docker.
+REMOTE_BUILD = r"""
+set -e
+export PATH=/opt/homebrew/bin:/usr/local/bin:$HOME/.cargo/bin:$PATH
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 </dev/null; then
+  if ! docker image inspect "$IMAGE" >/dev/null 2>&1 </dev/null; then
+    echo "builder: making the $IMAGE image (once: rust + the wasm32 target)" >&2
+    printf 'FROM rust:1-bookworm\nRUN rustup target add wasm32-unknown-unknown\n' | docker build -q -t "$IMAGE" - >&2
+  fi
+  exec docker run --rm -i --cpus 6 --memory 8g -v "$VOLUME:/cache" -e CARGO_HOME=/cache/cargo -e CRATE "$IMAGE" bash -c "$INNER"
+fi
+command -v cargo >/dev/null || { echo "builder $(hostname): neither docker nor cargo" >&2; exit 3; }
+CACHE=$HOME/.cache/powos-app-builder; mkdir -p "$CACHE"; export CACHE; exec bash -c "$INNER"
+"""
+REMOTE_INNER = r"""
+set -e
+W=$(mktemp -d); trap 'rm -rf $W' EXIT
+tar -xz -C $W
+T=${CACHE:-/cache}/target-powos-apps
+cd $W/module
+CARGO_TARGET_DIR=$T cargo build --release --target wasm32-unknown-unknown -q >&2
+cp $T/wasm32-unknown-unknown/release/$CRATE.wasm $W/module.wasm
+tar -cz -C $W module.wasm module/Cargo.lock
+"""
+
+
+def build_module(d, m, where=None, force=False):
+    """The module -> out/module.wasm, and its TS bindings -> ui/bindings. False when it was up to date."""
+    mod = os.path.join(d, (m.get("module") or {}).get("path", "module/").rstrip("/"))
+    if not m.get("module") or not os.path.isfile(os.path.join(mod, "Cargo.toml")):
+        return False
+    out = os.path.join(d, "out")
+    os.makedirs(out, exist_ok=True)
+    wasm = os.path.join(out, "module.wasm")
+    stamp = os.path.join(out, ".module.sha")
+    src = tree_hash(mod, skip={"target", "Cargo.lock"})
+    try:
+        with open(stamp) as f:
+            same = f.read().strip() == src
+    except OSError:
+        same = False
+    ui = os.path.join(d, "ui")
+    if same and os.path.isfile(wasm) and not force:
+        if os.path.isdir(ui) and not os.path.isdir(os.path.join(ui, "bindings")):
+            bindings(d, wasm)
+        return False
+    crate = crate_name(mod)
+    b = where or builder()
+    t0 = time.monotonic()
+    if b == "local" or (b is None and local_rust()):
+        if not local_rust():
+            die("no cargo + wasm32 target here (rustup target add wasm32-unknown-unknown), or: powos app builder user@host")
+        r = subprocess.run(["cargo", "build", "--release", "--target", "wasm32-unknown-unknown", "-q"], cwd=mod,
+                           env={**os.environ, "CARGO_TARGET_DIR": LOCAL_TARGET})
+        if r.returncode != 0:
+            die("module: cargo build failed")
+        shutil.copy(os.path.join(LOCAL_TARGET, "wasm32-unknown-unknown", "release", crate + ".wasm"), wasm)
+        how = "here"
+    elif b is None:
+        die("module: no Rust toolchain here and no app builder set - powos app builder user@host (a machine with "
+            "docker), or install cargo + the wasm32 target")
+    else:
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as t:
+            t.add(mod, arcname="module", filter=lambda ti: None if ti.name.startswith("module/target") else ti)
+        env = " ".join(f"{k}={shlex.quote(v)}" for k, v in
+                       {"IMAGE": BUILDER_IMAGE, "VOLUME": CACHE_VOLUME, "CRATE": crate, "INNER": REMOTE_INNER}.items())
+        for attempt in range(3):
+            r = subprocess.run(ssh_cmd(b, f"{env} bash -c {shlex.quote(REMOTE_BUILD)}"), input=buf.getvalue(),
+                               stdout=subprocess.PIPE)
+            # 255: ssh itself failed (no route yet after a wake, a refused login) - not the build: again, shortly.
+            if r.returncode != 255:
+                break
+            time.sleep(1 + attempt)
+        if r.returncode != 0:
+            die(f"module: the build on {b} failed (exit {r.returncode})")
+        with tarfile.open(fileobj=io.BytesIO(r.stdout), mode="r:gz") as t:
+            got = t.extractfile("module.wasm").read()
+            lock = t.extractfile("module/Cargo.lock").read()
+        with open(wasm + ".tmp", "wb") as f:
+            f.write(got)
+        os.replace(wasm + ".tmp", wasm)
+        lp = os.path.join(mod, "Cargo.lock")
+        if not os.path.isfile(lp) or open(lp, "rb").read() != lock:
+            with open(lp, "wb") as f:
+                f.write(lock)
+        how = f"on {b}"
+    with open(stamp, "w") as f:
+        f.write(src + "\n")
+    log(f"module: built {how} in {ms(t0)} ms ({os.path.getsize(wasm) // 1024} KB)")
+    if os.path.isdir(ui):
+        bindings(d, wasm)
+    return True
+
+
+def bindings(d, wasm):
+    t0 = time.monotonic()
+    out = os.path.join(d, "ui", "bindings")
+    tmp = out + ".new"
+    shutil.rmtree(tmp, ignore_errors=True)
+    spacetime("generate", "--lang", "typescript", "--out-dir", tmp, "--bin-path", wasm, "-y", quiet=True)
+    shutil.rmtree(out, ignore_errors=True)
+    os.rename(tmp, out)
+    log(f"bindings: ui/bindings in {ms(t0)} ms")
+
+
+def build_ui(d, m):
+    """ui/ -> out/ui: static files as they are, pages and widgets bundled one ES module each (the shell's own Preact
+    and SpacetimeDB SDK stay imports), workers bundled whole (a worker has no import map)."""
+    ui = os.path.join(d, "ui")
+    if not m.get("ui") or not os.path.isdir(ui):
+        return False
+    t0 = time.monotonic()
+    out = os.path.join(d, "out", "ui")
+    new = os.path.join(d, "out", ".ui-new")
+    shutil.rmtree(new, ignore_errors=True)
+    os.makedirs(new)
+    entries, workers = [], []
+    for root, dirs, files in os.walk(ui):
+        rel_root = os.path.relpath(root, ui)
+        if rel_root == "bindings" or rel_root.startswith("bindings" + os.sep) or "node_modules" in rel_root:
+            dirs[:] = []
+            continue
+        for f in files:
+            rel = os.path.normpath(os.path.join(rel_root, f))
+            top = rel.split(os.sep)[0]
+            if f.endswith((".ts", ".tsx", ".jsx")) or f == "tsconfig.json":
+                if top in ("pages", "widgets") and os.sep in rel and rel.count(os.sep) == 1 and not f.endswith(".d.ts"):
+                    entries.append(rel)
+                elif top == "workers" and rel.count(os.sep) == 1:
+                    workers.append(rel)
+                continue
+            os.makedirs(os.path.join(new, os.path.dirname(rel)), exist_ok=True)
+            shutil.copyfile(os.path.join(ui, rel), os.path.join(new, rel))
+    schema = tree_hash(os.path.join(ui, "bindings"))[:16]
+    if entries:
+        bundle(ui, entries, new, externals=UI_EXTERNALS, define={"__POWOS_SCHEMA__": json.dumps(schema)})
+    if workers:
+        bundle(ui, workers, new, externals=[], define={})
+    shutil.rmtree(out, ignore_errors=True)
+    os.rename(new, out)
+    log(f"ui: {len(entries)} bundled{f' + {len(workers)} workers' if workers else ''} in {ms(t0)} ms")
+    return True
+
+
+def bundle(ui, entries, outdir, externals, define):
+    if shutil.which("bun"):
+        cmd = ["bun", "build", *entries, "--outdir", outdir, "--root", ".", "--format", "esm", "--target", "browser",
+               "--minify"]
+        for e in externals:
+            cmd += ["--external", e]
+        for k, v in define.items():
+            cmd += ["--define", f"{k}={v}"]
+    elif shutil.which("esbuild"):
+        cmd = ["esbuild", *entries, "--bundle", "--format=esm", "--target=es2022", "--jsx=automatic",
+               "--jsx-import-source=preact", "--minify", f"--outdir={outdir}", "--outbase=.", "--log-level=warning"]
+        cmd += [f"--external:{e}" for e in externals] + [f"--define:{k}={v}" for k, v in define.items()]
+    else:
+        die("ui: no bun or esbuild here (PowOS ships bun)")
+    r = subprocess.run(cmd, cwd=ui, capture_output=True, text=True)
+    if r.returncode != 0:
+        die(f"ui: bundling failed:\n{(r.stderr or r.stdout).strip()}")
+
+
+def built(d, m):
+    has_mod = m.get("module") and os.path.isfile(os.path.join(d, (m["module"].get("path") or "module/"), "Cargo.toml"))
+    return (not has_mod or os.path.isfile(os.path.join(d, "out", "module.wasm"))) and (
+        not m.get("ui") or os.path.isdir(os.path.join(d, (m["ui"].get("dir") or "out/ui/").rstrip("/"))))
+
+
+def cmd_build(d, a):
+    opts = flags(a, {"--local": 0, "--remote": 0, "--module": 0, "--ui": 0, "--force": 0})
+    m, _ = manifest(d)
+    where = "local" if "--local" in opts else None
+    if "--remote" in opts:
+        where = builder()
+        if not where or where == "local":
+            die("--remote: no app builder set (powos app builder user@host)")
+    t0 = time.monotonic()
+    if "--ui" not in opts:
+        if not build_module(d, m, where, force="--force" in opts) and m.get("module"):
+            log("module: unchanged")
+    if "--module" not in opts:
+        build_ui(d, m)
+    log(f"built {m['id']} in {ms(t0)} ms")
+
+
+# ------------------------------------------------------------------------------------------------------ install
+
+
+def live_schema(db):
+    """The module live in [db] on this device, as its schema's fingerprint (spacetime describe); None: no such db."""
+    code, out = spacetime("describe", "-s", SERVER, "--json", db, check=False, quiet=True)
+    return hashlib.sha256(out.encode()).hexdigest() if code == 0 and out.strip() else None
+
+
+def file_sha(p):
+    with open(p, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
 def publish_module(d, m):
     mod = m.get("module")
     if not mod:
         return
     wasm = os.path.join(d, "out", "module.wasm")
     if not os.path.isfile(wasm):
-        die(f"{wasm} missing (apps/build.sh builds it)")
+        die(f"{wasm} missing (powos app build {d})")
+    t0 = time.monotonic()
     # Additive schema changes migrate in place; anything destructive is refused by the server (no --delete-data).
-    spacetime("publish", "-y", "-s", SERVER, "--bin-path", wasm, mod["database"])
+    spacetime("publish", "-y", "-s", SERVER, "--bin-path", wasm, mod["database"], quiet=True)
+    # What's live now, to compare with next time (ensure_published).
+    with open(os.path.join(d, "out", ".published"), "w") as f:
+        json.dump({"database": mod["database"], "wasm": file_sha(wasm), "live": live_schema(mod["database"])}, f)
+    log(f"module: published to {mod['database']} in {ms(t0)} ms (clients stay connected)")
+
+
+def ensure_published(d, m):
+    """Publishes the module unless the device already runs this very build: the wasm is the one last published from
+    here AND the live module's schema is the one it had then. Not trusted: "the local build didn't change" - the
+    database may run another module (an older publish from elsewhere, a reset), whatever this directory built."""
+    mod = m.get("module")
+    wasm = os.path.join(d, "out", "module.wasm")
+    if not mod or not os.path.isfile(wasm):
+        return publish_module(d, m)
+    try:
+        with open(os.path.join(d, "out", ".published")) as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        rec = {}
+    live = live_schema(mod["database"])
+    if (live and rec.get("database") == mod["database"] and rec.get("wasm") == file_sha(wasm)
+            and rec.get("live") == live):
+        log(f"module: live in {mod['database']} is this build")
+        return
+    if live and rec.get("live") and rec.get("live") != live:
+        log(f"module: {mod['database']} runs another module than this build's - publishing this one")
+    publish_module(d, m)
 
 
 def install_ui(d, m):
+    """The UI installed atomically, every time: written whole into a new dir (<version>+<time>), then `current`
+    flipped to it in one rename - the shell sees the old UI or the new one, never a half-copied one (a widget that
+    loaded mid-copy 404'd and stayed broken). The previous one stays (rollback = flip back); older ones go.
+    Returns how many files differ from the previous one."""
     src = os.path.join(d, (m.get("ui") or {}).get("dir", "ui").rstrip("/"))
     base = os.path.join(APPS, m["id"])
-    dest = os.path.join(base, m["version"])
     os.makedirs(base, exist_ok=True)
+    current = os.path.join(base, "current")
+    previous = os.path.realpath(current) if os.path.lexists(current) else None
+    name = f"{m['version']}+{int(time.time() * 1000)}"
+    tmp = tempfile.mkdtemp(dir=base, prefix=".new-")
+    # Plain writes, not copytree/copy2: those copy extended attributes too, security.selinux among them - the
+    # source tree's label (system_data_root_file on the phone) landed on the installed dir and the PowOS app
+    # (privapp_data_file only) could read none of it. New files get their dir's label.
     if os.path.isdir(src):
-        tmp = tempfile.mkdtemp(dir=base, prefix=".new-")
-        shutil.copytree(src, os.path.join(tmp, "ui"))
-        shutil.copy(os.path.join(d, "powos-app.json"), tmp)
-        os.chmod(tmp, 0o755)
-        if os.path.exists(dest):
-            shutil.rmtree(dest)
-        os.rename(tmp, dest)
+        sync(src, os.path.join(tmp, "ui"))
+    sync_file(os.path.join(d, "powos-app.json"), os.path.join(tmp, "powos-app.json"))
+    for root, dirs, _ in os.walk(tmp):
+        for x in dirs:
+            os.chmod(os.path.join(root, x), 0o755)
+    os.chmod(tmp, 0o755)
+    os.rename(tmp, os.path.join(base, name))
     link = os.path.join(base, ".current-new")
     if os.path.lexists(link):
         os.unlink(link)
-    os.symlink(m["version"], link)
-    os.replace(link, os.path.join(base, "current"))  # atomic: the shell sees the old version or the new one
-    # Earlier versions beyond the previous one go (rollback = the previous one, still there).
-    versions = sorted((v for v in os.listdir(base) if not v.startswith(".") and v != "current"),
-                      key=lambda v: os.path.getmtime(os.path.join(base, v)))
-    for v in versions[:-2]:
-        if v != m["version"]:
-            shutil.rmtree(os.path.join(base, v), ignore_errors=True)
+    os.symlink(name, link)
+    os.replace(link, current)  # atomic: the shell sees the old version or the new one
+    changed = -1
+    if previous and os.path.isdir(os.path.join(previous, "ui")):
+        changed = sum(1 for _ in diff_files(os.path.join(previous, "ui"), os.path.join(base, name, "ui")))
+    # Everything but this one and the previous one goes (half-made .new- dirs of a crashed install too).
+    keep = {name, os.path.basename(previous) if previous else None}
+    for v in os.listdir(base):
+        if v == "current" or v in keep or v == ".current-new":
+            continue
+        shutil.rmtree(os.path.join(base, v), ignore_errors=True)
     if not mounted(APPS) and os.path.exists("/run/powos-app"):
         print(f"note: {APPS} isn't the PowOS app's files/apps here (start a new session): the shell won't see it")
+    return changed
+
+
+def diff_files(a, b):
+    """Paths that differ between two trees (added, removed or changed)."""
+    def files(r):
+        out = {}
+        for root, _, fs in os.walk(r):
+            for f in fs:
+                p = os.path.join(root, f)
+                out[os.path.relpath(p, r)] = p
+        return out
+    fa, fb = files(a), files(b)
+    for rel in set(fa) | set(fb):
+        if rel not in fa or rel not in fb:
+            yield rel
+            continue
+        with open(fa[rel], "rb") as x, open(fb[rel], "rb") as y:
+            if x.read() != y.read():
+                yield rel
+
+
+def sync_file(a, b):
+    try:
+        with open(a, "rb") as f:
+            new = f.read()
+    except OSError:
+        return 0
+    try:
+        with open(b, "rb") as f:
+            if f.read() == new:
+                return 0
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(b), exist_ok=True)
+    tmp = os.path.join(os.path.dirname(b), "." + os.path.basename(b) + ".new")
+    with open(tmp, "wb") as f:
+        f.write(new)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, b)
+    return 1
+
+
+def sync(src, dest):
+    """dest becomes src: changed files replaced, new ones added, gone ones removed. How many changed."""
+    n = 0
+    want = set()
+    for root, _, files in os.walk(src):
+        for f in files:
+            rel = os.path.relpath(os.path.join(root, f), src)
+            want.add(rel)
+            n += sync_file(os.path.join(src, rel), os.path.join(dest, rel))
+    for root, _, files in os.walk(dest):
+        for f in files:
+            rel = os.path.relpath(os.path.join(root, f), dest)
+            if rel not in want:
+                os.unlink(os.path.join(dest, rel))
+                n += 1
+    return n
 
 
 def mounted(path):
@@ -121,13 +709,123 @@ def register(text):
     spacetime("call", "-s", SERVER, REGISTRY, "install", json.dumps(text), quiet=True)
 
 
+def units():
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+    p = os.path.join(os.path.dirname(os.path.realpath(__file__)), "powos-units")
+    if not os.path.exists(p):
+        return None
+    loader = SourceFileLoader("powos_units", p)
+    mod = module_from_spec(spec_from_loader("powos_units", loader))
+    loader.exec_module(mod)
+    return mod
+
+
+def register_unit(m):
+    """The installed app as a unit (lib/apps/powos-units): its files, its backend's process and limits, its owner,
+    how it goes (powos app remove). An app's dependencies live in its module or its container, never on the host."""
+    u = units()
+    if u is None:
+        return
+    b = m.get("backend") or {}
+    unit = {"id": m["id"], "name": m.get("name", m["id"]), "kind": "app", "owner": u.owner_default(),
+            "purpose": (m.get("description") or f"the PowOS app {m.get('name', m['id'])}")[:300],
+            "installedBy": "powos app install", "files": [os.path.join(APPS, m["id"])],
+            "database": (m.get("module") or {}).get("database", ""),
+            "remove": {"commands": [f"powos app remove {m['id']}"]}}
+    if b.get("exec"):
+        unit["processes"] = [{"match": re.escape(b["exec"][0])}]
+        budget = (m.get("budget") or {})
+        bud = budget.get(u.HOST if u.HOST in budget else "phone" if u.HOST.startswith("phone") else "desktop") or {}
+        if bud.get("memMB"):
+            unit["limits"] = {"memory": f"{int(bud['memMB']) * 2}m", "pids": int(bud.get("pids", 512))}
+    if m.get("autosleep") is not None:
+        unit["autosleep"] = m["autosleep"]
+    try:
+        u.register(unit, quiet=True)
+    except (OSError, ValueError) as e:
+        log(f"note: not registered as a unit ({e})")
+
+
 def cmd_install(d):
     m, text = manifest(d)
+    # Always: an unchanged module isn't rebuilt (its source hash), and the UI bundles in ~0.1 s - an install never
+    # ships a UI older than its source (it did: ui/lib edited, out/ui kept).
+    cmd_build(d, [])
     ensure_registry()
-    publish_module(d, m)
+    ensure_published(d, m)
     install_ui(d, m)
     register(text)
-    print(f"installed {m['id']} {m['version']}")
+    register_unit(m)
+    page = (m.get("page") or {}).get("entry")
+    log(f"installed {m['id']} {m['version']}" + (" - in the drawer" if page else "")
+        + (f", {len(m.get('widgets') or [])} widget(s) in home's edit sheet" if m.get("widgets") else ""))
+
+
+# ---------------------------------------------------------------------------------------------------------- dev
+
+
+def scan(d):
+    """Every source file's (mtime, size): what `dev` compares. Not the build's own output."""
+    skip = {"out", ".git", "node_modules", os.path.join("module", "target"), os.path.join("ui", "bindings")}
+    seen = {}
+    for root, dirs, files in os.walk(d):
+        rel_root = os.path.relpath(root, d)
+        dirs[:] = [x for x in dirs if os.path.normpath(os.path.join(rel_root, x)) not in skip]
+        for f in files:
+            rel = os.path.normpath(os.path.join(rel_root, f))
+            if rel == os.path.join("module", "Cargo.lock") or f.endswith(("~", ".swp")) or f.startswith(".#"):
+                continue
+            try:
+                st = os.stat(os.path.join(root, f))
+            except OSError:
+                continue
+            seen[rel] = (st.st_mtime_ns, st.st_size)
+    return seen
+
+
+def cmd_dev(d):
+    d = os.path.abspath(d)
+    m, text = manifest(d)
+    if not os.path.isdir(os.path.join(APPS, m["id"], "current")):
+        cmd_install(d)
+    else:
+        build_module(d, m)
+        ensure_published(d, m)
+        build_ui(d, m)
+        install_ui(d, m)
+    log(f"dev: watching {d} - save a file and it's live (Ctrl-C stops)")
+    snap = scan(d)
+    while True:
+        # HACK: polls (a stat of each source file, 4x a second, only while `dev` runs): Python has no inotify in its
+        # standard library. Real fix: inotify through ctypes (or inotifywait when the image ships inotify-tools).
+        time.sleep(0.25)
+        now = scan(d)
+        if now == snap:
+            continue
+        # An editor's save can be several writes: once it has settled.
+        time.sleep(0.05)
+        now = scan(d)
+        changed = sorted(k for k in set(snap) | set(now) if snap.get(k) != now.get(k))
+        snap = now
+        t0 = time.monotonic()
+        try:
+            if "powos-app.json" in changed:
+                m, text = manifest(d)
+            if any(c.startswith("module" + os.sep) for c in changed):
+                if build_module(d, m):
+                    publish_module(d, m)
+            if build_ui(d, m):
+                install_ui(d, m)
+            if "powos-app.json" in changed:
+                register(text)
+            log(f"live in {ms(t0)} ms: {', '.join(changed)[:120]}")
+        except Fail as e:
+            log(f"error: {e}")
+        snap = scan(d)
+
+
+# ---------------------------------------------------------------------------------------------------------- rest
 
 
 def cmd_list():
@@ -148,6 +846,9 @@ def cmd_remove(app_id, data):
         db = lines[-1].strip('"') if lines else ""
         if db and db != "database":
             spacetime("delete", "-s", SERVER, db, "-y", check=False)
+    u = units()
+    if u is not None:
+        u.unregister(app_id, quiet=True)
     print(f"removed {app_id}")
 
 
@@ -155,24 +856,110 @@ def runtime(*args):
     os.execvp("powos-runtime", ["powos-runtime", *args])
 
 
+def take_note(a):
+    """--note TEXT (or --note-b64, from scripts through layers of shell quoting) out of the arguments."""
+    import base64
+
+    note = None
+    for flag in ("--note", "--note-b64"):
+        while flag in a:
+            i = a.index(flag)
+            if i + 1 >= len(a):
+                die(f"{flag} needs a value")
+            v = a[i + 1]
+            note = base64.b64decode(v).decode() if flag == "--note-b64" else v
+            a = a[:i] + a[i + 2 :]
+    return a, note
+
+
+def deployed(verb, d, note):
+    """The phone's quiet "update applied" notification (shade only, deploys within 2 min batched into one:
+    targets/android/tools/deploy-note.sh): the note, else a plain default. Best effort, never fatal."""
+    if not note:
+        try:
+            name = manifest(d)[0].get("name") or os.path.basename(os.path.abspath(d))
+        except BaseException:
+            name = os.path.basename(os.path.abspath(d))
+        note = f"{name} app installed" if verb == "install" else f"{name} app updated"
+    try:
+        subprocess.run(["powos", "comms", "notify", "--from", "deploy", "--priority", "low", "--batch", "deploy", "--", note],
+                       timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+def cmd_preview(a):
+    """powos app preview: shell/dev/preview.sh for one app's widgets, one OWL file, or a widget id."""
+    if not a:
+        die("usage: powos app preview <dir|file.owl|widget-id> [--live] [--out D]")
+    tool = os.environ.get("POWOS_PREVIEW") or os.path.join(LIB, "..", "..", "shell", "dev", "preview.sh")
+    if not os.path.isfile(tool):
+        die(f"no widget preview here ({tool}): it runs from a PowOS checkout where docker is - POWOS_PREVIEW=<preview.sh>")
+    if not shutil.which("docker"):
+        die("the widget preview needs docker (a headless Chromium and the OWL engine run in containers)")
+    what, rest = a[0], a[1:]
+    target = os.path.abspath(os.path.expanduser(what))
+    args = []
+    if os.path.isdir(target) and os.path.isfile(os.path.join(target, "powos-app.json")):
+        m, _ = manifest(target)
+        if not os.path.isdir(os.path.join(target, "out", "ui")):
+            cmd_build(target, ["--ui"])
+        args = ["--no-defaults", "--app", target, "--only", "^" + re.escape(m["id"]) + r"\."]
+        if "--out" not in rest:
+            args += ["--out", os.path.join(target, "out", "preview")]
+    elif target.endswith(".owl") and os.path.isfile(target):
+        name = os.path.basename(target)[: -len(".owl")]
+        args = ["--no-defaults", "--owl", target, "--only", "^" + re.escape(name) + "$"]
+    else:
+        args = ["--only", "^" + re.escape(what) + r"(\.|$)"]
+    os.execvp("bash", ["bash", tool, *args, *rest])
+
+
 def main(a):
+    a, note = take_note(a)
+    dispatch(a)
+    if len(a) == 2 and a[0] in ("install", "publish", "ui"):
+        deployed(a[0], a[1], note)
+
+
+def dispatch(a):
     if not a or a[0] in ("-h", "--help", "help"):
         print(__doc__.strip())
         return
     c = a[0]
+    # A directory argument as an absolute path: the build runs its tools in other directories (bun in ui/), where a
+    # relative "." meant something else - `powos app install .` bundled into ui/out/ and installed no page.
+    if c in ("build", "install", "dev", "publish", "ui") and len(a) >= 2:
+        a = [c, os.path.abspath(os.path.expanduser(a[1])), *a[2:]]
     if c == "list":
         cmd_list()
+    elif c == "new":
+        cmd_new(a[1:])
+    elif c == "build" and len(a) >= 2:
+        cmd_build(a[1], a[2:])
     elif c == "install" and len(a) == 2:
         cmd_install(a[1])
+    elif c == "dev" and len(a) == 2:
+        try:
+            cmd_dev(a[1])
+        except KeyboardInterrupt:
+            pass
+    elif c == "builder":
+        cmd_builder(a[1:])
     elif c == "publish" and len(a) == 2:
+        # Built first, as install does: an unchanged module isn't rebuilt, an edited one is - never the stale wasm.
+        cmd_build(a[1], ["--module"])
         m, _ = manifest(a[1])
         publish_module(a[1], m)
-        print(f"{m['id']}: module republished (connected clients carry on)")
     elif c == "ui" and len(a) == 2:
+        # Built first (~0.1 s), as install does: it shipped the stale out/ui ("0 files changed") after an edit.
+        cmd_build(a[1], ["--ui"])
         m, text = manifest(a[1])
-        install_ui(a[1], m)
+        n = install_ui(a[1], m)
         register(text)
-        print(f"{m['id']}: UI {m['version']} in place")
+        log(f"{m['id']}: UI {m['version']} in place" + (f" ({n} files changed)" if n >= 0 else ""))
+    elif c == "preview":
+        cmd_preview(a[1:])
     elif c == "remove" and len(a) >= 2:
         cmd_remove(a[1], "--data" in a)
     elif c == "runtime":
@@ -191,4 +978,8 @@ def main(a):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    try:
+        main(sys.argv[1:])
+    except Fail as e:
+        print(f"powos app: {e}", file=sys.stderr)
+        sys.exit(1)

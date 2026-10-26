@@ -1,0 +1,59 @@
+# SpacetimeDB 2.12.0 built from the PowOS fork (~/Projects/SpacetimeDB, branch powos/v2.12: upstream v2.12.0 plus three
+# commits that make an idle server idle; see FORK.md there). Replaces spacetimedb-bin (the unpatched official
+# binaries; the same paths, the same CLI). Measured on the OnePlus Open
+# (docs/POWOS-APPS-FEASIBILITY.md §8): every loaded database cost ~145 wakeups/s and ~1.4% of a core doing nothing,
+# and the bare server another ~100/s - on a phone that keeps its home (and so its databases) open, that's battery.
+#   engine:     the per-database transaction-metrics recorder slept 5 ms and polled its queue forever; it now parks on the
+#         queue while no transactions run and keeps the 5 ms batching while they do.
+#   wasmtime:   wasmtime's 10 ms epoch ticker (it only serves to log calls running over a second) ticks only while a call
+#         into WASM runs. V8's budget ticker is untouched.
+#   standalone: the control database (sled) fsynced every 50 ms, idle or not; now once a second.
+# Result on the phone: 556 -> 10-15 wakeups/s with 4 clients and 2-3 databases, 161 -> 9 with none; CPU ~0.
+# All three are for upstream (clockworklabs/SpacetimeDB, none sent yet); a release that has one drops it on the next
+# rebase of the fork. The fork is local only (no remote of ours): build-pkgs.sh mounts it read-only at /forks/SpacetimeDB
+# (FORKS in this folder), and the source is pinned to one commit of it, so the build is reproducible.
+# Upgrading: rebase the fork onto the new tag (FORK.md), then set pkgver and _commit here.
+pkgname=spacetimedb
+pkgver=2.12.0
+pkgrel=2
+_commit=48e5b47ce076f99e6faecc774ad2543c681be702   # powos/v2.12 (v2.12.0 + the three idle commits + FORK.md)
+pkgdesc='SpacetimeDB server (PowOS fork: idle-wakeup commits) and CLI'
+arch=(aarch64)
+url='https://github.com/clockworklabs/SpacetimeDB'
+license=('BUSL-1.1')
+depends=(gcc-libs glibc)
+makedepends=(git rustup clang cmake protobuf)
+provides=(spacetimedb-bin)
+conflicts=(spacetimedb-bin)
+replaces=(spacetimedb-bin)
+# !ccache: nothing for Rust to gain (and the shared cache's tmp is another user's).
+options=(!strip !debug !lto !ccache)
+source=("SpacetimeDB::git+file:///forks/SpacetimeDB#commit=$_commit"
+        "spacetime-$pkgver-aarch64.tar.gz::https://github.com/clockworklabs/SpacetimeDB/releases/download/v$pkgver/spacetime-aarch64-unknown-linux-gnu.tar.gz")
+sha256sums=('SKIP'
+            '3dd4785cf525d1029ab61177db2dc8cd303e04a73728ee611f5e1f4d2065b4ab')
+noextract=("spacetime-$pkgver-aarch64.tar.gz")
+
+prepare() {
+  cd SpacetimeDB
+  # The toolchain upstream pins (rust-toolchain.toml), through rustup.
+  rustup show active-toolchain >/dev/null 2>&1 || rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" --profile minimal
+  # The CLI is the official one (nothing in it changed).
+  mkdir -p "$srcdir/official" && bsdtar -xf "$srcdir/spacetime-$pkgver-aarch64.tar.gz" -C "$srcdir/official"
+}
+
+build() {
+  cd SpacetimeDB
+  # makepkg's RUSTFLAGS would replace upstream's .cargo/config.toml flags, and tokio's taskdump needs this one.
+  export RUSTFLAGS="${RUSTFLAGS:-} --cfg tokio_unstable"
+  cargo build --release --locked -p spacetimedb-standalone
+}
+
+package() {
+  local d=/usr/lib/spacetimedb/$pkgver
+  install -Dm755 SpacetimeDB/target/release/spacetimedb-standalone "$pkgdir$d/spacetimedb-standalone"
+  install -Dm755 "$srcdir/official/spacetimedb-cli" "$pkgdir$d/spacetimedb-cli"
+  install -d "$pkgdir/usr/bin"
+  ln -s "$d/spacetimedb-cli" "$pkgdir/usr/bin/spacetime"
+  ln -s "$d/spacetimedb-standalone" "$pkgdir/usr/bin/spacetimedb-standalone"
+}

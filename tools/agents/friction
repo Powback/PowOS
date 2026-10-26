@@ -1,0 +1,4 @@
+#!/bin/bash
+# tools/agents/friction (Mac): `powos friction` for the Mac's agents (the Mac has no `powos`): the agents CLI, which
+# runs it on the phone's board. `tools/agents/friction help`.
+exec python3 "$(cd "$(dirname "$0")/../.." && pwd -P)/lib/ai/agents/powos-agents-cli" friction "$@"

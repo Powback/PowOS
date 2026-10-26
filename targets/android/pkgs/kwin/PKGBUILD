@@ -11,6 +11,28 @@
 #   0009-0011   ours: phone swipe-up opens the launcher, Android keyboard follows text focus,
 #               DPMS wakes when the app comes back to the front
 #   0015        ours: ANLAND_SOCKET may be an abstract-namespace socket ("@powos.display", rooted phones)
+#   0016        ours: X11 apps' text fields show the Android keyboard (D-Bus SetX11TextFocus, powos-ime-bridge)
+#   0017        ours: a full-screen window task keeps its size through output changes (fold) and is scaled to fit
+#   0018        ours: floating window tasks resize live ("size"), new windows open as tasks ("export-new"), dialogs
+#               drawn into their parent's task, closing a floating task closes its window
+#   0019        ours: an Xwayland window is looked at for "export-new" again once it has its wl_surface
+#   0020        ours: a touch goes to the task's window or a shown popup/dialog that takes input there (hitTest), not
+#               to any helper window whose frame is under it (Steam's); a window that resizes itself is sized back
+#   0021        ours: a floating window task's window going full screen by itself tells the app ("fullscreen <id> 1|0"):
+#               the same task covers the screen, then floats back; a window that opened full screen floats when it leaves
+#   0022        ours: X11 windows a task shows are shown (Mapped, not Kept under KWin's input guard window: Xwayland gave
+#               the guard every touch) and raised with their task, so taps reach Steam, its dialogs, any X11 window
+#   0023        ours: KWin tells the app its session (a uuid per KWin) and the task ids it has ("session"), also on the
+#               app's "hello": the app finishes window tasks of an earlier KWin instead of showing new windows in them
+#   0024        ours: an Xwayland window that goes full screen before it has its wl_surface (a game) still opens as a
+#               task: one wait per window re-runs the full-screen / new-window decision once the surface is there
+#   0025        ours: while the desktop (the Plasma app) is on screen ("desktop 1"), new windows stay KDE windows on it,
+#               maximize is KWin's own, and its windows are never pulled out into tasks by "export-new" later
+#   0026        ours: KWin tells the app who draws a task's title bar ("decor <id> 1|0": KWin's decoration or the
+#               window's own - Steam, GTK header bars - so the app adds no second bar), and a drag on a window's own
+#               bar moves the task ("move <id>"), not the window on the hidden desktop
+#   0027        ours: a task's window's popups (menus, combo boxes, tooltips) are placed inside the task, not against the
+#               output (Workspace::setPopupAreaHandler): past the window's edge they were cut off; desktop windows unchanged
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -20,7 +42,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.19
+pkgrel=3.31
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -51,11 +73,23 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0012-backends-anland-keyboard-only-when-a-client-asks.patch
           0013-backends-anland-windows-as-Android-tasks.patch
           0014-workspace-let-the-platform-take-window-operations-over.patch
-          0015-backends-anland-display-daemon-in-the-abstract-namespace.patch)
+          0015-backends-anland-display-daemon-in-the-abstract-namespace.patch
+          0016-backends-anland-keyboard-for-X11-text-fields.patch
+          0017-backends-anland-full-screen-window-tasks-keep-their-size.patch
+          0018-backends-anland-floating-window-tasks-resize-live.patch
+          0019-backends-anland-xwayland-windows-export-once-they-have-a-surface.patch
+          0020-backends-anland-touches-go-to-windows-that-take-them.patch
+          0021-backends-anland-a-floating-window-task-s-own-full-screen.patch
+          0022-backends-anland-windows-a-task-shows-are-shown-to-X-too.patch
+          0023-backends-anland-tell-the-app-which-KWin-it-is-and-its-live-tasks.patch
+          0024-backends-anland-a-window-full-screen-before-its-surface-opens-as-a-task.patch
+          0025-backends-anland-the-desktop-s-own-windows-stay-on-it.patch
+          0026-backends-anland-who-draws-a-task-s-title-bar-and-its-own-bar-s-drag.patch
+          0027-backends-anland-popups-of-a-task-s-window-stay-inside-the-task.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

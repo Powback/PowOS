@@ -4,7 +4,7 @@ widget "focus" {
   size: 3x3
   minSize: 3x2
 
-  meta { owl: 4 }
+  meta { owl: 6 }
 
   // No shell at all: state, a clock and buttons make a pomodoro timer.
   source now = clock every 1s
@@ -19,30 +19,71 @@ widget "focus" {
     endsAt = 0
   }
 
-  Column {
-    gap: 8
-    align: center
-    Box {
-      weight: 1
-      fill: width
-      align: center
-      Ring {
-        fill: true; thickness: 8
-        value: running ? left / length : 1
-        color: running ? accent : muted
-        animate value: tween(900ms, "linear")
+  // Sized from the tile, never fixed (monospace: 0.6 em a character): the ring as big as the tile allows with the
+  // time in it, and the start / -5 / +5 chips - beside it on a wide tile, under it otherwise. Soft chips, no lines.
+  let iw = tileWidth == null ? 154 : tileWidth - 24
+  let ih = tileHeight == null ? 154 : tileHeight - 24
+  let wide = iw > ih * 1.4
+  let chipH = clamp(floor(wide ? (ih - 12) / 3 : ih * 0.2), 26, 64)
+  let d = wide ? floor(min(ih, iw * 0.6)) : floor(min(iw, ih - chipH - 8))
+  let label = running ? "${pad(floor(left / 60), 2, "0")}:${pad(left % 60, 2, "0")}" : "${length / 60} min"
+  let ts = clamp(floor(d * 0.6 / (max(len(label), 5) * 0.6)), 12, 90)
+  let chipW = wide ? iw - d - 12 : (iw - 12) / 3
+  let cs = clamp(floor(min(chipH * 0.42, (chipW - 10) / (5 * 0.6))), 9, 28)
+
+  if wide {
+    Row {
+      gap: 12; align: center; fill: true
+      Box {
+        size: d; align: center
+        Ring { size: d; thickness: clamp(round(d * 0.07), 4, 14); value: running ? left / length : 1; color: running ? accent : muted; animate value: tween(900ms, "linear") }
+        Text { text: label; fontSize: ts; align: center; maxLines: 1 }
       }
-      Text {
-        text: running ? "${pad(floor(left / 60), 2, "0")}:${pad(left % 60, 2, "0")}" : "${length / 60} min"
-        style: title; align: center
+      Column {
+        weight: 1; gap: 6; fill: height
+        Box {
+          weight: 1; fill: true; align: center; background: alpha(foreground, 0.08); radius: 8 * corners
+          onTap: { endsAt = running ? 0 : now + length }
+          Text { text: running ? "stop" : "start"; fontSize: cs; color: accent; align: center; maxLines: 1 }
+        }
+        Box {
+          weight: 1; fill: true; align: center; background: alpha(foreground, 0.08); radius: 8 * corners
+          onTap: { length = max(length - 300, 300) }
+          Text { text: "-5"; fontSize: cs; color: muted; align: center; maxLines: 1 }
+        }
+        Box {
+          weight: 1; fill: true; align: center; background: alpha(foreground, 0.08); radius: 8 * corners
+          onTap: { length = min(length + 300, 3600) }
+          Text { text: "+5"; fontSize: cs; color: muted; align: center; maxLines: 1 }
+        }
       }
     }
-    Row {
-      gap: 6
-      justify: center
-      Button { text: running ? "stop" : "start"; onTap: endsAt = running ? 0 : now + length }
-      Button { text: "-5"; color: muted; onTap: length = max(length - 300, 300) }
-      Button { text: "+5"; color: muted; onTap: length = min(length + 300, 3600) }
+  } else {
+    Column {
+      gap: 8; align: center; justify: center; fill: true
+      Box {
+        size: d; align: center
+        Ring { size: d; thickness: clamp(round(d * 0.07), 4, 14); value: running ? left / length : 1; color: running ? accent : muted; animate value: tween(900ms, "linear") }
+        Text { text: label; fontSize: ts; align: center; maxLines: 1 }
+      }
+      Row {
+        gap: 6; height: chipH; fill: width
+        Box {
+          weight: 1; fill: true; align: center; background: alpha(foreground, 0.08); radius: 8 * corners
+          onTap: { endsAt = running ? 0 : now + length }
+          Text { text: running ? "stop" : "start"; fontSize: cs; color: accent; align: center; maxLines: 1 }
+        }
+        Box {
+          weight: 1; fill: true; align: center; background: alpha(foreground, 0.08); radius: 8 * corners
+          onTap: { length = max(length - 300, 300) }
+          Text { text: "-5"; fontSize: cs; color: muted; align: center; maxLines: 1 }
+        }
+        Box {
+          weight: 1; fill: true; align: center; background: alpha(foreground, 0.08); radius: 8 * corners
+          onTap: { length = min(length + 300, 3600) }
+          Text { text: "+5"; fontSize: cs; color: muted; align: center; maxLines: 1 }
+        }
+      }
     }
   }
 }

@@ -69,14 +69,31 @@ fun agentInvocation(
     }
 }
 
+/**
+ * What PowOS AI gets for "create app" (PowosAiChat.newApp, in a fresh directory of its own): the PowOS app platform -
+ * `powos app new` here, the module and the page (and a widget if one fits), `powos app install` - which puts it in the
+ * phone launcher's drawer. [description]: what the user wants, or "" to ask them first.
+ */
+fun newAppPrompt(description: String) =
+    buildString {
+        append("Build me a PowOS app")
+        if (description.isNotBlank()) append(": ").append(description) else append(" - first ask me in one short question what it should do")
+        append(
+            "\n\nThis directory is fresh and just for it. Use the PowOS app platform (powos app help): " +
+                "`powos app new <short-name> --name \"<Shown name>\" --dir .` here, then write the module (module/src/lib.rs) " +
+                "and the full-screen page (ui/pages/main.tsx); add a home widget (ui/widgets/main.tsx) only if one makes " +
+                "sense, else drop it from powos-app.json. Then `powos app install .` - on an error, read it, fix the code " +
+                "and install again. Installed, it's in my app drawer and opens full screen; its widget is in home's edit " +
+                "sheet. No .desktop file: that's only for apps on the Plasma desktop. Keep your replies short - I'm " +
+                "reading them on my phone; end with one line saying what the app does.",
+        )
+    }
+
 /** A new-app session in ~/apps: the agent asks what to build, then adds it to the app drawer. */
 fun newAppCommand(agentBin: String): String {
+    // PowOS AI in a terminal (the shell opens its chat instead: PowosAiChat.newApp): a PowOS app, in its own directory.
     if (agentBin == POWOS_AI.bin) {
-        val prompt =
-            "Ask me what app to build, then build it as a PowOS project (powos dev new). It runs on PowOS on my phone " +
-                "(Arch Linux ARM, aarch64, KDE Plasma on a touch screen). When it works, give it a desktop entry in " +
-                "~/.local/share/applications/<name>.desktop so it shows up in my app drawer."
-        return "cd ~ && ${agentInvocation(agentBin, prompt)}"
+        return "mkdir -p ~/Projects/new-app && cd ~/Projects/new-app && ${agentInvocation(agentBin, newAppPrompt(""))}"
     }
     val prompt =
         "Ask me what app to build, then build it in its own directory here. It runs on Arch Linux ARM (aarch64) inside proot " +

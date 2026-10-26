@@ -14,29 +14,49 @@ widget "games" {
   let games = lines(acf ?? "").filter(l => len(l) > 0).map(l => split(l, "\t"))
     .map(g => {id: g[0], last: num(g[1], 0), size: num(g[2], 0), name: g[3]})
   let hero = first(games)
-  let rest = drop(games, 1).take(rows ? max(rows * 2 - 2, 1) : 4)
   let tints = [accent, magenta, cyan, green, orange, blue, yellow, red]
 
-  // Launching: app() starts `steam steam://rungameid/...` as a graphical app - it hands the game to the running Steam
-  // (or starts Steam) - and brings the PowOS desktop up, where the game opens.
+  // Launching: app() starts `steam steam://rungameid/...` - rooted, through powos-open-task (Runtime.launch): a game
+  // that already runs (maybe frozen with Steam) is resumed and its window shown as its own task at once; otherwise
+  // it hands the game to the running Steam (or starts Steam) and shows the game's window when it comes.
 
-  component Ago(stamp) {
+  component Ago(stamp, size = 11) {
     let d = now - stamp
     Text {
       text: stamp == 0 ? "never played" : d < 3600 ? "${max(floor(d / 60), 1)}m ago" : d < 86400 ? "${floor(d / 3600)}h ago" : d < 86400 * 60 ? "${floor(d / 86400)}d ago" : fmtTime(stamp, "MMM yyyy")
-      style: small; color: muted; maxLines: 1
+      fontSize: size; color: muted; maxLines: 1
     }
   }
 
-  // A game's tile when there's no art: its initials on a tint picked from the theme by its appid.
+  // A game's tile when there's no art: its initials in a tint picked from the theme by its appid, on the tile's soft
+  // fill - no coloured plate, no outline.
   component Badge(game, side = 34) {
     let tint = tints[num(game.id, 0) % len(tints)]
     Box {
       width: side; height: side; radius: 6 * corners; align: center
-      background: mix(tint, background, 0.55); border: 1; borderColor: alpha(tint, 0.7)
-      Text { text: upper(join(words(replace(replace(game.name, ":", " "), "-", " ")).take(2).map(w => sub(w, 0, 1)), "")); bold: true; color: foreground; fontSize: side * 0.36; align: center }
+      background: alpha(foreground, 0.07)
+      Text { text: upper(join(words(replace(replace(game.name, ":", " "), "-", " ")).take(2).map(w => sub(w, 0, 1)), "")); bold: true; color: tint; fontSize: side * 0.36; align: center }
     }
   }
+
+  // What fits: the hero's badge by the tile's width, the list's rows (26 dp and 6 between) by the height left under the
+  // header (16 + 8) and the hero (its badge + 8 + 8).
+  let iw = tileWidth == null ? 340 : tileWidth - 24
+  let ih = tileHeight == null ? 180 : tileHeight - 24
+  let heroSide = clamp(round(min(iw * 0.16, ih * 0.32)), 34, 88)
+  let listCols = iw < 360 ? 1 : 2
+  let avail = ih - 24 - (heroSide + 8) - 8
+  // Rows no smaller than the tile warrants (a big tile: fewer, bigger rows rather than many small ones).
+  let minSide = clamp(round(min(iw / listCols, ih) * 0.16), 26, 48)
+  let listRows = max(floor((avail + 6) / (minSide + 6)), 0)
+  // Fewer games than rows: each row taller (its badge up to 54), so the list still reaches the tile's foot.
+  let need = max(ceil((len(games) - 1) / listCols), 1)
+  let rowSide = clamp(floor((avail + 6) / max(min(need, listRows), 1)) - 6, minSide, 60)
+  // Text in step with its badge (its two lines about the badge's height), and a name of ~18 characters fitting its column.
+  let rowFs = clamp(min(round(rowSide * 0.38), floor((iw / listCols - rowSide - 14) / (18 * 0.62))), 10, 20)
+  let heroFs = clamp(round(heroSide * 0.36), 13, 24)
+
+  let rest = drop(games, 1).take(listRows * listCols)
 
   Column {
     gap: 8
@@ -52,37 +72,29 @@ widget "games" {
     } else if hero == null {
       Text { text: "no games installed in PowOS's Steam yet"; style: small; color: muted }
     } else {
-      // The last played, big: tap anywhere on it to carry on.
-      Box {
-        fill: width; radius: 8 * corners; clip: true
-        background: linear(0, 0, 400, 0, [mix(tints[num(hero.id, 0) % len(tints)], background, 0.7), alpha(background, 0.4)])
-        border: 1; borderColor: alpha(tints[num(hero.id, 0) % len(tints)], 0.5)
+      // The last played, big: tap anywhere on it to carry on. On the tile itself - no plate, no outline.
+      Row {
+        fill: width; gap: 12; align: center
         onTap: app("steam steam://rungameid/${hero.id}")
-        Row {
-          padding: 10; gap: 12; align: center
-          Badge { game: hero; side: 46 }
-          Column {
-            gap: 2; weight: 1
-            Text { text: hero.name; style: body; bold: true; maxLines: 1 }
-            Ago { stamp: hero.last }
-          }
-          Box {
-            width: 38; height: 38; radius: 19; align: center; background: accent
-            Text { text: "▶"; color: background; fontSize: 15; align: center }
-          }
+        Badge { game: hero; side: heroSide }
+        Column {
+          gap: 2; weight: 1
+          Text { text: hero.name; fontSize: heroFs; bold: true; maxLines: 1 }
+          Ago { stamp: hero.last; size: round(heroFs * 0.8) }
         }
+        Text { text: "▶"; color: accent; fontSize: round(heroFs * 1.1); width: round(heroFs * 1.3); align: center }
       }
       Grid {
-        columns: cols && cols < 5 ? 1 : 2; gap: 6
+        columns: listCols; gap: 6
         for g in rest key g.id {
           Row {
             gap: 8; align: center
             onTap: app("steam steam://rungameid/${g.id}")
-            Badge { game: g; side: 26 }
+            Badge { game: g; side: rowSide }
             Column {
               gap: 0; weight: 1
-              Text { text: g.name; style: small; maxLines: 1 }
-              Ago { stamp: g.last }
+              Text { text: g.name; fontSize: rowFs; maxLines: 1 }
+              Ago { stamp: g.last; size: round(rowFs * 0.85) }
             }
           }
         }

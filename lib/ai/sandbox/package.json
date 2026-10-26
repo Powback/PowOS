@@ -1,0 +1,10 @@
+{
+  "name": "powos-sandbox",
+  "private": true,
+  "type": "module",
+  "description": "PowOS agents' TypeScript sandbox: ported from SpaceTimeAI's code mode (agents/worker/codemode). TypeScript type-checked against the job's granted declarations, run in QuickJS (WebAssembly) with a memory cap and a deadline. Runtime deps only; no build.",
+  "dependencies": {
+    "quickjs-emscripten": "0.32.0",
+    "typescript": "5.9.3"
+  }
+}

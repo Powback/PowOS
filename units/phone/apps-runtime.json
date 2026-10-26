@@ -1,0 +1,27 @@
+{
+  "id": "apps-runtime",
+  "name": "PowOS apps platform",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "powos app (install/publish/dev), powos compose (widgets from building blocks, the composed module), powos-runtime (native/sandbox/container), powos units, the app templates and the registry module",
+  "installedBy": "targets/android/rooted/powos-deploy.sh",
+  "files": [
+    "/usr/lib/powos/apps/powos-app",
+    "/usr/lib/powos/apps/powos-runtime",
+    "/usr/lib/powos/apps/powos-units",
+    "/usr/lib/powos/apps/powos-compose",
+    "/usr/lib/powos/apps/composed",
+    "/usr/lib/powos/apps/templates",
+    "/usr/lib/powos/apps/registry",
+    "/usr/lib/powos/apps/__pycache__",
+    "/usr/bin/powos-app",
+    "/usr/bin/powos-runtime",
+    "/usr/bin/powos-units",
+    "/var/lib/powos/runtime",
+    "/var/lib/powos/apps",
+    "/usr/lib/powos/apps"
+  ],
+  "packages": [
+    "bubblewrap"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "local.app-api",
+  "name": "App API",
+  "version": "0.1.0",
+  "description": "See and switch on what your apps can do, as one API: actions by safety class, the generated API/AI tools/CLI/widget views, dry runs, the audit log and trackers. Talks only to the local App API runtime on this device.",
+  "icon": "icon.svg",
+  "ui": { "dir": "out/ui/" },
+  "page": { "entry": "pages/main.js" },
+  "module": null,
+  "backend": null,
+  "net": ["127.0.0.1"],
+  "widgets": [],
+  "surfaces": { "launcher": true, "desktop": true },
+  "permissions": [],
+  "budget": { "phone": { "memMB": 8, "idle": "unload" }, "desktop": { "memMB": 16 } }
+}

@@ -21,20 +21,48 @@ widget "what's new" {
 
   onTap: screen()
 
+  // Sized from the tile, never fixed (monospace: 0.6 em a character, a line 1.4 em budgeted): the label, the version
+  // big with its date, then the changes - whole ones only, each one's wrapped lines counted, as many as fit spread over
+  // the height, the rest counted.
+  let iw = tileWidth == null ? 154 : tileWidth - 24
+  let ih = tileHeight == null ? 106 : tileHeight - 24
+  let ls = clamp(floor(min(ih * 0.08, iw / (10 * 0.6))), 10, 18)
+  let vs = clamp(floor(min(iw * 0.55 / (max(len(latest.version ?? "0.0.0"), 5) * 0.6), ih * 0.2 / 1.4)), 14, 64)
+  let items = latest == null ? [] : latest.items
+  let budget0 = ih - (ls + vs) * 1.4 - 6 - 14
+  // Small enough that the first change fits whole: ceil(chars / per line) lines of 1.4 em in the height left.
+  let first = len(items) == 0 ? 20 : len(items[0]) + 2
+  let is = clamp(floor(min(iw / 20, ih * 0.075, sqrt(max(budget0, 1) * iw / (first * 0.6 * 1.4)) * 0.85)), 8, 22)
+  let cpl = max(1, floor((iw - is) / (is * 0.6)))
+  // The date beside the version where the width leaves it room.
+  let dateFits = iw - len(latest.version ?? "") * 0.6 * vs - 6 >= 10 * 0.6 * ls
+  let heights = items.map(i => ceil((len(i) + 2) / cpl) * is * 1.4)
+  let budget = ih - (ls + vs) * 1.4 - 6 - is * 1.4
+  let fits = count(range(len(items)), k => sum(take(heights, k + 1)) + k * 4 <= budget)
+
   Column {
-    gap: 2
-    Text { text: "what's new"; style: muted }
+    gap: 2; fill: height
+    Text { text: "what's new"; fontSize: ls; color: muted; maxLines: 1 }
     if latest != null {
       Row {
         gap: 6
         align: bottom
-        Text { text: latest.version; style: title; color: accent; width: 76; maxLines: 1 }
-        Text { text: behind ? "update" : latest.date; style: small; color: behind ? yellow : muted; align: end; weight: 1; maxLines: 1 }
+        Text { text: latest.version; fontSize: vs; color: accent; maxLines: 1 }
+        if dateFits {
+          Text { text: behind ? "update" : latest.date; fontSize: ls; color: behind ? yellow : muted; align: end; weight: 1; maxLines: 1 }
+        }
       }
-      // Every change, cut off with "…" where the tile ends.
-      Text { text: join(latest.items.map(i => "• ${i}"), "\n"); style: small; maxLines: 40; weight: 1 }
+      Column {
+        gap: 4; weight: 1; justify: fits + (fits < len(items) ? 1 : 0) > 1 ? "spaceBetween" : "start"
+        for i in take(items, fits) {
+          Text { text: "• ${i}"; fontSize: is; maxLines: 6 }
+        }
+        if fits < len(items) {
+          Text { text: "+${len(items) - fits} more"; fontSize: is; color: muted; maxLines: 1 }
+        }
+      }
     } else {
-      Text { text: log == null ? "…" : "offline"; style: title; color: muted }
+      Text { text: log == null ? "…" : "offline"; fontSize: vs; color: muted }
     }
   }
 

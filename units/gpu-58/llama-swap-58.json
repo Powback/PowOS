@@ -1,0 +1,48 @@
+{
+  "id": "llama-swap-58",
+  "name": "llama-swap + vLLM coder-32b (.58 RTX 5090)",
+  "kind": "service",
+  "host": "desktop",
+  "hostNote": "the 5090 box (192.168.50.58, Bazzite, RTX 5090 32 GB)",
+  "owner": "system:llm",
+  "purpose": "the big-model host: llama-swap v240 on :9292 starts vLLM Qwen/Qwen3-32B-AWQ (64k context, fp8 KV, YaRN x2, hermes tools, qwen3 reasoning) as qwen-32b-vllm / coder-32b (coder-32b-nothink through the router) on first request, through a VRAM gate (refuses below 30000 MiB free), and stops it after 300 idle seconds; the router llm.pow (PowStation config/litellm/config.yaml) serves it as coder-32b and falls back to gpu-195's general when it refuses or the box is off. Config, gate script and unit file live in the local-llm-stack checkout (powos/), deployed by its powos/install.sh",
+  "installedBy": "~/Projects/local-llm-stack/powos/install.sh (systemd --user, user powos, linger on)",
+  "image": "docker.io/vllm/vllm-openai:latest (the vLLM container llama-swap runs, vllm-qwen32b)",
+  "ports": [
+    "9292/tcp",
+    "127.0.0.1:8001/tcp"
+  ],
+  "files": [
+    "/var/home/powos/.local/bin/llama-swap",
+    "/var/home/powos/.config/systemd/user/llama-swap.service",
+    "/var/home/powos/Projects/local-llm-stack/powos/llama-swap.yaml",
+    "/var/home/powos/Projects/local-llm-stack/powos/run-vllm-32b.sh",
+    "/var/home/powos/.local/share/containers/storage/volumes/vllm-hf-cache"
+  ],
+  "processes": [
+    {
+      "systemd": "llama-swap.service"
+    },
+    {
+      "container": "vllm-qwen32b"
+    }
+  ],
+  "unbounded": "no memory/cpu/pid limits yet: llama-swap is a bare systemd --user service and the vLLM container runs without --memory/--cpus (local-llm-stack's script); VRAM is bounded by --gpu-memory-utilization 0.92 and the gate",
+  "autosleep": "llama-swap ttl 300 s (the proxy stays up, no VRAM)",
+  "gpu": "nvidia.com/gpu=all (the one 5090)",
+  "vramBudget": "29.3g (0.92 of 32 GiB)",
+  "health": "http://192.168.50.58:9292/health",
+  "remove": {
+    "stop": [
+      "systemctl --user disable --now llama-swap.service"
+    ],
+    "commands": [
+      "rm -f /var/home/powos/.config/systemd/user/llama-swap.service /var/home/powos/.local/bin/llama-swap",
+      "systemctl --user daemon-reload"
+    ],
+    "keep": [
+      "vllm-hf-cache (podman volume, 19 GB: Qwen3-32B-AWQ; podman volume rm vllm-hf-cache to drop it)",
+      "~/Projects/local-llm-stack (the checkout; also holds the Ollama compose)"
+    ]
+  }
+}

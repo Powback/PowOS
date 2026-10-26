@@ -42,66 +42,149 @@ widget "breathe" {
   let p1 = (t1 - (i1 > 0 ? ends[i1 - 1] : 0)) / step1[1]
   let ease = 0.5 - cos(p1 * pi) / 2
   let lastMove = steps.take(i1).filter(s => s[0] != "hold").map(s => s[0]).last() ?? "out"
-  let k = !running ? 0 : step1[0] == "in" ? ease : step1[0] == "out" ? 1 - ease : lastMove == "in" ? 1 : 0
+  // Idle, the circle rests at a full breath (big enough to read "start" on), not at the bottom of one.
+  let k = !running ? 1 : step1[0] == "in" ? ease : step1[0] == "out" ? 1 - ease : lastMove == "in" ? 1 : 0
   let grow = lerp(0.42, 1, k)
   let holding = running && step[0] == "hold"
 
   onTap: startedAt = running ? 0 : now
 
-  Column {
-    gap: 4
-    align: center
-    Box {
-      weight: 1
-      fill: width
-      align: center
-      // the size of a full breath
-      Canvas {
-        fill: true
-        circle(width / 2, height / 2, min(width, height) / 2 - 4, stroke: alpha(border, 0.6), width: 1.5)
-      }
-      // drawn full size once; only its scale changes
-      Canvas {
-        fill: true
-        scale: grow
-        animate scale: tween(1s, "linear")
-        let cx = width / 2
-        let cy = height / 2
-        let rOuter = min(width, height) / 2 - 4
-        let r = rOuter * 0.88
-        circle(cx, cy, r + rOuter * 0.07, fill: alpha(accent, 0.10))
-        circle(cx, cy, r, fill: radial(cx, cy, r, [alpha(accent, 0.55), alpha(accent, 0.25)]))
-        circle(cx, cy, r, stroke: accent, width: 2)
-      }
-      // fills during a hold
-      Ring {
-        fill: true
-        thickness: 2
-        track: transparent
-        color: alpha(foreground, 0.7)
-        value: holding ? (into + 1) / step[1] : 0
-        animate value: tween(1s, "linear")
-        opacity: holding ? 1 : 0
-        scale: grow * 0.93
-        animate scale: tween(1s, "linear")
+  // Sized from the tile, never fixed (monospace: 0.6 em a character - 0.7 for the pattern lines' · and ›; a line
+  // 1.4 em budgeted): the circle as big as the tile allows; the pattern (its name, then its steps or the round) beside
+  // it on a wide tile, as two lines under it on a tall one, one line under it otherwise.
+  let iw = tileWidth == null ? 154 : tileWidth - 24
+  let ih = tileHeight == null ? 154 : tileHeight - 24
+  let wide = iw > ih * 1.2
+  let tall = ih > iw * 1.3
+  let l1 = pattern.name
+  let l2 = running ? "${floor(elapsed / cycle) + 1} of ${rounds}" : "${join(steps.map(s => s[1]), "·")}  ›"
+  let both = "${l1}  ${l2}"
+  let d0 = wide ? min(ih, iw * 0.7) : iw
+  let restW = wide ? iw - d0 - 12 : iw
+  let s1 = clamp(floor(min(restW / (max(len(l1), 4) * 0.7), (wide ? ih * 0.5 : ih * 0.18) / 1.4)), 9, 80)
+  let s2 = clamp(floor(min(restW / (max(len(l2), 4) * 0.7), s1 * 0.75)), 9, 60)
+  let ps = clamp(floor(min(iw / (len(both) * 0.7), ih * 0.1)), 9, 26)
+  let under = tall ? (s1 + s2) * 1.45 + 10 : ps * 1.5 + 8
+  let d = wide ? floor(d0) : floor(min(iw, ih - under))
+  // A tall tile with room left under the two lines: a hint as a third (idle only).
+  let l3 = running ? "" : "tap to start"
+  let s3 = clamp(floor(min(iw / (len(l3) * 0.7), s2)), 9, 30)
+  let hint = tall && l3 != "" && ih - d - under >= s3 * 1.45 + 4
+  let ls = clamp(floor(d / (7 * 0.6) * 0.45), 10, 48)
+
+  if wide {
+    Row {
+      gap: 12; align: center; fill: true
+      Spacer { weight: 1 }
+      Box {
+        size: d
+        align: center
+        // the size of a full breath
+        Canvas {
+          fill: true
+          circle(width / 2, height / 2, min(width, height) / 2 - 4, stroke: alpha(border, 0.6), width: 1.5)
+        }
+        // drawn full size once; only its scale changes
+        Canvas {
+          fill: true
+          scale: grow
+          animate scale: tween(1s, "linear")
+          let cx = width / 2
+          let cy = height / 2
+          let rOuter = min(width, height) / 2 - 4
+          let r = rOuter * 0.88
+          circle(cx, cy, r + rOuter * 0.07, fill: alpha(accent, 0.10))
+          circle(cx, cy, r, fill: radial(cx, cy, r, [alpha(accent, 0.55), alpha(accent, 0.25)]))
+          circle(cx, cy, r, stroke: accent, width: 2)
+        }
+        // fills during a hold
+        Ring {
+          fill: true
+          thickness: 2
+          track: transparent
+          color: alpha(foreground, 0.7)
+          value: holding ? (into + 1) / step[1] : 0
+          animate value: tween(1s, "linear")
+          opacity: holding ? 1 : 0
+          scale: grow * 0.93
+          animate scale: tween(1s, "linear")
+        }
+        Column {
+          gap: 0
+          align: center
+          Text {
+            text: !running ? "start" : step[0] == "hold" ? "hold" : step[0] == "in" ? "inhale" : "exhale"
+            bold: true; align: center; fontSize: ls; maxLines: 1
+          }
+          if running {
+            Text { text: "${step[1] - into}"; fontSize: round(ls * 0.75); color: alpha(foreground, 0.65); align: center; maxLines: 1 }
+          }
+        }
       }
       Column {
-        gap: 0
+        align: center; gap: 2
+        onTap: pick = running ? pick : (pick + 1) % len(patterns)
+        Text { text: l1; fontSize: s1; align: center; maxLines: 1 }
+        Text { text: l2; fontSize: s2; color: muted; align: center; maxLines: 1 }
+      }
+      Spacer { weight: 1 }
+    }
+  } else {
+    Column {
+      gap: 4; align: center; justify: center; fill: true
+      Box {
+        size: d
         align: center
-        Text {
-          text: !running ? "start" : step[0] == "hold" ? "hold" : step[0] == "in" ? "inhale" : "exhale"
-          bold: true; align: center
+        // the size of a full breath
+        Canvas {
+          fill: true
+          circle(width / 2, height / 2, min(width, height) / 2 - 4, stroke: alpha(border, 0.6), width: 1.5)
         }
-        if running {
-          Text { text: "${step[1] - into}"; style: small; color: alpha(foreground, 0.65); align: center }
+        // drawn full size once; only its scale changes
+        Canvas {
+          fill: true
+          scale: grow
+          animate scale: tween(1s, "linear")
+          let cx = width / 2
+          let cy = height / 2
+          let rOuter = min(width, height) / 2 - 4
+          let r = rOuter * 0.88
+          circle(cx, cy, r + rOuter * 0.07, fill: alpha(accent, 0.10))
+          circle(cx, cy, r, fill: radial(cx, cy, r, [alpha(accent, 0.55), alpha(accent, 0.25)]))
+          circle(cx, cy, r, stroke: accent, width: 2)
+        }
+        // fills during a hold
+        Ring {
+          fill: true
+          thickness: 2
+          track: transparent
+          color: alpha(foreground, 0.7)
+          value: holding ? (into + 1) / step[1] : 0
+          animate value: tween(1s, "linear")
+          opacity: holding ? 1 : 0
+          scale: grow * 0.93
+          animate scale: tween(1s, "linear")
+        }
+        Column {
+          gap: 0
+          align: center
+          Text {
+            text: !running ? "start" : step[0] == "hold" ? "hold" : step[0] == "in" ? "inhale" : "exhale"
+            bold: true; align: center; fontSize: ls; maxLines: 1
+          }
+          if running {
+            Text { text: "${step[1] - into}"; fontSize: round(ls * 0.75); color: alpha(foreground, 0.65); align: center; maxLines: 1 }
+          }
         }
       }
-    }
-    // While idle, tapping the pattern switches to the next one.
-    Text {
-      text: running ? "${pattern.name}  ${floor(elapsed / cycle) + 1} of ${rounds}" : "${pattern.name}  ${join(steps.map(s => s[1]), "·")}  ›"
-      style: muted; align: center
-      onTap: pick = running ? pick : (pick + 1) % len(patterns)
+      // While idle, tapping the pattern switches to the next one.
+      if tall {
+        Text { text: l1; fontSize: s1; align: center; maxLines: 1; onTap: pick = running ? pick : (pick + 1) % len(patterns) }
+        Text { text: l2; fontSize: s2; color: muted; align: center; maxLines: 1 }
+        if hint { Text { text: l3; fontSize: s3; color: muted; align: center; maxLines: 1 } }
+      } else {
+        Text { text: both; fontSize: ps; color: muted; align: center; maxLines: 1; onTap: pick = running ? pick : (pick + 1) % len(patterns) }
+      }
     }
   }
 }

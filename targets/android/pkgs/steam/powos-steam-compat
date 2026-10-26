@@ -1,0 +1,504 @@
+#!/usr/bin/env python3
+"""powos-steam-compat: which way each Steam game runs on the phone, picked per game - the fastest that works.
+
+Every installed game has up to three ways to run (fastest first, as far as we know before measuring):
+  native   its native Linux build (no compat tool): the game's x86 code under FEX, no Wine at all; FEX hands its
+           GL/Vulkan calls to the phone's own Mesa (thunks, /usr/bin/steam STEAM_COMPAT_FEX_CONFIG)
+  arm64    Proton Experimental (ARM64): Wine itself runs natively, only the game's x86 code goes through FEX
+           (arm64ec/wow64fex); needs Steam Linux Runtime 4.0 arm64, which Steam fetches at the first launch
+  x86      Proton Experimental: all of Wine under FEX (what every game ran on before)
+
+Policy (mode "auto"): the fastest tool with a measured working launch (median tap -> window, warm Steam first), else
+the first of native / arm64 / x86 the game has and that hasn't just failed. A launch is measured by powos-open-task
+(the drawer / home / widget path: its window's time, or "fail" when none came; never across a download) and by the
+phone checks (tools/phone/verify/bf-coldstart.sh), through `record`.
+
+Games that already ran under Proton (a prefix in compatdata with a drive_c) start in mode "kept": their current tool
+stays until someone says `auto` - a switch to the native build would hide their Proton saves (in the prefix, the
+native build looks in ~/.config or ~/.local/share) and makes Steam swap the depot. New games start in "auto".
+`set <appid> native|arm64|x86|<tool name>` pins one ("pinned").
+
+Steam reads its compat tool mapping (config.vdf CompatToolMapping) at start and rewrites it from memory at exit, so
+the mapping is only written while Steam is off: /usr/bin/steam runs `apply` before it starts the client. A choice made
+while Steam runs (set, a failed launch) is applied at its next start (`powos game <x> stop --steam` to make that now).
+
+    powos-steam-compat apply [--dry-run]            the policy into config.vdf (Steam off); prints what changed
+    powos-steam-compat status [appid]               mode, the tool now, what each tool measured
+    powos-steam-compat set <appid> auto|native|arm64|x86|<tool>   (or what `mode` printed: kept:<tool>, pinned:<tool>)
+    powos-steam-compat mode <appid>                 auto | kept:<tool> | pinned:<tool>
+    powos-steam-compat record <appid> <ms>|fail [--tool T] [--cold]   a launch's result (tool: the mapping now)
+    powos-steam-compat get <appid>                  tool=<mapping name or -> opts=<LaunchOptions or ->
+    powos-steam-compat tool <appid> <name|->        the raw mapping (Steam off; no policy state change)
+    powos-steam-compat opts <appid> <text|->        every user's LaunchOptions for the app (Steam off)
+
+State: ~/.local/share/powos/steam-compat.json. Edits keep <file>.powos-bak-<time> copies of config.vdf/localconfig.vdf.
+"""
+import glob
+import json
+import os
+import re
+import shutil
+import statistics
+import struct
+import sys
+import time
+
+S = os.path.expanduser(os.environ.get("POWOS_STEAM_DIR", "~/.local/share/Steam"))
+CONFIG = os.path.join(S, "config/config.vdf")
+STATE = os.path.expanduser(os.environ.get("POWOS_STEAM_COMPAT_STATE", "~/.local/share/powos/steam-compat.json"))
+TOOLS_PATH = ["installconfigstore", "software", "valve", "steam", "compattoolmapping"]
+APPS_PATH = ["userlocalconfigstore", "software", "valve", "steam", "apps"]
+TOOL = {"native": "-", "arm64": "proton-experimental-arm64", "x86": "proton_experimental"}
+NAME = {v: k for k, v in TOOL.items()}
+ORDER = ["native", "arm64", "x86"]
+ARM64_DIR = "Proton Experimental (ARM64)"
+KEEP = 6  # results kept per tool
+
+
+# ---- Steam's text VDF files: edited in place, only the block in question (the rest stays byte for byte) ----
+def tokens(t):
+    return [(m.start(), m.end(), m.group()) for m in re.finditer(r'"(?:[^"\\]|\\.)*"|[{}]', t)]
+
+
+def find(t, parent, key):
+    tok, stack, k, found, par = tokens(t), [], None, None, None
+    for i, (_, _, v) in enumerate(tok):
+        if v == "{":
+            stack.append(((k or "").strip('"').lower(), i)); k = None
+        elif v == "}":
+            name, start = stack.pop()
+            path = [n for n, _ in stack] + [name]
+            if path == parent:
+                par = (start, i)
+            elif key is not None and path == parent + [key.lower()]:
+                found = (start, i)
+            k = None
+        else:
+            k = v if k is None else None
+    return tok, found, par
+
+
+def line_span(t, s, e):
+    ls = t.rfind("\n", 0, s) + 1
+    le = t.find("\n", e)
+    return ls, (len(t) if le < 0 else le + 1)
+
+
+def child(tok, block, key):
+    depth = 0
+    for j in range(block[0], block[1]):
+        v = tok[j][2]
+        if v == "{": depth += 1
+        elif v == "}": depth -= 1
+        elif depth == 1 and v.lower() == '"%s"' % key.lower() and tok[j + 1][2] not in "{}":
+            return j
+    return None
+
+
+def children(t, parent):
+    """Direct child block keys of the block at the key path `parent`."""
+    tok, _, par = find(t, parent, None)
+    out, depth = [], 0
+    if not par:
+        return out
+    for j in range(par[0], par[1]):
+        v = tok[j][2]
+        if v == "{":
+            depth += 1
+            if depth == 2: out.append(tok[j - 1][2].strip('"'))
+        elif v == "}": depth -= 1
+    return out
+
+
+def read(path):
+    return open(path, encoding="utf-8", errors="surrogateescape").read()
+
+
+def write(path, t):
+    b, n = "%s.powos-bak-%s" % (path, time.strftime("%Y%m%d-%H%M%S")), 1
+    while os.path.exists(b):  # never overwrite an older copy
+        b, n = "%s.powos-bak-%s.%d" % (path, time.strftime("%Y%m%d-%H%M%S"), n), n + 1
+    shutil.copy2(path, b)
+    tmp = path + ".powos-tmp"
+    with open(tmp, "w", encoding="utf-8", errors="surrogateescape") as f:
+        f.write(t); f.flush(); os.fsync(f.fileno())
+    os.replace(tmp, path)
+    prune(path)
+    return b
+
+
+def prune(path, keep=10):
+    for old in sorted(glob.glob(path + ".powos-bak-*"))[:-keep]:
+        try: os.remove(old)
+        except OSError: pass
+
+
+def get_tool(appid, t=None):
+    t = read(CONFIG) if t is None else t
+    tok, blk, _ = find(t, TOOLS_PATH, appid)
+    j = child(tok, blk, "name") if blk else None
+    return tok[j + 1][2].strip('"') if j is not None else "-"
+
+
+def set_tool(appid, name):
+    t = read(CONFIG)
+    tok, blk, par = find(t, TOOLS_PATH, appid)
+    if par is None:
+        if name == "-":
+            return None
+        _, _, steam = find(t, TOOLS_PATH[:-1], None)
+        if steam is None:
+            raise SystemExit("powos-steam-compat: no Steam block in " + CONFIG)
+        i = "\t" * (len(TOOLS_PATH) - 1)
+        s = line_span(t, tok[steam[1]][0], tok[steam[1]][1])[0]
+        t = t[:s] + '%s"CompatToolMapping"\n%s{\n%s}\n' % (i, i, i) + t[s:]
+        tok, blk, par = find(t, TOOLS_PATH, appid)
+    ind = "\t" * len(TOOLS_PATH)
+    new = "" if name == "-" else (
+        '%s"%s"\n%s{\n%s\t"name"\t\t"%s"\n%s\t"config"\t\t""\n%s\t"priority"\t\t"250"\n%s}\n'
+        % (ind, appid, ind, ind, name, ind, ind, ind))
+    if blk:
+        ks = line_span(t, tok[blk[0] - 1][0], tok[blk[0] - 1][1])[0]
+        ke = line_span(t, tok[blk[1]][0], tok[blk[1]][1])[1]
+    else:
+        ks = ke = line_span(t, tok[par[1]][0], tok[par[1]][1])[0]
+    return write(CONFIG, t[:ks] + new + t[ke:])
+
+
+def localconfigs():
+    return sorted(glob.glob(os.path.join(S, "userdata/*/config/localconfig.vdf")))
+
+
+def get_opts(appid):
+    for c in localconfigs():
+        t = read(c)
+        tok, blk, _ = find(t, APPS_PATH, appid)
+        j = child(tok, blk, "LaunchOptions") if blk else None
+        if j is not None:
+            return tok[j + 1][2][1:-1].replace('\\"', '"').replace("\\\\", "\\")
+    return "-"
+
+
+def set_opts(appid, text):
+    out = []
+    for c in localconfigs():
+        t = read(c)
+        tok, blk, par = find(t, APPS_PATH, appid)
+        val = text.replace("\\", "\\\\").replace('"', '\\"')
+        ind = "\t" * (len(APPS_PATH) + 1)
+        line = "" if text == "-" else '%s"LaunchOptions"\t\t"%s"\n' % (ind, val)
+        if blk:
+            j = child(tok, blk, "LaunchOptions")
+            if j is not None:
+                s, e = line_span(t, tok[j][0], tok[j + 1][1])
+            else:
+                s = e = line_span(t, tok[blk[1]][0], tok[blk[1]][1])[0]
+            t = t[:s] + line + t[e:]
+        elif text != "-" and par is not None:
+            k = ind[:-1]
+            s = line_span(t, tok[par[1]][0], tok[par[1]][1])[0]
+            t = t[:s] + '%s"%s"\n%s{\n%s%s}\n' % (k, appid, k, line, k) + t[s:]
+        else:
+            continue
+        out.append((c, write(c, t)))
+    return out
+
+
+# ---- Steam's binary appinfo cache: which builds (OSes) a game has ----
+def appinfo_oslist():
+    """{appid: set of launch oslists ("windows", "linux", "macos")}; {} when the cache can't be read."""
+    p = os.path.join(S, "appcache/appinfo.vdf")
+    try:
+        b = open(p, "rb").read()
+    except OSError:
+        return {}
+    magic = struct.unpack_from("<I", b, 0)[0]
+    strtab = None
+    if magic >= 0x07564429:  # v29: keys through a string table
+        so = struct.unpack_from("<q", b, 8)[0]
+        n = struct.unpack_from("<I", b, so)[0]; pos = so + 4; strtab = []
+        for _ in range(n):
+            e = b.index(b"\0", pos); strtab.append(b[pos:e].decode("utf8", "replace")); pos = e + 1
+        pos = 16
+    else:
+        pos = 8
+
+    def key(p):
+        if strtab is not None:
+            return strtab[struct.unpack_from("<I", b, p)[0]], p + 4
+        e = b.index(b"\0", p); return b[p:e].decode("utf8", "replace"), e + 1
+
+    def parse(p):
+        d = {}
+        while True:
+            ty = b[p]; p += 1
+            if ty == 8: return d, p
+            k, p = key(p)
+            if ty == 0: v, p = parse(p)
+            elif ty == 1:
+                e = b.index(b"\0", p); v = b[p:e].decode("utf8", "replace"); p = e + 1
+            elif ty in (2, 3, 4, 6): v = struct.unpack_from("<i", b, p)[0]; p += 4
+            elif ty == 7: v = struct.unpack_from("<Q", b, p)[0]; p += 8
+            elif ty == 10: v = struct.unpack_from("<q", b, p)[0]; p += 8
+            else: raise ValueError("vdf type %d" % ty)
+            d[k] = v
+
+    out = {}
+    head = 8 + 4 + 4 + 8 + 20 + 4 + (20 if magic >= 0x07564428 else 0)
+    try:
+        while True:
+            appid, size = struct.unpack_from("<II", b, pos)
+            if appid == 0: break
+            try:
+                d, _ = parse(pos + head)
+                a = d.get("appinfo", d)
+                oses = set()
+                for l in (a.get("config", {}).get("launch") or {}).values():
+                    if isinstance(l, dict):
+                        o = str((l.get("config") or {}).get("oslist", "windows")) or "windows"
+                        oses.update(x.strip() for x in o.split(","))
+                out[str(appid)] = oses
+            except (ValueError, IndexError, struct.error, KeyError, AttributeError):
+                pass
+            pos += 8 + size
+    except struct.error:
+        pass
+    return out
+
+
+def installed_games():
+    """{appid: name} of installed games (Steam's tools and runtimes left out)."""
+    libs = [os.path.join(S, "steamapps")]
+    try:
+        libs += [m + "/steamapps" for m in re.findall(r'"path"\s+"([^"]+)"', read(os.path.join(S, "steamapps/libraryfolders.vdf")))]
+    except OSError:
+        pass
+    out = {}
+    for lib in dict.fromkeys(libs):
+        for f in glob.glob(os.path.join(lib, "appmanifest_*.acf")):
+            t = read(f)
+            m, n = re.search(r'"appid"\s+"(\d+)"', t), re.search(r'"name"\s+"([^"]*)"', t)
+            if not m: continue
+            name = n.group(1) if n else m.group(1)
+            if re.match(r"(?i)proton|steam linux runtime|steamworks|fex|steamvr", name): continue
+            out[m.group(1)] = name
+    return out
+
+
+def family(tool):
+    """The Wine architecture a tool's prefix is for: "arm64" (ARM64 Proton), "x86" (any other Proton), None (native)."""
+    if tool in ("-", "", None):
+        return None
+    return "arm64" if "arm64" in tool.lower() else "x86"
+
+
+def swap_prefix(appid, fam):
+    """compatdata/<id> holds the prefix of one Wine architecture: one ARM64 Proton set up breaks x86 Proton (its VC++
+    runtime DLLs, c000007b: Teardown 2026-10-23 06:04) and the reverse. On a change of family the prefix in place goes
+    to compatdata/<id>.powos-<its family> and the new family's comes back (or none: Proton makes a new one). Each keeps
+    its own saves; `powos game <x> compat` back brings them back. Steam must be off (apply's caller)."""
+    cd = os.path.join(S, "steamapps/compatdata", appid)
+    if fam is None or not os.path.isdir(cd):
+        return None
+    mark = os.path.join(cd, "powos-family")
+    try:
+        cur = open(mark).read().strip()
+    except OSError:
+        cur = None
+    if cur is None:  # first time: the prefix belongs to the tool Steam used it with so far
+        cur = family(get_tool(appid)) or "x86"
+        if not os.path.isdir(os.path.join(cd, "pfx")):
+            cur = fam
+        with open(mark, "w") as f:
+            f.write(cur + "\n")
+    if cur == fam:
+        return None
+    away = cd + ".powos-" + cur
+    if os.path.exists(away):
+        os.rename(away, away + ".old-%d" % int(time.time()))
+    os.rename(cd, away)
+    back = cd + ".powos-" + fam
+    if os.path.isdir(back):
+        os.rename(back, cd)
+    else:
+        os.makedirs(cd)
+    with open(os.path.join(cd, "powos-family"), "w") as f:
+        f.write(fam + "\n")
+    return "prefix %s -> %s (the %s one kept as compatdata/%s.powos-%s)" % (cur, fam, cur, appid, cur)
+
+
+def has_prefix(appid):
+    return os.path.isdir(os.path.join(S, "steamapps/compatdata", appid, "pfx/drive_c/users"))
+
+
+def arm64_proton():
+    return os.path.isfile(os.path.join(S, "steamapps/common", ARM64_DIR, "proton"))
+
+
+# ---- state + policy ----
+def load():
+    try:
+        with open(STATE) as f:
+            s = json.load(f)
+        if isinstance(s.get("apps"), dict):
+            return s
+    except (OSError, ValueError, AttributeError):
+        pass
+    return {"apps": {}}
+
+
+def save(s):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(s, f, indent=1, sort_keys=True); f.flush(); os.fsync(f.fileno())
+    os.replace(tmp, STATE)
+
+
+def short(tool):
+    return NAME.get(tool, tool)
+
+
+def app_entry(s, appid, cfg_text=None):
+    a = s["apps"].get(appid)
+    if a is None:
+        cur = get_tool(appid, cfg_text) if os.path.exists(CONFIG) else "-"
+        # Ran under Proton already: keep its tool (its saves live in that prefix). Else the policy picks.
+        a = {"mode": "kept", "tool": cur} if (cur != "-" and has_prefix(appid)) else {"mode": "auto"}
+        a["since"] = time.strftime("%F %T")
+        s["apps"][appid] = a
+    a.setdefault("launches", {})
+    return a
+
+
+def median_ms(results, warm_only):
+    v = [r["ms"] for r in results if "ms" in r and (not warm_only or not r.get("cold"))]
+    return statistics.median(v) if v else None
+
+
+def choose(appid, a, oses):
+    """(tool short name, why)."""
+    if a["mode"] in ("pinned", "kept"):
+        return short(a.get("tool", "-")), a["mode"]
+    has = []
+    if "linux" in oses: has.append("native")
+    if not oses or "windows" in oses or not has:
+        if arm64_proton(): has.append("arm64")
+        has.append("x86")
+    L = a.get("launches", {})
+    ok = [t for t in has if not (L.get(t) and "fail" in L[t][-1])]  # the latest result of a tool decides
+    for warm in (True, False):
+        m = {t: median_ms(L.get(t, []), warm) for t in ok}
+        m = {t: v for t, v in m.items() if v is not None}
+        if m:
+            t = min(m, key=m.get)
+            return t, "fastest measured (%s: %d ms%s)" % (t, m[t], ", warm" if warm else "")
+    if ok:
+        return ok[0], "first that the game has (%s), not measured yet" % "/".join(has)
+    return has[-1], "all failed last time - %s" % has[-1]
+
+
+def steam_running():
+    try:
+        pid = open(os.path.expanduser("~/.steam/steam.pid")).read().strip()
+        exe = os.readlink("/proc/%s/exe" % pid)
+    except OSError:
+        return False
+    return exe.endswith("/steam") or "FEX" in exe
+
+
+def cmd_apply(dry):
+    if not os.path.exists(CONFIG):
+        return 0
+    if steam_running() and not dry:
+        print("powos-steam-compat: Steam is running - nothing written (it rewrites config.vdf on exit)", file=sys.stderr)
+        return 1
+    s, t, oses = load(), read(CONFIG), appinfo_oslist()
+    for appid, name in sorted(installed_games().items()):
+        a = app_entry(s, appid, t)
+        want, why = choose(appid, a, oses.get(appid, set()))
+        cur = get_tool(appid, t)
+        if TOOL.get(want, want) != cur:
+            print("%s %s: %s -> %s (%s)" % ("would set" if dry else "set", "%s %s" % (appid, name), short(cur), want, why))
+            if not dry:
+                sw = swap_prefix(appid, family(TOOL.get(want, want)))
+                if sw:
+                    print("   %s: %s" % (appid, sw))
+                set_tool(appid, TOOL.get(want, want)); t = read(CONFIG)
+                a["applied"] = time.strftime("%F %T")
+        a["why"] = why
+    if not dry:
+        save(s)
+    return 0
+
+
+def cmd_status(appid=None):
+    s, oses, games = load(), appinfo_oslist(), installed_games()
+    for g in ([appid] if appid else sorted(games)):
+        a = app_entry(s, g)
+        want, why = choose(g, a, oses.get(g, set()))
+        L = a.get("launches", {})
+        meas = ", ".join("%s %s" % (t, "/".join("fail" if "fail" in r else "%d%s" % (r["ms"], "c" if r.get("cold") else "") for r in L[t]))
+                         for t in L) or "nothing measured"
+        print("%s %s: %s, tool now %s, policy %s (%s); builds %s; ms (c = Steam started too): %s" % (
+            g, games.get(g, "?"), a["mode"], short(get_tool(g)), want, why, "/".join(sorted(oses.get(g, []))) or "?", meas))
+    return 0
+
+
+def cmd_set(appid, what):
+    s = load()
+    a = app_entry(s, appid)
+    mode, _, what = what.rpartition(":")  # kept:<tool> / pinned:<tool> (what `mode` printed), or just <tool>
+    if what == "auto":
+        a["mode"] = "auto"; a.pop("tool", None)
+    else:
+        a["mode"], a["tool"] = (mode if mode in ("kept", "pinned") else "pinned"), TOOL.get(what, what)
+    save(s)
+    if steam_running():
+        print("%s: %s - applied at Steam's next start" % (appid, what))
+        return 0
+    return cmd_apply(False)
+
+
+def cmd_record(appid, res, tool, cold):
+    s = load()
+    a = app_entry(s, appid)
+    t = short(tool or get_tool(appid))
+    r = {"t": time.strftime("%F %T")}
+    if res == "fail": r["fail"] = True
+    else: r["ms"] = int(float(res))
+    if cold: r["cold"] = True
+    a["launches"][t] = (a["launches"].get(t, []) + [r])[-KEEP:]
+    save(s)
+    print("%s: %s %s recorded" % (appid, t, res))
+    return 0
+
+
+def main(a):
+    if not a or a[0] in ("-h", "--help", "help"):
+        print(__doc__); return 0
+    c = a[0]
+    if c == "apply": return cmd_apply("--dry-run" in a)
+    if c == "status": return cmd_status(a[1] if len(a) > 1 else None)
+    if c == "mode" and len(a) == 2:  # what `set` takes to put it back: auto, or <kept|pinned>:<tool>
+        s = load(); e = app_entry(s, a[1]); save(s)
+        print("auto" if e["mode"] == "auto" else "%s:%s" % (e["mode"], short(e.get("tool", "-")))); return 0
+    if c == "get" and len(a) == 2:
+        print("tool=%s opts=%s" % (get_tool(a[1]), get_opts(a[1]))); return 0
+    if c == "record" and len(a) >= 3:
+        tool = a[a.index("--tool") + 1] if "--tool" in a else None
+        return cmd_record(a[1], a[2], tool, "--cold" in a)
+    if c in ("set", "tool", "opts") and len(a) == 3:
+        if c == "set": return cmd_set(a[1], a[2])
+        if steam_running():
+            raise SystemExit("powos-steam-compat: Steam is running - close it first (it rewrites its config files on exit)")
+        if c == "tool":
+            b = set_tool(a[1], a[2]); print("config.vdf: %s compat tool %s (backup %s)" % (a[1], a[2], b))
+        else:
+            for f, b in set_opts(a[1], a[2]): print("%s: %s LaunchOptions %s (backup %s)" % (f, a[1], a[2], b))
+        return 0
+    print(__doc__, file=sys.stderr); return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

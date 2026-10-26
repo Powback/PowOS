@@ -9,9 +9,10 @@ import android.util.Log;
 import android.view.Display;
 
 /**
- * PowOS on a foldable (OnePlus Open): opening the phone shows the PowOS desktop - with the running apps in its
- * taskbar - wherever the cover screen was (the launcher, an Android app). Folding it is left to Android (the cover
- * screen shows the home screen). Runs with the PowOS session (SessionService).
+ * PowOS on a foldable (OnePlus Open): keeps Android's default home on the alias HomeScreen picks for the hinge. With
+ * Plasma's desktop as home (the "desktop" setting) opening the phone also shows that desktop - with the running apps
+ * in its taskbar - wherever the cover screen was; with the web home (auto, launcher) fold and unfold are Android's
+ * own (the app in front stays in front). Runs with the PowOS session (SessionService).
  *
  * Unfolding = the main display (id 0, which Android moves between the cover and the inner panel) going from
  * the cover panel to the inner one (its physical mode). (Android's
@@ -60,8 +61,6 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             dm.unregisterDisplayListener(this);
         if (thread != null)
             thread.quitSafely();
-        if (shell != null)
-            shell.destroy();
     }
 
     private Boolean isBig() {
@@ -76,14 +75,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         return null; // in between (tent, half open) or unknown: no change
     }
 
-    // One root shell for the whole session: a new `su` per command took long enough that, on unfold, the cover
+    // One root shell (RootShell, the app's): a new `su` per command took long enough that, on unfold, the cover
     // screen's app showed on the inner screen before the desktop came up.
-    private Process shell;
-    private java.io.BufferedWriter shellIn;
-    private java.io.BufferedReader shellOut;
-    private static final String END = "__powos_fold_end__";
-
-    /** Runs a command as root and returns its output (on this watcher's thread only). */
     /**
      * The enabled home alias as Android's default home: switching aliases drops the remembered choice, and Home
      * (or a fold) then asked "open with" PowOS or OnePlus's launcher every time, "always" or not.
@@ -98,24 +91,9 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
 
     private String preferredHome;
 
+    /** [cmd] as root, its output: through the app's one root shell, shared with everything else (RootShell). */
     private String root(String cmd) {
-        try {
-            if (shell == null || !shell.isAlive()) {
-                shell = new ProcessBuilder("su").redirectErrorStream(true).start();
-                shellIn = new java.io.BufferedWriter(new java.io.OutputStreamWriter(shell.getOutputStream()));
-                shellOut = new java.io.BufferedReader(new java.io.InputStreamReader(shell.getInputStream()));
-            }
-            shellIn.write(cmd + "; echo " + END + "\n");
-            shellIn.flush();
-            StringBuilder out = new StringBuilder();
-            for (String line; (line = shellOut.readLine()) != null && !line.equals(END); )
-                out.append(line).append('\n');
-            return out.toString();
-        } catch (java.io.IOException e) {
-            Log.w(TAG, "root shell: " + e);
-            shell = null;
-            return "";
-        }
+        return RootShell.run(cmd).output + "\n";
     }
 
     @Override
@@ -156,7 +134,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
      * app in use: the desktop comes onto the cover with it (desktopAppActive). Neither: the cover shows the launcher.
      */
     private void folded() {
-        if (!enabled())
+        // The web home (auto, launcher): Android's own fold - the app in front stays in front on the cover screen.
+        if (!enabled() || !HomeScreen.desktopIsHome())
             return;
         carried = null;
         try {
@@ -212,15 +191,13 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
      * app carried onto the cover goes back into its PowOS window behind it.
      */
     private void unfolded() {
-        if (!enabled())
+        // The web home is the desktop unfolded: nothing to bring up (a HomeDesktop started over it fought it).
+        if (!enabled() || !HomeScreen.desktopIsHome())
             return;
         // The home alias when it is the desktop: the same activity instance Home opens. By class name it was a
         // second instance of the desktop beside the home one, and the two fought over the one connection.
-        android.content.ComponentName home = new android.content.ComponentName(ctx, "andro.marchy.HomeDesktop");
-        boolean homeIsDesktop = ctx.getPackageManager().getComponentEnabledSetting(home)
-            == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
-        su("am start --display 0 -n " + ctx.getPackageName() + "/"
-            + (homeIsDesktop ? "andro.marchy.HomeDesktop" : MainActivity.class.getName()));
+        // (Rooted, both aliases stay enabled - HomeScreen: which one is home is the one it made the default.)
+        su("am start --display 0 -n " + ctx.getPackageName() + "/andro.marchy.HomeDesktop");
         if (carried != null) {
             su("am display move-stack " + carried[0] + " " + carried[1]); // fails harmlessly if the window closed
             carried = null;

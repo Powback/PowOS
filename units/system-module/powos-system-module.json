@@ -1,0 +1,19 @@
+{
+  "id": "powos-system-module",
+  "name": "PowOS system module",
+  "kind": "system",
+  "owner": "system:powos-system-module",
+  "host": "phone-android",
+  "purpose": "Magisk module: PowOS.apk as a privileged system app + its permissions, the recents overlay, the containers kernel's nftables modules, a two-strike boot watchdog",
+  "installedBy": "the module zip (targets/android/system-module), installed with rooted.sh module (pushed to /data/local/tmp, magisk --install-module, then deleted), active after a reboot",
+  "packages": [
+    "powos-system"
+  ],
+  "files": [
+    "/data/adb/modules/powos-system"
+  ],
+  "remove": {
+    "commands": []
+  },
+  "remove_note": "the module package's own removal (Magisk's remove marker) is the uninstall; it is gone at the next boot"
+}

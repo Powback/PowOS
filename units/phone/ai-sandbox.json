@@ -1,0 +1,26 @@
+{
+  "id": "ai-sandbox",
+  "name": "Manager's TypeScript sandbox",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "the manager's TypeScript sandbox (powos sandbox, lib/ai/sandbox): its MCP server and jobs, QuickJS + a TypeScript check, run by PowOS's bun (unit bun, /usr/bin/bun); its deps (quickjs-emscripten, typescript) inside the app, from its lock",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (rooted.sh deploy builds the deps from lib/ai/sandbox/package-lock.json)",
+  "files": [
+    "/usr/lib/powos/ai/sandbox"
+  ],
+  "processes": [
+    {
+      "match": "lib/powos/ai/sandbox/main.ts"
+    }
+  ],
+  "limits": {
+    "memory": "768m",
+    "pids": 64
+  },
+  "autosleep": "never",
+  "remove": {
+    "commands": [
+      "rm -rf /usr/lib/powos/ai/sandbox"
+    ]
+  }
+}

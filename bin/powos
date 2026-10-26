@@ -39,7 +39,12 @@ experimental_warn() {
     echo -e "${YELLOW}  See the Feature Status table in CLAUDE.md.${NC}" >&2
 }
 
+# The help text, one function per group of sections (a function stays short enough to read).
 usage() {
+    _usage_core; _usage_sync; _usage_dev; _usage_more
+}
+
+_usage_core() {
     cat << EOF
 PowOS - Install-to-disk daily-driver that dual-boots Windows
 
@@ -96,9 +101,12 @@ Boot / dual-boot:
 
   cuda enable         Set up the CUDA toolkit in a GPU-passthrough container
   cuda status         Container / toolkit / GPU visibility
-
   dlss4 preset <j-m>  Force a DLSS 4 transformer preset (official; j,k=DLSS 4, l,m=4.5)
+EOF
+}
 
+_usage_sync() {
+    cat << EOF
 Controllers (analog stick-drift fixer — any joystick/gamepad):
   controller list                  Detected controllers + deadzone + idle drift
   controller deadzone <dev> <pct>  Set & persist a driver-level deadzone (now)
@@ -148,6 +156,11 @@ Updating — one question: whose code?
   console --live      Live read-only mirrors instead of snapshots
   zones               KZones window snapping: status / list layouts / edit
 
+EOF
+}
+
+_usage_dev() {
+    cat << EOF
 Layers & rollback:
   layers              Show active layers
   layers status       Detailed layer status
@@ -158,11 +171,16 @@ Layers & rollback:
   rollback reset      Clear rollback flags
 
 Packages, containers & build:
+  units               What is installed/running here: owner, purpose, status, limits (check/remove/enforce)
   containers          List containers and images
+  containers run      Run a container with hard limits (--memory/--cpus/--pids-limit; phone too)
+  containers ps       Containers with their limits; exec/limits/check: see containers --help
   containers create   Create a new distrobox container
   containers enter    Enter a distrobox container
   containers assemble Create all predefined containers
   containers prune    Clean up unused resources
+  sleep status        What is asleep - apps, containers, GUI apps, databases, shell pages - and why (--all, --json)
+  sleep wake <thing>  Wake it now (an agent call); sleep never <thing>: keep it awake (powos sleep --help)
   build [path] [tag]  Build container from Dockerfile/Containerfile
   build iso           Build the bootable PowOS image
   build test          Build container image only (for testing)
@@ -175,16 +193,35 @@ Dev & AI:
   dev fork <upstream> Fork existing app (e.g., kde:dolphin)
   dev build|enable|disable <name>  Build / install (overlay) / remove a project
   dev update <name>   Pull upstream changes (forks only)
+  app new|build|install|dev   PowOS apps (a SpacetimeDB module + a page/widgets): make, hot-reload (powos app help)
+  compose widget "<words>"    a home widget made of building blocks (apps' read actions) (powos compose help)
   ai "prompt"         Ask AI for help (uses default agent)
   ai --agent coder|devops|health   Pick an agent
   ai -i               Interactive chat mode
   ai --continue       Resume the last chat here (incl. plain claude-CLI sessions)
   ai --session <id>   Resume a conversation
-  ai manager          Persistent PowOS manager (streaming, per-dir memory, live inbox)
-  comms send <to> <msg>   Message another agent's inbox (health/coder/devops...)
+  ai manager          Persistent PowOS manager (streaming, per-dir memory, live inbox; --help: its flags)
+  sandbox run|caps|setup   TypeScript jobs in the manager's sandbox, with limits (powos sandbox help)
+  comms send <to> <msg|-> Message another agent's inbox (health/coder/devops...); - reads stdin
+                          (backticks/$() in msg: use `- <<'EOF' ... EOF`, never inline - f18)
   comms watch --agent R   Park until that role gets mail (yield, no polling)
   comms inbox|agents      Show an inbox / list all inboxes
+  agents task add|set|done|list   The work board: what each agent is on (PowOS AI page)
+  agents sweep|check|ask    The board's truth: orphans digest, phone checks, user asks with no task
+  friction add|list|fix     What got in the way (log it before working around it): fixed for good
+  android apps|open|running   (phone) Android's apps: list, open as a window or full screen, what runs
+  android notifications|notify|screenshot   (phone) The phone's notifications, post one, its screen
+  shell errors [N]    (phone) The web shell's last errors (each one also went to the manager's inbox)
+  glasses [status]    (phone) The smart glasses (Even G2/G1): connected, arms, worn, battery
+  glasses show|clear|connect|disconnect|mic   (phone) Text on them, blank them, the link, the mic (powos glasses help)
+  pet say "<text>" [--mood M]   (phone) Speak through the pet on home (powos pet help)
+  transcribe FILE|- [--lang xx] [--json]   Speech to text on the GPU server (stt.pow) (powos transcribe --help)
 
+EOF
+}
+
+_usage_more() {
+    cat << EOF
 ═══ EXPERIMENTAL (unvalidated — may not work) ═══════════════════════
 These features are half-built or hardware-only and are NOT part of the
 primary install-to-disk story. They print a warning when run. See the
@@ -462,6 +499,11 @@ cmd_status() {
     echo -e "${BOLD}${CYAN}PowOS Status${NC}"
     echo "════════════════════════════════════════"
     echo ""
+    # A phone has no USB drive, layers or RAM overlay to report (lib/phone.sh).
+    if declare -f powos_is_phone >/dev/null && powos_is_phone; then
+        _phone_status
+        return
+    fi
     _status_layers
     _status_ram_overlay
     _status_user_data
@@ -1651,8 +1693,9 @@ cmd_health() {
     _HEALTH_WARNINGS=0
     _HEALTH_USB_STATUS=""
 
-    local probe
-    for probe in "${_HEALTH_PROBES[@]}"; do
+    local probe probes=("${_HEALTH_PROBES[@]}")
+    declare -f powos_is_phone >/dev/null && powos_is_phone && probes=("${_HEALTH_PROBES_PHONE[@]}")
+    for probe in "${probes[@]}"; do
         "_health_$probe"
     done
 
@@ -2162,6 +2205,7 @@ PROJECTS_DIR="${POWOS_ROOT:-/var/lib/powos}/projects"
 [[ -f "$POWOS_LIB/ai/agent.sh" ]]     && source "$POWOS_LIB/ai/agent.sh"
 [[ -f "$POWOS_LIB/sync.sh" ]]         && source "$POWOS_LIB/sync.sh"
 [[ -f "$POWOS_LIB/backup.sh" ]]       && source "$POWOS_LIB/backup.sh"
+[[ -f "$POWOS_LIB/phone.sh" ]]        && source "$POWOS_LIB/phone.sh"
 
 # ═══════════════════════════════════════════════════════════════════
 # Container Commands (Podman/Distrobox)
@@ -2525,6 +2569,18 @@ _containers_do_usage() {
     echo "Usage: powos containers <command>"
     echo ""
     echo "Commands:"
+    echo "  run [options] <image> [cmd...]  Run a container with hard limits (options before the image):"
+    echo "                          --memory 64m  --memory-swap 128m  --cpus 0.5  --cpuset-cpus 0-2"
+    echo "                          --pids-limit 64  --name N  --network host|none  -d  --rm  -it  -e  -v  ..."
+    echo "                          (phone: Android's cgroup v1 memcg/cpuctl + v2 pids; a limit the kernel"
+    echo "                          can't enforce runs with a warning, never silently)"
+    echo "  ps [-a] [--json]        Containers with their limits (memory used/limit, CPU, pids)"
+    echo "  exec [-it] <name> <cmd> Run a command in a container, inside its limits"
+    echo "  limits <name>           A container's limits and counters (throttling, OOM kills)"
+    echo "  check                   What this kernel enforces; storage, namespace, network"
+    echo "  autosleep status        What is asleep and why (idle containers pause; phone: after 5 min by default)"
+    echo "  autosleep set <name> 5m|never|off   A container's rule (run: --autosleep 5m --sleep-mode pause|stop)"
+    echo "  wake <name>             Wake a sleeping container (start and a connection to its ports do too)"
     echo "  list [--json]           List all containers and images (--json for widgets)"
     echo "  start <name>            Start a stopped container"
     echo "  stop <name>             Stop a container (keeps it — restartable)"
@@ -2532,22 +2588,40 @@ _containers_do_usage() {
     echo "  logs <name> [--lines N] Show the last N log lines (default 200)"
     echo "  create <name> [image]   Create a new distrobox container"
     echo "  enter <name>            Enter a distrobox container"
-    echo "  remove <name>           Remove a distrobox container"
+    echo "  remove <name>           Remove a container (distrobox or podman; rm -f on the phone: and its limit groups)"
     echo "  assemble                Create all predefined containers"
     echo "  export <name> <app>     Export app from container to host"
     echo "  prune                   Clean up unused resources"
     echo "  podman <args>           Pass through to podman"
     echo "  sync <user@host>        Wire this box into a PowStation pihole-sync"
     echo ""
+    echo "Full details: powos containers run --help"
+    echo ""
     echo "Examples:"
+    echo "  powos containers run --rm --memory 64m --cpus 0.2 --pids-limit 32 alpine sh"
+    echo "  powos containers run -d --autosleep 5m --sleep-mode pause IMG   (autosleep status|set|sleep, wake NAME)"
     echo "  powos containers create dev"
     echo "  powos containers enter dev"
     echo "  powos containers assemble"
 }
 
+# Containers with hard limits (lib/apps/powos-container): run/ps/exec/limits/check everywhere; on the phone the
+# lifecycle verbs too, since its podman is the rootful one in PowOS's system tier with Android's cgroups (the
+# rootless/sudo paths below never see those containers).
+_containers_runtime() { exec "$POWOS_LIB/apps/powos-container" "$@"; }
+_containers_by_runtime() {
+    case "$1" in run|ps|exec|limits|check|autosleep|wake) return 0 ;; esac
+    declare -f powos_is_phone >/dev/null && powos_is_phone || return 1
+    # podman/gc too: on the phone the containers live in PowOS's overlay storage image, which plain podman (the
+    # passthrough below) doesn't see - an image imported with it was invisible to `powos containers run`.
+    case "$1" in stop|start|restart|remove|rm|delete|destroy|podman|gc) return 0 ;; esac
+    return 1
+}
+
 cmd_containers() {
     local action="${1:-list}"
 
+    _containers_by_runtime "$action" && _containers_runtime "$@"
     case "$action" in
         list|ls)                  _containers_do_list "${2:-}" ;;
         create)                   _containers_do_create "${2:-}" "${3:-}" ;;
@@ -3078,10 +3152,114 @@ case "${1:-}" in
         source "$POWOS_LIB/ai/manager/manager.sh"
         manager_run "$@"
         ;;
+    app|apps)
+        # PowOS apps: install/publish/list, the runtime switch, the system tier (lib/apps/powos-app).
+        shift
+        exec "$POWOS_LIB/apps/powos-app" "$@"
+        ;;
+    compose)
+        # Widgets (later apps) made of the building blocks PowOS has, from plain words (lib/apps/powos-compose,
+        # docs/COMPOSER.md).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-compose" "$@"
+        ;;
+    sleep)
+        # Unified sleep: everything that sleeps, of every kind (lib/apps/powos-sleep; `powos sleep --help`).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-sleep" "$@"
+        ;;
+    pet)
+        # The pet on home, the face of the agents (lib/apps/powos-pet; the local.pet app, shell/ui/pet.tsx).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-pet" "$@"
+        ;;
+    glasses)
+        # The smart glasses the phone's PowOS app drives (lib/apps/powos-glasses, docs/GLASSES.md).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-glasses" "$@"
+        ;;
+    transcribe|stt)
+        # Speech to text on the GPU server, stt.pow (lib/apps/powos-transcribe; hosts/gpu-195 stt-batch unit).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-transcribe" "$@"
+        ;;
+    units|unit)
+        # Everything installed or running on this host, with owner, purpose, limits and removal (lib/apps/powos-units).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-units" "$@"
+        ;;
+    sandbox)
+        # The manager's TypeScript sandbox (lib/ai/sandbox: QuickJS + a type check, granted capabilities only).
+        shift
+        [[ -f "$POWOS_LIB/ai/sandbox/sandbox.sh" ]] || { echo "powos sandbox: not on this host (no $POWOS_LIB/ai/sandbox)"; exit 1; }
+        exec bash "$POWOS_LIB/ai/sandbox/sandbox.sh" "$@"
+        ;;
     comms)
         shift
         source "$POWOS_LIB/ai/comms/comms.sh"
         cmd_comms "$@"
+        ;;
+    shell)
+        # The web shell on a phone (shell/ in the repo, the PowOS app's WebViews): its errors. The app writes them to
+        # its files/shell-errors.log and the run dir's copy, /run/powos-app/shell-errors.log (ShellErrors.kt).
+        shift
+        _shell_log=${POWOS_SHELL_ERRORS:-/run/powos-app/shell-errors.log}
+        case "${1:-help}" in
+            errors)
+                if [ "${2:-}" = "--follow" ] || [ "${2:-}" = "-f" ]; then exec tail -n 20 -F "$_shell_log"; fi
+                if [ -f "$_shell_log" ]; then tail -n "${2:-40}" "$_shell_log"; else echo "No shell errors logged ($_shell_log)."; fi
+                ;;
+            help|--help|-h)
+                cat <<'SHELLHELP'
+powos shell - the PowOS web shell on a phone (home, lock face, shade, assistant, switcher, AOD)
+
+Usage:
+  powos shell errors [N]       The last N (default 40) shell errors, newest last
+  powos shell errors --follow  Follow them as they come
+
+Every shell page reports its own errors to the app: uncaught errors, unhandled rejections, modules that
+didn't load (an import cycle, a missing export, a 404, a MIME refusal), and a page that never became
+ready (app.tsx's window.__powosAlive; 3 s after it started loading if it reported an error, else 8 s).
+Each one:
+  - is logged: one line per error - time, page (home|lock|shade|assist|aod|recents), status, error with
+    file:line. Status: sent (told the manager), repeat (the same error within 10 min: not told again),
+    ROLLBACK (a push undone);
+  - goes to the manager agent's inbox: `powos comms send manager "shell <page>: <error> (file:line) ...
+    APK <version>; overrides: <files (when pushed)>; last push <time> from <host>: <files>" --from shell
+    --priority high` - once per error per 10 minutes (the same error on every page is one message).
+A page that fails to boot within 2 min of a hot push (shell/push.sh) has that push rolled back by the app:
+the pushed files restored to the overrides they replaced, or removed (the APK's own shell under them),
+every page reloaded, and the manager told "rolled back <files> because <error>".
+
+Testing this safety net: never break a live page. Break the test-only page instead, test/gate-test.tsx
+(?mode=gate-test: loaded off screen by the app when that file is pushed), and push with --test:
+  shell/push.sh --force --test --note "..." test/gate-test.tsx
+Its reports never reach the manager or the user: they go to the test's role (--test=ROLE; default
+shelltest, a scratch inbox) as "[test] ...", low priority, read again after 2 min. Its push is rolled
+back like any other.
+
+From the Mac: shell/push.sh --errors [N] reads the same log; shell/push.sh runs a gate before pushing
+(tsc + every page booted in a headless Chromium: shell/dev/gate.sh), refusing a shell that doesn't
+load (--force overrides). apps/install.sh gates a PowOS app's UI the same way.
+SHELLHELP
+                ;;
+            *) echo "Unknown shell command: $1 (powos shell help)" >&2; exit 1 ;;
+        esac
+        ;;
+    agents)
+        # The work board (lib/ai/agents/powos-agents-cli; `powos agents help`).
+        shift
+        exec python3 "$POWOS_LIB/ai/agents/powos-agents-cli" "$@"
+        ;;
+    friction)
+        # Friction log: what got in an agent's way, so it gets fixed for good (`powos friction help`).
+        shift
+        exec python3 "$POWOS_LIB/ai/agents/powos-agents-cli" friction "$@"
+        ;;
+    android)
+        shift
+        source "$POWOS_LIB/android.sh"
+        cmd_android "$@"
         ;;
     version|--version|-v)
         cmd_version

@@ -12,15 +12,41 @@ task of its own, docs/powos-window-tasks.md); this only finds the window:
   nothing new starts (an Android icon brings its app back; single-instance apps would just exit on a second launch);
 - else COMMAND starts, and its first window - the app id's, or one of COMMAND's own processes' - is shown.
 
+An existing window's app is woken first if unified sleep froze it (powos-sleep-gui's Wake, docs/UNIFIED-SLEEP.md):
+thawed before KWin shows it, so the task's first frame is a running app's, not a frozen one's (Steam's instant resume).
+
+A Steam game (COMMAND has steam://rungameid/<appid>, or an app id steam_app_<appid> - Proton's window class): a game
+that already runs, maybe frozen with Steam (units/phone/steam.json games: pause), is resumed first - powos-sleep-gui's
+Resume thaws Steam + the game and names the game's window, which is shown - so the drawer, the games widget and
+Android shortcuts bring a running game back at once instead of a cold Proton start. Its window also counts by class
+(steam_app_<appid>) or by its process running under that game's Steam launch (a native Linux build's own class), and a new game's window may take up to WAIT_GAME_S (Proton under FEX).
+
 KWin reports windows to us through a KWin script (a script can't write files or answer, but it can call D-Bus), the
 way powos-android-tasks learns about focus.
+
+A launch that started COMMAND stays until the window it showed has lasted SETTLE_S: one that closes first (a launch's
+throwaway window - Steam/Unity/Proton map a short-lived one seconds after the tap, then the game's own 1-2 min later)
+doesn't count, and the next matching window is shown in its place. Before, the throwaway was shown, the helper exited,
+and the game's real window came up behind home - running, drawing, never in front until a second tap (bf-return
+"launch-front", 2026-10-23: Broforce's window at 75 s, HomeShell in front). A show KWin refuses for a new window (an
+Xwayland window whose surface isn't there yet) is tried again for a few seconds.
+
+A game launch waits for the GAME's window: Steam's own windows (its client, started by a cold launch) don't count. A
+"Steam Dialog" that comes during it is Steam asking the user before the game can start - an interstitial (EULA,
+publisher notice), the launch-option picker, a cloud conflict; Steam logs "LaunchApp waiting for user response to
+ShowInterstitials" and starts nothing until it is answered. It is shown in front at once (before, it stayed behind
+home and the launch waited forever: ABZU and Desk Job 2026-10-23, no game in 265 s), and once it closes the helper
+waits WAIT_GAME_S again for the game's window.
 
 Prints one status line for the caller, then exits (COMMAND keeps running; its output goes on to ours):
     powos-open-task: task       shown as its own task
     powos-open-task: desktop    not as a task - no window tasks (the PowOS app isn't connected to KWin, KWin not up),
                                 a window KWin doesn't export, or no window in time: the caller shows the desktop
 """
+import glob
+import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -28,6 +54,19 @@ import time
 RUN = os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app")
 # A new window must come within this; apps under FEX (x86) take their time.
 WAIT_S = 30
+# A game's first window: Steam + Proton under FEX (Broforce ~1-2 min cold).
+WAIT_GAME_S = 150
+# Steam's own window (a tap on Steam, not a game): a Steam that runs out of sight (-silent, resident) drops a forwarded
+# URL, so /usr/bin/steam restarts it with steam://open/main - its kill + a cold start + login, ~25-40 s on the phone.
+# Past WAIT_S the helper said "desktop" and left, and the window came later behind home: no visible result.
+WAIT_STEAM_S = 120
+# A newly started app's shown window counts once it has lasted this long; one closing earlier is replaced by the next.
+SETTLE_S = 8
+# A show KWin refused for a new window: tried again this often, this far apart (its surface may come a moment later).
+SHOW_TRIES = 10
+SHOW_RETRY_MS = 500
+STEAM_DIALOG = "Steam Dialog"  # the caption of Steam's modal dialogs (its web UI's popups)
+STEAM_GAME = re.compile(r"steam://rungameid/(\d+)|^steam_app_(\d+)$")
 
 REPORT_SCRIPT = """
 const helper = ["%(service)s", "/", "org.powos.OpenTask"];
@@ -36,13 +75,17 @@ function report(w, existing) {
         return;
     }
     callDBus(helper[0], helper[1], helper[2], "Window", w.internalId.toString(), String(w.pid),
-             String(w.desktopFileName), String(w.resourceClass), String(w.resourceName), existing ? "1" : "0");
+             String(w.desktopFileName), String(w.resourceClass), String(w.resourceName), existing ? "1" : "0",
+             String(w.caption));
 }
 for (const w of workspace.windowList()) {
     report(w, true);
 }
 callDBus(helper[0], helper[1], helper[2], "Listed");
 workspace.windowAdded.connect(function (w) { report(w, false); });
+workspace.windowRemoved.connect(function (w) {
+    callDBus(helper[0], helper[1], helper[2], "Closed", w.internalId.toString());
+});
 """
 
 # A minimized window exports as nothing to draw: it comes up first.
@@ -81,6 +124,72 @@ def ancestors(pid):
     return seen
 
 
+def steam_launch_of(pid):
+    """The appid of the Steam launch (`reaper SteamLaunch AppId=<id> ...`) a process runs under, else None. A native
+    Linux game's window has the game's own class (Broforce.x86_64), not Proton's steam_app_<id>; its process still
+    runs under the launch's reaper."""
+    for p in ancestors(pid):
+        try:
+            with open(f"/proc/{p}/cmdline", "rb") as f:
+                argv = f.read().split(b"\0")
+        except OSError:
+            continue
+        if b"SteamLaunch" in argv and b"Install=1" not in argv:
+            for a in argv:
+                if a.startswith(b"AppId="):
+                    return a[6:].decode(errors="replace")
+    return None
+
+
+STEAM = os.path.expanduser("~/.local/share/Steam")
+
+
+def steam_alive():
+    try:
+        with open(os.path.expanduser("~/.steam/steam.pid")) as f:
+            return os.path.isdir(f"/proc/{int(f.read().strip())}")
+    except (OSError, ValueError):
+        return False
+
+
+def download_mark(game):
+    """What changes when Steam downloads anything (the game's depot swap or update, a runtime/Proton it needs first):
+    something in steamapps/downloading, every manifest's LastUpdated."""
+    d = os.path.join(STEAM, "steamapps/downloading")
+    mark = [bool(os.path.isdir(d) and os.listdir(d))]
+    for f in sorted(glob.glob(os.path.join(STEAM, "steamapps/appmanifest_*.acf"))):
+        try:
+            with open(f) as fh:
+                m = re.search(r'"LastUpdated"\s+"(\d+)"', fh.read())
+            mark.append(m.group(1) if m else "")
+        except OSError:
+            mark.append("")
+    return mark
+
+
+class LaunchRecord:
+    """A game's cold launch through us, measured for the steam package's per-game compat policy (powos-steam-compat
+    record: tap -> its window in ms, or "fail" when no window came in WAIT_GAME_S). Never a launch that waited for a
+    download (a depot swap or update: minutes that aren't the way it runs) and never a resumed game."""
+
+    def __init__(self, game):
+        self.game, self.t0, self.cold, self.mark = game, time.monotonic(), not steam_alive(), download_mark(game)
+
+    def done(self, ok, at=None):
+        if os.environ.get("POWOS_NO_LAUNCH_RECORD") or self.mark[0] or download_mark(self.game) != self.mark:
+            return
+        # No window on a Steam that was already running is Steam's (a frozen client not thawed for the launch, unified
+        # sleep, 2026-10-23), not the game's way of running: only a launch that started Steam itself can fail a tool.
+        if not ok and not self.cold:
+            return
+        res = str(int(((at or time.monotonic()) - self.t0) * 1000)) if ok else "fail"
+        try:
+            subprocess.Popen(["powos-steam-compat", "record", self.game, res] + (["--cold"] if self.cold else []),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            pass
+
+
 def main():
     args = sys.argv[1:]
     ids = set()
@@ -95,17 +204,27 @@ def main():
     command = " ".join(args[1:])
     if not command:
         sys.exit("usage: powos-open-task [--app-id ID]... -- COMMAND")
+    game = next((m.group(1) or m.group(2) for m in map(STEAM_GAME.search, [command, *ids]) if m), None)
+    if game:
+        ids.add(f"steam_app_{game}")
+    steam_client = not game and os.path.basename(command.split()[0]) == "steam"
+    wait_s = WAIT_GAME_S if game else WAIT_STEAM_S if steam_client else WAIT_S
 
     from PySide6.QtCore import ClassInfo, QCoreApplication, QObject, QTimer, Slot
-    from PySide6.QtDBus import QDBusConnection, QDBusMessage
+    from PySide6.QtDBus import QDBus, QDBusConnection, QDBusMessage
 
     app = QCoreApplication(sys.argv[:1])
     bus = QDBusConnection.sessionBus()
     name = f"org.powos.OpenTask.p{os.getpid()}"
     scripts = []
-    state = {"child": None, "picked": None, "existing": [], "done": False}
+    # picked: the window being shown; shown: a window of ours was shown as a task (the status said "task"); tries: shows
+    # KWin refused for the picked window so far; picked_at: when it came (the launch record's time).
+    state = {"child": None, "picked": None, "existing": [], "pids": {}, "done": False, "shown": False, "tries": 0,
+             "picked_at": None, "gen": 0, "seen": [], "dialog": None, "timer": 0}
 
     def start_command():
+        if game:
+            state["launch"] = LaunchRecord(game)
         state["child"] = subprocess.Popen(["/bin/bash", "-c", "exec " + command], start_new_session=True)
 
     def kwin(method, *call_args):
@@ -116,6 +235,12 @@ def main():
 
     def run_script(tag, text):
         plugin = f"powos-open-task-{os.getpid()}-{tag}"
+        # A plugin of that name still loaded (an earlier show's): unloaded first, or KWin keeps the old one.
+        for i, (p, path) in enumerate(scripts):
+            if p == plugin:
+                kwin("unloadScript", p)
+                scripts.pop(i)
+                break
         path = os.path.join(RUN, plugin + ".js")
         with open(path, "w") as f:
             f.write(text)
@@ -138,41 +263,142 @@ def main():
                 pass
         app.exit(0 if what == "task" else 2)
 
-    def matches(desktop_file, resource_class, resource_name):
-        return bool(ids & {desktop_file.lower(), resource_class.lower(), resource_name.lower()})
+    def matches(desktop_file, resource_class, resource_name, pid=""):
+        if ids & {desktop_file.lower(), resource_class.lower(), resource_name.lower()}:
+            return True
+        return bool(game) and pid.isdigit() and steam_launch_of(int(pid)) == game
+
+    def wake(window):
+        """Thaw the window's app if unified sleep froze it (no-op when it's awake or powos-sleep-gui isn't there)."""
+        pid = state["pids"].get(window)
+        if not pid:
+            return
+        msg = QDBusMessage.createMethodCall("dev.powos.Sleep", "/Gui", "dev.powos.Sleep.Gui", "Wake")
+        msg.setArguments([pid])
+        bus.call(msg, QDBus.CallMode.Block, 3000)
+
+    def resume():
+        """A running Steam game: thawed (with Steam) and its window, if it has one yet - else None."""
+        msg = QDBusMessage.createMethodCall("dev.powos.Sleep", "/Gui", "dev.powos.Sleep.Gui", "Resume")
+        msg.setArguments([game])
+        reply = bus.call(msg, QDBus.CallMode.Block, 3000)
+        if reply.type() != QDBusMessage.MessageType.ReplyMessage or not reply.arguments():
+            return None
+        try:
+            r = json.loads(reply.arguments()[0])
+        except (TypeError, ValueError):
+            return None
+        return r.get("window") if r.get("running") else None
+
+    def show(window):
+        state["gen"] += 1
+        if not run_script(f"show{state['gen']}", SHOW_SCRIPT % {"window": window, "service": name}):
+            finish("desktop")
 
     def pick(window):
         if state["picked"]:
             return
-        state["picked"] = window
-        if not run_script("show", SHOW_SCRIPT % {"window": window, "service": name}):
-            finish("desktop")
+        state["picked"], state["picked_at"], state["tries"] = window, time.monotonic(), 0
+        wake(window)
+        show(window)
+
+    def settled(window):
+        """The shown window of a launch lasted SETTLE_S: it's the app's - done."""
+        if state["picked"] != window or state["done"] or window == state["dialog"]:
+            return
+        if state.get("launch"):
+            state.pop("launch").done(True, state["picked_at"])
+        finish("task")
 
     @ClassInfo({"D-Bus Interface": "org.powos.OpenTask"})
     class Service(QObject):
-        @Slot(str, str, str, str, str, str)
-        def Window(self, window, pid, desktop_file, resource_class, resource_name, existing):  # noqa: N802
+        @Slot(str, str, str, str, str, str, str)
+        def Window(self, window, pid, desktop_file, resource_class, resource_name, existing, caption):  # noqa: N802
+            if existing != "1" and game and caption == STEAM_DIALOG and not state["done"]:
+                # Steam asks before the game starts: in front now, whatever was shown; the game's window after it.
+                print(f"powos-open-task: Steam asks before the game starts - its dialog {window} in front",
+                      file=sys.stderr, flush=True)
+                state["dialog"], state["picked"], state["pids"][window] = window, None, pid
+                state.pop("launch", None)  # the user's answer time isn't the launch's: not recorded
+                pick(window)
+                return
             if existing == "1":
-                if matches(desktop_file, resource_class, resource_name):
+                if matches(desktop_file, resource_class, resource_name, pid):
                     state["existing"].append(window)
+                    state["pids"][window] = pid
                 return
             child = state["child"]
-            ours = child is not None and child.pid in ancestors(int(pid) if pid.isdigit() else 0)
-            if ours or matches(desktop_file, resource_class, resource_name):
+            # A game launch: only the game's own windows (matches) - the Steam client a cold launch starts is ours too.
+            ours = not game and child is not None and child.pid in ancestors(int(pid) if pid.isdigit() else 0)
+            if ours or matches(desktop_file, resource_class, resource_name, pid):
+                state["pids"][window] = pid
+                state["seen"].append(window)
                 pick(window)
+
+        @Slot(str)
+        def Closed(self, window):  # noqa: N802
+            # The launch's window closed before it settled (a throwaway one): the next matching window is shown.
+            if window in state["seen"]:
+                state["seen"].remove(window)
+            if window == state["dialog"] and not state["done"]:
+                # Answered: the game starts now (or the user said no) - its window gets a fresh WAIT_GAME_S.
+                state["dialog"] = None
+                if state["picked"] == window:
+                    state["picked"] = None
+                state["timer"] += 1
+                QTimer.singleShot(wait_s * 1000, lambda g=state["timer"]: g == state["timer"] and timed_out())
+                if state["seen"]:
+                    pick(state["seen"][-1])
+                return
+            if window == state["picked"] and not state["done"]:
+                print(f"powos-open-task: window {window} closed {time.monotonic() - state['picked_at']:.1f} s after it came - "
+                      "showing the next one", file=sys.stderr, flush=True)
+                state["picked"] = None
+                # One that came meanwhile (the game's window while the throwaway was up), the newest; else the next.
+                if state["seen"]:
+                    pick(state["seen"][-1])
 
         @Slot()
         def Listed(self):  # noqa: N802
+            window = resume() if game else None
+            if window:
+                pick(window)
+                return
             if state["existing"]:
                 # Its last one: windowList() is in stacking order, the top one last.
                 pick(state["existing"][-1])
                 return
             start_command()
-            QTimer.singleShot(WAIT_S * 1000, lambda: finish("desktop"))
+            QTimer.singleShot(wait_s * 1000, lambda g=state["timer"]: g == state["timer"] and timed_out())
 
         @Slot(str)
         def Shown(self, ok):  # noqa: N802
-            finish("task" if ok == "1" else "desktop")
+            window = state["picked"]
+            if state["child"] is None or window is None:
+                # An existing window brought back (nothing started): done at once.
+                finish("task" if ok == "1" else "desktop")
+                return
+            if ok != "1":
+                state["tries"] += 1
+                if state["tries"] < SHOW_TRIES:
+                    QTimer.singleShot(SHOW_RETRY_MS, lambda w=window: state["picked"] == w and not state["done"] and show(w))
+                elif state["shown"]:
+                    state["picked"] = None  # an earlier window showed: wait for the next
+                else:
+                    finish("desktop")
+                return
+            # Shown: the caller hears "task" now; the helper stays until the window has lasted SETTLE_S.
+            state["shown"] = True
+            status("task")
+            QTimer.singleShot(SETTLE_S * 1000, lambda w=window: settled(w))
+
+    def timed_out():
+        # No window that lasted came in time: a launch that showed one leaves it at that (the status said "task").
+        if state["done"]:
+            return
+        if state.get("launch"):
+            state.pop("launch").done(False)
+        finish("task" if state["shown"] else "desktop")
 
     service = Service()
     if not bus.isConnected() or not bus.registerService(name):

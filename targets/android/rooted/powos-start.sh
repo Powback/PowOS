@@ -7,6 +7,7 @@
 # /run, the phone's storage at /mnt/sdcard, DNS. Then starts PowOS's SSH server on port 2222.
 # Nothing outside /data/powos is changed; to remove PowOS: stop the phone's use of it, delete /data/powos and
 # /data/adb/service.d/powos.sh.
+# powos-units: deploy - what this installs on the phone is checked against units/ (test/tier1/test-units-registry.py)
 R=/data/powos/root
 LOG=/data/powos/start.log
 exec >> "$LOG" 2>&1
@@ -57,18 +58,29 @@ done
 dns=$(getprop net.dns1); [ -n "$dns" ] || dns=192.168.50.100
 printf 'nameserver %s\nnameserver 1.1.1.1\n' "$dns" > "$R/etc/resolv.conf"
 
+# The PowOS app's home layout and store, backed up into PowOS's root once an hour when they changed (one instance;
+# docs/APP-DATA-BACKUP.md): an app-data wipe then loses at most that hour.
+[ -f /data/powos/powos-appdata.sh ] && (sh /data/powos/powos-appdata.sh watch > /dev/null 2>&1 < /dev/null &)
+
+# The VPN client (the WireGuard app) exempt from Doze and background limits, once Android's services are up
+# (powos-vpn-keep.sh, unit vpn-keep): else the tunnel stops while the phone rests and the Mac loses the phone.
+# The whole wait runs in the background: Magisk's service.d starts this before boot completes, and the mounts + sshd
+# below must not wait for it (bounded: gives up after 10 min).
+[ -f /data/powos/powos-vpn-keep.sh ] && ( i=0; until [ "$(getprop sys.boot_completed)" = 1 ] || [ $i -ge 120 ]; do
+  sleep 5; i=$((i + 1)); done; sh /data/powos/powos-vpn-keep.sh apply ) > /dev/null 2>&1 < /dev/null &
+
 # SSH into PowOS (port 2222: Android may use 22). Keys are generated on first start.
 chroot "$R" /usr/bin/env -i PATH=/usr/bin:/usr/sbin HOME=/root /bin/sh -c '
   [ -f /etc/ssh/ssh_host_ed25519_key ] || ssh-keygen -A
   pgrep -x sshd >/dev/null || /usr/bin/sshd -p 2222
 ' && echo "sshd on 2222"
 
-# PowOS's local services' ports (SpacetimeDB 3410), for the PowOS app's uid only: Android's loopback is shared by
+# PowOS's local services' ports (SpacetimeDB 3410, the App API runtime 3411), for the PowOS app's uid only: Android's loopback is shared by
 # every app on the phone, and the PowOS user powos IS the app's uid - so the app's WebViews, the desktop session,
 # agents and root pass, every other Android app gets a reset (docs/POWOS-APPS-FEASIBILITY.md section 3). The uid
 # comes from Android's package list each time (it changes if the app is reinstalled). A changed rule set is built as
 # a new chain and swapped in, never flushed in place (that would leave the port open in between).
-POWOS_PORTS="3410"
+POWOS_PORTS="3410 3411"
 lock_ports() {
   u=$(awk '$1 == "com.powos.app" {print $2}' /data/system/packages.list)
   [ -n "$u" ] || { echo "port lock: com.powos.app not in packages.list"; return 1; }
@@ -116,4 +128,29 @@ system_tier() {
   echo "system tier: the supervisor didn't come up (/data/powos/root/var/log/powos/supervisor.log)"
 }
 system_tier
+
+# Unified sleep's sleeper (lib/apps/powos-sleepd, docs/UNIFIED-SLEEP.md): idle app backends frozen and woken by a
+# connection, unfocused GUI apps frozen for the session's watcher. In the system tier's namespace (it reads the
+# supervisor's state and borrows its services' sockets), in limits of its own; it thaws everything when it stops.
+sleep_tier() {
+  [ -x "$R/usr/lib/powos/apps/powos-sleepd" ] || return 0
+  pid=$(cat "$R/run/powos-sleep/sleepd.pid" 2>/dev/null)
+  [ -n "$pid" ] && grep -q powos-sleepd "/proc/$pid/cmdline" 2>/dev/null && return 0
+  sup=$(cat "$R/run/powos-system/supervisor.pid" 2>/dev/null)
+  [ -n "$sup" ] && [ -d "/proc/$sup" ] || { echo "sleep: no system tier"; return 0; }
+  L="$R/usr/lib/ld-linux-aarch64.so.1 --library-path $R/usr/lib"
+  setsid $L $R/usr/bin/nsenter -t "$sup" -m -r -w -- /usr/bin/env -i PATH=/usr/bin:/usr/sbin LANG=C.UTF-8 \
+    /usr/bin/powos-sleepd > /dev/null 2>&1 < /dev/null &
+  echo "sleep: powos-sleepd started"
+}
+sleep_tier
+# Every running unit with limits in a cgroup of its own (lib/apps/powos-units enforce): the supervisor, the app-data
+# watcher; SpacetimeDB places itself (powos-runtime). In the background: a slow /proc scan never holds the boot up.
+# HACK: a fixed 20 s wait for the supervisor and the watcher to be up, then one enforce pass. Real fix: each of them
+# places itself in its unit's cgroup as it starts (as powos-runtime does for services), and this pass goes.
+# Then both sides' units go to the PowOS AI page (powos units publish).
+(sleep 20; chroot "$R" /usr/bin/env -i PATH=/usr/bin:/usr/sbin python3 /usr/lib/powos/apps/powos-units enforce
+ [ -f /data/powos/powos-units.sh ] && sh /data/powos/powos-units.sh enforce
+ chroot "$R" /usr/bin/env -i PATH=/usr/bin:/usr/sbin python3 /usr/lib/powos/apps/powos-units publish
+ [ -f /data/powos/powos-units.sh ] && sh /data/powos/powos-units.sh publish) > /dev/null 2>&1 < /dev/null &
 echo "PowOS up"

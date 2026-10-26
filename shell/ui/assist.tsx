@@ -1,22 +1,39 @@
 /**
  * PowOS AI over another app (index.html?mode=assist; PowosAssistSession, the phone's digital assistant: holding the
  * power button). A panel at the bottom: the screen it was opened over (a thumbnail), the question - typed, or the mic
- * (hold to talk and send, tap to dictate) - and PowOS AI's answer as it comes. What's asked goes with the screen's text,
- * so "what's this?" means the screen. A tap above the panel puts it away.
+ * (hold to talk and send, tap to dictate) - and, once asked, the one chat (assistant.ts: the pill's conversation and
+ * its ChatView, asks through askQueued - not a chat of its own). What's asked goes with the screen's text, so "what's
+ * this?" means the screen. A tap above the panel puts it away.
  *
- * The screenshot goes along too (PowOS AI reads it: the host saves it where PowOS sees it, the question names the
- * path). Tapping the thumbnail opens it full size to circle what you mean instead - letting go cuts that part out.
+ * Summoned (the side button), it listens at once and sends by itself: what's said goes into the field, and when it ends
+ * - the side button let go when it was held (PowerKey reads the release as root: assist.held / assist.keyup), else
+ * ~1.5 s with nothing heard (assist.quick), or the mic tapped - the text shows for a moment (SEND_DELAY_MS) and goes,
+ * with the screen and the circled part. A tap on the field in that moment,
+ * or typing or tapping it while it listens, keeps the text there to edit instead; the panel going away stops it.
+ * The mic button itself keeps its own ways (tap: fill in; hold: send on release).
+ *
+ * The screenshot always goes along (PowOS AI reads it: the host saves it where PowOS sees it, the question names the
+ * path). Circling is always on, no mode: draw around anything on the screen above the panel and that part is cut out
+ * of the screenshot and sent too, the whole screen with it for context. A tap there (no stroke) puts the panel away.
  *
  * Live mode: the screen a frame a second (LiveCapture; Android asks once), the panel a bar at the bottom - the app
  * under it stays usable (only the bar takes touches) - and each question takes the last moments that changed as one
  * filmstrip image.
  */
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { stored } from "../state.ts";
-import { Mic, hearing, type MicTarget } from "./bar.tsx";
-import { Now } from "./powai.tsx";
+import { Pill, dictate, hearing, interrupt, speech, type MicTarget } from "./bar.tsx";
+import { makeHold, release } from "./dictation.ts";
+import { askQueued, setAskContext } from "./assistant.ts";
+import { ChatView } from "./chat.tsx";
+
+/** The side button is held to talk (assist.held): its release sends at once. */
+let pushToTalk = false;
+
+/** A summoning with the side button already let go: its dictation ends after this much silence. */
+const QUICK_SILENCE_MS = 1500;
 import type { AssistScreen } from "../types.ts";
 
 const screen = signal<AssistScreen | null>(null);
@@ -24,122 +41,260 @@ const screen = signal<AssistScreen | null>(null);
 const draft = stored("assist.draft");
 /** Asked something since it opened: the answer shows. */
 const asked = signal(false);
-/** What PowOS AI gets to look at with the question: the whole screen, a region cut out of it (a PNG), or nothing. */
-const image = signal<{ region: string | null } | null>({ region: null });
-/** The cut-out view, open. */
-const cropping = signal(false);
+/** The part of the screen circled (a PNG cut out of the screenshot), sent with the whole screen; null: just the screen. */
+const region = signal<string | null>(null);
+/** The circle drawn over the screen (px), left showing so it's clear what goes along. */
+const stroke = signal<[number, number][]>([]);
 /** Live mode: on, and how many different moments it holds. */
 const live = signal({ on: false, frames: 0 });
 powos.on("assist.live", (l: { on: boolean; frames: number }) => (live.value = l));
 
 powos.on("assist.context", (s: AssistScreen) => (screen.value = s));
-// Summoned again (the page stays warm between summonings, AssistWeb): last time's question, answer and cut-out go.
+// Summoned again (the page stays warm between summonings, AssistWeb): last time's question, answer and cut-out go,
+// and it listens.
 powos.on("assist.reset", () => {
   screen.value = null;
   asked.value = false;
-  image.value = { region: null };
-  cropping.value = false;
+  region.value = null;
+  stroke.value = [];
+  summoned();
+});
+powos.on("assist.hidden", () => takeOver());
+// The side button let go (when Android passes it on, PowosAssistSession.onKeyUp): the dictation ends, and so sends.
+// Hold to talk: the side button still down - the dictation lasts until it's let go (assist.keyup: PowerKey reads the
+// release as root), then ends, and so sends. Already up: it ends after QUICK_SILENCE_MS of nothing heard.
+// Push to talk: no preview, no silence - the release sends what's heard at once (release()).
+powos.on("assist.held", () => {
+  if (!autoSend) return;
+  autoSend = false;
+  pushToTalk = true;
+  makeHold(mic);
+});
+powos.on("assist.quick", () => autoSend && powos.speech.quiet(QUICK_SILENCE_MS));
+powos.on("assist.keyup", () => {
+  if (!pushToTalk) return;
+  pushToTalk = false;
+  release(mic);
 });
 
 /** The screen's text that goes along with a question, at most (the host caps it too). */
 const SCREEN_TEXT = 4000;
 
-async function send() {
-  const text = draft.value.trim();
-  if (!text) return;
-  draft.value = "";
-  asked.value = true;
+/**
+ * What goes with every question asked here (assistant.ts setAskContext): the question, then the screen - the image
+ * first (the host saves it where PowOS sees it), then the screen's text; the chat shows only the question (chat.tsx).
+ */
+async function withScreen(text: string) {
   const seen = screen.value?.text.trim();
   // The image first (the host saves it where PowOS sees it), then the screen's text: both after the question, which is
   // all the chat shows of it (powai.tsx). Live: the filmstrip of the last moments instead of the one screenshot.
   const strip = live.value.on ? await powos.assist.filmstrip() : null;
-  const path = !strip && image.value && screen.value?.screenshot ? await powos.assist.attach(image.value.region) : null;
+  const shot = !strip && screen.value?.screenshot;
+  const part = shot && region.value ? await powos.assist.attach(region.value) : null;
+  const path = shot ? await powos.assist.attach(null) : null;
   const context = [
     strip &&
       `(live view of my screen: ${strip} - the last moments that changed, a frame a second, oldest first, left to right then down, each labelled with how long ago; read it)`,
-    path && `(image of it: ${path} - read it to see the screen${image.value?.region ? ", the part I mean" : ""})`,
+    part && `(the part of the screen I circled: ${part} - read it, it's what I mean)`,
+    path && `(image of the whole screen: ${path} - read it to see the screen${part ? " around the part I circled" : ""})`,
     seen?.slice(0, SCREEN_TEXT),
   ]
     .filter(Boolean)
     .join("\n");
-  powos.ai.send(context ? `${text}\n\n[What's on my screen right now - the app under this overlay, not PowOS AI itself:]\n${context}` : text);
+  return context ? `${text}\n\n[What's on my screen right now - the app under this overlay, not PowOS AI itself:]\n${context}` : text;
+}
+
+/**
+ * Asks the one conversation (assistant.ts askQueued, as the pill and the pet do): asked mid-turn, it waits for that
+ * turn instead of being dropped; the screen goes along (withScreen).
+ */
+function send() {
+  const text = draft.value.trim();
+  if (!text) return;
+  draft.value = "";
+  asked.value = true;
+  askQueued(text);
 }
 
 /** Around the stroke, so a circle drawn tight still holds what it circles (px on screen). */
 const PAD = 12;
 
+/** Moved less than this (px), a press on the screen is a tap: it puts the panel away instead of circling. */
+const TAP = 12;
+
 /**
- * The screenshot full size: circle (or scribble over) what you mean; letting go cuts out the stroke's bounds (a canvas
- * from the same-origin image) as the image that goes with the question.
+ * Over the screen above the panel, always: a stroke drawn there (a circle, a scribble) cuts its bounds out of the
+ * screenshot as the part that goes with the question; a tap puts the panel away. The overlay covers the whole display,
+ * as the screenshot does, so a point on the overlay is the same point in the screenshot (scaled to its pixels).
  */
-function Crop({ src }: { src: string }) {
-  const img = useRef<HTMLImageElement>(null);
-  const [points, setPoints] = useState<[number, number][]>([]);
-  const drawing = useRef(false);
+function Draw({ src }: { src: string | undefined }) {
+  const drawing = useRef<[number, number][] | null>(null);
+  const shot = useRef<HTMLImageElement | null>(null);
+  useEffect(() => {
+    if (!src) return void (shot.current = null);
+    const img = new Image();
+    img.src = src;
+    shot.current = img;
+  }, [src]);
   const cut = (pts: [number, number][]) => {
-    const el = img.current!;
-    const r = el.getBoundingClientRect();
+    const el = shot.current;
+    if (!el?.naturalWidth) return;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
     const xs = pts.map((p) => p[0]);
     const ys = pts.map((p) => p[1]);
-    const left = Math.max(r.left, Math.min(...xs) - PAD);
-    const top = Math.max(r.top, Math.min(...ys) - PAD);
-    const right = Math.min(r.right, Math.max(...xs) + PAD);
-    const bottom = Math.min(r.bottom, Math.max(...ys) + PAD);
-    if (right - left < 16 || bottom - top < 16) return setPoints([]);
-    const sx = el.naturalWidth / r.width;
-    const sy = el.naturalHeight / r.height;
+    const left = Math.max(0, Math.min(...xs) - PAD);
+    const top = Math.max(0, Math.min(...ys) - PAD);
+    const right = Math.min(W, Math.max(...xs) + PAD);
+    const bottom = Math.min(H, Math.max(...ys) + PAD);
+    if (right - left < 16 || bottom - top < 16) return;
+    const sx = el.naturalWidth / W;
+    const sy = el.naturalHeight / H;
     const c = document.createElement("canvas");
     c.width = Math.round((right - left) * sx);
     c.height = Math.round((bottom - top) * sy);
-    c.getContext("2d")!.drawImage(el, (left - r.left) * sx, (top - r.top) * sy, c.width, c.height, 0, 0, c.width, c.height);
-    image.value = { region: c.toDataURL("image/png") };
-    cropping.value = false;
+    c.getContext("2d")!.drawImage(el, left * sx, top * sy, c.width, c.height, 0, 0, c.width, c.height);
+    region.value = c.toDataURL("image/png");
   };
   return (
-    <div class="crop">
-      <div
-        class="crop-area"
-        onPointerDown={(e) => {
-          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-          drawing.current = true;
-          setPoints([[e.clientX, e.clientY]]);
-        }}
-        onPointerMove={(e) => drawing.current && setPoints((p) => [...p, [e.clientX, e.clientY]])}
-        onPointerUp={(e) => {
-          drawing.current = false;
-          cut([...points, [e.clientX, e.clientY]]);
-        }}
-      >
-        <img ref={img} src={src} alt="" draggable={false} />
-        <svg class="crop-stroke">
-          <polyline points={points.map((p) => p.join(",")).join(" ")} />
-        </svg>
-      </div>
-      <div class="crop-bar tile">
-        <span class="muted">circle what you mean</span>
-        <button type="button" onClick={() => (cropping.value = false)}>
-          cancel
-        </button>
-        <button type="button" onClick={() => ((image.value = { region: null }), (cropping.value = false))}>
-          whole screen
-        </button>
-      </div>
+    <div
+      class="assist-draw"
+      onPointerDown={(e) => {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        drawing.current = [[e.clientX, e.clientY]];
+      }}
+      onPointerMove={(e) => {
+        const d = drawing.current;
+        if (!d) return;
+        d.push([e.clientX, e.clientY]);
+        if (d.length > 2 || Math.hypot(e.clientX - d[0][0], e.clientY - d[0][1]) >= TAP) stroke.value = [...d];
+      }}
+      onPointerUp={(e) => {
+        const d = drawing.current;
+        drawing.current = null;
+        if (!d) return;
+        d.push([e.clientX, e.clientY]);
+        const moved = Math.max(...d.map((p) => Math.hypot(p[0] - d[0][0], p[1] - d[0][1])));
+        if (moved < TAP) return powos.assist.close();
+        stroke.value = d;
+        cut(d);
+      }}
+      onPointerCancel={() => (drawing.current = null)}
+    >
+      <svg class="crop-stroke">
+        <polyline points={stroke.value.map((p) => p.join(",")).join(" ")} />
+      </svg>
     </div>
   );
+}
+
+/** The text from a summoning's dictation, shown this long before it's sent (a tap on it keeps it to edit). */
+const SEND_DELAY_MS = 300;
+/** This summoning's dictation sends by itself when it ends (until the user takes over: a tap, typing, the mic). */
+let autoSend = false;
+/** About to send what was heard (the moment it shows); a tap on the field stops it. */
+const sending = signal(false);
+let sendTimer = 0;
+
+function holdBack() {
+  autoSend = false;
+  pushToTalk = false;
+  clearTimeout(sendTimer);
+  sending.value = false;
 }
 
 const mic: MicTarget = {
   typed: () => draft.value,
   heard: (full, sendIt) => {
     draft.value = full;
-    if (sendIt) send();
+    if (!sendIt) return;
+    if (!autoSend) return void send();
+    // The side button's dictation: the words show a moment first, then go.
+    autoSend = false;
+    sending.value = true;
+    sendTimer = window.setTimeout(() => {
+      sending.value = false;
+      send();
+    }, SEND_DELAY_MS);
   },
 };
 
+/** The summoning's dictation: listens, and sends when it ends. */
+function summoned() {
+  holdBack();
+  autoSend = true;
+  dictate(mic, true);
+}
+
+/** The user took over the field: no sending by itself, what's heard stays there to edit. */
+function takeOver() {
+  holdBack();
+  interrupt(mic);
+}
+
+/** A swipe up this far (px) puts the panel away on release; or a fling this fast (px/ms) from any distance over MIN. */
+const SWIPE_CLOSE_PX = 90;
+const SWIPE_FLING = 0.6;
+const SWIPE_MIN = 24;
+
+/**
+ * Swipe up to put the panel away (the handle, the header and the strip along the bottom edge take it; the screen
+ * above is for circling, the chat for scrolling). The panel follows the finger at once, completes on release past
+ * a threshold or a fling, else snaps back.
+ */
+function swipeAway(panel: { current: HTMLDivElement | null }) {
+  let y0 = 0;
+  let t0 = 0;
+  let dy = 0;
+  let on = false;
+  const move = (dyPx: number, animate: boolean) => {
+    const el = panel.current;
+    if (!el) return;
+    el.style.transition = animate ? "transform 0.18s ease-out, opacity 0.18s ease-out" : "none";
+    el.style.transform = dyPx ? `translateY(${dyPx}px)` : "";
+    el.style.opacity = dyPx ? String(Math.max(0.25, 1 - Math.abs(dyPx) / 400)) : "";
+  };
+  return {
+    onPointerDown: (e: PointerEvent) => {
+      if (e.target instanceof Element && e.target.closest("button, input, textarea")) return;
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      y0 = e.clientY;
+      t0 = e.timeStamp;
+      dy = 0;
+      on = true;
+    },
+    onPointerMove: (e: PointerEvent) => {
+      if (!on) return;
+      dy = Math.min(0, e.clientY - y0); // up only
+      move(dy, false);
+    },
+    onPointerUp: (e: PointerEvent) => {
+      if (!on) return;
+      on = false;
+      const fling = -dy / Math.max(1, e.timeStamp - t0);
+      if (-dy >= SWIPE_CLOSE_PX || (-dy >= SWIPE_MIN && fling >= SWIPE_FLING)) {
+        move(-window.innerHeight, true);
+        window.setTimeout(() => (powos.assist.close(), move(0, false)), 180);
+      } else move(0, true);
+    },
+    onPointerCancel: () => ((on = false), move(0, true)),
+  };
+}
+
 export function Assist() {
   const panel = useRef<HTMLDivElement>(null);
+  const swipe = swipeAway(panel);
+  // Over an app, asks carry the screen and put the chat in the app switcher. Registered on mount, never at import:
+  // app.tsx imports this module in every mode, and home's sends then started PowosAiActivity (keepInRecents) - its
+  // window covered home for a moment, a black flash on every send from the AI page.
+  useEffect(() => (setAskContext(withScreen, true), () => setAskContext(null)), []);
   useEffect(() => {
-    powos.assist.screen().then((s) => s && (screen.value = s));
+    // The page loaded during a summoning (not warm before it): no assist.reset came, so it listens now.
+    powos.assist.screen().then((s) => {
+      if (!s) return;
+      screen.value = s;
+      summoned();
+    });
     powos.assist.liveState().then((l) => (live.value = l));
   }, []);
   const on = live.value.on;
@@ -159,11 +314,13 @@ export function Assist() {
   }, [on]);
   const s = screen.value;
   return (
-    <div class={`assist ${on ? "live" : ""}`} onClick={(e) => !on && e.target === e.currentTarget && powos.assist.close()}>
+    <div class={`assist ${on ? "live" : ""}`}>
+      {!on && <Draw src={s?.screenshot ?? undefined} />}
       <div class="assist-panel tile" ref={panel}>
-        <div class="assist-head">
+        <div class="assist-grip" {...swipe} aria-hidden="true"><span /></div>
+        <div class="assist-head" {...swipe}>
           {!on && s?.screenshot ? (
-            <img class="assist-shot" src={image.value?.region ?? s.screenshot} alt="" onClick={() => (cropping.value = true)} />
+            <img class="assist-shot" src={region.value ?? s.screenshot} alt="" />
           ) : (
             !on && <span class="assist-shot blank" />
           )}
@@ -178,21 +335,18 @@ export function Assist() {
         </div>
         {!on && s?.screenshot && (
           <div class="assist-attach">
-            {image.value ? (
-              <button type="button" class="chip" onClick={() => (image.value = null)}>
-                {image.value.region ? "region of the screen" : "the screen"} ✕
+            {region.value ? (
+              <button type="button" class="chip" onClick={() => ((region.value = null), (stroke.value = []))}>
+                the part you circled + the screen ✕
               </button>
             ) : (
-              <button type="button" class="chip off" onClick={() => (image.value = { region: null })}>
-                + the screen
-              </button>
+              <span class="muted assist-hint">the screen goes along · circle anything above to point at it</span>
             )}
-            <button type="button" class="chip off" onClick={() => (cropping.value = true)}>
-              circle a part…
-            </button>
           </div>
         )}
-        {asked.value && <Now />}
+        {/* The one chat (the pill's, chat.tsx): this conversation's newest, once something's asked here - until then
+            the screen above stays free to circle. */}
+        {asked.value && <ChatView head={false} />}
         <form
           class="assist-ask"
           onSubmit={(e) => {
@@ -200,18 +354,26 @@ export function Assist() {
             send();
           }}
         >
-          <input
+          {/* The one pill (bar.tsx Pill, as home's search and PowOS AI's page): three rows, then it scrolls; what's
+              heard streams in as it's said, newest in view, and stays editable. */}
+          <Pill
+            target={mic}
+            sending={sending.value}
             value={hearing(mic) ?? draft.value}
-            onInput={(e) => (draft.value = (e.currentTarget as HTMLInputElement).value)}
-            onFocus={() => powos.keyboard.show()}
-            placeholder="ask about this screen"
+            onInput={(v: string) => {
+              takeOver();
+              draft.value = v;
+            }}
+            onPointerDown={() => takeOver()}
+            onFocus={() => (takeOver(), powos.keyboard.show())}
+            placeholder={speech.value.listening ? "listening…" : undefined}
+            aria-label="Ask about this screen"
             enterKeyHint="send"
             autocomplete="off"
           />
-          <Mic target={mic} />
         </form>
       </div>
-      {cropping.value && s?.screenshot && <Crop src={s.screenshot} />}
+      <div class="assist-edge" {...swipe} aria-hidden="true" />
     </div>
   );
 }

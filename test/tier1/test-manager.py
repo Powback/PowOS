@@ -258,5 +258,44 @@ class ListJsonTests(unittest.TestCase):
         self.assertFalse(byname["Beta"])
 
 
+
+class RichBlockTests(unittest.TestCase):
+    """present / present_choices calls become fenced blocks in the assistant's text (what the chat renders)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("powos_manager", BROKER)
+        cls.m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.m)
+        cls.M = next(v for v in vars(cls.m).values() if isinstance(v, type) and hasattr(v, "_rich_block"))
+
+    def block(self, name, inp):
+        text = self.M._rich_block(name, inp)
+        if text is None:
+            return None, None
+        head, body, tail = text.split("\n")
+        self.assertEqual(tail, "```")
+        return head, json.loads(body)
+
+    def test_choices(self):
+        head, data = self.block("mcp__comms__present_choices", {"question": "Which?", "options": ["a", " ", "b"], "multi": True})
+        self.assertEqual(head, "```choices")
+        self.assertEqual(data["options"], ["a", "b"])
+        self.assertTrue(data["multi"])
+
+    def test_present_html_and_md(self):
+        head, data = self.block("mcp__comms__present", {"title": "Plan", "format": "html", "body": "<h1>x</h1>"})
+        self.assertEqual((head, data["format"], data["title"]), ("```present", "html", "Plan"))
+        self.assertEqual(self.block("mcp__comms__present", {"title": "T", "body": "# x"})[1]["format"], "md")
+
+    def test_other_tools_and_empty_bodies_show_nothing(self):
+        self.assertEqual(self.block("Bash", {"command": "ls"}), (None, None))
+        self.assertEqual(self.block("mcp__comms__present", {"title": "T", "body": "  "}), (None, None))
+
+    def test_result_out_keeps_lines(self):
+        self.assertEqual(self.M._result_out([{"type": "text", "text": "a\nb"}]), "a\nb")
+        self.assertTrue(self.M._result_out("x" * 3000).endswith("…"))
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

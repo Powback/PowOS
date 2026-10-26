@@ -1,0 +1,109 @@
+PowOS: cgroup pids controller in the net_prio slot (KMI-preserving CGROUP_PIDS)
+
+OnePlus Open (GKI android13-5.15). Adding CGROUP_PIDS the normal way grows CGROUP_SUBSYS_COUNT from 7 to
+8, and with it every per-subsystem array in struct css_set / struct cgroup that the vendor modules were
+built against. Instead, CGROUP_PIDS_REPLACES_NET_PRIO registers pids under net_prio's subsystem id (6,
+the last one of this config; Android never mounts net_prio: /proc/cgroups hierarchy 0, no vendor module
+imports a net_prio symbol). Count, ids and all layouts stay stock; genksyms sees net_prio (__GENKSYMS__),
+so symbol CRCs stay stock. net_prio's code is not built; its struct fields stay, unused.
+
+diff --git a/include/linux/cgroup_subsys.h b/include/linux/cgroup_subsys.h
+index 445235487..ea6fd882c 100644
+--- a/include/linux/cgroup_subsys.h
++++ b/include/linux/cgroup_subsys.h
+@@ -46,14 +46,23 @@ SUBSYS(perf_event)
+ #endif
+ 
+ #if IS_ENABLED(CONFIG_CGROUP_NET_PRIO)
++/*
++ * PowOS: CGROUP_PIDS_REPLACES_NET_PRIO puts pids in net_prio's slot, so the
++ * subsystem ids and CGROUP_SUBSYS_COUNT stay those of the stock KMI. genksyms
++ * keeps seeing net_prio, so symbol CRCs stay the stock ones too.
++ */
++#if IS_ENABLED(CONFIG_CGROUP_PIDS_REPLACES_NET_PRIO) && !defined(__GENKSYMS__)
++SUBSYS(pids)
++#else
+ SUBSYS(net_prio)
+ #endif
++#endif
+ 
+ #if IS_ENABLED(CONFIG_CGROUP_HUGETLB)
+ SUBSYS(hugetlb)
+ #endif
+ 
+-#if IS_ENABLED(CONFIG_CGROUP_PIDS)
++#if IS_ENABLED(CONFIG_CGROUP_PIDS) && !IS_ENABLED(CONFIG_CGROUP_PIDS_REPLACES_NET_PRIO)
+ SUBSYS(pids)
+ #endif
+ 
+diff --git a/include/net/netprio_cgroup.h b/include/net/netprio_cgroup.h
+index dec7522b6..10fb40715 100644
+--- a/include/net/netprio_cgroup.h
++++ b/include/net/netprio_cgroup.h
+@@ -18,7 +18,10 @@ struct netprio_map {
+ 	u32 priomap_len;
+ 	u32 priomap[];
+ };
++#endif
+ 
++/* PowOS: without the net_prio controller (its slot went to pids) every socket stays at prioidx 0. */
++#if IS_ENABLED(CONFIG_CGROUP_NET_PRIO) && !IS_ENABLED(CONFIG_CGROUP_PIDS_REPLACES_NET_PRIO)
+ static inline u32 task_netprioidx(struct task_struct *p)
+ {
+ 	struct cgroup_subsys_state *css;
+diff --git a/init/Kconfig b/init/Kconfig
+index df94ea920..36cc505a5 100755
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -1065,6 +1065,22 @@ config CGROUP_PIDS
+ 	  since the PIDs limit only affects a process's ability to fork, not to
+ 	  attach to a cgroup.
+ 
++config CGROUP_PIDS_REPLACES_NET_PRIO
++	bool "PIDs controller takes the net_prio controller's slot (KMI-preserving)"
++	depends on CGROUP_PIDS && CGROUP_NET_PRIO
++	help
++	  PowOS, for GKI kernels whose vendor modules are frozen against a KMI
++	  built without CGROUP_PIDS. Adding a cgroup subsystem grows
++	  CGROUP_SUBSYS_COUNT and with it every per-subsystem array in
++	  struct css_set and struct cgroup, which breaks the vendor modules.
++	  With this option the pids controller is registered under the subsystem
++	  id net_prio had (net_prio is the last subsystem of this config and
++	  Android does not mount it), so the count, the ids and every structure
++	  layout stay exactly as in the stock KMI. net_prio itself is dropped;
++	  the struct fields it owns (net_device.priomap,
++	  sock_cgroup_data.prioidx) stay in place, unused.
++	  Symbol CRCs are computed on the stock view (__GENKSYMS__).
++
+ config CGROUP_RDMA
+ 	bool "RDMA controller"
+ 	help
+diff --git a/kernel/cgroup/cgroup.c b/kernel/cgroup/cgroup.c
+index b3d540740..0d7a3515e 100644
+--- a/kernel/cgroup/cgroup.c
++++ b/kernel/cgroup/cgroup.c
+@@ -149,6 +149,10 @@ static const char *cgroup_subsys_name[] = {
+ 	EXPORT_SYMBOL_GPL(_x ## _cgrp_subsys_enabled_key);			\
+ 	EXPORT_SYMBOL_GPL(_x ## _cgrp_subsys_on_dfl_key);
+ #include <linux/cgroup_subsys.h>
++#if IS_ENABLED(CONFIG_CGROUP_PIDS_REPLACES_NET_PRIO) && defined(__GENKSYMS__)
++/* PowOS: genksyms sees net_prio in pids' slot (cgroup_subsys.h); give pids' keys their CRCs too. */
++SUBSYS(pids)
++#endif
+ #undef SUBSYS
+ 
+ #define SUBSYS(_x) [_x ## _cgrp_id] = &_x ## _cgrp_subsys_enabled_key,
+diff --git a/net/core/Makefile b/net/core/Makefile
+index e5fc37ece..3729a5f45 100644
+--- a/net/core/Makefile
++++ b/net/core/Makefile
+@@ -26,7 +26,9 @@ obj-$(CONFIG_NET_DROP_MONITOR) += drop_monitor.o
+ obj-$(CONFIG_NET_SELFTESTS) += selftests.o
+ obj-$(CONFIG_NETWORK_PHY_TIMESTAMPING) += timestamping.o
+ obj-$(CONFIG_NET_PTP_CLASSIFY) += ptp_classifier.o
++ifndef CONFIG_CGROUP_PIDS_REPLACES_NET_PRIO
+ obj-$(CONFIG_CGROUP_NET_PRIO) += netprio_cgroup.o
++endif
+ obj-$(CONFIG_CGROUP_NET_CLASSID) += netclassid_cgroup.o
+ obj-$(CONFIG_LWTUNNEL) += lwtunnel.o
+ obj-$(CONFIG_LWTUNNEL_BPF) += lwt_bpf.o

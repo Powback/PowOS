@@ -1,36 +1,70 @@
 /* Home, the bar, the drawer, the dock: laid out from theme.css's tokens only. */
 
+/*
+ * Home and PowOS AI's page together (home.tsx): a box the screen's size. The switcher's swipe scales it (recents.tsx
+ * frame), and a transformed element is the containing block of its fixed children - with no box of its own (0 px
+ * tall) home and the AI page (top: 0; bottom: 0) collapsed to nothing for the whole swipe and popped back at its end.
+ * Absolute, not fixed: no stacking context at rest.
+ */
+.screens { position: absolute; inset: 0; }
+
 .home {
   position: fixed;
   inset: 0;
   display: flex;
   flex-direction: column;
-  /* The host's insets (app.tsx), else the browser's safe areas; the keyboard lifts the bar above it. */
+  /* The host's insets (app.tsx), else the browser's safe areas; the keyboard lifts the bar above it, a pill's foot
+     clear of it (the pill sat flush on the keyboard's toolbar). */
   padding:
     var(--inset-top, env(safe-area-inset-top))
     var(--inset-right, env(safe-area-inset-right))
-    max(var(--inset-bottom, env(safe-area-inset-bottom)), var(--inset-keyboard, 0px))
+    max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot)))
     var(--inset-left, env(safe-area-inset-left));
 }
 
 /*
- * The stage: the pages, and the launcher panel at its foot. The panel is the recent apps bar grown by --p (0..1, the
- * drawer's openness, gesture.ts): its frame's top edge rises from the bar to the top of the stage, and the drawer is
- * revealed by a clip at that edge - a frame of the swipe moves an edge, nothing is laid out again.
+ * The stage: the pages, and the launcher panel over them. The panel is laid out once, at its open size, and --p (0..1,
+ * the drawer's openness, gesture.ts) only moves and fades it as one layer - nothing changes size or place in layout
+ * while a finger drags it (the user: a slow open lagged while the dock and the frame's edges were laid out each frame).
  */
 @property --p {
   syntax: "<number>";
+  /* Not inherited: set on a [data-p] element, a change restyled every app cell and widget under it on each frame of
+     a drag (3.3 ms of the frame headless on the M4, ~0.6 without). The few inside that read it inherit it by name. */
+  inherits: false;
+  initial-value: 0;
+}
+.cc-media::after { --p: inherit; }
+/* How far the drawer rises as it opens - THE knob for where its open starts (gesture.ts maps the finger onto it, so a
+   shorter rise opens it with less finger too): from ~15% of the screen down, close to where it rests, fading in - the
+   user's (2026-10-22: 30vh, then "further up"). A length, so JS reads it in px. */
+/* The notification panel's / control center's open travel (as --rise): a length, so JS reads it in px. */
+@property --drop {
+  syntax: "<length>";
   inherits: true;
+  initial-value: 0px;
+}
+@property --rise {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+.home { --rise: 15vh; }
+/* The launcher's fade (below), worked out from --p: not inherited either, for the same reason. */
+@property --fade {
+  syntax: "<number>";
+  inherits: false;
   initial-value: 0;
 }
 /*
  * What follows the panel's openness (data-p): --p is written on each by gesture.ts and transitions between settled
- * values; while a finger moves the panel, it tracks the finger exactly. Only clips, transforms and opacity read it -
- * nothing that lays anything out again.
+ * values; while a finger moves the panel, it tracks the finger exactly. Only transforms and opacity read it - nothing
+ * that lays anything out again.
  */
 [data-p] {
   --p: 0;
-  transition: --p 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  /* Fast out, no slow tail: let go, it's there within 180 ms (the user: "snappier"). */
+  transition: --p 180ms cubic-bezier(0.1, 0.8, 0.2, 1);
 }
 .home.dragging [data-p] { transition: none; }
 
@@ -44,53 +78,88 @@
   position: absolute;
   inset: 0;
   /* Room for the bar at the panel's foot. */
-  padding-bottom: calc(var(--strip-height) + var(--gap));
+  padding-bottom: var(--gap);
   display: flex;
   flex-direction: column;
   opacity: calc(1 - var(--p));
   transform: scale(calc(1 - var(--p) * 0.04));
 }
 .home.open .home-content { pointer-events: none; }
+/* Lifted over the floating windows (ui/panellift.ts): home's pages are behind the windows, so they don't draw over them. */
+.home.over-windows > .stage > .home-content { visibility: hidden; }
 
-.launcher-frame {
-  position: absolute;
-  left: var(--edge);
-  right: var(--edge);
-  bottom: var(--gap);
-  top: calc((1 - var(--p)) * (100% - var(--strip-height) - var(--gap)));
-  /* The wallpaper through it, more of the drawer's own color as it opens (the list stays readable); what's under it on
-     home is blurred (the wallpaper isn't the page's to blur). */
-  background: color-mix(in srgb, var(--color-background) calc(var(--glass) + var(--p) * 14%), transparent);
-  backdrop-filter: blur(calc(var(--p) * 18px));
-  -webkit-backdrop-filter: blur(calc(var(--p) * 18px));
+/*
+ * The panel. The drag moves it up by --rise and fades it in (an ease-out, 1 - (1 - p/0.8)^3: ~95% there half-way,
+ * whole by 80% of the way, the rest is motion only; closing the same in reverse) - each piece its own compositor
+ * layer, so a frame of the drag is transforms and opacities, nothing else. On the phone (home.tsx, pull.tsx) the frost
+ * (.stage > .launcher-frame) reaches the screen's foot, under the search pill and the navigation bar, while the drawer
+ * (.launcher-clip > .launcher) is cut off at the pill's top with a short fade - no app row ever under the pill, moving
+ * or at rest. The desktop (desktop.tsx) keeps the frost inside the launcher.
+ */
+.stage, .launcher { --foot: max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)); }
+.launcher, .stage > .launcher-frame {
+  --fade: calc(1 - min(1, var(--p) * 1.25));
+  transform: translateY(calc((1 - var(--p)) * var(--rise)));
+  opacity: calc(1 - var(--fade) * var(--fade) * var(--fade));
+  will-change: transform, opacity;
 }
 .launcher {
   position: absolute;
-  left: var(--edge);
-  right: var(--edge);
+  left: 0;
+  right: 0;
   top: 0;
-  bottom: var(--gap);
+  bottom: calc(-1 * (48px + var(--strip-height) + var(--foot)));
   display: flex;
   flex-direction: column;
-  clip-path: inset(calc((1 - var(--p)) * (100% - var(--strip-height))) 0 0 0 round var(--radius));
-  /* Closed, only the recent apps take touches; the pages under the rest stay reachable. */
   pointer-events: none;
 }
-/* The panel's content, the recent row first: it moves with the top edge as one piece (the clip cuts what's below). */
+/* The frost (the compositor's blur under it fades with it: nativeglass.ts, a region's alpha is its opacity). */
+.launcher-frame { position: absolute; inset: 0; }
+.stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--strip-height) + var(--foot))); pointer-events: none; }
+/* The drawer's window: down to the search pill's top once the dock has given way (the pill's 44 px sit 2 px above the
+   bar's 48), its last 12 px fading out - what rides past it as the drawer moves goes under nothing. */
+.launcher-clip {
+  position: absolute;
+  inset: 0 0 calc(4px - var(--strip-height));
+  overflow: hidden;
+  pointer-events: none;
+  mask-image: linear-gradient(black calc(100% - 12px), transparent);
+}
+.launcher-clip > .launcher { bottom: 0; }
+/* Where the search bar slides down as the dock gives way (.home > .bar), the window's edge rides with the pill - it is
+   always at the pill's top - and the drawer in it is moved back by as much: transforms only, all of them. */
+.home > .stage > .launcher-clip { transform: translateY(calc((var(--p) - 1) * var(--strip-height))); will-change: transform; }
+.home > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * (var(--rise) + var(--strip-height)))); }
+:is(.home.pill-below, .pull-screen, .home:not(:has(> .bar))) > .stage > .launcher-clip { transform: none; }
+:is(.home.pill-below, .pull-screen, .home:not(:has(> .bar))) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
+/* No search bar at the foot (the search widget): down over the dock's place to the screen's foot, no pill to clear.
+   Over an app (pull.tsx): no dock - the pill right under the stage. */
+.home:not(:has(> .bar)) .launcher-clip { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); mask-image: none; }
+.home:not(:has(> .bar)) .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
+.pull-screen .launcher-clip { inset: 0 0 4px; }
+.pull-screen .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
+/* The reference material (theme.css --text-fill); home's content fades out under it (.home-content), nothing to blur. */
+.home .launcher-frame.tile {
+  background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+}
+/* The drawer, above the search pill's place. */
 .launcher-inner {
-  height: 100%;
+  position: relative;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  transform: translateY(calc((1 - var(--p)) * (100% - var(--strip-height))));
+  padding-bottom: calc(48px + var(--foot));
 }
-.launcher .strip { pointer-events: auto; }
-.home.open .launcher .drawer { pointer-events: auto; }
+.home:not(:has(> .bar)) .launcher-inner { padding-bottom: var(--foot); }
+/* In the window: a gap over the pill (its fade above it), the last row clear of it. */
+.launcher-clip .launcher-inner { padding-bottom: 16px; }
+.home.open :is(.launcher-frame, .launcher .drawer, .launcher .ai-panel) { pointer-events: auto; }
+/* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
+.home > .bar { transform: translateY(calc(var(--p) * var(--strip-height))); }
+.home.pill-below > .bar, .pull-screen > .bar { transform: none; }
 
-/*
- * The recent row heads the panel; as the launcher opens it closes towards the top: it moves up by its openness and
- * is clipped by as much from its top, so the icons (full size) disappear into its top edge - with transforms and a
- * clip only. The list under it rides up by the same amount.
- */
+/* A row of recent apps (recentwidget.tsx). */
 .strip {
   flex: none;
   height: var(--strip-height);
@@ -106,59 +175,277 @@
   scroll-padding: 0 4px;
   overscroll-behavior-x: contain;
   touch-action: pan-x;
-  transform: translateY(calc(var(--p) * -1 * var(--strip-height)));
-  clip-path: inset(calc(var(--p) * 100%) 0 0 0);
 }
 /* The apps share the row's width: all of them fit, at up to the strip's icon size. */
 .strip .app { flex: 0 0 calc((100% - 5 * 4px) / 6); min-width: 0; padding: 0; scroll-snap-align: start; }
 .strip .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 /* Full size always, in the full-height row's place: the shutter cuts them, it doesn't scale them. */
+/*
+ * The dock's pages (home.tsx Dock): the pinned apps, a swipe sideways the recent ones - the browser's own scroll
+ * snapping, a page at a time, on the compositor; small dots under them say which.
+ */
+.dock-pages {
+  flex: none;
+  width: 100%;
+  height: var(--strip-height);
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Proximity: the recent apps scroll freely with the finger (momentum), settling on the pinned page or the recents'
+     start only when let go near one. Sideways is the dock's own (gesture.ts inStrip), never home's page swipe. */
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  container-type: inline-size;
+}
+.dock-pages::-webkit-scrollbar { display: none; }
+.dock-page { flex: 0 0 100%; display: flex; align-items: flex-start; gap: 4px; padding: 0 4px; scroll-snap-align: start; scroll-snap-stop: always; }
+/* The recent apps: one row as long as they are, each as wide as a pinned app (six to a width). */
+.dock-page.dock-recent { flex: 0 0 auto; scroll-snap-stop: normal; }
+/* Sized from the dock's own width (a container: cqw), not the viewport's - in the WebView 100vw isn't the page's
+   width; and over .dock .app's flex: 1 (which came later at the same specificity and stretched each to 141 px). */
+.dock .dock-recent .app { flex: 0 0 calc((100cqw - 28px) / 6); }
+/* Faded at the edges where there's more to scroll, not cut: the right while there's more on, the left once scrolled
+   (a scroll-driven mask, on the compositor; without that support only the right). */
+@property --dock-fade-l { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --dock-fade-r { syntax: "<length>"; inherits: false; initial-value: 24px; }
+.dock.paged .dock-pages {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black var(--dock-fade-l), black calc(100% - var(--dock-fade-r)), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, black var(--dock-fade-l), black calc(100% - var(--dock-fade-r)), transparent 100%);
+}
+@supports (animation-timeline: scroll()) {
+  .dock.paged .dock-pages { animation: dock-fade linear both; animation-timeline: scroll(self x); }
+}
+@keyframes dock-fade {
+  0% { --dock-fade-l: 0px; --dock-fade-r: 24px; }
+  4% { --dock-fade-l: 24px; }
+  96% { --dock-fade-r: 24px; }
+  100% { --dock-fade-l: 24px; --dock-fade-r: 0px; }
+}
+/* The pinned apps never fade (the user, 2026-10-23: the edge icon faded and cut): the dock's right edge fades only
+   once it scrolls into the recent apps; the recent apps' own tray (wide) keeps dock-fade. */
+.dock.paged:not(.dock-tray) .dock-pages { --dock-fade-r: 0px; animation-name: dock-fade-pinned; }
+@keyframes dock-fade-pinned {
+  0% { --dock-fade-l: 0px; --dock-fade-r: 0px; }
+  4% { --dock-fade-l: 24px; --dock-fade-r: 24px; }
+  96% { --dock-fade-r: 24px; }
+  100% { --dock-fade-l: 24px; --dock-fade-r: 0px; }
+}
+/*
+ * Content scrolling under chrome (the drawer's apps under the status bar and over the pill, PowOS AI's panes under its
+ * header and over the compose, the shade's list, the chat) fades out at an edge where there's more to scroll, never
+ * cut (the user, 2026-10-24): one scroll-driven mask on the scroll container, the dock's way, both ends --scroll-fade.
+ * Nothing to scroll, or no scroll timelines: no fade, as before.
+ */
+@property --scroll-fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --scroll-fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
+:is(.drawer-list, .chat, .ai-panel, .ai-scroll, .notif-list) {
+  --scroll-fade: 24px;
+  -webkit-mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
+  mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
+}
+@supports (animation-timeline: scroll()) {
+  :is(.drawer-list, .chat, .ai-panel, .ai-scroll, .notif-list) {
+    animation: scroll-fade-t linear both, scroll-fade-b linear both;
+    animation-timeline: scroll(self y), scroll(self y);
+    animation-range: 0 var(--scroll-fade), calc(100% - var(--scroll-fade)) 100%;
+  }
+}
+@keyframes scroll-fade-t { from { --scroll-fade-t: 0px; } to { --scroll-fade-t: var(--scroll-fade); } }
+@keyframes scroll-fade-b { from { --scroll-fade-b: var(--scroll-fade); } to { --scroll-fade-b: 0px; } }
+.dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
+.dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
+.dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
 .dock .app { flex: 1 1 0; min-width: 0; height: calc(var(--strip-height) - 2 * var(--frame)); justify-content: center; padding: 0; }
 .dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 
-.bar {
-  position: relative;
-  z-index: 3;
-  margin: 0 var(--edge) var(--gap);
-  min-height: 48px;
+/*
+ * The pill (bar.tsx's search, PowOS AI's compose): one component - the reference material (theme.css .tile.pill), round,
+ * its field growing to three rows (grow.tsx), the mic on its right. Only the placeholder differs.
+ */
+.pill {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--gap);
-  padding: 0 var(--edge);
+  min-height: var(--pill-height);
+  padding: 0 4px 0 var(--edge);
+  border-radius: 20px;
 }
-.bar:focus-within { border-color: var(--color-accent); }
-.bar .prompt { color: var(--color-accent); }
-.bar input {
+.pill .grow::placeholder { color: var(--color-muted); }
+/* Empty, the pill shows a prompt glyph, not words (bar.tsx Pill; its name is the field's aria-label). Zero wide, it
+   sits where the text starts; focused, it blinks in place of the caret, and the first letter typed takes its place. */
+.pill .prompt {
+  flex: none;
+  align-self: flex-end;
+  width: 0;
+  margin-right: calc(-1 * var(--gap)); /* nor does the pill's gap move the text */
+  overflow: visible;
+  pointer-events: none;
+  color: var(--color-muted);
+  font: calc(var(--text-item) + 3px) / 40px var(--font);
+}
+.pill.empty .grow { caret-color: transparent; }
+.pill.empty:focus-within .prompt { animation: prompt-blink 1.1s ease-in-out infinite; }
+@keyframes prompt-blink { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .pill.empty:focus-within .prompt { animation: none; } }
+.pill .mic {
+  flex: none;
+  align-self: flex-end;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 20px;
+  background: none;
+  color: var(--color-foreground);
+  touch-action: none;
+}
+.pill .mic.on { background: var(--color-red); color: var(--color-background); }
+/* An autosend dictation's words, a moment before they go (assistant.ts): a touch keeps them to edit. */
+.pill.sending .grow { color: var(--accent-text); }
+/* The search bar's place in home's layout is a fixed 48 px; the pill sits in it and grows upward, over home. */
+.bar { position: relative; z-index: 3; margin: 0; height: 48px; padding: 0; }
+.bar-pill {
+  position: absolute;
+  left: var(--edge);
+  right: var(--edge);
+  bottom: var(--pill-foot);
+  /* Its own layer, always: the drawer's list scrolling by above it flickered it (a layer re-promoted, re-rastered). */
+  will-change: transform;
+  contain: paint;
+}
+/* Under the dock (searchwidget.tsx footBelow): the foot's order swapped. */
+.home.pill-below .bar { order: 1; }
+/* The search widget (searchwidget.tsx): the pill centred in its cells, growing upward from there as in the foot. */
+.search-face { position: relative; height: 100%; }
+.search-face .bar { position: absolute; left: 0; right: 0; top: 50%; height: 24px; }
+.search-face .bar-pill { left: calc(var(--gap) / 2); right: calc(var(--gap) / 2); bottom: -20px; }
+.home.editing .search-face { pointer-events: none; }
+/* Its face doesn't type (bar.tsx proxy): a tap opens the drawer and the foot's pill types. */
+.search-face .grow { pointer-events: none; }
+/*
+ * The search widget on the grid (home.tsx .search-parked): the foot's pill stays the drawer's search, parked in the
+ * dock's row (after it, over its foot: no room of its own, home's layout as without it) - unseen at rest, faded in as
+ * the dock gives way, where the original pill ends up open. The drawer's window ends at its top, as over the pill.
+ */
+.home.search-parked > .bar { order: 1; margin-top: -48px; z-index: 4; transform: none; opacity: min(1, calc(var(--p) * 3)); pointer-events: none; }
+.home.search-parked.open > .bar { pointer-events: auto; }
+.home.search-parked:not(.wide) > .stage > .launcher-clip { inset: 0 0 calc(52px - var(--strip-height)); transform: none; }
+.home.search-parked:not(.wide) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
+.home.search-parked:not(.wide) > .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
+.home.wide.search-parked > .bar { margin-top: 0; }
+/* Edit mode: the search widget carried over the bar's slot (searchwidget.tsx barAim) - let go, it's back in the bar. */
+.edit-sheet.drop-here, .home.search-below-aim > .dock:not(.dock-tray) { outline: var(--frame) dashed var(--color-accent); outline-offset: -2px; }
+/* The fields that grow with their text (grow.tsx): their height animates, they scroll past their last row. */
+.grow {
   flex: 1;
   min-width: 0;
+  resize: none;
   background: none;
   border: 0;
   outline: 0;
+  margin: 0;
+  padding: 10px 0;
   color: var(--color-foreground);
   font: var(--text-item) var(--font);
+  line-height: 20px;
+  overflow: hidden;
+  scrollbar-width: none;
+  transition: height 140ms ease;
 }
-.bar input::placeholder { color: var(--color-muted); }
+.grow.scrolls { overflow-y: auto; }
 
 /*
- * The dock: pinned apps under the bar (iOS's dock). As the launcher opens it closes like a shutter - its bottom edge
- * rises to the bar, cutting the icons off; they keep their size and place. (Its height changes, so the stage above
- * resizes with it; home's grid doesn't re-measure meanwhile - grid.tsx - it's faded out under the launcher.)
+ * The dock: pinned apps under the bar (iOS's dock). As the launcher opens it gives way - down and out, faded by a
+ * third of the way - with its size and place in layout unchanged (the drawer is laid over its place).
  */
 .dock {
-  --dock-open: calc(1 - var(--p));
   position: relative;
   z-index: 3;
-  height: calc(var(--strip-height) * var(--dock-open));
-  margin: 0 var(--edge) calc(var(--edge) * var(--dock-open));
+  height: var(--strip-height);
+  margin: 0;
   overflow: hidden;
   display: flex;
   align-items: flex-start;
-  gap: 4px;
-  padding: 0 4px;
-  /* Its frame goes at the very end, so a closed dock leaves no line under the bar. */
-  border-width: calc(var(--frame) * min(1, var(--dock-open) * 8));
+  padding: 0;
+  transform: translateY(calc(var(--p) * var(--strip-height)));
+  opacity: calc(1 - min(1, var(--p) * 3));
 }
+.home.pill-below .dock { transform: none; }
+.home.open .dock { pointer-events: none; }
 
+/*
+ * Home's foot - the recent row (the launcher panel, closed), the bar and the dock - is one sheet: edge to edge, the
+ * pieces flush against each other and the sheet against the screen's foot (the filler under it fills the navigation
+ * bar's inset), the same fill everywhere so no seam shows; only the sheet's top corners are rounded, only its top
+ * edge catches the light.
+ */
+.launcher-frame, .dock { border-color: transparent; box-shadow: none; }
+/*
+ * The drawer: a page of labels over the frost - more of the tint than a tile (--glass-dim 42%, as the desktop's drawer:
+ * measured 0 failures over the phone's and a light wallpaper, three themes). --text-fill again here, for it's resolved
+ * where it's declared.
+ */
+.home .launcher-frame {
+  --glass-dim: 42%;
+  --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
+}
+/* Over a wallpaper of the other tone (theme.css data-wallpaper): the root's deeper tint, the drawer's too. */
+:root[data-light="false"][data-wallpaper="light"] .home .launcher-frame, :root[data-light="true"][data-wallpaper="dark"] .home .launcher-frame { --glass-dim: 68%; }
+/*
+ * The chat in the drawer (chat.tsx): a page of text over the frost - the frame takes the theme's background at 84%
+ * (as the assistant's panel), so its text keeps 4.5:1 over a bright wallpaper (the reference fill measured 3.7-4.4).
+ */
+html:root .home:has(.drawer .chat) .launcher-frame.tile {
+  background: color-mix(in srgb, var(--color-background) var(--chat-fill, 84%), transparent);
+}
+/* Over a wallpaper of the other tone: nearly solid. */
+:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] { --chat-fill: 94%; }
+/* Home's widgets: their text is often small and plain - a touch more of the tint than the reference (4.0 -> 4.5:1). */
+.page .home-tile > .tile, .page .seam {
+  /* Measured over the crystal on the inner screen (the widgets' preview): 32% left plain text at 4.2:1, 42% reaches
+     4.5; secondary text in a widget is the foreground itself - its size says it's secondary, a see-through colour
+     there was 3.7:1. */
+  --glass-dim: 42%;
+  --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
+  --glass-fill: var(--text-fill);
+  --color-muted: var(--color-foreground);
+}
+:root[data-light="false"][data-wallpaper="light"] .page .home-tile > .tile, :root[data-light="true"][data-wallpaper="dark"] .page .home-tile > .tile { --glass-dim: 68%; }
+.dock { background: none; }
+/* The dock: no slab and no plates - the icons bare on the wallpaper, as the search pill floats above them. */
+.launcher-frame { border-radius: var(--radius) var(--radius) 0 0; box-shadow: var(--lift-edge), var(--lift-shadow-up); }
+.dock { border-radius: 0; }
+/* The navigation bar's band: no filler any more (the foot has no slab); the rule stays for the edit sheet's sake. */
+.home::after {
+  display: none;
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: max(var(--inset-bottom, env(safe-area-inset-bottom)), var(--inset-keyboard, 0px));
+  background: var(--glass-fill);
+  pointer-events: none;
+}
+.home.editing::after { visibility: hidden; }
+/*
+ * On glass (theme.css, ui/glass.ts): the foot's filler is the frosted wallpaper at the screen's foot; the launcher's
+ * frame keeps its picture pinned at its bottom edge (its top rises with the drawer, --gb is where its foot is) and
+ * takes more tint as it opens, so the list stays readable; the notification panel a little more tint too.
+ */
+.glass .home::after {
+  background:
+    linear-gradient(var(--glass-fill), var(--glass-fill)),
+    var(--glass-image) left 0 bottom 0 / var(--glass-w) var(--glass-h) no-repeat;
+}
+.glass .home .launcher-frame.tile {
+  background:
+    linear-gradient(var(--text-fill), var(--text-fill)) border-box,
+    var(--glass-image) left calc(-1 * var(--gx)) bottom calc(-1 * var(--gb)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}
 
 /* The drawer: the panel under the recent row. */
 .drawer-clip {
@@ -166,22 +453,39 @@
   min-height: 0;
   display: flex;
   overflow: hidden;
-  /* Taller by the recent row, and riding up by as much as it closes: open, it reaches the panel's foot. */
-  margin-bottom: calc(-1 * var(--strip-height));
-  transform: translateY(calc(var(--p) * -1 * var(--strip-height)));
 }
-.drawer {
-  opacity: min(1, calc(var(--p) * 1.6));
+/* PowOS AI's pull-up panel (state.ts pullKind "ai"): its content in the drawer's place, scrolling; its cards on the
+   panel's frost are a soft fill (a surface inside a surface). */
+.ai-panel {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: var(--edge) var(--edge) 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-y;
+}
+html:root .ai-panel .tile { background: var(--soft-fill); }
+.drawer {
+  flex: 1;
+  /* Unfolded, a column of at most ~7 apps, centred with its A-Z bar: an A-Z section of three apps across 2268 px left
+     most of the frost empty. */
+  max-width: 600px;
+  margin-inline: auto;
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr var(--letter-bar);
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   padding: 0 4px 0 var(--edge);
 }
 
 .drawer-list {
   grid-column: 1;
+  /* The A-Z bar's width kept clear: a long name in the last column ran into its letters. */
+  padding-right: var(--letter-bar);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
@@ -196,6 +500,9 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--cell), 1fr));
 }
+/* The recent row (drawer.tsx RecentRow): fixed under the scrolling list, by the search pill; the first row of its grid
+   only, as many as fit across, columns as the list's; spacing, no line, above it. */
+.drawer-recents { grid-column: 1; grid-template-rows: auto; grid-auto-rows: 0; overflow: hidden; margin-top: 16px; padding-right: var(--letter-bar); }
 /* Search results sit at the foot of the list, by the bar, and fill upward: the best match nearest the bar. */
 .drawer-list.results {
   display: flex;
@@ -216,7 +523,7 @@
   flex-direction: column;
   align-items: center;
   max-height: 100%;
-  height: calc(27 * 18px);
+  height: calc(var(--letters, 27) * 18px);
   touch-action: none;
 }
 .letter-bar span {
@@ -224,9 +531,16 @@
   display: flex;
   align-items: center;
   font-size: var(--text-small);
-  color: var(--color-muted);
 }
-.letter-bar span.on { color: var(--color-accent); transform: scale(1.5); }
+/* The drawer's labels can sit over the brightest part of the wallpaper: the label shadow, as home's. */
+.drawer :is(.app-label, .heading), .letter-bar span { text-shadow: 0 0 2px var(--color-background), 0 0 4px var(--color-background), 0 0 7px var(--color-background), 0 0 12px color-mix(in srgb, var(--color-background) 70%, transparent); }
+.letter-bar span { transition: transform 160ms ease-out, color 160ms; }
+.letter-bar span.on { color: var(--accent-text); transform: scale(1.5); }
+/* Scrubbing the A-Z bar (drawer.tsx highlight): the letter's cells bright with a soft lift, the rest dim; eased in
+   and back. opacity/scale/translate only (composited, no layout), changed per letter, not per pointermove. */
+.grid.az .app { transition: background 120ms, opacity 180ms ease-out, scale 180ms ease-out, translate 180ms ease-out; }
+.grid.az[data-scrub] .app { opacity: 0.4; }
+.grid.az[data-scrub] .app[data-lit] { opacity: 1; scale: 1.05; translate: 0 -2px; }
 /* The letter under the finger, big, beside the bar. */
 .letter-bubble {
   position: absolute;
@@ -257,10 +571,44 @@
   transition: background 120ms;
 }
 .app:active { background: var(--color-surface); }
-.app-icon { display: block; width: var(--icon); height: var(--icon); pointer-events: none; border-radius: 22%; }
-.app-icon img { display: block; width: 100%; height: 100%; transition: opacity 160ms; }
+.app-icon { position: relative; display: block; width: var(--icon); height: var(--icon); pointer-events: none; border-radius: var(--icon-radius); }
+/*
+ * The one icon shape (ui/iconshape.ts): the face is the squircle, the img placed in it by its measure (trimmed of its
+ * clear padding, inline left/top/width/height) and clipped to it. A transparent or irregular icon sits on the plate;
+ * one that is a shape already has none (the dock rule). Static: laid out once, nothing per frame.
+ */
+/* In flow, sized as the img was (the icon's box keeps its intrinsic height where it's height: auto). */
+.app-icon-face { position: relative; display: block; width: 100%; height: 100%; aspect-ratio: 1; overflow: hidden; border-radius: var(--icon-radius); }
+.app-icon.initials .app-icon-face { position: absolute; inset: 0; }
+.app-icon-face.plate { background: var(--icon-plate); }
+.app-icon-face.placed img { position: absolute; max-width: none; }
+/*
+ * A running app (ui/running.ts: a task, a Linux window) or one with a floating window (the dock, unfolded): a short
+ * accent bar centred under its icon, bare (no plate) - in the dock, its recent apps and the drawer. Frozen (asleep in
+ * RAM: powos-sleep-gui, a game with Steam) or minimised: the same bar, faint. Static: no frames while nothing changes.
+ */
+.app[data-run] .app-icon::after,
+.dock .app.windowed .app-icon::after {
+  content: "";
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 50%;
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  translate: -50% 0;
+  background: var(--color-accent);
+  /* A hairline of the theme background (the accent's own ground), so it reads on any wallpaper. */
+  box-shadow: 0 0 0 1px var(--color-background);
+}
+.app[data-run="frozen"] .app-icon::after,
+.dock .app.windowed.minimised:not([data-run="running"]) .app-icon::after { opacity: 0.4; }
+.app-icon img { display: block; width: 100%; height: 100%; object-fit: contain; transition: opacity 160ms; }
 /* Not loaded yet (apps.tsx AppIcon): a pulsing tile in its place, not a broken image. */
-.app-icon.loading { background: var(--color-surface); animation: icon-wait 1.2s ease-in-out infinite alternate; }
+/* Pulses ~10 s, not forever: an app with no icon at all (a Linux app like lstopo) stays "loading", and an endless
+   animation kept the compositor drawing 60 frames a second on an idle home (app + renderer ~20% of a core). */
+.app-icon.initials { border-radius: var(--icon-radius); }
+.app-icon.loading { background: var(--color-surface); animation: icon-wait 1.2s ease-in-out 8 alternate; }
 .app-icon.loading img { opacity: 0; }
 @keyframes icon-wait { from { opacity: 0.35; } to { opacity: 0.8; } }
 .app-label {
@@ -280,7 +628,6 @@
   display: flex;
   flex-direction: column;
   padding: 4px;
-  background: var(--color-surface);
   animation: menu-in 120ms ease-out;
 }
 @keyframes menu-in { from { opacity: 0; transform: scale(0.95); } }
@@ -293,7 +640,7 @@
   white-space: nowrap;
 }
 .menu-item { padding: 10px 12px; text-align: left; border-radius: 8px; }
-.menu-item:active { background: var(--color-background); }
+.menu-item:active { background: var(--soft-fill); }
 
 /* Home pages: tiles on a grid of square cells (grid.tsx computes the boxes). */
 .pages {
@@ -306,14 +653,128 @@
 .page-track {
   display: flex;
   height: 100%;
-  transition: transform 300ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  transition: transform 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
   will-change: transform;
 }
 /* A finger is sliding the pages: they follow it exactly. */
 .page-track.dragging { transition: none; }
 .page { position: relative; flex: 0 0 100%; height: 100%; }
+/* PowOS apps' own controls (islands on home, their pages) get the shell's borderless look too: their buttons' and
+   chips' outlines go (their styles are inline - hence !important), a bare one takes a soft fill. */
+/*
+ * Under a page-sized sheet (any .sheet but a .pop: a widget's screen, an app's page, the picker, settings) home's content steps
+ * out - faded, then hidden (the compositor drops its glass regions too) - so only the frosted wallpaper is behind it.
+ */
+.stage, .bar, .dock, .ai-screen .ai-scroll { transition: opacity 180ms ease-out, visibility 0s; }
+html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 180ms ease-out, visibility 0s 180ms;
+}
+/* The whole-screen sheets (an app's page, settings and its screens, agents, remote input): no corners, no edge. */
+:is(.app-screen, .scr, .ag-screen, .remote-screen).tile { border: 0; border-radius: 0; box-shadow: none; }
+:is(.island-face, .app-screen) button { border-color: transparent !important; }
+:is(.island-face, .app-screen) button[style*="background: transparent"] { background: var(--soft-fill) !important; box-shadow: var(--lift) !important; }
+/*
+ * A page's glass (grid.tsx PageGlass): the frosted wallpaper once per page, under its tiles, masked to their faces;
+ * gesture.ts moves it against the track (same transition) so it holds still on screen as the page slides. The faces
+ * themselves are only the tint over it.
+ */
+.page-glass { display: none; position: absolute; inset: 0; pointer-events: none;
+  -webkit-mask: var(--glass-mask) 0 0 / var(--glass-mask-size) no-repeat; mask: var(--glass-mask) 0 0 / var(--glass-mask-size) no-repeat; }
+.glass .page-glass { display: block; }
+.page-glass-img {
+  position: absolute;
+  left: calc(-1 * var(--pg-left));
+  top: calc(-1 * var(--pg-top));
+  width: var(--glass-w);
+  height: var(--glass-h);
+  background: var(--glass-image) 0 0 / 100% 100% no-repeat;
+  will-change: transform;
+  transition: transform 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.page-track.dragging .page-glass-img, .page-glass-img.sliding { transition: none; }
+.glass .page .home-tile > .tile { background: var(--glass-fill); }
 .home-tile { position: absolute; padding: calc(var(--gap) / 2); touch-action: none; }
 .home-tile.lifted { opacity: 0.25; }
+/*
+ * Neighbouring widgets are one surface (grid.tsx joins): no gap on a side that touches another, square corners inside
+ * the group, round ones only on its outside; no edge light or shadow between them.
+ */
+.home-tile.joined {
+  padding:
+    calc(var(--gap) / 2 * (1 - var(--jt))) calc(var(--gap) / 2 * (1 - var(--jr)))
+    calc(var(--gap) / 2 * (1 - var(--jb))) calc(var(--gap) / 2 * (1 - var(--jl)));
+}
+.home-tile.joined > .tile {
+  border-radius:
+    calc(var(--radius) * var(--ctl)) calc(var(--radius) * var(--ctr))
+    calc(var(--radius) * var(--cbr)) calc(var(--radius) * var(--cbl));
+  /* The group's --lift: the light edge only along the group's top (a tile with nothing above), the shadow under the
+     whole group (grid.tsx GroupShadow). */
+  box-shadow: none;
+}
+.home-tile.joined[style*="--jt: 0"] > .tile { box-shadow: var(--lift-edge); }
+.group-shadow { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+/*
+ * The pieces merging tiles that touch over part of an edge (grid.tsx seams): the gutter along the shared span, and a
+ * fillet rounding the group's inner corner (the tint cut to a quarter circle's outside). Surfaces like a face, nothing
+ * of their own: no edge light, no shadow, no touches.
+ */
+.seam { position: absolute; box-sizing: border-box; border: 0; border-radius: 0; box-shadow: none; pointer-events: none; }
+.seam.fillet {
+  -webkit-mask-image: radial-gradient(circle at var(--fx) var(--fy), transparent calc(var(--fr) - 0.5px), #000 var(--fr));
+  mask-image: radial-gradient(circle at var(--fx) var(--fy), transparent calc(var(--fr) - 0.5px), #000 var(--fr));
+}
+.glass .page .seam { background: var(--glass-fill); }
+
+/*
+ * A PowOS app island's network failure, shared by every app (host.net.error's message): one calm muted line - on a
+ * narrow tile it breaks between words ("Hue bridge / offline"), never mid-word or cut - sized to the tile's width; a
+ * tap retries (host.net.useRetry), a long press shows the raw detail (the log has it too). .alone: nothing else to
+ * show - it takes the tile's free space, centred, a little bigger, the app's icon (.island-offline-icon) greyed above.
+ */
+.island-offline {
+  container-type: inline-size; display: flex; align-items: center; gap: 0.45em; flex: none; align-self: stretch; min-width: 0;
+  color: var(--color-muted); background: none; border: 0; padding: 0; font: inherit; text-align: start; cursor: pointer;
+}
+.island-offline > span {
+  min-width: 0; overflow-wrap: normal; word-break: keep-all; text-wrap: balance; line-height: 1.25;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  font-size: clamp(11px, 6.5cqw, 13px);
+}
+.island-offline::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.6; }
+.island-offline.alone { container-type: size; flex: 1; flex-direction: column; justify-content: center; gap: 4px; }
+.island-offline.alone::before { display: none; }
+.island-offline.alone > span { font-size: clamp(11px, min(8cqw, 15cqh), 30px); text-align: center; }
+/* The app's own icon, greyed, above the line: what's offline at a glance (the line alone left a tile mostly blank). */
+.island-offline-icon { flex: none; width: min(50cqh, 38cqw); height: min(50cqh, 38cqw); max-width: none; max-height: none; opacity: 0.35; filter: grayscale(1); }
+/* A one-row phone tile: no room for the icon over two lines - the line alone, as big as the height allows. */
+@container (max-height: 70px) {
+  .island-offline-icon { display: none; }
+  .island-offline.alone > span { font-size: clamp(11px, min(7.5cqw, 30cqh), 20px); }
+}
+.island-stale { opacity: 0.45; filter: saturate(0.4); pointer-events: none; }
+
+/* The recent apps as a home widget (ui/recentwidget.tsx): a row (or rows) of icons, --recent-n to a row. */
+
+.recents-face { height: 100%; display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
+.recents-face .strip { flex: 1; height: 100%; }
+.recents-face .strip .app { flex-basis: calc((100% - (var(--recent-n) - 1) * 4px) / var(--recent-n)); }
+.recents-face.fit { padding: 4px; }
+.recents-grid {
+  flex: 1; height: 100%; display: grid; overflow: hidden;
+  grid-template-columns: repeat(var(--recent-c), minmax(0, 1fr)); grid-template-rows: repeat(var(--recent-r), minmax(0, 1fr));
+}
+.recents-grid .app { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; padding: 0; }
+.recents-grid .app-icon { width: var(--recent-icon); height: var(--recent-icon); }
+.recents-face.rows .strip {
+  display: grid;
+  grid-template-columns: repeat(var(--recent-n), minmax(0, 1fr));
+  grid-auto-rows: calc(100% / var(--recent-rows));
+  overflow: hidden;
+  scroll-snap-type: none;
+}
 .widget-face {
   height: 100%;
   padding: 0;
@@ -322,7 +783,7 @@
   gap: 4px;
   overflow: hidden;
 }
-.widget-name { color: var(--color-accent); }
+.widget-name { color: var(--accent-text); }
 .widget-error { color: var(--color-red); font-size: var(--text-small); }
 .tile-app {
   height: 100%;
@@ -332,12 +793,14 @@
   justify-content: center;
   gap: 4px;
 }
-/* The icon takes what the cell leaves after its label; labels carry a shadow, to read on any wallpaper. */
+/* The icon takes what the cell leaves after its label; labels carry a shadow, to read on any wallpaper. The cell's
+   whole width (the icon's % is of it): the icon's face has no intrinsic size to widen it the way a bare img did. */
+.tile-app { width: 100%; }
 .tile-app .app-icon { width: min(var(--icon), 58%); height: auto; aspect-ratio: 1; }
 .tile-app .app-label,
 .strip .app-label {
   max-width: 100%;
-  text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+  text-shadow: var(--label-shadow);
   color: var(--color-foreground);
 }
 .initials {
@@ -346,7 +809,7 @@
   justify-content: center;
   border-radius: 50%;
   background: var(--color-surface);
-  color: var(--color-accent);
+  color: var(--accent-text);
 }
 .folder-face {
   height: 100%;
@@ -366,11 +829,11 @@
   pointer-events: none;
 }
 .carried {
-  position: absolute;
-  z-index: 5;
+  position: fixed;
+  z-index: 20;
   pointer-events: none;
   transform: scale(1.06);
-  filter: drop-shadow(0 8px 16px rgb(0 0 0 / 0.4));
+  filter: var(--lift-drop);
 }
 
 .tile-actions {
@@ -395,7 +858,7 @@
   height: 28px;
   border-radius: 50%;
   background: var(--color-accent);
-  border: 3px solid var(--color-background);
+  box-shadow: 0 0 0 3px var(--color-background);
   touch-action: none;
 }
 .resize-preview {
@@ -405,22 +868,57 @@
   pointer-events: none;
 }
 
-.folder-scrim {
+/*
+ * An open folder (ui/folderview.tsx): the tile grows into the sheet (FLIP: transforms and opacity, inline only while it
+ * moves). Behind it a page-sized frost (.folder-focus: the compositor's blur and a soft dim) while home's own content
+ * steps out - the compositor blurs only what's under the window, never home's tiles, so they fade instead.
+ */
+.folder-view { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; touch-action: none; }
+.folder-view .folder-focus.tile {
   position: absolute;
   inset: 0;
-  z-index: 8;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--color-background) 60%, transparent);
+  border-radius: 0;
+  box-shadow: none;
+  --glass-blur-native: var(--frost-blur-native);
+  background: color-mix(in srgb, var(--color-background) 30%, transparent);
+  transition: opacity 240ms ease-out;
 }
-.folder-panel {
+.folder-view:not(.open) .folder-focus.tile { opacity: 0; }
+html:has(.folder-view.open) .home :is(.page-track > .page, .bar, .dock, .dock-tray, .edit-sheet) { opacity: 0; pointer-events: none; }
+.page-track > .page { transition: opacity 240ms ease-out; }
+.home-tile.opened .folder-face, .lib-card.opened { opacity: 0; }
+.folder-sheet {
+  position: relative;
+  width: calc(var(--fcols) * var(--fcell-w) + 2 * var(--edge));
+  max-width: calc(100% - 2 * var(--edge));
+}
+.folder-sheet .folder-bg.tile { position: absolute; inset: 0; border-radius: calc(var(--radius) * 1.6); transform-origin: 0 0; }
+.folder-body { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 14px var(--edge) var(--edge); }
+.folder-title {
+  font: inherit;
+  font-size: var(--text-item);
+  text-align: center;
+  color: var(--color-foreground);
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  padding: 4px 10px;
+  outline: none;
+}
+input.folder-title:focus { background: var(--soft-fill); }
+.folder-title::placeholder { color: var(--color-muted); }
+.folder-grid {
   display: grid;
-  grid-template-columns: repeat(3, var(--cell));
-  gap: var(--gap);
-  padding: var(--edge);
-  background: var(--color-background);
+  grid-template-columns: repeat(var(--fcols), var(--fcell-w));
+  grid-auto-rows: var(--fcell-h);
+  max-height: 64vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
+.folder-grid .app { touch-action: none; min-width: 0; }
+.folder-grid .app .app-icon { width: min(var(--icon), 58%); transform-origin: 0 0; }
+.folder-grid .app-label { text-shadow: none; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
+.chosen-actions { z-index: 9; }
 
 /* OWL widgets (owl.tsx): the tree fills the tile as Render.kt's WidgetContent, a Column. */
 .owl {
@@ -457,7 +955,7 @@
 }
 .chat-open {
   font: inherit;
-  color: var(--color-accent);
+  color: var(--accent-text);
   background: none;
   border: 0;
   padding: 4px 0 4px 8px;
@@ -479,16 +977,51 @@
 }
 .msg.assistant {
   align-self: flex-start;
-  background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  background: var(--soft-fill);
+  border: var(--frame) solid var(--line);
   padding: 6px 10px;
   border-radius: var(--radius);
+  box-shadow: var(--lift);
 }
 .msg.tool, .msg.note, .msg.ask { font-size: var(--text-small); max-width: 100%; }
-.msg.tool .hint { opacity: 0.7; }
-.msg.tool .ok { color: var(--color-accent); }
-.msg.tool .fail, .msg.note.error { color: var(--color-red); }
+.msg.note.error { color: var(--color-red); }
 .msg.ask { align-self: flex-end; }
+
+/*
+ * An app carried over the dock (dockdrop.ts): the gap it would drop into, or - the dock full - the app it would swap
+ * out; the hint over the dock says which. Nothing pinned yet, the dock is only a drop zone at the foot of home while
+ * an app is carried. Picked up from home's grid (edit mode hides the dock) it comes back to be dropped on.
+ */
+.dock .dock-gap {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 6px 2px;
+  border: var(--frame) dashed var(--color-accent);
+  border-radius: var(--radius);
+}
+.dock.aimed { border-color: var(--color-accent); }
+.dock .app.swap-out { opacity: 0.35; scale: 0.8; transition: scale 120ms, opacity 120ms; }
+.dock.dock-ghost {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--inset-bottom, 0px));
+  z-index: 4;
+  align-items: center;
+  justify-content: center;
+}
+.dock .dock-empty { flex: 1; text-align: center; color: var(--color-muted); font-size: 13px; }
+.dock-hint {
+  position: fixed;
+  z-index: 6;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  font-size: 13px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.home.editing.carry-app .dock { visibility: visible; }
 
 /* A pinned app held and moved along the dock (home.tsx): it rides over the others as they make room. */
 .dock .app.lifted {
@@ -523,7 +1056,7 @@
   will-change: transform;
 }
 .session-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 8px 4px 2px; font-size: var(--text-small); min-width: 0; }
-.session-back { font: 22px var(--font); line-height: 1; width: 36px; height: 32px; background: none; border: 0; color: var(--color-accent); }
+.session-back { font: 22px var(--font); line-height: 1; width: 36px; height: 32px; background: none; border: 0; color: var(--accent-text); }
 .session-title { color: var(--color-foreground); white-space: nowrap; }
 .session-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .session-term { flex: 1; min-height: 0; }
@@ -533,7 +1066,6 @@
   position: fixed;
   z-index: 15;
   inset: 0;
-  background: color-mix(in srgb, var(--color-background) 60%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -556,56 +1088,81 @@
 .screen-close { font: inherit; color: var(--color-muted); background: none; border: 0; padding: 4px 8px; }
 .screen-body { flex: 1; min-height: 0; overflow-y: auto; }
 
-/* The bar's mic (bar.tsx): red while it listens, as the Compose bar's. */
-.bar .mic {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  margin-right: calc(-1 * var(--edge) / 2);
-  border: 0;
-  border-radius: var(--radius);
-  background: none;
-  color: var(--color-foreground);
-  touch-action: none;
-}
-.bar .mic.on { background: var(--color-red); color: var(--color-background); }
-
-/* Edit mode (editsheet.tsx, state.ts editing): the pages step back, outlined, the sheet under them. */
-.home.editing .bar,
-.home.editing .dock,
+/*
+ * Edit mode (editsheet.tsx, state.ts editing): the foot's search pill is on the grid, a tile like the others
+ * (searchwidget.tsx footSearch: shown, lifted, moved and resized; its field doesn't take the press there), so the
+ * edit sheet takes the pill's place in the foot; the dock stays where it is. The pages stay as they are.
+ */
+.home.editing .bar:not(.search-face .bar),
 .home.editing .launcher,
 .home.editing .launcher-frame { visibility: hidden; }
-.home.editing .page {
-  outline: var(--frame) dashed color-mix(in srgb, var(--color-foreground) 30%, transparent);
-  outline-offset: -6px;
-  border-radius: var(--radius);
+/* Pill over the dock (the default): the sheet in the pill's row, over the dock; wide: the middle of the one bar. */
+.home:not(.pill-below):not(.wide) { --edit-foot: calc(var(--strip-height) + max(var(--inset-bottom, 0px), var(--pill-foot))); }
+.home:not(.pill-below):not(.wide) > .edit-sheet { bottom: var(--edit-foot); min-height: 48px; padding-bottom: 0; border-radius: var(--radius); }
+.home:not(.pill-below):not(.wide) > .theme-pop { bottom: calc(var(--edit-foot) + 48px + var(--gap)); }
+.home.wide > .edit-sheet {
+  position: relative;
+  grid-area: 2 / 2;
+  align-self: center;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  min-height: 44px;
+  padding: 0 4px 0 var(--edge);
+  border-radius: 22px;
 }
+.home.wide > .theme-pop { bottom: calc(var(--strip-height) + max(var(--inset-bottom, 0px), var(--pill-foot)) + var(--gap)); }
+/* One slim bar where the search bar and the dock were, flush with the screen's foot (editsheet.tsx). */
 .edit-sheet {
+  position: fixed;
+  z-index: 12;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: calc(52px + var(--inset-bottom, 0px));
+  padding: 0 var(--edge) var(--inset-bottom, 0px);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.edit-act {
+  font: var(--text-item) var(--font);
+  color: var(--color-foreground);
+  background: var(--soft-fill);
+  box-shadow: var(--lift);
+  border-radius: 999px;
+  padding: 8px 14px;
+}
+.edit-act.on { background: color-mix(in srgb, var(--color-accent) 22%, transparent); color: var(--accent-text); }
+.edit-act.done { box-shadow: none; background: none; color: var(--accent-text); padding-right: 0; }
+.edit-note { flex: 1; min-width: 0; font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The theme popover, just above the bar. */
+.theme-pop {
   position: fixed;
   z-index: 12;
   left: var(--edge);
   right: var(--edge);
-  bottom: calc(var(--inset-bottom, 0px) + var(--edge));
+  bottom: calc(52px + var(--inset-bottom, 0px) + var(--gap));
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px 12px;
-  max-height: 60%;
+  animation: menu-in 120ms ease-out;
 }
 .sheet-head, .sheet-row { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-small); }
-.sheet-done { font: var(--text-item) var(--font); color: var(--color-accent); background: none; border: 0; padding: 4px 0 4px 12px; }
+.sheet-done { font: var(--text-item) var(--font); color: var(--accent-text); background: none; border: 0; padding: 4px 0 4px 12px; }
 .sheet-items { display: flex; flex-wrap: wrap; gap: 6px; }
 .sheet-item {
   font: var(--text-small) var(--font);
   color: var(--color-foreground);
-  background: none;
-  border: var(--frame) solid var(--color-border);
+  background: var(--soft-fill);
+  border: var(--frame) solid var(--line);
   border-radius: 10px;
   padding: 7px 10px;
+  box-shadow: var(--lift);
 }
-.sheet-item:active { color: var(--color-accent); }
+.sheet-item:active { color: var(--accent-text); }
 .swatches {
   display: flex;
   gap: 8px;
@@ -621,20 +1178,21 @@
   flex-direction: column;
   gap: 10px;
   padding: 10px;
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   border-radius: 12px;
   font: var(--text-small) var(--font);
   text-align: start;
+  box-shadow: var(--lift);
 }
-.swatch.on { border: 2px solid var(--color-accent); }
+.swatch.on { box-shadow: inset 0 0 0 2px var(--color-accent); }
 .swatch.browse { justify-content: center; background: none; color: var(--color-muted); }
 .swatch-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .swatch-bars { display: flex; gap: 3px; }
 .swatch-bars i { width: 14px; height: 6px; }
 
 /*
- * The notification panel (notifications.tsx): down from the top as --q goes 0 -> 1 (gesture.ts follows the finger with
- * it, as --p for the drawer), the home dimmed under it.
+ * The notification panel (notifications.tsx, in the shade's window - mode=shade, over apps and home alike): down from
+ * the top as --q goes 0 -> 1 (the host follows the finger with it).
  */
 @property --q {
   syntax: "<number>";
@@ -667,15 +1225,22 @@
   background: color-mix(in srgb, var(--color-background) calc(var(--glass) + 10%), transparent);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  border-bottom: var(--frame) solid var(--color-border);
+  border-bottom: 0;
   border-radius: 0 0 calc(var(--radius) * 2) calc(var(--radius) * 2);
-  transform: translateY(calc((var(--q) - 1) * 100%));
+  /*
+   * Its open, as the drawer's (d254e58): from just above where it rests - --drop, the one knob (gesture.ts and the
+   * host map the finger onto it at 1.5x) - fading in, nearly all there by half of it. Transform and opacity only.
+   */
+  --drop: 15vh;
+  transform: translateY(calc((var(--q) - 1) * var(--drop)));
+  opacity: min(1, calc(var(--q) / 0.55));
   visibility: hidden;
+  box-shadow: var(--lift);
 }
 .notif-panel.shown { visibility: visible; }
 .notif-bar { display: flex; justify-content: space-between; align-items: center; padding: 4px 2px 8px; font-size: var(--text-small); }
 .notif-actions { display: flex; gap: 4px; }
-.notif-actions button { font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: 0; padding: 6px 6px; }
+.notif-actions button { font: var(--text-small) var(--font); color: var(--accent-text); background: none; border: 0; padding: 6px 6px; }
 .notif-list {
   flex: 1;
   min-height: 0;
@@ -687,12 +1252,36 @@
   flex-direction: column;
   gap: 6px;
 }
+/*
+ * The pull (notifications.tsx): the cards ride on the sliding sheet's bottom edge - under the finger, nothing of them
+ * hidden above the screen - until their top reaches where it rests (top-aligned), then stay there: moved down by the
+ * part of the sheet still above the screen ((1 - q) x its height), at most the room left under them (--free). Only
+ * --q changes per frame; continuous, no jump. A list that fills the panel has no room: it slides with the sheet.
+ */
+.notif-items { display: flex; flex-direction: column; gap: 6px; flex: none; }
+/*
+ * (The ride - the cards hanging from the sheet's bottom edge - is gone with the short --drop: it cancelled the sheet's
+ * own move exactly, and the cards stood still on screen while the header came down. The cascade below is the motion.)
+ */
+/*
+ * The cascade, opening: each row (a notification group, the control center's header, sliders, media, a row of tiles:
+ * .cascade, --i its place) comes down from 24 px + 5 px a row above where it rests and fades in, a row starting a
+ * little after the one above it - its own progress --r from the same --q: nothing per frame but --q.
+ */
+.notif-panel.riding :is(.cascade, .panel-body > .notif-bar) {
+  --s: calc(min(var(--i, 0) + var(--i0, 0), 8) * 0.06);
+  --r: clamp(0, calc((var(--q) - var(--s)) / (1 - var(--s))), 1);
+  transform: translateY(calc((1 - var(--r)) * -1 * (24px + min(var(--i, 0), 8) * 5px)));
+  opacity: var(--r);
+}
+.notif-list:has(> .notif-items > .notif-empty) .notif-items { flex: 1; justify-content: center; }
 .notif { padding: 9px 12px; touch-action: pan-y; user-select: none; flex: none; }
-.notif-head { display: flex; align-items: center; gap: 6px; font-size: var(--text-small); }
+.notif-head { display: flex; align-items: center; min-height: 18px; gap: 6px; font-size: var(--text-small); }
 .notif-icon { width: 18px; height: 18px; border-radius: 5px; }
-.notif-icon.blank { background: var(--color-border); }
 .notif-app { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); }
 .notif-title { margin-top: 5px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* (A card with no title: its text keeps the title's gap under the row - the group look drops that gap, ccexpand.ts headMorph.) */
+.notif-head + .notif-text { margin-top: 5px; }
 .notif-text {
   margin-top: 2px;
   color: color-mix(in srgb, var(--color-foreground) 80%, transparent);
@@ -702,11 +1291,48 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.notif-access { font: var(--text-small) var(--font); color: var(--color-accent); text-align: start; }
+.notif-access { font: var(--text-small) var(--font); color: var(--accent-text); text-align: start; }
 .notif-empty { padding: 18px 2px; text-align: center; font-size: var(--text-small); }
 /* Nothing new: the message in the middle of the (now always full-height) panel. */
-.notif-list:has(> .notif-empty) { display: flex; align-items: center; justify-content: center; }
+.notif-list:has(> .notif-items > .notif-empty) { display: flex; }
 .notif-grip { align-self: center; width: 44px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--color-border); }
+/*
+ * One panel (notifications.tsx, the default; settings -> style keeps them apart): the control center on top, the
+ * notifications under it, one list scrolling as one. As tall as what's in it, up to the panel's height - nothing to
+ * switch to, so no fixed height to hold.
+ */
+.notif-panel:has(> .panel-body.together) { height: auto; max-height: 88%; }
+.notif-panel .panel-body.together { flex: 0 1 auto; }
+/*
+ * The one panel's edge follows the gesture: its frost, bottom edge and grip come down with the pull and go back up
+ * with the close (--q of its height, --ph: notifications.tsx measures it on a resize, never per frame), and the
+ * further pull lifts it by what's not shown yet (--cc-lift, ccexpand.ts). The panel moves up by that, its body back
+ * down by the same (nothing in it moves on screen), the part past the edge clipped. Translates only; at rest both 0.
+ */
+@property --cc-lift {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+.notif-panel:has(> .panel-body.together) {
+  overflow-y: clip;
+  translate: 0 calc(-1 * ((1 - var(--q)) * var(--ph, 0px) + var(--cc-lift)));
+}
+.notif-panel > .panel-body.together {
+  --cc-lift: inherit;
+  translate: 0 calc((1 - var(--q)) * var(--ph, 0px) + var(--cc-lift));
+}
+.panel-body.together > .notif-list { gap: 10px; }
+.panel-body.together .cc { flex: none; overflow: visible; padding-bottom: 0; }
+.panel-body.together .cc + .notif-bar { padding-top: 10px; padding-bottom: 0; }
+.panel-body.together .notif-empty { padding: 14px 2px 6px; }
+/*
+ * Unfolded (notifications.tsx wideShade): the same panel in two columns - the notifications left, the controls right,
+ * each scrolling on its own. The column the pull didn't come from cascades a few rows later (--i0).
+ */
+.panel-body.together.two { flex-direction: row; gap: var(--edge); }
+.panel-body.two > .notif-list { flex: 1 1 0; min-width: 0; }
+.panel-body.two[data-from="control"] > .notif-col, .panel-body.two[data-from="notifications"] > .cc-col { --i0: 3; }
 
 /*
  * PowOS AI's page (powai.tsx), left of home: it and home slide as one (gesture.ts applyTrack sets both transforms) -
@@ -727,11 +1353,35 @@
     calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--edge));
 }
 .ai-top { display: flex; align-items: center; gap: 10px; }
+/* The wallpaper as on home - no page of its own; what's on it the same tiles as home's. */
+/*
+ * The same material as home's surfaces (theme.css glass tokens): the glass tint, a little more of it for the text
+ * (--glass-dim) - no palette of its own. Frosted by the compositor (native glass) or, with CSS glass, tinted only (its
+ * own copy of the picture would slide away with it).
+ */
+.ai-screen { background: none; padding-bottom: 0; }
+/* Its cards: home's tile material, a little more tint for their text (never a page dim). */
+.ai-screen .tile {
+  background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+  border-color: transparent;
+}
+html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
+/*
+ * Its compose bar: the pill (.pill), where home's search sits, and as high above the keyboard (or the navigation
+ * handle) as home's: --ai-foot, one token for every AI compose and pane foot. The AI page is fixed and unpadded, so it
+ * carries the insets; inside home's or the pull-up's frame (.home pads the keyboard and the nav already) only the
+ * pill's own foot - the insets again there would lift the pill twice the keyboard's height.
+ */
+.ai-screen { --ai-foot: calc(max(var(--inset-bottom, 0px), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + var(--pill-foot)); }
+.home { --ai-foot: var(--pill-foot); }
+.ai-compose { margin: 0 0 var(--ai-foot); }
 .ai-title { font-size: var(--text-item); font-weight: bold; }
 .ai-state { flex: 1; font-size: var(--text-small); color: var(--color-muted); }
-.ai-state.busy { color: var(--color-accent); }
-.ai-state.busy::before { content: "● "; animation: icon-wait 0.9s ease-in-out infinite alternate; }
-.ai-open { font: var(--text-small) var(--font); color: var(--color-accent); }
+.ai-state.busy { color: var(--accent-text); }
+.ai-state.busy::before { content: "● "; }
+.ai-open { font: var(--text-small) var(--font); color: var(--accent-text); }
+/* Unfolded, PowOS AI reads as a column, not a 2268 px line: its content capped and centred (the folded width is less). */
+.ai-screen > *, .ai-panel > * { width: 100%; max-width: 720px; margin-inline: auto; }
 .ai-scroll {
   flex: 1;
   min-height: 0;
@@ -743,16 +1393,96 @@
   flex-direction: column;
   gap: 14px;
 }
+/*
+ * Wide (the AI page or panel >= 700 px: unfolded, a wide window - powai.tsx AiView): two panes, each its own scroll.
+ * Left what needs the user, the board, the agents; right the conversation at reading width with the pill under it, by the right
+ * thumb. Both panes start on one line and end on the pill's; the pair stays centred on a very wide window.
+ */
+.ai-view.wide {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(0, 70ch);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  column-gap: 20px;
+  row-gap: 10px;
+  padding-inline: max(var(--edge), calc((100% - 70ch - 40rem - 20px) / 2));
+}
+.ai-view.wide > * { max-width: none; margin-inline: 0; }
+.ai-view.wide > .ai-top { grid-column: 1 / -1; }
+/* The panel, wide: its panes scroll, not it; its own pill under the conversation instead of home's bar. */
+.ai-panel.wide { overflow: hidden; }
+:is(.home, .pull-screen).open:has(.ai-panel.wide) > .bar { visibility: hidden; }
+/*
+ * Its pill where home's bar pill is, with or without the keyboard: the panel's window reaches down over the bar's place
+ * (no fade, no gap under it), so the pill's foot is --ai-foot's as on the AI page. Dragged, the bar (over the launcher)
+ * covers the pill riding into its place; open, the bar hides and the pill is there already.
+ */
+.home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * (48px + var(--strip-height))); mask-image: none; }
+/* Wide home's one-row foot (.home.wide): the stage already ends at the row's top. */
+.home.wide:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * var(--strip-height)); }
+.pull-screen:has(.ai-panel.wide) > .stage > .launcher-clip { bottom: -48px; }
+.home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip .launcher-inner { padding-bottom: 0; }
+.ai-view.wide > .ai-side { grid-column: 1; grid-row: 2 / 4; margin-bottom: var(--ai-foot); }
+.ai-view.wide > .ai-talk { grid-column: 2; grid-row: 2; flex-direction: column-reverse; }
+/* The whole conversation (powai.tsx History): reversed, the pane opens at the newest and holds it; short, it sits on top. */
+.ai-talk-in { display: flex; flex-direction: column; gap: 14px; margin-bottom: auto; }
+.ai-view.wide > .ai-compose { grid-column: 2; grid-row: 3; margin-bottom: var(--ai-foot); }
+/* Wide, a fold heading a pane ("needs you", "paused") sits on the panes' top line. */
+.ai-view.wide .ai-fold:not(.tile *) { margin: 0 0 0 2px; }
+/* The board (powai.tsx AiContent): one surface - what was a card each is a section on it, parted by spacing. */
+.ai-board { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
+html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-heading { margin: 0 0 6px 2px; font-size: var(--text-small); font-weight: normal; }
 .ai-card { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .ai-asked { font-weight: bold; }
 .ai-steps { display: flex; flex-direction: column; gap: 2px; font-size: var(--text-small); }
-.ai-step .ok { color: var(--color-accent); }
+.ai-step .ok { color: var(--accent-text); }
 .ai-step .fail, .ai-note.error { color: var(--color-red); }
 .ai-step .run { color: var(--color-muted); }
 .ai-answer { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; user-select: text; max-height: 40vh; overflow-y: auto; }
 .ai-note, .ai-thinking { font-size: var(--text-small); }
 .ai-empty { padding: 30px 6px; text-align: center; font-size: var(--text-small); }
+
+/* ui/pending.tsx: the shared "being made" building block - app/widget creation placeholders, and the being-built
+   view (apps/sheet.ts's popover). Accent for progress, muted for everything secondary; no borders, no raw colors. */
+.pending-ring-track { stroke: var(--color-accent); stroke-opacity: 0.22; }
+.pending-ring-fill { stroke: var(--color-accent); transition: stroke-dashoffset 220ms ease; }
+/* Indeterminate only (a running build with no step fraction yet): spins while mounted - never on a settled tile. */
+.pending-ring.spin { animation: pending-spin 1.1s linear infinite; }
+@keyframes pending-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pending-ring.spin { animation: none; } }
+.pending-bar { height: 3px; border-radius: 2px; background: var(--soft-fill); overflow: hidden; }
+.pending-bar-fill { height: 100%; border-radius: inherit; background: var(--color-accent); transition: width 220ms ease; }
+.pending-bar.indeterminate .pending-bar-fill { width: 38%; animation: pending-slide 1.4s ease-in-out infinite; }
+@keyframes pending-slide { 0% { margin-left: -38%; } 100% { margin-left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .pending-bar.indeterminate .pending-bar-fill { animation: none; margin-left: 0; } }
+.pending-steps { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-small); }
+.pending-step { display: flex; align-items: baseline; gap: 8px; }
+.pending-step-mark { width: 1.2em; text-align: center; color: var(--color-muted); }
+.pending-step.done .pending-step-mark { color: var(--accent-text); }
+.pending-step.failed .pending-step-mark, .pending-step.failed { color: var(--color-red); }
+.pending-step.pending { color: var(--color-muted); }
+.pending-log { font-size: var(--text-small); line-height: 1.35; max-height: 4.6em; overflow-y: auto; }
+.pending-log-line { overflow-wrap: anywhere; }
+.pending-preview { border-radius: var(--radius); overflow: hidden; }
+.pending-build { display: flex; flex-direction: column; gap: 10px; min-width: 220px; }
+.pending-failed { display: flex; flex-direction: column; gap: 8px; }
+.pending-error { color: var(--color-red); font-size: var(--text-small); }
+.pending-actions { display: flex; gap: 8px; justify-content: flex-end; }
+/* The drawer placeholder: an icon (real once known, else the generic plate) with a ring at its corner. */
+.pending-badge { position: relative; display: inline-flex; }
+.pending-badge-ring { position: absolute; right: -4px; bottom: -4px; display: flex; border-radius: 50%; background: var(--color-background); padding: 1px; }
+.pending-badge.failed .pending-ring-fill { stroke: var(--color-red); }
+/* The home widget placeholder: skeleton rows, a spinner and a progress bar, at the tile's real size. */
+.pending-widget { display: flex; flex-direction: column; justify-content: space-between; gap: 8px; padding: 12px; height: 100%; box-sizing: border-box; }
+.pending-skel-rows { display: flex; flex-direction: column; gap: 7px; }
+.pending-skel-row { height: 0.85em; border-radius: 5px; background: var(--soft-fill); }
+.pending-widget-foot { display: flex; align-items: center; gap: 8px; font-size: var(--text-small); }
+.pending-widget-step { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending-widget.failed .pending-ring-fill, .pending-widget.failed .pending-bar-fill { background: var(--color-red); stroke: var(--color-red); }
+/* The drawer's one placeholder app cell (ui/drawer.tsx PendingAppCell): sits above the A-Z grid, same cell width,
+   left-aligned like the grid's own first column. */
+.pending-app { align-self: flex-start; margin: 2px 0 10px; width: var(--cell); }
+.pending-app .app-icon.initials { display: flex; align-items: center; justify-content: center; font-size: 1.3em; color: var(--color-muted); background: var(--soft-fill); }
 .ai-session {
   width: 100%;
   display: flex;
@@ -763,34 +1493,55 @@
   text-align: start;
 }
 .ai-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-border); }
-.ai-dot.on { background: var(--color-accent); animation: icon-wait 0.9s ease-in-out infinite alternate; }
+/* "Working" is a still accent dot - no pulse: an endless animation keeps the page
+   drawing 60 frames a second, and the compositor re-blurring every glass surface under it with each one (measured
+   2026-10-21: 62 frames/s on an idle home while PowOS AI's page showed working agents). */
+.ai-dot.on { background: var(--color-accent); }
+/* Off screen (home on another page: PowOS AI and home's other pages are kept laid out beside it), nothing on it animates - the work list's
+   "working" dots pulse forever, and an infinite animation anywhere in the page keeps the compositor drawing every
+   frame on an idle home (the app's and the renderer's CPU). */
+.ai-screen:not(.shown) *, .ai-screen:not(.shown) *::before, .ai-screen:not(.shown) *::after,
+.page.away *, .page.away *::before, .page.away *::after { animation-play-state: paused !important; }
 .ai-session-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ai-session-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-session-meta { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Work in progress (powai.tsx Work): one line per task, the detail under it on a tap. */
+.ai-work-box { padding: 4px 0; display: flex; flex-direction: column; gap: 2px; }
+.ai-work { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; text-align: start; font: inherit; color: inherit; }
+.ai-work-line { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.ai-work-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-work-meta { flex: none; font-size: var(--text-small); white-space: nowrap; }
+.ai-work.done .ai-work-title { color: var(--color-muted); }
+.ai-dot.done { background: var(--color-muted); }
+.ai-work-detail { display: flex; flex-direction: column; gap: 3px; padding-left: 17px; font-size: var(--text-small); line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.ai-work-note { color: var(--color-foreground); }
+.ai-work-empty { padding: 10px 12px; font-size: var(--text-small); }
+/* Project groups and the chips that show one project (powai.tsx Work). */
+/* Chips wrap rather than scroll: a sideways drag on home turns the page. On the tiles' own fill: readable over any
+   wallpaper. */
+.ai-work-head { display: inline-block; padding: 4px 10px; border-radius: 999px; color: var(--color-foreground); }
+/* The task list is one home tile: its heading, chips and rows inside it. */
+.ai-work-list.tile { padding: 8px 6px 4px; }
+.ai-work-list.tile > .ai-work-head { padding: 2px 8px 6px; }
+.ai-work-group + .ai-work-group { margin-top: 10px; }
+.ai-work-project .ai-work-title { font-weight: bold; }
+.ai-work-caret { flex: none; width: 8px; font-size: var(--text-small); }
+.ai-work-blocked { color: var(--color-red); }
+/* installed & running (units.tsx): orphans marked for the user to decide; asleep dimmed */
+.ai-unit.orphan { box-shadow: inset 3px 0 0 var(--color-accent); }
+.ai-unit-flag { color: var(--accent-text); font-weight: bold; }
+.ai-unit-decide { color: var(--accent-text); }
+.ai-dot.asleep { background: color-mix(in srgb, var(--color-accent) 45%, transparent); }
+.ai-unit .ai-work-meta { max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.ai-work.done .ai-work-title { color: var(--color-muted); }
+.ai-dot.done { background: var(--color-muted); }
+.ai-work-detail { display: flex; flex-direction: column; gap: 3px; padding-left: 17px; font-size: var(--text-small); line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.ai-work-note { color: var(--color-foreground); }
+.ai-work-empty { padding: 10px 12px; font-size: var(--text-small); }
 .ai-mail { padding: 10px 12px; margin-bottom: 6px; font-size: var(--text-small); line-height: 1.4; }
+/* An agent's mail in full, its lines kept. */
+.ai-mail-text { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .ai-mail-head { margin-bottom: 3px; }
-.ai-compose { display: flex; align-items: center; gap: var(--gap); min-height: 48px; padding: 0 var(--edge); }
-.ai-compose input {
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: 0;
-  outline: 0;
-  color: var(--color-foreground);
-  font: var(--text-item) var(--font);
-}
-.ai-compose .mic {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  margin-right: calc(-1 * var(--edge) / 2);
-  border-radius: var(--radius);
-  color: var(--color-foreground);
-  touch-action: none;
-}
-.ai-compose .mic.on { background: var(--color-red); color: var(--color-background); }
 
 /* The screen-off display (aod.tsx): black (an OLED panel's off pixels), dim, in the middle, drifting a little. */
 html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }
@@ -810,43 +1561,70 @@ html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }
 .aod-apps { display: flex; gap: 10px; margin-top: 14px; }
 .aod-apps img { width: 22px; height: 22px; border-radius: 6px; opacity: 0.7; filter: grayscale(0.4); }
 
-/* PowOS AI over another app (assist.tsx): the app dimmed a little, the panel at the bottom above the keyboard. */
+/*
+ * PowOS AI over another app (assist.tsx) - the design language's one exception (docs/DESIGN-LANGUAGE.md): it shows the
+ * real screen 1:1 for circling, so no glass and no tint over the shot; its panel solid. These are yesterday's styles
+ * (before be049e7), restored after the glass work changed the overlay (2026-10-21: the screenshot drawn twice/zoomed -
+ * the APK's assist.tsx lost its .assist-shot sizing when the newer shell.css shipped without it).
+ * PowOS AI over another app (assist.tsx): the app dimmed a little, the panel at the bottom above the keyboard. */
 html[data-mode="assist"] .assist {
   position: fixed;
   inset: 0;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  padding: 0 var(--edge) calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--edge));
+  /* Clear of the navigation handle and the keyboard by a pill's foot more than the edge (it sat tight on both). */
+  padding: 0 var(--edge) calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--pill-foot) + var(--edge));
   background: rgb(0 0 0 / 0.25);
 }
 /* Solid: over another app, what's under it would show through the field. */
 .assist-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; max-height: 75%; background: var(--color-background); }
+.assist-grip { display: flex; justify-content: center; padding: 2px 0 6px; margin-top: -6px; touch-action: none; }
+.assist-grip span { width: 36px; height: 4px; border-radius: 2px; background: var(--color-border); }
+.assist-head { touch-action: none; }
+/* The strip along the bottom edge: a swipe up from it closes the overlay (assist.tsx swipeAway). */
+.assist-edge { position: fixed; left: 0; right: 0; bottom: 0; height: 28px; touch-action: none; z-index: 2; }
 .assist-head { display: flex; align-items: center; gap: 10px; }
 .assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; border: var(--frame) solid var(--color-border); }
 .assist-shot.blank { background: var(--color-surface); }
 .assist-title { font-weight: bold; }
 .assist-sub { flex: 1; font-size: var(--text-small); }
-.assist-open { font: var(--text-small) var(--font); color: var(--color-accent); }
+.assist-open { font: var(--text-small) var(--font); color: var(--accent-text); }
 .assist-panel .ai-card { overflow-y: auto; min-height: 0; }
-.assist-ask { display: flex; align-items: center; gap: var(--gap); min-height: 46px; padding: 0 4px 0 10px; border: var(--frame) solid var(--color-border); border-radius: var(--radius); }
-.assist-ask input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--color-foreground); font: var(--text-item) var(--font); }
-.assist-ask .mic { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius); color: var(--color-foreground); touch-action: none; }
-.assist-ask .mic.on { background: var(--color-red); color: var(--color-background); }
+/* Its field is the one pill (bar.tsx Pill, .pill above): no styles of its own. */
+.assist-ask { flex: none; }
 .assist-attach { display: flex; gap: 6px; flex-wrap: wrap; }
-.assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent); color: var(--color-accent); }
+.assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent); color: var(--accent-text); }
 .assist-attach .chip.off { border-color: var(--color-border); color: var(--color-muted); }
-.assist-shot { cursor: pointer; }
-/* The screenshot full size, to cut a region out of (assist.tsx Crop). */
-.crop { position: fixed; inset: 0; z-index: 5; background: #000; display: flex; flex-direction: column; }
-.crop-area { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; touch-action: none; }
-.crop-area img { max-width: 100%; max-height: 100%; user-select: none; -webkit-user-drag: none; }
+/* Circling, always on (assist.tsx Draw): the screen above the panel takes strokes; the panel sits over it. */
+.assist-draw { position: absolute; inset: 0; touch-action: none; }
+.assist-panel { position: relative; z-index: 1; }
+/*
+ * Its chrome is the reference material: the panel frosted from the screenshot of the screen under it (glass.ts), the
+ * text fill over it - the screen above the panel untouched, 1:1. Until the screenshot is in (and live): solid.
+ */
+html[data-mode="assist"] .assist-panel { background: var(--color-background); backdrop-filter: none; -webkit-backdrop-filter: none; }
+html.glass[data-mode="assist"] .assist-panel {
+  /* The theme's background as the tint, more of it than the reference: an app's screen is often light (the wallpaper
+     rarely) - its text keeps 4.5:1 over any app. */
+  --assist-fill: color-mix(in srgb, var(--color-background) 84%, transparent);
+  background:
+    linear-gradient(var(--assist-fill), var(--assist-fill)) border-box,
+    linear-gradient(var(--glass-veil), var(--glass-veil)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+  border-radius: var(--radius);
+  box-shadow: var(--lift);
+}
+/* What's on the panel: soft fills (a surface inside a surface), the pill too. */
+html:root .assist-panel .tile.pill { background: var(--soft-fill); }
+/* The one chat in the panel (assistant.ts, chat.tsx ChatView), under the crop screen's head and above its field. */
+.assist-panel .chat { flex: 1 1 auto; min-height: 0; }
+/* Without its head line (the panel has its own), the chat still sits at the bottom while short. */
+.chat.headless > :first-child { margin-top: auto; }
+.assist-panel .bar { flex: none; }
+.assist-hint { font-size: var(--text-small); }
 .crop-stroke { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .crop-stroke polyline { fill: none; stroke: var(--color-accent); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
-.crop-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--text-small); margin: 8px var(--edge) calc(var(--inset-bottom, 0px) + var(--edge)); padding: 8px; }
-.crop-bar button { font: var(--text-small) var(--font); padding: 8px 12px; color: var(--color-foreground); }
-.crop-bar button.on { color: var(--color-accent); }
-.crop-bar button:disabled { opacity: 0.4; }
 .assist-live { font: var(--text-small) var(--font); padding: 4px 10px; border-radius: 999px; border: var(--frame) solid var(--color-border); color: var(--color-foreground); }
 .assist-live.on { border-color: var(--color-red); color: var(--color-red); }
 /* Live mode: the app under it in use - no dimming, nothing but the bar takes touches. */
@@ -861,15 +1639,15 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   font: var(--text-small) var(--font);
   padding: 8px 12px;
   border-radius: var(--radius);
-  background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  background: var(--control-fill);
+  border: var(--frame) solid var(--line);
   color: var(--color-foreground);
+  box-shadow: var(--lift);
 }
 .qs-tile.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
 /* The control center (control.tsx): in the notification panel's place - the big Wi-Fi and data cards, the sliders, the tiles. */
 .cc { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: 6px; }
 .cc-clock { font-size: var(--text-small); color: var(--color-foreground); }
-.cc-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .cc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
 .cc-tile {
   display: flex;
@@ -882,28 +1660,30 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   font: var(--text-small) var(--font);
   text-transform: lowercase;
   border-radius: calc(var(--radius) * 1.5);
-  background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  background: var(--control-fill);
+  border: var(--frame) solid var(--line);
   color: var(--color-foreground);
   user-select: none;
   -webkit-touch-callout: none;
+  box-shadow: var(--lift);
 }
 .cc-tile.big { min-height: 64px; }
 .cc-tile.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
 .cc-tile:active { filter: brightness(1.15); }
 .cc-label { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.2; }
 .cc-slider .cc-label, .cc-tile.big .cc-label { display: block; white-space: nowrap; text-overflow: ellipsis; }
-.cc-detail { opacity: 0.7; font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cc-sliders { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.cc-detail { color: var(--color-muted); font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-sliders { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .cc-slider {
   position: relative;
   display: flex;
   align-items: center;
-  height: 44px;
-  border-radius: calc(var(--radius) * 1.5);
-  border: var(--frame) solid var(--color-border);
-  background: linear-gradient(90deg, var(--color-accent) calc(var(--v) * 100%), var(--color-surface) 0);
+  height: 36px;
+  border-radius: 18px;
+  border: 0;
+  background: linear-gradient(90deg, var(--color-accent) calc(var(--v) * 100%), var(--control-fill) 0);
   overflow: hidden;
+  box-shadow: var(--lift);
 }
 .cc-slider .cc-label {
   position: absolute;
@@ -920,9 +1700,10 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   height: 44px;
   padding: 0 10px;
   border-radius: calc(var(--radius) * 1.5);
-  background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  background: var(--control-fill);
+  border: var(--frame) solid var(--line);
   color: var(--color-foreground);
+  box-shadow: var(--lift);
 }
 .cc-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
 .cc-media {
@@ -933,9 +1714,10 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   gap: 10px;
   padding: 8px 10px 10px;
   border-radius: calc(var(--radius) * 1.5);
-  background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  background: var(--control-fill);
+  border: var(--frame) solid var(--line);
   overflow: hidden;
+  box-shadow: var(--lift);
 }
 .cc-media::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--p) * 100%); background: var(--color-accent); }
 .cc-art { width: 44px; height: 44px; border-radius: var(--radius); object-fit: cover; }
@@ -948,92 +1730,258 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .icon { display: block; flex: none; }
 .notif-actions.icons { gap: 2px; }
 .notif-actions.icons button { width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--color-foreground); border-radius: 50%; }
-.notif-actions.icons button.on { color: var(--color-accent); }
+.notif-actions.icons button.on { color: var(--accent-text); }
 .notif-actions.icons button:active { background: var(--color-surface); }
-.cc-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 12px 6px; }
+/*
+ * The control center's tiles (control.tsx): one shape - a rounded tile, its icon over its name (and a state line), the
+ * accent when on. Four to a row; the eight on the main view, all of them on the all-tiles page.
+ */
+.cc-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .cc-grid .cc-tile {
-  min-height: 0;
-  padding: 0;
-  background: none;
+  position: relative;
+  min-height: 72px;
+  padding: 10px 10px 8px;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 3px;
   border: 0;
-  align-items: center;
-  gap: 6px;
-  text-align: center;
   color: var(--color-foreground);
+  transition: background-color 150ms ease, color 150ms ease;
 }
-.cc-grid .cc-tile .cc-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+.cc-grid .cc-tile .cc-icon { display: flex; align-items: center; width: 100%; font-size: 22px; margin-bottom: 4px; }
+.cc-grid .cc-tile .cc-label { display: block; width: 100%; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-grid .cc-tile .cc-detail { display: block; width: 100%; font-size: 10px; }
+.cc-grid .cc-tile.on { background: var(--color-accent); color: var(--color-background); }
+.cc-grid .cc-tile.on .cc-detail { color: var(--color-background); }
+/* A category's chevron: it opens the category in place. */
+.cc-more { margin-left: auto; display: flex; font-size: 18px; opacity: 0.8; padding: 2px; margin-right: -4px; transition: transform 200ms ease; }
+.cc-tile.opened .cc-more { transform: rotate(90deg); }
+.cc-main { display: flex; flex-direction: column; }
+/* A row's unfolding (control.tsx Unfold): the open category's members, its height animated - the grid below moves. */
+.cc-unfold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 220ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+.cc-unfold > div { min-height: 0; overflow: hidden; }
+.cc-unfold.open { grid-template-rows: 1fr; }
+.cc-main > .cc-grid + .cc-unfold + .cc-grid { margin-top: 8px; }
+/*
+ * A category's cell: its tile, and in the whole view (ccexpand.ts: the one panel pulled further down) its members under
+ * it - small round toggles as in a row's unfolding, no surface of their own. A row with members shown is as tall as
+ * its tallest; the others keep their size.
+ */
+.cc-grid > .cc-cell { display: flex; flex-direction: column; min-width: 0; }
+.cc-cell > .cc-tile { flex: 1; width: 100%; }
+.cc-grid:has(> .cc-cell.all) { align-items: start; }
+.cc-cell.all > .cc-tile { flex: none; }
+.cc-cell-subs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 6px 4px;
+  padding: 8px 2px 0;
+  justify-items: center;
+  opacity: calc(1 + min(0, var(--cc-k, 0)) * 2);
+  animation: cc-subs-in 220ms ease both;
 }
-.cc-grid .cc-tile.on .cc-icon { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
-.cc-grid .cc-tile.on { background: none; color: var(--color-foreground); }
-.cc-grid .cc-tile .cc-label {
-  display: block;
-  width: 100%;
-  font-size: 10px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--color-muted);
-}
-.cc-cards .cc-tile { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
-.cc-cards .cc-tile .cc-icon { font-size: 24px; display: flex; }
-.cc-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-.cc-slider-icon { position: absolute; left: 12px; font-size: 20px; color: var(--color-foreground); mix-blend-mode: difference; pointer-events: none; display: flex; }
-.cc-chip { display: flex; align-items: center; justify-content: center; font-size: 20px; min-width: 52px; }
-.cc-transport button { display: flex; align-items: center; justify-content: center; font-size: 22px; }
-/* Edit mode (control.tsx's EditGrid): tiles wobble gently, a − to take one out, dragged ones lift under the finger. */
-.cc-editing { display: flex; flex-direction: column; gap: 10px; touch-action: none; }
-.cc-tile.edit { position: relative; user-select: none; -webkit-touch-callout: none; touch-action: none; }
-.cc-tile.edit .cc-icon { animation: cc-wobble 1.6s ease-in-out infinite; }
-.cc-tile.edit:nth-child(2n) .cc-icon { animation-delay: -0.8s; }
-.cc-tile.edit.dragging { z-index: 2; transition: none; }
-.cc-tile.edit.dragging .cc-icon { animation: none; box-shadow: 0 8px 24px rgb(0 0 0 / 45%); border-color: var(--color-accent); }
-.cc-grid .cc-tile.edit:not(.dragging) { transition: transform 160ms ease; }
-.cc-badge {
-  position: absolute;
-  top: -4px;
-  right: calc(50% - 34px);
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
+@keyframes cc-subs-in { from { opacity: 0; transform: translateY(-6px); } }
+.cc-cell-subs .cc-tile { min-height: 0; padding: 0; background: none; box-shadow: none; border: 0; align-items: center; color: var(--color-foreground); }
+.cc-cell-subs .cc-tile .cc-icon {
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 18px;
-  background: var(--color-background);
-  color: var(--color-red);
+  background: var(--control-fill);
+  transition: background-color 150ms ease, color 150ms ease;
 }
-.cc-badge.add { color: var(--color-accent); }
-.cc-tray-head { font-size: var(--text-small); padding-top: 4px; border-top: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent); }
-.cc-tray .cc-tile .cc-icon { animation: none; opacity: 0.75; }
-@keyframes cc-wobble {
-  0%, 100% { transform: rotate(-1.5deg); }
-  50% { transform: rotate(1.5deg); }
+.cc-cell-subs .cc-tile.on { background: none; }
+.cc-cell-subs .cc-tile.on .cc-icon { background: var(--color-accent); color: var(--color-background); }
+.cc-cell-subs .cc-tile :is(.cc-label, .cc-detail, .cc-text) { display: none; }
+/*
+ * The finger pulling it further (ccexpand.ts): translates written on each mover (the rows, what's under them) and
+ * --cc-k (the pull's progress) on them or on v3's grid - registered, not inherited: on the panel, an inherited one
+ * restyled everything in it each frame. The few that read it inherit it by name.
+ */
+@property --cc-k {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
 }
+.cc-grid > .cc-cell, .cc-cell > .cc-cell-subs { --cc-k: inherit; }
+/* One row that scrolls sideways, a member at a time (snapping), about five in view and the next one peeking. */
+.cc-subs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 10px 4px;
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--soft-fill);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 4px;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+.cc-subs::-webkit-scrollbar { display: none; }
+.cc-sub { display: flex; }
+.cc-sub > .cc-tile { width: 100%; }
+/*
+ * Edit mode (ui/reorder.ts, as home's): the lifted item's place a faint ghost (home's .lifted), its copy under the
+ * finger (home's .carried: the same scale and drop shadow) - absolute in its row, so the row's rules still dress it;
+ * the selected one outlined, its actions over it (home's .tile-actions).
+ */
+[data-reorder] [data-key] { -webkit-touch-callout: none; user-select: none; }
+.cc-grid, .cc-subs, .cc-cell-subs, .cc-cell, .cc-sub, .cc-mini { position: relative; }
+[data-reorder] .lifted { opacity: 0.25; }
+[data-reorder] .carried { position: absolute; z-index: 5; margin: 0; }
+.cc-cell.chosen > .cc-tile, :is(.cc-sub, .cc-mini).chosen .cc-icon { outline: var(--frame) solid var(--color-accent); outline-offset: -2px; }
+.cc .tile-actions { z-index: 7; }
+.cc-subs.dragging { overflow-x: visible; }
+.cc-subs > * { flex: 0 0 calc((100% - 4 * 6px) / 5.4); min-width: 0; scroll-snap-align: start; }
+/* Its members: small round toggles over their names. */
+.cc-subs .cc-tile { min-height: 0; padding: 0; background: none; box-shadow: none; border: 0; align-items: center; gap: 4px; text-align: center; color: var(--color-foreground); }
+.cc-subs .cc-tile .cc-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  background: var(--control-fill);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.cc-subs .cc-tile.on { background: none; }
+.cc-subs .cc-tile.on .cc-icon { background: var(--color-accent); color: var(--color-background); }
+.cc-subs .cc-tile .cc-label { display: block; width: 100%; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.cc-slider-icon { position: absolute; left: 10px; font-size: 18px; color: var(--color-foreground); mix-blend-mode: difference; pointer-events: none; display: flex; }
+/* The volume's icon is a button: silent, vibrate, ring. */
+.cc-slider-icon.tap { pointer-events: auto; background: none; border: 0; padding: 4px; left: 6px; }
+/* The brightness's auto: a small "A" at its end, the accent when on. */
+.cc-auto {
+  position: absolute;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  border: 0;
+  font: bold 12px var(--font);
+  color: var(--color-foreground);
+  background: var(--soft-fill);
+}
+.cc-auto.on { background: var(--color-background); color: var(--accent-text); }
+.cc-chip { display: flex; align-items: center; justify-content: center; font-size: 20px; min-width: 52px; }
+.cc-transport button { display: flex; align-items: center; justify-content: center; font-size: 22px; }
+/* Remote input's tile held (control.tsx's RemotePick): its side, USB or Bluetooth, picked under the tiles. */
+.cc-grid .cc-tile.picking .cc-icon { border-color: var(--color-accent); }
+.cc-pick { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: calc(var(--radius) * 1.5); background: var(--control-fill); border: var(--frame) solid var(--line); box-shadow: var(--lift); }
+.cc-pick-head { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-pick-row { display: flex; gap: 8px; }
+.cc-pick-row .cc-chip { flex: 1; gap: 6px; font-size: var(--text-small); }
+.cc-pick-row .cc-chip .icon { font-size: 18px; }
 /* The panel's content: a sideways swipe moves it (gesture.ts), between the notifications and the control center. */
 .notif-panel .panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; transform: translateX(var(--panel-dx, 0px)); }
 .notif-panel .panel-body.settling { transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-/* The switcher (switcher.tsx): the recent tasks side by side over the dimmed wallpaper, newest first. */
-html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-background) 72%, transparent); }
-.switcher {
+/*
+ * The switcher (recents.tsx): a layer of home, the recent tasks side by side over the blurred, dimmed wallpaper (the
+ * blur is the host's, behind the window). --rp (0..1) is how far it's up - a swipe up drives it every frame, the
+ * host's window landing on the first card - and --rx / --ry move the row with the finger: transforms and opacity only,
+ * nothing lays out again. The row runs right to left as Android's: the app it was opened over in the middle, the ones
+ * before it to its left.
+ */
+.recents {
+  --rp: 0;
+  --rx: 0px;
+  --ry: 0px;
+  --rh: 0;
+  /*
+   * --screen-w / --screen-h: the screen as the eye sees it, the keyboard left out (recents.tsx bounds) - not vw/vh,
+   * which follow the layout viewport: over the PowOS AI page with the keyboard up it grew (759x1690 CSS px on a
+   * 404x899 screen) and the cards landed off center, small.
+   */
+  --card-w: min(calc(0.72 * var(--screen-w, 100vw)), 440px, calc(0.62 * var(--screen-h, 100vh) * var(--screen-ratio-n, 0.45)));
+  --card-radius: max(var(--radius), 22px);
   position: fixed;
-  inset: 0;
+  left: 0;
+  top: 0;
+  width: var(--screen-w, 100vw);
+  height: var(--screen-h, 100vh);
+  z-index: 40;
   display: flex;
   flex-direction: column;
   justify-content: center;
   padding: var(--inset-top, 0px) 0 calc(var(--inset-bottom, 0px) + var(--edge));
+  visibility: hidden;
+  pointer-events: none;
 }
+.recents.open { visibility: visible; }
+.recents.shown { pointer-events: auto; }
+/* Collapsing: it stays visible till the cards are gone. */
+.recents.closed.settling { transition: visibility 0s linear 240ms; }
+.recents-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-background) 45%, transparent); opacity: calc(var(--rp) * (1 - var(--rh))); pointer-events: none; }
+.recents .task-row {
+  direction: rtl;
+  position: relative;
+  opacity: calc(1 - var(--rh));
+  gap: calc(var(--gap) * 3);
+  padding: 0 calc((var(--screen-w, 100vw) - var(--card-w)) / 2);
+  scroll-snap-type: x proximity;
+  /* A card added before the one in view must not keep that one in view (the row rewinds to its start instead). */
+  overflow-anchor: none;
+  transform: translate(var(--rx), var(--ry)) scale(calc(1 - 0.12 * var(--rh)));
+}
+.recents .task { direction: ltr; width: var(--card-w); max-width: none; }
+.recents .task-head { justify-content: center; gap: 10px; padding: 0 4px 12px; font: 500 var(--text-small) var(--font); color: var(--color-foreground); }
+.recents .task-icon { width: 28px; height: 28px; border-radius: 8px; }
+.recents .task-shot {
+  max-height: none;
+  border: none;
+  border-radius: var(--card-radius);
+}
+/* Shadows only while it's up: a closed layer costs the page nothing to keep. */
+.recents.open .task-shot { box-shadow: var(--lift-shadow); }
+.recents .task.pinned .task-label::after { content: " \00b7 pinned"; color: var(--accent-text); }
+/* The first card is where the app's window lands; the others slide in from the left with the finger. */
+.recents .task:not(:first-child) { transform: translateX(calc((var(--rp) - 1) * 0.45 * var(--screen-w, 100vw))); opacity: var(--rp); }
+.recents .task:first-child .task-head, .recents .task-clear { opacity: var(--rp); }
+.recents.live .task:first-child .task-shot { visibility: hidden; }
+/* A swipe up over home has no app window growing into the first card: it rises and fades in with the finger too. */
+.recents.homeswipe .task:first-child .task-shot { opacity: var(--rp); transform: translateY(calc((1 - var(--rp)) * 10vh)) scale(calc(0.92 + 0.08 * var(--rp))); }
+.recents .task[aria-hidden] { visibility: hidden; }
+.recents.settling .recents-scrim,
+.recents.settling .task-row,
+.recents.settling .task:not(:first-child),
+.recents.settling .task:first-child .task-head,
+.recents.settling .task-clear { transition: transform var(--spring-ms, 300ms) var(--spring, ease), opacity 240ms ease; }
+/* Split screen: picking the second app - the first one set apart. */
+.recents.splitting .task.picked { opacity: 0.45; transform: scale(0.94); }
+.recents-banner {
+  position: absolute; left: 50%; top: calc(var(--inset-top, 0px) + 24px); transform: translateX(-50%);
+  padding: 10px 18px; border-radius: 999px; font: var(--text-small) var(--font);
+  background: var(--color-surface); color: var(--color-foreground); border: var(--frame) solid var(--line);
+  box-shadow: var(--lift);
+}
+.recents-menu-scrim { position: fixed; inset: 0; z-index: 1; }
+.recents-menu {
+  position: fixed; z-index: 2; width: 220px; display: flex; flex-direction: column; padding: 6px 0;
+  border-radius: var(--radius);
+  animation: recents-menu-in 160ms cubic-bezier(0.2, 0.9, 0.2, 1);
+  transform-origin: top left;
+}
+.recents-menu button { text-align: left; padding: 12px 18px; font: var(--text-small) var(--font); color: var(--color-foreground); background: none; border: none; }
+.recents-menu button:active { background: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
+@keyframes recents-menu-in { from { opacity: 0; transform: scale(0.92); } }
+/* A card growing to the screen as its app opens (its transform is animated from the card's frame). */
+.recents-expand { position: fixed; left: 0; top: 0; width: var(--screen-w, 100vw); height: var(--screen-h, 100vh); z-index: 3; object-fit: cover; object-position: top; transform-origin: 0 0; pointer-events: none; }
+.recents-note {
+  position: absolute; left: 50%; bottom: calc(var(--inset-bottom, 0px) + 24px); transform: translateX(-50%);
+  padding: 10px 16px; border-radius: 999px; font: var(--text-small) var(--font);
+  background: var(--color-surface); color: var(--color-foreground);
+  animation: recents-note 2.4s ease forwards;
+}
+@keyframes recents-note { 0% { opacity: 0; } 8%, 85% { opacity: 1; } 100% { opacity: 0; } }
 .task-row {
   display: flex;
   gap: calc(var(--gap) * 2);
@@ -1046,7 +1994,7 @@ html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-bac
 .task-row::-webkit-scrollbar { display: none; }
 .task { flex: none; width: 70vw; max-width: 420px; scroll-snap-align: center; touch-action: pan-x; }
 .task-head { display: flex; align-items: center; gap: 8px; padding: 0 2px 8px; font-size: var(--text-small); }
-.task-icon { width: 22px; height: 22px; border-radius: 6px; }
+.task-icon { width: 22px; height: 22px; border-radius: 6px; flex: none; }
 .task-icon.blank { background: var(--color-surface); }
 .task-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .task-shot {
@@ -1057,13 +2005,14 @@ html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-bac
   object-fit: cover;
   object-position: top;
   border-radius: var(--radius);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   background: var(--color-surface);
   user-select: none;
   -webkit-user-drag: none;
+  box-shadow: var(--lift);
 }
-.task-clear { align-self: center; margin-top: calc(var(--gap) * 3); font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: var(--frame) solid var(--color-border); border-radius: 999px; padding: 8px 16px; }
-.task-empty { align-self: center; font-size: var(--text-body); }
+/* "clear all": calm - a quiet text button on the blur, no plate. */
+.task-clear { align-self: center; margin-top: calc(var(--gap) * 4); font: var(--text-small) var(--font); color: var(--color-muted); background: none; border: none; border-radius: 999px; padding: 10px 22px; }
 
 /*
  * The lock screen's face (lock.tsx): over the wallpaper, dimmed; the whole of it follows the finger up. --lift (0..1,
@@ -1106,25 +2055,27 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .aw-face canvas { display: block; width: 100%; height: 100%; pointer-events: none; user-select: none; }
 .aw-face canvas[hidden] { display: none; }
 .aw-wait { height: 100%; display: flex; align-items: center; justify-content: center; font-size: var(--text-small); text-align: center; }
-.home-tile.selected .aw-face { outline: var(--frame) solid var(--color-accent); outline-offset: 2px; }
+.home-tile.selected .aw-face { outline: var(--frame) solid var(--color-accent); outline-offset: -2px; }
 .aw-scrim {
   position: fixed;
   inset: 0;
   z-index: 13;
   display: flex;
   align-items: flex-end;
-  padding: calc(var(--inset-top, 0px) + var(--edge)) var(--edge) calc(var(--inset-bottom, 0px) + var(--edge));
-  background: color-mix(in srgb, var(--color-background) 50%, transparent);
+  /* Above the keyboard: the app picker's search pill is at its foot (it sat under the keyboard, typing unseen). */
+  padding: calc(var(--inset-top, 0px) + var(--edge)) var(--edge)
+    calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--edge));
 }
-.aw-picker { width: 100%; max-height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; background: var(--color-background); }
+.aw-picker { width: 100%; max-height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }
 .aw-search {
   font: var(--text-item) var(--font);
   color: var(--color-foreground);
   background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   border-radius: 10px;
   padding: 8px 10px;
   outline: none;
+  box-shadow: var(--lift);
 }
 .aw-search:focus { border-color: var(--color-accent); }
 .aw-list { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
@@ -1142,20 +2093,67 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   font: var(--text-small) var(--font);
   color: var(--color-foreground);
   text-align: left;
-  background: none;
-  border: var(--frame) solid var(--color-border);
+  background: var(--soft-fill);
+  border: var(--frame) solid var(--line);
   border-radius: 12px;
+  box-shadow: var(--lift);
 }
 .aw-provider:active { border-color: var(--color-accent); }
 .aw-preview { height: 96px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--color-surface); overflow: hidden; }
 .aw-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .aw-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* PowOS's own widgets' previews (ui/editsheet.tsx ShellAdds): the pill, the pill under the dock, a glyph row. */
+.aw-pill-preview { padding: 6px 18px; border-radius: 999px; background: var(--soft-fill); font-size: var(--text-small); color: var(--color-muted); }
+.aw-foot-preview { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.aw-foot-preview.below { flex-direction: column-reverse; }
+.aw-foot-preview i { width: 84px; height: 14px; border-radius: 6px; background: var(--soft-fill); }
+.aw-glyph { font-size: 18px; letter-spacing: 4px; color: var(--color-muted); }
 .aw-desc { font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* The Agents view (agents.tsx): home's widget, a line per agent, and its screen over home. */
-.ag-panel { height: 100%; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; font-size: var(--text-small); }
-.ag-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; white-space: nowrap; }
+/* The widget fills its tile at every size (shell/dev/preview.sh): a size container, type from the tile (cqmin), the
+   agents as cards sharing the height (agents.tsx AgentsPanel picks the columns and rows that fit). */
+.ag-panel { height: 100%; container-type: size; overflow: hidden; }
+.ag-in {
+  height: 100%; box-sizing: border-box; padding: 0.55em 0.7em; display: flex; flex-direction: column; gap: 0.4em;
+  font-size: clamp(12px, 5.2cqmin, 19px);
+}
+.ag-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 0.6em; white-space: nowrap; flex: none; }
 .ag-head > :first-child { color: var(--color-foreground); font-weight: bold; }
+.ag-head > :last-child { font-size: 0.85em; }
+.ag-list { flex: 1; min-height: 0; display: grid; gap: 0.4em; overflow: hidden; }
+.ag-card {
+  overflow: hidden; min-width: 0; min-height: 0; box-sizing: border-box; padding: 0.35em 0.6em; border-radius: 0.7em;
+  background: color-mix(in srgb, currentColor 8%, transparent); color: var(--color-foreground);
+  display: flex; flex-direction: column; justify-content: center; gap: 0.15em; text-align: start; cursor: pointer;
+}
+.ag-card.gone { opacity: 0.7; }
+.ag-card.needs_you, .ag-card.blocked { background: color-mix(in srgb, var(--color-red) 16%, transparent); }
+.ag-c1 { display: flex; align-items: center; gap: 0.4em; white-space: nowrap; min-width: 0; }
+.ag-c1 .ag-who { flex: 1; min-width: 0; font-weight: bold; }
+.ag-c1 .ag-act { padding: 0.15em 0.7em; }
+.ag-c2, .ag-c3 { overflow-wrap: anywhere; line-height: 1.25; }
+.ag-c3 { font-size: 0.85em; }
+.ag-idle .ag-mark { color: var(--color-muted); }
+.ag-idle.big { align-items: center; text-align: center; }
+.ag-idle.big .ag-c1 { justify-content: center; }
+.ag-idle.big .ag-who { flex: none; }
+.ag-big { font-size: 2.2em; line-height: 1.2; color: var(--color-muted); }
+/* Nobody, on a small tile or the desktop (agents.tsx IdleLine): the line alone, no card - centred where the card was. */
+.ag-idle-line { display: flex; align-items: center; justify-content: center; text-align: center; min-height: 0; white-space: nowrap; cursor: pointer; }
+/* A one-row tile: the head beside the cards, its two parts stacked. */
+@container (max-height: 96px) {
+  .ag-in { flex-direction: row; align-items: stretch; padding: 0.3em 0.4em 0.3em 0.7em; }
+  .ag-list { flex: 1; min-width: 0; }
+  .ag-head { flex-direction: column; justify-content: center; align-items: flex-start; gap: 0.1em; }
+  .ag-ask-line { display: none !important; }
+}
+/* The smallest (a 2x1 on the cover screen): no room for a card beside the head - the head is the widget. */
+@container (max-height: 96px) and (max-width: 150px) {
+  .ag-list { display: none; }
+  .ag-head { flex: 1; padding: 0.35em 0.6em; border-radius: 0.7em; background: color-mix(in srgb, currentColor 8%, transparent); }
+  .ag-head > :last-child { font-size: 1em; white-space: normal; }
+}
 .ag-line, .ag-node {
   display: flex;
   align-items: baseline;
@@ -1171,7 +2169,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   white-space: nowrap;
 }
 .ag-mark { flex: none; width: 1em; text-align: center; color: var(--color-muted); }
-.working > .ag-mark, .ag-mark.working { color: var(--color-accent); animation: icon-wait 0.9s ease-in-out infinite alternate; }
+.working > .ag-mark, .ag-mark.working { color: var(--accent-text); }
 .needs_you > .ag-mark, .ag-mark.needs_you, .blocked > .ag-mark, .ag-mark.blocked { color: var(--color-red); font-weight: bold; }
 .ag-who { flex: none; }
 .ag-host { flex: none; }
@@ -1183,7 +2181,6 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   z-index: 15;
   inset: 0;
   padding: var(--inset-top, 0px) var(--edge) var(--inset-bottom, 0px);
-  background: var(--color-background);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1191,7 +2188,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .ag-top { display: flex; align-items: center; gap: 6px; }
 .ag-top .ai-title { flex: 1; }
 .ag-live { font-size: var(--text-small); color: var(--color-muted); }
-.ag-live.on { color: var(--color-accent); }
+.ag-live.on { color: var(--accent-text); }
 .ag-scroll {
   flex: 1;
   min-height: 0;
@@ -1214,11 +2211,13 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .ag-detail-head .muted { font-weight: normal; }
 .ag-tasks, .ag-tools { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .ag-task.done { color: var(--color-muted); }
-.ag-task.in_progress { color: var(--color-accent); }
+.ag-task.in_progress { color: var(--accent-text); }
 .ag-tool.fail { color: var(--color-red); }
 .ag-report { overflow-wrap: anywhere; }
 .ag-comms { padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--text-small); line-height: 1.4; }
 .ag-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Opened: the whole message, its lines kept (the feed's line is only a preview). */
+.ag-msg.open { overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .ag-body { color: var(--color-muted); }
 .ag-actions { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
 .ag-say { flex: 1; min-width: 0; }
@@ -1226,12 +2225,12 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   width: 100%;
   font: var(--text-small) var(--font);
   color: var(--color-foreground);
-  background: none;
-  border: var(--frame) solid var(--color-border);
+  background: var(--soft-fill);
+  border: var(--frame) solid var(--line);
   border-radius: var(--radius);
   padding: 7px 9px;
 }
-.ag-act { flex: none; font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: var(--frame) solid var(--color-border); border-radius: 999px; padding: 6px 12px; }
+.ag-act { flex: none; font: var(--text-small) var(--font); color: var(--accent-text); background: var(--soft-fill); border: var(--frame) solid var(--line); border-radius: 999px; padding: 6px 12px; box-shadow: var(--lift); }
 .ag-act.danger { color: var(--color-red); }
 .ag-act:disabled { opacity: 0.4; }
 .ag-ask { padding: 10px 12px; margin-bottom: 6px; display: flex; flex-direction: column; gap: 6px; font-size: var(--text-small); }
@@ -1244,3 +2243,310 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   height: 100%;
   overflow: hidden;
 }
+
+/* A theme picked (app.tsx applyTheme): its colors fade in over 200 ms - colors and fills only, for a moment. */
+html.theme-fade, html.theme-fade * {
+  transition: color 200ms ease, background-color 200ms ease, border-color 200ms ease, fill 200ms ease, stroke 200ms ease !important;
+}
+/*
+ * Quick Tools (quicktools.tsx, mode=quicktools): a small control center by the thumb, over any app. The window is the
+ * screen; the card comes in from its edge with the finger (--q 0..1) and springs on release. The compositor blurs
+ * what's under the card (a native region), the card only tints (html.glass-behind).
+ */
+html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: transparent; }
+.qt-root { position: fixed; inset: 0; }
+.qt-card {
+  position: absolute;
+  width: min(304px, calc(100vw - 2 * var(--edge)));
+  padding: 14px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: calc(var(--radius) * 2);
+  opacity: min(1, calc(var(--q) * 2.5));
+  will-change: transform, opacity;
+}
+.qt-root.right .qt-card { right: var(--edge); transform: translateX(calc((1 - var(--q)) * 60%)) scale(calc(0.92 + 0.08 * var(--q))); transform-origin: right center; }
+.qt-root.left .qt-card { left: var(--edge); transform: translateX(calc((var(--q) - 1) * 60%)) scale(calc(0.92 + 0.08 * var(--q))); transform-origin: left center; }
+.qt-root.settling .qt-card { transition: transform 240ms cubic-bezier(0.2, 0.9, 0.3, 1.05), opacity 200ms ease-out; }
+.qt-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 6px; }
+/* The control center's tiles in three narrow columns: they shrink, their labels end in an ellipsis. */
+.qt-grid .cc-tile { min-width: 0; overflow: hidden; }
+.qt-grid .cc-label { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qt-sliders { display: grid; gap: 8px; }
+
+/* Text straight on the wallpaper (PowOS AI's page header and headings, home's labels): the label shadow, any theme. */
+.ai-screen :is(.ai-top, .ai-heading, .ai-empty, .ai-mail-bar):not(.tile *), .tile-app .app-label {
+  color: var(--on-wallpaper);
+  text-shadow: var(--label-shadow);
+}
+.ai-screen :is(.ai-top, .ai-mail-bar) * { color: inherit; }
+
+/*
+ * PowOS AI (its page's cards, its pull-up panel), the control center, PowOS apps' pages and the app library's cards:
+ * the frost (theme.css, frost v2) - the compositor's stronger blur on each surface (nativeglass.ts reads
+ * --glass-blur-native per surface; the shade's window is blurred by its host: shade.tsx) and the cool tint; over the
+ * other tone it takes that tone. No halos. An app whose page paints its own ground opts out (appscreen.tsx).
+ */
+.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3), .home:has(.ai-panel) .ai-panel, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *) {
+  /* Resolved here, from this surface's own --frost-base (a light frost swaps it below). */
+  /* Secondary lines the foreground itself, as a widget's: their size says they're secondary. */
+  --color-muted: var(--color-foreground);
+  --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 20%), transparent);
+  --frost-sheen: color-mix(in srgb, var(--color-foreground) 6%, transparent);
+}
+/* A dark theme over a dark wallpaper: the tint a touch lighter, so the glass shows over pure black. */
+:root[data-light="false"]:not([data-wallpaper="light"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3)) {
+  --frost-base: color-mix(in oklab, var(--glass-base) 50%, color-mix(in oklab, var(--frost-cool) 80%, var(--color-foreground)));
+}
+html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html.glass-native .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel:has(.cc.v3) {
+  --glass-blur-native: var(--frost-blur-native);
+  /* Glass, not a slab, over a black backdrop too (blur of black is black): a faint light from above and a lit edge. */
+  background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+  box-shadow: var(--lift-edge), var(--lift-shadow);
+}
+html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
+/*
+ * Over a wallpaper of the other tone (a dark theme over a bright picture, a light one over a dark): the frost takes
+ * the wallpaper's tone, its text the theme's two colours swapped - as the wallpaper's labels turn (theme.css
+ * data-wallpaper) - not a heavier fill.
+ */
+:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-view, .home:has(.ai-panel) .launcher-frame.tile, .home:has(.ai-panel) .ai-panel, .notif-panel:has(.cc.v3), .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *)) {
+  --frost-base: color-mix(in oklab, var(--frost-paper) 70%, var(--frost-swap-cool));
+  --glass-veil: transparent;
+  --color-foreground: var(--frost-ink);
+  --color-muted: color-mix(in srgb, var(--frost-ink) 80%, transparent);
+  --accent-text: color-mix(in srgb, var(--color-accent) 45%, var(--frost-ink));
+  color: var(--frost-ink);
+}
+/*
+ * PowOS AI's labels on the wallpaper (its title and state, "open", the headings, "clear all", the empty line): each a
+ * small pill of the frost with a lit edge - no halo (halos read as highlighter over a bright picture).
+ */
+.ai-screen :is(.ai-top > *, .ai-heading:not(.ai-mail-bar), .ai-mail-bar > *, .ai-empty):not(.tile *),
+.ai-screen.wide .ai-fold:not(.tile *) {
+  --frost-fill: color-mix(in srgb, var(--frost-base) 82%, transparent);
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--frost-fill);
+  box-shadow: var(--lift-edge);
+  color: var(--color-foreground);
+  text-shadow: none;
+}
+.ai-screen .ai-mail-bar:not(.tile *), .ai-screen .ai-top { text-shadow: none; }
+/* The header's state a pill of its own size, "open" at the far end. */
+.ai-screen .ai-top > .ai-state { flex: none; margin-right: auto; }
+/* Inside the frost secondary text is the ink itself (its size says it's secondary): no see-through grey. */
+:is(.ai-screen .tile, .ai-panel, .notif-panel:has(.cc.v3)) :is(.muted, .notif-text) { color: var(--color-foreground); }
+/* The compose's words and placeholder follow the frost's (flipped) ink. */
+.ai-screen .pill .grow { color: var(--color-foreground); }
+.ai-screen .ai-open:not(.tile *), .ai-screen .ai-mail-clear:not(.tile *) { color: var(--accent-text); }
+
+/*
+ * The wide screen (the phone unfolded, 821 CSS px; hosts/wide.ts: one wide page; home.tsx .home.wide): one bar at the
+ * foot - the dock's pinned apps on the left, the search pill in the middle, the recent apps (DockTray) on the right,
+ * every icon at one slot's width (a sixth of a side, at most 60 px). The launcher opens above that bar like a desktop's
+ * start menu (the user, 2026-10-24): the whole bar stays in place and in use, the drawer ends at the bar's top.
+ */
+.home.wide {
+  --wide-pill: clamp(220px, 30%, 360px);
+  --pill-mid: calc((var(--strip-height) - 44px) / 2);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--wide-pill) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--strip-height);
+  column-gap: 8px;
+}
+.home.wide > .stage { grid-area: 1 / 1 / 2 / -1; }
+.home.wide > .dock:not(.dock-tray) { grid-area: 2 / 1; }
+.home.wide > .bar { grid-area: 2 / 2; height: auto; transform: none; }
+.home.wide > .dock-tray { grid-area: 2 / 3; }
+.home.wide > .bar .bar-pill { left: 0; right: 0; bottom: var(--pill-mid); }
+.home.wide .dock-page { --slot: min(60px, calc((100cqw - 28px) / max(6, var(--cells, 6)))); flex: 0 0 auto; }
+.home.wide .dock :is(.app, .dock-gap), .home.wide .dock .dock-recent .app { flex: 0 0 var(--slot); }
+.home.wide > .dock:not(.dock-tray) { margin-left: 8px; }
+.home.wide > .dock-tray { margin-right: 8px; }
+/* The launcher above the one-row foot: the frost and the drawer's window end at the stage's foot (the bar's top). */
+.home.wide:not(:has(.ai-panel.wide)) > .stage > .launcher-frame { inset: 0; border-radius: var(--radius); }
+.home.wide:has(.ai-panel.wide) > .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
+.home.wide > .stage > .launcher-clip, .home.wide:not(:has(> .bar)) > .stage > .launcher-clip { inset: 0; transform: none; }
+.home.wide > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
+/* The bar under it stays: no slide, no fade, still tappable (PowOS AI's wide panel still covers the foot). */
+.home.wide:not(:has(.ai-panel.wide)) > .dock { transform: none; opacity: 1; pointer-events: auto; }
+
+/*
+ * The control center, v3 (control.tsx Controls, state.ts ccV3): one row of the most-used toggles, every control in a
+ * uniform labelled grid on a further pull, under quiet section names. A toggle: its icon on a round chip - the accent
+ * only when on - and one word under it. The sliders a calm fill of the foreground with an accent mark where they are.
+ */
+.cc3-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px 4px; position: relative; }
+.cc3-cell { position: relative; display: flex; justify-content: center; min-width: 0; }
+.cc3-t {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-foreground);
+  font: 11px var(--font);
+}
+.cc3-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  font-size: 22px;
+  background: var(--control-fill);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.cc3-t.on .cc3-chip { background: var(--color-accent); color: var(--color-background); }
+.cc3-t:active .cc3-chip { filter: brightness(1.15); }
+.cc3-word { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/*
+ * The first pull shows the list's first six; the further pull (ccexpand.ts) lays the rest out once (the grid's "cc-peek")
+ * and reveals it under the finger: each row of the rest ([--j] its place, of --cc-rows) fades and drops in from the
+ * pull's progress --cc-k as the notifications slide down off it. Transform and opacity only; nothing at rest.
+ */
+.cc3-list:not(.whole) .cc3-grid:not(.cc-peek) > .cc3-cell:nth-child(n + 7) { display: none; }
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 7) {
+  --cc-k: inherit;
+  --f: clamp(0, calc(var(--cc-k) * var(--cc-rows, 1) - var(--j, 0)), 1);
+  opacity: var(--f);
+  translate: 0 calc((var(--f) - 1) * 12px);
+}
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 13) { --j: 1; }
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 19) { --j: 2; }
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 25) { --j: 3; }
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 31) { --j: 4; }
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 37) { --j: 5; }
+.cc3-all { display: flex; flex-direction: column; gap: 14px; }
+.cc3-sec { display: flex; flex-direction: column; gap: 8px; animation: cc-subs-in 220ms ease both; }
+.cc3-head { margin: 0; padding: 0 2px; font: var(--text-small) var(--font); font-weight: normal; color: var(--color-muted); }
+.cc3-cell.chosen .cc3-chip { outline: var(--frame) solid var(--color-accent); outline-offset: -2px; }
+/* Calm sliders: the foreground at low alpha for the level, the accent only as a mark at its end. */
+.cc.v3 .cc-slider {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-foreground) 22%, transparent) calc(var(--v) * 100%), var(--soft-fill) 0);
+  box-shadow: none;
+}
+.cc.v3 .cc-slider::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--v) * (100% - 18px) + 6px);
+  top: 9px;
+  width: 4px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  pointer-events: none;
+}
+.cc.v3 .cc-slider-icon { mix-blend-mode: normal; color: var(--color-foreground); }
+/* The notifications after the controls: a hairline between, their header with room. */
+.panel-body.together .cc.v3 + .notif-bar { margin-top: 6px; padding-top: 14px; border-top: var(--frame) solid var(--line); }
+/* One strong frost under it: what's behind can't be read (the compositor's blur in the shade's window; here too). */
+.notif-panel:has(.cc.v3) { backdrop-filter: blur(48px) saturate(1.1); -webkit-backdrop-filter: blur(48px) saturate(1.1); }
+
+/*
+ * The widget detail sheet (ui/widgetsheet.tsx, apps/sheet.ts): a frosted popover anchored to a widget - the menus'
+ * material (.tile.sheet.pop) - its scrim (no dim) taking the touches outside it. Its body scrolls only when it's longer.
+ */
+.wsheet-scrim { position: fixed; inset: 0; z-index: 40; }
+.wsheet {
+  position: fixed; display: flex; flex-direction: column; box-sizing: border-box; padding: 6px 14px 14px; overflow: hidden;
+  touch-action: none; transition: transform 160ms ease-out; animation: wsheet-in 160ms ease-out both;
+}
+@keyframes wsheet-in { from { opacity: 0; transform: scale(0.96); } }
+.wsheet-head { display: flex; flex-direction: column; align-items: center; gap: 6px; padding-bottom: 10px; flex: none; }
+.wsheet-grab { width: 36px; height: 4px; border-radius: 2px; background: var(--soft-fill); }
+.wsheet-title { font: var(--text-item) var(--font); font-weight: bold; color: var(--color-foreground); }
+.wsheet-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 14px; }
+.wsheet-body.scrolls { touch-action: pan-y; }
+/* A coloured slider in a sheet (an island's Range with a track: colour temperature, hue): the gradient is the scale. */
+.wsheet-body input[type="range"][data-track] { -webkit-appearance: none; appearance: none; height: 22px; border-radius: 11px; }
+.wsheet-body input[type="range"][data-track]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--color-foreground); box-shadow: var(--lift);
+}
+
+/*
+ * Picking several tiles in edit mode (ui/homeselect.ts): the rectangle drawn on empty space - a soft accent fill, no
+ * line - and a picked tile's mark, an accent dot with a tick at its corner. Both exist only while needed: nothing
+ * animates at rest.
+ */
+.marquee {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  border-radius: calc(var(--radius) / 2);
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+.home-tile.chosen::after {
+  content: "\2713";
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--color-accent);
+  color: var(--color-background);
+  box-shadow: var(--lift);
+}
+.home-tile.chosen > .tile { background-color: color-mix(in srgb, var(--color-accent) 14%, var(--glass-fill)); }
+
+/*
+ * The app library (ui/library.tsx): home's last page - the search pill, then a card (a .tile face) per folder, its
+ * name and its first apps; up and down it scrolls (gesture.ts leaves the page's up/down to it). No lines.
+ */
+.page.library { display: flex; flex-direction: column; }
+.library-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--edge);
+}
+.lib-search {
+  flex: none;
+  font: inherit;
+  color: var(--color-foreground);
+  border: 0;
+  outline: none;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 22px;
+}
+.lib-search::placeholder { color: var(--color-muted); }
+.lib-search::-webkit-search-cancel-button { display: none; }
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: var(--gap); }
+.lib-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: var(--radius); min-width: 0; }
+.lib-name { display: flex; align-items: baseline; gap: 6px; font-size: var(--text-small); color: var(--color-foreground); padding: 0 2px; }
+.lib-name > span:first-child { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-count { flex: none; font-size: 0.85em; }
+/* Up to four apps, small, in a uniform 2x2 - the whole card is the tap (it opens the folder). */
+.lib-icons { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; aspect-ratio: 1; padding: 4px; pointer-events: none; }
+.lib-icons > .app-icon { width: 100%; height: auto; aspect-ratio: 1; }
+.lib-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); grid-auto-rows: var(--cell); gap: var(--gap); }
+.lib-results .app { touch-action: pan-y; }
+.lib-none { grid-column: 1 / -1; text-align: center; color: var(--color-muted); padding: 24px 0; }
+/* The edit bar's "+ app" picker (editsheet.tsx AppPicker): the drawer's list and pill in the picker's sheet. */
+.aw-picker.app-picker { height: min(100%, 720px); }
+.app-picker .drawer { padding: 0; max-width: none; width: 100%; }
+.app-picker .pill { flex: none; }

@@ -22,7 +22,25 @@ object HiddenApi {
         arrayOf(
             "Landroid/app/ActivityTaskManager",
             "Landroid/app/IActivityTaskManager",
+            // The task stack listener (FreeformTasks.listen): ITaskStackListener.Stub.asInterface is hidden; without the
+            // exemption the listener never registered (no task events for the running bar or the window frames).
+            "Landroid/app/ITaskStackListener",
             "Landroid/window/TaskSnapshot",
+            // The floating windows (FreeformTasks): a task's bounds and mode (Configuration.windowConfiguration is
+            // blocked: without it list() found no windows - no frames, no density, empty windows.list, 2026-10-23), its
+            // token and the WindowContainerTransactions (bounds, density, reorder) applied through WindowOrganizer.
+            "Landroid/content/res/Configuration;->windowConfiguration",
+            "Landroid/app/WindowConfiguration",
+            "Landroid/app/TaskInfo",
+            "Landroid/window/WindowContainerTransaction",
+            "Landroid/window/WindowContainerToken",
+            "Landroid/window/WindowOrganizer",
+            // A floating window's content under PowOS's hand while it's dragged (TaskLeash): the remote transition's
+            // filter, its parcel and what WM Shell hands it.
+            "Landroid/window/TransitionFilter",
+            "Landroid/window/RemoteTransition",
+            "Landroid/window/IRemoteTransition",
+            "Landroid/window/TransitionInfo",
             "Landroid/app/StatusBarManager",
             // The gesture input (system/gesture/GestureMonitor): the display's input monitor and its receiver.
             "Landroid/hardware/input/InputManager",
@@ -34,6 +52,17 @@ object HiddenApi {
             "Landroid/app/ActivityOptions",
             "Landroid/content/ContextWrapper",
             "Landroid/app/ActivityThread",
+            // The window blurs (shell/WindowBlur, shell/GlassBlur): a window's surface (View.getViewRootImpl,
+            // ViewRootImpl.getSurfaceControl / createBackgroundBlurDrawable) and its blur (Transaction.setBackgroundBlurRadius / setBlurRegions).
+            "Landroid/view/View;",
+            "Landroid/view/ViewRootImpl",
+            "Landroid/view/SurfaceControl",
+            // The framework's own blur-region encoding (GlassBlur.Codec): the OEM's region layout, never guessed.
+            "Lcom/android/internal/graphics/drawable/BackgroundBlurDrawable",
+            // The live wallpaper behind home (shell/WallpaperBackdrop): its surface mirrored, captured by the compositor.
+            "Landroid/view/WindowManagerGlobal",
+            "Landroid/view/IWindowManager",
+            "Landroid/window/ScreenCapture",
         )
 
     @Volatile private var done = false

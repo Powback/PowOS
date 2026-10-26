@@ -1,0 +1,8 @@
+{
+ "bat": {
+  "level": 64,
+  "status": "discharging",
+  "charging": false,
+  "temp": 31.5
+ }
+}

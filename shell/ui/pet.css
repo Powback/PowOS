@@ -1,0 +1,169 @@
+/*
+ * The pet (ui/pet.tsx, ui/petbody.tsx): a small soft creature over home and the PowOS AI page, and its speech bubble.
+ * Calm: still at rest. A state shows in its body (a pose, eased into once) and its face; a state's move plays once
+ * when it comes (or home comes back) and stops - transform and opacity only. Blinks: one short compositor animation
+ * every few seconds (pet.tsx). Colours are the theme's tokens only; no outline (a soft shadow under it and a light
+ * top edge inside, as --lift gives a surface).
+ */
+.pet {
+  --pet-size: 64px;
+  position: fixed;
+  z-index: 5;
+  width: var(--pet-size);
+  height: var(--pet-size);
+  padding: 0;
+  touch-action: none;
+  /* A soft tint of the theme, not the accent itself: a loud accent (Matte Black's orange) made it a bright smiley.
+   * The accent's hue, quieted with the foreground and a little background. */
+  --pet-base: color-mix(in oklab, var(--color-foreground) 78%, var(--color-background));
+  --pet-fill: color-mix(in oklab, var(--color-accent) 46%, var(--pet-base));
+  --pet-ink: var(--color-background);
+  /* A perch that moved (a page settled, a tile moved): it goes there in a short glide. */
+  transition: opacity 200ms ease, left 280ms cubic-bezier(0.3, 0.8, 0.3, 1), top 280ms cubic-bezier(0.3, 0.8, 0.3, 1);
+}
+@media (min-width: 600px) { .pet { --pet-size: 72px; } }
+.pet.falling { transition: opacity 200ms ease; }
+/* Physics on (pet.tsx, petmove.ts): its place is one transform the simulation writes - no left/top, no glide. */
+.pet.phys { left: 0; top: 0; transition: opacity 200ms ease; will-change: transform; }
+.pet.away { opacity: 0; pointer-events: none; }
+/* The chat's face: on the search pill's top edge while it's in chat mode (pet.tsx places it; its perch is kept). */
+.pet.dragging { transition: none; }
+.pet-body, .pet-inner { display: block; width: 100%; height: 100%; transform-origin: 50% 92%; }
+.pet-body { will-change: transform; }
+/* Its pose for the state: eased into once, then still. */
+.pet-inner { transition: transform 420ms cubic-bezier(0.3, 0.8, 0.3, 1); }
+.pet.dragging .pet-inner { transform: scale(1.06); }
+.pet-art { position: relative; display: block; width: 100%; height: 100%; }
+.pet-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.pet-eyes-move { position: absolute; inset: 0; will-change: transform; pointer-events: none; }
+/* Its own layer, kept: a blink (a transform animation) only re-composites it, never repaints the page or the glass. */
+.pet-eyes-blink { display: block; width: 100%; height: 100%; transform-origin: 50% 52%; will-change: transform; }
+
+/* The body: no outline; a light top edge inside, a soft shadow under it. */
+.pet-shape { fill: var(--pet-fill); transition: fill 400ms ease; }
+.pet-hl { fill: none; stroke: url(#pet-hl-grad); stroke-width: 2.6; }
+.pet-hl-a { stop-color: color-mix(in srgb, var(--color-foreground) 60%, transparent); }
+.pet-hl-b { stop-color: transparent; }
+.pet-shadow { fill: color-mix(in srgb, var(--color-background) 55%, transparent); filter: blur(1.6px); }
+.pet-foot { fill: color-mix(in srgb, var(--pet-fill) 72%, var(--pet-ink)); }
+.pet-eye.open { fill: var(--pet-ink); transform-box: fill-box; transform-origin: center; }
+.pet-glint { fill: color-mix(in srgb, var(--color-foreground) 85%, transparent); }
+.pet-eye.closed, .pet-eye.glad, .pet-brows, .pet-mouth { fill: none; stroke: var(--pet-ink); stroke-width: 2; stroke-linecap: round; }
+.pet-mouth.open { fill: var(--pet-ink); stroke: none; }
+.pet-z { font: 600 10px var(--font); fill: var(--color-foreground); }
+.pet-ear { fill: color-mix(in srgb, var(--color-accent) 55%, var(--color-foreground)); opacity: 0; }
+.pet-parcel-glow { fill: var(--color-accent); opacity: 0.55; filter: blur(2.2px); }
+.pet-parcel-box { fill: color-mix(in srgb, var(--color-foreground) 75%, var(--color-accent)); }
+.pet-parcel-tie { fill: none; stroke: var(--pet-ink); stroke-width: 0.8; opacity: 0.6; }
+
+/* Which face and props each state shows: everything else hidden. */
+.pet-eye.closed, .pet-eye.glad, .pet-brows, .pet-mouth, .pet-z, .pet-parcel, .pet-arm, .pet-crumb { display: none; }
+.pet-arm { fill: var(--pet-fill); transform-box: fill-box; transform-origin: 30% 90%; }
+.pet-crumb { transform-box: fill-box; transform-origin: center; fill: color-mix(in srgb, var(--color-foreground) 88%, var(--color-accent)); stroke: var(--pet-ink); stroke-width: 0.5; stroke-linejoin: round; }
+.pet[data-state="looking"] .pet-arm { display: inline; animation: pet-arm-wave 380ms ease-in-out 3 alternate; }
+.pet[data-state="eating"] .pet-crumb { display: inline; animation: pet-crumb 1680ms ease-in 1 forwards; }
+.pet .pet-mouth.smile { display: inline; }
+.pet:is([data-state="happy"], [data-state="sleepy"]) :is(.pet-eye.open, .pet-glint) { display: none; }
+.pet[data-state="happy"] .pet-eye.glad { display: inline; }
+.pet[data-state="sleepy"] .pet-eye.closed { display: inline; }
+.pet[data-state="sleepy"] .pet-z { display: inline; opacity: 0.7; }
+.pet:is([data-state="working"], [data-state="sleepy"], [data-state="looking"], [data-state="hungry"], [data-state="listening"], [data-state="worried"]) .pet-mouth.smile { display: none; }
+.pet:is([data-state="working"], [data-state="sleepy"]) .pet-mouth.flat { display: inline; }
+.pet:is([data-state="looking"], [data-state="hungry"], [data-state="listening"]) .pet-mouth.open { display: inline; }
+.pet[data-state="worried"] :is(.pet-mouth.wavy, .pet-brows) { display: inline; }
+.pet[data-state="working"] .pet-parcel { display: inline; }
+.pet[data-state="listening"] .pet-ear { opacity: 0.35; }
+/* Looking at you / listening: bigger eyes. Working: eyes down at the parcel. */
+.pet:is([data-state="looking"], [data-state="listening"]) .pet-eye.open { transform: scale(1.22); }
+.pet[data-state="working"] .pet-eyes-blink svg { transform: translate(1.2px, 1.6px); }
+/* Tints: worried cooler, hungry and sleepy toward the muted colour. */
+.pet[data-state="worried"] { --pet-fill: color-mix(in oklab, var(--color-accent) 30%, color-mix(in oklab, var(--color-muted) 70%, var(--color-background))); }
+.pet:is([data-state="hungry"], [data-state="sleepy"]) { --pet-fill: color-mix(in oklab, var(--color-accent) 26%, color-mix(in oklab, var(--color-muted) 80%, var(--color-background))); }
+
+/* Body language - the pose held: */
+.pet[data-state="sleepy"] .pet-inner { transform: translateY(3%) scale(1.07, 0.86); }
+.pet[data-state="hungry"] .pet-inner { transform: translateY(5%) scale(0.9) rotate(-4deg); }
+.pet[data-state="working"] .pet-inner { transform: rotate(7deg) translateY(2%); }
+.pet[data-state="listening"] .pet-inner { transform: scale(0.97, 1.09); }
+.pet[data-state="looking"] .pet-inner { transform: translateY(-2%); }
+/* Night: curled up asleep - lower and rounder than a nap. */
+.pet[data-state="sleepy"][data-night] .pet-inner { transform: translateY(6%) scale(1.12, 0.76) rotate(-3deg); }
+/* Charging: eating - a few munches when it starts, then content. */
+.pet[data-state="eating"] .pet-mouth.smile { display: none; }
+.pet[data-state="eating"] .pet-mouth.open { display: inline; transform-box: fill-box; transform-origin: center; animation: pet-munch 420ms ease-in-out 4; }
+.pet[data-state="eating"] .pet-eye.glad { display: inline; }
+.pet[data-state="eating"] :is(.pet-eye.open, .pet-glint) { display: none; }
+/* - and the move that comes with it, once: */
+.pet[data-state="idle"] .pet-body { animation: pet-settle 900ms ease-out 1; }
+.pet[data-state="happy"] .pet-body { animation: pet-jump 700ms cubic-bezier(0.3, 0.7, 0.4, 1) 1; }
+.pet[data-state="working"] .pet-body { animation: pet-bob 900ms ease-in-out 2; }
+.pet[data-state="looking"] .pet-body { animation: pet-wave 1100ms ease-in-out 1; }
+.pet[data-state="worried"] .pet-body { animation: pet-shiver 300ms ease-in-out 4; }
+.pet[data-state="sleepy"] .pet-body { animation: pet-breathe 3000ms ease-in-out 2; }
+.pet[data-state="hungry"] .pet-body { animation: pet-sag 1400ms ease-in-out 1; }
+.pet[data-state="listening"] .pet-body { animation: pet-perk 500ms ease-out 1; }
+
+@keyframes pet-settle { 0% { transform: translateY(3px) scale(1.04, 0.96); } 60% { transform: translateY(-1px); } 100% { transform: none; } }
+@keyframes pet-jump { 0%, 100% { transform: none; } 20% { transform: scale(1.08, 0.9); } 50% { transform: translateY(-16px) scale(0.96, 1.05); } 80% { transform: scale(1.05, 0.95); } }
+@keyframes pet-bob { 0%, 100% { transform: none; } 50% { transform: translateY(-3px); } }
+@keyframes pet-wave { 0%, 100% { transform: none; } 25% { transform: rotate(-7deg); } 50% { transform: rotate(5deg); } 75% { transform: rotate(-4deg); } }
+@keyframes pet-shiver { 0%, 100% { transform: none; } 25% { transform: translateX(-1.5px); } 75% { transform: translateX(1.5px); } }
+@keyframes pet-breathe { 0%, 100% { transform: none; } 50% { transform: scale(1.03, 0.96); } }
+@keyframes pet-sag { 0% { transform: translateY(-4px); } 100% { transform: none; } }
+@keyframes pet-arm-wave { from { transform: rotate(-10deg); } to { transform: rotate(32deg); } }
+@keyframes pet-crumb { 0% { transform: none; } 100% { transform: translateY(-1px) scale(0.8); } }
+@keyframes pet-munch { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.2, 0.35); } }
+@keyframes pet-perk { 0% { transform: scale(0.94); } 100% { transform: none; } }
+
+/* The bubble: home's tile material, one short line; tapped open, every line batched into it. */
+.pet-bubble {
+  position: fixed;
+  z-index: 5;
+  max-width: min(300px, calc(100vw - 32px));
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.4;
+  border-radius: var(--radius);
+  box-shadow: var(--lift);
+  animation: pet-bubble-in 160ms ease-out 1;
+}
+/* Its tail, pointing at the pet: a corner of the same material. */
+.pet-bubble::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: inherit;
+  transform: rotate(45deg);
+}
+.pet-bubble.above::after { bottom: -4px; }
+.pet-bubble.below::after { top: -4px; }
+.pet-bubble::after { left: var(--tail, 24px); }
+.pet-bubble.open::after { display: none; }
+/* Far from the pet (no free place next to it): no tail. */
+.pet-bubble.far::after { display: none; }
+.pet-bubble.open { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; touch-action: pan-y; }
+.pet-short { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.pet-from { font-size: var(--text-small); }
+.pet-more-link { align-self: flex-end; color: var(--accent-text); font-size: var(--text-small); padding: 2px 0; }
+@keyframes pet-bubble-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.pet-bubble.below { animation-name: pet-bubble-in-below; }
+@keyframes pet-bubble-in-below { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pet-body, .pet-bubble { animation: none !important; }
+  .pet-inner { transition: none; }
+}
+
+/* PowOS AI's page: the conversation before the latest turn, on one frost surface as the latest's card (its messages soft
+   fills on it) - bare on the wallpaper it was unreadable over a bright one. */
+.ai-history-list { max-height: none; overflow: visible; padding: 12px 14px; }
+.pet-talk .pet-asked { font-size: var(--text-small); }
+.pet-talk .pet-reply { -webkit-line-clamp: 4; }
+/* Standing ON a tile's edge: a small, firmer contact shadow on it. */
+.pet-shadow { transform-box: fill-box; transform-origin: center; }
+.pet.perched .pet-shadow { transform: scale(0.72, 0.8); fill: color-mix(in srgb, var(--color-background) 70%, transparent); }
+
+/* Over apps (mode petover): the pet alone in its small window, centred; the window is the host's to move. */
+html[data-mode="petover"], html[data-mode="petover"] body { background: transparent; overflow: hidden; }
+.pet.over { left: calc(50% - var(--pet-size) / 2); top: calc(50% - var(--pet-size) / 2); pointer-events: none; }

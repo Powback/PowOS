@@ -1,0 +1,1056 @@
+#!/usr/bin/env python3
+"""powos-sleep-gui - Android's cached-app freezer for the Linux apps in the PowOS session (docs/UNIFIED-SLEEP.md).
+
+Runs as the session's user (powos-rooted-session starts it). A KWin script (lib/apps/sleep/kwin, loaded through
+KWin's D-Bus /Scripting) reports every app window's focus and minimized state as it changes; nothing here polls.
+An app none of whose windows had focus for POWOS_SLEEP_GUI_IDLE (default 10m) is frozen - its whole process tree,
+by powos-sleepd (root) - unless:
+  - it plays or records audio (a PipeWire stream: pactl's sink-inputs / source-outputs),
+  - it moves data: more than 256 KB/s read+written (downloads, uploads, copies) or more than 20% of a core,
+  - it's a terminal with a foreground job (a shell whose terminal's foreground group isn't the shell),
+  - it, or anything in its tree, is on the never list (powos-sleep-common: the session core, `powos sleep never`),
+  - it's one of powos-android-tasks' stand-ins for Android apps (window class android-*),
+  - it's a game Steam started, unless its unit says "games": "pause" (then the game sleeps with Steam, below).
+On the phone "focus" also needs PowOS on screen: the PowOS app showing the desktop or one of its window tasks (the
+display daemon's consumers, read from its log - HACK, see Screen). Off screen (Android's home, another app, the
+screen off) no window has focus. The desktop shell (plasmashell) itself sleeps while PowOS is off screen
+(DESKTOP_IDLE), that process alone, and wakes when PowOS is back, on D-Bus to it, and briefly every 5 minutes.
+
+Apps with a unit of their own (/etc/powos/units.d/<id>.json with "windowClass") get their unit's rule:
+  "windowClass": ["steam"]                     its windows (resource class)
+  "autosleep": {"idle": "15s"}                 how long unfocused before it sleeps
+  "processes": [{"pidfile": P, "tree": true}]  the app is that process's tree, whichever of its processes owns the
+                                               window (Steam's windows are steamwebhelper's; the client is the root)
+                                               - it stays tracked while it has no window (Steam in the tray)
+  "sleepBusy": {"cmdline": "SteamLaunch",      awake while a process of its tree has this in its command line
+                "io": "disk", "cpu": false,    busy = disk reads+writes over 256 KB/s (not rchar/wchar: a CEF app's IPC
+                                               counts there); its CPU doesn't keep it awake (its idle CPU is the point)
+                "startGrace": "2m",            awake for this long after its root process started (update, login, the
+                                               launch it was started for), and after a game's launcher started
+                "games": "pause"}              a game it runs sleeps with it: the game's windows are the app's (its
+                                               focus is the app's), the whole tree frozen at once; the game's own
+                                               audio stream doesn't keep it awake. Without it, a game keeps it awake
+Woken by `Wake` (D-Bus dev.powos.Sleep /Gui, `powos-sleep-gui wake <class|pid>`): a launch path (Steam's
+/usr/bin/steam, powos-open-task) thaws the app before showing it, so the launch reaches it and not a frozen process.
+`Resume <appid>` (`powos-sleep-gui resume`, /usr/bin/steam on steam://rungameid/<appid>): the game already runs -
+thaw its app and raise the game's window (instant start; {"running": false} = not running, launch it). `Sleep <what>`
+(`powos-sleep-gui sleep`, `powos game <name> freeze`): freeze now, its focused windows minimized first.
+
+It thaws at once on focus (activating, raising or un-minimizing it; a notification's click activates it too), and on
+any D-Bus message addressed to it (a method call, a notification's targeted ActionInvoked signal, the tray's
+Activate): a monitor connection watches only the frozen apps' bus names. Woken by D-Bus while still unfocused, it
+sleeps again after a minute.
+
+If this watcher dies, powos-sleepd thaws every GUI app it froze (the connection drops).
+"""
+import ctypes
+import glob
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+from importlib.machinery import SourceFileLoader
+
+import dbus
+import dbus.service
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+common = SourceFileLoader("powos_sleep_common", os.path.join(HERE, "powos-sleep-common")).load_module()
+SCRIPT = os.environ.get("POWOS_SLEEP_KWIN", os.path.join(HERE, "sleep/kwin/contents/code/main.js"))
+SOCK = f"{common.STATE_DIR}/sleepd.sock"
+IDLE = common.seconds(os.environ.get("POWOS_SLEEP_GUI_IDLE", "10m"))
+GRACE = 60  # woken by D-Bus but still unfocused: asleep again after this
+SAMPLE = 5  # seconds of CPU/IO measured before freezing
+GAME_WINDOW_S = 600  # a game still without a window this long after its launch (hung) sleeps all the same
+# A unit's app running without a window (Steam -silent) is adopted at most this long after it started (Gui.adopt)
+ADOPT_S = 30
+# The desktop shell (plasmashell) while PowOS is off screen (phone): frozen this long after PowOS went off screen
+# ("off": never), thawed the moment it's back, and for DESKTOP_DRAIN s every DESKTOP_AWAKE s meanwhile - long enough
+# to read what KWin sent it (a Wayland client that never reads its socket is disconnected once the buffer fills).
+# Measured 2026-10-21: plasmashell 1.5-2.7% of a core with Android's home on screen and the desktop unseen.
+DESKTOP_IDLE = os.environ.get("POWOS_SLEEP_DESKTOP_IDLE", "15s")
+DESKTOP_AWAKE = 300
+DESKTOP_DRAIN = 2
+IO_MAX = 256 << 10  # bytes/s
+CPU_MAX = 20  # % of a core
+CLK = os.sysconf("SC_CLK_TCK")
+SHELLS = {"bash", "zsh", "fish", "sh", "dash", "nu", "ksh", "tcsh", "csh", "xonsh"}
+BUS, NAME = "dev.powos.Sleep", "dev.powos.Sleep"
+UNITS = os.environ.get("POWOS_UNITS_DIR", "/etc/powos/units.d")
+RUN = os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app")
+SCREEN_LOG = os.environ.get("POWOS_SLEEP_SCREEN_LOG", f"{RUN}/andromarchy.log")
+RUNNING_DIR = f"{RUN}/running"  # the PowOS app makes it (and watches it); none on the desktop, nothing written
+
+
+def log(msg):
+    print(f"{time.strftime('%F %T')} {msg}", flush=True)
+
+
+def rd(p):
+    try:
+        with open(p) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def stat(pid):
+    s = rd(f"/proc/{pid}/stat")
+    if not s:
+        return None
+    comm = s[s.index("(") + 1:s.rindex(")")]
+    f = s[s.rindex(")") + 2:].split()
+    return {"comm": comm, "ppid": int(f[1]), "pgrp": int(f[2]), "sid": int(f[3]), "tty": int(f[4]),
+            "tpgid": int(f[5]), "ticks": int(f[11]) + int(f[12])}
+
+
+def tree(root):
+    kids = {}
+    for p in os.listdir("/proc"):
+        if p.isdigit():
+            st = stat(p)
+            if st:
+                kids.setdefault(st["ppid"], []).append(int(p))
+    out, todo = [], [root]
+    while todo:
+        p = todo.pop()
+        if os.path.isdir(f"/proc/{p}"):
+            out.append(p)
+            todo += kids.get(p, [])
+    return out
+
+
+def io_bytes(pids, disk=False):
+    """Bytes read+written: every read()/write() (rchar/wchar: files, pipes, sockets), or only the storage's (disk)."""
+    keys = ("read_bytes", "write_bytes") if disk else ("rchar", "wchar")
+    n = 0
+    for p in pids:
+        for line in rd(f"/proc/{p}/io").splitlines():
+            k, _, v = line.partition(":")
+            if k in keys:
+                n += int(v)
+    return n
+
+
+def age(pid):
+    """Seconds since the process started."""
+    st = rd(f"/proc/{pid}/stat")
+    try:
+        start = int(st[st.rindex(")") + 2:].split()[19]) / CLK
+        return float(rd("/proc/uptime").split()[0]) - start
+    except (ValueError, IndexError):
+        return 0.0
+
+
+def cmdline(pid):
+    return rd(f"/proc/{pid}/cmdline").replace("\0", " ").strip()
+
+
+def ancestors(pid):
+    seen = []
+    while pid > 1 and pid not in seen:
+        seen.append(pid)
+        st = stat(pid)
+        if not st:
+            break
+        pid = st["ppid"]
+    return seen
+
+
+def unit_root(u):
+    """A unit's root process (its pidfile), or None."""
+    r = rd(os.path.expanduser(u["pidfile"] or "/nonexistent")).strip()
+    return int(r) if r.isdigit() and os.path.isdir(f"/proc/{r}") else None
+
+
+def game_launcher(u):
+    """The command-line mark of the unit's game launcher when its games sleep with it (sleepBusy.games "pause")."""
+    b = u.get("busy") or {}
+    return b.get("cmdline") if b.get("games") == "pause" else None
+
+
+def unit_game(u, appid):
+    """The launcher process (Steam's reaper SteamLaunch AppId=<appid>) of a game the unit's app runs, or None."""
+    root, mark = unit_root(u), (u.get("busy") or {}).get("cmdline")
+    if not root or not mark:
+        return None
+    return next((p for p in tree(root) if mark in cmdline(p) and re.search(rf"AppId={appid}( |$)", cmdline(p))),
+                None)
+
+
+def unit_rules():
+    """GUI rules from the units' manifests that name window classes (see the top)."""
+    out = []
+    for f in sorted(glob.glob(f"{UNITS}/*.json")):
+        try:
+            with open(f) as fh:
+                m = json.load(fh)
+            classes = {str(c).lower() for c in (m.get("windowClass") or [])}
+            if not classes:
+                continue
+            r = common.from_manifest(m.get("autosleep")) or {"idle": IDLE, "mode": "pause", "stop": 0}
+            pidfile = next((p["pidfile"] for p in m.get("processes") or []
+                            if isinstance(p, dict) and p.get("pidfile")), None)
+            out.append({"id": m["id"], "classes": classes, "rule": r, "pidfile": pidfile,
+                        "busy": m.get("sleepBusy") or {}})
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            log(f"{f}: not read: {e}")
+    return out
+
+
+class Screen:
+    """Is PowOS on screen? (phone only; elsewhere always yes.) The PowOS app's display daemon pairs one consumer per
+    visible surface - the desktop (surface 0) and each window task - and logs each connect and disconnect: an Activity
+    whose surface goes away (Android's home, another app, Recents, the screen off) disconnects. Watched with inotify,
+    no polling: on screen = some consumer connected.
+
+    HACK: the daemon's log (andromarchy.log, its stderr) is the signal - no state of its own is published. Real fix: the
+    display daemon (or SessionService) writes the connected surfaces to a state file in the run dir, or KWin's anland
+    backend exposes them (D-Bus / a KWin script property); then read that instead."""
+
+    IN_MODIFY, IN_ATTRIB, IN_DELETE_SELF, IN_MOVE_SELF = 0x2, 0x4, 0x400, 0x800
+    LINE = re.compile(rb"surface (\d+): consumer (connected|disconnected)|daemon: (listening) on")
+
+    def __init__(self, path, on_change):
+        self.path, self.on_change = path, on_change
+        self.pos, self.ino, self.surfaces, self.known = 0, None, set(), False
+        self.started = False
+        self.libc = ctypes.CDLL(None, use_errno=True)
+        self.fd = self.libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+        self.wd = -1
+        if self.fd >= 0:
+            GLib.io_add_watch(self.fd, GLib.PRIORITY_DEFAULT, GLib.IO_IN, self.event)
+        self.watch()
+        self.started = True
+
+    @property
+    def on(self):
+        return bool(self.surfaces) or not self.known
+
+    def watch(self):
+        if self.fd < 0:
+            return False
+        if self.wd >= 0:
+            self.libc.inotify_rm_watch(self.fd, self.wd)
+        self.wd = self.libc.inotify_add_watch(self.fd, self.path.encode(),
+                                              self.IN_MODIFY | self.IN_ATTRIB | self.IN_DELETE_SELF | self.IN_MOVE_SELF)
+        if self.wd < 0:  # no log (yet): not a phone, or the app's daemon not started - look again in a minute
+            self.known, self.surfaces = False, set()
+            GLib.timeout_add_seconds(60, self.watch)
+            return False
+        self.read()
+        return False
+
+    def event(self, *_):
+        try:
+            data = os.read(self.fd, 4096)
+        except BlockingIOError:
+            return True
+        gone = False
+        while len(data) >= 16:
+            mask, ln = int.from_bytes(data[4:8], "little"), int.from_bytes(data[12:16], "little")
+            gone |= bool(mask & (self.IN_DELETE_SELF | self.IN_MOVE_SELF))
+            data = data[16 + ln:]
+        if gone:
+            self.watch()
+        else:
+            self.read()
+        return True
+
+    def read(self):
+        was = self.on
+        try:
+            st = os.stat(self.path)
+            if st.st_ino != self.ino or st.st_size < self.pos:  # a new daemon's log (the app restarted)
+                self.ino, self.pos, self.surfaces = st.st_ino, 0, set()
+            with open(self.path, "rb") as f:
+                f.seek(self.pos)
+                data = f.read()
+        except OSError:
+            self.known, self.surfaces = False, set()
+            data = b""
+        else:
+            self.known = True
+        end = data.rfind(b"\n") + 1
+        self.pos += end
+        for m in self.LINE.finditer(data[:end]):
+            if m.group(3):  # a new daemon (the app restarted; its log is truncated and written again)
+                self.surfaces = set()
+            else:
+                (self.surfaces.add if m.group(2) == b"connected" else self.surfaces.discard)(int(m.group(1)))
+        if self.on != was and self.started:
+            self.on_change(self.on)
+
+
+
+def fg_job(pids):
+    """A terminal in the tree with a job in the foreground: its shell's terminal's foreground group isn't the shell's
+    own, or what the terminal runs isn't a shell at all (a command started in it directly)."""
+    sts = {p: stat(p) for p in pids}
+    for p, st in sts.items():
+        if not st or not st["tty"] or st["sid"] != p:
+            continue
+        if st["comm"] not in SHELLS:
+            return st["comm"]
+        # The foreground group holds something besides the shell (a job; a non-interactive shell has no job
+        # control, so its command runs in the shell's own group).
+        fg = [q for q, o in sts.items() if o and q != p and o["sid"] == p and o["pgrp"] == st["tpgid"]]
+        if fg:
+            return sts[fg[0]]["comm"]
+    return None
+
+
+def audio_pids():
+    pids = set()
+    for kind in ("sink-inputs", "source-outputs"):
+        try:
+            out = subprocess.run(["pactl", "-f", "json", "list", kind], capture_output=True, text=True, timeout=3).stdout
+            for s in json.loads(out or "[]"):
+                if s.get("corked"):
+                    continue
+                pid = (s.get("properties") or {}).get("application.process.id")
+                if pid and str(pid).isdigit():
+                    pids.add(int(pid))
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+    return pids
+
+
+class Sleepd:
+    """The persistent connection to powos-sleepd: our requests; its going away means everything is thawed there."""
+
+    def __init__(self, on_reset=None, on_woken=None):
+        self.s = None
+        self.on_reset = on_reset
+        self.on_woken = on_woken
+        self.connects = 0
+
+    def ask(self, line):
+        err = None
+        for _ in range(2):
+            try:
+                if self.s is None:
+                    self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    self.s.settimeout(5)
+                    self.s.connect(SOCK)
+                    self.s.sendall(b"gui-hello\n")
+                    self._read()
+                    self.connects += 1
+                    if self.connects > 1 and self.on_reset:
+                        self.on_reset()  # a new powos-sleepd: the old one thawed everything when we lost it
+                self.s.sendall(line.encode() + b"\n")
+                r = self._read()
+                if r.get("woken") and self.on_woken:
+                    self.on_woken(r["woken"])  # thawed there by someone else (`powos sleep wake`)
+                return r
+            except OSError as e:
+                self.s = None
+                err = e
+        return {"error": f"powos-sleepd: {err}"}
+
+    def _read(self):
+        buf = b""
+        while not buf.endswith(b"\n"):
+            d = self.s.recv(65536)
+            if not d:
+                raise OSError("closed")
+            buf += d
+        return json.loads(buf)
+
+
+class Gui(dbus.service.Object):
+    def __init__(self, bus):
+        super().__init__(bus, "/Gui")
+        self.bus = bus
+        self.sleepd = Sleepd(self.reset, self.woken)
+        self.wins = {}  # wid -> {pid, cls, active, minimized} (pid: the app's - its unit's root process, if it has one)
+        self.idle_since = {}  # pid -> when it last lost focus
+        self.frozen = {}  # pid -> {"names": [...], "cls", "pids"}
+        self.refused = {}  # pid -> (until, why)
+        self.tracked = {}  # pid -> class: a unit's app (its root process) followed while it has no window
+        self.sampling = set()
+        self.timer = None
+        self.monitor = None
+        self.active = None
+        self.units, self.units_mtime = [], None
+        self.desk = None  # the desktop shell's pid while frozen (also in self.frozen, for D-Bus to wake it)
+        self.home = None  # the desktop home's (powos-shell, its whole tree) while frozen, with the desktop shell
+        self.desk_timer = None
+        self.screen = Screen(SCREEN_LOG, self.screen_changed)
+        self.desktop(self.screen.on)  # started while PowOS is off screen: the desktop shell sleeps too
+        GLib.timeout_add_seconds(ADOPT_S, self.adopt)
+
+    def adopt(self):
+        """A unit's app that never showed a window (Steam started -silent by powos-steam-resident: only a tray icon) was
+        never tracked - tracked starts at a window - so it never slept: 12.7% of a core for as long as the session ran
+        (2026-10-23, resident Steam awake 20 min after its start). Its root process alive without a window: tracked,
+        idle from now; its unit's rules (start grace, busy, games) decide as for one that closed its window."""
+        for u in self.rules():
+            if not u["pidfile"] or not u["classes"] or u["rule"].get("never"):
+                continue
+            root = unit_root(u)
+            if root is None or root in self.tracked or any(w["pid"] == root for w in self.wins.values()):
+                continue
+            self.tracked[root] = sorted(u["classes"])[0]
+            self.idle_since.setdefault(root, time.time())
+            log(f"{self.tracked[root]} ({root}): running without a window - sleeps after {common.fmt(self.idle(root))} "
+                f"like one out of sight")
+            self.schedule()
+        return True
+
+    # the apps' units --------------------------------------------------------
+    def rules(self):
+        try:
+            mt = os.stat(UNITS).st_mtime
+        except OSError:
+            mt = None
+        if mt != self.units_mtime:
+            self.units_mtime, self.units = mt, unit_rules()
+        return self.units
+
+    def units_class(self, cls):
+        return any(cls.lower() in u["classes"] for u in self.rules())
+
+    def unit_of(self, pid):
+        cls = self.cls(pid).lower()
+        return next((u for u in self.rules() if cls in u["classes"]), None) \
+            or next((u for u in self.rules() if u["pidfile"] and unit_root(u) == pid), None)
+
+    def idle(self, pid):
+        u = self.unit_of(pid)
+        return u["rule"].get("idle", IDLE) if u and not u["rule"].get("never") else IDLE
+
+    def app_pid(self, pid, cls):
+        """The window's process -> the app's: its unit's root (pidfile) when the window's process is in that tree -
+        a window of the unit's class, or (sleepBusy.games "pause") a game's window, a process its launcher started."""
+        anc = ancestors(pid)
+        for u in self.rules():
+            if not u["pidfile"]:
+                continue
+            root = unit_root(u)
+            if root in anc and (cls.lower() in u["classes"] or game_launcher(u) and any(
+                    game_launcher(u) in cmdline(p) for p in anc)):
+                return root
+        return pid
+
+    # from the KWin script ----------------------------------------------------
+    @dbus.service.method("dev.powos.Sleep.Gui", in_signature="sisbb")
+    def Window(self, wid, pid, cls, active, minimized):
+        raw = int(pid)
+        pid = self.app_pid(raw, str(cls))
+        if pid != raw:
+            u = self.unit_of(pid)
+            self.tracked.setdefault(pid, sorted(u["classes"])[0] if u else str(cls))
+        if str(wid) not in self.wins and self.units_class(str(cls)):
+            # A unit's app's new window: when it showed up after its start (a cold start's length, in the log).
+            log(f"{cls} ({pid}): window {wid} {'(focused) ' if active else ''}{age(pid):.1f}s after its start")
+        self.wins[str(wid)] = {"pid": pid, "raw": raw, "cls": str(cls), "active": bool(active),
+                               "minimized": bool(minimized)}
+        if self.pid_active(pid):
+            self.idle_since.pop(pid, None)
+            if pid in self.frozen:
+                self.thaw(pid, "focused")
+        elif pid not in self.idle_since:
+            self.idle_since[pid] = time.time()
+        self.update_active()
+        self.schedule()
+
+    @dbus.service.method("dev.powos.Sleep.Gui", in_signature="si")
+    def Closed(self, wid, pid):
+        w = self.wins.pop(str(wid), None)
+        pid = w["pid"] if w else int(pid)
+        if not any(w["pid"] == pid for w in self.wins.values()):
+            if pid in self.tracked and os.path.isdir(f"/proc/{pid}"):
+                # A unit's app without a window (Steam in the tray) is still running: unused, it sleeps all the same.
+                self.idle_since.setdefault(pid, time.time())
+            else:
+                self.forget(pid)
+                if pid in self.frozen:
+                    self.thaw(pid, "window closed")
+        self.update_active()
+        self.schedule()
+
+    @dbus.service.method("dev.powos.Sleep.Gui", in_signature="s", out_signature="s")
+    def Wake(self, what):
+        """Thaw an app now - a launch path, before it shows the app: its window's process id, any of its process ids,
+        its window class or its unit's id. It sleeps again after its idle time unless it gets the focus."""
+        t = time.monotonic()
+        what = str(what).strip()
+        pid = None
+        for p, f in self.frozen.items():
+            if (what.isdigit() and (int(what) == p or int(what) in f.get("pids", ())
+                                    or p in ancestors(int(what)))) \
+                    or what.lower() == f["cls"].lower() or (self.unit_of(p) or {}).get("id") == what:
+                pid = p
+                break
+        if pid is None:
+            return json.dumps({"ok": True, "awake": True})
+        r = self.thaw(pid, "launched")
+        if not self.pid_active(pid):
+            self.idle_since[pid] = time.time()
+        self.schedule()
+        return json.dumps({**r, "totalMs": round((time.monotonic() - t) * 1000, 2)})
+
+    @dbus.service.method("dev.powos.Sleep.Gui", in_signature="s", out_signature="s")
+    def Resume(self, appid):
+        """A game's launch (Steam's steam://rungameid/<appid>) while that game already runs: thaw its app (the client
+        and the game, if frozen) and bring the game's window up - instead of handing the launch to Steam, which has
+        nothing to start. {"running": false} when no unit's app runs that game (the launch then goes to Steam)."""
+        t = time.monotonic()
+        appid = str(appid).strip()
+        for u in self.rules():
+            if not game_launcher(u) or not appid.isdigit():
+                continue
+            game = unit_game(u, appid)
+            if not game:
+                continue
+            root = unit_root(u)
+            r = self.thaw(root, f"launched app {appid}") if root in self.frozen else {"already": True}
+            thawed = round((time.monotonic() - t) * 1000, 2)
+            if not self.pid_active(root):
+                self.idle_since[root] = time.time()
+            self.refused.pop(root, None)
+            gpids = set(tree(game))
+            wins = [w for w, v in self.wins.items() if v.get("raw") in gpids]
+            if wins:
+                self.kwin_run("raise", RAISE_JS % {"window": wins[-1]})
+            self.schedule()
+            log(f"{u['id']} ({root}): app {appid} resumed - "
+                f"{'thawed' if not r.get('already') else 'awake'} in {thawed} ms, window {wins[-1] if wins else 'none yet'}")
+            return json.dumps({"running": True, "app": appid, "thawed": not r.get("already"), "thawMs": thawed,
+                               "window": wins[-1] if wins else None,
+                               "totalMs": round((time.monotonic() - t) * 1000, 2)})
+        return json.dumps({"running": False, "app": appid})
+
+    @dbus.service.method("dev.powos.Sleep.Gui", in_signature="s", out_signature="s")
+    def Sleep(self, what):
+        """Freeze an app now, without its idle time (`powos game <name> freeze`): a game's appid (the app that runs
+        it), a unit's id, a window class or a pid. Its focused windows are minimized first (a focused app is never
+        frozen); the never list and powos-sleepd's checks still apply."""
+        what = str(what).strip()
+        pid = None
+        for u in self.rules():
+            if what.isdigit() and game_launcher(u) and unit_game(u, what) or u["id"] == what \
+                    or what.lower() in u["classes"]:
+                pid = unit_root(u)
+                break
+        if pid is None and what.isdigit():
+            pid = next((p for p in self.app_pids() if int(what) == p or p in ancestors(int(what))), None)
+        if pid is None:
+            pid = next((p for p in self.app_pids() if self.cls(p).lower() == what.lower()), None)
+        if pid is None:
+            return json.dumps({"ok": False, "refused": f"{what}: not a running app of this session"})
+        if pid in self.frozen:
+            return json.dumps({"ok": True, "already": True, "pid": pid})
+        u = self.unit_of(pid)
+        if u and u["rule"].get("never") or common.is_never(self.cls(pid)):
+            return json.dumps({"ok": False, "refused": "never list"})
+        self.idle_since[pid] = time.time() - self.idle(pid)
+        mine = [w for w, v in self.wins.items() if v["pid"] == pid and not v["minimized"]]
+        if self.pid_active(pid) and mine:
+            self.kwin_run("minimize", "".join(MINIMIZE_JS % {"window": w} for w in mine))
+            GLib.timeout_add(700, self.sleep_now, pid)
+            return json.dumps({"ok": True, "pending": "minimized first", "pid": pid})
+        return json.dumps(self.sleep_now(pid) or {"ok": pid in self.frozen, "pid": pid,
+                                                  "refused": (self.refused.get(pid) or (0, None))[1]})
+
+    def sleep_now(self, pid):
+        if pid not in self.frozen and not self.pid_active(pid):
+            self.freeze(pid, 0.0)
+        self.schedule()
+        return False
+
+    def kwin_run(self, tag, js):
+        """A one-shot KWin script (loaded, started, unloaded 5 s later)."""
+        plugin = f"powos-sleep-{tag}-{os.getpid()}-{int(time.monotonic() * 1000)}"
+        path = f"{RUN}/{plugin}.js"
+        try:
+            with open(path, "w") as f:
+                f.write(js)
+            self.bus.call_blocking("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "loadScript", "ss",
+                                   (path, plugin))
+            self.bus.call_blocking("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "start", "", ())
+        except (OSError, dbus.DBusException) as e:
+            log(f"KWin script {tag}: {e}")
+
+        def done():
+            try:
+                self.bus.call_blocking("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "unloadScript", "s",
+                                       (plugin,))
+            except dbus.DBusException:
+                pass
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return False
+        GLib.timeout_add_seconds(5, done)
+
+    def woken(self, pids):
+        """powos-sleepd thawed these for someone else (`powos sleep wake`): awake here too, asleep again when idle."""
+        for pid in pids:
+            if int(pid) == self.home:
+                self.home = None
+                self.frozen.pop(int(pid), None)
+                continue
+            if int(pid) == self.desk:
+                self.desk = None
+                self.frozen.pop(int(pid), None)
+                self.desktop(self.screen.on)
+                continue
+            if self.frozen.pop(int(pid), None) is not None:
+                log(f"{self.cls(int(pid))} ({pid}): woken through powos-sleepd")
+                if not self.pid_active(int(pid)):
+                    self.idle_since[int(pid)] = time.time()
+        self.rebuild_monitor()
+        GLib.idle_add(lambda: self.schedule() and False)
+
+    def screen_changed(self, on):
+        """PowOS came on screen or went off it: the focused app gains or loses its focus with it."""
+        log(f"PowOS {'on' if on else 'off'} screen (consumers: {sorted(self.screen.surfaces) or '-'})")
+        now = time.time()
+        for pid in self.app_pids():
+            if self.pid_active(pid):
+                self.idle_since.pop(pid, None)
+                if pid in self.frozen:
+                    self.thaw(pid, "on screen, focused")
+            elif pid not in self.idle_since:
+                self.idle_since[pid] = now
+        self.update_active()
+        self.schedule()
+        self.desktop(on)
+
+    # the desktop shell off screen -------------------------------------------
+    def desktop(self, on):
+        """PowOS on screen: the desktop shell awake at once. Off: frozen after DESKTOP_IDLE (phone only)."""
+        if self.desk_timer:
+            GLib.source_remove(self.desk_timer)
+            self.desk_timer = None
+        if on or not self.screen.known:
+            if self.desk is not None:
+                self.thaw(self.desk, "PowOS on screen")
+            if self.home is not None:
+                self.thaw(self.home, "PowOS on screen")
+            return
+        if DESKTOP_IDLE != "off":
+            self.desk_timer = GLib.timeout_add(int(common.seconds(DESKTOP_IDLE) * 1000), self.desktop_sleep)
+            log(f"desktop shell: asleep in {DESKTOP_IDLE} unless PowOS comes back on screen")
+
+    def desktop_sleep(self):
+        """PowOS off screen for DESKTOP_IDLE: the desktop shell (plasmashell) and the desktop home (powos-shell, the web
+        shell's home under Plasma - its Chromium tree too) frozen, until PowOS is back or a drain is due."""
+        self.desk_timer = None
+        if self.screen.on:
+            return False
+        me = os.getuid()
+        for comm in ("plasmashell", "powos-shell"):
+            if (self.desk if comm == "plasmashell" else self.home) is not None:
+                continue
+            pid = next((int(p) for p in os.listdir("/proc") if p.isdigit() and (stat(p) or {}).get("comm") == comm
+                        and os.stat(f"/proc/{p}").st_uid == me), None)
+            if pid is None:
+                continue
+            r = self.sleepd.ask(f"gui-desktop-freeze {pid}")
+            if not r.get("ok"):
+                log(f"{comm} ({pid}): not frozen: {r.get('refused') or r.get('error')}")
+                continue
+            if comm == "plasmashell":
+                self.desk = pid
+            else:
+                self.home = pid
+            pids = set(r.get("pids") or [pid])
+            self.frozen[pid] = {"cls": comm, "names": self.bus_names(pids), "cpu": None, "pids": pids}
+            log(f"{comm} ({pid}): frozen in {r.get('ms')} ms, {len(pids)} process(es) (PowOS off screen), "
+                f"thaws on screen or on D-Bus to {', '.join(self.frozen[pid]['names']) or '-'}")
+        if self.desk is not None or self.home is not None:
+            self.rebuild_monitor()
+            # Awake for a moment every few minutes: they read what KWin queued for them (title changes, ...).
+            self.desk_timer = GLib.timeout_add_seconds(DESKTOP_AWAKE, self.desktop_drain)
+        return False
+
+    def desktop_drain(self):
+        self.desk_timer = None
+        if self.desk is not None:
+            self.thaw(self.desk, "draining its socket")
+        if self.home is not None:
+            self.thaw(self.home, "draining its socket")
+        if not self.screen.on:
+            self.desk_timer = GLib.timeout_add_seconds(DESKTOP_DRAIN, self.desktop_sleep)
+        return False
+
+    def update_active(self):
+        # Which app has focus, for powos-sleepd's own check (it never freezes that one); 0 = none of ours.
+        now_active = next((w["pid"] for w in self.wins.values() if w["active"]), 0) if self.screen.on else 0
+        if now_active != self.active:
+            self.active = now_active
+            self.sleepd.ask(f"gui-active {now_active}")
+
+    def forget(self, pid):
+        self.idle_since.pop(pid, None)
+        self.refused.pop(pid, None)
+        self.tracked.pop(pid, None)
+
+    def reset(self):
+        log(f"powos-sleepd reconnected: {len(self.frozen)} app(s) it had thawed, counting from now")
+        self.frozen.clear()
+        self.desk = None
+        self.home = None
+        self.rebuild_monitor()
+        self.desktop(self.screen.on)
+        now = time.time()
+        for pid in self.idle_since:
+            self.idle_since[pid] = now
+        self.active = None
+        self._last = None
+        self.publish_running()
+
+    def app_pids(self):
+        return {w["pid"] for w in self.wins.values()} | set(self.tracked)
+
+    def pid_active(self, pid):
+        return self.screen.on and any(w["pid"] == pid and w["active"] for w in self.wins.values())
+
+    def cls(self, pid):
+        return next((w["cls"] for w in self.wins.values() if w["pid"] == pid), self.tracked.get(pid, ""))
+
+    # deciding ---------------------------------------------------------------
+    def schedule(self):
+        if self.timer:
+            GLib.source_remove(self.timer)
+            self.timer = None
+        now, due = time.time(), []
+        for pid, t in self.idle_since.items():
+            if pid in self.frozen or pid in self.sampling:
+                continue
+            until = self.refused.get(pid, (0, ""))[0]
+            due.append(max(t + self.idle(pid), until))
+        if due:
+            self.timer = GLib.timeout_add(int(max(0.5, min(due) - now) * 1000), self.tick)
+        self.report()
+
+    def tick(self):
+        self.timer = None
+        now = time.time()
+        for pid, t in list(self.idle_since.items()):
+            if pid in self.frozen or pid in self.sampling or self.pid_active(pid):
+                continue
+            if now < max(t + self.idle(pid), self.refused.get(pid, (0, ""))[0]):
+                continue
+            self.consider(pid)
+        self.schedule()
+        return False
+
+    def refuse(self, pid, why, retry=None):
+        self.refused[pid] = (time.time() + (retry or self.idle(pid)), why)
+        log(f"{self.cls(pid)} ({pid}): not frozen: {why}")
+
+    def consider(self, pid):
+        cls = self.cls(pid)
+        pids = tree(pid)
+        if not pids:
+            return self.forget(pid)  # gone (a tracked app that exited)
+        u = self.unit_of(pid)
+        if pid in self.tracked and u and u["pidfile"] and rd(os.path.expanduser(u["pidfile"])).strip() != str(pid):
+            return self.forget(pid)  # not its root any more (it restarted; the pid may be another process's now)
+        busy = (u or {}).get("busy") or {}
+        if u and u["rule"].get("never"):
+            return self.refuse(pid, f"never (unit {u['id']})", 3600)
+        grace = common.seconds(busy["startGrace"]) if busy.get("startGrace") else 0
+        if grace and age(pid) < grace:
+            # Starting: updating itself, logging in, and doing what it was started for (Steam started by a game's
+            # launch hands the game over only once it's logged in - frozen before that, the launch waits).
+            return self.refuse(pid, f"started {age(pid):.0f}s ago", grace - age(pid) + 1)
+        names = [(stat(p) or {}).get("comm") for p in pids]
+        if cls.startswith("android-"):
+            # powos-android-tasks' stand-ins for Android apps: its watcher signals them when the app goes away, and
+            # a frozen stand-in would stay in the taskbar until focused.
+            return self.refuse(pid, "a stand-in for an Android app", 3600)
+        if common.is_never(cls, *names):
+            return self.refuse(pid, "never list", 3600)
+        # Games: a window whose process a unit's launcher started (Steam's reaper with SteamLaunch), and that unit's
+        # app itself while it runs one (its tree holds the game). With the unit's sleepBusy.games "pause" the game
+        # sleeps with the app - one freeze, the client and the game together (they talk over shared memory and
+        # IPC; one frozen without the other would time out) - once it's past the start grace (Proton's start).
+        # Otherwise games don't sleep.
+        game_pids = set()
+        for r in self.rules():
+            mark = (r.get("busy") or {}).get("cmdline")
+            if not mark:
+                continue
+            game = next((p for p in (pids if r is u else ancestors(pid)) if mark in cmdline(p)), None)
+            if game:
+                m = re.search(r"AppId=(\d+)", cmdline(game))
+                app = f" (app {m.group(1)})" if m else ""
+                if r is u and game_launcher(r):
+                    if grace and age(game) < grace:
+                        return self.refuse(pid, f"starting a game{app}, {age(game):.0f}s ago", grace - age(game) + 1)
+                    gp = set(tree(game))
+                    # A cold Proton start under FEX outlasts the grace (2-5 min): frozen before its first window,
+                    # the launch looked like it did nothing (2026-10-22). Not before it has one (up to GAME_WINDOW_S).
+                    if age(game) < GAME_WINDOW_S and not any(w["raw"] in gp for w in self.wins.values()):
+                        return self.refuse(pid, f"starting a game{app}: no window yet, {age(game):.0f}s", 30)
+                    game_pids |= gp
+                    continue
+                return self.refuse(pid, f"running a game{app}", 60)
+        job = fg_job(pids)
+        if job:
+            return self.refuse(pid, f"terminal running {job}", 120)
+        # A game holds its audio stream open the whole time it runs (music, silence): out of sight, it pauses.
+        if audio_pids() & (set(pids) - game_pids):
+            return self.refuse(pid, "playing or recording audio", 120)
+        disk = busy.get("io") == "disk"
+        before = (time.time(), sum((stat(p) or {"ticks": 0})["ticks"] for p in pids), io_bytes(pids, disk))
+        self.sampling.add(pid)
+        GLib.timeout_add_seconds(SAMPLE, self.sampled, pid, pids, before)
+
+    def sampled(self, pid, pids, before):
+        self.sampling.discard(pid)
+        if self.pid_active(pid) or pid not in self.idle_since:
+            return False
+        dt = time.time() - before[0]
+        cpu = 100.0 * (sum((stat(p) or {"ticks": 0})["ticks"] for p in pids) - before[1]) / CLK / dt
+        busy = (self.unit_of(pid) or {}).get("busy") or {}
+        io = (io_bytes(pids, busy.get("io") == "disk") - before[2]) / dt
+        if io > IO_MAX:
+            self.refuse(pid, f"moving data ({io / 1024:.0f} KB/s{' disk' if busy.get('io') == 'disk' else ''})",
+                        60 if busy else 120)
+        elif cpu > CPU_MAX and busy.get("cpu", True):
+            self.refuse(pid, f"busy ({cpu:.0f}% CPU)", 120)
+        else:
+            self.freeze(pid, cpu)
+        self.schedule()
+        return False
+
+    def freeze(self, pid, cpu):
+        cls = self.cls(pid)
+        r = self.sleepd.ask(f"gui-freeze {pid} {cls}")
+        if not r.get("ok"):
+            return self.refuse(pid, r.get("refused") or r.get("error") or "refused", 600)
+        self.refused.pop(pid, None)
+        self.frozen[pid] = {"cls": cls, "names": self.bus_names(set(r.get("pids") or [pid])), "cpu": round(cpu, 1),
+                            "pids": set(r.get("pids") or [pid])}
+        log(f"{cls} ({pid}): frozen in {r.get('ms')} ms (was {cpu:.1f}% CPU), "
+            f"thaws on focus or D-Bus to {', '.join(self.frozen[pid]['names']) or '-'}")
+        self.rebuild_monitor()
+        self.publish_running()
+
+    def thaw(self, pid, why):
+        if pid == self.desk:
+            self.desk = None
+        if pid == self.home:
+            self.home = None
+        f = self.frozen.pop(pid, None)
+        t = time.monotonic()
+        r = self.sleepd.ask(f"gui-thaw {pid} {why}")
+        if f:
+            log(f"{f['cls']} ({pid}): thawed in {r.get('ms')} ms, {(time.monotonic() - t) * 1000:.1f} ms with the "
+                f"request ({why})")
+            self.rebuild_monitor()
+            self.publish_running()
+        return r
+
+    # D-Bus to a frozen app thaws it -------------------------------------------
+    def bus_names(self, pids):
+        dbo = self.bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+        iface = dbus.Interface(dbo, "org.freedesktop.DBus")
+        uniques, names = set(), []
+        all_names = [str(n) for n in iface.ListNames()]
+        for n in all_names:
+            if n.startswith(":"):
+                try:
+                    if int(iface.GetConnectionUnixProcessID(n)) in pids:
+                        uniques.add(n)
+                except dbus.DBusException:
+                    pass
+        for n in all_names:
+            if not n.startswith(":"):
+                try:
+                    if str(iface.GetNameOwner(n)) in uniques:
+                        names.append(n)
+                except dbus.DBusException:
+                    pass
+        return sorted(uniques) + names
+
+    def rebuild_monitor(self):
+        if self.monitor is not None:
+            self.monitor.close()
+            self.monitor = None
+        names = {n: pid for pid, f in self.frozen.items() for n in f["names"]}
+        if not names:
+            return  # BecomeMonitor with no rules would watch everything
+        m = dbus.bus.BusConnection(os.environ["DBUS_SESSION_BUS_ADDRESS"])
+        m.call_blocking("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.Monitoring",
+                        "BecomeMonitor", "asu", ([f"destination='{n}'" for n in names], dbus.UInt32(0)))
+
+        def seen(_conn, msg):
+            pid = names.get(msg.get_destination())
+            if pid in self.frozen:
+                why = f"D-Bus {msg.get_member()} from {msg.get_sender()}{self.who(msg.get_sender())}"
+                GLib.idle_add(self.dbus_wake, pid, why)
+            return None
+
+        m.add_message_filter(seen)
+        self.monitor = m
+
+    def who(self, sender):
+        """A bus client's process, for the log (" (comm pid)"), or ""."""
+        try:
+            dbo = self.bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+            p = int(dbus.Interface(dbo, "org.freedesktop.DBus").GetConnectionUnixProcessID(sender))
+            st = stat(p) or {}
+            parent = (stat(st.get("ppid", 0)) or {}).get("comm", "?")
+            return f" ({st.get('comm', '?')} {p}, from {parent} {st.get('ppid', '?')}: {cmdline(st.get('ppid', 0))[:80]})"
+        except (dbus.DBusException, TypeError, ValueError):
+            return ""
+
+    def dbus_wake(self, pid, why):
+        if pid in self.frozen and pid == self.desk:
+            # The desktop shell: awake while it answers, asleep again a minute later if PowOS is still off screen.
+            self.thaw(pid, why)
+            if self.desk_timer:
+                GLib.source_remove(self.desk_timer)
+            self.desk_timer = GLib.timeout_add_seconds(GRACE, self.desktop_sleep)
+            return False
+        if pid in self.frozen:
+            self.thaw(pid, why)
+            self.idle_since[pid] = time.time() - self.idle(pid) + GRACE
+            self.schedule()
+        return False
+
+    # status -----------------------------------------------------------------
+    def report(self):
+        now, items = time.time(), []
+        for pid in sorted(self.app_pids()):
+            if pid in self.frozen:
+                continue
+            cls, idle = self.cls(pid), self.idle(pid)
+            if self.pid_active(pid):
+                st, why = "awake", "focused"
+            elif pid in self.refused and self.refused[pid][0] > now:
+                st, why = "exempt", self.refused[pid][1]
+            elif pid in self.idle_since:
+                st, why = "awake", (f"{'unfocused' if self.screen.on else 'PowOS off screen'}; sleeps in "
+                                    f"{common.fmt(max(0, self.idle_since[pid] + idle - now))}")
+            else:
+                st, why = "awake", ""
+            items.append({"id": f"gui:{pid}", "type": "gui", "name": cls, "state": st, "why": why,
+                          "rule": f"{common.fmt(idle)} pause"})
+        line = "gui-report " + json.dumps(items)
+        if line != getattr(self, "_last", None):
+            self._last = line
+            self.sleepd.ask(line)
+        self.publish_running()
+
+    def publish_running(self):
+        """The apps with a window (or a unit's app without one) and whether each is frozen, for the phone shell's
+        running dots: RUN/running/apps.json, written only when it changes - the app watches it (RunningApps.kt)."""
+        classes = {}
+        for pid, cls in [(w["pid"], w["cls"]) for w in self.wins.values()] + list(self.tracked.items()):
+            if cls and not cls.lower().startswith("android-") and classes.get(cls.lower()) != "running":
+                classes[cls.lower()] = "frozen" if pid in self.frozen else "running"
+        text = json.dumps({"classes": classes}, sort_keys=True)
+        if text == getattr(self, "_running", None) or not os.path.isdir(RUNNING_DIR):
+            return
+        self._running = text
+        try:
+            with open(f"{RUNNING_DIR}/.apps.json", "w") as f:
+                f.write(text)
+            os.replace(f"{RUNNING_DIR}/.apps.json", f"{RUNNING_DIR}/apps.json")
+        except OSError as e:
+            log(f"can't write {RUNNING_DIR}/apps.json: {e}")
+
+
+# One-shot KWin scripts (Gui.kwin_run): a game's window up (un-minimized and focused) on Resume; an app's windows
+# minimized before Sleep freezes it.
+RAISE_JS = """
+for (const w of workspace.windowList()) {
+    if (w.internalId.toString() === "%(window)s") {
+        w.minimized = false;
+        workspace.activeWindow = w;
+    }
+}
+"""
+MINIMIZE_JS = """
+for (const w of workspace.windowList()) {
+    if (w.internalId.toString() === "%(window)s") {
+        w.minimized = true;
+    }
+}
+"""
+
+
+def load_script(bus):
+    k = bus.get_object("org.kde.KWin", "/Scripting")
+    s = dbus.Interface(k, "org.kde.kwin.Scripting")
+    try:
+        if s.isScriptLoaded("powos-sleep"):
+            s.unloadScript("powos-sleep")
+    except dbus.DBusException:
+        pass
+    # loadScript is overloaded (s / ss): dbus-python's introspection picks the one-argument form, so the signature
+    # is given here.
+    sid = bus.call_blocking("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "loadScript", "ss",
+                            (SCRIPT, "powos-sleep"))
+    s.start()
+    return sid
+
+
+def main():
+    if "DBUS_SESSION_BUS_ADDRESS" not in os.environ and os.environ.get("XDG_RUNTIME_DIR"):
+        os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={os.environ['XDG_RUNTIME_DIR']}/bus"
+    if sys.argv[1:2] == ["wake"] and len(sys.argv) == 3:
+        # powos-sleep-gui wake <class|pid|unit>: what a launch path runs (or the same call with dbus-send)
+        try:
+            print(dbus.SessionBus().call_blocking(NAME, "/Gui", "dev.powos.Sleep.Gui", "Wake", "s", (sys.argv[2],),
+                                                  timeout=5))
+        except dbus.DBusException as e:
+            sys.exit(f"powos-sleep-gui: {e.get_dbus_name()} (not running? then nothing is frozen by it)")
+        return
+    if sys.argv[1:2] in (["resume"], ["sleep"]) and len(sys.argv) == 3:
+        # powos-sleep-gui resume <appid> | sleep <appid|unit|class|pid>: `powos game <name> thaw|freeze`
+        try:
+            print(dbus.SessionBus().call_blocking(NAME, "/Gui", "dev.powos.Sleep.Gui", sys.argv[1].capitalize(), "s",
+                                                  (sys.argv[2],), timeout=5))
+        except dbus.DBusException as e:
+            sys.exit(f"powos-sleep-gui: {e.get_dbus_name()} (not running?)")
+        return
+    if len(sys.argv) > 1:
+        print(__doc__.strip())
+        return
+    DBusGMainLoop(set_as_default=True)
+    bus = dbus.SessionBus()
+    name = dbus.service.BusName(NAME, bus, do_not_queue=True)  # noqa: F841 - held for the process's life
+    gui = Gui(bus)
+    gui.sleepd.ask("status")  # hello: our limits, and thaw-all if we go away
+    for _ in range(30):
+        try:
+            log(f"up: KWin script {load_script(bus)}, idle {common.fmt(IDLE)}; units "
+                f"{', '.join(u['id'] + ' ' + common.describe(u['rule']) for u in gui.rules()) or '-'}; PowOS "
+                f"{'on' if gui.screen.on else 'off'} screen" + ("" if gui.screen.known else " (no display daemon log)"))
+            break
+        except dbus.DBusException as e:
+            log(f"KWin not ready ({e.get_dbus_name()}); again in 2 s")
+            time.sleep(2)
+    loop = GLib.MainLoop()
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, 15, loop.quit)  # noqa (GLibUnix needs GLib >= 2.80 bindings)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, 2, loop.quit)
+    try:
+        loop.run()
+    finally:
+        for pid in list(gui.frozen):
+            gui.thaw(pid, "powos-sleep-gui stopping")
+        try:
+            dbus.Interface(bus.get_object("org.kde.KWin", "/Scripting"), "org.kde.kwin.Scripting").unloadScript(
+                "powos-sleep")
+        except dbus.DBusException:
+            pass
+        log("down")
+
+
+if __name__ == "__main__":
+    main()

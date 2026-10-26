@@ -1,0 +1,26 @@
+{
+  "id": "dev-root-shells",
+  "name": "Root shells (dev)",
+  "kind": "scratch",
+  "owner": "agent:*",
+  "host": "phone-android",
+  "purpose": "the root shells agents and the Mac's tools open over adb/su (scripts in /data/local/tmp, the rootsh channel): transient, gone with their session",
+  "processes": [
+    {
+      "match": "^(/system/bin/)?sh$",
+      "tree": true
+    },
+    {
+      "match": "^(/system/bin/)?sh -c ",
+      "tree": true
+    },
+    {
+      "match": "^-?bash( --noprofile --norc)?$",
+      "tree": true
+    },
+    {
+      "match": "com\\.topjohnwu\\.magisk|libbusybox\\.so"
+    }
+  ],
+  "unbounded": "interactive; a background job started from one and left running shows up in check (it leaves the tree)"
+}

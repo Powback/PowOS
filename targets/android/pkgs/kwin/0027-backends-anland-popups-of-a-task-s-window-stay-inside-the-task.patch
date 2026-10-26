@@ -1,0 +1,162 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] backends/anland: popups of a task's window stay inside the task
+
+A window shown as its own Android task (0013) draws only what lies inside the task: its client area at the task's
+size. Its popups - menus, combo boxes, tooltips (xdg_popup) - were placed by their positioner against the output's
+placement area, so a menu that ran past the window's edge was cut off by the task (Kate's menus in a floating window
+on the unfolded home).
+
+Workspace::setPopupAreaHandler(): the platform may give a parent window's popups a smaller area to be placed in;
+XdgPopupWindow::updateRelativePlacement() uses it instead of the output's area, so the positioner's own constraint
+adjustment (flip, slide, resize) keeps the popup inside it, as on a small screen. The anland backend gives the task's
+area (AnlandWindowTask::area) for a window shown in a task, its dialogs (drawn into the same task) and their popups;
+every other window - the desktop's, in the Plasma app - keeps the output's area, so KWin's own popups are unchanged.
+---
+
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -486,6 +486,18 @@ RectF AnlandWindowTask::viewport() const
+     return RectF(client.topLeft(), size);
+ }
+ 
++RectF AnlandWindowTask::area() const
++{
++    if (!m_window) {
++        return RectF();
++    }
++    const RectF client = m_window->clientGeometry();
++    if (fitsWindow() || taskSize().isEmpty()) {
++        return client;
++    }
++    return RectF(client.topLeft(), QSizeF(taskSize()) / scale());
++}
++
+ QSize AnlandWindowTask::taskSize() const
+ {
+     // Never past the buffers: what doesn't fit them can't be shown.
+@@ -991,6 +1003,18 @@ void AnlandWindowTasks::integrate()
+         }
+         return show(window);
+     });
++    // A popup (menu, combo box, tooltip) of a window shown in a task - or of its dialog, which the task draws too
++    // (attach) - is placed inside the task, which shows nothing beyond it: placed against the output, Kate's menus
++    // ran past the window and were cut off. The desktop's windows keep the output's area (their popups are KWin's own).
++    workspace()->setPopupAreaHandler([this](const Window *parent) -> std::optional<RectF> {
++        for (const Window *w = parent; w; w = w->transientFor()) {
++            if (AnlandWindowTask *task = taskFor(w)) {
++                const RectF area = task->area();
++                return area.isEmpty() ? std::nullopt : std::optional<RectF>(area);
++            }
++        }
++        return std::nullopt;
++    });
+     // An application going full screen (a game, Steam Big Picture, a video) gets its own task the same way, shown
+     // immersive; leaving full screen gives it back.
+     for (Window *window : workspace()->windows()) {
+@@ -1225,7 +1249,7 @@ bool AnlandWindowTasks::exportable(Window *window) const
+         && window->desktopFileName() != QLatin1String("org.kde.plasmashell");
+ }
+ 
+-AnlandWindowTask *AnlandWindowTasks::taskFor(Window *window) const
++AnlandWindowTask *AnlandWindowTasks::taskFor(const Window *window) const
+ {
+     for (AnlandWindowTask *task : m_tasks) {
+         if (window && task->window() == window) {
+
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -94,6 +94,11 @@ public:
+      * or a GTK header bar - so the app adds none: two title bars otherwise). Only when it changed, unless [again].
+      */
+     void tellDecoration(bool again);
++    /**
++     * What the task shows of the window's surroundings, in KWin's coordinates: its client area at the task's size (a
++     * floating task crops the buffers to that), the whole window when it is scaled to fit. Popups are kept inside it.
++     */
++    RectF area() const;
+ 
+ private:
+     enum class State {
+@@ -222,7 +227,7 @@ private:
+     /** Once the workspace is there: maximize (the user's - title bar, menu, shortcut) = the window's own task. */
+     void integrate();
+     bool exportable(Window *window) const;
+-    AnlandWindowTask *taskFor(Window *window) const;
++    AnlandWindowTask *taskFor(const Window *window) const;
+     /** An Android app's own window (powos-android-app): back to Android, the app itself in front. */
+     bool handBackAndroidApp(Window *window);
+     void watchFullScreen(Window *window);
+
+--- a/src/useractions.cpp
++++ b/src/useractions.cpp
+@@ -1069,6 +1069,19 @@ void Workspace::setWindowOperationHandler(std::function<bool(Window *, Options::
+     m_windowOperationHandler = std::move(handler);
+ }
+ 
++void Workspace::setPopupAreaHandler(std::function<std::optional<RectF>(const Window *)> handler)
++{
++    m_popupAreaHandler = std::move(handler);
++}
++
++std::optional<RectF> Workspace::popupArea(const Window *parent) const
++{
++    if (!m_popupAreaHandler || !parent) {
++        return std::nullopt;
++    }
++    return m_popupAreaHandler(parent);
++}
++
+ void Workspace::performWindowOperation(Window *window, Options::WindowOperation op)
+ {
+     if (!window) {
+
+--- a/src/workspace.h
++++ b/src/workspace.h
+@@ -28,6 +28,7 @@
+ // std
+ #include <functional>
+ #include <memory>
++#include <optional>
+ 
+ class KConfig;
+ class KConfigGroup;
+@@ -455,6 +456,16 @@ public:
+      */
+     void setWindowOperationHandler(std::function<bool(KWin::Window *, Options::WindowOperation)> handler);
+ 
++    /**
++     * PowOS: the platform may give a window's popups (xdg_popup: menus, combo boxes, tooltips) a smaller area than the
++     * output's to be placed in - flipped and slid inside it as the positioner allows, as on a small screen. On a phone
++     * (backends/anland) a window shown as its own Android task draws only what lies inside that task, so its popups are
++     * kept inside it. No area (std::nullopt): the usual one (the output's placement area).
++     */
++    void setPopupAreaHandler(std::function<std::optional<RectF>(const KWin::Window *)> handler);
++    /** The area [parent]'s popups are placed in, if the platform gives one (setPopupAreaHandler). */
++    std::optional<RectF> popupArea(const KWin::Window *parent) const;
++
+ public Q_SLOTS:
+     void performWindowOperation(KWin::Window *window, Options::WindowOperation op);
+     // Keybindings
+@@ -663,6 +674,7 @@ private:
+     QList<LogicalOutput *> m_outputOrder;
+ 
+     std::function<bool(Window *, Options::WindowOperation)> m_windowOperationHandler;
++    std::function<std::optional<RectF>(const Window *)> m_popupAreaHandler;
+     Window *m_activeWindow;
+     Window *m_moveResizeWindow;
+ 
+
+--- a/src/xdgshellwindow.cpp
++++ b/src/xdgshellwindow.cpp
+@@ -1924,7 +1924,10 @@ void XdgPopupWindow::handleRepositionRequested(quint32 token)
+ void XdgPopupWindow::updateRelativePlacement()
+ {
+     const QPointF parentPosition = transientFor()->nextFramePosToClientPos(transientFor()->pos());
+-    const RectF bounds = workspace()->clientArea(transientFor()->isFullScreen() ? FullScreenArea : PlacementArea, transientFor()).translated(-parentPosition);
++    // PowOS: a parent shown in an Android task (backends/anland) keeps its popups inside that task - outside it they
++    // aren't drawn (Kate's menus were cut off at the window's edge); else the output's area, as upstream.
++    const std::optional<RectF> area = workspace()->popupArea(transientFor());
++    const RectF bounds = (area ? *area : workspace()->clientArea(transientFor()->isFullScreen() ? FullScreenArea : PlacementArea, transientFor())).translated(-parentPosition);
+     const XdgPositioner positioner = m_shellSurface->positioner();
+ 
+     if (m_plasmaShellSurface && m_plasmaShellSurface->isPositionSet()) {

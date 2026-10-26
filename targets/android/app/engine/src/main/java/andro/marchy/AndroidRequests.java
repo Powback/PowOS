@@ -11,17 +11,36 @@ import java.nio.file.Files;
 
 /**
  * Requests from the Linux session for things only Android can do, written to run/android-request by the
- * android-request helper (atomically, by rename): "wifi-panel", "open <package>" (full screen), "split <package>" (beside Andromarchy), "float <package>" (floating window).
+ * android-request helper (atomically, by rename): "wifi-panel", "open <package>" (full screen; a floating window on the unfolded home, [openOptions]), "split <package>" (beside Andromarchy), "float <package>" (floating window).
  */
-final class AndroidRequests extends FileObserver {
+public final class AndroidRequests implements DirWatch.Listener {
     private static final String TAG = "AndroidRequests";
+
+    /**
+     * Launch options for "open <package>": the app module's (dev.omalauncher.system.AppWindows, set by App) - a
+     * floating window on the unfolded home like every app opened there, null (full screen) folded. The engine can't
+     * see the app module, so it hands it in. A PowOS window's own task (WindowTasks "open") takes the same.
+     */
+    public static volatile java.util.function.Function<Context, android.os.Bundle> openOptions = null;
     private final Context ctx;
     private final File file;
+    private DirWatch.Handle watch;
 
     AndroidRequests(Context ctx, File runDir) {
-        super(runDir, MOVED_TO | CLOSE_WRITE);
         this.ctx = ctx;
         this.file = new File(runDir, "android-request");
+    }
+
+    /** The run dir is watched by others too (focused-window, ...): through DirWatch, never a FileObserver of its own. */
+    void startWatching() {
+        if (watch == null)
+            watch = DirWatch.watch(file.getParentFile(), FileObserver.MOVED_TO | FileObserver.CLOSE_WRITE, this);
+    }
+
+    void stopWatching() {
+        if (watch != null)
+            watch.stop();
+        watch = null;
     }
 
     /**
@@ -115,7 +134,8 @@ final class AndroidRequests extends FileObserver {
             Restarter.power(ctx, req[1].trim());
             return;
         }
-        android.os.Bundle options = null;
+        java.util.function.Function<Context, android.os.Bundle> open = openOptions;
+        android.os.Bundle options = req[0].equals("open") && open != null ? open.apply(ctx) : null;
         if (req[0].equals("float") && req.length == 2) {
             intent = ctx.getPackageManager().getLaunchIntentForPackage(req[1].trim());
             options = floating().toBundle();

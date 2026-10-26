@@ -1,0 +1,11 @@
+{
+    "KPlugin": {
+        "Id": "powos-sleep",
+        "Name": "PowOS sleep",
+        "Description": "Tells powos-sleep-gui which windows have focus and which are minimized, so idle apps can be frozen and thawed on focus",
+        "Version": "1.0",
+        "License": "MIT"
+    },
+    "X-Plasma-API": "javascript",
+    "KPackageStructure": "KWin/Script"
+}

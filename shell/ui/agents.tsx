@@ -2,7 +2,8 @@
  * The Agents view (docs/AGENTS-VIEW-DESIGN.md §1): which agents run - here and on the Mac - what each one is on, its
  * subagents, tasks and tools, and who handed what to whom.
  *
- * - AgentsPanel: home's Agents widget (a "panel" home item): a line per session agent, needs-you first; a tap opens
+ * - AgentsPanel: home's Agents widget (a "panel" home item): open asks allowed/denied in place, a line per session agent
+ *   (this phone's working ones stoppable in place), needs-you first; a tap on a line opens
  *   the screen on it. 4×1 shows the count line only.
  * - AgentsScreen: the tree (manager → its agents → their subagents), the picked agent's step, tasks, recent tools and
  *   last report, and the comms feed. Opened from the widget, PowOS AI's page and the agents' notification.
@@ -43,24 +44,130 @@ const doing = (a: Agent) =>
         ? "done"
         : a.title || a.step || (a.state === "idle" ? "idle" : a.cwd);
 
-function Line({ id }: { id: string }) {
+/** A button on the widget: its tap is its own (not the tile's, not the line's). */
+const tapOnly = (run: () => void) => ({
+  onPointerUp: takeTap,
+  onClick: (e: Event) => {
+    e.stopPropagation();
+    run();
+  },
+});
+
+/** A card's inner box and type size, from the panel's measure: what its lines are fitted to. */
+interface Box {
+  w: number;
+  h: number;
+  font: number;
+}
+
+/**
+ * How many lines [text] takes at [cols] characters a line: the shell's font is monospace, so word wrapping is
+ * counting (a word longer than a line breaks anywhere, as .ag-c2's overflow-wrap does).
+ */
+function wrapped(text: string, cols: number) {
+  if (cols < 1) return 99;
+  let lines = 1;
+  let used = 0;
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const need = used ? used + 1 + word.length : word.length;
+    if (need <= cols) used = need;
+    else if (word.length <= cols) (lines++, (used = word.length));
+    else {
+      lines += used ? 1 : 0;
+      lines += Math.ceil(word.length / cols) - 1;
+      used = word.length % cols || cols;
+    }
+  }
+  return lines;
+}
+
+/** The lines a card shows in [box]: its first always; what it's on and its step/report while they fit unwrapped-over. */
+function fitLines(box: Box, second: string, third: string) {
+  const f = box.font;
+  const gap = 0.15 * f;
+  const per = (size: number) => Math.floor(box.w / (0.62 * size));
+  const one = 1.35 * f;
+  const two = one + gap + wrapped(second, per(f)) * 1.25 * f;
+  const three = two + gap + wrapped(third, per(0.85 * f)) * 1.25 * 0.85 * f;
+  return third && three <= box.h ? 3 : second && two <= box.h ? 2 : 1;
+}
+
+/**
+ * An agent as a card on the widget: its mark, role and when it last did something; then what it's on and (a tall
+ * card) its step or last report - as many of those lines as fit its box, never cut. A tap opens the screen on it;
+ * this phone's working agent can be stopped in place (a second tap, so a stray one doesn't).
+ */
+function Card({ id, box }: { id: string; box: Box }) {
   const a = agent(id)?.value;
+  const [sure, setSure] = useState(false);
+  useEffect(() => setSure(false), [a?.state]);
   if (!a) return null;
+  const stoppable = a.host === "phone" && a.state === "working" && a.pid > 1;
+  // A finished one says what it was on (its mark is the ✓), not "done".
+  const on = a.state === "gone" ? a.title || "done" : doing(a);
+  const what = on + (a.subs > 0 ? ` · ${a.subs} sub` : "");
+  const more = (a.state === "working" && a.step ? a.step : a.report) || "";
+  const lines = fitLines(box, what, more);
+  // When it was: only where it doesn't crowd the role (mark, role, a space, the age, and the stop button's room).
+  const ago = since(a.last);
+  const roomy = Math.floor(box.w / (0.62 * box.font)) >= a.role.length + ago.length + (stoppable ? 9 : 3);
   return (
-    <button type="button" class={`ag-line ${a.state}`} onPointerUp={takeTap} onClick={() => openAgents(id)}>
-      <span class="ag-mark">{mark(a)}</span>
-      <span class="ag-who">{a.role}</span>
-      <span class="ag-host muted">· {a.host} ·</span>
-      <span class="ag-what">
-        {doing(a)}
-        {a.subs > 0 && <span class="muted"> ({a.subs} sub)</span>}
-      </span>
-      <span class="ag-ago muted">{since(a.last)}</span>
-    </button>
+    <div role="button" tabIndex={0} class={`ag-card ${a.state}`} onPointerUp={takeTap} onClick={() => openAgents(id)}>
+      <div class="ag-c1">
+        <span class="ag-mark">{mark(a)}</span>
+        <span class="ag-who">{a.role}</span>
+        {roomy && <span class="ag-ago muted">{ago}</span>}
+        {stoppable && (
+          <button type="button" class={`ag-act ${sure ? "danger" : ""}`} {...tapOnly(() => (sure ? (powos.agents.interrupt(a.id), setSure(false)) : setSure(true)))}>
+            {sure ? "stop?" : "stop"}
+          </button>
+        )}
+      </div>
+      {lines > 1 && (
+        <div class="ag-c2">
+          {on}
+          {a.subs > 0 && <span class="muted"> · {a.subs} sub</span>}
+        </div>
+      )}
+      {lines > 2 && <div class="ag-c3 muted">{more}</div>}
+    </div>
   );
 }
 
-/** "3 running · 1 needs you". */
+const HINT = "Ask PowOS AI for one, or start claude in a terminal";
+
+/** Nobody at all: one card for the whole list, its hint while it fits. */
+function Idle({ box }: { box: Box }) {
+  const hint = fitLines(box, HINT, "") > 1;
+  // A tall card: a big mark over the words, centred (the box less the mark's 2.8 em still holds them).
+  const big = hint && fitLines({ ...box, h: box.h - 2.8 * box.font }, HINT, "") > 1;
+  return (
+    <div role="button" tabIndex={0} class={`ag-card ag-idle ${big ? "big" : ""}`} onPointerUp={takeTap} onClick={() => openAgents()}>
+      {big && <div class="ag-big">○</div>}
+      <div class="ag-c1">
+        {!big && <span class="ag-mark">○</span>}
+        <span class="ag-who">No agents</span>
+      </div>
+      {hint && <div class="ag-c2 muted">{HINT}</div>}
+    </div>
+  );
+}
+
+/**
+ * Nobody at all, plainly: one muted line, no card - a small tile (3x2 and less: the card was most of it, a box in a
+ * box) and the desktop's home (the plate on a plate read as a nested grey box). The hint while it fits on the line.
+ */
+function IdleLine({ w, font }: { w: number; font: number }) {
+  // Monospace-safe: 0.62 em a character (the phone's font ~0.575).
+  const text = (HINT.length + 2) * 0.62 * font <= w ? HINT : "No agents";
+  return (
+    <div role="button" tabIndex={0} class="ag-idle-line muted" onPointerUp={takeTap} onClick={() => openAgents()}>
+      {text}
+    </div>
+  );
+}
+
+/** "3 running · 1 needs you" / "2 idle" / "none running". */
 function count(ids: string[]) {
   const states = ids.map((id) => agent(id)?.value.state);
   const working = states.filter((s) => s === "working").length;
@@ -71,24 +178,89 @@ function count(ids: string[]) {
   return parts.join(" · ");
 }
 
-/** Home's Agents widget (grid.tsx draws it for a "panel" item named "agents"). */
+/**
+ * Home's Agents widget (grid.tsx draws it for a "panel" item named "agents"), on the phone's home and the desktop's.
+ * It fills its tile at every size (shell/dev/preview.sh checks it): the agents as cards in a grid, the columns from the
+ * measured width (~9 em a card), the rows from the height (~2.6 em at least) sharing it - whole cards only, the rest
+ * counted in the head. Running ones first, then the sessions that finished lately (the spool keeps them a while), so
+ * an idle home still shows what was done; nothing at all is one idle card. A one-row tile puts the head beside them.
+ */
 export function AgentsPanel({ item }: { item: HomeItem }) {
   useAgents();
+  const [tw, th] = item.size ?? item.minSize ?? [4, 2];
+  const plain = document.documentElement.dataset.mode === "desktop" || (tw <= 3 && th <= 2);
   const ids = sessions.value;
-  const rows = item.cell && item.cell.h <= 1 ? 0 : 4;
-  const shown = ids.slice(0, rows);
+  const done = agentIds.value
+    .map((id) => agent(id)?.value)
+    .filter((a): a is Agent => !!a && a.state === "gone" && !isSub(a))
+    .sort((x, y) => y.last - x.last)
+    .map((a) => a.id);
+  const all = [...ids, ...done];
+  const list = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 0, h: 0, font: 14 });
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const measure = () => {
+      const next = { w: el.clientWidth, h: el.clientHeight, font: parseFloat(getComputedStyle(el).fontSize) || 14 };
+      setSize((s) => (s.w === next.w && s.h === next.h && s.font === next.font ? s : next));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const { w, h, font } = size;
+  const gap = font * 0.4;
+  const cols = Math.max(1, Math.min(3, Math.floor((w + gap) / (font * 9 + gap))));
+  const rows = Math.max(1, Math.floor((h + gap) / (font * 2.6 + gap)));
+  const shown = w ? all.slice(0, cols * rows) : [];
+  const c = Math.max(1, Math.min(cols, shown.length));
+  const r = Math.max(1, Math.ceil(shown.length / c));
+  // A card's inner box (less its padding: .ag-card's 0.35em 0.6em).
+  const box: Box = { w: (w - gap * (c - 1)) / c - 1.2 * font, h: (h - gap * (r - 1)) / r - 0.7 * font, font };
+  const hidden = w ? all.length - shown.length : 0;
   return (
     <div class="tile ag-panel">
-      <div class="ag-head">
-        <span>Agents</span>
-        <span class="muted">{count(ids)}</span>
+      <div class="ag-in">
+        <div class="ag-head">
+          <span>Agents</span>
+          <span class="muted">
+            {count(ids)}
+            {hidden > 0 && ` · +${hidden}`}
+          </span>
+        </div>
+        <InlineAsks max={1} />
+        <div ref={list} class="ag-list" style={{ gridTemplateColumns: `repeat(${c}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${r}, minmax(0, 1fr))` }}>
+          {shown.map((id) => (
+            <Card key={id} id={id} box={box} />
+          ))}
+          {w > 0 && !all.length && (plain ? <IdleLine w={w} font={font} /> : <Idle box={box} />)}
+        </div>
       </div>
-      {shown.map((id) => (
-        <Line key={id} id={id} />
-      ))}
-      {rows > 0 && ids.length > rows && <div class="ag-more muted">+{ids.length - rows} more</div>}
-      {rows > 0 && !ids.length && <div class="ag-more muted">no agent reports yet</div>}
     </div>
+  );
+}
+
+/** The widget's open asks, decided in place: allow or deny (telling it what to do instead is on the screen). */
+function InlineAsks({ max }: { max: number }) {
+  const open = asks.value.filter((x) => x.answer == null).slice(0, max);
+  return (
+    <>
+      {open.map((x) => (
+        <div key={x.id} class="ag-ask-line" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <b>{agent(x.agent)?.value.role ?? "an agent"}</b> wants {x.tool}: <span class="muted">{x.summary}</span>
+          </span>
+          <button type="button" class="ag-act" {...tapOnly(() => powos.agents.answer(x.id, "allow"))}>
+            allow
+          </button>
+          <button type="button" class="ag-act danger" {...tapOnly(() => powos.agents.answer(x.id, "deny"))}>
+            deny
+          </button>
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -276,7 +448,9 @@ function Asks() {
 
 const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
 
+/** The comms feed: a line each (its body's start); a tap opens the whole body there, every line of it, and closes it. */
 function Comms() {
+  const [opened, setOpened] = useState<string | null>(null);
   const list = [...messages.value].reverse();
   if (!list.length) return null;
   return (
@@ -284,7 +458,14 @@ function Comms() {
       <h3 class="ai-heading muted">comms</h3>
       <div class="ag-comms tile">
         {list.map((m) => (
-          <div key={m.id} class="ag-msg">
+          <div
+            key={m.id}
+            class={`ag-msg ${opened === m.id ? "open" : ""}`}
+            role="button"
+            tabIndex={0}
+            aria-expanded={opened === m.id}
+            onClick={() => setOpened(opened === m.id ? null : m.id)}
+          >
             <span class="muted">{clock(m.ts)}</span> {m.from} → {m.to}
             {m.kind !== "message" && <span class="muted"> {m.kind}</span>} <span class="ag-body">{m.body}</span>
           </div>
@@ -308,7 +489,7 @@ function Screen({ picked }: { picked: string | null }) {
   const scroller = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => scroller.current?.scrollTo(0, 0), []);
   return (
-    <div class="ag-screen" {...own}>
+    <div class="ag-screen tile sheet" {...own}>
       <header class="ag-top">
         <button type="button" class="session-back" onClick={closeAgents}>
           ‹

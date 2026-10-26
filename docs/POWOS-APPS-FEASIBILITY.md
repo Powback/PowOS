@@ -590,7 +590,7 @@ manifest says *what* an app needs; a setting decides *how* it runs. `lib/apps/po
 |---|---|---|---|
 | `native` | a plain process under the supervisor (Tier 0 apps: no process at all) | its user; rlimits, nice, ionice | ✅ |
 | `sandbox` | the *same binary* under bubblewrap: `--unshare-user --unshare-pid --unshare-uts --unshare-cgroup-try` (never `--unshare-ipc`/`--unshare-all`: no SysV IPC in Android's kernel), `--ro-bind / /`, private `/tmp` `/run`, `/home` and `/var/lib/powos` hidden, only the data dir (+ `needs.write`) writable, `--unshare-net` when `needs.network` is `"none"`, a seccomp denylist (mount/namespaces/BPF/ptrace/keys/kexec/modules/new mount API; `clone` with namespace flags; `clone3` → ENOSYS) and Landlock where the kernel has it | ✅ (no Landlock: `CONFIG_SECURITY_LANDLOCK` is off in this kernel - a kernel item) |
-| `container` | podman, for apps that need a foreign userland | full | **not ready yet**: refused (exit 78) until `/dev/fuse` and cgroup v2 land (§2) |
+| `container` | podman through `powos-container` (PHONE-KERNEL-CONTAINERS §12): `backend.container.image`, else PowOS's own `/` read-only - the same binary | full; the budget as hard limits (memMB/cpuPct/pids) in Android's v1 memcg/cpuctl + v2 pids | ✅ since 2026-10-20 (hybrid cgroups; host or no network) |
 
 - **Settings.** `powos config app-runtime <mode>` is the default, `powos app runtime <id> <mode>` an app's override,
   both in `/var/lib/powos/runtime/config.json` (the user's, no sudo). The supervisor restarts what a change affects
@@ -715,7 +715,7 @@ and the kernel deferred):
 | SpacetimeDB 2.12.0, official aarch64 binaries | `targets/android/pkgs/spacetimedb-bin` → `/usr/lib/spacetimedb/2.12.0/`, `spacetime` on PATH; in the image through `out/pkgs` (`install-powos-android.sh` installs every package there), on a running phone through `rooted.sh deploy` | ✅ |
 | System tier | `powos-start.sh` → `powos-supervisor` in PowOS's own mount namespace, once per boot; survives desktop restarts | ✅ |
 | Port lock | iptables chain `powos-local`: `127.0.0.1:3410` for the app's uid (looked up in `packages.list` each start) and root, `tcp-reset` for the rest | ✅ uid 2000 (shell) and 10200 (another app) refused; root and 10359 pass |
-| Runtime switch | `powos-runtime`, `powos config app-runtime`, `powos app runtime` | ✅ native, sandbox; container stubbed |
+| Runtime switch | `powos-runtime`, `powos config app-runtime`, `powos app runtime` | ✅ native, sandbox, container (2026-10-20: PHONE-KERNEL-CONTAINERS §12) |
 | Registry | `apps/registry` (Rust) → database `powos-registry`, `install(manifest)`/`remove(id)`, owner-only | ✅ |
 | Tier 0 app | `apps/counter` (Rust module `powos-counter`, island `widgets/count.js`, `powos-app.json`) | ✅ installed via `powos app install` |
 | Shell | `shell/apps/stdb.ts` (one socket per database for the page, 5 s grace, closed while hidden), `shell/apps/registry.ts`, `shell/ui/island.tsx`, vendored SDK `vendor/spacetimedb.js` (119 KB) | see below |
@@ -727,7 +727,7 @@ and the kernel deferred):
 | SpacetimeDB start → `/v1/ping` | 128 ms | 130-150 ms |
 | SpacetimeDB idle, 0 databases loaded | 50.8 MB RSS, 27 threads, 1.4 % of a core, ~144 wakeups/s | 137 MB, 0.3-0.7 %, ~170/s |
 | … 2 Rust databases loaded (registry + counter) | 74-78 MB RSS, 31 threads, 3.8-4.4 % of a core, ~435 wakeups/s | — |
-| Per loaded Rust database | ~13 MB, **~145 wakeups/s**, ~1.4 % of a core | ~5.5 MB, ~11/s |
+| Per loaded Rust database | ~13 MB, **~145 wakeups/s**, ~1.4 % of a core (official binary; patched: ~0-2/s, below) | ~5.5 MB, ~11/s |
 | `TOKIO_WORKER_THREADS=2` | 25 threads, wakeups and CPU unchanged: the cost is per database, not per worker | — |
 | Start `true`: plain exec / `powos-runtime` native / sandbox / podman (vfs store) | 3-6 ms / 70-87 ms / 79-131 ms / 315-367 ms | podman 310-460 ms |
 | Wrapper cost, sandbox | 2 bwrap processes, 0.96 MB + 0.12 MB RSS, 0 wakeups idle | conmon 2.3 MB |
@@ -737,11 +737,35 @@ and the kernel deferred):
 **What follows:**
 - `powos-runtime`'s ~70 ms is Python start-up, paid once per service start, not per request. Sandbox adds ~10-40 ms
   and ~1 MB; podman adds ~250 ms, a storage driver and (on the phone) blocks on `/dev/fuse`.
-- **Idle wakeups per database are ~13× the Mac's**, so idle unload is not optional on the phone: the supervisor's
-  policy (no client for `idle.quietSec` = 300 s and RSS above `idle.unloadAboveMB` - 60 MB on the phone, 180 on a Mac, per device since the base differs - → restart, which unloads
-  everything) brings an untouched server back to its ~144/s base. Next: ask upstream for idle-database eviction, or
-  profile the per-database timers (the tokio workers wake ~100×/s each with 2 databases). Battery cost: measure over a
-  night with `dumpsys batterystats` before the service is always-on by default.
+- **The idle wakeups were SpacetimeDB's own timers, and are fixed** (root cause found with simpleperf call graphs of
+  tokio's eventfd wakes, symbolized against the binary, and an ftrace of `epoll_pwait` timeouts):
+  1. `spacetimedb_engine::spawn_tx_metrics_recorder`: one task **per database** sleeping 5 ms and polling its queue
+     forever, transactions or not (~145 wakeups/s per loaded database);
+  2. wasmtime's global 10 ms epoch ticker, which only serves to log calls running over a second (100/s, always);
+  3. the control database (sled) fsyncing every 50 ms (20/s, always).
+
+  Not the tokio worker count (`TOKIO_WORKER_THREADS` changed nothing), WebSocket pings or disk I/O. Three small
+  commits on the v2.12.0 source (the local fork `~/Projects/SpacetimeDB`, branch `powos/v2.12`, which
+  `targets/android/pkgs/spacetimedb` builds from by pinned hash and SpaceTimeAI's hub image too: the recorder parks while idle and keeps its 5 ms
+  batching under load; the epoch ticks only while a WASM call runs; the control db fsyncs once a second), same
+  version, the official CLI. Upstream candidates.
+
+  | Live server on the phone | Official 2.12.0 | Patched |
+  |---|---|---|
+  | 4 clients, 2-3 databases loaded | 556-586 wakeups/s, 3.7-4.0 % of a core | 10-15 wakeups/s, ~0.1 % |
+  | No clients, no databases | 161 wakeups/s, 1.45 % | 9 wakeups/s, 0 % |
+  | Per loaded database | ~145 wakeups/s | ~0-2 wakeups/s |
+
+  What remains idle (~9-15 wakeups/s): sled's 7 waiting pool threads (`sled-io-*`, a 1 s wait each, fixed in sled
+  0.34 - not worth vendoring a dependency for), its flusher (1/s), tokio ~1-5/s. Threads: tokio's and rayon's pools
+  default to one per core; on the phone the manifest's budget env sets `TOKIO_WORKER_THREADS=3`,
+  `RAYON_NUM_THREADS=2` (both read by the libraries themselves, since core pinning is off below 10 cores): 30 -> 17
+  threads, same wakeups.
+
+  Idle unload stays as a memory policy (RSS), no longer as the battery fix.
+- **Home itself, idle** (screen on, user away > 120 s): app 13.1 % of a core + WebView renderer 7.1 %, almost all from
+  one endless CSS pulse on an app icon that never loads (a Linux app without one); capped (`shell.css`, fc3f9fc):
+  app 2.9 %, renderer 1.2 %.
 
 **Next steps (exact):**
 1. **Islands on home** - wire `app:<id>/<widget>` home items into the `panel` kind (`ShellPanels.kt`), the grid

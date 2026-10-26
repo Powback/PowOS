@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""powos-apps-watch: PowOS's app list for Android kept current from KService's own change notice (rooted mode).
+
+Started with the desktop (/etc/xdg/autostart/powos-apps-watch.desktop). kded6 rebuilds the KSycoca database (KService's
+index of the .desktop entries) when an application dir changes - a package, a Flatpak, a user's own entry. KF6 no
+longer broadcasts org.kde.KSycoca.notifyDatabaseChanged on D-Bus (KService 6.31: no emitter left; kbuildsycoca6 sends
+nothing on the bus, measured 2026-10-22); its clients watch the database file instead. So does this: on a new
+~/.cache/ksycoca6_* it reruns powos-apps-export, which renames the list into the PowOS app's run dir, where the
+app's FileObserver reloads its drawer.
+
+Nothing polls: one inotify watch on the cache dir, a blocking read (zero CPU at rest). After an event it waits
+SETTLE_S for the rest of a rebuild's events, then exports once. One export at start too.
+"""
+import ctypes
+import os
+import select
+import struct
+import subprocess
+
+CACHE = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+PREFIX = b"ksycoca6"
+IN_CLOSE_WRITE, IN_MOVED_TO = 0x08, 0x80
+SETTLE_S = 1.0
+EVENT = struct.Struct("iIII")
+
+
+def export():
+    subprocess.run(["powos-apps-export"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def names(buf):
+    off = 0
+    while off + EVENT.size <= len(buf):
+        _wd, _mask, _cookie, size = EVENT.unpack_from(buf, off)
+        yield buf[off + EVENT.size: off + EVENT.size + size].rstrip(b"\0")
+        off += EVENT.size + size
+
+
+def main():
+    libc = ctypes.CDLL(None, use_errno=True)
+    fd = libc.inotify_init1(os.O_CLOEXEC)
+    os.makedirs(CACHE, exist_ok=True)
+    if fd < 0 or libc.inotify_add_watch(fd, CACHE.encode(), IN_CLOSE_WRITE | IN_MOVED_TO) < 0:
+        raise SystemExit(f"powos-apps-watch: no inotify on {CACHE}: {os.strerror(ctypes.get_errno())}")
+    export()
+    while True:
+        if not any(n.startswith(PREFIX) for n in names(os.read(fd, 65536))):
+            continue
+        while select.select([fd], [], [], SETTLE_S)[0]:
+            os.read(fd, 65536)
+        export()
+
+
+if __name__ == "__main__":
+    main()

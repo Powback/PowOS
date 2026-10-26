@@ -58,6 +58,25 @@ Control messages are one line of UTF-8 each, fields separated by tabs: `open <id
 `open` may end in `fullscreen`; `focus 0` is the desktop's task coming to the front (a window shown as its own task
 then gives up KWin's focus, so the taskbar activates it instead of minimizing it).
 
+Sessions (kwin 0023): window ids restart at 1 with every KWin, while Android keeps the old window tasks through a
+session restart. On connecting, and on the app's `hello 1` (its channel came up after KWin's, so the daemon dropped
+what KWin said), KWin sends `caps <words>` and `session <uuid> <id,id,...>`: a uuid made once per KWin process and
+the ids of the tasks it has. A task's data is `powos-window://<id>?session=<uuid>` (a new KWin's window 1 is a new
+document, not the old one's); WindowTasks finishes every window task - live activity or a Recents entry without one -
+that isn't one of the listed ids of that session, telling KWin nothing (`closed <id>` would close the new KWin's
+window of that id). Only a live window of the running session is raised again (`open` of a known id, the launcher's
+and dock's restoreLinux through WindowTasks.appIdOfTask); anything else opens fresh.
+
+Popups (kwin 0027): a task shows nothing beyond the window's client area, so a window's popups (menus, combo boxes,
+tooltips: xdg_popup) are placed inside its task - `Workspace::setPopupAreaHandler` hands the positioner the task's
+area instead of the output's, for the window, its dialogs and their popups; the desktop's windows keep the output's.
+
+Title bars (kwin 0026): a task shows the window's client area only, so the app's frame (WindowFrames) adds a bar -
+unless the window draws its own. KWin says which before `open` and whenever it changes: `decor <id> 1` (KWin's
+decoration: Kate, Dolphin) or `decor <id> 0` (client-side: Steam, GTK header bars - no frame bar, only the grip),
+again for every task on `hello`. A drag on a window's own bar asks KWin for an interactive move; KWin cancels it and
+sends `move <id>`: the task's activity hands the rest of that touch to the frame's drag (KWin's touch lifted first).
+
 ## From the launcher
 
 A PowOS app tapped in the PowOS app's launcher (drawer, home, search, the web shell: `Runtime.launch`) opens like a
@@ -67,6 +86,12 @@ then each new one); if the app already has a window (by app id: desktop file nam
 shown - again a task, or brought to the front if it is one - and nothing starts; else the command starts and its
 first normal window (by app id, or by being one of the command's processes) is shown. "Shown" is
 `org.powos.WindowTasks.show` (un-minimized first), the same as the title bar's maximize.
+
+The tap also opens the app's launch window at once (LaunchWindows, when the app has no window task): a window task
+`powos-window://launch?app=<id>` at the place its window will be, the app's icon and name on it. KWin's first `open`
+for that app (its app id matched like the launcher's) becomes that task (PowosWindowActivity.become: the consumer on
+its surface), no second task; a full-screen window (a game) gets its own and the launch window goes, as it does when
+the helper ends with no window. Android apps have the system's starting window for this.
 
 It prints `powos-open-task: desktop` when the app opens on the desktop instead, and the app then brings the desktop
 up: no window tasks (the app isn't connected to KWin), a window KWin doesn't export, nothing within 30 s, or an older

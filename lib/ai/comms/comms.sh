@@ -97,9 +97,21 @@ list_agents. wait_for_message BLOCKS until mail arrives (yield-while-idle, no
 polling); the model can also Monitor the inbox path directly.
 
 Usage:
-  powos comms send <to> <message...> [--priority low|normal|high|urgent]
-                                     Send to an agent role's inbox.
-  powos comms notify <message...>    Notify the human user (+ desktop toast).
+  powos comms send <to> <message...|-> [--priority low|normal|high|urgent]
+                                     Send to an agent role's inbox. -: the message from stdin
+                                     (f18: a body with backticks/$(...) typed inline gets expanded
+                                     by YOUR shell before send ever sees it - use `send <to> - <<'EOF'
+                                     ... EOF` so the quoted heredoc passes it through literally).
+  powos comms notify <message...|-> [--priority P] [--from NAME] [--batch KEY [--window S]] [--silent]
+                                     Notify the human user (+ desktop toast, phone notification).
+                                     -: the message from stdin. --batch: notices with the same key
+                                     within S seconds (default 120) become one notification.
+                                     --silent: tell nobody, only log it (`comms quiet`) - for deploys
+                                     the user can't see (refactors, lint, tooling).
+  powos comms quiet [-n N]           The quiet log: what was deployed silently, newest last.
+  powos comms read <id...> [--agent R]
+                                     Mark messages read by id (default agent: user): out of the
+                                     inbox, and on a phone off its notifications and feed.
   powos comms inbox [--agent R] [--peek]
                                      Show (and clear, unless --peek) an inbox.
                                      Default agent: $COMMS_AGENT_ID or 'user'.
@@ -110,6 +122,8 @@ Usage:
 Examples:
   powos comms send devops "CI is green, digest changed" --priority high
   powos comms watch --agent devops         # park until devops gets mail
+  powos comms notify --from deploy --priority low --batch deploy "Switcher now follows your finger"
+                                           # "update applied": quiet, shade only, batched
   powos ai --agent devops "check your inbox and act on it"
 
 Disable wiring with POWOS_COMMS_ENABLED=0.

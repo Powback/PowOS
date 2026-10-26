@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    // @powos/shared: apps/build.sh's esbuild alias for shell/ui/shared (friction f179) - mirrored here so tsc
+    // resolves the same import (apps/typecheck.sh).
+    "baseUrl": ".",
+    "paths": { "@powos/shared/*": ["../../../shell/ui/shared/*"] }
+  }
+}

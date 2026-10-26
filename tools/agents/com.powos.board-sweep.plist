@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The work board's orphan sweeper (tools/agents/board-sweep.sh; unit units/mac/board-sweep-mac.json) every 10 minutes.
+  Installed by tools/agents/board-sweep-deploy.sh, which fills in @HOME@ and @R@ (the verify-runner checkout: never a
+  worktree that may be removed). The sweep itself runs origin's current CLI. LimitLoadToSessionType Background: this
+  Mac is headless (user/<uid> domain, no gui domain).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.powos.board-sweep</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@R@/tools/agents/board-sweep.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>@R@</string>
+  <key>StartInterval</key>
+  <integer>1800</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>LimitLoadToSessionType</key>
+  <string>Background</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>Nice</key>
+  <integer>10</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/dev/null</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/.cache/powos-board-sweep/launchd.err</string>
+</dict>
+</plist>

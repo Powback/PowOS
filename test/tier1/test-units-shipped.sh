@@ -25,23 +25,28 @@ bad() { echo -e "${RED}✗${NC} $1"; [[ -n "${2:-}" ]] && echo "    $2"; FAIL=$(
 
 # Units that MUST be installed, and why. Each is depended on by something that
 # ships to users: a boot-menu entry, or the guided installer's handoff.
-declare -A REQUIRED=(
-  [powos-installer.service]="the boot menu's 'Install PowOS to disk' entry (powos.install=1) starts nothing without it"
-  [powos-safemode.service]="the 'Recovery — Safe mode' and 'AI Debug' entries (powos.mode=) do nothing without it"
-  [powos-firstboot.service]="applies the wizard's hostname/user/password/SSH/ramboot/AI/restore choices"
-  [powos-variant-retry.service]="retries a GPU-variant switch that had no network at first boot"
-)
+# A function, not an associative array: the Mac's bash 3.2 has no `declare -A` (the test died there with
+# "powos: unbound variable" - the keys were read as arithmetic).
+REQUIRED_UNITS="powos-installer.service powos-safemode.service powos-firstboot.service powos-variant-retry.service"
+required_reason() {
+  case "$1" in
+    powos-installer.service) echo "the boot menu's 'Install PowOS to disk' entry (powos.install=1) starts nothing without it" ;;
+    powos-safemode.service) echo "the 'Recovery — Safe mode' and 'AI Debug' entries (powos.mode=) do nothing without it" ;;
+    powos-firstboot.service) echo "applies the wizard's hostname/user/password/SSH/ramboot/AI/restore choices" ;;
+    powos-variant-retry.service) echo "retries a GPU-variant switch that had no network at first boot" ;;
+  esac
+}
 
 echo "== units the shipped boot menu depends on =="
-for u in "${!REQUIRED[@]}"; do
+for u in $REQUIRED_UNITS; do
   if grep -qF "COPY systemd/$u " "$CF"; then
     if grep -qE "systemctl enable +$u" "$CF"; then
       ok "$u is COPYed and enabled"
     else
-      bad "$u is COPYed but never enabled" "${REQUIRED[$u]}"
+      bad "$u is COPYed but never enabled" "$(required_reason "$u")"
     fi
   else
-    bad "$u is NOT copied into the image" "${REQUIRED[$u]}"
+    bad "$u is NOT copied into the image" "$(required_reason "$u")"
   fi
 done
 
@@ -359,7 +364,7 @@ shopt -s nullglob
 unshipped=0
 for f in "$ROOT"/systemd/*.service "$ROOT"/systemd/*.timer; do
   u=$(basename "$f")
-  [[ -n "${REQUIRED[$u]:-}" ]] && continue
+  [[ -n "$(required_reason "$u")" ]] && continue
   grep -qF "COPY systemd/$u " "$CF" && continue
   echo -e "  ${YELLOW}not installed${NC}: $u"
   unshipped=$((unshipped+1))

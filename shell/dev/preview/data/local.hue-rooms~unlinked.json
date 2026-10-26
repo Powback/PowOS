@@ -1,0 +1,13 @@
+{
+ "rows": {
+  "snapshot": []
+ },
+ "net": [
+  {
+   "match": "/call\\?app=hue",
+   "json": {
+    "refused": "REFUSED: needs bridge_ip - link Philips Hue in App API first"
+   }
+  }
+ ]
+}

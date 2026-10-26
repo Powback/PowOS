@@ -1,0 +1,16 @@
+{
+  "id": "bun",
+  "name": "bun (JavaScript/TypeScript runtime)",
+  "kind": "system",
+  "owner": "system:powos-rootfs",
+  "purpose": "PowOS's JavaScript/TypeScript runtime at /usr/bin/bun, the aarch64 build of the release the PC image curls in (no Arch package carries it): it runs the manager's TypeScript sandbox (unit ai-sandbox) and PowOS apps' builds",
+  "installedBy": "targets/android/install-powos-android.sh (the rootfs build: bun-linux-aarch64.zip from oven-sh/bun's latest release; HACK marker there - the manifest can't carry binaries outside packages)",
+  "files": [
+    "/usr/bin/bun"
+  ],
+  "remove": {
+    "commands": [
+      "rm -f /usr/bin/bun"
+    ]
+  }
+}

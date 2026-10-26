@@ -3,6 +3,7 @@ widget "ai usage" {
   order: 3
   size: 6x3
   minSize: 3x2
+  meta { owl: 6 }
 
   requires { pacman: ["jq", "procps-ng", "findutils"] }
 
@@ -21,31 +22,40 @@ widget "ai usage" {
     printf '{"claude":%s,"codex":%s,"running":{"claude":%s,"codex":%s}}\n' "$claude" "$codex" "$(pgrep -x claude | wc -l)" "$(pgrep -x codex | wc -l)"
   """) every 2m json timeout 30s
 
+  // Sized from the tile, never fixed (monospace: 0.6 em a character, a line 1.4 em budgeted): the label, the two
+  // agents as soft cards (their name, today's tokens big, their sessions), and the hours' graph in the height left.
+  let iw = tileWidth == null ? 340 : tileWidth - 24
+  let ih = tileHeight == null ? 180 : tileHeight - 24
+  let ls = clamp(floor(min(ih * 0.07, iw / (16 * 0.6))), 10, 18)
+  let cardW = (iw - 8) / 2
+  let ts = clamp(floor(min((cardW - 20) / (5 * 0.6), ih * 0.2 / 1.4)), 14, 72)
+  let ss = clamp(floor(min((cardW - 20) / (11 * 0.6), ts * 0.4)), 9, 22)
+
   component Agent(name, tokens, sessions, running) {
     Column {
-      gap: 0
+      gap: 0; padding: [10, 8]; background: alpha(foreground, 0.07); radius: 8 * corners
       Row {
         gap: 6
         align: center
-        Text { text: name; style: label; weight: 1 }
-        if running > 0 { Text { text: "● ${running}"; fontSize: 11; color: green; width: 32; align: end } }
+        Text { text: name; fontSize: ss; color: muted; weight: 1; maxLines: 1 }
+        if running > 0 { Text { text: "● ${running}"; fontSize: ss; color: green; maxLines: 1 } }
       }
       Text {
         text: tokens == null ? "…" : tokens >= 1000000 ? "${round(tokens / 1000000, 1)}M" : tokens >= 1000 ? "${round(tokens / 1000)}k" : "${tokens}"
-        style: title
+        fontSize: ts; maxLines: 1
         color: tokens > 0 ? foreground : muted
       }
-      Text { text: sessions == 1 ? "1 session" : "${sessions ?? 0} sessions"; style: small; color: muted }
+      Text { text: sessions == 1 ? "1 session" : "${sessions ?? 0} sessions"; fontSize: ss; color: muted; maxLines: 1 }
     }
   }
 
   onTap: launcher("agents")
 
   Column {
-    gap: 6
-    Text { text: "ai tokens today"; style: muted }
+    gap: 8; fill: height
+    Text { text: "ai tokens today"; fontSize: ls; color: muted; maxLines: 1 }
     Row {
-      gap: 12
+      gap: 8
       Agent { name: "claude"; tokens: ai.claude.tokens; sessions: ai.claude.sessions; running: ai.running.claude; weight: 1 }
       Agent { name: "codex"; tokens: ai.codex.tokens; sessions: ai.codex.sessions; running: ai.running.codex; weight: 1 }
     }

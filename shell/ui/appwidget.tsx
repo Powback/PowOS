@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { signal, type Signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { apps, carry, editing, selected } from "../state.ts";
-import { drawerDrag, notifDrag, pageDrag } from "./gesture.ts";
+import { drawerDrag, pageDrag } from "./gesture.ts";
 import { takeTap } from "./taps.ts";
 import type { AppWidgetProvider, HomeItem } from "../types.ts";
 
@@ -61,7 +61,7 @@ async function draw(canvas: HTMLCanvasElement, url: string) {
 }
 
 /** Home has the finger now: the widget's press ends as a cancel. */
-const homeTook = () => !!carry.value || pageDrag.value != null || drawerDrag.value != null || notifDrag.value != null;
+const homeTook = () => !!carry.value || pageDrag.value != null || drawerDrag.value != null;
 
 /** One Android widget's tile: its frame, watched while it's on screen, at its size; touches to the widget. */
 export function AppWidgetFace({ item }: { item: HomeItem }) {
@@ -171,7 +171,8 @@ export const picker = signal(false);
 /** An app's drawer icon, by its package (an Android app's key is "a:<package>/<activity>"). */
 const iconOf = (pkg: string) => apps.value.find((a) => a.key.startsWith(`a:${pkg}/`))?.icon;
 
-export function AppWidgetPicker({ onPick }: { onPick: (p: AppWidgetProvider) => void }) {
+/** [head]: what the list starts with (the edit bar's: the shell's own widgets, the stores), given a close to call. */
+export function AppWidgetPicker({ onPick, head }: { onPick: (p: AppWidgetProvider) => void; head?: (close: () => void, q: string) => any }) {
   const [list, setList] = useState<AppWidgetProvider[] | null>(null);
   const [query, setQuery] = useState("");
   const open = picker.value;
@@ -195,9 +196,9 @@ export function AppWidgetPicker({ onPick }: { onPick: (p: AppWidgetProvider) => 
   const stop = (e: Event) => e.stopPropagation();
   return (
     <div class="aw-scrim" onClick={close} onPointerDown={stop} onTouchStart={stop}>
-      <div class="aw-picker tile" onClick={stop}>
+      <div class="aw-picker tile sheet" onClick={stop}>
         <div class="sheet-head">
-          <span class="muted">android widgets</span>
+          <span class="muted">add to home</span>
           <button type="button" class="sheet-done" onClick={close}>
             close
           </button>
@@ -210,7 +211,9 @@ export function AppWidgetPicker({ onPick }: { onPick: (p: AppWidgetProvider) => 
           onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
         />
         <div class="aw-list">
-          {/* PowOS apps' widgets first (the registry: ui/apppicker.tsx), then every Android app's. */}
+          {/* The caller's first (the edit bar's: ui/editsheet.tsx - PowOS's own widgets, found by the search too), PowOS
+              apps' widgets (the registry: ui/apppicker.tsx), then every Android app's. */}
+          {head?.(close, q)}
           {!q && <AppWidgetList onAdded={close} />}
           {list == null && <div class="muted">loading…</div>}
           {list != null && !shown.length && <div class="muted">no widgets{q ? ` for "${query}"` : ""}</div>}

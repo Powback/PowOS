@@ -1,0 +1,18 @@
+{
+  "id": "nft-module-loader",
+  "name": "nftables module loader",
+  "kind": "system",
+  "owner": "system:powos-system-module",
+  "host": "phone-android",
+  "purpose": "loads the containers kernel's nf_tables + nft_* modules at boot in the background (netavark/nft for containers); refuses cleanly on any other kernel",
+  "installedBy": "the system module (load-kernel-modules.sh, kernel-modules/)",
+  "files": [
+    "/data/adb/modules/powos-system/load-kernel-modules.sh",
+    "/data/adb/modules/powos-system/kernel-modules"
+  ],
+  "processes": [
+    {
+      "match": "load-kernel-modules\\.sh"
+    }
+  ]
+}

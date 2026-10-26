@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""powos-plasma-bridge: the Plasma session's notifications and clipboard in Android (rooted mode).
+
+Started with the desktop (/etc/xdg/autostart/powos-plasma-bridge.desktop). plasmashell stays the notification server
+and Klipper (in plasmashell) the clipboard; this only listens and relays, through the PowOS app's run dir:
+  plasma/out/*.json  to the app (its FileObserver, PlasmaBridge.kt): {"op": "notify" | "close" | "reset" | "clip"}
+  plasma/in/*.json   from the app (inotify here):                  {"op": "close" | "action" | "clip"}
+Each file is written as .name and renamed into place, read once and deleted by the other side.
+
+- Notifications: a watcher of Plasma's server (org.kde.NotificationManager.RegisterWatcher - KDE Connect's way): the
+  server calls our org.kde.NotificationWatcher.Notify with the id it gave each notification (KDE Connect's phone
+  notifications included). Their close comes from a second, monitor-only connection (BecomeMonitor, matched to
+  NotificationClosed alone): Plasma sends that signal to the sending app only, and its reason tells a popup that
+  timed out (kept, as Plasma keeps it in its history) from one dismissed or withdrawn (gone from Android too).
+  Android's dismiss -> CloseNotification; its buttons and tap -> InvokeAction, then closed unless resident.
+- Clipboard, text only: Klipper's clipboardHistoryUpdated -> getClipboardContents -> Android; Android's -> Klipper's
+  setClipboardContents. The last text either way is remembered, so neither side echoes the other's copy back.
+
+Nothing polls: D-Bus signals and calls, one inotify watch, a GLib main loop blocked at rest.
+"""
+import ctypes
+import html
+import itertools
+import json
+import os
+import re
+import struct
+import time
+
+import dbus
+import dbus.bus
+import dbus.service
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
+
+RUN = os.environ.get("XDG_RUNTIME_DIR") or "/run/powos-app"
+OUT = os.path.join(RUN, "plasma", "out")
+IN = os.path.join(RUN, "plasma", "in")
+NOTIF, NPATH = "org.freedesktop.Notifications", "/org/freedesktop/Notifications"
+KLIPPER, KPATH, KIFACE = "org.kde.klipper", "/klipper", "org.kde.klipper.klipper"
+# Already Android notifications of their own (lib/ai/comms/comms-mcp.py sends both): not twice.
+SKIP_APPS = {"PowOS agents"}
+MAX_CLIP = 256 * 1024
+EXPIRED = 1
+IN_CLOSE_WRITE, IN_MOVED_TO = 0x08, 0x80
+EVENT = struct.Struct("iIII")
+_seq = itertools.count()
+
+
+def emit(obj):
+    name = f"{time.time_ns()}-{next(_seq)}.json"
+    tmp = os.path.join(OUT, "." + name)
+    with open(tmp, "w") as f:
+        json.dump(obj, f)
+    os.rename(tmp, os.path.join(OUT, name))
+
+
+def text(body):
+    """Plasma's body markup (a subset of HTML) as plain text."""
+    body = re.sub(r"<br\s*/?>", "\n", body, flags=re.I)
+    return html.unescape(re.sub(r"<[^>]+>", "", body)).strip()
+
+
+class Bridge(dbus.service.Object):
+    def __init__(self, bus):
+        super().__init__(bus, "/NotificationWatcher")
+        self.bus = bus
+        self.open = {}  # id -> resident
+        self.monitored = False
+        self.last_clip = None
+
+    # --- notifications (the server calls these; signature as plasma-workspace's server_p.cpp sends them)
+    @dbus.service.method("org.kde.NotificationWatcher", in_signature="ususssasa{sv}i", out_signature="")
+    def Notify(self, nid, app, _replaces, icon, summary, body, actions, hints, timeout):
+        app = str(app)
+        if app in SKIP_APPS:
+            return
+        nid = int(nid)
+        self.open[nid] = bool(hints.get("resident", False))
+        pairs = [[str(actions[i]), str(actions[i + 1])] for i in range(0, len(actions) - 1, 2)]
+        emit({
+            "op": "notify", "id": nid, "app": app, "icon": str(icon),
+            "entry": str(hints.get("desktop-entry", "")).removesuffix(".desktop"),
+            "title": str(summary), "text": text(str(body)), "actions": pairs,
+            "urgency": int(hints.get("urgency", 1)), "transient": bool(hints.get("transient", False)),
+            "timeout": int(timeout), "time": int(time.time()),
+        })
+
+    @dbus.service.method("org.kde.NotificationWatcher", in_signature="u", out_signature="")
+    def CloseNotification(self, nid):
+        # Without the monitor's reason a timed-out popup can't be told from a dismissal: close it here then.
+        if not self.monitored:
+            self.closed(int(nid))
+
+    def closed(self, nid):
+        if self.open.pop(nid, None) is not None:
+            emit({"op": "close", "id": nid})
+
+    def on_monitored(self, _conn, msg):
+        if msg.get_member() == "NotificationClosed" and msg.get_interface() == NOTIF:
+            nid, reason = (int(a) for a in msg.get_args_list()[:2])
+            if reason == EXPIRED:
+                self.open.pop(nid, None)  # forgotten here (no later close to relay), kept on Android
+            else:
+                self.closed(nid)
+
+    def server(self, owner):
+        """plasmashell (re)started: its ids are new, so Android drops the old ones, and we register again."""
+        emit({"op": "reset"})
+        self.open.clear()
+        if owner:
+            self.call(NOTIF, NPATH, "org.kde.NotificationManager", "RegisterWatcher")
+
+    # --- from Android
+    def request(self, req):
+        op = req.get("op")
+        if op == "close":
+            self.call(NOTIF, NPATH, NOTIF, "CloseNotification", dbus.UInt32(req["id"]))
+        elif op == "action":
+            nid = int(req["id"])
+            self.call(NOTIF, NPATH, "org.kde.NotificationManager", "InvokeAction", dbus.UInt32(nid), str(req["key"]))
+            if not self.open.get(nid, False):
+                self.call(NOTIF, NPATH, NOTIF, "CloseNotification", dbus.UInt32(nid))
+        elif op == "clip":
+            t = str(req.get("text", ""))[:MAX_CLIP]
+            if t and t != self.last_clip:
+                self.last_clip = t
+                self.call(KLIPPER, KPATH, KIFACE, "setClipboardContents", t)
+
+    # --- clipboard
+    def clip_changed(self):
+        self.call(KLIPPER, KPATH, KIFACE, "getClipboardContents", reply=self.clip_now)
+
+    def clip_now(self, t=""):
+        t = str(t)
+        if t and t != self.last_clip and len(t.encode()) <= MAX_CLIP:
+            self.last_clip = t
+            emit({"op": "clip", "text": t})
+
+    def call(self, name, path, iface, method, *args, reply=None):
+        self.bus.call_async(name, path, iface, method, sig(args), args,
+                            reply or (lambda *_: None), lambda e: print(f"powos-plasma-bridge: {method}: {e}", flush=True))
+
+
+def sig(args):
+    return "".join("u" if isinstance(a, dbus.UInt32) else "s" for a in args)
+
+
+def names(buf):
+    off = 0
+    while off + EVENT.size <= len(buf):
+        _wd, _mask, _cookie, size = EVENT.unpack_from(buf, off)
+        yield buf[off + EVENT.size: off + EVENT.size + size].rstrip(b"\0").decode(errors="replace")
+        off += EVENT.size + size
+
+
+def watch_in(bridge):
+    libc = ctypes.CDLL(None, use_errno=True)
+    fd = libc.inotify_init1(os.O_CLOEXEC | os.O_NONBLOCK)
+    if fd < 0 or libc.inotify_add_watch(fd, IN.encode(), IN_CLOSE_WRITE | IN_MOVED_TO) < 0:
+        raise SystemExit(f"powos-plasma-bridge: no inotify on {IN}: {os.strerror(ctypes.get_errno())}")
+
+    def take(name):
+        if name.startswith(".") or not name.endswith(".json"):
+            return
+        path = os.path.join(IN, name)
+        try:
+            with open(path) as f:
+                req = json.load(f)
+            os.unlink(path)
+            bridge.request(req)
+        except (OSError, ValueError, KeyError) as e:
+            print(f"powos-plasma-bridge: {name}: {e}", flush=True)
+
+    def ready(*_):
+        try:
+            buf = os.read(fd, 65536)
+        except BlockingIOError:
+            return True
+        for n in names(buf):
+            take(n)
+        return True
+
+    for n in sorted(os.listdir(IN)):  # what arrived while we weren't running
+        take(n)
+    GLib.io_add_watch(fd, GLib.PRIORITY_DEFAULT, GLib.IO_IN, ready)
+
+
+def monitor(bridge, address):
+    try:
+        mon = dbus.bus.BusConnection(address)
+        rule = f"type='signal',interface='{NOTIF}',member='NotificationClosed'"
+        mon.call_blocking("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.Monitoring",
+                          "BecomeMonitor", "asu", ([rule], dbus.UInt32(0)))
+        mon.add_message_filter(bridge.on_monitored)
+        bridge.monitored = True
+        return mon
+    except dbus.DBusException as e:
+        print(f"powos-plasma-bridge: no monitor ({e}); a popup's timeout closes it on Android too", flush=True)
+        return None
+
+
+def main():
+    os.makedirs(OUT, exist_ok=True)
+    os.makedirs(IN, exist_ok=True)
+    DBusGMainLoop(set_as_default=True)
+    bus = dbus.SessionBus()
+    bridge = Bridge(bus)
+    keep = monitor(bridge, os.environ.get("DBUS_SESSION_BUS_ADDRESS", f"unix:path={RUN}/bus"))  # noqa: F841 (kept open)
+    bus.watch_name_owner(NOTIF, lambda owner: bridge.server(owner))
+    bus.add_signal_receiver(bridge.clip_changed, "clipboardHistoryUpdated", KIFACE, KLIPPER, KPATH)
+    # Klipper's current text is where we start: nothing is sent until it changes.
+    try:
+        bridge.last_clip = str(bus.get_object(KLIPPER, KPATH).getClipboardContents(dbus_interface=KIFACE))
+    except dbus.DBusException:
+        pass
+    watch_in(bridge)
+    GLib.MainLoop().run()
+
+
+if __name__ == "__main__":
+    main()

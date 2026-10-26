@@ -365,7 +365,7 @@ class PtyTerminal(
                     if (path.startsWith("/")) {
                         file.parentFile?.mkdirs()
                         val copy = "cp ${shellQuote("/data/powos/root$path")} ${shellQuote(file.path)} && chmod 644 ${shellQuote(file.path)}"
-                        runCatching { ProcessBuilder("su", "-c", copy).redirectErrorStream(true).start().waitFor() }
+                        runCatching { andro.marchy.RootShell.run(copy) }
                     }
                     main.post {
                         fetching -= family

@@ -126,6 +126,9 @@ class Manager:
                 cmd += ["--append-system-prompt", f.read()]
         if self.args.mcp_config_file:
             cmd += ["--mcp-config", self.args.mcp_config_file]
+            # One way to ask the user to pick: comms' present_choices (a card the
+            # chat renders). AskUserQuestion needs an interactive TTY to be answered.
+            cmd += ["--disallowedTools", "AskUserQuestion"]
         if self.session_id:
             cmd += ["--resume", self.session_id]
         cmd += _agents_hooks()
@@ -141,6 +144,8 @@ class Manager:
         self.proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=self._log, text=True, bufsize=1, env=env,
+            # UTF-8 whatever the locale: a C/latin-1 one would mis-decode claude's events (an agent's message, changed).
+            encoding="utf-8", errors="replace",
             cwd=self.cwd)
 
     # -- normalized event stream + sinks -------------------------------------
@@ -200,10 +205,41 @@ class Manager:
                 self._emit({"kind": "inbox", "text": text})
             else:
                 self._emit({"kind": "user", "text": text})
+                text = self._ask_turn(text)
             self._send_event(text)
 
+    def _ask_turn(self, text):
+        """A user turn as the user's ASK: recorded (the session store's asks.jsonl, then the board's user_ask table
+        through `powos agents ask add`, in the background) and sent with its id, so the manager links the task it
+        makes to it (the user, 2026-10-23: asks re-sent 3-5 times before one landed on the board). The chat shows the
+        user's words alone (the user event above). POWOS_MANAGER_ASKS=0 turns it off."""
+        if os.environ.get("POWOS_MANAGER_ASKS", "1") == "0" or not text.strip():
+            return text
+        aid = f"ask-{int(time.time() * 1000):x}"
+        rec = {"id": aid, "at": int(time.time() * 1000), "text": text, "by": self._agent_id or "manager"}
+        try:
+            with open(os.path.join(self.args.session_store, "asks.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+        def board():
+            cmd = (os.environ.get("POWOS_AGENTS_CMD") or "powos agents").split()
+            try:
+                subprocess.run(cmd + ["ask", "add", "--id", aid, "--by", rec["by"], "-"], input=text, text=True,
+                               encoding="utf-8", capture_output=True, timeout=20)
+            except (OSError, subprocess.SubprocessError):
+                pass   # asks.jsonl has it: the board sweeper's `ask sync` adds it later
+
+        threading.Thread(target=board, daemon=True).start()
+        return (f"{text}\n\n[user ask {aid}: if it asks for work, put it on the board linked to this ask - "
+                f"`powos agents task add \"<plain title>\" --owner <expert> --ask {aid}`, or "
+                f"`powos agents task set <existing task id> --ask {aid}` when it's already there; if it's not work "
+                f"(a question you answered, thanks), `powos agents ask none {aid} --reason \"...\"`.]")
+
     def take_inbox(self):
-        """The manager's comms inbox as turn texts, oldest first, taken out of it."""
+        """The manager's comms inbox as turn texts, oldest first, taken out of it. Each body whole - the turn is the
+        only place the manager sees it (test-comms-fulltext.py holds it to that, byte for byte)."""
         if not self._comms_root or not self._agent_id:
             return []
         inbox = os.path.join(self._comms_root, "agents", self._agent_id, "inbox")
@@ -266,14 +302,19 @@ class Manager:
                 if b.get("type") == "text" and b.get("text", "").strip():
                     self._emit({"kind": "assistant", "text": b["text"].strip()})
                 elif b.get("type") == "tool_use":
+                    inp = b.get("input", {}) or {}
                     self._emit({"kind": "tool_use", "name": b.get("name", "?"),
-                                "hint": self._tool_hint(b.get("input", {}) or {})})
+                                "hint": self._tool_hint(inp)})
+                    shown = self._rich_block(b.get("name", ""), inp)
+                    if shown:
+                        self._emit({"kind": "assistant", "text": shown})
         elif t == "user":
             for b in ev["message"].get("content", []):
                 if b.get("type") == "tool_result":
                     self._emit({"kind": "tool_result",
                                 "ok": not b.get("is_error"),
-                                "text": self._result_text(b.get("content", ""))})
+                                "text": self._result_text(b.get("content", "")),
+                                "out": self._result_out(b.get("content", ""))})
         elif t == "result":
             self.busy.clear()
             self.turns_done += 1
@@ -288,6 +329,40 @@ class Manager:
                 or inp.get("pattern") or inp.get("to") or inp.get("message") or "")
         hint = str(hint).replace("\n", " ")
         return hint[:120] + "…" if len(hint) > 120 else hint
+
+    # What present / present_choices (comms) show in the chat: a fenced block in the
+    # assistant's text (```choices / ```present + one JSON line), so every chat that
+    # renders the event stream gets it with no new event kind; one that doesn't
+    # shows the fence as code.
+    PRESENT_MAX = 64_000
+
+    @classmethod
+    def _rich_block(cls, name, inp):
+        tool = name.rsplit("__", 1)[-1]
+        if tool == "present_choices":
+            options = [str(o).strip()[:120] for o in inp.get("options") or [] if str(o).strip()][:8]
+            if not options:
+                return None
+            data = {"question": str(inp.get("question", "")).strip()[:600], "options": options,
+                    "multi": bool(inp.get("multi")), "other": inp.get("other", True) is not False}
+            return "```choices\n" + json.dumps(data, ensure_ascii=False) + "\n```"
+        if tool == "present":
+            body = str(inp.get("body", ""))
+            if not body.strip():
+                return None
+            fmt = "html" if inp.get("format") == "html" else "md"
+            data = {"title": str(inp.get("title", "")).strip()[:120] or "untitled", "format": fmt,
+                    "body": body[:cls.PRESENT_MAX]}
+            return "```present\n" + json.dumps(data, ensure_ascii=False) + "\n```"
+        return None
+
+    @staticmethod
+    def _result_out(content, limit=2000):
+        """A tool's output as a chat shows it expanded: lines kept, the head of it."""
+        if isinstance(content, list):
+            content = "\n".join(c.get("text", "") for c in content if isinstance(c, dict))
+        content = str(content).strip()
+        return content[:limit] + "\n…" if len(content) > limit else content
 
     @staticmethod
     def _result_text(content):
@@ -413,7 +488,20 @@ def list_json(args):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="powos-manager")
+    ap = argparse.ArgumentParser(
+        prog="powos ai manager",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="The standing PowOS manager: one persistent claude session (per-directory memory, live inbox).",
+        epilog="""launcher flags (powos ai manager, lib/ai/manager/manager.sh):
+  --safe          claude asks before acting (no --dangerously-skip-permissions)
+  --no-sandbox    start without the TypeScript sandbox (same as POWOS_SANDBOX_ENABLED=0)
+
+MCP servers the launcher gives it (--mcp-config-file):
+  comms     mail, the board's handoffs, present/present_choices (powos comms help)
+  sandbox   TypeScript jobs with limits (lib/ai/sandbox, ported from SpaceTimeAI's code mode): the tools
+            sandbox eval (run code or a saved script, with the capabilities granted to that job only) and
+            sandbox declarations (the exact types a set of grants gives the code). Only when its runtime
+            (bun, or node >= 22.18) and in-app deps are here: powos sandbox status / setup / help.""")
     ap.add_argument("--agent-id", default="manager")
     ap.add_argument("--system-prompt-file")
     ap.add_argument("--mcp-config-file")
@@ -438,8 +526,11 @@ def main():
         return
     # Live output: line-buffer so a pipe/widget consumer sees each event as it
     # renders (a block-buffered pipe would swallow everything until exit).
+    # UTF-8 stdio whatever the locale (the phone's chat writes the turn as UTF-8; an emoji in mail must not kill the
+    # terminal sink).
     try:
-        sys.stdout.reconfigure(line_buffering=True)
+        sys.stdout.reconfigure(line_buffering=True, encoding="utf-8", errors="backslashreplace")
+        sys.stdin.reconfigure(encoding="utf-8")
     except Exception:
         pass
     m = Manager(args)

@@ -1,0 +1,23 @@
+{
+  "spec": "powos.appcap/v1",
+  "app": "open-meteo",
+  "name": "Open-Meteo weather",
+  "description": "Public weather API, no auth, no spend. Safe target for runtime send tests.",
+  "enabled": true,
+  "base": { "kind": "internet", "url": "https://api.open-meteo.com/v1", "tls": "standard" },
+  "auth": { "tokens": {} },
+  "defaults": { "rate_limit": { "per_minute": 30 }, "cache_ttl_s": 300 },
+  "actions": {
+    "get_forecast": {
+      "summary": "Current temperature at a lat/lon.",
+      "safety": "read",
+      "origin": "official",
+      "widget": true,
+      "refresh": { "poll_s": 600 },
+      "view": { "rows": "current", "label": "=Now", "fields": { "value": "temperature_2m" }, "unit": "°C" },
+      "inputs": { "type": "object", "required": ["lat","lon"], "properties": { "lat": {"type":"number"}, "lon": {"type":"number"} } },
+      "output": { "type": "object" },
+      "endpoint": { "method": "GET", "path": "/forecast?latitude={lat}&longitude={lon}&current=temperature_2m" }
+    }
+  }
+}

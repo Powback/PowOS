@@ -1,0 +1,25 @@
+# gpu-195 voice core: text to speech. Kokoro-FastAPI (GPU build), voice bf_emma, resident on GPU0 (~1.5 GB).
+# OpenAI API: POST /v1/audio/speech. The model ships inside the image.
+# Unit: powos units show voice-tts  (repo units/gpu-195/voice-tts.json)
+[Unit]
+Description=PowOS voice core - TTS (Kokoro, GPU0)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=voice-tts
+Image=ghcr.io/remsky/kokoro-fastapi-gpu:latest
+Network=voice.network
+PublishPort=8880:8880
+AddDevice=nvidia.com/gpu=0
+SecurityLabelDisable=true
+Label=io.powos.unit=voice-tts
+PodmanArgs=--memory=4g --memory-swap=4g --cpus=2 --pids-limit=512
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

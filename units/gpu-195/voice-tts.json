@@ -1,0 +1,48 @@
+{
+  "id": "voice-tts",
+  "name": "Voice TTS (Kokoro)",
+  "kind": "container",
+  "host": "desktop",
+  "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
+  "owner": "system:voice",
+  "purpose": "the voice path's text to speech: Kokoro-FastAPI GPU build, voice bf_emma, resident; OpenAI /v1/audio/speech on :8880",
+  "installedBy": "hosts/gpu-195/install.sh (rootless podman quadlet, user powos, linger on)",
+  "image": "ghcr.io/remsky/kokoro-fastapi-gpu:latest",
+  "ports": [
+    "8880/tcp"
+  ],
+  "files": [
+    "/var/home/powos/.config/containers/systemd/voice-tts.container"
+  ],
+  "processes": [
+    {
+      "systemd": "voice-tts.service"
+    },
+    {
+      "container": "voice-tts"
+    }
+  ],
+  "limits": {
+    "memory": "4g",
+    "memory_swap": "4g",
+    "cpus": 2,
+    "pids": 512
+  },
+  "autosleep": "never",
+  "gpu": "nvidia.com/gpu=0",
+  "vramBudget": "1.5g",
+  "vramMeasured": "1.0 GiB",
+  "health": "http://192.168.50.195:8880/health",
+  "remove": {
+    "stop": [
+      "systemctl --user stop voice-tts.service"
+    ],
+    "commands": [
+      "rm -f /var/home/powos/.config/containers/systemd/voice-tts.container",
+      "systemctl --user daemon-reload",
+      "podman rmi ghcr.io/remsky/kokoro-fastapi-gpu:latest"
+    ],
+    "keep": []
+  },
+  "vramNote": "GPU0 belongs to the realtime voice path (docs/GPU-SERVERS-PLAN.md); nothing else allocates on it"
+}

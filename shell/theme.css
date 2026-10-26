@@ -13,7 +13,9 @@
   --color-background: #1f1f28;
   --color-surface: #2a2a37;
   --color-foreground: #dcd7ba;
-  --color-muted: #727169;
+  /* Secondary text: the foreground, a little see-through (app.tsx sets it from the theme the same way). */
+  --color-muted: color-mix(in srgb, var(--color-foreground) var(--muted-text), transparent);
+  --muted-text: 90%;
   --color-accent: #7e9cd8;
   --color-border: #54546d;
   --color-red: #e82424;
@@ -26,6 +28,96 @@
   /* How much of the background a surface lays over the wallpaper (tiles, the drawer, the panels): one knob for all. */
   --glass: 72%;
 
+  /*
+   * Surfaces are told apart by their fill and a soft shadow, not by lines. --line is a surface's outline (none; a
+   * theme can bring one back; rows inside a surface are told apart by spacing, never a line), --soft-fill what a control
+   * that's only a shape (a chip, a field, a button) is filled with, --lift a surface's light inner edge and the soft
+   * shadow it casts.
+   */
+  --line: transparent;
+  --soft-fill: color-mix(in srgb, var(--color-foreground) 5%, transparent);
+  /* --lift's parts, for a surface made of several (a merged widget group, the foot): its top edge, its shadow. */
+  --lift-edge: inset 0 1px 0 rgb(255 255 255 / 7%);
+  --lift-shadow: 0 6px 20px -10px rgb(0 0 0 / 50%);
+  --lift-shadow-up: 0 -6px 20px -12px rgb(0 0 0 / 50%);
+  --lift: var(--lift-edge), var(--lift-shadow);
+  /* A thing held up by a finger (a carried tile), as a filter: its shadow, larger. */
+  --lift-drop: drop-shadow(0 8px 16px rgb(0 0 0 / 40%));
+  /* Labels straight on the wallpaper (home's app labels): the one text shadow, so they read on any picture. */
+  /* A halo of the theme's background round text on the wallpaper (any picture, any theme): 4.5:1 where it's bright. */
+  --label-shadow: 0 0 2px var(--on-wallpaper-halo), 0 0 4px var(--on-wallpaper-halo), 0 0 7px var(--on-wallpaper-halo), 0 0 14px color-mix(in srgb, var(--on-wallpaper-halo) 75%, transparent);
+  /* Text straight on the wallpaper (home's app labels, PowOS AI's page header): the theme's foreground with a halo of
+     its background - turned round over a wallpaper of the other tone (data-wallpaper, below), as iOS does. */
+  --on-wallpaper: var(--color-foreground);
+  --on-wallpaper-halo: var(--color-background);
+  /* Text in the accent (links, "open ↗", a text button): the accent drawn a little towards the foreground - on glass
+     over any wallpaper, in any theme, >= 4.5:1. Fills (an on tile, a switch) keep the accent itself. */
+  --accent-text: color-mix(in srgb, var(--color-accent) 50%, var(--color-foreground));
+  /* What a control on a panel (a quick setting, a slider, a chip) is filled with: on glass, a soft fill instead. */
+  --control-fill: var(--color-surface);
+
+  /*
+   * Glass (ui/glass.ts), one look for every page: home, the drawer, PowOS AI's page (a darker tint, for its text), the
+   * lock face, PowOS apps' islands - frosted: a copy of the wallpaper blurred once (never live: every surface draws the
+   * same pre-blurred picture at its own place on the screen) under a tint of the theme's background (also the plain
+   * fill, a little more of it, without a wallpaper to frost). The shade, the switcher and the assistant are windows
+   * over apps: tinted only (--glass-behind-tint), over what the host blurs behind them (the assistant's isn't: it's
+   * drawn on). --glass-tint: how much tint (text stays readable on any wallpaper); --glass-blur, --glass-saturate,
+   * --glass-brightness: how the copy is frosted (read when it's made).
+   */
+  --glass-tint: 42%;
+  --glass-blur: 28px;
+  --glass-saturate: 1.6;
+  --glass-brightness: 0.8;
+  /*
+   * The same frost from the compositor (native glass, ui/nativeglass.ts): its blur radius, which SurfaceFlinger takes as
+   * about a fifth of a Gaussian's sigma (measured on the phone: radius 77 device px blurred like sigma 12-20), so the
+   * lock screen's blur(--glass-blur) is about five times --glass-blur here; and --glass-brightness as a veil under the
+   * tint (a compositor blur can't darken or saturate - the saturation is the one thing that doesn't carry over).
+   */
+  --glass-blur-native: 140px;
+  --glass-veil: rgb(0 0 0 / 20%);
+  --glass-behind-tint: 58%;
+  /*
+   * Liquid glass (live blur on, GlassBlur/LiquidGlass.kt): each surface's edge bends what's behind it like a lens's
+   * rim. --liquid-band: how wide the bent edge is; --liquid-refraction: how far its outer edge pulls the picture in;
+   * --liquid-rim: the bright line along the shape (0-1, lit from the top left); --liquid-dispersion: how far red and
+   * blue part (0-1). A band or both refraction and rim of 0: off.
+   */
+  --liquid-band: 14px;
+  --liquid-refraction: 9px;
+  --liquid-rim: 0.5;
+  --liquid-dispersion: 0.25;
+  /* The tint: the theme's background lifted a little towards its foreground (a dark wallpaper reads as glass, not as
+     a black slab), see-through by --glass-tint. */
+  --glass-base: color-mix(in srgb, var(--color-foreground) 18%, var(--color-background));
+  /* The one darkening for a page that is mostly text (PowOS AI's): more of the same tint, nothing else. */
+  --glass-dim: 28%;
+  /*
+   * The frost (frost v2, 2026-10-22): one material for the surfaces you read through - PowOS AI's cards and panel, the
+   * control center. Its strength is the compositor's blur (--frost-blur-native: what's behind can't be read, not a
+   * darker fill), its colour the reference tint cooled, at the reference strength; over a wallpaper of the other tone
+   * it takes that tone (shell.css), so text keeps its contrast without a slab or a halo.
+   */
+  --frost-cool: var(--frost-cool-dark);
+  --frost-cool-light: #e8eef6;
+  --frost-cool-dark: #182230;
+  /* The frost over a wallpaper of the other tone takes the other tone (light glass, dark text; or the reverse). */
+  --frost-swap-cool: var(--frost-cool-light);
+  /* The text on light frost in a dark theme: its background colour (read before anything swaps it). */
+  --frost-ink: var(--color-background);
+  --frost-paper: var(--color-foreground);
+  --frost-base: color-mix(in oklab, var(--glass-base) 55%, var(--frost-cool));
+  --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 16%), transparent);
+  --frost-blur-native: 360px;
+  /* One material (docs/DESIGN-LANGUAGE.md): every surface is the reference fill - home's tiles as PowOS AI's cards. */
+  --glass-fill: var(--text-fill);
+  /*
+   * The reference material (docs/DESIGN-LANGUAGE.md: PowOS AI's page, 2026-10-21): the glass tint and --glass-dim more
+   * of it, over --glass-veil. What a surface with text on it is filled with - PowOS AI's cards, and every sheet.
+   */
+  --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
+
   --gap: 8px;
   --edge: 12px;
   --radius: 12px;
@@ -33,9 +125,65 @@
   --cell: 76px;
   --icon: 48px;
   --strip-icon: 56px;
+  /* Every app icon's one shape (ui/iconshape.ts, shell.css .app-icon-face): a squircle, the corner this much of its
+     edge (AndroidApps draws adaptive icons in the same one). Transparent / irregular icons sit on --icon-plate in it:
+     the frost's own neutral tint (never the theme's surface or accent - gruvbox's read as brown), opaque, lifted a
+     little towards the other tone so a dark or light glyph still shows on it. */
+  --icon-radius: 22%;
+  --icon-plate: color-mix(in oklab, var(--frost-base) 85%, var(--frost-swap-cool));
   --strip-height: 76px;
   --letter-bar: 22px;
+  /* The pill's space above the screen's foot (over the navigation bar's inset): home's search, the drawer's, PowOS AI's compose. */
+  --pill-foot: 6px;
+  /* The pill's height, empty: one row of its field (home's search - in the foot or as a widget anywhere - the drawer's,
+     PowOS AI's compose, the assistant's). It grows only with typed lines, up to 3 (grow.tsx); never with its cell. */
+  --pill-height: 40px;
 }
+
+/*
+ * A wallpaper of the other tone than the theme (dark glass over a bright picture, light glass over a dark one:
+ * glass.ts data-wallpaper): the text needs more of the tint - nearly opaque (measured: 4.5:1 over a white wallpaper).
+ */
+:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] {
+  --glass-dim: 68%;
+  --on-wallpaper: var(--color-background);
+  --on-wallpaper-halo: var(--color-foreground);
+}
+:root[data-light="true"] {
+  --frost-cool: var(--frost-cool-light);
+  --frost-swap-cool: var(--frost-cool-dark);
+  --glass-tint: 50%;
+  --glass-brightness: 1.08;
+  --glass-veil: rgb(255 255 255 / 8%);
+  --glass-behind-tint: 66%;
+}
+.glass, .glass-native { --glass-tint: 32%; }
+:is(.glass, .glass-native)[data-light="true"] { --glass-tint: 40%; }
+.glass, .glass-behind, .glass-native { --control-fill: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
+/*
+ * A sheet: anything over home's own content - a widget's screen, a PowOS app's page, the widget picker, menus,
+ * popovers: the reference material (--text-fill over --glass-veil), a .tile too (its region for the compositor, its
+ * lift). The compositor's blur reaches only the wallpaper under the window, never home's tiles in it - so under a
+ * page-sized sheet home's content steps out (shell.css: html:has(...)), and only the frosted wallpaper is behind it.
+ * A small popover (.pop: a menu, the theme strip) leaves home in place and blurs what's under it itself.
+ */
+html:root :is(.tile.sheet, .sheet, .tile.pill) {
+  background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+}
+html:root .sheet.pop {
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+}
+/* The picture glass (no compositor blur): the frosted wallpaper under it, as a tile's. */
+html.glass :is(.tile.sheet, .tile.pill) {
+  background:
+    linear-gradient(var(--text-fill), var(--text-fill)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}
+/* Where a glass surface is on the screen (ui/glass.ts), its own: not inherited, so setting one restyles one element. */
+@property --gx { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --gy { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --gb { syntax: "<length>"; inherits: false; initial-value: 0px; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -50,13 +198,59 @@ body {
   touch-action: none;
 }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; }
+/* No scrollbars anywhere: the phone's WebView ignores scrollbar-width (CSS.supports false on Chrome 155 WebView) and
+   drew an overlay bar as a faint line at the right edge of home. Scrolling stays. */
+::-webkit-scrollbar { display: none; }
+
+/*
+ * The one surface look every page shares: a fill and --lift (the light top edge, a faint ring, the soft shadow under
+ * it). A surface gets it by being a .tile (the glass fill: tiles, panels, PowOS apps' islands) or a .surface (a soft
+ * fill: chips, fields, buttons on a surface) - nothing else to set. A surface made of several - a merged widget
+ * group, home's foot - carries it on its outline (--lift-edge on top, --lift-shadow under it).
+ */
+.surface { background: var(--soft-fill); border-radius: var(--radius); box-shadow: var(--lift); }
 
 /* A tile: what every home element is drawn on. */
 .tile {
-  background: color-mix(in srgb, var(--color-background) var(--glass), transparent);
-  border: var(--frame) solid var(--color-border);
+  background: var(--glass-fill);
+  border: var(--frame) solid var(--line);
   border-radius: var(--radius);
+  box-shadow: var(--lift);
 }
 .tile.focused { border-color: var(--color-accent); }
+
+/*
+ * A surface on glass: the tint over the frosted wallpaper, that picture placed so its pixels sit where the wallpaper's
+ * are (--gx/--gy: where the surface is on the screen). A surface inside another is only a soft fill on it; PowOS AI's
+ * page is solid (shell.css). No live blur anywhere.
+ */
+.glass :is(.tile, .notif-panel) {
+  background:
+    linear-gradient(var(--glass-fill), var(--glass-fill)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.glass :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
+/*
+ * Live glass (ui/nativeglass.ts, html.glass-native): the display compositor blurs what's behind each surface (the
+ * wallpaper), the page only tints it - no picture, and no backdrop blur of its own.
+ */
+.glass-native :is(.tile, .notif-panel) {
+  background: linear-gradient(var(--glass-fill), var(--glass-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.glass-native :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
+/*
+ * Glass over what the host blurs behind the window (the shade's, the switcher's) or over an app (the assistant's
+ * panel, which can't blur the app it circles on): the same surfaces, tinted only - --glass-behind-tint, more of it.
+ */
+.glass-behind :is(.tile, .notif-panel), .recents :is(.tile, .recents-banner) {
+  background: color-mix(in srgb, var(--color-background) var(--glass-behind-tint), transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.glass-behind :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
 
 .muted { color: var(--color-muted); }

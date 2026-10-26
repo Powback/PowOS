@@ -1,0 +1,2 @@
+Xwayland links the rootfs's own KGSL Mesa (EGL_MESA_image_dma_buf_export, GBM) - built against exactly what it runs
+with, like kwin (see build-pkgs.sh).

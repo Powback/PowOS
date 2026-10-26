@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The verify queue's runner as a launchd agent (tools/phone/verify/queue.sh run; unit units/mac/verify-runner-mac.json).
+  Installed by tools/phone/verify/runner-deploy.sh, which fills in @HOME@ and @VR@ (the verify-runner checkout).
+  - Started on demand: `queue.sh add` kicks it (launchctl kickstart) - no polling; with nothing queued it exits 0 at
+    once. Not WatchPaths: launchd watches through FSEvents, and in this headless Mac's user (Background) domain a
+    watched path never fired (measured 2026-10-23: a dir, a file written, renamed, created - 0 runs).
+  - KeepAlive SuccessfulExit=false: killed or crashed (a non-zero exit), launchd starts it again - so the phone's
+    checks never stay "stopped" because a process went away. A user stop is a pause inside the runner instead.
+  - LimitLoadToSessionType Background: loaded into the user/<uid> domain (this Mac is headless: no gui domain).
+  - WorkingDirectory: the verify-runner checkout, never a worktree that may be removed (getcwd errors).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.powos.verify-runner</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@VR@/tools/phone/verify/queue.sh</string>
+    <string>run</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>@VR@</string>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>ExitTimeOut</key>
+  <integer>30</integer>
+  <key>LimitLoadToSessionType</key>
+  <string>Background</string>
+  <key>ProcessType</key>
+  <string>Standard</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>@HOME@/.cache/powos-verify-queue/runner.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/.cache/powos-verify-queue/runner.log</string>
+</dict>
+</plist>

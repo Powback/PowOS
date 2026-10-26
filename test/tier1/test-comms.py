@@ -138,6 +138,24 @@ class StoreTests(unittest.TestCase):
         self.assertIn("No message arrived", out)
 
 
+class PresentTests(unittest.TestCase):
+    """present / present_choices: the manager's only (its stream is what a chat renders)."""
+
+    def setUp(self):
+        self.root = os.path.join(tempfile.mkdtemp(), "comms")
+
+    def test_only_the_manager_has_them(self):
+        self.assertIn("present_choices", load_server(self.root, "manager").TOOLS)
+        self.assertIn("present", load_server(self.root, "manager").TOOLS)
+        self.assertNotIn("present", load_server(self.root, "devops").TOOLS)
+
+    def test_choices_need_two_options(self):
+        mgr = load_server(self.root, "manager")
+        with self.assertRaises(ValueError):
+            mgr.tool_present_choices({"question": "q", "options": ["only"]})
+        self.assertIn("end your turn", mgr.tool_present_choices({"question": "q", "options": ["a", "b"]}))
+
+
 class StdioProtocolTests(unittest.TestCase):
     """Exercise the real newline-delimited JSON-RPC transport."""
 
@@ -240,6 +258,20 @@ class CliTests(unittest.TestCase):
     def test_from_override(self):
         self._cli("send", "devops", "msg", "--from", "health")
         self.assertIn("from health", self._cli("inbox", "--agent", "devops").stdout)
+
+    def test_backtick_and_cmdsub_message_via_stdin_arrives_verbatim(self):
+        """f18: a body with backticks/$(...) typed inline gets expanded by the CALLER's shell
+        before `send` ever sees it. The safe form is `send <to> - <<'EOF' ... EOF` - a quoted
+        heredoc into stdin, which passes the body through byte-for-byte with nothing evaluated."""
+        msg = "log it with `whoami` and $(pwd) literally, not run"
+        env = dict(os.environ, COMMS_ROOT=self.root, COMMS_AGENT_ID="")
+        p = subprocess.run(
+            ["bash", "-c", f"{sys.executable!r} {SERVER!r} send devops - <<'EOF'\n{msg}\nEOF"],
+            capture_output=True, text=True, env=env, timeout=30,
+        )
+        self.assertEqual(p.returncode, 0, p.stderr)
+        out = self._cli("inbox", "--agent", "devops").stdout
+        self.assertIn(msg, out)
 
 
 if __name__ == "__main__":

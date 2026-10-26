@@ -119,7 +119,7 @@ public class MainActivity extends Activity
         }
     }
     private GamepadOverlay mGamepadOverlay;
-    private android.os.FileObserver mFocusWatcher;
+    private DirWatch.Handle mFocusWatcher;
 
     private static String readFocusedWindow(java.io.File runDir) {
         try {
@@ -284,17 +284,7 @@ public class MainActivity extends Activity
     // Termux-side Binder bridge instead of calling connect() from this UID.
     private void applyConnectionConfig() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        String sock = prefs.getString(KEY_SOCKET_PATH, defaultSocketPath());
-        // PowOS: in rooted mode the daemon has no socket file any more (SessionService.DISPLAY_SOCKET); a saved path
-        // into this app's own run dir is a default from before, not a daemon of the user's.
-        if (sock == null || sock.trim().isEmpty() || (RootMode.enabled()
-                && sock.trim().startsWith(SessionService.runDir(this).getPath() + "/")))
-            sock = defaultSocketPath();
-        boolean useRoot = prefs.getBoolean(KEY_USE_ROOT, false);
-        String helperPath = getApplicationInfo().nativeLibraryDir + "/libfdhelper.so";
-        String bridgePath = getCacheDir().getAbsolutePath() + "/andromarchy_fdbridge.sock";
-        Native.nativeSetCompatibleMode(BuildConfig.COMPATIBLE);
-        Native.nativeConfigure(sock.trim(), useRoot, helperPath, bridgePath);
+        configureConsumer(this);
         if (BuildConfig.COMPATIBLE)
             attachCompatibleFd();
         int customW = prefs.getInt("custom_width", 0);
@@ -302,6 +292,28 @@ public class MainActivity extends Activity
         customScreenWidth = prefs.getInt("custom_width", 0);
         customScreenHeight = prefs.getInt("custom_height", 0);
         Native.nativeSetCustomResolution(customW, customH);
+    }
+
+    /**
+     * The consumer's connection settings (the daemon's socket, root mode) for every consumer of this process: the
+     * desktop's and each Linux window's (PowosWindowActivity). They were set only here, as the desktop opened - after
+     * an app restart with no desktop opened, window consumers tried the old socket file every 500 ms and every Linux
+     * window stayed black (2026-10-23: the daemon logged no consumer for any window surface since its start).
+     */
+    static void configureConsumer(Context ctx) {
+        SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String fallback = SessionService.daemonSocket(ctx);
+        String sock = prefs.getString(KEY_SOCKET_PATH, fallback);
+        // PowOS: in rooted mode the daemon has no socket file any more (SessionService.DISPLAY_SOCKET); a saved path
+        // into this app's own run dir is a default from before, not a daemon of the user's.
+        if (sock == null || sock.trim().isEmpty() || (RootMode.enabled()
+                && sock.trim().startsWith(SessionService.runDir(ctx).getPath() + "/")))
+            sock = fallback;
+        boolean useRoot = prefs.getBoolean(KEY_USE_ROOT, false);
+        String helperPath = ctx.getApplicationInfo().nativeLibraryDir + "/libfdhelper.so";
+        String bridgePath = ctx.getCacheDir().getAbsolutePath() + "/andromarchy_fdbridge.sock";
+        Native.nativeSetCompatibleMode(BuildConfig.COMPATIBLE);
+        Native.nativeConfigure(sock.trim(), useRoot, helperPath, bridgePath);
     }
 
     private void registerCompatibleReceiver() {
@@ -557,16 +569,14 @@ public class MainActivity extends Activity
         mGamepadOverlay.setMouse(new OverlayMouse());
         // Per-game layouts: powos-focus-watch (PowOS) writes the focused window's class into the run dir.
         java.io.File runDir = SessionService.runDir(this);
-        mFocusWatcher = new android.os.FileObserver(runDir,
-                android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
-            @Override
-            public void onEvent(int event, String path) {
-                if (!"focused-window".equals(path)) return;
-                String key = readFocusedWindow(runDir);
-                runOnUiThread(() -> mGamepadOverlay.setGame(key));
-            }
-        };
-        mFocusWatcher.startWatching();
+        // Through DirWatch: the run dir's android-request is watched too, and a FileObserver of its own here took that
+        // watch's events and, at onDestroy, ended it (logout did nothing).
+        mFocusWatcher = DirWatch.watch(runDir,
+                android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO, (event, path) -> {
+                    if (!"focused-window".equals(path)) return;
+                    String key = readFocusedWindow(runDir);
+                    runOnUiThread(() -> mGamepadOverlay.setGame(key));
+                });
         mGamepadOverlay.setGame(readFocusedWindow(runDir));
         root.addView(mGamepadOverlay, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -851,8 +861,16 @@ public class MainActivity extends Activity
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        // PowOS: the desktop (the Plasma app) is on screen - its windows are KDE windows on it, not floating tasks.
+        WindowTasks.desktopShown(this, true);
+    }
+
+    @Override
     protected void onStop() {
         super.onStop();
+        WindowTasks.desktopShown(this, false);
         // Left: folded, the next time it steps aside again (unless asked for again).
         sShownOnPurpose = false;
     }
@@ -1111,7 +1129,7 @@ public class MainActivity extends Activity
             CameraServices.nativeDestroyCameraService();
             cameraInited = false;
         }
-        if (mFocusWatcher != null) mFocusWatcher.stopWatching();
+        if (mFocusWatcher != null) mFocusWatcher.stop();
         if (sInstance == this)
             sInstance = null;
         super.onDestroy();
@@ -1346,6 +1364,38 @@ public class MainActivity extends Activity
      * A drag moves it (anywhere on screen) out of the way of what's underneath.
      */
     /** Round 🎮 toggle for the game controls, top-right (the keyboard button keeps the bottom); long-press edits. */
+    private TextView mGamepadButton;
+
+    /** The game controls on or off (the 🎮 button's tap, and the control centre's Controller tile): saved, back screen follows. */
+    private void setPadShown(boolean show) {
+        mGamepadOverlay.setShown(show);
+        if (mGamepadButton != null) mGamepadButton.setAlpha(show ? 1f : 0.6f);
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
+        applyBackScreen(show);
+    }
+
+    /** Whether the game controls are on: the live overlay's state, else what was saved (it is restored at the next start). */
+    public static boolean padShown(Context c) {
+        MainActivity m = sInstance;
+        if (m != null && m.mGamepadOverlay != null) return m.mGamepadOverlay.getVisibility() == View.VISIBLE;
+        return c.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_GAMEPAD_SHOWN, false);
+    }
+
+    /** The control centre's Controller tile: on/off. With no session up it is saved and applies at the next start. */
+    public static void padShow(Context c, boolean show) {
+        MainActivity m = sInstance;
+        if (m != null && m.mGamepadOverlay != null) m.runOnUiThread(() -> m.setPadShown(show));
+        else c.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
+    }
+
+    /** The tile's long press: the layout editor. False when no session is up to edit on. */
+    public static boolean padEdit() {
+        MainActivity m = sInstance;
+        if (m == null || m.mGamepadOverlay == null) return false;
+        m.runOnUiThread(() -> m.mGamepadOverlay.setEditing(true, () -> m.setPadShown(true)));
+        return true;
+    }
+
     private void addGamepadButton(FrameLayout root) {
         int size = Math.round(44 * mDensity);
         int margin = Math.round(12 * mDensity);
@@ -1362,13 +1412,8 @@ public class MainActivity extends Activity
         b.setContentDescription("Game controls");
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         b.setAlpha(mGamepadOverlay.getVisibility() == View.VISIBLE ? 1f : 0.6f);
-        b.setOnClickListener(v -> {
-            boolean show = mGamepadOverlay.getVisibility() != View.VISIBLE;
-            mGamepadOverlay.setShown(show);
-            v.setAlpha(show ? 1f : 0.6f);
-            prefs.edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
-            applyBackScreen(show);
-        });
+        mGamepadButton = b;
+        b.setOnClickListener(v -> setPadShown(mGamepadOverlay.getVisibility() != View.VISIBLE));
         // Long-press: a menu - the layout editor and the back screen's toggles.
         b.setOnLongClickListener(v -> {
             v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
@@ -1707,6 +1752,26 @@ public class MainActivity extends Activity
             }
         }
         return super.onGenericMotionEvent(event);
+    }
+
+    /**
+     * Valve's (vendor 0x28de) pads are PowOS's own: powos-padd's Deck controller and the Xbox pad Steam Input makes
+     * from it for each game, both created inside PowOS. Android's input stack sees them too (they are kernel input
+     * devices) and hands their buttons to this activity - forwarded, every press would reach the game twice (once as
+     * a pad button, once as a keyboard BTN_* key from here), B would fire the Back action (Android's fallback key),
+     * and a key with no focused window to go to makes an ANR. They already reach Linux directly: drop them here.
+     */
+    private static boolean isPowosPad(KeyEvent event) {
+        InputDevice d = event.getDevice();
+        return d != null && d.getVendorId() == 0x28de
+            && (event.isFromSource(InputDevice.SOURCE_GAMEPAD) || event.isFromSource(InputDevice.SOURCE_JOYSTICK));
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (isPowosPad(event))
+            return true; // consumed: no fallback key either
+        return super.dispatchKeyEvent(event);
     }
 
     @Override

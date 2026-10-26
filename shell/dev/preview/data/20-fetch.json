@@ -1,0 +1,53 @@
+{
+ "dev": {
+  "maker": "OnePlus",
+  "model": "CPH2551",
+  "android": "16",
+  "sdk": 36
+ },
+ "sys": {
+  "kernel": "5.15.180-android13-8-o-g1d3c2f",
+  "uptime": 59760,
+  "apps": 52,
+  "theme": "Matte Black",
+  "codename": "aston",
+  "patch": "2026-09-01",
+  "build": "CPH2551_16.0.1.300(EX01)",
+  "locale": "en_GB",
+  "timezone": "Europe/Oslo",
+  "launcher": "PowOS 0.9",
+  "cpu": {
+   "soc": "SM8550",
+   "cores": 8,
+   "hardware": "Qualcomm Technologies, Inc SM8550",
+   "maker": "Qualcomm",
+   "abi": "arm64-v8a",
+   "maxMhz": 3360
+  },
+  "memory": {
+   "used": 10200547328,
+   "total": 16106127360
+  },
+  "storage": {
+   "used": 63350000000,
+   "total": 488000000000
+  },
+  "display": {
+   "width": 1116,
+   "height": 2484,
+   "hz": 120,
+   "dpi": 442
+  }
+ },
+ "bat": {
+  "level": 30,
+  "status": "on battery",
+  "temp": 31.5,
+  "voltage": 3.85,
+  "health": "good",
+  "cycles": 210,
+  "technology": "Li-ion",
+  "plugged": null
+ },
+ "lx": "{\"user\": \"powos\", \"os\": \"Arch Linux ARM\", \"pkgs\": 935, \"explicit\": 120, \"shell\": \"bash 5.3.20\", \"upgraded\": \"2026-10-19\"}"
+}

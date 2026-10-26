@@ -2,68 +2,33 @@
  * The bar at the bottom: it finds apps and asks PowOS AI. Tapping it types - the keyboard comes up then, not when the
  * drawer is swiped open, which is for browsing. Enter opens the best match; with none, it asks PowOS AI (chat.tsx).
  * The mic (the Compose prompt bar's): hold to talk, let go to ask PowOS AI; a tap dictates into the field instead,
- * ending at the next pause; held and dragged well away, it's cancelled.
+ * until ~4 s with nothing heard or the next tap (pauses don't end either); held and dragged well away, it's cancelled.
+ * It listens from the moment the finger lands: a press that lasts becomes a hold (speech.hold) - no first words lost
+ * to deciding which it is.
  */
-import { useRef } from "preact/hooks";
-import { signal } from "@preact/signals";
+import { useEffect, useRef, useState } from "preact/hooks";
+import type { Ref } from "preact";
+import { GrowField } from "./grow.tsx";
 import { matches } from "./drawer.tsx";
-import { ask, drawer, launch, query } from "../state.ts";
+import { followOpenness } from "./gesture.ts";
+import { drawer, launch, pullKind, query } from "../state.ts";
 import { powos } from "../bridge.ts";
+import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
+import { forget, hearing, listen, listeningFor, makeHold, release, speech, type MicTarget } from "./dictation.ts";
 
 /** A press longer than this is a hold (talk, then send); shorter, a tap (dictate). */
 const HOLD_MS = 250;
 /** Held and moved this far off the mic: cancelled. */
 const CANCEL_PX = 64;
 
-/** What the recognizer hears, as it hears it. */
-export const speech = signal<{ listening: boolean; text: string; error: string | null }>({ listening: false, text: "", error: null });
-
-/** Where a recognition's words go: the field it's for (what was typed before it, and what to do with the whole). */
-export interface MicTarget {
-  /** What the field held when it started: the words go after it. */
-  typed(): string;
-  /** The whole text once it ends; [send]: it was held (talk, then send), else a tap (dictate into the field). */
-  heard(full: string, send: boolean): void;
-  /** It started listening (the bar opens the drawer to show what comes). */
-  started?(): void;
-}
-
-/** The recognition under way, and whether it sends what's heard; typed is what its field had before it. */
-let pending: { send: boolean; typed: string; target: MicTarget } | null = null;
-/** It asked for the mic first: the press that asked can't still be held, so a yes dictates. */
-let asked: MicTarget | null = null;
-
-const join = (...parts: string[]) => parts.map((p) => p.trim()).filter(Boolean).join(" ");
-
-/** What a field shows while it listens: what was typed, then what's heard so far. */
-export const hearing = (target: MicTarget) => (speech.value.listening && pending?.target === target ? join(pending.typed, speech.value.text) : null);
-
-async function listen(hold: boolean, target: MicTarget) {
-  pending = { send: hold, typed: target.typed(), target };
-  target.started?.();
-  (document.activeElement as HTMLElement | null)?.blur();
-  powos.keyboard.hide();
-  navigator.vibrate?.(10);
-  const r = await powos.speech.start(hold);
-  if (r !== "started") pending = null;
-  if (r === "asked") asked = target;
-}
-
-powos.on("speech.state", (s: { listening: boolean; text: string; error: string | null }) => (speech.value = s));
-powos.on("speech.done", ({ text }: { text: string }) => {
-  const p = pending;
-  pending = null;
-  if (p) p.target.heard(join(p.typed, text), p.send && !!text.trim());
-});
-powos.on("speech.permission", ({ granted }: { granted: boolean }) => {
-  if (granted && asked) listen(false, asked);
-  asked = null;
-});
+export { dictate, hearing, interrupt, speech, type MicTarget } from "./dictation.ts";
 
 /** A mic for [target]: hold to talk and send, tap to dictate; held and dragged well away, cancelled. */
 export function Mic({ target }: { target: MicTarget }) {
   const press = useRef<{ x: number; y: number; timer: number; held: boolean; cancelled: boolean } | null>(null);
-  const on = speech.value.listening;
+  const on = speech.value.listening || listeningFor(target);
+  // Shown: the recognizer bound and ready (it doesn't listen), so a press starts at once.
+  useEffect(() => void powos.speech.warm(), []);
   return (
     <button
       type="button"
@@ -79,10 +44,12 @@ export function Mic({ target }: { target: MicTarget }) {
           powos.speech.stop();
           return;
         }
+        // Listens now, as a tap's dictation; still down after HOLD_MS, it's a hold: it sends when let go.
         const p = { x: e.clientX, y: e.clientY, timer: 0, held: false, cancelled: false };
+        listen(false, target);
         p.timer = window.setTimeout(() => {
           p.held = true;
-          listen(true, target);
+          makeHold(target);
         }, HOLD_MS);
         press.current = p;
       }}
@@ -91,7 +58,7 @@ export function Mic({ target }: { target: MicTarget }) {
         if (!p?.held || p.cancelled) return;
         if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > CANCEL_PX) {
           p.cancelled = true;
-          pending = null;
+          forget(target);
           powos.speech.cancel();
           navigator.vibrate?.(5);
         }
@@ -101,13 +68,17 @@ export function Mic({ target }: { target: MicTarget }) {
         press.current = null;
         if (!p) return;
         clearTimeout(p.timer);
-        if (!p.held) listen(false, target);
-        else if (!p.cancelled) powos.speech.stop();
+        // Push to talk: let go, and what's heard is sent at once (release); a tap's dictation goes on until its
+        // silence or the next tap.
+        if (p.held && !p.cancelled) release(target);
       }}
       onPointerCancel={() => {
         const p = press.current;
         press.current = null;
-        if (p) clearTimeout(p.timer);
+        if (!p) return;
+        clearTimeout(p.timer);
+        // The press was taken away (the panel went, a gesture): a hold must not stay listening without its release.
+        if (p.held && !p.cancelled) powos.speech.stop();
       }}
     >
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -118,45 +89,114 @@ export function Mic({ target }: { target: MicTarget }) {
   );
 }
 
+/**
+ * The pill (shell.css .pill): THE compose field - home's search, PowOS AI's page, the side button's panel. Its field
+ * grows to three rows, then scrolls inside, newest words in view (grow.tsx); the mic on its right ([target]: hold to
+ * talk and send, tap to dictate). [value] is what it shows - the caller passes hearing(target) ?? its text, so what's
+ * heard streams in as it's said and stays editable. [sending]: an autosend's words, about to go.
+ */
+export function Pill({
+  target,
+  sending = false,
+  class: cls = "",
+  ...field
+}: {
+  target: MicTarget;
+  value: string;
+  onInput: (v: string) => void;
+  sending?: boolean;
+  class?: string;
+  inputRef?: Ref<HTMLTextAreaElement>;
+  [attr: string]: any;
+}) {
+  // Empty and no status to say (listening, an error): the prompt glyph stands in for a placeholder (shell.css .prompt).
+  const empty = !field.value && !field.placeholder;
+  return (
+    <div class={`${cls} pill tile ${sending ? "sending" : ""} ${empty ? "empty" : ""}`}>
+      {empty && <span class="prompt" aria-hidden="true">&gt;</span>}
+      <GrowField {...(field as { value: string; onInput: (v: string) => void })} />
+      <Mic target={target} />
+    </div>
+  );
+}
+
 /** The bar's field: a held mic asks PowOS AI, a tap dictates into the search; the drawer comes up to show either. */
 const barMic: MicTarget = {
   typed: () => query.value,
-  heard: (full, send) => (send ? ask(full) : (query.value = full)),
-  started: () => (drawer.value = 1),
+  heard: (full, send) => (send ? askHere(full) : (query.value = full)),
+  started: () => openHere(),
 };
 
-export function Bar() {
-  const input = useRef<HTMLInputElement>(null);
+/** Up from the pill: the drawer, unless the pull-up panel is already up (PowOS AI's stays). */
+function openHere() {
+  if (drawer.value === 0) pullKind.value = "apps";
+  drawer.value = 1;
+}
+
+/** The foot's pill field (home.tsx: always there, parked while the search widget is on the grid). */
+const footField = () => document.querySelector<HTMLTextAreaElement>(".home > .bar textarea");
+
+/** Asked from the pill: the one chat surface (the drawer's chat) takes it - from PowOS AI's panel too. */
+function askHere(text: string) {
+  pullKind.value = "apps";
+  askQueued(text);
+}
+
+/**
+ * The search/ask bar: the pill PowOS AI's page asks in (shell.css .pill - the reference material, the field growing to
+ * three rows upward over home without moving anything under it, the mic on its right), the prompt glyph its placeholder.
+ */
+export function Bar({ proxy = false }: { proxy?: boolean }) {
+  const input = useRef<HTMLTextAreaElement>(null);
+  const [focused, setFocused] = useState(false);
   const s = speech.value;
   // While it listens, the field shows what's heard after what was typed.
-  const shown = hearing(barMic) ?? query.value;
+  // The assistant's dictation (the side button, the pet) writes into this field too.
+  const shown = hearing(barMic) ?? hearing(pillTarget) ?? query.value;
+  const active = focused || !!shown || s.listening;
   return (
     <form
-      class="bar tile"
+      class={`bar ${active ? "active" : ""}`}
+      data-p={!proxy || undefined}
+      ref={proxy ? undefined : followOpenness}
       onSubmit={(e) => {
         e.preventDefault();
-        const best = matches.value[0];
+        const best = pullKind.value === "apps" ? matches.value[0] : null;
         if (best) launch(best.key);
-        else ask(query.value);
+        else askHere(query.value);
       }}
       onClick={() => {
-        drawer.value = 1;
-        input.current?.focus();
+        openHere();
+        // The search widget on the grid is the pill's face only: the typing is the foot's pill (home.tsx, parked
+        // there while the widget is on the grid), which comes up with the drawer as the original did.
+        (proxy ? footField() : input.current)?.focus();
         powos.keyboard.show();
       }}
     >
-      <span class="prompt">❯</span>
-      <input
-        ref={input}
+      {/* The pill (shell.css .pill, as PowOS AI's compose): its own box over the bar's place, growing upward - the bar's
+          height (home's layout) never changes. */}
+      <Pill
+        class="bar-pill"
+        target={barMic}
+        sending={sending.value}
+        inputRef={input}
         value={shown}
-        onInput={(e) => (query.value = (e.currentTarget as HTMLInputElement).value)}
-        placeholder={s.listening ? "listening…" : s.error ?? "find an app or ask AI"}
+        onInput={(v: string) => {
+          // Typing over a dictation: it stops, what it heard stays (and nothing sends by itself).
+          takeOver();
+          query.value = v;
+        }}
+        onFocus={() => (takeOver(), setFocused(true))}
+        onBlur={() => setFocused(false)}
+        placeholder={s.listening ? "listening…" : (s.error ?? undefined)}
+        aria-label={pullKind.value === "ai" && drawer.value > 0 ? "Ask PowOS AI" : "Search"}
         enterKeyHint={query.value.trim() && !matches.value.length ? "send" : "go"}
         autocomplete="off"
         autoCapitalize="off"
         spellcheck={false}
+        readOnly={proxy}
+        tabIndex={proxy ? -1 : undefined}
       />
-      <Mic target={barMic} />
     </form>
   );
 }

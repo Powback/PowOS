@@ -27,25 +27,19 @@ private const val MAX_FILE_BYTES = 1 shl 20
 fun watchFile(file: File): Flow<String> =
     callbackFlow {
         val changed = Channel<Unit>(Channel.CONFLATED)
-        var observer: FileObserver? = null
+        var observer: andro.marchy.DirWatch.Handle? = null
         var watched: File? = null
 
         fun watch() {
             val dir = file.parentFile ?: return
             if (observer != null && watched == dir && dir.isDirectory) return
-            observer?.stopWatching()
+            observer?.stop()
             observer = null
             if (!dir.isDirectory) return
             val mask = FileObserver.CLOSE_WRITE or FileObserver.MODIFY or FileObserver.MOVED_TO or FileObserver.MOVED_FROM or FileObserver.CREATE or FileObserver.DELETE
-            observer =
-                object : FileObserver(dir, mask) {
-                    override fun onEvent(
-                        event: Int,
-                        path: String?,
-                    ) {
-                        if (path == file.name) changed.trySend(Unit)
-                    }
-                }.also { it.startWatching() }
+            // Shared with every other watch of the folder (andro.marchy.DirWatch): a FileObserver of its own would take
+            // their events (a widget's file in the run dir took android-request's) and end their watch when stopped.
+            observer = andro.marchy.DirWatch.watch(dir, mask) { _, path -> if (path == file.name) changed.trySend(Unit) }
             watched = dir
         }
 
@@ -67,7 +61,7 @@ fun watchFile(file: File): Flow<String> =
             }
         awaitClose {
             loop.cancel()
-            observer?.stopWatching()
+            observer?.stop()
         }
     }.flowOn(Dispatchers.IO).distinctUntilChanged()
 

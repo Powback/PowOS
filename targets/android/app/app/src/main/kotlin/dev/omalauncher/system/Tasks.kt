@@ -25,6 +25,8 @@ object Tasks {
         val id: Int,
         val component: ComponentName?,
         val label: String?,
+        /** When it was last in front (SystemClock.uptimeMillis): its snapshot is new only when this is. */
+        val lastActive: Long = 0,
     )
 
     /** Recent tasks, newest first: what's listed in the switcher (home and the switcher itself aren't). */
@@ -38,9 +40,13 @@ object Tasks {
         val tasks = am.getRecentTasks(max, ActivityManager.RECENT_IGNORE_UNAVAILABLE)
         return tasks.map { t ->
             val component = t.baseIntent.component ?: t.baseActivity ?: t.topActivity
-            Task(t.taskId, component, t.taskDescription?.label)
+            Task(t.taskId, component, t.taskDescription?.label, lastActive(t))
         }
     }
+
+    /** TaskInfo.lastActiveTime (a hidden field; 0 where it can't be read). */
+    private fun lastActive(t: ActivityManager.RecentTaskInfo): Long =
+        runCatching { android.app.TaskInfo::class.java.getField("lastActiveTime").getLong(t) }.getOrDefault(0L)
 
     /** The task the user was in (shown when the switcher opened): the newest one that's visible, or null (home). */
     fun visible(context: Context): Int? {
@@ -56,12 +62,23 @@ object Tasks {
     fun open(
         context: Context,
         id: Int,
+        options: ActivityOptions = ActivityOptions.makeBasic(),
     ): Boolean {
+        // A floating window that is there already (unfolded home): raised alone. startActivityFromRecents of a freeform
+        // task on this ROM is a TO_FRONT transition that sends every other floating task TO_BACK - the other windows
+        // vanished (logcat 2026-10-24 #901: TO_FRONT t2915, t2909 m=TO_BACK), where moveTaskToFront of the same kind of
+        // task moved only that one (#902: t2909 TO_FRONT, nothing else in the change). The dock, the switcher, a launcher
+        // tap on an open Linux window and the quick switch all come through here. A task of another mode (full screen,
+        // folded, gone) still takes startActivityFromRecents: it restarts a dead task and applies [options]' bounds.
+        if (AppWindows.floating(context) && FreeformTasks.list(context).any { it.id == id } && FreeformTasks.raise(context, id)) {
+            Log.i(TAG, "task $id raised (moveTaskToFront: the other floating windows stay)")
+            return true
+        }
         val result =
             runCatching {
                 HiddenApi.allow()
                 atm().javaClass.getMethod("startActivityFromRecents", Int::class.javaPrimitiveType, android.os.Bundle::class.java)
-                    .invoke(atm(), id, ActivityOptions.makeBasic().toBundle()) as Int
+                    .invoke(atm(), id, options.toBundle()) as Int
             }.onFailure { Log.w(TAG, "can't start task $id from recents", it) }.getOrNull()
         // START_SUCCESS (0) and the other non-negative codes (delivered to top, task to front) are a switch.
         if (result != null) return result >= 0
@@ -69,12 +86,147 @@ object Tasks {
         return runCatching { context.getSystemService(ActivityManager::class.java).moveTaskToFront(id, 0) }.isSuccess
     }
 
-    /** Removes task [id] from recents (and ends its activities, as the stock switcher's swipe away). */
-    fun remove(id: Int): Boolean =
+    /** WM Shell's ISplitScreen (ILauncherProxy.onInitialize hands it over): the switcher's split screen. */
+    @Volatile
+    var splitScreen: android.os.IBinder? = null
+
+    /**
+     * Tasks [first] (left / top) and [second] side by side, half and half: WM Shell's split screen, as Quickstep's
+     * split from overview (ISplitScreen.startTasks). False when WM Shell can't be asked.
+     *
+     * HACK: ISplitScreen is WM Shell's, hidden and not in the SDK: its call is written by hand as the generated AIDL
+     * would (this phone's SystemUI: startTasks is transaction 11; SNAP_TO_2_50_50 is 1; InstanceId's parcel is its
+     * int). Real fix: none for an app - Quickstep compiles against the platform's copy.
+     */
+    fun split(
+        first: Int,
+        second: Int,
+    ): Boolean {
+        val binder = splitScreen ?: return false.also { Log.w(TAG, "no ISplitScreen from SystemUI") }
+        return runCatching {
+            val data = android.os.Parcel.obtain()
+            try {
+                data.writeInterfaceToken("com.android.wm.shell.splitscreen.ISplitScreen")
+                data.writeInt(first)
+                data.writeTypedObject(null as android.os.Bundle?, 0)
+                data.writeInt(second)
+                data.writeTypedObject(null as android.os.Bundle?, 0)
+                data.writeInt(SPLIT_POSITION_TOP_OR_LEFT)
+                data.writeInt(SNAP_TO_2_50_50)
+                // No remote transition (WM Shell animates it); an InstanceId (its parcel: present, then its id).
+                data.writeInt(0)
+                data.writeInt(1)
+                data.writeInt((System.nanoTime() and 0xFFFFF).toInt().coerceAtLeast(1))
+                binder.transact(SPLIT_START_TASKS, data, null, android.os.IBinder.FLAG_ONEWAY)
+            } finally {
+                data.recycle()
+            }
+        }.onFailure { Log.w(TAG, "can't split $first and $second", it) }.isSuccess
+    }
+
+    /** Task [id] in a floating window (freeform: the OS's pop-up view), in the middle of the screen. */
+    fun float(
+        context: Context,
+        id: Int,
+    ): Boolean {
+        val screen = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
+        val w = screen.width() * 3 / 4
+        val h = screen.height() / 2
+        return open(context, id, freeformOptions(android.graphics.Rect(screen.centerX() - w / 2, screen.centerY() - h / 2, screen.centerX() + w / 2, screen.centerY() + h / 2)))
+    }
+
+    /**
+     * Launch options ([base]'s, else plain) for a floating (freeform) window at [bounds] (screen px). HACK: ActivityOptions.setLaunchWindowingMode
+     * is hidden (reflected); real fix: none for an app. Without freeform support (enable_freeform_support off) Android
+     * opens the app full screen anyway.
+     */
+    fun freeformOptions(
+        bounds: android.graphics.Rect,
+        base: ActivityOptions? = null,
+    ): ActivityOptions {
+        val options = (base ?: ActivityOptions.makeBasic()).setLaunchBounds(bounds)
         runCatching {
             HiddenApi.allow()
-            atm().javaClass.getMethod("removeTask", Int::class.javaPrimitiveType).invoke(atm(), id) as Boolean
+            ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(options, WINDOWING_MODE_FREEFORM)
+        }.onFailure { Log.w(TAG, "no freeform launch", it) }
+        return options
+    }
+
+    /** Task [id]'s app's info screen (Settings). */
+    fun info(
+        context: Context,
+        id: Int,
+    ): Boolean {
+        val pkg = list(context).firstOrNull { it.id == id }?.component?.packageName ?: return false
+        return runCatching {
+            context.startActivity(
+                android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", pkg, null))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.isSuccess
+    }
+
+    /** Task [id]'s last frame saved as a screenshot (Pictures/Screenshots); its name, or null. */
+    fun screenshot(
+        context: Context,
+        id: Int,
+    ): String? {
+        val jpeg = snapshot(id, Int.MAX_VALUE) ?: return null
+        val name = "Screenshot_${java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())}.jpg"
+        return runCatching {
+            val values =
+                android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
+                    put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Screenshots")
+                }
+            val uri = context.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+            context.contentResolver.openOutputStream(uri)?.use { it.write(jpeg) }
+            name
+        }.onFailure { Log.w(TAG, "can't save task $id's screenshot", it) }.getOrNull()
+    }
+
+    private const val SPLIT_START_TASKS = 11
+    private const val SPLIT_POSITION_TOP_OR_LEFT = 0
+    private const val SNAP_TO_2_50_50 = 1
+    private const val WINDOWING_MODE_FREEFORM = 5
+
+    /**
+     * Removes task [id] from recents (and ends its activities, as the stock switcher's swipe away) - any app's, one
+     * whose widget is on home too: the widget is RemoteViews PowOS hosts, it outlives the provider's process
+     * (AppWidgets keeps the last ones and heals). PowOS's own (the assistant, a window) is finished as a task of ours -
+     * its activities only, never the process that hosts home, its widgets and the gestures.
+     */
+    fun remove(
+        context: Context,
+        id: Int,
+    ): Boolean {
+        val task = list(context).firstOrNull { it.id == id }
+        val pkg = task?.component?.packageName
+        if (pkg == context.packageName) {
+            val own = context.getSystemService(ActivityManager::class.java).appTasks.firstOrNull { runCatching { it.taskInfo?.taskId }.getOrNull() == id }
+            if (own != null) return runCatching { own.finishAndRemoveTask() }.onFailure { Log.w(TAG, "can't finish own task $id", it) }.isSuccess
+            Log.w(TAG, "task $id is PowOS's own but not among its app tasks: removeTask")
+        }
+        return runCatching {
+            HiddenApi.allow()
+            (atm().javaClass.getMethod("removeTask", Int::class.javaPrimitiveType).invoke(atm(), id) as Boolean).also { if (!it) Log.w(TAG, "removeTask($id) said no (pkg $pkg, listed ${task != null})") }
         }.onFailure { Log.w(TAG, "can't remove task $id", it) }.getOrDefault(false)
+    }
+
+    /**
+     * Takes task [id]'s snapshot now (its window as it is this moment) into the system's cache, which [snapshot] then
+     * serves: the switcher's card of the app it was opened over shows the app as it was left, not as it was last time.
+     * As WM Shell's recents controller does for Quickstep (screenshotTask: IActivityTaskManager.takeTaskSnapshot(id,
+     * updateCache)). Blocking (a screen capture in the system server): off the main thread.
+     */
+    fun capture(id: Int): Boolean =
+        runCatching {
+            HiddenApi.allow()
+            val m = atm().javaClass.methods.first { it.name == "takeTaskSnapshot" }
+            val args: Array<Any?> = if (m.parameterTypes.size >= 2) arrayOf(id, true) else arrayOf(id)
+            m.invoke(atm(), *args) != null
+        }.onFailure { Log.w(TAG, "can't take task $id's snapshot", it) }.getOrDefault(false)
 
     /**
      * Task [id]'s last frame (the system's task snapshot) as a JPEG at most [width] px wide, or null if it has none.

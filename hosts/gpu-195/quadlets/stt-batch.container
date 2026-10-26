@@ -1,0 +1,42 @@
+# gpu-195: speech to text for everything that isn't the realtime voice path - files and recordings from any PowOS
+# (`powos transcribe`) or any OpenAI-compatible client, behind http://stt.pow (Traefik on .100, PowStation
+# config/traefik/dynamic/stt.yml). Same whisper-fast image and model as voice-stt, but on GPU1 with its own copy of
+# the model: a long file never queues voice-agent's turns (GPU0 is the voice path's alone, docs/GPU-SERVERS-PLAN.md),
+# and CPU contention goes to the voice path first (2 CPUs at a low cpu weight; voice-stt has 4 at the default).
+# File settings: Silero VAD skips silence, uploads up to 500 MB, at most 4 requests running or waiting (then 503).
+# OpenAI API: POST /v1/audio/transcriptions (json|text|verbose_json|srt|vtt, stream=true for SSE deltas), GET /health.
+# Unit: powos units show stt-batch  (repo units/gpu-195/stt-batch.json)
+[Unit]
+Description=PowOS STT for files (whisper-fast large-v3-turbo, GPU1) - stt.pow
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=stt-batch
+Image=localhost/voice-stt-fast:latest
+PublishPort=8001:8000
+AddDevice=nvidia.com/gpu=1
+SecurityLabelDisable=true
+Volume=/var/lib/powos/models/hf:/root/.cache/huggingface
+Environment=WHISPER__MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
+Environment=WHISPER__INFERENCE_DEVICE=cuda
+Environment=WHISPER__COMPUTE_TYPE=float16
+Environment=WHISPER_BEAM=1
+Environment=WHISPER_MIN_WINDOW=10
+Environment=WHISPER_VAD=1
+# Clips under 2 s decode with timestamps: without them a short word comes back repeated ("Yes. Yes. Yes.").
+Environment=WHISPER_SHORT_TIMESTAMPS_S=2
+Environment=MAX_UPLOAD_MB=500
+Environment=MAX_QUEUE=4
+Environment=OMP_NUM_THREADS=2
+Label=io.powos.unit=stt-batch
+# cpu-shares 128 (cpu.weight ~5 vs the voice units' 100): under CPU contention the voice path's mel/VAD wins.
+PodmanArgs=--memory=6g --memory-swap=6g --cpus=2 --cpu-shares=128 --pids-limit=512
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

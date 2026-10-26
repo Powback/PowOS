@@ -1,0 +1,126 @@
+From 6f52f86a22063726b8aed9415859eb62d7ae97f5 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Fri, 23 Oct 2026 19:53:23 +0200
+Subject: [PATCH] backends/anland: windows a task shows are shown to X too
+
+An X11 window exported as an Android task lives on the tasks desktop, which is
+never current, so X11Window::updateVisibility kept it Kept (hidden preview):
+stacked under the root-sized InputOnly guard window. Xwayland delivers a touch or
+click to the X window on top at its root coordinates, so the guard took every
+one - no X11 window in a task (Steam, its dialogs) took a tap, and a Kept window
+dropped its input focus. Windows a task draws carry powosShownByTask, and such a
+window is shown (Mapped). A task's window is also raised when its task takes the
+focus or a touch, so X's stacking has the touched task's window on top where all
+task windows overlap.
+---
+ src/backends/anland/anland_window_task.cpp | 28 +++++++++++++++++++++-
+ src/x11window.cpp                          |  9 +++++--
+ 2 files changed, 34 insertions(+), 3 deletions(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 098ddc9..21a72e7 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -29,6 +29,9 @@
+ #include "wayland_server.h"
+ #include "window.h"
+ #include "workspace.h"
++#if KWIN_BUILD_X11
++#include "x11window.h"
++#endif
+ 
+ #include <QDBusConnection>
+ #include <QSocketNotifier>
+@@ -47,6 +50,22 @@ extern "C" {
+ namespace KWin
+ {
+ 
++// Every window a task draws is shown, though it is on the tasks desktop (KWin keeps an X11 window off the current
++// desktop under its input guard otherwise: X11Window::updateVisibility). [shown] false: hidden again (or shown, when it
++// is back on the current desktop).
++static void setShownByTask(Window *window, bool shown)
++{
++    if (!window || window->isDeleted() || window->property("powosShownByTask").toBool() == shown) {
++        return;
++    }
++    window->setProperty("powosShownByTask", shown);
++#if KWIN_BUILD_X11
++    if (auto *x11 = qobject_cast<X11Window *>(window)) {
++        x11->updateVisibility();
++    }
++#endif
++}
++
+ // The consumer gives up on a buffer it handed over after 5 s (refresh_done): answer well before.
+ static constexpr int s_keepaliveMs = 2000;
+ // Touch ids of a task's fingers: never the desktop's own (Android's are small).
+@@ -148,7 +167,10 @@ void AnlandWindowTask::focus()
+ {
+     if (m_window && m_exported) {
+         // The window is shown (on the tasks desktop, which isn't current), so it can take the focus without a desktop
+-        // switch: requestFocus() neither raises nor switches (activateWindow() would switch to its desktop).
++        // switch: requestFocus() neither raises nor switches (activateWindow() would switch to its desktop). Raised
++        // too: every task's window lies at the same place on that desktop, and Xwayland gives a touch to the X window
++        // on top at its root coordinates - KWin's stacking follows the task in front (raising switches nothing).
++        workspace()->raiseWindow(m_window);
+         workspace()->requestFocus(m_window, true);
+     }
+ }
+@@ -215,6 +237,7 @@ void AnlandWindowTask::goLive()
+         if (m_maximizeMode != MaximizeRestore && !m_window->isFullScreen()) {
+             m_window->maximize(MaximizeRestore);
+         }
++        setShownByTask(m_window, true); // before the move: never Kept on the way (that drops its focus)
+         if (VirtualDesktop *desktop = m_tasks->tasksDesktop()) {
+             m_window->setDesktops({desktop});
+         }
+@@ -248,6 +271,7 @@ void AnlandWindowTask::watchWindow(Window *window)
+         }
+     }
+     window->refOffscreenRendering();
++    setShownByTask(window, true);
+     Watched watched;
+     watched.window = window;
+     watched.damaged = connect(window, &Window::damaged, this, [this]() {
+@@ -302,6 +326,7 @@ void AnlandWindowTask::unwatchAll()
+         disconnect(w.closed);
+         if (w.window) {
+             w.window->unrefOffscreenRendering();
++            setShownByTask(w.window, false);
+         }
+     }
+     m_watched.clear();
+@@ -639,6 +664,7 @@ void AnlandWindowTask::processInputEvent(const InputEvent &ev)
+             }
+             focus();
+             if (target != m_window && !target->isPopupWindow()) {
++                workspace()->raiseWindow(target); // over the window for Xwayland too (it picks by X stacking)
+                 workspace()->requestFocus(target, true); // a dialog: its fields take the keys
+             }
+             if (target != m_window || !m_window->hitTest(pos)) {
+diff --git a/src/x11window.cpp b/src/x11window.cpp
+index 7ec3e37..a3d8f90 100644
+--- a/src/x11window.cpp
++++ b/src/x11window.cpp
+@@ -1148,11 +1148,16 @@ void X11Window::updateVisibility()
+         return;
+     }
+     info->setState(NET::States(), NET::Hidden);
+-    if (!isOnCurrentDesktop() || waylandServer()->isScreenLocked()) {
++    if (waylandServer()->isScreenLocked()) {
+         internalKeep();
+         return;
+     }
+-    if (!isOnCurrentActivity()) {
++    // PowOS (anland): a window an Android task shows (powosShownByTask, set by AnlandWindowTask for every window it
++    // draws) is shown, though it lives on the tasks desktop, which is never current. Kept instead, it is stacked under
++    // the guard window (propagateWindows: hidden windows go below it), a root-sized InputOnly window, so every touch
++    // and click Xwayland delivers at the window's root coordinates went to the guard - no X11 window in a task took a
++    // tap (Steam, its dialogs) - and a Kept window gives its input focus away (internalKeep: focusToNull).
++    if ((!isOnCurrentDesktop() || !isOnCurrentActivity()) && !property("powosShownByTask").toBool()) {
+         internalKeep();
+         return;
+     }
+-- 
+2.50.1 (Apple Git-155)
+

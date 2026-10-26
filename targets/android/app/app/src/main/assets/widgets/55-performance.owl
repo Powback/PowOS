@@ -1,13 +1,14 @@
 widget "performance" {
-  meta { owl: 7; description: "The phone under load: Adreno GPU busy and clock, CPU load, and how hot the CPU, GPU, skin and battery run"; version: "1.0"; license: "MIT"; category: "system" }
+  meta { owl: 7; description: "The phone under load: Adreno GPU busy and clock, CPU load, and how hot the CPU, GPU, skin and battery run"; version: "1.1"; license: "MIT"; category: "system" }
   page: 1
   order: 7
   size: 6x3
   minSize: 2x2
 
-  // One cheap read every 2 s, builtins only (no forks per sensor): GPU busy %, GPU clock (Hz), GPU temp, the
+  // One cheap read every 5 s (each changes the widget: home repaints, the glass under it re-composites - at most one
+  // a 5 s on an idle home, 2026-10-21), builtins only (no forks per sensor): GPU busy %, GPU clock (Hz), GPU temp, the
   // hottest CPU sensor, skin and battery temps (m°C), then /proc/stat's total and idle jiffies for the CPU load.
-  source raw = cmd('k=/sys/class/kgsl/kgsl-3d0; read b x < $k/gpu_busy_percentage; read f < $k/devfreq/cur_freq; read g < $k/temp; c=0; s=0; bt=0; for z in /sys/class/thermal/thermal_zone*; do read t < $z/type; read v < $z/temp || continue; [ "${t#cpu}" != "$t" ] && [ "$v" -gt "$c" ] && c=$v; [ "$t" = skin-msm-therm ] && s=$v; [ "$t" = battery ] && bt=$v; done 2>/dev/null; read _ u n y i w q r rest < /proc/stat; echo $b $f $g $c $s $bt $((u+n+y+i+w+q+r)) $((i+w))') every 2s
+  source raw = cmd('k=/sys/class/kgsl/kgsl-3d0; read b x < $k/gpu_busy_percentage; read f < $k/devfreq/cur_freq; read g < $k/temp; c=0; s=0; bt=0; for z in /sys/class/thermal/thermal_zone*; do read t < $z/type; read v < $z/temp || continue; [ "${t#cpu}" != "$t" ] && [ "$v" -gt "$c" ] && c=$v; [ "$t" = skin-msm-therm ] && s=$v; [ "$t" = battery ] && bt=$v; done 2>/dev/null; read _ u n y i w q r rest < /proc/stat; echo $b $f $g $c $s $bt $((u+n+y+i+w+q+r)) $((i+w))') every 5s
 
   let v = words(raw ?? "").map(w => num(w, 0))
   let gpu = raw == null ? null : v[0]
@@ -49,14 +50,14 @@ widget "performance" {
     Box {
       width: dim; height: dim; align: center
       Ring {
-        value: pct ?? 0; max: 100; start: 225; sweep: 270; thickness: dim >= 90 ? 9 : 7; fill: true
+        value: pct ?? 0; max: 100; start: 225; sweep: 270; thickness: clamp(round(dim * 0.1), 7, 14); fill: true
         color: deg >= 80 ? red : deg >= 65 ? orange : tint; track: alpha(muted, 0.25)
         animate value: spring()
       }
       Column {
         gap: 0; align: center
-        Text { text: pct == null ? "…" : "${round(pct)}%"; fontSize: dim >= 90 ? 22 : 16; bold: true; align: center }
-        Text { text: deg > 0 ? "${what} ${round(deg)}°" : what; style: label; align: center; maxLines: 1 }
+        Text { text: pct == null ? "…" : "${round(pct)}%"; fontSize: clamp(round(dim * 0.24), 15, 60); bold: true; align: center }
+        Text { text: deg > 0 ? "${what} ${round(deg)}°" : what; fontSize: clamp(round(dim * 0.09), 11, 20); color: muted; align: center; maxLines: 1 }
       }
     }
   }
@@ -72,18 +73,34 @@ widget "performance" {
   let short = rows != null && rows < 3
   let tall = rows != null && rows >= 4
   let across = cols != null && cols < 3 ? 1 : 2
-  let traced = narrow && rows != null && rows >= 5
-  let below = (rows != null && rows >= 3 ? 64 : across == 1 ? 46 : 28) + (traced ? 110 : 0)
-  let dim = tileWidth == null || tileHeight == null ? 80 : clamp(min((tileWidth - 24) / across - 8, tileHeight - 24 - below), 44, 124)
+  // What sits under the gauges: the temperatures (3+ rows), the CPU's line (one gauge), and the traces when the tile is
+  // tall enough for them under gauges as wide as it (the inner screen's tall tiles: not a gap down the middle). Two
+  // gauges on a short tile have nothing under them, so they take the whole height instead of reserving a strip.
+  let baseBelow = rows != null && rows >= 3 ? 64 : across == 1 ? 22 : 0
+  let wDim = tileWidth == null ? 80 : (tileWidth - 24 - (across - 1) * 6) / across
+  let traced = narrow && tileHeight != null && tileHeight - 24 - baseBelow - min(wDim, 280) >= 120
+  let below = baseBelow + (traced ? 110 : 0)
+  // The gauges as big as the tile allows (6 dp between two), so they fill the card instead of floating in it.
+  // No cap but the tile: a 160 dp cap left the inner screen's big tiles a small gauge in a lot of glass.
+  let dim = tileWidth == null || tileHeight == null ? 80 : clamp(min(wDim, tileHeight - 24 - below), 44, 280)
+  // Room left under the gauges on a short tile: the GPU clock and the skin temperature in it.
+  // Only when a whole line fits (the column has no gaps, so the line needs just its own ~16 dp): never half-clipped.
+  let spare = tileHeight != null && rows != null && rows < 3 && tileHeight - 24 - below - dim >= 18
   // Wide and tall: both gauges as big as half the width and about half the height allow.
-  let big = tileWidth == null || tileHeight == null ? 124 : clamp(min((tileWidth - 40) / 2, (tileHeight - 24) * 0.45), 90, 180)
+  // Wide and short or 3 rows: the GPU's gauge the tile's full inner height, beside the traces.
+  let side = tileWidth == null || tileHeight == null ? (short ? 84 : 124) : clamp(min(tileHeight - 24, (tileWidth - 24) * 0.42), 72, 260)
+  let big = tileWidth == null || tileHeight == null ? 124 : clamp(min((tileWidth - 40) / 2, (tileHeight - 24) * 0.45), 90, 260)
 
   if narrow {
     Column {
-      gap: 6; align: center; weight: 1
-      Spacer { weight: 1 }
+      gap: 0; align: center; weight: 1
+      // Centred when the gauges are all there is; with the temperatures under them, the gauges at the top and the
+      // temperatures at the foot - the room between, not above and below the whole.
+      if rows == null || rows < 3 {
+        Spacer { weight: 1 }
+      }
       Row {
-        gap: 8; align: center
+        gap: 6; align: center
         Gauge { what: "gpu"; pct: gpu; deg: tGpu; dim: dim; tint: accent }
         if across == 2 {
           Gauge { what: "cpu"; pct: cpu; deg: tCpu; dim: dim; tint: magenta }
@@ -91,6 +108,9 @@ widget "performance" {
       }
       if across == 1 {
         Text { text: cpu == null ? "cpu …" : "cpu ${round(cpu)}%"; style: small; color: magenta; align: center; maxLines: 1 }
+      }
+      if spare && across == 2 {
+        Text { text: "${mhz == null ? "adreno" : round(mhz) + " MHz"}${tSkin > 0 ? " · skin " + round(tSkin) + "°" : ""}"; style: label; color: muted; align: center; maxLines: 1 }
       }
       Spacer { weight: 1 }
       if traced {
@@ -142,15 +162,15 @@ widget "performance" {
 
       // Adreno as a gauge: the arc fills with load, its color warms with the GPU's temperature.
       Box {
-        width: short ? 84 : 124; height: short ? 84 : 124; align: center
+        width: side; height: side; align: center
         Ring {
-          value: gpu ?? 0; max: 100; start: 225; sweep: 270; thickness: short ? 7 : 9; fill: true
+          value: gpu ?? 0; max: 100; start: 225; sweep: 270; thickness: clamp(round(side * 0.08), 7, 13); fill: true
           color: tGpu >= 80 ? red : tGpu >= 65 ? orange : accent; track: alpha(muted, 0.25)
           animate value: spring()
         }
         Column {
           gap: 0; align: center
-          Text { text: gpu == null ? "…" : "${round(gpu)}%"; fontSize: short ? 16 : 24; bold: true; align: center }
+          Text { text: gpu == null ? "…" : "${round(gpu)}%"; fontSize: clamp(round(side * 0.2), 16, 32); bold: true; align: center }
           if !short {
             Text { text: mhz == null ? "" : "${round(mhz)} MHz"; style: small; color: muted; align: center }
           }

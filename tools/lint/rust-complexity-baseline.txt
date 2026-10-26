@@ -1,0 +1,5 @@
+1 apps/agents/module/src/lib.rs cognitive_complexity
+2 apps/agents/module/src/lib.rs excessive_nesting
+2 apps/agents/module/src/lib.rs too_many_arguments
+1 apps/agents/module/src/lib.rs too_many_lines
+2 apps/pet/module/src/lib.rs excessive_nesting

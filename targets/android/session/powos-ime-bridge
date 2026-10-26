@@ -1,0 +1,115 @@
+#!/usr/bin/python3
+# /usr/bin/powos-ime-bridge: Android's keyboard for X11 apps' text fields (unit x11-ime-bridge, skill powos-gestures).
+#
+# Wayland apps ask for the keyboard through text-input (KWin patches 0010/0012). Xwayland has no text-input, so an
+# X11 app (Steam's CEF, any GTK/Qt app on X11) never asks. X11 apps do tell IBus: GTK on X11 picks IBus's IM module
+# when it is installed, XIM apps reach it through ibus-daemon --xim (XMODIFIERS=@im=ibus, plasma-workspace env
+# powos-ime.sh). This program runs ibus-daemon and is its panel, the one process IBus tells which input context has
+# the focus; it passes that on to KWin (org.kde.KWin /org/powos/Keyboard SetX11TextFocus, patch 0016), which shows or
+# hides Android's keyboard. Typed text goes back as key events (KWin's InputMethod without text-input).
+#
+# Started by the session's autostart (/etc/xdg/autostart/ibus.desktop, ours). Log: $XDG_RUNTIME_DIR/powos-ime-bridge.log
+import os
+import signal
+import subprocess
+import sys
+
+import gi
+
+gi.require_version("IBus", "1.0")
+from gi.repository import Gio, GLib, IBus  # noqa: E402
+
+# IBus's own input context for "nothing has the focus" (its global engine's): the first one ibus-daemon makes, at
+# start (bus/ibusimpl.c bus_ibus_impl_init), so always InputContext_1. Its focus is no text field.
+FAKE_CONTEXT = "/org/freedesktop/IBus/InputContext_1"
+# A field-to-field move is a focus-out then a focus-in: hide only after this, or the keyboard would flicker.
+BLUR_MS = 150
+
+
+def log(*a):
+    print("powos-ime-bridge:", *a, file=sys.stderr, flush=True)
+
+
+class Bridge:
+    def __init__(self):
+        self.session = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        self.sent = None
+        self.blur = 0
+        self.panel = None
+        self.warned = False
+
+    def tell_kwin(self, focused):
+        if self.sent == focused:
+            return
+        self.sent = focused
+        log("x11 text focus", "in" if focused else "out")
+        self.session.call(
+            "org.kde.KWin", "/org/powos/Keyboard", "org.powos.Keyboard", "SetX11TextFocus",
+            GLib.Variant("(b)", (focused,)), None, Gio.DBusCallFlags.NO_AUTO_START, 2000, None, self.answered)
+
+    def answered(self, conn, res):
+        try:
+            conn.call_finish(res)
+        except GLib.Error as e:
+            if not self.warned:  # a KWin without patch 0016, or KWin restarting
+                log("KWin did not take it:", e.message)
+                self.warned = True
+
+    def focus_in(self, _panel, path):
+        if self.blur:
+            GLib.source_remove(self.blur)
+            self.blur = 0
+        if path == FAKE_CONTEXT:
+            self.focus_out(None, path)
+        else:
+            self.tell_kwin(True)
+
+    def focus_out(self, _panel, _path):
+        if not self.blur:
+            self.blur = GLib.timeout_add(BLUR_MS, self.blurred)
+
+    def blurred(self):
+        self.blur = 0
+        self.tell_kwin(False)
+        return False
+
+    def connected(self, bus):
+        # The panel: IBus calls FocusIn/FocusOut on whoever owns org.freedesktop.IBus.Panel (no panel of its own:
+        # --panel=disable), the focused context first.
+        self.panel = IBus.PanelService(connection=bus.get_connection(), object_path=IBus.PATH_PANEL)
+        self.panel.connect("focus-in", self.focus_in)
+        self.panel.connect("focus-out", self.focus_out)
+        bus.request_name(IBus.SERVICE_PANEL, IBus.BusNameFlag.REPLACE_EXISTING)
+        log("panel up on", IBus.get_address())
+
+
+def main():
+    # One IBus, ours: --replace ends any other (an image's autostart, a previous session's). No emoji picker or
+    # panel processes: Android's keyboard does both.
+    daemon = subprocess.Popen(["ibus-daemon", "--replace", "--xim", "--panel=disable", "--emoji-extension=disable"])
+    IBus.init()
+    bus = IBus.Bus()
+    bridge = Bridge()
+    loop = GLib.MainLoop()
+
+    def daemon_gone(pid, status):
+        log("ibus-daemon exited", status)
+        bridge.tell_kwin(False)
+        loop.quit()
+
+    GLib.child_watch_add(GLib.PRIORITY_DEFAULT, daemon.pid, daemon_gone)
+    if bus.is_connected():
+        bridge.connected(bus)
+    else:
+        bus.connect("connected", bridge.connected)
+    for s in (signal.SIGTERM, signal.SIGINT):
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, s, loop.quit)
+    loop.run()
+    bridge.tell_kwin(False)
+    if daemon.poll() is None:
+        daemon.terminate()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

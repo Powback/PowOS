@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- tools/phone/verify/window-max-video.html: window-max.sh's "video" stage page (served on the phone's 127.0.0.1).
+     A playing <video> (a canvas stream: a moving box + the page's viewport size, so a recording shows whether the
+     content took the window's new size). A tap anywhere: the video asks for full screen, a tap again leaves it
+     (Back leaves it too). document.title says the state for the check. -->
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>wmax windowed</title>
+<style>html,body{margin:0;height:100%;background:#123;color:#fff;font:16px sans-serif}
+video{display:block;width:100%;height:100%;object-fit:contain;background:#000}</style></head>
+<body><video id="v" muted autoplay playsinline></video>
+<script>
+const c = document.createElement("canvas"); c.width = 640; c.height = 360;
+const g = c.getContext("2d"), v = document.getElementById("v");
+v.srcObject = c.captureStream(30);
+let t = 0;
+(function draw() {
+  t++; g.fillStyle = "#246"; g.fillRect(0, 0, 640, 360);
+  g.fillStyle = "#fc3"; g.fillRect((t * 6) % 600, 150, 40, 40);
+  g.fillStyle = "#fff"; g.font = "28px sans-serif";
+  g.fillText(`viewport ${innerWidth}x${innerHeight} css px, ${screen.width}x${screen.height} screen`, 16, 40);
+  g.fillText(document.fullscreenElement ? "FULL SCREEN" : "windowed", 16, 80);
+  requestAnimationFrame(draw);
+})();
+const state = () => { document.title = "wmax " + (document.fullscreenElement ? "fullscreen" : "windowed") + " " + innerWidth + "x" + innerHeight; };
+document.addEventListener("fullscreenchange", state);
+addEventListener("resize", state);
+document.body.addEventListener("click", () => {
+  if (document.fullscreenElement) document.exitFullscreen(); else v.requestFullscreen().catch(e => { document.title = "wmax refused " + e.message; });
+});
+state();
+</script></body></html>

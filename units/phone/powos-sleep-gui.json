@@ -1,0 +1,35 @@
+{
+  "id": "powos-sleep-gui",
+  "owner": "unified-sleep (lib/apps/powos-sleep-gui, docs/UNIFIED-SLEEP.md)",
+  "purpose": "The session side of GUI sleep: a KWin script reports window focus; apps unfocused for 10 min are frozen (via powos-sleepd), thawed on focus or a D-Bus message to them.",
+  "files": [
+    "/usr/lib/powos/apps/powos-sleep-gui",
+    "/usr/lib/powos/apps/sleep/kwin/",
+    "/var/log/powos/sleep-gui.log",
+    "/usr/bin/powos-sleep-gui"
+  ],
+  "packages": [],
+  "processes": [
+    {
+      "name": "powos-sleep-gui",
+      "user": "powos",
+      "started_by": "powos-rooted-session (the desktop session)"
+    },
+    {
+      "name": "KWin script powos-sleep",
+      "user": "powos",
+      "started_by": "powos-sleep-gui (org.kde.KWin /Scripting loadScript), unloaded when it stops"
+    }
+  ],
+  "cgroups": [
+    "/dev/memcg/powos/sleep-gui",
+    "/dev/cpuctl/powos/sleep-gui",
+    "/sys/fs/cgroup/powos/sleep-gui (put there by powos-sleepd on connect)"
+  ],
+  "limits": {
+    "memMB": 64,
+    "cpuPct": 50,
+    "pids": 16
+  },
+  "remove": "pkill -f powos-sleep-gui (the KWin script is unloaded, powos-sleepd thaws every GUI app); rm -rf /usr/lib/powos/apps/powos-sleep-gui /usr/lib/powos/apps/sleep; drop its line from powos-rooted-session"
+}

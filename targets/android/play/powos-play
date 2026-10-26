@@ -1,0 +1,200 @@
+#!/bin/bash
+# powos-play: run a Windows program on PowOS's phone build through Proton, without Steam's container runtime.
+#
+#   powos-play [options] [--] <program.exe> [args...]
+#   powos-play --install-proton [tag]       download GE-Proton's aarch64 build (default: latest)
+#   powos-play --register-steam             make it a Steam compatibility tool (no pressure-vessel)
+#   powos-play --info                       print what would be used
+#
+# Options:
+#   --proton aarch64|x86_64|<dir>  which Proton (default aarch64: native ARM64 Wine; only the game's x86 code is
+#                                  emulated, by FEX's ARM64EC/WoW64 DLLs inside Wine. x86_64: all of Wine runs under
+#                                  box64 - slower, and 32-bit games get no Vulkan there, so no DXVK)
+#   --prefix <name>                Wine prefix (default: the program's file name); under ~/.local/share/powos/prefixes
+#   --hud                          DXVK HUD (fps, frame times) + MangoHud with a CSV log in the log directory
+#   --wayland                      Wine's Wayland driver instead of X11 (XWayland)
+#   --log                          Proton/Wine log (PROTON_LOG=1) in ~/.local/state/powos/play
+#
+# Why no Steam runtime: Proton's toolmanifest asks Steam to run it inside the Steam Linux Runtime
+# (pressure-vessel), which needs bubblewrap and user namespaces; Android does not give an app either. Proton itself
+# does not need the container: its own script sets up the prefix and environment, and the rootfs is a full Arch
+# system. This is what umu-launcher does with UMU_NO_RUNTIME; here without the runtime download at all.
+set -euo pipefail
+
+DATA=${XDG_DATA_HOME:-$HOME/.local/share}
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/powos/play
+PROTONS=$DATA/powos/proton
+PREFIXES=$DATA/powos/prefixes
+STEAM_DIR=$DATA/Steam
+
+die() { echo "powos-play: $*" >&2; exit 1; }
+
+latest_installed() { # $1 = aarch64 | x86_64
+  local d
+  for d in $(ls -d "$PROTONS"/*-"$1" "$STEAM_DIR"/compatibilitytools.d/*-"$1" 2>/dev/null | sort -V -r); do
+    [ -x "$d/proton" ] && { echo "$d"; return; }
+  done
+  # Steam's own (x86_64) Proton installs, newest first
+  if [ "$1" = x86_64 ]; then
+    for d in $(ls -d "$STEAM_DIR"/steamapps/common/Proton* 2>/dev/null | sort -V -r); do
+      [ -x "$d/proton" ] && { echo "$d"; return; }
+    done
+  fi
+}
+
+install_proton() { # [tag] [arch]
+  local tag=${1:-} arch=${2:-aarch64} api=https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases
+  if [ -z "$tag" ]; then
+    tag=$(curl -fsSL "$api/latest" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+  fi
+  local name=$tag-$arch url=https://github.com/GloriousEggroll/proton-ge-custom/releases/download/$tag/$tag-$arch.tar.gz
+  [ -x "$PROTONS/$name/proton" ] && { echo "$PROTONS/$name"; return; }
+  mkdir -p "$PROTONS"
+  echo "powos-play: downloading $name (~600 MB)" >&2
+  curl -fL --progress-bar "$url" | tar -xz -C "$PROTONS"
+  # GE names the aarch64 dist directory <tag>-aarch64 and the x86_64 one <tag>: normalise to <tag>-<arch>.
+  [ -d "$PROTONS/$name" ] || mv "$PROTONS/$tag" "$PROTONS/$name"
+  echo "$PROTONS/$name"
+}
+
+# A Steam compatibility tool around a Proton dist whose manifest does NOT require the Steam Linux Runtime:
+# Steam then runs "<dir>/proton waitforexitandrun <game>" directly, without pressure-vessel/bwrap.
+register_steam() {
+  local src=${1:-$(latest_installed aarch64)}
+  [ -n "$src" ] || src=$(install_proton "" aarch64)
+  local name=PowOS-$(basename "$src") dst
+  dst=$STEAM_DIR/compatibilitytools.d/$name
+  rm -rf "$dst" && mkdir -p "$dst"
+  for f in "$src"/*; do
+    case ${f##*/} in toolmanifest.vdf|compatibilitytool.vdf) ;; *) ln -s "$f" "$dst/" ;; esac
+  done
+  # HACK: no require_tool_appid (the Steam Linux Runtime) - pressure-vessel needs user namespaces, which Android
+  # denies to apps. Real fix: none on Android short of a runtime that works without namespaces.
+  cat > "$dst/toolmanifest.vdf" <<'EOF'
+"manifest"
+{
+  "version" "2"
+  "commandline" "/powos-proton %verb%"
+}
+EOF
+  cat > "$dst/compatibilitytool.vdf" <<EOF
+"compatibilitytools"
+{
+  "compat_tools"
+  {
+    "$name"
+    {
+      "install_path" "."
+      "display_name" "$name (PowOS phone, no runtime)"
+      "from_oslist" "windows"
+      "to_oslist" "linux"
+    }
+  }
+}
+EOF
+  # Steam calls this with Steam's environment; the phone defaults are applied, then Proton runs as usual.
+  cat > "$dst/powos-proton" <<EOF
+#!/bin/bash
+export POWOS_PLAY_STEAM=1
+exec /usr/bin/powos-play --proton "$src" --steam-verb "\$@"
+EOF
+  chmod +x "$dst/powos-proton"
+  echo "registered $name in $dst: restart Steam, then pick it under a game's Properties > Compatibility"
+}
+
+# ── options ──────────────────────────────────────────────────────────────────────────────────────────────
+proton=aarch64 prefix= hud=0 wayland=0 log=0 steam_verb=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --install-proton) install_proton "${2:-}" "${3:-aarch64}"; exit ;;
+    --register-steam) register_steam "${2:-}"; exit ;;
+    --proton) proton=$2; shift 2 ;;
+    --prefix) prefix=$2; shift 2 ;;
+    --hud) hud=1; shift ;;
+    --wayland) wayland=1; shift ;;
+    --log) log=1; shift ;;
+    --info) info=1; shift ;;
+    --steam-verb) steam_verb=1; shift; break ;;
+    --) shift; break ;;
+    -h|--help) sed -n '2,25p' "$0"; exit ;;
+    -*) die "unknown option $1" ;;
+    *) break ;;
+  esac
+done
+
+case $proton in
+  aarch64|x86_64) dir=$(latest_installed "$proton"); [ -n "$dir" ] || dir=$(install_proton "" "$proton") ;;
+  *) dir=$proton ;;
+esac
+[ -x "$dir/proton" ] || die "no Proton at $dir"
+
+# HACK: Wine's wine-preloader is a static binary that opens the Wine loader with raw syscalls, which bypass
+# fakechroot (the rootfs is not the real /): it fails with "<path>/wine: could not open", for the first process
+# and for every process Wine starts later (ntdll execs the preloader itself, so WINELOADERNOEXEC alone is not
+# enough). Without the file, Wine falls back to starting its loader directly, through glibc. Found in
+# tools/lab/phone-sim.sh (2026-10-13). Cost: no early address-space reservation (a few old 32-bit games want
+# it). Real fix: a preloader that resolves paths like fakechroot does (or a real chroot).
+for pre in "$dir"/files/lib/wine/aarch64-unix/wine-preloader; do
+  [ -e "$pre" ] || continue
+  mv "$pre" "$pre.powos-disabled" 2>/dev/null || die "cannot disable $pre (read-only Proton?): it cannot run under fakechroot"
+done
+
+# ── environment ──────────────────────────────────────────────────────────────────────────────────────────
+mkdir -p "$STATE" "$PREFIXES" "$STEAM_DIR"
+if [ "$steam_verb" = 0 ]; then
+  [ $# -gt 0 ] || [ "${info:-0}" = 1 ] || die "usage: powos-play [options] <program.exe> [args...]"
+  exe=${1:-}
+  [ -z "$exe" ] || exe=$(realpath "$exe")
+  shift || true
+  [ -n "$prefix" ] || prefix=$(basename "${exe:-default}" .exe | tr ' A-Z' '_a-z')
+  export STEAM_COMPAT_DATA_PATH=$PREFIXES/$prefix
+  export STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_DIR
+  mkdir -p "$STEAM_COMPAT_DATA_PATH"
+  # umu's non-Steam mode in Proton's script: the program starts through umu.exe, lsteamclient is disabled
+  # (no Steam client to talk to), protonfixes looks the game up by this id.
+  export UMU_ID=${UMU_ID:-umu-0} SteamGameId=${SteamGameId:-powos-$prefix} SteamAppId=${SteamAppId:-0}
+  # Arguments for the game's own working directory: Windows games look for data next to the .exe.
+  [ -z "$exe" ] || cd "$(dirname "$exe")"
+fi
+
+# HACK: fsync uses the futex_waitv syscall, which Android's app seccomp filter may kill the process for
+# (the syscall probe in tools/device-test.sh answers it per device); esync (eventfd) is always allowed.
+# POWOS_PLAY_FSYNC=1 turns fsync back on. Real fix: none needed if the probe shows futex_waitv allowed.
+[ "${POWOS_PLAY_FSYNC:-0}" = 1 ] || export PROTON_NO_FSYNC=1
+# No /dev/ntsync on Android.
+export PROTON_NO_NTSYNC=1
+if [ "$hud" = 1 ]; then
+  export DXVK_HUD=${DXVK_HUD:-fps,frametimes,gpuload,api,version}
+  export MANGOHUD=1 MANGOHUD_CONFIG=${MANGOHUD_CONFIG:-fps,frametime,cpu_stats,gpu_stats,output_folder=$STATE,log_duration=60,autostart_log=5}
+fi
+[ "$wayland" = 0 ] || export PROTON_ENABLE_WAYLAND=1
+if [ "$log" = 1 ]; then
+  export PROTON_LOG=${PROTON_LOG:-1} PROTON_LOG_DIR=$STATE
+fi
+# HACK: Proton puts its own library directories on LD_LIBRARY_PATH as rootfs paths, which the (not fakechroot-aware)
+# dynamic loader cannot use under the runtime; the same directories as host paths, after Proton's, make its
+# bundled libraries win over the rootfs's as on a PC. No-op outside the runtime (FAKECHROOT_BASE unset).
+# Real fix: a fakechroot-aware dynamic loader, or a real chroot.
+if [ -n "${FAKECHROOT_BASE:-}" ]; then
+  for d in "$dir"/files/lib/aarch64-linux-gnu "$dir"/files/lib/x86_64-linux-gnu "$dir"/files/lib/i386-linux-gnu; do
+    [ -d "$d" ] && LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$FAKECHROOT_BASE$d
+  done
+  export LD_LIBRARY_PATH
+fi
+# Vulkan driver: the engine's arch-native.sh sets the KGSL variables for Turnip; without /dev/kgsl-3d0
+# (emulator, lab container) Mesa's lavapipe is the only Vulkan device - fine for smoke tests.
+
+if [ "${info:-0}" = 1 ]; then
+  echo "proton:  $dir ($(cat "$dir/version" 2>/dev/null))"
+  echo "prefix:  ${STEAM_COMPAT_DATA_PATH:-}"
+  echo "x86:     $( [ -d "$dir/files/bin-arm64" ] && echo 'FEX ARM64EC/WoW64 inside ARM64 Wine' || echo 'box64 (all of Wine emulated)')"
+  echo "fsync:   $( [ -n "${PROTON_NO_FSYNC:-}" ] && echo off || echo on)"
+  exit 0
+fi
+
+# Steam mode: Steam passes "<verb> <game command...>" (waitforexitandrun, run, getcompatpath, ...).
+if [ "$steam_verb" = 1 ]; then
+  exec "$dir/proton" "$@"
+fi
+echo "powos-play: $(basename "$dir") / prefix $prefix / $exe" >&2
+exec "$dir/proton" run "$exe" "$@"

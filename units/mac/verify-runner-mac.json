@@ -1,0 +1,23 @@
+{
+  "id": "verify-runner-mac",
+  "name": "Phone verify runner (Mac launchd agent)",
+  "kind": "service",
+  "owner": "system:powos-verify",
+  "host": "mac",
+  "purpose": "the verify queue's runner (tools/phone/verify/queue.sh run, from the $POWOS_RUN_ROOT/verify-runner checkout, default ~/pw/verify-runner) as the launchd agent com.powos.verify-runner: started when a job lands in ~/.cache/powos-verify-queue (WatchPaths, no polling) and again if it dies (KeepAlive), so queued phone checks never stall on a stopped process. A user stop from the phone is a pause inside it (resume on the AI page). Exits by itself when nothing is queued",
+  "installedBy": "tools/phone/verify/runner-deploy.sh install",
+  "files": [
+    "~/Library/LaunchAgents/com.powos.verify-runner.plist"
+  ],
+  "processes": [
+    {
+      "match": "powos-queue\\.[A-Za-z0-9]+ run"
+    }
+  ],
+  "unbounded": "macOS has no cgroups; one bash loop that mostly waits on one held adb call, its checks' own processes while a window runs",
+  "remove": {
+    "commands": [
+      "tools/phone/verify/runner-deploy.sh remove"
+    ]
+  }
+}

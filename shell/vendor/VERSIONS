@@ -8,4 +8,6 @@ xterm.js          @xterm/xterm 6.0.0       lib/xterm.mjs                MIT
 xterm.css         @xterm/xterm 6.0.0       css/xterm.css                MIT
 xterm-addon-fit.js @xterm/addon-fit 0.11.0 lib/addon-fit.mjs            MIT
 spacetimedb.js    spacetimedb 2.12.0       dist/index.browser.mjs (esbuild --bundle --minify: base64-js, safe-stable-stringify in it)  ISC
-powos-registry.js generated              apps/registry: `apps/build.sh registry`, then esbuild --bundle of ui/bindings/index.ts (spacetimedb external)
+powos-registry.js generated              apps/registry: `apps/vendor.sh registry` (its module built, the TS bindings bundled, spacetimedb external)
+powos-agents.js   generated              apps/agents: `apps/vendor.sh agents` (its module built, the TS bindings bundled, spacetimedb external)
+local-pet.js      generated              apps/pet: `apps/vendor.sh pet` (its module built, the TS bindings bundled, spacetimedb external)

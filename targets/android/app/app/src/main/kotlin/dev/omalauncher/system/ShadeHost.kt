@@ -8,6 +8,9 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
+import android.os.PowerManager
+import android.service.notification.NotificationListenerService.Ranking
+import android.service.notification.StatusBarNotification
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -23,7 +26,8 @@ import android.widget.FrameLayout
 import dev.omalauncher.App
 import dev.omalauncher.shell.ShellHost
 import dev.omalauncher.system.gesture.GestureConsumer
-import dev.omalauncher.system.gesture.shadeOpens
+import dev.omalauncher.system.gesture.PanelPull
+import dev.omalauncher.widgets.runtime.MediaListener
 import org.json.JSONObject
 import kotlin.math.abs
 
@@ -51,6 +55,12 @@ import kotlin.math.abs
  * - The shade: TYPE_STATUS_BAR_SUB_PANEL, full screen and transparent (the page dims with its own scrim), above the
  *   status bar and SystemUI's windows. The page is kept warm: the window stays added, hidden while the shade is shut
  *   (the page says so: shade.closed), so the next pull shows it at once.
+ * - Heads-up banners: SystemUI shows none while its shade is off (its peek needs the panel enabled - its log says
+ *   "PEEK=off|disabled panel" for every notification), so the shade shows them ([peek]): for a notification that
+ *   would have had one (Notifications.peeks), the shade window comes up as a strip at the top - its height the page's
+ *   banner's ("shade.peekHeight"), touchable, never focused (the app below keeps the keyboard) - and the page shows
+ *   the banner ("shade.peek"): a tap opens it, up puts it away, down pulls the whole shade ("shade.expand"). Not on
+ *   the lock screen (SystemUI's flags are lifted there, its own heads-up shows) nor with the screen off.
  *
  * Needs what the recents provider is granted (STATUS_BAR_SERVICE for the window types, STATUS_BAR for the flags):
  * [PowosRecentsService] runs it while SystemUI is bound to it.
@@ -74,6 +84,7 @@ class ShadeHost(
     private var host: ShellHost? = null
     private var shade: Root? = null
     private var edge: Edge? = null
+    private var statusChrome: StatusChrome? = null
     private var shadeParams: WindowManager.LayoutParams? = null
     private var edgeParams: WindowManager.LayoutParams? = null
 
@@ -84,9 +95,20 @@ class ShadeHost(
     private var lent = false
     private var lentSeenOpen = false
 
-    /** The status bar is showing: false while a full-screen app hides it. */
-    private var statusBarShown = true
+    /** The status bar is showing: false while a full-screen app hides it (the pet over apps keeps out then). */
+    var statusBarShown = true
+        private set(value) {
+            if (field == value) return
+            field = value
+            PetOverlay.current?.update()
+            flags()
+            edgeLayoutChanged()
+        }
     private var shown = false
+
+    /** The window is up as a heads-up banner's strip ([peek]), not the whole shade. */
+    private var peeking = false
+    private val power = service.getSystemService(PowerManager::class.java)
 
     /** The status bar's height (px), from the strip's insets. */
     private var stripHeight = 0
@@ -104,13 +126,17 @@ class ShadeHost(
     /** The pull under way (from the monitor or the strip). */
     private val pulling = Pull()
 
-    /** Home pressed (or the switcher) while the shade is down: it goes up, as SystemUI's does. */
+    /** Home pressed (or the switcher) while the shade is down: it goes up, as SystemUI's does. The screen off: a banner goes. */
     private val closer =
         object : BroadcastReceiver() {
             override fun onReceive(
                 context: Context,
                 intent: Intent,
             ) {
+                if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                    if (peeking) unpeek()
+                    return
+                }
                 if (shown) settle(false)
             }
         }
@@ -129,21 +155,44 @@ class ShadeHost(
         h.bridge.shade =
             object : ShadeSlot {
                 override fun closed() = hide()
+
+                override fun expand() = expandPeek()
+
+                override fun peekHeight(px: Int) = sizePeek(px)
+
+                override fun blur(dp: Float) = blur.radius(dp)
             }
         host = h
+        watchdog =
+            dev.omalauncher.shell.PageWatchdog(h.web, "PowOS shade") {
+                if (peeking) host?.bridge?.emit("shade.peek", null)
+                hide()
+            }
         val root = Root(shadeContext).apply { addView(h.web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
         root.visibility = View.GONE
         shade = root
         shadeParams = shadeLayout().also { shadeWm.addView(root, it) }
+        reload =
+            OverlayReload("shade", shadeWm, { host?.web }, { shade?.let { v -> shadeParams?.let { v to it } } }, { shown || peeking }) {
+                // A pull (or a banner) came while the page reloaded: the new page hears it so far, then it counts.
+                for ((event, data) in told) host?.bridge?.emit(event, data)
+                if (shown) blur.set(behind)
+                watchdog?.start()
+                if (wantOpen) armOpen()
+            }.also { g -> h.filesGate = g::changed }
         val strip = Edge(edgeContext)
         edge = strip
+        statusChrome = StatusChrome(edgeContext, { flags(); edgeLayoutChanged() }, { openPanel(it) }).also {
+            strip.addView(it.web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
         stripHeight = statusBarHeight()
         edgeParams = edgeLayout(stripHeight).also { edgeWm.addView(strip, it) }
         // Out of the way at once if the gesture input already runs.
         edgeLayoutChanged()
         @Suppress("DEPRECATION")
-        service.registerReceiver(closer, IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+        service.registerReceiver(closer, IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS).apply { addAction(Intent.ACTION_SCREEN_OFF) })
         current = this
+        MediaListener.posted = { sbn, ranking -> root.post { peek(sbn, ranking) } }
         flags()
         Log.i(TAG, "PowOS's shade in place of SystemUI's")
         return true
@@ -152,9 +201,14 @@ class ShadeHost(
     /** SystemUI's shade back: the windows gone, the flags lifted. */
     fun stop() {
         if (current === this) current = null
+        MediaListener.posted = null
         runCatching { service.unregisterReceiver(closer) }
         edge?.let { runCatching { edgeWm.removeView(it) } }
+        watchdog?.stop()
+        watchdog = null
         shade?.let { runCatching { shadeWm.removeView(it) } }
+        statusChrome?.destroy()
+        statusChrome = null
         edge = null
         shade = null
         host?.destroy()
@@ -218,6 +272,22 @@ class ShadeHost(
         }, EXPAND_DELAY_MS)
     }
 
+    /** PowOS's shade is down (or coming down): other gestures leave the screen alone meanwhile. */
+    val isShown get() = shown
+
+    /**
+     * Brings the shade down without a pull (an edge gesture): its control center ([control]) or its notifications.
+     * False when it isn't PowOS's to show now (locked, lent to SystemUI).
+     */
+    fun openPanel(control: Boolean): Boolean {
+        val h = host ?: return false
+        if (keyguard || lent || DeviceLock.locked(service)) return false
+        tell("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
+        show()
+        settle(true)
+        return true
+    }
+
     /** Shuts PowOS's shade if it's down (a swipe up from the bottom edge): true if it was. */
     fun closeIfOpen(): Boolean {
         if (!shown) return false
@@ -225,14 +295,40 @@ class ShadeHost(
         return true
     }
 
-    /** Whether a finger down at [y] (display px) may be the shade's pull. */
-    private fun pullable(y: Float): Boolean {
+    /**
+     * Home's page says a pull down on it is the shade's now (shade.homePull: home's first pages showing, nothing open
+     * over them, not editing): a finger down anywhere on home is followed and taken once it's dragged down - the same
+     * window, pull and blur as from the status bar over an app. Home has no notification panel of its own.
+     */
+    var homePull = false
+
+    /** Where a pull may start: the status bar (anywhere), or home's body (while [homePull]). */
+    private enum class From { STATUS_BAR, HOME }
+
+    /** Whether a finger down on home's body at ([x], [y]) may be the shade's pull. */
+    private fun homePullable(
+        x: Float,
+        y: Float,
+    ): Boolean {
+        val home = homePull && Switcher.onHome && Switcher.homeVisible && !Switcher.open && host != null && !shown && !keyguard && !lent
+        // Never inside a floating window: home is "on" under every window, and the gesture input sees all touches - a
+        // scroll down in Chrome or Kate pulled the shade (the user, 2026-10-23).
+        return home && WindowFrames.current?.covers(x, y) != true
+    }
+
+    /** Whether a finger down at ([x], [y]) (display px) may be the shade's pull, and from where. */
+    private fun pullable(
+        x: Float,
+        y: Float,
+    ): From? {
+        // Never over a locked phone (the lock face reports the keyguard OCCLUDED, which [keyguard] doesn't count).
+        if (DeviceLock.locked(service)) return null
         val edge = stripHeight.coerceAtLeast((24 * service.resources.displayMetrics.density).toInt())
-        if (y > edge) return false
+        if (y > edge) return if (homePullable(x, y)) From.HOME else null
         val ok = host != null && !shown && !keyguard && !lent && statusBarShown
         // A finger down on the status bar that isn't a pull: why, as it's the first thing to ask when the shade won't come.
         if (!ok) Log.i(TAG, "not pulling: host=${host != null} shown=$shown keyguard=$keyguard lent=$lent statusBarShown=$statusBarShown")
-        return ok
+        return if (ok) From.STATUS_BAR else null
     }
 
     /**
@@ -242,10 +338,12 @@ class ShadeHost(
     val pull =
         object : GestureConsumer {
             override fun onDown(e: MotionEvent): Boolean {
-                if (!pullable(e.rawY)) return false
+                val from = pullable(e.rawX, e.rawY) ?: return false
                 // The status bar's right half pulls the control center, the rest the notifications - as on OnePlus's.
-                val control = e.rawX > shadeWm.currentWindowMetrics.bounds.width() * CONTROL_SPLIT
-                host?.bridge?.emit("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
+                // Down on home's body: the notifications, as a stock launcher's.
+                val control = from == From.STATUS_BAR && e.rawX > shadeWm.currentWindowMetrics.bounds.width() * CONTROL_SPLIT
+                pulling.fromHome = from == From.HOME
+                tell("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
                 pulling.down(e)
                 return true
             }
@@ -269,7 +367,10 @@ class ShadeHost(
         }
 
     private fun flags() {
-        if (keyguard || lent) disable(0, 0) else disable(DISABLE_EXPAND, DISABLE2_QUICK_SETTINGS or DISABLE2_NOTIFICATION_SHADE)
+        val ownsBar = statusChrome?.ready == true && statusBarShown && !keyguard && !lent
+        statusChrome?.web?.visibility = if (ownsBar) View.VISIBLE else View.INVISIBLE
+        val icons = if (ownsBar) DISABLE_CLOCK or DISABLE_SYSTEM_INFO or DISABLE_NOTIFICATION_ICONS else 0
+        if (keyguard || lent) disable(0, 0) else disable(DISABLE_EXPAND or icons, DISABLE2_QUICK_SETTINGS or DISABLE2_NOTIFICATION_SHADE)
     }
 
     /**
@@ -287,33 +388,210 @@ class ShadeHost(
         }.onFailure { Log.w(TAG, "can't set the status bar's disable flags", it) }
     }
 
-    /** Shows the shade window (the pull started): touchable and focused (Back reaches the page). */
+    /**
+     * Shows the shade window (the pull started), the whole screen - but not yet touchable or focused: the pull's touches
+     * are the gesture input's, and the window only takes touches once the shade has settled open and its page answered
+     * ([armOpen]). A page that can't (it never loaded, it hangs) must never leave an invisible window over the screen
+     * eating every touch - it did, over the lock face (2026-10-20); [watchdog] takes the window away then.
+     */
     private fun show() {
         val root = shade ?: return
         if (shown) return
         shown = true
+        peeking = false
+        wantOpen = false
         root.visibility = View.VISIBLE
+        setFlags(touchable = false, focusable = false, height = ViewGroup.LayoutParams.MATCH_PARENT)
+        // A page reloading (a shell push) stays invisible (alpha 0) until it's up; the watchdog starts then.
+        if (reload?.reloading != true) watchdog?.start()
+    }
+
+    /** A shell push's reload done while hidden ([OverlayReload]): never a pull onto a page still booting. */
+    private var reload: OverlayReload? = null
+
+    /** What the page was told since the window last went (by event name), for a page that reloaded meanwhile. */
+    private val told = linkedMapOf<String, Any?>()
+
+    /** Settled open while the page was still reloading: opened once it's up. */
+    private var wantOpen = false
+
+    /** How far what's behind is blurred by now; applied only while the page can be seen. */
+    private var behind = 0f
+
+    private fun blurBehind(amount: Float) {
+        behind = amount
+        blur.set(if (reload?.reloading == true) 0f else amount)
+    }
+
+    /** To the page, kept for a reload's new page while the window shows. */
+    private fun tell(
+        event: String,
+        data: Any?,
+    ) {
+        // Kept from a gesture's start (the panel is told before the window shows) until the window goes.
+        told[event] = data
+        host?.bridge?.emit(event, data)
+    }
+
+    /** The shade settled open: touchable and focused (Back reaches the page) once its page answers it's alive. */
+    private fun armOpen() {
+        if (reload?.reloading == true) {
+            wantOpen = true
+            return
+        }
+        val web = host?.web ?: return
+        dev.omalauncher.shell.PageWatchdog.probeShown(web) { alive, why ->
+            if (!shown) return@probeShown
+            if (alive) {
+                setFlags(touchable = true, focusable = true, height = ViewGroup.LayoutParams.MATCH_PARENT)
+            } else {
+                Log.w(TAG, "shade page isn't answering ($why): the shade goes")
+                hide()
+            }
+        }
+    }
+
+    /** The shade settled shut: the page hides the window itself (shade.closed); should it not, the host does. */
+    private fun armShut() {
+        val root = shade ?: return
+        root.removeCallbacks(shutGone)
+        root.postDelayed(shutGone, SHUT_MAX_MS)
+    }
+
+    private val shutGone =
+        Runnable {
+            if (shown) {
+                Log.w(TAG, "shade settled shut but its page never said closed: the window goes")
+                hide()
+            }
+        }
+
+    private fun setFlags(
+        touchable: Boolean,
+        focusable: Boolean,
+        height: Int,
+    ) {
+        val root = shade ?: return
         shadeParams?.let {
-            it.flags = it.flags and (WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE).inv()
+            var f = it.flags
+            f = if (touchable) f and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv() else f or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            f = if (focusable) f and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv() else f or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            if (f == it.flags && height == it.height) return
+            it.flags = f
+            it.height = height
             shadeWm.updateViewLayout(root, it)
         }
     }
 
-    /** The page shut it (shade.closed): the window hidden, its page kept for the next pull. */
+    /** Whether the page answers, while the window is up (the shade or its banner): no answer, the window goes. */
+    private var watchdog: dev.omalauncher.shell.PageWatchdog? = null
+
+    /** The page shut it (shade.closed, the shade or its banner): the window hidden, its page kept for the next pull. */
     private fun hide() {
         val root = shade ?: return
-        if (!shown) return
+        watchdog?.stop()
+        root.removeCallbacks(shutGone)
+        root.removeCallbacks(peekGone)
+        if (!shown && !peeking) return
         shown = false
-        root.visibility = View.GONE
-        shadeParams?.let {
-            it.flags = it.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-            shadeWm.updateViewLayout(root, it)
-        }
+        peeking = false
+        wantOpen = false
+        told.clear()
+        blurEase?.cancel()
+        blurBehind(0f)
+        // Mid-reload the window stays up (alpha 0) for the page to finish loading; it goes when that's done.
+        if (reload?.reloading != true) root.visibility = View.GONE
+        setFlags(touchable = false, focusable = false, height = ViewGroup.LayoutParams.MATCH_PARENT)
+        reload?.hidden()
     }
 
-    private fun drag(q: Double) = host?.bridge?.emit("shade.drag", JSONObject().put("q", q))
+    /**
+     * A notification was posted: if it would have had SystemUI's heads-up (Notifications.peeks), the banner - the shade
+     * window as a strip at the top, touchable but not focusable, and the page told ("shade.peek").
+     */
+    private fun peek(
+        sbn: StatusBarNotification,
+        ranking: Ranking,
+    ) {
+        val h = host ?: return
+        val root = shade ?: return
+        val notifications = (service.applicationContext as App).runtime.widgets.notifications
+        if (!notifications.peeks(sbn, ranking)) return
+        // The shade down shows it already; locked, SystemUI's own heads-up does (its flags are lifted); screen off: none.
+        if (shown || keyguard || lent || !power.isInteractive) return
+        val item = notifications.item(sbn)
+        if (!peeking) {
+            peeking = true
+            root.visibility = View.VISIBLE
+            // Not touchable until the page says how tall its banner is (shade.peekHeight: it drew it); never focusable.
+            setFlags(touchable = false, focusable = false, height = stripHeight + (PEEK_HEIGHT_DP * service.resources.displayMetrics.density).toInt())
+            watchdog?.start()
+        }
+        tell("shade.peek", h.bridge.notificationJson(item))
+        // The page puts the banner away itself (shade.closed); should it never, the strip mustn't stay over the top.
+        root.removeCallbacks(peekGone)
+        root.postDelayed(peekGone, PEEK_MAX_MS)
+        Log.i(TAG, "banner for ${sbn.packageName} (${sbn.notification.channelId})")
+    }
 
-    private fun settle(open: Boolean) = host?.bridge?.emit("shade.settle", JSONObject().put("open", open))
+    /** The banner's strip as tall as the page's banner ([px], from the window's top). */
+    private fun sizePeek(px: Int) {
+        if (!peeking || px <= 0 || shade == null) return
+        setFlags(touchable = true, focusable = false, height = px)
+    }
+
+    /** The banner pulled down (or its Reply): the whole shade, open. */
+    private fun expandPeek() {
+        if (!peeking && !shown) return
+        show()
+        settle(true)
+    }
+
+    private val peekGone = Runnable { if (peeking) unpeek() }
+
+    /** The banner put away without the page (the screen went off, or the page never did). */
+    private fun unpeek() {
+        host?.bridge?.emit("shade.peek", null)
+        hide()
+    }
+
+    /**
+     * What's behind the shade (the app, home) blurred as it comes down, as SystemUI's shade blurs it: the shade page
+     * only tints its panel over it (shell/ui/glass.ts, html.glass-behind). Not for the banner (a strip of the window).
+     */
+    // The control center's material: home's text, pill and dock unreadable behind it (design: 360 dp; the page sets it too).
+    private val blur = dev.omalauncher.shell.WindowBlur({ shade }, SHADE_BLUR_DP)
+
+    private fun drag(q: Double) {
+        blurEase?.cancel()
+        if (shown) blurBehind(q.toFloat())
+        tell("shade.drag", JSONObject().put("q", q))
+    }
+
+    /**
+     * Let go: the blur eases to its end as the page's panel does (shell.css [data-q]: --q over 280 ms, this curve).
+     * Set at once, a shut (a pull let go short, an assistant's close) took the blur away while the panel was still
+     * there, fading: home read straight through it (2026-10-23).
+     */
+    private var blurEase: android.animation.ValueAnimator? = null
+
+    private fun easeBlur(to: Float) {
+        blurEase?.cancel()
+        blurEase =
+            android.animation.ValueAnimator.ofFloat(behind, to).apply {
+                duration = SETTLE_MS
+                interpolator = android.view.animation.PathInterpolator(0.2f, 0.9f, 0.3f, 1f)
+                addUpdateListener { if (shown) blurBehind(it.animatedValue as Float) }
+                start()
+            }
+    }
+
+    private fun settle(open: Boolean) {
+        if (shown) easeBlur(if (open) 1f else 0f)
+        tell("shade.settle", JSONObject().put("open", open))
+        if (!shown) return
+        if (open) armOpen() else armShut()
+    }
 
     private fun shadeLayout() =
         WindowManager.LayoutParams(
@@ -335,20 +613,22 @@ class ShadeHost(
             ViewGroup.LayoutParams.MATCH_PARENT,
             height,
             TYPE_EDGE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            title = "PowOS top edge"
+            title = "PowOS status bar"
             gravity = Gravity.TOP or Gravity.START
             fitInsetsTypes = 0
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         }
 
+    private fun edgeTouchable() = (!monitored || statusChrome?.ready == true) && statusBarShown && !keyguard && !lent
+
     /** The strip as the state says: touchable only while it's PowOS's shade to pull and the status bar shows. */
     private fun edgeLayoutChanged(height: Int? = null) {
         val strip = edge ?: return
         val p = edgeParams ?: return
-        val touchable = !monitored && statusBarShown && !keyguard && !lent
+        val touchable = edgeTouchable()
         val flags =
             if (touchable) p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv() else p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         val h = height ?: p.height
@@ -380,8 +660,8 @@ class ShadeHost(
 
     /**
      * The pull, wherever its touches come from (the monitor, or the strip as the fallback): a drag down from the top edge
-     * pulls the shade, the page following the finger as home's swipe does (openness = the distance over 60% of the
-     * screen; a flick or past a third opens it: [shadeOpens]).
+     * pulls the shade, the page following the finger as the page's own drags do ([PanelPull]: its short --drop at the
+     * drawer's gain, open past 15% or on a flick down; a flick up shuts it).
      */
     private inner class Pull {
         private val slop = ViewConfiguration.get(shadeContext).scaledTouchSlop
@@ -391,7 +671,25 @@ class ShadeHost(
         private var q = 0.0
         private var velocity: VelocityTracker? = null
 
+        /** Started on home's body: only a swipe is a pull there - not a hold that then moves (a tile being picked up). */
+        var fromHome = false
+
+        /** The page's --drop (shell.css .notif-panel, device px) as it last said; 0: not asked yet (15% of the height). */
+        private var dropPx = 0f
+        private var dropFor = 0
+
+        /** The page's own travel, read from its CSS once per window height - one knob for the page and the pull. */
+        private fun askDrop(height: Int) {
+            if (dropFor == height) return
+            dropFor = height
+            val web = host?.web ?: return
+            web.evaluateJavascript(
+                "(() => { const p = document.querySelector('.notif-panel'); return p ? parseFloat(getComputedStyle(p).getPropertyValue('--drop')) * devicePixelRatio : 0; })()",
+            ) { v -> v?.toFloatOrNull()?.takeIf { it > 0f }?.let { dropPx = it } }
+        }
+
         fun down(e: MotionEvent) {
+            askDrop(shade?.height?.takeIf { it > 0 } ?: service.resources.displayMetrics.heightPixels)
             x0 = e.rawX
             y0 = e.rawY
             dragging = false
@@ -406,6 +704,7 @@ class ShadeHost(
             val dy = e.rawY - y0
             var result = PullMove.NONE
             if (!dragging) {
+                if (fromHome && e.eventTime - e.downTime > HOME_SWIPE_MS && (dy > slop || abs(dx) > slop)) return PullMove.NOT_A_PULL
                 if (dy > slop && dy >= abs(dx)) {
                     dragging = true
                     show()
@@ -416,7 +715,7 @@ class ShadeHost(
             }
             if (dragging) {
                 val height = shade?.height?.takeIf { it > 0 } ?: service.resources.displayMetrics.heightPixels
-                q = (dy / (height * PULL_SPAN)).toDouble().coerceIn(0.0, 1.0)
+                q = (if (dropPx > 0f) PanelPull.opennessOver(dy, dropPx) else PanelPull.openness(dy, height.toFloat())).toDouble()
                 drag(q)
             }
             return result
@@ -428,7 +727,7 @@ class ShadeHost(
             if (dragging) {
                 // px/ms of the screen, in CSS px as the page's flick threshold is.
                 val vy = v?.let { it.computeCurrentVelocity(1); it.yVelocity / service.resources.displayMetrics.density } ?: 0f
-                settle(shadeOpens(vy, q, cancelled = e.actionMasked != MotionEvent.ACTION_UP))
+                settle(PanelPull.opens(vy, q, cancelled = e.actionMasked != MotionEvent.ACTION_UP))
             }
             v?.recycle()
             dragging = false
@@ -441,10 +740,11 @@ class ShadeHost(
      */
     private inner class Edge(
         context: Context,
-    ) : View(context) {
+    ) : FrameLayout(context) {
         init {
             // The status bar's height (it changes on folding) and whether it shows: from the insets the window gets.
             setOnApplyWindowInsetsListener { _, insets ->
+                statusChrome?.insets(insets)
                 val top = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
                 // Hidden only if this window is told of a status bar at all (top > 0) and it's hidden: a window above the
                 // status bar, as this one is, may be given no status bar inset, and that's not a full-screen app.
@@ -454,6 +754,8 @@ class ShadeHost(
                 insets
             }
         }
+
+        override fun onInterceptTouchEvent(e: MotionEvent): Boolean = !monitored
 
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -470,6 +772,12 @@ class ShadeHost(
         private const val TAG = "PowosShade"
         private const val MODE = "shade"
 
+        /** What's behind the open shade blurred by this much (dp, the compositor's radius) until the page says. */
+        private const val SHADE_BLUR_DP = 360f
+
+        /** The page's settle (shell.css [data-q] --q transition), ms. */
+        private const val SETTLE_MS = 280L
+
         /** The running shade host, for the bridge (system.notifications lends SystemUI's panel through it). */
         var current: ShadeHost? = null
             private set
@@ -485,6 +793,9 @@ class ShadeHost(
 
         // StatusBarManager's hidden disable flags.
         private const val DISABLE_EXPAND = 0x00010000
+        private const val DISABLE_NOTIFICATION_ICONS = 0x00020000
+        private const val DISABLE_SYSTEM_INFO = 0x00100000
+        private const val DISABLE_CLOCK = 0x00800000
         private const val DISABLE2_QUICK_SETTINGS = 1
         private const val DISABLE2_NOTIFICATION_SHADE = 1 shl 2
 
@@ -493,8 +804,6 @@ class ShadeHost(
         private const val SYSUI_KEYGUARD_SHOWING = 1L shl 6
         private const val SYSUI_QUICK_SETTINGS_VISIBLE = 1L shl 11
 
-        /** As the page's: the pull's span (of the screen's height). A flick and the openness it opens at: [shadeOpens]. */
-        private const val PULL_SPAN = 0.6f
 
         private const val LEND_TIMEOUT_MS = 5000L
 
@@ -503,6 +812,18 @@ class ShadeHost(
 
         /** The status bar's right part (from this fraction of its width) pulls the control center, as on OnePlus's. */
         private const val CONTROL_SPLIT = 0.5f
+
+        /** On home's body, the finger must be moving down within this of its down (ms): later is a long press's drag. */
+        private const val HOME_SWIPE_MS = 250L
+
+        /** The banner's strip below the status bar until the page says how tall its banner is ("shade.peekHeight"). */
+        private const val PEEK_HEIGHT_DP = 150
+
+        /** Settled shut, the page says closed within this (its slide up is ~300 ms): else the host hides the window. */
+        private const val SHUT_MAX_MS = 1_500L
+
+        /** Longer than the page keeps any banner (shade.tsx): past this the host takes it away itself. */
+        private const val PEEK_MAX_MS = 30_000L
     }
 }
 
@@ -518,8 +839,17 @@ private enum class PullMove {
     NOT_A_PULL,
 }
 
-/** What the shade page reaches through the bridge (shade.closed). */
+/** What the shade page reaches through the bridge (shade.closed, shade.expand, shade.peekHeight). */
 interface ShadeSlot {
-    /** The panel is shut: the window can go. */
+    /** The panel (or the heads-up banner) is shut: the window can go. */
     fun closed()
+
+    /** The heads-up banner pulled down: the whole shade. */
+    fun expand()
+
+    /** The heads-up banner is [px] (device px) tall from the window's top: the window as tall. */
+    fun peekHeight(px: Int)
+
+    /** How strongly what's behind the shade is blurred when it's open: the radius at full openness, dp (the page's). */
+    fun blur(dp: Float) {}
 }

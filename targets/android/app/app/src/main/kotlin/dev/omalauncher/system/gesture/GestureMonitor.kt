@@ -50,6 +50,14 @@ class GestureMonitor private constructor(
             }
             else -> {
                 val consumer = active ?: return
+                // A consumer whose zone is all its own (the edge handles): taken on the first event after the down, before
+                // anything under it - SystemUI's edge-back gesture included - can decide it's theirs. Not on the down
+                // itself: pilfered while the down is still being delivered, the dispatcher sent this monitor a second
+                // down and none of the moves after it (seen 2026-10-21 21:20, "edge: down" twice, no swipe).
+                if (consumer.takesOnDown && !pilfered && e.actionMasked != MotionEvent.ACTION_UP && e.actionMasked != MotionEvent.ACTION_CANCEL) {
+                    pilfered = true
+                    runCatching { monitor.pilferPointers() }.onFailure { Log.w(TAG, "can't take the gesture from the windows", it) }
+                }
                 val verdict = runCatching { consumer.onEvent(e) }.onFailure { Log.w(TAG, "gesture consumer failed", it) }.getOrDefault(GestureConsumer.Verdict.DROP)
                 when (verdict) {
                     GestureConsumer.Verdict.TAKE ->
@@ -136,6 +144,13 @@ interface GestureConsumer {
         /** Not this consumer's after all: it hears no more of this gesture. */
         DROP,
     }
+
+    /**
+     * The gesture is taken from the windows (and the other monitors) at its first move after [onDown] said it follows
+     * it, not once recognised: for a zone that's wholly the consumer's, where nothing under it may start a gesture of
+     * its own.
+     */
+    val takesOnDown: Boolean get() = false
 
     /** A finger down (display px, [MotionEvent.getRawX]/Y): true to follow this gesture. */
     fun onDown(e: MotionEvent): Boolean

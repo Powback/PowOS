@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108"><!-- PowOS's mark: the app icon (targets/android/app res/drawable/ic_launcher_*.xml), as an SVG for the shell. -->
+<defs><linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#24283b"/><stop offset="1" stop-color="#16161e"/></linearGradient>
+<linearGradient id="o" gradientUnits="userSpaceOnUse" x1="30" y1="30" x2="78" y2="78"><stop offset="0" stop-color="#33ccff"/><stop offset="1" stop-color="#00ff99"/></linearGradient></defs>
+<rect width="108" height="108" rx="24" fill="url(#b)"/>
+<path d="M75 57V44a11 11 0 0 0-11-11H44a11 11 0 0 0-11 11v20a11 11 0 0 0 11 11h13" fill="none" stroke="url(#o)" stroke-width="6" stroke-linecap="round"/>
+<rect x="65" y="65" width="10" height="10" rx="2.5" fill="#c0caf5"/></svg>

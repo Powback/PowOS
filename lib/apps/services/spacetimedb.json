@@ -16,7 +16,8 @@
   },
   "needs": { "network": "host", "listen": ["127.0.0.1:3410"] },
   "budget": {
-    "phone":   { "memMB": 300, "cpuPct": 50, "nofile": 65536, "nice": 5, "io": "be:6" },
+    "phone":   { "memMB": 300, "cpuPct": 50, "nofile": 65536, "nice": 5, "io": "be:6",
+                 "env": { "TOKIO_WORKER_THREADS": "3", "RAYON_NUM_THREADS": "2" } },
     "desktop": { "memMB": 1536, "nofile": 65536 }
   },
   "idle": { "port": 3410, "quietSec": 300, "unloadAboveMB": { "phone": 60, "desktop": 180 } }

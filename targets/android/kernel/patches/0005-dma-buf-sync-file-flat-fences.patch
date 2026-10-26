@@ -1,0 +1,423 @@
+From: PowOS
+Subject: dma-buf: sync_file import/export build flat fences (upstream dma_fence_unwrap_merge) - fixes reboots at game close
+
+Fix for 0004. Its dma_buf_resv_fence wrapped every fence on the buffer in a NEW dma_fence_array - including the
+exclusive fence a previous IMPORT_SYNC_FILE(WRITE) had set, which was already such an array - and kept signaled
+fences. Mesa's Vulkan WSI imports a write fence for every frame it presents, so a game's swapchain dma-buf carried a
+fence array nested one level deeper per frame shown. Freeing the buffer (the game or Steam closing) released that
+nest recursively, dma_fence_array_release -> dma_fence_put -> dma_fence_array_release ..., once per frame, on the
+16 KB kernel stack: the phone rebooted at every game close (2026-10-23 10:33, 10:53, 10:58, 11:14; boot reason
+"reboot", pstore empty).
+
+Now the fences go through upstream's __dma_fence_unwrap_merge, which this android13-5.15 tree already has (Android
+backported dma-fence-unwrap; sync_file_merge uses it): arrays and chains unwrapped, signaled fences dropped, one
+fence per context (the later one), the single remaining fence returned as itself, else one flat array, else a
+signaled stub. A buffer's fence is at most one array of unsignaled fences, one per context, whatever the frame count.
+KMI: dma-buf.c's static functions only; __dma_fence_unwrap_merge is an existing exported symbol.
+diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
+--- a/drivers/dma-buf/dma-buf.c
++++ b/drivers/dma-buf/dma-buf.c
+@@ -1,119 +1,120 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+  * Framework for buffer objects that can be shared across devices/subsystems.
+  *
+  * Copyright(C) 2011 Linaro Limited. All rights reserved.
+  * Author: Sumit Semwal <sumit.semwal@ti.com>
+  *
+  * Many thanks to linaro-mm-sig list, and specially
+  * Arnd Bergmann <arnd@arndb.de>, Rob Clark <rob@ti.com> and
+  * Daniel Vetter <daniel@ffwll.ch> for their support in creation and
+  * refining of this idea.
+  */
+ 
+ #include <linux/fs.h>
+ #include <linux/slab.h>
+ #include <linux/dma-buf.h>
+ #include <linux/dma-fence.h>
+ #include <linux/dma-fence-array.h>
+ #include <linux/sync_file.h>
++#include <linux/dma-fence-unwrap.h>
+ #include <linux/anon_inodes.h>
+ #include <linux/export.h>
+ #include <linux/debugfs.h>
+ #include <linux/module.h>
+ #include <linux/seq_file.h>
+ #include <linux/poll.h>
+ #include <linux/dma-resv.h>
+ #include <linux/mm.h>
+ #include <linux/mount.h>
+ #include <linux/pseudo_fs.h>
+ 
+ #include <uapi/linux/dma-buf.h>
+ #include <uapi/linux/magic.h>
+ 
+ #include <trace/hooks/dmabuf.h>
+ 
+ #include "dma-buf-sysfs-stats.h"
+ 
+ struct dma_buf_list {
+ 	struct list_head head;
+ 	struct mutex lock;
+ };
+ 
+ static struct dma_buf_list db_list;
+ 
+ /*
+  * This function helps in traversing the db_list and calls the
+  * callback function which can extract required info out of each
+  * dmabuf.
+  */
+ int get_each_dmabuf(int (*callback)(const struct dma_buf *dmabuf,
+ 		    void *private), void *private)
+ {
+ 	struct dma_buf *buf;
+ 	int ret = mutex_lock_interruptible(&db_list.lock);
+ 
+ 	if (ret)
+ 		return ret;
+ 
+ 	list_for_each_entry(buf, &db_list.head, list_node) {
+ 		ret = callback(buf, private);
+ 		if (ret)
+ 			break;
+ 	}
+ 	mutex_unlock(&db_list.lock);
+ 	return ret;
+ }
+ EXPORT_SYMBOL_NS_GPL(get_each_dmabuf, MINIDUMP);
+ 
+ static char *dmabuffs_dname(struct dentry *dentry, char *buffer, int buflen)
+ {
+ 	struct dma_buf *dmabuf;
+ 	char name[DMA_BUF_NAME_LEN];
+ 	size_t ret = 0;
+ 
+ 	dmabuf = dentry->d_fsdata;
+ 	spin_lock(&dmabuf->name_lock);
+ 	if (dmabuf->name)
+ 		ret = strlcpy(name, dmabuf->name, DMA_BUF_NAME_LEN);
+ 	spin_unlock(&dmabuf->name_lock);
+ 
+ 	return dynamic_dname(dentry, buffer, buflen, "/%s:%s",
+ 			     dentry->d_name.name, ret > 0 ? name : "");
+ }
+ 
+ static void dma_buf_release(struct dentry *dentry)
+ {
+ 	struct dma_buf *dmabuf;
+ 
+ 	dmabuf = dentry->d_fsdata;
+ 	if (unlikely(!dmabuf))
+ 		return;
+ 
+ 	BUG_ON(dmabuf->vmapping_counter);
+ 
+ 	/*
+ 	 * If you hit this BUG() it could mean:
+ 	 * * There's a file reference imbalance in dma_buf_poll / dma_buf_poll_cb or somewhere else
+ 	 * * dmabuf->cb_in/out.active are non-0 despite no pending fence callback
+ 	 */
+ 	BUG_ON(dmabuf->cb_in.active || dmabuf->cb_out.active);
+ 
+ 	dma_buf_stats_teardown(dmabuf);
+ 	dmabuf->ops->release(dmabuf);
+ 
+ 	trace_android_vh_dma_buf_release(dmabuf);
+ 	if (dmabuf->resv == (struct dma_resv *)&dmabuf[1])
+ 		dma_resv_fini(dmabuf->resv);
+ 
+ 	WARN_ON(!list_empty(&dmabuf->attachments));
+ 	module_put(dmabuf->owner);
+ 	kfree(dmabuf->name);
+ 	kfree(dmabuf);
+ }
+ 
+ static int dma_buf_file_release(struct inode *inode, struct file *file)
+ {
+ 	struct dma_buf *dmabuf;
+ 
+ 	if (!is_dma_buf_file(file))
+@@ -314,254 +315,265 @@
+ 
+ 			if (!dma_buf_poll_shared(resv, dcb) &&
+ 			    !dma_buf_poll_excl(resv, dcb))
+ 
+ 				/* No callback queued, wake up any other waiters */
+ 				dma_buf_poll_cb(NULL, &dcb->cb);
+ 			else
+ 				events &= ~EPOLLOUT;
+ 		}
+ 	}
+ 
+ 	if (events & EPOLLIN) {
+ 		struct dma_buf_poll_cb_t *dcb = &dmabuf->cb_in;
+ 
+ 		/* Check that callback isn't busy */
+ 		spin_lock_irq(&dmabuf->poll.lock);
+ 		if (dcb->active)
+ 			events &= ~EPOLLIN;
+ 		else
+ 			dcb->active = EPOLLIN;
+ 		spin_unlock_irq(&dmabuf->poll.lock);
+ 
+ 		if (events & EPOLLIN) {
+ 			/* Paired with fput in dma_buf_poll_cb */
+ 			get_file(dmabuf->file);
+ 
+ 			if (!dma_buf_poll_excl(resv, dcb))
+ 				/* No callback queued, wake up any other waiters */
+ 				dma_buf_poll_cb(NULL, &dcb->cb);
+ 			else
+ 				events &= ~EPOLLIN;
+ 		}
+ 	}
+ 
+ 	dma_resv_unlock(resv);
+ 	return events;
+ }
+ 
+ static long _dma_buf_set_name(struct dma_buf *dmabuf, const char *name)
+ {
+ 	spin_lock(&dmabuf->name_lock);
+ 	kfree(dmabuf->name);
+ 	dmabuf->name = name;
+ 	spin_unlock(&dmabuf->name_lock);
+ 
+ 	return 0;
+ }
+ 
+ /**
+  * dma_buf_set_name - Set a name to a specific dma_buf to track the usage.
+  * It could support changing the name of the dma-buf if the same piece of
+  * memory is used for multiple purpose between different devices.
+  *
+  * @dmabuf: [in]     dmabuf buffer that will be renamed.
+  * @buf:    [in]     A piece of userspace memory that contains the name of
+  *                   the dma-buf.
+  *
+  * Returns 0 on success. If the dma-buf buffer is already attached to
+  * devices, return -EBUSY.
+  *
+  */
+ long dma_buf_set_name(struct dma_buf *dmabuf, const char *name)
+ {
+ 	long ret = 0;
+ 	char *buf = kstrndup(name, DMA_BUF_NAME_LEN, GFP_KERNEL);
+ 
+ 	if (!buf)
+ 		return -ENOMEM;
+ 
+ 	ret = _dma_buf_set_name(dmabuf, buf);
+ 	if (ret)
+ 		kfree(buf);
+ 
+ 	return ret;
+ }
+ EXPORT_SYMBOL_GPL(dma_buf_set_name);
+ 
+ static long dma_buf_set_name_user(struct dma_buf *dmabuf, const char __user *buf)
+ {
+ 	char *name = strndup_user(buf, DMA_BUF_NAME_LEN);
+ 	long ret = 0;
+ 
+ 	if (IS_ERR(name))
+ 		return PTR_ERR(name);
+ 
+ 	ret = _dma_buf_set_name(dmabuf, name);
+ 	if (ret)
+ 		kfree(name);
+ 
+ 	return ret;
+ }
+ 
+ /*
+  * PowOS: DMA_BUF_IOCTL_EXPORT_SYNC_FILE / DMA_BUF_IOCTL_IMPORT_SYNC_FILE, backported from Linux 6.0 (upstream
+  * 20e10881a043, 594740497e99) to android13-5.15's dma_resv (exclusive + shared fences instead of dma_resv_usage).
+  * Mesa's Vulkan WSI attaches its rendering fence to a swapchain image with these, and a compositor (Xwayland) waits
+  * on it before reading the image. Without them a driver with no implicit sync of its own (Turnip on KGSL) hands
+  * over images the GPU is still drawing: Proton games on the phone showed half-drawn and older frames.
+  */
+ 
+-/* All fences a waiter of this kind has to wait for, as one fence (a stub if there are none). */
++/*
++ * All fences a waiter of this kind has to wait for, as one FLAT fence: upstream's dma_fence_unwrap_merge (in this
++ * tree, also what sync_file_merge uses) unwraps arrays and chains, drops signaled fences, keeps only the latest fence
++ * per context, and returns the single remaining fence itself, an array of the rest, or a signaled stub.
++ *
++ * The first version wrapped every fence on the buffer in a NEW dma_fence_array, including the exclusive fence the
++ * last import had set - itself such an array. Mesa's WSI imports a write fence for every frame it presents, so a
++ * game's swapchain buffer carried an array nested one level deeper per frame, its signaled fences included. Freeing
++ * the buffer (the game or Steam closing) put that chain: dma_fence_array_release -> dma_fence_put -> release, once
++ * per frame shown, on the kernel stack - the phone rebooted at every game close (2026-10-23, 4x).
++ */
+ static int dma_buf_resv_fence(struct dma_resv *resv, bool write, struct dma_fence *extra,
+ 			      struct dma_fence **out)
+ {
+-	struct dma_fence *excl = NULL, **shared = NULL, **fences;
+-	struct dma_fence_array *array;
++	struct dma_fence *excl = NULL, **shared = NULL, **fences, **work;
++	struct dma_fence_unwrap *iter;
+ 	unsigned int shared_count = 0, count, i;
+ 	int ret;
+ 
+ 	ret = dma_resv_get_fences(resv, &excl, &shared_count, &shared);
+ 	if (ret)
+ 		return ret;
+ 
+ 	if (!write) {	/* a reader waits for the writer only */
+ 		for (i = 0; i < shared_count; i++)
+ 			dma_fence_put(shared[i]);
+ 		shared_count = 0;
+ 	}
+ 
+ 	count = shared_count + (excl ? 1 : 0) + (extra ? 1 : 0);
+ 	if (count == 0) {
+ 		kfree(shared);
+ 		*out = dma_fence_get_stub();
+ 		return 0;
+ 	}
+-	if (count == 1) {
+-		*out = excl ? excl : extra ? dma_fence_get(extra) : shared[0];
+-		kfree(shared);
+-		return 0;
+-	}
+ 
+ 	fences = krealloc(shared, count * sizeof(*fences), GFP_KERNEL);
+ 	if (!fences) {
+ 		for (i = 0; i < shared_count; i++)
+ 			dma_fence_put(shared[i]);
+ 		kfree(shared);
+ 		dma_fence_put(excl);
+ 		return -ENOMEM;
+ 	}
+ 	i = shared_count;
+ 	if (excl)
+ 		fences[i++] = excl;
+ 	if (extra)
+ 		fences[i++] = dma_fence_get(extra);
+ 
+-	array = dma_fence_array_create(count, fences, dma_fence_context_alloc(1), 1, false);
+-	if (!array) {
+-		for (i = 0; i < count; i++)
+-			dma_fence_put(fences[i]);
+-		kfree(fences);
+-		return -ENOMEM;
+-	}
+-	*out = &array->base;
+-	return 0;
++	/*
++	 * __dma_fence_unwrap_merge uses its fences[] as cursor positions (trashes it) and takes its own references:
++	 * it gets a copy, our references in fences[] are put after.
++	 */
++	work = kmemdup(fences, count * sizeof(*fences), GFP_KERNEL);
++	iter = kmalloc_array(count, sizeof(*iter), GFP_KERNEL);
++	*out = work && iter ? __dma_fence_unwrap_merge(count, work, iter) : NULL;
++	kfree(iter);
++	kfree(work);
++
++	for (i = 0; i < count; i++)
++		dma_fence_put(fences[i]);
++	kfree(fences);
++
++	return *out ? 0 : -ENOMEM;
+ }
+ 
+ static long dma_buf_export_sync_file(struct dma_buf *dmabuf, void __user *user_data)
+ {
+ 	struct dma_buf_export_sync_file arg;
+ 	struct dma_fence *fence = NULL;
+ 	struct sync_file *sync_file;
+ 	int fd, ret;
+ 
+ 	if (copy_from_user(&arg, user_data, sizeof(arg)))
+ 		return -EFAULT;
+ 
+ 	if (arg.flags & ~DMA_BUF_SYNC_RW)
+ 		return -EINVAL;
+ 
+ 	if ((arg.flags & DMA_BUF_SYNC_RW) == 0)
+ 		return -EINVAL;
+ 
+ 	fd = get_unused_fd_flags(O_CLOEXEC);
+ 	if (fd < 0)
+ 		return fd;
+ 
+ 	ret = dma_buf_resv_fence(dmabuf->resv, arg.flags & DMA_BUF_SYNC_WRITE, NULL, &fence);
+ 	if (ret)
+ 		goto err_put_fd;
+ 
+ 	sync_file = sync_file_create(fence);
+ 	dma_fence_put(fence);
+ 	if (!sync_file) {
+ 		ret = -ENOMEM;
+ 		goto err_put_fd;
+ 	}
+ 
+ 	arg.fd = fd;
+ 	if (copy_to_user(user_data, &arg, sizeof(arg))) {
+ 		ret = -EFAULT;
+ 		goto err_put_file;
+ 	}
+ 
+ 	fd_install(fd, sync_file->file);
+ 
+ 	return 0;
+ 
+ err_put_file:
+ 	fput(sync_file->file);
+ err_put_fd:
+ 	put_unused_fd(fd);
+ 	return ret;
+ }
+ 
+ static long dma_buf_import_sync_file(struct dma_buf *dmabuf, const void __user *user_data)
+ {
+ 	struct dma_buf_import_sync_file arg;
+ 	struct dma_fence *fence, *excl;
+ 	int ret = 0;
+ 
+ 	if (copy_from_user(&arg, user_data, sizeof(arg)))
+ 		return -EFAULT;
+ 
+ 	if (arg.flags & ~DMA_BUF_SYNC_RW)
+ 		return -EINVAL;
+ 
+ 	if ((arg.flags & DMA_BUF_SYNC_RW) == 0)
+ 		return -EINVAL;
+ 
+ 	fence = sync_file_get_fence(arg.fd);
+ 	if (!fence)
+ 		return -EINVAL;
+ 
+ 	dma_resv_lock(dmabuf->resv, NULL);
+ 	if (arg.flags & DMA_BUF_SYNC_WRITE) {
+ 		/*
+ 		 * A write fence. 5.15's dma_resv keeps one exclusive fence and drops the shared ones when it is set,
+ 		 * so the new exclusive fence also covers everything that was there (upstream keeps them as separate
+ 		 * write and read fences instead).
+ 		 */
+ 		ret = dma_buf_resv_fence(dmabuf->resv, true, fence, &excl);
+ 		if (!ret) {
+ 			dma_resv_add_excl_fence(dmabuf->resv, excl);
+ 			dma_fence_put(excl);
+ 		}
+ 	} else {
+ 		ret = dma_resv_reserve_shared(dmabuf->resv, 1);
+ 		if (!ret)
+ 			dma_resv_add_shared_fence(dmabuf->resv, fence);
+ 	}
+ 	dma_resv_unlock(dmabuf->resv);
+ 
+ 	dma_fence_put(fence);
+ 
+ 	return ret;
+ }
+ 
+ static long dma_buf_ioctl(struct file *file,
+ 			  unsigned int cmd, unsigned long arg)
+ {
+ 	struct dma_buf *dmabuf;
+ 	struct dma_buf_sync sync;
+ 	enum dma_data_direction direction;
+ 	int ret;

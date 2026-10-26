@@ -1,0 +1,25 @@
+# The style lint's justified exceptions (dev/lint-style.sh): "<file> <text on the line>  # why".
+# AUDIT: an entry marked so is a known violation of docs/DESIGN-LANGUAGE.md still to be removed, not an exception.
+ui/glasses.css #  # the smart glasses' own screen: a monochrome green panel, black is off - not the theme's
+ui/terminal.css --term-color  # the terminal's default ANSI palette (a theme's color0-15 replace it, app.tsx)
+ui/terminal.tsx "#00000000"  # xterm's transparent background (it takes no CSS variable)
+ui/shell.css html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }  # the screen-off display: black is an OLED's off pixels
+ui/shell.css var(--color-foreground) 70%, #000)  # the screen-off display: dimmed towards black (OLED burn-in, power)
+ui/shell.css var(--color-accent) 75%, #000)  # the screen-off display: dimmed towards black (OLED burn-in, power)
+ui/grid.tsx fill="#fff"  # an SVG mask's keep-area (mask semantics, not a colour)
+ui/grid.tsx fill="#000" stroke="#000"  # an SVG mask's cut-out (mask semantics, not a colour)
+ui/grid.tsx fill="rgb(0 0 0 / 0.42)"  # a merged group's --lift-shadow drawn in SVG (one outline for the group)
+ui/owl.tsx || "#ddd"  # fallback before the theme's tokens exist (first frame)
+ui/owl.tsx return `rgb(${a.map((v, i) => Math.round(v * 0.35 + b[i] * 0.65)).join(",")})`;  # a canvas text colour mixed into the theme's foreground (canvasText: a canvas takes no CSS variable)
+apps/pages.ts || "#222"  # fallback before the theme's tokens exist (first frame)
+apps/pages.ts || "#ddd"  # fallback before the theme's tokens exist (first frame)
+apps/pages.ts fill="#567"  # a PowOS app's placeholder icon (an SVG data URL, no CSS)
+ui/shell.css .ai-unit.orphan { box-shadow: inset 3px 0 0 var(--color-accent); }  # a state mark (orphaned unit), theme colour
+ui/shell.css background: rgb(0 0 0 / 0.55);  # AUDIT: the notification panel's page dim on home
+ui/shell.css background: rgb(0 0 0 / 0.25);  # AUDIT: the assistant's dim over the app
+ui/shell.css html[data-mode="lock"] { background: rgb(0 0 0 / calc(0.55  # AUDIT: the lock face's page dim
+ui/shell.css border: var(--frame) solid var(--color-border); }  # assist: yesterday's look restored (the exception: the real screen 1:1)
+ui/shell.css .assist-ask { display: flex;  # assist: yesterday's look restored (the exception)
+ui/shell.css .assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent);  # assist: yesterday's look restored (the exception)
+ui/shell.css .assist-live { font:  # assist: yesterday's look restored (the exception)
+ui/shell.css transparent calc(var(--fr) - 0.5px), #000 var(--fr));  # a CSS mask's keep-area (mask semantics, not a colour): the seam fillet's quarter-circle cut

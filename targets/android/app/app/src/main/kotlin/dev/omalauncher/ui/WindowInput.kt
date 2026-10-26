@@ -1,8 +1,11 @@
 package dev.omalauncher.ui
 
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isPrimaryPressed
@@ -43,6 +46,7 @@ private suspend fun PointerInputScope.handlePointer(
     touchSlop: Float,
     longPressMs: Long,
 ) = awaitPointerEventScope {
+    val target = TouchTarget(wm, window, touchSlop, longPressMs)
     var mouseButtons = 0
     while (true) {
         val event = awaitPointerEvent()
@@ -50,68 +54,107 @@ private suspend fun PointerInputScope.handlePointer(
         if (change.type == PointerType.Mouse) {
             mouseButtons = handleMouse(wm, window, event, mouseButtons)
             change.consume()
-            continue
-        }
-        if (event.type != PointerEventType.Press || change.isConsumed) continue
-
-        val start = change.position
-        val hit = window.hitTest(start.x, start.y)
-        change.consume()
-        if (!wm.onPress(window, hit) || hit == null) continue
-
-        // Clients with wl_touch (foot, GTK) get real touch: foot turns hold-and-drag into selection.
-        if (wm.wantsTouch(hit.surface)) {
-            val id = change.id.value.toInt()
-            wm.touchDown(hit, id)
-            while (true) {
-                val next = awaitPointerEvent()
-                val c = next.changes.firstOrNull { it.id == change.id } ?: break
-                // Taken by the home screen (a long press lifts a tile): the touch ends here.
-                if (c.isConsumed || !c.pressed) break
-                c.consume()
-                val d = (c.position - start) / wm.scale.toFloat()
-                wm.touchMotion(id, hit.x + d.x, hit.y + d.y)
-            }
-            wm.touchUp(id)
-            continue
-        }
-
-        var scrolling = false
-        var longPressed = false
-        var last = start
-        while (true) {
-            val next =
-                if (!scrolling && !longPressed) {
-                    withTimeoutOrNull(longPressMs) { awaitPointerEvent() }
-                } else {
-                    awaitPointerEvent()
-                }
-            if (next == null) {
-                longPressed = true
-                wm.click(hit, BTN_RIGHT)
-                continue
-            }
-            val c = next.changes.firstOrNull { it.id == change.id } ?: break
-            if (c.isConsumed) {
-                if (scrolling) wm.scrollStop()
-                break
-            }
-            c.consume()
-            if (!c.pressed) {
-                if (scrolling) wm.scrollStop() else if (!longPressed) wm.click(hit, BTN_LEFT)
-                break
-            }
-            if (!scrolling && !longPressed && (c.position - start).getDistance() > touchSlop) {
-                scrolling = true
-                wm.pointerMove(hit)
-            }
-            if (scrolling) {
-                val d = c.position - last
-                wm.scroll(-d.x / wm.scale, -d.y / wm.scale, AXIS_SOURCE_FINGER)
-            }
-            last = c.position
+        } else if (event.type == PointerEventType.Press && !change.isConsumed) {
+            touchPress(target, change)
         }
     }
+}
+
+/** What a touch on a window needs: where it goes, and the platform's slop and long-press time. */
+private class TouchTarget(
+    val wm: WindowManager,
+    val window: XdgToplevel,
+    val touchSlop: Float,
+    val longPressMs: Long,
+)
+
+/** A finger down on the window: real touch for clients that take it, else the phone's mapping (tap, hold, drag). */
+private suspend fun AwaitPointerEventScope.touchPress(
+    t: TouchTarget,
+    change: PointerInputChange,
+) {
+    val hit = t.window.hitTest(change.position.x, change.position.y)
+    change.consume()
+    if (!t.wm.onPress(t.window, hit) || hit == null) return
+    // Clients with wl_touch (foot, GTK) get real touch: foot turns hold-and-drag into selection.
+    if (t.wm.wantsTouch(hit.surface)) realTouch(t.wm, hit, change) else phoneGesture(t, hit, change)
+}
+
+private suspend fun AwaitPointerEventScope.realTouch(
+    wm: WindowManager,
+    hit: SurfaceHit,
+    change: PointerInputChange,
+) {
+    val id = change.id.value.toInt()
+    val start = change.position
+    wm.touchDown(hit, id)
+    while (true) {
+        val c = awaitPointerEvent().changes.firstOrNull { it.id == change.id }
+        // Taken by the home screen (a long press lifts a tile): the touch ends here.
+        if (c == null || c.isConsumed || !c.pressed) break
+        c.consume()
+        val d = (c.position - start) / wm.scale.toFloat()
+        wm.touchMotion(id, hit.x + d.x, hit.y + d.y)
+    }
+    wm.touchUp(id)
+}
+
+/** A phone gesture in progress: where it began, whether it became a scroll or a long press. */
+private class Gesture(
+    val start: Offset,
+) {
+    var scrolling = false
+    var longPressed = false
+    var last = start
+    val undecided get() = !scrolling && !longPressed
+}
+
+/** Tap = left click, long press = right click, drag = scroll. */
+private suspend fun AwaitPointerEventScope.phoneGesture(
+    t: TouchTarget,
+    hit: SurfaceHit,
+    change: PointerInputChange,
+) {
+    val g = Gesture(change.position)
+    while (true) {
+        val next = if (g.undecided) withTimeoutOrNull(t.longPressMs) { awaitPointerEvent() } else awaitPointerEvent()
+        if (next == null) {
+            g.longPressed = true
+            t.wm.click(hit, BTN_RIGHT)
+            continue
+        }
+        val c = next.changes.firstOrNull { it.id == change.id } ?: break
+        if (!gestureStep(t, hit, g, c)) break
+    }
+}
+
+/** One move of the finger; false once the gesture is over (lifted, or taken by home). */
+private fun gestureStep(
+    t: TouchTarget,
+    hit: SurfaceHit,
+    g: Gesture,
+    c: PointerInputChange,
+): Boolean {
+    val wm = t.wm
+    if (c.isConsumed) {
+        if (g.scrolling) wm.scrollStop()
+        return false
+    }
+    c.consume()
+    if (!c.pressed) {
+        if (g.scrolling) wm.scrollStop() else if (!g.longPressed) wm.click(hit, BTN_LEFT)
+        return false
+    }
+    if (g.undecided && (c.position - g.start).getDistance() > t.touchSlop) {
+        g.scrolling = true
+        wm.pointerMove(hit)
+    }
+    if (g.scrolling) {
+        val d = c.position - g.last
+        wm.scroll(-d.x / wm.scale, -d.y / wm.scale, AXIS_SOURCE_FINGER)
+    }
+    g.last = c.position
+    return true
 }
 
 private fun handleMouse(

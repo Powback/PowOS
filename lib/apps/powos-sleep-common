@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""powos-sleep-common - what every PowOS sleeper shares: the never-sleep list, the manifest's "autosleep" key, durations,
+and the status board `powos sleep` reads.
+
+One config surface for every kind of thing that sleeps: containers (powos-autosleep), native/sandbox app backends,
+GUI apps in the Plasma session, SpacetimeDB databases (powos-sleepd), the shell's islands (the shell itself).
+Loaded as a module (SourceFileLoader); run, it prints the never list.
+
+  manifest:  "autosleep": {"idle": "5m", "mode": "pause" | "hibernate" | "stop", "stop": "6h"}   or   "never"
+  rule:      {"idle": 300, "mode": "pause", "stop": 0}   or   {"never": True}
+
+  idle   how long it must be idle before it sleeps (default 5m)
+  mode   pause = frozen in memory (cgroup freezer), wakes in ms - the default
+         hibernate = frozen, and its memory paged out (containers: checkpointed with CRIU where there is CRIU;
+         processes: MADV_PAGEOUT to zram); wakes in ms plus the page faults it takes back
+         stop = stopped, started again on demand
+  stop   after this long asleep, stop it (0 = never)
+
+The never list: NEVER (words in a name or app id) + CORE (exact process names: the session, the compositor, the
+desktop shell, the buses, audio) + the user's own (`powos sleep never <thing>`, /var/lib/powos/sleep/never.json).
+
+The status board: each sleeper publishes /run/powos-sleep/<provider>.json -
+  {"provider": "containers", "time": <epoch>, "wake": {"socket": "/run/..."} | {"exec": ["cmd", "{id}"]},
+   "items": [{"id", "type", "name", "state": "asleep"|"awake"|"never"|"exempt", "since", "why", "rule"}]}
+`powos sleep status` lists every provider's items; `powos sleep wake <thing>` finds it and uses its provider's wake:
+a socket gets the line "wake <id>" (one JSON line back: {"ok": true} or {"error": "..."}), exec runs the command.
+"""
+import json
+import os
+import re
+import socket
+import time
+
+DEFAULT = {"idle": 300, "mode": "pause", "stop": 0}
+MODES = ("pause", "hibernate", "stop")
+
+# System services never sleep, wherever they run (matched as a word in the name or the app id).
+NEVER = ("spacetimedb", "spacetime", "comms", "agentsd")
+NEVER_RE = re.compile(r"(^|[-_.])(" + "|".join(NEVER) + r")([-_.]|$)", re.I)
+# The phone's session core, exact process names (comm, 15 chars): freezing one stalls the whole desktop.
+CORE = {"kwin_wayland", "kwin_x11", "kwin_wayland_wr", "plasmashell", "Xwayland", "ksmserver", "kded6", "kded5",
+        "startplasma-way", "plasma_session", "plasma-session", "dbus-daemon", "dbus-broker", "dbus-broker-lau",
+        "pipewire", "pipewire-pulse", "wireplumber", "xdg-desktop-por", "kglobalacceld", "polkit-kde-auth",
+        "org_kde_powerde", "powos-shell", "powos-supervis", "powos-sleepd", "powos-sleep-gui", "powos-padd",
+        "powos-focus-wat", "powos-android-t", "sshd", "tmux: server", "tmux", "init", "systemd", "su", "magiskd"}
+USER_NEVER = os.environ.get("POWOS_SLEEP_NEVER", "/var/lib/powos/sleep/never.json")
+STATE_DIR = os.environ.get("POWOS_SLEEP_STATE", "/run/powos-sleep")
+_user = {"mtime": None, "names": set()}
+
+
+def user_never():
+    """The user's own never list (names, exact, case-insensitive), re-read when the file changes."""
+    try:
+        mt = os.stat(USER_NEVER).st_mtime
+    except OSError:
+        _user.update(mtime=None, names=set())
+        return _user["names"]
+    if mt != _user["mtime"]:
+        try:
+            with open(USER_NEVER) as f:
+                _user["names"] = {str(n).lower() for n in json.load(f)}
+        except (OSError, ValueError):
+            _user["names"] = set()
+        _user["mtime"] = mt
+    return _user["names"]
+
+
+def set_never(name, on=True):
+    names = set(user_never())
+    (names.add if on else names.discard)(name.lower())
+    os.makedirs(os.path.dirname(USER_NEVER), exist_ok=True)
+    tmp = USER_NEVER + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(sorted(names), f, indent=1)
+    os.replace(tmp, USER_NEVER)
+    _user["mtime"] = None
+
+
+def is_never(*names):
+    """Any of the names (an app id, a container name, a process comm, a window class) on the never list."""
+    mine = user_never()
+    for n in names:
+        if not n:
+            continue
+        if NEVER_RE.search(n) or n in CORE or n.lower() in mine:
+            return True
+    return False
+
+
+def seconds(s):
+    """5m / 30s / 6h / 1d / 300 -> seconds."""
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)([smhd]?)", str(s).strip().lower())
+    if not m:
+        raise ValueError(f"not a duration: {s} (e.g. 30s, 5m, 6h)")
+    return int(float(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)])
+
+
+def fmt(sec):
+    sec = int(sec)
+    for unit, n in (("d", 86400), ("h", 3600), ("m", 60)):
+        if (sec >= n and sec % n == 0) or sec >= 10 * n:
+            return f"{sec // n}{unit}"
+    return f"{sec}s"
+
+
+def rule(idle=None, mode=None, stop=None):
+    """A rule from loose values (flags or a manifest). Raises ValueError on bad ones."""
+    if str(idle).strip().lower() in ("never", "off", "no", "false", "0"):
+        return {"never": True}
+    r = {"idle": seconds(idle) if idle is not None else DEFAULT["idle"], "mode": (mode or DEFAULT["mode"]).lower(),
+         "stop": seconds(stop) if stop else 0}
+    if r["mode"] not in MODES:
+        raise ValueError(f"mode: one of {', '.join(MODES)}, not {r['mode']}")
+    return r
+
+
+def from_manifest(value):
+    """The manifest's "autosleep" value -> a rule, or None when the key is absent (the sleeper's default applies)."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return dict(DEFAULT) if value else {"never": True}
+    if isinstance(value, str):
+        return rule(value)
+    return rule(value.get("idle"), value.get("mode"), value.get("stop"))
+
+
+def encode(r):
+    return "never" if r.get("never") else f"idle={r['idle']},mode={r['mode']},stop={r.get('stop', 0)}"
+
+
+def decode(s):
+    if not s:
+        return None
+    if s.strip() == "never":
+        return {"never": True}
+    r = dict(DEFAULT)
+    for kv in s.split(","):
+        k, _, v = kv.partition("=")
+        if k in ("idle", "stop") and v.isdigit():
+            r[k] = int(v)
+        elif k == "mode" and v in MODES:
+            r[k] = v
+    return r
+
+
+def describe(r):
+    if not r:
+        return "-"
+    if r.get("never"):
+        return "never"
+    s = f"{fmt(r['idle'])} {r['mode']}"
+    return s + (f", stop {fmt(r['stop'])}" if r.get("stop") else "")
+
+
+# ── the status board ────────────────────────────────────────────────────────
+
+def publish(provider, items, wake=None):
+    """Atomically replace /run/powos-sleep/<provider>.json (readable by everyone in PowOS)."""
+    os.makedirs(STATE_DIR, exist_ok=True)
+    try:
+        os.chmod(STATE_DIR, 0o755)
+    except OSError:
+        pass
+    p = f"{STATE_DIR}/{provider}.json"
+    tmp = f"{p}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump({"provider": provider, "time": round(time.time()), "wake": wake, "items": items}, f)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, p)
+
+
+def providers():
+    out = []
+    try:
+        names = sorted(os.listdir(STATE_DIR))
+    except OSError:
+        return out
+    for n in names:
+        if n.endswith(".json"):
+            try:
+                with open(f"{STATE_DIR}/{n}") as f:
+                    out.append(json.load(f))
+            except (OSError, ValueError):
+                pass
+    return out
+
+
+def request(path, line, timeout=5.0):
+    """One line to a sleeper's socket, one JSON line back."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect(path)
+        s.sendall(line.rstrip("\n").encode() + b"\n")
+        buf = b""
+        while not buf.endswith(b"\n"):
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+        return json.loads(buf or b'{"error": "no reply"}')
+    finally:
+        s.close()
+
+
+if __name__ == "__main__":
+    print("words:", ", ".join(NEVER))
+    print("core: ", ", ".join(sorted(CORE)))
+    print("yours:", ", ".join(sorted(user_never())) or "-")

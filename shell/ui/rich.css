@@ -1,0 +1,229 @@
+/* The conversation's rich parts (rich.tsx). No surfaces of their own: quiet lines in the chat's flow; what opens
+   (a tool's output) is the soft fill inside the surface it's on. */
+
+/* A run of tool calls: one muted line, its count; open, a line per call. */
+.tl {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  font-size: var(--text-small);
+  min-width: 0;
+}
+.tl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: var(--color-foreground);
+  background: none;
+  border: 0;
+}
+.tl-row .icon, .tl-spin { flex: none; width: 1.1em; height: 1.1em; }
+.tl-verb { flex: none; font-weight: 600; }
+.tl-arg { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tl-count { flex: none; }
+.tl-row .tl-fail { color: var(--color-red); }
+.tl-more {
+  align-self: flex-start;
+  padding: 4px 0;
+  font: inherit;
+  color: var(--color-foreground);
+  background: none;
+  border: 0;
+}
+/* What a call returned: its head, scrolled inside, selectable. */
+.tl-out {
+  margin: 2px 0 6px calc(1.1em + 8px);
+  padding: 6px 8px;
+  max-height: 30vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  color: var(--color-foreground);
+  background: var(--soft-fill);
+  border-radius: 8px;
+  user-select: text;
+}
+/* Running: a still accent dot (no spin: an endless animation keeps the compositor re-blurring every frame). */
+.tl-spin { display: grid; place-items: center; }
+.tl-spin::before { content: ""; width: 0.5em; height: 0.5em; border-radius: 50%; background: var(--color-accent); }
+
+/* A question with options (```choices): the question as the assistant's line, the options as pills under it. */
+.choice { align-self: stretch; display: flex; flex-direction: column; gap: 6px; }
+.choice-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice-opt {
+  min-height: 36px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: var(--text-body);
+  color: var(--color-foreground);
+  background: var(--soft-fill);
+  border: 0;
+  border-radius: 20px;
+}
+.choice-opt.on { color: var(--color-background); background: var(--color-accent); }
+.choice-opt.other { background: none; }
+
+/* On PowOS AI's page the latest answer is the card's text, not a bubble in it. */
+.ai-answer .msg.assistant { max-width: none; padding: 0; background: none; border: 0; box-shadow: none; }
+.ai-answer > * + * { margin-top: 8px; }
+
+/* A presented document (```present): a card with its title and its beginning; a tap opens it full screen. */
+.present {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 0;
+  color: var(--color-foreground);
+  background: var(--soft-fill);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+}
+.present-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.present-title { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+/* Its beginning: still, untouchable, faded out at the foot. */
+.present-peek {
+  height: 140px;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(black 60%, transparent);
+  mask: linear-gradient(black 60%, transparent);
+}
+.present-frame { display: block; width: 100%; height: 100%; border: 0; background: none; }
+.present-peek .present-frame { height: 140px; }
+.present-peek .present-md { font-size: var(--text-small); }
+
+/* Full screen, over everything: the reference sheet, its title and × at the top, the document scrolling under. */
+.present-full {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--inset-top, 0px) var(--edge) var(--inset-bottom, 0px);
+}
+.present-full.tile { border: 0; border-radius: 0; box-shadow: none; }
+.present-full > * { width: 100%; max-width: 720px; margin-inline: auto; }
+.present-full .present-head { min-height: 48px; font-size: var(--text-item); }
+.present-close { display: grid; place-items: center; width: 40px; height: 40px; font-size: 20px; color: var(--color-foreground); background: none; border: 0; }
+.present-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 16px; }
+.present-body .present-md { font-size: var(--text-body); }
+
+/* Markdown (md.ts): hierarchy by size and weight; code and tables on the soft fill; no lines. */
+.md { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; user-select: text; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md blockquote, .md .md-table { margin: 0 0 8px; }
+.md h3, .md h4, .md h5 { margin: 12px 0 6px; line-height: 1.25; }
+.md h3 { font-size: 1.25em; }
+.md h4 { font-size: 1.1em; }
+.md h5 { font-size: 1em; }
+.md ul, .md ol { padding-left: 1.4em; }
+.md li { margin: 2px 0; }
+.md li > ul, .md li > ol { margin: 2px 0 0; }
+.md a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+.md code { padding: 1px 4px; background: var(--soft-fill); border-radius: 4px; font: inherit; }
+.md pre { padding: 8px 10px; overflow-x: auto; background: var(--soft-fill); border-radius: 8px; white-space: pre; }
+.md pre code { padding: 0; background: none; }
+.md blockquote { margin-left: 0; margin-right: 0; padding: 6px 10px; background: var(--soft-fill); border-radius: 8px; }
+.md hr { height: 8px; margin: 4px 0; border: 0; }
+.md img { display: block; max-width: 100%; border-radius: 8px; }
+.md .md-table { overflow-x: auto; }
+.md table { border-collapse: collapse; font-size: 0.93em; }
+.md th, .md td { padding: 4px 10px 4px 0; text-align: left; vertical-align: top; }
+.md th { font-weight: 600; }
+.md tbody tr:nth-child(odd) td { background: var(--soft-fill); }
+
+/* PowOS AI's page (powai.tsx): what needs you, then the conversation, then the board. */
+.ai-needs { display: flex; flex-direction: column; gap: 8px; }
+.ai-need { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; }
+.ai-need-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 0; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
+.ai-need-do { font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.ai-need-what { font-size: var(--text-small); overflow-wrap: anywhere; }
+.ai-need-acts { flex: none; display: flex; flex-direction: column; gap: 6px; }
+.ai-need-act { min-height: 32px; padding: 4px 14px; font: inherit; color: var(--color-foreground); background: none; border: 0; border-radius: 20px; }
+/* Folds on the wallpaper (not on a surface): a label's colour and shadow, as the page's headings. */
+.ai-screen .ai-fold:not(.tile *) { color: var(--on-wallpaper); text-shadow: var(--label-shadow); }
+
+/* The board's rows: a dot, the title up to two lines, an age only past a day. */
+.ai-item { display: flex; flex-direction: column; }
+/* A grid so the progress (bar + "1/4 · step") sits above the title's column and the dot stays beside the title. */
+.ai-item-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; column-gap: 10px; row-gap: 2px; width: 100%; padding: 8px 12px; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
+.ai-item-row .ai-dot { margin-top: 0.45em; }
+.ai-item-progress { grid-column: 2 / -1; display: flex; flex-direction: column; min-width: 0; }
+.ai-item-row > .ai-dot { grid-column: 1; }
+.ai-item-main { grid-column: 2; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ai-item-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.35; overflow-wrap: anywhere; }
+.ai-item-row[aria-expanded="true"] .ai-item-title { -webkit-line-clamp: unset; }
+.ai-item-note { margin: 0; font-size: var(--text-small); line-height: 1.4; overflow-wrap: anywhere; }
+/* Tracked: above the title a thin bar (how far along) and "3/10 · the step"; under it "owner · 2 commits · 2h ago". */
+.ai-bar { display: block; height: 3px; margin: 2px 0 3px; border-radius: 2px; background: var(--soft-fill); overflow: hidden; }
+.ai-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--color-accent); }
+.ai-item-step, .ai-item-facts { font-size: var(--text-small); line-height: 1.35; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ai-item-facts { color: var(--color-muted); }
+/* Open: the note, the steps (done / now / next), the commits in plain words, the review images. */
+.ai-item-more { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 10px calc(12px + 8px + 10px); font-size: var(--text-small); line-height: 1.4; }
+.ai-steps, .ai-commits { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.ai-steps li { display: flex; gap: 8px; overflow-wrap: anywhere; }
+.ai-step-mark { flex: none; width: 1em; text-align: center; }
+/* Now: a filled dot; next: a ring (drawn, not glyphs - a font drew "●" as a coloured emoji). */
+.ai-steps li:not(.done) .ai-step-mark::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--color-foreground); }
+.ai-steps li.current .ai-step-mark::before { background: var(--color-foreground); }
+.ai-steps li.current { font-weight: 600; }
+.ai-steps li.next { color: var(--color-muted); }
+.ai-commits li { overflow-wrap: anywhere; }
+.ai-imgs { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-img { width: 72px; height: 128px; padding: 0; overflow: hidden; border: 0; border-radius: 8px; background: var(--soft-fill); }
+.ai-img img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.ai-img-name { padding: 2px 8px; border-radius: 8px; background: var(--soft-fill); overflow-wrap: anywhere; }
+.ai-img-full { display: block; max-width: 100%; margin: 0 auto; border-radius: 8px; }
+.ai-item-age { flex: none; font-size: var(--text-small); color: var(--color-muted); }
+.ai-item.done .ai-item-title { color: var(--color-muted); }
+.ai-group + .ai-group { margin-top: 6px; }
+.ai-group-name { padding: 6px 12px 2px; font-size: var(--text-small); color: var(--color-muted); }
+.ai-work-list { display: flex; flex-direction: column; }
+.ai-work-list > .ai-heading { margin: 4px 12px 2px; display: flex; align-items: baseline; gap: 6px; }
+/* A queued phone check: a quiet "test now" under the row (the queue runs it at once); "test all" on the header. */
+.ai-test { align-self: flex-start; margin: -2px 12px 8px calc(12px + 8px + 10px); padding: 4px 12px; font: inherit; font-size: var(--text-small); color: var(--color-foreground); background: var(--soft-fill); border: 0; border-radius: 999px; }
+.ai-heading .ai-test-all { margin: 0 0 0 auto; }
+.ai-heading span.ai-test-all { font-size: var(--text-small); }
+.ai-result.bad { color: var(--color-red); }
+.ai-result-shot { padding: 0 12px 10px calc(12px + 8px + 10px); }
+/* A folded line: paused, done recently, the earlier conversation. */
+.ai-fold { align-self: flex-start; padding: 8px 12px; font: inherit; font-size: var(--text-small); color: var(--color-foreground); background: none; border: 0; }
+
+/* Sent mid-turn, waiting for its turn: the user's words, right-aligned with no bubble yet, "queued" and a x under it. */
+.msg.user.queued { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding-top: 2px; padding-bottom: 2px; text-align: end; color: var(--color-foreground); background: none; box-shadow: none; }
+.queued-mark { display: flex; align-items: center; gap: 4px; font-size: var(--text-small); }
+.queued-x { display: grid; place-items: center; width: 28px; height: 28px; margin: -6px -8px -6px 0; padding: 0; font-size: 14px; color: var(--color-foreground); background: none; border: 0; }
+.ai-queued { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+
+/* The images a message sent: thumbnails under its words (the screen's top, a tap: full screen); cleaned up, a quiet line. */
+.sent-imgs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+.ai-asked .sent-imgs { justify-content: flex-start; }
+.sent-img { width: 64px; height: 112px; padding: 0; overflow: hidden; border: 0; border-radius: 8px; background: var(--soft-fill); }
+.sent-img img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.sent-gone { font-size: var(--text-small); font-weight: normal; }
+
+/* An agent's message: a compact card (who, the gist in one line); open, its Markdown with quiet section headers. */
+/* An agent's mail (rich.tsx MailCard): folded to one line - who, the gist, a chevron; open, its Markdown under it. */
+.mail { align-self: stretch; display: flex; flex-direction: column; gap: 6px; padding: 0 12px; border-radius: var(--radius); background: var(--soft-fill); }
+.mail.open { padding-bottom: 10px; }
+/* The whole line is the tap target (40 px tall), not only the words. */
+.mail-head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 40px; padding: 0; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
+/* Drawn, not a glyph (a font drew the arrow as an emoji): down folded, up open. */
+.mail-chev { flex: none; width: 6px; height: 6px; margin: 0 2px 3px auto; border: solid var(--color-muted); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.mail.open .mail-chev { margin-bottom: -3px; transform: rotate(-135deg); }
+.mail-from { flex: none; font-weight: 600; }
+.mail-sum { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-small); }
+.mail-body { font-size: var(--text-small); }
+.mail-body h5 { margin: 8px 0 2px; font-size: var(--text-small); font-weight: 600; letter-spacing: 0.04em; }

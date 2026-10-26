@@ -284,7 +284,7 @@ class QuickSettings(
                             .takeIf { context.packageManager.resolveActivity(it, 0) != null } ?: launch(cn.packageName)
                     } ?: error("no quick setting $name")
             } ?: return
-        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context)) }
             .onFailure { Log.w(TAG, "can't open $name", it) }
     }
 
@@ -390,9 +390,9 @@ class QuickSettings(
         /** A command in a su shell: its output, null if it failed. */
         private fun rootOut(cmd: String): String? =
             runCatching {
-                val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
-                val text = p.inputStream.bufferedReader().readText()
-                if (p.waitFor() == 0) text else null.also { Log.w(TAG, "$cmd: $text") }
+                // Through the app's one root shell: no new su (and its Magisk toast) per tile read.
+                val r = andro.marchy.RootShell.run(cmd)
+                if (r.code == 0) r.output else null.also { Log.w(TAG, "$cmd: ${r.output}") }
             }.getOrNull()
     }
 }

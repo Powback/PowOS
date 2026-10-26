@@ -1,0 +1,27 @@
+{
+  "id": "sshd",
+  "name": "SSH into PowOS",
+  "kind": "service",
+  "owner": "system:powos-start",
+  "purpose": "PowOS's sshd on port 2222 (Android may use 22), started at boot by powos-start.sh",
+  "installedBy": "targets/android/rooted/powos-start.sh",
+  "packages": [],
+  "files": [
+    "/etc/ssh/ssh_host_*"
+  ],
+  "processes": [
+    {
+      "match": "^sshd: /usr/bin/sshd -p 2222",
+      "tree": true
+    }
+  ],
+  "unbounded": "every ssh login runs under it; capping sshd caps every agent's session",
+  "remove": {
+    "stop": [
+      "pkill -f '^sshd: /usr/bin/sshd -p 2222'"
+    ],
+    "keep": [
+      "/etc/ssh"
+    ]
+  }
+}

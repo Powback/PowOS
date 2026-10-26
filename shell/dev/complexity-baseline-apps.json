@@ -1,0 +1,29 @@
+{
+  "apps/pet/ui/pages/main.tsx": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "apps/stickman/ui/widgets/parkour.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "apps/stickman/ui/workers/sim.ts": {
+    "complexity": {
+      "count": 4
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "max-params": {
+      "count": 3
+    },
+    "sonarjs/cognitive-complexity": {
+      "count": 5
+    }
+  }
+}

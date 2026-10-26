@@ -1,0 +1,14 @@
+[package]
+name = "powos-composed"
+# Every composed app or widget (lib/apps/powos-compose, docs/COMPOSER.md) runs this one module in a database of its
+# own: a composition is a manifest, not code - no Rust build per composition.
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Pinned to the device's server (SpacetimeDB 2.12 on every PowOS machine).
+spacetimedb = "=2.12.0"
+log = "0.4"

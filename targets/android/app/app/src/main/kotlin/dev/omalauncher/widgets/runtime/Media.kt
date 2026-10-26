@@ -7,6 +7,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.media.MediaMetadata
 import android.media.session.MediaController
+import android.media.session.MediaSession
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Build
@@ -15,6 +16,8 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
+import android.service.notification.NotificationListenerService.Ranking
+import android.service.notification.NotificationListenerService.RankingMap
 import android.service.notification.StatusBarNotification
 import dev.omalauncher.widgets.lang.Null
 import dev.omalauncher.widgets.lang.Num
@@ -28,6 +31,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -50,8 +54,17 @@ class MediaListener : NotificationListenerService() {
         changes.update { it + 1 }
     }
 
-    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+    override fun onNotificationPosted(
+        sbn: StatusBarNotification?,
+        rankingMap: RankingMap?,
+    ) {
         changes.update { it + 1 }
+        // A new one, with how the system ranks it (its importance, whether Do not disturb holds it back): PowOS's
+        // shade's heads-up banner decides with it (system/ShadeHost.peek).
+        val to = posted ?: return
+        if (sbn == null || rankingMap == null) return
+        val ranking = Ranking()
+        if (rankingMap.getRanking(sbn.key, ranking)) to(sbn, ranking)
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
@@ -71,6 +84,10 @@ class MediaListener : NotificationListenerService() {
 
         /** Bumped whenever the notifications or the connection change. */
         val changes = MutableStateFlow(0)
+
+        /** Told of each notification posted (on the main thread), with its ranking: PowOS's shade's banner. */
+        @Volatile
+        var posted: ((StatusBarNotification, Ranking) -> Unit)? = null
     }
 }
 
@@ -161,65 +178,75 @@ class Media(
      */
     fun updates(): Flow<Value> =
         callbackFlow {
-            var current: MediaController? = null
+            // Every active session is watched, not only the one shown: another one starting to play is an event. A 5 s
+            // ticker used to look instead - three binder calls into system_server each time, for the app's whole life
+            // once a control center had asked (perf, 2026-10-22).
+            val bound = HashMap<MediaSession.Token, MediaController>()
+            val playing = MutableStateFlow(false)
+
+            fun changed() {
+                playing.value = synchronized(bound) { bound.values.any { it.playbackState?.state == PlaybackState.STATE_PLAYING } }
+                trySend(Unit)
+            }
             val callback =
                 object : MediaController.Callback() {
-                    override fun onPlaybackStateChanged(state: PlaybackState?) {
-                        trySend(Unit)
-                    }
+                    override fun onPlaybackStateChanged(state: PlaybackState?) = changed()
 
-                    override fun onMetadataChanged(metadata: MediaMetadata?) {
-                        trySend(Unit)
-                    }
+                    override fun onMetadataChanged(metadata: MediaMetadata?) = changed()
 
-                    // The ticker below rebinds to whichever session is current.
-                    override fun onSessionDestroyed() {
-                        trySend(Unit)
-                    }
+                    override fun onSessionDestroyed() = changed()
                 }
 
-            fun rebind(next: MediaController?) {
-                if (next?.sessionToken == current?.sessionToken) return
-                current?.unregisterCallback(callback)
-                current = next
-                next?.registerCallback(callback, main)
-            }
-            val changed =
-                MediaSessionManager.OnActiveSessionsChangedListener {
-                    rebind(controller())
-                    trySend(Unit)
+            fun bind(list: List<MediaController>) =
+                synchronized(bound) {
+                    val tokens = list.mapTo(HashSet()) { it.sessionToken }
+                    bound.entries.removeAll { (token, c) -> (token !in tokens).also { gone -> if (gone) c.unregisterCallback(callback) } }
+                    for (c in list) if (bound.putIfAbsent(c.sessionToken, c) == null) c.registerCallback(callback, main)
+                }
+            val sessionsChanged =
+                MediaSessionManager.OnActiveSessionsChangedListener { list ->
+                    bind(list.orEmpty())
+                    changed()
                 }
             var listening = false
 
             fun listen() {
                 if (listening || !granted) return
-                listening = runCatching { sessions.addOnActiveSessionsChangedListener(changed, component, main) }.isSuccess
-                rebind(controller())
+                listening = runCatching { sessions.addOnActiveSessionsChangedListener(sessionsChanged, component, main) }.isSuccess
+                bind(runCatching { sessions.getActiveSessions(component) }.getOrNull().orEmpty())
             }
             listen()
-            trySend(Unit)
+            changed()
+            // Access granted (or taken away) later: Android binds (or unbinds) the notification listener - an event too.
+            val access =
+                launch {
+                    var connected = MediaListener.connected != null
+                    MediaListener.changes.collect {
+                        val now = MediaListener.connected != null
+                        if (now == connected) return@collect
+                        connected = now
+                        listen()
+                        changed()
+                    }
+                }
+            // Every second while something plays, so `position` moves; no wake at all otherwise.
             val ticker =
                 launch {
-                    var wasGranted = granted
-                    while (true) {
-                        // Every second while playing, for the position; otherwise only to notice access being granted
-                        // or a session that started playing without the active list changing order.
-                        delay(if (current?.playbackState?.state == PlaybackState.STATE_PLAYING) 1000 else 5000)
-                        val now = granted
-                        if (now != wasGranted) {
-                            wasGranted = now
-                            listen()
+                    playing.collectLatest { on ->
+                        while (on) {
+                            delay(1000)
                             trySend(Unit)
                         }
-                        // Another session may have started playing without the active list changing order.
-                        if (listening) rebind(controller())
-                        if (current?.playbackState?.state == PlaybackState.STATE_PLAYING) trySend(Unit)
                     }
                 }
             awaitClose {
+                access.cancel()
                 ticker.cancel()
-                current?.unregisterCallback(callback)
-                if (listening) sessions.removeOnActiveSessionsChangedListener(changed)
+                synchronized(bound) {
+                    bound.values.forEach { it.unregisterCallback(callback) }
+                    bound.clear()
+                }
+                if (listening) sessions.removeOnActiveSessionsChangedListener(sessionsChanged)
             }
         }.conflate().map { value() }.distinctUntilChanged()
 
@@ -238,7 +265,7 @@ class Media(
             "next" -> t.skipToNext()
             "previous" -> t.skipToPrevious()
             // send() throws CanceledException, which isn't a RuntimeException: the tap handler wouldn't catch it.
-            "open" -> c.sessionActivity?.let { runCatching { it.send() } } ?: context.packageManager.getLaunchIntentForPackage(c.packageName)?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            "open" -> c.sessionActivity?.let { runCatching { it.send(context, 0, null, null, null, null, dev.omalauncher.system.AppWindows.bundle(context)) } } ?: context.packageManager.getLaunchIntentForPackage(c.packageName)?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context)) }
         }
     }
 

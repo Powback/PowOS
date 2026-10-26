@@ -1,0 +1,68 @@
+/*
+ * The desktop's home (ui/desktop.tsx): the phone's home on a desktop-sized screen. Only what differs from the phone:
+ * the pill and the launcher are a column in the middle, not the screen's width; no mic yet (dictation on the desktop
+ * is round 2, docs/DESKTOP-SHELL.md).
+ */
+html[data-mode="desktop"] {
+  --desk-column: 720px;
+}
+html[data-mode="desktop"] .home > .bar {
+  width: min(var(--desk-column), 100%);
+  margin: 0 auto var(--edge);
+  transform: none;
+}
+html[data-mode="desktop"] .launcher {
+  left: max(0px, calc(50% - var(--desk-column) / 2));
+  right: max(0px, calc(50% - var(--desk-column) / 2));
+  bottom: calc(-1 * (48px + var(--strip-height) + var(--edge)));
+}
+/*
+ * The launcher and its chat float as a column over the whole wallpaper: the reference fill with a deeper dim under
+ * their text. Measured (gate.sh --shots, blur emulated, 2026-10-21): the reference left 9-10 of 67 labels under 4.5:1
+ * over the phone's wallpaper and 54 over a light one; tint + 36%: 0-3 and 11-23; tint + 42%: 0 and 0-1 (gruvbox,
+ * kanagawa, flexoki-light). --text-fill is redefined here because :root resolved it with its own --glass-dim.
+ */
+html[data-mode="desktop"] .launcher {
+  --glass-dim: 42%;
+  --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
+}
+/* The drawer clear of the pill, which floats a gap above the screen's foot here. */
+html[data-mode="desktop"] .launcher-inner {
+  padding-bottom: calc(48px + 2 * var(--edge));
+}
+html[data-mode="desktop"] .launcher-frame {
+  border-radius: var(--radius);
+}
+html[data-mode="desktop"] .mic {
+  display: none;
+}
+/* The chat: as tall as its conversation, from the pill up (no empty frost over it), the screen's height at most. */
+html[data-mode="desktop"] .home.chatting .launcher {
+  top: auto;
+  max-height: 100%;
+}
+/* No scrollbars drawn: QtWebEngine draws classic ones (the phone's WebView overlays its own, unseen). Scrolling stays. */
+html[data-mode="desktop"] * {
+  scrollbar-width: none;
+}
+/* The home's own wallpaper (desktop.tsx): over Plasma's desktop, under everything of home's. */
+html[data-mode="desktop"] .desk-wall {
+  position: fixed;
+  inset: 0;
+  background: var(--color-background) center / cover no-repeat;
+  pointer-events: none;
+}
+/* The dock under the pill: its icons at their folded spacing in the middle, not spread across a desktop. */
+html[data-mode="desktop"] .dock-page {
+  justify-content: safe center;
+  gap: 12px;
+}
+/* Recents can be the only page when nothing is pinned. Its flex children have fixed slots: size the row from
+ * those slots, with at least a viewport of space, so centering never pushes its first apps outside the scroller. */
+html[data-mode="desktop"] .dock-page.dock-recent {
+  width: max-content;
+  min-width: 100%;
+}
+html[data-mode="desktop"] .dock .app {
+  flex: 0 0 72px;
+}

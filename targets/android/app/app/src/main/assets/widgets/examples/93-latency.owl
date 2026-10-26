@@ -11,14 +11,22 @@ widget "latency" {
   let ms = num(rtt) >= 0 ? round(num(rtt) * 1000) : null
   let hist = history(ms, 60)
 
+  // Sized from the tile, never fixed (monospace: 0.6 em a character, a line 1.4 em budgeted): the host and the round
+  // trip on one line - the time as big as a share of the height allows - and the graph in the height left.
+  let iw = tileWidth == null ? 340 : tileWidth - 24
+  let ih = tileHeight == null ? 106 : tileHeight - 24
+  let val = rtt == null ? "…" : ms == null ? "offline" : "${ms} ms"
+  let vs = clamp(floor(min(ih * 0.3 / 1.4, iw * 0.5 / (max(len(val), 6) * 0.6))), 12, 72)
+  let ls = clamp(floor(min(vs * 0.5, (iw - len(val) * 0.6 * vs - 12) / (17 * 0.6))), 9, 22)
+
   Column {
-    gap: 4
+    gap: 4; fill: height
     Row {
-      Text { text: "latency · 1.1.1.1"; style: muted; weight: 1 }
+      align: center
+      Text { text: "latency · 1.1.1.1"; fontSize: ls; color: muted; weight: 1; maxLines: 1 }
       Text {
-        text: rtt == null ? "…" : ms == null ? "offline" : "${ms} ms"
+        text: val; fontSize: vs; maxLines: 1; align: end
         color: ms == null ? red : ms > 200 ? red : ms > 80 ? yellow : green
-        width: 96; align: end
       }
     }
     Sparkline { values: hist; min: 0; color: cyan; area: true; fill: width; weight: 1 }

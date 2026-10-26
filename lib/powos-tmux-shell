@@ -151,13 +151,21 @@ _powos_tmux_rows() {
         fi
     }
 
-    # Sort keys: category, then section recency, then section, then row recency.
-    # $'' hands tmux real tabs; a literal backslash-t is passed through as-is.
+    # Sort keys: category, then section recency, then section, then DETACHED before
+    # ATTACHED (resume what's idle before what's already in front of someone), then row recency.
+    # Names + attached count come from one list-sessions call (session names can't hold a tab, so a plain
+    # space-separated "#{session_attached} #{session_name}" is enough, and it's the same shape the no-fzf
+    # fallback below already relies on); activity + cwd are then one more per-session query each - a session
+    # list is never long enough for that to matter, and it keeps each tmux query answering exactly one thing.
     # The console session is a VIEW of the others, not work to resume — the
     # action row below opens it. Listing it here too would be duplicate noise.
-    tmux list-sessions -F $'#{session_activity}\t#{session_attached}\t#{session_name}\t#{pane_current_path}' 2>/dev/null \
-    | awk -F'\t' -v me="${POWOS_CONSOLE_SESSION:-console}" -v home="$HOME" -v cl="$cl" -v wk="$wk" '
-        $3 == me { next }
+    { tmux list-sessions -F $'#{session_attached} #{session_name}' 2>/dev/null | while read -r att name; do
+          [ -n "$name" ] && [ "$name" != "${POWOS_CONSOLE_SESSION:-console}" ] || continue
+          printf '%s\t%s\t%s\t%s\n' \
+              "$(tmux display-message -p -t "$name" '#{session_activity}' 2>/dev/null)" "$att" "$name" \
+              "$(tmux display-message -p -t "$name" '#{pane_current_path}' 2>/dev/null)"
+      done; } \
+    | awk -F'\t' -v home="$HOME" -v cl="$cl" -v wk="$wk" '
         {
             cwd = $4
             sub(/^\/var\/home\//, "/home/", cwd)      # ostree physical -> logical
@@ -172,7 +180,7 @@ _powos_tmux_rows() {
             for (i = 1; i <= n; i++)
                 printf "%d\t%d\t%s\t%d\t%s\t%s\n", R[i], mx[K[i]], C[i], A[i], T[i], N[i]
         }' \
-    | sort -t$'\t' -k1,1n -k2,2nr -k3,3 -k4,4nr \
+    | sort -t$'\t' -k1,1n -k2,2nr -k3,3 -k5,5n -k4,4nr \
     | while IFS=$'\t' read -r rank _ grp _ att name; do
           [ -n "$name" ] || continue
           if [ "$rank" != "$prevcat" ]; then

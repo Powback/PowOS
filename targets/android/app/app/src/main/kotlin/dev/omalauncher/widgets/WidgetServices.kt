@@ -21,7 +21,6 @@ import android.view.Display
 import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.compose.ui.graphics.ImageBitmap
-import dev.omalauncher.BuildConfig
 import android.os.Process
 import android.os.SystemClock
 import android.os.UserHandle
@@ -260,7 +259,7 @@ class WidgetServices(
                 "patch" to Str(Build.VERSION.SECURITY_PATCH),
                 "locale" to Str(java.util.Locale.getDefault().toLanguageTag()),
                 "timezone" to Str(java.util.TimeZone.getDefault().id),
-                "launcher" to Str(BuildConfig.VERSION_NAME),
+                "launcher" to Str(dev.omalauncher.AppVersion.name(context)),
                 "theme" to (runtime.themes.current?.title?.let(::Str) ?: Null),
                 "apps" to num(runtime.androidApps.apps.size.toLong()),
             ),
@@ -327,7 +326,7 @@ class WidgetServices(
             // Any scheme an app handles: tel:, geo:, mailto:, ... One nothing handles mustn't crash the launcher.
             "url" ->
                 try {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(arg)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(arg)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context))
                 } catch (e: ActivityNotFoundException) {
                     Toast.makeText(context, "no app opens $arg", Toast.LENGTH_SHORT).show()
                 }
@@ -335,7 +334,7 @@ class WidgetServices(
             "media" -> media.control(arg)
             "volume" -> volume.control(args[0])
             "notification" -> args.getOrNull(1)?.takeIf { it != Null }?.let { notifications.control(arg, it.toString()) }
-            "androidApp" -> context.packageManager.getLaunchIntentForPackage(arg)?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            "androidApp" -> context.packageManager.getLaunchIntentForPackage(arg)?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context)) }
             "copy" -> copy(arg)
             "notify" -> notify(arg, args.getOrNull(1)?.takeIf { it != Null }?.toString())
             "torch" -> modes.torch(args[0])

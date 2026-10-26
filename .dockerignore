@@ -61,3 +61,6 @@ sources/*/upstream/
 # Tier bookkeeping (raw cache key, gate record, timings). build/output/ is
 # already excluded above under "Build artifacts".
 build/.cache/
+
+# The shell's type-checking deps (npm ci in shell/): never part of the image (the page loads shell/vendor/).
+shell/node_modules/

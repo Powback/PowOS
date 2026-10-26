@@ -1,0 +1,144 @@
+From f903bf5b291a63edf42e367d9e63113a3cdc3708 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Sat, 24 Oct 2026 03:59:20 +0200
+Subject: [PATCH] backends/anland: the desktop's own windows stay on it while
+ it is on screen
+
+The desktop (the Plasma app: the PowOS app's MainActivity) and the unfolded
+PowOS home are both first-class now. "export-new 1" assumed nothing shows the
+desktop when unfolded, so in the Plasma app every window opened from Kickoff
+left Plasma as a floating Android task, a maximize button sent the window out
+into a task of its own (PowOS's frame over KDE's decoration), and going home
+pulled every window on Plasma's desktop out into floating tasks.
+
+The app now says "desktop 1|0" when the desktop's task comes on / goes off
+screen (cap "desktop"). While it is on screen: new application windows stay
+KDE windows on the desktop, maximize is KWin's own, and every application
+window on it is marked the desktop's (powosDesktopOwned). Marked windows are
+never exported by themselves later ("export-new" and its sweep skip them); an
+explicit show (the PowOS launcher's powos-open-task) still makes one a task.
+---
+ src/backends/anland/anland_window_task.cpp | 57 +++++++++++++++++++++-
+ src/backends/anland/anland_window_task.h   |  8 +++
+ 2 files changed, 63 insertions(+), 2 deletions(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index de0bedf..6ade377 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -793,7 +793,7 @@ void AnlandWindowTasks::announce()
+ {
+     // What this KWin understands beyond "closed"/"focus": the app only sends it then (an older KWin, buffers of the
+     // task's size as before).
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).
+@@ -850,6 +850,10 @@ void AnlandWindowTasks::handleLine(const QString &line)
+         setExportNew(f[1] == QLatin1String("1"));
+         return;
+     }
++    if (f[0] == QLatin1String("desktop")) {
++        setDesktopShown(f[1] == QLatin1String("1"));
++        return;
++    }
+     if (f[0] == QLatin1String("hello")) {
+         // The app's control channel (re)connected after ours: the daemon dropped what we said while it was away.
+         announce();
+@@ -928,6 +932,11 @@ void AnlandWindowTasks::integrate()
+         if (handBackAndroidApp(window)) {
+             return true;
+         }
++        // The desktop on screen (the Plasma app): its windows maximize the KDE way, inside it - not out into a task
++        // of their own over it (with PowOS's frame on top of KDE's decoration).
++        if (m_desktopShown || ownedByDesktop(window)) {
++            return false;
++        }
+         if (window->maximizeMode() == MaximizeFull || !exportable(window)) {
+             return false;
+         }
+@@ -1059,9 +1068,53 @@ void AnlandWindowTasks::setExportNew(bool on)
+     }
+ }
+ 
++void AnlandWindowTasks::setDesktopShown(bool on)
++{
++    if (on == m_desktopShown) {
++        return;
++    }
++    m_desktopShown = on;
++    qCInfo(KWIN_ANLAND) << "desktop on screen:" << on;
++    if (!on || !workspace()) {
++        return;
++    }
++    // On screen: every application window on it now is the desktop's. Leaving it ("export-new 1" again, the unfolded
++    // home) must not pull them out into floating tasks: the user left them in Plasma and finds them there.
++    for (Window *window : workspace()->windows()) {
++        if (!taskFor(window) && exportable(window)) {
++            markDesktopOwned(window);
++        }
++    }
++}
++
++bool AnlandWindowTasks::ownedByDesktop(Window *window)
++{
++    return window && window->property("powosDesktopOwned").toBool();
++}
++
++void AnlandWindowTasks::markDesktopOwned(Window *window)
++{
++    if (window && !window->isDeleted() && !ownedByDesktop(window)) {
++        window->setProperty("powosDesktopOwned", true);
++        qCInfo(KWIN_ANLAND) << "window" << window->caption() << "(" << window->desktopFileName() << ") stays on the desktop";
++    }
++}
++
+ void AnlandWindowTasks::exportNew(Window *window)
+ {
+-    if (!m_exportNew || !window || window->isDeleted() || window->transientFor() || window->isFullScreen() || taskFor(window)) {
++    if (!window || window->isDeleted() || window->transientFor() || window->isFullScreen() || taskFor(window)) {
++        return;
++    }
++    if (m_desktopShown) {
++        // Opened while the desktop is on screen (Kickoff, Dolphin -> Gwenview in Plasma): a KDE window there, with
++        // KDE's decoration, and it stays there. An Xwayland one without its surface yet is marked now too.
++        if (window->isClient() && window->isNormalWindow() && !window->isPopupWindow() && !window->skipTaskbar()
++            && !window->isSpecialWindow() && window->desktopFileName() != QLatin1String("org.kde.plasmashell")) {
++            markDesktopOwned(window);
++        }
++        return;
++    }
++    if (!m_exportNew || ownedByDesktop(window)) {
+         return;
+     }
+     if (window->isClient() && !window->surface()) {
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 396d541..1cbd9df 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -225,6 +225,11 @@ private:
+     void onControlReadable();
+     void handleLine(const QString &line);
+     void setExportNew(bool on);
++    /** The app's "desktop 1|0": the desktop (the Plasma app) is on screen; its windows stay on it ([ownedByDesktop]). */
++    void setDesktopShown(bool on);
++    /** [window] is the desktop's: seen on it while it was on screen, never exported by itself (export-new, maximize). */
++    static bool ownedByDesktop(Window *window);
++    static void markDesktopOwned(Window *window);
+     void exportNew(Window *window);
+     /** [window] (an Xwayland one, no wl_surface yet) decided again once it has its surface: full screen or new. */
+     void whenSurfaced(Window *window);
+@@ -242,6 +247,9 @@ private:
+     const QString m_session = QUuid::createUuid().toString(QUuid::WithoutBraces);
+     // The app's "export-new 1" (the unfolded home, apps float): every application window opens as its own task.
+     bool m_exportNew = false;
++    // The app's "desktop 1": the desktop's task (Plasma, the PowOS app's MainActivity) is on screen, so the desktop is
++    // where the user sees and uses windows - new ones open there, maximize is KWin's own (kwin 0025).
++    bool m_desktopShown = false;
+     /** Windows waiting for their surface (whenSurfaced): one wait each. */
+     QSet<Window *> m_waitingSurface;
+     QPointer<VirtualDesktop> m_desktop;
+-- 
+2.50.1 (Apple Git-155)
+

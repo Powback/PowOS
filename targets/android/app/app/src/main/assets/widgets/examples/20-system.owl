@@ -14,11 +14,23 @@ widget "memory" {
 
   onTap: terminal("btop")
 
+  // Sized from the tile, never fixed (monospace: 0.6 em a character, a line 1.4 em budgeted): the label, the
+  // value as big as the width and a share of the height allow, a bar, the detail, and the history graph taking the
+  // height that's left.
+  let iw = tileWidth == null ? 154 : tileWidth - 24
+  let ih = tileHeight == null ? 200 : tileHeight - 24
+  let detail = "${fmtBytes(used)} / ${fmtBytes(total)}"
+  let ls = clamp(floor(min(ih * 0.08, iw / (8 * 0.6))), 10, 20)
+  let tz = clamp(floor(min(iw / (4 * 0.6), ih * 0.3 / 1.4)), 18, 120)
+  let ds = clamp(floor(min(iw / (max(len(detail), 6) * 0.6), max(tz * 0.35, ih * 0.06))), 9, 28)
+  let bar = clamp(round(ih * 0.035), 3, 10)
+
   Column {
-    Text { text: "memory"; style: muted }
-    Text { text: "${round(pct)}%"; style: title; color: pct > 85 ? red : foreground }
-    Progress { value: pct; color: pct > 85 ? red : accent; animate value: spring() }
-    Text { text: "${fmtBytes(used)} / ${fmtBytes(total)}"; style: small }
-    Sparkline { values: hist; min: 0; max: 100; color: green; area: true; fill: width; weight: 1 }
+    gap: 4; fill: height
+    Text { text: "memory"; fontSize: ls; color: muted; maxLines: 1 }
+    Text { text: "${round(pct)}%"; fontSize: tz; color: pct > 85 ? red : foreground; maxLines: 1 }
+    Progress { value: pct; color: pct > 85 ? red : accent; height: bar; fill: width; animate value: spring() }
+    Text { text: detail; fontSize: ds; maxLines: 1 }
+    Sparkline { values: hist; min: 0; max: 100; color: pct > 85 ? red : accent; area: true; fill: width; weight: 1 }
   }
 }

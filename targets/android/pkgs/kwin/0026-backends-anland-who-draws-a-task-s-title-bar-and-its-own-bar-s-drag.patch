@@ -1,0 +1,143 @@
+From cbe268834e146488c5734480e6c5c0ec64c99749 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Sat, 24 Oct 2026 03:53:43 +0200
+Subject: [PATCH] backends/anland: tell the app who draws a task's title bar;
+ its own bar's drag moves the task
+
+A task shows the window's client area only, so the PowOS app frames every
+floating task with a title bar of its own. A window that draws its own bar
+(client-side decorations: Steam, a GTK header bar) got two. KWin knows which
+is which (isDecorated: the client's xdg-decoration / server-decoration mode,
+_MOTIF_WM_HINTS, _GTK_FRAME_EXTENTS): "decor <id> 1|0" tells the app, before
+"open", whenever the decoration comes or goes (not while full screen, which
+has none either way), and again for every task on the app's "hello".
+
+A drag on such a window's own bar asks KWin for an interactive move
+(_NET_WM_MOVERESIZE, xdg_toplevel.move), which moved the window on the
+hidden desktop where nothing shows it and took its touches meanwhile. Now it
+is cancelled and the app told ("move <id>"): it drags the task with the rest
+of that touch. A resize asked that way is cancelled too (the app's grip
+resizes). caps: + "decor move".
+---
+ src/backends/anland/anland_window_task.cpp | 51 +++++++++++++++++++++-
+ src/backends/anland/anland_window_task.h   |  8 ++++
+ 2 files changed, 58 insertions(+), 1 deletion(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 6ade377..62c9c9c 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -123,6 +123,15 @@ AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uin
+         m_tasks->send({QStringLiteral("title"), QString::number(m_id), m_window->caption()});
+     });
+ 
++    // Who draws its title bar (tellDecoration): told before "open", again whenever its decoration comes or goes.
++    connect(window, &Window::decorationChanged, this, [this]() {
++        tellDecoration(false);
++    });
++    tellDecoration(false);
++    // The window's own title bar dragged (a client-side one: Steam's, a GTK header bar) starts KWin's interactive move,
++    // on the hidden desktop where nothing shows it: the app moves the task instead (handOverMoveResize).
++    connect(window, &Window::interactiveMoveResizeStarted, this, &AnlandWindowTask::handOverMoveResize);
++
+     // Its surface of the daemon: the task's consumer says hello with the same id once the activity is up.
+     if (connect_to_deamon_begin(&m_display, m_tasks->socketPath().toLocal8Bit().constData(), m_id) < 0) {
+         qCWarning(KWIN_ANLAND) << "window task" << m_id << ": no display daemon";
+@@ -134,6 +143,42 @@ AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uin
+     connect(m_ctrlNotifier, &QSocketNotifier::activated, this, &AnlandWindowTask::onCtrlReadable);
+ }
+ 
++void AnlandWindowTask::tellDecoration(bool again)
++{
++    // Full screen has no decoration either way: what it prefers shows once it's a window again (decorationChanged).
++    if (!m_window || m_window->isDeleted() || m_window->isFullScreen()) {
++        return;
++    }
++    const int decorated = m_window->isDecorated() ? 1 : 0;
++    if (!again && decorated == m_decorTold) {
++        return;
++    }
++    m_decorTold = decorated;
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << (decorated ? "has KWin's title bar" : "draws its own title bar (or none)");
++    m_tasks->send({QStringLiteral("decor"), QString::number(m_id), QString::number(decorated)});
++}
++
++void AnlandWindowTask::handOverMoveResize()
++{
++    // A floating task's window being moved or resized by its own request (_NET_WM_MOVERESIZE, xdg_toplevel.move/
++    // resize - a drag on its client-side title bar or edge): KWin's move would follow the finger on the hidden desktop
++    // and take its touches meanwhile. Cancelled; a move is the task's ("move <id>": the app drags the task with the
++    // rest of that touch, its frame's drag), a resize is the frame's grip's.
++    if (!m_window || m_fullScreen || m_appFullScreen) {
++        return;
++    }
++    const bool move = m_window->isInteractiveMove();
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "asked to be" << (move ? "moved: the task moves" : "resized: the task's grip resizes");
++    QMetaObject::invokeMethod(this, [w = m_window]() {
++        if (w && (w->isInteractiveMove() || w->isInteractiveResize())) {
++            w->cancelInteractiveMoveResize();
++        }
++    }, Qt::QueuedConnection);
++    if (move) {
++        m_tasks->send({QStringLiteral("move"), QString::number(m_id)});
++    }
++}
++
+ AnlandWindowTask::~AnlandWindowTask()
+ {
+     cancelTouches();
+@@ -793,7 +838,7 @@ void AnlandWindowTasks::announce()
+ {
+     // What this KWin understands beyond "closed"/"focus": the app only sends it then (an older KWin, buffers of the
+     // task's size as before).
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).
+@@ -802,6 +847,10 @@ void AnlandWindowTasks::announce()
+         live.append(QString::number(it.key()));
+     }
+     send({QStringLiteral("session"), m_session, live.join(QLatin1Char(','))});
++    // Who draws each task's title bar, again: a restarted app knows none of it (it would frame Steam twice).
++    for (AnlandWindowTask *task : std::as_const(m_tasks)) {
++        task->tellDecoration(true);
++    }
+ }
+ 
+ void AnlandWindowTasks::onControlReadable()
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 1cbd9df..4eae9a8 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -88,6 +88,12 @@ public:
+     {
+         return m_appFullScreen;
+     }
++    /**
++     * Tells the app who draws the window's title bar ("decor <id> 1": KWin's decoration, which the task doesn't show -
++     * the app adds its frame's bar; "decor <id> 0": the window draws its own or none - client-side decorations, Steam's
++     * or a GTK header bar - so the app adds none: two title bars otherwise). Only when it changed, unless [again].
++     */
++    void tellDecoration(bool again);
+ 
+ private:
+     enum class State {
+@@ -126,12 +132,14 @@ private:
+     Window *touchTarget(const QPointF &pos) const;
+     static QString describe(const Window *window);
+     void cancelTouches();
++    void handOverMoveResize();
+ 
+     AnlandWindowTasks *m_tasks;
+     QPointer<Window> m_window;
+     const uint32_t m_id;
+     const bool m_fullScreen;
+     bool m_appFullScreen = false;
++    int m_decorTold = -1; // the last "decor" told: 1 KWin's title bar, 0 the window's own, -1 not yet
+     display_ctx *m_display = nullptr;
+     State m_state = State::Handshake;
+     QSocketNotifier *m_ctrlNotifier = nullptr;
+-- 
+2.50.1 (Apple Git-155)
+

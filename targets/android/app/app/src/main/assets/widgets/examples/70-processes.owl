@@ -13,17 +13,28 @@ widget "processes" {
 
   onTap: terminal("btop")
 
+  // As many processes as fit at ~34 dp a row (whole rows), sharing the tile's height; each row's name, size and bar
+  // as big as its share allows. Sized from the tile, never fixed.
+  let iw = tileWidth == null ? 154 : tileWidth - 24
+  let ih = tileHeight == null ? 200 : tileHeight - 24
+  let hs = clamp(floor(min(ih * 0.08, iw / (10 * 0.6))), 10, 22)
+  let n = clamp(floor((ih - hs * 1.4 - 6) / 40), 1, max(1, len(procs)))
+  let rowH = (ih - hs * 1.4 - 6 - (n - 1) * 6) / n
+  // A name of ~14 characters and its size (~5) across the width (monospace: 0.6 em a character).
+  let fs = clamp(floor(min(rowH * 0.55, iw / (19 * 0.6))), 11, 32)
+  let bar = clamp(round(rowH * 0.14), 3, 10)
+
   Column {
-    gap: 6
-    Text { text: "top memory"; style: muted }
-    for p in procs key p.name {
+    gap: 6; fill: height
+    Text { text: "top memory"; fontSize: hs; color: muted; maxLines: 1 }
+    for p in take(procs, n) key p.name {
       Column {
-        gap: 2
+        gap: 2; weight: 1; justify: center
         Row {
-          Text { text: p.name; fontSize: 12; maxLines: 1; weight: 1 }
-          Text { text: fmtBytes(p.mem); fontSize: 12; color: muted; width: 48; align: end }
+          Text { text: p.name; fontSize: fs; maxLines: 1; weight: 1 }
+          Text { text: fmtBytes(p.mem); fontSize: fs; color: muted; width: round(fs * 3.4); align: end; maxLines: 1 }
         }
-        Progress { value: p.mem; max: biggest; height: 2; fill: width; animate value: spring() }
+        Progress { value: p.mem; max: biggest; height: bar; fill: width; animate value: spring() }
       }
     }
   }

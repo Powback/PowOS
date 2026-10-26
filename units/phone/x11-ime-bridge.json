@@ -1,0 +1,25 @@
+{
+  "id": "x11-ime-bridge",
+  "name": "Android keyboard for X11 apps",
+  "kind": "system",
+  "owner": "agent:powos-gestures (task keyboard-follows-powos-text-fields)",
+  "purpose": "Android's keyboard for X11 (Xwayland) apps' text fields - Steam's CEF, GTK/Qt apps on X11 - which have no Wayland text-input. ibus-daemon (GTK on X11 picks IBus by itself; XIM apps through ibus-daemon --xim) learns the text-field focus; powos-ime-bridge is its panel and calls KWin's SetX11TextFocus (pkgs/kwin patch 0016), which shows or hides the keyboard. Typed text comes back as key events.",
+  "installedBy": "targets/android/install-powos-android.sh (rootfs build) and targets/android/rooted/powos-deploy.sh; ibus itself comes with the rootfs (phone-rules.conf keeps it; input-method engines stay out)",
+  "packages": ["ibus"],
+  "files": [
+    "/usr/bin/powos-ime-bridge",
+    "/etc/xdg/autostart/ibus.desktop",
+    "/etc/xdg/plasma-workspace/env/ibus.sh",
+    "/etc/profile.d/60-powos-ime.sh",
+    "/run/powos-app/ibus-address",
+    "/run/powos-app/powos-ime-bridge.log"
+  ],
+  "processes": [
+    {"match": "^/usr/bin/python3 /usr/bin/powos-ime-bridge", "tree": true, "user": "powos",
+     "started_by": "the Plasma session's autostart (/etc/xdg/autostart/ibus.desktop); it starts ibus-daemon (+ ibus-x11, ibus-engine-simple) as its children"}
+  ],
+  "limits": {"memMB": 96, "cpuPct": 10, "pids": 16},
+  "unbounded": "a few small session processes, idle unless a key is typed into an X11 app; inside the session's own bound (Android's lmkd)",
+  "autosleep": "never",
+  "remove": "pkill -f powos-ime-bridge (ends ibus-daemon with it); rm /usr/bin/powos-ime-bridge /etc/xdg/autostart/ibus.desktop /etc/xdg/plasma-workspace/env/ibus.sh /etc/profile.d/60-powos-ime.sh; X11 apps then type without the keyboard coming up"
+}

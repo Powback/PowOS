@@ -251,6 +251,15 @@ class Session {
   refit() {
     if (!this.holder.isConnected || !this.holder.clientWidth || !this.holder.clientHeight) return;
     this.fit.fit();
+    // Whole rows fit; what's left of a row is split above and below them, not all left under the last one (a tile's
+    // bottom stood a row's height empty). xterm maps the pointer from the screen's own rect, so the shift is safe.
+    requestAnimationFrame(() => {
+      const xt = this.holder.querySelector<HTMLElement>(".xterm");
+      const scr = this.holder.querySelector<HTMLElement>(".xterm-screen");
+      if (!xt || !scr) return;
+      const left = this.holder.clientHeight - scr.getBoundingClientRect().height;
+      xt.style.transform = left > 1 ? `translateY(${Math.floor(left / 2)}px)` : "";
+    });
   }
 
   restyle() {

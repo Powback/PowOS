@@ -1,0 +1,22 @@
+{
+  "id": "plasma-bridge",
+  "name": "Plasma notifications and clipboard in Android",
+  "kind": "system",
+  "owner": "agent:powos-desktop (task plasma-as-an-app-linux-backend-for-the-web-launc)",
+  "purpose": "The Plasma session's notifications in PowOS's shade (a watcher of Plasma's notification server, RegisterWatcher, plus a monitor-only connection for NotificationClosed) and Klipper's clipboard both ways with Android's, text only. Relays through the PowOS app's run dir (plasma/out, plasma/in; PlasmaBridge.kt). D-Bus signals and one inotify watch: idle at rest. Uses the rootfs's own python-dbus and python-gobject; installs no package.",
+  "installedBy": "targets/android/install-powos-android.sh (rootfs build) and targets/android/rooted/powos-deploy.sh",
+  "packages": [],
+  "files": [
+    "/usr/local/bin/powos-plasma-bridge",
+    "/etc/xdg/autostart/powos-plasma-bridge.desktop",
+    "/run/powos-app/plasma"
+  ],
+  "processes": [
+    {"match": "^python3 /usr/local/bin/powos-plasma-bridge", "user": "powos",
+     "started_by": "the Plasma session's autostart (/etc/xdg/autostart/powos-plasma-bridge.desktop)"}
+  ],
+  "limits": {"memMB": 64, "cpuPct": 5, "pids": 4},
+  "unbounded": "one small session process, blocked on D-Bus and inotify at rest; inside the session's own bound (Android's lmkd)",
+  "autosleep": "never",
+  "remove": "pkill -f powos-plasma-bridge; rm /usr/local/bin/powos-plasma-bridge /etc/xdg/autostart/powos-plasma-bridge.desktop; rm -r /run/powos-app/plasma. Plasma's notifications then stay in Plasma and the clipboard syncs only while the desktop is in front (KWin's own path)"
+}

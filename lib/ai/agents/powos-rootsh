@@ -1,0 +1,454 @@
+#!/usr/bin/env python3
+"""powos-rootsh - one long-lived root shell on the phone for the Mac's tools (docs/REMOTE-POWOS.md C1, C4, C5).
+
+HACK: a dev channel (adb + Magisk su) used as a runtime transport by the agents mirror and the Mac's mail to the
+phone. Real fix: REMOTE-POWOS.md M2 (the phone subscribes to the hub's powos-agents) and M6 (comms federation); then
+nothing on the Mac needs root on the phone and this file goes.
+
+Why it exists: every `adb shell su -c ...` is a new Magisk superuser request - a log entry and a toast, and on ColorOS
+each toast caps the panel to 60 Hz (C5). The phone app already keeps one RootShell (commit 12d41ca); this is the Mac's
+side of the same idea. One daemon per Mac user holds one `adb shell -T su` and runs every caller's command in it, so
+the phone sees one su for as long as the daemon lives instead of one per call.
+
+    powos-rootsh run [-i] [--tag T] [--timeout S] -- '<root shell command>'   one command as root on the phone
+    powos-rootsh app [-i] [--tag T] [--timeout S] -- '<bash command>'         one command in the PowOS session, as powos
+    powos-rootsh send <to> <message...> [--from coder] [--priority P]         powos comms send, on the phone
+    powos-rootsh inbox [--agent coder] [--peek]                               powos comms inbox, on the phone
+    powos-rootsh status                                                       the daemon, the session, per-tag results
+    powos-rootsh stop                                                         end the daemon (and its su)
+
+-i passes this process's stdin to the command. The exit status is the command's; 124 = timed out (the session is then
+dropped and the next call opens a new one), 255 = no session (container down, phone unreachable, su refused).
+
+The daemon starts on the first call (and stays single by a lock), listens on $POWOS_ROOTSH_DIR/rootsh.sock (default
+~/.local/state/powos/vadb), and exits after POWOS_ROOTSH_IDLE seconds (1800) without a call. A dead session (container
+restart, adb drop, VPN gone) is reopened on the next call, at most once every 5 s.
+
+Framing: each command and its stdin go base64-encoded into the shell (so no quoting or stray input can desynchronise
+it), the command runs in a subshell from / with stdin from its own data or /dev/null, and a per-call random marker
+after stdout and stderr ends the response, with the exit status on stdout's marker line.
+
+Per-tag results (--tag): <dir>/status/<tag>.ok holds the epoch of the last success, <tag>.fail_since the epoch the
+current run of failures began. The powos-vadb container's health check (targets/android/vadb/vadb-health.sh) reads
+them and mails the phone's manager when the agents mirror (tag "mirror") goes stale.
+
+The session: POWOS_ROOTSH_SHELL (a shell command line), default `docker exec -i powos-vadb adb shell -T su` (adb over
+the WireGuard VPN, targets/android/vadb/compose.yaml); `adb -s 192.168.50.239:5555 shell -T su` on the LAN works too.
+"""
+
+import base64
+import fcntl
+import json
+import os
+import secrets
+import shlex
+import socket
+import subprocess
+import sys
+import threading
+import time
+
+DIR = os.environ.get("POWOS_ROOTSH_DIR") or os.path.join(os.path.expanduser("~"), ".local", "state", "powos", "vadb")
+SOCK = os.path.join(DIR, "rootsh.sock")
+LOCK = os.path.join(DIR, "rootsh.lock")
+LOG = os.path.join(DIR, "rootsh.log")
+STATUS = os.path.join(DIR, "status")
+SHELL = os.environ.get("POWOS_ROOTSH_SHELL") or "docker exec -i powos-vadb adb shell -T su"
+IDLE_S = float(os.environ.get("POWOS_ROOTSH_IDLE", "1800"))
+RECONNECT_S = 5.0
+DEFAULT_TIMEOUT = 30.0
+NO_SESSION = 255
+TIMED_OUT = 124
+
+
+def log(*a):
+    print(time.strftime("%Y-%m-%d %H:%M:%S"), *a, file=sys.stderr, flush=True)
+
+
+# ---- the daemon -------------------------------------------------------------------------------------------------
+
+
+class Stream:
+    """A pipe read by a thread into a buffer, consumed up to a marker."""
+
+    def __init__(self, f):
+        self.buf = bytearray()
+        self.eof = False
+        self.cv = threading.Condition()
+        threading.Thread(target=self._pump, args=(f,), daemon=True).start()
+
+    def _pump(self, f):
+        fd = f.fileno()
+        while True:
+            try:
+                b = os.read(fd, 1 << 16)
+            except OSError:
+                b = b""
+            with self.cv:
+                if not b:
+                    self.eof = True
+                    self.cv.notify_all()
+                    return
+                self.buf += b
+                self.cv.notify_all()
+
+    def until(self, marker, deadline, line=False):
+        """Everything before marker (consumed with it; with line=True also the rest of its line, returned second).
+        None on timeout or end of stream."""
+        with self.cv:
+            while True:
+                i = self.buf.find(marker)
+                if i >= 0:
+                    j = i + len(marker)
+                    rest = b""
+                    if line:
+                        k = self.buf.find(b"\n", j)
+                        if k < 0:
+                            if not self._wait(deadline):
+                                return None
+                            continue
+                        rest = bytes(self.buf[j:k])
+                        j = k + 1
+                    out = bytes(self.buf[:i])
+                    del self.buf[:j]
+                    return out, rest
+                if self.eof or not self._wait(deadline):
+                    return None
+
+    def _wait(self, deadline):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return False
+        self.cv.wait(left)
+        return True
+
+    def drain(self):
+        with self.cv:
+            del self.buf[:]
+
+
+class Session:
+    def __init__(self):
+        self.proc = None
+        self.failed_at = 0.0
+        self.opened_at = None
+        self.calls = 0
+
+    def alive(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def close(self):
+        if self.proc is not None:
+            try:
+                self.proc.kill()
+            except OSError:
+                pass
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        self.proc = None
+        self.opened_at = None
+
+    def open(self):
+        if self.alive():
+            return None
+        self.close()
+        if time.monotonic() - self.failed_at < RECONNECT_S:
+            return "no session (the last attempt failed under %ds ago)" % RECONNECT_S
+        log("opening:", SHELL)
+        try:
+            self.proc = subprocess.Popen(
+                shlex.split(SHELL), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+        except OSError as e:
+            self.failed_at = time.monotonic()
+            self.proc = None
+            return "no session: %s" % e
+        self.out = Stream(self.proc.stdout)
+        self.err = Stream(self.proc.stderr)
+        # The one su request: is it root?
+        rc, out, err = self._exec("id -u", None, 20.0)
+        if rc != 0 or out.strip() != b"0":
+            self.failed_at = time.monotonic()
+            why = (err or out).decode(errors="replace").strip()[-300:]
+            self.close()
+            return "no session: su did not give root (%s)" % (why or "rc %s" % rc)
+        self.opened_at = time.time()
+        log("session open")
+        return None
+
+    def run(self, cmd, data, timeout):
+        why = self.open()
+        if why:
+            return NO_SESSION, b"", (why + "\n").encode()
+        self.calls += 1
+        return self._exec(cmd, data, timeout)
+
+    def _exec(self, cmd, data, timeout):
+        n = secrets.token_hex(8)
+        end = "__PRS_%s__" % n
+        c64 = base64.b64encode(cmd.encode()).decode()
+        body = '( cd / && eval "$(printf %%s %s | base64 -d)" )' % c64
+        if data is None:
+            script = body + " </dev/null\n"
+        else:
+            d64 = base64.encodebytes(data).decode()  # 76-column lines
+            script = "base64 -d <<'%s_IN' | %s\n%s%s_IN\n" % (end, body, d64, end)
+        script += "printf '\\n%%s %%s\\n' %s \"$?\"\nprintf '\\n%%s\\n' %s >&2\n" % (end, end)
+        try:
+            self.proc.stdin.write(script.encode())
+            self.proc.stdin.flush()
+        except (OSError, ValueError):
+            self.close()
+            self.failed_at = time.monotonic()
+            return NO_SESSION, b"", b"no session: the shell went away\n"
+        deadline = time.monotonic() + timeout
+        got = self.out.until(("\n%s " % end).encode(), deadline, line=True)
+        if got is None:
+            dead = not self.alive()
+            self.close()
+            if dead:
+                self.failed_at = time.monotonic()
+                return NO_SESSION, b"", b"no session: the shell went away\n"
+            return TIMED_OUT, b"", b"timed out after %ds; the session was dropped\n" % round(timeout)
+        out, rest = got
+        # stderr's marker follows right after; a shell that merges stderr (no adb shell protocol) never sends one.
+        e = self.err.until(("\n%s\n" % end).encode(), min(deadline, time.monotonic() + 2.0))
+        if e is None:
+            self.err.drain()
+            e = (b"", b"")
+        try:
+            rc = int(rest.strip() or b"1")
+        except ValueError:
+            rc = 1
+        return rc, out, e[0]
+
+
+def write_status(tag, ok):
+    if not tag or not tag.replace("-", "").replace("_", "").isalnum():
+        return
+    os.makedirs(STATUS, exist_ok=True)
+    now = str(int(time.time()))
+
+    def put(name, v):
+        p = os.path.join(STATUS, name)
+        with open(p + ".tmp", "w") as f:
+            f.write(v + "\n")
+        os.replace(p + ".tmp", p)
+
+    def get(name):
+        try:
+            with open(os.path.join(STATUS, name)) as f:
+                return int(f.read().strip() or 0)
+        except (OSError, ValueError):
+            return 0
+
+    if ok:
+        put(tag + ".ok", now)
+    elif get(tag + ".fail_since") <= get(tag + ".ok"):
+        put(tag + ".fail_since", now)
+
+
+def daemon():
+    os.makedirs(DIR, exist_ok=True)
+    lockf = open(LOCK, "w")
+    try:
+        fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0  # another daemon has it
+    try:
+        os.unlink(SOCK)
+    except FileNotFoundError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(SOCK)
+    os.chmod(SOCK, 0o600)
+    srv.listen(16)
+    srv.settimeout(30)
+    sess = Session()
+    lock = threading.Lock()
+    last = [time.monotonic()]
+    log("daemon up, pid", os.getpid())
+
+    def serve(conn):
+        try:
+            f = conn.makefile("rwb")
+            req = json.loads(f.readline() or b"{}")
+            op = req.get("op", "run")
+            if op == "status":
+                resp = {
+                    "pid": os.getpid(), "shell": SHELL, "session": sess.alive(), "opened_at": sess.opened_at,
+                    "calls": sess.calls,
+                }
+            elif op == "stop":
+                resp = {"stopping": True}
+                f.write(json.dumps(resp).encode() + b"\n")
+                f.flush()
+                with lock:
+                    sess.close()
+                os._exit(0)
+            else:
+                data = base64.b64decode(req["stdin"]) if req.get("stdin") is not None else None
+                timeout = float(req.get("timeout") or DEFAULT_TIMEOUT)
+                t0 = time.monotonic()
+                if not lock.acquire(timeout=timeout):
+                    rc, out, err = TIMED_OUT, b"", b"timed out waiting for the session\n"
+                else:
+                    try:
+                        rc, out, err = sess.run(req["cmd"], data, max(1.0, timeout - (time.monotonic() - t0)))
+                    finally:
+                        lock.release()
+                write_status(req.get("tag"), rc == 0)
+                last[0] = time.monotonic()
+                resp = {"rc": rc, "out": base64.b64encode(out).decode(), "err": base64.b64encode(err).decode()}
+            f.write(json.dumps(resp).encode() + b"\n")
+            f.flush()
+        except Exception as e:  # one bad client never takes the daemon down
+            log("client error:", repr(e))
+        finally:
+            conn.close()
+
+    while True:
+        try:
+            conn, _ = srv.accept()
+        except socket.timeout:
+            if time.monotonic() - last[0] > IDLE_S and lock.acquire(blocking=False):
+                log("idle, exiting")
+                sess.close()
+                try:
+                    os.unlink(SOCK)
+                except OSError:
+                    pass
+                return 0
+            continue
+        last[0] = time.monotonic()
+        threading.Thread(target=serve, args=(conn,), daemon=True).start()
+
+
+# ---- the client -------------------------------------------------------------------------------------------------
+
+
+def connect(start=True):
+    for i in range(60):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.connect(SOCK)
+            return s
+        except OSError:
+            s.close()
+        if not start:
+            return None
+        if i == 0:
+            os.makedirs(DIR, exist_ok=True)
+            with open(LOG, "ab") as lf:
+                subprocess.Popen(
+                    [sys.executable, os.path.abspath(__file__), "daemon"], stdin=subprocess.DEVNULL, stdout=lf,
+                    stderr=lf, start_new_session=True,
+                )
+        time.sleep(0.1)
+    return None
+
+
+def call(req, timeout):
+    s = connect(start=req.get("op", "run") == "run")
+    if s is None:
+        return None
+    s.settimeout(timeout + 15)
+    try:
+        s.sendall(json.dumps(req).encode() + b"\n")
+        f = s.makefile("rb")
+        line = f.readline()
+        return json.loads(line) if line else None
+    except (OSError, ValueError):
+        return None
+    finally:
+        s.close()
+
+
+def run(cmd, data=None, tag=None, timeout=DEFAULT_TIMEOUT):
+    """(rc, stdout bytes, stderr bytes) of one command as root on the phone. Importable."""
+    r = call({"op": "run", "cmd": cmd, "stdin": base64.b64encode(data).decode() if data is not None else None,
+              "tag": tag, "timeout": timeout}, timeout)
+    if r is None:
+        if tag:
+            write_status(tag, False)
+        return NO_SESSION, b"", b"powos-rootsh: no daemon\n"
+    return r["rc"], base64.b64decode(r["out"]), base64.b64decode(r["err"])
+
+
+def in_session(cmd):
+    """A bash command line for the PowOS session (powos-run.sh), as a root shell command. The command travels
+    base64-encoded, so it may contain any quotes."""
+    b = base64.b64encode(cmd.encode()).decode()
+    return "sh /data/powos/powos-run.sh 'eval \"$(printf %%s %s | base64 -d)\"'" % b
+
+
+def _emit(rc, out, err):
+    sys.stdout.buffer.write(out)
+    sys.stdout.flush()
+    sys.stderr.buffer.write(err)
+    sys.stderr.flush()
+    return rc
+
+
+def main(argv):
+    import argparse
+
+    if argv[:1] == ["daemon"]:
+        return daemon()
+    p = argparse.ArgumentParser(prog="powos-rootsh", description=__doc__.split("\n\n")[0])
+    sub = p.add_subparsers(dest="op", required=True)
+    for name in ("run", "app"):
+        sp = sub.add_parser(name)
+        sp.add_argument("-i", action="store_true", help="pass stdin to the command")
+        sp.add_argument("--tag")
+        sp.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
+        sp.add_argument("cmd", nargs=argparse.REMAINDER)
+    ss = sub.add_parser("send")
+    ss.add_argument("to")
+    ss.add_argument("message", nargs="+")
+    ss.add_argument("--from", dest="frm", default="coder")
+    ss.add_argument("--priority", default="normal")
+    si = sub.add_parser("inbox")
+    si.add_argument("--agent", default="coder")
+    si.add_argument("--peek", action="store_true")
+    sub.add_parser("status")
+    sub.add_parser("stop")
+    a = p.parse_args(argv)
+
+    if a.op in ("run", "app"):
+        cmd = a.cmd[1:] if a.cmd[:1] == ["--"] else a.cmd
+        if not cmd:
+            p.error("no command")
+        line = " ".join(cmd)
+        if a.op == "app":
+            line = in_session(line)
+        data = sys.stdin.buffer.read() if a.i else None
+        return _emit(*run(line, data, a.tag, a.timeout))
+    if a.op == "send":
+        c = "powos comms send %s %s --from %s --priority %s" % (
+            shlex.quote(a.to), shlex.quote(" ".join(a.message)), shlex.quote(a.frm), shlex.quote(a.priority))
+        return _emit(*run(in_session(c), tag="comms"))
+    if a.op == "inbox":
+        c = "powos comms inbox --agent %s%s" % (shlex.quote(a.agent), " --peek" if a.peek else "")
+        return _emit(*run(in_session(c), tag="comms"))
+    if a.op == "status":
+        r = call({"op": "status"}, 5)
+        print(json.dumps(r if r is not None else {"daemon": False}))
+        if os.path.isdir(STATUS):
+            for n in sorted(os.listdir(STATUS)):
+                if not n.endswith(".tmp"):
+                    with open(os.path.join(STATUS, n)) as f:
+                        print("%s %s" % (n, f.read().strip()))
+        return 0
+    if a.op == "stop":
+        r = call({"op": "stop"}, 5)
+        print("stopped" if r else "not running")
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

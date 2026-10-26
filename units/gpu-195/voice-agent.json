@@ -1,0 +1,53 @@
+{
+  "id": "voice-agent",
+  "name": "VoiceAgent backend",
+  "kind": "container",
+  "host": "desktop",
+  "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
+  "owner": "system:voice",
+  "purpose": "VoiceAgent's FastAPI server (~/Projects/VoiceAgent branch server-gpu195, image built on the box): /ws voice conversations, /transcribe; VAD, diarization, recall on the CPU; STT/TTS/LLM = voice-stt/-tts/-llm",
+  "installedBy": "hosts/gpu-195/install.sh (rootless podman quadlet, user powos, linger on)",
+  "image": "localhost/voiceagent-backend:latest",
+  "ports": [
+    "9000/tcp"
+  ],
+  "files": [
+    "/var/home/powos/.config/containers/systemd/voice-agent.container",
+    "/var/home/powos/.config/voiceagent/voiceagent.env",
+    "/var/home/powos/.config/voiceagent/secrets.env",
+    "/var/home/powos/Projects/VoiceAgent",
+    "/var/lib/powos/voiceagent"
+  ],
+  "processes": [
+    {
+      "systemd": "voice-agent.service"
+    },
+    {
+      "container": "voice-agent"
+    }
+  ],
+  "limits": {
+    "memory": "6g",
+    "memory_swap": "6g",
+    "cpus": 4,
+    "pids": 1024
+  },
+  "autosleep": "never",
+  "gpu": "none (CPU)",
+  "health": "http://192.168.50.195:9000/health",
+  "remove": {
+    "stop": [
+      "systemctl --user stop voice-agent.service"
+    ],
+    "commands": [
+      "rm -f /var/home/powos/.config/containers/systemd/voice-agent.container",
+      "systemctl --user daemon-reload",
+      "podman rmi localhost/voiceagent-backend:latest"
+    ],
+    "keep": [
+      "/var/lib/powos/voiceagent",
+      "/var/home/powos/Projects/VoiceAgent",
+      "/var/home/powos/.config/voiceagent/secrets.env"
+    ]
+  }
+}

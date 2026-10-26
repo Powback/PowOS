@@ -226,6 +226,16 @@ RUN chmod +x /tmp/kde/image-build.sh && /tmp/kde/image-build.sh /tmp/kde /kde-ou
 # see; a missing cache entry is a 40-minute mystery.
 FROM ${KDE_BUILDER} AS kde-builder
 
+# powos-shell-builder: the desktop web shell's host (sources/powos-shell/, docs/DESKTOP-WEB-SHELL.md) and the web UI
+# it serves (shell/ -> /usr/share/powos/shell). FROM the same base image so it links the image's own Qt / KF6 /
+# libtaskmanager (no ABI promise there). Shipped, not started: nothing in the session runs powos-shell yet (phase 0
+# runs it by hand next to plasmashell). Only sources/powos-shell + shell/ are copied in, so other edits don't
+# rebuild it. Discarded after COPY.
+FROM ${BASE_IMAGE} AS powos-shell-builder
+COPY sources/powos-shell/ /tmp/powos-shell/
+COPY shell/ /tmp/shell/
+RUN bash /tmp/powos-shell/image-build.sh /tmp/powos-shell /tmp/shell /powos-shell-out
+
 FROM ${BASE_IMAGE} AS powos-base
 
 LABEL org.opencontainers.image.title="PowOS"
@@ -703,6 +713,9 @@ COPY --from=staging / /
 
 # Version-matched rebuilds of patched KDE apps (sources/kde/patches/).
 COPY --from=kde-builder /kde-out/ /
+
+# The desktop web shell's host + shell/ (sources/powos-shell/).
+COPY --from=powos-shell-builder /powos-shell-out/ /
 
 # Mask all sleep-related systemd targets — no code path can suspend the box.
 # Must run in the real base stage (not the scratch staging stage, which has no

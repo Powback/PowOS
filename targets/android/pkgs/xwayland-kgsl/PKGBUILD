@@ -1,0 +1,64 @@
+# PowOS Android: the Xwayland the phone's KDE session runs (/usr/local/bin/Xwayland, first in PATH), GPU-accelerated
+# without /dev/dri: glamor + DRI3 on KGSL surfaceless (Turnip on /dev/kgsl-3d0).
+#
+# Xwayland 24.1.13 + lfdevs's KGSL patches, as Andromarchy's build/build-inside.sh builds it @ 220754d (the same
+# pin as build-rootfs.sh), plus ours:
+#   0001-0004  lfdevs (lfdevs/xwayland, test/support-xwayland-surfaceless), from Andromarchy's patches/xwayland
+#   0005       a Present fence callback fires once (Xwayland spun in miSyncTriggerFence)
+#   0006       a copy presentation doesn't wait on its wait fence again (Steam's frozen web UI, swap interval 0)
+#   0007       window buffers come back after a KGSL forced commit (the dma-buf leak that got the session killed)
+#   0008       a Present copy waits for the client's rendering (dma-buf sync_file) and finishes before the buffer goes back
+# Was built inside the rootfs only (build-inside.sh); a package so a fix reaches phones without a new rootfs:
+# rooted.sh deploy installs it (powos-deploy.sh), the rootfs build installs it with our other packages.
+#
+# Arch's xorg-xwayland stays installed (KWin's makedepends, its man pages and the -version KWin probes match);
+# this one lives in /usr/local/bin, which pacman's xorg-xwayland never touches.
+# BUILD_ON_ROOTFS: built against the rootfs's own KGSL Mesa (EGL_MESA_image_dma_buf_export, GBM) and libraries.
+
+pkgname=xwayland-kgsl
+pkgver=24.1.13
+pkgrel=2
+pkgdesc='Xwayland with glamor/DRI3 on KGSL surfaceless (PowOS Android: Turnip without /dev/dri)'
+arch=(aarch64)
+url='https://gitlab.freedesktop.org/xorg/xserver'
+license=(MIT)
+depends=(nettle libepoxy libxfont2 pixman xorg-server-common libxcvt mesa libglvnd libxau wayland libdrm libtirpc
+         libei libxshmfence libdecor glibc)
+makedepends=(git meson ninja xorgproto xtrans libxkbfile xorg-font-util wayland-protocols)
+_andromarchy=220754d390f743aa5a8227e689402de1a6eb0281
+_lfdevs=(0001-xwayland-support-kgsl-dmabuf-v3-fallback-paths.patch
+         0002-xwayland-glamor-add-KGSL-surfaceless-backend-path.patch
+         0003-xwayland-dri3-support-KGSL-surfaceless-client-render.patch
+         0004-xwayland-scope-KGSL-frame-callback-recovery-per-window.patch)
+_patches=(0005-present-fence-callback-fires-once.patch
+          0006-xwayland-present-no-wait-after-copy.patch
+          0007-xwayland-kgsl-window-buffers-come-back.patch
+          0008-xwayland-kgsl-wait-for-client-rendering.patch)
+source=("xserver::git+https://gitlab.freedesktop.org/xorg/xserver.git#tag=xwayland-$pkgver"
+        "${_lfdevs[@]/#/https://raw.githubusercontent.com/lotfibennour/andromarchy/$_andromarchy/patches/xwayland/}"
+        "${_patches[@]}")
+sha256sums=(SKIP
+            4ecf3951e92f2ab35644e4e67969cd2ede125ccb6ddd65bb170ad63848979aff
+            88f40f91416cc76d3ed3588fc93d4a892e414442938e25b2555e50dfcdf88f97
+            652094faa7e89ff05726d9b7c2c3f5631b1c3e6a0e5460ebf4afe52612e07a2f
+            d175913cbbd23e80c6bb7fd17565f1fad9ccf247171bf5a939fb157117f05b88
+            SKIP SKIP SKIP SKIP)
+
+prepare() {
+  for p in "${_lfdevs[@]}" "${_patches[@]}"; do
+    echo "Applying $p"
+    git -C xserver apply "$srcdir/$p"
+  done
+}
+
+build() {
+  # build-inside.sh's options (prefix /usr: the xkb, font and protocol paths of Arch's X server).
+  meson setup build xserver --prefix=/usr --buildtype=release -Dxvfb=false -Dxdmcp=false -Dglamor=true \
+    -Dxkb_dir=/usr/share/X11/xkb -Dxkb_output_dir=/var/lib/xkb
+  ninja -C build hw/xwayland/Xwayland
+}
+
+package() {
+  install -Dm755 build/hw/xwayland/Xwayland "$pkgdir"/usr/local/bin/Xwayland
+  install -Dm644 xserver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/COPYING
+}

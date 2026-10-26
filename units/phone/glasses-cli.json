@@ -1,0 +1,14 @@
+{
+  "id": "glasses-cli",
+  "name": "powos glasses",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "`powos glasses`: the smart glasses the PowOS app drives (status, show text, clear, connect, mic) through the app's run dir (docs/GLASSES.md); a command-line tool, nothing running",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (lib/apps/powos-glasses)",
+  "files": [
+    "/usr/lib/powos/apps/powos-glasses"
+  ],
+  "remove": {
+    "commands": []
+  }
+}

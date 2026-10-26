@@ -1,0 +1,945 @@
+#!/usr/bin/env python3
+"""powos-container - PowOS's container runtime: podman (crun) with hard limits (docs/PHONE-KERNEL-CONTAINERS.md section 12).
+
+On a desktop this is plain podman: its own cgroups enforce --memory/--cpus/--pids-limit. On the phone Android keeps
+memory and cpu on cgroup v1 (/dev/memcg, /dev/cpuctl) and they stay Android's, so podman runs with --cgroups=disabled
+and PowOS puts each container's init into groups of its own under Android's hierarchies (the hybrid, section 9.3):
+
+  /dev/memcg/powos/<name>        memory.limit_in_bytes (+ memory.memsw.limit_in_bytes: --memory-swap)
+  /dev/cpuctl/powos/<name>       cpu.cfs_quota_us / cpu.cfs_period_us (--cpus); without CFS bandwidth in the kernel:
+                                 cpu.shares, a relative weight only (a warning says so)
+  /dev/cpuset/powos/<name>       cpus (--cpuset-cpus: a hard cap on which cores, on any kernel)
+  /sys/fs/cgroup/powos/<name>    pids.max (--pids-limit; needs the containers kernel, pids on cgroup v2)
+
+An OCI hook (createRuntime) makes the groups, writes the limits and moves the container's init in before the workload
+starts, so everything it runs inherits them; a poststop hook and every command here remove the groups again once the
+container is gone. A limit this kernel can't enforce is never refused: it runs without it, with a warning.
+
+On the phone it also gives podman what it needs there: PowOS's own mount namespace (the system tier's, else the one
+it runs in if it is a real root, never a chroot: crun's pivot_root fails there), overlay storage on an ext4 image
+(f2fs can't be overlayfs' upper layer; vfs when there is no image) and TMPDIR=/var/tmp. As root: sudo when not.
+
+  powos containers run [options] <image> [command...]   run a container (options before the image):
+      --name N            its name (default: powos-<random>)
+      --memory 64m        hard memory limit          --memory-swap 128m   memory + swap (default: 2x --memory; -1 any)
+      --cpus 0.5          CPU quota, in cores        --cpuset-cpus 0-2    only these cores
+      --pids-limit 64     process/thread limit       --network host|none   (default host; pasta: not here)
+      -d / --rm / -it / -e / -v / -p / ...         podman's own, passed through
+  powos containers ps [-a] [--json]                     containers and their limits (usage / limit)
+  powos containers exec [-it] <name> <command...>       run a command in it, inside its limits (podman exec isn't)
+  powos containers stop|start|restart <name>            podman stop/start/restart (start re-applies the limits)
+  powos containers rm [-f] <name>                       remove it (and its groups)
+  powos containers limits <name>                        its groups: limits, usage, throttling, OOM kills
+  powos containers check                                what this kernel enforces, storage, namespace, network
+  powos containers podman <args...>                     podman with PowOS's storage and namespace (pull, images, logs, inspect)
+
+Autosleep (section 13; on the phone every container sleeps after 5 min idle unless told otherwise):
+      --autosleep 5m|never   idle time before it sleeps    --sleep-mode pause|stop   (default pause: frozen, ms wake)
+      --autostop 6h          stop it after this long paused (not for --rm containers)
+  powos containers autosleep status [--json]            what is asleep and why, the device triggers
+  powos containers autosleep set <name> 5m|never|off    change a container's rule (--sleep-mode, --autostop)
+  powos containers autosleep sleep <name>               put it to sleep now
+  powos containers wake <name>                          wake it (start does too; so does a connection to its ports)
+  powos containers autosleep --help                     the whole story: idle, triggers, waking
+"""
+import json
+import os
+import re
+import secrets
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+PLATFORM_FILE = "/etc/powos/platform"
+SELF = os.path.realpath(__file__)
+PY = "/usr/bin/python3"
+MEMCG, CPUCTL, CPUSET, V2 = "/dev/memcg", "/dev/cpuctl", "/dev/cpuset", "/sys/fs/cgroup"
+PARENT = "powos"
+ANNOT = "io.powos.limits"
+HOOKS = "/usr/share/containers/oci/hooks.d"   # podman's default hooks_dir
+LOG = "/var/log/powos/containers.log"
+SUPERVISOR_PID = "/run/powos-system/supervisor.pid"
+STORE = "/var/lib/containers"
+IMG = f"{STORE}/powos.img"          # ext4 image: overlay storage
+MNT = f"{STORE}/powos"
+IMG_SIZE = os.environ.get("POWOS_CONTAINER_IMG_SIZE", "16G")   # sparse: costs what it holds
+CHOICE = "/var/lib/powos/containers/storage"                     # "overlay" or "vfs", decided once
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
+PERIOD = 100000
+HOSTROOT = "/run/powos-containers/hostroot"  # --rootfs /: PowOS's own / (non-recursive, read-only bind)
+
+
+def die(msg, code=1):
+    print(f"powos containers: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def warn(msg):
+    print(f"powos containers: warning: {msg}", file=sys.stderr)
+
+
+def device():
+    try:
+        return open(PLATFORM_FILE).read().strip() or "desktop"
+    except OSError:
+        return "desktop"
+
+
+PHONE = device() == "phone"
+
+
+def rd(path, default=""):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return default
+
+
+def wr(path, value):
+    try:
+        with open(path, "w") as f:
+            f.write(str(value))
+    except OSError as e:
+        raise OSError(e.errno, f"{e.strerror}: {value} > {path}") from None
+
+
+def log(msg):
+    try:
+        os.makedirs(os.path.dirname(LOG), exist_ok=True)
+        with open(LOG, "a") as f:
+            f.write(f"{time.strftime('%F %T')} {msg}\n")
+    except OSError:
+        pass
+
+
+def size(s):
+    """64m / 1g / 512k / bytes -> bytes; -1 stays -1."""
+    s = str(s).strip().lower()
+    if s == "-1":
+        return -1
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)([bkmgt]?)i?b?", s)
+    if not m:
+        die(f"not a size: {s} (e.g. 64m, 1g)")
+    return int(float(m.group(1)) * 1024 ** "bkmgt".index(m.group(2) or "b"))
+
+
+# ── what this kernel can enforce ────────────────────────────────────────────
+
+def caps():
+    v2 = rd(f"{V2}/cgroup.controllers").split()
+    return {
+        "memory": os.path.exists(f"{MEMCG}/memory.limit_in_bytes"),
+        "memsw": os.path.exists(f"{MEMCG}/memory.memsw.limit_in_bytes"),
+        "cfs": os.path.exists(f"{CPUCTL}/cpu.cfs_quota_us"),
+        "shares": os.path.exists(f"{CPUCTL}/cpu.shares"),
+        "cpuset": os.path.isdir(CPUSET) and bool(cpuset_file(CPUSET, "cpus")),
+        "pids": "pids" in v2,
+    }
+
+
+def cpuset_file(d, f):
+    """Android mounts cpuset with noprefix: 'cpus', elsewhere 'cpuset.cpus' - as the hierarchy's root has it."""
+    for n in (f, f"cpuset.{f}"):
+        if os.path.exists(f"{CPUSET}/{n}"):
+            return f"{d}/{n}"
+    return None
+
+
+def degrade_notes(lim, c):
+    """The limits asked for that this kernel can't enforce, each as a warning line."""
+    out = []
+    if "mem" in lim and not c["memory"]:
+        out.append(f"--memory: no memory cgroup at {MEMCG}; running without a memory limit")
+    if int(lim.get("memsw", -1)) > 0 and not c["memsw"]:
+        out.append("--memory-swap: no memory.memsw (kernel without swap accounting); swap is not limited")
+    if "cpus" in lim and not c["cfs"]:
+        out.append("--cpus: this kernel has no CFS bandwidth control (cpu.cfs_quota_us), so no hard CPU cap: "
+                   + (f"cpu.shares={shares(lim['cpus'])} instead, a relative weight under contention only; "
+                      "--cpuset-cpus caps the cores hard" if c["shares"] else "running without a CPU limit")
+                   + " (the containers kernel adds the quota: docs/PHONE-KERNEL-CONTAINERS.md)")
+    if "cpuset" in lim and not c["cpuset"]:
+        out.append("--cpuset-cpus: no cpuset cgroup; running on every core")
+    if "pids" in lim and not c["pids"]:
+        out.append("--pids-limit: this kernel has no pids controller on cgroup v2, so no process limit "
+                   "(the containers kernel adds it: docs/PHONE-KERNEL-CONTAINERS.md)")
+    return out
+
+
+def shares(cpus):
+    return max(2, int(float(cpus) * 1024))
+
+
+# ── the groups (the hook's work) ────────────────────────────────────────────
+
+def groups(name):
+    return {"memory": f"{MEMCG}/{PARENT}/{name}", "cpu": f"{CPUCTL}/{PARENT}/{name}",
+            "cpuset": f"{CPUSET}/{PARENT}/{name}", "pids": f"{V2}/{PARENT}/{name}"}
+
+
+def encode(lim):
+    return ",".join(f"{k}={v}" for k, v in lim.items())
+
+
+def decode(s):
+    out = {}
+    for kv in (s or "").split(","):
+        k, _, v = kv.partition("=")
+        if k:
+            out[k] = v
+    return out
+
+
+def mkparent(kind):
+    if kind == "cpuset":
+        p = f"{CPUSET}/{PARENT}"
+        os.makedirs(p, exist_ok=True)
+        for f in ("cpus", "mems"):  # a v1 cpuset takes no task until both are set: the whole phone's, from the root
+            fp = cpuset_file(p, f)
+            if not rd(fp):
+                wr(fp, rd(cpuset_file(CPUSET, f)))
+        return
+    if kind == "pids":
+        # pids enabled for the children of the v2 root and of powos/: the controller's files appear in Android's
+        # v2 groups too (uid_*/pid_*), with no limit - nothing of Android's is limited or moved.
+        if "pids" not in rd(f"{V2}/cgroup.subtree_control").split():
+            wr(f"{V2}/cgroup.subtree_control", "+pids")
+        os.makedirs(f"{V2}/{PARENT}", exist_ok=True)
+        if "pids" not in rd(f"{V2}/{PARENT}/cgroup.subtree_control").split():
+            wr(f"{V2}/{PARENT}/cgroup.subtree_control", "+pids")
+        return
+    os.makedirs({"memory": f"{MEMCG}/{PARENT}", "cpu": f"{CPUCTL}/{PARENT}"}[kind], exist_ok=True)
+
+
+def apply(name, lim, pid=None):
+    """Make the container's groups, write its limits and (pid) move its init in. Returns what was enforced.
+    A controller the kernel lacks is skipped (degrade); a write that fails on one it has raises (fail closed)."""
+    c, g, done = caps(), groups(name), []
+    if "mem" in lim and c["memory"]:
+        mkparent("memory")
+        os.makedirs(g["memory"], exist_ok=True)
+        mem, memsw = int(lim["mem"]), int(lim.get("memsw", -1))
+        # The kernel keeps memsw >= limit at every step: lowering, the limit goes first; raising, memsw does.
+        order = [("memory.limit_in_bytes", mem)]
+        if c["memsw"]:
+            order.append(("memory.memsw.limit_in_bytes", memsw))
+            if mem > int(rd(f"{g['memory']}/memory.limit_in_bytes", "0") or 0):
+                order.reverse()
+        for f, v in order:
+            wr(f"{g['memory']}/{f}", v)
+        done.append(f"memory {mem >> 20}M" + (f" (+swap {(memsw - mem) >> 20}M)" if c["memsw"] and memsw > 0 else
+                                               " (swap not limited)" if memsw == -1 else ""))
+        if pid:
+            wr(f"{g['memory']}/cgroup.procs", pid)
+    if "cpus" in lim and (c["cfs"] or c["shares"]):
+        mkparent("cpu")
+        os.makedirs(g["cpu"], exist_ok=True)
+        if c["cfs"]:
+            wr(f"{g['cpu']}/cpu.cfs_period_us", PERIOD)
+            wr(f"{g['cpu']}/cpu.cfs_quota_us", max(1000, int(float(lim["cpus"]) * PERIOD)))
+            done.append(f"cpu quota {lim['cpus']} cores")
+        else:
+            wr(f"{g['cpu']}/cpu.shares", shares(lim["cpus"]))
+            done.append(f"cpu.shares {shares(lim['cpus'])} (weight only)")
+        if pid:
+            wr(f"{g['cpu']}/cgroup.procs", pid)
+    if "cpuset" in lim and c["cpuset"]:
+        mkparent("cpuset")
+        os.makedirs(g["cpuset"], exist_ok=True)
+        wr(cpuset_file(g["cpuset"], "cpus"), lim["cpuset"])
+        wr(cpuset_file(g["cpuset"], "mems"), rd(cpuset_file(f"{CPUSET}/{PARENT}", "mems")))
+        done.append(f"cores {lim['cpuset']}")
+        if pid:
+            wr(f"{g['cpuset']}/cgroup.procs", pid)
+    if "pids" in lim and c["pids"]:
+        mkparent("pids")
+        os.makedirs(g["pids"], exist_ok=True)
+        wr(f"{g['pids']}/pids.max", lim["pids"])
+        done.append(f"pids {lim['pids']}")
+        if pid:
+            wr(f"{g['pids']}/cgroup.procs", pid)
+    return done
+
+
+def procs(d):
+    return rd(f"{d}/cgroup.procs").split()
+
+
+def remove_groups(name):
+    left = []
+    for d in groups(name).values():
+        if not os.path.isdir(d):
+            continue
+        try:
+            os.rmdir(d)
+        except OSError:
+            left.append(d)  # still has processes: the container is still running
+    return left
+
+
+NOT_OURS = {"sleep"}  # /sys/fs/cgroup/powos/sleep: powos sleep's frozen app/GUI groups, never a container's
+
+
+def our_groups():
+    names = set()
+    for k, d in groups("").items():
+        try:
+            names.update(n for n in os.listdir(d) if os.path.isdir(f"{d}/{n}") and NAME_RE.match(n)
+                         and n not in NOT_OURS)
+        except OSError:
+            pass
+    return names
+
+
+def gc():
+    """Groups whose container is gone (or stopped) and empty: removed."""
+    for n in our_groups():
+        if not any(procs(d) for d in groups(n).values() if os.path.isdir(d)):
+            remove_groups(n)
+
+
+def hook(stage):
+    """The OCI hook (createRuntime / poststop): the container's state on stdin."""
+    # HACK: an OCI hook is the container's cgroup manager on the phone (podman runs with --cgroups=disabled), because
+    # Android keeps memory and cpu on cgroup v1, which crun's cgroupfs manager can't drive at Android's paths
+    # (/dev/memcg, /dev/cpuctl) - section 9.3. Real fix: memory and cpu on cgroup v2 next to Android's own use, then
+    # podman's own --memory/--cpus/--pids-limit and this hook goes.
+    try:
+        st = json.load(sys.stdin)
+    except ValueError:
+        die("hook: no OCI state on stdin")
+    lim = decode((st.get("annotations") or {}).get(ANNOT))
+    name = lim.pop("name", "")
+    if not NAME_RE.match(name):
+        return  # not ours
+    if stage == "stop":
+        remove_groups(name)
+        log(f"{name}: stopped, groups removed")
+        # A --rm container goes now (podman marks it in the annotations): its unit with it.
+        if str((st.get("annotations") or {}).get("io.podman.annotations.autoremove", "")).upper() == "TRUE":
+            unit_forget(name)
+        return
+    pid = st.get("pid")
+    try:
+        done = apply(name, lim, pid)
+    except OSError as e:
+        log(f"{name}: limits FAILED ({e}): not started")
+        die(f"hook: {name}: could not apply the limits: {e}")
+    notes = degrade_notes(lim, caps())
+    log(f"{name}: init {pid} in its groups: {', '.join(done) or 'no limits'}"
+        + "".join(f"; degraded: {n.split(':')[0]}" for n in notes))
+
+
+HOOK_JSON = {
+    "createRuntime": "create",
+    "poststop": "stop",
+}
+
+
+def install_hooks():
+    os.makedirs(HOOKS, exist_ok=True)
+    for stage, arg in HOOK_JSON.items():
+        want = json.dumps({"version": "1.0.0", "hook": {"path": PY, "args": ["python3", SELF, "hook", arg]},
+                           "when": {"annotations": {f"^{re.escape(ANNOT)}$": ".*"}}, "stages": [stage]},
+                          indent=2) + "\n"
+        p = f"{HOOKS}/50-powos-limits-{arg}.json"
+        if rd(p) + "\n" != want:
+            with open(p, "w") as f:
+                f.write(want)
+
+
+# ── root, namespace, storage (the phone) ────────────────────────────────────
+
+def mount_ns(pid="self"):
+    try:
+        return os.readlink(f"/proc/{pid}/ns/mnt")
+    except OSError:
+        return None
+
+
+def root_is_private_mount():
+    """/ is a mount of its own and not shared: crun's pivot_root works here (a chroot fails with EINVAL)."""
+    for line in open("/proc/self/mountinfo"):
+        f = line.split()
+        if f[4] == "/":
+            return "shared:" not in line.split(" - ")[0]
+    return False
+
+
+def ensure_root(argv):
+    if os.geteuid() == 0:
+        return
+    if not shutil.which("sudo"):
+        die("needs root (PowOS's podman on the phone is rootful: it writes Android's cgroups)")
+    # Without a terminal never prompt: PowOS's askpass would put a password dialog on the phone's screen for an
+    # agent's or a widget's call. -n: it works where sudo needs no password, and fails at once otherwise.
+    tty = sys.stdin.isatty()
+    r = subprocess.run(["sudo", *([] if tty else ["-n"]), "--", PY, SELF, *argv])
+    if r.returncode and not tty and subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode:
+        die("needs root: run it in a terminal (sudo asks for the password), as root, or from the Mac with "
+            "targets/android/rooted/rooted.sh run 'powos containers ...'")
+    sys.exit(r.returncode)
+
+
+def ensure_ns(argv):
+    """Into the system tier's mount namespace (persistent, PowOS as /, private), so every command sees the same
+    storage mount and the containers outlive the desktop session."""
+    if os.environ.get("POWOS_CONTAINER_NS") == "1":
+        return
+    pid = rd(SUPERVISOR_PID)
+    if pid and os.path.exists(f"/proc/{pid}") and mount_ns(pid):
+        if mount_ns(pid) != mount_ns():
+            os.environ["POWOS_CONTAINER_NS"] = "1"
+            os.execvp("nsenter", ["nsenter", "-t", pid, "-m", "--", PY, SELF, *argv])
+        return
+    if not root_is_private_mount():
+        die("no system tier running (rooted.sh system on) and this is not a namespace podman can use "
+            "(a chroot: crun's pivot_root fails); start the system tier or run from a PowOS terminal")
+    warn("system tier not running: containers run in this mount namespace (they stop with it)")
+
+
+def mounted(path):
+    return any(line.split()[4] == path for line in open("/proc/self/mountinfo"))
+
+
+def storage():
+    """podman's storage options. Overlay on an ext4 image (decided once, then kept), else vfs."""
+    if not PHONE:
+        return []
+    choice = rd(CHOICE)
+    if not choice:
+        choice = os.environ.get("POWOS_CONTAINER_STORAGE") or ("overlay" if make_image() else "vfs")
+        os.makedirs(os.path.dirname(CHOICE), exist_ok=True)
+        wr(CHOICE, choice + "\n")
+    if choice == "overlay":
+        if not mounted(MNT):
+            if not os.path.exists(IMG) and not make_image():
+                die(f"overlay storage: {IMG} is missing and could not be made")
+            os.makedirs(MNT, exist_ok=True)
+            dev = loop_device(IMG)
+            r = subprocess.run(["mount", "-t", "ext4", "-o", "noatime", dev, MNT], capture_output=True, text=True)
+            if r.returncode:
+                die(f"overlay storage: mount {dev} ({IMG}): {r.stderr.strip()}")
+        return ["--storage-driver=overlay", f"--root={MNT}/storage", "--runroot=/run/containers/powos"]
+    # HACK: vfs copies every layer into every container (no copy-on-write): overlayfs can't use f2fs as its upper
+    # layer and the ext4 image could not be made here. Real fix: the image (this file's overlay path) or a kernel
+    # whose f2fs overlayfs accepts.
+    return ["--storage-driver=vfs", f"--root={STORE}/vfs", "--runroot=/run/containers/vfs"]
+
+
+def loop_device(img):
+    """A loop device backed by img: the one it already has, else a free one. Android keeps the loop nodes in
+    /dev/block (util-linux looks in /dev and fails with 'failed to set up loop device')."""
+    import fcntl
+    r = subprocess.run(["losetup", "-j", img], capture_output=True, text=True)
+    m = re.match(r"/dev/(?:block/)?loop(\d+):", r.stdout)
+    if m:
+        return loop_node(m.group(1))
+    # HACK: the image carries vold's SELinux label, because the loop driver reads and writes it as the kernel
+    # domain, and Android's policy lets the kernel read/write only a few file types (vold_data_file is the one for
+    # loop-backed images); with /data's label every read is an I/O error. Real fix: a type of our own in the PowOS
+    # system module's sepolicy (allow kernel powos_container_image:file { read write }).
+    if os.path.exists("/sys/fs/selinux/enforce"):
+        os.setxattr(img, "security.selinux", b"u:object_r:vold_data_file:s0\0")  # (PowOS has no chcon)
+    with open("/dev/loop-control", "rb") as ctl:
+        n = fcntl.ioctl(ctl, 0x4C82)  # LOOP_CTL_GET_FREE
+    dev = loop_node(n)
+    r = subprocess.run(["losetup", dev, img], capture_output=True, text=True)
+    if r.returncode:
+        die(f"overlay storage: losetup {dev} {img}: {r.stderr.strip()}")
+    return dev
+
+
+def loop_node(n):
+    for _ in range(20):  # a new loop device's node comes from Android's ueventd
+        for d in (f"/dev/block/loop{n}", f"/dev/loop{n}"):
+            if os.path.exists(d):
+                return d
+        time.sleep(0.1)
+    die(f"overlay storage: no device node for loop{n} in /dev/block")
+
+
+def make_image():
+    """The ext4 image for overlay storage: sparse, so it takes only what the images and containers use."""
+    # HACK: an ext4 filesystem in a file on f2fs, because overlayfs refuses f2fs as its upper layer
+    # (section 11.1). Real fix: a kernel/f2fs combination overlayfs accepts (or an ext4 partition of our own).
+    if os.path.exists(IMG):
+        return True
+    if not shutil.which("mkfs.ext4"):
+        return False
+    try:
+        os.makedirs(STORE, exist_ok=True)
+        tmp = IMG + ".new"
+        with open(tmp, "wb") as f:
+            f.truncate(size(IMG_SIZE))
+        r = subprocess.run(["mkfs.ext4", "-q", "-m", "0", "-L", "powos-containers",
+                            "-E", "lazy_itable_init=1,lazy_journal_init=1", tmp], capture_output=True, text=True)
+        if r.returncode:
+            os.unlink(tmp)
+            warn(f"mkfs.ext4: {r.stderr.strip()}")
+            return False
+        os.replace(tmp, IMG)
+        print(f"powos containers: overlay storage: {IMG} (ext4, sparse {IMG_SIZE})", file=sys.stderr)
+        return True
+    except OSError as e:
+        warn(f"could not make {IMG}: {e}")
+        return False
+
+
+def env():
+    e = {"PATH": "/usr/local/bin:/usr/bin:/usr/sbin", "HOME": "/root", "TMPDIR": "/var/tmp",
+         "LANG": os.environ.get("LANG", "C.UTF-8")}
+    if os.environ.get("TERM"):
+        e["TERM"] = os.environ["TERM"]
+    return e
+
+
+def prepare(argv):
+    if PHONE:
+        ensure_root(argv)
+        ensure_ns(argv)
+        install_hooks()
+        # Killable at their memory limit: under Magisk's su (and the system tier) everything has oom_score_adj -1000,
+        # which podman, conmon and crun hand on to the container (run and exec alike). The memcg OOM killer then can't
+        # kill the workload and kills the container's init instead, or nothing (it stalls at the limit).
+        try:
+            wr("/proc/self/oom_score_adj", 0)
+        except OSError:
+            pass
+    return ["podman", *storage()]
+
+
+def podman(base, *args, capture=False, background=False):
+    if background:
+        return subprocess.Popen([*base, *args], env=env() if PHONE else None)
+    return subprocess.run([*base, *args], env=env() if PHONE else None, capture_output=capture, text=True)
+
+
+# ── commands ────────────────────────────────────────────────────────────────
+
+# podman run's options that take no value (everything else starting with - is taken to take one, unless =value).
+BOOL = {"-d", "--detach", "--rm", "-i", "--interactive", "-t", "--tty", "--privileged", "--init", "--read-only",
+        "--replace", "-q", "--quiet", "--rmi", "--no-healthcheck", "--no-hosts", "-P", "--publish-all",
+        "--read-only-tmpfs", "--sig-proxy", "--oom-kill-disable", "--http-proxy", "--env-host", "--systemd"}
+OURS = {"--memory": "mem", "-m": "mem", "--memory-swap": "memsw", "--cpus": "cpus", "--cpuset-cpus": "cpuset",
+        "--pids-limit": "pids", "--name": "name", "--autosleep": "as_idle", "--sleep-mode": "as_mode",
+        "--autostop": "as_stop"}
+AS_FLAGS = ("as_idle", "as_mode", "as_stop")
+
+
+def autosleep():
+    """lib/apps/powos-autosleep (sleeping and waking idle containers), next to this file."""
+    m = sys.modules.get("powos_autosleep")
+    if m is None:
+        from importlib.machinery import SourceFileLoader
+        from importlib.util import module_from_spec, spec_from_loader
+        loader = SourceFileLoader("powos_autosleep", os.path.join(os.path.dirname(SELF), "powos-autosleep"))
+        m = module_from_spec(spec_from_loader("powos_autosleep", loader))
+        loader.exec_module(m)
+        sys.modules["powos_autosleep"] = m
+    m.pc = sys.modules[__name__]
+    return m
+
+
+def units():
+    """lib/apps/powos-units, next to this file: what `run` starts is registered as a unit (None if not installed)."""
+    m = sys.modules.get("powos_units")
+    if m is None:
+        from importlib.machinery import SourceFileLoader
+        from importlib.util import module_from_spec, spec_from_loader
+        p = os.path.join(os.path.dirname(SELF), "powos-units")
+        if not os.path.exists(p):
+            return None
+        loader = SourceFileLoader("powos_units", p)
+        m = module_from_spec(spec_from_loader("powos_units", loader))
+        loader.exec_module(m)
+        sys.modules["powos_units"] = m
+    return m
+
+
+def unit_register(name, lim, rest, rule):
+    """The container as a unit (container.<name>): owner, purpose, cgroup, limits, autosleep, how to remove it.
+    Never blocks the container: a registry that can't be written is a warning."""
+    u = units()
+    if u is None:
+        return
+    try:
+        u.register_container(name, lim, " ".join(rest), autosleep=autosleep().encode(rule) if rule else None)
+    except (OSError, ValueError) as e:
+        warn(f"not registered as a unit ({e})")
+
+
+def unit_forget(*names):
+    u = units()
+    for n in names:
+        try:
+            u and u.unregister(f"container.{n}", quiet=True)
+        except OSError:
+            pass
+
+
+def parse_run(args):
+    lim, rest, i, net = {}, [], 0, None
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            rest += args[i + 1:]
+            break
+        if not a.startswith("-") or a == "-":
+            rest += args[i:]
+            break
+        k, eq, v = a.partition("=")
+        if k in OURS:
+            if not eq:
+                if i + 1 >= len(args):
+                    die(f"{k} needs a value")
+                v = args[i + 1]
+                i += 1
+            lim[OURS[k]] = v
+        else:
+            rest.append(a)
+            short_bools = re.fullmatch(r"-[ditqP]+", a)
+            if not eq and k not in BOOL and not short_bools and i + 1 < len(args):
+                rest.append(args[i + 1])
+                i += 1
+                v = args[i]
+            if k in ("--network", "--net"):
+                net = v
+        i += 1
+    if not any(not r.startswith("-") for r in rest):
+        die("usage: powos containers run [options] <image> [command...]  (powos containers --help)")
+    name = lim.pop("name", None) or f"powos-{secrets.token_hex(3)}"
+    if not NAME_RE.match(name):
+        die(f"invalid name: {name}")
+    out = {}
+    if "mem" in lim:
+        out["mem"] = size(lim["mem"])
+        sw = lim.get("memsw")
+        out["memsw"] = size(sw) if sw is not None else 2 * out["mem"]
+        if out["memsw"] != -1 and out["memsw"] < out["mem"]:
+            die("--memory-swap must be at least --memory (it is memory + swap), or -1")
+    elif "memsw" in lim:
+        die("--memory-swap needs --memory")
+    if "cpus" in lim:
+        try:
+            if float(lim["cpus"]) <= 0:
+                raise ValueError
+        except ValueError:
+            die(f"--cpus: not a positive number: {lim['cpus']}")
+        out["cpus"] = lim["cpus"]
+    if "cpuset" in lim:
+        if not re.fullmatch(r"[0-9,\-]+", lim["cpuset"]):
+            die(f"--cpuset-cpus: e.g. 0-2 or 4,5: {lim['cpuset']}")
+        out["cpuset"] = lim["cpuset"]
+    if "pids" in lim:
+        if not lim["pids"].isdigit() or int(lim["pids"]) < 1:
+            die(f"--pids-limit: a positive number: {lim['pids']}")
+        out["pids"] = lim["pids"]
+    out.update({k: lim[k] for k in AS_FLAGS if k in lim})  # cmd_run takes these out again (the autosleep rule)
+    return name, out, rest, net
+
+
+def detached(rest):
+    return any(a == "--detach" or re.fullmatch(r"-[itP]*d[ditP]*", a) for a in rest)
+
+
+def cmd_run(argv, args):
+    name, lim, rest, net = parse_run(args)
+    asl = autosleep()
+    rule = asl.rule_from_flags(lim, rm="--rm" in rest)
+    label = [f"--label={asl.LABEL}={asl.encode(rule)}"] if rule else []
+    base = prepare(argv)
+    unit_register(name, lim, rest, rule)
+    if not PHONE:  # podman's own cgroups do it
+        native = {"mem": "--memory", "memsw": "--memory-swap", "cpus": "--cpus", "cpuset": "--cpuset-cpus",
+                  "pids": "--pids-limit"}
+        flags = [f"{native[k]}={v}" for k, v in lim.items()]
+        if rule and not rule.get("never"):
+            asl.ensure_watcher()
+        code = podman(base, "run", f"--name={name}", *flags, *label, *rest).returncode
+        if "--rm" in rest and not detached(rest):
+            unit_forget(name)
+        return code
+    mode = (net or "host").split(":")[0]
+    if mode in ("pasta", "slirp4netns", "bridge") or mode.startswith("bridge"):
+        die(f"--network {mode}: not on this phone yet. pasta can't sandbox itself without IPC namespaces (this "
+            "kernel has none: 'Failed to detach isolating namespaces'); slirp4netns isn't installed; bridge needs "
+            "netavark + the nftables modules (the containers kernel). Use --network host (default) or none.")
+    for n in degrade_notes(lim, caps()):
+        warn(n)
+    gc()
+    if any(procs(d) for d in groups(name).values() if os.path.isdir(d)):
+        die(f"{name}: its groups still hold processes (a container of that name is running)")
+    extra = [] if net else ["--network=host"]  # the phone's network, as 50-powos-phone.conf says
+    rest = host_rootfs(rest)
+    r = podman(base, "run", "--cgroups=disabled", f"--annotation={ANNOT}={encode({'name': name, **lim})}",
+               f"--name={name}", *extra, *label, *rest, background=True)
+    if not (rule or {}).get("never") and not asl.common.is_never(name):
+        asl.ensure_watcher()
+    # Signals to us (the supervisor stopping an app, ^C) go to podman, which hands them to the container.
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, lambda s, _f: r.send_signal(s))
+    code = r.wait()
+    if not detached(rest):
+        gc()
+        if "--rm" in rest:
+            unit_forget(name)
+    return code
+
+
+EXEC_VALUE = {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys", "--preserve-fds"}
+
+
+def cmd_exec(argv, args):
+    """podman exec, with the process in the container's groups before its command runs."""
+    i, flags = 0, []
+    while i < len(args) and args[i].startswith("-"):
+        flags.append(args[i])
+        if args[i] in EXEC_VALUE and i + 1 < len(args):
+            flags.append(args[i + 1])
+            i += 1
+        i += 1
+    if len(args) - i < 2 or not NAME_RE.match(args[i]):
+        die("usage: powos containers exec [-it] [-e K=V] [-u user] <name> <command...>")
+    name, cmd = args[i], args[i + 1:]
+    base = prepare(argv)
+    autosleep().wake(base, name)  # exec into a frozen container would hang; the session keeps it awake
+    if not PHONE or not any(os.path.isdir(d) for d in groups(name).values()):
+        return podman(base, "exec", *flags, name, *cmd).returncode
+    # HACK: crun exec joins no cgroup when podman runs with --cgroups=disabled, so a plain `podman exec` would run
+    # outside the container's limits. The exec'd shell stops itself first; we move it into the groups and continue it,
+    # and only then does it exec the command (its children inherit). Needs /bin/sh in the image (else: a warning and
+    # an unlimited exec). Real fix: memory/cpu on cgroup v2 (section 9.3), then podman's own cgroup and crun's exec
+    # into it.
+    tok = secrets.token_hex(8)
+    r = podman(base, "exec", *flags, "-e", f"POWOS_EXEC={tok}", name, "/bin/sh", "-c", "kill -STOP $$; exec \"$@\"",
+               "sh", *cmd, background=True)
+    deadline, moved = time.time() + 10, False
+    while time.time() < deadline and r.poll() is None and not moved:
+        for pid in os.listdir("/proc"):
+            if pid.isdigit() and f"POWOS_EXEC={tok}".encode() in _environ(pid) and _state(pid) == "T":
+                for kind, d in groups(name).items():
+                    if os.path.isdir(d):
+                        wr(f"{d}/cgroup.procs", pid)
+                os.kill(int(pid), 18)  # SIGCONT
+                moved = True
+                break
+        time.sleep(0.02)
+    if not moved and r.poll() is None:
+        warn(f"{name}: the exec'd process wasn't found to put into the container's limits; it runs without them")
+    return r.wait()
+
+
+def _environ(pid):
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            return f.read()
+    except OSError:
+        return b""
+
+
+def _state(pid):
+    s = rd(f"/proc/{pid}/stat")
+    return s.rsplit(")", 1)[-1].split()[0] if ")" in s else ""
+
+
+def host_rootfs(rest):
+    """--rootfs / (PowOS's own userland as the container's root: powos-runtime's container mode without an image)."""
+    # HACK: a bind of / at HOSTROOT stands in for "/": crun can't pivot_root onto the root it runs in ("Device or
+    # resource busy"), and an overlay with / as its lower layer is refused (its upper layer, podman's storage, is below
+    # /). Real fix: crun binding a rootfs that is its own / before pivot_root (upstream). Non-recursive: only /
+    # itself, no submounts.
+    for i, a in enumerate(rest[:-1]):
+        if a == "--rootfs" and rest[i + 1] in ("/", "/:O"):
+            if not mounted(HOSTROOT):
+                os.makedirs(HOSTROOT, exist_ok=True)
+                for m in (["mount", "--bind", "/", HOSTROOT], ["mount", "-o", "remount,bind,ro", HOSTROOT]):
+                    r = subprocess.run(m, capture_output=True, text=True)
+                    if r.returncode:
+                        die(f"--rootfs /: {' '.join(m)}: {r.stderr.strip()}")
+            return rest[:i + 1] + [HOSTROOT] + rest[i + 2:]
+    return rest
+
+
+def usage_of(name):
+    g = groups(name)
+    out = {}
+    if os.path.isdir(g["memory"]):
+        out["mem"] = int(rd(f"{g['memory']}/memory.usage_in_bytes", "0") or 0)
+        out["mem_max"] = int(rd(f"{g['memory']}/memory.limit_in_bytes", "0") or 0)
+    if os.path.isdir(g["cpu"]):
+        q = rd(f"{g['cpu']}/cpu.cfs_quota_us")
+        out["cpu"] = (f"{int(q) / PERIOD:g} cores" if q and int(q) > 0 else
+                      f"shares {rd(g['cpu'] + '/cpu.shares')}")
+        st = dict(line.split() for line in rd(f"{g['cpu']}/cpu.stat").splitlines() if len(line.split()) == 2)
+        out["throttled"] = int(st.get("nr_throttled", 0))
+    if os.path.isdir(g["cpuset"]):
+        out["cores"] = rd(cpuset_file(g["cpuset"], "cpus"))
+    if os.path.isdir(g["pids"]):
+        out["pids"] = rd(f"{g['pids']}/pids.current")
+        out["pids_max"] = rd(f"{g['pids']}/pids.max")
+    return out
+
+
+def mb(b):
+    return f"{b / 1048576:.0f}M"
+
+
+def cmd_ps(argv, args):
+    base = prepare(argv)
+    a = ["ps", "--format", "json"] + (["-a"] if "-a" in args or "--all" in args else [])
+    r = podman(base, *a, capture=True)
+    if r.returncode:
+        sys.stderr.write(r.stderr)
+        return r.returncode
+    rows, asleep = [], autosleep().load()["asleep"]
+    for c in json.loads(r.stdout or "[]"):
+        n = c["Names"][0] if isinstance(c.get("Names"), list) else c.get("Names", "")
+        state = "asleep" if c.get("State") == "running" and n in asleep else c.get("State", "")
+        rows.append({"name": n, "image": c.get("Image", ""), "state": state,
+                     "status": c.get("Status", ""), "limits": usage_of(n) if PHONE else {}})
+    if "--json" in args:
+        print(json.dumps(rows))
+        return 0
+    print(f"{'NAME':20} {'STATE':9} {'MEMORY':>13} {'CPU':>14} {'PIDS':>9}  IMAGE")
+    for x in rows:
+        u = x["limits"]
+        mem = f"{mb(u['mem'])}/{mb(u['mem_max'])}" if "mem" in u else "-"
+        cpu = u.get("cpu", "-") + (f" @{u['cores']}" if u.get("cores") else "")
+        pids = f"{u['pids']}/{u['pids_max']}" if "pids" in u else "-"
+        print(f"{x['name'][:20]:20} {x['state'][:9]:9} {mem:>13} {cpu[:14]:>14} {pids:>9}  {x['image']}")
+    return 0
+
+
+def cmd_life(argv, verb, args):
+    names = [a for a in args if not a.startswith("-")]
+    if not names:
+        die(f"usage: powos containers {verb} <name>")
+    for n in names:
+        if not NAME_RE.match(n):
+            die(f"invalid name: {n}")
+    base = prepare(argv)
+    flags = [a for a in args if a.startswith("-")]
+    asl = autosleep()
+    if verb == "start":  # a sleeping one is woken (thawed, or started through the watcher that holds its ports)
+        woke = [n for n in names if asl.wake(base, n) == 0]
+        names = [n for n in names if n not in woke]
+        if not names:
+            return 0
+    else:
+        for n in names:
+            asl.release(base, n)  # stop/restart/rm of a sleeping one: thawed first, its watch dropped
+    r = podman(base, verb, *flags, *names)
+    if PHONE:
+        gc()
+    if verb in ("rm", "remove", "delete", "destroy") and r.returncode == 0:
+        unit_forget(*names)  # gone with its unit
+    return r.returncode
+
+
+def cmd_limits(argv, args):
+    if not args or not NAME_RE.match(args[0]):
+        die("usage: powos containers limits <name>")
+    prepare(argv)
+    n = args[0]
+    g = groups(n)
+    any_ = False
+    for kind, files in (("memory", ["memory.limit_in_bytes", "memory.memsw.limit_in_bytes", "memory.usage_in_bytes",
+                                    "memory.max_usage_in_bytes", "memory.failcnt"]),
+                        ("cpu", ["cpu.cfs_quota_us", "cpu.cfs_period_us", "cpu.shares", "cpu.stat"]),
+                        ("cpuset", ["cpus", "cpuset.cpus"]),
+                        ("pids", ["pids.max", "pids.current", "pids.events"])):
+        d = g[kind]
+        if not os.path.isdir(d):
+            continue
+        any_ = True
+        print(f"{d}  (processes: {len(procs(d))})")
+        for f in files:
+            v = rd(f"{d}/{f}", None)
+            if v is not None:
+                print(f"  {f}: {' '.join(v.split())}")
+        if kind == "memory":
+            oc = rd(f"{d}/memory.oom_control")
+            if oc:
+                print(f"  memory.oom_control: {' '.join(oc.split())}")
+    if not any_:
+        print(f"{n}: no groups (not running, or started without limits)")
+    return 0
+
+
+def cmd_check(argv):
+    if PHONE:
+        ensure_root(argv)
+        ensure_ns(argv)
+    c = caps()
+    yes = lambda b: "yes" if b else "no"  # noqa: E731
+    print(f"device: {device()}  kernel: {os.uname().release}")
+    if not PHONE:
+        print("limits: podman's own cgroups (--memory, --cpus, --pids-limit as podman)")
+        return 0
+    print(f"--memory       {'hard' if c['memory'] else 'NOT enforced'}   cgroup v1 {MEMCG}/{PARENT}/<name>")
+    print(f"--memory-swap  {'hard' if c['memsw'] else 'NOT enforced'}   memory.memsw (swap accounting)")
+    print(f"--cpus         {'hard quota' if c['cfs'] else 'weight only (cpu.shares)' if c['shares'] else 'NOT enforced'}"
+          f"   cgroup v1 {CPUCTL}/{PARENT}/<name>" + ("" if c["cfs"] else "  (no CFS bandwidth in this kernel)"))
+    print(f"--cpuset-cpus  {'hard' if c['cpuset'] else 'NOT enforced'}   {CPUSET}/{PARENT}/<name>")
+    print(f"--pids-limit   {'hard' if c['pids'] else 'NOT enforced'}   cgroup v2 {V2}/{PARENT}/<name>"
+          + ("" if c["pids"] else "  (no pids controller in this kernel)"))
+    pid = rd(SUPERVISOR_PID)
+    print(f"namespace      {'system tier (supervisor ' + pid + ')' if pid and mount_ns(pid) == mount_ns() else 'this one'}"
+          f", / private: {yes(root_is_private_mount())}")
+    ch = rd(CHOICE) or "(not chosen yet: overlay on first use if the image can be made)"
+    print(f"storage        {ch}" + (f"  {IMG} mounted: {yes(mounted(MNT))}" if ch == "overlay" else ""))
+    tools = {t: shutil.which(t) for t in ("podman", "crun", "conmon", "pasta", "slirp4netns", "netavark")}
+    print("tools          " + "  ".join(f"{t}: {yes(p)}" for t, p in tools.items()))
+    nft = sum(1 for line in open("/proc/modules") if line.startswith(("nf_tables ", "nft_")))
+    print("network        host (default) and none. pasta: no (it can't sandbox itself without IPC namespaces); "
+          f"bridge: not yet (netavark {'installed' if tools['netavark'] else 'not installed'}, "
+          f"nftables modules loaded: {nft}, and Android's policy routing needs a rule for the bridge)")
+    return 0
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
+    cmd, rest = argv[0], argv[1:]
+    if rest[:1] in (["-h"], ["--help"]) and cmd != "autosleep":
+        print(__doc__.strip())
+        return 0
+    if cmd == "hook":
+        hook(rest[0] if rest else "create")
+        return 0
+    if cmd == "run":
+        return cmd_run(argv, rest)
+    if cmd in ("ps", "ls"):
+        return cmd_ps(argv, rest)
+    if cmd in ("stop", "start", "restart"):
+        return cmd_life(argv, cmd, rest)
+    if cmd in ("rm", "remove", "delete"):
+        return cmd_life(argv, "rm", rest)
+    if cmd == "exec":
+        return cmd_exec(argv, rest)
+    if cmd == "limits":
+        return cmd_limits(argv, rest)
+    if cmd == "check":
+        return cmd_check(argv)
+    if cmd == "gc":
+        prepare(argv)
+        gc()
+        return 0
+    if cmd == "podman":
+        return podman(prepare(argv), *rest).returncode
+    if cmd == "autosleep":
+        if rest[:1] in (["-h"], ["--help"], ["help"]):
+            print(autosleep().__doc__.strip())
+            return 0
+        return autosleep().cmd(prepare(argv), rest)
+    if cmd == "wake":
+        return autosleep().cmd(prepare(argv), ["wake", *rest])
+    die(f"unknown command {cmd} (run, ps, exec, stop, start, restart, rm, wake, autosleep, limits, check, podman)")
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]) or 0)

@@ -56,8 +56,8 @@
 #
 # Wayland gives output-geometry changes to Qt over the wl_output protocol,
 # NOT over a DBus broadcast (plasmashell repositions panels but nothing is
-# emitted on the bus), so --watch polls — resolution changes are rare and
-# each poll is a single cheap DBus round-trip that no-ops when nothing moved.
+# emitted on the bus), so --watch polls — resolution changes are rare: each
+# poll asks X for the outputs (xrandr, cheap) and plasmashell only when they moved.
 
 set -uo pipefail
 
@@ -201,6 +201,26 @@ print(changed.length ? changed.join("\n") : "no-change");
 
 script="var THRESHOLD = ${THRESHOLD};"$'\n'"$script_body"
 
+# RandR's screen/CRTC/output change events on the root window, one "changed" line each (--watch).
+RANDR_EVENTS='
+import ctypes, ctypes.util, sys
+x = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
+r = ctypes.CDLL(ctypes.util.find_library("Xrandr") or "libXrandr.so.2")
+x.XOpenDisplay.restype = ctypes.c_void_p
+x.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+x.XDefaultRootWindow.restype = ctypes.c_ulong
+r.XRRSelectInput.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int]
+x.XNextEvent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+d = x.XOpenDisplay(None)
+if not d:
+    sys.exit(1)
+r.XRRSelectInput(d, x.XDefaultRootWindow(d), 1 | 2 | 4)
+ev = ctypes.create_string_buffer(192)
+while True:
+    x.XNextEvent(d, ev)
+    print("changed", flush=True)
+'
+
 apply() {
     "$QDBUS" org.kde.plasmashell /PlasmaShell \
         org.kde.PlasmaShell.evaluateScript "$script" 2>/dev/null || true
@@ -208,8 +228,30 @@ apply() {
 
 case "${1:-}" in
     --watch)
+        # Event-driven: RandR's change events from X (Xwayland mirrors every Wayland output), read by a blocked
+        # python3 (ctypes, libXrandr) - nothing runs until an output changes, then plasmashell is asked once. Each
+        # evaluateScript runs a whole script engine inside plasmashell: polled every 3 s, that was plasmashell's idle
+        # cost (1.5-2.7% of a core on the phone, 2026-10-21) and it woke a plasmashell asleep while the phone's
+        # desktop isn't shown (powos-sleep-gui). Without X or the listener: the outputs polled with xrandr (cheap),
+        # plasmashell only when they moved; without xrandr either, plasmashell every poll as before.
+        apply >/dev/null
+        if [[ -n "${DISPLAY:-}" ]] && command -v python3 >/dev/null 2>&1; then
+            python3 -c "$RANDR_EVENTS" 2>/dev/null | while read -r ev; do
+                [[ "$ev" == changed ]] || continue
+                while read -r -t 0.5 _; do :; done  # a change comes as a burst of events: once, after it
+                apply >/dev/null
+            done
+        fi
+        last=""
         while true; do
-            apply >/dev/null
+            if [[ -n "${DISPLAY:-}" ]] && command -v xrandr >/dev/null 2>&1; then
+                # X gone (the session ended, its Xwayland with it): so is this session's plasmashell - done.
+                now=$(xrandr --listmonitors 2>/dev/null) || exit 0
+                [[ "$now" != "$last" ]] && apply >/dev/null
+                last=$now
+            else
+                apply >/dev/null
+            fi
             sleep "$INTERVAL"
         done
         ;;

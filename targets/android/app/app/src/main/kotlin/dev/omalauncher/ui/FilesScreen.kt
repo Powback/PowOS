@@ -1,14 +1,17 @@
 package dev.omalauncher.ui
 
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
@@ -48,6 +52,7 @@ import dev.omalauncher.Runtime
 import dev.omalauncher.linux.GuestEntry
 import dev.omalauncher.linux.GuestFs
 import dev.omalauncher.linux.shellQuote
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -63,31 +68,105 @@ fun FilesScreen(
     val context = LocalContext.current
     val fs = remember { GuestFs(runtime.proot::hostFile) }
     val scope = rememberCoroutineScope()
+    // The folder and the way back start over when the screen is opened with another path; the rest stays.
+    val nav = remember(startPath) { FilesNav(fs.normalize(startPath)) }
+    val ui = remember { FilesUi() }
+    val f = remember(nav, ui) { Files(runtime, fs, context, scope, ui, nav) }
+    f.onExit = onExit
 
-    var path by remember(startPath) { mutableStateOf(fs.normalize(startPath)) }
-    val history = remember(startPath) { mutableStateListOf<String>() }
-    var showHidden by remember { mutableStateOf(true) }
-    var query by remember { mutableStateOf<String?>(null) }
-    val selected = remember { mutableStateListOf<String>() }
-    var reload by remember { mutableIntStateOf(0) }
-    var viewing by remember { mutableStateOf<File?>(null) }
-    var dialog by remember { mutableStateOf<FileDialog?>(null) }
-    var menuOpen by remember { mutableStateOf(false) }
-
-    val entries by produceState<List<GuestEntry>?>(null, path, showHidden, reload) {
-        value = withContext(Dispatchers.IO) { runCatching { fs.list(path, showHidden) }.getOrDefault(emptyList()) }
+    val entries by produceState<List<GuestEntry>?>(null, nav.path, ui.showHidden, ui.reload) {
+        value = withContext(Dispatchers.IO) { runCatching { fs.list(nav.path, ui.showHidden) }.getOrDefault(emptyList()) }
     }
-    val shown = entries?.filter { e -> query.isNullOrBlank() || query!!.lowercase() in e.name.lowercase() }
+    val shown = entries?.let { matching(it, ui.query) }
     val listState = rememberLazyListState()
-    LaunchedEffect(path) { listState.scrollToItem(0) }
+    LaunchedEffect(nav.path) { listState.scrollToItem(0) }
+
+    BackHandler { f.back() }
+
+    Column(Modifier.fillMaxSize().background(Palette.background).systemBarsPadding().imePadding()) {
+        if (ui.selected.isNotEmpty()) FilesSelectionBar(f, entries, shown) else FilesTopBar(f)
+        Breadcrumbs(nav.path, onNavigate = f::navigate)
+        Places(nav.path, exists = fs::isDir, onNavigate = f::navigate)
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            FilesList(f, shown, listState)
+            if (ui.selected.isEmpty() && ui.query == null) {
+                Fab(Icons.NewFolder, "new folder", Modifier.align(Alignment.BottomEnd).padding(20.dp)) { ui.dialog = FileDialog.NewFolder }
+            }
+        }
+        FilesPasteBar(f)
+    }
+
+    ui.viewing?.let { file -> ImageViewer(file, onClose = { ui.viewing = null }) }
+    FilesDialogs(f)
+}
+
+/** The entries whose name contains [query] (all of them without one). */
+private fun matching(
+    entries: List<GuestEntry>,
+    query: String?,
+): List<GuestEntry> {
+    if (query.isNullOrBlank()) return entries
+    val q = query.lowercase()
+    return entries.filter { q in it.name.lowercase() }
+}
+
+/** Where the screen is: the folder and the folders before it. */
+private class FilesNav(
+    start: String,
+) {
+    var path by mutableStateOf(start)
+    val history = mutableStateListOf<String>()
+}
+
+/** What the screen shows besides the folder. */
+private class FilesUi {
+    var showHidden by mutableStateOf(true)
+    var query by mutableStateOf<String?>(null)
+    val selected = mutableStateListOf<String>()
+    var reload by mutableIntStateOf(0)
+    var viewing by mutableStateOf<File?>(null)
+    var dialog by mutableStateOf<FileDialog?>(null)
+    var menuOpen by mutableStateOf(false)
+}
+
+/** The screen's actions over its state. */
+private class Files(
+    val runtime: Runtime,
+    val fs: GuestFs,
+    private val context: Context,
+    private val scope: CoroutineScope,
+    val ui: FilesUi,
+    val nav: FilesNav,
+) {
+    var onExit: () -> Unit = {}
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
 
     fun navigate(to: String) {
-        history += path
-        path = to
-        query = null
-        selected.clear()
+        nav.history += nav.path
+        nav.path = to
+        ui.query = null
+        ui.selected.clear()
+    }
+
+    /** Back: closes what's open first, then the previous folder, then the screen. */
+    fun back() {
+        when {
+            ui.viewing != null -> ui.viewing = null
+            ui.selected.isNotEmpty() -> ui.selected.clear()
+            ui.query != null -> ui.query = null
+            nav.history.isNotEmpty() -> {
+                nav.path = nav.history.removeAt(nav.history.lastIndex)
+                ui.selected.clear()
+            }
+            else -> onExit()
+        }
+    }
+
+    /** The top bar's back arrow: the parent folder, or out at the root. */
+    fun up() {
+        val up = fs.parent(nav.path)
+        if (up != null) navigate(up) else onExit()
     }
 
     /** Runs a file operation off the main thread, then reloads the listing. */
@@ -95,12 +174,15 @@ fun FilesScreen(
         scope.launch {
             val error = withContext(Dispatchers.IO) { runCatching(block).exceptionOrNull() }
             if (error != null) toast(error.message ?: "failed")
-            selected.clear()
-            reload++
+            ui.selected.clear()
+            ui.reload++
         }
     }
 
-    fun openWithAndroid(file: File, share: Boolean = false) {
+    fun openWithAndroid(
+        file: File,
+        share: Boolean = false,
+    ) {
         // A file outside the folders in file_paths.xml (a link out of them) has no uri.
         val uri =
             try {
@@ -128,183 +210,211 @@ fun FilesScreen(
         if (entry.isDir) return navigate(fs.resolve(entry.path))
         val file = fs.host(entry.path)
         when {
-            isImage(entry.name) -> viewing = file
+            isImage(entry.name) -> ui.viewing = file
             isText(entry.name, file) -> edit(entry)
             else -> openWithAndroid(file)
         }
     }
 
-    BackHandler {
-        when {
-            viewing != null -> viewing = null
-            selected.isNotEmpty() -> selected.clear()
-            query != null -> query = null
-            history.isNotEmpty() -> {
-                path = history.removeAt(history.lastIndex)
-                selected.clear()
-            }
-            else -> onExit()
+    /** A tap on a row: opens it, or while selecting toggles it. */
+    fun tap(entry: GuestEntry) {
+        if (ui.selected.isEmpty()) {
+            open(entry)
+        } else if (!ui.selected.remove(entry.path)) {
+            ui.selected += entry.path
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Palette.background).systemBarsPadding().imePadding()) {
-        if (selected.isNotEmpty()) {
-            val single = entries?.firstOrNull { it.path == selected.singleOrNull() }
-            // Sniffing a file for text reads it: off the main thread, once per selection.
-            val singleIsText by produceState(false, single?.path) {
-                value = single?.takeIf { !it.isDir }?.let { s -> withContext(Dispatchers.IO) { isText(s.name, fs.host(s.path)) } } == true
-            }
-            SelectionBar(
-                count = selected.size,
-                onClose = { selected.clear() },
-                onSelectAll = {
-                    selected.clear()
-                    selected += shown.orEmpty().map { it.path }
-                },
-                onCopy = {
-                    FileClipboard.paths = selected.toList()
-                    FileClipboard.cut = false
-                    selected.clear()
-                },
-                onCut = {
-                    FileClipboard.paths = selected.toList()
-                    FileClipboard.cut = true
-                    selected.clear()
-                },
-                onDelete = { dialog = FileDialog.Delete(selected.toList()) },
-                onRename = single?.let { { dialog = FileDialog.Rename(it) } },
-                onShare = single?.takeIf { !it.isDir }?.let { { openWithAndroid(fs.host(it.path), share = true) } },
-                onOpenWith = single?.takeIf { !it.isDir }?.let { { openWithAndroid(fs.host(it.path)) } },
-                onEdit = single?.takeIf { singleIsText }?.let { { edit(it) } },
-            )
+    fun hold(entry: GuestEntry) {
+        if (entry.path !in ui.selected) ui.selected += entry.path
+    }
+
+    fun selectAll(shown: List<GuestEntry>?) {
+        ui.selected.clear()
+        ui.selected += shown.orEmpty().map { it.path }
+    }
+
+    /** Puts the selection on the clipboard, to copy or (with [cut]) move. */
+    fun clip(cut: Boolean) {
+        FileClipboard.paths = ui.selected.toList()
+        FileClipboard.cut = cut
+        ui.selected.clear()
+    }
+
+    fun paste(clip: List<String>) {
+        val cut = FileClipboard.cut
+        FileClipboard.paths = emptyList()
+        val into = nav.path
+        operate { fs.paste(clip, into, move = cut) }
+    }
+
+    fun terminalHere() = runtime.terminal("cd ${shellQuote(nav.path)} && exec bash", "Terminal")
+}
+
+@Composable
+private fun FilesSelectionBar(
+    f: Files,
+    entries: List<GuestEntry>?,
+    shown: List<GuestEntry>?,
+) {
+    val ui = f.ui
+    val single = entries?.firstOrNull { it.path == ui.selected.singleOrNull() }
+    val file = single?.takeIf { !it.isDir }
+    // Sniffing a file for text reads it: off the main thread, once per selection.
+    val singleIsText by produceState(false, single?.path) {
+        value = file?.let { s -> withContext(Dispatchers.IO) { isText(s.name, f.fs.host(s.path)) } } == true
+    }
+    SelectionBar(
+        count = ui.selected.size,
+        onClose = { ui.selected.clear() },
+        onSelectAll = { f.selectAll(shown) },
+        onCopy = { f.clip(cut = false) },
+        onCut = { f.clip(cut = true) },
+        onDelete = { ui.dialog = FileDialog.Delete(ui.selected.toList()) },
+        onRename = single?.let { { ui.dialog = FileDialog.Rename(it) } },
+        onShare = file?.let { { f.openWithAndroid(f.fs.host(it.path), share = true) } },
+        onOpenWith = file?.let { { f.openWithAndroid(f.fs.host(it.path)) } },
+        onEdit = single?.takeIf { singleIsText }?.let { { f.edit(it) } },
+    )
+}
+
+@Composable
+private fun FilesTopBar(f: Files) {
+    Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(Icons.Back, "back") { f.up() }
+        val q = f.ui.query
+        if (q != null) {
+            FilesSearch(f, q)
         } else {
-            Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(Icons.Back, "back") {
-                    val up = fs.parent(path)
-                    if (up != null) navigate(up) else onExit()
-                }
-                val q = query
-                if (q != null) {
-                    val focus = remember { FocusRequester() }
-                    LaunchedEffect(Unit) { focus.requestFocus() }
-                    BasicTextField(
-                        value = q,
-                        onValueChange = { query = it },
-                        singleLine = true,
-                        textStyle = Mono.copy(fontSize = TextSize.Large),
-                        cursorBrush = SolidColor(Palette.accent),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = {}),
-                        modifier = Modifier.weight(1f).focusRequester(focus).padding(horizontal = 8.dp),
-                        decorationBox = { inner ->
-                            Box {
-                                if (q.isEmpty()) BasicText("filter this folder", style = Mono.copy(color = Palette.muted, fontSize = TextSize.Large))
-                                inner()
-                            }
-                        },
-                    )
-                    IconButton(Icons.Close, "close search") { query = null }
-                } else {
-                    Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                        BasicText(
-                            when (path) {
-                                "/" -> "/"
-                                "/root" -> "home"
-                                else -> path.substringAfterLast('/')
-                            },
-                            style = Mono.copy(fontSize = TextSize.Title),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    IconButton(Icons.Search, "search") { query = "" }
-                    Box {
-                        IconButton(Icons.More, "more") { menuOpen = true }
-                        if (menuOpen) {
-                            MenuPopup(
-                                listOf(
-                                    "new folder" to { dialog = FileDialog.NewFolder },
-                                    (if (showHidden) "hide hidden files" else "show hidden files") to { showHidden = !showHidden },
-                                    "open terminal here" to { runtime.terminal("cd ${shellQuote(path)} && exec bash", "Terminal") },
-                                ),
-                                onDismiss = { menuOpen = false },
-                            )
-                        }
-                    }
-                }
-            }
+            FilesTitle(f.nav.path)
+            IconButton(Icons.Search, "search") { f.ui.query = "" }
+            FilesMenu(f)
         }
+    }
+}
 
-        Breadcrumbs(path, onNavigate = ::navigate)
-        Places(path, exists = fs::isDir, onNavigate = ::navigate)
-
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                shown == null -> {}
-                shown.isEmpty() ->
-                    BasicText(
-                        if (query.isNullOrBlank()) "empty folder" else "nothing matches",
-                        Modifier.align(Alignment.Center),
-                        style = Mono.copy(color = Palette.muted),
-                    )
-                else ->
-                    LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 96.dp)) {
-                        items(shown, key = { it.path }) { entry ->
-                            FileRow(
-                                entry = entry,
-                                selected = entry.path in selected,
-                                selecting = selected.isNotEmpty(),
-                                onClick = {
-                                    if (selected.isEmpty()) {
-                                        open(entry)
-                                    } else if (!selected.remove(entry.path)) {
-                                        selected += entry.path
-                                    }
-                                },
-                                onLongClick = { if (entry.path !in selected) selected += entry.path },
-                            )
-                        }
-                    }
+@Composable
+private fun RowScope.FilesSearch(
+    f: Files,
+    q: String,
+) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    BasicTextField(
+        value = q,
+        onValueChange = { f.ui.query = it },
+        singleLine = true,
+        textStyle = Mono.copy(fontSize = TextSize.Large),
+        cursorBrush = SolidColor(Palette.accent),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = {}),
+        modifier = Modifier.weight(1f).focusRequester(focus).padding(horizontal = 8.dp),
+        decorationBox = { inner ->
+            Box {
+                if (q.isEmpty()) BasicText("filter this folder", style = Mono.copy(color = Palette.muted, fontSize = TextSize.Large))
+                inner()
             }
-            if (selected.isEmpty() && query == null) {
-                Fab(Icons.NewFolder, "new folder", Modifier.align(Alignment.BottomEnd).padding(20.dp)) { dialog = FileDialog.NewFolder }
-            }
-        }
+        },
+    )
+    IconButton(Icons.Close, "close search") { f.ui.query = null }
+}
 
-        val clip = FileClipboard.paths
-        if (clip.isNotEmpty()) {
-            PasteBar(
-                count = clip.size,
-                cut = FileClipboard.cut,
-                onCancel = { FileClipboard.paths = emptyList() },
-                onPaste = {
-                    val cut = FileClipboard.cut
-                    FileClipboard.paths = emptyList()
-                    operate { fs.paste(clip, path, move = cut) }
-                },
+@Composable
+private fun RowScope.FilesTitle(path: String) {
+    Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+        BasicText(
+            when (path) {
+                "/" -> "/"
+                "/root" -> "home"
+                else -> path.substringAfterLast('/')
+            },
+            style = Mono.copy(fontSize = TextSize.Title),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun FilesMenu(f: Files) {
+    val ui = f.ui
+    Box {
+        IconButton(Icons.More, "more") { ui.menuOpen = true }
+        if (ui.menuOpen) {
+            MenuPopup(
+                listOf(
+                    "new folder" to { ui.dialog = FileDialog.NewFolder },
+                    (if (ui.showHidden) "hide hidden files" else "show hidden files") to { ui.showHidden = !ui.showHidden },
+                    "open terminal here" to { f.terminalHere() },
+                ),
+                onDismiss = { ui.menuOpen = false },
             )
         }
     }
+}
 
-    viewing?.let { file -> ImageViewer(file, onClose = { viewing = null }) }
+@Composable
+private fun BoxScope.FilesList(
+    f: Files,
+    shown: List<GuestEntry>?,
+    listState: LazyListState,
+) {
+    when {
+        shown == null -> {}
+        shown.isEmpty() ->
+            BasicText(
+                if (f.ui.query.isNullOrBlank()) "empty folder" else "nothing matches",
+                Modifier.align(Alignment.Center),
+                style = Mono.copy(color = Palette.muted),
+            )
+        else ->
+            LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 96.dp)) {
+                items(shown, key = { it.path }) { entry ->
+                    FileRow(
+                        entry = entry,
+                        selected = entry.path in f.ui.selected,
+                        selecting = f.ui.selected.isNotEmpty(),
+                        onClick = { f.tap(entry) },
+                        onLongClick = { f.hold(entry) },
+                    )
+                }
+            }
+    }
+}
 
-    when (val d = dialog) {
+@Composable
+private fun FilesPasteBar(f: Files) {
+    val clip = FileClipboard.paths
+    if (clip.isEmpty()) return
+    PasteBar(
+        count = clip.size,
+        cut = FileClipboard.cut,
+        onCancel = { FileClipboard.paths = emptyList() },
+        onPaste = { f.paste(clip) },
+    )
+}
+
+@Composable
+private fun FilesDialogs(f: Files) {
+    val ui = f.ui
+    val close = { ui.dialog = null }
+    when (val d = ui.dialog) {
         null -> {}
         FileDialog.NewFolder ->
-            TextDialog("new folder", "", "create", onDismiss = { dialog = null }) { name ->
-                dialog = null
-                operate { fs.mkdir(path, name) }
+            TextDialog("new folder", "", "create", onDismiss = close) { name ->
+                close()
+                f.operate { f.fs.mkdir(f.nav.path, name) }
             }
         is FileDialog.Rename ->
-            TextDialog("rename", d.entry.name, "rename", onDismiss = { dialog = null }) { name ->
-                dialog = null
-                operate { fs.rename(d.entry.path, name) }
+            TextDialog("rename", d.entry.name, "rename", onDismiss = close) { name ->
+                close()
+                f.operate { f.fs.rename(d.entry.path, name) }
             }
         is FileDialog.Delete -> {
             val what = if (d.paths.size == 1) d.paths[0].substringAfterLast('/') else "${d.paths.size} items"
-            ConfirmDialog("delete $what?", "This can't be undone.", "delete", onDismiss = { dialog = null }) {
-                dialog = null
-                operate { d.paths.forEach(fs::delete) }
+            ConfirmDialog("delete $what?", "This can't be undone.", "delete", onDismiss = close) {
+                close()
+                f.operate { d.paths.forEach(f.fs::delete) }
             }
         }
     }

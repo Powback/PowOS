@@ -1,5 +1,6 @@
 /**
- * The host (types.ts Bridge): window.powos when a host sets it, the phone's WebView (window.PowosHost), or - in a
+ * The host (types.ts Bridge): window.powos when a host sets it, a native host's window.PowosHost (the phone's WebView,
+ * or the desktop's powos-shell over QWebChannel - one contract, sources/powos-shell/src/bridge.cpp), or - in a
  * desktop browser, for working on the shell - a mock with sample apps, a sample home and widget trees captured from
  * the phone, so the shell still runs.
  */
@@ -12,21 +13,31 @@ import type {
   AppWidgetProvider,
   AssistScreen,
   Bridge,
+  ChromeState,
   Cell,
   Chat,
+  DesktopWindow,
   Home,
   HomeItem,
   NotificationList,
   PhoneNotification,
   RecentTask,
+  RunState,
+  AppLinks,
+  AppWindow,
   QuickState,
   TermState,
   ThemeChoice,
+  GlassSource,
   ThemeColors,
   WidgetScreen,
   MediaState,
+  GlassesState,
 } from "./types.ts";
 import { mockScreens } from "./screens-mock.ts";
+import { homeLayout } from "./hosts/layout.ts";
+import { desktop } from "./hosts/desktop.ts";
+import { wide } from "./hosts/wide.ts";
 
 type Handler = (data: any) => void;
 
@@ -46,10 +57,16 @@ class Events {
 }
 
 /**
- * The phone's WebView (ShellBridge.kt): one native entry, PowosHost.call(id, method, argsJson), answered through
- * window.__powosHost.resolve / reject; events arrive through window.__powosHost.emit.
+ * A native host - the phone's WebView (ShellBridge.kt) or the desktop's powos-shell (bridge.cpp): one native entry,
+ * PowosHost.call(id, method, argsJson) on the desktop, PowosHost.postMessage(JSON [id, method, argsJson]) on the phone
+ * (a web message listener the app gives only to this page's top frame at its origin: ShellOrigin.kt), answered through
+ * window.__powosHost.resolve / reject; events arrive through window.__powosHost.emit. An area a host doesn't have
+ * rejects ("no such call" / "unsupported").
  */
-function android(host: NonNullable<Window["PowosHost"]>): Bridge {
+function native(host: NonNullable<Window["PowosHost"]>): Bridge {
+  const send = host.call
+    ? (id: number, method: string, args: string) => host.call!(id, method, args)
+    : (id: number, method: string, args: string) => host.postMessage!(JSON.stringify([id, method, args]));
   const pending = new Map<number, [(v: any) => void, (e: Error) => void]>();
   const events = new Events();
   let next = 1;
@@ -68,15 +85,23 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
     new Promise<T>((resolve, reject) => {
       const id = next++;
       pending.set(id, [resolve, reject]);
-      host.call(id, method, JSON.stringify(args));
+      send(id, method, JSON.stringify(args));
     });
   return {
-    host: "android",
+    host: host.name ?? "android",
+    chrome: {
+      state: () => call<ChromeState>("chrome.state"),
+      ready: () => call("chrome.ready"),
+      action: (action) => call("chrome.action", action),
+      regions: (regions) => call("chrome.regions", regions),
+    },
     apps: {
       list: () => call<App[]>("apps.list"),
       launch: (key) => call("apps.launch", key),
       info: (key) => call("apps.info", key),
       uninstall: (key) => call("apps.uninstall", key),
+      running: () => call<Record<string, RunState>>("apps.running"),
+      links: (pkg) => call<AppLinks>("apps.links", pkg),
     },
     usage: { recent: (limit) => call<string[]>("usage.recent", limit) },
     home: {
@@ -115,9 +140,17 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
     },
     ai: {
       chat: () => call<Chat>("ai.chat"),
-      send: (text) => call("ai.send", text),
+      send: (text, recents = true) => call("ai.send", text, recents),
+      unqueue: (id) => call("ai.unqueue", id),
+      verifyGo: (task) => call("verify.go", task),
+      verifyState: () => call("verify.state"),
+      verifyStop: (dry = false) => call("verify.stop", dry),
       open: () => call("ai.open"),
+      newApp: (description) => call<boolean>("ai.newApp", description),
+      closeThread: () => call<boolean>("ai.closeThread"),
       mail: () => call<AgentMail[]>("ai.mail"),
+      mailRead: (id) => call("ai.mailRead", id),
+      mailClear: () => call("ai.mailClear"),
       sessions: () => call("ai.sessions"),
       attach: (name) => call("ai.attach", name),
     },
@@ -143,14 +176,35 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       keys: (reports) => call("remote.keys", reports),
       mouse: (buttons, dx, dy, wheel, pan) => call("remote.mouse", buttons, dx, dy, wheel ?? 0, pan ?? 0),
     },
+    glasses: {
+      state: () => call<GlassesState>("glasses.state"),
+      pair: () => call<"started" | "unavailable">("glasses.pair"),
+      forget: () => call<GlassesState>("glasses.forget"),
+      connect: () => call<boolean>("glasses.connect"),
+      disconnect: () => call<GlassesState>("glasses.disconnect"),
+      showText: (text) => call<boolean>("glasses.showText", text),
+      showImage: (image, dither) => call<boolean>("glasses.showImage", image, dither ?? true),
+      clear: () => call<boolean>("glasses.clear"),
+      mic: (on) => call<boolean>("glasses.mic", on),
+      audio: (on) => call<boolean>("glasses.audio", on),
+      surface: (on) => call<boolean>("glasses.surface", on),
+      reload: () => call("glasses.reload"),
+      option: (name, value) => call<boolean>("glasses.option", name, value ?? null),
+    },
     notifications: {
       list: () => call<NotificationList>("notifications.list"),
       open: (key) => call("notifications.open", key),
       dismiss: (key) => call("notifications.dismiss", key),
       clearAll: () => call("notifications.clearAll"),
       access: () => call("notifications.access"),
+      action: (key, index, text) => call("notifications.action", key, index, text ?? null),
     },
     lock: { unlock: () => call("lock.unlock") },
+    pad: {
+      state: () => call<boolean>("pad.state"),
+      overlay: (on) => call<boolean>("pad.overlay", on),
+      edit: () => call<boolean>("pad.edit"),
+    },
     media: {
       state: () => call<MediaState>("media.state"),
       control: (command) => call("media.control", command),
@@ -163,15 +217,52 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       set: (name, value) => call<QuickState>("qs.set", name, value),
       listening: (on) => call("qs.listening", on),
     },
-    shade: { closed: () => call("shade.closed") },
+    shade: {
+      closed: () => call("shade.closed"),
+      expand: () => call("shade.expand"),
+      peekHeight: (px) => call("shade.peekHeight", px),
+      blur: (dp) => call("shade.blur", dp),
+      homePull: (on) => call<boolean>("shade.homePull", on),
+      open: () => call("shade.open"),
+    },
+    overlay: {
+      closed: () => call("overlay.closed"),
+    },
+    pull: {
+      closed: () => call("pull.closed"),
+      launched: () => call("pull.launched"),
+    },
+    windows: {
+      list: () => call<DesktopWindow[]>("windows.list"),
+      activate: (id) => call<boolean>("windows.activate", id),
+      minimize: (id) => call<boolean>("windows.minimize", id),
+      close: (id) => call<boolean>("windows.close", id),
+    },
+    panel: { height: (px) => call("panel.height", px) },
+    // The phone's floating windows; on the desktop host "windows.list" is the taskbar's (DesktopWindow[]).
+    floating: host.name === "powos" ? undefined : {
+      list: () => call<AppWindow[]>("windows.list"),
+      restore: (id: number) => call<boolean>("windows.restore", id),
+      desktop: (hide: number[]) => call<boolean>("windows.desktop", hide),
+      minimise: (id: number) => call<boolean>("windows.minimise", id),
+      maximise: (id: number) => call<boolean>("windows.maximise", id),
+      area: (barTop: number) => call<boolean>("windows.area", barTop),
+      slide: (op: string, data?: unknown) => call<boolean>("windows.slide", op, data ?? null),
+    },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),
-      open: (id) => call<boolean>("tasks.open", id),
+      open: (id, from) => call<boolean>("tasks.open", id, from ?? null),
       remove: (id) => call<boolean>("tasks.remove", id),
+      split: (first, second) => call<boolean>("tasks.split", first, second),
+      float: (id) => call<boolean>("tasks.float", id),
+      info: (id) => call<boolean>("tasks.info", id),
+      screenshot: (id) => call<string | null>("tasks.screenshot", id),
     },
-    switcher: {
-      close: () => call("switcher.close"),
-      home: () => call("switcher.home"),
+    recents: {
+      slot: (rect) => call("recents.slot", rect),
+      ready: () => call("recents.ready"),
+      closed: () => call("recents.closed"),
+      state: () => call("recents.state"),
     },
     assist: {
       screen: () => call<AssistScreen | null>("assist.screen"),
@@ -208,15 +299,22 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       start: (hold) => call("speech.start", hold),
       stop: () => call("speech.stop"),
       cancel: () => call("speech.cancel"),
+      hold: () => call("speech.hold"),
+      warm: () => call("speech.warm"),
+      quiet: (ms) => call("speech.quiet", ms),
     },
     keyboard: {
       show: () => call("keyboard.show"),
       hide: () => call("keyboard.hide"),
     },
+    pet: {
+      overlay: (on) => call<boolean>("pet.overlay", on ?? null),
+    },
     system: {
       insets: () => call("system.insets"),
       notifications: (open = true) => call("system.notifications", open),
       battery: () => call("system.battery"),
+      glass: () => call<GlassSource>("system.glass"),
     },
     on: (event, handler) => events.on(event, handler),
   };
@@ -224,6 +322,8 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
 
 function mock(): Bridge {
   const events = new Events();
+  // Dev tools (dev/shots.mjs, a desktop browser's console): host events emitted by hand - __mockEvents.emit(name, e).
+  (window as unknown as { __mockEvents: Events }).__mockEvents = events;
   const names = [
     "Brave",
     "Calculator",
@@ -276,8 +376,10 @@ function mock(): Bridge {
   const recent = ["a:chrome", "l:konsole", "a:spotify", "a:signal", "l:dolphin", "a:youtube"];
   const data = (name: string) => `powos-shell:${name}`;
   let samples: Promise<Record<string, unknown>> | null = null;
-  let chat: Chat = { busy: false, items: [] };
+  let chat: Chat = { busy: false, items: [], queued: [] };
   let screen: WidgetScreen = { key: null };
+  // The phone-check runner's word (VerifyRun.kt state): checks waiting for a free phone until stopped.
+  let mockRunner = "waiting";
   let liveMock = { on: false, frames: 0 };
   const pin = (name: string, x: number, y: number): HomeItem => {
     const a = apps.find((app) => app.label === name)!;
@@ -352,12 +454,33 @@ function mock(): Bridge {
       },
     ],
   };
+  // The mock's layout lives in the page only; a check that reloads (dev/gate.mjs "add-app") sets "mock.keepHome" in
+  // localStorage to keep it there too, as the phone keeps its own.
+  const keepHome = (() => {
+    try {
+      const kept = localStorage.getItem(data("mock.keepHome")) === "1" && localStorage.getItem(data("mock.home"));
+      if (kept) Object.assign(home, JSON.parse(kept));
+      return localStorage.getItem(data("mock.keepHome")) === "1";
+    } catch {
+      return false;
+    }
+  })();
+  const homeChanged = () => {
+    if (keepHome) localStorage.setItem(data("mock.home"), JSON.stringify(home));
+    events.emit("home.changed", null);
+  };
   const changed = () => {
     home.pages = [...new Set(home.items.map((i) => i.page))].sort((a, b) => a - b);
     events.emit("home.changed", null);
   };
   return {
     host: "mock",
+    chrome: {
+      state: async () => ({ kind: new URLSearchParams(location.search).get("mode") === "statusbar" ? "status" : new URLSearchParams(location.search).get("mode") === "windowgrip" ? "grip" : "window", title: "Calculator", maximised: false }),
+      ready: async () => {},
+      action: async (action) => { console.log("[mock] chrome", action); },
+      regions: async () => {},
+    },
     apps: {
       list: async () => apps,
       launch: async (key) => {
@@ -367,80 +490,12 @@ function mock(): Bridge {
       },
       info: async (key) => console.log("[mock] info", key),
       uninstall: async (key) => console.log("[mock] uninstall", key),
+      // A few running, Steam frozen (a game asleep with it) and Dolphin frozen (powos-sleep-gui).
+      running: async () => ({ "a:chrome": "running", "l:konsole": "running", "a:spotify": "running", "a:signal": "running", "l:dolphin": "frozen", "l:steam": "frozen" }),
+      links: async (pkg) => ({ pkg, label: pkg, links: [{ uri: `https://${pkg}.example/item/.*`, activity: ".ItemActivity" }] }),
     },
     usage: { recent: async (limit) => recent.slice(0, limit) },
-    home: {
-      get: async () => structuredClone(home),
-      place: async (key: string, cell: Cell, page: number) => {
-        Object.assign(
-          home.items.find((i) => i.key === key)!,
-          { cell, page },
-        );
-        changed();
-      },
-      add: async (app, page, cell) => {
-        const a = apps.find((x) => x.key === app)!;
-        const key = (a.kind === "linux" ? "linux:" : "app:") + a.key.slice(2);
-        home.items = home.items.filter((i) => i.key !== key);
-        home.items.push({
-          key,
-          kind: "app",
-          page,
-          cell: cell ?? null,
-          resizable: false,
-          minSize: [1, 1],
-          size: [1, 1],
-          label: a.label,
-          app,
-        });
-        changed();
-        return key;
-      },
-      remove: async (key) => {
-        home.items = home.items.filter((i) => i.key !== key);
-        changed();
-      },
-      addPanel: async (name, page, cell) => {
-        const key = `panel:${name}`;
-        home.items = home.items.filter((i) => i.key !== key);
-        home.items.push({ key, kind: "panel", name, page, cell, resizable: true, minSize: [2, 1], size: [4, 2] });
-        changed();
-        return key;
-      },
-      // As WidgetLayout.place: the first free spot at the item's size, on its page.
-      arrange: async (cols, rows) => {
-        let moved = false;
-        for (const item of home.items.filter((i) => !i.cell)) {
-          const [w, h] = item.size ?? [Math.floor(cols / 2), 3];
-          const taken = home.items.filter((o) => o !== item && o.page === item.page && o.cell).map((o) => o.cell!);
-          for (let y = 0; y + h <= rows && !item.cell; y++)
-            for (let x = 0; x + w <= cols && !item.cell; x++)
-              if (taken.every((c) => x >= c.x + c.w || c.x >= x + w || y >= c.y + c.h || c.y >= y + h))
-                item.cell = { x, y, w, h };
-          moved ||= !!item.cell;
-        }
-        if (moved) changed();
-      },
-      group: async (key, target) => {
-        const item = home.items.find((i) => i.key === key);
-        const into = home.items.find((i) => i.key === target);
-        if (!item || !into || item.kind !== "app") return null;
-        home.items = home.items.filter((i) => i.key !== key);
-        const entry = { key: item.key, label: item.label!, app: item.app! };
-        if (into.kind === "folder") into.apps!.push(entry);
-        else {
-          home.items = home.items.filter((i) => i.key !== target);
-          home.items.push({
-            ...into,
-            key: "folder:" + Date.now(),
-            kind: "folder",
-            apps: [{ key: into.key, label: into.label!, app: into.app! }, entry],
-          });
-        }
-        changed();
-        return null;
-      },
-    },
+    home: homeLayout(home, homeChanged, () => apps),
     store: {
       get: async <T>(name: string) => {
         try {
@@ -488,8 +543,10 @@ function mock(): Bridge {
     // A stand-in that answers after a tool call, as a streamed turn does.
     ai: {
       chat: async () => chat,
-      send: async (text) => {
+      send: async function send(text: string): Promise<void> {
         const step = (next: Partial<Chat>) => events.emit("ai.changed", (chat = { ...chat, ...next }));
+        // Mid-turn: queued, as PowosAiChat does; the next turn when this one ends.
+        if (chat.busy) return void step({ queued: [...(chat.queued ?? []), { id: Date.now(), text }] });
         step({ busy: true, items: [...chat.items, { kind: "user", text }] });
         await new Promise((r) => setTimeout(r, 400));
         step({
@@ -505,17 +562,48 @@ function mock(): Bridge {
             { kind: "assistant", text: `(mock) You asked: ${text}` },
           ],
         });
+        const next = chat.queued?.[0];
+        if (next) {
+          step({ queued: chat.queued!.slice(1) });
+          await send(next.text);
+        }
+      },
+      unqueue: async (id) => void events.emit("ai.changed", (chat = { ...chat, queued: (chat.queued ?? []).filter((q) => q.id !== id) })),
+      verifyGo: async (task) => {
+        console.log(`[mock] test now: ${task}`);
+        if (mockRunner === "paused") mockRunner = "waiting";
+      },
+      verifyState: async () => events.emit("verify.state", { state: mockRunner, age: 2 }),
+      verifyStop: async (dry = false) => {
+        if (!dry) mockRunner = "paused";
       },
       open: async () => console.log("[mock] open PowOS AI"),
+      newApp: async (description) => {
+        const step = (next: Partial<Chat>) => events.emit("ai.changed", (chat = { ...chat, ...next }));
+        const thread = { dir: "Projects/new-app-mock", title: "New app", kind: "app" };
+        step({ busy: true, thread, items: [{ kind: "user", text: description }] });
+        const tool = (hint: string, name = "Bash") => ({ kind: "tool" as const, name, hint, ok: true });
+        for (const it of [tool("powos app new notes --name Notes --dir ."), tool("module/src/lib.rs", "Write"), tool("ui/pages/main.tsx", "Write"), tool("powos app install .")]) {
+          await new Promise((r) => setTimeout(r, 300));
+          step({ items: [...chat.items, it] });
+        }
+        step({ busy: false, items: [...chat.items, { kind: "assistant", text: "(mock) Notes: a list of notes, in your drawer." }] });
+        return true;
+      },
+      closeThread: async () => (events.emit("ai.changed", (chat = { busy: false, items: [], thread: null })), true),
+      mailRead: async (id) => console.log("[mock] mail read", id),
+      mailClear: async () => console.log("[mock] all mail read"),
       mail: async () => {
         const now = Math.floor(Date.now() / 1000);
         return [
           {
+            id: "m1",
             from: "coder",
             text: "Launcher refactor done - 3 commits pushed to master.",
             time: now - 600,
           },
           {
+            id: "m2",
             from: "health",
             text: "Disk at 91% on /var - want me to prune old container images?",
             time: now - 5400,
@@ -560,7 +648,16 @@ function mock(): Bridge {
       write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
     },
     remote: mockRemote(events),
+    glasses: mockGlasses(events),
     lock: { unlock: async () => console.log("[mock] unlock") },
+    pad: (() => {
+      let on = false;
+      return {
+        state: async () => on,
+        overlay: async (v: boolean) => (on = v),
+        edit: async () => (console.log("[mock] controller layout editor"), true),
+      };
+    })(),
     media: (() => {
       let st: MediaState = {
         available: true,
@@ -612,10 +709,16 @@ function mock(): Bridge {
           tile("battery", "Battery saver", false),
           tile("lockscreen", "Lock", null),
           tile("qr_code_scanner", "Scan QR code", null),
+          { ...tile("custom(com.coloros.alarmclock/.timer.TimerTileService)", "Timer", null), app: "com.coloros.alarmclock" },
           {
             ...tile("custom(com.oplus.eyeprotect/.services.EyeProtectTileService)", "Eye comfort", null),
             app: "com.oplus.eyeprotect",
           },
+          // The phone's other third-party tiles (its sysui_qs_tiles, 2026-10-21).
+          { ...tile("custom(com.oneplus.oshare/com.oplus.oshare.OshareTileService)", "OnePlus Share", false), app: "com.oneplus.oshare" },
+          { ...tile("custom(com.google.android.gms/.nearby.sharing.SharingTileService)", "Quick Share", null), app: "com.google.android.gms" },
+          { ...tile("custom(com.oplus.linker/.synergy.service.TVTileService)", "Screencast", null), app: "com.oplus.linker" },
+          { ...tile("custom(com.microsoft.appmanager/.quicksettings.WindowsLinkTileService)", "Link to Windows", null), app: "com.microsoft.appmanager" },
         ],
         brightness: { value: 0.6, auto: true },
         volume: { value: 0.4, ringer: 2 },
@@ -650,11 +753,27 @@ function mock(): Bridge {
         },
       };
     })(),
-    shade: { closed: async () => console.log("[mock] shade closed") },
+    shade: {
+      closed: async () => console.log("[mock] shade closed"),
+      expand: async () => console.log("[mock] shade expanded"),
+      peekHeight: async (px) => console.log("[mock] banner height", px),
+      blur: async (dp) => console.log("[mock] shade blur", dp),
+      homePull: async () => true,
+      open: async () => console.log("[mock] shade open"),
+    },
+    overlay: { closed: async () => console.log("[mock] overlay closed") },
+    pull: {
+      closed: async () => console.log("[mock] pull closed"),
+      launched: async () => console.log("[mock] pull launched"),
+    },
+    windows: mockWindows(events, icon),
+    panel: { height: async (px) => console.log("[mock] panel height", px) },
     tasks: mockTasks(icon, hue),
-    switcher: {
-      close: async () => console.log("[mock] switcher closed"),
-      home: async () => console.log("[mock] switcher: home"),
+    recents: {
+      slot: async () => {},
+      ready: async () => {},
+      closed: async () => {},
+      state: async () => ({ open: false, from: null, tasks: [] }),
     },
     // A screen it was opened over: some text, no screenshot.
     assist: {
@@ -682,11 +801,12 @@ function mock(): Bridge {
           time: now - 120,
           clearable: true,
           profile: null,
+          conversation: true,
         },
         {
           key: "2",
           app: "Gmail",
-          icon: null,
+          icon: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><rect width="18" height="18" rx="5" fill="#d44"/><text x="9" y="13" font-size="11" text-anchor="middle" fill="#fff" font-family="sans-serif">M</text></svg>'),
           title: "Your order has shipped",
           text: "Track your package: it arrives Thursday.",
           time: now - 3600,
@@ -702,7 +822,15 @@ function mock(): Bridge {
           time: now - 7200,
           clearable: true,
           profile: null,
+          actions: [
+            { title: "Reply", input: true },
+            { title: "Mark read", input: false },
+          ],
         },
+        { key: "4", app: "Gmail", icon: null, title: "Weekly digest", text: "12 new posts in your groups.", time: now - 5400, clearable: true, profile: null },
+        { key: "5", app: "Gmail", icon: null, title: "Invoice #4411", text: "Your invoice is ready.", time: now - 9000, clearable: true, profile: null },
+        { key: "6", app: "PowOS AI", icon: null, title: "deploy", text: "Search can sit below the dock.", time: now - 300, clearable: true, profile: null },
+        { key: "7", app: "PowOS AI", icon: null, title: "deploy", text: "Chat in the drawer is easier to read.", time: now - 900, clearable: true, profile: null },
       ];
       const changed = () => events.emit("notifications.changed", { available: true, items });
       return {
@@ -717,6 +845,7 @@ function mock(): Bridge {
           changed();
         },
         access: async () => console.log("[mock] notification access"),
+        action: async (key: string, index: number, text?: string) => console.log("[mock] notification action", key, index, text),
       };
     })(),
     // Three of Omarchy's themes; picking one recolors the page as the phone's would.
@@ -829,9 +958,15 @@ function mock(): Bridge {
           clearInterval(timer);
           state(false);
         },
+        hold: async () => void (held = true),
+        warm: async () => {},
+        quiet: async () => {},
       };
     })(),
     keyboard: { show: async () => {}, hide: async () => {} },
+    pet: {
+      overlay: async () => true,
+    },
     system: {
       insets: async () => ({
         top: 0,
@@ -842,6 +977,8 @@ function mock(): Bridge {
       }),
       notifications: async (open = true) => (console.log(`[mock] notification shade ${open ? "down" : "up"}`), true),
       battery: async () => ({ level: 76, charging: false }),
+      // No wallpaper to frost in a browser: the plain fills (ui/glass.ts's __glass.use() tries one by hand).
+      glass: async () => ({ wallpaper: null, blurBehind: false }),
     },
     on: (event, handler) => events.on(event, handler),
   };
@@ -944,17 +1081,68 @@ const terminalTrees: Record<string, unknown> = {
 /**
  * Recent tasks for the mock: a few apps, each "snapshot" a drawing of a screen in its color; removing one removes it.
  */
+/** The desktop's windows in a browser: a few, one active; activating / minimizing them as KWin would. */
+function mockWindows(events: Events, icon: (name: string) => string): Bridge["windows"] {
+  const w = (id: string, title: string, app: string, appName: string, active = false, minimized = false): DesktopWindow => ({
+    id,
+    title,
+    app,
+    appName,
+    icon: icon(appName),
+    active,
+    minimized,
+  });
+  const list = [
+    w("w1", "~/Projects/PowOS : bash - Konsole", "org.kde.konsole", "Konsole", true),
+    w("w2", "PowOS - Dolphin", "org.kde.dolphin", "Dolphin"),
+    w("w3", "DESKTOP-WEB-SHELL.md - Kate", "org.kde.kate", "Kate"),
+    w("w4", "Steam", "steam", "Steam", false, true),
+    { ...w("w5", "Chrome", "android-com.android.chrome", "Chrome"), android: true },
+    { ...w("w6", "Termux", "android-com.termux", "Termux", false, true), android: true, onPhone: true },
+  ];
+  const changed = () => events.emit("windows.changed", structuredClone(list));
+  const find = (id: string) => list.find((x) => x.id === id);
+  return {
+    list: async () => structuredClone(list),
+    activate: async (id) => {
+      const target = find(id);
+      if (!target) return false;
+      for (const x of list) x.active = x === target;
+      target.minimized = false;
+      changed();
+      return true;
+    },
+    minimize: async (id) => {
+      const target = find(id);
+      if (!target) return false;
+      target.minimized = !target.minimized;
+      target.active = !target.minimized;
+      if (target.minimized) for (const x of list) if (x !== target) x.active = false;
+      changed();
+      return true;
+    },
+    close: async (id) => {
+      const i = list.findIndex((x) => x.id === id);
+      if (i < 0) return false;
+      list.splice(i, 1);
+      changed();
+      return true;
+    },
+  };
+}
+
 function mockTasks(icon: (name: string) => string, hue: (name: string) => number): Bridge["tasks"] {
   const shot = (name: string) =>
     "data:image/svg+xml," +
     encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 780"><rect width="360" height="780" fill="hsl(${hue(name)} 30% 18%)"/>` +
-        `<rect y="0" width="360" height="96" fill="hsl(${hue(name)} 55% 40%)"/>` +
+      // A stand-in for the app's last frame, as an app looks: a light page, a thin app bar in its colour, grey rows.
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 780"><rect width="360" height="780" fill="#f4f4f5"/>` +
+        `<rect y="0" width="360" height="96" fill="hsl(${hue(name)} 35% 45%)"/>` +
         `<text x="24" y="66" font-family="sans-serif" font-size="30" fill="white">${name}</text>` +
         Array.from(
           { length: 7 },
           (_, i) =>
-            `<rect x="24" y="${130 + i * 86}" width="${312 - (i % 3) * 60}" height="54" rx="10" fill="hsl(${hue(name)} 20% 28%)"/>`,
+            `<rect x="24" y="${130 + i * 86}" width="${312 - (i % 3) * 60}" height="54" rx="10" fill="#e1e1e4"/>`,
         ).join("") +
         `</svg>`,
     );
@@ -972,6 +1160,10 @@ function mockTasks(icon: (name: string) => string, hue: (name: string) => number
       tasks = tasks.filter((t) => t.id !== id);
       return true;
     },
+    split: async (a, b) => (console.log("[mock] split", a, b), true),
+    float: async (id) => (console.log("[mock] float", id), true),
+    info: async (id) => (console.log("[mock] info", id), true),
+    screenshot: async (id) => (console.log("[mock] screenshot", id), "Screenshot_mock.jpg"),
   };
 }
 
@@ -979,6 +1171,53 @@ function mockTasks(icon: (name: string) => string, hue: (name: string) => number
  * Terminals for the mock: a tiny line-editing shell instead of a pty (echo, seq, size, colors, mouse, exit), with the host's
  * protocol - base64 both ways, output offsets, runs - so the page's terminal code runs as on the phone.
  */
+/**
+ * A shell as it's used, for the widget preview (dev/preview/data/45-terminal*.json "term"): "full" - ls, a git status
+ * with changes, a log, a line long enough to wrap and a journal that runs past any tile's height; "short" - one command
+ * and the prompt. Lines end CR LF, colours as a shell prints them.
+ */
+function mockTranscript(kind: string) {
+  const p = (dir: string) => `\x1b[32mmats@phone\x1b[0m:\x1b[34m${dir}\x1b[0m$ `;
+  if (kind === "short") return `${p("~")}uptime\r\n 23:41:07 up 16:36,  2 users,  load average: 0.42, 0.51, 0.47\r\n${p("~")}`;
+  const lines = [
+    `${p("~")}ls`,
+    "\x1b[34mDocuments\x1b[0m  \x1b[34mDownloads\x1b[0m  \x1b[34mProjects\x1b[0m  notes.md  todo.txt",
+    `${p("~")}cd Projects/powos && git status`,
+    "On branch worktree-powos-multiplatform",
+    "Your branch is up to date with 'origin/worktree-powos-multiplatform'.",
+    "",
+    "Changes not staged for commit:",
+    '  (use "git add <file>..." to update what will be committed)',
+    "\t\x1b[31mmodified:   shell/ui/owl.tsx\x1b[0m",
+    "\t\x1b[31mmodified:   shell/dev/preview/baseline.json\x1b[0m",
+    "",
+    'no changes added to commit (use "git add" and/or "git commit -a")',
+    `${p("~/Projects/powos")}git log --oneline -6`,
+    "\x1b[33mc5d21b8\x1b[0m Example widgets fit with real data at every size they allow",
+    "\x1b[33m696a0d1\x1b[0m OWL widget text follows the theme",
+    "\x1b[33m8409d27\x1b[0m Agents widget fills its tile at every size, empty included",
+    "\x1b[33m64893c3\x1b[0m home: a widget's slider or drag control wins over the page swipe",
+    "\x1b[33m5e597b3\x1b[0m powos app preview <dir|file.owl|widget-id>",
+    "\x1b[33m36116ff\x1b[0m Pet physics: left/top pinned to 0 while it's on",
+    `${p("~/Projects/powos")}head -c 300 README.md`,
+    "PowOS is a layered Linux that runs from RAM, keeps what you install and configure in a layer of its own and rolls each layer back on its own when an update or a package breaks something - the OS stays yours, the changes stay undoable.",
+    `${p("~/Projects/powos")}journalctl --user -n 40 --no-pager`,
+    ...Array.from({ length: 40 }, (_, i) => {
+      const t = `Oct 21 23:${String(10 + Math.floor(i / 2)).padStart(2, "0")}:${String((i * 17) % 60).padStart(2, "0")}`;
+      const what = [
+        "powos-agentsd[812]: spool: 3 agents, 1 working",
+        "pipewire[1204]: client 51 connected",
+        "kwin_wayland[901]: output DSI-1 mode 2440x2268@120, scale 2.75, adaptive sync on, the cover display DSI-0 asleep",
+        "powos-shell[1330]: home: 0 frames at rest",
+        "systemd[1]: Started powos-apps-cargo.service - the app builder's cache volume, mounted for 2 builds of local.lights and local.shopping",
+      ][i % 5];
+      return `${t} cph2551 ${what}`;
+    }),
+    p("~/Projects/powos"),
+  ];
+  return lines.join("\r\n");
+}
+
 function mockTerm(events: Events): Bridge["term"] {
   const utf8 = new TextEncoder();
   const b64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(""));
@@ -1035,7 +1274,10 @@ function mockTerm(events: Events): Bridge["term"] {
       if (!sh || (restart && sh.code != null)) {
         sh = { run: ++runs, out: [], line: "", cols, rows, code: null };
         shells.set(id, sh);
-        print(id, sh, `mock terminal \x1b[2m(${command ?? "login shell"})\x1b[0m\r\n` + prompt);
+        // The widget preview's transcripts (dev/preview: a terminal widget's data "term"): a shell as it's used.
+        const t = (window as unknown as { __powosMockTerm?: string }).__powosMockTerm;
+        if (t) print(id, sh, mockTranscript(t));
+        else print(id, sh, `mock terminal \x1b[2m(${command ?? "login shell"})\x1b[0m\r\n` + prompt);
       }
       return state(sh);
     },
@@ -1078,7 +1320,11 @@ function mockTerm(events: Events): Bridge["term"] {
   };
 }
 
-export const powos: Bridge = window.powos ?? (window.PowosHost ? android(window.PowosHost) : mock());
+export const powos: Bridge =
+  window.powos ??
+  // The desktop's host (powos-shell) has fewer areas natively; hosts/desktop.ts adds the ones kept in the page (its
+  // own desktop-wide grid). The phone's (and the mock): two of home's pages side by side when unfolded (hosts/wide.ts).
+  (window.PowosHost ? (window.PowosHost.name === "powos" ? desktop(native(window.PowosHost)) : wide(native(window.PowosHost))) : wide(mock()));
 
 /**
  * The mock's agents (as the design's §1.3 sketch): the manager on the phone, a coder on the Mac with two subagents,
@@ -1140,6 +1386,8 @@ function mockAgents(
     snapshot: async () => {
       clearInterval(timer);
       timer = window.setInterval(() => {
+        // The gate's idle check (dev/gate.mjs): the mock's own news would be a change, not idle drawing.
+        if ((window as { __powosMockQuiet?: boolean }).__powosMockQuiet) return;
         const c = { ...agents[1], step: steps[n++ % steps.length], last: Date.now(), rev: agents[1].rev + 1 };
         agents[1] = c;
         events.emit("agents.delta", { agents: [c] });
@@ -1196,6 +1444,73 @@ function mockAgents(
 }
 
 type RemoteState = import("./types.ts").RemoteState;
+
+/**
+ * Glasses in a desktop browser: a pretend G2 pair, connected; what's shown goes to the console (the glasses page,
+ * index.html?mode=glasses, shows its own frame on screen, and keys stand in for the touch bars: surface.tsx).
+ */
+function mockGlasses(events: Events): Bridge["glasses"] {
+  const arm = (side: string, phase: string) => ({ address: `AA:BB:CC:DD:EE:0${side === "L" ? 1 : 2}`, name: `Even G2_84_${side}_8AF0B1`, phase });
+  const state: GlassesState = {
+    available: true,
+    enabled: true,
+    paired: { model: "G2", pairId: "G2_84" },
+    wanted: true,
+    phase: "ready",
+    left: arm("L", "ready"),
+    right: arm("R", "ready"),
+    worn: null,
+    shown: true,
+    battery: {},
+    mic: false,
+    error: null,
+    canvas: { width: 576, height: 288, bits: 4 },
+    image: { verified: false, usable: false },
+    options: { g2Raster: false },
+  };
+  const changed = () => {
+    events.emit("glasses.state", structuredClone(state));
+    return structuredClone(state);
+  };
+  const ready = () => state.phase === "ready";
+  return {
+    state: async () => structuredClone(state),
+    pair: async () => (console.log("[mock] glasses pairing dialog"), "started" as const),
+    forget: async () => {
+      Object.assign(state, { paired: null, left: null, right: null, wanted: false, phase: "off", canvas: null });
+      return changed();
+    },
+    connect: async () => {
+      if (!state.paired) return false;
+      Object.assign(state, { wanted: true, phase: "ready", left: arm("L", "ready"), right: arm("R", "ready") });
+      changed();
+      return true;
+    },
+    disconnect: async () => {
+      Object.assign(state, { wanted: false, phase: "off", left: arm("L", "off"), right: arm("R", "off"), mic: false });
+      return changed();
+    },
+    showText: async (text) => (ready() && console.log("[mock] glasses text\n" + text), ready()),
+    showImage: async (image) => (ready() && console.log("[mock] glasses image", image.length, "chars"), ready() && state.image.usable),
+    clear: async () => (console.log("[mock] glasses cleared"), ready()),
+    mic: async (on) => {
+      state.mic = on && ready();
+      changed();
+      return state.mic === on;
+    },
+    audio: async (on) => on,
+    surface: async (on) => on,
+    reload: async () => events.emit("glasses.reload", null),
+    option: async (name, value) => {
+      if (value != null) {
+        state.options[name] = value;
+        if (name === "g2Raster") state.image.usable = value;
+        changed();
+      }
+      return !!state.options[name];
+    },
+  };
+}
 
 /** Remote input in a desktop browser: a pretend USB cable and a paired laptop; reports go to the console. */
 function mockRemote(events: Events): Bridge["remote"] {

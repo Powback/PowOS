@@ -1,0 +1,11 @@
+{
+  "id": "dev.powos.registry",
+  "name": "Registry",
+  "version": "0.1.0",
+  "description": "The device's list of installed PowOS apps and widgets, and apps/widgets being built (`creation`, `creation_step`, `creation_log`): written by `powos app install`/`powos-compose`, read by the launcher, desktop and agents.",
+  "module": { "path": "module/", "lang": "rust", "database": "powos-registry", "stdb": "2.12" },
+  "backend": null,
+  "widgets": [],
+  "surfaces": { "launcher": false, "desktop": true },
+  "budget": { "phone": { "memMB": 16 }, "desktop": { "memMB": 32 } }
+}

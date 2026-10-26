@@ -41,13 +41,43 @@ class NavGestureClassifierTest {
     }
 
     @Test
-    fun aSlowLongSwipeUpGoesHomeToo() {
+    fun aSlowLongSwipeUpLetGoIsTheSwitcher() {
         val c = classifier()
         c.down(540f, bottom, 0)
-        // 700 px in 1.4 s: never a fling, never still, past the home distance (22% of the screen).
+        // 700 px in 1.4 s: never a fling, never still, past the home distance (22% of the screen): the window is on
+        // its card by then, and a slow release leaves it there (Quickstep's non-fling end target).
         val t = c.drag(540f, bottom, 540f, bottom - 700f, 1400)
         assertFalse(c.armed)
-        assertEquals(NavGestureClassifier.Outcome.Home, c.up(540f, bottom - 700f, t + 8))
+        assertEquals(NavGestureClassifier.Outcome.Switcher, c.up(540f, bottom - 700f, t + 8))
+    }
+
+    @Test
+    fun aRelaxedSwipeAndReleaseIsTheSwitcher() {
+        val c = classifier()
+        c.down(540f, bottom, 0)
+        // 480 px in 300 ms (1.6 px/ms, 0.64 dp/ms) and let go moving: no pause, no hold - the switcher all the same.
+        val t = c.drag(540f, bottom, 540f, bottom - 480f, 300)
+        assertFalse(c.armed)
+        assertEquals(NavGestureClassifier.Outcome.Switcher, c.up(540f, bottom - 480f, t + 8))
+    }
+
+    @Test
+    fun letGoNearTheTopGoesHome() {
+        val c = classifier()
+        c.down(540f, bottom, 0)
+        // Slowly up past half the screen (1200 px of 2400): the home zone.
+        val t = c.drag(540f, bottom, 540f, bottom - 1300f, 1600)
+        assertEquals(1f, c.homeness(), 0f)
+        assertEquals(NavGestureClassifier.Outcome.Home, c.up(540f, bottom - 1300f, t + 8))
+    }
+
+    @Test
+    fun theHomeZoneFadesInBetween() {
+        val c = classifier()
+        // 30% of the screen up: still all switcher; 40%: halfway; 50%: home.
+        assertEquals(0f, c.homeness(720f), 0.001f)
+        assertEquals(0.5f, c.homeness(960f), 0.001f)
+        assertEquals(1f, c.homeness(1200f), 0.001f)
     }
 
     @Test

@@ -155,6 +155,10 @@ class Style(
         val THEMED_ICONS = Setting.Flag("icons.themed", true, "App icons in the theme's colors: a muted theme mutes them, a pastel one makes them pastel; false keeps their own colors.")
         val MONOCHROME_ICONS = Setting.Flag("icons.monochrome", false, "App icons as silhouettes in the accent color, as on Omarchy, rather than in their own colors.")
 
+        val LIVE_BLUR = Setting.Flag("glass.live-blur", true, "Glass blurred live by the display compositor (what's behind each surface, as it moves); false draws one pre-blurred copy of the wallpaper in the page. Off by itself where Android turns window blurs off (battery saver).")
+
+        val LIQUID_GLASS = Setting.Flag("glass.liquid", true, "With live blur: the glass's edges bend what's behind them like a lens, with a bright rim (theme.css --liquid-*); false leaves the plain blur.")
+
         val CORNER_SCALE = Setting.Number("corners.scale", 0.0, 0.0..2.0, "Multiplies every frame's corner radius: 0 square (Omarchy), 0.5 soft, 1 round like stock Android.")
 
         val STATUS_BAR = Bar("status-bar", "Android's status bar at the top of home")

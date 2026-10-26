@@ -20,7 +20,11 @@ S() {
     sudo -n true 2>/dev/null || echo "${POWOS_SUDO_PASS:-powos}" | sudo -S -v 2>/dev/null
     sudo -n "$@" 2>/dev/null
 }
-S cat "$DIR/index.json" 2>/dev/null | DIR="$DIR" EXPECT="$*" python3 -c '
+# A plain read first - most stores (and every test fixture) are readable without root; sudo is the fallback for
+# a real build host's root-owned store, not the default path (an unneeded sudo call with no sudo installed, or a
+# password prompt that can't be answered, silently handed the python below an empty stdin -> a JSON parse crash
+# instead of a verdict).
+{ cat "$DIR/index.json" 2>/dev/null || S cat "$DIR/index.json" 2>/dev/null; } | DIR="$DIR" EXPECT="$*" python3 -c '
 import json, os, sys, subprocess
 
 d = os.environ["DIR"]; expect = os.environ["EXPECT"].split()

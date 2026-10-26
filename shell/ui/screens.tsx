@@ -31,6 +31,13 @@ import {
   useScreen,
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
+import { apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
+import { iconTint } from "./icontint.ts";
+
+/** "icon colours" options after "the apps'": theme hues, the accent. */
+const TINTS = ["hue", "mono"];
+import { drawerRecents } from "./drawer.tsx";
+import { PetToggle } from "./pet.tsx";
 
 /** Its touches are its own: home's swipes under it don't see them. */
 const own = {
@@ -57,7 +64,7 @@ function Frame({
   const body = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => body.current?.scrollTo(0, 0), [title]);
   return (
-    <div class="scr" {...own}>
+    <div class="scr tile sheet" {...own}>
       <header class="scr-top">
         <button type="button" class="scr-back" aria-label="back" onClick={() => (onBack ? onBack() : closeScreen())}>
           <Icon name="chevronLeft" size={26} />
@@ -224,7 +231,7 @@ function Confirm({
   }, []);
   return (
     <div class="scr-scrim" onClick={(e) => e.target === e.currentTarget && onNo()}>
-      <div class="scr-confirm tile">
+      <div class="scr-confirm tile sheet pop">
         <div class={`scr-confirm-title ${danger ? "danger" : ""}`}>{title}</div>
         <div class="scr-confirm-text muted">{text}</div>
         <div class="scr-confirm-do">
@@ -309,6 +316,14 @@ function SettingsScreen() {
     ["robotOutline", "coding agents", installed ? (s?.agent ? `default: ${s.agent}` : "Claude Code, OpenCode, …") : "needs linux", needs("coding")],
     ["packageVariant", "packages", installed ? "pacman and the AUR" : "needs linux", needs("aur")],
     ["cellphoneCog", "android settings", "the phone's own", () => act("settings", "android")],
+    ["arrowLeft", "gestures", "edge gestures, quick tools", () => openScreen("gestures")],
+    // Dictation's engine: a tap switches it (Whisper on the GPU server, else the phone's own).
+    [
+      "microphoneOutline",
+      "voice",
+      speechEngine.value === "ondevice" ? "transcription: on the phone" : "transcription: GPU (Whisper)",
+      () => (speechEngine.value = speechEngine.value === "ondevice" ? "gpu" : "ondevice"),
+    ],
     ["scaleBalance", "licenses", "open source in PowOS", () => openScreen("licenses")],
   ];
   return (
@@ -468,7 +483,36 @@ function StyleScreen() {
           </button>
         </Section>
       )}
+      <Section icon="apps" title="home">
+        <Option label="swipe up from the left: PowOS AI">
+          <Segmented options={["on", "off"]} picked={pullPanels.value === "on" ? 0 : 1} onPick={(i) => (pullPanels.value = i === 0 ? "on" : "off")} />
+        </Option>
+        <Option label="swipe up from a bottom corner over apps: apps, PowOS AI">
+          <Segmented options={["on", "off"]} picked={pullOverApps.value === "on" ? 0 : 1} onPick={(i) => (pullOverApps.value = i === 0 ? "on" : "off")} />
+        </Option>
+        <Option label="recent apps in the drawer">
+          <Segmented options={["on", "off"]} picked={drawerRecents.value === "on" ? 0 : 1} onPick={(i) => (drawerRecents.value = i === 0 ? "on" : "")} />
+        </Option>
+        <Option label="separate notifications & controls">
+          <Segmented options={["on", "off"]} picked={separatePanels.value === "on" ? 0 : 1} onPick={(i) => (separatePanels.value = i === 0 ? "on" : "off")} />
+        </Option>
+        <Option label="control center">
+          <Segmented options={["simple", "classic"]} picked={ccV3.value === "v3" ? 0 : 1} onPick={(i) => (ccV3.value = i === 0 ? "v3" : "classic")} />
+        </Option>
+        {/* The pet (ui/pet.tsx; also `powos pet on|off`): off by default - off, it shows and runs nothing. */}
+        <PetToggle
+          render={(on, set) => (
+            <Option label="pet">
+              <Segmented options={["on", "off"]} picked={on ? 0 : 1} onPick={(i) => set(i === 0)} />
+            </Option>
+          )}
+        />
+      </Section>
       <Section icon="apps" title="icons">
+        {/* The page's own (ui/icontint.ts): each icon redrawn once - its hues the theme's, all the accent - or as drawn. */}
+        <Option label="icon colours">
+          <Segmented options={["the apps'", "theme hues", "accent"]} picked={TINTS.indexOf(iconTint.value) + 1} onPick={(i) => (iconTint.value = TINTS[i - 1] ?? "")} />
+        </Option>
         {s.flags.map((f) => (
           <Option key={f.key} label={f.label}>
             <Segmented options={[f.on, f.off]} picked={f.value ? 0 : 1} onPick={(i) => act("style", "flag", [f.key, i === 0])} />
@@ -1060,6 +1104,204 @@ function LicensesScreen() {
   );
 }
 
+// --- gestures: edge gestures (EdgeGestures.kt reads what this keeps: the store's edgeGestures, EdgeConfig.kt's shape)
+
+type EdgeSide = { on: boolean; top: number; bottom: number; width: number; actions: Record<string, string> };
+type EdgeSettings = { on: boolean; handles: boolean; sensitivity: "low" | "normal" | "high"; left: EdgeSide; right: EdgeSide };
+
+const EDGE_KEYS = ["short.straight", "short.up", "short.down", "long.straight", "long.up", "long.down"] as const;
+const EDGE_GESTURES: Record<(typeof EDGE_KEYS)[number], [string, IconName]> = {
+  "short.straight": ["swipe in", "arrowLeft"],
+  "short.up": ["swipe in and up", "arrowUp"],
+  "short.down": ["swipe in and down", "arrowDown"],
+  "long.straight": ["swipe in and hold", "arrowLeft"],
+  "long.up": ["in and up, hold", "arrowUp"],
+  "long.down": ["in and down, hold", "arrowDown"],
+};
+/** The actions, as EdgeGestures.kt runs them; "app:<package>" opens that app. */
+const EDGE_ACTIONS: [string, string][] = [
+  ["quicktools", "quick tools"],
+  ["back", "back"],
+  ["home", "home"],
+  ["recents", "recent apps"],
+  ["previous", "previous app"],
+  ["notifications", "notifications"],
+  ["control", "control center"],
+  ["assistant", "assistant"],
+  ["drawer", "app drawer"],
+  ["playpause", "play / pause"],
+  ["app", "an app"],
+  ["none", "nothing"],
+];
+// The defaults EdgeConfig.kt has: the right edge on (in and up: Quick Tools, straight in still Back), the left off.
+const EDGE_DEFAULTS: EdgeSettings = {
+  on: true,
+  handles: true,
+  sensitivity: "normal",
+  right: {
+    on: true,
+    top: 0.5,
+    bottom: 1,
+    width: 18,
+    actions: { "short.straight": "back", "short.up": "quicktools", "short.down": "notifications", "long.straight": "previous", "long.up": "quicktools", "long.down": "control" },
+  },
+  left: {
+    on: false,
+    top: 0.5,
+    bottom: 1,
+    width: 18,
+    actions: { "short.straight": "back", "short.up": "back", "short.down": "back", "long.straight": "previous", "long.up": "home", "long.down": "recents" },
+  },
+};
+const EDGE_SPANS: [string, number][] = [
+  ["lower third", 0.67],
+  ["lower half", 0.5],
+  ["lower ⅔", 0.33],
+  ["whole edge", 0.08],
+];
+const EDGE_WIDTHS: [string, number][] = [
+  ["thin", 12],
+  ["normal", 18],
+  ["wide", 28],
+];
+
+function edgeMerged(saved: Partial<EdgeSettings> | null): EdgeSettings {
+  const side = (d: EdgeSide, s?: Partial<EdgeSide>): EdgeSide => ({ ...d, ...s, actions: { ...d.actions, ...s?.actions } });
+  return { ...EDGE_DEFAULTS, ...saved, left: side(EDGE_DEFAULTS.left, saved?.left), right: side(EDGE_DEFAULTS.right, saved?.right) };
+}
+
+function edgeActionLabel(a: string) {
+  if (a.startsWith("app:")) {
+    const pkg = a.slice(4);
+    return apps.value.find((x) => x.kind === "android" && x.key.slice(2).split("/")[0] === pkg)?.label ?? pkg;
+  }
+  return EDGE_ACTIONS.find(([k]) => k === a)?.[1] ?? a;
+}
+
+function EdgeSideSection({ name, s, set }: { name: "left" | "right"; s: EdgeSide; set: (s: EdgeSide) => void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [picking, setPicking] = useState<string | null>(null);
+  const span = EDGE_SPANS.reduce((best, x) => (Math.abs(x[1] - s.top) < Math.abs(best[1] - s.top) ? x : best));
+  const width = EDGE_WIDTHS.reduce((best, x) => (Math.abs(x[1] - s.width) < Math.abs(best[1] - s.width) ? x : best));
+  const androidApps = apps.value.filter((a) => a.kind === "android" && !a.work && !a.clone);
+  return (
+    <Section icon={name === "right" ? "arrowLeft" : "arrowRight"} title={`${name} edge`}>
+      <Option label="handle">
+        <Segmented options={["on", "off"]} picked={s.on ? 0 : 1} onPick={(i) => set({ ...s, on: i === 0 })} />
+      </Option>
+      {s.on && (
+        <>
+          <Option label="where">
+            <span class="scr-chips">
+              {EDGE_SPANS.map(([label, top]) => (
+                <button type="button" key={label} class={`scr-chip ${span[0] === label ? "on" : ""}`} onClick={() => set({ ...s, top, bottom: 1 })}>
+                  {label}
+                </button>
+              ))}
+            </span>
+          </Option>
+          <Option label="width">
+            <Segmented options={EDGE_WIDTHS.map(([l]) => l)} picked={EDGE_WIDTHS.indexOf(width)} onPick={(i) => set({ ...s, width: EDGE_WIDTHS[i][1] })} />
+          </Option>
+          {EDGE_KEYS.map((k) => {
+            const [label, icon] = EDGE_GESTURES[k];
+            const action = s.actions[k] ?? "none";
+            return (
+              <div key={k} class="scr-edge-gesture">
+                <button type="button" class="scr-row" onClick={() => (setOpen(open === k ? null : k), setPicking(null))}>
+                  <Icon name={icon} size={18} class={`scr-row-icon ${name === "left" && icon === "arrowLeft" ? "flip" : ""}`} />
+                  <span class="scr-row-text">{label}</span>
+                  <span class="scr-edge-action">{edgeActionLabel(action)}</span>
+                </button>
+                {open === k && (
+                  <span class="scr-chips scr-edge-picks">
+                    {EDGE_ACTIONS.map(([a, l]) => (
+                      <button
+                        type="button"
+                        key={a}
+                        class={`scr-chip ${(a === "app" ? action.startsWith("app:") : action === a) ? "on" : ""}`}
+                        onClick={() => {
+                          if (a === "app") return setPicking(k);
+                          set({ ...s, actions: { ...s.actions, [k]: a } });
+                          setOpen(null);
+                        }}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </span>
+                )}
+                {open === k && picking === k && (
+                  <span class="scr-chips scr-edge-picks">
+                    {androidApps.map((app) => {
+                      const pkg = app.key.slice(2).split("/")[0];
+                      return (
+                        <button
+                          type="button"
+                          key={app.key}
+                          class={`scr-chip ${action === `app:${pkg}` ? "on" : ""}`}
+                          onClick={() => {
+                            set({ ...s, actions: { ...s.actions, [k]: `app:${pkg}` } });
+                            setOpen(null);
+                            setPicking(null);
+                          }}
+                        >
+                          {app.label}
+                        </button>
+                      );
+                    })}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+    </Section>
+  );
+}
+
+function GesturesScreen() {
+  const [c, setC] = useState<EdgeSettings | null>(null);
+  useEffect(() => {
+    powos.store.get<Partial<EdgeSettings>>("edgeGestures").then(
+      (saved) => setC(edgeMerged(saved)),
+      () => setC(edgeMerged(null)),
+    );
+  }, []);
+  if (!c) return <Frame icon="arrowLeft" title="gestures"><Loading /></Frame>;
+  const save = (next: EdgeSettings) => {
+    setC(next);
+    powos.store.set("edgeGestures", next);
+  };
+  return (
+    <Frame icon="arrowLeft" title="gestures">
+      <Section icon="arrowLeft" title="edge gestures">
+        <div class="scr-note muted">Swipe in from a handle on the screen's edge: a short swipe, or one held still at its end, straight in or diagonally up or down. Above the handles the edges stay Android's back swipe.</div>
+        <Option label="edge gestures">
+          <Segmented options={["on", "off"]} picked={c.on ? 0 : 1} onPick={(i) => save({ ...c, on: i === 0 })} />
+        </Option>
+        {c.on && (
+          <>
+            <Option label="show handles">
+              <Segmented options={["on", "off"]} picked={c.handles ? 0 : 1} onPick={(i) => save({ ...c, handles: i === 0 })} />
+            </Option>
+            <Option label="sensitivity">
+              <Segmented options={["low", "normal", "high"]} picked={["low", "normal", "high"].indexOf(c.sensitivity)} onPick={(i) => save({ ...c, sensitivity: (["low", "normal", "high"] as const)[i] })} />
+            </Option>
+          </>
+        )}
+      </Section>
+      {c.on && (
+        <>
+          <EdgeSideSection name="right" s={c.right} set={(right) => save({ ...c, right })} />
+          <EdgeSideSection name="left" s={c.left} set={(left) => save({ ...c, left })} />
+        </>
+      )}
+    </Frame>
+  );
+}
+
 const SCREENS: Record<ScreenName, FunctionComponent> = {
   settings: SettingsScreen,
   style: StyleScreen,
@@ -1069,6 +1311,7 @@ const SCREENS: Record<ScreenName, FunctionComponent> = {
   coding: CodingScreen,
   aur: PackagesScreen,
   licenses: LicensesScreen,
+  gestures: GesturesScreen,
 };
 
 /** The top screen, over home; those under it wait (unwatched) until it closes. */

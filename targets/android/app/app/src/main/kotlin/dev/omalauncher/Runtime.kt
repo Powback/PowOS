@@ -24,6 +24,7 @@ import dev.omalauncher.linux.POWOS
 import dev.omalauncher.linux.AudioBridge
 import dev.omalauncher.linux.Bootstrap
 import dev.omalauncher.linux.FILES_COMMAND
+import dev.omalauncher.linux.PLASMA_COMMAND
 import dev.omalauncher.linux.Gpu
 import dev.omalauncher.linux.LinuxApp
 import dev.omalauncher.linux.OpenBridge
@@ -411,6 +412,28 @@ class Runtime(
         widgets.linuxChanged(true)
         // PowOS's apps in the drawer, search and Android's shortcuts.
         refreshApps()
+        watchPowosApps()
+    }
+
+    private var appsWatch: android.os.FileObserver? = null
+
+    /**
+     * Rooted mode: the drawer follows the session's app list without polling. powos-apps-watch reruns powos-apps-export
+     * on KSycoca's change signal; the export's last step renames icons/.icon-names into place (after apps.tsv and the
+     * icons), so that rename means "a complete list": read it again, without exporting again.
+     */
+    private fun watchPowosApps() {
+        if (appsWatch != null) return
+        val icons = File(RootedGuest.runDir ?: return, "powos-apps/icons").apply { mkdirs() }
+        appsWatch =
+            object : android.os.FileObserver(icons, MOVED_TO) {
+                override fun onEvent(
+                    event: Int,
+                    path: String?,
+                ) {
+                    if (path == ".icon-names") scope.launch { reloadPowosApps() }
+                }
+            }.also { it.startWatching() }
     }
 
     /** Turns GPU acceleration on (installing and checking the driver) or off, for Linux apps started from then on. */
@@ -477,25 +500,40 @@ class Runtime(
     }
 
     /** Rescans .desktop entries; the list only changes (and recomposes) when entries do. */
-    suspend fun refreshApps() {
+    suspend fun refreshApps() = loadApps(export = true)
+
+    /** PowOS's list was just written (watchPowosApps): read it again without exporting it again. */
+    private suspend fun reloadPowosApps() = loadApps(export = false)
+
+    private suspend fun loadApps(export: Boolean) {
         // Rooted mode: PowOS's own apps, as its menu has them (powos-apps-export writes them to the run dir).
         val powos = !linux && rootedTerminals
         if (!linux && !powos) return
-        val apps =
-            withContext(Dispatchers.IO) {
-                if (powos) {
-                    RootedGuest.run("powos-apps-export")
-                    loadPowosApps(File(RootedGuest.runDir ?: return@withContext emptyList(), "powos-apps"))
-                } else {
-                    loadLinuxApps(proot)
-                }
-            }
+        val apps = withContext(Dispatchers.IO) { readApps(powos, export) }
         if (apps != linuxApps.toList()) {
             linuxApps.clear()
             linuxApps += apps
         }
         // And as Android's own shortcuts: the most used on the PowOS icon, pinned ones kept up to date.
         if (powos) withContext(Dispatchers.IO) { PowosShortcuts.publish(context, apps) { usage.score("l:" + it.id) } }
+        loadLinuxIcons(apps, powos)
+    }
+
+    /** The guest's entries (no-root Linux), or PowOS's list ([export]: written anew first). On the IO dispatcher. */
+    private fun readApps(
+        powos: Boolean,
+        export: Boolean,
+    ): List<LinuxApp> {
+        if (!powos) return loadLinuxApps(proot)
+        if (export) RootedGuest.run("powos-apps-export")
+        return loadPowosApps(File(RootedGuest.runDir ?: return emptyList(), "powos-apps"))
+    }
+
+    /** [apps]' icons not loaded yet, and the gone apps' ones dropped. */
+    private suspend fun loadLinuxIcons(
+        apps: List<LinuxApp>,
+        powos: Boolean,
+    ) {
         val ids = apps.mapTo(HashSet()) { it.id }
         linuxIcons.keys.retainAll(ids)
         linuxMasks.keys.retainAll(ids)
@@ -577,6 +615,8 @@ class Runtime(
     fun launch(app: LinuxApp) {
         // Our own Files app: open it directly rather than round-tripping through the guest.
         if (app.exec == FILES_COMMAND) return openFiles()
+        // Plasma itself, as an app: its full desktop (the "PowOS" activity), nothing started in the session.
+        if (app.exec == PLASMA_COMMAND) return showDesktop()
         if (app.terminal) return terminal(app.exec, app.name)
         // PowOS rooted mode: like a phone app, its window as its own Android task (KWin exports it), not the desktop.
         if (!linux && rootedTerminals) return openRooted(app)
@@ -595,10 +635,20 @@ class Runtime(
      */
     private fun openRooted(app: LinuxApp) {
         Log.i(TAG, "open as task: ${app.id}")
+        // Its launch window at once, where its window will be (LaunchWindows): the app's first window becomes it.
+        val ids = listOfNotNull(app.id, app.wmClass).filter { it.isNotBlank() }.toTypedArray()
+        if (!andro.marchy.WindowTasks.hasWindow(ids)) andro.marchy.LaunchWindows.open(context, app.id, ids, app.name)
         thread(name = "guest-open", isDaemon = true) {
             val log: (String) -> Unit = { Log.i(TAG, "[${app.id.take(24)}] $it") }
-            val code = runCatching { RootedGuest.openAsTask(app.id, app.wmClass, app.exec, ::showDesktop, log) }.getOrElse { -1 }
+            val desktop = {
+                andro.marchy.LaunchWindows.done(app.id)
+                showDesktop()
+            }
+            val code = runCatching { RootedGuest.openAsTask(app.id, app.wmClass, app.exec, desktop, log) }.getOrElse { -1 }
             Log.i(TAG, "exited $code: ${app.exec}")
+            // Its window's "open" may still be on its way from KWin: a moment, then a launch window still waiting goes.
+            Thread.sleep(LAUNCH_GRACE_MS)
+            andro.marchy.LaunchWindows.done(app.id)
         }
     }
 
@@ -656,11 +706,22 @@ class Runtime(
             return
         }
         Log.i(TAG, "launch: $command")
+        // A Steam game (the games widget's steam://rungameid/<appid>), rooted: like the drawer, its window in its own
+        // task - powos-open-task resumes a running (maybe frozen) game at once and shows its window, a cold start's
+        // window when it comes; the desktop only where it can't be a task.
+        val game = if (rooted) STEAM_GAME.find(command)?.groupValues?.get(1) else null
         // Rooted mode: it opens on the PowOS desktop (RootedGuest), which comes to the front to show it.
-        if (rooted) showDesktop()
+        if (rooted && game == null) showDesktop()
         thread(name = "guest-launch", isDaemon = true) {
             val log: (String) -> Unit = { Log.i(TAG, "[${command.take(24)}] $it") }
-            val code = runCatching { if (rooted) RootedGuest.run("exec $command", log) else proot.run("exec $command", log) }.getOrElse { -1 }
+            val code =
+                runCatching {
+                    when {
+                        game != null -> RootedGuest.openAsTask("steam_app_$game", null, command, ::showDesktop, log)
+                        rooted -> RootedGuest.runOwn("exec $command", log)
+                        else -> proot.run("exec $command", log)
+                    }
+                }.getOrElse { -1 }
             Log.i(TAG, "exited $code: $command")
             onExit()
         }
@@ -668,6 +729,8 @@ class Runtime(
 
     companion object {
         private const val TAG = "runtime"
+        private const val LAUNCH_GRACE_MS = 3000L
+        private val STEAM_GAME = Regex("""steam://rungameid/(\d+)""")
         private const val SETUP_DONE = "setup_done"
         private const val SYSTEM_THEME_KEY = "system_theme_applied"
     }

@@ -1,0 +1,30 @@
+{
+  "id": "agentsd",
+  "name": "Agents reporter",
+  "kind": "watcher",
+  "owner": "system:powos-deploy",
+  "purpose": "the Agents view's reporter: the claude hooks and powos-agentsd, folding them into the powos-agents module (the PowOS AI page)",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (lib/ai/agents, install-hooks.py into /home/powos/.claude/settings.json)",
+  "files": [
+    "/usr/lib/powos/ai/agents",
+    "/home/powos/.claude/settings.json.bak-agents-view"
+  ],
+  "processes": [
+    {
+      "match": "powos-agentsd"
+    }
+  ],
+  "limits": {
+    "memory": "96m",
+    "pids": 32
+  },
+  "autosleep": "never",
+  "remove": {
+    "commands": [
+      "python3 /usr/lib/powos/ai/agents/install-hooks.py /home/powos/.claude/settings.json --remove"
+    ]
+  },
+  "edits": [
+    "/home/powos/.claude/settings.json"
+  ]
+}

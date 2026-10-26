@@ -3,21 +3,42 @@ widget "agents" {
   order: 2
   size: 3x5
   minSize: 3x3
+  meta { owl: 6 }
 
   source installed = cmd("for a in claude opencode codex grok crush; do command -v $a >/dev/null && printf '%s ' $a; done") every 5m
 
+  // A row for each installed agent (tap: it in a terminal) and one to manage them, sharing the tile's height - soft
+  // filled, no lines; their names as big as the row and the longest name's width allow (monospace: 0.6 em a
+  // character). Sized from the tile, never fixed.
+  let list = words(installed ?? "")
+  let iw = tileWidth == null ? 154 : tileWidth - 24
+  let ih = tileHeight == null ? 200 : tileHeight - 24
+  let hs = clamp(floor(min(ih * 0.07, iw / (13 * 0.6))), 10, 22)
+  let n = len(list) + 1
+  let rowH = (ih - hs * 1.4 - 6 - (n - 1) * 6) / n
+  let longest = max(len("manage"), len(list) == 0 ? 0 : max(list.map(a => len(a))))
+  let fs = clamp(floor(min(rowH * 0.45, (iw - 24) / (longest * 0.6))), 11, 40)
+
   Column {
-    gap: 6
-    Text { text: "coding agents"; style: muted }
-    if len(words(installed)) == 0 {
-      Text { text: "none installed yet"; style: small }
-    }
-    Flow {
-      gap: 6
-      for agent in words(installed) {
-        Button { text: agent; onTap: terminal(agent) }
+    gap: 6; fill: height
+    Text { text: "coding agents"; fontSize: hs; color: muted; maxLines: 1 }
+    if len(list) == 0 {
+      Box {
+        weight: 1; fill: width; align: start; padding: [12, 0]; background: alpha(foreground, 0.06); radius: 8 * corners
+        Text { text: "none installed yet"; fontSize: fs; color: muted; maxLines: 2 }
       }
     }
-    Button { text: "manage"; color: muted; onTap: launcher("agents") }
+    for agent in list key agent {
+      Box {
+        weight: 1; fill: width; align: start; padding: [12, 0]; background: alpha(foreground, 0.08); radius: 8 * corners
+        onTap: terminal(agent)
+        Text { text: agent; fontSize: fs; color: accent; maxLines: 1 }
+      }
+    }
+    Box {
+      weight: 1; fill: width; align: start; padding: [12, 0]; background: alpha(foreground, 0.04); radius: 8 * corners
+      onTap: launcher("agents")
+      Text { text: "manage"; fontSize: fs; color: muted; maxLines: 1 }
+    }
   }
 }

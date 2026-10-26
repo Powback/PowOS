@@ -8,10 +8,13 @@ import android.os.Process;
 
 /**
  * Omarchy's reboot / log out: a fresh session. Runs in its own process (":restart"): it waits for the app's main
- * process to be gone (killed by power()), then starts MainActivity again, which starts a new session.
+ * process to be gone (killed by power()), then starts a new session - through MainActivity when the desktop (the
+ * Plasma app) was on screen, else without it: on the PowOS web shell a session restart (a new KWin) must not bring
+ * Plasma's desktop to the front.
  */
 public class Restarter extends Activity {
     private static final String EXTRA_PID = "pid";
+    private static final String EXTRA_DESKTOP = "desktop";
 
     /** Omarchy's power actions (android-request power ...), from the session's systemctl/uwsm stand-ins. */
     static void power(Context ctx, String action) {
@@ -29,6 +32,7 @@ public class Restarter extends Activity {
         ctx.stopService(new Intent(ctx, SessionService.class)); // ends Hyprland and every session process
         if (action.equals("reboot") || action.equals("logout"))
             ctx.startActivity(new Intent(ctx, Restarter.class).putExtra(EXTRA_PID, Process.myPid())
+                    .putExtra(EXTRA_DESKTOP, WindowTasks.desktopOnScreen())
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         else if (main != null) // shutdown
             main.runOnUiThread(main::finishAndRemoveTask);
@@ -43,14 +47,18 @@ public class Restarter extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         int pid = getIntent().getIntExtra(EXTRA_PID, -1);
+        boolean desktop = getIntent().getBooleanExtra(EXTRA_DESKTOP, true);
         new Thread(() -> {
             for (int i = 0; i < 100 && pid > 0 && new java.io.File("/proc/" + pid).exists(); i++)
                 try {
                     Thread.sleep(100);
                 } catch (InterruptedException ignored) {
                 }
-            startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                    | Intent.FLAG_ACTIVITY_CLEAR_TASK));
+            if (desktop)
+                startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_CLEAR_TASK));
+            else // the web shell (home, an app) stays in front; the session comes up behind it
+                SessionService.start(this);
             finish();
             Process.killProcess(Process.myPid());
         }).start();

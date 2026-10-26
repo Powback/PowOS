@@ -179,6 +179,16 @@ Key facts an agent should CHECK before starting:
   the default escalation target: specialist agents report UP to it. `--safe` keeps
   permission prompts. `powos ai --continue` now also resumes raw `claude` CLI sessions in
   the current dir. ✅ (Phase 1; widget is Phase 2)
+- The manager's **TypeScript sandbox** (`powos sandbox`, `lib/ai/sandbox`, ported from SpaceTimeAI's code mode):
+  the manager gets MCP tools `sandbox eval` / `sandbox declarations` and runs one TypeScript job instead of a long
+  tool-call chain. The code is type-checked against only the functions of the capabilities granted to that job
+  (comms.read/send, board.read/write, checks.queue, phone.read), then runs in QuickJS (WebAssembly) with no process,
+  file, network, env or secret; limits per job: deadline, heap, host calls, 5 phone reads. Every job is logged
+  (`~/.local/state/powos/sandbox/jobs.jsonl`). Its deps (quickjs-emscripten, typescript) live inside the app
+  (`powos sandbox setup` = `npm ci --ignore-scripts` into `lib/ai/sandbox/node_modules`), never on the host; without
+  them (or bun / node >= 22.18) the manager starts without it. `powos sandbox status|help`; `--no-sandbox` or
+  `POWOS_SANDBOX_ENABLED=0` opts out. ✅ Mac; phone: `rooted.sh deploy` ships it with its deps built from
+  the lock (unit ai-sandbox; the phone has no npm, PowOS's bun runs it)
 - Inter-agent comms (`powos comms` + a `comms` MCP auto-wired into every `powos ai`
   agent): a daemonless **mailbox** so agents talk to each other. Each agent runs as a
   role (health/coder/devops/...); mail addressed to a role lands in that role's durable
@@ -192,7 +202,8 @@ Key facts an agent should CHECK before starting:
 - Cloud backup `powos backup {status|push|pull|setup}` — git-based USB state backup. ✅ CLI exists.
 - Sync conflicts `powos sync {status|resolve|--keep-ram|--keep-usb|--merge}` — detection ✅, `--merge` basic ⚠️.
 - CacheFS (lazy user-data FUSE) — ❌ incomplete: write-back to USB NOT implemented (written data is lost); must remain disabled (`POWOS_CACHEFS_ENABLED`).
-- Containers `powos containers …` (Podman/Distrobox), install/export GUI apps. ✅
+- Containers `powos containers …` (Podman/Distrobox), install/export GUI apps. ✅ `powos containers run` with
+  `--memory/--cpus/--pids-limit` enforced everywhere, the phone included (no pasta/bridge networking there yet). ✅
 - Desktop widgets (KDE plasmoids in `desktop/plasmoid/`, shipped to
   `/usr/share/plasma/plasmoids/`) — add from "Add Widgets" or the System Tray: ✅
   - `com.powos.manager` — **two-pane chat with the PowOS manager**: left sidebar of
@@ -230,6 +241,17 @@ Key facts an agent should CHECK before starting:
   validation. See docs/HIBERNATION.md. `powos boot windows` (UEFI BootNext,
   one-shot reboot to Windows) IS built. ✅
 
+## Speech (speech to text)
+- `powos transcribe FILE|- [--lang xx] [--json] [--format srt|vtt]` (`powos transcribe --help`): any audio/video file
+  to text on the GPU server, from any PowOS (desktop, phone, the Mac). Text streams as it's recognized; ~0.1 s for a
+  short clip, ~12 s for 12 minutes of speech. Endpoint: `POWOS_STT_URL` (env or /etc/powos/config), else
+  `http://stt.pow` (LAN + VPN only; no public route).
+- `stt.pow` is OpenAI-compatible (`POST /v1/audio/transcriptions`, multipart `file` + `language` + `response_format`
+  json|text|verbose_json|srt|vtt, `stream=true` for SSE): whisper large-v3-turbo on gpu-195's GPU1 (unit `stt-batch`),
+  500 MB uploads, 4 requests at a time (then 429/503: retry). Any tool that speaks the OpenAI audio API can use it.
+- The realtime voice path (voiceagent.pow, unit `voice-stt` on GPU0) is separate on purpose: files never delay it.
+- The phone's dictation (prompt bar, PowOS AI, assist) is Android's own recognizer, not stt.pow.
+
 ## PowOS on a phone (Android)
 
 You may be running on a phone: `/etc/powos/platform` reads `phone` and the session exports `POWOS_PLATFORM=phone`.
@@ -266,24 +288,47 @@ Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenO
 | Displays | `0` = active panel (cover 1116×2484 folded / inner 2268×2440 open); `cmd device_state print-state`: 0 = folded |
 | Hosted Android widgets | private virtual displays `powos-appwidget-N` (not the screen; don't capture them) |
 | Root | Magisk (`su`); SELinux enforcing |
+| App data backups | full: `/data/powos/backup/app-data-<time>.tar`; hourly layout + store: `/data/powos/root/var/backups/powos-app/light-<time>.tar` - `su -c "sh /data/powos/powos-appdata.sh list\|backup\|restore <tar>"` (`docs/APP-DATA-BACKUP.md`) |
 | adb | phone-local `127.0.0.1:5555` (rooted.sh wifi); LAN `192.168.50.239:5555`; VPN `10.13.13.7:5555`. On the phone itself `emulator-5554` is this same phone's adbd auto-detected on port 5555 (a bare `adb shell` then fails, "more than one device"): always pass `-s 127.0.0.1:5555`. An AVD only on the Mac |
 
 ### Shipping a change (edit → test → ship → roll back)
 | Layer | Edit | Ship | Roll back |
 |---|---|---|---|
-| Web shell UI | `shell/**` | `shell/push.sh <files>` (`ANDROID_SERIAL` picks the phone): every open page reloads | `shell/push.sh --reset [files]` |
+| Web shell UI | `shell/**` | `shell/push.sh --note "<what changed>" <files>` (`--vpn` first over the VPN; `ANDROID_SERIAL` picks the phone): gated first (below), then every open page reloads | `shell/push.sh --reset [files]`; automatic when a page fails to boot within 2 min of the push |
 | OWL widgets | `targets/android/app/app/src/main/assets/widgets/*.owl` | APK; or write the live copy `files/widgets/<name>.owl` (that copy then counts as the user's and isn't updated by later APKs) | restore the previous file |
-| App (Kotlin) | `targets/android/app/**` | `bash targets/android/build-app.sh` → `~/Projects/android-app-dev/output/powos.apk` (also on android.pow) → `adb install -r` | install the previous APK |
-| System slots (priv-app, recents, overlays) | `targets/android/system-module/` | `build-module.sh --priv-app --slot recents` → `magisk --install-module` + reboot | `touch /data/adb/modules/powos-system/disable` + reboot |
-| Rooted scripts | `targets/android/rooted/*` | `targets/android/rooted/rooted.sh deploy` | redeploy the previous version |
+| App (Kotlin) | `targets/android/app/**` | `bash targets/android/build-app.sh` → `~/Projects/android-app-dev/output/powos.apk` (also on android.pow) → `targets/android/install-app.sh <apk> --note "<what changed>"` | install the previous APK |
+| System slots (priv-app, recents, overlays) | `targets/android/system-module/` | `build-module.sh --priv-app --slot recents` → `rooted.sh module <zip> --note "<what changed>"` + reboot | `touch /data/adb/modules/powos-system/disable` + reboot |
+| Rooted scripts | `targets/android/rooted/*` | `targets/android/rooted/rooted.sh deploy --note "<what changed>"` | redeploy the previous version |
 | KWin / packages | `targets/android/pkgs/` | `build-pkgs.sh` (ccache) → rootfs | previous package |
-| Rootfs | `build-rootfs.sh` → `out/powos-rootfs.tar.gz` | `rooted.sh install` (replaces `/data/powos/root`) | reinstall the old tarball |
-| PowOS layer (`lib/`, `bin/`, `config/`) | repo | copy into `/data/powos/root/usr/lib/powos/…` (or `/etc/powos/…`) as root | copy back the old file |
+| Rootfs | `build-rootfs.sh` → `out/powos-rootfs.tar.gz` | `rooted.sh install --note "<what changed>"` (replaces `/data/powos/root`) | reinstall the old tarball |
+| PowOS layer (`lib/`, `bin/`, `config/`) | repo | copy into `/data/powos/root/usr/lib/powos/…` (or `/etc/powos/…`) as root, then `targets/android/tools/deploy-note.sh "<what changed>"` | copy back the old file |
 Built centrally and shipped whole. Never `pacman -Syu` on the phone.
+**Never `pm uninstall-system-updates com.powos.app` (nor `pm clear`, nor a downgrade) without the backup step: it
+deletes the app's whole data dir** - home layout, hosted widgets, installed PowOS app UIs, chat, mail, the shell's
+store (lost for good on 2026-10-20). Re-basing on the system copy is only `su -c "sh /data/powos/powos-appdata.sh
+rebase <apk>"` (backup, refuses without one, restore after); afterwards check PowOS still has Magisk Superuser (the
+user re-grants it). `docs/APP-DATA-BACKUP.md`; `test/tier1/test-appdata-guard.sh` enforces it.
+Every ship to the phone carries `--note`: one plain line of what changed for the user ("Switcher now follows your finger", never a hash or a file) - the phone's quiet "update applied" notification, deploys within 2 min folded into one (`powos comms notify --from deploy --priority low --batch deploy`).
+
+### Shell errors reach the manager (nothing only in logcat)
+- **Before a push**: `shell/push.sh` runs `shell/dev/gate.sh` - tsc, then every page (home, lock, shade, assist, aod,
+  recents) booted in a headless Chromium against the mock bridge, as the phone serves it (committed shell + the phone's
+  overrides + the pushed files). Any uncaught error, failed module load, missing export, import-cycle error or a page
+  not ready in 8 s refuses the push with the error; `--force` overrides. `apps/install.sh` gates an app's UI modules
+  the same way. Run it alone: `shell/dev/gate.sh [--tree] [files]`.
+- **On the phone**: every page's uncaught errors, rejections, module-load failures and "never became ready" go to the
+  manager's inbox (`--from shell --priority high`: page, file:line, APK version, override files and when they were
+  pushed, the last push), once per error per 10 min, and to a log: `powos shell errors [N]` (phone),
+  `shell/push.sh --errors` (Mac). A page that fails to boot within 2 min of a push has the push rolled back by the app
+  (previous overrides restored, else the APK's files) and the manager gets "rolled back <files> because <error>".
+  `powos shell help` has the details.
+- **Testing it: never break a live page (home, lock, shade).** Break the test-only page `shell/test/gate-test.tsx`
+  (`?mode=gate-test`, loaded off screen by the app when that file is pushed) and push with `--test`; its reports go
+  only to the test's role (`--test=ROLE`, default the scratch role `shelltest`) as "[test]", never to the manager.
 
 ### `powos` on the phone
 - Works: `status` (Phone: mode, kernel, battery, network), `android {apps,open,running,notifications,notify,screenshot}`,
-  `ai …`, `manager`, `comms …`, `doctor`, `help`. `podman`, `distrobox`, `flatpak` and `tmux` are installed.
+  `ai …`, `manager`, `comms …`, `shell errors`, `doctor`, `help`. `podman`, `distrobox`, `flatpak` and `tmux` are installed.
   ⚠️ Containers aren't validated on the phone.
 - Doesn't apply (no bootc, rpm-ostree or grubby; no USB/RAM layers): `upgrade`, `base`, `driver`, `rollback`,
   `ramboot`, `sync`/`flush`/`safe`, `install-system`, `boot`, `games storage`, `windows`, `gpu`, `cuda`.
@@ -301,9 +346,11 @@ Built centrally and shipped whole. Never `pacman -Syu` on the phone.
 - Share sheet (`ACTION_SEND`) and `ACTION_ASSIST` open PowOS AI.
 - Agents view (docs/AGENTS-VIEW-DESIGN.md, Phase 1): every claude in PowOS reports through async hooks in
   `~powos/.claude/settings.json` (`/usr/lib/powos/ai/agents/powos-agent-hook` → `powos-agentsd` → `/run/powos-app/agents/`);
-  the Mac's sessions are mirrored in (`agents/mirror/mac.json`). Shown as home's Agents widget, PowOS AI's page →
+  the Mac's sessions are mirrored in (`agents/mirror/mac.json`; an adb HACK - every cross-device channel and its
+  replacement, the remote PowOS design: `docs/REMOTE-POWOS.md`). Shown as home's Agents widget, PowOS AI's page →
   Agents, and an ongoing notification while one works. Asks (PermissionRequest) can be allowed/denied from the phone;
   unanswered after 60 s, Claude asks at its terminal.
+- Compute mesh (moving containers between PowOS hosts, resource sharing): design only, ❌ not implemented - `docs/POWOS-COMPUTE-MESH.md`.
 - Claude: `ANTHROPIC_BASE_URL=http://claude-auth.pow`, the fleet's OAuth proxy. Never log in or refresh a token on
   the phone.
 
@@ -315,23 +362,83 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
   and keeps budgets without cgroups (RSS over `memMB` → restart, 3× in 5 min → held; CPU over `cpuPct` for a minute
   → nice 19; rlimits/nice/ionice at start). `powos app services` = its status (`/run/powos-system/status.json`),
   logs `/var/log/powos/<id>.log`. Off: `rooted.sh system off` (`/data/powos/system-tier.off`), on: `rooted.sh system on`.
-- **SpacetimeDB 2.12.0** (package `spacetimedb-bin`, official aarch64 binaries; `spacetime` CLI on PATH) as
+- **SpacetimeDB 2.12.0** (package `spacetimedb`: built from the local SpacetimeDB fork, `~/Projects/SpacetimeDB` branch `powos/v2.12` = v2.12.0 + three idle-wakeup commits, pinned by hash -
+  idle server ~9 wakeups/s instead of 161, ~0 per loaded database instead of ~145; `spacetimedb-bin` = the unpatched
+  official binaries; `spacetime` CLI on PATH) as
   `dev.powos.spacetimedb`: `127.0.0.1:3410`, data/keys `/var/lib/powos/stdb` (owned by powos). The port is locked to
   the PowOS app's uid (= powos) and root by iptables chain `powos-local` (`xt_owner`); every other Android app gets
   a reset. Idle unload: no client for 5 min and RSS > 60 MB (the bare server is ~51 MB) → a ~150 ms restart that drops every loaded database
-  (each loaded database costs ~145 wakeups/s on this phone).
+  (a memory policy; the patched server costs ~nothing idle).
 - **Runtime switch**: `powos config app-runtime native|sandbox|container` (default), `powos app runtime <id> <mode>`
   (per app). native = plain process; sandbox = bubblewrap (user/pid/uts/cgroup ns - never `--unshare-ipc`/`--unshare-all`,
   this kernel has no SysV IPC), read-only system, private /tmp, only the data dir writable, seccomp denylist (no
-  Landlock: not in this kernel); container = **not ready yet** on the phone (refused, exit 78). Flipping restarts the
+  Landlock: not in this kernel); container = podman via `powos containers run` with the budget as hard limits (phone:
+  Android's v1 memcg/cpuctl + v2 pids, `docs/PHONE-KERNEL-CONTAINERS.md` §12). Flipping restarts the
   service in seconds; same command, data dir, port and uid. `powos app check` shows what this kernel supports.
 - **Apps**: `powos app install|publish|ui|list|remove` (Mac side: `apps/build.sh <app>` then
-  `ADB="docker exec powos-vadb adb" apps/install.sh <app> [install|publish|ui]`). The registry is the
+  `ADB="docker exec powos-vadb adb" apps/install.sh <app> [install|publish|ui] --note "<what changed>"`). The registry is the
   `powos-registry` database (owner = powos's CLI identity). Installed UIs: `~/.local/share/powos/apps/<id>/<ver>/` =
   the app's `files/apps` (bound by `powos-session.sh`), served to the shell at `https://shell.powos/_app/<id>/`.
   Prototype: `apps/counter` (Rust module `powos-counter` + island widget `widgets/count.js`).
+- **Making apps** ✅ (2026-10-20, `powos app help` is the contract): `powos app new <name> [--name ..] [--template
+  spacetimedb-astro|widget|module-only]` scaffolds `~/Projects/<name>` (Rust module `module/src/lib.rs`, Preact page
+  `ui/pages/main.tsx`, widget `ui/widgets/main.tsx`, hooks `ui/lib/app.ts` = the spacetimedb-astro template's
+  useTable/useReducer/useStatus on the shell's host); `powos app install <dir>` builds and installs; `powos app dev
+  <dir>` hot-reloads every save (UI: the open page and widgets re-import in place, no shell reload; module: republished,
+  clients stay connected). The **module builds on the app builder** (`powos app builder user@host`, on the phone the Mac
+  `macback@192.168.50.99`: source over ssh into a `powos-app-builder` container with the shared cargo cache, wasm back;
+  ~3-4 s warm) - never Rust on the phone's battery; the UI bundles locally with bun (~50 ms), bindings with the local
+  `spacetime generate`. An app with a page is a launcher app (`p:<id>`: drawer, search, recent strip) and opens full
+  screen inside home's page (`shell/ui/appscreen.tsx`); its widgets are in home's edit sheet → PowOS apps. Example:
+  `~/Projects/shopping` on the phone (`local.shopping`, a shared shopping list + widget).
+- **Composed widgets** ✅ first slice (2026-10-23, `powos compose help` is the contract, docs/COMPOSER.md): a home
+  widget made of building blocks from plain words - `powos compose widget "which Hue rooms are on"` picks App API's
+  widget-safe read actions (PowOS AI, else a word match over `powos compose blocks`), writes one manifest
+  (composition.json, powos.compose/v1), generates an ordinary app (its own database `local-<name>` on the shared
+  apps/composed module - no Rust build -, net 127.0.0.1 only) and installs it: home's edit sheet → PowOS apps. A widget
+  only reads: a block that writes or spends is refused at compose time, and the runtime refuses it for consumer
+  `widget`. PowOS AI's tools: compose_blocks, compose_widget. Hue shows "Link Hue in App API" until Hue is linked there.
+- **Apps on the network** ✅ (2026-10-20, `host.net`, the PowOS app's `ShellNet.kt` - no process of the app's own):
+  an app declares what it may reach in powos-app.json `"net": ["lan", "discovery.meethue.com"]` (exact hosts, or
+  `"lan"` = any private address / `*.local`); nothing declared, nothing reachable. `host.net.fetch(app, url, {method,
+  headers, body, capture})`, `host.net.useEvents(app, url, headers, onEvent)` (server-sent events: one connection per
+  app + URL for the whole shell, closed 5 s after home/the page is hidden or the screen goes off), `host.net.mdns(app,
+  "_hue._tcp")`, `hasSecret`, `forget`. A LAN device's self-signed certificate is pinned on first use per app +
+  host:port (a changed one fails until `forget`); public hosts use the system CAs. Secrets stay in the PowOS app's
+  private storage per app: `capture: {secret, path}` takes one out of a response, `${secret:name}` in a header sends it
+  - the page never sees it. Example: `~/Projects/lights` (`local.lights`, Philips Hue: rooms, brightness, scenes).
 - Remove an app: `powos app remove <id> [--data]`. Remove everything: `rooted.sh system off`, then delete
   `/var/lib/powos/stdb`.
+
+### The pet - the agents' face on home (`local.pet`, apps/pet + shell/ui/pet.tsx)
+- A small creature floating over home and the PowOS AI page (draggable; its place is kept). Its look comes from live
+  data only: working (an agent is working - the agents' spool), looking at the user (an agent needs them, an approval
+  ask, a work-board task `waiting`, unread agent mail), worried (a shell error, a deploy note saying something failed
+  or was rolled back), sleepy (23-7, or home untouched 3 min), hungry (battery < 20% and not charging), a jump when a
+  task gets done. Still at rest: one short CSS animation per state change, no timers while hidden.
+- **Speak to the user through it:** `powos pet say "<text>" [--mood M] [--from ROLE]` - one short plain line in its
+  speech bubble (3-6 s, batched with others arriving together, a tap opens them all). Use it for "done, try it" and
+  "I need you" moments; it doesn't replace `notify_user` (deploy notes and agent mail already show in the bubble too,
+  alongside their notification). `powos pet mood <M> [--for S]`, `feed`, `name`, `status`, `log`, `hush`; `powos pet
+  help`. Moods: idle, happy, working, looking, worried, sleepy, hungry.
+- One assistant: ONE conversation (the manager's) and ONE chat surface, home's search pill in chat mode
+  (shell/ui/assistant.ts `openAssistant`); PowOS AI's page is that conversation's history + the work board. The pet is
+  its face: a tap listens right there (its bubble shows the transcript, then the reply; a tap on the bubble opens the
+  chat surface), a long press opens PowOS AI's page. Removing the app (`powos app remove local.pet`) removes the pet.
+
+### Smart glasses (Even Realities G2 / G1) - docs/GLASSES.md
+- The PowOS app drives the glasses over raw BLE (no Even app): `targets/android/app/.../glasses/` (G2: app-layer auth,
+  heartbeat, teleprompter text, input, mic; G1: Nordic UART, text, 1-bit bitmaps, wear/battery events).
+- Pairing is on the phone: control center -> glasses tile -> pair (Android's companion dialogs, one per arm); then they
+  reconnect by themselves (Android's background connect + companion presence; no polling).
+- Their screen is a shell page, `shell/glasses/` (mode `glasses`, loaded off screen while connected): the HUD
+  (`glasses/hud.tsx`: time, newest notification, PowOS AI's last reply; tap = next view, double tap = ask PowOS AI
+  by voice on the G2, scroll = through it), or a PowOS app's manifest `"glasses": {"entry": ...}` picked on the phone's
+  glasses screen. Hot-reloaded as any shell file (`shell/push.sh`).
+- The G2 gets TEXT (its teleprompter - the confirmed path); pictures to the G2 are an unverified guess, behind the
+  `g2Raster` option. The G1 gets 1-bit pictures.
+- `powos glasses [status|show TEXT|clear|connect|disconnect|mic on|off]` from PowOS (through the app's run dir).
+- Bridge: `powos.glasses.*` + events `glasses.state|input|transcript|audio|message` (shell/types.ts).
 
 ### Status
 - ✅ On hardware (OnePlus Open, 2026-10-19):
@@ -354,13 +461,45 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
   (module disable / service off / remove the app); if the home screen breaks, roll back first, then report.
 - Confirm first (via `manager`): anything irreversible or that can lose data (deleting volumes or user data, wipes,
   flashing kernel/boot, force-pushing master) and externally visible behaviour (the Discord bot, exposed ports, auth).
-- Deferred by the user for now: containers on the phone, the /dev/fuse rule, cgroup v2, a custom kernel.
+- Deferred by the user for now: the /dev/fuse rule, moving memory/cpu to cgroup v2. (The containers kernel is flashed
+  and phone containers run with hard limits since 2026-10-20.)
 - Never type into existing tmux sessions, on the phone or on the Mac: they are live Claude sessions. Open a fresh shell.
 - Don't inject touches/keys while the user is using the phone: `dumpsys power | grep lastUserActivityTime` must
   show more than 120000 ms ago.
 - Never weaken SELinux (no setenforce, no broad allow rules). Don't route around a denial; tell the user.
-- Mark every workaround `HACK:` with why and the real fix. Never print secrets or tokens.
+- Mark every workaround `HACK:` with why and the real fix, and add it to the HACK registry (`docs/REMOTE-POWOS.md` §4)
+  in the same commit (`test/tier1/test-hack-registry.sh` checks). Never print secrets or tokens.
+- Nothing goes on a host without a unit (`powos units`, below): every package, file, watcher or daemon you install has
+  a manifest with owner, purpose, limits and removal, and dependencies go INSIDE an app or a container, not the host.
 - Recovery if the phone UI breaks: disable the Magisk module (above) and reboot.
+
+## Units: what is installed and running, on every host (`powos units`)
+The rule: nothing is installed or left running host-wide without an overview or a limit. A **unit** is anything that
+installs files or runs processes on a host - a PowOS app, a container, a system component, a package dependency, a
+watcher/daemon. Each has a manifest (`/etc/powos/units.d/<id>.json`; the phone's Android side `/data/powos/units.d`,
+the Magisk module's own `powos-units/`; the Mac `~/.config/powos/units.d`; a user's own installs
+`~/.config/powos/units.d`): id, owner (`app:<id>` | `agent:<role>` | `user` | `system:<installer>`), purpose, host,
+what it installs (`packages`, `files`, `edits` = shared files it changes, never deleted), what it runs (`processes`:
+`match` regex | `pidfile` + `tree` | `cgroup` | `container` | `systemd`), `limits` (memory, cpus, pids - or
+`unbounded` with the reason), `autosleep` (powos-sleep-common's key), and `remove` (stop, commands, keep).
+- `powos units` - this host's units: running / asleep / stopped / installed, owner, memory, CPU, limits; orphans
+  (found with no clear owner) marked for the user. `show <id>`, `check` (drift: packages, files, processes and
+  Docker containers no unit claims; a unit's process outside its cgroup), `remove <id> [--dry-run] [--yes]` (the plan
+  first), `register`, `unregister`, `enforce` (each running unit with limits into a cgroup of its own - the
+  containers' hybrid cgroups on the phone, cgroup v2 elsewhere; macOS has none), `baseline` (adopt a host's
+  pre-existing base once), `publish` (to the PowOS AI page's "installed & running" section, per host).
+- The install paths register by themselves: `powos app install` (the app; `remove` unregisters), `powos containers run`
+  (`container.<name>`, its cgroup and limits; `rm` / `--rm` unregister), the rooted deploy (`units/phone/`,
+  `units/phone-android/`), the system module (`units/system-module/`). A native/sandbox service is put in its unit's
+  cgroup by powos-runtime before it execs (limits: its manifest's, else twice its budget's memMB) - nothing long-running
+  is unbounded. On the phone: `sh /data/powos/powos-units.sh ...` for Android's side.
+- **Dependencies belong inside an app or a container, not on the host.** Need a tool or a library? Put it in the
+  app's container image (`backend.container.image`) or `powos containers run` it. A host install is the exception: it
+  needs a unit in `units/<host>/` in the same commit (`test/tier1/test-units-registry.py` fails a deploy script that
+  installs anything no unit claims), and `powos units check` shows anything installed by hand.
+- What was removed or registered on a host, and how to undo it: `docs/UNITS-LOG.md` (one row per action). GPU
+  benchmarks on the phone belong in a container, not host packages: `powos-gpu-bench build|vk|gl` (unit `gpu-bench`;
+  not run yet - see the log).
 
 ## Game modding (`powos mods`)
 - **Native v2 mod manager (primary path — see docs/MODDING-V2.md).** Per-game

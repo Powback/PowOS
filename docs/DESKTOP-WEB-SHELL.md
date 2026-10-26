@@ -1,7 +1,8 @@
 # The web shell as the PowOS desktop shell
 
-Status: research, 2026-10-19. Nothing here is built yet. This is phase 7 of `shell/DESIGN.md` ("the same `shell/`
-as the desktop shell under KWin, replacing plasmashell"), worked out far enough to start.
+Status: research, 2026-10-19; **phase 0 built 2026-10-20** (`sources/powos-shell/`, `shell/ui/panel.tsx`; see "Phase 0:
+what runs" at the end). This is phase 7 of `shell/DESIGN.md` ("the same `shell/` as the desktop shell under KWin,
+replacing plasmashell"), worked out far enough to start.
 
 Goal: the PowOS desktop's panel/taskbar, launcher, home with widgets, notifications, system tray, quick settings,
 OSDs, lock-screen face and window overview are the web shell (`shell/`, Preact + TypeScript, hot-reloaded), the
@@ -340,3 +341,121 @@ sources). About 600 lines of C++:
 5. Try it in a VM (`docs/DUAL-BOOT-VM.md` / the Tier-C VM), never on a running workstation session first.
    Success: the panel reserves space, maximized windows stop above it, clicking a task activates or minimizes it,
    and saving `ui/panel.tsx` in the override folder redraws the panel in place.
+
+### Phase 0: what runs (2026-10-20)
+
+`sources/powos-shell/` (CMake; built in the image by the Containerfile's `powos-shell-builder` stage, shipped but not
+started) and `shell/ui/panel.tsx` (`index.html?mode=panel`). Tested in a nested KWin 6.7 (X11-windowed, Xvfb, llvmpipe)
+in a Fedora 44 container - `sources/powos-shell/dev/nested.sh`, because this Mac has no KVM for the VM. There:
+
+- the panel is a layer surface along the bottom (top layer, exclusive zone 48): a maximized KWrite stops at y=752 of 800;
+- the window list is live over `org_kde_plasma_window_management` (granted by `org.powos.shell.desktop`, the real KWin
+  check): clicking a task activates it, clicking the active one minimizes it, again restores it;
+- the launcher button grows the surface to 520 px (`panel.height`), lists KSycoca's apps with theme icons on
+  `powos://icon/`, and starts one through `KIO::ApplicationLauncherJob`;
+- saving `ui/panel.tsx` into `~/.config/powos/shell/` reloads the panel in place (`files.changed`);
+- first paint 0.6 s after navigation; RSS 550 MB host + 280 MB renderer + 2x65 MB zygotes, under software GL.
+
+Not tested yet: a real Plasma session next to plasmashell (its own panel removed), a VM boot of the image, multiple
+screens, real GPU numbers. One `HACK:` (all of the process's windows are layer surfaces, `src/main.cpp`).
+
+
+## Windows over the PowOS home (plan, 2026-10-22)
+
+Board task `powos-home-as-the-desktop-linux-android-apps-as`. The desktop home (mode=desktop, `src/home.*`, a
+bottom-layer surface) is the desktop expert's; this is the windows side: apps as windows over it, a taskbar, focus,
+minimise, close, the switcher.
+
+**What exists**
+- Linux apps are KWin windows; the home is a bottom-layer surface, so every window is already over it.
+- Android apps as windows (the phone's rooted session): `powos-android-app <pkg>` gives the app its own Android virtual
+  display through scrcpy and shows it as a Wayland window (app_id `android-<pkg>`, KWin decorations, resize, input
+  back to the app). `powos-android-tasks` puts each app running on the phone's own screen in the taskbar as a
+  minimized stand-in window; activating the stand-in moves the app into a real window. The PowOS app writes an
+  `android-<pkg>.desktop` per app into `/run/powos-app/share/applications` (52 on the phone), which is on
+  powos-shell's `XDG_DATA_DIRS`: `apps.list` already lists them and `apps.launch` runs their Exec.
+- powos-shell: `Windows` over `TaskManager::TasksModel` (`windows.list/activate/minimize`, `windows.changed`,
+  coalesced 50 ms), granted `org_kde_plasma_window_management` by `org.powos.shell.desktop`; phase 0's `panel` role
+  (`src/panel.*`, `ui/panel.tsx`: a bottom layer surface with an exclusive zone, a launcher button and the window
+  list) - built, tested nested, not started on the phone (`POWOS_SHELL_ROLES` defaults to `home`).
+
+**What's missing (in order)**
+1. `windows.close` and an `android` flag on `DesktopWindow` (app id `android-*`; the stand-ins marked `standin`:
+   minimized placeholders, shown as "on the phone's screen").
+2. The taskbar on the phone's session, toggleable: `powos-desktop-shell taskbar on|off` (roles `home panel`).
+   Plasma's own panel stays until ours is proven; with both, ours sits above it (two exclusive zones).
+3. The taskbar's actions: click = activate / minimize the active one, middle click or the close button = close.
+   Android windows get a small badge.
+4. Proof: one Linux app (Konsole) and one Android app (a stand-in activated -> a scrcpy window) over the home, both in
+   the taskbar, recorded with Android's screencap of the activity (KWin's capture comes back empty on Anland) while
+   the user has the desktop open.
+5. Then: the switcher (Alt+Tab / a swipe) over `windows.*` with thumbnails (`KWin.ScreenShot2`), virtual desktops,
+   grouping, and replacing Plasma's panel.
+
+### Change of direction (2026-10-22): native floating windows on the Android home
+
+The Plasma-hosted shell is parked (powos-shell autostart off, `powos-desktop-shell taskbar off`; the code above stays).
+The PowOS desktop is the unfolded Android home exactly as it is; apps float over it.
+
+- **Mechanism (spike, measured on the phone):** Android's own freeform windowing. OxygenOS 16 coerces
+  `--windowingMode 5` to full screen until the developer setting `enable_freeform_support` is 1 (global; set on the
+  phone 2026-10-22 20:46, no reboot needed; undo with `settings delete global enable_freeform_support`). With it on,
+  Calculator opened as a freeform window over home (bounds 565,272-1703,2294) and `am task resize` moved/resized it.
+  OnePlus's own APIs (`FlexibleWindowManager.startAnyActivity` / `calculateFlexibleWindowBounds`,
+  `startFlexibleWindowForRecentTasks`, `OplusZoomWindowManager.startZoomWindow`) opened apps full screen or as a
+  split pocket when called from outside its launcher; Settings is on OnePlus's no-floating list.
+- **Slice 1:** apps opened from home on the unfolded screen launch freeform (`system/AppWindows.kt`, cascaded,
+  half width x two thirds height); folded, full screen as before.
+- **Missing:** a title bar (OxygenOS draws no caption for freeform tasks), move/resize by touch, minimise to the
+  dock, running windows in the dock; then Linux (KWin) apps through the same model.
+
+## Plasma as an app and as the web launcher's backend (plan, 2026-10-22)
+
+The user likes Plasma's interface: it stays, as a PowOS app, and KWin/Plasma become the Linux-side backend the web
+home drives. Nothing is removed. Board task "Plasma as app + backend for the web launcher" (owner powos-desktop).
+
+**(1) Plasma, the app.** A "Plasma" entry in the drawer opens the full Plasma desktop (the engine's MainActivity, the
+"PowOS" activity, as OpenPowosApp and powos-open-task's "desktop" fallback already do). The paused powos-shell host
+stays paused: the drawer entry opens Plasma's own shell, not ours.
+- Data path: `org.powos.plasma.desktop` (OnlyShowIn=X-PowOS, so Kickoff never lists Plasma inside Plasma; Exec
+  `powos-plasma`) -> powos-apps-export -> apps.tsv -> Runtime.linuxApps -> `apps.list` (kind linux) -> drawer tap ->
+  `apps.launch` -> Runtime.launch sees PLASMA_COMMAND -> showDesktop().
+
+**(2) KWin/Plasma as the backend.**
+- Apps: KService's view of the menu. powos-apps-export reads the same XDG .desktop entries KService indexes, with
+  Kickoff's rules (NoDisplay/Hidden/OnlyShowIn/NotShowIn, first id wins) and Plasma's icon theme. Exists; it ran only
+  on app start and pacman calls from the app. Now event-driven: kded6 rebuilds KSycoca when an application dir
+  changes. KF6 (KService 6.31) no longer broadcasts `org.kde.KSycoca.notifyDatabaseChanged` on D-Bus (no emitter left,
+  measured); its clients watch the database file. So `powos-apps-watch` does too: one inotify watch on
+  ~/.cache (a new ksycoca6_*), blocked at rest -> the export -> the app's FileObserver on the export's last rename
+  (icons/.icon-names) reloads the list -> `apps.changed` -> the drawer.
+- Opening: exists. Runtime.openRooted -> `powos-open-task` -> KWin's org.powos.WindowTasks.show (pkgs/kwin 0013):
+  an existing window comes back, else the app starts and its first window becomes its own Android task.
+- Window list: exists for the dot. powos-sleep-gui writes running/apps.json from KWin's window list (a KWin script,
+  signals only) -> RunningApps.linux -> `apps.running` -> ui/running.ts (5472a10's dot in the dock).
+- Missing: Linux windows as floating windows on home pages (2b31282/31634aa do Android's). KWin's exported window
+  tasks are Android tasks, so they can go through the same freeform path (AppWindows/WindowFrames, `windows.list`)
+  once WindowTasks opens them freeform on the unfolded screen; their page binding is desktops.ts's as is.
+
+**(3) Into the PowOS shade.** Built 2026-10-23 (slices 3 + 4, unit plasma-bridge): `powos-plasma-bridge` in the session
+and `PlasmaBridge.kt` in the app, through run/plasma/{out,in}. What changed from the plan below: notifications come from
+a *watcher* of Plasma's server (`org.kde.NotificationManager.RegisterWatcher`, KDE Connect's way: it hands us the id),
+and only their close from a monitor, since Plasma sends NotificationClosed to the sending app alone. They become
+Android notifications (tag "plasma"), so the shade, its banner, buttons and swipe need nothing new. The clipboard
+reaches the session from Android only while one of the app's windows has focus (Android's rule).
+- Notifications: a session helper as a second org.freedesktop.Notifications *monitor* (BecomeMonitor on Notify /
+  NotificationClosed, never the server: plasmashell stays the server) -> a spool in the run dir (AgentsSpool's
+  pattern: FileObserver) -> the shade's notifications list, actions back over D-Bus ActionInvoked.
+- Clipboard: Klipper's org.kde.klipper.klipper clipboardHistoryUpdated signal -> getClipboardContents -> the app sets
+  Android's clip (and Android's clip -> setClipboardContents), one direction at a time to avoid echo loops.
+- KDE Connect: its devices' notifications already arrive as Plasma notifications, so (3a) covers them; battery and
+  "find my phone" from org.kde.kdeconnect.device later, only if the user wants them.
+
+**Slices**
+1. Plasma app in the drawer + the Linux list event-driven from KService's rebuilds, launched through KWin (this
+   slice: org.powos.plasma.desktop, powos-apps-watch, the app's FileObserver and PLASMA_COMMAND; unit android-apps).
+2. Linux windows floating on home pages: WindowTasks freeform when unfolded, frames and the dock's windows for them.
+3. Plasma notifications (KDE Connect's included) in the shade.
+4. Clipboard both ways.
+
+Cost rule for every slice: zero CPU at rest. D-Bus signals and inotify only, no polling. (3) is D-Bus throughout.

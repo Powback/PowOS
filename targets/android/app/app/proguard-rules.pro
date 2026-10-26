@@ -11,3 +11,6 @@
 -dontwarn android.view.InputMonitor
 -dontwarn android.view.RemoteAnimationTarget
 -keep class dev.omalauncher.system.gesture.GestureMonitor$Receiver { *; }
+
+# Run as root with app_process from this APK (system/OemCaption.kt): its main must keep its name.
+-keep class dev.omalauncher.system.OemCaption { public static void main(java.lang.String[]); }

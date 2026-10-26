@@ -1,6 +1,5 @@
 package dev.omalauncher.system.gesture
 
-import android.animation.ValueAnimator
 import android.app.ActivityOptions
 import android.app.PendingIntent
 import android.content.ComponentName
@@ -17,11 +16,12 @@ import android.os.Looper
 import android.os.Parcel
 import android.provider.Settings
 import android.util.Log
+import android.view.Choreographer
 import android.view.RemoteAnimationTarget
 import android.view.SurfaceControl
-import android.view.animation.DecelerateInterpolator
 import androidx.annotation.RequiresApi
 import dev.omalauncher.system.HiddenApi
+import dev.omalauncher.system.Switcher
 import java.util.concurrent.Executors
 
 /**
@@ -30,10 +30,14 @@ import java.util.concurrent.Executors
  * ILauncherProxy.onInitialize), which launches PowOS's home transiently behind the app and gives PowOS the app's
  * surface (a leash) to move; the gesture's end finishes it - to home (home stays), or back to the app.
  *
- * - [drag]: the window shrinks as the finger goes up, its bottom edge under the finger.
- * - [end]: animates to where the gesture went (home, the switcher - also home, the switcher then shown over it - or
- *   back to the app), finishes the transition, then calls back: true when the transition did it, false when it never
- *   came up or was cancelled (the caller then does the plain thing: a home intent).
+ * - [drag]: the window shrinks toward its card in the switcher (home's recents layer, shell/ui/recents.tsx: where that
+ *   card is, [slot], is the page's) as the finger goes up, its bottom edge under the finger and sideways with it, as
+ *   Quickstep's TaskViewSimulator; every frame's progress goes to [onFrame] (the page moves the other cards with it).
+ * - [end]: animates to where the gesture went - home (it shrinks away), the switcher (onto its card exactly: home's
+ *   page is already showing the switcher behind it, so finishing to home leaves the switcher up) or back to the app -,
+ *   finishes the transition, then calls back: true when the transition did it, false when it never came up or was
+ *   cancelled (the caller then does the plain thing: a home intent). A `hold` keeps the window on its card until the
+ *   page has put the app's fresh snapshot on that card (Switcher.settle), then finishes.
  * - Every path finishes: a start that doesn't come in time is given up (and finished at once if it comes later), a
  *   task appearing mid-gesture ends it back to the apps, and WM Shell itself finishes it if PowOS dies (its
  *   RecentsController's death recipient).
@@ -50,19 +54,28 @@ import java.util.concurrent.Executors
  */
 @RequiresApi(Build.VERSION_CODES.BAKLAVA)
 class RecentsTransition private constructor(
-    private val screenHeight: Float,
+    /** The display (px): the windows' full-screen frame. */
+    private val screen: Rect,
 ) {
+    /** Where the app's card is (screen px) - the switcher's slot the window lands on; null: a default slot. */
+    var slot: () -> Rect? = { null }
+
+    /** Every frame the windows move: progress 0 (full screen) .. 1 (on the card), and the sideways / upwards offset (px). */
+    var onFrame: ((progress: Float, dx: Float, dy: Float, home: Float) -> Unit)? = null
+
     enum class End { HOME, SWITCHER, APP }
 
     private enum class State { STARTING, RUNNING, ENDING, DONE }
 
     private val main = Handler(Looper.getMainLooper())
     private var state = State.STARTING
+
+    /** When it was asked for (uptimeMillis): how long WM Shell took is logged. */
+    private val askedAt = android.os.SystemClock.uptimeMillis()
+    private var firstFrameLogged = false
     private var controller: IBinder? = null
     private var apps: List<Leash> = emptyList()
-    private var lift = 0f
-    private var pending: Pair<End, (Boolean) -> Unit>? = null
-    private var animator: ValueAnimator? = null
+    private var pending: Ending? = null
 
     /** The end under way's callback (until the windows got there, or WM Shell called it off). */
     private var ending: ((Boolean) -> Unit)? = null
@@ -73,35 +86,72 @@ class RecentsTransition private constructor(
         val bounds: Rect,
     )
 
-    /** The look of the windows: scale, the bottom edge's lift, opacity. */
+    /**
+     * Where the windows are: [progress] 0 (full screen) .. 1 (on the card's slot), then moved by [dx], [dy] (px), shrunk
+     * about their middle by [shrink], at [alpha].
+     */
     private data class Look(
-        val scale: Float,
-        val lift: Float,
-        val alpha: Float,
+        val progress: Float,
+        val dx: Float,
+        val dy: Float,
+        val shrink: Float = 1f,
+        val alpha: Float = 1f,
+        /** How far into the home zone (0..1): where letting go goes home - the page fades the switcher out with it. */
+        val home: Float = 0f,
     )
 
-    private var look = Look(1f, 0f, 1f)
+    private var look = Look(0f, 0f, 0f)
 
-    /** The finger is [lift] px above where it went down. */
-    fun drag(lift: Float) {
+    /** A gesture's end waiting for the transition to start. */
+    private class Ending(
+        val end: End,
+        val hold: ((() -> Unit) -> Unit)?,
+        val done: (Boolean) -> Unit,
+    )
+
+    /** The finger is [lift] px above where it went down and [dx] px to the side of it. */
+    fun drag(
+        lift: Float,
+        dx: Float,
+        home: Float = 0f,
+    ) {
         if (state == State.DONE || state == State.ENDING) return
-        this.lift = lift
-        look = dragLook(lift)
-        apply(look)
+        look = dragLook(lift, dx, home)
+        // Once per display frame (touch comes in faster than the screen refreshes): the window and the page move
+        // together on the frame, with the newest finger position.
+        if (!framePending) {
+            framePending = true
+            choreographer.postFrameCallback(frame)
+        }
     }
 
-    /** The gesture ended as [end]: animate there and finish; [done] hears whether the transition did it. */
+    private val choreographer = Choreographer.getInstance()
+    private var framePending = false
+    private val frame =
+        Choreographer.FrameCallback {
+            framePending = false
+            if (state == State.RUNNING) apply(look)
+        }
+
+    /**
+     * The gesture ended as [end]: animate there and finish; [done] hears whether the transition did it. [hold], when
+     * given, is called once the windows got there, before finishing: the transition finishes when it calls back.
+     */
     fun end(
         end: End,
+        hold: ((() -> Unit) -> Unit)? = null,
+        /** The finger's speed at the release (px/ms, upwards): the settle carries on with it. */
+        liftSpeed: Float = 0f,
         done: (Boolean) -> Unit,
     ) {
+        releaseSpeed = liftSpeed
         when (state) {
             State.STARTING -> {
-                pending = end to done
+                pending = Ending(end, hold, done)
                 // The start never came: give up (it's finished the moment it comes, if it does).
                 main.postDelayed({
                     if (state == State.STARTING && pending != null) {
-                        val (_, cb) = pending!!
+                        val cb = pending!!.done
                         pending = null
                         state = State.DONE
                         abandoned = end
@@ -110,11 +160,17 @@ class RecentsTransition private constructor(
                     }
                 }, START_TIMEOUT_MS)
             }
-            State.RUNNING -> finishAnimated(end, done)
+            State.RUNNING -> finishAnimated(end, hold, done)
             State.ENDING -> done(true)
             State.DONE -> done(interrupted)
         }
     }
+
+    /** The finger's upward speed at the release (px/ms). */
+    private var releaseSpeed = 0f
+
+    /** The settle's spring (Choreographer-paced) while it runs. */
+    private var settleFrame: Choreographer.FrameCallback? = null
 
     /** Set when the transition was given up before it started: how a late start is finished. */
     private var abandoned: End? = null
@@ -132,16 +188,27 @@ class RecentsTransition private constructor(
             return
         }
         this.controller = controller
+        Log.i(TAG, "started ${android.os.SystemClock.uptimeMillis() - askedAt} ms after it was asked for: " + targets.filterNotNull().joinToString { "task ${it.taskId} mode ${it.mode} at ${it.screenSpaceBounds}" })
         apps =
             targets.filterNotNull().filter { it.mode == RemoteAnimationTarget.MODE_CLOSING && it.leash != null }.map {
                 Leash(it.leash, it.screenSpaceBounds ?: Rect(0, 0, 0, 0))
             }
         state = State.RUNNING
+        // Home (the opening target) is what the switcher is drawn in: shown from the first frame, under the app. WM
+        // Shell leaves the recents target's surface to the recents provider (Quickstep shows its launcher itself).
+        runCatching {
+            val t = SurfaceControl.Transaction()
+            targets.filterNotNull().filter { it.mode == RemoteAnimationTarget.MODE_OPENING && it.leash != null }.forEach {
+                t.setVisibility(it.leash, true)
+                t.setAlpha(it.leash, 1f)
+            }
+            t.apply()
+        }.onFailure { Log.w(TAG, "can't show home under the app", it) }
         apply(look)
         main.postDelayed(watchdog, WATCHDOG_MS)
-        pending?.let { (end, done) ->
+        pending?.let { p ->
             pending = null
-            finishAnimated(end, done)
+            finishAnimated(p.end, p.hold, p.done)
         }
     }
 
@@ -149,9 +216,9 @@ class RecentsTransition private constructor(
     private fun canceled() {
         if (state == State.DONE) return
         stop()
-        pending?.let { (_, done) ->
+        pending?.let { p ->
             pending = null
-            done(false)
+            p.done(false)
         }
         ending?.let { done ->
             ending = null
@@ -167,9 +234,9 @@ class RecentsTransition private constructor(
         val c = controller
         stop()
         c?.let { control(it) { b -> finishCall(b, toHome = false, userLeaveHint = false) } }
-        pending?.let { (_, done) ->
+        pending?.let { p ->
             pending = null
-            done(true)
+            p.done(true)
         }
         ending?.let { done ->
             ending = null
@@ -181,12 +248,13 @@ class RecentsTransition private constructor(
         Runnable {
             if (state == State.RUNNING) {
                 Log.w(TAG, "the recents transition was left running: back to the app")
-                finishAnimated(End.APP) {}
+                finishAnimated(End.APP, null) {}
             }
         }
 
     private fun finishAnimated(
         end: End,
+        hold: ((() -> Unit) -> Unit)?,
         done: (Boolean) -> Unit,
     ) {
         state = State.ENDING
@@ -197,69 +265,178 @@ class RecentsTransition private constructor(
         val from = look
         val to =
             when (end) {
-                End.HOME -> Look(0.3f, screenHeight * 0.45f, 0f)
-                End.SWITCHER -> Look(0.5f, screenHeight * 0.3f, 0f)
-                End.APP -> Look(1f, 0f, 1f)
+                // Shrinks away into home (the layer collapses behind it).
+                End.HOME -> Look(1f, 0f, -screen.height() * 0.04f, shrink = 0.6f, alpha = 0f, home = 1f)
+                // Onto its card exactly.
+                End.SWITCHER -> Look(1f, 0f, 0f)
+                End.APP -> Look(0f, 0f, 0f)
             }
-        animator?.cancel()
-        animator =
-            ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = if (toHome) 220 else 180
-                interpolator = DecelerateInterpolator()
-                addUpdateListener {
-                    val f = it.animatedValue as Float
-                    look = Look(lerp(from.scale, to.scale, f), lerp(from.lift, to.lift, f), lerp(from.alpha, to.alpha, f))
-                    apply(look)
+        val finish = {
+            if (state == State.ENDING) {
+                stop()
+                if (c != null) control(c) { finishCall(it, toHome, userLeaveHint = end == End.HOME) }
+                ending?.let { cb ->
+                    ending = null
+                    cb(true)
                 }
-                addListener(
-                    object : android.animation.AnimatorListenerAdapter() {
-                        override fun onAnimationEnd(animation: android.animation.Animator) {
-                            if (state != State.ENDING) return
-                            stop()
-                            if (c != null) control(c) { finishCall(it, toHome, userLeaveHint = end == End.HOME) }
-                            ending?.let { cb ->
-                                ending = null
-                                cb(true)
-                            }
-                        }
-                    },
-                )
-                start()
             }
+        }
+        // From where the finger left the windows, at its speed: the settle's start speed in its own units (fractions
+        // of the way per second) is the finger's speed through the progress it moved (lift / travel).
+        val travel = (screen.bottom - target().bottom).toFloat().coerceAtLeast(screen.height() * 0.12f)
+        val progressPerSec = releaseSpeed * 1000f / travel
+        val span = to.progress - from.progress
+        val v0 = if (kotlin.math.abs(span) > 0.02f) (progressPerSec / span).coerceIn(-4f, 12f) else 0f
+        settle(v0, { f ->
+            look =
+                Look(
+                    lerp(from.progress, to.progress, f),
+                    lerp(from.dx, to.dx, f),
+                    lerp(from.dy, to.dy, f),
+                    lerp(from.shrink, to.shrink, f),
+                    lerp(from.alpha, to.alpha, f).coerceIn(0f, 1f),
+                    lerp(from.home, to.home, f),
+                )
+            apply(look)
+        }) {
+            if (state != State.ENDING) return@settle
+            // The windows stay where they are (on the card) until the holder lets them go.
+            if (hold != null) hold { main.post(finish) } else finish()
+        }
+    }
+
+    /**
+     * A spring from 0 to 1 starting at speed [v0] (per second), each display frame to [onFrame], then [onDone]: the
+     * drawer's and the shade's settle (their 280 ms ease-out, cubic-bezier(0.2, 0.9, 0.3, 1)) with the finger's
+     * momentum kept - critically damped, so it never overshoots a window past its card. Quickstep settles its windows
+     * with a spring the same way (AnimatedFloat + SpringAnimation from the release velocity).
+     */
+    private fun settle(
+        v0: Float,
+        onFrame: (Float) -> Unit,
+        onDone: () -> Unit,
+    ) {
+        settleFrame?.let(choreographer::removeFrameCallback)
+        var x = 0f
+        var v = v0
+        var last = 0L
+        val cb =
+            object : Choreographer.FrameCallback {
+                override fun doFrame(now: Long) {
+                    if (state != State.ENDING) return
+                    val dt = if (last == 0L) 1f / 120 else ((now - last) / 1e9f).coerceIn(0.001f, 0.05f)
+                    last = now
+                    // Semi-implicit Euler in small steps: steady at 60 or 120 Hz.
+                    var left = dt
+                    while (left > 0f) {
+                        val h = minOf(left, 0.004f)
+                        v += (-SPRING_K * (x - 1f) - SPRING_C * v) * h
+                        x += v * h
+                        left -= h
+                    }
+                    val settled = kotlin.math.abs(x - 1f) < 0.003f && kotlin.math.abs(v) < 0.05f
+                    onFrame(if (settled) 1f else x)
+                    if (settled) {
+                        settleFrame = null
+                        onDone()
+                    } else {
+                        choreographer.postFrameCallback(this)
+                    }
+                }
+            }
+        settleFrame = cb
+        choreographer.postFrameCallback(cb)
     }
 
     /** Done with the windows: no more moving them, the leashes let go. */
     private fun stop() {
         state = State.DONE
+        if (framePending) choreographer.removeFrameCallback(frame)
+        framePending = false
         main.removeCallbacks(watchdog)
-        animator?.cancel()
-        animator = null
+        settleFrame?.let(choreographer::removeFrameCallback)
+        settleFrame = null
         controller = null
         apps.forEach { runCatching { it.surface.release() } }
         apps = emptyList()
     }
 
-    private fun dragLook(lift: Float): Look {
-        val q = (lift / (screenHeight * 0.5f)).coerceIn(0f, 1f)
-        return Look(1f - 0.4f * q, lift, 1f)
+    /** The card's slot (screen px): the page's, or where a card would be (the middle 70% of the screen). */
+    private fun target(): Rect =
+        slot()?.takeIf { it.width() > 0 && it.height() > 0 }
+            ?: Rect(
+                screen.left + (screen.width() * 0.15f).toInt(),
+                screen.top + (screen.height() * 0.15f).toInt(),
+                screen.right - (screen.width() * 0.15f).toInt(),
+                screen.top + (screen.height() * 0.85f).toInt(),
+            )
+
+    /**
+     * The finger [lift] px up: the window's bottom edge stays under it on its way to the card (progress 1 when the
+     * bottom edges meet); past that the window goes on up, slower (a rubber band), and sideways with the finger.
+     */
+    private fun dragLook(
+        lift: Float,
+        dx: Float,
+        home: Float,
+    ): Look {
+        val travel = (screen.bottom - target().bottom).toFloat().coerceAtLeast(screen.height() * 0.12f)
+        val progress = (lift / travel).coerceIn(0f, 1f)
+        val over = (lift - travel).coerceAtLeast(0f)
+        // Into the home zone the window shrinks and fades toward home, as the release there will take it.
+        return Look(progress, dx, -over * RUBBER, shrink = 1f - 0.35f * home, alpha = 1f - 0.6f * home, home = home)
     }
 
-    /** The windows as [look] says: scaled about their bottom middle, the bottom edge [Look.lift] px up. */
+    /** The windows as [look] says: their frame between full screen and the card, moved, shrunk, faded. */
     private fun apply(look: Look) {
         if (state != State.RUNNING && state != State.ENDING) return
+        onFrame?.invoke(look.progress, look.dx, look.dy, look.home)
+        if (!firstFrameLogged && look.progress > 0f) {
+            firstFrameLogged = true
+            Log.i(TAG, "window moving ${android.os.SystemClock.uptimeMillis() - askedAt} ms after the down")
+        }
         if (apps.isEmpty()) return
+        val card = target()
+        val p = look.progress
+        val w = lerp(screen.width().toFloat(), card.width().toFloat(), p) * look.shrink
+        val h = lerp(screen.height().toFloat(), card.height().toFloat(), p) * look.shrink
+        val cx = lerp(screen.exactCenterX(), card.exactCenterX(), p) + look.dx
+        val cy = lerp(screen.exactCenterY(), card.exactCenterY(), p) + look.dy
+        val scale = w / screen.width()
+        val left = cx - w / 2
+        val top = cy - h / 2
+        val radius = Switcher.slotRadius * p
         runCatching {
             val t = SurfaceControl.Transaction()
             for (app in apps) {
                 if (!app.surface.isValid) continue
-                val w = app.bounds.width().toFloat().takeIf { it > 0 } ?: continue
-                val h = app.bounds.height().toFloat().takeIf { it > 0 } ?: continue
-                t.setScale(app.surface, look.scale, look.scale)
-                t.setPosition(app.surface, app.bounds.left + w * (1 - look.scale) / 2, app.bounds.top + h * (1 - look.scale) - look.lift)
+                if (app.bounds.width() <= 0 || app.bounds.height() <= 0) continue
+                t.setScale(app.surface, scale, scale)
+                t.setPosition(app.surface, left + (app.bounds.left - screen.left) * scale, top + (app.bounds.top - screen.top) * scale)
                 t.setAlpha(app.surface, look.alpha)
+                corners(t, app, radius / scale)
             }
             t.apply()
         }.onFailure { Log.w(TAG, "can't move the app's window", it) }
+    }
+
+    /**
+     * The window's corners rounded as the card's, [radius] in the window's own px. HACK: Transaction.setCornerRadius is
+     * hidden (the call Quickstep makes); reflected, and skipped where it isn't there. Real fix: none for an app.
+     */
+    private fun corners(
+        t: SurfaceControl.Transaction,
+        app: Leash,
+        radius: Float,
+    ) {
+        val m = cornerRadius ?: return
+        runCatching {
+            t.setCrop(app.surface, Rect(0, 0, app.bounds.width(), app.bounds.height()))
+            m.invoke(t, app.surface, radius)
+        }.onFailure {
+            Log.w(TAG, "no rounded corners for the window", it)
+            cornerRadius = null
+        }
     }
 
     /** IRecentsAnimationRunner, the transition's side in PowOS (WM Shell calls it; hand-written onTransact). */
@@ -322,6 +499,23 @@ class RecentsTransition private constructor(
         private const val FINISHED_CALLBACK_ON_TRANSITION_FINISHED = 1
 
         private const val START_TIMEOUT_MS = 700L
+
+        /**
+         * The settle's spring (1/s², 1/s): critically damped (c = 2 sqrt k), settled in about 280 ms from rest - the
+         * drawer's and the shade's settle.
+         */
+        private const val SPRING_K = 500f
+        private val SPRING_C = 2f * kotlin.math.sqrt(SPRING_K)
+
+        /** Past the card, the window goes up this much of the finger's way. */
+        private const val RUBBER = 0.3f
+
+        /** SurfaceControl.Transaction.setCornerRadius (hidden), looked up once. */
+        private var cornerRadius: java.lang.reflect.Method? =
+            runCatching {
+                HiddenApi.allow()
+                SurfaceControl.Transaction::class.java.getMethod("setCornerRadius", SurfaceControl::class.java, Float::class.javaPrimitiveType)
+            }.getOrNull()
         private const val WATCHDOG_MS = 10_000L
 
         /** The transition's blocking calls go here, off the main thread (as Quickstep's UI helper executor). */
@@ -340,10 +534,10 @@ class RecentsTransition private constructor(
             context: Context,
             recentTasks: IBinder,
             home: ComponentName,
-            screenHeight: Float,
+            screen: Rect,
         ): RecentsTransition? {
             HiddenApi.allow()
-            val transition = RecentsTransition(screenHeight)
+            val transition = RecentsTransition(screen)
             return runCatching {
                 val creator = ActivityOptions.makeBasic().setPendingIntentCreatorBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS)
                 // As Quickstep's SystemUiProxy: an intent for the package, the component filled in from the next one.
@@ -356,6 +550,8 @@ class RecentsTransition private constructor(
                         creator.toBundle(),
                     )
                 val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setComponent(home).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        // Not Home pressed: home's page keeps what it shows (its recents layer is coming up).
+                        .putExtra(Switcher.EXTRA_RECENTS, true)
                 val options = ActivityOptions.makeBasic()
                 ActivityOptions::class.java.getMethod("setTransientLaunch").invoke(options)
                 val data = Parcel.obtain()

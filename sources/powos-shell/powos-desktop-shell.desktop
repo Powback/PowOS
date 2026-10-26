@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PowOS desktop home
+Comment=The web shell's home under Plasma's windows (powos-desktop-shell disable to turn it off)
+Exec=/usr/bin/powos-desktop-shell start --auto
+OnlyShowIn=KDE;
+NoDisplay=true
+X-KDE-autostart-phase=2
+X-KDE-StartupNotify=false

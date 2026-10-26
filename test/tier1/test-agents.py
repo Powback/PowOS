@@ -115,6 +115,19 @@ class AgentsSpoolTest(unittest.TestCase):
         self.assertNotIn("tee", text, "Bash's hint stops at the first |")
         self.assertIn("secret.txt", text)
 
+    def test_board_task_held(self):
+        """`work`: the board task the agent's own step/progress calls name; assigning claims nothing; done/queued lets go."""
+        bash = lambda c: self.hook(hook_event_name="PreToolUse", agent_id="A1", agent_type="powos-comms", tool_name="Bash", tool_use_id=c[:8], tool_input={"command": c})
+        work = lambda: {r["id"]: r for r in self.fold()["agents"]}["mac:S1/A1"]["work"]
+        bash("powos agents task set other --owner switcher --note 'yours'")
+        self.assertEqual(work(), "")
+        bash('cd x && powos agents task set board-live --step "derive state" && git push')
+        self.assertEqual(work(), "board-live")
+        bash("tools/phone/verify/queue.sh add --close --name 'a b' board-live check.sh")
+        self.assertEqual(work(), "")
+        bash("powos agents task set t2 --progress=1/3\npowos agents task done t2")
+        self.assertEqual(work(), "")
+
     def test_three_failures_block(self):
         for i in range(3):
             self.hook(hook_event_name="PostToolUseFailure", tool_name=f"T{i}", tool_use_id=str(i), error="no")

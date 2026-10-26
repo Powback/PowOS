@@ -5,7 +5,7 @@
 # expected state without hitting forbidden failures — capturing the serial log
 # and periodic framebuffer screenshots for evidence. This is the automated
 # real-boot check the repo previously lacked (see the "Tier-2 VM testing"
-# ❌ row in CLAUDE.md's Feature Status).
+# ❌ row in docs/REFERENCE-X86.md's Feature Status).
 #
 # It cannot run on GitHub's runners (no KVM); run it on a KVM-capable Linux host
 # or a privileged container with /dev/kvm. Falls back to TCG (slow) without KVM.

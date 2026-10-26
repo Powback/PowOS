@@ -17,6 +17,8 @@ private const val USAGE = """owl: the widget language checker
                                        Markdown on stdout; --base holds the main-branch copies
   owl programs <file.owl>...           programs and packages, one "<kind> <name>" per line
   owl index <repo>                     write index.json for every reviewed widget in <repo>/widgets
+  owl trees <file.owl> --theme <colors.toml> --variants <variants.json> [--data <data.json>] [--live]
+                                       the node trees the web shell draws, per tile size (the widget preview)
 """
 
 fun main(args: Array<String>) {
@@ -28,6 +30,7 @@ fun main(args: Array<String>) {
             "review" -> review(rest)
             "programs" -> programs(rest)
             "index" -> index(rest)
+            "trees" -> trees(rest)
             else -> usage()
         }
     exitProcess(code)

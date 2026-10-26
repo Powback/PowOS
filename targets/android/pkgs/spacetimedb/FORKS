@@ -1,0 +1,3 @@
+# Local git repos this package builds from, mounted read-only at /forks/<name> by build-pkgs.sh.
+# <name> <path on the build host>  (~ = the home of whoever runs build-pkgs.sh)
+SpacetimeDB ~/Projects/SpacetimeDB

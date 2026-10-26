@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""powos pet - speak through PowOS's pet, the face of its agents (the local.pet app, shell/ui/pet.tsx).
+
+Writes the device's local-pet module (apps/pet) over the SpacetimeDB HTTP API as the PowOS user's CLI identity, like
+`powos agents`. The shell shows each line in the pet's speech bubble at once (it's subscribed while home shows).
+"""
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+DB = "local-pet"
+SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
+MOODS = ("idle", "happy", "working", "looking", "worried", "sleepy", "hungry")
+
+HELP = """powos pet - speak through PowOS's pet (the small companion on home and the PowOS AI page)
+
+The pet is the face of the agents: it looks busy while they work, looks at the user when something
+waits on them, worries at a shell error or a failed deploy, gets sleepy at night and hungry on low
+battery - all from live data, nothing to set. What you say through it shows in its speech bubble
+(3-6 s, one at a time; a tap on the bubble opens the rest). Keep it to one short, plain line.
+
+Usage:
+  powos pet on|off        The pet at all, everywhere (home, over apps, the desktop); off by default. Off, it
+                          shows nothing and costs nothing; what it knows is kept. (Also: Settings > Style > Pet.)
+  powos pet say <text...> [--mood M] [--from ROLE]
+                          Say a line in its bubble (and its history). --mood shows M for 30 s.
+                          --from: who's speaking (default: $POWOS_AGENTS_ROLE, else "agent").
+  powos pet mood <M> [--for SECONDS]
+                          Show a mood for a while (default 30 s); `powos pet mood clear` ends it.
+  powos pet feed          Feed it (full energy, a happy moment).
+  powos pet name <name>   Rename it.
+  powos pet status [--json]   Its name, level, xp, energy, mood.
+  powos pet log [N] [--json]  The last N (default 10) lines said through it.
+  powos pet hush          Forget what it said (the history).
+  powos pet goto <where> [--say TEXT]
+                          Send it somewhere on home: a widget's or app's name ("lights"), a tile key, a CSS
+                          selector (".bar"), or "x,y" in CSS px. It walks and jumps there (the nearest edge it
+                          can stand on) and says TEXT when it arrives.
+  powos pet overlay on|off
+                          Show it over apps too (a small window at a screen edge; on by default) or not.
+
+Moods: idle, happy, working, looking (at the user), worried, sleepy, hungry.
+The user talks to it by tapping it (dictation, sent to the manager; the reply streams into its
+bubble); a long press opens PowOS AI.
+
+Examples:
+  powos pet say "Switcher fix is live - try swiping up" --mood happy --from coder
+  powos pet say "I need you: approve the kernel flash" --mood looking
+"""
+
+
+def die(msg, code=1):
+    print(f"powos pet: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def token():
+    p = os.path.expanduser("~/.config/spacetime/cli.toml")
+    try:
+        with open(p) as f:
+            for line in f:
+                k, _, v = line.partition("=")
+                if k.strip() == "spacetimedb_token":
+                    return v.strip().strip('"')
+    except OSError:
+        pass
+    return None
+
+
+def http(path, body, ctype):
+    headers = {"Content-Type": ctype}
+    tok = token()
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
+    req = urllib.request.Request(f"{SERVER}{path}", data=body, method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.read().decode()
+    except urllib.error.HTTPError as e:
+        msg = e.read().decode(errors="replace").strip() or str(e)
+        if e.code == 404 or "not found" in msg.lower():
+            die("the pet isn't installed here (the local.pet app: powos app install <apps/pet>)")
+        die(f"{path.rsplit('/', 1)[-1]}: {msg}")
+    except (urllib.error.URLError, OSError) as e:
+        die(f"SpacetimeDB isn't reachable at {SERVER} ({e})")
+
+
+def call(reducer, *args):
+    http(f"/v1/database/{DB}/call/{reducer}", json.dumps(list(args)).encode(), "application/json")
+
+
+def rows(query):
+    out = json.loads(http(f"/v1/database/{DB}/sql", query.encode(), "text/plain"))
+    res = out[0]
+    names = [e["name"]["some"] for e in res["schema"]["elements"]]
+    return [dict(zip(names, r)) for r in res["rows"]]
+
+
+def opts(args, takes):
+    """Splits --flags (with a value when in [takes]) from the words."""
+    words, flags = [], {}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--") and "=" in a:
+            k, v = a.split("=", 1)
+            flags[k] = v
+        elif a in takes:
+            if i + 1 >= len(args):
+                die(f"{a} needs a value")
+            flags[a] = args[i + 1]
+            i += 1
+        elif a.startswith("--") and a not in ("--json",):
+            die(f"unknown option {a} (powos pet help)")
+        elif a == "--json":
+            flags[a] = True
+        else:
+            words.append(a)
+        i += 1
+    return words, flags
+
+
+def mood_of(m):
+    m = (m or "").strip().lower()
+    if m in ("", "clear", "none", "off"):
+        return ""
+    if m == "look":
+        m = "looking"
+    if m not in MOODS:
+        die(f"mood: one of {', '.join(MOODS)}")
+    return m
+
+
+def energy_now(p, now_ms):
+    hours = max(0, now_ms - int(p["fed"])) / 3_600_000
+    return max(0, int(p["energy"]) - int(hours * 3))
+
+
+def main(argv):
+    if not argv or argv[0] in ("help", "--help", "-h"):
+        print(HELP, end="")
+        return
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "say":
+        words, f = opts(rest, ("--mood", "--from"))
+        text = " ".join(words).strip()
+        if text == "-":
+            text = sys.stdin.read().strip()
+        if not text:
+            die('say what? powos pet say "<text>" [--mood M]')
+        who = f.get("--from") or os.environ.get("POWOS_AGENTS_ROLE") or "agent"
+        call("say", text[:280], mood_of(f.get("--mood")), who)
+    elif cmd == "mood":
+        words, f = opts(rest, ("--for",))
+        if not words:
+            die("mood: powos pet mood <M> [--for SECONDS] (or clear)")
+        try:
+            secs = int(f.get("--for", 0))
+        except ValueError:
+            die("--for: seconds")
+        call("set_mood", mood_of(words[0]), max(0, min(secs, 86400)))
+    elif cmd == "feed":
+        call("feed")
+    elif cmd in ("name", "rename"):
+        name = " ".join(rest).strip()
+        if not name:
+            die("name: powos pet name <name>")
+        call("rename", name)
+    elif cmd == "hush":
+        call("hush")
+    elif cmd in ("on", "off"):
+        call("set_enabled", cmd == "on")
+        print(f"pet {cmd}")
+    elif cmd == "goto":
+        words, f = opts(rest, ("--say",))
+        where = " ".join(words).strip()
+        if not where:
+            die('goto: powos pet goto <name|selector|x,y> [--say "..."]')
+        call("goto", where, (f.get("--say") or "")[:280])
+    elif cmd == "overlay":
+        if not rest or rest[0] not in ("on", "off"):
+            die("overlay: powos pet overlay on|off")
+        call("set_overlay", rest[0] == "on")
+    elif cmd == "status":
+        _, f = opts(rest, ())
+        r = rows("SELECT * FROM pet")
+        if not r:
+            die("no pet yet (install local.pet)")
+        p = r[0]
+        import time
+
+        now = int(time.time() * 1000)
+        mood = p["mood"] if p["mood"] and int(p["mood_until"]) > now else ""
+        st = {"name": p["name"], "level": p["level"], "xp": p["xp"], "energy": energy_now(p, now), "mood": mood or "live"}
+        if f.get("--json"):
+            print(json.dumps(st))
+        else:
+            print(f"{st['name']} - level {st['level']} ({st['xp']} xp), energy {st['energy']}%, mood: {st['mood']}")
+    elif cmd == "log":
+        words, f = opts(rest, ())
+        n = int(words[0]) if words and words[0].isdigit() else 10
+        r = sorted(rows("SELECT * FROM said"), key=lambda s: int(s["id"]))[-n:]
+        if f.get("--json"):
+            print(json.dumps(r))
+        else:
+            import time
+
+            for s in r:
+                t = time.strftime("%H:%M", time.localtime(int(s["at"]) / 1000))
+                print(f"{t}  {s['from']}: {s['text']}" + (f"  ({s['mood']})" if s["mood"] else ""))
+    else:
+        die(f"unknown command {cmd} (powos pet help)")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

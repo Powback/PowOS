@@ -23,7 +23,8 @@
 #   --slot NAME ships one of those too, for trying it on the phone before it moves to overlays/. The recents slot
 #   (PowOS as the recents provider: switcher, shade) needs --priv-app: SystemUI binds only a system package's service.
 # - module/: the boot watchdog (post-fs-data.sh counts boots, service.sh clears the count once Android is up; two
-#   that never finish and the module disables itself).
+#   that never finish and the module disables itself), and load-kernel-modules.sh: the containers kernel's nftables
+#   modules (kernel/out/modules, when built), insmodded at boot in the background (docs/PHONE-KERNEL-CONTAINERS.md §9).
 #
 # Output: ~/Projects/android-app-dev/output/powos-system-module.zip (install: magisk --install-module, reboot).
 set -euo pipefail
@@ -107,7 +108,18 @@ cp "$APK" "$M/system/priv-app/PowOS/PowOS.apk"
     echo '</permissions>'
 } > "$M/system/etc/permissions/privapp-permissions-com.powos.app.xml"
 fi
-cp "$HERE/module/post-fs-data.sh" "$HERE/module/service.sh" "$M/"
+cp "$HERE/module/post-fs-data.sh" "$HERE/module/service.sh" "$HERE/module/load-kernel-modules.sh" "$M/"
+# What the module installs and runs, as units (lib/apps/powos-units: `powos units` on the phone's Android side reads
+# /data/adb/modules/*/powos-units/*.json): the module registers itself, and goes with itself.
+mkdir -p "$M/powos-units" && cp "$HERE/../../../units/system-module/"*.json "$M/powos-units/"
+# The containers kernel's nftables modules (kernel/build-containers-kernel.sh's out/modules), loaded at boot by
+# load-kernel-modules.sh; refused cleanly by any other kernel. Not built: the module just doesn't carry them.
+KM=$HERE/../kernel/out/modules
+if [ -f "$KM/load-order.txt" ]; then
+    mkdir -p "$M/kernel-modules"
+    cp "$KM/load-order.txt" "$M/kernel-modules/"
+    for m in $(cat "$KM/load-order.txt"); do cp "$KM/$m" "$M/kernel-modules/"; done
+fi
 
 # The slots' overlays: compiled, linked against the platform, signed.
 KEYS=~/.local/share/powos

@@ -1,0 +1,58 @@
+{
+  "id": "powos-session",
+  "name": "PowOS desktop session",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "the phone's KDE desktop session (kwin, plasmashell, Xwayland, pipewire) the PowOS app starts, the user's terminals and programs in it, and the desktop's PowOS layer (wallpaper, KWin script, widgets, launcher, picker key)",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (Xwayland and KWin: our packages, targets/android/pkgs/xwayland-kgsl and pkgs/kwin)",
+  "packages": [
+    "foot",
+    "fzf",
+    "kwin",
+    "libnm",
+    "openal",
+    "pipewire-pulse",
+    "qmltermwidget",
+    "xwayland-kgsl"
+  ],
+  "files": [
+    "/usr/bin/powos-rooted-session",
+    "/usr/local/bin/powos-output-scale",
+    "/usr/bin/powos-padd",
+    "/usr/bin/powos-focus-watch",
+    "/usr/bin/powos-panel-phone",
+    "/usr/lib/powos/powos-tmux-shell",
+    "/etc/xdg/autostart/powos-panel-phone.desktop",
+    "/etc/profile.d/60-powos-picker-key.sh",
+    "/usr/share/plasma/wallpapers/org.powos.transparent",
+    "/usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/powos-transparent-desktop.js",
+    "/usr/share/kwin/scripts/powos-translucent-desktop",
+    "/usr/share/plasma/plasmoids/com.powos.*",
+    "/etc/xdg/breezerc",
+    "/etc/xdg/ksplashrc",
+    "/etc/sudoers.d/10-wheel"
+  ],
+  "processes": [
+    {
+      "match": "^/usr/bin/startplasma-wayland|^startplasma-wayland",
+      "tree": true
+    },
+    {
+      "match": "^/bin/bash /usr/bin/powos-rooted-session",
+      "tree": true
+    },
+    {
+      "match": "^/usr/bin/kwin_wayland ",
+      "tree": true
+    },
+    {
+      "match": "^tmux",
+      "tree": true
+    },
+    {
+      "user": "powos"
+    }
+  ],
+  "unbounded": "the desktop and every program the user runs in it (games through FEX included): Android's lmkd bounds it; a hard memory cap would kill the user's games",
+  "autosleep": "never"
+}

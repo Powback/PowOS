@@ -1,6 +1,10 @@
 #!/bin/bash
 # run-all.sh - Discover and run every Tier-1 test.
 #
+# Needs bash 4+ (declare -A, mapfile) - the Mac's own /bin/bash is 3.2, so this FAILS run raw on the Mac shell.
+# Run it inside the Docker test container (CLAUDE.md, Testing):
+#   docker compose up --build -d && docker exec powos bash /var/lib/powos/src/test/tier1/run-all.sh
+#
 # WHY THIS EXISTS: CI used to hand-enumerate which tier-1 tests to run. That
 # list silently fell behind — 21 of 31 suites were never executed in CI,
 # including every test for the mod manager, the games partition, and the

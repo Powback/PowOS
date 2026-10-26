@@ -1,0 +1,29 @@
+{
+  "id": "gradle-warm-mac",
+  "name": "PowOS warm Gradle builder (Mac)",
+  "kind": "container",
+  "owner": "system:powos-build",
+  "host": "mac",
+  "purpose": "powos-gradle-warm: a long-lived android-app-dev builder container whose Gradle daemon stays warm between PowOS APK builds (targets/android/build-app.sh uses it; android-app-dev's cold `make build` is the fallback and every other project's path). Idle: its Gradle daemon exits after 3 h without a build, the container ends itself after 6 h (WARM_IDLE_HOURS)",
+  "installedBy": "targets/android/tools/warm-builder.sh start (on demand, from build-app.sh)",
+  "files": [
+    "docker volume powos-gradle-warm (its Gradle home, seeded once from android-gradle-cache)"
+  ],
+  "processes": [
+    {
+      "match": "docker container powos-gradle-warm"
+    }
+  ],
+  "limits": {
+    "memory": "8g",
+    "cpus": "6"
+  },
+  "remove": {
+    "stop": [
+      "targets/android/tools/warm-builder.sh stop"
+    ],
+    "files": [
+      "docker volume rm powos-gradle-warm"
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "rootsh-mac",
+  "name": "Phone root channel (Mac)",
+  "kind": "watcher",
+  "owner": "system:powos-agents",
+  "host": "mac",
+  "purpose": "powos-rootsh: one long-lived `adb shell su` on the phone for the Mac's mirror and mail (a dev channel used as runtime transport, REMOTE-POWOS.md C1/C4/C5; idle exit after 30 min)",
+  "installedBy": "started on demand by powos-agentsd / powos-rootsh send (lib/ai/agents/powos-rootsh)",
+  "files": [
+    "~/.local/state/powos/vadb"
+  ],
+  "processes": [
+    {
+      "match": "powos-rootsh daemon"
+    },
+    {
+      "match": "^docker exec -i powos-vadb adb shell -T su"
+    }
+  ],
+  "unbounded": "macOS has no cgroups",
+  "remove": {
+    "stop": [
+      "python3 lib/ai/agents/powos-rootsh stop"
+    ]
+  }
+}

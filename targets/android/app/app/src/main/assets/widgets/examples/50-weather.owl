@@ -10,9 +10,62 @@ widget "weather" {
 
   onTap: url("https://wttr.in")
 
+  // The temperature big, the sky in words under it, the place last - sized from the tile, never fixed (monospace:
+  // 0.58 em a character - the phone's font measured 0.575, a line 1.4 em budgeted), centred: the temperature as big as the width and the height leave
+  // once the words have theirs (the sky at most 0.5 of it, the place 0.8 of the sky). A short tile drops the place
+  // where keeping it would shrink the temperature under 1.6 times the sky or keep the lines from spanning the tile; a tall one splits the sky over two
+  // lines where that lets it be bigger. One line each, never cut.
+  let iw = tileWidth == null ? 340 : tileWidth - 24
+  let ih = tileHeight == null ? 120 : tileHeight - 24
+  let ok = now != null && now.ok
+  let w = ok ? words(trim(now.out)) : []
+  let temp = now == null ? "…" : ok ? w[0] : "offline"
+  let skyWords = ok ? drop(w, 1) : []
+  let sky = join(skyWords, " ")
+  let where = trim(place ?? "")
+  let tF = iw / (max(len(temp), 2) * 0.58)
+  let sF = sky == "" ? 0 : iw / (max(len(sky), 1) * 0.58)
+  let pF = where == "" ? 0 : iw / (max(len(where), 1) * 0.58)
+  // With the place: the three lines share the height as 1 : 0.5 : 0.4 until a line reaches its width.
+  let t1 = min(tF, ih / (1.4 * 1.9))
+  let s1 = min(sF, t1 * 0.5)
+  let p1 = min(pF, max(s1, t1 * 0.5) * 0.8)
+  let tzP = min(tF, ih / 1.4 - s1 - p1)
+  // Without it: 1 : 0.75 (the sky can be bigger with the line to itself).
+  let t0 = min(tF, ih / (1.4 * 1.75))
+  let s0 = min(sF, t0 * 0.75)
+  let tzN = min(tF, ih / 1.4 - s0)
+  // How much of the width each way's widest line spans: the place goes where keeping it still spans the tile.
+  let wP = max(tzP * len(temp), s1 * len(sky), p1 * len(where)) * 0.58 / iw
+  let wN = max(tzN * len(temp), s0 * len(sky)) * 0.58 / iw
+  let withPlace = where != "" && (sky == "" || (tzP >= s1 * 1.6 && (wP >= 0.85 || wP >= wN)))
+  let tz1 = withPlace ? tzP : tzN
+  let sz1 = withPlace ? s1 : s0
+  let pz1 = withPlace ? p1 : 0
+  let room = ih - (tz1 + sz1 + pz1) * 1.4
+  // Split: the sky as big as its longer half's width, 0.7 of the temperature and the height left allow.
+  let half = max(1, floor(len(skyWords) / 2 + 0.5))
+  let skyA = join(take(skyWords, half), " ")
+  let skyB = join(drop(skyWords, half), " ")
+  let s2 = min(iw / (max(len(skyA), len(skyB), 1) * 0.58), tz1 * 0.7, (room / 1.4 + sz1) / 2)
+  let split = len(skyWords) > 1 && s2 > sz1 * 1.3
+  let tz = clamp(floor(tz1), 14, 200)
+  let sz = clamp(floor(split ? s2 : sz1), 9, 80)
+  let pz = clamp(floor(pz1), 8, 50)
+
   Column {
-    Text { text: "weather"; style: muted }
-    Text { text: now == null ? null : now.ok ? now.out : "offline"; style: title; color: cyan }
-    Text { text: place; style: small }
+    fill: height; align: center; gap: 0
+    Spacer { weight: 1 }
+    Text { text: temp; fontSize: tz; color: cyan; align: center; maxLines: 1 }
+    if split {
+      Text { text: skyA; fontSize: sz; align: center; maxLines: 1 }
+      Text { text: skyB; fontSize: sz; align: center; maxLines: 1 }
+    } else {
+      if sky != "" { Text { text: sky; fontSize: sz; align: center; maxLines: 1 } }
+    }
+    if withPlace {
+      Text { text: where; fontSize: pz; color: muted; align: center; maxLines: 1 }
+    }
+    Spacer { weight: 1 }
   }
 }

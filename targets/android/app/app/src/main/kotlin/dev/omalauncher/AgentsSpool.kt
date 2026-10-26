@@ -21,7 +21,7 @@ import java.util.concurrent.CopyOnWriteArraySet
  * The Agents view on the phone (docs/AGENTS-VIEW-DESIGN.md, Phase 1): which agents run, their subagents, tasks and
  * steps, as PowOS's powos-agentsd writes them into the run dir -
  *   agents/state.json, messages.json, events/<agent>.json   this phone's agents (/run/powos-app/agents in PowOS)
- *   agents/mirror/<host>.json                               another host's, folded (the Mac's; HACK, see powos-agentsd)
+ *   agents/mirror/<host>.json                               another host's, folded (the Mac's; HACK: see powos-agentsd)
  * - merged by agent id (ids are host-prefixed, so hosts never collide).
  *
  * Nothing polls: one FileObserver per folder (HotReload's rule: one per path in a process), the files read on a thread
@@ -335,13 +335,12 @@ object AgentsSpool {
     }
 
     /**
-     * The approval notifications (channel powos-agents-ask, heads-up), one per ask: "devops wants to run Bash", its
+     * The approval notifications (AgentMail's urgent channel: heads-up, heard on silent and through Do not disturb), one per ask: "devops wants to run Bash", its
      * command, Allow / Deny / Reply… (a deny with the reply as its reason). An ask that goes without an answer from
      * here expired: its agent asks at its terminal now, and the notification says so.
      */
     private object Asker {
         const val ACTION = "dev.omalauncher.AGENTS_ANSWER"
-        private const val CHANNEL = "powos-agents-ask"
         private const val TAG_N = "agents-ask"
         private const val KEY_TEXT = "text"
         private val shown = HashSet<String>()
@@ -364,7 +363,7 @@ object AgentsSpool {
                     nm.notify(
                         TAG_N,
                         gone.hashCode(),
-                        Notification.Builder(context, CHANNEL)
+                        Notification.Builder(context, AgentMail.channel(context, "low"))
                             .setSmallIcon(R.drawable.ic_notification)
                             .setContentTitle("PowOS agents")
                             .setContentText("expired · decided at the terminal")
@@ -379,11 +378,6 @@ object AgentsSpool {
                 val id = ask.optString("id")
                 if (id in shown) continue
                 shown += id
-                nm.createNotificationChannel(
-                    NotificationChannel(CHANNEL, "PowOS agents asking", NotificationManager.IMPORTANCE_HIGH).apply {
-                        description = "An agent wants to run something: allow it, deny it, or tell it what to do instead"
-                    },
-                )
                 val who = agents[ask.optString("agent")]?.optString("role") ?: "an agent"
                 val n = id.hashCode()
                 fun action(
@@ -409,7 +403,8 @@ object AgentsSpool {
                 nm.notify(
                     TAG_N,
                     n,
-                    Notification.Builder(context, CHANNEL)
+                    // An agent blocked on the user: AgentMail's urgent channel (heard on silent, through Do not disturb).
+                    Notification.Builder(context, AgentMail.channel(context, "urgent"))
                         .setSmallIcon(R.drawable.ic_notification)
                         .setContentTitle("$who wants to run ${ask.optString("tool")}")
                         .setContentText(ask.optString("summary"))
@@ -423,6 +418,8 @@ object AgentsSpool {
                         .addAction(action("Reply…", "deny", reply = true))
                         .build(),
                 )
+                // Its sound (ringer on only), vibration and the screen on: the urgent channel has none of its own.
+                AgentMail.alertUrgent(context)
             }
         }
 

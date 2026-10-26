@@ -1,0 +1,34 @@
+{
+  "id": "system-tier",
+  "name": "System tier (supervisor)",
+  "kind": "service",
+  "owner": "system:powos-start",
+  "purpose": "powos-supervisor: runs the system services (SpacetimeDB) for as long as the phone is up, restarts them, keeps their budgets",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (started by targets/android/rooted/powos-start.sh at boot)",
+  "files": [
+    "/usr/lib/powos/apps/powos-supervisor",
+    "/usr/bin/powos-supervisor",
+    "/usr/lib/powos/apps/services",
+    "/var/log/powos/supervisor.log"
+  ],
+  "processes": [
+    {
+      "match": "^python3 /usr/bin/powos-supervisor$"
+    },
+    {
+      "match": "^python3 /usr/bin/powos-supervisor$",
+      "tree": true
+    }
+  ],
+  "limits": {
+    "memory": "256m",
+    "pids": 64
+  },
+  "autosleep": "never",
+  "remove": {
+    "stop": [
+      "touch /data/powos/system-tier.off 2>/dev/null; pkill -f '^python3 /usr/bin/powos-supervisor$'"
+    ]
+  },
+  "processes_note": "the supervisor, and the services it runs that have no unit of their own (a test app's backend)"
+}

@@ -1,0 +1,50 @@
+{
+  "id": "voice-stt",
+  "name": "Voice STT (faster-whisper)",
+  "kind": "container",
+  "host": "desktop",
+  "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
+  "owner": "system:voice",
+  "purpose": "the voice path's speech to text: whisper-fast (VoiceAgent services/whisper-fast on faster-whisper-server's CUDA image) with deepdml/faster-whisper-large-v3-turbo-ct2, float16, greedy, encoder window sized to the audio, resident; OpenAI /v1/audio/transcriptions on :8000",
+  "installedBy": "hosts/gpu-195/install.sh (rootless podman quadlet, user powos, linger on)",
+  "image": "localhost/voice-stt-fast:latest",
+  "ports": [
+    "8000/tcp"
+  ],
+  "files": [
+    "/var/home/powos/.config/containers/systemd/voice-stt.container"
+  ],
+  "processes": [
+    {
+      "systemd": "voice-stt.service"
+    },
+    {
+      "container": "voice-stt"
+    }
+  ],
+  "limits": {
+    "memory": "6g",
+    "memory_swap": "6g",
+    "cpus": 4,
+    "pids": 512
+  },
+  "autosleep": "never",
+  "gpu": "nvidia.com/gpu=0",
+  "vramBudget": "3g",
+  "vramMeasured": "2.3 GiB",
+  "health": "http://192.168.50.195:8000/health",
+  "remove": {
+    "stop": [
+      "systemctl --user stop voice-stt.service"
+    ],
+    "commands": [
+      "rm -f /var/home/powos/.config/containers/systemd/voice-stt.container",
+      "systemctl --user daemon-reload",
+      "podman rmi localhost/voice-stt-fast:latest docker.io/fedirz/faster-whisper-server:latest-cuda"
+    ],
+    "keep": [
+      "/var/lib/powos/models/hf"
+    ]
+  },
+  "vramNote": "GPU0 belongs to the realtime voice path (docs/GPU-SERVERS-PLAN.md); nothing else allocates on it"
+}

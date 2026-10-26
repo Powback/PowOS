@@ -1,0 +1,152 @@
+From c377357b8006d46fdb638448d2d1432bb6732af8 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Sat, 24 Oct 2026 02:54:42 +0200
+Subject: [PATCH] backends/anland: a window that goes full screen before its
+ surface opens as a task
+
+An Xwayland window is managed before Xwayland pairs it with its wl_surface.
+Both ways a window becomes a task waited for that surface only for their own
+case: a new window (0019) re-ran exportNew, which skips a full-screen window,
+and a full-screen window was dropped at once (exportable() needs the surface).
+A game that maps its window and goes full screen in that moment (Unity under
+Wine, Broforce launched from Steam's Library) fell between the two: it ran,
+rendering, on the hidden desktop with no task, and nothing on the phone
+showed it. One wait per window now (whenSurfaced), whichever case asked:
+once it has its surface the decision runs again on its state then - full
+screen = its own immersive task, else a new window. A full-screen window that
+still isn't a task says why in the log.
+---
+ src/backends/anland/anland_window_task.cpp | 65 +++++++++++++++++++---
+ src/backends/anland/anland_window_task.h   |  4 ++
+ 2 files changed, 60 insertions(+), 9 deletions(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index f17e7d8..de0bedf 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -29,6 +29,8 @@
+ #include "wayland_server.h"
+ #include "window.h"
+ #include "workspace.h"
++
++#include <memory>
+ #if KWIN_BUILD_X11
+ #include "x11window.h"
+ #endif
+@@ -1008,8 +1010,18 @@ void AnlandWindowTasks::onFullScreenChanged(Window *window)
+ {
+     AnlandWindowTask *task = taskFor(window);
+     if (window->isFullScreen()) {
+-        if (!task && !handBackAndroidApp(window) && exportable(window)) {
++        if (!task && window->isClient() && !window->isDeleted() && !window->surface()) {
++            // Full screen before Xwayland paired it with its wl_surface (a game mapping its window full screen, or
++            // going full screen in the moment between): exportable() can't take it yet. Again once it has one.
++            whenSurfaced(window);
++        } else if (!task && !handBackAndroidApp(window) && exportable(window)) {
+             show(window, true);
++            qCInfo(KWIN_ANLAND) << "full-screen window" << window->caption() << "opened as a task";
++        } else if (!task && !window->isDeleted()) {
++            // Why not, in the log: a game whose window never shows is diagnosed from this line.
++            qCInfo(KWIN_ANLAND) << "full-screen window" << window->caption() << "not a task: normal" << window->isNormalWindow()
++                                << "popup" << window->isPopupWindow() << "skipTaskbar" << window->skipTaskbar()
++                                << "special" << window->isSpecialWindow() << "connected" << (m_controlFd >= 0);
+         } else if (task && !task->fullScreen() && task->setAppFullScreen(true)) {
+             // Already a floating task (the unfolded home): the same task covers the whole screen, immersive - no
+             // frame, no dock - and floats again where it was when the window leaves full screen.
+@@ -1056,12 +1068,7 @@ void AnlandWindowTasks::exportNew(Window *window)
+         // An Xwayland window is added before Xwayland pairs it with its wl_surface (WL_SURFACE_SERIAL comes
+         // later): exportable() can't take it yet, and nothing would ask again - an X11 app's second window (Gwenview
+         // opened from an X11 Dolphin, a game's real window) stayed on the hidden desktop. Once it has one: again.
+-        connect(window, &Window::surfaceChanged, this, [this, w = QPointer<Window>(window)]() {
+-            if (w && w->surface()) {
+-                qCInfo(KWIN_ANLAND) << "new window" << w->caption() << "has its surface now";
+-                exportNew(w);
+-            }
+-        }, Qt::SingleShotConnection);
++        whenSurfaced(window);
+         return;
+     }
+     if (window->isMinimized() || !exportable(window)) {
+@@ -1072,6 +1079,41 @@ void AnlandWindowTasks::exportNew(Window *window)
+     }
+ }
+ 
++void AnlandWindowTasks::whenSurfaced(Window *window)
++{
++    // One wait per window, whichever asked first (a new window, its full screen): once Xwayland pairs it with its
++    // surface, the whole decision runs again on its state THEN - full screen = its own immersive task, else a new
++    // window. Before, each asker waited for its own case only: a game window that went full screen meanwhile (Wine/
++    // Unity map, then full screen; or mapped full screen) was dropped by both, so it ran on the hidden desktop with
++    // no task - launched from Steam's Library, nothing else shows it (2026-10-24, Broforce).
++    if (m_waitingSurface.contains(window)) {
++        return;
++    }
++    m_waitingSurface.insert(window);
++    auto wait = std::make_shared<QMetaObject::Connection>();
++    *wait = connect(window, &Window::surfaceChanged, this, [this, wait, w = QPointer<Window>(window), raw = window]() {
++        if (!w) {
++            m_waitingSurface.remove(raw);
++            disconnect(*wait);
++            return;
++        }
++        if (!w->surface()) {
++            return; // not yet: keep waiting
++        }
++        m_waitingSurface.remove(raw);
++        disconnect(*wait);
++        qCInfo(KWIN_ANLAND) << "new window" << w->caption() << "has its surface now" << (w->isFullScreen() ? "(full screen)" : "");
++        if (w->isFullScreen()) {
++            onFullScreenChanged(w);
++        } else {
++            exportNew(w);
++        }
++    });
++    connect(window, &Window::closed, this, [this, raw = window]() {
++        m_waitingSurface.remove(raw);
++    }, Qt::SingleShotConnection);
++}
++
+ bool AnlandWindowTasks::exportable(Window *window) const
+ {
+     // An application's own window: what the taskbar lists. Not the shell's (the app grid is a full-screen
+@@ -1106,8 +1148,13 @@ bool AnlandWindowTasks::show(Window *window, bool fullScreen)
+         return false;
+     }
+     if (AnlandWindowTask *task = taskFor(window)) {
+-        // Already a task: to the front.
+-        send({QStringLiteral("open"), QString::number(task->id()), window->desktopFileName(), window->caption()});
++        // Already a task: to the front - as what it is: a game's own full-screen task stays full screen (the drawer's
++        // launch of a game that KWin already showed full screen made it a floating task, the game scaled into it).
++        QStringList open{QStringLiteral("open"), QString::number(task->id()), window->desktopFileName(), window->caption()};
++        if (task->fullScreen()) {
++            open.append(QStringLiteral("fullscreen"));
++        }
++        send(open);
+         return true;
+     }
+     const uint32_t id = m_nextId++;
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index b798816..396d541 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -226,6 +226,8 @@ private:
+     void handleLine(const QString &line);
+     void setExportNew(bool on);
+     void exportNew(Window *window);
++    /** [window] (an Xwayland one, no wl_surface yet) decided again once it has its surface: full screen or new. */
++    void whenSurfaced(Window *window);
+     void dropTasksDesktopIfUnused();
+ 
+     AnlandBackend *m_backend;
+@@ -240,6 +242,8 @@ private:
+     const QString m_session = QUuid::createUuid().toString(QUuid::WithoutBraces);
+     // The app's "export-new 1" (the unfolded home, apps float): every application window opens as its own task.
+     bool m_exportNew = false;
++    /** Windows waiting for their surface (whenSurfaced): one wait each. */
++    QSet<Window *> m_waitingSurface;
+     QPointer<VirtualDesktop> m_desktop;
+     QPointer<VirtualDesktop> m_returnDesktop; // where to go back to when something switched to the tasks desktop
+ };
+-- 
+2.50.1 (Apple Git-155)
+

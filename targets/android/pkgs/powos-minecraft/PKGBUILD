@@ -1,0 +1,20 @@
+# Minecraft modpacks as a PowOS app on the phone: Prism Launcher (Arch Linux ARM's, native aarch64 - its LWJGL has
+# linux-arm64 natives), Java 21, and powos-minecraft (the server's .mrpack -> a Prism instance, synced at every
+# start). An app package, not part of the PowOS image: nothing here goes into the desktop's Containerfile.
+pkgname=powos-minecraft
+pkgver=1.0
+pkgrel=1
+pkgdesc="PowOS Minecraft: modpacks (.mrpack) through Prism Launcher, the server's own pack"
+arch=(any)
+url=https://github.com/powback/PowOS
+license=(custom)
+depends=(prismlauncher jre21-openjdk python zenity)
+source=(powos-minecraft packs.json env dev.powos.minecraft.desktop)
+sha256sums=(SKIP SKIP SKIP SKIP)
+
+package() {
+  install -Dm755 powos-minecraft "$pkgdir/usr/bin/powos-minecraft"
+  install -Dm644 packs.json "$pkgdir/usr/share/powos/minecraft/packs.json"
+  install -Dm644 env "$pkgdir/usr/share/powos/minecraft/env"
+  install -Dm644 dev.powos.minecraft.desktop "$pkgdir/usr/share/applications/dev.powos.minecraft.desktop"
+}

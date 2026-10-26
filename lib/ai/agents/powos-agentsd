@@ -6,7 +6,7 @@ host folds them into rows - agents, their tasks, a 64-event ring each, the comms
 viewers read (the PowOS app's FileObserver on the phone):
 
     <spool>/state.json            {"v", "host", "ts", "agents": [...], "tasks": [...], "asks": []}
-    <spool>/messages.json         {"v", "host", "messages": [...]}     the last 200 comms messages
+    <spool>/messages.json         {"v", "host", "messages": [...]}     the last 200 comms messages, bodies whole
     <spool>/events/<agent>.json   {"agent", "events": [...]}           one agent's ring, rewritten when it changes
 
 Field names and types are the design's §3 schema, so Phase 2 (SpacetimeDB) takes the same rows. Every file is written
@@ -16,8 +16,11 @@ Not a poller: it blocks on inotify (Linux) or kqueue (the Mac) on the queue, bat
 writes once per batch, and only what changed. It wakes on a timer only to sweep (once a minute, while it holds
 agents), and exits after 10 minutes without events and without a working agent; the next hook starts it again.
 
---mirror (POWOS_AGENTS_MIRROR, the Mac): also pushes the whole state, folded, to another host's spool at most once a
-second and only when it changed - the Mac's agents on the phone.
+Each batch also goes to the device's SpacetimeDB (the powos-agents module, apps/agents: the same §3 rows), when it
+runs - Phase 2's backend, with the spool as the fallback (class Stdb).
+
+--mirror (POWOS_AGENTS_MIRROR, the Mac): also pushes the whole state, folded, to another host's spool at most once every
+15 s and only when it changed - the Mac's agents on the phone, through powos-rootsh's one long-lived root shell.
 HACK: adb is a dev channel, not a transport; real fix = Phase 2 (the phone subscribes to the Mac's agents module).
 
 Never stored (§3): tool inputs or outputs, file contents, transcripts, env, tokens. Hints come from a fixed whitelist
@@ -46,7 +49,9 @@ IDLE_EXIT_S = 600
 STALE_WORKING_MS = 30 * 60_000
 QUIET_GONE_MS = 15 * 60_000
 DROP_GONE_MS = 60 * 60_000
-MIRROR_EVERY_S = 1.0
+# Each push is an `adb shell su -c` on the phone, and Magisk shows a Superuser toast per su call; a toast window
+# also caps the panel to 60 Hz, so pushing every second made the phone's UI flicker. HACK: the real fix is Phase 2.
+MIRROR_EVERY_S = 15.0
 MIRROR_EVENTS = 20
 MIRROR_MESSAGES = 50
 
@@ -103,6 +108,12 @@ def clean(s, n):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def scrub(s):
+    """All of [s], its lines kept, with what looks like a secret cut: a comms message's body - the view previews it
+    and opens the rest, so it's never shortened here."""
+    return _SECRET.sub("…", s) if isinstance(s, str) else ""
+
+
 def first_line(s, n):
     if not isinstance(s, str):
         return ""
@@ -147,6 +158,66 @@ def summary_of(tool, inp):
     return clean(json.dumps(inp, ensure_ascii=False)[:400], 200)
 
 
+# The work board task an agent holds (`work`): from its own Bash calls, so no hook needs to know about the board.
+# `powos agents task set <id> --step/--progress/--plan/--commit` = it's working on <id> (the manager's assigning
+# `task set <id> --owner X --note ...` claims nothing); `task done <id>` or `queue.sh add ... <id>` (handed to the phone
+# check) lets it go. Only the id is kept, never the command.
+_WORK_ID = re.compile(r"[A-Za-z0-9][\w.:@-]{0,63}$")
+_CLAIMS = {"--step", "--progress", "--plan", "--commit"}
+_SEP = {";", "&&", "||", "|", "&", "(", ")"}
+
+
+def work_of(command):
+    """What [command] does to the board: [(claim True|False, task id)] in order."""
+    import shlex
+
+    try:
+        lx = shlex.shlex(str(command).replace("\n", ";"), posix=True, punctuation_chars=";&|()")
+        lx.whitespace_split = True
+        lx.commenters = ""
+        toks = list(lx)
+    except ValueError:
+        return []
+    out = []
+    for i, t in enumerate(toks):
+        nxt = toks[i + 1 : i + 2]
+        if t == "task" and nxt and nxt[0] in ("set", "done"):
+            j = i + 2
+            tid = toks[j] if j < len(toks) else ""
+            if not _WORK_ID.match(tid):
+                continue
+            if nxt[0] == "done":
+                out.append((False, tid))
+                continue
+            flags = set()
+            for x in toks[j + 1 :]:
+                if x in _SEP:
+                    break
+                flags.add(x.split("=", 1)[0])
+            if flags & _CLAIMS:
+                out.append((True, tid))
+        elif t.endswith("queue.sh") and nxt == ["add"]:
+            j = i + 2
+            while j < len(toks) and toks[j].startswith("--"):
+                j += 2 if toks[j] in ("--name", "--screen") else 1
+            if j < len(toks) and _WORK_ID.match(toks[j]):
+                out.append((False, toks[j]))
+    return out
+
+
+# The words of a permission refusal in a PostToolUseFailure's error (auto mode's classifier, a deny rule, a hook).
+REFUSAL = re.compile(r"permission|denied|not allowed|requires approval|was blocked|refused", re.I)
+
+
+def friction_cmd():
+    """`... friction add`: the agents CLI next to this file (the phone's /usr/lib/powos/ai/agents, the Mac's hooks
+    copy), POWOS_AGENTS_CLI, else `powos friction`."""
+    cli = os.environ.get("POWOS_AGENTS_CLI") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "powos-agents-cli")
+    if os.path.isfile(cli):
+        return [sys.executable, cli, "friction", "add"]
+    return ["powos", "friction", "add"]
+
+
 def safe_file(agent_id):
     return re.sub(r"[^A-Za-z0-9._-]", "_", agent_id)[:150]
 
@@ -168,6 +239,7 @@ class Spool:
         self.pending = {}  # tool_use_id -> (agent id, start ms)
         self.fails = {}  # agent id -> failures in a row
         self.described = {}  # session agent id -> [descriptions of Agent tool calls not started yet]
+        self.refused = {}  # (role, tool, hint) -> ms last logged as friction (one per hour)
         self.dirty_agents = set()
         self.dirty_rings = set()
         self.dirty_messages = False
@@ -214,6 +286,7 @@ class Spool:
                 "subs": 0,
                 "unread": 0,
                 "report": "",
+                "work": "",
                 "started": ts,
                 "last": ts,
                 "rev": 0,
@@ -272,6 +345,29 @@ class Spool:
             title = max(doing, key=lambda t: t["updated"])["subject"][:80]
             if a["title"] != title:
                 a["title"] = title
+
+    def refusal(self, me, tool, rec, ts):
+        """A tool call the permission system refused is friction (`powos friction add --kind refused`): logged once an
+        hour per (role, tool, hint) through the agents CLI, in the background. Only the whitelisted hint and the
+        refusal's own words (secrets cut) leave - never the tool's input or output."""
+        err = str(rec.get("error") or "")
+        if rec.get("is_interrupt") or not REFUSAL.search(err):
+            return
+        hint = hint_of(tool, rec.get("tool_input"))
+        role = me.get("role") or "agent"
+        key = (role, tool, hint)
+        if key in self.refused and ts - self.refused[key] < 3600_000:
+            return
+        self.refused[key] = ts
+        word = (hint.split() or [tool])[0]
+        cmd = friction_cmd() + ["--area", "permissions", "--kind", "refused",
+                                f"{tool} refused by the permission system: {word}",
+                                "--repro", f"{role} ran {tool}: {hint}", "--details", clean(scrub(err), 600), "--by", role]
+        try:
+            subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        except OSError:
+            pass
 
     def task(self, aid, tid, ts, subject=None, status=None, order=None):
         if not tid:
@@ -333,7 +429,7 @@ class Spool:
                 "kind": rec.get("kind") if rec.get("kind") in ("message", "escalate", "notify", "ask", "report") else "message",
                 "priority": clean(rec.get("priority") or "normal", 16),
                 "ts": int(rec.get("ts") or ts),
-                "body": clean(rec.get("body"), 280),
+                "body": scrub(rec.get("body")),
                 "read": False,
             }
         )
@@ -377,7 +473,11 @@ class Spool:
                 if len(self.pending) > 512:
                     self.pending.pop(next(iter(self.pending)))
             step = tool if hint == tool else f"{tool} {hint}"
-            self.touch(me, ts, state="working", step=clean(step, 60))
+            work = me.get("work", "")
+            if tool == "Bash" and isinstance(rec.get("tool_input"), dict):
+                for claim, tid in work_of(rec["tool_input"].get("command") or ""):
+                    work = tid if claim else ("" if work == tid else work)
+            self.touch(me, ts, state="working", step=clean(step, 60), work=work)
             if me is not a and a["state"] != "working":
                 self.touch(a, ts, state="working")
         elif ev in ("PostToolUse", "PostToolUseFailure"):
@@ -393,6 +493,7 @@ class Spool:
                 self.touch(me, ts, state="working" if me["state"] in ("blocked", "needs_you", "idle") else me["state"])
             else:
                 self.fails[aid] = self.fails.get(aid, 0) + 1
+                self.refusal(me, tool, rec, ts)
                 # §2: three failures in a row and it's stuck.
                 self.touch(me, ts, state="blocked" if self.fails[aid] >= 3 else "working")
         elif ev == "SubagentStart":
@@ -530,8 +631,10 @@ class Spool:
             "asks": sorted(self.asks.values(), key=lambda a: a["ts"]),
         }
 
-    def flush(self):
-        """Writes what changed; True if anything was."""
+    def flush(self, sink=None):
+        """Writes what changed; True if anything was. [sink] (Stdb) also gets the change, as one batch."""
+        if sink is not None and (self.dirty_agents or self.dirty_rings or self.dropped or self.dirty_messages or sink.full):
+            sink.send(self.batch(full=sink.full))
         wrote = False
         if self.dirty_agents:
             self.unread()
@@ -557,6 +660,20 @@ class Spool:
         self.dropped.clear()
         self.dirty_messages = False
         return wrote
+
+    def batch(self, full=False):
+        """What changed, for the powos-agents module's `sync` (apps/agents): §3 rows as the spool has them. [full]:
+        everything (the first batch, or after the server was unreachable)."""
+        b = {}
+        if full or self.dirty_agents:
+            st = self.snapshot()
+            b["state"] = {"agents": st["agents"], "tasks": st["tasks"], "asks": st["asks"]}
+        rings = self.rings.keys() if full else self.dirty_rings
+        b["events"] = {aid: self.rings[aid] for aid in rings if aid in self.rings}
+        b["dropped"] = sorted(self.dropped)
+        if full or self.dirty_messages:
+            b["messages"] = self.messages
+        return b
 
     def bundle(self):
         """Everything, smaller: what the mirror sends (the last 20 events per agent, the last 50 messages)."""
@@ -699,6 +816,11 @@ class Mirror:
         d = "/data/data/com.powos.app/files/run/agents/mirror"
         f = f"{d}/{host}.json"
         inner = f"[ -d {d} ] && cat > {d}/.{host}.tmp && chmod 644 {d}/.{host}.tmp && mv {d}/.{host}.tmp {f}"
+        # Through powos-rootsh (next to this file): one long-lived su on the phone for every push instead of one su
+        # (one Magisk toast) each. Tagged "mirror", so the powos-vadb health check sees when pushes stop landing.
+        rootsh = os.path.join(os.path.dirname(os.path.abspath(__file__)), "powos-rootsh")
+        if os.access(rootsh, os.X_OK):
+            return [sys.executable, rootsh, "run", "-i", "--tag", "mirror", "--timeout", "30", "--", inner]
         return ["docker", "exec", "-i", "powos-vadb", "adb", "shell", f"su -c '{inner}'"]
 
     def due(self):
@@ -746,6 +868,58 @@ class Mirror:
 # ---- main --------------------------------------------------------------------------------------------------------
 
 
+class Stdb:
+    """The device's SpacetimeDB (docs/POWOS-APPS-FEASIBILITY.md §8) as a second target: each batch also goes to the
+    powos-agents module's `sync` (apps/agents) over the server's HTTP call endpoint, as the PowOS user's CLI identity
+    (the module's owner). Best effort: the spool stays the source of truth; while the server is unreachable nothing is
+    sent, and the next batch that gets through is a full one. POWOS_AGENTS_STDB=0 turns it off."""
+
+    def __init__(self, host):
+        self.host = host
+        self.url = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410") + "/v1/database/powos-agents/call/sync"
+        self.full = True
+        self.token = None
+        self.retry_at = 0.0
+        self.warned = False
+
+    def _token(self):
+        p = os.path.expanduser("~/.config/spacetime/cli.toml")
+        try:
+            with open(p) as f:
+                for line in f:
+                    k, _, v = line.partition("=")
+                    if k.strip() == "spacetimedb_token":
+                        return v.strip().strip('"')
+        except OSError:
+            pass
+        return None
+
+    def send(self, batch):
+        import urllib.request
+
+        if time.monotonic() < self.retry_at:
+            self.full = True
+            return
+        self.token = self.token or self._token()
+        if not self.token:
+            self.retry_at = time.monotonic() + 60
+            return
+        body = json.dumps([self.host, json.dumps(batch, separators=(",", ":"))]).encode()
+        req = urllib.request.Request(self.url, data=body, method="POST", headers={
+            "Content-Type": "application/json", "Authorization": f"Bearer {self.token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=2) as r:
+                r.read()
+            self.full = False
+            self.warned = False
+        except Exception as e:  # down, not published, or refused: the spool has it all
+            self.full = True
+            self.retry_at = time.monotonic() + 30
+            if not self.warned:
+                print(f"powos-agentsd: SpacetimeDB sync off until it answers ({e})", file=sys.stderr)
+                self.warned = True
+
+
 def main():
     import argparse
 
@@ -775,6 +949,7 @@ def main():
 
     s = Spool(spool, host_name())
     mirror = Mirror(args.mirror, s.host) if args.mirror else None
+    stdb = None if os.environ.get("POWOS_AGENTS_STDB", "1") == "0" else Stdb(s.host)
     watch = None if args.once else Watch(q)
     last_event = time.monotonic()
     next_sweep = time.monotonic()
@@ -795,7 +970,7 @@ def main():
             if time.monotonic() >= next_sweep:
                 s.sweep(now_ms())
                 next_sweep = time.monotonic() + SWEEP_S
-            changed = s.flush()
+            changed = s.flush(stdb)
             if mirror and changed:
                 mirror.wanted = True
             if mirror and mirror.due():

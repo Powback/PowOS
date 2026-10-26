@@ -2,6 +2,7 @@ widget "owl" {
   meta { owl: 3; description: "A pixel owl to look after. Tap to hatch it, feed it and pet it; it sleeps at night and dances to your music"; version: "1.0"; license: "MIT"; category: "fun" }
   size: 3x3
   minSize: 2x2
+  padding: 8
 
   // A Tamagotchi in theme colors. Its moods come from real things: the hour
   // (it sleeps from 23 to 7), when it was last fed (it gets hungry after 8 h),
@@ -79,8 +80,10 @@ widget "owl" {
   let wingPal = {w: pal.w}
   let feetPal = {f: pal.f}
 
+  // The scene takes the tile's height (the column fills it), the line under it its own.
   Column {
     gap: 2
+    fill: height
     Canvas {
       weight: 1
       fill: width
@@ -95,7 +98,9 @@ widget "owl" {
       }
 
       // One art pixel, in dp: owl, branch and room for hearts above.
-      let p = clamp(floor(min(width / 18, height / 22)), 2, 8)
+      // As big as the tile allows (it was capped at 8 dp: a small owl at the bottom of an empty sky).
+      // Its height without the room hearts need above it: they rise past the top for the second they show.
+      let p = clamp(floor(min(width / 16, height / 17)), 2, 32)
       let s = p + 0.5
       // Seconds since the last tap. `time` restarts with the frame clock (say,
       // after the page was off screen), so an old tap could look recent again:
@@ -118,6 +123,20 @@ widget "owl" {
           let sx = floor(width * (0.3 + 0.15 * k) / p) * p
           let sy = (2 + (k * 7) % 5) * p
           rect(sx, sy, p, p, fill: alpha(foreground, 0.3 + 0.5 * abs(sin(time * 0.8 + k * 1.9))))
+        }
+      }
+
+      // Day sky: where there's sky left above the owl, a few pixel clouds drift across it (as the night has its moon
+      // and stars).
+      if !asleep && oy > 3 * p {
+        for k in range(3) {
+          let cw = (5 + k % 2 * 2) * p
+          let cx = floor(((time * (2 + k) * p * 0.6 + (0.3 + k * 0.37) * width + cw) % (width + cw * 2) - cw) / p) * p
+          let cy = floor((2 * p + (oy - 4 * p) * (0.05 + 0.32 * k)) / p) * p
+          let cc = alpha(foreground, 0.3 - k * 0.05)
+          rect(cx, cy, cw, s, fill: cc)
+          rect(cx + p, cy - p, cw - 3 * p, s, fill: cc)
+          rect(cx + 2 * p, cy - 2 * p, 2 * p, s, fill: cc)
         }
       }
 

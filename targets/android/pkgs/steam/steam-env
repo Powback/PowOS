@@ -1,0 +1,27 @@
+# /usr/lib/powos-steam/steam-env: environment for Steam and EVERY game it starts (native Linux builds and Proton
+# alike: Steam's children inherit it, pressure-vessel passes it into the container, FEX reads FEX_* as its config).
+# /usr/bin/steam exports each KEY=VALUE line; ~/.config/powos/steam-env (same format) comes after and wins, an empty
+# value there (KEY=) unsets a default. Applies from Steam's next start. Measured with tools/phone/verify/bf-coldstart.sh
+# (env:KEY=VALUE tokens) before a line goes in here.
+#
+# Candidates being measured (2026-10-23, Broforce + Teardown):
+#   PRESSURE_VESSEL_GENERATE_LOCALES=0   the container's locale-gen (pv-locale-gen under FEX) for the session's
+#                                        LANG=en_CH.UTF-8, which games run with LC_ALL=C anyway
+#   FEX_ENABLECODECACHINGWIP=1           FEX keeps the x86 code it compiled (per game, compatdata/<id>/fex-emu)
+
+# HACK: GL_ARB_buffer_storage on the phone's freedreno: the lfdevs Mesa (freedreno_screen.c fd_init_screen_caps) turns
+# buffer_map_persistent_coherent off on KGSL ("KGSL mappings are not coherent"), so GL stops at 4.3 without
+# ARB_buffer_storage; a game that calls glBufferStorage anyway jumps to NULL (Teardown 1167630: crash at
+# teardown.exe+0x5BCD63 creating its first uniform buffer, black window). Native KGSL BOs are write-combined
+# (uncached, coherent); only dma-heap shared/scanout BOs are cached. Measured 2026-10-23 08:51 (td-launch arm64 with
+# this line): no crash, Teardown draws its splash. Real fix: a PowOS Mesa build with the cap kept for native BOs
+# (only shared dma-heap BOs need the cache maintenance), then this line goes.
+MESA_EXTENSION_OVERRIDE=+GL_ARB_buffer_storage
+
+# HACK: no System V IPC in native (Linux build) games: Android's kernel has none (semget -> ENOSYS) and the sysvipc
+# shim /usr/bin/steam preloads never reaches them - the game process's LD_PRELOAD is empty under Valve's FEX compat
+# tool + pressure-vessel (bf-coldstart hang_diag, 2026-10-23 10:36). Unity's old Mono retries semget forever in its
+# runtime init: Broforce native spun 4 min at 100% with no window (gdb: FEX's raw svc 190 every sample). Mono without
+# its shared-handle segment needs no semaphores. Measured 10:31: Broforce native window 36.6 s, first frame 44.9 s.
+# Real fix: the x86_64 shim inside native games (pass it through the FEX compat tool / pressure-vessel), then this goes.
+MONO_DISABLE_SHM=1

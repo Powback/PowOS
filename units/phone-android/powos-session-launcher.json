@@ -1,0 +1,30 @@
+{
+  "id": "powos-session-launcher",
+  "name": "Session launcher",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "host": "phone-android",
+  "purpose": "starts PowOS's desktop session for the PowOS app (powos-session.sh) and runs commands in it (powos-run.sh: terminal tiles, agents); the app's VA-API bridge",
+  "installedBy": "targets/android/rooted/powos-deploy.sh",
+  "files": [
+    "/data/powos/powos-session.sh",
+    "/data/powos/powos-run.sh",
+    "/data/powos/session.log",
+    "/data/powos/termux-va.pid"
+  ],
+  "processes": [
+    {
+      "match": "powos-session\\.sh ",
+      "tree": true
+    },
+    {
+      "match": "powos-run\\.sh ",
+      "tree": true
+    },
+    {
+      "match": "libtermuxva\\.so"
+    }
+  ],
+  "unbounded": "the desktop session's own launcher: its limits are the session's (powos-session on the phone host)",
+  "autosleep": "never"
+}

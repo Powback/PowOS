@@ -81,9 +81,8 @@ class Proot(
         cause: Throwable,
     ) {
         if (!RootedGuest.enabled) throw cause
-        val p = ProcessBuilder("su", "-c", "rm -rf '${dir.absolutePath}'").redirectErrorStream(true).start()
-        val out = p.inputStream.bufferedReader().readText()
-        if (p.waitFor() != 0 || dir.exists()) throw IllegalStateException("can't clear $dir as root: $out", cause)
+        val r = andro.marchy.RootShell.run("rm -rf '${dir.absolutePath}'")
+        if (r.code != 0 || dir.exists()) throw IllegalStateException("can't clear $dir as root: ${r.output}", cause)
     }
 
     /** The guest path of a host file, the reverse of [hostFile]; null if the guest can't see it. */

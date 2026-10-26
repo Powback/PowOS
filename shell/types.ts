@@ -3,17 +3,28 @@
  * Android WebView, ShellBridge.kt) or PowOS's desktop host. Calls are async; events come through `on`. A browser
  * without a host gets bridge.ts's mock, so the shell runs anywhere.
  */
+/** apps.links: an Android app's deep links (a prefix or pattern path ends in ".*"), with the activity each opens. */
+export interface AppLinks {
+  pkg: string;
+  label: string;
+  links: { uri: string; activity?: string }[];
+}
+
 export interface App {
-  /** Stable id: "a:<package/activity[@profile]>" (Android) or "l:<desktop id>" (Linux / PowOS). */
+  /** Stable id: "a:<package/activity[@profile]>" (Android), "l:<desktop id>" (Linux / PowOS), "p:<app id>" (a PowOS app). */
   key: string;
   label: string;
   /** URL of its icon (the host serves them). */
   icon: string;
-  kind: "android" | "linux";
+  kind: "android" | "linux" | "powos";
   /** A work-profile app, a clone, or the system's own (not uninstallable). */
   work?: boolean;
   clone?: boolean;
   system?: boolean;
+  /** Android: ApplicationInfo.category (0 game ... 8 accessibility), when the app says one (the app library's folders). */
+  category?: number | null;
+  /** Linux: its .desktop Categories ("Network;WebBrowser;"). */
+  categories?: string | null;
 }
 
 /** CSS px; [keyboard] is the soft keyboard's height (0 while it's down). */
@@ -133,13 +144,24 @@ export interface AssistScreen {
   screenshot: string | null;
 }
 
-/** Something an agent told the user (time: Unix seconds). */
+/** Something an agent told the user, unread (time: Unix seconds; id: comms' message id). */
 export interface AgentMail {
+  id?: string;
   from: string;
   text: string;
   time: number;
+  priority?: string;
 }
 /** An agent at work: a tmux session in PowOS; [title] its pane's (Claude Code's: the task, a spinner while working). */
+/**
+ * The phone-check runner on the Mac (tools/phone/verify/queue.sh), as its heartbeat file on the phone says:
+ * state waiting | paused | running | idle | stopped ("" when unknown); age: seconds since its last beat (-1: none yet).
+ */
+export interface VerifyState {
+  state: string;
+  age: number;
+}
+
 export interface AgentSession {
   name: string;
   activity: number;
@@ -152,7 +174,7 @@ export interface AgentSession {
 /** One entry of PowOS AI's chat; a tool's ok is null while it runs. */
 export type ChatItem =
   | { kind: "user" | "assistant"; text: string }
-  | { kind: "tool"; name: string; hint: string; ok: boolean | null }
+  | { kind: "tool"; name: string; hint: string; ok: boolean | null; out?: string }
   | { kind: "note"; text: string; error: boolean };
 /** A notification as the panel shows it; [icon] its app's drawer icon, [time] Unix seconds. */
 export interface PhoneNotification {
@@ -164,19 +186,65 @@ export interface PhoneNotification {
   time: number;
   clearable: boolean;
   profile: string | null;
+  /** Its buttons in order (notifications.action's index); [input]: it takes a typed reply. */
+  actions?: { title: string; input: boolean }[];
+  /** Notification.category ("alarm", "call", "msg", ...): an alarm's or a call's banner stays up longer. */
+  category?: string | null;
+  /** Its app's package (an older host: none). */
+  pkg?: string;
+  /** Android's group key (the app's bundle; its summary is never listed itself), null when it's in none. */
+  group?: string | null;
+  /** A conversation (a messaging-style one): shown on its own, above the groups. */
+  conversation?: boolean;
 }
 /**
- * A recent task, as the switcher shows it: [id] the system's, [key] and [icon] its app's in the drawer (null when it
+ * A recent task, as the switcher (ui/recents.tsx) shows it: [id] the system's, [key] and [icon] its app's in the drawer (null when it
  * isn't there), [snapshot] its last frame (a new URL each listing).
  */
+/** A floating app window on the unfolded home (system/WindowFrames.kt): its task, app, name, and whether it's minimised. */
+export interface AppWindow {
+  id: number;
+  pkg: string;
+  label: string;
+  minimised: boolean;
+  /** On a home page not on screen (ui/desktops.ts): out of sight until home shows that page. */
+  away?: boolean;
+  /** The shell's key of the PowOS (Linux) app it shows ("l:..."): its task is PowOS's own, so pkg says nothing. */
+  app?: string;  /** Where it shows on the screen, device px [left, top, right, bottom]; absent while hidden or minimised. */
+  bounds?: [number, number, number, number];
+}
+
 export interface RecentTask {
   id: number;
   label: string;
   key: string | null;
   icon: string | null;
   snapshot: string;
+  /** Unfolded: it comes back as a floating window (its card grows to [window], or the host opens it out of the card). */
+  floats?: boolean;
+  /** A floating window already: where it is (CSS px of the page), where it comes back. */
+  window?: { left: number; top: number; width: number; height: number };
 }
 /** [available]: the launcher may read them (it has notification access). */
+/**
+ * A window on the desktop (PowOS's desktop host: KWin's window list through libtaskmanager). [id] is the host's
+ * (KWin's window uuid); [icon] a URL the host serves.
+ */
+export interface DesktopWindow {
+  id: string;
+  title: string;
+  /** Its app id (the .desktop name: "org.kde.konsole"), "" when unknown. */
+  app: string;
+  appName: string;
+  icon: string;
+  active: boolean;
+  minimized: boolean;
+  /** An Android app's window (the phone's session: app id "android-<package>"). */
+  android?: boolean;
+  /** An Android app still on the phone's own screen: a stand-in - activating it moves the app into a window. */
+  onPhone?: boolean;
+}
+
 export interface NotificationList {
   available: boolean;
   items: PhoneNotification[];
@@ -188,6 +256,11 @@ export interface ThemeColors {
   light: boolean;
   css: Record<string, string>;
   colors: Record<string, string>;
+}
+/** The wallpaper as an image ([url] on the page's origin, [rev] new whenever it's another picture), or none. */
+export interface GlassSource {
+  wallpaper: { url: string; rev: string; source: string } | null;
+  blurBehind: boolean;
 }
 /** A theme to pick: what its swatch shows (background, foreground, accent, red, yellow, green, magenta). */
 export interface ThemeChoice {
@@ -206,9 +279,43 @@ export interface WidgetScreen {
 export interface Chat {
   busy: boolean;
   items: ChatItem[];
+  /** A thread of its own open instead of the main conversation (PowosAiChat.Thread): "create app"'s. */
+  thread?: { dir: string; title: string; kind: string } | null;
+  /**
+   * Sent mid-turn, waiting for theirs, oldest first (PowosAiChat.queued): every chat shows them at once. Absent from a
+   * host that doesn't queue (an older APK): the page queues itself (assistant.ts).
+   */
+  queued?: { id: number; text: string }[];
 }
 
+/** An app that runs, or one frozen (asleep in RAM: powos-sleep-gui, a game frozen with Steam). */
+export type RunState = "running" | "frozen";
+
+/** Visible system chrome is shared web UI; hosts supply state and perform scoped actions. */
+export interface ChromeState {
+  kind: "window" | "grip" | "status";
+  clock?: string;
+  notifications?: number | null;
+  title?: string;
+  icon?: string;
+  maximised?: boolean;
+  pressed?: string | null;
+  battery?: number | null;
+  charging?: boolean;
+  network?: "wifi" | "cellular" | "ethernet" | "offline" | null;
+  vpn?: boolean;
+  left?: number;
+  right?: number;
+}
+export interface ChromeRegion { action: string; x: number; y: number; width: number; height: number }
+
 export interface Bridge {
+  chrome: {
+    state(): Promise<ChromeState>;
+    ready(): Promise<void>;
+    action(action: string): Promise<void>;
+    regions(regions: ChromeRegion[]): Promise<void>;
+  };
   /** "android" | "powos" | "mock" */
   host: string;
   apps: {
@@ -216,6 +323,17 @@ export interface Bridge {
     launch(key: string): Promise<void>;
     info(key: string): Promise<void>;
     uninstall(key: string): Promise<void>;
+    /**
+     * Which apps run, app key -> "running" | "frozen" (only those that do); "apps.running" carries it again on every
+     * change. Android: an app with a task in recents; Linux, Steam and its games: a window, frozen by powos-sleep-gui.
+     * Only where the host knows it.
+     */
+    running?(): Promise<Record<string, RunState>>;
+    /**
+     * An Android app's deep links (App API's "+ add app"): the URIs its exported VIEW/BROWSABLE intent filters open,
+     * read from its manifest - nothing is fired. Android only; an older APK rejects it ("no such call").
+     */
+    links?(pkg: string): Promise<AppLinks>;
   };
   usage: {
     /** Keys, last opened first. */
@@ -305,12 +423,43 @@ export interface Bridge {
    */
   ai: {
     chat(): Promise<Chat>;
-    /** Asks it: one turn, streamed into the chat. */
-    send(text: string): Promise<void>;
+    /** Asks it: one turn, streamed into the chat. [recents] false: not also put into the app switcher (that briefly shows the chat activity over home). */
+    send(text: string, recents?: boolean): Promise<void>;
+    /** Takes a queued message back before its turn: it's never sent (?: hosts from before the queue). */
+    unqueue?(id: number): Promise<void>;
+    /**
+     * "Test now": the verify queue (tools/phone/verify/queue.sh, on the Mac) runs [task]'s queued phone checks at once
+     * ("all": every queued one), not waiting for the phone to sit idle. ?: hosts from before it.
+     */
+    verifyGo?(task: string): Promise<void>;
+    /**
+     * Asks for the verify runner's state; it comes as "verify.state" (VerifyState). ?: hosts from before it (their
+     * call rejects "no such call": the page then shows no "checks paused").
+     */
+    verifyState?(): Promise<void>;
+    /**
+     * Stops the phone checks: the runner kills the running one and pauses the queue (the test pill's x; verifyGo "all"
+     * resumes). [dry]: nothing stopped - it only answers, so a page can tell this host has it (older ones reject "no
+     * such call"). ?: hosts from before it.
+     */
+    verifyStop?(dry?: boolean): Promise<void>;
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
-    /** What agents told the user lately, newest first ("ai.mail" brings it again). */
+    /**
+     * "Create app": a fresh thread in a new directory, building [description] as a PowOS app (`powos app new` /
+     * `install`). False while a turn is under way (or PowOS isn't running).
+     */
+    newApp(description: string): Promise<boolean>;
+    /** Back from a thread to the main conversation. False while a turn is under way. */
+    closeThread(): Promise<boolean>;
+    /** What agents told the user and is unread, newest first ("ai.mail" brings it again). */
     mail(): Promise<AgentMail[]>;
+    /**
+     * Marks one read ([mailRead]) or all ([mailClear]): read everywhere - its notification goes, and it's out of the
+     * user's comms inbox.
+     */
+    mailRead(id: string): Promise<void>;
+    mailClear(): Promise<void>;
     /** Asks for the agents at work (PowOS's tmux sessions); they come as "ai.sessions" (AgentSession[]). */
     sessions(): Promise<void>;
     /** Opens a terminal on one of them. */
@@ -363,6 +512,37 @@ export interface Bridge {
     /** A mouse report: buttons (1 left, 2 right, 4 middle), relative motion, wheel and horizontal wheel. */
     mouse(buttons: number, dx: number, dy: number, wheel?: number, pan?: number): Promise<void>;
   };
+  /**
+   * Smart glasses (Even Realities G2/G1: glasses/Glasses.kt, docs/GLASSES.md): the pair, its connection, its display,
+   * input and microphone. "glasses.state" (GlassesState) on every change; "glasses.input" ({ input, side }: input
+   * "click" | "double" | "up" | "down" | "enter" | "exit" | "headUp" | "headDown" ...); "glasses.transcript" ({ text,
+   * final }: the G2's own speech recognition); "glasses.audio" ({ data: base64, codec, rate }, to a page that asked
+   * with audio(true)); "glasses.message" ({ text, seconds }: `powos glasses show`, to the surface page).
+   */
+  glasses: {
+    state(): Promise<GlassesState>;
+    /** Android's companion pairing dialogs (one per arm). "started" | "unavailable". */
+    pair(): Promise<"started" | "unavailable">;
+    /** Forgets the pair (disconnects, drops the associations). */
+    forget(): Promise<GlassesState>;
+    /** Connects (and keeps reconnecting) the paired glasses. False: none paired. */
+    connect(): Promise<boolean>;
+    disconnect(): Promise<GlassesState>;
+    /** The glasses' own text rendering (the G2's teleprompter, the G1's text screen). False: not ready. */
+    showText(text: string): Promise<boolean>;
+    /** A picture (data: URL or base64 PNG), scaled to the canvas and converted (4-bit greys / 1-bit). [dither]: G1. */
+    showImage(image: string, dither?: boolean): Promise<boolean>;
+    clear(): Promise<boolean>;
+    mic(on: boolean): Promise<boolean>;
+    /** This page wants "glasses.audio" events (many: only while it uses them). */
+    audio(on: boolean): Promise<boolean>;
+    /** This page is the glasses' screen (shell/glasses/surface.tsx): `powos glasses show` comes to it. */
+    surface(on: boolean): Promise<boolean>;
+    /** The glasses' screen loads its app again (another one picked: store "glasses"). */
+    reload(): Promise<void>;
+    /** An option's value; with [value], sets it. "g2Raster": pictures to the G2 over its unverified render channel. */
+    option(name: string, value?: boolean): Promise<boolean>;
+  };
   /** The phone's notifications, for the launcher's own panel; "notifications.changed" brings the list again. */
   notifications: {
     list(): Promise<NotificationList>;
@@ -371,10 +551,15 @@ export interface Bridge {
     clearAll(): Promise<void>;
     /** Opens the setting that grants the launcher notification access. */
     access(): Promise<void>;
+    /** Presses [key]'s action [index]; [text] is the reply typed into it when it takes one. */
+    action(key: string, index: number, text?: string): Promise<void>;
   };
   /**
    * The assistant's screen (index.html?mode=assist, over another app): what that app's screen showed - its text, an
    * outline, and a screenshot URL ("assist.context" brings them as they arrive) - and closing the assistant.
+   * "assist.reset" comes with each summoning (the page starts dictating then), "assist.hidden" when it goes away,
+   * "assist.held" right after it when the side button is still down (hold to talk: a hold's dictation), then
+   * "assist.keyup" when it's let go; "assist.quick" instead when it was already up (the dictation ends at a short pause).
    */
   assist: {
     screen(): Promise<AssistScreen | null>;
@@ -397,6 +582,15 @@ export interface Bridge {
    * The control center (and the notification panel's row): every tile the phone's own control center has, switched
    * here, and its sliders. "qs.changed" brings the state again.
    */
+  /** The touch controller overlay (GamepadOverlay), for the control centre's Controller tile. */
+  pad: {
+    /** Whether the overlay is on (live, else what was saved for the next start). */
+    state(): Promise<boolean>;
+    /** Shows or hides it; resolves to the new state. Rejects where the phone has no overlay. */
+    overlay(on: boolean): Promise<boolean>;
+    /** Opens its layout editor. False: no game session up to edit on. */
+    edit(): Promise<boolean>;
+  };
   /** What's playing ("media.changed" brings it again once asked): the control center's media card. */
   media: {
     state(): Promise<MediaState>;
@@ -418,26 +612,121 @@ export interface Bridge {
   /**
    * The shade (index.html?mode=shade, in PowOS's system window above the status bar - the native shade host): the
    * host drives the pull ("shade.drag" { q: 0..1 } while the finger is on the top edge, "shade.settle" { open }), and
-   * hears when the page closed it.
+   * hears when the page closed it. Heads-up banners show here too: "shade.peek" (a PhoneNotification, or null: it's
+   * gone) with the window a strip at the top as tall as [peekHeight] says; [expand] makes it the whole shade, open.
    */
   shade: {
     closed(): Promise<void>;
+    expand(): Promise<void>;
+    /** The banner's bottom edge, CSS px from the top of the window. */
+    peekHeight(px: number): Promise<void>;
+    /**
+     * How strongly what's behind the shade's window is blurred when it's open: the compositor's radius at full openness,
+     * dp (0..600; default 140). The compositor's blur is only a fraction of its radius - text needs a lot.
+     */
+    blur(dp: number): Promise<void>;
+    /**
+     * Home's page: a pull down on home is the shade's now ([on]: nothing open over home's pages). Resolves true when the
+     * host takes that finger itself (its gesture input), false when it can't - then home asks [open] on a swipe down.
+     */
+    homePull(on: boolean): Promise<boolean>;
+    /** The shade down, not following a finger (home without the host's gesture input). */
+    open(): Promise<void>;
+  };
+  /**
+   * An overlay window's page over any app (OverlayHost.kt): Quick Tools (mode=quicktools: "qt.drag" { side, y, q },
+   * "qt.settle" { open }). [closed]: the page is shut, the window can go.
+   */
+  overlay: {
+    closed(): Promise<void>;
+  };
+  /**
+   * The pull-up panels over apps (mode=pull: "pull.begin" { kind }, "pull.drag" { p }, "pull.end" { open },
+   * "pull.hide"). [closed]: shut and settled; [launched]: an app was opened from it, the window goes at once.
+   */
+  pull: {
+    closed(): Promise<void>;
+    launched(): Promise<void>;
+  };
+  /**
+   * The desktop's windows (PowOS's desktop host only; the phone rejects these): every window, ungrouped, in the
+   * taskbar's order; "windows.changed" (DesktopWindow[]) brings the whole list again on any change.
+   */
+  windows: {
+    list(): Promise<DesktopWindow[]>;
+    /** Raises and focuses it (a minimized one comes back); false: no such window. */
+    activate(id: string): Promise<boolean>;
+    /** Minimizes it, or brings a minimized one back. */
+    minimize(id: string): Promise<boolean>;
+    /** Asks it to close (the app may ask to save first); false: no such window. */
+    close(id: string): Promise<boolean>;
+  };
+  /**
+   * The desktop panel's own surface (index.html?mode=panel, a layer surface along the screen's bottom edge): [px]
+   * tall while something opens above the bar (the launcher), the bar alone again with 0. The space kept free of
+   * maximized windows stays the bar's.
+   */
+  panel: {
+    height(px: number): Promise<void>;
   };
   /** Android's recent tasks (the host is the recents provider): newest first; switching to one; removing one. */
   tasks: {
     list(): Promise<RecentTask[]>;
-    /** Brings the task back (the switcher goes away); false if it's gone. */
-    open(id: number): Promise<boolean>;
+    /**
+     * Brings the task back: growing out of [from] (its card, CSS px), or "instant" (the page grew the card to the
+     * screen itself); false if it's gone.
+     */
+    open(id: number, from?: { left: number; top: number; width: number; height: number } | "instant"): Promise<boolean>;
     remove(id: number): Promise<boolean>;
+    /** Two tasks side by side (WM Shell's split screen): [first] left / top. */
+    split(first: number, second: number): Promise<boolean>;
+    /** The task in a floating window (freeform). */
+    float(id: number): Promise<boolean>;
+    /** Its app's info screen. */
+    info(id: number): Promise<boolean>;
+    /** Its last frame saved to Pictures/Screenshots: the file's name, or null. */
+    screenshot(id: number): Promise<string | null>;
   };
   /**
-   * The switcher (index.html?mode=switcher, the system's recents screen): "switcher.shown" ({ from: the task it was
-   * opened over, or null }) each time it comes up, "switcher.toggle" when the overview button is pressed again.
+   * The floating app windows (unfolded home), top-most first, for the dock; "windows.changed" (AppWindow[]) after.
+   * The phone's only (wire calls "windows.list" / "windows.restore"): not `windows`, which is the desktop's taskbar.
    */
-  switcher: {
-    /** Away: what was under it shows again. */
-    close(): Promise<void>;
-    home(): Promise<void>;
+  floating?: {
+    list(): Promise<AppWindow[]>;
+    /** Brings it back (minimised, or under others) on top; false if it's gone. "windows.raised" (its id) after. */
+    restore(id: number): Promise<boolean>;
+    /** Home's pages as desktops (ui/desktops.ts): [hide] are the other pages' windows, out of sight; the rest back. */
+    desktop(hide: number[]): Promise<boolean>;
+    /** Off the screen into the dock, as its minimise button does (the dock's tap on the focused window's app). */
+    minimise?(id: number): Promise<boolean>;
+    /** Over the windows' whole area, or back where it was (its title bar's maximise button). */
+    maximise?(id: number): Promise<boolean>;
+    /** Where home's bottom bar starts (CSS px from the top): windows open and maximise above it, never over it. */
+    area?(barTop: number): Promise<boolean>;
+    /**
+     * A page swipe moving the windows of the pages it shows (ui/desktops.ts, the host's PageSlide), CSS px: "start"
+     * { rels: task id -> page offset -1/0/1, width, x } (false: nothing slides), "move" x (the track's offset from the
+     * page it started on), "settle" { to, ms, curve: cubic-bezier, hide } (the track's own transition; [hide] is the
+     * desktop change, committed when it lands), "cancel".
+     */
+    slide?(op: "start" | "move" | "settle" | "cancel", data?: unknown): Promise<boolean>;
+  };
+  /**
+   * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up
+   * over task [from] began, its window following the finger), "recents.drag" ({ progress 0..1, x, y }: every frame of
+   * it, CSS px), "recents.end" ({ to: "switcher" | "home" | "app", snapshot }), "recents.show" ({ open, from, tasks }:
+   * up without a swipe), "recents.hide" (home went away), "recents.tasks" ({ tasks }: the list for next time, laid out
+   * ahead), "switcher.toggle" (the overview button again).
+   */
+  recents: {
+    /** Where the first card's frame is (CSS px, its corner radius): a swiped-up window lands there. */
+    slot(rect: { left: number; top: number; width: number; height: number; radius: number }): Promise<void>;
+    /** After "recents.end" to the switcher: the first card shows the app's snapshot, its window may go. */
+    ready(): Promise<void>;
+    /** The page closed it (a tap beside the cards, Back, Home). */
+    closed(): Promise<void>;
+    /** Whether it's up, over what, with the tasks (a page that just loaded). */
+    state(): Promise<{ open: boolean; from: number | null; tasks: RecentTask[] }>;
   };
   /** The theme: the colors in use ("theme.changed" brings them again), the ones to pick from, picking one. */
   theme: {
@@ -482,14 +771,27 @@ export interface Bridge {
    * as it hears; "speech.done" ({ text }) once it ends; "speech.permission" ({ granted }) after it asked for the mic.
    */
   speech: {
-    /** [hold]: listens across pauses until stop(). "asked": it asked for the mic first, nothing started. */
+    /**
+     * Listens across pauses: [hold] until stop(), else until ~4 s with nothing heard (or stop()). "asked": it asked for
+     * the mic first, nothing started.
+     */
     start(hold: boolean): Promise<"started" | "asked" | "unavailable">;
     stop(): Promise<void>;
     cancel(): Promise<void>;
+    /** The dictation under way becomes a hold's: it ends only at stop() (the press that started it is still down). */
+    hold(): Promise<void>;
+    /** Binds the recognizer without listening (the mic stays closed), so the next start is immediate. */
+    warm(): Promise<void>;
+    /** The dictation under way (a tap's) ends after [ms] with nothing heard instead of ~4 s. */
+    quiet(ms: number): Promise<void>;
   };
   keyboard: {
     show(): Promise<void>;
     hide(): Promise<void>;
+  };
+  /** The pet over apps (system/PetOverlay.kt): on or off; no argument reads it. An older host has none: check. */
+  pet?: {
+    overlay(on?: boolean): Promise<boolean>;
   };
   system: {
     insets(): Promise<Insets>;
@@ -497,10 +799,17 @@ export interface Bridge {
     battery(): Promise<{ level: number | null; charging: boolean }>;
     /** Pulls Android's notification shade down ([open], the default) or puts it away. */
     notifications(open?: boolean): Promise<boolean>;
+    /**
+     * What the shell's glass (ui/glass.ts) has to work with: the wallpaper behind the page as an image (Android draws
+     * it behind the window, out of the page's reach - the page frosts this copy of it once), and whether the host
+     * blurs what's behind this window itself (the shade's, over an app). "system.glass" brings it again when the
+     * wallpaper changes. Hosts without it reject: no glass, the plain fills.
+     */
+    glass(): Promise<GlassSource>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
-   * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "qt.drag" ({ side, y, q }) / "qt.settle" ({ open }) (Quick Tools), "home.panel" ({ kind }: home with its pull-up panel up), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "verify.state" (VerifyState), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "system.glass" (GlassSource), "notifications.changed" (NotificationList),
+   * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "windows.changed" (DesktopWindow[]), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;
 }
@@ -553,7 +862,12 @@ export interface OwlRoot extends OwlNode {
 declare global {
   interface Window {
     powos?: Bridge;
-    PowosHost?: { call(id: number, method: string, args: string): void };
+    /**
+     * [name]: which host ("powos": the desktop's powos-shell; none: the phone's WebView, "android"). The desktop has
+     * call(); the phone has postMessage(JSON [id, method, args]) - a web message listener only the page's top frame at
+     * its own origin gets (ShellOrigin.kt), never an iframe.
+     */
+    PowosHost?: { name?: string; call?(id: number, method: string, args: string): void; postMessage?(message: string): void };
     __powosHost?: {
       resolve(id: number, v: unknown): void;
       reject(id: number, m: string): void;
@@ -580,6 +894,8 @@ export interface Agent {
   subs: number;
   unread: number;
   report: string;
+  /** The work board task it holds (`powos agents task set <id> --step ...`; powos-agentsd's `work`), "" or absent: none. */
+  work?: string;
   started: number;
   last: number;
   rev: number;
@@ -671,4 +987,36 @@ export interface RemoteState {
     hosts: RemoteHost[];
     error: string | null;
   };
+}
+
+/** An arm of the glasses: its address, advertised name, and link ("off" | "connecting" | "discovering" | "authenticating" | "ready"). */
+export interface GlassesArm {
+  address: string;
+  name: string | null;
+  phase: string;
+}
+/** The glasses as the host has them (Glasses.state). */
+export interface GlassesState {
+  /** Bluetooth there, and on. */
+  available: boolean;
+  enabled: boolean;
+  /** The paired pair: "G2" | "G1" and its id ("G2_84"); null: none paired. */
+  paired: { model: "G1" | "G2"; pairId: string } | null;
+  /** Connected or reconnecting on purpose. */
+  wanted: boolean;
+  phase: "off" | "connecting" | "ready";
+  left: GlassesArm | null;
+  right: GlassesArm | null;
+  /** On the face (null: the glasses don't say - the G2). */
+  worn: boolean | null;
+  /** False while the display is cleared because they're off the face. */
+  shown: boolean;
+  battery: Record<string, number>;
+  mic: boolean;
+  error: string | null;
+  /** The display: 576x288 at 4 bits (G2), 576x136 at 1 bit (G1). */
+  canvas: { width: number; height: number; bits: number } | null;
+  /** Pictures: confirmed on real glasses (G1), and usable now (G2 only with the g2Raster option). */
+  image: { verified: boolean; usable: boolean };
+  options: Record<string, boolean>;
 }

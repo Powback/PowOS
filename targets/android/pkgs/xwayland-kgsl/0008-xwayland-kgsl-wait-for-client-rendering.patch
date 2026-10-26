@@ -1,0 +1,143 @@
+From: PowOS
+Subject: xwayland/kgsl: a Present copy waits for the client's rendering, and finishes before the buffer goes back
+
+KGSL has no implicit sync, and Mesa's X11 WSI never waits for its own rendering
+when the server is Xwayland (x11_needs_wait_for_fences: false for Xwayland, it
+relies on implicit sync). So glamor's copy of a presented Vulkan image could
+read it while the client's GPU was still drawing it, and the client could draw
+its next frame into it while the copy was still reading: on the OnePlus Open,
+Proton games (Broforce, DXVK in IMMEDIATE mode) showed half-drawn frames whose
+missing parts were the image's older content - frames jumping back and forth.
+
+- Before a copy (not a flip; KGSL never flips) from an imported DRI3 buffer, the
+  buffer's read fence is exported (DMA_BUF_IOCTL_EXPORT_SYNC_FILE) and the
+  request waits for it through the same notify-fd path as the explicit-sync
+  acquire wait (xwl_present_wait_acquire_fence_avail -> ..._fence_avail ->
+  re-execute). Mesa attaches its rendering fence to the dma-buf with
+  DMA_BUF_IOCTL_IMPORT_SYNC_FILE when the kernel has it: Linux 6.0, backported
+  to the phone's 5.15 by targets/android/kernel/patches/0004. On a kernel
+  without the ioctl the export fails with ENOTTY: logged once, never tried
+  again, and the copy runs as before - this half is a no-op there.
+- After a copy, xwl_present_flush finishes it (glFinish) before Present sends
+  the client its buffer back (idle). Kernel-independent.
+---
+diff --git a/hw/xwayland/xwayland-glamor-gbm.c b/hw/xwayland/xwayland-glamor-gbm.c
+index 6c07ac5..5a4cbdb 100644
+--- a/hw/xwayland/xwayland-glamor-gbm.c
++++ b/hw/xwayland/xwayland-glamor-gbm.c
+@@ -684,6 +684,56 @@ error:
+     return NULL;
+ }
+ 
++/*
++ * PowOS: the fence of whatever is still drawing into a client's DRI3 buffer, as a sync_file to wait on before
++ * reading it (a Present copy), or -1 when there is nothing to wait for.
++ *
++ * KGSL has no implicit sync: nothing stops glamor from copying a Vulkan swapchain image the client's GPU is still
++ * rendering, and Mesa's X11 WSI never waits itself when the server is Xwayland. With the kernel's
++ * DMA_BUF_IOCTL_EXPORT/IMPORT_SYNC_FILE (Linux 6.0, backported to the phone's 5.15 by PowOS) Mesa attaches its
++ * rendering fence to the dma-buf, and this exports it again for the copy to wait on. On a kernel without the ioctl
++ * (ENOTTY) it says so once and returns -1 from then on: the copy runs unsynchronized, as before.
++ */
++int
++xwl_glamor_kgsl_export_read_fence(PixmapPtr pixmap)
++{
++#if defined(DRI3) && defined(DMA_BUF_IOCTL_EXPORT_SYNC_FILE)
++    static Bool unsupported;
++    struct xwl_screen *xwl_screen = xwl_screen_get(pixmap->drawable.pScreen);
++    struct xwl_pixmap *xwl_pixmap = xwl_pixmap_get(pixmap);
++    struct dma_buf_export_sync_file args = {
++        .flags = DMA_BUF_SYNC_READ,
++        .fd = -1,
++    };
++    struct pollfd pfd;
++
++    if (unsupported || !xwl_glamor_is_kgsl_surfaceless(xwl_screen) ||
++        !xwl_pixmap || !xwl_pixmap->kgsl_dri3_import ||
++        xwl_pixmap->kgsl_num_fds < 1 || xwl_pixmap->kgsl_fds[0] < 0)
++        return -1;
++
++    if (drmIoctl(xwl_pixmap->kgsl_fds[0], DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &args) != 0) {
++        if (errno == ENOTTY) {
++            unsupported = TRUE;
++            ErrorF("Xwayland glamor: the kernel has no DMA_BUF_IOCTL_EXPORT_SYNC_FILE: "
++                   "client buffers are copied without waiting for their rendering\n");
++        }
++        return -1;
++    }
++
++    /* Already done (the usual case, and a stub fence when nobody attached one): no need to wait. */
++    pfd.fd = args.fd;
++    pfd.events = POLLIN;
++    if (poll(&pfd, 1, 0) == 1) {
++        close(args.fd);
++        return -1;
++    }
++    return args.fd;
++#else
++    return -1;
++#endif
++}
++
+ Bool
+ xwl_glamor_kgsl_refresh_dri3_pixmap(PixmapPtr pixmap)
+ {
+diff --git a/hw/xwayland/xwayland-glamor-gbm.h b/hw/xwayland/xwayland-glamor-gbm.h
+index e40ef49..ea8e847 100644
+--- a/hw/xwayland/xwayland-glamor-gbm.h
++++ b/hw/xwayland/xwayland-glamor-gbm.h
+@@ -44,6 +44,7 @@ drmDevice *xwl_gbm_get_main_device(struct xwl_screen *xwl_screen);
+ Bool xwl_glamor_is_kgsl_surfaceless(struct xwl_screen *xwl_screen);
+ void xwl_glamor_kgsl_refresh_wl_buffer(PixmapPtr pixmap);
+ Bool xwl_glamor_kgsl_refresh_dri3_pixmap(PixmapPtr pixmap);
++int xwl_glamor_kgsl_export_read_fence(PixmapPtr pixmap);
+ 
+ /* Explicit buffer synchronization points */
+ Bool xwl_glamor_gbm_set_syncpts(struct xwl_window *xwl_window, PixmapPtr pixmap);
+diff --git a/hw/xwayland/xwayland-present.c b/hw/xwayland/xwayland-present.c
+index 22783c6..4591d4c 100644
+--- a/hw/xwayland/xwayland-present.c
++++ b/hw/xwayland/xwayland-present.c
+@@ -28,6 +28,8 @@
+ #include <compint.h>
+ #ifdef XWL_HAS_GLAMOR
+ #include <glamor.h>
++#include <epoxy/gl.h>
++#include "xwayland-glamor.h"
+ #include "xwayland-glamor-gbm.h"
+ #endif
+ #include <windowstr.h>
+@@ -695,6 +697,13 @@ xwl_present_flush(WindowPtr window)
+     if (xwl_screen->glamor)
+         glamor_block_handler(screen);
+     if (xwl_glamor_is_kgsl_surfaceless(xwl_screen)) {
++        /* PowOS: present_execute_copy sends the client its buffer back (idle) right after this flush, and with
++         * no implicit sync on KGSL the client's next frame can overwrite it while glamor's copy is still reading
++         * it - the window gets half of the next frame. Finish the copy first (one window-sized blit). */
++        if (xwl_screen->glamor) {
++            xwl_glamor_egl_make_current(xwl_screen);
++            glFinish();
++        }
+         kgsl_flush_count++;
+         if ((kgsl_flush_count % 256) == 0)
+             xwl_screen_post_damage(xwl_screen);
+@@ -998,6 +1007,19 @@ xwl_present_wait_acquire_fence_avail(struct xwl_screen *xwl_screen,
+                                                    vblank->efd);
+         return TRUE;
+     }
++
++    /* PowOS (KGSL surfaceless, no implicit sync): a copy from a client buffer waits until the client's GPU has
++     * finished drawing it - its fence, exported from the dma-buf (xwl_glamor_kgsl_export_read_fence). Without
++     * this, Proton games showed half-drawn and older frames. Re-executed by xwl_present_acquire_fence_avail. */
++    if (!vblank->flip && vblank->pixmap && vblank->efd < 0) {
++        int fence_fd = xwl_glamor_kgsl_export_read_fence(vblank->pixmap);
++
++        if (fence_fd >= 0) {
++            vblank->efd = fence_fd;
++            SetNotifyFd(vblank->efd, xwl_present_acquire_fence_avail, X_NOTIFY_READ, vblank);
++            return TRUE;
++        }
++    }
+ #endif /* defined(XWL_HAS_GLAMOR) && defined(DRI3) */
+     return FALSE;
+ }

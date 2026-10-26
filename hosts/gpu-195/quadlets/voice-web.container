@@ -1,0 +1,27 @@
+# gpu-195: the VoiceAgent web UI (Astro SSR, ~/Projects/VoiceAgent/VoiceAgentWeb) on :4321. Proxies /api/* and /ws to
+# voice-agent. Traefik on .100 routes voiceagent.pow here (and /ws, /transcribe straight to voice-agent :9000).
+# Unit: powos units show voice-web  (repo units/gpu-195/voice-web.json)
+[Unit]
+Description=PowOS voice - VoiceAgent web UI
+After=voice-agent.service
+Wants=voice-agent.service
+
+[Container]
+ContainerName=voice-web
+Image=localhost/voiceagent-web:latest
+Network=voice.network
+PublishPort=4321:4321
+Environment=HOST=0.0.0.0
+Environment=PORT=4321
+Environment=NODE_ENV=production
+Environment=VOICE_AGENT_URL=ws://voice-agent:9000/ws
+Environment=VOICE_AGENT_HTTP_URL=http://voice-agent:9000
+Label=io.powos.unit=voice-web
+PodmanArgs=--memory=1g --memory-swap=1g --cpus=1 --pids-limit=256
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

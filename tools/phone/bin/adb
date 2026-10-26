@@ -1,0 +1,11 @@
+#!/bin/bash
+# `adb` for scripts that call plain adb (targets/android/rooted/rooted.sh deploy), through the VPN: tools/phone/adb.sh.
+#   PATH="$PWD/tools/phone/bin:$PATH" targets/android/rooted/rooted.sh deploy --note "..."
+# Paths are made canonical first: adb.sh mounts each absolute path's folder, and "rooted/../session/x" isn't one.
+here=$(cd "$(dirname "$0")/.." && pwd)
+a=()
+for x in "$@"; do
+  if [[ "$x" == /* && -e "$x" ]]; then x=$(cd "$(dirname "$x")" && pwd -P)/$(basename "$x"); fi
+  a+=("$x")
+done
+exec "$here/adb.sh" ${a[@]+"${a[@]}"}

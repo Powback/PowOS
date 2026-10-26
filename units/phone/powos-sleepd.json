@@ -1,0 +1,13 @@
+{
+  "id": "powos-sleepd",
+  "owner": "unified-sleep (lib/apps/powos-sleepd, docs/UNIFIED-SLEEP.md)",
+  "purpose": "Freezes idle app backends and (for powos-sleep-gui) unfocused GUI apps with the cgroup v2 freezer; thaws them on a connection, focus, D-Bus or `powos sleep wake`.",
+  "files": ["/usr/lib/powos/apps/powos-sleepd", "/usr/lib/powos/apps/powos-sleep-common", "/usr/lib/powos/apps/powos-sleep",
+            "/usr/bin/powos-sleepd", "/run/powos-sleep/", "/var/lib/powos/sleep/never.json", "/var/log/powos/sleepd.log", "/etc/powos/units.d/powos-sleepd.json"],
+  "packages": [],
+  "processes": [{"name": "powos-sleepd", "user": "root", "started_by": "rooted/powos-start.sh (system tier, beside powos-supervisor)"}],
+  "cgroups": ["/sys/fs/cgroup/powos/sleep/<thing> (one per frozen thing, removed on thaw)", "/dev/memcg/powos/sleepd",
+              "/dev/cpuctl/powos/sleepd", "/sys/fs/cgroup/powos/sleepd"],
+  "limits": {"memMB": 48, "cpuPct": 50, "pids": 16},
+  "remove": "kill $(cat /run/powos-sleep/sleepd.pid) (thaws everything); rm -rf /usr/lib/powos/apps/powos-sleep* /usr/bin/powos-sleepd /run/powos-sleep /var/lib/powos/sleep; rmdir /dev/memcg/powos/sleepd /dev/cpuctl/powos/sleepd /sys/fs/cgroup/powos/sleepd; drop the powos-sleepd lines from powos-start.sh"
+}

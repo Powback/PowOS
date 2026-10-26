@@ -1,0 +1,26 @@
+{
+  "id": "powos-boot",
+  "name": "PowOS boot hook",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "host": "phone-android",
+  "purpose": "Magisk's boot script: mounts PowOS's root, DNS, x86 binfmt, sshd, the port lock (iptables chain powos-local), the system tier and the app-data watcher - at every boot",
+  "installedBy": "targets/android/rooted/powos-deploy.sh",
+  "files": [
+    "/data/adb/service.d/powos.sh",
+    "/data/powos/powos-start.sh",
+    "/data/powos/start.log",
+    "/data/powos/root",
+    "/data/powos/system-tier.off",
+    "/data/powos/units.d",
+    "/data/powos/powos-units.sh"
+  ],
+  "remove": {
+    "commands": [
+      "for p in 3410; do while iptables -w -D OUTPUT -o lo -p tcp --dport $p -j powos-local 2>/dev/null; do :; done; done; iptables -w -F powos-local; iptables -w -X powos-local"
+    ],
+    "keep": [
+      "/data/powos/root"
+    ]
+  }
+}

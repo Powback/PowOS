@@ -1,0 +1,104 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>App API — viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Standalone viewer for App Capability Specs: the "toggle it and view the
+  resulting API" surface, client-side and read-only. Drop one or more
+  *.appcap.json on the page (or it loads ../examples/hue.appcap.json when served).
+  It renders, per app, every action with its safety class, auth handle, endpoint
+  mapping and widget/refresh hints, and an enable toggle that REFLECTS the spec's
+  allowlist (enabled flags). It never contacts any app and never sends a request;
+  persisting a toggle is the job of the control backend (powos app …), not this
+  preview. This is the design target for the PowOS "App API" app.
+-->
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --fg:#e6e8ec; --muted:#9aa0aa; --line:#272b34;
+          --read:#2ec27e; --rev:#e3b341; --spend:#f85149; --accent:#539bf5; }
+  @media (prefers-color-scheme: light){ :root{ --bg:#f6f7f9; --card:#fff; --fg:#1b1f24; --muted:#636b76; --line:#e3e6ea; } }
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+  header{padding:18px 16px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  h1{font-size:18px;margin:0}
+  main{padding:16px;max-width:900px;margin:0 auto}
+  .app{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:0 0 16px}
+  .app h2{margin:0 0 2px;font-size:17px} .meta{color:var(--muted);font-size:13px;margin-bottom:12px}
+  .act{border-top:1px solid var(--line);padding:11px 0;display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:start}
+  .act:first-of-type{border-top:0}
+  .name{font-weight:600} .sum{color:var(--muted);font-size:13px;grid-column:1/-1}
+  .map{font-family:ui-monospace,monospace;font-size:12px;color:var(--muted);grid-column:1/-1;word-break:break-all}
+  .badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .read{background:color-mix(in oklab,var(--read) 22%,transparent);color:var(--read)}
+  .rev{background:color-mix(in oklab,var(--rev) 22%,transparent);color:var(--rev)}
+  .spend{background:color-mix(in oklab,var(--spend) 22%,transparent);color:var(--spend)}
+  .tags{font-size:11px;color:var(--muted)} .tag{border:1px solid var(--line);border-radius:6px;padding:1px 6px;margin-right:5px}
+  .sw{position:relative;width:40px;height:22px;flex:none}
+  .sw input{opacity:0;width:0;height:0} .track{position:absolute;inset:0;background:var(--line);border-radius:999px;transition:.15s}
+  .knob{position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.15s}
+  .sw input:checked+.track{background:var(--accent)} .sw input:checked+.track+.knob{left:20px}
+  .drop{border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;color:var(--muted);margin-bottom:16px}
+  button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:7px 12px;font:inherit;cursor:pointer}
+</style>
+<header>
+  <h1>App API</h1>
+  <span class="meta">one capability spec → API · CLI · AI tools · widgets, all enforcing the same safety class</span>
+  <span style="flex:1"></span>
+  <button id="pick">Load .appcap.json…</button>
+  <input id="file" type="file" accept=".json" multiple hidden>
+</header>
+<main>
+  <div class="drop" id="drop">Drop <code>*.appcap.json</code> files here, or use the button. Tries <code>../examples/hue.appcap.json</code> automatically.</div>
+  <div id="apps"></div>
+</main>
+<script>
+const SAFE = { "read":["read","read"], "reversible-write":["rev","reversible"], "spend":["spend","spend ⚠"] };
+const appsEl = document.getElementById('apps');
+
+function actEndpoint(ep){
+  if(!ep) return "—";
+  if(ep.ui) return "UI → " + (ep.ui.deep_link || ep.ui.route || ((ep.ui.steps||[]).length+" steps"));
+  if(ep.argv) return "CLI " + ep.argv.join(" ");
+  return (ep.method||"GET") + " " + (ep.path || ep.operationId || "?") + (ep.auth? "  (auth "+ep.auth+")":"");
+}
+
+function renderApp(spec){
+  const card = document.createElement('div'); card.className='app';
+  const toks = Object.entries((spec.auth&&spec.auth.tokens)||{})
+    .map(([k,v])=>`${k} → ${v.store} (value never shown)`).join(", ") || "none";
+  card.innerHTML = `<h2>${spec.name||spec.app}</h2>
+    <div class="meta">${spec.description||""}<br>
+    base: <code>${(spec.base&&spec.base.url)||"?"}</code> · auth: ${toks} · app enabled: <b>${!!spec.enabled}</b></div>`;
+  const acts = Object.entries(spec.actions||{}).sort();
+  for(const [aid,a] of acts){
+    const [cls,label] = SAFE[a.safety]||["",a.safety];
+    const row = document.createElement('div'); row.className='act';
+    const captured = a.origin==='captured';
+    const tags = [
+      captured ? `<span class="tag">${a.promoted?'captured·promoted':'captured·read-only'}</span>` : `<span class="tag">official</span>`,
+      a.widget ? `<span class="tag">widget</span>`:'',
+      a.confirm ? `<span class="tag">needs confirm</span>`:'',
+      a.undo ? `<span class="tag">undo</span>`:'',
+      a.refresh ? `<span class="tag">${a.refresh.event_stream?'push':'poll '+(a.refresh.poll_s||'')+'s'}</span>`:''
+    ].join('');
+    const on = a.enabled !== false;
+    const widgetBlocked = a.safety!=='read';
+    row.innerHTML = `
+      <div><span class="name">${aid}</span> <span class="badge ${cls}">${label}</span></div>
+      <label class="sw" title="${on?'in allowlist':'disabled'}"><input type="checkbox" ${on?'checked':''} disabled>
+        <span class="track"></span><span class="knob"></span></label>
+      <div class="sum">${a.summary||""}</div>
+      <div class="map">${actEndpoint(a.endpoint)}</div>
+      <div class="tags" style="grid-column:1/-1">${tags}</div>`;
+    card.appendChild(row);
+  }
+  appsEl.appendChild(card);
+}
+
+function load(text){ try{ renderApp(JSON.parse(text)); document.getElementById('drop').style.display='none'; }
+  catch(e){ alert('not a valid appcap json: '+e); } }
+
+document.getElementById('pick').onclick=()=>document.getElementById('file').click();
+document.getElementById('file').onchange=e=>{ for(const f of e.target.files) f.text().then(load); };
+const drop=document.getElementById('drop');
+drop.ondragover=e=>{e.preventDefault();}; drop.ondrop=e=>{e.preventDefault(); for(const f of e.dataTransfer.files) f.text().then(load);};
+fetch('../examples/hue.appcap.json').then(r=>r.ok&&r.text().then(load)).catch(()=>{});
+</script>

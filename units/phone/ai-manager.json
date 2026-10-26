@@ -1,0 +1,20 @@
+{
+  "id": "ai-manager",
+  "name": "PowOS manager agent",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "the standing manager agent (powos ai manager) and its config",
+  "installedBy": "targets/android/rooted/powos-deploy.sh",
+  "files": [
+    "/usr/lib/powos/ai/manager",
+    "/usr/lib/powos/ai",
+    "/etc/powos/ai/agents",
+    "/etc/powos/ai"
+  ],
+  "processes": [
+    {
+      "match": "lib/powos/ai/manager/manager.py"
+    }
+  ],
+  "unbounded": "a claude session tree the user talks to; bounded by the session it runs in"
+}

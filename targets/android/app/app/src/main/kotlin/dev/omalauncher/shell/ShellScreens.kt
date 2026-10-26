@@ -15,7 +15,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import dev.omalauncher.BuildConfig
 import dev.omalauncher.Runtime
 import dev.omalauncher.linux.AGENTS
 import dev.omalauncher.linux.JobState
@@ -202,7 +201,7 @@ class ShellScreens(
             .put("agent", runtime.agents.default?.name ?: JSONObject.NULL)
             .put("updates", if (installed) updates() else JSONObject.NULL)
             .put("setup", job(runtime.bootstrap.updates.value).takeIf { it != JSONObject.NULL && installed } ?: JSONObject.NULL)
-            .put("version", BuildConfig.VERSION_NAME)
+            .put("version", dev.omalauncher.AppVersion.name(context))
     }
 
     /** Pending pacman and agent updates, from the last check; "update all" runs them as one job. */
@@ -375,6 +374,8 @@ class ShellScreens(
         flag(Style.MONOCHROME_ICONS, "icons", "monochrome", "colored")
         flag(Style.THEMED_ICONS, "icon colors", "theme", "original")
         if (RootedGuest.enabled) flag(Style.SYSTEM_THEME, "system colors", "theme", "own")
+        flag(Style.LIVE_BLUR, "glass", "live blur", "still picture")
+        flag(Style.LIQUID_GLASS, "glass edges", "liquid", "plain")
         return JSONObject()
             .put("current", current?.name ?: JSONObject.NULL)
             .put("themes", themes)
@@ -535,7 +536,7 @@ class ShellScreens(
 
     private fun licenses(): JSONObject =
         JSONObject()
-            .put("version", BuildConfig.VERSION_NAME)
+            .put("version", dev.omalauncher.AppVersion.name(context))
             .put("components", JSONArray(Licenses.COMPONENTS.map { c -> JSONObject().put("name", c.name).put("use", c.use).put("license", c.license).put("notice", c.notice).put("url", c.url).put("source", c.source ?: JSONObject.NULL) }))
 
     /** A license's text (the LGPL with the GPL 3.0 it adds to); null for the public domain. */
@@ -602,7 +603,7 @@ class ShellScreens(
 
     private fun start(intent: Intent) {
         // runCatching: there may be no browser, no live wallpaper picker (Android Go).
-        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { Log.w(TAG, "can't open $intent", it) }
+        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context)) }.onFailure { Log.w(TAG, "can't open $intent", it) }
     }
 
     fun close() {
@@ -628,7 +629,7 @@ class ShellScreens(
 
         private const val LOG_LINES = 4
 
-        private val FLAGS = listOf(Style.MONOCHROME_ICONS, Style.THEMED_ICONS, Style.SYSTEM_THEME)
+        private val FLAGS = listOf(Style.MONOCHROME_ICONS, Style.THEMED_ICONS, Style.SYSTEM_THEME, Style.LIVE_BLUR, Style.LIQUID_GLASS)
 
         /** Bytes in [dir], without following symlinks (the rootfs is full of absolute guest links). */
         private fun diskUsage(dir: File): Long {

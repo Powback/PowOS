@@ -60,6 +60,23 @@ def log(*a):
     print(f"[{SERVER_NAME}]", *a, file=sys.stderr, flush=True)
 
 
+def _utf8_stdio():
+    """Messages are UTF-8 end to end, whatever the locale: a C/latin-1 locale's stdio would mis-decode what the MCP
+    client sends (silently changing the body) or fail to print an emoji (the watcher dying on it). stdout never fails:
+    something unprintable (a lone surrogate) comes out escaped, not as an exception."""
+    for stream, errors in ((sys.stdin, "strict"), (sys.stdout, "backslashreplace"), (sys.stderr, "backslashreplace")):
+        try:
+            stream.reconfigure(encoding="utf-8", errors=errors)
+        except (AttributeError, ValueError):
+            pass
+
+
+def _stdin_body():
+    """A message given as "-": all of stdin, as sent - only the one newline echo/heredoc add at the end is dropped."""
+    text = sys.stdin.read()
+    return text[:-1] if text.endswith("\n") else text
+
+
 # ---------------------------------------------------------------------------
 # Spool store
 # ---------------------------------------------------------------------------
@@ -135,7 +152,101 @@ def _read_pending(agent, drain):
                 os.remove(path)
             except OSError:
                 pass
+    if drain and _safe_name(agent) == "user":
+        # The user's mail read here: the phone's notifications of it go too (one read state).
+        _phone_read([m.get("id") for m in msgs if m.get("id")])
     return msgs
+
+
+def _consume(agent, ids):
+    """Removes the messages with these ids from ``agent``'s inbox (read elsewhere: on the phone, by a test's clean-up).
+    Returns how many were there. The user's: the phone is told too."""
+    want = set(ids)
+    n = 0
+    for path in _pending_files(agent):
+        try:
+            with open(path) as f:
+                mid = json.load(f).get("id")
+        except (OSError, json.JSONDecodeError):
+            continue
+        if mid in want:
+            try:
+                os.remove(path)
+                n += 1
+            except OSError:
+                pass
+    if _safe_name(agent) == "user":
+        _phone_read(list(want))
+    return n
+
+
+def _batched(key, text, window):
+    """--batch: notices of one kind within [window] s of the last become one. Returns (the text to post: the latest
+    note first, then every note of the batch as a list; the batch's previous message id to take back, or None).
+    State: <root>/batches/<key>.json, under a lock (two deploys at once still make one batch)."""
+    import fcntl
+
+    d = os.path.join(ROOT, "batches")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"{_safe_name(key)}.json")
+    with open(path + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with open(path) as f:
+                st = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            st = {}
+        now = time.time()
+        fresh = now - float(st.get("ts", 0)) < window
+        notes = (st.get("notes") or []) if fresh else []
+        prev = st.get("id") if fresh else None
+        notes = [n for n in notes if n != text] + [text]
+        if len(notes) == 1:
+            body = text
+        else:
+            # Line 1 is what the collapsed notification shows; the list is what a tap expands to.
+            body = f"{text} (+{len(notes) - 1} more)\n" + "\n".join(f"• {n}" for n in reversed(notes))
+        st = {"ts": now, "notes": notes[-20:], "id": None}
+        with open(path + ".tmp", "w") as f:
+            json.dump(st, f)
+        os.replace(path + ".tmp", path)
+    return body, prev
+
+
+def _batch_sent(key, mid):
+    path = os.path.join(ROOT, "batches", f"{_safe_name(key)}.json")
+    try:
+        with open(path) as f:
+            st = json.load(f)
+        st["id"] = mid
+        with open(path + ".tmp", "w") as f:
+            json.dump(st, f)
+        os.replace(path + ".tmp", path)
+    except (OSError, json.JSONDecodeError):
+        pass
+
+
+QUIET_KEEP = 500
+
+
+def _quiet_lines():
+    try:
+        with open(os.path.join(ROOT, "quiet.log"), encoding="utf-8") as f:
+            return f.read().splitlines()
+    except OSError:
+        return []
+
+
+def _quiet_log(text):
+    """notify --silent: a line in <root>/quiet.log (the last QUIET_KEEP kept) - logged, nobody told."""
+    os.makedirs(ROOT, exist_ok=True)
+    rec = {"ts": time.time(), "iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+           "from": AGENT_ID or "unknown", "text": text}
+    lines = (_quiet_lines() + [json.dumps(rec, ensure_ascii=False)])[-QUIET_KEEP:]
+    path = os.path.join(ROOT, "quiet.log")
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(path + ".tmp", path)
 
 
 def _list_agents():
@@ -155,7 +266,15 @@ def _list_agents():
 # Presentation
 # ---------------------------------------------------------------------------
 
+def _indent(text, first="    "):
+    """Every line of [text] indented four spaces (the first after [first]): a multi-line body stays visibly one
+    message, and dropping four characters from each line gives it back exactly."""
+    lines = str(text).split("\n")
+    return "\n".join([first + lines[0]] + ["    " + line for line in lines[1:]])
+
+
 def _fmt_msgs(msgs):
+    """The messages in full - every line of every body, never a preview (a watcher that cut them lost the rest)."""
     if not msgs:
         return "(no messages)"
     lines = []
@@ -163,11 +282,21 @@ def _fmt_msgs(msgs):
         tag = f"[{m.get('priority', 'normal')}]"
         kind = m.get("kind", "message")
         frm = m.get("from", "?")
-        lines.append(f"• {tag} from {frm} ({kind}) at {m.get('iso', '?')}")
-        lines.append(f"    {m.get('body', '')}")
+        lines.append(f"• {tag} from {frm} ({kind}) at {m.get('iso', '?')} [id {m.get('id', '?')}]")
+        lines.append(_indent(m.get("body", "")))
         if m.get("result"):
-            lines.append(f"    result: {m['result']}")
+            lines.append(_indent(m["result"], "    result: "))
     return "\n".join(lines)
+
+
+def _print_msgs(msgs, as_json):
+    """The CLI's output: the human form, or --json's one JSON object per message per line (the stored message as is:
+    the exact body for a script)."""
+    if as_json:
+        for m in msgs:
+            print(json.dumps(m, ensure_ascii=False))
+    else:
+        print(_fmt_msgs(msgs))
 
 
 def _idle_hint():
@@ -180,7 +309,7 @@ def _idle_hint():
     )
 
 
-def _phone_notify(message, priority="normal"):
+def _phone_notify(message, priority="normal", mid=None):
     """On a phone running PowOS: the message as an Android notification too, where the user is - the PowOS desktop
     may not be on screen. Written into the PowOS app's run dir (agent-mail/, the session's XDG_RUNTIME_DIR); the app
     posts it with an inline reply that comes back to this agent's inbox (targets/android: AgentMail).
@@ -201,7 +330,27 @@ def _phone_notify(message, priority="normal"):
         name = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
         tmp = os.path.join(box, f".{name}.tmp")
         with open(tmp, "w") as f:
-            json.dump({"from": AGENT_ID or "agent", "text": message, "priority": priority}, f)
+            # id: the user-inbox message's (the app keeps the mail by it, read or not); time: Unix seconds.
+            json.dump({"id": mid or name, "from": AGENT_ID or "agent", "text": message, "priority": priority,
+                       "time": int(time.time())}, f)
+        os.rename(tmp, os.path.join(box, f"{name}.json"))
+    except Exception:
+        pass
+
+
+def _phone_read(ids):
+    """On a phone running PowOS: these user-mail ids are read - the app marks them read and takes their
+    notifications away (agent-mail/ again, {"op": "read", "ids": [...]}). Best-effort, never fatal."""
+    if not ids or not _on_phone():
+        return
+    try:
+        run = os.environ.get("XDG_RUNTIME_DIR") or "/run/powos-app"
+        box = os.path.join(run, "agent-mail")
+        os.makedirs(box, exist_ok=True)
+        name = f"{int(time.time() * 1000)}-read-{uuid.uuid4().hex[:8]}"
+        tmp = os.path.join(box, f".{name}.tmp")
+        with open(tmp, "w") as f:
+            json.dump({"op": "read", "ids": list(ids)}, f)
         os.rename(tmp, os.path.join(box, f"{name}.json"))
     except Exception:
         pass
@@ -242,14 +391,15 @@ def _agents_queue():
 
 def _agents_note(payload):
     """The message as a row of the Agents view's comms feed (docs/AGENTS-VIEW-DESIGN.md §3 message): who to whom,
-    its kind and a preview - agentsd caps and scrubs it. Best-effort, never fatal; nothing when no agent reports."""
+    its kind and its body - agentsd scrubs it. Best-effort, never fatal; nothing when no agent reports."""
     try:
         q = _agents_queue()
         if not q:
             return
+        # The whole body: the view shows a preview line and opens the rest on a tap (agentsd scrubs secrets from it).
         rec = {"powos_agents": "message", "id": payload["id"], "from": payload["from"], "to": payload["to"],
                "kind": payload["kind"], "priority": payload["priority"], "ts": int(time.time() * 1000),
-               "body": payload["body"][:400]}
+               "body": payload["body"]}
         name = f"m{payload['id']}"
         with open(os.path.join(q, f".{name}.tmp"), "w") as f:
             json.dump(rec, f)
@@ -269,11 +419,11 @@ def _on_phone():
     return platform == "phone"
 
 
-def _desktop_notify(message, priority):
+def _desktop_notify(message, priority, mid=None):
     """Best-effort desktop toast for notify_user. Never fatal."""
     urgency = {"low": "low", "normal": "normal", "high": "critical",
                "urgent": "critical"}.get(priority, "normal")
-    _phone_notify(message, priority)
+    _phone_notify(message, priority, mid)
     if not shutil.which("notify-send"):
         return
     try:
@@ -316,7 +466,7 @@ def tool_notify_user(args):
         return (f"This agent may not notify the user directly; forwarded to "
                 f"'{PARENT_ID}' instead (id {mid}).")
     mid = _deliver("user", "notify", message, priority)
-    _desktop_notify(message, priority)
+    _desktop_notify(message, priority, mid)
     return f"User notified (id {mid})."
 
 
@@ -457,6 +607,132 @@ TOOLS = {
 }
 
 
+# What the manager shows the user in PowOS AI's chat. The chat draws these from the tool call itself (manager.py turns
+# it into a fenced block in the conversation), so here they only answer the model. Only the manager has them: its
+# stream is the one a chat renders.
+def tool_present_choices(args):
+    if len([o for o in args.get("options") or [] if str(o).strip()]) < 2:
+        raise ValueError("present_choices needs at least 2 options")
+    return ("Shown to the user as tappable options under your question. Their pick (or their own words) comes back "
+            "as their next message: end your turn now and wait for it.")
+
+
+def tool_present(args):
+    if not str(args.get("body", "")).strip():
+        raise ValueError("present needs a body")
+    return f"Shown to the user in the chat as a card, '{args.get('title', '')}'; a tap opens it full screen."
+
+
+def _compose(*argv, timeout=600):
+    """`powos compose` (lib/apps/powos-compose, docs/COMPOSER.md): the installed CLI, else this checkout's."""
+    here = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "apps", "powos-compose")
+    cmd = ["powos", "compose"] if shutil.which("powos") else [sys.executable, here]
+    r = subprocess.run([*cmd, *argv], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    if r.returncode:
+        raise ValueError((r.stderr or r.stdout).strip()[-1500:] or f"powos compose exited {r.returncode}")
+    return r.stdout.strip(), r.stderr.strip()
+
+
+def tool_compose_blocks(args):
+    out, _ = _compose("blocks", "--json", *(["--all"] if args.get("all") else []), timeout=60)
+    return out
+
+
+def tool_compose_widget(args):
+    """A home widget from building blocks: your manifest (checked by the composer's rules), or the words alone (its
+    word match). Installed unless install=false."""
+    no_install = [] if args.get("install", True) else ["--no-install"]
+    m = args.get("manifest")
+    if m:
+        import tempfile
+        d = tempfile.mkdtemp(prefix="powos-compose-")
+        path = os.path.join(d, "composition.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(m, f)
+        _compose("check", path, timeout=60)
+        out, log_ = _compose("build", path)
+        if not no_install:
+            _compose("install", out.splitlines()[-1], "--note", f"New widget: {m.get('name', 'composed')}")
+        return f"{log_}\nmade {m.get('id')} in {out.splitlines()[-1]}" + ("" if no_install else ", installed: home's edit sheet lists it")
+    words_ = str(args.get("words") or "").strip()
+    if not words_:
+        raise ValueError("compose_widget needs words or a manifest")
+    argv = ["widget", words_, "--no-ai", "--json", *no_install]
+    for k, v in (args.get("args") or {}).items():
+        argv += ["--arg", f"{k}={v}"]
+    if args.get("name"):
+        argv += ["--name", str(args["name"])]
+    out, log_ = _compose(*argv)
+    return f"{log_}\n{out}"
+
+
+if AGENT_ID == "manager":
+    TOOLS["compose_blocks"] = {
+        "fn": tool_compose_blocks,
+        "description": (
+            "The building blocks a composed home widget may use (`powos compose blocks --json`): every app "
+            "capability's widget-safe read action, with its row hint (view) and the inputs it needs. Read this "
+            "before compose_widget with a manifest."),
+        "schema": {"type": "object", "properties": {"all": {"type": "boolean", "default": False,
+                                                            "description": "Every action, writes too (not usable)."}}},
+    }
+    TOOLS["compose_widget"] = {
+        "fn": tool_compose_widget,
+        "description": (
+            "Make (and install) a new home widget out of building blocks, when the user asks for one in plain words "
+            "(docs/COMPOSER.md). Best: read compose_blocks, then pass a powos.compose/v1 manifest you wrote "
+            "(`powos compose help` has its rules). Or pass only the words: the composer's word match picks. A widget "
+            "only reads - a block that writes or spends is refused. Lands in home's edit sheet, PowOS apps; the "
+            "user places it."),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "words": {"type": "string", "description": "What the user asked for, in their words."},
+                "manifest": {"type": "object", "description": "A powos.compose/v1 manifest (kind widget)."},
+                "args": {"type": "object", "description": "Inputs a block needs (lat, lon)."},
+                "name": {"type": "string", "description": "The widget's name."},
+                "install": {"type": "boolean", "default": True},
+            },
+        },
+    }
+if AGENT_ID == "manager":
+    TOOLS["present_choices"] = {
+        "fn": tool_present_choices,
+        "description": (
+            "Ask the user a question with options they tap, instead of listing options in prose. Use whenever you "
+            "need the user to pick (which approach, yes/no, which of these). 2-8 short options; multi=true lets them "
+            "pick several. They can always answer in their own words instead. Then end your turn: the answer is "
+            "their next message."),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "The question, one or two sentences."},
+                "options": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 8,
+                            "description": "Short labels (a few words each)."},
+                "multi": {"type": "boolean", "default": False, "description": "Several may be picked."},
+            },
+            "required": ["question", "options"],
+        },
+    }
+    TOOLS["present"] = {
+        "fn": tool_present,
+        "description": (
+            "Show the user a document in the chat: a card they tap to read full screen. For plans, tables, "
+            "comparisons, previews and review sheets - anything longer or more structured than a chat reply. "
+            "format 'md' (Markdown: headings, lists, tables, code, images by https URL) or 'html' (a page or a "
+            "fragment with inline CSS, shown in a sandbox: scripts don't run, nothing loads but https/data: images; "
+            "under 60 KB). Say in a sentence what it is; don't repeat its content in prose."),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "A short name for the card."},
+                "format": {"type": "string", "enum": ["md", "html"], "default": "md"},
+                "body": {"type": "string", "description": "The Markdown or the HTML page."},
+            },
+            "required": ["title", "body"],
+        },
+    }
+
 # ---------------------------------------------------------------------------
 # JSON-RPC / MCP stdio loop
 # ---------------------------------------------------------------------------
@@ -533,22 +809,40 @@ def run_cli(argv):
 
     ps = sub.add_parser("send", help="Send a message to an agent role.")
     ps.add_argument("to")
-    ps.add_argument("message", nargs="+")
+    ps.add_argument("message", nargs="+", help="The message; - reads it from stdin. After --, words may start with -.")
     ps.add_argument("--priority", choices=VALID_PRIORITIES, default="normal")
     ps.add_argument("--from", dest="frm", default=AGENT_ID or "user")
 
     pn = sub.add_parser("notify", help="Notify the human user.")
     pn.add_argument("message", nargs="+")
     pn.add_argument("--priority", choices=VALID_PRIORITIES, default="normal")
+    pn.add_argument("--from", dest="frm", default=AGENT_ID or "user",
+                    help="Who it's from (tests: their own name, never 'user').")
+    pn.add_argument("--batch", metavar="KEY",
+                    help="Fold into the last notice with this key if it came within --window s: one notification, "
+                         "the latest line first and all of them as a list (deploys: --batch deploy).")
+    pn.add_argument("--window", type=float, default=120, help="--batch's window in seconds (default 120).")
+    pn.add_argument("--silent", action="store_true",
+                    help="Tell nobody: no inbox, no notification - only a line in the quiet log (`comms quiet`). "
+                         "For deploys the user can't see (refactors, lint, tooling).")
+
+    pq = sub.add_parser("quiet", help="The quiet log: what was deployed silently (notify --silent), newest last.")
+    pq.add_argument("-n", type=int, default=20, help="How many lines (default 20).")
+
+    pr = sub.add_parser("read", help="Mark messages read by id: out of the inbox (the user's: off the phone too).")
+    pr.add_argument("ids", nargs="+")
+    pr.add_argument("--agent", default="user")
 
     pi = sub.add_parser("inbox", help="Show an inbox (default: yours / user).")
     pi.add_argument("--agent", default=AGENT_ID or "user")
     pi.add_argument("--peek", action="store_true",
                     help="Don't consume the messages.")
+    pi.add_argument("--json", action="store_true", help="One JSON object per message per line (the exact body).")
 
     pw = sub.add_parser("watch", help="Block until a message arrives, then drain.")
     pw.add_argument("--agent", default=AGENT_ID or "user")
     pw.add_argument("--timeout", type=float, default=300)
+    pw.add_argument("--json", action="store_true", help="One JSON object per message per line (the exact body).")
 
     sub.add_parser("agents", help="List known inboxes and their depth.")
 
@@ -556,7 +850,7 @@ def run_cli(argv):
 
     if a.cmd == "send":
         AGENT_ID = a.frm
-        text = " ".join(a.message)
+        text = _stdin_body() if a.message == ["-"] else " ".join(a.message)
         # An empty body is always a mistake upstream (an unset shell variable, a file that wasn't there): refuse it
         # rather than deliver a blank message the recipient can't act on.
         if not text.strip():
@@ -565,14 +859,33 @@ def run_cli(argv):
         mid = _deliver(a.to, "message", text, a.priority)
         print(f"Sent to '{a.to}' (id {mid}).")
     elif a.cmd == "notify":
-        mid = _deliver("user", "notify", " ".join(a.message), a.priority)
-        _desktop_notify(" ".join(a.message), a.priority)
+        AGENT_ID = a.frm
+        # "-": the message from stdin (scripts passing text through layers of shell quoting).
+        text = _stdin_body() if a.message == ["-"] else " ".join(a.message)
+        if not text.strip():
+            print("powos comms notify: refusing an empty message", file=sys.stderr)
+            sys.exit(2)
+        if a.silent:
+            _quiet_log(text)
+            print("Logged quietly (no notification).")
+            return 0
+        prev = None
+        if a.batch:
+            text, prev = _batched(a.batch, text, a.window)
+        mid = _deliver("user", "notify", text, a.priority)
+        if prev:
+            # The batch's earlier notice: out of the inbox, the feed and the shade - this one replaces it.
+            _consume("user", [prev])
+        if a.batch:
+            _batch_sent(a.batch, mid)
+        _desktop_notify(text, a.priority, mid)
         print(f"User notified (id {mid}).")
     elif a.cmd == "inbox":
         msgs = _read_pending(a.agent, drain=not a.peek)
         verb = "Peek" if a.peek else "Inbox (cleared)"
-        print(f"{verb} for '{a.agent}': {len(msgs)} message(s)")
-        print(_fmt_msgs(msgs))
+        if not a.json:
+            print(f"{verb} for '{a.agent}': {len(msgs)} message(s)")
+        _print_msgs(msgs, a.json)
     elif a.cmd == "watch":
         AGENT_ID = a.agent
         print(f"Watching '{a.agent}' inbox (Ctrl-C to stop)...", file=sys.stderr)
@@ -580,11 +893,21 @@ def run_cli(argv):
         while time.time() < deadline:
             msgs = _read_pending(a.agent, drain=True)
             if msgs:
-                print(_fmt_msgs(msgs))
+                _print_msgs(msgs, a.json)
                 return 0
             time.sleep(0.5)
         print("(timed out, no messages)", file=sys.stderr)
         return 0
+    elif a.cmd == "read":
+        n = _consume(a.agent, a.ids)
+        print(f"Read {len(a.ids)} id(s); {n} were waiting in '{a.agent}'.")
+    elif a.cmd == "quiet":
+        for line in _quiet_lines()[-max(1, a.n):]:
+            try:
+                q = json.loads(line)
+                print(f"{q.get('iso', '?')}  {q.get('from', '?')}: {q.get('text', '')}")
+            except ValueError:
+                continue
     elif a.cmd == "agents":
         for row in _list_agents():
             print(f"{row['agent']:20s} {row['pending']} pending")
@@ -592,6 +915,7 @@ def run_cli(argv):
 
 
 def main():
+    _utf8_stdio()
     if not AGENT_ID:
         log("warning: COMMS_AGENT_ID is empty — read_inbox/wait_for_message "
             "will refuse (this agent has no inbox), but sending still works.")
@@ -616,5 +940,6 @@ def main():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
+        _utf8_stdio()
         sys.exit(run_cli(sys.argv[1:]))
     main()

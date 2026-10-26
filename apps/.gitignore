@@ -1,3 +1,8 @@
 # Build output (apps/build.sh): the module wasm, the bundled UI, the generated TypeScript bindings.
 */out/
 */ui/bindings/
+
+# apps/typecheck.sh's throwaway working files (f109): a symlink to shell/node_modules, and a fallback tsconfig
+# for an app that has none of its own.
+*/ui/node_modules
+*/ui/.typecheck-tsconfig.json

@@ -92,6 +92,8 @@ class PowosAiActivity : ComponentActivity() {
 
     private fun handle(intent: Intent?) {
         intent ?: return
+        // From an agent's mail notification: that mail read, and shown here.
+        AgentMail.opened(applicationContext, intent)
         intent.getStringExtra(EXTRA_PROMPT)?.let {
             PowosAiChat.send(applicationContext, it)
             return
@@ -264,6 +266,8 @@ class PowosAiActivity : ComponentActivity() {
                 Intent(context, PowosAiActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     .apply { prompt?.let { putExtra(EXTRA_PROMPT, it) } },
+                // Unfolded: a floating window like any app opened there (AppWindows).
+                dev.omalauncher.system.AppWindows.bundle(context),
             )
         }
     }

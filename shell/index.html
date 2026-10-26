@@ -10,7 +10,88 @@
   `npm run check` (tsc --noEmit) type-checks it all. The import map names the vendored libraries (vendor/VERSIONS).
 -->
 <script>
+  /*
+   * The boot guard, before anything else can fail: every error of this page reaches the host (PowosBoot.error ->
+   * ShellHost -> files/shell-errors.log and the manager's comms inbox, shell/ShellErrors.kt), and so does the page's
+   * ready - app.tsx setting window.__powosAlive once its screen rendered. A module that doesn't load (an import cycle,
+   * a missing export, a 404, a MIME refusal) stops every module from running, bridge.ts included: so this is plain
+   * script, talking to the native interface directly. On an APK without PowosBoot it writes one console line instead
+   * ("powos-shell-error {...}", logcat). shell/dev/gate.mjs reads window.__powosBoot.errors in the pre-push gate.
+   */
+  window.__powosBoot = (() => {
+    const mode = new URLSearchParams(location.search).get("mode") || "home";
+    const boot = { mode, ready: false, failed: false, errors: [], late: 0 };
+    const seen = new Set();
+    const native = () => window.PowosBoot;
+    boot.report = (kind, err, file, line) => {
+      // A module's blob: URL (es-module-shims runs each module from one) named as its file: "The requested module
+      // 'apps/pages.ts' does not provide an export named ...". HACK: through es-module-shims' private registry
+      // (importShim._r, its load records' .b blob URLs) - it has no public lookup; a new version may drop it, and the
+      // message then keeps the blob: URL (still reported, only less telling). Real fix: es-module-shims naming the
+      // source URL in its link errors (upstream), or a loader of our own.
+      const named = (b) => {
+        const r = window.importShim && window.importShim._r;
+        if (r) for (const k in r) if (r[k] && r[k].b === b) return k.replace(location.origin + "/", "");
+        return b;
+      };
+      const message = String((err && err.message) || err || "unknown error").replace(/blob:[^'"\s)]+/g, named).slice(0, 1500);
+      const stack = err && err.stack ? String(err.stack).slice(0, 2000) : "";
+      // Its first source frame when the event has none (an error from es-module-shims, a rejection).
+      if (!file && stack) {
+        const m = stack.match(/(https?:\/\/[^\s)]+?):(\d+):\d+/);
+        if (m) { file = m[1]; line = +m[2]; }
+      }
+      file = file ? String(file).replace(location.origin + "/", "") : "";
+      // Once per message: es-module-shims raises a load failure twice (a window error, and onerror below).
+      if (seen.has(message)) return;
+      seen.add(message);
+      const e = { mode, kind, message, file, line: line || 0, stack, ready: boot.ready, at: Date.now() };
+      if (!boot.ready) boot.failed = true;
+      if (boot.errors.length < 50) boot.errors.push(e);
+      try {
+        // The app's web message listener (postMessage: top frame, own origin only - ShellOrigin.kt); an older APK's
+        // JavaScript interface (error()).
+        const n = native();
+        if (n && n.postMessage) n.postMessage("error " + JSON.stringify(e));
+        else if (n) n.error(JSON.stringify(e));
+        else console.error("powos-shell-error " + JSON.stringify(e));
+      } catch (_) {}
+    };
+    addEventListener("error", (ev) => {
+      const t = ev.target;
+      // A script or stylesheet that didn't load (capture phase: resource errors don't bubble).
+      if (t && t !== window && t.tagName) {
+        if (t.tagName === "SCRIPT" || t.tagName === "LINK") boot.report("resource", "failed to load " + (t.src || t.href));
+        return;
+      }
+      // The browser's ResizeObserver loop warning: an observer's callback resized something it observes and the rest
+      // waits a frame - nothing failed, nothing thrown (an error event with no error). Not a crash: never reported.
+      if (!ev.error && /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)/.test(ev.message || "")) return;
+      boot.report("error", ev.error || ev.message, ev.filename, ev.lineno);
+    }, true);
+    addEventListener("unhandledrejection", (ev) => boot.report("rejection", ev.reason));
+    // Ready: app.tsx's last line (the native windows' watchdog asks the same flag, shell/PageWatchdog.kt).
+    let alive = false;
+    Object.defineProperty(window, "__powosAlive", {
+      configurable: true,
+      get: () => alive,
+      set: (v) => {
+        alive = v;
+        if (!v || boot.ready) return;
+        boot.ready = true;
+        try { const n = native(); if (n && n.postMessage) n.postMessage("ready " + mode); else if (n) n.ready(mode); } catch (_) {}
+      },
+    });
+    // The host's answers before bridge.ts has loaded (or for the page before a reload): dropped, counted - not an
+    // uncaught "reading 'resolve'" of undefined (01:51:37, a reload with calls in flight). bridge.ts replaces it.
+    window.__powosHost = { resolve() { boot.late++; }, reject() { boot.late++; }, emit() {} };
+    return boot;
+  })();
+  // Room for every request of a slow start (ui/iconperf.ts counts the icon ones; the default 250 fills up).
+  performance.setResourceTimingBufferSize?.(2000);
   window.esmsInitOptions = {
+    // A module graph that didn't load (es-module-shims also raises it as a window error: deduplicated above).
+    onerror: (e) => window.__powosBoot.report("module", e),
     shimMode: true,
     async fetch(url, options) {
       const res = await fetch(url, options);
@@ -43,13 +124,40 @@
   }
 }
 </script>
+<style>
+  /* Home's last frame (ui/snapshot.ts) stays up while the live page under it lays itself out, hidden. */
+  .snapshot { position: fixed; inset: 0; pointer-events: none; }
+  body.booting > :not(.snapshot) { visibility: hidden; }
+</style>
 <link rel="stylesheet" href="./theme.css" data-hot>
 <link rel="stylesheet" href="./ui/shell.css" data-hot>
 <link rel="stylesheet" href="./vendor/xterm.css">
 <link rel="stylesheet" href="./ui/terminal.css" data-hot>
 <link rel="stylesheet" href="./ui/screens.css" data-hot>
 <link rel="stylesheet" href="./ui/remote.css" data-hot>
-<script type="module-shim" src="./app.tsx"></script>
+<link rel="stylesheet" href="./ui/glasses.css" data-hot>
+<link rel="stylesheet" href="./ui/notifications.css" data-hot>
+<link rel="stylesheet" href="./ui/panel.css" data-hot>
+<link rel="stylesheet" href="./ui/rich.css" data-hot>
+<script type="module-shim" src="./entry.ts"></script>
 </head>
-<body></body>
+<body>
+<script>
+  // Home's last frame (ui/snapshot.ts, version 1), up before the modules have loaded: icons and all on the first
+  // frame. The shell's first render replaces it (app.tsx). Its icons' arrival is counted for ui/iconperf.ts.
+  try {
+    const shot = !new URLSearchParams(location.search).get("mode") && JSON.parse(localStorage.getItem("powos.snapshot." + Math.round(innerWidth)) || "null");
+    if (shot && shot.v === 1) {
+      document.documentElement.setAttribute("style", shot.style);
+      document.documentElement.dataset.mode = "home";
+      document.body.innerHTML = shot.html;
+      document.body.inert = true;
+      const imgs = document.body.querySelectorAll("img");
+      const s = (window.__snapshot = { v: 1, at: performance.now(), icons: imgs.length, loaded: 0, last: 0 });
+      const one = () => { s.loaded++; s.last = performance.now(); };
+      for (const i of imgs) if (i.complete && i.naturalWidth) one(); else i.addEventListener("load", one, { once: true });
+    }
+  } catch {}
+</script>
+</body>
 </html>

@@ -1,0 +1,48 @@
+{
+  "id": "app-api",
+  "name": "App API (capability runtime + encrypted token store)",
+  "kind": "package",
+  "owner": "user",
+  "host": "phone",
+  "purpose": "runs the app-api capability pipeline locally on PowOS: the encrypted token store, the runtime call path (safety enforcement + handle-injected auth + audit), the `powos app` CLI, the AI tools and widget bindings, and appcap_serve.py: the App API app's loopback service on 127.0.0.1:3411 (a system-tier service, lib/apps/services/app-api.json; the port locked to the PowOS uid by powos-start.sh). Offline/LAN-only; no Mac or cloud at runtime. Design: docs/APP-API-CAPTURE.md.",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (tools/app-api, staged by rooted.sh deploy); also installable on desktop PowOS",
+  "files": [
+    "/usr/lib/powos/app-api",
+    "/usr/lib/powos/app-api/appcap_store.py",
+    "/usr/lib/powos/app-api/appcap_run.py",
+    "/usr/lib/powos/app-api/appcap_validate.py",
+    "/usr/lib/powos/app-api/appcap_render.py",
+    "/usr/lib/powos/app-api/openapi2appcap.py",
+    "/usr/lib/powos/app-api/har2openapi.py",
+    "/usr/lib/powos/app-api/appcap_serve.py",
+    "/usr/lib/powos/app-api/appcap_add.py",
+    "/usr/lib/powos/app-api/examples",
+    "/usr/lib/powos/app-api/sample",
+    "/usr/lib/powos/apps/services/app-api.json",
+    "/home/powos/.local/state/powos/app-api/"
+  ],
+  "packages": [
+    "openssl",
+    "python3"
+  ],
+  "limits": {
+    "memory": "96m",
+    "pids": 32
+  },
+  "autosleep": "never",
+  "remove": {
+    "commands": [
+      "rm -rf /usr/lib/powos/app-api /usr/lib/powos/apps/services/app-api.json"
+    ],
+    "keep": [
+      "/home/powos/.local/state/powos/app-api"
+    ],
+    "note": "the state dir holds the encrypted token store + audit log; removal keeps it by default so re-install is seamless. Delete ~/.local/state/powos/app-api manually to wipe stored sessions."
+  },
+  "processes": [
+    {
+      "match": "^/usr/bin/python3 /usr/lib/powos/app-api/appcap_serve.py"
+    }
+  ],
+  "network_note": "lan-only; no outbound except to apps the user has explicitly enabled"
+}

@@ -1,0 +1,41 @@
+From: PowOS <mats@powback.com>
+Date: Fri, 23 Oct 2026 09:10:00 +0200
+Subject: [PATCH] backends/anland: an Xwayland window opens as a task once it
+ has its surface
+
+"export-new" looks at a new window when KWin adds it. An X11 window is added
+before Xwayland pairs it with its wl_surface (WL_SURFACE_SERIAL comes later),
+so it wasn't exportable yet and nothing asked again: an X11 app's new window
+(Gwenview from an X11 Dolphin, a game's second window) stayed on the hidden
+tasks desktop. It is looked at again once it has its surface.
+---
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 92fa5d5..09c6b20 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -892,10 +892,24 @@ void AnlandWindowTasks::exportNew(Window *window)
+     if (!m_exportNew || !window || window->isDeleted() || window->transientFor() || window->isFullScreen() || taskFor(window)) {
+         return;
+     }
++    if (window->isClient() && !window->surface()) {
++        // An Xwayland window is added before Xwayland pairs it with its wl_surface (WL_SURFACE_SERIAL comes
++        // later): exportable() can't take it yet, and nothing would ask again - an X11 app's second window (Gwenview
++        // opened from an X11 Dolphin, a game's real window) stayed on the hidden desktop. Once it has one: again.
++        connect(window, &Window::surfaceChanged, this, [this, w = QPointer<Window>(window)]() {
++            if (w && w->surface()) {
++                qCInfo(KWIN_ANLAND) << "new window" << w->caption() << "has its surface now";
++                exportNew(w);
++            }
++        }, Qt::SingleShotConnection);
++        return;
++    }
+     if (window->isMinimized() || !exportable(window)) {
+         return;
+     }
+-    show(window);
++    if (show(window)) {
++        qCInfo(KWIN_ANLAND) << "new window" << window->caption() << "(" << window->desktopFileName() << ") opened as a task";
++    }
+ }
+ 
+ bool AnlandWindowTasks::exportable(Window *window) const

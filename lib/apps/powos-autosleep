@@ -1,0 +1,909 @@
+#!/usr/bin/env python3
+"""powos-autosleep - idle containers sleep and wake on demand (docs/PHONE-KERNEL-CONTAINERS.md section 13).
+
+Loaded by powos-container (it is `powos containers autosleep ...`); not a command of its own.
+
+  powos containers run --autosleep 5m --sleep-mode pause|stop [--autostop 6h] <image> ...
+  powos containers run --autosleep never <image> ...   never sleeps
+  app manifest:  "autosleep": {"idle": "5m", "mode": "pause", "stop": "6h"}   or   "autosleep": "never"
+  powos containers autosleep status [--json]           what is asleep, what is awake, why; the device triggers
+  powos containers autosleep set <name> 5m|never|off [--sleep-mode pause|stop] [--autostop 6h]
+  powos containers autosleep sleep <name>              put it to sleep now
+  powos containers wake <name>                         wake it (also: powos containers start <name>, a connection)
+  powos containers autosleep watch                     the watcher (started by itself; you never need to)
+
+Rules. On the phone every container sleeps after 5 min idle, by pause, unless told otherwise; on a desktop only
+those run with --autosleep. Never: system services (spacetimedb, comms, agentsd - by name: powos-sleep-common's list,
+shared with every other sleeper), `--autosleep never`, the manifest's "never", `autosleep set <name> never`.
+The manifest key is the one every sleeper reads: "autosleep": {"idle", "mode": pause|hibernate|stop, "stop"}.
+Idle = no established TCP connection, CPU under 2 % of one core, no exec session, for the whole idle time.
+Device triggers shorten the idle time to 1 min while any holds: screen off for over 2 min, battery under 20 % and
+not charging, battery saver on, battery over 42 C or skin over 45 C.
+
+Sleep. pause = the cgroup freezer (on the phone /sys/fs/cgroup/powos/<name>/cgroup.freeze, since podman runs
+without cgroups there; on a desktop podman pause): memory stays, CPU is 0, waking takes well under a millisecond.
+stop = podman stop, for what can't be paused; only if asked (--sleep-mode stop, or --autostop after a long pause),
+never for --rm containers (stopping removes them). hibernate (CRIU) pauses here: the phone's kernel has no CRIU yet.
+
+Wake. A paused container keeps its listening sockets: the watcher holds a duplicate of each (pidfd_getfd) in epoll,
+so the first connection wakes it before the container itself sees it - the connection is just held (event-driven,
+no polling). A stopped one gets a small socket-activation proxy on its ports: the first connection starts it and is
+forwarded. Also `powos containers start|wake <name>`, which apps and widgets call when they open it.
+
+The watcher is one process, started by the first command that needs it and gone 10 min after the last container:
+one /proc scan every 30 s (POWOS_AUTOSLEEP_TICK), epoll in between. Log: /var/log/powos/containers.log.
+"""
+import ctypes
+import json
+import os
+import re
+import selectors
+import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+
+pc = None  # the powos-container module (set by it)
+
+
+def _common():
+    """The never-sleep list, the manifest key and durations, shared with every other sleeper (powos sleep)."""
+    p = os.path.join(os.path.dirname(os.path.realpath(__file__)), "powos-sleep-common")
+    loader = SourceFileLoader("powos_sleep_common", p)
+    m = module_from_spec(spec_from_loader("powos_sleep_common", loader))
+    loader.exec_module(m)
+    return m
+
+
+common = _common()
+seconds, fmt, encode, decode, describe = common.seconds, common.fmt, common.encode, common.decode, common.describe
+DEFAULT, NEVER_RE = common.DEFAULT, common.NEVER_RE
+
+LABEL = "io.powos.autosleep"
+STATE = "/var/lib/powos/containers/autosleep.json"     # overrides (autosleep set) + what is asleep
+RUN = "/run/powos-containers"
+PIDFILE = f"{RUN}/autosleep.pid"
+CTL = f"{RUN}/autosleep.sock"
+STATUS = f"{RUN}/autosleep-status.json"
+TICK = max(5, int(os.environ.get("POWOS_AUTOSLEEP_TICK", "30")))
+CPU_IDLE_PCT = float(os.environ.get("POWOS_AUTOSLEEP_CPU", "2"))
+TRIGGER_IDLE = 60
+SCREEN_OFF_AFTER = 120
+BATTERY_LOW = 20
+BATTERY_HOT_C, SKIN_HOT_C = 42.0, 45.0
+EXIT_AFTER = 600   # the watcher leaves when there has been nothing to watch for this long
+CLK = os.sysconf("SC_CLK_TCK")
+PIDFD_GETFD = 438  # same number on aarch64 and x86_64 (the unified table)
+
+
+# ── rules ───────────────────────────────────────────────────────────────────
+
+def rule_from_flags(flags, rm=False):
+    """parse_run's --autosleep/--sleep-mode/--autostop (popped from flags) -> a rule, or None (the default)."""
+    idle, mode, stop = flags.pop("as_idle", None), flags.pop("as_mode", None), flags.pop("as_stop", None)
+    if idle is None and mode is None and stop is None:
+        return None
+    try:
+        r = common.rule(idle, mode, stop)
+    except ValueError as e:
+        pc.die(f"--autosleep: {e}")
+    if r.get("never"):
+        return r
+    if r["mode"] == "hibernate":
+        # No CRIU in the phone's kernel yet (docs/POWOS-COMPUTE-MESH.md): containers here pause instead.
+        pc.warn("--sleep-mode hibernate: no CRIU on this kernel, it pauses (memory kept) instead")
+        r["mode"] = "pause"
+    if rm and (r["mode"] == "stop" or r["stop"]):
+        pc.warn("--rm container: stopping it would remove it, so it only pauses (--sleep-mode pause, no --autostop)")
+        r["mode"], r["stop"] = "pause", 0
+    return r
+
+
+def manifest_flags(value):
+    """An app manifest's "autosleep" key -> powos-container run flags (powos-runtime's container mode)."""
+    r = common.from_manifest(value)
+    if r is None:
+        return []
+    if r.get("never"):
+        return ["--autosleep", "never"]
+    out = ["--autosleep", str(r["idle"]), "--sleep-mode", r["mode"]]
+    return out + (["--autostop", str(r["stop"])] if r.get("stop") else [])
+
+
+def effective_rule(name, label, overrides):
+    """(rule, why) for a container: never list > override (autosleep set) > its label > the default."""
+    if NEVER_RE.search(name):
+        return {"never": True}, "system service (never list)"
+    o = overrides.get(name)
+    if o:
+        return o, "autosleep set"
+    r = decode(label)
+    if r:
+        if r.get("mode") == "hibernate":
+            r["mode"] = "pause"
+        return r, "never (its rule)" if r.get("never") else "its rule"
+    if not pc.PHONE:
+        return {"never": True}, "no rule (off by default on a desktop: --autosleep)"
+    return dict(DEFAULT), "default"
+
+
+# ── state ───────────────────────────────────────────────────────────────────
+
+def load():
+    try:
+        with open(STATE) as f:
+            s = json.load(f)
+    except (OSError, ValueError):
+        s = {}
+    s.setdefault("rules", {})
+    s.setdefault("asleep", {})
+    return s
+
+
+def save(s):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    tmp = STATE + ".new"
+    with open(tmp, "w") as f:
+        json.dump(s, f, indent=1)
+    os.replace(tmp, STATE)
+
+
+# ── processes, sockets ──────────────────────────────────────────────────────
+
+def stat(pid):
+    """(ppid, cpu ticks incl. reaped children) from /proc/<pid>/stat, or None."""
+    s = pc.rd(f"/proc/{pid}/stat")
+    if ")" not in s:
+        return None
+    f = s.rsplit(")", 1)[1].split()
+    return int(f[1]), sum(int(x) for x in f[11:15])
+
+
+def proc_table():
+    """pid -> (ppid, ticks, pid-ns link) for every process: one /proc scan per tick."""
+    out = {}
+    for p in os.listdir("/proc"):
+        if not p.isdigit():
+            continue
+        st = stat(p)
+        if st:
+            try:
+                ns = os.readlink(f"/proc/{p}/ns/pid")
+            except OSError:
+                ns = ""
+            out[int(p)] = (st[0], st[1], ns)
+    return out
+
+
+def members(init, table):
+    """The container's processes: everything in its pid namespace (a private one), else init's descendants."""
+    if init not in table:
+        return set()
+    ns = table[init][2]
+    try:
+        own = os.readlink("/proc/self/ns/pid")
+    except OSError:
+        own = None
+    if ns and ns != own:
+        return {p for p, v in table.items() if v[2] == ns}
+    kids, todo = {init}, [init]
+    while todo:
+        q = todo.pop()
+        for p, v in table.items():
+            if v[0] == q and p not in kids:
+                kids.add(p)
+                todo.append(p)
+    return kids
+
+
+def socket_fds(pids):
+    """inode -> (pid, fd) for every socket the processes hold."""
+    out = {}
+    for p in pids:
+        try:
+            fds = os.listdir(f"/proc/{p}/fd")
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                t = os.readlink(f"/proc/{p}/fd/{fd}")
+            except OSError:
+                continue
+            if t.startswith("socket:["):
+                out.setdefault(t[8:-1], (p, int(fd)))
+    return out
+
+
+def tcp(init):
+    """Rows of /proc/<init>/net/tcp{,6} (its network namespace): (state, local addr, port, inode)."""
+    rows = []
+    for f in ("tcp", "tcp6"):
+        try:
+            lines = open(f"/proc/{init}/net/{f}").read().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            p = line.split()
+            if len(p) > 9:
+                addr, port = p[1].rsplit(":", 1)
+                rows.append((p[3], addr, int(port, 16), p[9]))
+    return rows
+
+
+def ip_of(hexaddr):
+    """/proc/net/tcp's address -> a bindable host ('' for any)."""
+    if len(hexaddr) == 8:
+        a = ".".join(str(int(hexaddr[i:i + 2], 16)) for i in (6, 4, 2, 0))
+        return "" if a == "0.0.0.0" else a
+    if hexaddr.strip("0") == "":
+        return ""
+    if hexaddr == "0000000000000000FFFF0000" + hexaddr[24:]:
+        return ip_of(hexaddr[24:])
+    return "::1" if hexaddr == "00000000000000000000000001000000" else ""
+
+
+# ── device triggers ─────────────────────────────────────────────────────────
+
+class Device:
+    """What should make idle containers sleep sooner: screen off, low battery, battery saver, heat."""
+
+    def __init__(self):
+        self.off_since = None
+
+    def screen_on(self):
+        d = "/sys/class/drm"
+        try:
+            panels = [n for n in os.listdir(d) if re.match(r"card\d+-DSI-\d+$", n)]
+        except OSError:
+            return True
+        if not panels:
+            return True
+        return any(pc.rd(f"{d}/{n}/dpms") == "On" for n in panels)
+
+    @staticmethod
+    def saver():
+        # HACK: Android's battery saver has no sysfs or property; ask its settings service through Android's own
+        # mount namespace (pid 1's), ~30 ms. Real fix: the PowOS app pushes power state to PowOS (SpacetimeDB).
+        try:
+            r = subprocess.run(["nsenter", "-t", "1", "-m", "--", "/system/bin/env", "PATH=/system/bin",
+                                "cmd", "settings", "get", "global", "low_power"],
+                               capture_output=True, text=True, timeout=5)
+            return r.stdout.strip() == "1"
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    @staticmethod
+    def thermal():
+        """(battery C, skin C) - None when unknown."""
+        bat = pc.rd("/sys/class/power_supply/battery/temp")
+        skin = None
+        try:
+            for z in os.listdir("/sys/class/thermal"):
+                if pc.rd(f"/sys/class/thermal/{z}/type").startswith("skin"):
+                    skin = int(pc.rd(f"/sys/class/thermal/{z}/temp") or 0) / 1000
+                    break
+        except OSError:
+            pass
+        return (int(bat) / 10 if bat.lstrip("-").isdigit() else None), skin
+
+    def triggers(self, now):
+        """The triggers that hold now, as words for status (empty off the phone)."""
+        if not pc.PHONE:
+            return []
+        out = []
+        if self.screen_on():
+            self.off_since = None
+        else:
+            self.off_since = self.off_since or now
+            if now - self.off_since >= SCREEN_OFF_AFTER:
+                out.append(f"screen off {fmt(now - self.off_since)}")
+        cap = pc.rd("/sys/class/power_supply/battery/capacity")
+        st = pc.rd("/sys/class/power_supply/battery/status")
+        if cap.isdigit() and int(cap) < BATTERY_LOW and st not in ("Charging", "Full"):
+            out.append(f"battery {cap}% not charging")
+        if self.saver():
+            out.append("battery saver")
+        bat, skin = self.thermal()
+        if bat is not None and bat >= BATTERY_HOT_C:
+            out.append(f"battery {bat:.0f}C")
+        if skin is not None and skin >= SKIN_HOT_C:
+            out.append(f"skin {skin:.0f}C")
+        return out
+
+    def summary(self):
+        cap = pc.rd("/sys/class/power_supply/battery/capacity") or "?"
+        st = pc.rd("/sys/class/power_supply/battery/status") or "?"
+        bat, skin = self.thermal()
+        scr = "on" if self.screen_on() else "off"
+        return f"screen {scr}, battery {cap}% {st.lower()}, " + (f"{bat:.0f}C" if bat is not None else "?C") + \
+               (f", skin {skin:.0f}C" if skin is not None else "")
+
+
+# ── sleeping and waking ─────────────────────────────────────────────────────
+
+def group(name):
+    return f"{pc.V2}/{pc.PARENT}/{name}"
+
+
+def frozen(name):
+    if not pc.PHONE:
+        return False
+    return "frozen 1" in pc.rd(f"{group(name)}/cgroup.events")
+
+
+def freeze(base, name, pids):
+    """The container's processes into its own v2 group (made if needed) and the group frozen."""
+    if not pc.PHONE:
+        return pc.podman(base, "pause", name, capture=True).returncode == 0
+    # HACK: PowOS's own cgroup v2 freezer instead of podman pause, because podman runs with --cgroups=disabled on the
+    # phone (Android keeps memory/cpu on v1) and refuses to pause a container with no cgroup. Real fix: memory and cpu
+    # on cgroup v2 (section 9.3), then podman's own cgroup and `podman pause`.
+    g = group(name)
+    os.makedirs(g, exist_ok=True)
+    for p in sorted(pids):
+        if str(p) not in pc.procs(g):
+            try:
+                pc.wr(f"{g}/cgroup.procs", p)
+            except OSError:
+                pass  # exited meanwhile
+    pc.wr(f"{g}/cgroup.freeze", 1)
+    for _ in range(50):
+        if frozen(name):
+            return True
+        time.sleep(0.02)
+    pc.wr(f"{g}/cgroup.freeze", 0)
+    return False
+
+
+def thaw(base, name):
+    if not pc.PHONE:
+        return pc.podman(base, "unpause", name, capture=True).returncode == 0
+    g = group(name)
+    if os.path.exists(f"{g}/cgroup.freeze"):
+        pc.wr(f"{g}/cgroup.freeze", 0)
+    return True
+
+
+def dup_fd(pid, fd):
+    """A duplicate of another process's fd (pidfd_getfd): the watcher's handle on a sleeping container's socket."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    pfd = os.pidfd_open(pid)
+    try:
+        n = libc.syscall(PIDFD_GETFD, pfd, fd, 0)
+        if n < 0:
+            raise OSError(ctypes.get_errno(), "pidfd_getfd")
+        return n
+    finally:
+        os.close(pfd)
+
+
+def pump(a, b):
+    def one(src, dst):
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                dst.sendall(data)
+        except OSError:
+            pass
+        for s in (dst,):
+            try:
+                s.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+    t = threading.Thread(target=one, args=(b, a), daemon=True)
+    t.start()
+    one(a, b)
+    t.join(60)
+    a.close()
+    b.close()
+
+
+# ── the watcher ─────────────────────────────────────────────────────────────
+
+class Watcher:
+    def __init__(self, base):
+        self.base = base
+        self.sel = selectors.DefaultSelector()
+        self.state = load()
+        self.dev = Device()
+        self.seen = {}      # name -> {"ticks", "at", "idle_since", ...} (awake containers' samples)
+        self.handles = {}   # name -> [fd or socket] (dup'd listen fds of a frozen one / a stopped one's proxies)
+        self.conmons = None
+        self.running = {}   # name -> {"pid", "label", "rm"}
+        self.last_ps = 0
+        self.empty_since = time.time()
+        self.status = {}
+        self.ctl = None
+
+    # inventory
+    def refresh(self, now):
+        conmons = {p for p in os.listdir("/proc") if p.isdigit() and pc.rd(f"/proc/{p}/comm") == "conmon"}
+        if conmons == self.conmons and now - self.last_ps < 10 * TICK:
+            return
+        self.conmons, self.last_ps = conmons, now
+        r = pc.podman(self.base, "ps", "--format", "json", capture=True)
+        if r.returncode:
+            return
+        run = {}
+        for c in json.loads(r.stdout or "[]"):
+            n = c["Names"][0] if isinstance(c.get("Names"), list) else c.get("Names", "")
+            labels = c.get("Labels") or {}
+            run[n] = {"pid": int(c.get("Pid") or 0), "label": labels.get(LABEL, ""), "rm": bool(c.get("AutoRemove"))}
+        self.running = run
+
+    def sync_handles(self):
+        """Drop the watch on anything no longer asleep (woken or released by a command)."""
+        for name in list(self.handles):
+            if name not in self.state["asleep"]:
+                self.disarm(name)
+
+    def tick(self):
+        now = time.time()
+        self.sync_handles()
+        self.refresh(now)
+        trig = self.dev.triggers(now)
+        table = proc_table()
+        overrides = {k: v for k, v in self.state["rules"].items()}
+        status = {}
+        for name, c in list(self.running.items()):
+            rule, why = effective_rule(name, c["label"], overrides)
+            status[name] = self.check(name, c, rule, why, trig, table, now)
+        for name, a in list(self.state["asleep"].items()):
+            if a["how"] == "stop" and name not in self.running:
+                status[name] = {"rule": a.get("rule", ""), "state": "stopped", "since": a["since"],
+                                "why": a.get("why", "")}
+                if name not in self.handles:
+                    self.proxy(name, a.get("ports", []))
+            elif name not in self.running:
+                self.forget(name)  # gone (removed, or stopped by someone else)
+        self.status = {"at": now, "tick": TICK, "pid": os.getpid(), "triggers": trig,
+                       "device": self.dev.summary() if pc.PHONE else "", "containers": status}
+        os.makedirs(RUN, exist_ok=True)
+        with open(STATUS + ".new", "w") as f:
+            json.dump(self.status, f)
+        os.replace(STATUS + ".new", STATUS)
+        self.publish(status)
+        if status:
+            self.empty_since = now
+
+    def check(self, name, c, rule, why, trig, table, now):
+        out = {"rule": describe(rule), "why": why}
+        a = self.state["asleep"].get(name)
+        if a and a["how"] == "pause" and (frozen(name) or not pc.PHONE):
+            if name not in self.handles:
+                self.arm(name, c["pid"], table)
+            if rule.get("stop") and not c["rm"] and now - a["since"] >= rule["stop"]:
+                self.to_stop(name, c, rule, table, now)
+                return {**out, "state": "stopped", "since": now, "why": f"paused {fmt(rule['stop'])}"}
+            return {**out, "state": "asleep", "since": a["since"], "why": a["why"]}
+        if a:
+            self.forget(name)  # thawed by someone else
+        if rule.get("never"):
+            self.seen.pop(name, None)
+            return {**out, "state": "awake", "since": None}
+        pids = members(c["pid"], table)
+        ticks = sum(table[p][1] for p in pids if p in table)
+        conns = self.conns(c["pid"], pids)
+        execs = [p for p in pids if p != c["pid"] and table.get(p, (0,))[0] not in pids]
+        s = self.seen.get(name)
+        cpu = None if not s else 100.0 * (ticks - s["ticks"]) / CLK / max(1e-3, now - s["at"])
+        busy = cpu is None or cpu > CPU_IDLE_PCT or conns or execs
+        since = now if busy or not s else s["idle_since"]
+        self.seen[name] = {"ticks": ticks, "at": now, "idle_since": since}
+        idle = min(rule["idle"], TRIGGER_IDLE) if trig else rule["idle"]
+        reason = ("cpu %.1f%%" % cpu if cpu is not None else "first look") if busy and not conns and not execs else \
+            f"{conns} connection(s)" if conns else f"{len(execs)} exec session(s)" if execs else "idle"
+        if not busy and now - since >= idle:
+            why_sleep = f"idle {fmt(now - since)}" + (f" ({', '.join(trig)})" if trig else "")
+            if self.sleep(name, c, rule, table, why_sleep, now):
+                return {**out, "state": "asleep" if rule["mode"] == "pause" else "stopped", "since": now,
+                        "why": why_sleep}
+        return {**out, "state": "awake", "since": None, "idle_for": now - since, "activity": reason}
+
+    @staticmethod
+    def publish(status):
+        """Containers on the shared sleep board (`powos sleep status`), next to apps, GUI apps and databases."""
+        if not hasattr(common, "publish"):
+            return
+        items = [{"id": n, "type": "container", "name": n, "state": r["state"], "since": r.get("since"),
+                  "why": r.get("activity") or r.get("why", ""), "rule": r.get("rule", "")} for n, r in status.items()]
+        try:
+            common.publish("containers", items, {"exec": ["powos-container", "wake", "{id}"]})
+        except OSError as e:
+            pc.log(f"autosleep: sleep board: {e}")
+
+    def conns(self, init, pids):
+        socks = socket_fds(pids)
+        return sum(1 for st, _a, _p, ino in tcp(init) if st == "01" and ino in socks)
+
+    def listeners(self, init, pids):
+        """[(addr, port, pid, fd)] - the container's listening TCP sockets."""
+        socks = socket_fds(pids)
+        return [(ip_of(a), port, *socks[ino]) for st, a, port, ino in tcp(init) if st == "0A" and ino in socks]
+
+    def sleep(self, name, c, rule, table, why, now):
+        pids = members(c["pid"], table)
+        ports = sorted({(a, p) for a, p, _pid, _fd in self.listeners(c["pid"], pids)})
+        if rule["mode"] == "stop" and not c["rm"]:
+            return self.to_stop(name, c, rule, table, now, why, ports)
+        if not freeze(self.base, name, pids):
+            pc.log(f"autosleep: {name}: could not freeze, stays awake")
+            return False
+        self.state["asleep"][name] = {"how": "pause", "since": now, "why": why, "rule": describe(rule),
+                                      "ports": ports}
+        save(self.state)
+        self.arm(name, c["pid"], table)
+        self.seen.pop(name, None)
+        pc.log(f"autosleep: {name}: paused ({why}); wakes on {self.port_list(ports)}")
+        return True
+
+    def to_stop(self, name, c, rule, table, now, why=None, ports=None):
+        if ports is None:
+            ports = self.state["asleep"].get(name, {}).get("ports", [])
+        self.disarm(name)
+        thaw(self.base, name)
+        r = pc.podman(self.base, "stop", "-t", "10", name, capture=True)
+        if r.returncode:
+            pc.log(f"autosleep: {name}: podman stop failed: {r.stderr.strip()}")
+            return False
+        why = why or f"paused {fmt(rule.get('stop', 0))}"
+        self.state["asleep"][name] = {"how": "stop", "since": now, "why": why, "rule": describe(rule), "ports": ports}
+        save(self.state)
+        self.running.pop(name, None)
+        self.proxy(name, ports)
+        pc.log(f"autosleep: {name}: stopped ({why}); proxy on {self.port_list(ports)}")
+        return True
+
+    @staticmethod
+    def port_list(ports):
+        return ", ".join(f"{a or '*'}:{p}" for a, p in ports) or "no ports (wake: powos containers wake)"
+
+    def arm(self, name, init, table):
+        """Watch a paused container's listening sockets (duplicates of its own) for the first connection."""
+        hs = []
+        for _a, _p, pid, fd in self.listeners(init, members(init, table)):
+            try:
+                d = dup_fd(pid, fd)
+            except OSError as e:
+                pc.log(f"autosleep: {name}: can't watch its socket ({e}); wakes on start/wake only")
+                continue
+            self.sel.register(d, selectors.EVENT_READ, ("wake", name))
+            hs.append(d)
+        self.handles[name] = hs
+
+    def proxy(self, name, ports):
+        """Socket activation for a stopped container: listen on its ports; the first connection starts it."""
+        hs = []
+        for a, p in ports:
+            fam = socket.AF_INET6 if ":" in a else socket.AF_INET
+            s = socket.socket(fam, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((a, p))
+                s.listen(16)
+            except OSError as e:
+                pc.log(f"autosleep: {name}: proxy can't listen on {a or '*'}:{p} ({e})")
+                s.close()
+                continue
+            self.sel.register(s, selectors.EVENT_READ, ("accept", name, a, p))
+            hs.append(s)
+        self.handles[name] = hs
+
+    def disarm(self, name):
+        for h in self.handles.pop(name, []):
+            try:
+                self.sel.unregister(h)
+            except (KeyError, ValueError):
+                pass
+            h.close() if isinstance(h, socket.socket) else os.close(h)
+
+    def forget(self, name):
+        self.disarm(name)
+        if self.state["asleep"].pop(name, None) is not None:
+            save(self.state)
+
+    def wake(self, name, why):
+        """Thaw or start it. Returns (ok, ms)."""
+        t0 = time.monotonic()
+        a = self.state["asleep"].get(name)
+        self.disarm(name)
+        if not a:
+            return frozen(name) and thaw(self.base, name), 0.0
+        if a["how"] == "pause":
+            ok = thaw(self.base, name)
+        else:
+            ok = pc.podman(self.base, "start", name, capture=True).returncode == 0
+            ok = ok and self.wait_ports(a.get("ports", []))
+            self.conmons = None  # re-read the container list
+        ms = (time.monotonic() - t0) * 1000
+        self.state["asleep"].pop(name, None)
+        save(self.state)
+        self.seen.pop(name, None)
+        pc.log(f"autosleep: {name}: woke ({why}) in {ms:.1f} ms" + ("" if ok else " - FAILED"))
+        return ok, ms
+
+    @staticmethod
+    def wait_ports(ports, timeout=30):
+        end = time.monotonic() + timeout
+        for a, p in ports:
+            while time.monotonic() < end:
+                try:
+                    socket.create_connection((a or "127.0.0.1", p), timeout=1).close()
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            else:
+                return False
+        return True
+
+    def on_event(self, data, obj):
+        if data[0] == "wake":
+            self.wake(data[1], "connection")
+        elif data[0] == "accept":
+            _, name, a, p = data
+            try:
+                conn, _ = obj.accept()
+            except OSError:
+                return
+            ok, _ms = self.wake(name, f"connection on {p}")
+            if ok:
+                try:
+                    up = socket.create_connection((a or "127.0.0.1", p), timeout=10)
+                    threading.Thread(target=pump, args=(conn, up), daemon=True).start()
+                    return
+                except OSError:
+                    pass
+            conn.close()
+        elif data[0] == "ctl":
+            self.on_ctl(obj)
+
+    def on_ctl(self, s):
+        try:
+            msg, addr = s.recvfrom(4096)
+        except OSError:
+            return
+        verb, _, name = msg.decode(errors="replace").partition(" ")
+        if verb == "wake":
+            ok, ms = self.wake(name, "asked")
+            reply = f"{'ok' if ok else 'failed'} {ms:.1f}"
+        elif verb == "sleep":
+            reply = self.force_sleep(name)
+        else:
+            reply = "refresh" if verb == "refresh" else "?"
+            self.conmons = None
+            self.state = load()
+            self.sync_handles()
+        try:
+            s.sendto(reply.encode(), addr)
+        except OSError:
+            pass
+
+    def force_sleep(self, name):
+        self.conmons = None
+        self.refresh(time.time())
+        c = self.running.get(name)
+        if not c:
+            return "not running"
+        rule, _ = effective_rule(name, c["label"], self.state["rules"])
+        if rule.get("never"):
+            return "never sleeps"
+        ok = self.sleep(name, c, rule, proc_table(), "asked", time.time())
+        return "ok" if ok else "failed"
+
+    def serve(self):
+        os.makedirs(RUN, exist_ok=True)
+        try:
+            os.unlink(CTL)
+        except OSError:
+            pass
+        self.ctl = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        self.ctl.bind(CTL)
+        os.chmod(CTL, 0o600)
+        self.sel.register(self.ctl, selectors.EVENT_READ, ("ctl",))
+        nxt = 0
+        while True:
+            now = time.time()
+            if now >= nxt:
+                self.tick()
+                nxt = now + TICK
+                if not self.status["containers"] and not self.state["asleep"] and now - self.empty_since > EXIT_AFTER:
+                    pc.log("autosleep: nothing to watch for 10 min, watcher leaving")
+                    return 0
+            for key, _ in self.sel.select(max(0.0, nxt - time.time())):
+                self.on_event(key.data, key.fileobj)
+                nxt = time.time()  # status (and the container list) follow a wake or a command at once
+
+    def thaw_all(self, why):
+        # A paused container without its watcher would never wake on a connection: thaw them all.
+        for name, a in list(self.state["asleep"].items()):
+            if a["how"] == "pause":
+                thaw(self.base, name)
+                self.state["asleep"].pop(name)
+                pc.log(f"autosleep: {name}: thawed ({why})")
+        save(self.state)
+
+    def leave(self, *_):
+        self.thaw_all("watcher stopping")
+        sys.exit(0)
+
+    def run(self):
+        """serve(), and whatever happens, nothing stays frozen without a watcher."""
+        try:
+            return self.serve()
+        except Exception:  # noqa: BLE001 - logged, then everything thawed
+            import traceback
+            pc.log("autosleep: watcher FAILED:\n" + traceback.format_exc())
+            self.thaw_all("watcher failed")
+            return 1
+
+
+# ── CLI side ────────────────────────────────────────────────────────────────
+
+def watcher_pid():
+    p = pc.rd(PIDFILE)
+    if p.isdigit() and os.path.exists(f"/proc/{p}") and "autosleep" in pc.rd(f"/proc/{p}/cmdline").replace("\0", " "):
+        return int(p)
+    return None
+
+
+def ensure_watcher():
+    if watcher_pid():
+        return
+    os.makedirs(RUN, exist_ok=True)
+    os.makedirs(os.path.dirname(pc.LOG), exist_ok=True)
+    with open(pc.LOG, "a") as logf:
+        subprocess.Popen([pc.PY, pc.SELF, "autosleep", "watch"], stdin=subprocess.DEVNULL, stdout=logf,
+                         stderr=logf, start_new_session=True, env={**os.environ, "POWOS_CONTAINER_NS": "1"})
+    for _ in range(50):
+        if os.path.exists(CTL) and watcher_pid():
+            return
+        time.sleep(0.05)
+
+
+def ask(msg, timeout=60):
+    """Send the watcher a request ('wake NAME', 'sleep NAME', 'refresh'); its reply, or None without a watcher."""
+    if not watcher_pid():
+        return None
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    s.bind("")  # autobind: an abstract address to reply to
+    s.settimeout(timeout)
+    try:
+        s.sendto(msg.encode(), CTL)
+        return s.recv(4096).decode()
+    except OSError:
+        return None
+    finally:
+        s.close()
+
+
+def release(base, name):
+    """Before stop/restart/rm: a sleeping container is thawed and the watcher stops watching it."""
+    if not is_asleep(name):
+        return
+    s = load()
+    s["asleep"].pop(name, None)
+    save(s)
+    thaw(base, name)
+    ask("refresh", timeout=5)
+
+
+def is_asleep(name):
+    return name in load()["asleep"] or frozen(name)
+
+
+def wake(base, name):
+    """powos containers wake/start: through the watcher (it owns the proxies and socket handles), else directly."""
+    if not is_asleep(name):
+        return None
+    r = ask(f"wake {name}")
+    if r is None:
+        s = load()
+        a = s["asleep"].pop(name, None)
+        save(s)
+        if a and a["how"] == "stop":
+            return pc.podman(base, "start", name).returncode
+        thaw(base, name)
+        print(f"{name}: awake")
+        return 0
+    ok, _, ms = r.partition(" ")
+    print(f"{name}: {'awake' if ok == 'ok' else 'wake FAILED'} ({ms} ms)")
+    return 0 if ok == "ok" else 1
+
+
+def cmd(base, args):
+    sub, rest = (args[0], args[1:]) if args else ("status", [])
+    if sub == "watch":
+        os.makedirs(RUN, exist_ok=True)
+        if watcher_pid() and watcher_pid() != os.getpid():
+            pc.die("autosleep: a watcher is already running")
+        with open(PIDFILE, "w") as f:
+            f.write(str(os.getpid()))
+        w = Watcher(base)
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            signal.signal(sig, w.leave)
+        pc.log(f"autosleep: watcher {os.getpid()} up (every {TICK}s)")
+        return w.run()
+    if sub == "status":
+        return status("--json" in rest)
+    if sub == "set":
+        return cmd_set(rest)
+    if sub == "sleep":
+        if not rest:
+            pc.die("usage: powos containers autosleep sleep <name>")
+        ensure_watcher()
+        r = ask(f"sleep {rest[0]}")
+        print(f"{rest[0]}: {r}")
+        return 0 if r == "ok" else 1
+    if sub == "wake":
+        if not rest:
+            pc.die("usage: powos containers wake <name>")
+        r = wake(base, rest[0])
+        if r is None:
+            print(f"{rest[0]}: not asleep")
+            return 0
+        return r
+    pc.die("usage: powos containers autosleep status|set|sleep|wake|watch (powos containers autosleep --help)")
+
+
+def cmd_set(rest):
+    if len(rest) < 2 or not pc.NAME_RE.match(rest[0]):
+        pc.die("usage: powos containers autosleep set <name> 5m|never|off [--sleep-mode pause|stop] [--autostop 6h]")
+    name, val, s = rest[0], rest[1], load()
+    if val == "off":
+        s["rules"].pop(name, None)
+    else:
+        flags, i = {"as_idle": val}, 2
+        while i + 1 < len(rest):
+            k = {"--sleep-mode": "as_mode", "--autostop": "as_stop"}.get(rest[i])
+            if not k:
+                pc.die(f"autosleep set: unknown option {rest[i]}")
+            flags[k] = rest[i + 1]
+            i += 2
+        s["rules"][name] = rule_from_flags(flags)
+    save(s)
+    ensure_watcher()
+    ask("refresh")
+    print(f"{name}: autosleep {describe(s['rules'][name]) if name in s['rules'] else 'back to its own rule'}")
+    return 0
+
+
+def status(as_json):
+    w = watcher_pid()
+    try:
+        st = json.load(open(STATUS)) if w else {}
+    except (OSError, ValueError):
+        st = {}
+    s = load()
+    if as_json:
+        print(json.dumps({"watcher": w, **st, "asleep": s["asleep"], "rules": s["rules"]}))
+        return 0
+    print(f"watcher: {'pid %d, every %ds, epoll between' % (w, st.get('tick', TICK)) if w else 'not running'}")
+    if st.get("device"):
+        trig = st.get("triggers") or []
+        print(f"device:  {st['device']}" + (f"  -> sleeping after {fmt(TRIGGER_IDLE)} idle: {', '.join(trig)}"
+                                            if trig else "  (no trigger)"))
+    rows = st.get("containers") or {n: {"rule": a.get("rule", ""), "state": "asleep" if a["how"] == "pause"
+                                        else "stopped", "since": a["since"], "why": a["why"]}
+                                    for n, a in s["asleep"].items()}
+    if not rows:
+        print("no containers")
+        return 0
+    now = time.time()
+    width = max(24, *(len(n) for n in rows))
+    print(f"{'NAME':{width}} {'RULE':18} {'STATE':8} {'FOR':>6}  WHY")
+    for n, r in sorted(rows.items()):
+        if r["state"] == "awake":
+            span = fmt(r["idle_for"]) if r.get("idle_for") is not None else "-"
+            why = f"idle {span}" if r.get("activity") == "idle" else r.get("activity") or r.get("why", "")
+            why = r["why"] if r["rule"] == "never" else why
+            span = "-"
+        else:
+            span, why = fmt(now - r["since"]), r["why"]
+        print(f"{n:{width}} {r['rule'][:18]:18} {r['state']:8} {span:>6}  {why}")
+    return 0

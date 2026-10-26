@@ -1,0 +1,13 @@
+{
+ "a": {
+  "set": true,
+  "time": 1792600080,
+  "app": "com.google.android.deskclock"
+ },
+ "m": {
+  "dnd": false,
+  "ringer": "normal",
+  "saver": false,
+  "torch": false
+ }
+}

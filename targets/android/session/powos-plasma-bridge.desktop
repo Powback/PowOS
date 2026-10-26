@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Plasma notifications and clipboard for Android
+Comment=Relays the Plasma session's notifications and Klipper's clipboard to the PowOS app's shade and Android's clipboard, and back (powos-plasma-bridge)
+Exec=powos-plasma-bridge
+NoDisplay=true
+X-KDE-autostart-phase=2

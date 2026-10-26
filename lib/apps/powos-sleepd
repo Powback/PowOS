@@ -1,0 +1,899 @@
+#!/usr/bin/env python3
+"""powos-sleepd - PowOS's sleeper for everything that isn't a container: what nobody uses stops costing CPU and battery,
+and wakes in milliseconds when somebody does (docs/UNIFIED-SLEEP.md).
+
+Runs as root in the system tier (rooted/powos-start.sh, beside the supervisor), in limits of its own. It freezes
+process trees with the cgroup v2 freezer (cgroup.freeze, kernel >= 5.2: the phone's 5.15 has it; SIGKILL still kills a
+frozen process, so the supervisor's stop never hangs): each sleeping thing gets /sys/fs/cgroup/powos/sleep/<key>, its
+processes moved in from the root cgroup and back out again on waking, so a thaw leaves no trace. Only processes in the
+root v2 cgroup are ever moved - never anything in Android's own groups (uid_*/pid_*).
+
+  app backends   the supervisor's services (native and sandbox; containers are powos-autosleep's) with the manifest's
+                 "autosleep" (default 5m pause; "never" and the never list: never). Idle = no TCP connection to its
+                 listening ports and < 1% CPU for the idle time. Then, by mode:
+                   pause      frozen; its listening sockets are borrowed (pidfd_getfd, kernel >= 5.6) and watched - the
+                              first connection thaws it (socket activation on its own port: the app keeps its port, the
+                              kernel queues the connection, the app accepts it after the thaw)
+                   hibernate  as pause, then its anonymous memory paged out to zram (process_madvise MADV_PAGEOUT)
+                   stop       the supervisor stops it (/run/powos-sleep/stopped/<id>); powos-sleepd holds its port and
+                              starts it again on the first connection, proxying the connections that came meanwhile
+                 Also woken by `powos sleep wake <id>` (agents) and by the shell opening the app (a connection).
+  GUI apps       for the session's watcher (powos-sleep-gui: KWin's window signals, D-Bus, PipeWire), which decides;
+                 here the freeze itself and the last checks (never list, the session core, Android's cgroups). Its
+                 connection dropping thaws every GUI app at once.
+  SpacetimeDB    reported: the loaded databases and their clients (/v1/metrics). Not unloaded one by one: 2.12 has no
+                 way to (exit_module_host is internal, only called on delete); the supervisor's idle unload restarts the
+                 whole server when nobody is connected.
+  shell islands  reported: the shell pauses islands off screen itself (shell/apps/onscreen.ts) and writes which to
+                 its store (shell-data/sleep.json).
+
+Socket /run/powos-sleep/sleepd.sock (root and the PowOS uid), one line in, one JSON line out:
+  status | wake <id> | gui-hello | gui-freeze <pid> <name> | gui-thaw <pid> <why> | gui-active <pid>
+  (a GUI app woken by `wake` is named to the watcher in its next reply: "woken": [pid, ...])
+
+  powos-sleepd            run (root)
+  powos-sleepd status     the same as `powos sleep status --json`
+"""
+import ctypes
+import json
+import os
+import platform
+import selectors
+import signal
+import socket
+import struct
+import sys
+import threading
+import time
+from importlib.machinery import SourceFileLoader
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+common = SourceFileLoader("powos_sleep_common", os.path.join(HERE, "powos-sleep-common")).load_module()
+
+V2 = "/sys/fs/cgroup"
+SLEEP_CG = f"{V2}/powos/sleep"
+STATE = common.STATE_DIR
+SOCK = f"{STATE}/sleepd.sock"
+STOPPED = f"{STATE}/stopped"
+SERVICES = os.environ.get("POWOS_SERVICES", "/usr/lib/powos/apps/services")
+SUPERVISOR = "/run/powos-system"
+STDB = "http://127.0.0.1:3410"
+SHELL_STORE = "/proc/1/root/data/data/com.powos.app/files/shell-data/sleep.json"
+TICK = 10  # seconds between service checks, only while some service can sleep
+CLK = os.sysconf("SC_CLK_TCK")
+LOGS = "/var/log/powos"
+# Own limits (the unit manifests say the same): memory, CPU quota, processes/threads. The CPU cap is a ceiling for a
+# runaway, not a budget: at 10% a 50 ms /proc scan (freezing a tree) stretched to 700 ms; idle, both use ~0.
+LIMITS = {"sleepd": {"memMB": 48, "cpuPct": 50, "pids": 16}, "sleep-gui": {"memMB": 64, "cpuPct": 50, "pids": 16}}
+
+NR = {"aarch64": {"pidfd_open": 434, "pidfd_getfd": 438, "process_madvise": 440},
+      "x86_64": {"pidfd_open": 434, "pidfd_getfd": 438, "process_madvise": 440}}.get(platform.machine(), {})
+libc = ctypes.CDLL(None, use_errno=True)
+libc.syscall.restype = ctypes.c_long
+MADV_PAGEOUT = 21
+
+
+def log(msg):
+    print(f"{time.strftime('%F %T')} {msg}", flush=True)
+
+
+def rd(p, default=""):
+    try:
+        with open(p) as f:
+            return f.read()
+    except OSError:
+        return default
+
+
+def wr(p, v):
+    with open(p, "w") as f:
+        f.write(str(v))
+
+
+# ── processes ───────────────────────────────────────────────────────────────
+
+def stat(pid):
+    """(comm, ppid, pgrp, session, tty_nr, tpgid, ticks) or None."""
+    s = rd(f"/proc/{pid}/stat")
+    if not s:
+        return None
+    comm = s[s.index("(") + 1:s.rindex(")")]
+    f = s[s.rindex(")") + 2:].split()
+    return comm, int(f[1]), int(f[2]), int(f[3]), int(f[4]), int(f[5]), int(f[11]) + int(f[12])
+
+
+def children():
+    kids = {}
+    for p in os.listdir("/proc"):
+        if p.isdigit():
+            st = stat(p)
+            if st:
+                kids.setdefault(st[1], []).append(int(p))
+    return kids
+
+
+def tree(root, kids=None):
+    kids = kids if kids is not None else children()
+    out, todo = [], [root]
+    while todo:
+        p = todo.pop()
+        if os.path.isdir(f"/proc/{p}"):
+            out.append(p)
+            todo += kids.get(p, [])
+    return out
+
+
+def cgroup_v2(pid):
+    for line in rd(f"/proc/{pid}/cgroup").splitlines():
+        if line.startswith("0::"):
+            return line[3:]
+    return None
+
+
+
+# ── the freezer ─────────────────────────────────────────────────────────────
+
+class Frozen:
+    """One sleeping thing's process tree, frozen in /sys/fs/cgroup/powos/sleep/<key>."""
+
+    def __init__(self, key, root, only=False):
+        self.key, self.root, self.only = key, root, only  # only: that process alone, not its children
+        self.cg = f"{SLEEP_CG}/{key}"
+        self.home = {}  # pid -> its cgroup before
+        self.ms = 0.0
+
+    def freeze(self):
+        t = time.monotonic()
+        os.makedirs(self.cg, exist_ok=True)
+        kids = children()
+        for n in range(2):  # again: a child forked while the first pass moved its parent (frozen now: no more forks)
+            for p in [self.root] if self.only else tree(self.root, kids if n == 0 else children()):
+                if p in self.home:
+                    continue
+                cg = cgroup_v2(p)
+                if cg is None or (cg != "/" and not cg.startswith("/powos/sleep/")):
+                    continue  # Android's own groups (or gone): never moved
+                try:
+                    wr(f"{self.cg}/cgroup.procs", p)
+                    self.home[p] = "/"
+                except OSError:
+                    pass
+            wr(f"{self.cg}/cgroup.freeze", 1)
+        if not self.home:
+            self.thaw()
+            raise OSError("nothing movable (its processes are in Android's cgroups)")
+        for _ in range(500):
+            if "frozen 1" in rd(f"{self.cg}/cgroup.events"):
+                break
+            time.sleep(0.001)
+        self.ms = (time.monotonic() - t) * 1000
+        return self.ms
+
+    def thaw(self):
+        t = time.monotonic()
+        try:
+            wr(f"{self.cg}/cgroup.freeze", 0)
+        except OSError:
+            pass
+        for p in rd(f"{self.cg}/cgroup.procs").split():
+            try:
+                wr(f"{V2}/cgroup.procs", p)
+            except OSError:
+                pass
+        try:
+            os.rmdir(self.cg)
+        except OSError:
+            pass
+        return (time.monotonic() - t) * 1000
+
+    def pids(self):
+        return [int(p) for p in rd(f"{self.cg}/cgroup.procs").split()]
+
+
+def thaw_leftovers():
+    """A crash or restart of this daemon never leaves anything frozen."""
+    if not os.path.isdir(SLEEP_CG):
+        return
+    for k in os.listdir(SLEEP_CG):
+        d = f"{SLEEP_CG}/{k}"
+        if os.path.isdir(d):
+            Frozen(k, 0).thaw()
+            log(f"{k}: left frozen by an earlier run: thawed")
+
+
+def pidfd(pid):
+    fd = libc.syscall(NR["pidfd_open"], pid, 0)
+    if fd < 0:
+        raise OSError(ctypes.get_errno(), "pidfd_open")
+    return fd
+
+
+def borrow_listeners(pid, ports):
+    """The process's listening TCP sockets on these ports, duplicated into this process (pidfd_getfd)."""
+    inodes = set()
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        for line in rd(table).splitlines()[1:]:
+            c = line.split()
+            if c[3] == "0A" and int(c[1].rsplit(":", 1)[1], 16) in ports:
+                inodes.add(c[9])
+    out = []
+    if not inodes or "pidfd_getfd" not in NR:
+        return out
+    for p in tree(pid):
+        try:
+            fds = os.listdir(f"/proc/{p}/fd")
+        except OSError:
+            continue
+        pfd = None
+        for fd in fds:
+            try:
+                link = os.readlink(f"/proc/{p}/fd/{fd}")
+            except OSError:
+                continue
+            if link.startswith("socket:[") and link[8:-1] in inodes:
+                pfd = pfd if pfd is not None else pidfd(p)
+                got = libc.syscall(NR["pidfd_getfd"], pfd, int(fd), 0)
+                if got >= 0:
+                    out.append(got)
+                    inodes.discard(link[8:-1])
+        if pfd is not None:
+            os.close(pfd)
+    return out
+
+
+class IOVec(ctypes.Structure):
+    _fields_ = [("base", ctypes.c_void_p), ("len", ctypes.c_size_t)]
+
+
+def rss_mb(pids):
+    kb = 0
+    for p in pids:
+        for line in rd(f"/proc/{p}/status").splitlines():
+            if line.startswith("VmRSS:"):
+                kb += int(line.split()[1])
+    return kb >> 10
+
+
+def page_out(pids):
+    """hibernate: every private anonymous mapping of these (frozen) processes to swap (zram). Returns MB asked."""
+    total = 0
+    for p in pids:
+        regions = []
+        for line in rd(f"/proc/{p}/maps").splitlines():
+            f = line.split()
+            if len(f) < 5 or f[1][3] != "p" or f[1][0] != "r":
+                continue
+            if len(f) >= 6 and not f[5].startswith("["):
+                continue  # file-backed: the kernel drops those itself, cheaply
+            a, b = (int(x, 16) for x in f[0].split("-"))
+            regions.append((a, b - a))
+        try:
+            fd = pidfd(p)
+        except OSError:
+            continue
+        try:
+            for i in range(0, len(regions), 512):
+                chunk = regions[i:i + 512]
+                iov = (IOVec * len(chunk))(*[IOVec(a, n) for a, n in chunk])
+                libc.syscall(NR["process_madvise"], fd, iov, len(chunk), MADV_PAGEOUT, 0)
+                total += sum(n for _, n in chunk)
+        finally:
+            os.close(fd)
+    return total >> 20
+
+
+# ── limits for this daemon and the session watcher ──────────────────────────
+
+def limit(name, pid):
+    """Put pid into PowOS's own groups under Android's hierarchies (as powos-container does): memcg, cpuctl, v2 pids."""
+    lim, done = LIMITS[name], []
+    for base, files in (("/dev/memcg", {"memory.limit_in_bytes": lim["memMB"] << 20}),
+                        ("/dev/cpuctl", {"cpu.cfs_period_us": 100000, "cpu.cfs_quota_us": lim["cpuPct"] * 1000}),
+                        (V2, {"pids.max": lim["pids"]})):
+        d = f"{base}/powos/{name}"
+        try:
+            os.makedirs(d, exist_ok=True)
+            for k, v in files.items():
+                if os.path.exists(f"{d}/{k}"):
+                    wr(f"{d}/{k}", v)
+            wr(f"{d}/cgroup.procs", pid)
+            done.append(base.rsplit("/", 1)[-1])
+        except OSError as e:
+            log(f"{name}: limit in {d} failed: {e}")
+    return done
+
+
+# ── app backends (the supervisor's services) ────────────────────────────────
+
+def listen_ports(m):
+    ports = set()
+    for a in (m.get("needs") or {}).get("listen", []):
+        try:
+            ports.add(int(str(a).rsplit(":", 1)[1]))
+        except (IndexError, ValueError):
+            pass
+    if (m.get("idle") or {}).get("port"):
+        ports.add(int(m["idle"]["port"]))
+    return ports
+
+
+def connections(ports):
+    n = 0
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        for line in rd(table).splitlines()[1:]:
+            c = line.split()
+            if c[3] == "01" and int(c[1].rsplit(":", 1)[1], 16) in ports:
+                n += 1
+    return n
+
+
+class Service:
+    def __init__(self, m):
+        self.m, self.id = m, m["id"]
+        self.ports = listen_ports(m)
+        r = common.from_manifest(m.get("autosleep"))
+        self.rule = r or dict(common.DEFAULT)
+        self.never = self.rule.get("never") or common.is_never(self.id, m.get("name"))
+        self.state, self.since, self.why = "awake", time.time(), ""
+        self.quiet_since = None
+        self.last = None  # (time, ticks)
+        self.frozen = None
+        self.fds = []
+        self.wake_ms = None
+        self.sleep_ms = None
+        self.holder = None
+
+    def item(self):
+        st = "never" if self.never else self.state
+        why = "never list" if self.never and not self.rule.get("never") else self.why
+        return {"id": self.id, "type": "app", "name": self.m.get("name", self.id), "state": st,
+                "since": round(self.since), "why": why, "rule": common.describe(self.rule),
+                "sleepMs": self.sleep_ms, "wakeMs": self.wake_ms}
+
+
+class Holder(threading.Thread):
+    """stop mode: the port while the backend is stopped. The first connection starts it again; connections that came
+    meanwhile are proxied to it (and only those).
+
+    HACK: the port is handed back by closing ours once the supervisor has started the backend, so a connection in that
+    gap is refused and a backend that binds faster than this lets go fails once (the supervisor restarts it in 1 s).
+    Real fix: socket activation proper - the listening socket passed to the backend (LISTEN_FDS), which needs every
+    backend to take one; then nothing is ever closed."""
+
+    def __init__(self, d, svc, port):
+        super().__init__(daemon=True)
+        self.d, self.svc, self.port = d, svc, port
+        self.ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.ls.bind(("127.0.0.1", port))
+        self.ls.listen(64)
+        self.accepted = False
+
+    def release(self):
+        """Woken some other way: let go of the port before the backend comes back."""
+        try:
+            self.ls.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        self.ls.close()
+
+    def run(self):
+        try:
+            first = self.ls.accept()[0]
+        except OSError:
+            return
+        self.accepted = True
+        held = [first]
+        self.ls.setblocking(False)
+        self.d.post(("wake", self.svc.id, f"connection to :{self.port}"))
+        # Until the backend listens: keep accepting what comes (the kernel queues it), then hand our port back.
+        for _ in range(300):
+            try:
+                while True:
+                    held.append(self.ls.accept()[0])
+            except (BlockingIOError, OSError):
+                pass
+            if self.d.stop_cleared(self.svc):
+                break
+            time.sleep(0.01)
+        self.ls.close()
+        for _ in range(500):
+            try:
+                up = socket.create_connection(("127.0.0.1", self.port), timeout=0.2)
+                break
+            except OSError:
+                time.sleep(0.01)
+        else:
+            for c in held:
+                c.close()
+            return
+        conns = [up] + [socket.create_connection(("127.0.0.1", self.port)) for _ in held[1:]]
+        for c, u in zip(held, conns):
+            for a, b in ((c, u), (u, c)):
+                threading.Thread(target=pipe, args=(a, b), daemon=True).start()
+
+
+def pipe(a, b):
+    try:
+        while True:
+            d = a.recv(65536)
+            if not d:
+                break
+            b.sendall(d)
+    except OSError:
+        pass
+    for s in (a, b):
+        try:
+            s.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+
+# ── the daemon ──────────────────────────────────────────────────────────────
+
+class Daemon:
+    def __init__(self):
+        self.sel = selectors.DefaultSelector()
+        self.services = {}
+        self.gui = {}  # pid -> {"frozen": Frozen, "name", "since", "why", "sleepMs"}
+        self.gui_last = {}  # pid -> last thaw (name, wakeMs)
+        self.gui_conn = None
+        self.gui_woken = []  # thawed by `wake` (not the watcher): told to the watcher with its next request
+        self.gui_report = []  # the watcher's view of the windows that are awake (and why)
+        self.active_pid = None
+        self.inbox = []
+        self.rfd, self.wfd = os.pipe()
+        self.load_services()
+
+    def post(self, msg):  # from a Holder thread
+        self.inbox.append(msg)
+        try:
+            os.write(self.wfd, b"x")
+        except BlockingIOError:
+            pass  # already woken
+
+    def stop_cleared(self, svc):
+        st = self.supervisor().get(svc.id) or {}
+        return not os.path.exists(f"{STOPPED}/{svc.id}") and st.get("state") == "running"
+
+    def load_services(self):
+        if not os.path.isdir(SERVICES):
+            return
+        for n in sorted(os.listdir(SERVICES)):
+            if n.endswith(".json"):
+                try:
+                    with open(f"{SERVICES}/{n}") as f:
+                        m = json.load(f)
+                    if m.get("backend"):
+                        self.services[m["id"]] = Service(m)
+                except (OSError, ValueError, KeyError) as e:
+                    log(f"{n}: bad manifest: {e}")
+
+    def supervisor(self):
+        try:
+            with open(f"{SUPERVISOR}/status.json") as f:
+                st = json.load(f)
+            return {s["id"]: {**s, "_time": st["time"]} for s in st["services"]}
+        except (OSError, ValueError, KeyError):
+            return {}
+
+    # services ---------------------------------------------------------------
+    def check_services(self):
+        now, sup = time.time(), self.supervisor()
+        for s in self.services.values():
+            if s.never or s.rule.get("never"):
+                continue
+            st = sup.get(s.id) or {}
+            if st.get("mode") == "container":
+                continue  # a container's sleep is powos-autosleep's (powos containers autosleep)
+            pid = st.get("pid")
+            if s.state == "asleep":
+                if s.frozen and (not pid or pid != s.frozen.root):
+                    log(f"{s.id}: restarted by the supervisor while asleep: awake")
+                    self.wake_service(s, "restarted")
+                continue
+            if st.get("state") != "running" or not pid:
+                s.quiet_since, s.last = None, None
+                continue
+            # The supervisor's own measure of its tree (it scans /proc each tick anyway; a scan here would cost
+            # ~50 ms of CPU every tick on the phone).
+            cpu = st.get("cpuPct", 100) if now - st.get("_time", now) < 3 * TICK else 100
+            if connections(s.ports) or cpu >= 1:
+                s.quiet_since = None
+                continue
+            s.quiet_since = s.quiet_since or now
+            if now - s.quiet_since >= s.rule["idle"]:
+                self.sleep_service(s, pid, f"idle {common.fmt(now - s.quiet_since)}: no connections, ~0% CPU")
+
+    def sleep_service(self, s, pid, why):
+        mode = s.rule["mode"]
+        try:
+            if mode == "stop":
+                os.makedirs(STOPPED, exist_ok=True)
+                wr(f"{STOPPED}/{s.id}", why)
+                self.kick_supervisor()
+                for _ in range(1100):
+                    if not connections(s.ports) and not self.port_listened(s.ports):
+                        break
+                    time.sleep(0.01)
+                s.holder = [Holder(self, s, p) for p in s.ports]
+                for h in s.holder:
+                    h.start()
+                s.sleep_ms = None
+            else:
+                s.fds = borrow_listeners(pid, s.ports)
+                s.frozen = Frozen(f"app-{s.id}", pid)
+                s.sleep_ms = round(s.frozen.freeze(), 1)
+                if mode == "hibernate":
+                    before = rss_mb(s.frozen.pids())
+                    page_out(s.frozen.pids())
+                    why += f"; resident {before} -> {rss_mb(s.frozen.pids())} MB (the rest in zram)"
+                for fd in s.fds:
+                    self.sel.register(fd, selectors.EVENT_READ, ("listener", s.id))
+        except OSError as e:
+            log(f"{s.id}: couldn't sleep: {e}")
+            s.why, s.quiet_since = f"couldn't sleep: {e}", None
+            # The borrowed listeners go back too: a copy kept here holds the backend's port open after the backend
+            # exits - its next start can't bind (EADDRINUSE) and every client hangs in a queue nobody accepts (App API,
+            # 2026-10-23: four failed sleeps, then a system-tier restart left 127.0.0.1:3411 held by powos-sleepd).
+            self.release_listeners(s)
+            if s.frozen:
+                s.frozen.thaw()
+                s.frozen = None
+            return
+        s.state, s.since, s.why = "asleep", time.time(), f"{why} ({mode})"
+        log(f"{s.id}: asleep ({mode}" + (f", frozen in {s.sleep_ms} ms" if s.sleep_ms else "") + f"): {why}"
+            + (f"; woken by a connection to :{', :'.join(map(str, sorted(s.ports)))}" if s.ports else ""))
+        self.publish()
+
+    def release_listeners(self, s):
+        """Close this daemon's copies of the backend's listening sockets (borrow_listeners), watched or not."""
+        for fd in s.fds:
+            try:
+                self.sel.unregister(fd)
+            except (KeyError, ValueError):
+                pass
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        s.fds = []
+
+    def wake_service(self, s, why):
+        t = time.monotonic()
+        self.release_listeners(s)
+        if s.frozen:
+            s.frozen.thaw()
+            s.frozen = None
+        for h in s.holder or []:
+            if not h.accepted:
+                h.release()
+        s.holder = None
+        if os.path.exists(f"{STOPPED}/{s.id}"):
+            os.unlink(f"{STOPPED}/{s.id}")
+            self.kick_supervisor()
+        s.wake_ms = round((time.monotonic() - t) * 1000, 2)
+        s.state, s.since, s.why, s.quiet_since, s.last = "awake", time.time(), f"woken: {why}", None, None
+        log(f"{s.id}: awake in {s.wake_ms} ms ({why})")
+        self.publish()
+
+    def port_listened(self, ports):
+        for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+            for line in rd(table).splitlines()[1:]:
+                c = line.split()
+                if c[3] == "0A" and int(c[1].rsplit(":", 1)[1], 16) in ports:
+                    return True
+        return False
+
+    def kick_supervisor(self):
+        try:
+            os.kill(int(rd(f"{SUPERVISOR}/supervisor.pid").strip()), signal.SIGUSR1)
+        except (OSError, ValueError):
+            pass
+
+    # GUI --------------------------------------------------------------------
+    def gui_freeze(self, pid, name):
+        if pid in self.gui:
+            return {"ok": True, "already": True}
+        st = stat(pid)
+        if not st:
+            return {"refused": "no such process"}
+        if pid == self.active_pid:
+            return {"refused": "it has focus"}
+        pids = tree(pid)
+        for p in pids:
+            c = (stat(p) or ("",))[0]
+            if common.is_never(c, name if p == pid else None):
+                return {"refused": f"{c or name}: on the never list"}
+        if cgroup_v2(pid) != "/":
+            return {"refused": f"in Android's cgroup {cgroup_v2(pid)}"}
+        f = Frozen(f"gui-{pid}", pid)
+        try:
+            ms = f.freeze()
+        except OSError as e:
+            return {"refused": str(e)}
+        self.gui[pid] = {"frozen": f, "name": name, "since": time.time(), "sleepMs": round(ms, 1), "n": len(f.home)}
+        log(f"gui {name} ({pid}, {len(f.home)} processes): frozen in {ms:.1f} ms")
+        self.publish()
+        return {"ok": True, "ms": round(ms, 2), "pids": sorted(f.home)}
+
+    def desktop_freeze(self, pid):
+        """The desktop shell (plasmashell) while PowOS is off screen (powos-sleep-gui asks): that process alone - the
+        apps it launched are its children and sleep by their own rules - though it's on the never list for everything
+        else. Thawed as PowOS comes back on screen, by D-Bus to it, and every few minutes to read its Wayland socket."""
+        if pid in self.gui:
+            return {"ok": True, "already": True}
+        st = stat(pid)
+        # plasmashell alone (the apps it launched are its children); the desktop home (powos-shell, the web shell's
+        # home under Plasma) with its whole tree - its Chromium renderer, GPU and zygotes are its children.
+        if not st or st[0] not in ("plasmashell", "powos-shell"):
+            return {"refused": "not a desktop shell (plasmashell, powos-shell)"}
+        if cgroup_v2(pid) != "/":
+            return {"refused": f"in Android's cgroup {cgroup_v2(pid)}"}
+        f = Frozen(f"gui-{pid}", pid, only=st[0] == "plasmashell")
+        try:
+            ms = f.freeze()
+        except OSError as e:
+            return {"refused": str(e)}
+        self.gui[pid] = {"frozen": f, "name": st[0], "since": time.time(), "sleepMs": round(ms, 1), "n": len(f.home)}
+        log(f"desktop shell {st[0]} ({pid}): frozen in {ms:.1f} ms, {len(f.home)} process(es) (PowOS off screen)")
+        self.publish()
+        return {"ok": True, "ms": round(ms, 2), "pids": sorted(f.home)}
+
+    def gui_thaw(self, pid, why):
+        g = self.gui.pop(pid, None)
+        if not g:
+            return {"ok": True, "already": True}
+        ms = g["frozen"].thaw()
+        self.gui_last[pid] = (g["name"], round(ms, 2), why, time.time())
+        log(f"gui {g['name']} ({pid}): thawed in {ms:.2f} ms ({why})")
+        self.publish()
+        return {"ok": True, "ms": round(ms, 2)}
+
+    def gui_thaw_all(self, why):
+        for pid in list(self.gui):
+            self.gui_thaw(pid, why)
+
+    # status -----------------------------------------------------------------
+    def items(self):
+        out = [s.item() for s in self.services.values()]
+        for pid, g in self.gui.items():
+            out.append({"id": f"gui:{pid}", "type": "gui", "name": g["name"], "state": "asleep",
+                        "since": round(g["since"]), "why": "unfocused/minimized (powos-sleep-gui)",
+                        "rule": "pause", "sleepMs": g["sleepMs"], "processes": g["n"]})
+        out += [i for i in self.gui_report if int(i["id"][4:]) not in self.gui]
+        return out
+
+    def publish(self):
+        common.publish("sleepd", self.items(), {"socket": SOCK})
+
+    def live_extras(self):
+        """Reported, not slept by this daemon: SpacetimeDB's databases and the shell's islands."""
+        out = []
+        try:
+            import urllib.request
+            txt = urllib.request.urlopen(f"{STDB}/v1/metrics", timeout=1).read().decode()
+            for line in txt.splitlines():
+                if line.startswith("spacetime_worker_connected_clients{"):
+                    ident = line.split('"')[1]
+                    n = int(float(line.rsplit(" ", 1)[1]))
+                    out.append({"id": f"stdb:{ident[:12]}", "type": "stdb", "name": self.db_name(ident),
+                                "state": "awake", "why": f"loaded, {n} client{'s' if n != 1 else ''}"
+                                + ("" if n else " (unloaded with the server's idle restart)"), "rule": "-"})
+            if not out:
+                out.append({"id": "stdb", "type": "stdb", "name": "SpacetimeDB", "state": "asleep",
+                            "why": "no database loaded (each loads on its first connection)", "rule": "-"})
+        except Exception as e:  # noqa: BLE001 - a status line, never a failure
+            out.append({"id": "stdb", "type": "stdb", "name": "SpacetimeDB", "state": "?", "why": f"metrics: {e}"})
+        try:
+            with open(SHELL_STORE) as f:
+                isl = json.load(f)
+            for i in isl.get("islands", []):
+                out.append({"id": f"shell:{i['key']}", "type": "shell", "name": i.get("name", i["key"]),
+                            "state": "awake" if i.get("on") else "asleep", "since": round(i.get("since", 0) / 1000),
+                            "why": "on screen" if i.get("on") else "off screen: paused by the shell", "rule": "off screen"})
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        return out
+
+    _names = {}
+
+    def db_name(self, ident):
+        if ident not in self._names:
+            try:
+                import urllib.request
+                r = json.loads(urllib.request.urlopen(f"{STDB}/v1/database/{ident}/names", timeout=1).read())
+                self._names[ident] = (r.get("names") or [ident[:12]])[0]
+            except Exception:  # noqa: BLE001
+                return ident[:12]
+        return self._names[ident]
+
+    # the socket -------------------------------------------------------------
+    def handle(self, conn, line):
+        cmd, _, rest = line.strip().partition(" ")
+        if cmd == "status":
+            return {"items": self.items() + self.live_extras()}
+        if cmd == "wake":
+            key = rest.strip()
+            s = self.services.get(key)
+            if s:
+                if s.state == "asleep":
+                    self.wake_service(s, "asked")
+                return {"ok": True, "wakeMs": s.wake_ms}
+            if key.startswith("gui:"):
+                key = key[4:]
+            for pid, g in list(self.gui.items()):
+                # its key, any process of its tree (a launcher knows the window's), or its name (window class)
+                if (key.isdigit() and (int(key) == pid or int(key) in g["frozen"].home)) \
+                        or g["name"].lower() == key.lower():
+                    self.gui_woken.append(pid)
+                    return self.gui_thaw(pid, "asked")
+            return {"error": f"{key}: nothing asleep by that name here"}
+        if cmd.startswith("gui-") and cmd != "gui-hello" and conn is not self.gui_conn:
+            return {"error": "gui-* only from the session's watcher (gui-hello first)"}
+        if cmd == "gui-hello":
+            if self.gui_conn and self.gui_conn is not conn:
+                self.drop(self.gui_conn)
+            self.gui_conn = conn
+            uid, pid = peer(conn)
+            return {"ok": True, "limits": limit("sleep-gui", pid)}
+        if cmd == "gui-report":
+            self.gui_report = json.loads(rest) if conn is self.gui_conn else self.gui_report
+            self.publish()
+            return {"ok": True}
+        if cmd == "gui-active":
+            self.active_pid = int(rest) if rest.strip().isdigit() else None
+            if self.active_pid in self.gui:
+                return self.gui_thaw(self.active_pid, "focused")
+            return {"ok": True}
+        if cmd == "gui-freeze":
+            pid, _, name = rest.partition(" ")
+            uid = peer(conn)[0]
+            try:
+                owner = os.stat(f"/proc/{int(pid)}").st_uid
+            except OSError:
+                return {"refused": "no such process"}
+            if uid != 0 and owner != uid:
+                return {"refused": "not the session user's process"}  # the watcher freezes its own apps only
+            return self.gui_freeze(int(pid), name.strip())
+        if cmd == "gui-desktop-freeze":
+            pid = int(rest.strip())
+            uid = peer(conn)[0]
+            try:
+                owner = os.stat(f"/proc/{pid}").st_uid
+            except OSError:
+                return {"refused": "no such process"}
+            if uid != 0 and owner != uid:
+                return {"refused": "not the session user's process"}
+            return self.desktop_freeze(pid)
+        if cmd == "gui-thaw":
+            pid, _, why = rest.partition(" ")
+            return self.gui_thaw(int(pid), why.strip() or "asked")
+        return {"error": f"unknown: {cmd}"}
+
+    def drop(self, conn):
+        try:
+            self.sel.unregister(conn)
+        except (KeyError, ValueError):
+            pass
+        conn.close()
+        if conn is self.gui_conn:
+            self.gui_conn = None
+            self.gui_report = []
+            self.gui_thaw_all("the session's watcher went away")
+
+    def serve(self):
+        os.makedirs(STATE, exist_ok=True)
+        try:
+            os.unlink(SOCK)
+        except OSError:
+            pass
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(SOCK)
+        os.chmod(SOCK, 0o666)  # who may talk: checked per connection (root and the PowOS uid)
+        srv.listen(16)
+        self.sel.register(srv, selectors.EVENT_READ, ("server",))
+        self.sel.register(self.rfd, selectors.EVENT_READ, ("inbox",))
+        self.publish()
+        bufs = {}
+        powos_uid = os.stat("/var/lib/powos/runtime").st_uid if os.path.isdir("/var/lib/powos/runtime") else None
+        sleepable = any(not (s.never or s.rule.get("never")) for s in self.services.values())
+        next_tick = time.time()
+        stop = []
+        signal.signal(signal.SIGTERM, lambda *_: stop.append(1))
+        signal.signal(signal.SIGINT, lambda *_: stop.append(1))
+        os.set_blocking(self.wfd, False)
+        signal.set_wakeup_fd(self.wfd)  # a signal wakes the select at once (Python retries it on EINTR)
+        log(f"up: services {', '.join(f'{s.id} ({s.item()['rule'] if not s.never else 'never'})' for s in self.services.values()) or '-'}")
+        while not stop:
+            timeout = max(0.0, next_tick - time.time()) if sleepable else None
+            try:
+                events = self.sel.select(timeout)
+            except InterruptedError:
+                continue
+            for key, _ in events:
+                kind = key.data[0]
+                if kind == "server":
+                    c, _ = srv.accept()
+                    uid, _ = peer(c)
+                    if uid not in (0, powos_uid):
+                        c.close()
+                        continue
+                    bufs[c] = b""
+                    self.sel.register(c, selectors.EVENT_READ, ("conn",))
+                elif kind == "inbox":
+                    os.read(self.rfd, 64)
+                    while self.inbox:
+                        _, sid, why = self.inbox.pop(0)
+                        self.wake_service(self.services[sid], why)
+                elif kind == "listener":
+                    s = self.services[key.data[1]]
+                    self.wake_service(s, "a connection")
+                elif kind == "conn":
+                    c = key.fileobj
+                    try:
+                        d = c.recv(4096)
+                    except OSError:
+                        d = b""
+                    if not d:
+                        bufs.pop(c, None)
+                        self.drop(c)
+                        continue
+                    bufs[c] += d
+                    while b"\n" in bufs.get(c, b""):
+                        line, bufs[c] = bufs[c].split(b"\n", 1)
+                        try:
+                            r = self.handle(c, line.decode())
+                        except Exception as e:  # noqa: BLE001 - one bad request never takes the daemon down
+                            r = {"error": repr(e)}
+                        if c is self.gui_conn and self.gui_woken and isinstance(r, dict):
+                            r["woken"], self.gui_woken = self.gui_woken, []
+                        try:
+                            c.sendall(json.dumps(r).encode() + b"\n")
+                        except OSError:
+                            break
+            if sleepable and time.time() >= next_tick:
+                try:
+                    self.check_services()
+                except Exception as e:  # noqa: BLE001
+                    log(f"service check failed: {e!r}")
+                next_tick = time.time() + TICK
+        for s in self.services.values():
+            if s.state == "asleep":
+                self.wake_service(s, "powos-sleepd stopping")
+        self.gui_thaw_all("powos-sleepd stopping")
+        log("down")
+
+
+def peer(conn):
+    cred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+    pid, uid, _ = struct.unpack("3i", cred)
+    return uid, pid
+
+
+def main(argv):
+    if argv and argv[0] == "status":
+        print(json.dumps(common.request(SOCK, "status"), indent=2))
+        return
+    if argv:
+        print(__doc__.strip())
+        return
+    if os.getuid() != 0:
+        sys.exit("powos-sleepd: runs as root (it freezes cgroups)")
+    import fcntl
+    os.makedirs(STATE, exist_ok=True)
+    lock = open(f"{STATE}/sleepd.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        sys.exit("powos-sleepd: already running")
+    os.makedirs(LOGS, exist_ok=True)
+    sys.stdout = sys.stderr = open(f"{LOGS}/sleepd.log", "a", buffering=1)
+    wr(f"{STATE}/sleepd.pid", os.getpid())
+    log(f"limits: {', '.join(limit('sleepd', os.getpid())) or 'none'}")
+    thaw_leftovers()
+    Daemon().serve()
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

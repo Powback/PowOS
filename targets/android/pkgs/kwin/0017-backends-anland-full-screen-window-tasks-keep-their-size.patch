@@ -1,0 +1,123 @@
+From effa21864b90329e6aeeb8d0463b55640528e15e Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Thu, 22 Oct 2026 22:40:26 +0200
+Subject: [PATCH] backends/anland: full-screen window tasks keep their size and
+ scale to fit
+
+A game shown as its own Android task (immersive, full screen) took the new
+full-screen area when the outputs changed - folding the phone resized it to
+the cover screen while the game kept rendering at its launch size - and the
+task cropped it to the task's buffer instead of scaling it.
+
+Now a full-screen window keeps its geometry while it is exported (dynamic
+property powosKeepFullScreenGeometry: Window::checkWorkspacePosition leaves it
+alone; a property so libkwin's Window layout is unchanged), and the task
+scales it to fit its buffers, aspect kept, centred with black bars. Touch
+maps through the same viewport. Back on the desktop it takes the screen's
+size again.
+---
+ src/backends/anland/anland_window_task.cpp | 28 ++++++++++++++++++++--
+ src/backends/anland/anland_window_task.h   |  1 +
+ src/window.cpp                             |  6 +++++
+ 3 files changed, 33 insertions(+), 2 deletions(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index fac085e..bfb90b2 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -102,6 +102,7 @@ AnlandWindowTask::~AnlandWindowTask()
+     unwatchAll();
+     if (m_window && m_exported && !m_window->isDeleted() && workspace()) {
+         // Back on the desktop as it was, and in front.
++        m_window->setProperty("powosKeepFullScreenGeometry", false);
+         m_window->setDesktops(m_desktops);
+         if (m_fullScreen) {
+             // Full screen on the desktop would cover it: a normal window again (KWin restores its size from before).
+@@ -114,6 +115,9 @@ AnlandWindowTask::~AnlandWindowTask()
+                 m_window->maximize(m_maximizeMode);
+             }
+         }
++        if (m_window->isFullScreen()) {
++            m_window->checkWorkspacePosition(); // still full screen: the screen's size again (kept while exported)
++        }
+         workspace()->activateWindow(m_window);
+     }
+ }
+@@ -195,6 +199,11 @@ void AnlandWindowTask::goLive()
+         m_exported = true;
+         focus();
+     }
++    // A full-screen window keeps the size it has now through output changes (a game started unfolded keeps
++    // rendering 2268x2440 on the cover screen) - the task scales it instead (viewport()).
++    if (m_window->isFullScreen()) {
++        m_window->setProperty("powosKeepFullScreenGeometry", true); // Window::checkWorkspacePosition
++    }
+     watchWindow(m_window);
+     for (Window *child : m_window->transients()) {
+         if (child->isPopupWindow()) {
+@@ -332,16 +341,31 @@ void AnlandWindowTask::releaseBuffers()
+     m_bufCount = 0;
+ }
+ 
++bool AnlandWindowTask::fitsWindow() const
++{
++    return m_window && m_window->isFullScreen() && !m_window->clientGeometry().isEmpty() && !m_bufferSize.isEmpty();
++}
++
+ qreal AnlandWindowTask::scale() const
+ {
++    if (fitsWindow()) {
++        // Full screen keeps its size (powosKeepFullScreenGeometry): scaled to fit the task, aspect kept.
++        const QSizeF client = m_window->clientGeometry().size();
++        return std::min(m_bufferSize.width() / client.width(), m_bufferSize.height() / client.height());
++    }
+     return m_window ? m_window->targetScale() : 1.0;
+ }
+ 
+ RectF AnlandWindowTask::viewport() const
+ {
+     // The client area, at the task's size: no title bar (the task has its own), the window's popups where they open.
+-    const QPointF origin = m_window ? m_window->clientGeometry().topLeft() : QPointF();
+-    return RectF(origin, QSizeF(m_bufferSize) / scale());
++    const RectF client = m_window ? m_window->clientGeometry() : RectF();
++    const QSizeF size = QSizeF(m_bufferSize) / scale();
++    if (fitsWindow()) {
++        // Centred: black bars where the task's shape differs from the window's (the cover screen after a fold).
++        return RectF(client.center() - QPointF(size.width(), size.height()) / 2, size);
++    }
++    return RectF(client.topLeft(), size);
+ }
+ 
+ void AnlandWindowTask::fitWindow()
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 1e4cc3a..d34faf9 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -95,6 +95,7 @@ private:
+     QPointF mapToGlobal(const QPointF &taskPoint) const;
+     RectF viewport() const;
+     qreal scale() const;
++    bool fitsWindow() const;
+     void fitWindow();
+     void cancelTouches();
+ 
+diff --git a/src/window.cpp b/src/window.cpp
+index e620a02..69f553a 100644
+--- a/src/window.cpp
++++ b/src/window.cpp
+@@ -3931,6 +3931,12 @@ void Window::checkWorkspacePosition(RectF oldGeometry, LogicalOutput *oldOutput)
+     if (isDock() || isDesktop() || !isPlaceable()) {
+         return;
+     }
++    if (isRequestedFullScreen() && property("powosKeepFullScreenGeometry").toBool()) {
++        // PowOS: shown as an Android task that scales it (backends/anland AnlandWindowTask): a full-screen window keeps
++        // its size through output changes (fold, rotation) - games that don't follow a resize keep their render size.
++        // A dynamic property, not a member: Window's layout (libkwin's ABI) stays as it is.
++        return;
++    }
+ 
+     RectF newGeom = moveResizeGeometry();
+ 
+-- 
+2.50.1 (Apple Git-155)
+

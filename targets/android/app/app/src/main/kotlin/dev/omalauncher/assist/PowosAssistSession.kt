@@ -62,11 +62,66 @@ class PowosAssistSession(
         showFlags: Int,
     ) {
         super.onShow(args, showFlags)
+        // The pet over apps keeps out of the assistant (its crop screen) while it shows.
+        dev.omalauncher.system.PetOverlay.assistShowing = true
+        // Drawn again (paused while hidden, onHide).
+        host?.web?.onResume()
         screenText = ""
         shot = null
-        // A new summoning: the page forgets the last one (its question, answer view, cut-out).
+        // A new summoning: the page forgets the last one (its question, answer view, cut-out) - and listens.
         host?.bridge?.emit("assist.reset", null)
+        // Hold to talk: the side button still down, the dictation lasts until it's let go, and then sends (PowerKey
+        // reads the release as root; Android doesn't pass it on). Already up (or no reader): it ends at a short pause.
+        PowerKey.start()
+        if (PowerKey.down) {
+            host?.bridge?.emit("assist.held", null)
+            PowerKey.onRelease = {
+                android.util.Log.i("speech", "assist: side button let go")
+                host?.bridge?.emit("assist.keyup", null)
+            }
+        } else {
+            PowerKey.onRelease = null
+            host?.bridge?.emit("assist.quick", null)
+        }
         sendScreen()
+        // Its page must answer (it never loaded, it hangs: a window over the app that can't be closed from it) - else
+        // the session ends (dev.omalauncher.shell.PageWatchdog).
+        host?.web?.let { web ->
+            watchdog?.stop()
+            watchdog = dev.omalauncher.shell.PageWatchdog(web, "PowOS assistant") { finish() }.also { it.start() }
+        }
+    }
+
+    private var watchdog: dev.omalauncher.shell.PageWatchdog? = null
+
+    /**
+     * The side button let go, if Android passes it on (the power key's release usually stays with the system; the
+     * assist key's may come): the page's dictation ends there and sends (assist.tsx). Logged, to know which this phone
+     * does.
+     */
+    override fun onKeyUp(
+        keyCode: Int,
+        event: android.view.KeyEvent,
+    ): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_POWER || keyCode == android.view.KeyEvent.KEYCODE_ASSIST) {
+            android.util.Log.i("speech", "assist: key up $keyCode")
+            host?.bridge?.emit("assist.keyup", null)
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
+    override fun onHide() {
+        dev.omalauncher.system.PetOverlay.assistShowing = false
+        watchdog?.stop()
+        PowerKey.onRelease = null
+        // The page stays warm after the panel goes: it stops listening (a summoning starts dictation, assist.tsx).
+        host?.bridge?.emit("assist.hidden", null)
+        // The warm page stays in the session's hidden window, and a WebView there still counts itself visible: it kept
+        // drawing (measured 2026-10-21: ~2 frames and 8 begin-frames a second with the panel gone). Paused, it's hidden
+        // to the page (document.hidden) and gets no frames; its JS still runs (assist.hidden above is handled).
+        host?.web?.onPause()
+        super.onHide()
     }
 
     /** The screen's text, as an outline of what each window shows (the app's own view text, by the framework). */
@@ -91,6 +146,7 @@ class PowosAssistSession(
     }
 
     override fun onDestroy() {
+        watchdog?.stop()
         // Live mode ends with the session (the capture would otherwise go on, unseen).
         LiveCapture.stop(context)
         // The page stays warm for the next time (AssistWeb); only this session's window lets go of it.

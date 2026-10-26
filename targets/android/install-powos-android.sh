@@ -73,6 +73,19 @@ rm -rf ~/.local/share/fex-emu/RootFS
 fexroot=$(ls -d /usr/share/fex-emu/RootFS/*/ | head -1)
 printf '{"Config":{"RootFS":"%s"}}\n' "${fexroot%/}" > /usr/share/fex-emu/Config.json
 
+# Windows games: powos-play runs a .exe through Proton without Steam's container runtime (pressure-vessel needs
+# user namespaces; see play/powos-play). Proton itself (GE-Proton's aarch64 build, ~2 GB) is downloaded on first
+# use, not shipped. What ARM64 Wine loads at run time (dlopen, so no package depends on it), and vulkaninfo for
+# checking the GPU from a terminal.
+pacman -S --noconfirm --needed vulkan-icd-loader vulkan-tools libxinerama libxcomposite libxrandr libxcursor \
+  libxi libxkbcommon sdl2-compat gnutls freetype2 fontconfig gst-plugins-base-libs
+install -m 755 "$P/play/powos-play" /usr/bin/powos-play
+# Steam: Valve's native ARM64 client (play/powos-steam bootstraps it on first use, ~110 MB + its own update).
+# What it links that Valve's Steam Runtime would otherwise provide (gtk2 is ours, recipes.list).
+pacman -S --noconfirm --needed alsa-lib libasyncns at-spi2-core libcups gdk-pixbuf2 libibus libnm nspr \
+  nss openal libpipewire libpulse libsndfile libvdpau libxdamage libxtst libxss
+install -m 755 "$P/play/powos-steam" /usr/bin/powos-steam
+
 # ── PowOS's files: everything in the image no package owns (PowOS layer, Bazzite's system_files, Deck
 # presets...), architecture-independent only. Unpacked after the packages, as the image's layers sit on top
 # of its packages.
@@ -139,12 +152,25 @@ pacman -S --noconfirm --needed scrcpy android-tools pyside6
 # the image comes from, only has a Qt 5 one, so the RPM mapping can't bring it).
 pacman -S --noconfirm --needed qmltermwidget
 install -m 755 "$P/session/powos-android-app" /usr/local/bin/powos-android-app
+# Andromarchy's NetworkManager stand-in with the ObjectManager libnm reads (Steam's login waited 10-20 s without it).
+install -m 755 "$P/session/android-nm" /usr/local/bin/android-nm
 install -m 755 "$P/session/powos-android-tasks" /usr/local/bin/powos-android-tasks
 install -m 755 "$P/session/powos-apps-export" /usr/local/bin/powos-apps-export
+install -m 755 "$P/session/powos-apps-watch" /usr/local/bin/powos-apps-watch
+install -Dm 644 "$P/session/powos-apps-watch.desktop" /etc/xdg/autostart/powos-apps-watch.desktop
+install -m 755 "$P/session/powos-plasma-bridge" /usr/local/bin/powos-plasma-bridge
+install -Dm 644 "$P/session/powos-plasma-bridge.desktop" /etc/xdg/autostart/powos-plasma-bridge.desktop
+install -Dm 644 "$P/session/plasma/org.powos.plasma.desktop" /usr/share/applications/org.powos.plasma.desktop
 install -m 755 "$P/session/powos-open-task" /usr/local/bin/powos-open-task
 # The app's touch controls as a gamepad (started by powos-rooted-session).
 install -m 755 "$P/session/powos-padd" /usr/bin/powos-padd
 install -m 755 "$P/session/powos-focus-watch" /usr/bin/powos-focus-watch
+# Android's keyboard for X11 apps' text fields (unit x11-ime-bridge; after the image's content, whose ibus.desktop and
+# plasma-workspace env/ibus.sh these replace).
+install -m 755 "$P/session/powos-ime-bridge" /usr/bin/powos-ime-bridge
+install -Dm 644 "$P/session/powos-ime-bridge.desktop" /etc/xdg/autostart/ibus.desktop
+install -Dm 644 "$P/session/plasma/powos-ime.sh" /etc/xdg/plasma-workspace/env/ibus.sh
+install -Dm 644 "$P/session/plasma/powos-ime.sh" /etc/profile.d/60-powos-ime.sh
 install -Dm 644 "$P/session/powos-android-tasks.desktop" /etc/xdg/autostart/powos-android-tasks.desktop
 # The desktop over Android's wallpaper (the app's surface is translucent): a transparent wallpaper, made the desktop's
 # once per user by a Plasma update script.
@@ -159,6 +185,7 @@ install -Dm 644 "$P/session/plasma/menus/powos-android.menu" /etc/xdg/menus/appl
 install -Dm 644 "$P/session/plasma/menus/powos-android.directory" /usr/share/desktop-directories/powos-android.directory
 # Window edges a finger can grab (see the file).
 install -Dm 644 "$P/session/plasma/breezerc" /etc/xdg/breezerc
+install -Dm 755 "$P/session/powos-devtest-agent" /usr/lib/powos/phone/powos-devtest-agent
 # first-boot.sh goes to /opt/lotfix/ in build-inside.sh's own install step (patched to take ours).
 # HACK: Omarchy command names the engine calls; see each file. omarchy-dns is Andromarchy's own
 # Android version (resolv.conf from Android's network), unchanged.

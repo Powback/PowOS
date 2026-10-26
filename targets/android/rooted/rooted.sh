@@ -12,10 +12,53 @@
 #   system [status|stop|off|on]   PowOS's system tier (SpacetimeDB under the supervisor, the uid-locked port)
 #   wifi      adb over Wi-Fi (port 5555, kept across reboots): unplug the cable
 #   widevine-l3 [remove]   Netflix etc. in SD on the unlocked phone (targets/native/widevine-l3.sh)
+#   sandbox-bundle  build only the manager sandbox's tarball deploy pushes (deps from its lock; no phone)
+#   module <zip>  stage the PowOS system module (system-module/build-module.sh's zip) in Magisk: on at the next reboot
+# install, deploy and module take --note "what changed, for the user" (required): the phone's quiet "update applied"
+# notification (tools/deploy-note.sh) - or --silent for a change the user can't see (only comms' quiet log).
 # Everything lives in /data/powos (+ /data/adb/service.d/powos.sh). Removing PowOS = deleting those.
+# powos-units: deploy - what this installs on the phone is checked against units/ (test/tier1/test-units-registry.py)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+NOTE="" SILENT="" ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in --silent) SILENT=1; shift ;; --note) NOTE=${2:-}; shift 2 || shift ;; --note=*) NOTE=${1#--note=}; shift ;; *) ARGS+=("$1"); shift ;; esac
+done
+set -- ${ARGS[@]+"${ARGS[@]}"}
+case "${1:-}" in
+  install|deploy|module)
+    [ -n "${NOTE// }" ] || [ -n "$SILENT" ] || { echo "rooted.sh: --note \"what changed, for the user\" is required (the phone's update notification)" >&2; exit 2; } ;;
+esac
+# After a deploy: the phone's "update applied" notification (batched: install's own deploy makes the same one).
+noted() { ADB=adb "$HERE/../tools/deploy-note.sh" ${SILENT:+--silent} "${NOTE:-rooted deploy}"; }
 ROOTFS=${ROOTFS:-$HERE/../out/powos-rootfs.tar.gz}
+
+# The sandbox's tarball for the phone (deploy, below): lib/ai/sandbox without its local node_modules, plus the deps
+# from its lock, built once per lock hash under ~/.cache/powos-sandbox (under $HOME: tools/phone/bin/adb pushes only
+# from there). Prints the tarball's path; fails (nothing printed) when the deps don't build.
+sandbox_bundle() {
+  local src="$HERE/../../../lib/ai/sandbox" c="$HOME/.cache/powos-sandbox" h dep st
+  h=$(shasum -a 256 < "$src/package-lock.json" | cut -c1-16)
+  dep=$c/deps-$h
+  if [ ! -f "$dep/node_modules/.powos-lock" ]; then
+    rm -rf "$dep" "$dep.tmp" && mkdir -p "$dep.tmp"
+    cp "$src/sandbox.sh" "$src/package.json" "$src/package-lock.json" "$dep.tmp/"
+    bash "$dep.tmp/sandbox.sh" setup >&2 || { rm -rf "$dep.tmp"; return 1; }
+    mv "$dep.tmp" "$dep"
+  fi
+  st=$c/stage
+  rm -rf "$st" && mkdir -p "$st/sandbox"
+  (cd "$src" && find . -name node_modules -prune -o -type f -print | sed 's|^\./||' \
+    | COPYFILE_DISABLE=1 tar -cf - --no-xattrs -T -) | tar -xf - -C "$st/sandbox" || return 1
+  cp -R "$dep/node_modules" "$st/sandbox/node_modules" || return 1
+  COPYFILE_DISABLE=1 tar -czf "$c/powos-sandbox.tar.gz" --no-xattrs --uid 0 --gid 0 -C "$st" sandbox || return 1
+  rm -rf "$st"
+  echo "$c/powos-sandbox.tar.gz"
+}
+if [ "${1:-}" = sandbox-bundle ]; then
+  # Build the sandbox's tarball only (what deploy pushes; no phone needed): a dry run of that part of the deploy.
+  t=$(sandbox_bundle) && echo "$t ($(du -h "$t" | cut -f1), $(tar -tzf "$t" | grep -c .) entries)"; exit $?
+fi
 
 # Magisk's su: on PATH once Magisk finished its setup, always at /debug_ramdisk/su while it runs.
 SU=$(adb shell 'command -v su || echo /debug_ramdisk/su' | tr -d '\r')
@@ -31,17 +74,35 @@ install)
   got=$(asu "sha256sum /data/local/tmp/powos-rootfs.tar.gz" | awk '{print $1}')
   [ "$want" = "$got" ] || { echo "CHECKSUM MISMATCH after push"; exit 1; }
   asu "mkdir -p /data/powos/root && tar -xzpf /data/local/tmp/powos-rootfs.tar.gz -C /data/powos/root --numeric-owner && rm /data/local/tmp/powos-rootfs.tar.gz"
-  "$0" deploy
+  "$0" deploy ${SILENT:+--silent} --note "$NOTE"
   echo "installed: /data/powos/root ($(asu 'du -sh /data/powos/root' | awk '{print $1}')), boot service in /data/adb/service.d" ;;
 deploy)
+  # A phone check holds the verify lock (~/.cache/powos-verify.lock): a deploy can restart the session under it and
+  # void the check (04:27:52: td-launch's launch was lost, friction f19). Wait up to 10 min for a lock fresher than
+  # 10 min, as ship-apk does; DEPLOY_NOW=1 skips the wait (an urgent fix).
+  vl="$HOME/.cache/powos-verify.lock"
+  if [ -z "${DEPLOY_NOW:-}" ]; then
+    for _ in $(seq 40); do
+      [ -d "$vl" ] && [ $(( $(date +%s) - $(stat -f %m "$vl" 2>/dev/null || stat -c %Y "$vl") )) -lt 600 ] || break
+      echo "rooted.sh deploy: waiting for the phone check ($(cat "$vl/who" 2>/dev/null)) to finish"; sleep 15
+    done
+  fi
+  # One deploy at a time: two at once raced on /data/local/tmp ("install: bad .../powos-open-task", 05:36, friction f20).
+  dl="$HOME/.cache/powos-deploy.lock"
+  for _ in $(seq 60); do mkdir "$dl" 2>/dev/null && break
+    [ $(( $(date +%s) - $(stat -f %m "$dl" 2>/dev/null || stat -c %Y "$dl") )) -gt 600 ] && { rm -rf "$dl"; continue; }
+    echo "rooted.sh deploy: another deploy is running - waiting"; sleep 5; done
+  trap 'rm -rf "$dl"' EXIT
   # The rooted-mode scripts (also part of install): the boot/mount script, the desktop session the PowOS app starts
   # (powos-session.sh -> /usr/bin/powos-rooted-session inside PowOS), and the flag the app checks
   # (persist.powos.root=1, set with Magisk's resetprop - readable without a root prompt).
-  for f in powos-start.sh powos-session.sh powos-run.sh powos-rooted-session powos-deploy.sh; do
+  for f in powos-start.sh powos-session.sh powos-run.sh powos-rooted-session powos-deploy.sh powos-appdata.sh \
+    powos-idle-sysupdate.sh powos-units.sh powos-vpn-keep.sh; do
     adb push -q "$HERE/$f" "/data/local/tmp/$f"
   done
   for f in powos-android-app powos-android-tasks powos-android-tasks.desktop powos-padd powos-focus-watch powos-apps-export \
-    powos-open-task; do
+    powos-apps-watch powos-apps-watch.desktop powos-plasma-bridge powos-plasma-bridge.desktop powos-open-task powos-ime-bridge powos-ime-bridge.desktop \
+    powos-output-scale android-nm; do
     adb push -q "$HERE/../session/$f" "/data/local/tmp/$f"
   done
   # PowOS's own scripts the phone's features rely on (shipped in the PowOS image - a rootfs from an older image
@@ -55,6 +116,23 @@ deploy)
   adb shell rm -rf /data/local/tmp/powos-agents
   adb push -q "$HERE/../../../lib/ai/agents" /data/local/tmp/powos-agents
   adb push -q "$HERE/../../../lib/ai/comms/comms-mcp.py" /data/local/tmp/comms-mcp.py
+  # App API's runtime (tools/app-api, unit app-api): the specs' tools + appcap_serve.py, the App API app's local service.
+  adb shell rm -rf /data/local/tmp/powos-app-api && adb shell mkdir -p /data/local/tmp/powos-app-api/examples /data/local/tmp/powos-app-api/sample
+  adb push -q "$HERE"/../../../tools/app-api/*.py /data/local/tmp/powos-app-api/
+  adb push -q "$HERE"/../../../tools/app-api/examples/*.appcap.json /data/local/tmp/powos-app-api/examples/
+  # "+ add app"'s import sample (appcap_add.py, POST /draft/import {sample}).
+  adb push -q "$HERE"/../../../tools/app-api/sample/*.openapi.json /data/local/tmp/powos-app-api/sample/
+  # The manager (lib/ai/manager: PowOS AI's chat runs a turn of it per message, so a new one takes the next turn).
+  adb shell rm -rf /data/local/tmp/powos-manager
+  adb push -q "$HERE/../../../lib/ai/manager" /data/local/tmp/powos-manager
+  # The manager's TypeScript sandbox (lib/ai/sandbox, unit ai-sandbox): its sources plus its deps, which stay inside
+  # the app (never on the phone's host). The deps are built HERE from its lock (package-lock.json: quickjs-emscripten +
+  # typescript, JavaScript and WebAssembly only - the same files on arm64; no install scripts) by the sandbox's own
+  # `setup` (npm ci --ignore-scripts, stamped with the lock's hash), once per lock into ~/.cache/powos-sandbox/<hash>,
+  # and go over as one tarball (thousands of small files). The phone has no npm; PowOS's bun runs it.
+  adb shell rm -f /data/local/tmp/powos-sandbox.tar.gz
+  if sbx_tgz=$(sandbox_bundle); then adb push -q "$sbx_tgz" /data/local/tmp/powos-sandbox.tar.gz
+  else echo "rooted.sh: the sandbox's deps didn't build (above) - the sandbox not updated"; fi
   adb push -q "$HERE/../pkgs/fex-emu/Config.json" /data/local/tmp/fex-Config.json
   adb push -q "$HERE/../pkgs/fex-emu/thunks.json" /data/local/tmp/fex-thunks.json
   adb shell rm -rf /data/local/tmp/powos-plasma
@@ -69,13 +147,41 @@ deploy)
   adb push -q "$HERE/../../../lib/apps" /data/local/tmp/powos-apps
   adb push -q "$HERE/../../../bin/powos" /data/local/tmp/powos-apps/powos
   adb push -q "$HERE/../../../lib/config.sh" /data/local/tmp/powos-apps/config.sh
-  stdb=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" spacetimedb-bin)
+  # The patched source build (pkgs/spacetimedb) when there is one, else the official binaries (pkgs/spacetimedb-bin).
+  stdb=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" spacetimedb)
+  [ -n "$stdb" ] || stdb=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" spacetimedb-bin)
   if [ -n "$stdb" ]; then adb push -q "$stdb" "/data/local/tmp/powos-apps/${stdb##*/}"
-  else echo "rooted.sh: no spacetimedb-bin package (targets/android/build-pkgs.sh spacetimedb-bin) - SpacetimeDB not updated"; fi
+  else echo "rooted.sh: no spacetimedb package (targets/android/build-pkgs.sh spacetimedb) - SpacetimeDB not updated"; fi
+  # The desktop's Xwayland (pkgs/xwayland-kgsl: Xwayland on KGSL + our fixes): build-pkgs.sh xwayland-kgsl.
+  xwl=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" xwayland-kgsl)
+  if [ -n "$xwl" ]; then adb push -q "$xwl" "/data/local/tmp/powos-apps/${xwl##*/}"
+  else echo "rooted.sh: no xwayland-kgsl package (targets/android/build-pkgs.sh xwayland-kgsl) - Xwayland not updated"; fi
+  # KWin with the Anland backend (pkgs/kwin; build-pkgs.sh kwin builds it on PowOS's rootfs).
+  kw=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" kwin)
+  if [ -n "$kw" ]; then adb push -q "$kw" "/data/local/tmp/powos-apps/${kw##*/}"
+  else echo "rooted.sh: no kwin package (targets/android/build-pkgs.sh kwin) - KWin not updated"; fi
+  # The module every composed widget runs (apps/composed; apps/build.sh composed): its source, wasm, stamp, bindings.
+  cmp=$HERE/../../../apps/composed
+  adb shell mkdir -p /data/local/tmp/powos-apps/composed
+  adb push -q "$cmp/module" /data/local/tmp/powos-apps/composed/module
+  if [ -f "$cmp/out/module.wasm" ]; then
+    for f in module.wasm .module.sha bindings; do adb push -q "$cmp/out/$f" /data/local/tmp/powos-apps/composed/; done
+  else echo "rooted.sh: no apps/composed/out/module.wasm (apps/build.sh composed) - compositions build their module"; fi
   reg=$HERE/../../../apps/registry/out/module.wasm
   if [ -f "$reg" ]; then adb push -q "$reg" /data/local/tmp/powos-apps/registry.wasm
   else echo "rooted.sh: no apps/registry/out/module.wasm (apps/build.sh registry) - the registry not updated"; fi
-  asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh" ;;
+  # The units: what this deploy installs and runs, with owner, purpose, limits and how to remove it (units/phone,
+  # units/phone-android; lib/apps/powos-units). powos-deploy.sh registers them on both sides.
+  adb shell rm -rf /data/local/tmp/powos-units
+  adb push -q "$HERE/../../../units" /data/local/tmp/powos-units
+  asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh"
+  noted ;;
+module)
+  # The system module (system-module/build-module.sh): staged in Magisk, on from the next reboot.
+  [ -f "${2:-}" ] || { echo "usage: rooted.sh module <powos-system-module.zip> --note \"...\""; exit 1; }
+  adb push -q "$2" /data/local/tmp/powos-system-module.zip
+  asu "magisk --install-module /data/local/tmp/powos-system-module.zip; rm -f /data/local/tmp/powos-system-module.zip"
+  NOTE="$NOTE (after a restart)" noted ;;
 start)
   asu "sh /data/powos/powos-start.sh"; asu "tail -5 /data/powos/start.log" ;;
 shell)
@@ -122,5 +228,5 @@ widevine-l3)
     echo "Widevine L3 forced (now and at every boot)"
   fi ;;
 *)
-  sed -n '2,15p' "$0"; exit 1 ;;
+  sed -n '2,19p' "$0"; exit 1 ;;
 esac

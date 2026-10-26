@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""powos sleep - what is asleep on this device, of every kind, and why; wake one; keep one awake.
+
+Unused things stop costing CPU and battery and wake in milliseconds when used (docs/UNIFIED-SLEEP.md):
+  app       native/sandbox app backends (powos-sleepd): frozen after their idle time (manifest "autosleep",
+            default 5m pause) with no connections and ~0% CPU; a connection to their port wakes them
+  container containers (powos containers autosleep): paused or stopped when idle; a connection or start wakes them
+  gui       Linux apps in the Plasma session (powos-sleep-gui): frozen 10 min after losing focus, unless playing
+            audio, moving data, running a terminal job or on the never list; focus or a D-Bus call wakes them
+  stdb      SpacetimeDB databases: shown with their clients (2.12 can't unload one database; the whole server
+            restarts when idle with nobody connected)
+  shell     the shell's app pages and widgets: paused by the shell while off screen
+
+Usage:
+  powos sleep status [--json] [--all]   everything asleep, and what is awake and why (--all: the awake too)
+  powos sleep wake <thing>              wake it now (an app id, container name, gui:<pid> or window class)
+  powos sleep never <thing>             never let it sleep (and wake it); `powos sleep never` lists the list
+  powos sleep never --remove <thing>    let it sleep again
+
+Manifest key (powos-app.json, containers' labels): "autosleep": {"idle": "5m", "mode": "pause|hibernate|stop"}
+or "never". Never sleeping, whatever they say: spacetimedb, comms, agentsd, and the session core (KWin,
+plasmashell, Xwayland, the buses, PipeWire, the PowOS shell host).
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+from importlib.machinery import SourceFileLoader
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+common = SourceFileLoader("powos_sleep_common", os.path.join(HERE, "powos-sleep-common")).load_module()
+ORDER = {"asleep": 0, "exempt": 1, "never": 2, "awake": 3}
+
+
+def gather():
+    items = {}
+    for p in common.providers():
+        got = p.get("items") or []
+        w = p.get("wake") or {}
+        if w.get("socket"):
+            try:
+                got = common.request(w["socket"], "status", timeout=3).get("items", got)
+            except OSError:
+                pass  # the file's copy, then
+        for i in got:
+            i.setdefault("provider", p.get("provider"))
+            i["_wake"] = w
+            old = items.get(i["id"])
+            if not old or ORDER.get(i.get("state"), 9) < ORDER.get(old.get("state"), 9):
+                items[i["id"]] = i
+    return list(items.values())
+
+
+def ago(t):
+    return common.fmt(max(0, time.time() - t)) if t else "-"
+
+
+def status(as_json, all_):
+    items = gather()
+    if as_json:
+        print(json.dumps([{k: v for k, v in i.items() if k != "_wake"} for i in items], indent=2))
+        return
+    if not items:
+        print("Nothing reports sleep here (powos-sleepd not running? /run/powos-sleep is empty).")
+        return
+    shown = [i for i in items if all_ or i.get("state") != "awake" or i.get("type") in ("stdb",)]
+    asleep = sum(1 for i in items if i.get("state") == "asleep")
+    print(f"{asleep} asleep, {len(items) - asleep} awake ({len(items) - len(shown)} awake not shown: --all)")
+    for i in sorted(shown, key=lambda i: (i.get("type", ""), ORDER.get(i.get("state"), 9), i.get("name", ""))):
+        extra = ""
+        if i.get("state") == "asleep":
+            extra = f" for {ago(i.get('since'))}"
+            if i.get("sleepMs") is not None:
+                extra += f", froze in {i['sleepMs']} ms"
+        print(f"  {i.get('type', '?'):9} {i.get('state', '?'):7} {i.get('name') or i['id']:28} {i.get('why', '')}{extra}"
+              + (f"  [{i['rule']}]" if i.get("rule") and i.get("rule") != "-" else ""))
+
+
+def find(thing):
+    t = thing.lower()
+    for i in gather():
+        if t in (i["id"].lower(), str(i.get("name", "")).lower()) or i["id"].lower().endswith(":" + t):
+            return i
+    return None
+
+
+def wake(thing):
+    i = find(thing)
+    if not i:
+        sys.exit(f"powos sleep: nothing called {thing} (powos sleep status --all)")
+    if i.get("state") != "asleep":
+        print(f"{i.get('name') or i['id']}: already awake")
+        return
+    w = i["_wake"]
+    t = time.monotonic()
+    if w.get("socket"):
+        r = common.request(w["socket"], f"wake {i['id']}")
+        if r.get("error"):
+            sys.exit(f"powos sleep: {r['error']}")
+    elif w.get("exec"):
+        rc = subprocess.call([a.replace("{id}", i["id"]) for a in w["exec"]])
+        if rc:
+            sys.exit(rc)
+    else:
+        sys.exit(f"powos sleep: {i.get('provider')} has no way to wake things")
+    print(f"{i.get('name') or i['id']}: awake ({(time.monotonic() - t) * 1000:.1f} ms)")
+
+
+def never(args):
+    if not args:
+        print("never sleep:")
+        print("  words: " + ", ".join(common.NEVER))
+        print("  core:  " + ", ".join(sorted(common.CORE)))
+        print("  yours: " + (", ".join(sorted(common.user_never())) or "-"))
+        return
+    remove = args[0] in ("--remove", "-r", "off")
+    thing = args[-1]
+    try:
+        common.set_never(thing, not remove)
+    except OSError as e:
+        sys.exit(f"powos sleep: {common.USER_NEVER}: {e}")
+    if remove:
+        print(f"{thing}: may sleep again")
+        return
+    print(f"{thing}: never sleeps")
+    i = find(thing)
+    if i and i.get("state") == "asleep":
+        wake(thing)
+
+
+def main(a):
+    if not a or a[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return
+    if a[0] == "status":
+        status("--json" in a, "--all" in a)
+    elif a[0] == "wake" and len(a) == 2:
+        wake(a[1])
+    elif a[0] == "never":
+        never(a[1:])
+    else:
+        sys.exit("usage: powos sleep status [--json] [--all] | wake <thing> | never [--remove] [<thing>]")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

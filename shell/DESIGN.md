@@ -4,6 +4,8 @@ One UI for the phone's launcher (Omalauncher) and, later, PowOS's desktop shell 
 plain files that change at runtime: edit a file — by hand or by an agent — and the shell reloads it in place. No
 APK, no package, no build.
 
+How it looks - the one material, contrast, motion, what a change may add - is [docs/DESIGN-LANGUAGE.md](../docs/DESIGN-LANGUAGE.md).
+
 ## Why
 
 The Compose launcher is ~27k lines of Kotlin; every change is a Gradle build and an APK install. The goal is a fully
@@ -50,7 +52,7 @@ Native code shrinks to a small, stable API (async calls + events), the same shap
 | usage | `usage.recent(n)`, `usage.record(key)` | |
 | store | `store.get(name)`, `store.set(name, json)` — the shell's own data files | |
 | keyboard | `keyboard.show()`, `keyboard.hide()` | `keyboard.inset` (px, per frame) |
-| system | `system.insets()`, `system.wallpaper()`, `system.openSettings(what)` | `system.insets` |
+| system | `system.insets()`, `system.glass()` (the wallpaper as a picture, for the glass), `system.openSettings(what)` | `system.insets`, `system.glass` |
 | terminal | `term.open(id, owner, cmd, cols, rows, restart?)` → state + recent output; `term.write(id, b64)`, `term.resize(id, cols, rows)`, `term.close(id)`, `term.style(points)` | `term.data`, `term.exit`, `term.style` |
 | clipboard | `clipboard.read()`, `clipboard.write(text)` | |
 | windows | `windows.embed(id, rect)` — a native Linux window placed over the page at a rect the page reports | |
@@ -77,6 +79,23 @@ published widget are unchanged.
 
 This is the one compiled piece, and it's the engine, not the UI: users and agents edit widgets (OWL) and the shell
 (JS/CSS), never the interpreter.
+
+## Glass
+
+Home's surfaces (tiles, the foot, the drawer, the notification panel) are frosted glass over the wallpaper. Android
+draws the wallpaper behind the window, so CSS `backdrop-filter` over the transparent page has nothing to blur - and a
+live backdrop blur per tile is a render pass each, every frame. Instead the host hands over the wallpaper as a picture
+(`system.glass`, ShellWallpaper.kt: our theme's background, a still wallpaper, or - rooted - OxygenOS's screenshot of a
+live one), `ui/glass.ts` blurs it once (half size, canvas filter) and every surface draws that one frosted picture at
+its own place on the screen under the theme's tint (theme.css `--glass-*`); positions are placed again only once
+things stop moving (a per-frame placement cost a second style pass per frame of the drawer's swipe). Measured: headless,
+4x CPU throttle, page swipes + drawer: plain fills 21.3 ms mean / 37.6 ms p95, glass 19.2 / 33.4, live
+`backdrop-filter` per tile 31.8 / 50.0. On the phone (OnePlus Open, 60 Hz, scripted over CDP): page swipes 0-2 late
+frames of 165 either way; the drawer 2-5 late of 46 with glass, 2-4 plain; live backdrop blur doubled the late frames.
+Every page shares the tokens. Over the wallpaper in the page (home, the drawer, PowOS AI's page - a darker tint for
+its text - the lock face, islands): the frosted copy. Windows over apps: the shade's and the switcher's are blurred
+behind by the host (WindowBlur), their pages only tint; the assistant's is tinted only, darker (the app under it is
+what it circles on - blurring it would hide it).
 
 ## Hot reload
 

@@ -3,7 +3,7 @@ widget "today" {
   order: 1
   size: 3x3
   minSize: 3x2
-  meta { description: "The date and the weather where you are, by IP or a city you type. Tap it for the next 24 hours, three days, wind, UV, sun and moon"; version: "1.2"; license: "MIT"; category: "world"; owl: 5 }
+  meta { description: "The date and the weather where you are, by IP or a city you type. Tap it for the next 24 hours, three days, wind, UV, sun and moon"; version: "1.4"; license: "MIT"; category: "world"; owl: 5 }
 
   source now = clock every 1m
   state city = "" persist
@@ -52,8 +52,6 @@ widget "today" {
       gap: 10
       align: center
       padding: [10, 8]
-      border: 1
-      borderColor: alpha(muted, 0.3)
       Text { text: glyph; font: icon; fontSize: 22; color: tint; width: 28; align: center }
       Column {
         gap: 0
@@ -64,35 +62,89 @@ widget "today" {
     }
   }
 
-  // The tile, kept quiet: the day and place on one line, now large, the next hours as a light strip when it's tall
-  // enough. Everything else (wind, UV, the days ahead, sun and moon) is a tap away, in the screen.
+  // The tile: the day and place on one line, now large, then the wind and rain, then the next hours as a light strip.
+  // Everything scales to the tile instead of floating in it: the temperature's size follows the tile's height, the
+  // hours strip takes as many 3-hour steps as fit across, and each line shows only when there's room for it, the
+  // spacers between them sharing what's left. The rest (UV, the days ahead, sun and moon) is a tap away, in the screen.
   // Narrow (a 3-column tile is about 170dp): now stacked - the temperature, then one line of sky, range and place.
   // Wider: the sky and the range beside the temperature, the place in the top line.
-  let narrow = tileWidth != null && tileWidth < 260
-  let hours = narrow ? 3 : cols != null && cols >= 5 ? 6 : 4
+  let iw = tileWidth == null ? 154 : tileWidth - 24
+  let ih = tileHeight == null ? 160 : tileHeight - 24
+  let narrow = iw < 236
+  // Every size follows the tile: the temperature about 30% of its height, the small lines and the hours strip in step
+  // with it (a big tile is a big forecast, not a small one in a lot of glass).
+  // Without the hours strip (under 3 rows, unless wide) the temperature takes more of the height; on a wide tile its width
+  // bounds it too.
+  let hoursRoom = rows == null || rows >= 3 || iw >= 440
+  // A wide tile (the inner screen's 4 columns) has the next three days beside now - the width used for more forecast,
+  // not more glass; their text sized to their column (~11.5 of it across).
+  let days3 = !narrow && iw >= 440 && ih < 420
+  // The temperature never truncates: its size leaves room for the widest it shows ("-13°", 4 characters at ~0.62 em on
+  // the phone's font) beside its icon (~0.95 big) and, narrow, the high and low (4 characters at 1.2 fs); wide, ~90 dp
+  // left beside it for the sky and "-8° / -13°" (140 for the days) - "13°" was cut to "1…" on a 3x3 when the width
+  // it got was only what the icon and the range left.
+  let fs0 = clamp(round(ih * 0.055), 11, 24)
+  // Without the days beside it, now is stacked on any tile: the icon, the temperature and the high and low on a line,
+  // the sky under it - a sky beside the temperature left it, or the sky, too little room for "-13°".
+  let stacked = narrow || !days3
+  let tempRoom = stacked ? (iw - 16 - 4 * 0.62 * round(fs0 * 1.2)) / (0.95 + 4 * 0.62) : (iw - 20 - 140) / (1 + 4.4 * 0.62)
+  let big = clamp(floor(min(ih * (hoursRoom ? 0.3 : 0.46), iw * (stacked ? 0.3 : 0.2), tempRoom)), 18, 150)
+  // The days take what the temperature leaves (the sky's words go to the line under it), their text as big as both
+  // that width (~11.5 of it across) and three lines beside the temperature allow.
+  // The temperature as wide as what it shows (its size already leaves room for "-13°"), the side or the days the rest.
+  let tempText = "${get(cur, "temp_" + unit)}°"
+  let tempW = ceil((len(tempText) + 0.4) * 0.62 * big)
+  // What the row leaves the days: the icon (big), the temperature (tempW), a 10 dp spacer and two 10 dp gaps.
+  let daysW = days3 ? iw - big - tempW - 40 : 0
+  let fs = clamp(round(ih * 0.055), 11, 24)
+  // A day's row: its name, an icon and two temperatures as wide as "-13°" (~17 characters across).
+  // A day's row ~12.5 em: its name, the icon (1.7), two temperatures as wide as "-13°" (2.8 each) and the gaps.
+  let dfs = clamp(min(floor(daysW / 12.5), floor(big * 0.36)), 8, 30)
+  let hw = round(fs * 3.3)
+  // Beside the temperature on a wide tile: what its icon (~big) and its digits (~1.9 big) leave.
+  // The row's two 10 dp gaps counted (a side reckoned 40 wide was 14).
+  let sideW = max(iw - big - tempW - 20, 30)
+  let hours = clamp(floor(iw / (hw + 10)), 3, 8)
+  // Lines are added by priority only while they fit the tile's real height (never half-clipped): the top line and now
+  // (the top line + the temperature's line + one small line) always, then the place/wind-and-rain line, then the hours.
+  let base = fs * 1.5 + big * 1.25 + fs * 1.5
+  let detailed = ih >= base + fs * 1.6
+  let hourly = hoursRoom && ih >= base + (detailed ? fs * 1.6 : 0) + fs * 4.6
+  // A tall tile not wide enough for the days beside now: the days under the hours, when there's room for three lines.
+  let daysBelow = !days3 && hourly && ih >= base + fs * 1.6 + fs * 4.6 + fs * 6.5
+  let rainToday = max((day.hourly ?? []).map(h => num(h.chanceofrain)))
+  let wind = imperial ? "${cur.windspeedMiles} mph" : "${cur.windspeedKmph} km/h"
   Column {
     gap: 0
+    weight: 1
     Row {
       gap: 6
       align: center
-      Text { text: lower(fmtTime(now, "EEEE")); style: label; color: accent; maxLines: 1 }
-      Text { text: lower(fmtTime(now, "d MMM")); style: label; color: muted; maxLines: 1; weight: 1 }
+      Text { text: lower(fmtTime(now, "EEEE")); fontSize: fs; color: accent; maxLines: 1 }
+      Text { text: lower(fmtTime(now, "d MMM")); fontSize: fs; color: muted; maxLines: 1; weight: 1 }
       if area != null && !narrow {
-        Text { text: lower(area.areaName[0].value); style: label; color: muted; maxLines: 1; align: end }
+        Text { text: lower(area.areaName[0].value); fontSize: fs; color: muted; maxLines: 1; align: end }
       }
     }
     Spacer { weight: 1 }
     if cur != null {
-      if narrow {
+      if stacked {
+        // Now, and today's high and low at its right; the sky in words under it.
         Row {
           gap: 8
           align: center
-          Text { text: weatherIcon(cur.weatherCode, night); font: icon; fontSize: 30; color: sky; width: 34; align: center }
-          Text { text: "${get(cur, "temp_" + unit)}°"; fontSize: 36; maxLines: 1; weight: 1 }
+          Text { text: weatherIcon(cur.weatherCode, night); font: icon; fontSize: round(big * 0.85); color: sky; width: round(big * 0.95); align: center }
+          Text { text: tempText; fontSize: big; maxLines: 1; weight: 1 }
+          Column {
+            gap: 0
+            Text { text: "${get(day, "maxtemp" + unit)}°"; fontSize: round(fs * 1.2); align: end; maxLines: 1 }
+            Text { text: "${get(day, "mintemp" + unit)}°"; fontSize: round(fs * 1.2); color: muted; align: end; maxLines: 1 }
+          }
         }
         Text {
-          text: "${lower(trim(cur.weatherDesc[0].value))} · ${get(day, "maxtemp" + unit)}°/${get(day, "mintemp" + unit)}°${area != null ? " · " + lower(area.areaName[0].value) : ""}"
-          style: small
+          text: lower(trim(cur.weatherDesc[0].value))
+          // As big as the line allows: never an ellipsis.
+          fontSize: clamp(min(fs, floor(iw / (len(trim(cur.weatherDesc[0].value)) * 0.62))), 9, 24)
           color: muted
           maxLines: 1
         }
@@ -100,30 +152,89 @@ widget "today" {
         Row {
           gap: 10
           align: center
-          Text { text: weatherIcon(cur.weatherCode, night); font: icon; fontSize: 40; color: sky; width: 44; align: center }
-          Text { text: "${get(cur, "temp_" + unit)}°"; fontSize: 44; maxLines: 1 }
+          Text { text: weatherIcon(cur.weatherCode, night); font: icon; fontSize: round(big * 0.9); color: sky; width: round(big); align: center }
+          Text { text: tempText; fontSize: big; maxLines: 1; width: tempW }
+          if days3 {
+            Spacer { width: 10 }
+          } else {
           Column {
             gap: 2
             weight: 1
-            Text { text: lower(trim(cur.weatherDesc[0].value)); style: small; align: end; maxLines: 1 }
-            Text { text: "${get(day, "maxtemp" + unit)}° / ${get(day, "mintemp" + unit)}°"; style: small; color: muted; align: end; maxLines: 1 }
+            // The room beside the temperature: the sky on up to two lines, the range under it.
+            // In its two lines whatever its length (~1.8 lines' worth of characters, words wrap).
+            Text { text: lower(trim(cur.weatherDesc[0].value)); fontSize: clamp(min(round(fs * 1.15), floor(sideW / 7), floor(sideW / (max(ceil(len(trim(cur.weatherDesc[0].value)) / 2) + 5, max(words(cur.weatherDesc[0].value).map(x => len(x)))) * 0.62))), 7, 28); align: end; maxLines: 2 }
+            Text { text: "${get(day, "maxtemp" + unit)}° / ${get(day, "mintemp" + unit)}°"; fontSize: clamp(min(round(fs * 1.15), floor(sideW / 7), floor(sideW / (len("${get(day, "maxtemp" + unit)}° / ${get(day, "mintemp" + unit)}°") * 0.62))), 7, 28); color: muted; align: end; maxLines: 1 }
+          }
+          }
+          if days3 {
+            Column {
+              gap: round(dfs * 0.35)
+              weight: 1
+              for d, i in wx.weather key d.date {
+                Row {
+                  gap: round(dfs * 0.4)
+                  align: center
+                  Text { text: i == 0 ? "today" : lower(fmtTime(now + 86400 * i, "EEE")); fontSize: dfs; maxLines: 1; weight: 1 }
+                  Text { text: weatherIcon(d.hourly[4].weatherCode, false); font: icon; fontSize: round(dfs * 1.3); width: round(dfs * 1.7); align: center; color: muted }
+                  Text { text: "${get(d, "mintemp" + unit)}°"; fontSize: dfs; color: muted; width: round(dfs * 2.8); align: end; maxLines: 1 }
+                  Text { text: "${get(d, "maxtemp" + unit)}°"; fontSize: dfs; width: round(dfs * 2.8); align: end; maxLines: 1 }
+                }
+              }
+            }
           }
         }
       }
-      Spacer { weight: 1 }
-      if rows == null || rows >= 3 {
-        // Fixed-width hours spread over the row: shared by weight, the first one came out squeezed ("n…").
+      if detailed {
+        Spacer { weight: 1 }
+        // Today's rain chance (what decides an umbrella) on one line with the place when narrow (it has no room in the
+        // top line there), with the wind when wide (the place is in the top line).
+        Row {
+          gap: 6
+          align: center
+          if narrow {
+            Text { text: area != null ? lower(area.areaName[0].value) : ""; fontSize: fs; color: muted; maxLines: 1; weight: 1 }
+          } else if days3 {
+            // As big as the line beside "rain 100%" allows: never an ellipsis.
+            Text { text: "${lower(trim(cur.weatherDesc[0].value))} · wind ${wind}"; fontSize: clamp(min(fs, floor((iw - 10 * 0.62 * fs - 12) / (len("${trim(cur.weatherDesc[0].value)} · wind ${wind}") * 0.62))), 8, 24); color: cyan; maxLines: 1; weight: 1 }
+          } else {
+            Text { text: "wind ${wind}"; fontSize: fs; color: cyan; maxLines: 1; weight: 1 }
+          }
+          Text { text: "rain ${rainToday}%"; fontSize: fs; color: rainToday >= 30 ? blue : muted; maxLines: 1 }
+        }
+      }
+      if hourly {
+        Spacer { weight: 1 }
+        // Fixed-width hours spread over the row (fill: across the whole tile, not only as wide as the hours): shared by
+        // weight, the first one came out squeezed ("n…").
         Row {
           gap: 0
+          fill: width
           justify: spaceBetween
           for s in steps.take(hours) key s.hr {
             Column {
-              gap: 2
-              width: 40
+              gap: round(fs * 0.2)
+              width: hw
               align: center
-              Text { text: s.hr == hourNow - hourNow % 3 ? "now" : pad(s.hr % 24, 2, "0"); style: label; color: muted; align: center }
-              Text { text: weatherIcon(s.code, s.hr % 24 < sunHours[0] || s.hr % 24 >= sunHours[1]); font: icon; fontSize: 16; align: center; color: muted }
-              Text { text: "${s.t}°"; style: small; align: center; maxLines: 1 }
+              Text { text: s.hr == hourNow - hourNow % 3 ? "now" : pad(s.hr % 24, 2, "0"); fontSize: fs; color: muted; align: center }
+              Text { text: weatherIcon(s.code, s.hr % 24 < sunHours[0] || s.hr % 24 >= sunHours[1]); font: icon; fontSize: round(fs * 1.5); align: center; color: muted }
+              Text { text: "${s.t}°"; fontSize: round(fs * 1.15); align: center; maxLines: 1 }
+            }
+          }
+        }
+      }
+      if daysBelow {
+        Spacer { weight: 1 }
+        Column {
+          gap: round(fs * 0.45)
+          for d, i in wx.weather key d.date {
+            Row {
+              gap: round(fs * 0.6)
+              align: center
+              Text { text: i == 0 ? "today" : lower(fmtTime(now + 86400 * i, "EEE")); fontSize: round(fs * 1.1); maxLines: 1; weight: 1 }
+              Text { text: weatherIcon(d.hourly[4].weatherCode, false); font: icon; fontSize: round(fs * 1.4); width: round(fs * 1.9); align: center; color: muted }
+              Text { text: "${max(d.hourly.map(h => num(h.chanceofrain)))}%"; fontSize: fs; color: blue; width: round(fs * 3); align: end; maxLines: 1 }
+              Text { text: "${get(d, "mintemp" + unit)}°"; fontSize: round(fs * 1.1); color: muted; width: round(fs * 2.6); align: end; maxLines: 1 }
+              Text { text: "${get(d, "maxtemp" + unit)}°"; fontSize: round(fs * 1.1); width: round(fs * 2.6); align: end; maxLines: 1 }
             }
           }
         }
@@ -136,11 +247,6 @@ widget "today" {
 
   screen {
     title: "weather"
-    Input {
-      text: city
-      placeholder: "city · empty = auto"
-      onSubmit: { city = trim(value); refresh() }
-    }
     if cur == null {
       Text { text: wx == null ? "weather…" : "weather offline"; style: body; color: muted }
     } else {
@@ -255,6 +361,13 @@ widget "today" {
           Button { text: "open yr.no ↗"; color: muted; onTap: url("https://www.yr.no/en/forecast/daily-table/${area.latitude},${area.longitude}") }
         }
       }
+    }
+    // The place: where you are (by IP) unless a city is typed here - last, out of the forecast's way, and there
+    // offline too (a wrong city is how it goes offline).
+    Input {
+      text: city
+      placeholder: "city"
+      onSubmit: { city = trim(value); refresh() }
     }
   }
 }

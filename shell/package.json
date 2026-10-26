@@ -4,13 +4,17 @@
   "description": "The PowOS launcher / desktop shell as a web UI. No build: these are only for type-checking (npm run check); the page loads the vendored copies (vendor/).",
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit -p ."
+    "check": "tsc --noEmit -p .",
+    "test:desktop": "node --test dev/desktop-host-test.mjs"
   },
   "devDependencies": {
     "@preact/signals": "1.3.4",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
+    "eslint": "^10.13.0",
+    "eslint-plugin-sonarjs": "^4.2.2",
     "preact": "10.29.8",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.72.0"
   }
 }

@@ -4,7 +4,6 @@
   z-index: 15;
   inset: 0;
   padding: var(--inset-top, 0px) var(--edge) max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px));
-  background: var(--color-background);
   display: flex;
   flex-direction: column;
   gap: var(--gap);
@@ -18,14 +17,16 @@
   height: 32px;
   padding: 0 10px;
   border-radius: 16px;
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   font-size: var(--text-small);
   color: var(--color-muted);
+  background: var(--soft-fill);
+  box-shadow: var(--lift);
 }
 .remote-target.picked { color: var(--color-foreground); border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 16%, transparent); }
 .remote-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-border); }
 .remote-dot.on { background: var(--color-accent); }
-.remote-dot.linked { background: var(--color-green, #76946a); }
+.remote-dot.linked { background: var(--color-green, var(--color-accent)); }
 
 .remote-status {
   display: flex;
@@ -43,9 +44,11 @@
   height: 28px;
   padding: 0 10px;
   border-radius: 14px;
-  border: 1px solid var(--color-border);
-  color: var(--color-accent);
+  border: 1px solid var(--line);
+  color: var(--accent-text);
   white-space: nowrap;
+  background: var(--soft-fill);
+  box-shadow: var(--lift);
 }
 .remote-chip { display: inline-flex; align-items: center; gap: 4px; color: var(--color-foreground); }
 
@@ -63,11 +66,12 @@
 .remote-button {
   flex: 1;
   border-radius: var(--radius);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   background: color-mix(in srgb, var(--color-background) var(--glass), transparent);
   font-size: var(--text-small);
   color: var(--color-muted);
   touch-action: none;
+  box-shadow: var(--lift);
 }
 .remote-button:active { background: color-mix(in srgb, var(--color-accent) 24%, transparent); color: var(--color-foreground); }
 
@@ -83,17 +87,18 @@
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line);
   background: var(--color-surface);
   font-size: var(--text-small);
+  box-shadow: var(--lift);
 }
 .remote-key:active { background: color-mix(in srgb, var(--color-accent) 30%, var(--color-surface)); }
 .remote-key.chip { height: 30px; border-radius: 15px; background: none; color: var(--color-muted); }
-.remote-key.latched { border-color: var(--color-accent); color: var(--color-accent); }
+.remote-key.latched { border-color: var(--color-accent); color: var(--accent-text); }
 .remote-key.locked { background: var(--color-accent); color: var(--color-background); border-color: var(--color-accent); }
 
 .remote-type { display: flex; align-items: center; gap: 6px; padding: 4px 6px; margin-bottom: 6px; }
-.remote-kbd { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; color: var(--color-accent); }
+.remote-kbd { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; color: var(--accent-text); }
 .remote-field {
   flex: 1;
   min-width: 0;
@@ -116,9 +121,10 @@
   max-width: 7.5em;
   height: 30px;
   border-radius: 15px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line);
   background: var(--color-surface);
   color: var(--color-muted);
   font: var(--text-small) var(--font);
   padding: 0 6px;
+  box-shadow: var(--lift);
 }

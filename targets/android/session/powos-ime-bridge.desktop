@@ -1,0 +1,10 @@
+[Desktop Entry]
+# PowOS: replaces the image's ibus.desktop (a Fedora panel path). IBus with powos-ime-bridge as its panel: X11 apps'
+# text fields show Android's keyboard (unit x11-ime-bridge).
+Name=IBus
+Comment=Android keyboard for X11 apps' text fields
+Type=Application
+OnlyShowIn=KDE
+NoDisplay=true
+Exec=sh -c 'exec /usr/bin/powos-ime-bridge >> "$XDG_RUNTIME_DIR/powos-ime-bridge.log" 2>&1'
+X-KDE-autostart-phase=1

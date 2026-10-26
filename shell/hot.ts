@@ -5,16 +5,41 @@
  * fast at this size, and always right.
  */
 import { powos } from "./bridge.ts";
+import { appChanged } from "./apps/pages.ts";
 
 powos.on("files.changed", ({ path }: { path: string }) => {
+  // A PowOS app's installed UI (`powos app ui`/`dev`): its page and widgets are imported again in place - the shell
+  // page isn't reloaded (apps/pages.ts).
+  if (path.startsWith("_app/")) {
+    const id = path.split("/")[1];
+    if (id) appChanged(id);
+    return;
+  }
+  // push.sh's commit marker (.pushing, there while a push's files are moved in): the files themselves reload the page.
+  if (path.startsWith(".")) return;
+  // The shell's dev and test files (dev/: the mock's data; test/: the gate-test page): no live page loads them.
+  if (path.startsWith("dev/") || path.startsWith("test/")) return;
   if (path.endsWith(".css")) {
-    for (const link of document.querySelectorAll<HTMLLinkElement>("link[rel=stylesheet][data-hot]")) {
-      const href = link.getAttribute("href")!.split("?")[0];
-      if (path.endsWith(href.replace(/^\.\//, ""))) link.href = `${href}?t=${Date.now()}`;
-    }
+    // Not on screen: a stylesheet swapped then never loaded its new sheet (the WebView doesn't load while hidden) and
+    // the page was left with none - home unstyled. Swapped once it shows instead.
+    if (document.hidden) pendingCss.add(path);
+    else swapCss(path);
     return;
   }
   reload();
+});
+
+const pendingCss = new Set<string>();
+function swapCss(path: string) {
+  for (const link of document.querySelectorAll<HTMLLinkElement>("link[rel=stylesheet][data-hot]")) {
+    const href = link.getAttribute("href")!.split("?")[0];
+    if (path.endsWith(href.replace(/^\.\//, ""))) link.href = `${href}?t=${Date.now()}`;
+  }
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  pendingCss.forEach(swapCss);
+  pendingCss.clear();
 });
 
 /**

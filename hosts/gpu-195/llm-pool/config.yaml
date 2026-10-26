@@ -1,0 +1,117 @@
+# gpu-195 general LLM pool: llama-swap (:9292 on the box, http://llm-gpu.pow via Traefik on .100) on GPU1.
+# Installed by hosts/gpu-195/install.sh to ~/.config/llm-pool/config.yaml (mounted read-only; -watch-config reloads
+# it). Plan and measurements: docs/GPU-SERVERS-PLAN.md. Unit: powos units show llm-pool.
+#
+# One OpenAI-compatible endpoint, model by name:
+#   general  Qwen3-14B-AWQ, 32k context, tool calls (hermes), thinking on (reasoning_content separate)
+#   general-nothink  the same loaded model with thinking off (no reload: a request parameter)
+#   vision   Qwen2.5-VL-7B-Instruct-AWQ, 16k context, up to 4 images per prompt
+#   embed    bge-m3 dense embeddings (1024-d, 8k tokens), /v1/embeddings
+#   ocr      PaddleOCR-VL-1.6 (0.9B) document OCR: one image + a task prompt ("OCR:", "Table Recognition:",
+#            "Formula Recognition:", "Chart Recognition:", "Spotting:", "Seal Recognition:"); used by PowScan
+#
+# GPU1 budget (24 GiB): stt-batch keeps ~2.4 GiB resident; embed ~2.4 GiB (0.10); ocr ~2.9 GiB (0.12); general or
+# vision ~16.8 GiB (0.70). The matrix lets embed or ocr sit beside either big model (never both: 2.4 + 2.4 + 2.9 +
+# 16.8 > 24), never general and vision together: asking for one swaps the other out (a cold start, ~1-2 min). Every model unloads after 10 idle minutes, so an idle GPU1 holds only stt-batch.
+# vLLM's --gpu-memory-utilization is this instance's share of the whole card and is checked against what's free at
+# start, so the shares must add up with stt-batch's: 2.4 + 2.9 + 16.8 = 22.1 of 24 GiB at most.
+#
+# GPU0 is the realtime voice path's (voice-llm and friends): nothing here may name it. The container only gets
+# nvidia.com/gpu=1, so CUDA device 0 inside is the host's GPU1.
+
+healthCheckTimeout: 600
+logLevel: info
+logToStdout: "proxy,upstream"
+startPort: 10001
+globalTTL: 600
+unloadTimeout: 30
+sendLoadingState: false
+# A burst beyond this gets 429 at once rather than piling up behind a 14B model on one card.
+globalConcurrencyLimit: 32
+
+macros:
+  # vLLM wants the model first (`vllm serve <model> --flags`), so each cmd is `vllm serve <model> ${serve} ...`.
+  serve: >-
+    --host 127.0.0.1 --port ${PORT}
+    --served-model-name ${MODEL_ID}
+    --disable-uvicorn-access-log
+
+models:
+  general:
+    name: "Qwen3-14B-AWQ"
+    description: "general pool model: agents, summaries, tool calls"
+    cmd: |
+      vllm serve Qwen/Qwen3-14B-AWQ ${serve}
+      --quantization awq_marlin
+      --max-model-len 32768
+      --max-num-seqs 32
+      --gpu-memory-utilization 0.70
+      --enable-auto-tool-choice --tool-call-parser hermes
+      --reasoning-parser qwen3
+    # general-nothink reaches vLLM as `general` (it serves one name); the alias only flips the template's thinking off.
+    useModelName: "general"
+    filters:
+      setParamsByID:
+        "general-nothink":
+          chat_template_kwargs:
+            enable_thinking: false
+    concurrencyLimit: 32
+    timeouts:
+      responseHeader: 0
+
+  vision:
+    name: "Qwen2.5-VL-7B-Instruct-AWQ"
+    description: "screenshots and images (PowOS AI's assistant)"
+    cmd: |
+      vllm serve Qwen/Qwen2.5-VL-7B-Instruct-AWQ ${serve}
+      --quantization awq_marlin
+      --max-model-len 16384
+      --max-num-seqs 8
+      --gpu-memory-utilization 0.70
+      --limit-mm-per-prompt '{"image":4,"video":0}'
+      --enable-auto-tool-choice --tool-call-parser hermes
+    concurrencyLimit: 8
+
+  embed:
+    name: "bge-m3"
+    description: "dense embeddings for recall/RAG (1024-d)"
+    cmd: |
+      vllm serve BAAI/bge-m3 ${serve}
+      --runner pooling
+      --max-model-len 8192
+      --max-num-seqs 64
+      --gpu-memory-utilization 0.10
+
+  ocr:
+    name: "PaddleOCR-VL-1.6"
+    description: "document OCR / table recognition (PowScan, ~/Projects/PowScan)"
+    # Options from the vLLM recipe (recipes.vllm.ai/PaddlePaddle/PaddleOCR-VL-1.6). One image per prompt; a page
+    # table can run to a few thousand tokens, so 16k context.
+    cmd: |
+      vllm serve PaddlePaddle/PaddleOCR-VL-1.6 ${serve}
+      --trust-remote-code
+      --max-model-len 16384
+      --max-num-batched-tokens 16384
+      --max-num-seqs 8
+      --no-enable-prefix-caching
+      --mm-processor-cache-gb 0
+      --limit-mm-per-prompt '{"image":1}'
+      --gpu-memory-utilization 0.12
+    concurrencyLimit: 8
+
+routing:
+  router:
+    use: matrix
+    settings:
+      matrix:
+        evict_costs:
+          general: 30
+          vision: 20
+          embed: 5
+          ocr: 5
+        sets:
+          text: "general & embed"
+          image: "vision & embed"
+          scan: "general & ocr"
+          scan-vision: "vision & ocr"
+          scan-embed: "ocr & embed"

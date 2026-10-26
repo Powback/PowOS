@@ -1,0 +1,312 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Open-Meteo (demo capture)",
+    "version": "0.0.0",
+    "description": "Inferred from captured traffic by har2openapi.py. Operations with x-powos-mutation require explicit user confirmation."
+  },
+  "servers": [
+    {
+      "url": "https://api.open-meteo.com"
+    },
+    {
+      "url": "https://geocoding-api.open-meteo.com"
+    }
+  ],
+  "paths": {
+    "/v1/forecast": {
+      "get": {
+        "operationId": "get_v1_forecast",
+        "x-powos-host": "api.open-meteo.com",
+        "x-powos-samples": 2,
+        "responses": {
+          "200": {
+            "description": "captured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "timezone_abbreviation": {
+                      "type": "string"
+                    },
+                    "elevation": {
+                      "type": "number"
+                    },
+                    "generationtime_ms": {
+                      "type": "number"
+                    },
+                    "hourly": {
+                      "type": "object",
+                      "properties": {
+                        "time": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "temperature_2m": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "temperature_2m",
+                        "time"
+                      ]
+                    },
+                    "current": {
+                      "type": "object",
+                      "properties": {
+                        "temperature_2m": {
+                          "type": "number"
+                        },
+                        "wind_speed_10m": {
+                          "type": "number"
+                        },
+                        "time": {
+                          "type": "string"
+                        },
+                        "interval": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "interval",
+                        "temperature_2m",
+                        "time"
+                      ]
+                    },
+                    "latitude": {
+                      "type": "number"
+                    },
+                    "longitude": {
+                      "type": "number"
+                    },
+                    "utc_offset_seconds": {
+                      "type": "integer"
+                    },
+                    "current_units": {
+                      "type": "object",
+                      "properties": {
+                        "temperature_2m": {
+                          "type": "string"
+                        },
+                        "wind_speed_10m": {
+                          "type": "string"
+                        },
+                        "time": {
+                          "type": "string"
+                        },
+                        "interval": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "interval",
+                        "temperature_2m",
+                        "time"
+                      ]
+                    },
+                    "hourly_units": {
+                      "type": "object",
+                      "properties": {
+                        "time": {
+                          "type": "string"
+                        },
+                        "temperature_2m": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "temperature_2m",
+                        "time"
+                      ]
+                    },
+                    "timezone": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "current",
+                    "current_units",
+                    "elevation",
+                    "generationtime_ms",
+                    "latitude",
+                    "longitude",
+                    "timezone",
+                    "timezone_abbreviation",
+                    "utc_offset_seconds"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "latitude",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "example": "59.91"
+          },
+          {
+            "name": "longitude",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "example": "10.75"
+          },
+          {
+            "name": "current",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "example": "temperature_2m"
+          },
+          {
+            "name": "hourly",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "example": "temperature_2m"
+          }
+        ]
+      }
+    },
+    "/v1/search": {
+      "get": {
+        "operationId": "get_v1_search",
+        "x-powos-host": "geocoding-api.open-meteo.com",
+        "x-powos-samples": 2,
+        "responses": {
+          "200": {
+            "description": "captured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "generationtime_ms": {
+                      "type": "number"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "postcodes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "country_code": {
+                            "type": "string"
+                          },
+                          "elevation": {
+                            "type": "number"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "country_id": {
+                            "type": "integer"
+                          },
+                          "admin3": {
+                            "type": "string"
+                          },
+                          "latitude": {
+                            "type": "number"
+                          },
+                          "admin2": {
+                            "type": "string"
+                          },
+                          "population": {
+                            "type": "integer"
+                          },
+                          "country": {
+                            "type": "string"
+                          },
+                          "admin3_id": {
+                            "type": "integer"
+                          },
+                          "longitude": {
+                            "type": "number"
+                          },
+                          "admin1": {
+                            "type": "string"
+                          },
+                          "feature_code": {
+                            "type": "string"
+                          },
+                          "admin1_id": {
+                            "type": "integer"
+                          },
+                          "admin2_id": {
+                            "type": "integer"
+                          },
+                          "id": {
+                            "type": "integer"
+                          },
+                          "timezone": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "admin1",
+                          "admin1_id",
+                          "admin2",
+                          "admin2_id",
+                          "country",
+                          "country_code",
+                          "country_id",
+                          "elevation",
+                          "feature_code",
+                          "id",
+                          "latitude",
+                          "longitude",
+                          "name",
+                          "timezone"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "generationtime_ms",
+                    "results"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "example": "Oslo"
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "example": "3"
+          }
+        ]
+      }
+    }
+  }
+}
