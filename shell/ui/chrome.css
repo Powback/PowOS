@@ -1,0 +1,31 @@
+/* Web chrome uses the shared frost tokens; hosts provide only the compositor blur and input/window operations. */
+html:is([data-mode="windowbar"], [data-mode="windowgrip"], [data-mode="statusbar"]),
+html:is([data-mode="windowbar"], [data-mode="windowgrip"], [data-mode="statusbar"]) body { width: 100%; height: 100%; overflow: hidden; margin: 0; }
+.window-chrome { position: relative; display: flex; align-items: stretch; width: 100%; height: 100%; padding: 0 2px 0 10px; color: var(--color-foreground); user-select: none; touch-action: none; }
+.window-glass { position: absolute; inset: 8px 0 0; border-radius: 10px 10px 0 0; pointer-events: none; }
+.window-caption { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding-top: 8px; font: 10.5px var(--font); }
+.window-caption span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.window-caption img { width: 12px; height: 12px; object-fit: contain; }
+.window-chrome button { position: relative; flex: 0 0 34px; display: grid; place-items: center; padding: 8px 0 0; border: 0; border-radius: 0; background: transparent; color: inherit; }
+.window-chrome button:is(:hover, :active, .pressed) { background: var(--soft-fill); }
+.window-chrome button:focus-visible, .status-chrome button:focus-visible { background: color-mix(in srgb, var(--color-accent) 30%, var(--frost-base)); }
+.window-chrome svg { width: 12px; height: 12px; }
+.window-chrome svg, .window-grip svg, .status-chrome svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.window-grip { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; color: var(--color-foreground); }
+.window-grip svg { width: 24px; height: 24px; }
+.status-chrome { width: 100%; height: 100%; display: flex; align-items: center; justify-content: space-between; gap: 24px; color: var(--color-foreground); user-select: none; }
+.status-chrome button { display: flex; align-items: center; gap: 6px; min-height: 24px; border: 0; border-radius: 999px; padding: 3px 10px; color: inherit; font: 12px var(--font); }
+.status-chrome svg { width: 16px; height: 16px; display: block; }
+.status-battery { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.status-battery svg { width: 24px; }
+.status-battery .battery-level { fill: currentColor; stroke: none; }
+
+/* The container carries frost ink to its caption/buttons; only the inset glass paints the background. */
+html:root .window-chrome { background: none; box-shadow: none; }
+/* Small labels over arbitrary app content use the shell's existing frosted-label strength (AI headings), so
+ * their text remains legible when the content behind the bar is much brighter than the wallpaper. */
+html:root .chrome-surface { --frost-fill: color-mix(in srgb, var(--frost-base) 82%, transparent); }
+/* At caption sizes keep the base frost tint: the large-card lift makes small text too faint over a bright app. */
+:root[data-light="false"]:not([data-wallpaper="light"]) .chrome-surface {
+  --frost-base: color-mix(in oklab, var(--glass-base) 25%, var(--frost-cool));
+}

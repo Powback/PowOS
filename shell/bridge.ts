@@ -13,6 +13,7 @@ import type {
   AppWidgetProvider,
   AssistScreen,
   Bridge,
+  ChromeState,
   Cell,
   Chat,
   DesktopWindow,
@@ -88,6 +89,12 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     });
   return {
     host: host.name ?? "android",
+    chrome: {
+      state: () => call<ChromeState>("chrome.state"),
+      ready: () => call("chrome.ready"),
+      action: (action) => call("chrome.action", action),
+      regions: (regions) => call("chrome.regions", regions),
+    },
     apps: {
       list: () => call<App[]>("apps.list"),
       launch: (key) => call("apps.launch", key),
@@ -468,6 +475,12 @@ function mock(): Bridge {
   };
   return {
     host: "mock",
+    chrome: {
+      state: async () => ({ kind: new URLSearchParams(location.search).get("mode") === "statusbar" ? "status" : new URLSearchParams(location.search).get("mode") === "windowgrip" ? "grip" : "window", title: "Calculator", maximised: false }),
+      ready: async () => {},
+      action: async (action) => { console.log("[mock] chrome", action); },
+      regions: async () => {},
+    },
     apps: {
       list: async () => apps,
       launch: async (key) => {

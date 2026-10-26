@@ -95,6 +95,9 @@ class ShellBridge(
     /** Set by the lock screen's face (PowosLockActivity): unlocking, through Android. */
     var lock: LockSlot? = null
 
+    /** Only the status/frame host assigns this scoped interface. */
+    var chrome: ChromeSlot? = null
+
     /** Set by the assistant's session (its page is the assist screen): the screen it was opened over, closing it. */
     var assist: dev.omalauncher.assist.AssistSlot? = null
 
@@ -248,6 +251,10 @@ class ShellBridge(
             "media.state" -> media.state()
             "media.control" -> media.control(a.getString(0))
             "media.output" -> media.output(a.optString(0).takeIf { it.isNotEmpty() })
+            "chrome.state" -> requireNotNull(chrome) { "not a chrome page" }.state()
+            "chrome.ready" -> requireNotNull(chrome) { "not a chrome page" }.ready()
+            "chrome.action" -> requireNotNull(chrome) { "not a chrome page" }.action(a.getString(0))
+            "chrome.regions" -> requireNotNull(chrome) { "not a chrome page" }.regions(a.getJSONArray(0))
             "shade.closed" -> shade?.closed()
             "shade.expand" -> shade?.expand()
             "shade.peekHeight" -> shade?.peekHeight((a.getDouble(0) * density()).toInt())

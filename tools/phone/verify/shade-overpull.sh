@@ -8,6 +8,9 @@
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
 adb() { tools/phone/adb.sh "$@"; }
+OUT=${OUT:-$HOME/.cache/powos-verify/shade-overpull-$(date +%m%d-%H%M%S)}
+mkdir -p "$OUT"
+shot() { tools/phone/shot.sh "$OUT/$1.png" >/dev/null 2>&1; }
 irq() { adb shell 'su -c "cat /proc/interrupts"' | awk '/touch-0/{for(i=2;i<=NF;i++) if($i ~ /^[0-9]+$/) s+=$i; else break} END{print s}'; }
 I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { echo "ABORT: real touch at $1"; adb shell input motionevent UP 1 1; adb shell input keyevent 4; exit 3; }; }
@@ -23,18 +26,21 @@ shown:[...document.querySelectorAll(".cc3-list .cc3-cell")].filter(e=>e.getBound
 val() { sed -nE "s/.*\"$1\":\"?([^,\"}]*).*/\1/p" <<<"$2"; }
 adb shell cmd statusbar collapse; sleep 0.3
 adb shell input swipe $((W * 800 / 1000)) 8 $((W * 800 / 1000)) $((H * 600 / 1000)) 350; sleep 1.5; chk open
+shot open
 a=$(tools/phone/cdp.sh eval shade "$probe" 2>&1 | tr -d '\\' | tail -1)
 # Start on the control center, not the gap between the unfolded shade's two columns.
 X=$(val x "$a"); Y=$(val y "$a"); S=$((H / 100))
 [[ "$X" =~ ^[0-9]+$ && "$Y" =~ ^[0-9]+$ ]] || { echo "FAIL: no control-center header: $a"; exit 1; }
 adb shell "input motionevent DOWN $X $Y; for i in 1 2 3 4 5 6; do input motionevent MOVE $X \$(($Y + i*$S)); sleep 0.03; done"
 sleep 0.4
+shot held
 m=$(tools/phone/cdp.sh eval shade "$probe" 2>&1 | tr -d '\\' | tail -1)
 adb shell "for i in 7 8 9 10 11 12 13 14; do input motionevent MOVE $X \$(($Y + i*$S)); sleep 0.03; done; input motionevent UP $X $(($Y + 14 * S))"
 sleep 1.2; chk pull
+shot expanded
 b=$(tools/phone/cdp.sh eval shade "$probe" 2>&1 | tr -d '\\' | tail -1)
 adb shell input keyevent 4; sleep 0.5; adb shell input keyevent 4
-echo "shade-overpull: open=$a held=$m after=$b"
+echo "shade-overpull: open=$a held=$m after=$b; captures: $OUT"
 fail=
 grep -q '"v3":true' <<<"$a" || fail="$fail not-v3"
 ua=$(val under "$a"); um=$(val under "$m")

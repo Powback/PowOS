@@ -291,7 +291,31 @@ export interface Chat {
 /** An app that runs, or one frozen (asleep in RAM: powos-sleep-gui, a game frozen with Steam). */
 export type RunState = "running" | "frozen";
 
+/** Visible system chrome is shared web UI; hosts supply state and perform scoped actions. */
+export interface ChromeState {
+  kind: "window" | "grip" | "status";
+  clock?: string;
+  notifications?: number | null;
+  title?: string;
+  icon?: string;
+  maximised?: boolean;
+  pressed?: string | null;
+  battery?: number | null;
+  charging?: boolean;
+  network?: "wifi" | "cellular" | "ethernet" | "offline" | null;
+  vpn?: boolean;
+  left?: number;
+  right?: number;
+}
+export interface ChromeRegion { action: string; x: number; y: number; width: number; height: number }
+
 export interface Bridge {
+  chrome: {
+    state(): Promise<ChromeState>;
+    ready(): Promise<void>;
+    action(action: string): Promise<void>;
+    regions(regions: ChromeRegion[]): Promise<void>;
+  };
   /** "android" | "powos" | "mock" */
   host: string;
   apps: {

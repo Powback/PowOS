@@ -172,6 +172,10 @@ const TEST_NOW =
  */
 const DESKTOP_HOME = `{ const B = (await U('./bridge.ts')).powos; for (const i of (await B.home.get()).items) await B.home.remove(i.key); const cols = Math.max(4, Math.round(innerWidth / 100)); const w = cols >= 8 ? 3 : Math.max(2, Math.floor((cols - 1) / 2)); const across = Math.max(1, Math.floor((cols + 1) / (w + 1))); let i = 0, y = 0, rowH = 0; for (const [n, h] of [['agents', 2], ['app:local.lights/main', 2], ['app:local.shopping/main', 2]]) { if (i % across === 0 && i > 0) { y += rowH + 1; rowH = 0; } rowH = Math.max(rowH, h); await B.home.addPanel(n, 1, { x: (i % across) * (w + 1), y, w, h }); i++; } await sleep(300); S.home.value = { ...S.home.value, columns: cols }; const st = document.createElement('style'); st.textContent = '.launcher { will-change: auto !important; transform: none !important; }'; document.head.append(st); await sleep(300); }`;
 const SCENES = [
+  ["chrome-status", "statusbar", "E.emit('chrome.changed', {kind:'status', battery:74, charging:true, network:'wifi', vpn:true, left:44});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
+  ["chrome-window", "windowbar", "E.emit('chrome.changed', {kind:'window', title:'Calculator'});", "blurred", null, { narrow: {width:280,height:27,insets:{top:0,bottom:0}}, wide: {width:650,height:27,insets:{top:0,bottom:0}} }],
+  ["chrome-restore", "windowbar", "E.emit('chrome.changed', {kind:'window', title:'A long document title that must leave all three window controls visible', maximised:true});", "blurred", null, { narrow: {width:280,height:27,insets:{top:0,bottom:0}} }],
+  ["chrome-grip", "windowgrip", "", "blurred", null, { grip: {width:28,height:28,insets:{top:0,bottom:0}} }],
   ["home", "home", "", "wallpaper"],
   ["home-p2", "home", "S.page.value = 1;", "wallpaper"],
   ["edit", "home", "S.editing.value = true;", "wallpaper"],

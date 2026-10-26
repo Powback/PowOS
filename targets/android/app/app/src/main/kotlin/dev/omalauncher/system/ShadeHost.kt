@@ -84,6 +84,7 @@ class ShadeHost(
     private var host: ShellHost? = null
     private var shade: Root? = null
     private var edge: Edge? = null
+    private var statusChrome: StatusChrome? = null
     private var shadeParams: WindowManager.LayoutParams? = null
     private var edgeParams: WindowManager.LayoutParams? = null
 
@@ -100,6 +101,8 @@ class ShadeHost(
             if (field == value) return
             field = value
             PetOverlay.current?.update()
+            flags()
+            edgeLayoutChanged()
         }
     private var shown = false
 
@@ -179,6 +182,9 @@ class ShadeHost(
             }.also { g -> h.filesGate = g::changed }
         val strip = Edge(edgeContext)
         edge = strip
+        statusChrome = StatusChrome(edgeContext, { flags(); edgeLayoutChanged() }, { openPanel(it) }).also {
+            strip.addView(it.web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
         stripHeight = statusBarHeight()
         edgeParams = edgeLayout(stripHeight).also { edgeWm.addView(strip, it) }
         // Out of the way at once if the gesture input already runs.
@@ -201,6 +207,8 @@ class ShadeHost(
         watchdog?.stop()
         watchdog = null
         shade?.let { runCatching { shadeWm.removeView(it) } }
+        statusChrome?.destroy()
+        statusChrome = null
         edge = null
         shade = null
         host?.destroy()
@@ -359,7 +367,10 @@ class ShadeHost(
         }
 
     private fun flags() {
-        if (keyguard || lent) disable(0, 0) else disable(DISABLE_EXPAND, DISABLE2_QUICK_SETTINGS or DISABLE2_NOTIFICATION_SHADE)
+        val ownsBar = statusChrome?.ready == true && statusBarShown && !keyguard && !lent
+        statusChrome?.web?.visibility = if (ownsBar) View.VISIBLE else View.INVISIBLE
+        val icons = if (ownsBar) DISABLE_CLOCK or DISABLE_SYSTEM_INFO or DISABLE_NOTIFICATION_ICONS else 0
+        if (keyguard || lent) disable(0, 0) else disable(DISABLE_EXPAND or icons, DISABLE2_QUICK_SETTINGS or DISABLE2_NOTIFICATION_SHADE)
     }
 
     /**
@@ -602,20 +613,22 @@ class ShadeHost(
             ViewGroup.LayoutParams.MATCH_PARENT,
             height,
             TYPE_EDGE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            title = "PowOS top edge"
+            title = "PowOS status bar"
             gravity = Gravity.TOP or Gravity.START
             fitInsetsTypes = 0
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         }
 
+    private fun edgeTouchable() = (!monitored || statusChrome?.ready == true) && statusBarShown && !keyguard && !lent
+
     /** The strip as the state says: touchable only while it's PowOS's shade to pull and the status bar shows. */
     private fun edgeLayoutChanged(height: Int? = null) {
         val strip = edge ?: return
         val p = edgeParams ?: return
-        val touchable = !monitored && statusBarShown && !keyguard && !lent
+        val touchable = edgeTouchable()
         val flags =
             if (touchable) p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv() else p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         val h = height ?: p.height
@@ -727,10 +740,11 @@ class ShadeHost(
      */
     private inner class Edge(
         context: Context,
-    ) : View(context) {
+    ) : FrameLayout(context) {
         init {
             // The status bar's height (it changes on folding) and whether it shows: from the insets the window gets.
             setOnApplyWindowInsetsListener { _, insets ->
+                statusChrome?.insets(insets)
                 val top = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
                 // Hidden only if this window is told of a status bar at all (top > 0) and it's hidden: a window above the
                 // status bar, as this one is, may be given no status bar inset, and that's not a full-screen app.
@@ -740,6 +754,8 @@ class ShadeHost(
                 insets
             }
         }
+
+        override fun onInterceptTouchEvent(e: MotionEvent): Boolean = !monitored
 
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -777,6 +793,9 @@ class ShadeHost(
 
         // StatusBarManager's hidden disable flags.
         private const val DISABLE_EXPAND = 0x00010000
+        private const val DISABLE_NOTIFICATION_ICONS = 0x00020000
+        private const val DISABLE_SYSTEM_INFO = 0x00100000
+        private const val DISABLE_CLOCK = 0x00800000
         private const val DISABLE2_QUICK_SETTINGS = 1
         private const val DISABLE2_NOTIFICATION_SHADE = 1 shl 2
 

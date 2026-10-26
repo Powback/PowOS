@@ -68,6 +68,38 @@ function mime(p) {
   );
 }
 
+/** Chrome controls stay within a narrow window and dispatch only their scoped actions. */
+async function windowChromeCheck() {
+  const B = (await importShim("./bridge.ts")).powos;
+  const actions = [];
+  B.chrome.action = async (name) => { actions.push(name); };
+  const fail = [];
+  for (const button of document.querySelectorAll("[data-action]")) {
+    const r = button.getBoundingClientRect();
+    if (r.x < 0 || r.right > innerWidth || r.width < 30) fail.push(`clipped control ${button.dataset.action}`);
+    button.click();
+  }
+  if (actions.join() !== "minimise,maximise,close") fail.push(`window actions: ${actions}`);
+  window.__mockEvents.emit("chrome.changed", {kind:"window", title:"Document", maximised:true});
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  if (!document.querySelector('[aria-label="Restore"]')) fail.push("maximised window has no Restore control");
+  return fail;
+}
+
+async function statusChromeCheck() {
+  const B = (await importShim("./bridge.ts")).powos;
+  const actions = [];
+  B.chrome.action = async (name) => { actions.push(name); };
+  const fail = [];
+  window.__mockEvents.emit("chrome.changed", {kind:"status", battery:74, charging:true, network:"wifi", left:44});
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  for (const button of document.querySelectorAll(".status-chrome button")) button.click();
+  if (actions.join() !== "notifications,controls") fail.push(`status actions: ${actions}`);
+  if (!document.querySelector("time") || !document.body.textContent.includes("74%")) fail.push("missing clock/battery");
+  if (document.querySelector(".status-clock").getBoundingClientRect().x < 44) fail.push("clock covers cutout");
+  return fail;
+}
+
 /** The modes app.tsx renders (`mode === "x"`), home first: a mode added there is checked without touching this. */
 function modes() {
   const src = fs.readFileSync(path.join(ROOT, "app.tsx"), "utf8");
@@ -2041,6 +2073,8 @@ try {
       runs.push(open(browser, url, mode).then((r) => settle(r, () => window.__powosAlive === true || window.__powosBoot?.failed === true)));
     }
   }
+  for (const [mode, width, height] of [["windowbar", 280, 27], ["statusbar", 404, 46]])
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, `chrome-${mode}`, { width, height }).then((r) => whenReady(r, () => r.page.evaluate(mode === "windowbar" ? windowChromeCheck : statusChromeCheck))));
   // The pill (bar.tsx, grow.tsx): every empty pill on home is one --pill-height tall - the foot's, PowOS AI's compose,
   // and the search widget at every size (one row, two rows, narrow), also after it was measured narrow and widened
   // again (2026-10-22: a pill measured narrow kept that height - three rows of placeholder - once wide again).

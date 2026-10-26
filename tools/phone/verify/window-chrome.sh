@@ -72,8 +72,8 @@ pass "task $BID's title bar is on screen, over its task"
 BH=$((BB - BT)); BDP=$((BH * 160 / D))
 echo "bar window: ${BH} px = ${BDP} dp (density $D)" | tee -a "$OUT/log.txt"
 [ "$BDP" -ge 24 ] && [ "$BDP" -le 28 ] && pass "the title bar is ${BH} px (${BDP} dp)" || fail "the title bar is ${BH} px (${BDP} dp), want 24-28 dp"
-sh_ "logcat -d -s PowosWindowFrame:I" | grep -m1 "bar .* frost" | tee -a "$OUT/log.txt" > "$OUT/frost.txt"
-grep -q "frost blur 360" "$OUT/frost.txt" && pass "frost v2 on the bar: $(grep -oE 'fill=#[0-9a-f]+' "$OUT/frost.txt"), blur 360 dp" || fail "no frost line from the frame (logcat PowosWindowFrame)"
+sh_ "logcat -d -s PowosWindowFrame:I" | grep -m1 "web bar .* compositor blur" | tee -a "$OUT/log.txt" > "$OUT/frost.txt"
+grep -q "compositor blur 360" "$OUT/frost.txt" && pass "shared web chrome, compositor blur 360 dp" || fail "no web chrome line from the frame (logcat PowosWindowFrame)"
 sh_ "dumpsys SurfaceFlinger" | grep -A30 "PowOS window bar" | grep -m3 -E "blurRegions|radius=" | tee -a "$OUT/log.txt" > "$OUT/sf-blur.txt"
 grep -qE "radius=[1-9]" "$OUT/sf-blur.txt" && pass "a blur region on the bar's layer" || echo "NOTE: no blur region read on the bar's layer (sf-blur.txt)" | tee -a "$OUT/log.txt"
 

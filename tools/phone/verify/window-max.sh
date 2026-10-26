@@ -54,6 +54,8 @@ sfrow_of() { awk -v p="$1" -v W="$W" -v H="$H" "$HWCCOLS"'
   /\(active\) HWC layers:/ {on=1; next} /HWC layers:/ {on=0}
   on && want {n=split($0, f, "|"); if (n >= cc) {
     split(f[dc], d, " "); split(f[cc], c, " "); cw = int(c[3] - c[1] + 0.5); ch = int(c[4] - c[2] + 0.5)
+    # AOSP prints display coordinates as decimals (0.0); the pixel comparisons below use shell integer arithmetic.
+    for (i = 1; i <= 4; i++) d[i] = sprintf("%.0f", d[i])
     # The crop is in the BUFFER: a buffer the app pre-rotated for the panel (Transform 0: HWUI apps, home) reads
     # turned against the screen, one SurfaceFlinger turns (ROT_90/270: the SurfaceView of a Linux window, its consumer
     # draws upright) reads as the screen does. Swapped only when exactly one of the two turns it.

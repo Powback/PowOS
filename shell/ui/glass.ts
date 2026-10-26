@@ -119,7 +119,8 @@ function refrost(): Promise<void> {
  */
 // The desktop's home (powos-shell) draws its own wallpaper (ui/desktop.tsx): its tiles frost that picture too.
 const OVER_WALLPAPER = new Set(["home", "lock", "desktop"]);
-const TINT_ONLY = new Set(["shade", "recents", "pull", "quicktools"]);
+const CHROME = new Set(["windowbar", "windowgrip", "statusbar"]);
+const TINT_ONLY = new Set(["shade", "recents", "pull", "quicktools", ...CHROME]);
 
 let lastSource: GlassSource | null = null;
 /** The assistant's: the screen it was opened over (its screenshot), and whether it's live (then no picture). */
@@ -155,7 +156,7 @@ async function tone(url: string | null) {
 
 function use(g: GlassSource | null) {
   lastSource = g;
-  void tone(OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : null);
+  void tone((OVER_WALLPAPER.has(mode) || CHROME.has(mode)) ? (g?.wallpaper?.url ?? null) : null);
   root.classList.toggle("glass-behind", TINT_ONLY.has(mode) && g != null);
   source = OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : mode === "assist" && !assistLive ? assistShot : null;
   void refrost();

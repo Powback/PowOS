@@ -3,12 +3,8 @@ package dev.omalauncher.system
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
-import android.text.TextUtils
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.SurfaceControl
@@ -16,9 +12,6 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.WindowManager
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.TextView
 import dev.omalauncher.shell.WindowBlur
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
@@ -28,7 +21,7 @@ import java.util.concurrent.atomic.AtomicReference
  * icon and name, minimise, maximise and close - that a finger drags to move it, and a grip on its lower right corner that resizes
  * it. Two small overlay windows (TYPE_APPLICATION_OVERLAY: over apps, under the status bar and the shade) placed on the
  * task's bounds; the task follows the finger through [FreeformTasks.resize], at most one call in flight.
- * Design language (powos-design): the glass is the frost ([Frost], frost v2 as the shell's app pages: the compositor's
+ * Visible chrome is shell/ui/chrome.tsx (shared web UI), using frost v2 as the shell's app pages: the compositor's
  * blur, a cool tint, a lit top edge), no borders, small marks. The bar is [BAR_DP] glass under a clear [HIT_DP] strip,
  * [BAR_DP] + [HIT_DP] in all (the user, 2026-10-23: half again); the strip and the buttons' full height keep it easy
  * to grab. A resize drag resizes the app's window as the finger goes ([FreeformTasks.Live]).
@@ -69,12 +62,12 @@ class WindowFrame(
     var held = false
         private set
 
-    private lateinit var maxButton: GlyphView
-    private val frost = Frost.colors(context)
-    /** The bar's buttons and what each does, for [Drag]'s hit test (filled by [barView], so declared before it). */
-    private val buttons = mutableListOf<Pair<GlyphView, () -> Unit>>()
-    private val bar = barView(app.pkg, app.title)
-    private val grip = GripView(context, frost)
+    private val barChrome = FrameChrome(context, "window", app.copy(title = app.title?.takeIf { it.isNotBlank() } ?: appLabel(app.pkg))) { action ->
+        when (action) { "minimise" -> minimise(); "maximise" -> maximise(); "close" -> close() }
+    }
+    private val gripChrome = FrameChrome(context, "grip", App(null)) {}
+    private val bar = barChrome.web
+    private val grip = gripChrome.web
     private val barParams = params("PowOS window bar $id")
     private val gripParams = params("PowOS window grip $id")
 
@@ -200,11 +193,7 @@ class WindowFrame(
             android.util.Log.i("PowosWindowFrame", "task $id: its own title bar, no bar (grip only)")
             return
         }
-        android.util.Log.i(
-            "PowosWindowFrame",
-            "task $id bar ${barParams.height} px (${BAR_DP + HIT_DP} dp, glass $BAR_DP) frost blur ${Frost.BLUR_DP} dp fill=#%08x veil=#%08x sheen=#%08x edge=#%08x ink=#%08x"
-                .format(frost.fill, frost.veil, frost.sheen, frost.edge, frost.ink),
-        )
+        android.util.Log.i("PowosWindowFrame", "task $id web bar ${barParams.height} px (${BAR_DP + HIT_DP} dp), compositor blur ${Frost.BLUR_DP} dp")
     }
 
     private fun updateViews() {
@@ -229,11 +218,7 @@ class WindowFrame(
 
     /** Maximised or not: its button shows "restore" (two squares) or "maximise" (one). */
     fun showMaximised(on: Boolean) {
-        val glyph = if (on) Glyph.RESTORE else Glyph.MAXIMISE
-        if (maxButton.glyph == glyph) return
-        maxButton.glyph = glyph
-        maxButton.contentDescription = glyph.name.lowercase()
-        maxButton.invalidate()
+        barChrome.maximised(on)
     }
 
     /**
@@ -343,9 +328,10 @@ class WindowFrame(
         // A gesture under way ends with the frame: its drag layer (the bar drawn where the finger had it) never outlives
         // the frame - left over, it was a title bar with no window under it (the 01:47 "Home - Dolphin" bar).
         abandonGesture()
-        if (!barAdded && !gripAdded) return
         if (barAdded) { barAdded = false; runCatching { wm.removeViewImmediate(bar) } }
         if (gripAdded) { gripAdded = false; runCatching { wm.removeViewImmediate(grip) } }
+        barChrome.destroy()
+        gripChrome.destroy()
     }
 
     private fun params(title: String) =
@@ -368,106 +354,8 @@ class WindowFrame(
         return pkg?.let { runCatching { pm.getApplicationLabel(pm.getApplicationInfo(it, 0)).toString() }.getOrNull() } ?: pkg.orEmpty()
     }
 
-    private fun appIcon(pkg: String?) = pkg?.let { p -> runCatching { context.packageManager.getApplicationIcon(p) }.getOrNull() }
-
-    /**
-     * The bar's window: the glass bar at its bottom ([BAR_DP]), a clear strip over it ([HIT_DP]); a touch in the strip
-     * is the bar's - its button below the finger, else the drag (the buttons span the window's height).
-     */
-    private fun barView(
-        pkg: String?,
-        title: String?,
-    ): LinearLayout {
-        val label = title?.takeIf { it.isNotBlank() } ?: appLabel(pkg)
-        return LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.BOTTOM
-            setPadding(dp(10f), 0, dp(2f), 0)
-            background = BarGlass(dp(HIT_DP).toFloat(), CORNER_DP * density, frost)
-            val strip = dp(HIT_DP)
-            appIcon(pkg)?.let { icon ->
-                addView(
-                    ImageView(context).apply { setImageDrawable(icon) },
-                    LinearLayout.LayoutParams(dp(ICON_DP), dp(ICON_DP)).apply {
-                        marginEnd = dp(8f)
-                        bottomMargin = (dp(BAR_DP) - dp(ICON_DP)) / 2
-                    },
-                )
-            }
-            addView(
-                TextView(context).apply {
-                    text = label
-                    setTextColor(frost.ink)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f)
-                    typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-                    maxLines = 1
-                    ellipsize = TextUtils.TruncateAt.END
-                    gravity = Gravity.CENTER_VERTICAL
-                },
-                LinearLayout.LayoutParams(0, dp(BAR_DP), 1f),
-            )
-            val full = dp(BAR_DP) + strip
-            // Never `id` in here: inside this apply it is the LinearLayout's View id (NO_ID, -1), not the task's - the
-            // button maximised task -1, which WindowFrames.maximise dropped without a line (2026-10-24, window-max calc).
-            addView(button(Glyph.MINIMISE, ::minimise), LinearLayout.LayoutParams(dp(BUTTON_DP), full))
-            maxButton = button(Glyph.MAXIMISE, ::maximise)
-            addView(maxButton, LinearLayout.LayoutParams(dp(BUTTON_DP), full))
-            addView(button(Glyph.CLOSE, ::close), LinearLayout.LayoutParams(dp(BUTTON_DP), full))
-        }
-    }
-
-    /** The bar's frost below the window's clear touch strip ([top] px), its upper corners rounded: veil, tint, sheen, lit edge. */
-    private class BarGlass(
-        private val top: Float,
-        private val corner: Float,
-        private val frost: Frost.Colors,
-    ) : android.graphics.drawable.Drawable() {
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val path = android.graphics.Path()
-
-        override fun draw(canvas: Canvas) {
-            val b = bounds
-            val t = b.top + top
-            path.reset()
-            path.addRoundRect(b.left.toFloat(), t, b.right.toFloat(), b.bottom.toFloat(), floatArrayOf(corner, corner, corner, corner, 0f, 0f, 0f, 0f), android.graphics.Path.Direction.CW)
-            canvas.save()
-            canvas.clipPath(path)
-            frostLayers(canvas, paint, frost, android.graphics.RectF(b.left.toFloat(), t, b.right.toFloat(), b.bottom.toFloat()))
-            canvas.restore()
-        }
-
-        override fun setAlpha(alpha: Int) {
-            paint.alpha = alpha
-        }
-
-        override fun setColorFilter(filter: android.graphics.ColorFilter?) {
-            paint.colorFilter = filter
-        }
-
-        @Deprecated("Deprecated in Java")
-        override fun getOpacity() = PixelFormat.TRANSLUCENT
-    }
-
-    /**
-     * A button: a mark the bar's own touch handler ([Drag]) hit-tests and acts on at the lift, not a clickable view.
-     * Measured 2026-10-23 (window-max calc/kate, float-windows, 6 runs): a tap on a clickable button never reached its
-     * click listener (no "maximised" line at all), while taps on the bar itself (its double tap) always reached [Drag];
-     * every bar touch has one owner now.
-     */
-    private fun button(
-        glyph: Glyph,
-        tap: () -> Unit,
-    ): GlyphView =
-        GlyphView(context, glyph, dp(HIT_DP).toFloat(), frost.ink).apply {
-            contentDescription = glyph.name.lowercase()
-            buttons.add(this to tap)
-        }
-
-    /** The button under bar point ([x], [y]) (the bar view's px), if any. */
-    private fun buttonAt(
-        x: Float,
-        y: Float,
-    ): Pair<GlyphView, () -> Unit>? = buttons.firstOrNull { (v, _) -> x >= v.left && x < v.right && y >= v.top && y < v.bottom }
+    /** Hit rectangles come from the web layout in CSS px, converted by FrameChrome. */
+    private fun buttonAt(x: Float, y: Float) = barChrome.buttonAt(x, y)
 
     /** A window's app: its package and, instead of the app's name, a PowOS (Linux) window's caption (its task is PowOS's own). */
     data class App(
@@ -476,87 +364,6 @@ class WindowFrame(
         /** The window draws its own title bar (KWin's "decor 0": client-side decorations): no bar of ours. */
         val ownBar: Boolean = false,
     )
-
-    private enum class Glyph { MINIMISE, MAXIMISE, RESTORE, CLOSE }
-
-    /**
-     * A button's mark, drawn (no icon files): a dash, a square, two squares or a cross, small, centred on the glass bar
-     * below the clear strip ([strip] px) the button reaches up through; a soft disc behind it while pressed.
-     */
-    private class GlyphView(
-        context: Context,
-        var glyph: Glyph,
-        private val strip: Float,
-        ink: Int,
-    ) : View(context) {
-        private val d = context.resources.displayMetrics.density
-        private val paint =
-            Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = ink
-                strokeWidth = 1.3f * d
-                strokeCap = Paint.Cap.ROUND
-                style = Paint.Style.STROKE
-            }
-        private val pressedFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = (ink and 0xFFFFFF) or (26 shl 24) }
-
-        override fun drawableStateChanged() {
-            super.drawableStateChanged()
-            invalidate()
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            val cx = width / 2f
-            val cy = strip + (height - strip) / 2f
-            if (isPressed) canvas.drawCircle(cx, cy, (height - strip) * 0.42f, pressedFill)
-            val s = GLYPH_DP * d / 2f
-            when (glyph) {
-                Glyph.MINIMISE -> canvas.drawLine(cx - s, cy, cx + s, cy, paint)
-                Glyph.MAXIMISE -> canvas.drawRect(cx - s, cy - s, cx + s, cy + s, paint)
-                Glyph.RESTORE -> {
-                    val o = s * 0.4f
-                    canvas.drawRect(cx - s, cy - s + o, cx + s - o, cy + s, paint)
-                    canvas.drawLine(cx - s + o, cy - s, cx + s, cy - s, paint)
-                    canvas.drawLine(cx + s, cy - s, cx + s, cy + s - o, paint)
-                }
-                Glyph.CLOSE -> {
-                    canvas.drawLine(cx - s, cy - s, cx + s, cy + s, paint)
-                    canvas.drawLine(cx - s, cy + s, cx + s, cy - s, paint)
-                }
-            }
-        }
-    }
-
-    /** The resize grip: a frost disc with two short diagonal strokes. */
-    private class GripView(
-        context: Context,
-        private val frost: Frost.Colors,
-    ) : View(context) {
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val disc = android.graphics.Path()
-        private val mark =
-            Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = frost.ink
-                strokeWidth = 1.6f * context.resources.displayMetrics.density
-                strokeCap = Paint.Cap.ROUND
-            }
-
-        init {
-            contentDescription = "resize"
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            val r = width / 2f
-            disc.reset()
-            disc.addCircle(r, r, r, android.graphics.Path.Direction.CW)
-            canvas.save()
-            canvas.clipPath(disc)
-            frostLayers(canvas, fill, frost, android.graphics.RectF(0f, 0f, width.toFloat(), height.toFloat()))
-            canvas.restore()
-            val a = r * 0.35f
-            canvas.drawLine(r + a, r - a * 0.2f, r - a * 0.2f, r + a, mark)
-            canvas.drawLine(r + a, r + a * 0.45f, r + a * 0.45f, r + a, mark)
-        }
-    }
 
     /** A finger on the bar (move) or the grip (resize): the frame follows at once, the task as fast as it can. */
     private inner class Drag(
@@ -599,7 +406,7 @@ class WindowFrame(
         }
 
         /** The button a finger went down on: it acts at the lift if the finger is still on it; no drag from a button. */
-        private var pressed: Pair<GlyphView, () -> Unit>? = null
+        private var pressed: Pair<FrameChrome.Button, () -> Unit>? = null
 
         /**
          * A finger that went down on a button: a tap (lifted within the touch slop, on it) presses it; past the slop it
@@ -625,7 +432,7 @@ class WindowFrame(
 
         /** The finger on button [v] moved: still a press within the touch slop ([on] it or not), past it a move. */
         private fun pressMoved(
-            v: GlyphView,
+            v: FrameChrome.Button,
             on: Boolean,
             e: MotionEvent,
         ) {
@@ -1102,11 +909,8 @@ class WindowFrame(
         /** The bar window's clear touch strip above the glass: the buttons' and the drag's target reaches it too. */
         const val HIT_DP = 8f
         private const val CORNER_DP = 10f
-        private const val BUTTON_DP = 34f
-        private const val ICON_DP = 12f
 
         /** A button's mark, across. */
-        private const val GLYPH_DP = 8f
         private const val GRIP_DP = 28f
 
         /** The most frames a drag's end waits for WM to have the bar's window where the finger left it. */
@@ -1123,28 +927,6 @@ class WindowFrame(
         private const val LEAVE_MS = 500L
         private const val MIN_W_DP = 280f
         private const val MIN_H_DP = 200f
-
-        /**
-         * The frost's layers in [box] (the caller clips the shape), as shell.css paints a frost surface: the veil,
-         * the tint, a sheen from the top to clear at 45%, a 1 px lit edge along the top (--lift-edge).
-         */
-        private fun frostLayers(
-            canvas: Canvas,
-            paint: Paint,
-            frost: Frost.Colors,
-            box: android.graphics.RectF,
-        ) {
-            paint.shader = null
-            paint.color = frost.veil
-            canvas.drawRect(box, paint)
-            paint.color = frost.fill
-            canvas.drawRect(box, paint)
-            paint.shader = android.graphics.LinearGradient(0f, box.top, 0f, box.top + box.height() * 0.45f, frost.sheen, Color.TRANSPARENT, android.graphics.Shader.TileMode.CLAMP)
-            canvas.drawRect(box, paint)
-            paint.shader = null
-            paint.color = frost.edge
-            canvas.drawRect(box.left, box.top, box.right, box.top + 1f, paint)
-        }
 
         /** Every frame's task calls, one at a time (a move sends many; only the newest matters). */
         private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "powos-window-frames") }
