@@ -1,20 +1,21 @@
 Name: powos-gpu-unlock
-Version: 1.0.0
-Release: 1
-Summary: GPU unlock built for the PowOS GPU server kernel
+Version: %{unlock_version}
+Release: %{unlock_release}
+Summary: GPU unlock (%{unlock_profile}) built for the PowOS kernel
 License: GPL-2.0-only AND LicenseRef-NVIDIA
-URL: https://github.com/Zagitta/gpu-unlock
+URL: %{unlock_repository}
 Source0: payload.tar.gz
 ExclusiveArch: x86_64
 # No DKMS hooks on an ostree deployment. Rebuild this package before a kernel update.
 Requires: kernel-core-uname-r = %{kver}
 Requires(post): /usr/sbin/depmod
+Provides: powos-gpu-unlock-profile-%{unlock_profile}
 AutoReqProv: no
 %global debug_package %{nil}
 %global __os_install_post %{nil}
 
 %description
-Pinned upstream af28cbbfd3d922a659227ecfb7369adfd924cf03, with verified
+Pinned upstream %{unlock_revision}, profile %{unlock_profile}, with verified
 firmware and a module built for %{kver}. Inert without gpu_unlock.targets.
 Requires local initramfs regeneration on rpm-ostree. No live loading.
 

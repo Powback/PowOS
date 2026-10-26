@@ -35,6 +35,8 @@ class ToggleTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix='.rpm') as rpm:
             def read(*args):
                 if args[:2] == ('rpm', '-qp'):
+                    if '--provides' in args:
+                        return 'powos-gpu-unlock-profile-ampere'
                     return 'powos-gpu-unlock' if '--qf' in args else 'kernel-core-uname-r = ' + control.os.uname().release
                 if args == ('mokutil', '--sb-state'):
                     return 'SecureBoot disabled'
@@ -43,6 +45,7 @@ class ToggleTests(unittest.TestCase):
                 raise AssertionError(args)
             with patch.object(control.sys, 'argv', ['control.py', 'enable', '--rpm', rpm.name]), \
                     patch.object(control.os, 'geteuid', return_value=0), \
+                    patch.object(control, 'gpu_devices', return_value={'0000:01:00.0': '0x2204'}), \
                     patch.object(control, 'run', side_effect=read), \
                     patch.object(control, 'change') as changes, \
                     patch.object(control, 'check_image', side_effect=RuntimeError('missing firmware')):
@@ -56,6 +59,46 @@ class ToggleTests(unittest.TestCase):
         with patch.object(control, 'run', side_effect=['gpu_unlock.ko', 'gpu-unlock/missing.bin']):
             with self.assertRaisesRegex(RuntimeError, 'missing firmware'):
                 control.check_image(deployment, 'test-kernel')
+
+    def test_4090_requires_ada_profile(self):
+        devices = {'0000:01:00.0': '0x2684'}
+        with self.assertRaisesRegex(ValueError, 'unsupported'):
+            control.validate_selection('ampere', 'all', devices)
+        self.assertEqual(control.validate_selection('ada', 'all', devices), ('all', ['0000:01:00.0']))
+
+    def test_5090_rejected_but_explicit_4090_on_mixed_host_allowed(self):
+        devices = {'0000:01:00.0': '0x2684', '0000:02:00.0': '0x2b85'}
+        with self.assertRaisesRegex(ValueError, 'Blackwell'):
+            control.validate_selection('ada', 'all', devices)
+        self.assertEqual(control.validate_selection('ada', '0000:01:00.0', devices)[1], ['0000:01:00.0'])
+
+    def test_both_3090s_remain_selected(self):
+        devices = {'0000:01:00.0': '0x2204', '0000:02:00.0': '0x2204'}
+        self.assertEqual(len(control.validate_selection('ampere', 'all', devices)[1]), 2)
+
+    def test_experimental_ada_ids_rejected(self):
+        for device in ['0x2685', '0x2757', '0x2705']:
+            with self.assertRaisesRegex(ValueError, 'unsupported'):
+                control.validate_selection('ada', 'all', {'0000:01:00.0': device})
+
+    def test_invalid_pci_selection_rejected(self):
+        for selection in ['all,0000:01:00.0', '01:00.0', '0000:01:00.0,0000:01:00.0', '0000:09:00.0']:
+            with self.assertRaises(ValueError):
+                control.validate_selection('ada', selection, {'0000:01:00.0': '0x2684'})
+
+    def test_explicit_targets_replace_all(self):
+        self.assertEqual(control.karg_changes('quiet gpu_unlock.targets=all', True, '0000:01:00.0'), [
+            '--delete-if-present=gpu_unlock.targets=all', '--append=gpu_unlock.targets=0000:01:00.0'])
+
+    def test_staged_wrong_profile_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            metadata = Path(tmp) / 'usr/share/powos/gpu-unlock'
+            metadata.mkdir(parents=True)
+            (metadata / 'profile').write_text('ampere')
+            (metadata / 'upstream-revision').write_text(control.PROFILES['ampere']['revision'])
+            with patch.object(control, 'deployment_root', return_value=Path(tmp)):
+                with self.assertRaisesRegex(RuntimeError, 'differs'):
+                    control.check_profile({}, 'ada')
 
 
 class BenchmarkTests(unittest.TestCase):

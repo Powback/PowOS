@@ -25,7 +25,9 @@ def measure(args):
     # Set before importing torch / creating a CUDA context.
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
+    gpu_uuid = subprocess.check_output(['nvidia-smi', '-i', str(args.gpu), '--query-gpu=uuid',
+                                       '--format=csv,noheader'], text=True).strip()
+    os.environ['CUDA_VISIBLE_DEVICES'] = gpu_uuid
     import torch
     torch.set_num_threads(2)
     torch.use_deterministic_algorithms(True)
@@ -39,7 +41,7 @@ def measure(args):
         'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
         'torch': torch.__version__, 'cuda': torch.version.cuda,
         'gpu': args.gpu, 'name': props.name, 'uuid': str(props.uuid),
-        'driver': subprocess.check_output(['nvidia-smi', '--query-gpu=driver_version', '--format=csv,noheader'], text=True).splitlines()[args.gpu],
+        'driver': subprocess.check_output(['nvidia-smi', '-i', str(args.gpu), '--query-gpu=driver_version', '--format=csv,noheader'], text=True).strip(),
         'n': args.size, 'samples': args.samples, 'warmups': 3, 'seed': 1953090,
         'before': snapshot(), 'results': {},
     }
@@ -110,7 +112,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     bench = sub.add_parser('run')
-    bench.add_argument('--gpu', type=int, choices=[0, 1], required=True)
+    bench.add_argument('--gpu', type=int, required=True)
     bench.add_argument('--label', choices=['before', 'after'], required=True)
     bench.add_argument('--output', type=Path, required=True)
     bench.add_argument('--size', type=int, default=8192)
@@ -120,8 +122,8 @@ def main():
     diff.add_argument('after', type=Path)
     args = parser.parse_args()
     if args.command == 'run':
-        if not 256 <= args.size <= 8192 or not 3 <= args.samples <= 20:
-            parser.error('Use size 256..8192 and 3..20 samples')
+        if args.gpu < 0 or not 256 <= args.size <= 8192 or not 3 <= args.samples <= 20:
+            parser.error('Use a nonnegative GPU index, size 256..8192 and 3..20 samples')
         measure(args)
     else:
         compare(json.loads(args.before.read_text()), json.loads(args.after.read_text()))
