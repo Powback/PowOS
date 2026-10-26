@@ -1,0 +1,32 @@
+{
+  "id": "gpu-unlock",
+  "name": "RTX 3090 FP16/BF16 unlock (both GPUs, next boot)",
+  "kind": "package",
+  "host": "desktop",
+  "hostNote": "gpu-195: two RTX 3090s at 0000:01:00.0 and 0000:02:00.0",
+  "owner": "system:gpu-195",
+  "purpose": "Pinned Zagitta/gpu-unlock, built for the exact host kernel and loaded from initramfs before NVIDIA. Opt in with gpu_unlock.targets=all; enable and disable require a later reboot. The CLI never reboots or live-loads a module.",
+  "installedBy": "hosts/gpu-195/gpu-unlock/control.py enable --rpm <built RPM>",
+  "packages": ["powos-gpu-unlock"],
+  "files": [
+    "/usr/lib/modules/*/extra/gpu_unlock.ko",
+    "/usr/lib/firmware/gpu-unlock",
+    "/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf",
+    "/usr/share/powos/gpu-unlock",
+    "/usr/share/licenses/gpu-unlock",
+    "/usr/share/licenses/gpu-unlock-firmware",
+    "/usr/bin/powos-gpu-unlock",
+    "/etc/powos/units.d/gpu-unlock.json",
+    "/var/home/powos/.cache/powos-gpu-unlock"
+  ],
+  "unbounded": "Kernel module, no userspace daemon. Build cache and rootless builder image only; no ongoing GPU workload.",
+  "remove": {
+    "stop": [],
+    "commands": [
+      "sudo powos-gpu-unlock disable",
+      "sudo rpm-ostree uninstall powos-gpu-unlock"
+    ],
+    "keep": ["/var/home/powos/.cache/powos-gpu-unlock"]
+  },
+  "decide": "Removal takes effect after a separately requested reboot. Rebuild for a new kernel before updating: the RPM depends on the exact kernel-core-uname-r. Local initramfs regeneration remains enabled because other packages may need it."
+}
