@@ -34,6 +34,7 @@ cp -a usr etc %{buildroot}/
 /usr/lib/modules/%{kver}/extra/gpu_unlock.ko
 /usr/lib/firmware/gpu-unlock
 /usr/lib/dracut/dracut.conf.d/gpu-unlock.conf
+/usr/lib/modprobe.d/gpu-unlock.conf
 /usr/share/licenses/gpu-unlock
 /usr/share/licenses/gpu-unlock-firmware
 /usr/share/powos/gpu-unlock
