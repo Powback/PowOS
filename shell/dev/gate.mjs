@@ -1550,6 +1550,38 @@ async function desktopsCheck() {
   return fails;
 }
 
+/** A coalesced final move must not turn a full swipe into a cancelled page switch. */
+async function desktopReleaseCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const G = await window.__gw.mod("./ui/gesture.ts");
+  const handlers = G.homeGestures();
+  const target = document.querySelector(".page-track");
+  const width = document.querySelector(".pages").clientWidth;
+  const failures = [];
+  S.windows.value = [];
+  S.notif.value = false;
+  S.drawer.value = 0;
+  for (const kind of ["touch", "mouse"]) {
+    S.page.value = 0;
+    const point = (x) => ({ clientX: x, clientY: 200 });
+    const start = point(width * 0.8), move = point(width * 0.7), end = point(width * 0.45);
+    if (kind === "touch") {
+      handlers.onTouchStart({ touches: [start], target });
+      handlers.onTouchMove({ touches: [move], cancelable: false });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      handlers.onTouchEnd({ changedTouches: [end] });
+    } else {
+      handlers.onPointerDown({ ...start, pointerType: "mouse", target });
+      handlers.onPointerMove({ ...move, pointerType: "mouse", buttons: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      handlers.onPointerUp({ ...end, pointerType: "mouse" });
+    }
+    if (S.page.value !== 1) failures.push(`${kind}: release crossed the page threshold but stayed on page ${S.page.value}`);
+  }
+  S.page.value = 0;
+  return failures;
+}
+
 /** In the page, after desktopsCheck: a window let go at a screen edge (windows.edge) goes to the next page with home. */
 async function desktopsEdge() {
   const S = await window.__gw.mod("./state.ts");
@@ -2075,7 +2107,8 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     runs.push(
       open(browser, `${ORIGIN}/index.html`, "desktops", { width: 900, height: 1000 }).then(async (r) => {
-        const s = await whenReady(r, () => r.page.evaluate(desktopsCheck));
+        const s = await whenReady(r, () => r.page.evaluate(desktopReleaseCheck));
+        if (!s.problems.length) s.problems.push(...(await r.page.evaluate(desktopsCheck)));
         if (!s.problems.length) s.problems.push(...(await r.page.evaluate(desktopsEdge).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
         if (!s.problems.length) s.problems.push(...(await r.page.evaluate(dockTapCheck).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
         if (!s.problems.length) s.problems.push(...(await r.page.evaluate(windowTouchCheck).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));

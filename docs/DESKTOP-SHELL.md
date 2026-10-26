@@ -1,7 +1,8 @@
 # The desktop shell: the phone's shell/ on Plasma
 
-> **Paused by the user, 2026-10-22.** The desktop is the PowOS home as it works unfolded / widescreen; this separate
-> Plasma host (powos-shell) is kept in the tree but disabled on the phone (`powos-desktop-shell disable`).
+> **Resumed by the user, 2026-10-26:** PC desktop development and Plasma-on-Android integration are both in scope.
+> The separate Plasma host (powos-shell) remains disabled on the phone until explicitly enabled. Android's unfolded
+> home and Plasma keep the independent window ownership described in `docs/DESKTOP-NATIVE.md`.
 
 
 Goal: one codebase for a widget or a PowOS app on the phone and on the desktop. The desktop runs the same `shell/`
@@ -66,6 +67,21 @@ Android bridge is untouched. bridge.ts picks `desktop(native(host))` when `Powos
 
 ## Perf and checks
 
+- Emulator review, 2026-10-26: page switching previously ignored the final touch/mouse release coordinates when
+  WebView coalesced moves. `gesture.ts` now uses that position before settling; the `desktops` browser regression
+  fails against the previous implementation for both input types. Android also cancelled the DOM swipe when an
+  incoming task took window focus, even though native touch delivery continued. `HomeWebView` defers that focus-loss
+  notification until release or cancellation; `float-desktops.sh` requires a real `touchend`, so an accidental flick
+  on cancellation cannot count as a pass. Device checks cover desktop ownership and
+  restart persistence (`float-desktops.sh`), touch isolation (`float-touch.sh`), live resizing (`window-chrome.sh`),
+  and notification expansion (`shade-overpull.sh`). The touch-isolation and shade checks now account for the emulator's
+  lack of OnePlus hinge states and the wide shade's side-by-side layout, respectively.
+- Emulator setup repairs `/system/xbin` traversal on old snapshots and applies the existing caption overlay through
+  adb root. The app's own root helper remains unreliable on this non-Magisk image; `run-as ... su` succeeding is not
+  proof of app-process root access. Captures after the overlay show one title bar. This does not validate the rooted
+  Linux/Plasma session or replace native PC testing. The PC shell's browser gate, type checking and startup tests pass.
+- `cd shell && npm run test:desktop` (Node 22.18+) checks the native host's asynchronous startup without a device:
+  early resizes must preserve the saved layout, and early launches must preserve recent-app history.
 - 0 frames at rest, the same rule as the phone. Measured on the phone over 60 s once settled: host 3 ticks,
   renderer 0, zygotes 0, no running animations, glass measured only at start. Check it with
   `powos-desktop-shell status` (CPU ticks per process) and `dev/phone.sh cdp`.

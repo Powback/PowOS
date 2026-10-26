@@ -17,6 +17,10 @@ cat > "$FAKE_SDK/platform-tools/adb" <<'EOF'
 #!/bin/bash
 args="$*"
 case "$args" in
+  *"test -e /system/xbin/su"*) exit 0 ;;
+  *"stat -c %a /system/xbin"*) echo "${FAKE_XBIN_MODE:-751}" ;;
+  *"remount"*) echo remount >> "$FAKE_SU_LOG" ;;
+  *"chmod o+x /system/xbin"*) echo chmod >> "$FAKE_SU_LOG" ;;
   *"getprop sys.boot_completed"*) echo "${FAKE_BOOT:-1}" ;;
   *"cmd package path android"*) [ "${FAKE_PKG_OK:-1}" = 1 ] && { echo "package:/system/framework/framework-res.apk"; exit 0; } || exit 1 ;;
   *"get-state"*) exit 1 ;;   # "not running" - status's own `running` check, harmless either way
@@ -67,6 +71,13 @@ check "booted: boot_completed=0" \
 # booted(): boot_completed=1 but the package service doesn't answer yet (wedged/still starting) -> false
 check "booted: boot_completed=1, pm not ready" \
   "$(run FAKE_BOOT=1 FAKE_PKG_OK=0 -- 'booted && echo yes || echo no')" "no"
+
+for mode in 750 751 755; do
+  : > "$FAKE_SDK/su.log"
+  run FAKE_XBIN_MODE="$mode" FAKE_SU_LOG="$FAKE_SDK/su.log" -- 'su_access' >/dev/null
+  expected=""; [ "$mode" = 750 ] && expected="remount chmod "
+  check "su access: xbin $mode repairs only missing traversal" "$(tr '\n' ' ' < "$FAKE_SDK/su.log")" "$expected"
+done
 
 # home_ready(): page alive + a real, stable bar rect on both reads -> true, fast (no 120s timeout wait)
 out=$(run FAKE_ALIVE=true FAKE_BAR='[[100,50]]' -- 't0=$(date +%s); home_ready; rc=$?; t1=$(date +%s); echo "$rc $((t1 - t0))"')

@@ -560,18 +560,30 @@ function settlePages(v: number) {
   page.value = Math.max(editing.value ? 0 : -1, Math.min(pageCount.value - 1, page.value + step));
 }
 
+/** Include a release's last position before deciding where the gesture settles. */
+function releaseGesture(x: number, y: number) {
+  // WebView can coalesce moves under load; the release still has the final position.
+  // Do not replace a flick's velocity with zero when the last move already reached it.
+  if (g && (x !== g.last[0] || y !== g.last[1])) moveGesture(x, y, null);
+  endGesture();
+}
+
 /** Handlers for home's root element. */
 export function homeGestures() {
   return {
     onTouchStart: (e: TouchEvent) =>
       e.touches.length === 1 ? startGesture(e.touches[0].clientX, e.touches[0].clientY, e.target as Element) : abandon(),
     onTouchMove: (e: TouchEvent) => moveGesture(e.touches[0].clientX, e.touches[0].clientY, e),
-    onTouchEnd: endGesture,
+    onTouchEnd: (e: TouchEvent) => {
+      const p = e.changedTouches[0];
+      if (p) releaseGesture(p.clientX, p.clientY);
+      else endGesture();
+    },
     onTouchCancel: endGesture,
     // A mouse (working on the shell in a desktop browser).
     onPointerDown: (e: PointerEvent) => e.pointerType === "mouse" && startGesture(e.clientX, e.clientY, e.target as Element),
     onPointerMove: (e: PointerEvent) => e.pointerType === "mouse" && e.buttons && moveGesture(e.clientX, e.clientY, null),
-    onPointerUp: (e: PointerEvent) => e.pointerType === "mouse" && endGesture(),
+    onPointerUp: (e: PointerEvent) => e.pointerType === "mouse" && releaseGesture(e.clientX, e.clientY),
   };
 }
 

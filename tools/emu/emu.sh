@@ -221,7 +221,18 @@ su_install() {
     docker cp powos-gradle-warm:/tmp/powos-emu-su "$d/su" >/dev/null || die "can't copy su out"
   fi
   a push "$d/su" /system/xbin/su >/dev/null 2>&1 || die "can't push su"
-  a shell 'chown root:shell /system/xbin/su; chmod 6755 /system/xbin/su; chcon u:object_r:su_exec:s0 /system/xbin/su'
+  a shell 'chmod o+x /system/xbin; chown root:shell /system/xbin/su; chmod 6755 /system/xbin/su; chcon u:object_r:su_exec:s0 /system/xbin/su'
+}
+# Older snapshots have xbin at 0750: adb is root, but the app cannot even reach su.
+# Repair only that directory's traversal bit; su.c still checks its caller's uid.
+su_access() {
+  a shell 'test -e /system/xbin/su' >/dev/null 2>&1 || return 0
+  local mode; mode=$(a shell stat -c %a /system/xbin | tr -d '\r')
+  [[ "$mode" =~ ^[0-7]+$ ]] || die "cannot read /system/xbin permissions"
+  [ $((0$mode & 1)) -ne 0 ] && return 0
+  a remount >/dev/null 2>&1 || die "cannot remount to repair su access"
+  a shell chmod o+x /system/xbin || die "cannot grant the app traversal to su"
+  say "repaired app access to /system/xbin/su"
 }
 # The phone's settings the window paths need, and SELinux permissive (the phone's Magisk policy lets PowOS's su
 # children do what they do; the emulator has no Magisk).
@@ -233,7 +244,7 @@ settings_like_phone() {
 }
 # HACK: SELinux permissive on the emulator: its policy has no rules for the PowOS app's su children (the phone's Magisk
 # patches them in). Real fix: Magisk (su + sepolicy patches) on the AVD, then enforcing (docs/REMOTE-POWOS.md section 4).
-selinux_permissive() { a shell setenforce 0; }
+selinux_permissive() { a shell setenforce 0; su_access; }
 # What the phone's user granted PowOS over time: every runtime permission it asks for, drawing over apps (the window
 # frames, edge handles: TYPE_APPLICATION_OVERLAY), all files. And the AVD's own launcher off: no longer the recents
 # app, it crash-loops ("Application Error" over home); Android System Intelligence's language-pack download page came up
@@ -243,6 +254,15 @@ grants_like_phone() {
     appops set com.powos.app SYSTEM_ALERT_WINDOW allow; appops set com.powos.app MANAGE_EXTERNAL_STORAGE allow; appops set com.powos.app GET_USAGE_STATS allow
     pm disable-user --user 0 com.google.android.apps.nexuslauncher >/dev/null 2>&1
     pm disable-user --user 0 com.google.android.as >/dev/null 2>&1; true'
+  caption_like_phone
+}
+# The AVD has adb root, not Magisk: a successful run-as su does not prove the app's
+# own sandbox can spawn it. Apply the app's existing caption overlay from adb so
+# the window tests exercise PowOS's one-title-bar setup on this image too.
+caption_like_phone() {
+  a shell 'apk=$(pm path com.powos.app | head -1)
+    test -n "$apk" && CLASSPATH=${apk#package:} app_process /system/bin dev.omalauncher.system.OemCaption &&
+    cmd overlay enable com.android.shell:PowosNoCaption' >/dev/null || die "cannot configure PowOS window captions"
 }
 # stay_awake: the emulator's screen on and staying on. Nobody is looking at it (unlike the phone, whose checks must
 # NEVER wake the screen - a real person may be asleep next to it): the emulator lane owns the opposite rule, and

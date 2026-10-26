@@ -61,7 +61,9 @@ export function desktop(n: Bridge): Bridge {
     for (const i of home.items) if (i.cell && i.cell.x + i.cell.w > cols) i.cell = null;
     return true;
   }
-  addEventListener("resize", () => {
+  addEventListener("resize", async () => {
+    // Qt can resize its surface while the native store is still loading.
+    await ready;
     if (fit()) (n.store.set(HOME, home), emit("home.changed", null));
   });
   const after =
@@ -76,6 +78,7 @@ export function desktop(n: Bridge): Bridge {
       ...n.apps,
       list: async () => (apps = await n.apps.list()),
       launch: async (key) => {
+        await ready;
         await n.apps.launch(key);
         recent = [key, ...recent.filter((k) => k !== key)].slice(0, 30);
         n.store.set(RECENT, recent);

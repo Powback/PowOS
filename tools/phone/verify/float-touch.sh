@@ -15,7 +15,13 @@ L=$HOME/.cache/powos-verify.lock
 PKG=${TEST_APP:-com.oneplus.calculator}
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-restore() { [ "${TOUCHED:-0}" = 1 ] || return 0; release_pkgs; sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
+restore() {
+  [ "${TOUCHED:-0}" = 1 ] || return 0
+  release_pkgs
+  sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
+  [ "${POWOS_DEVICE:-phone}" = emu ] || sh_ "cmd device_state state reset"
+  echo "restored"
+}
 . "$here/window-lock.sh"
 window_lock float-touch.sh 120
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
@@ -44,8 +50,11 @@ s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 # The committed state flips to OPENED before display 0 is the inner screen: 3 s once wasn't enough (right after
 # sketch-rotate, folded: OPENED, wm size still the cover's 1116x2484) - wait for the inner size, up to 15 s.
 claim_pkg $PKG
-sh_ "cmd device_state state 3"; sleep 2; chk unfold
-sh_ "dumpsys device_state | grep -m1 mCommittedState" | grep -q OPENED || fail "the inner screen didn't come on"
+# The AVD is already the inner screen and has no OnePlus hinge states.
+if [ "${POWOS_DEVICE:-phone}" != emu ]; then
+  sh_ "cmd device_state state 3"; sleep 2; chk unfold
+  sh_ "dumpsys device_state | grep -m1 mCommittedState" | grep -q OPENED || fail "the inner screen didn't come on"
+fi
 wsize() { sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1; }
 t=0; WH=$(wsize)
 while [ "${WH%% *}" -le 2000 ] 2>/dev/null && [ $t -lt 13 ]; do sleep 1; t=$((t + 1)); WH=$(wsize); done

@@ -122,6 +122,9 @@ swipe() {
   [ $to -lt 20 ] && to=20; [ $to -gt $((W - 20)) ] && to=$((W - 20))
   # Shorter than home turns a page for (a quarter of its width, no flick): the check's spot, not the product.
   [ $(( (to - x) * $1 )) -ge $((W / 4 + 40)) ] || { echo "ENV: only a $(( (to - x) * $1 )) px swipe fits from $x,$y - stopping (not a product FAIL)"; exit 5; }
+  # A cancelled stream sometimes still turns the page on its last flick velocity. Require the real release too:
+  # raising an incoming task used to make WebView cancel on focus loss, even though Android kept sending moves.
+  "$T/cdp.sh" eval home '(()=>{window.__desktopSwipeEnd=null;if(!window.__desktopSwipeWatching){window.__desktopSwipeWatching=true;for(const t of ["touchend","touchcancel"])addEventListener(t,()=>{window.__desktopSwipeEnd=t},{capture:true,passive:true})}return true})()' >/dev/null
   LASTSWIPE="$x,$y -> $to,$y"; echo "swipe $LASTSWIPE" >>"$OUT/log.txt"
   # The flash probe (2026-10-24: "the windows of the previous page appear for a split second" on the new page): on the
   # device, a SurfaceFlinger composition list every ~0.4 s for 10 s from the swipe, each sample "<device uptime ms>
@@ -133,6 +136,9 @@ swipe() {
   # call it came only once the sampler's 10 s were over (job 20261024-190606-57880: every sample 10-0.6 s before the
   # slide's end line - 56 before / 0 after, and 0 bar samples during the 332 ms swipe back).
   sh_ "rm -f /data/local/tmp/fd-flash.txt /data/local/tmp/fd-bar.txt; (read u0 r </proc/uptime; u0=\${u0%.*}; while :; do read u r </proc/uptime; [ \${u%.*} -ge \$((u0 + 10)) ] && break; d=\$(dumpsys SurfaceFlinger); h=\$(echo \"\$d\" | awk \"/HWC layers/{f=1} f&&/^\\\$/{f=0} f\"); v=\$(echo \"\$h\" | grep -c $PKG); echo \${u%.*}\${u#*.}0 \$v >>/data/local/tmp/fd-flash.txt; echo \"@ \${u%.*}\${u#*.}0\" >>/data/local/tmp/fd-bar.txt; bl=\$(echo \"\$d\" | grep -A22 \"Layer .*window bar ${id:-x}#\"); ba=\$(echo \"\$bl\" | grep -o -m1 \"alpha=[0-9.]*\"); bv=\$(echo \"\$bl\" | grep -o -m1 \"isVisible=[a-z]*\"); echo \"=A \${ba:-none} \${bv:-none}\" >>/data/local/tmp/fd-bar.txt; echo \"\$h\" | grep -A1 -e $PKG -e \"window bar ${id:-x}\" >>/data/local/tmp/fd-bar.txt; done </dev/null >/dev/null 2>&1 &); input swipe $x $y $to $y 250"; sleep 1.5
+  local ended; ended=$("$T/cdp.sh" eval home 'window.__desktopSwipeEnd' | tr -d '\"\r' | tail -1)
+  [ "$ended" = touchend ] || fail "swipe lost its touch stream ($ended): $LASTSWIPE"
+  pass "swipe received its release"
 }
 
 # After a swipe that leaves the window behind: was it composited after the slide ended? $1 the step. The end time is
