@@ -118,7 +118,9 @@ for p in "${pkgs[@]}"; do
       # A fork mounted from the Mac is owned by another uid (virtiofs): git refuses to clone it ("dubious ownership")
       # unless it is trusted, by name, for this container only.
       for f in $FORKS; do git config --system --add safe.directory "$f"; git config --system --add safe.directory "$f/.git"; done
-      chown builder /ccache
+      # Base images assign different builder UIDs; each owns its cache subdirectory.
+      cache=/ccache/uid-$(id -u builder)
+      mkdir -p "$cache" && chown builder "$cache"
       echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
       case $SRC in
         local)    cp -r /pkg/. /build/ ;;
@@ -146,7 +148,7 @@ for p in "${pkgs[@]}"; do
       ignorearch=""; [ "$SRC" = local ] || ignorearch=--ignorearch
       # The real sudo, also for makepkg'"'"'s own (sudo pacman, for the dependencies): PowOS'"'"'s rootfs has a sudo
       # stand-in in /usr/local/bin, first on PATH, which knows neither -u nor VAR=value.
-      /usr/bin/sudo -u builder env PATH=/usr/bin:/usr/sbin MAKEFLAGS="-j8" CCACHE_DIR=/ccache CCACHE_MAXSIZE=30G \
+      /usr/bin/sudo -u builder env PATH=/usr/bin:/usr/sbin MAKEFLAGS="-j8" CCACHE_DIR="$cache" CCACHE_MAXSIZE=30G \
         CCACHE_BASEDIR=/build makepkg -sf --noconfirm --skippgpcheck --nocheck $ignorearch
       cp /build/*.pkg.tar.* /out/'
   # Scratch only (KWin's build tree is several GB) on the Docker disk shared with live services.
