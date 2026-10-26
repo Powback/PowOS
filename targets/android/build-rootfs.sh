@@ -43,6 +43,10 @@ cp -a "$HERE/session" "$HERE/shims" "$HERE/play" "$HERE/phone-rules.conf" "$HERE
 install -m 755 "$HERE/install-powos-android.sh" "$S/"
 # The PowOS desktop widgets from this checkout (install-powos-android.sh puts them over the image content's).
 cp -a "$HERE/../../desktop/plasmoid" "$S/plasmoids"
+# The downloaded manifest supplies distro packages; ship this checkout's committed PowOS CLI and libraries.
+mkdir -p "$S/current"
+git -C "$HERE/../.." archive HEAD bin lib | tar -x -C "$S/current"
+git -C "$HERE/../.." rev-parse HEAD > "$S/current/revision"
 
 # 3. Build inside a privileged aarch64 container (chroot + mounts need it), on a Docker volume:
 #    a bind-mounted macOS directory can't hold Linux ownership, device nodes or hard links.

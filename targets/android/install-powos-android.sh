@@ -113,6 +113,13 @@ zstd -dc $P/manifest/content.tar.zst | tar -x -C / --no-same-owner --exclude-fro
 # The PowOS widgets from the checkout being built, over the published image's copies: a widget fix reaches these
 # targets with the build instead of waiting for the next image (the content is the image's; widgets are QML only).
 [ -d $P/plasmoids ] && cp -a $P/plasmoids/. /usr/share/plasma/plasmoids/
+# Keep the phone's PowOS code at the release revision even when the Deck manifest is older.
+if [ -d "$P/current" ]; then
+  cp -a "$P/current/bin/." /usr/bin/
+  mkdir -p /usr/lib/powos
+  cp -a "$P/current/lib/." /usr/lib/powos/
+  install -Dm644 "$P/current/revision" /usr/share/powos/revision
+fi
 cp $P/manifest/flatpaks.txt /usr/share/powos/phone-flatpaks.txt
 
 # HACK: bun is an x86 binary the PowOS image puts outside any package (Containerfile curl), so the manifest
