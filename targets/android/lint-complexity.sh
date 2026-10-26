@@ -50,7 +50,7 @@ if [ ! -f "$JAR" ]; then
   mv "$JAR.part" "$JAR"
 fi
 out=$(mktemp -d "$CACHE/run.XXXXXX"); trap 'rm -rf "$out"' EXIT
-inputs=app/src/main,owl/src/main
+inputs=app/src/main,owl/src/main,owl/src/cli
 [ -d "$APP/engine" ] && inputs+=,engine
 # --only paths may be relative to targets/android/app (the hook's form), repo-relative, or absolute (f294: only the
 # first form matched, the others said "nothing to lint"): normalize all to app-relative.

@@ -44,44 +44,43 @@ import java.time.Duration
  */
 internal fun trees(args: List<String>): Int {
     fun opt(name: String) = args.indexOf(name).takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
-    // --batch <batch.json>: [{ "file", "theme", "data", "live", "variants": [...], "out" }] - one JVM for a whole preview.
-    opt("--batch")?.let { batch ->
-        var failed = 0
-        for (job in (Json.parse(File(batch).readText()) as Lst).items.map { (it as Obj).fields }) {
-            val text =
-                try {
-                    trees(
-                        File(job["file"].toString()).readText(),
-                        job["theme"]?.takeIf { it != Null }?.let { toml(File(it.toString()).readText()) }.orEmpty(),
-                        job["data"]?.takeIf { it != Null }?.let { File(it.toString()) }?.takeIf { it.exists() }?.let { Json.parse(it.readText()) as? Obj }?.fields.orEmpty(),
-                        (job["variants"] as Lst).items.map { it as Obj },
-                        job["live"]?.truthy == true,
-                    )
-                } catch (e: Exception) {
-                    failed++
-                    Json.write(Obj(mapOf("errors" to Lst(listOf(Str("${job["file"]}: ${e.message ?: e}"))))))!!
-                }
-            File(job["out"].toString()).writeText(text)
-        }
-        return if (failed == 0) 0 else 1
-    }
+    opt("--batch")?.let { return batchTrees(it) }
     val file = args.firstOrNull { !it.startsWith("--") } ?: return 2
     val theme = opt("--theme")?.let { toml(File(it).readText()) }.orEmpty()
-    val data = opt("--data")?.let { File(it) }?.takeIf { it.exists() }?.let { Json.parse(it.readText()) as? Obj }?.fields.orEmpty()
     val variants = (Json.parse(File(opt("--variants") ?: return 2).readText()) as Lst).items.map { it as Obj }
-    println(trees(File(file).readText(), theme, data, variants, "--live" in args))
+    println(trees(File(file).readText(), PreviewInputs(theme, readData(opt("--data")), "--live" in args), variants))
     return 0
 }
 
-private fun trees(
-    source: String,
-    theme: Map<String, Int>,
-    data: Map<String, Value>,
-    variants: List<Obj>,
-    live: Boolean,
-): String {
+private data class PreviewInputs(val theme: Map<String, Int>, val data: Map<String, Value>, val live: Boolean)
+
+private fun readData(path: String?): Map<String, Value> =
+    path?.let { File(it) }?.takeIf { it.exists() }?.let { Json.parse(it.readText()) as? Obj }?.fields.orEmpty()
+
+private fun batchTree(job: Map<String, Value>): String {
+    val theme = job["theme"]?.takeIf { it != Null }?.let { toml(File(it.toString()).readText()) }.orEmpty()
+    val data = readData(job["data"]?.takeIf { it != Null }?.toString())
+    val variants = (job["variants"] as Lst).items.map { it as Obj }
+    return trees(File(job["file"].toString()).readText(), PreviewInputs(theme, data, job["live"]?.truthy == true), variants)
+}
+
+private fun batchTrees(path: String): Int {
+    var failed = 0
+    for (job in (Json.parse(File(path).readText()) as Lst).items.map { (it as Obj).fields }) {
+        val text = try {
+            batchTree(job)
+        } catch (e: Exception) {
+            failed++
+            Json.write(Obj(mapOf("errors" to Lst(listOf(Str("${job["file"]}: ${e.message ?: e}"))))))!!
+        }
+        File(job["out"].toString()).writeText(text)
+    }
+    return if (failed == 0) 0 else 1
+}
+
+private fun trees(source: String, inputs: PreviewInputs, variants: List<Obj>): String {
     val program = Compiler.compile(source)
-    val host = PreviewHost(program, theme, data, live)
+    val host = PreviewHost(program, inputs.theme, inputs.data, inputs.live)
     val out = LinkedHashMap<String, Value>()
     for (v in variants) {
         val f = v.fields
@@ -165,10 +164,13 @@ private class PreviewHost(
                 g.kind == "http" && live -> listOfNotNull(fetch(g))
                 else -> emptyList()
             }
-        return raw.map { v ->
-            val parsed = if (v is Str && g.json) Json.parseOrText(v.v) else v
-            if (g.status && !(parsed is Obj && "ok" in parsed.fields)) Obj(mapOf("out" to parsed, "err" to Str(""), "code" to Num(0.0), "ok" to bool(true))) else parsed
-        }
+        return raw.map { sourceValue(g, it) }
+    }
+
+    private fun sourceValue(g: Global.Source, v: Value): Value {
+        val parsed = if (v is Str && g.json) Json.parseOrText(v.v) else v
+        if (!g.status || (parsed is Obj && "ok" in parsed.fields)) return parsed
+        return Obj(mapOf("out" to parsed, "err" to Str(""), "code" to Num(0.0), "ok" to bool(true)))
     }
 
     private fun fetch(g: Global.Source): Value? =
@@ -184,19 +186,20 @@ private class PreviewHost(
 
     private fun sample() {
         lets.clear()
-        program.globals.forEachIndexed { i, g ->
-            if (g !is Global.Sampled) return@forEachIndexed
-            val v = eval(g.of, root, g.name)
-            if (v == Null) return@forEachIndexed
-            if (g.prev) {
-                val before = last[i]
-                if (before != v) {
-                    write(i, before ?: Null)
-                    last[i] = v
-                }
-            } else {
-                write(i, Lst((((slots[i] as? Lst)?.items).orEmpty() + v).takeLast(g.keep)))
-            }
+        program.globals.forEachIndexed { i, g -> if (g is Global.Sampled) sampleValue(i, g) }
+    }
+
+    private fun sampleValue(i: Int, g: Global.Sampled) {
+        val v = eval(g.of, root, g.name)
+        if (v == Null) return
+        if (!g.prev) {
+            write(i, Lst((((slots[i] as? Lst)?.items).orEmpty() + v).takeLast(g.keep)))
+            return
+        }
+        val before = last[i]
+        if (before != v) {
+            write(i, before ?: Null)
+            last[i] = v
         }
     }
 
@@ -228,19 +231,11 @@ private class PreviewHost(
     override fun time() = 0.0
 
     override fun tile(name: String): Value {
-        val v =
-            when (name) {
-                "linux" -> return data["linux"] ?: bool(true)
-                "corners" -> return Num(1.0)
-                "screenWidth" -> screen[0]
-                "screenHeight" -> screen[1]
-                "cols" -> tile[0]
-                "rows" -> tile[1]
-                "tileWidth" -> tile[2]
-                "tileHeight" -> tile[3]
-                else -> null
-            }
-        return v?.let { Num(Math.round(it).toDouble()) } ?: Null
+        if (name == "linux") return data["linux"] ?: bool(true)
+        if (name == "corners") return Num(1.0)
+        val sizes = mapOf("screenWidth" to screen[0], "screenHeight" to screen[1],
+            "cols" to tile[0], "rows" to tile[1], "tileWidth" to tile[2], "tileHeight" to tile[3])
+        return sizes[name]?.let { Num(Math.round(it).toDouble()) } ?: Null
     }
 
     fun setTile(
@@ -340,26 +335,31 @@ private class TreeWalk(
                 val branch = if (inst.eval(node.cond, env, "if").truthy) node.then else node.orElse
                 branch.forEachIndexed { i, n -> node(n, env, "$id.${if (branch === node.then) "t" else "e"}$i", out) }
             }
-            is WNode.For ->
-                items(inst.eval(node.list, env, "for")).forEachIndexed { i, v ->
-                    val child = env.child(v, Num(i.toDouble()))
-                    val key = node.key?.let { inst.eval(it, child, "for key").toString() } ?: i.toString()
-                    node.body.forEachIndexed { j, n -> node(n, child, "$id[$key].$j", out) }
-                }
+            is WNode.For -> loopNode(node, env, id, out)
             is WNode.Lets -> {
                 val frame = env.lets(node.values)
                 node.children.forEachIndexed { i, n -> node(n, frame, "$id.$i", out) }
             }
-            is WNode.Use -> {
-                val inner = Env(inst, inst.root, Array(node.args.size) { i -> { inst.eval(node.args[i], env, "${node.component} parameter") } })
-                if (node.wrapper.isEmpty()) {
-                    node.body.forEachIndexed { i, n -> node(n, inner, "$id.$i", out) }
-                } else {
-                    val wrapper = WNode.Element("Box", node.wrapper, emptyMap(), emptyMap(), emptyList(), node.pos)
-                    element(wrapper, env, id)?.let { box -> out += Obj(box.fields + ("c" to nodes(node.body, inner, id))) }
-                }
-            }
+            is WNode.Use -> useNode(node, env, id, out)
             is WNode.Draw -> {}
+        }
+    }
+
+    private fun loopNode(n: WNode.For, env: Env, id: String, out: MutableList<Value>) {
+        items(inst.eval(n.list, env, "for")).forEachIndexed { i, v ->
+            val child = env.child(v, Num(i.toDouble()))
+            val key = n.key?.let { inst.eval(it, child, "for key").toString() } ?: i.toString()
+            n.body.forEachIndexed { j, childNode -> node(childNode, child, "$id[$key].$j", out) }
+        }
+    }
+
+    private fun useNode(n: WNode.Use, env: Env, id: String, out: MutableList<Value>) {
+        val inner = Env(inst, inst.root, Array(n.args.size) { i -> { inst.eval(n.args[i], env, "${n.component} parameter") } })
+        if (n.wrapper.isEmpty()) {
+            n.body.forEachIndexed { i, child -> node(child, inner, "$id.$i", out) }
+        } else {
+            val wrapper = WNode.Element("Box", n.wrapper, emptyMap(), emptyMap(), emptyList(), n.pos)
+            element(wrapper, env, id)?.let { box -> out += Obj(box.fields + ("c" to nodes(n.body, inner, id))) }
         }
     }
 
@@ -377,55 +377,61 @@ private class TreeWalk(
         val o = linkedMapOf<String, Value>("k" to Str(el.kind), "id" to Str(id), "p" to Obj(props))
         if (el.handlers.isNotEmpty()) o["h"] = Lst(el.handlers.keys.map(::Str))
         if (el.kind == "Canvas") {
-            val (w, h) = canvasSizes[id] ?: (100.0 to 100.0)
-            val ops = ArrayList<Value>()
-            try {
-                draw(el.children, env.child(Num(w), Num(h)), ops)
-            } catch (e: WidgetError) {
-                inst.report("Canvas: ${e.message}")
-            }
-            o["ops"] = Lst(ops)
+            o["ops"] = canvasOps(el, env, id)
         } else if (el.children.isNotEmpty()) {
             o["c"] = nodes(el.children, env, id)
         }
         return Obj(o)
     }
 
-    private fun draw(
-        list: List<WNode>,
-        env: Env,
-        out: MutableList<Value>,
-    ) {
-        for (n in list) {
-            when (n) {
-                is WNode.Draw -> {
-                    if (out.size > MAX_OPS) throw WidgetError("more than $MAX_OPS drawing calls in one frame")
-                    val values = n.op == "path" || n.op == "text" || n.op == "image" || n.op == "sprite"
-                    val args =
-                        n.args.mapIndexed { i, a ->
-                            val v = inst.eval(a, env, "Canvas.${n.op}")
-                            if (i == 0 && values) json(v) else Num((v as? Num)?.v?.takeIf { it.isFinite() } ?: 0.0)
-                        }
-                    val named = LinkedHashMap<String, Value>()
-                    for ((name, ev) in n.named) {
-                        val v = inst.eval(ev, env, "Canvas.${n.op} $name")
-                        named[name] = if (name in DRAW_COLORS) paint(v) ?: Null else json(v)
-                    }
-                    val op = linkedMapOf<String, Value>("op" to Str(n.op), "a" to Lst(args), "n" to Obj(named))
-                    n.children?.let { kids ->
-                        val nested = ArrayList<Value>()
-                        draw(kids, env, nested)
-                        op["c"] = Lst(nested)
-                    }
-                    out += Obj(op)
-                }
-                is WNode.If -> draw(if (inst.eval(n.cond, env, "if").truthy) n.then else n.orElse, env, out)
-                is WNode.For -> items(inst.eval(n.list, env, "for")).forEachIndexed { i, v -> draw(n.body, env.child(v, Num(i.toDouble())), out) }
-                is WNode.Lets -> draw(n.children, env.lets(n.values), out)
-                else -> {}
+    private fun canvasOps(el: WNode.Element, env: Env, id: String): Lst {
+        val (w, h) = canvasSizes[id] ?: (100.0 to 100.0)
+        val ops = ArrayList<Value>()
+        try {
+            draw(el.children, env.child(Num(w), Num(h)), ops)
+        } catch (e: WidgetError) {
+            inst.report("Canvas: ${e.message}")
+        }
+        return Lst(ops)
+    }
+
+    private fun draw(list: List<WNode>, env: Env, out: MutableList<Value>) {
+        for (n in list) drawNode(n, env, out)
+    }
+
+    private fun drawNode(n: WNode, env: Env, out: MutableList<Value>) {
+        when (n) {
+            is WNode.Draw -> {
+                if (out.size > MAX_OPS) throw WidgetError("more than $MAX_OPS drawing calls in one frame")
+                out += drawOp(n, env)
             }
+            is WNode.If -> draw(if (inst.eval(n.cond, env, "if").truthy) n.then else n.orElse, env, out)
+            is WNode.For -> items(inst.eval(n.list, env, "for")).forEachIndexed { i, v -> draw(n.body, env.child(v, Num(i.toDouble())), out) }
+            is WNode.Lets -> draw(n.children, env.lets(n.values), out)
+            else -> {}
         }
     }
+
+    private fun drawOp(n: WNode.Draw, env: Env): Obj {
+        val args = n.args.mapIndexed { i, a ->
+            val v = inst.eval(a, env, "Canvas.${n.op}")
+            if (i == 0 && n.op in setOf("path", "text", "image", "sprite")) json(v) else drawNumber(v)
+        }
+        val named = LinkedHashMap<String, Value>()
+        for ((name, ev) in n.named) {
+            val v = inst.eval(ev, env, "Canvas.${n.op} $name")
+            named[name] = if (name in DRAW_COLORS) paint(v) ?: Null else json(v)
+        }
+        val op = linkedMapOf<String, Value>("op" to Str(n.op), "a" to Lst(args), "n" to Obj(named))
+        n.children?.let { kids ->
+            val nested = ArrayList<Value>()
+            draw(kids, env, nested)
+            op["c"] = Lst(nested)
+        }
+        return Obj(op)
+    }
+
+    private fun drawNumber(v: Value): Num = Num((v as? Num)?.v?.takeIf { it.isFinite() } ?: 0.0)
 
     private fun css(v: Value): Value? = Builtins.argb(v, inst)?.let { Str(cssColor(it)) }
 
@@ -445,13 +451,15 @@ private class TreeWalk(
     private fun json(v: Value): Value =
         when (v) {
             is Null, is Str, is Bool -> v
-            is Num -> if (v.v.isFinite()) v else Null
+            is Num -> finiteNumber(v)
             is Lst -> Lst(v.items.map(::json))
             is Obj -> Obj(v.fields.mapValues { json(it.value) })
             is Col -> css(v) ?: Null
             is Gradient -> paint(v) ?: Null
             else -> Str(v.toString())
         }
+
+    private fun finiteNumber(v: Num): Value = if (v.v.isFinite()) v else Null
 
     companion object {
         private val COLORS = setOf("color", "background", "borderColor", "track", "tint", "fallback")

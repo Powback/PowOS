@@ -62,20 +62,20 @@ private fun review(args: List<String>): Int {
     val plain = args.filterIndexed { i, a -> a != "--base" && (i == 0 || args[i - 1] != "--base") }
     val repo = File(plain.firstOrNull() ?: usage())
     val paths = plain.drop(1).ifEmpty { usage() }
-    var failed = 0
-    for (path in paths) {
-        val file = File(repo, path)
-        if (!file.exists()) {
-            println("### 🗑️ `$path` removed\n")
-            continue
-        }
-        val previous = base?.let { File(it, path) }?.takeIf { it.exists() }?.readText()
-        val r = Review(path, file.readText(), previous)
-        if (File(file.parentFile, "preview.png").exists().not()) r.warnings += "no preview.png next to the widget; the store shows a placeholder"
-        println(r.markdown())
-        if (r.errors.isNotEmpty()) failed++
+    return if (paths.count { reviewPath(repo, it, base) } == 0) 0 else 1
+}
+
+private fun reviewPath(repo: File, path: String, base: String?): Boolean {
+    val file = File(repo, path)
+    if (!file.exists()) {
+        println("### 🗑️ `$path` removed\n")
+        return false
     }
-    return if (failed == 0) 0 else 1
+    val previous = base?.let { File(it, path) }?.takeIf { it.exists() }?.readText()
+    val r = Review(path, file.readText(), previous)
+    if (!File(file.parentFile, "preview.png").exists()) r.warnings += "no preview.png next to the widget; the store shows a placeholder"
+    println(r.markdown())
+    return r.errors.isNotEmpty()
 }
 
 private fun programs(files: List<String>): Int {
