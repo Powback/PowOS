@@ -33,11 +33,19 @@ git clone -q "$ANDROMARCHY_URL" "$W/andromarchy"
 git -C "$W/andromarchy" checkout -q "$ANDROMARCHY_REF"
 for p in "$HERE"/patches/andromarchy/*.patch; do patch -d "$W/andromarchy" -p1 < "$p"; done
 
-# 2. What PowOS is: the published PowOS Deck image's manifest (a few MB; see
+# 2. What PowOS is: the published PowOS Deck image's manifest and content (see
 #    .github/workflows/phone-manifest.yml). POWOS_MANIFEST picks another one (e.g. a commit's deck-<digest>).
 S=$W/powos
 rm -rf "$S" && mkdir -p "$S/pkgs"
-"$HERE/tools/fetch-manifest.sh" "$S/manifest" "${POWOS_MANIFEST:-ghcr.io/powback/powos-phone:deck}"
+if [ -n "${POWOS_MANIFEST_DIR:-}" ]; then
+  # Reuse a completed fetch when retrying a build, without downloading the content archive again.
+  for f in image.txt packages.tsv leaves.tsv content.list content.tar.zst; do
+    [ -s "$POWOS_MANIFEST_DIR/$f" ] || { echo "missing manifest input: $POWOS_MANIFEST_DIR/$f" >&2; exit 1; }
+  done
+  cp -a "$POWOS_MANIFEST_DIR" "$S/manifest"
+else
+  "$HERE/tools/fetch-manifest.sh" "$S/manifest" "${POWOS_MANIFEST:-ghcr.io/powback/powos-phone:deck}"
+fi
 cp $("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs") "$S/pkgs/"   # ours: kwin, fex-emu, recipes.list builds (newest of each)
 cp -a "$HERE/session" "$HERE/shims" "$HERE/play" "$HERE/phone-rules.conf" "$HERE/tools/resolve-packages.py" "$HERE/tools/phone-parity.py" "$S/"
 install -m 755 "$HERE/install-powos-android.sh" "$S/"
