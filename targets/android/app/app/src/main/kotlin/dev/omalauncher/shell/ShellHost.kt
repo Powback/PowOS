@@ -92,7 +92,11 @@ class ShellHost(
     private val boot = Boot()
 
     /** The page's own port (open, surface tiles): [ShellNative], handed only to the top frame at the page's origin. */
-    private val native = ShellNative(context, web, devUrl()?.let { Uri.parse(it).let { u -> "${u.scheme}://${u.authority}" } } ?: ORIGIN)
+    private val native = ShellNative(
+        context, web, devUrl()?.let { Uri.parse(it).let { u -> "${u.scheme}://${u.authority}" } } ?: ORIGIN,
+        // Frame windows already have one compositor-blur owner (WindowFrame), including the clear grip at rest.
+        pageGlass = mode != "windowbar" && mode != "windowgrip",
+    )
 
     init {
         ShellIcons.init(context.applicationContext, runtime)

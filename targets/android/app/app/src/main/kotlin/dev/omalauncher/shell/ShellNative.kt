@@ -56,6 +56,7 @@ class ShellNative(
     private val context: Context,
     private val web: WebView,
     private val origin: String,
+    pageGlass: Boolean = true,
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val render = HandlerThread("PowosSurface").apply { start() }
@@ -66,7 +67,7 @@ class ShellNative(
 
     /** The glass's live blur (Android 13+: the window's surface control), for a page in a window. */
     internal val glass: GlassBlur? =
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        if (pageGlass && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             GlassBlur(web) { text -> port?.postMessage(WebMessage(text)) }.also { g ->
                 g.holes = { synchronized(tiles) { tiles.values.mapNotNull { it.shownRect() } } }
             }

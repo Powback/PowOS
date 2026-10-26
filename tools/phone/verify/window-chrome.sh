@@ -105,4 +105,20 @@ W0=$((AR - AL)); WM=$((MR - ML)); W1=$((ER - EL))
 [ $(( (W1 - W0) * SG )) -gt 0 ] || fail "the grip didn't resize the window ($W0 -> $W1 px wide)"
 [ $(( (WM - W0) * SG )) -gt 0 ] && [ $(( (W1 - WM) * SG )) -gt 0 ] && pass "live resize: the app's window $W0 -> $WM (mid-drag) -> $W1 px wide" ||
   fail "not live: the app's window was $WM px wide mid-drag ($W0 before, $W1 after)"
+# 3. The remaining title-bar controls, through real taps (not bridge actions).
+read -r BL BT BR BB <<<"$(wframe "PowOS window bar $BID")"
+sh_ "input tap $((BR - $(px 87))) $(((BT + BB) / 2))"
+sleep 1.5; chk minimise
+r=$(hcall windows.list "[]" "l=>l.find(w=>w.id===$BID)?.minimised?'minimised':'not-minimised'")
+[ "$r" = minimised ] || fail "the web title-bar minimise button: $r"
+pass "web title-bar minimise hides its task"
+hcall windows.restore "[$BID]" "v=>String(v)" >/dev/null
+sleep 2.5
+read -r BL BT BR BB <<<"$(wframe "PowOS window bar $BID")"
+[ -n "${BB:-}" ] || fail "no title bar after restoring the minimised task"
+sh_ "input tap $((BR - $(px 19))) $(((BT + BB) / 2))"
+sleep 1.5; chk close
+r=$(hcall windows.list "[]" "l=>l.some(w=>w.id===$BID)?'still-present':'closed'")
+[ "$r" = closed ] || fail "the web title-bar close button: $r"
+pass "web title-bar close removes its task"
 echo "all passed; artefacts: $OUT"

@@ -442,6 +442,9 @@ internal class GlassBlur(
             val ok =
                 a.size >= 10 && a[0] == 30f && kotlin.math.abs(a[1] - 0.5f) < 0.01f && a[2] == 10f && a[3] == 20f &&
                     a[4] == 110f && a[5] == 220f && a[6] == 1f && a[7] == 2f && a[8] == 4f && a[9] == 3f
+            // The encoder retains its drawable. Leave it empty after probing: Android 16 can include it in a
+            // later window aggregate despite mVisible=false (a 100x200 test rectangle beside a hidden grip).
+            c.encode(Region(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f))
             Log.i(TAG, "blur regions ${if (ok) "usable" else "NOT usable"}: ${a.size} floats per region (${a.take(10)})")
             return ok
         }
