@@ -51,6 +51,9 @@ object PageSlide {
 
     val active get() = session != null
 
+    /** A finger still drives the slide, before its release starts the settle. */
+    val dragging get() = active && settleAt == 0L
+
     /** Home's "windows.slide" (ui/desktops.ts): start {rels, width, x} | move x | settle {to, ms, curve, hide} | cancel; CSS px * [d]. */
     fun call(
         context: Context,

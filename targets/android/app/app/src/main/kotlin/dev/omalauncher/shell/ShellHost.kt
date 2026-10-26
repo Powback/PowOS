@@ -61,7 +61,7 @@ class ShellHost(
 
     @SuppressLint("SetJavaScriptEnabled")
     val web: WebView =
-        WebView(context).apply {
+        (if (mode == null) HomeWebView(context) else WebView(context)).apply {
             setBackgroundColor(Color.TRANSPARENT)
             // No View scrollbars over the page (a faint line at the right edge); the page scrolls on its own.
             isVerticalScrollBarEnabled = false
