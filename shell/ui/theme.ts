@@ -32,4 +32,3 @@ export async function loadTheme() {
   powos.on("theme.changed", applyTheme);
   applyTheme(await powos.theme.get().catch(() => null));
 }
-
