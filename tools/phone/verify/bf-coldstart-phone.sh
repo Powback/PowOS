@@ -256,6 +256,21 @@ cs_no_window_evidence() {
   echo "   console_log (waiting for user response, since the tap): $(tail -n +$((cl + 1)) "$S/logs/console_log.txt" 2>/dev/null | grep -i 'waiting for user response' | tail -6 | cut -c1-150 | tr '\n' '|')"
   echo "   connection_log (latest state): $(tail -3 "$S/logs/connection_log.txt" 2>/dev/null | cut -c1-150 | tr '\n' '|')"
 }
+# Read KWin's own state before judging a black Android task: X's hidden bit alone also covers off-desktop windows.
+window_evidence() {
+  local plugin=powos-game-evidence-$$ script="$T/window-evidence.js"
+  cat > "$script" <<'JS'
+for (const w of workspace.windowList()) {
+    print("POWOS_GAME_STATE " + JSON.stringify({caption:String(w.caption),id:String(w.internalId),minimized:w.minimized,hidden:w.hidden,active:w.active,fullScreen:w.fullScreen,desktops:w.desktops.map(d=>d.id),shownByTask:w.powosShownByTask}));
+}
+JS
+  qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript "$script" "$plugin" >/dev/null
+  qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.start >/dev/null
+  sleep 1
+  grep 'POWOS_GAME_STATE' "$HYPR" | tail -12
+  qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript "$plugin" >/dev/null
+}
+
 run() {  # run <variant> <n>
   local v=$1 t0 st
   declare -gA seen=()
@@ -279,10 +294,12 @@ run() {  # run <variant> <n>
   if [ -n "${seen[window]:-}" ]; then
     exported "$v" "$hl" "$W"
     pill "cold start timing: $v - first frame"
+    window_evidence
     x=$(first_frame 90)
     if [[ "$x" =~ ^[0-9]+([.][0-9]+)?$ ]] && [ "$(ms "$t0" "$x")" -ge 0 ]; then
       seen[frame]=$(ms "$t0" "$x")
     else
+      window_evidence
       fail "frame-$v" "window created but no new game frame measured within 90 s"
     fi
   elif [ -n "${seen[handoff]:-}" ]; then fail "handoff-$v" "the running Steam didn't log the launch's URL in 20 s (handoff lines above)"
