@@ -88,8 +88,8 @@ trace_on() { printf '%s\n' 'buffers { size_kb: 65536 fill_policy: RING_BUFFER }'
 trace_off() { sh_ "pkill -INT perfetto"; sleep 2; sh_ "cp /data/misc/perfetto-traces/ps.pftrace /data/local/tmp/ps.pftrace; chmod 644 /data/local/tmp/ps.pftrace"
   "$A" pull /data/local/tmp/ps.pftrace "$1" >/dev/null 2>&1 && log "trace: $1 ($(du -k "$1" | cut -f1) KB)" || fail "no trace"; sh_ "rm -f /data/local/tmp/ps.pftrace"; }
 gfx() { sh_ "dumpsys gfxinfo com.powos.app" | grep -m6 -E "Total frames rendered|Janky frames|50th percentile|90th percentile|99th percentile|Number Missed Vsync" | xargs; }
-pagelag() { local p x y to d=1
-  p=$(freept "$(win "$WKEY" bounds 2>/dev/null)" $d $((W * 35 / 100))); [ "$p" = none ] || [ -z "$p" ] && { d=-1; p=$(freept "$(win "$WKEY" bounds 2>/dev/null)" $d $((W * 35 / 100))); }
+pagelag() { local p x y to d=${POWOS_PAGE_DIRECTION:-1}
+  p=$(freept "$(win "$WKEY" bounds 2>/dev/null)" $d $((W * 35 / 100))); [ "$p" = none ] || [ -z "$p" ] && { d=$((-d)); p=$(freept "$(win "$WKEY" bounds 2>/dev/null)" $d $((W * 35 / 100))); }
   [ "$p" != none ] && [ -n "$p" ] || { fail "[$1] no spot for a page swipe"; return; }
   set -- $p "$1"; x=$1; y=$2; to=$((x + d * W * 35 / 100))
   logc; sh_ "dumpsys gfxinfo com.powos.app reset >/dev/null"; rec "pages-$3" 10
