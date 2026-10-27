@@ -25,6 +25,8 @@ class WindowFrames(
     private val context: Context = service.createDisplayContext(display).createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
     private val main = Handler(Looper.getMainLooper())
     private val frames = mutableMapOf<Int, WindowFrame>()
+    /** Detached frames of recently visited desktops: bounded, paused, and never accepting input. */
+    private val parked = linkedMapOf<Int, WindowFrame>()
     private var stopListening: (() -> Unit)? = null
     private var keyguard = false
     private val refreshNow = Runnable { refresh() }
@@ -91,6 +93,8 @@ class WindowFrames(
         main.removeCallbacks(refreshLate)
         frames.values.forEach { it.remove() }
         frames.clear()
+        parked.values.forEach { it.remove() }
+        parked.clear()
         if (current === this) {
             current = null
             dev.omalauncher.shell.HighRefresh.onWanted = null
@@ -189,7 +193,7 @@ class WindowFrames(
         val show = if (framed) shown(all) else emptyList()
         // A page swipe's windows keep their frames where they are till the page change is committed ([sliding]).
         val ids = show.map { it.id }.toSet() + held(all, floating && !keyguard) + sliding.keys
-        frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
+        retireFrames(ids, all.map { it.id }.toSet(), floating)
         if (framed) belowStatusBar(show)
         frame(show.filter { it.id !in sliding })
         if (sliding.isNotEmpty()) return
@@ -259,7 +263,7 @@ class WindowFrames(
         committed: Boolean,
     ) {
         for (id in sliding.keys) {
-            if (id in gone) frames.remove(id)?.remove() else frames[id]?.apply { slideTo(0); slideShow() }
+            if (id in gone) park(id) else frames[id]?.apply { slideTo(0); slideShow() }
         }
         Log.i(TAG, "slide end: bars of ${sliding.entries.joinToString { "${it.key}@${it.value.toInt()}" }}, gone ${gone.ifEmpty { "none" }}")
         if (committed) return
@@ -306,7 +310,30 @@ class WindowFrames(
         }
     }
 
-    private fun newFrame(w: FreeformTasks.Window) = WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w), ownBar(w)), ::minimise, ::edge, ::maximise)
+    private fun retireFrames(ids: Set<Int>, live: Set<Int>, floating: Boolean) {
+        parked.keys.filter { it !in live }.forEach { parked.remove(it)?.remove() }
+        frames.keys.filter { it !in ids }.forEach { id ->
+            if (floating && id in away && id in live) park(id) else frames.remove(id)?.remove()
+        }
+    }
+
+    private fun park(id: Int) {
+        val frame = frames.remove(id) ?: return
+        frame.detach()
+        parked.put(id, frame)?.remove()
+        while (parked.size > 4) parked.remove(parked.keys.first())?.remove()
+    }
+
+    private fun newFrame(w: FreeformTasks.Window): WindowFrame {
+        val kept = parked.remove(w.id)
+        if (kept != null && kept.ownBar == ownBar(w)) {
+            kept.slideShow()
+            kept.preferMode(dev.omalauncher.shell.HighRefresh.wanted)
+            return kept
+        }
+        kept?.remove()
+        return WindowFrame(context, w.id, WindowFrame.App(w.pkg, ownTitle(w), ownBar(w)), ::minimise, ::edge, ::maximise)
+    }
 
     /**
      * [w] draws its own title bar: a Linux window with client-side decorations (Steam, GTK header bars; KWin says,

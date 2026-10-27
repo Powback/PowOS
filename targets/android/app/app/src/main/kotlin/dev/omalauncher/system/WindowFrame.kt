@@ -167,6 +167,8 @@ class WindowFrame(
      * (WindowFrames.frameRefused asks for a retry) never blocks the other, and a retry never re-adds one that's
      * already up. */
     private fun addViews() {
+        bar.onResume()
+        grip.onResume()
         var ok = true
         if (!app.ownBar && !barAdded) {
             runCatching { wm.addView(bar, barParams); barAdded = true; barBlur.set(blurLevel()) }
@@ -278,7 +280,7 @@ class WindowFrame(
     fun slideShow() {
         veiled = false
         slideHidden = false
-        if (app.ownBar || !barAdded) { wmAlpha(1f); return }
+        if (app.ownBar || !barAdded) { bar.alpha = 1f; wmAlpha(1f); return }
         bar.animate().cancel()
         wmAlpha(1f) // at the final place first (the view is still clear), then fade the view in
         barBlur.set(1f)
@@ -324,12 +326,22 @@ class WindowFrame(
         }.onFailure { android.util.Log.w("PowosWindowFrame", "can't raise the frame of task $id", it) }
     }
 
-    fun remove() {
+    /** Leave the screen without rebuilding two WebViews when this desktop returns. */
+    fun detach() {
         // A gesture under way ends with the frame: its drag layer (the bar drawn where the finger had it) never outlives
         // the frame - left over, it was a title bar with no window under it (the 01:47 "Home - Dolphin" bar).
         abandonGesture()
         if (barAdded) { barAdded = false; runCatching { wm.removeViewImmediate(bar) } }
         if (gripAdded) { gripAdded = false; runCatching { wm.removeViewImmediate(grip) } }
+        bar.animate().cancel()
+        grip.animate().cancel()
+        bar.onPause()
+        grip.onPause()
+        slideTo(0)
+    }
+
+    fun remove() {
+        detach()
         barChrome.destroy()
         gripChrome.destroy()
     }
