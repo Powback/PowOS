@@ -9,6 +9,7 @@
 # frames go to OUT (frame-*.png; the board task's --image when BOARD_TASK is set). Changes no setting; Back + Home after.
 # Exit 1 + "FAIL:" on a miss, 3 on a real touch (restored) or no window.
 set -uo pipefail
+export CDP_TIMEOUT_S=20
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/shade-panel-${POWOS_DEVICE:-phone}-$(date +%m%d-%H%M%S)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
@@ -43,8 +44,8 @@ f() { echo "$1" | awk -v i="$2" '{print $i}'; }
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
 sh_ "cmd statusbar collapse; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk home
-[ "$(q 'fetch(new URL("./ui/ccexpand.ts", location.href)).then(r=>r.text()).then(t=>t.includes("--cc-lift"))')" = true ] ||
-  { echo "the panel-follows-the-finger shell isn't live on the phone yet - back on the queue"; exit 3; }
+[ "$(q '!!document.querySelector(".cc3-list")')" = true ] ||
+  { echo "control center is not ready - retry in the next window"; exit 3; }
 did=$(sh_ "dumpsys display" | sed -nE 's/.*DisplayDeviceInfo.*uniqueId="local:([0-9]+)", ([0-9]+) x ([0-9]+),.* state ON,.*/\1 \2 \3/p' | head -1)
 set -- $did; [ $# -ge 3 ] || { echo "no display on"; exit 3; }; DID=$1; W=$2; H=$3
 S=$((H / 100)); X=$((W * 8 / 10))
@@ -123,5 +124,5 @@ else fail "no recording pulled"; fi
 
 restore; trap - EXIT; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
 echo "artefacts: $OUT"
-[ "$FAILS" = 0 ] && echo "PASS: the panel's edge followed the finger opening, over-pulled and shutting; the blur covered it open and grown" ||
+[ "$FAILS" = 0 ] && echo "PASS: the panel's edge followed the finger opening, over-pulled and shutting; hardware blur checked on phone only" ||
   { echo "FAIL: $FAILS step(s)"; exit 1; }
