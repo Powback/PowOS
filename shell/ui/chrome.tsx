@@ -66,11 +66,11 @@ export function StatusBar({ state, action }: { state: ChromeState; action: Chrom
   const time = state.clock ?? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const battery = state.battery == null ? null : Math.round(Math.max(0, Math.min(100, state.battery)));
   return <div class="status-chrome" style={{ paddingLeft: `${Math.max(8, state.left ?? 0)}px`, paddingRight: `${Math.max(8, state.right ?? 0)}px` }}>
-    <button class="chrome-surface status-clock" aria-label={`Notifications, ${time}`} onClick={() => action("notifications")}>
+    <button class="status-clock" aria-label={`Notifications, ${time}`} onClick={() => action("notifications")}>
       <time dateTime={now.toISOString()}>{time}</time>
       {!!state.notifications && <span class="status-notifications" title={`${state.notifications} notifications`}>{state.notifications}</span>}
     </button>
-    <button class="chrome-surface status-indicators" aria-label={statusLabel(state, battery)} onClick={() => action("controls")}>
+    <button class="status-indicators" aria-label={statusLabel(state, battery)} onClick={() => action("controls")}>
       <Indicators state={state} battery={battery} />
     </button>
   </div>;

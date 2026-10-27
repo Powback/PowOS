@@ -84,7 +84,7 @@ async function dockPositionCheck(position) {
     if (rect.width > 80 || rect.height < 200) fails.push("dock is not vertical");
     const invalid = (r, i) => r.width < 40 || r.height < 40 || (i > 0 && r.top < cells[i-1].bottom - 1);
     if (cells.some(invalid)) fails.push("icons overlap or are too small");
-    const stage = document.querySelector(".home > .stage").getBoundingClientRect();
+    const stage = document.querySelector(".home > .stage > .home-content").getBoundingClientRect();
     const overlaps = position === "left" ? stage.left < rect.right - 1 : stage.right > rect.left + 1;
     if (overlaps) fails.push("side dock overlaps home");
     const target = cells[2];
@@ -94,6 +94,18 @@ async function dockPositionCheck(position) {
   if (position !== "bottom") checkVertical();
   else if (rect.width < rect.height) fails.push("bottom dock is vertical");
   if (localStorage.getItem("powos.dock.position") !== position) fails.push("position not saved");
+  const windows = await importShim("./ui/desktops.ts");
+  if (windows.barTop() < innerHeight / 2) fails.push("dock collapses window work area");
+  S.drawer.value = 1;
+  await new Promise(r => setTimeout(r, 450));
+  checkLauncher();
+  function checkLauncher() {
+    const desktop = document.documentElement.dataset.mode === "desktop";
+    const clip = document.querySelector(desktop ? ".launcher" : ".launcher-clip").getBoundingClientRect();
+    const bar = document.querySelector(".home > .bar").getBoundingClientRect();
+    if (!desktop && (clip.left > 20 || clip.right < innerWidth - 20)) fails.push("launcher loses width beside dock");
+    if (bar.bottom > innerHeight + 1 || bar.top < innerHeight - 140) fails.push("launcher search is off screen");
+  }
   return fails;
 }
 
@@ -126,6 +138,10 @@ async function statusChromeCheck() {
   if (actions.join() !== "notifications,controls") fail.push(`status actions: ${actions}`);
   if (!document.querySelector("time") || !document.body.textContent.includes("74%")) fail.push("missing clock/battery");
   if (document.querySelector(".status-clock").getBoundingClientRect().x < 44) fail.push("clock covers cutout");
+  for (const button of document.querySelectorAll(".status-chrome button")) {
+    const css = getComputedStyle(button);
+    if (css.backgroundImage !== "none" || css.boxShadow !== "none") fail.push("status bar has decorative effects");
+  }
   return fail;
 }
 

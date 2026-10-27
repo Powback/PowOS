@@ -107,7 +107,7 @@ let followers: Follower[] | null = null;
 const tables = new WeakMap<HTMLElement, { key: string; table: Keyframe[] }>();
 
 function tableOf(el: HTMLElement): Keyframe[] {
-  const key = `${innerWidth}x${innerHeight} ${el.offsetWidth}x${el.offsetHeight} ${el.closest(".home")?.classList.contains("pill-below")} ${el.closest(".home")?.classList.contains("search-parked")}`;
+  const key = `${innerWidth}x${innerHeight} ${el.offsetWidth}x${el.offsetHeight} ${el.closest(".home")?.classList.contains("pill-below")} ${el.closest(".home")?.classList.contains("search-parked")} ${document.querySelector(".home")?.className.match(/dock-(bottom|left|right)/)?.[0]}`;
   const had = tables.get(el);
   if (had?.key === key) return had.table;
   const st = el.style;

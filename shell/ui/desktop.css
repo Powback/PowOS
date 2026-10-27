@@ -66,3 +66,6 @@ html[data-mode="desktop"] .dock-page.dock-recent {
 html[data-mode="desktop"] .dock .app {
   flex: 0 0 72px;
 }
+
+/* With no bottom dock, the desktop launcher ends at the search bar instead of below the screen. */
+html[data-mode="desktop"] .home:is(.dock-left, .dock-right) .launcher { bottom: calc(-1 * (48px + var(--edge))); }

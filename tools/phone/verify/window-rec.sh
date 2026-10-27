@@ -47,8 +47,24 @@ sfframe() { sh_ "dumpsys SurfaceFlinger" | awk -v p="$1" '
 content() { screenrect "$(sfframe "$LAYER")"; }
 near() { local d=$(($1 - $2)); [ ${d#-} -le "$3" ]; }
 logc() { sh_ "rm -f /data/local/tmp/rec.txt; (timeout 280 logcat -T 1 -v time -s PowosTaskLeash PowosWindowDrag PowosWindowResize PowosWindowFrames PowosWindowFrame PowosFreeform WindowTasks RemoteTransitionHandler ShellTransitions </dev/null >/data/local/tmp/rec.txt 2>&1 &)"; }
-rec() { sh_ "rm -f /data/local/tmp/wc-$1.mp4; (screenrecord --display-id $DID --bit-rate 20000000 --time-limit ${2:-12} /data/local/tmp/wc-$1.mp4 </dev/null >/dev/null 2>&1 &)"; sleep 1.2; }
-recstop() { sleep 0.6; sh_ "pkill -INT screenrecord"; sleep 1.5; "$A" pull "/data/local/tmp/wc-$1.mp4" "$PRE-$1.mp4" >/dev/null 2>&1 && log "recording: $PRE-$1.mp4 ($(du -k "$PRE-$1.mp4" | cut -f1) KB)" || fail "no recording for $1"; sh_ "rm -f /data/local/tmp/wc-$1.mp4"; }
+rec() {
+  local display=""
+  [ -n "$DID" ] && display="--display-id $DID"
+  "$A" shell "su -c 'rm -f /data/local/tmp/wc-$1.mp4; screenrecord $display --bit-rate 20000000 --time-limit ${2:-12} /data/local/tmp/wc-$1.mp4'" > "$PRE-$1-screenrecord.txt" 2>&1 &
+  RECORD_PID=$!
+  sleep 1.2
+}
+recstop() {
+  sleep 0.6; sh_ "pkill -INT screenrecord"; sleep 1.5
+  wait "$RECORD_PID" 2>/dev/null || true
+  sh_ "chmod 644 /data/local/tmp/wc-$1.mp4"
+  if "$A" pull "/data/local/tmp/wc-$1.mp4" "$PRE-$1.mp4" >/dev/null 2>&1; then
+    log "recording: $PRE-$1.mp4 ($(du -k "$PRE-$1.mp4" | cut -f1) KB)"
+    sh_ "rm -f /data/local/tmp/wc-$1.mp4"
+  else
+    fail "no recording for $1; diagnostics: $PRE-$1-screenrecord.txt (device files retained)"
+  fi
+}
 touched() { sh_ "dumpsys input" | sed -n '/TouchStatesByDisplay/,/CursorStatesByDisplay/p' | grep -oE "name='[^']*'|pilferingPointerIds=[^,]*" | tr '\n' ' ' | cut -c1-600; }
 # A tap inside the window's content (a third down, a quarter in): which windows the finger went to.
 intap() { local b w=$2; b=$(tbounds "$1"); [ -n "$b" ] || return; set -- $b; local x=$(($1 + ($3 - $1) / 4)) y=$(($2 + ($4 - $2) / 3))

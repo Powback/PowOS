@@ -15,7 +15,7 @@
  */
 import { AppIcon } from "./apps.tsx";
 import { tapTaken } from "./taps.ts";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, selected, setDocked, type Carry } from "../state.ts";
 import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
@@ -636,15 +636,15 @@ function GroupShadow({ items, joined, id }: { items: HomeItem[]; joined: Map<str
   );
 }
 
-function PageGlass({ items, joined, index }: { items: HomeItem[]; joined: Map<string, Record<string, number>>; index: number }) {
+function PageGlass({ items, joined }: { items: HomeItem[]; joined: Map<string, Record<string, number>> }) {
+  // The gesture owns both transforms. Initialize newly mounted glass before paint without a render resetting a drag.
+  useLayoutEffect(() => applyTrack());
   const mask = faceMask(items, joined, carry.value?.item?.key);
   if (!mask) return null;
   const g = geometry.peek();
-  // Where applyTrack puts it at rest, from the start (a transition from nowhere would slide it in).
-  const transform = `translateX(calc(${Math.max(page.value, 0) - index - (page.value === -1 ? 1 : 0)} * 100%))`;
   return (
     <div class="page-glass" style={mask}>
-      <div class="page-glass-img" style={{ "--pg-left": `${g.left}px`, "--pg-top": `${g.top}px`, transform }} />
+      <div class="page-glass-img" style={{ "--pg-left": `${g.left}px`, "--pg-top": `${g.top}px` }} />
     </div>
   );
 }
@@ -1076,7 +1076,7 @@ export function Pages() {
               const joined = joins(on);
               return (
                 <>
-                  <PageGlass items={on} joined={joined} index={i} />
+                  <PageGlass items={on} joined={joined} />
                   <GroupShadow items={on} joined={joined} id={String(n)} />
                   <Seams items={on} joined={joined} />
                   {on.map((item) => renderTile(item, joined.get(item.key)))}

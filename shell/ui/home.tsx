@@ -64,10 +64,18 @@ const homePullOk = computed(
 // Home's page only (app.tsx imports this module in every mode).
 if (!new URLSearchParams(location.search).get("mode")) effect(() => {
   const on = homePullOk.value;
-  powos.shade.homePull(on).then(
-    (taken) => (shadeTakesHome.value = !!taken),
-    () => (shadeTakesHome.value = false),
-  );
+  const side = dockPosition.value !== "bottom";
+  const report = () => {
+    const r = side ? document.querySelector(".home > .dock")?.getBoundingClientRect() : null;
+    const exclude = r ? { left: r.left, top: r.top, width: r.width, height: r.height } : undefined;
+    powos.shade.homePull(on, exclude).then(
+      (taken) => (shadeTakesHome.value = !!taken),
+      () => (shadeTakesHome.value = false),
+    );
+  };
+  const frame = requestAnimationFrame(report);
+  addEventListener("resize", report);
+  return () => { cancelAnimationFrame(frame); removeEventListener("resize", report); };
 });
 
 /** How far above the dock a held app has to go to leave it for the home screen. */

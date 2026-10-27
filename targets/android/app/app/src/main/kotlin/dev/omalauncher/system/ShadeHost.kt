@@ -301,6 +301,7 @@ class ShadeHost(
      * window, pull and blur as from the status bar over an app. Home has no notification panel of its own.
      */
     var homePull = false
+    var homePullExcluded: android.graphics.Rect? = null
 
     /** Where a pull may start: the status bar (anywhere), or home's body (while [homePull]). */
     private enum class From { STATUS_BAR, HOME }
@@ -310,11 +311,15 @@ class ShadeHost(
         x: Float,
         y: Float,
     ): Boolean {
+        if (homeControlAt(x, y)) return false
         val home = homePull && Switcher.onHome && Switcher.homeVisible && !Switcher.open && host != null && !shown && !keyguard && !lent
         // Never inside a floating window: home is "on" under every window, and the gesture input sees all touches - a
         // scroll down in Chrome or Kate pulled the shade (the user, 2026-10-23).
         return home && WindowFrames.current?.covers(x, y) != true
     }
+
+    private fun homeControlAt(x: Float, y: Float): Boolean =
+        homePullExcluded?.contains(x.toInt(), y.toInt()) == true || dev.omalauncher.shell.ControllerPad.covers(x, y)
 
     /** Whether a finger down at ([x], [y]) (display px) may be the shade's pull, and from where. */
     private fun pullable(

@@ -2595,3 +2595,16 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 }
 .home:is(.dock-left, .dock-right) .dock .app-icon { width: min(var(--strip-icon), 48px); }
 .home:is(.dock-left, .dock-right) .dock-recent { margin-top: 12px; }
+
+/* Reserve the side rail only for home tiles. The launcher and bottom search retain the full viewport. */
+.home:is(.dock-left, .dock-right) { padding-left: var(--inset-left, env(safe-area-inset-left)); padding-right: var(--inset-right, env(safe-area-inset-right)); }
+.home.dock-left > .stage > .home-content { margin-left: var(--side-dock); }
+.home.dock-right > .stage > .home-content { margin-right: var(--side-dock); }
+.home:is(.dock-left, .dock-right) > .bar { transform: none; }
+.home:is(.dock-left, .dock-right) > .stage > .launcher-clip { inset: 0 0 4px; transform: none; }
+.home:is(.dock-left, .dock-right) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
+.home:is(.dock-left, .dock-right) > .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
+.home.wide:is(.dock-left, .dock-right) > .bar { width: 100%; }
+.home.wide:is(.dock-left, .dock-right) > .bar .bar-pill { bottom: 2px; }
+.home.wide:is(.dock-left, .dock-right) { grid-template-rows: minmax(0, 1fr) 48px; }
+.home:is(.dock-left, .dock-right).open > .dock { opacity: 0; pointer-events: none; }

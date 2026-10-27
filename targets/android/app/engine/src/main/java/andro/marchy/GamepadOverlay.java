@@ -826,6 +826,41 @@ public final class GamepadOverlay extends View {
         }
     }
 
+    private boolean floating;
+    private android.graphics.Region floatingRegion;
+
+    /** A standalone window accepts touches only in its controls, leaving the game reachable between them. */
+    public void setFloating(boolean value) {
+        floating = value;
+        getViewTreeObserver().addOnPreDrawListener(() -> {
+            if (floating && android.os.Build.VERSION.SDK_INT >= 33 && getRootSurfaceControl() != null) {
+                android.graphics.Region region = controlRegion();
+                if (!region.equals(floatingRegion)) {
+                    getRootSurfaceControl().setTouchableRegion(region);
+                    floatingRegion = region;
+                }
+            }
+            return true;
+        });
+    }
+
+    public android.graphics.Region controlRegion() {
+        android.graphics.Region region = new android.graphics.Region();
+        if (editing) region.set(0, 0, getWidth(), getHeight());
+        else for (Module m : modules) {
+            android.graphics.Rect r = new android.graphics.Rect();
+            m.zone.roundOut(r);
+            region.op(r, android.graphics.Region.Op.UNION);
+        }
+        return region;
+    }
+
+    private void showDialog(AlertDialog.Builder builder) {
+        AlertDialog dialog = builder.create();
+        if (floating) dialog.getWindow().setType(android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
+        dialog.show();
+    }
+
     public boolean isEditing() { return editing; }
 
     /** Edit mode; leaving it saves the layout. {@code done} runs when the user taps Done. */
@@ -1129,7 +1164,7 @@ public final class GamepadOverlay extends View {
             "Start", "Guide", "Stick click L3", "Stick click R3", "D-pad", "Left stick", "Right stick",
             "Trigger LT", "Trigger RT", "Mouse region", "Trackball", "Gyro (toggle)",
             "Back paddle L4", "Back paddle L5", "Back paddle R4", "Back paddle R5", "Quick Access"};
-        new AlertDialog.Builder(getContext()).setTitle("Add control").setItems(items, (d, which) -> {
+        showDialog(new AlertDialog.Builder(getContext()).setTitle("Add control").setItems(items, (d, which) -> {
             Module m;
             if (which <= 10) m = new ButtonModule(BUTTON_OUTPUTS[which], "");
             else if (which == 11) m = new DpadModule();
@@ -1150,14 +1185,14 @@ public final class GamepadOverlay extends View {
             m.layout(getWidth(), getHeight());
             modules.add(m);
             invalidate();
-        }).show();
+        }));
     }
 
     private void confirmReset() {
-        new AlertDialog.Builder(getContext()).setTitle("Reset controls?")
+        showDialog(new AlertDialog.Builder(getContext()).setTitle("Reset controls?")
             .setMessage("Go back to the default gamepad layout.")
             .setPositiveButton("Reset", (d, w) -> load(DEFAULT_LAYOUT))
-            .setNegativeButton("Cancel", null).show();
+            .setNegativeButton("Cancel", null));
     }
 
     private void showOptions(Module m) {
@@ -1166,8 +1201,8 @@ public final class GamepadOverlay extends View {
         if (m instanceof ButtonModule) {
             ButtonModule b = (ButtonModule) m;
             items.add("Output: " + buttonLabel(b.output) + "  (change)");
-            actions.add(() -> new AlertDialog.Builder(getContext()).setTitle("Button output")
-                .setItems(BUTTON_LABELS, (d, i) -> { b.setOutput(BUTTON_OUTPUTS[i]); invalidate(); }).show());
+            actions.add(() -> showDialog(new AlertDialog.Builder(getContext()).setTitle("Button output")
+                .setItems(BUTTON_LABELS, (d, i) -> { b.setOutput(BUTTON_OUTPUTS[i]); invalidate(); })));
             items.add("toggle".equals(b.mode) ? "Mode: toggle  (switch to hold)" : "Mode: hold  (switch to toggle)");
             actions.add(() -> { b.mode = "toggle".equals(b.mode) ? "" : "toggle"; invalidate(); });
         } else if (m instanceof StickModule) {
@@ -1196,8 +1231,8 @@ public final class GamepadOverlay extends View {
         }
         items.add("Delete");
         actions.add(() -> { modules.remove(m); invalidate(); });
-        new AlertDialog.Builder(getContext()).setTitle("Control")
-            .setItems(items.toArray(new String[0]), (d, i) -> actions.get(i).run()).show();
+        showDialog(new AlertDialog.Builder(getContext()).setTitle("Control")
+            .setItems(items.toArray(new String[0]), (d, i) -> actions.get(i).run()));
     }
 
     @Override

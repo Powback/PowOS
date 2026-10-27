@@ -245,9 +245,9 @@ class ShellBridge(
             "qs.set" -> quick.set(a.getString(0), a.getDouble(1)).let { quick.state() }
             "qs.listening" -> quick.listening(a.getBoolean(0))
             // The touch controller overlay (andro.marchy.GamepadOverlay): the control centre's Controller tile.
-            "pad.state" -> andro.marchy.MainActivity.padShown(context)
-            "pad.overlay" -> a.getBoolean(0).let { andro.marchy.MainActivity.padShow(context, it); it }
-            "pad.edit" -> andro.marchy.MainActivity.padEdit()
+            "pad.state" -> ControllerPad.shown()
+            "pad.overlay" -> ControllerPad.show(context, a.getBoolean(0))
+            "pad.edit" -> ControllerPad.edit()
             "media.state" -> media.state()
             "media.control" -> media.control(a.getString(0))
             "media.output" -> media.output(a.optString(0).takeIf { it.isNotEmpty() })
@@ -260,7 +260,7 @@ class ShellBridge(
             "shade.peekHeight" -> shade?.peekHeight((a.getDouble(0) * density()).toInt())
             "shade.blur" -> shade?.blur(a.getDouble(0).toFloat())
             // Home's page: whether a pull down on it is the shade's now. True: PowOS's shade takes it (on the gesture input).
-            "shade.homePull" -> homePull(a.getBoolean(0))
+            "shade.homePull" -> homePull(a.getBoolean(0), a.optJSONObject(1))
             // Home without the gesture input: the shade down, not following the finger.
             "shade.open" -> dev.omalauncher.system.ShadeHost.current?.let { s -> main.post { s.openPanel(control = false) } } ?: notifications(true)
             "overlay.closed", "pull.closed" -> overlay?.closed()
@@ -420,9 +420,12 @@ class ShellBridge(
         return list
     }
 
-    private fun homePull(on: Boolean): Boolean {
+    private fun homePull(on: Boolean, exclude: JSONObject?): Boolean {
         val shade = dev.omalauncher.system.ShadeHost.current ?: return false
-        main.post { shade.homePull = on }
+        main.post {
+            shade.homePullExcluded = exclude?.let { screenRect(it) }
+            shade.homePull = on
+        }
         return shade.monitored
     }
 

@@ -222,7 +222,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       expand: () => call("shade.expand"),
       peekHeight: (px) => call("shade.peekHeight", px),
       blur: (dp) => call("shade.blur", dp),
-      homePull: (on) => call<boolean>("shade.homePull", on),
+      homePull: (on, exclude) => call<boolean>("shade.homePull", on, exclude ?? null),
       open: () => call("shade.open"),
     },
     overlay: {

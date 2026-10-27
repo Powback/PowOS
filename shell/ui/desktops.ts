@@ -247,6 +247,7 @@ export function inWindow(x: number, y: number): boolean {
 export function barTop(): number | null {
   let top = Infinity;
   for (const el of document.querySelectorAll<HTMLElement>(".home > .bar, .home > .dock, .home > .bottom-bar")) {
+    if (el.matches(".dock-left > .dock, .dock-right > .dock")) continue;
     const r = el.getBoundingClientRect();
     if (r.height > 0 && r.top < top) top = r.top;
   }
