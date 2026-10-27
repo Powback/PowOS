@@ -1221,7 +1221,8 @@ input.folder-title:focus { background: var(--soft-fill); }
   height: 88%;
   display: flex;
   flex-direction: column;
-  padding: calc(var(--inset-top, 0px) + 8px) var(--edge) 6px;
+  /* The shade replaces the status bar: its heading occupies that row. */
+  padding: 0 var(--edge) 6px;
   background: color-mix(in srgb, var(--color-background) calc(var(--glass) + 10%), transparent);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
