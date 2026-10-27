@@ -2610,4 +2610,4 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .home.wide:is(.dock-left, .dock-right) > .bar { width: 100%; }
 .home.wide:is(.dock-left, .dock-right) > .bar .bar-pill { bottom: 2px; }
 .home.wide:is(.dock-left, .dock-right) { grid-template-rows: minmax(0, 1fr) 48px; }
-.home:is(.dock-left, .dock-right).open > .dock { opacity: 0; pointer-events: none; }
+.home:is(.dock-left, .dock-right).open > .dock:not(.dock-tray) { opacity: 0; pointer-events: none; }

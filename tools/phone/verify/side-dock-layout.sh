@@ -53,6 +53,8 @@ for state in 0 3; do
     sleep 1
     verdict=$(ev '(()=>{const c=document.querySelector(".launcher-clip").getBoundingClientRect(),b=document.querySelector(".home > .bar").getBoundingClientRect();return c.left<20&&c.right>innerWidth-20&&b.top>=0&&b.bottom<=innerHeight+1&&b.bottom>innerHeight-60?"ok":JSON.stringify({clip:c.toJSON(),bar:b.toJSON(),size:[innerWidth,innerHeight]})})()')
     [ "$verdict" = ok ] || { echo "FAIL: $state $side launcher: $verdict"; exit 1; }
+    visible=$(ev 'getComputedStyle(document.querySelector(".home>.dock")).opacity')
+    [ "$visible" = 0 ] || { echo "FAIL: $state $side dock covers launcher (opacity $visible)"; exit 1; }
     "$T/shot.sh" "$OUT/launcher-$state-$side.png" >/dev/null || exit 1
     echo "PASS: $state $side dock swipe isolated; launcher/search fully visible"
   done

@@ -98,7 +98,7 @@ async function dockPositionCheck(position) {
   if (windows.barTop() < innerHeight / 2) fails.push("dock collapses window work area");
   S.drawer.value = 1;
   await new Promise(r => setTimeout(r, 450));
-  checkLauncher();
+  checkLauncher(); if (position !== "bottom" && getComputedStyle(dock).opacity !== "0") fails.push("side dock covers launcher");
   function checkLauncher() {
     const desktop = document.documentElement.dataset.mode === "desktop";
     const clip = document.querySelector(desktop ? ".launcher" : ".launcher-clip").getBoundingClientRect();
