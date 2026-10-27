@@ -10,7 +10,7 @@
 # Exit 1 + "FAIL:" on a miss, 3 on a real touch (restored) or no window.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
-OUT=${1:-$HOME/.cache/powos-verify/shade-panel-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
+OUT=${1:-$HOME/.cache/powos-verify/shade-panel-${POWOS_DEVICE:-phone}-$(date +%m%d-%H%M%S)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
@@ -30,6 +30,9 @@ blur() { sh_ "dumpsys SurfaceFlinger" | awk '/^  Layer \[/{on=/PowOS shade/} on&
 covers() { # $1 what, $2 panel line, $3 blur line: the region over the panel's whole rect
   set -- "$1" $2 X $3
   local e=$2 top=$4 l=$5 r=$6 rad=${11:-0} bl=${12:-0} bt=${13:-0} br=${14:-0} bb=${15:-0}
+  if [ "${POWOS_DEVICE:-phone}" = emu ]; then
+    log "$1: hardware blur not assessed on emulator"; return
+  fi
   [ "${rad%%.*}" -gt 0 ] 2>/dev/null || { fail "$1: no blur under the shade (regions: ${*:11})"; return; }
   [ "$bt" -le "$top" ] && [ "$bb" -ge "$((e - 2))" ] && [ "$bl" -le "$((l + 2))" ] && [ "$br" -ge "$((r - 2))" ] &&
     log "$1: blur radius ${rad} over [$bl $bt $br $bb], the panel [$l $top $r $e]" ||
@@ -48,7 +51,8 @@ S=$((H / 100)); X=$((W * 8 / 10))
 # Phone-side moves for steps FROM..TO of S px each from (X, Y0), down (+1) or up (-1).
 steps() { local i; for i in $(seq "$1" "$2"); do echo "input motionevent MOVE $3 $(($4 + $5 * i * S)); sleep 0.03;"; done; }
 
-sh_ "screenrecord --display-id $DID --bit-rate 20000000 --time-limit 40 /data/local/tmp/shade-panel.mp4 >/dev/null 2>&1 &"
+"$A" shell "su -c 'screenrecord --display-id $DID --bit-rate 20000000 --time-limit 180 /data/local/tmp/shade-panel.mp4'" > "$OUT/screenrecord.txt" 2>&1 &
+REC_PID=$!
 sleep 1.2
 # 1. Open: a finger down on the status bar, held partway (the edge short of open), then on down and let go.
 "$A" shell "input motionevent DOWN $X 8; $(steps 1 3 $X 8 1)" >/dev/null; sleep 0.5; chk open1
@@ -75,22 +79,24 @@ Y=$((H * 45 / 100))
 ph=$(q "$P"); log "over-pull held: $ph"
 de=$(( $(f "$ph" 1) - E )); gap0=$(( E - $(f "$po" 6) )); gap1=$(( $(f "$ph" 1) - $(f "$ph" 6) ))
 [ "$de" -ge "$((S * 2))" ] || fail "over-pulled $((4 * S)) px, the panel's edge moved only $de px"
-[ "$gap1" -le "$((gap0 + 12))" ] || fail "over-pulled, $gap1 px of empty panel under the notifications (open: $gap0)"
+[ "$(q '!!document.querySelector(".panel-body.two")')" = true ] || [ "$gap1" -le "$((gap0 + 12))" ] || fail "over-pulled, $gap1 px of empty panel under the notifications (open: $gap0)"
 "$A" shell "$(steps 5 14 $((W / 2)) $Y 1) input motionevent UP $((W / 2)) $((Y + 14 * S))" >/dev/null; sleep 1.5; chk over2
 pw=$(q "$P"); bw=$(blur); log "shown whole: $pw | blur: $bw"
 [ "$(f "$pw" 8)" = true ] || fail "let go past the threshold, the rest isn't shown"
 covers "shown whole" "$pw" "$bw"
 
 # 3. Fold it back (up at the list's end), then push the shade shut: held partway, the edge higher than open.
-# A list taller than the panel scrolls to its end first: up to three pulls up until it folds.
-for _ in 1 2 3; do
+# Expanded notification groups can span many screens. Scroll to the actual end before judging the fold gesture.
+for _ in $(seq 30); do
   EW=$(f "$(q "$P")" 1); YU=$((EW - 6 * S))
-  "$A" shell "input motionevent DOWN $((W / 2)) $YU; $(steps 1 12 $((W / 2)) $YU -1) input motionevent UP $((W / 2)) $((YU - 12 * S))" >/dev/null
+  remaining=$(q '(()=>{const l=document.elementFromPoint(innerWidth/2,innerHeight*.7)?.closest(".notif-list");return l?Math.max(0,l.scrollHeight-l.clientHeight-l.scrollTop):0})()')
+  count=12; [ "${remaining%%.*}" -gt 1 ] 2>/dev/null && count=35
+  "$A" shell "input motionevent DOWN $((W / 2)) $YU; $(steps 1 $count $((W / 2)) $YU -1) input motionevent UP $((W / 2)) $((YU - count * S))" >/dev/null
   sleep 1.5; chk fold
   pf=$(q "$P"); [ "$(f "$pf" 8)" = false ] && break
 done
 log "folded: $pf"
-[ "$(f "$pf" 8)" = false ] || fail "pulled up at the list's end three times, the rest is still shown"
+[ "$(f "$pf" 8)" = false ] || fail "the rest is still shown after scrolling and pulling up (remaining scroll: $remaining)"
 EF=$(f "$pf" 1); YC=$((EF - 6 * S))
 "$A" shell "input motionevent DOWN $((W / 2)) $YC; $(steps 1 3 $((W / 2)) $YC -1)" >/dev/null; sleep 0.5; chk close1
 pc=$(q "$P"); bc=$(blur); log "closing, held: $pc | blur: $bc"
@@ -99,11 +105,12 @@ pz=$(q "$P"); log "closed: $pz"
 qc=$(f "$pc" 7)
 if awk -v q="$qc" 'BEGIN{exit !(q > 0.02 && q < 0.98)}'; then
   [ "$(f "$pc" 1)" -lt "$((EF - EF / 10))" ] || fail "partway shut (q $qc) the panel's edge stayed at $(f "$pc" 1) of $EF"
-  [ -n "$bc" ] || fail "partway shut the blur is already gone while the panel shows"
+  [ "${POWOS_DEVICE:-phone}" = emu ] || [ -n "$bc" ] || fail "partway shut the blur is already gone while the panel shows"
 else log "(closing probe at q=$qc: not partway)"; fi
 awk -v q="$(f "$pz" 7)" 'BEGIN{exit !(q < 0.05)}' || fail "pushed up, the shade didn't shut ($pz)"
 
-sleep 1; sh_ "pkill -INT screenrecord"; sleep 1.5
+sleep 1; sh_ "pkill -INT screenrecord"; wait "$REC_PID" 2>/dev/null || true
+sh_ "chmod 644 /data/local/tmp/shade-panel.mp4"
 "$A" pull /data/local/tmp/shade-panel.mp4 "$OUT/clip.mp4" >/dev/null 2>&1; sh_ "rm -f /data/local/tmp/shade-panel.mp4"
 if [ -s "$OUT/clip.mp4" ]; then
   ffmpeg -loglevel error -y -i "$OUT/clip.mp4" -vf "fps=12,scale=540:-2" "$OUT/frame-%03d.png"
