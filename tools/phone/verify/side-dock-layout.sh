@@ -26,7 +26,7 @@ close_shade() {
   sleep 1
 }
 shade_open() {
-  ev 'importShim("./ui/gesture.ts").then(s=>String(s.notifShown()>0.01))' shade
+  if sh_ "dumpsys window windows" | grep mCurrentFocus | grep -q "PowOS shade"; then echo true; else echo false; fi
 }
 for state in 0 3; do
   close_shade
