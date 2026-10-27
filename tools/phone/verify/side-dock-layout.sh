@@ -8,6 +8,7 @@ OUT=$HOME/.cache/powos-verify/side-dock-$(date +%m%d-%H%M%S)
 mkdir -p "$OUT"
 . "$here/window-lock.sh"
 window_lock side-dock-layout 120
+export CDP_TIMEOUT_S=20
 I0=$(irq)
 [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" = Awake ] || exit 3
 old=$(ev 'importShim("./state.ts").then(s=>s.dockPlacement.value)')
@@ -20,18 +21,32 @@ restore() {
   [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
 }
 trap restore EXIT
+close_shade() {
+  ev '(window.__powosHost.emit("shade.settle", {open:false}), "closed")' shade >/dev/null
+  sleep 1
+}
+shade_open() {
+  ev 'importShim("./ui/gesture.ts").then(s=>String(s.notifShown()>0.01))' shade
+}
 for state in 0 3; do
+  close_shade
+  ev 'importShim("./state.ts").then(s=>{s.drawer.value=0;return "closed"})' >/dev/null
   sh_ "cmd device_state state $state; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
   sleep 3
   for side in left right; do
+    close_shade
     chk setting
     ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.dockPlacement.value='$side';s.page.value=0;return 'set'})" >/dev/null
     sleep 1
     read -r x y end <<<"$(ev '(()=>{const r=document.querySelector(".home > .dock").getBoundingClientRect(),d=devicePixelRatio;return [r.x+r.width/2,r.bottom-45,r.top+45].map(n=>Math.round(n*d)).join(" ")})()')"
+    echo "dock $state $side: swipe $x,$y -> $x,$end"
+    [[ "$x $y $end" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]] && [ "$y" -gt "$end" ] || { echo "FAIL: invalid dock swipe geometry"; exit 1; }
     sh_ "input swipe $x $y $x $end 400"
     sleep 1
     chk dock-swipe
     opened=$(ev 'importShim("./state.ts").then(s=>String(s.drawer.value!==0||s.notif.value))')
+    native=$(shade_open)
+    [ "$native" = false ] || { echo "FAIL: $state $side dock swipe opened native shade ($native)"; exit 1; }
     [ "$opened" = false ] || { echo "FAIL: $state $side dock swipe opened launcher or shade ($opened)"; exit 1; }
     "$T/shot.sh" "$OUT/home-$state-$side.png" >/dev/null || exit 1
     ev 'importShim("./state.ts").then(s=>{s.drawer.value=1;return "open"})' >/dev/null
