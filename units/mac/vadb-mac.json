@@ -1,0 +1,13 @@
+{
+  "id": "vadb-mac",
+  "name": "PowOS phone ADB transport",
+  "kind": "container",
+  "owner": "system:powos-agents",
+  "host": "mac",
+  "purpose": "Existing powos-vadb container runs the shared ADB server in wireguard's network namespace. Ship and verify tools depend on it. Restart policy: unless-stopped; after Docker recovery, confirm wireguard is running and adb get-state reports device.",
+  "installedBy": "Existing android-app-dev builder container; recovery: docker update --restart unless-stopped powos-vadb && docker start powos-vadb",
+  "files": [],
+  "processes": [{"match": "docker container powos-vadb"}],
+  "unbounded": "Existing shared transport; no new resource limits imposed during recovery",
+  "remove": {"stop": ["docker update --restart no powos-vadb", "docker stop powos-vadb"]}
+}

@@ -28,6 +28,7 @@
 here=$(dirname "$0")
 # The emulator lane (POWOS_DEVICE=emu): nobody touches it - always free, screen on (it never sleeps: emu.sh).
 if [ "${POWOS_DEVICE:-phone}" = emu ]; then echo "idle=86400 screen=Awake act=86400"; exit 0; fi
+"$here/adb.sh" --transport-state >/dev/null || { echo transport-error; exit 70; }
 # Off the VPN (a stale WireGuard handshake, tools/phone/adb.sh --vpn-state): "offline", exit 69 - never an empty state
 # that reads as busy or free. --wait keeps waiting for it to come back (checked every 30 s on the Mac, no adb call).
 if [ "${1:-}" != "--wait" ] && ! "$here/adb.sh" --vpn-state >/dev/null; then echo "offline"; exit 69; fi
@@ -43,6 +44,7 @@ if [ "${1:-}" = "--wait" ]; then
   while :; do
   left=$(( deadline - $(date +%s) ))
   [ $left -gt 0 ] || { out=${off:-timeout}; break; }
+  "$here/adb.sh" --transport-state >/dev/null || { echo transport-error; exit 70; }
   if ! "$here/adb.sh" --vpn-state >/dev/null; then off=offline; sleep $(( left < 30 ? left : 30 )); continue; fi; off=
   out=$("$here/adb.sh" shell "end=\$(( \$(date +%s) + $left )); on=0; [ -n '$st' ] && printf %s '$st' > $hb
     while [ \$(date +%s) -lt \$end ]; do

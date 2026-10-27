@@ -14,6 +14,12 @@ case "${POWOS_DEVICE:-phone}" in
     exec "${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}/platform-tools/adb" -s "emulator-${EMU_PORT:-5584}" "$@" ;;
   *) echo "adb.sh: POWOS_DEVICE=${POWOS_DEVICE} - phone or emu" >&2; exit 2 ;;
 esac
+# A stopped local transport is not a busy/offline phone. Keep this check outside the device-state cache.
+if [ "$(docker inspect --format '{{.State.Running}}' powos-vadb 2>/dev/null || true)" != true ]; then
+  echo 'adb.sh: transport unavailable: powos-vadb is not running (start it with docker start powos-vadb)' >&2
+  exit 70
+fi
+[ "${1:-}" = --transport-state ] && { echo transport=up; exit 0; }
 # Fail fast when the phone is off the VPN. adb keeps listing the device after the tunnel died, and every call then
 # HANGS (2026-10-23/24: drops at ~13:40, 16:0x, 19:5x, 02:56 held the ship service, the check queue and the board).
 # Both ends send a keepalive every 25 s, so a live tunnel re-handshakes about every 2 min; a handshake older than
@@ -51,6 +57,11 @@ if [ -z "$cached_ok" ]; then
   # afresh, once, before the command (a pre-check, not a retry: the command itself never runs twice).
   if [ "$(docker exec powos-vadb adb -s 10.13.13.7:5555 get-state 2>/dev/null || true)" != device ]; then
     docker exec powos-vadb sh -c 'adb disconnect 10.13.13.7:5555 >/dev/null 2>&1; timeout 15 adb connect 10.13.13.7:5555 >/dev/null 2>&1' || true
+  fi
+  if [ "$(docker exec powos-vadb adb -s 10.13.13.7:5555 get-state 2>/dev/null || true)" != device ]; then
+    rm -f "$state_file"
+    echo 'adb.sh: phone unavailable after reconnect; not caching device state' >&2
+    exit 69
   fi
   printf '%s ok\n' "$now" > "$state_file.$$" && mv -f "$state_file.$$" "$state_file"
 fi

@@ -171,7 +171,12 @@ if [ -z "$now" ]; then
     # (an empty or unreadable state) = NOT safe - it installed over an active user once when the state came back empty.
     chunk=$(( ${SHIP_WAIT_MIN:-60} * 60 - waited )); [ $chunk -gt 240 ] && chunk=240
     # exit 1 = this chunk passed without a free phone: wait the next one (set -e would end the whole ship here).
-    i2=$(tools/phone/idle.sh --wait 60 $chunk || true)
+    idle_rc=0
+    i2=$(tools/phone/idle.sh --wait 60 $chunk) || idle_rc=$?
+    if [ "$idle_rc" = 70 ]; then
+      echo 'ship-apk: phone transport failed; APK kept, not installing or waiting for user idle' >&2
+      exit 70
+    fi
     case "$i2" in *screen=Asleep*|*screen=Dozing*|*screen=Awake*) ok=1; break ;; esac
     waited=$((waited + chunk))
     echo "ship-apk: waiting for a free phone ($waited/$(( ${SHIP_WAIT_MIN:-60} * 60 ))s): $i2"
