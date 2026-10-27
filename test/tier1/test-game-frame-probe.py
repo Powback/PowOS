@@ -40,6 +40,8 @@ class FrameProbe(unittest.TestCase):
                 script = """first_frame() { printf '%s' "$STAMP"; }
 ms() { echo $(( $2 - $1 )); }
 fail() { echo failed; }
+pill() { :; }
+sleep() { :; }
 t0=100; v=cold; seen=()
 """ + block
                 result = subprocess.run(["bash", "-c", 'STAMP=$1; ' + script, "test", timestamp], capture_output=True, text=True)

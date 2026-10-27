@@ -38,6 +38,8 @@ for state in 0 3; do
     chk setting
     ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.dockPlacement.value='$side';s.page.value=0;return 'set'})" >/dev/null
     sleep 1
+    clear=$(ev 'document.querySelector(".home>.dock").getBoundingClientRect().bottom<=document.querySelector(".home>.bar").getBoundingClientRect().top+1')
+    [ "$clear" = true ] || { echo "FAIL: $state $side dock overlaps search bar"; exit 1; }
     read -r x y end <<<"$(ev '(()=>{const r=document.querySelector(".home > .dock").getBoundingClientRect(),d=devicePixelRatio;return [r.x+r.width/2,r.bottom-45,r.top+45].map(n=>Math.round(n*d)).join(" ")})()')"
     echo "dock $state $side: swipe $x,$y -> $x,$end"
     [[ "$x $y $end" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]] && [ "$y" -gt "$end" ] || { echo "FAIL: invalid dock swipe geometry"; exit 1; }

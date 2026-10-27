@@ -81,7 +81,7 @@ async function dockPositionCheck(position) {
   const cells = [...dock.querySelectorAll(".dock-page:first-child > .app")].map(n => n.getBoundingClientRect());
   if (cells.length < 4) fails.push("missing pinned icons");
   function checkVertical() {
-    if (![rect.width <= 80, rect.height >= 200, rect.top >= 0, rect.bottom <= innerHeight + 1].every(Boolean)) fails.push("dock is not vertical inside viewport");
+    if (![rect.width <= 80, rect.height >= 200, rect.top >= 0, rect.bottom <= document.querySelector(".home > .bar").getBoundingClientRect().top + 1].every(Boolean)) fails.push("dock is not vertical inside viewport");
     const invalid = (r, i) => r.width < 40 || r.height < 40 || (i > 0 && r.top < cells[i-1].bottom - 1);
     if (cells.some(invalid)) fails.push("icons overlap or are too small");
     const stage = document.querySelector(".home > .stage > .home-content").getBoundingClientRect();

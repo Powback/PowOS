@@ -2563,7 +2563,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
   grid-area: auto;
   position: absolute;
   top: calc(var(--inset-top, env(safe-area-inset-top)) + 8px);
-  bottom: max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot)));
+  bottom: calc(max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + 48px + var(--edge));
   width: var(--side-dock);
   height: auto;
   margin: 0;
