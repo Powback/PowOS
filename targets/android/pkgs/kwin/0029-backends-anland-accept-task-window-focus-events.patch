@@ -1,0 +1,31 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] accept X focus acknowledgements for visible Android task windows
+
+Task windows are deliberately off the current desktop. updateVisibility already
+keeps them mapped, but focusInEvent discarded their X focus acknowledgement.
+Steam retained KWin's active-window identity and a full-screen Wine game lost
+activation and minimized again. Accept focus for the same explicitly shown task
+windows; hidden/minimized windows still fail isShown(). Update user time on an
+Android task focus, as activateWindow does for normal desktop activation.
+
+--- a/src/events.cpp
++++ b/src/events.cpp
+@@ -551,3 +551,3 @@
+-    if (!isShown() || !isOnCurrentDesktop()) { // we unmapped it, but it got focus meanwhile ->
++    if (!isShown() || (!isOnCurrentDesktop() && !property("powosShownByTask").toBool())) {
+         return; // activateNextWindow() already transferred focus elsewhere
+     }
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -214,6 +214,11 @@
+ void AnlandWindowTask::focus()
+ {
+     if (m_window && m_exported) {
++#if KWIN_BUILD_X11
++        if (auto *x11 = qobject_cast<X11Window *>(m_window.data())) {
++            x11->updateUserTime();
++        }
++#endif
+         m_window->setMinimized(false);
+         // The window is shown (on the tasks desktop, which isn't current), so it can take the focus without a desktop
+         // switch: requestFocus() neither raises nor switches (activateWindow() would switch to its desktop). Raised
