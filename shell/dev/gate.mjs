@@ -81,7 +81,7 @@ async function dockPositionCheck(position) {
   const cells = [...dock.querySelectorAll(".dock-page:first-child > .app")].map(n => n.getBoundingClientRect());
   if (cells.length < 4) fails.push("missing pinned icons");
   function checkVertical() {
-    if (rect.width > 80 || rect.height < 200) fails.push("dock is not vertical");
+    if (![rect.width <= 80, rect.height >= 200, rect.top >= 0, rect.bottom <= innerHeight + 1].every(Boolean)) fails.push("dock is not vertical inside viewport");
     const invalid = (r, i) => r.width < 40 || r.height < 40 || (i > 0 && r.top < cells[i-1].bottom - 1);
     if (cells.some(invalid)) fails.push("icons overlap or are too small");
     const stage = document.querySelector(".home > .stage > .home-content").getBoundingClientRect();
@@ -2122,7 +2122,7 @@ try {
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
     for (const position of ["bottom", "left", "right"]) {
       const name = `dock-position-${label}-${position}`;
-      runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, name, {width, height}).then(r => whenReady(r, async () => {
+      runs.push(open(browser, `${ORIGIN}/index.html${mode === "home" ? "" : `?mode=${mode}`}`, name, {width, height}).then(r => whenReady(r, async () => {
         const failures = await r.page.evaluate(dockPositionCheck, position);
         if (process.env.DOCK_SHOTS) await r.page.screenshot({path: `${process.env.DOCK_SHOTS}/${name}.png`});
         return failures;
