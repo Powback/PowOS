@@ -110,7 +110,7 @@ watcher() { grep -i "steam\|app $APP" "$GLOG" | tail -${1:-2} | cut -c1-200 | tr
 #                                          2nd pixel, as bf-checker.py scores), f<n>.png full size every 10 s, a line
 #                                          "<n> <time> <window> <WxH>" per 10 s in <dir>/grab.log, "done" at the end
 # "none" when nothing came in <s>. The time is the sample's start (a sample takes a few ms; a whole frame ~0.2 s).
-xframes() { python3 /var/tmp/powos-bf-xframes.py "$@"; }  # body: bf-xframes.py (split out for the length budget)
+xframes() { python3 "${BF_XFRAMES:-/var/tmp/powos-bf-xframes.py}" "$@" || echo none; }  # body: bf-xframes.py
 first_frame() { xframes first "$WIN_NAME" "$1"; }  # first_frame <s>: the game's first drawn frame (xframes first)
 first_change() { xframes change "$1" "$2" "$3"; }  # first_change <window> <s> <fps>: its first new frame (xframes change)
 open_task() {  # open_task <timeout s> <app id>: the drawer's / widget's launch path; its status line
@@ -282,7 +282,7 @@ step_resume() {
   f=$(first_change "$W" 5 30)
   RES=$([ "$f" = none ] && echo none || ms "$t0" "$f")
   local ev="'$st' in $t ms, steam frozen '$(cg)', same game $([ "$(reaper)" = "$r0" ] && echo yes || echo "no ($r0 -> $(reaper))"), window $(mapped "$W"), focused $([ "$(active)" = "$(printf '%d' "$W")" ] && echo yes || echo no), first new frame ${RES} ms after the launch"
-  if [ -z "$(cg)" ] && [ "$(reaper)" = "$r0" ] && [ "$(mapped "$W")" = IsViewable ] && [ "$RES" != none ] && [ "$RES" -le "$RESUME_MS" ] \
+  if [ -z "$(cg)" ] && [ "$(reaper)" = "$r0" ] && [ "$(mapped "$W")" = IsViewable ] && [ "$RES" != none ] && [ "$RES" -ge 0 ] && [ "$RES" -le "$RESUME_MS" ] \
       && { [ "$label" = steam ] || [ "$st" = "powos-open-task: task" ]; }; then
     echo "resume ($label): $ev"
   else fail "resume-$label" "$ev; watcher: $(watcher)"; return 1; fi
