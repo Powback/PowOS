@@ -298,6 +298,10 @@ run() {  # run <variant> <n>
     x=$(first_frame 90)
     if [[ "$x" =~ ^[0-9]+([.][0-9]+)?$ ]] && [ "$(ms "$t0" "$x")" -ge 0 ]; then
       seen[frame]=$(ms "$t0" "$x")
+      pill "checking the visible game after its first frame"
+      sleep 12
+      echo "SHOT ${v}-rendered-$(date +%H%M%S)"
+      sleep 5
     else
       window_evidence
       fail "frame-$v" "window created but no new game frame measured within 90 s"
