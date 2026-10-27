@@ -31,7 +31,7 @@ import {
   useScreen,
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import { apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
+import { dockPlacement, dockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
 
 /** "icon colours" options after "the apps'": theme hues, the accent. */
@@ -484,6 +484,9 @@ function StyleScreen() {
         </Section>
       )}
       <Section icon="apps" title="home">
+        <Option label="dock position">
+          <Segmented options={["bottom", "left", "right"]} picked={["bottom", "left", "right"].indexOf(dockPosition.value)} onPick={(i) => (dockPlacement.value = ["bottom", "left", "right"][i])} />
+        </Option>
         <Option label="swipe up from the left: PowOS AI">
           <Segmented options={["on", "off"]} picked={pullPanels.value === "on" ? 0 : 1} onPick={(i) => (pullPanels.value = i === 0 ? "on" : "off")} />
         </Option>

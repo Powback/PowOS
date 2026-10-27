@@ -68,6 +68,35 @@ function mime(p) {
   );
 }
 
+/** Side docks keep usable icons, reserve home space, and calculate drops on the vertical axis. */
+async function dockPositionCheck(position) {
+  const S = await importShim("./state.ts");
+  const D = await importShim("./ui/dockdrop.ts");
+  S.setDock(S.apps.value.slice(0, 4).map(a => a.key));
+  S.dockPlacement.value = position;
+  await new Promise(r => setTimeout(r, 250));
+  const fails = [];
+  const dock = document.querySelector(".home > .dock");
+  const rect = dock.getBoundingClientRect();
+  const cells = [...dock.querySelectorAll(".dock-page:first-child > .app")].map(n => n.getBoundingClientRect());
+  if (cells.length < 4) fails.push("missing pinned icons");
+  function checkVertical() {
+    if (rect.width > 80 || rect.height < 200) fails.push("dock is not vertical");
+    const invalid = (r, i) => r.width < 40 || r.height < 40 || (i > 0 && r.top < cells[i-1].bottom - 1);
+    if (cells.some(invalid)) fails.push("icons overlap or are too small");
+    const stage = document.querySelector(".home > .stage").getBoundingClientRect();
+    const overlaps = position === "left" ? stage.left < rect.right - 1 : stage.right > rect.left + 1;
+    if (overlaps) fails.push("side dock overlaps home");
+    const target = cells[2];
+    const aim = D.aimDock({app:S.apps.value[5].key}, target.left + target.width/2, target.top + target.height/2);
+    if (aim?.slot !== 2) fails.push(`vertical drop targets slot ${aim?.slot}, expected 2`);
+  }
+  if (position !== "bottom") checkVertical();
+  else if (rect.width < rect.height) fails.push("bottom dock is vertical");
+  if (localStorage.getItem("powos.dock.position") !== position) fails.push("position not saved");
+  return fails;
+}
+
 /** Chrome controls stay within a narrow window and dispatch only their scoped actions. */
 async function windowChromeCheck() {
   const B = (await importShim("./bridge.ts")).powos;
@@ -2071,6 +2100,16 @@ try {
       const url = `${ORIGIN}/index.html${mode === "home" ? "" : `?mode=${mode}`}`;
       // Ready, or failed: the boot guard (index.html) saw an error before ready - no use waiting out READY_MS.
       runs.push(open(browser, url, mode).then((r) => settle(r, () => window.__powosAlive === true || window.__powosBoot?.failed === true)));
+    }
+  }
+  for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
+    for (const position of ["bottom", "left", "right"]) {
+      const name = `dock-position-${label}-${position}`;
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, name, {width, height}).then(r => whenReady(r, async () => {
+        const failures = await r.page.evaluate(dockPositionCheck, position);
+        if (process.env.DOCK_SHOTS) await r.page.screenshot({path: `${process.env.DOCK_SHOTS}/${name}.png`});
+        return failures;
+      })));
     }
   }
   for (const [mode, width, height] of [["windowbar", 280, 27], ["statusbar", 404, 46]])

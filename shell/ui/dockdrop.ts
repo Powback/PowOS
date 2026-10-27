@@ -3,7 +3,7 @@
  * recent strip, home's grid, or out of the dock itself - pins where it's let go over the dock. While it hovers there
  * the dock makes room for it (home.tsx Dock reads [dockAim]); a full dock offers to swap the app under the finger.
  */
-import { byKey, dock, dockAim, editing, selected, setDock, type Carry } from "../state.ts";
+import { byKey, dock, dockPosition, dockAim, editing, selected, setDock, type Carry } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
 
@@ -30,20 +30,31 @@ export function aimDock(c: Carry, x: number, y: number) {
   const el = dockEl();
   if (!key || !el) return null;
   const r = el.getBoundingClientRect();
-  if (!r.width || y < r.top - REACH || x < r.left || x > r.right) return null;
+  const vertical = dockPosition.value !== "bottom";
+  if (!overDock(r, x, y, vertical)) return null;
   const rest = shownLess(key);
   const full = rest.length >= DOCK_MAX && !dock.value.includes(key);
   // Inserting: one more slot than there are others (the gap counts); swapping: one of the others.
   const n = full ? rest.length : rest.length + 1;
-  return { key, slot: slotAt(el, r, x, n), swap: full };
+  return { key, slot: slotAt(el, r, { x, y }, n), swap: full };
+}
+
+function overDock(r: DOMRect, x: number, y: number, vertical: boolean) {
+  const reach = vertical ? REACH : 0;
+  return r.width > 0 && y >= r.top - REACH && x >= r.left - reach && x <= r.right + reach && (!vertical || y <= r.bottom);
 }
 
 /** Which of [n] slots of the dock [el] (at [r]) [x] is over. */
-function slotAt(el: HTMLElement, r: DOMRect, x: number, n: number) {
+function slotAt(el: HTMLElement, r: DOMRect, point: { x: number; y: number }, n: number) {
+  if (dockPosition.value !== "bottom") {
+    const row = el.querySelector<HTMLElement>(".dock-page");
+    const top = row?.getBoundingClientRect().top ?? r.top;
+    return Math.max(0, Math.min(n - 1, Math.floor((point.y - top) / 56)));
+  }
   // Wide (one bar: home.tsx .home.wide), the pinned row is as long as its icons, not the dock's whole side.
   const row = wideHome.value ? el.querySelector<HTMLElement>(".dock-page")?.getBoundingClientRect() : null;
   const s = row?.width ? row : r;
-  return Math.max(0, Math.min(n - 1, Math.floor(((x - s.left) / s.width) * n)));
+  return Math.max(0, Math.min(n - 1, Math.floor(((point.x - s.left) / s.width) * n)));
 }
 
 /** Follows the finger: the dock makes room as it comes and goes, with a tick for each new slot. */

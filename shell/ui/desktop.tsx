@@ -21,7 +21,7 @@ import { Carried, Pages } from "./grid.tsx";
 import { Pet } from "./pet.tsx";
 import { AppScreen } from "./appscreen.tsx";
 import { Screens } from "./screens.tsx";
-import { back, chatting, closeDrawer, drawer, editing, pullKind } from "../state.ts";
+import { back, chatting, closeDrawer, dockPosition, drawer, editing, pullKind } from "../state.ts";
 
 // Its own stylesheet, here so the phone's pages never load it (hot.ts swaps it in place like the others).
 const css = document.createElement("link");
@@ -67,7 +67,7 @@ export function Desktop() {
   return (
     <>
       <div class="desk-wall" style={wall.value ? { backgroundImage: `url("${wall.value}")` } : undefined} />
-      <div class={`home ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${chatting.value ? "chatting" : ""}`}>
+      <div class={`home dock-${dockPosition.value} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${chatting.value ? "chatting" : ""}`}>
         {/* Open, only the launcher takes the pointer: a click beside it lands on the stage itself and closes it. */}
         <div class="stage" onClick={(e) => drawerOpen.value && e.target === e.currentTarget && closeDrawer()}>
           <div class="home-content" data-p ref={followOpenness}>

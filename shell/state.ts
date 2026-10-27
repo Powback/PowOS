@@ -138,6 +138,10 @@ export function stored(key: string, initial = ""): Signal<string> {
   return s;
 }
 
+/** Dock placement is shared by the phone and desktop shell; unknown saved values fall back to bottom. */
+export const dockPlacement = stored("dock.position", "bottom");
+export const dockPosition = computed(() => ["left", "right"].includes(dockPlacement.value) ? dockPlacement.value : "bottom");
+
 /** The drawer: open or not (a finger dragging it is gesture.ts's drawerDrag). */
 export const drawer = signal(0);
 /**

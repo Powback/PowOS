@@ -319,7 +319,7 @@ function startGesture(x: number, y: number, target: Element) {
   // An open folder (ui/folderview.tsx) takes its own taps and swipes (down closes it).
   // A touch inside a floating app window is the app's, always (a scroll in Chrome must never pull the launcher up or
   // the shade down): home's swipes start only outside every window (ui/desktops.ts inWindow).
-  if (busy() || inWindow(x, y)) return;
+  if (busy() || inWindow(x, y) || target.closest?.(".dock-left .dock, .dock-right .dock")) return;
   g = {
     x0: x,
     y0: y,

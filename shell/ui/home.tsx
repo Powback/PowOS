@@ -31,7 +31,7 @@ import { appOf, dockTap } from "./desktops.ts";
 import { overWindows } from "./panellift.ts";
 import { footBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
-import { byKey, carry, dock, dockAim, dockDrag, drawer, editing, folder, menu, page, pullKind, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
+import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pullKind, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
 import { remoteOpen } from "../remote.ts";
@@ -79,12 +79,15 @@ const DOCK_EXIT = 48;
  * room), brought back over the dock it goes where it's let go (dockdrop.ts).
  */
 function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
+  const vertical = dockPosition.value !== "bottom";
+  const axis = (ev: PointerEvent) => vertical ? ev.clientY : ev.clientX;
   const slotOf = (x: number) => {
     const r = dockEl.getBoundingClientRect();
-    return Math.max(0, Math.min(dock.value.length - 1, Math.floor(((x - r.left) / r.width) * dock.value.length)));
+    const slot = vertical ? (x - r.top) / 56 : ((x - r.left) / r.width) * dock.value.length;
+    return Math.max(0, Math.min(dock.value.length - 1, Math.floor(slot)));
   };
   menu.value = null;
-  dockDrag.value = { key, x: e.clientX, slot: slotOf(e.clientX) };
+  dockDrag.value = { key, x: axis(e), slot: slotOf(axis(e)) };
   const done = () => {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
@@ -92,14 +95,14 @@ function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
   };
   const move = (ev: PointerEvent) => {
     if (ev.pointerId !== e.pointerId) return;
-    if (ev.clientY < dockEl.getBoundingClientRect().top - DOCK_EXIT) {
+    if (outsideDock(dockEl.getBoundingClientRect(), ev)) {
       done();
       dockDrag.value = null;
       return startCarry({ app: key, fromDock: true }, ev, { x: 30, y: 30 });
     }
-    const slot = slotOf(ev.clientX);
+    const slot = slotOf(axis(ev));
     if (slot !== dockDrag.value?.slot) navigator.vibrate?.(5);
-    dockDrag.value = { key, x: ev.clientX, slot };
+    dockDrag.value = { key, x: axis(ev), slot };
   };
   const up = (ev: PointerEvent) => {
     if (ev.pointerId !== e.pointerId) return;
@@ -121,6 +124,12 @@ function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
   window.addEventListener("pointercancel", cancel);
 }
 
+function outsideDock(r: DOMRect, e: PointerEvent) {
+  if (dockPosition.value === "left") return e.clientX > r.right + DOCK_EXIT;
+  if (dockPosition.value === "right") return e.clientX < r.left - DOCK_EXIT;
+  return e.clientY < r.top - DOCK_EXIT;
+}
+
 /** The dock's keys with [key] moved to [slot]. */
 function order(key: string, slot: number) {
   const rest = dock.value.filter((k) => k !== key);
@@ -137,12 +146,13 @@ function useGlide(el: { current: HTMLDivElement | null }, keys: string) {
     const now = new Map<string, number>();
     for (const node of el.current?.querySelectorAll<HTMLElement>(".app[data-key]") ?? []) {
       const k = node.dataset.key!;
-      const left = node.getBoundingClientRect().left;
+      const rect = node.getBoundingClientRect();
+      const left = dockPosition.value === "bottom" ? rect.left : rect.top;
       now.set(k, left);
       const from = was.current.get(k);
       // The held one rides the finger (its own transform); a new one just appears.
       if (from == null || from === left || node.classList.contains("lifted")) continue;
-      node.animate([{ transform: `translateX(${from - left}px)` }, { transform: "none" }], { duration: 160, easing: "ease-out" });
+      node.animate([{ transform: `translate${dockPosition.value === "bottom" ? "X" : "Y"}(${from - left}px)` }, { transform: "none" }], { duration: 160, easing: "ease-out" });
     }
     was.current = now;
   }, [keys]);
@@ -211,6 +221,7 @@ const dockPage = signal(0);
 /** Exported for the desktop's home (ui/desktop.tsx): the same dock under its pill. */
 export function Dock() {
   const el = useRef<HTMLDivElement>(null);
+  const vertical = dockPosition.value !== "bottom";
   const d = dockDrag.value;
   const aim = dockAim.value;
   const c = carry.value;
@@ -241,18 +252,18 @@ export function Dock() {
   const ghost = !dock.value.some((k) => byKey.value.has(k)) && windowed.value.size === 0;
   // Wide (unfolded), the recent apps are the bar's right end (DockTray): the dock is its pinned apps only.
   const wide = wideHome.value;
-  const recents = !wide && recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k));
+  const recents = (!wide || vertical) && recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k));
   if (ghost && !carried && !recents) return null;
   // While an app is carried or moved along it, the dock is its pinned page only.
-  const paged = recents && !carried && !d && !ghost;
+  const paged = !vertical && recents && !carried && !d && !ghost;
   const slots = pinned.length + (gap >= 0 ? 1 : 0);
   const cells = pinned.map((app, i) => {
     // The held one follows the finger from its new slot; the others have moved aside (a slot each, equal widths).
     let style: Record<string, string> | undefined;
     if (d?.key === app.key && el.current) {
       const r = el.current.getBoundingClientRect();
-      const slotCenter = r.left + ((i + 0.5) * r.width) / slots;
-      style = { transform: `translateX(${d.x - slotCenter}px)` };
+      const slotCenter = vertical ? r.top + i * 56 + 28 : r.left + ((i + 0.5) * r.width) / slots;
+      style = { transform: `translate${vertical ? "Y" : "X"}(${d.x - slotCenter}px)` };
     }
     return (
       <AppCell
@@ -291,7 +302,7 @@ export function Dock() {
               {!d && !carried && <DockWindows pinned={dock.value} />}
             </div>
           )}
-          {recents && (paged || (ghost && !carried)) && (
+          {recents && (paged || (vertical && !carried && !d) || (ghost && !carried)) && (
             <div class="dock-page dock-recent">
               <DockRecents count={30} />
             </div>
@@ -319,6 +330,7 @@ export function Dock() {
  * the finger past what fits. It gives way with the dock as the launcher opens (a .dock: the same fade and slide).
  */
 function DockTray() {
+  if (dockPosition.value !== "bottom") return null;
   if (!recent.value.some((k) => !dock.value.includes(k) && !windowed.value.has(k) && byKey.value.has(k))) return null;
   return (
     <div class="dock dock-tray paged" data-p ref={followOpenness}>
@@ -339,7 +351,7 @@ export function Home() {
       <div class="screens" {...homeGestures()}>
         <PowAiPage />
         <div
-          class={`home ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
+          class={`home dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
         >
           <div class="stage">
             <div class="home-content" data-p ref={followOpenness}>
