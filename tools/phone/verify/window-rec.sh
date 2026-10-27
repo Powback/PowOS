@@ -17,19 +17,26 @@
 #   queue.sh add --budget 300 <task> tools/phone/verify/window-rec.sh --app kate [--off] [--pages]
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-APP=calc; OFF=0; PAGES=0; TWO=0; ONLY=0; TRACE=0; ARGS=()
-while [ $# -gt 0 ]; do case $1 in --app) APP=$2; shift 2 ;; --off) OFF=1; shift ;; --pages) PAGES=1; shift ;; --two) TWO=1; shift ;; --pages-only) PAGES=1; ONLY=1; shift ;; --trace) TRACE=1; shift ;; *) ARGS+=("$1"); shift ;; esac; done
+APP=calc; OFF=0; PAGES=0; TWO=0; ONLY=0; TRACE=0; CSS_GLASS=0; ARGS=()
+while [ $# -gt 0 ]; do case $1 in --app) APP=$2; shift 2 ;; --off) OFF=1; shift ;; --pages) PAGES=1; shift ;; --two) TWO=1; shift ;; --pages-only) PAGES=1; ONLY=1; shift ;; --trace) TRACE=1; shift ;; --css-glass) CSS_GLASS=1; shift ;; *) ARGS+=("$1"); shift ;; esac; done
 . "$here/e2e-lib.sh"
 e2e_args ${ARGS[@]+"${ARGS[@]}"}; LAST=2
 E2E_APPS="${TEST_APP:-com.oneplus.calculator}|PowosWindowActivity"; E2E_LINUX='kate'
-TAG=$APP$([ $OFF = 1 ] && echo -off)
+TAG=$APP$([ $OFF = 1 ] && echo -off)$([ $CSS_GLASS = 1 ] && echo -css-glass)
 e2e_init "rec-$TAG"
 e2e_setup inner
+GLASS0=
+if [ $CSS_GLASS = 1 ]; then
+  GLASS0=$(ev 'String(window.__glass.live.state.native)')
+  [[ "$GLASS0" = true || "$GLASS0" = false ]] || { echo "FAIL: cannot read glass state"; exit 1; }
+  ev '(window.__glass.live.native(false), "CSS glass")' >/dev/null
+fi
+restore_glass() { [ -z "$GLASS0" ] || ev "(window.__glass.live.native($GLASS0), 'restored')" >/dev/null; }
 RD=$HOME/.cache/powos-verify/window-core; mkdir -p "$RD"; STAMP=$(date +%m%d-%H%M); PRE=$RD/$STAMP-$TAG
 TOL=${TOL:-40}
 LEASH0=$(sh_ "settings get global powos_live_leash")
 restore_leash() { if [ "$LEASH0" = null ] || [ -z "$LEASH0" ]; then sh_ "settings delete global powos_live_leash" >/dev/null; else sh_ "settings put global powos_live_leash $LEASH0" >/dev/null; fi; }
-trap 'rc=$?; sh_ "pkill -INT screenrecord" >/dev/null 2>&1; restore_leash; (exit $rc); e2e_abort' EXIT
+trap 'rc=$?; sh_ "pkill -INT screenrecord" >/dev/null 2>&1; restore_leash; restore_glass; (exit $rc); e2e_abort' EXIT
 [ $OFF = 1 ] && sh_ "settings put global powos_live_leash 0"
 note "live leash setting: was ${LEASH0:-unset}, now $(sh_ "settings get global powos_live_leash")"
 DID=$(sh_ "dumpsys display" | grep -E "^  DisplayDeviceInfo" | sed -nE 's/.*uniqueId="local:([0-9]+)",.* state ON,.*/\1/p' | head -1)
