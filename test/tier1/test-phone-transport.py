@@ -18,6 +18,7 @@ class TransportTest(unittest.TestCase):
         docker.write_text('''#!/bin/sh
 case "$1" in
  inspect) echo "$MOCK_RUNNING" ;;
+ run) printf '%s\\n' "$@" ;;
  exec)
    case "$*" in
      *get-state*) echo offline; exit 1 ;;
@@ -54,6 +55,25 @@ esac
         result = self.run_script('adb.sh', 'shell', 'true')
         self.assertEqual(result.returncode, 69, result.stderr)
         self.assertFalse((self.directory / 'state').exists())
+
+    def test_cached_package_symlink_mounts_its_target(self):
+        import time
+        with tempfile.TemporaryDirectory(dir=Path.home()) as fixture:
+            root = Path(fixture)
+            (root / 'pkgs').mkdir()
+            (root / 'blobs').mkdir()
+            blob = root / 'blobs' / 'digest'
+            blob.write_bytes(b'package')
+            link = root / 'pkgs' / 'steam.pkg.tar.xz'
+            link.symlink_to(blob)
+            self.env['MOCK_RUNNING'] = 'true'
+            (self.directory / 'state').write_text(f'{int(time.time())} ok\n')
+            result = self.run_script('adb.sh', 'push', str(link), '/data/local/tmp/steam.pkg.tar.xz')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            arguments = result.stdout.splitlines()
+            self.assertIn(str(blob), arguments)
+            self.assertIn(f'{blob.parent}:{blob.parent}', arguments)
+            self.assertNotIn(str(link), arguments)
 
 
 if __name__ == '__main__':

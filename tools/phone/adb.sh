@@ -86,6 +86,8 @@ for a in "$@"; do
   # (`KWIN_PKG=targets/android/out/pkgs/...`): unmounted, the push failed silently (kwin 3.26, 21:35, 2026-10-23).
   # So every local path is resolved to its physical location first.
   if [ "$role" = in ] && [ -e "$a" ]; then
+    # Cached packages are links into a sibling blobs directory. Mount the target, not an unresolvable link.
+    if [ -L "$a" ]; then a=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$a"); fi
     d=$(cd "$(dirname "$a")" && pwd -P); a="$d/$(basename "$a")"
     if shared "$d"; then mounts+=(-v "$d:$d")
     else cp_in+=("$a" "/stage/in/$i"); a="/stage/in/$i/$(basename "$a")"; fi
