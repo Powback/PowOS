@@ -61,12 +61,19 @@ const homePullOk = computed(
     !agentsView.value &&
     screens.value.length === 0,
 );
+const dockElement = signal<HTMLElement | null>(null);
+function followDock(el: HTMLElement | null) {
+  followOpenness(el);
+  dockElement.value = el;
+}
+
 // Home's page only (app.tsx imports this module in every mode).
 if (!new URLSearchParams(location.search).get("mode")) effect(() => {
   const on = homePullOk.value;
   const side = dockPosition.value !== "bottom";
+  const dockNode = dockElement.value;
   const report = () => {
-    const r = side ? document.querySelector(".home > .dock")?.getBoundingClientRect() : null;
+    const r = side ? dockNode?.getBoundingClientRect() : null;
     const exclude = r ? { left: r.left, top: r.top, width: r.width, height: r.height } : undefined;
     powos.shade.homePull(on, exclude).then(
       (taken) => (shadeTakesHome.value = !!taken),
@@ -74,8 +81,10 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
     );
   };
   const frame = requestAnimationFrame(report);
+  const observer = new ResizeObserver(report);
+  if (dockNode) observer.observe(dockNode);
   addEventListener("resize", report);
-  return () => { cancelAnimationFrame(frame); removeEventListener("resize", report); };
+  return () => { cancelAnimationFrame(frame); observer.disconnect(); removeEventListener("resize", report); };
 });
 
 /** How far above the dock a held app has to go to leave it for the home screen. */
@@ -293,7 +302,7 @@ export function Dock() {
        * The pinned apps' page, then the recent apps in a row that scrolls on (the browser's own scroll, on the
        * compositor: momentum, snapping only near the two starts). The dots below follow when a scroll settles.
        */}
-      <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p ref={followOpenness}>
+      <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p ref={followDock}>
         <div class="dock-pages" ref={pagesEl}>
           {(!ghost || carried) && (
             <div
