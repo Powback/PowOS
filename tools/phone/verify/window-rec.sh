@@ -11,18 +11,19 @@
 #   --two            a second window open too (Kate with calc, Calculator with kate) for the page swipes
 #   --android-only   with --app calc --two: Chrome instead of Kate as the second window (the emulator lane)
 #   --pages-only     only the page swipes (no drag/resize)
+#   --no-record      measure without screenrecord overhead (keep the same gesture timing)
 #   --trace          a perfetto trace of the with-window swipes (sched, gfx/view/wm/am/input/binder atrace, SF frame
 #                    timeline) -> <PRE>-pages-win.pftrace; tools/phone/verify/page-trace.py reads it
 # Recordings: ~/.cache/powos-verify/window-core/<MMDD-HHMM>-<app>[-off]-{drag,resize,pages}.mp4 (+ logcat, log).
 #   queue.sh add --budget 300 <task> tools/phone/verify/window-rec.sh --app kate [--off] [--pages]
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-APP=calc; OFF=0; PAGES=0; TWO=0; ONLY=0; TRACE=0; CSS_GLASS=0; ARGS=()
-while [ $# -gt 0 ]; do case $1 in --app) APP=$2; shift 2 ;; --off) OFF=1; shift ;; --pages) PAGES=1; shift ;; --two) TWO=1; shift ;; --pages-only) PAGES=1; ONLY=1; shift ;; --trace) TRACE=1; shift ;; --css-glass) CSS_GLASS=1; shift ;; *) ARGS+=("$1"); shift ;; esac; done
+APP=calc; OFF=0; PAGES=0; TWO=0; ONLY=0; TRACE=0; CSS_GLASS=0; NO_RECORD=0; ARGS=()
+while [ $# -gt 0 ]; do case $1 in --app) APP=$2; shift 2 ;; --off) OFF=1; shift ;; --pages) PAGES=1; shift ;; --two) TWO=1; shift ;; --pages-only) PAGES=1; ONLY=1; shift ;; --trace) TRACE=1; shift ;; --css-glass) CSS_GLASS=1; shift ;; --no-record) NO_RECORD=1; shift ;; *) ARGS+=("$1"); shift ;; esac; done
 . "$here/e2e-lib.sh"
 e2e_args ${ARGS[@]+"${ARGS[@]}"}; LAST=2
 E2E_APPS="${TEST_APP:-com.oneplus.calculator}|PowosWindowActivity"; E2E_LINUX='kate'
-TAG=$APP$([ $OFF = 1 ] && echo -off)$([ $CSS_GLASS = 1 ] && echo -css-glass)
+TAG=$APP$([ $OFF = 1 ] && echo -off)$([ $CSS_GLASS = 1 ] && echo -css-glass)$([ $NO_RECORD = 1 ] && echo -no-record)
 e2e_init "rec-$TAG"
 e2e_setup inner
 GLASS0=
@@ -55,6 +56,7 @@ content() { screenrect "$(sfframe "$LAYER")"; }
 near() { local d=$(($1 - $2)); [ ${d#-} -le "$3" ]; }
 logc() { sh_ "rm -f /data/local/tmp/rec.txt; (timeout 280 logcat -T 1 -v time -s PowosTaskLeash PowosWindowDrag PowosWindowResize PowosWindowFrames PowosWindowFrame PowosFreeform WindowTasks RemoteTransitionHandler ShellTransitions </dev/null >/data/local/tmp/rec.txt 2>&1 &)"; }
 rec() {
+  if [ $NO_RECORD = 1 ]; then sleep 1.2; return; fi
   local display=""
   [ -n "$DID" ] && display="--display-id $DID"
   "$A" shell "su -c 'rm -f /data/local/tmp/wc-$1.mp4; screenrecord $display --bit-rate 20000000 --time-limit ${2:-12} /data/local/tmp/wc-$1.mp4'" > "$PRE-$1-screenrecord.txt" 2>&1 &
@@ -62,6 +64,7 @@ rec() {
   sleep 1.2
 }
 recstop() {
+  if [ $NO_RECORD = 1 ]; then sleep 2.1; return; fi
   sleep 0.6; sh_ "pkill -INT screenrecord"; sleep 1.5
   wait "$RECORD_PID" 2>/dev/null || true
   sh_ "chmod 644 /data/local/tmp/wc-$1.mp4"
