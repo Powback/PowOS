@@ -20,7 +20,8 @@ L=$HOME/.cache/powos-verify.lock
 # override; a check that doesn't source e2e-lib.sh still falls back to the same default (${TEST_APP:-...}).
 TEST_APP=${TEST_APP:-com.oneplus.calculator}
 
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+# Command-only calls must not drain a surrounding read loop (cleanup must visit every task).
+sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
 # ash: a script on stdin as Android root (any quoting inside).
 ash() { "$A" shell "su -c 'sh -s'" 2>/dev/null | tr -d '\r'; }
 # device_state_set <state>: set fold state; on emu, state 3 (inner) is a no-op, state 0 (cover) prints SKIP.
