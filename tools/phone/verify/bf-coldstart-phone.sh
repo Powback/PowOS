@@ -101,7 +101,7 @@ restore() {
 # prefix or the native build's ~/.config/unity3d).
 renderer() { local l; l=$(find "$CD/pfx/drive_c/users" "$HOME/.config/unity3d" \( -name Player.log -o -name output_log.txt \) -newer /tmp/bf-cold-mark 2>/dev/null | head -1)
   [ -n "$l" ] && grep -a -m3 -i 'renderer:\|GfxDevice:\|Direct3D\|OpenGL\|Vulkan' "$l" | tr -d '\r' | cut -c1-90 | tr '\n' '|' || echo "no new Unity log"; }
-ON_CLOSE="fexcache_off; restore"
+ON_CLOSE="fexcache_off; restore; bash /var/tmp/powos-bf-stop.sh --steam | head -1"
 # game_exe <reaper>: the game's own program runs under the launch - a process whose command line runs a file from
 # common/<installdir>/ (Unix or Wine's Windows spelling), run by FEX or Wine, that isn't one of the chain's wrappers.
 game_exe() { local x c; for x in $(tree "$1"); do c=$(tr '\0' ' ' < "/proc/$x/cmdline" 2>/dev/null) || continue
@@ -267,7 +267,7 @@ JS
   qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript "$script" "$plugin" >/dev/null
   qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.start >/dev/null
   sleep 1
-  grep 'POWOS_GAME_STATE' "$HYPR" | tail -12
+  grep -a 'POWOS_GAME_STATE' "$HYPR" | tail -12
   qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript "$plugin" >/dev/null
 }
 

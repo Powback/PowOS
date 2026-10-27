@@ -71,10 +71,10 @@ intap() { local b w=$2; b=$(tbounds "$1"); [ -n "$b" ] || return; set -- $b; loc
   mdown $x $y "inside the window" || return; local t; t=$(touched); mup $x $y
   case $t in *PowosWindowActivity*|*calculator*|*Calculator*) pass "[$w] a tap inside goes to the app: $t" ;; *) fail "[$w] a tap inside did NOT reach the app's window: $t" ;; esac; sleep 0.6; }
 # perfetto around the swipes: scheduling, the framework's atrace (com.powos.app's too), SurfaceFlinger's frame timeline.
-trace_on() { printf '%s\n' 'buffers { size_kb: 65536 fill_policy: RING_BUFFER }' \
+trace_on() { printf '%s\n' 'buffers { size_kb: 65536 fill_policy: RING_BUFFER }' 'buffers { size_kb: 4096 fill_policy: DISCARD }' \
   'data_sources { config { name: "linux.ftrace" ftrace_config { ftrace_events: "sched/sched_switch" ftrace_events: "sched/sched_wakeup" ftrace_events: "power/cpu_frequency" atrace_categories: "gfx" atrace_categories: "view" atrace_categories: "wm" atrace_categories: "am" atrace_categories: "input" atrace_categories: "binder_driver" atrace_apps: "com.powos.app" atrace_apps: "com.android.systemui" } } }' \
   'data_sources { config { name: "android.surfaceflinger.frametimeline" } }' \
-  'data_sources { config { name: "linux.process_stats" target_buffer: 0 process_stats_config { scan_all_processes_on_start: true } } }' \
+  'data_sources { config { name: "linux.process_stats" target_buffer: 1 process_stats_config { scan_all_processes_on_start: true } } }' \
   'duration_ms: 20000' > "$OUT/trace.cfg"
   "$A" push "$OUT/trace.cfg" /data/local/tmp/ps-trace.cfg >/dev/null 2>&1
   sh_ "rm -f /data/misc/perfetto-traces/ps.pftrace; cat /data/local/tmp/ps-trace.cfg | perfetto --txt -c - -o /data/misc/perfetto-traces/ps.pftrace --background" >/dev/null; sleep 1; }
