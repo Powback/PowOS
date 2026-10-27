@@ -42,7 +42,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.33
+pkgrel=3.34
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -87,11 +87,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0026-backends-anland-who-draws-a-task-s-title-bar-and-its-own-bar-s-drag.patch
           0027-backends-anland-popups-of-a-task-s-window-stay-inside-the-task.patch
           0028-backends-anland-restore-minimized-task-on-focus.patch
-          0029-backends-anland-accept-task-window-focus-events.patch)
+          0029-backends-anland-accept-task-window-focus-events.patch
+          0030-backends-anland-restore-existing-task-on-show.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

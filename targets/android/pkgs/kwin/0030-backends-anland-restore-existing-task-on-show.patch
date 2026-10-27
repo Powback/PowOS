@@ -1,0 +1,34 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: restore existing tasks on show and reconnect
+
+Reopening an already foreground Android task need not produce a new focus
+event. Restore its minimized Linux window explicitly on show. When its
+consumer reconnects, restore focus after watchWindow has marked it visible
+again; the first-export-only focus call misses subsequent connections.
+
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -295,7 +295,6 @@
+             m_window->setDesktops({desktop});
+         }
+         m_exported = true;
+-        focus();
+     }
+     // A full-screen window keeps the size it has now through output changes (a game started unfolded keeps
+     // rendering 2268x2440 on the cover screen) - the task scales it instead (viewport()).
+@@ -303,6 +302,7 @@
+         m_window->setProperty("powosKeepFullScreenGeometry", true); // Window::checkWorkspacePosition
+     }
+     watchWindow(m_window);
++    focus();
+     attach(m_window);
+     // Menus, popups and dialogs it opens from now on are drawn into the task too (dialogs over it, where KWin placed
+     // them - centred on it), and moved with it: they live with it on the tasks desktop.
+@@ -1280,6 +1280,7 @@
+         return false;
+     }
+     if (AnlandWindowTask *task = taskFor(window)) {
++        task->focus();
+         // Already a task: to the front - as what it is: a game's own full-screen task stays full screen (the drawer's
+         // launch of a game that KWin already showed full screen made it a floating task, the game scaled into it).
+         QStringList open{QStringLiteral("open"), QString::number(task->id()), window->desktopFileName(), window->caption()};
