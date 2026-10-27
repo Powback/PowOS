@@ -30,5 +30,20 @@ class FrameProbe(unittest.TestCase):
         self.assertEqual(self.probe("print('1793133042.100')"), "1793133042.100")
 
 
+    def test_cold_launch_requires_a_measured_frame(self):
+        source = (ROOT / "tools/phone/verify/bf-coldstart-phone.sh").read_text()
+        start = source.index('    x=$(first_frame 90)')
+        block = source[start:source.index('\n  elif', start)]
+        # Exercise the actual launch verdict with a timeout, broken probe, stale frame and valid frame.
+        for timestamp, valid in [("none", False), ("", False), ("garbage", False), ("99", False), ("101", True)]:
+            with self.subTest(timestamp=timestamp):
+                script = """first_frame() { printf '%s' "$STAMP"; }
+ms() { echo $(( $2 - $1 )); }
+fail() { echo failed; }
+t0=100; v=cold; seen=()
+""" + block
+                result = subprocess.run(["bash", "-c", 'STAMP=$1; ' + script, "test", timestamp], capture_output=True, text=True)
+                self.assertEqual("failed" not in result.stdout, valid)
+
 if __name__ == "__main__":
     unittest.main()

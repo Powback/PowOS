@@ -279,7 +279,12 @@ run() {  # run <variant> <n>
   if [ -n "${seen[window]:-}" ]; then
     exported "$v" "$hl" "$W"
     pill "cold start timing: $v - first frame"
-    x=$(first_frame 90); [ "$x" != none ] && seen[frame]=$(ms "$t0" "$x")
+    x=$(first_frame 90)
+    if [[ "$x" =~ ^[0-9]+([.][0-9]+)?$ ]] && [ "$(ms "$t0" "$x")" -ge 0 ]; then
+      seen[frame]=$(ms "$t0" "$x")
+    else
+      fail "frame-$v" "window created but no new game frame measured within 90 s"
+    fi
   elif [ -n "${seen[handoff]:-}" ]; then fail "handoff-$v" "the running Steam didn't log the launch's URL in 20 s (handoff lines above)"
   elif [ -n "${seen[ended]:-}" ]; then fail "start-$v" "the launch chain ended ${seen[ended]} ms after the tap, no window; Steam: $(grep -a 'Game process removed\|exit code' "$S/logs/gameprocess_log.txt" | tail -2 | cut -c1-120 | tr '\n' '|')"
   else
@@ -294,7 +299,7 @@ run() {  # run <variant> <n>
   echo "   tool: $($CFG get $APP); renderer: $(renderer)"
   echo "   after: $(sizes); evaluator: $(tail -1 "$CD/powos-iscript.log" 2>/dev/null | cut -c1-160)"
   RES_="$RES_ $v#$2 window ${seen[window]:--} frame ${seen[frame]:--};"
-  # The per-game compat policy learns from it (powos-steam-compat record): a window = a working launch of this tool;
+  # The per-game compat policy learns from it (powos-steam-compat record): a rendered frame confirms a working launch;
   # a chain that ended without one = a failed one. Not when Steam downloaded first (the time isn't the tool's).
   # A warm run (Steam left running) without a window says nothing about the tool while Steam's freeze/thaw can hang
   # a launch (2026-10-23 02:53: a frozen Steam never thawed for the launch, no window in 394 s; 02:58: never frozen):
@@ -302,7 +307,7 @@ run() {  # run <variant> <n>
   if [ -z "${seen[window]:-}" ] && [ $v != cold ]; then
     echo "INVALID $v #$2: no window on a warm Steam (at the tap: $st; Steam's cgroup now '$(cg)'$([ -n "${seen[handoff]:-}" ] && echo "; Steam never took the URL")) - Steam's hand-off, not the tool; not recorded"
   elif [ -z "${seen[update]:-}" ]; then
-    if [ -n "${seen[window]:-}" ]; then echo "   policy: $($CFG record $APP "${seen[window]}" $([ $v = cold ] && echo --cold))"
+    if [ -n "${seen[frame]:-}" ]; then echo "   policy: $($CFG record $APP "${seen[window]}" $([ $v = cold ] && echo --cold))"
     elif [ -n "${seen[ended]:-}" ]; then echo "   policy: $($CFG record $APP fail)"; fi
   fi
   [ $v = fexcache ] && { echo "   FEX wrote: $(find "$CD/fex-emu" ~/.local/share/fex-emu ~/.cache -newer /tmp/bf-cold-mark -type f 2>/dev/null | grep -vi telemetry | head -8 | tr '\n' ' ')"; fexcache_off; }
