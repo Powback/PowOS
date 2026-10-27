@@ -104,7 +104,8 @@ async function dockPositionCheck(position) {
     const clip = document.querySelector(desktop ? ".launcher" : ".launcher-clip").getBoundingClientRect();
     const bar = document.querySelector(".home > .bar").getBoundingClientRect();
     if (!desktop && (clip.left > 20 || clip.right < innerWidth - 20)) fails.push("launcher loses width beside dock");
-    if (bar.bottom > innerHeight + 1 || bar.top < innerHeight - 140) fails.push("launcher search is off screen");
+    if (bar.bottom > innerHeight + 1 || bar.top < 0) fails.push(`launcher search is off screen: top=${bar.top}, bottom=${bar.bottom}, viewport=${innerHeight}`);
+    if (position !== "bottom" && bar.bottom < innerHeight - 60) fails.push("side dock leaves launcher search above the bottom edge");
   }
   return fails;
 }

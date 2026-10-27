@@ -537,6 +537,8 @@ EOS
           [ "$f" \< "$j" ] || break
           case " ${sel[*]} " in *" $f "*) continue ;; esac
           need=; qt=0; task=; . "$f"
+          # A task-specific test request must not yield forever to a job it cannot select next window.
+          [ -z "$go" ] || [ "$go" = all ] || [ "$task" = "$go" ] || continue
           if shipped "$need" "$qt"; then echo "$(date +%T) $(basename "$f" .job) queued to go first - re-picking the window"; exit 4; fi
         done
         task=; need=; qt=0
