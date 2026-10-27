@@ -40,5 +40,20 @@ exit 0
         self.assertEqual(self.run_selection("all", "games", shipped=False), 0)
 
 
+    def test_install_boot_check_blocks_visual_jobs(self):
+        start = CODE.index('        wp=${SHIP_DIR:', CODE.index('# An APK install waits'))
+        block = CODE[start:CODE.index('\n        fi', start) + len('\n        fi')]
+        with tempfile.TemporaryDirectory() as directory:
+            for marker in ("installing", "wants-phone", None):
+                with self.subTest(marker=marker):
+                    script = 'SHIP_DIR=$1; N=1; k=0; pass=0; fail=0; status() { :; }; jstr() { :; }; '
+                    if marker:
+                        script += f'echo $$ > "$SHIP_DIR/{marker}"; '
+                    result = subprocess.run(["bash", "-c", script + block + "\nexit 0", "test", directory], capture_output=True)
+                    self.assertEqual(result.returncode, 4 if marker else 0)
+                    if marker:
+                        (pathlib.Path(directory) / marker).unlink()
+
+
 if __name__ == "__main__":
     unittest.main()

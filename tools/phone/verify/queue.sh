@@ -545,7 +545,9 @@ EOS
         # An APK install waits for this window (ship-apk wrote wants-phone): yield before the next check - the install
         # restarts the app anyway, and the rest run in the next window against the new build.
         wp=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/wants-phone
-        if [ -f "$wp" ] && kill -0 "$(cat "$wp" 2>/dev/null)" 2>/dev/null; then
+        ip=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/installing
+        if { [ -f "$wp" ] && kill -0 "$(cat "$wp" 2>/dev/null)" 2>/dev/null; } ||
+           { [ -f "$ip" ] && kill -0 "$(cat "$ip" 2>/dev/null)" 2>/dev/null; }; then
           echo "$(date +%T) yielding the window to an APK install ($((N - k)) checks wait for the next window)"
           status "" "{\"done\":true,\"summary\":$(jstr "Phone checks paused for an update install: $pass passed, $fail failed")}"
           exit 4
