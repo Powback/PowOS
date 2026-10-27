@@ -10,6 +10,7 @@ mkdir -p "$OUT"
 . "$here/window-lock.sh"
 window_lock controller-overlay 120
 I0=$(irq)
+[ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" = Awake ] || { echo "screen asleep; visual check deferred"; exit 3; }
 was=$(hcall pad.state '[]' 'v=>String(v)')
 case "$was" in true|false) ;; *) echo "FAIL: cannot read controller state: $was"; exit 1 ;; esac
 restore() {

@@ -10,6 +10,7 @@ mkdir -p "$OUT"
 . "$here/window-lock.sh"
 window_lock home-shade-layout 120
 I0=$(irq)
+[ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" = Awake ] || { echo "screen asleep; visual check deferred"; exit 3; }
 restore() {
   sh_ 'input keyevent BACK; cmd device_state state reset' >/dev/null
   [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"

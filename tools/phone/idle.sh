@@ -19,7 +19,7 @@
 #        PHONE (a local 5 s check) over one held adb connection - no VPN round trip per check. Agents never poll the
 #        phone in loops (docs/AGENT-HANDBOOK.md); this is what to call instead.
 #        AWAKE_ONLY=1: return only for Awake + idle (a check that needs the screen on waits through doze; never wakes it).
-#        VERIFY_GO=1: also return "go=<task|all> screen=<..>" at once when the AI page's "test now" wrote PowOS's
+#        VERIFY_GO=1: also return "go=<task|all> screen=<..>" (respecting AWAKE_ONLY) when the AI page's "test now" wrote PowOS's
 #        /tmp/powos-verify-go (the user hands the phone over; tools/phone/verify/queue.sh's runner clears it), and
 #        "stop screen=<..>" when the status pill's tap wrote /tmp/powos-verify-stop (the runner pauses).
 #        GO_ONLY=1 (the runner paused): return for the go flag only. VERIFY_STATE=<word>: the runner's state for the
@@ -53,7 +53,7 @@ if [ "${1:-}" = "--wait" ]; then
       t=\$(( \$(date +%s) - \$(cat /data/local/tmp/powos-lasttouch 2>/dev/null || date +%s) ))
       [ \$w = Awake ] && { [ \$on = 0 ] && on=\$(date +%s); } || on=0
       a=\$(( \$(date +%s) - on ))
-      [ "$go" = 1 ] && [ -s /data/powos/root/tmp/powos-verify-go ] && { echo go=\$(head -c 64 /data/powos/root/tmp/powos-verify-go | tr -cd 'A-Za-z0-9_.:-') screen=\$w; exit 0; }
+      [ "$go" = 1 ] && { [ "$awake" != 1 ] || [ \$w = Awake ]; } && [ -s /data/powos/root/tmp/powos-verify-go ] && { echo go=\$(head -c 64 /data/powos/root/tmp/powos-verify-go | tr -cd 'A-Za-z0-9_.:-') screen=\$w; exit 0; }
       [ "$go" = 1 ] && [ "$only" != 1 ] && [ -e /data/powos/root/tmp/powos-verify-stop ] && { echo stop screen=\$w; exit 0; }
       # A game running is the user playing, touched or not (23:51, 2026-10-23: a check closed My Friend Pedro mid-game
       # because 2 min without a touch counted as free). Checks wait until it's closed; "test now" (go) still overrides.
