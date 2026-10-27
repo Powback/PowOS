@@ -299,7 +299,8 @@ run() {  # run <variant> <n>
     if [[ "$x" =~ ^[0-9]+([.][0-9]+)?$ ]] && [ "$(ms "$t0" "$x")" -ge 0 ]; then
       seen[frame]=$(ms "$t0" "$x")
       pill "checking the visible game after its first frame"
-      sleep 12
+      # Let the intro settle before reviewing the rendered game, not just its first splash.
+      sleep 30
       echo "SHOT ${v}-rendered-$(date +%H%M%S)"
       sleep 5
     else
