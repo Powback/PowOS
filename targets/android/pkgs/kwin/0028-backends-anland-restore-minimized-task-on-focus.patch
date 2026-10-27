@@ -1,0 +1,19 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: restore a minimized window when its task gains focus
+
+Broforce's full-screen window can already be minimized when its Android
+consumer connects. Raising and requesting focus leaves that window unmapped:
+the Android task is foreground but black, while Steam retains keyboard focus.
+Restore the window before raising it, just as activateWindow does, without
+switching the desktop to the private task desktop.
+
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -167,6 +167,7 @@
+ void AnlandWindowTask::focus()
+ {
+     if (m_window && m_exported) {
++        m_window->setMinimized(false);
+         // The window is shown (on the tasks desktop, which isn't current), so it can take the focus without a desktop
+         // switch: requestFocus() neither raises nor switches (activateWindow() would switch to its desktop). Raised
+         // too: every task's window lies at the same place on that desktop, and Xwayland gives a touch to the X window
