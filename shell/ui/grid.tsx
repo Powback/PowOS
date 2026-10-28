@@ -152,10 +152,11 @@ function touch(a: Cell, b: Cell): "v" | "h" | null {
 
 /**
  * Each straight group's members' common span, per page (the carried tile is out of every group while it's carried).
- * Left as they are: a group that both stacks and rows (a block), and an L - two touching members flush on one side
- * but not the other (steam 6 wide over fetch on its right half): that's a deliberate turn, drawn with its seam and
- * rounded inner corner, and stretching it would cover the wide one's whole bottom (its free half dropping half a
- * gutter, to the row line's far side). The common span never covers another tile and stays inside the grid.
+ * A stack takes one width even when its narrower member sits flush on one side (steam 6 wide over fetch on its right
+ * half becomes one 6-wide shape); a row one height. Only a group that joins both ways (a block or a T) keeps its
+ * members' own spans, seams and rounded inner corners. A stretched member's shared side is then covered whole, a seam
+ * (its face meets the neighbour's on the row line) - its outer edges stay half a gutter in, as a single tile's. The
+ * common span never covers another tile and stays inside the grid.
  */
 const groupSpans = computed(() => {
   const out = new Map<string, Cell>();
@@ -172,11 +173,10 @@ const groupSpans = computed(() => {
   return out;
 });
 
-/** The merged group [start] is in (boxed tiles reachable edge to edge, marked [seen]), how they meet, and whether it turns. */
+/** The merged group [start] is in (boxed tiles reachable edge to edge, marked [seen]) and how its members meet. */
 function groupOf(start: HomeItem, tiles: HomeItem[], seen: Set<string>) {
   const members: HomeItem[] = [];
   const ways = new Set<string>();
-  let turns = false;
   const todo = [start];
   seen.add(start.key);
   while (todo.length) {
@@ -184,11 +184,10 @@ function groupOf(start: HomeItem, tiles: HomeItem[], seen: Set<string>) {
     members.push(a);
     for (const [b, t] of touching(a, tiles)) {
       ways.add(t);
-      turns ||= turnsAt(own(a), own(b), t);
       if (!seen.has(b.key)) (seen.add(b.key), todo.push(b));
     }
   }
-  return { members, ways, turns };
+  return { members, ways };
 }
 
 /** The tiles of [tiles] touching [a] edge to edge, and how. */
@@ -198,15 +197,9 @@ const touching = (a: HomeItem, tiles: HomeItem[]) =>
     return t ? [[b, t] as const] : [];
   });
 
-/** Cells [a] and [b] meeting [t]-wise flush on exactly one side across the meeting: an L's turn. */
-function turnsAt(a: Cell, b: Cell, t: "v" | "h") {
-  const [p, s] = t === "v" ? (["x", "w"] as const) : (["y", "h"] as const);
-  return (a[p] === b[p]) !== (a[p] + a[s] === b[p] + b[s]);
-}
-
-/** A straight stack or row (no turn): each member's common span into [out], if one fits beside the page's other tiles. */
-function stretch(g: { members: HomeItem[]; ways: Set<string>; turns: boolean }, on: HomeItem[], out: Map<string, Cell>, lim: { cols: number; rows: number }) {
-  if (g.members.length < 2 || g.ways.size !== 1 || g.turns) return;
+/** A straight stack or row (joined one way only): each member's common span into [out], if one fits beside the page's other tiles. */
+function stretch(g: { members: HomeItem[]; ways: Set<string> }, on: HomeItem[], out: Map<string, Cell>, lim: { cols: number; rows: number }) {
+  if (g.members.length < 2 || g.ways.size !== 1) return;
   // Along the common side: x/w for a stack, y/h for a row.
   const [p, s, max] = g.ways.has("v") ? (["x", "w", lim.cols] as const) : (["y", "h", lim.rows] as const);
   const cells = g.members.map(own);

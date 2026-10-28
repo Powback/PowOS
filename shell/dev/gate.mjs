@@ -262,7 +262,9 @@ async function checkOnce(r, check) {
   }
 }
 
-/** In the page: steam (6x3) over fetch (3x3, the right half) on home's first page - merged, level, one surface? */
+/** In the page: steam (6x3) over fetch (3x3, flush right) on home's first page - a straight stack: ONE clean rectangle
+ * (the user's 2026-10-28 "looks ugly af if the widgets arent the same width"), fetch shown 6 wide, outer edges on the
+ * row and column lines, the shared side a seam, no inner corner. */
 async function joinsCheck() {
   const S = await window.__gw.mod("./state.ts");
   const { powos } = await window.__gw.mod("./bridge.ts");
@@ -283,18 +285,15 @@ async function joinsCheck() {
   if (tiles.length !== 2) return [`${tiles.length} tiles on the page, not the 2 placed`];
   const [A, B] = tiles.map((t) => ({ t, cell: t.getBoundingClientRect(), face: t.querySelector(":scope > .tile").getBoundingClientRect() })).sort((p, q) => p.cell.top - q.cell.top);
   const near = (a, b) => Math.abs(a - b) <= 1;
-  const seamBetween = [...document.querySelectorAll(".page:not(.away) .seam.bridge")].some((e) => {
-    const r = e.getBoundingClientRect();
-    return near(r.top, A.face.bottom) && near(r.bottom, B.face.top) && near(r.left, Math.max(A.face.left, B.face.left)) && near(r.right, Math.min(A.face.right, B.face.right));
-  });
-  const gap = B.face.top - A.face.bottom;
+  // Outer edges: half a gutter in from the cell box, as a single tile's. The shared side: the faces meet (a seam).
+  const inset = (x) => ["top", "right", "bottom", "left"].filter((k) => !near(Math.abs(x.face[k] - x.cell[k]), half));
   return [
     !A.t.classList.contains("joined") || !B.t.classList.contains("joined") ? "the two aren't merged (no .joined)" : "",
-    // The wide one's bottom: where an unjoined edge is (its free half level), not half a gutter lower.
-    near(A.face.bottom, A.cell.bottom - half) ? "" : `the wide tile's bottom edge is ${Math.round(A.face.bottom - (A.cell.bottom - half))} px off its row line`,
-    gap > 0.5 && !seamBetween ? `a ${Math.round(gap)} px gutter between them along the shared span (not one surface)` : "",
-    near(A.face.right, B.face.right) ? "" : `their right edges differ by ${Math.round(A.face.right - B.face.right)} px`,
-    document.querySelector(".page:not(.away) .seam.fillet") ? "" : "no rounded inner corner where the group turns",
+    near(A.face.left, B.face.left) && near(A.face.right, B.face.right) ? "" : `not one width: left edges differ by ${Math.round(A.face.left - B.face.left)} px, right by ${Math.round(A.face.right - B.face.right)} px`,
+    ...inset(A).filter((k) => k !== "bottom").map((k) => `the wide tile's ${k} edge is off its grid line`),
+    ...inset(B).filter((k) => k !== "top").map((k) => `the stacked tile's ${k} edge is off its grid line`),
+    near(A.face.bottom, A.cell.bottom) && near(B.face.top, B.cell.top) && near(A.cell.bottom, B.cell.top) ? "" : `the shared side isn't a seam on the row line (${Math.round(B.face.top - A.face.bottom)} px between the faces)`,
+    document.querySelector(".page:not(.away) .seam.fillet") ? "a rounded inner corner in a straight stack (it should be one rectangle)" : "",
   ].filter(Boolean);
 }
 
@@ -2410,10 +2409,9 @@ try {
       }),
     );
   }
-  // Merged tiles touching over PART of an edge (grid.tsx joins/seams; the user's steam-over-fetch, 2026-10-22): a wide
-  // widget over a half-width one is ONE surface - the gutter along the shared span filled by a seam exactly between the
-  // two faces, an inner-corner fillet where the group turns - and the wide one's free edge stays level with an unjoined
-  // edge (half a gutter in from its row line: extending it whole was the ragged step). Folded and unfolded.
+  // Merged tiles in a straight stack (grid.tsx groupSpans/joins; the user's steam-over-fetch, 2026-10-28): a wide widget
+  // over a half-width one shows as ONE rectangle - one width, outer edges on the grid lines, the shared side a seam, no
+  // inner corner. Folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 412, height: 915 }], ["unfolded", { width: 900, height: 1000 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `joins-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(joinsCheck))));
