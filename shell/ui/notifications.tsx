@@ -285,7 +285,7 @@ const toggle = (id: string) => {
 /**
  * Whether a stack is [open] (tapped, or the shade's whole view), and [shown] open: also while a pull of the shade
  * (ccexpand.ts) is about to unfold it - then its rest rides the finger. [driven]: the pull drives it either way (its
- * "peek": the top card's "+N" and the peeking cards under it are kept, faded by the finger - ccexpand.ts attachPeek).
+^ * "pulled": the top card's "+N" and the peeking cards under it are kept, faded by the finger - ccexpand.ts attachPeek).
  */
 function useStackOpen(id: string) {
   const has = expanded.value.has(id);
@@ -299,7 +299,7 @@ function useStackOpen(id: string) {
     if (driven && ref.current) attachPeek(ref.current);
   }, [peek, shown]);
   // The stack's classes, and whether the top card keeps its folded look ("+N"): folded, or driven by the pull.
-  const cls = `notif-stack ${shown ? "open" : ""} ${driven ? "peek" : ""}`;
+  const cls = `notif-stack ${shown ? "open" : ""} ${driven ? "pulled" : ""}`;
   return { open, shown, driven, cls, folded: !open || driven, ref };
 }
 

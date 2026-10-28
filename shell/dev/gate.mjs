@@ -460,14 +460,14 @@ async function overpullHalf() {
    */
   o.midPull = (fails, way) => {
     return (k) => {
-      const stacks = [...document.querySelectorAll(".panel-body.together .notif-stack.peek")];
+      const stacks = [...document.querySelectorAll(".panel-body.together .notif-stack.pulled")];
       if (!stacks.length) return fails.push(`${way} half way (k ${k.toFixed(2)}), no notification stack follows the pull`);
       for (const st of stacks) {
         const rest = st.querySelector(":scope > .notif-rest"), card = st.querySelector(":scope > .notif");
         const full = rest.firstElementChild.scrollHeight;
         const f = (rest.getBoundingClientRect().bottom - card.getBoundingClientRect().bottom) / full;
         if (!(f > 0.1 && f < 0.9)) fails.push(`${way} half way (k ${k.toFixed(2)}), a stack is ${Math.round(f * 100)}% unfolded (not between)`);
-        o.restWhole(fails, `${way} half way (k ${k.toFixed(2)})`, rest, card);
+        o.restWhole(fails, `${way} half way (k ${k.toFixed(2)})`, rest, card); stackInFlow(fails, `${way} half way (k ${k.toFixed(2)})`, st);
         const badge = card.querySelector(".notif-more");
         const op = badge ? Number(getComputedStyle(badge).opacity) : NaN;
         if (!(op > 0.05 && op < 0.95)) fails.push(`${way} half way (k ${k.toFixed(2)}), the top card's +N badge's opacity is ${op} (not between 0 and 1)`);
@@ -2825,3 +2825,16 @@ try {
   await browser.close();
 }
 process.exit(failed ? 1 : 0);
+
+/**
+ * A stack the pull drives is in flow and as wide as its list, like at rest: it once took the heads-up banner's ".peek"
+ * (fixed, inset by --edge, its own veil, sliding in from the top) - the 2026-10-28 19:53 "shade pull transition is
+ * still fucked".
+ */
+function stackInFlow(fails, at, st) {
+  const sc = getComputedStyle(st), lr = st.parentElement.getBoundingClientRect(), sr = st.getBoundingClientRect();
+  const banner = sc.position === "fixed" || sc.animationName !== "none" || (sc.backdropFilter || "none") !== "none";
+  if (banner) fails.push(`${at}, a stack is styled as a banner (position ${sc.position}, animation ${sc.animationName}, backdrop ${sc.backdropFilter})`);
+  if (Math.abs(sr.left - lr.left) > 1 || Math.abs(sr.right - lr.right) > 1)
+    fails.push(`${at}, a stack is ${Math.round(sr.left - lr.left)}/${Math.round(lr.right - sr.right)} px in from its list's edges`);
+}

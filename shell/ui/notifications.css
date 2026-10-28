@@ -31,7 +31,9 @@
 }
 .notif-reply button:disabled { color: var(--color-muted); background: var(--color-surface); }
 
-/* The banner: at the top under the status bar, over whatever app is there (the window is only as tall as it). */
+/* The banner: at the top under the status bar, over whatever app is there (the window is only as tall as it). The
+ * stack a pull drives is ".pulled", never ".peek": it was, and this rule made it a fixed, inset, veiled banner that
+ * slid in from the top mid-pull (the user, 2026-10-28 19:53 "shade pull transition is still fucked"). */
 .peek {
   position: fixed;
   z-index: 20;
@@ -65,8 +67,8 @@
 /* The rest paints over the peeking slices too (a pull retracts them into its last card, ccexpand.ts): nothing fades. */
 .notif-stack > .notif-rest { position: relative; z-index: 1; }
 /* The peeking cards: the stack's own pseudo layers under the top card, narrower and lower each. */
-/* (Also while a pull of the shade drives it - "peek": slid under the cards by the finger, ccexpand.ts attachPeek.) */
-.notif-stack:is(:not(.open), .peek)::before, .notif-stack:is(:not(.open), .peek)[data-depth="2"]::after {
+/* (Also while a pull of the shade drives it - "pulled": slid under the cards by the finger, ccexpand.ts attachPeek.) */
+.notif-stack:is(:not(.open), .pulled)::before, .notif-stack:is(:not(.open), .pulled)[data-depth="2"]::after {
   content: "";
   position: absolute;
   left: 10px;
@@ -77,7 +79,7 @@
   background: var(--soft-fill);
   box-shadow: var(--lift-shadow);
 }
-.notif-stack:is(:not(.open), .peek)[data-depth="2"]::after { left: 20px; right: 20px; bottom: -10px; opacity: 0.6; }
+.notif-stack:is(:not(.open), .pulled)[data-depth="2"]::after { left: 20px; right: 20px; bottom: -10px; opacity: 0.6; }
 .notif-stack:not(.open)[data-depth="2"] { margin-bottom: 10px; }
 .notif-stack:not(.open)[data-depth="1"] { margin-bottom: 5px; }
 /* The rest: folded to nothing, unfolded to its height (a grid row from 0fr to 1fr - an animated auto height). */
@@ -106,8 +108,8 @@
 .notif-fold { flex: none; color: var(--color-muted); }
 /* Inside an open group the head is the group's: each card keeps only its time. */
 /* While a pull drives the stack: the card lays out its header row, the head floats over the same band. */
-.notif-stack.peek > .notif-group-head { position: absolute; top: 0; left: 0; right: 0; z-index: 2; }
-.notif-stack.peek > .notif .notif-title { padding-right: 40px; }
+.notif-stack.pulled > .notif-group-head { position: absolute; top: 0; left: 0; right: 0; z-index: 2; }
+.notif-stack.pulled > .notif .notif-title { padding-right: 40px; }
 .notif.in-group .notif-icon, .notif.in-group .notif-app { display: none; }
 .notif.in-group { position: relative; }
 .notif.in-group .notif-head { position: absolute; top: 9px; right: 12px; }

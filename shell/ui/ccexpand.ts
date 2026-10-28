@@ -114,7 +114,10 @@ function headMorph(card: HTMLElement | null, head: HTMLElement | null) {
     peekAnim(app, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: `translate(${dx}px, ${dy}px)` }]);
     peekAnim(headApp, [{ transform: `translate(${-dx}px, ${-dy}px)` }, { transform: "none" }]);
   } else peekAnim(app, [{ opacity: 1 }, { opacity: 0 }]);
-  peekAnim(card, [{ clipPath: "inset(0px -60px -60px -60px)" }, { clipPath: `inset(${band}px -60px -60px -60px)` }]);
+  // The clip keeps the card's own top corners (its sides at the card's: a rounded inset past the box rounds nothing):
+  // a square-cut top mid-pull read as a different, sliced box than either rest.
+  const rad = getComputedStyle(card).borderTopLeftRadius || "0px";
+  peekAnim(card, [{ clipPath: `inset(0px 0px -60px 0px round ${rad} ${rad} 0px 0px)` }, { clipPath: `inset(${band}px 0px -60px 0px round ${rad} ${rad} 0px 0px)` }]);
   if (time) {
     const dy = band + 9 - (time.getBoundingClientRect().top - card.getBoundingClientRect().top);
     peekAnim(time, [{ transform: "none" }, { transform: `translateY(${dy}px)` }]);
