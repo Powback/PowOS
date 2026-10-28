@@ -11,7 +11,7 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { ccV3, notif, panel } from "../state.ts";
 import { held, notifOpen } from "./gesture.ts";
-import { ccEditing, ccExpanded } from "./ccexpand.ts";
+import { ccEditing, ccExpanded, expandedByDefault } from "./ccexpand.ts";
 import { useReorder } from "./reorder.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
@@ -938,7 +938,7 @@ function Controls() {
       powos.qs.listening(false);
       clearInterval(timer);
       picking.value = false;
-      ccExpanded.value = false;
+      ccExpanded.value = expandedByDefault();
       ccEditing.value = false;
       chosen.value = null;
     };

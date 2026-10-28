@@ -20,7 +20,9 @@
 import { signal } from "@preact/signals";
 
 /** Every category's members shown (only in the one panel, only while it's open). */
-export const ccExpanded = signal(false);
+/** Phone width: it opens expanded (the whole control center shown, folded by its own swipe); unfolded, both columns show. */
+export const expandedByDefault = () => typeof innerWidth === "number" && innerWidth < 700;
+export const ccExpanded = signal(expandedByDefault());
 /**
  * v3 pull under way: "open" (stacks are shown unfolded for the pull, their rest driven by the finger) or "fold" (the
  * open ones are driven back down). null at rest. notifications.tsx's Stack reads it and hands its elements to
