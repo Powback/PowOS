@@ -62,6 +62,7 @@ class ShellActivity : Activity() {
             window.isStatusBarContrastEnforced = false
         }
         host = ShellHost(this, this, runtime)
+        openPanel(intent)   // a cold start with a panel asked for (the old AI app's entries): once the page is ready
         setContentView(host.web)
         // The switcher is a layer of this page: the gestures and the overview button reach it here.
         val blur = WindowBlur(window, glass = host::wholeWindow)
@@ -221,12 +222,17 @@ class ShellActivity : Activity() {
         if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED) && !recents) homePressed()
         dev.omalauncher.AgentsSpool.opened(intent)
         // An edge gesture's "app drawer": home with its pull-up panel up.
-        intent.getStringExtra(EXTRA_HOME_PANEL)?.let {
-            val ev = org.json.JSONObject().put("kind", it)
-            intent.getStringExtra(EXTRA_HOME_DRAFT)?.let { d -> ev.put("draft", d) }
-            host.bridge.emit("home.panel", ev)
-        }
+        openPanel(intent)
         handleDebugExec(intent)
+    }
+
+    /** [EXTRA_HOME_PANEL] (an edge gesture's "app drawer", the old AI app's entries): home with that pull-up panel
+     * up, [EXTRA_HOME_DRAFT] in the AI page's field. Sent once the page is ready (a cold start's intent too). */
+    private fun openPanel(intent: Intent) {
+        val kind = intent.getStringExtra(EXTRA_HOME_PANEL) ?: return
+        val ev = org.json.JSONObject().put("kind", kind)
+        intent.getStringExtra(EXTRA_HOME_DRAFT)?.let { d -> ev.put("draft", d) }
+        host.whenReady { host.bridge.emit("home.panel", ev) }
     }
 
     /** SystemUI can deliver Home directly instead of going through our navigation consumer. */

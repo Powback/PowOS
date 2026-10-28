@@ -216,9 +216,17 @@ class ShellHost(
         }
 
         fun ready(page: String) {
-            main.post { bootReady = true }
+            main.post {
+                bootReady = true
+                val queued = onReady.toList(); onReady.clear(); queued.forEach { it() }
+            }
         }
     }
+
+    /** Runs [f] on the main thread once the page has said it's ready (now, if it already has): an event sent before
+     * that (a cold start's intent) would reach a page that isn't listening yet. */
+    private val onReady = mutableListOf<() -> Unit>()
+    fun whenReady(f: () -> Unit) { main.post { if (bootReady) f() else onReady.add(f) } }
 
     /**
      * A load started: the page has [BOOT_ERROR_MS] to be ready if it reported an error meanwhile, [BOOT_MS] if not
