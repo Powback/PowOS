@@ -355,7 +355,7 @@ public final class WindowTasks {
             opening.remove(id);
             open(context, id, f);
         };
-        if (LaunchWindows.adopt(appId, fullScreen, a -> a.runOnUiThread(() -> a.become(id, data, appId, title, orElse)))) {
+        if (LaunchWindows.adopt(appId, title, fullScreen, a -> a.runOnUiThread(() -> a.become(id, data, appId, title, orElse)))) {
             Log.i(TAG, "open " + id + " (" + appId + "): in its launch window");
             return;
         }

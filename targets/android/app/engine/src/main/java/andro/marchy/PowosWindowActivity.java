@@ -249,7 +249,10 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             orElse.run();
             return;
         }
-        setIntent(new android.content.Intent(getIntent()).setData(data).putExtra(EXTRA_APP_ID, appId).putExtra(EXTRA_TITLE, title));
+        // A window KWin names no app for (Steam's X11 window: no desktop file name) keeps its launch's app id: the
+        // dock/switcher still know it as that app's.
+        String app = appId == null || appId.isEmpty() ? getIntent().getStringExtra(EXTRA_APP_ID) : appId;
+        setIntent(new android.content.Intent(getIntent()).setData(data).putExtra(EXTRA_APP_ID, app).putExtra(EXTRA_TITLE, title));
         id = windowId;
         if (!WindowTasks.register(id, this)) {
             Log.i(TAG, "launch window: window " + id + " has its task already, this one goes");

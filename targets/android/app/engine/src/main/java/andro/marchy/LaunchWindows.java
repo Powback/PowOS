@@ -84,21 +84,90 @@ public final class LaunchWindows {
     }
 
     /**
-     * KWin opens a window of app [appId]: the launch window waiting for that app, if any, is handed to [become] (it
-     * shows the window from now on) - true. A full-screen window (a game's own) gets an immersive task of its own: the
-     * launch window goes, false.
+     * KWin opens a window of app [appId], captioned [title]: the launch window waiting for that app, if any, is handed to
+     * [become] (it shows the window from now on) - true. A full-screen window (a game's own) gets an immersive task of
+     * its own: the launch window goes at once (not at its app's launch end), false.
      */
-    static boolean adopt(String appId, boolean fullScreen, Consumer<PowosWindowActivity> become) {
-        PowosWindowActivity a = waitingFor(new String[] {appId});
-        if (a == null || appId.isEmpty())
+    static boolean adopt(String appId, String title, boolean fullScreen, Consumer<PowosWindowActivity> become) {
+        PowosWindowActivity a = appId.isEmpty() ? null : waitingFor(new String[] {appId});
+        if (a == null)
+            a = loosely(appId, title);
+        if (a == null)
             return false;
         waiting.remove(a);
         if (fullScreen) {
+            Log.i(TAG, "window of " + a.getIntent().getStringExtra(PowosWindowActivity.EXTRA_APP_ID) + " opened full screen in a task of its own: its launch window goes");
             a.runOnUiThread(a::launchEnded);
             return false;
         }
         become.accept(a);
         return true;
+    }
+
+    /** How long after its tap a launch window takes a window with no app id (a cold Steam: 25-40 s to its window). */
+    private static final long ANONYMOUS_MS = 60_000;
+
+    /**
+     * The launch window a window KWin names no (or no known) app for belongs to: one whose app's ids or name occur in
+     * the window's app id or caption, any case (Steam ~ "Steam"/"steam"); else, for a window with no app id at all,
+     * the only launch window waiting, tapped in the last [ANONYMOUS_MS].
+     * HACK: KWin's "open" carries only desktopFileName, which an X11 client without _KDE_NET_WM_DESKTOP_FILE /
+     * GTK_APPLICATION_ID (Steam) leaves empty: "open 3 ()" opened a second task beside Steam's launch window. The real
+     * fix is in the anland KWin backend: fall back to the window's resourceClass/resourceName (WM_CLASS "steam") when
+     * desktopFileName is empty, so [waitingFor]'s exact rules match; this guess stays as the net for apps that set
+     * neither.
+     */
+    private static PowosWindowActivity loosely(String appId, String title) {
+        String key = (appId + " " + (title != null ? title : "")).toLowerCase(Locale.ROOT);
+        PowosWindowActivity only = null;
+        int live = 0;
+        for (PowosWindowActivity a : waiting) {
+            if (a.isFinishing())
+                continue;
+            live++;
+            only = a;
+            for (String n : names(a))
+                if (n.length() >= 3 && key.contains(n)) {
+                    Log.i(TAG, "window (" + appId + ") \"" + title + "\" is " + n + "'s: into its launch window");
+                    return a;
+                }
+        }
+        if (live != 1 || !appId.isEmpty())
+            return null;
+        long at = tappedAt(only);
+        if (at < 0 || android.os.SystemClock.uptimeMillis() - at > ANONYMOUS_MS)
+            return null;
+        Log.i(TAG, "window with no app id \"" + title + "\": into the only launch window waiting ("
+                + only.getIntent().getStringExtra(PowosWindowActivity.EXTRA_APP_ID) + ")");
+        return only;
+    }
+
+    /** A launch window's app names, lower case: its ids' last dotted parts and its label. */
+    private static List<String> names(PowosWindowActivity a) {
+        List<String> names = new java.util.ArrayList<>();
+        String[] ids = a.getIntent().getStringArrayExtra(EXTRA_IDS);
+        if (ids != null)
+            for (String i : ids)
+                if (i != null && !i.isEmpty()) {
+                    String m = i.toLowerCase(Locale.ROOT);
+                    if (m.endsWith(".desktop"))
+                        m = m.substring(0, m.length() - ".desktop".length());
+                    names.add(m.substring(m.lastIndexOf('.') + 1));
+                }
+        String label = a.getIntent().getStringExtra(PowosWindowActivity.EXTRA_TITLE);
+        if (label != null && !label.isEmpty())
+            names.add(label.toLowerCase(Locale.ROOT));
+        return names;
+    }
+
+    /** When launch window [a] was tapped open (its launch data's "at"), or -1. */
+    private static long tappedAt(PowosWindowActivity a) {
+        Uri d = a.getIntent().getData();
+        try {
+            return d != null && isLaunch(d) && d.getQueryParameter("at") != null ? Long.parseLong(d.getQueryParameter("at")) : -1;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     /** App [appId]'s launch is over (its helper exited, or it opened on the desktop): a launch window still waiting goes. */
