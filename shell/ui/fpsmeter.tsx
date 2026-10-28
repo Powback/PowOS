@@ -40,27 +40,28 @@ function fpsNow(): number {
 }
 
 let shownFps = -1, shownRec = "";
+function drawGraph(cv: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
+  const w = cv.width, h = cv.height, bw = w / RING;
+  ctx.clearRect(0, 0, w, h);
+  for (let i = 0; i < filled; i++) {
+    const dt = ring[(head - filled + i + RING) % RING];
+    ctx.fillStyle = dt > 33.5 ? "#ff5a4f" : dt > 18 ? "#ffb02e" : "#5fd38a";
+    const bh = Math.max(1, Math.min(1, dt / 50) * h); // 50 ms = full height
+    ctx.fillRect((RING - filled + i) * bw, h - bh, Math.max(1, bw - 0.4), bh);
+  }
+}
+
+function drawText(u: NonNullable<typeof ui>) {
+  const f = fpsNow();
+  if (f !== shownFps) { shownFps = f; u.num.textContent = String(f).padStart(3, "\u2007"); }
+  const label = rec ? `REC ${Math.floor((performance.now() - recStart) / 1000)}s` : busy ? "SEND" : "";
+  if (label !== shownRec) { shownRec = label; u.label.textContent = label; u.root.classList.toggle("rec", rec); }
+}
+
 function tick(count: number) {
   if (!ui) return;
-  const { ctx, cv } = ui;
-  if (ctx) {
-    const w = cv.width, h = cv.height;
-    ctx.clearRect(0, 0, w, h);
-    const bw = w / RING;
-    for (let i = 0; i < filled; i++) {
-      const dt = ring[(head - filled + i + RING) % RING];
-      const v = Math.min(1, dt / 50); // 50 ms = full height
-      ctx.fillStyle = dt > 33.5 ? "#ff5a4f" : dt > 18 ? "#ffb02e" : "#5fd38a";
-      const bh = Math.max(1, v * h);
-      ctx.fillRect((RING - filled + i) * bw, h - bh, Math.max(1, bw - 0.4), bh);
-    }
-  }
-  if (count % 3 === 0) {
-    const f = fpsNow();
-    if (f !== shownFps) { shownFps = f; ui.num.textContent = String(f).padStart(3, " "); }
-    const label = rec ? `REC ${Math.floor((performance.now() - recStart) / 1000)}s` : busy ? "SEND" : "";
-    if (label !== shownRec) { shownRec = label; ui.label.textContent = label; ui.root.classList.toggle("rec", rec); }
-  }
+  if (ui.ctx) drawGraph(ui.cv, ui.ctx);
+  if (count % 3 === 0) drawText(ui);
 }
 
 function start() {
@@ -103,7 +104,7 @@ function observe() {
 
 function pct(sorted: number[], p: number) { return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] : 0; }
 
-export function summarise(t: Float32Array, dt: Float32Array, n: number, evs: typeof events, durMs: number, mode: string) {
+export function summarise({ t, dt, n, evs, durMs, mode }: { t: Float32Array; dt: Float32Array; n: number; evs: typeof events; durMs: number; mode: string }) {
   const fps: number[] = [], worst: { at: number; ms: number }[] = [];
   for (let i = 0; i < n; i++) { fps.push(1000 / Math.max(1, dt[i])); worst.push({ at: Math.round(t[i]), ms: Math.round(dt[i] * 10) / 10 }); }
   fps.sort((a, b) => a - b);
@@ -118,29 +119,37 @@ export function summarise(t: Float32Array, dt: Float32Array, n: number, evs: typ
   };
 }
 
-async function toggleRecord() {
-  if (busy) return;
-  if (!rec) {
-    recStart = performance.now(); recN = 0;
-    recT = new Float32Array(MAX_FRAMES); recDt = new Float32Array(MAX_FRAMES);
-    observe(); rec = true;
-    if (!raf) start();
-    stopTimer = window.setTimeout(() => void toggleRecord(), MAX_REC_MS);
-    return;
-  }
-  rec = false; busy = true; clearTimeout(stopTimer); po?.disconnect(); po = null;
-  const dur = performance.now() - recStart, n = recN;
-  const mode = new URLSearchParams(location.search).get("mode") ?? "?";
-  const sum = summarise(recT, recDt, n, events, dur, `${mode} window (${powos.host})`);
-  const full = { summary: sum, when: new Date().toISOString(), ua: navigator.userAgent, dpr: devicePixelRatio,
-    frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events };
-  recT = new Float32Array(0); recDt = new Float32Array(0);
+function beginRecord() {
+  recStart = performance.now(); recN = 0;
+  recT = new Float32Array(MAX_FRAMES); recDt = new Float32Array(MAX_FRAMES);
+  observe(); rec = true;
+  if (!raf) start();
+  stopTimer = window.setTimeout(() => void toggleRecord(), MAX_REC_MS);
+}
+
+async function saveAndSend(full: object, sum: object) {
   let path: string | null = null;
   try { path = (await powos.perf?.save?.(JSON.stringify(full))) ?? null; } catch { path = null; }
   const text = `Perf trace (fps meter, tapped record/stop). ${path ? `Full data: ${path}` : "Full data could not be saved (host has no perf.save yet)."}\n` +
     "```json\n" + JSON.stringify(sum) + "\n```";
   try { await powos.ai.send(text, false); } catch (e) { console.error("perf send failed", e); }
+}
+
+async function endRecord() {
+  rec = false; busy = true; clearTimeout(stopTimer); po?.disconnect(); po = null;
+  const durMs = performance.now() - recStart, n = recN;
+  const mode = new URLSearchParams(location.search).get("mode") ?? "?";
+  const sum = summarise({ t: recT, dt: recDt, n, evs: events, durMs, mode: `${mode} window (${powos.host})` });
+  const full = { summary: sum, when: new Date().toISOString(), ua: navigator.userAgent, dpr: devicePixelRatio,
+    frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events };
+  recT = new Float32Array(0); recDt = new Float32Array(0);
+  await saveAndSend(full, sum);
   busy = false;
+}
+
+async function toggleRecord() {
+  if (busy) return;
+  if (rec) await endRecord(); else beginRecord();
 }
 
 export function FpsMeter() {
