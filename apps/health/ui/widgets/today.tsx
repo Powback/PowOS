@@ -67,13 +67,19 @@ function Chart({ days }: { days: Day[] }) {
   );
 }
 
+/** The empty state's box: a row on one-cell-high tiles; a column otherwise, spread over the height on tall tiles. */
+function emptyBox(row: boolean, tall: boolean) {
+  if (row) return { flexDirection: "row" as const, alignItems: "center", justifyContent: "center", gap: "3cqw" };
+  return { flexDirection: "column" as const, alignItems: "center", justifyContent: tall ? "space-between" : "center", padding: tall ? "4cqh 0" : 0, boxSizing: "border-box" as const, gap: "3cqh" };
+}
+
 /** Nothing to show yet: a big heart + "Connect Health", scaled to the tile (container units), one line, centred. */
 function Empty({ row, tall }: { row: boolean; tall: boolean }) {
   // Row (one-cell-high tiles): heart then text across the width. Column: the text spans the width, the heart takes the height left.
   const size = row ? "min(96cqh, 40cqw)" : tall ? "max(10cqmin, min(92cqh - 58.8cqw, 98cqw))" : "max(10cqmin, min(84cqh - 16.7cqw, 88cqw))";
   const text = row ? "calc((88cqw - min(96cqh, 40cqw) - 3cqw) / 7.4)" : tall ? "24.5cqw" : "11.9cqw";
   return (
-    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: row ? "row" : "column", alignItems: "center", justifyContent: "center", gap: row ? "3cqw" : "3cqh", fontWeight: 600 }}>
+    <div style={{ position: "absolute", inset: 0, display: "flex", ...emptyBox(row, tall), fontWeight: 600 }}>
       <svg viewBox="0 0 24 24" style={{ height: size, width: size, flex: "none" }} aria-hidden="true">
         <path d={HEART} fill="currentColor" opacity="0.85" />
       </svg>
