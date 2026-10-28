@@ -1350,7 +1350,7 @@ input.folder-title:focus { background: var(--soft-fill); }
 /*
  * The notifications on a panel of their own, under the control center's card and down to the screen's bottom
  * (2026-10-28 "have the notifications expand all the way down on its own panel"). ccexpand.ts moves it as one with the
- * card: a translate, and --cc-ext the frost's extra height at its bottom while it's carried up (a fold), so the panel
+ * card: a translate, and --cc-ext the box's extra height at its bottom (its frost with it) while it's carried up (a fold), so the panel
  * still reaches the bottom. Its surface is the ::before (the list inside scrolls, the surface doesn't).
  */
 @property --cc-ext {
@@ -1366,12 +1366,14 @@ input.folder-title:focus { background: var(--soft-fill); }
   isolation: isolate;
   display: flex;
   flex-direction: column;
+  /* Carried up by --cc-ext (a fold), the box is that much taller at its bottom (the negative margin grows the flex item): its bottom stays the screen's. */
+  margin-bottom: calc(-1 * var(--cc-ext));
   border-radius: calc(var(--radius) * 1.5) calc(var(--radius) * 1.5) 0 0;
 }
 .notif-own::before {
   content: "";
   position: absolute;
-  inset: 0 0 calc(-1 * var(--cc-ext)) 0;
+  inset: 0;
   z-index: -1;
   border-radius: inherit;
   pointer-events: none;

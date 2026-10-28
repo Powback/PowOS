@@ -507,9 +507,25 @@ async function shadeLayout() {
   const body = document.querySelector(".notif-panel .panel-body");
   const box = (el) => el.getBoundingClientRect();
   // Folded: the one list, the controls in it.
+  // The control center's card and the notifications' own panel are two siblings (the redesign split them): the card
+  // with its header and toggles, the panel right under it on its own frost to the screen's bottom, nothing overlapping.
+  const foldedSplit = () => {
+    const card = body.querySelector(":scope > .cc"), own = body.querySelector(":scope > .notif-own");
+    if (!card) return ["folded: no control center card in the panel"];
+    if (!own) return ["folded: no notifications panel of its own under the card"];
+    const [bc, bo] = [box(card), box(own)];
+    return [
+      [card.querySelector(".cc3-cell"), "folded: the card shows no toggle"],
+      [card.querySelector(".cc-main, .cc3-list") && bc.height > 0, "folded: the card has no header/toggle content"],
+      [!own.querySelector(".cc"), "folded: the controls are inside the notifications' panel"],
+      [bo.top >= bc.bottom - 1, `folded: the notifications overlap the card (${Math.round(bo.top)} < ${Math.round(bc.bottom)})`],
+      [bo.top - bc.bottom <= 24, `folded: the notifications aren't directly under the card (${Math.round(bo.top - bc.bottom)} px gap)`],
+      [bo.bottom >= innerHeight - 1, `folded: the notifications' panel ends ${Math.round(innerHeight - bo.bottom)} px above the screen's bottom`],
+    ].filter(([ok]) => !ok).map(([, why]) => why);
+  };
   const folded = () => [
     ...(body.classList.contains("two") ? [`folded (${innerWidth}px): two columns`] : []),
-    ...(body.querySelector(".notif-list > .cc") ? [] : ["folded: the controls aren't in the one list"]),
+    ...foldedSplit(),
   ];
   // Unfolded: side by side, tops level, both a real width, each its own content and its own scroll.
   const columns = (n, c) => {

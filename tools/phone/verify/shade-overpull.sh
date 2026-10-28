@@ -18,7 +18,7 @@ read -r W H < <(adb shell wm size | sed -nE 's/.*: ([0-9]+)x([0-9]+).*/\1 \2/p' 
 W=${W:-1116}; H=${H:-2484}
 probe='JSON.stringify({v3:!!document.querySelector(".cc.v3"),two:!!document.querySelector(".panel-body.two"),whole:!!document.querySelector(".cc3-list.whole"),
 peek:!!document.querySelector(".cc3-grid.cc-peek"),
-under:Math.round(document.querySelector(".panel-body.together .notif-items")?.getBoundingClientRect().top??-1),
+under:Math.round(document.querySelector(".panel-body.together .notif-own .notif-items")?.getBoundingClientRect().top??-1),
 x:Math.round((document.querySelector(".cc > .notif-bar")?.getBoundingClientRect().x+document.querySelector(".cc > .notif-bar")?.getBoundingClientRect().width/2)*devicePixelRatio),
 y:Math.round((document.querySelector(".cc > .notif-bar")?.getBoundingClientRect().y+document.querySelector(".cc > .notif-bar")?.getBoundingClientRect().height/2)*devicePixelRatio),
 row:[...document.querySelectorAll(".cc3-list .cc3-cell")].slice(0,6).map(e=>Math.round(e.getBoundingClientRect().y)).join("_"),
