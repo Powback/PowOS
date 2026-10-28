@@ -423,7 +423,7 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
 :root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] { --chat-fill: 94%; }
 /* Home's widgets are PowOS AI's frost (the material block near the end: same tint, same compositor blur, 2026-10-28 "the
    color of the widgets sucks"); this --glass-dim is only the plain/CSS-glass fallback. Their text is often small and plain - a touch more of the tint than the reference (4.0 -> 4.5:1). */
-.page .home-tile > .tile, .page .seam {
+.page .home-tile > .tile, .lib-card.tile, .page .seam {
   /* Measured over the crystal on the inner screen (the widgets' preview): 32% left plain text at 4.2:1, 42% reaches
      4.5; secondary text in a widget is the foreground itself - its size says it's secondary, a see-through colour
      there was 3.7:1. */
@@ -432,7 +432,7 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
   --glass-fill: var(--text-fill);
   --color-muted: var(--color-foreground);
 }
-:root[data-light="false"][data-wallpaper="light"] .page .home-tile > .tile, :root[data-light="true"][data-wallpaper="dark"] .page .home-tile > .tile { --glass-dim: 68%; }
+:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.page .home-tile > .tile, .lib-card.tile) { --glass-dim: 68%; }
 .dock { background: none; }
 /* The dock: no slab and no plates - the icons bare on the wallpaper, as the search pill floats above them. */
 .launcher-frame { border-radius: var(--radius) var(--radius) 0 0; box-shadow: var(--lift-edge), var(--lift-shadow-up); }
@@ -720,7 +720,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   transition: transform 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 .page-track.dragging .page-glass-img, .page-glass-img.sliding { transition: none; }
-.glass .page .home-tile > .tile { background: var(--glass-fill); }
+.glass :is(.page .home-tile > .tile, .lib-card.tile) { background: var(--glass-fill); }
 .home-tile { position: absolute; padding: calc(var(--gap) / 2); touch-action: none; }
 .home-tile.lifted { opacity: 0.25; }
 /*
@@ -2384,12 +2384,12 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
 .ai-screen :is(.ai-top, .ai-mail-bar) * { color: inherit; }
 
 /*
- * PowOS AI (its page's cards, its pull-up panel), the control center, PowOS apps' pages and the app library's cards:
+ * PowOS AI (its page's cards, its pull-up panel), the control center, PowOS apps' pages:
  * the frost (theme.css, frost v2) - the compositor's stronger blur on each surface (nativeglass.ts reads
  * --glass-blur-native per surface; the shade's window is blurred by its host: shade.tsx) and the cool tint; over the
  * other tone it takes that tone. No halos. An app whose page paints its own ground opts out (appscreen.tsx).
  */
-.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel :is(.cc.v3, .notif-own), .home:has(.ai-panel) .ai-panel, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *), .home > .bar .bar-pill {
+.chrome-surface, .app-screen.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel :is(.cc.v3, .notif-own), .home:has(.ai-panel) .ai-panel, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *), .home > .bar .bar-pill {
   /* Resolved here, from this surface's own --frost-base (a light frost swaps it below). */
   /* Secondary lines the foreground itself, as a widget's: their size says they're secondary. */
   --color-muted: var(--color-foreground);
@@ -2400,7 +2400,7 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
 :root[data-light="false"]:not([data-wallpaper="light"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, .home:has(.ai-panel) .launcher-frame.tile, .notif-panel :is(.cc.v3, .notif-own), .page .home-tile > .tile, .home > .bar .bar-pill) {
   --frost-base: color-mix(in oklab, var(--glass-base) 50%, color-mix(in oklab, var(--frost-cool) 80%, var(--color-foreground)));
 }
-html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html.glass-native .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel .cc.v3, html:root .page .home-tile > .tile, html:root .home > .bar .bar-pill {
+html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html:root .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel .cc.v3, html:root .page .home-tile > .tile, html:root .home > .bar .bar-pill {
   --glass-blur-native: var(--frost-blur-native);
   /* Glass, not a slab, over a black backdrop too (blur of black is black): a faint light from above and a lit edge. */
   background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
@@ -2408,7 +2408,8 @@ html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html.glass-
 }
 /* Home's widgets: the frost above, with their own (lighter) compositor blur - --widget-blur-native (theme.css). */
 html:root .page .home-tile > .tile, html:root .lib-card.tile { --glass-blur-native: var(--widget-blur-native); }
-/* (the library's folder cards are home's tiles too: the widgets' blur, not the chrome's - the user, 18:41) */
+/* The library's folder cards are home's tiles too: every widget rule names .lib-card.tile beside .page .home-tile > .tile,
+   so tint, edge and blur are the widgets' own in every theme (the user, 18:41 and 19:09 "doesnt seem the same still?"). */
 /* Home's search bar (the foot's pill, bar.tsx) is the widgets' glass too: their frost, edge and compositor blur (2026-10-28
    "make the search bar have the same tint and blur as the widgets"). */
 html:root .home > .bar .bar-pill {
