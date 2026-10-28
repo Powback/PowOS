@@ -151,12 +151,7 @@ object FreeformTasks {
         return runCatching {
             apply(token(context, id), transition = true) { wct, token ->
                 modeAndBounds(wct, token, mode, to)
-                // The in-task bar's caption inset (TaskFrame): none over the full screen, back with the window.
-                if (on) {
-                    if (captions.containsKey(id)) runCatching { removeCaption(wct, token) }.onFailure { Log.w(TAG, "task $id: caption inset not removed", it) }
-                } else {
-                    captions[id]?.let { h -> runCatching { addCaption(wct, token, to, h) }.onFailure { Log.w(TAG, "task $id: caption inset not restored", it) } }
-                }
+                captionFor(wct, token, id, if (on) null else to)
             }
         }
             .onFailure { Log.w(TAG, "can't put task $id in windowing mode $mode", it) }.isSuccess
@@ -264,6 +259,18 @@ object FreeformTasks {
         transact(context, id) { wct, token -> addCaption(wct, token, bounds, height) }
             .onSuccess { captions[id] = height }
             .onFailure { Log.w(TAG, "task $id: no caption inset", it) }.isSuccess
+
+    /** The in-task bar's caption inset (TaskFrame) off for the full screen ([to] null), back with the window at [to]. */
+    private fun captionFor(
+        wct: Any,
+        token: Any,
+        id: Int,
+        to: Rect?,
+    ) {
+        val h = captions[id] ?: return
+        runCatching { if (to == null) removeCaption(wct, token) else addCaption(wct, token, to, h) }
+            .onFailure { Log.w(TAG, "task $id: caption inset not ${if (to == null) "removed" else "restored"}", it) }
+    }
 
     private fun addCaption(
         wct: Any,
