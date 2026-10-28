@@ -632,6 +632,8 @@ class WindowFrame(
     /** The drag is over: the frame's windows at [r] (once), the drag layer gone. */
     private fun endDrag(r: Rect) {
         layout(r)
+        // Its app's place on this screen (WindowPlaces), where its next window opens.
+        WindowFrames.current?.placed(id, r)
         val layer = drag
         if (layer == null) {
             DragLayer.report("PowosWindowDrag", "task $id legacy drag", legacyLatencies)

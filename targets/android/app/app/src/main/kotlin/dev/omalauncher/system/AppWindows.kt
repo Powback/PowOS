@@ -56,6 +56,8 @@ object AppWindows {
     ): ActivityOptions {
         // Folded, a window left from the inner screen comes back full screen, not freeform off the cover's edge.
         FoldedWindows.beforeOpen(context, id)
+        // Sent full screen by its maximise button: it floats again at its place (adopt never floats it back).
+        if (WindowFrames.current?.floatBack(id) == true) return base
         if (!floating(context) || FreeformTasks.list(context).any { it.id == id }) return base
         return options(context, base) ?: base
     }
@@ -103,6 +105,25 @@ object AppWindows {
     }
 
     private const val GAP_DP = 8
+
+    /**
+     * [bounds] moved (and shrunk if it is bigger) so the whole window - all four edges, and so its title bar above it -
+     * is inside [area]: every place a window is put back to (a saved place, a restore after maximise or full screen, the
+     * dock) goes through this, so none comes back off the screen or under the status bar / home's bottom bar. Empty
+     * bounds (unknown) stay empty.
+     */
+    fun onScreen(
+        context: Context,
+        bounds: Rect,
+    ): Rect {
+        if (bounds.isEmpty) return Rect(bounds)
+        val a = area(context)
+        val w = bounds.width().coerceAtMost(a.width())
+        val h = bounds.height().coerceAtMost(a.height())
+        val left = bounds.left.coerceIn(a.left, a.right - w)
+        val top = bounds.top.coerceIn(a.top, a.bottom - h)
+        return Rect(left, top, left + w, top + h)
+    }
 
     /** 60% of the screen's width x 70% of its height (inside [area]), cascading down and right from the upper left. */
     fun nextBounds(context: Context): Rect {

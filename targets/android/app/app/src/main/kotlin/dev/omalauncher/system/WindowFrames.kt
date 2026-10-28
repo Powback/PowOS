@@ -390,23 +390,20 @@ class WindowFrames(
      * its content (a change transition). Not while a finger has it or maximised (the area's own top).
      */
     private fun belowStatusBar(show: List<FreeformTasks.Window>) {
-        val top = AppWindows.area(context).top
-        for (w in show.filter { lowerable(it, top) }) {
+        for (w in show.filter { lowerable(it) }) {
+            val to = AppWindows.onScreen(context, w.bounds)
+            if (to == w.bounds) continue
             if (!lowered.add("${w.id}@${w.bounds.flattenToString()}")) continue
-            val to = Rect(w.bounds).apply { offset(0, top - w.bounds.top) }
             val ok = FreeformTasks.moveTo(context, w.id, to)
-            Log.i(TAG, "task ${w.id} was under the status bar (${w.bounds.toShortString()}): moved to ${to.toShortString()} ok=$ok")
+            Log.i(TAG, "task ${w.id} was off the windows' area (${w.bounds.toShortString()}): moved to ${to.toShortString()} ok=$ok")
         }
         if (lowered.size > LOWERED_MAX) lowered.clear()
     }
 
-    /** [w] reaches above [top] and nobody else has it (a finger, maximise). */
-    private fun lowerable(
-        w: FreeformTasks.Window,
-        top: Int,
-    ): Boolean {
+    /** Nobody else has [w] (a finger, maximise): it may be moved back on screen (AppWindows.onScreen). */
+    private fun lowerable(w: FreeformTasks.Window): Boolean {
         val f = frames[w.id] ?: return false
-        return w.bounds.top < top && !f.held && !f.dragging && w.id !in maximised
+        return !f.held && !f.dragging && w.id !in maximised
     }
 
     /** Windows moved out from under the status bar, by task and the bounds they had (each once). */
@@ -453,6 +450,7 @@ class WindowFrames(
             adopted.clear()
             windowed.clear()
             fullBefore.clear()
+            buttonFull.clear()
         }
         return floating && !keyguard && !Switcher.open && adopt()
     }
@@ -540,17 +538,64 @@ class WindowFrames(
      */
     private fun backFromFullScreen(all: List<FreeformTasks.Window>) {
         all.forEach { w ->
-            windowed.add(w.id)
+            val first = windowed.add(w.id)
             lastBounds[w.id] = Rect(w.bounds)
-            val before = fullBefore.remove(w.id) ?: return@forEach
-            val ok = before.isEmpty || w.bounds == before || FreeformTasks.resize(w.id, before)
-            Log.i(TAG, "task ${w.id} left full screen: at ${w.bounds.toShortString()}, was ${before.toShortString()}${if (ok) "" else " (can't put it back)"}")
-            if (!before.isEmpty && w.bounds != before) lastBounds[w.id] = Rect(before)
+            // A new window: where its app's window was last put by hand on this screen (WindowPlaces), on screen.
+            if (first && w.id !in fullBefore && w.id !in maximised) placeSaved(w)
+            buttonFull.remove(w.id)
+            fullBefore.remove(w.id)?.let { leftFullScreen(w, AppWindows.onScreen(context, it)) }
         }
         val ids = all.map { it.id }.toSet()
         // Gone tasks; a full-screen one isn't listed (not floating) but keeps its entry.
         windowed.retainAll { it in ids || it in fullBefore }
+        buttonFull.retainAll { it in fullBefore }
         lastBounds.keys.retainAll { it in ids || it in fullBefore }
+    }
+
+    /** [w] floating again after full screen: at [before] (its place then, on screen; empty = unknown). */
+    private fun leftFullScreen(
+        w: FreeformTasks.Window,
+        before: Rect,
+    ) {
+        val ok = before.isEmpty || w.bounds == before || FreeformTasks.resize(w.id, before)
+        Log.i(TAG, "task ${w.id} left full screen: at ${w.bounds.toShortString()}, was ${before.toShortString()}${if (ok) "" else " (can't put it back)"}")
+        if (!before.isEmpty && w.bounds != before) lastBounds[w.id] = Rect(before)
+    }
+
+    /** [w]'s saved place (WindowPlaces), if it has one and isn't there. */
+    private fun placeSaved(w: FreeformTasks.Window) {
+        val to = WindowPlaces.get(context, placeKey(w)) ?: return
+        if (to == w.bounds) return
+        lastBounds[w.id] = Rect(to)
+        val ok = FreeformTasks.moveTo(context, w.id, to)
+        Log.i(TAG, "task ${w.id} (${w.pkg}) opened at ${w.bounds.toShortString()}: its saved place ${to.toShortString()} ok=$ok")
+    }
+
+    private fun placeKey(w: FreeformTasks.Window): String? = WindowPlaces.key(context, w.pkg, ownTitle(w))
+
+    /** Task [id]'s window was put at [r] by hand (WindowFrame: a drag or resize ended): its app's place on this screen. */
+    fun placed(
+        id: Int,
+        r: Rect,
+    ) {
+        if (id in maximised || !AppWindows.floating(context)) return
+        val w = FreeformTasks.list(context).firstOrNull { it.id == id } ?: return
+        lastBounds[id] = Rect(r)
+        WindowPlaces.put(context, placeKey(w), r)
+    }
+
+    /**
+     * Task [id], sent full screen by its maximise button ([fullScreen]), floating again at its place before - a recents
+     * or dock tap in desktop mode. [adopt] skips tasks it already floated, so nothing else would. False if it isn't one.
+     */
+    fun floatBack(id: Int): Boolean {
+        if (id !in buttonFull || !AppWindows.floating(context)) return false
+        buttonFull.remove(id)
+        val ok = toWindowAgain(id)
+        FreeformTasks.raise(context, id)
+        Log.i(TAG, "task $id back from full screen (maximise button) to ${fullBefore[id]?.toShortString()} ok=$ok")
+        main.postDelayed(refreshNow, SETTLE_MS)
+        return true
     }
 
     /**
@@ -575,7 +620,7 @@ class WindowFrames(
     }
 
     private fun toWindowAgain(taskId: Int): Boolean {
-        val before = fullBefore[taskId]?.takeIf { !it.isEmpty } ?: AppWindows.nextBounds(context)
+        val before = fullBefore[taskId]?.takeIf { !it.isEmpty }?.let { AppWindows.onScreen(context, it) } ?: AppWindows.nextBounds(context)
         return FreeformTasks.setFullScreen(context, taskId, false, before)
     }
 
@@ -618,7 +663,7 @@ class WindowFrames(
     fun maximise(id: Int) {
         val now = frames[id]?.bounds ?: FreeformTasks.list(context).firstOrNull { it.id == id }?.bounds ?: return
         val back = maximised.remove(id)
-        val target = back?.before ?: AppWindows.area(context)
+        val target = back?.before?.let { AppWindows.onScreen(context, it) } ?: AppWindows.area(context)
         if (back == null) maximised[id] = Max(Rect(now), Rect(target), android.os.SystemClock.uptimeMillis())
         frames[id]?.showMaximised(back == null)
         val how = boundsTo(id, target, raise = !isFront(id))
@@ -635,6 +680,7 @@ class WindowFrames(
         if (id in maximised || !AppWindows.floating(context)) return maximise(id)
         val now = frames[id]?.bounds ?: FreeformTasks.list(context).firstOrNull { it.id == id }?.bounds
         if (now != null) fullBefore[id] = Rect(now)
+        buttonFull.add(id)
         val ok = toFullScreen(id)
         Log.i(TAG, "task $id full screen (maximise button): was ${now?.toShortString()} ok=$ok")
         changed()
@@ -779,7 +825,13 @@ class WindowFrames(
     fun restore(id: Int): Boolean {
         minimised.remove(id)
         away.remove(id)
+        if (floatBack(id)) return true
         val ok = FreeformTasks.raise(context, id) || Tasks.open(context, id)
+        // Back where it was - on screen (AppWindows.onScreen): a place from another bottom bar or fold isn't kept.
+        FreeformTasks.list(context).firstOrNull { it.id == id }?.bounds?.let { b ->
+            val to = AppWindows.onScreen(context, b)
+            if (to != b) Log.i(TAG, "task $id restored off screen (${b.toShortString()}): to ${to.toShortString()} ok=${FreeformTasks.moveTo(context, id, to)}")
+        }
         main.postDelayed(refreshNow, SETTLE_MS)
         return ok
     }
@@ -787,7 +839,12 @@ class WindowFrames(
     /** [pkg]'s floating window back (a tap on its app anywhere on home), if it has one and apps float: its task, or null. */
     fun restoreApp(pkg: String): Int? {
         if (!AppWindows.floating(context)) return null
-        val w = running.value.firstOrNull { it.pkg == pkg } ?: return null
+        val w = running.value.firstOrNull { it.pkg == pkg }
+        if (w == null) {
+            // Its window went full screen by its maximise button: it floats again, at its place.
+            val full = FreeformTasks.fullScreen(context).firstOrNull { (id, p) -> p == pkg && id in buttonFull } ?: return null
+            return full.first.takeIf { floatBack(it) }
+        }
         return w.id.takeIf { restore(it) }
     }
 
@@ -874,6 +931,9 @@ class WindowFrames(
 
         /** Windows full screen by their app's own request -> their bounds before (empty: unknown). */
         private val fullBefore = mutableMapOf<Int, Rect>()
+
+        /** Of [fullBefore], the ones its maximise button sent there ([fullScreen]): a recents/dock tap floats them back. */
+        private val buttonFull = mutableSetOf<Int>()
 
         /** Windows of the home pages not on screen ([desktop]); kept across a rebind like [minimised]. */
         private val away = mutableSetOf<Int>()
