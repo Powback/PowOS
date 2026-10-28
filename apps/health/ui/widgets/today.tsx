@@ -66,6 +66,17 @@ function Chart({ days }: { days: Day[] }) {
   );
 }
 
+function Body({ shown, nrows, chart }: { shown: Tile[]; nrows: number; chart: Day[] }) {
+  if (!shown.length) return <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontWeight: 600, opacity: 0.8 }}>Tap to connect Health</div>;
+  if (nrows < 2) return <Small tile={shown[0]} />;
+  return (
+    <>
+      <Tiles tiles={shown} grow={!chart.length} />
+      {chart.length > 0 && <Chart days={chart} />}
+    </>
+  );
+}
+
 /** How many figures beyond steps a tile of this size holds. */
 const extra = (cols: number, nrows: number) => (nrows < 2 ? 0 : nrows === 2 ? (cols >= 3 ? 3 : 1) : 3);
 
@@ -80,15 +91,7 @@ export default function Today({ host, cells, app: id }: Props) {
   const steps = t.find((x) => x.kind === "steps") ?? t[0];
   const shown = steps ? [steps, ...t.filter((x) => x !== steps).slice(0, extra(cells?.[0] ?? 2, nrows))] : [];
   const chart = nrows >= 3 ? week(rows, "steps") : [];
-  let body;
-  if (!shown.length) body = <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontWeight: 600, opacity: 0.8 }}>Tap to connect Health</div>;
-  else if (nrows < 2) body = <Small tile={shown[0]} />;
-  else body = (
-    <>
-      <Tiles tiles={shown} grow={!chart.length} />
-      {chart.length > 0 && <Chart days={chart} />}
-    </>
-  );
+  const body = <Body shown={shown} nrows={nrows} chart={chart} />;
   return (
     <div style={{ width: "100%", height: "100%", containerType: "size" }} onClick={() => host.openApp?.(id)}>
       <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", padding: "8px 12px", boxSizing: "border-box", gap: "0.5em", fontSize: "clamp(13px, 6cqmin, 22px)" }}>{body}</div>
