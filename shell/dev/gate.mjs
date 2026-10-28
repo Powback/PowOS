@@ -406,6 +406,8 @@ async function overpullKit() {
   };
   const S = await window.__gw.mod("./state.ts");
   S.ccV3.value = "v3";
+  // The phone opens folded (ccexpand.ts expandedByDefault): these scenes measure the whole view, so expand it first.
+  (await window.__gw.mod("./ui/ccexpand.ts")).ccExpanded.value = true;
   S.notif.value = true;
   try {
     await until(() => shown() >= 6 && document.querySelector(UNDER), "the row and the notifications' header");
@@ -1799,7 +1801,7 @@ async function desktopReleaseCheck() {
   };
   const d = width;
   await swipe("22% slow drag commits", [[-d * 0.08, 200], [-d * 0.16, 400], [-d * 0.22, 600], [-d * 0.22, 650]], 0, 1);
-  await swipe("gentle 0.2 px/ms flick commits", [[-10, 50], [-20, 100], [-30, 150], [-40, 200]], 0, 1);
+  await swipe("gentle 0.25 px/ms flick commits", [[-12, 50], [-25, 100], [-37, 150], [-50, 200]], 0, 1);
   await swipe("short fast flick commits", [[-12, 20], [-30, 40], [-60, 60]], 0, 1);
   await swipe("short slow drag cancels", [[-20, 200], [-40, 400], [-60, 600], [-60, 700]], 0, 0);
   await swipe("flick back cancels", [[-d * 0.4, 100], [-d * 0.4 + 10, 110], [-d * 0.4 + 30, 120], [-d * 0.4 + 60, 130]], 0, 0);

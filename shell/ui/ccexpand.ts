@@ -20,8 +20,8 @@
 import { signal } from "@preact/signals";
 
 /** Every category's members shown (only in the one panel, only while it's open). */
-/** It opens expanded on every screen, desktop mode too (the user, 2026-10-28): all tiles and the quick launchers shown, folded by its own swipe. */
-export const expandedByDefault = () => true;
+/** Desktop mode (wide) opens expanded; the phone opens folded, its quick launchers still shown (the user, 2026-10-28). */
+export const expandedByDefault = () => typeof innerWidth === "number" && innerWidth >= 700;
 export const ccExpanded = signal(expandedByDefault());
 /**
  * v3 pull under way: "open" (stacks are shown unfolded for the pull, their rest driven by the finger) or "fold" (the

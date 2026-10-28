@@ -1370,20 +1370,10 @@ input.folder-title:focus { background: var(--soft-fill); }
   margin-bottom: calc(-1 * var(--cc-ext));
   border-radius: calc(var(--radius) * 1.5) calc(var(--radius) * 1.5) 0 0;
 }
-.notif-own::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
-  box-shadow: var(--lift-edge);
-}
+/* The notifications' own panel has no background of its own (the user, 2026-10-28): its cards float on the shade's blur. */
 .notif-own > .notif-list { padding: 10px 10px 16px; }
 .notif-own .notif-bar { padding-top: 2px; }
 /* Collapsed: one compact row - the launchers (under the toggles) go; a pull lays them out with the rest (cc-peek). */
-.cc.v3:not(.whole):not(.cc-peek) .cc3-launchers { display: none; }
 .panel-body.together .notif-empty { padding: 14px 2px 6px; }
 /*
  * Unfolded (notifications.tsx wideShade): the same panel in two columns - the notifications left, the controls right,
