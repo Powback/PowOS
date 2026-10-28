@@ -102,8 +102,9 @@ lock_ports() {
   done
 }
 
-# PowOS's system tier: services that live as long as the phone, not the desktop session (which restarts with every
-# app update and kills its whole process group). Its own persistent mount namespace with PowOS as its root - the same
+# PowOS's system tier: services that live as long as the phone, not the desktop session (which an app update no longer
+# restarts - powos-session.sh reattaches - but rooted.sh session restart, a KWin update or a clear-data still do, and a
+# new session kills its whole process group). Its own persistent mount namespace with PowOS as its root - the same
 # pivot_root as powos-session.sh - made once per boot, running the supervisor (lib/apps/powos-supervisor: SpacetimeDB
 # and other manifests under /usr/lib/powos/apps/services, budgets, idle unload). Never without the port lock above.
 # Off: touch /data/powos/system-tier.off (rooted.sh system off); its state: rooted.sh system status.

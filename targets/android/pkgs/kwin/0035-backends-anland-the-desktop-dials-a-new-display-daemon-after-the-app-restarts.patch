@@ -1,0 +1,140 @@
+From 70970e36c416905c6c12e3bbfea18ba3ecf8ccaa Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Wed, 28 Oct 2026 16:10:14 +0100
+Subject: [PATCH] backends/anland: the desktop dials a new display daemon after
+ the app restarts
+
+The display daemon is a child of the PowOS app; KWin and the rooted session are not (they run under Magisk's su,
+outside the app's cgroup). Every app update or kill took the daemon down and the desktop producer stayed in fallback
+on its dead control socket forever, so the session had to be restarted with every APK install, killing every Linux
+app. try_exit_fallback() now notices the daemon's end is closed, dials the daemon's address again (non-blocking across
+the reconnect timer's ticks: HELLO, then the screen info) and picks the new consumer up through the usual path.
+Window tasks keep their behaviour (a lost daemon gives the window back to the desktop).
+---
+ src/backends/anland/display_producer.c | 74 ++++++++++++++++++++++++++
+ 1 file changed, 74 insertions(+)
+
+diff --git a/src/backends/anland/display_producer.c b/src/backends/anland/display_producer.c
+index 4808288..4511350 100644
+--- a/src/backends/anland/display_producer.c
++++ b/src/backends/anland/display_producer.c
+@@ -35,6 +35,13 @@ struct display_ctx {
+ 
+     void (*fallback_cb)(void *);
+     void  *fallback_userdata;
++
++    /* PowOS: the daemon's address and this producer's surface, to dial a NEW daemon when the one we talk to is gone
++     * (the PowOS app was updated or killed: the daemon is its child, KWin and the session are not). redialing: a
++     * HELLO went out on ctrl_fd and its screen info hasn't come yet. */
++    char    *socket_path;
++    uint32_t surface_id;
++    bool     redialing;
+ };
+ 
+ /*
+@@ -192,6 +199,8 @@ int connect_to_deamon_begin(display_ctx **out, const char *socket_path, uint32_t
+     for (int i = 0; i < MAX_BUFS; i++)
+         ctx->dmabuf_fds[i] = -1;
+ 
++    ctx->socket_path = strdup(socket_path);
++    ctx->surface_id = surface_id;
+     ctx->ctrl_fd = connect_unix(socket_path);
+     if (ctx->ctrl_fd < 0)
+         goto fail;
+@@ -210,6 +219,7 @@ int connect_to_deamon_begin(display_ctx **out, const char *socket_path, uint32_t
+ fail:
+     if (ctx->ctrl_fd >= 0)
+         close(ctx->ctrl_fd);
++    free(ctx->socket_path);
+     free(ctx);
+     return -1;
+ }
+@@ -263,6 +273,7 @@ void disconnect(display_ctx *ctx)
+     release_consumer_resources(ctx);
+     if (ctx->ctrl_fd >= 0)
+         close(ctx->ctrl_fd);
++    free(ctx->socket_path);
+     free(ctx);
+ }
+ 
+@@ -476,14 +487,77 @@ bool is_fallback(display_ctx *ctx)
+     return ctx->fallback;
+ }
+ 
++/* PowOS: the daemon's end of ctrl_fd is closed (EOF or error; data still queued counts as alive). */
++static bool ctrl_dead(display_ctx *ctx)
++{
++    if (ctx->ctrl_fd < 0)
++        return true;
++    char c;
++    ssize_t n = recv(ctx->ctrl_fd, &c, 1, MSG_PEEK | MSG_DONTWAIT);
++    return n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR);
++}
++
++static void drop_ctrl(display_ctx *ctx)
++{
++    if (ctx->ctrl_fd >= 0)
++        close(ctx->ctrl_fd);
++    ctx->ctrl_fd = -1;
++    ctx->redialing = false;
++}
++
++/*
++ * PowOS: talk to a new display daemon after ours went away. The daemon is a child of the PowOS app, so every app
++ * update or app kill takes it down, while KWin, Plasma and every Linux app (the root session, outside the app's
++ * cgroup) live on. Before this the desktop producer stayed in fallback on the dead ctrl_fd forever and the session had
++ * to be restarted. Non-blocking across calls (the reconnect timer's 200 ms ticks): dial + HELLO, then the screen info
++ * on a later tick if the daemon isn't quick. Returns 0 once the new daemon has answered.
++ */
++static int redial(display_ctx *ctx)
++{
++    if (!ctx->socket_path)
++        return -1;
++    if (!ctx->redialing) {
++        if (ctx->ctrl_fd >= 0)
++            close(ctx->ctrl_fd);
++        ctx->ctrl_fd = connect_unix(ctx->socket_path);
++        if (ctx->ctrl_fd < 0)
++            return -1; // no daemon yet (the app is still starting)
++        uint8_t hello[sizeof(struct ctrl_msg) + sizeof(uint32_t)];
++        struct ctrl_msg hdr = { .type = CTRL_MSG_PRODUCER_HELLO, .size = ctx->surface_id ? sizeof(uint32_t) : 0 };
++        memcpy(hello, &hdr, sizeof(hdr));
++        memcpy(hello + sizeof(hdr), &ctx->surface_id, sizeof(ctx->surface_id));
++        if (send_all(ctx->ctrl_fd, hello, sizeof(hdr) + hdr.size) < 0) {
++            drop_ctrl(ctx);
++            return -1;
++        }
++        ctx->redialing = true;
++    }
++    struct pollfd pfd = { .fd = ctx->ctrl_fd, .events = POLLIN };
++    int r = poll(&pfd, 1, HANDSHAKE_TIMEOUT_MS);
++    if (r == 0)
++        return -1; // answer still pending: next tick
++    if (r < 0 || connect_to_deamon_finish(ctx) < 0) {
++        drop_ctrl(ctx);
++        return -1;
++    }
++    ctx->redialing = false;
++    return 0;
++}
++
+ int try_exit_fallback(display_ctx *ctx)
+ {
+     if (!ctx->fallback)
+         return 0;
+ 
++    // PowOS: a daemon we lost (or are still greeting) first.
++    if ((ctx->ctrl_fd < 0 || ctx->redialing) && redial(ctx) < 0)
++        return -1;
++
+     // Step 1: ask the daemon to hand over the consumer-side fds.
+     if (pickup_fds(ctx, true) < 0) {
+         release_consumer_resources(ctx);
++        if (ctrl_dead(ctx))
++            drop_ctrl(ctx); // the next call dials the new daemon
+         return -1;
+     }
+ 
+-- 
+2.50.1 (Apple Git-155)
+

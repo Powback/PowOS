@@ -10,6 +10,8 @@
 #   log       /data/powos/start.log
 #   run CMD   one command inside PowOS (no pipes: they would run in Android's shell)
 #   system [status|stop|off|on]   PowOS's system tier (SpacetimeDB under the supervisor, the uid-locked port)
+#   session [status|restart]   the desktop session (KWin + Linux apps): healthy? / a new one on purpose (an app
+#             update no longer restarts it: the app reattaches, powos-session.sh)
 #   wifi      adb over Wi-Fi (port 5555, kept across reboots): unplug the cable
 #   widevine-l3 [remove]   Netflix etc. in SD on the unlocked phone (targets/native/widevine-l3.sh)
 #   sandbox-bundle  build only the manager sandbox's tarball deploy pushes (deps from its lock; no phone)
@@ -222,6 +224,14 @@ system)
     on) asu 'rm -f /data/powos/system-tier.off; sh /data/powos/powos-start.sh; tail -3 /data/powos/start.log' ;;
     *) echo "rooted.sh system status|stop|off|on"; exit 1 ;;
   esac ;;
+session)
+  # The desktop session outlives the app (an APK update reattaches to it); restart is the one explicit way to a new
+  # one (the app's display daemon keeps running, the new KWin connects to it).
+  case ${2:-status} in
+    status) asu "sh /data/powos/powos-session.sh status" ;;
+    restart) asu "sh /data/powos/powos-session.sh restart"; sleep 3; asu "tail -n 3 /data/powos/session.log" ;;
+    *) echo "rooted.sh session status|restart"; exit 1 ;;
+  esac ;;
 android)
   # A script as root on the Android side (outside PowOS): pushed, then run with Magisk's su.
   [ -f "${2:-}" ] || { echo "usage: rooted.sh android <script>"; exit 1; }
@@ -245,5 +255,5 @@ widevine-l3)
     echo "Widevine L3 forced (now and at every boot)"
   fi ;;
 *)
-  sed -n '2,19p' "$0"; exit 1 ;;
+  sed -n '2,21p' "$0"; exit 1 ;;
 esac

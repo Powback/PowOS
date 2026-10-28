@@ -2,16 +2,62 @@
 # The PowOS desktop on a rooted phone: started by the PowOS app (SessionService, rooted mode) through
 # `su -c sh /data/powos/powos-session.sh <run dir> <display socket> <physical mm> <LANG> <TZ> [<termux-va>]`.
 #
+# The session OUTLIVES the app: it runs under Magisk's su, outside the app's cgroup, so an APK update (am_kill
+# "installPackageLI") or an app kill only takes the app's display daemon down; KWin (patch 0035) dials the new
+# app's daemon and the screen comes back with every Linux app (Steam, Dolphin, ...) still running. So when the app
+# starts and a healthy session already runs, this REATTACHES (no new session) instead of starting one.
+#   powos-session.sh status    is a session running and healthy (exit 0) - rooted.sh session status
+#   powos-session.sh restart   a new session on purpose, with the last start's arguments - rooted.sh session restart
+# A start with POWOS_SESSION_RESTART=1 (or /data/powos/session.restart present, consumed) always makes a new one.
+#
 # The app keeps what only an Android app can do: the screen surface and its display daemon (buffers, touch, keyboard,
 # audio relayed to KWin's Anland backend over <display socket>), plus the phone's state files in <run dir> (battery,
 # network, Android requests). Everything else runs here, inside PowOS's own system (/data/powos/root), the desktop as
 # the user powos (powos-rooted-session drops to it; sudo works for real) - no
 # patched loader, fakechroot or fakeroot as in the no-root engine. The app's run dir appears inside PowOS at
 # /run/powos-app (XDG_RUNTIME_DIR), so sockets, logs and desktop-ready are shared as-is.
-RUN=$1 SOCK=$2 MM=$3 LANG_=$4 TZ_=$5 TVA=$6
 R=/data/powos/root
+
+# A session that is up and can take the new app: its process group alive (powos-rooted-session's pgid, in PowOS's
+# /run), KWin running from the KWin package installed now (not one replaced under it), KWin new enough to dial a new
+# display daemon (0035, kwin 6.7.5-3.40), and its Wayland socket in the app's run dir <$1> (a clear-data makes a new
+# run dir: no socket there, so a new session). Prints why not.
+healthy() {
+  run=${1:-/data/user/0/com.powos.app/files/run}
+  pg=$(cat "$R/run/powos-rooted-session.pgid" 2>/dev/null)
+  [ -n "$pg" ] && kill -0 "-$pg" 2>/dev/null || { echo "no session process group"; return 1; }
+  kw=$(pgrep -x kwin_wayland | head -n 1)
+  [ -n "$kw" ] || { echo "no KWin"; return 1; }
+  [ "$(awk '{print $5}' "/proc/$kw/stat" 2>/dev/null)" = "$pg" ] || { echo "KWin $kw is not the session's"; return 1; }
+  case $(readlink "/proc/$kw/exe") in *deleted*) echo "KWin $kw runs a replaced binary (kwin updated)"; return 1 ;; esac
+  # HACK: KWin's ability to dial a new daemon read off its package version (pacman's db). Real fix: KWin says so
+  # itself (a "caps ... redial" on the control channel, or a file in the run dir the backend writes at start).
+  v=$(sed -n '/^%VERSION%$/{n;p;q}' "$R"/var/lib/pacman/local/kwin-[0-9]*/desc 2>/dev/null)
+  case $v in
+    6.7.5-3.*) [ "${v#6.7.5-3.}" -ge 40 ] 2>/dev/null || { echo "KWin $v can't reattach (needs 6.7.5-3.40+)"; return 1; } ;;
+    *) [ -n "$v" ] && [ "$(printf '%s\n' "$v" 6.7.5-3.40 | sort -V | head -n 1)" = 6.7.5-3.40 ] \
+         || { echo "KWin ${v:-?} can't reattach"; return 1; } ;;
+  esac
+  [ -S "$run/wayland-0" ] || { echo "no Wayland socket in $run"; return 1; }
+  echo "healthy: session $pg, KWin $kw ($v)"
+}
+
+case ${1:-} in
+  status) healthy "${2:-}"; exit $? ;;
+  restart)
+    # A new session on purpose, with the arguments of the last start (the app's daemon keeps running; the new KWin
+    # connects to it). Detached, so it outlives the caller (adb's shell).
+    [ -s /data/powos/session.args ] || { echo "no previous start (/data/powos/session.args)"; exit 1; }
+    POWOS_SESSION_RESTART=1 setsid sh /data/powos/powos-session.sh $(cat /data/powos/session.args) \
+      > /dev/null 2>&1 < /dev/null &
+    echo "restarting the session (log: /data/powos/session.log)"; exit 0 ;;
+esac
+
+RUN=$1 SOCK=$2 MM=$3 LANG_=$4 TZ_=$5 TVA=$6
 exec >> /data/powos/session.log 2>&1
 echo "--- $(date) powos-session run=$RUN"
+echo "$*" > /data/powos/session.args
+[ -e /data/powos/session.restart ] && { rm -f /data/powos/session.restart; POWOS_SESSION_RESTART=1; }
 
 sh /data/powos/powos-start.sh                       # mounts (idempotent; also done at boot)
 m() { nsenter -t 1 -m -- "$@"; }
@@ -49,6 +95,19 @@ A=$R/home/powos/.local/share/powos/apps
 m mkdir -p "$A" "$F/apps"
 m chown "$U:$U" "$R/home/powos/.local" "$R/home/powos/.local/share" "$R/home/powos/.local/share/powos" "$A" "$F/apps"
 appbind "$F/apps" "$A"
+
+# Reattach: a healthy session keeps running (the app was updated or killed, not the session). Its KWin dials this app's
+# new display daemon itself; the splash only needs desktop-ready again (the new app process deletes it: SplashScreen).
+if [ -z "${POWOS_SESSION_RESTART:-}" ] && why=$(healthy "$RUN"); then
+  echo "reattach: $why - no new session"
+  # HACK: desktop-ready touched again a few times: the new app's SplashScreen deletes it when its activity comes up,
+  # which may be after this. Real fix: the splash asks whether the session is up (wayland-0 + KWin connected to the
+  # daemon) instead of trusting a file only a session start writes.
+  ( for t in 0 2 5 10; do sleep $t; touch "$RUN/desktop-ready"; chown "$(stat -c %u "$RUN")" "$RUN/desktop-ready"; done ) \
+    > /dev/null 2>&1 < /dev/null &
+  exit 0
+fi
+[ -n "${POWOS_SESSION_RESTART:-}" ] && echo "restart requested" || echo "new session: $why"
 
 # The display socket as PowOS sees it: "@name" is in the abstract namespace (the app's SessionService.DISPLAY_SOCKET),
 # shared with the app as is; a socket file in the run dir is at /run/powos-app.
