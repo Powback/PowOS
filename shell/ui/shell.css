@@ -2322,8 +2322,12 @@ html:root .page .search-face .bar-pill {
   background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
 }
 html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
-/* The AI page's own ground: the launcher chat's frost (.launcher-frame.tile above), same tokens; cards unchanged. */
-html:root .ai-screen { background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil)); }
+/* The AI page's own ground: the launcher chat's frost (.launcher-frame.tile above), same tokens; cards unchanged.
+   Its compositor blur is the widgets' (--widget-blur-native, theme.css); nativeglass.ts registers the page (.ai-screen). */
+html:root .ai-screen {
+  --glass-blur-native: var(--widget-blur-native);
+  background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+}
 /*
  * Over a wallpaper of the other tone (a dark theme over a bright picture, a light one over a dark): the frost takes
  * the wallpaper's tone, its text the theme's two colours swapped - as the wallpaper's labels turn (theme.css
