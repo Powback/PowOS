@@ -190,7 +190,7 @@ function file(url) {
   if (p.startsWith("_app/")) {
     const [, id, ...rest] = p.split("/");
     f = path.join(APPS, id, "ui", rest.join("/"));
-  } else f = path.join(ROOT, p);
+  } else f = p === "dev/search-check.js" ? new URL("./search-check.js", import.meta.url) : path.join(ROOT, p);
   return fs.existsSync(f) && fs.statSync(f).isFile() ? { path: f, name: p } : null;
 }
 

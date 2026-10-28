@@ -246,7 +246,7 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/n
 # The shared transpile's cache (gate.mjs transpiled()): by source hash, so it never goes stale; pruned of week-old files.
 tx="${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/tx"
 mkdir -p "$tx" && find "$tx" -type f -mtime +7 -delete 2>/dev/null || true
-mounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/gate.mjs:/usr/src/app/gate.mjs:ro" -v "$tx:/cache")
+mounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/gate.mjs:/usr/src/app/gate.mjs:ro" -v "$SHELL_DIR/dev/search-check.js:/usr/src/app/search-check.js:ro" -v "$tx:/cache")
 # node_modules is a link out of the composed folder: the browser half needs none of it.
 if [ -n "$app" ]; then
   id=$(sed -n 's/^ *"id": *"\([^"]*\)".*/\1/p' "$app/powos-app.json" | head -1)
