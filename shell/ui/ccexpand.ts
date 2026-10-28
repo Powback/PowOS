@@ -95,7 +95,18 @@ function headMorph(card: HTMLElement | null, head: HTMLElement | null) {
   const band = head?.offsetHeight ?? 0;
   const time = card.querySelector<HTMLElement>(".notif-time");
   peekAnim(card.querySelector(".notif-icon"), [{ opacity: 1 }, { opacity: 0 }]);
-  peekAnim(card.querySelector(".notif-app"), [{ opacity: 1 }, { opacity: 0 }]);
+  // The group's name is drawn twice while it morphs - the card's (fading out) and the head's (fading in) - and the two
+  // sit apart (the card's row is under its padding, after its icon; the head's at the band's edge): crossfaded in
+  // place they read as one header doubled a few px off (the user, 2026-10-28 "notifications still borked during
+  // transition"). Both ride the same path instead, card's to head's, so at every k they cover each other exactly.
+  const app = card.querySelector<HTMLElement>(".notif-app");
+  const headApp = head?.querySelector<HTMLElement>(".notif-app");
+  if (app && headApp) {
+    const a = app.getBoundingClientRect(), h = headApp.getBoundingClientRect();
+    const dx = h.left - a.left, dy = h.top + h.height / 2 - (a.top + a.height / 2);
+    peekAnim(app, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: `translate(${dx}px, ${dy}px)` }]);
+    peekAnim(headApp, [{ transform: `translate(${-dx}px, ${-dy}px)` }, { transform: "none" }]);
+  } else peekAnim(app, [{ opacity: 1 }, { opacity: 0 }]);
   peekAnim(card, [{ clipPath: "inset(0px -60px -60px -60px)" }, { clipPath: `inset(${band}px -60px -60px -60px)` }]);
   if (time) {
     const dy = band + 9 - (time.getBoundingClientRect().top - card.getBoundingClientRect().top);

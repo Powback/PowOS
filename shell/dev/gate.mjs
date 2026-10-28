@@ -379,15 +379,15 @@ async function overpullKit() {
   // Time-driven ones only: the list's edge fades (shell.css scroll-fade) are scroll-driven, "running" for good -
   // window.__gw.documentAnimations already excludes those (friction f125).
   const still = () => !window.__gw.documentAnimations(".notif-panel").length;
-  const at = { x: 0, y: 0 };
+  const at = { x: 0, y: 0, el: null };
   const P = (type, y) =>
-    document.querySelector(".cc > .notif-bar").dispatchEvent(
+    at.el.dispatchEvent(
       new PointerEvent(type, { bubbles: true, clientX: at.x, clientY: y, pointerId: 1, isPrimary: true, pointerType: "mouse", buttons: type === "pointerup" ? 0 : 1 }),
     );
-  // A finger down on the control center's header ([mid]: half way first), moved [dy] in six frames, [check]ed, let go.
-  const drag = async (dy, check, mid) => {
-    const b = document.querySelector(".cc > .notif-bar").getBoundingClientRect();
-    Object.assign(at, { x: b.left + b.width / 2, y: b.top + b.height / 2 });
+  // A finger down on the control center's header ([from]; [mid]: half way first), moved [dy] in six frames, [check]ed, let go.
+  const drag = async (dy, check, mid, from = ".cc > .notif-bar") => {
+    const el = document.querySelector(from), b = el.getBoundingClientRect();
+    Object.assign(at, { el, x: b.left + b.width / 2, y: b.top + Math.min(b.height / 2, 24) });
     P("pointerdown", at.y);
     if (mid) await window.__op.toHalf((y) => P("pointermove", at.y + y), dy, mid);
     for (let i = 1; i <= 6; i++) {
@@ -578,12 +578,13 @@ async function overpullShort() {
 
 /**
  * All the way, from the compact row: the rest shown and laid out, what's under it moved down to where the whole view
- * had it, the row still, every stack unfolded.
+ * had it, the row still, every stack unfolded. Pulled from the NOTIFICATIONS' list (the user, 2026-10-28: folded, a
+ * down-pull on the notifications expands the control center as one on the card does - gesture.ts ccShowWay).
  */
 async function overpullExpand() {
   const o = window.__op;
   const fails = [];
-  await o.drag(260, null, o.midPull(fails, "pulling down"));
+  await o.drag(260, null, o.midPull(fails, "pulling down"), ".panel-body.together > .notif-own .notif-list");
   o.settled(fails, "pulling down");
   if (!document.querySelector(".cc3-list.whole")) fails.push("pulled 260 px further, the rest isn't shown");
   if (Math.abs(o.under() - o.under0) > 1) fails.push(`expanded again, what's under the control center is ${Math.round(o.under() - o.under0)} px off the whole view's place`);
