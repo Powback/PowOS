@@ -210,6 +210,8 @@ effect(() => void powos.store.set("pullOverApps", pullOverApps.value).catch(() =
 export const speechEngine = stored("speechEngine", "gpu");
 // The object itself: a string is stored quoted (ShellBridge store.set), and the app reads {"engine": ...}.
 effect(() => void powos.store.set("speech", { engine: speechEngine.value }).catch(() => {}));
+/** What's typed in PowOS AI's page and not sent yet: kept across reloads (an update mustn't lose it). */
+export const aiDraft = stored("powai.draft");
 /** Opens the pull-up panel with [kind] in it (the pet's long press, a bubble's "more": "ai"). */
 export function openPanel(kind: "apps" | "ai") {
   pullKind.value = kind;
@@ -355,7 +357,11 @@ export function goHome() {
 powos.on("system.back", () => back());
 powos.on("system.home", () => goHome());
 // An edge gesture's "app drawer" (EdgeGestures.kt): home with its pull-up panel up.
-powos.on("home.panel", ({ kind }: { kind: "apps" | "ai" }) => openPanel(kind === "ai" ? "ai" : "apps"));
+powos.on("home.panel", ({ kind, draft }: { kind: "apps" | "ai"; draft?: string }) => {
+  // A share to the retired AI app's entry: its words wait in PowOS AI's field.
+  if (draft) aiDraft.value = aiDraft.value ? `${aiDraft.value}\n${draft}` : draft;
+  openPanel(kind === "ai" ? "ai" : "apps");
+});
 
 export async function launch(key: string) {
   menu.value = null;

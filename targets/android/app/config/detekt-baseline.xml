@@ -86,8 +86,6 @@
     <ID>CognitiveComplexMethod:Parser.kt$Parser$private fun primary(): Expr</ID>
     <ID>CognitiveComplexMethod:Paste.kt$Paste$fun download( id: String, userAgent: String, ): String</ID>
     <ID>CognitiveComplexMethod:PetOverlay.kt$PetOverlay.Root$override fun onTouchEvent(ev: MotionEvent): Boolean</ID>
-    <ID>CognitiveComplexMethod:PowosAiActivity.kt$PowosAiActivity$@Composable private fun Bubble(item: PowosAiChat.Item)</ID>
-    <ID>CognitiveComplexMethod:PowosAiActivity.kt$PowosAiActivity$@Composable private fun Chat()</ID>
     <ID>CognitiveComplexMethod:PowosAiChat.kt$PowosAiChat$private fun turn(prompt: String?)</ID>
     <ID>CognitiveComplexMethod:PowosRecentsService.kt$PowosRecentsService$private fun startGestures()</ID>
     <ID>CognitiveComplexMethod:Proot.kt$Proot$fun prepare()</ID>
@@ -243,7 +241,6 @@
     <ID>CyclomaticComplexMethod:Paste.kt$Paste$fun download( id: String, userAgent: String, ): String</ID>
     <ID>CyclomaticComplexMethod:PetOverlay.kt$PetOverlay$fun update()</ID>
     <ID>CyclomaticComplexMethod:PetOverlay.kt$PetOverlay.Root$override fun onTouchEvent(ev: MotionEvent): Boolean</ID>
-    <ID>CyclomaticComplexMethod:PowosAiActivity.kt$PowosAiActivity$@Composable private fun Bubble(item: PowosAiChat.Item)</ID>
     <ID>CyclomaticComplexMethod:PowosAiChat.kt$PowosAiChat$private fun turn(prompt: String?)</ID>
     <ID>CyclomaticComplexMethod:PowosRecentsService.kt$PowosRecentsService$private fun startGestures()</ID>
     <ID>CyclomaticComplexMethod:PtyTerminal.kt$PtyTerminal$override fun key( code: Int, pressed: Boolean, )</ID>
@@ -337,7 +334,6 @@
     <ID>LongMethod:Parser.kt$Parser$private fun body(top: Boolean = false): Body</ID>
     <ID>LongMethod:Parser.kt$Parser$private fun decl(): Decl</ID>
     <ID>LongMethod:Parser.kt$Parser$private fun primary(): Expr</ID>
-    <ID>LongMethod:PowosAiActivity.kt$PowosAiActivity$@Composable private fun Chat()</ID>
     <ID>LongMethod:PowosTerminalActivity.kt$PowosTerminalActivity$override fun onCreate(savedInstanceState: Bundle?)</ID>
     <ID>LongMethod:Render.kt$@Composable private fun common( p: Props, parent: Any?, ): Modifier</ID>
     <ID>LongMethod:ShellBridge.kt$ShellBridge$private fun dispatch( method: String, a: JSONArray, ): Any?</ID>

@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { chat, openSession, page, sessionView, stored } from "../state.ts";
+import { aiDraft, chat, openSession, page, sessionView } from "../state.ts";
 import { Pill, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
 import { md } from "./md.ts";
@@ -38,7 +38,7 @@ const task = (s: AgentSession) => s.title.replace(/^[⠀-⣿✳*·\s]+/, "") || 
 const folder = (path: string) => path.split("/").filter(Boolean).at(-1) ?? "~";
 
 // What's typed and not sent yet: kept across reloads (an update mustn't lose it).
-const draft = stored("powai.draft");
+const draft = aiDraft;
 
 const send = () => {
   const text = draft.value.trim();
@@ -738,9 +738,6 @@ function AiHeader() {
       <span class={`ai-state ${busy ? "busy" : ""}`}>
         {busy ? `working${step && step.kind === "tool" ? ` · ${toolLabel(step)}` : "…"}` : "ready"}
       </span>
-      <button type="button" class="ai-open" onClick={() => powos.ai.open()}>
-        open ↗
-      </button>
     </header>
   );
 }

@@ -6,7 +6,7 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 
-/** "PowOS AI" in Quick Settings: opens the chat ([PowosAiActivity]) from anywhere, the shade collapsing. */
+/** "PowOS AI" in Quick Settings: opens PowOS AI's page (via the [PowosAiActivity] redirect) from anywhere, the shade collapsing. */
 class PowosAiTile : TileService() {
     override fun onStartListening() {
         qsTile?.apply {

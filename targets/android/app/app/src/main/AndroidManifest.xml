@@ -266,9 +266,10 @@
         <activity
             android:name=".PowosAiActivity"
             android:label="PowOS AI"
-            android:theme="@style/Theme.Omalauncher.Window"
+            android:theme="@android:style/Theme.NoDisplay"
             android:exported="true"
             android:launchMode="singleTask"
+            android:excludeFromRecents="true"
             android:taskAffinity=".powosai"
             android:resizeableActivity="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
