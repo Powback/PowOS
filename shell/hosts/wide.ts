@@ -231,6 +231,9 @@ export function wide(n: Bridge): Bridge {
   const pull = () => void n.system.display?.().then(apply).catch(() => {});
   n.on("system.display", apply);
   pull();
+  // HACK: a host without system.display (APK older than 44ab84fd) pushes nothing, so a fold while home is hidden is only
+  // caught by this 1 s recheck (while shown). Remove once every host has system.display.
+  if (!n.system.display) setInterval(recheck, 1000);
 
   return {
     ...n,
