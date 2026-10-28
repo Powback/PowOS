@@ -10,11 +10,12 @@
  * the page tells the host (pull.closed / pull.launched) and the window goes.
  */
 import { useEffect } from "preact/hooks";
-import { computed } from "@preact/signals";
+import { computed, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { closeDrawer, drawer, pullKind } from "../state.ts";
+import { chatting, closeDrawer, drawer, pullKind } from "../state.ts";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
+import { Dock } from "./home.tsx";
 import { drawerDrag, drawerOpen, drawerShown, followOpenness, homeGestures } from "./gesture.ts";
 import { AiView } from "./powai.tsx";
 
@@ -38,6 +39,14 @@ powos.on("pull.hide", () => {
   drawerDrag.value = null;
   closeDrawer();
 });
+
+/** The keyboard up (the host's insets: app.tsx applies the same ones as --inset-keyboard). */
+const keyboardUp = signal(false);
+powos.on("system.insets", (i: { keyboard?: number } | null) => (keyboardUp.value = (i?.keyboard ?? 0) > 0));
+
+/** Home's dock under the pill, as on home: on the app grid only - not in the chat, not with the keyboard up (the user:
+    the dock stays with the launcher so it's there when the launcher is used over other apps). */
+const dockShown = computed(() => pullKind.value === "apps" && !chatting.value && !keyboardUp.value);
 
 /** A finger on the panel: a render when that starts and ends, not one for every frame of the drag. */
 const pullDragging = computed(() => drawerDrag.value != null);
@@ -73,6 +82,7 @@ export function Pull() {
         </div>
       </div>
       <Bar />
+      {dockShown.value && <Dock />}
     </div>
   );
 }

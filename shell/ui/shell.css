@@ -133,11 +133,13 @@
 :is(.home.pill-below, .pull-screen, .home:not(:has(> .bar))) > .stage > .launcher-clip { transform: none; }
 :is(.home.pill-below, .pull-screen, .home:not(:has(> .bar))) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
 /* No search bar at the foot (the search widget): down over the dock's place to the screen's foot, no pill to clear.
-   Over an app (pull.tsx): no dock - the pill right under the stage. */
+   Over an app (pull.tsx): the pill right under the stage, the dock (on the app grid) under the pill. */
 .home:not(:has(> .bar)) .launcher-clip { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); mask-image: none; }
 .home:not(:has(> .bar)) .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
 .pull-screen .launcher-clip { inset: 0 0 4px; }
 .pull-screen .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
+/* With home's dock under the pill (pull.tsx dockShown): the frost down under the dock to the screen's foot, as home's. */
+.pull-screen:has(> .dock) .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--strip-height) + var(--foot))); }
 /* The reference material (theme.css --text-fill); home's content fades out under it (.home-content), nothing to blur. */
 .home .launcher-frame.tile {
   background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
