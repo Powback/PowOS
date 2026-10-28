@@ -37,23 +37,6 @@ object TaskSurfaces {
     /** Task [id]'s surface, or null: not seen in a transition yet (or dropped since). */
     fun get(id: Int): SurfaceControl? = surfaces[id]?.takeIf { it.isValid }
 
-    /**
-     * Task [ids]' surfaces shown ([on]) or hidden in [t] (the caller applies it): a window of a page off the screen
-     * stays a live, drawn task above home - only its leash is hidden, so the app keeps its buffer and is there at once
-     * when its page returns (reordered under home it stopped, dropped its buffer and came back blank until touched).
-     * Returns the ids PowOS holds no surface of (the caller falls back to WM: minimise / raise).
-     */
-    fun show(
-        t: SurfaceControl.Transaction,
-        ids: Collection<Int>,
-        on: Boolean,
-    ): Set<Int> =
-        ids.filterTo(mutableSetOf()) { id ->
-            val leash = get(id) ?: return@filterTo true
-            t.setVisibility(leash, on)
-            false
-        }
-
     /** The task ids PowOS holds a surface of. */
     fun ids(): Set<Int> = surfaces.keys.toSet()
 

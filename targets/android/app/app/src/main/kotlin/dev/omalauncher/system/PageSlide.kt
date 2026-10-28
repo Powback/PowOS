@@ -17,9 +17,9 @@ import android.view.SurfaceControl
  * the settle runs the page track's own curve here, frame by frame ([settle]: its duration and cubic-bezier, read from
  * the track's CSS transition). Their title bars and grips (their own overlay windows, [WindowFrame]) move in the same
  * transaction. At the end the transition finishes with every window at its real bounds: the ones the page left behind
- * hidden there (their leash hidden; the task stays live and drawn above home, not focusable - never reordered under
- * home, which stopped the app and it came back blank; the next slide shows its leash in its start transaction) and
- * the page change committed ([WindowFrames.desktop]), after the slide has landed instead of during it.
+ * hidden there (their leash hidden, as WM hides an invisible task - nothing is parked off the screen; the next open
+ * transition shows it where it belongs) and the page change committed as before ([WindowFrames.desktop]: minimised /
+ * raised), after the slide has landed instead of during it.
  *
  * Why not the old way: the page change minimised and raised windows (binder calls and two WM transitions per window)
  * on the main thread the moment the finger let go - the thread home's WebView draws on - so the settle stuttered and
@@ -319,8 +319,10 @@ object PageSlide {
         finish(s, emptySet(), why)
         // Home's list that came during the settle: committed still, after the windows went back.
         if (pending != null) main.post { WindowFrames.current?.desktop(pending) }
-        // The other pages' windows it brought up are hidden again by their leash in the finish (home's hide list is
-        // unchanged); none goes under home.
+        // The other pages' windows it brought up go back under home (home's hide list is unchanged).
+        val back = wins.filter { it.rel != 0 }.map { it.id }.toSet()
+        val c = context ?: return
+        if (back.isNotEmpty()) main.post { back.forEach { FreeformTasks.minimise(c, it) } }
     }
 
     private fun finish(
@@ -358,9 +360,8 @@ object PageSlide {
         for (w in wins) {
             val tok = token(w.id) ?: continue
             TaskLeash.setBounds(wct, tok, w.bounds)
-            // The [gone] ones stay above home, live and drawn, their leash hidden (s.hidden) and not focusable: a
-            // reorder under home stopped the app and it came back blank until touched.
-            if (w.rel != 0 || w.id in gone) TaskLeash.setFocusable(wct, tok, w.id !in gone)
+            if (w.rel != 0) TaskLeash.setFocusable(wct, tok, true)
+            if (w.id in gone) TaskLeash.reorder(wct, tok, false)
         }
     }
 

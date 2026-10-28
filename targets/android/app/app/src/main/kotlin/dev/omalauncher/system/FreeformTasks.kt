@@ -234,18 +234,6 @@ object FreeformTasks {
             .onFailure { Log.w(TAG, "can't minimise task $id", it) }.isSuccess
 
     /**
-     * Task [id] may take input focus ([on]) or not: a window whose page is off the screen stays above home with its
-     * leash hidden (TaskSurfaces.show) and must not hold the key focus meanwhile. HACK: hidden, reflected like [minimise].
-     */
-    fun focusable(
-        context: Context,
-        id: Int,
-        on: Boolean,
-    ): Boolean =
-        transact(context, id) { wct, token -> TaskLeash.setFocusable(wct, token, on) }
-            .onFailure { Log.w(TAG, "can't set task $id focusable=$on", it) }.isSuccess
-
-    /**
      * Task [id]'s content drawn at [dpi] (0: the screen's own again): a real per-task density, the app lays itself out
      * for it (WindowContainerTransaction.setDensityDpi, what WM Shell's desktop mode does to its windows; checked on
      * this ROM 2026-10-22: the task's configuration says the new dpi and its screen width in dp follows). HACK: hidden,
