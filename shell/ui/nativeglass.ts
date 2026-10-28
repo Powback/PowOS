@@ -70,6 +70,18 @@ function sendLook() {
 powos.on("theme.changed", () => setTimeout(sendLook, 0));
 liquidWanted.subscribe(() => sendLook());
 
+/**
+ * The host binds "b.f <id> ..." regions to the draw that shows page frame <id> ("b.sync 1", GlassBlur.frameCommand).
+ * An older host never says it: "b.r" then, applied on its next draw (a frame early or late under load).
+ */
+let frameSync = false;
+/** Page frame ids for "b.f": in the trace as console.timeStamp("glass f<id>"), the host's async section the same. */
+let fid = 0;
+let syncOff = false;
+fromNative.add((text) => {
+  if (text === "b.sync 1") frameSync = true;
+});
+
 function update() {
   const on = OVER_WALLPAPER.has(mode) && hostBlurs.value && wanted.value && !!native.value;
   if (on === nativeGlass.value) return;
@@ -480,6 +492,16 @@ const carries = (t: EventTarget | Node | null | undefined): boolean => {
 const moving = () =>
   document.getAnimations().some((a) => a.playState === "running" && a.timeline === document.timeline && carries((a.effect as KeyframeEffect | null)?.target));
 
+/** One changed region list to the host: tagged with its page frame when the host binds them to that frame's draw. */
+function sendRegions(text: string) {
+  counts.sent++;
+  if (frameSync && !syncOff) {
+    fid++;
+    console.timeStamp(`glass f${fid}`);
+    send(`b.f ${fid} ${text}`);
+  } else send(`b.r ${text}`);
+}
+
 function frame() {
   if (!nativeGlass.value) {
     running = false;
@@ -490,10 +512,7 @@ function frame() {
   if (text !== last) {
     last = text;
     still = 0;
-    if (!held) {
-      counts.sent++;
-      send(`b.r ${text}`);
-    }
+    if (!held) sendRegions(text);
   } else {
     still++;
   }
@@ -603,6 +622,8 @@ export const debug = {
   },
   lag: (frames: number) => send(`b.lag ${frames}`),
   hold: (on: boolean) => void (held = on),
+  /** For CDP A/B (`__glass.live.sync(false)`): "b.r" as an older host gets, though this one says "b.sync 1". */
+  sync: (on: boolean) => void (syncOff = !on),
   compute: (on: boolean) => void ((computing = on), (tracks = null)),
   /** What set off the last measures (cause, element), oldest first. */
   get kicks() {

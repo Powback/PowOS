@@ -4,11 +4,14 @@ import android.graphics.RectF
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.Trace
+import android.provider.Settings
 import android.util.Log
 import android.view.Choreographer
 import android.view.SurfaceControl
 import android.view.View
 import android.view.WindowManager
+import android.webkit.WebView
 import androidx.annotation.RequiresApi
 import dev.omalauncher.system.HiddenApi
 import java.util.function.Consumer
@@ -166,7 +169,15 @@ internal class GlassBlur(
             // This host bends the live wallpaper (WallpaperBackdrop), never a stale picture of it: the page may ask
             // for liquid edges.
             state("b.backdrop live")
+            // This host binds "b.f" regions to the draw showing their page frame: the page may send them. Only with
+            // Settings.Global powos_glass_sync = 1 (default 0, the page then never sends "b.f" and keeps "b.r" as
+            // before): it ships off until the coordinator turns it on on the phone for the device acceptance (a 60 fps
+            // recording of a folder morph, a widget drag and a shade open with the blur exact), then flips the default.
+            if (frameSyncOn()) state("b.sync 1")
         }
+
+    private fun frameSyncOn() =
+        runCatching { Settings.Global.getInt(view.context.contentResolver, "powos_glass_sync", 0) == 1 }.getOrDefault(false)
 
     private fun update() {
         if (checked == null && !broken) check()
@@ -215,39 +226,107 @@ internal class GlassBlur(
 
     /**
      * "b.r <dpr> <n> [x y w h tl tr br bl alpha radius] * n" (CSS px of the page; radius: the blur's), on the port's
-     * thread: parsed there, set on the main thread.
+     * thread: parsed there, set on the main thread on the window's next draw - not tied to the page frame it was
+     * measured on (pages without "b.f", and the page's clear). Any frame-synced set still in flight is dropped.
      */
     fun command(rest: String) {
-        val regions =
-            try {
-                val t = rest.trim().split(' ')
-                val dpr = t[0].toFloat()
-                val n = t[1].toInt()
-                var i = 2
-                List(n) {
-                    val x = t[i++].toFloat() * dpr
-                    val y = t[i++].toFloat() * dpr
-                    val w = t[i++].toFloat() * dpr
-                    val h = t[i++].toFloat() * dpr
-                    val tl = t[i++].toFloat() * dpr
-                    val tr = t[i++].toFloat() * dpr
-                    val br = t[i++].toFloat() * dpr
-                    val bl = t[i++].toFloat() * dpr
-                    val alpha = t[i++].toFloat()
-                    val radius = t[i++].toFloat() * dpr
-                    Region(x, y, x + w, y + h, tl, tr, br, bl, alpha, radius)
-                }
-            } catch (e: RuntimeException) {
-                Log.w(TAG, "b.r: bad regions ($e)")
-                return
-            }
+        val regions = parse(rest, "b.r") ?: return
         val lag = lag
-        main.post { if (on) set(regions, lag) }
+        main.post {
+            applied = maxOf(applied, received)
+            if (on) set(regions, lag)
+        }
+    }
+
+    /** "b.r"'s and "b.f"'s regions, in the window's px; null (logged) when malformed. */
+    private fun parse(
+        rest: String,
+        verb: String,
+    ): List<Region>? =
+        try {
+            val t = rest.trim().split(' ')
+            val dpr = t[0].toFloat()
+            val n = t[1].toInt()
+            var i = 2
+            List(n) {
+                val x = t[i++].toFloat() * dpr
+                val y = t[i++].toFloat() * dpr
+                val w = t[i++].toFloat() * dpr
+                val h = t[i++].toFloat() * dpr
+                val tl = t[i++].toFloat() * dpr
+                val tr = t[i++].toFloat() * dpr
+                val br = t[i++].toFloat() * dpr
+                val bl = t[i++].toFloat() * dpr
+                val alpha = t[i++].toFloat()
+                val radius = t[i++].toFloat() * dpr
+                Region(x, y, x + w, y + h, tl, tr, br, bl, alpha, radius)
+            }
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "$verb: bad regions ($e)")
+            null
+        }
+
+    /** The newest "b.f" id received (port thread writes, main reads) and the newest one put on a draw (main only). */
+    @Volatile private var received = -1L
+    private var applied = -1L
+
+    /**
+     * "b.f <id> <regions as b.r>": the regions the page measured for its frame <id>. They go on the window's draw
+     * that first shows that page state: [WebView.postVisualStateCallback] fires once the WebView's next draw holds
+     * the renderer's content as of now (frame <id> or later), and the regions ride that draw
+     * ([android.view.AttachedSurfaceControl.applyTransactionOnDraw]). Before, they rode whichever draw came next,
+     * racing the page's pixels by a frame either way (docs/NATIVE-GLASS.md). A callback older than one already
+     * applied is dropped: only the newest set goes on. Trace: async section "glass f<id>", receipt to apply.
+     */
+    fun frameCommand(rest: String) {
+        val s = rest.trimStart()
+        val sp = s.indexOf(' ')
+        val id: Long? = (if (sp > 0) s.substring(0, sp).toLongOrNull() else null) 
+        if (id == null) {
+            Log.w(TAG, "b.f: no frame id")
+            return
+        }
+        val regions = parse(s.substring(sp + 1), "b.f") ?: return
+        val cookie = id.toInt()
+        Trace.beginAsyncSection("glass f$id", cookie)
+        if (id > received) received = id
+        val lag = lag
+        main.post { bindToDraw(id, cookie, regions, lag) }
+    }
+
+    /** On the main thread: [regions] onto the window draw that shows page frame [id] (or the old path, see frameCommand). */
+    private fun bindToDraw(
+        id: Long,
+        cookie: Int,
+        regions: List<Region>,
+        lag: Int,
+    ) {
+        val web = view as? WebView
+        // The lag knob is a test override; no WebView (never here today): the old next-draw path.
+        if (!on || lag != 0 || web == null) {
+            Trace.endAsyncSection("glass f$id", cookie)
+            if (on) set(regions, lag)
+            return
+        }
+        web.postVisualStateCallback(
+            id,
+            object : WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) {
+                    Trace.endAsyncSection("glass f$id", cookie)
+                    if (requestId <= applied || !on) return
+                    applied = requestId
+                    set(regions, 0)
+                }
+            },
+        )
     }
 
     /** Another page (a reload): its regions are its own to set; until then none. */
     fun reset() = main.post {
         told = null
+        // Its frame ids start again at 1.
+        received = -1L
+        applied = -1L
         if (regions.isNotEmpty()) set(emptyList(), -1)
     }
 

@@ -39,6 +39,8 @@ import android.widget.FrameLayout
  *                                      (again whenever that changes) - [GlassBlur]; "b.backdrop live": liquid edges
  *                                      bend the live wallpaper ([WallpaperBackdrop])
  *   b.r <dpr> <n> <region...>          the glass surfaces' rounded rectangles, blurred live by the compositor
+ *   b.f <id> <dpr> <n> <region...>     the same, measured on the page's frame <id>: applied on the draw that shows
+ *                                      that frame (WebView.postVisualStateCallback); the host says "b.sync 1"
  *   b.lag <frames>                     test knob: when the regions apply (-1 at once, 0 on the next draw, n later)
  *   b.liquid <dpr> <band> <refraction> <rim> <dispersion>   liquid glass's look (theme.css --liquid-*): [LiquidGlass]
  *
@@ -125,6 +127,7 @@ class ShellNative(
                 "p.lift" -> if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) lift?.want(rest.trim() == "1")
                 "b.hello" -> if (glass != null) glass.hello() else main.post { port?.postMessage(WebMessage("b.state 0")) }
                 "b.r" -> glass?.command(rest)
+                "b.f" -> glass?.frameCommand(rest)
                 "b.lag" -> glass?.let { it.lag = rest.trim().toInt() }
                 "b.liquid" -> glass?.liquidCommand(rest)
                 "s.draw" -> {
