@@ -34,6 +34,9 @@ html:root .chrome-surface { --frost-fill: color-mix(in srgb, var(--frost-base) 8
 /* FPS meter: fixed width + tabular digits so nothing shifts; the canvas has a fixed size (no reflow). */
 .status-chrome .fps-meter { flex: 0 0 auto; width: 150px; justify-content: center; gap: 4px; font-variant-numeric: tabular-nums; contain: layout paint; }
 .status-chrome .fps-meter[hidden] { display: none; }
+/* Over a centred camera hole (chrome.tsx has-hole) the meter sits just left of it, sized to its content (no tap area over the clock). */
+.status-chrome.has-hole { position: relative; }
+.status-chrome.has-hole .fps-meter { position: absolute; top: 50%; translate: 0 -50%; width: auto; right: calc(100% - var(--hole-left) + 8px); }
 .fps-meter canvas { width: 45px; height: 16px; display: block; }
 .fps-meter .fps-num { width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
 .fps-meter .fps-unit { font-size: 9px; opacity: .7; }

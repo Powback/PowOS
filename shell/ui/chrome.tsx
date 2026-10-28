@@ -67,7 +67,9 @@ export function StatusBar({ state, action }: { state: ChromeState; action: Chrom
   const now = useClock();
   const time = state.clock ?? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const battery = state.battery == null ? null : Math.round(Math.max(0, Math.min(100, state.battery)));
-  return <div class="status-chrome" style={{ paddingLeft: `${Math.max(8, state.left ?? 0)}px`, paddingRight: `${Math.max(8, state.right ?? 0)}px` }}>
+  // A camera hole in the middle (folded cover screen, StatusChrome.kt holeLeft): the meter ends left of it, not under it.
+  const hole = (state as { holeLeft?: number }).holeLeft;
+  return <div class={`status-chrome${hole != null ? " has-hole" : ""}`} style={{ paddingLeft: `${Math.max(8, state.left ?? 0)}px`, paddingRight: `${Math.max(8, state.right ?? 0)}px`, ...(hole != null ? { "--hole-left": `${hole}px` } : {}) }}>
     <button class="status-clock" aria-label={`Notifications${state.notifications ? `, ${state.notifications} new` : ""}, ${time}`} onClick={() => action("notifications")}>
       <time dateTime={now.toISOString()}>{time}</time>
     </button>

@@ -94,6 +94,10 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         val right = cutout?.boundingRects?.filter { it.right > width * 2 / 3 }?.maxOfOrNull { width - it.left } ?: 0
         data.put("left", (maxOf(left, cutout?.safeInsetLeft ?: 0) / d) + 8)
         data.put("right", (maxOf(right, cutout?.safeInsetRight ?: 0) / d) + 8)
+        // A punch-hole in the middle third (the folded cover screen's camera) sat on the centred FPS meter, so the
+        // meter "wasn't there" (the user, 2026-10-28). chrome.tsx keeps the meter left of it.
+        val hole = cutout?.boundingRects?.filter { it.left >= width / 3 && it.right <= width * 2 / 3 }?.minByOrNull { it.left }
+        if (hole != null) data.put("holeLeft", hole.left / d) else data.remove("holeLeft")
         publish()
     }
     private fun publish() {
