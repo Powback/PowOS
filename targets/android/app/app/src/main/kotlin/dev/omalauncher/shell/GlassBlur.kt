@@ -138,6 +138,7 @@ internal class GlassBlur(
                 liquidAllowed = false
                 return null
             }
+        l.neverFocus()
         parent.addView(l, parent.indexOfChild(view), android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
         l.look(look)
         val b =

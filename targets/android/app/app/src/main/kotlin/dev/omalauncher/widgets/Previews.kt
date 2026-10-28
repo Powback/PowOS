@@ -13,6 +13,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.ViewGroup
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
@@ -22,12 +23,13 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import dev.omalauncher.shell.neverFocus
+import dev.omalauncher.shell.neverFocused
 import dev.omalauncher.ui.WidgetScreenPanel
 import dev.omalauncher.ui.WidgetTile
-import androidx.compose.runtime.Composable
+import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
-import java.io.File
 
 /**
  * Renders widgets to PNGs off screen, for agents editing them in the guest:
@@ -107,8 +109,10 @@ internal class Previews(
             presentation =
                 Presentation(context, display.display).apply {
                     window?.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
+                    neverFocused()
                     val view =
                         ComposeView(this.context).apply {
+                            neverFocus()
                             setContent { content() }
                         }
                     setContentView(view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))

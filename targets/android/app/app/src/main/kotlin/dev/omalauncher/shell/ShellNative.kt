@@ -205,7 +205,7 @@ class ShellNative(
             view.holder.addCallback(this)
             view.visibility = View.INVISIBLE
             view.isClickable = false
-            view.isFocusable = false
+            view.neverFocus()
             view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
 

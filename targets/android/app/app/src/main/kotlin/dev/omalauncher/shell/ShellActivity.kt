@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
+import android.view.View
 import androidx.compose.runtime.snapshotFlow
 import dev.omalauncher.App
 import kotlinx.coroutines.CoroutineScope
@@ -64,6 +65,7 @@ class ShellActivity : Activity() {
         host = ShellHost(this, this, runtime)
         openPanel(intent)   // a cold start with a panel asked for (the old AI app's entries): once the page is ready
         setContentView(host.web)
+        keepFocusOnPage(host.web)
         // The switcher is a layer of this page: the gestures and the overview button reach it here.
         val blur = WindowBlur(window, glass = host::wholeWindow)
         // Home's window, left out when the wallpaper's picture is taken from the display (WallpaperBackdrop.still).
@@ -318,4 +320,55 @@ class ShellActivity : Activity() {
         const val WALLPAPER_SETTLE_MS = 2_500L
         const val EXTRA_REDIRECTED = "dev.omalauncher.shell.redirected"
     }
+}
+
+/**
+ * The page is the only thing in home's window that may hold view focus. A text field in the page has the keyboard only
+ * while the WebView holds Android's view focus: any other view in the window taking it (requestFocus from a native
+ * view, a focusable view added next to the page) blurs the field and closes the keyboard - the launcher search lost
+ * its keyboard 0.4-0.9 s after focus, document.hasFocus() still true (2026-10-28). Each focus change is logged
+ * (PowosFocus, with a stack when it leaves the page) and a view that took it is made non-focusable and the focus handed
+ * back. Native views are also made non-focusable where they're made ([neverFocus]); this catches whatever wasn't.
+ */
+internal fun keepFocusOnPage(web: View) {
+    web.rootView.viewTreeObserver.addOnGlobalFocusChangeListener { old, new ->
+        val msg = "PowosFocus: ${focusName(old)} -> ${focusName(new)}"
+        if (new == null || new === web || isInside(new, web)) {
+            Log.i("PowosShell", msg)
+            return@addOnGlobalFocusChangeListener
+        }
+        Log.i("PowosShell", msg, Throwable("focus left the page"))
+        new.neverFocus()
+        if (web.isAttachedToWindow) web.requestFocus()
+    }
+}
+
+private fun isInside(v: View, ancestor: View): Boolean {
+    var p = v.parent
+    while (p != null) {
+        if (p === ancestor) return true
+        p = p.parent
+    }
+    return false
+}
+
+private fun focusName(v: View?): String {
+    if (v == null) return "null"
+    val id = if (v.id != View.NO_ID) runCatching { v.resources.getResourceEntryName(v.id) }.getOrDefault(v.id.toString()) else "-"
+    return "${v.javaClass.name}#$id(${v.parent?.javaClass?.simpleName})"
+}
+
+/**
+ * Never takes view focus (nor its children): a native view in or beside the page's window. Touches still reach it -
+ * clicks don't need focus - but a focus it took would blur the page's text field and close the keyboard.
+ */
+internal fun View.neverFocus() {
+    isFocusable = false
+    isFocusableInTouchMode = false
+    if (this is android.view.ViewGroup) descendantFocusability = android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
+}
+
+/** A Presentation (an offscreen widget / recon / preview window) that never takes window focus from home. */
+internal fun android.app.Dialog.neverFocused() {
+    window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
 }

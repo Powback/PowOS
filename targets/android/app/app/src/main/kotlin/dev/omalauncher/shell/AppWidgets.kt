@@ -980,7 +980,9 @@ class AppWidgets private constructor(
                     AppWidgetHostView(presentation.context).apply { setAppWidget(AppWidgetManager.INVALID_APPWIDGET_ID, info) }
                 }
             colors?.let { if (Build.VERSION.SDK_INT >= 31) view.setColorResources(it) }
-            root = FrameLayout(presentation.context).apply { addView(view, FrameLayout.LayoutParams(w, h)) }
+            view.neverFocus()
+            root = FrameLayout(presentation.context).apply { neverFocus(); addView(view, FrameLayout.LayoutParams(w, h)) }
+            presentation.neverFocused()
             presentation.setContentView(root, ViewGroup.LayoutParams(w, h))
             presentation.show()
             if (preview != null) view.updateAppWidget(preview)

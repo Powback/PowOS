@@ -34,6 +34,14 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.RemoteViews
 import dev.omalauncher.R
+import dev.omalauncher.shell.neverFocus
+import dev.omalauncher.shell.neverFocused
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,12 +54,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.roundToInt
 
 /**
  * Recon of Android app widgets (any Play Store or system app's), so an agent can recreate one as an OWL widget that
@@ -551,7 +553,9 @@ class WidgetRecon private constructor(
 
         fun show(v: View) {
             view = v
-            presentation.setContentView(FrameLayout(context).apply { addView(v, FrameLayout.LayoutParams(w, h)) }, ViewGroup.LayoutParams(w, h))
+            v.neverFocus()
+            presentation.neverFocused()
+            presentation.setContentView(FrameLayout(context).apply { neverFocus(); addView(v, FrameLayout.LayoutParams(w, h)) }, ViewGroup.LayoutParams(w, h))
             presentation.show()
         }
 
