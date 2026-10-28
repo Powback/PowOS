@@ -11,7 +11,10 @@ set -uo pipefail
 src=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/ship-catchup-test.XXXXXX"); trap '[ -n "${KEEP:-}" ] && echo "kept $T" || rm -rf "$T"' EXIT
 export HOME=$T/home GIT_CONFIG_GLOBAL=$T/gitconfig
-mkdir -p "$HOME/.cache"
+mkdir -p "$HOME/.cache" "$T/bin"
+# ship-apk's need_docker only checks that a docker CLI resolves; nothing here runs it, so a stub keeps the test
+# hermetic and independent of the runner having docker.
+printf '#!/bin/sh\nexit 0\n' > "$T/bin/docker"; chmod +x "$T/bin/docker"; export PATH="$T/bin:$PATH"
 git config --global user.email t@t; git config --global user.name t; git config --global init.defaultBranch main
 
 fails=0
@@ -24,8 +27,9 @@ seed_repo() {   # a bare origin with one base commit on worktree-powos-multiplat
   git clone -q "$T/origin.git" "$T/seed" 2>/dev/null
   (
     cd "$T/seed" && git checkout -q -b worktree-powos-multiplatform
-    mkdir -p tools/phone shell/dev targets/android
+    mkdir -p tools/phone tools/lib shell/dev targets/android
     cp "$src/tools/phone/ship-apk.sh" tools/phone/ship-apk.sh
+    cp "$src/tools/lib/need-docker.sh" tools/lib/need-docker.sh   # ship-apk sources it (f34/f35)
     printf '#!/bin/bash\necho "ok all pages"\n' > shell/dev/gate.sh
     printf '#!/bin/bash\necho "BUILD ATTEMPTED" >&2\nexit 5\n' > targets/android/build-app.sh
     chmod +x shell/dev/gate.sh targets/android/build-app.sh tools/phone/ship-apk.sh

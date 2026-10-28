@@ -1,6 +1,6 @@
 # tools/agents/Dockerfile.tier1 — the container tools/agents/tier1.sh runs test/tier1/run-all.sh in.
 #
-# ubuntu:24.04 + bash 5 + python3 + jq + shellcheck + git + tmux + node >=22.18 — enough for every
+# ubuntu:24.04 + bash 5 + python3 + jq + shellcheck + git + tmux + zip (ship-order-test fake APKs) + node >=22.18 — enough for every
 # test/tier1/test-*.{sh,py} that doesn't need the full Bazzite OS image (those are quarantined/NEEDS_IMAGE
 # in run-all.sh already). Built once, cached as `powos-tier1:latest` by tier1.sh; rebuild with
 # `tools/agents/tier1.sh --rebuild` after editing this file.
@@ -9,7 +9,7 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bash python3 python3-pip jq shellcheck git tmux docker.io ca-certificates curl gnupg \
+      bash python3 python3-pip jq shellcheck git tmux docker.io ca-certificates curl gnupg zip unzip \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && node --version && npm --version \

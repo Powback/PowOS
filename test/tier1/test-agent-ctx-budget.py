@@ -53,6 +53,7 @@ class ContextBudgetTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
+        self.primed = set()
         self.home = os.path.join(self.tmp, "home")
         os.makedirs(self.home, exist_ok=True)
         self.cwd = os.path.join(self.tmp, "worktree")
@@ -96,6 +97,16 @@ class ContextBudgetTests(unittest.TestCase):
         env = {k: v for k, v in os.environ.items()
                if k not in ("COMMS_AGENT_ID", "POWOS_AGENTS_ROLE", "XDG_STATE_HOME")}
         env["HOME"] = self.home  # isolate from the real ~/.cache/powos-agent-notices state
+        # The hook injects the once-per-session agent card (docs/AGENT-CARD.md) on a subagent's first tool
+        # call; these tests are about the budget notices, so consume the card with a throw-away call on an
+        # empty subagent transcript first (a different, unseen session still gets its own card, by design).
+        sid = payload["session_id"]
+        if transcript_path is not None and sid not in self.primed:
+            self.primed.add(sid)
+            empty = os.path.join(self.sub, "empty-prime.jsonl")
+            open(empty, "w").close()
+            subprocess.run([sys.executable, HOOK], input=json.dumps(dict(payload, transcript_path=empty)),
+                           capture_output=True, text=True, timeout=10, env=env)
         p = subprocess.run([sys.executable, HOOK], input=json.dumps(payload), capture_output=True,
                             text=True, timeout=10, env=env)
         self.assertEqual(p.returncode, 0, f"hook must always exit 0 (fail-silent): {p.stderr}")

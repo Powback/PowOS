@@ -158,7 +158,7 @@ if [ -z "$now" ]; then
     # A verify lock is for an injected test (minutes). One older than 10 min is held through a wait (a check waiting for
     # idle or for the user to fold - 2026-10-22, twice, blocking every APK for 20+ min): warn and don't wait on it.
     vl="$HOME/.cache/powos-verify.lock"
-    if [ -d "$vl" ] && [ $(( $(date +%s) - $(stat -f %m "$vl" 2>/dev/null || stat -c %Y "$vl") )) -lt 600 ]; then
+    if [ -d "$vl" ] && [ $(( $(date +%s) - $(stat -c %Y "$vl" 2>/dev/null || stat -f %m "$vl") )) -lt 600 ]; then
       # Ask the verify queue to yield: it ends its window before its next check (queue.sh, wants-phone), so the install
       # waits one check, not the 10 min until the lock goes stale (01:56, 2026-10-23).
       echo $$ > "$sq/wants-phone"
@@ -189,7 +189,7 @@ fi
 # idle wait) and holds $lock/phone while one push runs: wait for it, then hold it to the end (the trap removes $lock).
 # One left over 10 min (a killed push) is taken over.
 until mkdir "$lock/phone" 2>/dev/null; do
-  [ $(( $(date +%s) - $(stat -f %m "$lock/phone" 2>/dev/null || stat -c %Y "$lock/phone" 2>/dev/null || date +%s) )) -gt 600 ] && rm -rf "$lock/phone"
+  [ $(( $(date +%s) - $(stat -c %Y "$lock/phone" 2>/dev/null || stat -f %m "$lock/phone" 2>/dev/null || date +%s) )) -gt 600 ] && rm -rf "$lock/phone"
   sleep 2
 done
 # The known-good state, for a rollback if a page doesn't boot after this install (tools/phone/ship-guard.sh): no

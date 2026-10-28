@@ -111,7 +111,7 @@ resume)
   echo "resumed$(ls "$Q"/*.req >/dev/null 2>&1 && echo ": $(ls "$Q"/*.req | wc -l | tr -d ' ') request(s) ship now")" ;;
 status)
   pi=$(paused_info)
-  [ -z "$pi" ] || echo "PAUSED $pi since $(date -r "$(stat -f %m "$Q/paused" 2>/dev/null || stat -c %Y "$Q/paused")" +%H:%M) - tools/phone/ship.sh resume$(installing && echo " (an install in flight finishes first)")"
+  [ -z "$pi" ] || echo "PAUSED $pi since $(date -r "$(stat -c %Y "$Q/paused" 2>/dev/null || stat -f %m "$Q/paused")" +%H:%M) - tools/phone/ship.sh resume$(installing && echo " (an install in flight finishes first)")"
   echo "requests:"; for r in "$Q"/*.req; do [ -f "$r" ] || continue; ( . "$r"; echo "  ${sha:0:9} $who: $([ "$silent" = 1 ] && echo '(silent)' || echo "$note")" ); done
   echo "service: $(runner_up && echo "running (pid $(cat "$Q/runner.lock/pid"))" || echo idle)$(agent_loaded && echo " (launchd $LABEL)")"
   echo "live: $(cut -c1-9 "$Q/live" 2>/dev/null || echo -)  installed APK: $(cut -c1-9 "$HOME/.cache/powos-installed-commit" 2>/dev/null || echo -)$([ -s "$Q/failed" ] && echo "  failed at: $(cut -c1-9 "$Q/failed") (waits for a new origin commit)")"
@@ -177,7 +177,7 @@ run)
         "$kind" "$t" \
         "tools/phone/ship.sh request --silent on the same origin tip; the run's log: $ev" "$ev" >> "$s" ;; esac
     "$SR/tools/phone/user.sh" "$s" >/dev/null 2>&1 || echo "$(date +%T) mail failed: $1"; rm -f "$s"; }
-  verify_held() { [ -d "$VL" ] && [ $(( $(date +%s) - $(stat -f %m "$VL" 2>/dev/null || stat -c %Y "$VL") )) -lt 600 ]; }
+  verify_held() { [ -d "$VL" ] && [ $(( $(date +%s) - $(stat -c %Y "$VL" 2>/dev/null || stat -f %m "$VL") )) -lt 600 ]; }
   ship_lock() {   # the cross-agent ship lock (ship-apk's): taken, or a dead holder's taken over
     local p
     mkdir "$SL" 2>/dev/null || {
