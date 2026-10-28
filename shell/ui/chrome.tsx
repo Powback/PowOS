@@ -1,6 +1,7 @@
 /** The same title bar, resize grip and status bar in every host. Native code supplies data, never glyphs or labels. */
 import { useEffect, useState } from "preact/hooks";
 import type { ChromeState } from "../types.ts";
+import { FpsMeter } from "./fpsmeter.tsx";
 
 export type ChromeAction = (action: string) => void;
 
@@ -70,6 +71,7 @@ export function StatusBar({ state, action }: { state: ChromeState; action: Chrom
       <time dateTime={now.toISOString()}>{time}</time>
       {!!state.notifications && <span class="status-notifications" title={`${state.notifications} notifications`}>{state.notifications}</span>}
     </button>
+    <FpsMeter />
     <button class="status-indicators" aria-label={statusLabel(state, battery)} onClick={() => action("controls")}>
       <Indicators state={state} battery={battery} />
     </button>

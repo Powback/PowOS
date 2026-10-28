@@ -28,6 +28,7 @@ const regions = () => powos.chrome.regions([...document.querySelectorAll<HTMLEle
 }));
 const observer = new ResizeObserver(() => { void regions().catch(console.error); });
 observer.observe(document.body);
+window.addEventListener("fps-layout", () => { requestAnimationFrame(() => { void regions().catch(console.error); }); });
 await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 await regions();
 (window as unknown as { __powosAlive?: boolean }).__powosAlive = true;

@@ -219,6 +219,14 @@ class ShellBridge(
             "usage.recent" -> JSONArray(installed(runtime.usage.recent).take(a.optInt(0, 5)))
             "store.get" -> store(a.getString(0)).takeIf { it.isFile }?.readText()?.let { RawJson(it) }
             "store.set" -> store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })
+            // Perf trace from the status bar's fps meter: saved where PowOS AI sees it (the shared run dir).
+            "perf.save" -> {
+                val dir = java.io.File(context.filesDir, "run/powos-ai-shared").apply { mkdirs() }
+                val name = "perf-${System.currentTimeMillis()}.json"
+                dir.listFiles { f -> f.name.startsWith("perf-") }?.sortedBy { it.lastModified() }?.dropLast(9)?.forEach { it.delete() }
+                java.io.File(dir, name).writeText(a.getString(0))
+                "/run/powos-app/powos-ai-shared/$name"
+            }
             "ai.chat" -> aiChat()
             "ai.send" -> {
                 PowosAiChat.send(context.applicationContext, a.getString(0))
