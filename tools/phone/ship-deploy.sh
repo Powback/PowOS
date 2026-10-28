@@ -8,7 +8,7 @@
 #   status   launchd's view of it.
 # Stop it for a while without removing: `launchctl bootout user/$(id -u)/com.powos.ship-runner` (back: install).
 # Loaded into user/<uid> (this Mac is headless): after a reboot, the first `ship.sh request` loads it again.
-#   gate-install / gate-remove  the ship gate (ship-gate.py, com.powos.ship-gate; unit units/mac/ship-gate-mac.json)
+#   gate-install / gate-remove  the ship gate (install runs it too; makes ~/.config/powos/ship-gate.secret if absent) (ship-gate.py, com.powos.ship-gate; unit units/mac/ship-gate-mac.json)
 # powos-units: deploy host=mac
 set -euo pipefail
 L=com.powos.ship-runner
@@ -34,7 +34,9 @@ install)
   loaded && launchctl bootout "$D/$L" 2>/dev/null || true
   for _ in $(seq 40); do loaded || break; sleep 1; done
   launchctl bootstrap "$D" "$P"
-  echo "loaded $L ($(ls "$Q"/*.req 2>/dev/null | wc -l | tr -d ' ') requests queued)" ;;
+  echo "loaded $L ($(ls "$Q"/*.req 2>/dev/null | wc -l | tr -d ' ') requests queued)"
+  # The gate (powos self push --ship) comes with the runner, so no manual step remains; it never fails the install.
+  "$0" gate-install || echo "ship-deploy: gate-install failed (above) - the runner is installed; retry: $0 gate-install" ;;
 remove)
   loaded && launchctl bootout "$D/$L" || true
   rm -f "$P"
@@ -42,9 +44,15 @@ remove)
 status)
   loaded && launchctl print "$D/$L" | grep -E '^\s*(state|pid|last exit code|runs) ' || echo "$L: not loaded" ;;
 gate-install)
-  # The LAN door for `powos self push --ship` (tools/phone/ship-gate.py). Needs its secret first (never in git).
-  G=com.powos.ship-gate; GP=$HOME/Library/LaunchAgents/$G.plist
-  [ -s "$HOME/.config/powos/ship-gate.secret" ] || { echo "ship-deploy: create ~/.config/powos/ship-gate.secret first (chmod 600, 16+ random chars: openssl rand -hex 24) and put the same value on the phone"; exit 1; }
+  # The LAN door for `powos self push --ship` (tools/phone/ship-gate.py). Its secret is made here when absent (random,
+  # 0600, never printed, never in git); the phone gets the same file from `rooted.sh deploy`. Idempotent.
+  # macOS's firewall may ask once to allow python3 on port 7433 - Allow it (this script changes no firewall setting).
+  G=com.powos.ship-gate; GP=$HOME/Library/LaunchAgents/$G.plist; GS=$HOME/.config/powos/ship-gate.secret
+  if [ ! -s "$GS" ]; then
+    ( umask 077; mkdir -p "$(dirname "$GS")"; openssl rand -hex 24 > "$GS.new" && mv "$GS.new" "$GS" )
+    echo "ship-deploy: made $GS (0600; the next rooted deploy puts it on the phone)"
+  fi
+  chmod 600 "$GS"
   [ -f "$SR/tools/phone/ship-gate.py" ] || { echo "ship-deploy: $SR has no ship-gate.py (push it to origin first)"; exit 1; }
   mkdir -p "$Q" "$HOME/Library/LaunchAgents"
   sed -e "s#@HOME@#$HOME#g" -e "s#@VR@#$SR#g" "$here/$G.plist" > "$GP"; plutil -lint "$GP" >/dev/null

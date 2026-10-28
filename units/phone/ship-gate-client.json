@@ -1,0 +1,17 @@
+{
+  "id": "ship-gate-client",
+  "name": "Ship gate client config (powos self push --ship)",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "the secret and url `powos self push --ship` uses to ask the Mac ship gate (unit ship-gate-mac) to ship a pushed sha; the Mac's own secret file, copied by rooted.sh deploy as a file (never on a command line or in a log), only when missing or different; url defaults to the Mac's LAN address 192.168.50.99:7433",
+  "installedBy": "targets/android/rooted/rooted.sh deploy -> powos-deploy.sh",
+  "files": [
+    "/home/powos/.config/powos/ship-gate.secret",
+    "/home/powos/.config/powos/ship-gate.conf"
+  ],
+  "remove": {
+    "commands": [
+      "rm -f /home/powos/.config/powos/ship-gate.secret /home/powos/.config/powos/ship-gate.conf"
+    ]
+  }
+}

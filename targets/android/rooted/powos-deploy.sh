@@ -333,6 +333,18 @@ if [ -f $T/powos-src.tar ] && [ -f $T/self-phone.sh ]; then
   [ -e $R/usr/lib/powos/.powos-src-commit ] || cp $T/powos-src.rev $R/usr/lib/powos/.powos-src-commit
 fi
 rm -f $T/powos-src.tar $T/powos-src.rev $T/self-phone.sh
+# The ship gate's secret + url (rooted.sh deploy pushes them from the Mac when it has them): into powos's
+# ~/.config/powos/ (mode 600, owner powos), only when missing or different. Never echoed; consumed from /data/local/tmp.
+G=$R/home/powos/.config/powos
+if [ -s $T/ship-gate.secret ]; then
+  mkdir -p $G && chown $U:$U $G && chmod 700 $G
+  cmp -s $T/ship-gate.secret $G/ship-gate.secret || { (umask 077; cp $T/ship-gate.secret $G/ship-gate.secret) && chown $U:$U $G/ship-gate.secret && chmod 600 $G/ship-gate.secret && echo "ship gate: secret installed"; }
+fi
+if [ -s $T/ship-gate.conf ]; then
+  mkdir -p $G && chown $U:$U $G
+  cmp -s $T/ship-gate.conf $G/ship-gate.conf || { cp $T/ship-gate.conf $G/ship-gate.conf && chown $U:$U $G/ship-gate.conf && chmod 644 $G/ship-gate.conf && echo "ship gate: url configured"; }
+fi
+rm -f $T/ship-gate.secret $T/ship-gate.conf
 # The units (lib/apps/powos-units): every file and process this deploy put on the phone, registered with its owner,
 # purpose, limits and how to remove it - PowOS's side in /etc/powos/units.d, Android's in /data/powos/units.d. Then the
 # running ones with limits go into cgroups of their own (the containers' hybrid cgroups). `powos units check` flags

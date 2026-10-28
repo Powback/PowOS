@@ -181,6 +181,15 @@ deploy)
   # units/phone-android; lib/apps/powos-units). powos-deploy.sh registers them on both sides.
   adb shell rm -rf /data/local/tmp/powos-units
   adb push -q "$HERE/../../../units" /data/local/tmp/powos-units
+  # The ship gate's secret + url (tools/phone/ship-gate.py on the Mac, ship-deploy.sh gate-install makes the secret):
+  # pushed as FILES (never on a command line), installed by powos-deploy.sh only when missing/different, then removed.
+  adb shell rm -f /data/local/tmp/ship-gate.secret /data/local/tmp/ship-gate.conf
+  gs=$HOME/.config/powos/ship-gate.secret
+  if [ -s "$gs" ]; then
+    adb push -q "$gs" /data/local/tmp/ship-gate.secret
+    gc=$(mktemp "${TMPDIR:-/tmp}/powos-gate.XXXXXX") && echo "url=${POWOS_SHIP_GATE_URL:-http://192.168.50.99:7433}" > "$gc" &&
+      adb push -q "$gc" /data/local/tmp/ship-gate.conf; rm -f "$gc"
+  else echo "rooted.sh: no $gs (tools/phone/ship-deploy.sh gate-install makes it) - the phone's ship gate not configured"; fi
   asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh"
   noted ;;
 module)
