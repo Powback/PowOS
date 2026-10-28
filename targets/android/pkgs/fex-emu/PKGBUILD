@@ -7,7 +7,7 @@
 # thunk, instead of running x86 Mesa under emulation (which can't reach the GPU at all).
 pkgname=fex-emu
 pkgver=2610
-pkgrel=5
+pkgrel=6
 install=fex-emu.install
 pkgdesc='Fast usermode x86 and x86-64 emulator for Arm64 (PowOS phone build, with library thunks)'
 url=https://fex-emu.com
@@ -79,12 +79,13 @@ prepare() {
   cd FEX
   git submodule update --init --recursive --depth 1
   # Android: exec by path through libc (the userspace launcher; see the patch)
-  patch -p1 < "$srcdir/0001-exec-by-path-through-libc.patch"
+  patch -p1 --no-backup-if-mismatch < "$srcdir/0001-exec-by-path-through-libc.patch" || { echo "patch 0001-exec-by-path-through-libc.patch FAILED"; exit 1; }
   # Thunk generator vs LLVM 23 (Arch Linux ARM's clang): FileManager's stat cache is gone; nothing to clear.
-  patch -p1 < "$srcdir/0002-thunkgen-llvm23.patch"
+  patch -p1 --no-backup-if-mismatch < "$srcdir/0002-thunkgen-llvm23.patch" || { echo "patch 0002-thunkgen-llvm23.patch FAILED"; exit 1; }
   # futex_waitv (Proton's fsync) passed through when the host has it, not only from kernel 5.16: the phone kernel
   # backports it on 5.15 (see the patch)
-  git apply "$srcdir/0003-futex_waitv-probe-host.patch"
+  git apply "$srcdir/0003-futex_waitv-probe-host.patch" || { echo "patch 0003-futex_waitv-probe-host.patch FAILED"; exit 1; }
+  [ -z "$(find . -name '*.rej' -print -quit)" ] || { echo "patch left .rej files (a hunk was rejected)"; exit 1; }
   cd "$srcdir"
 
   _make_x86_sysroot

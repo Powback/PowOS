@@ -59,7 +59,8 @@ git -C "$tree" -c user.email=agent@powos -c user.name=powos-agent add -A
 git -C "$tree" -c user.email=agent@powos -c user.name=powos-agent commit -q -m "pristine $pkgname-$pkgver"
 
 for p in "${_patches[@]}"; do
-  patch -d "$tree" -p1 -N < "$here/$p"
+  patch -d "$tree" -p1 -N --forward --no-backup-if-mismatch < "$here/$p" || { echo "src-tree.sh: patch $p FAILED" >&2; exit 1; }
+  [ -z "$(find "$tree" -name '*.rej' -print -quit)" ] || { echo "src-tree.sh: patch $p left .rej files" >&2; exit 1; }
   git -C "$tree" -c user.email=agent@powos -c user.name=powos-agent add -A
   git -C "$tree" -c user.email=agent@powos -c user.name=powos-agent commit -q -m "$p"
 done

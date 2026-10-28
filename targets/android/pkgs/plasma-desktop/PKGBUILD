@@ -9,7 +9,7 @@
 pkgname=plasma-desktop
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=1.8
+pkgrel=1.9
 pkgdesc='KDE Plasma Desktop'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -111,12 +111,13 @@ sha256sums=('079fcf6b87d7bf65e3f2a4670d605fac9469344c279a285a98ad549332d7b53e'
 
 prepare() {
   cd $pkgname-$pkgver
-  patch -p1 -N < "$srcdir/0001-kicker-dashboard-categories-respond-to-a-tap.patch"
-  patch -p1 -N < "$srcdir/0002-kicker-an-A-Z-bar-on-the-Application-Dashboard.patch"
-  patch -p1 -N < "$srcdir/0003-kicker-favorites-as-a-row-above-the-apps.patch"
-  patch -p1 -N < "$srcdir/0004-desktop-widgets-keep-their-size-while-narrower.patch"
-  patch -p1 -N < "$srcdir/0005-folder-view-swipe-up-on-the-desktop-opens-the-launcher.patch"
-  patch -p1 -N < "$srcdir/0006-kicker-dashboard-no-search-focus-while-closing.patch"
+  patch -p1 -N --forward --no-backup-if-mismatch < "$srcdir/0001-kicker-dashboard-categories-respond-to-a-tap.patch" || { echo "patch 0001-kicker-dashboard-categories-respond-to-a-tap.patch FAILED"; exit 1; }
+  patch -p1 -N --forward --no-backup-if-mismatch < "$srcdir/0002-kicker-an-A-Z-bar-on-the-Application-Dashboard.patch" || { echo "patch 0002-kicker-an-A-Z-bar-on-the-Application-Dashboard.patch FAILED"; exit 1; }
+  patch -p1 -N --forward --no-backup-if-mismatch < "$srcdir/0003-kicker-favorites-as-a-row-above-the-apps.patch" || { echo "patch 0003-kicker-favorites-as-a-row-above-the-apps.patch FAILED"; exit 1; }
+  patch -p1 -N --forward --no-backup-if-mismatch < "$srcdir/0004-desktop-widgets-keep-their-size-while-narrower.patch" || { echo "patch 0004-desktop-widgets-keep-their-size-while-narrower.patch FAILED"; exit 1; }
+  patch -p1 -N --forward --no-backup-if-mismatch < "$srcdir/0005-folder-view-swipe-up-on-the-desktop-opens-the-launcher.patch" || { echo "patch 0005-folder-view-swipe-up-on-the-desktop-opens-the-launcher.patch FAILED"; exit 1; }
+  patch -p1 -N --forward --no-backup-if-mismatch < "$srcdir/0006-kicker-dashboard-no-search-focus-while-closing.patch" || { echo "patch 0006-kicker-dashboard-no-search-focus-while-closing.patch FAILED"; exit 1; }
+  [ -z "$(find . -name '*.rej' -print -quit)" ] || { echo "patch left .rej files (a hunk was rejected)"; exit 1; }
 }
 
 build() {

@@ -42,7 +42,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.35
+pkgrel=3.36
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -99,7 +99,8 @@ prepare() {
   cd $pkgname-$pkgver
   for p in "${_patches[@]}"; do
     echo "Applying $p"
-    patch -p1 -N < "$srcdir/$p"
+    patch -p1 -N --forward --no-backup-if-mismatch < "$srcdir/$p" || { echo "patch $p FAILED"; exit 1; }
+    [ -z "$(find . -name '*.rej' -print -quit)" ] || { echo "patch left .rej files (a hunk was rejected)"; exit 1; }
   done
 }
 

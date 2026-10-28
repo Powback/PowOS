@@ -5,7 +5,7 @@
 #   gpd_fixup.patch                7 upstream GPD hardware-support commits (git am series: renames + new device files)
 pkgname=inputplumber
 pkgver=0.82.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Open source input router and remapper daemon for Linux'
 arch=(aarch64)
 url=https://github.com/ShadowBlip/InputPlumber
@@ -26,8 +26,9 @@ sha256sums=('aaee9b65b47a21756169eb1c49eb258ecdd1896fb8dd4996c2b50d11af049d21'
 prepare() {
   cd "InputPlumber-$pkgver"
   # spec: %autosetup -S git_am -p1 (git-format patches with renames; git apply handles them like git am)
-  git apply -p1 "$srcdir/make-install-dont-build.patch"
-  git apply -p1 "$srcdir/gpd_fixup.patch"
+  git apply -p1 "$srcdir/make-install-dont-build.patch" || { echo "patch make-install-dont-build.patch FAILED"; exit 1; }
+  git apply -p1 "$srcdir/gpd_fixup.patch" || { echo "patch gpd_fixup.patch FAILED"; exit 1; }
+  [ -z "$(find . -name '*.rej' -print -quit)" ] || { echo "patch left .rej files (a hunk was rejected)"; exit 1; }
 }
 
 build() {
