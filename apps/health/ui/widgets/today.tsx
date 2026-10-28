@@ -6,6 +6,7 @@ import { LABEL, UNIT, show, today, week, weekQuery, type Day, type DailyRow } fr
 import { useHealthSync, type CursorRow } from "../lib/sync";
 
 const HEART = "M12 21s-7.5-4.6-9.6-9.2C.9 8.4 2.7 4.8 6.2 4.8c2.1 0 3.6 1.1 5.8 3.4 2.2-2.3 3.7-3.4 5.8-3.4 3.5 0 5.3 3.6 3.8 7C19.5 16.4 12 21 12 21z";
+const SHORT: Record<string, string> = { active_calories: "Calories" };
 const soft = "color-mix(in srgb, currentColor 8%, transparent)";
 
 type Tile = ReturnType<typeof today>[number];
@@ -20,26 +21,26 @@ function Figure({ tile }: { tile: Tile }) {
 
 function Small({ tile }: { tile: Tile }) {
   return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", gap: "0.6em" }}>
+    <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", gap: "3cqw" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: "0.7em", opacity: 0.7, whiteSpace: "nowrap" }}>{LABEL[tile.kind]}</div>
-        <div style={{ fontSize: "1.5em", fontWeight: 600, lineHeight: 1.1, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: "min(24cqh, 12cqw)", opacity: 0.7, whiteSpace: "nowrap", lineHeight: 1.1 }}>{LABEL[tile.kind]}</div>
+        <div style={{ fontSize: "min(52cqh, 26cqw)", fontWeight: 600, lineHeight: 1.05, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
           <Figure tile={tile} />
         </div>
       </div>
-      <svg viewBox="0 0 24 24" style={{ height: "2.2em", width: "2.2em", flex: "none", padding: "0.4em", borderRadius: "50%", background: soft, boxSizing: "border-box" }} aria-hidden="true">
+      <svg viewBox="0 0 24 24" style={{ height: "min(62cqh, 20cqw)", width: "min(62cqh, 20cqw)", flex: "none", padding: "0.25em", borderRadius: "50%", background: soft, boxSizing: "border-box" }} aria-hidden="true">
         <path d={HEART} fill="currentColor" opacity="0.85" />
       </svg>
     </div>
   );
 }
 
-function Tiles({ tiles, grow }: { tiles: Tile[]; grow: boolean }) {
+function Tiles({ tiles, grow, narrow }: { tiles: Tile[]; grow: boolean; narrow: boolean }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5em", flex: grow ? 1 : "none", minHeight: 0, alignContent: "stretch" }}>
+    <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: "0.5em", flex: grow ? 1 : "none", minHeight: 0, alignContent: "stretch" }}>
       {tiles.map((tile) => (
         <div key={tile.kind} style={{ background: soft, borderRadius: "0.7em", padding: "0.4em 0.6em", display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
-          <div style={{ fontSize: "0.7em", opacity: 0.7, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{LABEL[tile.kind]}</div>
+          <div style={{ fontSize: "0.7em", opacity: 0.7, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{SHORT[tile.kind] ?? LABEL[tile.kind]}</div>
           <div style={{ fontSize: "1.3em", fontWeight: 600, lineHeight: 1.15, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
             <Figure tile={tile} />
           </div>
@@ -66,19 +67,34 @@ function Chart({ days }: { days: Day[] }) {
   );
 }
 
-function Body({ shown, nrows, chart }: { shown: Tile[]; nrows: number; chart: Day[] }) {
-  if (!shown.length) return <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontWeight: 600, opacity: 0.8 }}>Tap to connect Health</div>;
+/** Nothing to show yet: a big heart + "Connect Health", scaled to the tile (container units), one line, centred. */
+function Empty({ row, tall }: { row: boolean; tall: boolean }) {
+  // Row (one-cell-high tiles): heart then text across the width. Column: the text spans the width, the heart takes the height left.
+  const size = row ? "min(96cqh, 40cqw)" : tall ? "max(10cqmin, min(92cqh - 58.8cqw, 98cqw))" : "max(10cqmin, min(84cqh - 16.7cqw, 88cqw))";
+  const text = row ? "calc((88cqw - min(96cqh, 40cqw) - 3cqw) / 7.4)" : tall ? "24.5cqw" : "11.9cqw";
+  return (
+    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: row ? "row" : "column", alignItems: "center", justifyContent: "center", gap: row ? "3cqw" : "3cqh", fontWeight: 600 }}>
+      <svg viewBox="0 0 24 24" style={{ height: size, width: size, flex: "none" }} aria-hidden="true">
+        <path d={HEART} fill="currentColor" opacity="0.85" />
+      </svg>
+      <div style={{ fontSize: text, whiteSpace: "nowrap", lineHeight: 1.1, textAlign: "center", opacity: 0.9 }}>{tall ? <>Connect<br />Health</> : "Connect Health"}</div>
+    </div>
+  );
+}
+
+function Body({ shown, nrows, cols, chart }: { shown: Tile[]; nrows: number; cols: number; chart: Day[] }) {
+  if (!shown.length) return <Empty row={nrows < 2} tall={nrows >= 3 && cols < nrows} />;
   if (nrows < 2) return <Small tile={shown[0]} />;
   return (
     <>
-      <Tiles tiles={shown} grow={!chart.length} />
+      <Tiles tiles={shown} grow={!chart.length} narrow={cols < 3} />
       {chart.length > 0 && <Chart days={chart} />}
     </>
   );
 }
 
 /** How many figures beyond steps a tile of this size holds. */
-const extra = (cols: number, nrows: number) => (nrows < 2 ? 0 : nrows === 2 ? (cols >= 3 ? 3 : 1) : 3);
+const extra = (cols: number, nrows: number) => (nrows < 2 ? 0 : cols < 3 ? Math.min(nrows, 3) - 1 : nrows === 2 ? 3 : 3);
 
 export default function Today({ host, cells, app: id }: Props) {
   const app = useApp(host);
@@ -88,13 +104,14 @@ export default function Today({ host, cells, app: id }: Props) {
   useHealthSync(host, { cursor, ready: app.db.status === "connected", ingest, ask: false });
   const t = today(rows);
   const nrows = cells?.[1] ?? 2;
+  const cols = cells?.[0] ?? 2;
   const steps = t.find((x) => x.kind === "steps") ?? t[0];
-  const shown = steps ? [steps, ...t.filter((x) => x !== steps).slice(0, extra(cells?.[0] ?? 2, nrows))] : [];
-  const chart = nrows >= 3 ? week(rows, "steps") : [];
-  const body = <Body shown={shown} nrows={nrows} chart={chart} />;
+  const shown = steps ? [steps, ...t.filter((x) => x !== steps).slice(0, extra(cols, nrows))] : [];
+  const chart = nrows >= (cols < 3 ? 4 : 3) ? week(rows, "steps") : [];
+  const body = <Body shown={shown} nrows={nrows} cols={cols} chart={chart} />;
   return (
     <div style={{ width: "100%", height: "100%", containerType: "size" }} onClick={() => host.openApp?.(id)}>
-      <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", padding: "8px 12px", boxSizing: "border-box", gap: "0.5em", fontSize: "clamp(13px, 6cqmin, 22px)" }}>{body}</div>
+      <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", padding: shown.length ? (nrows < 2 ? "3px 8px" : "8px 12px") : 0, position: "relative", boxSizing: "border-box", gap: "0.5em", fontSize: "clamp(13px, 6cqmin, 22px)" }}>{body}</div>
     </div>
   );
 }
