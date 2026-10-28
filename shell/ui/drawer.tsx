@@ -9,8 +9,8 @@ import { computed } from "@preact/signals";
 import { AppCell } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
 import { drawerOpen, pageDecision, sampleVx } from "./gesture.ts";
-import { apps, byKey, chatting, home, query, recent, stored } from "../state.ts";
-import { folderName } from "./folders.tsx";
+import { apps, byKey, chatting, query, recent, stored } from "../state.ts";
+import { library } from "./library.tsx";
 import { pendingApp } from "./appbuild.tsx";
 import { PendingDetailSheet, PendingIconBadge } from "./pending.tsx";
 import type { App } from "../types.ts";
@@ -188,17 +188,21 @@ function PendingAppCell() {
   );
 }
 
-/** The drawer's 2nd page: the home folders, each with its apps (tap to open). */
+/**
+ * The drawer's 2nd page: the folders home shows - the user's own, then the app library's (library.tsx, home's last
+ * page) - each with its apps (tap to open). It read only the user's own and said "No folders yet" next to a page full
+ * of the library's (the user, 2026-10-28).
+ */
 function FolderView() {
-  const folders = home.value.items.filter((i) => i.kind === "folder" && i.apps?.length);
+  const folders = library.value.filter((f) => f.apps.length);
   return (
     <div class="drawer-list drawer-folders">
       {!folders.length && <div class="muted folder-empty">No folders yet</div>}
       {folders.map((f) => (
         <section key={f.key}>
-          <h3 class="heading">{folderName(f.key)}</h3>
+          <h3 class="heading">{f.name}</h3>
           <div class="grid">
-            {f.apps!.map((a) => {
+            {f.apps.map((a) => {
               const app = byKey.value.get(a.app);
               return app ? <AppCell key={a.key} app={app} draggable /> : null;
             })}
@@ -265,20 +269,48 @@ function Pages() {
   );
 }
 
+/** How long a closing drawer keeps what it showed: the close's fade (shell.css [data-p] and gesture.ts SETTLE_MS, 180 ms) and a frame. */
+const CLOSE_HOLD_MS = 200;
+
 export function Drawer() {
   const searching = query.value.trim() !== "";
   // No app by that name: it's a question for PowOS AI. In a chat, typing is the next message: the chat stays (the user,
   // 2026-10-28: it flipped to search results while typing a follow-up) until the launcher closes.
-  const asking = chatting.value || (searching && searchResults.value.length === 0 && !searchPending.value);
+  const liveAsking = chatting.value || (searching && searchResults.value.length === 0 && !searchPending.value);
   const open = drawerOpen.value;
+  // Closing clears the search and ends the chat (state.ts closeDrawer) at once: the panel swapped to the app pages
+  // under its fade, and the cards it showed vanished instead of fading out as they faded in (the user, 2026-10-28).
+  // What was on screen stays for the close's fade (--p, 180 ms), then the drawer goes back to its pages.
+  const live = { searching, asking: liveAsking, results: searchResults.value, pending: searchPending.value };
+  const last = useRef(live);
+  const holdUntil = useRef(0);
+  const wasOpen = useRef(open);
+  const [, tick] = useState(0);
+  if (wasOpen.current && !open) holdUntil.current = performance.now() + CLOSE_HOLD_MS;
+  wasOpen.current = open;
+  if (open) {
+    holdUntil.current = 0;
+    last.current = live;
+  }
+  const held = !open && holdUntil.current > 0;
+  useEffect(() => {
+    if (!held) return;
+    const t = setTimeout(() => {
+      holdUntil.current = 0;
+      tick((n) => n + 1);
+    }, CLOSE_HOLD_MS);
+    return () => clearTimeout(t);
+  }, [held]);
+  const { asking, results, pending } = held ? last.current : live;
+  const shownSearch = held ? last.current.searching : searching;
   return (
     // The launcher panel's lower part (home.tsx): it comes in (shell.css, by --p) as the recent bar grows into the panel.
     <div class={`drawer ${open ? "shown" : ""}`} aria-hidden={!open}>
-      {asking ? <ChatView /> : searching ? <div class="drawer-list results"><div class="launcher-search-results">
-        {searchResults.value.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><span class="scr-ico" aria-hidden="true">{result.label.trim().slice(0, 1).toUpperCase()}</span><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>)}
-        {searchPending.value && <div class="scr-note muted" role="status">Searching…</div>}
+      {asking ? <ChatView /> : shownSearch ? <div class="drawer-list results"><div class="launcher-search-results">
+        {results.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><span class="scr-ico" aria-hidden="true">{result.label.trim().slice(0, 1).toUpperCase()}</span><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>)}
+        {pending && <div class="scr-note muted" role="status">Searching…</div>}
       </div></div> : <Pages />}
-      {!searching && !asking && <RecentRow />}
+      {!shownSearch && !asking && <RecentRow />}
     </div>
   );
 }

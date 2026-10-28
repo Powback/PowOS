@@ -169,7 +169,9 @@
 /* The dock stays while the launcher is open (bottom dock, search bar above it): the pill and dock don't move, the drawer's
    window ends at the pill's top, and the drawer only rises (as pill-below). Wide and side docks keep giving way. */
 .home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > :is(.bar, .dock) { transform: none; }
-.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > .dock { opacity: 1; }
+/* ...but not over the launcher's chat (chat.tsx in the drawer): a page of text, the dock had no place on it (the user,
+   2026-10-28); it gives way as it does for a side dock, and comes back as the chat closes. */
+.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar):not(:has(.drawer .chat)) > .dock { opacity: 1; }
 .home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar).open > .dock { pointer-events: auto; }
 .home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > .stage > .launcher-clip { inset: 0 0 4px; transform: none; }
 .home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
