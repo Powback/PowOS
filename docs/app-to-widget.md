@@ -81,6 +81,35 @@ Step A is the instant win (the pixel host already works); B-F make it a real Pow
 About 65 agent-minutes, 8 tasks; A1-A2 ship alone first. Next slices: (b) notifications block + feed template;
 (c) `local.health` + Health Connect; then (e) passive capture and (d) screens per decision.
 
+## 3b. What landed: the health central (`local.health`)
+
+D2/D5 decided: **Health Connect first** (the aggregator most wearable apps write to), rooted per-app DB reads later only
+for apps that don't write to it; **history kept indefinitely** (nothing deletes by age).
+
+- **Android side** (`shell/HealthConnectBridge.kt`, `androidx.health.connect:connect-client`, read-only). Bridge, all
+  feature-detected (f307; `// detect` in `shell/bridge.ts`, `powos.health` is host-optional):
+  `powos.health.status()`, `.grant()` (Health Connect's own permission dialog, shown over PowOS, once),
+  `.read(types, sinceMs, untilMs?)` -> `{id, type, start, end, value, unit, source[, detail]}` (source = the package of
+  the wearable's app; steps count, heart_rate bpm one record per sample, sleep/exercise min, weight kg, active_calories
+  kcal), and `.token(types)` / `.changes(types, token)` -> `{token, records, deleted, expired}` so polling only
+  fetches what changed. Manifest: the six `android.permission.health.READ_*`, the provider `<queries>` entry and the
+  rationale activity-aliases Health Connect requires before it shows the dialog.
+- **The app** (`apps/health`, id `local.health`, database `local-health`, own module). Tables: `sample` (every reading,
+  keyed by the source's record id, so re-reads upsert), `daily` (per type, per source, per local day: sum/count/min/max/
+  last - derived by the module), `cursor` (the changes token + newest sample). The `ingest` reducer is the only way
+  samples get in; `rebuild(tz_min)` re-buckets days after a time-zone change. Other apps never touch these tables:
+  widgets subscribe to `daily` (today and the last 7 days, per source) or go through appcap.
+- **Sync loop** (`ui/lib/sync.ts`): runs in the app's own surfaces (page and widget) - at once, every 5 min, and when
+  shown again - one loop at a time; first run reads the last 30 days (what Health Connect allows without the history
+  permission) in week windows, later runs use the changes token. The page asks for the permission on first open; the
+  widget only says to open the page. It does not run with no Health surface mounted (an app has no process of its own):
+  for always-on sync a background reader would need the READ_HEALTH_DATA_IN_BACKGROUND permission and a service - not done.
+- **Headline figure** per type is the source with the most that day, never a sum across sources (two apps often see the
+  same steps); the per-source figures are all there.
+- **To use it**: install the APK, `apps/install.sh health`, open Health and allow in the Health Connect dialog (or
+  `pm grant com.powos.app android.permission.health.READ_STEPS` ... as root for the six).
+- Not yet: the `android`-block `source: health` for compositions (widgets can already read `daily`), rooted per-app DB reads.
+
 ## 4. Open decisions for the user
 
 - **D1** OWL: freeze (no new work, existing `.owl` tiles stay) or retire (move its widgets to islands, delete engine)?
