@@ -450,7 +450,9 @@ const atListEnd = (gs: Gesture) => !gs.inList || gs.listBottom;
  */
 function ccAllWay(gs: Gesture, dy: number) {
   if (separatePanels.value === "on" || notifDrag.value != null) return false;
-  return dy > 0 ? !ccExpanded.value && gs.listTop : ccExpanded.value && atListEnd(gs);
+  if (dy > 0) return !ccExpanded.value && gs.listTop;
+  // Up from an expanded shade shuts it whole (one swipe): the fold is the control center's own area's swipe only.
+  return ccExpanded.value && atListEnd(gs) && !!gs.target.closest?.(".cc, .cc3-grid, .cc-col");
 }
 
 /**

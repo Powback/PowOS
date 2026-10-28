@@ -39,7 +39,6 @@ powos.on("shade.settle", ({ open }: { open: boolean }) => {
  * compositor's radius at full openness, dp - its blur is only ~0.15-0.3 of it (the native-blur expert's measure).
  */
 const BLUR_DP = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--shade-blur-native")) || 160;
-void powos.shade.blur?.(BLUR_DP).catch(() => {});
 
 /**
  * The blur behind follows the panel as it's drawn: each frame the panel's openness moves (the host's pull, the page's
@@ -56,18 +55,33 @@ let following = false;
  * blur away instead of leaving it until the window goes. The full radius is put back when the window is shut.
  */
 let legacyHost = false;
+/** The last radius sent: an unchanged one is not sent again (each send re-registers the blur and can stutter it). */
+let sentRadius = -1;
+function sendRadius(dp: number) {
+  const d = Math.round(dp * 2) / 2;
+  if (d === sentRadius) return;
+  sentRadius = d;
+  void powos.shade.blur?.(d).catch(() => {});
+}
 function sendBehind(q: number) {
-  if (legacyHost) return void powos.shade.blur?.(BLUR_DP * q).catch(() => {});
+  if (legacyHost) return void sendRadius(BLUR_DP * q);
   const p = powos.shade.behind?.(q);
   if (!p) return void (legacyHost = true);
   p.catch(() => {
     legacyHost = true;
-    void powos.shade.blur?.(BLUR_DP * q).catch(() => {});
+    sendRadius(BLUR_DP * q);
   });
+}
+// Page-driven from before the first frame: pageDriven (behind) goes first, at 0, then the radius once - the host
+// never runs its own blur ramp against the page's (the blur used to start, stop and start again on open).
+if (document.documentElement.dataset.mode === "shade") {
+  sentQ = 0;
+  sendBehind(0);
+  if (!legacyHost) void powos.shade.blur?.(BLUR_DP).catch(() => {});
 }
 /** The window is going: the old host's radius back to full for the next pull (no-op on a host with behind). */
 function restoreRadius() {
-  if (legacyHost) void powos.shade.blur?.(BLUR_DP).catch(() => {});
+  if (legacyHost) sendRadius(BLUR_DP);
 }
 const panelQ = () => {
   const el = document.querySelector<HTMLElement>(".shade-screen .notif-panel");

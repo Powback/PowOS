@@ -1251,7 +1251,7 @@ input.folder-title:focus { background: var(--soft-fill); }
    * Its open, as the drawer's (d254e58): from just above where it rests - --drop, the one knob (gesture.ts and the
    * host map the finger onto it at 1.5x) - fading in, nearly all there by half of it. Transform and opacity only.
    */
-  --drop: 15vh;
+  --drop: 6vh;
   transform: translateY(calc((var(--q) - 1) * var(--drop)));
   opacity: min(1, calc(var(--q) / 0.55));
   visibility: hidden;
