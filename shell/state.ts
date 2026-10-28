@@ -162,7 +162,12 @@ export const dockPlacement = {
 export function validDockPosition(value: string, fallback: string): string {
   return ["bottom", "left", "right"].includes(value) ? value : fallback;
 }
-export const dockPosition = computed(() => validDockPosition(dockPlacement.value, dockMode.value === "desktop" ? "left" : "bottom"));
+/**
+ * A device check's placement for this page only: never stored, gone on a reload. Checks set THIS, never the user's
+ * choice above - a check killed before its restore left the folded home with a side dock (2026-10-28 13:46 run).
+ */
+export const dockTry = signal("");
+export const dockPosition = computed(() => validDockPosition(dockTry.value || dockPlacement.value, dockMode.value === "desktop" ? "left" : "bottom"));
 
 /** The drawer: open or not (a finger dragging it is gesture.ts's drawerDrag). */
 export const drawer = signal(0);

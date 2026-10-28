@@ -25,7 +25,14 @@ const isHome = !new URLSearchParams(location.search).get("mode");
  */
 type Display = { widthDp: number; heightDp: number; displayId: number; rotation: number; folded: boolean };
 let hint: Display | null = null;
-const isWide = () => isHome && innerWidth >= WIDE;
+/**
+ * A tall portrait page is never wide, whatever its width in CSS px: during a swipe up to home (recents) the folded
+ * home's page measured 804x1790 (dpr ~1.39, not 2.76) and was laid out wide - the dock on the side, the 13-column grid
+ * squashed ("desktop on mobile" after the AI page, 2026-10-28 13:53 logcat). The inner screen is ~square (821x883).
+ */
+const TALL = 0.6;
+const isWide = () => isHome && innerWidth >= WIDE && innerWidth >= innerHeight * TALL;
+
 /** Home laid out wide now (home.tsx: one bottom bar - dock left, search, recent apps right). */
 export const wideHome = signal(isWide());
 
@@ -208,7 +215,7 @@ export function wide(n: Bridge): Bridge {
     // (console -> logcat PowosShell), so the next wrong layout explains itself.
     if (changed || why !== "resize") {
       const h = hint;
-      console.log(`[wide] ${now ? "wide" : "narrow"}${changed ? "" : " (kept)"} by ${why}: innerWidth ${innerWidth} innerHeight ${innerHeight} >= ${WIDE}? ${innerWidth >= WIDE}${h ? `; host hint ${h.widthDp}x${h.heightDp}dp display ${h.displayId} rot ${h.rotation} folded ${h.folded}` : ""}`);
+      console.log(`[wide] ${now ? "wide" : "narrow"}${changed ? "" : " (kept)"} by ${why}: innerWidth ${innerWidth} innerHeight ${innerHeight} dpr ${devicePixelRatio.toFixed(2)} (>= ${WIDE} and not portrait)${h ? `; host hint ${h.widthDp}x${h.heightDp}dp display ${h.displayId} rot ${h.rotation} folded ${h.folded}` : ""}`);
     }
     if (!changed) return;
     was = wideHome.value = now;

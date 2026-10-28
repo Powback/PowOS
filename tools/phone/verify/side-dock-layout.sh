@@ -11,14 +11,13 @@ window_lock side-dock-layout 120
 export CDP_TIMEOUT_S=20
 I0=$(irq)
 [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" = Awake ] || exit 3
-old=$(ev 'importShim("./state.ts").then(s=>s.mobileDockPlacement.value)')
-oldUnfolded=$(ev 'importShim("./state.ts").then(s=>s.unfoldedDockPlacement.value)')
-case "$oldUnfolded" in bottom|left|right) ;; *) echo "FAIL: cannot read unfolded dock setting"; exit 1 ;; esac
-case "$old" in bottom|left|right) ;; *) echo "FAIL: cannot read dock setting"; exit 1 ;; esac
+# The side is tried with state.ts dockTry (this page only, never stored): the user's own choice is never written, so a
+# run killed before its restore can't leave their home with a side dock (13:46 run, 2026-10-28). The page clears the
+# try itself after 4 minutes too.
 oldpage=$(hpage)
 [[ "$oldpage" =~ ^-?[0-9]+$ ]] || { echo "FAIL: cannot read home page"; exit 1; }
 restore() {
-  ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.mobileDockPlacement.value='$old';s.unfoldedDockPlacement.value='$oldUnfolded';s.page.value=$oldpage;return 'restored'})" >/dev/null
+  ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.dockTry.value='';s.page.value=$oldpage;return 'restored'})" >/dev/null
   sh_ 'input keyevent BACK; cmd device_state state reset' >/dev/null
   [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
 }
@@ -39,10 +38,7 @@ for state in 0 3; do
   for side in left right; do
     close_shade
     chk setting
-    # The state's own key, never the mode-following dockPlacement: written mid-fold it lands in the other mode's
-    # choice, and a missed restore then left the user's home with a side dock (2026-10-28).
-    key=$([ "$state" = 0 ] && echo mobileDockPlacement || echo unfoldedDockPlacement)
-    ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.$key.value='$side';s.page.value=0;return 'set'})" >/dev/null
+    ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.dockTry.value='$side';setTimeout(()=>{if(s.dockTry.value==='$side')s.dockTry.value=''},240000);s.page.value=0;return 'set'})" >/dev/null
     sleep 1
     clear=$(ev 'document.querySelector(".home>.dock").getBoundingClientRect().bottom<=document.querySelector(".home>.bar").getBoundingClientRect().top+1')
     [ "$clear" = true ] || { echo "FAIL: $state $side dock overlaps search bar"; exit 1; }
