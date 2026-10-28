@@ -83,8 +83,8 @@ export interface AppWidgetHost {
   frames(id: number, width: number, height: number, on: (url: string) => void): () => void;
   /** A small picture of a tree's image [ref] (a data URL), null once forgotten. */
   image(ref: string): Promise<string | null>;
-  /** A tap at (x, y) of a tile [width] x [height] (the tree's dp work as well): down then up on the real widget. */
-  tap(id: number, x: number, y: number, width: number, height: number): Promise<void>;
+  /** A tap at (x, y) of a tile of [size] = [width, height] (the tree's dp work as well): down then up on the real widget. */
+  tap(id: number, x: number, y: number, size: [number, number]): Promise<void>;
 }
 
 const appWidget: AppWidgetHost = {
@@ -112,7 +112,7 @@ const appWidget: AppWidgetHost = {
     };
   },
   image: async (ref) => (powos.appWidgets?.image ? powos.appWidgets.image(ref).catch(() => null) : null),
-  async tap(id, x, y, width, height) {
+  async tap(id, x, y, [width, height]) {
     await powos.appWidgets.touch(id, "down", x, y, width, height);
     await powos.appWidgets.touch(id, "up", x, y, width, height);
   },

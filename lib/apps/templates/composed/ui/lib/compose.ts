@@ -266,7 +266,7 @@ interface AndroidHost {
   data(id: number, on: (d: { id: number; at: number; tree: WidgetTree }) => void): () => void;
   frames(id: number, width: number, height: number, on: (url: string) => void): () => void;
   image(ref: string): Promise<string | null>;
-  tap(id: number, x: number, y: number, width: number, height: number): Promise<void>;
+  tap(id: number, x: number, y: number, size: [number, number]): Promise<void>;
 }
 
 /** Nothing the card can draw: the tree has no text, picture, progress or list rows. */
@@ -318,7 +318,7 @@ export function useAndroidBlock(host: Host, use: AndroidUse, size: [number, numb
     if (!ah || id === null || !fallback || !w || !h) return;
     return ah.frames(id, Math.round(w), Math.round(h), setFrame);
   }, [id, fallback, Math.round(w), Math.round(h)]);
-  const tap = (x: number, y: number, tw: number, th: number) => (ah && id !== null ? ah.tap(id, x, y, tw, th) : Promise.resolve());
+  const tap = (x: number, y: number, size: [number, number]) => (ah && id !== null ? ah.tap(id, x, y, size) : Promise.resolve());
   const phase = !ah ? "unavailable" : missing ? "missing" : fallback ? "fallback" : tree ? "live" : "loading";
   return { tree, images, frame, phase: phase as "unavailable" | "missing" | "fallback" | "live" | "loading", tap };
 }

@@ -41,7 +41,7 @@ export function pick(t: WidgetTree) {
   return { values, title, label, prog, rows, image, targets: t.targets.filter((x) => x.label).slice(0, 3) };
 }
 
-export default function Widget({ host, base, cells = [4, 2] }: Props) {
+export default function Widget({ host, cells = [4, 2] }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [w, h] = useSize(box);
   const b = useAndroidBlock(host, U, [w, h]);
@@ -67,7 +67,7 @@ export default function Widget({ host, base, cells = [4, 2] }: Props) {
           style={S.pixels}
           onClick={(e) => {
             const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            void b.tap(e.clientX - r.left, e.clientY - r.top, r.width, r.height);
+            void b.tap(e.clientX - r.left, e.clientY - r.top, [r.width, r.height]);
           }}
         />
       )}
