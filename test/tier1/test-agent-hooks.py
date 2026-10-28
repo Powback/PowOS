@@ -11,6 +11,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 GUARD = os.path.join(REPO, ".claude", "hooks", "wait-guard.py")
+MISTAKE = os.path.join(REPO, ".claude", "hooks", "mistake-guard.py")
 NOTICES = os.path.join(REPO, ".claude", "hooks", "agent-notices.py")
 SUB = "/h/.claude/projects/p/s/subagents/agent-1.jsonl"
 
@@ -93,8 +94,39 @@ class T(unittest.TestCase):
             self.assertEqual(self.bash(ok), "", ok)
 
     def test_sed_range(self):
-        self.assertDenied(self.bash("sed -n '1,400p' f.md"), "cap 200")
+        self.assertDenied(self.bash("sed -n '1,400p' f.md"), "cap 150")
+        self.assertDenied(self.bash("sed -n '1,200p' f.md"), "cap 150")
         self.assertEqual(self.bash("sed -n '10,100p' f.md"), "")
+
+    def test_poll_shapes_hint_wait_sh(self):
+        for c in ("pgrep -f gate.sh", "sleep 30", "tail -5 /tmp/x.log"):
+            self.assertEqual(self.bash(c), "", c)
+            self.assertDenied(self.bash(c), "wait.sh")
+
+    def test_mistake_guard(self):
+        mg = lambda c, **k: self.run_hook(MISTAKE, "Bash", {"command": c})
+        for bad, needle in (("cd x && timeout 30 make test", "alarm 30; exec @ARGV' make test"),
+                            ("grep -rn foo . --include=*.ts | head", "--include='*.ts'"),
+                            ("sed -i 's/a/b/' f", "sed -i ''"), ("source <(foo env)", "eval"),
+                            ("tools/phone/pull-root.sh /data/x/a.jpg /tmp/a.jpg", "DIRECTORY")):
+            self.assertDenied(mg(bad), needle)
+        for ok in ("perl -e 'alarm 5; exec @ARGV' ls", "grep -rn foo . --include='*.ts' | head", "grep -rn x --include=\"*.ts\" . | head -3",
+                   "sed -i '' 's/a/b/' f", "sed -i.bak 's/a/b/' f", "sed -i .bak 's/a/b/' f", "docker exec c sed -i 's/a/b/' f",
+                   "eval \"$(foo env)\"", "tools/phone/pull-root.sh /data/x/a.jpg /tmp/d/", "echo timeout 5", "gtimeout 5 ls"):
+            self.assertEqual(mg(ok), "", ok)
+        self.assertEqual(self.run_hook(MISTAKE, "Bash", {"command": "timeout 5 ls"}, transcript="/h/s.jsonl"), "")
+
+    def test_wait_sh(self):
+        w = os.path.join(REPO, "tools", "agents", "wait.sh")
+        f = os.path.join(self.home.name, "g.log")
+        open(f, "w").write("a\nFAIL x\nPASS y\n")
+        r = subprocess.run([w, f, "5"], capture_output=True, text=True, timeout=20)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("PASS y", r.stdout)
+        r = subprocess.run([w, "true foo", "5"], capture_output=True, text=True, timeout=20)
+        self.assertEqual(r.returncode, 0)
+        r = subprocess.run([w, os.path.join(self.home.name, "none"), "1"], capture_output=True, text=True, timeout=20)
+        self.assertEqual(r.returncode, 124)
 
     # -- card
     def test_card_once_and_subagent_only(self):

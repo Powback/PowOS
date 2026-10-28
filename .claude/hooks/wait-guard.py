@@ -78,18 +78,20 @@ GIT_CMD_RE = re.compile(r'\bgit\s+(?:-C\s+\S+\s+)?(?:commit|push|rebase|merge)\b
 POLL_WINDOW = 8          # the same status poll again within this many guarded calls is denied
 READ_MAX_LINES = 400     # whole-file Read denied above this ...
 READ_MAX_BYTES = 40_000  # ... or this
-CAT_MAX_LINES = 400
-SED_MAX_RANGE = 200
+CAT_MAX_LINES = 300
+SED_MAX_RANGE = 150
 NO_LIMIT_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".pdf", ".ipynb", ".svg")
 
-WAIT_HINT = ("block ONCE instead of polling: `tools/phone/verify/queue.sh wait <job-id> [max_s]` (prints "
+WAIT_HINT = ("use tools/agents/wait.sh <pid|file-pattern|\"cmd\"> [max_s<=110] (blocks once, prints the PASS/FAIL lines); "
+             "or block ONCE instead of polling: `tools/phone/verify/queue.sh wait <job-id> [max_s]` (prints "
              "PASS/FAIL lines only), `tools/phone/idle.sh --wait`, or a background `until ...` loop run with "
              "run_in_background (the harness notifies you; the PostToolUse hook also delivers queue/ship "
              "results on your next call). Or hand back with the job id.")
 POLL_RES = [re.compile(p) for p in (
     r'\bqueue\.sh\s+(?:status|list)\b', r'\bship\.sh\s+status\b',
     r'\bls\b[^|;&]*powos-(?:verify|ship)-queue', r'\b(?:tail|cat|head)\b[^|;&]*runner\.log',
-    r'\bget-state\b', r'\btasks/[^\s]*\.output\b')]
+    r'\bget-state\b', r'\bpgrep\b', r'\bps\s+(?:-p|-o)', r'\bkill\s+-0\b',
+    r'^\s*(?:cd\s+\S+\s*&&\s*)?sleep\s+\d', r'\btail\b(?!\s+-[a-zA-Z]*f)[^|;&]*\.(?:log|out)\b', r'\btasks/[^\s]*\.output\b')]
 GREP_REC_RE = re.compile(r'(?<!git )\bgrep\s+(?:[^|;&\n]*?\s)?(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)(?=\s)')
 GREP_OK_FLAG_RE = re.compile(r'(?:^|\s)(?:-[A-Za-z]*[lLcq][A-Za-z]*|-m\s*\d*|--max-count\S*|--files-with\S*|--count)(?=\s|$)')
 HEADLIKE_RE = re.compile(r'\|\s*(?:head|tail|wc|sed\s+-n|awk|cut\b[^|]*\|\s*head)\b')
@@ -169,7 +171,7 @@ def _check_bash_output(inp, cmd):
     for a, b in SED_RANGE_RE.findall(cmd):
         if int(b) - int(a) > SED_MAX_RANGE:
             return (f"sed -n '{a},{b}p' is {int(b) - int(a)} lines (cap {SED_MAX_RANGE}) - `grep -n '<what you need>' <file> | head -20` "
-                    f"first, then print a narrower range around the hit.")
+                    f"first, then print a narrower range around the hit (read the function you need: grep -n name file, then sed -n a,b).")
     return None
 
 

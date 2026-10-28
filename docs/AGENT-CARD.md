@@ -2,11 +2,16 @@
 
 Budgets: 5 min, ~30 tool calls, 150k context. At 4 min land what works and hand back.
 
+Fast path
+- (a) Your brief names files+lines: open those first, no exploration. (b) First edit within ~3 calls.
+- (c) Use the check commands the brief gives (gate defaults to affected scenes).
+- (d) Waits go through `tools/agents/wait.sh <pid|file-pattern|"cmd"> [max_s<=110]` (blocks once, prints PASS/FAIL).
+
 Start
 - `tools/agents/worktree.sh new <name>`, then prefix EVERY Bash with `cd ~/pw/<name> &&`. Never edit the shared checkout.
 - Edit from your first Read; re-read only after your own Edit or a rebase.
 - Docs/code: `grep -n '<term>' file | head -20`, then Read with offset/limit. Never Read a >400-line file whole,
-  `cat` it, `grep -r` uncapped, or `sed -n` >200 lines (hooks deny these).
+  `cat` it, `grep -r` uncapped, or `sed -n` >150 lines (hooks deny these).
 
 Land
 - `tools/agents/land.sh "msg" -- <every path, incl. new untracked files> [--task <id> --step "..."] [--no-ship]`
