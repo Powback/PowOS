@@ -303,10 +303,11 @@ class WindowFrames(
      */
     private fun frame(show: List<FreeformTasks.Window>) {
         show.asReversed().filter(::mayFrame).forEach { w ->
+            val above = show.takeWhile { it.id != w.id }.map { it.bounds }
             val own = ownBar(w)
             // Who draws its title bar changed (a launch window became Steam's, KWin's "decor"): a new frame, between touches.
             frames[w.id]?.takeIf { it.ownBar != own && !it.held && !it.dragging }?.let { frames.remove(w.id)?.remove() }
-            frames.getOrPut(w.id) { newFrame(w) }.apply { showMaximised(w.id in maximised) }.place(w.bounds, spans[w.id])
+            frames.getOrPut(w.id) { newFrame(w) }.apply { showMaximised(w.id in maximised) }.apply { place(w.bounds, spans[w.id]); gripCovered(above.any { Rect.intersects(it, gripRect()) }) }
         }
     }
 

@@ -306,6 +306,28 @@ class WindowFrame(
             bar.alpha = if (hide) 0f else 1f
             if (barAdded) barBlur.set(if (hide) 0f else 1f)
         }
+    /** The grip's square on the screen (px): what a window above may cover. */
+    fun gripRect(): Rect {
+        val g = dp(GRIP_DP)
+        return Rect(bounds.right - g + dp(GRIP_OUT_DP), bounds.bottom - g + dp(GRIP_OUT_DP), bounds.right + dp(GRIP_OUT_DP), bounds.bottom + dp(GRIP_OUT_DP))
+    }
+
+    private var gripUnder = false
+
+    /**
+     * A window above this one covers its grip: the grip (an overlay, over every task) takes no touch there, so a
+     * resize never starts through the window above - the grip's share of "bars z-ordered with their window"
+     * (the bar's is [place]'s span). HACK: overlays can't sit between tasks; real fix: the bar and grip in the task's own
+     * layer (TaskBarProbe, flag powos_bar_in_task), once the probe has run on the phone.
+     */
+    fun gripCovered(on: Boolean) {
+        if (on == gripUnder) return
+        gripUnder = on
+        val f = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        gripParams.flags = if (on) gripParams.flags or f else gripParams.flags and f.inv()
+        if (gripAdded && !dragging) runCatching { wm.updateViewLayout(grip, gripParams) }
+    }
+
     /** Where its bar and grip take touches (screen px): a frame stacked over another's there takes that one's finger. */
     fun reach(): Rect = Rect(bounds.left, bounds.top - barHeight(), bounds.right + dp(GRIP_OUT_DP), bounds.bottom + dp(GRIP_OUT_DP))
 
