@@ -288,6 +288,21 @@ class Routes(unittest.TestCase):
         self.assertEqual(acts["open"]["endpoint"], "open android-app://com.example.shop")
         self.assertEqual(self.req("/draft/installed", {"kind": "android", "pkg": "../x"})[0], 400)
 
+    def test_android_widgets(self):
+        gm = {"provider": "com.example.mail.widget.MailWidgetProvider", "label": "Inbox", "minWidth": 250, "minHeight": 110,
+              "minResizeWidth": 150, "targetCellWidth": 4, "targetCellHeight": 2, "resize": ["horizontal", "vertical"],
+              "categories": ["home_screen"], "updatePeriodMs": 86400000, "preview": "image", "configure": "com.example.mail.Setup"}
+        code, d = self.req("/draft/installed", {"kind": "android", "pkg": "com.example.mail", "label": "Example Mail",
+                                                "links": [], "widgets": [gm, {"provider": "bad name!"}, "x"]})
+        self.assertEqual(code, 200, d)
+        dr = self.req(f"/draft?app={d['app']}")[1]
+        self.assertEqual(dr["widgets"], [gm])
+        a = dr["actions"]["widget_inbox"]
+        self.assertTrue(a["safety"] == "read" and a["widget"])
+        self.assertIn("4x2 cells", a["summary"])
+        self.assertIn("needs set-up", a["summary"])
+        self.assertEqual(self.req("/draft/installed", {"kind": "android", "pkg": "com.example.none", "label": "None"})[1]["actions"], 1)
+
     def test_trackers_filter_by_app(self):
         code, d = self.req("/draft/import", {"sample": "open-meteo"})
         self.assertEqual(code, 200, d)

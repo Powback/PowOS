@@ -174,7 +174,8 @@ def summary(path: str) -> dict:
             acts[aid]["auth"] = toks[auth].get("store")  # the handle, never a value
     return {"app": s["app"], "name": s.get("name", s["app"]), "description": s.get("description", ""),
             "enabled": s.get("enabled", False), "base": (s.get("base") or {}).get("url", ""),
-            "origin": app_origin(s, acts), "auth": app_auth(s, acts), "actions": acts}
+            "origin": app_origin(s, acts), "auth": app_auth(s, acts), "actions": acts,
+            "widgets": (s.get("android") or {}).get("widgets", [])}
 
 
 def apps(_q, _b):

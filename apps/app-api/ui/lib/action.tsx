@@ -5,7 +5,7 @@
  * (`draft`: "+ add app" review) has no switches and only ever dry-runs (/call draft:true, appcap_run.py --draft).
  */
 import { useState } from "preact/hooks";
-import { call, SAFETY, shape, type Action, type AppSpec, type CallResult, type Net, type Schema } from "./api";
+import { call, SAFETY, shape, type Action, type AppSpec, type AppWidget, type CallResult, type Net, type Schema } from "./api";
 import { Block, Muted, S, Switch, title } from "./ui";
 
 type Args = Record<string, string | boolean>;
@@ -122,6 +122,34 @@ function ActionRow({ p, id }: { p: DetailProps; id: string }) {
   );
 }
 
+/** "5x2 cells" when the widget declares a target grid size, else its minimum in dp. */
+function widgetSize(w: AppWidget): string {
+  return w.targetCellWidth ? `${w.targetCellWidth}x${w.targetCellHeight} cells` : `${w.minWidth}x${w.minHeight} dp`;
+}
+
+/** An Android app's analysed home-screen widgets (AppWidgetProviders): what each is, so a PowOS widget can be offered. */
+export function Widgets({ widgets }: { widgets?: AppWidget[] }) {
+  if (!widgets?.length) return null;
+  return (
+    <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+      <h2 style={S.group}>
+        Home-screen widgets <span style={{ ...S.muted, fontWeight: 400 }}>the app's own; each is also a widget-able action above</span>
+      </h2>
+      {widgets.map((w) => (
+        <div key={w.provider} style={S.card}>
+          <div style={S.name}>{w.label}</div>
+          <div style={S.idMuted}>{w.provider}</div>
+          <Muted>
+            {widgetSize(w)} · {w.resize.length ? `resizes ${w.resize.join(" + ")}` : "fixed size"} · preview {w.preview}
+            {w.updatePeriodMs >= 1800000 ? ` · updates every ${Math.round(w.updatePeriodMs / 60000)} min` : ""}
+            {w.configure ? ` · set-up: ${w.configure}` : ""}
+          </Muted>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function Actions(p: DetailProps) {
   const ids = Object.keys(p.spec.actions).sort();
   return (
@@ -138,6 +166,7 @@ export function Actions(p: DetailProps) {
           </section>
         );
       })}
+      <Widgets widgets={p.spec.widgets} />
     </>
   );
 }

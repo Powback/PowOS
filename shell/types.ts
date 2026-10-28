@@ -8,6 +8,24 @@ export interface AppLinks {
   pkg: string;
   label: string;
   links: { uri: string; activity?: string }[];
+  /** The home-screen widgets it declares (AppWidgetProviders); absent from an older APK. Sizes in dp, targetCell* in grid cells. */
+  widgets?: AppWidget[];
+}
+
+export interface AppWidget {
+  provider: string;
+  label: string;
+  minWidth: number;
+  minHeight: number;
+  minResizeWidth?: number;
+  minResizeHeight?: number;
+  targetCellWidth?: number;
+  targetCellHeight?: number;
+  resize: ("horizontal" | "vertical")[];
+  categories: string[];
+  updatePeriodMs: number;
+  preview: "image" | "layout" | "none";
+  configure?: string;
 }
 
 export interface App {

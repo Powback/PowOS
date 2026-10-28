@@ -47,7 +47,9 @@ auth only as `store:<app>:session` / `secret:<app>` handles, credentials in URLs
   `appcap_add.py put --source describe FILE` - the model never runs in this runtime (its memory budget is 48 MB);
 - **an installed app**: a PowOS app's page (`app://<id>`) + its own database's public tables (SQL reads) and
   reducers (writes, off); an Android app's exported VIEW/BROWSABLE deep links (the bridge's `apps.links`, read from
-  its manifest, nothing fired) as UI reads;
+  its manifest, nothing fired) as UI reads, plus its home-screen widgets (AppWidgetProviders: label, class, sizes,
+  resize, preview, update period, configure activity) kept as `spec.android.widgets`, shown on the detail page and
+  offered as widget-able `widget_*` read actions;
 - **import**: an OpenAPI document (`openapi2appcap.convert`) or a capability spec, from a URL (fetched here, no
   credentials accepted) or a file; `{"sample": "open-meteo"}` imports `sample/open-meteo.openapi.json`.
 

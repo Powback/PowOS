@@ -189,6 +189,9 @@ def normalize(spec: dict, source: str, app: str | None = None) -> dict:
     # source per draft); the handle is the one every action that needs auth resolves to, or 'mixed'. The detail
     # page (apps/app-api/ui/pages/main.tsx) reads these instead of deriving them client-side.
     out["origin"] = origin
+    if isinstance(spec.get("android"), dict):  # what analysing an Android app found; information only, nothing callable
+        out["android"] = {"package": str(spec["android"].get("package") or "")[:200],
+                          "widgets": [w for w in (_widget(x) for x in (spec["android"].get("widgets") or [])[:40]) if w]}
     handle = _app_auth_handle(out["actions"], tokens)
     if handle:
         out["auth"]["handle"] = handle
@@ -413,8 +416,39 @@ def _link_action(link: dict) -> tuple[str, dict] | None:
         "inputs": {"type": "object", "properties": props}, "endpoint": {"ui": {"deep_link": deep}}}
 
 
-def from_android(pkg: str, label: str, links: list) -> dict:
-    """An Android app's exported VIEW/BROWSABLE links (the bridge's apps.links) as UI reads: screens it opens."""
+WIDGET_NUM = ("minWidth", "minHeight", "minResizeWidth", "minResizeHeight", "targetCellWidth", "targetCellHeight", "updatePeriodMs")
+CLASS_NAME = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$")
+
+
+def _widget(w) -> dict | None:
+    """One analysed home-screen widget (the bridge's apps.links "widgets"), cut to the schema's fields; None if unusable."""
+    if not isinstance(w, dict) or not CLASS_NAME.match(str(w.get("provider") or "")):
+        return None
+    out = {"provider": w["provider"], "label": str(w.get("label") or w["provider"].rsplit(".", 1)[-1])[:80]}
+    for k in WIDGET_NUM:
+        if isinstance(w.get(k), int) and not isinstance(w[k], bool) and w[k] >= 0:
+            out[k] = w[k]
+    out["resize"] = [r for r in (w.get("resize") or []) if r in ("horizontal", "vertical")]
+    out["categories"] = [str(c)[:20] for c in (w.get("categories") or [])][:4]
+    out["preview"] = w.get("preview") if w.get("preview") in ("image", "layout", "none") else "none"
+    if CLASS_NAME.match(str(w.get("configure") or "")):
+        out["configure"] = w["configure"]
+    return out
+
+
+def _widget_text(w: dict) -> str:
+    size = (f"{w['targetCellWidth']}x{w['targetCellHeight']} cells" if w.get("targetCellWidth")
+            else f"{w.get('minWidth', 0)}x{w.get('minHeight', 0)} dp")
+    rs = "/".join(w["resize"]) if w["resize"] else "fixed size"
+    every = f", updates every {w['updatePeriodMs'] // 60000} min" if w.get("updatePeriodMs", 0) >= 1800000 else ""
+    return (f"Home widget {w['label']}: {size}, resize {rs}, preview {w['preview']}{every}"
+            + (", needs set-up" if w.get("configure") else ""))
+
+
+def from_android(pkg: str, label: str, links: list, widgets: list | None = None) -> dict:
+    """An Android app's exported VIEW/BROWSABLE links (the bridge's apps.links) as UI reads: screens it opens, and its
+    home-screen widgets (AppWidgetProviders): kept as spec.android.widgets, and each one offered as a widget-able read
+    a PowOS widget can be made from."""
     if not re.match(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$", pkg or ""):
         raise ValueError("an Android package name")
     acts = {"open": {"summary": f"Open {label or pkg}.", "safety": "read", "endpoint": {"ui": {"deep_link": f"android-app://{pkg}"}}}}
@@ -422,8 +456,17 @@ def from_android(pkg: str, label: str, links: list) -> dict:
         got = _link_action(link if isinstance(link, dict) else {})
         if got and got[0] not in acts:
             acts[got[0]] = got[1]
+    found = [w for w in (_widget(x) for x in (widgets or [])[:40]) if w]
+    for w in found:
+        aid = "widget_" + (slug(w["label"], "_") or slug(w["provider"].rsplit(".", 1)[-1], "_") or "widget")[:40]
+        while aid in acts:
+            aid += "_2"
+        acts[aid] = {"summary": _widget_text(w), "safety": "read", "widget": True, "inputs": {"type": "object", "properties": {}},
+                     "endpoint": {"ui": {"route": f"android-widget://{pkg}/{w['provider']}"}}}
+    what = f"the screens {pkg} opens from a link" + (f" and its {len(found)} home-screen widget(s)" if found else "")
     spec = {"app": slug(label) or slug(pkg.split(".")[-1]), "name": label or pkg,
-            "description": f"Drafted from the screens {pkg} opens from a link.", "base": {"kind": "on-device"}, "actions": acts}
+            "description": f"Drafted from {what}.", "base": {"kind": "on-device"}, "actions": acts,
+            "android": {"package": pkg, "widgets": found}}
     return put(spec, "android")
 
 
@@ -453,7 +496,7 @@ def r_import(_q, b):
 
 def r_from_installed(_q, b):
     if b.get("kind") == "android":
-        return from_android(str(b.get("pkg") or ""), str(b.get("label") or ""), b.get("links") or [])
+        return from_android(str(b.get("pkg") or ""), str(b.get("label") or ""), b.get("links") or [], b.get("widgets") or [])
     return from_powos(str(b.get("id") or ""))
 
 

@@ -1,7 +1,10 @@
 package dev.omalauncher.shell
 
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProviderInfo
 import android.content.Context
 import android.content.res.Resources
+import android.os.Build
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.ByteBuffer
@@ -37,7 +40,75 @@ object AppLinks {
         if (manifest != null) {
             for (l in Manifest(manifest, res).links().distinct().take(MAX)) links.put(JSONObject().put("uri", l.first).put("activity", l.second))
         }
-        return JSONObject().put("pkg", pkg).put("label", pm.getApplicationLabel(info).toString()).put("links", links)
+        return JSONObject()
+            .put("pkg", pkg)
+            .put("label", pm.getApplicationLabel(info).toString())
+            .put("links", links)
+            .put("widgets", widgets(context, pkg))
+    }
+
+    /**
+     * The home-screen widgets the app declares (AppWidgetProviders): AppWidgetManager's public listing, which is
+     * the manifest's <receiver> + android.appwidget.provider res/xml read by the system - so no parsing here. Sizes
+     * are dp (minWidth/minHeight, the resize minimums) and grid cells (targetCell*, API 31+; 0 = not declared).
+     * READ-ONLY: nothing is bound, no widget id allocated, no configure activity started.
+     */
+    private fun widgets(
+        context: Context,
+        pkg: String,
+    ): JSONArray {
+        val out = JSONArray()
+        val list =
+            runCatching { AppWidgetManager.getInstance(context).getInstalledProvidersForPackage(pkg, null) }.getOrDefault(emptyList())
+        for (w in list.take(MAX)) out.put(widget(context, w))
+        return out
+    }
+
+    private fun flags(
+        bits: Int,
+        names: List<Pair<Int, String>>,
+    ) = JSONArray().also { a -> names.forEach { (bit, n) -> if (bits and bit != 0) a.put(n) } }
+
+    private fun widget(
+        context: Context,
+        w: AppWidgetProviderInfo,
+    ): JSONObject {
+        val density = context.resources.displayMetrics.density
+        fun dp(px: Int) = Math.round(px / density)
+        val sdk31 = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S // targetCell*, previewLayout
+        val resize = listOf(AppWidgetProviderInfo.RESIZE_HORIZONTAL to "horizontal", AppWidgetProviderInfo.RESIZE_VERTICAL to "vertical")
+        val cats =
+            listOf(
+                AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN to "home_screen",
+                AppWidgetProviderInfo.WIDGET_CATEGORY_KEYGUARD to "keyguard",
+                AppWidgetProviderInfo.WIDGET_CATEGORY_SEARCHBOX to "searchbox",
+            )
+        val preview = if (w.previewImage != 0) "image" else if (sdk31 && w.previewLayout != 0) "layout" else "none"
+        val o =
+            JSONObject()
+                .put("provider", w.provider.className)
+                .put("label", runCatching { w.loadLabel(context.packageManager) }.getOrNull() ?: w.provider.shortClassName)
+                .put("minWidth", dp(w.minWidth))
+                .put("minHeight", dp(w.minHeight))
+                .put("resize", flags(w.resizeMode, resize))
+                .put("categories", flags(w.widgetCategory, cats))
+                .put("updatePeriodMs", w.updatePeriodMillis)
+                .put("preview", preview)
+        return optional(o, w, density, sdk31)
+    }
+
+    /** The fields a provider may leave undeclared (0 / null): only the declared ones are written. */
+    private fun optional(
+        o: JSONObject,
+        w: AppWidgetProviderInfo,
+        density: Float,
+        sdk31: Boolean,
+    ): JSONObject {
+        if (w.minResizeWidth > 0) o.put("minResizeWidth", Math.round(w.minResizeWidth / density))
+        if (w.minResizeHeight > 0) o.put("minResizeHeight", Math.round(w.minResizeHeight / density))
+        if (sdk31 && w.targetCellWidth > 0) o.put("targetCellWidth", w.targetCellWidth).put("targetCellHeight", w.targetCellHeight)
+        w.configure?.let { o.put("configure", it.className) }
+        return o
     }
 
     /** One intent filter being read: what it says, and the activity it belongs to. */

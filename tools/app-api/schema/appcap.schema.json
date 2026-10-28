@@ -19,6 +19,37 @@
       "enum": ["official", "captured", "drafted"],
       "description": "App-level summary of its actions' origin (same values as action.origin). Set by appcap_add.py's normalize() when it builds a draft/capture; a spec written before this field existed omits it and appcap_serve.py derives it from the actions instead."
     },
+    "android": {
+      "type": "object",
+      "description": "What analysing an installed Android app found beyond its links: its home-screen widgets (AppWidgetProviders). Set by appcap_add.py from_android(); information only - nothing here is callable.",
+      "additionalProperties": false,
+      "properties": {
+        "package": { "type": "string" },
+        "widgets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["provider", "label"],
+            "additionalProperties": false,
+            "properties": {
+              "provider": { "type": "string", "description": "The AppWidgetProvider class." },
+              "label": { "type": "string" },
+              "minWidth": { "type": "integer", "minimum": 0, "description": "dp" },
+              "minHeight": { "type": "integer", "minimum": 0, "description": "dp" },
+              "minResizeWidth": { "type": "integer", "minimum": 0 },
+              "minResizeHeight": { "type": "integer", "minimum": 0 },
+              "targetCellWidth": { "type": "integer", "minimum": 0 },
+              "targetCellHeight": { "type": "integer", "minimum": 0 },
+              "resize": { "type": "array", "items": { "enum": ["horizontal", "vertical"] } },
+              "categories": { "type": "array", "items": { "type": "string" } },
+              "updatePeriodMs": { "type": "integer", "minimum": 0 },
+              "preview": { "enum": ["image", "layout", "none"] },
+              "configure": { "type": "string", "description": "The configure activity class, if any." }
+            }
+          }
+        }
+      }
+    },
     "enabled": {
       "type": "boolean",
       "default": false,

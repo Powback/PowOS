@@ -41,6 +41,8 @@ export interface AppSpec {
   origin: string;
   auth: string | null;
   actions: Record<string, Action>;
+  /** An Android draft's analysed home-screen widgets (spec.android.widgets). */
+  widgets?: AppWidget[];
   error?: string;
 }
 
@@ -102,6 +104,24 @@ export interface AppLinks {
   pkg: string;
   label: string;
   links: { uri: string; activity?: string }[];
+  widgets?: AppWidget[];
+}
+
+/** An Android app's home-screen widget (AppWidgetProvider); sizes in dp, targetCell* in grid cells. */
+export interface AppWidget {
+  provider: string;
+  label: string;
+  minWidth: number;
+  minHeight: number;
+  minResizeWidth?: number;
+  minResizeHeight?: number;
+  targetCellWidth?: number;
+  targetCellHeight?: number;
+  resize: string[];
+  categories: string[];
+  updatePeriodMs: number;
+  preview: "image" | "layout" | "none";
+  configure?: string;
 }
 
 /** What App API's page gets from the shell (apps/stdb.ts IslandHost): the runtime's net, and "+ add app"'s helpers. */
