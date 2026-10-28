@@ -1452,7 +1452,9 @@ async function pillBelowDockInEdit(W, wide) {
   const bar = document.querySelector(".home > .bar");
   await window.__gw.settled(() => getComputedStyle(bar).visibility === "visible");
   const p = bar.querySelector(".bar-pill").getBoundingClientRect();
-  const d = document.querySelector(".home > .dock:not(.dock-tray)").getBoundingClientRect();
+  // The dock's icons, not its box: the box has transparent padding under the icons that the pill may sit in.
+  const icons = [...document.querySelectorAll(".home > .dock:not(.dock-tray) .app-icon")].map((e) => e.getBoundingClientRect()).filter((r) => r.height);
+  const d = { bottom: Math.max(...icons.map((r) => r.bottom), -Infinity) };
   const fails = W.footSearch.value ? ["edit mode after the drop under the dock: the pill is a grid tile again"] : [];
   if (getComputedStyle(bar).visibility !== "visible" || p.top < d.bottom - 1)
     fails.push(`edit mode after the drop under the dock: the pill isn't below the dock (pill top ${p.top}, dock bottom ${d.bottom})`);
