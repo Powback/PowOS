@@ -367,7 +367,7 @@ async function overpullKit() {
   const shown = () => cells().filter((e) => e.getClientRects().length && Number(getComputedStyle(e).opacity) > 0.05).length;
   // The notifications list: always there, even empty (the emulator has no notifications, so their count bar is absent).
   // tools/phone/verify/shade-overpull.sh reads the same node - keep them the same.
-  const UNDER = ".panel-body.together .cc ~ .notif-items";
+  const UNDER = ".panel-body.together > .notif-own .notif-items";
   const under = () => document.querySelector(UNDER)?.getBoundingClientRect().top ?? NaN;
   const row = () => cells().slice(0, 6).map((e) => Math.round(e.getBoundingClientRect().top)).join();
   // The panel's own edge on screen (its frost's bottom), its grip, and the last thing in it (the gap under that).
@@ -419,6 +419,19 @@ async function overpullKit() {
     return [e.message];
   }
   window.__op = { sleep, frames, shown, under, row, still, drag, edge, grip, gap, n0: shown(), under0: under(), row0: row(), edge0: edge(), grip0: grip(), gap0: gap() };
+  return [];
+}
+
+/** The shade-overpull case's card tools (window.__op): the control center's card and the notifications' own panel under it. */
+async function overpullCard() {
+  const o = window.__op;
+  const q = (sel) => document.querySelector(`.panel-body.together > ${sel}`)?.getBoundingClientRect();
+  // (ccexpand.ts moves the two as one: the seam between them, and the panel's bottom - it runs down to the screen's bottom.)
+  o.cardTop = () => q(".cc")?.top ?? NaN;
+  o.seam = () => (q(".notif-own")?.top ?? NaN) - (q(".cc")?.bottom ?? NaN);
+  o.ownBottom = () => q(".notif-own")?.bottom ?? NaN;
+  o.rowTop = () => document.querySelector(".cc3-list .cc3-cell")?.getBoundingClientRect().top ?? NaN;
+  Object.assign(o, { seam0: o.seam(), rowTop0: o.rowTop(), cardTop0: o.cardTop() });
   return [];
 }
 
@@ -518,40 +531,48 @@ async function shadeLayout() {
   return body.classList.contains("two") && n && c ? columns(n, c) : [`unfolded (${innerWidth}px): not two columns`];
 }
 
-/** Part of the way: under the control center follows the finger 1:1, the rest starts to show; let go, all back. */
+/**
+ * Over-pull (the control center is shown whole by default on a phone): a pull further stretches - the card and the
+ * notifications under it follow the finger damped (a rubber band, at most 40 px), the toggles stay as they are; let go,
+ * all springs back. The notifications' panel keeps reaching the screen's bottom and the seam to the card does not open.
+ */
 async function overpullShort() {
   const o = window.__op;
   const fails = [];
+  const want = 40 * (1 - Math.exp(-30 / 100));
   await o.drag(30, () => {
     const d = o.under() - o.under0;
-    if (Math.abs(d - 30) > 3) fails.push(`pulled 30 px further, what's under the control center moved ${Math.round(d)} px`);
-    if (o.shown() <= o.n0) fails.push(`pulled 30 px further, no more toggles show (${o.shown()})`);
-    if (o.row() !== o.row0) fails.push(`the first row moved on the pull: ${o.row0} -> ${o.row()}`);
-    // The panel itself, not only what's in it: its edge and grip 30 px lower, no empty frost under the notifications.
-    const e = o.edge() - o.edge0;
-    if (Math.abs(e - 30) > 3) fails.push(`pulled 30 px further, the panel's edge moved ${Math.round(e)} px (a static slab)`);
-    if (Math.abs(o.grip() - o.grip0 - 30) > 3) fails.push(`pulled 30 px further, the panel's grip moved ${Math.round(o.grip() - o.grip0)} px`);
-    // (The groups unfold with the finger too, so the notifications may grow past the edge - only empty frost is a fail.)
-    if (o.gap() - o.gap0 > 3) fails.push(`pulled 30 px further, ${Math.round(o.gap())} px of empty panel under the notifications (at rest ${Math.round(o.gap0)})`);
+    if (d < 3) fails.push(`pulled 30 px further, what's under the control center moved ${Math.round(d)} px (no stretch)`);
+    if (d > 25) fails.push(`pulled 30 px further, what's under the control center moved ${Math.round(d)} px (no damping)`);
+    if (Math.abs(d - want) > 4) fails.push(`pulled 30 px further, the stretch is ${Math.round(d)} px, not about ${Math.round(want)}`);
+    // The card follows too, not only what's under it: its first row and its top moved by the same.
+    if (Math.abs(o.rowTop() - o.rowTop0 - d) > 2) fails.push(`pulled 30 px further, the card's row moved ${Math.round(o.rowTop() - o.rowTop0)} px, what's under it ${Math.round(d)} px`);
+    if (Math.abs(o.cardTop() - o.cardTop0 - d) > 2) fails.push(`pulled 30 px further, the card's top moved ${Math.round(o.cardTop() - o.cardTop0)} px, not ${Math.round(d)}`);
+    if (o.shown() !== o.n0) fails.push(`pulled 30 px further, ${o.shown()} toggles show, not ${o.n0} (an over-pull shows no more)`);
+    // The notifications' own panel runs on to the screen's bottom, and no gap opens between it and the card.
+    if (o.ownBottom() < innerHeight - 1) fails.push(`pulled 30 px further, the notifications' panel ends ${Math.round(innerHeight - o.ownBottom())} px above the screen's bottom`);
+    if (Math.abs(o.seam() - o.seam0) > 2) fails.push(`pulled 30 px further, the seam between the card and the notifications went ${Math.round(o.seam0)} -> ${Math.round(o.seam())} px`);
   });
-  if (Math.abs(o.edge() - o.edge0) > 1) fails.push(`let go short, the panel's edge is ${Math.round(o.edge() - o.edge0)} px off its place`);
-  if (Math.abs(o.under() - o.under0) > 1) fails.push(`let go short, what's under the control center is ${Math.round(o.under() - o.under0)} px off its place`);
-  if (o.shown() !== o.n0) fails.push(`let go short, ${o.shown()} toggles show, not ${o.n0}`);
+  if (Math.abs(o.under() - o.under0) > 1) fails.push(`let go, what's under the control center is ${Math.round(o.under() - o.under0)} px off its place (no spring back)`);
+  if (Math.abs(o.rowTop() - o.rowTop0) > 1) fails.push(`let go, the card's row is ${Math.round(o.rowTop() - o.rowTop0)} px off its place`);
+  if (o.shown() !== o.n0) fails.push(`let go, ${o.shown()} toggles show, not ${o.n0}`);
   return fails;
 }
 
-/** All the way: the rest shown and laid out, what's under it below the rest, the row still. */
+/**
+ * All the way, from the compact row: the rest shown and laid out, what's under it moved down to where the whole view
+ * had it, the row still, every stack unfolded.
+ */
 async function overpullExpand() {
   const o = window.__op;
   const fails = [];
   await o.drag(260, null, o.midPull(fails, "pulling down"));
-  o.h = o.under() - o.under0;
   o.settled(fails, "pulling down");
   if (!document.querySelector(".cc3-list.whole")) fails.push("pulled 260 px further, the rest isn't shown");
-  if (o.h < 40) fails.push(`expanded, what's under the control center moved only ${Math.round(o.h)} px`);
+  if (Math.abs(o.under() - o.under0) > 1) fails.push(`expanded again, what's under the control center is ${Math.round(o.under() - o.under0)} px off the whole view's place`);
+  if (o.shown() !== o.n0) fails.push(`expanded again, ${o.shown()} toggles show, not ${o.n0}`);
   if (o.row() !== o.row0) fails.push(`the first row moved on the expand: ${o.row0} -> ${o.row()}`);
-  // (At its max height the list scrolls: the notifications may go on under the edge - never empty frost under them.)
-  if (o.gap() - o.gap0 > 3) fails.push(`expanded, ${Math.round(o.gap())} px of empty panel under the notifications (at rest ${Math.round(o.gap0)})`);
+  if (o.ownBottom() < innerHeight - 1) fails.push(`expanded, the notifications' panel ends ${Math.round(innerHeight - o.ownBottom())} px above the screen's bottom`);
   // The notifications show everything too (the user, 2026-10-24): every grouped stack unfolded into its cards.
   const stacks = [...document.querySelectorAll(".panel-body.together .notif-stack")];
   if (!stacks.length) fails.push("no grouped notifications in the shade to unfold");
@@ -583,26 +604,32 @@ async function overpullTests() {
   return fails;
 }
 
-/** Up at the list's end folds it: on the way what's under it follows the finger up; folded, all where it was. */
+/**
+ * A swipe up on the card folds it to one compact row (no half state): on the way what's under it follows the finger
+ * up; folded, only the first six toggles show, no launchers, the notifications' panel right under the card and still
+ * down to the screen's bottom, the row where it was.
+ */
 async function overpullFold() {
   const o = window.__op;
   const fails = [];
-  const list = document.querySelector(".panel-body.together .notif-list");
-  list.scrollTop = list.scrollHeight;
-  await o.frames(2);
   const from = o.under();
   await o.drag(-80, () => {
     const d = o.under() - from;
-    if (Math.abs(d + Math.min(80, o.h)) > 3) fails.push(`folding 80 px, what's under the control center moved ${Math.round(d)} px`);
+    if (d > -20 || d < -83) fails.push(`folding 80 px, what's under the control center moved ${Math.round(d)} px (not with the finger)`);
+    if (o.ownBottom() < innerHeight - 1) fails.push(`folding 80 px, the notifications' panel ends ${Math.round(innerHeight - o.ownBottom())} px above the screen's bottom`);
   }, o.midPull(fails, "folding back up"));
   o.settled(fails, "folding back up");
-  if (document.querySelector(".cc3-list.whole") || o.shown() !== o.n0) fails.push(`pulled up 80 px, still ${o.shown()} toggles shown`);
+  o.n1 = o.shown();
+  o.under1 = o.under();
+  o.h = from - o.under1;
+  if (document.querySelector(".cc3-list.whole") || o.n1 !== 6) fails.push(`pulled up 80 px, ${o.n1} toggles shown, not the one compact row of 6`);
+  if (o.h < 40) fails.push(`folded, what's under the control center came up only ${Math.round(o.h)} px`);
+  const launch = document.querySelector(".panel-body.together .cc3-launchers");
+  if (launch && launch.getClientRects().length) fails.push("folded, the launchers still show under the row (not compact)");
   if (document.querySelector(".panel-body.together .notif-stack.open")) fails.push("folded, notification stacks stay unfolded");
-  list.scrollTop = 0;
-  await o.frames(2);
-  if (Math.abs(o.under() - o.under0) > 1) fails.push(`folded, what's under the control center is ${Math.round(o.under() - o.under0)} px off its place`);
+  if (Math.abs(o.seam() - o.seam0) > 2) fails.push(`folded, the seam between the card and the notifications is ${Math.round(o.seam())} px, not ${Math.round(o.seam0)}`);
+  if (o.ownBottom() < innerHeight - 1) fails.push(`folded, the notifications' panel ends ${Math.round(innerHeight - o.ownBottom())} px above the screen's bottom`);
   if (o.row() !== o.row0) fails.push(`folded, the first row isn't where it was: ${o.row0} -> ${o.row()}`);
-  if (Math.abs(o.edge() - o.edge0) > 1) fails.push(`folded, the panel's edge is ${Math.round(o.edge() - o.edge0)} px off its place`);
   return fails;
 }
 
@@ -2546,7 +2573,7 @@ try {
       open(browser, `${ORIGIN}/index.html?mode=shade`, "shade-overpull").then(async (r) => {
         await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
         const fails = [];
-        for (const step of [overpullKit, overpullHalf, overpullShort, overpullExpand, overpullTests, overpullFold, panelTracksFinger, overpullRest]) {
+        for (const step of [overpullKit, overpullHalf, overpullCard, overpullShort, overpullTests, overpullFold, overpullExpand, panelTracksFinger, overpullRest]) {
           const out = await r.page.evaluate(step).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`]);
           fails.push(...(out ?? []));
           if (fails.length) break;

@@ -22,7 +22,7 @@ import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { overPull, overRelease } from "./overpull.ts";
 import { inWindow } from "./desktops.ts";
-import { ccEditing, ccExpanded, EXPAND_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
+import { ccEditing, ccExpanded, EXPAND_AT, FOLD_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
 import { carry, closeDrawer, dockDrag, drawer, editing, folder, menu, notif, onLibrary, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
@@ -450,7 +450,9 @@ const atListEnd = (gs: Gesture) => !gs.inList || gs.listBottom;
  */
 function ccAllWay(gs: Gesture, dy: number) {
   if (separatePanels.value === "on" || notifDrag.value != null) return false;
-  if (dy > 0) return !ccExpanded.value && gs.listTop;
+  // Down at the top: shows the rest (folded), or - already whole - the rubber band (the card and the notifications
+  // follow the finger damped and spring back, ccexpand.ts stretch/settle).
+  if (dy > 0) return gs.listTop;
   // Up from an expanded shade shuts it whole (one swipe): the fold is the control center's own area's swipe only.
   return ccExpanded.value && atListEnd(gs) && !!gs.target.closest?.(".cc, .cc3-grid, .cc-col");
 }
@@ -572,7 +574,7 @@ function settleGesture(gs: Gesture, dy: number) {
   if (isDrawerMode(mode)) return settleDrawerGesture(gs, v);
   if (mode === "notifClose") return settleNotif(v);
   // Past the threshold, or a flick its way: committed; otherwise it springs back.
-  if (mode === "ccAll") return settleCc(!ccExpanded.value ? dy > EXPAND_AT || v > FLICK : dy < -EXPAND_AT || v < -FLICK);
+  if (mode === "ccAll") return settleCc(!ccExpanded.value ? dy > EXPAND_AT || v > FLICK : dy < -FOLD_AT || v < -FLICK);
   if (mode === "panel") return settlePanel(lastDx, v);
   if (mode === "pages") settlePages(gs);
 }

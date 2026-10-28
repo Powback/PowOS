@@ -441,27 +441,28 @@ export function NotificationPanel() {
               </div>
             </>
           ) : together ? (
-            // One panel: the controls on top, the notifications under them - one list, one scroll, one cascade (the
-            // control center's rows first: its header 0 .. its second row of tiles 4, then these).
-            <div
-              class="notif-list"
-              ref={listEl}
-            >
+            // One panel: the controls a floating card on top, the notifications under it on a panel of their own that
+            // runs down to the screen's bottom (ccexpand.ts moves them as two: .notif-own is what follows the card).
+            <>
               <ControlCenter />
-              {available && items.length > 0 && (
-                <div class="notif-bar cascade" style={{ "--i": 5 }}>
-                  <span class="muted">{`${items.length} notification${items.length > 1 ? "s" : ""}`}</span>
-                  {clearable && (
-                    <span class="notif-actions icons">
-                      <button type="button" aria-label="clear all" onClick={() => powos.notifications.clearAll()}>
-                        <Icon name="notificationClearAll" />
-                      </button>
-                    </span>
+              <div class="notif-own">
+                <div class="notif-list" ref={listEl}>
+                  {available && items.length > 0 && (
+                    <div class="notif-bar cascade" style={{ "--i": 5 }}>
+                      <span class="muted">{`${items.length} notification${items.length > 1 ? "s" : ""}`}</span>
+                      {clearable && (
+                        <span class="notif-actions icons">
+                          <button type="button" aria-label="clear all" onClick={() => powos.notifications.clearAll()}>
+                            <Icon name="notificationClearAll" />
+                          </button>
+                        </span>
+                      )}
+                    </div>
                   )}
+                  {items$(6)}
                 </div>
-              )}
-              {items$(6)}
-            </div>
+              </div>
+            </>
           ) : panel.value === "control" ? (
             <ControlCenter />
           ) : (

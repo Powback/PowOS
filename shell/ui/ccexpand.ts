@@ -164,6 +164,8 @@ const OVER = 40;
 const over = (d: number) => OVER * (1 - Math.exp(-Math.max(0, d) / 100));
 /** Pulled this far (CSS px, the finger's travel) it commits on its own; a flick (gesture.ts FLICK) does too. */
 export const EXPAND_AT = 56;
+/** Folding is easier than showing (the user: "can't properly collapse"): a short swipe up on the card folds it, no half state. */
+export const FOLD_AT = 24;
 const MS = 260;
 const EASE = "cubic-bezier(0.2, 0.9, 0.3, 1)";
 
@@ -173,11 +175,11 @@ type Pull = {
   /** v3's list and its grid (laid out whole while the pull lasts: the grid's "cc-peek"), or null: classic. */
   list: HTMLElement | null;
   grid: HTMLElement | null;
-  /** v3: the panel, and how much taller it is laid out whole than folded (px; less than [h] at its max height). */
-  panel: HTMLElement | null;
-  g: number;
+  /** v3: the control center's card, and the notifications' own panel under it (what follows the card). */
+  card: HTMLElement | null;
+  own: HTMLElement | null;
   movers: Mover[];
-  /** v3: the rest's height (px) - the row's bottom to the list's, laid out whole. */
+  /** v3: how much taller the card is laid out whole than folded (px): the rest of the toggles and the launchers. */
   h: number;
   /** Shown whole when the pull began. */
   was: boolean;
@@ -188,17 +190,12 @@ let pull: Pull | null = null;
 let doneTimer = 0;
 
 /**
- * What's under the toggle grid: the quick launchers (inside .cc) and the notifications' header and list. The launchers
- * ride with the rest: left out they stayed where the laid-out grid pushed them, over the notifications, a gap above.
+ * What's under the toggle grid: the quick launchers (inside the card) and the notifications' own panel (a sibling under
+ * the card, to the screen's bottom). The launchers ride with the rest: left out they stayed where the laid-out grid
+ * pushed them, over the notifications, a gap above.
  */
-const below = () => [...document.querySelectorAll<HTMLElement>(".panel-body.together .cc3-launchers, .panel-body.together .cc ~ *")];
+const below = () => [...document.querySelectorAll<HTMLElement>(".panel-body.together .cc3-launchers, .panel-body.together > .notif-own")];
 const list3 = () => document.querySelector<HTMLElement>(".panel-body.together .cc3-list");
-
-/** The rest's height in [list] laid out whole: from the first row's bottom to the list's. */
-function restHeight(list: HTMLElement) {
-  const cells = list.querySelectorAll<HTMLElement>(".cc3-cell");
-  return cells.length > 6 ? Math.max(0, list.getBoundingClientRect().bottom - cells[5].getBoundingClientRect().bottom) : 0;
-}
 
 /** The pull under way, or a new one: v3's rest laid out (once), everything at where it is on screen. */
 function begin(): Pull {
@@ -218,37 +215,39 @@ function peeking(p: Pull) {
   return p;
 }
 
-/** What a pull writes inline: its movers, v3's grid. */
-const inline = (p: Pull) => [...p.movers.map((m) => m.el), ...(p.grid ? [p.grid] : [])];
+/** What a pull writes inline: its movers, v3's grid and card. */
+const inline = (p: Pull) => [...p.movers.map((m) => m.el), ...(p.grid ? [p.grid] : []), ...(p.card ? [p.card] : [])];
 
-/** v3: every toggle laid out (the cc-peek class on the grid, whose class preact never rewrites; the list's changes). */
+/** v3: every toggle laid out (the cc-peek class on the grid and the card, whose classes preact never rewrites; the list's changes). */
 function peekPull(): Pull | null {
   const list = list3();
   const grid = list?.querySelector<HTMLElement>(".cc3-grid");
-  if (!list || !grid) return null;
-  const panel = list.closest<HTMLElement>(".notif-panel");
-  const g = panel ? growth(panel, list, grid) : 0;
+  const card = list?.closest<HTMLElement>(".cc") ?? null;
+  if (!list || !grid || !card) return null;
+  const h = growth(card, list, grid);
   const n = grid.querySelectorAll(".cc3-cell").length;
   grid.style.setProperty("--cc-rows", String(Math.max(1, Math.ceil((n - 6) / 6))));
-  return { list, grid, panel, g, movers: below().map((el) => ({ el, gain: 1 })), h: restHeight(list), was: ccExpanded.value };
+  const own = document.querySelector<HTMLElement>(".panel-body.together > .notif-own");
+  return { list, grid, card, own, movers: below().map((el) => ({ el, gain: 1 })), h, was: ccExpanded.value };
 }
 
 /**
- * The panel's height folded, then with every toggle laid out (the grid left "cc-peek"): its edge's travel. Once per
- * pull, two layouts. Folded for the measure even if it's shown whole now - its scroll put back (the shorter list
- * clamped it).
+ * The card's height folded (one compact row: the first six toggles, no launchers), then with everything laid out (the
+ * card and its grid "cc-peek"): the travel of its bottom edge, and so of the notifications under it. Once per pull,
+ * two layouts; the state it was in put back after the measure.
  */
-function growth(panel: HTMLElement, list: HTMLElement, grid: HTMLElement) {
-  const scroller = list.closest<HTMLElement>(".notif-list");
-  const st = scroller?.scrollTop ?? 0;
-  const whole = list.classList.contains("whole");
+function growth(card: HTMLElement, list: HTMLElement, grid: HTMLElement) {
+  const [whole, lw] = [card.classList.contains("whole"), list.classList.contains("whole")];
+  card.classList.remove("whole", "cc-peek");
   list.classList.remove("whole");
-  const folded = panel.offsetHeight;
-  if (whole) list.classList.add("whole");
+  grid.classList.remove("cc-peek");
+  const folded = card.offsetHeight;
+  card.classList.add("cc-peek");
   grid.classList.add("cc-peek");
-  const g = Math.max(0, panel.offsetHeight - folded);
-  if (scroller) scroller.scrollTop = st;
-  return g;
+  const h = Math.max(0, card.offsetHeight - folded);
+  card.classList.toggle("whole", whole);
+  list.classList.toggle("whole", lw);
+  return h;
 }
 
 /** Classic: the rows spread apart from the third (its --i 3), what's under them with the last. */
@@ -256,23 +255,31 @@ function classicPull(): Pull {
   const grids = [...document.querySelectorAll<HTMLElement>(".panel-body.together .cc-main > .cc-grid")];
   const gain = (el: HTMLElement) => ((Number(el.style.getPropertyValue("--i")) || 3) - 3) / 2;
   const movers = [...grids.map((el) => ({ el, gain: gain(el) })), ...below().map((el) => ({ el, gain: 1 }))];
-  return { list: null, grid: null, panel: null, g: 0, movers, h: 0, was: ccExpanded.value };
+  return { list: null, grid: null, card: null, own: null, movers, h: 0, was: ccExpanded.value };
 }
 
-/** v3: [r] of the rest shown (px, 0..h, past h the rubber band). Classic: [r] the spread. */
+/**
+ * v3: [r] of the rest shown (px, 0..h, past h the rubber band). Classic: [r] the spread. What's under the card is
+ * carried by r - h: up while it's folded (the card is clipped to what's shown and the notifications' frost reaches on
+ * down to the screen's bottom, --cc-ext), down past h (the card follows the finger too: the over-pull's stretch).
+ */
 function place(p: Pull, r: number) {
-  if (p.grid) {
-    const k = p.h > 0 ? Math.min(1, Math.max(0, r / p.h)) : 1;
-    p.grid.style.setProperty("--cc-k", String(k));
-    peekTo(k);
-    for (const m of p.movers) m.el.style.translate = `0 ${r - p.h}px`;
-    p.panel?.style.setProperty("--cc-lift", `${Math.max(0, p.g - r)}px`);
-    return;
-  }
+  if (p.grid) return placeV3(p as Pull & { grid: HTMLElement }, r);
   for (const m of p.movers) {
     m.el.style.translate = `0 ${r * m.gain}px`;
     m.el.style.setProperty("--cc-k", String(r / 120));
   }
+}
+
+function placeV3(p: Pull & { grid: HTMLElement }, r: number) {
+  const k = p.h > 0 ? Math.min(1, Math.max(0, r / p.h)) : 1;
+  const t = r - p.h;
+  p.grid.style.setProperty("--cc-k", String(k));
+  peekTo(k);
+  for (const m of p.movers) m.el.style.translate = `0 ${m.el.closest(".cc") ? Math.min(0, t) : t}px`;
+  p.card?.style.setProperty("translate", `0 ${Math.max(0, t)}px`);
+  p.card?.style.setProperty("clip-path", `inset(0px 0px ${Math.max(0, -t)}px 0px round calc(var(--radius) * 1.5))`);
+  p.own?.style.setProperty("--cc-ext", `${Math.max(0, -t)}px`);
 }
 
 /** Following the finger: [dy] its travel, down to show (positive), up to fold (negative). */
@@ -299,8 +306,8 @@ function ease(p: Pull, r: number, on: boolean) {
   void inline(p)[0]?.offsetWidth;
   for (const m of p.movers) m.el.style.transition = `translate ${MS}ms ${EASE}`;
   p.grid?.style.setProperty("transition", `--cc-k ${MS}ms ${EASE}`);
-  // The panel's own --q keeps its transition (shell.css [data-q]); its lift eases with the rest.
-  p.panel?.style.setProperty("transition", `--q 280ms ${EASE}, --cc-lift ${MS}ms ${EASE}`);
+  p.card?.style.setProperty("transition", `translate ${MS}ms ${EASE}, clip-path ${MS}ms ${EASE}`);
+  p.own?.style.setProperty("transition", `translate ${MS}ms ${EASE}, --cc-ext ${MS}ms ${EASE}`);
   p.to = on;
   // The groups ride the same ease, from where the finger left them to the end (at the translate's duration).
   const k0 = peekK;
@@ -316,23 +323,24 @@ function ease(p: Pull, r: number, on: boolean) {
 /** The end state laid out (the render) and the pull's inline values gone in the same frame: nothing jumps. */
 function finish(p: Pull, on: boolean) {
   if (pull === p) pull = null;
-  const scroller = p.list?.closest<HTMLElement>(".notif-list");
-  const st = scroller?.scrollTop ?? 0;
+  // The notifications' own list: when the card folds it grows, its scroll is unchanged (it is not in the card's scroll).
   ccExpanded.value = on;
   // Laid out now, not at the render (a microtask away): a pull begun right after measures the right state.
   p.list?.classList.toggle("whole", on);
+  p.card?.classList.toggle("whole", on);
   clearInline(p);
-  // Folded at the list's end: the list is shorter, its scroll clamped - what's in it eases down from where it was.
-  if (scroller) slide([...scroller.children] as HTMLElement[], () => st - scroller.scrollTop);
 }
 
-/** What the pull wrote inline gone: the movers', the grid's (its peek too), the panel's lift. */
+/** What the pull wrote inline gone: the movers', the grid's (its peek too), the card's, the notifications' panel's. */
 function clearInline(p: Pull) {
   for (const el of inline(p)) {
     el.style.transition = "";
     el.style.translate = "";
     el.style.removeProperty("--cc-k");
   }
+  p.card?.style.removeProperty("clip-path");
+  p.own?.style.removeProperty("--cc-ext");
+  p.card?.classList.remove("cc-peek");
   p.grid?.classList.remove("cc-peek");
   cancelAnimationFrame(rideFrame);
   for (const a of peekAnims) a.cancel();
@@ -340,7 +348,6 @@ function clearInline(p: Pull) {
   peeked.clear();
   peekK = 0;
   ccPeeking.value = null;
-  for (const k of ["--cc-lift", "transition"]) p.panel?.style.removeProperty(k);
 }
 
 /** [els] shown [by] px higher than laid out (0: not moved), eased to their place. */
@@ -377,7 +384,7 @@ export function setExpanded(on: boolean, anchor?: HTMLElement | null) {
 /** Laid out once in state [on]: the movers played from where they were (or, [anchor], the notifications kept still). */
 function relayout(on: boolean, anchor?: HTMLElement | null) {
   const before = new Map(movers().map((el) => [el, el.getBoundingClientRect().top]));
-  const items = anchor ? document.querySelector<HTMLElement>(".panel-body.together .cc ~ .notif-items") : null;
+  const items = anchor ? document.querySelector<HTMLElement>(".panel-body.together > .notif-own .notif-items") : null;
   const itemsTop = items?.getBoundingClientRect().top ?? 0;
   clearTimeout(doneTimer);
   if (pull) finish(pull, on);
