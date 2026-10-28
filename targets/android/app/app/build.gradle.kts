@@ -95,6 +95,8 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     // Web message listeners: the shell page's native objects, to its own top frame only (shell/ShellOrigin.kt).
     implementation(libs.androidx.webkit)
+    // Health Connect: the health central (shell/HealthConnectBridge.kt, apps/health) reads what the wearables' apps wrote.
+    implementation(libs.androidx.health.connect)
     implementation(libs.compose.runtime)
     implementation(libs.compose.foundation)
     implementation(libs.compose.ui)

@@ -600,6 +600,25 @@ export interface Bridge {
     /** An option's value; with [value], sets it. "g2Raster": pictures to the G2 over its unverified render channel. */
     option(name: string, value?: boolean): Promise<boolean>;
   };
+  /**
+   * Host-optional (f307: feature-detect `powos.health`): Health Connect, read-only - what the wearables' apps wrote there
+   * (the health central, apps/health). Records are normalised; times are Unix ms; [source] is the package of the app that
+   * wrote it. Rejects where Health Connect isn't on the phone or the permission is missing (ask with grant).
+   */
+  health?: {
+    status(): Promise<HealthStatus>;
+    /** Shows Health Connect's permission dialog over PowOS when a type is missing (once); answers the status after it. */
+    grant(): Promise<HealthStatus>;
+    /** Records of [types] (all when empty) that overlap [sinceMs, untilMs] (default now). */
+    read(types: HealthType[], sinceMs: number, untilMs?: number): Promise<HealthRecord[]>;
+    /** A changes token for [types]: what `changes` continues from. */
+    token(types: HealthType[]): Promise<{ token: string }>;
+    /**
+     * Only what changed since [token]: new and updated records, ids of deleted ones, and the next token. [expired]: the
+     * token was too old (Health Connect keeps about 30 days) - read since the last sample instead; the token is fresh.
+     */
+    changes(types: HealthType[], token: string): Promise<{ token: string; records: HealthRecord[]; deleted: string[]; expired: boolean }>;
+  };
   /** The phone's notifications, for the launcher's own panel; "notifications.changed" brings the list again. */
   notifications: {
     list(): Promise<NotificationList>;
@@ -1095,4 +1114,28 @@ export interface GlassesState {
   /** Pictures: confirmed on real glasses (G1), and usable now (G2 only with the g2Raster option). */
   image: { verified: boolean; usable: boolean };
   options: Record<string, boolean>;
+}
+
+export type HealthType = "steps" | "heart_rate" | "sleep" | "exercise" | "weight" | "active_calories";
+
+export interface HealthStatus {
+  /** "none": no Health Connect on this phone; "update": its provider app needs an update. */
+  state: "ok" | "update" | "none";
+  granted: HealthType[];
+  missing: HealthType[];
+}
+
+/** One normalised Health Connect record. Units: steps count, heart_rate bpm (start = end), sleep/exercise min, weight kg, active_calories kcal. */
+export interface HealthRecord {
+  /** Stable (Health Connect's record id; heart rate: "<id>:<n>"): the same record read again upserts. */
+  id: string;
+  type: HealthType;
+  start: number;
+  end: number;
+  value: number;
+  unit: string;
+  /** The package of the app that wrote it - the wearable's own app. */
+  source: string;
+  /** Exercise: its title or Health Connect's exercise type number. */
+  detail?: string;
 }

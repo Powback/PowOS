@@ -13,6 +13,8 @@ import type {
   AppWidgetProvider,
   AssistScreen,
   Bridge,
+  HealthRecord,
+  HealthStatus,
   ChromeState,
   Cell,
   Chat,
@@ -193,6 +195,14 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       surface: (on) => call<boolean>("glasses.surface", on),
       reload: () => call("glasses.reload"),
       option: (name, value) => call<boolean>("glasses.option", name, value ?? null),
+    },
+    health: {
+      status: () => call<HealthStatus>("health.status"), // detect
+      grant: () => call<HealthStatus>("health.grant"), // detect
+      read: (types, sinceMs, untilMs) => call<HealthRecord[]>("health.read", types, sinceMs, untilMs ?? null), // detect
+      token: (types) => call<{ token: string }>("health.token", types), // detect
+      changes: (types, token) =>
+        call<{ token: string; records: HealthRecord[]; deleted: string[]; expired: boolean }>("health.changes", types, token), // detect
     },
     notifications: {
       list: () => call<NotificationList>("notifications.list"),

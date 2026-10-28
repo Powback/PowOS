@@ -17,7 +17,7 @@ import { openUrl, power, useLayoutSize, useOnScreen, useQuiet } from "./onscreen
 import { useSurface, type Surface } from "./native.ts";
 import { closeApp, openApp } from "./pages.ts";
 import { powos } from "../bridge.ts";
-import type { AppLinks, AppWidgetData } from "../types.ts";
+import type { AppLinks, AppWidgetData, Bridge } from "../types.ts";
 import { net, type Net } from "./net.ts";
 import { DetailSheet, type DetailSheetProps } from "./sheet.ts";
 
@@ -68,10 +68,16 @@ export interface IslandHost {
    */
   addAppWidget?(provider: string): Promise<"added">;
   /**
+<<<<<<< HEAD
    * A placed Android widget's data, for an island that draws it in PowOS's own style (composer "android" block,
    * native-card): the data never leaves the phone. Each call returns its stop.
    */
   appWidget?: AppWidgetHost;
+  /**
+   * Health Connect through the phone's bridge (powos.health, read-only) - the health central's source. Absent where the
+   * host has none (an older APK, the desktop): check for it, and catch the rejection of a call the APK doesn't know.
+   */
+  health?: NonNullable<Bridge["health"]>;
 }
 
 export interface AppWidgetHost {
@@ -550,4 +556,5 @@ export const host: IslandHost = {
   appLinks,
   addAppWidget,
   appWidget,
+  health: powos.health,
 };

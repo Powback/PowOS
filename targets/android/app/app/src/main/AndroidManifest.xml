@@ -2,6 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Health Connect (shell/HealthConnectBridge.kt): read-only, what the wearables' apps wrote there. Asked once from PowOS
+         (powos.health.grant); on the rooted phone `pm grant` does it too. -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+    <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
+
     <!-- system/WindowFrames: the floating windows' title bars and grips are TYPE_APPLICATION_OVERLAY windows. Without
          this declaration (dropped with the fold veil, 2026-10-16) the op reads "default" and `appops set ... allow` is a
          silent no-op: no title bars at all ("permission denied for window type 2038"). -->
@@ -78,6 +87,8 @@
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
+        <!-- Health Connect's provider app (Android 13 and older; part of the system from 14). -->
+        <package android:name="com.google.android.apps.healthdata" />
     </queries>
 
     <application
@@ -107,6 +118,27 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Health Connect needs an activity that answers "why does this app read my health data" before it shows its
+             permission dialog (Android 13 and older: the action; 14+: the permission-usage alias). Both open PowOS. -->
+        <activity-alias
+            android:name=".HealthPermissionsRationale"
+            android:targetActivity=".shell.ShellActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".ViewPermissionUsage"
+            android:targetActivity=".shell.ShellActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- Android's home screen when it should be the launcher (andro.marchy.HomeScreen switches this and the
              engine's .HomeDesktop alias; one is enabled). -->

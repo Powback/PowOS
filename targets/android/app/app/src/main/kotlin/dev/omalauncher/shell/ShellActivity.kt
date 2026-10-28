@@ -259,6 +259,7 @@ class ShellActivity : Activity() {
         data: Intent?,
     ) {
         super.onActivityResult(requestCode, resultCode, data)
+        host.bridge.health.onActivityResult(requestCode, resultCode, data)
         if (requestCode == ShellScreens.PICK_IMAGE_REQUEST) host.bridge.screens.imagePicked(data?.data?.takeIf { resultCode == RESULT_OK })
     }
 

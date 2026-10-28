@@ -92,6 +92,9 @@ class ShellBridge(
     /** The smart glasses (glasses/Glasses.kt): pairing, connection, their display, input and mic - "glasses.*" calls. */
     private val glasses = dev.omalauncher.glasses.Glasses.Client(context, activity, ::emit)
 
+    /** Health Connect, read-only (HealthConnectBridge.kt): the health central's source, "health.*" calls. */
+    val health = HealthConnectBridge(context, activity, scope)
+
     /** Set by the lock screen's face (PowosLockActivity): unlocking, through Android. */
     var lock: LockSlot? = null
 
@@ -197,6 +200,13 @@ class ShellBridge(
         main.post {
             try {
                 val a = if (args.isBlank()) JSONArray() else JSONArray(args)
+                // Health Connect's calls answer later (it is suspend, and its dialog is Android's): not through dispatch.
+                if (method.startsWith("health.")) {
+                    health.call(method, a) { result, err ->
+                        main.post { if (err == null) respond(id, result) else js(reply("reject($id, ${JSONObject.quote(err)})")) }
+                    }
+                    return@post
+                }
                 respond(id, dispatch(method, a))
             } catch (e: Exception) {
                 Log.w(TAG, "$method failed", e)
