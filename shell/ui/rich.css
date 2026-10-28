@@ -119,7 +119,7 @@
 .present-body .present-md { font-size: var(--text-body); }
 
 /* Markdown (md.ts): hierarchy by size and weight; code and tables on the soft fill; no lines. */
-.md { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; user-select: text; }
+.md { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.45; user-select: text; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
 .md p, .md ul, .md ol, .md pre, .md blockquote, .md .md-table { margin: 0 0 8px; }
@@ -132,12 +132,12 @@
 .md li > ul, .md li > ol { margin: 2px 0 0; }
 .md a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 .md code { padding: 1px 4px; background: var(--soft-fill); border-radius: 4px; font: inherit; }
-.md pre { padding: 8px 10px; overflow-x: auto; background: var(--soft-fill); border-radius: 8px; white-space: pre; }
+.md pre { max-width: 100%; padding: 8px 10px; overflow-x: auto; background: var(--soft-fill); border-radius: 8px; white-space: pre; }
 .md pre code { padding: 0; background: none; }
 .md blockquote { margin-left: 0; margin-right: 0; padding: 6px 10px; background: var(--soft-fill); border-radius: 8px; }
 .md hr { height: 8px; margin: 4px 0; border: 0; }
 .md img { display: block; max-width: 100%; border-radius: 8px; }
-.md .md-table { overflow-x: auto; }
+.md .md-table { max-width: 100%; overflow-x: auto; }
 .md table { border-collapse: collapse; font-size: 0.93em; }
 .md th, .md td { padding: 4px 10px 4px 0; text-align: left; vertical-align: top; }
 .md th { font-weight: 600; }

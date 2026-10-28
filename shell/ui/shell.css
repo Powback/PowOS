@@ -1442,6 +1442,9 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* Never sideways (the user, 2026-10-28: "when text overflows the chat the whole page breaks"): a pasted JSON's long
+     token widened the last ask and the page scrolled left. Text wraps and code scrolls inside its card instead. */
+  overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-width: none;
   touch-action: pan-y;
@@ -1483,7 +1486,9 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-view.wide > .ai-side { grid-column: 1; grid-row: 2 / 4; margin-bottom: var(--ai-foot); }
 .ai-view.wide > .ai-talk { grid-column: 2; grid-row: 2; flex-direction: column-reverse; }
 /* The whole conversation (powai.tsx History): reversed, the pane opens at the newest and holds it; short, it sits on top. */
-.ai-talk-in { display: flex; flex-direction: column; gap: 14px; margin-bottom: auto; }
+.ai-talk-in { display: flex; flex-direction: column; gap: 14px; margin-bottom: auto; min-width: 0; }
+/* No child of the conversation is wider than its pane: flex items' min-width defaults to their longest word. */
+.ai-scroll > *, .ai-talk-in > *, .ai-card > *, .ai-history-list > * { min-width: 0; max-width: 100%; }
 .ai-view.wide > .ai-compose { grid-column: 2; grid-row: 3; margin-bottom: var(--ai-foot); }
 /*
  * The AI page's scrollers run the page's full height (the user, 2026-10-28, 4th time: "the cutoff"): no clip at the header
@@ -1516,14 +1521,15 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-board { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
 html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-heading { margin: 0 0 6px 2px; font-size: var(--text-small); font-weight: normal; }
-.ai-card { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
-.ai-asked { font-weight: bold; }
+.ai-card { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* The ask as typed: its line breaks kept, a long unbroken token (JSON, a path) wraps inside the card. */
+.ai-asked { font-weight: bold; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .ai-steps { display: flex; flex-direction: column; gap: 2px; font-size: var(--text-small); }
 .ai-step .ok { color: var(--accent-text); }
 .ai-step .fail, .ai-note.error { color: var(--color-red); }
 .ai-step .run { color: var(--color-muted); }
 .ai-answer { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; user-select: text; max-height: 40vh; overflow-y: auto; }
-.ai-note, .ai-thinking { font-size: var(--text-small); }
+.ai-note, .ai-thinking { font-size: var(--text-small); overflow-wrap: anywhere; }
 .ai-empty { padding: 30px 6px; text-align: center; font-size: var(--text-small); }
 
 /* ui/pending.tsx: the shared "being made" building block - app/widget creation placeholders, and the being-built
