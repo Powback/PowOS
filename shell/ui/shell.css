@@ -2497,6 +2497,10 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .home.wide:has(.ai-panel.wide) > .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
 .home.wide > .stage > .launcher-clip, .home.wide:not(:has(> .bar)) > .stage > .launcher-clip { inset: 0; transform: none; }
 .home.wide > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
+/* Desktop mode spreads the drawer across the screen (the user, 2026-10-28: "use the width, more columns"): the panel
+   between the side insets up to 1600 px, centred, the grid's auto-fill adding columns of the phone's tile size, the
+   A-Z bar at the panel's right edge. Folded keeps the 600 px column (.drawer). */
+.home.wide .drawer { max-width: 1600px; width: 100%; box-sizing: border-box; }
 /* The bar under it stays: no slide, no fade, still tappable (PowOS AI's wide panel still covers the foot). */
 .home.wide:not(.dock-left):not(.dock-right):not(:has(.ai-panel.wide)) > .dock { transform: none; opacity: 1; pointer-events: auto; }
 
