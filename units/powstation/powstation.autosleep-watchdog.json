@@ -1,0 +1,42 @@
+{
+  "id": "powstation.autosleep-watchdog",
+  "name": "powstation: autosleep-watchdog",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "infrastructure; Compose-managed by powstation",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "autosleep-watchdog"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powstation",
+    "service": "autosleep-watchdog",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/PowStation -f /Users/macback/Projects/PowStation/docker-compose.yaml --project-name powstation stop autosleep-watchdog"
+    ],
+    "keep": [
+      "/Users/macback/Projects/PowStation/data/autosleep",
+      "/sys/fs/cgroup"
+    ]
+  },
+  "limits": {
+    "memory": "50331648",
+    "cpus": 0.1,
+    "pids": 16
+  }
+}

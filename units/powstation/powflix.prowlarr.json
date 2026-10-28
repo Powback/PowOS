@@ -1,0 +1,37 @@
+{
+  "id": "powflix.prowlarr",
+  "name": "powflix: prowlarr",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "media-support; Compose-managed by powflix",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "prowlarr"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powflix",
+    "service": "prowlarr",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/Powflix -f /Users/macback/Projects/Powflix/docker-compose.yml --project-name powflix stop prowlarr"
+    ],
+    "keep": [
+      "/Users/macback/Projects/Powflix/config/prowlarr"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

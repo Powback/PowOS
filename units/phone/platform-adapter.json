@@ -1,0 +1,11 @@
+{
+  "id": "platform-adapter",
+  "name": "PowOS Compose platform adapter",
+  "kind": "package",
+  "owner": "system:powos-deploy",
+  "purpose": "Validate and inspect Compose workload/storage/access contracts and register existing services as PowOS units. Runs only on demand; does not schedule workloads or move data.",
+  "installedBy": "PowOS rootfs image and targets/android/rooted/powos-deploy.sh",
+  "files": ["/usr/bin/pow-compose", "/usr/lib/powos/apps/powos-platform"],
+  "autosleep": "never",
+  "remove": {"keep": ["/etc/powos/units.d", "/var/lib/powos"]}
+}

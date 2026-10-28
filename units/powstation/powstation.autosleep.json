@@ -1,0 +1,43 @@
+{
+  "id": "powstation.autosleep",
+  "name": "powstation: autosleep",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "infrastructure; Compose-managed by powstation",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "autosleep"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powstation",
+    "service": "autosleep",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/PowStation -f /Users/macback/Projects/PowStation/docker-compose.yaml --project-name powstation stop autosleep"
+    ],
+    "keep": [
+      "/var/run/docker.sock",
+      "/Users/macback/Projects/PowStation/data/autosleep",
+      "/sys/fs/cgroup"
+    ]
+  },
+  "limits": {
+    "memory": "134217728",
+    "cpus": 0.5,
+    "pids": 64
+  }
+}

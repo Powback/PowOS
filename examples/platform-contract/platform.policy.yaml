@@ -1,0 +1,156 @@
+# Proposed PowOS fleet policy. No current tool loads or enforces this file.
+# This is not a Docker Compose file and must not be passed to compose up.
+schema: powos.platform-policy/v1-draft
+status: review-only
+ownership:
+  infrastructure: single-personal-operator
+  serviceUsers: powauth-accounts
+  distinction: A service account does not grant device administration or access to other datasets.
+
+authority:
+  projectDefinition: existing-compose-or-quadlet-or-native-app-manifest
+  localInventory: existing-powos-units
+  fleetView: extend-existing-powos-units-publish
+  deploymentEntry: extend-existing-pow-compose
+  avoidCommand: powos compose # Already means app/widget composition, not Docker Compose.
+  localPolicyCache: required
+  oneLifecycleControllerPerWorkload: true
+  offline: Existing locally configured workloads continue without the fleet view.
+  enrollment: explicit-owner-action
+  discoveryIsNotDeploymentAuthorization: true
+
+bootstrap:
+  availableLocally:
+    - kernel-and-rootfs
+    - local-runtime-and-network-configuration
+    - device-identity-and-recovery-access
+    - essential-unit-manifests-and-runtime-images
+    - trusted-catalog-verification-keys
+    - minimum-ui-fonts-and-selected-offline-assets
+  sharedServicesStartWithoutCDN:
+    - dns
+    - ingress
+    - powauth
+    - storage-access
+    - powcdn
+  doNotRequire: Remote control-plane availability to unlock local boot or start its recovery tools.
+
+deviceClasses:
+  server:
+    role: shared-services-and-durable-storage
+    scheduling: explicit-placement
+  desktop:
+    role: interactive-apps-builds-and-capability-specific-services
+    scheduling: preserve-interactive-resource-headroom
+  console:
+    role: local-games-and-streaming
+    scheduling: prioritize-foreground-game
+  phone:
+    role: local-app-runtime-and-remote-service-client
+    scheduling: battery-thermal-and-connectivity-aware
+    assets: selected-verified-local-copies
+  watch:
+    role: companion-or-supported-native-runtime
+    gateway: paired-device-when-needed
+  xr:
+    role: companion-display-input-and-sensors-or-supported-native-runtime
+    gateway: paired-phone-desktop-or-console-when-needed
+  vr:
+    status: future-capability-profile
+    role: local-or-streamed-interactive-session
+  rule: Class is a default; actual CPU architecture, GPU, memory, runtime and network capabilities govern placement.
+
+storage:
+  roles:
+    state: Local live databases/worlds; application-consistent backups; never evict.
+    durable: Completed authoritative content; explicit retention and backup decision; never evict as cache.
+    scratch: Active temporary work; reserve space before jobs; application-aware cleanup only.
+    cache: Verified reproducible copies; bounded eviction; retain offline pins.
+  existingPowCacheShare: Mixed durable, backup and cache content; classify each subtree, preserve existing paths.
+  powStorage: Do not create Mac mounts or exports.
+  accountingDomains:
+    - mac-data-volume
+    - colima-filesystem
+    - nas-approved-subtree
+    - each-device-local-filesystem
+  admission:
+    status: requires-implementation
+    reserveBefore: [download, unpack, build, publish, cache-fill]
+    reserveComponents: [input, expanded-output, temporary-copy, concurrent-work, safety-headroom]
+    hostReserveCandidate: 50GiB # Proposed starting floor, not measured or applied.
+    currentHostBelowCandidate: true # 27 GiB free during this review; remeasure before use.
+    newCDNCacheAllocation: 0GiB # Until free space and budgets have been reviewed.
+    measurement: Track shared physical capacity as well as VM/filesystem capacity; avoid double-counting.
+    enforcement: A label or local Docker volume is not a filesystem quota.
+    cleanup: Never broadly prune Docker build caches, worlds, credentials or agent workspaces.
+
+access:
+  provider: PowAuth
+  existingImplementation:
+    project: PowAuth
+    lineage: Authelia-fork
+    middleware: authelia@docker
+    preserveExistingRoutePolicies: true
+  newServiceDefault: private
+  independentDimensions:
+    exposure: [device-local, lan-vpn, internet]
+    audience: [owner, authenticated-users, explicitly-anonymous]
+  browser: Use the existing PowAuth forward-auth integration and per-service policy.
+  nativeClient: Select a supported token or application-login flow; do not assume browser redirects work.
+  publisher: Project-scoped credential via secret reference; never a shared owner password in labels.
+  cache: Authorize private reads before serving cached bytes, including range requests.
+  offline: Define explicit offline entitlement; never promise instant revocation on a disconnected device.
+  unauthenticatedRequest: Must not wake protected workload before the auth check.
+
+lifecycle:
+  profiles:
+    infrastructure: always
+    database: never-sleep-until-application-specific-support
+    web: http-idle
+    web-dev: http-idle-no-deep-stop
+    game-server: always-until-player-job-and-protocol-wake-support
+    job: run-to-completion
+    media: always-until-playback-download-and-transcode-signals
+    gpu-model: application-managed-model-unload
+    asset-delivery: always
+  adapters:
+    powstation:
+      existing: powos.autosleep.* plus Traefik autosleep@file
+      grouping: existing-group-label
+      limitations: Freeze/pause retains RAM; CRIU restore currently disabled; healthchecks can delay wake.
+    powosContainer:
+      existing: io.powos.autosleep
+      example: idle=900,mode=pause,stop=0
+      limitations: Do not assume PowStation group/dependency semantics exist here.
+    nativeApp:
+      existing: manifest autosleep plus powos-sleepd/powos-sleep-gui
+    quadlet:
+      existing: systemd/Podman plus registered PowOS unit
+      note: Keep working GPU Quadlets; no migration merely for formatting consistency.
+  prerequisites:
+    - Verify controller support on the selected host before enabling a policy.
+    - Unknown activity or lost dependency heartbeat keeps stateful work awake.
+    - Active playback, games, recordings, builds and XR sessions hold an activity lease.
+    - Implement authenticated bounded leases before relying on them; they do not exist as a fleet contract yet.
+    - Graceful shutdown and wake readiness are distinct from Compose depends_on startup ordering.
+
+cdn:
+  status: not-implemented
+  role: durable-publication-and-bounded-delivery-cache
+  consumer: HTTPS asset download with trusted catalog, digest verification and atomic activation
+  deviceCache: local, bounded, offline pins preserved
+  firstConsumers: [minecraft-modpacks, powos-android-releases, published-scenes]
+  namespaceOwnership: project-scoped-with-powauth-access-policy
+  localName: cdn.pow
+  tls: Trust strategy required; cdn.pow is not automatically HTTPS-capable or reachable off-LAN.
+  externalAccess: Explicit VPN or approved real hostname and TLS; preserve account checks.
+  publishing: Commit object first, immutable catalog second, mutable channel pointer last.
+  consistency: Model versions, server modpacks, APK/rootfs hashes and client catalogs must remain compatible.
+  routing: Verify reload; current VirtioFS dynamic-file notifications are documented as unreliable.
+
+implementationOrder:
+  - Read-only Compose/x-pow inventory mapped to the existing unit registry.
+  - Report effective host/controller/access/storage policies and unsupported requests.
+  - Add shared capacity accounting and admission; keep paths and existing deployments.
+  - Implement one PowCDN publisher and one PowOS consumer with offline verification.
+  - Add dependency/activity adapters, then opt game/media workloads into sleep.

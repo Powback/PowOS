@@ -1,0 +1,63 @@
+{
+  "status": "historical-review-proposals",
+  "generatedFrom": "local working trees, 2026-10-26",
+  "entries": [
+    {
+      "id": "ararat",
+      "source": "Ararat/docker-compose.yml",
+      "proposal": "ararat.compose.yaml",
+      "projectDirectory": "/Users/macback/Projects/Ararat",
+      "services": 1
+    },
+    {
+      "id": "minecraft",
+      "source": "minecraft-create121/docker-compose.yaml",
+      "proposal": "minecraft.compose.yaml",
+      "projectDirectory": "/Users/macback/Projects/minecraft-create121",
+      "services": 2
+    },
+    {
+      "id": "mcwebviewer",
+      "source": "McWebViewer/docker-compose.yaml",
+      "proposal": "mcwebviewer.compose.yaml",
+      "projectDirectory": "/Users/macback/Projects/McWebViewer",
+      "services": 3
+    },
+    {
+      "id": "powflix",
+      "source": "Powflix/docker-compose.yml",
+      "proposal": "powflix.compose.yaml",
+      "projectDirectory": "/Users/macback/Projects/Powflix",
+      "services": 15
+    },
+    {
+      "id": "android",
+      "source": "android-app-dev/docker-compose.yml",
+      "proposal": "android.compose.yaml",
+      "projectDirectory": "/Users/macback/Projects/android-app-dev",
+      "services": 9
+    },
+    {
+      "id": "spacetimeai",
+      "source": "SpaceTimeAI/docker-compose.yml",
+      "proposal": "spacetimeai.compose.yaml",
+      "projectDirectory": "/Users/macback/Projects/SpaceTimeAI",
+      "services": 10
+    },
+    {
+      "id": "scenes",
+      "source": "DroneSplat/scenes-pow/docker-compose.yml",
+      "proposal": "scenes.compose.yaml",
+      "projectDirectory": "/Users/macback/Projects/DroneSplat/scenes-pow",
+      "services": 1
+    },
+    {
+      "id": "powstation",
+      "source": "PowStation/docker-compose.yaml",
+      "proposal": "powstation.compose.yaml",
+      "projectDirectory": "/Users/macback/Projects/PowStation",
+      "services": 23
+    }
+  ],
+  "supersededBy": "../../docs/PLATFORM.md and live project Compose files"
+}

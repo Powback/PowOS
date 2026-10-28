@@ -1,0 +1,38 @@
+{
+  "id": "scenes.scenes-nginx",
+  "name": "scenes-pow: scenes-nginx",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "asset-origin; Compose-managed by scenes-pow",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "scenes-nginx"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "scenes-pow",
+    "service": "scenes-nginx",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/DroneSplat/scenes-pow -f /Users/macback/Projects/DroneSplat/scenes-pow/docker-compose.yml --project-name scenes-pow stop scenes-nginx"
+    ],
+    "keep": [
+      "powcache-scenes",
+      "/Users/macback/Projects/DroneSplat/scenes-pow/scenes-nginx.conf"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

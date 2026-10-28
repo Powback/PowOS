@@ -1,0 +1,38 @@
+{
+  "id": "spacetimeai.stdb",
+  "name": "spacetimeai: stdb",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "database; Compose-managed by spacetimeai",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "spacetimeai-stdb"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "spacetimeai",
+    "service": "stdb",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/SpaceTimeAI -f /Users/macback/Projects/SpaceTimeAI/docker-compose.yml --project-name spacetimeai stop stdb"
+    ],
+    "keep": [
+      "stdb_data",
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/server-config"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

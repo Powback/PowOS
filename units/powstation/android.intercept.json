@@ -1,0 +1,37 @@
+{
+  "id": "android.intercept",
+  "name": "android-app-dev: intercept",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "support; Compose-managed by android-app-dev",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "android-intercept"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "android-app-dev",
+    "service": "intercept",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/android-app-dev -f /Users/macback/Projects/android-app-dev/docker-compose.yml --project-name android-app-dev stop intercept"
+    ],
+    "keep": [
+      "intercept-data"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

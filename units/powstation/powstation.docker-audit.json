@@ -1,0 +1,38 @@
+{
+  "id": "powstation.docker-audit",
+  "name": "powstation: docker-audit",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "infrastructure; Compose-managed by powstation",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "docker-audit"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powstation",
+    "service": "docker-audit",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/PowStation -f /Users/macback/Projects/PowStation/docker-compose.yaml --project-name powstation stop docker-audit"
+    ],
+    "keep": [
+      "/var/run/docker.sock",
+      "/Users/macback/Projects/PowStation/data/docker-audit"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

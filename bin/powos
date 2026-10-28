@@ -176,6 +176,7 @@ Layers & rollback:
 
 Packages, containers & build:
   units               What is installed/running here: owner, purpose, status, limits (check/remove/enforce)
+  platform            Compose policy: check, plan, fleet, units, register, status (same adapter as pow-compose)
   containers          List containers and images
   containers run      Run a container with hard limits (--memory/--cpus/--pids-limit; phone too)
   containers ps       Containers with their limits; exec/limits/check: see containers --help
@@ -3202,6 +3203,12 @@ case "${1:-}" in
         # Speech to text on the GPU server, stt.pow (lib/apps/powos-transcribe; hosts/gpu-195 stt-batch unit).
         shift
         exec python3 "$POWOS_LIB/apps/powos-transcribe" "$@"
+        ;;
+    platform)
+        shift
+        _platform_cli="$POWOS_LIB/../bin/pow-compose"
+        [[ -f "$_platform_cli" ]] || _platform_cli=/usr/bin/pow-compose
+        exec bash "$_platform_cli" "$@"
         ;;
     units|unit)
         # Everything installed or running on this host, with owner, purpose, limits and removal (lib/apps/powos-units).

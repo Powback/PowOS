@@ -1,0 +1,39 @@
+{
+  "id": "powflix.homarr",
+  "name": "powflix: homarr",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "media-support; Compose-managed by powflix",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "homarr"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powflix",
+    "service": "homarr",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/Powflix -f /Users/macback/Projects/Powflix/docker-compose.yml --project-name powflix stop homarr"
+    ],
+    "keep": [
+      "/Users/macback/Projects/Powflix/config/homarr",
+      "/Users/macback/Projects/Powflix/config/homarr/icons",
+      "/var/run/docker.sock"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

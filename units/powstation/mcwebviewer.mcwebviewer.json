@@ -1,0 +1,45 @@
+{
+  "id": "mcwebviewer.mcwebviewer",
+  "name": "mcwebviewer: mcwebviewer",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "web; Compose-managed by mcwebviewer",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "mcwebviewer"
+    }
+  ],
+  "autosleep": {
+    "idle": "15m",
+    "mode": "pause"
+  },
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "mcwebviewer",
+    "service": "mcwebviewer",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "group": "mcwebviewer",
+      "idle": "15m",
+      "policy": "http-idle"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/McWebViewer -f /Users/macback/Projects/McWebViewer/docker-compose.yaml --project-name mcwebviewer stop mcwebviewer"
+    ],
+    "keep": [
+      "/Users/macback/Projects/minecraft-create121/data/world",
+      "/Users/macback/Projects/minecraft-create121/data/mods",
+      "/Users/macback/Projects/McWebViewer/.cache",
+      "/Users/macback/Projects/McWebViewer/dist"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

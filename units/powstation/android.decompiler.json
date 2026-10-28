@@ -1,0 +1,41 @@
+{
+  "id": "android.decompiler",
+  "name": "android-app-dev: decompiler",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "support; Compose-managed by android-app-dev",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "android-decompiler"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "android-app-dev",
+    "service": "decompiler",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/android-app-dev -f /Users/macback/Projects/android-app-dev/docker-compose.yml --project-name android-app-dev stop decompiler"
+    ],
+    "keep": [
+      "/Users/macback/Projects/android-app-dev/apks",
+      "/Users/macback/Projects/android-app-dev/decompiled",
+      "/Users/macback/Projects/android-app-dev/output",
+      "/Users/macback/Projects/android-app-dev/reports",
+      "android-keystores"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

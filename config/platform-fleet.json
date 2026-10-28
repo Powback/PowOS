@@ -1,0 +1,29 @@
+{
+  "schema": "powos.fleet/v1",
+  "projects": [
+    {
+      "compose": "../../Ararat/docker-compose.yml"
+    },
+    {
+      "compose": "../../minecraft-create121/docker-compose.yaml"
+    },
+    {
+      "compose": "../../McWebViewer/docker-compose.yaml"
+    },
+    {
+      "compose": "../../Powflix/docker-compose.yml"
+    },
+    {
+      "compose": "../../android-app-dev/docker-compose.yml"
+    },
+    {
+      "compose": "../../SpaceTimeAI/docker-compose.yml"
+    },
+    {
+      "compose": "../../DroneSplat/scenes-pow/docker-compose.yml"
+    },
+    {
+      "compose": "../../PowStation/docker-compose.yaml"
+    }
+  ]
+}

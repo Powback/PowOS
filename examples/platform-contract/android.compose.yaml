@@ -1,0 +1,289 @@
+# REVIEW PROPOSAL ONLY; not deployed. Full copy of android-app-dev/docker-compose.yml.
+# Relative paths belong to android-app-dev, not this examples directory.
+# Validate with --project-directory /Users/macback/Projects/android-app-dev.
+# x-pow is proposed metadata, ignored by Docker Compose and current PowOS tools.
+# io.powos.unit ownership labels require corresponding unit registrations.
+# No storage quota, backup schedule, dependency lease, or publisher is created by x-pow.
+services:
+  # Main Android APK builder - builds any project
+  android-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: android-builder
+    volumes:
+      - ./output:/app/output
+      - ./projects:/app/projects
+      - ./scripts:/app/scripts
+      - gradle-cache:/root/.gradle
+      - android-keystores:/app/keystores
+      - /Users/macback/Projects:/Projects
+    environment:
+      - ANDROID_SDK_ROOT=/opt/android-sdk
+      - PROJECT=${PROJECT:-webview-app}
+      - KEYSTORE_DIR=/app/keystores
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    command: bash -c "scripts/build-gradle.sh ${PROJECT:-webview-bridge-gradle}"
+    networks:
+      - android-net
+    labels:
+      io.powos.unit: android.android-builder
+      powos.autosleep: never
+    x-pow:
+      role: build-job
+      lifecycle:
+        policy: job
+        sleep: never-during-build
+      admission:
+        status: proposed
+        requires:
+          - host-scratch-reservation
+
+  # Web server for APK distribution (UI + downloads) and bridge testing
+  web-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.webserver
+    container_name: android-webserver
+    # Survive reboots and daemon restarts; only a deliberate `docker compose stop`
+    # keeps it down. Every other long-lived service here already has this.
+    restart: unless-stopped
+    ports:
+      - "9091:80"
+    volumes:
+      - ./webserver:/usr/share/nginx/html
+      - ./output:/usr/share/nginx/html/apk:ro
+      - ./webserver/bridge-test:/usr/share/nginx/html/bridge-test
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.android.rule: Host(`android.pow`)
+      traefik.http.routers.android.entrypoints: web
+      traefik.http.services.android.loadbalancer.server.port: "80"
+      io.powos.unit: android.web-server
+      powos.autosleep: never
+    networks:
+      - android-net
+      - traefik
+    x-pow:
+      role: asset-origin
+      lifecycle:
+        policy: always
+      publication:
+        namespace: powos-android
+        mode: publish-snapshot
+        status: requires-publisher
+        preserveUrls:
+          - http://android.pow/apk/
+        releaseRule: Publish rootfs, checksums, catalog and APK coherently; never cache the bridge or telemetry routes.
+
+  # Android Emulator with noVNC web interface
+  android-emulator:
+    image: budtmo/docker-android:emulator_14.0
+    container_name: android-emulator
+    privileged: true
+    user: "0:0"
+    entrypoint: [ "/bin/bash", "-c" ]
+    command:
+      - |
+        # Fix: add root to /etc/passwd as first line (needed by sudo for KVM setup)
+        # The emulator's change_permission() removes it via sed -i '1d' after use
+        if ! grep -q '^root:' /etc/passwd; then
+          printf 'root:x:0:0:root:/root:/bin/bash\n' | cat - /etc/passwd > /tmp/passwd.tmp
+          cp /tmp/passwd.tmp /etc/passwd && rm /tmp/passwd.tmp
+        fi
+        exec runuser -u androidusr -- /home/androidusr/docker-android/mixins/scripts/run.sh
+    ports:
+      - "5554:5554"
+      - "5555:5555"
+      - "6081:6080"
+    environment:
+      - EMULATOR_DEVICE=Samsung Galaxy S10
+      - WEB_VNC=true
+      - APPIUM=false
+      - EMULATOR_TIMEOUT=300
+    devices:
+      - /dev/kvm
+    group_add:
+      - "993" # kvm group for hardware acceleration
+    networks:
+      - android-net
+    labels:
+      io.powos.unit: android.android-emulator
+      powos.autosleep: never
+
+  # APK Decompiler - reverse engineering toolkit
+  decompiler:
+    build:
+      context: .
+      dockerfile: Dockerfile.decompiler
+    container_name: android-decompiler
+    volumes:
+      - ./apks:/app/apks
+      - ./decompiled:/app/decompiled
+      - ./output:/app/output
+      - ./reports:/app/reports
+      - android-keystores:/app/keystores
+    networks:
+      - android-net
+    # For ADB access to emulator
+    depends_on:
+      - android-emulator
+    labels:
+      io.powos.unit: android.decompiler
+      powos.autosleep: never
+
+  # Security scan report server — serves HTML/JSON reports at scan.pow
+  scan-reports:
+    image: nginx:alpine
+    container_name: android-scan-reports
+    restart: unless-stopped
+    volumes:
+      - ./reports:/usr/share/nginx/html:ro
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.scan.rule: Host(`scan.pow`)
+      traefik.http.routers.scan.entrypoints: web
+      traefik.http.services.scan.loadbalancer.server.port: "80"
+      io.powos.unit: android.scan-reports
+      powos.autosleep: never
+    networks:
+      - traefik
+
+  # Android Remote Control - device automation with UI helpers
+  android-remote:
+    build:
+      context: ./tools/android-remote
+      dockerfile: Dockerfile
+    container_name: android-remote
+    stdin_open: true
+    tty: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./output:/app/output
+      - ./tools/android-remote/screenshots:/app/screenshots
+      - ./tools/android-remote/recipes:/app/recipes
+      - adb-keys:/root/.android
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /Users/macback/Projects:/Projects
+    environment:
+      - ADB_DEVICE=${ADB_DEVICE:-}
+      - ADB_SERVER_SOCKET=tcp:host.docker.internal:5037
+    networks:
+      - android-net
+    restart: unless-stopped
+    labels:
+      io.powos.unit: android.android-remote
+      powos.autosleep: never
+
+  # Traffic dashboard — real-time per-app network monitor
+  traffic-dashboard:
+    image: nginx:alpine
+    container_name: traffic-dashboard
+    restart: unless-stopped
+    volumes:
+      - ./projects/traffic-dashboard/index.html:/usr/share/nginx/html/index.html:ro
+      - ./projects/traffic-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.traffic.rule: Host(`traffic.pow`)
+      traefik.http.routers.traffic.entrypoints: web
+      traefik.http.services.traffic.loadbalancer.server.port: "80"
+      io.powos.unit: android.traffic-dashboard
+      powos.autosleep: never
+    networks:
+      - android-net
+      - traefik
+
+  # Telemetry service — Android crash reporting
+  telemetry:
+    build:
+      context: ./telemetry
+      dockerfile: Dockerfile
+    container_name: android-telemetry
+    restart: unless-stopped
+    volumes:
+      - telemetry-data:/data
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.telemetry.rule: Host(`android-telemetry.pow`)
+      traefik.http.routers.telemetry.entrypoints: web
+      traefik.http.services.telemetry.loadbalancer.server.port: "8080"
+      io.powos.unit: android.telemetry
+      powos.autosleep: never
+    networks:
+      - android-net
+      - traefik
+
+  # Intercept Dashboard — unified patch + proxy workflow UI
+  intercept:
+    build:
+      context: ./tools/intercept
+      dockerfile: Dockerfile
+    container_name: android-intercept
+    restart: unless-stopped
+    volumes:
+      - intercept-data:/data
+    environment:
+      - PORT=9099
+      - MITMPROXY_API=http://mitmproxy:8081
+      - MITMPROXY_WEB=http://mitm.pow
+      - DATA_DIR=/data
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.intercept.rule: Host(`intercept.pow`)
+      traefik.http.routers.intercept.entrypoints: web
+      traefik.http.services.intercept.loadbalancer.server.port: "9099"
+      io.powos.unit: android.intercept
+      powos.autosleep: never
+    networks:
+      - android-net
+      - traefik
+
+volumes:
+  gradle-cache:
+    name: android-gradle-cache
+    external: true
+  adb-keys:
+    name: android-adb-keys
+    external: true
+  android-keystores:
+    name: android-keystores
+  telemetry-data:
+    name: android-telemetry-data
+  intercept-data:
+    name: android-intercept-data
+
+networks:
+  android-net:
+    driver: bridge
+  traefik:
+    external: true
+x-pow:
+  schema: powos.platform/v1-draft
+  status: proposal-not-enforced
+  source: android-app-dev/docker-compose.yml
+  host: powstation
+  runtime:
+    engine: docker
+    lifecycleAuthority: powstation-autosleep
+  identity: Keep the existing Compose project name; unit IDs below are proposed registrations.
+  datasets:
+    output:
+      role: published-source
+      mounts:
+        - service: android-builder
+          target: /app/output
+        - service: web-server
+          target: /usr/share/nginx/html/apk
+      cleanup: supported-release-retention
+      publish: completed-builds-only
+    keys:
+      role: secret-state
+      mounts:
+        - service: android-builder
+          target: /app/keystores
+      cdn: forbidden
+      backup: encrypted-separate-policy
+  notes:
+    - The entire android-app-dev project is excluded by the current PowStation autosleep never-list.

@@ -1,0 +1,42 @@
+{
+  "id": "android.android-builder",
+  "name": "android-app-dev: android-builder",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "build-job; Compose-managed by android-app-dev",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "android-builder"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "android-app-dev",
+    "service": "android-builder",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "job"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/android-app-dev -f /Users/macback/Projects/android-app-dev/docker-compose.yml --project-name android-app-dev stop android-builder"
+    ],
+    "keep": [
+      "/Users/macback/Projects/android-app-dev/output",
+      "/Users/macback/Projects/android-app-dev/projects",
+      "/Users/macback/Projects/android-app-dev/scripts",
+      "gradle-cache",
+      "android-keystores",
+      "/Users/macback/Projects"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

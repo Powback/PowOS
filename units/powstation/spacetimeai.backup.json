@@ -1,0 +1,42 @@
+{
+  "id": "spacetimeai.backup",
+  "name": "spacetimeai: backup",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "backup-worker; Compose-managed by spacetimeai",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "spacetimeai-backup"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "spacetimeai",
+    "service": "backup",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/SpaceTimeAI -f /Users/macback/Projects/SpaceTimeAI/docker-compose.yml --project-name spacetimeai stop backup"
+    ],
+    "keep": [
+      "stdb_data",
+      "blobs",
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/deploy/SpaceTimeAI/tools",
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/server-config",
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/cli-config",
+      "powcache"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

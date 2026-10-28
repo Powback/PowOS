@@ -1,0 +1,39 @@
+{
+  "id": "powflix.request-reconciler",
+  "name": "powflix: request-reconciler",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "media-support; Compose-managed by powflix",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "request-reconciler"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powflix",
+    "service": "request-reconciler",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/Powflix -f /Users/macback/Projects/Powflix/docker-compose.yml --project-name powflix stop request-reconciler"
+    ],
+    "keep": [
+      "/Users/macback/Projects/Powflix/request-reconciler/reconcile.py",
+      "/Users/macback/Projects/Powflix/config/jellyseerr",
+      "powcache-media"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

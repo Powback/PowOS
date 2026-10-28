@@ -1,0 +1,39 @@
+{
+  "id": "spacetimeai.control",
+  "name": "spacetimeai: control",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "agent-platform; Compose-managed by spacetimeai",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "spacetimeai-control"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "spacetimeai",
+    "service": "control",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/SpaceTimeAI -f /Users/macback/Projects/SpaceTimeAI/docker-compose.yml --project-name spacetimeai stop control"
+    ],
+    "keep": [
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/deploy/SpaceTimeAI/agents",
+      "agents_node_modules",
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/tokens"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

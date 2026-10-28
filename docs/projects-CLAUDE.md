@@ -1,5 +1,42 @@
 # PowOS Projects — service exposure via Traefik
 
+## PowOS fleet integration (2026-10-26)
+
+The operational contract is documented in `PowOS/docs/PLATFORM.md` (relative to `~/Projects`). PowOS is the
+owner's cross-device runtime and management layer; PowStation is the shared server deployment, and PowAuth
+manages accounts for exposed services. Keep native apps and GPU Quadlets in their existing runtimes.
+
+Use the shared `PowStation/bin/pow-compose` wrapper for Compose operations. From `~/Projects`:
+
+```sh
+PowStation/bin/pow-compose fleet --manifest PowOS/config/platform-fleet.json --json
+PowStation/bin/pow-compose --project-directory <project-dir> -f <project-dir>/docker-compose.yml check
+```
+
+The eight adopted projects declare `x-pow.schema: powos.platform/v1`, service policy in top-level
+`x-pow.services`, and one storage declaration per persistent mount in `x-pow.datasets`. Every service carries
+`io.powos.unit`; `pow-compose units` exports records and `pow-compose register` installs them through the
+existing PowOS unit registry. `powos platform` exposes the same adapter. Compose policy is validated before
+starts; direct `docker compose` bypasses this preflight. Preserve project names and existing volumes.
+
+Existing Traefik and autosleep labels remain the enforcement mechanisms. Keep one lifecycle controller per
+workload. Games/media stay awake until their activity and wake integrations exist. Never freeze infrastructure,
+state stores, active jobs or agent fleets just because CPU is low. Host placement metadata does not migrate data.
+
+Public browser routes use PowAuth (`authelia@docker`, backed by `powauth:latest`). When a route also sleeps,
+auth must precede `autosleep@file`. Preserve existing native/API authentication and explicit route exceptions;
+never add a blanket bypass. Service accounts do not grant fleet administration. No new public route was added.
+
+Storage classifications do not create quotas or backups. No automatic cleanup or data migration is enabled.
+PowCache contains durable media, scenes and backups as well as caches; never clear the whole share. PowStorage
+is not approved for Mac mounts/exports. PowCDN publication remains planned: no CDN controller/backend is running
+as a result of this integration. Do not advertise draft CDN labels or commands as implemented.
+
+Changes require project `check`, the fleet check, and regeneration of that project's unit files under
+`PowOS/units/powstation/`. Existing containers receive label changes on their normal deployment, not by bulk
+restarting the infrastructure. Keep boot/runtime/trust/recovery prerequisites local so PowOS can start offline.
+
+
 Every project on this box that wants a hostname (LAN-local `foo.pow` or
 public `foo.powback.com`) does it the same way: add Traefik router labels
 to the compose service. Nothing else is required — this box already ships:

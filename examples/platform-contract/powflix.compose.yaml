@@ -1,0 +1,548 @@
+# REVIEW PROPOSAL ONLY; not deployed. Full copy of Powflix/docker-compose.yml.
+# Relative paths belong to Powflix, not this examples directory.
+# Validate with --project-directory /Users/macback/Projects/Powflix.
+# x-pow is proposed metadata, ignored by Docker Compose and current PowOS tools.
+# io.powos.unit ownership labels require corresponding unit registrations.
+# No storage quota, backup schedule, dependency lease, or publisher is created by x-pow.
+---
+name: powflix
+
+services:
+  # Keeps the macOS autofs NFS mount alive so it never idle-unmounts out from under
+  # the running containers (that drops their bind-mount view → "No such file or
+  # directory" → playback kicks to menu; happened 2026-07-05). Touches the NAS every
+  # 30s; app services gate on its health so they never start against a cold mount.
+  # A Jellyseerr request that FAILS is terminal: nothing retries it, nothing re-checks it, and the
+  # UI still shows it as requested. Measured here: 47 of 72 requests sat dead in FAILED/PROCESSING,
+  # every one with serviceId=None so none ever reached Radarr, all of them clustered in a single
+  # broken month four months earlier. Nobody noticed because nothing was looking -- it surfaced only
+  # when someone asked why one film had never arrived.
+  #
+  # This retries them. MIN_FREE_GB is a hard gate and MAX_PER_PASS is deliberately small: firing 47
+  # film grabs at a nearly-full disk is how a watchdog becomes the outage.
+  request-reconciler:
+    image: python:3.12-alpine
+    container_name: request-reconciler
+    environment:
+      JELLYSEERR_URL: "http://jellyseerr:5055"
+      INTERVAL_SECONDS: "3600"
+      STALE_HOURS: "48"
+      MIN_FREE_GB: "150"
+      MAX_PER_PASS: "3"
+      MEDIA_PATH: "/media"
+    volumes:
+      - ./request-reconciler/reconcile.py:/reconcile.py:ro
+      # Its own settings file, read-only: one copy of the API key, which therefore cannot go stale.
+      - ./config/jellyseerr:/jellyseerr-config:ro
+      # Read-only, and only ever used to ask how much room is left.
+      - powcache-media:/media:ro
+    command: [ "python", "/reconcile.py" ]
+    restart: unless-stopped
+    depends_on:
+      - jellyseerr
+    networks:
+      - default
+    labels:
+      io.powos.unit: powflix.request-reconciler
+      powos.autosleep: never
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  nas-keepalive:
+    image: alpine:latest
+    container_name: nas-keepalive
+    volumes:
+      - powcache:/nas/PowCache:ro
+    command:
+      [
+        "sh",
+        "-c",
+        "while true; do ls /nas/PowCache/media >/dev/null 2>&1; ls /nas/PowCache/downloads >/dev/null 2>&1;
+          sleep 30; done"
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "ls /nas/PowCache/media/tv >/dev/null 2>&1 && ls /nas/PowCache/downloads >/dev/null 2>&1"
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      io.powos.unit: powflix.nas-keepalive
+      powos.autosleep: never
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    depends_on:
+      nas-keepalive:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./config/jellyfin:/config
+      # Media library on PowCache NAS (Mats directive 2026-07-02). In-container
+      # path stays /data/media so Jellyfin DB path references remain valid.
+      - powcache-media:/data/media
+    ports:
+      - "8096:8096" # HTTP web UI
+      - "8920:8920" # HTTPS web UI (optional)
+      - "7359:7359/udp" # Auto-discovery
+      - "1900:1900/udp" # DLNA
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.jellyfin.rule: Host(`jellyfin.pow`)
+      traefik.http.routers.jellyfin.entrypoints: web
+      traefik.http.routers.jellyfin.service: jellyfin
+      traefik.http.routers.jellyfin-pub.rule: Host(`jellyfin.powback.com`) || Host(`powflix.powback.com`)
+      traefik.http.routers.jellyfin-pub.entrypoints: websecure
+      traefik.http.routers.jellyfin-pub.tls.certresolver: letsencrypt
+      traefik.http.routers.jellyfin-pub.middlewares: authelia@docker
+      traefik.http.routers.jellyfin-pub.service: jellyfin
+      traefik.http.services.jellyfin.loadbalancer.server.port: "8096"
+      io.powos.unit: powflix.jellyfin
+      powos.autosleep: never
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: media-server
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  sabnzbd:
+    image: lscr.io/linuxserver/sabnzbd:latest
+    container_name: sabnzbd
+    depends_on:
+      nas-keepalive:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./config/sabnzbd:/config
+      # Downloads on LOCAL Mac SSD via VirtioFS (2026-08-09). Reverses the
+      # 2026-07-03 "consolidate on NAS" call: SAB unpack/par2/article-assembly
+      # is random-write, which collapses to ~0.8MB/s over NFS→VirtioFS→ecryptfs
+      # (and risks the corruption seen 2026-07-06). Media stays on NAS; imports
+      # are a one-time sequential local→NAS copy (no cross-device hardlink).
+      - /Users/macback/powflix-downloads:/data/downloads
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.sabnzbd.rule: Host(`sabnzbd.pow`)
+      traefik.http.routers.sabnzbd.entrypoints: web
+      traefik.http.services.sabnzbd.loadbalancer.server.port: "8080"
+      io.powos.unit: powflix.sabnzbd
+      powos.autosleep: never
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: download-worker
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./config/prowlarr:/config
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.prowlarr.rule: Host(`prowlarr.pow`)
+      traefik.http.routers.prowlarr.entrypoints: web
+      traefik.http.services.prowlarr.loadbalancer.server.port: "9696"
+      io.powos.unit: powflix.prowlarr
+      powos.autosleep: never
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    depends_on:
+      nas-keepalive:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./config/sonarr:/config
+      # Downloads LOCAL (fast scratch), media on NAS (2026-08-09 — see sabnzbd
+      # note). Different mounts → import is a sequential local→NAS copy, not a
+      # hardlink; accepted tradeoff for usable download speed.
+      - /Users/macback/powflix-downloads:/data/downloads
+      - powcache-media:/data/media
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.sonarr.rule: Host(`sonarr.pow`)
+      traefik.http.routers.sonarr.entrypoints: web
+      traefik.http.services.sonarr.loadbalancer.server.port: "8989"
+      io.powos.unit: powflix.sonarr
+      powos.autosleep: never
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    depends_on:
+      nas-keepalive:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./config/radarr:/config
+      # Downloads LOCAL, media on NAS (2026-08-09 — see sabnzbd note).
+      - /Users/macback/powflix-downloads:/data/downloads
+      - powcache-media:/data/media
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.radarr.rule: Host(`radarr.pow`)
+      traefik.http.routers.radarr.entrypoints: web
+      traefik.http.services.radarr.loadbalancer.server.port: "7878"
+      io.powos.unit: powflix.radarr
+      powos.autosleep: never
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    depends_on:
+      nas-keepalive:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./config/bazarr:/config
+      # Media library on PowCache NAS (Mats directive 2026-07-02).
+      - powcache-media:/data/media
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.bazarr.rule: Host(`bazarr.pow`)
+      traefik.http.routers.bazarr.entrypoints: web
+      traefik.http.services.bazarr.loadbalancer.server.port: "6767"
+      io.powos.unit: powflix.bazarr
+      powos.autosleep: never
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    environment:
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./config/jellyseerr:/app/config
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.jellyseerr.rule: Host(`requests.pow`)
+      traefik.http.routers.jellyseerr.entrypoints: web
+      traefik.http.services.jellyseerr.loadbalancer.server.port: "5055"
+      io.powos.unit: powflix.jellyseerr
+      powos.autosleep: never
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  recyclarr:
+    image: ghcr.io/recyclarr/recyclarr:latest
+    container_name: recyclarr
+    environment:
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./config/recyclarr:/config
+    restart: unless-stopped
+    # Recyclarr runs on a schedule, no web UI exposed
+    networks:
+      - default
+    labels:
+      io.powos.unit: powflix.recyclarr
+      powos.autosleep: never
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  epg:
+    image: ghcr.io/iptv-org/epg:master
+    container_name: epg
+    environment:
+      - CRON_SCHEDULE=0 0,12 * * *
+      - MAX_CONNECTIONS=5
+      - GZIP=false
+      - RUN_AT_STARTUP=true
+    volumes:
+      - ./config/epg/channels.xml:/epg/public/channels.xml:ro
+      - epg-data:/epg/public
+    # Auto-restart disabled — grabber burned 115% CPU for hours slowing the whole VM.
+    # Start manually with `docker start epg` when TV guide refresh is actually needed.
+    restart: "no"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.epg.rule: Host(`epg.pow`)
+      traefik.http.routers.epg.entrypoints: web
+      traefik.http.services.epg.loadbalancer.server.port: "3000"
+      io.powos.unit: powflix.epg
+      powos.autosleep: never
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: manual-job
+        futureSleep: requires-job-or-stream-adapter
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=Europe/Amsterdam
+    restart: unless-stopped
+    # Internal service only — accessed by Prowlarr via container name
+    networks:
+      - default
+    labels:
+      io.powos.unit: powflix.flaresolverr
+      powos.autosleep: never
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  homarr:
+    image: ajnart/homarr:latest
+    container_name: homarr
+    environment:
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./config/homarr:/app/data/configs
+      - ./config/homarr/icons:/app/public/icons
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.homarr.rule: Host(`dash.pow`)
+      traefik.http.routers.homarr.entrypoints: web
+      traefik.http.services.homarr.loadbalancer.server.port: "7575"
+      io.powos.unit: powflix.homarr
+      powos.autosleep: never
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  jellyfin-sync:
+    image: nginx:alpine
+    container_name: jellyfin-sync
+    volumes:
+      - ./jellyfin-sync:/usr/share/nginx/html:ro
+      - ./jellyfin-sync/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.jellyfin-sync.rule: Host(`sync.pow`)
+      traefik.http.routers.jellyfin-sync.entrypoints: web
+      traefik.http.services.jellyfin-sync.loadbalancer.server.port: "80"
+      io.powos.unit: powflix.jellyfin-sync
+      powos.autosleep: never
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+  lg-control:
+    image: alpine:latest
+    container_name: lg-control
+    network_mode: host
+    working_dir: /app
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    environment:
+      - LG_TV_IP=192.168.50.143
+      - LG_TV_KEY=FE7E7B
+    restart: unless-stopped
+    volumes:
+      - ./lg-control:/app
+    command: [ "sh", "-c", "apk add --no-cache nodejs npm curl && npm install && npm start" ]
+    labels:
+      io.powos.unit: powflix.lg-control
+      powos.autosleep: never
+    x-pow:
+      role: media-support
+      lifecycle:
+        policy: always
+        futureSleep: requires-job-or-stream-adapter
+
+volumes:
+  epg-data: # NAS (PowCache) mounted over NFS directly from the Colima VM, not via macOS autofs + VirtioFS: that chain needs a
+
+  # macOS privacy grant (Network Volumes) which is lost when Colima is restarted outside its launchd agent, and then
+  # every NAS-backed container fails to start and is never retried.
+  powcache-media:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=192.168.50.231,nfsvers=3,rw,nolock,soft
+      device: ":/volume1/PowCache/media"
+  powcache:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=192.168.50.231,nfsvers=3,rw,nolock,soft
+      device: ":/volume1/PowCache"
+
+networks:
+  default:
+    name: powflix
+  traefik:
+    external: true
+x-pow:
+  schema: powos.platform/v1-draft
+  status: proposal-not-enforced
+  source: Powflix/docker-compose.yml
+  host: powstation
+  runtime:
+    engine: docker
+    lifecycleAuthority: powstation-autosleep
+  identity: Keep the existing Compose project name; unit IDs below are proposed registrations.
+  datasets:
+    downloads:
+      role: scratch
+      mounts:
+        - service: sabnzbd
+          target: /data/downloads
+        - service: sonarr
+          target: /data/downloads
+        - service: radarr
+          target: /data/downloads
+      backing: mac-local-existing-bind
+      cleanup: application-owned; never delete active downloads
+      admission:
+        status: proposed
+        requires:
+          - mac-free-space-reserve
+          - nas-free-space
+          - estimated-unpack-and-import-space
+    media:
+      role: durable
+      mounts:
+        - service: jellyfin
+          target: /data/media
+        - service: sonarr
+          target: /data/media
+        - service: radarr
+          target: /data/media
+      backing: existing-powcache-media-nfs
+      cleanup: application-retention-only
+      cdn: Do not put authenticated streams or transcodes into public caching.
+    config:
+      role: state
+      mounts:
+        - service: jellyfin
+          target: /config
+        - service: sabnzbd
+          target: /config
+        - service: prowlarr
+          target: /config
+        - service: sonarr
+          target: /config
+        - service: radarr
+          target: /config
+        - service: bazarr
+          target: /config
+      backup:
+        status: required-not-configured
+        consistency: application-aware
+  notes:
+    - The existing 150 GB request-reconciler check is NAS-only. SABnzbd separately has a 20G local floor.
+      Neither reserves shared host capacity.
+    - "epg retains restart: no; never-sleep is an exclusion from autosleep, not an instruction to start it."

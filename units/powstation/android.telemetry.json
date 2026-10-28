@@ -1,0 +1,37 @@
+{
+  "id": "android.telemetry",
+  "name": "android-app-dev: telemetry",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "support; Compose-managed by android-app-dev",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "android-telemetry"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "android-app-dev",
+    "service": "telemetry",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/android-app-dev -f /Users/macback/Projects/android-app-dev/docker-compose.yml --project-name android-app-dev stop telemetry"
+    ],
+    "keep": [
+      "telemetry-data"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

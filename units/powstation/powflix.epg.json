@@ -1,0 +1,38 @@
+{
+  "id": "powflix.epg",
+  "name": "powflix: epg",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "media-support; Compose-managed by powflix",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "epg"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powflix",
+    "service": "epg",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "job"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/Powflix -f /Users/macback/Projects/Powflix/docker-compose.yml --project-name powflix stop epg"
+    ],
+    "keep": [
+      "/Users/macback/Projects/Powflix/config/epg/channels.xml",
+      "epg-data"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

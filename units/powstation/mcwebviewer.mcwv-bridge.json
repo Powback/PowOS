@@ -1,0 +1,37 @@
+{
+  "id": "mcwebviewer.mcwv-bridge",
+  "name": "mcwebviewer: mcwv-bridge",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "live-game-bridge; Compose-managed by mcwebviewer",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "mcwv-bridge"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "mcwebviewer",
+    "service": "mcwv-bridge",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/McWebViewer -f /Users/macback/Projects/McWebViewer/docker-compose.yaml --project-name mcwebviewer stop mcwv-bridge"
+    ],
+    "keep": [
+      "/Users/macback/Projects/minecraft-create121/data/logs"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

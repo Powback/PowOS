@@ -1,0 +1,44 @@
+{
+  "id": "ararat.app",
+  "name": "ararat: app",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "web-dev; Compose-managed by ararat",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "ararat"
+    }
+  ],
+  "autosleep": {
+    "idle": "15m",
+    "mode": "pause"
+  },
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "ararat",
+    "service": "app",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "deepSleep": "off",
+      "group": "ararat",
+      "idle": "15m",
+      "policy": "http-idle"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/Ararat -f /Users/macback/Projects/Ararat/docker-compose.yml --project-name ararat stop app"
+    ],
+    "keep": [
+      "/Users/macback/Projects/Ararat/src",
+      "/Users/macback/Projects/Ararat/public"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

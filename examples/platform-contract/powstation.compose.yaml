@@ -1,0 +1,948 @@
+# REVIEW PROPOSAL ONLY; not deployed. Full copy of PowStation/docker-compose.yaml.
+# Relative paths belong to PowStation, not this examples directory.
+# Validate with --project-directory /Users/macback/Projects/PowStation.
+# x-pow is proposed metadata, ignored by Docker Compose and current PowOS tools.
+# io.powos.unit ownership labels require corresponding unit registrations.
+# No storage quota, backup schedule, dependency lease, or publisher is created by x-pow.
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "traefik", "healthcheck", "--ping" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    command:
+      - "--ping=true"
+      - "--log.level=WARN"
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.websecure.http3"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@powback.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--accesslog=true"
+      - "--accesslog.filepath=/logs/access.log"
+      - "--accesslog.format=json"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--experimental.plugins.rewritebody.modulename=github.com/packruler/rewrite-body"
+      - "--experimental.plugins.rewritebody.version=v1.2.0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-acme:/etc/traefik
+      - ./config/traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./logs:/logs
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.traefik-local.rule: Host(`traefik.local`) || Host(`traefik.pow`)
+      traefik.http.routers.traefik-local.entrypoints: web
+      traefik.http.routers.traefik-local.middlewares: inject-inspector@file
+      traefik.http.routers.traefik-local.service: api@internal
+      traefik.http.middlewares.local-only.ipallowlist.sourcerange: 192.168.50.0/24,10.13.13.0/24,10.13.14.0/24,172.16.0.0/12
+      traefik.http.middlewares.secured.chain.middlewares: local-only,authelia
+      traefik.http.middlewares.authelia.forwardauth.address: http://authelia:9091/api/verify?rd=https://auth.powback.com
+      traefik.http.middlewares.authelia.forwardauth.trustForwardHeader: "true"
+      traefik.http.middlewares.authelia.forwardauth.authResponseHeaders: Remote-User,Remote-Groups,Remote-Email
+      traefik.http.middlewares.authelia.forwardauth.authRequestHeaders: Authorization,Accept,Accept-Language,Cookie,X-Forwarded-For,X-Forwarded-Host,X-Forwarded-Proto,X-Original-URL
+      traefik.http.middlewares.authelia.forwardauth.maxResponseBodySize: "65536"
+      io.powos.unit: powstation.traefik
+      powos.autosleep: never
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      # IP PINNED (2026-08-21). WireGuard's wg0.conf DNATs VPN traffic for
+      # 192.168.50.100:80/443 to Traefik by ADDRESS, resolved once at WireGuard start.
+      # Traefik's dynamic IP moved three times in a single afternoon of recreates
+      # (.20 -> .14 -> .2); each move silently pointed that rule at a dead address, so
+      # VPN clients would lose all web access while the tunnel still looked healthy.
+      # .250 is far outside the dynamic allocation range (currently reaching ~.45).
+      traefik:
+        ipv4_address: 172.19.0.250
+
+  # Encrypts Pi-hole's upstream DNS (DoT to Cloudflare + DNSSEC). See unbound/unbound.conf.
+  unbound:
+    build: ./unbound
+    container_name: unbound
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "dig +short +time=2 +tries=1 @127.0.0.1 cloudflare.com >/dev/null || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      # `dns` is internal: true and therefore has NO gateway. `default` is what gives unbound a
+      # route out to Cloudflare on :853 -- without it every upstream query fails.
+      default:
+      dns:
+        ipv4_address: 172.30.0.53
+    logging: *default-logging
+    labels:
+      io.powos.unit: powstation.unbound
+      powos.autosleep: never
+
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    ports:
+      # Port 53 published DIRECTLY as of 2026-08-21.
+      #
+      # NOTE: Docker's daemon DNS now points at 192.168.50.100 (this publish), so
+      # containers resolve .pow through Pi-hole. If this container is down, container
+      # DNS falls back to 1.1.1.1 -- internet works, .pow does not.
+      #
+      # It could not be before: the Docker VM had no LAN address, so DNS arrived at the Mac --
+      # where macOS mDNSResponder owns *:53 -- and had to be relayed inward by a root Python
+      # script on the host and then a socat shim inside the VM. Four hops, two shims, and socat's
+      # `fork` had accumulated 150+ orphaned processes.
+      #
+      # With the VM bridged onto the LAN as its own host (192.168.50.100), nothing competes for
+      # :53 here and Pi-hole just binds it. dns-udp-forward and dns-tcp-forward in the VM are
+      # stopped and disabled; the Mac-side udp-relay plist is unloaded.
+      - "53:53/tcp"
+      - "53:53/udp"
+    environment:
+      TZ: "Europe/Amsterdam"
+      WEBPASSWORD: ${PIHOLE_PASSWORD:-}
+      # IPv4 upstreams ONLY. This box has no working IPv6 route, so every query to Cloudflare's
+      # IPv6 resolvers failed —
+      #
+      #   WARNING: Connection error (2606:4700:4700::1111#53): failed to send UDP request
+      #   (Network unreachable)
+      #
+      # roughly every ten minutes — and only answered after falling back to IPv4, putting a
+      # timeout's worth of latency on the DNS the whole LAN depends on. The same missing route
+      # broke a docker build the same day (registry-1.docker.io over IPv6), so it is the host's
+      # routing, not pihole's.
+      #
+      # Declared HERE rather than left in data/pihole/etc-pihole/pihole.toml, because that path
+      # is gitignored runtime state: fixing it there works until the container is recreated from
+      # scratch, and then the latency quietly comes back with nothing to explain it.
+      #
+      # Restore IPv6 only once `ping6 2606:4700:4700::1111` actually works from this host.
+      # SINGLE upstream, on purpose -- this is unbound, which forwards to Cloudflare over
+      # DNS-over-TLS with DNSSEC validation (see unbound/unbound.conf).
+      #
+      # Do NOT add a plaintext server such as 1.1.1.1 "as a fallback". dnsmasq/FTL picks between
+      # upstreams by responsiveness rather than treating later entries as failover, so a cleartext
+      # entry would carry a share of real traffic and quietly undo the encryption -- the failure
+      # mode being that everything looks fine while queries still leak to the ISP.
+      #
+      # The accepted tradeoff: if unbound is down, external names stop resolving (.pow keeps
+      # working, since Pi-hole answers those locally). unbound restarts unless-stopped and is
+      # healthchecked.
+      FTLCONF_dns_upstreams: "172.30.0.53"
+      INTERFACE: ""
+    volumes:
+      - ./data/pihole/etc-pihole:/etc/pihole
+      - ./data/pihole/etc-dnsmasq.d:/etc/dnsmasq.d
+    cap_add:
+      - NET_ADMIN
+    restart: always
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.pihole-local.rule: Host(`pihole.local`) || Host(`pihole.pow`)
+      traefik.http.routers.pihole-local.entrypoints: web
+      traefik.http.routers.pihole-local.middlewares: inject-inspector@file
+      traefik.http.services.pihole.loadbalancer.server.port: "80"
+      io.powos.unit: powstation.pihole
+      powos.autosleep: never
+    logging: *default-logging
+    networks:
+      default:
+      traefik:
+      dns:
+        ipv4_address: 172.30.0.100
+    depends_on:
+      - unbound
+
+  # Keeps Traefik's access log from growing without bound. It reached 9.8 GB unrotated before
+  # anyone looked; Traefik has no rotation of its own. Compose service rather than a host cron so
+  # the stack stays self-contained.
+  log-rotator:
+    image: docker:cli
+    container_name: log-rotator
+    restart: unless-stopped
+    entrypoint: [ "/bin/sh", "/rotate.sh" ]
+    environment:
+      - MAX_BYTES=536870912
+      - KEEP_DAYS=14
+      - INTERVAL=3600
+    volumes:
+      - ./logs:/logs
+      - ./log-rotator/rotate.sh:/rotate.sh:ro
+      # Needed only to send SIGUSR1 to traefik so it reopens the log.
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      io.powos.unit: powstation.log-rotator
+      powos.autosleep: never
+
+  dot-proxy:
+    build: ./dot-proxy
+    container_name: dot-proxy
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "nc -z 127.0.0.1 853 || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # 853 IS NO LONGER PUBLISHED (2026-08-21).
+    #
+    # Verified reachable from the public internet: `nc -z 212.51.140.99 853` -> OPEN. That made
+    # this an open DNS-over-TLS resolver, usable by anyone on the internet and resolving through
+    # Pi-hole -- someone else's queries, in your logs, on your upstream.
+    #
+    # NOTE: this only stops the container listening. The router still forwards 853 to
+    # 192.168.50.100, and LAN and internet traffic arrive at that same address, so no
+    # Docker-side binding can distinguish them. REMOVE THE 853 PORT-FORWARD ON THE ROUTER
+    # to close it properly; this change alone just means nothing answers.
+    #
+    # LAN clients never needed this -- they use Pi-hole on :53 directly. DoT existed for phones
+    # on mobile data; use the WireGuard VPN for that instead.
+    # ports:
+    #   - "853:853"
+    environment:
+      - DOT_DOMAIN=dns.powback.com
+      - DOT_UPSTREAM=pihole
+    volumes:
+      - traefik-acme:/acme:ro
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.dot-cert.rule: Host(`dns.powback.com`)
+      traefik.http.routers.dot-cert.entrypoints: websecure
+      traefik.http.routers.dot-cert.tls.certresolver: letsencrypt
+      traefik.http.routers.dot-cert.middlewares: local-only@docker
+      traefik.http.services.dot-cert.loadbalancer.server.port: "853"
+      io.powos.unit: powstation.dot-proxy
+      powos.autosleep: never
+    networks:
+      default:
+      traefik:
+    logging: *default-logging
+    depends_on:
+      - pihole
+      - traefik
+
+  authelia-redis:
+    image: redis:7-alpine
+    container_name: authelia-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - authelia-redis-data:/data
+    logging: *default-logging
+    labels:
+      io.powos.unit: powstation.authelia-redis
+      powos.autosleep: never
+
+  authelia:
+    image: powauth:latest
+    container_name: authelia
+    restart: unless-stopped
+    depends_on:
+      - traefik
+      - authelia-redis
+    volumes:
+      - ./config/authelia:/config
+      - ./data/authelia:/data
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.authelia.rule: Host(`auth.powback.com`)
+      traefik.http.routers.authelia.entrypoints: websecure
+      traefik.http.routers.authelia.tls.certresolver: letsencrypt
+      traefik.http.routers.authelia.middlewares: authelia-fix-chain@file
+      traefik.http.services.authelia.loadbalancer.server.port: "9091"
+      io.powos.unit: powstation.authelia
+      powos.autosleep: never
+    logging: *default-logging
+    networks:
+      default:
+      traefik:
+
+  pihole-sync:
+    build: ./pihole-sync
+    container_name: pihole-sync
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "test -f /dnsmasq/05-docker-hosts.conf || exit 1" ]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    environment:
+      - HOST_IP=${HOST_IP:-192.168.50.100}
+      - PIHOLE_CONTAINER=pihole
+      - PIHOLE_PASSWORD=${PIHOLE_PASSWORD}
+      - HEALTH_CHECK_ENABLED=true
+      - AGGRESSIVE_RELOAD=true
+      - DREAMHOST_API_KEY=${DREAMHOST_API_KEY:-}
+      - DREAMHOST_DOMAIN=${DREAMHOST_DOMAIN:-powback.com}
+      - REMOTE_DOCKER_HOSTS=${REMOTE_DOCKER_HOSTS:-}
+      - RESCAN_INTERVAL=${RESCAN_INTERVAL:-900}
+      - STATIC_HOSTS=${STATIC_HOSTS:-powos.pow=192.168.50.58,powos.local=192.168.50.58}
+      - DEBOUNCE_SECONDS=${DEBOUNCE_SECONDS:-30}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data/pihole/etc-dnsmasq.d:/dnsmasq
+      # Traefik routers generated for remote hosts that set
+      # powback.route=powstation. Read-write because pihole-sync owns
+      # remote-hosts.yml in here; every other file is hand-maintained and
+      # never touched. See sync_traefik_remote in pihole-sync.sh.
+      - ./config/traefik/dynamic:/traefik-dynamic
+      # SSH transport for REMOTE_DOCKER_HOSTS ssh:// entries. Mount is read-only
+      # so the privkey can't be tampered with from inside; known_hosts is rw so
+      # first-connect TOFU pins host keys persistently. The container startup
+      # (pihole-sync.sh) copies the key into a container-writable path and
+      # generates ~/.ssh/config with the right IdentityFile line.
+      - ./pihole-sync/config/id_pihole_sync_ed25519:/etc/ssh/pihole-sync/id_pihole_sync_ed25519:ro
+      - ./pihole-sync/config/known_hosts:/etc/ssh/pihole-sync/known_hosts
+    logging: *default-logging
+    depends_on:
+      - pihole
+    labels:
+      io.powos.unit: powstation.pihole-sync
+      powos.autosleep: never
+
+  docker-audit:
+    build: ./docker-audit
+    container_name: docker-audit
+    restart: unless-stopped
+    environment:
+      - LOGDIR=/audit
+      - RETENTION_DAYS=30
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data/docker-audit:/audit
+    logging: *default-logging
+    labels:
+      io.powos.unit: powstation.docker-audit
+      powos.autosleep: never
+
+  # Idle containers sleep and wake on demand (CLAUDE.md "Autosleep"). Opt-in by label only
+  # (powos.autosleep=on); a hard-coded never-list in server.js wins over any label. Tiers: pause after
+  # 15 min idle -> CRIU checkpoint after 6 h or under memory pressure (needs dockerd experimental) ->
+  # stop where a checkpoint fails. Web services wake through the autosleep@file forwardAuth middleware
+  # (config/traefik/dynamic/autosleep.yml). It needs the Docker socket read-write: pause/start/checkpoint.
+  autosleep:
+    build: ./autosleep
+    image: powstation-autosleep:latest
+    container_name: autosleep
+    restart: unless-stopped
+    environment:
+      - AUTOSLEEP_IDLE=15m
+      - AUTOSLEEP_HIBERNATE_AFTER=6h
+      - AUTOSLEEP_MEM_LOW_MB=4096
+      - TRAEFIK_API=http://traefik:8080
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/autosleep:/data
+      # The VM's cgroup v2 tree, writable: containers without a healthcheck sleep by cgroup.freeze directly (Docker
+      # and Traefik keep them "running", wake in ms). docker-default AppArmor allows cgroupfs writes; no privileges.
+      - /sys/fs/cgroup:/host-cgroup
+    labels:
+      powos.autosleep: never
+      traefik.enable: "true"
+      traefik.http.routers.autosleep.rule: Host(`autosleep.pow`)
+      traefik.http.routers.autosleep.entrypoints: web
+      traefik.http.services.autosleep.loadbalancer.server.port: "9300"
+      io.powos.unit: powstation.autosleep
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    logging: *default-logging
+    networks:
+      - traefik
+
+  # Thaws every cgroup autosleep froze if autosleep is gone for ~30 s (SIGKILL, OOM, a hang): Docker doesn't know
+  # those containers are frozen, so without this their requests would hang until someone noticed.
+  autosleep-watchdog:
+    image: powstation-autosleep:latest
+    container_name: autosleep-watchdog
+    restart: unless-stopped
+    command: [ "node", "watchdog.js" ]
+    healthcheck:
+      # the image's check is autosleep's port; the watchdog only needs to be running
+      test: [ "CMD-SHELL", "pgrep -f watchdog.js >/dev/null" ]
+      interval: 60s
+    volumes:
+      - ./data/autosleep:/data
+      - /sys/fs/cgroup:/host-cgroup
+    labels:
+      powos.autosleep: never
+      io.powos.unit: powstation.autosleep-watchdog
+    mem_limit: 48m
+    cpus: 0.1
+    pids_limit: 16
+    logging: *default-logging
+    networks:
+      - traefik
+    depends_on:
+      - autosleep
+
+  mitmproxy:
+    image: mitmproxy-local
+    container_name: mitmproxy
+    restart: unless-stopped
+    command:
+      - mitmweb
+      - --mode
+      - regular
+      - --mode
+      - wireguard:/root/.mitmproxy/wireguard.conf@0.0.0.0:51821
+      - --showhost
+      - --listen-port
+      - "8080"
+      - --web-host
+      - 0.0.0.0
+      - --web-port
+      - "8081"
+      - --set
+      - block_global=false
+      - --set
+      - web_password=trafficmon
+      - --scripts
+      - /scripts/inject.py
+    ports:
+      - "51821:51821/udp"
+    volumes:
+      - ./data/mitmproxy:/root/.mitmproxy
+      - ./mitmproxy/scripts:/scripts:ro
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.mitmproxy-local.rule: Host(`mitm.pow`)
+      traefik.http.routers.mitmproxy-local.entrypoints: web
+      traefik.http.routers.mitmproxy-local.middlewares: inject-inspector@file
+      traefik.http.services.mitmproxy.loadbalancer.server.port: "8081"
+      io.powos.unit: powstation.mitmproxy
+      powos.autosleep: never
+    logging: *default-logging
+    networks:
+      default:
+      traefik:
+
+        # coturn — LAN-wide TURN/STUN server so WebRTC (and any other future
+        # RTC-shaped service) has ONE public UDP ingress instead of every service
+        # needing its own host-mode container or hand-cut port range. Clients
+        # get an `iceServers` config pointing at turn.powback.com:3478; coturn
+        # multiplexes internally and relays media to whichever backend the
+        # allocation ended up on.
+        #
+        # Router-side requirements
+        #   Forward UDP/3478 + TCP/3478 to this machine. (WG UDP relay pattern
+        #   in ~/.colima/default/colima.yaml is the model — either add a socat
+        #   forwarder for 3478 UDP or use hostAddresses: true if that path
+        #   already works for you.)
+        #
+        # Realm + secret
+        #   TURN_SECRET is the HMAC key for time-limited credentials — the
+        #   preferred model over static user/pass because it lets services
+        #   mint short-lived credentials without redeploying coturn. Rotate
+        #   it in .env when needed. Realm is powback.com so future services
+        #   don't need a per-service realm.
+  coturn:
+    image: coturn/coturn:latest
+    container_name: coturn
+    restart: unless-stopped
+    # host networking is the one place we DO want it — coturn's whole job
+    # is to advertise host-reachable candidates, and the LAN + public IPs
+    # both need to be visible to it. All other services stay on bridge.
+    network_mode: host
+    volumes:
+      - ./config/coturn/turnserver.conf:/etc/turnserver.conf:ro
+    # coturn's config file doesn't do ${VAR} interpolation, but its CLI
+    # flags accept every option — and docker-compose expands ${VAR}
+    # before exec, so the .env is the single source of truth.
+    command:
+      - "-c"
+      - "/etc/turnserver.conf"
+      - "--external-ip=${EXTERNAL_IP_PUBLIC:-192.168.50.100}/${EXTERNAL_IP_LOCAL:-192.168.50.100}"
+      - "--static-auth-secret=${TURN_SECRET}"
+    # Traefik disabled (host-mode container, no HTTP to route), but the
+    # Host() labels ARE picked up by pihole-sync — that's how turn.pow
+    # and turn.powback.com become resolvable everywhere. Any WebRTC
+    # service points its iceServers at turn:turn.pow:3478 without having
+    # to know an IP.
+    labels:
+      traefik.enable: "false"
+      traefik.http.routers.turn-local.rule: Host(`turn.pow`)
+      traefik.http.routers.turn-public.rule: Host(`turn.powback.com`)
+      io.powos.unit: powstation.coturn
+      powos.autosleep: never
+    logging: *default-logging
+
+  wireguard:
+    container_name: wireguard
+    # Switched from ntkme/boringtun:edge (custom build) to linuxserver/wireguard.
+    # boringtun was crash-looping on Apple Silicon vz with "File descriptor in bad
+    # state" on tun read. linuxserver/wireguard uses the in-kernel WireGuard module
+    # when available (Colima's VM has it loaded) and falls back to wireguard-go
+    # otherwise. Same wg0.conf, same peers, no functional change for clients.
+    image: lscr.io/linuxserver/wireguard:latest
+    restart: always
+    healthcheck:
+      test: [ "CMD-SHELL", "ip link show wg0 || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Zurich
+    ports:
+      # Published straight onto the LAN. The host-side socat LaunchDaemon that used to
+      # relay UDP into the VM was deleted 2026-08-21 -- the VM is its own host at
+      # 192.168.50.100 now, so the router forwards 51820/udp directly here.
+      - "51820:51820/udp"
+      - "9090:9090" # ssl-bypass analytics API (shares this network namespace)
+    volumes:
+      # Mount the whole data dir as /config — linuxserver expects this layout
+      # (wg_confs/, peer_*/, server/, templates/ — all already present).
+      - ./data/wireguard:/config
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv4.ip_forward=1
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.ssl-bypass-metrics.rule: Host(`ssl-bypass.pow`)
+      traefik.http.routers.ssl-bypass-metrics.entrypoints: web
+      traefik.http.routers.ssl-bypass-metrics.middlewares: inject-inspector@file
+      traefik.http.services.ssl-bypass-metrics.loadbalancer.server.port: "9090"
+      io.powos.unit: powstation.wireguard
+      powos.autosleep: never
+    logging: *default-logging
+    networks:
+      default:
+      traefik:
+      dns:
+
+  log-viewer:
+    build: ./log-viewer
+    container_name: log-viewer
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://localhost:3000/health', r =>
+            process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    environment:
+      - PORT=3000
+      - LOG_FILE=/app/logs/access.log
+      - MAX_LINES=5000
+    volumes:
+      - ./logs:/app/logs:ro
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.log-viewer.rule: Host(`logs.pow`)
+      traefik.http.routers.log-viewer.entrypoints: web
+      traefik.http.routers.log-viewer.middlewares: inject-inspector@file
+      traefik.http.services.log-viewer.loadbalancer.server.port: "3000"
+      io.powos.unit: powstation.log-viewer
+      powos.autosleep: never
+    logging: *default-logging
+    networks:
+      default:
+      traefik:
+
+  telemetry:
+    build: ./telemetry
+    container_name: telemetry
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://localhost:3000/health', (res) => {
+            process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))\""
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    environment:
+      - PORT=3000
+      - API_KEY=${API_KEY:?Supply existing API_KEY securely}
+      - DATA_DIR=/app/data
+      - RETENTION_DAYS=${TELEMETRY_RETENTION_DAYS:-30}
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./data/telemetry:/app/data
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.telemetry-local.rule: Host(`telemetry.pow`)
+      traefik.http.routers.telemetry-local.entrypoints: web
+      traefik.http.routers.telemetry-local.middlewares: inject-inspector@file
+      traefik.http.services.telemetry.loadbalancer.server.port: "3000"
+      io.powos.unit: powstation.telemetry
+      powos.autosleep: never
+    logging: *default-logging
+    networks:
+      default:
+      traefik:
+
+  health-dashboard:
+    build: ./health-dashboard
+    container_name: health-dashboard
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://localhost:3000/', r =>
+            process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.health-dashboard.rule: Host(`health.pow`)
+      traefik.http.routers.health-dashboard.entrypoints: web
+      traefik.http.routers.health-dashboard.middlewares: inject-inspector@file
+      traefik.http.services.health-dashboard.loadbalancer.server.port: "3000"
+      io.powos.unit: powstation.health-dashboard
+      powos.autosleep: never
+    logging: *default-logging
+    networks:
+      - traefik
+
+  apps-dashboard:
+    build: ./apps-dashboard
+    container_name: apps-dashboard
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:3000/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.apps-dashboard.rule: Host(`apps.pow`)
+      traefik.http.routers.apps-dashboard.entrypoints: web
+      traefik.http.routers.apps-dashboard.middlewares: inject-inspector@file
+      traefik.http.services.apps-dashboard.loadbalancer.server.port: "3000"
+      io.powos.unit: powstation.apps-dashboard
+      powos.autosleep: never
+    logging: *default-logging
+    networks:
+      - traefik
+
+  inspector-api:
+    build:
+      context: .
+      dockerfile: inspector-api/Dockerfile
+      args:
+        COMMIT_SHA: ${COMMIT_SHA:-dev}
+        BUILT_AT: ${BUILT_AT:-unknown}
+    container_name: inspector-api
+    restart: unless-stopped
+    environment:
+      - FEEDBACK_WEBHOOK_URL=${FEEDBACK_WEBHOOK_URL:-}
+      - ROUTING_WEBHOOK_URL=${ROUTING_WEBHOOK_URL:-http://powpanion-stdb-pos.pow/api/cc/inspect-feedback}
+      - SELF_IP=${SELF_IP:-192.168.50.100}
+      - PIHOLE_DNS=${PIHOLE_DNS:-172.30.0.100}
+    # PI-HOLE AS AN EXPLICIT RESOLVER, OR NO .pow NAME RESOLVES AT ALL.
+    #
+    # Being ON powstation_dns is not enough -- Docker's embedded resolver does not forward to
+    # Pi-hole unless it is named here, so every routing hop died at getaddrinfo ENOTFOUND before a
+    # packet was ever sent. Measured from inside the container: powpanion.pow, inspector-api.pow
+    # and powpanion-stdb-pos.pow ALL returned ENOTFOUND.
+    #
+    # This is the canonical cross-project pattern in ~/Projects/CLAUDE.md ("Cross-Project Container
+    # Reach"), which this service was on the wrong side of. It also explains why routing failures
+    # were invisible: the store succeeds, the overlay says "Feedback submitted", and only this
+    # container's own log ever mentions the hop that did not happen.
+    dns:
+      - 172.30.0.100
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://localhost:3000/health', r =>
+            process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - ./data/inspector-api:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Bind-mount of /Users/macback/Projects so chokidar can watch each
+      # registered project's working dir for live commit + file-change
+      # notifications (Mats feature request 2026-06-25). Read-only so the
+      # inspector-api can't accidentally modify any project state.
+      - /Users/macback/Projects:/host-projects:ro
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.inspector-api.rule: Host(`inspector-api.pow`)
+      traefik.http.routers.inspector-api.entrypoints: web
+      traefik.http.routers.inspector-api.middlewares: inject-inspector@file
+      traefik.http.routers.inspector-pub.rule: Host(`inspector.powback.com`) || Host(`inspector-api.powback.com`)
+      traefik.http.routers.inspector-pub.entrypoints: websecure
+      traefik.http.routers.inspector-pub.tls.certresolver: letsencrypt
+      traefik.http.routers.inspector-pub.service: inspector-api
+      traefik.http.routers.inspector-pub.middlewares: authelia@docker
+      traefik.http.routers.inspector-assets.rule: (Host(`inspector.powback.com`) ||
+        Host(`inspector-api.powback.com`)) && (Path(`/loader.js`) || Path(`/inspector.js`))
+      traefik.http.routers.inspector-assets.entrypoints: websecure
+      traefik.http.routers.inspector-assets.tls.certresolver: letsencrypt
+      traefik.http.routers.inspector-assets.service: inspector-api
+      traefik.http.routers.inspector-assets.priority: "100"
+      traefik.http.services.inspector-api.loadbalancer.server.port: "3000"
+      io.powos.unit: powstation.inspector-api
+      powos.autosleep: never
+    logging: *default-logging
+    networks:
+      - default
+      - traefik
+      - dns # reach Pi-hole (172.30.0.100) to resolve sourceDomain → owning machine
+
+  honeypot:
+    build: ./honeypot
+    container_name: honeypot
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://localhost:3000/health', r =>
+            process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    environment:
+      - BASE_URL=https://cloud.powback.com
+    volumes:
+      - ./data/honeypot:/app/data
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.honeypot.rule: Host(`cloud.powback.com`)
+      traefik.http.routers.honeypot.entrypoints: websecure
+      traefik.http.routers.honeypot.tls.certresolver: letsencrypt
+      traefik.http.services.honeypot.loadbalancer.server.port: "3000"
+      traefik.http.routers.honeypot-admin.rule: Host(`cloud.powback.com`) && PathPrefix(`/admin`)
+      traefik.http.routers.honeypot-admin.entrypoints: websecure
+      traefik.http.routers.honeypot-admin.tls.certresolver: letsencrypt
+      traefik.http.routers.honeypot-admin.middlewares: authelia@docker
+      traefik.http.routers.honeypot-admin.service: honeypot
+      traefik.http.routers.honeypot-local.rule: Host(`cloud.pow`)
+      traefik.http.routers.honeypot-local.entrypoints: web
+      traefik.http.routers.honeypot-local.middlewares: inject-inspector@file
+      traefik.http.routers.honeypot-local.service: honeypot
+      io.powos.unit: powstation.honeypot
+      powos.autosleep: never
+    logging: *default-logging
+    networks:
+      default:
+      traefik:
+
+        # llm.pow - the fleet's one front door for models: LiteLLM routing model NAMES to wherever they run (gpu-195's
+        # voice LLM and GPU1 pool, .58's 5090, claude-auth.pow). Config + reasons: config/litellm/config.yaml. Plan: PowOS
+        # repo docs/GPU-SERVERS-PLAN.md (phase 4). LAN + VPN only (local-only allowlist, no powback.com twin); clients
+        # present LLM_ROUTER_MASTER_KEY from .env as their bearer token. Replaces local-llm-stack's Mac-side LiteLLM on :4000 (not run since 2026-08).
+        # Stateless: no database, no cache, no volume - remove = `docker compose rm -sf llm-router` + this block.
+  llm-router:
+    image: ghcr.io/berriai/litellm:v1.106.2@sha256:7294b90f868c5c38c99b83021c7ba46f9b439e95f8e32964c925c7d2563a03f7
+    container_name: llm-router
+    restart: unless-stopped
+    command: [ "--config", "/app/config.yaml", "--port", "4000", "--num_workers", "2" ]
+    volumes:
+      - ./config/litellm/config.yaml:/app/config.yaml:ro
+    environment:
+      - LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES=true
+      - LITELLM_LOG=WARNING
+      - LITELLM_MASTER_KEY=${LLM_ROUTER_MASTER_KEY:?set LLM_ROUTER_MASTER_KEY in .env}
+      - DISABLE_SCHEMA_UPDATE=true
+    extra_hosts:
+      # Containers don't resolve .pow (no Pi-hole inside): reach the authority through Traefik by Host header.
+      - "claude-auth.pow:192.168.50.100"
+      # Blackhole: LiteLLM's Anthropic count-tokens handler ignores api_base and posts the FULL prompt of a local
+      # model to api.anthropic.com. Pointing it at localhost makes it fail at once and count locally instead.
+      - "api.anthropic.com:127.0.0.1"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if
+            urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5).status == 200 else
+            1)"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 512
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.llm-router-local.rule: Host(`llm.pow`)
+      traefik.http.routers.llm-router-local.entrypoints: web
+      traefik.http.routers.llm-router-local.middlewares: local-only
+      traefik.http.services.llm-router.loadbalancer.server.port: "4000"
+      powos.autosleep: never
+      io.powos.unit: powstation.llm-router
+    logging: *default-logging
+    networks:
+      - traefik
+
+  # ── Browser farm: concurrent-browser-mcp (cb-mcp-stdb) + its egress firewall ──────────────────────────────────
+  # Moved here from Powpanion-STDB (agi-ui-spacetime) 2026-10-23 so the agents' browser tool outlives that project.
+  # Code: ~/Projects/concurrent-browser-mcp (local repo, split from Powpanion-STDB/mcp-server/browser with history).
+  # Same container names, same endpoint: agents reach http://cb-mcp-stdb:3000 (/sse, /api/call, /health) over the
+  # traefik network (alias concurrent-browser too). No Traefik route - there was none before.
+  egress-proxy:
+    build: ../concurrent-browser-mcp/egress-proxy
+    image: powstation-egress-proxy:latest
+    container_name: egress-proxy
+    restart: always
+    environment:
+      - POLICY_FILE=/policy/policy.json
+      - CACHE_TTL_SECONDS=10
+    volumes:
+      - ./config/egress-proxy:/policy:ro
+    # No host port: the old 8081 publish made it an open proxy on the LAN. Debug with `docker exec egress-proxy ...`.
+    networks:
+      - browser
+    healthcheck:
+      test: [ "CMD", "python3", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 8080)); s.close()" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      powos.autosleep: never
+      io.powos.unit: powstation.egress-proxy
+    logging: *default-logging
+
+  concurrent-browser:
+    build: ../concurrent-browser-mcp
+    image: powstation-concurrent-browser:latest
+    container_name: cb-mcp-stdb
+    init: true # reap zombie chrome-headless children (Playwright spawns without waitpid)
+    command:
+      [
+        "node",
+        "dist/index.js",
+        "--max-instances",
+        "25",
+        "--headless",
+        "true",
+        "--browser",
+        "chromium",
+        "--sse-port",
+        "3000",
+        "--tools",
+        "agent"
+      ]
+    environment:
+      - NODE_ENV=production
+      - OMNIPARSER_URL=http://omniparser:8000
+      - EGRESS_PROXY_URL=http://egress-proxy:8080
+      - POW_RESOLVER_IP=172.19.0.250
+    restart: always
+    networks:
+      - browser
+      - traefik
+      - dns
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+    shm_size: 2g
+    volumes:
+      # Browser profiles, created by the Powpanion project: kept under its original name.
+      - browser-data:/app/browser-data
+    depends_on:
+      egress-proxy:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      powos.autosleep: never
+      io.powos.unit: powstation.concurrent-browser
+    logging: *default-logging
+
+networks:
+  traefik:
+    name: traefik
+  dns:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  browser:
+    # cb-mcp-stdb <-> egress-proxy only; egress-proxy needs internet, so not internal
+    ipam:
+      config:
+        - subnet: 10.99.0.0/24 # explicit: Docker's default address pools are used up on this VM
+
+volumes:
+  traefik-acme:
+    external: true
+  browser-data:
+    external: true
+    name: agi-ui-spacetime_browser-data
+  authelia-redis-data:
+
+x-pow:
+  schema: powos.platform/v1-draft
+  status: proposal-not-enforced
+  source: PowStation/docker-compose.yaml
+  host: powstation
+  runtime:
+    engine: docker
+    lifecycleAuthority: powstation-autosleep
+    bootstrap: true
+  identity: Keep the existing Compose project name; unit IDs below are proposed registrations.
+  datasets: {}
+  notes:
+    - Keep existing infrastructure services and their runtime settings.
+    - Do not add a non-existent PowCDN image to this stack. Select and implement its backend separately.
+    - Host boot, container runtime, DNS, ingress, secrets and essential local state must not require PowCDN.
+    - An unavailable central registry must not stop existing local services.

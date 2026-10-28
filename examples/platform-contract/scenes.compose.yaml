@@ -1,0 +1,69 @@
+# REVIEW PROPOSAL ONLY; not deployed. Full copy of DroneSplat/scenes-pow/docker-compose.yml.
+# Relative paths belong to DroneSplat/scenes-pow, not this examples directory.
+# Validate with --project-directory /Users/macback/Projects/DroneSplat/scenes-pow.
+# x-pow is proposed metadata, ignored by Docker Compose and current PowOS tools.
+# io.powos.unit ownership labels require corresponding unit registrations.
+# No storage quota, backup schedule, dependency lease, or publisher is created by x-pow.
+# scenes.pow — serves Streamed SOG splat scenes from NAS PowCache/scenes over HTTP.
+# The viewer (splat.pow) streams LOD chunks from here. Bind-mount (not NFS volume):
+# macOS autofs-mounts the NAS (NFSv3) → Colima VirtioFS → container binds the host path.
+# Use the explicit /Users/macback/nas path until the /mnt/nas symlink activates on reboot.
+services:
+  scenes-nginx:
+    image: nginx:alpine
+    container_name: scenes-nginx
+    restart: unless-stopped
+    volumes:
+      - powcache-scenes:/usr/share/nginx/html:ro
+      - ./scenes-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.scenes.rule: Host(`scenes.pow`)
+      traefik.http.routers.scenes.entrypoints: web
+      traefik.http.services.scenes.loadbalancer.server.port: "80"
+      io.powos.unit: scenes.scenes-nginx
+      powos.autosleep: never
+    networks:
+      - traefik
+    x-pow:
+      role: asset-origin
+      lifecycle:
+        policy: always
+      publication:
+        namespace: scenes
+        mode: publish-snapshot
+        status: requires-publisher
+        preserveUrls:
+          - http://scenes.pow/
+        consistency: complete-versioned-manifest-before-activation
+
+networks:
+  traefik:
+    external: true
+
+volumes:
+  powcache-scenes:
+    # NAS over NFS from the Colima VM (not the macOS autofs path; see PowStation CLAUDE.md "NAS Mount")
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=192.168.50.231,nfsvers=3,ro,nolock,soft
+      device: ":/volume1/PowCache/scenes"
+x-pow:
+  schema: powos.platform/v1-draft
+  status: proposal-not-enforced
+  source: DroneSplat/scenes-pow/docker-compose.yml
+  host: powstation
+  runtime:
+    engine: docker
+    lifecycleAuthority: powstation-autosleep
+  identity: Keep the existing Compose project name; unit IDs below are proposed registrations.
+  datasets:
+    scenes:
+      role: durable
+      mounts:
+        - service: scenes-nginx
+          target: /usr/share/nginx/html
+      backing: existing-read-only-nfs
+      cleanup: never-as-cache
+      backup: decision-required

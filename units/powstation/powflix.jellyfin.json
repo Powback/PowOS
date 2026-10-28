@@ -1,0 +1,38 @@
+{
+  "id": "powflix.jellyfin",
+  "name": "powflix: jellyfin",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "media-server; Compose-managed by powflix",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "jellyfin"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powflix",
+    "service": "jellyfin",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/Powflix -f /Users/macback/Projects/Powflix/docker-compose.yml --project-name powflix stop jellyfin"
+    ],
+    "keep": [
+      "/Users/macback/Projects/Powflix/config/jellyfin",
+      "powcache-media"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

@@ -1,0 +1,211 @@
+# REVIEW PROPOSAL ONLY; not deployed. Full copy of minecraft-create121/docker-compose.yaml.
+# Relative paths belong to minecraft-create121, not this examples directory.
+# Validate with --project-directory /Users/macback/Projects/minecraft-create121.
+# x-pow is proposed metadata, ignored by Docker Compose and current PowOS tools.
+# io.powos.unit ownership labels require corresponding unit registrations.
+# No storage quota, backup schedule, dependency lease, or publisher is created by x-pow.
+# Create CC:T 121 — a HAND-BUILT NeoForge 1.21.1 pack (there is no ready-made
+# 1.21.1 version of the "Create CC:T" Modrinth pack; it only exists as Fabric
+# 1.20.1). Runs on a spare port so the working 1.20.1 server keeps serving.
+#
+# The modlist is authored with packwiz in ./pack — never edit ./data/mods by hand,
+# it gets overwritten from the pack on every boot:
+#
+#   cd pack
+#   packwiz modrinth add <modrinth-slug-or-url>   # add a mod (pulls dependencies)
+#   packwiz update --all                          # bump everything to latest
+#   packwiz modrinth export                       # regenerate pack.mrpack
+#   docker compose up -d --force-recreate         # server picks up the new pack
+#
+# The SAME pack.mrpack is what you import into Amethyst on Android, which is the
+# whole reason for using packwiz: client and server come from one manifest, so
+# they can't drift. A server-only update (e.g. itzg's MODRINTH_PROJECTS) would
+# put the server ahead of the client and produce packet-decode crashes on join —
+# that's what the `levelz` IndexOutOfBounds on the 1.20.1 server was.
+services:
+  mc:
+    # java21: NeoForge 1.21.1 requires it. (The 1.20.1 Fabric server next door
+    # needs java17 — Fabric 1.20.1's Mixin/ASM breaks on 21. Don't cross them.)
+    image: itzg/minecraft-server:java21
+    container_name: mc-create121
+    # Win CPU contention against the agent fleet.
+    #
+    # Every container on this box ran at cpu_shares=0 (i.e. the default 1024, all equal), so a
+    # `cargo build` during a deploy could take all 14 cores and starve Minecraft's single tick
+    # thread. That is what the ServerHangWatchdog crashes actually were: every one reported a
+    # tick just over 60,000,000 microseconds — exactly the old 60s ceiling, tripped precisely,
+    # with a random top frame. Not a hang in any one piece of code; the whole thread stopped
+    # getting scheduled. They cluster in fleet-busy windows (02:20, 04:58, 17:36, 20:36 on
+    # 2026-08-20).
+    #
+    # Raising MAX_TICK_TIME to 180s widens the window but does not stop the starvation. This
+    # does, and costs the fleet almost nothing: shares only apply when cores are actually
+    # contended, and a Minecraft server is one or two busy threads, not fourteen.
+    cpu_shares: 4096
+    tty: true
+    stdin_open: true
+    ports:
+      - "25565:25565" # the box's primary Minecraft port (1.20.1 server retired 2026-08-13)
+    environment:
+      EULA: "TRUE"
+      # TYPE=MODRINTH is REQUIRED — without it itzg silently installs vanilla.
+      # Pointed at the LOCAL pack.mrpack packwiz exports, not a published pack.
+      TYPE: "MODRINTH"
+      MODRINTH_MODPACK: "/pack/pack.mrpack"
+      MEMORY: "6G" # Create 6 + Aeronautics is heavier than the 1.20.1 pack
+      USE_AIKAR_FLAGS: "TRUE"
+      # The hang watchdog has killed this server 8 times, 7 of them on 19-20 August while the
+      # agent fleet was saturating the box. The crash message reads "a single server tick took
+      # 60130448.00 seconds", which is MICROSECONDS mislabelled — 60.1s, exactly the 60000ms
+      # default. The stack lands in Runtime.freeMemory inside AllTheLeaks' MemoryMonitor: a GC
+      # pause on a starved JVM, not a deadlock.
+      #
+      # 180s, not -1. A long GC under load should not destroy a world mid-write; a real deadlock
+      # still should be caught. Set HERE rather than in data/server.properties because data/ is
+      # gitignored and "wiped/rebuilt from the pack" — an edit there is an edit that disappears.
+      MAX_TICK_TIME: "180000"
+      ONLINE_MODE: "TRUE"
+      # Stop the "Flying is not enabled on this server" kick. OVERRIDE_SERVER_PROPERTIES rewrites
+      # server.properties from env on every boot, so allow-flight must be set HERE or it reverts to
+      # the vanilla default (false) and any airborne player (elytra, mod flight, a laggy fall) gets
+      # kicked. Creative players are exempt from the check regardless; this covers survival flight.
+      ALLOW_FLIGHT: "TRUE"
+      MOTD: "Create CC:T 1.21.1 · PowStation"
+      TZ: "Europe/Oslo"
+      OVERRIDE_SERVER_PROPERTIES: "TRUE"
+      # PIN THE RCON PASSWORD, or it rotates on every start.
+      #
+      # OVERRIDE_SERVER_PROPERTIES rewrites server.properties from env on every boot, and with no
+      # RCON_PASSWORD set itzg generates a fresh random one each time -- so every restart or world
+      # regen silently changed rcon.password out from under the McWebViewer bridge, which then failed
+      # auth ("rcon auth failed (bad password)") and stopped showing drones. Pinned here so it is
+      # stable across restarts; the bridge's MCWV_RCON_PASSWORD must match this value.
+      ENABLE_RCON: "TRUE"
+      RCON_PASSWORD: "${RCON_PASSWORD:?Supply existing RCON_PASSWORD securely}"
+      # AUTO-RESTORE 10x TICK RATE ON EVERY BOOT.
+      #
+      # `/tick rate` is a RUNTIME command, not a server.property, so it resets to the default 20 TPS
+      # (1x) on every restart / world regen -- which is why the settlement kept dropping to 1x after
+      # a restart. itzg runs these rcon commands once the server is up, so 10x is reapplied
+      # automatically. (The fleet's timeouts are game-ticks, so it is TUNED for ~10x.)
+      RCON_CMDS_STARTUP: |-
+        tick rate 200
+    # The game server can route to the host LAN IP fine, but has no Pi-hole DNS,
+    # so `hive.pow` does not resolve inside the container — and CC:T's http API
+    # runs in THIS process, so a computer calling HQ fails on name resolution
+    # before any rule is even consulted. Pin the name; Traefik routes by Host.
+    extra_hosts:
+      - "hive.pow:192.168.50.100"
+    volumes:
+      - ./data:/data # world + resolved mods; wiped/rebuilt from the pack
+      - ./pack:/pack:ro # the packwiz project — source of truth for the modlist
+      # Server-side tooling, read-only. Lives here rather than in data/ because data/ is
+      # "wiped/rebuilt from the pack" — a script in there is a script that disappears.
+      # The fleet tooling lives with the fleet, in the HiveMind repo -- this repo is the
+      # server. Same reasoning as HQ mounting that repo's lua/ tree: one copy, mounted where
+      # it is needed, rather than a second copy per consumer.
+      # Override MC_TOOLS if the HiveMind checkout is not beside this one.
+      - ${MC_TOOLS:-../HiveMind/bin}:/opt/mc-tools:ro
+    restart: unless-stopped
+    stop_grace_period: 90s
+    healthcheck:
+      test: [ "CMD", "mc-health" ]
+      start_period: 10m # first boot downloads every mod, then generates a world
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    labels:
+      io.powos.unit: minecraft.mc
+      powos.autosleep: never
+    x-pow:
+      role: game-server
+      lifecycle:
+        policy: always
+        futurePolicy: game-idle
+        requiredSignals:
+          - human-players
+          - bots-and-turtles
+          - world-jobs
+          - backup-in-progress
+        requiredCapabilities:
+          - protocol-aware-wake
+          - save-flush-before-stop
+          - dependency-leases
+        unavailableSignal: stay-awake
+      exposure: lan-game-port
+
+  # ── Modpack download ──────────────────────────────────────────────────────
+  # Serves pack/pack.mrpack over HTTP so a client (Amethyst on Android, Prism on
+  # desktop) can fetch the exact pack the server is running. Same file, one
+  # manifest — that is the whole reason for packwiz, and it is what stops the
+  # client/server drift that produced the levelz packet-decode crash on 1.20.1.
+  #
+  #   http://mcpack.pow/pack.mrpack
+  pack:
+    image: nginx:alpine
+    container_name: mc-create121-pack
+    volumes:
+      - ./download:/usr/share/nginx/html:ro # landing page
+      - ./pack:/packfiles:ro # the packwiz project
+      - ./download/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.mcpack.rule: Host(`mcpack.pow`)
+      traefik.http.routers.mcpack.entrypoints: web
+      traefik.http.services.mcpack.loadbalancer.server.port: "80"
+      io.powos.unit: minecraft.pack
+      powos.autosleep: never
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: asset-origin
+      lifecycle:
+        policy: always
+      exposure: lan
+      publication:
+        namespace: minecraft-create121
+        mode: publish-snapshot
+        status: requires-powcdn-publisher
+        preserveUrls:
+          - http://mcpack.pow/pack/pack.mrpack
+          - http://mcpack.pow/pack.mrpack
+        releaseRule: Publish and verify the same pack used by the server; retain old releases.
+
+networks:
+  default: {}
+  traefik:
+    external: true
+x-pow:
+  schema: powos.platform/v1-draft
+  status: proposal-not-enforced
+  source: minecraft-create121/docker-compose.yaml
+  host: powstation
+  runtime:
+    engine: docker
+    lifecycleAuthority: powstation-autosleep
+  identity: Keep the existing Compose project name; unit IDs below are proposed registrations.
+  datasets:
+    world:
+      role: state
+      mounts:
+        - service: mc
+          target: /data
+      cleanup: never
+      backup:
+        status: required-not-configured
+        consistency: minecraft-save-flush-or-clean-stop
+        destination: platform-approved-backup-store
+        restoreDrill: required
+    pack:
+      role: published-source
+      mounts:
+        - service: mc
+          target: /pack
+        - service: pack
+          target: /packfiles
+      cleanup: release-retention-only
+  notes:
+    - 6G is the existing Java heap, not a container memory cap. Measure native overhead before selecting a cap.
+    - Only one server may own host port 25565; the retired Create/CCT stack must remain retired.

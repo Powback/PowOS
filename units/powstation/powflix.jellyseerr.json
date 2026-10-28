@@ -1,0 +1,37 @@
+{
+  "id": "powflix.jellyseerr",
+  "name": "powflix: jellyseerr",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "media-support; Compose-managed by powflix",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "jellyseerr"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powflix",
+    "service": "jellyseerr",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/Powflix -f /Users/macback/Projects/Powflix/docker-compose.yml --project-name powflix stop jellyseerr"
+    ],
+    "keep": [
+      "/Users/macback/Projects/Powflix/config/jellyseerr"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

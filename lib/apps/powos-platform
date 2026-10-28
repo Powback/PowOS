@@ -1,0 +1,547 @@
+#!/usr/bin/env python3
+"""Compose integration for the personal PowOS fleet.
+
+Uses the engine's resolved Compose model, never a second YAML/interpolation implementation.
+Reports contain selected metadata only: environment values, commands and secrets are never exported.
+This is a preflight/inventory adapter, not a scheduler, quota manager or CDN implementation.
+"""
+import argparse
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+
+SCHEMA = "powos.platform/v1"
+ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,80}$")
+HOST_RULE = re.compile(r"Host\(([^)]*)\)")
+GLOBAL_VALUES = {"-f", "--file", "-p", "--project-name", "--project-directory", "--env-file", "--profile", "--ansi", "--progress", "--parallel"}
+GLOBAL_FLAGS = {"--compatibility", "--dry-run", "--all-resources"}
+COMMANDS = {"check", "plan", "units", "register", "status", "fleet"}
+MUTATIONS = {"up", "start", "restart", "run", "create", "unpause", "scale"}
+POLICIES = {"always", "http-idle", "follow-group", "job", "application-managed"}
+ROLES = {"state", "durable", "scratch", "cache", "source", "secret-state", "borrowed-state", "derived", "runtime"}
+
+
+class Failure(Exception):
+    pass
+
+
+def engine():
+    result = shlex.split(os.environ.get("POW_COMPOSE_ENGINE", "docker compose"))
+    if not result:
+        raise Failure("POW_COMPOSE_ENGINE is empty")
+    return result
+
+
+def split_args(argv):
+    """Keep all global flags in preflight as well as the eventual engine invocation."""
+    flags, i = [], 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in GLOBAL_VALUES:
+            if i + 1 == len(argv):
+                raise Failure(f"missing value for {arg}")
+            flags.extend(argv[i:i + 2]); i += 2
+        elif arg in GLOBAL_FLAGS or any(arg.startswith(k + "=") for k in GLOBAL_VALUES if k.startswith("--")):
+            flags.append(arg); i += 1
+        elif arg.startswith("-f") and len(arg) > 2 or arg.startswith("-p") and len(arg) > 2 and not arg.startswith("--"):
+            flags.append(arg); i += 1
+        else:
+            return flags, arg, argv[i + 1:]
+    return flags, "", []
+
+
+def capture(cmd, timeout=45):
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Failure(f"cannot execute {Path(cmd[0]).name}: {type(exc).__name__}") from None
+    if result.returncode:
+        # Engine errors can quote an interpolated secret. Do not echo captured output.
+        raise Failure(f"{Path(cmd[0]).name} command failed (exit {result.returncode}); inspect locally with the underlying CLI")
+    return result.stdout
+
+
+def load_model(flags):
+    # Config is local/read-only; do not need a Docker socket. Do not resolve service env files.
+    try:
+        raw = capture(engine() + flags + ["config", "--format", "json", "--no-env-resolution"])
+        model = json.loads(raw)
+    except (Failure, ValueError):
+        # podman-compose versions without JSON output may use their runtime's PyYAML.
+        # No dependencies are installed implicitly; absent support is an actionable failure.
+        try:
+            import yaml
+        except ImportError:
+            raise Failure("cannot render Compose JSON; use Docker Compose v2 or a Podman runtime with PyYAML and config support") from None
+        raw = capture(engine() + flags + ["config"])
+        try:
+            model = yaml.safe_load(raw)
+        except Exception:
+            raise Failure("invalid Compose model") from None
+    if not isinstance(model, dict) or not isinstance(model.get("services"), dict):
+        raise Failure("Compose model has no services")
+    return model
+
+
+def mapping(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        return dict(x.split("=", 1) if "=" in x else (x, "") for x in value)
+    return {}
+
+
+def seconds(value):
+    m = re.fullmatch(r"(\d+)(ms|s|m|h|d)?", str(value))
+    if not m:
+        raise ValueError("invalid duration")
+    return int(m[1]) * {None: 1, "ms": .001, "s": 1, "m": 60, "h": 3600, "d": 86400}[m[2]]
+
+
+def routes(labels):
+    result = []
+    prefix = "traefik.http.routers."
+    for key, value in labels.items():
+        if key.startswith(prefix) and key.endswith(".rule"):
+            base = key[:-5]
+            hosts = [host for call in HOST_RULE.findall(str(value)) for host in re.findall(r'[`"]([^`"]+)[`"]', call)]
+            result.append({"router": base[len(prefix):], "hosts": hosts,
+                           "middlewares": str(labels.get(base + ".middlewares", "")).split(","),
+                           "entrypoints": labels.get(base + ".entrypoints", "")})
+    return result
+
+
+def mount_rows(service):
+    out = []
+    for item in service.get("volumes", []):
+        if isinstance(item, str):
+            parts = item.split(":")
+            item = {"source": parts[0] if len(parts) > 1 else "", "target": parts[1] if len(parts) > 1 else parts[0],
+                    "read_only": len(parts) > 2 and parts[2] == "ro", "type": "unresolved"}
+        out.append({k: item.get(k) for k in ("type", "source", "target", "read_only")})
+    return out
+
+
+def validate_lifecycle(name, service, config, host, errors):
+    labels = mapping(service.get("labels"))
+    life = config.get("lifecycle", {})
+    policy = life.get("policy")
+    if policy not in POLICIES:
+        errors.append(f"{name}: lifecycle.policy must be one of {', '.join(sorted(POLICIES))}")
+        return
+    if policy in {"http-idle", "follow-group"} and config.get("role") in {
+        "game-server", "media-server", "download-worker", "database", "agent-platform",
+        "infrastructure", "build-job", "backup-worker", "media-support"
+    }:
+        errors.append(f"{name}: this role needs an application activity/wake adapter before sleep")
+    authority = host.get("lifecycleAuthority")
+    if authority not in {"powstation-autosleep", "powos-container", "application"}:
+        errors.append(f"{name}: unknown lifecycleAuthority")
+    if authority == "powstation-autosleep":
+        value = labels.get("powos.autosleep")
+        if policy in {"always", "job", "application-managed"} and value != "never":
+            errors.append(f"{name}: {policy} requires powos.autosleep=never")
+        if policy in {"http-idle", "follow-group"}:
+            if model_never_sleep(host, service):
+                errors.append(f"{name}: protected infrastructure/state workload cannot opt into generic sleep")
+            if value != "on":
+                errors.append(f"{name}: sleeping policy requires powos.autosleep=on")
+            if labels.get("powos.autosleep.group", service.get("container_name", name)) != life.get("group"):
+                errors.append(f"{name}: declared sleep group does not match runtime labels")
+            if "idle" in life and labels.get("powos.autosleep.idle", "15m") != life["idle"]:
+                errors.append(f"{name}: declared idle timeout does not match runtime labels")
+            if life.get("deepSleep") == "off" and labels.get("powos.autosleep.hibernate") != "off":
+                errors.append(f"{name}: deepSleep off requires powos.autosleep.hibernate=off")
+            if policy == "http-idle":
+                if not routes(labels):
+                    errors.append(f"{name}: HTTP wake requires a Traefik router")
+                for r in routes(labels):
+                    if "autosleep@file" not in r["middlewares"]:
+                        errors.append(f"{name}/{r['router']}: missing autosleep@file wake middleware")
+                if labels.get("traefik.docker.allownonrunning") != "true":
+                    errors.append(f"{name}: sleeping HTTP routes require allownonrunning=true")
+            if policy == "follow-group" and labels.get("powos.autosleep.activity") != "requests":
+                errors.append(f"{name}: follower requires activity=requests")
+        if "io.powos.autosleep" in labels:
+            errors.append(f"{name}: two container sleep controllers declared")
+    elif authority == "powos-container":
+        if "powos.autosleep" in labels:
+            errors.append(f"{name}: PowStation sleep label on a PowOS container host")
+        if policy in {"always", "job", "application-managed"} and labels.get("io.powos.autosleep") != "never":
+            errors.append(f"{name}: {policy} requires io.powos.autosleep=never")
+        if policy in {"http-idle", "follow-group"}:
+            errors.append(f"{name}: portable HTTP/group wake adapter is not implemented; use an explicit local app policy")
+    elif authority == "application":
+        if policy in {"http-idle", "follow-group"} or labels.get("powos.autosleep") == "on" or labels.get("io.powos.autosleep", "never") != "never":
+            errors.append(f"{name}: application-managed lifecycle cannot also enable a generic sleeper")
+    if "idle" in life:
+        try:
+            if seconds(life["idle"]) <= 0:
+                raise ValueError()
+        except ValueError:
+            errors.append(f"{name}: invalid idle duration")
+
+
+def model_never_sleep(host, service):
+    """Conservative counterpart of the existing controller's infrastructure protection."""
+    name = service.get("container_name", "")
+    image = service.get("image", "")
+    return (host.get("project") in {"powstation", "spacetimeai", "android-app-dev", "hq", "agent-gateway", "claude-rate-limiter"}
+            or re.search(r"spacetime|stdb|postgres|redis|mysql|mariadb|mongo|valkey", name + " " + image)
+            or name in {"traefik", "pihole", "unbound", "wireguard", "authelia", "coturn", "autosleep", "autosleep-watchdog"})
+
+
+def validate_access(name, service, config, errors, warnings):
+    access = config.get("access", {})
+    authentication = access.get("authentication", "existing")
+    if authentication not in {"existing", "powauth", "application", "none"}:
+        errors.append(f"{name}: unknown authentication policy")
+    if authentication == "existing":
+        warnings.append(f"{name}: existing access rules preserved; no new access grant")
+    if authentication == "none" and access.get("exposure") == "internet" and not access.get("reason"):
+        errors.append(f"{name}: anonymous internet access requires an explicit reason")
+    for route in routes(mapping(service.get("labels"))):
+        if authentication != "powauth":
+            continue
+        chain = route["middlewares"]
+        if "authelia@docker" not in chain:
+            errors.append(f"{name}/{route['router']}: PowAuth policy requires authelia@docker")
+        elif "autosleep@file" in chain and chain.index("authelia@docker") > chain.index("autosleep@file"):
+            errors.append(f"{name}/{route['router']}: authenticate before waking")
+
+
+def validate_datasets(model, policy, errors, warnings):
+    datasets = policy.get("datasets", {})
+    if not isinstance(datasets, dict):
+        errors.append("datasets must be a mapping")
+        return []
+    covered, result = set(), []
+    for name, dataset in datasets.items():
+        if not isinstance(dataset, dict) or dataset.get("role") not in ROLES:
+            errors.append(f"dataset {name}: invalid storage role")
+            continue
+        if not dataset.get("mounts"):
+            errors.append(f"dataset {name}: at least one existing mount is required")
+        if dataset.get("role") in {"state", "durable", "source", "secret-state", "borrowed-state"} and dataset.get("cleanup") != "never":
+            errors.append(f"dataset {name}: authoritative/source data requires cleanup=never")
+        for ref in dataset.get("mounts", []):
+            pair = (ref.get("service"), ref.get("target"))
+            if pair in covered:
+                errors.append(f"dataset {name}: mount is declared twice: {pair[0]}:{pair[1]}")
+            covered.add(pair)
+            service = model["services"].get(pair[0])
+            match = next((m for m in mount_rows(service or {}) if m["target"] == pair[1]), None)
+            if match is None:
+                errors.append(f"dataset {name}: no mount {pair[0]}:{pair[1]}")
+            elif dataset.get("role") == "borrowed-state" and not match["read_only"]:
+                errors.append(f"dataset {name}: borrowed state must be mounted read-only")
+        if dataset.get("budget"):
+            warnings.append(f"dataset {name}: budget is advisory; filesystem quota/admission is not implemented")
+        if dataset.get("backup") == "required":
+            warnings.append(f"dataset {name}: backup/restore policy still required")
+        result.append({"id": name, **dataset})
+    for service_name, service in model["services"].items():
+        for mount in mount_rows(service):
+            if mount["type"] != "tmpfs" and (service_name, mount["target"]) not in covered:
+                errors.append(f"{service_name}:{mount['target']}: mount has no dataset declaration")
+    return result
+
+
+def inspect_model(model):
+    policy = model.get("x-pow")
+    errors, warnings, services = [], [], []
+    if policy is None:
+        return {"project": model.get("name", "unknown"), "managed": False, "errors": [],
+                "warnings": ["No x-pow contract; existing Compose behavior retained"], "services": [], "datasets": []}
+    if not isinstance(policy, dict) or policy.get("schema") != SCHEMA:
+        return {"project": model.get("name", "unknown"), "managed": True, "errors": [f"x-pow.schema must be {SCHEMA}"], "warnings": [], "services": [], "datasets": []}
+    for field in ("owner", "host", "lifecycleAuthority"):
+        if not isinstance(policy.get(field), str) or not policy[field]:
+            errors.append(f"x-pow.{field} is required")
+    unknown = set(policy) - {"schema", "owner", "host", "lifecycleAuthority", "services", "datasets"}
+    if unknown:
+        errors.append("unknown top-level x-pow fields: " + ", ".join(sorted(unknown)))
+    if not isinstance(policy.get("services"), dict):
+        errors.append("x-pow.services must be a mapping")
+        return {"project": model.get("name", "unknown"), "managed": True, "errors": errors, "warnings": warnings, "services": [], "datasets": []}
+    for extra in set(policy["services"]) - set(model["services"]):
+        errors.append(f"x-pow.services refers to missing service {extra}")
+    ids = set()
+    for name, service in model["services"].items():
+        # Docker Compose's JSON renderer drops per-service extension fields.
+        # Keep policy in top-level x-pow.services so every engine sees the same model.
+        config = policy.get("services", {}).get(name, {})
+        if not isinstance(config, dict) or not config.get("role"):
+            errors.append(f"{name}: x-pow.role required")
+            continue
+        labels = mapping(service.get("labels"))
+        unit = labels.get("io.powos.unit", "")
+        if not ID.fullmatch(unit) or unit in ids:
+            errors.append(f"{name}: missing, invalid or duplicate io.powos.unit")
+        ids.add(unit)
+        validate_lifecycle(name, service, config, {**policy, "project": model.get("name")}, errors)
+        validate_access(name, service, config, errors, warnings)
+        if labels.get("powcdn.enable") == "true":
+            errors.append(f"{name}: PowCDN is not implemented; do not enable a non-existent controller")
+        services.append({"service": name, "unit": unit, "container": service.get("container_name"),
+                         "role": config["role"], "lifecycle": config.get("lifecycle", {}),
+                         "access": config.get("access", {}), "routes": routes(labels),
+                         "mounts": mount_rows(service), "ports": service.get("ports", []),
+                         "dependencies": config.get("dependencies", [])})
+    groups = {s["lifecycle"].get("group") for s in services if s["lifecycle"].get("policy") == "http-idle"}
+    for service in services:
+        if service["lifecycle"].get("policy") == "follow-group" and service["lifecycle"].get("group") not in groups:
+            errors.append(f"{service['service']}: follower group has no HTTP wake owner in this project")
+    datasets = validate_datasets(model, policy, errors, warnings)
+    return {"project": model.get("name", "unknown"), "managed": True, "owner": policy.get("owner"),
+            "host": policy.get("host"), "lifecycleAuthority": policy.get("lifecycleAuthority"),
+            "errors": errors, "warnings": warnings, "services": services, "datasets": datasets}
+
+
+def write_json(file, value):
+    file = Path(file)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=file.parent, prefix=".powos-")
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(value, stream, indent=2); stream.write("\n")
+        os.replace(temporary, file)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def unit_manifests(model, report, flags):
+    if report["errors"] or not report["managed"]:
+        raise Failure("units require a valid managed Compose contract")
+    # Pin the source location/project so removal works from any working directory.
+    persistent_flags = stable_flags(flags, report["project"])
+    result = []
+    for row in report["services"]:
+        name = row["service"]
+        service = model["services"][name]
+        # A name regex supports scaled services; explicit container_name stays exact.
+        container = service.get("container_name") or re.escape(report["project"]) + "[-_]" + re.escape(name) + "[-_][0-9]+"
+        life = row["lifecycle"]
+        manifest = {"id": row["unit"], "name": f"{report['project']}: {name}", "kind": "container", "host": report["host"],
+                    "owner": report["owner"], "purpose": f"{row['role']}; Compose-managed by {report['project']}",
+                    "installedBy": "pow-compose register", "processes": [{"container": container}],
+                    "autosleep": "never" if life["policy"] in {"always", "job", "application-managed"} else {"idle": life.get("idle", "15m"), "mode": "pause"},
+                    "platform": {"schema": SCHEMA, "project": report["project"], "service": name, "lifecycleAuthority": report["lifecycleAuthority"], "lifecycle": life, "access": row["access"]},
+                    "remove": {"stop": [shlex.join(engine() + persistent_flags + ["stop", name])], "keep": [m["source"] for m in row["mounts"] if m["source"]]}}
+        limits = {out: service[key] for key, out in {"mem_limit": "memory", "memswap_limit": "memory_swap", "cpus": "cpus", "pids_limit": "pids"}.items() if service.get(key) is not None}
+        if limits:
+            manifest["limits"] = limits
+        else:
+            manifest["unbounded"] = "Existing Compose has no explicit container cap; measure before selecting limits."
+        result.append(manifest)
+    return result
+
+
+def stable_flags(flags, project):
+    out, project_dir, first_file = [], None, None
+    i = 0
+    while i < len(flags):
+        arg = flags[i]
+        if arg in {"-f", "--file", "--project-directory", "--env-file"}:
+            value = str(Path(flags[i + 1]).resolve())
+            if arg in {"-f", "--file"}: first_file = first_file or value
+            if arg == "--project-directory": project_dir = value
+            out.extend([arg, value]); i += 2
+        elif any(arg.startswith(k + "=") for k in {"--file", "--project-directory", "--env-file"}):
+            key, value = arg.split("=", 1)
+            value = str(Path(value).resolve())
+            if key == "--file": first_file = first_file or value
+            if key == "--project-directory": project_dir = value
+            out.extend([key, value]); i += 1
+        elif arg.startswith("-f") and len(arg) > 2:
+            value = str(Path(arg[2:]).resolve()); first_file = first_file or value
+            out.extend(["-f", value]); i += 1
+        else:
+            out.append(arg); i += 1
+    if not project_dir:
+        out.extend(["--project-directory", str(Path(first_file).parent) if first_file else str(Path.cwd())])
+    out.extend(["--project-name", project])
+    return out
+
+
+def report_text(report, verbose=False):
+    print(f"{report['project']}: {'managed' if report['managed'] else 'legacy'}; {len(report['services'])} services, {len(report['datasets'])} datasets")
+    if verbose:
+        for row in report["services"]:
+            print(f"  {row['service']}: {row['role']}; {row['lifecycle'].get('policy')}; unit={row['unit']}")
+    for level in ("errors", "warnings"):
+        if level == "warnings" and not verbose:
+            if report[level]: print(f"  {len(report[level])} operational notes; use plan or --json for details")
+            continue
+        for item in report[level]:
+            print(f"  {level[:-1].upper()}: {item}")
+
+
+def dns_guard(model):
+    hosts = sorted({host for service in model["services"].values() for r in routes(mapping(service.get("labels"))) for host in r["hosts"] if host.endswith(".pow")})
+    if not hosts:
+        return
+    allowed = set(filter(None, os.environ.get("POW_SELF_IP", "").split(",")))
+    if not allowed:
+        # Deliberately do not infer the Mac's address: its Docker engine lives on a different LAN IP.
+        raise Failure("set POW_SELF_IP to the service/engine LAN IP (Colima is .100, the Mac is .99)")
+    for value in allowed:
+        try:
+            ipaddress.ip_address(value)
+        except ValueError:
+            raise Failure("POW_SELF_IP must contain comma-separated IP addresses") from None
+    collisions = []
+    for host in hosts:
+        if not re.fullmatch(r"[A-Za-z0-9.-]+", host):
+            raise Failure("invalid hostname in routing labels")
+        if shutil.which("dig"):
+            answer = capture(["dig", "+short", "+time=2", "+tries=1", "A", host], timeout=5)
+            addresses = {x for x in answer.splitlines() if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", x)}
+        else:
+            raise Failure("dig is required for bounded DNS checks")
+        if not addresses and os.environ.get("POW_STATION_HOST"):
+            target = os.environ["POW_STATION_HOST"]
+            answer = capture(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", "--", target,
+                              shlex.join(["dig", "+short", "+time=2", "+tries=1", "A", host])], timeout=8)
+            addresses = {x for x in answer.splitlines() if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", x)}
+        if addresses - allowed:
+            collisions.append(f"{host}: {', '.join(sorted(addresses - allowed))}")
+    if collisions:
+        if os.environ.get("POW_COMPOSE_FORCE") == "1":
+            print("pow-compose: explicitly bypassing DNS collisions: " + "; ".join(collisions), file=sys.stderr)
+        else:
+            raise Failure("hostname collision: " + "; ".join(collisions))
+
+
+def host_guard(report):
+    if report["managed"] and os.environ.get("POW_PLATFORM_HOST") != report.get("host"):
+        raise Failure("target host mismatch: set POW_PLATFORM_HOST to the intended engine host and use that host's contract")
+
+
+def fleet(manifest_file):
+    manifest_file = Path(manifest_file).resolve()
+    manifest = json.loads(manifest_file.read_text())
+    reports, errors, ids, names, ports = [], [], {}, {}, []
+    for entry in manifest["projects"]:
+        source = (manifest_file.parent / entry["compose"]).resolve()
+        flags = ["--project-directory", str(source.parent), "-f", str(source)]
+        model = load_model(flags)
+        report = inspect_model(model)
+        report["compose"] = str(source)
+        reports.append(report)
+        if not report["managed"]:
+            errors.append(f"adopted project {report['project']} is missing its x-pow contract")
+        for row in report["services"]:
+            where = f"{report['project']}/{row['service']}"
+            for table, keys in [(ids, [(report["host"], row["unit"])]), (names, [h for r in row["routes"] for h in r["hosts"]])]:
+                for key in keys:
+                    if key in table and table[key] != where:
+                        errors.append(f"duplicate unit/hostname {key}: {table[key]} and {where}")
+                    table[key] = where
+            for port in row["ports"]:
+                if not isinstance(port, dict) or not port.get("published"):
+                    continue
+                current = (report["host"], str(port["published"]), port.get("protocol", "tcp"), port.get("host_ip", "0.0.0.0"), where)
+                for previous in ports:
+                    if current[0] == previous[0] and current[2] == previous[2] and port_overlap(current[1], previous[1]) and (current[3] == previous[3] or current[3] in {"0.0.0.0", "::"} or previous[3] in {"0.0.0.0", "::"}):
+                        errors.append(f"port conflict {current[1]}/{current[2]}: {previous[4]} and {where}")
+                ports.append(current)
+    return {"schema": SCHEMA, "projects": reports, "errors": errors,
+            "ok": not errors and all(not r["errors"] for r in reports)}
+
+
+def port_overlap(first, second):
+    def bounds(value):
+        parts = str(value).split("-", 1)
+        return int(parts[0]), int(parts[-1])
+    a, b = bounds(first), bounds(second)
+    # Published 0 asks the engine to allocate an ephemeral port.
+    return a[0] != 0 and b[0] != 0 and max(a[0], b[0]) <= min(a[1], b[1])
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    flags, command, tail = split_args(argv)
+    if command in {"help", "--help", "-h"} or not command:
+        print("pow-compose [Compose global options] COMMAND [options]\n"
+              "  check | plan [--json]       Validate/report the resolved project contract\n"
+              "  fleet --manifest FILE [--json]  Cross-project inventory and conflict checks\n"
+              "  units [--output DIR]        Export matching PowOS unit manifests\n"
+              "  register                    Register units on the declared host; no restart\n"
+              "  status [--json]             Include deployed runtime state\n"
+              "  up/start/restart/run/create/unpause/scale  Validate before engine execution\n"
+              "Other commands pass through to the Compose engine. See PowOS/docs/PLATFORM.md.")
+        return 0
+    if command not in COMMANDS and command not in MUTATIONS:
+        return subprocess.call(engine() + argv)
+    if command == "fleet":
+        parser = argparse.ArgumentParser(prog="pow-compose fleet")
+        parser.add_argument("--manifest", required=True); parser.add_argument("--json", action="store_true")
+        args = parser.parse_args(tail)
+        result = fleet(args.manifest)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            for report in result["projects"]: report_text(report)
+            for error in result["errors"]: print("ERROR: " + error)
+        return 0 if result["ok"] else 1
+    model = load_model(flags)
+    report = inspect_model(model)
+    if command in MUTATIONS:
+        if report["errors"]:
+            report_text(report); return 1
+        host_guard(report)
+        dns_guard(model)
+        return subprocess.call(engine() + argv)
+    parser = argparse.ArgumentParser(prog="pow-compose " + command)
+    parser.add_argument("--json", action="store_true")
+    if command == "units": parser.add_argument("--output")
+    args = parser.parse_args(tail)
+    if command in {"units", "register"}:
+        units = unit_manifests(model, report, flags)
+        if command == "register":
+            host_guard(report)
+            cli = Path(__file__).resolve().with_name("powos-units")
+            if not cli.is_file(): raise Failure("powos-units is not installed alongside the platform adapter")
+            for unit in units:
+                result = subprocess.run([sys.executable, str(cli), "register", "-"], input=json.dumps(unit), text=True, capture_output=True)
+                if result.returncode: raise Failure("unit registration failed; check registry permissions")
+            print(f"Registered {len(units)} units. No containers started or changed.")
+        elif args.output:
+            for unit in units: write_json(Path(args.output) / (unit["id"] + ".json"), unit)
+            print(f"Wrote {len(units)} unit manifests to {args.output}")
+        else:
+            print(json.dumps(units, indent=2))
+        return 0
+    if command == "status":
+        try:
+            raw = capture(engine() + flags + ["ps", "--all", "--format", "json"])
+            try: containers = json.loads(raw)
+            except ValueError: containers = [json.loads(line) for line in raw.splitlines() if line.strip()]
+            if isinstance(containers, dict): containers = [containers]
+            report["runtime"] = [{k: c.get(k) for k in ("Service", "Name", "State", "Health", "ExitCode")} for c in containers]
+        except (Failure, ValueError):
+            report["errors"].append("Runtime unavailable; cannot verify deployed state")
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        report_text(report, verbose=command == "plan")
+        for row in report.get("runtime", []): print("  Runtime: " + json.dumps(row))
+    return 1 if report["errors"] else 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (Failure, OSError, ValueError, KeyError, TypeError) as exc:
+        # Only our Failure messages are curated; arbitrary model/parser errors may contain secrets.
+        print("pow-compose: " + (str(exc) if isinstance(exc, Failure) else type(exc).__name__ + ": invalid configuration or unavailable file"), file=sys.stderr)
+        sys.exit(2)

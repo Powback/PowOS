@@ -1,0 +1,35 @@
+{
+  "id": "android.android-emulator",
+  "name": "android-app-dev: android-emulator",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "support; Compose-managed by android-app-dev",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "android-emulator"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "android-app-dev",
+    "service": "android-emulator",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/android-app-dev -f /Users/macback/Projects/android-app-dev/docker-compose.yml --project-name android-app-dev stop android-emulator"
+    ],
+    "keep": []
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

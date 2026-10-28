@@ -1,0 +1,39 @@
+{
+  "id": "minecraft.mc",
+  "name": "minecraft-create121: mc",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "game-server; Compose-managed by minecraft-create121",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "mc-create121"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "minecraft-create121",
+    "service": "mc",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/minecraft-create121 -f /Users/macback/Projects/minecraft-create121/docker-compose.yaml --project-name minecraft-create121 stop mc"
+    ],
+    "keep": [
+      "/Users/macback/Projects/minecraft-create121/data",
+      "/Users/macback/Projects/minecraft-create121/pack",
+      "/Users/macback/Projects/HiveMind/bin"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

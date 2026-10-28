@@ -1,0 +1,41 @@
+{
+  "id": "powstation.llm-router",
+  "name": "powstation: llm-router",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "infrastructure; Compose-managed by powstation",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "llm-router"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powstation",
+    "service": "llm-router",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/PowStation -f /Users/macback/Projects/PowStation/docker-compose.yaml --project-name powstation stop llm-router"
+    ],
+    "keep": [
+      "/Users/macback/Projects/PowStation/config/litellm/config.yaml"
+    ]
+  },
+  "limits": {
+    "memory": "2147483648",
+    "cpus": 2,
+    "pids": 512
+  }
+}

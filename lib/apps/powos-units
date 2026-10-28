@@ -799,12 +799,14 @@ def docker_rows(units):
         return []
     rows, projects, by_unit = [], {}, {}
     for c in cs:
-        if c["project"]:
-            projects.setdefault(c["project"], []).append(c)
-            continue
+        # Explicit unit ownership wins over the legacy project summary. Compose
+        # services now carry the same io.powos.unit label as native/Quadlet units.
         u = container_unit(units, c)
         if u:
             by_unit.setdefault(u["id"], (u, []))[1].append(c)
+            continue
+        if c["project"]:
+            projects.setdefault(c["project"], []).append(c)
             continue
         rows.append({
             "id": f"container:{c['name']}", "name": c["name"], "kind": "container", "owner": "?",

@@ -1,0 +1,264 @@
+# REVIEW PROPOSAL ONLY; not deployed. Full copy of McWebViewer/docker-compose.yaml.
+# Relative paths belong to McWebViewer, not this examples directory.
+# Validate with --project-directory /Users/macback/Projects/McWebViewer.
+# x-pow is proposed metadata, ignored by Docker Compose and current PowOS tools.
+# io.powos.unit ownership labels require corresponding unit registrations.
+# No storage quota, backup schedule, dependency lease, or publisher is created by x-pow.
+# McWebViewer — static bundle + a read-only view of a world for ?auto=1.
+#
+# Deliberately LAN-only (`.pow`, no Let's Encrypt route). The container serves the
+# vanilla client jar and mod assets to the browser; those are Mojang's and each mod
+# author's files, and Mojang's EULA prohibits redistributing game files. Serving them
+# to yourself on your own LAN is fine — publishing them on `*.powback.com` would not be.
+# If you add a public router, gate it behind Authelia and understand what you are hosting.
+
+services:
+  mcwebviewer:
+    build: .
+    container_name: mcwebviewer
+    restart: unless-stopped
+    environment:
+      # Region files to autoload. Each is up to 1024 chunks; two is plenty to fly around.
+      # the four regions around the base at -480,63,64: the reach square spans x -560..-401 and
+      # z -16..143, crossing the x=-512 and z=0 region seams (2026-09-05: "only plus coords render")
+      MCWV_REGIONS: "${MCWV_REGIONS:-r.0.0.mca}"
+      # Which live pipeline the browser uses.
+      #   bridge    (default) RCON + save-file re-reads. Entities move at the flush rate.
+      #   spacetime ../mcspacetime's protocol client mirroring the world into SpacetimeDB.
+      #             Entities move at packet rate. Needs that bot running.
+      # A single tab can override either way with ?source=... — no restart needed for that.
+      MCWV_SOURCE: "${MCWV_SOURCE:-bridge}"
+      MCWV_STDB_URI: "${MCWV_STDB_URI:-http://mcspacetime.pow}"
+      MCWV_STDB_DB: "${MCWV_STDB_DB:-mcspacetime}"
+      # Uncomment to serve only some mod jars. The full set is ~450 MB and the browser
+      # fetches all of it on ?auto=1 — fine on a wired LAN, painful over the VPN.
+      # MCWV_JARS: "create-1.21.1-6.0.10.jar,cc-tweaked-1.21.1-forge-1.119.0.jar"
+    volumes:
+      # ALL READ-ONLY. This is a live server world; nothing here may write to it.
+      - /Users/macback/Projects/minecraft-create121/data/world:/data/world:ro
+      - /Users/macback/Projects/minecraft-create121/data/mods:/data/mods:ro
+      # Vanilla client jar: run `npm run fetch-assets` on the host first.
+      - ./.cache:/data/client:ro
+      # THE BUNDLE IS MOUNTED, NOT BAKED IN — so a change is a rebuild of the bundle and
+      # nothing else. The image's last stage is `COPY --from=build /app/dist
+      # /usr/share/nginx/html` and nothing else in the container depends on the source, so
+      # a full `docker compose build` was ninety seconds of ceremony around a file copy.
+      # With this mount, `npm run watch` (vite build --watch) rebuilds into ./dist in a
+      # couple of seconds and nginx is already serving it — refresh the page and it is
+      # there. No image rebuild, no restart, same URL, same bridge, same nginx routes.
+      #
+      # THE CATCH, so nobody is surprised by it: ./dist is now load bearing. If it is
+      # missing or half written the site is missing or half written, and what the container
+      # serves is whatever is on disk rather than whatever was last built into the image.
+      # `npm run build` puts it right. Take this line out to go back to the baked bundle.
+      - ./dist:/usr/share/nginx/html:ro
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.mcwebviewer.rule: Host(`mcwebviewer.pow`)
+      traefik.http.routers.mcwebviewer.entrypoints: web
+      traefik.http.services.mcwebviewer.loadbalancer.server.port: "80"
+      traefik.http.routers.mcwebviewer.middlewares: autosleep@file
+      traefik.docker.allownonrunning: "true"
+      powos.autosleep: on
+      powos.autosleep.group: mcwebviewer
+      io.powos.unit: mcwebviewer.mcwebviewer
+    networks:
+      - default
+      - traefik
+    x-pow:
+      role: web
+      lifecycle:
+        policy: http-idle
+        group: mcwebviewer
+        idle: 15m
+      dependencies:
+        - project: minecraft-create121
+          service: mc
+          kind: live-state
+          activation: manual-until-dependency-adapter-exists
+      exposure: lan
+
+  # The baker: keeps the served asset bundle in step with a LIVE world.
+  #
+  # .cache/baked is a snapshot of the block states the world contained when it was made.
+  # Turtles place blocks the bake has never seen, and a state the bundle lacks is drawn as
+  # NOTHING — the reference server showed a tower with no walls for three days this way,
+  # with the region files current and the live sync working the whole time. This service
+  # re-scans the regions every MCWV_BAKE_MS and re-bakes ONLY when the world contains a
+  # state, biome or entity type the bundle does not (src/server/bake-plan.ts) — about a
+  # second of CPU, a few times an hour while turtles build. The page notices the new
+  # bundle and swaps it in without a reload.
+  #
+  # It is the ONLY container in this project with a writable mount, and that mount is this
+  # project's own .cache. The world and the mods are read-only here as everywhere else.
+  mcwv-baker:
+    build:
+      context: .
+      target: baker
+    container_name: mcwv-baker
+    restart: unless-stopped
+    init: true
+    environment:
+      # Must match the viewer's MCWV_REGIONS above: it bakes what the viewer serves.
+      MCWV_REGIONS: "${MCWV_REGIONS:-r.0.0.mca}"
+      MCWV_BAKE_MS: "${MCWV_BAKE_MS:-30000}"
+    labels:
+      powos.autosleep: on
+      powos.autosleep.group: mcwebviewer
+      powos.autosleep.activity: requests
+      io.powos.unit: mcwebviewer.mcwv-baker
+    volumes:
+      - /Users/macback/Projects/minecraft-create121/data/world:/data/world:ro
+      - /Users/macback/Projects/minecraft-create121/data/mods:/data/mods:ro
+      - ./.cache:/data/client
+    x-pow:
+      role: derived-assets
+      lifecycle:
+        policy: follow-group
+        group: mcwebviewer
+      cachePublication: Only publish completed bake generations; never expose in-progress files.
+
+  # The live tier: a READ-ONLY RCON observer. A browser cannot open a TCP socket, so this
+  # process holds the RCON connection and reports player positions plus "the server has
+  # flushed" over one WebSocket. It is reached at ws://mcwebviewer.pow/live — nginx
+  # proxies it, so there is no second hostname and no second DNS record.
+  #
+  # It has no Traefik router of its own on purpose: this socket can ask a live server to
+  # save, and it should have exactly one way in, behind the viewer it belongs to.
+  mcwv-bridge:
+    build: ./bridge
+    container_name: mcwv-bridge
+    restart: unless-stopped
+    environment:
+      # `mc` is the Minecraft service's name on ITS OWN compose network, which this
+      # container joins below. RCON's port 25575 is NOT published to the host — reaching
+      # it means joining that network, which is a change to THIS container and requires
+      # no restart of, or change to, the Minecraft server.
+      MCWV_RCON_HOST: "${MCWV_RCON_HOST:-mc}"
+      MCWV_RCON_PORT: "${MCWV_RCON_PORT:-25575}"
+      # Set this in a .env file next to this compose file; do NOT commit it.
+      # It is the `rcon.password` from the server's server.properties.
+      MCWV_RCON_PASSWORD: "${MCWV_RCON_PASSWORD:-}"
+
+      # Player position polling. Cheap: `list` plus three `data get`s per tracked player.
+      MCWV_POLL_MS: "${MCWV_POLL_MS:-1000}"
+      MCWV_MAX_PLAYERS: "${MCWV_MAX_PLAYERS:-10}"
+      # Live turtles. `computercraft dump` lists every loaded computer with its block
+      # position — one cheap read a second while a viewer is connected (floor 500 ms, 0 turns
+      # it off). Without it a turtle only moves on screen when its chunk is flushed and
+      # re-read, i.e. every ~5 s, and a fleet that moves 12 blocks/s looks stuck.
+      MCWV_TURTLE_MS: "${MCWV_TURTLE_MS:-1000}"
+      # Turtle ACTIVITY labels come from the settlement brain (HQ), not RCON: `computercraft
+      # dump` says where a turtle is, HQ says what it is doing. HQ lives on this same
+      # network as `hq:4400`; the bridge polls its `fleet.status` once a second in parallel
+      # with the dump and folds each drone's name + free-text line into the turtle stream.
+      # Empty MCWV_HQ_URL turns labels off; turtle positions still stream.
+      MCWV_HQ_URL: "${MCWV_HQ_URL:-http://hq:4400}"
+      MCWV_HQ_MS: "${MCWV_HQ_MS:-1000}"
+      # FALLBACK source for monitor text. The primary source is the computers' own
+      # screen.json files in the world save, served by the viewer container and read by the
+      # page; this feed fills any panel those do not cover. Any URL answering the schema in
+      # bridge/src/monitors.mjs works; empty disables the fallback.
+      MCWV_MONITORS_URL: "${MCWV_MONITORS_URL:-http://hq:4400/monitors}"
+      MCWV_MONITORS_MS: "${MCWV_MONITORS_MS:-2000}"
+
+      # --- `save-all flush`: THE ONLY WRITE THIS SERVICE MAKES -------------------
+      # Live BLOCK changes (turtles moving, pistons, redstone) need the server to write
+      # changed chunks to disk so the browser can re-read them. That command runs on the
+      # server tick thread, and this server runs a turtle fleet that has already been
+      # destroyed once by a server that could not tick.
+      #
+      # So: OFF unless you set this to 1, and even then the bridge only flushes while a
+      # viewer is actually connected, never faster than every 2 s, and doubles the
+      # interval whenever a flush comes back slow. See bridge/src/flush-timer.mjs.
+      MCWV_FLUSH_ENABLE: "${MCWV_FLUSH_ENABLE:-0}"
+      MCWV_FLUSH_MS: "${MCWV_FLUSH_MS:-5000}"
+      MCWV_FLUSH_SLOW_MS: "${MCWV_FLUSH_SLOW_MS:-1000}"
+
+      # --- browser control (playing, not just watching) -------------------------
+      # Drives a server-side fake player over `/player <name> ...`. That command comes
+      # from a MOD — SiliconeDolls or Carpet: NeoForged on NeoForge 1.21.1 — and is NOT
+      # installed on the reference server.
+      #
+      # Setting this to 1 only permits an ATTEMPT. On startup the bridge runs the spawn
+      # command once and reads the reply; a server without the mod answers "Unknown or
+      # incomplete command", and the bridge then reports the control path as unavailable
+      # and refuses every control message. The browser binds no controls at all in that
+      # case and says why in the HUD — nothing is left firing failing commands at a live
+      # server. See bridge/src/fake-player.mjs.
+      MCWV_FAKEPLAYER_ENABLE: "${MCWV_FAKEPLAYER_ENABLE:-0}"
+      MCWV_BOT_NAME: "${MCWV_BOT_NAME:-WebViewer}"
+      # JSON overriding the command templates, for a mod that spells them differently:
+      #   MCWV_FAKEPLAYER_COMMANDS={"spawn":"dolls spawn {name}"}
+      MCWV_FAKEPLAYER_COMMANDS: "${MCWV_FAKEPLAYER_COMMANDS:-}"
+
+      # Poll tiers. The bot's position drives the camera, so it is polled far faster than
+      # anything else; measured at 10 Hz it is indistinguishable from idle in the server's
+      # tick-time distribution. See bridge/src/observer.mjs for the numbers.
+      MCWV_SELF_MS: "${MCWV_SELF_MS:-100}"
+      MCWV_VITALS_MS: "${MCWV_VITALS_MS:-500}"
+      MCWV_INVENTORY_MS: "${MCWV_INVENTORY_MS:-2000}"
+
+      # RCON has no push channel, so received chat is read from the server's own log.
+      MCWV_CHAT_LOG: "${MCWV_CHAT_LOG:-/data/mclogs/latest.log}"
+    volumes:
+      # READ-ONLY, and the only reason it is here: chat cannot be received over RCON.
+      # Nothing in this project writes to the Minecraft server's directories.
+      - /Users/macback/Projects/minecraft-create121/data/logs:/data/mclogs:ro
+    networks:
+      - default
+      - minecraft
+      - hq
+    labels:
+      io.powos.unit: mcwebviewer.mcwv-bridge
+      powos.autosleep: never
+    x-pow:
+      role: live-game-bridge
+      lifecycle:
+        policy: always
+      reason: Do not add to sleeping group without testing RCON reconnects and active WebSocket leases.
+
+networks:
+  traefik:
+    external: true
+  # The Minecraft server's own compose network. Joining it is how RCON is reached without
+  # publishing port 25575 on the host — nothing about the Minecraft stack changes.
+  minecraft:
+    external: true
+    name: minecraft-create121_default
+  # HQ's own compose network, where the settlement brain answers as `hq:4400`. The bridge
+  # joins it to read turtle activity labels — a change to THIS container only; nothing
+  # about the HiveMind stack is touched. (HQ lives on hq_default + traefik, NOT on the
+  # Minecraft network, so `hq:4400` is only reachable from here.)
+  hq:
+    external: true
+    name: hq_default
+x-pow:
+  schema: powos.platform/v1-draft
+  status: proposal-not-enforced
+  source: McWebViewer/docker-compose.yaml
+  host: powstation
+  runtime:
+    engine: docker
+    lifecycleAuthority: powstation-autosleep
+  identity: Keep the existing Compose project name; unit IDs below are proposed registrations.
+  datasets:
+    worldView:
+      role: borrowed-state
+      mounts:
+        - service: mcwebviewer
+          target: /data/world
+        - service: mcwv-baker
+          target: /data/world
+      owner: minecraft-create121
+      access: read-only
+      cleanup: never
+    baked:
+      role: derived
+      mounts:
+        - service: mcwebviewer
+          target: /data/client
+        - service: mcwv-baker
+          target: /data/client
+      cleanup: only-verified-regenerable-subpaths
+      budget: measure-before-setting

@@ -1,0 +1,35 @@
+{
+  "scope": "Repository integration; live activation not performed",
+  "schema": "powos.platform/v1",
+  "projects": 8,
+  "services": 64,
+  "datasets": 162,
+  "fleetValid": true,
+  "checks": {
+    "platformTests": {
+      "passed": 30,
+      "failed": 0
+    },
+    "unitRegistryTests": {
+      "passed": 13,
+      "failed": 0
+    },
+    "isolatedRegistry": {
+      "registeredUnits": 64,
+      "location": "/private/tmp/pow-platform-registry",
+      "liveRegistry": false
+    },
+    "composeRuntimeSettings": "Original mounts, ports, networks, images, builds, commands, restarts, dependencies, healthchecks, CPU shares and shutdown grace preserved",
+    "shellSyntax": "passed",
+    "spaceTimeAILint": "passed",
+    "spaceTimeAISpecToCode": "blocked by duplicate local.1 tag in DESIGN.md outside this change",
+    "runtimeStatus": "unavailable: Docker socket permission denied"
+  },
+  "notImplemented": [
+    "PowCDN backend/controller",
+    "shared storage reservation/quota enforcement",
+    "game/media activity wake adapters",
+    "automatic cross-host placement/failover"
+  ],
+  "activation": "bash PowStation/scripts/register-platform-units.sh from an unrestricted terminal on the Mac; normal service deployment applies new labels"
+}

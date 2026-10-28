@@ -1,0 +1,13 @@
+# OPTIONAL REVIEW EXAMPLE. Not applied. Requires approved PowAuth host policy.
+# Merge with ararat.compose.yaml using Ararat as --project-directory.
+# This deliberately adds an authenticated public router; the existing LAN router is unchanged.
+# Internet reachability is a separate deployment decision.
+services:
+  app:
+    labels:
+      traefik.http.routers.ararat-pub.rule: Host(`ararat.powback.com`)
+      traefik.http.routers.ararat-pub.entrypoints: websecure
+      traefik.http.routers.ararat-pub.tls.certresolver: letsencrypt
+      traefik.http.routers.ararat-pub.service: ararat
+      # Authenticate before waking the backend; keep the existing PowAuth middleware name.
+      traefik.http.routers.ararat-pub.middlewares: authelia@docker,autosleep@file

@@ -1,0 +1,50 @@
+{
+  "check": "Compose structural validation without interpolation or service env-file resolution; no deployment or runtime checks",
+  "results": [
+    {
+      "project": "ararat",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "project": "minecraft",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "project": "mcwebviewer",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "project": "powflix",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "project": "android",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "project": "spacetimeai",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "project": "scenes",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "project": "powstation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "project": "ararat-optional-public-overlay",
+      "passed": true,
+      "detail": ""
+    }
+  ]
+}

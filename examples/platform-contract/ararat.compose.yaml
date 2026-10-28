@@ -1,0 +1,68 @@
+# REVIEW PROPOSAL ONLY; not deployed. Full copy of Ararat/docker-compose.yml.
+# Relative paths belong to Ararat, not this examples directory.
+# Validate with --project-directory /Users/macback/Projects/Ararat.
+# x-pow is proposed metadata, ignored by Docker Compose and current PowOS tools.
+# io.powos.unit ownership labels require corresponding unit registrations.
+# No storage quota, backup schedule, dependency lease, or publisher is created by x-pow.
+name: ararat
+
+services:
+  app:
+    build: .
+    container_name: ararat
+    restart: unless-stopped
+    ports:
+      - "4370:4321"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=4321
+      - NODE_ENV=development
+    volumes:
+      - ./src:/app/src:rw # hot reload
+      - ./public:/app/public:rw
+      - /app/node_modules # keep container's installed deps
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.ararat.rule: Host(`ararat.pow`)
+      traefik.http.routers.ararat.entrypoints: web
+      traefik.http.services.ararat.loadbalancer.server.port: "4321"
+      traefik.http.routers.ararat.middlewares: autosleep@file
+      traefik.docker.allownonrunning: "true"
+      powos.autosleep: on
+      powos.autosleep.group: ararat
+      powos.autosleep.hibernate: off
+      io.powos.unit: ararat.app
+      powos.autosleep.idle: 15m
+    networks: [ traefik ] # traefik only — host is out of subnets for per-project default nets
+    x-pow:
+      role: web-dev
+      lifecycle:
+        policy: http-idle
+        idle: 15m
+        deepSleep: disabled
+      exposure: lan
+      directPortNote: :4370 bypasses the wake middleware; use ararat.pow
+    # No healthcheck: it only fetched its own page (a bun process every 30 s), and a healthcheck makes autosleep pause
+    # the container instead of freezing it - Traefik then holds a woken request until the next probe (up to 30 s).
+
+networks:
+  traefik:
+    external: true
+x-pow:
+  schema: powos.platform/v1-draft
+  status: proposal-not-enforced
+  source: Ararat/docker-compose.yml
+  host: powstation
+  runtime:
+    engine: docker
+    lifecycleAuthority: powstation-autosleep
+  identity: Keep the existing Compose project name; unit IDs below are proposed registrations.
+  datasets:
+    source:
+      role: source
+      mounts:
+        - service: app
+          target: /app/src
+        - service: app
+          target: /app/public
+      cleanup: never

@@ -1,0 +1,44 @@
+{
+  "id": "spacetimeai.web",
+  "name": "spacetimeai: web",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "agent-platform; Compose-managed by spacetimeai",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "spacetimeai-web"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "spacetimeai",
+    "service": "web",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/SpaceTimeAI -f /Users/macback/Projects/SpaceTimeAI/docker-compose.yml --project-name spacetimeai stop web"
+    ],
+    "keep": [
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/deploy/SpaceTimeAI/web",
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/deploy/SpaceTimeAI/module",
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/deploy/SpaceTimeAI/agents",
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/deploy/SpaceTimeAI",
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/tokens",
+      "web_node_modules",
+      "module_node_modules",
+      "/Users/macback/Projects/SpaceTimeAI/.stdb-state/cli-config"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

@@ -1,0 +1,41 @@
+{
+  "id": "powstation.pihole-sync",
+  "name": "powstation: pihole-sync",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "infrastructure; Compose-managed by powstation",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "pihole-sync"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powstation",
+    "service": "pihole-sync",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/PowStation -f /Users/macback/Projects/PowStation/docker-compose.yaml --project-name powstation stop pihole-sync"
+    ],
+    "keep": [
+      "/var/run/docker.sock",
+      "/Users/macback/Projects/PowStation/data/pihole/etc-dnsmasq.d",
+      "/Users/macback/Projects/PowStation/config/traefik/dynamic",
+      "/Users/macback/Projects/PowStation/pihole-sync/config/id_pihole_sync_ed25519",
+      "/Users/macback/Projects/PowStation/pihole-sync/config/known_hosts"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

@@ -1,0 +1,464 @@
+# REVIEW PROPOSAL ONLY; not deployed. Full copy of SpaceTimeAI/docker-compose.yml.
+# Relative paths belong to SpaceTimeAI, not this examples directory.
+# Validate with --project-directory /Users/macback/Projects/SpaceTimeAI.
+# x-pow is proposed metadata, ignored by Docker Compose and current PowOS tools.
+# io.powos.unit ownership labels require corresponding unit registrations.
+# No storage quota, backup schedule, dependency lease, or publisher is created by x-pow.
+# [d.svc.1] The services, one compose file on the main host (worker.yml on other PCs).
+# SpaceTimeAI, dev: SpacetimeDB + the web app with hot reload.
+#   docker compose up -d        then open http://spacetimeai.pow (LAN) or http://localhost:4321
+# Save module/src/*.ts → republished and bindings regenerated in about a second (red banner on failure).
+# Save web/src/**     → Vite hot-reloads the page.
+# Both services join only the shared `traefik` network (Docker's address pools are full), so their
+# names carry the project prefix.
+services:
+  # [d.svc.2] STDB on the main host (pinned 2.12.0).
+  # [arch.1] SpacetimeDB: the only state store.
+  stdb:
+    container_name: spacetimeai-stdb
+    # [d.state.9] server, CLI and npm spacetimedb all pinned to 2.12.0. The server binary is built from the local
+    # SpacetimeDB fork (../SpacetimeDB, branch powos/v2.12: v2.12.0 plus three idle-wakeup commits, pinned by hash;
+    # deploy/stdb/Dockerfile): 441 -> 20 wakeups/s for an idle server with two databases. The fork is also what PowOS's
+    # phone package builds from. Rollback: spacetimeai-stdb:2.10.2-idle (kept) with the pre-upgrade volume snapshot.
+    image: spacetimeai-stdb:2.12.0-idle
+    init: true # reaps the orphans git leaves behind; bun as PID 1 does not
+    build:
+      context: ./deploy/stdb
+      additional_contexts: { fork: ../SpacetimeDB/.git }
+      args: { STDB_VERSION: 2.12.0, STDB_COMMIT: 48e5b47ce076f99e6faecc774ad2543c681be702 }
+    user: "0:0"
+    command: [ "start", "--listen-addr", "0.0.0.0:3000", "--data-dir", "/stdb" ]
+    volumes:
+      - stdb_data:/stdb
+      # The server's JWT signing keys live in a bind mount so a saved token (and the CLI's identity,
+      # which owns the database) survives every compose lifecycle, `down -v` included.
+      # Lesson from ~/Projects/spacetimedb-astro: rotating these is what wedges publishes with 401/403.
+      - ./.stdb-state/server-config:/root/.config/spacetime
+    healthcheck:
+      test: [ "CMD", "curl", "-fsS", "http://localhost:3000/v1/ping" ]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: traefik
+      traefik.http.routers.spacetimeai-stdb.rule: Host(`stdb.spacetimeai.pow`)
+      traefik.http.routers.spacetimeai-stdb.entrypoints: web
+      traefik.http.services.spacetimeai-stdb.loadbalancer.server.port: "3000"
+      io.powos.unit: spacetimeai.stdb
+      powos.autosleep: never
+    restart: unless-stopped
+    networks: [ traefik ]
+    x-pow:
+      role: database
+      lifecycle:
+        policy: always
+
+  # [d.svc.3] [d.svc.10] [d.svc.11] The web (Astro, Bun; HMR when CODE=.) also watches module/ and publishes to the dev DB only; watchers poll.
+  # [d.prio.1] The web plane: thin, its own container; agents run in theirs (worker, control, merger).
+  web:
+    container_name: spacetimeai-web
+    build: { context: ./web, dockerfile: Dockerfile.dev }
+    init: true # reaps the orphans git leaves behind; bun as PID 1 does not
+    environment:
+      - ASTRO_TELEMETRY_DISABLED=1
+      - STDB_SERVER=http://spacetimeai-stdb:3000
+      - STDB_DATABASE=spacetimeai-dev
+      - PUBLIC_SPACETIMEDB_DB_NAME=spacetimeai-dev
+      - MODULE_DIR=/module
+      - SPACETIMEDB_INTERNAL_URL=http://spacetimeai-stdb:3000
+      - EXTRA_BINDINGS=/agents/module_bindings
+      - WATCH_POLL_MS=${CODE:+500}
+      - ASTRO_DEV=${CODE:+1}
+    volumes:
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/web:/app
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/module:/module
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/agents:/agents
+      # the whole repo, read-only, for deploy/seed.mjs and deploy/issue-token.mjs run as the owner:
+      #   docker exec spacetimeai-web bun /repo/deploy/seed.mjs --repo-path /repo
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}:/repo:ro
+      - ./.stdb-state/tokens:/repo-tokens
+      - web_node_modules:/app/node_modules
+      - module_node_modules:/module/node_modules
+      # the CLI's identity, which owns the database; kept with the server keys above
+      - ./.stdb-state/cli-config:/root/.config/spacetime
+    depends_on:
+      stdb: { condition: service_healthy }
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: traefik
+      traefik.http.routers.spacetimeai-dev.rule: Host(`spacetimeai.pow`)
+      traefik.http.routers.spacetimeai-dev.entrypoints: web
+      traefik.http.services.spacetimeai-dev.loadbalancer.server.port: "4321"
+      io.powos.unit: spacetimeai.web
+      powos.autosleep: never
+    restart: unless-stopped
+    networks: [ traefik ]
+    x-pow:
+      role: agent-platform
+      lifecycle:
+        policy: always
+
+  # [d.plane.1] The dispatcher. It holds only its own Dispatcher token and no model credentials; it can stop at
+  # any time (the module expires leases itself).
+  # [arch.8] Nothing connects into it: no ports.
+  # [d.cont.1] [d.cont.3] [d.svc.4] control: the dispatcher; it holds its own token and never runs model-written code.
+  # [arch.2] The dispatcher (the merger is its own service below); no model credentials.
+  control:
+    container_name: spacetimeai-control
+    image: spacetimeai-agents
+    init: true # reaps the orphans git leaves behind; bun as PID 1 does not
+    build: ./agents
+    working_dir: /agents
+    command: [ "sh", "-c", "bun install --silent && bun --watch control/main.ts" ]
+    environment:
+      - SPACETIMEDB_HOST=ws://spacetimeai-stdb:3000
+      - SPACETIMEDB_DB_NAME=spacetimeai-dev
+      - CONTROL_TOKEN_FILE=/tokens/control.token
+      - SUBSCRIPTION=powback
+      - CODEX_SUBSCRIPTION=chatgpt
+      - CLAUDE_AUTH_URL=http://claude-rate-limiter-authority:3128
+    volumes:
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/agents:/agents
+      - agents_node_modules:/agents/node_modules
+      - ./.stdb-state/tokens:/tokens:ro
+    depends_on:
+      stdb: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [ traefik ]
+    labels:
+      io.powos.unit: spacetimeai.control
+      powos.autosleep: never
+    x-pow:
+      role: agent-platform
+      lifecycle:
+        policy: always
+
+  # [d.prin.10] This machine's worker. Other PCs run the same container from worker.yml.
+  # [d.cont.4] [d.svc.5] The worker: the runner plus the Claude Code CLIs (the agent as its own uid).
+  # [arch.3] The runner and Claude Code, the agent caged as its own uid.
+  worker:
+    # [d.cd.3]
+    stop_grace_period: 30s # [d.action.26] the worker drains on SIGTERM, then exits
+    container_name: spacetimeai-worker
+    image: spacetimeai-agents
+    init: true # reaps the orphans git leaves behind; bun as PID 1 does not
+    build: ./agents
+    working_dir: /agents
+    command: [ "sh", "-c", "bun install --silent && exec bun worker/main.ts" ] # [auto.17] no file watcher: it restarts itself between sessions (worker/update.ts)
+    # [d.cont.6] [d.cont.9] [d.cont.13] Hardened: only the capabilities the cage needs (start the agent and hand it its
+    # checkout, its firewall, stop its processes), no new privileges for any child, limits, and a read-only root.
+    cap_drop: [ ALL ]
+    cap_add: [ SETUID, SETGID, CHOWN, FOWNER, DAC_OVERRIDE, KILL, NET_ADMIN, NET_RAW ] # [sec.10] NET_ADMIN: the agent uid's firewall
+    security_opt: [ "no-new-privileges:true" ]
+    pids_limit: 4096
+    mem_limit: 24g
+    read_only: true
+    tmpfs: [ "/tmp", "/run", "/root:mode=0700", "/home/agent:uid=1001,gid=1001,mode=0700" ]
+    environment:
+      - GIT_CONFIG_COUNT=1
+      - GIT_CONFIG_KEY_0=safe.directory
+      - GIT_CONFIG_VALUE_0=*
+      - SPACETIMEDB_HOST=ws://spacetimeai-stdb:3000
+      - SPACETIMEDB_DB_NAME=spacetimeai-dev
+      - MACHINE=mac-studio
+      - LABELS=host=mac-studio,repos=*
+      - CAPACITY=4
+      - WORKER_TOKEN_FILE=/root/tokens/worker-mac-studio.token
+      - EGRESS_URL=http://spacetimeai-egress:8079
+      - AGENT_UID=1001
+      - SCRATCH_DIR=/scratch
+      - PLAYBOOKS_DIR=/playbooks
+    volumes:
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/agents:/agents
+      - agents_node_modules:/agents/node_modules
+      # [d.cont.10] The runner's token under /root (0700); the agent owns the checkouts.
+      - ./.stdb-state/tokens:/root/tokens:ro # [sec.9] a host mount does not enforce file modes; /root does
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/playbooks:/playbooks:ro
+      - worker_scratch:/scratch
+      - worker_work:/work # the checkouts (the root is read-only)
+      - ./.stdb-state/hub:/repos:ro # [d.git.6] [d.cont.12] [d.plane.8] [hub.1] workers mount the hub's bare repos read-only
+    depends_on:
+      stdb: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [ traefik ]
+    labels:
+      io.powos.unit: spacetimeai.worker
+      powos.autosleep: never
+    x-pow:
+      role: agent-platform
+      lifecycle:
+        policy: always
+
+  # [d.plane.4] The egress guard: model traffic to the claude-auth authority with the tenant's routing secret,
+  # which only this container can read. It holds no Anthropic credential; claude-auth is the only refresher.
+  # [d.cont.18] [d.cont.21] [d.cont.22] [d.svc.6] The egress guard: the agent's only way out; model calls carry the tenant
+  # secret to claude-auth, and no .credentials.json exists anywhere in the agent plane.
+  # [arch.4] The only way out for a worker: model calls to claude-auth, other hosts through the guard.
+  egress:
+    container_name: spacetimeai-egress
+    image: spacetimeai-agents
+    init: true # reaps the orphans git leaves behind; bun as PID 1 does not
+    build: ./agents
+    working_dir: /agents
+    command: [ "bun", "--watch", "egress/main.ts" ]
+    environment:
+      - CLAUDE_AUTH_URL=http://claude-rate-limiter-authority:3128
+      - TENANT_SECRET_FILE=/secrets/tenant.secret
+      - EGRESS_TOKEN_FILE=/tokens/egress.token
+      - SPACETIMEDB_HOST=ws://spacetimeai-stdb:3000
+      - SPACETIMEDB_DB_NAME=spacetimeai-dev
+    volumes:
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/agents:/agents:ro
+      - agents_node_modules:/agents/node_modules:ro
+      - ./.stdb-state/secrets:/secrets:ro
+      - ./.stdb-state/tokens:/tokens:ro
+    restart: unless-stopped
+    networks: [ traefik, claude_auth_internal ]
+    labels:
+      io.powos.unit: spacetimeai.egress
+      powos.autosleep: never
+    x-pow:
+      role: agent-platform
+      lifecycle:
+        policy: always
+
+  # [d.git.2] The merger: the only writer to the bare repos (control plane). Its own Merger token.
+  # [arch.9] The only writer to the bare repos and their default branches.
+  merger:
+    container_name: spacetimeai-merger
+    image: spacetimeai-agents
+    init: true # reaps the orphans git leaves behind; bun as PID 1 does not
+    working_dir: /agents
+    command: [ "sh", "-c", "bun install --silent && bun --watch control/merger.ts" ]
+    environment:
+      - GIT_CONFIG_COUNT=1
+      - GIT_CONFIG_KEY_0=safe.directory
+      - GIT_CONFIG_VALUE_0=*
+      - SPACETIMEDB_HOST=ws://spacetimeai-stdb:3000
+      - SPACETIMEDB_DB_NAME=spacetimeai-dev
+      - MERGER_TOKEN_FILE=/tokens/merger.token
+      - REPOS_DIR=/repos
+      - BLOBSTORE_URL=http://spacetimeai-blobstore:8081
+      - REPO_SOURCES=SpaceTimeAI=/src/SpaceTimeAI
+      - GITHUB_TOKEN_FILE=/secrets/github/token
+      - PROJECTS_DIR=/projects
+      - DEPLOY_REPO=SpaceTimeAI
+      - DEPLOY_DIR=/deploy
+      - SYNC_MS=60000
+    volumes:
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/agents:/agents
+      - agents_node_modules:/agents/node_modules
+      - ./.stdb-state/tokens:/tokens:ro
+      - ./.stdb-state/hub:/repos # [hub.1] the hub: bare repos on disk, so a checkout pushes to one as a remote
+      - .:/src/SpaceTimeAI:ro # onboarding: SpaceTimeAI's own repo, cloned bare into /repos
+      - ./.stdb-state/github:/secrets/github:ro # [pr.3] the GitHub token alone (not the tenant secret); empty until you add one
+      - ..:/projects:ro # [disc.1] the projects folder, read-only: listed, and cloned bare once switched on
+      - ./.stdb-state/deploy:/deploy # [auto.7] the deploy copy every service runs from (CODE=. runs your checkout instead)
+    depends_on:
+      stdb: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [ traefik ]
+    labels:
+      io.powos.unit: spacetimeai.merger
+      powos.autosleep: never
+    x-pow:
+      role: agent-platform
+      lifecycle:
+        policy: always
+
+  # [d.boot.36] The previewer: the only service with this host's Docker socket. It takes preview jobs only (labels
+  # preview=true), builds an issue's preview from its branch with the default branch's compose file, refuses host
+  # mounts and privileges, and routes it at <repo>-<issue>.spacetimeai.pow on the LAN entrypoint (never powback.com).
+  # [d.svc.7] The previewer: it alone holds this host's Docker socket, for per-issue preview compose projects.
+  # [arch.5] Builds and serves per-issue previews.
+  previewer:
+    container_name: spacetimeai-previewer
+    image: spacetimeai-previewer
+    init: true # reaps the orphans git leaves behind; bun as PID 1 does not
+    build: ./agents/previewer
+    working_dir: /agents
+    command: [ "sh", "-c", "bun install --silent && exec bun worker/main.ts" ] # [auto.17] no file watcher: it restarts itself between sessions (worker/update.ts)
+    environment:
+      - GIT_CONFIG_COUNT=1
+      - GIT_CONFIG_KEY_0=safe.directory
+      - GIT_CONFIG_VALUE_0=*
+      - SPACETIMEDB_HOST=ws://spacetimeai-stdb:3000
+      - SPACETIMEDB_DB_NAME=spacetimeai-dev
+      - WORKER_TOKEN_FILE=/tokens/worker-previewer.token
+      - MACHINE=previewer
+      - LABELS=preview=true,repos=*
+      - CAPACITY=2
+      - SELFTEST=0
+      - PREVIEWER=1
+      - REPOS_DIR=/repos
+      - GATE_DIR=${PWD}/.stdb-state/gate
+      - TOOLS_HOME_ANDROID=${TOOLS_HOME_ANDROID:-/Users/macback/Projects/android-app-dev}
+    volumes:
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/agents:/agents
+      - agents_node_modules:/agents/node_modules
+      - ./.stdb-state/tokens:/tokens:ro
+      - ./.stdb-state/hub:/repos:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      # [auto.15] Mounted at its host path: the step check scripts bind-mount "$PWD" for the host's Docker, which must
+      # see the same path. Run `docker compose up` from this folder.
+      - ${PWD}/.stdb-state/gate:${PWD}/.stdb-state/gate
+    depends_on:
+      stdb: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [ traefik ]
+    labels:
+      io.powos.unit: spacetimeai.previewer
+      powos.autosleep: never
+    x-pow:
+      role: agent-platform
+      lifecycle:
+        policy: always
+
+  # [auto.16] No browser of SpaceTimeAI's own: every session's browser is an instance on the box's shared farm
+  # (cb-mcp-stdb, Powpanion's concurrent browser), scoped to its preview or to the LAN (agents/worker/codemode/browser.ts).
+
+  # The blob store: immutable content by sha256; writes need an upload token minted for an active lease.
+  # [ways.2] The Discord bridge (agents/notify/discord.ts, ported from agent-gateway): what waits for you, as a title and a
+  # console link; Allow / Deny on permissions only, as a Notifier principal. Idle until NOTIFY_DISCORD_CHANNEL is set and
+  # .stdb-state/secrets/discord.token exists. Trusted infrastructure: it reaches Discord directly, so the agents' egress
+  # guard never has to allow discord.com.
+  discord:
+    container_name: spacetimeai-discord
+    image: spacetimeai-agents
+    init: true # reaps the orphans git leaves behind; bun as PID 1 does not
+    working_dir: /agents
+    command: [ "sh", "-c", "exec bun notify/discord.ts" ]
+    environment:
+      - SPACETIMEDB_HOST=ws://spacetimeai-stdb:3000
+      - SPACETIMEDB_DB_NAME=spacetimeai-dev
+      - NOTIFIER_TOKEN_FILE=/tokens/notifier.token
+      - DISCORD_TOKEN_FILE=/secrets/discord.token
+      - NOTIFY_DISCORD_CHANNEL=${NOTIFY_DISCORD_CHANNEL:-}
+      - NOTIFY_KINDS=${NOTIFY_KINDS:-}
+      - NOTIFY_DISCORD_USERS=${NOTIFY_DISCORD_USERS:-}
+      - CONSOLE_URL=http://spacetimeai.pow
+    volumes:
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/agents:/agents:ro
+      - agents_node_modules:/agents/node_modules:ro
+      - ./.stdb-state/tokens:/tokens:ro
+      - ./.stdb-state/secrets:/secrets:ro
+    restart: unless-stopped
+    networks: [ traefik ]
+    labels:
+      io.powos.unit: spacetimeai.discord
+      powos.autosleep: never
+    x-pow:
+      role: agent-platform
+      lifecycle:
+        policy: always
+
+  # [d.svc.8] The blob store: content-addressed, read over HTTP, written with one-use tokens.
+  # [arch.6] Large immutable content: bundles, screenshots, transcripts.
+  blobstore:
+    container_name: spacetimeai-blobstore
+    image: spacetimeai-agents
+    init: true # reaps the orphans git leaves behind; bun as PID 1 does not
+    working_dir: /agents
+    command: [ "sh", "-c", "bun install --silent && bun --watch blobstore/main.ts" ]
+    environment:
+      - SPACETIMEDB_HOST=ws://spacetimeai-stdb:3000
+      - SPACETIMEDB_DB_NAME=spacetimeai-dev
+      - BLOBSTORE_TOKEN_FILE=/tokens/blobstore.token
+      - BLOB_DIR=/blobs
+    volumes:
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/agents:/agents
+      - agents_node_modules:/agents/node_modules
+      - ./.stdb-state/tokens:/tokens:ro
+      - blobs:/blobs
+    restart: unless-stopped
+    networks: [ traefik ]
+    # [d.plane.9] Remote workers reach it on the LAN (or WireGuard) as blobs.spacetimeai.pow: .pow only, never powback.com.
+    # A read needs the content's sha256; a write still needs a one-use upload token.
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: traefik
+      traefik.http.routers.spacetimeai-blobs.rule: Host(`blobs.spacetimeai.pow`)
+      traefik.http.routers.spacetimeai-blobs.entrypoints: web
+      traefik.http.services.spacetimeai-blobs.loadbalancer.server.port: "8081"
+      io.powos.unit: spacetimeai.blobstore
+      powos.autosleep: never
+    x-pow:
+      role: agent-platform
+      lifecycle:
+        policy: always
+
+  # [d.schema.13] Nightly backups of STDB and the blob store to the NAS, each with a restore drill (tools/backup.sh).
+  backup:
+    container_name: spacetimeai-backup
+    image: clockworklabs/spacetime:v2.12.0 # the drill restores with the server version the data is from
+    init: true # reaps the orphans git leaves behind; bun as PID 1 does not
+    user: "0:0"
+    entrypoint: [ "sh", "/tools/backup.sh" ]
+    volumes:
+      - stdb_data:/data/stdb:ro
+      - blobs:/data/blobs:ro
+      - ${CODE:-./.stdb-state/deploy/SpaceTimeAI}/tools:/tools:ro
+      - ./.stdb-state/server-config:/root/.config/spacetime:ro # the same signing keys, so the restored copy accepts the owner's token
+      - ./.stdb-state/cli-config:/cli:ro # the owner's token, to count what the copy holds
+      - powcache:/nas
+    restart: unless-stopped
+    networks: [ traefik ]
+    labels:
+      io.powos.unit: spacetimeai.backup
+      powos.autosleep: never
+    x-pow:
+      role: backup-worker
+      lifecycle:
+        policy: always
+
+volumes:
+  # PowCache on the NAS, mounted by the Colima VM over NFS (PowStation's pattern); only the backup writes to it.
+  powcache:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=192.168.50.231,nfsvers=3,rw,nolock,soft
+      device: ":/volume1/PowCache"
+  worker_work:
+  blobs:
+  worker_scratch:
+  agents_node_modules:
+  stdb_data:
+  web_node_modules:
+  module_node_modules:
+
+networks:
+  traefik:
+    external: true
+  claude_auth_internal:
+    external: true
+x-pow:
+  schema: powos.platform/v1-draft
+  status: proposal-not-enforced
+  source: SpaceTimeAI/docker-compose.yml
+  host: powstation
+  runtime:
+    engine: docker
+    lifecycleAuthority: powstation-autosleep
+  identity: Keep the existing Compose project name; unit IDs below are proposed registrations.
+  datasets:
+    database:
+      role: state
+      mounts:
+        - service: stdb
+          target: /stdb
+      backing: existing-local-volume
+      cleanup: never
+      backup: preserve-existing-backup-service-and-restore-drill
+    blobs:
+      role: private-durable
+      mounts:
+        - service: blobstore
+          target: /blobs
+      cleanup: application-retention-only
+      cdn: Explicit authenticated integration only; retain existing one-use upload-token semantics.
+  notes:
+    - The entire spacetimeai project is excluded by the current PowStation autosleep never-list.
+    - Preserve signing keys and agent workspaces; no automatic storage migration.

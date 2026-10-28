@@ -1,0 +1,38 @@
+{
+  "id": "android.traffic-dashboard",
+  "name": "android-app-dev: traffic-dashboard",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "support; Compose-managed by android-app-dev",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "traffic-dashboard"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "android-app-dev",
+    "service": "traffic-dashboard",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/android-app-dev -f /Users/macback/Projects/android-app-dev/docker-compose.yml --project-name android-app-dev stop traffic-dashboard"
+    ],
+    "keep": [
+      "/Users/macback/Projects/android-app-dev/projects/traffic-dashboard/index.html",
+      "/Users/macback/Projects/android-app-dev/projects/traffic-dashboard/nginx.conf"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}

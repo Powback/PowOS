@@ -146,6 +146,7 @@ deploy)
   adb shell rm -rf /data/local/tmp/powos-apps
   adb push -q "$HERE/../../../lib/apps" /data/local/tmp/powos-apps
   adb push -q "$HERE/../../../bin/powos" /data/local/tmp/powos-apps/powos
+  adb push -q "$HERE/../../../bin/pow-compose" /data/local/tmp/powos-apps/pow-compose
   adb push -q "$HERE/../../../lib/config.sh" /data/local/tmp/powos-apps/config.sh
   # The patched source build (pkgs/spacetimedb) when there is one, else the official binaries (pkgs/spacetimedb-bin).
   stdb=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" spacetimedb)

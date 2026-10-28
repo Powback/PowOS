@@ -1,0 +1,16 @@
+{
+  "id": "ararat.app",
+  "name": "Ararat web application",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "Example matching registration for io.powos.unit=ararat.app. Review only; not installed. Existing PowStation autosleep owns lifecycle.",
+  "installedBy": "Proposed Compose-to-unit adapter; not implemented",
+  "processes": [{"container": "ararat"}],
+  "unbounded": "Existing container has no explicit cap; measure peak development/build use before selecting limits.",
+  "autosleep": {"idle": "15m", "mode": "pause", "stop": "0"},
+  "remove": {
+    "stop": ["docker stop ararat"],
+    "keep": ["/Users/macback/Projects/Ararat"]
+  }
+}

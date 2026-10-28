@@ -1,0 +1,42 @@
+{
+  "id": "android.android-remote",
+  "name": "android-app-dev: android-remote",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "support; Compose-managed by android-app-dev",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "android-remote"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "android-app-dev",
+    "service": "android-remote",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "existing",
+      "exposure": "existing"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/android-app-dev -f /Users/macback/Projects/android-app-dev/docker-compose.yml --project-name android-app-dev stop android-remote"
+    ],
+    "keep": [
+      "/Users/macback/Projects/android-app-dev/output",
+      "/Users/macback/Projects/android-app-dev/tools/android-remote/screenshots",
+      "/Users/macback/Projects/android-app-dev/tools/android-remote/recipes",
+      "adb-keys",
+      "/var/run/docker.sock",
+      "/Users/macback/Projects"
+    ]
+  },
+  "unbounded": "Existing Compose has no explicit container cap; measure before selecting limits."
+}
