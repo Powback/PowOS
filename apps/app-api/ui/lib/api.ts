@@ -130,6 +130,8 @@ export interface Host {
   askAssistant?(text: string): void;
   androidApps?(): Promise<{ pkg: string; label: string }[]>;
   appLinks?(pkg: string): Promise<AppLinks>;
+  /** Older shells lack it (feature-detect). */
+  addAppWidget?(provider: string): Promise<"added">;
 }
 
 export interface Net {

@@ -102,6 +102,8 @@ export interface DetailProps {
   toggle?: (on: boolean, action?: string) => void;
   draft?: boolean;
   selectedAction?: string;
+  /** host.addAppWidget when the shell has it. */
+  addToHome?: (provider: string) => Promise<unknown>;
 }
 
 function ActionRow({ p, id }: { p: DetailProps; id: string }) {
@@ -133,7 +135,24 @@ function widgetSize(w: AppWidget): string {
 }
 
 /** An Android app's analysed home-screen widgets (AppWidgetProviders): what each is, so a PowOS widget can be offered. */
-export function Widgets({ widgets }: { widgets?: AppWidget[] }) {
+function PutOnHome({ add, provider }: { add: (provider: string) => Promise<unknown>; provider: string }) {
+  const [state, setState] = useState<"idle" | "busy" | "done" | string>("idle");
+  const go = () => {
+    setState("busy"); // Optimistic: shown at once; the tile lands on home as soon as Android allows it.
+    add(provider).then(() => setState("done"), (e) => setState(`error:${e instanceof Error ? e.message : String(e)}`));
+  };
+  const err = state.startsWith("error:") ? state.slice(6) : null;
+  return (
+    <div style={S.row}>
+      <button type="button" disabled={state === "busy"} onClick={go}>
+        {state === "busy" ? "Adding… (approve Android's prompt if shown)" : state === "done" ? "Added to home ✓" : "Put on home"}
+      </button>
+      {err && <Muted>{err}</Muted>}
+    </div>
+  );
+}
+
+export function Widgets({ widgets, addToHome }: { widgets?: AppWidget[]; addToHome?: (provider: string) => Promise<unknown> }) {
   if (!widgets?.length) return null;
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -149,6 +168,7 @@ export function Widgets({ widgets }: { widgets?: AppWidget[] }) {
             {w.updatePeriodMs >= 1800000 ? ` · updates every ${Math.round(w.updatePeriodMs / 60000)} min` : ""}
             {w.configure ? ` · set-up: ${w.configure}` : ""}
           </Muted>
+          {addToHome ? <PutOnHome add={addToHome} provider={w.provider} /> : <Muted>Update PowOS to put this on home.</Muted>}
         </div>
       ))}
     </section>
@@ -171,7 +191,7 @@ export function Actions(p: DetailProps) {
           </section>
         );
       })}
-      <Widgets widgets={p.spec.widgets} />
+      <Widgets widgets={p.spec.widgets} addToHome={p.addToHome} />
     </>
   );
 }

@@ -243,7 +243,7 @@ export default function Main({ host, app, close, route }: Props) {
       );
     return (
       <div style={S.page}>
-        <Detail selectedAction={route?.action} net={net} app={app} spec={spec} toggle={toggle} back={() => setOpenId(null)} />
+        <Detail selectedAction={route?.action} addToHome={host.addAppWidget} net={net} app={app} spec={spec} toggle={toggle} back={() => setOpenId(null)} />
       </div>
     );
   }

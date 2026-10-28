@@ -61,6 +61,12 @@ export interface IslandHost {
   androidApps?(): Promise<{ pkg: string; label: string }[]>;
   /** An Android app's deep links, read from its manifest - nothing fired (bridge apps.links); rejects on an older APK. */
   appLinks?(pkg: string): Promise<AppLinks>;
+  /**
+   * Puts an Android app's own home-screen widget on PowOS home as a tile ([provider]: "package/class", as App API
+   * lists it). Resolves "added" (the tile is on home), or "pending" once Android's bind prompt was answered
+   * and the tile landed ("home.changed"); rejects with why (no such widget, the prompt declined, binding failed).
+   */
+  addAppWidget?(provider: string): Promise<"added">;
 }
 
 /** Launcher entries -> one per Android package ("a:<pkg>/<activity>[@profile]", the owner's profile only). */
@@ -76,6 +82,32 @@ async function androidApps() {
 function appLinks(pkg: string): Promise<AppLinks> {
   if (!powos.apps.links) return Promise.reject(new Error("this host can't read an app's links"));
   return powos.apps.links(pkg);
+}
+
+async function addAppWidget(provider: string): Promise<"added"> {
+  if (!powos.appWidgets?.add) throw new Error("this PowOS is too old to host app widgets");
+  const base = provider.split("#")[0];
+  const all = await powos.appWidgets.providers();
+  const p = all.find((x) => x.provider.split("#")[0] === base && !x.work) ?? all.find((x) => x.provider.split("#")[0] === base);
+  if (!p) throw new Error("Android doesn't list this widget (is the app installed?)");
+  const { placeNew } = await import("../ui/grid.tsx");
+  const spot = placeNew(p.sizeDp[0], p.sizeDp[1]);
+  // Listen before asking: a bind prompt's outcome can arrive before add() resolves.
+  let settle!: (e?: Error) => void;
+  const outcome = new Promise<void>((res, rej) => (settle = (e) => (e ? rej(e) : res())));
+  const offFail = powos.on("appwidgets.failed", () => settle(new Error("the widget wasn't added (the Android prompt was declined or its setup didn't finish)")));
+  const offHome = powos.on("home.changed", () => settle());
+  const timer = setTimeout(() => settle(new Error("timed out waiting for the Android prompt")), 120000);
+  try {
+    const r = await powos.appWidgets.add(p.provider, spot.page, spot.cell, spot.width, spot.height).catch(() => "failed");
+    if (r === "failed") throw new Error(`couldn't add ${p.label}`);
+    if (r === "pending") await outcome; // Android asks first: "Allow PowOS to create widgets", then the widget's setup.
+    return "added";
+  } finally {
+    clearTimeout(timer);
+    offFail?.();
+    offHome?.();
+  }
 }
 
 function askAssistant(text: string) {
@@ -454,4 +486,5 @@ export const host: IslandHost = {
   askAssistant,
   androidApps,
   appLinks,
+  addAppWidget,
 };
