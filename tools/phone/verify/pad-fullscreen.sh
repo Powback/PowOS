@@ -29,7 +29,15 @@ trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
 I0=$(irq)
 fail() { echo "FAIL: $*" | tee -a "$OUT/log.txt"; "$T/shot.sh" "$OUT/fail.png" >/dev/null 2>&1; exit 1; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
-padflag() { sh_ "grep -o 'gamepad_shown\" value=\"[a-z]*' /data/data/andro.marchy/shared_prefs/andromarchy_settings.xml" | grep -o '[a-z]*$' | head -1; }
+# Per app (PadApps): the saved set gamepad_apps holds the app the controller was enabled in (Kate here).
+padflag() { sh_ "grep -A6 'gamepad_apps' /data/data/andro.marchy/shared_prefs/andromarchy_settings.xml" | grep -qi kate && echo true || echo false; }
+# shotdiff A B: per mille of the screen that differs
+shotdiff() { python3 - "$1" "$2" <<'PY'
+import subprocess,sys
+a,b=[subprocess.run(["ffmpeg","-v","error","-i",f,"-vf","scale=180:-1,format=gray","-f","rawvideo","-"],capture_output=True).stdout for f in sys.argv[1:]]
+print(sum(1 for x,y in zip(a,b) if abs(x-y)>25)*1000//max(len(a),1))
+PY
+}
 # center "x y" of the node with this content-desc, from a uiautomator dump
 node() {
   sh_ "uiautomator dump /sdcard/pf.xml >/dev/null 2>&1; cat /sdcard/pf.xml" | python3 -c '
@@ -79,6 +87,18 @@ PY
 )
 log "overlay on: $d per mille of the screen changed"
 [ "${d:-0}" -ge 5 ] || fail "the overlay did not draw over full-screen Kate ($d per mille changed) - $OUT/on.png"
+# Per app: enabled for Kate, so it is hidden over home / another app and back when Kate returns.
+sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 3
+"$T/shot.sh" "$OUT/home-on.png" >/dev/null 2>&1
+sh_ "am move-task $KT" >/dev/null 2>&1 || sh_ "cmd activity task-to-front $KT" >/dev/null 2>&1; sleep 3
+"$T/shot.sh" "$OUT/back.png" >/dev/null 2>&1
+[ "$(padflag)" = true ] || fail "the controller choice for Kate was lost leaving Kate"
+dh=$(shotdiff "$OUT/on.png" "$OUT/back.png"); log "back over Kate: $dh per mille differ from the first on-shot"
+[ "${dh:-999}" -le 60 ] || fail "the controller did not come back over Kate after home ($dh per mille differ) - $OUT/back.png"
+sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 3
+"$T/shot.sh" "$OUT/home-2.png" >/dev/null 2>&1
+dv=$(shotdiff "$OUT/home-on.png" "$OUT/home-2.png"); log "home twice: $dv per mille differ"
+sh_ "am move-task $KT" >/dev/null 2>&1 || sh_ "cmd activity task-to-front $KT" >/dev/null 2>&1; sleep 3
 tap_desc "Game controls"; [ "$(padflag)" = false ] || fail "second tap did not turn the controls off"
 tap_desc Keyboard || fail "tap on Keyboard"; sleep 1
 sh_ "dumpsys input_method" | grep -q "mInputShown=true" || fail "Keyboard tapped, the IME is not shown"

@@ -575,13 +575,20 @@ public class MainActivity extends Activity
                 android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO, (event, path) -> {
                     if (!"focused-window".equals(path)) return;
                     String key = readFocusedWindow(runDir);
-                    runOnUiThread(() -> mGamepadOverlay.setGame(key));
+                    runOnUiThread(() -> {
+                        mGamepadOverlay.setGame(key);
+                        // Per app: the controller shows only while the app it was enabled in is in front.
+                        boolean on = PadApps.on(this, key);
+                        mGamepadOverlay.setShown(on);
+                        if (mGamepadButton != null) mGamepadButton.setAlpha(on ? 1f : 0.6f);
+                        applyBackScreen(on);
+                    });
                     PowosWindowActivity.gameAll(key);
                 });
         mGamepadOverlay.setGame(readFocusedWindow(runDir));
         root.addView(mGamepadOverlay, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-        mGamepadOverlay.setShown(getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_GAMEPAD_SHOWN, false));
+        mGamepadOverlay.setShown(PadApps.on(this, PadApps.front(this)));
         addKeyboardButton(root);
         addGamepadButton(root);
 
@@ -1371,23 +1378,22 @@ public class MainActivity extends Activity
     private void setPadShown(boolean show) {
         mGamepadOverlay.setShown(show);
         if (mGamepadButton != null) mGamepadButton.setAlpha(show ? 1f : 0.6f);
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
+        PadApps.set(this, PadApps.front(this), show);
         applyBackScreen(show);
     }
 
     /** Whether the game controls are on: the live overlay's state, else what was saved (it is restored at the next start). */
     public static boolean padShown(Context c) {
-        MainActivity m = sInstance;
-        if (m != null && m.mGamepadOverlay != null) return m.mGamepadOverlay.getVisibility() == View.VISIBLE;
-        return c.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_GAMEPAD_SHOWN, false);
+        // The state for the app in front (the saved set), the same answer whichever window carries the overlay.
+        return PadApps.on(c, PadApps.front(c));
     }
 
     /** The control centre's Controller tile: on/off. With no session up it is saved and applies at the next start. */
     public static void padShow(Context c, boolean show) {
+        PadApps.set(c, PadApps.front(c), show);
         PowosWindowActivity.padShowAll(show);
         MainActivity m = sInstance;
         if (m != null && m.mGamepadOverlay != null) m.runOnUiThread(() -> m.setPadShown(show));
-        else c.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
     }
 
     /** The tile's long press: the layout editor. False when no session is up to edit on. */
@@ -1432,7 +1438,7 @@ public class MainActivity extends Activity
                     case 1:
                         mGamepadOverlay.setEditing(true, () -> {
                             v.setAlpha(1f);
-                            prefs.edit().putBoolean(KEY_GAMEPAD_SHOWN, true).apply();
+                            PadApps.set(this, PadApps.front(this), true);
                         });
                         return true;
                     case 2:

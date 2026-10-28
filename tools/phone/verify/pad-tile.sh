@@ -5,7 +5,8 @@
 # Records pad.state(); opens the control centre (the shade's pull, as cc-toprow.sh does); asserts the tile is shown
 # (the tools group is opened if it is folded); taps it: within 1 s pad.state() has flipped, timed from the tap's
 # pointerdown in the page to the host's answer; taps again: back to the start. Closes the shade. The overlay ends in
-# the state it started (restored in a trap). Changes no other setting.
+# the state it started (restored in a trap). The overlay is per app (PadApps): the tile reflects the app in front, so
+# pad.state is the answer for the app in front (home: off); run it over an app to check that app. Changes no other setting.
 # Exit 1 + "FAIL:" on a miss, 3 on a real touch (restored) or no window, 5 + "ENV:" when it can't run (screen off,
 # no pad host, no shell page).
 set -uo pipefail

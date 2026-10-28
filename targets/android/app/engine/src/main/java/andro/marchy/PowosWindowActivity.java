@@ -133,14 +133,17 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     /** The focused window's class changed (powos-focus-watch): the per-game layout, in the full-screen windows too. */
     static void gameAll(String key) {
-        for (PowosWindowActivity w : CHROME) w.runOnUiThread(() -> { if (w.padOverlay != null) w.padOverlay.setGame(key); });
+        for (PowosWindowActivity w : CHROME) w.runOnUiThread(() -> {
+            if (w.padOverlay == null) return;
+            w.padOverlay.setGame(key);
+            w.setPad(PadApps.on(w, key));
+        });
     }
 
     private void setPad(boolean show) {
         if (padOverlay == null) return;
         padOverlay.setShown(show);
         padButton.setAlpha(show ? 1f : 0.6f);
-        getSharedPreferences("andromarchy_settings", MODE_PRIVATE).edit().putBoolean("gamepad_shown", show).apply();
     }
 
     /**
@@ -167,7 +170,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         padOverlay = new GamepadOverlay(this, PadHub.PADD_SOCKET);
         padOverlay.setGame(MainActivity.readFocusedWindow(SessionService.runDir(this)));
         rootView.addView(padOverlay, new android.widget.FrameLayout.LayoutParams(-1, -1));
-        padOverlay.setShown(getSharedPreferences("andromarchy_settings", MODE_PRIVATE).getBoolean("gamepad_shown", false));
+        padOverlay.setShown(PadApps.on(this, PadApps.front(this)));
         ime = new SystemIME(this, new SystemIME.Host() {
             @Override public ExtraKeysBar getExtraKeysBar() { return null; }
             @Override public void onImeVisibilityChanged(boolean visible) { }
