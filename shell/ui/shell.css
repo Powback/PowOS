@@ -2470,7 +2470,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .home.wide > .bar .bar-pill { left: 0; right: 0; bottom: var(--pill-mid); }
 .home.wide .dock-page { --slot: min(60px, calc((100cqw - 28px) / max(6, var(--cells, 6)))); flex: 0 0 auto; }
 .home.wide .dock :is(.app, .dock-gap), .home.wide .dock .dock-recent .app { flex: 0 0 var(--slot); }
-.home.wide > .dock:not(.dock-tray) { margin-left: 8px; }
+.home.wide:not(.dock-left):not(.dock-right) > .dock:not(.dock-tray) { margin-left: 8px; }
 .home.wide > .dock-tray { margin-right: 8px; }
 /* The launcher above the one-row foot: the frost and the drawer's window end at the stage's foot (the bar's top). */
 .home.wide:not(:has(.ai-panel.wide)) > .stage > .launcher-frame { inset: 0; border-radius: var(--radius); }
@@ -2478,7 +2478,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .home.wide > .stage > .launcher-clip, .home.wide:not(:has(> .bar)) > .stage > .launcher-clip { inset: 0; transform: none; }
 .home.wide > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
 /* The bar under it stays: no slide, no fade, still tappable (PowOS AI's wide panel still covers the foot). */
-.home.wide:not(:has(.ai-panel.wide)) > .dock { transform: none; opacity: 1; pointer-events: auto; }
+.home.wide:not(.dock-left):not(.dock-right):not(:has(.ai-panel.wide)) > .dock { transform: none; opacity: 1; pointer-events: auto; }
 
 /*
  * The control center, v3 (control.tsx Controls, state.ts ccV3): one row of the most-used toggles, every control in a
