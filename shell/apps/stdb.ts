@@ -68,7 +68,6 @@ export interface IslandHost {
    */
   addAppWidget?(provider: string): Promise<"added">;
   /**
-<<<<<<< HEAD
    * A placed Android widget's data, for an island that draws it in PowOS's own style (composer "android" block,
    * native-card): the data never leaves the phone. Each call returns its stop.
    */
