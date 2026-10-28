@@ -240,6 +240,17 @@ class NavGesture(
         transition = null
         val over = from
         Log.i(TAG, "gesture: $outcome (over task $over, animated ${t != null || overHome}; $why)")
+        // PowOS's shade down (over an app, home's main page or a panel): the swipe only puts it up, as SystemUI's does -
+        // whatever followed the finger under it goes back. Over home it never reached the Home branch below (overHome).
+        if ((outcome == NavGestureClassifier.Outcome.Home || outcome == NavGestureClassifier.Outcome.Switcher) &&
+            ShadeHost.current?.closeIfOpen() == true
+        ) {
+            if (panel != null) endPanel(false)
+            if (overHome && homeBegun) endOverHome(NavGestureClassifier.Outcome.None)
+            overHome = false
+            backToApp(t)
+            return
+        }
         // A panel was open: this swipe only closes it (it followed the finger) - no home, no switcher, no reload.
         if (panel != null) return endPanel(outcome == NavGestureClassifier.Outcome.Home || outcome == NavGestureClassifier.Outcome.Switcher)
         if (overHome && homeBegun) return endOverHome(outcome)
@@ -250,11 +261,6 @@ class NavGesture(
         }
         when (outcome) {
             NavGestureClassifier.Outcome.Home -> {
-                // Up with PowOS's shade down: the shade goes up, as SystemUI's does.
-                if (ShadeHost.current?.closeIfOpen() == true) {
-                    backToApp(t)
-                    return
-                }
                 home(t)
             }
             NavGestureClassifier.Outcome.Switcher -> {
