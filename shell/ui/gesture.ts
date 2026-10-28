@@ -269,7 +269,7 @@ interface Gesture {
   last: [number, number, number];
   /** Velocity along the gesture's axis, px/ms. */
   v: number;
-  mode: "open" | "close" | "over" | "pages" | "notifClose" | "panel" | "ccAll" | null;
+  mode: "open" | "close" | "closeUp" | "over" | "pages" | "notifClose" | "panel" | "ccAll" | null;
   open: boolean;
   /** The notification panel was down when it started. */
   notif: boolean;
@@ -446,6 +446,8 @@ function claimVertical(gs: Gesture, dy: number): Gesture["mode"] {
  */
 function claimOnOpen(gs: Gesture, dy: number): Gesture["mode"] {
   if (dy > 0) return !gs.inList || gs.listTop ? "close" : null;
+  // Up from the panel's foot (its bottom strip, over the list or not): shuts it, as an app drawer closes on iOS/Android.
+  if (gs.y0 > gs.height * CLOSE_UP_ZONE) return "closeUp";
   return pullKind.value === "apps" && atListEnd(gs) ? "over" : null;
 }
 
@@ -474,6 +476,9 @@ function dragTo(gs: Gesture, dx: number, dy: number) {
     case "close":
       drawerDrag.value = clamp(1 - (dy * GAIN) / gs.travel);
       return;
+    case "closeUp":
+      drawerDrag.value = clamp(1 + (dy * GAIN) / gs.travel);
+      return;
     default:
       pageDrag.value = pageOffset(dx);
   }
@@ -485,6 +490,14 @@ function pageOffset(dx: number) {
   const edge = (page.value === -1 && dx > 0) || (page.value === last && dx < 0);
   return edge ? dx / 3 : dx;
 }
+
+/** The panel's foot: a swipe up starting below this share of the height shuts it. */
+const CLOSE_UP_ZONE = 0.72;
+/** Shut when let go with it this far (or less) still showing; a flick up this fast (px/ms) after this many px; a dwell. */
+const CLOSE_UP_KEEP = 0.75;
+const CLOSE_UP_SPEED = 0.35;
+const CLOSE_UP_MIN = 20;
+const CLOSE_DWELL_MS = 120;
 
 /** The finger up: a tap, or the gesture settles. */
 function endGesture() {
@@ -521,12 +534,34 @@ function tapOnPanel({ target, own }: Gesture) {
 
 function settleGesture(gs: Gesture, dy: number) {
   const { mode, v } = gs;
-  if (mode === "open" || mode === "close") return settleDrawer(mode, v);
+  if (isDrawerMode(mode)) return settleDrawerGesture(gs, v);
   if (mode === "notifClose") return settleNotif(v);
   // Past the threshold, or a flick its way: committed; otherwise it springs back.
   if (mode === "ccAll") return settleCc(!ccExpanded.value ? dy > EXPAND_AT || v > FLICK : dy < -EXPAND_AT || v < -FLICK);
   if (mode === "panel") return settlePanel(lastDx, v);
   if (mode === "pages") settlePages(v);
+}
+
+/**
+ * Up from the foot shut it. Let go: as the switcher's early release (NavGestureClassifier) - far enough, or a fast
+ * flick up after a short way (and not a flick back down), or held at the end of the pull (dwell) - it shuts; else it
+ * springs back open.
+ */
+function settleCloseUp(gs: Gesture, v: number) {
+  const p = drawerDrag.value ?? 1;
+  drawerDrag.value = null;
+  const lift = -(gs.last[1] - gs.y0);
+  const dwell = performance.now() - gs.last[2] > CLOSE_DWELL_MS;
+  const shut = v <= FLICK && (p < CLOSE_UP_KEEP || (-v >= CLOSE_UP_SPEED && lift >= CLOSE_UP_MIN) || (dwell && lift >= CLOSE_UP_MIN));
+  if (shut) closeDrawer();
+  else drawer.value = 1;
+}
+
+const isDrawerMode = (m: Gesture["mode"]) => m === "open" || m === "close" || m === "closeUp";
+
+function settleDrawerGesture(gs: Gesture, v: number) {
+  if (gs.mode === "closeUp") return settleCloseUp(gs, v);
+  settleDrawer(gs.mode as "open" | "close", v);
 }
 
 function settleDrawer(mode: "open" | "close", v: number) {

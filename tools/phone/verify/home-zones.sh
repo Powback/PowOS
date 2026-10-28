@@ -47,4 +47,8 @@ switcher_open || fail flick "a fast short flick up did not commit the switcher"
 sh_ 'input keyevent BACK'; sleep 1
 home; swipe $((W/2)) 60 500 slow
 switcher_open && fail slow "a short slow release opened the switcher (should abort)"
-echo "PASS: home corners open AI/apps panels, centre the switcher, a fast short flick commits, a short slow one aborts"
+# Swipe up closes the open launcher: from its foot (above the nav strip), the panel follows and shuts.
+home; ev 'importShim("./state.ts").then(s=>{s.drawer.value=1;return "open"})' >/dev/null; sleep 1.5
+sh_ "input swipe $((W/2)) $((H*85/100)) $((W/2)) $((H*40/100)) 250"; sleep 1.5
+[ "$(ev 'importShim("./state.ts").then(s=>s.drawer.value)')" = 0 ] || fail close-up "swipe up from the open launcher's foot did not close it"
+echo "PASS: home corners open AI/apps panels, centre the switcher, a fast short flick commits, a short slow one aborts, swipe up closes the launcher"
