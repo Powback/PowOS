@@ -236,22 +236,15 @@
  * Content scrolling under chrome: the drawer's apps and the shade's list fade out at an edge where there's more to
  * scroll, never cut (the user, 2026-10-24): one scroll-driven mask on the scroll container, the dock's way, both ends
  * --scroll-fade. Nothing to scroll, or no scroll timelines: no fade, as before.
- * PowOS AI's panes and chat do NOT fade (the user, 2026-10-28): they end in a crisp edge with a hairline that appears
- * only once content is scrolled under that edge (--edge-t/-b, 0..1, scroll-driven).
+ * PowOS AI's panes and chat do NOT fade (the user, 2026-10-28): they end in a crisp edge. No scroll-driven shadow or
+ * clip radius on them: that animated paint glitched the launcher's previews as it opened.
  */
 @property --scroll-fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @property --scroll-fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
-@property --edge-t { syntax: "<number>"; inherits: false; initial-value: 0; }
-@property --edge-b { syntax: "<number>"; inherits: false; initial-value: 0; }
 :is(.drawer-list, .notif-list) {
   --scroll-fade: 24px;
   -webkit-mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
   mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
-}
-:is(.chat, .ai-panel, .ai-scroll) {
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--color-foreground) calc(var(--edge-t) * 16%), transparent),
-    inset 0 -1px 0 color-mix(in srgb, var(--color-foreground) calc(var(--edge-b) * 16%), transparent);
 }
 @supports (animation-timeline: scroll()) {
   :is(.drawer-list, .notif-list) {
@@ -259,16 +252,9 @@
     animation-timeline: scroll(self y), scroll(self y);
     animation-range: 0 var(--scroll-fade), calc(100% - var(--scroll-fade)) 100%;
   }
-  :is(.chat, .ai-panel, .ai-scroll) {
-    animation: edge-t linear both, edge-b linear both;
-    animation-timeline: scroll(self y), scroll(self y);
-    animation-range: 0 12px, calc(100% - 12px) 100%;
-  }
 }
 @keyframes scroll-fade-t { from { --scroll-fade-t: 0px; } to { --scroll-fade-t: var(--scroll-fade); } }
 @keyframes scroll-fade-b { from { --scroll-fade-b: var(--scroll-fade); } to { --scroll-fade-b: 0px; } }
-@keyframes edge-t { from { --edge-t: 0; } to { --edge-t: 1; } }
-@keyframes edge-b { from { --edge-b: 1; } to { --edge-b: 0; } }
 .dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
 .dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
 .dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
@@ -1377,7 +1363,7 @@ input.folder-title:focus { background: var(--soft-fill); }
  * (--glass-dim) - no palette of its own. Frosted by the compositor (native glass) or, with CSS glass, tinted only (its
  * own copy of the picture would slide away with it).
  */
-.ai-screen { background: none; padding-bottom: 0; }
+.ai-screen { padding-bottom: 0; }
 /* Its cards: home's tile material, a little more tint for their text (never a page dim). */
 .ai-screen .tile {
   background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
@@ -1413,7 +1399,6 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   /* No fade at the foot (the user, 2026-10-28): the last card ends on its own rounded corner with room under it, and a
      cut mid-scroll is the pane's own rounded edge, so a short viewport (keyboard open) never shows a flat clipped card. */
   padding-bottom: 12px;
-  border-radius: var(--radius-card, 18px);
 }
 /*
  * Wide (the AI page or panel >= 700 px: unfolded, a wide window - powai.tsx AiView): two panes, each its own scroll.
@@ -2310,7 +2295,7 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
  * --glass-blur-native per surface; the shade's window is blurred by its host: shade.tsx) and the cool tint; over the
  * other tone it takes that tone. No halos. An app whose page paints its own ground opts out (appscreen.tsx).
  */
-.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3), .home:has(.ai-panel) .ai-panel, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *) {
+.ai-screen, .chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3), .home:has(.ai-panel) .ai-panel, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *) {
   /* Resolved here, from this surface's own --frost-base (a light frost swaps it below). */
   /* Secondary lines the foreground itself, as a widget's: their size says they're secondary. */
   --color-muted: var(--color-foreground);
@@ -2335,6 +2320,8 @@ html:root .page .search-face .bar-pill {
   background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
 }
 html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
+/* The AI page's own ground: the launcher chat's frost (.launcher-frame.tile above), same tokens; cards unchanged. */
+html:root .ai-screen { background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil)); }
 /*
  * Over a wallpaper of the other tone (a dark theme over a bright picture, a light one over a dark): the frost takes
  * the wallpaper's tone, its text the theme's two colours swapped - as the wallpaper's labels turn (theme.css
