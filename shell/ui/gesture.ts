@@ -436,7 +436,7 @@ function claim(gs: Gesture, dx: number, dy: number): boolean {
 function claimOnPanel(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
   const vertical = Math.abs(dy) > Math.abs(dx);
   // Down past the notifications' top: only their list stretches (damped, as Android's), the card and panels stay.
-  if (vertical && dy > 0 && gs.listTop && notifDrag.value == null && inNotifs(gs) && grabList(gs)) return "listOver";
+  if (vertical && listOverWay(gs, dy)) return "listOver";
   if (vertical && ccAllWay(gs, dy)) return "ccAll";
   // Up drags it shut (the list scrolls until its end); sideways is a card's.
   if (dy < 0 && vertical && atListEnd(gs)) return "notifClose";
@@ -449,6 +449,9 @@ const atListEnd = (gs: Gesture) => !gs.inList || gs.listBottom;
 /** The control center's card (its whole-panel pull and fold are its own), and the notifications' side. */
 const CARD = ".cc, .cc3-grid, .cc-col";
 const inNotifs = (gs: Gesture) => !!gs.target.closest?.(".notif-own, .notif-list");
+const listOverWay = (gs: Gesture, dy: number) => dy > 0 && gs.listTop && notifDrag.value == null && inNotifs(gs) && grabList(gs);
+/** Down at the top: folded, shows the rest; whole, the card's own short rubber band (only a drag on the card). */
+const ccShowWay = (gs: Gesture) => gs.listTop && !inNotifs(gs) && (!ccExpanded.value || !!gs.target.closest?.(CARD));
 
 /** The notifications' list over-pulled past its top: its items follow the finger damped (at most LIST_OVER px). */
 const LIST_OVER = 56;
@@ -486,7 +489,7 @@ function ccAllWay(gs: Gesture, dy: number) {
   if (separatePanels.value === "on" || notifDrag.value != null) return false;
   // Down at the top: shows the rest (folded), or - already whole - a short rubber band (ccexpand.ts stretch/settle),
   // only when the drag starts on the card itself; from the notifications only their list moves (listOver).
-  if (dy > 0) return gs.listTop && !inNotifs(gs) && (!ccExpanded.value || !!gs.target.closest?.(CARD));
+  if (dy > 0) return ccShowWay(gs);
   // Up from an expanded shade shuts it whole (one swipe): the fold is the control center's own area's swipe only.
   return ccExpanded.value && atListEnd(gs) && !!gs.target.closest?.(CARD);
 }
