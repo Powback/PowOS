@@ -19,11 +19,13 @@ const WIDE = 700;
 const isHome = !new URLSearchParams(location.search).get("mode");
 /**
  * The native host's display state (system.display: width/height in dp, display id, orientation, folded), pushed on every
- * display change and on resume. When there is one it decides; the page's own innerWidth only without a host (web shell).
+ * display change and on resume. Only a HINT to look again (and logged beside the decision): the decision itself is a
+ * pure function of the page's CURRENT innerWidth. A kept host value decided once and went stale - folded portrait home
+ * laid out wide with the unfolded dock (3rd device FAIL, 2026-10-28 13:28).
  */
 type Display = { widthDp: number; heightDp: number; displayId: number; rotation: number; folded: boolean };
-let hostDisplay: Display | null = null;
-const isWide = () => isHome && (hostDisplay ? hostDisplay.widthDp >= WIDE : innerWidth >= WIDE);
+let hint: Display | null = null;
+const isWide = () => isHome && innerWidth >= WIDE;
 /** Home laid out wide now (home.tsx: one bottom bar - dock left, search, recent apps right). */
 export const wideHome = signal(isWide());
 
@@ -197,43 +199,52 @@ export function wide(n: Bridge): Bridge {
   // ONE decision (was) serves the bridge's layout (wideNow) and the UI (wideHome) alike. They used to read innerWidth
   // separately: a home.get landing between a fold and the recheck gave the wide layout to a folded page (or the
   // reverse), the "desktop layout on the cover screen, sometimes" bug (2026-10-28).
-  const recheck = () => {
-    // The host's push is exact even while hidden; the page's own width is only judged while shown.
-    if ((!hostDisplay && document.hidden) || isWide() === was) return;
-    was = wideHome.value = isWide();
-    const d = hostDisplay;
-    console.log(`[wide] ${was ? "wide" : "narrow"} (${d ? `host ${d.widthDp}x${d.heightDp}dp display ${d.displayId} rot ${d.rotation} folded ${d.folded}` : `innerWidth ${innerWidth}`})`);
+  const recheck = (why = "resize") => {
+    // Hidden, the window may still have an app's size (landscape game): judged again the moment it's shown.
+    if (document.hidden) return;
+    const now = isWide();
+    const changed = now !== was;
+    // Every decision that changes something, and every one asked by a show or a host push, is logged with its inputs
+    // (console -> logcat PowosShell), so the next wrong layout explains itself.
+    if (changed || why !== "resize") {
+      const h = hint;
+      console.log(`[wide] ${now ? "wide" : "narrow"}${changed ? "" : " (kept)"} by ${why}: innerWidth ${innerWidth} innerHeight ${innerHeight} >= ${WIDE}? ${innerWidth >= WIDE}${h ? `; host hint ${h.widthDp}x${h.heightDp}dp display ${h.displayId} rot ${h.rotation} folded ${h.folded}` : ""}`);
+    }
+    if (!changed) return;
+    was = wideHome.value = now;
     emit("home.changed", null);
   };
   // Every way the size can change: a resize, a rotation, a fold, and coming back to home (an app that ran in landscape
   // - Broforce - left home hidden at its size: the resize while hidden was judged on that, and none came on return,
   // so home stayed laid out wide - tiny cells squashed at the top). Hidden, nothing is decided; shown again, at once
   // and once more after the window has its size. These serve the no-host case; with a host they only re-ask it.
-  addEventListener("resize", recheck);
-  addEventListener("orientationchange", recheck);
-  addEventListener("pageshow", recheck);
+  addEventListener("resize", () => recheck());
+  addEventListener("orientationchange", () => recheck("orientation"));
+  addEventListener("pageshow", () => recheck("pageshow"));
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) return;
     pull();
-    recheck();
-    requestAnimationFrame(() => requestAnimationFrame(recheck));
-    setTimeout(recheck, 400);
+    recheck("shown");
+    requestAnimationFrame(() => requestAnimationFrame(() => recheck()));
+    setTimeout(() => recheck(), 400);
   });
-  if (typeof ResizeObserver !== "undefined") new ResizeObserver(recheck).observe(document.documentElement);
-  matchMedia(`(min-width: ${WIDE}px)`).addEventListener?.("change", recheck);
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => recheck()).observe(document.documentElement);
   // The host pushes its display state on every display/fold change and on resume ("system.display"); a fold while the
   // page is hidden delivers no resize, which is why a 1 s heartbeat used to stand here.
   const apply = (d: Display | null) => {
     if (!d || typeof d.widthDp !== "number") return;
-    hostDisplay = d;
-    recheck();
+    hint = d;
+    recheck(`host display`);
+    // The window gets its new size a moment after the host's push: look again once it has.
+    requestAnimationFrame(() => requestAnimationFrame(() => recheck()));
+    setTimeout(() => recheck(), 400);
   };
   const pull = () => void n.system.display?.().then(apply).catch(() => {});
   n.on("system.display", apply);
   pull();
   // HACK: a host without system.display (APK older than 44ab84fd) pushes nothing, so a fold while home is hidden is only
   // caught by this 1 s recheck (while shown). Remove once every host has system.display.
-  if (!n.system.display) setInterval(recheck, 1000);
+  if (!n.system.display) setInterval(() => recheck(), 1000);
 
   return {
     ...n,

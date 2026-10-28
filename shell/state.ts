@@ -138,11 +138,22 @@ export function stored(key: string, initial = ""): Signal<string> {
   return s;
 }
 
-/** Mobile and desktop keep independent choices; unfolded home uses the desktop preference. */
+/**
+ * One dock placement per mode, each only what the user picked there (Settings > style > home): folded home (mobile),
+ * unfolded home (wideHome) and the desktop shell (?mode=desktop). Folded and unfolded default to the bottom bar; a
+ * side dock shows only where it was chosen for that mode. (2026-10-28: unfolded home read the desktop key, default
+ * "left", left at "right" by a check run - every unfolded or stuck-wide moment showed a side dock.)
+ */
 export const mobileDockPlacement = stored("dock.position.mobile", "bottom");
+export const unfoldedDockPlacement = stored("dock.position.unfolded", "bottom");
 export const desktopDockPlacement = stored("dock.position.desktop", "left");
-export const desktopDockMode = computed(() => new URLSearchParams(location.search).get("mode") === "desktop" || wideHome.value);
-const activeDockPlacement = () => desktopDockMode.value ? desktopDockPlacement : mobileDockPlacement;
+const desktopShell = new URLSearchParams(location.search).get("mode") === "desktop";
+/** The dock mode in use: "desktop" (the desktop shell), "unfolded" (wide home) or "mobile" (folded). */
+export const dockMode = computed(() => desktopShell ? "desktop" : wideHome.value ? "unfolded" : "mobile");
+/** The desktop shell or the unfolded home: the wide layouts (launcher, gestures). */
+export const desktopDockMode = computed(() => dockMode.value !== "mobile");
+const placements = { mobile: mobileDockPlacement, unfolded: unfoldedDockPlacement, desktop: desktopDockPlacement };
+const activeDockPlacement = () => placements[dockMode.value];
 /** The active preference also serves gesture/layout callers when the display changes. */
 export const dockPlacement = {
   get value() { return activeDockPlacement().value; },
@@ -151,7 +162,7 @@ export const dockPlacement = {
 export function validDockPosition(value: string, fallback: string): string {
   return ["bottom", "left", "right"].includes(value) ? value : fallback;
 }
-export const dockPosition = computed(() => validDockPosition(dockPlacement.value, desktopDockMode.value ? "left" : "bottom"));
+export const dockPosition = computed(() => validDockPosition(dockPlacement.value, dockMode.value === "desktop" ? "left" : "bottom"));
 
 /** The drawer: open or not (a finger dragging it is gesture.ts's drawerDrag). */
 export const drawer = signal(0);

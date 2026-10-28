@@ -12,13 +12,13 @@ export CDP_TIMEOUT_S=20
 I0=$(irq)
 [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" = Awake ] || exit 3
 old=$(ev 'importShim("./state.ts").then(s=>s.mobileDockPlacement.value)')
-oldDesktop=$(ev 'importShim("./state.ts").then(s=>s.desktopDockPlacement.value)')
-case "$oldDesktop" in bottom|left|right) ;; *) echo "FAIL: cannot read desktop dock setting"; exit 1 ;; esac
+oldUnfolded=$(ev 'importShim("./state.ts").then(s=>s.unfoldedDockPlacement.value)')
+case "$oldUnfolded" in bottom|left|right) ;; *) echo "FAIL: cannot read unfolded dock setting"; exit 1 ;; esac
 case "$old" in bottom|left|right) ;; *) echo "FAIL: cannot read dock setting"; exit 1 ;; esac
 oldpage=$(hpage)
 [[ "$oldpage" =~ ^-?[0-9]+$ ]] || { echo "FAIL: cannot read home page"; exit 1; }
 restore() {
-  ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.mobileDockPlacement.value='$old';s.desktopDockPlacement.value='$oldDesktop';s.page.value=$oldpage;return 'restored'})" >/dev/null
+  ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.mobileDockPlacement.value='$old';s.unfoldedDockPlacement.value='$oldUnfolded';s.page.value=$oldpage;return 'restored'})" >/dev/null
   sh_ 'input keyevent BACK; cmd device_state state reset' >/dev/null
   [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
 }
@@ -39,7 +39,10 @@ for state in 0 3; do
   for side in left right; do
     close_shade
     chk setting
-    ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.dockPlacement.value='$side';s.page.value=0;return 'set'})" >/dev/null
+    # The state's own key, never the mode-following dockPlacement: written mid-fold it lands in the other mode's
+    # choice, and a missed restore then left the user's home with a side dock (2026-10-28).
+    key=$([ "$state" = 0 ] && echo mobileDockPlacement || echo unfoldedDockPlacement)
+    ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.$key.value='$side';s.page.value=0;return 'set'})" >/dev/null
     sleep 1
     clear=$(ev 'document.querySelector(".home>.dock").getBoundingClientRect().bottom<=document.querySelector(".home>.bar").getBoundingClientRect().top+1')
     [ "$clear" = true ] || { echo "FAIL: $state $side dock overlaps search bar"; exit 1; }

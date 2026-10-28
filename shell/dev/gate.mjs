@@ -75,13 +75,15 @@ async function dockPositionCheck(position) {
   S.setDock(S.apps.value.slice(0, 4).map(a => a.key));
   const fails = [];
   function setPosition() {
-    const mode = S.desktopDockMode.value ? "desktop" : "mobile";
+    const mode = S.dockMode.value;
+    // Folded and unfolded home: the bottom bar unless chosen (a side dock never appears by default).
     const expected = mode === "desktop" ? "left" : "bottom";
-    if (S.dockPosition.value !== expected) fails.push("wrong default dock position");
-    const other = mode === "desktop" ? S.mobileDockPlacement : S.desktopDockPlacement;
-    const before = other.value;
+    if (S.dockPosition.value !== expected) fails.push(`wrong default dock position in ${mode}: ${S.dockPosition.value}`);
+    const all = { mobile: S.mobileDockPlacement, unfolded: S.unfoldedDockPlacement, desktop: S.desktopDockPlacement };
+    const others = Object.entries(all).filter(([m]) => m !== mode).map(([, p]) => p);
+    const before = others.map(p => p.value);
     S.dockPlacement.value = position;
-    if (other.value !== before) fails.push("changing dock position changed the other mode");
+    if (others.some((p, i) => p.value !== before[i])) fails.push("changing dock position changed another mode");
     if (localStorage.getItem(`powos.dock.position.${mode}`) !== position) fails.push("position not saved");
   }
   setPosition();

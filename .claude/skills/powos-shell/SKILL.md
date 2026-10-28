@@ -273,6 +273,11 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   Check: shell/dev/perf/dock-scroll.sh (one free window: swipe, scrollLeft, widths, screencap).
 
 ## Wide bar (unfolded, home.tsx .home.wide from hosts/wide.ts wideHome)
+- wideHome is a PURE function of the page's current innerWidth (>= 700), judged on every resize/show; the host's
+  system.display push is only a hint to look again, never kept as the answer (a kept host value left folded home wide,
+  2026-10-28). Each decision logs `[wide] ... by <why>: innerWidth .. innerHeight ..; host hint ..` (logcat PowosShell).
+- Dock placement per mode (state.ts dockMode): dock.position.mobile (folded), .unfolded (wide home), .desktop
+  (?mode=desktop only); folded/unfolded default bottom. Checks write the state's own key, never dockPlacement.
 - .home is a grid: stage over a one-row foot (strip-height): Dock (pinned only, no recents page) | .bar (pill column
   --wide-pill clamp(220px, 30%, 360px), pill centred in the row: --pill-mid) | DockTray (recents, a .dock.paged row).
   Slots --slot min(60px, (100cqw - 28px)/6); the pinned .dock-page is as long as its icons (dockdrop slotAt measures it).

@@ -32,7 +32,7 @@ import {
   useScreen,
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import { mobileDockPlacement, desktopDockPlacement, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
+import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
 
 /** "icon colours" options after "the apps'": theme hues, the accent. */
@@ -179,6 +179,16 @@ function Option({ label, children }: { label: string; children: ComponentChildre
       <span class="scr-option-label muted">{label}</span>
       <div class="scr-option-control">{children}</div>
     </div>
+  );
+}
+
+const DOCK_SIDES = ["bottom", "left", "right"];
+/** One mode's dock placement (state.ts dockMode): folded, unfolded or the desktop shell, each its own choice. */
+function DockOption({ label, placement, fallback }: { label: string; placement: { value: string }; fallback: string }) {
+  return (
+    <Option label={label}>
+      <Segmented options={DOCK_SIDES} picked={DOCK_SIDES.indexOf(validDockPosition(placement.value, fallback))} onPick={(i) => (placement.value = DOCK_SIDES[i])} />
+    </Option>
   );
 }
 
@@ -502,12 +512,9 @@ function StyleScreen() {
         </Section>
       )}
       <Section icon="apps" title="home">
-        <Option label="mobile dock position">
-          <Segmented options={["bottom", "left", "right"]} picked={["bottom", "left", "right"].indexOf(validDockPosition(mobileDockPlacement.value, "bottom"))} onPick={(i) => (mobileDockPlacement.value = ["bottom", "left", "right"][i])} />
-        </Option>
-        <Option label="desktop dock position">
-          <Segmented options={["bottom", "left", "right"]} picked={["bottom", "left", "right"].indexOf(validDockPosition(desktopDockPlacement.value, "left"))} onPick={(i) => (desktopDockPlacement.value = ["bottom", "left", "right"][i])} />
-        </Option>
+        <DockOption label="folded dock position" placement={mobileDockPlacement} fallback="bottom" />
+        <DockOption label="unfolded dock position" placement={unfoldedDockPlacement} fallback="bottom" />
+        <DockOption label="desktop dock position" placement={desktopDockPlacement} fallback="left" />
         <Option label="swipe up from the left: PowOS AI">
           <Segmented options={["on", "off"]} picked={pullPanels.value === "on" ? 0 : 1} onPick={(i) => (pullPanels.value = i === 0 ? "on" : "off")} />
         </Option>
