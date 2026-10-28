@@ -927,6 +927,65 @@ async function launcherKeyboardKeepsFocus(page) {
   return fails;
 }
 
+/**
+ * The launcher's search tapped with the dock on the side and the pill below it (the user's unfolded home, 2026-10-28:
+ * `home dock-right wide pill-below` at 821x883, "the keyboard gets dismissed when I try to use it" - the field blurred to
+ * nothing 0.5-1 s after the tap, connected, the window focused). The pill clicked as a finger does (bar.tsx's onClick:
+ * the drawer opens, the field takes the focus), then the keyboard's resize; the field must hold the focus for 2 s.
+ */
+async function launcherKeyboardSide(page, view) {
+  const setup = await page.evaluate(async () => {
+    const S = await window.__gw.mod("./state.ts");
+    const W = await window.__gw.mod("./ui/searchwidget.tsx");
+    S.dockTry.value = "right";
+    W.footBelow.value = "1";
+    await window.__gw.settled(() => document.querySelector(".home.dock-right.pill-below > .bar textarea"));
+    await window.__gw.frames(4);
+    const home = document.querySelector(".home");
+    const field = document.querySelector(".home > .bar textarea");
+    const kb = (window.__kbs = { field, log: [] });
+    const tag = (a) => `${a.tagName.toLowerCase()}.${String(a.className).split(" ").join(".")}`;
+    const unfocusable = (c) => c.display === "none" || c.visibility !== "visible" || c.contentVisibility !== "visible";
+    const chain = (el) => { const out = []; for (let a = el; a; a = a.parentElement) if (a.inert || unfocusable(getComputedStyle(a))) out.push(tag(a)); return out.join(" "); };
+    const why = (el) => `ro=${el.readOnly} ti=${el.tabIndex} same=${document.querySelector(".home > .bar textarea") === el} conn=${el.isConnected} active=${document.activeElement ? tag(document.activeElement) : "none"} hidden/inert=[${chain(el)}] home=${document.querySelector(".home")?.className}`;
+    const t0 = performance.now();
+    field.addEventListener("focus", () => kb.log.push(`${Math.round(performance.now() - t0)}ms focus`));
+    field.addEventListener("blur", (e) => kb.log.push(`${Math.round(performance.now() - t0)}ms blur to=${e.relatedTarget ? e.relatedTarget.tagName.toLowerCase() + "." + e.relatedTarget.className : "none"} ${why(field)}`));
+    kb.why = () => why(field);
+    return home.className;
+  });
+  const r = await page.evaluate(() => { const b = document.querySelector(".home > .bar .bar-pill").getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; });
+  // A finger's tap (the phone's touch path through home's gestures), not a mouse click.
+  const cdp = await page.target().createCDPSession();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  await touch("touchStart", [{ x: r[0], y: r[1] }]);
+  await new Promise((ok) => setTimeout(ok, 60));
+  await touch("touchEnd", []);
+  // The keyboard up as the phone's host reports it (the WebView keeps its size): "keyboard.inset" every frame of its
+  // slide, then "system.insets" with its height (~40% of the screen).
+  const kbPx = Math.round(view.height * 0.4);
+  await page.evaluate(async (h) => {
+    for (let y = 0; y <= h; y += h / 10) (window.__mockEvents.emit("keyboard.inset", Math.round(y)), await window.__gw.frames(1));
+    window.__mockEvents.emit("system.insets", { top: 0, bottom: 0, left: 0, right: 0, keyboard: h });
+  }, kbPx);
+  await new Promise((ok) => setTimeout(ok, 1700));
+  const out = await page.evaluate(() => ({ log: window.__kbs.log, held: document.activeElement === window.__kbs.field, now: window.__kbs.why() }));
+  await page.evaluate(async () => {
+    const S = await window.__gw.mod("./state.ts");
+    const W = await window.__gw.mod("./ui/searchwidget.tsx");
+    window.__mockEvents.emit("system.insets", { top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 });
+    window.__kbs.field.blur();
+    S.drawer.value = 0;
+    S.dockTry.value = "";
+    W.footBelow.value = "";
+  });
+  const fails = [];
+  if (!/dock-right/.test(setup) || !/pill-below/.test(setup) || !/wide/.test(setup)) fails.push(`launcher keyboard (side dock): home isn't dock-right wide pill-below (${setup})`);
+  if (!out.held || out.log.some((l) => l.includes("blur"))) fails.push(`launcher keyboard (side dock, pill below): the search lost the focus within 2 s of the tap (${out.log.join("; ")})`);
+  return fails.map((f) => `${f}; at the end: ${out.now}`);
+}
+
 /** The user's search widget on the grid (the phone, 2026-10-23): the bar's own pill, parked, keeps the bar's middle. */
 async function wideBarParked() {
   const S = await window.__gw.mod("./state.ts");
@@ -2603,6 +2662,9 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar)), ...(await r.page.evaluate(wideLauncherBar)), ...(await r.page.evaluate(wideBarParked))])));
     runs.push(open(browser, `${ORIGIN}/index.html`, "launcher-keyboard", { width: 1280, height: 800 }).then((r) => whenReady(r, () => launcherKeyboardKeepsFocus(r.page))));
+  // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "launcher-keyboard-side", { width: 821, height: 883 }).then((r) => whenReady(r, () => launcherKeyboardSide(r.page, { width: 821, height: 883 }))));
   // Home after an app at another size (Broforce in landscape, 2026-10-22: back on home the widgets were tiny and squashed
   // at the top). Laid out at [from] while hidden and shown again at [to], turned there and back, and relaid in its own
   // column count after the other's at the same size: the tiles must sit where a fresh layout at [to] puts them, and the
