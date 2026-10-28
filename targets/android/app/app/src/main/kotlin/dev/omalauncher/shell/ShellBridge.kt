@@ -284,6 +284,7 @@ class ShellBridge(
             "tasks.open" -> openTask(a.getInt(0), a.opt(1))
             "tasks.remove" -> dev.omalauncher.system.Tasks.remove(context, a.getInt(0)).also { appWidgets.heal() }
             "tasks.split" -> dev.omalauncher.system.Tasks.split(a.getInt(0), a.getInt(1))
+            "tasks.desktopWindow" -> desktopWindow(a.getInt(0), a.optBoolean(1, true))
             "tasks.float" -> dev.omalauncher.system.Tasks.float(context, a.getInt(0))
             "tasks.info" -> dev.omalauncher.system.Tasks.info(context, a.getInt(0))
             "tasks.screenshot" -> dev.omalauncher.system.Tasks.screenshot(context, a.getInt(0))
@@ -475,6 +476,28 @@ class ShellBridge(
         // comes: the switcher's layer - and the card grown over it - stayed behind the window, a full-screen ghost of
         // the app (2026-10-23). The layer goes once the window is up over its card.
         if (ok && floats) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ dev.omalauncher.system.Switcher.hide() }, WINDOW_UP_MS)
+        return ok
+    }
+
+    /**
+     * Task [id] into a PowOS desktop window ([on]) or back to full screen. A PowOS desktop window is a freeform task under
+     * AppWindows' rules (60% x 70% in the windows' area, cascaded, window density, PowOS title bar, a home page's desktop in
+     * windows.list) - what any app opened on the unfolded home gets; "Floating window" (Tasks.float) is a bare freeform
+     * task at a fixed spot. NOTE: the two are still separate systems (Android freeform vs the web shell's desktop); unify
+     * them later so one "window" menu item places every app the same way. Unfolded only (false folded).
+     */
+    private fun desktopWindow(
+        id: Int,
+        on: Boolean,
+    ): Boolean {
+        if (!dev.omalauncher.system.AppWindows.floating(context)) return false
+        val ok =
+            if (on) {
+                dev.omalauncher.system.Tasks.open(context, id, dev.omalauncher.system.AppWindows.taskOptions(context, id, android.app.ActivityOptions.makeBasic()))
+            } else {
+                dev.omalauncher.system.FreeformTasks.setFullScreen(context, id, true, null)
+            }
+        if (ok) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ dev.omalauncher.system.Switcher.hide() }, WINDOW_UP_MS)
         return ok
     }
 

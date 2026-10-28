@@ -706,6 +706,8 @@ export interface Bridge {
     split(first: number, second: number): Promise<boolean>;
     /** The task in a floating window (freeform). */
     float(id: number): Promise<boolean>;
+    /** Host-optional (f307: feature-detect): the task in a PowOS desktop window ([on], AppWindows' size/placement) or full screen. */
+    desktopWindow?(id: number, on?: boolean): Promise<boolean>;
     /** Its app's info screen. */
     info(id: number): Promise<boolean>;
     /** Its last frame saved to Pictures/Screenshots: the file's name, or null. */

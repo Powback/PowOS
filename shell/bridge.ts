@@ -256,6 +256,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       remove: (id) => call<boolean>("tasks.remove", id),
       split: (first, second) => call<boolean>("tasks.split", first, second),
       float: (id) => call<boolean>("tasks.float", id),
+      desktopWindow: (id, on = true) => call<boolean>("tasks.desktopWindow", id, on),
       info: (id) => call<boolean>("tasks.info", id),
       screenshot: (id) => call<string | null>("tasks.screenshot", id),
     },
@@ -1165,6 +1166,7 @@ function mockTasks(icon: (name: string) => string, hue: (name: string) => number
     },
     split: async (a, b) => (console.log("[mock] split", a, b), true),
     float: async (id) => (console.log("[mock] float", id), true),
+    desktopWindow: async (id, on = true) => (console.log("[mock] desktop window", id, on), true),
     info: async (id) => (console.log("[mock] info", id), true),
     screenshot: async (id) => (console.log("[mock] screenshot", id), "Screenshot_mock.jpg"),
   };
