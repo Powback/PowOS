@@ -184,6 +184,13 @@ if [ -z "$GATE_ALL" ] && [ "${GATE_PRIORITY:-}" != ship ] && [ -z "$app" ] && [ 
     for f in "${chg[@]}"; do case $f in *.css|*.md|*.txt) ;; *) skip_tsc="" ;; esac; done
   fi
 fi
+# GATE_SCOPE=boot (tools/phone/ship-apk.sh's pre-install gate): tsc + the page boots only - "does this shell load?" - not
+# the other scenes, the style/complexity lints or the widget sweep; those run in the post-deploy full gate (ship.sh).
+if [ "${GATE_SCOPE:-}" = boot ] && [ -z "${GATE_ONLY:-}" ]; then
+  modes_re=$(grep -oE 'mode === "[a-z0-9-]+"' "$S/app.tsx" 2>/dev/null | sed 's/mode === "//; s/"$//' | paste -sd'|' -)
+  GATE_ONLY="^(home${modes_re:+|$modes_re})\$"
+  scope_note="boot only (tsc + the page boots)"
+fi
 export GATE_ONLY
 [ -z "${GATE_ONLY:-}" ] || [ "$scope_note" != "all scenes" ] || scope_note="GATE_ONLY=$GATE_ONLY"
 echo "gate: scope: $scope_note"
@@ -214,12 +221,15 @@ fi
 t_tsc=$(( $(mark) - ts )); ts=$(mark)
 # 1b. The design language's style lint (docs/DESIGN-LANGUAGE.md): no raw colours, lines or shadows outside the tokens.
 # A push: the files it brings (what's already on the phone isn't this push's to answer for); otherwise all of the shell.
-if out=$("$SHELL_DIR/dev/lint-style.sh" "$S" ${files[@]+"${files[@]}"} 2>&1); then echo "$out"; else echo "$out" | head -30; fail=1; fi
+if [ "${GATE_SCOPE:-}" = boot ]; then echo "     style lint: skipped (GATE_SCOPE=boot)"
+elif out=$("$SHELL_DIR/dev/lint-style.sh" "$S" ${files[@]+"${files[@]}"} 2>&1); then echo "$out"; else echo "$out" | head -30; fail=1; fi
 # 1b'. The complexity lint (dev/lint-complexity.sh: per function cyclomatic/cognitive 10, depth 3, 60 lines, 4 params;
 # old debt frozen in dev/complexity-baseline.json, which only shrinks). A push: the files it brings; else all.
 # Fail closed: it installs its own deps if missing; only GATE_LINT=0 skips it.
 # --app: the PowOS apps' UIs too (apps/*/ui, their own baseline).
-cx=0; out=$("$SHELL_DIR/dev/lint-complexity.sh" --dir "$S" ${app:+--apps} ${files[@]+"${files[@]}"} 2>&1) || cx=$?
+cx=0; out=""
+if [ "${GATE_SCOPE:-}" != boot ]; then out=$("$SHELL_DIR/dev/lint-complexity.sh" --dir "$S" ${app:+--apps} ${files[@]+"${files[@]}"} 2>&1) || cx=$?
+fi
 case $cx in 0|2) echo "$out" ;; *) echo "$out" | head -45; fail=1 ;; esac
 t_lint=$(( $(mark) - ts ))
 # 1c. Every local file a page names (an html's href/src) or a script links in (a "./ui/x.css" it adds) is in what the

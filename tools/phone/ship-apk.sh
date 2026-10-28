@@ -97,7 +97,7 @@ fi
 # and 5b23de9b, 2026-10-23, whose shell loaded) - once more with a longer wait, as shell/push.sh does. The log keeps
 # the FAIL lines themselves (a tail of the console warnings hid them).
 glog=${TMPDIR:-/tmp}/ship-apk-gate.log
-gate_head() { GATE_PRIORITY=ship READY_MS=$1 IDLE_MS=0 bash shell/dev/gate.sh > "$glog" 2>&1; }
+gate_head() { GATE_SCOPE=boot GATE_PRIORITY=ship READY_MS=$1 IDLE_MS=0 bash shell/dev/gate.sh > "$glog" 2>&1; }
 grc=0; gate_head "${READY_MS:-30000}" || grc=$?
 if [ $grc -ne 0 ] && grep -q '^FAIL' "$glog" && ! grep '^FAIL' "$glog" | grep -qv 'not ready'; then
   echo "ship-apk: only boot timeouts - the Mac is busy? gating once more with READY_MS=90000" >&2
