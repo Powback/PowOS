@@ -819,6 +819,8 @@ export interface Bridge {
   };
   system: {
     insets(): Promise<Insets>;
+    /** The display the host shows on now (dp), pushed as "system.display" on every fold/display change and on resume. An older host or the web shell has none: check. */
+    display?(): Promise<{ widthDp: number; heightDp: number; displayId: number; rotation: number; folded: boolean }>;
     /** The battery: level 0-100 (null when unknown) and whether it's charging. */
     battery(): Promise<{ level: number | null; charging: boolean }>;
     /** Pulls Android's notification shade down ([open], the default) or puts it away. */
@@ -832,7 +834,7 @@ export interface Bridge {
     glass(): Promise<GlassSource>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "qt.drag" ({ side, y, q }) / "qt.settle" ({ open }) (Quick Tools), "home.panel" ({ kind }: home with its pull-up panel up), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "verify.state" (VerifyState), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "system.glass" (GlassSource), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "system.display" (widthDp, heightDp, displayId, rotation, folded), "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "qt.drag" ({ side, y, q }) / "qt.settle" ({ open }) (Quick Tools), "home.panel" ({ kind }: home with its pull-up panel up), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "verify.state" (VerifyState), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "system.glass" (GlassSource), "notifications.changed" (NotificationList),
    * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "windows.changed" (DesktopWindow[]), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

@@ -162,6 +162,8 @@ class ShellActivity : Activity() {
     override fun onResume() {
         super.onResume()
         inFront = true
+        // The page may have missed a fold while hidden: the display state again, whatever it was.
+        host.bridge.pushDisplay(force = true)
         runtime.wm.focus(null)
         removeStaleWindowTasks()
         // Back from the engine's installer (or anything else): whether PowOS is installed now.

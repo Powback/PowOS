@@ -313,6 +313,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     },
     system: {
       insets: () => call("system.insets"),
+      display: () => call("system.display"),
       notifications: (open = true) => call("system.notifications", open),
       battery: () => call("system.battery"),
       glass: () => call<GlassSource>("system.glass"),

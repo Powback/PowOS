@@ -336,6 +336,7 @@ class ShellBridge(
             "keyboard.show" -> keyboard(true)
             "keyboard.hide" -> keyboard(false)
             "system.insets" -> lastInsets
+            "system.display" -> display()
             "system.notifications" -> notifications(a.optBoolean(0, true))
             "system.battery" -> battery()
             // The pet over apps: on or off (null: just read it) - system/PetOverlay.
@@ -862,6 +863,47 @@ class ShellBridge(
 
     private fun JSONArray.optStringOrNull(i: Int) = if (isNull(i)) null else getString(i)
 
+    /**
+     * The display state the page lays out by (shell/hosts/wide.ts), in dp: the window's size (not the page's, which can
+     * lag a fold while hidden), the display id, rotation, and folded (the cover screen: under 600dp wide).
+     */
+    fun display(): JSONObject {
+        val d = context.resources.displayMetrics.density
+        val bounds = (activity?.windowManager ?: context.getSystemService(android.view.WindowManager::class.java)).currentWindowMetrics.bounds
+        val disp = activity?.display ?: context.display
+        return JSONObject()
+            .put("widthDp", Math.round(bounds.width() / d))
+            .put("heightDp", Math.round(bounds.height() / d))
+            .put("displayId", disp?.displayId ?: 0)
+            .put("rotation", disp?.rotation ?: 0)
+            .put("folded", bounds.width() / d < 600)
+    }
+
+    private var lastDisplay = ""
+
+    /** [display] pushed as "system.display" when it changed (or [force]: on resume/visible). */
+    fun pushDisplay(force: Boolean = false) {
+        val now = runCatching { display() }.getOrNull() ?: return
+        if (!force && now.toString() == lastDisplay) return
+        if (now.toString() != lastDisplay) Log.i(DISPLAY_TAG, "display $now")
+        lastDisplay = now.toString()
+        emit("system.display", now)
+    }
+
+    /** Fold, unfold, rotation, another display: DisplayManager hears of all of them, hidden or not. */
+    private val displayListener =
+        object : android.hardware.display.DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) = pushDisplay()
+
+            override fun onDisplayRemoved(displayId: Int) = pushDisplay()
+
+            override fun onDisplayChanged(displayId: Int) = pushDisplay()
+        }
+
+    init {
+        context.getSystemService(android.hardware.display.DisplayManager::class.java).registerDisplayListener(displayListener, main)
+    }
+
     /** The window's insets in CSS px, sent as "system.insets" when they change (the keyboard's included). */
     fun insets(w: WindowInsets) {
         val d = context.resources.displayMetrics.density
@@ -925,6 +967,7 @@ class ShellBridge(
     private fun js(code: String) = web.evaluateJavascript(code, null)
 
     fun close() {
+        runCatching { context.getSystemService(android.hardware.display.DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         ShellWallpaper.onChange.remove(wallpaperChanged)
         runCatching { android.app.WallpaperManager.getInstance(context).removeOnColorsChangedListener(wallpaperColors) }
         dev.omalauncher.theme.ThemeStore.changeListeners.remove(themeChanged)
@@ -948,6 +991,9 @@ class ShellBridge(
 
     companion object {
         private const val TAG = "PowosShell"
+
+        /** logcat tag of every display/fold push (and the page's wide/narrow switch, via its console). */
+        private const val DISPLAY_TAG = "PowosDisplay"
 
         /** A task opened as a floating window is up over its grown card by then: the switcher's layer may go. */
         private const val WINDOW_UP_MS = 150L
