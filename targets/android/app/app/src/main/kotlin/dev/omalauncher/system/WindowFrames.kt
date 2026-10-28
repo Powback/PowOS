@@ -26,8 +26,6 @@ class WindowFrames(
     private val main = Handler(Looper.getMainLooper())
     private val frames = mutableMapOf<Int, WindowFrame>()
 
-    /** Task [id]'s frame on screen now, or null (TaskFrame's bar acts through it). */
-    fun frame(id: Int): WindowFrame? = frames[id]
     /** Detached frames of recently visited desktops: bounded, paused, and never accepting input. */
     private val parked = linkedMapOf<Int, WindowFrame>()
     private var stopListening: (() -> Unit)? = null
