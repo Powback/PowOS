@@ -323,7 +323,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     },
     keyboard: {
       show: () => call("keyboard.show"),
-      hide: () => call("keyboard.hide"),
+      // Who took the keyboard down, in logcat (chromium console): desktop-mode search kept closing it (2026-10-28).
+      hide: () => (console.info("keyboard.hide from", new Error().stack?.split("\n").slice(2, 5).join(" <- ")), call("keyboard.hide")),
     },
     pet: {
       overlay: (on) => call<boolean>("pet.overlay", on ?? null),
