@@ -2171,6 +2171,19 @@ try {
       runs.push(open(browser, url, mode).then((r) => settle(r, () => window.__powosAlive === true || window.__powosBoot?.failed === true)));
     }
   }
+  for (const [mode, width, height] of [["home", 404, 900], ["desktop", 1280, 800]]) {
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, `launcher-search-${mode}`, {width, height}).then(r => whenReady(r, async () => {
+      const failures = await r.page.evaluate(async () => {
+        const check = await importShim('./dev/search-check.js');
+        return check.launcherSearchCheck();
+      });
+      await r.page.evaluate(async () => { const s = await importShim('./state.ts'); s.drawer.value = 1; s.query.value = 'dock position'; });
+      await r.page.waitForSelector('[data-search-result^="settings:style:"]');
+      await r.page.screenshot({path: `/cache/launcher-search-${mode}.png`});
+      return failures;
+    })));
+
+  }
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
     for (const position of ["bottom", "left", "right"]) {
       const name = `dock-position-${label}-${position}`;

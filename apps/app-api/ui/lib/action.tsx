@@ -4,7 +4,7 @@
  * first slice; a reversible write stays a dry run; a spend is never sent from here - it is confirmed in chat. A draft
  * (`draft`: "+ add app" review) has no switches and only ever dry-runs (/call draft:true, appcap_run.py --draft).
  */
-import { useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { call, SAFETY, shape, type Action, type AppSpec, type AppWidget, type CallResult, type Net, type Schema } from "./api";
 import { Block, Muted, S, Switch, title } from "./ui";
 
@@ -101,14 +101,19 @@ export interface DetailProps {
   /** The action's switch (the allowlist); none in a draft's review. */
   toggle?: (on: boolean, action?: string) => void;
   draft?: boolean;
+  selectedAction?: string;
 }
 
 function ActionRow({ p, id }: { p: DetailProps; id: string }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(p.selectedAction === id);
+  const row = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (p.selectedAction === id) { setOpen(true); row.current?.scrollIntoView({ block: "start" }); }
+  }, [p.selectedAction, id]);
   const a = p.spec.actions[id];
   const toggle = p.toggle;
   return (
-    <div style={S.card}>
+    <div ref={row} style={S.card}>
       <div style={{ ...S.row, cursor: "pointer" }} onClick={() => setOpen(!open)}>
         <div style={S.grow}>
           <div style={S.name}>{title(id)}</div>
@@ -151,7 +156,7 @@ export function Widgets({ widgets }: { widgets?: AppWidget[] }) {
 }
 
 export function Actions(p: DetailProps) {
-  const ids = Object.keys(p.spec.actions).sort();
+  const ids = Object.keys(p.spec.actions).sort((a, b) => Number(b === p.selectedAction) - Number(a === p.selectedAction) || a.localeCompare(b));
   return (
     <>
       {SAFETY.map((g) => {

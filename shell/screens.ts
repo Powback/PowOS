@@ -14,7 +14,10 @@ export type ScreenName = "settings" | "style" | "themes" | "store" | "linux" | "
 export const screens = signal<ScreenName[]>([]);
 
 /** Opens [name] on top (one already open comes up from under the others). */
-export function openScreen(name: ScreenName) {
+export const screenTarget = signal<string | undefined>(undefined);
+
+export function openScreen(name: ScreenName, target?: string) {
+  screenTarget.value = target;
   screens.value = [...screens.value.filter((s) => s !== name), name];
 }
 

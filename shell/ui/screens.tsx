@@ -22,6 +22,7 @@ import {
   type PackagesState,
   type ScreenName,
   screens,
+  screenTarget,
   setInnerBack,
   type SettingsState,
   type StoreState,
@@ -63,6 +64,23 @@ function Frame({
 }) {
   const body = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => body.current?.scrollTo(0, 0), [title]);
+  useEffect(() => {
+    const target = screenTarget.value;
+    const root = body.current;
+    if (!target || !root) return;
+    const reveal = () => {
+      const el = [...root.querySelectorAll<HTMLElement>("[data-setting]")].find((e) => e.dataset.setting === target);
+      if (!el) return false;
+      el.scrollIntoView({ block: "center" });
+      el.tabIndex = -1;
+      el.focus({ preventScroll: true });
+      return true;
+    };
+    if (reveal()) return;
+    const observer = new MutationObserver(() => { if (reveal()) observer.disconnect(); });
+    observer.observe(root, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [title, screenTarget.value]);
   return (
     <div class="scr tile sheet" {...own}>
       <header class="scr-top">
@@ -113,7 +131,7 @@ function Action({
 
 function Section({ icon, title, actions, children }: { icon: IconName; title: string; actions?: ComponentChildren; children: ComponentChildren }) {
   return (
-    <section class="scr-section">
+    <section class="scr-section" data-setting={title}>
       <h3 class="scr-heading">
         <Icon name={icon} size={16} />
         <span>{title}</span>
@@ -157,7 +175,7 @@ function Segmented({ options, picked, onPick }: { options: string[]; picked: num
 /** A labeled option row: the label, then its control. */
 function Option({ label, children }: { label: string; children: ComponentChildren }) {
   return (
-    <div class="scr-option">
+    <div class="scr-option" data-setting={label}>
       <span class="scr-option-label muted">{label}</span>
       <div class="scr-option-control">{children}</div>
     </div>
@@ -291,7 +309,7 @@ function Updates({ u }: { u: NonNullable<SettingsState["updates"]> }) {
             ? `up to date · checked ${ago(u.checked)}`
             : [u.packages.length ? plural(u.packages.length, "package") : "", u.tools.join(", ")].filter(Boolean).join(" · ");
   return (
-    <div class="scr-card tile">
+    <div class="scr-card tile" data-setting="system updates">
       <div class="scr-row">
         <Icon name="update" size={22} class="scr-row-icon" />
         <div class="scr-row-text">
@@ -341,7 +359,7 @@ function SettingsScreen() {
       {s?.updates && <Updates u={s.updates} />}
       <div class="scr-grid">
         {tiles.map(([icon, title, sub, open]) => (
-          <button type="button" key={title} class="scr-tile tile" onClick={open}>
+          <button type="button" key={title} class="scr-tile tile" data-setting={title} onClick={open}>
             <Icon name={icon} size={30} class="scr-tile-icon" />
             <span class="scr-tile-title">{title}</span>
             <span class="scr-tile-sub muted">{sub}</span>

@@ -94,10 +94,10 @@ function initial(name: string) {
 }
 
 /** The app open full screen: which, and the box it was opened from; closing while it goes. */
-export const appView = signal<{ id: string; from: DOMRect | null; closing?: boolean } | null>(null);
+export const appView = signal<{ id: string; from: DOMRect | null; closing?: boolean; route?: Record<string, string> } | null>(null);
 
-export function openApp(id: string, from: DOMRect | null = null) {
-  appView.value = { id, from };
+export function openApp(id: string, from: DOMRect | null = null, route?: Record<string, string>) {
+  appView.value = { id, from, route };
   noteOpened(PREFIX + id);
 }
 

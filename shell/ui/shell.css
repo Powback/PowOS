@@ -2639,3 +2639,6 @@ html:root .ai-screen { background: linear-gradient(180deg, var(--frost-sheen), t
 }
 .cc3-badge.add { background: var(--color-accent); }
 .cc3-spare { opacity: 0.8; }
+
+.launcher-search-results { display: flex; flex-direction: column; gap: var(--gap); width: 100%; }
+.launcher-search-results .scr-sub { display: block; }

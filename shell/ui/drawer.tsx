@@ -14,6 +14,8 @@ import { pendingApp } from "./appbuild.tsx";
 import { PendingDetailSheet, PendingIconBadge } from "./pending.tsx";
 import type { App } from "../types.ts";
 
+import { searchResults, searchPending, openSearchResult } from "../search.ts";
+
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 
@@ -188,12 +190,15 @@ function PendingAppCell() {
 export function Drawer() {
   const searching = query.value.trim() !== "";
   // No app by that name: it's a question for PowOS AI. Asked, the chat stays until the search finds apps again.
-  const asking = searching ? matches.value.length === 0 : chatting.value;
+  const asking = searching ? searchResults.value.length === 0 && !searchPending.value : chatting.value;
   const open = drawerOpen.value;
   return (
     // The launcher panel's lower part (home.tsx): it comes in (shell.css, by --p) as the recent bar grows into the panel.
     <div class={`drawer ${open ? "shown" : ""}`} aria-hidden={!open}>
-      {asking ? <ChatView /> : <AppList found={searching ? matches.value : null} />}
+      {asking ? <ChatView /> : searching ? <div class="drawer-list results"><div class="launcher-search-results">
+        {searchResults.value.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>)}
+        {searchPending.value && <div class="scr-note muted" role="status">Searching…</div>}
+      </div></div> : <AppList found={null} />}
       {!searching && !asking && <RecentRow />}
     </div>
   );

@@ -163,7 +163,7 @@ export function AppScreen() {
       ) : C ? (
         <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
           <Boundary key={mod!.url} id={v.id} name={name}>
-            <C host={host} app={v.id} base={`./_app/${v.id}/`} close={closeApp} />
+            <C route={v.route} host={host} app={v.id} base={`./_app/${v.id}/`} close={closeApp} />
           </Boundary>
         </div>
       ) : null}

@@ -9,9 +9,9 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { Ref } from "preact";
 import { GrowField } from "./grow.tsx";
-import { matches } from "./drawer.tsx";
+import { searchResults, searchPending, openSearchResult } from "../search.ts";
 import { followOpenness } from "./gesture.ts";
-import { drawer, launch, pullKind, query } from "../state.ts";
+import { drawer, pullKind, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
 import { forget, hearing, listen, listeningFor, makeHold, release, speech, stopTap, type MicTarget } from "./dictation.ts";
@@ -161,8 +161,9 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
       ref={proxy ? undefined : followOpenness}
       onSubmit={(e) => {
         e.preventDefault();
-        const best = pullKind.value === "apps" ? matches.value[0] : null;
-        if (best) launch(best.key);
+        const best = pullKind.value === "apps" ? searchResults.value[0] : null;
+        if (best) openSearchResult(best);
+        else if (searchPending.value) return;
         else askHere(query.value);
       }}
       onClick={() => {
@@ -190,7 +191,7 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
         onBlur={() => setFocused(false)}
         placeholder={s.listening ? "listening…" : (s.error ?? undefined)}
         aria-label={pullKind.value === "ai" && drawer.value > 0 ? "Ask PowOS AI" : "Search"}
-        enterKeyHint={query.value.trim() && !matches.value.length ? "send" : "go"}
+        enterKeyHint={query.value.trim() && !searchResults.value.length && !searchPending.value ? "send" : "go"}
         autocomplete="off"
         autoCapitalize="off"
         spellcheck={false}

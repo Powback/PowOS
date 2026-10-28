@@ -4,7 +4,7 @@
  * (appcap_render.py: API, AI tools, CLI, widget bindings), dry-run an action, read the audit log and the trackers the
  * capture proxy saw. All of it is the local runtime on this device (lib/api.ts).
  */
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { optimistic } from "@powos/shared/pending";
 import { Actions, type DetailProps } from "../lib/action";
 import { AddApp } from "../lib/add";
@@ -19,6 +19,7 @@ interface Props {
   host: Host;
   app: string;
   close?: () => void;
+  route?: Record<string, string>;
 }
 
 const TABS = ["Apps", "Audit", "Trackers", "Rules", "Recordings", "Files"];
@@ -216,10 +217,11 @@ const TAB: Record<string, (p: { net?: Net; app: string }) => preact.ComponentChi
   Audit, Trackers: TrackersView, Rules, Recordings, Files,
 };
 
-export default function Main({ host, app, close }: Props) {
+export default function Main({ host, app, close, route }: Props) {
   const net = host.net;
   const [tab, setTab] = useState("Apps");
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(route?.app ?? null);
+  useEffect(() => { setOpenId(route?.app ?? null); }, [route]);
   const [adding, setAdding] = useState(false);
   const [d, err, reload] = useRuntime<{ apps: AppSpec[] }>(net, app, "/apps");
   const spec = d?.apps.find((a) => a.app === openId);
@@ -241,7 +243,7 @@ export default function Main({ host, app, close }: Props) {
       );
     return (
       <div style={S.page}>
-        <Detail net={net} app={app} spec={spec} toggle={toggle} back={() => setOpenId(null)} />
+        <Detail selectedAction={route?.action} net={net} app={app} spec={spec} toggle={toggle} back={() => setOpenId(null)} />
       </div>
     );
   }
