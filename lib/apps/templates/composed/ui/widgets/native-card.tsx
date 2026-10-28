@@ -54,7 +54,7 @@ export default function Widget({ host, cells = [4, 2] }: Props) {
   // A target's centre (dp in the widget) as a fraction of the widget, sent as that fraction of the tile.
   const press = (x: [number, number, number, number]) => {
     if (!t) return;
-    void b.tap(((x[0] + x[2] / 2) / t.w) * (w || 1), ((x[1] + x[3] / 2) / t.h) * (h || 1), w || 1, h || 1);
+    void b.tap(((x[0] + x[2] / 2) / t.w) * (w || 1), ((x[1] + x[3] / 2) / t.h) * (h || 1), [w || 1, h || 1]);
   };
   return (
     <div ref={box} style={{ ...S.box, fontSize: `${font}px` }}>
