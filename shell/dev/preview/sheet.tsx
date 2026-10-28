@@ -252,6 +252,25 @@ export async function mount(spec: Spec, settleMs = 900) {
     root,
   );
   await new Promise((r) => setTimeout(r, settleMs));
+  await stable(root);
+}
+
+/** What the sheet shows, as a number: its markup and every canvas's drawn pixels. */
+const shown = (root: HTMLElement) => root.innerHTML.length + [...root.querySelectorAll("canvas")].reduce((n, c) => n + (c.width ? c.toDataURL().length : 0), 0);
+
+/**
+ * Resolves once the sheet has stopped changing for 400 ms (at most 6 s): a tile whose content arrives or paints late
+ * (a terminal's transcript on a loaded run) is measured settled, not mid-draw - "nothing drawn" at 4x4 vs a sparse
+ * fit finding was the same tile measured before and after, depending on the machine's load.
+ */
+async function stable(root: HTMLElement) {
+  let last = shown(root);
+  for (let still = 0, t = 0; still < 8 && t < 120; t++) {
+    await new Promise((r) => setTimeout(r, 50));
+    const now = shown(root);
+    still = now === last ? still + 1 : 0;
+    last = now;
+  }
 }
 
 export const canvasSizes = () => canvases;

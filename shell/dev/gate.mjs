@@ -105,8 +105,14 @@ async function dockPositionCheck(position) {
   else if (rect.width < rect.height) fails.push("bottom dock is vertical");
   const windows = await importShim("./ui/desktops.ts");
   if (windows.barTop() < innerHeight / 2) fails.push("dock collapses window work area");
+  async function dockSettled() {
+    if (position === "bottom") return new Promise(r => setTimeout(r, 450));
+    for (let t = 0; t < 120 && getComputedStyle(dock).opacity !== "0"; t++) await new Promise(r => setTimeout(r, 50));
+  }
   S.drawer.value = 1;
-  await new Promise(r => setTimeout(r, 450));
+  // The dock fades out on its own transition: wait for it to settle (opacity 0, up to 6 s), not a fixed delay a
+  // throttled or loaded run overshoots (2026-10-28: desktop-left / inner-left failed only under load).
+  await dockSettled();
   checkLauncher(); if (position !== "bottom" && getComputedStyle(dock).opacity !== "0") fails.push("side dock covers launcher");
   function checkLauncher() {
     const desktop = document.documentElement.dataset.mode === "desktop";
