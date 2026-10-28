@@ -10,6 +10,7 @@ import android.view.VelocityTracker
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import dev.omalauncher.system.PullHost
+import dev.omalauncher.system.Switcher
 import dev.omalauncher.system.Tasks
 import java.io.File
 import kotlin.math.abs
@@ -25,7 +26,7 @@ import kotlin.math.abs
  * once it has gone [slop] mostly upwards - before nav has seen that move - it's the panel's: nav hears a cancel (its
  * window goes back where it was), the panel comes up. Anything else stays nav's, event for event.
  *
- * Only over an app (home's own page has the corners), only in gesture navigation (nav takes the down), and only while
+ * Over an app, and over home's main page (same zones, thresholds and follow), only in gesture navigation (nav takes the down), and only while
  * the switch is on: the page store's `pullOverApps` (settings -> style -> home; files/shell-data/pullOverApps.json,
  * "off" turns it off).
  */
@@ -63,6 +64,13 @@ class CornerPull(
 
     private fun screen(): Rect = runCatching { displayContext.getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds }.getOrElse { Rect(0, 0, 1080, 2400) }
 
+    /**
+     * Over an app, or over home's main page with nothing open (the page reports it: shade.homePull mainPage): the same
+     * corner zones, thresholds and follow in both. Else home's own page has the touch.
+     */
+    private fun overAppOrHomeMain(): Boolean =
+        runCatching { Tasks.visible(service) }.getOrNull() != null || (Switcher.homeVisible && Switcher.homeMainPage && !Switcher.open)
+
     override fun onDown(e: MotionEvent): Boolean {
         navFollows = nav.onDown(e)
         state = State.NAV
@@ -73,8 +81,7 @@ class CornerPull(
         val left = e.rawX < s.left + zone
         val right = e.rawX >= s.right - zone
         if (!left && !right) return true
-        // Over home its own page has the corners.
-        if (runCatching { Tasks.visible(service) }.getOrNull() == null) return true
+        if (!overAppOrHomeMain()) return true
         state = State.WATCHING
         kind = if (left) "ai" else "apps"
         x0 = e.rawX

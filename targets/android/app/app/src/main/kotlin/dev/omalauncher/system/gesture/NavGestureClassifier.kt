@@ -48,6 +48,13 @@ class NavGestureClassifier(
     private val homeZoneStart = screenHeight * 0.3f
     private val switchDistance = 56f * density
 
+    /**
+     * An early release still commits: a real upward flick (this fast, [commitMinDistance] up) is the switcher even
+     * when it is short; only a short AND slow release, or one flung back down, is nothing.
+     */
+    private val commitSpeed = 0.35f * density // px/ms
+    private val commitMinDistance = 20f * density
+
     enum class Axis { NONE, UP, SIDEWAYS, IGNORED }
 
     sealed interface Outcome {
@@ -158,10 +165,11 @@ class NavGestureClassifier(
             Axis.UP ->
                 when {
                     vy >= flingSpeed -> Outcome.None
-                    lift < minDistance -> Outcome.None
-                    -vy >= homeFlingSpeed -> Outcome.Home
+                    -vy >= homeFlingSpeed && lift >= commitMinDistance -> Outcome.Home
                     lift >= homeDistance -> Outcome.Home
-                    else -> Outcome.Switcher
+                    lift >= minDistance || armed -> Outcome.Switcher
+                    -vy >= commitSpeed && lift >= commitMinDistance -> Outcome.Switcher
+                    else -> Outcome.None
                 }
             Axis.SIDEWAYS -> {
                 val dx = x - x0
