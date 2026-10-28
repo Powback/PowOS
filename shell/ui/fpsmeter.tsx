@@ -1,5 +1,5 @@
 /**
- * Status-bar FPS meter + tap-to-record perf trace. On by default (store "perf.meter" unset or {on:true}; {on:false} turns it off).
+ * Status-bar FPS meter + tap-to-record perf trace. Off by default (store "perf.meter" = {on:true}).
  * Stable by construction: the component renders its DOM once and is then only touched imperatively (a text node and a
  * canvas), never re-rendered per frame; fixed width + tabular digits; the rAF loop does no allocation (ring buffers);
  * text updates at 4 Hz from a 1 s window, the sparkline at 10 Hz on its own 2D canvas.
@@ -115,9 +115,8 @@ function setEnabled(on: boolean) {
 document.addEventListener("visibilitychange", () => { if (enabled && !rec) { if (document.hidden) stopLoop(); else start(); } });
 
 async function readSetting() {
-  // On by default (the spec): only an explicit {on:false} turns it off; a failed read changes nothing.
-  const v = await powos.store.get<{ on?: boolean }>(STORE).then((x) => ({ x }), () => null);
-  if (v) setEnabled(v.x?.on !== false);
+  const v = await powos.store.get<{ on?: boolean }>(STORE).catch(() => null);
+  setEnabled(!!v?.on);
 }
 /** Turn the meter on/off (persisted). Other windows pick it up within a few seconds. */
 export function setMeter(on: boolean) { setEnabled(on); void powos.store.set(STORE, { on }).catch(() => {}); }
@@ -207,7 +206,7 @@ export function FpsMeter() {
     ui.root.hidden = !enabled;
     void readSetting();
     const poll = window.setInterval(() => { if (!rec) void readSetting(); }, 30000); // backstop; the host pushes changes
-    const offs = [powos.on("perf.meter", (v: { on?: boolean } | null) => setEnabled(v?.on !== false)), powos.on("perf.sample", (s: ({ recPart?: number } & Parameters<typeof onSample>[0]) | null) => s && "recPart" in s ? onPart(s) : onSample(s))];
+    const offs = [powos.on("perf.meter", (v: { on?: boolean } | null) => setEnabled(!!v?.on)), powos.on("perf.sample", (s: ({ recPart?: number } & Parameters<typeof onSample>[0]) | null) => s && "recPart" in s ? onPart(s) : onSample(s))];
     return () => { themeChanges.disconnect(); clearInterval(poll); offs.forEach((o) => o()); ui = null; };
   }, []);
   // Rendered always (hidden while off) so the node and canvas are stable; the bar never re-renders it per frame.
