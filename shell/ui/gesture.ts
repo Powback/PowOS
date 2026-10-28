@@ -26,10 +26,11 @@ import { ccEditing, ccExpanded, EXPAND_AT, FOLD_AT, settle as settleCc, stretch 
 import { carry, closeDrawer, dockDrag, drawer, editing, folder, menu, notif, onLibrary, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
-/** Page swipe (iOS/Android launcher rule): commit past this share of a page's width, or on a clear flick. */
-const PAGE_AT = 0.3;
-/** A clear page flick: release speed (px/ms, over the last PAGE_V_WINDOW ms) after at least this many px. */
-const PAGE_FLICK = 0.3;
+/** Page swipe (iOS rule): commit past this share of a page's width, or on a flick. 0.3 / 0.3 px/ms were too hard
+    (user 10-28: "not consistently changing page"); iOS commits at ~0.2 or any flick of ~0.15 px/ms. */
+const PAGE_AT = 0.2;
+/** A page flick: release speed (px/ms, over the last PAGE_V_WINDOW ms) in the release direction, after this many px. */
+const PAGE_FLICK = 0.15;
 const PAGE_FLICK_MIN = 16;
 const PAGE_V_WINDOW = 50;
 /** Axis lock, decided at SLOP: vertical only when clearly so (> ~54 deg off the horizontal), so a diagonal swipe pages. */
@@ -295,6 +296,8 @@ interface Gesture {
   /** Where it started: a tap closes the launcher unless it was on something that takes taps. */
   target: Element;
   own: boolean;
+  /** Over something that scrolls only up and down (an Android widget's list): vertical is its own, sideways pages. */
+  ownV: boolean;
   height: number;
   /** The drawer's way, closed to open: its rise (shell.css --rise). */
   travel: number;
@@ -308,6 +311,7 @@ let g: Gesture | null = null;
  * dragging settles where its state says, rather than staying half-open.
  */
 function abandon() {
+  if (g?.mode === "pages") logSwipe(`abandoned dx=${r(g.last[0] - g.x0)} carry=${!!carry.value} dock=${!!dockDrag.value} held=${!!held.value}`);
   g = null;
   overRelease(false);
   drawerDrag.value = null;
@@ -358,10 +362,8 @@ function startGesture(x: number, y: number, target: Element) {
     open: drawer.value > 0,
     notif: notif.value,
     ...listUnder(target),
-    // A strip that scrolls sideways itself (the recent apps, the dock's pages): sideways is its own.
-    inStrip: !!target.closest?.(".strip, .dock-pages, .cc-subs"),
+    ...ownerUnder(target),
     target,
-    own: !!target.closest?.(OWN),
     height: document.querySelector(".home")?.clientHeight || innerHeight,
     travel: travelOf(),
   };
@@ -373,7 +375,15 @@ function startGesture(x: number, y: number, target: Element) {
  * or anything marked data-owns-gesture: its sideways drag is its own (a pill dimming a light), never a page swipe.
  * (Home's swipes are touch events on .home: a control's pointerdown stopPropagation doesn't reach them.)
  */
-const OWN = ".letter-bar, input[type=range], [role=slider], [data-owns-gesture], .resize-handle, .menu, .mic, .cc-editing, .aw-face.scrolls";
+const OWN = ".letter-bar, input[type=range], [role=slider], [data-owns-gesture], .resize-handle, .menu, .mic, .cc-editing";
+/** Vertical scrollers on home: their up/down is their own, but a mostly-sideways swipe over them still pages. */
+const OWN_VERTICAL = ".aw-face.scrolls";
+
+/** Who else may own the touch: a sideways strip (the recent apps, the dock's pages), a control, a vertical scroller. */
+function ownerUnder(target: Element) {
+  const has = (sel: string) => !!target.closest?.(sel);
+  return { inStrip: has(".strip, .dock-pages, .cc-subs"), own: has(OWN), ownV: has(OWN_VERTICAL) };
+}
 
 /** The scrolling list under the finger - the drawer's, PowOS AI's chat, the notifications: it scrolls until its end. */
 function listUnder(target: Element) {
@@ -508,9 +518,15 @@ function claimOnHome(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
   const vertical = Math.abs(dy) > Math.abs(dx) * VERTICAL_RATIO;
   if (vertical && Math.abs(dx) >= 6) logSwipe(`lock=vertical dx=${r(dx)} dy=${r(dy)} ratio=${(Math.abs(dy) / Math.abs(dx)).toFixed(2)} page=${page.value}`);
   // PowOS AI's page and the app library: up and down are their own (they scroll).
-  if (vertical && (page.value === -1 || onLibrary())) return null;
-  if (vertical) return claimVertical(gs, dy);
-  return !gs.open && !gs.inStrip ? "pages" : null;
+  if (vertical && (page.value === -1 || onLibrary() || gs.ownV)) return null;
+  return vertical ? claimVertical(gs, dy) : claimSideways(gs, dx, dy);
+}
+
+/** Sideways on home: the pages, unless the drawer is open or a strip scrolls sideways itself (logged, as a miss). */
+function claimSideways(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
+  if (!gs.open && !gs.inStrip) return "pages";
+  logSwipe(`drop sideways dx=${r(dx)} dy=${r(dy)} open=${gs.open} strip=${gs.inStrip} page=${page.value}`);
+  return null;
 }
 
 function claimVertical(gs: Gesture, dy: number): Gesture["mode"] {
@@ -677,8 +693,14 @@ export function pageDecision(total: number, dx: number, vx: number, width: numbe
   const flick = Math.abs(vx) >= PAGE_FLICK && Math.abs(dx) >= PAGE_FLICK_MIN;
   if (flick && Math.sign(vx) !== Math.sign(dx)) return { dir: 0, why: "flick-back" };
   if (flick) return { dir: -Math.sign(vx), why: "velocity" };
-  if (Math.abs(total) >= width * PAGE_AT) return { dir: -Math.sign(total), why: "distance" };
-  return { dir: 0, why: "short-slow" };
+  return byDistance(total, vx, width);
+}
+
+/** No flick: past PAGE_AT goes on - unless the finger was last drifting back (it changed its mind). */
+function byDistance(total: number, vx: number, width: number) {
+  if (Math.abs(total) < width * PAGE_AT) return { dir: 0, why: "short-slow" };
+  if (Math.abs(vx) >= PAGE_FLICK / 2 && Math.sign(vx) !== Math.sign(total)) return { dir: 0, why: "drift-back" };
+  return { dir: -Math.sign(total), why: "distance" };
 }
 
 /** Include a release's last position before deciding where the gesture settles. */

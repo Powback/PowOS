@@ -1798,7 +1798,8 @@ async function desktopReleaseCheck() {
     if (S.page.value !== want) failures.push(`${name}: page ${S.page.value}, wanted ${want} (${logged.join(" | ")} w=${width} drag=${JSON.stringify(steps)} dyEnd=${dyEnd})`);
   };
   const d = width;
-  await swipe("30% slow drag commits", [[-d * 0.1, 200], [-d * 0.2, 400], [-d * 0.32, 600], [-d * 0.32, 650]], 0, 1);
+  await swipe("22% slow drag commits", [[-d * 0.08, 200], [-d * 0.16, 400], [-d * 0.22, 600], [-d * 0.22, 650]], 0, 1);
+  await swipe("gentle 0.2 px/ms flick commits", [[-10, 50], [-20, 100], [-30, 150], [-40, 200]], 0, 1);
   await swipe("short fast flick commits", [[-12, 20], [-30, 40], [-60, 60]], 0, 1);
   await swipe("short slow drag cancels", [[-20, 200], [-40, 400], [-60, 600], [-60, 700]], 0, 0);
   await swipe("flick back cancels", [[-d * 0.4, 100], [-d * 0.4 + 10, 110], [-d * 0.4 + 30, 120], [-d * 0.4 + 60, 130]], 0, 0);
