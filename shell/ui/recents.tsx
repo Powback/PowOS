@@ -479,9 +479,15 @@ function Menu() {
             <button type="button" onClick={act(() => powos.tasks.float(t.id))}>
               Floating window
             </button>
-            {/* Unfolded only, and only on a host that has the call (f307). A window goes back to full screen. */}
+            {/* Unfolded only. A window goes back to full screen. A host without the call (an older APK, f307) rejects
+                "no such call": say so instead of leaving an unhandled rejection. */}
             {t.floats && powos.tasks.desktopWindow && (
-              <button type="button" onClick={act(() => powos.tasks.desktopWindow?.(t.id, !t.window))}>
+              <button
+                type="button"
+                onClick={act(() =>
+                  powos.tasks.desktopWindow?.(t.id, !t.window).catch(() => showNote("Not supported by this build yet")),
+                )}
+              >
                 {t.window ? "Full screen" : "PowOS desktop window"}
               </button>
             )}
