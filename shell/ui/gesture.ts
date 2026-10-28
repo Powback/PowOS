@@ -446,8 +446,8 @@ function claimVertical(gs: Gesture, dy: number): Gesture["mode"] {
  */
 function claimOnOpen(gs: Gesture, dy: number): Gesture["mode"] {
   if (dy > 0) return !gs.inList || gs.listTop ? "close" : null;
-  // Up from the panel's foot (its bottom strip, over the list or not): shuts it, as an app drawer closes on iOS/Android.
-  if (gs.y0 > gs.height * CLOSE_UP_ZONE) return "closeUp";
+  // Up from the panel's foot (its bottom strip only - never the list's scroll): shuts it, as an app drawer closes on iOS/Android.
+  if (gs.y0 > gs.height - CLOSE_UP_FOOT_PX) return "closeUp";
   return pullKind.value === "apps" && atListEnd(gs) ? "over" : null;
 }
 
@@ -491,8 +491,8 @@ function pageOffset(dx: number) {
   return edge ? dx / 3 : dx;
 }
 
-/** The panel's foot: a swipe up starting below this share of the height shuts it. */
-const CLOSE_UP_ZONE = 0.72;
+/** The panel's foot: only a swipe up starting in this bottom strip (css px) shuts it; anywhere above it scrolls the list. */
+const CLOSE_UP_FOOT_PX = 36;
 /** Shut when let go with it this far (or less) still showing; a flick up this fast (px/ms) after this many px; a dwell. */
 const CLOSE_UP_KEEP = 0.75;
 const CLOSE_UP_SPEED = 0.35;

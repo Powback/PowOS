@@ -818,6 +818,40 @@ async function wideBarParked() {
 }
 
 /**
+ * The open launcher: a swipe up over its list scrolls and keeps it open; a swipe up from its foot strip (the bottom
+ * 36 px, gesture.ts CLOSE_UP_FOOT_PX) closes it (the user, 2026-10-28: scrolling the launcher closed it).
+ */
+async function closeUpCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const fails = [];
+  const home = document.querySelector(".home");
+  const drag = async (x, y0, dy) => {
+    const fire = (type, y, buttons) => home.dispatchEvent(new PointerEvent(type, { pointerId: 11, pointerType: "mouse", clientX: x, clientY: y, buttons, bubbles: true, isPrimary: true }));
+    fire("pointerdown", y0, 1);
+    for (let d = 15; d <= dy; d += 15) {
+      fire("pointermove", y0 - d, 1);
+      await new Promise((ok) => setTimeout(ok, 16));
+    }
+    await new Promise((ok) => setTimeout(ok, 200));
+    fire("pointerup", y0 - dy, 0);
+    await new Promise((ok) => setTimeout(ok, 700));
+  };
+  const open = async () => {
+    S.drawer.value = 1;
+    await window.__gw.settled(() => document.querySelector(".home.open .drawer-list"));
+  };
+  await open();
+  const h = home.clientHeight;
+  await drag(innerWidth * 0.5, h * 0.8, 120);
+  if (!(S.drawer.value > 0)) fails.push("a swipe up over the open launcher's list closed it (it scrolls)");
+  await open();
+  await drag(innerWidth * 0.5, h - 12, 160);
+  if (S.drawer.value > 0) fails.push("a swipe up from the open launcher's foot strip did not close it");
+  S.drawer.value = 0;
+  return fails;
+}
+
+/**
  * In the page: content scrolling under chrome fades out at an edge with more to scroll, never cut (shell.css
  * scroll-fade; the user, 2026-10-24) - the drawer's apps: at the top only the foot fades, part-way both ends, at the end
  * only the top. Then closed again.
@@ -2289,6 +2323,7 @@ try {
   // The drawer's list fades at an edge with more to scroll (2026-10-24): a short screen, so the mock's apps scroll.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "scroll-fade", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(scrollFadeCheck))));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "close-up", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(closeUpCheck))));
   // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
   // side-by-side pages without moving a tile.
   if (process.env.SHELL_PAGES !== "0")
