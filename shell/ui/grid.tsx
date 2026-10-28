@@ -180,20 +180,14 @@ function groupOf(start: HomeItem, tiles: HomeItem[], seen: Set<string>) {
   while (todo.length) {
     const a = todo.pop()!;
     members.push(a);
-    for (const [b, t] of touching(a, tiles)) {
-      ways.add(t);
-      if (!seen.has(b.key)) (seen.add(b.key), todo.push(b));
+    for (const b of tiles) {
+      const t = a === b ? null : touch(own(a), own(b));
+      if (t) ways.add(t);
+      if (t && !seen.has(b.key)) (seen.add(b.key), todo.push(b));
     }
   }
   return { members, ways };
 }
-
-/** The tiles of [tiles] touching [a] edge to edge, and how. */
-const touching = (a: HomeItem, tiles: HomeItem[]) =>
-  tiles.flatMap((b) => {
-    const t = a === b ? null : touch(own(a), own(b));
-    return t ? [[b, t] as const] : [];
-  });
 
 /** A pure stack or row: each member's common span into [out], if one fits beside the page's other tiles. */
 function stretch(g: { members: HomeItem[]; ways: Set<string> }, on: HomeItem[], out: Map<string, Cell>, lim: { cols: number; rows: number }) {
