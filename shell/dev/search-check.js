@@ -28,7 +28,7 @@ export async function launcherSearchCheck() {
     s.query.value = 'newresult';
     await wait(() => search.searchResults.value.some(r => r.id === 'newresult'));
     await new Promise(r => setTimeout(r, 400));
-    if (!search.searchResults.value.some(r => r.id === 'newresult') || search.searchResults.value.some(r => r.id === 'oldresult')) failures.push('stale result replaced new query');
+    if (!hasCurrentResult(search.searchResults.value)) failures.push('stale result replaced new query');
     search.openSearchResult(search.searchResults.value.find(r => r.id === 'newresult'));
     if (!opened) failures.push('provider destination did not open');
     off(); off = null;
@@ -40,4 +40,8 @@ export async function launcherSearchCheck() {
   } catch (e) { failures.push(String(e)); }
   finally { off?.(); screens.screens.value = old.screens; screens.screenTarget.value = old.target; s.query.value = old.query; s.drawer.value = old.drawer; }
   return failures;
+}
+
+function hasCurrentResult(results) {
+  return results.some(r => r.id === "newresult") && !results.some(r => r.id === "oldresult");
 }
