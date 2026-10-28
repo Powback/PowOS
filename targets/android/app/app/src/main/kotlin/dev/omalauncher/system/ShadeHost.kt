@@ -161,6 +161,8 @@ class ShadeHost(
                 override fun peekHeight(px: Int) = sizePeek(px)
 
                 override fun blur(dp: Float) = blur.radius(dp)
+
+                override fun behind(q: Float) = pageBehind(q)
             }
         host = h
         watchdog =
@@ -567,9 +569,25 @@ class ShadeHost(
     // The control center's material: home's text, pill and dock unreadable behind it (design: 360 dp; the page sets it too).
     private val blur = dev.omalauncher.shell.WindowBlur({ shade }, SHADE_BLUR_DP)
 
+    /**
+     * The page reports the openness it renders (shell/ui/shade.tsx followBehind): from then on the blur is the page's,
+     * on the draw that carries its frame - set here at touch time it led the panel by a frame or two, and the page's
+     * own swipe shut never reached it (the blur stayed, then snapped off with the window, 2026-10-28). Until a page
+     * says (an older one, mid-reload) the host drives it from its pull as before.
+     */
+    private var pageDriven = false
+
+    private fun pageBehind(q: Float) {
+        pageDriven = true
+        blurEase?.cancel()
+        if (!shown) return
+        behind = q.coerceIn(0f, 1f)
+        blur.setOnDraw(if (reload?.reloading == true) 0f else behind)
+    }
+
     private fun drag(q: Double) {
         blurEase?.cancel()
-        if (shown) blurBehind(q.toFloat())
+        if (shown && !pageDriven) blurBehind(q.toFloat())
         tell("shade.drag", JSONObject().put("q", q))
     }
 
@@ -592,7 +610,7 @@ class ShadeHost(
     }
 
     private fun settle(open: Boolean) {
-        if (shown) easeBlur(if (open) 1f else 0f)
+        if (shown && !pageDriven) easeBlur(if (open) 1f else 0f)
         tell("shade.settle", JSONObject().put("open", open))
         if (!shown) return
         if (open) armOpen() else armShut()
@@ -857,4 +875,7 @@ interface ShadeSlot {
 
     /** How strongly what's behind the shade is blurred when it's open: the radius at full openness, dp (the page's). */
     fun blur(dp: Float) {}
+
+    /** The panel's openness as the page draws it this frame (0..1): what's behind blurred by it on that draw. */
+    fun behind(q: Float) {}
 }

@@ -9,7 +9,7 @@
  * opens it, its buttons are its actions (a reply opens the whole shade with the field), up puts the banner away, down
  * pulls the whole shade. It goes by itself after a few seconds - an alarm's or a call's later - not while touched.
  */
-import { signal } from "@preact/signals";
+import { effect, signal } from "@preact/signals";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { notif, panel, separatePanels } from "../state.ts";
@@ -40,6 +40,45 @@ powos.on("shade.settle", ({ open }: { open: boolean }) => {
  */
 const BLUR_DP = 360;
 void powos.shade.blur?.(BLUR_DP).catch(() => {});
+
+/**
+ * The blur behind follows the panel as it's drawn: each frame the panel's openness moves (the host's pull, the page's
+ * own swipe shut, a tap beside it, the 280 ms settle either way), the --q this frame renders goes to the host, which
+ * puts the blur on the window's draw that carries this frame. The host used to set the blur itself, at touch time -
+ * a frame or two ahead of the page's panel (2026-10-28: "the blur isn't in the same frame as the content") - and a
+ * swipe shut on the page never reached it at all: the blur stayed until the window went, then snapped off.
+ */
+let sentQ = -1;
+let following = false;
+const panelQ = () => {
+  const el = document.querySelector<HTMLElement>(".shade-screen .notif-panel");
+  // The registered --q, animated: at an animation frame it's this frame's value (the drag's, or the transition's).
+  const q = el ? parseFloat(getComputedStyle(el).getPropertyValue("--q")) : NaN;
+  return Number.isFinite(q) ? Math.max(0, Math.min(1, q)) : notifShown();
+};
+function followBehind() {
+  // The shade's page only (home imports this module too; its mode is set after the imports run).
+  if (following || document.documentElement.dataset.mode !== "shade") return;
+  following = true;
+  let still = 0;
+  const tick = () => {
+    const q = panelQ();
+    if (Math.abs(q - sentQ) > 0.001) {
+      sentQ = q;
+      still = 0;
+      void powos.shade.behind?.(q).catch(() => {});
+    } else if (++still > 3 && notifDrag.peek() == null) {
+      following = false;
+      return;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+effect(() => {
+  notifShown();
+  followBehind();
+});
 
 /** The heads-up banner showing, or null. */
 const peek = signal<PhoneNotification | null>(null);

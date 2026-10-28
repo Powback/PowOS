@@ -477,12 +477,29 @@ internal class GlassBlur(
                 val regions = wholeRegion(c, android.graphics.RectF(0f, topPx, root.width.toFloat(), root.height.toFloat()), radiusPx, corners)
                 val t = SurfaceControl.Transaction()
                 m.setBlurRegions.invoke(t, surface, regions)
-                t.apply()
+                applyWhole(view, t)
                 true
             } catch (e: Throwable) {
                 Log.w(TAG, "no blur region over the window", e)
                 false
             }
+        }
+
+        /**
+         * Set (main thread only) while a [wholeWindowOf] is for the frame its window's page draws now (WindowBlur.setOnDraw):
+         * the regions ride on the window's next draw ([AttachedSurfaceControl.applyTransactionOnDraw]), not at once.
+         */
+        internal var onNextDraw = false
+
+        private fun applyWhole(
+            view: View,
+            t: SurfaceControl.Transaction,
+        ) {
+            val attached = if (onNextDraw && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) view.rootSurfaceControl else null
+            if (attached == null) return t.apply()
+            attached.applyTransactionOnDraw(t)
+            // A draw comes even when the page has nothing new (its last frame already drawn).
+            view.invalidate()
         }
 
         /** The window's region codec, made once; null (and the window remembered as bad) where it can't be. */

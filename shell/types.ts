@@ -626,6 +626,12 @@ export interface Bridge {
      */
     blur(dp: number): Promise<void>;
     /**
+     * The panel's openness (0..1) as the page renders it this frame: the host blurs what's behind by it on the window's
+     * draw that carries the frame - the blur in the same frame as the panel, both ways (a pull, the page's own swipe
+     * shut, a settle). Optional: an older host drives the blur from its own pull.
+     */
+    behind?(q: number): Promise<void>;
+    /**
      * Home's page: a pull down on home is the shade's now ([on]: nothing open over home's pages). Resolves true when the
      * host takes that finger itself (its gesture input), false when it can't - then home asks [open] on a swipe down.
      */

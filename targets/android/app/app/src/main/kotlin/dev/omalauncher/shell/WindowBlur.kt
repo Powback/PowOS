@@ -62,6 +62,19 @@ internal class WindowBlur(
         set(amount)
     }
 
+    /**
+     * As [set], on the window's next draw rather than at once: [amount] is what its page is drawing now (the shade page
+     * reports the openness it renders, shell/ui/shade.tsx) - the blur in the same frame as the content.
+     */
+    fun setOnDraw(amount: Float) {
+        GlassBlur.onNextDraw = true
+        try {
+            set(amount)
+        } finally {
+            GlassBlur.onNextDraw = false
+        }
+    }
+
     fun set(amount: Float) {
         this.amount = amount
         if (broken) return
