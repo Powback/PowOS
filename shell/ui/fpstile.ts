@@ -5,11 +5,11 @@ import type { QuickTile } from "../types.ts";
 
 export const FPS_ID = "powos.fps";
 const on = signal<boolean | null>(null);
-powos.on("perf.meter", (v: { on?: boolean } | null) => (on.value = !!v?.on));
+powos.on("perf.meter", (v: { on?: boolean } | null) => (on.value = v?.on !== false));
 
 /** Reads the real state (while the shade shows). */
 export function askFps() {
-  powos.store.get<{ on?: boolean }>("perf.meter").then((v) => (on.value = !!v?.on), () => {});
+  powos.store.get<{ on?: boolean }>("perf.meter").then((v) => (on.value = v?.on !== false), () => {});
 }
 
 export function fpsTile(): QuickTile {

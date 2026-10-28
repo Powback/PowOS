@@ -57,7 +57,7 @@ function recorder(v: { rec?: number } | null) {
 }
 
 export function startSampler() {
-  powos.on("perf.meter", (v: { on?: boolean; rec?: number } | null) => { on = !!v?.on; run(); recorder(v); });
+  powos.on("perf.meter", (v: { on?: boolean; rec?: number } | null) => { on = v?.on !== false; run(); recorder(v); });
   document.addEventListener("visibilitychange", run);
-  powos.store.get<{ on?: boolean }>("perf.meter").then((v) => { on = !!v?.on; run(); }, () => {});
+  powos.store.get<{ on?: boolean }>("perf.meter").then((v) => { on = v?.on !== false; run(); }, () => {});
 }
