@@ -946,6 +946,8 @@ class ShellBridge(
 
     private fun keyboard(show: Boolean) {
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        // Home is non-focusable while desktop windows show (FreeformTasks.homeFocusable): a text field lifts that.
+        dev.omalauncher.system.FreeformTasks.homeTyping(context, show)
         if (show) {
             web.requestFocus()
             if (web.hasWindowFocus()) {

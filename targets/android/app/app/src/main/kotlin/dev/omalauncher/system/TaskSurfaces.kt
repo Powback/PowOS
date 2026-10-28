@@ -3,6 +3,7 @@ package dev.omalauncher.system
 import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Point
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
@@ -55,6 +56,7 @@ object TaskSurfaces {
             val c = context.applicationContext
             app = c
             stopTasks = FreeformTasks.listen { prune() }
+            dressLeashes(c)
             val dm = c.getSystemService(DisplayManager::class.java)
             screen = screenKey(dm)
             dm.registerDisplayListener(
@@ -98,6 +100,7 @@ object TaskSurfaces {
         why: String,
     ) {
         if (surfaces.remove(id) == null) return
+        sizes.remove(id)
         Log.i(TAG, "dropped task $id ($why)")
         say(id, null)
     }
@@ -130,6 +133,85 @@ object TaskSurfaces {
         if (listeners.isEmpty()) return
         main.post { for (l in listeners) runCatching { l(id, surface) }.onFailure { Log.w(TAG, "a listener failed", it) } }
     }
+
+    /** Every leash that comes gets PowOS's window look at once (the size known by then, else at the next [dress]). */
+    private fun dressLeashes(c: Context) {
+        density = c.resources.displayMetrics.density
+        listen { id, leash -> if (leash != null) look(id, leash, on = id !in bare) }
+    }
+
+    /** Task id -> the window's size (px) last [dress]ed: the crop its rounded corners are cut at. */
+    private val sizes = ConcurrentHashMap<Int, Point>()
+
+    /** Tasks shown full screen ([undress]): no corners, no shadow until [dress]ed again. */
+    private val bare = ConcurrentHashMap.newKeySet<Int>()
+
+    @Volatile private var density = 1f
+
+    /**
+     * One PowOS look on desktop window [id] at [bounds] (screen px): the shell's window radius (`--radius`,
+     * shell/theme.css) and a soft shadow on its leash. Cheap and idempotent: WindowFrames calls it on every refresh, so a
+     * resize re-cuts the crop and a re-handed leash is dressed again. Main thread.
+     */
+    fun dress(
+        id: Int,
+        bounds: Rect,
+    ) {
+        if (bounds.isEmpty) return
+        sizes[id] = Point(bounds.width(), bounds.height())
+        bare.remove(id)
+        get(id)?.let { look(id, it, on = true) }
+    }
+
+    /** Task [id] full screen: square corners, no shadow (FreeformTasks.setFullScreen). */
+    fun undress(id: Int) {
+        bare.add(id)
+        sizes.remove(id)
+        get(id)?.let { look(id, it, on = false) }
+    }
+
+    /**
+     * HACK: SurfaceControl.Transaction.setCornerRadius / setShadowRadius are hidden (WM Shell's desktop mode makes the
+     * same calls on its task leashes); reflected, and skipped for good where they aren't there. The corners are cut at a
+     * crop of the window's last known size, re-set on every WindowFrames refresh - a live resize may show the old crop
+     * for a frame. Real fix: none for an app (WM Shell's own desktop decor would do it, which PowOS replaces).
+     */
+    private fun look(
+        id: Int,
+        leash: SurfaceControl,
+        on: Boolean,
+    ) {
+        if (!leash.isValid) return
+        val radius = if (on) WINDOW_RADIUS_DP * density else 0f
+        val shadow = if (on) WINDOW_SHADOW_DP * density else 0f
+        val size = sizes[id]
+        runCatching {
+            val t = SurfaceControl.Transaction()
+            if (on && size != null) t.setCrop(leash, Rect(0, 0, size.x, size.y)) else if (!on) t.setCrop(leash, null)
+            cornerRadius?.invoke(t, leash, radius)
+            shadowRadius?.invoke(t, leash, shadow)
+            t.apply()
+        }.onFailure {
+            Log.w(TAG, "no window look for task $id", it)
+            cornerRadius = null
+            shadowRadius = null
+        }
+    }
+
+    private var cornerRadius: java.lang.reflect.Method? = hidden("setCornerRadius")
+    private var shadowRadius: java.lang.reflect.Method? = hidden("setShadowRadius")
+
+    private fun hidden(name: String): java.lang.reflect.Method? =
+        runCatching {
+            HiddenApi.allow()
+            SurfaceControl.Transaction::class.java.getMethod(name, SurfaceControl::class.java, Float::class.javaPrimitiveType)
+        }.onFailure { Log.w(TAG, "no Transaction.$name", it) }.getOrNull()
+
+    /** The shell's window radius (shell/theme.css `--radius: 12px`, CSS px = dp). */
+    private const val WINDOW_RADIUS_DP = 12f
+
+    /** A soft shadow, as the shell's lifted panels. */
+    private const val WINDOW_SHADOW_DP = 18f
 
     /** Size + rotation of the main display: a fold swaps the panel behind display 0, a rotation turns it. */
     private fun screenKey(dm: DisplayManager): String {

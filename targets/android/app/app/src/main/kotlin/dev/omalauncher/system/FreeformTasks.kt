@@ -148,6 +148,8 @@ object FreeformTasks {
     ): Boolean {
         val mode = if (on) UNDEFINED else FREEFORM
         val to = if (on) Rect() else bounds ?: Rect()
+        // Full screen has square corners and no shadow; a window again is dressed at the next WindowFrames refresh.
+        if (on) android.os.Handler(android.os.Looper.getMainLooper()).post { TaskSurfaces.undress(id) }
         return runCatching {
             apply(token(context, id), transition = true) { wct, token ->
                 modeAndBounds(wct, token, mode, to)
@@ -302,6 +304,58 @@ object FreeformTasks {
         id: Int,
         change: (Any, Any) -> Unit,
     ): Result<Unit> = runCatching { apply(token(context, id), change = change) }
+
+    @Volatile private var windowsShown = false
+    @Volatile private var homeTypingNow = false
+    @Volatile private var homeFocusTold: Boolean? = null
+
+    /**
+     * Desktop mode (docs/DESKTOP-NATIVE.md step 7): PowOS's home task is non-focusable while desktop windows show, so a
+     * tap on the wallpaper or home doesn't take the focus from them and hide them; focusable again when none show
+     * (folded included) or while a shell text field takes the keyboard ([homeTyping]). WindowFrames' refresh, any thread.
+     */
+    fun homeFocusable(
+        context: Context,
+        shown: Boolean,
+    ) {
+        windowsShown = shown
+        applyHomeFocus(context)
+    }
+
+    /**
+     * A shell text field has the keyboard ([on]) or let it go: home's non-focusable flag is lifted meanwhile so
+     * ShellBridge.keyboard's moveTaskToFront can give it the input focus (57fcf37b).
+     * HACK: keyed to keyboard.show/hide, not to the field's own focus/blur - a field blurred without keyboard.hide keeps
+     * home focusable until the next hide. Real fix: the page reports text-field focus through the bridge.
+     */
+    fun homeTyping(
+        context: Context,
+        on: Boolean,
+    ) {
+        homeTypingNow = on
+        applyHomeFocus(context)
+    }
+
+    @Synchronized
+    private fun applyHomeFocus(context: Context) {
+        val focusable = !windowsShown || homeTypingNow
+        if (focusable == homeFocusTold) return
+        val id = homeTaskId(context) ?: return
+        runCatching { apply(token(context, id)) { wct, token -> TaskLeash.setFocusable(wct, token, focusable) } }
+            .onSuccess {
+                homeFocusTold = focusable
+                Log.i(TAG, "home task $id ${if (focusable) "focusable" else "non-focusable (desktop windows show)"}")
+            }.onFailure { Log.w(TAG, "can't set home task $id focusable=$focusable", it) }
+    }
+
+    /** PowOS's home task (this app's CATEGORY_HOME activity), or null when it isn't running. */
+    private fun homeTaskId(context: Context): Int? =
+        runCatching {
+            @Suppress("DEPRECATION")
+            context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS).firstOrNull {
+                it.baseIntent.hasCategory(android.content.Intent.CATEGORY_HOME) && it.baseActivity?.packageName == context.packageName
+            }?.taskId
+        }.getOrNull()
 
     /** Task [id]'s WindowContainerToken (TaskInfo.token, hidden). */
     private fun token(
