@@ -2671,8 +2671,11 @@ html:root .notif-panel:has(> .panel-body.together) {
   width: var(--side-dock);
   height: auto;
   margin: 0;
-  transform: none;
+  /* Slides out to its own edge as --p rises (same --p transition as the bottom dock), transform only. */
+  transform: translateX(calc(var(--p) * var(--side-dir, -1) * (100% + var(--side-edge, 0px))));
 }
+.home.dock-left { --side-dir: -1; --side-edge: var(--inset-left, env(safe-area-inset-left)); }
+.home.dock-right { --side-dir: 1; --side-edge: var(--inset-right, env(safe-area-inset-right)); }
 .home.dock-left > .dock { left: var(--inset-left, env(safe-area-inset-left)); }
 .home.dock-right > .dock { right: var(--inset-right, env(safe-area-inset-right)); }
 .home:is(.dock-left, .dock-right) .dock-pages {
@@ -2714,7 +2717,7 @@ html:root .notif-panel:has(> .panel-body.together) {
 .home.wide:is(.dock-left, .dock-right) > .bar { width: 100%; }
 .home.wide:is(.dock-left, .dock-right) > .bar .bar-pill { bottom: 2px; }
 .home.wide:is(.dock-left, .dock-right) { grid-template-rows: minmax(0, 1fr) 48px; }
-.home:is(.dock-left, .dock-right).open > .dock:not(.dock-tray) { opacity: 0; pointer-events: none; }
+.home:is(.dock-left, .dock-right).open > .dock:not(.dock-tray) { pointer-events: none; }
 
 /* Quick launchers (launchers.tsx): the toggles' chips holding an app's icon, in a row of their own under the toggles. */
 .cc3-launchers { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--soft-fill); }
