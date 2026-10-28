@@ -282,6 +282,9 @@ class ShellBridge(
             "shade.open" -> dev.omalauncher.system.ShadeHost.current?.let { s -> main.post { s.openPanel(control = false) } } ?: notifications(true)
             "overlay.closed", "pull.closed" -> overlay?.closed()
             "pull.launched" -> overlay?.launched()
+            // Which shell panel is open (system/Panels.kt): the bottom-edge home gesture closes it.
+            "panels.open" -> dev.omalauncher.system.Panels.set(a.getString(0), this)
+            "panels.closed" -> dev.omalauncher.system.Panels.set(null, this)
             // The floating app windows for the dock (system/WindowFrames.kt), and one brought back.
             "windows.list" -> windows()
             "apps.running" -> running()

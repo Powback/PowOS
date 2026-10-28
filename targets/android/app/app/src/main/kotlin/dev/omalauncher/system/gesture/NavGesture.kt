@@ -61,6 +61,9 @@ class NavGesture(
     private var transition: RecentsTransition? = null
     private var pinned = false
 
+    /** The page whose open panel this swipe closes (system/Panels.kt); null: the swipe is home's/the switcher's. */
+    private var panel: dev.omalauncher.shell.ShellBridge? = null
+
     /** Where the finger went down (screen px): the window follows it sideways. */
     private var downX = 0f
 
@@ -123,7 +126,8 @@ class NavGesture(
         // WM Shell takes 50-80 ms to hand over the app's window, as long as a quick swipe lasts - asked for after the
         // touch slop, the window only came loose once the finger was gone. A tap or a sideways swipe ends it straight
         // back to the app.
-        began()
+        panel = if (pinned) null else dev.omalauncher.system.Panels.live()
+        panel?.let { dev.omalauncher.system.Panels.begin(it) } ?: began()
         return true
     }
 
@@ -139,11 +143,13 @@ class NavGesture(
                 }
                 when (axis) {
                     NavGestureClassifier.Axis.UP -> {
+                        panelDrag(c.lift)
                         transition?.drag(c.lift, e.rawX - downX, c.homeness())
                         homeDrag(c.lift, e.rawX - downX, c.homeness())
                         return GestureConsumer.Verdict.TAKE
                     }
                     NavGestureClassifier.Axis.SIDEWAYS -> {
+                        if (panel != null) return drop()
                         // Along the bar: the quick switch's, not the window's - back where it was.
                         backToApp(transition)
                         transition = null
@@ -156,6 +162,7 @@ class NavGesture(
                     else -> {}
                 }
                 if (c.axis == NavGestureClassifier.Axis.UP) {
+                    panelDrag(c.lift)
                     transition?.drag(c.lift, e.rawX - downX, c.homeness())
                     homeDrag(c.lift, e.rawX - downX, c.homeness())
                 }
@@ -182,6 +189,7 @@ class NavGesture(
 
     private fun drop(): GestureConsumer.Verdict {
         classifier = null
+        endPanel(false)
         // A layer begun over home goes back down with it.
         if (overHome && homeBegun) endOverHome(NavGestureClassifier.Outcome.None)
         overHome = false
@@ -232,6 +240,8 @@ class NavGesture(
         transition = null
         val over = from
         Log.i(TAG, "gesture: $outcome (over task $over, animated ${t != null || overHome}; $why)")
+        // A panel was open: this swipe only closes it (it followed the finger) - no home, no switcher, no reload.
+        if (panel != null) return endPanel(outcome == NavGestureClassifier.Outcome.Home || outcome == NavGestureClassifier.Outcome.Switcher)
         if (overHome && homeBegun) return endOverHome(outcome)
         overHome = false
         if (pinned) {
@@ -282,6 +292,18 @@ class NavGesture(
             Switcher.end("home")
             if ((!ok || viaRecents) && swipe == mine) goHome()
         }
+    }
+
+    /** The open panel follows the finger: it is shut by the time the finger has come up this far. */
+    private fun panelDrag(lift: Float) {
+        val b = panel ?: return
+        dev.omalauncher.system.Panels.drag(b, lift / (screen.height() * PANEL_TRAVEL))
+    }
+
+    private fun endPanel(shut: Boolean) {
+        val b = panel ?: return
+        panel = null
+        dev.omalauncher.system.Panels.end(b, shut)
     }
 
     /** A frame of the swipe over home: the layer at the finger, once per display frame. */
@@ -435,6 +457,7 @@ class NavGesture(
         const val TAG = "PowosNavGesture"
         /** Over home: the lift (a share of the screen height) that brings the switcher layer all the way up. */
         const val HOME_TRAVEL = 0.4f
+        const val PANEL_TRAVEL = 0.4f
         const val HOME_SETTLE_MS = 220L
         const val NAV_MODE_GESTURAL = 2
 

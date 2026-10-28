@@ -635,6 +635,11 @@ export interface Bridge {
    * hears when the page closed it. Heads-up banners show here too: "shade.peek" (a PhoneNotification, or null: it's
    * gone) with the window a strip at the top as tall as [peekHeight] says; [expand] makes it the whole shade, open.
    */
+  /**
+   * The open shell panel (the launcher drawer "apps", PowOS AI's "ai"), told to the host so the bottom-edge home gesture
+   * closes it (events "panel.close.begin" / ".drag" { p } / ".end" { shut }). Optional: an older host lacks it.
+   */
+  panels?: { open(kind: "apps" | "ai"): Promise<void>; closed(): Promise<void> };
   shade: {
     closed(): Promise<void>;
     expand(): Promise<void>;

@@ -218,6 +218,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       set: (name, value) => call<QuickState>("qs.set", name, value),
       listening: (on) => call("qs.listening", on),
     },
+    panels: { open: (kind) => call("panels.open", kind), closed: () => call("panels.closed") },
     shade: {
       closed: () => call("shade.closed"),
       expand: () => call("shade.expand"),
@@ -758,6 +759,7 @@ function mock(): Bridge {
         },
       };
     })(),
+    panels: { open: async () => {}, closed: async () => {} },
     shade: {
       closed: async () => console.log("[mock] shade closed"),
       expand: async () => console.log("[mock] shade expanded"),

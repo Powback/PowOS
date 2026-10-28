@@ -47,8 +47,12 @@ switcher_open || fail flick "a fast short flick up did not commit the switcher"
 sh_ 'input keyevent BACK'; sleep 1
 home; swipe $((W/2)) 60 500 slow
 switcher_open && fail slow "a short slow release opened the switcher (should abort)"
-# Swipe up closes the open launcher: from its foot (above the nav strip), the panel follows and shuts.
+# The home gesture closes the open launcher/AI page: a swipe up in the system bottom-edge strip, the panel follows it.
+# A swipe up inside the open launcher (above the strip) scrolls and never closes it.
 home; ev 'importShim("./state.ts").then(s=>{s.drawer.value=1;return "open"})' >/dev/null; sleep 1.5
 sh_ "input swipe $((W/2)) $((H*85/100)) $((W/2)) $((H*40/100)) 250"; sleep 1.5
-[ "$(ev 'importShim("./state.ts").then(s=>s.drawer.value)')" = 0 ] || fail close-up "swipe up from the open launcher's foot did not close it"
-echo "PASS: home corners open AI/apps panels, centre the switcher, a fast short flick commits, a short slow one aborts, swipe up closes the launcher"
+[ "$(ev 'importShim("./state.ts").then(s=>s.drawer.value)')" != 0 ] || fail close-inside "a swipe up inside the open launcher closed it"
+swipe $((W/2)) $((H/3)) 300 close-home
+[ "$(ev 'importShim("./state.ts").then(s=>s.drawer.value)')" = 0 ] || fail close-home "the home gesture did not close the open launcher"
+switcher_open && fail close-home-switcher "the home gesture over the open launcher also raised the switcher"
+echo "PASS: home corners open AI/apps panels, centre the switcher, a fast short flick commits, a short slow one aborts, only the home gesture closes the launcher"

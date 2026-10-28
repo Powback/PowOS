@@ -826,8 +826,9 @@ async function wideBarParked() {
 }
 
 /**
- * The open launcher: a swipe up over its list scrolls and keeps it open; a swipe up from its foot strip (the bottom
- * 36 px, gesture.ts CLOSE_UP_FOOT_PX) closes it (the user, 2026-10-28: scrolling the launcher closed it).
+ * The open launcher: a swipe up over its list scrolls and keeps it open - also from its foot - and never closes it; the
+ * home gesture (the host's bottom-edge swipe, "panel.close.*" events) is what closes it: it follows the finger, an
+ * early release springs back, a full one shuts it (the user, 2026-10-28: "its home swipe up not general swipe up").
  */
 async function closeUpCheck() {
   const S = await window.__gw.mod("./state.ts");
@@ -848,13 +849,29 @@ async function closeUpCheck() {
     S.drawer.value = 1;
     await window.__gw.settled(() => document.querySelector(".home.open .drawer-list"));
   };
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const host = (event, data) => window.__mockEvents.emit(event, data);
+  void powos;
   await open();
   const h = home.clientHeight;
   await drag(innerWidth * 0.5, h * 0.8, 120);
   if (!(S.drawer.value > 0)) fails.push("a swipe up over the open launcher's list closed it (it scrolls)");
-  await open();
   await drag(innerWidth * 0.5, h - 12, 160);
-  if (S.drawer.value > 0) fails.push("a swipe up from the open launcher's foot strip did not close it");
+  if (!(S.drawer.value > 0)) fails.push("a swipe up from the open launcher's foot strip closed it (only the home gesture does)");
+  // The host's home gesture with the panel open: follows, springs back on a short release.
+  host("panel.close.begin", { kind: "apps" });
+  host("panel.close.drag", { p: 0.5 });
+  await new Promise((ok) => setTimeout(ok, 50));
+  const mid = (await window.__gw.mod("./ui/gesture.ts")).drawerDrag.value;
+  if (!(mid > 0.4 && mid < 0.6)) fails.push(`the panel did not follow the home gesture (openness ${mid}, want ~0.5)`);
+  host("panel.close.end", { shut: false });
+  await new Promise((ok) => setTimeout(ok, 300));
+  if (!(S.drawer.value > 0)) fails.push("a home gesture released early did not leave the launcher open");
+  host("panel.close.begin", { kind: "apps" });
+  host("panel.close.drag", { p: 1 });
+  host("panel.close.end", { shut: true });
+  await new Promise((ok) => setTimeout(ok, 500));
+  if (S.drawer.value > 0) fails.push("the home gesture released did not close the launcher");
   S.drawer.value = 0;
   return fails;
 }
