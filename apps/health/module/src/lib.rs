@@ -118,10 +118,22 @@ fn cursor_row(ctx: &ReducerContext) -> Cursor {
     ctx.db.cursor().id().find(0).unwrap_or(Cursor { id: 0, token: String::new(), newest: 0, synced: 0, tz_min: 0 })
 }
 
+/// One ingest call: [samples] to add or replace, [deleted] ids the source removed, the changes [token] to continue
+/// from ("" keeps the stored one), the phone's UTC offset [tz_min] and the caller's clock [now].
+#[derive(SpacetimeType)]
+pub struct IngestBatch {
+    samples: Vec<Incoming>,
+    deleted: Vec<String>,
+    token: String,
+    tz_min: i32,
+    now: u64,
+}
+
 /// Adds or replaces [samples], removes [deleted] (records the source deleted), keeps the sync cursor. The only way
 /// samples get in. [token]: the changes token to continue from ("" keeps the stored one); [now]: the caller's clock.
 #[spacetimedb::reducer]
-pub fn ingest(ctx: &ReducerContext, samples: Vec<Incoming>, deleted: Vec<String>, token: String, tz_min: i32, now: u64) -> Result<(), String> {
+pub fn ingest(ctx: &ReducerContext, batch: IngestBatch) -> Result<(), String> {
+    let IngestBatch { samples, deleted, token, tz_min, now } = batch;
     if samples.len() > MAX_BATCH || deleted.len() > MAX_BATCH {
         return Err(format!("at most {MAX_BATCH} samples per ingest"));
     }

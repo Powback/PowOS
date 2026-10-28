@@ -25,7 +25,7 @@ export interface CursorRow {
   synced: bigint;
 }
 
-export type Ingest = (a: { samples: IncomingRow[]; deleted: string[]; token: string; tzMin: number; now: bigint }) => Promise<unknown>;
+export type Ingest = (a: { batch: { samples: IncomingRow[]; deleted: string[]; token: string; tzMin: number; now: bigint } }) => Promise<unknown>;
 interface IncomingRow {
   id: string;
   kind: string;
@@ -81,7 +81,7 @@ async function send(p: Pass, records: HealthRecord[], deleted: string[], token: 
   let n = 0;
   do {
     const last = n + CHUNK >= rows.length;
-    await p.ingest({ samples: rows.slice(n, n + CHUNK), deleted: n === 0 ? deleted : [], token: last ? token : "", tzMin: p.tz, now: BigInt(p.now) });
+    await p.ingest({ batch: { samples: rows.slice(n, n + CHUNK), deleted: n === 0 ? deleted : [], token: last ? token : "", tzMin: p.tz, now: BigInt(p.now) } });
     n += CHUNK;
   } while (n < rows.length);
   return rows.length;
