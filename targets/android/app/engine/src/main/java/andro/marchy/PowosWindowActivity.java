@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.view.View;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -108,10 +109,100 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             splash = LaunchWindows.splash(this, getIntent().getStringExtra(EXTRA_TITLE), icon());
             root.addView(splash);
             setContentView(root);
+            rootView = root;
         } else {
-            setContentView(view);
+            android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+            root.addView(view);
+            setContentView(root);
+            rootView = root;
         }
         view.requestFocus();
+    }
+
+    private android.widget.FrameLayout rootView;
+    private GamepadOverlay padOverlay;
+    private View padButton, kbButton;
+    private SystemIME ime;
+    /** Windows showing the controls chrome now (full screen): the control centre's tile and the focus watcher reach them. */
+    private static final java.util.Set<PowosWindowActivity> CHROME = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** The control centre's Controller tile, for every full-screen window (MainActivity.padShow). */
+    static void padShowAll(boolean show) {
+        for (PowosWindowActivity w : CHROME) w.runOnUiThread(() -> w.setPad(show));
+    }
+
+    /** The focused window's class changed (powos-focus-watch): the per-game layout, in the full-screen windows too. */
+    static void gameAll(String key) {
+        for (PowosWindowActivity w : CHROME) w.runOnUiThread(() -> { if (w.padOverlay != null) w.padOverlay.setGame(key); });
+    }
+
+    private void setPad(boolean show) {
+        if (padOverlay == null) return;
+        padOverlay.setShown(show);
+        padButton.setAlpha(show ? 1f : 0.6f);
+        getSharedPreferences("andromarchy_settings", MODE_PRIVATE).edit().putBoolean("gamepad_shown", show).apply();
+    }
+
+    /**
+     * A full-screen Linux application owns the whole screen as its own task, so MainActivity's game controls and
+     * keyboard button are not on it: the same overlay (PadHub is shared) plus the two buttons ride on this window
+     * while it is full screen, and Linux gets the keyboard's text as it does from the desktop (Native.nativeSend*).
+     */
+    private void chrome(boolean on) {
+        if (rootView == null || id <= 0) return;
+        if (!on) {
+            if (padOverlay != null) {
+                padOverlay.setShown(false);
+                rootView.removeView(padOverlay);
+                rootView.removeView(padButton);
+                rootView.removeView(kbButton);
+                if (ime != null) rootView.removeView(ime.getInputView());
+            }
+            padOverlay = null; ime = null;
+            CHROME.remove(this);
+            return;
+        }
+        if (padOverlay != null) return;
+        float d = getResources().getDisplayMetrics().density;
+        padOverlay = new GamepadOverlay(this, PadHub.PADD_SOCKET);
+        padOverlay.setGame(MainActivity.readFocusedWindow(SessionService.runDir(this)));
+        rootView.addView(padOverlay, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        padOverlay.setShown(getSharedPreferences("andromarchy_settings", MODE_PRIVATE).getBoolean("gamepad_shown", false));
+        ime = new SystemIME(this, new SystemIME.Host() {
+            @Override public ExtraKeysBar getExtraKeysBar() { return null; }
+            @Override public void onImeVisibilityChanged(boolean visible) { }
+        });
+        rootView.addView(ime.getInputView(), new android.widget.FrameLayout.LayoutParams(1, 1));
+        padButton = chromeButton("\uD83C\uDFAE", "Game controls", 44, d, android.view.Gravity.TOP | android.view.Gravity.END, 12);
+        padButton.setAlpha(padOverlay.getVisibility() == View.VISIBLE ? 1f : 0.6f);
+        padButton.setOnClickListener(v -> {
+            boolean show = padOverlay.getVisibility() != View.VISIBLE;
+            setPad(show);
+            MainActivity.padShow(this, show);
+        });
+        kbButton = chromeButton("\u2328", "Keyboard", 52, d, android.view.Gravity.BOTTOM | android.view.Gravity.END, 20);
+        kbButton.setOnClickListener(v -> ime.toggleSystemKeyboard());
+        CHROME.add(this);
+    }
+
+    private View chromeButton(String text, String desc, int dp, float d, int gravity, int marginDp) {
+        android.widget.TextView b = new android.widget.TextView(this);
+        b.setText(text);
+        b.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, 22);
+        b.setTextColor(android.graphics.Color.WHITE);
+        b.setGravity(android.view.Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        bg.setColor(0x99202020);
+        bg.setStroke(Math.round(d), 0x55FFFFFF);
+        b.setBackground(bg);
+        b.setElevation(6 * d);
+        b.setContentDescription(desc);
+        android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(Math.round(dp * d), Math.round(dp * d), gravity);
+        int m = Math.round(marginDp * d);
+        lp.setMargins(m, m, m, m);
+        rootView.addView(b, lp);
+        return b;
     }
 
     private static final String STATE_WINDOW = "powos_window";
@@ -260,6 +351,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else
             getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        chrome(on);
         android.view.WindowInsetsController c = getWindow().getInsetsController();
         if (c == null)
             return;
@@ -561,6 +653,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     @Override
     protected void onDestroy() {
+        CHROME.remove(this);
         LaunchWindows.remove(this);
         surfaceGen++;
         stopConsumer();

@@ -121,7 +121,7 @@ public class MainActivity extends Activity
     private GamepadOverlay mGamepadOverlay;
     private DirWatch.Handle mFocusWatcher;
 
-    private static String readFocusedWindow(java.io.File runDir) {
+    static String readFocusedWindow(java.io.File runDir) {
         try {
             return new String(java.nio.file.Files.readAllBytes(new java.io.File(runDir, "focused-window").toPath()),
                 java.nio.charset.StandardCharsets.UTF_8).trim();
@@ -576,6 +576,7 @@ public class MainActivity extends Activity
                     if (!"focused-window".equals(path)) return;
                     String key = readFocusedWindow(runDir);
                     runOnUiThread(() -> mGamepadOverlay.setGame(key));
+                    PowosWindowActivity.gameAll(key);
                 });
         mGamepadOverlay.setGame(readFocusedWindow(runDir));
         root.addView(mGamepadOverlay, new FrameLayout.LayoutParams(
@@ -1383,6 +1384,7 @@ public class MainActivity extends Activity
 
     /** The control centre's Controller tile: on/off. With no session up it is saved and applies at the next start. */
     public static void padShow(Context c, boolean show) {
+        PowosWindowActivity.padShowAll(show);
         MainActivity m = sInstance;
         if (m != null && m.mGamepadOverlay != null) m.runOnUiThread(() -> m.setPadShown(show));
         else c.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
