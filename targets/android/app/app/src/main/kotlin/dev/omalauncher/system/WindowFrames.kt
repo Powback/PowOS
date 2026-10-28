@@ -595,10 +595,14 @@ class WindowFrames(
      */
     fun floatBack(id: Int): Boolean {
         if (id !in buttonFull || !AppWindows.floating(context)) return false
-        buttonFull.remove(id)
         val ok = toWindowAgain(id)
+        // Kept until it floats (backFromFullScreen clears it): a failed try leaves the next tap able to float it again.
+        if (!ok) Log.w(TAG, "task $id can't float again yet: kept for the next tap")
+        minimised.remove(id)
+        away.remove(id)
         FreeformTasks.raise(context, id)
         Log.i(TAG, "task $id back from full screen (maximise button) to ${fullBefore[id]?.toShortString()} ok=$ok")
+        main.removeCallbacks(refreshNow)
         main.postDelayed(refreshNow, SETTLE_MS)
         return true
     }
@@ -846,8 +850,10 @@ class WindowFrames(
         if (!AppWindows.floating(context)) return null
         val w = running.value.firstOrNull { it.pkg == pkg }
         if (w == null) {
-            // Its window went full screen by its maximise button: it floats again, at its place.
-            val full = FreeformTasks.fullScreen(context).firstOrNull { (id, p) -> p == pkg && id in buttonFull } ?: return null
+            // Its window went full screen by its maximise button: it floats again, at its place. Gone home, that task
+            // isn't shown (not visible) but still full screen - so the hidden ones too, else the dock/app icon launched
+            // the app over it: full screen again with no frame, its saved place and buttonFull never used (18:27).
+            val full = FreeformTasks.fullScreen(context, hiddenToo = true).firstOrNull { (id, p) -> p == pkg && id in buttonFull } ?: return null
             return full.first.takeIf { floatBack(it) }
         }
         return w.id.takeIf { restore(it) }

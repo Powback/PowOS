@@ -102,19 +102,26 @@ object FreeformTasks {
      * The app tasks showing full screen now (an ordinary activity: not home, recents, the assistant or a dream), top-most
      * first, as task id -> its package: on the unfolded home every app is a window ([toWindow] makes one of them).
      */
-    fun fullScreen(context: Context): List<Pair<Int, String?>> {
+    fun fullScreen(
+        context: Context,
+        hiddenToo: Boolean = false,
+    ): List<Pair<Int, String?>> {
         HiddenApi.allow()
         @Suppress("DEPRECATION")
         val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
-        return tasks.filter { isFullScreenApp(it) }.map { it.taskId to (it.baseActivity ?: it.topActivity)?.packageName }
+        return tasks.filter { isFullScreenApp(it, hiddenToo) }.map { it.taskId to (it.baseActivity ?: it.topActivity)?.packageName }
     }
 
-    private fun isFullScreenApp(t: ActivityManager.RunningTaskInfo): Boolean {
+    /** [t] a standard app task in full screen - shown now, or also behind home ([hiddenToo]: a full-screen window gone home). */
+    private fun isFullScreenApp(
+        t: ActivityManager.RunningTaskInfo,
+        hiddenToo: Boolean,
+    ): Boolean {
         val wc = runCatching { windowConfiguration(t) }.getOrNull() ?: return false
         val mode = wc.javaClass.getMethod("getWindowingMode").invoke(wc)
         val type = wc.javaClass.getMethod("getActivityType").invoke(wc)
         val visible = runCatching { android.app.TaskInfo::class.java.getField("isVisible").getBoolean(t) }.getOrDefault(false)
-        return mode == FULLSCREEN && type == ACTIVITY_TYPE_STANDARD && visible
+        return mode == FULLSCREEN && type == ACTIVITY_TYPE_STANDARD && (visible || hiddenToo)
     }
 
     /**
