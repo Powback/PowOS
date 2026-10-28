@@ -6,6 +6,7 @@ import android.content.Intent
 import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import androidx.health.connect.client.changes.Change
 import androidx.health.connect.client.changes.DeletionChange
 import androidx.health.connect.client.changes.UpsertionChange
 import androidx.health.connect.client.permission.HealthPermission
@@ -140,15 +141,22 @@ class HealthConnectBridge(
         val c = client()
         val out = JSONArray()
         val range = TimeRangeFilter.between(Instant.ofEpochMilli(since), Instant.ofEpochMilli(until))
-        for (name in wanted) {
-            var page: String? = null
-            do {
-                val r = c.readRecords(ReadRecordsRequest(types.getValue(name), range, pageSize = PAGE, pageToken = page, ascendingOrder = true))
-                for (rec in r.records) normalise(rec).forEach { out.put(it) }
-                page = r.pageToken?.takeIf { it.isNotEmpty() && r.records.isNotEmpty() }
-            } while (page != null)
-        }
+        for (name in wanted) readType(c, types.getValue(name), range, out)
         return out
+    }
+
+    private suspend fun readType(
+        c: HealthConnectClient,
+        type: KClass<out Record>,
+        range: TimeRangeFilter,
+        out: JSONArray,
+    ) {
+        var page: String? = null
+        do {
+            val r = c.readRecords(ReadRecordsRequest(type, range, pageSize = PAGE, pageToken = page, ascendingOrder = true))
+            r.records.forEach { rec -> normalise(rec).forEach { out.put(it) } }
+            page = r.pageToken?.takeIf { it.isNotEmpty() && r.records.isNotEmpty() }
+        } while (page != null)
     }
 
     private suspend fun changes(
@@ -166,33 +174,35 @@ class HealthConnectBridge(
                 val fresh = c.getChangesToken(ChangesTokenRequest(classesOf(wanted)))
                 return JSONObject().put("token", fresh).put("records", JSONArray()).put("deleted", JSONArray()).put("expired", true)
             }
-            for (ch in r.changes) {
-                when (ch) {
-                    is UpsertionChange -> normalise(ch.record).forEach { records.put(it) }
-                    is DeletionChange -> deleted.put(ch.recordId)
-                }
-            }
+            r.changes.forEach { take(it, records, deleted) }
             token = r.nextChangesToken
         } while (r.hasMore)
         return JSONObject().put("token", token).put("records", records).put("deleted", deleted).put("expired", false)
     }
 
-    private fun sample(
+    private fun take(
+        ch: Change,
+        records: JSONArray,
+        deleted: JSONArray,
+    ) {
+        when (ch) {
+            is UpsertionChange -> normalise(ch.record).forEach { records.put(it) }
+            is DeletionChange -> deleted.put(ch.recordId)
+        }
+    }
+
+    private fun base(
+        rec: Record,
         id: String,
         type: String,
+        unit: String,
+    ) = JSONObject().put("id", id).put("type", type).put("unit", unit).put("source", rec.metadata.dataOrigin.packageName)
+
+    private fun JSONObject.span(
         start: Instant,
         end: Instant,
         value: Double,
-        unit: String,
-        rec: Record,
-    ) = JSONObject()
-        .put("id", id)
-        .put("type", type)
-        .put("start", start.toEpochMilli())
-        .put("end", end.toEpochMilli())
-        .put("value", value)
-        .put("unit", unit)
-        .put("source", rec.metadata.dataOrigin.packageName)
+    ): JSONObject = put("start", start.toEpochMilli()).put("end", end.toEpochMilli()).put("value", value)
 
     private fun minutes(
         a: Instant,
@@ -202,13 +212,17 @@ class HealthConnectBridge(
     private fun normalise(rec: Record): List<JSONObject> {
         val id = rec.metadata.id
         return when (rec) {
-            is StepsRecord -> listOf(sample(id, "steps", rec.startTime, rec.endTime, rec.count.toDouble(), "count", rec))
-            is HeartRateRecord -> rec.samples.mapIndexed { i, s -> sample("$id:$i", "heart_rate", s.time, s.time, s.beatsPerMinute.toDouble(), "bpm", rec) }
-            is SleepSessionRecord -> listOf(sample(id, "sleep", rec.startTime, rec.endTime, minutes(rec.startTime, rec.endTime), "min", rec))
+            is StepsRecord -> listOf(base(rec, id, "steps", "count").span(rec.startTime, rec.endTime, rec.count.toDouble()))
+            is HeartRateRecord -> rec.samples.mapIndexed { i, s -> base(rec, "$id:$i", "heart_rate", "bpm").span(s.time, s.time, s.beatsPerMinute.toDouble()) }
+            is SleepSessionRecord -> listOf(base(rec, id, "sleep", "min").span(rec.startTime, rec.endTime, minutes(rec.startTime, rec.endTime)))
             is ExerciseSessionRecord ->
-                listOf(sample(id, "exercise", rec.startTime, rec.endTime, minutes(rec.startTime, rec.endTime), "min", rec).put("detail", rec.title ?: rec.exerciseType.toString()))
-            is WeightRecord -> listOf(sample(id, "weight", rec.time, rec.time, rec.weight.inKilograms, "kg", rec))
-            is ActiveCaloriesBurnedRecord -> listOf(sample(id, "active_calories", rec.startTime, rec.endTime, rec.energy.inKilocalories, "kcal", rec))
+                listOf(
+                    base(rec, id, "exercise", "min")
+                        .span(rec.startTime, rec.endTime, minutes(rec.startTime, rec.endTime))
+                        .put("detail", rec.title ?: rec.exerciseType.toString()),
+                )
+            is WeightRecord -> listOf(base(rec, id, "weight", "kg").span(rec.time, rec.time, rec.weight.inKilograms))
+            is ActiveCaloriesBurnedRecord -> listOf(base(rec, id, "active_calories", "kcal").span(rec.startTime, rec.endTime, rec.energy.inKilocalories))
             else -> emptyList()
         }
     }
