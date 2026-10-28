@@ -86,7 +86,7 @@ object TaskSurfaces {
         for ((id, leash) in leashes) {
             if (!leash.isValid) continue
             val old = surfaces.put(id, leash)
-            if (old != null && old.isValid && old.isSameSurface(leash)) continue
+            if (old === leash) continue // (SurfaceControl.isSameSurface is @hide: a re-handed copy of the same leash logs again)
             Log.i(TAG, "registered task $id ($from)${if (old != null) ", replaced" else ""}")
             say(id, leash)
         }
