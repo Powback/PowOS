@@ -70,6 +70,9 @@ const REACH = 24;
  */
 export function footAimAt(key: string | undefined, x: number, y: number): "bar" | "below" | null {
   if (key !== SEARCH_KEY) return null;
+  // On the dock itself first: in edit mode the edit sheet sits just under the dock (shell.css), so its reach would
+  // otherwise take a drop on the dock's lower half.
+  if (!wideHome.value && near(document.querySelector(".home > .dock:not(.dock-tray)"), x, y, 0)) return "below";
   if (near(document.querySelector(".home > .edit-sheet"), x, y, REACH)) return "bar";
   const dock = document.querySelector(".home > .dock:not(.dock-tray)")?.getBoundingClientRect();
   if (!dock?.width) return null;

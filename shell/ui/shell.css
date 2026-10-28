@@ -1142,6 +1142,15 @@ input.folder-title:focus { background: var(--soft-fill); }
   border-radius: var(--radius) var(--radius) 0 0;
 }
 .theme-pop { bottom: calc(var(--edit-foot) + var(--strip-height) + var(--gap)); }
+/* Its own space: in edit mode the dock and the pill's row rise by the bar's height above the foot's inset (never
+   down), so nothing lies under the bar and a drop on the dock lands on the dock. `translate`, not `transform`, so the
+   launcher's --p transform stays as it is; outside edit mode it is 0. */
+.home > .dock:not(.dock-tray),
+.home > .bar { transition: translate 180ms ease-out; }
+.home.editing > .dock:not(.dock-tray),
+.home.editing > .bar {
+  translate: 0 min(0px, calc(max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) - var(--edit-foot)));
+}
 .edit-act {
   font: var(--text-item) var(--font);
   color: var(--color-foreground);
