@@ -185,8 +185,11 @@ type Pull = {
 let pull: Pull | null = null;
 let doneTimer = 0;
 
-/** What's under the control center: the notifications' header and list. */
-const below = () => [...document.querySelectorAll<HTMLElement>(".panel-body.together .cc ~ *")];
+/**
+ * What's under the toggle grid: the quick launchers (inside .cc) and the notifications' header and list. The launchers
+ * ride with the rest: left out they stayed where the laid-out grid pushed them, over the notifications, a gap above.
+ */
+const below = () => [...document.querySelectorAll<HTMLElement>(".panel-body.together .cc3-launchers, .panel-body.together .cc ~ *")];
 const list3 = () => document.querySelector<HTMLElement>(".panel-body.together .cc3-list");
 
 /** The rest's height in [list] laid out whole: from the first row's bottom to the list's. */
