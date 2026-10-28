@@ -24,8 +24,9 @@ import android.view.SurfaceControlViewHost
  * Shown since SystemUI does the same for its own caption (SurfaceFlinger, 2026-10-28: "Decor container of Task=N", an
  * SCVH under "Task=N"; the task layer crops to its bounds, so the bar sits inside them).
  *
- * Off unless `settings put global powos_bar_in_task 1` (step 6 makes it the default and drops the overlay bar); until
- * then a window shows both bars. Logcat PowosTaskFrame. Main thread.
+ * Off unless `settings put global powos_bar_in_task 1` (step 6 makes it the default). While this bar is up its
+ * WindowFrame drops its overlay bar ([WindowFrame.taskBar]); with no leash yet or a failed attach the overlay bar
+ * stays, so a window always has exactly one bar. Logcat PowosTaskFrame. Main thread.
  */
 class TaskFrame private constructor(
     private val context: Context,
@@ -108,8 +109,14 @@ class TaskFrame private constructor(
             // A window that draws its own title bar (a Linux window's CSD) gets none of ours.
             if (leash == null || frame == null || frame.ownBar || frame.bounds.width() <= 0) return release(id)
             val w = frame.bounds.width()
-            frames[id]?.let { return it.update(leash, w) }
+            frames[id]?.let {
+                it.update(leash, w)
+                frame.taskBar(true)
+                return
+            }
+            // Its overlay bar goes only once this one is up: a failed attach keeps it (a window never has no bar).
             runCatching { frames[id] = TaskFrame(context, id, frame, leash, w) }
+                .onSuccess { frame.taskBar(true) }
                 .onFailure { Log.w(TAG, "task $id: can't put a bar in its layer", it) }
         }
 
@@ -122,7 +129,11 @@ class TaskFrame private constructor(
                 main.post { release(id) }
                 return
             }
-            frames.remove(id)?.release()
+            // The overlay bar back (WindowFrame.taskBar): a no-op for a frame already detached.
+            frames.remove(id)?.let {
+                it.release()
+                it.frame.taskBar(false)
+            }
         }
     }
 }

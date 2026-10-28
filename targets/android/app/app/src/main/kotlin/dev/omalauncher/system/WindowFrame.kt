@@ -85,7 +85,7 @@ class WindowFrame(
     // failed once never got another try, 2026-10-24 - "no title bar to close it by" after a dock minimise/restore).
     private var barAdded = false
     private var gripAdded = false
-    private val added: Boolean get() = gripAdded && (app.ownBar || barAdded)
+    private val added: Boolean get() = gripAdded && (noBar || barAdded)
 
     private val barBlur = WindowBlur({ bar.rootView }, Frost.BLUR_DP, cornersDp = floatArrayOf(CORNER_DP, CORNER_DP, 0f, 0f), topDp = HIT_DP)
     private val gripBlur = WindowBlur({ grip.rootView }, Frost.BLUR_DP, cornersDp = FloatArray(4) { GRIP_DP / 2 })
@@ -98,11 +98,35 @@ class WindowFrame(
     /** The window draws its own title bar ([App.ownBar]): no bar of ours, only the grip. */
     val ownBar: Boolean get() = app.ownBar
 
+    /** Its title bar is in the task's own layer ([TaskFrame], set by it): no overlay bar, as for [ownBar]. */
+    private var inTaskBar = false
+
+    /** No overlay bar of ours: the window draws its own ([ownBar]) or has its in-task bar ([inTaskBar]); grip only. */
+    private val noBar: Boolean get() = app.ownBar || inTaskBar
+
+    /**
+     * [TaskFrame] put this window's bar in its task's layer ([on]) or dropped it: the overlay bar goes, or comes back
+     * (a window never has no bar: a task with no leash yet, or a failed attach, keeps the overlay one). Main thread.
+     */
+    fun taskBar(on: Boolean) {
+        // A removal skipped under a finger (its touch would end) is retried on the next call (TaskFrame.sync on layout).
+        if (on == inTaskBar && !(on && barAdded)) return
+        inTaskBar = on
+        android.util.Log.i("PowosWindowFrame", "task $id: ${if (on) "bar in its task, overlay bar removed" else "overlay bar back"}")
+        if (on && barAdded && !dragging && !held) {
+            barAdded = false
+            bar.animate().cancel()
+            runCatching { wm.removeViewImmediate(bar) }
+        }
+        // Shown: re-laid out (the bar's height above the window comes and goes with it), the overlay bar re-added if back.
+        if (gripAdded) layout(bounds, span)
+    }
+
     /** Our bar's height above the window (px): none for a window with its own. */
-    private fun barHeight(): Int = if (app.ownBar) 0 else dp(BAR_DP + HIT_DP)
+    private fun barHeight(): Int = if (noBar) 0 else dp(BAR_DP + HIT_DP)
 
     /** The frame's view that is always shown (the bar, or the grip of a window with its own bar). */
-    private val anchor: View get() = if (app.ownBar) grip else bar
+    private val anchor: View get() = if (noBar) grip else bar
 
     /** The drag of the in-task bar ([TaskFrame]): its buttons hit-tested by that bar's own chrome ([barTouch]). */
     private var taskBarHit: (Float, Float) -> Pair<FrameChrome.Button, () -> Unit>? = { _, _ -> null }
@@ -193,7 +217,7 @@ class WindowFrame(
         bar.onResume()
         grip.onResume()
         var ok = true
-        if (!app.ownBar && !barAdded) {
+        if (!noBar && !barAdded) {
             runCatching { wm.addView(bar, barParams); barAdded = true; barBlur.set(blurLevel()) }
                 .onFailure { ok = false; android.util.Log.w("PowosWindowFrame", "can't add the bar of task $id", it) }
         }
@@ -214,7 +238,7 @@ class WindowFrame(
 
     /** What the device check reads: the bar's size and its frost as drawn (or that the window has its own bar). */
     private fun logAdded() {
-        if (app.ownBar) {
+        if (noBar) {
             android.util.Log.i("PowosWindowFrame", "task $id: its own title bar, no bar (grip only)")
             return
         }
@@ -223,7 +247,7 @@ class WindowFrame(
 
     private fun updateViews() {
         runCatching {
-            if (!app.ownBar) wm.updateViewLayout(bar, barParams)
+            if (!noBar) wm.updateViewLayout(bar, barParams)
             wm.updateViewLayout(grip, gripParams)
         }
     }
@@ -257,14 +281,14 @@ class WindowFrame(
      * app's window, its ask is the top-most one, which WM takes - the app's own (ColorOS's 60 Hz) capped home's swipes.
      */
     fun preferMode(id: Int) {
-        val p = if (app.ownBar) gripParams else barParams
+        val p = if (noBar) gripParams else barParams
         if (p.preferredDisplayModeId == id) return
         dev.omalauncher.shell.HighRefresh.ask(p, context.display, id)
         if (added) runCatching { wm.updateViewLayout(anchor, p) }
     }
 
     /** Its bar's and grip's views while shown (shell/PanelLift stacks their surfaces under home under a home panel; PageSlide moves them with a page swipe). */
-    val panelViews: List<android.view.View> get() = if (!added) emptyList() else if (app.ownBar) listOf(grip) else listOf(bar, grip)
+    val panelViews: List<android.view.View> get() = if (!added) emptyList() else if (noBar) listOf(grip) else listOf(bar, grip)
 
     /** A page swipe's offset of its bar and grip (screen px, along x): their layout x = the window's live place + it. */
     private var slideDx = 0
@@ -286,7 +310,7 @@ class WindowFrame(
      */
     fun slideHide() {
         slideHidden = true
-        if (app.ownBar) return
+        if (noBar) return
         if (!barAdded) { bar.animate().cancel(); bar.alpha = 0f; wmAlpha(0f); return }
         bar.animate().cancel()
         bar.animate().alpha(0f).setDuration(SLIDE_FADE_OUT_MS).withEndAction {
@@ -298,7 +322,7 @@ class WindowFrame(
 
     /** The bar and grip overlay windows' own alpha (LayoutParams.alpha): 0 = the compositor has nothing to draw for them. */
     private fun wmAlpha(a: Float) {
-        if (app.ownBar) return
+        if (noBar) return
         if (barParams.alpha == a && gripParams.alpha == a) return
         barParams.alpha = a
         gripParams.alpha = a
@@ -309,7 +333,7 @@ class WindowFrame(
     fun slideShow() {
         veiled = false
         slideHidden = false
-        if (app.ownBar || !barAdded) { bar.alpha = 1f; wmAlpha(1f); return }
+        if (noBar || !barAdded) { bar.alpha = 1f; wmAlpha(1f); return }
         bar.animate().cancel()
         wmAlpha(1f) // at the final place first (the view is still clear), then fade the view in
         barBlur.set(1f)
@@ -329,7 +353,7 @@ class WindowFrame(
         set(v) {
             if (field == v) return
             field = v
-            if (app.ownBar) return
+            if (noBar) return
             bar.animate().cancel()
             val hide = v || slideHidden
             bar.alpha = if (hide) 0f else 1f
@@ -367,13 +391,13 @@ class WindowFrame(
     fun raise() {
         if (!added || dragging || held) return
         runCatching {
-            if (!app.ownBar) {
+            if (!noBar) {
                 wm.removeViewImmediate(bar)
                 wm.addView(bar, barParams)
             }
             wm.removeViewImmediate(grip)
             wm.addView(grip, gripParams)
-            if (!app.ownBar) barBlur.set(blurLevel())
+            if (!noBar) barBlur.set(blurLevel())
         }.onFailure { android.util.Log.w("PowosWindowFrame", "can't raise the frame of task $id", it) }
     }
 
@@ -392,8 +416,9 @@ class WindowFrame(
     }
 
     fun remove() {
-        TaskFrame.release(id)
         detach()
+        // After detach: released first, its taskBar(false) would re-add the overlay bar of a frame that is going.
+        TaskFrame.release(id)
         barChrome.destroy()
         gripChrome.destroy()
     }
@@ -594,7 +619,7 @@ class WindowFrame(
     /** The layer that draws the frame where the finger has it: our bar (none for a window with its own), the grip resizing. */
     private fun dragLayer(resizing: Boolean): DragLayer {
         val bitmapOf = { v: View -> runCatching { v.drawToBitmap() }.getOrNull() }
-        val barPicture = if (app.ownBar) null else bitmapOf(bar)
+        val barPicture = if (noBar) null else bitmapOf(bar)
         return DragLayer(context, barPicture, if (resizing) bitmapOf(grip) else null, barHeight(), dp(GRIP_DP) - dp(GRIP_OUT_DP), CORNER_DP * density).apply { controlsWidth = barChrome.controlsWidth }
     }
 
@@ -680,7 +705,7 @@ class WindowFrame(
                 leave(layer, "task $id drag")
                 return@whenPlaced
             }
-            if (!app.ownBar && !slideHidden) {
+            if (!noBar && !slideHidden) {
                 bar.alpha = 1f
                 barBlur.set(1f)
             }
@@ -722,7 +747,7 @@ class WindowFrame(
     private fun barAt(r: Rect): Boolean {
         val at = IntArray(2)
         anchor.getLocationOnScreen(at)
-        if (app.ownBar) return at[0] == r.right - dp(GRIP_DP) + dp(GRIP_OUT_DP) && at[1] == r.bottom - dp(GRIP_DP) + dp(GRIP_OUT_DP)
+        if (noBar) return at[0] == r.right - dp(GRIP_DP) + dp(GRIP_OUT_DP) && at[1] == r.bottom - dp(GRIP_DP) + dp(GRIP_OUT_DP)
         return at[0] == r.left && at[1] == r.top - barHeight()
     }
 
