@@ -2393,6 +2393,13 @@ try {
     })));
 
   }
+  // The launcher's chat while typing (the user, 2026-10-28: "launcher chat refreshes every keypress"): no search, no
+  // re-render of the chat or its messages, the scroll where it was (dev/search-check.js launcherChatTypingCheck).
+  runs.push(open(browser, `${ORIGIN}/index.html`, "launcher-chat-typing", {width: 404, height: 900}).then(r => whenReady(r, async () => {
+    const [failures, counts] = await r.page.evaluate(async () => (await importShim('./dev/search-check.js')).launcherChatTypingCheck());
+    console.log(`launcher-chat-typing: ${JSON.stringify(counts)}`);
+    return failures;
+  })));
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
     for (const position of ["bottom", "left", "right"]) {
       const name = `dock-position-${label}-${position}`;

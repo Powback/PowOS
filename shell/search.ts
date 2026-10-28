@@ -1,6 +1,6 @@
 /** Launcher providers return destinations, never execute capabilities while searching. */
 import { computed, effect, signal } from "@preact/signals";
-import { apps, closeDrawer, launch, query } from "./state.ts";
+import { apps, chatting, closeDrawer, launch, query } from "./state.ts";
 import { openScreen, type ScreenName } from "./screens.ts";
 import { installedApps, openApp } from "./apps/pages.ts";
 import { powos } from "./bridge.ts";
@@ -103,8 +103,11 @@ registerSearchProvider({ id: "app-api", async search(_text, signal) {
 
 const extra = signal<SearchResult[]>([]);
 export const searchPending = signal(false);
+/** What's searched: the pill's text - except in a chat, where it's the next message, never a search (the user, 2026-10-28:
+ * "launcher chat refreshes every keypress" - each key ran every provider, and its results re-rendered the launcher). */
+const searched = computed(() => (chatting.value ? "" : query.value.trim()));
 export const searchResults = computed(() => {
-  const q = query.value.trim();
+  const q = searched.value;
   if (!q) return [];
   const entries: SearchResult[] = apps.value.map((a) => ({ id: `app:${a.key}`, label: a.label, source: "Apps", open: () => { void launch(a.key); } }));
   // Apps and settings pages come first; App API capabilities (hundreds of "open <url>" actions) are a capped tail so they cannot bury them.
@@ -120,7 +123,7 @@ export function openSearchResult(result: SearchResult) {
 }
 // State imports shell UI too; start after the module graph has initialized.
 queueMicrotask(() => effect(() => {
-  const q = query.value.trim();
+  const q = searched.value;
   const sources = providers.value;
   nativeSettingsRevision.value;
   const controller = new AbortController();

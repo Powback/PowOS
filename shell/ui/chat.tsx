@@ -36,12 +36,11 @@ export function Item({ item, reply = null }: { item: ChatItem; reply?: string | 
 export function ChatView({ head = true }: { head?: boolean } = {}) {
   const list = useRef<HTMLDivElement>(null);
   const { busy, items } = chat.value;
-  const typed = query.value.trim();
   // Kept at the newest, by the bar, as a turn streams in.
   useEffect(() => {
     const el = list.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [items.length, items.at(-1), typed]);
+  }, [items.length, items.at(-1)]);
   return (
     <div class={`chat ${head ? "" : "headless"}`} ref={list}>
       {head && (
@@ -55,8 +54,25 @@ export function ChatView({ head = true }: { head?: boolean } = {}) {
       <Thread items={items.slice(-SHOWN)} render={(item, reply) => <Item item={item} reply={reply} />} />
       {busy && <div class="msg tool muted thinking">thinking…</div>}
       <Queued />
-      {typed && !busy && <div class="msg ask muted">↵ ask “{typed}”</div>}
-      {!items.length && !typed && <div class="msg muted">Type anything that isn't an app to ask PowOS AI.</div>}
+      <AskHint list={list} busy={busy} empty={!items.length} />
     </div>
   );
+}
+
+/**
+ * What Enter will ask. The only part of the chat that reads the pill: typing re-rendered the whole conversation and
+ * scrolled it to the end on every key (the user, 2026-10-28: "launcher chat refreshes every keypress"). It follows the
+ * text at the end only when the chat was already there; scrolled up, the conversation stays put.
+ */
+function AskHint({ list, busy, empty }: { list: { current: HTMLDivElement | null }; busy: boolean; empty: boolean }) {
+  const typed = query.value.trim();
+  const atEnd = useRef(true);
+  const el = list.current;
+  if (el) atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  useEffect(() => {
+    const box = list.current;
+    if (box && atEnd.current) box.scrollTop = box.scrollHeight;
+  }, [typed]);
+  if (typed && !busy) return <div class="msg ask muted">↵ ask “{typed}”</div>;
+  return empty && !typed ? <div class="msg muted">Type anything that isn't an app to ask PowOS AI.</div> : null;
 }

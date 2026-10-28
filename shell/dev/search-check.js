@@ -98,3 +98,82 @@ async function checkUnmatchedChat(state, search, wait) {
   await wait(() => !search.searchPending.value);
   if (search.searchResults.value.some(r => r.id === 'android-settings:settings-search')) throw Error('generic settings action stole chat input');
 }
+
+/**
+ * Typing in the launcher's chat (the user, 2026-10-28 17:05 and 19:53: "launcher chat refreshes every keypress"): in a
+ * chat the pill is the next message, never a search. Five keys must run no search, flip no searchPending, replace no
+ * node of the drawer or the chat, re-render none of its messages and leave its scroll where it was. Returns
+ * [failures, counts].
+ */
+export async function launcherChatTypingCheck() {
+  const s = await importShim('./state.ts');
+  const search = await importShim('./search.ts');
+  const { effect } = await importShim('@preact/signals');
+  const frame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+  const wait = async (f) => { for (let i = 0; i < 60; i++) { if (f()) return; await new Promise(r => setTimeout(r, 50)); } throw Error('chat typing: timed out'); };
+  const counts = { searches: 0, pendingFlips: 0, drawerReplaced: 0, chatReplaced: 0, messagesChanged: 0, scrollMoved: 0 };
+  const off = search.registerSearchProvider({ id: 'chat-typing-probe', search() { counts.searches++; return []; } });
+  let stop = () => {};
+  const observers = [];
+  try {
+    s.query.value = '';
+    s.drawer.value = 1;
+    s.ask('hi');
+    // The mock's turn (bridge.ts ai.send) streams for ~1 s and its events replace the chat: the keys come after it.
+    await wait(() => s.chat.value.items.some(i => i.kind === 'assistant') && !s.chat.value.busy);
+    // A history longer than the panel, so its scroll can be checked.
+    const said = Array.from({ length: 30 }, (_, i) => ({ kind: 'user', text: `line ${i} of an earlier chat` }));
+    s.chat.value = { ...s.chat.value, busy: false, items: said };
+    await wait(() => s.chatting.value && document.querySelector('.drawer .chat'));
+    await frame(); await frame();
+    const drawer = document.querySelector('.drawer');
+    const chat = drawer.querySelector('.chat');
+    chat.scrollTop = Math.max(0, Math.floor((chat.scrollHeight - chat.clientHeight) / 2));
+    const top = chat.scrollTop;
+    let pending = search.searchPending.value;
+    stop = effect(() => { const p = search.searchPending.value; if (p !== pending) { counts.pendingFlips++; pending = p; } });
+    const drawerKids = [...drawer.children];
+    observers.push(watchChat(drawer, chat, counts));
+    for (const ch of 'hello') {
+      s.query.value += ch;
+      await new Promise(r => setTimeout(r, 160)); // past search.ts's 100 ms debounce, as a typist's keys are
+      if (chat.scrollTop !== top) counts.scrollMoved++;
+    }
+    await frame();
+    if (drawer.querySelector('.chat') !== chat) counts.chatReplaced++;
+    if (drawerKids.some(n => !n.isConnected)) counts.drawerReplaced++;
+  } finally {
+    observers.forEach(o => o.disconnect());
+    stop(); off();
+    s.query.value = '';
+    s.closeDrawer();
+  }
+  const failures = chatTypingFailures(counts);
+  return [failures, counts];
+}
+
+/** Counts, into [counts], the drawer's children replaced and every change inside the chat but its "↵ ask" line. */
+function watchChat(drawer, chat, counts) {
+  const inHint = (n) => !!(n.nodeType === 1 ? n : n.parentElement)?.closest?.('.msg.ask');
+  const hintOnly = (r) => [...r.addedNodes, ...r.removedNodes].every(inHint) && (r.addedNodes.length + r.removedNodes.length > 0 || inHint(r.target));
+  const mo = new MutationObserver((recs) => {
+    for (const r of recs) {
+      if (r.target === drawer && r.type === 'childList') counts.drawerReplaced += r.removedNodes.length;
+      else if (!hintOnly(r)) counts.messagesChanged++;
+    }
+  });
+  mo.observe(drawer, { childList: true });
+  mo.observe(chat, { childList: true, subtree: true, characterData: true, attributes: true });
+  return mo;
+}
+
+function chatTypingFailures(counts) {
+  const said = [
+    [counts.searches, `typing ran ${counts.searches} searches`],
+    [counts.pendingFlips, `typing flipped searchPending ${counts.pendingFlips} times`],
+    [counts.drawerReplaced || counts.chatReplaced, `typing replaced the drawer's nodes ${counts.drawerReplaced}x, the chat ${counts.chatReplaced}x`],
+    [counts.messagesChanged, `typing re-rendered the messages (${counts.messagesChanged} DOM changes)`],
+    [counts.scrollMoved, `typing moved the chat's scroll on ${counts.scrollMoved} of 5 keys`],
+  ];
+  return said.filter(([n]) => n).map(([, m]) => `launcher chat: ${m}`);
+}
