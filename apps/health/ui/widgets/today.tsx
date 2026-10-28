@@ -94,7 +94,9 @@ function Body({ shown, nrows, cols, chart }: { shown: Tile[]; nrows: number; col
 }
 
 /** How many figures beyond steps a tile of this size holds. */
-const extra = (cols: number, nrows: number) => (nrows < 2 ? 0 : cols < 3 ? Math.min(nrows, 3) - 1 : nrows === 2 ? 3 : 3);
+const extra = (cols: number, nrows: number) => (nrows < 2 ? 0 : cols < 3 ? Math.min(nrows, 3) - 1 : 3);
+
+const pad = (has: boolean, nrows: number) => (!has ? 0 : nrows < 2 ? "3px 8px" : "8px 12px");
 
 export default function Today({ host, cells, app: id }: Props) {
   const app = useApp(host);
@@ -103,15 +105,14 @@ export default function Today({ host, cells, app: id }: Props) {
   const ingest = app.useReducer<any>("ingest");
   useHealthSync(host, { cursor, ready: app.db.status === "connected", ingest, ask: false });
   const t = today(rows);
-  const nrows = cells?.[1] ?? 2;
-  const cols = cells?.[0] ?? 2;
+  const [cols, nrows] = cells ?? [2, 2];
   const steps = t.find((x) => x.kind === "steps") ?? t[0];
   const shown = steps ? [steps, ...t.filter((x) => x !== steps).slice(0, extra(cols, nrows))] : [];
   const chart = nrows >= (cols < 3 ? 4 : 3) ? week(rows, "steps") : [];
   const body = <Body shown={shown} nrows={nrows} cols={cols} chart={chart} />;
   return (
     <div style={{ width: "100%", height: "100%", containerType: "size" }} onClick={() => host.openApp?.(id)}>
-      <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", padding: shown.length ? (nrows < 2 ? "3px 8px" : "8px 12px") : 0, position: "relative", boxSizing: "border-box", gap: "0.5em", fontSize: "clamp(13px, 6cqmin, 22px)" }}>{body}</div>
+      <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", padding: pad(shown.length > 0, nrows), position: "relative", boxSizing: "border-box", gap: "0.5em", fontSize: "clamp(13px, 6cqmin, 22px)" }}>{body}</div>
     </div>
   );
 }
