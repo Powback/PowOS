@@ -88,13 +88,12 @@ export function QuickTools() {
   return (
     <div
       class={`qt-root ${right ? "right" : "left"} ${settling.value ? "settling" : ""}`}
-      style={{ "--q": String(q.value) }}
       onPointerDown={(e) => {
         // A tap outside the card puts it away.
         if (!card.current?.contains(e.target as Node)) settle(false);
       }}
     >
-      <div class="qt-card tile" ref={card}>
+      <div class="qt-card tile" ref={card} style={{ "--q": String(q.value) }}>
         <div class="cc-grid qt-grid">
           {tools.map((t) => (
             <Tile key={t.id} t={t} />

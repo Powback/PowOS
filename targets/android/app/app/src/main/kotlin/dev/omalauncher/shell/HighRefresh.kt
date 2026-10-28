@@ -40,10 +40,17 @@ internal class HighRefresh(
      * The page animates without a finger on it (the switcher layer following a swipe up over an app): fastest while
      * [on], given back a moment after.
      */
-    fun boost(on: Boolean) {
+    fun boost(
+        on: Boolean,
+        by: String = "switcher",
+    ) {
+        // Two holders (the switcher, the page's own animations - ShellHost): one letting go keeps the other's.
+        if (on) holders += by else holders -= by
         main.removeCallbacks(release)
-        if (on) prefer(fastest()) else main.postDelayed(release, HOLD_MS)
+        if (holders.isNotEmpty()) prefer(fastest()) else main.postDelayed(release, HOLD_MS)
     }
+
+    private val holders = mutableSetOf<String>()
 
     private fun touched(e: MotionEvent) {
         main.removeCallbacks(release)

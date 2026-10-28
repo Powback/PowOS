@@ -108,7 +108,14 @@ class ShellHost(
                 val m = JSONArray(text)
                 bridge.call(m.getInt(0), m.getString(1), m.optString(2, ""))
             }
-            listen("PowosNative", rules) { text -> if (text == "connect") native.connect() }
+            listen("PowosNative", rules) { text ->
+                when (text) {
+                    "connect" -> native.connect()
+                    // The page animating with no finger on it (refresh.ts): the fastest mode while it does.
+                    "boost 1" -> highRefresh?.boost(true, "page")
+                    "boost 0" -> highRefresh?.boost(false, "page")
+                }
+            }
             listen("PowosBoot", rules) { text ->
                 when (text.substringBefore(' ')) {
                     "error" -> boot.error(text.substringAfter(' ', ""))

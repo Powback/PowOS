@@ -12,6 +12,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
+import { holdRefresh } from "./refresh.ts";
 import {
   agent,
   agentIds,
@@ -604,6 +605,15 @@ function Screen({ picked }: { picked: string | null }) {
   const id = picked && agent(picked) ? picked : (sessions.value[0] ?? null);
   const scroller = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => scroller.current?.scrollTo(0, 0), []);
+  useEffect(() => {
+    // Its live updates (a turn streaming in, a status changing) move the page with no finger on it: 120 Hz for them
+    // as for a swipe (refresh.ts).
+    const el = document.querySelector(".ag-screen");
+    if (!el) return;
+    const watch = new MutationObserver(holdRefresh);
+    watch.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => watch.disconnect();
+  }, []);
   return (
     <div class="ag-screen tile sheet" {...own}>
       <header class="ag-top">

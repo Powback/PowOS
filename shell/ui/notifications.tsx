@@ -343,7 +343,7 @@ function Stack({ g }: { g: Group }) {
 /** The notifications' head in the two columns: how many, and clear all. */
 function notifBar(count: number, clearable: boolean) {
   return (
-    <div class="notif-bar cascade" style={{ "--i": 0 }}>
+    <div class="notif-bar cascade" data-q ref={followNotif} style={{ "--i": 0 }}>
       <span class="muted">{count ? `${count} notification${count > 1 ? "s" : ""}` : "notifications"}</span>
       {clearable && (
         <span class="notif-actions icons">
@@ -399,12 +399,12 @@ export function NotificationPanel() {
         </button>
       ) : items.length ? (
         grouped(items).map((g, i) => (
-          <div key={g.id} class="cascade" style={{ "--i": from + i }}>
+          <div key={g.id} class="cascade" data-q ref={followNotif} style={{ "--i": from + i }}>
             <Stack g={g} />
           </div>
         ))
       ) : (
-        <div class="notif-empty muted cascade" style={{ "--i": from }}>
+        <div class="notif-empty muted cascade" data-q ref={followNotif} style={{ "--i": from }}>
           {together ? "no notifications" : "nothing new"}
         </div>
       )}
@@ -448,7 +448,7 @@ export function NotificationPanel() {
               <div class="notif-own">
                 <div class="notif-list" ref={listEl}>
                   {available && items.length > 0 && (
-                    <div class="notif-bar cascade" style={{ "--i": 5 }}>
+                    <div class="notif-bar cascade" data-q ref={followNotif} style={{ "--i": 5 }}>
                       <span class="muted">{`${items.length} notification${items.length > 1 ? "s" : ""}`}</span>
                       {clearable && (
                         <span class="notif-actions icons">
@@ -467,7 +467,7 @@ export function NotificationPanel() {
             <ControlCenter />
           ) : (
             <>
-              <div class="notif-bar">
+              <div class="notif-bar" data-q ref={followNotif}>
                 <span class="muted">
                   {items.length ? `${items.length} notification${items.length > 1 ? "s" : ""}` : "notifications"}
                 </span>

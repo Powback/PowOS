@@ -10,6 +10,7 @@ import { useEffect } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import type { App } from "../types.ts";
 import { ccEditing } from "./ccexpand.ts";
+import { followNotif } from "./gesture.ts";
 import { Icon } from "./icons.tsx";
 import { useReorder } from "./reorder.ts";
 
@@ -91,7 +92,7 @@ export function Launchers({ hooks, shut }: { hooks: Parameters<typeof useReorder
   const editing = ccEditing.value;
   if (!shown.length && !(editing && spare.length)) return null;
   return (
-    <div class="cc3-launchers cascade" style={{ "--i": 4 }}>
+    <div class="cc3-launchers cascade" data-q ref={followNotif} style={{ "--i": 4 }}>
       <div class="cc3-grid" {...r.handlers}>
         {r.order.map((id) => {
           const l = CATALOG.find((x) => x.id === id)!;

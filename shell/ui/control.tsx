@@ -10,7 +10,7 @@ import { Fragment, type ComponentChildren } from "preact";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { ccV3, notif, panel } from "../state.ts";
-import { held, notifOpen } from "./gesture.ts";
+import { followNotif, held, notifOpen } from "./gesture.ts";
 import { ccEditing, ccExpanded, expandedByDefault } from "./ccexpand.ts";
 import { useReorder } from "./reorder.ts";
 import { Icon, type IconName } from "./icons.tsx";
@@ -433,7 +433,7 @@ function MediaCard({ i = 0 }: { i?: number }) {
   if (!m?.available || !m.title) return null;
   const progress = m.duration ? Math.min(1, (m.position ?? 0) / m.duration) : 0;
   return (
-    <div class="cc-media cascade" style={{ "--p": String(progress), "--i": i }}>
+    <div class="cc-media cascade" data-q ref={followNotif} style={{ "--p": String(progress), "--i": i }}>
       {m.art && <img class="cc-art" src={`/_media/${encodeURIComponent(m.art)}`} alt="" />}
       <button type="button" class="cc-track" onClick={() => (shut(), powos.media.control("open"))}>
         <span class="cc-label">{m.title}</span>
@@ -750,7 +750,7 @@ function Categories() {
   for (let i = 0; i < ordered.length; i += 4) rows.push(ordered.slice(i, i + 4));
   return (
     <div class={`cc ${ccEditing.value ? "cc-editing" : ""}`}>
-      <div class="notif-bar cascade" style={{ "--i": 0 }}>
+      <div class="notif-bar cascade" data-q ref={followNotif} style={{ "--i": 0 }}>
         <Clock />
         {ccEditing.value ? (
           // Edit mode's way out, as home's edit bar's.
@@ -765,7 +765,7 @@ function Categories() {
           </span>
         )}
       </div>
-      <div class="cc-sliders cascade" style={{ "--i": 1 }}>
+      <div class="cc-sliders cascade" data-q ref={followNotif} style={{ "--i": 1 }}>
         <Slider
           name="brightness"
           value={b.value}
@@ -794,7 +794,7 @@ function Categories() {
       <div class={`cc-main ${grid.carrying ? "dragging" : ""}`} {...grid.handlers}>
         {rows.map((row, r) => (
           <Fragment key={r}>
-            <div class="cc-grid cascade" style={{ "--i": 3 + r }}>
+            <div class="cc-grid cascade" data-q ref={followNotif} style={{ "--i": 3 + r }}>
               {row.map(({ g, ts }) => (
                 <GroupTile key={g.id} g={g} ts={ts} />
               ))}
@@ -969,7 +969,7 @@ function Controls() {
   const whole = ccExpanded.value;
   return (
     <div class={`cc v3 ${ccEditing.value ? "cc-editing" : ""} ${whole ? "whole" : ""}`}>
-      <div class="notif-bar cascade" style={{ "--i": 0 }}>
+      <div class="notif-bar cascade" data-q ref={followNotif} style={{ "--i": 0 }}>
         <Clock />
         {ccEditing.value ? (
           <button type="button" class="edit-act done" data-edit-ok onClick={() => (ccEditing.value = false)}>
@@ -986,7 +986,7 @@ function Controls() {
           </span>
         )}
       </div>
-      <div class="cc-sliders cascade" style={{ "--i": 1 }}>
+      <div class="cc-sliders cascade" data-q ref={followNotif} style={{ "--i": 1 }}>
         <Slider
           name="brightness"
           value={b.value}
@@ -1016,7 +1016,7 @@ function Controls() {
         * One ordered list (the user's order; edit mode rearranges it): the first six are the first pull's row, and a
         * further pull only reveals the rest under them - the row never moves (the user: icons mustn't reorganize).
         */}
-      <div class={`cc3-list cascade ${whole ? "whole" : ""}`} style={{ "--i": 3 }}>
+      <div class={`cc3-list cascade ${whole ? "whole" : ""}`} data-q ref={followNotif} style={{ "--i": 3 }}>
         <ToggleGrid ts={list} save={saveOrder} />
       </div>
       <Launchers hooks={editHooks} shut={shut} />

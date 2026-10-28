@@ -13,6 +13,7 @@ import type { Insets } from "./types.ts";
 import "./hot.ts";
 import { measureIcons } from "./ui/iconperf.ts";
 import "./ui/glass.ts";
+import "./ui/refresh.ts";
 import { handOff, keepSnapshots, restored } from "./ui/snapshot.ts";
 
 /** The host's insets (system bars, cutout, keyboard) as --inset-* custom properties, kept current. */
