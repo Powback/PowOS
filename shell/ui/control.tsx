@@ -17,6 +17,7 @@ import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
 import { openGlasses } from "../glasses/open.ts";
 import { useMinuteClock } from "./time.ts";
+import { Launchers } from "./launchers.tsx";
 import { PAD_ID, askPad, editPad, padTile, togglePad } from "./padtile.ts";
 import { TESTS_ID, askTests, testsTile, toggleTests } from "./tests.ts";
 import type { GlassesState, MediaState, QuickState, QuickTile, RemoteState, RemoteTarget } from "../types.ts";
@@ -1014,6 +1015,7 @@ function Controls() {
       <div class={`cc3-list cascade ${whole ? "whole" : ""}`} style={{ "--i": 3 }}>
         <ToggleGrid ts={list} save={saveOrder} />
       </div>
+      <Launchers hooks={editHooks} shut={shut} />
     </div>
   );
 }

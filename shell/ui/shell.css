@@ -2612,3 +2612,16 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .home.wide:is(.dock-left, .dock-right) > .bar .bar-pill { bottom: 2px; }
 .home.wide:is(.dock-left, .dock-right) { grid-template-rows: minmax(0, 1fr) 48px; }
 .home:is(.dock-left, .dock-right).open > .dock:not(.dock-tray) { opacity: 0; pointer-events: none; }
+
+/* Quick launchers (launchers.tsx): the toggles' chips holding an app's icon, in a row of their own under the toggles. */
+.cc3-launchers { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--soft-fill); }
+.cc3-launch .cc3-chip { position: relative; }
+.cc3-chip img { width: 30px; height: 30px; border-radius: 8px; pointer-events: none; }
+.cc3-launch.on .cc3-chip { background: var(--color-accent); transform: scale(0.94); }
+.cc3-badge {
+  position: absolute; top: -3px; right: -3px; display: flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%; font-size: 12px;
+  background: var(--color-foreground); color: var(--color-background);
+}
+.cc3-badge.add { background: var(--color-accent); }
+.cc3-spare { opacity: 0.8; }
