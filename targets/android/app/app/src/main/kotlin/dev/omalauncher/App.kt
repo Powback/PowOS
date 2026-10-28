@@ -24,6 +24,8 @@ class App : Application() {
         // launcher has been opened: their notifications with inline replies (AgentMail).
         if (RootedGuest.enabled) {
             AgentMail.start(this, File(filesDir, "run"))
+            // Desktop mode switched while the session runs: powos-shell's roles, Plasma's panels and Meta follow at once.
+            andro.marchy.WindowTasks.desktopShellHook = java.util.function.Consumer { on -> desktopShell(on) }
             // Mail for the manager runs its turn in PowOS AI's chat, the user's next message not needed.
             PowosAiChat.startWake(this, File(filesDir, "run"))
             // Which agents run and what they do (the Agents view): the spool PowOS's agentsd writes, and the notification.
@@ -38,6 +40,18 @@ class App : Application() {
             dev.omalauncher.shell.VerifyRun.start(this, File(filesDir, "run"))
         }
     }
+
+    /** `powos-desktop-shell desktop on|off` in the PowOS session, off the caller's thread, one at a time; logged. */
+    private fun desktopShell(on: Boolean) {
+        desktopShellRunner.execute {
+            val arg = if (on) "on" else "off"
+            val out = StringBuilder()
+            val code = runCatching { RootedGuest.run("powos-desktop-shell desktop $arg") { out.appendLine(it) } }.getOrElse { -1 }
+            android.util.Log.i("PowosDesktop", "powos-desktop-shell desktop $arg: exit $code ${out.toString().trim().take(400)}")
+        }
+    }
+
+    private val desktopShellRunner = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     private fun floatingWindows() {
         val windows = dev.omalauncher.system.AppWindows

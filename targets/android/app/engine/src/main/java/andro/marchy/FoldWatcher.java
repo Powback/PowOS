@@ -55,7 +55,34 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             Log.i(TAG, "desktop mode " + (on ? "on" : "off"));
         desktopMode = on;
         WindowTasks.modeChanged(ctx);
+        // The session's own side (powos-shell's roles, Plasma's panels, Meta): the session start read the setting
+        // (powos-session.sh); a change while it runs goes there too, once it settles (a toggle flipped twice = none).
+        if (!modeRead) {
+            modeRead = true;
+            shellApplied = on;
+            return;
+        }
+        handler.removeCallbacks(applyShell);
+        handler.postDelayed(applyShell, SHELL_DEBOUNCE_MS);
     }
+
+    /** The first read is the session's own (powos-session.sh applied it at start); later ones are changes. */
+    private boolean modeRead;
+    /** The mode the session was last told ("powos-desktop-shell desktop on|off"). */
+    private boolean shellApplied;
+    private static final long SHELL_DEBOUNCE_MS = 400;
+    private final Runnable applyShell = () -> {
+        boolean on = desktopMode;
+        if (on == shellApplied)
+            return;
+        java.util.function.Consumer<Boolean> hook = WindowTasks.desktopShellHook;
+        if (hook == null) {
+            Log.w(TAG, "desktop mode " + (on ? "on" : "off") + ": no session hook, the session keeps its mode");
+            return;
+        }
+        shellApplied = on;
+        hook.accept(on);
+    };
 
     private android.database.ContentObserver modeObserver;
 

@@ -28,6 +28,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * Runs for the session's life (SessionService), reconnecting while the daemon or KWin restart.
  */
 public final class WindowTasks {
+    /**
+     * Tells the running PowOS session the desktop mode changed (`powos-desktop-shell desktop on|off`, as the session
+     * user - the app sets it, RootedGuest). FoldWatcher calls it once per settled change, on its own thread; it must
+     * not block.
+     */
+    public static volatile java.util.function.Consumer<Boolean> desktopShellHook;
+
     private static final String TAG = "WindowTasks";
     // protocol.h
     private static final int CTRL_MSG_CONTROL_HELLO = 20;
