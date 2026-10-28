@@ -25,10 +25,11 @@ export function WindowBar({ state, action }: { state: ChromeState; action: Chrom
       <span>{state.title ?? "Application"}</span>
     </div>
     {["minimise", "maximise", "close"].map((name) => {
-      const label = name === "maximise" && state.maximised ? "restore" : name;
+      // The maximise button opens the app full screen (its old shape, a new meaning); maximised in place, it restores.
+      const label = name === "maximise" ? (state.maximised ? "restore" : "full screen") : name;
       return <button key={name} data-action={name} class={state.pressed === name ? "pressed" : ""}
         aria-label={label[0].toUpperCase() + label.slice(1)} title={label}
-        onClick={() => action(name)}><Mark kind={label} /></button>;
+        onClick={() => action(name)}><Mark kind={label === "full screen" ? "maximise" : label} /></button>;
     })}
   </div>;
 }

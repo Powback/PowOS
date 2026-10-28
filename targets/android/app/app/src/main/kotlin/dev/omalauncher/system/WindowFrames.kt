@@ -627,6 +627,20 @@ class WindowFrames(
     }
 
     /**
+     * Task [id]'s app full screen - its title bar's maximise button - the same as an app opened on the phone: windowing
+     * mode full screen ([toFullScreen]), its floating bounds kept in [fullBefore] so it floats again exactly there
+     * ([backFromFullScreen]). Maximised in place (the bar's double tap), the button reads "restore" and restores.
+     */
+    fun fullScreen(id: Int) {
+        if (id in maximised || !AppWindows.floating(context)) return maximise(id)
+        val now = frames[id]?.bounds ?: FreeformTasks.list(context).firstOrNull { it.id == id }?.bounds
+        if (now != null) fullBefore[id] = Rect(now)
+        val ok = toFullScreen(id)
+        Log.i(TAG, "task $id full screen (maximise button): was ${now?.toShortString()} ok=$ok")
+        changed()
+    }
+
+    /**
      * Task [id]'s window to [target] in one change, the way a drag of its frame ends (TaskLeash: a change transition
      * whose content PowOS places at the new bounds, then WM's bounds at its end). Measured 2026-10-23 (f468af79): the
      * bare resizeTask the button used changed nothing - the window stayed where it was; it is only the fallback now.

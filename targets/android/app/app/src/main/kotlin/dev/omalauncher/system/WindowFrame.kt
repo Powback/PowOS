@@ -37,7 +37,7 @@ class WindowFrame(
     private val onMinimise: (Int) -> Unit,
     /** Let go at the screen's left (-1) or right (1) edge: the window goes to that home page (WindowFrames.edge). */
     private val onEdge: (Int, Int) -> Unit = { _, _ -> },
-    /** The maximise button: over the windows' whole area, or back (WindowFrames.maximise). */
+    /** The bar's double tap: over the windows' whole area, or back (WindowFrames.maximise). */
     private val onMaximise: (Int) -> Unit = {},
 ) {
     private val wm = context.getSystemService(WindowManager::class.java)
@@ -63,7 +63,7 @@ class WindowFrame(
         private set
 
     private val barChrome = FrameChrome(context, "window", app.copy(title = app.title?.takeIf { it.isNotBlank() } ?: appLabel(app.pkg))) { action ->
-        when (action) { "minimise" -> minimise(); "maximise" -> maximise(); "close" -> close() }
+        when (action) { "minimise" -> minimise(); "maximise" -> fullScreen(); "close" -> close() }
     }
     private val gripChrome = FrameChrome(context, "grip", App(null)) {}
     private val bar = barChrome.web
@@ -212,8 +212,13 @@ class WindowFrame(
         WindowFrames.current?.changed()
     }
 
-    /** Its window over the windows' whole area, or back: the maximise button and the bar's double tap, one path. */
+    /** Its window over the windows' whole area, or back: the bar's double tap (the maximise button: [onFullScreen]). */
     private fun maximise() = onMaximise(id)
+
+    /** The maximise button: the app full screen, as opened on the phone (WindowFrames.fullScreen), as close reaches it. */
+    private fun fullScreen() {
+        WindowFrames.current?.fullScreen(id) ?: maximise()
+    }
 
     /** Its window off the screen, into the dock (the minimise button). */
     private fun minimise() = onMinimise(id)
