@@ -119,6 +119,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Health Connect's permission sheet, asked from any PowOS surface (shell/HealthGrantActivity.kt): transparent,
+             finishes when the sheet closes. -->
+        <activity
+            android:name=".shell.HealthGrantActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- Health Connect needs an activity that answers "why does this app read my health data" before it shows its
              permission dialog (Android 13 and older: the action; 14+: the permission-usage alias). Both open PowOS. -->
         <activity-alias

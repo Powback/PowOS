@@ -2,10 +2,8 @@ package dev.omalauncher.shell
 
 import android.app.Activity
 import android.content.Context
-import android.content.Intent
 import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
-import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.changes.Change
 import androidx.health.connect.client.changes.DeletionChange
 import androidx.health.connect.client.changes.UpsertionChange
@@ -43,9 +41,20 @@ import kotlin.reflect.KClass
  */
 class HealthConnectBridge(
     private val context: Context,
-    private val activity: Activity?,
+    @Suppress("UNUSED_PARAMETER") activity: Activity?,
     private val scope: CoroutineScope,
+    /** Told every grant's outcome (the status JSON), in every shell WebView: the Health sync runs at once. */
+    private val onGranted: (String) -> Unit = {},
 ) {
+    init {
+        synchronized(all) { all.add(this) }
+    }
+
+    /** The host is gone: no more grant news to it. */
+    fun close() {
+        synchronized(all) { all.remove(this) }
+    }
+
     private val types: Map<String, KClass<out Record>> =
         linkedMapOf(
             "steps" to StepsRecord::class,
@@ -55,9 +64,6 @@ class HealthConnectBridge(
             "weight" to WeightRecord::class,
             "active_calories" to ActiveCaloriesBurnedRecord::class,
         )
-
-    /** A grant waiting for Health Connect's dialog to close ([onActivityResult]). */
-    private var pendingGrant: ((Any?, String?) -> Unit)? = null
 
     /** Runs one "health.*" call; [done] gets the answer or the reason, on any thread. */
     fun call(
@@ -113,24 +119,19 @@ class HealthConnectBridge(
     private suspend fun grant(done: (Any?, String?) -> Unit) {
         val s = status()
         if (s.getString("state") != "ok" || s.getJSONArray("missing").length() == 0) return done(s, null)
-        val asker = activity ?: return done(null, "Health Connect can only be asked from the PowOS app's own window")
         val want = types.values.map { HealthPermission.getReadPermission(it) }.toSet()
-        pendingGrant?.invoke(null, "another request replaced this one")
-        pendingGrant = done
-        @Suppress("DEPRECATION")
-        asker.startActivityForResult(PermissionController.createRequestPermissionResultContract().createIntent(context, want), REQUEST)
-    }
-
-    /** The dialog closed ([ShellActivity.onActivityResult]): what is granted now, whatever the user chose. */
-    fun onActivityResult(
-        requestCode: Int,
-        @Suppress("UNUSED_PARAMETER") resultCode: Int,
-        @Suppress("UNUSED_PARAMETER") data: Intent?,
-    ) {
-        if (requestCode != REQUEST) return
-        val waiting = pendingGrant ?: return
-        pendingGrant = null
-        scope.launch { runCatching { status() }.fold({ waiting(it, null) }, { waiting(null, it.message ?: it.toString()) }) }
+        Log.i(TAG, "grant: missing ${s.getJSONArray("missing")}, opening Health Connect's sheet")
+        // Always through PowOS's own transparent activity: the asking surface is usually a WebView without one.
+        HealthGrantActivity.ask(context, want) { _, err ->
+            scope.launch {
+                runCatching { status() }.fold({
+                    Log.i(TAG, "grant done: granted ${it.getJSONArray("granted")} missing ${it.getJSONArray("missing")}")
+                    done(it, null)
+                    val news = it.toString()
+                    synchronized(all) { all.toList() }.forEach { b -> b.onGranted(news) }
+                }, { done(null, err ?: it.message ?: it.toString()) })
+            }
+        }
     }
 
     private suspend fun read(
@@ -228,7 +229,8 @@ class HealthConnectBridge(
     }
 
     companion object {
-        const val REQUEST = 42
+        /** Every live bridge (one per shell WebView), for the grant news. */
+        private val all = mutableSetOf<HealthConnectBridge>()
         private const val PAGE = 2000
         private const val TAG = "PowosHealth"
     }

@@ -380,10 +380,42 @@ function answer(w: WorkRow, how: "done" | "skip") {
   askQueued(how === "done" ? `Done: ${w.note || w.title} (task ${w.id})` : `Skip for now: ${w.note || w.title} (task ${w.id})`);
 }
 
+/**
+ * "Open Health once and allow Health Connect" answers itself: once Health Connect has granted everything (status
+ * `missing` empty) - checked when such a card shows and on every grant (the bridge's "powos:health-granted").
+ * HACK: the task is the manager's free text, so it is matched by wording; the real fix is a board task carrying a
+ * machine-checkable "done when" (e.g. `health.missing == 0`) that the board resolves itself.
+ */
+const HEALTH_TASK = /health connect/i;
+function useHealthTaskDone(items: WorkRow[]) {
+  const ids = items.filter((w) => HEALTH_TASK.test(`${w.title} ${w.note ?? ""}`)).map((w) => w.id);
+  const key = ids.join(",");
+  useEffect(() => {
+    const h = powos.health;
+    if (!h || !ids.length) return;
+    let live = true;
+    const check = () =>
+      void h
+        .status()
+        .then((s) => {
+          if (!live || s.state !== "ok" || s.missing.length) return;
+          for (const w of board.value) if (ids.includes(w.id) && w.status === "waiting" && !isAnswered(w)) answer(w, "done");
+        })
+        .catch(() => {});
+    check();
+    window.addEventListener("powos:health-granted", check);
+    return () => {
+      live = false;
+      window.removeEventListener("powos:health-granted", check);
+    };
+  }, [key]);
+}
+
 /** What waits on the user: one card each, saying what to do; a tap asks about it, done / skip answer it. */
 function NeedsYou() {
   const [all, setAll] = useState(false);
   const items = board.value.filter((w) => w.status === "waiting" && !isAnswered(w)).sort((a, b) => Number(b.updated) - Number(a.updated));
+  useHealthTaskDone(items);
   if (!items.length) return null;
   const shown = all ? items : items.slice(0, NEEDS_SHOWN);
   return (

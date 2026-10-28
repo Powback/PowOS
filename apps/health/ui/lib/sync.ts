@@ -1,7 +1,7 @@
 /**
  * The sync loop: pulls what Health Connect has (powos.health, through the host) and gives it to this app's `ingest`
  * reducer. It runs in the app's own surfaces - the page and the widget - while one is mounted (an app has no process
- * of its own): at once, every few minutes, and when the page is shown again. One loop at a time however many surfaces.
+ * of its own): at once, every few minutes, when the page is shown again, and when a Health Connect grant comes back. One loop at a time however many surfaces.
  *
  * First run: a changes token is taken, then the last 30 days (all Health Connect lets an app read without the history
  * permission) are read in week windows and ingested. After: only the changes since the token. An expired token
@@ -174,9 +174,13 @@ export function useHealthSync(host: Host, o: { cursor: CursorRow | undefined; re
     const timer = window.setInterval(() => void run(), EVERY_MS);
     const shown = () => document.visibilityState === "visible" && void run();
     document.addEventListener("visibilitychange", shown);
+    // A grant from any surface (Health Connect's sheet closed, HealthConnectBridge.kt): sync at once, not in 5 minutes.
+    const granted = () => void run();
+    window.addEventListener("powos:health-granted", granted);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", shown);
+      window.removeEventListener("powos:health-granted", granted);
     };
   }, [ready]);
   return { state, syncNow: () => run(true) };

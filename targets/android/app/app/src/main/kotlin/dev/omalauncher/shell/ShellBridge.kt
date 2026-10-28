@@ -93,7 +93,10 @@ class ShellBridge(
     private val glasses = dev.omalauncher.glasses.Glasses.Client(context, activity, ::emit)
 
     /** Health Connect, read-only (HealthConnectBridge.kt): the health central's source, "health.*" calls. */
-    val health = HealthConnectBridge(context, activity, scope)
+    val health =
+        HealthConnectBridge(context, activity, scope) { status ->
+            js("window.dispatchEvent(new CustomEvent('powos:health-granted', { detail: $status }))")
+        }
 
     /** Set by the lock screen's face (PowosLockActivity): unlocking, through Android. */
     var lock: LockSlot? = null
@@ -1103,6 +1106,7 @@ class ShellBridge(
     private fun js(code: String) = web.evaluateJavascript(code, null)
 
     fun close() {
+        health.close()
         runCatching { context.getSystemService(android.hardware.display.DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         ShellWallpaper.onChange.remove(wallpaperChanged)
         runCatching { android.app.WallpaperManager.getInstance(context).removeOnColorsChangedListener(wallpaperColors) }
