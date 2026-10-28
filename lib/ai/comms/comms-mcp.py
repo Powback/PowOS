@@ -180,6 +180,53 @@ def _consume(agent, ids):
     return n
 
 
+def _split_note(note):
+    """A deploy note as its separate changes: split on newlines and on "; " outside parentheses (the ship service
+    joins one note per request with "; ")."""
+    out, depth, cur = [], 0, ""
+    for i, ch in enumerate(note.replace("\n", "; ")):
+        depth += ch in "([" ; depth -= ch in ")]" and depth > 0
+        cur += ch
+        if depth == 0 and cur.endswith("; "):
+            out.append(cur[:-2]); cur = ""
+    return [c for c in out + [cur] if c.strip()]
+
+
+def _plain_change(c, cap=60):
+    """One change in plain words: no "area:" prefix, parentheses, flags/paths or shas; cut at a word at ~cap chars."""
+    import re
+
+    c = re.sub(r"\s*[(\[][^()\[\]]*[)\]]", "", c).strip()   # (details) and [tags]
+    m = re.match(r"^([\w /&-]{1,28}):\s+(.*)$", c)
+    if m and len(m.group(2).split()) >= 3:
+        c = m.group(2)
+    c = re.sub(r"\b[0-9a-f]{7,40}\b", "", c)
+    c = re.sub(r"(?<!\w)--?[a-z][\w-]*|\S+\.(?:sh|py|tsx?|css|kt|json|md)\b|(?<!\w)(?:\w+/){3,}[\w.-]+", "", c)
+    c = re.sub(r"\s+", " ", c).strip(" ,.;:-")
+    if len(c) > cap:
+        c = c[:cap].rsplit(" ", 1)[0].rstrip(" ,.;:-") + "…"
+    return c[:1].upper() + c[1:]
+
+
+def _deploy_md(notes, shown=6):
+    """A deploy batch as Markdown: a short headline (what the notification's collapsed line shows), then one short
+    bullet per change, newest first; the rest folded into "+N more". Technical subjects are not repeated."""
+    items = []
+    for n in reversed(notes):
+        for c in _split_note(n):
+            c = _plain_change(c)
+            if c and c not in items:
+                items.append(c)
+    if not items:
+        return notes[-1]
+    k = len(items)
+    head = "Update installed" + (f" \u00b7 {k} changes" if k > 1 else "")
+    lines = [head, ""] + [f"- {c}" for c in items[:shown]]
+    if k > shown:
+        lines.append(f"- +{k - shown} more")
+    return "\n".join(lines)
+
+
 def _batched(key, text, window):
     """--batch: notices of one kind within [window] s of the last become one. Returns (the text to post: the latest
     note first, then every note of the batch as a list; the batch's previous message id to take back, or None).
@@ -201,11 +248,9 @@ def _batched(key, text, window):
         notes = (st.get("notes") or []) if fresh else []
         prev = st.get("id") if fresh else None
         notes = [n for n in notes if n != text] + [text]
-        if len(notes) == 1:
-            body = text
-        else:
-            # Line 1 is what the collapsed notification shows; the list is what a tap expands to.
-            body = f"{text} (+{len(notes) - 1} more)\n" + "\n".join(f"• {n}" for n in reversed(notes))
+        # Line 1 is what the collapsed notification shows; the list is what a tap expands to.
+        body = _deploy_md(notes) if key == "deploy" else text if len(notes) == 1 else (
+            f"{text} (+{len(notes) - 1} more)\n" + "\n".join(f"• {n}" for n in reversed(notes)))
         st = {"ts": now, "notes": notes[-20:], "id": None}
         with open(path + ".tmp", "w") as f:
             json.dump(st, f)

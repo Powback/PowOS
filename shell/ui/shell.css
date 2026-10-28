@@ -1562,7 +1562,7 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-work-empty { padding: 10px 12px; font-size: var(--text-small); }
 .ai-mail { padding: 10px 12px; margin-bottom: 6px; font-size: var(--text-small); line-height: 1.4; }
 /* An agent's mail in full, its lines kept. */
-.ai-mail-text { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.ai-mail-text {  overflow-wrap: anywhere; user-select: text; }
 .ai-mail-head { margin-bottom: 3px; }
 
 /* The screen-off display (aod.tsx): black (an OLED panel's off pixels), dim, in the middle, drifting a little. */

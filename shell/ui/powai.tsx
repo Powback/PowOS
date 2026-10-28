@@ -12,6 +12,7 @@ import { powos } from "../bridge.ts";
 import { chat, openSession, page, sessionView, stored } from "../state.ts";
 import { Pill, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
+import { md } from "./md.ts";
 import { boardState, openAgents, useAgents, type BoardCheck } from "../agents.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { checkAlive, useDb, useRows } from "../apps/stdb.ts";
@@ -19,7 +20,7 @@ import type { AgentMail, AgentSession, ChatItem, VerifyState } from "../types.ts
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
-import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf, openFull, qaUrl, toolLabel } from "./rich.tsx";
+import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf, onLink, openFull, qaUrl, toolLabel } from "./rich.tsx";
 import { askQueued, openAssistant, waiting } from "./assistant.ts";
 
 const sessions = signal<AgentSession[]>([]);
@@ -703,7 +704,7 @@ function FromAgents() {
               ×
             </button>
           </div>
-          <div class="ai-mail-text">{m.text}</div>
+          <div class="ai-mail-text md" onClick={onLink} dangerouslySetInnerHTML={{ __html: md(m.text) }} />
         </div>
       ))}
     </section>

@@ -274,5 +274,19 @@ class CliTests(unittest.TestCase):
         self.assertIn(msg, out)
 
 
+class DeployNoteTests(unittest.TestCase):
+    def test_deploy_batch_is_a_headline_and_short_bullets(self):
+        with tempfile.TemporaryDirectory() as d:
+            m = load_server(d)
+            raw = "; ".join(f"area{i}: change number {i} (some detail; more detail) in ship.sh --flag" for i in range(8))
+            body, _ = m._batched("deploy", raw, 120)
+            lines = body.split("\n")
+            self.assertEqual(lines[0], "Update installed \u00b7 8 changes")
+            self.assertEqual(len([l for l in lines if l.startswith("- ")]), 7)
+            self.assertIn("- +2 more", lines)
+            self.assertNotIn("ship.sh", body)
+            self.assertNotIn("detail", body)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
