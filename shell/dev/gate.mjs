@@ -1708,6 +1708,34 @@ async function desktopReleaseCheck() {
     }
     if (S.page.value !== 1) failures.push(`${kind}: release crossed the page threshold but stayed on page ${S.page.value}`);
   }
+  // The release rule (2026-10-28): [name, x moves as [dx, ms-after-start], dy at end, expected page from page 0].
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const logged = [];
+  const info = console.info;
+  console.info = (...a) => (logged.push(a.join(" ")), info(...a));
+  const swipe = async (name, steps, dyEnd, want) => {
+    logged.length = 0;
+    S.page.value = 0;
+    S.notif.value = false;
+    S.drawer.value = 0;
+    await sleep(350);
+    const x0 = width * 0.8;
+    handlers.onTouchStart({ touches: [{ clientX: x0, clientY: 300 }], target });
+    let t = 0;
+    for (const [dx, ms] of steps) {
+      await sleep(ms - t);
+      t = ms;
+      handlers.onTouchMove({ touches: [{ clientX: x0 + dx, clientY: 300 + (dyEnd * dx) / steps[steps.length - 1][0] }], cancelable: false });
+    }
+    handlers.onTouchEnd({ changedTouches: [{ clientX: x0 + steps[steps.length - 1][0], clientY: 300 + dyEnd }] });
+    if (S.page.value !== want) failures.push(`${name}: page ${S.page.value}, wanted ${want} (${logged.join(" | ")} w=${width} drag=${JSON.stringify(steps)} dyEnd=${dyEnd})`);
+  };
+  const d = width;
+  await swipe("30% slow drag commits", [[-d * 0.1, 200], [-d * 0.2, 400], [-d * 0.32, 600], [-d * 0.32, 650]], 0, 1);
+  await swipe("short fast flick commits", [[-12, 20], [-30, 40], [-60, 60]], 0, 1);
+  await swipe("short slow drag cancels", [[-20, 200], [-40, 400], [-60, 600], [-60, 700]], 0, 0);
+  await swipe("flick back cancels", [[-d * 0.4, 100], [-d * 0.4 + 10, 110], [-d * 0.4 + 30, 120], [-d * 0.4 + 60, 130]], 0, 0);
+  await swipe("diagonal 20deg swipe pages", [[-d * 0.2, 100], [-d * 0.4, 200]], d * 0.4 * Math.tan((20 * Math.PI) / 180), 1);
   S.page.value = 0;
   return failures;
 }

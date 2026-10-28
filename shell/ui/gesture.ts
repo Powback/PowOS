@@ -26,6 +26,14 @@ import { ccEditing, ccExpanded, EXPAND_AT, settle as settleCc, stretch as stretc
 import { carry, closeDrawer, dockDrag, drawer, editing, folder, menu, notif, onLibrary, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
+/** Page swipe (iOS/Android launcher rule): commit past this share of a page's width, or on a clear flick. */
+const PAGE_AT = 0.3;
+/** A clear page flick: release speed (px/ms, over the last PAGE_V_WINDOW ms) after at least this many px. */
+const PAGE_FLICK = 0.3;
+const PAGE_FLICK_MIN = 16;
+const PAGE_V_WINDOW = 50;
+/** Axis lock, decided at SLOP: vertical only when clearly so (> ~54 deg off the horizontal), so a diagonal swipe pages. */
+const VERTICAL_RATIO = 1.4;
 /** px per ms: a flick, whatever the distance. */
 const FLICK = 0.45;
 /** Up, opening the drawer: a short flick is enough (px per ms), or past this much of the way. */
@@ -279,6 +287,11 @@ interface Gesture {
   listTop: boolean;
   /** The list under the finger is scrolled to its end (the notification list: up from there drags the panel shut). */
   listBottom: boolean;
+  /** The finger's recent positions [x, t], for the release velocity (the last PAGE_V_WINDOW ms, not the average). */
+  samples: [number, number][];
+  /** A page settle was in flight at touch-down: how far (px) the track still was from the page's rest. */
+  base: number;
+  t0: number;
   /** Where it started: a tap closes the launcher unless it was on something that takes taps. */
   target: Element;
   own: boolean;
@@ -309,6 +322,19 @@ function travelOf() {
   return (l && parseFloat(getComputedStyle(l).getPropertyValue("--rise"))) || l?.clientHeight || innerHeight;
 }
 
+/**
+ * The page track's offset from its page's rest, px, while a settle is still in flight (page.value is already the
+ * target): a new swipe continues from there instead of jumping to the rest position.
+ */
+function trackBase() {
+  const track = document.querySelector<HTMLElement>(".page-track");
+  const pages = document.querySelector<HTMLElement>(".pages");
+  if (!track || !pages || page.value < 0 || pageDrag.peek() != null) return 0;
+  const w = pages.clientWidth;
+  const off = track.getBoundingClientRect().left - pages.getBoundingClientRect().left + page.value * w;
+  return Math.abs(off) < 1 || Math.abs(off) >= w ? 0 : off;
+}
+
 /** Home's own layers have the touch: a tile carried or picked, a menu, an open folder. */
 const busy = () => !!(carry.value || selected.value || menu.value || folder.value);
 
@@ -326,6 +352,9 @@ function startGesture(x: number, y: number, target: Element) {
     last: [x, y, performance.now()],
     v: 0,
     mode: null,
+    samples: [[x, performance.now()]],
+    base: trackBase(),
+    t0: performance.now(),
     open: drawer.value > 0,
     notif: notif.value,
     ...listUnder(target),
@@ -372,6 +401,19 @@ function track(gs: Gesture, x: number, y: number) {
   const [lx, ly, lt] = gs.last;
   if (now > lt) gs.v = gs.mode === "pages" || gs.mode === "panel" ? (x - lx) / (now - lt) : (y - ly) / (now - lt);
   gs.last = [x, y, now];
+  gs.samples.push([x, now]);
+  while (gs.samples.length > 2 && now - gs.samples[1][1] > 150) gs.samples.shift();
+}
+
+/** Sideways release velocity, px/ms: the finger over the last PAGE_V_WINDOW ms up to now (a dwell before lifting = 0). */
+function releaseVx(gs: Gesture) {
+  const now = performance.now();
+  const [, t1] = gs.samples[gs.samples.length - 1];
+  const x1 = gs.samples[gs.samples.length - 1][0];
+  if (now - t1 > PAGE_V_WINDOW) return 0;
+  const old = gs.samples.find(([, t]) => now - t <= PAGE_V_WINDOW) ?? gs.samples[0];
+  const dt = t1 - old[1];
+  return dt > 0 ? (x1 - old[0]) / dt : 0;
 }
 
 /** The gesture's kind, once the finger is past SLOP. False: not yet, or not home's at all (dropped). */
@@ -420,7 +462,8 @@ function panelSwipe(gs: Gesture, dx: number, dy: number) {
 
 /** Home itself: up and down the drawer (or the shade), sideways the pages. */
 function claimOnHome(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
-  const vertical = Math.abs(dy) > Math.abs(dx);
+  const vertical = Math.abs(dy) > Math.abs(dx) * VERTICAL_RATIO;
+  if (vertical && Math.abs(dx) >= 6) logSwipe(`lock=vertical dx=${r(dx)} dy=${r(dy)} ratio=${(Math.abs(dy) / Math.abs(dx)).toFixed(2)} page=${page.value}`);
   // PowOS AI's page and the app library: up and down are their own (they scroll).
   if (vertical && (page.value === -1 || onLibrary())) return null;
   if (vertical) return claimVertical(gs, dy);
@@ -480,7 +523,7 @@ function dragTo(gs: Gesture, dx: number, dy: number) {
       drawerDrag.value = clamp(1 + (dy * GAIN) / gs.travel);
       return;
     default:
-      pageDrag.value = pageOffset(dx);
+      pageDrag.value = pageOffset(dx + gs.base);
   }
 }
 
@@ -539,7 +582,7 @@ function settleGesture(gs: Gesture, dy: number) {
   // Past the threshold, or a flick its way: committed; otherwise it springs back.
   if (mode === "ccAll") return settleCc(!ccExpanded.value ? dy > EXPAND_AT || v > FLICK : dy < -EXPAND_AT || v < -FLICK);
   if (mode === "panel") return settlePanel(lastDx, v);
-  if (mode === "pages") settlePages(v);
+  if (mode === "pages") settlePages(gs);
 }
 
 /**
@@ -586,13 +629,38 @@ function settleNotif(v: number) {
   notif.value = v > FLICK ? true : v < -FLICK ? false : q > CLOSE_KEEP;
 }
 
-function settlePages(v: number) {
-  const dx = pageDrag.value ?? 0;
+const r = Math.round;
+/** One compact line per page-swipe decision, to logcat (console.info, tag PowosShell). */
+const logSwipe = (msg: string) => console.info(`pageswipe ${msg}`);
+
+/**
+ * Let go: commit when dragged past PAGE_AT of the width, or flicked (PAGE_FLICK px/ms over the last PAGE_V_WINDOW ms,
+ * after PAGE_FLICK_MIN px); a flick back cancels; a short, slow release springs back. The target is always the page
+ * on screen +-1 (page.value is the in-flight target when a settle was running; the drag continued from its position).
+ */
+function settlePages(gs: Gesture) {
+  const total = pageDrag.value ?? 0;
   pageDrag.value = null;
   const width = document.querySelector(".pages")?.clientWidth || innerWidth;
-  const step = v < -FLICK || dx < -width / 4 ? 1 : v > FLICK || dx > width / 4 ? -1 : 0;
-  // -1: PowOS AI's page, left of the first (not while editing home: the empty page is to the right).
-  page.value = Math.max(editing.value ? 0 : -1, Math.min(pageCount.value - 1, page.value + step));
+  const dx = gs.last[0] - gs.x0;
+  const vx = releaseVx(gs);
+  const { dir, why } = pageDecision(total, dx, vx, width);
+  const from = page.value;
+  const to = Math.max(editing.value ? 0 : -1, Math.min(pageCount.value - 1, from + dir));
+  page.value = to;
+  const outcome = to !== from ? "commit" : dir !== 0 ? "edge-cancel" : "cancel";
+  logSwipe(
+    `dx=${r(dx)} dy=${r(gs.last[1] - gs.y0)} total=${r(total)} base=${r(gs.base)} dur=${r(performance.now() - gs.t0)}ms v=${vx.toFixed(2)}px/ms thr=${r(width * PAGE_AT)}px/${PAGE_FLICK} page=${from}->${to} ${outcome} why=${why}`,
+  );
+}
+
+/** The page step (-1, 0, 1) and the reason, from the offset on screen, the drag's dx and the release velocity. */
+function pageDecision(total: number, dx: number, vx: number, width: number) {
+  const flick = Math.abs(vx) >= PAGE_FLICK && Math.abs(dx) >= PAGE_FLICK_MIN;
+  if (flick && Math.sign(vx) !== Math.sign(dx)) return { dir: 0, why: "flick-back" };
+  if (flick) return { dir: -Math.sign(vx), why: "velocity" };
+  if (Math.abs(total) >= width * PAGE_AT) return { dir: -Math.sign(total), why: "distance" };
+  return { dir: 0, why: "short-slow" };
 }
 
 /** Include a release's last position before deciding where the gesture settles. */
