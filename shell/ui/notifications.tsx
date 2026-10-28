@@ -200,11 +200,7 @@ function Card({ n, onTap, onDismiss, clearable = n.clearable, name, more = 0, cl
     >
       <div class="notif-head">
         {/* PowOS's own (its app isn't in the drawer, no icon from the host): PowOS's mark; another without one: none. */}
-        {n.icon ? (
-          <img class="notif-icon" src={n.icon} alt="" />
-        ) : POWOS.has((n as GroupedNotification).pkg ?? "") || POWOS.has(n.app) ? (
-          <img class="notif-icon" src="./icons/powos.svg" alt="" />
-        ) : null}
+        {notifIconSrc(n) && <img class="notif-icon" src={notifIconSrc(n)!} alt="" />}
         <span class="notif-app">{name ?? n.app}</span>
         {more > 0 && <span class="notif-more">+{more}</span>}
         <span class="notif-time muted">{ago(n.time)}</span>
@@ -230,6 +226,10 @@ type GroupedNotification = PhoneNotification & { pkg?: string; group?: string | 
 const UPDATES = "PowOS · updates";
 /** PowOS's own notifications (the app's agent mail and deploy notes): grouped by who sent them, not as one app. */
 const POWOS = new Set(["com.powos.app", "PowOS AI", "PowOS"]);
+/** A notification's icon: the host's app icon, PowOS's mark for its own (no drawer icon), else none. The lock uses it too. */
+export function notifIconSrc(n: { icon?: string | null; app: string; pkg?: string }): string | null {
+  return n.icon || (POWOS.has(n.pkg ?? "") || POWOS.has(n.app) ? "./icons/powos.svg" : null);
+}
 
 interface Group {
   id: string;
