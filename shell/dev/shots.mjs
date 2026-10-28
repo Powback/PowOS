@@ -557,6 +557,18 @@ const contrastOf = async (png, runs) => {
 };
 
 
+// The shade's pull as a filmstrip (dev/filmstrip.mjs): 3 Gmail cards (a stack) + others, the host's pull 0..1, the
+// control center's expand pull 0..its height, then the host's pull shut. Folded only.
+const FILM_N = "const now = Math.floor(Date.now() / 1000); E.emit('notifications.changed', { available: true, items: [['Signal', 'Mats', 'are we still on for tonight?', 120, true], ['Gmail', 'Your order has shipped', 'It arrives Thursday.', 3600], ['Gmail', 'Invoice 4411', 'Paid, thanks.', 3700], ['Gmail', 'Weekly digest', 'Five new posts.', 3800], ['Calendar', 'Dentist', 'Tomorrow 09:30', 7200]].map(([app, title, text, ago, conversation], i) => ({ key: 'f' + i, app, icon: null, title, text, time: now - ago, clearable: true, profile: null, conversation: !!conversation })) }); await sleep(200); ";
+const FOLDED = { folded: SIZES.folded };
+for (let i = 0; i <= 10; i++)
+  SCENES.push([`film-a-${String(i).padStart(2, "0")}`, "shade", FILM_N + `E.emit('shade.panel', { panel: 'notifications' }); E.emit('shade.drag', { q: 0.01 }); await sleep(60); E.emit('shade.drag', { q: ${i / 10} }); await sleep(120);`, "blurred", undefined, FOLDED]);
+for (let i = 0; i <= 10; i++)
+  SCENES.push([`film-b-${String(i).padStart(2, "0")}`, "shade", FILM_N + `S.notif.value = true; await sleep(500); const X = await U('./ui/ccexpand.ts'); X.stretch(1); await sleep(30); const h = document.querySelector('.cc-more, .cc-ext, .cc')?.scrollHeight ?? 300; X.stretch(${i / 10} * (window.__ccH ?? 260)); await sleep(60);`, "blurred", undefined, FOLDED]);
+for (let i = 0; i <= 5; i++)
+  SCENES.push([`film-c-${String(i).padStart(2, "0")}`, "shade", FILM_N + `E.emit('shade.panel', { panel: 'notifications' }); S.notif.value = true; await sleep(500); E.emit('shade.drag', { q: 0.99 }); await sleep(60); E.emit('shade.drag', { q: ${1 - i / 5} }); await sleep(120);`, "blurred", undefined, FOLDED]);
+
+
 try {
   for (const [name, mode, setup, behind, touch, sizes] of SCENES) {
     for (const [sizeName, size] of Object.entries(sizes ?? (mode === "desktop" ? DESKTOP_SIZES : SIZES))) {
