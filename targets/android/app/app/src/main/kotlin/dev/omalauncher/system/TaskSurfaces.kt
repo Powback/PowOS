@@ -51,8 +51,12 @@ object TaskSurfaces {
         ids.filterTo(mutableSetOf()) { id ->
             val leash = get(id) ?: return@filterTo true
             t.setVisibility(leash, on)
+            if (on) hiddenLeashes.remove(id) else hiddenLeashes.add(id)
             false
         }
+
+    /** Tasks whose leash PowOS hid ([show] false): shown again before PowOS lets go of the leash ([dropAll], [undress]). */
+    private val hiddenLeashes = ConcurrentHashMap.newKeySet<Int>()
 
     /** The task ids PowOS holds a surface of. */
     fun ids(): Set<Int> = surfaces.keys.toSet()
@@ -86,8 +90,13 @@ object TaskSurfaces {
                         if (displayId != Display.DEFAULT_DISPLAY) return
                         val now = screenKey(dm)
                         if (now == screen) return
-                        Log.i(TAG, "display changed ($screen -> $now): all dropped")
+                        Log.i(TAG, "display changed ($screen -> $now): all shown, undressed and dropped")
                         screen = now
+                        // A fold makes every window full screen: a leash PowOS hid (its page off the screen) or cropped
+                        // to its window size must not stay so once PowOS forgets it - Chrome came back on the cover as
+                        // an empty surface (hidden leash, nothing ever showed it again). The unfold's next open/move
+                        // records the leashes again and the window look comes back with them.
+                        releaseAll()
                         dropAll("display change")
                     }
                 },
@@ -118,8 +127,34 @@ object TaskSurfaces {
     ) {
         if (surfaces.remove(id) == null) return
         sizes.remove(id)
+        hiddenLeashes.remove(id)
         Log.i(TAG, "dropped task $id ($why)")
         say(id, null)
+    }
+
+    /** Every held leash shown, uncropped, square and without shadow: as WM left it before PowOS touched it. */
+    private fun releaseAll() {
+        if (surfaces.isEmpty()) return
+        runCatching {
+            val t = SurfaceControl.Transaction()
+            for ((id, leash) in surfaces) if (leash.isValid) plain(t, id, leash)
+            t.apply()
+        }.onFailure { Log.w(TAG, "can't release the leashes", it) }
+    }
+
+    /** Leash [leash] of task [id] back to WM's own state in [t]: shown, no crop, no corners or shadow. */
+    private fun plain(
+        t: SurfaceControl.Transaction,
+        id: Int,
+        leash: SurfaceControl,
+    ) {
+        if (hiddenLeashes.remove(id)) Log.i(TAG, "task $id: hidden leash shown again")
+        t.setVisibility(leash, true)
+        t.setCrop(leash, null)
+        runCatching {
+            cornerRadius?.invoke(t, leash, 0f)
+            shadowRadius?.invoke(t, leash, 0f)
+        }
     }
 
     private fun dropAll(why: String) {
@@ -180,11 +215,16 @@ object TaskSurfaces {
         get(id)?.let { look(id, it, on = true) }
     }
 
-    /** Task [id] full screen: square corners, no shadow (FreeformTasks.setFullScreen). */
+    /**
+     * Task [id] full screen: square corners, no shadow, no crop - and shown, if PowOS had hidden its leash (a window of
+     * a page off the screen going full screen must not stay invisible) (FreeformTasks.setFullScreen).
+     */
     fun undress(id: Int) {
         bare.add(id)
         sizes.remove(id)
-        get(id)?.let { look(id, it, on = false) }
+        val leash = get(id) ?: return
+        runCatching { SurfaceControl.Transaction().also { plain(it, id, leash) }.apply() }
+            .onFailure { Log.w(TAG, "task $id: can't undress", it) }
     }
 
     /**

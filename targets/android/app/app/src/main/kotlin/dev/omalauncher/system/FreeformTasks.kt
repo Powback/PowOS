@@ -158,12 +158,24 @@ object FreeformTasks {
         // Full screen has square corners and no shadow; a window again is dressed at the next WindowFrames refresh.
         if (on) android.os.Handler(android.os.Looper.getMainLooper()).post { TaskSurfaces.undress(id) }
         return runCatching {
-            apply(token(context, id), transition = true) { wct, token ->
-                modeAndBounds(wct, token, mode, to)
-                captionFor(wct, token, id, if (on) null else to)
-            }
+            apply(token(context, id), transition = true) { wct, token -> fullScreenChange(wct, token, id, if (on) null else to) }
         }
             .onFailure { Log.w(TAG, "can't put task $id in windowing mode $mode", it) }.isSuccess
+    }
+
+    /** [setFullScreen]'s change: a window at [window], or full screen (null) and focusable again; its caption inset. */
+    private fun fullScreenChange(
+        wct: Any,
+        token: Any,
+        id: Int,
+        window: Rect?,
+    ) {
+        val on = window == null
+        modeAndBounds(wct, token, if (on) UNDEFINED else FREEFORM, window ?: Rect())
+        captionFor(wct, token, id, window)
+        // A window of a page off the screen was made not focusable (WindowFrames.showOnly): full screen it is the app
+        // in front again and takes the keys.
+        if (on) TaskLeash.setFocusable(wct, token, true)
     }
 
     /**
