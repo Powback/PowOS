@@ -490,9 +490,14 @@ class ShadeHost(
             var f = it.flags
             f = if (touchable) f and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv() else f or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             f = if (focusable) f and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv() else f or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-            if (f == it.flags && height == it.height) return
+            // The mode id is per physical screen: the one picked at creation (cover: 4) is no mode of the inner screen
+            // (1-3) after an unfold, and as the top-most window's ask it outvoted home's 120 Hz boost - 60 Hz all over
+            // (dumpsys 18:20: shade preferredDisplayMode=4 on the inner screen). Re-pick on the screen it is on now.
+            val mode = dev.omalauncher.shell.HighRefresh.fastest(root.display ?: this@ShadeHost.display)
+            if (f == it.flags && height == it.height && mode == it.preferredDisplayModeId) return
             it.flags = f
             it.height = height
+            dev.omalauncher.shell.HighRefresh.ask(it, root.display ?: this@ShadeHost.display, mode)
             shadeWm.updateViewLayout(root, it)
         }
     }
