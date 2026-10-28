@@ -1,0 +1,30 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: a window's own move stays KWin's until its task shows it
+
+0026 cancels any interactive move of a window that has a task and tells the app ("move <id>") to drag the task
+instead. It did that for a task that never went live too: its window was still on the desktop (the Plasma app on
+the cover screen), so every title bar drag there - KWin's decoration (Dolphin) or a client-side bar's
+xdg_toplevel.move / _NET_WM_MOVERESIZE (Brave, Steam) - was cancelled at once and the window never moved (log: eleven
+"window task 11 asked to be moved: the task moves" with no "window task 11 live", 2026-10-28). Now only an exported
+window (on the tasks desktop, shown by its task) hands its move over.
+---
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index ffc9d33..d33bf7c 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -167,6 +167,12 @@ void AnlandWindowTask::handOverMoveResize()
+     if (!m_window || m_fullScreen || m_appFullScreen) {
+         return;
+     }
++    // Only while the task shows the window (exported: on the tasks desktop). Until its task goes live the window is
++    // still on the desktop (the Plasma app), where KWin's own move is the right one: cancelling it there made every
++    // title bar drag in Plasma do nothing (log: "asked to be moved" on a task that never went live).
++    if (!m_exported) {
++        return;
++    }
+     const bool move = m_window->isInteractiveMove();
+     qCInfo(KWIN_ANLAND) << "window task" << m_id << "asked to be" << (move ? "moved: the task moves" : "resized: the task's grip resizes");
+     QMetaObject::invokeMethod(this, [w = m_window]() {
+-- 
+2.50.1 (Apple Git-155)
+

@@ -258,6 +258,11 @@ description: Use when working on PowOS window tasks - floating Android windows (
   no bar window, grip only. Its own bar's drag: KWin cancels the interactive move, sends `move <id>` ->
   PowosWindowActivity.appMove -> WindowFrames.appMove -> WindowFrame's Drag (buttons off). Logcat WindowTasks "decor N",
   "move N", PowosWindowFrame "its own title bar, no bar", "moved by its own title bar". Check: verify/one-title-bar.sh.
+  0033 (3.38): the hand-over only for an EXPORTED window. A task created but never live (no "window task N live")
+  left its window on the Plasma desktop, and every title-bar drag there (KDE decoration or CSD) was cancelled: the
+  user's "i cant move plasma windows" (2026-10-28, hyprland.log: 11x "window task 11 asked to be moved" on the cover).
+  Open: a CSD drag (Brave, task 13) INSIDE a live task logged no "asked to be moved" at all - the move request never
+  started KWin's move (unmeasured why: X11 vs Wayland Brave, implicit-grab serial for task touches).
 - Launch windows (LaunchWindows.java): Runtime.openRooted opens one at the tap (no window task for the app yet); KWin's
   first `open` for the app id becomes it (logcat WindowTasks "open N (id): in its launch window", PowosWindow "launch
   window: now window N"); the helper's exit + 3 s ends one still waiting. Not yet for games (Runtime.launch).
