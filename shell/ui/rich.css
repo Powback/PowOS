@@ -182,8 +182,8 @@
 .ai-steps li.next { color: var(--color-muted); }
 .ai-commits li { overflow-wrap: anywhere; }
 .ai-imgs { display: flex; flex-wrap: wrap; gap: 8px; }
-.ai-img { width: 72px; height: 128px; padding: 0; overflow: hidden; border: 0; border-radius: 8px; background: var(--soft-fill); }
-.ai-img img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.ai-img { padding: 0; line-height: 0; overflow: hidden; border: 0; border-radius: 8px; background: var(--soft-fill); }
+.ai-img img { display: block; width: auto; height: auto; max-width: 128px; max-height: 128px; object-fit: contain; }
 .ai-img-name { padding: 2px 8px; border-radius: 8px; background: var(--soft-fill); overflow-wrap: anywhere; }
 .ai-img-full { display: block; max-width: 100%; margin: 0 auto; border-radius: 8px; }
 .ai-item-age { flex: none; font-size: var(--text-small); color: var(--color-muted); }
@@ -210,8 +210,8 @@
 /* The images a message sent: thumbnails under its words (the screen's top, a tap: full screen); cleaned up, a quiet line. */
 .sent-imgs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 6px; }
 .ai-asked .sent-imgs { justify-content: flex-start; }
-.sent-img { width: 64px; height: 112px; padding: 0; overflow: hidden; border: 0; border-radius: 8px; background: var(--soft-fill); }
-.sent-img img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.sent-img { padding: 0; line-height: 0; overflow: hidden; border: 0; border-radius: 8px; background: var(--soft-fill); }
+.sent-img img { display: block; width: auto; height: auto; max-width: 112px; max-height: 112px; object-fit: contain; }
 .sent-gone { font-size: var(--text-small); font-weight: normal; }
 
 /* An agent's message: a compact card (who, the gist in one line); open, its Markdown with quiet section headers. */
