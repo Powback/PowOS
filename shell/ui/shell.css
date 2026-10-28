@@ -173,7 +173,6 @@
 .home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar).open > .dock { pointer-events: auto; }
 .home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > .stage > .launcher-clip { inset: 0 0 4px; transform: none; }
 .home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
-}
 
 /* A row of recent apps (recentwidget.tsx). */
 .strip {
