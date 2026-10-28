@@ -38,6 +38,12 @@ r=$(sh_ 'cat /sdcard/powos-settings-search.xml')
 [[ "$r" == *'Auto-select'* || "$r" == *'High'* || "$r" == *'Standard'* ]] || { echo 'FAIL: detailed refresh-rate choices not shown'; exit 1; }
 tools/phone/shot.sh "$OUT/refresh-page.png" >/dev/null
 sh_ 'am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null' >/dev/null
+record_pid=
+if [ "${RECORD_NATIVE:-0}" = 1 ]; then
+  "$T/adb.sh" shell screenrecord --time-limit 8 --bit-rate 3000000 /sdcard/powos-settings-highlight.mp4 >/dev/null 2>&1 &
+  record_pid=$!
+  sleep 0.4
+fi
 r=$(ev '(async()=>{const s=await importShim("./state.ts"),q=await importShim("./search.ts");s.goHome();s.drawer.value=1;s.query.value="auto rotate";for(let i=0;i<50;i++){const hit=q.searchResults.value.find(r=>r.id.startsWith("android-settings:indexed:com.android.settings:")&&r.label==="Auto-rotate");if(hit){q.openSearchResult(hit);return "opened"}await new Promise(r=>setTimeout(r,100))}return "missing"})()')
 [ "$r" = opened ] || { echo 'FAIL: Auto-rotate result missing'; exit 1; }
 sleep 0.8
@@ -45,5 +51,10 @@ tools/phone/shot.sh "$OUT/auto-rotate-highlight.png" >/dev/null
 sh_ 'uiautomator dump /sdcard/powos-settings-search.xml >/dev/null' >/dev/null
 r=$(sh_ 'cat /sdcard/powos-settings-search.xml')
 [[ "$r" == *'Auto-rotate'* ]] || { echo 'FAIL: Auto-rotate not visible after direct link'; exit 1; }
+if [ -n "$record_pid" ]; then
+  wait "$record_pid"
+  "$T/adb.sh" pull /sdcard/powos-settings-highlight.mp4 "$OUT/native-highlight.mp4" >/dev/null
+  sh_ 'rm /sdcard/powos-settings-highlight.mp4' >/dev/null
+fi
 sh_ 'rm /sdcard/powos-settings-search.xml' >/dev/null
 echo "PASS: indexed OEM settings, keyword searches and exact refresh-rate page; screenshots $OUT"
