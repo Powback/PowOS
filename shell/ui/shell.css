@@ -489,7 +489,8 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   display: grid;
   grid-template-columns: 1fr var(--letter-bar);
   grid-template-rows: minmax(0, 1fr) auto;
-  padding: 0 4px 0 var(--edge);
+  /* The A-Z bar sits a gutter (--edge) further in than before: clear of Android's back-gesture zone and the screen curve. */
+  padding: 0 calc(4px + var(--edge)) 0 var(--edge);
 }
 
 /* Two pages (drawer.tsx Pages): all apps | folders, side by side, moved by transform only. */
