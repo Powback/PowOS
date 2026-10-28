@@ -321,6 +321,18 @@ if [ -d $A ]; then
   mkdir -p $R/var/log/powos
   rm -rf $A
 fi
+# Source seeding for phones installed before source was baked: the payload's tree becomes /var/lib/powos/src only when
+# absent (lib/self-phone.sh, the routine the rootfs build uses), plus the marker and branch `powos self` needs.
+if [ -f $T/powos-src.tar ] && [ -f $T/self-phone.sh ]; then
+  . $T/self-phone.sh
+  if [ ! -e $R/var/lib/powos/src ]; then
+    rm -rf $T/powos-src && mkdir -p $T/powos-src && tar -x -C $T/powos-src -f $T/powos-src.tar &&
+      self_phone_seed $T/powos-src $R && echo "source: seeded /var/lib/powos/src ($(cat $T/powos-src.rev))"
+    rm -rf $T/powos-src
+  fi
+  [ -e $R/usr/lib/powos/.powos-src-commit ] || cp $T/powos-src.rev $R/usr/lib/powos/.powos-src-commit
+fi
+rm -f $T/powos-src.tar $T/powos-src.rev $T/self-phone.sh
 # The units (lib/apps/powos-units): every file and process this deploy put on the phone, registered with its owner,
 # purpose, limits and how to remove it - PowOS's side in /etc/powos/units.d, Android's in /data/powos/units.d. Then the
 # running ones with limits go into cgroups of their own (the containers' hybrid cgroups). `powos units check` flags

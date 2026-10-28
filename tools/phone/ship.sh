@@ -198,7 +198,7 @@ run)
   # 2 - this is part 1). `deploy`, never `install` (which also re-pushes the rootfs tarball - a human step).
   rooted_inputs() { git diff --name-only "$1" "$2" -- targets/android/rooted targets/android/session \
     targets/android/pkgs/fex-emu bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop \
-    lib/powos-tmux-shell config/etc/profile.d/60-powos-picker-key.sh lib/ai/agents lib/ai/comms/comms-mcp.py \
+    lib/powos-tmux-shell lib/self-phone.sh config/etc/profile.d/60-powos-picker-key.sh lib/ai/agents lib/ai/comms/comms-mcp.py \
     tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid 2>/dev/null | grep -v '^lib/ai/sandbox/node_modules/'; }
   # The APK ship runs BESIDE the loop, in its own checkout (it builds from it for minutes while ship_tree resets $SR),
   # so a shell change never queues behind an APK's build or idle wait (2026-10-23: shell fixes waited 25-30 min behind

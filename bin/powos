@@ -957,6 +957,16 @@ _update_self_describe_src() {
     echo ""
 }
 
+# The phone's `update self [--from DIR]`: pull then apply, or apply DIR. Returns 99 when this is not a phone.
+_update_self_phone() {
+    local src=/var/lib/powos/src from=""
+    [[ "$(cat /etc/powos/platform 2>/dev/null)" == phone ]] || return 99
+    [[ "${1:-}" == --from ]] && from="${2:-}" && src="$from"
+    [[ -d "$src" ]] || { echo "PowOS source not found at: $src"; return 1; }
+    source "$POWOS_LIB/self.sh"
+    if [[ -n "$from" ]]; then self_phone_apply_tree "$src"; else self_phone_update "$src"; fi
+}
+
 # `powos update self` / `powos update powos` — reinstall the CLI and its
 # libraries from a source tree. Args arrive already shifted past the verb.
 _update_self() {
@@ -1131,7 +1141,8 @@ cmd_update() {
 
         powos|self)
             shift   # drop the verb; _update_self parses --from/--pull
-            _update_self "$@"
+            _update_self_phone "$@"; local _rc=$?
+            if (( _rc == 99 )); then _update_self "$@"; else return "$_rc"; fi
             ;;
 
         projects)

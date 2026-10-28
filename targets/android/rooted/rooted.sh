@@ -170,6 +170,13 @@ deploy)
   reg=$HERE/../../../apps/registry/out/module.wasm
   if [ -f "$reg" ]; then adb push -q "$reg" /data/local/tmp/powos-apps/registry.wasm
   else echo "rooted.sh: no apps/registry/out/module.wasm (apps/build.sh registry) - the registry not updated"; fi
+  # The whole source as the update payload (git archive HEAD, like the rootfs build): powos-deploy.sh seeds
+  # /var/lib/powos/src from it ONLY when absent, so a phone installed before source was baked gets attached without a
+  # reinstall. An existing tree (the user's edits, git state) is never touched; `powos self update` moves it.
+  src_tar=$(mktemp "${TMPDIR:-/tmp}/powos-src.XXXXXX") && git -C "$HERE/../../.." archive HEAD > "$src_tar" &&
+    adb push -q "$src_tar" /data/local/tmp/powos-src.tar && git -C "$HERE/../../.." rev-parse HEAD > "$src_tar" &&
+    adb push -q "$src_tar" /data/local/tmp/powos-src.rev; rm -f "$src_tar"
+  adb push -q "$HERE/../../../lib/self-phone.sh" /data/local/tmp/self-phone.sh
   # The units: what this deploy installs and runs, with owner, purpose, limits and how to remove it (units/phone,
   # units/phone-android; lib/apps/powos-units). powos-deploy.sh registers them on both sides.
   adb shell rm -rf /data/local/tmp/powos-units

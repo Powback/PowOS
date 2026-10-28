@@ -115,18 +115,11 @@ zstd -dc $P/manifest/content.tar.zst | tar -x -C / --no-same-owner --exclude-fro
 [ -d $P/plasmoids ] && cp -a $P/plasmoids/. /usr/share/plasma/plasmoids/
 # Keep the phone's PowOS code at the release revision even when the Deck manifest is older.
 if [ -d "$P/current" ]; then
-  cp -a "$P/current/src/bin/." /usr/bin/
-  mkdir -p /usr/lib/powos
-  cp -a "$P/current/src/lib/." /usr/lib/powos/
-  install -Dm644 "$P/current/revision" /usr/share/powos/revision
-  # The desktop image bakes source the same way (Containerfile: COPY .snapshot -> /usr/lib/powos/src, the commit in
-  # .powos-src-commit, config/tmpfiles.d seeds /var/lib/powos/src). No systemd here, so seed it ourselves, only when
-  # absent: an existing tree holds the user's edits and git state. `powos self status|pull` work from this.
-  rm -rf /usr/lib/powos/src && cp -a "$P/current/src" /usr/lib/powos/src
-  cp "$P/current/revision" /usr/lib/powos/.powos-src-commit
-  [ -e /var/lib/powos/src ] || { mkdir -p /var/lib/powos && cp -a /usr/lib/powos/src /var/lib/powos/src; }
-  # self pull follows the branch these builds ship from (default master).
-  grep -qs '^upstream-branch=' /etc/powos/config || { mkdir -p /etc/powos && echo "upstream-branch=worktree-powos-multiplatform" >> /etc/powos/config; }
+  # One routine for fresh installs, the rooted deploy and `powos self`: lib/self-phone.sh. It copies bin/ and lib/,
+  # stamps revision + marker, bakes /usr/lib/powos/src and seeds /var/lib/powos/src only when absent (an existing
+  # tree holds the user's edits). No systemd here, so nothing else seeds it. `powos self status|pull` work from this.
+  . "$P/current/src/lib/self-phone.sh"
+  self_phone_bake "$P/current/src" "$(cat "$P/current/revision")"
 fi
 cp $P/manifest/flatpaks.txt /usr/share/powos/phone-flatpaks.txt
 

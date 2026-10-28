@@ -6,6 +6,7 @@
 #                       system, transiently (auto-reverts on reboot on installed
 #                       composefs; direct on live/RAM). No commit needed.
 #   powos self pull     SAFE update from upstream — NEVER discards local edits.
+#   powos self update   pull, then apply (on the phone: bin/lib copy from the tree; no composefs/bootc).
 #   powos self push     commit + push (helpful errors, not raw git): `-- <paths>` commits only those; no paths: the
 #                       whole tree, refused when others' changes are already staged (a tree agents share).
 #
@@ -40,6 +41,11 @@ SELF_UPSTREAM="${POWOS_UPSTREAM:-https://github.com/Powback/PowOS.git}"
 # Branch `self` follows: `powos config upstream-branch <name>` (key upstream-branch in /etc/powos/config), default master.
 SELF_BRANCH="${POWOS_UPSTREAM_BRANCH:-$(awk -F= '$1=="upstream-branch" { v=$2 } END { print v }' /etc/powos/config 2>/dev/null)}"
 SELF_BRANCH="${SELF_BRANCH:-master}"
+
+# The phone applies a tree with one small routine shared with its rootfs build and rooted deploy.
+source "$(dirname "${BASH_SOURCE[0]}")/self-phone.sh"
+# The phone has no composefs or bootc and a writable /: its apply and test skip the usr-overlay parts.
+self_is_phone() { [[ "$(cat /etc/powos/platform 2>/dev/null)" == phone ]]; }
 
 # Indent a stream by two spaces without sed (repo owner forbids sed).
 self_indent() { awk '{ print "  " $0 }'; }
@@ -169,6 +175,11 @@ SELF_PULL_HAVE_MASTER=0    # did the origin/$SELF_BRANCH fetch succeed?
 # Local edits are stashed first and popped after, so a pull can never eat them.
 self_pull_existing() {
     local src="$1" stashed=0
+    # Offline or unreachable: say so and leave the tree exactly as it is (before any stash).
+    if ! git -C "$src" fetch -q origin "$SELF_BRANCH" 2>/dev/null; then
+        perr "Cannot reach upstream - nothing changed. Current tree: $(git -C "$src" log -1 --format='%h %s' 2>/dev/null)"
+        return 1
+    fi
     if self_git_dirty "$src"; then
         plog "Local edits present — stashing before pull…"
         if git -C "$src" stash push -u -m "powos-self-pull" >/dev/null 2>&1; then
@@ -349,12 +360,38 @@ self_status() {
 }
 
 # ══════════════════════════════════════════════════════════════════
+# phone apply / update — no composefs, no bootc: copy bin+lib from the tree
+# ══════════════════════════════════════════════════════════════════
+# Apply the tree at $1 to the running phone (HEAD's sha when it is a checkout, else the baked marker).
+self_phone_apply_tree() {
+    local src="${1:-$SELF_SRC}" sha
+    sha="$(git -C "$src" rev-parse HEAD 2>/dev/null || self_baked_sha)"
+    self_phone_apply "$src" "$sha" || return 1
+    pok "Applied ${sha:0:12} from $src (bin/, lib/, revision, marker)."
+}
+
+# `powos self update` / `powos update self` on the phone: fast-forward the editable tree (local edits are stashed and
+# restored), then apply FROM it. A failed fetch stops before anything is applied.
+self_phone_update() {
+    local src="${1:-$SELF_SRC}"
+    self_safe_pull "$src" || { perr "Update not applied; the running PowOS is unchanged."; return 1; }
+    self_phone_apply_tree "$src"
+}
+
+# `powos self update`: pull, then apply (the phone's way, or the desktop's transient test).
+self_update() {
+    plog "source: $1"
+    if self_is_phone; then self_phone_update "$1"; else self_safe_pull "$1" && self_test "$1"; fi
+}
+
+# ══════════════════════════════════════════════════════════════════
 # test — transient live apply of local edits to the running system
 # ══════════════════════════════════════════════════════════════════
 self_test() {
     local src="${1:-$SELF_SRC}"
     [[ -d "$src" ]] || { perr "Source not found: $src"; return 1; }
 
+    self_is_phone && { self_phone_apply_tree "$src"; return $?; }
     local powos_bin; powos_bin="$(command -v powos 2>/dev/null || echo powos)"
 
     # Merged sysext extensions sit as a READ-ONLY overlay on /usr — they must
@@ -557,7 +594,7 @@ cmd_self() {
     case "$sub" in
         status|st)  self_status "$SELF_SRC" ;;
         test|t)     self_test "$SELF_SRC" ;;
-        pull)       self_safe_pull "$SELF_SRC" ;;
+        pull|update) "self_${sub/pull/safe_pull}" "$SELF_SRC" ;;
         reseed)     self_reseed "$SELF_SRC" ;;
         push)
             local msg="" paths=()
