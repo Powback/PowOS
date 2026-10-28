@@ -830,6 +830,26 @@ _grub_menu_defaults() {
     log_success "Boot menu: ${timeout}s timeout, default entry '$live'"
 }
 
+# _bls_derive <template> <out> <title> <append> <check-regex> [sort-key]
+# Copy the template entry to <out>, retitle it, append <append> to its options line, and keep it
+# only if <check-regex> matches afterwards (an entry without the karg would boot the wrong thing).
+_bls_derive() {
+    local template="$1" out="$2" title="$3" append="$4" check="$5" key="${6:-}"
+    awk -v t="$title" -v a="$append" '
+        /^title /   { print "title " t; next }
+        /^options / { print $0 " " a; next }
+        { print }
+    ' "$template" > "$out"
+    grep -q '^title ' "$out" || echo "title $title" >> "$out"   # cosmetic only
+    if grep -q -- "$check" "$out"; then
+        [[ -n "$key" ]] && _bls_sort_key "$out" "$key"
+        log_success "Added boot entry: '$title'"
+    else
+        log_warn "Failed to build boot entry '$title' — removing."
+        rm -f "$out"
+    fi
+}
+
 write_bls_entries() {
     local entries_dir="$1"
 
@@ -859,100 +879,33 @@ write_bls_entries() {
         return 0
     fi
 
-    local install_entry="${entries_dir}/powos-install.conf"
-    # Copy template; retitle; append the installer kernel arg to the options
-    # line. systemd.unit=multi-user.target keeps the display manager (SDDM)
-    # from seizing tty1 and hiding the installer.
-    awk '
-        /^title / { print "title Install PowOS to disk"; next }
-        /^options / { print $0 " powos.install=1 systemd.unit=multi-user.target plymouth.enable=0 systemd.mask=getty@tty1.service consoleblank=0"; next }
-        { print }
-    ' "$template" > "$install_entry"
-    # Ensure a title line existed; if not, add one (cosmetic only).
-    grep -q '^title '   "$install_entry" || echo "title Install PowOS to disk" >> "$install_entry"
-    # Sanity: the karg injection must have landed on the options line.
-    if ! grep -q 'powos.install=1' "$install_entry"; then
-        log_warn "Failed to inject powos.install=1 into $install_entry — removing it."
-        rm -f "$install_entry"
-    else
-        _bls_sort_key "$install_entry" "powos-2-install"
-        log_success "Added boot entry: 'Install PowOS to disk'"
-    fi
+    # Install entry: systemd.unit=multi-user.target keeps SDDM off tty1 so the installer shows.
+    _bls_derive "$template" "$entries_dir/powos-install.conf" "Install PowOS to disk" \
+        "powos.install=1 systemd.unit=multi-user.target plymouth.enable=0 systemd.mask=getty@tty1.service consoleblank=0" \
+        'powos.install=1' "powos-2-install"
 
-    # ── Live boot with systemd debug logging ──────────────────────
-    # The live entry reaches graphical.target and never starts a display
-    # manager, with ZERO mentions of sddm in the journal despite the unit file,
-    # the graphical.target.wants symlink and the display-manager alias all
-    # being correct on disk. "Never considered" is not a failure mode that
-    # ordinary logging explains, so this entry makes systemd record its
-    # dependency resolution and unit loading, which will say whether sddm is
-    # loaded, skipped, or dropped from the target.
-    local dbg="$entries_dir/powos-debug.conf"
-    awk '
-        /^title /   { print "title Live boot (systemd debug logging)"; next }
-        /^options / { print $0 " systemd.log_level=debug systemd.log_target=journal"; next }
-        { print }
-    ' "$template" > "$dbg"
-    grep -q '^title ' "$dbg" || echo "title Live boot (systemd debug logging)" >> "$dbg"
-    if grep -q '^options .*root=' "$dbg"; then
-        log_success "Added boot entry: 'Live boot (systemd debug logging)'"
-    else
-        rm -f "$dbg"
-    fi
+    # Live boot with systemd debug logging: records dependency resolution, to explain why sddm
+    # was "never considered" on the live entry (zero journal mentions despite correct unit files).
+    _bls_derive "$template" "$entries_dir/powos-debug.conf" "Live boot (systemd debug logging)" \
+        "systemd.log_level=debug systemd.log_target=journal" '^options .*root=' ""
 
-    # ── Recovery entries (Safe mode + AI Debug) ───────────────────
-    # Both force RAM boot OFF (so they come up even when a ramboot/normal boot
-    # doesn't) and carry powos.mode=, which powos-safemode.service acts on:
-    #   safe    → recovery menu (offer AI debug, rollback, reset, shell)
-    #   aidebug → run `powos doctor --ai` straight away
-    # systemd.unit=multi-user.target keeps SDDM off tty1 so the console shows.
-    # The live medium is the deck image on every machine, so on an NVIDIA box
-    # its GPU driver is nouveau -- and this kernel's nouveau panics on the first
-    # render-node ioctl when the GPU's engines are not up (NULL deref in
-    # nouveau_abi16_ioctl_get_zcull_info; fixed upstream Aug 2026, not in the
-    # OGC kernel yet). Recovery entries must not die to that, and a plain live
-    # boot needs a way around it too: "basic graphics" keeps nouveau from
-    # registering a DRM device at all, so the session comes up on simpledrm.
-    # Harmless on AMD/Intel; an install from either entry still lays down the
-    # right variant from the offline store.
+    # Recovery entries (Safe mode + AI Debug): RAM boot OFF, powos.mode= acted on by
+    # powos-safemode.service (safe -> recovery menu; aidebug -> `powos doctor --ai`).
+    # The live medium's nouveau panics on the first render-node ioctl on NVIDIA boxes
+    # (NULL deref in nouveau_abi16_ioctl_get_zcull_info; fixed upstream Aug 2026, not in
+    # the OGC kernel yet), so every non-install entry keeps nouveau out: "basic graphics"
+    # means no DRM device registers and the session comes up on simpledrm. Harmless on
+    # AMD/Intel; an install still lays down the right variant from the offline store.
     local no_nouveau="modprobe.blacklist=nouveau nouveau.modeset=0"
-    _write_recovery_entry() {
-        local name="$1" title="$2" mode="$3"
-        local out="${entries_dir}/${name}.conf"
-        awk -v t="$title" -v m="$mode" -v nognk="$no_nouveau" '
-            /^title / { print "title " t; next }
-            /^options / { print $0 " rd.powos.ramboot=0 powos.mode=" m " systemd.unit=multi-user.target plymouth.enable=0 " nognk; next }
-            { print }
-        ' "$template" > "$out"
-        grep -q '^title ' "$out" || echo "title $title" >> "$out"
-        if grep -q "powos.mode=$mode" "$out"; then
-            _bls_sort_key "$out" "powos-9-$name"
-            log_success "Added boot entry: '$title'"
-        else
-            log_warn "Failed to build recovery entry '$title' — removing."
-            rm -f "$out"
-        fi
-    }
-    _write_recovery_entry "powos-safe"    "Recovery — Safe mode (RAM boot off)" "safe"
-    _write_recovery_entry "powos-aidebug" "Recovery — AI Debug (diagnose boot)" "aidebug"
+    local rec="rd.powos.ramboot=0 systemd.unit=multi-user.target plymouth.enable=0 $no_nouveau"
+    _bls_derive "$template" "$entries_dir/powos-safe.conf" "Recovery — Safe mode (RAM boot off)" \
+        "$rec powos.mode=safe" 'powos.mode=safe' "powos-9-powos-safe"
+    _bls_derive "$template" "$entries_dir/powos-aidebug.conf" "Recovery — AI Debug (diagnose boot)" \
+        "$rec powos.mode=aidebug" 'powos.mode=aidebug' "powos-9-powos-aidebug"
 
-    # ── Live, basic graphics ──────────────────────────────────────
-    # The normal live boot with nouveau kept out (see no_nouveau above). Sorted
-    # right after the install entry, before the recovery ones.
-    local basic="${entries_dir}/powos-basicgfx.conf"
-    awk -v t="PowOS Live (basic graphics — no nouveau)" -v nognk="$no_nouveau" '
-        /^title / { print "title " t; next }
-        /^options / { print $0 " " nognk; next }
-        { print }
-    ' "$template" > "$basic"
-    grep -q '^title ' "$basic" || echo "title PowOS Live (basic graphics — no nouveau)" >> "$basic"
-    if grep -q 'modprobe.blacklist=nouveau' "$basic"; then
-        _bls_sort_key "$basic" "powos-3-basicgfx"
-        log_success "Added boot entry: 'PowOS Live (basic graphics — no nouveau)'"
-    else
-        log_warn "Failed to build the basic-graphics entry — removing."
-        rm -f "$basic"
-    fi
+    # Live, basic graphics: the normal live boot with nouveau kept out; sorted after install.
+    _bls_derive "$template" "$entries_dir/powos-basicgfx.conf" "PowOS Live (basic graphics — no nouveau)" \
+        "$no_nouveau" 'modprobe.blacklist=nouveau' "powos-3-basicgfx"
     # Point every entry on this medium at the display (see
     # _bls_console_to_display). Includes the image's own ostree entries, which
     # we did not write but which boot on the same hardware.
@@ -1615,6 +1568,15 @@ usage() {
     echo "WARNING: ALL DATA on the target drive will be ERASED!"
 }
 
+# _parse_gb <VAR> <flag> <value>: set VAR to a whole number of GB or exit.
+_parse_gb() {
+    if ! [[ "$3" =~ ^[0-9]+$ ]]; then
+        log_error "$2 needs a whole number of GB (got: '$3')"
+        exit 1
+    fi
+    printf -v "$1" '%s' "$3"
+}
+
 main() {
     local device=""
     local image="$RAW_PATH"
@@ -1646,19 +1608,11 @@ main() {
                 shift 2
                 ;;
             --windows-gb)
-                WINDOWS_GB="${2:-0}"
-                if ! [[ "$WINDOWS_GB" =~ ^[0-9]+$ ]]; then
-                    log_error "--windows-gb needs a whole number of GB (got: '$WINDOWS_GB')"
-                    exit 1
-                fi
+                _parse_gb WINDOWS_GB --windows-gb "${2:-0}"
                 shift 2
                 ;;
             --games-gb)
-                GAMES_GB="${2:-0}"
-                if ! [[ "$GAMES_GB" =~ ^[0-9]+$ ]]; then
-                    log_error "--games-gb needs a whole number of GB (got: '$GAMES_GB')"
-                    exit 1
-                fi
+                _parse_gb GAMES_GB --games-gb "${2:-0}"
                 shift 2
                 ;;
             /dev/*)

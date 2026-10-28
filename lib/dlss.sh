@@ -187,24 +187,9 @@ dlss_proton_dir() {
 
 # ── status ───────────────────────────────────────────────────────────────
 
-cmd_dlss_status() {
-    echo -e "${BOLD}NVIDIA DLSS${NC}"
-    echo    "════════════════════════════════════════"
-
+dlss_status_sr() {
     local mark_ok="${GREEN}●${NC}" mark_no="${RED}○${NC}" mark_warn="${YELLOW}◐${NC}"
-    local gpu ver wine_dir
-
-    if ! dlss_driver_ok; then
-        echo -e "  Driver:        $mark_no no working NVIDIA driver (nvidia-smi sees no GPU)"
-        echo
-        pwarn "DLSS needs the NVIDIA driver. Nothing below can work without it."
-        return 0
-    fi
-
-    gpu="$(dlss_gpu_name)"; ver="$(dlss_driver_version)"
-    echo -e "  GPU:           $mark_ok $gpu"
-    echo -e "  Driver:        $mark_ok $ver"
-
+    local wine_dir
     # DLSS 4 — official, no blockers.
     wine_dir="$(dlss_nvidia_wine_dir || true)"
     if [[ -n "$wine_dir" ]]; then
@@ -223,7 +208,10 @@ cmd_dlss_status() {
     else
         echo -e "  Native NGX:    $mark_warn libnvidia-ngx.so not in ldconfig — NR init will fail"
     fi
+}
 
+dlss_status_nr() {
+    local mark_ok="${GREEN}●${NC}" mark_no="${RED}○${NC}" mark_warn="${YELLOW}◐${NC}"
     # DLSS 5 NR.
     echo
     echo -e "  ${BOLD}Neural Rendering (DLSS 5)${NC}"
@@ -255,7 +243,10 @@ cmd_dlss_status() {
     else
         echo -e "  Vulkan layer:  $mark_no not installed  ${DIM}powos dlss nr install${NC}"
     fi
+}
 
+dlss_status_layer() {
+    local mark_ok="${GREEN}●${NC}" mark_no="${RED}○${NC}" mark_warn="${YELLOW}◐${NC}"
     local proton; proton="$(dlss_proton_dir || true)"
     if [[ -n "$proton" ]]; then
         echo -e "  Proton:        $mark_ok $(basename "$proton")"
@@ -263,7 +254,9 @@ cmd_dlss_status() {
         echo -e "  Proton:        $mark_no no GE-Proton or proton-cachyos found"
         echo -e "                 ${DIM}stock Proton/Experimental lack DXVK-NVAPI and will not work${NC}"
     fi
+}
 
+dlss_status_next() {
     echo
     # Next step — computed from state, like win_status's tail.
     if ! dlss_nr_runtime_verified; then
@@ -275,6 +268,29 @@ cmd_dlss_status() {
     fi
     echo -e "  ${DIM}NR costs ~50-60% fps and is experimental. SR/FG stay per-game by design.${NC}"
     echo
+}
+
+cmd_dlss_status() {
+    echo -e "${BOLD}NVIDIA DLSS${NC}"
+    echo    "════════════════════════════════════════"
+
+    local mark_ok="${GREEN}●${NC}" mark_no="${RED}○${NC}" gpu ver
+
+    if ! dlss_driver_ok; then
+        echo -e "  Driver:        $mark_no no working NVIDIA driver (nvidia-smi sees no GPU)"
+        echo
+        pwarn "DLSS needs the NVIDIA driver. Nothing below can work without it."
+        return 0
+    fi
+
+    gpu="$(dlss_gpu_name)"; ver="$(dlss_driver_version)"
+    echo -e "  GPU:           $mark_ok $gpu"
+    echo -e "  Driver:        $mark_ok $ver"
+
+    dlss_status_sr
+    dlss_status_nr
+    dlss_status_layer
+    dlss_status_next
 }
 
 # ── runtime import ───────────────────────────────────────────────────────
@@ -461,7 +477,7 @@ dlss_apply_layer_patches() {
     return 0
 }
 
-cmd_dlss_nr_install() {
+dlss_nr_preflight() {
     dlss_driver_ok || { perr "No working NVIDIA driver — fix that first."; return 1; }
 
     if ! dlss_nr_runtime_verified; then
@@ -478,7 +494,9 @@ cmd_dlss_nr_install() {
         perr "podman not found (should ship with PowOS) — needed for the container build."
         return 1
     fi
+}
 
+dlss_nr_sync_src() {
     mkdir -p "$DLSS_CACHE_DIR"
     if [[ -d "$DLSS_LAYER_SRC/.git" ]]; then
         plog "Updating $DLSS_LAYER_SRC…"
@@ -490,9 +508,10 @@ cmd_dlss_nr_install() {
         plog "Cloning $DLSS_LAYER_REPO (AGPL-3.0)…"
         git clone --depth 1 "$DLSS_LAYER_REPO" "$DLSS_LAYER_SRC" || { perr "Clone failed."; return 1; }
     fi
+}
 
-    dlss_apply_layer_patches
-
+# Builds in a container, stages a tarball package; prints the staged dir (logs go to stderr).
+dlss_nr_build_stage() {
     # Build INSIDE a container so the host never gains build-time packages. The
     # first cut of this told the user to rpm-ostree install ~20 packages and
     # reboot; on a bootc image that is a bad trade for tools nothing needs at
@@ -528,6 +547,15 @@ cmd_dlss_nr_install() {
     local staged
     staged="$(find "$DLSS_LAYER_SRC/dist" -maxdepth 1 -type d -name 'dlssnr-[0-9]*-linux-*' 2>/dev/null | sort -V | tail -1)"
     [[ -n "$staged" ]] || { perr "No staged package under $DLSS_LAYER_SRC/dist."; return 1; }
+    echo "$staged"
+}
+
+cmd_dlss_nr_install() {
+    dlss_nr_preflight || return 1
+    dlss_nr_sync_src || return 1
+    dlss_apply_layer_patches
+
+    local staged; staged="$(dlss_nr_build_stage)" || return 1
 
     # Per-user install: no root, no /usr write, so no sysext unmerge dance.
     plog "Installing per-user from $(basename "$staged") (no root; /usr untouched)…"

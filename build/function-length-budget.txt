@@ -14,10 +14,10 @@ build/install-to-usb.sh:_fstab_containers_on_data 114
 build/install-to-usb.sh:add_data_partition 122
 build/install-to-usb.sh:add_install_boot_entry 73
 build/install-to-usb.sh:check_device 73
-build/install-to-usb.sh:main 117
+build/install-to-usb.sh:main 112
 build/install-to-usb.sh:self_complete_boot_disk 85
 build/install-to-usb.sh:setup_persistence 131
-build/install-to-usb.sh:write_bls_entries 104
+build/install-to-usb.sh:write_bls_entries 65
 lib/ai/agent.sh:_ai_interactive_loop 74
 lib/ai/agent.sh:_ai_load_agent 62
 lib/ai/agent.sh:_ai_parse_args 79
