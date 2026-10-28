@@ -246,13 +246,17 @@ class WindowFrames(
      * One slide frame: with [HIDE_BAR_DURING_SLIDE] the bars are hidden and only the windows' offsets are kept. Off:
      * every bar at its leash's offset [dx] through WM (HACK: trails its window by a frame or more).
      */
-    fun slideMove(dx: Map<Int, Float>) {
+    fun slideMove(
+        t: android.view.SurfaceControl.Transaction,
+        dx: Map<Int, Float>,
+    ) {
         for ((id, x) in dx) {
             val f = frames[id] ?: continue
             if (sliding.isEmpty()) slidingSince = android.os.SystemClock.uptimeMillis()
             sliding[id] = x
             if (HIDE_BAR_DURING_SLIDE) continue
-            f.slideTo(x.toInt())
+            // With the leash, in its transaction; else through WM (trails by a frame or more).
+            if (!f.slideSurface(t, x)) f.slideTo(x.toInt())
             // Unveiled once WM has the offset: the next draw.
             if (f.veiled) main.post { f.veiled = false }
         }
@@ -268,7 +272,7 @@ class WindowFrames(
         committed: Boolean,
     ) {
         for (id in sliding.keys) {
-            if (id in gone) park(id) else frames[id]?.apply { slideTo(0); slideShow() }
+            if (id in gone) park(id) else frames[id]?.apply { slideSurfaceRest(); slideTo(0); slideShow() }
         }
         Log.i(TAG, "slide end: bars of ${sliding.entries.joinToString { "${it.key}@${it.value.toInt()}" }}, gone ${gone.ifEmpty { "none" }}")
         if (committed) return
@@ -289,7 +293,7 @@ class WindowFrames(
         val age = android.os.SystemClock.uptimeMillis() - slidingSince
         if (age <= SLIDE_STALE_MS) return false
         Log.w(TAG, "slide watchdog: clearing stale sliding ${sliding.keys.toList()} after $age ms")
-        sliding.keys.forEach { frames[it]?.apply { slideTo(0); slideShow() } }
+        sliding.keys.forEach { frames[it]?.apply { slideSurfaceRest(); slideTo(0); slideShow() } }
         sliding.clear()
         return true
     }
@@ -890,10 +894,11 @@ class WindowFrames(
 
     companion object {
         /**
-         * HACK: hide each sliding window's title bar for the slide and fade it back in at its final place (overlay
-         * windows can't track a leash per frame). false: the bar trails its window. Real fix: bars in the task's layer.
+         * true: hide each sliding window's title bar for the slide and fade it back in at its final place. false (now):
+         * bars move with their window - their own surfaces offset in the leash's transaction (WindowFrame.slideSurface),
+         * WM's layout only as the fallback. Was true: bars vanished for every page swipe (manager, 2026-10-28 13:44).
          */
-        const val HIDE_BAR_DURING_SLIDE = true
+        const val HIDE_BAR_DURING_SLIDE = false
 
 
         private const val TAG = "PowosWindowFrames"

@@ -302,6 +302,37 @@ class WindowFrame(
         if (added) updateViews()
     }
 
+    /** The page swipe's offset put on its bar's and grip's own surfaces ([slideSurface]); 0 at rest. */
+    private var surfaceDx = Float.NaN
+
+    /**
+     * The bar and grip [dx] px along x by their window surfaces, in [t] - the transaction that moves the window's leash
+     * (PageSlide.draw), so they move with the page in the same frame, not a frame or more later through WM's layout.
+     * False when their surfaces can't be had (not drawn yet, a WM-moved slide already going): then [slideTo].
+     * HACK: ViewRootImpl.getSurfaceControl is hidden (GlassBlur.surfaceOf). Real fix: bars inside the task's own layer.
+     */
+    fun slideSurface(
+        t: android.view.SurfaceControl.Transaction,
+        dx: Float,
+    ): Boolean {
+        if (slideDx != 0) return false
+        val views = panelViews
+        val surfaces = views.mapNotNull { dev.omalauncher.shell.GlassBlur.surfaceOf(it) }
+        if (views.isEmpty() || surfaces.size != views.size) return false
+        surfaces.forEach { t.setPosition(it, dx, 0f) }
+        surfaceDx = dx
+        return true
+    }
+
+    /** The slide's surface offset ([slideSurface]) back to 0, at once: the bar is at its window's place again. */
+    fun slideSurfaceRest() {
+        if (surfaceDx.isNaN()) return
+        surfaceDx = Float.NaN
+        val t = android.view.SurfaceControl.Transaction()
+        panelViews.mapNotNull { dev.omalauncher.shell.GlassBlur.surfaceOf(it) }.forEach { t.setPosition(it, 0f, 0f) }
+        t.apply()
+    }
+
     /**
      * HACK: a page slide hides the bar (overlay windows can't track a task's leash per frame: WM applies their layout
      * a frame late, the bar trailed by up to 183 px, job 20261024-213609-68435) - faded out at the slide's start,

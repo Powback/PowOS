@@ -281,7 +281,8 @@ object PageSlide {
             if (s.frame(t, w.id, at(w))) moved = true
         }
         if (moved) {
-            WindowFrames.current?.slideMove(wins.associate { it.id to dx(it).toFloat() })
+            // Bars and grips in the same transaction as the leashes: they move with the page.
+            WindowFrames.current?.slideMove(t, wins.associate { it.id to dx(it).toFloat() })
             frames++
         }
         t.apply()
