@@ -25,7 +25,11 @@ ADB=${ADB:-adb}
   { echo "install.sh: build it first (apps/build.sh $APP)" >&2; exit 1; }
 # The gate: the UI's modules, loaded as the shell loads them (not for publish: the module alone, no UI).
 if [ "$VERB" != publish ] && [ -d "$D/out/ui" ]; then
-  if ! GATE_SHELL_PAGES=0 "$HERE/../shell/dev/gate.sh" --app "$D"; then
+  # Only THIS app's runs (GATE_ONLY on the run names: "app <id>" and its widget/page entries) - not the shell's scenes, so an
+  # unrelated failing scene (shade-overpull, 2026-10-28) can't block an app deploy. The lints and the app's widget sweep
+  # still run; ship.sh's post-deploy full gate reports the rest.
+  GID=$(sed -n 's/^ *"id": *"\([^"]*\)".*/\1/p' "$D/powos-app.json" | head -1)
+  if ! GATE_ONLY="^app ${GID//./\\.}( |\$)" GATE_SHELL_PAGES=0 "$HERE/../shell/dev/gate.sh" --app "$D"; then
     [ -n "$FORCE" ] || { echo "install.sh: refused - the gate failed (above). Fix it, or --force to install anyway." >&2; exit 1; }
     echo "install.sh: the gate failed - installing anyway (--force)" >&2
   fi
