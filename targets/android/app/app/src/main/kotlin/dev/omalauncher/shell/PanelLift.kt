@@ -104,6 +104,7 @@ internal class PanelLift(
         runCatching {
             SurfaceControl.Transaction().apply { was.filter { it.isValid }.forEach { setLayer(it, 0) } }.apply()
         }.onFailure { Log.w(TAG, "can't put home back under the windows", it) }
+        keyboardTouches(false)
         WindowFrames.current?.underPanel = false
         Log.i(TAG, "home under the windows again ($why)")
         tell("p.lifted 0")
@@ -129,7 +130,73 @@ internal class PanelLift(
         val ok = stack(set, home, over, bars)
         if (!ok) frames?.underPanel = false
         if (ok) lifted = listOf(home) + bars
+        if (ok) keyboardTouches(true)
         tell(if (ok) "p.lifted 1" else "p.lifted 0")
+    }
+
+    /** While lifted: home's window takes no touch where the keyboard is (the listener; null when not lifted). */
+    private var keyboardHole: Any? = null
+
+    /**
+     * WM layers the IME just above its target app's own surface, which stays where it was in the task area; lifted,
+     * home's surface is above the keyboard, and input follows SurfaceFlinger's order - every tap on a key went to home,
+     * which blurred the search and closed the keyboard (2026-10-28, the user: "the keyboard gets dismissed when I try to
+     * use it"; e2e-launcher-keyboard.sh step 04 reproduces it, `dumpsys input`: HomeShell above InputMethod). So while
+     * lifted, home's touchable region leaves out the keyboard's area (its ime inset) and those taps reach the keyboard
+     * under it, drawn through home's transparent pixels as before. FLAG_NOT_TOUCH_MODAL: WM ignores the region of a
+     * modal activity window (the task bounds instead); home is full screen, so nothing outside it changes.
+     * HACK: ViewTreeObserver's internal-insets listener is hidden (the IME's and SystemUI's own touch regions), reflected
+     * past the checks. Real fix: home's panels above the windows natively - desktop mode as KWin + the PowOS shell
+     * (docs/DESKTOP-KWIN-NATIVE.md) - with no surface lifted over the IME.
+     */
+    private fun keyboardTouches(on: Boolean) {
+        if (on == (keyboardHole != null)) return
+        runCatching {
+            HiddenApi.allow()
+            val type = Class.forName("android.view.ViewTreeObserver\$OnComputeInternalInsetsListener")
+            if (on) holeOn(type) else holeOff(type)
+            web.rootView.requestLayout()
+        }.onFailure { Log.w(TAG, "can't pass the keyboard's taps through home (on=$on)", it) }
+    }
+
+    private fun holeOn(type: Class<*>) {
+        val listener = keyboardListener(type)
+        android.view.ViewTreeObserver::class.java.getMethod("addOnComputeInternalInsetsListener", type).invoke(web.viewTreeObserver, listener)
+        homeWindow()?.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        keyboardHole = listener
+    }
+
+    private fun holeOff(type: Class<*>) {
+        val listener = keyboardHole ?: return
+        keyboardHole = null
+        homeWindow()?.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        val observer = web.viewTreeObserver.takeIf { it.isAlive } ?: return
+        android.view.ViewTreeObserver::class.java.getMethod("removeOnComputeInternalInsetsListener", type).invoke(observer, listener)
+    }
+
+    /** Home's activity window (the WebView's context may be wrapped). */
+    private fun homeWindow(): android.view.Window? =
+        generateSequence(web.context) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<android.app.Activity>().firstOrNull()?.window
+
+    /** The hidden OnComputeInternalInsetsListener, as a proxy calling [leaveOutKeyboard]. */
+    private fun keyboardListener(type: Class<*>): Any =
+        java.lang.reflect.Proxy.newProxyInstance(type.classLoader, arrayOf(type)) { proxy, method, args ->
+            when (method.name) {
+                "onComputeInternalInsets" -> leaveOutKeyboard(args!![0])
+                "equals" -> proxy === args?.getOrNull(0)
+                "hashCode" -> System.identityHashCode(proxy)
+                else -> "PanelLift.keyboardHole"
+            }
+        }
+
+    /** One InternalInsetsInfo: touchable everywhere but the keyboard's inset at the bottom. */
+    private fun leaveOutKeyboard(info: Any) {
+        val root = web.rootView
+        val ime = root.rootWindowInsets?.getInsets(android.view.WindowInsets.Type.ime())?.bottom ?: 0
+        info.javaClass.getMethod("setTouchableInsets", Int::class.javaPrimitiveType).invoke(info, TOUCHABLE_INSETS_REGION)
+        (info.javaClass.getField("touchableRegion").get(info) as android.graphics.Region)
+            .set(0, 0, root.width, (root.height - ime).coerceAtLeast(0))
     }
 
     /** The anchor's window isn't drawn yet (just made): its surface a frame or two later. */
@@ -188,6 +255,8 @@ internal class PanelLift(
         private const val TAG = "PowosPanelLift"
         private const val ANCHOR_TRIES = 30
         private const val FRAME_MS = 16L
+        /** ViewTreeObserver.InternalInsetsInfo.TOUCHABLE_INSETS_REGION (hidden). */
+        private const val TOUCHABLE_INSETS_REGION = 3
 
         /** Home's, while its page is up. */
         @Volatile var current: PanelLift? = null
