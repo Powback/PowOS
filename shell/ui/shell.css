@@ -1119,9 +1119,10 @@ input.folder-title:focus { background: var(--soft-fill); }
 /*
  * Edit mode (editsheet.tsx, state.ts editing): the foot's search pill is on the grid, a tile like the others
  * (searchwidget.tsx footSearch: shown, lifted, moved and resized; its field doesn't take the press there), so the
- * edit sheet takes the pill's place in the foot; the dock stays where it is. The pages stay as they are.
+ * edit sheet takes the pill's place in the foot; the dock stays where it is. The pages stay as they are. Folded under
+ * the dock (.pill-below) the pill stays in the foot instead: dock, pill, then the edit bar at the very bottom.
  */
-.home.editing .bar:not(.search-face .bar),
+.home.editing:is(.wide, :not(.pill-below)) .bar:not(.search-face .bar),
 .home.editing .launcher,
 .home.editing .launcher-frame { visibility: hidden; }
 /* The edit bar sits under the dock at the screen's very foot, the lowest element (the user, folded: "move the edit bar

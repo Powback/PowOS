@@ -1438,6 +1438,20 @@ async function searchLauncherCheck() {
   return [...fails, ...(await searchPutBack()), ...(await searchToDock())];
 }
 
+/** Still in edit mode, folded, after the drop under the dock: the pill stays where it was put, under the dock (not
+ *  back on top as a grid tile - the user, 2026-10-28). */
+async function pillBelowDockInEdit(W, wide) {
+  if (wide) return [];
+  const bar = document.querySelector(".home > .bar");
+  await window.__gw.settled(() => getComputedStyle(bar).visibility === "visible");
+  const p = bar.querySelector(".bar-pill").getBoundingClientRect();
+  const d = document.querySelector(".home > .dock:not(.dock-tray)").getBoundingClientRect();
+  const fails = W.footSearch.value ? ["edit mode after the drop under the dock: the pill is a grid tile again"] : [];
+  if (getComputedStyle(bar).visibility !== "visible" || p.top < d.bottom - 1)
+    fails.push(`edit mode after the drop under the dock: the pill isn't below the dock (pill top ${p.top}, dock bottom ${d.bottom})`);
+  return fails;
+}
+
 /**
  * The user's own move (2026-10-23, 5th report): edit mode, the search bar's tile carried down onto the dock and let
  * go - the pill is in the foot under the dock (folded), back in the bar (unfolded), and the drawer still has it.
@@ -1447,6 +1461,7 @@ async function searchToDock() {
   const G = await window.__gw.mod("./ui/grid.tsx");
   const W = await window.__gw.mod("./ui/searchwidget.tsx");
   const wide = !!document.querySelector(".home.wide");
+  W.footBelow.value = "";
   S.editing.value = true;
   // Folded the dock's row (under the dock); wide the one bar's middle (no "under" there).
   const foot = wide ? ".home > .edit-sheet" : ".home > .dock:not(.dock-tray)";
@@ -1460,9 +1475,10 @@ async function searchToDock() {
   await window.__gw.frames(2);
   window.dispatchEvent(at("pointerup", to.left + to.width / 2, to.top + to.height / 2));
   await window.__gw.until(() => W.footBelow.value === (wide ? "" : "1") && !W.hasSearchWidget());
+  const fails = [];
+  fails.push(...(await window.__sp.pillBelowDockInEdit(W, wide)));
   S.editing.value = false;
   await window.__gw.settled(() => !document.querySelector(".carried"));
-  const fails = [];
   if (W.footBelow.value !== (wide ? "" : "1")) fails.push(`dragged onto the foot: footBelow is "${W.footBelow.value}"`);
   if (W.hasSearchWidget()) fails.push("dragged onto the foot: the search widget stayed on the grid");
   await window.__sp.pullUpFrom(document.querySelector(".home > .bar .bar-pill"));
@@ -2467,7 +2483,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `search-launcher-${label}`, viewport).then(async (r) => {
-        const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock} }`;
+        const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock}, pillBelowDockInEdit: ${pillBelowDockInEdit} }`;
         const s = await whenReady(r, async () => [...(await r.page.evaluate(searchDefaultCheck)), ...(await r.page.evaluate(helpers).then(() => r.page.evaluate(searchLauncherCheck)))]);
         if (s.problems.length) return s;
         await r.page.reload().catch(() => {});
