@@ -48,12 +48,17 @@ trace=$(ev 'JSON.stringify((window.__kbTrace||[]).slice(-12))')
 step keys "five real taps on the keyboard's middle letter row: the keyboard stays up and the search keeps focus"
 kb=$(wframe "InputMethod"); set -- $kb
 if [ $# -ge 4 ] && [ "$4" -gt "$2" ]; then
+  # Who gets a touch over the keys: the input dispatcher's window list (touchable regions, flags) before and after.
+  sh_ "dumpsys input" > "$OUT/input-before.txt"; sh_ "dumpsys window windows" > "$OUT/windows-before.txt"
+  sh_ "logcat -c"
   bad=""; y=$(($2 + ($4 - $2) * 55 / 100))
   for f in 20 35 50 65 80; do
     x=$(($1 + ($3 - $1) * f / 100)); tap "$x" "$y" "a key on the keyboard"; sleep 0.7; chk "key tap"
     k=$(ime); s=$(state); log "after key tap at $x,$y: $k $s"
     [ "$k" = mInputShown=true ] && [[ $s == *'"focus":true'* ]] || { bad="after the key tap at $x,$y: $k $s"; break; }
   done
+  sh_ "dumpsys input" > "$OUT/input-after.txt"; sh_ "logcat -d -v time" > "$OUT/logcat-keys.txt"
+  note "input dispatcher dumps and logcat: $OUT (input-before/after, windows-before, logcat-keys)"
   trace=$(ev 'JSON.stringify((window.__kbTrace||[]).slice(-12))')
   [ -z "$bad" ] && pass "keyboard up and focused through 5 key taps ($s)" || fail "keyboard dismissed $bad; page trace: $trace"
 else
