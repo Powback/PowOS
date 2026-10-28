@@ -33,10 +33,12 @@ tapel() { local p; p=$(safe "$1"); case $p in none|off|unsafe*|"") fail "not tap
 # until_js <js boolean> <s>: polls it.
 until_js() { local i; for i in $(seq 1 $((${2:-6} * 2))); do [ "$(ev "!!($1)")" = true ] && return 0; sleep 0.5; done; return 1; }
 screen_app() { ev "($SCR&&$SCR.dataset.app)||'none'"; }
-# Scroll the app page until the element is on screen: a swipe up on the page's left margin (no switch is there).
+# Scroll the app page until the element is on screen: a swipe on the page's left margin (no switch is there); up when the
+# element is below, DOWN when it is above (e2e r4: revealing the Audit heading scrolled list_rooms off the top, and a
+# swipe up never brings it back).
 reveal() {
   local i v; for i in 1 2 3 4; do
-    v=$(ev "(()=>{const e=($1),s=$SCR;if(!e||!s)return 'none';const r=e.getBoundingClientRect(),q=s.getBoundingClientRect(),d=devicePixelRatio;if(r.top>=q.top&&r.bottom<=Math.min(q.bottom,innerHeight)*0.92)return 'ok';const x=Math.round((q.left+6)*d),h=Math.min(q.bottom,innerHeight)-q.top;return x+' '+Math.round((q.top+h*0.7)*d)+' '+Math.round((q.top+h*0.35)*d)})()")
+    v=$(ev "(()=>{const e=($1),s=$SCR;if(!e||!s)return 'none';const r=e.getBoundingClientRect(),q=s.getBoundingClientRect(),d=devicePixelRatio;if(r.top>=q.top&&r.bottom<=Math.min(q.bottom,innerHeight)*0.92)return 'ok';const x=Math.round((q.left+6)*d),h=Math.min(q.bottom,innerHeight)-q.top;const a=Math.round((q.top+h*0.7)*d),b=Math.round((q.top+h*0.35)*d);return r.top<q.top?x+' '+b+' '+a:x+' '+a+' '+b})()")
     case $v in ok) return 0 ;; none|"") return 1 ;; esac
     set -- "$1" $v; swipe "$2" "$3" "$2" "$4" 300 "up on the page's left margin (scroll)" || return 1; sleep 0.8; done; return 1; }
 # Search: the pill focused (never typed into anything else), the text, the result for key tapped.

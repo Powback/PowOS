@@ -47,7 +47,7 @@ put_away() {
   note "windows.list before the dock tap: $before"; note "windows.list after: $after"
   step "$4" "$3 put away: a tap on its dock cell while its window is in front"
   local m; m=$(win "$1" minimised)
-  [ "$m" = true ] && pass "$3 minimised into the dock" || fail "$3 after a dock tap on it in front: minimised=$m (windows.list before: $before; after: $after)"
+  [ "$m" = true ] && pass "$3 minimised into the dock" || fail "$3 after a dock tap on it in front: minimised=$m (windows.list before: $before; after: $after; WindowFrames log: $(sh_ "logcat -d | grep -E \"minimise task|can.t minimise\" | tail -3" | tr "\n" "~"))"
 }
 # closebar <task> <name> <slug>: its title bar's close button, a real tap.
 closebar() {
@@ -163,13 +163,16 @@ part2() {
   # ~65 px of room down, so dragging down 165 "failed" by exactly the clamp. With less room than the drag, go UP.
   local dock room; dock=$(pt "$(dockel "a:$CALC/")"); set -- $b0; room=$(( ${dock#* } - ${4:-0} ))
   if [ -n "${dock#* }" ] && [ "$room" -lt $((dy * 2)) ] 2>/dev/null; then dy=$((-dy)); fi
+  # Same for sideways: a window opened right of centre (side docks, r4: 776..2136 of 2268) dragged right ended past the
+  # screen edge (2467), its grip off screen and the resize below tapped nothing. Go left when the right has no room.
+  [ $((W - ${3:-0})) -lt $((dx * 2)) ] && dx=$((-dx))
   if [ -n "$p" ]; then set -- $p; x=$1; y=$2
     if mdown $x $y "Calculator's title bar"; then
       mpath $x $y $((x + dx)) $((y + dy)) 6
       sleep 0.3; mup $((x + dx)) $((y + dy)); sleep 1.2; chk drag
       b1=$(tbounds "$CT"); step dragged "Calculator dragged by its title bar ($dx,$dy px)"
       set -- $b0 $b1
-      [ $# -ge 8 ] && [ $(($5 - $1)) -ge $((dx * 7 / 10)) ] && [ $((($6 - $2) * ${dy#-} / dy)) -ge $((${dy#-} * 5 / 10)) ] && pass "it moved with the finger: $b0 -> $b1" || fail "dragged $dx,$dy: $b0 -> $b1"
+      [ $# -ge 8 ] && [ $((($5 - $1) * ${dx#-} / dx)) -ge $((${dx#-} * 7 / 10)) ] && [ $((($6 - $2) * ${dy#-} / dy)) -ge $((${dy#-} * 5 / 10)) ] && pass "it moved with the finger: $b0 -> $b1" || fail "dragged $dx,$dy: $b0 -> $b1"
     fi
   else fail "no title bar on Calculator's window"; fi
 
@@ -288,7 +291,7 @@ part3() {
   open_drawer || true
   step drawer "stage 1: a plain swipe up - the drawer, no keyboard"
   [ "$(isopen)" = true ] && [ "$(ev "document.activeElement&&document.activeElement.matches('.home > .bar textarea')?'yes':'no'")" = no ] && [[ "$(ime)" == *false* ]] &&
-    pass "the drawer is up, the search isn't focused, no keyboard" || fail "stage 1: drawer open=$(isopen), $(ime)"
+    pass "the drawer is up, the search isn't focused, no keyboard" || fail "stage 1: drawer open=$(isopen), $(ime) (windows now: $(hcall windows.list "[]" "l=>JSON.stringify(l.map(w=>({id:w.id,min:w.minimised,away:w.away,b:w.bounds})))"); focus: $(sh_ "dumpsys window | grep -m1 mCurrentFocus"))"
   back; back 0.6
   # A spot that is always free (footpt.js: a gap in the dock's or the bottom bar's row, right half - the left half is
   # PowOS AI's pull-up corner, 12:48 round 3): with windows open home had no empty spot above them (freept, 15:11).
