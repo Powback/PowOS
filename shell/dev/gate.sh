@@ -231,6 +231,11 @@ cx=0; out=""
 if [ "${GATE_SCOPE:-}" != boot ]; then out=$("$SHELL_DIR/dev/lint-complexity.sh" --dir "$S" ${app:+--apps} ${files[@]+"${files[@]}"} 2>&1) || cx=$?
 fi
 case $cx in 0|2) echo "$out" ;; *) echo "$out" | head -45; fail=1 ;; esac
+# 1b''. The import-cycle lint (dev/lint-cycles.mjs): a module in a cycle can run before its dependency finished, so an
+# import is still undefined at its top level. The shell's existing cycles are in dev/cycles-allow.txt; a new one fails.
+if [ "${GATE_SCOPE:-}" != boot ]; then
+  if out=$(node "$SHELL_DIR/dev/lint-cycles.mjs" "$SHELL_DIR" 2>&1); then echo "$out"; else echo "$out" | head -20; fail=1; fi
+fi
 t_lint=$(( $(mark) - ts ))
 # 1c. Every local file a page names (an html's href/src) or a script links in (a "./ui/x.css" it adds) is in what the
 # phone will serve: the boot check below doesn't fail a stylesheet that 404s (2026-10-21: index.html's override named

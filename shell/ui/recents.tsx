@@ -201,7 +201,11 @@ async function landed(snapshot: string | null) {
   if (snapshot && id != null) tasks.value = tasks.value.map((t) => (t.id === id ? { ...t, snapshot } : t));
   // The render (a microtask), then the card's image decoded, shown, and painted - then the host lets the window go.
   await Promise.resolve();
-  const img = row?.querySelector<HTMLImageElement>(".task:first-child .task-shot");
+  // The first card's shot is a <div> placeholder when it has no snapshot (a PowOS app, a fresh task): a div has no
+  // decode(), and sucrase's optional-chain helper (line 1 of the served module) failed it as "Cannot read properties of
+  // undefined (reading 'call')" at recents.tsx:1 (2026-10-28). Only an <img> is decoded.
+  const shot = row?.querySelector(".task:first-child .task-shot");
+  const img = shot instanceof HTMLImageElement ? shot : null;
   if (img && snapshot && img.getAttribute("src") !== snapshot) img.src = snapshot;
   await img?.decode().catch(() => {});
   if (img) img.style.visibility = "";
