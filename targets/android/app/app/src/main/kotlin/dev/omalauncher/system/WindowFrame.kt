@@ -110,14 +110,18 @@ class WindowFrame(
      */
     fun taskBar(on: Boolean) {
         // A removal skipped under a finger (its touch would end) is retried on the next call (TaskFrame.sync on layout).
-        if (on == inTaskBar && !(on && barAdded)) return
+        // Only a real change re-lays out: layout() calls TaskFrame.sync, which calls this again - a removal still
+        // waiting for the finger once recursed here until the app died (StackOverflowError, emulator 2026-10-28).
+        val changed = on != inTaskBar
+        val drop = on && barAdded && !dragging && !held
+        if (!changed && !drop) return
         inTaskBar = on
-        android.util.Log.i("PowosWindowFrame", "task $id: ${if (on) "bar in its task, overlay bar removed" else "overlay bar back"}")
-        if (on && barAdded && !dragging && !held) {
+        if (drop) {
             barAdded = false
             bar.animate().cancel()
             runCatching { wm.removeViewImmediate(bar) }
         }
+        android.util.Log.i("PowosWindowFrame", "task $id: " + if (!on) "overlay bar back" else if (drop) "bar in its task, overlay bar removed" else "bar in its task, overlay bar goes at the lift")
         // Shown: re-laid out (the bar's height above the window comes and goes with it), the overlay bar re-added if back.
         if (gripAdded) layout(bounds, span)
     }
@@ -525,6 +529,9 @@ class WindowFrame(
         private fun let() {
             held = false
             WindowFrames.current?.touchEnded()
+            // The in-task bar came up under this finger (a drag of the overlay bar started its TaskLeash session):
+            // the overlay bar's removal waited for the lift; now, after this event's dispatch (one bar, not two).
+            if (inTaskBar && barAdded) bar.post { taskBar(true) }
         }
 
         /** The button a finger went down on: it acts at the lift if the finger is still on it; no drag from a button. */
