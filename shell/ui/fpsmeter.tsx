@@ -6,6 +6,7 @@
  */
 import { useEffect, useRef } from "preact/hooks";
 import { powos } from "../bridge.ts";
+import { m as main, mring, MRING, mainFresh, onSample, beginMain, endMain } from "./fpsmain.ts";
 
 const RING = 90, MAX_REC_MS = 120_000, MAX_FRAMES = 20_000, MAX_EVENTS = 300, STORE = "perf.meter";
 const ring = new Float32Array(RING);
@@ -47,20 +48,21 @@ function readGraphColors() {
   graphColors = ["red", "yellow", "green"].map((name) => style.getPropertyValue(`--color-${name}`).trim());
 }
 function drawGraph(cv: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
-  const w = cv.width, h = cv.height, bw = w / RING;
+  const w = cv.width, h = cv.height, bw = w / RING, fromMain = mainFresh();
+  const r = fromMain ? mring : ring, hd = fromMain ? main.head : head, fl = fromMain ? main.filled : filled;
   ctx.clearRect(0, 0, w, h);
-  for (let i = 0; i < filled; i++) {
-    const dt = ring[(head - filled + i + RING) % RING];
+  for (let i = 0; i < fl; i++) {
+    const dt = r[(hd - fl + i + MRING) % MRING];
     ctx.fillStyle = graphColors[dt > 33.5 ? 0 : dt > 18 ? 1 : 2];
     const bh = Math.max(1, Math.min(1, dt / 50) * h); // 50 ms = full height
-    ctx.fillRect((RING - filled + i) * bw, h - bh, Math.max(1, bw - 0.4), bh);
+    ctx.fillRect((RING - fl + i) * bw, h - bh, Math.max(1, bw - 0.4), bh);
   }
 }
 
 function drawText(u: NonNullable<typeof ui>) {
-  const f = fpsNow();
+  const f = mainFresh() ? main.fps : fpsNow();
   if (f !== shownFps) { shownFps = f; u.num.textContent = String(f).padStart(3, "\u2007"); }
-  const label = rec ? `REC ${Math.floor((performance.now() - recStart) / 1000)}s` : busy ? "SEND" : "";
+  const label = rec ? `REC ${Math.floor((performance.now() - recStart) / 1000)}s` : busy ? "SEND" : mainFresh() ? "" : "bar";
   if (label !== shownRec) { shownRec = label; u.label.textContent = label; u.root.classList.toggle("rec", rec); }
 }
 
@@ -128,7 +130,7 @@ export function summarise({ t, dt, n, evs, durMs, mode }: { t: Float32Array; dt:
 function beginRecord() {
   recStart = performance.now(); recN = 0;
   recT = new Float32Array(MAX_FRAMES); recDt = new Float32Array(MAX_FRAMES);
-  observe(); rec = true;
+  observe(); beginMain(); rec = true;
   if (!raf) start();
   stopTimer = window.setTimeout(() => void toggleRecord(), MAX_REC_MS);
 }
@@ -145,8 +147,10 @@ async function endRecord() {
   rec = false; busy = true; clearTimeout(stopTimer); po?.disconnect(); po = null;
   const durMs = performance.now() - recStart, n = recN;
   const mode = new URLSearchParams(location.search).get("mode") ?? "?";
-  const sum = summarise({ t: recT, dt: recDt, n, evs: events, durMs, mode: `${mode} window (${powos.host})` });
-  const full = { summary: sum, when: new Date().toISOString(), ua: navigator.userAgent, dpr: devicePixelRatio,
+  const mn = endMain(), fromMain = mn.n > 1;
+  const sum = fromMain ? summarise({ ...mn, evs: events, durMs, mode: `main shell (home), ${mode} bar recorded` })
+    : summarise({ t: recT, dt: recDt, n, evs: events, durMs, mode: `${mode} window only, main shell not reporting (${powos.host})` });
+  const full = { summary: sum, main: fromMain ? { frameDeltas: Array.from(mn.dt, (x) => Math.round(x * 10) / 10) } : undefined, when: new Date().toISOString(), ua: navigator.userAgent, dpr: devicePixelRatio,
     frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events };
   recT = new Float32Array(0); recDt = new Float32Array(0);
   await saveAndSend(full, sum);
@@ -167,8 +171,9 @@ export function FpsMeter() {
     themeChanges.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
     ui.root.hidden = !enabled;
     void readSetting();
-    const poll = window.setInterval(() => { if (!rec) void readSetting(); }, 5000);
-    return () => { themeChanges.disconnect(); clearInterval(poll); ui = null; };
+    const poll = window.setInterval(() => { if (!rec) void readSetting(); }, 30000); // backstop; the host pushes changes
+    const offs = [powos.on("perf.meter", (v: { on?: boolean } | null) => setEnabled(!!v?.on)), powos.on("perf.sample", onSample)];
+    return () => { themeChanges.disconnect(); clearInterval(poll); offs.forEach((o) => o()); ui = null; };
   }, []);
   // Rendered always (hidden while off) so the node and canvas are stable; the bar never re-renders it per frame.
   return <button ref={root} class="fps-meter" data-action="fps" aria-label="FPS meter, tap to record a perf trace"

@@ -329,7 +329,7 @@ export interface ChromeRegion { action: string; x: number; y: number; width: num
 
 export interface Bridge {
   /** Perf traces (?: hosts from before it): saves JSON under the AI shared dir, returns its path in PowOS. */
-  perf?: { save(json: string): Promise<string | null> };
+  perf?: { save(json: string): Promise<string | null>; /** Main shell frame sample to the other windows (hosts from before it: absent). */ publish?(json: string): Promise<unknown> };
   chrome: {
     state(): Promise<ChromeState>;
     ready(): Promise<void>;

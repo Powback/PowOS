@@ -90,6 +90,8 @@ if (mode === "aod") {
   handOff(() => render(<Home />, document.body));
   measureIcons(restored != null);
   keepSnapshots();
+  // The fps meter's source: this page's own frames, sent to the status bar's meter (only while it is on).
+  void import("./ui/fpssample.ts").then((m) => m.startSampler());
 }
 // The page ran and drew its screen: what the native hosts ask before they let a window of theirs cover the screen
 // (shell/PageWatchdog.kt) - a page that never got here (a module that didn't load) has its window taken away.

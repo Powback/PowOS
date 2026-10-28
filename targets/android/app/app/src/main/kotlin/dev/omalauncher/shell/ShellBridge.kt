@@ -218,7 +218,14 @@ class ShellBridge(
             "apps.links" -> AppLinks.read(context, a.getString(0))
             "usage.recent" -> JSONArray(installed(runtime.usage.recent).take(a.optInt(0, 5)))
             "store.get" -> store(a.getString(0)).takeIf { it.isFile }?.readText()?.let { RawJson(it) }
-            "store.set" -> store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })
+            "store.set" -> {
+                store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })
+                // The fps meter's switch takes effect in every shell window at once (status bar, home), not on its next poll.
+                if (a.getString(0) == "perf.meter") runCatching { JSONObject(a.get(1).toString()).toString() }.getOrNull()?.let { broadcast("perf.meter", it) }
+                Unit
+            }
+            // The main shell's frame samples (fps + new frame times, ~4 Hz) to the other windows' meter: re-parsed, never spliced raw.
+            "perf.publish" -> a.getString(0).takeIf { it.length < 8192 }?.let { broadcast("perf.sample", JSONObject(it).toString(), except = this) }
             // Perf trace from the status bar's fps meter: saved where PowOS AI sees it (the shared run dir).
             "perf.save" -> {
                 val dir = java.io.File(context.filesDir, "run/powos-ai-shared").apply { mkdirs() }
@@ -1020,7 +1027,19 @@ class ShellBridge(
         val text: String,
     )
 
+    init {
+        synchronized(live) { live.add(this) }
+    }
+
+    private fun broadcast(event: String, json: String, except: ShellBridge? = null) {
+        val all = synchronized(live) { live.toList() }
+        all.forEach { if (it !== except) it.emit(event, json) }
+    }
+
     companion object {
+        /** Every open shell window's bridge (weak: a closed window just drops out), for events meant for all of them. */
+        private val live: MutableSet<ShellBridge> = java.util.Collections.newSetFromMap(java.util.WeakHashMap())
+
         private const val TAG = "PowosShell"
 
         /** logcat tag of every display/fold push (and the page's wide/narrow switch, via its console). */
