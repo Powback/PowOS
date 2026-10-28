@@ -102,22 +102,28 @@ n=$(npages); echo "home pages: $n, on $(onpage)" | tee -a "$OUT/log.txt"
 [ "${n:-0}" -ge 2 ] || { echo "ENV: home has one page - nothing to switch between; stopping"; exit 5; }
 [ "$(onpage)" = 0 ] || fail "system.home didn't show page 1 ($(onpage))"
 
-bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ' | xargs; }
+bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n-' ' ' | xargs; }
 # A spot on the page on screen with nothing under it (no tile, app, bar, dock) and outside the window: read-only CDP,
 # device px "x y" (a real swipe starts there, never on a widget). $2 the swipe's way (-1 leftwards), $3 its length: a
 # spot with room for the whole swipe first. The 05:25 FAIL (2026-10-23) was the check's: the leftmost empty spot
 # (x 227, left of the window) clamped a leftward swipe to 207 px - under home's quarter-width turn and its flick
 # speed, so home rightly stayed on page 1.
 freept() {
-  "$T/cdp.sh" eval home "(()=>{const b='$1'.split(' ').map(Number),r=devicePixelRatio,d=$2,len=$3,W=innerWidth*r;let best=null,room=-1;for(let y=.15;y<=.92;y+=.03)for(let x=.04;x<=.96;x+=.02){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.app,.panel,.widget,.island,.owl,button,a,input,.bar,.bottom-bar,.dock,[data-key]'))continue;if(px<60||px>W-60)continue;const m=d<0?px-20:W-20-px;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()" 2>&1 | tr -d '"\r' | tail -1
+  # $1: every floating window's frame "l t r b;l t r b" (device px). Each is kept clear by WM px on every side: the title
+  # bar, the resize handles (a leftward swipe from 161 px right of the Calculator's top-right corner resized it,
+  # 2026-10-28 11:20: [566,346][1926,2054] -> [566,346][1339,1055]) and the grab margins. The dock (bottom OR side: its
+  # rect from the DOM, .dock/.bar/.dock-tray/.launcher) and the page track's edges are excluded too.
+  "$T/cdp.sh" eval home "(()=>{const WM=240,bs='$1'.split(';').filter(Boolean).map(s=>s.trim().split(' ').map(Number)).filter(a=>a.length===4),r=devicePixelRatio,d=$2,len=$3,W=innerWidth*r;const dk=[...document.querySelectorAll('.dock,.bar,.bottom-bar,.dock-tray,.launcher,.island')].map(e=>e.getBoundingClientRect()).filter(q=>q.width>0&&q.height>0);let best=null,room=-1;for(let y=.15;y<=.92;y+=.03)for(let x=.04;x<=.96;x+=.02){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(bs.some(b=>px>=b[0]-WM&&px<=b[2]+WM&&py>=b[1]-WM&&py<=b[3]+WM))continue;if(dk.some(q=>cx>=q.left-48&&cx<=q.right+48&&cy>=q.top-48&&cy<=q.bottom+48))continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.app,.panel,.widget,.island,.owl,button,a,input,.bar,.bottom-bar,.dock,.dock-tray,[data-key]'))continue;if(px<60||px>W-60)continue;const m=d<0?px-20:W-20-px;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()" 2>&1 | tr -d '"\r' | tail -1
 }
+# Every visible floating window's frame, "l t r b;..." (home's own task and system UI left out).
+allbounds() { sh_ "am stack list | grep visible=true | grep -v -e com.powos.app -e systemui -e launcher" | grep -oE 'bounds=\[[0-9-]+,[0-9-]+\]\[[0-9-]+,[0-9-]+\]' | tr -c '0-9\n-' ' ' | xargs -n4 | tr '\n' ';'; }
 # A real horizontal swipe on home from an empty spot: $1 -1 = to the next page (finger leftwards), 1 = back.
 swipe() {
   # The window's box is kept clear only while it shows: on page 2 it's hidden (its bounds still listed), and keeping
   # its box clear there left no spot with room for the swipe back (05:57: 570 px from x 1678).
   kg | grep -q true && { echo "ENV: phone locked mid-run (keyguard)" | tee -a "$OUT/log.txt"; exit 5; }
   local d=$((W * 30 / 100)) p b=;  # 30% (680 px of 2268): above the quarter-width turn (+40), and the scan covers the whole page width from the far edge in
-  [ "$(vis)" = visible=true ] && b=$(bounds); p=$(freept "$b" "$1" "$d"); [ "$p" != none ] && [ -n "$p" ] || { echo "ENV: no empty spot on page $(($(onpage) + 1)) to swipe from - stopping"; exit 5; }
+  b=$(allbounds); p=$(freept "$b" "$1" "$d"); [ "$p" != none ] && [ -n "$p" ] || { echo "ENV: no empty spot on page $(($(onpage) + 1)) to swipe from - stopping"; exit 5; }
   local x=${p% *} y=${p#* }; local to=$((x + $1 * d))
   [ $to -lt 20 ] && to=20; [ $to -gt $((W - 20)) ] && to=$((W - 20))
   # Shorter than home turns a page for (a quarter of its width, no flick): the check's spot, not the product.
@@ -227,6 +233,14 @@ if [ "$id" = none ]; then
   fail "no Calculator in windows.list ($(vis)) - see missing.txt"
 fi
 [ "$(vis)" = visible=true ] || fail "Calculator's window isn't showing ($(vis))"
+# The window must be fully on screen (it once opened at x -145: a swipe near it hit its resize handles). Move it to a
+# clear spot (left of centre, below the status bar) with am task resize if it isn't; fail if it still isn't.
+onscreen() { local l t r b; read -r l t r b <<<"$(bounds)"; [ -n "${b:-}" ] && [ "$l" -ge 0 ] && [ "$t" -ge 0 ] && [ "$r" -le "$W" ] && [ "$b" -le "$H" ]; }
+if ! onscreen; then
+  echo "window off screen at $(bounds): moving it" | tee -a "$OUT/log.txt"
+  sh_ "am task resize $id 260 420 1620 2120" >/dev/null; sleep 1.5
+  onscreen || fail "the test window isn't fully on screen after placing it: $(bounds) on ${W}x${H}"
+fi
 B1=$(bounds); echo "bounds on page 1: $B1" | tee -a "$OUT/log.txt"
 P1=$(hcall store.get "['home.windows']" "m=>m&&m['$id']"); echo "stored page id: $P1" | tee -a "$OUT/log.txt"
 [ -n "$P1" ] && [ "$P1" != undefined ] && [ "$P1" != null ] || fail "the window got no page (home.windows has no $id)"
