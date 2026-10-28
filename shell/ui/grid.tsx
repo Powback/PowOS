@@ -880,9 +880,16 @@ function ResizeHandle({ item }: { item: HomeItem }) {
   };
   const b = box(cell0);
   const n = size && box(size);
+  // Kept out of the host's right edge handle (EdgeGestures.kt: a finger down within its width of the right edge, lower
+  // half, is the native gesture monitor's - it pilfers the touch, so the handle got only a cancel): a tile at the
+  // right column had its corner there. Shifted in until its right side clears the zone.
+  // HACK: the zone's width is the default 18dp (+4 slack), not the user's setting (8-40dp); the real fix is the host
+  // telling the shell its edge zones (or excluding the handle's rect, as homePull's exclude does for the pull).
+  const inset = Math.max(0, geometry.value.left + b.left + b.width + 6 - (innerWidth - 22));
   return (
     <div
       class="resize-handle"
+      style={inset ? { right: `${inset - 6}px` } : undefined}
       onPointerDown={(e) => {
         e.stopPropagation();
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -895,7 +902,7 @@ function ResizeHandle({ item }: { item: HomeItem }) {
         if (cell) await placeItem(item.key, cell, item.page);
       }}
     >
-      {n && <div class="resize-preview" style={{ width: `${n.width}px`, height: `${n.height}px`, left: `${-b.width + 18}px`, top: `${-b.height + 18}px` }} />}
+      {n && <div class="resize-preview" style={{ width: `${n.width}px`, height: `${n.height}px`, left: `${-b.width + 18 + inset}px`, top: `${-b.height + 18}px` }} />}
     </div>
   );
 }
