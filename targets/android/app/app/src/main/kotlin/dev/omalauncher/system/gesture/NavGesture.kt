@@ -198,7 +198,9 @@ class NavGesture(
         from = if (Switcher.open && Switcher.homeVisible) null else Tasks.visible(service)
         val tasks = recentTasks ?: run { Log.i(TAG, "gesture: no recents transition - SystemUI gave no IRecentTasks"); return }
         if (from == null) {
-            if (!Switcher.open && Switcher.target(service) != null && Switcher.onHome && Switcher.homeVisible) {
+            // One owner: the switcher layer follows the finger only over home's main page with nothing open. On the AI
+            // page, an open drawer or another page the swipe is home's (it goes to the main page): no layer at all.
+            if (!Switcher.open && Switcher.target(service) != null && Switcher.onHome && Switcher.homeVisible && Switcher.homeMainPage) {
                 homeSettle?.cancel()
                 homeSettle = null
                 overHome = true
