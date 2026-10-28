@@ -160,6 +160,12 @@
 /* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
 .home > .bar { transform: translateY(calc(var(--p) * var(--strip-height))); }
 .home.pill-below > .bar, .pull-screen > .bar { transform: none; }
+/* Over an app (pull.tsx) the foot is home's: the pill in the flow right above the dock, the dock at the screen's foot, both
+   held in place (no --p slide, no shrinking) - the dock was drawn over the pill (the user, 2026-10-28). With the dock
+   hidden (chat, keyboard, PowOS AI) it isn't rendered and the pill takes the foot. */
+.home.pull-screen > :is(.bar, .dock) { flex: none; transform: none; translate: none; margin: 0; }
+.home.pull-screen > .bar { order: 1; height: 48px; }
+.home.pull-screen > .dock { order: 2; height: var(--strip-height); opacity: 1; }
 /* The dock stays while the launcher is open (bottom dock, search bar above it): the pill and dock don't move, the drawer's
    window ends at the pill's top, and the drawer only rises (as pill-below). Wide and side docks keep giving way. */
 .home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > :is(.bar, .dock) { transform: none; }
