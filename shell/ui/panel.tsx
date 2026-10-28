@@ -6,10 +6,21 @@
  * window carries a small phone mark (the phone's session: scrcpy windows, and stand-ins for apps still on the phone's
  * own screen - clicking one moves the app into a window here). The launcher opens above the bar: the page asks the
  * host for a taller surface while it's open (panel.height) and gives it back when it closes.
+ *
+ * Desktop mode (docs/DESKTOP-KWIN-NATIVE.md phase 1; app.tsx loaded state.ts for it): the bar starts with the phone
+ * dock's pinned apps (the same "dock" store key and AppCell as ui/home.tsx's Dock), and the launcher is the drawer's
+ * own app list (drawer.tsx AppList / findApps). Meta and KWin's swipe-up reach it as "launcher.toggle" (powos-shell's
+ * org.powos.Shell /Launcher toggle). Only powos-shell serves this page: the phone's Android shell never renders it.
  */
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import type { App, DesktopWindow } from "../types.ts";
+import { apps as allApps, byKey, dock } from "../state.ts";
+import { AppCell } from "./apps.tsx";
+import { AppList, findApps } from "./drawer.tsx";
+
+/** The desktop-mode panel: PowOS's dock and drawer (only powos-shell's host is "powos"). */
+const docked = powos.host === "powos";
 
 /** How tall the surface gets while the launcher is open (CSS px, the bar included). */
 const OPEN_HEIGHT = 520;
@@ -22,6 +33,10 @@ export function Panel() {
     powos.windows.list().then(setWindows, (e) => console.warn("windows.list", e));
     return off;
   }, []);
+  // Meta / swipe-up (org.powos.Shell /Launcher toggle): open or close, as the start button does.
+  const shown = useRef(launcher);
+  shown.current = launcher;
+  useEffect(() => powos.on("launcher.toggle", () => (shown.current ? close() : open())), []);
 
   const open = async () => {
     await powos.panel.height(OPEN_HEIGHT);
@@ -54,6 +69,16 @@ export function Panel() {
             <rect x="14" y="14" width="7" height="7" rx="1.5" />
           </svg>
         </button>
+        {docked && (
+          <div class="panel-dock dock-page">
+            {dock.value
+              .map((k) => byKey.value.get(k))
+              .filter((a) => a != null)
+              .map((app) => (
+                <AppCell key={app.key} app={app} labels={false} />
+              ))}
+          </div>
+        )}
         <div class="panel-tasks" role="list">
           {windows.map((w) => (
             <button
@@ -102,13 +127,30 @@ function Launcher({ close }: { close: () => void }) {
     return powos.on("apps.changed", load);
   }, []);
   const shown = useMemo(() => {
+    if (docked) return query.trim() ? findApps(query) : allApps.value;
     const q = query.trim().toLowerCase();
     return q ? apps.filter((a) => a.label.toLowerCase().includes(q)) : apps;
-  }, [apps, query]);
+  }, [apps, query, docked && allApps.value]);
   const launch = (a: App) => {
     powos.apps.launch(a.key);
     close();
   };
+  if (docked)
+    return (
+      <div class="panel-launcher panel-drawer" onKeyDown={(e) => e.key === "Escape" && close()}>
+        <input
+          ref={input}
+          class="panel-search"
+          placeholder="Search apps"
+          value={query}
+          onInput={(e) => setQuery(e.currentTarget.value)}
+          onKeyDown={(e) => e.key === "Enter" && shown[0] && launch(shown[0])}
+        />
+        <div class="drawer" onClick={(e) => (e.target as Element).closest(".app") && close()}>
+          <AppList found={query.trim() ? shown : null} />
+        </div>
+      </div>
+    );
   return (
     <div class="panel-launcher" onKeyDown={(e) => e.key === "Escape" && close()}>
       <input

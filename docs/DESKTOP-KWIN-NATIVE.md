@@ -138,6 +138,11 @@ Android apps stay as they are today in the Plasma app (freeform over it, or `pow
    tray and Klipper until phase 3. Undo = re-add the default panel (the fallback when powos-shell fails to start).
 5. **Launcher keys:** Meta and the swipe-up (kwin 0009) open powos-shell's launcher (a D-Bus method on powos-shell,
    e.g. `org.powos.Shell /Launcher toggle`), not Kickoff.
+   Built 2026-10-28: `org.powos.Shell /Launcher toggle` (src/launcher.h, registered with `POWOS_DESKTOP_MODE=1`);
+   Meta = kwinrc `[ModifierOnlyShortcuts]` set by `powos-desktop-shell desktop on`; swipe-up = kwin 0009 now calls
+   it as well as plasmashell's `activateLauncherMenu` (no Kickoff without a panel), kwin 3.45. Items 3-4:
+   `powos-desktop-shell desktop on|off` (the app calls it on a setting change; the session passes
+   `POWOS_DESKTOP_MODE` from `settings get global powos_desktop_mode` to `start --auto`).
 6. **One renderer:** home + panel in one renderer (window.open children, or `--renderer-process-limit=1` first);
    `powos-desktop-shell status` prints PSS per process.
 

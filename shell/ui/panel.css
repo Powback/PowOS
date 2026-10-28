@@ -167,3 +167,18 @@ html[data-mode="panel"] .panel-app span {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+/* Desktop mode (ui/panel.tsx docked): the phone dock's pinned apps at the bar's start - its cells (shell.css .app),
+   icons only, and the drawer's own list in the launcher. */
+html[data-mode="panel"] .panel-dock {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  padding: 0 6px;
+  flex: none;
+}
+html[data-mode="panel"] .panel-dock .app { width: 44px; height: 44px; }
+html[data-mode="panel"] .panel-dock .app img { width: 32px; height: 32px; }
+html[data-mode="panel"] .panel-drawer .drawer { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; }
+html[data-mode="panel"] .panel-drawer .drawer-list { flex: 1; overflow-y: auto; }

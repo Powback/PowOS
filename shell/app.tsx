@@ -52,6 +52,8 @@ if (mode === "aod") {
   render(<QuickTools />, document.body);
 } else if (mode === "panel") {
   // The desktop's panel (powos-shell: a layer surface per screen, docs/DESKTOP-WEB-SHELL.md): the bar alone.
+  // Desktop mode's panel is the phone's dock and drawer (ui/panel.tsx): their state (apps, dock pins) first.
+  if (powos.host === "powos") await load();
   const { Panel } = await import("./ui/panel.tsx");
   render(<Panel />, document.body);
 } else if (mode === "desktop") {

@@ -8,11 +8,13 @@
 //   QTWEBENGINE_REMOTE_DEBUGGING=9222 powos-shell   DevTools / Playwright connectOverCDP
 #include "bridge.h"
 #include "home.h"
+#include "launcher.h"
 #include "panel.h"
 #include "server.h"
 #include "services.h"
 
 #include <QApplication>
+#include <QDBusConnection>
 #include <QMultiHash>
 #include <QIcon>
 #include <QJsonObject>
@@ -50,6 +52,16 @@ int main(int argc, char **argv)
         qputenv("QT_WAYLAND_SHELL_INTEGRATION", "layer-shell");
     // Mixed / fractional scale per screen: each surface lives on one QScreen, Chromium follows its ratio (§3.5).
     QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+
+    // One renderer for every surface (docs/DESKTOP-KWIN-NATIVE.md phase 1 item 6): home and panel are the same site
+    // (powos://shell/), so they share one renderer process instead of one each (~150-230 MB a renderer). Appended to
+    // what the environment already asks for.
+    {
+        QByteArray flags = qgetenv("QTWEBENGINE_CHROMIUM_FLAGS");
+        if (!flags.contains("--renderer-process-limit"))
+            flags += " --renderer-process-limit=1 --process-per-site";
+        qputenv("QTWEBENGINE_CHROMIUM_FLAGS", flags.trimmed());
+    }
 
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("powos-shell"));
@@ -107,6 +119,22 @@ int main(int argc, char **argv)
         for (ShellView *view : views.values(screen))
             view->deleteLater();
         views.remove(screen);
+    });
+
+    // Desktop mode: Meta and the swipe-up open this launcher (org.powos.Shell /Launcher toggle): the panel's on each
+    // screen, else home's. Not registered outside desktop mode, where Plasma's panel and Kickoff stay.
+    auto *launcher = new Launcher(&app);
+    if (qEnvironmentVariable("POWOS_DESKTOP_MODE") == QLatin1String("1")) {
+        auto bus = QDBusConnection::sessionBus();
+        if (!bus.registerObject(QStringLiteral("/Launcher"), launcher, QDBusConnection::ExportScriptableSlots)
+            || !bus.registerService(QStringLiteral("org.powos.Shell")))
+            qWarning().noquote() << "powos-shell: org.powos.Shell not registered:" << bus.lastError().message();
+    }
+    QObject::connect(launcher, &Launcher::toggled, &app, [&] {
+        const bool panel = roles.contains(QLatin1String("panel"));
+        for (ShellView *view : std::as_const(views))
+            if (!panel || qobject_cast<Panel *>(view))
+                view->bridge()->emitEvent(QStringLiteral("launcher.toggle"), QJsonValue());
     });
 
     // Hot reload: a saved shell file reaches every page as "files.changed" (shell/hot.ts reloads or swaps the CSS).

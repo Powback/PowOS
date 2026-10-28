@@ -134,6 +134,8 @@ fi
 # need them. Made private first (pivot_root fails on shared mounts); PowOS's own mount/pivot_root, through its
 # loader: Android's toybox has no pivot_root and no --make-rprivate. powos-rooted-session detaches /.oldroot.
 export L="$R/usr/lib/ld-linux-aarch64.so.1 --library-path $R/usr/lib" R
+# Desktop mode (docs/DESKTOP-KWIN-NATIVE.md phase 1): the session's powos-desktop-shell start --auto reads it.
+DESKTOP_MODE_=$(settings get global powos_desktop_mode 2>/dev/null); case "$DESKTOP_MODE_" in 1) ;; *) DESKTOP_MODE_=0 ;; esac
 # The session keeps this pid through the execs below: powos-run.sh joins its mount namespace.
 echo $$ > /data/powos/session.pid
 exec nsenter -t 1 -m -- unshare -m sh -c '
@@ -144,7 +146,7 @@ exec nsenter -t 1 -m -- unshare -m sh -c '
   PATH=/home/powos/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin \
   LANG="$LANG_" TZ="$TZ_" \
   XDG_RUNTIME_DIR=/run/powos-app \
-  ANDROMARCHY_SOCKET="$sock" ANDROMARCHY_PHYSICAL_MM="$MM" \
+  ANDROMARCHY_SOCKET="$sock" ANDROMARCHY_PHYSICAL_MM="$MM" POWOS_DESKTOP_MODE="$DESKTOP_MODE_" \
   DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus \
   DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/powos-app/system_bus \
   XDG_DATA_DIRS=/run/powos-app/share:/home/powos/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share \

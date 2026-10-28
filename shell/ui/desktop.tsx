@@ -58,7 +58,14 @@ function useKeys() {
       }
     };
     addEventListener("keydown", key);
-    return () => removeEventListener("keydown", key);
+    // Meta / KWin's swipe-up (powos-shell's org.powos.Shell /Launcher), sent here when no panel runs: as "/" does.
+    const offToggle = powos.on("launcher.toggle", () => {
+      if (drawer.value > 0) return void closeDrawer();
+      pullKind.value = "apps";
+      drawer.value = 1;
+      document.querySelector<HTMLTextAreaElement>(".bar-pill textarea")?.focus();
+    });
+    return () => (removeEventListener("keydown", key), offToggle());
   }, []);
 }
 

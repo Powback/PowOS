@@ -19,7 +19,7 @@ diff --git a/src/input.cpp b/src/input.cpp
  #include <QKeyEvent>
  #include <QThread>
  #include <qpa/qwindowsysteminterface.h>
-@@ -1920,6 +1924,107 @@
+@@ -1920,6 +1924,112 @@
  };
  
  /**
@@ -80,6 +80,11 @@ diff --git a/src/input.cpp b/src/input.cpp
 +            // and went into edit mode (closing the launcher). Past the drag threshold, a release is no click.
 +            waylandServer()->seat()->notifyTouchUp(*m_id);
 +            waylandServer()->seat()->notifyTouchFrame();
++            // PowOS's launcher in desktop mode (powos-shell registers org.powos.Shell then, and plasmashell has no
++            // panel, so no Kickoff); Plasma's otherwise (no org.powos.Shell: that call fails quietly). Both async.
++            QDBusConnection::sessionBus().asyncCall(
++                QDBusMessage::createMethodCall(QStringLiteral("org.powos.Shell"), QStringLiteral("/Launcher"),
++                                               QStringLiteral("org.powos.Shell"), QStringLiteral("toggle")));
 +            QDBusConnection::sessionBus().asyncCall(
 +                QDBusMessage::createMethodCall(QStringLiteral("org.kde.plasmashell"),
 +                                               QStringLiteral("/PlasmaShell"),
@@ -127,7 +132,7 @@ diff --git a/src/input.cpp b/src/input.cpp
   * This filter implements window actions. If the event should not be passed to the
   * current window it will filter out the event
   */
-@@ -3170,6 +3275,11 @@
+@@ -3170,6 +3280,11 @@
      if (kwinApp()->supportsGlobalShortcuts()) {
          m_screenEdgeFilter = std::make_unique<ScreenEdgeInputFilter>();
          installInputEventFilter(m_screenEdgeFilter.get());

@@ -9,6 +9,10 @@
 #   enable | disable  with the Plasma session (XDG autostart, powos-desktop-shell.desktop) or not; disable stops it
 #   taskbar on|off    PowOS's own taskbar (the panel role: the windows - Linux and Android apps - as a bar along the
 #                     bottom) next to the home, or not; restarts it if running. Plasma's own panel stays either way.
+#   desktop on|off    desktop mode (Android setting powos_desktop_mode, docs/DESKTOP-KWIN-NATIVE.md phase 1): on, the
+#                     home and panel run by default, plasmashell's panels go (its desktop, notifications, OSD, tray and
+#                     Klipper stay) and Meta opens PowOS's launcher; off, Plasma's panel and Kickoff come back. The
+#                     app calls it when the setting changes; the session passes POWOS_DESKTOP_MODE at start (--auto).
 #
 # Runs as the session user, in the session's environment (WAYLAND_DISPLAY etc.).
 set -u
@@ -20,15 +24,56 @@ BIN=$HERE/powos-shell
 LOG=${XDG_STATE_HOME:-$HOME/.local/state}/powos/desktop-shell.log
 OFF=${XDG_CONFIG_HOME:-$HOME/.config}/powos/desktop-shell.off
 TASKBAR=${XDG_CONFIG_HOME:-$HOME/.config}/powos/desktop-shell.taskbar
-roles() { if [ -n "${POWOS_SHELL_ROLES:-}" ]; then echo "$POWOS_SHELL_ROLES"; elif [ -e "$TASKBAR" ]; then echo "home panel"; else echo home; fi; }
+# Desktop mode: on while this file exists; PANELS_GONE: plasmashell's panels were removed by us (restored on off).
+DESKTOP=${XDG_CONFIG_HOME:-$HOME/.config}/powos/desktop-mode
+PANELS_GONE=${XDG_CONFIG_HOME:-$HOME/.config}/powos/desktop-mode.plasma-panels-removed
+desktop_mode() { [ -e "$DESKTOP" ]; }
+roles() { if [ -n "${POWOS_SHELL_ROLES:-}" ]; then echo "$POWOS_SHELL_ROLES"; elif desktop_mode || [ -e "$TASKBAR" ]; then echo "home panel"; else echo home; fi; }
+# plasmashell's layout through its scripting API (evaluateScript), once it's on the bus (it may still be starting).
+plasma_eval() {
+  for _ in $(seq 1 30); do qdbus6 org.kde.plasmashell /PlasmaShell >/dev/null 2>&1 && break; sleep 0.5; done
+  qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "$1" >/dev/null
+}
+# Desktop mode's plasmashell: no panels (powos-shell's panel is the bar), its transparent desktop kept.
+plasma_panels_off() {
+  plasma_eval 'var p = panels(); for (var i = 0; i < p.length; i++) p[i].remove();' && : >"$PANELS_GONE"
+}
+# Back to Plasma's own panel (setting off, or powos-shell failed to start): only if we took it away, never twice.
+plasma_panels_on() {
+  [ -e "$PANELS_GONE" ] || return 0
+  plasma_eval 'if (panels().length == 0) loadTemplate("org.kde.plasma.desktop.defaultPanel");' && rm -f "$PANELS_GONE"
+}
+# Meta alone: PowOS's launcher (org.powos.Shell /Launcher toggle) in desktop mode, Plasma's (Kickoff) otherwise.
+meta_key() {
+  if [ "$1" = on ]; then
+    kwriteconfig6 --file kwinrc --group ModifierOnlyShortcuts --key Meta "org.powos.Shell,/Launcher,org.powos.Shell,toggle"
+  else
+    kwriteconfig6 --file kwinrc --group ModifierOnlyShortcuts --key Meta --delete
+  fi
+  qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+}
+# Desktop mode applied to the running session (Plasma's panels, Meta); the shell restarted with its roles.
+desktop_apply() {
+  mkdir -p "$(dirname "$DESKTOP")"
+  case "$1" in
+    1|on) : >"$DESKTOP"; meta_key on ;;
+    *) rm -f "$DESKTOP"; meta_key off ;;
+  esac
+  if desktop_mode; then rm -f "$OFF"; plasma_panels_off; else plasma_panels_on; fi
+}
 pids() { pgrep -u "$(id -u)" -f "^$BIN( |$)"; }
 start() {
   if pids >/dev/null; then echo "running: $(pids | head -1)"; return 0; fi
   mkdir -p "$(dirname "$LOG")"
   : >"$LOG"
+  desktop_mode && export POWOS_DESKTOP_MODE=1 || export POWOS_DESKTOP_MODE=0
   setsid "$BIN" $(roles) >>"$LOG" 2>&1 </dev/null &
   sleep 2
-  pids >/dev/null && echo "started: $(pids | head -1)" || { echo "did not start:"; tail -20 "$LOG"; return 1; }
+  pids >/dev/null && echo "started: $(pids | head -1)" && return 0
+  echo "did not start:"; tail -20 "$LOG"
+  # No PowOS bar: Plasma's panel is the fallback, so the desktop is never left without one.
+  desktop_mode && plasma_panels_on
+  return 1
 }
 stop() {
   p=$(pids) || { echo "not running"; return 0; }
@@ -39,7 +84,9 @@ stop() {
 }
 case "${1:-status}" in
   start)
-    if [ "${2:-}" = --auto ] && [ -e "$OFF" ]; then echo "disabled (powos-desktop-shell enable)"; exit 0; fi
+    # The session's view of the setting (powos-session.sh passes it) wins over the remembered one.
+    if [ "${2:-}" = --auto ] && [ -n "${POWOS_DESKTOP_MODE:-}" ]; then desktop_apply "$POWOS_DESKTOP_MODE"; fi
+    if [ "${2:-}" = --auto ] && [ -e "$OFF" ] && ! desktop_mode; then echo "disabled (powos-desktop-shell enable)"; exit 0; fi
     start
     ;;
   stop) stop ;;
@@ -53,9 +100,28 @@ case "${1:-status}" in
     esac
     if pids >/dev/null; then stop >/dev/null; start; fi
     ;;
+  desktop)
+    case "${2:-}" in
+      on|1) desktop_apply on; echo "desktop mode on" ;;
+      off|0) desktop_apply off; echo "desktop mode off" ;;
+      *) desktop_mode && echo "desktop mode: on" || echo "desktop mode: off"; exit 0 ;;
+    esac
+    stop >/dev/null
+    if desktop_mode || [ ! -e "$OFF" ]; then start; fi
+    ;;
   status)
     [ -e "$OFF" ] && echo "autostart: disabled" || echo "autostart: enabled"
+    desktop_mode && echo "desktop mode: on" || echo "desktop mode: off"
+    # PSS (shared pages split between their users: the real cost, RSS counts libQt6WebEngineCore in every process):
+    # KWin, plasmashell, and powos-shell with all its Chromium children.
+    pss() { awk '/^Pss:/{print $2}' /proc/$1/smaps_rollup 2>/dev/null || echo 0; }
+    for name in kwin_wayland plasmashell; do
+      kb=0; for q in $(pgrep -x "$name"); do kb=$((kb + $(pss $q))); done
+      printf 'PSS %-13s %6s MB\n' "$name" $((kb / 1024))
+    done
     p=$(pids | head -1) || { echo "stopped"; exit 1; }
+    kb=0; for q in $p $(pgrep -P "$p") $(for c in $(pgrep -P "$p"); do pgrep -P "$c"; done); do kb=$((kb + $(pss $q))); done
+    printf 'PSS %-13s %6s MB (host + renderer + GPU + zygotes)\n' powos-shell $((kb / 1024))
     echo "running: pid $p ($(roles))"
     # Each surface as the host last laid it out (src/home.cpp logs it on every resize).
     grep -a "surface:" "$LOG" | tail -4
@@ -66,5 +132,5 @@ case "${1:-status}" in
         "$(awk '{print $14+$15}' /proc/$q/stat)" "$(tr '\0' ' ' </proc/$q/cmdline | cut -c1-90)"
     done
     ;;
-  *) sed -n '2,10p' "$0"; exit 2 ;;
+  *) sed -n '2,14p' "$0"; exit 2 ;;
 esac
