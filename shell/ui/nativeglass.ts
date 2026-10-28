@@ -19,13 +19,17 @@ import { powos } from "../bridge.ts";
 const root = document.documentElement;
 const mode = new URLSearchParams(location.search).get("mode") ?? "home";
 /**
- * Pages whose window is over the wallpaper and nothing else: what's behind it is what the glass shows. Home only - the
- * lock face's window can be over an app (its glass would blur the app, not the wallpaper): it keeps the picture.
+ * Pages whose window is over the wallpaper and nothing else: what's behind it is what the glass shows.
  */
+// The lock face too: PowosLockActivity's window has FLAG_SHOW_WALLPAPER, so the wallpaper layer is right under it
+// whatever app is further down - its cards blur the wallpaper live, as home's. With the frosted picture (ui/glass.ts)
+// the cards' blur was a copy made once: it slid with the cards as the face lifted and never showed what moved behind
+// ("the bg elements on the lockscreen still has static blur", 2026-10-28). The picture stays the fallback while the
+// host doesn't blur (b.state 0).
 // Quick Tools (ui/quicktools.tsx) too: a card in a window over any app, the compositor blurring what's under the card
 // alone (a region of that window - the app under it, as it is).
 // The desktop's home (powos-shell) too: a surface under every window, KWin blurring the wallpaper under its tiles.
-const OVER_WALLPAPER = new Set(["home", "quicktools", "desktop", "statusbar"]);
+const OVER_WALLPAPER = new Set(["home", "lock", "quicktools", "desktop", "statusbar"]);
 /** The surfaces with glass (theme.css): one inside another is only a soft fill on it, not glass of its own. */
 const SURFACES = ".tile, .notif-panel, .status-chrome .chrome-surface";
 
