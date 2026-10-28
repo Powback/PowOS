@@ -739,6 +739,30 @@ async function otherColumns(page, to, fresh) {
   await restAt(page, null, fresh);
 }
 
+/**
+ * Stale wide (2026-10-28, the cover screen in the desktop layout after the AI overlay): home resized to a desktop size
+ * (wide), hidden, back at [to] with that resize event eaten, then shown. hosts/wide.ts measures the viewport again on
+ * every show and read: home at a portrait [to] must not stay wide.
+ */
+async function staleWide(page, to) {
+  const isWide = () => page.evaluate(() => !!document.querySelector(".home.wide"));
+  const desk = { width: 1280, height: 800 };
+  await viewTo(page, desk);
+  await restAt(page, desk);
+  if (!(await isWide())) return [`home isn't wide at ${desk.width}x${desk.height} (the scene's premise)`];
+  await hideAs(page, true);
+  await page.evaluate(() => {
+    window.__eatResize = (e) => e.stopImmediatePropagation();
+    addEventListener("resize", window.__eatResize, { capture: true });
+  });
+  await viewTo(page, to);
+  await restAt(page, to);
+  await page.evaluate(() => removeEventListener("resize", window.__eatResize, { capture: true }));
+  await hideAs(page, false);
+  await restAt(page, null);
+  return (await isWide()) ? [`home stayed wide at ${to.width}x${to.height} after a desktop size, a resize dropped while hidden and a show`] : [];
+}
+
 /** The relayout case: each way of getting back to [to] must give a fresh layout's tiles and a full-width grid. */
 async function relayout(page, to, from) {
   await viewTo(page, to);
@@ -2537,6 +2561,9 @@ try {
       ["unfold", { width: 900, height: 1000 }, { width: 404, height: 900 }],
     ])
       runs.push(open(browser, `${ORIGIN}/index.html`, `relayout-${label}`, to).then((r) => whenReady(r, () => relayout(r.page, to, from))));
+  // Never a stale wide home on the cover screen (staleWide: a desktop size, a resize dropped while hidden, a show).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "stale-wide", { width: 412, height: 900 }).then((r) => whenReady(r, () => staleWide(r.page, { width: 412, height: 900 }))));
   // The control center's rearranging (ui/reorder.ts, control.tsx Controls): in edit mode a toggle held and carried onto
   // the first slot of the row lands there, is saved (the store holds it), and is still there after the panel shut and
   // opened again and after a reload; a carry cancelled (the system took the pointer) changes nothing. Every step waits

@@ -31,7 +31,19 @@ let hint: Display | null = null;
  * squashed ("desktop on mobile" after the AI page, 2026-10-28 13:53 logcat). The inner screen is ~square (821x883).
  */
 const TALL = 0.6;
-const isWide = () => isHome && innerWidth >= WIDE && innerWidth >= innerHeight * TALL;
+/**
+ * The page's size now, as the eye sees it: the narrower of the layout viewport (innerWidth) and the visual viewport.
+ * Over the PowOS AI page with the keyboard up the layout viewport grew to 759x1690 on a 404x899 screen (recents.tsx
+ * bounds); the visual viewport stayed the screen's. The height stays the layout one: a keyboard only shortens the
+ * visual viewport, and a shorter height must never make a portrait page "wide".
+ */
+const measure = () => {
+  const vv = window.visualViewport;
+  const w = Math.round(Math.min(innerWidth, vv?.width || innerWidth));
+  return { w, h: Math.round(innerHeight) };
+};
+const decide = ({ w, h }: { w: number; h: number }) => isHome && w >= WIDE && w >= h * TALL;
+const isWide = () => decide(measure());
 
 /** Home laid out wide now (home.tsx: one bottom bar - dock left, search, recent apps right). */
 export const wideHome = signal(isWide());
@@ -69,9 +81,12 @@ export function wide(n: Bridge): Bridge {
   let hostPage = new Map<string, number>();
   /** The wide cells (null: not read from the store yet). */
   let cells: Record<string, WideCell> | null = null;
-  /** Wide or not as last decided (recheck); never read from innerWidth directly outside it. */
-  let was = isWide();
-  const wideNow = () => was;
+  /**
+   * Wide or not as last decided (recheck) - only a copy of the last measurement, never a mode: every read measures
+   * again (wideNow), so no stale value (an overlay's size, a resize dropped while hidden) outlives the next read.
+   */
+  let was = wideHome.value;
+  const wideNow = () => (recheck("read"), was);
 
   const save = () => n.store.set(STORE, cells).catch(() => {});
 
@@ -209,13 +224,16 @@ export function wide(n: Bridge): Bridge {
   const recheck = (why = "resize") => {
     // Hidden, the window may still have an app's size (landscape game): judged again the moment it's shown.
     if (document.hidden) return;
-    const now = isWide();
+    const m = measure();
+    const now = decide(m);
     const changed = now !== was;
     // Every decision that changes something, and every one asked by a show or a host push, is logged with its inputs
-    // (console -> logcat PowosShell), so the next wrong layout explains itself.
-    if (changed || why !== "resize") {
+    // (console -> logcat PowosShell), so the next wrong layout explains itself. Plain resizes, viewport changes and reads
+    // that change nothing stay quiet (a keyboard's resize stream, every home.get).
+    if (changed || !["resize", "read", "visualViewport"].includes(why)) {
       const h = hint;
-      console.log(`[wide] ${now ? "wide" : "narrow"}${changed ? "" : " (kept)"} by ${why}: innerWidth ${innerWidth} innerHeight ${innerHeight} dpr ${devicePixelRatio.toFixed(2)} (>= ${WIDE} and not portrait)${h ? `; host hint ${h.widthDp}x${h.heightDp}dp display ${h.displayId} rot ${h.rotation} folded ${h.folded}` : ""}`);
+      const vv = window.visualViewport;
+      console.info(`layout wide=${now} w=${m.w} h=${m.h} why=${why}${changed ? " (changed)" : ""} inner=${innerWidth}x${innerHeight} vv=${vv ? `${Math.round(vv.width)}x${Math.round(vv.height)}@${vv.scale.toFixed(2)}` : "-"} dpr=${devicePixelRatio.toFixed(2)}${h ? ` hint=${h.widthDp}x${h.heightDp}dp display=${h.displayId} rot=${h.rotation} folded=${h.folded}` : ""}`);
     }
     if (!changed) return;
     was = wideHome.value = now;
@@ -226,6 +244,9 @@ export function wide(n: Bridge): Bridge {
   // so home stayed laid out wide - tiny cells squashed at the top). Hidden, nothing is decided; shown again, at once
   // and once more after the window has its size. These serve the no-host case; with a host they only re-ask it.
   addEventListener("resize", () => recheck());
+  // The visual viewport changes on its own (an overlay's keyboard, a zoom): the layout viewport may send no resize.
+  window.visualViewport?.addEventListener("resize", () => recheck("visualViewport"));
+  addEventListener("focus", () => recheck("focus"));
   addEventListener("orientationchange", () => recheck("orientation"));
   addEventListener("pageshow", () => recheck("pageshow"));
   document.addEventListener("visibilitychange", () => {
