@@ -40,12 +40,18 @@ function fpsNow(): number {
 }
 
 let shownFps = -1, shownRec = "";
+// Resolve theme tokens outside the drawing loop; refresh when PowOS changes the theme.
+let graphColors = ["", "", ""];
+function readGraphColors() {
+  const style = getComputedStyle(document.documentElement);
+  graphColors = ["red", "yellow", "green"].map((name) => style.getPropertyValue(`--color-${name}`).trim());
+}
 function drawGraph(cv: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
   const w = cv.width, h = cv.height, bw = w / RING;
   ctx.clearRect(0, 0, w, h);
   for (let i = 0; i < filled; i++) {
     const dt = ring[(head - filled + i + RING) % RING];
-    ctx.fillStyle = dt > 33.5 ? "#ff5a4f" : dt > 18 ? "#ffb02e" : "#5fd38a";
+    ctx.fillStyle = graphColors[dt > 33.5 ? 0 : dt > 18 ? 1 : 2];
     const bh = Math.max(1, Math.min(1, dt / 50) * h); // 50 ms = full height
     ctx.fillRect((RING - filled + i) * bw, h - bh, Math.max(1, bw - 0.4), bh);
   }
@@ -156,10 +162,13 @@ export function FpsMeter() {
   const root = useRef<HTMLButtonElement>(null), num = useRef<HTMLSpanElement>(null), cv = useRef<HTMLCanvasElement>(null), label = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     ui = { root: root.current!, num: num.current!, cv: cv.current!, ctx: cv.current!.getContext("2d"), label: label.current! };
+    readGraphColors();
+    const themeChanges = new MutationObserver(readGraphColors);
+    themeChanges.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
     ui.root.hidden = !enabled;
     void readSetting();
     const poll = window.setInterval(() => { if (!rec) void readSetting(); }, 5000);
-    return () => { clearInterval(poll); ui = null; };
+    return () => { themeChanges.disconnect(); clearInterval(poll); ui = null; };
   }, []);
   // Rendered always (hidden while off) so the node and canvas are stable; the bar never re-renders it per frame.
   return <button ref={root} class="fps-meter" data-action="fps" aria-label="FPS meter, tap to record a perf trace"
