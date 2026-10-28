@@ -15,14 +15,21 @@
 import { signal } from "@preact/signals";
 import { fromNative, native, send } from "../apps/native.ts";
 import { powos } from "../bridge.ts";
-import { anyBlur, nativePath } from "./glasspath.ts";
 
 const root = document.documentElement;
-// Which pages the compositor blurs for is decided in one place (ui/glasspath.ts): home and the lock face draw the
-// wallpaper themselves and blur with backdrop-filter (2026-10-28: "blur is not native, it doesnt actually follow the
-// containers or when their shapes get morphed"); the regions here stay for windows over what the page can't see (Quick
-// Tools over an app, the status chrome, the desktop's home under KWin) and as home's/the lock face's fallback (no
-// wallpaper picture, home lifted over app windows).
+const mode = new URLSearchParams(location.search).get("mode") ?? "home";
+/**
+ * Pages whose window is over the wallpaper and nothing else: what's behind it is what the glass shows.
+ */
+// The lock face too: PowosLockActivity's window has FLAG_SHOW_WALLPAPER, so the wallpaper layer is right under it
+// whatever app is further down - its cards blur the wallpaper live, as home's. With the frosted picture (ui/glass.ts)
+// the cards' blur was a copy made once: it slid with the cards as the face lifted and never showed what moved behind
+// ("the bg elements on the lockscreen still has static blur", 2026-10-28). The picture stays the fallback while the
+// host doesn't blur (b.state 0).
+// Quick Tools (ui/quicktools.tsx) too: a card in a window over any app, the compositor blurring what's under the card
+// alone (a region of that window - the app under it, as it is).
+// The desktop's home (powos-shell) too: a surface under every window, KWin blurring the wallpaper under its tiles.
+const OVER_WALLPAPER = new Set(["home", "lock", "quicktools", "desktop", "statusbar"]);
 /** The surfaces with glass (theme.css): one inside another is only a soft fill on it, not glass of its own. */
 const SURFACES = ".tile, .notif-panel, .status-chrome .chrome-surface";
 
@@ -64,7 +71,7 @@ powos.on("theme.changed", () => setTimeout(sendLook, 0));
 liquidWanted.subscribe(() => sendLook());
 
 function update() {
-  const on = nativePath.value && hostBlurs.value && wanted.value && !!native.value;
+  const on = OVER_WALLPAPER.has(mode) && hostBlurs.value && wanted.value && !!native.value;
   if (on === nativeGlass.value) return;
   nativeGlass.value = on;
   root.classList.toggle("glass-native", on);
@@ -82,11 +89,10 @@ fromNative.add((text) => {
   if (nativeGlass.value) (void (last = ""), kick());
 });
 native.subscribe((p) => {
-  if (p && anyBlur) send("b.hello");
+  if (p && OVER_WALLPAPER.has(mode)) send("b.hello");
   update();
 });
 wanted.subscribe(update);
-nativePath.subscribe(update);
 
 // ---- where the surfaces are -------------------------------------------------------------------------------------------
 

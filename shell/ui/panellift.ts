@@ -15,7 +15,6 @@ import { computed, effect, signal } from "@preact/signals";
 import { fromNative, native, send } from "../apps/native.ts";
 import { editing, windows } from "../state.ts";
 import { drawerOpen } from "./gesture.ts";
-import { overApps } from "./glasspath.ts";
 
 const home = !new URLSearchParams(location.search).get("mode");
 
@@ -31,9 +30,6 @@ const windowsShow = computed(() => windows.value.some((w) => !w.minimised && !w.
 
 /** Home's pages hidden: lifted (or about to be) over windows that show, outside edit mode (there the pages ARE the panel). */
 export const overWindows = computed(() => hostLifts.value && (wanted.value || hostLifted.value) && windowsShow.value && !editing.value);
-// Lifted over app windows: the page can't draw the wallpaper under its glass then (apps are behind it) - the compositor
-// blurs instead (ui/glasspath.ts).
-effect(() => void (overApps.value = overWindows.value));
 
 fromNative.add((text) => {
   if (!text.startsWith("p.lifted ")) return;

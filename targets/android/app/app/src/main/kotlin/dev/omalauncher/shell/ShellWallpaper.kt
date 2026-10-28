@@ -29,18 +29,13 @@ import kotlin.math.roundToInt
  * - another app's live wallpaper (OxygenOS's video ones): the frame it shows now, from the compositor; failing that,
  *   rooted, the system's own screenshot of it (a stale frame); else its thumbnail.
  *
- * Scaled to at most [MAX_SIDE] (the screen's size: the page draws it as it is) and kept until its revision changes. Worked out off
+ * Scaled to at most [MAX_SIDE] (the page blurs it hard: plenty) and kept until its revision changes. Worked out off
  * the main thread: [info] answers with what's cached and looks again in the background; a new picture is announced
  * through [onChange] ("system.glass").
  */
 internal object ShellWallpaper {
     private const val TAG = "PowosWallpaper"
-    /**
-     * The page's picture, longest side px: home and the lock face draw it as their bottom layer and blur with
-     * backdrop-filter (shell/ui/glasspath.ts), so it is the screen's size - the Open's inner screen is 2440 (was 720:
-     * only frosted then).
-     */
-    private const val MAX_SIDE = 2560
+    private const val MAX_SIDE = 720
     private const val LIVE_SETTLE_MS = 2_500L
 
     /** The session's copy ([writeSession]): the longest side, px - about the inner screen's at Plasma's scale 2. */
