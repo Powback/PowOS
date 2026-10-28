@@ -267,8 +267,9 @@ function Pages() {
 
 export function Drawer() {
   const searching = query.value.trim() !== "";
-  // No app by that name: it's a question for PowOS AI. Asked, the chat stays until the search finds apps again.
-  const asking = searching ? searchResults.value.length === 0 && !searchPending.value : chatting.value;
+  // No app by that name: it's a question for PowOS AI. In a chat, typing is the next message: the chat stays (the user,
+  // 2026-10-28: it flipped to search results while typing a follow-up) until the launcher closes.
+  const asking = chatting.value || (searching && searchResults.value.length === 0 && !searchPending.value);
   const open = drawerOpen.value;
   return (
     // The launcher panel's lower part (home.tsx): it comes in (shell.css, by --p) as the recent bar grows into the panel.

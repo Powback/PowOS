@@ -11,7 +11,7 @@ import type { Ref } from "preact";
 import { GrowField } from "./grow.tsx";
 import { searchResults, searchPending, openSearchResult } from "../search.ts";
 import { followOpenness } from "./gesture.ts";
-import { drawer, pullKind, query } from "../state.ts";
+import { chatting, drawer, pullKind, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
 import { forget, hearing, listen, listeningFor, makeHold, release, speech, stopTap, type MicTarget } from "./dictation.ts";
@@ -161,7 +161,8 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
       ref={proxy ? undefined : followOpenness}
       onSubmit={(e) => {
         e.preventDefault();
-        const best = pullKind.value === "apps" ? searchResults.value[0] : null;
+        // In a chat, Enter sends the next message - never opens a search hit.
+        const best = pullKind.value === "apps" && !chatting.value ? searchResults.value[0] : null;
         if (best) openSearchResult(best);
         else if (searchPending.value) return;
         else askHere(query.value);
