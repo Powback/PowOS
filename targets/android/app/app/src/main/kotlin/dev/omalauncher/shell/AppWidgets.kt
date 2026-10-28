@@ -159,6 +159,7 @@ class AppWidgets private constructor(
             super.updateAppWidget(remoteViews)
             // Inflated (getErrorView wasn't called on the way): the next failure starts its backoff from the start.
             if (!failed) asked = 0
+            dataChanged(widget)
         }
 
         /** How often its app has been asked since its views last loaded: the next ask waits longer ([REFRESH_MS]). */
@@ -287,7 +288,8 @@ class AppWidgets private constructor(
 
     fun unlisten(events: (String, Any?) -> Unit) {
         val shown = listeners.remove(events).orEmpty()
-        shown.forEach(::updateShown)
+        val dataIds = dataWatchers.remove(events).orEmpty()
+        (shown + dataIds).forEach(::updateShown)
         updateListening()
     }
 
@@ -563,6 +565,91 @@ class AppWidgets private constructor(
         updateListening()
     }
 
+    // Data mode (docs/app-to-widget.md, slice B): a widget a page asked for as data, not pixels.
+
+    private val data = WidgetData()
+
+    /** Who watches which widget's data: only these are ever read. */
+    private val dataWatchers = LinkedHashMap<(String, Any?) -> Unit, MutableSet<Int>>()
+    private val dataHash = HashMap<Int, Int>()
+    private val dataLast = HashMap<Int, Long>()
+    private val dataQueued = HashMap<Int, Runnable>()
+
+    private fun dataWatched(id: Int) = dataWatchers.values.any { id in it }
+
+    /**
+     * Turns [id]'s data mode on or off for the page [events]. On: the widget is hosted (drawn at its default size,
+     * frames not copied) and "appwidgets.data" comes after each update that changed what it shows.
+     */
+    fun watchData(
+        events: (String, Any?) -> Unit,
+        id: Int,
+        on: Boolean,
+    ) {
+        if (!on) {
+            dataWatchers[events]?.remove(id)
+            if (!dataWatched(id)) {
+                dataHash.remove(id)
+                dataQueued.remove(id)?.let(main::removeCallbacks)
+                updateShown(id)
+            }
+            updateListening()
+            return
+        }
+        val e = entries.firstOrNull { it.id == id } ?: return
+        val info = awm.getAppWidgetInfo(e.id) ?: return
+        dataWatchers.getOrPut(events) { HashSet() } += id
+        dataHash.remove(id) // a new watcher gets the current state
+        if (renderers[id] == null) {
+            val (wDp, hDp) = defaultSizeDp(info)
+            val d = context.resources.displayMetrics.density
+            val w = (wDp * d).roundToInt().coerceIn(1, 4096)
+            val h = (hDp * d).roundToInt().coerceIn(1, 4096)
+            awm.updateAppWidgetOptions(id, sizeOptions(wDp, hDp))
+            val store = frames.getOrPut(id, ::Frames)
+            renderers[id] = Renderer(info, w, h, bound = id) { image -> if (store.offer(image)) main.post { frame(id) } }
+        }
+        updateShown(id)
+        updateListening()
+        scheduleData(id, SETTLE_MS)
+    }
+
+    /** [id] was updated: if anyone watches its data, read it soon (coalesced, at most once per [DATA_MS]). */
+    private fun dataChanged(id: Int) {
+        if (dataWatched(id)) scheduleData(id, SETTLE_MS)
+    }
+
+    private fun scheduleData(
+        id: Int,
+        settle: Long,
+    ) {
+        if (dataQueued.containsKey(id)) return
+        val wait = maxOf(settle, (dataLast[id] ?: 0L) + DATA_MS - SystemClock.uptimeMillis())
+        val run =
+            Runnable {
+                dataQueued.remove(id)
+                publishData(id)
+            }
+        dataQueued[id] = run
+        main.postDelayed(run, wait)
+    }
+
+    private fun publishData(id: Int) {
+        val view = renderers[id]?.view ?: return
+        if ((view as? KeptView)?.failed == true || view.width <= 0) return
+        dataLast[id] = SystemClock.uptimeMillis()
+        val tree = runCatching { data.read(view) }.onFailure { Log.w(TAG, "widget $id data", it) }.getOrNull() ?: return
+        val hash = tree.toString().hashCode()
+        if (dataHash[id] == hash) return
+        dataHash[id] = hash
+        val provider = awm.getAppWidgetInfo(id)?.let(::name) ?: JSONObject.NULL
+        val payload = JSONObject().put("id", id).put("provider", provider).put("at", System.currentTimeMillis()).put("tree", tree)
+        for ((events, ids) in dataWatchers.entries.toList()) if (id in ids) events("appwidgets.data", payload)
+    }
+
+    /** A small picture of a data tree (its image ref): a PNG data URL. */
+    fun image(ref: String): String? = data.image(ref)
+
     /**
      * Whether any page shows [id]: its frames are copied only then (it's drawn regardless - a clock ticks on), and one
      * no page has shown for [RELEASE_MS] is let go of, its last frame kept for the tile to show when it's back.
@@ -571,7 +658,7 @@ class AppWidgets private constructor(
         val shown = listeners.values.any { id in it }
         renderers[id]?.shown = shown
         releases.remove(id)?.let(main::removeCallbacks)
-        if (!shown && id in renderers) {
+        if (!shown && id in renderers && !dataWatched(id)) {
             releases[id] =
                 Runnable {
                     releases.remove(id)
@@ -585,7 +672,7 @@ class AppWidgets private constructor(
      * listening when it isn't on screen); what changed meanwhile comes when it listens again.
      */
     private fun updateListening() {
-        val want = listeners.values.any { it.isNotEmpty() }
+        val want = listeners.values.any { it.isNotEmpty() } || dataWatchers.values.any { it.isNotEmpty() }
         if (want == listening) return
         listening = want
         runCatching { if (want) host.startListening() else host.stopListening() }.onFailure { Log.w(TAG, "listening $want", it) }
@@ -1198,6 +1285,10 @@ class AppWidgets private constructor(
 
         /** At most a frame a display frame goes to the page (a list scrolling, a ripple); it asks for each when shown. */
         private const val FRAME_MS = 16L
+
+        /** Data mode: at most one "appwidgets.data" a second per widget, and a read waits this long after an update for the layout. */
+        private const val DATA_MS = 1000L
+        private const val SETTLE_MS = 250L
 
         /** Untouched, at most five frames a second (an animation nobody's touching, a player's progress). */
         private const val IDLE_FRAME_MS = 200L

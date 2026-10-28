@@ -81,6 +81,35 @@ export interface HomeItem {
   apps?: { key: string; label: string; app: string }[];
   /** appwidget: another app's Android widget (its [name] is the widget's label) */
   appWidget?: AppWidgetRef;
+  /** A placeholder the shell drew at once while the real tile is on its way (e.g. "Adding..."); gone with home.changed. */
+  pending?: string;
+}
+
+/**
+ * What a hosted Android widget shows, as data ("appwidgets.data" while watchData is on): the rendered view tree
+ * slimmed down. Bounds are [x, y, w, h] dp inside the widget. Roles are guesses by size/position.
+ */
+export interface AppWidgetTree {
+  /** The widget's size, dp. */
+  w: number;
+  h: number;
+  texts: { t: string; role: "title" | "value" | "label"; size: number; b: [number, number, number, number] }[];
+  /** [ref]: a small cached picture, fetched once with appWidgets.image(ref). */
+  images: { ref: string; b: [number, number, number, number]; d?: string }[];
+  progress: { v: number; max: number; indeterminate: boolean; b: [number, number, number, number] }[];
+  /** Each list's rows, each row its texts. */
+  lists: { b: [number, number, number, number]; rows: string[][] }[];
+  /** What a tap does something on: its centre goes to appWidgets.touch. */
+  targets: { b: [number, number, number, number]; label: string }[];
+}
+
+/** The "appwidgets.data" event. */
+export interface AppWidgetData {
+  id: number;
+  provider: string;
+  /** Epoch ms of the read. */
+  at: number;
+  tree: AppWidgetTree;
 }
 
 /** An Android widget on home: the system's id for it, its provider (a component) and that provider's app. */
@@ -425,6 +454,14 @@ export interface Bridge {
      */
     watch(id: number, width: number, height: number): Promise<{ url: string | null; scrolls: boolean } | null>;
     unwatch(id: number): Promise<void>;
+    /**
+     * Host-optional (f307: feature-detect `powos.appWidgets.watchData`). Turns widget [id]'s data mode on or off: while
+     * on, "appwidgets.data" ({@link AppWidgetData}) comes after each update that changed what it shows (at most about
+     * once a second); the widget is hosted without frames. Off for every widget until asked, so idle ones cost nothing.
+     */
+    watchData?(id: number, on: boolean): Promise<void>;
+    /** Host-optional: the picture [ref] of an {@link AppWidgetTree} image, a small PNG data URL (null once forgotten). */
+    image?(ref: string): Promise<string | null>;
     /** A touch on its tile at (x, y) of a tile [width] x [height] CSS px; "cancel": the page took the gesture. */
     touch(
       id: number,

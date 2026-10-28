@@ -718,15 +718,7 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
           )}
         </div>
       )}
-      {item.kind === "appwidget" &&
-        (item.error ? (
-          <div class="tile widget-face">
-            <div class="widget-name">{item.name}</div>
-            <div class="widget-error">{item.error}</div>
-          </div>
-        ) : (
-          <AppWidgetFace item={item} />
-        ))}
+      {item.kind === "appwidget" && <AppWidgetBody item={item} />}
       {item.kind === "panel" && item.name === "agents" && <AgentsPanel item={item} />}
       {item.kind === "panel" && item.name?.startsWith("app:") && <Island item={item} />}
       {item.kind === "panel" && item.name === "recents" && <RecentsPanel item={item} />}
@@ -1038,6 +1030,26 @@ function useMeasured(el: { current: HTMLDivElement | null }) {
       removeEventListener("resize", shown);
     };
   }, []);
+}
+
+/** An Android widget's tile body: the placeholder while it's being added, its error, or its frames. */
+function AppWidgetBody({ item }: { item: HomeItem }) {
+  if (item.pending) {
+    return (
+      <div class="tile widget-face">
+        <div class="widget-name">{item.name}</div>
+        <div class="widget-error">{item.pending}</div>
+        <progress />
+      </div>
+    );
+  }
+  if (!item.error) return <AppWidgetFace item={item} />;
+  return (
+    <div class="tile widget-face">
+      <div class="widget-name">{item.name}</div>
+      <div class="widget-error">{item.error}</div>
+    </div>
+  );
 }
 
 export function Pages() {

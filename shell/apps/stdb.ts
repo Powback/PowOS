@@ -92,6 +92,18 @@ async function addAppWidget(provider: string): Promise<"added"> {
   if (!p) throw new Error("Android doesn't list this widget (is the app installed?)");
   const { placeNew } = await import("../ui/grid.tsx");
   const spot = placeNew(p.sizeDp[0], p.sizeDp[1]);
+  // Optimistic: a placeholder tile is on home at once, in its spot, "Adding..." - real tile replaces it (home.changed),
+  // a failure removes it and says why.
+  const { home } = await import("../state.ts");
+  const ph = `pending:${p.provider}:${Date.now()}`;
+  home.value = {
+    ...home.value,
+    items: [
+      ...home.value.items,
+      { key: ph, kind: "appwidget", page: spot.page, cell: spot.cell, resizable: false, minSize: [1, 1], size: null, name: p.label, pending: "Adding..." },
+    ],
+  };
+  const dropPlaceholder = () => (home.value = { ...home.value, items: home.value.items.filter((i) => i.key !== ph) });
   // Listen before asking: a bind prompt's outcome can arrive before add() resolves.
   let settle!: (e?: Error) => void;
   const outcome = new Promise<void>((res, rej) => (settle = (e) => (e ? rej(e) : res())));
@@ -104,6 +116,7 @@ async function addAppWidget(provider: string): Promise<"added"> {
     if (r === "pending") await outcome; // Android asks first: "Allow PowOS to create widgets", then the widget's setup.
     return "added";
   } finally {
+    dropPlaceholder();
     clearTimeout(timer);
     offFail?.();
     offHome?.();

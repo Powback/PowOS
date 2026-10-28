@@ -120,6 +120,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       watch: (id, width, height) =>
         call<{ url: string | null; scrolls: boolean } | null>("appwidgets.watch", id, width, height),
       unwatch: (id) => call("appwidgets.unwatch", id),
+      watchData: (id, on) => call("appwidgets.watchData", id, on),
+      image: (ref) => call<string | null>("appwidgets.image", ref),
       touch: (id, action, x, y, width, height) => call("appwidgets.touch", id, action, x, y, width, height),
       configure: (id) => call("appwidgets.configure", id),
     },
@@ -993,6 +995,8 @@ function mock(): Bridge {
 }
 
 /** The mock's Android widgets: a light switch and a note card, their frames SVG data URLs. */
+const dataTimers = new Map<number, ReturnType<typeof setInterval>>();
+
 function mockAppWidgets(home: Home, changed: () => void, events: Events): Bridge["appWidgets"] {
   const providers: AppWidgetProvider[] = [
     ["com.example.lights/.Switch#0", "Light switch", "Lights", [57, 57], [40, 40], true],
@@ -1046,6 +1050,38 @@ function mockAppWidgets(home: Home, changed: () => void, events: Events): Bridge
     },
     watch: async (id) => ({ url: url(id), scrolls: false }),
     unwatch: async () => {},
+    // A fake step counter: the same tree a real widget's view tree slims to; the count ticks while watched.
+    watchData: async (id, on) => {
+      clearInterval(dataTimers.get(id));
+      dataTimers.delete(id);
+      if (!on) return;
+      let steps = 4210;
+      const push = () => {
+        const item = home.items.find((i) => i.appWidget?.id === id);
+        events.emit("appwidgets.data", {
+          id,
+          provider: item?.appWidget?.provider ?? "com.example.steps/.Counter#0",
+          at: Date.now(),
+          tree: {
+            w: 250,
+            h: 110,
+            texts: [
+              { t: "Steps", role: "title", size: 12, b: [12, 8, 60, 16] },
+              { t: steps.toLocaleString("en"), role: "value", size: 34, b: [12, 28, 120, 44] },
+              { t: "of 8,000", role: "label", size: 12, b: [12, 74, 70, 16] },
+            ],
+            images: [],
+            progress: [{ v: steps, max: 8000, indeterminate: false, b: [12, 94, 226, 6] }],
+            lists: [],
+            targets: [{ b: [0, 0, 250, 110], label: "Steps" }],
+          },
+        });
+        steps += 17;
+      };
+      push();
+      dataTimers.set(id, setInterval(push, 1000));
+    },
+    image: async () => null,
     touch: async (id, action) => {
       if (action !== "up") return;
       on.set(id, !(on.get(id) ?? false));

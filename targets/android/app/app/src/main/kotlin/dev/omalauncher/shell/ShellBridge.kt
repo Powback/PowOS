@@ -380,6 +380,8 @@ class ShellBridge(
             "appwidgets.add" -> appWidgets.add(a.getString(0), a.getInt(1), a.getJSONObject(2), a.getDouble(3), a.getDouble(4))
             "appwidgets.watch" -> appWidgets.watch(appWidgetEvents, a.getInt(0), a.getDouble(1), a.getDouble(2))
             "appwidgets.unwatch" -> appWidgets.unwatch(appWidgetEvents, a.getInt(0))
+            "appwidgets.watchData" -> appWidgets.watchData(appWidgetEvents, a.getInt(0), a.getBoolean(1))
+            "appwidgets.image" -> appWidgets.image(a.getString(0)) ?: JSONObject.NULL
             "appwidgets.touch" -> appWidgets.touch(a.getInt(0), a.getString(1), a.getDouble(2), a.getDouble(3), a.getDouble(4), a.getDouble(5))
             "appwidgets.configure" -> appWidgets.reconfigure(a.getInt(0))
             "widgets.watch" -> widgets.watch(a.getString(0), a.optBoolean(1))
