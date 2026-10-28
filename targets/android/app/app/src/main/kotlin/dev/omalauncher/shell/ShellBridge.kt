@@ -242,13 +242,17 @@ class ShellBridge(
             }
             // The main shell's frame samples (fps + new frame times, ~4 Hz) to the other windows' meter: re-parsed, never spliced raw.
             "perf.publish" -> a.getString(0).takeIf { it.length < 8192 }?.let { broadcast("perf.sample", JSONObject(it).toString(), except = this) }
-            // Perf trace from the status bar's fps meter: saved where PowOS AI sees it (the shared run dir).
+            // Perf trace from the status bar's fps meter: saved where PowOS AI sees it (the shared run dir), the last 20 kept,
+            // and mailed to the coordinator (the Mac session running PowOS) so every recording reaches it with its full data.
             "perf.save" -> {
                 val dir = java.io.File(context.filesDir, "run/powos-ai-shared").apply { mkdirs() }
                 val name = "perf-${System.currentTimeMillis()}.json"
-                dir.listFiles { f -> f.name.startsWith("perf-") }?.sortedBy { it.lastModified() }?.dropLast(9)?.forEach { it.delete() }
-                java.io.File(dir, name).writeText(a.getString(0))
-                "/run/powos-app/powos-ai-shared/$name"
+                dir.listFiles { f -> f.name.startsWith("perf-") }?.sortedBy { it.lastModified() }?.dropLast(19)?.forEach { it.delete() }
+                val json = a.getString(0)
+                java.io.File(dir, name).writeText(json)
+                val path = "/run/powos-app/powos-ai-shared/$name"
+                sendPerfToCoordinator(json, path)
+                path
             }
             "ai.chat" -> aiChat()
             "ai.send" -> {
@@ -722,6 +726,26 @@ class ShellBridge(
         val theme = runtime.themes.choices.firstOrNull { it.name == name } ?: error("no theme $name")
         runtime.themes.pick(theme)
         scope.launch { if (runtime.themes.complete) runtime.themes.applyPicked() else runtime.themes.fetchPicked() }
+    }
+
+    /**
+     * A saved fps-meter recording to the coordinator's comms inbox (priority high, so its mail monitor picks it up): the
+     * summary inline, the full trace's path in the guest. Off the bridge thread; a failure only logs (the file and the
+     * AI chat message still stand).
+     * HACK: shells out to `powos comms send` through RootedGuest, as AgentsSpool.message does - the real fix is a comms
+     * reducer the app calls directly (Phase 2's SpacetimeDB comms), no guest process per message.
+     */
+    private fun sendPerfToCoordinator(json: String, path: String) {
+        val summary = runCatching { JSONObject(json).optJSONObject("summary")?.toString() }.getOrNull() ?: "{}"
+        val text = "Perf recording from the phone's fps meter (record/stop). Full data: $path (on the phone; Android path " +
+            "/data/user/0/${context.packageName}/files/run/powos-ai-shared/${path.substringAfterLast('/')}). Summary: $summary"
+        Thread({
+            runCatching {
+                dev.omalauncher.linux.RootedGuest.run(
+                    "powos comms send coordinator ${dev.omalauncher.linux.shellQuote(text)} --from shell --priority high",
+                )
+            }.onFailure { android.util.Log.w("ShellBridge", "perf: can't mail the coordinator", it) }
+        }, "perf-send").start()
     }
 
     /**
