@@ -37,6 +37,9 @@ else
     SELF_MARKER="/var/lib/powos/.powos-src-commit"
 fi
 SELF_UPSTREAM="${POWOS_UPSTREAM:-https://github.com/Powback/PowOS.git}"
+# Branch `self` follows: `powos config upstream-branch <name>` (key upstream-branch in /etc/powos/config), default master.
+SELF_BRANCH="${POWOS_UPSTREAM_BRANCH:-$(awk -F= '$1=="upstream-branch" { v=$2 } END { print v }' /etc/powos/config 2>/dev/null)}"
+SELF_BRANCH="${SELF_BRANCH:-master}"
 
 # Indent a stream by two spaces without sed (repo owner forbids sed).
 self_indent() { awk '{ print "  " $0 }'; }
@@ -150,9 +153,9 @@ self_apply_manifest() {
 #   B) no .git (bundled snapshot):
 #      - git init + add origin
 #      - baked SHA known & fetchable → seed the index from the TRUE base so only
-#        real edits show as pending, stash-if-dirty, checkout origin/master,
+#        real edits show as pending, stash-if-dirty, checkout origin/$SELF_BRANCH,
 #        stash pop.
-#      - baked SHA unknown/unfetchable → align with origin/master ONLY if the
+#      - baked SHA unknown/unfetchable → align with origin/$SELF_BRANCH ONLY if the
 #        tree is clean; otherwise REFUSE (tell the user to commit/copy first).
 # ══════════════════════════════════════════════════════════════════
 # self_safe_pull's phases. Each is a named step of the flow above, in the
@@ -160,7 +163,7 @@ self_apply_manifest() {
 # a SELF_PULL_* global rather than echoed: every one of them also PRINTS
 # progress, and a command substitution would swallow exactly that.
 SELF_PULL_BAKED=""         # baked base SHA, or "unknown" (self_pull_attach)
-SELF_PULL_HAVE_MASTER=0    # did the origin/master fetch succeed?
+SELF_PULL_HAVE_MASTER=0    # did the origin/$SELF_BRANCH fetch succeed?
 
 # ── Case A: already a git checkout → plain safe pull ──
 # Local edits are stashed first and popped after, so a pull can never eat them.
@@ -210,9 +213,9 @@ self_pull_attach() {
     git -C "$src" remote add origin "$upstream" 2>/dev/null \
         || git -C "$src" remote set-url origin "$upstream" 2>/dev/null || true
 
-    # Always need origin/master to align onto.
+    # Always need origin/$SELF_BRANCH to align onto.
     SELF_PULL_HAVE_MASTER=0
-    git -C "$src" fetch --depth 200 origin master 2>/dev/null && SELF_PULL_HAVE_MASTER=1
+    git -C "$src" fetch --depth 200 origin "$SELF_BRANCH" 2>/dev/null && SELF_PULL_HAVE_MASTER=1
     # A failed fetch is NOT an error here — the fallback below reports it with
     # the right message. Without this `return 0` the `&&` above would become
     # the return value and abort the attach on a perfectly normal offline run.
@@ -220,7 +223,7 @@ self_pull_attach() {
 }
 
 # Can we align onto the TRUE baked base? Ensures the baked commit is present
-# (depth fallback → an explicit fetch of it) and that origin/master arrived.
+# (depth fallback → an explicit fetch of it) and that origin/$SELF_BRANCH arrived.
 # Non-zero means "not usable" — the caller falls back to the master-only path.
 self_pull_have_base() {
     local src="$1" baked="$2"
@@ -231,7 +234,7 @@ self_pull_have_base() {
     (( SELF_PULL_HAVE_MASTER ))
 }
 
-# ── Case B, step 2: align onto origin/master FROM the baked base ──
+# ── Case B, step 2: align onto origin/$SELF_BRANCH FROM the baked base ──
 # Returns SELF_PULL_SKIP (90) when the baked base is unusable, so the caller
 # can fall through — any other code is this phase's final answer.
 SELF_PULL_SKIP=90
@@ -250,8 +253,8 @@ self_pull_align_baked() {
         plog "Bundle carries local edits — stashing before checkout…"
         git -C "$src" stash push -u -m "powos-bundle-edits" >/dev/null 2>&1 && stashed=1
     fi
-    if ! git -C "$src" checkout -B master origin/master >/dev/null 2>&1; then
-        perr "checkout of origin/master failed."
+    if ! git -C "$src" checkout -B "$SELF_BRANCH" origin/$SELF_BRANCH >/dev/null 2>&1; then
+        perr "checkout of origin/$SELF_BRANCH failed."
         (( stashed )) && git -C "$src" stash pop >/dev/null 2>&1 || true
         return 1
     fi
@@ -269,7 +272,7 @@ self_pull_align_baked() {
 
 # ── Case B, fallback: baked SHA unknown/unfetchable. NEVER force over edits. ──
 # Without the true base we can't perfectly separate edits from a pristine
-# bundle. Seed the index from origin/master and REFUSE if anything differs.
+# bundle. Seed the index from origin/$SELF_BRANCH and REFUSE if anything differs.
 self_pull_align_master() {
     local src="$1"
     if (( ! SELF_PULL_HAVE_MASTER )); then
@@ -277,17 +280,17 @@ self_pull_align_master() {
         perr "Set up auth (gh auth login) or deploy locally: powos update self --from /path"
         return 1
     fi
-    git -C "$src" reset --mixed origin/master >/dev/null 2>&1 || true
+    git -C "$src" reset --mixed origin/$SELF_BRANCH >/dev/null 2>&1 || true
     if self_git_dirty "$src"; then
-        perr "Baked base commit is unknown and the tree differs from origin/master."
+        perr "Baked base commit is unknown and the tree differs from origin/$SELF_BRANCH."
         perr "Refusing to reset — that could discard local edits. Your files are UNTOUCHED."
         perr "Commit or copy your changes out of $src first, then re-run:"
         perr "  (cd $src && git add -A && git commit -m 'my edits')   # then: powos self pull"
         return 1
     fi
     # Clean tree → safe to align with master (no data to lose).
-    if ! git -C "$src" checkout -B master origin/master >/dev/null 2>&1; then
-        perr "checkout of origin/master failed."
+    if ! git -C "$src" checkout -B "$SELF_BRANCH" origin/$SELF_BRANCH >/dev/null 2>&1; then
+        perr "checkout of origin/$SELF_BRANCH failed."
         return 1
     fi
     pok "Attached to upstream (no local edits detected)."
@@ -334,10 +337,10 @@ self_status() {
         else
             echo "Local edits:   none"
         fi
-        local ab; ab="$(git -C "$src" rev-list --left-right --count 'origin/master...HEAD' 2>/dev/null)"
+        local ab; ab="$(git -C "$src" rev-list --left-right --count "origin/$SELF_BRANCH...HEAD" 2>/dev/null)"
         if [[ -n "$ab" ]]; then
             local behind="${ab%%[[:space:]]*}" ahead="${ab##*[[:space:]]}"
-            echo "vs origin/master: $ahead ahead, $behind behind"
+            echo "vs origin/$SELF_BRANCH: $ahead ahead, $behind behind"
         fi
     else
         echo "Git:           not attached (bundled snapshot)"

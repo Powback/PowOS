@@ -53,7 +53,10 @@ install -m 755 "$HERE/install-powos-android.sh" "$S/"
 cp -a "$HERE/../../desktop/plasmoid" "$S/plasmoids"
 # The downloaded manifest supplies distro packages; ship this checkout's committed PowOS CLI and libraries.
 mkdir -p "$S/current"
-git -C "$HERE/../.." archive HEAD bin lib | tar -x -C "$S/current"
+# The whole tree, exactly as CI's .snapshot (git archive HEAD): install-powos-android.sh takes bin/ and lib/ from it
+# and bakes it as the bundled source that `powos self` attaches to origin.
+mkdir -p "$S/current/src"
+git -C "$HERE/../.." archive HEAD | tar -x -C "$S/current/src"
 git -C "$HERE/../.." rev-parse HEAD > "$S/current/revision"
 
 # 3. Build inside a privileged aarch64 container (chroot + mounts need it), on a Docker volume:

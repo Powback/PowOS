@@ -34,6 +34,7 @@ ssh|on,off|now|SSH server (sshd) — remote shell access to this machine
 driver|stable,testing|reboot|NVIDIA driver channel — tested vs newest published image
 auto-update|on,off|now|Stage OS updates in the background; they apply at your next reboot
 ramsize|custom|reboot|RAM overlay size, e.g. 8G or 24G (kernel arg rd.powos.ramsize)
+upstream-branch|custom|now|Git branch `powos self` pulls from and compares against (default master)
 sync-interval|custom|now|RAM→disk layer sync interval in seconds (default 60)
 nvidia-persistence|on,off|now|Keep the NVIDIA GPU initialized between uses (consistent idle state)
 cachefs|on,off|reboot|CacheFS lazy /home (experimental)
@@ -159,6 +160,11 @@ set_ramsize() {
         return 1
     fi
 }
+
+# ── upstream-branch (file-backed; lib/self.sh reads it) ─
+get_upstream_branch() { local v; v="$(cfg_file_get upstream-branch)"; echo "${v:-master}"; }
+validate_upstream_branch() { [[ "$1" =~ ^[A-Za-z0-9._/-]+$ ]]; }
+set_upstream_branch() { cfg_file_set upstream-branch "$1" && cok "upstream-branch: $1"; }
 
 # ── sync-interval (file-backed; layer-sync service reads it via env) ─
 
