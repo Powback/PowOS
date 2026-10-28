@@ -2564,7 +2564,11 @@ html:root .notif-panel:has(> .panel-body.together) {
   box-shadow: none;
   border-radius: 0;
 }
-.notif-panel .cc.v3 { padding: 10px; border-radius: calc(var(--radius) * 1.5); box-shadow: var(--lift); }
+.notif-panel .cc.v3 { padding: 10px; border-radius: calc(var(--radius) * 1.5); }
+/* The control center has no card of its own (the user: "we dont need the bg of the control centre"): no fill, edge or
+   shadow - its tiles and sliders (their own fills kept) float on the shade's blur, as the notifications do. Its frost
+   variables stay (the text colours read them). Same selector as the glass rule above, later: it wins. */
+html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 
 /*
  * The widget detail sheet (ui/widgetsheet.tsx, apps/sheet.ts): a frosted popover anchored to a widget - the menus'

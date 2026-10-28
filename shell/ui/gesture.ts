@@ -277,7 +277,7 @@ interface Gesture {
   last: [number, number, number];
   /** Velocity along the gesture's axis, px/ms. */
   v: number;
-  mode: "open" | "close" | "over" | "pages" | "notifClose" | "panel" | "ccAll" | null;
+  mode: "open" | "close" | "over" | "pages" | "notifClose" | "panel" | "ccAll" | "listOver" | null;
   open: boolean;
   /** The notification panel was down when it started. */
   notif: boolean;
@@ -435,6 +435,8 @@ function claim(gs: Gesture, dx: number, dy: number): boolean {
 /** The notification panel down. */
 function claimOnPanel(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
   const vertical = Math.abs(dy) > Math.abs(dx);
+  // Down past the notifications' top: only their list stretches (damped, as Android's), the card and panels stay.
+  if (vertical && dy > 0 && gs.listTop && notifDrag.value == null && inNotifs(gs) && grabList(gs)) return "listOver";
   if (vertical && ccAllWay(gs, dy)) return "ccAll";
   // Up drags it shut (the list scrolls until its end); sideways is a card's.
   if (dy < 0 && vertical && atListEnd(gs)) return "notifClose";
@@ -444,17 +446,49 @@ function claimOnPanel(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
 /** The list scrolled to its end, or none under the finger. */
 const atListEnd = (gs: Gesture) => !gs.inList || gs.listBottom;
 
+/** The control center's card (its whole-panel pull and fold are its own), and the notifications' side. */
+const CARD = ".cc, .cc3-grid, .cc-col";
+const inNotifs = (gs: Gesture) => !!gs.target.closest?.(".notif-own, .notif-list");
+
+/** The notifications' list over-pulled past its top: its items follow the finger damped (at most LIST_OVER px). */
+const LIST_OVER = 56;
+let overItems: HTMLElement[] = [];
+function grabList(gs: Gesture) {
+  const list = gs.target.closest?.(".notif-list") ?? gs.target.closest?.(".notif-own")?.querySelector(".notif-list");
+  overItems = list ? ([...list.children] as HTMLElement[]) : [];
+  return overItems.length > 0;
+}
+function listOverTo(dy: number) {
+  const d = LIST_OVER * (1 - Math.exp(-Math.max(0, dy) / 180));
+  for (const el of overItems) {
+    el.style.transition = "none";
+    el.style.transform = `translateY(${d}px)`;
+  }
+}
+/** Let go: back to the top, ease-out, no spring. */
+function listOverBack() {
+  const els = overItems;
+  overItems = [];
+  for (const el of els) {
+    el.style.transition = "transform 200ms cubic-bezier(0.25, 1, 0.5, 1)";
+    el.style.transform = "";
+  }
+  window.setTimeout(() => {
+    for (const el of els) if (!el.style.transform) el.style.transition = "";
+  }, 240);
+}
+
 /**
  * The one panel open: down at its top shows the control center's whole view; with it shown, the list scrolls through
  * it all and the notifications, and up at the end folds it (ccexpand.ts) - before up shuts the panel.
  */
 function ccAllWay(gs: Gesture, dy: number) {
   if (separatePanels.value === "on" || notifDrag.value != null) return false;
-  // Down at the top: shows the rest (folded), or - already whole - the rubber band (the card and the notifications
-  // follow the finger damped and spring back, ccexpand.ts stretch/settle).
-  if (dy > 0) return gs.listTop;
+  // Down at the top: shows the rest (folded), or - already whole - a short rubber band (ccexpand.ts stretch/settle),
+  // only when the drag starts on the card itself; from the notifications only their list moves (listOver).
+  if (dy > 0) return gs.listTop && !inNotifs(gs) && (!ccExpanded.value || !!gs.target.closest?.(CARD));
   // Up from an expanded shade shuts it whole (one swipe): the fold is the control center's own area's swipe only.
-  return ccExpanded.value && atListEnd(gs) && !!gs.target.closest?.(".cc, .cc3-grid, .cc-col");
+  return ccExpanded.value && atListEnd(gs) && !!gs.target.closest?.(CARD);
 }
 
 /**
@@ -509,6 +543,8 @@ function dragTo(gs: Gesture, dx: number, dy: number) {
   switch (gs.mode) {
     case "ccAll":
       return void stretchCc(dy);
+    case "listOver":
+      return listOverTo(dy);
     case "panel":
       lastDx = dx;
       return void panelBody()?.style.setProperty("--panel-dx", `${panelResist(dx)}px`);
@@ -573,6 +609,7 @@ function settleGesture(gs: Gesture, dy: number) {
   const { mode, v } = gs;
   if (isDrawerMode(mode)) return settleDrawerGesture(gs, v);
   if (mode === "notifClose") return settleNotif(v);
+  if (mode === "listOver") return listOverBack();
   // Past the threshold, or a flick its way: committed; otherwise it springs back.
   if (mode === "ccAll") return settleCc(!ccExpanded.value ? dy > EXPAND_AT || v > FLICK : dy < -FOLD_AT || v < -FLICK);
   if (mode === "panel") return settlePanel(lastDx, v);

@@ -127,9 +127,9 @@ function peekTo(k: number) {
   for (const a of peekAnims) a.currentTime = k * MS;
 }
 
-/** EASE as a function of time (0..1): the cubic bezier solved for x (Newton, then bisection). */
-function eased(t: number) {
-  const [x1, y1, x2, y2] = [0.2, 0.9, 0.3, 1];
+/** A cubic bezier ([pts], EASE's by default) as a function of time (0..1): solved for x (bisection). */
+function eased(t: number, pts: Curve = EASE_PTS) {
+  const [x1, y1, x2, y2] = pts;
   const bz = (s: number, a: number, b: number) => 3 * a * s * (1 - s) ** 2 + 3 * b * s * s * (1 - s) + s ** 3;
   let lo = 0, hi = 1, s = t;
   for (let i = 0; i < 20; i++) {
@@ -143,12 +143,12 @@ function eased(t: number) {
 }
 let rideFrame = 0;
 /** The tied animations from k [from] to [to] on the translate's own curve and duration (one currentTime a frame). */
-function ride(from: number, to: number) {
+function ride(from: number, to: number, ms = MS, pts: Curve = EASE_PTS) {
   cancelAnimationFrame(rideFrame);
   const t0 = performance.now();
   const step = (now: number) => {
-    const t = Math.min(1, Math.max(0, (now - t0) / MS));
-    peekTo(from + (to - from) * eased(t));
+    const t = Math.min(1, Math.max(0, (now - t0) / ms));
+    peekTo(from + (to - from) * eased(t, pts));
     if (t < 1) rideFrame = requestAnimationFrame(step);
   };
   rideFrame = requestAnimationFrame(step);
@@ -159,8 +159,8 @@ export const ccEditing = signal(false);
 
 /** The finger's travel (CSS px) to the classic rows' spread: easy at first, firmer the further it goes. */
 const band = (d: number) => Math.sign(d) * 120 * (1 - Math.exp(-Math.abs(d) / 200));
-/** Past the end (v3): a short rubber band, at most OVER px. */
-const OVER = 40;
+/** Past the end (v3, only a drag on the card itself - gesture.ts ccAllWay): a subtle rubber band, at most OVER px. */
+const OVER = 20;
 const over = (d: number) => OVER * (1 - Math.exp(-Math.max(0, d) / 100));
 /** Pulled this far (CSS px, the finger's travel) it commits on its own; a flick (gesture.ts FLICK) does too. */
 export const EXPAND_AT = 56;
@@ -168,6 +168,12 @@ export const EXPAND_AT = 56;
 export const FOLD_AT = 24;
 const MS = 260;
 const EASE = "cubic-bezier(0.2, 0.9, 0.3, 1)";
+/** Folding: a clean, quick fold (height and opacity, ease-out) - no stretch or spring frames. */
+const FOLD_MS = 200;
+const FOLD_EASE = "cubic-bezier(0.25, 1, 0.5, 1)";
+type Curve = [number, number, number, number];
+const EASE_PTS: Curve = [0.2, 0.9, 0.3, 1];
+const FOLD_PTS: Curve = [0.25, 1, 0.5, 1];
 
 /** What the finger moves; [gain] of its spread (classic rows spread apart, the rest moves whole). */
 type Mover = { el: HTMLElement; gain: number };
@@ -304,20 +310,22 @@ export function settle(commit: boolean) {
 function ease(p: Pull, r: number, on: boolean) {
   // The values the finger left are the transitions' start (one style pass before they change).
   void inline(p)[0]?.offsetWidth;
-  for (const m of p.movers) m.el.style.transition = `translate ${MS}ms ${EASE}`;
-  p.grid?.style.setProperty("transition", `--cc-k ${MS}ms ${EASE}`);
-  p.card?.style.setProperty("transition", `translate ${MS}ms ${EASE}, clip-path ${MS}ms ${EASE}`);
-  p.own?.style.setProperty("transition", `translate ${MS}ms ${EASE}, --cc-ext ${MS}ms ${EASE}`);
+  // Folding is its own quicker ease-out (no overshoot anywhere: the notifications' panel doesn't bounce).
+  const [ms, ez, pts] = on ? [MS, EASE, EASE_PTS] : [FOLD_MS, FOLD_EASE, FOLD_PTS];
+  for (const m of p.movers) m.el.style.transition = `translate ${ms}ms ${ez}`;
+  p.grid?.style.setProperty("transition", `--cc-k ${ms}ms ${ez}`);
+  p.card?.style.setProperty("transition", `translate ${ms}ms ${ez}, clip-path ${ms}ms ${ez}`);
+  p.own?.style.setProperty("transition", `translate ${ms}ms ${ez}, --cc-ext ${ms}ms ${ez}`);
   p.to = on;
   // The groups ride the same ease, from where the finger left them to the end (at the translate's duration).
   const k0 = peekK;
   place(p, r);
   if (p.grid) {
     peekTo(k0);
-    ride(k0, on ? 1 : 0);
+    ride(k0, on ? 1 : 0, ms, pts);
   }
   clearTimeout(doneTimer);
-  doneTimer = window.setTimeout(() => finish(p, on), MS + 40);
+  doneTimer = window.setTimeout(() => finish(p, on), ms + 40);
 }
 
 /** The end state laid out (the render) and the pull's inline values gone in the same frame: nothing jumps. */

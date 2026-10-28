@@ -547,18 +547,19 @@ async function shadeLayout() {
 }
 
 /**
- * Over-pull (the control center is shown whole by default on a phone): a pull further stretches - the card and the
- * notifications under it follow the finger damped (a rubber band, at most 40 px), the toggles stay as they are; let go,
+ * Over-pull (the control center is shown whole by default on a phone): a pull further ON THE CARD stretches - the card
+ * and the notifications under it follow the finger damped (a subtle rubber band, at most 20 px; from the notifications
+ * only their list moves, gesture.ts listOver), the toggles stay as they are; let go,
  * all springs back. The notifications' panel keeps reaching the screen's bottom and the seam to the card does not open.
  */
 async function overpullShort() {
   const o = window.__op;
   const fails = [];
-  const want = 40 * (1 - Math.exp(-30 / 100));
+  const want = 20 * (1 - Math.exp(-30 / 100));
   await o.drag(30, () => {
     const d = o.under() - o.under0;
     if (d < 3) fails.push(`pulled 30 px further, what's under the control center moved ${Math.round(d)} px (no stretch)`);
-    if (d > 25) fails.push(`pulled 30 px further, what's under the control center moved ${Math.round(d)} px (no damping)`);
+    if (d > 12) fails.push(`pulled 30 px further, what's under the control center moved ${Math.round(d)} px (no damping)`);
     if (Math.abs(d - want) > 4) fails.push(`pulled 30 px further, the stretch is ${Math.round(d)} px, not about ${Math.round(want)}`);
     // The card follows too, not only what's under it: its first row and its top moved by the same.
     if (Math.abs(o.rowTop() - o.rowTop0 - d) > 2) fails.push(`pulled 30 px further, the card's row moved ${Math.round(o.rowTop() - o.rowTop0)} px, what's under it ${Math.round(d)} px`);
