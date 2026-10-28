@@ -20,11 +20,11 @@
 import { powos } from "../bridge.ts";
 import type { GlassSource } from "../types.ts";
 // Live glass (ui/nativeglass.ts): while the compositor blurs behind the surfaces, no frosted picture here.
+import { effect } from "@preact/signals";
 import { debug as nativeDebug, nativeGlass } from "./nativeglass.ts";
+import { mode, pagePath, wallpaperUrl } from "./glasspath.ts";
 
 const root = document.documentElement;
-/** Which page this is (index.html?mode=): home is over the wallpaper; the shade's window over an app; others neither. */
-const mode = new URLSearchParams(location.search).get("mode") ?? "home";
 /**
  * The surfaces that get the glass: every tile and the notification panel (PowOS AI's page shows the wallpaper as home
  * does; its cards are tiles).
@@ -80,7 +80,8 @@ async function frost(url: string): Promise<string> {
 
 /** Frosts [source] for the screen as it is now, unless that's what's up already; no source: the plain fills. */
 function refrost(): Promise<void> {
-  const live = nativeGlass.value;
+  // The page's own blur (glasspath.ts "page") or the compositor's: no frosted picture either way.
+  const live = nativeGlass.value || pagePath.value;
   const key = `${live ? "live" : source}|${innerWidth}x${innerHeight}|${root.dataset.light ?? ""}`;
   if (key === frostedFor) return busy ?? Promise.resolve();
   frostedFor = key;
@@ -156,11 +157,44 @@ async function tone(url: string | null) {
 
 function use(g: GlassSource | null) {
   lastSource = g;
+  void drawable(OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : null);
   void tone((OVER_WALLPAPER.has(mode) || CHROME.has(mode)) ? (g?.wallpaper?.url ?? null) : null);
   root.classList.toggle("glass-behind", TINT_ONLY.has(mode) && g != null);
   source = OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : mode === "assist" && !assistLive ? assistShot : null;
   void refrost();
 }
+
+/**
+ * The page's own wallpaper (glasspath.ts "page"): the host's picture, the same one Android draws behind the window
+ * (ShellWallpaper.kt, now at the screen's size), handed to the page as ready only once decoded - until then the
+ * compositor's regions stay on, so there's never a frame without blur. Drawn as html.glass-page's bottom layer
+ * (theme.css), centred and covering the screen as Android does: the launcher never calls setWallpaperOffsets, so the
+ * wallpaper sits at the middle offset on every page (no parallax to mirror).
+ */
+// HACK: a live (video) wallpaper is drawn as the still frame the host captured (ShellWallpaper "live"), not played -
+// the real fix is the host streaming the wallpaper's surface into the page (a video/canvas layer) or the WebView
+// drawing over a SurfaceView of it.
+let decoding: string | null = null;
+async function drawable(url: string | null) {
+  if (url === decoding) return;
+  decoding = url;
+  if (!url) return void (wallpaperUrl.value = null);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    if (decoding === url) wallpaperUrl.value = url;
+  } catch (e) {
+    console.warn("glass: the wallpaper didn't decode, the compositor blurs", e);
+    if (decoding === url) wallpaperUrl.value = null;
+  }
+}
+effect(() => {
+  const url = pagePath.value ? wallpaperUrl.value : null;
+  if (url) root.style.setProperty("--wallpaper-image", `url("${url}")`);
+  root.classList.toggle("glass-page", !!url);
+  void refrost();
+});
 
 if (mode === "assist") {
   const shot = (s: { screenshot?: string | null } | null) => {

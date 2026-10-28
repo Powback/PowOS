@@ -1430,7 +1430,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
   border-color: transparent;
 }
-html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
+html:not(.glass-native, .glass-page) .ai-screen .tile { background: var(--text-fill); }
 /*
  * Its compose bar: the pill (.pill), where home's search sits, and as high above the keyboard (or the navigation
  * handle) as home's: --ai-foot, one token for every AI compose and pane foot. The AI page is fixed and unpadded, so it
@@ -2400,7 +2400,7 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
 :root[data-light="false"]:not([data-wallpaper="light"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, .home:has(.ai-panel) .launcher-frame.tile, .notif-panel :is(.cc.v3, .notif-own), .page .home-tile > .tile, .home > .bar .bar-pill) {
   --frost-base: color-mix(in oklab, var(--glass-base) 50%, color-mix(in oklab, var(--frost-cool) 80%, var(--color-foreground)));
 }
-html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html.glass-native .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel .cc.v3, html:root .page .home-tile > .tile, html:root .home > .bar .bar-pill {
+html:root .chrome-surface, html:is(.glass-native, .glass-page) .app-screen.tile.sheet, html:is(.glass-native, .glass-page) .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel .cc.v3, html:root .page .home-tile > .tile, html:root .home > .bar .bar-pill {
   --glass-blur-native: var(--frost-blur-native);
   /* Glass, not a slab, over a black backdrop too (blur of black is black): a faint light from above and a lit edge. */
   background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
@@ -2428,7 +2428,7 @@ html:root .page .search-face .bar-pill {
   --glass-blur-native: var(--widget-blur-native);
   background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
 }
-html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
+html:root:not(.glass-native, .glass-page) .ai-screen .tile { background: var(--frost-fill); }
 /*
  * Over a wallpaper of the other tone (a dark theme over a bright picture, a light one over a dark): the frost takes
  * the wallpaper's tone, its text the theme's two colours swapped - as the wallpaper's labels turn (theme.css

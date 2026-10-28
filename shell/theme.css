@@ -163,9 +163,9 @@
   --glass-veil: rgb(255 255 255 / 8%);
   --glass-behind-tint: 66%;
 }
-.glass, .glass-native { --glass-tint: 32%; }
-:is(.glass, .glass-native)[data-light="true"] { --glass-tint: 40%; }
-.glass, .glass-behind, .glass-native { --control-fill: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
+.glass, .glass-native, .glass-page { --glass-tint: 32%; }
+:is(.glass, .glass-native, .glass-page)[data-light="true"] { --glass-tint: 40%; }
+.glass, .glass-behind, .glass-native, .glass-page { --control-fill: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
 /*
  * A sheet: anything over home's own content - a widget's screen, a PowOS app's page, the widget picker, menus,
  * popovers: the reference material (--text-fill over --glass-veil), a .tile too (its region for the compositor, its
@@ -242,12 +242,59 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
  * Live glass (ui/nativeglass.ts, html.glass-native): the display compositor blurs what's behind each surface (the
  * wallpaper), the page only tints it - no picture, and no backdrop blur of its own.
  */
-.glass-native :is(.tile, .notif-panel) {
+.glass-native :is(.tile, .notif-panel), .glass-page :is(.tile, .notif-panel) {
   background: linear-gradient(var(--glass-fill), var(--glass-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
-.glass-native :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
+.glass-native :is(.tile, .notif-panel) .tile, .glass-page :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
+/*
+ * The page's own glass (ui/glasspath.ts "page", html.glass-page: home and the lock face, over the wallpaper only):
+ * the page draws the wallpaper as its bottom layer and every glass surface blurs what's under it with backdrop-filter
+ * - the wallpaper and the DOM beneath, following every shape, radius and transform in the same frame. The look is the
+ * compositor's: the same tint and veil as html.glass-native above, the strength from the same per-surface token
+ * (--glass-blur-native, --widget-blur-native, --frost-blur-native via shell.css), converted: SurfaceFlinger's radius is
+ * about five times a CSS blur's sigma (measured: --glass-blur-native 140 matched blur(28px), see --glass-blur-native);
+ * and the saturation the compositor couldn't do. One blur per surface: one inside another is a soft fill only, and no
+ * will-change anywhere (backdrop-filter makes its own layer; Chromium skips a layer at opacity 0, its blur too).
+ */
+html.glass-page body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* As Android draws it: centred, covering the screen (the launcher sets no wallpaper offsets, ui/glass.ts). */
+  background: var(--wallpaper-image) center / cover no-repeat;
+}
+html:root.glass-page :is(.tile, .notif-panel) {
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur-native) / 5)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(calc(var(--glass-blur-native) / 5)) saturate(var(--glass-saturate));
+}
+html:root.glass-page :is(.tile, .notif-panel) :is(.tile, .notif-panel) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+/*
+ * The lock face fades as it lifts (opacity, will-change): that makes it a backdrop root, so its cards could blur only
+ * what is inside it. It carries its own copy of the wallpaper, held still on screen against the lift (the same picture
+ * as Android's under the window, so the fade between them doesn't show); the page's layer under it is left out.
+ */
+html.glass-page[data-mode="lock"] body::before { content: none; }
+html.glass-page .lock::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* The face's dim (shell.css html[data-mode="lock"]) is under this layer now: drawn on it instead. */
+  background:
+    linear-gradient(rgb(0 0 0 / calc(0.55 * (1 - var(--lift, 0)))), rgb(0 0 0 / calc(0.55 * (1 - var(--lift, 0))))),
+    var(--wallpaper-image) center / cover no-repeat;
+  transform: translateY(calc(var(--lift, 0) * 100%));
+}
+/* Settling, the face's transform eases (shell.css .lock-settling): this one the same way, so the two cancel exactly. */
+html.lock-settling.glass-page .lock::before { transition: transform 220ms ease-out; }
 /*
  * Glass over what the host blurs behind the window (the shade's, the switcher's) or over an app (the assistant's
  * panel, which can't blur the app it circles on): the same surfaces, tinted only - --glass-behind-tint, more of it.
