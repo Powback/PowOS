@@ -9,6 +9,7 @@ src=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/ship-queue-test.XXXXXX")
 export HOME=$T/home PHONE=$T/phone LOG=$T/log GIT_CONFIG_GLOBAL=$T/gitconfig SHIP_DIR=$T/home/.cache/powos-ship-queue
 export SHIP_QUIET_S=2 SHIP_QUIET_SHELL_S=2 SHIP_POLL_S=0.2
+export SHIP_GATE_FIRST=1   # these tests cover the gate-then-push mode; deploy-first is the default
 unset POWOS_SHIP_SERVICE SHIP_AGENT
 Q=$SHIP_DIR
 stop_runner() { local p; p=$(cat "$Q/runner.lock/pid" 2>/dev/null) && kill "$p" 2>/dev/null; pkill -f "$T/" 2>/dev/null; }

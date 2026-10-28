@@ -9,6 +9,7 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/ship-order-test.XXXXXX"); trap '[ -n "${KEEP:-}" 
 export HOME=$T/home PHONE=$T/phone LOG=$T/log GIT_CONFIG_GLOBAL=$T/gitconfig
 # The ship service runs these (tools/phone/ship.sh); its own test is tools/phone/ship-queue-test.sh.
 export POWOS_SHIP_SERVICE=1
+export SHIP_GATE_FIRST=1   # these tests cover the gate-then-push mode; deploy-first is the default
 mkdir -p "$HOME/.cache" "$PHONE/files/shell" "$PHONE/tmp" "$PHONE/app" "$T/bin" "$HOME/Projects/android-app-dev/output"
 export GUARD_WAIT_S=2 GUARD_POLL_S=1
 git config --global user.email t@t; git config --global user.name t; git config --global init.defaultBranch main

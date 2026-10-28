@@ -10,7 +10,11 @@
 # Run by the ship service only (tools/phone/ship.sh: agents push, then `ship.sh request`); by hand only with --direct
 # (an emergency; logged to ~/.cache/powos-ship-queue/direct.log).
 # Waits for the user to be idle >= 60 s (or the screen off) before installing - an install restarts the PowOS session;
-# never installs over an active user (exit 4 after SHIP_WAIT_MIN minutes). --now skips the wait (only for urgent fixes).
+# never installs over an active user. It NEVER GIVES UP (2026-10-28: it quit after 60 min and the user got no Android fix
+# all morning, f310): the built APK stays pending, the wait runs on the phone, and it installs on the next screen-off.
+# Once, when the wait starts: a PowOS notification + a pet line "Update ready (N fixes): lock the screen to install".
+# A newer origin tip with APK inputs ends the wait (exit 8): the runner builds that one instead, which replaces this.
+# SHIP_WAIT_MIN=N (tests) gives up after N minutes with exit 4. --now skips the wait (only for urgent fixes).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 # Always the shared, current rules: each worktree has its own copy of this script, and an old copy skipped the
@@ -76,7 +80,7 @@ until mkdir "$lock" 2>/dev/null; do
 done
 echo "$(git rev-parse --short HEAD) $(git branch --show-current) pid $$ $(date +%H:%M:%S)" > "$lock/who"
 t=""   # the origin-tip tree the newer shell files are gated and pushed from (below)
-trap 'rm -rf "$lock"; rm -f "$sq/wants-phone"; [ "$(cat "$sq/installing" 2>/dev/null)" = $$ ] && rm -f "$sq/installing"; [ -n "$t" ] && { git worktree remove --force "$t/tree" 2>/dev/null; rm -rf "$t"; }' EXIT
+trap 'rm -rf "$lock"; rm -f "$sq/wants-phone" "$sq/apk/waiting"; [ "$(cat "$sq/installing" 2>/dev/null)" = $$ ] && rm -f "$sq/installing"; [ -n "$t" ] && { git worktree remove --force "$t/tree" 2>/dev/null; rm -rf "$t"; }' EXIT
 # Queued ships coalesce: each one builds the origin tip it saw, so a ship whose HEAD is already IN the installed build
 # (another ship took the lock first and built a newer tip) has nothing left to install - 3 ships queued behind one idle
 # wait each rebuilt and reinstalled the same code (2026-10-22). Skip it instead of an ~8 min build + install.
@@ -131,8 +135,12 @@ apk_delta() {   # shell files at commit $1 the APK's bundled shell lacks or has 
 }
 git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
 tip=$(git rev-parse origin/worktree-powos-multiplatform)
-newer=$(apk_delta "$tip") stamp=""
-if [ -n "$newer" ]; then
+newer=$(apk_delta "$tip") stamp=""; sg=POWOS_SKIP_GATE=1; [ -z "${SHIP_GATE_FIRST:-}" ] || sg=
+# The full pre-gate of the delta (573 s; scene sweeps like dock-position / widget fit) REFUSED every APK on 2026-10-28
+# for scenes unrelated to the install. Those files are already live (the shell ship pushed them, and its post-gate
+# reports failures to the coder/board). The install needs only that the pages BOOT: ship-guard.sh check below, with a
+# full rollback. So no pre-gate and an ungated delta push, unless SHIP_GATE_FIRST=1 (the old behaviour).
+if [ -n "$newer" ] && [ -n "${SHIP_GATE_FIRST:-}" ]; then
   t=$(mktemp -d "$HOME/.cache/powos-reapply.XXXXXX")
   git worktree add -q --detach "$t/tree" "$tip" 2>/dev/null || { echo "ship-apk: REFUSED - couldn't check out origin's tip to gate the newer shell files" >&2; exit 3; }
   [ -d shell/node_modules ] && ln -s "$PWD/shell/node_modules" "$t/tree/shell/node_modules"
@@ -148,11 +156,31 @@ if [ -n "$newer" ]; then
     exit 3
   fi
 fi
+# wait_notice: the APK is built and waits for the phone - tell the user once, in plain words: how many fixes, which
+# (the first three titles of this ship's notes, "a; b; c"), and what to do. A notification + the pet's bubble.
+wait_notice() {
+  [ -n "$silent" ] && return 0
+  local n titles msg m
+  n=$(printf '%s' "$note" | awk -F'; ' '{print NF}'); titles=$(printf '%s' "$note" | awk -F'; ' '{for(i=1;i<=NF&&i<=3;i++){t=substr($i,1,50); printf "%s%s", (i>1?"; ":""), t}}')
+  msg="Update ready ($n fix$([ "$n" = 1 ] || echo es)): lock the screen to install. $titles"
+  m=$(mktemp); printf 'powos comms notify --from deploy --priority normal --batch apk-ready %q >/dev/null 2>&1 || true\npowos pet say %q --mood happy --from deploy >/dev/null 2>&1 || true\n' "$msg" "$msg" > "$m"
+  tools/phone/user.sh "$m" >/dev/null 2>&1 || echo "ship-apk: couldn't post the update-ready notice (phone unreachable)" >&2
+  rm -f "$m"
+}
 if [ -z "$now" ]; then
   # Never install over an active user (it restarts their session): wait up to SHIP_WAIT_MIN (default 60) minutes for
   # 60 s of idle (or the screen off); if none comes, leave the built APK for the next ship and exit 4 - don't install.
-  waited=0; ok=""
-  while [ $waited -lt $(( ${SHIP_WAIT_MIN:-60} * 60 )) ]; do
+  waited=0; ok=""; wmax=$(( ${SHIP_WAIT_MIN:-10080} * 60 ))   # default 7 days: effectively never
+  while [ $waited -lt $wmax ]; do
+    # A newer APK is wanted: this pending one is replaced (the runner builds origin's tip), never installed stale.
+    git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+    wtip=$(git rev-parse origin/worktree-powos-multiplatform 2>/dev/null || true)
+    if [ -n "$wtip" ] && [ "$wtip" != "$(git rev-parse HEAD)" ] && [ -n "$(git diff --name-only HEAD "$wtip" -- targets/android/app targets/android/build-app.sh 2>/dev/null | grep -v 'app/version.properties$')" ]; then
+      echo "ship-apk: superseded - origin's tip $(git rev-parse --short "$wtip") has newer APK inputs; this pending APK is dropped for that build"; exit 8
+    fi
+    if [ ! -e "$sq/apk/waiting" ] && [ -d "$sq/apk" ]; then
+      date +%s > "$sq/apk/waiting"; wait_notice
+    fi
     # A verifier's measurement window has priority (an install restarts the app mid-run and voids it):
     # ~/.cache/powos-verify.lock (mkdir; who/why inside) holds the install until it's gone.
     # A verify lock is for an injected test (minutes). One older than 10 min is held through a wait (a check waiting for
@@ -169,7 +197,7 @@ if [ -z "$now" ]; then
     # 4-min chunks (AGENT-HANDBOOK.md, Caps: no repo wait helper blocks past ~4 min in one call) so the verify lock
     # above is seen. Screen off (Asleep/Dozing) = safe at once; Awake = only after 60 s without a touch; anything else
     # (an empty or unreadable state) = NOT safe - it installed over an active user once when the state came back empty.
-    chunk=$(( ${SHIP_WAIT_MIN:-60} * 60 - waited )); [ $chunk -gt 240 ] && chunk=240
+    chunk=$(( wmax - waited )); [ $chunk -gt 240 ] && chunk=240
     # exit 1 = this chunk passed without a free phone: wait the next one (set -e would end the whole ship here).
     idle_rc=0
     i2=$(tools/phone/idle.sh --wait 60 $chunk) || idle_rc=$?
@@ -179,11 +207,11 @@ if [ -z "$now" ]; then
     fi
     case "$i2" in *screen=Asleep*|*screen=Dozing*|*screen=Awake*) ok=1; break ;; esac
     waited=$((waited + chunk))
-    echo "ship-apk: waiting for a free phone ($waited/$(( ${SHIP_WAIT_MIN:-60} * 60 ))s): $i2"
+    echo "ship-apk: waiting for a free phone ($waited/${wmax}s): $i2"
   done
   echo "ship-apk: $i2"
   [ "$i2" = offline ] && [ -z "$ok" ] && { echo "ship-apk: the phone is offline (stale VPN handshake, tools/phone/adb.sh --vpn-state) - NOT installing (APK built, kept)"; exit 4; }
-  [ -n "$ok" ] || { echo "ship-apk: the user stayed active for ${SHIP_WAIT_MIN:-60} min - NOT installing (APK built, kept)"; exit 4; }
+  [ -n "$ok" ] || { echo "ship-apk: the user stayed active for ${SHIP_WAIT_MIN:-10080} min - NOT installing (APK built, kept)"; exit 4; }
 fi
 # The install and its re-pushes own the phone. The ship service pushes shell BESIDE this ship (during the build and the
 # idle wait) and holds $lock/phone while one push runs: wait for it, then hold it to the end (the trap removes $lock).
@@ -246,7 +274,7 @@ if [ -n "$full" ]; then
   else
     echo "ship-apk: pushing the shell files the APK has differently from origin's tip $(git rev-parse --short "$tip2"): $(echo $full)"
     # A loaded Mac timed every page out at 30 s and the re-push was refused (2026-10-22, 29878209): 60 s, one retry.
-    rp() { (cd "$t/tree/shell" && READY_MS=${READY_MS:-60000} ./push.sh --vpn --silent $full 2>&1 | tail -3); }
+    rp() { (cd "$t/tree/shell" && READY_MS=${READY_MS:-60000} env $sg ./push.sh --vpn --silent $full 2>&1 | tail -3); }
   fi
   out=$(rp); echo "$out"
   if ! echo "$out" | grep -q "^pushed "; then

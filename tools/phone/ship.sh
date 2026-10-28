@@ -16,7 +16,7 @@
 # night, racing; twice an APK built from an older tip landed after newer shell pushes and wiped them on the phone.
 # The service, in its own checkout ($POWOS_RUN_ROOT/ship-runner, default ~/pw/ship-runner, only it touches it;
 # no .claude/worktrees fallback - wt-move-rest moved it for good, f190), ships origin's TIP in two parts:
-#   - shell, once origin stayed SHIP_QUIET_SHELL_S (10) s on the tip: shell/push.sh --vpn of exactly the shell files
+#   - shell, at once (SHIP_QUIET_SHELL_S, default 0: commits landing while a ship is out coalesce into the next one): shell/push.sh --vpn of exactly the shell files
 #     that differ from what's live (the last tip it shipped, or the installed build), --reset of the ones the tip
 #     deleted - ALSO while an APK ship is out (2026-10-23: shell fixes waited 25-30 min behind one APK's build and idle
 #     wait). Never while the verify lock (~/.cache/powos-verify.lock, < 10 min old) is held, never during an install
@@ -43,7 +43,7 @@ POWOS_RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
 SR=$POWOS_RUN_ROOT/ship-runner
 Q=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}; mkdir -p "$Q/done"
 LABEL=${SHIP_AGENT:-com.powos.ship-runner}
-QUIET=${SHIP_QUIET_S:-60} QS=${SHIP_QUIET_SHELL_S:-10} POLL=${SHIP_POLL_S:-10}
+QUIET=${SHIP_QUIET_S:-60} QS=${SHIP_QUIET_SHELL_S:-0} POLL=${SHIP_POLL_S:-3}
 alive_runner() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null && ps -p "$1" -o command= 2>/dev/null | grep -q ship; }
 runner_up() { alive_runner "$(cat "$Q/runner.lock/pid" 2>/dev/null)"; }
 killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c"; done; kill "$1" 2>/dev/null; }
@@ -226,6 +226,24 @@ run)
     ( cd "$SA" && POWOS_SHIP_SERVICE=1 SHIP_DIR=$Q GATE_PRIORITY=ship bash tools/phone/ship-apk.sh "$@" > "$(cat "$Q/apk/log")" 2>&1; echo $? > "$Q/apk/rc" ) &
     echo $! > "$Q/apk/pid"
   }
+  # post_gate TIP LOG FILE...: the full gate on what was just pushed, in the background, one at a time (a newer tip's
+  # gate replaces a running one). A FAIL mails the coder with the failing lines - the push stays (the phone's own
+  # rollback handles a page that dies there); SHIP_GATE_FIRST=1 means the push was already gated: nothing to do.
+  post_gate() {
+    local t=$1 lg=$2; shift 2
+    [ -z "${SHIP_GATE_FIRST:-}" ] || return 0
+    [ -d shell ] || return 0
+    local old; old=$(cat "$Q/postgate.pid" 2>/dev/null) && [ -n "$old" ] && killtree "$old" 2>/dev/null
+    ( gl=$Q/done/postgate-${t:0:9}.log
+      ( cd shell && GATE_PRIORITY=ship IDLE_MS=0 READY_MS=${READY_MS:-60000} ./push.sh --pre-gate "$@" ) > "$gl" 2>&1; grc=$?
+      if [ $grc -ne 0 ] && ! grep '^FAIL' "$gl" | grep -qv 'not ready' ; then ( cd shell && GATE_PRIORITY=ship IDLE_MS=0 READY_MS=90000 ./push.sh --pre-gate "$@" ) > "$gl" 2>&1; grc=$?; fi
+      if [ $grc -ne 0 ]; then
+        echo "$t" > "$Q/postgate-failed"
+        mail "ship ${t:0:9} (shell) went live and its gate FAILED after: $(grep -E '^FAIL|REFUSED|pre-gate failed' "$gl" | head -2 | cut -c1-200 | paste -sd' ' -) - log $gl on the Mac; fix it on origin, then ship.sh request again"
+      else rm -f "$Q/postgate-failed"; fi
+      rm -f "$Q/postgate.pid" ) &
+    echo $! > "$Q/postgate.pid"
+  }
   # done_req FILE RESULT: a request fully on the phone.
   done_req() { echo "result=$2" >> "$1"; mv "$1" "$Q/done/"; }
   # pending_apk SHA: APK inputs changed up to it and aren't installed yet - its request is done once the APK is in.
@@ -253,6 +271,7 @@ run)
         echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
         echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
         e2e_round
+      elif [ "$arc" = 8 ]; then echo "$(date +%T) ${A:0:9}: a newer APK is wanted - the pending one is replaced"
       elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
       elif [ -e "$Q/paused" ]; then echo "$(date +%T) ${A:0:9}: APK ship stopped by pause (rc $arc) - its requests are kept"
       else
@@ -276,7 +295,7 @@ run)
         apk_alive && { sleep "$POLL"; continue; }
         echo "$(date +%T) paused - $(ls "$Q"/*.req 2>/dev/null | wc -l | tr -d ' ') request(s) kept"; break
       fi
-      # The debounce: shell after SHIP_QUIET_SHELL_S (10) s of origin on this tip, an APK after QUIET (60) s.
+      # The debounce: shell after SHIP_QUIET_SHELL_S (0) s of origin on this tip, an APK after QUIET (60) s.
       { read -r seen at < "$Q/tip-seen"; } 2>/dev/null || seen=
       [ "$seen" = "$T" ] || { at=$(date +%s); echo "$T $at" > "$Q/tip-seen"; echo "$(date +%T) origin at ${T:0:9}"; }
       age=$(( $(date +%s) - at ))
@@ -324,12 +343,25 @@ run)
         sn=$(joined ${snotes[@]+"${snotes[@]}"})
         if [ -n "$sn" ]; then na=(--note "$sn"); else na=(--silent); fi
         log=$Q/done/$(date +%Y%m%d-%H%M%S)-${T:0:9}.log
+        # f307: this shell goes live before the APK it may need. Bridge methods the installed APK lacks, with no
+        # `// detect`: reported to the coder (once per tip) - a bug to fix, so it ships unless SHIP_BRIDGE_STRICT=1.
+        if [ -x tools/phone/bridge-detect-check.sh ] && ! bd=$(tools/phone/bridge-detect-check.sh "$T" 2>&1); then
+          echo "$bd" | sed 's/^/  /'
+          [ "$(cat "$Q/bridge-flagged" 2>/dev/null)" = "$T" ] || { echo "$T" > "$Q/bridge-flagged"
+            mail "ship ${T:0:9} (shell) f307: bridge calls the installed APK lacks, no // detect: $(echo "$bd" | sed -n 's/^  \([a-z]*\.[A-Za-z.]*\)$/\1/p' | paste -sd' ' - | cut -c1-200) - log $log on the Mac"; }
+          if [ -n "${SHIP_BRIDGE_STRICT:-}" ]; then
+            echo "$(date +%T) ${T:0:9}: shell ship held by SHIP_BRIDGE_STRICT (f307)"; rm -rf "$held"; rm -f "$Q/installing"; echo "$T" > "$Q/failed"; continue; fi
+        fi
         echo "$(date +%T) ship ${T:0:9} as shell:$(echo $add)$([ -n "$gone" ] && echo " reset:$(echo $gone)") for $who_s$(apk_alive && echo ' (beside the APK ship)')"
-        rc=0
+        rc=0; sg=POWOS_SKIP_GATE=1; [ -z "${SHIP_GATE_FIRST:-}" ] || sg=
         if [ -n "$add" ]; then
           # 60 s like ship-apk's pre-gate: a shell ship runs beside an APK build (Colima ~900% CPU), and at 30 s every
           # page timed out "not ready" with no error (02:03, b56483e).
-          (cd shell && POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship READY_MS=${READY_MS:-60000} ./push.sh --vpn "${na[@]}" $add) > "$log" 2>&1 || rc=$?
+          # DEPLOY FIRST, VERIFY AFTER (2026-10-28: the in-ship gate - tsc, lints, every page booted, twice when the Mac
+          # is busy - was 2-7 min of the land->live time). The agent's land already gated this tip; the phone's own
+          # ShellErrors rollback catches a page that dies on the device; the full gate runs right after, off the
+          # critical path (post_gate below), and a FAIL mails the coder. SHIP_GATE_FIRST=1 restores gate-then-push.
+          (cd shell && POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship IDLE_MS=${IDLE_MS:-0} READY_MS=${READY_MS:-60000} env $sg ./push.sh --vpn "${na[@]}" $add) > "$log" 2>&1 || rc=$?
         fi
         if [ $rc = 0 ] && [ -n "$gone" ]; then
           (cd shell && POWOS_SHIP_SERVICE=1 GATE_PRIORITY=ship ./push.sh --vpn --reset $gone) >> "$log" 2>&1 || rc=$?
@@ -337,6 +369,7 @@ run)
         rm -rf "$held"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
         if [ $rc = 0 ]; then
           echo "$T" > "$Q/live"; rm -f "$Q/failed"
+          post_gate "$T" "$log" $add
           echo "$(date '+%F %T') ${T:0:9} shell ${#sreqs[@]} req ($who_s): ${sn:-(silent)}" >> "$Q/shipped.log"
           for r in ${nreqs[@]+"${nreqs[@]}"}; do [ -f "$r" ] && echo "noted=1" >> "$r"; done
           for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "shipped:${T:0:9}:shell"; done

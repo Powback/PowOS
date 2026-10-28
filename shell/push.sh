@@ -142,7 +142,8 @@ if [ "${1:-}" = "--vpn" ]; then
   # current overrides (pulled through the adb container, as the local path pulls them) + the files pushed - the shell
   # the phone will run. Without the overrides it checked a shell the phone doesn't have (2026-10-21: a push that passed
   # was followed by a home error). Overrides that can't be pulled: the committed shell + the files, as before.
-  if [ -z "${POWOS_GATE_DONE:-}" ] && [[ " $* " != *" --reset "* ]] && [[ " $* " != *" --errors "* ]]; then
+  # POWOS_SKIP_GATE=1 (ship service): deploy first, the gate runs right after it (ship.sh post_gate).
+  if [ -z "${POWOS_GATE_DONE:-}" ] && [ -z "${POWOS_SKIP_GATE:-}" ] && [[ " $* " != *" --reset "* ]] && [[ " $* " != *" --errors "* ]]; then
     gf=(); for a in "$@"; do case "$a" in --*) ;; *) [ -f "$a" ] && gf+=("$a") ;; esac; done
     if [ ${#gf[@]} -gt 0 ]; then
       # Under $HOME: Colima mounts only the home folder into containers.
