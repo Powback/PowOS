@@ -249,6 +249,9 @@ object TaskLeash {
             }
             val st = t ?: SurfaceControl.Transaction()
             for ((id, leash) in leashes) last[id]?.let { place(st, leash, it) }
+            // A window whose page was off the screen has its leash hidden (TaskSurfaces.show): it shows in this same
+            // transaction as its slide/move. WM Shell only shows OPEN/TO_FRONT leashes; a CHANGE one stays hidden.
+            for ((id, leash) in leashes) if (leash.isValid && id !in hidden) st.setVisibility(leash, true)
             return st
         }
 
