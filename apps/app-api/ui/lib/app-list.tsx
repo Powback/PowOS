@@ -14,13 +14,17 @@ export function remember(id: string) {
   try { localStorage.setItem(KEY, JSON.stringify([id, ...recents().filter((x) => x !== id)].slice(0, 8))); } catch { /* not kept */ }
 }
 
-function summary(a: AppSpec): string {
-  if (a.error) return "can't be read, tap for why";
+const count = (n: number, one: string, many = `${one}s`) => (n ? `${n} ${n === 1 ? one : many}` : "");
+
+/** "1 widget · 2 live data · 1 action": what an app offers, in plain words (empty parts left out). */
+export function offers(a: AppSpec): string {
   const acts = Object.values(a.actions ?? {});
   const reads = acts.filter((x) => x.safety === "read").length;
-  const w = a.widgets?.length ?? 0;
-  const parts = [w && `${w} widget${w === 1 ? "" : "s"}`, reads && `${reads} live data`, acts.length - reads && `${acts.length - reads} action${acts.length - reads === 1 ? "" : "s"}`];
-  return parts.filter(Boolean).join(" · ") || "nothing to use yet";
+  return [count(a.widgets?.length ?? 0, "widget"), count(reads, "live data", "live data"), count(acts.length - reads, "action")].filter(Boolean).join(" · ");
+}
+
+function summary(a: AppSpec): string {
+  return a.error ? "can't be read, tap for why" : offers(a) || "nothing to use yet";
 }
 
 function Row({ a, open, flip }: { a: AppSpec; open: () => void; flip: (on: boolean) => void }) {

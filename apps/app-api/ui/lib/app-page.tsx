@@ -9,6 +9,7 @@ import { ActionPanel, Widgets, type DetailProps } from "./action";
 import { AppAudit, Privacy } from "./activity";
 import { type Action, type AppSpec, type Host, type Views } from "./api";
 import { useRuntime } from "./runtime";
+import { offers } from "./app-list";
 import { Block, Muted, S, Seg, Switch, title } from "./ui";
 
 /** [spec] with an action's (or the app's own, key "_app") `enabled` optimistically overridden. */
@@ -98,13 +99,6 @@ function Developer({ p }: { p: DetailProps }) {
   );
 }
 
-function summary(spec: AppSpec): string {
-  const acts = Object.values(spec.actions);
-  const reads = acts.filter((a) => a.safety === "read").length;
-  const parts = [`${spec.widgets?.length ?? 0} widget${spec.widgets?.length === 1 ? "" : "s"}`, `${reads} live data`, `${acts.length - reads} action${acts.length - reads === 1 ? "" : "s"}`];
-  return parts.join(" · ");
-}
-
 /** "Make a widget": PowOS AI builds it from this app's data; without the assistant, the add-app draft flow. */
 // HACK: the composer (docs/COMPOSER.md, compose_widget) is reached through a chat prompt until it has its own call;
 // the real fix is a direct composer entry here with live progress (lib/pending).
@@ -137,7 +131,7 @@ export function AppPage(p: DetailProps & { host: Host; back: () => void; makeWid
         <h1 style={S.title}>{spec.name}</h1>
         <Switch on={spec.enabled} label={`${spec.name} on`} onFlip={(on) => flip(on)} />
       </header>
-      <Muted>{spec.description ? `${spec.description} · ${summary(spec)}` : summary(spec)}</Muted>
+      <Muted>{spec.description ? `${spec.description} · ${(offers(spec) || "nothing to use yet")}` : (offers(spec) || "nothing to use yet")}</Muted>
       {!spec.enabled && <Muted>This app is off: nothing can use its data until you switch it on.</Muted>}
       {toggleErr && <Muted><span style={S.bad}>{toggleErr}</span></Muted>}
       <button type="button" style={S.hero} onClick={make} data-make-widget="">Make a widget</button>
