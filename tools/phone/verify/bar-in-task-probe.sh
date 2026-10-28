@@ -67,8 +67,10 @@ BID=$(sh_ "dumpsys window windows" | grep -m1 -oE "PowOS window bar [0-9]+" | gr
 # 1. A slow bar drag: a TaskLeash session (the probe attaches when its leashes come).
 X=$(((BL + BR) / 2)); Y=$(((BT + BB) / 2))
 sh_ "input swipe $X $Y $((X + $(px 60))) $((Y + $(px 40))) 1500"; sleep 2.5; chk drag
-sh_ "logcat -d -s PowosTaskBar:I PowosTaskLeash:I" | tee -a "$OUT/log.txt" > "$OUT/logcat.txt"
-grep -q "task $BID: bar attached" "$OUT/logcat.txt" && pass "probe attached under task $BID's leash" || fail "no 'bar attached' for task $BID (logcat.txt; did a TaskLeash session start?)"
+sh_ "logcat -d -s PowosTaskFrame:I PowosTaskLeash:I PowosTaskSurfaces:I" | tee -a "$OUT/log.txt" > "$OUT/logcat.txt"
+grep -q "task $BID: bar in its own layer" "$OUT/logcat.txt" && pass "TaskFrame's bar attached under task $BID's leash" || fail "no 'bar in its own layer' for task $BID (logcat.txt; did TaskSurfaces register it?)"
+grep -q "task $BID: caption inset .* set" "$OUT/logcat.txt" && pass "caption inset set" || echo "WARN: caption inset not set (logcat.txt)" | tee -a "$OUT/log.txt"
+sh_ "dumpsys window windows" | grep -q "PowOS window bar $BID" && fail "task $BID still has its overlay bar window (two bars)" || pass "one bar: no overlay bar window for task $BID"
 # 2. The layer tree: a direct child of Task=N owned by PowOS's uid.
 PUID=$(sh_ "dumpsys package com.powos.app" | grep -m1 -oE "userId=[0-9]+" | grep -oE "[0-9]+")
 # Box-drawing characters to ASCII first: the tree depth is counted in columns (BSD awk counts bytes).
@@ -78,9 +80,13 @@ cat "$OUT/task-tree.txt" | tee -a "$OUT/log.txt"
 TD=$(head -1 "$OUT/task-tree.txt" | awk '{print index($0,"Task=")}')
 CH=$(awk -v d="$TD" -v u="uid=$PUID" 'NR>1{q=match($0,/[^ |+-]/); if(q==d+3 && index($0,u)) print}' "$OUT/task-tree.txt")
 [ -n "$CH" ] && pass "a PowOS-owned layer is a direct child of Task=$BID: $CH" || fail "no direct child of Task=$BID with uid $PUID (task-tree.txt)"
-# 3. Input: a tap in the strip (task top + 9 dp).
+# 3. Input: the in-task bar (task top + 9 dp).
 read -r AL AT AR AB <<<"$(wframe "$PKG")"
 sh_ "input tap $(((AL + AR) / 2)) $((AT + $(px 9)))"; sleep 1; chk tap
-sh_ "logcat -d -s PowosTaskBar:I" | grep -m1 "task $BID: touch at" | tee -a "$OUT/log.txt" | grep -q . && pass "the strip in the task's layer gets touches" || fail "no touch reached the probe strip"
+# A double tap on the in-task bar maximises in place (WindowFrames.maximise): the task's bounds grow.
+read -r BL BT BR BB <<<"$(wframe "$PKG")"
+sh_ "input tap $(((AL + AR) / 2)) $((AT + $(px 9))); input tap $(((AL + AR) / 2)) $((AT + $(px 9)))"; sleep 2; chk dtap
+read -r CL CT CR CB <<<"$(wframe "$PKG")"
+[ $((CR - CL)) -gt $((BR - BL)) ] && pass "double tap on the in-task bar maximised ($((BR - BL)) -> $((CR - CL)) wide)" || fail "double tap on the in-task bar didn't maximise ($BL $BT $BR $BB -> $CL $CT $CR $CB)"
 "$T/shot.sh" "$OUT/probe.png" >/dev/null 2>&1
 echo "ALL PASS" | tee -a "$OUT/log.txt"
