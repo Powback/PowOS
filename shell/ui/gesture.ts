@@ -423,7 +423,10 @@ export function sampleVx(samples: [number, number][]) {
   const now = performance.now();
   const [x1, t1] = samples[samples.length - 1];
   if (now - t1 > PAGE_V_WINDOW) return 0;
-  const old = samples.find(([, t]) => now - t <= PAGE_V_WINDOW) ?? samples[0];
+  // The first sample in the window; when the last one is alone in it (sparse moves), the one before it.
+  const last = samples.length - 1;
+  const i = samples.findIndex(([, t]) => now - t <= PAGE_V_WINDOW);
+  const old = samples[Math.max(0, i === last ? last - 1 : i)];
   const dt = t1 - old[1];
   return dt > 0 ? (x1 - old[0]) / dt : 0;
 }
