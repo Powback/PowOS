@@ -10,11 +10,17 @@ window_lock launcher-search 120
 export CDP_TIMEOUT_S=30
 OUT=$HOME/.cache/powos-verify/launcher-search-$(date +%m%d-%H%M%S)
 mkdir -p "$OUT"
+top=$(sh_ 'dumpsys activity activities | grep -m1 topResumedActivity')
+top_task=$(sed -nE 's/.* t([0-9]+)\}.*/\1/p' <<<"$top")
+case "$top" in *HomeShell*|*HomeDesktop*|*PowosLock*|"") top_task= ;; esac
 restore() {
   ev 'Promise.all([importShim("./state.ts"),importShim("./screens.ts"),importShim("./apps/pages.ts")]).then(([s,p,a])=>{s.closeDrawer();p.closeScreens();a.closeApp();return "restored"})' >/dev/null || true
+  [ -z "$top_task" ] || hcall tasks.open "[$top_task]" "()=>'ok'" >/dev/null || true
   [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
 }
 trap restore EXIT
+sh_ 'am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null' >/dev/null
+ev 'importShim("./state.ts").then(s=>{s.goHome();return "home"})' >/dev/null
 code=$(sed 's/^export async function/async function/' shell/dev/search-check.js)
 r=$(ev "(async()=>{$code;return JSON.stringify(await launcherSearchCheck())})()")
 echo "search checks: $r"
