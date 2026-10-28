@@ -200,7 +200,10 @@ if [ -z "$now" ]; then
     chunk=$(( wmax - waited )); [ $chunk -gt 240 ] && chunk=240
     # exit 1 = this chunk passed without a free phone: wait the next one (set -e would end the whole ship here).
     idle_rc=0
-    i2=$(tools/phone/idle.sh --wait 60 $chunk) || idle_rc=$?
+    # 10 s without a touch, not 60: since kwin 3.40 + powos-session.sh's reattach (05b81555) an install no longer ends
+    # the Linux session (verified 2026-10-28 17:26: same kwin pid across the install), only the app's own pages reload.
+    # The user, waiting on updates: "so update it wtf". SHIP_IDLE_S overrides.
+    i2=$(tools/phone/idle.sh --wait "${SHIP_IDLE_S:-10}" $chunk) || idle_rc=$?
     if [ "$idle_rc" = 70 ]; then
       echo 'ship-apk: phone transport failed; APK kept, not installing or waiting for user idle' >&2
       exit 70
