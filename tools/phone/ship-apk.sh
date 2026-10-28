@@ -205,20 +205,7 @@ if [ -z "$now" ]; then
       echo 'ship-apk: phone transport failed; APK kept, not installing or waiting for user idle' >&2
       exit 70
     fi
-    case "$i2" in *screen=Asleep*|*screen=Dozing*|*screen=Awake*)
-      # An idle or locked phone is not a free one while the user has Linux apps open: the install force-stops the app,
-      # which ends the whole desktop session (powos-rooted-session) and every Linux app in it - Steam, Dolphin, games.
-      # 2026-10-28 15:45-16:03: five APK installs, each with the screen locked/idle, killed the user's apps every
-      # ~5 min. The open apps: powos-sleep-gui's running list (RUN/running/apps.json, Linux apps with a window).
-      # Unreadable = no session (nothing to kill). SHIP_OVER_LINUX_APPS=1 (or --now) installs anyway.
-      la=$(tools/phone/adb.sh shell "su -c 'cat /data/powos/root/run/powos-app/running/apps.json 2>/dev/null'" 2>/dev/null \
-        | python3 -c 'import json,sys
-try: print(" ".join(sorted(json.load(sys.stdin).get("classes", {}))))
-except Exception: pass' 2>/dev/null || true)
-      if [ -z "$la" ] || [ "${SHIP_OVER_LINUX_APPS:-}" = 1 ]; then ok=1; break; fi
-      echo "ship-apk: Linux apps open ($la) - an install would end the desktop session and kill them; waiting until they're closed"
-      sleep 60; waited=$((waited + 60)); continue ;;
-    esac
+    case "$i2" in *screen=Asleep*|*screen=Dozing*|*screen=Awake*) ok=1; break ;; esac
     waited=$((waited + chunk))
     echo "ship-apk: waiting for a free phone ($waited/${wmax}s): $i2"
   done
