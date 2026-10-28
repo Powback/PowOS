@@ -739,12 +739,16 @@ def truth(w, held, idle_roles, checks, now_ms=None):
         return "awaiting-check", f"check {_check_name(c)} {c['state']}{ship}"
     if not checks and w.get("step") == QUEUED_STEP:
         return "awaiting-check", "check queued (the queue not synced yet)"
-    results = [c for c in checks if c.get("state") in CHECK_RESULTS]
+    results = sorted((c for c in checks if c.get("state") in CHECK_RESULTS), key=lambda c: int(c.get("at") or 0))
     last = results[-1] if results else None
     if last and last["state"] in ("FAIL", "INVALID", "SKIP"):
         word = {"FAIL": "FAILED", "INVALID": "was INVALID", "SKIP": "was SKIPPED"}[last["state"]]
         return "no-check", f"last check {_check_name(last)} {word}: {last.get('line', '')[:120]} - nobody on it"
     if last and last["state"] == "PASS":
+        # A newer PASS of a shipped build supersedes every older FAIL (results[-1] is the latest by time); with the fix
+        # landed (commits recorded) that is the done rule's evidence - the board no longer waits for someone to close it.
+        if last.get("shipped", True) and _jl(w.get("commits", "")):
+            return "done", f"fix landed, check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago"
         return "no-check", f"check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago - close it or queue the next check"
     if last and last["state"] == "none":
         return "no-check", f"no device check possible ({last.get('line', '')[:80]}) - close it"

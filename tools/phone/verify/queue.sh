@@ -529,7 +529,7 @@ EOS
         if [ "$task" != "$go" ] && ! shipped "$need" "$qt"; then held=$((held + 1)); echo "$(date +%T) $(basename "$j" .job): waits for its ship (${need:0:9})"; continue; fi
         sel+=("$j")
       done
-      N=${#sel[@]}; k=0; pass=0; fail=0; first=; prev=
+      N=${#sel[@]}; k=0; pass=0; fail=0; first=; prev=; results=
       [ $N -gt 0 ] || { status "" '{"done":true}' "rm -f /tmp/powos-verify-go"; [ $held = 0 ] && exit 5; exit 7; }
       [ -n "$go" ] && echo "$(date +%T) go from the phone: $go ($N checks)"
       for j in "${sel[@]}"; do
@@ -664,12 +664,12 @@ EOS
         prev="${name:-$task}: $r"
         img=
         if [ $rc != 0 ] && [ $rc != 3 ] && [ $envskip = 0 ]; then
-          fail=$((fail + 1)); [ -n "$first" ] || first=${name:-$task}$([ "$why" = timeout ] && echo ": timeout")
+          results="${results:-}${name:-$task}"$'\t'"F"$'\n'; fail=$((fail + 1)); [ -n "$first" ] || first=${name:-$task}$([ "$why" = timeout ] && echo ": timeout")
           # What the screen showed when it failed: the board task's review image (the pill keeps out of screencaps).
           f=verify-$(printf %s "$n" | tr -c 'A-Za-z0-9._-' '-').png
           "$phone/adb.sh" shell "su -c 'mkdir -p /data/powos/root/home/powos/design-qa'" >/dev/null 2>&1
           "$phone/shot.sh" --phone "/data/powos/root/home/powos/design-qa/$f" >/dev/null 2>&1 && img=/home/powos/design-qa/$f
-        else pass=$((pass + 1)); fi
+        else results="${results:-}${name:-$task}"$'\t'"P"$'\n'; pass=$((pass + 1)); fi
         line=$(grep '^FAIL' "$log" | head -1); [ $rc != 0 ] && [ -n "$line" ] || line=$(tail -2 "$log" | head -1)
         # f94: a check that prints its real version ("VERSION ...", its first line) gets that recorded with the
         # result - so a name that claims a version is checkable against what it actually says it ran on.
@@ -677,6 +677,12 @@ EOS
         board "$task" "verify $r: $(printf %s "$line" | cut -c1-160)${ver:+ ($ver)} (log ~/.cache/powos-verify-queue/done/$n.log)" "$([ $rc = 0 ] && echo $close || echo 0)" "$img"
         echo "$(date +%T) $n: $r"
       done
+      # Only the LATEST result per check counts: a check that failed and then passed in this same window (a re-queue)
+      # is a pass, not a stale fail in the notification.
+      if [ -n "${results:-}" ]; then
+        read -r pass fail first <<<"$(printf '%s' "$results" | awk -F'\t' '{r[$1]=$2} END {p=0;f=0;fs=""; for(k in r){ if(r[k]=="P")p++; else {f++; if(fs=="")fs=k}} print p, f, (fs==""?"-":fs)}')"
+        [ "$first" != - ] || first=
+      fi
       sum="Phone checks: $pass passed"; [ $fail = 0 ] || sum="$sum, $fail failed ($first$([ $fail -gt 1 ] && echo ", ..."))"
       status "" "{\"done\":true,\"summary\":$(jstr "$sum")}" ) & wait $!
     rc=$?; [ -n "$wpp" ] && endjob "$wpp"   # the wait ended without a window (exit 3/6): its pill writes end before pause's

@@ -190,6 +190,17 @@ class TruthTest(unittest.TestCase):
         held, roles = cli.holders(list(agents))
         return cli.truth(w, held, roles, list(checks), NOW)
 
+    def test_newer_pass_supersedes_older_fail_and_closes_a_landed_fix(self):
+        fail = {"state": "FAIL", "at": NOW - 5000, "job": "j1", "line": "x"}
+        ok = {"state": "PASS", "at": NOW - 1000, "job": "j2", "shipped": True}
+        landed = row("a", commits='["abc1234"]')
+        self.assertEqual(self.t(landed, checks=[ok, fail])[0], "done")   # order of the list does not matter, time does
+        self.assertEqual(self.t(landed, checks=[dict(fail, at=NOW - 100), ok])[0], "no-check")   # newer FAIL wins
+        self.assertEqual(self.t(row("a"), checks=[fail, ok])[0], "no-check")   # no landed fix recorded: not closed blindly
+        self.assertEqual(self.t(landed, checks=[dict(ok, shipped=False)])[0], "no-check")
+        # a queued re-check keeps it awaiting-check (no stalled clock while it waits on the queue/ship)
+        self.assertEqual(self.t(landed, checks=[fail, {"state": "queued", "at": NOW, "job": "j3"}])[0], "awaiting-check")
+
     def test_working_only_while_a_live_agent_holds_it(self):
         self.assertEqual(self.t(row("a"), [agent("a")])[0], "working")
         # Its owner set, no agent at all: not working, even with status working.
