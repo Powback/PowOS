@@ -6,7 +6,7 @@
 # Then, never touching the home layout: Calculator opened through home's launch call lands on page 1 (in windows.list,
 # stored in home.windows - missing there was the bug of 2026-10-23, its logcat is kept); a REAL swipe from an empty
 # spot (read-only CDP finds one: no tile, outside the window) to page 2 hides it; swiping back shows it at the same
-# bounds; its app opened while page 2 shows moves it to page 2; home's app killed and back, it's still page 2's. Always
+# bounds (hidden = away in windows.list + not composited, the flash probe: its task stays visible=true); its app opened while page 2 shows moves it to page 2; home's app killed and back, it's still page 2's. Always
 # restores: Calculator stopped,
 # home's first page, `cmd device_state state reset`. Both first swipes must slide the window with the page (slid). Exit: 0 passed; 1 FAIL: ...; 3 a real touch / no free window;
 # 5 can't run (no screen size, a PIN, one home page only). Injected input only; a free window first, the lock then.
@@ -113,10 +113,18 @@ freept() {
   # bar, the resize handles (a leftward swipe from 161 px right of the Calculator's top-right corner resized it,
   # 2026-10-28 11:20: [566,346][1926,2054] -> [566,346][1339,1055]) and the grab margins. The dock (bottom OR side: its
   # rect from the DOM, .dock/.bar/.dock-tray/.launcher) and the page track's edges are excluded too.
-  "$T/cdp.sh" eval home "(()=>{const WM=240,bs='$1'.split(';').filter(Boolean).map(s=>s.trim().split(' ').map(Number)).filter(a=>a.length===4),r=devicePixelRatio,d=$2,len=$3,W=innerWidth*r;const dk=[...document.querySelectorAll('.dock,.bar,.bottom-bar,.dock-tray,.launcher,.island')].map(e=>e.getBoundingClientRect()).filter(q=>q.width>0&&q.height>0);let best=null,room=-1;for(let y=.15;y<=.92;y+=.03)for(let x=.04;x<=.96;x+=.02){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(bs.some(b=>px>=b[0]-WM&&px<=b[2]+WM&&py>=b[1]-WM&&py<=b[3]+WM))continue;if(dk.some(q=>cx>=q.left-48&&cx<=q.right+48&&cy>=q.top-48&&cy<=q.bottom+48))continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.app,.panel,.widget,.island,.owl,button,a,input,.bar,.bottom-bar,.dock,.dock-tray,[data-key]'))continue;if(px<60||px>W-60)continue;const m=d<0?px-20:W-20-px;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()" 2>&1 | tr -d '"\r' | tail -1
+  # A dock-like element counts only if it is on top at its own centre: the emulator's closed drawer (.launcher) spans
+  # the whole screen under the page (0,157-821,935 css px) and once left no spot at all (f331, 2026-10-28).
+  "$T/cdp.sh" eval home "(()=>{const WM=240,bs='$1'.split(';').filter(Boolean).map(s=>s.trim().split(' ').map(Number)).filter(a=>a.length===4),r=devicePixelRatio,d=$2,len=$3,W=innerWidth*r;const dk=[...document.querySelectorAll('.dock,.bar,.bottom-bar,.dock-tray,.launcher,.island')].map(e=>[e,e.getBoundingClientRect()]).filter(([e,q])=>{if(!(q.width>0&&q.height>0))return false;const h=document.elementFromPoint(Math.min(Math.max(q.left+q.width/2,0),innerWidth-1),Math.min(Math.max(q.top+q.height/2,0),innerHeight-1));return !!h&&e.contains(h)}).map(([e,q])=>q);let best=null,room=-1;for(let y=.15;y<=.92;y+=.03)for(let x=.04;x<=.96;x+=.02){const cx=innerWidth*x,cy=innerHeight*y,px=cx*r,py=cy*r;if(bs.some(b=>px>=b[0]-WM&&px<=b[2]+WM&&py>=b[1]-WM&&py<=b[3]+WM))continue;if(dk.some(q=>cx>=q.left-48&&cx<=q.right+48&&cy>=q.top-48&&cy<=q.bottom+48))continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.app,.panel,.widget,.island,.owl,button,a,input,.bar,.bottom-bar,.dock,.dock-tray,[data-key]'))continue;if(px<60||px>W-60)continue;const m=d<0?px-20:W-20-px;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()" 2>&1 | tr -d '"\r' | tail -1
 }
 # Every visible floating window's frame, "l t r b;..." (home's own task and system UI left out).
-allbounds() { sh_ "am stack list | grep visible=true | grep -v -e com.powos.app -e systemui -e launcher" | grep -oE 'bounds=\[[0-9-]+,[0-9-]+\]\[[0-9-]+,[0-9-]+\]' | tr -c '0-9\n-' ' ' | xargs -n4 | tr '\n' ';'; }
+# An off-screen page's windows stay live (visible=true, leash hidden: no blank window on return, 2026-10-28), so the
+# test window's box is dropped while windows.list says it's away - it isn't on the page being swiped.
+allbounds() {
+  local a; a=$(sh_ "am stack list | grep visible=true | grep -v -e com.powos.app -e systemui -e launcher" | grep -oE 'bounds=\[[0-9-]+,[0-9-]+\]\[[0-9-]+,[0-9-]+\]' | tr -c '0-9\n-' ' ' | xargs -n4 | tr '\n' ';')
+  [ "$(away)" = true ] && a=$(echo "$a" | tr ';' '\n' | grep -vxF "$(bounds)" | tr '\n' ';')
+  echo "$a"
+}
 # A real horizontal swipe on home from an empty spot: $1 -1 = to the next page (finger leftwards), 1 = back.
 swipe() {
   # The window's box is kept clear only while it shows: on page 2 it's hidden (its bounds still listed), and keeping
@@ -269,7 +277,7 @@ slid "swipe to page 2"
 flash "swipe to page 2" "$E0"
 barcheck "swipe to page 2" - hidden
 "$T/shot.sh" "$OUT/2-page2-hidden.png"
-[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=false ] && [ "$(away)" = true ] && pass "swiped to page 2: hidden" \
+[ "$(onpage)" = 1 ] && [ "$(away)" = true ] && pass "swiped to page 2: hidden" \
   || fail "on page 2: page $(onpage), $(vis), away=$(away); $(ctx)"
 
 swipe 1; chk swipe1
@@ -282,7 +290,7 @@ B2=$(bounds); echo "bounds back on page 1: $B2" | tee -a "$OUT/log.txt"
 
 # Its app opened while page 2 shows: the window comes to page 2 (home stays there).
 swipe -1; chk swipe2b
-[ "$(onpage)" = 1 ] && [ "$(vis)" = visible=false ] || fail "page 2 again: page $(onpage), $(vis); $(ctx)"
+[ "$(onpage)" = 1 ] && [ "$(away)" = true ] || fail "page 2 again: page $(onpage), $(vis); $(ctx)"
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch (from page 2): $r"
 sleep 1.8; chk relaunch
 "$T/shot.sh" "$OUT/4-opened-on-page2.png"
@@ -292,7 +300,7 @@ P2=$(hcall store.get "['home.windows']" "m=>m&&m['$id']")
 
 # Survives home's app restarting: page 1 (it hides), the app killed, home back - still page 2's.
 hemit system.home null; chk home1
-[ "$(vis)" = visible=false ] || fail "page 1 after the move: $(vis)"
+[ "$(away)" = true ] || fail "page 1 after the move: $(vis)"
 sh_ "kill \$(pidof com.powos.app)"; t=0
 until [ "$(CDP_TIMEOUT_S=8 "$T/cdp.sh" eval home 'window.__powosAlive === true' 2>/dev/null | tr -d '\r' | tail -1)" = true ] || [ $t -ge 12 ]; do sleep 3; t=$((t + 1)); done
 sleep 2; chk restart
@@ -301,7 +309,7 @@ sleep 2; chk restart
 t=0; until [ "$(npages)" -ge 3 ] 2>/dev/null || [ $t -ge 10 ]; do sleep 1; t=$((t + 1)); done; sleep 1
 n=$(npages); P3=$(hcall store.get "['home.windows']" "m=>m&&m['$id']")
 "$T/shot.sh" "$OUT/5-after-restart-page1.png"
-[ "$P3" = "$P2" ] && [ "$(vis)" = visible=false ] && pass "after the app restarted: still page id $P3, hidden on page 1" \
+[ "$P3" = "$P2" ] && [ "$(away)" = true ] && pass "after the app restarted: still page id $P3, hidden on page 1" \
   || fail "after the app restarted: page id $P3 (want $P2), $(vis), page $(onpage); $(ctx)"
 swipe -1; chk swipe2c
 "$T/shot.sh" "$OUT/6-after-restart-page2.png"

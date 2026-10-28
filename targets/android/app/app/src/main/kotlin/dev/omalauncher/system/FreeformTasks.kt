@@ -234,6 +234,18 @@ object FreeformTasks {
             .onFailure { Log.w(TAG, "can't minimise task $id", it) }.isSuccess
 
     /**
+     * Task [id] may take input focus ([on]) or not: a window whose page is off the screen stays above home with its
+     * leash hidden (TaskSurfaces.show) and must not hold the key focus meanwhile. HACK: hidden, reflected like [minimise].
+     */
+    fun focusable(
+        context: Context,
+        id: Int,
+        on: Boolean,
+    ): Boolean =
+        transact(context, id) { wct, token -> TaskLeash.setFocusable(wct, token, on) }
+            .onFailure { Log.w(TAG, "can't set task $id focusable=$on", it) }.isSuccess
+
+    /**
      * Task [id]'s content drawn at [dpi] (0: the screen's own again): a real per-task density, the app lays itself out
      * for it (WindowContainerTransaction.setDensityDpi, what WM Shell's desktop mode does to its windows; checked on
      * this ROM 2026-10-22: the task's configuration says the new dpi and its screen width in dp follows). HACK: hidden,
@@ -246,6 +258,30 @@ object FreeformTasks {
     ): Boolean =
         transact(context, id) { wct, token -> wct.javaClass.getMethod("setDensityDpi", token.javaClass, Int::class.javaPrimitiveType).invoke(wct, token, dpi) }
             .onFailure { Log.w(TAG, "can't set task $id to $dpi dpi", it) }.isSuccess
+
+    /**
+     * Apps that draw their own caption in a desktop window (Chromium: a captionBar inset turns on its tab strip in the
+     * caption area, APPEARANCE_TRANSPARENT_CAPTION_BAR_BACKGROUND): under PowOS's in-task bar Chrome's strip came doubled
+     * and misaligned, Brave padded the inset black. Decision: PowOS's bar stays (Chrome's header has no window buttons of
+     * its own - it leaves them to SystemUI's caption, which PowOS shrinks to 1 px, OemCaption), as the overlay bar
+     * ABOVE the window, and these tasks get no caption inset - the app lays out from its top with nothing to pad.
+     * HACK: a package list, not the window's own appearance flag (hidden; only `dumpsys window` shows it). Real fix:
+     * read APPEARANCE_TRANSPARENT_CAPTION_BAR_BACKGROUND per window (a WM Shell-side decor provider sees it).
+     */
+    fun drawsOwnCaption(pkg: String?): Boolean = pkg != null && (pkg in CAPTION_APPS || CAPTION_PREFIXES.any { pkg.startsWith(it) })
+
+    private val CAPTION_APPS = setOf("com.android.chrome", "com.brave.browser", "com.microsoft.emmx", "com.vivaldi.browser", "com.kiwibrowser.browser", "org.chromium.chrome")
+    private val CAPTION_PREFIXES = listOf("com.chrome.", "com.brave.browser_")
+
+    /** Task [id]'s caption inset (TaskFrame's) taken off, if it has one: the app lays out from its top again. */
+    fun dropCaptionInsets(
+        context: Context,
+        id: Int,
+    ): Boolean {
+        if (captions.remove(id) == null) return true
+        return transact(context, id) { wct, token -> removeCaption(wct, token) }
+            .onFailure { Log.w(TAG, "task $id: caption inset not removed", it) }.isSuccess
+    }
 
     /** The caption inset (px) each task's in-task bar (TaskFrame) asked for. */
     private val captions = java.util.concurrent.ConcurrentHashMap<Int, Int>()
