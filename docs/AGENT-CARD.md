@@ -18,6 +18,10 @@ Land
   Flags go AFTER the paths. It commits, rebases, pushes and auto-ships; `--no-ship` for docs/tests/tools only.
 - Land check changes (the check script itself) BEFORE queueing the check: the runner runs origin's tip.
 
+Fast checks (shell/)
+- `shell/dev/gate.sh ui/x.css ui/y.ts` (repo paths `shell/ui/x.css` work too): only the scenes those files can affect (`shell/dev/gate-scope.map`), no slot wait, tsc skipped for CSS-only, an identical tree that passed returns at once; ends with a PASS/FAIL + slot-wait/phase-time summary. Widget-fit sweep: `--widgets`. Everything (what the ship runs after landing): `--all`. A gate under ~90 s can run in the foreground - don't background it.
+- `bash test/tier1/test-complexity.sh` lints only the languages that changed vs the merge base (detekt only for .kt/.java); `--all` for every language.
+
 Phone/emulator checks
 - `tools/phone/verify/queue.sh add <task> <check.sh> [args]` then END YOUR TURN or block once with
   `queue.sh wait <job-id> [max_s]` (PASS/FAIL lines only). `queue.sh summary [--since HH:MM]` = one line per finished job.

@@ -1,0 +1,34 @@
+# gate.sh's scope: which browser scenes (gate.mjs run names) a changed shell file can affect.
+#   <shell-relative glob>  <scene regex | none | ALL>
+# First matching line wins. The scene regex is a JavaScript regex on gate.mjs's run names (GATE_ONLY); the page boots
+# (home, lock, shade, ...: one per mode app.tsx renders) ALWAYS run. "none": only the boots. "ALL": every scene.
+# A file that matches no line is ALL, so a new or shared file never loses coverage. tsc and the lints always run for
+# a .ts/.tsx/.json change (a CSS/markdown-only change skips tsc: nothing it checks reads them).
+# `shell/dev/gate.sh --all` (and the ship service's gate: GATE_PRIORITY=ship) ignores this file and runs every scene.
+# dev/gate-scope-test.sh checks the filters it produces.
+*.md                    none
+docs/*                  none
+dev/lint*               none
+dev/style-allow.txt     none
+dev/complexity-baseline*  none
+dev/gate-scope.map      none
+dev/gate.sh             none
+dev/gate-*.sh           none
+ui/terminal.*           none
+ui/remote.*             none
+ui/glasses.*            none
+ui/rich.*               none
+ui/pet.*                ^pet$
+ui/pet/*                ^pet$
+ui/desktop.css          ^(desktops|dock-position-desktop-.*)$
+ui/desktops.ts          ^(desktops|dock-position-desktop-.*)$
+ui/notifications.*      ^(shade-.*|cc-reorder)$
+ui/overpull.ts          ^(shade-.*|cc-reorder)$
+ui/chrome.css           ^(chrome-.*|dock-.*)$
+ui/library*             ^(library-.*|add-app-.*)$
+ui/folder*              ^(home-folder-.*|home-select-.*)$
+# Layout-bearing CSS / tokens: every scene but the PowOS apps' own pages (--app runs those).
+theme.css               ^(?!app )
+ui/shell.css            ^(?!app )
+ui/panel.css            ^(?!app )
+ui/screens.css          ^(?!app )

@@ -4,7 +4,7 @@
 set -uo pipefail
 G=$(cd "$(dirname "$0")" && pwd)/gate.sh
 export XDG_CACHE_HOME; XDG_CACHE_HOME=$(mktemp -d); trap 'rm -rf "$XDG_CACHE_HOME"' EXIT
-export GATE_SLOT_POLL_S=0.2
+export GATE_SLOT_POLL_S=0.2 GATE_SLOTS=2 GATE_SHIP_EXCLUSIVE=1   # the pre-2026-10-28 behaviour, which this test pins
 S=$XDG_CACHE_HOME/powos-gate/slots L=$XDG_CACHE_HOME/log
 fails=0
 ok() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=1; fi; }

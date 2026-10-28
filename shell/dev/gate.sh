@@ -39,6 +39,7 @@
 set -euo pipefail
 SHELL_DIR=$(cd "$(dirname "$0")/.." && pwd)
 IMAGE=${GATE_IMAGE:-zenika/alpine-chrome:with-puppeteer}
+GATE_ALL=${GATE_ALL:-}
 base=head dir="" installed="" overrides="" app="" shots="" wallpaper="" widgets=${GATE_WIDGETS:-} files=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -53,15 +54,17 @@ while [ $# -gt 0 ]; do
     --shots) mkdir -p "$2"; shots=$(cd "$2" && pwd); shift 2 ;;
     --wallpaper) wallpaper=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"); shift 2 ;;
     --widgets) widgets=1; shift ;;
+    --all) GATE_ALL=1; shift ;;
     -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
-    *) files+=("$1"); shift ;;
+    # f305: repo-relative (shell/ui/x.tsx), absolute and ./ paths name the same shell file as ui/x.tsx.
+    *) f=${1#./}; f=${f#"$SHELL_DIR"/}; f=${f#shell/}; files+=("$f"); shift ;;
   esac
 done
 if [ -z "${GATE_STUB_SLEEP:-}" ]; then
   . "$SHELL_DIR/../tools/lib/need-docker.sh"
   need_docker || { echo "gate: no docker" >&2; exit 2; }
 fi
-t0=$(date +%s)
+t0=$(date +%s) slot_wait=0
 # The Mac's 1-min load, measured once up front: a fixed READY_MS can't tell a slow page from a starved one,
 # and under real agent-swarm load (f30: load 25) a page that would boot fine at load 2 missed a fixed 8000 ms
 # and failed the gate though nothing was wrong with the code - even after GATE_SLOTS/build-slot stop OUR OWN
@@ -95,14 +98,17 @@ else
   said=""
   while :; do
     reap
-    if ! ls -d "$slots"/ship.* >/dev/null 2>&1; then
-      for i in $(seq 0 $((${GATE_SLOTS:-2} - 1))); do slot_take "$slots/agent.$i" && break; done
+    # The ship's gate used to stop every agent gate while it ran (GATE_SHIP_EXCLUSIVE=1 brings that back); its priority
+    # is now CPU shares (1024 vs 256) and nice, so agents don't sit idle behind it.
+    if [ -z "${GATE_SHIP_EXCLUSIVE:-}" ] || ! ls -d "$slots"/ship.* >/dev/null 2>&1; then
+      for i in $(seq 0 $((${GATE_SLOTS:-4} - 1))); do slot_take "$slots/agent.$i" && break; done
       [ -n "$slot" ] && break
     fi
     [ -n "$said" ] || { echo "gate: waiting for a slot ($(running) running)"; said=1; }
     sleep "${GATE_SLOT_POLL_S:-2}"
   done
-  [ -z "$said" ] || echo "gate: got a slot after $(($(date +%s) - t0)) s"
+  slot_wait=$(($(date +%s) - t0))
+  [ -z "$said" ] || echo "gate: got a slot after $slot_wait s"
   renice -n 10 -p $$ >/dev/null 2>&1 || true
   cpu="--cpu-shares 256"
   export GATE_CPU_SHARES=256   # dev/preview.sh's container
@@ -140,15 +146,72 @@ if [ "$base" != dir ]; then
   ln -sfn "$SHELL_DIR/node_modules" "$S/node_modules"
 fi
 fail=0
+# 0. Scope (dev/gate-scope.map): the scenes the changed files can affect, not all ~60. Agent gates only: --all, the
+# ship's gate (GATE_PRIORITY=ship: the full run, off the agent's critical path), --app, --tree/--dir/--installed
+# bases and a push with no files or an unmapped file all run every scene. The page boots always run.
+chg=(${files[@]+"${files[@]}"}) scope_re="" scope_note="all scenes" skip_tsc=""
+if [ -z "$GATE_ALL" ] && [ "${GATE_PRIORITY:-}" != ship ] && [ -z "$app" ] && [ -z "${GATE_ONLY:-}" ] && [ "$base" = head ]; then
+  if [ ${#chg[@]} -eq 0 ]; then   # no files named: what this branch changed in shell/ since the merge base, plus uncommitted
+    top=$(git -C "$SHELL_DIR" rev-parse --show-toplevel 2>/dev/null) || top=""
+    mb=$(git -C "$SHELL_DIR" merge-base HEAD origin/worktree-powos-multiplatform 2>/dev/null) || mb=""
+    if [ -n "$top" ] && [ -n "$mb" ]; then
+      while IFS= read -r f; do [ -n "$f" ] && chg+=("${f#shell/}"); done < <({ git -C "$top" diff --name-only "$mb" HEAD -- shell; git -C "$top" status --porcelain -- shell | sed 's/^...//'; } | sort -u)
+    fi
+  fi
+  if [ ${#chg[@]} -gt 0 ]; then
+    scope_re="" all=""
+    for f in "${chg[@]}"; do
+      hit=""
+      while IFS= read -r line; do
+        case $line in ""|"#"*) continue ;; esac
+        pat=${line%%[[:space:]]*}; val=${line#"$pat"}; val=${val#"${val%%[![:space:]]*}"}
+        # shellcheck disable=SC2254
+        case $f in $pat) hit=$val; break ;; esac
+      done < "$SHELL_DIR/dev/gate-scope.map"
+      case $hit in
+        "") all=1 ;;                                  # unmapped: every scene
+        ALL) all=1 ;;
+        none) ;;
+        *) scope_re="${scope_re:+$scope_re|}$hit" ;;
+      esac
+    done
+    if [ -z "$all" ]; then
+      modes_re=$(grep -oE 'mode === "[a-z0-9-]+"' "$S/app.tsx" 2>/dev/null | sed 's/mode === "//; s/"$//' | paste -sd'|' -)
+      GATE_ONLY="^(home${modes_re:+|$modes_re})\$${scope_re:+|$scope_re}"
+      scope_note="scoped to ${#chg[@]} changed file(s) (--all for every scene)"
+    fi
+    skip_tsc=1
+    for f in "${chg[@]}"; do case $f in *.css|*.md|*.txt) ;; *) skip_tsc="" ;; esac; done
+  fi
+fi
+export GATE_ONLY
+[ -z "${GATE_ONLY:-}" ] || [ "$scope_note" != "all scenes" ] || scope_note="GATE_ONLY=$GATE_ONLY"
+echo "gate: scope: $scope_note"
+[ -z "${GATE_SCOPE_DRY:-}" ] || { echo "gate: GATE_ONLY=${GATE_ONLY:-} skip_tsc=${skip_tsc:-0}"; exit 0; }   # dev/gate-scope-test.sh
+# The pass cache: the same composed tree (+ scope + flags) that passed once passes again at once - an agent's rerun
+# (a flaky tool timeout, a re-check before landing) costs nothing. Failures are never cached.
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/pass"
+mkdir -p "$cache_dir" && find "$cache_dir" -type f -mtime +3 -delete 2>/dev/null || true
+cache_key=$( { (cd "$S" && find . -path ./node_modules -prune -o -type f -print0 | sort -z | xargs -0 shasum 2>/dev/null)
+  echo "$IMAGE|${GATE_ONLY:-}|${widgets:-}|${app:-}|${GATE_SHELL_PAGES:-1}|${IDLE_MS:-}|${GATE_THROTTLE:-}|$skip_tsc"; } | shasum | cut -c1-24)
+if [ -z "$shots" ] && [ -z "${GATE_NOCACHE:-}" ] && [ -f "$cache_dir/$cache_key" ]; then
+  echo "gate: pass in 0 s (cached: this exact tree already passed, $(cat "$cache_dir/$cache_key")) (slot wait $slot_wait s)"; exit 0
+fi
+t_tsc=0 t_lint=0 t_browser=0 t_widgets=0
+mark() { date +%s; }
 # 1. Types.
+ts=$(mark)
 if [ "${GATE_SHELL_PAGES:-1}" = 0 ]; then
   : # an app's UI alone (apps/install.sh): the shell isn't what changed
+elif [ -n "$skip_tsc" ]; then
+  echo "     tsc: skipped (CSS/text-only change)"
 elif [ -x "$SHELL_DIR/node_modules/.bin/tsc" ]; then
   if out=$(cd "$S" && "$SHELL_DIR/node_modules/.bin/tsc" --noEmit -p . 2>&1); then echo "ok   tsc"
   else echo "$out" | grep -v '^ ' | head -40 | sed 's/^/FAIL tsc: /'; fail=1; fi
 else
   echo "     tsc: skipped (no shell/node_modules - npm ci in shell/)"
 fi
+t_tsc=$(( $(mark) - ts )); ts=$(mark)
 # 1b. The design language's style lint (docs/DESIGN-LANGUAGE.md): no raw colours, lines or shadows outside the tokens.
 # A push: the files it brings (what's already on the phone isn't this push's to answer for); otherwise all of the shell.
 if out=$("$SHELL_DIR/dev/lint-style.sh" "$S" ${files[@]+"${files[@]}"} 2>&1); then echo "$out"; else echo "$out" | head -30; fail=1; fi
@@ -158,6 +221,7 @@ if out=$("$SHELL_DIR/dev/lint-style.sh" "$S" ${files[@]+"${files[@]}"} 2>&1); th
 # --app: the PowOS apps' UIs too (apps/*/ui, their own baseline).
 cx=0; out=$("$SHELL_DIR/dev/lint-complexity.sh" --dir "$S" ${app:+--apps} ${files[@]+"${files[@]}"} 2>&1) || cx=$?
 case $cx in 0|2) echo "$out" ;; *) echo "$out" | head -45; fail=1 ;; esac
+t_lint=$(( $(mark) - ts ))
 # 1c. Every local file a page names (an html's href/src) or a script links in (a "./ui/x.css" it adds) is in what the
 # phone will serve: the boot check below doesn't fail a stylesheet that 404s (2026-10-21: index.html's override named
 # ui/rich.css before rich.css itself was on the phone - the assist page loaded without it). Push a page with what it
@@ -197,13 +261,17 @@ set +e
 # fixes the cause instead of raising the timeout.
 # One browser run; GATE_BOOTS / READY_MS / GATE_ONLY come from the caller's environment of this function.
 browser_run() {
-  "$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" -- \
+  # Not under tools/agents/build-slot.sh any more: that is ONE Mac-wide lock shared with compile-check/build-pkgs, so
+  # with N agents the N-1 others queued behind the gate holding it - ~210 s of f311's waits, on top of this file's own
+  # slots (GATE_SLOTS) that already cap how many gates run. GATE_BUILD_SLOT=1 brings it back.
+  ${GATE_BUILD_SLOT:+"$SHELL_DIR/../tools/agents/build-slot.sh" "gate $base" --} \
   docker run --rm --platform linux/arm64 --shm-size 512m $cpu "${mounts[@]}" -e READY_MS="$1" \
     ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} ${GATE_SHARED_TX:+-e GATE_SHARED_TX="$GATE_SHARED_TX"} \
     ${2:+-e GATE_ONLY="$2"} ${3:+-e GATE_BOOTS="$3"} ${GATE_THROTTLE:+-e GATE_THROTTLE="$GATE_THROTTLE"} \
     -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs
 }
 ready_ms=${READY_MS:-$ready_default}
+ts=$(mark)
 browser_log="$work/browser.log"
 browser_run "$ready_ms" "${GATE_ONLY:-}" "${GATE_BOOTS:-}" 2>&1 | tee "$browser_log"
 rc=${PIPESTATUS[0]}
@@ -221,12 +289,20 @@ if [ $rc -eq 1 ] && grep -q '^FAIL ' "$browser_log" && ! grep '^FAIL ' "$browser
   set -e
 fi
 [ $rc -eq 0 ] || fail=1
+t_browser=$(( $(mark) - ts ))
 # 2b. The widgets' fit (dev/preview.sh): when this push brings what draws them, or asked.
-if [ -z "$widgets" ]; then
-  for f in ${files[@]+"${files[@]}"}; do
+if [ -z "$widgets" ] && { [ "${GATE_PRIORITY:-}" = ship ] || [ -n "$GATE_ALL" ] || [ -n "$app" ]; }; then
+  for f in ${chg[@]+"${chg[@]}"}; do
     case $f in ui/owl.tsx|ui/island.tsx|ui/grid.tsx|ui/agents.tsx|ui/recentwidget.tsx|theme.css|ui/shell.css|apps/stdb.ts|dev/preview/*) widgets=1 ;; esac
   done
   [ -n "$app" ] && widgets=1
+elif [ -z "$widgets" ]; then
+  # The agent's gate leaves the ~1-4 min widget-fit sweep to the ship's gate (full run after landing, FAILs land on the
+  # board as friction); --widgets / GATE_WIDGETS=1 / --all run it here.
+  for f in ${chg[@]+"${chg[@]}"}; do
+    case $f in ui/owl.tsx|ui/island.tsx|ui/grid.tsx|ui/agents.tsx|ui/recentwidget.tsx|theme.css|ui/shell.css|apps/stdb.ts|dev/preview/*)
+      echo "gate: widget-fit sweep deferred to the ship's gate (it runs there after landing); --widgets runs it now"; break ;; esac
+  done
 fi
 if [ "$widgets" = 1 ]; then
   wargs=(--dir "$S" --fast --out "$work/widgets")
@@ -236,9 +312,11 @@ if [ "$widgets" = 1 ]; then
     [ "${GATE_SHELL_PAGES:-1}" = 0 ] && wargs+=(--only "^$(sed -n 's/^ *"id": *"\([^"]*\)".*/\1/p' "$app/powos-app.json" | head -1 | sed 's/\./\\./g')\\.")
   fi
   set +e
+  ts=$(mark)
   "$SHELL_DIR/dev/preview.sh" "${wargs[@]}" > "$work/widgets.log" 2>&1
   wrc=$?
   set -e
+  t_widgets=$(( $(mark) - ts ))
   grep -E "^(FAIL|known|       |preview:|     owl)" "$work/widgets.log" | sed 's/^FAIL /FAIL widget /' | head -80
   [ $wrc = 0 ] || fail=1
 fi
@@ -256,6 +334,11 @@ if [ -n "$shots" ]; then
       [ "${SHOTS_STRICT:-}" = 1 ] && fail=1; }
 fi
 [ $rc -le 1 ] || echo "FAIL gate: the browser run itself failed (exit $rc)"
+# The summary: scenes PASS/FAIL, where the time went (slot wait is queueing for CPU, not work).
+n_ok=$(cat "$browser_log" "$work/browser-retry.log" 2>/dev/null | grep -c '^ok   ')
+bad_scenes=$(grep -h '^FAIL ' "$browser_log" 2>/dev/null | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u | paste -sd' ' -)
+echo "gate: summary: scenes $n_ok PASS, $(echo "$bad_scenes" | wc -w | tr -d ' ') FAIL${bad_scenes:+ ($bad_scenes)}; slot wait ${slot_wait} s; tsc ${t_tsc} s, lints ${t_lint} s, browser ${t_browser} s, widgets ${t_widgets} s"
+[ $fail = 0 ] && [ -z "$shots" ] && echo "$(date +%F\ %T) $scope_note" > "$cache_dir/$cache_key"
 echo "gate: $([ $fail = 0 ] && echo pass || echo FAIL) in $(($(date +%s) - t0)) s ($base$([ -n "$overrides" ] && echo " + phone overrides")$([ ${#files[@]} -gt 0 ] && echo " + ${#files[@]} pushed file(s)"))"
 # A failure while the Mac is loaded (1-min load >= GATE_LOAD_FRICTION, 12) is friction: the gate may have failed for
 # the load, not the code (2026-10-23: loads 17-25 timed pages out). Logged in the background, never failing the gate.
