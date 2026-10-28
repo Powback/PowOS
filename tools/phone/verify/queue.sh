@@ -637,6 +637,10 @@ EOS
         fi
         # A check that printed FAIL but exited 0 (float-windows did) failed.
         [ $rc = 0 ] && grep -q '^FAIL' "$log" && rc=1
+        # The phone/CDP not answering is the environment, not a product bug: shot.sh refuses a dozing screen and a dead CDP
+        # (cdp: no answer within N s) both surface inside a check's own FAIL line (they were counted as product FAILs).
+        if [ $rc != 0 ] && [ $rc != 5 ] && ! grep -q '^ENV:' "$log"; then
+          envl=$(grep -m1 -E '(^|[^a-z])shot: refused - the screen is|cdp: no answer within [0-9]+ s' "$log"); [ -z "$envl" ] || { echo "ENV: $envl" >> "$log"; rc=5; }; fi
         envskip=0; [ $rc = 5 ] && grep -q '^ENV:' "$log" && envskip=1   # preflight.sh: the phone cannot run it
         mv "$j" "$Q/done/$n.job"
         # rc 3 six times = the user kept using the phone: a SKIP (no mail, not a fail), not a bug in the check.

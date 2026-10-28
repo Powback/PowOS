@@ -45,7 +45,14 @@ for state in 0 3; do
     [ "$clear" = true ] || { echo "FAIL: $state $side dock overlaps search bar"; exit 1; }
     read -r x y end <<<"$(ev '(()=>{const r=document.querySelector(".home > .dock").getBoundingClientRect(),d=devicePixelRatio;return [r.x+r.width/2,r.bottom-45,r.top+45].map(n=>Math.round(n*d)).join(" ")})()')"
     echo "dock $state $side: swipe $x,$y -> $x,$end"
-    [[ "$x $y $end" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]] && [ "$y" -gt "$end" ] || { echo "FAIL: invalid dock swipe geometry"; exit 1; }
+    # The dock lays out a moment after device_state changes: give it up to 10 s before judging its geometry (a
+    # mid-transition rect is not a product answer), and say what the rect was.
+    for _ in 1 2 3 4 5; do
+      [[ "$x $y $end" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]] && [ "$y" -gt "$end" ] && break
+      sleep 2
+      read -r x y end <<<"$(ev '(()=>{const r=document.querySelector(".home > .dock").getBoundingClientRect(),d=devicePixelRatio;return [r.x+r.width/2,r.bottom-45,r.top+45].map(n=>Math.round(n*d)).join(" ")})()')"
+    done
+    [[ "$x $y $end" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]] && [ "$y" -gt "$end" ] || { echo "FAIL: $state $side dock too small to swipe after 10 s (x y end = '$x $y $end'; dock rect: $(ev 'JSON.stringify(document.querySelector(".home > .dock").getBoundingClientRect())'))"; exit 1; }
     for direction in up down; do
       if [ "$direction" = up ]; then start=$y; finish=$end; else start=$end; finish=$y; fi
     sh_ "input swipe $x $start $x $finish 400"

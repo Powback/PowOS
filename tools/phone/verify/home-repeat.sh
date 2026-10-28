@@ -41,7 +41,9 @@ chk first-home
 sh_ "input swipe $x $y $x $end 150"
 sleep 2
 chk repeat-home
-[ "$(ev 'document.querySelector(".recents")?.classList.contains("open") || false')" = true ] || { echo 'FAIL: repeated Home swipe did not open switcher'; exit 1; }
+[ "$(ev 'document.querySelector(".recents")?.classList.contains("open") || false')" = true ] || {
+  "$T/shot.sh" "$OUT/repeat-home-fail.png" >/dev/null 2>&1; sh_ 'dumpsys window windows' | grep -E 'mCurrentFocus|mFocusedApp' > "$OUT/focus.txt"
+  echo "FAIL: repeated Home swipe did not open switcher (page $(hpage); screenshot $OUT/repeat-home-fail.png, focus $OUT/focus.txt: $(head -c 160 "$OUT/focus.txt" | tr '\n' ' '))"; exit 1; }
 "$T/shot.sh" "$OUT/switcher.png" >/dev/null || exit 1
 sh_ 'input keyevent BACK'
 sleep 1

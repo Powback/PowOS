@@ -13,7 +13,7 @@ for a in "$@"; do case $a in
   win:*) ;;   # a window title may hold spaces (handled below)
   # Before app: (its glob takes the space too). Several words in one argument ("app:557340 steam": zsh doesn't split $var when queueing) - every run would be
   # wasted (env: 'cold': No such file, 22:38, 2026-10-23, friction f46): refuse it plainly instead.
-  *[[:space:]]*) echo "FAIL setup: one argument holds several words: '$a' - pass each token separately"; exit 2 ;;
+  *[[:space:]]*) echo "INVALID setup: one argument holds several words: '$a' - pass each token separately"; exit 2 ;;
   esac; case $a in
   app:[0-9]*) envs="$envs APP=${a#app:}" ;;
   # Base64: a title with spaces ("RimWorld by Ludeon Studios") through su -c and powos-run.sh's quoting.
