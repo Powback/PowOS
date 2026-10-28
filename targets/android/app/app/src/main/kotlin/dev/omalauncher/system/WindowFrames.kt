@@ -827,9 +827,22 @@ class WindowFrames(
         val back = away - hide
         away.clear()
         away.addAll(hide)
-        // All of them, not only the new: after a fold and unfold Android may have raised them again.
-        hide.forEach { FreeformTasks.minimise(context, it) }
-        running.value.asReversed().filter { it.id in back && it.id !in minimised }.forEach { FreeformTasks.raise(context, it.id) }
+        // The other pages' windows stay live and drawn above home, their leash hidden and not focusable - never
+        // reordered under home (that stopped the app, it dropped its buffer and came back blank until touched).
+        // All of them, not only the new: after a fold and unfold Android may have raised/shown them again.
+        val returning = running.value.asReversed().filter { it.id in back && it.id !in minimised }.map { it.id }
+        val t = android.view.SurfaceControl.Transaction()
+        val noLeashHide = TaskSurfaces.show(t, hide, false)
+        val noLeashBack = TaskSurfaces.show(t, returning, true)
+        t.apply()
+        hide.forEach { FreeformTasks.focusable(context, it, false) }
+        returning.forEach { FreeformTasks.focusable(context, it, true) }
+        // HACK: a window PowOS holds no leash of (none recorded yet, or dropped by a fold) leaves the old way, under
+        // home, and comes back by a raise - that one may still come back blank. Real fix: a leash for every window task.
+        noLeashHide.forEach { FreeformTasks.minimise(context, it) }
+        returning.filter { it in noLeashBack || it in parked }.forEach { FreeformTasks.raise(context, it) }
+        parked.removeAll(back.toSet())
+        parked.addAll(noLeashHide)
         main.removeCallbacks(refreshNow)
         main.postDelayed(refreshNow, SETTLE_MS)
     }
@@ -837,7 +850,12 @@ class WindowFrames(
     /** Task [id]'s window back where it was, on top (a tap on it in the dock; home goes to its page, windows.raised). */
     fun restore(id: Int): Boolean {
         minimised.remove(id)
-        away.remove(id)
+        if (away.remove(id)) {
+            // Its page's leash-hidden window: shown again (the raise below brings it to the top).
+            android.view.SurfaceControl.Transaction().also { TaskSurfaces.show(it, listOf(id), true) }.apply()
+            FreeformTasks.focusable(context, id, true)
+            parked.remove(id)
+        }
         if (floatBack(id)) return true
         val ok = FreeformTasks.raise(context, id) || Tasks.open(context, id)
         // Back where it was - on screen (AppWindows.onScreen): a place from another bottom bar or fold isn't kept.
@@ -868,7 +886,7 @@ class WindowFrames(
         val next =
             all.map { w ->
                 val label = w.pkg?.let { p -> runCatching { pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString() }.getOrNull() }
-                Running(w.id, w.pkg, label ?: w.pkg.orEmpty(), w.id in minimised, w.id in away, w.bounds.takeIf { w.visible })
+                Running(w.id, w.pkg, label ?: w.pkg.orEmpty(), w.id in minimised, w.id in away, w.bounds.takeIf { w.visible && w.id !in away })
             }
         if (next != running.value) running.value = next
     }
@@ -953,6 +971,9 @@ class WindowFrames(
 
         /** Windows of the home pages not on screen ([desktop]); kept across a rebind like [minimised]. */
         private val away = mutableSetOf<Int>()
+
+        /** Of [away]: the ones that left under home (no leash to hide - HACK in showOnly), brought back by a raise. */
+        private val parked = mutableSetOf<Int>()
 
         /** The floating windows, top-most first, for the dock (home's page reads it: windows.list / windows.changed). */
         val running = mutableStateOf<List<Running>>(emptyList())
