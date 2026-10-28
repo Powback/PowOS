@@ -68,7 +68,14 @@ powos.widgets.canvas = async (key: string, id: string, w: number, h: number) => 
 
 /** An island's host over mock data: the app's tables as given, its network answered from the data's patterns. */
 function mockHost(spec: Spec) {
-  const rows = spec.data?.rows ?? {};
+  // A row value {"$daysAgo": n} is that local midnight (BigInt ms): fixtures with dated rows stay "today" whenever they render.
+  const midnight = (n: number) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - n); return BigInt(d.getTime()); };
+  const rows = Object.fromEntries(
+    Object.entries(spec.data?.rows ?? {}).map(([t, rs]) => [
+      t,
+      rs.map((r) => (r && typeof r === "object" ? Object.fromEntries(Object.entries(r).map(([k, v]: [string, any]) => [k, v && typeof v === "object" && "$daysAgo" in v ? midnight(v.$daysAgo) : v])) : r)),
+    ]),
+  ) as Record<string, any[]>;
   const db = { conn: { db: Object.fromEntries(Object.keys(rows).map((t) => [t, {}])), reducers: {} }, status: "connected", epoch: 1 };
   const answer = (url: string) => {
     const hit = spec.data?.net?.find((n) => new RegExp(n.match).test(url));

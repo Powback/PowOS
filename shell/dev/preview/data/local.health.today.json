@@ -1,0 +1,902 @@
+{
+ "rows": {
+  "daily": [
+   {
+    "id": "steps-com.google.android.apps.fitness-6",
+    "kind": "steps",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 6
+    },
+    "sum": 6120,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 6
+    }
+   },
+   {
+    "id": "hr-com.google.android.apps.fitness-6",
+    "kind": "heart_rate",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 6
+    },
+    "sum": 12800,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 64,
+    "lastAt": {
+     "$daysAgo": 6
+    }
+   },
+   {
+    "id": "sl-com.google.android.apps.fitness-6",
+    "kind": "sleep",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 6
+    },
+    "sum": 432,
+    "count": 1,
+    "min": 432,
+    "max": 432,
+    "last": 432,
+    "lastAt": {
+     "$daysAgo": 6
+    }
+   },
+   {
+    "id": "ac-com.google.android.apps.fitness-6",
+    "kind": "active_calories",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 6
+    },
+    "sum": 410,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 6
+    }
+   },
+   {
+    "id": "steps-com.garmin.android.apps.connectmobile-6",
+    "kind": "steps",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 6
+    },
+    "sum": 5400,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 6
+    }
+   },
+   {
+    "id": "hr-com.garmin.android.apps.connectmobile-6",
+    "kind": "heart_rate",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 6
+    },
+    "sum": 13000,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 65,
+    "lastAt": {
+     "$daysAgo": 6
+    }
+   },
+   {
+    "id": "sl-com.garmin.android.apps.connectmobile-6",
+    "kind": "sleep",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 6
+    },
+    "sum": 426,
+    "count": 1,
+    "min": 426,
+    "max": 426,
+    "last": 426,
+    "lastAt": {
+     "$daysAgo": 6
+    }
+   },
+   {
+    "id": "ac-com.garmin.android.apps.connectmobile-6",
+    "kind": "active_calories",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 6
+    },
+    "sum": 390,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 6
+    }
+   },
+   {
+    "id": "steps-com.google.android.apps.fitness-5",
+    "kind": "steps",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 5
+    },
+    "sum": 8450,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 5
+    }
+   },
+   {
+    "id": "hr-com.google.android.apps.fitness-5",
+    "kind": "heart_rate",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 5
+    },
+    "sum": 13200,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 66,
+    "lastAt": {
+     "$daysAgo": 5
+    }
+   },
+   {
+    "id": "sl-com.google.android.apps.fitness-5",
+    "kind": "sleep",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 5
+    },
+    "sum": 401,
+    "count": 1,
+    "min": 401,
+    "max": 401,
+    "last": 401,
+    "lastAt": {
+     "$daysAgo": 5
+    }
+   },
+   {
+    "id": "ac-com.google.android.apps.fitness-5",
+    "kind": "active_calories",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 5
+    },
+    "sum": 520,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 5
+    }
+   },
+   {
+    "id": "steps-com.garmin.android.apps.connectmobile-5",
+    "kind": "steps",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 5
+    },
+    "sum": 8200,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 5
+    }
+   },
+   {
+    "id": "hr-com.garmin.android.apps.connectmobile-5",
+    "kind": "heart_rate",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 5
+    },
+    "sum": 13400,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 67,
+    "lastAt": {
+     "$daysAgo": 5
+    }
+   },
+   {
+    "id": "sl-com.garmin.android.apps.connectmobile-5",
+    "kind": "sleep",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 5
+    },
+    "sum": 395,
+    "count": 1,
+    "min": 395,
+    "max": 395,
+    "last": 395,
+    "lastAt": {
+     "$daysAgo": 5
+    }
+   },
+   {
+    "id": "ac-com.garmin.android.apps.connectmobile-5",
+    "kind": "active_calories",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 5
+    },
+    "sum": 500,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 5
+    }
+   },
+   {
+    "id": "steps-com.google.android.apps.fitness-4",
+    "kind": "steps",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 4
+    },
+    "sum": 4980,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 4
+    }
+   },
+   {
+    "id": "hr-com.google.android.apps.fitness-4",
+    "kind": "heart_rate",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 4
+    },
+    "sum": 12600,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 63,
+    "lastAt": {
+     "$daysAgo": 4
+    }
+   },
+   {
+    "id": "sl-com.google.android.apps.fitness-4",
+    "kind": "sleep",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 4
+    },
+    "sum": 455,
+    "count": 1,
+    "min": 455,
+    "max": 455,
+    "last": 455,
+    "lastAt": {
+     "$daysAgo": 4
+    }
+   },
+   {
+    "id": "ac-com.google.android.apps.fitness-4",
+    "kind": "active_calories",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 4
+    },
+    "sum": 380,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 4
+    }
+   },
+   {
+    "id": "steps-com.garmin.android.apps.connectmobile-4",
+    "kind": "steps",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 4
+    },
+    "sum": 4700,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 4
+    }
+   },
+   {
+    "id": "hr-com.garmin.android.apps.connectmobile-4",
+    "kind": "heart_rate",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 4
+    },
+    "sum": 12800,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 64,
+    "lastAt": {
+     "$daysAgo": 4
+    }
+   },
+   {
+    "id": "sl-com.garmin.android.apps.connectmobile-4",
+    "kind": "sleep",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 4
+    },
+    "sum": 449,
+    "count": 1,
+    "min": 449,
+    "max": 449,
+    "last": 449,
+    "lastAt": {
+     "$daysAgo": 4
+    }
+   },
+   {
+    "id": "ac-com.garmin.android.apps.connectmobile-4",
+    "kind": "active_calories",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 4
+    },
+    "sum": 360,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 4
+    }
+   },
+   {
+    "id": "steps-com.google.android.apps.fitness-3",
+    "kind": "steps",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 3
+    },
+    "sum": 10210,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 3
+    }
+   },
+   {
+    "id": "hr-com.google.android.apps.fitness-3",
+    "kind": "heart_rate",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 3
+    },
+    "sum": 13600,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 68,
+    "lastAt": {
+     "$daysAgo": 3
+    }
+   },
+   {
+    "id": "sl-com.google.android.apps.fitness-3",
+    "kind": "sleep",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 3
+    },
+    "sum": 388,
+    "count": 1,
+    "min": 388,
+    "max": 388,
+    "last": 388,
+    "lastAt": {
+     "$daysAgo": 3
+    }
+   },
+   {
+    "id": "ac-com.google.android.apps.fitness-3",
+    "kind": "active_calories",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 3
+    },
+    "sum": 610,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 3
+    }
+   },
+   {
+    "id": "steps-com.garmin.android.apps.connectmobile-3",
+    "kind": "steps",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 3
+    },
+    "sum": 9900,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 3
+    }
+   },
+   {
+    "id": "hr-com.garmin.android.apps.connectmobile-3",
+    "kind": "heart_rate",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 3
+    },
+    "sum": 13800,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 69,
+    "lastAt": {
+     "$daysAgo": 3
+    }
+   },
+   {
+    "id": "sl-com.garmin.android.apps.connectmobile-3",
+    "kind": "sleep",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 3
+    },
+    "sum": 382,
+    "count": 1,
+    "min": 382,
+    "max": 382,
+    "last": 382,
+    "lastAt": {
+     "$daysAgo": 3
+    }
+   },
+   {
+    "id": "ac-com.garmin.android.apps.connectmobile-3",
+    "kind": "active_calories",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 3
+    },
+    "sum": 590,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 3
+    }
+   },
+   {
+    "id": "steps-com.google.android.apps.fitness-2",
+    "kind": "steps",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 2
+    },
+    "sum": 7340,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 2
+    }
+   },
+   {
+    "id": "hr-com.google.android.apps.fitness-2",
+    "kind": "heart_rate",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 2
+    },
+    "sum": 13000,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 65,
+    "lastAt": {
+     "$daysAgo": 2
+    }
+   },
+   {
+    "id": "sl-com.google.android.apps.fitness-2",
+    "kind": "sleep",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 2
+    },
+    "sum": 420,
+    "count": 1,
+    "min": 420,
+    "max": 420,
+    "last": 420,
+    "lastAt": {
+     "$daysAgo": 2
+    }
+   },
+   {
+    "id": "ac-com.google.android.apps.fitness-2",
+    "kind": "active_calories",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 2
+    },
+    "sum": 450,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 2
+    }
+   },
+   {
+    "id": "steps-com.garmin.android.apps.connectmobile-2",
+    "kind": "steps",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 2
+    },
+    "sum": 7340,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 2
+    }
+   },
+   {
+    "id": "hr-com.garmin.android.apps.connectmobile-2",
+    "kind": "heart_rate",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 2
+    },
+    "sum": 13200,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 66,
+    "lastAt": {
+     "$daysAgo": 2
+    }
+   },
+   {
+    "id": "sl-com.garmin.android.apps.connectmobile-2",
+    "kind": "sleep",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 2
+    },
+    "sum": 414,
+    "count": 1,
+    "min": 414,
+    "max": 414,
+    "last": 414,
+    "lastAt": {
+     "$daysAgo": 2
+    }
+   },
+   {
+    "id": "ac-com.garmin.android.apps.connectmobile-2",
+    "kind": "active_calories",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 2
+    },
+    "sum": 430,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 2
+    }
+   },
+   {
+    "id": "steps-com.google.android.apps.fitness-1",
+    "kind": "steps",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 1
+    },
+    "sum": 9120,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "hr-com.google.android.apps.fitness-1",
+    "kind": "heart_rate",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 1
+    },
+    "sum": 13400,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 67,
+    "lastAt": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "sl-com.google.android.apps.fitness-1",
+    "kind": "sleep",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 1
+    },
+    "sum": 470,
+    "count": 1,
+    "min": 470,
+    "max": 470,
+    "last": 470,
+    "lastAt": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "ac-com.google.android.apps.fitness-1",
+    "kind": "active_calories",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 1
+    },
+    "sum": 560,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "steps-com.garmin.android.apps.connectmobile-1",
+    "kind": "steps",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 1
+    },
+    "sum": 8800,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "hr-com.garmin.android.apps.connectmobile-1",
+    "kind": "heart_rate",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 1
+    },
+    "sum": 13600,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 68,
+    "lastAt": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "sl-com.garmin.android.apps.connectmobile-1",
+    "kind": "sleep",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 1
+    },
+    "sum": 464,
+    "count": 1,
+    "min": 464,
+    "max": 464,
+    "last": 464,
+    "lastAt": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "ac-com.garmin.android.apps.connectmobile-1",
+    "kind": "active_calories",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 1
+    },
+    "sum": 540,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 1
+    }
+   },
+   {
+    "id": "steps-com.google.android.apps.fitness-0",
+    "kind": "steps",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 0
+    },
+    "sum": 4210,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 0
+    }
+   },
+   {
+    "id": "hr-com.google.android.apps.fitness-0",
+    "kind": "heart_rate",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 0
+    },
+    "sum": 13200,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 66,
+    "lastAt": {
+     "$daysAgo": 0
+    }
+   },
+   {
+    "id": "sl-com.google.android.apps.fitness-0",
+    "kind": "sleep",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 0
+    },
+    "sum": 415,
+    "count": 1,
+    "min": 415,
+    "max": 415,
+    "last": 415,
+    "lastAt": {
+     "$daysAgo": 0
+    }
+   },
+   {
+    "id": "ac-com.google.android.apps.fitness-0",
+    "kind": "active_calories",
+    "source": "com.google.android.apps.fitness",
+    "day": {
+     "$daysAgo": 0
+    },
+    "sum": 320,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 0
+    }
+   },
+   {
+    "id": "steps-com.garmin.android.apps.connectmobile-0",
+    "kind": "steps",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 0
+    },
+    "sum": 4050,
+    "count": 40,
+    "min": 0,
+    "max": 900,
+    "last": 120,
+    "lastAt": {
+     "$daysAgo": 0
+    }
+   },
+   {
+    "id": "hr-com.garmin.android.apps.connectmobile-0",
+    "kind": "heart_rate",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 0
+    },
+    "sum": 13400,
+    "count": 200,
+    "min": 52,
+    "max": 128,
+    "last": 67,
+    "lastAt": {
+     "$daysAgo": 0
+    }
+   },
+   {
+    "id": "sl-com.garmin.android.apps.connectmobile-0",
+    "kind": "sleep",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 0
+    },
+    "sum": 409,
+    "count": 1,
+    "min": 409,
+    "max": 409,
+    "last": 409,
+    "lastAt": {
+     "$daysAgo": 0
+    }
+   },
+   {
+    "id": "ac-com.garmin.android.apps.connectmobile-0",
+    "kind": "active_calories",
+    "source": "com.garmin.android.apps.connectmobile",
+    "day": {
+     "$daysAgo": 0
+    },
+    "sum": 300,
+    "count": 12,
+    "min": 0,
+    "max": 90,
+    "last": 30,
+    "lastAt": {
+     "$daysAgo": 0
+    }
+   }
+  ]
+ }
+}
