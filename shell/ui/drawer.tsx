@@ -4,12 +4,13 @@
  * the search pill (thumb reach), a fixed row of the apps opened lately. Typing in the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of
  * the recent apps bar (home.tsx); always mounted, so it follows the finger without rebuilding.
  */
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { computed } from "@preact/signals";
 import { AppCell } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
-import { drawerOpen } from "./gesture.ts";
-import { apps, byKey, chatting, query, recent, stored } from "../state.ts";
+import { drawerOpen, pageDecision, sampleVx } from "./gesture.ts";
+import { apps, byKey, chatting, home, query, recent, stored } from "../state.ts";
+import { folderName } from "./folders.tsx";
 import { pendingApp } from "./appbuild.tsx";
 import { PendingDetailSheet, PendingIconBadge } from "./pending.tsx";
 import type { App } from "../types.ts";
@@ -187,6 +188,83 @@ function PendingAppCell() {
   );
 }
 
+/** The drawer's 2nd page: the home folders, each with its apps (tap to open). */
+function FolderView() {
+  const folders = home.value.items.filter((i) => i.kind === "folder" && i.apps?.length);
+  return (
+    <div class="drawer-list folder-view">
+      {!folders.length && <div class="muted folder-empty">No folders yet</div>}
+      {folders.map((f) => (
+        <section key={f.key}>
+          <h3 class="heading">{folderName(f.key)}</h3>
+          <div class="grid">
+            {f.apps!.map((a) => {
+              const app = byKey.value.get(a.app);
+              return app ? <AppCell key={a.key} app={app} draggable /> : null;
+            })}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * All apps | folders as two pages that swipe sideways under the finger, deciding like the home pager (gesture.ts
+ * pageDecision: 30% or a flick, release velocity over the last 50 ms). Transform only (translate3d). Home's own gesture
+ * drops sideways moves while the drawer is open, so these touch events are the drawer's alone.
+ */
+function Pages() {
+  const track = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState(0);
+  const s = useRef({ x0: 0, y0: 0, lock: "" as "" | "x" | "y", samples: [] as [number, number][], base: 0 });
+  const put = (px: number, ms: number) => {
+    const el = track.current;
+    if (!el) return;
+    el.style.transition = ms ? `transform ${ms}ms cubic-bezier(0.1, 0.8, 0.2, 1)` : "none";
+    el.style.transform = `translate3d(${px}px, 0, 0)`;
+  };
+  const width = () => track.current?.clientWidth || innerWidth;
+  useEffect(() => put(-view * width(), 0), []);
+  const start = (e: TouchEvent) => {
+    const t = e.touches[0];
+    const st = s.current;
+    st.x0 = t.clientX;
+    st.y0 = t.clientY;
+    st.lock = (e.target as Element).closest?.(".letter-bar") ? "y" : "";
+    st.samples = [[t.clientX, performance.now()]];
+  };
+  const move = (e: TouchEvent) => {
+    const t = e.touches[0];
+    const st = s.current;
+    const dx = t.clientX - st.x0;
+    if (!st.lock && Math.hypot(dx, t.clientY - st.y0) >= 10) st.lock = Math.abs(dx) > Math.abs(t.clientY - st.y0) ? "x" : "y";
+    if (st.lock !== "x") return;
+    st.samples.push([t.clientX, performance.now()]);
+    if (st.samples.length > 12) st.samples.shift();
+    const off = (view === 0 && dx > 0) || (view === 1 && dx < 0) ? dx / 3 : dx;
+    put(-view * width() + off, 0);
+  };
+  const end = (e: TouchEvent) => {
+    const st = s.current;
+    if (st.lock !== "x") return;
+    st.lock = "";
+    const dx = (e.changedTouches[0]?.clientX ?? st.x0) - st.x0;
+    const { dir } = pageDecision(dx, dx, sampleVx(st.samples), width());
+    const to = Math.max(0, Math.min(1, view + dir));
+    setView(to);
+    put(-to * width(), 220);
+  };
+  return (
+    <div class="drawer-pages" data-view={view} onTouchStart={start} onTouchMove={move} onTouchEnd={end} onTouchCancel={end}>
+      <div class="drawer-track" ref={track}>
+        <div class="drawer-page"><AppList found={null} /></div>
+        <div class="drawer-page"><FolderView /></div>
+      </div>
+    </div>
+  );
+}
+
 export function Drawer() {
   const searching = query.value.trim() !== "";
   // No app by that name: it's a question for PowOS AI. Asked, the chat stays until the search finds apps again.
@@ -198,7 +276,7 @@ export function Drawer() {
       {asking ? <ChatView /> : searching ? <div class="drawer-list results"><div class="launcher-search-results">
         {searchResults.value.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>)}
         {searchPending.value && <div class="scr-note muted" role="status">Searching…</div>}
-      </div></div> : <AppList found={null} />}
+      </div></div> : <Pages />}
       {!searching && !asking && <RecentRow />}
     </div>
   );

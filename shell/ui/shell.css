@@ -484,6 +484,12 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   padding: 0 4px 0 var(--edge);
 }
 
+/* Two pages (drawer.tsx Pages): all apps | folders, side by side, moved by transform only. */
+.drawer-pages { grid-column: 1 / -1; grid-row: 1; min-height: 0; overflow: hidden; }
+.drawer-track { display: flex; height: 100%; will-change: transform; }
+.drawer-page { flex: 0 0 100%; min-width: 0; min-height: 0; display: grid; grid-template-columns: 1fr var(--letter-bar); grid-template-rows: minmax(0, 1fr); }
+.drawer-page > .folder-view { grid-column: 1 / -1; padding-right: 0; }
+.folder-empty { padding: 24px 8px; text-align: center; }
 .drawer-list {
   grid-column: 1;
   /* The A-Z bar's width kept clear: a long name in the last column ran into its letters. */

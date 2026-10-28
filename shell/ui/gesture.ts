@@ -406,12 +406,14 @@ function track(gs: Gesture, x: number, y: number) {
 }
 
 /** Sideways release velocity, px/ms: the finger over the last PAGE_V_WINDOW ms up to now (a dwell before lifting = 0). */
-function releaseVx(gs: Gesture) {
+const releaseVx = (gs: Gesture) => sampleVx(gs.samples);
+
+/** [releaseVx] for any [x, t] samples (the drawer's own two-page swipe shares the home pager's rule). */
+export function sampleVx(samples: [number, number][]) {
   const now = performance.now();
-  const [, t1] = gs.samples[gs.samples.length - 1];
-  const x1 = gs.samples[gs.samples.length - 1][0];
+  const [x1, t1] = samples[samples.length - 1];
   if (now - t1 > PAGE_V_WINDOW) return 0;
-  const old = gs.samples.find(([, t]) => now - t <= PAGE_V_WINDOW) ?? gs.samples[0];
+  const old = samples.find(([, t]) => now - t <= PAGE_V_WINDOW) ?? samples[0];
   const dt = t1 - old[1];
   return dt > 0 ? (x1 - old[0]) / dt : 0;
 }
@@ -657,7 +659,7 @@ function settlePages(gs: Gesture) {
 }
 
 /** The page step (-1, 0, 1) and the reason, from the offset on screen, the drag's dx and the release velocity. */
-function pageDecision(total: number, dx: number, vx: number, width: number) {
+export function pageDecision(total: number, dx: number, vx: number, width: number) {
   const flick = Math.abs(vx) >= PAGE_FLICK && Math.abs(dx) >= PAGE_FLICK_MIN;
   if (flick && Math.sign(vx) !== Math.sign(dx)) return { dir: 0, why: "flick-back" };
   if (flick) return { dir: -Math.sign(vx), why: "velocity" };
