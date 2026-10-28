@@ -471,6 +471,15 @@ object Switcher {
         if (open && homeVisible && !gesture) home?.emit("switcher.toggle", null) else show(context)
     }
 
+    /** Home over the open switcher (the home swipe): the layer collapses into home with its own spring. */
+    fun close() {
+        if (gesture || !open) return
+        open = false
+        from = null
+        depthTo(0f)
+        home?.emit("recents.end", JSONObject().put("to", "home"))
+    }
+
     /** Away (SystemUI's onOverviewHidden, a quick switch): the layer closes. */
     fun hide() {
         if (gesture || !open) return

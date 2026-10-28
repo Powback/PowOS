@@ -284,10 +284,7 @@ class NavGesture(
 
     /** Let go for home: the window shrinks away, home's switcher layer collapses into home. */
     private fun home(t: RecentsTransition?) {
-        if (t == null) {
-            if (from == null && Switcher.homeVisible && Switcher.homeMainPage) return switcher(null)
-            return goHome()
-        }
+        if (t == null) return homePlain()
         // The page follows the window's settle frame by frame (the same spring), and hears where it went at its end.
         Switcher.ending()
         // The recents activity was what came up behind the app (the desktop is home): home is started after it.
@@ -298,6 +295,15 @@ class NavGesture(
             Switcher.end("home")
             if ((!ok || viaRecents) && swipe == mine) goHome()
         }
+    }
+
+    /** Home without the transition (no app's window under the finger). */
+    private fun homePlain() {
+        // Over the open switcher (home's layer): home closes it, the layer collapsing back into home - re-showing it
+        // (below) left the switcher up after every home swipe.
+        if (Switcher.open && Switcher.homeVisible) return Switcher.close()
+        if (from == null && Switcher.homeVisible && Switcher.homeMainPage) return switcher(null)
+        goHome()
     }
 
     /** The open panel follows the finger: it is shut by the time the finger has come up this far. */
