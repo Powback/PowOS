@@ -1,5 +1,9 @@
 # Native desktop architecture: who composites, and where the PowOS shell runs
 
+> **Superseded for desktop mode on 2026-10-28:** unfolded / external-display desktop mode is now KWin compositing
+> every window with PowOS's shell replacing plasmashell (option B/C below). See `docs/DESKTOP-KWIN-NATIVE.md`.
+> Folded phone mode stays option A as described here.
+
 Status: **accepted by the user, 2026-10-24** (two compositors: Android draws the PowOS shell, KWin draws Plasma
 apps, a window lives in one world unless the user moves it). The provisional hold is lifted: work that locks in
 this architecture may proceed. Written 2026-10-24 as a design note; Board task "Native desktop architecture: KWin composites,
