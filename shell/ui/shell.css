@@ -1369,7 +1369,7 @@ input.folder-title:focus { background: var(--soft-fill); }
  * (--glass-dim) - no palette of its own. Frosted by the compositor (native glass) or, with CSS glass, tinted only (its
  * own copy of the picture would slide away with it).
  */
-.ai-screen { padding-bottom: 0; }
+.ai-screen { background: none; padding-bottom: 0; }
 /* Its cards: home's tile material, a little more tint for their text (never a page dim). */
 .ai-screen .tile {
   background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
@@ -2303,7 +2303,7 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
  * --glass-blur-native per surface; the shade's window is blurred by its host: shade.tsx) and the cool tint; over the
  * other tone it takes that tone. No halos. An app whose page paints its own ground opts out (appscreen.tsx).
  */
-.ai-screen, .chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3), .home:has(.ai-panel) .ai-panel, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *) {
+.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3), .home:has(.ai-panel) .ai-panel, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *) {
   /* Resolved here, from this surface's own --frost-base (a light frost swaps it below). */
   /* Secondary lines the foreground itself, as a widget's: their size says they're secondary. */
   --color-muted: var(--color-foreground);
@@ -2328,12 +2328,6 @@ html:root .page .search-face .bar-pill {
   background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
 }
 html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
-/* The AI page's own ground: the launcher chat's frost (.launcher-frame.tile above), same tokens; cards unchanged.
-   Its compositor blur is the widgets' (--widget-blur-native, theme.css); nativeglass.ts registers the page (.ai-screen). */
-html:root .ai-screen {
-  --glass-blur-native: var(--widget-blur-native);
-  background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
-}
 /*
  * Over a wallpaper of the other tone (a dark theme over a bright picture, a light one over a dark): the frost takes
  * the wallpaper's tone, its text the theme's two colours swapped - as the wallpaper's labels turn (theme.css

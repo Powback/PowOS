@@ -28,10 +28,6 @@ const mode = new URLSearchParams(location.search).get("mode") ?? "home";
 const OVER_WALLPAPER = new Set(["home", "quicktools", "desktop", "statusbar"]);
 /** The surfaces with glass (theme.css): one inside another is only a soft fill on it, not glass of its own. */
 const SURFACES = ".tile, .notif-panel, .status-chrome .chrome-surface";
-/** PowOS AI's page: a region of its own (shell.css, --glass-blur-native). Not in SURFACES: its cards stay regions too, not
- * soft fills on the page. */
-const PAGE = ".ai-screen";
-const GLASS_ROOTS = `${SURFACES}, ${PAGE}`;
 
 /** The host blurs for this page (b.state 1). */
 const hostBlurs = signal(false);
@@ -144,9 +140,8 @@ function shapeOf(el: HTMLElement): Shape {
 function reshape() {
   shapesDirty = false;
   const next = new Map<Element, Shape>();
-  for (const el of document.querySelectorAll<HTMLElement>(GLASS_ROOTS)) {
-    // A surface inside another: a soft fill on that one's glass (theme.css), none of its own. (The page is no surface
-    // here: its cards are regions as before.)
+  for (const el of document.querySelectorAll<HTMLElement>(SURFACES)) {
+    // A surface inside another: a soft fill on that one's glass (theme.css), none of its own.
     if (el.parentElement?.closest(SURFACES)) continue;
     // A merged group's inner-corner fillet (grid.tsx seams) is a square with a quarter circle cut out of its tint: the
     // compositor's regions are rounded boxes only, so a region there blurred the whole square - a pale untinted
@@ -523,7 +518,7 @@ function changed() {
 
 /** A node added or removed is (or holds) a surface. */
 const holds = (nodes: NodeList) => {
-  for (const n of nodes) if (n instanceof Element && (n.matches(GLASS_ROOTS) || n.querySelector(GLASS_ROOTS))) return true;
+  for (const n of nodes) if (n instanceof Element && (n.matches(SURFACES) || n.querySelector(SURFACES))) return true;
   return false;
 };
 new MutationObserver((records) => {
