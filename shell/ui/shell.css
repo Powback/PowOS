@@ -2327,6 +2327,13 @@ html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html.glass-
   background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
   box-shadow: var(--lift-edge), var(--lift-shadow);
 }
+/* Home's widgets: the frost above, with their own (lighter) compositor blur - --widget-blur-native (theme.css). */
+html:root .page .home-tile > .tile { --glass-blur-native: var(--widget-blur-native); }
+/* The search widget (searchwidget.tsx) is a widget too: its pill takes the same frost and the same blur, nothing else. */
+html:root .page .search-face .bar-pill {
+  --glass-blur-native: var(--widget-blur-native);
+  background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+}
 html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 /*
  * Over a wallpaper of the other tone (a dark theme over a bright picture, a light one over a dark): the frost takes
