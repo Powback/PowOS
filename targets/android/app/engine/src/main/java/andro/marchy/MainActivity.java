@@ -899,6 +899,14 @@ public class MainActivity extends Activity
         super.onResume();
         inFront = true;
         mPipTransitionPending = false;
+        // Desktop mode's unfold, timed (target < 700 ms): hinge seen -> desktop resumed -> its next frame.
+        long unfoldAt = FoldWatcher.unfoldAt;
+        FoldWatcher.unfoldAt = 0;
+        if (unfoldAt != 0 && android.os.SystemClock.uptimeMillis() - unfoldAt < 5000) { // older: not this unfold's resume
+            long resumed = android.os.SystemClock.uptimeMillis() - unfoldAt;
+            android.view.Choreographer.getInstance().postFrameCallback(t -> Log.i(TAG, "desktop mode unfold: resumed "
+                + resumed + " ms, first frame " + (android.os.SystemClock.uptimeMillis() - unfoldAt) + " ms after the hinge"));
+        }
         // The back screen as its toggles say, whenever the desktop comes to the front (start, return, unfold) - not
         // only when a toggle is tapped. Only acts when it is not in the right mode already.
         if (mGamepadOverlay != null) applyBackScreen(mGamepadOverlay.getVisibility() == View.VISIBLE);
@@ -1263,6 +1271,9 @@ public class MainActivity extends Activity
         // the desktop stepped aside there instead of splitting.
         boolean cover = FoldWatcher.folded;
         // A PowOS app in use comes onto the cover with the desktop (FoldWatcher.folded()).
+        // Desktop mode: folded is always the phone home - the desktop steps aside, keeping its inner size.
+        if (cover && c.smallestScreenWidthDp < 600 && FoldWatcher.desktopMode())
+            return !sShownOnPurpose;
         return cover && c.smallestScreenWidthDp < 600 && RootMode.enabled()
             && getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(FoldWatcher.KEY_UNFOLD_DESKTOP, true)
             && !FoldWatcher.desktopAppActive(this) && !sShownOnPurpose;

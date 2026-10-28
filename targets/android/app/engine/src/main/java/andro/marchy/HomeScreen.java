@@ -49,6 +49,9 @@ final class HomeScreen {
             desktop = false;
         else
             desktop = false; // auto: the web home, wide when unfolded
+        // Desktop mode (FoldWatcher.DESKTOP_MODE): KWin's desktop is the home unfolded, the phone home folded.
+        if (FoldWatcher.desktopMode() && unfolded != null)
+            desktop = unfolded;
         String home = desktop ? "HomeDesktop" : LAUNCHER;
         String component = ctx.getPackageName() + "/andro.marchy." + home;
         current = home;

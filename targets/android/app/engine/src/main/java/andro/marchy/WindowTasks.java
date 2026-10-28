@@ -175,11 +175,22 @@ public final class WindowTasks {
         }
     }
 
+    /**
+     * Desktop mode (FoldWatcher.desktopModeActive: the setting on, the phone open): KWin's desktop holds every Linux
+     * window for the whole mode - "desktop 1" whether or not the Plasma app is started, and "export-new 0" - so a
+     * window opened from anywhere (the launcher, a terminal, Steam) stays a KWin window. Folded, its windows stay the
+     * desktop's (kwin 0025 never exports them by themselves) and new ones are full-screen tasks as before.
+     */
+    static void modeChanged(Context context) {
+        tellDesktop();
+        tellExportNew(context.getApplicationContext());
+    }
+
     /** KWin told whether the desktop is on screen ("desktop 1/0", kwin 0025), when it changed or KWin hasn't been told. */
     static void tellDesktop() {
         if (!kwinCan("desktop"))
             return;
-        boolean on = desktopOnScreen();
+        boolean on = desktopOnScreen() || FoldWatcher.desktopModeActive();
         if (Boolean.valueOf(on).equals(desktopSent))
             return;
         desktopSent = on;
@@ -190,11 +201,12 @@ public final class WindowTasks {
     /** KWin told whether apps float now ("export-new 1/0"), when it changed or KWin hasn't been told. */
     static void tellExportNew(Context context) {
         java.util.function.Predicate<Context> f = floating;
-        if (!kwinCan("export-new") || f == null)
+        boolean mode = FoldWatcher.desktopModeActive();
+        if (!kwinCan("export-new") || (f == null && !mode))
             return;
         // A KWin without "desktop" (before 0025) would take new windows out of the Plasma app into floating tasks: it
-        // gets "export-new 0" while the desktop is on screen.
-        boolean on = f.test(context) && (kwinCan("desktop") || !desktopOnScreen());
+        // gets "export-new 0" while the desktop is on screen. Desktop mode: never ([modeChanged]).
+        boolean on = !mode && f.test(context) && (kwinCan("desktop") || !desktopOnScreen());
         if (Boolean.valueOf(on).equals(exportNewSent))
             return;
         exportNewSent = on;

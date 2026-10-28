@@ -25,6 +25,39 @@ import android.view.Display;
 final class FoldWatcher implements DisplayManager.DisplayListener {
     private static final String TAG = "FoldWatcher";
     static final String KEY_UNFOLD_DESKTOP = "unfold_opens_desktop";
+    /**
+     * Desktop mode (docs/DESKTOP-KWIN-NATIVE.md phase 1): Settings.Global {@code powos_desktop_mode} = 1. Unfolded,
+     * KWin's desktop (HomeDesktop, the Plasma app) is the home, full screen, and KWin exports no window as an Android
+     * task for the whole mode ("desktop 1" + "export-new 0", WindowTasks); folded, the phone home (the PowOS shell)
+     * and the frozen session as before. 0 (the default) = exactly the behaviour without it.
+     * Set with `settings put global powos_desktop_mode 1`; watched live.
+     */
+    static final String DESKTOP_MODE = "powos_desktop_mode";
+    /** The setting, as last read (rooted mode only: the fold reaction needs root). */
+    private static volatile boolean desktopMode;
+    /** When the last unfold in desktop mode was seen (uptime ms; 0 = none pending): MainActivity logs the time to its first frame. */
+    static volatile long unfoldAt;
+
+    /** Desktop mode is on (the setting, rooted). */
+    static boolean desktopMode() {
+        return desktopMode;
+    }
+
+    /** Desktop mode is on and the phone is open: KWin's desktop is the home and holds every Linux window. */
+    static boolean desktopModeActive() {
+        return desktopMode && !folded;
+    }
+
+    private void readDesktopMode() {
+        boolean on = RootMode.enabled()
+            && android.provider.Settings.Global.getInt(ctx.getContentResolver(), DESKTOP_MODE, 0) == 1;
+        if (on != desktopMode)
+            Log.i(TAG, "desktop mode " + (on ? "on" : "off"));
+        desktopMode = on;
+        WindowTasks.modeChanged(ctx);
+    }
+
+    private android.database.ContentObserver modeObserver;
 
     private final Context ctx;
     private DisplayManager dm;
@@ -50,15 +83,27 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             wasBig = isBig();
             if (wasBig != null)
                 folded = !wasBig;
+            readDesktopMode();
             preferHome(HomeScreen.apply(ctx, wasBig));
-            Log.i(TAG, "watching the hinge (open=" + wasBig + ")");
+            Log.i(TAG, "watching the hinge (open=" + wasBig + ", desktop mode=" + desktopMode + ")");
         });
         dm.registerDisplayListener(this, handler);
+        modeObserver = new android.database.ContentObserver(handler) {
+            @Override
+            public void onChange(boolean selfChange) {
+                readDesktopMode();
+                preferHome(HomeScreen.apply(ctx, wasBig));
+            }
+        };
+        ctx.getContentResolver().registerContentObserver(
+            android.provider.Settings.Global.getUriFor(DESKTOP_MODE), false, modeObserver);
     }
 
     void stop() {
         if (dm != null)
             dm.unregisterDisplayListener(this);
+        if (modeObserver != null)
+            ctx.getContentResolver().unregisterContentObserver(modeObserver);
         if (thread != null)
             thread.quitSafely();
     }
@@ -116,6 +161,13 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         if (big == null || big.equals(wasBig))
             return;
         Log.i(TAG, big ? "unfolded" : "folded");
+        // Desktop mode, unfolding: the desktop first - before the default-home switch below (a root round trip) - so
+        // unfold is a thaw plus one frame (its surface kept its inner size through the fold, MainActivity.onCoverScreen).
+        if (desktopMode && big && Boolean.FALSE.equals(wasBig)) {
+            unfoldAt = android.os.SystemClock.uptimeMillis();
+            startDesktop();
+        }
+        WindowTasks.modeChanged(ctx); // "desktop"/"export-new" follow the hinge in desktop mode
         preferHome(HomeScreen.apply(ctx, big)); // auto: desktop on the inner screen, launcher on the cover
         if (big && Boolean.FALSE.equals(wasBig))
             unfolded();
@@ -135,7 +187,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
      */
     private void folded() {
         // The web home (auto, launcher): Android's own fold - the app in front stays in front on the cover screen.
-        if (!enabled() || !HomeScreen.desktopIsHome())
+        if (!desktopMode && (!enabled() || !HomeScreen.desktopIsHome()))
             return;
         carried = null;
         try {
@@ -149,7 +201,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         } catch (java.io.IOException e) {
             Log.d(TAG, "nothing to carry: " + e);
         }
-        if (carried == null && !desktopAppActive(ctx)) {
+        // Desktop mode: folded is always the phone home (the desktop steps aside even with a Linux app in use).
+        if (carried == null && (desktopMode || !desktopAppActive(ctx))) {
             // The launcher (HomeScreen.apply made it home for the cover screen), not whatever was below the desktop.
             // A HOME intent with our alias as its component: without one Android asked which home app (ours or
             // OnePlus's) every time - the home alias switches with the fold, so "remember" never stuck; without HOME
@@ -191,6 +244,14 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
      * app carried onto the cover goes back into its PowOS window behind it.
      */
     private void unfolded() {
+        if (desktopMode) {
+            // The desktop is up already (check, startDesktop); only the carried app goes back to its window.
+            if (carried != null) {
+                su("am display move-stack " + carried[0] + " " + carried[1]);
+                carried = null;
+            }
+            return;
+        }
         // The web home is the desktop unfolded: nothing to bring up (a HomeDesktop started over it fought it).
         if (!enabled() || !HomeScreen.desktopIsHome())
             return;
@@ -202,5 +263,31 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             su("am display move-stack " + carried[0] + " " + carried[1]); // fails harmlessly if the window closed
             carried = null;
         }
+    }
+
+    /**
+     * Desktop mode's unfold: HomeDesktop (the same instance Home opens, see unfolded) started from the app's own
+     * process - no `su am start` round trip. The app may start activities from the background while it holds "display
+     * over other apps" (SYSTEM_ALERT_WINDOW); should Android refuse anyway (it does so silently), root starts it once
+     * the desktop isn't on screen 400 ms later.
+     */
+    private void startDesktop() {
+        long t0 = android.os.SystemClock.uptimeMillis();
+        try {
+            android.content.Intent i = new android.content.Intent()
+                .setComponent(new android.content.ComponentName(ctx.getPackageName(), "andro.marchy.HomeDesktop"))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(Display.DEFAULT_DISPLAY);
+            ctx.startActivity(i, o.toBundle());
+            Log.i(TAG, "desktop mode: unfold started the desktop in-process (" + (android.os.SystemClock.uptimeMillis() - t0) + " ms)");
+        } catch (RuntimeException e) {
+            Log.w(TAG, "desktop mode: in-process start refused: " + e);
+        }
+        handler.postDelayed(() -> {
+            if (!folded && !WindowTasks.desktopOnScreen()) {
+                Log.w(TAG, "desktop mode: the desktop is not up 400 ms after unfold, starting it as root");
+                su("am start --display 0 -n " + ctx.getPackageName() + "/andro.marchy.HomeDesktop");
+            }
+        }, 400);
     }
 }
