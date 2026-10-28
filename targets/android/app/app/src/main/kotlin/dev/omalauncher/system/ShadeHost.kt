@@ -133,6 +133,13 @@ class ShadeHost(
                 context: Context,
                 intent: Intent,
             ) {
+                // HACK: the system broadcasts CLOSE_SYSTEM_DIALOGS (reason "assist") when the side-button AI session starts;
+                // the assist overlay opens OVER this panel, so it stays. Real fix: none needed, the reason is the contract.
+                if (intent.action == Intent.ACTION_CLOSE_SYSTEM_DIALOGS &&
+                    (intent.getStringExtra("reason") == "assist" || dev.omalauncher.system.PetOverlay.assistShowing)
+                ) {
+                    return
+                }
                 if (intent.action == Intent.ACTION_SCREEN_OFF) {
                     if (peeking) unpeek()
                     return
