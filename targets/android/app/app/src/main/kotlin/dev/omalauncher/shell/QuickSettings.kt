@@ -255,7 +255,7 @@ class QuickSettings(
 
     /** Android's own page for [name] (a tile's long press, or a tile that's a page): a tile id, or wifi/bluetooth/internet/settings. */
     fun open(name: String) {
-        if (name.startsWith("settings:") || name.startsWith("indexed:") || name.startsWith("search:")) {
+        if (name.startsWith("settings:") || name.startsWith("indexed:")) {
             SettingsSearch(context).open(name)
             return
         }

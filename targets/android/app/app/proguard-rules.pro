@@ -17,3 +17,5 @@
 
 # Read-only native settings index exporter, invoked from the installed APK.
 -keep class dev.omalauncher.shell.SettingsIndexReader { public static void main(java.lang.String[]); }
+
+-keep class dev.omalauncher.shell.SettingsIndexLauncher { public static void main(java.lang.String[]); }

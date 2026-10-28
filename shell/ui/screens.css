@@ -244,3 +244,9 @@
 .scr-edge-action { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); color: var(--accent-text); }
 .scr-edge-picks { padding-left: 28px; }
 .scr-row-icon.flip { transform: scaleX(-1); }
+
+/* A launcher search destination stays marked until the user interacts with the setting. */
+.scr [data-search-highlight="true"] {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  border-radius: var(--radius);
+}

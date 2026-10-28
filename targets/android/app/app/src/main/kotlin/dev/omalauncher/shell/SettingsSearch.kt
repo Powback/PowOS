@@ -12,26 +12,17 @@ class SettingsSearch(private val context: Context) {
     fun destinations(changed: () -> Unit = {}): JSONArray = JSONArray().apply {
         val indexed = NativeSettingsIndex.destinations(context, changed)
         for (i in 0 until indexed.length()) put(indexed.getJSONObject(i))
-        if (context.packageManager.resolveActivity(searchIntent(""), 0) != null) {
-            put(JSONObject().put("id", "settings-search").put("label", "Search Android settings").put("keywords", ""))
-        }
         pages.filter { available(it) }.forEach { page ->
             put(JSONObject().put("id", "settings:${page.action}").put("label", page.label).put("keywords", page.keywords))
         }
     }
 
     fun open(id: String) {
-        if (id.startsWith("search:")) {
-            context.startActivity(searchIntent(id.removePrefix("search:").take(300)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context))
-            return
-        }
         if (id.startsWith("indexed:")) return NativeSettingsIndex.open(context, id)
         val page = pages.firstOrNull { "settings:${it.action}" == id } ?: error("Unknown settings page")
         check(available(page)) { "Settings page unavailable" }
         context.startActivity(intent(page).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context))
     }
-
-    private fun searchIntent(query: String) = Intent("android.settings.APP_SEARCH_SETTINGS").putExtra("query", query)
 
     private fun intent(page: Page) = Intent("android.settings.${page.action}")
 

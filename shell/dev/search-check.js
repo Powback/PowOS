@@ -14,12 +14,14 @@ export async function launcherSearchCheck() {
     await wait(() => document.querySelectorAll('[data-search-result^="settings:style:"]').length === 3);
     document.querySelector('[data-search-result="settings:style:desktop dock position"]').click();
     await wait(() => document.activeElement?.dataset.setting === 'desktop dock position');
+    failures.push(...highlightFailures(document.activeElement));
     const box = document.activeElement.getBoundingClientRect();
     if (box.top < 0 || box.bottom > innerHeight) failures.push('setting opened outside viewport');
     if (s.drawer.value !== 0 || screens.screens.value.at(-1) !== 'style') failures.push('setting did not open');
     await checkDockTargets(search, screens);
     await checkGestureTargets(screens);
     await checkNativeSettings(s, search, wait);
+    await checkUnmatchedChat(s, search, wait);
     screens.closeScreens();
     let opened = false;
     off = search.registerSearchProvider({ id: 'search-test', async search(q) {
@@ -83,4 +85,16 @@ async function checkGestureTargets(screens) {
       await new Promise(r => setTimeout(r, 50));
     }
   }
+}
+
+function highlightFailures(element) {
+  return element.dataset.searchHighlight === 'true' ? [] : ['setting opened without highlight'];
+}
+
+async function checkUnmatchedChat(state, search, wait) {
+  state.query.value = '__powos_unmatched_chat_814765';
+  await wait(() => !search.searchPending.value && search.searchResults.value.length === 0);
+  state.query.value = 'search android settings';
+  await wait(() => !search.searchPending.value);
+  if (search.searchResults.value.some(r => r.id === 'android-settings:settings-search')) throw Error('generic settings action stole chat input');
 }

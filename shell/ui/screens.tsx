@@ -79,18 +79,27 @@ function Frame({
     const target = screenTarget.value;
     const root = body.current;
     if (!target || !root) return;
+    let frame = 0;
+    let highlighted: HTMLElement | null = null;
+    const clear = () => { highlighted?.removeAttribute("data-search-highlight"); };
     const reveal = () => {
       const el = settingElement(root, target);
-      if (!el) return false;
-      el.scrollIntoView({ block: "center" });
+      if (!el) return;
+      observer.disconnect();
+      highlighted = el;
+      el.dataset.searchHighlight = "true";
+      const offset = el.getBoundingClientRect().top - root.getBoundingClientRect().top;
+      root.scrollTop += offset - Math.max(0, (root.clientHeight - el.clientHeight) / 2);
       el.tabIndex = -1;
       el.focus({ preventScroll: true });
-      return true;
     };
-    if (reveal()) return;
-    const observer = new MutationObserver(() => { if (reveal()) observer.disconnect(); });
+    // Let child effects (theme strips, async settings state) finish before moving the settings scroller.
+    const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => { frame = requestAnimationFrame(reveal); }); };
+    const observer = new MutationObserver(schedule);
     observer.observe(root, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    root.addEventListener("pointerdown", clear, { once: true });
+    schedule();
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); root.removeEventListener("pointerdown", clear); clear(); };
   }, [title, screenTarget.value]);
   return (
     <div class="scr tile sheet" {...own}>

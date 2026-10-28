@@ -55,19 +55,47 @@ object NativeSettingsIndex {
     fun open(context: Context, id: String) {
         val entry = entries[id] ?: error("Settings result expired; search again")
         val intent = Intent.parseUri(entry.getString("intent"), Intent.URI_INTENT_SCHEME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // Intent URI serialization drops nested Bundles. Restore Android's preference arguments at launch.
+        val key = intent.getStringExtra(":settings:fragment_args_key")
+        if (!key.isNullOrBlank()) {
+            val args = android.os.Bundle().apply { putString(":settings:fragment_args_key", key) }
+            intent.putExtra(":settings:show_fragment_args", args)
+        }
+        if (!intent.getStringExtra(":settings:show_fragment").isNullOrBlank() && RootMode.enabled() && android.os.Process.myUid() / 100000 == 0) {
+            intent.setClassName("com.android.settings", "com.android.settings.SubSettings")
+            openFragment(context, intent, entry.getString("label"))
+            return
+        }
         try {
             context.startActivity(intent, dev.omalauncher.system.AppWindows.bundle(context))
         } catch (e: SecurityException) {
-            searchFallback(context, entry.getString("label"))
+            unavailable(context, entry.getString("label"))
         } catch (e: android.content.ActivityNotFoundException) {
-            searchFallback(context, entry.getString("label"))
+            unavailable(context, entry.getString("label"))
         }
     }
 
-    private fun searchFallback(context: Context, title: String) {
-        android.widget.Toast.makeText(context, "Opening Android settings search for $title", android.widget.Toast.LENGTH_SHORT).show()
-        context.startActivity(Intent("android.settings.APP_SEARCH_SETTINGS").putExtra("query", title)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context))
+    private fun openFragment(context: Context, intent: Intent, title: String) {
+        val parcel = android.os.Parcel.obtain()
+        val payload = try {
+            parcel.writeBundle(android.os.Bundle().apply {
+                putParcelable("intent", intent)
+                putBundle("options", dev.omalauncher.system.AppWindows.bundle(context))
+            })
+            android.util.Base64.encodeToString(parcel.marshall(), android.util.Base64.NO_WRAP)
+        } finally { parcel.recycle() }
+        val app = context.applicationContext
+        worker.execute {
+            val result = RootShell.run("timeout 15s env CLASSPATH=${quote(app.applicationInfo.sourceDir)} app_process /system/bin ${SettingsIndexLauncher::class.java.name} ${quote(payload)}", null, 20_000)
+            if (result.code != 0) {
+                Log.w("PowosSettingsSearch", "Fragment navigation failed: ${result.code}")
+                android.os.Handler(android.os.Looper.getMainLooper()).post { unavailable(app, title) }
+            }
+        }
+    }
+
+    private fun unavailable(context: Context, title: String) {
+        android.widget.Toast.makeText(context, "Cannot open $title on this device", android.widget.Toast.LENGTH_LONG).show()
     }
 
     private fun quote(value: String) = "'" + value.replace("'", "'\\''") + "'"
