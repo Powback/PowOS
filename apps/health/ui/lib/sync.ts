@@ -8,7 +8,7 @@
  * (not synced for about 30 days) reads again from the newest sample kept and starts a fresh token.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { HealthRecord, HealthType, Host } from "./app";
+import type { HealthBridge, HealthRecord, HealthType, Host } from "./app";
 
 export type Phase = "idle" | "syncing" | "ok" | "needs-grant" | "update" | "none" | "unsupported" | "error";
 export interface SyncState {
@@ -25,7 +25,7 @@ export interface CursorRow {
   synced: bigint;
 }
 
-type Ingest = (a: { samples: IncomingRow[]; deleted: string[]; token: string; tzMin: number; now: bigint }) => Promise<unknown>;
+export type Ingest = (a: { samples: IncomingRow[]; deleted: string[]; token: string; tzMin: number; now: bigint }) => Promise<unknown>;
 interface IncomingRow {
   id: string;
   kind: string;
@@ -67,6 +67,69 @@ function unpack(s: string): { types: HealthType[]; t: string } | null {
   }
 }
 
+interface Pass {
+  h: HealthBridge;
+  types: HealthType[];
+  tz: number;
+  now: number;
+  ingest: Ingest;
+}
+
+/** Ingests [records] (and [deleted]) in chunks; the token goes with the last one. Resolves how many samples. */
+async function send(p: Pass, records: HealthRecord[], deleted: string[], token: string): Promise<number> {
+  const rows = records.map(row);
+  let n = 0;
+  do {
+    const last = n + CHUNK >= rows.length;
+    await p.ingest({ samples: rows.slice(n, n + CHUNK), deleted: n === 0 ? deleted : [], token: last ? token : "", tzMin: p.tz, now: BigInt(p.now) });
+    n += CHUNK;
+  } while (n < rows.length);
+  return rows.length;
+}
+
+/** Reads [from, now) in week windows and ingests each. */
+async function backfill(p: Pass, from: number): Promise<number> {
+  let took = 0;
+  for (let t = from; t < p.now; t += WINDOW) took += await send(p, await p.h.read(p.types, t, Math.min(p.now, t + WINDOW)), [], "");
+  return took;
+}
+
+/** Continues from a kept token: only what changed; an expired one reads again from the newest sample kept. */
+async function follow(p: Pass, token: string, cursor: CursorRow | undefined): Promise<number> {
+  const ch = await p.h.changes(p.types, token);
+  if (!ch.expired) return send(p, ch.records, ch.deleted, pack(ch.token, p.types));
+  const took = await backfill(p, Math.max(p.now - FIRST_BACKFILL, Number(cursor?.newest ?? 0n) - DAY));
+  return took + (await send(p, [], [], pack(ch.token, p.types)));
+}
+
+/** The first pass (or after a new grant): a token first - a record written while reading comes with the first changes - then the reads. */
+async function start(p: Pass, cursor: CursorRow | undefined): Promise<number> {
+  const tok = await p.h.token(p.types);
+  const newest = Number(cursor?.newest ?? 0n);
+  const took = await backfill(p, newest > 0 ? newest - DAY : p.now - FIRST_BACKFILL);
+  return took + (await send(p, [], [], pack(tok.token, p.types)));
+}
+
+const sameTypes = (kept: { types: HealthType[] } | null, types: HealthType[]) =>
+  !!kept && kept.types.length === types.length && types.every((t) => kept.types.includes(t));
+
+/** What a failed pass means for the page. */
+function failure(e: unknown): SyncState {
+  const message = String((e as Error)?.message ?? e);
+  // A host whose APK lacks the call: the same as no bridge.
+  if (/no such call/i.test(message)) return { phase: "unsupported", message: "The PowOS app on this phone has no Health Connect yet." };
+  if (/permission|denied|SecurityException/i.test(message)) return { phase: "needs-grant", message };
+  return { phase: "error", message };
+}
+
+/** The status, asking for the permission when [ask]; the granted types, or the state to show instead. */
+async function grantedTypes(h: HealthBridge, ask: boolean): Promise<HealthType[] | SyncState> {
+  let st = await h.status();
+  if (st.state !== "ok") return { phase: st.state, message: st.state === "update" ? "Health Connect needs an update." : "This phone has no Health Connect." };
+  if (st.missing.length && ask) st = await h.grant();
+  return st.granted.length ? st.granted : { phase: "needs-grant", message: "Allow PowOS to read Health Connect." };
+}
+
 /** Reads and ingests one pass. [ask]: show Health Connect's permission dialog when something isn't granted yet. */
 export async function syncOnce(host: Host, cursor: CursorRow | undefined, ingest: Ingest, ask: boolean): Promise<SyncState> {
   const h = host.health;
@@ -74,54 +137,14 @@ export async function syncOnce(host: Host, cursor: CursorRow | undefined, ingest
   if (running) return { phase: "syncing" };
   running = true;
   try {
-    let st = await h.status();
-    if (st.state !== "ok") return { phase: st.state, message: st.state === "update" ? "Health Connect needs an update." : "This phone has no Health Connect." };
-    if (st.missing.length && ask) st = await h.grant();
-    const types = st.granted;
-    if (!types.length) return { phase: "needs-grant", message: "Allow PowOS to read Health Connect." };
-    const tz = -new Date().getTimezoneOffset();
-    const now = Date.now();
-    const send = async (records: HealthRecord[], deleted: string[], token: string) => {
-      const rows = records.map(row);
-      let n = 0;
-      do {
-        const last = n + CHUNK >= rows.length;
-        await ingest({ samples: rows.slice(n, n + CHUNK), deleted: n === 0 ? deleted : [], token: last ? token : "", tzMin: tz, now: BigInt(now) });
-        n += CHUNK;
-      } while (n < rows.length);
-      return rows.length;
-    };
-    const backfill = async (from: number) => {
-      let took = 0;
-      for (let t = from; t < now; t += WINDOW) took += await send(await h.read(types, t, Math.min(now, t + WINDOW)), [], "");
-      return took;
-    };
+    const types = await grantedTypes(h, ask);
+    if (!Array.isArray(types)) return types;
+    const p: Pass = { h, types, tz: -new Date().getTimezoneOffset(), now: Date.now(), ingest };
     const kept = cursor?.token ? unpack(cursor.token) : null;
-    const same = kept && kept.types.length === types.length && types.every((t) => kept.types.includes(t));
-    let took = 0;
-    if (same && kept) {
-      const ch = await h.changes(types, kept.t);
-      if (ch.expired) {
-        const from = Math.max(now - FIRST_BACKFILL, Number(cursor?.newest ?? 0n) - DAY);
-        took = await backfill(from);
-        took += await send([], [], pack(ch.token, types));
-      } else {
-        took = await send(ch.records, ch.deleted, pack(ch.token, types));
-      }
-    } else {
-      // Token first, then the reads: a record written while reading comes with the first changes.
-      const tok = await h.token(types);
-      const newest = Number(cursor?.newest ?? 0n);
-      took = await backfill(newest > 0 ? newest - DAY : now - FIRST_BACKFILL);
-      took += await send([], [], pack(tok.token, types));
-    }
+    const took = kept && sameTypes(kept, types) ? await follow(p, kept.t, cursor) : await start(p, cursor);
     return { phase: "ok", took, at: Date.now() };
   } catch (e) {
-    const message = String((e as Error)?.message ?? e);
-    // A host whose APK lacks the call: the same as no bridge.
-    if (/no such call/i.test(message)) return { phase: "unsupported", message: "The PowOS app on this phone has no Health Connect yet." };
-    if (/permission|denied|SecurityException/i.test(message)) return { phase: "needs-grant", message };
-    return { phase: "error", message };
+    return failure(e);
   } finally {
     running = false;
   }
@@ -131,7 +154,8 @@ export async function syncOnce(host: Host, cursor: CursorRow | undefined, ingest
  * Keeps [syncOnce] going while the calling surface is mounted. [ready]: the database is connected and [cursor] is its
  * first read. [ask]: this surface may show the permission dialog (the page; the widget just says to open the app).
  */
-export function useHealthSync(host: Host, cursor: CursorRow | undefined, ready: boolean, ingest: Ingest, ask: boolean) {
+export function useHealthSync(host: Host, o: { cursor: CursorRow | undefined; ready: boolean; ingest: Ingest; ask: boolean }) {
+  const { cursor, ready, ingest, ask } = o;
   const [state, setState] = useState<SyncState>({ phase: "idle" });
   const latest = useRef({ cursor, ingest, ask });
   latest.current = { cursor, ingest, ask };

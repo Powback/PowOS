@@ -21,7 +21,7 @@ export default function Main({ host, close }: Props) {
   const rows = app.useTable<DailyRow>("daily", weekQuery());
   const cursor = app.useTable<CursorRow>("cursor")[0];
   const ingest = app.useReducer<any>("ingest");
-  const { state, syncNow } = useHealthSync(host, cursor, app.db.status === "connected", ingest, true);
+  const { state, syncNow } = useHealthSync(host, { cursor, ready: app.db.status === "connected", ingest, ask: true });
   const [open, setOpen] = useState<HealthType | null>(null);
   const t = today(rows);
   return (

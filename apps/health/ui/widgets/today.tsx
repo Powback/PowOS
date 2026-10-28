@@ -9,7 +9,7 @@ export default function Today({ host, cells, app: id }: Props) {
   const rows = app.useTable<DailyRow>("daily", weekQuery());
   const cursor = app.useTable<CursorRow>("cursor")[0];
   const ingest = app.useReducer<any>("ingest");
-  const { state } = useHealthSync(host, cursor, app.db.status === "connected", ingest, false);
+  const { state } = useHealthSync(host, { cursor, ready: app.db.status === "connected", ingest, ask: false });
   const t = today(rows);
   const small = (cells?.[1] ?? 2) < 2;
   const shown = t.slice(0, small ? 2 : 4);

@@ -191,22 +191,28 @@ class ShellBridge(
         }
     }
 
+    /** Health Connect's calls answer later (it is suspend, and its dialog is Android's): not through [dispatch]. */
+    private fun callHealth(
+        id: Int,
+        method: String,
+        args: String,
+    ) {
+        val a = if (args.isBlank()) JSONArray() else JSONArray(args)
+        health.call(method, a) { result, err ->
+            main.post { if (err == null) respond(id, result) else js(reply("reject($id, ${JSONObject.quote(err)})")) }
+        }
+    }
+
     /** One call from the page (PowosHost.postMessage, ShellHost.listen: its top frame at its own origin only). */
     fun call(
         id: Int,
         method: String,
         args: String,
     ) {
+        if (method.startsWith("health.")) return callHealth(id, method, args)
         main.post {
             try {
                 val a = if (args.isBlank()) JSONArray() else JSONArray(args)
-                // Health Connect's calls answer later (it is suspend, and its dialog is Android's): not through dispatch.
-                if (method.startsWith("health.")) {
-                    health.call(method, a) { result, err ->
-                        main.post { if (err == null) respond(id, result) else js(reply("reject($id, ${JSONObject.quote(err)})")) }
-                    }
-                    return@post
-                }
                 respond(id, dispatch(method, a))
             } catch (e: Exception) {
                 Log.w(TAG, "$method failed", e)
