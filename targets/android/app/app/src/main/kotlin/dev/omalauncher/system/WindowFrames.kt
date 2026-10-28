@@ -840,9 +840,9 @@ class WindowFrames(
         // HACK: a window PowOS holds no leash of (none recorded yet, or dropped by a fold) leaves the old way, under
         // home, and comes back by a raise - that one may still come back blank. Real fix: a leash for every window task.
         noLeashHide.forEach { FreeformTasks.minimise(context, it) }
-        returning.filter { it in noLeashBack || it in parked }.forEach { FreeformTasks.raise(context, it) }
-        parked.removeAll(back.toSet())
-        parked.addAll(noLeashHide)
+        returning.filter { it in noLeashBack || it in underHome }.forEach { FreeformTasks.raise(context, it) }
+        underHome.removeAll(back.toSet())
+        underHome.addAll(noLeashHide)
         main.removeCallbacks(refreshNow)
         main.postDelayed(refreshNow, SETTLE_MS)
     }
@@ -854,7 +854,7 @@ class WindowFrames(
             // Its page's leash-hidden window: shown again (the raise below brings it to the top).
             android.view.SurfaceControl.Transaction().also { TaskSurfaces.show(it, listOf(id), true) }.apply()
             FreeformTasks.focusable(context, id, true)
-            parked.remove(id)
+            underHome.remove(id)
         }
         if (floatBack(id)) return true
         val ok = FreeformTasks.raise(context, id) || Tasks.open(context, id)
@@ -973,7 +973,7 @@ class WindowFrames(
         private val away = mutableSetOf<Int>()
 
         /** Of [away]: the ones that left under home (no leash to hide - HACK in showOnly), brought back by a raise. */
-        private val parked = mutableSetOf<Int>()
+        private val underHome = mutableSetOf<Int>()
 
         /** The floating windows, top-most first, for the dock (home's page reads it: windows.list / windows.changed). */
         val running = mutableStateOf<List<Running>>(emptyList())
