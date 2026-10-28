@@ -1,0 +1,110 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: a window's own maximize and minimize are its task's
+
+A window that draws its own title bar (Steam, GTK header bars: "decor <id> 0", 0026) has its own maximize and
+minimize buttons and double click. Only its drag reached the task ("move", 0026): its maximize maximized the window on
+the hidden tasks desktop (the desktop's size, cut off inside the floating task), its minimize unmapped it (a black task
+that stayed on screen). Now, for an exported floating task (not full screen): a maximize request is undone and the app
+told "maximize <id>" (it maximizes the task in place, a toggle: the next press restores it); a minimize request is
+undone and the app told "minimize <id>" (the task goes into the dock). giveBack's restore of a maximize from before the
+export isn't a request. Its close already closes the task (Window::closed -> "close"). caps: + "maximize minimize".
+---
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 86b2a41..41b44e5 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -131,6 +131,11 @@ AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uin
+     // The window's own title bar dragged (a client-side one: Steam's, a GTK header bar) starts KWin's interactive move,
+     // on the hidden desktop where nothing shows it: the app moves the task instead (handOverMoveResize).
+     connect(window, &Window::interactiveMoveResizeStarted, this, &AnlandWindowTask::handOverMoveResize);
++    // The window's own maximize / minimize (a client-side title bar's buttons, a double click on it: Steam's
++    // _NET_WM_STATE maximized / WM_CHANGE_STATE iconic, xdg_toplevel.set_maximized / set_minimized) are the task's
++    // (handOverMaximize / handOverMinimize).
++    connect(window, &Window::maximizedChanged, this, &AnlandWindowTask::handOverMaximize);
++    connect(window, &Window::minimizedChanged, this, &AnlandWindowTask::handOverMinimize);
+ 
+     // Its surface of the daemon: the task's consumer says hello with the same id once the activity is up.
+     if (connect_to_deamon_begin(&m_display, m_tasks->socketPath().toLocal8Bit().constData(), m_id) < 0) {
+@@ -158,6 +163,43 @@ void AnlandWindowTask::tellDecoration(bool again)
+     m_tasks->send({QStringLiteral("decor"), QString::number(m_id), QString::number(decorated)});
+ }
+ 
++void AnlandWindowTask::handOverMaximize()
++{
++    // A floating task's window maximized by its own request (its client-side bar's maximize button or double click):
++    // maximized on the hidden desktop it would be the desktop's size inside the task. Undone; the app maximizes the
++    // task in place ("maximize <id>": its frame's maximize, which toggles - a second press restores the task). The
++    // window itself always reads as not maximized, so its button keeps asking. A restore asked that way changes
++    // nothing here (it isn't maximized) - so is ignored, as KWin's own restores (export, giveBack) are.
++    if (!m_window || !m_exported || m_givingBack || m_fullScreen || m_appFullScreen || m_window->isFullScreen()
++        || m_window->maximizeMode() == MaximizeRestore) {
++        return;
++    }
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "asked to be maximized: the task maximizes";
++    QMetaObject::invokeMethod(this, [w = m_window]() {
++        if (w && !w->isDeleted() && w->maximizeMode() != MaximizeRestore) {
++            w->maximize(MaximizeRestore);
++        }
++    }, Qt::QueuedConnection);
++    m_tasks->send({QStringLiteral("maximize"), QString::number(m_id)});
++}
++
++void AnlandWindowTask::handOverMinimize()
++{
++    // A floating task's window minimized by its own request (a client-side bar's minimize button): the task goes into
++    // the dock ("minimize <id>"). The window itself is shown again at once - the task shows it, and an unmapped window
++    // is a black task when it comes back (0028 restores it on focus as well).
++    if (!m_window || !m_exported || m_givingBack || m_fullScreen || m_appFullScreen || !m_window->isMinimized()) {
++        return;
++    }
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "asked to be minimized: the task minimizes";
++    QMetaObject::invokeMethod(this, [w = m_window]() {
++        if (w && !w->isDeleted() && w->isMinimized()) {
++            w->setMinimized(false);
++        }
++    }, Qt::QueuedConnection);
++    m_tasks->send({QStringLiteral("minimize"), QString::number(m_id)});
++}
++
+ void AnlandWindowTask::handOverMoveResize()
+ {
+     // A floating task's window being moved or resized by its own request (_NET_WM_MOVERESIZE, xdg_toplevel.move/
+@@ -206,7 +248,9 @@ AnlandWindowTask::~AnlandWindowTask()
+         } else {
+             m_window->moveResize(m_geometry);
+             if (m_maximizeMode != MaximizeRestore) {
++                m_givingBack = true; // its maximize from before, back on the desktop: not the task's
+                 m_window->maximize(m_maximizeMode);
++                m_givingBack = false;
+             }
+         }
+         if (m_window->isFullScreen()) {
+@@ -894,7 +938,7 @@ void AnlandWindowTasks::announce()
+ {
+     // What this KWin understands beyond "closed"/"focus": the app only sends it then (an older KWin, buffers of the
+     // task's size as before).
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 1d03087..a53424b 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -144,12 +144,15 @@ private:
+     static QString describe(const Window *window);
+     void cancelTouches();
+     void handOverMoveResize();
++    void handOverMaximize();
++    void handOverMinimize();
+ 
+     AnlandWindowTasks *m_tasks;
+     QPointer<Window> m_window;
+     const uint32_t m_id;
+     const bool m_fullScreen;
+     bool m_appFullScreen = false;
++    bool m_givingBack = false; // giveBack restoring the window's own maximize: not a request of its own
+     int m_decorTold = -1; // the last "decor" told: 1 KWin's title bar, 0 the window's own, -1 not yet
+     display_ctx *m_display = nullptr;
+     State m_state = State::Handshake;

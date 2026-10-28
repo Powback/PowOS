@@ -53,6 +53,11 @@ class App : Application() {
         andro.marchy.WindowTasks.barChanged = Runnable { dev.omalauncher.system.WindowFrames.current?.changed() }
         andro.marchy.WindowTasks.moveTask =
             java.util.function.BiPredicate { id, e -> dev.omalauncher.system.WindowFrames.current?.appMove(id, e) ?: false }
+        // Its own bar's maximize/minimize (KWin "maximize"/"minimize"): the frame's own maximise (in place, a toggle) / minimise.
+        andro.marchy.WindowTasks.maximiseTask =
+            java.util.function.IntConsumer { id -> dev.omalauncher.system.WindowFrames.current?.maximise(id) }
+        andro.marchy.WindowTasks.minimiseTask =
+            java.util.function.IntConsumer { id -> dev.omalauncher.system.WindowFrames.current?.minimise(id) }
         // KWin opens every new application window as a floating task then (WindowTasks "export-new").
         andro.marchy.WindowTasks.setFloating(this, java.util.function.Predicate { windows.floating(it) })
     }

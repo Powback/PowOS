@@ -116,6 +116,13 @@ public final class WindowTasks {
      * (WindowFrames.appMove) get each event, the first one as the drag's start; false = no frame to move it.
      */
     public static volatile java.util.function.BiPredicate<Integer, android.view.MotionEvent> moveTask = null;
+    /**
+     * A window's own title bar's maximize (button or double click) or minimize ("maximize"/"minimize", kwin 0036):
+     * Android task [taskId] maximized in place - a toggle, the next one restores it (WindowFrames.maximise) - or into
+     * the dock (WindowFrames.minimise). Set by the app module; null = nothing happens.
+     */
+    public static volatile java.util.function.IntConsumer maximiseTask = null;
+    public static volatile java.util.function.IntConsumer minimiseTask = null;
 
     private WindowTasks() {}
 
@@ -387,6 +394,15 @@ public final class WindowTasks {
                 Log.i(TAG, "move " + id + ": its own title bar dragged" + (a == null ? " (no task)" : ""));
                 if (a != null)
                     a.runOnUiThread(a::appMove);
+                break;
+            }
+            case "maximize":
+            case "minimize": {
+                PowosWindowActivity a = tasks.get(id);
+                java.util.function.IntConsumer to = f[0].equals("maximize") ? maximiseTask : minimiseTask;
+                Log.i(TAG, f[0] + " " + id + ": its own title bar's button" + (a == null ? " (no task)" : to == null ? " (no frames)" : ""));
+                if (a != null && to != null)
+                    a.runOnUiThread(() -> to.accept(a.getTaskId()));
                 break;
             }
             case "title": {
