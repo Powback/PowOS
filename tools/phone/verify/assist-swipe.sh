@@ -26,6 +26,12 @@ v=$(vis); echo "after: ${v:-none}"
 if [ -z "$v" ] || [ "$v" = hidden ]; then echo "grip swipe closed it"; else
   $A shell "su -c 'cmd voiceinteraction hide'"; echo "RESULT FAIL overlay still visible after swipe up"; exit 1; fi
 
+# A drawer: down from the handle shuts it too (the panel follows the finger either way).
+echo "== show again, swipe down from the handle"; $A shell "su -c 'cmd voiceinteraction show'" >/dev/null 2>&1; sleep 2
+v=$(vis); [ "$v" = visible ] || { echo "RESULT FAIL assist did not show for the swipe-down case (${v:-none})"; exit 1; }
+$A shell "input swipe $x $yb $x $((yb + 400)) 250"; sleep 1.5
+v=$(vis); if [ -n "$v" ] && [ "$v" != hidden ]; then $A shell "su -c 'cmd voiceinteraction hide'"; echo "RESULT FAIL overlay still visible after swipe down"; exit 1; fi
+
 # Bottom-edge case: the gesture-nav zone (start 5 px from the bottom edge, as the user's thumb does), the system's home gesture.
 echo "== show again"; $A shell "su -c 'cmd voiceinteraction show'" >/dev/null 2>&1; sleep 2
 v=$(vis); [ "$v" = visible ] || { echo "RESULT FAIL assist did not show for the edge case (${v:-none})"; exit 1; }

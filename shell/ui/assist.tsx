@@ -236,9 +236,11 @@ function takeOver() {
 const SWIPE_CLOSE_PX = 90;
 const SWIPE_FLING = 0.6;
 const SWIPE_MIN = 24;
+const SWIPE_DWELL_MS = 250;
+const SWIPE_DWELL_PX = 56;
 
 /**
- * Swipe up to put the panel away (the handle, the header and the strip along the bottom edge take it; the screen
+ * Swipe up or down to put the panel away (a drawer: the handle drags it either way) (the handle, the header and the strip along the bottom edge take it; the screen
  * above is for circling, the chat for scrolling). The panel follows the finger at once, completes on release past
  * a threshold or a fling, else snaps back.
  */
@@ -247,6 +249,10 @@ function swipeAway(panel: { current: HTMLDivElement | null }) {
   let t0 = 0;
   let dy = 0;
   let on = false;
+  // The last move (time, y): the release speed is the finger's at the end, not the swipe's average.
+  let lastT = 0;
+  let lastY = 0;
+  let v = 0;
   const move = (dyPx: number, animate: boolean) => {
     const el = panel.current;
     if (!el) return;
@@ -261,19 +267,29 @@ function swipeAway(panel: { current: HTMLDivElement | null }) {
       y0 = e.clientY;
       t0 = e.timeStamp;
       dy = 0;
+      lastT = e.timeStamp;
+      lastY = y0;
+      v = 0;
       on = true;
     },
     onPointerMove: (e: PointerEvent) => {
       if (!on) return;
-      dy = Math.min(0, e.clientY - y0); // up only
+      dy = e.clientY - y0; // a drawer: either way, following the finger
+      v = (e.clientY - lastY) / Math.max(1, e.timeStamp - lastT);
+      lastT = e.timeStamp;
+      lastY = e.clientY;
       move(dy, false);
     },
     onPointerUp: (e: PointerEvent) => {
       if (!on) return;
       on = false;
-      const fling = -dy / Math.max(1, e.timeStamp - t0);
-      if (-dy >= SWIPE_CLOSE_PX || (-dy >= SWIPE_MIN && fling >= SWIPE_FLING)) {
-        move(-window.innerHeight, true);
+      // The switcher's early-release rule (NavGestureClassifier): far enough, OR a fast flick after a short way
+      // (the finger's speed at the end), OR held there (dwell) - else it snaps back.
+      const far = Math.abs(dy);
+      const flick = Math.abs(v) >= SWIPE_FLING && Math.sign(v) === Math.sign(dy);
+      const dwell = e.timeStamp - t0 >= SWIPE_DWELL_MS && far >= SWIPE_DWELL_PX;
+      if (far >= SWIPE_CLOSE_PX || (far >= SWIPE_MIN && flick) || dwell) {
+        move(Math.sign(dy) * window.innerHeight, true);
         window.setTimeout(() => (powos.assist.close(), move(0, false)), 180);
       } else move(0, true);
     },
