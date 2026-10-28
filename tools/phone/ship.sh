@@ -73,14 +73,16 @@ paused_info() {
 }
 case "${1:-}" in
 request)
-  shift; note= silent=
+  shift; note= silent= rsha= rwho=
   while [ $# -gt 0 ]; do case "$1" in
+    --sha) rsha=${2:-}; shift 2 || shift ;; --who) rwho=${2:-}; shift 2 || shift ;;   # ship-gate.py: a device's pushed sha
     --note) note=${2:-}; shift 2 || shift ;; --note=*) note=${1#--note=}; shift ;; --silent) silent=1; shift ;;
     *) echo "ship.sh request: unknown $1" >&2; exit 2 ;; esac; done
   [ -n "${note// }" ] || [ -n "$silent" ] || { echo "ship.sh request: --note \"what changed, for the user\" (or --silent) required" >&2; exit 2; }
   top=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "ship.sh request: run it in your PowOS worktree" >&2; exit 2; }
   git fetch -q origin "$BASE" 2>/dev/null || echo "ship.sh request: fetch failed - checking against the last fetched origin" >&2
-  sha=$(git rev-parse HEAD)
+  sha=$(git rev-parse --verify -q "${rsha:-HEAD}^{commit}") || { echo "ship.sh request: REFUSED - unknown commit ${rsha}" >&2; exit 3; }
+  [ -z "$rwho" ] || SHIP_REQUESTER=$rwho
   git merge-base --is-ancestor "$sha" "origin/$BASE" 2>/dev/null ||
     { echo "ship.sh request: REFUSED - HEAD ${sha:0:9} isn't on origin/$BASE: push it first (git push origin HEAD:$BASE)" >&2; exit 3; }
   # Before queueing: if the service is paused, say who and why now - not only after the request is already on disk
@@ -90,7 +92,7 @@ request)
   printf 'sha=%q\nnote=%q\nsilent=%s\nwho=%q\nat=%s\n' "$sha" "$note" "${silent:-0}" "${SHIP_REQUESTER:-$(basename "$top")}" "$(date +%s)" > "$r.tmp" && mv "$r.tmp" "$r"
   # The request is on disk before the runner check: a runner on its way out sees it (run's last look).
   runner_up || agent_kick || { nohup bash "$here/ship.sh" run >> "$Q/runner.log" 2>&1 & }
-  echo "ship requested (${sha:0:9}): the ship service ships origin's tip after ${QUIET}s without new commits - nothing else to do (status: tools/phone/ship.sh status)" ;;
+  echo "ship requested (${sha:0:9}): the ship service ships origin's tip after ${QUIET}s without new commits - nothing else to do (status: tools/phone/ship.sh status) [id $(basename "$r" .req)]" ;;
 pause)
   shift; why= until=
   while [ $# -gt 0 ]; do case "$1" in

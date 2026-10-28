@@ -1,0 +1,24 @@
+{
+  "id": "ship-gate-mac",
+  "name": "Ship gate: LAN door for `powos self push --ship` (Mac launchd agent)",
+  "kind": "service",
+  "owner": "system:powos-ship",
+  "host": "mac",
+  "purpose": "authenticated HTTP endpoint (port 7433, LAN) that lets a device which pushed a sha to origin ask the Mac to ship it: tools/phone/ship-gate.py calls `ship.sh request --sha` (same .req, same 'must be on origin' rule) and never ships by itself. Bearer secret from ~/.config/powos/ship-gate.secret (0600, provisioned out of band, never in git)",
+  "installedBy": "tools/phone/ship-deploy.sh gate-install",
+  "files": [
+    "~/Library/LaunchAgents/com.powos.ship-gate.plist",
+    "~/.config/powos/ship-gate.secret"
+  ],
+  "processes": [
+    {
+      "match": "ship-gate\\.py"
+    }
+  ],
+  "unbounded": "macOS has no cgroups; one idle python3 http.server (stdlib, ~15 MB), request bodies capped at 8 KB, each request runs ship.sh request (a git fetch) with a 60 s timeout",
+  "remove": {
+    "commands": [
+      "tools/phone/ship-deploy.sh gate-remove"
+    ]
+  }
+}

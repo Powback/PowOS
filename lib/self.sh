@@ -679,6 +679,7 @@ PowOS self — edit → test → push loop
                       (transient; auto-reverts on reboot on installed composefs)
   powos self pull     SAFE update from upstream (never discards local edits)
   powos self push     commit + push  (-m "message" [-- <paths>]: only those files; no paths = whole tree)
+                      --ship "note" [--task ID]: then ask the Mac ship service to ship that sha
   powos self reseed   Wipe /var/lib/powos/src and re-copy from the CURRENT image
                       snapshot at /usr/lib/powos/src. Use after bootc-switch when
                       the /var tree was inherited from an older PowOS install and
@@ -687,12 +688,59 @@ PowOS self — edit → test → push loop
 EOF
 }
 
-# `powos self push [-m msg] [-- paths]`
+# ── push --ship: ask the Mac ship service to ship what we just pushed ──────────
+# The Mac runs tools/phone/ship-gate.py (unit ship-gate-mac). Config, never a value in git:
+#   POWOS_SHIP_GATE_URL   (default http://192.168.50.99:7433; or "url=" in the conf file)
+#   POWOS_SHIP_GATE_SECRET_FILE (default ~/.config/powos/ship-gate.secret, mode 0600: the Mac's same file)
+self_ship_conf() {   # echoes "URL<TAB>SECRET_FILE"
+    local conf="${POWOS_SHIP_GATE_CONF:-$HOME/.config/powos/ship-gate.conf}" url=""
+    [[ -r "$conf" ]] && url="$(sed -n 's/^url=//p' "$conf" | head -1)"
+    printf '%s\t%s\n' "${POWOS_SHIP_GATE_URL:-${url:-http://192.168.50.99:7433}}" \
+        "${POWOS_SHIP_GATE_SECRET_FILE:-$HOME/.config/powos/ship-gate.secret}"
+}
+
+# self_ship_post URL SECRET_FILE JSON: the secret goes to curl on stdin as a header (never argv, never printed).
+# Echoes "HTTP_CODE<NL>BODY"; curl failure (unreachable) returns 7.
+self_ship_post() {
+    local out
+    out="$(printf 'Authorization: Bearer %s\n' "$(tr -d '\r\n' <"$2")" | curl -sS --max-time 70 -H @- \
+        -H 'Content-Type: application/json' -d "$3" -w '\n%{http_code}' "$1/request" 2>&1)" || { printf '%s\n' "$out"; return 7; }
+    printf '%s\n%s\n' "${out##*$'\n'}" "${out%$'\n'*}"
+}
+
+# self_json_str TEXT: TEXT escaped for the inside of a JSON string (no python/jq needed on the phone).
+self_json_str() {
+    local t="$1"; t="${t//\\/\\\\}"; t="${t//\"/\\\"}"; t="${t//$'\n'/ }"; t="${t//$'\t'/ }"; t="${t//$'\r'/ }"
+    printf '%s' "$t"
+}
+
+# self_ship_request SRC NOTE [TASK]: after a successful push. The push stays done whatever happens here.
+self_ship_request() {
+    local src="$1" note="$2" task="${3:-}" url sf sha dev json res code body
+    IFS=$'\t' read -r url sf < <(self_ship_conf)
+    [[ -r "$sf" ]] || { perr "Pushed, but not shipped: no ship secret at $sf (copy the Mac's ~/.config/powos/ship-gate.secret there, chmod 600)."; return 1; }
+    sha="$(git -C "$src" rev-parse HEAD)"; dev="$(hostname 2>/dev/null | tr -c 'A-Za-z0-9._\n-' '-')"
+    json="$(printf '{"sha":"%s","note":"%s","task":"%s","from":"%s"}' "$sha" "$(self_json_str "$note")" \
+        "$(self_json_str "$task")" "${dev:-phone}")"
+    res="$(self_ship_post "$url" "$sf" "$json")" || { perr "Pushed, but the Mac ship service is unreachable at $url: ${res:0:200}"; perr "Ship later from the Mac: tools/phone/ship.sh request --note \"...\""; return 1; }
+    code="${res%%$'\n'*}"; body="${res#*$'\n'}"
+    case "$code" in
+        200) pok "Ship requested for ${sha:0:9}: id $(printf '%s' "$body" | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p')"
+             plog "Status: curl -H @<(secret header) $url/status   (or on the Mac: tools/phone/ship.sh status)" ;;
+        401) perr "Pushed, but the ship service rejected the secret (does $sf match the Mac's?)."; return 1 ;;
+        403) perr "Pushed, but the Mac says ${sha:0:9} is not on origin yet: $body"; return 1 ;;
+        *)   perr "Pushed, but the ship request failed (HTTP $code): ${body:0:300}"; return 1 ;;
+    esac
+}
+
+# `powos self push [-m msg] [--ship NOTE] [--task ID] [-- paths]`
 self_push_args() {
-    local msg="" paths=()
+    local msg="" paths=() ship="" task=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -m|--message) msg="${2:-}"; shift 2 ;;
+            --ship) ship="${2:-}"; shift 2 ;;
+            --task) task="${2:-}"; shift 2 ;;
             --) shift; paths+=("$@"); break ;;
             *) paths+=("$1"); shift ;;
         esac
@@ -700,7 +748,8 @@ self_push_args() {
     if [[ -z "$msg" ]] && [[ -t 0 ]]; then
         read -rp "Commit message [PowOS self: sync local changes]: " msg || true
     fi
-    self_push "$SELF_SRC" "$msg" "${paths[@]}"
+    self_push "$SELF_SRC" "$msg" "${paths[@]}" || return 1
+    [[ -z "$ship" ]] || self_ship_request "$SELF_SRC" "$ship" "$task"
 }
 
 cmd_self() {

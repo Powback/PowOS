@@ -8,6 +8,7 @@
 #   status   launchd's view of it.
 # Stop it for a while without removing: `launchctl bootout user/$(id -u)/com.powos.ship-runner` (back: install).
 # Loaded into user/<uid> (this Mac is headless): after a reboot, the first `ship.sh request` loads it again.
+#   gate-install / gate-remove  the ship gate (ship-gate.py, com.powos.ship-gate; unit units/mac/ship-gate-mac.json)
 # powos-units: deploy host=mac
 set -euo pipefail
 L=com.powos.ship-runner
@@ -40,5 +41,17 @@ remove)
   echo "removed $L (the requests are kept)" ;;
 status)
   loaded && launchctl print "$D/$L" | grep -E '^\s*(state|pid|last exit code|runs) ' || echo "$L: not loaded" ;;
+gate-install)
+  # The LAN door for `powos self push --ship` (tools/phone/ship-gate.py). Needs its secret first (never in git).
+  G=com.powos.ship-gate; GP=$HOME/Library/LaunchAgents/$G.plist
+  [ -s "$HOME/.config/powos/ship-gate.secret" ] || { echo "ship-deploy: create ~/.config/powos/ship-gate.secret first (chmod 600, 16+ random chars: openssl rand -hex 24) and put the same value on the phone"; exit 1; }
+  [ -f "$SR/tools/phone/ship-gate.py" ] || { echo "ship-deploy: $SR has no ship-gate.py (push it to origin first)"; exit 1; }
+  mkdir -p "$Q" "$HOME/Library/LaunchAgents"
+  sed -e "s#@HOME@#$HOME#g" -e "s#@VR@#$SR#g" "$here/$G.plist" > "$GP"; plutil -lint "$GP" >/dev/null
+  launchctl bootout "$D/$G" 2>/dev/null || true; sleep 1
+  launchctl bootstrap "$D" "$GP"; echo "loaded $G (port 7433)" ;;
+gate-remove)
+  launchctl bootout "$D/com.powos.ship-gate" 2>/dev/null || true; rm -f "$HOME/Library/LaunchAgents/com.powos.ship-gate.plist"
+  echo "removed com.powos.ship-gate" ;;
 *) sed -n 2,10p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
