@@ -84,6 +84,8 @@ class PowosRecentsService : Service() {
                 Tasks.splitScreen = params?.getBinder("com.android.wm.shell.splitscreen.ISplitScreen")
                 // WM Shell's transitions: a floating window's content follows a drag (TaskLeash).
                 TaskLeash.shell = params?.getBinder(TaskLeash.KEY)
+                // Every desktop window's surface, for the in-task frames (TaskSurfaces; fed by TaskLeash).
+                TaskSurfaces.start(this@PowosRecentsService)
                 Log.i(TAG, "SystemUI connected: ${params?.keySet()?.sorted()}")
                 main.post {
                     RecentsWatchdog.onConnected()

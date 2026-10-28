@@ -46,6 +46,10 @@ object TaskLeash {
 
     /** WM Shell's IShellTransitions (PowosRecentsService.onInitialize); null: no live content, the old way. */
     @Volatile var shell: IBinder? = null
+        set(value) {
+            field = value
+            if (value != null) registerOpenWatch(value)
+        }
 
     /** Off with `settings put global powos_live_leash 0` (the drag then works as before). */
     fun enabled(context: Context) = shell != null && android.provider.Settings.Global.getInt(context.contentResolver, "powos_live_leash", 1) == 1
@@ -237,7 +241,11 @@ object TaskLeash {
             finishCallback = callback
             if (info != null) {
                 offset = runCatching { rootOffset(info) }.getOrDefault(Point())
-                runCatching { leashesOf(info) }.onFailure { Log.w(TAG, "$what: can't read the transition's tasks", it) }.getOrNull()?.let { leashes.putAll(it) }
+                runCatching { leashesOf(info) }.onFailure { Log.w(TAG, "$what: can't read the transition's tasks", it) }.getOrNull()?.let {
+                    leashes.putAll(it)
+                    // Every session's leashes are the windows' surfaces too (a task's first move records it).
+                    TaskSurfaces.record(it, what)
+                }
             }
             val st = t ?: SurfaceControl.Transaction()
             for ((id, leash) in leashes) last[id]?.let { place(st, leash, it) }
@@ -348,8 +356,11 @@ object TaskLeash {
         return c.getConstructor().newInstance() to c
     }
 
-    /** A change transition (type CHANGE) with a floating task changed in it. */
-    private fun filter(modes: IntArray): Any {
+    /** A transition of one of [types] (CHANGE by default) with a floating task in one of [modes] in it. */
+    private fun filter(
+        modes: IntArray,
+        types: IntArray = intArrayOf(TRANSIT_CHANGE),
+    ): Any {
         val fc = Class.forName("android.window.TransitionFilter")
         val rc = Class.forName("android.window.TransitionFilter\$Requirement")
         val r = rc.getConstructor().newInstance()
@@ -359,16 +370,80 @@ object TaskLeash {
         val reqs = java.lang.reflect.Array.newInstance(rc, 1)
         java.lang.reflect.Array.set(reqs, 0, r)
         val f = fc.getConstructor().newInstance()
-        fc.getField("mTypeSet").set(f, intArrayOf(TRANSIT_CHANGE))
+        fc.getField("mTypeSet").set(f, types)
         fc.getField("mRequirements").set(f, reqs)
         return f
     }
 
-    /** android.window.RemoteTransition(IRemoteTransition.Stub.asInterface(binder), "PowOS window drag"). */
-    private fun remoteTransition(binder: IBinder): Any {
+    /** android.window.RemoteTransition(IRemoteTransition.Stub.asInterface(binder), [name]). */
+    private fun remoteTransition(
+        binder: IBinder,
+        name: String = "PowOS window drag",
+    ): Any {
         val iface = Class.forName("android.window.IRemoteTransition")
         val stub = Class.forName("android.window.IRemoteTransition\$Stub").getMethod("asInterface", IBinder::class.java).invoke(null, binder)
-        return Class.forName("android.window.RemoteTransition").getConstructor(iface, String::class.java).newInstance(stub, "PowOS window drag")
+        return Class.forName("android.window.RemoteTransition").getConstructor(iface, String::class.java).newInstance(stub, name)
+    }
+
+    /**
+     * The permanent remote for a floating task opened or brought to front (DESKTOP-NATIVE.md step 3): it only records
+     * the transition's leashes in [TaskSurfaces], then applies the start transaction as it is and finishes at once, on
+     * the binder thread - it never holds a transition open and never changes what WM does. Registered again whenever
+     * WM Shell (re)connects ([shell]). HACK: WM Shell may claim a freeform open in its own handleRequest (desktop
+     * mode's handler) and play it itself, so this remote never sees it; then the task's first move (a TaskLeash
+     * session) records it. Real fix: a leash-observer hook in WM Shell (Transitions.registerObserver is in-process only).
+     */
+    private val openWatch = OpenWatch()
+
+    private fun registerOpenWatch(binder: IBinder) {
+        runCatching {
+            HiddenApi.allow()
+            val rt = remoteTransition(openWatch, "PowOS window surfaces")
+            shellCall(binder, REGISTER_REMOTE) {
+                it.writeTypedObject(filter(OPEN_MODES, OPEN_MODES) as Parcelable, 0)
+                it.writeTypedObject(rt as Parcelable, 0)
+            }
+            Log.i(TAG, "open watch registered (freeform open / to front)")
+        }.onFailure { Log.w(TAG, "no open watch: window surfaces only from moves", it) }
+    }
+
+    /** IRemoteTransition for [openWatch]: record, pass through, finish (hand-written onTransact). */
+    private class OpenWatch : Binder(REMOTE) {
+        override fun onTransact(
+            code: Int,
+            data: Parcel,
+            reply: Parcel?,
+            flags: Int,
+        ): Boolean {
+            if (code == INTERFACE_TRANSACTION) {
+                reply?.writeString(REMOTE)
+                return true
+            }
+            if (code < FIRST_CALL_TRANSACTION || code > LAST_CALL_TRANSACTION) return super.onTransact(code, data, reply, flags)
+            data.enforceInterface(REMOTE)
+            when (code) {
+                START_ANIMATION -> {
+                    data.readStrongBinder()
+                    val info = runCatching { data.readTypedObject(creator("android.window.TransitionInfo")) }.onFailure { Log.w(TAG, "open watch: can't read the transition", it) }.getOrNull()
+                    val t = runCatching { data.readTypedObject(SurfaceControl.Transaction.CREATOR) }.getOrNull()
+                    val cb = data.readStrongBinder()
+                    // Whatever happens below, the transition is finished: WM Shell's queue never waits on PowOS.
+                    try {
+                        if (info != null) runCatching { TaskSurfaces.record(leashesOf(info), "open") }.onFailure { Log.w(TAG, "open watch: can't read the transition's tasks", it) }
+                        runCatching { t?.apply() }.onFailure { Log.w(TAG, "open watch: start transaction failed", it) }
+                    } finally {
+                        cb?.let { runCatching { finished(it, null, null) }.onFailure { e -> Log.w(TAG, "open watch: can't finish the transition", e) } }
+                    }
+                }
+                // Already finished: nothing to merge, take over, or clean up.
+                MERGE_ANIMATION, TAKE_OVER_ANIMATION, ON_TRANSITION_CONSUMED, ON_TRANSITION_ABORT -> {}
+                else -> return super.onTransact(code, data, reply, flags)
+            }
+            return true
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        private fun creator(cls: String) = Class.forName(cls).getField("CREATOR").get(null) as Parcelable.Creator<Any>
     }
 
     private fun rootOffset(info: Any): Point {
@@ -477,6 +552,9 @@ object TaskLeash {
 
     /** A page slide's task modes (PageSlide): changed, and brought up from under home (TRANSIT_OPEN 1, TO_FRONT 3). */
     val SLIDE_MODES = intArrayOf(TRANSIT_CHANGE, 1, 3)
+
+    /** The open watch's transition types and task modes: TRANSIT_OPEN 1, TRANSIT_TO_FRONT 3 (same numbers in both). */
+    private val OPEN_MODES = intArrayOf(1, 3)
     private const val MAX_TASKS = 24
 
     /** How long WM Shell may take to hand the leashes over before the drag goes the old way. */
