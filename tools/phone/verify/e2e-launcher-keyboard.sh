@@ -63,6 +63,8 @@ if [ $# -ge 4 ] && [ "$4" -gt "$2" ]; then
   for f in 20 35 50 65 80; do
     x=$(($1 + ($3 - $1) * f / 100)); tap "$x" "$y" "a key on the keyboard"; sleep 0.7; chk "key tap"
     k=$(ime); s=$(state); log "after key tap at $x,$y: $k $s"
+    # What the user sees after each key: a screenshot per tap (keys-<n>.png), reviewed by eye, not only the state.
+    "$T/shot.sh" "$OUT/keys-$f.png" >/dev/null 2>&1 || log "no screenshot after the key at $x,$y"
     [ "$k" = mInputShown=true ] && [[ $s == *'"focus":true'* ]] || { bad="after the key tap at $x,$y: $k $s"; break; }
   done
   sh_ "dumpsys input" > "$OUT/input-after.txt"; sh_ "logcat -d -v time" > "$OUT/logcat-keys.txt"
