@@ -1,0 +1,17 @@
+{
+  "id": "local.health",
+  "name": "Health",
+  "version": "0.1.0",
+  "description": "One place for your health data from all your wearables: steps, heart rate, sleep, exercise, weight and active calories read from Health Connect (what the wearables' apps write there), kept on this phone indefinitely, shown per type and per device, and feeding widgets. Nothing leaves the phone.",
+  "icon": "icon.svg",
+  "ui": { "dir": "out/ui/" },
+  "page": { "entry": "pages/main.js" },
+  "module": { "path": "module/", "lang": "rust", "database": "local-health", "stdb": "2.12" },
+  "backend": null,
+  "widgets": [
+    { "id": "today", "name": "Health today", "kind": "island", "entry": "widgets/today.js", "size": "4x2", "minSize": "2x1" }
+  ],
+  "surfaces": { "launcher": true, "desktop": true },
+  "permissions": [],
+  "budget": { "phone": { "memMB": 8, "idle": "unload" }, "desktop": { "memMB": 16 } }
+}
