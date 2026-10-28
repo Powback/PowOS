@@ -203,11 +203,21 @@ class ShellActivity : Activity() {
         // Home pressed - not a notification's or the app entry's way here (toHome), which carries what it opens.
         // Nor the recents transition's launch of home or the switcher's (Switcher.EXTRA_RECENTS): its layer is coming up.
         val recents = intent.getBooleanExtra(dev.omalauncher.system.Switcher.EXTRA_RECENTS, false)
-        if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED) && !recents) host.bridge.emit("system.home", null)
+        if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED) && !recents) homePressed()
         dev.omalauncher.AgentsSpool.opened(intent)
         // An edge gesture's "app drawer": home with its pull-up panel up.
         intent.getStringExtra(EXTRA_HOME_PANEL)?.let { host.bridge.emit("home.panel", org.json.JSONObject().put("kind", it)) }
         handleDebugExec(intent)
+    }
+
+    /** SystemUI can deliver Home directly instead of going through our navigation consumer. */
+    private fun homePressed() {
+        val switcher = dev.omalauncher.system.Switcher
+        if (switcher.homeVisible && switcher.homeMainPage && !switcher.open) {
+            switcher.show(this, null)
+        } else {
+            host.bridge.emit("system.home", null)
+        }
     }
 
     /** Back goes to the page: it closes the drawer, a folder or edit mode. A home screen has nowhere to go back to. */

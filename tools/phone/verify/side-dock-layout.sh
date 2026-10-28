@@ -35,6 +35,7 @@ for state in 0 3; do
   ev 'importShim("./state.ts").then(s=>{s.drawer.value=0;return "closed"})' >/dev/null
   sh_ "cmd device_state state $state; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
   sleep 3
+  ev 'importShim("./state.ts").then(s=>{s.goHome();return "home"})' >/dev/null
   for side in left right; do
     close_shade
     chk setting

@@ -30,7 +30,7 @@ sh_ 'cmd device_state state 0; am start -W -a android.intent.action.MAIN -c andr
 sleep 3
 chk home
 # AI is a real non-main page even for a home with only one populated apps page.
-ev 'importShim("./state.ts").then(s=>{s.closeDrawer();s.page.value=-1;s.mobileDockPlacement.value="bottom";return "set"})' >/dev/null
+ev 'importShim("./state.ts").then(s=>{s.goHome();s.page.value=-1;s.mobileDockPlacement.value="bottom";return "set"})' >/dev/null
 sleep 1
 read -r x y end <<<"$(ev '[innerWidth/2,innerHeight-3,innerHeight-220].map(n=>Math.round(n*devicePixelRatio)).join(" ")')"
 sh_ "input swipe $x $y $x $end 150"
