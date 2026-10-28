@@ -200,7 +200,7 @@ class WindowFrames(
         // One PowOS look on every shown window's surface (rounded corners, shadow) at its current size.
         show.filter { it.id !in sliding }.forEach { TaskSurfaces.dress(it.id, it.bounds) }
         // Step 7: home doesn't take the focus from the windows while they show.
-        FreeformTasks.homeFocusable(context, show.isNotEmpty())
+        FreeformTasks.homeFocusable(context, show.isNotEmpty(), show.map { it.id })
         if (sliding.isNotEmpty()) return
         restack(show.asReversed().map { it.id })
     }

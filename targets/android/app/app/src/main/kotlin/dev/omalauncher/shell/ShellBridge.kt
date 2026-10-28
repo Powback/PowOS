@@ -955,10 +955,12 @@ class ShellBridge(
                 return
             }
             // Desktop mode: a floating task (a terminal, Dolphin, Steam) keeps the input focus while home is tapped, so
-            // Android serves the IME to that task and ignores ours - no keyboard. A PowOS text field asking for the
-            // keyboard is the shell taking the input: its task comes forward, and the IME is shown once the window
-            // actually has focus.
-            Log.i(TAG, "keyboard.show without window focus: taking focus first")
+            // Android serves the IME to that task and ignores ours - no keyboard. homeTyping above made home focusable
+            // and every shown window task non-focusable, so WM's focus update hands the focus to home (the top
+            // focusable task); the IME is shown once the window has it. No moveTaskToFront of home: in desktop mode
+            // that is a TO_FRONT transition after which WM Shell re-raised the desktop's freeform tasks and the focus
+            // went to a floating Linux window (PowosWindowActivity), hiding the IME (2026-10-28).
+            Log.i(TAG, "keyboard.show without window focus: waiting for home's focus")
             val listener = object : android.view.ViewTreeObserver.OnWindowFocusChangeListener {
                 override fun onWindowFocusChanged(hasFocus: Boolean) {
                     if (!hasFocus) return
@@ -968,14 +970,8 @@ class ShellBridge(
                 }
             }
             web.viewTreeObserver.addOnWindowFocusChangeListener(listener)
-            // Never wait forever: a focus that doesn't come (the task refused to move) drops the listener.
+            // Never wait forever: a focus that doesn't come drops the listener.
             main.postDelayed({ web.viewTreeObserver.takeIf { it.isAlive }?.removeOnWindowFocusChangeListener(listener) }, 1500)
-            var c: Context? = web.context
-            while (c is android.content.ContextWrapper && c !is Activity) c = c.baseContext
-            (c as? Activity)?.let { act ->
-                val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                runCatching { am.moveTaskToFront(act.taskId, 0) }.onFailure { Log.w(TAG, "keyboard focus: moveTaskToFront", it) }
-            }
             web.windowInsetsController?.show(WindowInsets.Type.ime())
         } else {
             imm.hideSoftInputFromWindow(web.windowToken, 0)

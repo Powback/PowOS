@@ -45,7 +45,12 @@ class App : Application() {
         andro.marchy.AndroidRequests.openOptions = java.util.function.Function { windows.bundle(it) }
         // A PowOS window's task shown again (the launcher, the dock): to the front, floating if it was full screen.
         andro.marchy.WindowTasks.raiseTask =
-            java.util.function.BiPredicate { c, id -> dev.omalauncher.system.Tasks.open(c, id, windows.taskOptions(c, id, android.app.ActivityOptions.makeBasic())) }
+            java.util.function.BiPredicate { c, id ->
+                // A shell text field typing: KWin's "show again" (its activation, a focus of its own) mustn't raise and
+                // focus a Linux window's task over the launcher's search; it stays where it is (true: no second task).
+                if (dev.omalauncher.system.FreeformTasks.typing) true
+                else dev.omalauncher.system.Tasks.open(c, id, windows.taskOptions(c, id, android.app.ActivityOptions.makeBasic()))
+            }
         // A floating Linux window's app went full screen by itself (KWin "fullscreen"): its task covers the screen, then floats back.
         andro.marchy.WindowTasks.fullScreenTask =
             java.util.function.BiConsumer { id, on -> dev.omalauncher.system.WindowFrames.current?.appFullScreen(id, on) }

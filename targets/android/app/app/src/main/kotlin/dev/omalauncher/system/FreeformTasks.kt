@@ -317,10 +317,21 @@ object FreeformTasks {
     fun homeFocusable(
         context: Context,
         shown: Boolean,
+        ids: Collection<Int> = emptyList(),
     ) {
         windowsShown = shown
+        shownIds = ids.toSet()
         applyHomeFocus(context)
     }
+
+    /** The shown window tasks (WindowFrames' refresh). */
+    @Volatile private var shownIds: Set<Int> = emptySet()
+
+    /** Window tasks made non-focusable while a shell text field types ([homeTyping]); focusable again after. */
+    private val typingHeld = mutableSetOf<Int>()
+
+    /** A PowOS shell text field has the keyboard now (keyboard.show till keyboard.hide): no window task may take focus. */
+    val typing get() = homeTypingNow
 
     /**
      * A shell text field has the keyboard ([on]) or let it go: home's non-focusable flag is lifted meanwhile so
@@ -338,6 +349,7 @@ object FreeformTasks {
 
     @Synchronized
     private fun applyHomeFocus(context: Context) {
+        windowsFocus(context)
         val focusable = !windowsShown || homeTypingNow
         if (focusable == homeFocusTold) return
         val id = homeTaskId(context) ?: return
@@ -346,6 +358,27 @@ object FreeformTasks {
                 homeFocusTold = focusable
                 Log.i(TAG, "home task $id ${if (focusable) "focusable" else "non-focusable (desktop windows show)"}")
             }.onFailure { Log.w(TAG, "can't set home task $id focusable=$focusable", it) }
+    }
+
+    /**
+     * While a shell text field types, every shown window task is non-focusable (still shown, still on top): WM can't
+     * hand the input focus to a floating window (a Linux window's PowosWindowActivity was the top focusable task, so a
+     * focus update gave it the focus and the IME was hidden for HIDE_INPUT_TARGET_CHANGED, 2026-10-28), and focus falls
+     * to home, the top focusable task. Focusable again on keyboard.hide.
+     * HACK: keyed to keyboard.show/hide like [homeTyping]; a touch on a window's content while the field keeps its
+     * focus doesn't focus that window till keyboard.hide (the drawer closing, the field's blur). Real fix: the page
+     * reports text-field focus/blur through the bridge, and a touch outside home's window ends the typing.
+     */
+    private fun windowsFocus(context: Context) {
+        val hold = if (homeTypingNow && windowsShown) shownIds else emptySet()
+        val change = (hold - typingHeld).map { it to false } + (typingHeld - hold).map { it to true }
+        for ((id, focusable) in change) {
+            runCatching { apply(token(context, id)) { wct, token -> TaskLeash.setFocusable(wct, token, focusable) } }
+                .onFailure { Log.w(TAG, "can't set window task $id focusable=$focusable", it) }
+            // A task gone meanwhile has nothing to restore: it leaves the set either way.
+            if (focusable) typingHeld.remove(id) else typingHeld.add(id)
+        }
+        if (change.isNotEmpty()) Log.i(TAG, "typing on home: window tasks non-focusable $typingHeld")
     }
 
     /** PowOS's home task (this app's CATEGORY_HOME activity), or null when it isn't running. */
