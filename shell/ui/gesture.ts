@@ -22,7 +22,7 @@ import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { overPull, overRelease } from "./overpull.ts";
 import { inWindow } from "./desktops.ts";
-import { ccEditing, ccExpanded, EXPAND_AT, FOLD_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
+import { ccEditing, ccExpanded, EXPAND_AT, expandedByDefault, FOLD_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
 import { carry, closeDrawer, dockDrag, drawer, editing, folder, menu, notif, onLibrary, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
@@ -504,7 +504,8 @@ function ccAllWay(gs: Gesture, dy: number) {
   // only when the drag starts on the card itself; from the notifications only their list moves (listOver).
   if (dy > 0) return ccShowWay(gs);
   // Up from an expanded shade shuts it whole (one swipe): the fold is the control center's own area's swipe only.
-  return ccExpanded.value && atListEnd(gs) && !!gs.target.closest?.(CARD);
+  // Desktop mode keeps it whole: no fold there (the user, 2026-10-28).
+  return ccExpanded.value && !expandedByDefault() && atListEnd(gs) && !!gs.target.closest?.(CARD);
 }
 
 /**

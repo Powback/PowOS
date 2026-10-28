@@ -301,8 +301,9 @@ export function stretch(dy: number) {
 export function settle(commit: boolean) {
   const p = pull;
   if (!p) return;
-  if (!p.list && commit) return setExpanded(!ccExpanded.value);
-  const to = commit ? !p.was : p.was;
+  if (!p.list && commit) return setExpanded(expandedByDefault() || !ccExpanded.value);
+  // Desktop mode never folds (the user, 2026-10-28): whatever the pull did, it settles whole.
+  const to = expandedByDefault() || (commit ? !p.was : p.was);
   ease(p, p.list && to ? p.h : 0, to);
 }
 
