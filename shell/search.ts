@@ -36,7 +36,7 @@ export const settingDestinations: { screen: ScreenName; label: string; target?: 
   { screen: "store", label: "Widget store", keywords: "home widgets install" },
   { screen: "style", label: "Theme", target: "theme", keywords: "appearance style colors colours" },
   { screen: "style", label: "Wallpaper", target: "background", keywords: "background image" },
-  ...["mobile dock position", "desktop dock position", "recent apps in the drawer", "separate notifications & controls", "control center", "pet", "icon colours", "font"].map((label) => ({ screen: "style" as const, label, target: label, keywords: "settings appearance launcher home docking bottom left right" })),
+  ...["folded dock position", "unfolded dock position", "desktop dock position", "recent apps in the drawer", "separate notifications & controls", "control center", "pet", "icon colours", "font"].map((label) => ({ screen: "style" as const, label, target: label, keywords: "settings appearance launcher home docking bottom left right" })),
   { screen: "style", label: "Swipe up panels", target: "swipe up from the left: PowOS AI", keywords: "launcher gestures assistant" },
   { screen: "gestures", label: "Edge gestures", target: "edge gestures", keywords: "back swipe sensitivity handles" },
   { screen: "linux", label: "Linux", keywords: "install gpu driver" },

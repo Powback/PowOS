@@ -10,13 +10,14 @@ export async function launcherSearchCheck() {
   try {
     s.drawer.value = 1;
     s.query.value = 'dock position';
-    await wait(() => search.searchResults.value.filter(r => r.source === 'Settings').length === 2);
-    await wait(() => document.querySelectorAll('[data-search-result^="settings:style:"]').length === 2);
+    await wait(() => search.searchResults.value.filter(r => r.source === 'Settings').length === 3);
+    await wait(() => document.querySelectorAll('[data-search-result^="settings:style:"]').length === 3);
     document.querySelector('[data-search-result="settings:style:desktop dock position"]').click();
     await wait(() => document.activeElement?.dataset.setting === 'desktop dock position');
     const box = document.activeElement.getBoundingClientRect();
     if (box.top < 0 || box.bottom > innerHeight) failures.push('setting opened outside viewport');
     if (s.drawer.value !== 0 || screens.screens.value.at(-1) !== 'style') failures.push('setting did not open');
+    await checkDockTargets(search, screens);
     screens.closeScreens();
     let opened = false;
     off = search.registerSearchProvider({ id: 'search-test', async search(q) {
@@ -44,4 +45,19 @@ export async function launcherSearchCheck() {
 
 function hasCurrentResult(results) {
   return results.some(r => r.id === "newresult") && !results.some(r => r.id === "oldresult");
+}
+
+async function checkDockTargets(search, screens) {
+  for (const entry of search.settingDestinations.filter(s => s.label.includes('dock position'))) {
+    screens.openScreen(entry.screen, entry.target);
+    await waitForSetting(entry.target);
+  }
+}
+
+async function waitForSetting(target) {
+  for (let i = 0; i < 60; i++) {
+    if (document.activeElement?.dataset.setting === target) return;
+    await new Promise(r => setTimeout(r, 50));
+  }
+  throw Error(`missing setting target: ${target}`);
 }
