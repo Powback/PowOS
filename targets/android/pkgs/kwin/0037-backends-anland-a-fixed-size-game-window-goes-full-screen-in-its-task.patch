@@ -1,0 +1,83 @@
+From eaabd8c061272dfe633963d27014f92e3b2d0f09 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Wed, 28 Oct 2026 17:17:44 +0100
+Subject: [PATCH] backends/anland: a fixed-size game window goes full screen in
+ its task
+
+A Proton game whose window has a fixed size (Noita: 1280x720, WM_NORMAL_HINTS
+min == max, windowed) refused every resize to its task: 568.889x320 logical at
+the task's top left on the folded phone (task 1048x420 after rotation), a grey
+strip beside it, status bar and KWin's title bar over the task, "sized back"
+on every task change, never following rotation or fold.
+
+Such a window (WM_CLASS steam_app_<id>) is made full screen: the task goes
+immersive (setAppFullScreen) and 0032's fitFullScreen configures the window to
+the task's size on every rotate/fold/resize - the game renders at that
+resolution instead of being drawn small (or scaled).
+---
+ src/backends/anland/anland_window_task.cpp | 29 ++++++++++++++++++++++
+ src/backends/anland/anland_window_task.h   |  1 +
+ 2 files changed, 30 insertions(+)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 41b44e5..b3d24e9 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -610,6 +610,9 @@ void AnlandWindowTask::refit()
+         }
+         return;
+     }
++    if (fillsAsFullScreen()) {
++        return;
++    }
+     qCInfo(KWIN_ANLAND) << "window task" << m_id << "the window took" << has << "itself, the task is" << wanted << ": sized back";
+     fitWindow();
+     if (fitsWindow()) {
+@@ -617,6 +620,32 @@ void AnlandWindowTask::refit()
+     }
+ }
+ 
++bool AnlandWindowTask::fillsAsFullScreen()
++{
++    // A game's fixed-size window (Noita under Proton: 1280x720, WM_NORMAL_HINTS min == max) refuses every resize to
++    // its task: it stayed 1280x720 at the task's top left - small, a grey strip beside it, system bars and KWin's title
++    // bar over the task, re-configured ("sized back") on every task change, never following a rotation or a fold. Full
++    // screen it is the task's size (fitFullScreen: configured to the task on rotate/fold/resize, the game renders at
++    // that resolution, never scaled up; one that keeps its own is still fitted, centred) and the task immersive
++    // (setAppFullScreen via fullScreenChanged: no title bar, no system bars).
++    // HACK: "a game" = Steam's WM_CLASS steam_app_<id> (every Proton/Steam game window has it). The real fix is the
++    // launcher telling KWin which window is a game (powos game / the units' game entry -> a task flag), so a native
++    // fixed-size game outside Steam gets the same and a Steam game's fixed-size dialog could be told apart.
++    if (!m_window || m_window->isFullScreen() || !m_window->isFullScreenable()
++        || !m_window->resourceClass().startsWith(QLatin1String("steam_app_"))) {
++        return false;
++    }
++    const QSizeF min = m_window->minSize();
++    const QSizeF max = m_window->maxSize();
++    if (min.isEmpty() || !sameSize(min, max)) {
++        return false; // resizable: the task's size is configured as for any window
++    }
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "fixed-size game window" << m_window->caption() << min
++                        << "goes full screen: the task's size, at its resolution";
++    m_window->setFullScreen(true);
++    return true;
++}
++
+ bool AnlandWindowTask::setAppFullScreen(bool on)
+ {
+     if (on == m_appFullScreen || !m_window) {
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index a53424b..01c02cd 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -136,6 +136,7 @@ private:
+     QSize taskSize() const;
+     void fitWindow();
+     void fitFullScreen();
++    bool fillsAsFullScreen();
+     void noteResized();
+     QSizeF wantedClientSize() const;
+     void keepTaskSize();
+-- 
+2.50.1 (Apple Git-155)
+
