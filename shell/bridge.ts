@@ -104,6 +104,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       uninstall: (key) => call("apps.uninstall", key),
       running: () => call<Record<string, RunState>>("apps.running"),
       links: (pkg) => call<AppLinks>("apps.links", pkg),
+      close: (key) => call<boolean>("apps.close", key),
     },
     usage: { recent: (limit) => call<string[]>("usage.recent", limit) },
     home: {

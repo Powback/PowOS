@@ -383,6 +383,11 @@ export interface Bridge {
      * read from its manifest - nothing is fired. Android only; an older APK rejects it ("no such call").
      */
     links?(pkg: string): Promise<AppLinks>;
+    /**
+     * Closes a Steam game or Steam itself cleanly (the games tooling's stop, not a removed task); false: not one of
+     * those, or nothing to close - the caller removes its tasks. An older host rejects it ("no such call").
+     */
+    close?(key: string): Promise<boolean>;
   };
   usage: {
     /** Keys, last opened first. */

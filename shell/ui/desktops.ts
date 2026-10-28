@@ -239,6 +239,21 @@ export function appOf(w: AppWindow): string | undefined {
   return w.app ?? [...byKey.value.keys()].find((k) => k.startsWith(`a:${w.pkg}/`));
 }
 
+/** App [key]'s floating windows, top-most first (none folded: the host lists none). */
+export const windowsOf = (key: string) => windows.value.filter((w) => isOf(w, key));
+
+/**
+ * Ends app [key], as its window's close button does (WindowFrame.close: its tasks removed - every window of it, and
+ * folded its full-screen task). A Steam game or Steam itself closes cleanly instead (the host's "apps.close": the
+ * games tooling's `powos game <appid> stop`), never a removed task; a host without that call removes the tasks.
+ */
+export async function closeApp(key: string) {
+  if (key.startsWith("l:") && powos.apps.close && (await powos.apps.close(key).catch(() => false))) return;
+  const ids = new Set(windowsOf(key).map((w) => w.id));
+  for (const t of await powos.tasks.list().catch(() => [])) if (t.key === key && t.id >= 0) ids.add(t.id);
+  await Promise.all([...ids].map((id) => powos.tasks.remove(id).catch(() => false)));
+}
+
 /** Whether CSS point ([x], [y]) on home is inside a floating window showing now (its bounds are device px). */
 export function inWindow(x: number, y: number): boolean {
   const px = x * devicePixelRatio;

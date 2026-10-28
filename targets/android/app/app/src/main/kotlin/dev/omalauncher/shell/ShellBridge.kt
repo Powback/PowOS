@@ -305,6 +305,8 @@ class ShellBridge(
             // The floating app windows for the dock (system/WindowFrames.kt), and one brought back.
             "windows.list" -> windows()
             "apps.running" -> running()
+            // The app menu's close (shell/ui/desktops.ts closeApp): a Steam game or Steam itself closed cleanly.
+            "apps.close" -> closeApp(a.getString(0))
             "windows.restore" -> (dev.omalauncher.system.WindowFrames.current?.restore(a.getInt(0)) ?: false).also { if (it) emit("windows.raised", a.getInt(0)) }
             // The dock's tap on the focused window's app (ui/desktops.ts dockTap): it goes, as its minimise button does.
             "windows.minimise" -> dev.omalauncher.system.WindowFrames.current?.let { f -> main.post { f.minimise(a.getInt(0)) }; true } ?: false
@@ -863,6 +865,32 @@ class ShellBridge(
     private fun restoreLinux(key: String): Int? {
         val w = dev.omalauncher.system.WindowFrames.running.value.firstOrNull { linuxApp(it.id, it.pkg, it.label)?.let { a -> "l:${a.id}" } == key } ?: return null
         return w.id.takeIf { dev.omalauncher.system.WindowFrames.current?.restore(it) == true }
+    }
+
+    /**
+     * Closes PowOS app [key] cleanly when it is a Steam game (the games tooling's own close, lib/game.sh `powos game
+     * <appid> stop`: its launch chain TERMed, wineserver too) or Steam itself (woken if unified sleep froze it, then
+     * asked to -shutdown, as `stop --steam` does). False for anything else: the page removes its tasks instead, as a
+     * window's close button does. Runs in the PowOS session off the main thread; its result goes to logcat.
+     */
+    private fun closeApp(key: String): Boolean {
+        if (!RootedGuest.enabled) return false
+        val app = runtime.linuxApps.firstOrNull { "l:${it.id}" == key } ?: return false
+        val game = Regex("""rungameid/(\d+)""").find(app.exec)?.groupValues?.get(1)
+        val steam = app.exec.trim().substringBefore(' ').substringAfterLast('/') == "steam"
+        val command =
+            when {
+                game != null -> "timeout 20 powos game $game stop"
+                steam ->
+                    "timeout 2 dbus-send --session --print-reply=literal --reply-timeout=1500 --dest=dev.powos.Sleep /Gui " +
+                        "dev.powos.Sleep.Gui.Wake string:steam >/dev/null 2>&1; timeout -k 1 10 steam -shutdown </dev/null"
+                else -> return false
+            }
+        thread(name = "app-close", isDaemon = true) {
+            val code = runCatching { RootedGuest.runOwn(command) { Log.i("PowosShell", "close $key: $it") } }.getOrElse { -1 }
+            Log.i("PowosShell", "close $key: exit $code")
+        }
+        return true
     }
 
     private fun android(key: String) = runtime.androidApps.apps.firstOrNull { "a:${it.key}" == key }

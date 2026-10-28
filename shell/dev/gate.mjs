@@ -1913,6 +1913,69 @@ async function dockTapCheck() {
 }
 
 /**
+ * In the page, after dockTapCheck: a RUNNING app's long-press menu (apps.tsx AppMenu) starts with its window actions -
+ * close first (desktops.ts closeApp: its tasks removed; a Steam game/Steam through the host's clean "apps.close"),
+ * then minimise or restore its top-most window, then with 2+ windows each of them (a tap: restored to the front).
+ * Not running: none of them.
+ */
+async function appMenuCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const R = await window.__gw.mod("./ui/running.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const fails = [];
+  const did = [];
+  const was = { min: powos.floating.minimise, restore: powos.floating.restore, remove: powos.tasks.remove, list: powos.tasks.list, close: powos.apps.close, running: R.running.value };
+  powos.floating.minimise = async (id) => (did.push(`min ${id}`), true);
+  powos.floating.restore = async (id) => (did.push(`restore ${id}`), true);
+  powos.tasks.remove = async (id) => (did.push(`remove ${id}`), true);
+  let tasks = [];
+  powos.tasks.list = async () => tasks;
+  powos.apps.close = async (key) => (did.push(`close ${key}`), key === "l:gate.game");
+  const win = (id, extra = {}) => ({ id, pkg: "gate.menu", label: "Menu App", minimised: false, bounds: [0, 0, 400, 300], ...extra });
+  const items = () => [...document.querySelectorAll(".menu .menu-item")].map((b) => b.textContent);
+  const at = new DOMRect(100, 200, 60, 60);
+  const check = async (key, { windows, run, want, what, tap, wantDid }) => {
+    S.menu.value = null;
+    S.windows.value = windows;
+    R.running.value = run ? { [key]: "running" } : {};
+    await window.__gw.frames(1);
+    S.menu.value = { app: { key, label: "Menu App", icon: "", kind: key.startsWith("l:") ? "linux" : "android" }, at };
+    await window.__gw.until(() => items().length > 0);
+    const got = items().slice(0, want.length);
+    if (got.join("|") !== want.join("|")) fails.push(`${what}: the menu starts [${items().join(", ")}], not [${want.join(", ")}]`);
+    if (!tap) return;
+    did.length = 0;
+    const b = [...document.querySelectorAll(".menu .menu-item")].find((x) => x.textContent === tap);
+    if (!b) return void fails.push(`${what}: no "${tap}" in the menu`);
+    b.click();
+    await window.__gw.until(() => did.join() === wantDid);
+    if (did.join() !== wantDid) fails.push(`${what}: "${tap}" did [${did.join()}], not [${wantDid}]`);
+    if (S.menu.value) fails.push(`${what}: the menu stayed open after "${tap}"`);
+  };
+  try {
+    const A = "a:gate.menu/.Main";
+    await check(A, { windows: [], run: false, want: ["pin to dock"], what: "not running" });
+    tasks = [{ id: 301, key: A }, { id: 302, key: "a:other/.Main" }];
+    await check(A, { windows: [], run: true, want: ["close", "pin to dock"], what: "running full screen (folded)", tap: "close", wantDid: "remove 301" });
+    tasks = [];
+    await check(A, { windows: [win(101)], run: true, want: ["close", "minimise", "pin to dock"], what: "one window showing", tap: "minimise", wantDid: "min 101" });
+    await check(A, { windows: [win(101)], run: true, want: ["close"], what: "one window, close", tap: "close", wantDid: "remove 101" });
+    await check(A, { windows: [win(101, { minimised: true })], run: true, want: ["close", "restore", "pin to dock"], what: "one window minimised", tap: "restore", wantDid: "restore 101" });
+    await check(A, { windows: [win(101), win(102, { label: "Other" }), win(103, { pkg: "gate.else" })], run: true, want: ["close", "minimise", "Menu App", "Other", "pin to dock"], what: "two windows", tap: "Other", wantDid: "restore 102" });
+    await check("l:gate.game", { windows: [win(104, { pkg: "com.powos.app", app: "l:gate.game" })], run: true, want: ["close", "minimise"], what: "a Steam game's window", tap: "close", wantDid: "close l:gate.game" });
+    await check("l:gate.tool", { windows: [win(105, { pkg: "com.powos.app", app: "l:gate.tool" })], run: true, want: ["close"], what: "a Linux app's window", tap: "close", wantDid: "close l:gate.tool,remove 105" });
+  } finally {
+    S.menu.value = null;
+    S.windows.value = [];
+    R.running.value = was.running;
+    Object.assign(powos.floating, { minimise: was.min, restore: was.restore });
+    Object.assign(powos.tasks, { remove: was.remove, list: was.list });
+    powos.apps.close = was.close;
+  }
+  return fails;
+}
+
+/**
  * In the page: a touch inside a floating window is the app's (ui/gesture.ts startGesture, desktops.ts inWindow) - a
  * swipe up there never opens the launcher, down never the shade; the same swipe outside every window still does.
  */
@@ -2360,6 +2423,7 @@ try {
         if (!s.problems.length) s.problems.push(...(await r.page.evaluate(desktopsCheck)));
         if (!s.problems.length) s.problems.push(...(await r.page.evaluate(desktopsEdge).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
         if (!s.problems.length) s.problems.push(...(await r.page.evaluate(dockTapCheck).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
+        if (!s.problems.length) s.problems.push(...(await r.page.evaluate(appMenuCheck).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
         if (!s.problems.length) s.problems.push(...(await r.page.evaluate(windowTouchCheck).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
         if (s.problems.length) return s;
         await r.page.reload().catch(() => {});
