@@ -2394,7 +2394,11 @@ html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html.glass-
 html:root .page .home-tile > .tile { --glass-blur-native: var(--widget-blur-native); }
 /* Home's search bar (the foot's pill, bar.tsx) is the widgets' glass too: their frost, edge and compositor blur (2026-10-28
    "make the search bar have the same tint and blur as the widgets"). */
-html:root .home > .bar .bar-pill { --glass-blur-native: var(--widget-blur-native); }
+html:root .home > .bar .bar-pill {
+  --glass-blur-native: var(--widget-blur-native);
+  /* No sheen on the thin pill: the widgets' light-from-above reads as a 3D bevel at this height (the user, 17:56). */
+  background: linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+}
 /* A merged group's seam pieces (grid.tsx seams: the bridge along a shared span, the inner corner's fillet) are the
    widgets' own material - the same frost, veil and compositor blur - not the plain glass fill they had (a flat grey band
    between two frosted widgets, 2026-10-28 "the thing connecting widgets looks off"). No sheen: it is the top of a
