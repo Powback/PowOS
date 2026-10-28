@@ -41,8 +41,56 @@ const doing = (a: Agent) =>
     : a.state === "blocked"
       ? a.step || "blocked"
       : a.state === "gone"
-        ? "done"
+        ? a.title || "done"
         : a.title || a.step || (a.state === "idle" ? "idle" : a.cwd);
+
+/** "4m", "1h 5m": how long [ms] milliseconds took. */
+const took = (ms: number) => {
+  const m = Math.round(ms / 60_000);
+  if (m < 1) return `${Math.max(1, Math.round(ms / 1000))}s`;
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}`;
+};
+
+/** A done subagent older than this is not listed (the spool keeps it an hour anyway). */
+const DONE_KEEP_MS = 3 * 3_600_000;
+
+/** What a tree row says for a finished subagent: how long it took and the sha it landed, if its hand-back named one. */
+const result = (a: Agent) => `${took(a.last - a.started)}${a.sha ? ` · ${a.sha}` : ""}`;
+
+/** Plain sentences for the non-tool events, by kind. */
+const KIND_SENTENCE: Record<string, (h: string, name: string) => string> = {
+  prompt: (h) => (h ? `asked: ${h}` : "was asked something"),
+  stop: () => "finished its turn",
+  sub_start: (h, n) => `started helper: ${h || n}`,
+  sub_stop: (h, n) => `helper done: ${h || n}`,
+  fail: (h) => `failed: ${h}`,
+  compact: () => "compacted its context",
+  notify: (h) => h || "notified you",
+};
+/** And for tools, by name. */
+const TOOL_SENTENCE: Record<string, (h: string) => string> = {
+  Read: (h) => `read ${h || "a file"}`,
+  NotebookRead: (h) => `read ${h || "a file"}`,
+  Edit: (h) => `edited ${h || "a file"}`,
+  MultiEdit: (h) => `edited ${h || "a file"}`,
+  NotebookEdit: (h) => `edited ${h || "a file"}`,
+  Write: (h) => `wrote ${h || "a file"}`,
+  Grep: () => "searched the code",
+  Glob: () => "searched the code",
+  Agent: (h) => `started helper: ${h}`,
+  Task: (h) => `started helper: ${h}`,
+  Bash: (h) =>
+    /gate\.sh/.test(h) ? "ran the shell gate" : /land\.sh|push/.test(h) ? "landed the change" : h ? `ran: ${h}` : "ran a command",
+};
+
+/** A tool event as a short plain sentence for the timeline ("edited gesture.ts", "ran a command"). */
+function sentence(e: AgentEvent) {
+  const h = e.hint && e.hint !== e.name ? e.hint : "";
+  if (e.kind !== "tool") return (KIND_SENTENCE[e.kind] ?? (() => e.kind))(h, e.name);
+  return (TOOL_SENTENCE[e.name] ?? ((x: string) => (x ? `${e.name}: ${x}` : e.name)))(h);
+}
+
+const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
 
 /** A button on the widget: its tap is its own (not the tile's, not the line's). */
 const tapOnly = (run: () => void) => ({
@@ -275,6 +323,15 @@ function tree(ids: string[]) {
     kids.set(p, [...(kids.get(p) ?? []), a]);
   }
   const out: { a: Agent; depth: number }[] = [];
+  // Finished subagents leave the tree for the folded "done" group, newest first; old ones are dropped.
+  const done = all
+    .filter((a) => a.state === "gone" && isSub(a) && Date.now() - a.last < DONE_KEEP_MS)
+    .sort((x, y) => y.last - x.last);
+  for (const a of done) {
+    const l = kids.get(parentOf(a));
+    if (l) l.splice(l.indexOf(a), 1);
+  }
+  for (const [k, l] of kids) kids.set(k, l.filter((a) => !(a.state === "gone" && isSub(a))));
   const seen = new Set<string>();
   const walk = (p: string | null, depth: number) => {
     for (const a of (kids.get(p) ?? []).sort((x, y) => x.started - y.started)) {
@@ -285,20 +342,18 @@ function tree(ids: string[]) {
     }
   };
   walk(null, 0);
-  return out;
+  return { nodes: out, done };
 }
 
 /** Tool calls as §1.3's "Read×6 · Bash ✗ (2s)": the coalesced rows, latest last. */
 function Tool({ e }: { e: AgentEvent }) {
-  const label = e.kind === "tool" ? e.name : e.kind === "prompt" ? "asked" : e.kind.replace("_", " ");
   return (
-    <span class={`ag-tool ${e.ok === false ? "fail" : ""}`} title={e.hint}>
-      {label}
-      {e.n > 1 && `×${e.n}`}
-      {e.n === 1 && e.hint && e.hint !== e.name && <span class="muted"> {e.hint}</span>}
+    <div class={`ag-tool ${e.ok === false ? "fail" : ""}`} title={e.hint}>
+      <span class="muted">{clock(e.ts)}</span> {sentence(e)}
+      {e.n > 1 && ` ×${e.n}`}
       {e.ok === false && " ✗"}
       {e.ms >= 2000 && <span class="muted"> ({Math.round(e.ms / 1000)}s)</span>}
-    </span>
+    </div>
   );
 }
 
@@ -311,7 +366,7 @@ function Detail({ id }: { id: string }) {
   return (
     <section class="ag-detail tile">
       <div class="ag-detail-head">
-        <span class={`ag-mark ${a.state}`}>{mark(a)}</span> {a.role}
+        <span class={`ag-mark ${a.state}`}>{mark(a)}</span> {isSub(a) && a.title ? a.title : a.role}
         <span class="muted">
           {" "}
           · {a.host} · {a.cwd} · {a.state.replace("_", " ")} {since(a.last)}
@@ -323,10 +378,17 @@ function Detail({ id }: { id: string }) {
           {a.step}
         </div>
       )}
-      {a.title && (
+      {a.title && !isSub(a) && (
         <div>
           <span class="muted">Task </span>
           {a.title}
+        </div>
+      )}
+      {isSub(a) && (
+        <div class="muted">
+          {a.role}
+          {a.work && ` · task ${a.work}`}
+          {a.state === "gone" && ` · took ${result(a)}`}
         </div>
       )}
       {list.length > 0 && (
@@ -339,7 +401,7 @@ function Detail({ id }: { id: string }) {
         </div>
       )}
       {events.length > 0 && (
-        <div class="ag-tools">
+        <div class="ag-tools ag-timeline">
           {events.map((e) => (
             <Tool key={e.id} e={e} />
           ))}
@@ -446,8 +508,6 @@ function Asks() {
   );
 }
 
-const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
-
 /** The comms feed: a line each (its body's start); a tap opens the whole body there, every line of it, and closes it. */
 function Comms() {
   const [opened, setOpened] = useState<string | null>(null);
@@ -482,9 +542,65 @@ const own = {
   onPointerDown: (e: PointerEvent) => e.stopPropagation(),
 };
 
+function Node({ a, depth, picked }: { a: Agent; depth: number; picked: boolean }) {
+  return (
+    <button
+      type="button"
+      class={`ag-node ${a.state} ${picked ? "picked" : ""}`}
+      style={{ paddingLeft: `${8 + depth * 16}px` }}
+      onClick={() => (agentsView.value = { id: a.id })}
+    >
+      <span class="ag-mark">{mark(a)}</span>
+      {isSub(a) ? (
+        <>
+          <span class="ag-what">{a.title || a.role}</span>
+          {a.state === "working" && a.step && <span class="muted ag-step">{a.step}</span>}
+        </>
+      ) : (
+        <>
+          <span class="ag-who">
+            {a.role}
+            <span class="muted"> ({a.host})</span>
+          </span>
+          <span class="ag-what">{doing(a)}</span>
+        </>
+      )}
+      <span class="ag-ago muted">{since(a.last)}</span>
+    </button>
+  );
+}
+
+/** Finished subagents, folded: "done · N", opened by a tap; each says what it was, how long it took and its sha. */
+function DoneGroup({ done, id }: { done: Agent[]; id: string | null }) {
+  const [open, setOpen] = useState(false);
+  if (!done.length) return null;
+  return (
+    <>
+      <button type="button" class="ag-node ag-donehead muted" onClick={() => setOpen(!open)}>
+        {open ? "▾" : "▸"} done · {done.length}
+      </button>
+      {open &&
+        done.map((a) => (
+          <button
+            type="button"
+            key={a.id}
+            class={`ag-node gone ${a.id === id ? "picked" : ""}`}
+            style={{ paddingLeft: "24px" }}
+            onClick={() => (agentsView.value = { id: a.id })}
+          >
+            <span class="ag-mark">✓</span>
+            <span class="ag-what">{a.title || a.role}</span>
+            <span class="muted ag-step">{result(a)}</span>
+            <span class="ag-ago muted">{since(a.last)}</span>
+          </button>
+        ))}
+    </>
+  );
+}
+
 function Screen({ picked }: { picked: string | null }) {
   useAgents();
-  const nodes = tree(agentIds.value);
+  const { nodes, done } = tree(agentIds.value);
   const id = picked && agent(picked) ? picked : (sessions.value[0] ?? null);
   const scroller = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => scroller.current?.scrollTo(0, 0), []);
@@ -501,23 +617,9 @@ function Screen({ picked }: { picked: string | null }) {
         <section class="ag-tree tile">
           {!nodes.length && <div class="muted">No agent reports yet. Agents started with the hooks show here.</div>}
           {nodes.map(({ a, depth }) => (
-            <button
-              type="button"
-              key={a.id}
-              class={`ag-node ${a.state} ${a.id === id ? "picked" : ""}`}
-              style={{ paddingLeft: `${8 + depth * 16}px` }}
-              onClick={() => (agentsView.value = { id: a.id })}
-            >
-              <span class="ag-mark">{mark(a)}</span>
-              <span class="ag-who">
-                {a.role}
-                {!isSub(a) && <span class="muted"> ({a.host})</span>}
-              </span>
-              <span class="ag-what">{doing(a)}</span>
-              {a.state === "working" && a.step && isSub(a) && <span class="muted ag-step">{a.step}</span>}
-              <span class="ag-ago muted">{since(a.last)}</span>
-            </button>
+            <Node key={a.id} a={a} depth={depth} picked={a.id === id} />
           ))}
+          <DoneGroup done={done} id={id} />
         </section>
         <Asks />
         {id && <Detail id={id} />}
@@ -526,7 +628,6 @@ function Screen({ picked }: { picked: string | null }) {
     </div>
   );
 }
-
 /** The Agents screen over home while it's open; opened by the agents' notification too. */
 export function AgentsScreen() {
   useEffect(() => {

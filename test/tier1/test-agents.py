@@ -104,6 +104,24 @@ class AgentsSpoolTest(unittest.TestCase):
         rows = {r["id"]: r for r in s["agents"]}
         self.assertEqual((rows["mac:S1/A1"]["state"], rows["mac:S1"]["subs"], rows["mac:S1"]["state"]), ("gone", 0, "idle"))
 
+    def test_subagent_label_step_and_sha(self):
+        self.hook(hook_event_name="UserPromptSubmit", prompt="go")
+        self.hook(hook_event_name="PreToolUse", tool_name="Agent", tool_use_id="g1",
+                  tool_input={"subagent_type": "general-purpose", "prompt": "Board task `agents-view-rows-task`\nsecret body"})
+        self.hook(hook_event_name="PreToolUse", tool_name="Agent", tool_use_id="g2",
+                  tool_input={"subagent_type": "Explore", "description": "find users", "prompt": "x"})
+        self.hook(hook_event_name="SubagentStart", agent_id="B1", agent_type="Explore")
+        self.hook(hook_event_name="SubagentStart", agent_id="B2", agent_type="general-purpose")
+        self.hook(hook_event_name="PreToolUse", agent_id="B2", agent_type="general-purpose", tool_name="Bash", tool_use_id="q",
+                  tool_input={"command": "cd ~/pw/x && shell/dev/gate.sh"})
+        rows = {r["id"]: r for r in self.fold()["agents"]}
+        self.assertEqual(rows["mac:S1/B1"]["title"], "find users", "matched by type, not queue order")
+        self.assertEqual(rows["mac:S1/B2"]["title"], "Board task `agents-view-rows-task`", "prompt's first line is the fallback")
+        self.assertEqual((rows["mac:S1/B2"]["work"], rows["mac:S1/B2"]["step"]), ("agents-view-rows-task", "running the shell gate"))
+        self.hook(hook_event_name="SubagentStop", agent_id="B2", agent_type="general-purpose", last_assistant_message="Landed sha abc1234 ok")
+        rows = {r["id"]: r for r in self.fold()["agents"]}
+        self.assertEqual((rows["mac:S1/B2"]["state"], rows["mac:S1/B2"]["sha"]), ("gone", "abc1234"))
+
     def test_secrets_and_whitelist(self):
         self.hook(hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="b", tool_input={"command": "GH_TOKEN=ghp_abcdefgh12345678 git push | tee log"})
         self.hook(hook_event_name="PostToolUseFailure", tool_name="Bash", tool_use_id="b", tool_input={"command": "GH_TOKEN=ghp_abcdefgh12345678 git push | tee log"}, error="x")

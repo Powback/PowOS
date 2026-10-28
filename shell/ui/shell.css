@@ -2220,6 +2220,8 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .ag-task.done { color: var(--color-muted); }
 .ag-task.in_progress { color: var(--accent-text); }
 .ag-tool.fail { color: var(--color-red); }
+.ag-timeline { flex-direction: column; gap: 2px; }
+.ag-donehead { cursor: pointer; }
 .ag-report { overflow-wrap: anywhere; }
 .ag-comms { padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--text-small); line-height: 1.4; }
 .ag-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

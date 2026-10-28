@@ -1372,9 +1372,10 @@ function mockAgents(
     row("mac:c1", "coder", "working", "hosted widgets", "Edit ShellBridge.kt", 12_000, "@manager", 2),
     row("mac:c1/a1", "Explore", "working", "find FileObserver users", "Grep", 4_000, "mac:c1"),
     row("mac:c1/a2", "general-purpose", "working", "survey SpaceTimeAI", "Read console-views.ts", 9_000, "mac:c1"),
+    { ...row("mac:c1/a3", "general-purpose", "gone", "fix hook labels", "", 600_000, "mac:c1"), sha: "abc1234", started: Date.now() - 1_200_000 },
     row("phone:d1", "devops", "idle", "prune old images", "", 3_600_000, "@manager"),
   ];
-  const steps = ["Edit grid.tsx", "Bash npx tsc --noEmit", "Read types.ts", "Edit ShellBridge.kt"];
+  const steps = ["Edit grid.tsx", "compiling", "Read types.ts", "Edit ShellBridge.kt"];
   let timer = 0;
   let n = 0;
   const ring = (agent: string): AgentEvent[] =>
