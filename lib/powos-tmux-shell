@@ -115,11 +115,9 @@ _powos_tmux_rows() {
         list_w=$POWOS_TMUX_LIST_W
     else
         cols=$( { { stty size </dev/tty || stty size; } 2>/dev/null || echo "24 80"; } | awk '{ print $2 }')
-        # fzf puts the preview beside the list above 80 columns and above it
-        # below, so the list gets about 42% of a wide terminal and all of a
-        # narrow one.
-        if [ "${cols:-80}" -ge 80 ] 2>/dev/null; then list_w=$(( cols * 42 / 100 ))
-        else list_w=${cols:-80}; fi
+        # One column at every width: the preview is hidden until asked for (Tab) and then opens
+        # below the list, so the list always gets the whole terminal - folded or unfolded.
+        list_w=${cols:-80}
         export POWOS_TMUX_LIST_W=$list_w
     fi
     # Reserve the "  (attached)" tag even on rows that lack it, so the columns
@@ -189,11 +187,11 @@ _powos_tmux_rows() {
                   1) s="claude · finished" ;;
                   *) s="shells" ;;
               esac
-              printf '%s\t%s── %s ──%s\n' "$name" $'\033[7m' "$s" $'\033[0m'
+              printf '%s\t%s▌ %s%s\n' "$name" $'\033[1;36m' "$s" $'\033[0m'
               prevcat="$rank"; prev=""
           fi
           if [ "$grp" != "$prev" ]; then
-              printf '%s\t%s%s%s\n' "$name" $'\033[1m' "$grp" $'\033[0m'
+              printf '%s\t  %s%s%s\n' "$name" $'\033[2m' "$grp" $'\033[0m'
               prev="$grp"
           fi
           if [ "$att" = "0" ]; then _row "$name" '○' ''
@@ -269,12 +267,14 @@ if command -v fzf >/dev/null 2>&1; then
         # is resized - the launcher's terminal tile opening full size left the old picker's lines above the new one.
         _powos_tmux_rows | fzf --ansi --reverse \
                 --delimiter=$'\t' --with-nth=2 \
-                --prompt='resume ▶ ' \
-                --header="tmux on ${HOSTNAME%%.*}   ·   Enter/→ = attach   ·   Del = kill   ·   Esc = shell" \
+                --prompt='resume ▶ ' --pointer='▶' --no-scrollbar --info=inline-right \
+                --header=$'tmux on '"${HOSTNAME%%.*}"$'\n\033[2mEnter attach · Tab peek · Del kill · Esc shell\033[0m' \
+                --header-first \
+                --bind='tab:toggle-preview' \
                 --bind='right:accept' \
                 --bind='del:execute-silent(tmux kill-session -t {1} 2>/dev/null)+reload(bash -c _powos_tmux_rows)' \
                 --preview="$preview" \
-                --preview-window='right,58%,border-left,wrap'
+                --preview-window='down,60%,border-top,wrap,hidden'
     )
     name=${choice%%$'\t'*}
 else
