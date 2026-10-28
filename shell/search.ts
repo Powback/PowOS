@@ -62,16 +62,17 @@ let nativeSettings: { id: string; label: string; keywords: string; breadcrumb?: 
 let nativeSettingsFetched = 0;
 const nativeSettingsRevision = signal(0);
 powos.on("qs.destinations", () => { nativeSettingsFetched = 0; nativeSettingsRevision.value++; });
-registerSearchProvider({ id: "android-settings", async search(text) {
+registerSearchProvider({ id: "android-settings", async search() {
   if (Date.now() - nativeSettingsFetched > 60_000) {
     nativeSettings = await powos.qs.destinations?.() ?? [];
     nativeSettingsFetched = Date.now();
   }
-  const entries = nativeSettings;
+  // No catch-all search action: unmatched text belongs to the launcher chat flow.
+  const entries = nativeSettings.filter((entry) => entry.id !== "settings-search");
   return entries.map((entry) => ({
-    id: `android-settings:${entry.id}`, label: entry.id === "settings-search" ? `Search Android settings for “${text}”` : entry.label, source: entry.breadcrumb ? `Android settings · ${entry.breadcrumb.replaceAll(";", " › ")}` : "Android settings",
+    id: `android-settings:${entry.id}`, label: entry.label, source: entry.breadcrumb ? `Android settings · ${entry.breadcrumb.replaceAll(";", " › ")}` : "Android settings",
     keywords: `${entry.keywords} settings preferences android`,
-    open: () => { void powos.qs.open(entry.id === "settings-search" ? `search:${text}` : entry.id); },
+    open: () => { void powos.qs.open(entry.id); },
   }));
 } });
 
@@ -107,7 +108,7 @@ export const searchResults = computed(() => {
   if (!q) return [];
   const entries: SearchResult[] = apps.value.map((a) => ({ id: `app:${a.key}`, label: a.label, source: "Apps", open: () => { void launch(a.key); } }));
   // Apps and settings pages come first; App API capabilities (hundreds of "open <url>" actions) are a capped tail so they cannot bury them.
-  const tier = (r: SearchResult) => r.id === "android-settings:settings-search" ? 2 : r.id.startsWith("app-api:") ? 1 : 0;
+  const tier = (r: SearchResult) => r.id.startsWith("app-api:") ? 1 : 0;
   const ranked = [...entries, ...extra.value].map((r) => ({ r, rank: searchRank(q, r.label, r.keywords) }))
     .filter(({ rank }) => rank >= 0).sort((a, b) => tier(a.r) - tier(b.r) || a.rank - b.rank || a.r.label.localeCompare(b.r.label)).map(({ r }) => r);
   let capi = 0;

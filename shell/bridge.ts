@@ -760,6 +760,7 @@ function mock(): Bridge {
           return changed();
         },
         destinations: async () => [
+          { id: "settings-search", label: "Search Android settings", keywords: "" }, // Old hosts must not steal unmatched chat text.
           { id: "indexed:settings:display:refresh_rate", label: "Screen refresh rate", keywords: "display brightness motion", breadcrumb: "Display & brightness" },
           { id: "settings:VPN_SETTINGS", label: "VPN", keywords: "virtual private network tunnel" },
           { id: "settings:WIFI_SETTINGS", label: "Wi-Fi", keywords: "wifi wireless internet" },
