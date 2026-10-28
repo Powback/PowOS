@@ -32,6 +32,7 @@ Mac/zsh gotchas
 - Test output: `... 2>&1 | tail -15`; re-run only the failing test file.
 
 Friction (log every one, then list in your hand-back)
+Compile Android/Kotlin/Java with `tools/phone/compile-check.sh` (builds in docker from any ~/pw worktree, includes the complexity lint) - NEVER `targets/android/build-app.sh` (that is the ship pipeline's APK build and refuses checkouts outside ~/Projects). Leave changes uncommitted for land.sh (it commits them).
 Phone evidence files (screenshots under /home/powos/...) are pulled read-only with `tools/phone/pull-root.sh <path-under-/data/powos/root> <dest>`; plain `adb devices` is empty on the Mac - always use tools/phone/adb.sh (it connects over the VPN).
 (run every `bin/powos …` from YOUR worktree, `cd ~/pw/<name> && bin/powos …` — ~/Projects/PowOS is a stale master whose bin/powos has no friction/agents commands)
 `bin/powos friction add --area <area> --kind <refused|broken-tool|flaky-check|unclear-rule|slow|other> "text" --repro "cmd"`
