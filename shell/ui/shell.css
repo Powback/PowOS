@@ -93,7 +93,7 @@
  * whole by 80% of the way, the rest is motion only; closing the same in reverse) - each piece its own compositor
  * layer, so a frame of the drag is transforms and opacities, nothing else. On the phone (home.tsx, pull.tsx) the frost
  * (.stage > .launcher-frame) reaches the screen's foot, under the search pill and the navigation bar, while the drawer
- * (.launcher-clip > .launcher) is cut off at the pill's top - no app row ever under the pill, moving
+ * (.launcher-clip > .launcher) is cut off at the pill's top with a short fade - no app row ever under the pill, moving
  * or at rest. The desktop (desktop.tsx) keeps the frost inside the launcher.
  */
 .stage, .launcher { --foot: max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)); }
@@ -117,12 +117,13 @@
 .launcher-frame { position: absolute; inset: 0; }
 .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--strip-height) + var(--foot))); pointer-events: none; }
 /* The drawer's window: down to the search pill's top once the dock has given way (the pill's 44 px sit 2 px above the
-   bar's 48), a plain clip (no fade, the user 2026-10-28) - what rides past it as the drawer moves goes under nothing. */
+   bar's 48), its last 12 px fading out - what rides past it as the drawer moves goes under nothing. */
 .launcher-clip {
   position: absolute;
   inset: 0 0 calc(4px - var(--strip-height));
   overflow: hidden;
   pointer-events: none;
+  mask-image: linear-gradient(black calc(100% - 12px), transparent);
 }
 .launcher-clip > .launcher { bottom: 0; }
 /* Where the search bar slides down as the dock gives way (.home > .bar), the window's edge rides with the pill - it is
@@ -133,7 +134,7 @@
 :is(.home.pill-below, .pull-screen, .home:not(:has(> .bar))) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
 /* No search bar at the foot (the search widget): down over the dock's place to the screen's foot, no pill to clear.
    Over an app (pull.tsx): the pill right under the stage, the dock (on the app grid) under the pill. */
-.home:not(:has(> .bar)) .launcher-clip { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
+.home:not(:has(> .bar)) .launcher-clip { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); mask-image: none; }
 .home:not(:has(> .bar)) .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
 .pull-screen .launcher-clip { inset: 0 0 4px; }
 .pull-screen .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
@@ -248,8 +249,29 @@
   96% { --dock-fade-r: 24px; }
   100% { --dock-fade-l: 24px; --dock-fade-r: 0px; }
 }
-/* The drawer's apps and the shade's list end in a plain clip, no edge fade (the user, 2026-10-28: "i dont need that
-   cutoff effect"). Only the recents switcher keeps a fade. */
+/*
+ * Content scrolling under chrome: the drawer's apps and the shade's list fade out at an edge where there's more to
+ * scroll, never cut (the user, 2026-10-24): one scroll-driven mask on the scroll container, the dock's way, both ends
+ * --scroll-fade. Nothing to scroll, or no scroll timelines: no fade, as before.
+ * PowOS AI's panes and chat do NOT fade (the user, 2026-10-28): they end in a crisp edge. No scroll-driven shadow or
+ * clip radius on them: that animated paint glitched the launcher's previews as it opened.
+ */
+@property --scroll-fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --scroll-fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
+:is(.drawer-list, .notif-list) {
+  --scroll-fade: 24px;
+  -webkit-mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
+  mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
+}
+@supports (animation-timeline: scroll()) {
+  :is(.drawer-list, .notif-list) {
+    animation: scroll-fade-t linear both, scroll-fade-b linear both;
+    animation-timeline: scroll(self y), scroll(self y);
+    animation-range: 0 var(--scroll-fade), calc(100% - var(--scroll-fade)) 100%;
+  }
+}
+@keyframes scroll-fade-t { from { --scroll-fade-t: 0px; } to { --scroll-fade-t: var(--scroll-fade); } }
+@keyframes scroll-fade-b { from { --scroll-fade-b: var(--scroll-fade); } to { --scroll-fade-b: 0px; } }
 .dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
 .dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
 .dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
@@ -1466,7 +1488,7 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
  * (no fade, no gap under it), so the pill's foot is --ai-foot's as on the AI page. Dragged, the bar (over the launcher)
  * covers the pill riding into its place; open, the bar hides and the pill is there already.
  */
-.home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * (48px + var(--strip-height))); }
+.home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * (48px + var(--strip-height))); mask-image: none; }
 /* Wide home's one-row foot (.home.wide): the stage already ends at the row's top. */
 .home.wide:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * var(--strip-height)); }
 .pull-screen:has(.ai-panel.wide) > .stage > .launcher-clip { bottom: -48px; }
