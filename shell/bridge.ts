@@ -251,11 +251,11 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     },
     windows: {
       list: () => call<DesktopWindow[]>("windows.list"),
-      activate: (id) => call<boolean>("windows.activate", id),
-      minimize: (id) => call<boolean>("windows.minimize", id),
-      close: (id) => call<boolean>("windows.close", id),
+      activate: (id) => call<boolean>("windows.activate", id), // host: panel (the Qt desktop host serves it; never the Android app)
+      minimize: (id) => call<boolean>("windows.minimize", id), // host: panel (the Qt desktop host serves it; never the Android app)
+      close: (id) => call<boolean>("windows.close", id), // host: panel (the Qt desktop host serves it; never the Android app)
     },
-    panel: { height: (px) => call("panel.height", px) },
+    panel: { height: (px) => call("panel.height", px) }, // host: panel (the Qt desktop host serves it; never the Android app)
     // The phone's floating windows; on the desktop host "windows.list" is the taskbar's (DesktopWindow[]).
     floating: host.name === "powos" ? undefined : {
       list: () => call<AppWindow[]>("windows.list"),

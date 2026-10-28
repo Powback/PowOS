@@ -22,7 +22,7 @@ while IFS= read -r line; do
   [ -n "$m" ] || continue
   printf '%s\n' "$have" | grep -qx "$m" && continue
   printf '%s\n' "$have" | grep -qx "${m%%.*}\\." && continue
-  case "$line" in *"// detect"*) continue ;; esac
+  case "$line" in *"// detect"*|*"// host: panel"*) continue ;; esac  # host: panel = only the Qt desktop host (powos-shell) serves it
   bad="$bad  $m"$'\n'
 done < <(git show "$tip:shell/bridge.ts" 2>/dev/null)
 if [ -n "$bad" ]; then
