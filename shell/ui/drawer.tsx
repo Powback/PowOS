@@ -272,6 +272,27 @@ function Pages() {
 /** How long a closing drawer keeps what it showed: the close's fade (shell.css [data-p] and gesture.ts SETTLE_MS, 180 ms) and a frame. */
 const CLOSE_HOLD_MS = 200;
 
+/** [live] while open; once it closes, what it last showed while open, for CLOSE_HOLD_MS - then [live] again. */
+function useHeldWhileClosing<T>(open: boolean, live: T): T {
+  const last = useRef(live);
+  const holding = useRef(false);
+  const wasOpen = useRef(open);
+  const [, tick] = useState(0);
+  holding.current = !open && (holding.current || wasOpen.current);
+  wasOpen.current = open;
+  if (open) last.current = live;
+  const held = holding.current;
+  useEffect(() => {
+    if (!held) return;
+    const t = setTimeout(() => {
+      holding.current = false;
+      tick((n) => n + 1);
+    }, CLOSE_HOLD_MS);
+    return () => clearTimeout(t);
+  }, [held]);
+  return held ? last.current : live;
+}
+
 export function Drawer() {
   const searching = query.value.trim() !== "";
   // No app by that name: it's a question for PowOS AI. In a chat, typing is the next message: the chat stays (the user,
@@ -282,27 +303,7 @@ export function Drawer() {
   // under its fade, and the cards it showed vanished instead of fading out as they faded in (the user, 2026-10-28).
   // What was on screen stays for the close's fade (--p, 180 ms), then the drawer goes back to its pages.
   const live = { searching, asking: liveAsking, results: searchResults.value, pending: searchPending.value };
-  const last = useRef(live);
-  const holdUntil = useRef(0);
-  const wasOpen = useRef(open);
-  const [, tick] = useState(0);
-  if (wasOpen.current && !open) holdUntil.current = performance.now() + CLOSE_HOLD_MS;
-  wasOpen.current = open;
-  if (open) {
-    holdUntil.current = 0;
-    last.current = live;
-  }
-  const held = !open && holdUntil.current > 0;
-  useEffect(() => {
-    if (!held) return;
-    const t = setTimeout(() => {
-      holdUntil.current = 0;
-      tick((n) => n + 1);
-    }, CLOSE_HOLD_MS);
-    return () => clearTimeout(t);
-  }, [held]);
-  const { asking, results, pending } = held ? last.current : live;
-  const shownSearch = held ? last.current.searching : searching;
+  const { searching: shownSearch, asking, results, pending } = useHeldWhileClosing(open, live);
   return (
     // The launcher panel's lower part (home.tsx): it comes in (shell.css, by --p) as the recent bar grows into the panel.
     <div class={`drawer ${open ? "shown" : ""}`} aria-hidden={!open}>
