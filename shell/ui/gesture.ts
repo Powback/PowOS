@@ -490,7 +490,9 @@ function claimVertical(gs: Gesture, dy: number): Gesture["mode"] {
 function claimOnOpen(gs: Gesture, dy: number): Gesture["mode"] {
   if (dy > 0) return !gs.inList || gs.listTop ? "close" : null;
   // Up from the panel's foot (its bottom strip only - never the list's scroll): shuts it, as an app drawer closes on iOS/Android.
-  if (gs.y0 > gs.height - CLOSE_UP_FOOT_PX) return "closeUp";
+  // Not from a text field: the search pill sits in this strip, and a finger drifting up while tapping/placing the caret in
+  // it was read as a close - dropKeyboard() then took the keyboard down as the user typed.
+  if (gs.y0 > gs.height - CLOSE_UP_FOOT_PX && !gs.target.closest?.("input, textarea, [contenteditable]")) return "closeUp";
   return pullKind.value === "apps" && atListEnd(gs) ? "over" : null;
 }
 
