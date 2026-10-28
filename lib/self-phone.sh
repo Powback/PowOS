@@ -40,3 +40,36 @@ self_phone_bake() {
     rm -rf "$_sp_root/usr/lib/powos/src" && cp -a "$_sp_src" "$_sp_root/usr/lib/powos/src" || return 1
     self_phone_seed "$_sp_src" "$_sp_root"
 }
+
+# self_phone_files SRC: every path (relative to the root) self_phone_apply writes for SRC, one per line.
+self_phone_files() {
+    (cd "$1/bin" && find . ! -type d | while IFS= read -r f; do printf 'usr/bin/%s\n' "${f#./}"; done)
+    (cd "$1/lib" && find . ! -type d | while IFS= read -r f; do printf 'usr/lib/powos/%s\n' "${f#./}"; done)
+    printf '%s\n' usr/share/powos/revision usr/lib/powos/.powos-src-commit
+}
+
+# self_phone_snapshot SRC [ROOT]: the rollback point. Saves the installed copy of every file an apply of SRC would
+# overwrite (prev.tar) and the names it would newly create (added.lst). One point: a new snapshot replaces the old.
+self_phone_snapshot() {
+    _sp_src=$1; _sp_root=${2:-}; _sp_rb="$_sp_root/var/lib/powos/rollback"
+    mkdir -p "$_sp_rb" || return 1
+    : > "$_sp_rb/keep.lst"; : > "$_sp_rb/added.lst"
+    self_phone_files "$_sp_src" | while IFS= read -r f; do
+        if [ -e "$_sp_root/$f" ] || [ -L "$_sp_root/$f" ]; then echo "$f" >> "$_sp_rb/keep.lst"; else echo "$f" >> "$_sp_rb/added.lst"; fi
+    done
+    rm -f "$_sp_rb/prev.tar"
+    if [ -s "$_sp_rb/keep.lst" ]; then
+        tar -cf "$_sp_rb/prev.tar" -C "${_sp_root:-/}" -T "$_sp_rb/keep.lst" || { rm -f "$_sp_rb/prev.tar"; return 1; }
+    else
+        tar -cf "$_sp_rb/prev.tar" -T /dev/null || return 1
+    fi
+}
+
+# self_phone_rollback [ROOT]: put back what the last snapshot saved and remove what the apply added.
+self_phone_rollback() {
+    _sp_root=${1:-}; _sp_rb="$_sp_root/var/lib/powos/rollback"
+    [ -f "$_sp_rb/prev.tar" ] || { echo "self-phone: no rollback point (nothing was applied with 'powos self apply')" >&2; return 1; }
+    tar -xf "$_sp_rb/prev.tar" -C "${_sp_root:-/}" || return 1
+    while IFS= read -r f; do [ -n "$f" ] && rm -f "$_sp_root/$f"; done < "$_sp_rb/added.lst"
+    rm -f "$_sp_rb/prev.tar" "$_sp_rb/keep.lst" "$_sp_rb/added.lst" "$_sp_root/usr/share/powos/applied-wip"
+}

@@ -2,6 +2,9 @@
 # self.sh - the "edit PowOS → test → push" dev loop, made memorable and SAFE.
 #
 #   powos self status   What's baked, is git attached, local edits, ahead/behind
+#   powos self apply    Phone: deploy the working tree (uncommitted edits too); saves a rollback point
+#   powos self rollback Phone: restore the state before the last apply
+#   powos self check [names]  Phone: on-device checks (applied syntax cli self manifest)
 #   powos self test     Apply your local /var/lib/powos/src edits to THIS running
 #                       system, transiently (auto-reverts on reboot on installed
 #                       composefs; direct on live/RAM). No commit needed.
@@ -227,9 +230,33 @@ self_pull_attach() {
     # Always need origin/$SELF_BRANCH to align onto.
     SELF_PULL_HAVE_MASTER=0
     git -C "$src" fetch --depth 200 origin "$SELF_BRANCH" 2>/dev/null && SELF_PULL_HAVE_MASTER=1
+    # Unknown baked commit (no marker): find the origin commit whose bin/ and lib/ equal this tree's, and treat that as
+    # the base. Everything else that differs then shows up as local edits (stashed and restored), never discarded.
+    if [[ "$SELF_PULL_BAKED" == unknown ]] && (( SELF_PULL_HAVE_MASTER )); then
+        local m; m="$(self_find_matching_commit "$src")"
+        if [[ -n "$m" ]]; then SELF_PULL_BAKED="$m"; plog "  matched baked tree to origin commit ${m:0:12}"
+        else pwarn "No origin commit matches this tree's bin/ and lib/ - attaching on the branch tip."; fi
+    fi
     # A failed fetch is NOT an error here — the fallback below reports it with
     # the right message. Without this `return 0` the `&&` above would become
     # the return value and abort the attach on a perfectly normal offline run.
+    return 0
+}
+
+# The origin/$SELF_BRANCH commit whose bin/ and lib/ trees equal the working files' (prints its sha, or nothing).
+# Needs the commits: deepens the fetch (SELF_MATCH_DEPTH, default 1500). Read-only on the files; uses a temp index.
+self_find_matching_commit() {
+    local src="$1" idx t_bin t_lib c
+    idx="$(mktemp)"; rm -f "$idx"
+    git -C "$src" fetch -q --depth "${SELF_MATCH_DEPTH:-1500}" origin "$SELF_BRANCH" 2>/dev/null || true
+    t_bin="$(GIT_INDEX_FILE=$idx git -C "$src" --work-tree="$src" add -A bin >/dev/null 2>&1 && GIT_INDEX_FILE=$idx git -C "$src" write-tree --prefix=bin/ 2>/dev/null)"
+    t_lib="$(GIT_INDEX_FILE=$idx git -C "$src" --work-tree="$src" add -A lib >/dev/null 2>&1 && GIT_INDEX_FILE=$idx git -C "$src" write-tree --prefix=lib/ 2>/dev/null)"
+    rm -f "$idx"
+    [[ -n "$t_bin" && -n "$t_lib" ]] || return 0
+    for c in $(git -C "$src" rev-list "origin/$SELF_BRANCH" -- bin lib 2>/dev/null); do
+        [[ "$(git -C "$src" rev-parse "$c:bin" 2>/dev/null)" == "$t_bin" && "$(git -C "$src" rev-parse "$c:lib" 2>/dev/null)" == "$t_lib" ]] \
+            && { printf '%s\n' "$c"; return 0; }
+    done
     return 0
 }
 
@@ -368,6 +395,68 @@ self_phone_apply_tree() {
     sha="$(git -C "$src" rev-parse HEAD 2>/dev/null || self_baked_sha)"
     self_phone_apply "$src" "$sha" || return 1
     pok "Applied ${sha:0:12} from $src (bin/, lib/, revision, marker)."
+}
+
+# `powos self apply` (phone): deploy the CURRENT working tree, uncommitted edits included. Saves a rollback point first.
+self_apply() {
+    local src="${1:-$SELF_SRC}"
+    self_is_phone || { self_test "$src"; return $?; }
+    [[ -d "$src/bin" && -d "$src/lib" ]] || { perr "$src has no bin/ and lib/."; return 1; }
+    self_phone_snapshot "$src" || { perr "Could not save a rollback point - nothing applied."; return 1; }
+    plog "Rollback point saved (powos self rollback restores it)."
+    self_phone_apply_tree "$src" || { pwarn "Apply failed part-way; rolling back."; self_phone_rollback; return 1; }
+    if self_git_dirty "$src"; then
+        git -C "$src" status --short > /usr/share/powos/applied-wip 2>/dev/null
+        pwarn "Applied with uncommitted edits ($(wc -l < /usr/share/powos/applied-wip) paths) - listed in /usr/share/powos/applied-wip."
+    else rm -f /usr/share/powos/applied-wip; fi
+    plog "Next: powos self check"
+}
+
+self_rollback() {
+    self_is_phone || { perr "powos self rollback is phone-only (the desktop test overlay reverts on reboot)."; return 1; }
+    self_phone_rollback && pok "Rolled back to the state before the last 'powos self apply'."
+}
+
+# `powos self check [names]`: on-device checks of the applied state. Runs only what works on the phone itself.
+#   applied   installed bin/lib equal the source tree (the apply took, nothing drifted)
+#   syntax    bash -n on every shell script in bin/ and lib/
+#   cli       the installed `powos` runs (help, self status)
+#   self      test/tier1/test-self.sh      manifest  test/tier1/test-self-manifest.sh
+# Not run here (need the Mac + adb): tools/phone/verify/*.sh, UI/gesture checks, the web shell, the APK.
+SELF_CHECKS="applied syntax cli self manifest"
+# Each check prints its findings and returns non-zero on failure.
+self_check_applied() {
+    local f g
+    for f in $(cd "$SELF_SRC" && self_phone_files "$SELF_SRC" | grep -v '^usr/share\|\.powos-src-commit'); do
+        g="${f/#usr\/bin\//bin/}"; g="${g/#usr\/lib\/powos\//lib/}"
+        cmp -s "$SELF_SRC/$g" "$SELF_CHECK_ROOT/$f" || echo "differs: $f"
+    done
+}
+self_check_syntax() {
+    local f
+    for f in $(cd "$SELF_SRC" && { git ls-files bin lib 2>/dev/null || find bin lib -type f; }); do
+        head -c 80 "$SELF_SRC/$f" | grep -q '^#!.*\(ba\)\?sh' || continue
+        bash -n "$SELF_SRC/$f" 2>&1 || echo "syntax: $f"
+    done
+}
+self_check_cli() { "$SELF_CHECK_ROOT/usr/bin/powos" help 2>&1 | head -3; "$SELF_CHECK_ROOT/usr/bin/powos" self status >/dev/null 2>&1 || echo "powos self status failed"; }
+self_check_self() { bash "$SELF_SRC/test/tier1/test-self.sh" 2>&1 | tail -5; }
+self_check_manifest() { bash "$SELF_SRC/test/tier1/test-self-manifest.sh" 2>&1 | tail -5; }
+
+# A check fails when its output says so (differs/syntax/failed/FAIL).
+self_check() {
+    local names=("$@") n out fails=0
+    SELF_CHECK_ROOT="${SELF_CHECK_ROOT:-}"
+    [[ ${#names[@]} -gt 0 ]] || names=($SELF_CHECKS)
+    for n in "${names[@]}"; do
+        declare -F "self_check_$n" >/dev/null || { perr "Unknown check: $n (have: $SELF_CHECKS)"; return 2; }
+        out="$("self_check_$n")"
+        if grep -q 'differs:\|syntax:\|failed\|FAIL' <<<"$out"; then
+            perr "check $n: FAIL"; printf '%s\n' "$out" | self_indent; fails=$((fails+1))
+        else pok "check $n: ok"; fi
+    done
+    (( fails )) && { perr "$fails check(s) failed - 'powos self rollback' restores the previous state."; return 1; }
+    plog "Local checks passed. Still needs the Mac: tools/phone/verify/*.sh (adb-driven UI checks)."
 }
 
 # `powos self update` / `powos update self` on the phone: fast-forward the editable tree (local edits are stashed and
@@ -582,6 +671,9 @@ self_usage() {
     cat <<EOF
 PowOS self — edit → test → push loop
 
+  powos self apply    Phone: deploy the working tree (uncommitted edits too); saves a rollback point
+  powos self rollback Phone: restore the state before the last apply
+  powos self check [names]  Phone: on-device checks (applied syntax cli self manifest)
   powos self status   Baked commit, git attach state, local edits, ahead/behind
   powos self test     Apply local /var/lib/powos/src edits to THIS running system
                       (transient; auto-reverts on reboot on installed composefs)
@@ -595,6 +687,22 @@ PowOS self — edit → test → push loop
 EOF
 }
 
+# `powos self push [-m msg] [-- paths]`
+self_push_args() {
+    local msg="" paths=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -m|--message) msg="${2:-}"; shift 2 ;;
+            --) shift; paths+=("$@"); break ;;
+            *) paths+=("$1"); shift ;;
+        esac
+    done
+    if [[ -z "$msg" ]] && [[ -t 0 ]]; then
+        read -rp "Commit message [PowOS self: sync local changes]: " msg || true
+    fi
+    self_push "$SELF_SRC" "$msg" "${paths[@]}"
+}
+
 cmd_self() {
     local sub="${1:-help}"; shift || true
 
@@ -603,7 +711,7 @@ cmd_self() {
     # never checked freshness, so it could apply, commit and push days-old code
     # while the real checkout sat elsewhere, fully up to date.
     case "$sub" in
-        status|st|test|t|pull|push|reseed)
+        status|st|test|t|pull|push|reseed|apply|rollback|check)
             plog "source: $SELF_SRC"
             powos_src_staleness "$SELF_SRC"
             ;;
@@ -612,22 +720,12 @@ cmd_self() {
     case "$sub" in
         status|st)  self_status "$SELF_SRC" ;;
         test|t)     self_test "$SELF_SRC" ;;
+        apply)      self_apply "$SELF_SRC" ;;
+        rollback)   self_rollback ;;
+        check)      self_check "$@" ;;
         pull|update) "self_${sub/pull/safe_pull}" "$SELF_SRC" ;;
         reseed)     self_reseed "$SELF_SRC" ;;
-        push)
-            local msg="" paths=()
-            while [[ $# -gt 0 ]]; do
-                case "$1" in
-                    -m|--message) msg="${2:-}"; shift 2 ;;
-                    --) shift; paths+=("$@"); break ;;
-                    *) paths+=("$1"); shift ;;
-                esac
-            done
-            if [[ -z "$msg" ]] && [[ -t 0 ]]; then
-                read -rp "Commit message [PowOS self: sync local changes]: " msg || true
-            fi
-            self_push "$SELF_SRC" "$msg" "${paths[@]}"
-            ;;
+        push)       self_push_args "$@" ;;
         help|-h|--help|"") self_usage ;;
         *) perr "Unknown: powos self $sub"; self_usage; return 1 ;;
     esac

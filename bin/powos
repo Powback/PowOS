@@ -139,6 +139,9 @@ Updating — one question: whose code?
   reload --pull       git pull the checkout first, then apply
   reload --build      Full local image build + switch (base/package changes)
   self status         Baked commit, git attach state, local edits
+  self apply          Phone: deploy the working tree (edits too), rollback point first
+  self rollback       Phone: restore the state before the last apply
+  self check          Phone: on-device checks
   self test           Same apply as 'reload', inside the self edit-loop
   self pull           SAFE update from upstream (never discards local edits)
   self push           git add -A + commit + push (-m "message")
