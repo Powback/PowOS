@@ -48,8 +48,16 @@ function run() {
   sent = head; raf = requestAnimationFrame(frame); timer = window.setInterval(sample, SAMPLE_MS);
 }
 
+/** A meter recording ({rec} in "perf.meter"): perfrec.ts records inputs, state and long frames here, loaded on demand. */
+let rec: Promise<typeof import("./perfrec.ts")> | null = null;
+function recorder(v: { rec?: number } | null) {
+  if (!v?.rec && !rec) return;
+  rec ??= import("./perfrec.ts");
+  void rec.then((m) => m.onMeter(v), (e) => console.error("perfrec", e));
+}
+
 export function startSampler() {
-  powos.on("perf.meter", (v: { on?: boolean } | null) => { on = !!v?.on; run(); });
+  powos.on("perf.meter", (v: { on?: boolean; rec?: number } | null) => { on = !!v?.on; run(); recorder(v); });
   document.addEventListener("visibilitychange", run);
   powos.store.get<{ on?: boolean }>("perf.meter").then((v) => { on = !!v?.on; run(); }, () => {});
 }

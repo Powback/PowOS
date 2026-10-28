@@ -17,6 +17,8 @@ import { ago } from "./time.ts";
 import type { NotificationList, PhoneNotification } from "../types.ts";
 
 const list = signal<NotificationList>({ available: true, items: [] });
+/** The list, read by the meter recording's snapshot (perfrec.ts). */
+export { list as notifList };
 
 /**
  * Unfolded (wider than the cover's 404, as hosts/wide.ts's 700): the panel is two columns side by side - the
