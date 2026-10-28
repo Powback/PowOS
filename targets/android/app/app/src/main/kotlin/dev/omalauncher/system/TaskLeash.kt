@@ -211,7 +211,10 @@ object TaskLeash {
                 leashes.isEmpty() -> end("no leash in it")
                 released -> end("released before")
                 gaveUp -> end("late")
-                else -> ready(true)
+                else -> {
+                    for ((id, leash) in leashes) TaskBarProbe.attach(context, id, leash, last[id]?.width() ?: 0)
+                    ready(true)
+                }
             }
         }
 

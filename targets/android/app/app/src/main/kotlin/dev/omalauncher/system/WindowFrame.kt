@@ -341,6 +341,7 @@ class WindowFrame(
     }
 
     fun remove() {
+        TaskBarProbe.release(id)
         detach()
         barChrome.destroy()
         gripChrome.destroy()
