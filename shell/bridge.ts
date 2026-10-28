@@ -214,7 +214,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       output: (pkg) => call("media.output", pkg ?? ""),
     },
     qs: {
-      destinations: () => call("qs.destinations"),
+      destinations: () => call<{ id: string; label: string; keywords: string }[]>("qs.destinations").catch(() => []), // detect: older APKs have no native settings catalog
       state: () => call<QuickState>("qs.state"),
       toggle: (name) => call<QuickState>("qs.toggle", name),
       open: (name) => call("qs.open", name),
