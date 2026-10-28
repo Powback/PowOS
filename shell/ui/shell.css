@@ -1450,6 +1450,31 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 /* The whole conversation (powai.tsx History): reversed, the pane opens at the newest and holds it; short, it sits on top. */
 .ai-talk-in { display: flex; flex-direction: column; gap: 14px; margin-bottom: auto; }
 .ai-view.wide > .ai-compose { grid-column: 2; grid-row: 3; margin-bottom: var(--ai-foot); }
+/*
+ * The AI page's scrollers run the page's full height (the user, 2026-10-28, 4th time: "the cutoff"): no clip at the header
+ * or the pill, no fade, no rounded mask. The header and the pill float over them (z-index), the scroller's padding keeps
+ * the first and last card reachable, and cards pass visibly under both. scroll-padding keeps focus/scrollIntoView clear of them.
+ */
+.ai-screen {
+  --ai-head-top: calc(var(--inset-top, 0px) + 8px);
+  --ai-head: calc(var(--ai-head-top) + 36px + 10px);
+  --ai-tail: calc(var(--ai-foot) + var(--pill-height) + 10px);
+  padding-top: 0;
+}
+.ai-screen > .ai-top { position: relative; z-index: 2; min-height: 36px; margin-top: var(--ai-head-top); }
+.ai-screen > .ai-compose { position: relative; z-index: 2; margin-top: auto; }
+.ai-screen > .ai-scroll {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding-top: var(--ai-head);
+  padding-bottom: var(--ai-tail);
+  scroll-padding-block: var(--ai-head) var(--ai-tail);
+}
+.ai-screen.wide > .ai-scroll { position: static; grid-row: 1 / -1; }
+.ai-screen.wide > .ai-compose { margin-top: 0; grid-row: 3; }
+.ai-screen.wide > .ai-top { grid-row: 1; }
+.ai-screen.wide > .ai-side { margin-bottom: 0; }
 /* Wide, a fold heading a pane ("needs you", "paused") sits on the panes' top line. */
 .ai-view.wide .ai-fold:not(.tile *) { margin: 0 0 0 2px; }
 /* The board (powai.tsx AiContent): one surface - what was a card each is a section on it, parted by spacing. */
