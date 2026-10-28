@@ -274,7 +274,7 @@ export function Drawer() {
     // The launcher panel's lower part (home.tsx): it comes in (shell.css, by --p) as the recent bar grows into the panel.
     <div class={`drawer ${open ? "shown" : ""}`} aria-hidden={!open}>
       {asking ? <ChatView /> : searching ? <div class="drawer-list results"><div class="launcher-search-results">
-        {searchResults.value.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>)}
+        {searchResults.value.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><span class="scr-ico" aria-hidden="true">{result.label.trim().slice(0, 1).toUpperCase()}</span><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>)}
         {searchPending.value && <div class="scr-note muted" role="status">Searching…</div>}
       </div></div> : <Pages />}
       {!searching && !asking && <RecentRow />}

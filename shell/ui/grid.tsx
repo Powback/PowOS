@@ -898,7 +898,7 @@ function PartyGhosts({ c }: { c: Carry }) {
         .map((i) => {
           const b = box(shown(i));
           return (
-            <div class="carried" key={i.key} style={{ left: `${g.left + c.x - c.grab.x + b.left - lead.left}px`, top: `${g.top + c.y - c.grab.y + b.top - lead.top}px`, width: `${b.width}px`, height: `${b.height}px` }}>
+            <div class="carried" key={i.key} style={{ transform: `translate3d(${g.left + c.x - c.grab.x + b.left - lead.left}px, ${g.top + c.y - c.grab.y + b.top - lead.top}px, 0) scale(1.06)`, width: `${b.width}px`, height: `${b.height}px` }}>
               <Face item={i} />
             </div>
           );
@@ -933,7 +933,7 @@ export function Carried() {
     <>
       <div
         class="carried"
-        style={{ left: `${g.left + c.x - c.grab.x}px`, top: `${g.top + c.y - c.grab.y}px`, width: `${size.w * g.cellW}px`, height: `${size.h * g.cellH}px` }}
+        style={{ transform: `translate3d(${g.left + c.x - c.grab.x}px, ${g.top + c.y - c.grab.y}px, 0) scale(1.06)`, width: `${size.w * g.cellW}px`, height: `${size.h * g.cellH}px` }}
       >
         {c.app ? <AppFace appKey={c.app} /> : <Face item={c.item!} />}
       </div>

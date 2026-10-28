@@ -158,6 +158,14 @@
 /* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
 .home > .bar { transform: translateY(calc(var(--p) * var(--strip-height))); }
 .home.pill-below > .bar, .pull-screen > .bar { transform: none; }
+/* The dock stays while the launcher is open (bottom dock, search bar above it): the pill and dock don't move, the drawer's
+   window ends at the pill's top, and the drawer only rises (as pill-below). Wide and side docks keep giving way. */
+.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > :is(.bar, .dock) { transform: none; }
+.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > .dock { opacity: 1; }
+.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar).open > .dock { pointer-events: auto; }
+.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > .stage > .launcher-clip { inset: 0 0 4px; transform: none; }
+.home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
+}
 
 /* A row of recent apps (recentwidget.tsx). */
 .strip {
@@ -843,6 +851,9 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   transform: scale(1.06);
   filter: var(--lift-drop);
 }
+
+/* Home's carried tile moves by translate3d only (grid.tsx Carried sets the transform, scale included): no layout per move. */
+.home > .carried { left: 0; top: 0; will-change: transform; }
 
 .tile-actions {
   position: absolute;
@@ -2646,5 +2657,10 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .cc3-badge.add { background: var(--color-accent); }
 .cc3-spare { opacity: 0.8; }
 
-.launcher-search-results { display: flex; flex-direction: column; gap: var(--gap); width: 100%; }
+/* Search results as a grid of tiles (an icon letter, the name, its source), like the app grid. */
+.launcher-search-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--cell), 1fr)); gap: var(--gap); width: 100%; align-content: end; }
+.launcher-search-results .scr-row { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0; }
+.launcher-search-results .scr-row-text { display: block; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.launcher-search-results .scr-ico { display: grid; place-items: center; width: var(--icon, 52px); height: var(--icon, 52px); border-radius: 30%; background: var(--soft-fill); font-weight: 600; }
+.launcher-search-results .scr-note { grid-column: 1 / -1; }
 .launcher-search-results .scr-sub { display: block; }
