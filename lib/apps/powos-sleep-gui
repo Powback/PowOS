@@ -168,6 +168,35 @@ def unit_root(u):
     return int(r) if r.isdigit() and os.path.isdir(f"/proc/{r}") else None
 
 
+def steam_link(path):
+    """Steam's CM link (same test as /usr/bin/steam cm_link): 0 logged on over a live socket, 1 not yet, 2 not trying."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 262144))
+            t = f.read().decode("latin-1")
+    except OSError:
+        return 2
+    st = re.findall(r"\] \[(Logged On|Logged Off|Connecting|Connected|Logging On), (\d+)", t)
+    if not st or (st[-1][0] == "Logged Off" and st[-1][1] == "0"):
+        return 2
+    if st[-1][0] != "Logged On":
+        return 1
+    lp = re.findall(r"ConnectionCompleted\(\) \([^)]*\) local address \([^)]*:(\d+)\)", t)
+    if not lp:
+        return 0
+    want = ":%04X" % int(lp[-1])
+    for tab in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            for ln in open(tab).read().splitlines()[1:]:
+                c = ln.split()
+                if len(c) > 3 and c[1].endswith(want) and c[3] == "01":
+                    return 0
+        except OSError:
+            pass
+    return 1
+
+
 def game_launcher(u):
     """The command-line mark of the unit's game launcher when its games sleep with it (sleepBusy.games "pause")."""
     b = u.get("busy") or {}
@@ -624,6 +653,46 @@ class Gui(dbus.service.Object):
         self.update_active()
         self.schedule()
         self.desktop(on)
+        if on:
+            self.reconnect_ahead()
+
+    # Steam's link, restored before the tap ---------------------------------------
+    def reconnect_ahead(self):
+        """PowOS on screen: a game launcher's client (Steam) that is RUNNING but frozen out of sight has lost its CM link
+        (Steam's server drops a silent client; it notices at the thaw, then a 9-19 s reconnect backoff, 2026-10-24).
+        Thaw it now so the backoff runs while the user is still on the way to the game's icon; then it sleeps again
+        a few seconds after it is logged on (its normal rules). Never starts Steam, never touches one that runs a
+        game (that thaws on focus). Costs nothing while the screen is off (no keepalive)."""
+        for u in self.rules():
+            if not game_launcher(u):
+                continue
+            root = unit_root(u)
+            if root is None or root not in self.frozen or "SteamLaunch" in " ".join(cmdline(p) for p in tree(root)):
+                continue
+            t0 = time.monotonic()
+            self.thaw(root, "screen on: reconnect ahead")
+            if not self.pid_active(root):
+                self.idle_since[root] = time.time()
+            self.schedule()
+            log(f"{u['id']} ({root}): screen on - reconnecting ahead of the tap")
+            GLib.timeout_add(500, self.reconnect_poll, u["id"], root, t0)
+
+    def reconnect_poll(self, uid, root, t0):
+        waited = time.monotonic() - t0
+        if root not in self.frozen and not os.path.isdir(f"/proc/{root}"):
+            return False
+        r = steam_link(os.path.expanduser("~/.local/share/Steam/logs/connection_log.txt"))
+        # HACK: a dropped link is only noticed at the thaw; before ~5 s the old Logged On / socket can still look live.
+        # Real fix: read Steam's own disconnect event instead of waiting.
+        if (r == 1 and waited < 40) or waited < 5:
+            return True
+        log(f"{uid} ({root}): reconnect ahead: {('logged on' if r == 0 else 'not trying' if r == 2 else 'still not logged on')} "
+            f"{waited:.1f} s after screen on (wake->ready; a launch after this waits 0 s)")
+        if r != 1 and not self.pid_active(root):
+            # logged on: asleep again soon (its rules still apply: busy, games, never)
+            self.idle_since[root] = time.time() - self.idle(root) + 10
+            self.schedule()
+        return False
 
     # the desktop shell off screen -------------------------------------------
     def desktop(self, on):
