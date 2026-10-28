@@ -160,7 +160,29 @@ step() {
 # A detail with a newline (a page's innerText) was cut at it in steps.txt and the log: flatten control chars to spaces.
 _res() { local m=${2//[[:cntrl:]]/ }; printf '%s\t%s%s\t%s: %s\n' "$CUR" "$CURD" "$CURX" "$1" "$m" >> "$STEPS"; echo "$1: [${CUR%.png}] $m" | tee -a "$OUT/log.txt"; }
 pass() { NPASS=$((NPASS + 1)); _res PASS "$*"; }
-fail() { NFAIL=$((NFAIL + 1)); _res FAIL "$*"; }
+# Evidence (2026-10-28): the phone's logcat ring wraps in ~1 min, so a FAIL left nothing to diagnose from. The journey keeps
+# its own window/shell log ($PDIR/logcat-<part>.txt, e2e_logcat_start); a FAIL copies its last 400 lines next to the
+# step's screenshot (NN-step.logcat.txt) and names the file in the FAIL line.
+LOGCAT_TAGS="PowosWindowFrames:V WindowTasks:V PowosWindow:V PowosFreeform:V PowosPageSlide:V PowosRunning:V PowosShell:V chromium:D"
+e2e_logcat_start() {
+  [ -n "${PDIR:-}" ] || return 0
+  ash <<EOF
+mkdir -p $PDIR; f=$PDIR/logcat-$PART.txt; [ -f \$f.pid ] && kill \$(cat \$f.pid) 2>/dev/null
+: > \$f; nohup logcat -v time -s $LOGCAT_TAGS > \$f 2>&1 < /dev/null &
+echo \$! > \$f.pid; chmod a+r \$f
+EOF
+}
+e2e_logcat_stop() {
+  [ -n "${PDIR:-}" ] || return 0
+  ash <<EOF
+f=$PDIR/logcat-$PART.txt; [ -f \$f.pid ] && kill \$(cat \$f.pid) 2>/dev/null; : > \$f.pid; chmod -R a+rX $PDIR
+EOF
+}
+fail() {
+  NFAIL=$((NFAIL + 1)); local lc="$PDIR/${CUR%.png}.logcat.txt"
+  sh_ "tail -n 400 $PDIR/logcat-$PART.txt > $lc; chmod a+r $lc" >/dev/null 2>&1
+  _res FAIL "$* [logcat: $lc]"
+}
 # note: a line in steps.txt that is neither (what was seen, for the manager).
 note() { _res NOTE "$*"; }
 ok() { local c=$1; shift; [ "$c" = 0 ] && pass "$*" || fail "$*"; }
@@ -205,6 +227,7 @@ e2e_setup() {
   window_lock "e2e-$JOURNEY" 120
   trap 'e2e_abort' EXIT
   I0=$(irq)
+  e2e_logcat_start
   if [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" != Awake ]; then
     # The "never wake the screen" rule is for the PHONE - someone may genuinely be asleep next to it, and a check
     # waking it is the bug. Nobody is ever "asleep next to" the emulator: the emulator lane owns the opposite rule
@@ -251,6 +274,7 @@ e2e_setup() {
 RESTORED=0
 e2e_restore() {
   [ $RESTORED = 1 ] && return 0; RESTORED=1
+  e2e_logcat_stop
   # Setup never read the start state (the screen asleep, no window): nothing of the journey's to close - without
   # TASKS0 every task looked new and a user's Linux window was closed (resize-probe, 2026-10-23 18:38).
   [ -n "${TASKS0+set}" ] || { log "nothing to restore (the journey never started)"; return 0; }

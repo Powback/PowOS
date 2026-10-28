@@ -220,7 +220,10 @@ export async function dockTap(key: string) {
   const front = windows.value.find((w) => !w.minimised && !w.away && !!w.bounds && (!!w.app || w.pkg !== "com.powos.app"));
   if (front && isOf(front, key) && powos.floating?.minimise) {
     const done = await powos.floating.minimise(front.id).catch(() => false);
+    console.debug("dockTap", key, done ? "minimise" : "minimise-failed", front.id);
     if (done) return;
+  } else {
+    console.debug("dockTap", key, front ? "raise" : "launch", front?.id);
   }
   await launch(key);
 }
