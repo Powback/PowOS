@@ -1,0 +1,54 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: a task that never went live gives its window to the desktop
+
+A task is made (show: powos-open-task's D-Bus show, the maximize op, export-new, a full-screen window) before the app's
+activity connects its consumer; only then does the task go live and take the window off the desktop. When the
+activity never shows it - started while the screen is off or the phone folds (the desktop is "off" for that
+moment), then covered by the desktop coming back - the task stays in fallback for good while its window is still on
+the Plasma desktop, where the user goes on using it: KWin took it as a task everywhere (taskFor: no export, no
+desktop ownership, its own moves cancelled before 0033), and a later consumer would pull the window out of Plasma.
+Log, 2026-10-28: "desktop on screen: false", "window task 11 has KWin's title bar", "desktop on screen: true", then
+only "window task 11 asked to be moved" - never "window task 11 live". Now the desktop coming on screen ends every
+task that never went live ("close": the app drops its card) and the window is the desktop's like the others there.
+---
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index d33bf7c..86b2a41 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -1203,6 +1203,20 @@ void AnlandWindowTasks::setDesktopShown(bool on)
+     if (!on || !workspace()) {
+         return;
+     }
++    // A task that never went live (its activity never showed the window: started while the screen was off or folding
++    // - the desktop is "off" for that moment - then covered by the desktop) left its window here on the desktop, where
++    // the user now works with it. It stops being a task (the app drops its card): kept, it held the window for a task
++    // nothing shows - every show/export took it as exported, and its own move was cancelled (0033) - and a later
++    // consumer would have pulled the window out of Plasma under the user's hands (2026-10-28: "window task 11 has
++    // KWin's title bar" between "desktop on screen: false" and "true" on a fold, never "window task 11 live").
++    const auto tasks = m_tasks;
++    for (AnlandWindowTask *task : tasks) {
++        if (!task->exported()) {
++            qCInfo(KWIN_ANLAND) << "window task" << task->id() << "never went live: its window stays on the desktop";
++            send({QStringLiteral("close"), QString::number(task->id())});
++            remove(task);
++        }
++    }
+     // On screen: every application window on it now is the desktop's. Leaving it ("export-new 1" again, the unfolded
+     // home) must not pull them out into floating tasks: the user left them in Plasma and finds them there.
+     for (Window *window : workspace()->windows()) {
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 9e29872..1d03087 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -72,6 +72,11 @@ public:
+     {
+         return m_fullScreen;
+     }
++    /** Its task went live once: the window is off the desktop, on the tasks desktop (until the task goes). */
++    bool exported() const
++    {
++        return m_exported;
++    }
+     /**
+      * The task's size in its pixels ("size" from the app: a floating window being resized). Its buffers stay at the
+      * screen's size, so the window takes the new size at once - a configure, drawn at its real size top-left when it

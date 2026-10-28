@@ -261,6 +261,14 @@ description: Use when working on PowOS window tasks - floating Android windows (
   0033 (3.38): the hand-over only for an EXPORTED window. A task created but never live (no "window task N live")
   left its window on the Plasma desktop, and every title-bar drag there (KDE decoration or CSD) was cancelled: the
   user's "i cant move plasma windows" (2026-10-28, hyprland.log: 11x "window task 11 asked to be moved" on the cover).
+  0034 (3.39), the cause of the never-live task: a task goes live only when its activity's consumer connects; one
+  made while the screen is off or the phone folds (the desktop is "off" for that gap: "desktop on screen: false",
+  "window task 11 has KWin's title bar", "desktop on screen: true") is stopped at once / covered by the desktop and
+  stays in fallback for good while its window is on Plasma. Now setDesktopShown(true) closes every task that never
+  went live ("window task N never went live: its window stays on the desktop") and the app drops it (WindowTasks
+  closedOpening: a "close" before the activity registered finishes it on register). Grep for never-live tasks:
+  "has KWin's title bar|draws its own" with no "window task N live" before the next "connected to daemon at".
+  Not the same as Java's PowosWindowActivity.live() (the appIdOfTask HACK, still unproven).
   Open: a CSD drag (Brave, task 13) INSIDE a live task logged no "asked to be moved" at all - the move request never
   started KWin's move (unmeasured why: X11 vs Wayland Brave, implicit-grab serial for task touches).
 - Launch windows (LaunchWindows.java): Runtime.openRooted opens one at the tap (no window task for the app yet); KWin's

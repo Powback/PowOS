@@ -72,13 +72,20 @@ public final class WindowTasks {
     private static final Map<Integer, Long> opening = new ConcurrentHashMap<>();
     /** An "open" whose task never registered (startActivity refused, the app died) stops holding its window after this. */
     private static final long OPENING_MS = 5000;
+    /** Windows KWin said "close" for while their task was [opening]: that task goes as soon as it registers. */
+    private static final java.util.Set<Integer> closedOpening = ConcurrentHashMap.newKeySet();
 
     /**
      * [a] shows window [id] now: false when another live task shows it already - then [a] must go (one task per KWin
      * window, always). Every registration comes here (onCreate, a launch window's become).
      */
     static boolean register(int id, PowosWindowActivity a) {
-        opening.remove(id);
+        // KWin closed the window's task before this activity came up (kwin 0034: a task that never went live, the
+        // desktop on screen again): nothing will ever feed it - it goes, like a second task.
+        if (opening.remove(id) != null && closedOpening.remove(id)) {
+            Log.i(TAG, "window " + id + ": KWin closed its task before it came up");
+            return false;
+        }
         PowosWindowActivity prev = tasks.putIfAbsent(id, a);
         if (prev == null || prev == a)
             return true;
@@ -333,6 +340,7 @@ public final class WindowTasks {
             return;
         }
         opening.put(id, now);
+        closedOpening.remove(id);
         Uri data = windowData(id);
         // The launch window of its app (LaunchWindows: opened at the tap) becomes this window: same task, same place.
         Runnable orElse = () -> {
@@ -392,6 +400,8 @@ public final class WindowTasks {
                 PowosWindowActivity a = tasks.get(id);
                 if (a != null)
                     a.runOnUiThread(a::closedByKWin);
+                else if (opening.containsKey(id))
+                    closedOpening.add(id);
                 break;
             }
             case "fullscreen": {
