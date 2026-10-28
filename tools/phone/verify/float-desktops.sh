@@ -102,7 +102,7 @@ n=$(npages); echo "home pages: $n, on $(onpage)" | tee -a "$OUT/log.txt"
 [ "${n:-0}" -ge 2 ] || { echo "ENV: home has one page - nothing to switch between; stopping"; exit 5; }
 [ "$(onpage)" = 0 ] || fail "system.home didn't show page 1 ($(onpage))"
 
-bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n-' ' ' | xargs; }
+bounds() { sh_ "am stack list | grep -m1 $PKG" | grep -oE 'bounds=\[[0-9-]+,[0-9-]+\]\[[0-9-]+,[0-9-]+\]' | head -1 | tr -c '0-9\n-' ' ' | xargs; }
 # A spot on the page on screen with nothing under it (no tile, app, bar, dock) and outside the window: read-only CDP,
 # device px "x y" (a real swipe starts there, never on a widget). $2 the swipe's way (-1 leftwards), $3 its length: a
 # spot with room for the whole swipe first. The 05:25 FAIL (2026-10-23) was the check's: the leftmost empty spot
