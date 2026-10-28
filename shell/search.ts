@@ -70,7 +70,7 @@ registerSearchProvider({ id: "app-api", async search(_text, signal) {
     .filter(([, action]) => action.enabled !== false)
     .map(([id, action]) => ({
       id: `app-api:${a.app}:${id}`, label: id.replace(/[_.-]/g, " "), source: a.name,
-      keywords: `${a.name} ${action.summary ?? ""}`,
+      keywords: a.name,
       open: () => openApp("local.app-api", null, { app: a.app, action: id }),
     })));
 } });
@@ -81,9 +81,12 @@ export const searchResults = computed(() => {
   const q = query.value.trim();
   if (!q) return [];
   const entries: SearchResult[] = apps.value.map((a) => ({ id: `app:${a.key}`, label: a.label, source: "Apps", open: () => { void launch(a.key); } }));
-  return [...entries, ...extra.value].map((r) => ({ r, rank: searchRank(q, r.label, r.keywords) }))
-    .filter(({ rank }) => rank >= 0).sort((a, b) => a.rank - b.rank || a.r.label.localeCompare(b.r.label))
-    .slice(0, 60).map(({ r }) => r);
+  // Apps and settings pages come first; App API capabilities (hundreds of "open <url>" actions) are a capped tail so they cannot bury them.
+  const tier = (r: SearchResult) => r.id.startsWith("app-api:") ? 1 : 0;
+  const ranked = [...entries, ...extra.value].map((r) => ({ r, rank: searchRank(q, r.label, r.keywords) }))
+    .filter(({ rank }) => rank >= 0).sort((a, b) => tier(a.r) - tier(b.r) || a.rank - b.rank || a.r.label.localeCompare(b.r.label)).map(({ r }) => r);
+  let capi = 0;
+  return ranked.filter((r) => !r.id.startsWith("app-api:") || ++capi <= 8).slice(0, 60);
 });
 export function openSearchResult(result: SearchResult) {
   closeDrawer();
