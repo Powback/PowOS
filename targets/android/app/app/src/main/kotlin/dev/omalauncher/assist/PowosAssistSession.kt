@@ -111,6 +111,11 @@ class PowosAssistSession(
         return super.onKeyUp(keyCode, event)
     }
 
+    /** Back (gesture or key) closes the overlay. */
+    override fun onBackPressed() {
+        finish()
+    }
+
     override fun onHide() {
         dev.omalauncher.system.PetOverlay.assistShowing = false
         watchdog?.stop()

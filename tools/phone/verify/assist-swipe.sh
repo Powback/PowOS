@@ -23,5 +23,13 @@ echo "== short swipe snaps back"; $A shell "input swipe $x $yb $x $((yb - 30)) 3
 v=$(vis); [ "$v" = visible ] || { echo "RESULT FAIL a short swipe closed it (${v:-none})"; exit 1; }
 echo "== swipe up from the handle"; $A shell "input swipe $x $yb $x $((yb - 400)) 250"; sleep 1.5
 v=$(vis); echo "after: ${v:-none}"
-if [ -z "$v" ] || [ "$v" = hidden ]; then echo "RESULT PASS swipe up closed the assist overlay"; else
+if [ -z "$v" ] || [ "$v" = hidden ]; then echo "grip swipe closed it"; else
   $A shell "su -c 'cmd voiceinteraction hide'"; echo "RESULT FAIL overlay still visible after swipe up"; exit 1; fi
+
+# Bottom-edge case: the gesture-nav zone (start 5 px from the bottom edge, as the user's thumb does), the system's home gesture.
+echo "== show again"; $A shell "su -c 'cmd voiceinteraction show'" >/dev/null 2>&1; sleep 2
+v=$(vis); [ "$v" = visible ] || { echo "RESULT FAIL assist did not show for the edge case (${v:-none})"; exit 1; }
+echo "== swipe up from the bottom edge"; $A shell "input swipe $x $((h - 5)) $x $((h - 600)) 250"; sleep 2
+v=$(vis); echo "after edge swipe: ${v:-none}"
+if [ -z "$v" ] || [ "$v" = hidden ]; then echo "RESULT PASS bottom-edge swipe up closed the assist overlay"; else
+  $A shell "su -c 'cmd voiceinteraction hide'"; echo "RESULT FAIL overlay still visible after the bottom-edge swipe"; exit 1; fi
