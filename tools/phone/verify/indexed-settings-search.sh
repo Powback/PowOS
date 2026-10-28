@@ -40,7 +40,7 @@ tools/phone/shot.sh "$OUT/refresh-page.png" >/dev/null
 sh_ 'am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null' >/dev/null
 record_pid=
 if [ "${RECORD_NATIVE:-0}" = 1 ]; then
-  "$T/adb.sh" shell screenrecord --time-limit 8 --bit-rate 3000000 /sdcard/powos-settings-highlight.mp4 >/dev/null 2>&1 &
+  "$T/adb.sh" shell screenrecord --size 720x1280 --time-limit 8 --bit-rate 3000000 /sdcard/powos-settings-highlight.mp4 </dev/null >"$OUT/record.log" 2>&1 &
   record_pid=$!
   sleep 0.4
 fi
@@ -52,7 +52,7 @@ sh_ 'uiautomator dump /sdcard/powos-settings-search.xml >/dev/null' >/dev/null
 r=$(sh_ 'cat /sdcard/powos-settings-search.xml')
 [[ "$r" == *'Auto-rotate'* ]] || { echo 'FAIL: Auto-rotate not visible after direct link'; exit 1; }
 if [ -n "$record_pid" ]; then
-  wait "$record_pid"
+  wait "$record_pid" || { cat "$OUT/record.log"; exit 1; }
   "$T/adb.sh" pull /sdcard/powos-settings-highlight.mp4 "$OUT/native-highlight.mp4" >/dev/null
   sh_ 'rm /sdcard/powos-settings-highlight.mp4' >/dev/null
 fi
