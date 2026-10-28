@@ -9,6 +9,7 @@ export async function launcherSearchCheck() {
   let off;
   try {
     s.drawer.value = 1;
+    await checkAppIcons(s, search, wait);
     s.query.value = 'dock position';
     await wait(() => search.searchResults.value.filter(r => r.source === 'Settings').length === 3);
     await wait(() => document.querySelectorAll('[data-search-result^="settings:style:"]').length === 3);
@@ -176,4 +177,20 @@ function chatTypingFailures(counts) {
     [counts.scrollMoved, `typing moved the chat's scroll on ${counts.scrollMoved} of 5 keys`],
   ];
   return said.filter(([n]) => n).map(([, m]) => `launcher chat: ${m}`);
+}
+
+async function checkAppIcons(state, search, wait) {
+  const apps = state.apps.value.filter(a => a.icon);
+  if (!apps.length) throw Error('no apps to verify search icons');
+  for (const kind of new Set(apps.map(a => a.kind))) {
+    const app = apps.find(a => a.kind === kind);
+    state.query.value = app.label;
+    await wait(() => search.searchResults.value.some(r => r.id === `app:${app.key}`));
+    const result = search.searchResults.value.find(r => r.id === `app:${app.key}`);
+    if (result.icon !== app.icon) throw Error(`${kind} search lost the app icon`);
+    await wait(() => [...document.querySelectorAll('[data-search-result]')].some(row => {
+      const img = row.querySelector('.app-icon img');
+      return row.dataset.searchResult === result.id && img?.complete && img.naturalWidth > 0;
+    }));
+  }
 }

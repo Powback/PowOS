@@ -10,6 +10,7 @@ export interface SearchResult {
   id: string;
   label: string;
   source: string;
+  icon?: string;
   keywords?: string;
   open(): void;
 }
@@ -109,7 +110,7 @@ const searched = computed(() => (chatting.value ? "" : query.value.trim()));
 export const searchResults = computed(() => {
   const q = searched.value;
   if (!q) return [];
-  const entries: SearchResult[] = apps.value.map((a) => ({ id: `app:${a.key}`, label: a.label, source: "Apps", open: () => { void launch(a.key); } }));
+  const entries: SearchResult[] = apps.value.map((a) => ({ id: `app:${a.key}`, label: a.label, source: "Apps", icon: a.icon, open: () => { void launch(a.key); } }));
   // Apps and settings pages come first; App API capabilities (hundreds of "open <url>" actions) are a capped tail so they cannot bury them.
   const tier = (r: SearchResult) => r.id.startsWith("app-api:") ? 1 : 0;
   const ranked = [...entries, ...extra.value].map((r) => ({ r, rank: searchRank(q, r.label, r.keywords) }))

@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { computed } from "@preact/signals";
-import { AppCell } from "./apps.tsx";
+import { AppCell, AppIcon } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
 import { drawerOpen, pageDecision, sampleVx } from "./gesture.ts";
 import { apps, byKey, chatting, query, recent, stored } from "../state.ts";
@@ -308,10 +308,14 @@ export function Drawer() {
     // The launcher panel's lower part (home.tsx): it comes in (shell.css, by --p) as the recent bar grows into the panel.
     <div class={`drawer ${open ? "shown" : ""}`} aria-hidden={!open}>
       {asking ? <ChatView /> : shownSearch ? <div class="drawer-list results"><div class="launcher-search-results">
-        {results.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><span class="scr-ico" aria-hidden="true">{result.label.trim().slice(0, 1).toUpperCase()}</span><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>)}
+        {results.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><SearchIcon icon={result.icon} label={result.label} /><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>)}
         {pending && <div class="scr-note muted" role="status">Searching…</div>}
       </div></div> : <Pages />}
       {!shownSearch && !asking && <RecentRow />}
     </div>
   );
+}
+
+function SearchIcon({ icon, label }: { icon?: string; label: string }) {
+  return icon ? <AppIcon src={icon} label={label} /> : <span class="scr-ico" aria-hidden="true">{label.trim().slice(0, 1).toUpperCase()}</span>;
 }

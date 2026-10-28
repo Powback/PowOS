@@ -25,6 +25,9 @@ code=$(sed 's/^export async function/async function/' shell/dev/search-check.js)
 r=$(ev "(async()=>{$code;return JSON.stringify(await launcherSearchCheck())})()")
 echo "search checks: $r"
 [ "$r" = '[]' ] || { echo 'FAIL: launcher search navigation'; exit 1; }
+ev 'importShim("./state.ts").then(s=>{s.drawer.value=1;s.query.value=s.apps.value.find(a=>a.icon).label;return "app search"})' >/dev/null
+sleep 1
+tools/phone/shot.sh "$OUT/app-search-icons.png" >/dev/null
 ev 'importShim("./state.ts").then(s=>{s.drawer.value=1;s.query.value="dock position";return "search"})' >/dev/null
 sleep 1
 tools/phone/shot.sh "$OUT/settings-search.png" >/dev/null

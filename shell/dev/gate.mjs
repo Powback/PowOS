@@ -2493,6 +2493,9 @@ try {
       await r.page.evaluate(async () => { const s = await importShim('./state.ts'); s.drawer.value = 1; s.query.value = 'dock position'; });
       await r.page.waitForSelector('[data-search-result^="settings:style:"]');
       await r.page.screenshot({path: `/cache/launcher-search-${mode}.png`});
+      await r.page.evaluate(async () => { const s = await importShim('./state.ts'); s.query.value = s.apps.value.find(a => a.icon).label; });
+      await r.page.waitForFunction(() => [...document.querySelectorAll('[data-search-result^="app:"] .app-icon img')].some(i => i.complete && i.naturalWidth > 0));
+      await r.page.screenshot({path: `/cache/launcher-search-icons-${mode}.png`});
       return failures;
     })));
 
