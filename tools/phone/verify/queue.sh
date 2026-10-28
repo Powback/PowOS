@@ -20,7 +20,8 @@
 #             TOLD, not guessed, to be Android-only: a literal --android-only in the command, OR (window-max.sh) its
 #             first argument is calc or video - and no argument names a Linux app/stage either way (kate, dolphin,
 #             gwenview, ffplay, steam, kwin). Else phone. Handbook "The emulator lane" has the table, per check.
-#   queue.sh summary [--since HH:MM]            one line per finished job: time, id, PASS/FAIL/SKIP, first FAIL line
+#   queue.sh summary [--since HH:MM | YYYY-MM-DD[ HH:MM]]  one line per finished job: time, id, PASS/FAIL/SKIP, first FAIL line
+#        --since: HH:MM means today; a bare date means from its midnight; compared on the job id's date and time (f291)
 #   queue.sh wait <job-id> [max_s]              block until that job's result; prints its PASS/FAIL/SKIP lines only
 #   queue.sh list                               queued, running, paused (who/why/until, if given) and the last results
 #   queue.sh pause --why TEXT [--until WHEN]    pause the runner (what the pill's tap does, with its own reason) / resume
@@ -352,9 +353,20 @@ list)
   echo "last results:"; { ls -t "$Q/done" 2>/dev/null | grep "\.log$" | head -8 | while read -r f; do echo "  $f: $(tail -1 "$Q/done/$f")"; done; } || echo "  no results yet" ;;
 summary)  # one line per finished job: finish time, id, PASS/FAIL/SKIP, first FAIL line (<=160 chars). Never grep runner.log.
   shift; since=; [ "${1:-}" = --since ] && since=${2:-}
+  # f291: --since compares the full date-time. HH:MM is today's; a bare date is from its midnight.
+  case "$since" in
+    '') ;;
+    [0-9][0-9]:[0-9][0-9]) since="$(date +%Y-%m-%d) $since" ;;
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) since="$since 00:00" ;;
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\ [0-9][0-9]:[0-9][0-9]) ;;
+    *) echo "queue.sh summary: --since takes HH:MM, YYYY-MM-DD or 'YYYY-MM-DD HH:MM' (got '$since')" >&2; exit 2 ;;
+  esac
   for lg in $(ls -tr "$Q/done" 2>/dev/null | grep '\.log$'); do
     f=$Q/done/$lg; id=${lg%.log}; t=$(date -r "$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")" +%H:%M)
-    [ -z "$since" ] || [[ "$t" > "$since" || "$t" == "$since" ]] || continue
+    # the job id starts YYYYMMDD-HHMMSS (when it was queued): compare that, not the file's mtime
+    if [[ $id =~ ^([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2}) ]]; then key="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]} ${BASH_REMATCH[4]}:${BASH_REMATCH[5]}"
+    else key=$(date -r "$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")" +"%Y-%m-%d %H:%M"); fi
+    [ -z "$since" ] || [[ "$key" > "$since" || "$key" == "$since" ]] || continue
     if grep -qE '^FAIL' "$f"; then v=FAIL; d=$(grep -m1 -E '^FAIL' "$f"); elif grep -qE '^SKIP' "$f"; then v=SKIP; d=$(grep -m1 -E '^SKIP' "$f")
     elif tail -1 "$f" | grep -qE '^PASS'; then v=PASS; d=; else v=PASS?; d=$(tail -1 "$f"); fi
     echo "$t $id $v${d:+ ${d:0:160}}"
@@ -579,7 +591,10 @@ EOS
         js() { printf '{"name":%s,"task":%s,"k":%s,"n":%s,"screen":%s,"el":%s,"budget":%s,"prev":"@@HINT@@","step":"@@STEP@@","stepel":@@STEPEL@@}' \
           "$(jstr "${name:-$task}")" "$(jstr "$task")" $k $N "$(jstr "$screen")" "$1" "$budget"; }
         status "$n" "$(js 0)" "$([ $k = 1 ] && echo 'rm -f /tmp/powos-verify-go')"
-        ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 && "$here/preflight.sh" "${cmd[@]}" && exec "${cmd[@]}" ) > "$log" 2>&1 & jp=$!   # preflight: rc 5 + "ENV: why" when the phone cannot run it
+        # f291: the first line names the build the check ran on: the installed APK and the live shell (ship.sh's state).
+        ia=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null); lv=$(cat "${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/live" 2>/dev/null)
+        printf 'build: %s shell=%s\n' "${ia:--}" "${lv:--}" > "$log"
+        ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 && "$here/preflight.sh" "${cmd[@]}" && exec "${cmd[@]}" ) >> "$log" 2>&1 & jp=$!   # preflight: rc 5 + "ENV: why" when the phone cannot run it
         # The heartbeat: every HB_S s the pill hears check, k/N, elapsed; a tap's stop flag or the budget ends the check.
         # The sub-step: the check's own (put) or its log's last line, timed from when that line first showed.
         t0=$(date +%s); why=; ls_=; lt=$t0
