@@ -744,6 +744,8 @@ async function wideAcross() {
 /** In the page: the wide screen's one bar - dock | search pill | recent apps, left to right, on one line. */
 async function wideBar() {
   const S = await window.__gw.mod("./state.ts");
+  S.dockPlacement.value = "bottom";
+  await window.__gw.frames(2);
   // Some pinned apps (the mock pins none), the recent ones left for the right end.
   if (!S.dock.value.length) S.setDock([...S.byKey.value.keys()].slice(0, 4));
   const fails = [];
@@ -1143,12 +1145,13 @@ async function libraryCheck() {
   const L = await window.__gw.mod("./ui/library.tsx");
   S.page.value = S.pages.value.length;
   // Until the track's slide is through (frames lag the clock on a busy gate), at most 3 s.
-  const at = () => document.querySelector(".page-track > .page.library")?.getBoundingClientRect().left ?? 1e9;
+  const expectedLeft = () => document.querySelector(".pages").getBoundingClientRect().left;
+  const at = () => (document.querySelector(".page-track > .page.library")?.getBoundingClientRect().left ?? 1e9) - expectedLeft();
   for (const t0 = performance.now(); Math.abs(at()) > 2 && performance.now() - t0 < 3000; ) await sleep(20);
   const lib = document.querySelector(".page-track > .page.library");
   if (!lib || lib !== document.querySelector(".page-track").lastElementChild) return ["the app library isn't home's last page"];
   const r = lib.getBoundingClientRect();
-  const fails = Math.abs(r.left) > 2 ? [`swiped to the last page, the app library is at x ${Math.round(r.left)}, not on screen`] : [];
+  const fails = Math.abs(r.left - expectedLeft()) > 2 ? [`swiped to the last page, the app library is at x ${Math.round(r.left)}, not on screen`] : [];
   const seen = L.library.value.flatMap((f) => f.apps.map((a) => a.app));
   const twice = seen.filter((k, i) => seen.indexOf(k) !== i);
   // One per name: an app whose name another shows already is that one.
@@ -1762,9 +1765,9 @@ async function dockTapCheck() {
       if (did.join() !== "min 201") fails.push(`a tap on the dock's ${key}, its window in front: [${did.join()}], not [min 201]`);
     }
     dispatchEvent(new Event("resize"));
-    const barNow = () => Math.min(...[...document.querySelectorAll(".home > .bar, .home > .dock")].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => r.top));
+    const barNow = () => Math.min(...[...document.querySelectorAll(".home > .bar, .home.dock-bottom > .dock")].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => r.top));
     await window.__gw.until(() => area !== null && Math.abs(area - barNow()) <= 1);
-    const bar = Math.min(...[...document.querySelectorAll(".home > .bar, .home > .dock")].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => r.top));
+    const bar = Math.min(...[...document.querySelectorAll(".home > .bar, .home.dock-bottom > .dock")].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => r.top));
     if (area !== null && Math.abs(area - bar) > 1) fails.push(`windows.area told ${area}, the bottom bar starts at ${Math.round(bar)}`);
     if (area === null && D.barTop() === null) fails.push("home found no bottom bar to keep windows above (windows.area never told)");
     if (D.barTop() !== null && (D.barTop() < innerHeight / 2 || D.barTop() > innerHeight)) fails.push(`the bottom bar's top ${D.barTop()} isn't in the lower half of ${innerHeight}`);

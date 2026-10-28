@@ -2559,6 +2559,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .home.dock-right { padding-right: calc(var(--inset-right, env(safe-area-inset-right)) + var(--side-dock)); }
 .home.wide:is(.dock-left, .dock-right) { grid-template-columns: minmax(0, 1fr); }
 .home.wide:is(.dock-left, .dock-right) > .bar { grid-area: 2 / 1; width: min(100%, 360px); justify-self: center; }
+.home.wide:is(.dock-left, .dock-right) > .edit-sheet { grid-area: 2 / 1; }
 .home:is(.dock-left, .dock-right) > .dock:not(.dock-tray) {
   grid-area: auto;
   position: absolute;
