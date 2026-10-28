@@ -62,8 +62,10 @@
 .notif-more { flex: none; padding: 1px 7px; border-radius: 999px; background: var(--soft-fill); font-size: var(--text-small); }
 .notif-stack { position: relative; flex: none; display: flex; flex-direction: column; }
 .notif-stack > .notif { position: relative; z-index: 1; }
+/* The rest paints over the peeking slices too (a pull retracts them into its last card, ccexpand.ts): nothing fades. */
+.notif-stack > .notif-rest { position: relative; z-index: 1; }
 /* The peeking cards: the stack's own pseudo layers under the top card, narrower and lower each. */
-/* (Also while a pull of the shade drives it - "peek": faded by the finger, ccexpand.ts attachPeek.) */
+/* (Also while a pull of the shade drives it - "peek": slid under the cards by the finger, ccexpand.ts attachPeek.) */
 .notif-stack:is(:not(.open), .peek)::before, .notif-stack:is(:not(.open), .peek)[data-depth="2"]::after {
   content: "";
   position: absolute;

@@ -50,8 +50,8 @@ function peekAnim(el: Element | null | undefined, frames: Keyframe[], o: { pseud
 /**
  * [stack] tied to the pull's progress k (0 folded .. 1 unfolded): one paused Web Animation per part, no style per frame.
  * Both ways the top card morphs with k: its "+N" badge shrinks away, the peeking cards under it (the stack's pseudos,
- * notifications.css "peek") fade into the rest. Opening, the rest unfolds in place (its layout grows: it can't clamp a
- * scroll). Folding, nothing is laid out until the settle - a shrinking list would clamp the scroll under the finger: the
+ * notifications.css "peek") retract into the rest - no card fades, none narrows. Opening, the rest unfolds in place
+ * (its layout grows: it can't clamp a scroll). Folding, nothing is laid out until the settle - a shrinking list would clamp the scroll under the finger: the
  * head, top card and rest slide up (the rest clipped under the card) by transforms only, and everything after the stack
  * comes up with it by the same running offset (composited "add", so each stack before one adds its own); at the settle
  * the folded layout is committed in the same frame the animations are cancelled - the k=0 frame is that layout.
@@ -63,6 +63,12 @@ export function attachPeek(stack: HTMLElement) {
   peekAnim(card?.querySelector(".notif-more"), [{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(0.6)" }]);
   (pull.was ? foldPeek : openPeek)(stack, card);
 }
+
+/**
+ * The peeking slices (notifications.css: 12 px tall, their top under the stack's last card) retract into it: clipped from
+ * the top down to nothing, never faded (the cards' material is translucent - a slice moved under one would show through).
+ */
+const TUCKED = "inset(100% 0px 0px 0px)";
 
 /** The stack's parts, and the room its folded peeking cards leave under it (notifications.css; open has none). */
 function parts(stack: HTMLElement) {
@@ -77,10 +83,11 @@ function parts(stack: HTMLElement) {
 function openPeek(stack: HTMLElement, card: HTMLElement | null) {
   const { rest, head, gap } = parts(stack);
   peekAnim(stack, [{ marginBottom: `${gap}px` }, { marginBottom: "0px" }]);
-  peekAnim(rest, [{ gridTemplateRows: "0fr", opacity: 0 }, { gridTemplateRows: "1fr", opacity: 1 }]);
+  // The rest is revealed by its own growing row (clipped by its box), never faded: each card opaque at every k. The
+  // peeking slices ride the stack's bottom and retract into its last card instead of fading out.
+  peekAnim(rest, [{ gridTemplateRows: "0fr" }, { gridTemplateRows: "1fr" }]);
   peekAnim(head, [{ opacity: 0 }, { opacity: 1 }]);
-  peekAnim(stack, [{ opacity: 1 }, { opacity: 0 }], { pseudo: "::before" });
-  peekAnim(stack, [{ opacity: 0.6 }, { opacity: 0 }], { pseudo: "::after" });
+  for (const pseudo of ["::before", "::after"]) peekAnim(stack, [{ clipPath: "inset(0px)" }, { clipPath: TUCKED }], { pseudo });
   headMorph(card, head);
 }
 
@@ -121,12 +128,17 @@ function foldPeek(stack: HTMLElement, card: HTMLElement | null) {
   const up = (px: number) => `translateY(${-px}px)`;
   peekAnim(head, [{ opacity: 0 }, { opacity: 1 }]);
   headMorph(card, head);
+  // The rest slides up under the top card - translate only, clipped at the card's bottom edge (the clip's sides past the
+  // box, so the cards keep their full width and shadow) - fully opaque at every k: no fade, no inset box. (It used to
+  // fade 0..1 with the pull: a translucent ghost of the rest over the list; the user, 2026-10-28 18:10 "not".)
   peekAnim(rest, [
-    { opacity: 0, transform: up(hr), clipPath: `inset(${hr}px 0px 0px 0px)` },
-    { opacity: 1, transform: "none", clipPath: "inset(0px 0px 0px 0px)" },
+    { transform: up(hr), clipPath: `inset(${hr}px -60px -60px -60px)` },
+    { transform: "none", clipPath: "inset(0px -60px -60px -60px)" },
   ]);
-  peekAnim(stack, [{ opacity: 1, transform: up(hr) }, { opacity: 0, transform: "none" }], { pseudo: "::before" });
-  peekAnim(stack, [{ opacity: 0.6, transform: up(hr) }, { opacity: 0, transform: "none" }], { pseudo: "::after" });
+  // The peeking slices ride the rest's bottom (up with it), drawn out of its last card as it folds - clipped, not faded.
+  for (const pseudo of ["::before", "::after"]) {
+    peekAnim(stack, [{ transform: up(hr), clipPath: "inset(0px)" }, { transform: "none", clipPath: TUCKED }], { pseudo });
+  }
   for (let el = stack.nextElementSibling; el; el = el.nextElementSibling) {
     peekAnim(el, [{ translate: `0px ${gap - hr}px` }, { translate: "0px 0px" }], { add: true });
   }

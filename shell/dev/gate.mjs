@@ -467,6 +467,7 @@ async function overpullHalf() {
         const full = rest.firstElementChild.scrollHeight;
         const f = (rest.getBoundingClientRect().bottom - card.getBoundingClientRect().bottom) / full;
         if (!(f > 0.1 && f < 0.9)) fails.push(`${way} half way (k ${k.toFixed(2)}), a stack is ${Math.round(f * 100)}% unfolded (not between)`);
+        o.restWhole(fails, `${way} half way (k ${k.toFixed(2)})`, rest, card);
         const badge = card.querySelector(".notif-more");
         const op = badge ? Number(getComputedStyle(badge).opacity) : NaN;
         if (!(op > 0.05 && op < 0.95)) fails.push(`${way} half way (k ${k.toFixed(2)}), the top card's +N badge's opacity is ${op} (not between 0 and 1)`);
@@ -476,6 +477,12 @@ async function overpullHalf() {
     };
   };
   o.half = {};
+  // Every card keeps its full width and its own opaque material at every frame: the rest never fades, never insets.
+  o.restWhole = (fails, at, rest, card) => {
+    const ro = Number(getComputedStyle(rest).opacity), rw = rest.getBoundingClientRect().width, cw = card.getBoundingClientRect().width;
+    if (ro !== 1) fails.push(`${at}, a stack's rest is faded (opacity ${ro}, want 1)`);
+    if (Math.abs(rw - cw) > 1) fails.push(`${at}, a stack's rest is ${Math.round(rw)} px wide, its top card ${Math.round(cw)} px`);
+  };
   // The group header look morphs too: the icon's partly faded half way; and the part above the rest (head band + card)
   // is the height it has settled - no layout change mid-pull, none at the settle ([settled] compares after it).
   o.headLook = (fails, way, k, card) => {
