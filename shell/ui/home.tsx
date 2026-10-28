@@ -70,12 +70,13 @@ function followDock(el: HTMLElement | null) {
 // Home's page only (app.tsx imports this module in every mode).
 if (!new URLSearchParams(location.search).get("mode")) effect(() => {
   const on = homePullOk.value;
-  const side = dockPosition.value !== "bottom";
+  const mainPage = on && page.value === 0;
+  dockPosition.value; // Re-report when placement changes, even if its size stays the same.
   const dockNode = dockElement.value;
   const report = () => {
-    const r = side ? dockNode?.getBoundingClientRect() : null;
+    const r = dockNode?.getBoundingClientRect();
     const exclude = r ? { left: r.left, top: r.top, width: r.width, height: r.height } : undefined;
-    powos.shade.homePull(on, exclude).then(
+    powos.shade.homePull(on, exclude, mainPage).then(
       (taken) => (shadeTakesHome.value = !!taken),
       () => (shadeTakesHome.value = false),
     );

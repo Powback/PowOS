@@ -266,7 +266,10 @@ class NavGesture(
 
     /** Let go for home: the window shrinks away, home's switcher layer collapses into home. */
     private fun home(t: RecentsTransition?) {
-        if (t == null) return goHome()
+        if (t == null) {
+            if (from == null && Switcher.homeVisible && Switcher.homeMainPage) return switcher(null)
+            return goHome()
+        }
         // The page follows the window's settle frame by frame (the same spring), and hears where it went at its end.
         Switcher.ending()
         // The recents activity was what came up behind the app (the desktop is home): home is started after it.
@@ -302,12 +305,16 @@ class NavGesture(
         }
     }
 
+    private fun wantsHomeSwitcher(outcome: NavGestureClassifier.Outcome): Boolean =
+        outcome == NavGestureClassifier.Outcome.Switcher ||
+            (outcome == NavGestureClassifier.Outcome.Home && Switcher.homeMainPage)
+
     /** The swipe over home let go: the layer springs onto the cards (the switcher) or back into home. */
     private fun endOverHome(outcome: NavGestureClassifier.Outcome) {
         overHome = false
         android.view.Choreographer.getInstance().removeFrameCallback(homeFrame)
         homeFramePending = false
-        val toSwitcher = outcome == NavGestureClassifier.Outcome.Switcher && systemUiState and SYSUI_OVERVIEW_DISABLED == 0L
+        val toSwitcher = wantsHomeSwitcher(outcome) && systemUiState and SYSUI_OVERVIEW_DISABLED == 0L
         if (!toSwitcher) Switcher.ending()
         val from0 = homeProgress
         val home0 = homeness

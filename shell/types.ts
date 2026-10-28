@@ -629,7 +629,7 @@ export interface Bridge {
      * Home's page: a pull down on home is the shade's now ([on]: nothing open over home's pages). Resolves true when the
      * host takes that finger itself (its gesture input), false when it can't - then home asks [open] on a swipe down.
      */
-    homePull(on: boolean, exclude?: { left: number; top: number; width: number; height: number }): Promise<boolean>;
+    homePull(on: boolean, exclude?: { left: number; top: number; width: number; height: number }, mainPage?: boolean): Promise<boolean>;
     /** The shade down, not following a finger (home without the host's gesture input). */
     open(): Promise<void>;
   };

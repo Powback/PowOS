@@ -73,9 +73,19 @@ async function dockPositionCheck(position) {
   const S = await importShim("./state.ts");
   const D = await importShim("./ui/dockdrop.ts");
   S.setDock(S.apps.value.slice(0, 4).map(a => a.key));
-  S.dockPlacement.value = position;
-  await new Promise(r => setTimeout(r, 250));
   const fails = [];
+  function setPosition() {
+    const mode = S.desktopDockMode.value ? "desktop" : "mobile";
+    const expected = mode === "desktop" ? "left" : "bottom";
+    if (S.dockPosition.value !== expected) fails.push("wrong default dock position");
+    const other = mode === "desktop" ? S.mobileDockPlacement : S.desktopDockPlacement;
+    const before = other.value;
+    S.dockPlacement.value = position;
+    if (other.value !== before) fails.push("changing dock position changed the other mode");
+    if (localStorage.getItem(`powos.dock.position.${mode}`) !== position) fails.push("position not saved");
+  }
+  setPosition();
+  await new Promise(r => setTimeout(r, 250));
   const dock = document.querySelector(".home > .dock");
   const rect = dock.getBoundingClientRect();
   const cells = [...dock.querySelectorAll(".dock-page:first-child > .app")].map(n => n.getBoundingClientRect());
@@ -93,7 +103,6 @@ async function dockPositionCheck(position) {
   }
   if (position !== "bottom") checkVertical();
   else if (rect.width < rect.height) fails.push("bottom dock is vertical");
-  if (localStorage.getItem("powos.dock.position") !== position) fails.push("position not saved");
   const windows = await importShim("./ui/desktops.ts");
   if (windows.barTop() < innerHeight / 2) fails.push("dock collapses window work area");
   S.drawer.value = 1;

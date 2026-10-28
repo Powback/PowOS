@@ -138,9 +138,20 @@ export function stored(key: string, initial = ""): Signal<string> {
   return s;
 }
 
-/** Dock placement is shared by the phone and desktop shell; unknown saved values fall back to bottom. */
-export const dockPlacement = stored("dock.position", "bottom");
-export const dockPosition = computed(() => ["left", "right"].includes(dockPlacement.value) ? dockPlacement.value : "bottom");
+/** Mobile and desktop keep independent choices; unfolded home uses the desktop preference. */
+export const mobileDockPlacement = stored("dock.position.mobile", "bottom");
+export const desktopDockPlacement = stored("dock.position.desktop", "left");
+export const desktopDockMode = computed(() => new URLSearchParams(location.search).get("mode") === "desktop" || wideHome.value);
+const activeDockPlacement = () => desktopDockMode.value ? desktopDockPlacement : mobileDockPlacement;
+/** The active preference also serves gesture/layout callers when the display changes. */
+export const dockPlacement = {
+  get value() { return activeDockPlacement().value; },
+  set value(value: string) { activeDockPlacement().value = value; },
+};
+export function validDockPosition(value: string, fallback: string): string {
+  return ["bottom", "left", "right"].includes(value) ? value : fallback;
+}
+export const dockPosition = computed(() => validDockPosition(dockPlacement.value, desktopDockMode.value ? "left" : "bottom"));
 
 /** The drawer: open or not (a finger dragging it is gesture.ts's drawerDrag). */
 export const drawer = signal(0);

@@ -11,12 +11,14 @@ window_lock side-dock-layout 120
 export CDP_TIMEOUT_S=20
 I0=$(irq)
 [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" = Awake ] || exit 3
-old=$(ev 'importShim("./state.ts").then(s=>s.dockPlacement.value)')
+old=$(ev 'importShim("./state.ts").then(s=>s.mobileDockPlacement.value)')
+oldDesktop=$(ev 'importShim("./state.ts").then(s=>s.desktopDockPlacement.value)')
+case "$oldDesktop" in bottom|left|right) ;; *) echo "FAIL: cannot read desktop dock setting"; exit 1 ;; esac
 case "$old" in bottom|left|right) ;; *) echo "FAIL: cannot read dock setting"; exit 1 ;; esac
 oldpage=$(hpage)
 [[ "$oldpage" =~ ^-?[0-9]+$ ]] || { echo "FAIL: cannot read home page"; exit 1; }
 restore() {
-  ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.dockPlacement.value='$old';s.page.value=$oldpage;return 'restored'})" >/dev/null
+  ev "importShim('./state.ts').then(s=>{s.drawer.value=0;s.mobileDockPlacement.value='$old';s.desktopDockPlacement.value='$oldDesktop';s.page.value=$oldpage;return 'restored'})" >/dev/null
   sh_ 'input keyevent BACK; cmd device_state state reset' >/dev/null
   [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
 }
@@ -43,13 +45,16 @@ for state in 0 3; do
     read -r x y end <<<"$(ev '(()=>{const r=document.querySelector(".home > .dock").getBoundingClientRect(),d=devicePixelRatio;return [r.x+r.width/2,r.bottom-45,r.top+45].map(n=>Math.round(n*d)).join(" ")})()')"
     echo "dock $state $side: swipe $x,$y -> $x,$end"
     [[ "$x $y $end" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]] && [ "$y" -gt "$end" ] || { echo "FAIL: invalid dock swipe geometry"; exit 1; }
-    sh_ "input swipe $x $y $x $end 400"
+    for direction in up down; do
+      if [ "$direction" = up ]; then start=$y; finish=$end; else start=$end; finish=$y; fi
+    sh_ "input swipe $x $start $x $finish 400"
     sleep 1
     chk dock-swipe
     opened=$(ev 'importShim("./state.ts").then(s=>String(s.drawer.value!==0||s.notif.value))')
     native=$(shade_open)
     [ "$native" = false ] || { echo "FAIL: $state $side dock swipe opened native shade ($native)"; exit 1; }
     [ "$opened" = false ] || { echo "FAIL: $state $side dock swipe opened launcher or shade ($opened)"; exit 1; }
+    done
     "$T/shot.sh" "$OUT/home-$state-$side.png" >/dev/null || exit 1
     ev 'importShim("./state.ts").then(s=>{s.drawer.value=1;return "open"})' >/dev/null
     sleep 1

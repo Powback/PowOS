@@ -60,6 +60,9 @@ object Switcher {
     private var hostBlur: ((Float) -> Unit)? = null
 
     /** The layer is home's page's (PowOS's web home is the home app), else the recents activity's. */
+    /** Home has reported its main page with no panel or app open. */
+    var homeMainPage = false
+
     var onHome = true
         private set
 
