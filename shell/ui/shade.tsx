@@ -38,7 +38,7 @@ powos.on("shade.settle", ({ open }: { open: boolean }) => {
  * One strong frost under the panel: what's behind it (home's widgets, the search pill, the dock) can't be read. The
  * compositor's radius at full openness, dp - its blur is only ~0.15-0.3 of it (the native-blur expert's measure).
  */
-const BLUR_DP = 360;
+const BLUR_DP = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--shade-blur-native")) || 160;
 void powos.shade.blur?.(BLUR_DP).catch(() => {});
 
 /**
@@ -50,6 +50,25 @@ void powos.shade.blur?.(BLUR_DP).catch(() => {});
  */
 let sentQ = -1;
 let following = false;
+/**
+ * A host without "shade.behind" (an APK older than 245a67af rejects the call): the blur is scaled by its radius instead
+ * (shade.blur(dp * q), which that host applies to the window as it is), so a swipe shut on the page still eases the
+ * blur away instead of leaving it until the window goes. The full radius is put back when the window is shut.
+ */
+let legacyHost = false;
+function sendBehind(q: number) {
+  if (legacyHost) return void powos.shade.blur?.(BLUR_DP * q).catch(() => {});
+  const p = powos.shade.behind?.(q);
+  if (!p) return void (legacyHost = true);
+  p.catch(() => {
+    legacyHost = true;
+    void powos.shade.blur?.(BLUR_DP * q).catch(() => {});
+  });
+}
+/** The window is going: the old host's radius back to full for the next pull (no-op on a host with behind). */
+function restoreRadius() {
+  if (legacyHost) void powos.shade.blur?.(BLUR_DP).catch(() => {});
+}
 const panelQ = () => {
   const el = document.querySelector<HTMLElement>(".shade-screen .notif-panel");
   // The registered --q, animated: at an animation frame it's this frame's value (the drag's, or the transition's).
@@ -66,7 +85,7 @@ function followBehind() {
     if (Math.abs(q - sentQ) > 0.001) {
       sentQ = q;
       still = 0;
-      void powos.shade.behind?.(q).catch(() => {});
+      sendBehind(q);
     } else if (++still > 3 && notifDrag.peek() == null) {
       following = false;
       return;
@@ -95,7 +114,7 @@ const PULL = 36;
 /** The banner gone: the window too, unless the shade is coming down. */
 function unpeek() {
   peek.value = null;
-  if (notifShown() === 0) powos.shade.closed();
+  if (notifShown() === 0) (restoreRadius(), powos.shade.closed());
 }
 
 /** The whole shade from the banner: the window grows, the panel comes down. */
@@ -194,7 +213,7 @@ export function Shade() {
   useEffect(() => {
     if (!shut) return;
     const t = window.setTimeout(
-      () => notifShown() === 0 && !peek.value && powos.shade.closed(),
+      () => notifShown() === 0 && !peek.value && (restoreRadius(), powos.shade.closed()),
       300,
     );
     return () => clearTimeout(t);

@@ -81,6 +81,8 @@ fromNative.add((text) => {
   if (!text.startsWith("b.state ")) return;
   hostBlurs.value = text.endsWith("1");
   update();
+  // Said again (the host on resume): its regions are gone with the window's last frame - send them anew.
+  if (nativeGlass.value) (void (last = ""), kick());
 });
 native.subscribe((p) => {
   if (p && OVER_WALLPAPER.has(mode)) send("b.hello");
@@ -543,9 +545,22 @@ new MutationObserver((records) => {
 // home measured every surface every frame (58 measures a second while the user used home).
 const touch = (e: Event) => (tracks || document.querySelector(".home.dragging")) && (why(e.type), kick());
 for (const ev of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) addEventListener(ev, touch, { capture: true, passive: true });
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) why("shown"), changed();
-});
+/**
+ * The window came back (unlocked, resumed, shown again): the host dropped its regions while it was away, and the set
+ * measured now is the same text as the last one sent - which isn't sent twice, so home sat unblurred until a page move
+ * changed a region (2026-10-28: "no blur after I unlock before I move the page"). Forget what was sent and measure.
+ */
+function resend(cause: string) {
+  if (document.hidden) return;
+  why(cause);
+  last = "";
+  changed();
+}
+document.addEventListener("visibilitychange", () => resend("shown"));
+addEventListener("focus", () => resend("focus"));
+addEventListener("pageshow", () => resend("pageshow"));
+powos.on("lock.shown", () => resend("lock.shown"));
+powos.on("system.home", () => resend("system.home"));
 const animated = (e: Event) => carries(e.target) && (why(e.type, e.target), kick());
 for (const ev of ["transitionrun", "transitionend", "transitioncancel", "animationstart", "animationend"]) addEventListener(ev, animated, { capture: true, passive: true });
 addEventListener("resize", () => (why("resize"), changed()));

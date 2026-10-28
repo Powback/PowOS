@@ -403,7 +403,8 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
 }
 /* Over a wallpaper of the other tone: nearly solid. */
 :root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] { --chat-fill: 94%; }
-/* Home's widgets: their text is often small and plain - a touch more of the tint than the reference (4.0 -> 4.5:1). */
+/* Home's widgets are PowOS AI's frost (the material block near the end: same tint, same compositor blur, 2026-10-28 "the
+   color of the widgets sucks"); this --glass-dim is only the plain/CSS-glass fallback. Their text is often small and plain - a touch more of the tint than the reference (4.0 -> 4.5:1). */
 .page .home-tile > .tile, .page .seam {
   /* Measured over the crystal on the inner screen (the widgets' preview): 32% left plain text at 4.2:1, 42% reaches
      4.5; secondary text in a widget is the foreground itself - its size says it's secondary, a see-through colour
@@ -2298,10 +2299,10 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
   --frost-sheen: color-mix(in srgb, var(--color-foreground) 6%, transparent);
 }
 /* A dark theme over a dark wallpaper: the tint a touch lighter, so the glass shows over pure black. */
-:root[data-light="false"]:not([data-wallpaper="light"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3)) {
+:root[data-light="false"]:not([data-wallpaper="light"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3), .page .home-tile > .tile) {
   --frost-base: color-mix(in oklab, var(--glass-base) 50%, color-mix(in oklab, var(--frost-cool) 80%, var(--color-foreground)));
 }
-html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html.glass-native .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel:has(.cc.v3) {
+html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html.glass-native .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel:has(.cc.v3), html:root .page .home-tile > .tile {
   --glass-blur-native: var(--frost-blur-native);
   /* Glass, not a slab, over a black backdrop too (blur of black is black): a faint light from above and a lit edge. */
   background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
@@ -2313,7 +2314,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
  * the wallpaper's tone, its text the theme's two colours swapped - as the wallpaper's labels turn (theme.css
  * data-wallpaper) - not a heavier fill.
  */
-:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-view, .home:has(.ai-panel) .launcher-frame.tile, .home:has(.ai-panel) .ai-panel, .notif-panel:has(.cc.v3), .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *)) {
+:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-view, .home:has(.ai-panel) .launcher-frame.tile, .home:has(.ai-panel) .ai-panel, .notif-panel:has(.cc.v3), .page .home-tile > .tile, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *)) {
   --frost-base: color-mix(in oklab, var(--frost-paper) 70%, var(--frost-swap-cool));
   --glass-veil: transparent;
   --color-foreground: var(--frost-ink);

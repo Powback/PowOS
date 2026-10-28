@@ -110,6 +110,9 @@
   --frost-base: color-mix(in oklab, var(--glass-base) 55%, var(--frost-cool));
   --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 16%), transparent);
   --frost-blur-native: 360px;
+  /* What's behind the open shade (the app, home): blurred by the compositor, dp. Was 360 (2026-10-28: "too much"); 160 is
+     still past reading text, close to home's glass (--glass-blur-native 140), so the two read as one material. */
+  --shade-blur-native: 160px;
   /* One material (docs/DESIGN-LANGUAGE.md): every surface is the reference fill - home's tiles as PowOS AI's cards. */
   --glass-fill: var(--text-fill);
   /*

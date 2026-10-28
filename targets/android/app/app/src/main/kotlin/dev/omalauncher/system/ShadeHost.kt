@@ -566,7 +566,7 @@ class ShadeHost(
      * What's behind the shade (the app, home) blurred as it comes down, as SystemUI's shade blurs it: the shade page
      * only tints its panel over it (shell/ui/glass.ts, html.glass-behind). Not for the banner (a strip of the window).
      */
-    // The control center's material: home's text, pill and dock unreadable behind it (design: 360 dp; the page sets it too).
+    // The control center's material: home's text, pill and dock unreadable behind it (design: 160 dp, theme.css --shade-blur-native; the page sets it too).
     private val blur = dev.omalauncher.shell.WindowBlur({ shade }, SHADE_BLUR_DP)
 
     /**
@@ -796,7 +796,7 @@ class ShadeHost(
         private const val MODE = "shade"
 
         /** What's behind the open shade blurred by this much (dp, the compositor's radius) until the page says. */
-        private const val SHADE_BLUR_DP = 360f
+        private const val SHADE_BLUR_DP = 160f
 
         /** The page's settle (shell.css [data-q] --q transition), ms. */
         private const val SETTLE_MS = 280L
