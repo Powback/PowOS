@@ -2407,7 +2407,8 @@ html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html.glass-
   box-shadow: var(--lift-edge), var(--lift-shadow);
 }
 /* Home's widgets: the frost above, with their own (lighter) compositor blur - --widget-blur-native (theme.css). */
-html:root .page .home-tile > .tile { --glass-blur-native: var(--widget-blur-native); }
+html:root .page .home-tile > .tile, html:root .lib-card.tile { --glass-blur-native: var(--widget-blur-native); }
+/* (the library's folder cards are home's tiles too: the widgets' blur, not the chrome's - the user, 18:41) */
 /* Home's search bar (the foot's pill, bar.tsx) is the widgets' glass too: their frost, edge and compositor blur (2026-10-28
    "make the search bar have the same tint and blur as the widgets"). */
 html:root .home > .bar .bar-pill {
