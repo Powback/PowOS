@@ -633,6 +633,9 @@ class ShadeHost(
             PixelFormat.TRANSLUCENT,
         ).apply {
             title = "PowOS shade"
+            // The shade at the display's fastest rate while it shows (the top-most window's ask wins; with none,
+            // ColorOS capped it and the home under it at 60 Hz - the user's 17:51 recording). Hidden, it asks nothing.
+            dev.omalauncher.shell.HighRefresh.ask(this, this@ShadeHost.display, dev.omalauncher.shell.HighRefresh.fastest(this@ShadeHost.display))
             gravity = Gravity.TOP or Gravity.START
             fitInsetsTypes = 0
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
