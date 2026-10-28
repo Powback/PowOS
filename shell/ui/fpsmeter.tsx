@@ -87,7 +87,7 @@ function drawGraph(cv: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
 function drawText(u: NonNullable<typeof ui>) {
   const f = mainFresh() ? main.fps : fpsNow();
   if (f !== shownFps) { shownFps = f; u.num.textContent = String(f).padStart(3, "\u2007"); }
-  const label = rec ? `REC ${Math.floor((performance.now() - recStart) / 1000)}s` : busy ? "SEND" : mainFresh() ? "" : "bar";
+  const label = rec ? `REC ${Math.floor((performance.now() - recStart) / 1000)}s` : busy ? "SEND" : "";
   if (label !== shownRec) { shownRec = label; u.label.textContent = label; u.root.classList.toggle("rec", rec); }
 }
 
