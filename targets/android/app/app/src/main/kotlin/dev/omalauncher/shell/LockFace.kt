@@ -110,6 +110,13 @@ class PowosLockActivity : Activity() {
         // Over the wallpaper, as home: the face lifted away shows what home stands on, not a blank window.
         window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+        // The bar under the face is the face's own: transparent, no contrast scrim. The scrim the system draws behind
+        // a nav bar that shows (a swipe from the edge, a keyguard handing over) was the undimmed wallpaper's strip at
+        // the bottom of the lock screen (2026-10-28 "a brown bar at the bottom").
+        window.navigationBarColor = Color.TRANSPARENT
+        window.statusBarColor = Color.TRANSPARENT
+        window.isNavigationBarContrastEnforced = false
+        window.isStatusBarContrastEnforced = false
         // No navigation handle: on a lock screen it goes nowhere (home is behind the lock), and the swipe up is the
         // face's. A swipe from the edge brings it back for a moment, as over a full-screen app.
         window.insetsController?.apply {

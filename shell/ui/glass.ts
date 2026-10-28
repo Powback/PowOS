@@ -205,7 +205,7 @@ function where(el: HTMLElement): [number, number] | null {
   return [x, y];
 }
 
-const placed = new WeakMap<HTMLElement, string>();
+let placed = new WeakMap<HTMLElement, string>();
 
 /** Every glass surface told where it is (only those that moved get new values: a style change is a restyle). */
 function place() {
@@ -256,7 +256,28 @@ new MutationObserver((records) => {
     if (r.attributeName === "style" && t.matches?.("[data-p], [data-q], .page-track, .home, .ai-screen")) continue;
     return schedule();
   }
-}).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class"] });
+}).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class"], characterData: true });
+
+// The lock face's cards come, go and change while it's up (a notification arrives, one is cleared): their frost is
+// placed again when the list's box resizes, and when the face is shown again (the cards moved while it was hidden,
+// where nothing laid out) - not only on a mutation, which a hidden window's frame never turned into a placement.
+if (mode === "lock") {
+  const again = () => {
+    placed = new WeakMap();
+    schedule();
+  };
+  const watch = new ResizeObserver(again);
+  const hook = () => {
+    const l = document.querySelector(".lock-notes");
+    if (l) watch.observe(l);
+  };
+  new MutationObserver(hook).observe(document.body, { childList: true, subtree: true });
+  hook();
+  powos.on("lock.shown", again);
+  document.addEventListener("visibilitychange", again);
+  addEventListener("pageshow", again);
+  addEventListener("focus", again);
+}
 
 addEventListener("resize", () => {
   // Folded or unfolded: another screen, maybe another picture (the host's copy is per screen) - asked again.
