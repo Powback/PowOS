@@ -823,6 +823,17 @@ public class MainActivity extends Activity
                 cutout.right, Math.max(cutout.bottom, roundedCornerBottom));
         }
 
+        // PowOS's status bar is a web-drawn overlay window above this activity (ShadeHost's strip). setupFullscreen hides
+        // the system bars, so the insets here read 0 and the desktop used to start under it: Steam's menu row and its
+        // window buttons were covered (2026-10-28). Reserve the bar's height like a panel strut: the surface (so KWin's
+        // output and every maximise/placement/snap in it) starts below the bar. Visibility is ignored on purpose.
+        // HACK: the output shrinks instead of KWin keeping a reserved area. Real fix: pkgs/kwin tells the output a top
+        // reserved area (layer-shell exclusive zone) so the wallpaper still runs behind the bar.
+        int statusTop = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top;
+        if (statusTop > safeInsets.top) {
+            safeInsets = Insets.of(safeInsets.left, statusTop, safeInsets.right, safeInsets.bottom);
+        }
+
         // The raised desktop ends directly above the IME. Keeping the display's
         // bottom safe inset there would leave a black strip between the desktop
         // (or extra-keys bar) and the keyboard. Use this dispatch's IME state,
