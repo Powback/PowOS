@@ -290,6 +290,14 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   task (patch 0013) cropped it. 0017: exported full-screen windows keep their geometry (QObject property
   `powosKeepFullScreenGeometry` -> checkWorkspacePosition returns; ABI unchanged) and AnlandWindowTask::scale/viewport
   fit them, centred, letterboxed (touch too); scale 1 when buffer == window. Every full-screen task letterboxes now.
+- 0032 (3.37, 2026-10-28, board games-resize-live-to-their-container-portrait-la): REVERSES 0017's size-keeping. The user
+  wants the game to match its container: fitWindow -> fitFullScreen sizes an exported full-screen window to taskSize /
+  targetScale on every task change (goLive after rotate/fold, resizeTo for a floating drag, setAppFullScreen). Evidence:
+  hyprland.log "window task 2 touch ... (steam_app_274190, 496x1104+0+0) (outside its input region)" while the task was
+  2484x1116 / 2268x2440 / 1360x1708 = launched on the cover at 1116x2484 / scale 2.25, never resized. 0017's fit-scale
+  letterbox stays as the fallback for a game that ignores the ConfigureNotify. Log: "full screen follows its task".
+  Check: bf-resize.sh (window aspect == screen aspect: unfolded, landscape, cover landscape/portrait, unfold again).
+  Unverified: whether Unity/DXVK under Wine re-renders at the new size or DXVK just scales its old swapchain.
 - bf-fold.sh: needs KWin >= KWIN_MIN (6.7.5-3.21); installs only an explicit KWIN_PKG NEWER than the installed one
   (vercmp). An old kit's KWIN_PKG=3.21 once DOWNGRADED the installed 3.22 (0018) (2026-10-23 02:02): never queue a kit
   with a pinned package. Fresh session (`android-request power logout`, never with Broforce up) when the running KWin

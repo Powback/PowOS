@@ -1,0 +1,102 @@
+From 3e23a1155cc38ce6ea0e55b3080e592452dd26b0 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Wed, 28 Oct 2026 11:46:21 +0100
+Subject: [PATCH] backends/anland: a full-screen window task's window follows
+ its task's size
+
+A full-screen window shown as its own Android task kept the size it had when
+it went full screen (0017): a game started on the folded cover stayed 496x1104
+logical when the phone rotated (2484x1116 task), unfolded (2268x2440) or its
+floating task was resized (1360x1708, 2268x2071) - drawn portrait and small,
+letterboxed, touches beside it outside its input region.
+
+Now fitWindow sizes a full-screen window to the task too (taskSize / the
+window's target scale) while the task owns its geometry
+(powosKeepFullScreenGeometry). KWin configures the X window; a game that
+follows renders at the task's size, one that doesn't is still scaled to fit
+(0017's viewport).
+---
+ src/backends/anland/anland_window_task.cpp | 40 +++++++++++++++++++---
+ src/backends/anland/anland_window_task.h   |  1 +
+ 2 files changed, 37 insertions(+), 4 deletions(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index c611df3..ffc9d33 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -296,8 +296,8 @@ void AnlandWindowTask::goLive()
+         }
+         m_exported = true;
+     }
+-    // A full-screen window keeps the size it has now through output changes (a game started unfolded keeps
+-    // rendering 2268x2440 on the cover screen) - the task scales it instead (viewport()).
++    // A full-screen window's size is the task's, not the screen's: KWin's own fit to the output stays out of it
++    // (checkWorkspacePosition) and fitWindow -> fitFullScreen sizes it to the task on every task change.
+     if (m_window->isFullScreen()) {
+         m_window->setProperty("powosKeepFullScreenGeometry", true); // Window::checkWorkspacePosition
+     }
+@@ -583,8 +583,11 @@ bool AnlandWindowTask::setAppFullScreen(bool on)
+ 
+ void AnlandWindowTask::fitWindow()
+ {
+-    // A full-screen window keeps KWin's full-screen geometry (the screen's - what the immersive task shows).
+-    if (!m_window || m_bufferSize.isEmpty() || m_window->isFullScreen()) {
++    if (!m_window || m_bufferSize.isEmpty()) {
++        return;
++    }
++    if (m_window->isFullScreen()) {
++        fitFullScreen();
+         return;
+     }
+     // The window takes the task's size (split screen, floating window, fold): its client area fills the task. The
+@@ -598,6 +601,35 @@ void AnlandWindowTask::fitWindow()
+     }
+ }
+ 
++void AnlandWindowTask::fitFullScreen()
++{
++    // A full-screen window shown as its task takes the task's shape and size: portrait task (phone upright) ->
++    // portrait window, rotated -> landscape, unfolded -> the inner screen, a floating task resized -> that size. It
++    // used to keep its size from when it went full screen (0017: a game started on the folded cover stayed 496x1104
++    // logical, letterboxed in a 2484x1116 landscape task, touches beside it "outside its input region"). KWin
++    // configures the X window (ConfigureNotify): Wine/SDL/Unity re-query their full-screen size from it; one that
++    // keeps rendering its old size is still scaled to fit, centred (scale()/viewport(): fitsWindow).
++    // Only while the task owns its geometry (powosKeepFullScreenGeometry: Window::checkWorkspacePosition leaves it).
++    if (!m_window->property("powosKeepFullScreenGeometry").toBool()) {
++        return;
++    }
++    const qreal targetScale = m_window->targetScale();
++    const QSize task = taskSize();
++    if (task.isEmpty() || targetScale <= 0) {
++        return;
++    }
++    const QSizeF client = QSizeF(task) / targetScale;
++    if (sameSize(m_window->clientGeometry().size(), client)) {
++        return;
++    }
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "full screen follows its task:" << m_window->clientGeometry().size() << "->" << client
++                        << "for" << task;
++    m_resizeAsked = std::chrono::steady_clock::now();
++    m_resizeWanted = client;
++    m_window->moveResize(RectF(m_window->frameGeometry().topLeft(), m_window->clientSizeToFrameSize(client)));
++    scheduleRender(); // drawn at the task's scale until the client commits its new size
++}
++
+ void AnlandWindowTask::noteResized()
+ {
+     // The client committed the size resizeTo asked for: how long it took (the log line after the resize).
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index caa311e..9e29872 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -130,6 +130,7 @@ private:
+     bool fitsWindow() const;
+     QSize taskSize() const;
+     void fitWindow();
++    void fitFullScreen();
+     void noteResized();
+     QSizeF wantedClientSize() const;
+     void keepTaskSize();
+-- 
+2.50.1 (Apple Git-155)
+

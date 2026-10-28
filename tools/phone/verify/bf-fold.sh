@@ -7,7 +7,7 @@
 # (powos-open-task: a Broforce the user started and left, frozen in the background, is resumed; else a launch) and
 # past its sleep grace, then unfolded -> forced CLOSED
 # (cmd device_state state 0) -> 25 s later (past the 15 s sleep timer) -> forced OPENED (state 3), each step: the
-# game's reaper + X window unchanged, its size kept, not frozen, its window changing (x11grab), SurfaceFlinger
+# game's reaper + X window unchanged (its size follows the task since kwin 0032), not frozen, its window changing (x11grab), SurfaceFlinger
 # presents of the window task, and a screencap's black bars (letterboxed on the cover). The forced state is always
 # reset; a Broforce it started is closed, one the user had left is frozen again (`powos game 274190 freeze`).
 # Artefacts ~/.cache/powos-verify/bf-fold-<date>/. Exit 3 = no window/touched.
@@ -114,12 +114,14 @@ probe() {  # probe <label> [cover|inner]
   [[ $st == *reaper=-* ]] && bad+=" game-gone"
   [ "${st%% *}" = "${first%% *}" ] || bad+=" kwin-restarted"
   [ "$(echo "$st" | grep -o 'reaper=[^ ]*')" = "$(echo "$first" | grep -o 'reaper=[^ ]*')" ] || bad+=" game-restarted"
-  [ "$(echo "$st" | grep -o 'win=[^ ]* geom=[0-9x]*')" = "$(echo "$first" | grep -o 'win=[^ ]* geom=[0-9x]*')" ] || bad+=" window-changed"
+  # kwin 0032 (3.37): the window takes the task's size on fold/unfold (bf-resize.sh checks that); same window id only.
+  [ "$(echo "$st" | grep -o 'win=[^ ]*')" = "$(echo "$first" | grep -o 'win=[^ ]*')" ] || bad+=" window-changed"
   [ "${c#changes=}" -ge 3 ] 2>/dev/null || bad+=" not-drawing"
   [ "${f:-0}" -ge 20 ] 2>/dev/null || bad+=" not-on-screen"
   local t=${s#*top=}; t=${t%% *}; local b=${s#*bottom=}; b=${b%% *}; local l=${s#*left=}; l=${l%% *}
   if [ "${2:-}" = cover ]; then  # 2268x2440 fitted into 1116x2484: ~640 px bars above and below
-    [ "${t:-0}" -ge 300 ] 2>/dev/null && [ "${b:-0}" -ge 300 ] 2>/dev/null || bad+=" not-letterboxed"
+    # Before 0032 the window kept 2268x2440 and was letterboxed here; now it takes the cover's size: a note only.
+    [ "${t:-0}" -ge 300 ] 2>/dev/null && [ "${b:-0}" -ge 300 ] 2>/dev/null && log "  $1 note: letterboxed on the cover: $s"
   else  # its own size on the inner screen: no bars expected (scale 1) - a note only, dark game art reads as bars too
     [ "${t:-999}" -lt 80 ] 2>/dev/null && [ "${b:-999}" -lt 80 ] 2>/dev/null && [ "${l:-999}" -lt 80 ] 2>/dev/null \
       || log "  $1 note: dark edges unfolded (bars? the task's buffer smaller than the game): $s"
