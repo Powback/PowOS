@@ -10,7 +10,10 @@ Android task focus, as activateWindow does for normal desktop activation.
 
 --- a/src/events.cpp
 +++ b/src/events.cpp
-@@ -551,3 +551,3 @@
+@@ -548,6 +548,6 @@
+         return;
+     }
+ 
 -    if (!isShown() || !isOnCurrentDesktop()) { // we unmapped it, but it got focus meanwhile ->
 +    if (!isShown() || (!isOnCurrentDesktop() && !property("powosShownByTask").toBool())) {
          return; // activateNextWindow() already transferred focus elsewhere

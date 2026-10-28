@@ -1,0 +1,33 @@
+From 915e4200199e07e428df8737de826a24cbc68073 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Wed, 28 Oct 2026 11:23:50 +0100
+Subject: [PATCH] backends/anland: a full-screen game in the Plasma app stays
+ on its desktop
+
+Steam inside the Plasma app starts a game that goes full screen: onFullScreenChanged exported it as a task over the app (only exportNew honoured m_desktopShown/ownedByDesktop), so it vanished from Plasma at once. Keep it on the desktop and activate it: Steam held KWin's active window and a full-screen Wine/Unity game that isn't active minimizes itself.
+---
+ src/backends/anland/anland_window_task.cpp | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index acfb274..643c2a0 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -1097,6 +1097,14 @@ void AnlandWindowTasks::onFullScreenChanged(Window *window)
+             // Full screen before Xwayland paired it with its wl_surface (a game mapping its window full screen, or
+             // going full screen in the moment between): exportable() can't take it yet. Again once it has one.
+             whenSurfaced(window);
++        } else if (!task && (m_desktopShown || ownedByDesktop(window)) && exportable(window)) {
++            // The Plasma app on screen (or a window the user left in it): a game Steam starts there goes full screen
++            // inside Plasma, the KDE way. Made a task, it vanished from Plasma at once (pulled off its desktop into a
++            // task over the app). Activated too: Steam kept KWin's active window, and a full-screen Wine/Unity game
++            // that isn't the active one minimizes itself.
++            markDesktopOwned(window);
++            workspace()->activateWindow(window, true);
++            qCInfo(KWIN_ANLAND) << "full-screen window" << window->caption() << "stays on the desktop (Plasma on screen)";
+         } else if (!task && !handBackAndroidApp(window) && exportable(window)) {
+             show(window, true);
+             qCInfo(KWIN_ANLAND) << "full-screen window" << window->caption() << "opened as a task";
+-- 
+2.50.1 (Apple Git-155)
+
