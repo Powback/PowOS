@@ -3,6 +3,11 @@
 # Home navigation: another page -> main page -> switcher. Dock drags never open panels.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
+installed=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null)
+if [ -z "$installed" ] || ! git -C "$here" diff --quiet "$installed" HEAD -- ":(top)targets/android/app"; then
+  echo "SKIP: the Home gesture APK has not been installed yet"
+  exit 3
+fi
 . "$here/e2e-lib.sh"
 . "$here/window-lock.sh"
 OUT=$HOME/.cache/powos-verify/home-repeat-$(date +%m%d-%H%M%S)
