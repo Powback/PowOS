@@ -1118,36 +1118,30 @@ input.folder-title:focus { background: var(--soft-fill); }
 .home.editing .bar:not(.search-face .bar),
 .home.editing .launcher,
 .home.editing .launcher-frame { visibility: hidden; }
-/* Pill over the dock (the default): the sheet in the pill's row, over the dock; wide: the middle of the one bar. */
-.home:not(.pill-below):not(.wide) { --edit-foot: calc(var(--strip-height) + max(var(--inset-bottom, 0px), var(--pill-foot))); }
-.home:not(.pill-below):not(.wide) > .edit-sheet { bottom: var(--edit-foot); min-height: 48px; padding-bottom: 0; border-radius: var(--radius); }
-.home:not(.pill-below):not(.wide) > .theme-pop { bottom: calc(var(--edit-foot) + 48px + var(--gap)); }
-.home.wide > .edit-sheet {
-  position: relative;
-  grid-area: 2 / 2;
-  align-self: center;
-  left: auto;
-  right: auto;
-  bottom: auto;
-  min-height: 44px;
-  padding: 0 4px 0 var(--edge);
-  border-radius: 22px;
-}
-.home.wide > .theme-pop { bottom: calc(var(--strip-height) + max(var(--inset-bottom, 0px), var(--pill-foot)) + var(--gap)); }
-/* One slim bar where the search bar and the dock were, flush with the screen's foot (editsheet.tsx). */
-.edit-sheet {
+/* The edit bar sits under the dock at the screen's very foot, the lowest element (the user, folded: "move the edit bar
+   to under the dock on the very very bottom"): flush on the gesture-nav inset, where the gesture-handle strip is when
+   there's no room above it. The search pill's row and the dock don't move. Folded, unfolded and with a side dock alike
+   it is one centred bar at the bottom. */
+.home { --edit-foot: max(var(--inset-bottom, env(safe-area-inset-bottom)), 44px); }
+.edit-sheet,
+.home.wide > .edit-sheet,
+.home.wide:is(.dock-left, .dock-right) > .edit-sheet {
   position: fixed;
   z-index: 12;
+  grid-area: auto;
   left: 0;
   right: 0;
   bottom: 0;
+  margin: 0 auto;
+  max-width: 640px;
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: calc(52px + var(--inset-bottom, 0px));
-  padding: 0 var(--edge) var(--inset-bottom, 0px);
+  min-height: var(--edit-foot);
+  padding: 0 var(--edge);
   border-radius: var(--radius) var(--radius) 0 0;
 }
+.theme-pop { bottom: calc(var(--edit-foot) + var(--strip-height) + var(--gap)); }
 .edit-act {
   font: var(--text-item) var(--font);
   color: var(--color-foreground);
@@ -1165,7 +1159,6 @@ input.folder-title:focus { background: var(--soft-fill); }
   z-index: 12;
   left: var(--edge);
   right: var(--edge);
-  bottom: calc(52px + var(--inset-bottom, 0px) + var(--gap));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2680,7 +2673,6 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
 .home.dock-right { padding-right: calc(var(--inset-right, env(safe-area-inset-right)) + var(--side-dock)); }
 .home.wide:is(.dock-left, .dock-right) { grid-template-columns: minmax(0, 1fr); }
 .home.wide:is(.dock-left, .dock-right) > .bar { grid-area: 2 / 1; width: min(100%, 360px); justify-self: center; }
-.home.wide:is(.dock-left, .dock-right) > .edit-sheet { grid-area: 2 / 1; }
 .home:is(.dock-left, .dock-right) > .dock:not(.dock-tray) {
   grid-area: auto;
   position: absolute;
