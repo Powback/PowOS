@@ -70,5 +70,8 @@ export const S: Record<string, Record<string, string | number>> = {
   btn: { font: "inherit", padding: "10px 16px", borderRadius: "20px", border: 0, background: "var(--soft-fill)", color: "inherit" },
   btnOn: { background: "var(--color-accent)", color: "var(--color-background)" },
   field: { flex: 1, minWidth: 0, font: "inherit", padding: "8px 12px", borderRadius: "8px", border: 0, background: "var(--soft-fill)", color: "inherit" },
+  fold: { cursor: "pointer", listStyle: "none" },
+  foldRow: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "12px" },
+  hero: { font: "inherit", fontWeight: 600, padding: "14px 16px", borderRadius: "var(--radius, 16px)", border: 0, background: "var(--color-accent)", color: "var(--color-background)" },
   bad: { color: "var(--color-red)" },
 };

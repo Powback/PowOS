@@ -152,17 +152,19 @@ function PutOnHome({ add, provider }: { add: (provider: string) => Promise<unkno
   );
 }
 
-export function Widgets({ widgets, addToHome }: { widgets?: AppWidget[]; addToHome?: (provider: string) => Promise<unknown> }) {
+export function Widgets({ widgets, addToHome, bare }: { widgets?: AppWidget[]; addToHome?: (provider: string) => Promise<unknown>; bare?: boolean }) {
   if (!widgets?.length) return null;
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-      <h2 style={S.group}>
-        Home-screen widgets <span style={{ ...S.muted, fontWeight: 400 }}>the app's own; each is also a widget-able action above</span>
-      </h2>
+      {!bare && (
+        <h2 style={S.group}>
+          Home-screen widgets <span style={{ ...S.muted, fontWeight: 400 }}>the app's own; each is also a widget-able action above</span>
+        </h2>
+      )}
       {widgets.map((w) => (
         <div key={w.provider} style={S.card}>
           <div style={S.name}>{w.label}</div>
-          <div style={S.idMuted}>{w.provider}</div>
+          {!bare && <div style={S.idMuted}>{w.provider}</div>}
           <Muted>
             {widgetSize(w)} · {w.resize.length ? `resizes ${w.resize.join(" + ")}` : "fixed size"} · preview {w.preview}
             {w.updatePeriodMs >= 1800000 ? ` · updates every ${Math.round(w.updatePeriodMs / 60000)} min` : ""}

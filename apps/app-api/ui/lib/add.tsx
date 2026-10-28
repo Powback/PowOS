@@ -264,7 +264,7 @@ function Review(p: ReviewProps) {
         <button style={S.back} onClick={p.back} aria-label="back">‹</button>
         <h1 style={S.title}>{spec?.name ?? p.draft}</h1>
       </header>
-      <Muted>A draft: dry runs only, nothing is sent. Reads are on once you add it; writes stay off until you switch one on.</Muted>
+      <Muted>Not added yet: you can only rehearse (dry run) here, nothing is sent. Its live data switches on when you add it; actions stay off until you switch one on.</Muted>
       {spec?.description && <Muted>{spec.description}</Muted>}
       {err ? <Muted>{err}</Muted> : spec ? <Actions net={p.net} app={p.app} spec={spec} draft /> : <Muted>…</Muted>}
       <Decide {...p} ready={!!spec} />
@@ -316,13 +316,13 @@ export function AddApp({ host, app, back, added }: { host: Host; app: string; ba
       <Path title="Describe it" note="PowOS AI reads the app's docs and writes the draft.">
         <Describe {...ctx} />
       </Path>
-      <Path title="From an installed app" note="Search what's installed. Tap one: it starts building at once, live, below in Drafts.">
+      <Path title="From an installed app" note="Search what's installed. Tap one: it starts building at once, live, below.">
         <InstalledApps {...ctx} />
       </Path>
       <Path title="Import its API" note="An OpenAPI document or a capability spec, from a link or a file. Never a password or a token.">
         <Import {...ctx} />
       </Path>
-      <h2 style={S.group}>Drafts</h2>
+      <h2 style={S.group}>Waiting for your OK</h2>
       <Drafts {...ctx} pending={Object.values(pending)} justAdded={justAdded} discardPending={discardPending} />
     </>
   );
