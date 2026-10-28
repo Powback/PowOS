@@ -8,13 +8,14 @@ html:is([data-mode="windowbar"], [data-mode="windowgrip"], [data-mode="statusbar
 .window-caption img { width: 12px; height: 12px; object-fit: contain; }
 .window-chrome button { position: relative; flex: 0 0 34px; display: grid; place-items: center; padding: 8px 0 0; border: 0; border-radius: 0; background: transparent; color: inherit; }
 .window-chrome button:is(:hover, :active, .pressed) { background: var(--soft-fill); }
-.window-chrome button:focus-visible, .status-chrome button:focus-visible { background: color-mix(in srgb, var(--color-accent) 30%, var(--frost-base)); }
+.window-chrome button:focus-visible { background: color-mix(in srgb, var(--color-accent) 30%, var(--frost-base)); }
 .window-chrome svg { width: 12px; height: 12px; }
 .window-chrome svg, .window-grip svg, .status-chrome svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .window-grip { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; color: var(--color-foreground); }
 .window-grip svg { width: 24px; height: 24px; }
 .status-chrome { width: 100%; height: 100%; display: flex; align-items: center; justify-content: space-between; gap: 24px; color: var(--color-foreground); user-select: none; }
 .status-chrome button { display: flex; align-items: center; gap: 6px; min-height: 24px; border: 0; border-radius: 0; padding: 3px 2px; background: transparent; box-shadow: none; color: inherit; font: 12px var(--font); }
+.status-chrome button:focus, .status-chrome button:focus-visible { outline: none; background: transparent; box-shadow: none; }
 .status-chrome svg { width: 16px; height: 16px; display: block; }
 .status-battery { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .status-battery svg { width: 24px; }
