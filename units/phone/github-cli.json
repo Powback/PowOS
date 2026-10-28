@@ -1,0 +1,14 @@
+{
+  "id": "github-cli",
+  "name": "GitHub CLI (gh)",
+  "kind": "system",
+  "owner": "system:powos-login",
+  "purpose": "`gh`: GitHub device-code sign-in behind `powos login github` and `powos self push` (pushing PowOS source upstream from any device); a command-line tool, nothing running",
+  "installedBy": "the PowOS rootfs image (Containerfile gh; phone: github-cli via targets/android/phone-rules.conf)",
+  "files": [
+    "/usr/bin/gh"
+  ],
+  "remove": {
+    "commands": []
+  }
+}

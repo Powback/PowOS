@@ -122,6 +122,7 @@ Sync, flush & backup:
   sync --keep-usb     Reload from USB (USB wins)
   flush               Force flush RAM → USB (no conflict check)
   safe                Check if safe to unplug USB
+  login github        Sign in to GitHub by device code (needed to push PowOS source; `self push` does it for you)
   backup [status|push|pull|setup <url>]  Backup system state to cloud (git)
 
 Updating — one question: whose code?
@@ -2778,6 +2779,11 @@ case "${1:-}" in
         # flip on/off, apply immediately. --json for GUIs.
         source "$POWOS_LIB/config.sh"
         cmd_config "$@"
+        ;;
+    login)
+        shift
+        source "$POWOS_LIB/setup.sh"
+        cmd_login "$@"
         ;;
     setup)
         shift

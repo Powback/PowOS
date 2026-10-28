@@ -29,8 +29,38 @@ POWOS_CONFIG_DIR="${POWOS_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME:-/root}/.config}
 # ─── GitHub auth ─────────────────────────────────────────────────────────
 # Wraps gh's device-code flow. gh handles the token storage + configures a
 # git credential helper so subsequent `git push` calls Just Work over HTTPS.
+# Run gh's device flow with the code made impossible to miss: gh prints
+# "one-time code: XXXX-XXXX" on its own; we re-announce it as one clear line
+# (the AI chat shows stdout, so the user sees it wherever PowOS AI runs) and
+# post a phone notification when the Android bridge is there. Never prints a token.
+GH_LOGIN_URL="https://github.com/login/device"
+gh_device_login() {
+    local line code rc
+    # stdin from /dev/null: gh must not wait for Enter; --skip-browser keeps it headless-safe.
+    # HACK: we parse gh's output for the code; gh has no machine-readable device-flow mode.
+    gh auth login --hostname github.com --git-protocol https \
+        --scopes "repo,workflow,read:packages,write:packages" --web --skip-browser </dev/null 2>&1 |
+    while IFS= read -r line; do
+        if [[ "$line" =~ ([A-Z0-9]{4}-[A-Z0-9]{4}) ]]; then
+            code="${BASH_REMATCH[1]}"
+            echo ">>> GitHub sign-in: open $GH_LOGIN_URL and enter code $code"
+            # Best-effort: only works on a rooted phone with the adb bridge; silent elsewhere.
+            command -v powos >/dev/null 2>&1 &&
+                powos android notify "GitHub sign-in" "Open $GH_LOGIN_URL and enter code $code" >/dev/null 2>&1 || true
+        else
+            printf '%s\n' "$line"
+        fi
+    done
+    rc="${PIPESTATUS[0]}"
+    return "$rc"
+}
+
 setup_gh_cmd() {
     if ! command -v gh >/dev/null 2>&1; then
+        if ! command -v dnf5 >/dev/null 2>&1; then
+            perr "gh CLI missing. It ships with the PowOS image/rootfs (github-cli); this device gets it on its next rebuild."
+            return 1
+        fi
         plog "gh CLI missing — installing via dnf (needs sudo)..."
         if ! sudo dnf5 -y install --setopt=install_weak_deps=False gh 2>&1 | tail -3; then
             perr "dnf install gh failed. Fedora repo should have it — check network."
@@ -39,23 +69,17 @@ setup_gh_cmd() {
     fi
 
     if gh auth status -h github.com >/dev/null 2>&1; then
-        pok "Already authenticated with GitHub."
+        pok "Already signed in to GitHub."
         gh auth status -h github.com 2>&1 | grep -E "Logged in|Token scopes" | head -3
-        plog "Re-run with --refresh to reauthenticate or add scopes."
+        gh auth setup-git >/dev/null 2>&1 || true
         [[ "${1:-}" == "--refresh" ]] || return 0
         gh auth refresh -h github.com -s read:packages,repo,workflow,write:packages
         return 0
     fi
 
-    plog "Starting GitHub login (device code — opens a browser tab)..."
-    plog "  Scopes: repo, workflow, read:packages, write:packages"
-    plog "  Git protocol: https (gh will configure the credential helper)"
-    if ! gh auth login \
-            --hostname github.com \
-            --git-protocol https \
-            --scopes "repo,workflow,read:packages,write:packages" \
-            --web; then
-        perr "gh auth login failed."
+    plog "Starting GitHub sign-in (device code)..."
+    if ! gh_device_login; then
+        perr "GitHub sign-in failed or was not approved."
         return 1
     fi
 
@@ -287,6 +311,14 @@ After setup:
   • Agents (powos ai --agent coder/modder/…) can commit + push + open
     Nexus API endpoints without asking you to click anything.
 EOF
+}
+
+# `powos login github` - the memorable front door for the same device-flow sign-in.
+cmd_login() {
+    case "${1:-github}" in
+        github|gh) shift || true; setup_gh_cmd "$@" ;;
+        *) perr "Unknown: powos login ${1:-}  (try: powos login github)"; return 1 ;;
+    esac
 }
 
 cmd_setup() {

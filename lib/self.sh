@@ -441,6 +441,24 @@ self_test() {
     return 1
 }
 
+# git push; with no credentials, sign in by GitHub device code right here and retry once.
+# No separate setup step. Prints git's output; returns git's status.
+self_push_authed() {
+    local src="$1" out rc
+    out="$(GIT_TERMINAL_PROMPT=0 git -C "$src" push 2>&1)"; rc=$?
+    if (( rc != 0 )) && grep -qiE "could not read (Username|Password)|Authentication failed|terminal prompts disabled|HTTP 40[13]|error: 40[13]" <<<"$out"; then
+        plog "Not signed in to GitHub - starting device sign-in." >&2
+        # shellcheck source=setup.sh
+        source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/setup.sh"
+        # The sign-in's code line must reach the user, so it goes to stderr, not into $out.
+        if setup_gh_cmd >&2; then
+            out="$(GIT_TERMINAL_PROMPT=0 git -C "$src" push 2>&1)"; rc=$?
+        fi
+    fi
+    printf '%s\n' "$out"
+    return "$rc"
+}
+
 # ══════════════════════════════════════════════════════════════════
 # push — add/commit/push with human-friendly errors
 # ══════════════════════════════════════════════════════════════════
@@ -516,12 +534,12 @@ self_push() {
 
     plog "Pushing to remote…"
     local out rc
-    out="$(git -C "$src" push 2>&1)"; rc=$?
+    out="$(self_push_authed "$src")"; rc=$?
     if (( rc != 0 )); then
         printf '%s\n' "$out" | self_indent
         perr "Push failed. Common fixes:"
         perr "  • No remote/upstream:  git -C $src remote -v   (or run 'powos self pull' to attach)"
-        perr "  • Not authenticated:   run 'gh auth login', or configure a git credential helper"
+        perr "  • Not authenticated:   run 'powos login github' (or 'gh auth login'), or configure a git credential helper"
         return 1
     fi
     printf '%s\n' "$out" | self_indent

@@ -300,7 +300,7 @@ RUN . /etc/os-release; \
     case "${VARIANT_ID:-}${IMAGE_ID:-}" in *deck*) EXCL="--exclude=akmod-openrgb" ;; esac; \
     dnf5 -y install --setopt=install_weak_deps=False $EXCL \
         openrgb piper logiops uv unzip podman-compose podman-docker \
-        libnice-gstreamer1 maliit-keyboard && \
+        libnice-gstreamer1 maliit-keyboard gh && \
     curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.zip" \
         -o /tmp/bun.zip && \
     unzip -q -j /tmp/bun.zip 'bun-linux-x64/bun' -d /usr/bin/ && \
