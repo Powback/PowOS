@@ -154,13 +154,23 @@ class ShellActivity : Activity() {
         }
     }
 
+    /**
+     * One line per home (the dock's window) visibility change, with the desktop (Plasma app) state: a dock seen over the
+     * Plasma app during a launch (board plasma-app-launching-inside-plasma-never-flashes) shows here as "home started"
+     * while desktop=true, and the line before it says which launch moved home up.
+     */
+    private fun dockLog(what: String) =
+        android.util.Log.i("PowosDock", "home $what (desktop on screen=${andro.marchy.WindowTasks.desktopOnScreen()}, top task=${dev.omalauncher.system.Tasks.visible(this)})")
+
     override fun onPause() {
         super.onPause()
+        dockLog("paused")
         inFront = false
     }
 
     override fun onResume() {
         super.onResume()
+        dockLog("resumed")
         inFront = true
         // The page may have missed a fold while hidden: the display state again, whatever it was.
         host.bridge.pushDisplay(force = true)
@@ -231,6 +241,7 @@ class ShellActivity : Activity() {
     // A home screen showing: widgets' sources run (they pause while no home is visible), the guest's on-screen helpers.
     override fun onStart() {
         super.onStart()
+        dockLog("started (dock visible)")
         if (::host.isInitialized) dev.omalauncher.system.Switcher.homeStarted(host.bridge)
         // Back in front with a home panel still open: over the windows again (PanelLift).
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) PanelLift.current?.again()
@@ -242,6 +253,7 @@ class ShellActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
+        dockLog("stopped (dock hidden)")
         // Out of sight: the switcher layer goes (an app was opened from it, or came up over it).
         if (::host.isInitialized) dev.omalauncher.system.Switcher.homeStopped(host.bridge)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) PanelLift.dropNow("home stopped")

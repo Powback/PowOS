@@ -352,6 +352,7 @@ public final class WindowTasks {
                 // The application went full screen (a game, Steam Big Picture): an immersive task.
                 .putExtra(PowosWindowActivity.EXTRA_FULLSCREEN, fullScreen)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
+        Log.i("PowosDock", "window task for " + id + " (" + appId + ") started over the " + (desktopOnScreen() ? "Plasma desktop" : "home"));
         context.startActivity(i, options);
     }
 

@@ -49,7 +49,15 @@ public final class LaunchWindows {
     public static boolean open(Context context, String appId, String[] ids, String label) {
         if (!WindowTasks.connected() || !WindowTasks.kwinCan("export-new") || waitingFor(ids) != null)
             return false;
+        // The Plasma app is on screen: the app's window opens ON the desktop (KWin: "desktop 1"), nothing is a task. A
+        // floating launch task started over it moves home (the dock) up behind/over the desktop until it ends (PowosDock
+        // log: home started while desktop=true), the flash seen launching inside Plasma.
+        if (WindowTasks.desktopOnScreen() && WindowTasks.kwinCan("desktop")) {
+            Log.i(TAG, "no launch window for " + appId + ": the desktop is on screen (its window opens there)");
+            return false;
+        }
         java.util.function.Function<Context, android.os.Bundle> options = AndroidRequests.openOptions;
+        Log.i("PowosDock", "launch window task for " + appId + " (desktop on screen=" + WindowTasks.desktopOnScreen() + ")");
         Intent i = new Intent(context, PowosWindowActivity.class)
                 // Its own document each time (documentLaunchMode intoExisting would bring an old one back).
                 .setData(Uri.parse("powos-window://launch?app=" + Uri.encode(appId) + "&at=" + android.os.SystemClock.uptimeMillis()))
