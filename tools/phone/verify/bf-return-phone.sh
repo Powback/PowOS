@@ -13,6 +13,7 @@
 #   back    the tap again: step_resume through powos-open-task -> tap -> first changed frame (<= RESUME_MS, 10000), the
 #           window focused (input goes to it) and its audio streams back, uncorked
 #   close   what this check started: closed (bf-stop.sh: the game, Steam stays); the user's game: frozen again
+#   frames <s>  changes=<n>: distinct samples of the game's X window over <s> s (xframes count; bf-recents.sh float)
 # Steps and asserts: bf-lib.sh ("FAIL <step>: <evidence>"); "TIMES ..." after back.
 set -uo pipefail
 RESUME_MS=${RESUME_MS:-10000}  # the limit (a FAIL past it); the goal is under 3 s (TIMES says which)
@@ -74,11 +75,13 @@ back)
   case ${AUD0:-} in [1-9]*) case $aud in 0\ *|*" ${aud%% *} corked") fail resume-audio "streams before leaving: $AUD0, after the resume: $aud" ;; esac ;; esac
   echo "TIMES resume ${RES:-none} ms ($(case ${RES:-none} in none) echo 'no frame' ;; *) [ "$RES" -lt 3000 ] && echo 'goal < 3 s met' || echo 'over the 3 s goal' ;; esac)), launch ${LAUNCH:-?} ms to its window"
   save ;;
+frames)
+  echo "changes=$(xframes count "$W" "${2:-5}" 10)" ;;
 close)
   if [ "${mine:-0}" = 1 ]; then close_mine
   else pill "$GAME frozen again (the user's)"; echo "the user's $GAME: $(powos game $APP freeze 2>&1 | tail -1 | sed 's/\x1b\[[0-9;]*m//g')"; fi
   rm -f $E ;;
-*) echo "usage: bf-return-phone.sh launch|away|back|close"; exit 2 ;;
+*) echo "usage: bf-return-phone.sh launch|away|back|frames <s>|close"; exit 2 ;;
 esac
 rm -rf "$T"
 [ -z "$FAILS" ]
