@@ -11,6 +11,13 @@
 # portable - the same pattern as shell/dev/gate.sh's own slots and targets/android/tools/warm-builder.sh's
 # build_lock) holding its pid and label; a dead holder's slot is reclaimed. No fixed wait limit: it blocks
 # until the slot is free, and prints who holds it once, not on every poll.
+#
+# Two lanes (f316), so a ~1 min quick check never queues behind a 10+ min package build:
+#   heavy: ONE at a time (CPU/RAM). Lock dir powos-build-slot (the pre-lanes path, so a lock held by an older
+#          version of this script still excludes new heavy jobs and is reclaimed the same way).
+#   quick: BUILD_SLOT_QUICK_N (default 2) at a time. Lock dirs powos-build-slot-quick.<i>. Never looks at heavy.
+# The lane comes from the label's first word (the lane table below); unknown names are heavy (the safe side).
+# Override with BUILD_SLOT_LANE=quick|heavy. A quick job holding an OLD-version lock only delays heavy jobs.
 set -uo pipefail
 [ $# -ge 1 ] || { echo "build-slot.sh: usage: build-slot.sh <label> -- <command...>" >&2; exit 2; }
 label=$1; shift
@@ -18,24 +25,39 @@ label=$1; shift
 shift
 [ $# -ge 1 ] || { echo "build-slot.sh: no command given after --" >&2; exit 2; }
 
-lock="${XDG_CACHE_HOME:-$HOME/.cache}/powos-build-slot"
-mkdir -p "$(dirname "$lock")"
+# lane table: first word of the label -> lane
+case "${BUILD_SLOT_LANE:-${label%% *}}" in
+  quick|compile-check|lint|lints|gate|bindings-check|tsc|typecheck) lane=quick ;;
+  *) lane=heavy ;;   # build-pkgs, warm-builder, apk, ship-apk, anything unknown
+esac
+base="${XDG_CACHE_HOME:-$HOME/.cache}"
+mkdir -p "$base"
+if [ "$lane" = quick ]; then
+  n=${BUILD_SLOT_QUICK_N:-2}; case "$n" in ''|*[!0-9]*|0) n=2 ;; esac
+  i=0; locks=""; while [ "$i" -lt "$n" ]; do locks="$locks $base/powos-build-slot-quick.$i"; i=$((i+1)); done
+else
+  locks="$base/powos-build-slot"
+fi
 t0=$(date +%s)
 said=""
+lock=""
 while :; do
-  if mkdir "$lock" 2>/dev/null; then
-    echo $$ > "$lock/pid"; echo "$label" > "$lock/label"
-    break
-  fi
-  # A dead holder's slot (its process no longer running) is reclaimed instead of waited on forever.
-  p=$(cat "$lock/pid" 2>/dev/null) || p=""
-  if [ -z "$p" ] || ! kill -0 "$p" 2>/dev/null; then rm -rf "$lock" 2>/dev/null; continue; fi
+  for l in $locks; do
+    if mkdir "$l" 2>/dev/null; then
+      echo $$ > "$l/pid"; echo "$label" > "$l/label"
+      lock=$l; break
+    fi
+    # A dead holder's slot (its process no longer running) is reclaimed instead of waited on forever.
+    p=$(cat "$l/pid" 2>/dev/null) || p=""
+    if [ -z "$p" ] || ! kill -0 "$p" 2>/dev/null; then rm -rf "$l" 2>/dev/null; continue 2; fi
+  done
+  [ -z "$lock" ] || break
   if [ -z "$said" ]; then
-    echo "build-slot: waiting for build slot (held by $(cat "$lock/label" 2>/dev/null || echo "?"))" >&2
+    echo "build-slot: waiting for $lane slot (held by $(for l in $locks; do cat "$l/label" 2>/dev/null; done | paste -sd, -))" >&2
     said=1
   fi
   sleep "${BUILD_SLOT_POLL_S:-2}"
 done
-[ -z "$said" ] || echo "build-slot: got the slot after $(($(date +%s) - t0))s" >&2
+[ -z "$said" ] || echo "build-slot: got the $lane slot after $(($(date +%s) - t0))s" >&2
 trap 'rm -rf "$lock"' EXIT
 "$@"
