@@ -54,6 +54,9 @@ export function wide(n: Bridge): Bridge {
   let hostPage = new Map<string, number>();
   /** The wide cells (null: not read from the store yet). */
   let cells: Record<string, WideCell> | null = null;
+  /** Wide or not as last decided (recheck); never read from innerWidth directly outside it. */
+  let was = isWide();
+  const wideNow = () => was;
 
   const save = () => n.store.set(STORE, cells).catch(() => {});
 
@@ -106,7 +109,7 @@ export function wide(n: Bridge): Bridge {
 
   async function toWide(h: Home): Promise<Home> {
     cols = h.columns;
-    if (!isWide()) return h;
+    if (!wideNow()) return h;
     const pages = [...h.pages].sort((a, b) => a - b);
     pairs = [];
     for (let i = 0; i < pages.length; i += 2) pairs.push(pages.slice(i, i + 2));
@@ -125,7 +128,7 @@ export function wide(n: Bridge): Bridge {
 
   /** A wide page and cell -> the host's (a tile onto another wide page): the half the cell's middle is over, inside it. */
   function toHost(page: number, cell: Cell | null): [number, Cell | null] {
-    if (!isWide()) return [page, cell];
+    if (!wideNow()) return [page, cell];
     const pair = pairs[page - 1] ?? [];
     const half = cell && cell.x + cell.w / 2 > cols + 0.5 ? 1 : 0;
     let host = pair[half] ?? pair[0];
@@ -148,7 +151,7 @@ export function wide(n: Bridge): Bridge {
    * page, the host moves it to that page's half too (the folded screen must find it on a page that page covers).
    */
   async function place(key: string, cell: Cell, page: number) {
-    if (!isWide()) return n.home.place(key, cell, page);
+    if (!wideNow()) return n.home.place(key, cell, page);
     const hp = hostPage.get(key);
     if (hp != null && pairs[page - 1]?.includes(hp)) {
       keep(key, cell, hp);
@@ -161,7 +164,7 @@ export function wide(n: Bridge): Bridge {
 
   /** Added on the wide page (an app dropped there, a panel): the host's page and cell for it, then its wide cell. */
   async function added(key: string, page: number, cell: Cell | null | undefined) {
-    if (isWide() && cell) {
+    if (wideNow() && cell) {
       keep(key, cell, toHost(page, cell)[0]);
       emit("home.changed", null);
     }
@@ -170,7 +173,7 @@ export function wide(n: Bridge): Bridge {
 
   /** The folder [app] is in now, unfolded (taken out of it, the folder may go away). */
   async function folderOf(app: string) {
-    if (!isWide() || !cells) return null;
+    if (!wideNow() || !cells) return null;
     const h = await n.home.get().catch(() => null);
     return h?.items.find((i) => i.kind === "folder" && i.apps?.some((a) => a.app === app)) ?? null;
   }
@@ -185,7 +188,9 @@ export function wide(n: Bridge): Bridge {
   }
 
   // Folded or unfolded: home is laid out again from the host's own layout.
-  let was = isWide();
+  // ONE decision (was) serves the bridge's layout (wideNow) and the UI (wideHome) alike. They used to read innerWidth
+  // separately: a home.get landing between a fold and the recheck gave the wide layout to a folded page (or the
+  // reverse), the "desktop layout on the cover screen, sometimes" bug (2026-10-28).
   const recheck = () => {
     if (document.hidden || isWide() === was) return;
     was = wideHome.value = isWide();
@@ -205,6 +210,12 @@ export function wide(n: Bridge): Bridge {
     setTimeout(recheck, 400);
   });
   if (typeof ResizeObserver !== "undefined") new ResizeObserver(recheck).observe(document.documentElement);
+  // A fold can change the window with none of the events above reaching a visible page (the resize lands while the
+  // page is hidden or the screen off, and the retries run at the old width). A media-query change fires whenever the
+  // viewport really crosses the threshold, and a slow heartbeat while shown catches anything else.
+  // HACK: the heartbeat is a safety net; the real fix would be the host pushing the display mode (HomeShell.kt).
+  matchMedia(`(min-width: ${WIDE}px)`).addEventListener?.("change", recheck);
+  setInterval(recheck, 1000);
 
   return {
     ...n,
@@ -221,7 +232,7 @@ export function wide(n: Bridge): Bridge {
       },
       group: async (key, target) => {
         // Two apps make a new folder in the target's place: on the wide page too (not the side-by-side spot).
-        const at = isWide() && !target.startsWith("folder:") ? cells?.[target] : undefined;
+        const at = wideNow() && !target.startsWith("folder:") ? cells?.[target] : undefined;
         const made = await n.home.group(key, target);
         if (made && at && made !== target) {
           keep(made, at, at.hp);
@@ -233,13 +244,13 @@ export function wide(n: Bridge): Bridge {
         const [p, c] = toHost(page, cell);
         return added(await n.home.addPanel(name, p, c!), page, cell);
       },
-      arrange: (columns, rows) => n.home.arrange(isWide() ? cols : columns, rows),
+      arrange: (columns, rows) => n.home.arrange(wideNow() ? cols : columns, rows),
     },
     // The shown page's widgets stay live, and the next page's (the host's rule): its left half's page covers both.
     // A desktop page after them (state.ts pages: no tiles yet) is a host page past all of them: nothing of theirs runs.
     widgets: {
       ...n.widgets,
-      page: (page) => n.widgets.page(isWide() ? (pairs[page - 1]?.[0] ?? Math.max(0, ...pairs.flat()) + page - pairs.length) : page),
+      page: (page) => n.widgets.page(wideNow() ? (pairs[page - 1]?.[0] ?? Math.max(0, ...pairs.flat()) + page - pairs.length) : page),
     },
     on: (event, handler) => {
       const off = n.on(event, handler);
