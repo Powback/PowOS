@@ -20,8 +20,8 @@
 import { signal } from "@preact/signals";
 
 /** Every category's members shown (only in the one panel, only while it's open). */
-/** Phone width: it opens expanded (the whole control center shown, folded by its own swipe); unfolded, both columns show. */
-export const expandedByDefault = () => typeof innerWidth === "number" && innerWidth < 700;
+/** It opens expanded on every screen, desktop mode too (the user, 2026-10-28): all tiles and the quick launchers shown, folded by its own swipe. */
+export const expandedByDefault = () => true;
 export const ccExpanded = signal(expandedByDefault());
 /**
  * v3 pull under way: "open" (stacks are shown unfolded for the pull, their rest driven by the finger) or "fold" (the
