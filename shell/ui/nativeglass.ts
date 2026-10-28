@@ -163,6 +163,13 @@ const sized = new ResizeObserver((es) => (why("resized", es[0]?.target), kick())
 
 /** How far a joined side reaches into its neighbour (CSS px; ~1.4 device px at 2.76). */
 const JOIN_OVERLAP = 0.5;
+/**
+ * How far a seam's bridge reaches into the two faces it joins (CSS px, per side). The bridge is only a gutter thick
+ * (8 px): the compositor's blur of a region that thin samples little but its own edge, and it came out a flat grey
+ * band between two frosted widgets. Reaching into each face (their regions blur the same wallpaper: the tint is CSS,
+ * so nothing doubles) gives it the same frost as the faces, so the group reads as one glass shape.
+ */
+const BRIDGE_REACH = 16;
 
 const f = (n: number) => (Math.round(n * 10) / 10).toString();
 
@@ -226,13 +233,14 @@ function measureRaw(followers: Element[] = []): Raw[] {
     // A side joined to a neighbour reaches half a CSS px into it: two regions meeting at a fractional device pixel each
     // antialias the shared edge, and unblurred wallpaper showed through between them as a hairline.
     const [jt, jr, jb, jl] = s.joined;
+    const reach = el.classList.contains("bridge") ? BRIDGE_REACH : JOIN_OVERLAP;
     let alpha = 1;
     for (const a of s.chain) alpha *= opacity(a);
     // Scaled (home's pages shrink a little as the drawer opens): the corners with it.
     const k = r.width / ((el as HTMLElement).offsetWidth || r.width);
     const follower = followerOf(el);
     out.push({
-      box: [r.left - JOIN_OVERLAP * jl, r.top - JOIN_OVERLAP * jt, r.right + JOIN_OVERLAP * jr, r.bottom + JOIN_OVERLAP * jb],
+      box: [r.left - reach * jl, r.top - reach * jt, r.right + reach * jr, r.bottom + reach * jb],
       own: [r.left, r.top, r.right, r.bottom],
       clips: s.clips.map((c) => {
         const q = c.getBoundingClientRect();

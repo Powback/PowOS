@@ -2396,6 +2396,14 @@ html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html.glass-
 }
 /* Home's widgets: the frost above, with their own (lighter) compositor blur - --widget-blur-native (theme.css). */
 html:root .page .home-tile > .tile { --glass-blur-native: var(--widget-blur-native); }
+/* A merged group's seam pieces (grid.tsx seams: the bridge along a shared span, the inner corner's fillet) are the
+   widgets' own material - the same frost, veil and compositor blur - not the plain glass fill they had (a flat grey band
+   between two frosted widgets, 2026-10-28 "the thing connecting widgets looks off"). No sheen: it is the top of a
+   face, and a piece in the middle of the group would restart it. */
+html:root .page .seam {
+  --glass-blur-native: var(--widget-blur-native);
+  background: linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+}
 /* The search widget (searchwidget.tsx) is a widget too: its pill takes the same frost and the same blur, nothing else. */
 html:root .page .search-face .bar-pill {
   --glass-blur-native: var(--widget-blur-native);
@@ -2407,7 +2415,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
  * the wallpaper's tone, its text the theme's two colours swapped - as the wallpaper's labels turn (theme.css
  * data-wallpaper) - not a heavier fill.
  */
-:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-view, .home:has(.ai-panel) .launcher-frame.tile, .home:has(.ai-panel) .ai-panel, .notif-panel :is(.cc.v3, .notif-own), .page .home-tile > .tile, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *)) {
+:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.chrome-surface, .page .seam, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-view, .home:has(.ai-panel) .launcher-frame.tile, .home:has(.ai-panel) .ai-panel, .notif-panel :is(.cc.v3, .notif-own), .page .home-tile > .tile, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *)) {
   --frost-base: color-mix(in oklab, var(--frost-paper) 70%, var(--frost-swap-cool));
   --glass-veil: transparent;
   --color-foreground: var(--frost-ink);
