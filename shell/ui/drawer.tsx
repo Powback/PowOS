@@ -192,7 +192,7 @@ function PendingAppCell() {
 function FolderView() {
   const folders = home.value.items.filter((i) => i.kind === "folder" && i.apps?.length);
   return (
-    <div class="drawer-list folder-view">
+    <div class="drawer-list drawer-folders">
       {!folders.length && <div class="muted folder-empty">No folders yet</div>}
       {folders.map((f) => (
         <section key={f.key}>

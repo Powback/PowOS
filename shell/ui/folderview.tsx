@@ -94,17 +94,31 @@ function useMorph(root: { current: HTMLElement | null }, closing: boolean, done:
     // Ends when the transitions do, not on a clock: a timer of MORPH_MS + 40 fired before a late-starting transition
     // (a busy frame on open) was through - it cut the sheet's last frames (a snap) and left the frost still fading.
     let live = true;
-    void transitionsEnded(el).then(async () => {
-      if (!live) return;
-      if (!closing) return rest(el);
+    let gone = false;
+    // Unmount exactly once, whichever path gets here first.
+    const finish = () => live && !gone && ((gone = true), done());
+    // Two frames, but never only frames: a hidden or throttled page runs no rAF, so a timer backs them up.
+    const frames = () => new Promise<void>((r) => {
+      const t = setTimeout(r, 120);
+      requestAnimationFrame(() => requestAnimationFrame(() => (clearTimeout(t), r())));
+    });
+    const close = async () => {
       // Closing is the mirror of opening: the tile's own mini icons come back under the landed ones, and only once they
       // are painted do the sheet's go - never a frame where the tile is empty (the user, 2026-10-28).
-      tileOf(el.dataset.key!)?.closest(".home-tile, .lib-card")?.classList.remove("opened");
-      tileOf(el.dataset.key!)?.classList.remove("opened");
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      if (live) done();
-    });
-    return () => void (live = false);
+      try {
+        const tile = tileOf(el.dataset.key!);
+        tile?.closest(".home-tile, .lib-card")?.classList.remove("opened");
+        tile?.classList.remove("opened");
+        await frames();
+      } finally {
+        finish();
+      }
+    };
+    void transitionsEnded(el).then(() => live && (closing ? close() : rest(el)), () => closing && finish());
+    // HACK: a transition that never reports finished (cancelled with the node, paused page) would leave the closed sheet
+    // mounted for good; real fix is none needed once transitionsEnded can't hang. Backstop only.
+    const backstop = closing ? setTimeout(() => void close(), MORPH_MS + 800) : 0;
+    return () => (live = false, void clearTimeout(backstop));
   }, [closing]);
 }
 

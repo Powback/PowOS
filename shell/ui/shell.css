@@ -496,7 +496,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 .drawer-pages { grid-column: 1 / -1; grid-row: 1; min-height: 0; overflow: hidden; }
 .drawer-track { display: flex; height: 100%; will-change: transform; }
 .drawer-page { flex: 0 0 100%; min-width: 0; min-height: 0; display: grid; grid-template-columns: 1fr var(--letter-bar); grid-template-rows: minmax(0, 1fr); }
-.drawer-page > .folder-view { grid-column: 1 / -1; padding-right: 0; }
+.drawer-page > .drawer-folders { grid-column: 1 / -1; padding-right: 0; }
 .folder-empty { padding: 24px 8px; text-align: center; }
 .drawer-list {
   grid-column: 1;
