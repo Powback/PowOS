@@ -345,8 +345,8 @@ if [ -n "$shots" ]; then
 fi
 [ $rc -le 1 ] || echo "FAIL gate: the browser run itself failed (exit $rc)"
 # The summary: scenes PASS/FAIL, where the time went (slot wait is queueing for CPU, not work).
-n_ok=$(cat "$browser_log" "$work/browser-retry.log" 2>/dev/null | grep -c '^ok   ')
-bad_scenes=$(grep -h '^FAIL ' "$browser_log" 2>/dev/null | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u | paste -sd' ' -)
+n_ok=$(cat "$browser_log" "$work/browser-retry.log" 2>/dev/null | grep -c '^ok   ' || true)
+bad_scenes=$(grep -h '^FAIL ' "$browser_log" 2>/dev/null | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u | paste -sd' ' - || true)
 echo "gate: summary: scenes $n_ok PASS, $(echo "$bad_scenes" | wc -w | tr -d ' ') FAIL${bad_scenes:+ ($bad_scenes)}; slot wait ${slot_wait} s; tsc ${t_tsc} s, lints ${t_lint} s, browser ${t_browser} s, widgets ${t_widgets} s"
 [ $fail = 0 ] && [ -z "$shots" ] && echo "$(date +%F\ %T) $scope_note" > "$cache_dir/$cache_key"
 echo "gate: $([ $fail = 0 ] && echo pass || echo FAIL) in $(($(date +%s) - t0)) s ($base$([ -n "$overrides" ] && echo " + phone overrides")$([ ${#files[@]} -gt 0 ] && echo " + ${#files[@]} pushed file(s)"))"
