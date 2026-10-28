@@ -20,6 +20,30 @@ export interface Use {
   name?: string;
   args?: Record<string, string | number | boolean>;
 }
+/**
+ * An Android app's own widget as a block (source "widget"): read in this island through the host's bridge
+ * (host.appWidget: the widget's view tree as data), so what it shows never leaves the phone. [appWidgetId] is the
+ * placed widget's id; when it's gone (re-added) the host finds it again by [provider].
+ */
+export interface AndroidUse {
+  as: string;
+  block: "android";
+  source: "widget";
+  provider: string;
+  appWidgetId?: number;
+  name?: string;
+}
+/** The native-card template's composition: one android block drawn as a PowOS glass card. */
+export interface CardComposition {
+  spec: "powos.compose/v1";
+  kind: "widget";
+  id: string;
+  name: string;
+  words?: string;
+  uses: AndroidUse[];
+  show: { template: "native-card"; title: string; from: string; empty?: string };
+  open?: string;
+}
 export interface RowSpec {
   from: string;
   path?: string;
@@ -223,4 +247,78 @@ export function useComposition(host: Host, app: string, c: Composition, box: { c
   const rows = build(c, source);
   const phase: Phase = fail ? (rows.length ? "stale" : "failed") : live ? "live" : rows.length ? "stale" : "loading";
   return { rows, phase, message: fail ? calm(fail, first?.name ?? c.name) : "", detail: fail ? String((fail as Error)?.message ?? fail) : "", retry };
+}
+
+// ------------------------------------------------------------------------------------------------ android blocks
+
+type Box = [number, number, number, number];
+export interface WidgetTree {
+  w: number;
+  h: number;
+  texts: { t: string; role: "title" | "value" | "label"; size: number; b: Box }[];
+  images: { ref: string; b: Box; d?: string }[];
+  progress: { v: number; max: number; indeterminate: boolean; b: Box }[];
+  lists: { b: Box; rows: string[][] }[];
+  targets: { b: Box; label: string }[];
+}
+interface AndroidHost {
+  idOf(provider: string): Promise<number | null>;
+  data(id: number, on: (d: { id: number; at: number; tree: WidgetTree }) => void): () => void;
+  frames(id: number, width: number, height: number, on: (url: string) => void): () => void;
+  image(ref: string): Promise<string | null>;
+  tap(id: number, x: number, y: number, width: number, height: number): Promise<void>;
+}
+
+/** Nothing the card can draw: the tree has no text, picture, progress or list rows. */
+export const emptyTree = (t: WidgetTree | null) => !t || !(t.texts.length || t.images.length || t.progress.length || t.lists.some((l) => l.rows.length));
+
+/**
+ * An android block, live: its tree (null until the widget answers), its pictures by ref (data URLs, fetched once),
+ * and - only while the tree is empty - the widget's own pixels as the fallback tile. "unavailable": this host can't
+ * read widgets (older PowOS), "missing": the widget isn't on home any more.
+ */
+export function useAndroidBlock(host: Host, use: AndroidUse, size: [number, number]) {
+  const ah = (host as Host & { appWidget?: AndroidHost }).appWidget;
+  const [id, setId] = useState<number | null>(use.appWidgetId ?? null);
+  const [tree, setTree] = useState<WidgetTree | null>(null);
+  const [images, setImages] = useState<Record<string, string>>({});
+  const [frame, setFrame] = useState<string | null>(null);
+  const [late, setLate] = useState(false);
+  const [missing, setMissing] = useState(false);
+  useEffect(() => {
+    if (!ah) return;
+    let live = true;
+    // The id written into the composition can be stale (the widget was removed and added again): look it up by provider.
+    ah.idOf(use.provider).then((now) => {
+      if (!live) return;
+      if (now !== null) setId(now);
+      else if (use.appWidgetId === undefined) setMissing(true);
+    }).catch(() => {});
+    return () => void (live = false);
+  }, [use.provider]);
+  useEffect(() => {
+    if (!ah || id === null) return;
+    const t = window.setTimeout(() => setLate(true), 4000);
+    const off = ah.data(id, (d) => setTree(d.tree));
+    return () => {
+      window.clearTimeout(t);
+      off();
+    };
+  }, [id]);
+  useEffect(() => {
+    if (!ah || !tree) return;
+    for (const im of tree.images) {
+      if (im.d || images[im.ref]) continue;
+      ah.image(im.ref).then((u) => u && setImages((m) => ({ ...m, [im.ref]: u }))).catch(() => {});
+    }
+  }, [tree]);
+  const fallback = !!ah && id !== null && (tree ? emptyTree(tree) : late);
+  const [w, h] = size;
+  useEffect(() => {
+    if (!ah || id === null || !fallback || !w || !h) return;
+    return ah.frames(id, Math.round(w), Math.round(h), setFrame);
+  }, [id, fallback, Math.round(w), Math.round(h)]);
+  const tap = (x: number, y: number, tw: number, th: number) => (ah && id !== null ? ah.tap(id, x, y, tw, th) : Promise.resolve());
+  const phase = !ah ? "unavailable" : missing ? "missing" : fallback ? "fallback" : tree ? "live" : "loading";
+  return { tree, images, frame, phase: phase as "unavailable" | "missing" | "fallback" | "live" | "loading", tap };
 }

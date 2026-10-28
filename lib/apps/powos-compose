@@ -21,8 +21,10 @@ it is an ordinary PowOS app with a database of its own, registered in powos-regi
 
 The rules (checked on every compose, build and install; C = composition):
   C1 spec powos.compose/v1, kind "widget" (apps: next - docs/COMPOSER.md)
-  C2 id local.<a-z0-9->, a name, the show template "status-list"
-  C3 every block is an appcap action that exists, in an app and an action switched on in App API
+  C2 id local.<a-z0-9->, a name, the show template "status-list" or "native-card"
+  C3 every block is an appcap action that exists, in an app and an action switched on in App API - or an android
+     block {block:"android", source:"widget", provider:"pkg/class", appWidgetId?} (native-card template only): the
+     phone's own widget read in the island through the bridge; its data never leaves the phone
   C4 a widget only reads: every block is `read` and widget-safe (the spec's widget: true) - never a write, never spend
   C5 a block's required inputs are given (args)
   C6 rows/join name blocks of this composition; `as` names are a-z0-9_- and unique
@@ -51,7 +53,7 @@ STATE = os.environ.get("POWOS_APPAPI_STATE") or os.path.expanduser("~/.local/sta
 SPEC = "powos.compose/v1"
 AS = re.compile(r"^[a-z0-9_-]{1,32}$")
 ID = re.compile(r"^local\.[a-z0-9][a-z0-9-]{0,40}$")
-TEMPLATES_SHOW = ("status-list",)
+TEMPLATES_SHOW = ("status-list", "native-card")
 
 
 class Fail(Exception):
@@ -316,12 +318,34 @@ def ai_manifest(text, args):
 # --------------------------------------------------------------------------------------------------------- check
 
 
+PROVIDER = re.compile(r"^[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+(#\d+)?$")
+
+
+def check_android(u, name):
+    """An android block: the phone's own widget, read as data. Only the widget source exists in this version; it
+    reads (the host's data mode) and a tap goes back to the widget itself - nothing here writes [C4]."""
+    errs = []
+    if u.get("source") != "widget":
+        errs.append(f"block {name}: android source \"widget\" only in this version (notifications, health: next) [C3]")
+    if not PROVIDER.match(str(u.get("provider", ""))):
+        errs.append(f"block {name}: provider = the widget's component, package/class [C3]")
+    if u.get("appWidgetId") is not None and not (isinstance(u["appWidgetId"], int) and not isinstance(u["appWidgetId"], bool) and u["appWidgetId"] >= 0):
+        errs.append(f"block {name}: appWidgetId = a whole number (the placed widget's id) [C3]")
+    return errs
+
+
+def use_name(u):
+    return f"android:{u.get('provider')}" if u.get("block") == "android" else f"{u['app']}.{u['action']}"
+
+
 def check_use(u, all_specs, seen):
     errs = []
     name = u.get("as", "?")
     if not AS.match(str(u.get("as", ""))) or name in seen:
         errs.append(f"block as={name!r}: a-z 0-9 _ -, unique [C6]")
     seen.add(name)
+    if u.get("block") == "android":
+        return errs + check_android(u, name)
     if u.get("block") != "appcap":
         return errs + [f"block {name}: only appcap blocks in this version [C3]"]
     s = all_specs.get(u.get("app"))
@@ -344,6 +368,14 @@ def check_show(m, names):
     errs = []
     if show.get("template") not in TEMPLATES_SHOW:
         errs.append(f"show.template: one of {', '.join(TEMPLATES_SHOW)} [C2]")
+    if show.get("template") == "native-card":
+        if show.get("from") not in names or not str(show.get("title", "")).strip():
+            errs.append("show: from = one of the blocks, and a title [C6]")
+        elif show["from"] not in {u.get("as") for u in (m.get("uses") or []) if isinstance(u, dict) and u.get("block") == "android"}:
+            errs.append("show.from: the native-card draws an android block [C3]")
+        return errs
+    if any(isinstance(u, dict) and u.get("block") == "android" for u in (m.get("uses") or [])):
+        errs.append("android blocks need the native-card template (status-list rows read appcap) [C2]")
     rows = show.get("rows") or {}
     if rows.get("from") not in names or not rows.get("label"):
         errs.append("show.rows: from = one of the blocks, and a label [C6]")
@@ -459,8 +491,11 @@ def generate(m, dest):
     t = TEMPLATES
     copy_template(os.path.join(t, "ui"), os.path.join("ui", "lib", "app.ts"), dest, m)
     copy_template(os.path.join(t, "ui"), os.path.join("ui", "tsconfig.json"), dest, m)
-    for rel in (os.path.join("ui", "lib", "compose.ts"), os.path.join("ui", "widgets", "main.tsx")):
-        copy_template(os.path.join(t, "composed"), rel, dest, m)
+    copy_template(os.path.join(t, "composed"), os.path.join("ui", "lib", "compose.ts"), dest, m)
+    # The show template's component is the widget's entry (widgets/main): status-list -> main.tsx, native-card -> native-card.tsx.
+    tpl = "native-card.tsx" if (m.get("show") or {}).get("template") == "native-card" else "main.tsx"
+    with open(os.path.join(t, "composed", "ui", "widgets", tpl), encoding="utf-8") as f:
+        write(os.path.join(dest, "ui", "widgets", "main.tsx"), subst(f.read(), m))
     write(own, json.dumps(m, indent=2) + "\n")
     write(os.path.join(dest, "composition.json"), json.dumps(m, indent=2) + "\n")
     write(os.path.join(dest, "powos-app.json"), json.dumps(app_manifest(m), indent=2) + "\n")
@@ -564,7 +599,7 @@ def _widget_manifest(o, text, args, cid):
     errs = check(m)
     if errs:
         fail_lines(errs)
-    uses_desc = ", ".join(f"{u['app']}.{u['action']}" for u in m["uses"])
+    uses_desc = ", ".join(use_name(u) for u in m["uses"])
     _creation("creation_add_log", cid, f"uses {uses_desc}")
     _creation("creation_step_done", cid, 0)
     return m
@@ -573,7 +608,7 @@ def _widget_manifest(o, text, args, cid):
 def _widget_build(o, m, cid):
     """Step 1: the app folder from the manifest (module + UI)."""
     d = generate(m, o.get("--dir") or os.path.join("~/Projects", m["id"].split(".", 1)[1]))
-    log(f"composed {m['id']} ({m['name']}) by {m['by']} in {d}: " + ", ".join(f"{u['app']}.{u['action']}" for u in m["uses"]))
+    log(f"composed {m['id']} ({m['name']}) by {m['by']} in {d}: " + ", ".join(use_name(u) for u in m["uses"]))
     _creation("creation_step_done", cid, 1)
     return d
 

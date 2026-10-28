@@ -167,3 +167,15 @@ service (a system-tier restart).
   answer from the real bridge with rows, and the audit shows reads only.
 - `tools/phone/verify/composer.sh`: on the phone - installed and registered (the edit sheet's list), its module
   served to the shell, its database published, and App API's audit shows the widget's calls as reads only.
+
+## Android widget blocks and the native card (2026-10-28)
+
+A block may be an Android app's own home widget: `{"as": "w", "block": "android", "source": "widget", "provider":
+"pkg/class", "appWidgetId": 12}`. It is read inside the island through the host (`host.appWidget`: the widget's view
+tree via `powos.appWidgets.watchData` / `appwidgets.data`), so the data never leaves the phone; `appWidgetId` is
+looked up again by `provider` when the widget was re-added. It is only valid with the `native-card` template:
+`show: {"template": "native-card", "title": "...", "from": "<as>"}`. The card draws title, big value(s), label, one
+small picture, a progress bar and list rows in PowOS type and glass; its targets (chips) forward a tap to the real
+widget (`appWidgets.touch`); when the tree has nothing to draw it shows the widget's own pixels (the pixel tile).
+`powos compose check` accepts it (rule C3, only source `widget` so far). Preview fixtures: `shell/dev/preview/data/
+local.steps.json` (and `~empty`) for a composition with id `local.steps`.

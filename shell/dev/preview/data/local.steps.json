@@ -1,0 +1,105 @@
+{
+ "android": {
+  "tree": {
+   "w": 250,
+   "h": 110,
+   "texts": [
+    {
+     "t": "Steps",
+     "role": "title",
+     "size": 12,
+     "b": [
+      12,
+      8,
+      60,
+      16
+     ]
+    },
+    {
+     "t": "4,210",
+     "role": "value",
+     "size": 34,
+     "b": [
+      12,
+      28,
+      120,
+      44
+     ]
+    },
+    {
+     "t": "of 8,000",
+     "role": "label",
+     "size": 12,
+     "b": [
+      12,
+      74,
+      70,
+      16
+     ]
+    }
+   ],
+   "images": [
+    {
+     "ref": "img1",
+     "b": [
+      200,
+      8,
+      40,
+      40
+     ]
+    }
+   ],
+   "progress": [
+    {
+     "v": 4210,
+     "max": 8000,
+     "indeterminate": false,
+     "b": [
+      12,
+      96,
+      226,
+      6
+     ]
+    }
+   ],
+   "lists": [
+    {
+     "b": [
+      12,
+      60,
+      226,
+      40
+     ],
+     "rows": [
+      [
+       "Mon",
+       "6,120"
+      ],
+      [
+       "Tue",
+       "8,004"
+      ],
+      [
+       "Wed",
+       "7,310"
+      ]
+     ]
+    }
+   ],
+   "targets": [
+    {
+     "b": [
+      12,
+      8,
+      226,
+      90
+     ],
+     "label": "Open"
+    }
+   ]
+  },
+  "images": {
+   "img1": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%23fc6'/%3E%3C/svg%3E"
+  }
+ }
+}

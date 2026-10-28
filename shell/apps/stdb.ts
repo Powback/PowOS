@@ -17,7 +17,7 @@ import { openUrl, power, useLayoutSize, useOnScreen, useQuiet } from "./onscreen
 import { useSurface, type Surface } from "./native.ts";
 import { closeApp, openApp } from "./pages.ts";
 import { powos } from "../bridge.ts";
-import type { AppLinks } from "../types.ts";
+import type { AppLinks, AppWidgetData } from "../types.ts";
 import { net, type Net } from "./net.ts";
 import { DetailSheet, type DetailSheetProps } from "./sheet.ts";
 
@@ -67,7 +67,56 @@ export interface IslandHost {
    * and the tile landed ("home.changed"); rejects with why (no such widget, the prompt declined, binding failed).
    */
   addAppWidget?(provider: string): Promise<"added">;
+  /**
+   * A placed Android widget's data, for an island that draws it in PowOS's own style (composer "android" block,
+   * native-card): the data never leaves the phone. Each call returns its stop.
+   */
+  appWidget?: AppWidgetHost;
 }
+
+export interface AppWidgetHost {
+  /** The id of the placed widget whose provider is [provider] ("package/class", serial ignored); null when none is on home. */
+  idOf(provider: string): Promise<number | null>;
+  /** Data mode on widget [id]: [on] with each tree ("appwidgets.data"), the latest one at once if known. */
+  data(id: number, on: (d: AppWidgetData) => void): () => void;
+  /** The widget's pixels at [width] x [height] CSS px (the fallback tile): [on] with each frame's URL. */
+  frames(id: number, width: number, height: number, on: (url: string) => void): () => void;
+  /** A small picture of a tree's image [ref] (a data URL), null once forgotten. */
+  image(ref: string): Promise<string | null>;
+  /** A tap at (x, y) of a tile [width] x [height] (the tree's dp work as well): down then up on the real widget. */
+  tap(id: number, x: number, y: number, width: number, height: number): Promise<void>;
+}
+
+const appWidget: AppWidgetHost = {
+  async idOf(provider) {
+    const base = provider.split("#")[0];
+    const it = (await powos.home.get()).items.find((i) => i.appWidget && i.appWidget.provider.split("#")[0] === base);
+    return it?.appWidget?.id ?? null;
+  },
+  data(id, on) {
+    if (!powos.appWidgets?.watchData) return () => {};
+    const off = powos.on("appwidgets.data", (d: AppWidgetData) => d.id === id && on(d));
+    void powos.appWidgets.watchData(id, true).catch(() => {});
+    return () => {
+      off?.();
+      void powos.appWidgets.watchData?.(id, false).catch(() => {});
+    };
+  },
+  frames(id, width, height, on) {
+    if (!powos.appWidgets?.watch) return () => {};
+    const off = powos.on("appwidgets.frame", (f: { id: number; url: string }) => f.id === id && on(f.url));
+    void powos.appWidgets.watch(id, width, height).then((r) => r?.url && on(r.url)).catch(() => {});
+    return () => {
+      off?.();
+      void powos.appWidgets.unwatch(id).catch(() => {});
+    };
+  },
+  image: async (ref) => (powos.appWidgets?.image ? powos.appWidgets.image(ref).catch(() => null) : null),
+  async tap(id, x, y, width, height) {
+    await powos.appWidgets.touch(id, "down", x, y, width, height);
+    await powos.appWidgets.touch(id, "up", x, y, width, height);
+  },
+};
 
 /** Launcher entries -> one per Android package ("a:<pkg>/<activity>[@profile]", the owner's profile only). */
 async function androidApps() {
@@ -500,4 +549,5 @@ export const host: IslandHost = {
   androidApps,
   appLinks,
   addAppWidget,
+  appWidget,
 };

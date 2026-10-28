@@ -111,6 +111,22 @@ class ComposerRules(unittest.TestCase):
         m["uses"][0]["action"] = "open_lights_page"  # read, not widget-safe
         self.assertIn("not widget-safe", self.rules(m))
 
+    def test_android_widget_block(self):
+        card = {"spec": "powos.compose/v1", "kind": "widget", "id": "local.steps", "name": "Steps",
+                "uses": [{"as": "w", "block": "android", "source": "widget", "provider": "com.example.steps/.Counter#0", "appWidgetId": 12}],
+                "show": {"template": "native-card", "title": "Steps", "from": "w"}}
+        self.assertEqual(self.c.check(card), [])
+        bad = json.loads(json.dumps(card))
+        bad["uses"][0]["source"] = "screen"
+        self.assertIn("[C3]", self.rules(bad))
+        bad = json.loads(json.dumps(card))
+        bad["uses"][0]["provider"] = "not a component"
+        self.assertIn("provider", self.rules(bad))
+        bad = json.loads(json.dumps(card))
+        bad["show"]["template"] = "status-list"
+        bad["show"]["rows"] = {"from": "w", "label": "x"}
+        self.assertIn("[C2]", self.rules(bad))
+
     def test_spend_and_switched_off_refused(self):
         d = os.path.join(self.e.root, "specs")
         os.makedirs(d)

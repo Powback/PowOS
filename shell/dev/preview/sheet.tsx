@@ -41,6 +41,11 @@ export interface Spec {
     rows?: Record<string, any[]>;
     /** By URL pattern: an answer ([status], [json]), or [error] - the request fails with that raw text, as the native layer's would (away from home: "failed to connect to (192.168.x.x...)"). */
     net?: { match: string; status?: number; json?: unknown; error?: string }[];
+    /**
+     * A native-card island's Android widget: the tree its host answers with (fixtures only), [images] by ref (data
+     * URLs), [frame] the pixel fallback's picture (a tree with nothing to draw shows it).
+     */
+    android?: { tree: any; images?: Record<string, string>; frame?: string };
     /** The app's localStorage before it mounts (e.g. what it cached from an earlier visit). */
     storage?: Record<string, string>;
     /**
@@ -76,6 +81,19 @@ function mockHost(spec: Spec) {
     useDb: () => db,
     useRows: (_db: unknown, table: string) => rows[table] ?? [],
     openApp: () => {},
+    appWidget: spec.data?.android && {
+      idOf: async () => 1,
+      data: (id: number, on: (d: unknown) => void) => {
+        const t = window.setTimeout(() => on({ id, provider: "preview", at: Date.now(), tree: spec.data!.android!.tree }), 0);
+        return () => window.clearTimeout(t);
+      },
+      frames: (_id: number, _w: number, _h: number, on: (u: string) => void) => {
+        const t = window.setTimeout(() => spec.data!.android!.frame && on(spec.data!.android!.frame), 0);
+        return () => window.clearTimeout(t);
+      },
+      image: async (ref: string) => spec.data!.android!.images?.[ref] ?? null,
+      tap: async () => {},
+    },
     net: {
       ...net,
       fetch: async (_app: string, url: string) => answer(url),
