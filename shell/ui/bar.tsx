@@ -14,7 +14,7 @@ import { followOpenness } from "./gesture.ts";
 import { drawer, launch, pullKind, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
-import { forget, hearing, listen, listeningFor, makeHold, release, speech, type MicTarget } from "./dictation.ts";
+import { forget, hearing, listen, listeningFor, makeHold, release, speech, stopTap, type MicTarget } from "./dictation.ts";
 
 /** A press longer than this is a hold (talk, then send); shorter, a tap (dictate). */
 const HOLD_MS = 250;
@@ -41,7 +41,7 @@ export function Mic({ target }: { target: MicTarget }) {
         // Listening already (a tap's dictation): this press ends it.
         if (on) {
           press.current = null;
-          powos.speech.stop();
+          stopTap();
           return;
         }
         // Listens now, as a tap's dictation; still down after HOLD_MS, it's a hold: it sends when let go.
@@ -78,7 +78,7 @@ export function Mic({ target }: { target: MicTarget }) {
         if (!p) return;
         clearTimeout(p.timer);
         // The press was taken away (the panel went, a gesture): a hold must not stay listening without its release.
-        if (p.held && !p.cancelled) powos.speech.stop();
+        if (p.held && !p.cancelled) release(target);
       }}
     >
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">

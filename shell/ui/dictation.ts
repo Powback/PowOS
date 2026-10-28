@@ -71,6 +71,19 @@ export function makeHold(target: MicTarget) {
 /** Forgets [target]'s dictation (it was cancelled): nothing goes to it. */
 export function forget(target: MicTarget) {
   if (pending?.target === target) pending = null;
+  speech.value = { ...speech.value, listening: false };
+}
+
+/** Ends the recognizer and resets the UI in this frame (optimistic; speech.state confirms), whatever state it was in. */
+function stopNow() {
+  speech.value = { ...speech.value, listening: false };
+  powos.speech.cancel();
+}
+
+/** A tap on a mic that is listening: it ends now - what's heard goes to its field; a stuck "listening" with nothing pending resets too. */
+export function stopTap() {
+  if (pending) interrupt();
+  else stopNow();
 }
 
 /**
@@ -79,10 +92,12 @@ export function forget(target: MicTarget) {
  */
 export function interrupt(target?: MicTarget) {
   const p = pending;
+  // The mic shows "off" at once, whatever the recognizer reports later (it never reported the end: a stuck button).
+  if (!p && !target) return void stopNow();
   if (!p || (target && p.target !== target)) return;
   const now = join(p.typed, speech.value.text);
   pending = null;
-  powos.speech.cancel();
+  stopNow();
   p.target.heard(now, false);
 }
 
@@ -96,7 +111,7 @@ export function release(target?: MicTarget) {
   if (!p || (target && p.target !== target)) return;
   const now = join(p.typed, speech.value.text);
   pending = null;
-  powos.speech.cancel();
+  stopNow();
   p.target.heard(now, !!now.trim());
 }
 
@@ -104,12 +119,13 @@ powos.on("speech.state", (s: { listening: boolean; text: string; error: string |
 powos.on("speech.done", ({ text }: { text: string }) => {
   const p = pending;
   pending = null;
+  speech.value = { ...speech.value, listening: false };
   if (p) p.target.heard(join(p.typed, text), p.send && !!text.trim());
 });
 // The page went away mid-dictation (the assist closed, an app came up over home): a release that never comes would
 // leave the recognizer listening until the native watchdog or cap. What's heard stays in the field; nothing is sent.
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden && pending) interrupt();
+  if (document.hidden && (pending || speech.value.listening)) interrupt();
 });
 powos.on("speech.permission",({ granted }: { granted: boolean }) => {
   if (granted && asked) listen(false, asked);
