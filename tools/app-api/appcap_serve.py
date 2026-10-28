@@ -46,6 +46,7 @@ from urllib.parse import parse_qs, urlparse
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import appcap_add  # noqa: E402
+import appcap_compose  # noqa: E402
 import appcap_files  # noqa: E402
 import appcap_link  # noqa: E402
 import appcap_flows  # noqa: E402
@@ -334,7 +335,7 @@ def trackers_allow(_q, b):
 ROUTES = {("GET", "/apps"): apps, ("GET", "/views"): views, ("POST", "/enable"): enable, ("POST", "/call"): call,
           ("GET", "/audit"): audit, ("GET", "/draft"): draft, ("GET", "/trackers"): trackers, ("POST", "/trackers/allow"): trackers_allow,
           **appcap_flows.ROUTES, **appcap_files.ROUTES, **appcap_link.ROUTES,
-          **appcap_add.ROUTES}
+          **appcap_add.ROUTES, **appcap_compose.ROUTES}
 
 
 class Handler(BaseHTTPRequestHandler):

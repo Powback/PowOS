@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { optimistic } from "@powos/shared/pending";
 import { ActionPanel, Widgets, type DetailProps } from "./action";
 import { AppAudit, Privacy } from "./activity";
-import { type Action, type AppSpec, type Host, type Views } from "./api";
+import { call, type Action, type AppSpec, type Host, type Views } from "./api";
 import { useRuntime } from "./runtime";
 import { offers } from "./app-list";
 import { Block, Muted, S, Seg, Switch, title } from "./ui";
@@ -99,10 +99,39 @@ function Developer({ p }: { p: DetailProps }) {
   );
 }
 
-/** "Make a widget": PowOS AI builds it from this app's data; without the assistant, the add-app draft flow. */
-// HACK: the composer (docs/COMPOSER.md, compose_widget) is reached through a chat prompt until it has its own call;
-// the real fix is a direct composer entry here with live progress (lib/pending).
+/**
+ * "Make a widget" on an app that ships its own home widget: the widget goes on home (the pixel tile, the fallback) and
+ * a native-card composition of it (an android block, docs/COMPOSER.md) is made and installed - no chat in between.
+ */
+function makeNative(p: DetailProps & { host: Host }, w: { provider: string; label: string }): Promise<unknown> {
+  return Promise.resolve(p.addToHome?.(w.provider)).then(() => call(p.net, p.app, "/compose/android", { provider: w.provider, label: w.label }));
+}
+
+/**
+ * Apps with no widget of their own still go through PowOS AI, which builds one from the app's reads.
+ * HACK: the composer (compose_widget) is reached through a chat prompt for these until it has its own call with live
+ * progress (lib/pending); the real fix is a direct composer entry for appcap reads too.
+ */
 const MAKE = (spec: AppSpec) => `Make me a home widget from my ${spec.name} app (App API id ${spec.app}). Use its live data (reads) that App API already allows, pick a layout, and put it on home.`;
+
+function MakeWidget({ p, spec }: { p: DetailProps & { host: Host; makeWidget: () => void }; spec: AppSpec }) {
+  const [state, setState] = useState<"idle" | "busy" | "done" | string>("idle");
+  const w = spec.widgets?.[0];
+  const direct = !!(w && p.addToHome && p.net);
+  const go = () => {
+    if (!direct) return void (p.host.askAssistant ? p.host.askAssistant(MAKE(spec)) : p.makeWidget());
+    setState("busy"); // Optimistic: shown at once; the tile lands on home as Android allows, the card is in the edit sheet.
+    makeNative(p, w!).then(() => setState("done"), (e) => setState(`error:${e instanceof Error ? e.message : String(e)}`));
+  };
+  return (
+    <>
+      <button type="button" style={S.hero} disabled={state === "busy"} onClick={go} data-make-widget="">
+        {state === "busy" ? "Making your widget… (approve Android's prompt if shown)" : state === "done" ? "Made: see home's edit sheet, PowOS apps ✓" : "Make a widget"}
+      </button>
+      {state.startsWith("error:") && <Muted><span style={S.bad}>{state.slice(6)}</span></Muted>}
+    </>
+  );
+}
 
 export function AppPage(p: DetailProps & { host: Host; back: () => void; makeWidget: () => void }) {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
@@ -123,7 +152,6 @@ export function AppPage(p: DetailProps & { host: Host; back: () => void; makeWid
     );
   };
   const dp: DetailProps = { ...p, spec, toggle: flip };
-  const make = () => (p.host.askAssistant ? p.host.askAssistant(MAKE(spec)) : p.makeWidget());
   return (
     <>
       <header style={S.head}>
@@ -134,7 +162,7 @@ export function AppPage(p: DetailProps & { host: Host; back: () => void; makeWid
       <Muted>{spec.description ? `${spec.description} · ${(offers(spec) || "nothing to use yet")}` : (offers(spec) || "nothing to use yet")}</Muted>
       {!spec.enabled && <Muted>This app is off: nothing can use its data until you switch it on.</Muted>}
       {toggleErr && <Muted><span style={S.bad}>{toggleErr}</span></Muted>}
-      <button type="button" style={S.hero} onClick={make} data-make-widget="">Make a widget</button>
+      <MakeWidget p={p} spec={spec} />
       <Offers p={dp} />
       <Section name="Recent use"><AppAudit net={p.net} app={p.app} specApp={spec.app} /></Section>
       <Privacy net={p.net} app={p.app} specApp={spec.app} />
