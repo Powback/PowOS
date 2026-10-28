@@ -47,6 +47,17 @@ const own = {
   onPointerDown: (e: PointerEvent) => e.stopPropagation(),
 };
 
+/** Search paths distinguish repeated controls such as left/right edge width. A disabled child reveals its parent. */
+function settingElement(root: HTMLElement, target: string): HTMLElement | null {
+  let current: HTMLElement | null = root;
+  for (const part of target.split("/")) {
+    const found: HTMLElement | undefined = [...current.querySelectorAll<HTMLElement>("[data-setting]")].find((e) => e.dataset.setting === part);
+    if (!found) return current === root ? null : current;
+    current = found;
+  }
+  return current;
+}
+
 /** A screen: back, its icon and title, [actions] at the far end; the body scrolls. */
 function Frame({
   icon,
@@ -69,7 +80,7 @@ function Frame({
     const root = body.current;
     if (!target || !root) return;
     const reveal = () => {
-      const el = [...root.querySelectorAll<HTMLElement>("[data-setting]")].find((e) => e.dataset.setting === target);
+      const el = settingElement(root, target);
       if (!el) return false;
       el.scrollIntoView({ block: "center" });
       el.tabIndex = -1;
@@ -1239,7 +1250,7 @@ function EdgeSideSection({ name, s, set }: { name: "left" | "right"; s: EdgeSide
             const action = s.actions[k] ?? "none";
             return (
               <div key={k} class="scr-edge-gesture">
-                <button type="button" class="scr-row" onClick={() => (setOpen(open === k ? null : k), setPicking(null))}>
+                <button type="button" class="scr-row" data-setting={label} onClick={() => (setOpen(open === k ? null : k), setPicking(null))}>
                   <Icon name={icon} size={18} class={`scr-row-icon ${name === "left" && icon === "arrowLeft" ? "flip" : ""}`} />
                   <span class="scr-row-text">{label}</span>
                   <span class="scr-edge-action">{edgeActionLabel(action)}</span>

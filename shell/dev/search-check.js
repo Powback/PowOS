@@ -18,6 +18,7 @@ export async function launcherSearchCheck() {
     if (box.top < 0 || box.bottom > innerHeight) failures.push('setting opened outside viewport');
     if (s.drawer.value !== 0 || screens.screens.value.at(-1) !== 'style') failures.push('setting did not open');
     await checkDockTargets(search, screens);
+    await checkGestureTargets(screens);
     await checkNativeSettings(s, search, wait);
     screens.closeScreens();
     let opened = false;
@@ -66,8 +67,20 @@ async function waitForSetting(target) {
 async function checkNativeSettings(state, search, wait) {
   const { powos } = await importShim('./bridge.ts');
   const pages = await powos.qs.destinations?.().catch(() => []) ?? [];
-  for (const page of pages.filter(p => ['VPN', 'Wi-Fi', 'Bluetooth', 'Accessibility'].includes(p.label))) {
+  for (const page of pages.filter(p => ['VPN', 'Wi-Fi', 'Bluetooth', 'Accessibility', 'Screen refresh rate'].includes(p.label))) {
     state.query.value = page.label === 'Wi-Fi' ? 'wifi' : page.label;
     await wait(() => search.searchResults.value.some(r => r.id === `android-settings:${page.id}`));
+  }
+}
+
+async function checkGestureTargets(screens) {
+  for (const side of ['left', 'right']) {
+    screens.openScreen('gestures', `${side} edge/handle`);
+    for (let i = 0; i < 60; i++) {
+      const active = document.activeElement;
+      if (active?.dataset.setting === 'handle' && active.closest('section')?.dataset.setting === `${side} edge`) break;
+      if (i === 59) throw Error(`wrong ${side} gesture search target`);
+      await new Promise(r => setTimeout(r, 50));
+    }
   }
 }

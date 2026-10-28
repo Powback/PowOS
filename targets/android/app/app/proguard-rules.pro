@@ -14,3 +14,6 @@
 
 # Run as root with app_process from this APK (system/OemCaption.kt): its main must keep its name.
 -keep class dev.omalauncher.system.OemCaption { public static void main(java.lang.String[]); }
+
+# Read-only native settings index exporter, invoked from the installed APK.
+-keep class dev.omalauncher.shell.SettingsIndexReader { public static void main(java.lang.String[]); }

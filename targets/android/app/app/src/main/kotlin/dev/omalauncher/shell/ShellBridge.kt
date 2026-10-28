@@ -274,7 +274,7 @@ class ShellBridge(
             "ai.sessions" -> aiSessions()
             "ai.attach" -> aiAttach(a.getString(0))
             "lock.unlock" -> lock?.unlock()
-            "qs.destinations" -> SettingsSearch(context).destinations()
+            "qs.destinations" -> SettingsSearch(context).destinations { broadcast("qs.destinations", "null") }
             "qs.state" -> quick.state()
             "qs.toggle" -> quick.toggle(a.getString(0)).let { quick.state() }
             "qs.open" -> quick.open(a.getString(0))

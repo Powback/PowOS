@@ -225,7 +225,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       output: (pkg) => call("media.output", pkg ?? ""),
     },
     qs: {
-      destinations: () => call<{ id: string; label: string; keywords: string }[]>("qs.destinations").catch(() => []), // detect: older APKs have no native settings catalog
+      destinations: () => call<{ id: string; label: string; keywords: string; breadcrumb?: string }[]>("qs.destinations").catch(() => []), // detect: older APKs have no native settings catalog
       state: () => call<QuickState>("qs.state"),
       toggle: (name) => call<QuickState>("qs.toggle", name),
       open: (name) => call("qs.open", name),
@@ -760,6 +760,7 @@ function mock(): Bridge {
           return changed();
         },
         destinations: async () => [
+          { id: "indexed:settings:display:refresh_rate", label: "Screen refresh rate", keywords: "display brightness motion", breadcrumb: "Display & brightness" },
           { id: "settings:VPN_SETTINGS", label: "VPN", keywords: "virtual private network tunnel" },
           { id: "settings:WIFI_SETTINGS", label: "Wi-Fi", keywords: "wifi wireless internet" },
           { id: "settings:BLUETOOTH_SETTINGS", label: "Bluetooth", keywords: "pairing devices" },

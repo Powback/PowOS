@@ -39,6 +39,11 @@ export const settingDestinations: { screen: ScreenName; label: string; target?: 
   { screen: "style", label: "Wallpaper", target: "background", keywords: "background image" },
   ...["folded dock position", "unfolded dock position", "desktop dock position", "recent apps in the drawer", "separate notifications & controls", "control center", "pet", "icon colours", "font"].map((label) => ({ screen: "style" as const, label, target: label, keywords: "settings appearance launcher home docking bottom left right" })),
   { screen: "style", label: "Swipe up panels", target: "swipe up from the left: PowOS AI", keywords: "launcher gestures assistant" },
+  ...["swipe up from a bottom corner over apps: apps, PowOS AI", "icon colors", "system colors", "glass", "glass edges", "text"].map((label) => ({ screen: "style" as const, label, target: label, keywords: "settings appearance terminal font size blur liquid gestures" })),
+  ...["show handles", "sensitivity"].map((label) => ({ screen: "gestures" as const, label, target: label, keywords: "settings edge gestures swipe" })),
+  ...["left", "right"].flatMap((side) => ["handle", "where", "width", "swipe in", "swipe in and up", "swipe in and down", "swipe in and hold", "in and up, hold", "in and down, hold"].map((control) => ({
+    screen: "gestures" as const, label: `${side} edge ${control}`, target: `${side} edge/${control}`, keywords: "settings gestures quick tools swipe position size action",
+  }))),
   { screen: "gestures", label: "Edge gestures", target: "edge gestures", keywords: "back swipe sensitivity handles" },
   { screen: "linux", label: "Linux", keywords: "install gpu driver" },
   { screen: "coding", label: "Coding agents", keywords: "assistant development" },
@@ -53,18 +58,20 @@ registerSearchProvider({ id: "settings", search: () => settingDestinations.map((
 
 // The host lists only pages this device can actually open. Old APKs and non-Android
 // hosts can reject/omit discovery without delaying the other providers.
-let nativeSettings: { id: string; label: string; keywords: string }[] = [];
+let nativeSettings: { id: string; label: string; keywords: string; breadcrumb?: string }[] = [];
 let nativeSettingsFetched = 0;
-registerSearchProvider({ id: "android-settings", async search() {
+const nativeSettingsRevision = signal(0);
+powos.on("qs.destinations", () => { nativeSettingsFetched = 0; nativeSettingsRevision.value++; });
+registerSearchProvider({ id: "android-settings", async search(text) {
   if (Date.now() - nativeSettingsFetched > 60_000) {
     nativeSettings = await powos.qs.destinations?.() ?? [];
     nativeSettingsFetched = Date.now();
   }
   const entries = nativeSettings;
   return entries.map((entry) => ({
-    id: `android-settings:${entry.id}`, label: entry.label, source: "Android settings",
+    id: `android-settings:${entry.id}`, label: entry.id === "settings-search" ? `Search Android settings for “${text}”` : entry.label, source: entry.breadcrumb ? `Android settings · ${entry.breadcrumb.replaceAll(";", " › ")}` : "Android settings",
     keywords: `${entry.keywords} settings preferences android`,
-    open: () => { void powos.qs.open(entry.id); },
+    open: () => { void powos.qs.open(entry.id === "settings-search" ? `search:${text}` : entry.id); },
   }));
 } });
 
@@ -100,7 +107,7 @@ export const searchResults = computed(() => {
   if (!q) return [];
   const entries: SearchResult[] = apps.value.map((a) => ({ id: `app:${a.key}`, label: a.label, source: "Apps", open: () => { void launch(a.key); } }));
   // Apps and settings pages come first; App API capabilities (hundreds of "open <url>" actions) are a capped tail so they cannot bury them.
-  const tier = (r: SearchResult) => r.id.startsWith("app-api:") ? 1 : 0;
+  const tier = (r: SearchResult) => r.id === "android-settings:settings-search" ? 2 : r.id.startsWith("app-api:") ? 1 : 0;
   const ranked = [...entries, ...extra.value].map((r) => ({ r, rank: searchRank(q, r.label, r.keywords) }))
     .filter(({ rank }) => rank >= 0).sort((a, b) => tier(a.r) - tier(b.r) || a.rank - b.rank || a.r.label.localeCompare(b.r.label)).map(({ r }) => r);
   let capi = 0;
@@ -114,6 +121,7 @@ export function openSearchResult(result: SearchResult) {
 queueMicrotask(() => effect(() => {
   const q = query.value.trim();
   const sources = providers.value;
+  nativeSettingsRevision.value;
   const controller = new AbortController();
   extra.value = [];
   searchPending.value = !!q;

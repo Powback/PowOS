@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Granted only to a privileged/system install; ordinary APKs keep page links and native search. -->
+    <uses-permission android:name="android.permission.READ_SEARCH_INDEXABLES" />
     <!-- Health Connect (shell/HealthConnectBridge.kt): read-only, what the wearables' apps wrote there. Asked once from PowOS
          (powos.health.grant); on the rooted phone `pm grant` does it too. -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
