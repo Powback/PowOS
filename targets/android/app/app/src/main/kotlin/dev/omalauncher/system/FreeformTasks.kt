@@ -148,7 +148,17 @@ object FreeformTasks {
     ): Boolean {
         val mode = if (on) UNDEFINED else FREEFORM
         val to = if (on) Rect() else bounds ?: Rect()
-        return runCatching { apply(token(context, id), transition = true) { wct, token -> modeAndBounds(wct, token, mode, to) } }
+        return runCatching {
+            apply(token(context, id), transition = true) { wct, token ->
+                modeAndBounds(wct, token, mode, to)
+                // The in-task bar's caption inset (TaskFrame): none over the full screen, back with the window.
+                if (on) {
+                    if (captions.containsKey(id)) runCatching { removeCaption(wct, token) }.onFailure { Log.w(TAG, "task $id: caption inset not removed", it) }
+                } else {
+                    captions[id]?.let { h -> runCatching { addCaption(wct, token, to, h) }.onFailure { Log.w(TAG, "task $id: caption inset not restored", it) } }
+                }
+            }
+        }
             .onFailure { Log.w(TAG, "can't put task $id in windowing mode $mode", it) }.isSuccess
     }
 
@@ -232,6 +242,52 @@ object FreeformTasks {
     ): Boolean =
         transact(context, id) { wct, token -> wct.javaClass.getMethod("setDensityDpi", token.javaClass, Int::class.javaPrimitiveType).invoke(wct, token, dpi) }
             .onFailure { Log.w(TAG, "can't set task $id to $dpi dpi", it) }.isSuccess
+
+    /** The caption inset (px) each task's in-task bar (TaskFrame) asked for. */
+    private val captions = java.util.concurrent.ConcurrentHashMap<Int, Int>()
+
+    /** The captionBar insets sources' owner: one per process, so a later call replaces the earlier source. */
+    private val captionOwner = android.os.Binder()
+
+    /**
+     * Task [id]'s app content laid out under a [height] px title bar at its top (the in-task bar, TaskFrame): a
+     * captionBar insets source on the task (WindowContainerTransaction.addInsetsSource, what WM Shell's desktop window
+     * decoration does for its caption). [bounds]: the task's (screen px). Taken off again by [setFullScreen].
+     * HACK: hidden, reflected like [minimise]. Real fix: none for an app.
+     */
+    fun captionInsets(
+        context: Context,
+        id: Int,
+        bounds: Rect,
+        height: Int,
+    ): Boolean =
+        transact(context, id) { wct, token -> addCaption(wct, token, bounds, height) }
+            .onSuccess { captions[id] = height }
+            .onFailure { Log.w(TAG, "task $id: no caption inset", it) }.isSuccess
+
+    private fun addCaption(
+        wct: Any,
+        token: Any,
+        bounds: Rect,
+        height: Int,
+    ) {
+        val m = wct.javaClass.methods.filter { it.name == "addInsetsSource" }.maxByOrNull { it.parameterCount } ?: error("no addInsetsSource")
+        val p = m.parameterTypes
+        // HACK: Android 14 takes the frame in screen coordinates (5 parameters); 15+ relative to the task, with
+        // bounding rects (and on 16 flags) after it. Real fix: none, the hidden signature moves per release.
+        val frame = if (p.size <= 5) Rect(bounds.left, bounds.top, bounds.right, bounds.top + height) else Rect(0, 0, bounds.width(), height)
+        val fixed = listOf(token, captionOwner, 0, android.view.WindowInsets.Type.captionBar(), frame)
+        val extra = p.drop(fixed.size).map { if (it == Int::class.javaPrimitiveType) 0 else if (it == Boolean::class.javaPrimitiveType) false else null }
+        m.invoke(wct, *(fixed + extra).toTypedArray())
+    }
+
+    private fun removeCaption(
+        wct: Any,
+        token: Any,
+    ) {
+        val m = wct.javaClass.methods.first { it.name == "removeInsetsSource" && it.parameterCount == 4 }
+        m.invoke(wct, token, captionOwner, 0, android.view.WindowInsets.Type.captionBar())
+    }
 
     /** One WindowContainerTransaction on task [id]'s container (any windowing mode), applied through WindowOrganizer. */
     private fun transact(

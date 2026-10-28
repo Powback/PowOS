@@ -216,7 +216,7 @@ object TaskLeash {
                 released -> end("released before")
                 gaveUp -> end("late")
                 else -> {
-                    for ((id, leash) in leashes) TaskBarProbe.attach(context, id, leash, last[id]?.width() ?: 0)
+                    for (id in leashes.keys) TaskFrame.sync(context, id)
                     ready(true)
                 }
             }

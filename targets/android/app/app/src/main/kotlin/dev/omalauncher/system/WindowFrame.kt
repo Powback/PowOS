@@ -33,7 +33,7 @@ class WindowFrame(
     private val context: Context,
     val id: Int,
     /** Its app: the bar's icon and name. */
-    private val app: App,
+    val app: App,
     private val onMinimise: (Int) -> Unit,
     /** Let go at the screen's left (-1) or right (1) edge: the window goes to that home page (WindowFrames.edge). */
     private val onEdge: (Int, Int) -> Unit = { _, _ -> },
@@ -62,7 +62,12 @@ class WindowFrame(
     var held = false
         private set
 
-    private val barChrome = FrameChrome(context, "window", app.copy(title = app.title?.takeIf { it.isNotBlank() } ?: appLabel(app.pkg))) { action ->
+    /** Its app as its bar names it (the app's label when the window has no title). */
+    val barApp get() = app.copy(title = app.title?.takeIf { it.isNotBlank() } ?: appLabel(app.pkg))
+    private val barChrome = FrameChrome(context, "window", barApp) { barAction(it) }
+
+    /** A title-bar button's action (this frame's bar, or its in-task bar: [TaskFrame]). */
+    fun barAction(action: String) {
         when (action) { "minimise" -> minimise(); "maximise" -> fullScreen(); "close" -> close() }
     }
     private val gripChrome = FrameChrome(context, "grip", App(null)) {}
@@ -98,6 +103,23 @@ class WindowFrame(
 
     /** The frame's view that is always shown (the bar, or the grip of a window with its own bar). */
     private val anchor: View get() = if (app.ownBar) grip else bar
+
+    /** The drag of the in-task bar ([TaskFrame]): its buttons hit-tested by that bar's own chrome ([barTouch]). */
+    private var taskBarHit: (Float, Float) -> Pair<FrameChrome.Button, () -> Unit>? = { _, _ -> null }
+    private val taskBarDrag = Drag(move = true, hit = { x, y -> taskBarHit(x, y) })
+
+    /**
+     * A touch on this window's in-task bar ([TaskFrame], the task's own layer): the same drag as this frame's bar - a
+     * button by [hit] (that bar's DOM rects), past the slop a move through the TaskLeash session, a double tap
+     * WindowFrames.maximise ([barTapped]). [e] in that bar's coordinates.
+     */
+    fun barTouch(
+        e: MotionEvent,
+        hit: (Float, Float) -> Pair<FrameChrome.Button, () -> Unit>?,
+    ): Boolean {
+        taskBarHit = hit
+        return taskBarDrag.onTouch(anchor, e)
+    }
 
     /** The drag a window's own title bar started (KWin's "move": [appMove]), fed the rest of that touch. */
     private val appDrag = Drag(move = true, buttons = false)
@@ -144,6 +166,7 @@ class WindowFrame(
     ) {
         bounds = Rect(r)
         span = free
+        TaskFrame.sync(context, id)
         val h = barHeight()
         barParams.apply {
             x = (free?.first ?: r.left) + slideDx
@@ -226,6 +249,7 @@ class WindowFrame(
     /** Maximised or not: its button shows "restore" (two squares) or "maximise" (one). */
     fun showMaximised(on: Boolean) {
         barChrome.maximised(on)
+        TaskFrame.maximised(id, on)
     }
 
     /**
@@ -323,7 +347,7 @@ class WindowFrame(
      * A window above this one covers its grip: the grip (an overlay, over every task) takes no touch there, so a
      * resize never starts through the window above - the grip's share of "bars z-ordered with their window"
      * (the bar's is [place]'s span). HACK: overlays can't sit between tasks; real fix: the bar and grip in the task's own
-     * layer (TaskBarProbe, flag powos_bar_in_task), once the probe has run on the phone.
+     * layer (TaskFrame, flag powos_bar_in_task), once the probe has run on the phone.
      */
     fun gripCovered(on: Boolean) {
         if (on == gripUnder) return
@@ -368,7 +392,7 @@ class WindowFrame(
     }
 
     fun remove() {
-        TaskBarProbe.release(id)
+        TaskFrame.release(id)
         detach()
         barChrome.destroy()
         gripChrome.destroy()
@@ -410,6 +434,8 @@ class WindowFrame(
         val move: Boolean,
         /** Its bar's buttons take a tap (not for a drag the window's own bar started: [appMove]). */
         val buttons: Boolean = true,
+        /** The button under a point: this frame's bar by default, the in-task bar's own for [barTouch]. */
+        val hit: (Float, Float) -> Pair<FrameChrome.Button, () -> Unit>? = { x, y -> buttonAt(x, y) },
     ) : View.OnTouchListener {
         private var x0 = 0f
         private var y0 = 0f
@@ -493,7 +519,7 @@ class WindowFrame(
             y0 = e.rawY
             from = Rect(bounds)
             if (move && buttons) {
-                buttonAt(e.x, e.y)?.let {
+                hit(e.x, e.y)?.let {
                     pressed = it
                     it.first.isPressed = true
                     // Raised if it turns into a drag (the drag's change), like any bar drag.
