@@ -130,3 +130,171 @@ the surface.
 
 `plasma-transparent.sh` (the wallpaper) and the window-core checks (linux-float, linux-touch, window-chrome,
 dock-taskbar) cover the rest of each mode.
+
+## Desktop windows inside the web shell (2026-10-28)
+
+User: "linux windows dont play nice with the webui, they are supposed to be fully integrated in the webui natively not
+this overlay shit" - and this applies to every desktop-mode window. Today a floating window (an Android freeform task,
+or a Linux window as a `PowosWindowActivity` task) sits above the whole web shell, and its PowOS title bar is a
+separate `TYPE_APPLICATION_OVERLAY` window (`WindowFrame.kt:22`) above every task. A screenshot showed a Termux-like
+Linux terminal drawn over the open drawer and the dock.
+
+Target z-order, owned by the web shell (one window manager: the web UI decides position, z-order, focus and frames;
+Android and KWin only render content):
+
+    [shell desktop layer: wallpaper, widgets]  <  [each window's task surface + its DOM frame]  <  [shell chrome: dock/taskbar, drawer, panels, shade]
+
+### Chosen mechanism (in 3 lines)
+
+1. Tasks stay where WM puts them (the DefaultTaskDisplayArea, organized by WM Shell); the shell moves around them instead:
+   the HOME task (ShellActivity's WebView) is the bottom layer, a second shell WebView in a trusted system overlay window is the top layer (chrome).
+2. Each window's frame is a SurfaceControlViewHost (FrameChrome's web page) parented under the task's own surface, inside its
+   bounds with a captionBar insets source - so it z-orders, moves and animates with its window by construction (TaskBarProbe path).
+3. Linux windows take the same path unchanged: they are already `PowosWindowActivity` freeform tasks, so they interleave with Android windows.
+
+### Device evidence (OnePlus Open, 2026-10-28, read-only dumpsys)
+
+- `dumpsys activity containers`: all app tasks are root tasks in `DefaultTaskDisplayArea` next to the HOME task
+  (Task=3253 HOME, Task=3209 FREEFORM Termux, Task=3 + 4/5 the split root). Z is the order of these root tasks; the HOME task
+  is above the freeform tasks while it has focus (3209 `visible=false`), so "tap the wallpaper" today hides all windows.
+- WM Shell (SystemUI) is the organizer of everything: `ShellTaskOrganizer` with `#1 TASK_LISTENER_TYPE_FREEFORM
+  FreeformTaskListener`, `task=3209 listener=FreeformTaskListener wmMode=5`; `DefaultTaskDisplayArea
+  (RootTaskDisplayAreaOrganizer.onDisplayAreaAppeared)`, `Display 0 (RootDisplayAreaOrganizer...)`.
+- SurfaceFlinger: SystemUI already parents `Decor container of Task=3209` / `Task=3260` (z=30000) under each freeform task
+  (3260 is a `PowosWindowActivity`). A third-party-process SCVH under a task surface is a normal, supported shape;
+  TaskBarProbe (`TaskBarProbe.kt:1-35`) documents PowOS doing the same from a TaskLeash session leash, surviving the transition end and taking touches.
+- PowOS windows above apps already exist: `PowOS shade`, `PowOS pull-up panel`, `PowOS quick tools`, `PowOS panel anchor`
+  (OverlayHost, `TYPE_STATUS_BAR_SUB_PANEL`, `OverlayHost.kt:26`). The app holds `STATUS_BAR_SERVICE` and `INTERNAL_SYSTEM_WINDOW` (manifest :48, :50).
+- `enable_freeform_support=1`, `powos_bar_in_task` unset (probe off), `powos_live_leash` default 1.
+
+### Ruled out
+
+- **Our own TaskOrganizer** (for freeform, or a root task via `createRootTask`): registering a TaskOrganizer makes it the
+  organizer of every non-created task (TaskOrganizerController puts the newest organizer first and re-evaluates all
+  tasks' organizer state). That steals FreeformTaskListener, split (Task=3) and desktop decor from WM Shell, which owns
+  them on this device (dump above). Unregistering removes the root tasks we created. Conflict, not coexistence.
+- **DisplayAreaOrganizer / reparenting the (Task)DisplayArea under the launcher**: `FEATURE_DEFAULT_TASK_CONTAINER` and the
+  root display area are already organized by WM Shell (RootTaskDisplayAreaOrganizer, RootDisplayAreaOrganizer); a second
+  organizer for a feature is refused ("Replacing existing organizer currently unsupported"). Organizing a spare feature to
+  `createTaskDisplayArea` gives a new TDA whose tasks are still Shell-organized, and its surface can't sit *between* two
+  layers of one ShellActivity window anyway. Kept only as a fallback note.
+- **Reparenting task leashes under ShellActivity's SurfaceControl permanently / setRelativeLayer**: every transition's
+  finish transaction reparents its participants back to their WindowContainer parent, and WM's `assignChildLayers` calls
+  `setLayer`, which drops a relative layer. It would have to be redone after every open/focus/resize/rotation and races
+  WM (TaskLeash.kt:201-203 already hit the finish-vs-start reparent race once).
+- **TaskView / TaskEmbedder**: `ActivityView`/`TaskEmbedder` were removed in Android 12; WM Shell's `TaskView` only works
+  inside SystemUI's process (it is a ShellTaskOrganizer listener). PowOS can't host one.
+- **One WebView + SurfaceControl layering**: one WebView draws into one surface; the DOM can't be split into a plane under
+  and a plane over other processes' tasks. Two shell surfaces are needed regardless (wallpaper/widgets must be under
+  windows, dock/drawer over them).
+- **Linux: embedding KWin's buffer straight into the shell** (the consumer in `native_consumer.c` writes any
+  ANativeWindow, today `PowosWindowActivity.java:98`'s SurfaceView): it would z-order only against PowOS's own surfaces,
+  never interleave with Android app windows, and would lose what the task gives for free (recents card, split, focus,
+  IME, back, the switcher, frames). Rejected; Linux windows stay tasks.
+
+### Two web layers and where touches go
+
+- **Bottom** - ShellActivity (the HOME task, alias `andro.marchy.HomeShell`), page as today minus the chrome in desktop
+  mode: wallpaper, widgets, desktop icons. It gets every touch that lands on no window and no chrome region.
+  So that touching it no longer raises HOME over the windows, the HOME task is made non-focusable while at least one
+  desktop window exists (`TaskLeash.setFocusable`, `TaskLeash.kt:325`, as the page slide already does). Text fields
+  move to the chrome layer (drawer search lives there anyway).
+- **Middle** - task surfaces. Touch goes to the task's own input windows natively; the frame's SCVH has its own input
+  window (title bar drag, buttons, double tap).
+- **Top** - a new `DesktopChromeHost` window (an OverlayHost sibling; system type so it is a trusted overlay and
+  untrusted-touch occlusion doesn't block taps on apps under its transparent parts), full screen, transparent, page
+  `?mode=chrome`: dock/taskbar, drawer, panels. Touchable only in the rectangles the page reports
+  (`AttachedSurfaceControl.setTouchableRegion`, as `VerifyRun.kt:355`); everything else falls through to the windows or
+  the desktop. The shade, quick tools and pull-up panel keep their own existing windows above it. Shown only in desktop
+  mode, unfolded, with no full-screen app/game on top.
+- State between the two pages goes through the bridge/runtime exactly as the shade and quick-tools pages already do
+  (one runtime, two ShellHosts).
+
+### Window bounds: owned and persisted by the shell
+
+User: "sometimes the position of floating windows goes offscreen ... their pos isnt properly persisted". The web shell
+owns each window's bounds, persisted **per app and per screen** (unfolded inner / folded cover, keyed by display size +
+rotation), not per task id. On open, restore (from the dock), un-maximise, rotation and fold/unfold it always clamps
+them on screen: the whole title bar's top inside the area and at least ~96 dp of the bar horizontally inside, so the bar
+can always be grabbed.
+
+Today's bugs (step 0, can ship now, independent of the rest):
+- `WindowFrames.kt:392` `belowStatusBar` only fixes `top`; nothing clamps left/right/bottom, so a window dragged past
+  an edge, or left from a rotation, keeps its bar off screen.
+- `WindowFrames.kt:621` un-maximise restores `back.before` unclamped, and `WindowFrames.kt:577` `toWindowAgain` restores
+  `fullBefore` unclamped - after a rotation or fold the old rect can be off screen.
+- `WindowFrames.kt:765` `restore` (from the dock) raises the task at its old bounds without a check.
+- `WindowFrames.kt:859` `lastBounds` is in-memory and keyed by task id: a new task of the same app, or a PowOS restart,
+  forgets the position and falls back to the cascade (`AppWindows.kt:108`).
+
+### Ordered edit steps (each one 5-minute edit agent)
+
+0. **Clamp now** - add `AppWindows.onScreen(context, r): Rect` next to `area()` (`AppWindows.kt:92`): keep size (shrink
+   only if larger than the area), top in `[area.top, area.bottom - bar]`, >= 96 dp of the bar inside horizontally.
+   Generalise `belowStatusBar` (`WindowFrames.kt:392`) to move any visible window whose `onScreen(bounds) != bounds`;
+   pass the targets at `WindowFrames.kt:577` and `:621` and `restore` (`:765`) through it. Ships alone.
+1. **Persist bounds per app + screen** - a small `WindowPlaces` store (SharedPreferences, key `pkg|linuxId` + screen key)
+   written on drag/resize end (`WindowFrame.kt:628` `endDrag`, `:892` `settleTask`) and read by `AppWindows.options`
+   (`AppWindows.kt:38`) before `nextBounds`, clamped by step 0. Later (step 11) the store moves behind the bridge so the page owns it.
+2. **Task surface registry** - new `TaskSurfaces.kt`: task id -> the task's SurfaceControl, filled from every TaskLeash
+   session (`TaskLeash.kt:240` `leashesOf`, `:381`), dropped on task removal (`FreeformTasks.listen`, `FreeformTasks.kt:327`).
+3. **Leash at open** - register a second, permanent remote in TaskLeash (`TaskLeash.kt:352` `filter`, `:107` `start` pattern)
+   for OPEN/TO_FRONT of freeform tasks that plays a short open (or passes the start transaction straight through) and
+   records the leash into TaskSurfaces. Fallback when Shell plays it itself: the first `FreeformTasks.moveTo`
+   change transition (`FreeformTasks.kt:160`) run as a TaskLeash session gives the leash.
+4. **Frame in the task** - turn `TaskBarProbe.attach` (`TaskBarProbe.kt:42-60`) into `TaskFrame`: the SCVH hosts
+   `FrameChrome(context, "window", app)` (`FrameChrome.kt:12`, the existing DOM bar) instead of the tint strip, at the
+   top of the task inside its crop, relaid on bounds/config change. Title-bar double tap/double click maximises and
+   restores through `WindowFrames.maximise(id)` (`WindowFrames.kt:618`) - the same single path as the maximise button
+   today (`WindowFrame.kt:215`); a mouse double click arrives as two ACTION_DOWN within `ViewConfiguration.getDoubleTapTimeout`, handled the same.
+5. **Caption insets** - `FreeformTasks.captionInsets(id, heightPx)`: WCT `addInsetsSource(token, owner, 0,
+   WindowInsets.Type.captionBar(), Rect(0,0,w,h), ...)` via `transact` (`FreeformTasks.kt:237`), so app content starts
+   under the bar; removed in `setFullScreen(on=true)` (`FreeformTasks.kt:143`). Keep OemCaption's 1-px Shell caption (`OemCaption.kt:9-20`) - its input window must not cover the bar.
+6. **Switch WindowFrames to in-task frames** - at `WindowFrames.kt:336` create `TaskFrame` when TaskSurfaces has the
+   task, else the old `WindowFrame` overlay. Flag `powos_bar_in_task` (`TaskBarProbe.kt:39`) becomes default 1. The drag
+   stream stays native (WindowFrame's drag code moved onto the SCVH's touch); `WindowFrame.place` (`:130`) no longer
+   positions a bar window for in-task frames.
+7. **HOME non-focusable in desktop mode** - in WindowFrames' refresh, `TaskLeash.setFocusable(homeToken, shown.isNotEmpty())`
+   inverted (non-focusable while a window shows; focusable again when none or when folded).
+8. **Chrome host** - new `DesktopChromeHost.kt` beside `OverlayHost.kt:34`: one warm full-screen transparent window,
+   trusted system type below the shade's, page `?mode=chrome`; touchable region = union of page-reported rects
+   (`rootSurfaceControl.setTouchableRegion`, pattern `VerifyRun.kt:355`; empty region = touch-through).
+9. **Chrome page** - `shell/hosts/desktop.ts` / `wide.ts:63`: a `chrome` host mode rendering dock/taskbar and the
+   drawer (`shell/ui/drawer.tsx`), reporting their rects through the bridge (ChromeSlot.regions as `FrameChrome.kt:30`);
+   the HOME page stops rendering them in desktop mode (`shell/ui/desktop.tsx`).
+10. **Chrome visibility** - DesktopChromeHost hidden when folded, on the lock screen/switcher (the rules WindowFrames
+    already follows) and when a full-screen app is on top (`FreeformTasks.fullScreen`, `FreeformTasks.kt:105`).
+11. **Shell owns z-order/focus/bounds** - bridge calls `windows.raise/move/maximise/minimise` from the page map to
+    `FreeformTasks.raise/moveTo`, `WindowFrames.maximise/minimise`; the page holds the window list, order and the
+    persisted places (step 1's store read/written through the bridge), Kotlin only applies.
+12. **Linux windows** - nothing new in `PowosWindowActivity.java`; verify the generic path covers task 3260-style tasks
+    (frame under the task, captionBar inset shrinks its SurfaceView, KWin's own decoration stays off - `one-title-bar.sh`).
+13. **Drop the overlay bars** - once checks pass on phone, remove `WindowFrame`'s `TYPE_APPLICATION_OVERLAY` bar/grip
+    windows (`WindowFrame.kt:22`, `:169` `addViews`) and the fallback in step 6.
+
+### Risks
+
+- Shell may play freeform OPEN itself before our remote (handler priority); step 3's fallback covers it at the cost of a
+  frame appearing one transition late. Watch PowosTaskLeash "no leash in" logs.
+- One WebView per frame (FrameChrome's ShellHost) costs memory with many windows; if > ~8 windows hurts, render frames
+  as one shared WebView whose per-window regions are drawn to each SCVH (later).
+- The leash reference goes invalid when a task moves display (fold to cover) or is recreated; TaskSurfaces must check
+  `isValid` and re-acquire, frames removed while folded (already WindowFrames' rule).
+- Non-focusable HOME: desktop widgets can't take keyboard focus; IME-needing desktop UI must live in the chrome layer.
+- Trusted-overlay type for the chrome window: with `TYPE_APPLICATION_OVERLAY` untrusted-touch occlusion could block
+  taps on apps under its transparent area; use a system type (as OverlayHost does) and confirm in `dumpsys input`.
+- Rotation: task surfaces persist, but bounds change; frames relayout on `onTaskInfoChanged`/config, and step 0's clamp runs.
+
+### On-device checks
+
+- SurfaceFlinger: for every freeform task (Android and `PowosWindowActivity`) a `SurfaceControlViewHost` layer of
+  com.powos.app under `Task=N`; the chrome window above all `Task=` layers; no PowOS bar overlay windows (`dumpsys window`).
+- Screenshot: open the drawer with a Linux terminal and an Android window open -> the drawer and dock are drawn over both.
+- Drag a window under the dock: the dock covers it; window A over B covers B's title bar.
+- Tap on the wallpaper/widget with windows open: windows stay visible (HOME not raised).
+- Tap an app through a transparent part of the chrome window: the app gets it.
+- Double tap and mouse double click on a title bar: maximise, again: restore to the clamped previous bounds (both for Android and Linux windows).
+- Bounds: drag a window half off the right edge, rotate, fold/unfold, minimise+restore, maximise+restore, kill PowOS and
+  reopen the app -> it comes back at its saved place for that screen, title bar fully reachable every time.
+- Fullscreen game: no chrome window; recents swipe and page slide still carry the frames (`float-desktops.sh`,
+  `linux-float.sh`, `one-title-bar.sh`, `fold.sh`).
