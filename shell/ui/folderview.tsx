@@ -94,7 +94,16 @@ function useMorph(root: { current: HTMLElement | null }, closing: boolean, done:
     // Ends when the transitions do, not on a clock: a timer of MORPH_MS + 40 fired before a late-starting transition
     // (a busy frame on open) was through - it cut the sheet's last frames (a snap) and left the frost still fading.
     let live = true;
-    void transitionsEnded(el).then(() => live && (closing ? done() : rest(el)));
+    void transitionsEnded(el).then(async () => {
+      if (!live) return;
+      if (!closing) return rest(el);
+      // Closing is the mirror of opening: the tile's own mini icons come back under the landed ones, and only once they
+      // are painted do the sheet's go - never a frame where the tile is empty (the user, 2026-10-28).
+      tileOf(el.dataset.key!)?.closest(".home-tile, .lib-card")?.classList.remove("opened");
+      tileOf(el.dataset.key!)?.classList.remove("opened");
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      if (live) done();
+    });
     return () => void (live = false);
   }, [closing]);
 }

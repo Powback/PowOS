@@ -1130,8 +1130,14 @@ async function folderCloseCheck() {
   S.folder.value = null;
   await until(() => !document.querySelector(".folder-view.open"));
   if (!document.querySelector(".folder-view:not(.open)")) fails.push("morph: closing, the sheet doesn't shrink back (gone at once)");
-  await until(() => !document.querySelector(".folder-view"));
+  const faceShown = () => [...document.querySelectorAll(".home-tile.folder .folder-face")].every((f) => getComputedStyle(f).opacity !== "0");
+  const sheetIcons = () => [...document.querySelectorAll(".folder-view .folder-grid .app-icon")].slice(0, 4).some((i) => getComputedStyle(i).opacity !== "0");
+  let blank = false;
+  for (const t0 = performance.now(); document.querySelector(".folder-view") && performance.now() - t0 < 3000; blank ||= !faceShown() && !sheetIcons()) await new Promise(requestAnimationFrame);
+  if (blank) fails.push("morph: closing, a frame with neither the tile's icons nor the sheet's (empty tile)");
+  await requestAnimationFrame(() => {});
   if (document.querySelector(".folder-view")) fails.push("morph: closed, the folder view is still there after 3 s");
+  else if (!faceShown()) fails.push("morph: closed, a folder tile's face is still hidden");
   return fails;
 }
 
