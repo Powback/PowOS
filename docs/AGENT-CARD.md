@@ -49,3 +49,4 @@ refused = a hook/tool denied valid work; broken-tool = script/tool errored; flak
 unclear-rule = docs contradict/omit; slow = waited >1 min; other.
 
 Hand-back: sha, what changed, test results, "Friction & missing info" list, Time line (minutes, top 3 sinks).
+- compile-check (`tools/phone/compile-check.sh`) only when you changed .kt/.java/.kts; never for shell-only changes (it now runs in seconds via the warm Gradle daemon).

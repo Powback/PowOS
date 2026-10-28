@@ -8,6 +8,10 @@
 #   warm-builder.sh build DIR  build the Gradle project at DIR (a /Projects/... path) and publish it as build-gradle.sh
 #                              does: android-app-dev/output/<name>.apk + .ver + .pkg (name: $PROJECT, default powos)
 #                              PUBLISH=0: build only (a timing run), nothing written to output/
+#   warm-builder.sh compile DIR  only :app:compileDebugKotlin for the project at DIR (a /Projects/... or host path, any
+#                              worktree under ~/Projects or ~/pw) through the warm daemon; prints the compiler output
+#                              and a final "gradle-exit=N"; exit 0 compiles, 1 compile errors, 3 builder unavailable
+#                              (the caller falls back to a cold build). Queues on the tiny build lock (seconds).
 #   warm-builder.sh healthy    exit 0 when it's up and answers within 10 s
 #   warm-builder.sh stop       remove it (its Gradle home volume stays: `docker volume rm powos-gradle-warm` drops it)
 # Limits: 8 GB memory, 6 CPUs (docker); the daemon exits after 3 h without a build (org.gradle.daemon.idletimeout),
@@ -18,6 +22,7 @@ NAME=powos-gradle-warm
 IMAGE=android-app-dev-android-builder:latest
 AAD=${ANDROID_APP_DEV:-$HOME/Projects/android-app-dev}
 IDLE_H=${WARM_IDLE_HOURS:-6}
+RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}
 
 healthy() { docker exec "$NAME" true >/dev/null 2>&1; }
 
@@ -30,7 +35,7 @@ start() {
     # The idle loop: /tmp/last-build is touched by each build; IDLE_H hours without one, the container ends itself.
     docker run -d --name "$NAME" --memory 8g --cpus 6 --label powos.unit=gradle-warm-mac \
       -v powos-gradle-warm:/root/.gradle -v android-gradle-cache:/seed:ro -v "${WARM_KEYSTORES:-android-keystores}":/app/keystores:ro \
-      -v "$HOME/Projects:/Projects" -v "$AAD/output:/app/output" -v "$AAD/scripts:/app/scripts:ro" \
+      -v "$HOME/Projects:/Projects" -v "$RUN_ROOT:/pw" -v "$AAD/output:/app/output" -v "$AAD/scripts:/app/scripts:ro" \
       -e ANDROID_SDK_ROOT=/opt/android-sdk --entrypoint bash "$IMAGE" -c '
         touch /tmp/last-build
         while [ $(( $(date +%s) - $(stat -c %Y /tmp/last-build) )) -lt '"$((IDLE_H * 3600))"' ]; do sleep 300; done' >/dev/null
@@ -98,7 +103,44 @@ build() {
     echo "warm-builder: output/$PROJECT.apk (version code $code)"'
 }
 
+# compile DIR: the Kotlin compile only, no APK, nothing published. Same /work mirror, lock and daemon as build(), but not
+# the Mac-wide build slot (one daemon, one lock: concurrent callers queue here for seconds). A worktree the running
+# container can't see (~/pw before the container was recreated with the /pw mount) is streamed in with tar instead.
+compile() {
+  local dir=$1 host repo src
+  case "$dir" in /Projects/*) host=$HOME/Projects${dir#/Projects} ;; *) host=$dir ;; esac
+  repo=$(cd "$host/../../.." 2>/dev/null && pwd) || { echo "warm-builder: no such project dir $dir" >&2; return 3; }
+  build_lock || return 3
+  start >/dev/null 2>&1 && healthy || { echo "warm-builder: the container did not start" >&2; return 3; }
+  case "$repo" in
+    "$HOME"/Projects/*) src=/Projects${repo#$HOME/Projects} ;;
+    "$RUN_ROOT"/*) src=/pw${repo#$RUN_ROOT}; docker exec "$NAME" test -d /pw || src= ;;
+    *) src= ;;
+  esac
+  if [ -z "$src" ]; then
+    src=/tmp/stage-compile
+    docker exec "$NAME" bash -c "rm -rf $src && mkdir -p $src" &&
+      COPYFILE_DISABLE=1 tar --no-xattrs -C "$repo" -c --exclude=shell/node_modules --exclude=build --exclude=targets/android/app/.gradle --exclude=shell/dev \
+        targets/android/app shell | docker exec -i "$NAME" tar --warning=no-unknown-keyword -x -C $src || { echo "warm-builder: staging failed" >&2; return 3; }
+  fi
+  local out rc
+  out=$(docker exec -e SRC="$src" "$NAME" bash -c '
+    set -uo pipefail
+    touch /tmp/last-build
+    mkdir -p /work/PowOS/targets/android/app /work/PowOS/shell
+    rsync -a --delete --exclude=/.gradle --exclude=build/ --exclude=/local.properties --exclude=/app/version.properties "$SRC/targets/android/app/" /work/PowOS/targets/android/app/ || exit 97
+    rsync -a --delete --exclude=/node_modules --exclude=/dev "$SRC/shell/" /work/PowOS/shell/ || exit 97
+    cd /work/PowOS/targets/android/app
+    echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+    [ -f app/version.properties ] || printf "versionCode=1\nversionName=check\n" > app/version.properties
+    ./gradlew :app:compileDebugKotlin --daemon -q 2>&1; echo "gradle-exit=$?"' 2>&1); rc=$?
+  echo "$out"
+  [ $rc = 0 ] && echo "$out" | grep -q 'gradle-exit=' || { echo "warm-builder: docker exec failed (exit $rc)" >&2; return 3; }
+  [ "$(echo "$out" | grep -o 'gradle-exit=[0-9]*' | tail -1)" = gradle-exit=0 ]
+}
+
 case "${1:-}" in
+  compile) compile "${2:?a Gradle project dir}" ;;
   start) start; docker exec "$NAME" bash -c 'cd /tmp && echo ok' ;;
   build) build "${2:?a /Projects/... Gradle project dir}" ;;
   healthy) healthy ;;

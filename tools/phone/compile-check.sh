@@ -6,7 +6,7 @@
 # projects/powos link or output/powos.apk (that's build-app.sh's, via ship-apk), so it's safe while a ship runs.
 # The gradle cache is the shared volume - but its own file locks only wait, they don't queue, so two
 # concurrent --no-daemon runs can both time out waiting on the journal cache lock (f62/f66-69). Serialized
-# through the Mac-wide build slot (tools/agents/build-slot.sh) instead, with the rest of the heavy builds.
+# through the Mac-wide build slot (cold path only; the warm path queues inside warm-builder).
 set -uo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 # Worktrees moved from ~/Projects/PowOS/.claude/worktrees/<name> to $POWOS_RUN_ROOT (default ~/pw) under
@@ -19,11 +19,21 @@ case "$root" in
     *) echo "compile-check: the worktree must be under ~/Projects or $RUN_ROOT (mounted into the builder)" >&2; exit 2 ;;
 esac
 app=/Projects${root#$mnt}/targets/android/app
-out=$("$root/tools/agents/build-slot.sh" "compile-check $root" -- docker run --rm -v "$mnt:/Projects" -v android-app-dev_gradle-cache:/root/.gradle \
+# The warm path first (targets/android/tools/warm-builder.sh compile): a long-lived Gradle daemon, seconds instead of a
+# cold JVM + Gradle + Kotlin start, and it queues on its own tiny lock - no Mac-wide build slot. Exit 3 = the builder
+# itself was unavailable: fall back to the cold throwaway container below.
+out=""
+if [ "${COMPILE_COLD:-0}" != 1 ]; then
+    out=$("$root/targets/android/tools/warm-builder.sh" compile "$root/targets/android/app" 2>&1); wrc=$?
+    [ $wrc = 3 ] && { echo "compile-check: warm builder unavailable, cold build" >&2; out=""; }
+fi
+if [ -z "$out" ]; then
+  out=$("$root/tools/agents/build-slot.sh" "compile-check $root" -- docker run --rm -v "$mnt:/Projects" -v android-app-dev_gradle-cache:/root/.gradle \
   -e ANDROID_SDK_ROOT=/opt/android-sdk -w "$app" --entrypoint bash android-app-dev-android-builder:latest -c '
     echo sdk.dir=/opt/android-sdk > local.properties
     [ -f app/version.properties ] || printf "versionCode=1\nversionName=check\n" > app/version.properties
     ./gradlew :app:compileDebugKotlin --no-daemon -q 2>&1; echo "gradle-exit=$?"' 2>&1)
+fi
 # Anywhere in a line: the SDK's progress bars end without a newline.
 rc=$(echo "$out" | grep -o 'gradle-exit=[0-9]*' | tail -1 | cut -d= -f2)
 echo "$out" | grep -E "^e: |error:" | head -40
