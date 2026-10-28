@@ -108,6 +108,11 @@ class TaskFrame private constructor(
             val frame = WindowFrames.current?.frame(id)
             // A window that draws its own title bar (a Linux window's CSD) gets none of ours.
             if (leash == null || frame == null || frame.ownBar || frame.bounds.width() <= 0) return release(id)
+            // An app that draws its own caption (Chrome, Brave): PowOS's overlay bar above it, no inset to pad.
+            if (FreeformTasks.drawsOwnCaption(WindowFrames.running.value.firstOrNull { it.id == id }?.pkg)) {
+                FreeformTasks.dropCaptionInsets(context, id)
+                return release(id)
+            }
             val w = frame.bounds.width()
             frames[id]?.let {
                 it.update(leash, w)
