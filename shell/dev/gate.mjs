@@ -882,6 +882,51 @@ async function wideLauncherBar() {
   return fails;
 }
 
+/**
+ * Desktop-size home (1280x800), the launcher open, its search typing: the keyboard comes up (the page 40% shorter, as
+ * the IME makes it) and keys are typed - the field stays the focused one and the drawer isn't mounted again (the user,
+ * 2026-10-28: desktop mode's launcher search dismissed the keyboard as they typed). Runs from node (viewport + keys).
+ */
+async function launcherKeyboardKeepsFocus(page) {
+  const start = await page.evaluate(async () => {
+    const S = await window.__gw.mod("./state.ts");
+    S.drawer.value = 1;
+    await window.__gw.settled(() => document.querySelector(".home.open"));
+    const field = document.querySelector(".home > .bar textarea");
+    const drawer = document.querySelector(".home .launcher-clip");
+    if (!field || !drawer) return `the open launcher lacks ${field ? "its drawer" : "its search field"}`;
+    const kb = (window.__kb = { field, drawer, wide: !!document.querySelector(".home.wide"), blurs: [] });
+    field.addEventListener("blur", (e) => kb.blurs.push(e.relatedTarget ? `${e.relatedTarget.tagName.toLowerCase()}.${e.relatedTarget.className}` : "none"));
+    field.focus();
+    await window.__gw.frames(2);
+    return document.activeElement === field ? "" : "the search field didn't take the focus";
+  });
+  if (start) return [`launcher keyboard: ${start}`];
+  const held = (when) =>
+    page.evaluate(async (w) => {
+      await window.__gw.frames(2);
+      const kb = window.__kb;
+      const fails = [];
+      if (document.activeElement !== kb.field) fails.push(`launcher keyboard, ${w}: the search field lost the focus (to ${document.activeElement?.tagName.toLowerCase() ?? "nothing"}${kb.blurs.length ? `; blurs to ${kb.blurs.join(", ")}` : ""})`);
+      if (!kb.field.isConnected) fails.push(`launcher keyboard, ${w}: the search field was mounted again`);
+      if (!kb.drawer.isConnected || document.querySelector(".home .launcher-clip") !== kb.drawer) fails.push(`launcher keyboard, ${w}: the drawer was mounted again`);
+      if (!!document.querySelector(".home.wide") !== kb.wide) fails.push(`launcher keyboard, ${w}: home's wide layout flipped to ${!kb.wide}`);
+      return fails;
+    }, when);
+  await viewTo(page, { width: 1280, height: 480 });
+  const fails = await held("keyboard up (800 -> 480 px)");
+  await page.keyboard.type("term", { delay: 40 });
+  fails.push(...(await held("typed with the keyboard up")));
+  await viewTo(page, { width: 1280, height: 800 });
+  await page.evaluate(async () => {
+    const S = await window.__gw.mod("./state.ts");
+    S.query.value = "";
+    window.__kb.field.blur();
+    S.drawer.value = 0;
+  });
+  return fails;
+}
+
 /** The user's search widget on the grid (the phone, 2026-10-23): the bar's own pill, parked, keeps the bar's middle. */
 async function wideBarParked() {
   const S = await window.__gw.mod("./state.ts");
@@ -2557,6 +2602,7 @@ try {
   // side-by-side pages without moving a tile.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar)), ...(await r.page.evaluate(wideLauncherBar)), ...(await r.page.evaluate(wideBarParked))])));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "launcher-keyboard", { width: 1280, height: 800 }).then((r) => whenReady(r, () => launcherKeyboardKeepsFocus(r.page))));
   // Home after an app at another size (Broforce in landscape, 2026-10-22: back on home the widgets were tiny and squashed
   // at the top). Laid out at [from] while hidden and shown again at [to], turned there and back, and relaid in its own
   // column count after the other's at the same size: the tiles must sit where a fresh layout at [to] puts them, and the

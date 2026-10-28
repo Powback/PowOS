@@ -44,6 +44,24 @@ const measure = () => {
 };
 const decide = ({ w, h }: { w: number; h: number }) => isHome && w >= WIDE && w >= h * TALL;
 const isWide = () => decide(measure());
+/** The width the last decision was made at (a keyboard changes only the height). */
+let lastW = measure().w;
+const typing = () => {
+  const a = document.activeElement as HTMLElement | null;
+  return !!a && (a.tagName === "TEXTAREA" || a.tagName === "INPUT" || a.isContentEditable);
+};
+/**
+ * A keyboard only shortens the page: a height change at the same width while a text field types keeps the decision
+ * ([was]). A shorter height can only turn a tall page wide (w >= h * TALL), and a flip re-lays home out under the field
+ * the user is typing into (launcher search, keyboard dismissed while typing - 2026-10-28).
+ */
+function heldWhileTyping(now: boolean, was: boolean, m: { w: number; h: number }, why: string) {
+  const held = now !== was && m.w === lastW && typing();
+  lastW = m.w;
+  if (!held) return now;
+  console.info(`layout wide=${was} kept: height-only change to ${m.w}x${m.h} while typing (why=${why})`);
+  return was;
+}
 
 /** Home laid out wide now (home.tsx: one bottom bar - dock left, search, recent apps right). */
 export const wideHome = signal(isWide());
@@ -225,7 +243,7 @@ export function wide(n: Bridge): Bridge {
     // Hidden, the window may still have an app's size (landscape game): judged again the moment it's shown.
     if (document.hidden) return;
     const m = measure();
-    const now = decide(m);
+    const now = heldWhileTyping(decide(m), was, m, why);
     const changed = now !== was;
     // Every decision that changes something, and every one asked by a show or a host push, is logged with its inputs
     // (console -> logcat PowosShell), so the next wrong layout explains itself. Plain resizes, viewport changes and reads

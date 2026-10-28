@@ -95,6 +95,15 @@ export function Mic({ target }: { target: MicTarget }) {
  * talk and send, tap to dictate). [value] is what it shows - the caller passes hearing(target) ?? its text, so what's
  * heard streams in as it's said and stays editable. [sending]: an autosend's words, about to go.
  */
+/** The search field's blur, in logcat: who took the focus (relatedTarget), whether the field was unmounted, and the
+ *  stack (a re-mount or a focus() elsewhere) - the keyboard went down ~0.9 s after it came up in wide home (2026-10-28). */
+function logBlur(e: FocusEvent, field: HTMLTextAreaElement | null) {
+  const to = e.relatedTarget as HTMLElement | null;
+  const name = to ? `${to.tagName.toLowerCase()}.${String(to.className).split(" ").join(".")}` : "none";
+  console.info(`search blur to=${name} connected=${!!field?.isConnected} drawer=${drawer.value} windowFocus=${document.hasFocus()}`);
+  console.trace("search blur");
+}
+
 export function Pill({
   target,
   sending = false,
@@ -188,8 +197,10 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
           takeOver();
           query.value = v;
         }}
-        onFocus={() => (takeOver(), setFocused(true))}
-        onBlur={() => setFocused(false)}
+        // Logged (console -> logcat): desktop mode's launcher search lost its keyboard as the user typed (2026-10-28);
+        // the blur's relatedTarget says who took the focus.
+        onFocus={() => (console.info(`search focus drawer=${drawer.value}`), takeOver(), setFocused(true))}
+        onBlur={(e: FocusEvent) => (logBlur(e, input.current), setFocused(false))}
         placeholder={s.listening ? "listening…" : (s.error ?? undefined)}
         aria-label={pullKind.value === "ai" && drawer.value > 0 ? "Ask PowOS AI" : "Search"}
         enterKeyHint={query.value.trim() && !searchResults.value.length && !searchPending.value ? "send" : "go"}
