@@ -949,6 +949,13 @@ class ShellBridge(
 
     private fun keyboard(show: Boolean) {
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        // An overlay's page (the pull-up panel over apps/desktop, Quick Tools): its own window must be the IME target -
+        // home's focus (homeTyping below) has nothing to do with it, and lifting home's non-focusable flag from here
+        // let WM hand the focus to home under the panel (2026-10-28: no keyboard in the pull-up panel's search).
+        overlay?.let { o ->
+            overlayKeyboard(o, show, imm)
+            return
+        }
         // Home is non-focusable while desktop windows show (FreeformTasks.homeFocusable): a text field lifts that.
         dev.omalauncher.system.FreeformTasks.homeTyping(context, show)
         if (show) {
@@ -979,6 +986,33 @@ class ShellBridge(
         } else {
             imm.hideSoftInputFromWindow(web.windowToken, 0)
         }
+    }
+
+    /** The overlay page's keyboard: its own window becomes the IME target (see keyboard()). */
+    private fun overlayKeyboard(o: dev.omalauncher.system.OverlaySlot, show: Boolean, imm: InputMethodManager) {
+        val flags = o.typing(show)
+        Log.i(TAG, "keyboard.show=$show in an overlay: $flags")
+        if (!show) {
+            imm.hideSoftInputFromWindow(web.windowToken, 0)
+            return
+        }
+        web.requestFocus()
+        if (web.hasWindowFocus()) {
+            imm.showSoftInput(web, 0)
+            return
+        }
+        // The window's focus follows its flag change: the IME is asked for once it has it.
+        val listener = object : android.view.ViewTreeObserver.OnWindowFocusChangeListener {
+            override fun onWindowFocusChanged(hasFocus: Boolean) {
+                if (!hasFocus) return
+                web.viewTreeObserver.takeIf { it.isAlive }?.removeOnWindowFocusChangeListener(this)
+                web.requestFocus()
+                imm.showSoftInput(web, 0)
+            }
+        }
+        web.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+        main.postDelayed({ web.viewTreeObserver.takeIf { it.isAlive }?.removeOnWindowFocusChangeListener(listener) }, 1500)
+        web.windowInsetsController?.show(WindowInsets.Type.ime())
     }
 
     /**

@@ -105,6 +105,8 @@ abstract class OverlayHost(
                 override fun closed() = hide()
 
                 override fun launched() = onLaunched()
+
+                override fun typing(on: Boolean) = typingWindow(on)
             }
         host = h
         watchdog = PageWatchdog(h.web, title) { hide() }
@@ -205,6 +207,8 @@ abstract class OverlayHost(
         watchdog?.stop()
         r.removeCallbacks(shutGone)
         if (!shown) return
+        // The panel closing takes its keyboard with it.
+        host?.web?.let { w -> (context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(w.windowToken, 0) }
         shown = false
         open = false
         wantOpen = false
@@ -214,6 +218,26 @@ abstract class OverlayHost(
         setFlags(touchable = false, focusable = false)
         onHidden()
         reload?.hidden()
+    }
+
+    /**
+     * The page's text field wants the keyboard ([on]) or let it go: while it types, this window is an IME target -
+     * focusable, without FLAG_ALT_FOCUSABLE_IM - so the IME serves it, not the app or desktop window under it. Only
+     * while open (touchable): the gesture-time window stays touch-through and non-focusable. Returns the window's flags
+     * now, for the log.
+     */
+    fun typingWindow(on: Boolean): String {
+        val r = root
+        val p = params ?: return "$mode keyboard: no window"
+        if (on && open && r != null) {
+            setFlags(touchable = true, focusable = true)
+            if (p.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM != 0) {
+                p.flags = p.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
+                runCatching { wm.updateViewLayout(r, p) }
+            }
+        }
+        return "$mode keyboard.${if (on) "show" else "hide"}: open=$open shown=$shown flags=0x${Integer.toHexString(p.flags)} notFocusable=${p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0} " +
+            "altIm=${p.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM != 0} windowFocus=${host?.web?.hasWindowFocus()}"
     }
 
     private fun setFlags(
@@ -274,4 +298,7 @@ interface OverlaySlot {
 
     /** An app was launched from the page: the overlay goes now. */
     fun launched()
+
+    /** The page's text field wants the keyboard ([on]) or let it go: the window made an IME target; its flags, for the log. */
+    fun typing(on: Boolean): String
 }
