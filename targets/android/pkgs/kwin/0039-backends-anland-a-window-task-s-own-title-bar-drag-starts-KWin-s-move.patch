@@ -1,0 +1,54 @@
+From cb4e0fe3c5f3e84332e15797b550c1591b8aedc5 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Wed, 28 Oct 2026 19:50:42 +0100
+Subject: [PATCH] backends/anland: a window task's own title bar drag starts
+ KWin's move
+
+X11Window::NETMoveResize drops a _NET_WM_MOVERESIZE unless KWin's input has a
+button or a touch down (InputRedirection). A window task's touches go to its
+window straight through the seat (0020, notifyTouchDown), past
+InputRedirection, whose touch count stays 0: Steam's drag on its own header
+asked for a move that was silently dropped, so 0026's hand-over ("move <id>")
+never ran and the header did not move the window (hyprland.log: no "asked to
+be moved" for Steam's task 6; logcat: no WindowTasks "move").
+
+A touch sequence on the seat counts too. Plasma's own windows are unchanged
+(their touches go through InputRedirection as before).
+---
+ src/events.cpp | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/src/events.cpp b/src/events.cpp
+index e0654f1..0062632 100644
+--- a/src/events.cpp
++++ b/src/events.cpp
+@@ -24,6 +24,7 @@
+ #include "touch_input.h"
+ #include "useractions.h"
+ #include "utils/xcbutils.h"
++#include "wayland/seat.h"
+ #include "wayland/xwaylandshell_v1.h"
+ #include "wayland_server.h"
+ #include "workspace.h"
+@@ -619,12 +620,16 @@ void X11Window::NETMoveResize(qreal x_root, qreal y_root, NET::Direction directi
+         setInteractiveMoveResizePointerButtonDown(false);
+         updateCursor();
+     } else if (direction == NET::Move || (direction >= NET::TopLeft && direction <= NET::Left)) {
++        // A finger down counts as KWin's own touch or the seat's: a window task's touches (backends/anland) go
++        // straight to its window through the seat, past InputRedirection, whose touch count stays 0 - every drag on
++        // a client-side title bar (Steam's) was dropped here, so KWin never started the move the task takes over.
++        const bool touching = input()->touch()->touchPointCount() || waylandServer()->seat()->isTouchSequence();
+         if (!button) {
+-            if (!input()->qtButtonStates() && !input()->touch()->touchPointCount()) {
++            if (!input()->qtButtonStates() && !touching) {
+                 return;
+             }
+         } else {
+-            if (!(input()->qtButtonStates() & x11ToQtMouseButton(button)) && !input()->touch()->touchPointCount()) {
++            if (!(input()->qtButtonStates() & x11ToQtMouseButton(button)) && !touching) {
+                 return;
+             }
+         }
+-- 
+2.50.1 (Apple Git-155)
+

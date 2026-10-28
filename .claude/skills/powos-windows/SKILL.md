@@ -282,7 +282,10 @@ description: Use when working on PowOS window tasks - floating Android windows (
   linux-float.sh first) and launch-window.sh, both --close on their board tasks.
 - Gotchas: the 3.30 package lives only in csd-launch's out/pkgs (keep it until the check ran). kwin patch numbers
   collide between agents (0025 was taken twice): look at origin's pkgs/kwin right before you add one. Steam's own bar
-  may not ask KWin for a move (unmeasured): then only the grip resizes, nothing moves it. An adopted launch window keeps
+  does ask (_NET_WM_MOVERESIZE), but X11Window::NETMoveResize (events.cpp) drops it unless InputRedirection has a
+  button/touch down - and a task's touches go straight to the seat (0020), so it never had one: no "asked to be moved"
+  in hyprland.log, no "move" in logcat (2026-10-28). kwin 0039 (3.44) counts seat->isTouchSequence() too. Any
+  core-KWin "is a button/touch down?" gate needs the seat, not InputRedirection, for a task's touches. An adopted launch window keeps
   its launch data as the task's base intent (finishStale/kept, onSaveInstanceState carry the window's own).
 - Next: read both check results; if no "move N" in logcat on a Steam bar drag, find how Steam moves itself (X
   configure requests?) and map that to the task; launch windows for games (Runtime.launch); Steam's own

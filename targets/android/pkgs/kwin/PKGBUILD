@@ -41,6 +41,8 @@
 #               0032 sizes it to the task on rotate/fold (it stayed small at the task's top left, refusing every resize)
 #   0038        ours: "nodecor <id>" from the app: a server-side decorated task window loses KWin's border (noBorder) while
 #               it's a task, the frame draws PowOS's bar ("decor" stays 1); restored back on the KWin desktop
+#   0039        ours: _NET_WM_MOVERESIZE counts the seat's touch too (a task's touches skip InputRedirection, 0020), so
+#               Steam's own header drag starts the move 0026 hands to the task (it was dropped: no button/touch down)
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -50,7 +52,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.43
+pkgrel=3.44
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -104,11 +106,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0035-backends-anland-the-desktop-dials-a-new-display-daemon-after-the-app-restarts.patch
           0036-backends-anland-a-window-s-own-maximize-and-minimize-are-its-task-s.patch
           0037-backends-anland-a-fixed-size-game-window-goes-full-screen-in-its-task.patch
-          0038-backends-anland-the-app-s-own-title-bar-replaces-KWin-s-on-a-task-s-window.patch)
+          0038-backends-anland-the-app-s-own-title-bar-replaces-KWin-s-on-a-task-s-window.patch
+          0039-backends-anland-a-window-task-s-own-title-bar-drag-starts-KWin-s-move.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver
