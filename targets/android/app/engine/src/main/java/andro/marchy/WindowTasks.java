@@ -22,7 +22,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * one-line messages to and from KWin: {@code open <id> <app id> <caption> [fullscreen]}, {@code title <id> <caption>},
  * {@code close <id>}, {@code android <package>}, {@code caps <words>}, {@code session <uuid> <id,id,...>},
  * {@code decor <id> 1|0} (KWin's title bar or the window's own, kwin 0026), {@code move <id>} (its own bar dragged) from KWin;
- * {@code closed <id>}, {@code focus <id>}, {@code hello 1} to it (tab-separated).
+ * {@code closed <id>}, {@code focus <id>}, {@code hello 1}, {@code nodecor <id>} (KWin's border off, kwin 0038) to it
+ * (tab-separated).
  *
  * Runs for the session's life (SessionService), reconnecting while the daemon or KWin restart.
  */
@@ -384,6 +385,10 @@ public final class WindowTasks {
                 boolean kwin = !(f.length > 2 && f[2].equals("0"));
                 Boolean was = kwinBar.put(id, kwin);
                 Log.i(TAG, "decor " + id + ": " + (kwin ? "KWin's title bar (the frame's bar)" : "its own title bar (no frame bar)"));
+                // Every desktop window uses PowOS's bar: a server-side decorated one has KWin's Breeze border taken off
+                // while it's a task (kwin 0038, which then keeps saying "decor 1"). Client-side ones (Steam) untouched.
+                if (kwin && kwinCan("nodecor"))
+                    send("nodecor", id);
                 Runnable r = barChanged;
                 if (r != null && was != null && was != kwin)
                     r.run();

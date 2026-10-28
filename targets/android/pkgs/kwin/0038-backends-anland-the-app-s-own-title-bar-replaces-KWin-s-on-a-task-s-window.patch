@@ -1,0 +1,122 @@
+From d700bf106e2f44ed8fff1a286fdd80405f43b01e Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Wed, 28 Oct 2026 17:38:15 +0100
+Subject: [PATCH] backends/anland: the app's own title bar replaces KWin's on a
+ task's window
+
+The app draws a server-side decorated window's title bar in its task's frame
+("decor <id> 1", kwin 0026), yet the window kept KWin's Breeze decoration on the
+hidden desktop. "nodecor <id>" from the app (caps: + "nodecor") sets noBorder on
+the exported window and keeps it while it's a task (re-set if a rule or Alt+F3
+gives the border back); the window's noBorder from before is restored when it
+goes back to the KWin desktop (the task's destructor). Client-side decorated
+windows (Steam, GTK header bars) are untouched. While held, "decor" stays 1: the
+frame keeps drawing PowOS's bar ("decor 0" would mean the window draws its own,
+and the app would drop the frame's bar).
+---
+ src/backends/anland/anland_window_task.cpp | 32 ++++++++++++++++++++--
+ src/backends/anland/anland_window_task.h   |  7 +++++
+ 2 files changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index b3d24e9..13608b8 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -125,6 +125,11 @@ AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uin
+ 
+     // Who draws its title bar (tellDecoration): told before "open", again whenever its decoration comes or goes.
+     connect(window, &Window::decorationChanged, this, [this]() {
++        // "nodecor" held (holdNoBorder): something gave it KWin's border back (a window rule, Alt+F3's "No titlebar
++        // and frame") while it's a task - taken off again, the task's frame draws its bar.
++        if (m_noBorderHeld && m_window && !m_window->isDeleted() && !m_window->noBorder()) {
++            m_window->setNoBorder(true);
++        }
+         tellDecoration(false);
+     });
+     tellDecoration(false);
+@@ -154,7 +159,8 @@ void AnlandWindowTask::tellDecoration(bool again)
+     if (!m_window || m_window->isDeleted() || m_window->isFullScreen()) {
+         return;
+     }
+-    const int decorated = m_window->isDecorated() ? 1 : 0;
++    // Held "nodecor": KWin's border is off, but the window still needs a title bar - the frame's (still "1").
++    const int decorated = (m_window->isDecorated() || m_noBorderHeld) ? 1 : 0;
+     if (!again && decorated == m_decorTold) {
+         return;
+     }
+@@ -227,9 +233,28 @@ void AnlandWindowTask::handOverMoveResize()
+     }
+ }
+ 
++void AnlandWindowTask::holdNoBorder()
++{
++    // The app draws this window's title bar (its frame's, PowOS's bar): KWin's decoration goes ("no border"), so the
++    // window is the same undecorated client on the hidden desktop as the task shows - no Breeze frame around it in
++    // any path that shows the whole window (window thumbnails, a frame the viewport misses). Only a server-side
++    // decorated window: one drawing its own bar (Steam, GTK header bars) has nothing of KWin's to take off.
++    if (m_noBorderHeld || !m_window || m_window->isDeleted() || !m_window->isDecorated()) {
++        return;
++    }
++    m_noBorderBefore = m_window->noBorder();
++    m_noBorderHeld = true;
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << ": KWin's title bar off, the task's frame draws it";
++    m_window->setNoBorder(true);
++}
++
+ AnlandWindowTask::~AnlandWindowTask()
+ {
+     cancelTouches();
++    // Back on the KWin desktop: its border is KDE's again (as it was before "nodecor").
++    if (m_noBorderHeld && m_window && !m_window->isDeleted()) {
++        m_window->setNoBorder(m_noBorderBefore);
++    }
+     releaseBuffers();
+     if (m_display) {
+         ::disconnect(m_display); // C producer API, not QObject::disconnect
+@@ -967,7 +992,7 @@ void AnlandWindowTasks::announce()
+ {
+     // What this KWin understands beyond "closed"/"focus": the app only sends it then (an older KWin, buffers of the
+     // task's size as before).
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).
+@@ -1066,6 +1091,9 @@ void AnlandWindowTasks::handleLine(const QString &line)
+                 }
+             });
+         }
++    } else if (f[0] == QLatin1String("nodecor")) {
++        // The app draws its title bar: KWin's decoration off while it's a task (holdNoBorder).
++        task->holdNoBorder();
+     } else if (f[0] == QLatin1String("focus")) {
+         task->focus();
+     } else if (f[0] == QLatin1String("size") && f.size() >= 4) {
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 01c02cd..3357631 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -99,6 +99,11 @@ public:
+      * or a GTK header bar - so the app adds none: two title bars otherwise). Only when it changed, unless [again].
+      */
+     void tellDecoration(bool again);
++    /**
++     * "nodecor <id>" from the app: KWin's server-side decoration off (noBorder) while this window is a task, its
++     * frame's bar instead; restored when the window goes back to the desktop. A client-side decorated one is untouched.
++     */
++    void holdNoBorder();
+     /**
+      * What the task shows of the window's surroundings, in KWin's coordinates: its client area at the task's size (a
+      * floating task crops the buffers to that), the whole window when it is scaled to fit. Popups are kept inside it.
+@@ -155,6 +160,8 @@ private:
+     bool m_appFullScreen = false;
+     bool m_givingBack = false; // giveBack restoring the window's own maximize: not a request of its own
+     int m_decorTold = -1; // the last "decor" told: 1 KWin's title bar, 0 the window's own, -1 not yet
++    bool m_noBorderHeld = false; // "nodecor": KWin's border taken off while a task (holdNoBorder)
++    bool m_noBorderBefore = false; // its noBorder before, restored on the desktop
+     display_ctx *m_display = nullptr;
+     State m_state = State::Handshake;
+     QSocketNotifier *m_ctrlNotifier = nullptr;
+-- 
+2.50.1 (Apple Git-155)
+
