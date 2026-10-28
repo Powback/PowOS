@@ -19,7 +19,7 @@ import { openGlasses } from "../glasses/open.ts";
 import { useMinuteClock } from "./time.ts";
 import { Launchers } from "./launchers.tsx";
 import { PAD_ID, askPad, editPad, padTile, togglePad } from "./padtile.ts";
-import { FPS_ID, askFps, fpsTile, toggleFps } from "./fpstile.ts";
+import { FPS_ID, askFps, toggleFps } from "./fpstile.ts";
 import { TESTS_ID, askTests, testsTile, toggleTests } from "./tests.ts";
 import type { GlassesState, MediaState, QuickState, QuickTile, RemoteState, RemoteTarget } from "../types.ts";
 
@@ -946,7 +946,7 @@ function Controls() {
   const q = quick.value;
   const tests = testsTile();
   const pad = padTile();
-  const every = [...(q.tiles ?? []), ...(glasses.value ? [glassesTile()] : []), ...(pad ? [pad] : []), ...(tests ? [tests] : []), fpsTile()].filter((t) => !leftOut(t));
+  const every = [...(q.tiles ?? []), ...(glasses.value ? [glassesTile()] : []), ...(pad ? [pad] : []), ...(tests ? [tests] : [])].filter((t) => !leftOut(t)); // no FPS tile: the meter is the status bar's, toggled in settings (the user, 16:59)
   const b = q.brightness ?? { value: 0.5, auto: false };
   const v = q.volume ?? { value: 0.5, ringer: 2 };
   // The user's order (controls.layout) within each group; the curated order after.
