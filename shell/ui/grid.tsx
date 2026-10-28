@@ -16,7 +16,7 @@
 import { AppIcon } from "./apps.tsx";
 import { tapTaken } from "./taps.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { signal } from "@preact/signals";
+import { computed, signal } from "@preact/signals";
 import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, selected, setDocked, type Carry } from "../state.ts";
 import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { powos } from "../bridge.ts";
@@ -129,8 +129,80 @@ const overlaps = (a: Cell, b: Cell) => a.x < b.x + b.w && b.x < a.x + a.w && a.y
 const itemsOn = (n: number) =>
   [...home.value.items, ...(footSearch.value ? [footSearch.value] : []), ...creationWidgets.value.items].filter((i) => i.page === n && i.cell);
 
-/** A tile's cell as shown: apps and folders are always 1x1. */
-const shown = (i: HomeItem): Cell => (i.resizable ? i.cell! : { ...i.cell!, w: 1, h: 1 });
+/** A tile's own cell (its stored span): apps and folders are always 1x1. */
+const own = (i: HomeItem): Cell => (i.resizable ? i.cell! : { ...i.cell!, w: 1, h: 1 });
+
+/**
+ * A tile's cell as shown and occupied: its own, or - a member of a merged group (boxed tiles touching edge to edge) -
+ * the group's common span. A vertical stack takes one width (the members' union: the widest member's span when the
+ * others sit inside it), a horizontal row one height, so the group's glass is one clean rounded rectangle with no
+ * notches (2026-10-28 "the widget combiner looks ugly af if the widgets arent the same width"). The stored cell stays
+ * each member's own span: unmerging (moving a member away, or the group turning mixed) shows it at that span again.
+ */
+const shown = (i: HomeItem): Cell => groupSpans.value.get(i.key) ?? own(i);
+
+/** Do boxed cells [a] and [b] touch edge to edge (over part of it at least)? "v": one above the other, "h": side by side. */
+function touch(a: Cell, b: Cell): "v" | "h" | null {
+  const xo = a.x < b.x + b.w && b.x < a.x + a.w;
+  const yo = a.y < b.y + b.h && b.y < a.y + a.h;
+  if (xo && (a.y + a.h === b.y || b.y + b.h === a.y)) return "v";
+  if (yo && (a.x + a.w === b.x || b.x + b.w === a.x)) return "h";
+  return null;
+}
+
+/**
+ * Each merged member's common span, per page (the carried tile is out of every group while it's carried). A group
+ * that both stacks and rows (an L or a block) keeps its members' own spans - the seams join it as before. The common
+ * span must not cover another tile: it snaps to the widest (tallest) member's span when the union doesn't fit, and
+ * stays unstretched when neither does. It is always inside the grid (clamped to the columns/rows).
+ */
+const groupSpans = computed(() => {
+  const out = new Map<string, Cell>();
+  if (typeof document !== "undefined" && document.documentElement.dataset.mode === "desktop") return out;
+  const lifted = carry.value?.item?.key;
+  const all = [...home.value.items, ...(footSearch.value ? [footSearch.value] : []), ...creationWidgets.value.items].filter((i) => i.cell && i.key !== lifted);
+  const lim = { cols: home.value.columns, rows: geometry.value.rows || Infinity };
+  for (const n of new Set(all.map((i) => i.page))) {
+    const on = all.filter((i) => i.page === n);
+    const tiles = on.filter(boxed);
+    const seen = new Set<string>();
+    for (const start of tiles) if (!seen.has(start.key)) stretch(groupOf(start, tiles, seen), on, out, lim);
+  }
+  return out;
+});
+
+/** The merged group [start] is in (boxed tiles reachable edge to edge, marked [seen]) and how its members meet. */
+function groupOf(start: HomeItem, tiles: HomeItem[], seen: Set<string>) {
+  const members: HomeItem[] = [];
+  const ways = new Set<string>();
+  const todo = [start];
+  seen.add(start.key);
+  while (todo.length) {
+    const a = todo.pop()!;
+    members.push(a);
+    for (const b of tiles) {
+      const t = a === b ? null : touch(own(a), own(b));
+      if (t) ways.add(t);
+      if (t && !seen.has(b.key)) (seen.add(b.key), todo.push(b));
+    }
+  }
+  return { members, ways };
+}
+
+/** A pure stack or row: each member's common span into [out], if one fits beside the page's other tiles. */
+function stretch(g: { members: HomeItem[]; ways: Set<string> }, on: HomeItem[], out: Map<string, Cell>, lim: { cols: number; rows: number }) {
+  if (g.members.length < 2 || g.ways.size !== 1) return;
+  // Along the common side: x/w for a stack, y/h for a row.
+  const [p, s, max] = g.ways.has("v") ? (["x", "w", lim.cols] as const) : (["y", "h", lim.rows] as const);
+  const cells = g.members.map(own);
+  const widest = cells.reduce((m, c) => (c[s] > m[s] ? c : m));
+  // Groups already stretched count at their common span: two groups never stretch into the same cells.
+  const others = on.filter((i) => !g.members.includes(i)).map((i) => out.get(i.key) ?? own(i));
+  const fits = ([a, b]: number[]) => b > a && cells.every((c) => others.every((o) => !overlaps({ ...c, [p]: a, [s]: b - a }, o)));
+  const union = [Math.max(0, Math.min(...cells.map((c) => c[p]))), Math.min(max, Math.max(...cells.map((c) => c[p] + c[s])))];
+  const span = [union, [widest[p], Math.min(max, widest[p] + widest[s])]].find(fits);
+  if (span) g.members.forEach((m, k) => out.set(m.key, { ...cells[k], [p]: span[0], [s]: span[1] - span[0] }));
+}
 
 type Aim = { group: string; page: number; cell?: undefined } | { cell: Cell; page: number; group?: undefined };
 
@@ -714,7 +786,7 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
               <div class="widget-error">{item.error}</div>
             </>
           ) : (
-            <OwlWidget widget={item.key} cells={item.cell} />
+            <OwlWidget widget={item.key} cells={shown(item)} />
           )}
         </div>
       )}
@@ -784,7 +856,8 @@ function appWidgetMin(item: HomeItem): [number, number] {
 /** Drag the corner: the widget grows or shrinks by whole cells, never under its minimum or onto another tile. */
 function ResizeHandle({ item }: { item: HomeItem }) {
   const [size, setSize] = useState<Cell | null>(null);
-  const cell0 = item.cell!;
+  // From the span it shows (a merged member's is the group's): that's the corner under the finger.
+  const cell0 = shown(item);
   // An Android widget: its provider's minimum, and only the sides its resize mode moves.
   const aw = item.appWidget;
   const min = aw ? appWidgetMin(item) : item.minSize;
