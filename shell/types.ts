@@ -656,6 +656,8 @@ export interface Bridge {
     output(pkg?: string): Promise<void>;
   };
   qs: {
+    /** Resolvable native settings pages; absent on older hosts. */
+    destinations?(): Promise<{ id: string; label: string; keywords: string }[]>;
     state(): Promise<QuickState>;
     /** A tile tapped: a switch flipped, an action run (screenshot, lock), a page opened. */
     toggle(name: string): Promise<QuickState>;

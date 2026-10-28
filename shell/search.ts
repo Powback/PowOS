@@ -3,6 +3,7 @@ import { computed, effect, signal } from "@preact/signals";
 import { apps, closeDrawer, launch, query } from "./state.ts";
 import { openScreen, type ScreenName } from "./screens.ts";
 import { installedApps, openApp } from "./apps/pages.ts";
+import { powos } from "./bridge.ts";
 import { net } from "./apps/net.ts";
 
 export interface SearchResult {
@@ -49,6 +50,23 @@ registerSearchProvider({ id: "settings", search: () => settingDestinations.map((
   id: `settings:${s.screen}:${s.target ?? ""}`, label: s.label, source: "Settings", keywords: s.keywords,
   open: () => openScreen(s.screen, s.target),
 })) });
+
+// The host lists only pages this device can actually open. Old APKs and non-Android
+// hosts can reject/omit discovery without delaying the other providers.
+let nativeSettings: { id: string; label: string; keywords: string }[] = [];
+let nativeSettingsFetched = 0;
+registerSearchProvider({ id: "android-settings", async search() {
+  if (Date.now() - nativeSettingsFetched > 60_000) {
+    nativeSettings = await powos.qs.destinations?.() ?? [];
+    nativeSettingsFetched = Date.now();
+  }
+  const entries = nativeSettings;
+  return entries.map((entry) => ({
+    id: `android-settings:${entry.id}`, label: entry.label, source: "Android settings",
+    keywords: `${entry.keywords} settings preferences android`,
+    open: () => { void powos.qs.open(entry.id); },
+  }));
+} });
 
 interface CatalogApp { app: string; name: string; enabled: boolean; error?: string; actions?: Record<string, { summary?: string; enabled?: boolean }> }
 let catalog: CatalogApp[] = [];

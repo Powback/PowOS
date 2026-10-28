@@ -214,6 +214,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       output: (pkg) => call("media.output", pkg ?? ""),
     },
     qs: {
+      destinations: () => call("qs.destinations"),
       state: () => call<QuickState>("qs.state"),
       toggle: (name) => call<QuickState>("qs.toggle", name),
       open: (name) => call("qs.open", name),
@@ -746,6 +747,12 @@ function mock(): Bridge {
           if (name === "dnd") st = { ...st, dnd: !st.dnd };
           return changed();
         },
+        destinations: async () => [
+          { id: "settings:VPN_SETTINGS", label: "VPN", keywords: "virtual private network tunnel" },
+          { id: "settings:WIFI_SETTINGS", label: "Wi-Fi", keywords: "wifi wireless internet" },
+          { id: "settings:BLUETOOTH_SETTINGS", label: "Bluetooth", keywords: "pairing devices" },
+          { id: "settings:ACCESSIBILITY_SETTINGS", label: "Accessibility", keywords: "talkback screen reader" },
+        ],
         open: async (name: string) => console.log("[mock] open quick setting", name),
         listening: async (on: boolean) => console.log("[mock] tiles listening", on),
         set: async (name, value) => {

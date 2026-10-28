@@ -255,6 +255,10 @@ class QuickSettings(
 
     /** Android's own page for [name] (a tile's long press, or a tile that's a page): a tile id, or wifi/bluetooth/internet/settings. */
     fun open(name: String) {
+        if (name.startsWith("settings:")) {
+            SettingsSearch(context).open(name)
+            return
+        }
         val intent =
             when (name) {
                 "wifi" -> Intent(Settings.ACTION_WIFI_SETTINGS)

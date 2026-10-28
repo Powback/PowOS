@@ -18,6 +18,7 @@ export async function launcherSearchCheck() {
     if (box.top < 0 || box.bottom > innerHeight) failures.push('setting opened outside viewport');
     if (s.drawer.value !== 0 || screens.screens.value.at(-1) !== 'style') failures.push('setting did not open');
     await checkDockTargets(search, screens);
+    await checkNativeSettings(s, search, wait);
     screens.closeScreens();
     let opened = false;
     off = search.registerSearchProvider({ id: 'search-test', async search(q) {
@@ -60,4 +61,13 @@ async function waitForSetting(target) {
     await new Promise(r => setTimeout(r, 50));
   }
   throw Error(`missing setting target: ${target}`);
+}
+
+async function checkNativeSettings(state, search, wait) {
+  const { powos } = await importShim('./bridge.ts');
+  const pages = await powos.qs.destinations?.().catch(() => []) ?? [];
+  for (const page of pages.filter(p => ['VPN', 'Wi-Fi', 'Bluetooth', 'Accessibility'].includes(p.label))) {
+    state.query.value = page.label === 'Wi-Fi' ? 'wifi' : page.label;
+    await wait(() => search.searchResults.value.some(r => r.id === `android-settings:${page.id}`));
+  }
 }
