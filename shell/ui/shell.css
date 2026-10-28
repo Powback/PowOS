@@ -1316,7 +1316,6 @@ input.folder-title:focus { background: var(--soft-fill); }
 .notif-empty { padding: 18px 2px; text-align: center; font-size: var(--text-small); }
 /* Nothing new: the message in the middle of the (now always full-height) panel. */
 .notif-list:has(> .notif-items > .notif-empty) { display: flex; }
-.notif-grip { align-self: center; width: 44px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--color-border); }
 /*
  * One panel (notifications.tsx, the default; settings -> style keeps them apart): the control center on top, the
  * notifications under it, one list scrolling as one. As tall as what's in it, up to the panel's height - nothing to
@@ -2557,7 +2556,6 @@ html:root .notif-panel:has(> .panel-body.together) {
   border-radius: 0;
 }
 .notif-panel .cc.v3 { padding: 10px; border-radius: calc(var(--radius) * 1.5); box-shadow: var(--lift); }
-.notif-panel .notif-grip { display: none; }
 
 /*
  * The widget detail sheet (ui/widgetsheet.tsx, apps/sheet.ts): a frosted popover anchored to a widget - the menus'

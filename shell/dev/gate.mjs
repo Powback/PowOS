@@ -370,9 +370,8 @@ async function overpullKit() {
   const UNDER = ".panel-body.together > .notif-own .notif-items";
   const under = () => document.querySelector(UNDER)?.getBoundingClientRect().top ?? NaN;
   const row = () => cells().slice(0, 6).map((e) => Math.round(e.getBoundingClientRect().top)).join();
-  // The panel's own edge on screen (its frost's bottom), its grip, and the last thing in it (the gap under that).
+  // The panel's own edge on screen (its frost's bottom), and the last thing in it (the gap under that).
   const edge = () => document.querySelector(".notif-panel")?.getBoundingClientRect().bottom ?? NaN;
-  const grip = () => document.querySelector(".notif-panel > .notif-grip")?.getBoundingClientRect().bottom ?? NaN;
   const last = () => {
     const els = [...document.querySelectorAll(".panel-body.together .notif-items > *")];
     return els.length ? Math.max(...els.map((e) => e.getBoundingClientRect().bottom)) : NaN;
@@ -403,7 +402,7 @@ async function overpullKit() {
     await until(() => !document.querySelector(".cc3-grid.cc-peek"), "the pull let go");
     await frames(2);
     await until(still, "settled after the pull");
-    await window.__gw.steady(() => [row(), under(), edge(), grip(), gap()], 4);
+    await window.__gw.steady(() => [row(), under(), edge(), gap()], 4);
   };
   const S = await window.__gw.mod("./state.ts");
   S.ccV3.value = "v3";
@@ -414,11 +413,11 @@ async function overpullKit() {
     // Its open eases --q and ends the ride on a timer: still() can hold before that begins (a late frame) - so also
     // nothing riding and every measure steady over frames, else the rest marks are taken mid-open.
     await until(() => !document.querySelector(".notif-panel.riding"), "the open's ride over");
-    if (!(await window.__gw.steady(() => [row(), under(), edge(), grip(), gap()], 4))) throw new Error("timed out: the panel at rest");
+    if (!(await window.__gw.steady(() => [row(), under(), edge(), gap()], 4))) throw new Error("timed out: the panel at rest");
   } catch (e) {
     return [e.message];
   }
-  window.__op = { sleep, frames, shown, under, row, still, drag, edge, grip, gap, n0: shown(), under0: under(), row0: row(), edge0: edge(), grip0: grip(), gap0: gap() };
+  window.__op = { sleep, frames, shown, under, row, still, drag, edge, gap, n0: shown(), under0: under(), row0: row(), edge0: edge(), gap0: gap() };
   return [];
 }
 
@@ -650,7 +649,7 @@ async function overpullFold() {
 }
 
 /**
- * Opening and closing (the host's pull: shade.drag q, then shade.settle): the panel's edge and grip come down with the
+ * Opening and closing (the host's pull: shade.drag q, then shade.settle): the panel's edge comes down with the
  * pull - its frost no taller than the pull so far - and go back up with the close; settled, all where it was.
  */
 async function panelTracksFinger() {
@@ -665,16 +664,15 @@ async function panelTracksFinger() {
     ev.emit("shade.drag", { q });
     // Until the panel stands where the pull put it (--q eases there), not a time.
     await window.__gw.settled(() => true, ".notif-panel");
-    await window.__gw.steady(() => [o.edge(), o.grip()], 4);
+    await window.__gw.steady(() => [o.edge()], 4);
     const e = o.edge();
     seen.push(Math.round(e));
     if (e > o.edge0 - (1 - q) * full * 0.6) fails.push(`pulled to ${q}, the panel's edge is already at ${Math.round(e)} of ${Math.round(o.edge0)} (a static slab)`);
-    if (Math.abs(o.grip() - (o.grip0 - o.edge0 + e)) > 2) fails.push(`pulled to ${q}, the grip isn't at the panel's edge`);
   }
   if (!(seen[0] < seen[1] && seen[1] < seen[2])) fails.push(`the panel's edge didn't follow the pull down: ${seen.join(" -> ")}`);
   ev.emit("shade.settle", { open: true });
   await window.__gw.until(() => Math.abs(o.edge() - o.edge0) <= 1 && o.still());
-  await window.__gw.steady(() => [o.edge(), o.grip()], 4);
+  await window.__gw.steady(() => [o.edge()], 4);
   if (Math.abs(o.edge() - o.edge0) > 1) fails.push(`settled open, the panel's edge is ${Math.round(o.edge() - o.edge0)} px off its place`);
   return fails;
 }

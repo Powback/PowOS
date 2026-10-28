@@ -488,7 +488,6 @@ export function NotificationPanel() {
             </>
           )}
         </div>
-        <div class="notif-grip" />
       </div>
     </>
   );
