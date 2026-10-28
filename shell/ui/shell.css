@@ -233,27 +233,42 @@
   100% { --dock-fade-l: 24px; --dock-fade-r: 0px; }
 }
 /*
- * Content scrolling under chrome (the drawer's apps under the status bar and over the pill, PowOS AI's panes under its
- * header and over the compose, the shade's list, the chat) fades out at an edge where there's more to scroll, never
- * cut (the user, 2026-10-24): one scroll-driven mask on the scroll container, the dock's way, both ends --scroll-fade.
- * Nothing to scroll, or no scroll timelines: no fade, as before.
+ * Content scrolling under chrome: the drawer's apps and the shade's list fade out at an edge where there's more to
+ * scroll, never cut (the user, 2026-10-24): one scroll-driven mask on the scroll container, the dock's way, both ends
+ * --scroll-fade. Nothing to scroll, or no scroll timelines: no fade, as before.
+ * PowOS AI's panes and chat do NOT fade (the user, 2026-10-28): they end in a crisp edge with a hairline that appears
+ * only once content is scrolled under that edge (--edge-t/-b, 0..1, scroll-driven).
  */
 @property --scroll-fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @property --scroll-fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
-:is(.drawer-list, .chat, .ai-panel, .ai-scroll, .notif-list) {
+@property --edge-t { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --edge-b { syntax: "<number>"; inherits: false; initial-value: 0; }
+:is(.drawer-list, .notif-list) {
   --scroll-fade: 24px;
   -webkit-mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
   mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
 }
+:is(.chat, .ai-panel, .ai-scroll) {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-foreground) calc(var(--edge-t) * 16%), transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--color-foreground) calc(var(--edge-b) * 16%), transparent);
+}
 @supports (animation-timeline: scroll()) {
-  :is(.drawer-list, .chat, .ai-panel, .ai-scroll, .notif-list) {
+  :is(.drawer-list, .notif-list) {
     animation: scroll-fade-t linear both, scroll-fade-b linear both;
     animation-timeline: scroll(self y), scroll(self y);
     animation-range: 0 var(--scroll-fade), calc(100% - var(--scroll-fade)) 100%;
   }
+  :is(.chat, .ai-panel, .ai-scroll) {
+    animation: edge-t linear both, edge-b linear both;
+    animation-timeline: scroll(self y), scroll(self y);
+    animation-range: 0 12px, calc(100% - 12px) 100%;
+  }
 }
 @keyframes scroll-fade-t { from { --scroll-fade-t: 0px; } to { --scroll-fade-t: var(--scroll-fade); } }
 @keyframes scroll-fade-b { from { --scroll-fade-b: var(--scroll-fade); } to { --scroll-fade-b: 0px; } }
+@keyframes edge-t { from { --edge-t: 0; } to { --edge-t: 1; } }
+@keyframes edge-b { from { --edge-b: 1; } to { --edge-b: 0; } }
 .dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
 .dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
 .dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
@@ -1395,6 +1410,10 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* No fade at the foot (the user, 2026-10-28): the last card ends on its own rounded corner with room under it, and a
+     cut mid-scroll is the pane's own rounded edge, so a short viewport (keyboard open) never shows a flat clipped card. */
+  padding-bottom: 12px;
+  border-radius: var(--radius-card, 18px);
 }
 /*
  * Wide (the AI page or panel >= 700 px: unfolded, a wide window - powai.tsx AiView): two panes, each its own scroll.
