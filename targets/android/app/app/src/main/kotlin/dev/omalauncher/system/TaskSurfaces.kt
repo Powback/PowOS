@@ -211,7 +211,7 @@ object TaskSurfaces {
         // a fixed-size app in OnePlus's compat box) stays exactly as WM left it - no crop, corners or shadow.
         listen { id, leash ->
             if (leash == null) return@listen
-            if (id in sizes) look(id, leash, on = true) else Log.i(TAG, "task $id: not a PowOS window, its surface left as WM placed it")
+            if (sizes.containsKey(id)) look(id, leash, on = true) else Log.i(TAG, "task $id: not a PowOS window, its surface left as WM placed it")
         }
     }
 
