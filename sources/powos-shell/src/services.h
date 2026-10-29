@@ -4,6 +4,7 @@
 
 #include <QFileSystemWatcher>
 #include <QHash>
+#include <QSet>
 #include <QIcon>
 #include <QJsonArray>
 #include <QModelIndex>
@@ -11,6 +12,8 @@
 #include <QObject>
 #include <QProcess>
 #include <QTimer>
+
+class Desktops;
 
 namespace TaskManager {
 class TasksModel;
@@ -43,6 +46,8 @@ public:
     bool close(const QString &id);
     /** A window's icon when its theme has no name for it (served on powos://icon/_task/<id>). */
     QIcon icon(const QString &id) const;
+    /** KWin virtual desktop ids that hold a window (on-all-desktops windows hold none): desktops.ensure keeps these. */
+    QSet<QString> desktopsInUse() const;
 Q_SIGNALS:
     /** The list again, at most every 50 ms however busy the model is. */
     void changed(const QJsonArray &list);
@@ -127,6 +132,8 @@ struct Services {
     Store *store;
     Theme *theme;
     Ai *ai;
+    /** desktops.*: KWin's virtual desktops, one per home page (desktops.h). */
+    Desktops *desktops;
 };
 
 /** powos://icon/<name>: a theme icon by name (QIcon::fromTheme), percent-encoded. */

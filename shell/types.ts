@@ -756,6 +756,19 @@ export interface Bridge {
     close(id: string): Promise<boolean>;
   };
   /**
+   * KWin's virtual desktops (PowOS's desktop host only; the phone rejects these): one per home page, in page order, so
+   * a window stays on the page it opened on and KWin itself moves windows when the page changes. "desktops.current"
+   * (index) when KWin switches (keyboard, gestures, a pager).
+   */
+  desktops: {
+    /** In KWin's order: index = home page index; current: KWin's current one. */
+    list(): Promise<VirtualDesktop[]>;
+    /** Makes desktop [index] KWin's current one (its slide effect moves the windows); false: no such desktop. */
+    setCurrent(index: number): Promise<boolean>;
+    /** Creates or removes desktops at the end until there are [count]; a desktop holding a window is never removed. */
+    ensure(count: number): Promise<VirtualDesktop[]>;
+  };
+  /**
    * The desktop panel's own surface (index.html?mode=panel, a layer surface along the screen's bottom edge): [px]
    * tall while something opens above the bar (the launcher), the bar alone again with 0. The space kept free of
    * maximized windows stays the bar's.
@@ -1143,4 +1156,12 @@ export interface HealthRecord {
   source: string;
   /** Exercise: its title or Health Connect's exercise type number. */
   detail?: string;
+}
+
+/** One of KWin's virtual desktops (Bridge.desktops): index is its position, the home page it belongs to. */
+export interface VirtualDesktop {
+  id: string;
+  name: string;
+  index: number;
+  current: boolean;
 }

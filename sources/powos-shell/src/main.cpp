@@ -11,6 +11,7 @@
 #include "launcher.h"
 #include "panel.h"
 #include "server.h"
+#include "desktops.h"
 #include "services.h"
 
 #include <QApplication>
@@ -81,7 +82,8 @@ int main(int argc, char **argv)
     if (roles.isEmpty())
         roles = {QStringLiteral("home")};
     auto *store = new Store(&app);
-    Services services{new Apps(&app), new Windows(&app), store, new Theme(&app), new Ai(store, &app)};
+    auto *windows = new Windows(&app);
+    Services services{new Apps(&app), windows, store, new Theme(&app), new Ai(store, &app), new Desktops(windows, &app)};
 
     // POWOS_SHELL_PROFILE: another instance's own storage (dev/phone.sh render runs one beside the session's).
     auto *profile = new QWebEngineProfile(qEnvironmentVariable("POWOS_SHELL_PROFILE", QStringLiteral("powos-shell")), &app);

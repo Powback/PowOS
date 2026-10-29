@@ -1,4 +1,5 @@
 #include "bridge.h"
+#include "desktops.h"
 #include "net.h"
 #include "server.h"
 #include "services.h"
@@ -36,6 +37,7 @@ Bridge::Bridge(const Services &services, QObject *parent)
     connect(services.apps, &Apps::changed, this, [this] { emitEvent(QStringLiteral("apps.changed"), QJsonValue::Null); });
     connect(services.theme, &Theme::changed, this, [this](const QJsonValue &t) { emitEvent(QStringLiteral("theme.changed"), t); });
     connect(services.ai, &Ai::changed, this, [this](const QJsonObject &c) { emitEvent(QStringLiteral("ai.changed"), c); });
+    connect(services.desktops, &Desktops::currentChanged, this, [this](int index) { emitEvent(QStringLiteral("desktops.current"), index); });
 }
 
 void Bridge::native(const QString &message)
@@ -108,6 +110,12 @@ QJsonValue Bridge::dispatch(const QString &method, const QJsonArray &a)
         return m_services.windows->minimize(a.at(0).toString());
     if (method == QLatin1String("windows.close"))
         return m_services.windows->close(a.at(0).toString());
+    if (method == QLatin1String("desktops.list"))
+        return m_services.desktops->list();
+    if (method == QLatin1String("desktops.setCurrent"))
+        return m_services.desktops->setCurrent(a.at(0).toInt());
+    if (method == QLatin1String("desktops.ensure"))
+        return m_services.desktops->ensure(a.at(0).toInt());
     if (method == QLatin1String("panel.height")) {
         Q_EMIT surfaceHeight(a.at(0).toInt());
         return QJsonValue::Null;

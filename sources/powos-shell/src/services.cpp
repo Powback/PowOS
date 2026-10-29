@@ -105,6 +105,19 @@ QString Windows::idOf(const QModelIndex &index)
     return ids.isEmpty() ? QString() : ids.first().toString();
 }
 
+QSet<QString> Windows::desktopsInUse() const
+{
+    QSet<QString> out;
+    for (int row = 0; row < m_model->rowCount(); ++row) {
+        const QModelIndex index = m_model->index(row, 0);
+        if (!index.data(AbstractTasksModel::IsWindow).toBool() || index.data(AbstractTasksModel::IsOnAllVirtualDesktops).toBool())
+            continue;
+        for (const QVariant &desktop : index.data(AbstractTasksModel::VirtualDesktops).toList())
+            out.insert(desktop.toString());
+    }
+    return out;
+}
+
 QModelIndex Windows::find(const QString &id) const
 {
     for (int row = 0; row < m_model->rowCount(); ++row) {

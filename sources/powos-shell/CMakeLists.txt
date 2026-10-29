@@ -24,6 +24,7 @@ add_executable(powos-shell
   src/server.cpp
   src/bridge.cpp
   src/services.cpp
+  src/desktops.cpp
   src/net.cpp
   src/launcher.h
 )

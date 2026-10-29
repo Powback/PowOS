@@ -19,6 +19,7 @@ import type {
   Cell,
   Chat,
   DesktopWindow,
+  VirtualDesktop,
   Home,
   HomeItem,
   NotificationList,
@@ -254,6 +255,11 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       activate: (id) => call<boolean>("windows.activate", id), // host: panel (the Qt desktop host serves it; never the Android app)
       minimize: (id) => call<boolean>("windows.minimize", id), // host: panel (the Qt desktop host serves it; never the Android app)
       close: (id) => call<boolean>("windows.close", id), // host: panel (the Qt desktop host serves it; never the Android app)
+    },
+    desktops: {
+      list: () => call<VirtualDesktop[]>("desktops.list"), // host: panel (the Qt desktop host serves it; never the Android app)
+      setCurrent: (index) => call<boolean>("desktops.setCurrent", index), // host: panel (the Qt desktop host serves it; never the Android app)
+      ensure: (count) => call<VirtualDesktop[]>("desktops.ensure", count), // host: panel (the Qt desktop host serves it; never the Android app)
     },
     panel: { height: (px) => call("panel.height", px) }, // host: panel (the Qt desktop host serves it; never the Android app)
     // The phone's floating windows; on the desktop host "windows.list" is the taskbar's (DesktopWindow[]).
@@ -799,6 +805,12 @@ function mock(): Bridge {
       launched: async () => console.log("[mock] pull launched"),
     },
     windows: mockWindows(events, icon),
+    // The browser has no KWin: one desktop, nothing to switch.
+    desktops: {
+      list: async () => [{ id: "mock", name: "Page 1", index: 0, current: true }],
+      setCurrent: async (index) => index === 0,
+      ensure: async () => [{ id: "mock", name: "Page 1", index: 0, current: true }],
+    },
     panel: { height: async (px) => console.log("[mock] panel height", px) },
     tasks: mockTasks(icon, hue),
     recents: {
