@@ -1543,7 +1543,7 @@ async function pullUpFrom(el) {
  * The drawer is open with the bar's pill on screen, over the drawer's window (not under an app row). On home's page
  * (homeAsks): home asked the host for the launcher overlay - with its search focused when [search].
  */
-function drawerWithPill(where, search = false) {
+function drawerWithPill(where, search) {
   if (window.__asked) return window.__sp.overlayAsked(where, search);
   const pill = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
   const clip = document.querySelector(".home .launcher-clip")?.getBoundingClientRect();
