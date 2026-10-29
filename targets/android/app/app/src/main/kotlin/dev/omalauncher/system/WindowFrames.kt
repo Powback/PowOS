@@ -190,7 +190,10 @@ class WindowFrames(
         all: List<FreeformTasks.Window>,
         floating: Boolean,
     ) {
-        val framed = floating && !keyguard && !Switcher.open
+        // Not over the Plasma app: Android windows there keep Android's own caption and nothing of PowOS's - our bars
+        // fought them (the user, 2026-10-29: "android apps inside plasma is totally broken it fights with our overlay
+        // title shit").
+        val framed = floating && !keyguard && !Switcher.open && !andro.marchy.WindowTasks.desktopOnScreen()
         val show = if (framed) shown(all) else emptyList()
         // A page swipe's windows keep their frames where they are till the page change is committed ([sliding]).
         val ids = show.map { it.id }.toSet() + held(all, floating && !keyguard) + sliding.keys
