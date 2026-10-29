@@ -109,10 +109,11 @@ export const searchPending = signal(false);
 /** The pill's text switched to chat because it found nothing. The user, 2026-10-29: "im typing in the launcherchat and it
  * triggers a search even after no search results" - a new chat message is typed before `chatting` is set, so every key
  * searched again and the launcher swapped between results and the chat. Once switched, that input stays chat while it
- * types on from (or deletes back into) the text that found nothing; an empty pill or a different text searches again
- * (select-all + new words is a new search, as the search scenes set one query after another). Holds that text, "" none. */
+ * types on from the text that found nothing. Deleting back past it searches again (the user, 2026-10-29: "if I delete
+ * so that it should have results it still shows the chat"), as do an empty pill and a different text. Holds that
+ * text, "" none. */
 const noMatch = signal("");
-const related = (q: string, nm: string) => !!nm && !!q && (q.startsWith(nm) || nm.startsWith(q));
+const related = (q: string, nm: string) => !!nm && !!q && q.startsWith(nm);
 /** Searches run after the switch to chat (should stay 0), logged when the input ends for the device check. */
 let searchesAfterChat = 0;
 const searched = computed(() => {

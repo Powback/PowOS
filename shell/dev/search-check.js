@@ -183,15 +183,23 @@ async function noMatchTypingFailures(s, search, wait, counts) {
     Object.assign(counts, { noMatchSearches: probe.searches, noMatchShown: probe.shown });
     await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
     const asked = document.querySelector('.msg.ask')?.textContent.includes(app);
-    s.query.value = 'zq';
-    await new Promise(r => setTimeout(r, 160));
+    // Deleting back past the text that found nothing searches again (the user, 2026-10-29: "if I delete so that it
+    // should have results it still shows the chat").
+    const head = app.slice(0, 3).toLowerCase();
+    s.query.value = '';
+    for (const ch of `${head}zq`) await key(ch);
+    await wait(() => !search.searchPending.value);
+    const noneFound = !search.searchResults.value.length;
+    s.query.value = head;
+    await wait(() => !search.searchPending.value);
+    const backToResults = search.searchResults.value.length > 0;
     const afterDelete = probe.searches;
     s.query.value = '';
     await key('z');
     await wait(() => !search.searchPending.value);
     return [
       [chattingAlready, 'chatting was already set, the case is not tested'],
-      [afterDelete, `deleting letters ran ${afterDelete} searches`],
+      [noneFound && !backToResults, `deleting "${head}zq" back to "${head}" kept the chat, no results`],
       [probe.searches === afterDelete, 'an emptied pill did not search again'],
       [counts.noMatchSearches, `${counts.noMatchSearches} searches after the text found nothing`],
       [counts.noMatchShown, `results shown on ${counts.noMatchShown} keys after the text found nothing`],
