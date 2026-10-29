@@ -150,44 +150,57 @@ export async function launcherChatTypingCheck() {
     s.closeDrawer();
   }
   const failures = chatTypingFailures(counts);
-  // A new chat message (not yet `chatting`; the user, 2026-10-29: "im typing in the launcherchat and it triggers a search
-  // even after no search results"): once the text found nothing, more letters - even an app's name, which a provider
-  // here would match - neither search nor show results; the "↵ ask" line still shows the text.
+  failures.push(...await noMatchTypingFailures(s, search, wait, counts));
+  return [failures, counts];
+}
+
+/**
+ * A new chat message (not yet `chatting`; the user, 2026-10-29: "im typing in the launcherchat and it triggers a search
+ * even after no search results"): once the text found nothing, more letters - even an app's name, which the probe here
+ * would match - neither search nor show results, nor does deleting letters; the "↵ ask" line still shows the text;
+ * an emptied pill searches again from scratch.
+ */
+async function noMatchTypingFailures(s, search, wait, counts) {
   const app = s.apps.value[0]?.label ?? 'Settings';
-  let probeSearches = 0;
-  const offProbe = search.registerSearchProvider({ id: 'chat-nomatch-probe', search(text) {
-    probeSearches++;
-    return text.toLocaleLowerCase().includes(app.toLocaleLowerCase()) ? [{ id: 'probe:' + text, label: text, source: 'Probe', open() {} }] : [];
+  const probe = { searches: 0, shown: 0 };
+  const off = search.registerSearchProvider({ id: 'chat-nomatch-probe', search(text) {
+    probe.searches++;
+    return text.toLocaleLowerCase().includes(app.toLocaleLowerCase()) ? [{ id: `probe:${text}`, label: text, source: 'Probe', open() {} }] : [];
   } });
+  const key = async (ch) => {
+    s.query.value += ch;
+    await new Promise(r => setTimeout(r, 160)); // past search.ts's 100 ms debounce
+    probe.shown += search.searchResults.value.length || document.querySelectorAll('[data-search-result]').length ? 1 : 0;
+  };
   try {
     s.closeDrawer();
-    s.query.value = '';
     s.drawer.value = 1;
-    for (const ch of 'zqxw') { s.query.value += ch; await new Promise(r => setTimeout(r, 160)); }
+    for (const ch of 'zqxw') await key(ch);
     await wait(() => !search.searchPending.value);
-    if (s.chatting.value) failures.push('no-match typing: chatting was already set, the case is not tested');
-    probeSearches = 0;
-    counts.noMatchShown = 0;
-    for (const ch of ` open ${app}`) {
-      s.query.value += ch;
-      await new Promise(r => setTimeout(r, 160));
-      if (search.searchResults.value.length || document.querySelector('[data-search-result]')) counts.noMatchShown++;
-    }
-    counts.noMatchSearches = probeSearches;
-    if (probeSearches) failures.push(`no-match typing: ${probeSearches} searches after the text found nothing`);
-    if (counts.noMatchShown) failures.push(`no-match typing: results shown on ${counts.noMatchShown} keys after the text found nothing`);
-    await frame();
-    if (!document.querySelector('.msg.ask')?.textContent.includes(app)) failures.push('no-match typing: no "↵ ask" line for the text');
+    const chattingAlready = s.chatting.value;
+    Object.assign(probe, { searches: 0, shown: 0 });
+    for (const ch of ` open ${app}`) await key(ch);
+    Object.assign(counts, { noMatchSearches: probe.searches, noMatchShown: probe.shown });
+    await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+    const asked = document.querySelector('.msg.ask')?.textContent.includes(app);
     s.query.value = 'zq';
     await new Promise(r => setTimeout(r, 160));
-    await wait(() => !search.searchPending.value);
-    if (!probeSearches) failures.push('no-match typing: deleting back to a shorter text did not search again');
-  } finally {
-    offProbe();
+    const afterDelete = probe.searches;
     s.query.value = '';
+    await key('z');
+    await wait(() => !search.searchPending.value);
+    return [
+      [chattingAlready, 'chatting was already set, the case is not tested'],
+      [afterDelete, `deleting letters ran ${afterDelete} searches`],
+      [probe.searches === afterDelete, 'an emptied pill did not search again'],
+      [counts.noMatchSearches, `${counts.noMatchSearches} searches after the text found nothing`],
+      [counts.noMatchShown, `results shown on ${counts.noMatchShown} keys after the text found nothing`],
+      [!asked, 'no "↵ ask" line for the text'],
+    ].filter(([bad]) => bad).map(([, m]) => `no-match typing: ${m}`);
+  } finally {
+    off();
     s.closeDrawer();
   }
-  return [failures, counts];
 }
 
 /** Counts, into [counts], the drawer's children replaced and every change inside the chat but its "↵ ask" line. */
