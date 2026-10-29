@@ -39,7 +39,20 @@ NEUTRAL = (0, 0, 0, 0, 0, 0, 0) + (0,) * 10
 
 
 def log(*a):
-    print("powos-padd:", *a, file=sys.stderr, flush=True)
+    print(time.strftime("%F %T"), "powos-padd:", *a, file=sys.stderr, flush=True)
+
+
+BUTTONS = ("A B X Y LB RB Back Start Guide LS RS up down left right L4 L5 R4 R5 QuickAccess lpad-touch rpad-touch "
+           "lpad-click rpad-click").split()
+
+
+def log_presses(prev, now):
+    """Every newly pressed button, timed: a game Steam launched with nobody tapping it (Broforce, 2026-10-29 15:31:03,
+    LaunchApp 8 s after a tap on Steam opened its main window, no touch reached Steam's window in KWin's log, Steam had
+    just loaded the Deck controller's config for the focused game) is told apart from a pad press only this way."""
+    down = now & ~prev
+    if down & 0xFFFFF:  # buttons, not the trackpad touch/click bits (those come with every trackpad move)
+        log("pressed", " ".join(b for i, b in enumerate(BUTTONS) if down >> i & 1))
 
 
 def give(path):
@@ -320,7 +333,7 @@ def main():
             time.sleep(0.1)
     srv.listen(2)
     log("listening on", "@" + SOCK[1:])
-    client, buf = None, b""
+    client, buf, held = None, b"", 0
     while True:
         fds = [srv] + ([client] if client else []) + ([pad.fd] if pad.fd is not None else [])
         r, _, _ = select.select(fds, [], [], pad.interval())
@@ -336,7 +349,7 @@ def main():
             if client:  # the newest overlay wins (an app restart reconnects before the old socket times out)
                 client.close()
                 pad.apply(NEUTRAL)
-            client, buf = new, b""
+            client, buf, held = new, b"", 0
             log("overlay connected")
         if client is None or client not in r:
             continue
@@ -363,6 +376,8 @@ def main():
                 break
             _, *state = fmt.unpack_from(buf)
             buf = buf[fmt.size:]
+            log_presses(held, state[0])
+            held = state[0]
             pad.apply(state)
 
 
