@@ -116,7 +116,8 @@ class EdgeGestures(
         }
 
     fun start() {
-        SplitDrawer.onChange = { main.post { handles() } }
+        // Posted, guarded: a drawer change (from SplitDrawer's own thread) only redraws the handles, and can't throw here.
+        SplitDrawer.onChange = { main.post { runCatching { handles() }.onFailure { Log.w(TAG, "edge handles redraw failed", it) } } }
         observer.startWatching()
         service.registerReceiver(
             lockReceiver,
@@ -271,10 +272,16 @@ class EdgeGestures(
     // --- the split drawers (SplitDrawer): a tucked app's tab, swiped in
 
     /** The tab's span on its edge (screen px): the middle of the screen, where the divider was let go. */
-    private fun tabSpan(screen: Rect): Pair<Float, Float> = screen.top + screen.height() * TAB_TOP to screen.top + screen.height() * TAB_BOTTOM
+    private fun tabSpan(screen: Rect): Pair<Float, Float>? = if (screen.height() <= 0) null else screen.top + screen.height() * TAB_TOP to screen.top + screen.height() * TAB_BOTTOM
 
     /** A finger down on a tucked app's tab: it's the drawer's, whatever the edge's own handle would do there. */
     private fun drawerDown(e: MotionEvent): Boolean {
+        // No tucked app (the usual case, and always at startup): no drawer work at all.
+        if (!SplitDrawer.any()) return false
+        return runCatching { drawerDownNow(e) }.onFailure { Log.w(TAG, "split drawer tab touch failed", it) }.getOrDefault(false)
+    }
+
+    private fun drawerDownNow(e: MotionEvent): Boolean {
         val screen = screen()
         val side =
             when {
@@ -283,10 +290,10 @@ class EdgeGestures(
                 else -> return false
             }
         if (SplitDrawer.tucked(side) == null) return false
-        val (top, bottom) = tabSpan(screen)
+        val (top, bottom) = tabSpan(screen) ?: return false
         if (e.rawY < top || e.rawY > bottom || locked()) return false
+        // Async (its binder calls run on SplitDrawer's thread); a gone app is dropped by pull() too.
         SplitDrawer.prune(service)
-        if (SplitDrawer.tucked(side) == null) return false
         pulling = side
         pullX = e.rawX
         Log.i(TAG, "edge: down on the ${if (side == 0) "left" else "right"} split drawer's tab")
@@ -305,7 +312,8 @@ class EdgeGestures(
                     inward < TAB_PULL_DP * density -> Log.i(TAG, "edge: split drawer tab let go after ${inward.toInt()}px: stays tucked")
                     else -> {
                         tick(EFFECT_CLICK)
-                        SplitDrawer.pull(service, side, float = inward > width * SplitDrawer.FLOAT_PULL)
+                        runCatching { SplitDrawer.pull(service, side, float = inward > width * SplitDrawer.FLOAT_PULL) }
+                            .onFailure { Log.w(TAG, "split drawer pull failed", it) }
                     }
                 }
                 return GestureConsumer.Verdict.DROP
@@ -443,10 +451,19 @@ class EdgeGestures(
         val screen = screen()
         val show = c.on && c.handles && !locked()
         // A tucked split app's tab shows whatever the edge's own settings (the drawer is the split's, not a gesture).
-        val tab = if (locked()) null else tabSpan(screen)
-        leftHandle.update(if (show && c.left.on) span(c.left, screen) else null, screen, tab?.takeIf { SplitDrawer.tucked(0) != null })
-        rightHandle.update(if (show && c.right.on) span(c.right, screen) else null, screen, tab?.takeIf { SplitDrawer.tucked(1) != null })
+        // No tucked app: no tab, exactly the handles as before the drawer existed.
+        leftHandle.update(if (show && c.left.on) span(c.left, screen) else null, screen, drawerTab(0, screen))
+        rightHandle.update(if (show && c.right.on) span(c.right, screen) else null, screen, drawerTab(1, screen))
     }
+
+    /** The tab of the split drawer on [side], or null (nothing tucked there, locked, no screen yet). */
+    private fun drawerTab(
+        side: Int,
+        screen: Rect,
+    ): Pair<Float, Float>? =
+        runCatching { if (SplitDrawer.tucked(side) == null || locked()) null else tabSpan(screen) }
+            .onFailure { Log.w(TAG, "split drawer tab", it) }
+            .getOrNull()
 
     /** A strip window on one edge, drawing a faint line over the handle's span; never touchable. */
     private inner class Handle(
@@ -514,19 +531,33 @@ class EdgeGestures(
         private val tabPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = TAB_COLOR }
 
         override fun onDraw(canvas: Canvas) {
-            span?.let { (top, bottom) ->
-                val w = HANDLE_LINE_DP * density
-                val inset = HANDLE_INSET_DP * density
-                val left = if (right) width - inset - w else inset
-                // Inset at the ends too, so the line reads as a handle, not a frame.
-                val pad = HANDLE_END_PAD_DP * density
-                if (bottom - top > pad * 2) canvas.drawRoundRect(left, top + pad, left + w, bottom - pad, w, w, paint)
-            }
-            tab?.let { (top, bottom) ->
-                val w = TAB_LINE_DP * density
-                val left = if (right) width - w else 0f
-                canvas.drawRoundRect(left, top, left + w, bottom, w, w, tabPaint)
-            }
+            span?.let { drawLine(canvas, it) }
+            tab?.let { drawTab(canvas, it) }
+        }
+
+        private fun drawLine(
+            canvas: Canvas,
+            span: Pair<Float, Float>,
+        ) {
+            val (top, bottom) = span
+            val w = HANDLE_LINE_DP * density
+            val inset = HANDLE_INSET_DP * density
+            val left = if (right) width - inset - w else inset
+            // Inset at the ends too, so the line reads as a handle, not a frame.
+            val pad = HANDLE_END_PAD_DP * density
+            if (bottom - top > pad * 2) canvas.drawRoundRect(left, top + pad, left + w, bottom - pad, w, w, paint)
+        }
+
+        /** Nothing until the window has a size and the tab a positive height. */
+        private fun drawTab(
+            canvas: Canvas,
+            tab: Pair<Float, Float>,
+        ) {
+            val (top, bottom) = tab
+            if (width <= 0 || bottom <= top) return
+            val w = TAB_LINE_DP * density
+            val left = if (right) width - w else 0f
+            canvas.drawRoundRect(left, top, left + w, bottom, w, w, tabPaint)
         }
     }
 

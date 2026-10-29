@@ -83,12 +83,14 @@ class PowosRecentsService : Service() {
                 val recentTasks = params?.getBinder(RecentsTransition.RECENT_TASKS)
                 // The switcher's split screen (WM Shell's).
                 Tasks.splitScreen = params?.getBinder("com.android.wm.shell.splitscreen.ISplitScreen")
-                // Its divider dragged to an edge tucks that app into an edge drawer (SplitDrawer).
-                SplitDrawer.attach(this@PowosRecentsService, Tasks.splitScreen)
                 // WM Shell's transitions: a floating window's content follows a drag (TaskLeash).
                 TaskLeash.shell = params?.getBinder(TaskLeash.KEY)
                 // Every desktop window's surface, for the in-task frames (TaskSurfaces; fed by TaskLeash).
                 TaskSurfaces.start(this@PowosRecentsService)
+                // Its divider dragged to an edge tucks that app into an edge drawer (SplitDrawer). Last, and guarded: an
+                // optional feature must never cut the rest of SystemUI's hand-off short (34ef9a7f stopped home booting).
+                runCatching { SplitDrawer.attach(this@PowosRecentsService, Tasks.splitScreen) }
+                    .onFailure { Log.w(TAG, "split drawer not attached", it) }
                 Log.i(TAG, "SystemUI connected: ${params?.keySet()?.sorted()}")
                 main.post {
                     RecentsWatchdog.onConnected()

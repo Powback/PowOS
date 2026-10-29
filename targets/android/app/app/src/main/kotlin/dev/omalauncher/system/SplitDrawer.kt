@@ -6,10 +6,12 @@ import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Binder
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
-import android.os.Looper
 import android.os.Parcel
+import android.os.SystemClock
 import android.util.Log
+import java.util.concurrent.atomic.AtomicReferenceArray
 
 /**
  * The split screen's edge drawer: dragging WM Shell's split divider all the way to an edge tucks that side's app into
@@ -32,6 +34,11 @@ import android.util.Log
  * register call are written by hand as the generated AIDL would. Real fix: none for an app (Quickstep compiles against
  * the platform's copy). HACK: the exit reason is inferred, not read; real fix: none (WM Shell keeps it to itself; its
  * only outlet is ProtoLog).
+ *
+ * Startup safety (34ef9a7f's install never let home boot): nothing here runs on the main thread or may throw out. The
+ * register call, the listener's callbacks, the settle/sample readings (getRecentTasks/getRunningTasks: binder calls)
+ * and [pull] all run on this feature's own thread [work], each wrapped ([safe]); the ratio poll runs only while a
+ * split exists; the thread itself is made on first [attach], inside its guard.
  */
 object SplitDrawer {
     private const val TAG = "PowosSplitDrawer"
@@ -54,14 +61,18 @@ object SplitDrawer {
     /** A tucked app: [side] is Tasks.SPLIT_POSITION_*; [share] the screen share it had in the split. */
     data class Tuck(val task: Int, val pkg: String?, val side: Int, val share: Float, val kept: Int)
 
-    private val main = Handler(Looper.getMainLooper())
-    private var context: Context? = null
-    private var registeredOn: IBinder? = null
+    /** This feature's own thread (never the main one): made on first [attach]; null before (callbacks then no-op). */
+    @Volatile private var work: Handler? = null
 
-    /** Called (main thread) when a tuck comes or goes: the edge handles redraw. */
-    var onChange: (() -> Unit)? = null
+    @Volatile private var context: Context? = null
 
-    private val tucked = arrayOfNulls<Tuck>(2)
+    @Volatile private var registeredOn: IBinder? = null
+
+    /** Called (on [work]; listeners post to their own thread) when a tuck comes or goes: the edge handles redraw. */
+    @Volatile var onChange: (() -> Unit)? = null
+
+    /** Read from the main thread (edge gestures), written on [work]. */
+    private val tucked = AtomicReferenceArray<Tuck?>(2)
 
     // The split as WM Shell reports it: task -> stage, task -> visible, stage -> position.
     private val stageOf = HashMap<Int, Int>()
@@ -73,27 +84,60 @@ object SplitDrawer {
     /** The last measured screen share of each split task. */
     private val share = HashMap<Int, Float>()
 
-    fun tucked(side: Int): Tuck? = tucked.getOrNull(side)
+    fun tucked(side: Int): Tuck? = if (side in 0 until tucked.length()) tucked.get(side) else null
+
+    /** Whether any edge holds a tucked app (the edge handles skip all drawer work when not). */
+    fun any(): Boolean = tucked.get(0) != null || tucked.get(1) != null
+
+    /** [block] on [work], logged instead of thrown; a no-op before [attach]. */
+    private fun safe(
+        what: String,
+        delay: Long = 0,
+        block: () -> Unit,
+    ) {
+        val h = work ?: return
+        h.postDelayed({ runCatching(block).onFailure { Log.w(TAG, "$what failed", it) } }, delay)
+    }
+
+    private fun changed() {
+        runCatching { onChange?.invoke() }.onFailure { Log.w(TAG, "drawer change listener failed", it) }
+    }
 
     /** WM Shell's ISplitScreen arrived ([PowosRecentsService.onInitialize]): its listener is registered on it. */
     fun attach(
         context: Context,
         splitScreen: IBinder?,
     ) {
-        this.context = context.applicationContext
-        if (splitScreen == null || splitScreen === registeredOn) return
+        val t0 = SystemClock.elapsedRealtime()
+        Log.i(TAG, "attach: start (split screen ${if (splitScreen == null) "absent" else "present"})")
         runCatching {
-            val data = Parcel.obtain()
-            try {
-                data.writeInterfaceToken(SPLIT_SCREEN)
-                data.writeStrongBinder(listener)
-                splitScreen.transact(REGISTER_LISTENER, data, null, IBinder.FLAG_ONEWAY)
-            } finally {
-                data.recycle()
-            }
-            registeredOn = splitScreen
-        }.onSuccess { Log.i(TAG, "listening to WM Shell's split screen (ISplitScreen.registerSplitScreenListener)") }
-            .onFailure { Log.w(TAG, "can't listen to WM Shell's split screen", it) }
+            this.context = context.applicationContext
+            ensureThread()
+            // The register call (oneway, but still a binder call) goes off the caller's thread.
+            if (splitScreen != null && splitScreen !== registeredOn) safe("registering the split listener") { register(splitScreen) }
+        }.onFailure { Log.w(TAG, "attach failed: no split drawer", it) }
+        Log.i(TAG, "attach: end in ${SystemClock.elapsedRealtime() - t0} ms")
+    }
+
+    @Synchronized
+    private fun ensureThread() {
+        if (work == null) work = Handler(HandlerThread(TAG).apply { start() }.looper)
+    }
+
+    /** On [work]: ISplitScreen.registerSplitScreenListener(listener), as the generated AIDL proxy would write it. */
+    private fun register(splitScreen: IBinder) {
+        if (splitScreen === registeredOn) return
+        val r0 = SystemClock.elapsedRealtime()
+        val data = Parcel.obtain()
+        try {
+            data.writeInterfaceToken(SPLIT_SCREEN)
+            data.writeStrongBinder(listener)
+            splitScreen.transact(REGISTER_LISTENER, data, null, IBinder.FLAG_ONEWAY)
+        } finally {
+            data.recycle()
+        }
+        registeredOn = splitScreen
+        Log.i(TAG, "listening to WM Shell's split screen (ISplitScreen.registerSplitScreenListener, ${SystemClock.elapsedRealtime() - r0} ms)")
     }
 
     private val listener =
@@ -108,21 +152,24 @@ object SplitDrawer {
                 reply: Parcel?,
                 flags: Int,
             ): Boolean {
+                // Never throws back into WM Shell: a bad parcel is logged and dropped.
                 when (code) {
-                    ON_STAGE_POSITION_CHANGED -> {
-                        data.enforceInterface(LISTENER)
-                        val stage = data.readInt()
-                        val position = data.readInt()
-                        main.post { stagePosition(stage, position) }
-                    }
-                    ON_TASK_STAGE_CHANGED -> {
-                        data.enforceInterface(LISTENER)
-                        val task = data.readInt()
-                        val stage = data.readInt()
-                        val visible = data.readInt() != 0
-                        main.post { taskStage(task, stage, visible) }
-                    }
-                    else -> return super.onTransact(code, data, reply, flags)
+                    ON_STAGE_POSITION_CHANGED ->
+                        runCatching {
+                            data.enforceInterface(LISTENER)
+                            val stage = data.readInt()
+                            val position = data.readInt()
+                            safe("stage position") { stagePosition(stage, position) }
+                        }.onFailure { Log.w(TAG, "bad onStagePositionChanged", it) }
+                    ON_TASK_STAGE_CHANGED ->
+                        runCatching {
+                            data.enforceInterface(LISTENER)
+                            val task = data.readInt()
+                            val stage = data.readInt()
+                            val visible = data.readInt() != 0
+                            safe("task stage") { taskStage(task, stage, visible) }
+                        }.onFailure { Log.w(TAG, "bad onTaskStageChanged", it) }
+                    else -> return runCatching { super.onTransact(code, data, reply, flags) }.getOrDefault(false)
                 }
                 return true
             }
@@ -152,9 +199,10 @@ object SplitDrawer {
         }
         val was = stageOf.remove(task) ?: return
         position(was)?.let { leaving[task] = it }
+        if (stageOf.size < 2) work?.removeCallbacks(sample)
         if (stageOf.isEmpty()) {
-            main.removeCallbacks(settle)
-            main.postDelayed(settle, SETTLE_MS)
+            work?.removeCallbacks(settle)
+            work?.postDelayed(settle, SETTLE_MS)
         }
     }
 
@@ -162,61 +210,83 @@ object SplitDrawer {
     private fun position(stage: Int): Int? = positionOf[stage] ?: positionOf.entries.firstOrNull { it.key != stage }?.let { 1 - it.value }
 
     /** The split ended: a divider dragged to an edge leaves exactly one of its apps visible and the other alive. */
-    private val settle =
-        Runnable {
-            val gone = HashMap(leaving)
-            leaving.clear()
-            main.removeCallbacks(sample)
-            if (gone.size != 2) {
-                Log.i(TAG, "split ended with ${gone.keys}: nothing tucked")
-                return@Runnable
-            }
-            val ctx = context ?: return@Runnable
-            val recent = recents(ctx)
-            val visible = gone.keys.filter { id -> recent.firstOrNull { it.taskId == id }?.isVisible == true }
-            val alive = gone.keys.filter { id -> recent.any { it.taskId == id } }
-            val folded = ctx.resources.configuration.smallestScreenWidthDp < 600
-            val kept = visible.singleOrNull()
-            val tuck = alive.singleOrNull { it != kept }
-            when {
-                folded -> Log.i(TAG, "split ended on the folded screen: nothing tucked")
-                kept == null || tuck == null -> Log.i(TAG, "split ended (visible $visible, alive $alive): not an edge drag, nothing tucked")
-                else -> {
-                    val side = gone[tuck]!!
-                    val pkg = recent.firstOrNull { it.taskId == tuck }?.baseActivity?.packageName
-                    val t = Tuck(tuck, pkg, side, share[tuck] ?: 0.5f, kept)
-                    tucked[side]?.let { Log.i(TAG, "${sideName(side)} drawer had ${it.task} (${it.pkg}): replaced") }
-                    tucked[side] = t
-                    Log.i(TAG, "split dismissed by edge drag: tucked $tuck ($pkg) at ${sideName(side)} (share ${"%.2f".format(t.share)}, kept $kept)")
-                    onChange?.invoke()
-                }
-            }
-            share.clear()
+    private val settle = Runnable { runCatching { settleNow() }.onFailure { Log.w(TAG, "settle failed", it) } }
+
+    private fun settleNow() {
+        val gone = HashMap(leaving)
+        leaving.clear()
+        work?.removeCallbacks(sample)
+        val ctx = context
+        when {
+            gone.size != 2 -> Log.i(TAG, "split ended with ${gone.keys}: nothing tucked")
+            ctx == null -> Log.i(TAG, "split ended before attach: nothing tucked")
+            ctx.resources.configuration.smallestScreenWidthDp < 600 -> Log.i(TAG, "split ended on the folded screen: nothing tucked")
+            else -> tuckAfter(gone, recents(ctx))
         }
+        share.clear()
+    }
+
+    /** The split of [gone] (task -> its side) ended: one visible and the other alive is an edge drag, tucked. */
+    private fun tuckAfter(
+        gone: Map<Int, Int>,
+        recent: List<ActivityManager.RecentTaskInfo>,
+    ) {
+        val visible = gone.keys.filter { id -> recent.firstOrNull { it.taskId == id }?.isVisible == true }
+        val alive = gone.keys.filter { id -> recent.any { it.taskId == id } }
+        val kept = visible.singleOrNull()
+        val tuck = alive.singleOrNull { it != kept }
+        val side = tuck?.let { gone[it] }?.takeIf { it in 0..1 }
+        if (kept == null || tuck == null || side == null) {
+            Log.i(TAG, "split ended (visible $visible, alive $alive): not an edge drag, nothing tucked")
+            return
+        }
+        val pkg = recent.firstOrNull { it.taskId == tuck }?.baseActivity?.packageName
+        val t = Tuck(tuck, pkg, side, share[tuck] ?: 0.5f, kept)
+        tucked.get(side)?.let { Log.i(TAG, "${sideName(side)} drawer had ${it.task} (${it.pkg}): replaced") }
+        tucked.set(side, t)
+        Log.i(TAG, "split dismissed by edge drag: tucked $tuck ($pkg) at ${sideName(side)} (share ${"%.2f".format(t.share)}, kept $kept)")
+        changed()
+    }
 
     /** The split tasks' screen shares, read now and again while split (the ratio a pulled-back app returns at). */
     private fun sampleSoon() {
-        main.removeCallbacks(sample)
-        main.postDelayed(sample, 800)
+        val h = work ?: return
+        h.removeCallbacks(sample)
+        h.postDelayed(sample, 800)
     }
 
-    private val sample: Runnable =
-        Runnable {
-            val ctx = context ?: return@Runnable
-            if (stageOf.size < 2) return@Runnable
-            val screen = runCatching { ctx.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds }.getOrNull() ?: return@Runnable
-            @Suppress("DEPRECATION")
-            val tasks = runCatching { ctx.getSystemService(ActivityManager::class.java).getRunningTasks(16) }.getOrDefault(emptyList())
-            for (t in tasks) {
-                if (t.taskId !in stageOf) continue
-                val b = bounds(t) ?: continue
-                // Left/right on the unfolded screen; top/bottom otherwise.
-                val s = if (screen.width() >= screen.height()) b.width().toFloat() / screen.width() else b.height().toFloat() / screen.height()
-                // A mid-drag reading near the edge isn't a ratio to come back at.
-                if (s in 0.15f..0.85f) share[t.taskId] = s
-            }
-            main.postDelayed(sample, SAMPLE_MS)
-        }
+    /** Polls only while a split exists (two tasks staged); it stops itself the moment that's no longer true. */
+    private val sample: Runnable = Runnable { runCatching { sampleNow() }.onFailure { Log.w(TAG, "split ratio reading failed", it) } }
+
+    private fun sampleNow() {
+        val ctx = context ?: return
+        if (stageOf.size < 2) return
+        val screen = screenOf(ctx)
+        if (screen != null) runningTasks(ctx).filter { it.taskId in stageOf }.forEach { t -> shareOf(t, screen)?.let { share[t.taskId] = it } }
+        if (stageOf.size >= 2) work?.postDelayed(sample, SAMPLE_MS)
+    }
+
+    /** The screen's bounds, or null when unknown or empty (nothing to divide by). */
+    private fun screenOf(ctx: Context): Rect? =
+        runCatching { ctx.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds }
+            .getOrNull()
+            ?.takeIf { it.width() > 0 && it.height() > 0 }
+
+    @Suppress("DEPRECATION")
+    private fun runningTasks(ctx: Context): List<ActivityManager.RunningTaskInfo> =
+        runCatching { ctx.getSystemService(ActivityManager::class.java).getRunningTasks(16) }.getOrDefault(emptyList())
+
+    /** Task [t]'s share of [screen] (non-empty), or null when unknown or a mid-drag reading near the edge. */
+    private fun shareOf(
+        t: ActivityManager.RunningTaskInfo,
+        screen: Rect,
+    ): Float? {
+        val b = bounds(t) ?: return null
+        // Left/right on the unfolded screen; top/bottom otherwise.
+        val s = if (screen.width() >= screen.height()) b.width().toFloat() / screen.width() else b.height().toFloat() / screen.height()
+        // A mid-drag reading near the edge isn't a ratio to come back at.
+        return s.takeIf { it in 0.15f..0.85f }
+    }
 
     /** HACK: TaskInfo.configuration / Configuration.windowConfiguration are hidden (as FreeformTasks); real fix: none. */
     private fun bounds(t: ActivityManager.RunningTaskInfo): Rect? =
@@ -232,16 +302,25 @@ object SplitDrawer {
 
     /**
      * The app tucked at [side] pulled back in: into the split on that side at its old ratio, or ([float]) as a floating
-     * window. False when nothing is tucked there or it's gone (the drawer empties either way).
+     * window. Runs on [work] (binder calls), never on the caller's (main) thread; the drawer empties either way.
      */
     fun pull(
         ctx: Context,
         side: Int,
         float: Boolean,
+    ) {
+        val app = ctx.applicationContext
+        safe("pulling the ${sideName(side)} drawer") { pullNow(app, side, float) }
+    }
+
+    private fun pullNow(
+        ctx: Context,
+        side: Int,
+        float: Boolean,
     ): Boolean {
-        val t = tucked.getOrNull(side) ?: return false
-        tucked[side] = null
-        onChange?.invoke()
+        val t = tucked(side) ?: return false
+        tucked.set(side, null)
+        changed()
         val recent = recents(ctx)
         if (recent.none { it.taskId == t.task }) {
             Log.i(TAG, "pulled ${sideName(side)}: ${t.task} (${t.pkg}) is gone, drawer emptied")
@@ -269,20 +348,26 @@ object SplitDrawer {
         task: Int,
         why: String,
     ) {
-        for (i in tucked.indices) {
-            if (tucked[i]?.task == task) {
+        for (i in 0 until tucked.length()) {
+            if (tucked.get(i)?.task == task) {
                 Log.i(TAG, "${sideName(i)} drawer: $task $why, emptied")
-                tucked[i] = null
-                onChange?.invoke()
+                tucked.set(i, null)
+                changed()
             }
         }
     }
 
     /** The drawers empty of apps that came back some other way (opened from the switcher) or are gone. */
     fun prune(ctx: Context) {
-        if (tucked.all { it == null }) return
+        if (!any()) return
+        val app = ctx.applicationContext
+        safe("pruning the drawers") { pruneNow(app) }
+    }
+
+    private fun pruneNow(ctx: Context) {
+        if (!any()) return
         val recent = recents(ctx)
-        for (t in tucked.filterNotNull()) {
+        for (t in listOfNotNull(tucked.get(0), tucked.get(1))) {
             val r = recent.firstOrNull { it.taskId == t.task }
             when {
                 r == null -> drop(t.task, "is gone")
