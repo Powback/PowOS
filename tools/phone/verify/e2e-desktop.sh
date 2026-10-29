@@ -292,7 +292,7 @@ part3() {
   open_drawer || true
   step drawer "stage 1: a plain swipe up - the drawer, no keyboard"
   [ "$(isopen)" = true ] && [ "$(ev "document.activeElement&&document.activeElement.matches('.home > .bar textarea')?'yes':'no'")" = no ] && [[ "$(ime)" == *false* ]] &&
-    pass "the drawer is up, the search isn't focused, no keyboard" || fail "stage 1: drawer open=$(isopen), $(ime) (windows now: $(hcall windows.list "[]" "l=>JSON.stringify(l.map(w=>({id:w.id,min:w.minimised,away:w.away,b:w.bounds})))"); focus: $(sh_ "dumpsys window | grep -m1 mCurrentFocus"))"
+    pass "the drawer is up, the search isn't focused, no keyboard" || fail "stage 1: drawer open=$(isopen), $(ime) (windows now: $(hcall windows.list "[]" "l=>JSON.stringify(l.map(w=>[w.id,w.minimised,w.away,w.bounds]))"); focus: $(sh_ "dumpsys window | grep -m1 mCurrentFocus"))"
   back; back 0.6
   # A spot that is always free (footpt.js: a gap in the dock's or the bottom bar's row, right half - the left half is
   # PowOS AI's pull-up corner, 12:48 round 3): with windows open home had no empty spot above them (freept, 15:11).
