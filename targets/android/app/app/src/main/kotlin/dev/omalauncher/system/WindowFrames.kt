@@ -37,6 +37,8 @@ class WindowFrames(
         overlayGrant()
         // The system's own caption would show under PowOS's bar on every window: off (OemCaption).
         OemCaption.off(context)
+        // Split screen left | right on the unfolded screen, not top / bottom (SplitSideBySide).
+        SplitSideBySide.on(context)
         stopListening =
             FreeformTasks.listen {
                 events++

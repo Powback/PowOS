@@ -91,7 +91,7 @@ object Tasks {
     var splitScreen: android.os.IBinder? = null
 
     /**
-     * Tasks [first] (left / top) and [second] side by side, half and half: WM Shell's split screen, as Quickstep's
+     * Tasks [first] (left / top) and [second] side by side, half and half (left / right on the unfolded screen: SplitSideBySide): WM Shell's split screen, as Quickstep's
      * split from overview (ISplitScreen.startTasks). False when WM Shell can't be asked.
      *
      * HACK: ISplitScreen is WM Shell's, hidden and not in the SDK: its call is written by hand as the generated AIDL
