@@ -94,13 +94,7 @@ async function dockPositionCheck(position, part = "all") {
   await new Promise(r => setTimeout(r, 250));
   const dock = document.querySelector(".home > .dock");
   // The launcher overlay shows home's dock only at the bottom: a side dock would cover its list (pull.tsx dockShown).
-  if (!dock && part === "launcher" && position !== "bottom") {
-    S.drawer.value = 1;
-    await new Promise(r => setTimeout(r, 450));
-    checkLauncher();
-    return fails;
-  }
-  if (!dock) return [...fails, `${part}: no dock`];
+  if (!dock) return part === "launcher" && position !== "bottom" ? [...fails, ...(await dockLauncherCheck(position))] : [...fails, `${part}: no dock`];
   const rect = dock.getBoundingClientRect();
   const cells = [...dock.querySelectorAll(".dock-page:first-child > .app")].map(n => n.getBoundingClientRect());
   if (cells.length < 4) fails.push("missing pinned icons");
@@ -115,13 +109,14 @@ async function dockPositionCheck(position, part = "all") {
     const aim = D.aimDock({app:S.apps.value[5].key}, target.left + target.width/2, target.top + target.height/2);
     if (aim?.slot !== 2) fails.push(`vertical drop targets slot ${aim?.slot}, expected 2`);
   }
-  if (part !== "launcher") {
+  if (part !== "launcher") await homeDock();
+  if (part === "home") return fails;
+  async function homeDock() {
     if (position !== "bottom") checkVertical();
     else if (rect.width < rect.height) fails.push("bottom dock is vertical");
     const windows = await importShim("./ui/desktops.ts");
     if (windows.barTop() < innerHeight / 2) fails.push("dock collapses window work area");
   }
-  if (part === "home") return fails;
   async function dockSettled() {
     if (position === "bottom") return new Promise(r => setTimeout(r, 450));
     for (let t = 0; t < 120 && getComputedStyle(dock).opacity !== "0"; t++) await new Promise(r => setTimeout(r, 50));
@@ -139,6 +134,20 @@ async function dockPositionCheck(position, part = "all") {
     if (bar.bottom > innerHeight + 1 || bar.top < 0) fails.push(`launcher search is off screen: top=${bar.top}, bottom=${bar.bottom}, viewport=${innerHeight}`);
     if (position !== "bottom" && bar.bottom < innerHeight - 60) fails.push("side dock leaves launcher search above the bottom edge");
   }
+  return fails;
+}
+
+/** The launcher overlay with a side dock (pull.tsx shows home's dock at the bottom only): full width, its pill at the foot. */
+async function dockLauncherCheck(position) {
+  const S = await importShim("./state.ts");
+  S.drawer.value = 1;
+  await new Promise(r => setTimeout(r, 450));
+  const clip = document.querySelector(".launcher-clip").getBoundingClientRect();
+  const bar = document.querySelector(".home > .bar").getBoundingClientRect();
+  const fails = [];
+  if (clip.left > 20 || clip.right < innerWidth - 20) fails.push("launcher loses width beside dock");
+  if (bar.bottom > innerHeight + 1 || bar.top < 0) fails.push(`launcher search is off screen: top=${bar.top}, bottom=${bar.bottom}, viewport=${innerHeight}`);
+  if (bar.bottom < innerHeight - 60) fails.push(`${position} dock leaves launcher search above the bottom edge`);
   return fails;
 }
 
@@ -1535,12 +1544,7 @@ async function pullUpFrom(el) {
  * (homeAsks): home asked the host for the launcher overlay - with its search focused when [search].
  */
 function drawerWithPill(where, search = false) {
-  if (window.__asked) {
-    const asked = window.__asked.splice(0);
-    if (!asked.length) return [`${where}: the launcher overlay wasn't asked to open`];
-    if (asked[0].kind !== "apps") return [`${where}: the launcher overlay was asked for ${asked[0].kind}, not the apps`];
-    return search && !asked[0].how?.search ? [`${where}: the launcher overlay wasn't asked to focus its search`] : [];
-  }
+  if (window.__asked) return window.__sp.overlayAsked(where, search);
   const pill = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
   const clip = document.querySelector(".home .launcher-clip")?.getBoundingClientRect();
   const bar = document.querySelector(".home > .bar");
@@ -1646,6 +1650,14 @@ async function searchToDock() {
   await window.__sp.closeDrawerNow();
   W.footBelow.value = "";
   return fails;
+}
+
+/** Home's page (homeAsks): what home asked the host's launcher overlay for, since the last pull or tap. */
+function overlayAsked(where, search) {
+  const asked = window.__asked.splice(0);
+  if (!asked.length) return [`${where}: the launcher overlay wasn't asked to open`];
+  if (asked[0].kind !== "apps") return [`${where}: the launcher overlay was asked for ${asked[0].kind}, not the apps`];
+  return search && !asked[0].how?.search ? [`${where}: the launcher overlay wasn't asked to focus its search`] : [];
 }
 
 /** Home's page: the host's launcher overlay recorded, not opened (Bridge.pull.open; the browser gate has no host). */
@@ -2554,19 +2566,18 @@ try {
     console.log(`launcher-chat-typing: ${JSON.stringify(counts)}`);
     return failures;
   })));
+  const dockRun = (name, query, part, position = name.split("-")[3]) => open(browser, `${ORIGIN}/index.html${query}`, name, dockViews[name.split("-")[2]]).then(r => whenReady(r, async () => {
+    const failures = await r.page.evaluate(dockPositionCheck, position, part);
+    if (process.env.DOCK_SHOTS) await r.page.screenshot({path: `${process.env.DOCK_SHOTS}/${name}.png`});
+    return failures;
+  }));
+  const dockViews = { cover: { width: 404, height: 900 }, inner: { width: 821, height: 883 }, desktop: { width: 1280, height: 800 } };
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
     for (const position of ["bottom", "left", "right"]) {
       // Home has no launcher of its own (the overlay's page is the launcher): home's dock on home, the launcher's beside
       // it in the overlay's page (index.html?mode=pull).
       const parts = mode === "home" ? [["home", "", ""], ["launcher", "?mode=pull", "-launcher"]] : [["all", `?mode=${mode}`, ""]];
-      for (const [part, query, suffix] of parts) {
-        const name = `dock-position-${label}-${position}${suffix}`;
-        runs.push(open(browser, `${ORIGIN}/index.html${query}`, name, {width, height}).then(r => whenReady(r, async () => {
-          const failures = await r.page.evaluate(dockPositionCheck, position, part);
-          if (process.env.DOCK_SHOTS) await r.page.screenshot({path: `${process.env.DOCK_SHOTS}/${name}.png`});
-          return failures;
-        })));
-      }
+      runs.push(...parts.map(([part, query, suffix]) => dockRun(`dock-position-${label}-${position}${suffix}`, query, part)));
     }
   }
   for (const [mode, width, height] of [["windowbar", 280, 27], ["statusbar", 404, 46]])
@@ -2686,7 +2697,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `search-launcher-${label}`, viewport).then(async (r) => {
-        const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock}, pillBelowDockInEdit: ${pillBelowDockInEdit} }`;
+        const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock}, pillBelowDockInEdit: ${pillBelowDockInEdit}, overlayAsked: ${overlayAsked} }`;
         const s = await whenReady(r, async () => [...(await r.page.evaluate(searchDefaultCheck)), ...(await r.page.evaluate(helpers).then(() => r.page.evaluate(homeAsks)).then(() => r.page.evaluate(searchLauncherCheck)))]);
         if (s.problems.length) return s;
         await r.page.reload().catch(() => {});
