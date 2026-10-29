@@ -258,7 +258,9 @@ function peekPull(): Pull | null {
   if (!list || !grid || !card) return null;
   const h = growth(card, list, grid);
   const n = grid.querySelectorAll(".cc3-cell").length;
-  grid.style.setProperty("--cc-rows", String(Math.max(1, Math.ceil((n - 6) / 6))));
+  // A row is the grid's own column count (--cc-cols: six, five unfolded where the sliders stand beside it).
+  const cols = Number(getComputedStyle(grid).getPropertyValue("--cc-cols")) || 6;
+  grid.style.setProperty("--cc-rows", String(Math.max(1, Math.ceil((n - cols) / cols))));
   const own = document.querySelector<HTMLElement>(".panel-body.together > .notif-own");
   return { list, grid, card, own, movers: below().map((el) => ({ el, gain: 1 })), h, was: ccExpanded.value };
 }
