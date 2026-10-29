@@ -392,6 +392,45 @@ export function NotificationPanel() {
     ro.observe(c);
     return () => ro.disconnect();
   }, [panel.value, together, two]);
+  // Scrolling the notifications slides the control center away with them (the user, 2026-10-29: "when I scroll up to
+  // notifications ... it should hide the control center ... right now we're just cutting off"). Folded, one panel only
+  // (unfolded the two are columns side by side: nothing is cut off). At rest NOTHING is written: the card and the list
+  // are laid out by CSS alone. Only while the list is scrolled (scrollTop > 0) and the room between the card's top and
+  // the list's top (h, measured as it starts, ccexpand's fold carry included) is > 0, .cc-away goes on the panel body
+  // (shell.css): the list's box reaches up to the card's top by a translate, padded and grown by as much (its cards stay
+  // where they were), and the card rides the scroll up 1:1 (--away), fading over its last half. Back at the top: all off.
+  // Attempt 1 (reverted 80ad021f/32fd146f) kept a negative margin at rest and wrote the card's inline translate, which
+  // ccexpand.ts also owns.
+  useLayoutEffect(() => {
+    const l = listEl.current;
+    const body = l?.closest<HTMLElement>(".panel-body");
+    if (!together || two || !l || !body) return;
+    let h = 0;
+    const off = () => {
+      h = 0;
+      body.classList.remove("cc-away");
+      for (const k of ["--cc-h", "--away", "--away-o"]) body.style.removeProperty(k);
+    };
+    const follow = () => {
+      const s = l.scrollTop;
+      if (s <= 0) return off();
+      if (!h) {
+        const top = body.querySelector<HTMLElement>(":scope > .cc")?.getBoundingClientRect().top;
+        h = top == null ? 0 : Math.round(l.getBoundingClientRect().top - top);
+        if (h <= 0) return off();
+        body.style.setProperty("--cc-h", `${h}px`);
+        body.classList.add("cc-away");
+      }
+      const a = Math.min(s, h);
+      body.style.setProperty("--away", `${a}px`);
+      body.style.setProperty("--away-o", String(Math.min(1, 2 * (1 - a / h))));
+    };
+    l.addEventListener("scroll", follow, { passive: true });
+    // Shut: the list back at its top, so the control center is all there on the next open.
+    if (!shown && l.scrollTop) l.scrollTop = 0;
+    follow();
+    return () => (l.removeEventListener("scroll", follow), off());
+  }, [together, two, shown]);
   // The cards, newest first, each group a row of the cascade (shell.css .cascade) from --i [from], after the rows above.
   const items$ = (from: number) => (
     <div class="notif-items" ref={itemsEl}>
