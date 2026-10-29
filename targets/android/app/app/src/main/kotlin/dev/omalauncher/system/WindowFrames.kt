@@ -847,6 +847,9 @@ class WindowFrames(
         main.postDelayed(refreshNow, SETTLE_MS)
     }
 
+    /** Task [id]'s window is out of sight because it lives on another home page ([desktop]'s hide list). */
+    fun isAway(id: Int): Boolean = id in away
+
     /** Task [id]'s window back where it was, on top (a tap on it in the dock; home goes to its page, windows.raised). */
     fun restore(id: Int): Boolean {
         minimised.remove(id)

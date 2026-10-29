@@ -2,8 +2,8 @@
  * Home's pages as desktops (unfolded home, the user's design 2026-10-22): every floating app window belongs to a home
  * page, like a widget - the page on screen when it opened. Swiping pages switches desktops: that page's windows show,
  * the others leave the screen (the host minimises them, the task keeps running: WindowFrames.desktop). A window
- * brought back from the dock or the drawer ("windows.raised") moves to the page on screen; one let go at the screen's side
- * ("windows.edge") moves to the page that way, and home goes with it. Folded, apps are full screen
+ * brought back from recents, the dock or the drawer ("windows.raised") takes home to its page; one let go at the
+ * screen's side ("windows.edge") moves to the page that way, and home goes with it. Folded, apps are full screen
  * and the host lists no windows: nothing here acts.
  *
  * Kept in the store ("home.windows": task id -> page id, next to the dock's pins), so a reload of the page (an update,
@@ -82,6 +82,19 @@ export function toEdge(id: number, side: number) {
     moveTo(id, pages.value[next]);
     page.value = next;
   });
+}
+
+/**
+ * Window [id] brought back in front (a recents card, a dock tap, its app opened: "windows.raised"): home goes to the
+ * page it lives on, so it shows there with its frame (board: "come back visible", 2026-10-29). Before, the window came
+ * to the page on screen (2026-10-23) - and a recents tap reached no one: it stayed hidden on its page. A window whose
+ * page is gone (or never placed) moves to the page on screen instead.
+ */
+function toWindowPage(id: number) {
+  const p = placed.value[id];
+  const at = p === undefined ? null : indexOf(p);
+  if (at === null) return void moveTo(id, pageId());
+  if (at !== page.value) page.value = at;
 }
 
 /** The windows of the other pages: out of sight. Sent only when it changes. */
@@ -197,11 +210,7 @@ export async function startDesktops() {
   addEventListener("resize", () => requestAnimationFrame(tellBar));
   const sized = new ResizeObserver(() => tellBar());
   for (const el of document.querySelectorAll(".home, .home > .bar, .home > .dock, .home > .bottom-bar")) sized.observe(el);
-  // Brought back from another page (its app opened, a dock tap): it moves to the page on screen - the user's page
-  // stays put, the window comes to them (the simpler of "move it" / "ask", 2026-10-23).
-  powos.on("windows.raised", (id: number) => {
-    if (placed.value[id] !== pageId()) moveTo(id, pageId());
-  });
+  powos.on("windows.raised", toWindowPage);
 }
 
 /**

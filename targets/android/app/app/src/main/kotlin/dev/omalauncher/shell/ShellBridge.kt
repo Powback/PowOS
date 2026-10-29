@@ -517,12 +517,27 @@ class ShellBridge(
             }
         // Unfolded: a full-screen task comes back as a floating window, like any app opened there.
         val floats = dev.omalauncher.system.AppWindows.floating(context)
-        val ok = dev.omalauncher.system.Tasks.open(context, id, dev.omalauncher.system.AppWindows.taskOptions(context, id, options))
+        // Its window hidden on another home page: shown there, home goes to that page (openAway).
+        val ok = (floats && openAway(id)) || dev.omalauncher.system.Tasks.open(context, id, dev.omalauncher.system.AppWindows.taskOptions(context, id, options))
         // A floating window leaves home in sight, so home never stops and "recents.hide" (Switcher.homeStopped) never
         // comes: the switcher's layer - and the card grown over it - stayed behind the window, a full-screen ghost of
         // the app (2026-10-23). The layer goes once the window is up over its card.
         if (ok && floats) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ dev.omalauncher.system.Switcher.hide() }, WINDOW_UP_MS)
         return ok
+    }
+
+    /**
+     * Task [id]'s floating window hidden because it lives on another home page (a page slide took it away): shown again
+     * and in front, and home goes to its page ("windows.raised", ui/desktops.ts) - as a dock tap does. Before, a
+     * recents card only moved the task to front: its leash stayed hidden, home stayed on the other page, no window and
+     * no title bar (2026-10-29, e2e-desktop step 39). False if it isn't such a window.
+     */
+    private fun openAway(id: Int): Boolean {
+        val frames = dev.omalauncher.system.WindowFrames.current ?: return false
+        if (!frames.isAway(id) || !frames.restore(id)) return false
+        Log.i(TAG, "task $id opened from recents, away on its page: shown, home to its page")
+        emit("windows.raised", id)
+        return true
     }
 
     /**
