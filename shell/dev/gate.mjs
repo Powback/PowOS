@@ -2636,12 +2636,24 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     runs.push(
       open(browser, `${ORIGIN}/index.html`, "desktops", { width: 900, height: 1000 }).then(async (r) => {
-        const s = await whenReady(r, () => r.page.evaluate(desktopReleaseCheck));
-        if (!s.problems.length) s.problems.push(...(await r.page.evaluate(desktopsCheck)));
-        if (!s.problems.length) s.problems.push(...(await r.page.evaluate(desktopsEdge).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
-        if (!s.problems.length) s.problems.push(...(await r.page.evaluate(dockTapCheck).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
-        if (!s.problems.length) s.problems.push(...(await r.page.evaluate(appMenuCheck).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
-        if (!s.problems.length) s.problems.push(...(await r.page.evaluate(windowTouchCheck).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
+        // The six steps are ONE check through whenReady's checkOnce: on a loaded gate an evaluate here was lost
+        // ("Promise was collected", 2026-10-29 - also the ship service's post-ship gate) and only the first step went
+        // through checkOnce; the others reported the lost evaluate as the scene's FAIL. Each step builds on the one
+        // before (windows placed, pages added), so a lost one reruns the whole chain on a page loaded afresh - with the
+        // first try's stored placement (localStorage "home.windows") cleared, or the rerun tests its leftovers.
+        let tries = 0;
+        const s = await whenReady(r, async () => {
+          if (tries++) {
+            await r.page.evaluate(() => localStorage.clear());
+            await r.page.reload().catch(() => {});
+            await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+          }
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck]) {
+            const problems = await r.page.evaluate(step);
+            if (problems.length) return problems;
+          }
+          return [];
+        });
         if (s.problems.length) return s;
         await r.page.reload().catch(() => {});
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
