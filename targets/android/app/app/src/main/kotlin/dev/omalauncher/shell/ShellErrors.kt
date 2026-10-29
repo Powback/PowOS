@@ -69,7 +69,35 @@ object ShellErrors {
         context: Context,
         mode: String,
         why: String,
-    ) = record(context, "not ready: $why", signature = "notready|$mode", mode = mode, detail = "")
+    ) {
+        markBroken(context, mode)
+        record(context, "not ready: $why", signature = "notready|$mode", mode = mode, detail = "")
+    }
+
+    /**
+     * Since when (epoch s) each page has failed to boot, cleared once it boots ([markReady]). A page already broken
+     * before a push doesn't blame it: windowbar/windowgrip, not booting since 2026-10-28 16:39 whatever was pushed,
+     * rolled back every push after them (the launcher chat fix, 2026-10-29 15:07).
+     */
+    private fun brokenFile(context: Context) = File(context.filesDir, "shell-not-ready.json")
+
+    private fun broken(context: Context): JSONObject = runCatching { JSONObject(brokenFile(context).readText()) }.getOrElse { JSONObject() }
+
+    private fun markBroken(context: Context, mode: String) {
+        val all = broken(context)
+        if (all.has(mode)) return
+        runCatching { brokenFile(context).writeText(all.put(mode, System.currentTimeMillis() / 1000).toString()) }
+    }
+
+    /** [mode]'s page booted: healthy again. */
+    fun markReady(context: Context, mode: String) {
+        val all = broken(context)
+        if (all.remove(mode) != null) runCatching { brokenFile(context).writeText(all.toString()) }
+    }
+
+    /** [mode]'s page was already failing to boot before the push at [pushedAt] (epoch s). */
+    private fun brokenBefore(context: Context, mode: String, pushedAt: Long): Boolean =
+        broken(context).optLong(mode, 0L).let { it in 1 until pushedAt }
 
     /**
      * A page failed to boot: what broke it rolled back. Blame goes to the files the error names (a module that threw, a
@@ -96,7 +124,8 @@ object ShellErrors {
         val age = manifest?.let { System.currentTimeMillis() / 1000 - it.optLong("at") } ?: -1
         val recent = manifest != null && !manifest.optBoolean("rolledBack") && age in 0..ROLLBACK_S
         val pushed = manifest?.optJSONArray("files")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
-        val pushBlamed = recent && (named.isEmpty() || named.any { it in pushed })
+        val wasBroken = manifest != null && brokenBefore(context, mode, manifest.optLong("at"))
+        val pushBlamed = recent && !wasBroken && (named.isEmpty() || named.any { it in pushed })
         val done = mutableListOf<String>()
         val text: String
         if (pushBlamed) {

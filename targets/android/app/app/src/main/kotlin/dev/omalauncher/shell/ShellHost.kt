@@ -264,6 +264,7 @@ class ShellHost(
             if (serial != bootSerial || bootReady || bootFailed) return@probe
             if (alive) {
                 bootReady = true
+                ShellErrors.markReady(context, mode ?: "home")
                 return@probe
             }
             if (bootError == null && after < BOOT_SLOW_MS) {
