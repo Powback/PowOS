@@ -108,12 +108,17 @@ export const searchPending = signal(false);
  * "launcher chat refreshes every keypress" - each key ran every provider, and its results re-rendered the launcher). */
 /** The pill's text switched to chat because it found nothing. The user, 2026-10-29: "im typing in the launcherchat and it
  * triggers a search even after no search results" - a new chat message is typed before `chatting` is set, so every key
- * searched again and the launcher swapped between results and the chat. Once switched, that input stays chat - also
- * when letters are deleted - until the pill is empty (cleared, or the drawer closed); then search starts from scratch. */
-const noMatch = signal(false);
+ * searched again and the launcher swapped between results and the chat. Once switched, that input stays chat while it
+ * types on from (or deletes back into) the text that found nothing; an empty pill or a different text searches again
+ * (select-all + new words is a new search, as the search scenes set one query after another). Holds that text, "" none. */
+const noMatch = signal("");
+const related = (q: string, nm: string) => !!nm && !!q && (q.startsWith(nm) || nm.startsWith(q));
 /** Searches run after the switch to chat (should stay 0), logged when the input ends for the device check. */
 let searchesAfterChat = 0;
-const searched = computed(() => (chatting.value || noMatch.value ? "" : query.value.trim()));
+const searched = computed(() => {
+  const q = query.value.trim();
+  return chatting.value || related(q, noMatch.value) ? "" : q;
+});
 export const searchResults = computed(() => {
   const q = searched.value;
   if (!q) return [];
@@ -131,9 +136,12 @@ export function openSearchResult(result: SearchResult) {
 }
 // State imports shell UI too; start after the module graph has initialized.
 queueMicrotask(() => effect(() => {
-  if (query.value.trim() || !noMatch.peek()) return;
+  // query read first, always: a run that returned before reading it would leave the effect with nothing to follow.
+  const q = query.value.trim();
+  const nm = noMatch.peek();
+  if (!nm || related(q, nm)) return;
   console.info(`search-after-chat n=${searchesAfterChat}`);
-  noMatch.value = false;
+  noMatch.value = "";
   searchesAfterChat = 0;
 }));
 queueMicrotask(() => effect(() => {
@@ -145,7 +153,7 @@ queueMicrotask(() => effect(() => {
   searchPending.value = !!q;
   if (!q) return;
   const timer = setTimeout(() => {
-    if (noMatch.peek() || chatting.peek()) searchesAfterChat++;
+    if (related(q, noMatch.peek()) || chatting.peek()) searchesAfterChat++;
     const found = new Map<string, SearchResult[]>();
     let remaining = sources.length;
     const finish = (id: string, results: SearchResult[]) => {
@@ -153,9 +161,9 @@ queueMicrotask(() => effect(() => {
       found.set(id, results);
       extra.value = [...found.values()].flat();
       searchPending.value = --remaining > 0;
-      if (!remaining && !searchResults.peek().length) noMatch.value = true;
+      if (!remaining && !searchResults.peek().length) noMatch.value = q;
     };
-    if (!remaining) { searchPending.value = false; if (!searchResults.peek().length) noMatch.value = true; }
+    if (!remaining) { searchPending.value = false; if (!searchResults.peek().length) noMatch.value = q; }
     for (const provider of sources) {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
