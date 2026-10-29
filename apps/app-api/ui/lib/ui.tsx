@@ -23,6 +23,7 @@ export function Seg({ options, picked, onPick }: { options: string[]; picked: st
         <button
           type="button"
           role="tab"
+          data-tab={o}
           key={o}
           aria-selected={o === picked}
           style={o === picked ? { ...S.segBtn, ...S.segOn } : S.segBtn}

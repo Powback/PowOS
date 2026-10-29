@@ -29,7 +29,7 @@ BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
 pill "checking KWin's version"
 "$A" push "$here/bf-fold-phone.sh" /data/local/tmp/powos-bf-fold-phone.sh >/dev/null
 "$A" push "$here/bf-stop.sh" /data/local/tmp/powos-bf-stop.sh >/dev/null
-"$A" push "$here/bf-lib.sh" /data/local/tmp/powos-bf-lib.sh >/dev/null
+"$A" push "$here/bf-lib.sh" /data/local/tmp/powos-bf-lib.sh >/dev/null || { echo "ENV: can't push bf-lib.sh to the phone (a stale /data/local/tmp copy would run instead)"; exit 5; }
 # bf-lib.sh's xframes body is bf-xframes.py (split out for test-complexity.sh's length budget), also pushed here.
 "$A" push "$here/bf-xframes.py" /data/local/tmp/powos-bf-xframes.py >/dev/null
 "$A" shell "su -c 'cp /data/local/tmp/powos-bf-fold-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh /data/powos/root/var/tmp/powos-bf-xframes.py'"

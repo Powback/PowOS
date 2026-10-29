@@ -3,7 +3,8 @@
 # folder-clip.sh [OUT]: a short screen recording of an app library folder opening (the morph out of its card) and
 # closing (a tap outside) on the screen that's on, its frames for review (frame-*.png, the board task's --image when
 # BOARD_TASK is set). Transient only: swipes to the last page, opens and closes a folder, Home after; no layout change.
-# Exit 1 + "FAIL:" when the folder didn't open/close or the new folder view isn't live; 3 on a real touch (restored).
+# Exit 1 + "FAIL:" when the folder didn't open/close or the new folder view isn't live; 3 on a real touch (restored);
+# 5 + "ENV:" when screenrecord left no clip (a test error: the queue records SKIP, never a product FAIL).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/folder-clip-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
@@ -35,10 +36,11 @@ done
 at=$(q '(()=>{const c=document.querySelector(".page.library .lib-card");if(!c||!document.querySelector(".lib-card .lib-count"))return "";const r=c.getBoundingClientRect(),d=devicePixelRatio;return Math.round((r.left+r.width/2)*d)+" "+Math.round((r.top+r.height/2)*d)})()')
 [ -n "$at" ] || { fail "no app library card with the new markup (the folder morph isn't live yet?)"; exit 1; }
 set -- $at
-# The recording runs in an adb session held open from the Mac (as ai-send-flash.sh): one started with & inside su -c
-# died with its adb shell, so nothing was there to pull ("no recording pulled", 2026-10-23).
-"$A" shell "su -c 'rm -f /data/local/tmp/folder-clip.mp4; screenrecord --display-id $DID --bit-rate 20000000 --time-limit 7 /data/local/tmp/folder-clip.mp4'" >/dev/null 2>&1 &
-RP=$!
+# The recording runs DETACHED on the phone (setsid nohup under su), never tied to an adb shell: one started with &
+# inside su -c, and then one held open from the Mac, both died with their adb shell - nothing to pull ("no recording
+# pulled", 2026-10-23/29). Stopped with SIGINT (screenrecord finishes the mp4 on it), checked non-empty before the pull.
+CLIP=/data/local/tmp/folder-clip.mp4
+sh_ "rm -f $CLIP; setsid nohup screenrecord --display-id $DID --bit-rate 20000000 --time-limit 7 $CLIP </dev/null >/dev/null 2>&1 &"
 sleep 1.2; sh_ "input tap $1 $2"; sleep 1.4; chk open
 [ "$(q '!!document.querySelector(".folder-view.open")')" = true ] || fail "the folder didn't open on a tap"
 [ "$(q '[...document.querySelectorAll(".folder-view.open [style]")].filter(e=>e.style.transform||e.style.transition).length')" = 0 ] || fail "the open folder kept its morph's inline styles (it never came to rest)"
@@ -46,9 +48,14 @@ sleep 1.2; sh_ "input tap $1 $2"; sleep 1.4; chk open
 # centred) and a tap on it is "stop" - this check paused the whole queue that way at every run (2026-10-23).
 sh_ "input tap $((W / 12)) $((H / 14))"; sleep 1.4; chk close
 [ "$(q '!!document.querySelector(".folder-view")')" = false ] || fail "a tap outside didn't close the folder"
-wait "$RP" 2>/dev/null; sleep 0.5
-"$A" pull /data/local/tmp/folder-clip.mp4 "$OUT/clip.mp4" >/dev/null 2>&1; sh_ "rm -f /data/local/tmp/folder-clip.mp4"
-if [ -s "$OUT/clip.mp4" ]; then
+sh_ "pkill -INT screenrecord"; for _ in 1 2 3 4 5 6 7 8 9 10; do [ -z "$(sh_ "pidof screenrecord")" ] && break; sleep 0.5; done
+csz=$(sh_ "stat -c %s $CLIP 2>/dev/null"); noclip=
+# A missing/empty file is the recorder (the environment), not the folder: a TEST ERROR (exit 5 + ENV:, the queue's SKIP).
+if [ "${csz:-0}" -gt 0 ] 2>/dev/null; then "$A" pull "$CLIP" "$OUT/clip.mp4" >/dev/null 2>&1; else noclip=1; fi
+sh_ "rm -f $CLIP"
+if [ -n "$noclip" ] || [ ! -s "$OUT/clip.mp4" ]; then
+  echo "ENV: screenrecord left no clip on the phone (size ${csz:-none}) or the pull failed - test error, not a product FAIL"; noclip=1
+elif [ -s "$OUT/clip.mp4" ]; then
   # Frames every 60 ms around the open and the close, scaled for review.
   ffmpeg -loglevel error -y -i "$OUT/clip.mp4" -vf "fps=16,scale=540:-2" "$OUT/frame-%03d.png"
   echo "frames: $(ls "$OUT"/frame-*.png 2>/dev/null | wc -l | tr -d ' ') in $OUT" | tee -a "$OUT/log.txt"
@@ -56,8 +63,9 @@ if [ -s "$OUT/clip.mp4" ]; then
     imgs=(); for f in $(ls "$OUT"/frame-*.png | awk 'NR>=18 && NR<=30 && NR%3==0 || NR>=40 && NR<=52 && NR%3==0'); do imgs+=(--image "$f"); done
     "$T/../../lib/ai/agents/powos-agents-cli" task set "$BOARD_TASK" "${imgs[@]}" >/dev/null 2>&1 || true
   fi
-else fail "no recording pulled"; fi
+fi
 
 restore; trap - EXIT; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
 echo "artefacts: $OUT"
+[ "$FAILS" = 0 ] && [ -n "$noclip" ] && { echo "SKIP: the folder opened and closed, but no clip was recorded (test error)"; exit 5; }
 [ "$FAILS" = 0 ] && echo "PASS: folder opens and closes as a morph (clip + frames)" || { echo "FAIL: $FAILS step(s)"; exit 1; }

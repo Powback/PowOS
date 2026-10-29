@@ -24,7 +24,7 @@ WL_TRAP='restore'
 trap 'restore; [ "${WL_LOCK:-}" ] && rm -rf "$WL_LOCK"' EXIT
 log() { echo "$(date +%T) $*" | tee -a "$OUT/run.txt"; }
 BF_ADB=$A . "$here/bf-lib.sh"
-for f in bf-fold-phone.sh bf-stop.sh bf-lib.sh bf-xframes.py; do "$A" push "$here/$f" "/data/local/tmp/powos-$f" >/dev/null; done
+for f in bf-fold-phone.sh bf-stop.sh bf-lib.sh bf-xframes.py; do "$A" push "$here/$f" "/data/local/tmp/powos-$f" >/dev/null || { echo "ENV: can't push $f to the phone (a stale /data/local/tmp copy would run instead)"; exit 5; }; done
 "$A" shell "su -c 'cd /data/local/tmp && cp powos-bf-fold-phone.sh powos-bf-stop.sh powos-bf-lib.sh powos-bf-xframes.py /data/powos/root/var/tmp/ && chmod 644 /data/powos/root/var/tmp/powos-bf-*'"
 ph() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP WIN_NAME=$WIN_NAME bash /var/tmp/powos-bf-fold-phone.sh $*\"'" | tr -d '\r'; }
 irq() { "$A" shell "cat /proc/interrupts" | awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}'; }

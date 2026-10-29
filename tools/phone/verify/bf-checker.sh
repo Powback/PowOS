@@ -28,7 +28,7 @@ front=$("$A" shell "dumpsys activity activities | grep -m1 topResumedActivity" |
 steam_before=$("$A" shell "pgrep -f 'steam -cef'" | tr -d '\r')
 fold=$("$A" shell "dumpsys device_state | grep -m1 mCommittedState" | sed -nE "s/.*name='([A-Z_]+)'.*/\1/p")
 echo "front=${front:-?} steam_before=${steam_before:+yes} fold=$fold out=$OUT"
-for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-checker-phone.sh bf-lib.sh bf-xframes.py; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null; done
+for f in bf-start.sh bf-stop.sh bf-window.sh bf-present.sh bf-checker-phone.sh bf-lib.sh bf-xframes.py; do "$A" push "$here/$f" /data/local/tmp/powos-$f >/dev/null || { echo "ENV: can't push $f to the phone (a stale /data/local/tmp copy would run instead)"; exit 5; }; done
 # bf-checker-phone.sh's grab sources bf-lib.sh (xframes grab: Xlib frames; x11grab gets none on Android, no MIT-SHM) -
 # xframes' body is bf-xframes.py (split out for test-complexity.sh's length budget), also pushed here.
 "$A" shell "su -c 'cp /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-xframes.py'"

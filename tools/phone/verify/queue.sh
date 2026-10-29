@@ -41,7 +41,10 @@
 # /tmp/powos-verify-stop, which the next beat sees: the check is killed and stays queued. While runnable checks wait for
 # the user (a touch in the last QUEUE_IDLE_S, a game running) the pill says "Tests wait · phone in use" (wait_pill). A check that exits 3 (a real touch, no window)
 # goes back on the queue for the next window, at most 3 tries (a stop from the pill doesn't count). A check that exits 0
-# but printed a line starting with FAIL is a FAIL. Each result goes onto the check's board task (`--step`, the log's
+# but printed a line starting with FAIL is a FAIL. Exit codes -> verdict: 0 PASS; 1 (any other non-zero) FAIL; past its
+# --budget FAIL timeout (rc 124); 3 retried, then SKIP phone in use; 5 SKIP (ENV:/test error: preflight, a recorder that
+# left no file); 137/143 SKIP killed (a signal not the budget's); a first verdict line "SKIP:" SKIP. SKIPs count as no
+# FAIL - a board FAIL must mean a real product bug. Each result goes onto the check's board task (`--step`, the log's
 # last line; a FAIL also gets a screenshot as its review image), a mail to the coder inbox (QUEUE_MAIL_TO) and the log
 # stays in ~/.cache/powos-verify-queue/done/. Queue a check and END YOUR TURN: the result shows on the board (handbook,
 # Efficiency). Paused (the pill's tap, `queue.sh pause`: ~/.cache/powos-verify-queue/paused): the runner stays up but
@@ -367,7 +370,9 @@ summary)  # one line per finished job: finish time, id, PASS/FAIL/SKIP, first FA
     if [[ $id =~ ^([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2}) ]]; then key="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]} ${BASH_REMATCH[4]}:${BASH_REMATCH[5]}"
     else key=$(date -r "$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")" +"%Y-%m-%d %H:%M"); fi
     [ -z "$since" ] || [[ "$key" > "$since" || "$key" == "$since" ]] || continue
-    if grep -qE '^FAIL' "$f"; then v=FAIL; d=$(grep -m1 -E '^FAIL' "$f"); elif grep -qE '^SKIP' "$f"; then v=SKIP; d=$(grep -m1 -E '^SKIP' "$f")
+    # The runner's own verdict (its last line, "SKIP ...: ") wins: a SKIPped check may have printed FAIL lines first.
+    if tail -1 "$f" | grep -qE '^SKIP'; then v=SKIP; d=$(tail -1 "$f")
+    elif grep -qE '^FAIL' "$f"; then v=FAIL; d=$(grep -m1 -E '^FAIL' "$f"); elif grep -qE '^SKIP' "$f"; then v=SKIP; d=$(grep -m1 -E '^SKIP' "$f")
     elif tail -1 "$f" | grep -qE '^PASS'; then v=PASS; d=; else v=PASS?; d=$(tail -1 "$f"); fi
     echo "$t $id $v${d:+ ${d:0:160}}"
   done ;;
@@ -378,7 +383,7 @@ wait)  # queue.sh wait <job-id|prefix> [max_s=1500]: block until that job has a 
     lg=$(ls "$Q/done/$id"*.log 2>/dev/null | head -1)
     # A log exists from the moment the job STARTS: it's finished only once its .job left the queue.
     queued=0; { ls "$Q/$id"*.job || ls "$E/$id"*.job; } >/dev/null 2>&1 && queued=1
-    if [ -n "$lg" ] && [ $queued = 0 ]; then grep -E '^(PASS|FAIL|SKIP)' "$lg" | cut -c1-200 | head -20 || true; grep -qE '^(PASS|FAIL|SKIP)' "$lg" || tail -1 "$lg"; grep -qE '^FAIL' "$lg" && exit 1; exit 0; fi
+    if [ -n "$lg" ] && [ $queued = 0 ]; then grep -E '^(PASS|FAIL|SKIP)' "$lg" | cut -c1-200 | head -20 || true; grep -qE '^(PASS|FAIL|SKIP)' "$lg" || tail -1 "$lg"; tail -1 "$lg" | grep -qE '^SKIP' && exit 0; grep -qE '^FAIL' "$lg" && exit 1; exit 0; fi
     # each lane alone: one unmatched glob made ls fail and wait said "no job" for every phone job
     [ $queued = 1 ] || [ -n "$lg" ] || { echo "queue.sh wait: no queued or finished job '$id' (see queue.sh list)"; exit 2; }
     [ "$SECONDS" -lt "$end" ] || { echo "queue.sh wait: $id still queued/running after ${max}s - hand back with the job id"; exit 3; }
@@ -657,9 +662,19 @@ EOS
         if [ $rc != 0 ] && [ $rc != 5 ] && ! grep -q '^ENV:' "$log"; then
           envl=$(grep -m1 -E '(^|[^a-z])shot: refused - the screen is|cdp: no answer within [0-9]+ s' "$log"); [ -z "$envl" ] || { echo "ENV: $envl" >> "$log"; rc=5; }; fi
         envskip=0; [ $rc = 5 ] && grep -q '^ENV:' "$log" && envskip=1   # preflight.sh: the phone cannot run it
+        # Environment, not product (board: "a phone FAIL means a real product bug"): exit 5 without an ENV: line (a test
+        # error), killed by a signal not ours (137 SIGKILL / 143 SIGTERM; our budget kill is rc 124 = FAIL timeout), or
+        # the check's first verdict line saying "SKIP:" -> SKIP. Only rc 1 (and other real non-zero rcs) and timeouts FAIL.
+        skipwhy=
+        if [ $envskip = 0 ] && [ "$why" != timeout ]; then
+          if [ $rc = 5 ]; then skipwhy="test error (rc 5): $(grep -m1 -E '^(SKIP|ENV|FAIL)' "$log" | cut -c1-120)"
+          elif [ $rc = 137 ] || [ $rc = 143 ]; then skipwhy="killed (rc $rc)"
+          elif grep -m1 -E '^(PASS|FAIL|SKIP)' "$log" | grep -q '^SKIP:'; then skipwhy="$(grep -m1 '^SKIP:' "$log" | cut -c7-126)"; fi
+        fi
+        [ -n "$skipwhy" ] && envskip=1
         mv "$j" "$Q/done/$n.job"
         # rc 3 six times = the user kept using the phone: a SKIP (no mail, not a fail), not a bug in the check.
-        if [ $envskip = 1 ]; then r="SKIP can't run (ENV): $(sed -n 's/^ENV: //p' "$log" | head -1)"; elif [ $rc = 3 ]; then r="SKIP phone in use"; elif [ $rc != 0 ] && grep -q '^INVALID' "$log"; then r="INVALID rc=$rc"; else
+        if [ -n "$skipwhy" ]; then r="SKIP $skipwhy"; elif [ $envskip = 1 ]; then r="SKIP can't run (ENV): $(sed -n 's/^ENV: //p' "$log" | head -1)"; elif [ $rc = 3 ]; then r="SKIP phone in use"; elif [ $rc != 0 ] && grep -q '^INVALID' "$log"; then r="INVALID rc=$rc"; else
         r=$([ $rc = 0 ] && echo PASS || { [ "$why" = timeout ] && echo "FAIL timeout" || echo "FAIL rc=$rc"; }); fi; echo "$r: $(tail -1 "$log")" >> "$log"
         prev="${name:-$task}: $r"
         img=
@@ -674,7 +689,8 @@ EOS
         # f94: a check that prints its real version ("VERSION ...", its first line) gets that recorded with the
         # result - so a name that claims a version is checkable against what it actually says it ran on.
         ver=$(head -1 "$log" 2>/dev/null | grep -oE '^VERSION .*' | cut -c1-80)
-        board "$task" "verify $r: $(printf %s "$line" | cut -c1-160)${ver:+ ($ver)} (log ~/.cache/powos-verify-queue/done/$n.log)" "$([ $rc = 0 ] && echo $close || echo 0)" "$img"
+        [ -z "$skipwhy" ] || line=$r
+        board "$task" "verify $r: $(printf %s "$line" | cut -c1-160)${ver:+ ($ver)} (log ~/.cache/powos-verify-queue/done/$n.log)" "$([ $rc = 0 ] && [ -z "$skipwhy" ] && echo $close || echo 0)" "$img"
         echo "$(date +%T) $n: $r"
       done
       # Only the LATEST result per check counts: a check that failed and then passed in this same window (a re-queue)

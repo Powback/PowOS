@@ -19,6 +19,13 @@ e2e_args "$@"
 e2e_init appapi
 e2e_setup
 SCR="document.querySelector('.app-screen')"
+LIST="$SCR&&$SCR.querySelector('[data-add-app]')"   # App API's main page: the app list (its + add app card)
+TAB() { echo "($SCR&&$SCR.querySelector('[role=tab][data-tab=$1]'))"; }   # a Seg tab by its data-tab hook (ui.tsx)
+# dev_tab <name>: the Audit/Trackers/... tabs live in the closed "Developer" fold at the bottom: open it, then the tab.
+dev_tab() {
+  local F="$SCR.querySelector('details[data-fold=developer]')"
+  if [ "$(ev "!!($F)&&!($F).open")" = true ]; then reveal "$F.querySelector('summary')"; tapel "$F.querySelector('summary')" "the Developer fold" || return 1; sleep 1; fi
+  reveal "$(TAB "$1")"; tapel "$(TAB "$1")" "the $1 tab"; }
 
 step start "home, page 1 (the journey found home on page index $PAGE0; -1 = PowOS AI's)"
 note "found home on page index $PAGE0, ${W}x${H}; the journey runs from page 1 and goes back there at the end"
@@ -56,11 +63,13 @@ search_open() { # <text> <result key> <name>
   local name=$3; pass "$name in the search results"; set -- $p; tap "$1" "$2" "$name in the results"
 }
 
-# The "+ add app" part (from the Apps tab, App API open): three paths, the sample imported, a dry run, discarded.
+# The "+ add app" part (from the app list, App API open): three paths, the sample imported, a dry run, discarded.
 btn() { echo "[...$SCR.querySelectorAll('button')].find(b=>b.textContent.trim()==='$1')"; }
 add_app_journey() {
-  tapel "[...$SCR.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Apps')" "the Apps tab" || return 0
-  sleep 1; chk apps-again
+  # The app list IS App API's main page since 36db31cd (no "Apps" tab any more: the exact textContent==='Apps' match
+  # found nothing and failed the journey). Hooks, never label text: [data-add-app] marks the list, [data-tab=X] a tab.
+  until_js "$LIST" 4 || { fail "not on App API's app list (no + add app card)"; return 0; }
+  chk apps-again
   local ADD="$SCR.querySelector('[data-add-app]')" t out
   reveal "$ADD"
   tapel "$ADD" "the + add app card" || return 0
@@ -100,7 +109,7 @@ add_app_journey() {
   step discarded "Discard: back on + add app, the draft gone"
   [ "$(ev "!!$SCR.querySelector('[data-draft=\"open-meteo-demo-capture\"]')")" = false ] && pass "the draft is gone from Drafts" || fail "the discarded draft is still listed"
   tapel "$SCR.querySelector('button[aria-label=back]')" "+ add app's back" && sleep 1
-  until_js "$SCR&&[...$SCR.querySelectorAll('[role=tab]')].some(t=>t.textContent==='Apps')" 4 || fail "back from + add app: no tabs"
+  until_js "$LIST" 4 || fail "back from + add app: not on the app list"
   [ "$(ev "$SCR.innerText.includes('Open-Meteo (demo capture)')")" = false ] && pass "the sample never became one of the apps" || fail "the sample is in the Apps list"
 }
 
@@ -109,7 +118,7 @@ p=$(pt "$(dockel p:local.app-api)")
 case $p in none|off|"") note "App API isn't in the dock here: from search"; search_open api p:local.app-api "App API" ;;
   *) set -- $p; tap "$1" "$2" "App API's dock cell" ;; esac
 sleep 1.5; chk app-api
-if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&$SCR.innerText.includes('Apps')" 8; then
+if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&!!($LIST)" 8; then
   step apps "App API: the Apps tab - every app's spec, its actions and its switch"
   n=$(ev "String([...$SCR.querySelectorAll('div')].filter(d=>d.style.cursor==='pointer').length)")
   until_js "$SCR.innerText.includes('Philips Hue')" 6 && pass "the Apps tab lists $n app(s), Philips Hue among them" || fail "no Philips Hue in the Apps tab ($n cards): $(ev "$SCR.innerText.slice(0,1200)")"
@@ -138,7 +147,7 @@ if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&$SCR.innerText.includes('
     [ "$(ev "!!($LR)&&!![...$SCR.querySelectorAll('div')].find(d=>d.textContent==='list_rooms'&&!d.children.length)")" = true ] &&
       pass "list_rooms shows as the title 'List rooms', its id muted under it" || fail "no plain 'List rooms' title with the id under it"
     # The active view tab: the dark foreground on the accent fill (not accent-tinted text on it).
-    tc=$(ev "(()=>{const t=[...$SCR.querySelectorAll('[role=tab][aria-selected=true]')].find(x=>x.textContent==='Actions');if(!t)return 'none';const c=getComputedStyle(t),b=getComputedStyle(document.documentElement).getPropertyValue('--color-background').trim();return c.color+' on '+c.backgroundColor+' | bg '+b})()")
+    tc=$(ev "(()=>{const t=$SCR.querySelector('[role=tab][aria-selected=true][data-tab=Actions]');if(!t)return 'none';const c=getComputedStyle(t),b=getComputedStyle(document.documentElement).getPropertyValue('--color-background').trim();return c.color+' on '+c.backgroundColor+' | bg '+b})()")
     note "the active Actions tab: $tc"
     reveal "$LR"
     if tapel "$LR" "list_rooms"; then sleep 1; chk list-rooms
@@ -158,11 +167,11 @@ if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&$SCR.innerText.includes('
     fi
     # Back to the list (the header's ‹ in the detail view).
     tapel "$SCR.querySelector('button[aria-label=back]')" "the detail's back" && sleep 1
-    until_js "$SCR&&[...$SCR.querySelectorAll('[role=tab]')].some(t=>t.textContent==='Audit')" 4 || { fail "back from Hue's detail: no tabs"; }
+    until_js "$LIST" 4 || fail "back from Hue's detail: not on the app list"
   fi
 
   # 4. Audit: the dry run on top.
-  if tapel "[...$SCR.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Audit')" "the Audit tab"; then
+  if dev_tab Audit; then
     sleep 1.5; chk audit
     step audit "the Audit tab: every call, newest first"
     top=$(ev "(()=>{const c=[...$SCR.querySelectorAll('div')].filter(d=>d.style.borderRadius&&d.textContent.includes('.'))[0];return c?c.innerText.replace(/\\n/g,' | '):$SCR.innerText.slice(0,160)})()")
@@ -170,7 +179,7 @@ if until_js "$SCR&&$SCR.dataset.app==='local.app-api'&&$SCR.innerText.includes('
       { grep -qi 'Nothing has been called' <<<"$top" && fail "the audit log is empty after a dry run" || note "the newest row isn't the dry run: $top"; }
   fi
   # 5. Trackers.
-  if tapel "[...$SCR.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Trackers')" "the Trackers tab"; then
+  if dev_tab Trackers; then
     sleep 1.5; chk trackers
     step trackers "the Trackers tab: what the capture proxy saw each app contact"
     t=$(ev "$SCR.innerText.replace(/\\n/g,' | ').slice(0,200)")

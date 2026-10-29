@@ -231,8 +231,11 @@ step_launch() {
   local CL=$HOME/.local/share/Steam/logs/console_log.txt cl0 up i
   cl0=$(wc -l < "$CL" 2>/dev/null || echo 0); up=$([ -z "$r" ] && [ -d "/proc/$(steam_pid)" ] && echo 1)
   t0=$(now)
-  ( open_task $((LAUNCH_S + 10)) "steam_app_$APP" > "$T/open.status" ) &
-  for i in $(seq $((LAUNCH_S * 2))); do W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && break
+  # ${LAUNCH_S:-360}, not $LAUNCH_S: a phone copy sourced without the default above ran "LAUNCH_S: unbound variable"
+  # under set -u - the launch wait was skipped in 11 ms and Broforce counted as a FAIL (2026-10-29).
+  local ls_=${LAUNCH_S:-360}
+  ( open_task $((ls_ + 10)) "steam_app_$APP" > "$T/open.status" ) &
+  for i in $(seq $((ls_ * 2))); do W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && break
     if [ "$up" = 1 ] && [ "$i" = $((${HANDOFF_S:-20} * 2)) ]; then
       if tail -n +$((cl0 + 1)) "$CL" 2>/dev/null | grep -q "steam://rungameid/$APP"; then up=; echo "launch: Steam took the URL"
       elif tail -n +$((cl0 + 1)) "$CL" 2>/dev/null | grep -q "Client version"; then up=; echo "launch: Steam restarted with the URL (/usr/bin/steam's fallback: $(grep '^steam: ' "$T/open.out" | tail -1))"
