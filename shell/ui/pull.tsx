@@ -16,6 +16,8 @@ import { computed, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { aiDraft, chatting, closeDrawer, dockPosition, drawer, pullKind, type LauncherOpen } from "../state.ts";
 import { AppMenu } from "./apps.tsx";
+import { detailSheet } from "../apps/sheet.ts";
+import { WidgetSheet } from "./widgetsheet.tsx";
 import { Screens } from "./screens.tsx";
 import { screens } from "../screens.ts";
 import { openAssistant } from "./assistant.ts";
@@ -81,13 +83,14 @@ const SETTLE_MS = 300;
 
 export function Pull() {
   const open = drawerOpen.value;
-  // A setting found in the launcher's search opens here, over everything (Screens): the window stays while it shows.
-  const screenUp = screens.value.length > 0;
+  // A setting found in the launcher's search opens here, over everything (Screens), as does a placeholder's being-built
+  // view (drawer.tsx PendingAppCell -> DetailSheet, drawn by WidgetSheet as on home): the window stays while either shows.
+  const screenUp = screens.value.length > 0 || detailSheet.value != null;
   // Shut and settled - let go, Back, a tap beside it, an app launched from it (state.ts launch closes the drawer) - the
   // host hides the window.
   useEffect(() => {
     if (open || screenUp) return;
-    const t = window.setTimeout(() => drawerShown() === 0 && !screens.value.length && void host()?.closed?.(), SETTLE_MS);
+    const t = window.setTimeout(() => drawerShown() === 0 && !screens.value.length && !detailSheet.value && void host()?.closed?.(), SETTLE_MS);
     return () => clearTimeout(t);
   }, [open, screenUp]);
   return (
@@ -113,6 +116,8 @@ export function Pull() {
       {/* A held app's menu ("add to home" puts it on home's page). */}
       <AppMenu />
       <Screens />
+      {/* The being-built view of an app PowOS AI is building (its placeholder tapped in the drawer), as on home. */}
+      <WidgetSheet />
     </div>
   );
 }

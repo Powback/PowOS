@@ -15,8 +15,13 @@ import type { Bridge, Cell, Home, HomeItem } from "../types.ts";
 
 /** Wider than this (CSS px) is the wide page: the inner display, never the cover screen. */
 const WIDE = 700;
-/** Home's page only (index.html without ?mode=): the desktop's home has its own grid, the other pages have no pages. */
-const isHome = !new URLSearchParams(location.search).get("mode");
+/**
+ * Home's page (index.html without ?mode=) and the launcher overlay's (?mode=pull, pull.tsx): the launcher is home's, so
+ * it lays out unfolded by the same decision home makes - one rule, not a second one in the overlay. The desktop's home
+ * has its own grid, the other pages have no pages.
+ */
+const pageMode = new URLSearchParams(location.search).get("mode");
+const isHome = !pageMode || pageMode === "pull";
 /**
  * The native host's display state (system.display: width/height in dp, display id, orientation, folded), pushed on every
  * display change and on resume. Only a HINT to look again (and logged beside the decision): the decision itself is a
