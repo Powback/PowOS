@@ -392,45 +392,6 @@ export function NotificationPanel() {
     ro.observe(c);
     return () => ro.disconnect();
   }, [panel.value, together, two]);
-  // One panel: the notifications' list reaches up to the control center's top (shell.css .notif-own > .notif-list, --cc-h: the card's
-  // height and the gap under it, measured on a resize, never per frame) and the card rides its scroll - scrolled up, the
-  // card slides away 1:1 with the cards under it (and fades out over its last half), the notifications taking its
-  // room; back at the top it's back. The whole shade scrolls as one; per frame only the card's translate/opacity.
-  // (The user, 2026-10-29: "when I scroll up to notifications ... it should hide the control center ... right now
-  // we're just cutting off".)
-  useLayoutEffect(() => {
-    const p = panelEl.current;
-    const l = listEl.current;
-    const own = l?.parentElement;
-    if (!together || two || !p || !l || !own) return;
-    const card = () => p.querySelector<HTMLElement>(".panel-body.together > .cc");
-    let h = 0;
-    const follow = () => {
-      const c = card();
-      if (!c) return;
-      const s = h > 0 ? Math.min(Math.max(0, l.scrollTop), h) : 0;
-      c.style.translate = s ? `0 ${-s}px` : "";
-      c.style.opacity = s ? String(Math.min(1, 2 * (1 - s / h))) : "";
-    };
-    const measure = () => {
-      const c = card();
-      h = c ? c.offsetHeight + (parseFloat(getComputedStyle(own.parentElement ?? own).rowGap) || 0) : 0;
-      own.style.setProperty("--cc-h", `${h}px`);
-      follow();
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    const c0 = card();
-    if (c0) ro.observe(c0);
-    l.addEventListener("scroll", follow, { passive: true });
-    return () => {
-      ro.disconnect();
-      l.removeEventListener("scroll", follow);
-      own.style.removeProperty("--cc-h");
-      const c = card();
-      if (c) (c.style.translate = ""), (c.style.opacity = "");
-    };
-  }, [together, two]);
   // The cards, newest first, each group a row of the cascade (shell.css .cascade) from --i [from], after the rows above.
   const items$ = (from: number) => (
     <div class="notif-items" ref={itemsEl}>

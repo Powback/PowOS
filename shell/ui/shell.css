@@ -1387,15 +1387,8 @@ input.folder-title:focus { background: var(--soft-fill); }
   margin-bottom: calc(-1 * var(--cc-ext));
   border-radius: calc(var(--radius) * 1.5) calc(var(--radius) * 1.5) 0 0;
 }
-/* The card over the list's top (it takes its own touches); notifications.tsx slides it with the list's scroll. */
-.panel-body.together:not(.two) > .cc { position: relative; z-index: 1; }
 /* The notifications' own panel has no background of its own (the user, 2026-10-28): its cards float on the shade's blur. */
-/*
- * The list reaches up over the control center to its top (--cc-h: the card's height and the gap, notifications.tsx),
- * padded down by as much: at rest the cards sit where they did; scrolled up they run on into the card's room while the
- * card rides the scroll away - no fixed cut line under the card (the user, 2026-10-29). The panel's own box stays put.
- */
-.notif-own > .notif-list { margin-top: calc(-1 * var(--cc-h, 0px)); padding: calc(10px + var(--cc-h, 0px)) 10px 16px; }
+.notif-own > .notif-list { padding: 10px 10px 16px; }
 .notif-own .notif-bar { padding-top: 2px; }
 /* Collapsed: one compact row - the launchers (under the toggles) go; a pull lays them out with the rest (cc-peek). */
 .panel-body.together .notif-empty { padding: 14px 2px 6px; }
