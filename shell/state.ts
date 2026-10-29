@@ -220,6 +220,17 @@ export const aiDraft = stored("powai.draft");
  */
 export const homePage = !new URLSearchParams(location.search).get("mode");
 
+/**
+ * The home page on screen (its id in home.pages): home shares it through the store, so the launcher overlay's "add to
+ * home" (apps.tsx AppMenu, in the overlay's own page) puts the app on the page home is showing, not the overlay's.
+ */
+export async function shownHomePage(): Promise<number> {
+  if (homePage) return pages.value[page.value] ?? 1;
+  const shown = await powos.store.get<{ page?: number }>("home.shown").catch(() => null);
+  return shown?.page ?? pages.value[0] ?? 1;
+}
+if (homePage) effect(() => void powos.store.set("home.shown", { page: pages.value[page.value] ?? 1 }).catch(() => {}));
+
 /** What the launcher overlay opens with (Bridge.pull.open): the search focused, the chat (openAssistant's), a draft. */
 export interface LauncherOpen {
   search?: boolean;

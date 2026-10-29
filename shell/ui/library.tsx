@@ -5,14 +5,14 @@
  *
  * - A category: Android's own (ApplicationInfo.category, `category`), a Linux app's .desktop Categories
  *   (`categories`), else guessed from its id and label (an APK before the categories came, or an app that says none).
- * - A search field at the top: typed in, the matching apps instead of the folders.
+ * - No search field of its own (the user, 2026-10-29): the launcher's pill finds apps.
  * - Tap an app to open it; hold one and drag it onto a home page to put it there (grid.tsx startCarry: the page turns
  *   at the screen's side). Tap a folder's free space for all of it, in the folder popover.
  */
-import { computed, signal } from "@preact/signals";
+import { computed } from "@preact/signals";
 import { apps, byKey, folder, home } from "../state.ts";
 import { AppIcon } from "./apps.tsx";
-import { AppPress, folderName, morphing, type DragOut } from "./folders.tsx";
+import { folderName, morphing } from "./folders.tsx";
 import type { App } from "../types.ts";
 
 /** ApplicationInfo.CATEGORY_* (0..8) -> the library's category. */
@@ -103,14 +103,6 @@ export const library = computed<LibraryFolder[]>(() => {
   return [...own.map((f) => ({ key: f.key, name: folderName(f.key), apps: f.apps!, own: true })), ...cats];
 });
 
-/** The search field's text. */
-export const libraryQuery = signal("");
-
-const matches = computed(() => {
-  const q = libraryQuery.value.trim().toLowerCase();
-  return q ? apps.value.filter((a) => a.label.toLowerCase().includes(q)).map(entry).sort(byLabel) : null;
-});
-
 /** A folder on the library: its name and count, its first four apps small in a 2x2; a tap anywhere opens it. */
 function Card({ f }: { f: LibraryFolder }) {
   return (
@@ -129,34 +121,19 @@ function Card({ f }: { f: LibraryFolder }) {
   );
 }
 
-/** Home's last page: the search field, then the folders (or what the search finds). */
-export function LibraryPage({ onHold, here }: { onHold: DragOut; here: boolean }) {
-  const found = matches.value;
+/**
+ * Home's last page: the folders. No search field of its own (the user, 2026-10-29: "We don't need that search apps bar
+ * on top of the folder page") - the launcher's pill finds apps.
+ */
+export function LibraryPage({ here }: { here: boolean }) {
   return (
     <div class={here ? "page library" : "page library away"}>
       <div class="library-scroll">
-        <input
-          class="lib-search tile pill"
-          type="search"
-          placeholder="Search apps"
-          aria-label="Search apps"
-          value={libraryQuery.value}
-          onInput={(e) => (libraryQuery.value = (e.currentTarget as HTMLInputElement).value)}
-        />
-        {found ? (
-          <div class="lib-results">
-            {found.map((a) => (
-              <AppPress key={a.key} a={a} onHold={onHold} onLeave={() => (libraryQuery.value = "")} />
-            ))}
-            {!found.length && <div class="lib-none">No app called that</div>}
-          </div>
-        ) : (
-          <div class="lib-grid">
-            {library.value.map((f) => (
-              <Card key={f.key} f={f} />
-            ))}
-          </div>
-        )}
+        <div class="lib-grid">
+          {library.value.map((f) => (
+            <Card key={f.key} f={f} />
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -2668,18 +2668,6 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
   gap: var(--gap);
   padding: var(--edge);
 }
-.lib-search {
-  flex: none;
-  font: inherit;
-  color: var(--color-foreground);
-  border: 0;
-  outline: none;
-  min-height: 44px;
-  padding: 0 16px;
-  border-radius: 22px;
-}
-.lib-search::placeholder { color: var(--color-muted); }
-.lib-search::-webkit-search-cancel-button { display: none; }
 .lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: var(--gap); }
 .lib-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: var(--radius); min-width: 0; }
 .lib-name { display: flex; align-items: baseline; gap: 6px; font-size: var(--text-small); color: var(--color-foreground); padding: 0 2px; }
@@ -2688,9 +2676,6 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
 /* Up to four apps, small, in a uniform 2x2 - the whole card is the tap (it opens the folder). */
 .lib-icons { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; aspect-ratio: 1; padding: 4px; pointer-events: none; }
 .lib-icons > .app-icon { width: 100%; height: auto; aspect-ratio: 1; }
-.lib-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); grid-auto-rows: var(--cell); gap: var(--gap); }
-.lib-results .app { touch-action: pan-y; }
-.lib-none { grid-column: 1 / -1; text-align: center; color: var(--color-muted); padding: 24px 0; }
 /* The edit bar's "+ app" picker (editsheet.tsx AppPicker): the drawer's list and pill in the picker's sheet. */
 .aw-picker.app-picker { height: min(100%, 720px); }
 .app-picker .drawer { padding: 0; max-width: none; width: 100%; }

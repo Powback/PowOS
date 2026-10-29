@@ -6,7 +6,7 @@ import { tinted } from "./icontint.ts";
 import { placement, shapeOf, type Shape } from "./iconshape.ts";
 import { running } from "./running.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { closeDrawer, dock, launch, menu, page, pages, setDocked } from "../state.ts";
+import { closeDrawer, dock, launch, menu, setDocked, shownHomePage } from "../state.ts";
 import { startCarry } from "./grid.tsx";
 import { closeApp, windowsOf } from "./desktops.ts";
 import { powos } from "../bridge.ts";
@@ -200,8 +200,8 @@ export function AppMenu() {
   const items: Item[] = [
     ...windowItems(app.key),
     [docked ? "unpin from dock" : "pin to dock", () => setDocked(app.key, !docked)],
-    // On the page on screen, in its first free cell.
-    ["add to home", () => powos.home.add(app.key, pages.value[page.value] ?? 1)],
+    // On the page home shows (also from the launcher overlay's own page: state.ts shownHomePage), in its first free cell.
+    ["add to home", () => shownHomePage().then((p) => powos.home.add(app.key, p))],
     ...(app.kind === "android" ? ([["app info", () => powos.apps.info(app.key)]] as Item[]) : []),
     ...(app.kind === "android" && !app.system ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
   ];

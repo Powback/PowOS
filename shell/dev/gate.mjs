@@ -68,8 +68,12 @@ function mime(p) {
   );
 }
 
-/** Side docks keep usable icons, reserve home space, and calculate drops on the vertical axis. */
-async function dockPositionCheck(position) {
+/**
+ * Side docks keep usable icons, reserve home space, and calculate drops on the vertical axis. [part]: "home" (home's
+ * page: no launcher of its own since the launcher is one overlay, pull.tsx), "launcher" (the overlay's page,
+ * index.html?mode=pull: the launcher keeps its width and its pill at the bottom beside a side dock), "all" (desktop).
+ */
+async function dockPositionCheck(position, part = "all") {
   const S = await importShim("./state.ts");
   const D = await importShim("./ui/dockdrop.ts");
   S.setDock(S.apps.value.slice(0, 4).map(a => a.key));
@@ -89,6 +93,14 @@ async function dockPositionCheck(position) {
   setPosition();
   await new Promise(r => setTimeout(r, 250));
   const dock = document.querySelector(".home > .dock");
+  // The launcher overlay shows home's dock only at the bottom: a side dock would cover its list (pull.tsx dockShown).
+  if (!dock && part === "launcher" && position !== "bottom") {
+    S.drawer.value = 1;
+    await new Promise(r => setTimeout(r, 450));
+    checkLauncher();
+    return fails;
+  }
+  if (!dock) return [...fails, `${part}: no dock`];
   const rect = dock.getBoundingClientRect();
   const cells = [...dock.querySelectorAll(".dock-page:first-child > .app")].map(n => n.getBoundingClientRect());
   if (cells.length < 4) fails.push("missing pinned icons");
@@ -103,10 +115,13 @@ async function dockPositionCheck(position) {
     const aim = D.aimDock({app:S.apps.value[5].key}, target.left + target.width/2, target.top + target.height/2);
     if (aim?.slot !== 2) fails.push(`vertical drop targets slot ${aim?.slot}, expected 2`);
   }
-  if (position !== "bottom") checkVertical();
-  else if (rect.width < rect.height) fails.push("bottom dock is vertical");
-  const windows = await importShim("./ui/desktops.ts");
-  if (windows.barTop() < innerHeight / 2) fails.push("dock collapses window work area");
+  if (part !== "launcher") {
+    if (position !== "bottom") checkVertical();
+    else if (rect.width < rect.height) fails.push("bottom dock is vertical");
+    const windows = await importShim("./ui/desktops.ts");
+    if (windows.barTop() < innerHeight / 2) fails.push("dock collapses window work area");
+  }
+  if (part === "home") return fails;
   async function dockSettled() {
     if (position === "bottom") return new Promise(r => setTimeout(r, 450));
     for (let t = 0; t < 120 && getComputedStyle(dock).opacity !== "0"; t++) await new Promise(r => setTimeout(r, 50));
@@ -981,7 +996,8 @@ async function launcherKeyboardSide(page, view) {
     W.footBelow.value = "";
   });
   const fails = [];
-  if (!/dock-right/.test(setup) || !/pill-below/.test(setup) || !/wide/.test(setup)) fails.push(`launcher keyboard (side dock): home isn't dock-right wide pill-below (${setup})`);
+  // The launcher overlay (pull.tsx) is "unfolded" where home is "wide", and its pill is always at its foot (no pill-below).
+  if (!/dock-right/.test(setup) || !(/pill-below/.test(setup) || /pull-screen/.test(setup)) || !/wide|unfolded/.test(setup)) fails.push(`launcher keyboard (side dock): home isn't dock-right wide pill-below (${setup})`);
   if (!out.held || out.log.some((l) => l.includes("blur"))) fails.push(`launcher keyboard (side dock, pill below): the search lost the focus within 2 s of the tap (${out.log.join("; ")})`);
   return fails.map((f) => `${f}; at the end: ${out.now}`);
 }
@@ -1236,6 +1252,8 @@ async function pendingAppCheck() {
   const B = await window.__gw.mod("./ui/appbuild.tsx");
   const P = await window.__gw.mod("./apps/pages.ts");
   const fails = [];
+  // The launcher (the overlay's page) open, as the user sees the placeholder in it.
+  S.drawer.value = 1;
   S.chat.value = { busy: true, items: [{ kind: "user", text: "a shopping list" }], thread: { dir: "/tmp/gate-app", title: "a shopping list", kind: "app" } };
   await window.__gw.settled(() => document.querySelector(".pending-app"));
   if (!document.querySelector(".pending-app")) fails.push("app creation: no placeholder in the drawer at the start");
@@ -1406,21 +1424,15 @@ async function libraryCheck() {
   return fails;
 }
 
-/** In the page, on the app library (after libraryCheck): its search finds an app; an app installed or removed shows or goes at once. */
+/** In the page, on the app library (after libraryCheck): no search bar of its own; an app installed or removed shows or goes at once. */
 async function libraryLiveCheck() {
   const S = await window.__gw.mod("./state.ts");
   const L = await window.__gw.mod("./ui/library.tsx");
   const { powos } = await window.__gw.mod("./bridge.ts");
   const lib = document.querySelector(".page.library");
   const fails = [];
-  const input = lib.querySelector(".lib-search");
-  const one = S.apps.value[0];
-  input.value = one.label.slice(0, 4);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  await window.__gw.until(() => lib.querySelector(`.lib-results .app[data-key="${one.key}"]`));
-  if (!lib.querySelector(`.lib-results .app[data-key="${one.key}"]`)) fails.push(`searching "${input.value}" doesn't find ${one.label}`);
-  input.value = "";
-  input.dispatchEvent(new Event("input", { bubbles: true }));
+  // No search field of its own (the user, 2026-10-29: "We don't need that search apps bar on top of the folder page").
+  if (lib.querySelector(".lib-search, input")) fails.push("the library page has a search bar of its own");
   const list = powos.apps.list;
   const fake = { key: "a:org.gate.chess/.Main", label: "Gate Chess", icon: "", kind: "android", category: 0 };
   powos.apps.list = async () => [...(await list()), fake];
@@ -1510,14 +1522,25 @@ async function pullUpFrom(el) {
     await new Promise((ok) => setTimeout(ok, 16));
   }
   fire("pointerup", 225, 0);
+  // Home's page: the launcher is the overlay (pull.tsx) - home asks the host for it (homeAsks).
+  if (window.__asked) return void (await window.__gw.settled(() => window.__asked.length));
   // Until it's open and come to rest - the bar's pill over it faded in (drawerWithPill's checks), at most 3 s.
   const bar = () => document.querySelector(".home > .bar");
   await window.__gw.settled(() => document.querySelector(".home.open") && bar() && +getComputedStyle(bar()).opacity >= 0.9);
   await window.__gw.steady(() => [document.querySelector(".home .launcher-clip")?.getBoundingClientRect().bottom, bar()?.querySelector(".bar-pill")?.getBoundingClientRect().top]);
 }
 
-/** The drawer is open with the bar's pill on screen, over the drawer's window (not under an app row). */
-function drawerWithPill(where) {
+/**
+ * The drawer is open with the bar's pill on screen, over the drawer's window (not under an app row). On home's page
+ * (homeAsks): home asked the host for the launcher overlay - with its search focused when [search].
+ */
+function drawerWithPill(where, search = false) {
+  if (window.__asked) {
+    const asked = window.__asked.splice(0);
+    if (!asked.length) return [`${where}: the launcher overlay wasn't asked to open`];
+    if (asked[0].kind !== "apps") return [`${where}: the launcher overlay was asked for ${asked[0].kind}, not the apps`];
+    return search && !asked[0].how?.search ? [`${where}: the launcher overlay wasn't asked to focus its search`] : [];
+  }
   const pill = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
   const clip = document.querySelector(".home .launcher-clip")?.getBoundingClientRect();
   const bar = document.querySelector(".home > .bar");
@@ -1565,10 +1588,10 @@ async function searchLauncherCheck() {
   fails.push(...drawerWithPill("pulled up from the widget"));
   await closeDrawerNow();
   tile.click();
-  const bar = () => document.querySelector(".home > .bar");
-  await window.__gw.settled(() => document.querySelector(".home.open") && +getComputedStyle(bar()).opacity >= 0.9);
-  fails.push(...drawerWithPill("tapped on the widget"));
-  if (document.activeElement !== document.querySelector(".home > .bar textarea")) fails.push("tapped on the widget: the bar's field isn't the one typing");
+  // Home's pill is only the launcher's face: the overlay's field types (search-launcher-overlay checks that side).
+  await window.__gw.settled(() => window.__asked.length);
+  fails.push(...drawerWithPill("tapped on the widget", true));
+  if (document.activeElement?.closest?.(".home > .bar, .home-tile")?.querySelector("textarea") === document.activeElement) fails.push("tapped on the widget: home's own field took the typing, not the launcher's");
   await closeDrawerNow();
   return [...fails, ...(await searchPutBack()), ...(await searchToDock())];
 }
@@ -1622,6 +1645,28 @@ async function searchToDock() {
   fails.push(...window.__sp.drawerWithPill("pulled up after the drop on the foot"));
   await window.__sp.closeDrawerNow();
   W.footBelow.value = "";
+  return fails;
+}
+
+/** Home's page: the host's launcher overlay recorded, not opened (Bridge.pull.open; the browser gate has no host). */
+async function homeAsks() {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  window.__asked = [];
+  powos.pull.open = async (kind, how) => (window.__asked.push({ kind, how }), true);
+}
+
+/**
+ * The launcher overlay's side of a tap on home's pill or search widget (pull.begin { search } then pull.end { open }
+ * from the host): it opens with its pill on screen and its own field focused, typing.
+ */
+async function overlaySearchCheck() {
+  window.__mockEvents.emit("pull.begin", { kind: "apps", search: true });
+  window.__mockEvents.emit("pull.end", { open: true });
+  const field = () => document.querySelector(".home > .bar textarea");
+  const bar = () => document.querySelector(".home > .bar");
+  await window.__gw.settled(() => document.querySelector(".home.open") && +getComputedStyle(bar()).opacity >= 0.9 && document.activeElement === field());
+  const fails = window.__sp.drawerWithPill("opened from home's pill");
+  if (!field() || document.activeElement !== field()) fails.push("opened from home's pill: the launcher's field isn't the one typing");
   return fails;
 }
 
@@ -2484,7 +2529,8 @@ try {
       runs.push(open(browser, url, mode).then((r) => settle(r, () => window.__powosAlive === true || window.__powosBoot?.failed === true)));
     }
   }
-  for (const [mode, width, height] of [["home", 404, 900], ["desktop", 1280, 800]]) {
+  // The phone's launcher is the overlay's page (index.html?mode=pull, pull.tsx): home has none of its own.
+  for (const [mode, width, height] of [["pull", 404, 900], ["desktop", 1280, 800]]) {
     runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, `launcher-search-${mode}`, {width, height}).then(r => whenReady(r, async () => {
       const failures = await r.page.evaluate(async () => {
         const check = await importShim('./dev/search-check.js');
@@ -2502,19 +2548,25 @@ try {
   }
   // The launcher's chat while typing (the user, 2026-10-28: "launcher chat refreshes every keypress"): no search, no
   // re-render of the chat or its messages, the scroll where it was (dev/search-check.js launcherChatTypingCheck).
-  runs.push(open(browser, `${ORIGIN}/index.html`, "launcher-chat-typing", {width: 404, height: 900}).then(r => whenReady(r, async () => {
+  // In the launcher: the overlay's page (index.html?mode=pull).
+  runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-chat-typing", {width: 404, height: 900}).then(r => whenReady(r, async () => {
     const [failures, counts] = await r.page.evaluate(async () => (await importShim('./dev/search-check.js')).launcherChatTypingCheck());
     console.log(`launcher-chat-typing: ${JSON.stringify(counts)}`);
     return failures;
   })));
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
     for (const position of ["bottom", "left", "right"]) {
-      const name = `dock-position-${label}-${position}`;
-      runs.push(open(browser, `${ORIGIN}/index.html${mode === "home" ? "" : `?mode=${mode}`}`, name, {width, height}).then(r => whenReady(r, async () => {
-        const failures = await r.page.evaluate(dockPositionCheck, position);
-        if (process.env.DOCK_SHOTS) await r.page.screenshot({path: `${process.env.DOCK_SHOTS}/${name}.png`});
-        return failures;
-      })));
+      // Home has no launcher of its own (the overlay's page is the launcher): home's dock on home, the launcher's beside
+      // it in the overlay's page (index.html?mode=pull).
+      const parts = mode === "home" ? [["home", "", ""], ["launcher", "?mode=pull", "-launcher"]] : [["all", `?mode=${mode}`, ""]];
+      for (const [part, query, suffix] of parts) {
+        const name = `dock-position-${label}-${position}${suffix}`;
+        runs.push(open(browser, `${ORIGIN}/index.html${query}`, name, {width, height}).then(r => whenReady(r, async () => {
+          const failures = await r.page.evaluate(dockPositionCheck, position, part);
+          if (process.env.DOCK_SHOTS) await r.page.screenshot({path: `${process.env.DOCK_SHOTS}/${name}.png`});
+          return failures;
+        })));
+      }
     }
   }
   for (const [mode, width, height] of [["windowbar", 280, 27], ["statusbar", 404, 46]])
@@ -2614,7 +2666,11 @@ try {
   // App and widget creation, live (the user, 2026-10-24): the drawer/home placeholder at the start, progress on mock
   // step events, the being-built view, and the in-place swap with no gap or overlap.
   if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html`, "pending-creation", { width: 404, height: 900 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(pendingAppCheck)), ...(await r.page.evaluate(pendingWidgetCheck))])));
+    // The app's placeholder is the launcher's (the overlay's page, index.html?mode=pull); the widget's is home's.
+    runs.push(
+      open(browser, `${ORIGIN}/index.html?mode=pull`, "pending-creation-launcher", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(pendingAppCheck))),
+      open(browser, `${ORIGIN}/index.html`, "pending-creation", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(pendingWidgetCheck))),
+    );
   // The app library: home's last page (the user, 2026-10-23). Both screens.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
@@ -2631,11 +2687,18 @@ try {
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `search-launcher-${label}`, viewport).then(async (r) => {
         const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock}, pillBelowDockInEdit: ${pillBelowDockInEdit} }`;
-        const s = await whenReady(r, async () => [...(await r.page.evaluate(searchDefaultCheck)), ...(await r.page.evaluate(helpers).then(() => r.page.evaluate(searchLauncherCheck)))]);
+        const s = await whenReady(r, async () => [...(await r.page.evaluate(searchDefaultCheck)), ...(await r.page.evaluate(helpers).then(() => r.page.evaluate(homeAsks)).then(() => r.page.evaluate(searchLauncherCheck)))]);
         if (s.problems.length) return s;
         await r.page.reload().catch(() => {});
         return whenReady(r, () => r.page.evaluate(() => (document.querySelector(".home > .bar .bar-pill, .search-face .bar-pill") ? [] : ["after a reload: no search pill anywhere"])));
       }));
+  // ...and the launcher overlay's side of it (index.html?mode=pull): open from home's pill, its own field typing.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `search-launcher-overlay-${label}`, viewport).then((r) => whenReady(r, async () => {
+        await r.page.evaluate(`window.__sp = { drawerWithPill: ${drawerWithPill} }`);
+        return r.page.evaluate(overlaySearchCheck);
+      })));
   // Edit mode: a rectangle drawn on empty space picks tiles, picked tiles move together (the user, 2026-10-22).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
@@ -2658,16 +2721,16 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
   // The drawer's list fades at an edge with more to scroll (2026-10-24): a short screen, so the mock's apps scroll.
   if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html`, "scroll-fade", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(scrollFadeCheck))));
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "scroll-fade", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(scrollFadeCheck))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "close-up", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(closeUpCheck))));
   // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
   // side-by-side pages without moving a tile.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar)), ...(await r.page.evaluate(wideLauncherBar)), ...(await r.page.evaluate(wideBarParked))])));
-    runs.push(open(browser, `${ORIGIN}/index.html`, "launcher-keyboard", { width: 1280, height: 800 }).then((r) => whenReady(r, () => launcherKeyboardKeepsFocus(r.page))));
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard", { width: 1280, height: 800 }).then((r) => whenReady(r, () => launcherKeyboardKeepsFocus(r.page))));
   // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
   if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html`, "launcher-keyboard-side", { width: 821, height: 883 }).then((r) => whenReady(r, () => launcherKeyboardSide(r.page, { width: 821, height: 883 }))));
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard-side", { width: 821, height: 883 }).then((r) => whenReady(r, () => launcherKeyboardSide(r.page, { width: 821, height: 883 }))));
   // Home after an app at another size (Broforce in landscape, 2026-10-22: back on home the widgets were tiny and squashed
   // at the top). Laid out at [from] while hidden and shown again at [to], turned there and back, and relaid in its own
   // column count after the other's at the same size: the tiles must sit where a fresh layout at [to] puts them, and the
