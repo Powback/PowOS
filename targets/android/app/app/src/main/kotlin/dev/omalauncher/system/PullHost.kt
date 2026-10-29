@@ -97,7 +97,8 @@ class PullHost(
         val r = homePullExcluded.firstOrNull { it.contains(x.toInt(), y.toInt()) }
         if (r != null) android.util.Log.i("PowosPull", "not lifting: excluded (${x.toInt()},${y.toInt()}) in $r of ${homePullExcluded.size}")
         if (r != null || dev.omalauncher.shell.ControllerPad.covers(x, y)) return false
-        return !PetOverlay.assistShowing && WindowFrames.current?.covers(x, y) != true
+        // Any app's window, by WM's bounds (spec G-W): OnePlus's own floating windows aren't in WindowFrames.
+        return !PetOverlay.assistShowing && !AppWindowAt.covered(service, x, y)
     }
 
     /** Home shows with nothing of the system's over it (the switcher, the shade). */

@@ -329,8 +329,9 @@ class ShadeHost(
         if (overHome(x, y)) return false
         val home = homePull && Switcher.onHome && Switcher.homeVisible && !Switcher.open && host != null && !shown && !keyguard && !lent
         // Never inside a floating window: home is "on" under every window, and the gesture input sees all touches - a
-        // scroll down in Chrome or Kate pulled the shade (the user, 2026-10-23).
-        return home && WindowFrames.current?.covers(x, y) != true
+        // scroll down in Chrome or Kate pulled the shade (the user, 2026-10-23). Any app's window, by WM's bounds (spec
+        // G-W): OnePlus's own floating windows aren't in WindowFrames (the user, 2026-10-29).
+        return home && !AppWindowAt.covered(service, x, y)
     }
 
     /** Something of PowOS's over home there that takes its own drags: a control, the AI overlay, the launcher. */
