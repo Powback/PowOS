@@ -90,6 +90,8 @@ async function dockPositionCheck(position, part = "all") {
     if (others.some((p, i) => p.value !== before[i])) fails.push("changing dock position changed another mode");
     if (localStorage.getItem(`powos.dock.position.${mode}`) !== position) fails.push("position not saved");
   }
+  // In the page: page.evaluate serialises this function only, so the launcher check lives inside it.
+  async function dockLauncherCheck(position) {    const S = await importShim("./state.ts");    S.drawer.value = 1;    await new Promise(r => setTimeout(r, 450));    const clip = document.querySelector(".launcher-clip").getBoundingClientRect();    const bar = document.querySelector(".home > .bar").getBoundingClientRect();    const fails = [];    if (clip.left > 20 || clip.right < innerWidth - 20) fails.push("launcher loses width beside dock");    if (bar.bottom > innerHeight + 1 || bar.top < 0) fails.push(`launcher search is off screen: top=${bar.top}, bottom=${bar.bottom}, viewport=${innerHeight}`);    if (bar.bottom < innerHeight - 60) fails.push(`${position} dock leaves launcher search above the bottom edge`);    return fails;  }
   setPosition();
   await new Promise(r => setTimeout(r, 250));
   const dock = document.querySelector(".home > .dock");
@@ -138,19 +140,6 @@ async function dockPositionCheck(position, part = "all") {
 }
 
 /** The launcher overlay with a side dock (pull.tsx shows home's dock at the bottom only): full width, its pill at the foot. */
-async function dockLauncherCheck(position) {
-  const S = await importShim("./state.ts");
-  S.drawer.value = 1;
-  await new Promise(r => setTimeout(r, 450));
-  const clip = document.querySelector(".launcher-clip").getBoundingClientRect();
-  const bar = document.querySelector(".home > .bar").getBoundingClientRect();
-  const fails = [];
-  if (clip.left > 20 || clip.right < innerWidth - 20) fails.push("launcher loses width beside dock");
-  if (bar.bottom > innerHeight + 1 || bar.top < 0) fails.push(`launcher search is off screen: top=${bar.top}, bottom=${bar.bottom}, viewport=${innerHeight}`);
-  if (bar.bottom < innerHeight - 60) fails.push(`${position} dock leaves launcher search above the bottom edge`);
-  return fails;
-}
-
 /** Chrome controls stay within a narrow window and dispatch only their scoped actions. */
 async function windowChromeCheck() {
   const B = (await importShim("./bridge.ts")).powos;
