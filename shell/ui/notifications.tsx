@@ -358,6 +358,23 @@ function notifBar(count: number, clearable: boolean) {
   );
 }
 
+/**
+ * The scroll-away's room (NotificationPanel): from the control center's header row (date, edit, settings: .cc >
+ * .notif-bar), which stays put (the user, 2026-10-29 "the notification center title can still be on the top"), down to
+ * the list's top; and what's under the header, each given --d (its distance below it: shell.css clips it there).
+ */
+function awayRoom(body: HTMLElement, l: HTMLElement): [number, HTMLElement[]] {
+  const card = body.querySelector<HTMLElement>(":scope > .cc");
+  if (!card) return [0, []];
+  const head = card.querySelector<HTMLElement>(":scope > .notif-bar");
+  const hb = head ? head.getBoundingClientRect().bottom : card.getBoundingClientRect().top;
+  const h = Math.round(l.getBoundingClientRect().top - hb);
+  if (h <= 0) return [0, []];
+  const moved = [...card.children].filter((el): el is HTMLElement => el !== head && el instanceof HTMLElement);
+  for (const el of moved) el.style.setProperty("--d", `${Math.round(el.getBoundingClientRect().top - hb)}px`);
+  return [h, moved];
+}
+
 export function NotificationPanel() {
   const shown = notifOpen.value;
   // The notifications and the control center: one panel (the default), or apart (settings -> style); unfolded, side
@@ -418,16 +435,8 @@ export function NotificationPanel() {
       const s = l.scrollTop;
       if (s <= 0) return off();
       if (!h) {
-        // The header row (date, edit, settings: .cc > .notif-bar) stays put (the user, 2026-10-29 "the notification
-        // center title can still be on the top"): h is from its bottom; what's under it slides away, each part clipped
-        // at the header's bottom (--d: its own distance below it).
-        const card = body.querySelector<HTMLElement>(":scope > .cc");
-        const head = card?.querySelector<HTMLElement>(":scope > .notif-bar");
-        const hb = (head ?? card)?.getBoundingClientRect()[head ? "bottom" : "top"];
-        h = !card || hb == null ? 0 : Math.round(l.getBoundingClientRect().top - hb);
+        [h, moved] = awayRoom(body, l);
         if (h <= 0) return off();
-        moved = [...card!.children].filter((el): el is HTMLElement => el !== head && el instanceof HTMLElement);
-        for (const el of moved) el.style.setProperty("--d", `${Math.round(el.getBoundingClientRect().top - hb!)}px`);
         body.style.setProperty("--cc-h", `${h}px`);
         body.classList.add("cc-away");
       }
