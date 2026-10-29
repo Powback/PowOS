@@ -514,12 +514,19 @@ interface WorkRow {
  */
 const saidSeen = stored("pet.saidAt", String(Date.now()));
 
+/**
+ * The board rows the pet reads: open ones (the waiting count) and ones gone done since this shell started (a task going
+ * done is a jump) - not every done task ever, which made the whole board decode and copy on home's main thread. An hour
+ * of slack for a phone clock ahead of the server's; done before load never cheered anyway (no earlier status seen).
+ */
+const WORK_OPEN_QUERY = `SELECT * FROM work WHERE status <> 'done' OR done > ${Date.now() - 3_600_000}`;
+
 function PetFeed() {
   const db = useDb("local-pet", PetDb);
   const pets = useRows<PetRow>(db, "pet", "SELECT * FROM pet");
   const said = useRows<SaidRow>(db, "said", "SELECT * FROM said");
   const adb = useDb("powos-agents", AgentsDb);
-  const work = useRows<WorkRow>(adb, "work", "SELECT * FROM work");
+  const work = useRows<WorkRow>(adb, "work", WORK_OPEN_QUERY);
   useAgents();
   petConn = db.status === "connected" ? db.conn : null;
   useEffect(() => {

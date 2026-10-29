@@ -455,18 +455,40 @@ export function useDb(database: string, make: Builder, schema?: string): Db {
 /** The SDK's accessor for a table: its name in camelCase (shopping_item -> shoppingItem). */
 const accessor = (conn: any, table: string) => conn.db[table] ?? conn.db[table.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase())];
 
+/**
+ * [fn] at most once per frame, however many times it's called before then. A table's row callbacks fire once per row
+ * changed (a subscription's first message: once per row it holds), and copying the whole table on each of them made one
+ * SpacetimeDB message cost 50-60 ms on home's main thread (the user's fps recording, 2026-10-29): now one copy per
+ * message, run just before the next paint. Hidden (no frames): a timer instead, so rows stay current for coming back.
+ */
+function perFrame(fn: () => void) {
+  let queued = false;
+  const run = () => {
+    queued = false;
+    fn();
+  };
+  return () => {
+    if (queued) return;
+    queued = true;
+    if (typeof requestAnimationFrame === "function" && !globalThis.document?.hidden) requestAnimationFrame(run);
+    else setTimeout(run, 0);
+  };
+}
+
 export function useRows<T = any>(db: Db, table: string, query: string): T[] {
   const [rows, setRows] = useState<T[]>([]);
   useEffect(() => {
     if (!db.conn || db.status !== "connected" || db.stale?.includes(table)) return;
     const t = accessor(db.conn, table);
     if (!t) return;
-    const refresh = () => setRows([...t.iter()] as T[]);
+    let live = true;
+    const refresh = perFrame(() => live && setRows([...t.iter()] as T[]));
     t.onInsert(refresh);
     t.onDelete(refresh);
     t.onUpdate?.(refresh);
     const sub = db.conn.subscriptionBuilder().onApplied(refresh).subscribe(query);
     return () => {
+      live = false;
       t.removeOnInsert(refresh);
       t.removeOnDelete(refresh);
       t.removeOnUpdate?.(refresh);
@@ -492,12 +514,14 @@ export function watchRows<T = any>(database: string, make: Builder, table: strin
     detach = null;
     const t = e?.conn ? accessor(e.conn, table) : null;
     if (!e || !t || e.status !== "connected" || e.stale?.includes(table)) return;
-    const refresh = () => onRows([...t.iter()] as T[]);
+    let live = true;
+    const refresh = perFrame(() => live && onRows([...t.iter()] as T[]));
     t.onInsert(refresh);
     t.onDelete(refresh);
     t.onUpdate?.(refresh);
     const sub = e.conn.subscriptionBuilder().onApplied(refresh).subscribe(query);
     detach = () => {
+      live = false;
       t.removeOnInsert(refresh);
       t.removeOnDelete(refresh);
       t.removeOnUpdate?.(refresh);
