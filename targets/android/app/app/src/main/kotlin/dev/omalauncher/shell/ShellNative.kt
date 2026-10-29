@@ -81,7 +81,15 @@ class ShellNative(
         main.post {
             port?.close()
             net.reset()
-            val (mine, theirs) = web.createWebMessageChannel()
+            // Null once the WebView is destroyed (a host torn down before this post ran): crashed the whole app
+            // (2026-10-29 17:43, NPE here). No channel then - the next page load connects again.
+            @Suppress("SENSELESS_COMPARISON", "UNNECESSARY_SAFE_CALL")
+            val channel: Array<WebMessagePort>? = runCatching { web.createWebMessageChannel() }.getOrNull()
+            if (channel == null || channel.size < 2) {
+                Log.w("PowosNative", "no message channel (web view gone): not connected")
+                return@post
+            }
+            val (mine, theirs) = channel
             mine.setWebMessageCallback(
                 object : WebMessagePort.WebMessageCallback() {
                     override fun onMessage(
