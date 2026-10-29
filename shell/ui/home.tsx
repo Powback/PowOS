@@ -10,6 +10,7 @@ import { WidgetSheet } from "./widgetsheet.tsx";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
+import type { PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, shadeTakesHome } from "./gesture.ts";
@@ -61,6 +62,44 @@ const homePullOk = computed(
     screens.value.length === 0,
 );
 const dockElement = signal<HTMLElement | null>(null);
+
+function pageRect(r: DOMRect): PageRect {
+  return { left: r.left, top: r.top, width: r.width, height: r.height };
+}
+
+/** Whether [el] scrolls along y (or x) and has more to show that way. */
+function scrolls(el: Element): boolean {
+  const up = el.scrollHeight > el.clientHeight + 1;
+  const side = el.scrollWidth > el.clientWidth + 1;
+  if (!up && !side) return false;
+  const s = getComputedStyle(el);
+  return (up && /auto|scroll/.test(s.overflowY)) || (side && /auto|scroll/.test(s.overflowX));
+}
+
+/**
+ * Spec G-R: a drag that starts on a strip that scrolls is the strip's - never the shade's pull down nor the launcher's
+ * swipe up. Every such region of home: the dock wherever it sits (bottom row, or the side column of `.home.dock-right`
+ * / `.dock-left` with its recents, which scrolls up and down), its own scrollers, and each widget list that scrolls.
+ * Home's pager and anything near screen-sized are left out: they're the empty home the pulls start from. The user,
+ * 2026-10-29: "Trying to scroll the recent bar triggers the notification center or the launcher."
+ */
+function claimFree(dockNode: HTMLElement | null): PageRect[] {
+  const out: PageRect[] = [];
+  const big = innerWidth * innerHeight * 0.5;
+  const add = (el: Element) => {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0 && r.width * r.height < big) out.push(pageRect(r));
+  };
+  if (dockNode) {
+    add(dockNode);
+    dockNode.querySelectorAll(".dock-pages, .dock-recent").forEach(add);
+  }
+  const home = document.querySelector(".home");
+  home?.querySelectorAll("*").forEach((el) => {
+    if (!dockNode?.contains(el) && scrolls(el)) add(el);
+  });
+  return out;
+}
 function followDock(el: HTMLElement | null) {
   followOpenness(el);
   dockElement.value = el;
@@ -75,14 +114,15 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
   const dockNode = dockElement.value;
   const report = () => {
     const r = dockNode?.getBoundingClientRect();
-    const exclude = r ? { left: r.left, top: r.top, width: r.width, height: r.height } : undefined;
-    powos.shade.homePull(on, exclude, mainPage).then(
+    const exclude = r ? pageRect(r) : undefined;
+    const regions = claimFree(dockNode);
+    powos.shade.homePull(on, exclude, mainPage, regions).then(
       (taken) => (shadeTakesHome.value = !!taken),
       () => (shadeTakesHome.value = false),
     );
     // Up is the launcher overlay's, the same way (PullHost.kt): it follows the finger over home.
     const split = pullPanels.value === "on";
-    (powos.pull.homePull?.(on, exclude, split) ?? Promise.resolve(false)).then(
+    (powos.pull.homePull?.(on, exclude, split, regions) ?? Promise.resolve(false)).then(
       (taken) => (launcherTakesHome.value = !!taken),
       () => (launcherTakesHome.value = false),
     );

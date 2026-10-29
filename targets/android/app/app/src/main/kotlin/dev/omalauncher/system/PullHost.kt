@@ -75,7 +75,7 @@ class PullHost(
 
     /** Home's page: a swipe up on its body is the launcher's now (nothing open over home's pages, not editing). */
     var homePull = false
-    var homePullExcluded: Rect? = null
+    var homePullExcluded: List<Rect> = emptyList()
 
     /** From home's left half the swipe brings PowOS AI's panel (the page's pull-up corners setting). */
     var homeSplit = false
@@ -93,7 +93,10 @@ class PullHost(
     ): Boolean {
         if (!homePull || host == null || shown || DeviceLock.locked(service) || !homeBare()) return false
         // Not on home's controls that drag (the dock), the controller pad, the PowOS AI overlay, nor a floating window.
-        if (homePullExcluded?.contains(x.toInt(), y.toInt()) == true || dev.omalauncher.shell.ControllerPad.covers(x, y)) return false
+        // Spec G-R: a drag starting on a strip that scrolls (the dock, the side column's recents, a widget list) is its own.
+        val r = homePullExcluded.firstOrNull { it.contains(x.toInt(), y.toInt()) }
+        if (r != null) android.util.Log.i("PowosPull", "not lifting: excluded (${x.toInt()},${y.toInt()}) in $r of ${homePullExcluded.size}")
+        if (r != null || dev.omalauncher.shell.ControllerPad.covers(x, y)) return false
         return !PetOverlay.assistShowing && WindowFrames.current?.covers(x, y) != true
     }
 

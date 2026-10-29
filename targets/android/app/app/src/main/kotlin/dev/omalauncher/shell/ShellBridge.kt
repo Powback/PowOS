@@ -316,14 +316,14 @@ class ShellBridge(
             // The shade page's openness as it renders it this frame: the blur behind on the same frame.
             "shade.behind" -> shade?.behind(a.getDouble(0).toFloat())
             // Home's page: whether a pull down on it is the shade's now. True: PowOS's shade takes it (on the gesture input).
-            "shade.homePull" -> homePull(a.getBoolean(0), a.optJSONObject(1), a.optBoolean(2, false))
+            "shade.homePull" -> homePull(a.getBoolean(0), a, a.optBoolean(2, false))
             // Home without the gesture input: the shade down, not following the finger.
             "shade.open" -> dev.omalauncher.system.ShadeHost.current?.let { s -> main.post { s.openPanel(control = false) } } ?: notifications(true)
             "overlay.closed", "pull.closed" -> overlay?.closed()
             "pull.launched" -> overlay?.launched()
             // Home's page: the launcher overlay up over home (the pill, the side button's chat) / its lift on home's body.
             "pull.open" -> launcherOpen(a.getString(0), a.optJSONObject(1))
-            "pull.homePull" -> launcherHomePull(a.getBoolean(0), a.optJSONObject(1), a.optBoolean(2, false))
+            "pull.homePull" -> launcherHomePull(a.getBoolean(0), a, a.optBoolean(2, false))
             // Which shell panel is open (system/Panels.kt): the bottom-edge home gesture closes it.
             "panels.open" -> dev.omalauncher.system.Panels.set(a.getString(0), this)
             "panels.closed" -> dev.omalauncher.system.Panels.set(null, this)
@@ -496,11 +496,11 @@ class ShellBridge(
     }
 
     /** Home's page: whether a swipe up on it is the launcher overlay's now (as [homePull] is the shade's swipe down). */
-    private fun launcherHomePull(on: Boolean, exclude: JSONObject?, split: Boolean): Boolean {
+    private fun launcherHomePull(on: Boolean, args: JSONArray, split: Boolean): Boolean {
         val pull = dev.omalauncher.system.PullHost.current ?: return false
         val shade = dev.omalauncher.system.ShadeHost.current
         main.post {
-            pull.homePullExcluded = exclude?.let { screenRect(it) }
+            pull.homePullExcluded = claimFree(args)
             pull.homeSplit = split
             pull.homePull = on
         }
@@ -508,10 +508,20 @@ class ShellBridge(
         return shade?.monitored == true
     }
 
-    private fun homePull(on: Boolean, exclude: JSONObject?, mainPage: Boolean): Boolean {
+    /**
+     * Home's claim-free regions (spec G-R: the dock, bottom row or side column with its recents, and every list that
+     * scrolls) on the screen: arg 3, a list of page rects; an older page sends only the dock's rect, arg 1.
+     */
+    private fun claimFree(a: JSONArray): List<android.graphics.Rect> {
+        val list = a.optJSONArray(3)
+        if (list == null) return listOfNotNull(a.optJSONObject(1)?.let { screenRect(it) })
+        return (0 until list.length()).mapNotNull { i -> list.optJSONObject(i)?.let { screenRect(it) } }
+    }
+
+    private fun homePull(on: Boolean, args: JSONArray, mainPage: Boolean): Boolean {
         val shade = dev.omalauncher.system.ShadeHost.current ?: return false
         main.post {
-            shade.homePullExcluded = exclude?.let { screenRect(it) }
+            shade.homePullExcluded = claimFree(args)
             shade.homePull = on
             dev.omalauncher.system.Switcher.homeMainPage = mainPage
         }

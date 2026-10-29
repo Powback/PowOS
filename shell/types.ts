@@ -4,6 +4,14 @@
  * without a host gets bridge.ts's mock, so the shell runs anywhere.
  */
 /** apps.links: an Android app's deep links (a prefix or pattern path ends in ".*"), with the activity each opens. */
+/** A rect on the page, CSS px from its top left. */
+export interface PageRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 export interface AppLinks {
   pkg: string;
   label: string;
@@ -727,8 +735,10 @@ export interface Bridge {
     /**
      * Home's page: a pull down on home is the shade's now ([on]: nothing open over home's pages). Resolves true when the
      * host takes that finger itself (its gesture input), false when it can't - then home asks [open] on a swipe down.
+     * [regions]: every place on home whose drags are its own (the dock, bottom row or side column with its recents, and
+     * each list that scrolls), [exclude] being only the dock's - for an older host, which reads that one rect.
      */
-    homePull(on: boolean, exclude?: { left: number; top: number; width: number; height: number }, mainPage?: boolean): Promise<boolean>;
+    homePull(on: boolean, exclude?: PageRect, mainPage?: boolean, regions?: PageRect[]): Promise<boolean>;
     /** The shade down, not following a finger (home without the host's gesture input). */
     open(): Promise<void>;
   };
@@ -754,9 +764,10 @@ export interface Bridge {
     /**
      * Home's page: a swipe up on home is the launcher's now ([on]: nothing open over home's pages), as [shade.homePull]
      * is a swipe down's; [split]: from home's left half it brings PowOS AI's panel (state.ts pullPanels). Resolves true
-     * when the host takes that finger itself (its gesture input); false - home asks [open] on a swipe up instead.
+     * when the host takes that finger itself (its gesture input); false - home asks [open] on a swipe up instead. [regions]:
+     * as [shade.homePull]'s - drags starting there are never the launcher's.
      */
-    homePull?(on: boolean, exclude?: { left: number; top: number; width: number; height: number }, split?: boolean): Promise<boolean>;
+    homePull?(on: boolean, exclude?: PageRect, split?: boolean, regions?: PageRect[]): Promise<boolean>;
   };
   /**
    * The desktop's windows (PowOS's desktop host only; the phone rejects these): every window, ungrouped, in the

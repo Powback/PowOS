@@ -312,7 +312,8 @@ class ShadeHost(
      * window, pull and blur as from the status bar over an app. Home has no notification panel of its own.
      */
     var homePull = false
-    var homePullExcluded: android.graphics.Rect? = null
+    /** Home's claim-free regions (spec G-R): a drag starting in one is home's own - its dock, column or list scrolls. */
+    var homePullExcluded: List<android.graphics.Rect> = emptyList()
 
     /** Where a pull may start: the status bar (anywhere), or home's body (while [homePull]). */
     private enum class From { STATUS_BAR, HOME }
@@ -336,8 +337,12 @@ class ShadeHost(
     // The launcher overlay (PullHost) too: down on it is its own (it drags the drawer shut).
     private fun overHome(x: Float, y: Float): Boolean = homeControlAt(x, y) || PetOverlay.assistShowing || PullHost.current?.shown == true
 
-    private fun homeControlAt(x: Float, y: Float): Boolean =
-        homePullExcluded?.contains(x.toInt(), y.toInt()) == true || dev.omalauncher.shell.ControllerPad.covers(x, y)
+    private fun homeControlAt(x: Float, y: Float): Boolean {
+        val r = homePullExcluded.firstOrNull { it.contains(x.toInt(), y.toInt()) }
+        // Why a drag on home isn't the shade's, as "not pulling" over the status bar: the first thing to ask.
+        if (r != null) Log.i(TAG, "not pulling: excluded (${x.toInt()},${y.toInt()}) in $r of ${homePullExcluded.size}")
+        return r != null || dev.omalauncher.shell.ControllerPad.covers(x, y)
+    }
 
     /** Whether a finger down at ([x], [y]) (display px) may be the shade's pull, and from where. */
     private fun pullable(

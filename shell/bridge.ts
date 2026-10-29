@@ -240,7 +240,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       peekHeight: (px) => call("shade.peekHeight", px),
       blur: (dp) => call("shade.blur", dp),
       behind: (q) => call("shade.behind", q),
-      homePull: (on, exclude, mainPage) => call<boolean>("shade.homePull", on, exclude ?? null, mainPage ?? false),
+      homePull: (on, exclude, mainPage, regions) =>
+        call<boolean>("shade.homePull", on, exclude ?? null, mainPage ?? false, regions ?? null),
       open: () => call("shade.open"),
     },
     overlay: {
@@ -250,7 +251,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       closed: () => call("pull.closed"),
       launched: () => call("pull.launched"),
       open: (kind, how) => call<boolean>("pull.open", kind, how ?? {}),
-      homePull: (on, exclude, split) => call<boolean>("pull.homePull", on, exclude ?? null, split ?? false),
+      homePull: (on, exclude, split, regions) =>
+        call<boolean>("pull.homePull", on, exclude ?? null, split ?? false, regions ?? null),
     },
     windows: {
       list: () => call<DesktopWindow[]>("windows.list"),
