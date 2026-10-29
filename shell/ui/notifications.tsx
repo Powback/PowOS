@@ -431,6 +431,15 @@ export function NotificationPanel() {
       if (c) (c.style.translate = ""), (c.style.opacity = "");
     };
   }, [together, two]);
+  // Shut (q 0, nothing drawn) and again as it starts to open: the list back at its top, so the control center is all
+  // there on every open (the card's ride cleared now, not on the scroll event a frame later).
+  useLayoutEffect(() => {
+    const l = listEl.current;
+    if (!l || !l.scrollTop) return;
+    l.scrollTop = 0;
+    const c = panelEl.current?.querySelector<HTMLElement>(".panel-body.together > .cc");
+    if (c) (c.style.translate = ""), (c.style.opacity = "");
+  }, [shown]);
   // The cards, newest first, each group a row of the cascade (shell.css .cascade) from --i [from], after the rows above.
   const items$ = (from: number) => (
     <div class="notif-items" ref={itemsEl}>
