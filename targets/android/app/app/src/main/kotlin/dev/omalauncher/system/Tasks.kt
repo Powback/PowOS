@@ -101,6 +101,8 @@ object Tasks {
     fun split(
         first: Int,
         second: Int,
+        position: Int = SPLIT_POSITION_TOP_OR_LEFT,
+        snap: Int = SNAP_TO_2_50_50,
     ): Boolean {
         val binder = splitScreen ?: return false.also { Log.w(TAG, "no ISplitScreen from SystemUI") }
         return runCatching {
@@ -111,8 +113,9 @@ object Tasks {
                 data.writeTypedObject(null as android.os.Bundle?, 0)
                 data.writeInt(second)
                 data.writeTypedObject(null as android.os.Bundle?, 0)
-                data.writeInt(SPLIT_POSITION_TOP_OR_LEFT)
-                data.writeInt(SNAP_TO_2_50_50)
+                // [first] goes to [position] (SplitDrawer puts a tucked app back on its own edge); [snap] is the divider.
+                data.writeInt(position)
+                data.writeInt(snap)
                 // No remote transition (WM Shell animates it); an InstanceId (its parcel: present, then its id).
                 data.writeInt(0)
                 data.writeInt(1)
@@ -187,8 +190,12 @@ object Tasks {
     }
 
     private const val SPLIT_START_TASKS = 11
-    private const val SPLIT_POSITION_TOP_OR_LEFT = 0
-    private const val SNAP_TO_2_50_50 = 1
+    // SplitScreenConstants (this phone's SystemUI, dexdump): positions and the 2-app snap targets (left/top share).
+    const val SPLIT_POSITION_TOP_OR_LEFT = 0
+    const val SPLIT_POSITION_BOTTOM_OR_RIGHT = 1
+    const val SNAP_TO_2_33_66 = 0
+    const val SNAP_TO_2_50_50 = 1
+    const val SNAP_TO_2_66_33 = 2
     private const val WINDOWING_MODE_FREEFORM = 5
 
     /**

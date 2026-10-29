@@ -27,6 +27,7 @@ import com.android.systemui.shared.recents.ISystemUiProxy
 import dev.omalauncher.shell.PowosLockActivity
 import dev.omalauncher.system.QuickToolsHost
 import dev.omalauncher.system.ShadeHost
+import dev.omalauncher.system.SplitDrawer
 import dev.omalauncher.system.Switcher
 import dev.omalauncher.system.Tasks
 import java.io.File
@@ -81,6 +82,10 @@ class EdgeGestures(
     /** Quick Tools is following this swipe in. */
     private var dragging = false
 
+    /** A swipe in from a split drawer's tab ([SplitDrawer]): its side (Tasks.SPLIT_POSITION_*), where it went down. */
+    private var pulling: Int? = null
+    private var pullX = 0f
+
     override val takesOnDown = true
 
     private val leftHandle = Handle(false)
@@ -111,6 +116,7 @@ class EdgeGestures(
         }
 
     fun start() {
+        SplitDrawer.onChange = { main.post { handles() } }
         observer.startWatching()
         service.registerReceiver(
             lockReceiver,
@@ -123,6 +129,7 @@ class EdgeGestures(
     }
 
     fun stop() {
+        SplitDrawer.onChange = null
         runCatching { service.unregisterReceiver(lockReceiver) }
         observer.stopWatching()
         leftHandle.remove()
@@ -185,6 +192,7 @@ class EdgeGestures(
     }
 
     override fun onDown(e: MotionEvent): Boolean {
+        if (drawerDown(e)) return true
         val c = config()
         if (!c.on) return false
         val screen = screen()
@@ -219,6 +227,7 @@ class EdgeGestures(
     }
 
     override fun onEvent(e: MotionEvent): GestureConsumer.Verdict {
+        if (pulling != null) return drawerEvent(e)
         val c = classifier ?: return GestureConsumer.Verdict.DROP
         val s = side ?: return GestureConsumer.Verdict.DROP
         when (e.actionMasked) {
@@ -253,6 +262,56 @@ class EdgeGestures(
                 Log.i(TAG, "edge: cancelled (the touch was taken)")
                 finish()
                 endDrag(open = false)
+                return GestureConsumer.Verdict.DROP
+            }
+        }
+        return GestureConsumer.Verdict.TAKE
+    }
+
+    // --- the split drawers (SplitDrawer): a tucked app's tab, swiped in
+
+    /** The tab's span on its edge (screen px): the middle of the screen, where the divider was let go. */
+    private fun tabSpan(screen: Rect): Pair<Float, Float> = screen.top + screen.height() * TAB_TOP to screen.top + screen.height() * TAB_BOTTOM
+
+    /** A finger down on a tucked app's tab: it's the drawer's, whatever the edge's own handle would do there. */
+    private fun drawerDown(e: MotionEvent): Boolean {
+        val screen = screen()
+        val side =
+            when {
+                e.rawX < screen.left + TAB_ZONE_DP * density -> 0
+                e.rawX >= screen.right - TAB_ZONE_DP * density -> 1
+                else -> return false
+            }
+        if (SplitDrawer.tucked(side) == null) return false
+        val (top, bottom) = tabSpan(screen)
+        if (e.rawY < top || e.rawY > bottom || locked()) return false
+        SplitDrawer.prune(service)
+        if (SplitDrawer.tucked(side) == null) return false
+        pulling = side
+        pullX = e.rawX
+        Log.i(TAG, "edge: down on the ${if (side == 0) "left" else "right"} split drawer's tab")
+        return true
+    }
+
+    private fun drawerEvent(e: MotionEvent): GestureConsumer.Verdict {
+        val side = pulling ?: return GestureConsumer.Verdict.DROP
+        val inward = if (side == 0) e.rawX - pullX else pullX - e.rawX
+        when (e.actionMasked) {
+            MotionEvent.ACTION_MOVE -> return GestureConsumer.Verdict.TAKE
+            MotionEvent.ACTION_UP -> {
+                pulling = null
+                val width = screen().width()
+                when {
+                    inward < TAB_PULL_DP * density -> Log.i(TAG, "edge: split drawer tab let go after ${inward.toInt()}px: stays tucked")
+                    else -> {
+                        tick(EFFECT_CLICK)
+                        SplitDrawer.pull(service, side, float = inward > width * SplitDrawer.FLOAT_PULL)
+                    }
+                }
+                return GestureConsumer.Verdict.DROP
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                pulling = null
                 return GestureConsumer.Verdict.DROP
             }
         }
@@ -383,8 +442,10 @@ class EdgeGestures(
         val c = config()
         val screen = screen()
         val show = c.on && c.handles && !locked()
-        leftHandle.update(if (show && c.left.on) span(c.left, screen) else null, screen)
-        rightHandle.update(if (show && c.right.on) span(c.right, screen) else null, screen)
+        // A tucked split app's tab shows whatever the edge's own settings (the drawer is the split's, not a gesture).
+        val tab = if (locked()) null else tabSpan(screen)
+        leftHandle.update(if (show && c.left.on) span(c.left, screen) else null, screen, tab?.takeIf { SplitDrawer.tucked(0) != null })
+        rightHandle.update(if (show && c.right.on) span(c.right, screen) else null, screen, tab?.takeIf { SplitDrawer.tucked(1) != null })
     }
 
     /** A strip window on one edge, drawing a faint line over the handle's span; never touchable. */
@@ -397,8 +458,11 @@ class EdgeGestures(
         fun update(
             span: Pair<Float, Float>?,
             screen: Rect,
+            tab: Pair<Float, Float>? = null,
         ) {
-            if (span == null) return remove()
+            if (span == null && tab == null) return remove()
+            val lineSpan = span?.minus(screen.top)
+            val tabSpan = tab?.minus(screen.top)
             val p =
                 params ?: WindowManager.LayoutParams(
                     (HANDLE_WINDOW_DP * density).toInt(),
@@ -416,14 +480,16 @@ class EdgeGestures(
             val v = view
             if (v == null) {
                 val line = Line(right)
-                line.span = span.first - screen.top to span.second - screen.top
+                line.span = lineSpan
+                line.tab = tabSpan
                 runCatching { wm.addView(line, p) }
                     .onSuccess {
                         view = line
                         params = p
                     }.onFailure { Log.w(TAG, "can't draw the edge handle", it) }
             } else {
-                v.span = span.first - screen.top to span.second - screen.top
+                v.span = lineSpan
+                v.tab = tabSpan
                 v.invalidate()
             }
         }
@@ -434,21 +500,33 @@ class EdgeGestures(
         }
     }
 
+    /** A screen span made window-relative (the handle window starts at the screen's top). */
+    private fun Pair<Float, Float>.minus(top: Int) = first - top to second - top
+
     private inner class Line(
         private val right: Boolean,
     ) : View(handleContext) {
-        var span = 0f to 0f
+        var span: Pair<Float, Float>? = null
+
+        /** A tucked split app's tab ([SplitDrawer]): wider and brighter than the gesture handle, drawn over it. */
+        var tab: Pair<Float, Float>? = null
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = HANDLE_COLOR }
+        private val tabPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = TAB_COLOR }
 
         override fun onDraw(canvas: Canvas) {
-            val w = HANDLE_LINE_DP * density
-            val inset = HANDLE_INSET_DP * density
-            val left = if (right) width - inset - w else inset
-            // Inset at the ends too, so the line reads as a handle, not a frame.
-            val (top, bottom) = span
-            val pad = HANDLE_END_PAD_DP * density
-            if (bottom - top <= pad * 2) return
-            canvas.drawRoundRect(left, top + pad, left + w, bottom - pad, w, w, paint)
+            span?.let { (top, bottom) ->
+                val w = HANDLE_LINE_DP * density
+                val inset = HANDLE_INSET_DP * density
+                val left = if (right) width - inset - w else inset
+                // Inset at the ends too, so the line reads as a handle, not a frame.
+                val pad = HANDLE_END_PAD_DP * density
+                if (bottom - top > pad * 2) canvas.drawRoundRect(left, top + pad, left + w, bottom - pad, w, w, paint)
+            }
+            tab?.let { (top, bottom) ->
+                val w = TAB_LINE_DP * density
+                val left = if (right) width - w else 0f
+                canvas.drawRoundRect(left, top, left + w, bottom, w, w, tabPaint)
+            }
         }
     }
 
@@ -466,6 +544,16 @@ class EdgeGestures(
         const val HANDLE_LINE_DP = 2.5f
         const val HANDLE_INSET_DP = 1.5f
         const val HANDLE_END_PAD_DP = 12f
+
+        // The split drawer's tab: the middle fifth of the edge, a finger's width to take, a short pull to bring back.
+        const val TAB_TOP = 0.4f
+        const val TAB_BOTTOM = 0.6f
+        const val TAB_ZONE_DP = 20f
+        const val TAB_PULL_DP = 32f
+        const val TAB_LINE_DP = 5f
+
+        /** White at 80%: a tucked app is there to be found. */
+        const val TAB_COLOR = 0xCCFFFFFF.toInt()
 
         /** White at 28%: visible on most screens, never loud. */
         const val HANDLE_COLOR = 0x47FFFFFF

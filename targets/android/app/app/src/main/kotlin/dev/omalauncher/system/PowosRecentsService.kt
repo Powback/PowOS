@@ -83,6 +83,8 @@ class PowosRecentsService : Service() {
                 val recentTasks = params?.getBinder(RecentsTransition.RECENT_TASKS)
                 // The switcher's split screen (WM Shell's).
                 Tasks.splitScreen = params?.getBinder("com.android.wm.shell.splitscreen.ISplitScreen")
+                // Its divider dragged to an edge tucks that app into an edge drawer (SplitDrawer).
+                SplitDrawer.attach(this@PowosRecentsService, Tasks.splitScreen)
                 // WM Shell's transitions: a floating window's content follows a drag (TaskLeash).
                 TaskLeash.shell = params?.getBinder(TaskLeash.KEY)
                 // Every desktop window's surface, for the in-task frames (TaskSurfaces; fed by TaskLeash).
