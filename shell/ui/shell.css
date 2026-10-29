@@ -2735,11 +2735,12 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
   justify-content: flex-start;
   width: 100%;
   min-width: 0;
-  gap: 0;
+  /* A real gap between icons (the dock/grid --gap), not slot padding: icons stay 48 px, the column scrolls. */
+  gap: var(--gap);
 }
 .home:is(.dock-left, .dock-right) .dock :is(.app, .dock-gap) {
-  flex: 0 0 56px;
-  height: 56px;
+  flex: 0 0 48px;
+  height: 48px;
   width: 48px;
 }
 .home:is(.dock-left, .dock-right) .dock .app-icon { width: min(var(--strip-icon), 48px); }
