@@ -9,6 +9,8 @@ import { powos } from "../bridge.ts";
 import { m as main, mring, MRING, mainFresh, onSample, beginMain, endMain } from "./fpsmain.ts";
 import { loafEntry, type Loaf } from "./loaf.ts";
 
+// The first SETTLE_MS after the tap are the meter's own UI reacting (REC label, panel/graph opening): not recorded.
+const SETTLE_MS = 300;
 const RING = 90, MAX_REC_MS = 120_000, MAX_FRAMES = 20_000, MAX_EVENTS = 300, STORE = "perf.meter";
 const ring = new Float32Array(RING);
 let head = 0, filled = 0, last = 0, raf = 0, enabled = false;
@@ -16,7 +18,7 @@ const marks = new Float64Array(240); // frame end times of roughly the last seco
 let markHead = 0;
 
 // Recording: preallocated, bounded.
-let rec = false, recStart = 0, recT = new Float32Array(0), recDt = new Float32Array(0), recN = 0;
+let rec = false, recStart = 0, settleAt = 0, settleTimer = 0, recT = new Float32Array(0), recDt = new Float32Array(0), recN = 0;
 let events: ({ kind: string; start: number; dur: number; blocking?: number } & Partial<Loaf>)[] = [];
 // Home's side of the recording (perfrec.ts): started by {rec} in "perf.meter", its detail comes back in parts.
 let recId = 0, homeParts: string[] = [], homeGot = 0, homeDone: (() => void) | null = null;
@@ -42,6 +44,10 @@ function attribution(home: { loaf?: Loaf[]; inputs?: unknown[]; state?: unknown[
   });
   return { longFrames: top, inputs: home.inputs?.length ?? 0, transitions: home.state?.length ?? 0 };
 }
+/** The summary's home entry: its attribution, or why there is none. */
+function homeLine(home: (NonNullable<Parameters<typeof attribution>[0]> & { missed?: string; error?: string }) | undefined) {
+  return home?.missed ?? home?.error ?? attribution(home) ?? "no detail from home (older shell there, or it didn't answer in 3 s)";
+}
 let po: PerformanceObserver | null = null;
 let ui: { root: HTMLElement; num: HTMLElement; cv: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null; label: HTMLElement } | null = null;
 let timer = 0, stopTimer = 0, busy = false;
@@ -52,7 +58,7 @@ function frame(t: number) {
     const dt = t - last;
     ring[head] = dt; head = (head + 1) % RING; if (filled < RING) filled++;
     marks[markHead] = t; markHead = (markHead + 1) % marks.length;
-    if (rec && recN < MAX_FRAMES) { recT[recN] = t - recStart; recDt[recN] = dt; recN++; }
+    if (rec && t >= settleAt && recN < MAX_FRAMES) { recT[recN] = t - recStart; recDt[recN] = dt; recN++; }
   }
   last = t;
 }
@@ -127,6 +133,7 @@ function observe() {
     po = new PerformanceObserver((list) => {
       for (const e of list.getEntries()) {
         if (events.length >= MAX_EVENTS) break;
+        if (e.startTime < settleAt) continue; // the meter's own opening
         events.push(e.entryType === "long-animation-frame" ? { kind: e.entryType, ...loafEntry(e, recStart) }
           : { kind: e.entryType, start: Math.round(e.startTime - recStart), dur: Math.round(e.duration) });
       }
@@ -153,9 +160,10 @@ export function summarise({ t, dt, n, evs, durMs, mode }: { t: Float32Array; dt:
 }
 
 function beginRecord() {
-  recStart = performance.now(); recN = 0;
+  recStart = performance.now(); settleAt = recStart + SETTLE_MS; recN = 0;
   recT = new Float32Array(MAX_FRAMES); recDt = new Float32Array(MAX_FRAMES);
-  observe(); beginMain(); rec = true;
+  observe(); rec = true;
+  settleTimer = window.setTimeout(() => { if (rec) beginMain(); }, SETTLE_MS); // home's frames, from the same point
   recId = Date.now(); homeParts = []; homeGot = 0;
   void powos.store.set(STORE, { on: true, rec: recId }).catch(() => {});
   if (!raf) start();
@@ -171,19 +179,19 @@ async function saveAndSend(full: object, sum: object) {
 }
 
 async function endRecord() {
-  rec = false; busy = true; clearTimeout(stopTimer); po?.disconnect(); po = null;
-  const durMs = performance.now() - recStart, n = recN;
+  rec = false; busy = true; clearTimeout(stopTimer); clearTimeout(settleTimer); po?.disconnect(); po = null;
+  const durMs = Math.max(0, performance.now() - settleAt), n = recN;
   const mode = new URLSearchParams(location.search).get("mode") ?? "?";
   const mn = endMain(), fromMain = mn.n > 1;
-  void powos.store.set(STORE, { on: true }).catch(() => {}); // home stops and sends its detail
+  void powos.store.set(STORE, { on: true, stop: recId }).catch(() => {}); // home stops and sends its detail (or why not)
   await new Promise<void>((r) => { homeDone = r; setTimeout(r, homeGot && homeGot === homeParts.length ? 0 : 3000); });
   homeDone = null;
-  let home: ({ loaf?: Loaf[]; inputs?: unknown[]; state?: unknown[] } & Record<string, unknown>) | undefined;
+  let home: ({ loaf?: Loaf[]; inputs?: unknown[]; state?: unknown[]; missed?: string; error?: string } & Record<string, unknown>) | undefined;
   try { home = homeGot && homeGot === homeParts.length ? JSON.parse(homeParts.join("")) : undefined; } catch { home = undefined; }
   homeParts = []; homeGot = 0;
   const sum = fromMain ? summarise({ ...mn, evs: events, durMs, mode: `main shell (home), ${mode} bar recorded` })
     : summarise({ t: recT, dt: recDt, n, evs: events, durMs, mode: `${mode} window only, main shell not reporting (${powos.host})` });
-  Object.assign(sum, { home: attribution(home) ?? "no detail from home (older shell there, or it didn't answer in 3 s)" });
+  Object.assign(sum, { settle: SETTLE_MS, home: homeLine(home) });
   const full = { summary: sum, main: fromMain ? { frameDeltas: Array.from(mn.dt, (x) => Math.round(x * 10) / 10) } : undefined, when: new Date().toISOString(), ua: navigator.userAgent, dpr: devicePixelRatio,
     frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events, home };
   recT = new Float32Array(0); recDt = new Float32Array(0);

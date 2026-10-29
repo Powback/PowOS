@@ -119,16 +119,35 @@ export function end() {
   if (!id) return;
   clearTimeout(stopTimer); offs.forEach((o) => o()); offs = [];
   const rec = id; id = 0;
-  const json = JSON.stringify({ v: 1, durationMs: Math.round(performance.now() - t0), snapshot, inputs, state, loaf, evt,
+  let json: string;
+  try {
+    json = JSON.stringify({ v: 1, durationMs: Math.round(performance.now() - t0), snapshot, inputs, state, loaf, evt,
     capped: { inputs: inputs.length >= MAX_INPUTS, state: state.length >= MAX_STATE, loaf: loaf.length >= MAX_LOAF, evt: evt.length >= MAX_EVT } });
+  } catch (e) { json = JSON.stringify({ v: 1, error: `home's detail could not be serialised: ${e}` }); } // still answer the bar
   inputs = []; state = []; loaf = []; evt = []; snapshot = {};
+  send(rec, json);
+}
+
+/** The detail to the bar in parts (each < the host's 8 KB per perf.publish). */
+function send(rec: number, json: string) {
   const n = Math.ceil(json.length / PART);
   for (let i = 0; i < n; i++)
     void powos.perf?.publish?.(JSON.stringify({ rec, recPart: i, of: n, data: json.slice(i * PART, (i + 1) * PART) }))?.catch?.(() => {});
 }
 
-/** The "perf.meter" value: {on, rec} starts a recording here, rec gone ends it. */
-export function onMeter(v: { on?: boolean; rec?: number } | null) {
+/**
+ * The "perf.meter" value: {on, rec} starts a recording here, rec gone ends it. The bar's stop carries {stop: id}: if
+ * this page wasn't recording that one (it missed the start, or reloaded since), it still answers, saying so, instead
+ * of leaving the bar to time out.
+ */
+export function onMeter(v: { on?: boolean; rec?: number; stop?: number } | null) {
   const r = Number(v?.rec) || 0;
-  if (r && r !== id) { end(); begin(r); } else if (!r && id) end();
+  if (r && r !== id) restart(r);
+  else if (!r && id) end();
+  else if (!r && v?.stop) send(Number(v.stop), MISSED);
+}
+const MISSED = JSON.stringify({ v: 1, missed: "home was not recording this one (it missed the start or reloaded since)" });
+function restart(r: number) {
+  end();
+  try { begin(r); } catch (e) { console.error("perfrec begin", e); } // id is set: the stop still answers
 }

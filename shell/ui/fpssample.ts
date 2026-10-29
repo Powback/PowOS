@@ -5,6 +5,7 @@
  * and the page is visible. The rAF callback allocates nothing (a ring); the sample is built 4x a second.
  */
 import { powos } from "../bridge.ts";
+import { onMeter } from "./perfrec.ts";
 
 const SIZE = 512, SAMPLE_MS = 250, CAP = 40;
 const ring = new Float32Array(SIZE);
@@ -48,16 +49,17 @@ function run() {
   sent = head; raf = requestAnimationFrame(frame); timer = window.setInterval(sample, SAMPLE_MS);
 }
 
-/** A meter recording ({rec} in "perf.meter"): perfrec.ts records inputs, state and long frames here, loaded on demand. */
-let rec: Promise<typeof import("./perfrec.ts")> | null = null;
-function recorder(v: { rec?: number } | null) {
-  if (!v?.rec && !rec) return;
-  rec ??= import("./perfrec.ts");
-  void rec.then((m) => m.onMeter(v), (e) => console.error("perfrec", e));
+/**
+ * A meter recording ({rec} in "perf.meter"): perfrec.ts records inputs, state and long frames here. Imported statically:
+ * home is the long-lived page, and an on-demand import() of a chunk from the bundle it loaded fails once the shell on
+ * disk is updated (the bar, reloaded, runs the new one) - home then never recorded nor answered the bar's stop.
+ */
+function recorder(v: { rec?: number; stop?: number } | null) {
+  try { onMeter(v); } catch (e) { console.error("perfrec", e); }
 }
 
 export function startSampler() {
-  powos.on("perf.meter", (v: { on?: boolean; rec?: number } | null) => { on = !!v?.on; run(); recorder(v); });
+  powos.on("perf.meter", (v: { on?: boolean; rec?: number; stop?: number } | null) => { on = !!v?.on; run(); recorder(v); });
   document.addEventListener("visibilitychange", run);
   powos.store.get<{ on?: boolean }>("perf.meter").then((v) => { on = !!v?.on; run(); }, () => {});
 }
