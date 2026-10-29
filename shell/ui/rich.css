@@ -1,6 +1,13 @@
 /* The conversation's rich parts (rich.tsx). No surfaces of their own: quiet lines in the chat's flow; what opens
    (a tool's output) is the soft fill inside the surface it's on. */
 
+/* Long text never widens the page: the chat and every bubble stay inside their column (a grid/flex item's min-width
+   is its longest unbroken line otherwise), prose wraps anywhere it must, code and tables scroll inside the bubble. */
+.chat, .ai-answer, .tl, .choice, .mail, .mail-body, .md { min-width: 0; max-width: 100%; }
+.msg { min-width: 0; }
+.msg, .ai-answer, .mail-body, .tl-out, .md { overflow-wrap: anywhere; }
+.md pre, .md .md-table, .tl-out { max-width: 100%; overflow-x: auto; }
+
 /* A run of tool calls: one muted line, its count; open, a line per call. */
 .tl {
   align-self: stretch;
@@ -71,7 +78,7 @@
 .choice-opt.other { background: none; }
 
 /* On PowOS AI's page the latest answer is the card's text, not a bubble in it. */
-.ai-answer .msg.assistant { max-width: none; padding: 0; background: none; border: 0; box-shadow: none; }
+.ai-answer .msg.assistant { max-width: 100%; padding: 0; background: none; border: 0; box-shadow: none; }
 .ai-answer > * + * { margin-top: 8px; }
 
 /* A presented document (```present): a card with its title and its beginning; a tap opens it full screen. */
