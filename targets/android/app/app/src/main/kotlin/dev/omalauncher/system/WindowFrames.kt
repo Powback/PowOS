@@ -198,6 +198,10 @@ class WindowFrames(
         // A page swipe's windows keep their frames where they are till the page change is committed ([sliding]).
         val ids = show.map { it.id }.toSet() + held(all, floating && !keyguard) + sliding.keys
         retireFrames(ids, all.map { it.id }.toSet(), floating)
+        // A dressed window that isn't floating any more (full screen from its own caption, the app or the system, not
+        // our button) loses the look: its crop at the floating size drew Chrome in a window-sized corner of the screen
+        // (the user, 2026-10-29: "I tried to full screen an Android app that was open in unfolded mode").
+        (TaskSurfaces.dressed() - all.map { it.id }.toSet()).forEach(TaskSurfaces::undress)
         if (framed) belowStatusBar(show)
         frame(show.filter { it.id !in sliding })
         // One PowOS look on every shown window's surface (rounded corners, shadow) at its current size.

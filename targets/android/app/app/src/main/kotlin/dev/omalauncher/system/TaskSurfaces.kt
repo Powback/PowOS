@@ -237,6 +237,9 @@ object TaskSurfaces {
      * Task [id] full screen: square corners, no shadow, no crop - and shown, if PowOS had hidden its leash (a window of
      * a page off the screen going full screen must not stay invisible) (FreeformTasks.setFullScreen).
      */
+    /** Tasks wearing PowOS's window look now ([dress]). */
+    fun dressed(): Set<Int> = sizes.keys.toSet()
+
     fun undress(id: Int) {
         bare.add(id)
         sizes.remove(id)
