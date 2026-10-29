@@ -312,7 +312,13 @@ function placeV3(p: Pull & { grid: HTMLElement }, r: number) {
   p.card?.style.setProperty("translate", `0 ${Math.max(0, t)}px`);
   p.card?.style.setProperty("clip-path", `inset(0px 0px ${Math.max(0, -t)}px 0px round calc(var(--radius) * 1.5))`);
   p.own?.style.setProperty("--cc-ext", `${Math.max(0, -t)}px`);
+  // Over-pulled (t > 0) the panel's own edge, grip and frost ride the band too: --cc-lift (shell.css) moves the panel
+  // down by t and its body back up by t, so the card and notifications land where they did and the edge follows.
+  panelOf(p)?.style.setProperty("--cc-lift", `${-Math.max(0, t)}px`);
 }
+
+/** The one panel the pull's card sits in (its --cc-lift moves the edge). */
+const panelOf = (p: Pull) => p.card?.closest<HTMLElement>(".notif-panel") ?? null;
 
 /** Following the finger: [dy] its travel, down to show (positive), up to fold (negative). */
 export function stretch(dy: number) {
@@ -343,6 +349,8 @@ function ease(p: Pull, r: number, on: boolean) {
   p.grid?.style.setProperty("transition", `--cc-k ${ms}ms ${ez}`);
   p.card?.style.setProperty("transition", `translate ${ms}ms ${ez}, clip-path ${ms}ms ${ez}`);
   p.own?.style.setProperty("transition", `translate ${ms}ms ${ez}, --cc-ext ${ms}ms ${ez}`);
+  // The panel keeps its own --q ease (shell.css [data-q]) beside the lift's.
+  panelOf(p)?.style.setProperty("transition", `--q 280ms cubic-bezier(0.2, 0.9, 0.3, 1), --cc-lift ${ms}ms ${ez}`);
   p.to = on;
   // The groups ride the same ease, from where the finger left them to the end (at the translate's duration).
   const k0 = peekK;
@@ -375,6 +383,8 @@ function clearInline(p: Pull) {
   }
   p.card?.style.removeProperty("clip-path");
   p.own?.style.removeProperty("--cc-ext");
+  panelOf(p)?.style.removeProperty("--cc-lift");
+  panelOf(p)?.style.removeProperty("transition");
   p.card?.classList.remove("cc-peek");
   p.grid?.classList.remove("cc-peek");
   cancelAnimationFrame(rideFrame);
