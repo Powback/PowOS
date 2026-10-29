@@ -53,16 +53,13 @@ object TaskSurfaces {
             hide(t, leash, !on)
             if (on) hiddenLeashes.remove(id) else hiddenLeashes.add(id)
             false
-        }.also { none -> if (ids.isNotEmpty()) Log.i(TAG, "${if (on) "shown" else "hidden (alpha 0)"} ${ids - none}, no leash $none") }
+        }.also { none -> if (ids.isNotEmpty()) Log.i(TAG, "${if (on) "shown" else "hidden"} ${ids - none}, no leash $none") }
 
     /**
-     * Task leash [leash] hidden ([off]) or shown in [t]: its visibility AND its alpha. HACK: WM Shell's window
-     * decoration re-shows a task's surface on every relayout (WindowDecoration.relayout: startT.show(taskSurface)),
-     * which runs on each task-info change - Chrome/Brave change theirs all the time (task description colour, caption
-     * appearance, focus), so their hidden leash came back at once and Chrome stayed on page 2 and the AI page, without
-     * its bar (the user, 2026-10-29); Calculator rarely changes it. The decor never touches alpha, and an alpha-0 layer
-     * takes no input, so alpha 0 keeps it out of sight and out of touch. Real fix: a WM Shell-side hook that hides the
-     * task (none for an app).
+     * Task leash [leash] hidden ([off]) or shown in [t]: the picture only, at once. Out of touch and kept hidden is
+     * WM's job - the caller also hides the task in WM (FreeformTasks.away, PageSlide's finish: WCT.setHidden), so its
+     * input windows are NOT_VISIBLE and WM Shell's decor, which re-shows a VISIBLE task's surface on each relayout,
+     * hides it instead. Shown sets alpha 1 too: builds before WM hiding left alpha 0 on hidden leashes.
      */
     fun hide(
         t: SurfaceControl.Transaction,
@@ -70,7 +67,7 @@ object TaskSurfaces {
         off: Boolean,
     ) {
         t.setVisibility(leash, !off)
-        t.setAlpha(leash, if (off) 0f else 1f)
+        if (!off) t.setAlpha(leash, 1f)
     }
 
     /** Tasks whose leash PowOS hid ([show] false): shown again before PowOS lets go of the leash ([dropAll], [undress]). */

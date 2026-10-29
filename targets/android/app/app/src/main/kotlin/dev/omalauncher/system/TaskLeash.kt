@@ -345,6 +345,24 @@ object TaskLeash {
         }
     }
 
+    /**
+     * WCT.setHidden(token, hidden) (hidden API; WM's own task hiding for organized tasks): WM force-hides the task -
+     * not visible, so InputDispatcher lists its windows NOT_VISIBLE and they take no touch (an alpha-0 leash still
+     * did: swipes where an off-page window sat went to it, the user 2026-10-29). WM Shell's decor hides the surface of
+     * a task that isn't visible, so nothing re-shows it. HACK: hidden API, reflected. Real fix: none for an app.
+     */
+    fun setHidden(
+        wct: Any,
+        token: Any,
+        hidden: Boolean,
+    ) {
+        try {
+            wct.javaClass.getMethod("setHidden", token.javaClass, Boolean::class.javaPrimitiveType).invoke(wct, token, hidden)
+        } catch (e: ReflectiveOperationException) {
+            android.util.Log.w("TaskLeash", "setHidden unavailable: $e")
+        }
+    }
+
     /** WCT.setDragResizing(token, on) (hidden). */
     fun setDragResizing(
         wct: Any,

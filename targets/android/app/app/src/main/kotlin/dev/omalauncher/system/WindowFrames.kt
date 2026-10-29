@@ -844,8 +844,8 @@ class WindowFrames(
         val noLeashHide = TaskSurfaces.show(t, hide, false)
         val noLeashBack = TaskSurfaces.show(t, returning, true)
         t.apply()
-        hide.forEach { FreeformTasks.focusable(context, it, false) }
-        returning.forEach { FreeformTasks.focusable(context, it, true) }
+        hide.forEach { FreeformTasks.away(context, it, true) }
+        returning.forEach { FreeformTasks.away(context, it, false) }
         // HACK: a window PowOS holds no leash of (none recorded yet, or dropped by a fold) leaves the old way, under
         // home, and comes back by a raise - that one may still come back blank. Real fix: a leash for every window task.
         noLeashHide.forEach { FreeformTasks.minimise(context, it) }
@@ -865,7 +865,7 @@ class WindowFrames(
         if (away.remove(id)) {
             // Its page's leash-hidden window: shown again (the raise below brings it to the top).
             android.view.SurfaceControl.Transaction().also { TaskSurfaces.show(it, listOf(id), true) }.apply()
-            FreeformTasks.focusable(context, id, true)
+            FreeformTasks.away(context, id, false)
             underHome.remove(id)
         }
         if (floatBack(id)) return true

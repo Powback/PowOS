@@ -192,9 +192,12 @@ object FreeformTasks {
         val on = window == null
         modeAndBounds(wct, token, if (on) UNDEFINED else FREEFORM, window ?: Rect())
         captionFor(wct, token, id, window)
-        // A window of a page off the screen was made not focusable (WindowFrames.showOnly): full screen it is the app
-        // in front again and takes the keys.
-        if (on) TaskLeash.setFocusable(wct, token, true)
+        // A window of a page off the screen was made hidden and not focusable (WindowFrames.showOnly, [away]): full
+        // screen it is the app in front again, shown and taking the keys.
+        if (on) {
+            TaskLeash.setHidden(wct, token, false)
+            TaskLeash.setFocusable(wct, token, true)
+        }
     }
 
     /**
@@ -275,6 +278,22 @@ object FreeformTasks {
     ): Boolean =
         transact(context, id) { wct, token -> TaskLeash.setFocusable(wct, token, on) }
             .onFailure { Log.w(TAG, "can't set task $id focusable=$on", it) }.isSuccess
+
+    /**
+     * Task [id]'s window on a page off the screen ([on]) or back on the shown one: hidden in WM and not focusable
+     * (TaskLeash.setHidden), so it takes no touch and no key focus - a swipe where it sat goes to the page - and
+     * shown and focusable again when its page shows. One WCT, the path [focusable] uses. HACK: hidden, reflected.
+     */
+    fun away(
+        context: Context,
+        id: Int,
+        on: Boolean,
+    ): Boolean =
+        transact(context, id) { wct, token ->
+            TaskLeash.setHidden(wct, token, on)
+            TaskLeash.setFocusable(wct, token, !on)
+        }.onFailure { Log.w(TAG, "can't set task $id away=$on", it) }.isSuccess
+            .also { Log.i(TAG, "task $id ${if (on) "hidden in WM (off page, no input)" else "shown in WM (its page)"}: ok=$it") }
 
     /**
      * Task [id]'s content drawn at [dpi] (0: the screen's own again): a real per-task density, the app lays itself out

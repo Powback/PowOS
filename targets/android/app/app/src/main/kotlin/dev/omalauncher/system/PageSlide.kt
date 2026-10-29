@@ -200,6 +200,8 @@ object PageSlide {
                     val tok = token(win.id) ?: continue
                     if (win.rel != 0) {
                         // Not focusable while it slides: raising it must not move focus off home (touch stream).
+                        // Shown in WM (hidden there at rest, off its page) in this same transition, so it slides in.
+                        TaskLeash.setHidden(wct, tok, false)
                         TaskLeash.setFocusable(wct, tok, false)
                         TaskLeash.reorder(wct, tok, true)
                     }
@@ -360,7 +362,11 @@ object PageSlide {
             TaskLeash.setBounds(wct, tok, w.bounds)
             // The [gone] ones stay above home, live and drawn, their leash hidden (s.hidden) and not focusable: a
             // reorder under home stopped the app and it came back blank until touched.
-            if (w.rel != 0 || w.id in gone) TaskLeash.setFocusable(wct, tok, w.id !in gone)
+            if (w.rel != 0 || w.id in gone) {
+                TaskLeash.setFocusable(wct, tok, w.id !in gone)
+                // At rest a window off the shown page is hidden in WM too: no touch lands on it (the user, 2026-10-29).
+                TaskLeash.setHidden(wct, tok, w.id in gone)
+            }
         }
     }
 
