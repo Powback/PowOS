@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Phone browser
+Comment=Opens links in the phone's own browser (Android's default, Chrome)
+Exec=powos-android-open %u
+Icon=web-browser
+NoDisplay=true
+MimeType=x-scheme-handler/http;x-scheme-handler/https;

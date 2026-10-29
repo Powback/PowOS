@@ -1,0 +1,25 @@
+#!/bin/sh
+# powos-android-open <url>   opens an http(s) link in the phone's default browser (Android's Chrome), not a Linux one.
+#
+# PowOS rooted mode: the URL goes to the PowOS app as a file in its run dir's open/ spool (/run/powos-app/open); the
+# app (OpenSpool in linux/OpenBridge.kt) opens it with ACTION_VIEW and deletes the file. Exit 0 only once the app took
+# it (the file is gone), 1 when the app didn't within 3 s (not running / older app), 2 on bad usage.
+# The session's xdg-open handler for http/https (powos-android-open.desktop, set by rooted/powos-deploy.sh) and the
+# agents' $BROWSER, so `xdg-open https://...` and PowOS AI's links land in the phone's Chrome.
+url=$1
+case $url in
+  http://* | https://*) ;;
+  *) echo "usage: powos-android-open <http(s) url>" >&2; exit 2 ;;
+esac
+dir=${XDG_RUNTIME_DIR:-/run/powos-app}/open
+[ -d "$dir" ] || { echo "powos-android-open: no $dir (is the PowOS app running?)" >&2; exit 1; }
+name=$(date +%s%N)-$$.url
+# Written whole under a dot name, then renamed: the app sees one complete URL (MOVED_TO).
+printf '%s\n' "$url" > "$dir/.$name" && mv -f "$dir/.$name" "$dir/$name" || { rm -f "$dir/.$name"; exit 1; }
+i=0
+while [ -e "$dir/$name" ]; do
+  i=$((i + 1))
+  [ $i -le 30 ] || { rm -f "$dir/$name"; echo "powos-android-open: the PowOS app didn't take $url" >&2; exit 1; }
+  sleep 0.1
+done
+exit 0

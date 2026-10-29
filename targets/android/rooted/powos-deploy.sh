@@ -37,6 +37,20 @@ install -m 644 $T/powos-plasma-bridge.desktop $R/etc/xdg/autostart/powos-plasma-
 # A PowOS app tapped on Android opens in its own Android task, like a phone app (the PowOS app runs this).
 install -m 755 $T/powos-open-task $R/usr/local/bin/powos-open-task
 install -m 644 $T/powos-android-tasks.desktop $R/etc/xdg/autostart/powos-android-tasks.desktop
+# Links open in the phone's own browser (Android's default, Chrome) - the PowOS app's OpenSpool: powos-android-open,
+# the user's http/https handler (their mimeapps.list, which outranks every other default) and every shell's $BROWSER.
+install -m 755 $T/powos-android-open $R/usr/local/bin/powos-android-open
+install -m 644 $T/powos-android-open.desktop $R/usr/share/applications/powos-android-open.desktop
+printf '%s\n' '# PowOS rooted mode (rooted/powos-deploy.sh): links open in the phone'"'"'s own browser.' \
+  'export BROWSER=powos-android-open' > $R/etc/profile.d/60-powos-browser.sh
+M=$R/home/powos/.config/mimeapps.list
+mkdir -p $R/home/powos/.config && touch $M
+grep -q '^\[Default Applications\]' $M || printf '[Default Applications]\n' >> $M
+for s in http https; do # the image's GNU sed (Android's toybox sed differs on `a`)
+  chroot $R sed -i "/^x-scheme-handler\/$s=/d; /^\[Default Applications\]/a x-scheme-handler/$s=powos-android-open.desktop" \
+    /home/powos/.config/mimeapps.list
+done
+chown $(stat -c %u /data/data/com.powos.app):$(stat -c %u /data/data/com.powos.app) $M
 # Linux apps the size of Android apps' windows: the output scale, set once by the session (powos-rooted-session) - and
 # here in the running session, once (it does nothing after its first run: the scale is the user's then).
 install -m 755 $T/powos-output-scale $R/usr/local/bin/powos-output-scale
@@ -100,7 +114,8 @@ rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-sess
   $T/powos-units.sh $T/powos-vpn-keep.sh \
   $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task \
   $T/powos-apps-watch $T/powos-apps-watch.desktop $T/powos-plasma-bridge $T/powos-plasma-bridge.desktop \
-  $T/powos-ime-bridge $T/powos-ime-bridge.desktop $T/powos-output-scale $T/android-nm
+  $T/powos-ime-bridge $T/powos-ime-bridge.desktop $T/powos-output-scale $T/android-nm \
+  $T/powos-android-open $T/powos-android-open.desktop
 
 # The user: powos, as on every PowOS (password powos, sudo through wheel). Its uid is the PowOS app's Android uid:
 # the app's run dir (display socket, phone state) is then the user's own, as XDG_RUNTIME_DIR should be. Re-run

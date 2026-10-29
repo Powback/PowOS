@@ -30,6 +30,8 @@ class App : Application() {
             PowosAiChat.startWake(this, File(filesDir, "run"))
             // Which agents run and what they do (the Agents view): the spool PowOS's agentsd writes, and the notification.
             AgentsSpool.start(this, File(filesDir, "run"))
+            // Links from the PowOS session (xdg-open, $BROWSER, powos-android-open) open in Android's default browser.
+            if (Application.getProcessName() == packageName) dev.omalauncher.linux.OpenSpool.start(this, File(filesDir, "run"))
             // The Plasma session's notifications in PowOS's shade and its clipboard both ways (powos-plasma-bridge);
             // the main process only (one reader of its spool; the engine's ":restart" runs this too).
             if (Application.getProcessName() == packageName) {

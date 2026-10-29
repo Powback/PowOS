@@ -104,6 +104,7 @@ deploy)
   done
   for f in powos-android-app powos-android-tasks powos-android-tasks.desktop powos-padd powos-focus-watch powos-apps-export \
     powos-apps-watch powos-apps-watch.desktop powos-plasma-bridge powos-plasma-bridge.desktop powos-open-task powos-ime-bridge powos-ime-bridge.desktop \
+    powos-android-open powos-android-open.desktop \
     powos-output-scale android-nm; do
     adb push -q "$HERE/../session/$f" "/data/local/tmp/$f"
   done

@@ -50,6 +50,8 @@ _manager_use_own_cli() {
     export POWOS_BIN="$bin/powos"
     PATH="$bin:$PATH"
     export PATH
+    # On the phone (rooted mode) links the manager opens go to the phone's own Chrome, not a Linux browser.
+    if command -v powos-android-open &>/dev/null; then export BROWSER=powos-android-open; fi
 }
 
 # powos ai manager [--safe] [--no-sandbox]  — start / resume the persistent manager session (--help: its flags).
