@@ -16,7 +16,7 @@ import java.io.File
 import kotlin.math.abs
 
 /**
- * The launcher overlay from the bottom corners, over an app or home (home draws no drawer): a swipe up from the bottom-LEFT corner brings
+ * The pull-up panels over any app (home has them in its own page): a swipe up from the bottom-LEFT corner brings
  * PowOS AI's panel, from the bottom-RIGHT corner the drawer ([PullHost], shell/ui/pull.tsx) - the panel following the
  * finger as on home. The middle of the bottom edge stays gesture navigation's ([NavGesture]: home, the switcher, the
  * quick switch), and so does every corner swipe that isn't clearly up.

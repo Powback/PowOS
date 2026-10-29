@@ -234,10 +234,6 @@ class ShellActivity : Activity() {
         val kind = intent.getStringExtra(EXTRA_HOME_PANEL) ?: return
         val ev = org.json.JSONObject().put("kind", kind)
         intent.getStringExtra(EXTRA_HOME_DRAFT)?.let { d -> ev.put("draft", d) }
-        // The launcher is the overlay over home (PullHost), as from every other way in; home's page asks it (state.ts
-        // openPanel) only when the overlay's host isn't up yet.
-        val pull = dev.omalauncher.system.PullHost.current
-        if (pull != null && pull.open(kind, org.json.JSONObject().putOpt("draft", ev.optString("draft").ifEmpty { null }))) return
         host.whenReady { host.bridge.emit("home.panel", ev) }
     }
 

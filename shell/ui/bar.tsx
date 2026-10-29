@@ -11,7 +11,7 @@ import type { Ref } from "preact";
 import { GrowField } from "./grow.tsx";
 import { searchResults, searchPending, openSearchResult } from "../search.ts";
 import { followOpenness } from "./gesture.ts";
-import { chatting, drawer, homePage, openPanel, pullKind, query } from "../state.ts";
+import { chatting, drawer, pullKind, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
 import { forget, hearing, listen, listeningFor, makeHold, release, speech, stopTap, type MicTarget } from "./dictation.ts";
@@ -136,12 +136,8 @@ const barMic: MicTarget = {
   started: () => openHere(),
 };
 
-/**
- * Up from the pill: the drawer, unless the pull-up panel is already up (PowOS AI's stays). On home: the launcher
- * overlay (state.ts openPanel), its own pill focused - home's pill is only its face.
- */
+/** Up from the pill: the drawer, unless the pull-up panel is already up (PowOS AI's stays). */
 function openHere() {
-  if (homePage) return openPanel("apps", { search: true });
   if (drawer.value === 0) pullKind.value = "apps";
   drawer.value = 1;
 }
@@ -182,7 +178,6 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
       }}
       onClick={() => {
         openHere();
-        if (homePage) return;
         // The search widget on the grid is the pill's face only: the typing is the foot's pill (home.tsx, parked
         // there while the widget is on the grid), which comes up with the drawer as the original did.
         (proxy ? footField() : input.current)?.focus();
@@ -204,13 +199,7 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
         }}
         // Logged (console -> logcat): desktop mode's launcher search lost its keyboard as the user typed (2026-10-28);
         // the blur's relatedTarget says who took the focus.
-        onFocus={(e: FocusEvent) => {
-          console.info(`search focus drawer=${drawer.value}`);
-          // Home's pill types nowhere: the overlay's pill does (openHere, from the click).
-          if (homePage) return void (e.target as HTMLElement | null)?.blur();
-          takeOver();
-          setFocused(true);
-        }}
+        onFocus={() => (console.info(`search focus drawer=${drawer.value}`), takeOver(), setFocused(true))}
         onBlur={(e: FocusEvent) => (logBlur(e, input.current), setFocused(false))}
         placeholder={s.listening ? "listening…" : (s.error ?? undefined)}
         aria-label={pullKind.value === "ai" && drawer.value > 0 ? "Ask PowOS AI" : "Search"}

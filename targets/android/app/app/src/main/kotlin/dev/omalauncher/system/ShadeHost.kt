@@ -104,9 +104,7 @@ class ShadeHost(
             flags()
             edgeLayoutChanged()
         }
-    /** The shade is down (or being pulled): read by the launcher overlay's home pull ([PullHost]). */
-    var shown = false
-        private set
+    private var shown = false
 
     /** The window is up as a heads-up banner's strip ([peek]), not the whole shade. */
     private var peeking = false
@@ -332,9 +330,8 @@ class ShadeHost(
         return home && WindowFrames.current?.covers(x, y) != true
     }
 
-    /** Something of PowOS's over home there that takes its own drags: a control, the AI overlay, the launcher. */
-    // The launcher overlay (PullHost) too: down on it is its own (it drags the drawer shut).
-    private fun overHome(x: Float, y: Float): Boolean = homeControlAt(x, y) || PetOverlay.assistShowing || PullHost.current?.shown == true
+    /** Something of PowOS's over home there that takes its own drags: a control, or the AI overlay. */
+    private fun overHome(x: Float, y: Float): Boolean = homeControlAt(x, y) || PetOverlay.assistShowing
 
     private fun homeControlAt(x: Float, y: Float): Boolean =
         homePullExcluded?.contains(x.toInt(), y.toInt()) == true || dev.omalauncher.shell.ControllerPad.covers(x, y)

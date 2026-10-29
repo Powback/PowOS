@@ -23,7 +23,7 @@ import { dropKeyboard } from "./keyboard.ts";
 import { overPull, overRelease } from "./overpull.ts";
 import { inWindow } from "./desktops.ts";
 import { ccEditing, ccExpanded, EXPAND_AT, expandedByDefault, FOLD_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
-import { carry, closeDrawer, dockDrag, drawer, editing, folder, homePage, menu, notif, onLibrary, openPanel, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
+import { carry, closeDrawer, dockDrag, drawer, editing, folder, menu, notif, onLibrary, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
 /** Page swipe (iOS rule): commit past this share of a page's width, or on a flick. 0.3 / 0.3 px/ms were too hard
@@ -66,8 +66,6 @@ export const notifDragging = computed(() => notifDrag.value != null);
  * gesture input): a swipe down on home asks for the shade (shade.open), not following the finger.
  */
 export const shadeTakesHome = signal(true);
-/** The host takes a swipe up on home itself for the launcher overlay (pull.homePull answered true), as [shadeTakesHome]. */
-export const launcherTakesHome = signal(false);
 /**
  * Something picked up by a long press and dragged (the control center's tiles, control.tsx useReorder): the finger is
  * its own - a pull, a close or a page swipe under way lets go of it.
@@ -548,21 +546,12 @@ function claimVertical(gs: Gesture, dy: number): Gesture["mode"] {
   if (gs.open) return claimOnOpen(gs, dy);
   // Editing home, up isn't the launcher (the sheet has the bottom), and down isn't the shade.
   if (editing.value) return null;
-  if (dy < 0) return claimUp(gs);
-  askShade();
-  return null;
-}
-
-/** Up on home: the launcher. */
-function claimUp(gs: Gesture): Gesture["mode"] {
-  // The pull-up corners (state.ts pullPanels): from the left half PowOS AI's panel, from the right the apps.
-  const kind = pullPanels.value === "on" && gs.x0 < innerWidth / 2 ? "ai" : "apps";
-  // Home's page: the launcher is the overlay (pull.tsx) - the host's own pull takes the finger; without it, asked.
-  if (!homePage) {
-    pullKind.value = kind;
+  if (dy < 0) {
+    // The pull-up corners (state.ts pullPanels): from the left half PowOS AI's panel, from the right the apps.
+    pullKind.value = pullPanels.value === "on" && gs.x0 < innerWidth / 2 ? "ai" : "apps";
     return "open";
   }
-  if (!launcherTakesHome.value) openPanel(kind);
+  askShade();
   return null;
 }
 

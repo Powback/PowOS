@@ -213,33 +213,8 @@ export const speechEngine = stored("speechEngine", "gpu");
 effect(() => void powos.store.set("speech", { engine: speechEngine.value }).catch(() => {}));
 /** What's typed in PowOS AI's page and not sent yet: kept across reloads (an update mustn't lose it). */
 export const aiDraft = stored("powai.draft");
-/**
- * Home's page: it has no launcher of its own. The launcher is one overlay, as the notification shade is (the user,
- * 2026-10-29: "the launcher is supposed to be an overlay just like the notifications"): the host's pull-up window
- * (PullHost.kt, page mode=pull) over whatever shows - home, an app, floating windows - for every way in.
- */
-export const homePage = !new URLSearchParams(location.search).get("mode");
-
-/** What the launcher overlay opens with (Bridge.pull.open): the search focused, the chat (openAssistant's), a draft. */
-export interface LauncherOpen {
-  search?: boolean;
-  chat?: boolean;
-  listen?: boolean;
-  autosend?: boolean;
-  context?: boolean;
-  text?: string;
-  draft?: string;
-}
-
-/**
- * Opens the pull-up panel with [kind] in it (the pet's long press, a bubble's "more": "ai"; the pill, the search
- * widget). On home: the launcher overlay over it (home never draws a drawer); in the overlay's own page: in place.
- */
-export function openPanel(kind: "apps" | "ai", how: LauncherOpen = {}) {
-  if (homePage) {
-    void powos.pull.open?.(kind, how).catch(() => {});
-    return;
-  }
+/** Opens the pull-up panel with [kind] in it (the pet's long press, a bubble's "more": "ai"). */
+export function openPanel(kind: "apps" | "ai") {
   pullKind.value = kind;
   drawer.value = 1;
 }
@@ -384,9 +359,9 @@ powos.on("system.back", () => back());
 powos.on("system.home", () => goHome());
 // An edge gesture's "app drawer" (EdgeGestures.kt): home with its pull-up panel up.
 powos.on("home.panel", ({ kind, draft }: { kind: "apps" | "ai"; draft?: string }) => {
-  // A share to the retired AI app's entry: its words wait in PowOS AI's field (the overlay's page reads the store).
+  // A share to the retired AI app's entry: its words wait in PowOS AI's field.
   if (draft) aiDraft.value = aiDraft.value ? `${aiDraft.value}\n${draft}` : draft;
-  openPanel(kind === "ai" ? "ai" : "apps", { draft });
+  openPanel(kind === "ai" ? "ai" : "apps");
 });
 
 export async function launch(key: string) {

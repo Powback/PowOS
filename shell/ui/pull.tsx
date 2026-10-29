@@ -1,9 +1,7 @@
 /**
- * The launcher: one overlay, as the notification shade is (index.html?mode=pull, PullHost.kt) - its own window over
- * whatever shows (home, an app, floating windows), for every way in: a swipe up on home's body or the pill (home hands
- * the host the finger, as its swipe down hands the shade its pull: Bridge.pull.homePull / open), the bottom corners
- * over an app or home (CornerPull.kt), an edge gesture's "app drawer". Home has no drawer of its own. The bottom-right
- * corner's swipe up brings the drawer, the bottom-left's PowOS AI's panel. The same panel as home's: the drawer's frame following the finger (--p), the drawer or PowOS AI's content in
+ * The pull-up panel over any app (index.html?mode=pull): home's pull-up corners (state.ts pullKind) in the overlay
+ * window the host puts over an app - the bottom-right corner's swipe up brings the drawer, the bottom-left's PowOS AI's
+ * panel. The same panel as home's: the drawer's frame following the finger (--p), the drawer or PowOS AI's content in
  * it, the pill at its foot. Only tinted: the host blurs the app behind the window (WindowBlur), as the shade's.
  *
  * The host (OverlayHost, the edge gestures) follows the finger: "pull.begin" {kind} as a corner swipe starts,
@@ -14,9 +12,7 @@
 import { useEffect } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { aiDraft, chatting, closeDrawer, dockPosition, drawer, pullKind, type LauncherOpen } from "../state.ts";
-import { AppMenu } from "./apps.tsx";
-import { openAssistant } from "./assistant.ts";
+import { chatting, closeDrawer, dockPosition, drawer, pullKind } from "../state.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
@@ -30,33 +26,16 @@ const host = () => (powos as unknown as { pull?: { closed?: () => Promise<void>;
 const kindOf = (k: unknown) => (k === "ai" ? "ai" : "apps");
 pullKind.value = kindOf(new URLSearchParams(location.search).get("kind"));
 
-/** How the opening one asked for it (home's pill: the search; the side button: the chat), done once it's open. */
-let asked: LauncherOpen = {};
-
-powos.on("pull.begin", (e: { kind?: string } & LauncherOpen) => {
+powos.on("pull.begin", (e: { kind?: string }) => {
   pullKind.value = kindOf(e?.kind);
-  asked = e ?? {};
-  if (asked.draft) aiDraft.value = aiDraft.value ? `${aiDraft.value}\n${asked.draft}` : asked.draft;
   drawerDrag.value = 0;
 });
 powos.on("pull.drag", (e: { p: number }) => (drawerDrag.value = Math.max(0, Math.min(1, e?.p ?? 0))));
 powos.on("pull.end", (e: { open: boolean }) => {
   drawerDrag.value = null;
-  if (!e?.open) return closeDrawer();
-  drawer.value = 1;
-  const how = asked;
-  asked = {};
-  if (how.chat) openAssistant(how);
-  else if (how.search) focusSearch();
+  if (e?.open) drawer.value = 1;
+  else closeDrawer();
 });
-
-/** The pill's field focused and the keyboard up (ShellBridge.overlayKeyboard makes this window the IME's target). */
-function focusSearch() {
-  requestAnimationFrame(() => {
-    document.querySelector<HTMLTextAreaElement>(".pull-screen > .bar textarea")?.focus();
-    void powos.keyboard.show();
-  });
-}
 powos.on("pull.hide", () => {
   drawerDrag.value = null;
   closeDrawer();
@@ -105,8 +84,6 @@ export function Pull() {
       </div>
       <Bar />
       {dockShown.value && <Dock />}
-      {/* A held app's menu ("add to home" puts it on home's page). */}
-      <AppMenu />
     </div>
   );
 }

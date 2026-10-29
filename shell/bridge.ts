@@ -249,8 +249,6 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     pull: {
       closed: () => call("pull.closed"),
       launched: () => call("pull.launched"),
-      open: (kind, how) => call<boolean>("pull.open", kind, how ?? {}),
-      homePull: (on, exclude, split) => call<boolean>("pull.homePull", on, exclude ?? null, split ?? false),
     },
     windows: {
       list: () => call<DesktopWindow[]>("windows.list"),
