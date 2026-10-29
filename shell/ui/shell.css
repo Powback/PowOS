@@ -2599,6 +2599,52 @@ html:root .notif-panel:has(> .panel-body.together) {
 html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 
 /*
+ * Unfolded (.panel-body.two), the sliders stand: brightness and volume two vertical bars side by side at the control
+ * center's right, as tall as the tiles beside them (the user, 2026-10-29 "move the sliders to the right side and make
+ * them vertical"). The tiles take the room to their left in five columns (same tile size). Up = more: the range input
+ * (invisible, the hit area) is turned -90deg inside its bar, so its min is at the bottom; the bar's own box - what the
+ * glass and the cascade read - is not rotated. Folded the sliders stay rows above the tiles.
+ */
+.panel-body.two .cc.v3 { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-auto-flow: row dense; column-gap: 10px; }
+.panel-body.two .cc.v3 > * { grid-column: 1 / -1; min-width: 0; }
+.panel-body.two .cc.v3 > .cc3-list { grid-column: 1; order: 1; }
+.panel-body.two .cc.v3 > .cc-sliders { grid-column: 2; order: 1; grid-template-columns: 40px 40px; gap: 8px; min-height: 150px; }
+.panel-body.two .cc.v3 > .cc3-launchers { order: 2; }
+.panel-body.two .cc.v3 .cc-slider {
+  height: auto;
+  border-radius: 20px;
+  container-type: size;
+  background: linear-gradient(0deg, color-mix(in srgb, var(--color-foreground) 22%, transparent) calc(var(--v) * 100%), var(--soft-fill) 0);
+}
+.panel-body.two .cc.v3 .cc-slider input[type="range"] {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100cqh;
+  height: 100cqw;
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+.panel-body.two .cc.v3 .cc-slider::after { left: 11px; top: auto; bottom: calc(var(--v) * (100% - 18px) + 6px); width: 18px; height: 4px; }
+.panel-body.two .cc.v3 .cc-slider-icon { left: 50%; translate: -50% 0; bottom: 8px; }
+.panel-body.two .cc.v3 .cc-slider-icon.tap { left: 50%; bottom: 4px; }
+.panel-body.two .cc.v3 .cc-auto { right: auto; left: 7px; top: 7px; }
+.panel-body.two .cc3-list .cc3-grid { --cc-cols: 5; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.panel-body.two .cc3-list:not(.whole) .cc3-grid:not(.cc-peek) > .cc3-cell:nth-child(6) { display: none; }
+.panel-body.two .cc3-grid.cc-peek > .cc3-cell:nth-child(n + 6) {
+  --cc-k: inherit;
+  --j: 0;
+  --f: clamp(0, calc(var(--cc-k) * var(--cc-rows, 1) - var(--j, 0)), 1);
+  opacity: var(--f);
+  translate: 0 calc((var(--f) - 1) * 12px);
+}
+.panel-body.two .cc3-grid.cc-peek > .cc3-cell:nth-child(n + 11) { --j: 1; }
+.panel-body.two .cc3-grid.cc-peek > .cc3-cell:nth-child(n + 16) { --j: 2; }
+.panel-body.two .cc3-grid.cc-peek > .cc3-cell:nth-child(n + 21) { --j: 3; }
+.panel-body.two .cc3-grid.cc-peek > .cc3-cell:nth-child(n + 26) { --j: 4; }
+.panel-body.two .cc3-grid.cc-peek > .cc3-cell:nth-child(n + 31) { --j: 5; }
+.panel-body.two .cc3-grid.cc-peek > .cc3-cell:nth-child(n + 36) { --j: 6; }
+
+/*
  * The widget detail sheet (ui/widgetsheet.tsx, apps/sheet.ts): a frosted popover anchored to a widget - the menus'
  * material (.tile.sheet.pop) - its scrim (no dim) taking the touches outside it. Its body scrolls only when it's longer.
  */
