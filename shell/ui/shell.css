@@ -2758,6 +2758,18 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
 .home.wide:is(.dock-left, .dock-right) > .bar .bar-pill { bottom: 2px; }
 .home.wide:is(.dock-left, .dock-right) { grid-template-rows: minmax(0, 1fr) 48px; }
 .home:is(.dock-left, .dock-right).open > .dock:not(.dock-tray) { pointer-events: none; }
+/* Over an app (pull.tsx) the launcher's dock sits where home's is (state.ts dockPosition, the same setting as .home's
+   dock-*): a side column held in place at its edge, the drawer clear of it; bottom stays under the pill (the user,
+   2026-10-29: "the launcher shows the dock on the bottom even though I set the dock to be on the right side"). Still
+   only on the app grid (pull.tsx dockShown: not in the chat, not with the keyboard). */
+.home.pull-screen:is(.dock-left, .dock-right) > .dock:not(.dock-tray) { transform: none; opacity: 1; pointer-events: auto; }
+.home.pull-screen.dock-left .drawer-clip { padding-left: var(--side-dock); }
+.home.pull-screen.dock-right .drawer-clip { padding-right: var(--side-dock); }
+.home.pull-screen:is(.dock-left, .dock-right):has(> .dock) .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
+/* Unfolded, the launcher's recent apps (the dock's recent page) sit at the app grid's spacing, not a sixth of the width
+   each: a couple more icons in the row, same icon size (the user, 2026-10-29: "the recent ones are too spread out"). */
+.home.pull-screen.unfolded.dock-bottom .dock .dock-recent { gap: var(--gap); }
+.home.pull-screen.unfolded.dock-bottom .dock .dock-recent .app { flex: 0 0 min(60px, var(--cell, 60px)); }
 
 /* Quick launchers (launchers.tsx): the toggles' chips holding an app's icon, in a row of their own under the toggles. */
 .cc3-launchers { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--soft-fill); }

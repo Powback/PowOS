@@ -12,7 +12,8 @@
 import { useEffect } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { chatting, closeDrawer, drawer, pullKind } from "../state.ts";
+import { chatting, closeDrawer, dockPosition, drawer, pullKind } from "../state.ts";
+import { wideHome } from "../hosts/wide.ts";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
 import { Dock } from "./home.tsx";
@@ -64,7 +65,7 @@ export function Pull() {
     return () => clearTimeout(t);
   }, [open]);
   return (
-    <div class={`home pull-screen ${open ? "open" : ""} ${pullDragging.value ? "dragging" : ""}`} {...homeGestures()}>
+    <div class={`home pull-screen dock-${dockPosition.value} ${wideHome.value ? "unfolded" : ""} ${open ? "open" : ""} ${pullDragging.value ? "dragging" : ""}`} {...homeGestures()}>
       <div class="stage">
         <div class="launcher-frame tile" data-p ref={followOpenness} />
         <div class="launcher-clip" data-p ref={followOpenness}>
