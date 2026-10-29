@@ -21,7 +21,6 @@ object Panels {
         if (kind == null && bridge !== from) return
         this.kind = kind
         bridge = if (kind == null) null else from
-        if (kind == null) HomePull.closed()
     }
 
     /** The page that has a panel open and can be seen (home started), else null. */
