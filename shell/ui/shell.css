@@ -163,7 +163,7 @@
 /* Over an app (pull.tsx) the foot is home's: the pill in the flow right above the dock, the dock at the screen's foot, both
    held in place (no --p slide, no shrinking) - the dock was drawn over the pill (the user, 2026-10-28). With the dock
    hidden (chat, keyboard, PowOS AI) it isn't rendered and the pill takes the foot. */
-.home.pull-screen > :is(.bar, .dock) { flex: none; transform: none; translate: none; margin: 0; }
+.home.pull-screen > :is(.bar, .dock) { flex: none; translate: none; margin: 0; }
 .home.pull-screen > .bar { order: 1; height: 48px; }
 .home.pull-screen > .dock { order: 2; height: var(--strip-height); opacity: 1; }
 /* The dock stays while the launcher is open (bottom dock, search bar above it): the pill and dock don't move, the drawer's
@@ -2793,7 +2793,7 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
    dock-*): a side column held in place at its edge, the drawer clear of it; bottom stays under the pill (the user,
    2026-10-29: "the launcher shows the dock on the bottom even though I set the dock to be on the right side"). Still
    only on the app grid (pull.tsx dockShown: not in the chat, not with the keyboard). */
-.home.pull-screen:is(.dock-left, .dock-right) > .dock:not(.dock-tray) { transform: none; opacity: 1; pointer-events: auto; }
+.home.pull-screen:is(.dock-left, .dock-right) > .dock:not(.dock-tray) { pointer-events: auto; }
 .home.pull-screen.dock-left .drawer-clip { padding-left: var(--side-dock); }
 .home.pull-screen.dock-right .drawer-clip { padding-right: var(--side-dock); }
 .home.pull-screen:is(.dock-left, .dock-right):has(> .dock) .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
@@ -2801,6 +2801,18 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
    each: a couple more icons in the row, same icon size (the user, 2026-10-29: "the recent ones are too spread out"). */
 .home.pull-screen.unfolded.dock-bottom .dock .dock-recent { gap: var(--gap); }
 .home.pull-screen.unfolded.dock-bottom .dock .dock-recent .app { flex: 0 0 min(60px, var(--cell, 60px)); }
+/* The launcher's foot leaves with it: the pill and the dock (bottom, side column or wide foot) follow the panel's --p as
+   the drawer and its frost do (.launcher above: the same rise and fade, one value, the finger's or the close's) - they
+   stood still and then vanished with the window (the user, 2026-10-29: "the launcher panel animates out fine but the
+   search bar and dock doesnt"). */
+.home.pull-screen > :is(.bar, .dock),
+.home.pull-screen:is(.dock-left, .dock-right) > .dock:not(.dock-tray),
+.home.wide.pull-screen:not(.dock-left):not(.dock-right):not(:has(.ai-panel.wide)) > .dock {
+  --fade: calc(1 - min(1, var(--p) * 1.25));
+  transform: translateY(calc((1 - var(--p)) * var(--rise)));
+  opacity: calc(1 - var(--fade) * var(--fade) * var(--fade));
+  will-change: transform, opacity;
+}
 
 /* Quick launchers (launchers.tsx): the toggles' chips holding an app's icon, in a row of their own under the toggles. */
 .cc3-launchers { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--soft-fill); }

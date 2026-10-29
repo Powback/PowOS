@@ -92,11 +92,10 @@ async function dockPositionCheck(position, part = "all") {
   }
   // In the page: page.evaluate serialises this function only, so the launcher check lives inside it.
   async function dockLauncherCheck(position) {    const S = await importShim("./state.ts");    S.drawer.value = 1;    await new Promise(r => setTimeout(r, 450));    const clip = document.querySelector(".launcher-clip").getBoundingClientRect();    const bar = document.querySelector(".home > .bar").getBoundingClientRect();    const fails = [];    if (clip.left > 20 || clip.right < innerWidth - 20) fails.push("launcher loses width beside dock");    if (bar.bottom > innerHeight + 1 || bar.top < 0) fails.push(`launcher search is off screen: top=${bar.top}, bottom=${bar.bottom}, viewport=${innerHeight}`);    if (bar.bottom < innerHeight - 60) fails.push(`${position} dock leaves launcher search above the bottom edge`);    return fails;  }
+  async function launcherDockCheck(dock, position) {    const side = position !== "bottom";    const fails = side ? await dockLauncherCheck(position) : await openedFor(450);    const r = dock.getBoundingClientRect();    fails.push(...(side ? sideColumnFails(r, position) : r.width < r.height ? ["launcher's bottom dock is vertical"] : []));    const o = getComputedStyle(dock).opacity;    if (o !== "1") fails.push(`launcher's dock not shown open: opacity ${o}`);    return fails;  }  async function openedFor(ms) { (await importShim("./state.ts")).drawer.value = 1; await new Promise(r => setTimeout(r, ms)); return []; }  function sideColumnFails(r, position) {    const fails = [];    const pill = document.querySelector(".home > .bar").getBoundingClientRect();    if (r.width > 80 || r.height < 200 || r.top < 0 || r.bottom > pill.top + 1) fails.push("launcher's side dock is not a column above the pill");    const cells = [...document.querySelectorAll(".drawer-clip .app")].map(n => Object.assign(n.getBoundingClientRect().toJSON(), { what: `${n.parentElement?.className}/${n.textContent}` })).filter(c => c.width > 0 && c.left >= 0 && c.right <= innerWidth);    const under = cells.find(c => position === "left" ? c.left < r.right - 1 : c.right > r.left + 1);    if (under) fails.push(`launcher's list runs under its side dock (${under.what} at ${Math.round(under.left)}..${Math.round(under.right)}, dock ${Math.round(r.left)}..${Math.round(r.right)})`);    return fails;  }
   setPosition();
-  await new Promise(r => setTimeout(r, 250));
-  const dock = document.querySelector(".home > .dock");
-  // The launcher overlay shows home's dock only at the bottom: a side dock would cover its list (pull.tsx dockShown).
-  if (!dock) return part === "launcher" && position !== "bottom" ? [...fails, ...(await dockLauncherCheck(position))] : [...fails, `${part}: no dock`];
+  await new Promise(r => setTimeout(r, 250)); const dock = document.querySelector(".home > .dock");
+  if (!dock) return [...fails, `${part}: no dock`]; if (part === "launcher") return [...fails, ...(await launcherDockCheck(dock, position))];
   const rect = dock.getBoundingClientRect();
   const cells = [...dock.querySelectorAll(".dock-page:first-child > .app")].map(n => n.getBoundingClientRect());
   if (cells.length < 4) fails.push("missing pinned icons");
@@ -139,7 +138,6 @@ async function dockPositionCheck(position, part = "all") {
   return fails;
 }
 
-/** The launcher overlay with a side dock (pull.tsx shows home's dock at the bottom only): full width, its pill at the foot. */
 /** Chrome controls stay within a narrow window and dispatch only their scoped actions. */
 async function windowChromeCheck() {
   const B = (await importShim("./bridge.ts")).powos;
@@ -953,6 +951,8 @@ async function launcherKeyboardSide(page, view) {
     S.dockTry.value = "right";
     W.footBelow.value = "1";
     await window.__gw.settled(() => document.querySelector(".home.dock-right.pill-below > .bar textarea"));
+    // The overlay is only up open: its pill leaves with the panel (shell.css .pull-screen > .bar follows --p).
+    if (document.querySelector(".pull-screen")) { S.drawer.value = 1; await new Promise((ok) => setTimeout(ok, 400)); }
     await window.__gw.frames(4);
     const home = document.querySelector(".home");
     const field = document.querySelector(".home > .bar textarea");
