@@ -58,7 +58,9 @@ if [ "${1:-}" = "--wait" ]; then
       # A game running is the user playing, touched or not (23:51, 2026-10-23: a check closed My Friend Pedro mid-game
       # because 2 min without a touch counted as free). Checks wait until it's closed; "test now" (go) still overrides.
       # [r]: the pattern must not match this loop's own command line (it did, so nothing was ever free, 00:3x 2026-10-24).
-      pgrep -f '[r]eaper SteamLaunch' >/dev/null 2>&1 && { on=0; sleep 5; continue; }
+      # Screen on only: with the screen off nobody is playing, and an APK install keeps the Linux session and its game
+      # (2026-10-29: Broforce left running in the background held every install back for an hour, screen dozing).
+      [ \$w = Awake ] && pgrep -f '[r]eaper SteamLaunch' >/dev/null 2>&1 && { on=0; sleep 5; continue; }
       [ "$only" = 1 ] || case \$w in Asleep|Dozing) [ "$awake" = 1 ] || { echo idle=\$t screen=\$w; exit 0; } ;; Awake) [ \$t -ge $need ] && [ \$a -ge $need ] && { echo idle=\$t screen=\$w; exit 0; } ;; esac
       sleep 5
     done; echo timeout" 2>/dev/null | tr -d '\r' | tail -1)
