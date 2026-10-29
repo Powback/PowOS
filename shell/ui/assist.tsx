@@ -20,7 +20,7 @@
  * under it stays usable (only the bar takes touches) - and each question takes the last moments that changed as one
  * filmstrip image.
  */
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useMemo, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { stored } from "../state.ts";
@@ -299,7 +299,9 @@ function swipeAway(panel: { current: HTMLDivElement | null }) {
 
 export function Assist() {
   const panel = useRef<HTMLDivElement>(null);
-  const swipe = swipeAway(panel);
+  // One gesture tracker for the page's life: made per render, a re-render mid-drag (the screen or live state arriving
+  // after a summoning) swapped in fresh handlers whose `on` was false - the release was dropped, the panel stayed.
+  const swipe = useMemo(() => swipeAway(panel), []);
   // Over an app, asks carry the screen and put the chat in the app switcher. Registered on mount, never at import:
   // app.tsx imports this module in every mode, and home's sends then started PowosAiActivity (keepInRecents) - its
   // window covered home for a moment, a black flash on every send from the AI page.
