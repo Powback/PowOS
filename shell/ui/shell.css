@@ -1401,11 +1401,22 @@ input.folder-title:focus { background: var(--soft-fill); }
 .panel-body.two[data-from="control"] > .notif-col, .panel-body.two[data-from="notifications"] > .cc-col { --i0: 3; }
 /*
  * Unfolded, the control center sits vertically centred in its column (the user, 2026-10-29 "make the control center
- * centered vertically"): auto block margins in the column's flex - the column itself (its top level with the
- * notifications', its own scroll) unchanged, and a card taller than the column (expanded) falls back to its top and
- * scrolls, as auto margins never push content above the scroll start. Folded: unchanged.
+ * centered vertically") - but its header row (date, edit, settings) stays at the column's top, level with the
+ * notifications' "N notifications" (the user, 2026-10-29 "the notification center title can still be on the top
+ * where it has the date and the edit icons"). The card fills the column (at least: grown taller when expanded, the
+ * column scrolls); auto margins on what follows the header (first and last child) centre the rest in the space left
+ * under it, and a card taller than the column falls back to its top, as auto margins never go negative. Folded:
+ * unchanged.
  */
-.panel-body.two > .cc-col > .cc { margin-block: auto; }
+.panel-body.two > .cc-col > .cc { flex: 1 0 auto; }
+.panel-body.two > .cc-col > .cc:not(.v3) > .notif-bar + * { margin-top: auto; }
+.panel-body.two > .cc-col > .cc:not(.v3) > :last-child:not(.notif-bar) { margin-bottom: auto; }
+/* v3 is a grid unfolded (below): every child on an explicit row, an empty 1fr row above and below the body centres it. */
+.panel-body.two > .cc-col > .cc.v3 { grid-template-rows: auto 1fr auto auto auto 1fr; padding-top: 0; }
+.panel-body.two > .cc-col > .cc.v3 > .notif-bar { grid-row: 1; }
+.panel-body.two > .cc-col > .cc.v3 > .cc-media { grid-row: 3; }
+.panel-body.two > .cc-col > .cc.v3 > :is(.cc3-list, .cc-sliders) { grid-row: 4; }
+.panel-body.two > .cc-col > .cc.v3 > .cc3-launchers { grid-row: 5; }
 
 /*
  * PowOS AI's page (powai.tsx), left of home: it and home slide as one (gesture.ts applyTrack sets both transforms) -
