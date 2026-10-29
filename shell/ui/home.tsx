@@ -12,8 +12,7 @@ import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
-import { Drawer } from "./drawer.tsx";
-import { drawerDragging, drawerOpen, followOpenness, homeGestures, shadeTakesHome } from "./gesture.ts";
+import { drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, shadeTakesHome } from "./gesture.ts";
 import { Carried, Folders, Pages, startCarry } from "./grid.tsx";
 import { carriedApp, shownLess } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
@@ -24,14 +23,14 @@ import { GlassesScreen } from "./glasses.tsx";
 import { AgentsScreen } from "./agents.tsx";
 import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
-import { AiView, PowAiPage } from "./powai.tsx";
+import { PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
 import { Recents } from "./recents.tsx";
 import { appOf, dockTap } from "./desktops.ts";
 import { overWindows } from "./panellift.ts";
 import { footBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
-import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pullKind, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
+import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
 import { remoteOpen } from "../remote.ts";
@@ -71,6 +70,7 @@ function followDock(el: HTMLElement | null) {
 if (!new URLSearchParams(location.search).get("mode")) effect(() => {
   const on = homePullOk.value;
   const mainPage = on && page.value === 0;
+  pullPanels.value; // Re-report when the pull-up corners change.
   dockPosition.value; // Re-report when placement changes, even if its size stays the same.
   const dockNode = dockElement.value;
   const report = () => {
@@ -79,6 +79,12 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
     powos.shade.homePull(on, exclude, mainPage).then(
       (taken) => (shadeTakesHome.value = !!taken),
       () => (shadeTakesHome.value = false),
+    );
+    // Up is the launcher overlay's, the same way (PullHost.kt): it follows the finger over home.
+    const split = pullPanels.value === "on";
+    (powos.pull.homePull?.(on, exclude, split) ?? Promise.resolve(false)).then(
+      (taken) => (launcherTakesHome.value = !!taken),
+      () => (launcherTakesHome.value = false),
     );
   };
   const frame = requestAnimationFrame(report);
@@ -375,23 +381,10 @@ export function Home() {
             <div class="home-content" data-p ref={followOpenness}>
               <Pages />
             </div>
-            <div class="launcher-frame tile" data-p ref={followOpenness} />
-            <div class="launcher-clip" data-p ref={followOpenness}>
-              <div class="launcher" data-p ref={followOpenness}>
-                <div class="launcher-inner">
-                  <div class="drawer-clip">
-                    {pullKind.value === "ai" ? (
-                      <AiView shown={drawerOpen.value} cls="ai-panel" pill={false} />
-                    ) : (
-                      <Drawer />
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+            {/* No launcher here: it's the overlay over home (pull.tsx), as the shade is - one for every way in. */}
           </div>
-          {/* Always the foot's pill: the drawer's search. With the search widget on the grid it's parked (shell.css
-              .search-parked): unseen at rest, up with the drawer, which the widget opens. */}
+          {/* Always the foot's pill: the launcher's face - a tap opens the overlay with its search (bar.tsx). With the
+              search widget on the grid it's parked (shell.css .search-parked). */}
           <Bar />
           <Dock />
           {wideHome.value && <DockTray />}

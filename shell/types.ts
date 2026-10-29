@@ -744,6 +744,17 @@ export interface Bridge {
   pull: {
     closed(): Promise<void>;
     launched(): Promise<void>;
+    /**
+     * Home's page: the launcher overlay up over home (the pill, an "app drawer" entry, the side button's chat):
+     * "pull.begin" { kind, ...how } then "pull.end" { open: true } to the overlay's page. An older host has none.
+     */
+    open?(kind: "apps" | "ai", how?: object): Promise<boolean>;
+    /**
+     * Home's page: a swipe up on home is the launcher's now ([on]: nothing open over home's pages), as [shade.homePull]
+     * is a swipe down's; [split]: from home's left half it brings PowOS AI's panel (state.ts pullPanels). Resolves true
+     * when the host takes that finger itself (its gesture input); false - home asks [open] on a swipe up instead.
+     */
+    homePull?(on: boolean, exclude?: { left: number; top: number; width: number; height: number }, split?: boolean): Promise<boolean>;
   };
   /**
    * The desktop's windows (PowOS's desktop host only; the phone rejects these): every window, ungrouped, in the

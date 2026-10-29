@@ -15,6 +15,7 @@ import com.android.systemui.shared.recents.ILauncherProxy
 import com.android.systemui.shared.recents.ISystemUiProxy
 import dev.omalauncher.system.gesture.CornerPull
 import dev.omalauncher.system.gesture.EdgeGestures
+import dev.omalauncher.system.gesture.FirstToTake
 import dev.omalauncher.system.gesture.GestureMonitor
 import dev.omalauncher.system.gesture.NavGesture
 import dev.omalauncher.system.gesture.RecentsTransition
@@ -167,7 +168,9 @@ class PowosRecentsService : Service() {
             }
         // The bottom corners' pull-up panels wrap gesture navigation's swipes (both start in the bar's strip). The shade's
         // pull last: on home it follows any finger down on home's body, so the bar's strip and the edge handles come first.
-        val consumers = listOfNotNull(CornerPull(this, n), e, shade?.pull)
+        // With it the launcher overlay's lift on home's body (up; the shade's is down): both follow, the first to take wins.
+        val homeBody = listOfNotNull(shade?.pull, pull?.homeLift)
+        val consumers = listOfNotNull(CornerPull(this, n), e, homeBody.singleOrNull() ?: homeBody.takeIf { it.isNotEmpty() }?.let { FirstToTake(*it.toTypedArray()) })
         gestures = GestureMonitor.start(this, Display.DEFAULT_DISPLAY, consumers)
         // The handles are drawn only where the gestures can be taken.
         if (gestures != null) e.start()

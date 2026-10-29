@@ -320,6 +320,9 @@ class ShellBridge(
             "shade.open" -> dev.omalauncher.system.ShadeHost.current?.let { s -> main.post { s.openPanel(control = false) } } ?: notifications(true)
             "overlay.closed", "pull.closed" -> overlay?.closed()
             "pull.launched" -> overlay?.launched()
+            // Home's page: the launcher overlay up over home (the pill, the side button's chat) / its lift on home's body.
+            "pull.open" -> launcherOpen(a.getString(0), a.optJSONObject(1))
+            "pull.homePull" -> launcherHomePull(a.getBoolean(0), a.optJSONObject(1), a.optBoolean(2, false))
             // Which shell panel is open (system/Panels.kt): the bottom-edge home gesture closes it.
             "panels.open" -> dev.omalauncher.system.Panels.set(a.getString(0), this)
             "panels.closed" -> dev.omalauncher.system.Panels.set(null, this)
@@ -482,6 +485,26 @@ class ShellBridge(
             )
         }
         return list
+    }
+
+    /** The launcher overlay up at once ([dev.omalauncher.system.PullHost.open]); false: no overlay host (no recents service). */
+    private fun launcherOpen(kind: String, how: JSONObject?): Boolean {
+        val pull = dev.omalauncher.system.PullHost.current ?: return false
+        main.post { pull.open(kind, how) }
+        return true
+    }
+
+    /** Home's page: whether a swipe up on it is the launcher overlay's now (as [homePull] is the shade's swipe down). */
+    private fun launcherHomePull(on: Boolean, exclude: JSONObject?, split: Boolean): Boolean {
+        val pull = dev.omalauncher.system.PullHost.current ?: return false
+        val shade = dev.omalauncher.system.ShadeHost.current
+        main.post {
+            pull.homePullExcluded = exclude?.let { screenRect(it) }
+            pull.homeSplit = split
+            pull.homePull = on
+        }
+        // Taken on the gesture input, as the shade's: only while that runs.
+        return shade?.monitored == true
     }
 
     private fun homePull(on: Boolean, exclude: JSONObject?, mainPage: Boolean): Boolean {
