@@ -320,12 +320,18 @@ class ShadeHost(
         x: Float,
         y: Float,
     ): Boolean {
-        if (homeControlAt(x, y)) return false
+        // Never under the PowOS AI overlay: it sits over home and drags its sheet down to close it; the shade took that
+        // swipe from it (2026-10-29, `dumpsys input`: powos-gestures stealing from VoiceInteractionSession, then the
+        // shade opened). The status bar still pulls the shade over it.
+        if (overHome(x, y)) return false
         val home = homePull && Switcher.onHome && Switcher.homeVisible && !Switcher.open && host != null && !shown && !keyguard && !lent
         // Never inside a floating window: home is "on" under every window, and the gesture input sees all touches - a
         // scroll down in Chrome or Kate pulled the shade (the user, 2026-10-23).
         return home && WindowFrames.current?.covers(x, y) != true
     }
+
+    /** Something of PowOS's over home there that takes its own drags: a control, or the AI overlay. */
+    private fun overHome(x: Float, y: Float): Boolean = homeControlAt(x, y) || PetOverlay.assistShowing
 
     private fun homeControlAt(x: Float, y: Float): Boolean =
         homePullExcluded?.contains(x.toInt(), y.toInt()) == true || dev.omalauncher.shell.ControllerPad.covers(x, y)
