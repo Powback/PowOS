@@ -251,7 +251,7 @@ object TaskLeash {
             for ((id, leash) in leashes) last[id]?.let { place(st, leash, it) }
             // A window whose page was off the screen has its leash hidden (TaskSurfaces.show): it shows in this same
             // transaction as its slide/move. WM Shell only shows OPEN/TO_FRONT leashes; a CHANGE one stays hidden.
-            for ((id, leash) in leashes) if (leash.isValid && id !in hidden) st.setVisibility(leash, true)
+            for ((id, leash) in leashes) if (leash.isValid && id !in hidden) TaskSurfaces.hide(st, leash, false)
             return st
         }
 
@@ -273,7 +273,7 @@ object TaskLeash {
             val cb = finishCallback
             val sct = SurfaceControl.Transaction()
             for ((id, leash) in leashes) if (leash.isValid) last[id]?.let { place(sct, leash, it) }
-            for ((id, leash) in leashes) if (leash.isValid && id in hidden) sct.setVisibility(leash, false)
+            for ((id, leash) in leashes) if (leash.isValid && id in hidden) TaskSurfaces.hide(sct, leash, true)
             val wct = runCatching { endTransaction() }.onFailure { Log.w(TAG, "$what: no end transaction", it) }.getOrNull()
             if (cb != null) runCatching { finished(cb, wct, sct) }.onFailure { Log.w(TAG, "$what: can't finish the transition", it) }
             unregister()
