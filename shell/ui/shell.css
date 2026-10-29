@@ -1399,6 +1399,13 @@ input.folder-title:focus { background: var(--soft-fill); }
 .panel-body.together.two { flex-direction: row; gap: var(--edge); }
 .panel-body.two > .notif-list { flex: 1 1 0; min-width: 0; }
 .panel-body.two[data-from="control"] > .notif-col, .panel-body.two[data-from="notifications"] > .cc-col { --i0: 3; }
+/*
+ * Unfolded, the control center sits vertically centred in its column (the user, 2026-10-29 "make the control center
+ * centered vertically"): auto block margins in the column's flex - the column itself (its top level with the
+ * notifications', its own scroll) unchanged, and a card taller than the column (expanded) falls back to its top and
+ * scrolls, as auto margins never push content above the scroll start. Folded: unchanged.
+ */
+.panel-body.two > .cc-col > .cc { margin-block: auto; }
 
 /*
  * PowOS AI's page (powai.tsx), left of home: it and home slide as one (gesture.ts applyTrack sets both transforms) -
