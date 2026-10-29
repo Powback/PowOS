@@ -214,7 +214,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       access: () => call("notifications.access"),
       action: (key, index, text) => call("notifications.action", key, index, text ?? null),
     },
-    lock: { unlock: () => call("lock.unlock") },
+    lock: { unlock: () => call("lock.unlock"), mark: (step) => call("lock.mark", step) },
     pad: {
       state: () => call<boolean>("pad.state"),
       overlay: (on) => call<boolean>("pad.overlay", on),
@@ -688,7 +688,7 @@ function mock(): Bridge {
     },
     remote: mockRemote(events),
     glasses: mockGlasses(events),
-    lock: { unlock: async () => console.log("[mock] unlock") },
+    lock: { unlock: async () => console.log("[mock] unlock"), mark: async () => {} },
     pad: (() => {
       let on = false;
       return {

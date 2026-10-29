@@ -178,6 +178,7 @@ class ShellActivity : Activity() {
         super.onResume()
         dockLog("resumed")
         inFront = true
+        UnlockLog.homeResumed(host.web)
         // The page may have missed a fold while hidden: the display state again, whatever it was.
         host.bridge.pushDisplay(force = true)
         runtime.wm.focus(null)

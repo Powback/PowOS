@@ -661,6 +661,8 @@ export interface Bridge {
   /** The lock screen's face (index.html?mode=lock): unlocking is Android's (its PIN pad, the fingerprint). */
   lock: {
     unlock(): Promise<void>;
+    /** One step of an unlock, logged natively under PowosUnlock with the phone's uptime (LockFace.kt UnlockLog). */
+    mark(step: string): Promise<void>;
   };
   /**
    * The control center (and the notification panel's row): every tile the phone's own control center has, switched

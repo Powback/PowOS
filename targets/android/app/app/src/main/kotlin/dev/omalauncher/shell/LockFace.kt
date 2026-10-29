@@ -10,6 +10,8 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -37,6 +39,7 @@ object LockFace {
                     c: Context,
                     intent: Intent,
                 ) {
+                    UnlockLog.mark("broadcast ${intent.action?.substringAfterLast('.')}")
                     when (intent.action) {
                         // Up as the screen goes off, so it's there the moment the screen comes on - started on screen-on,
                         // Android's own lock screen showed first, the face a moment later: two lock screens. Not locked
@@ -91,10 +94,19 @@ class PowosLockActivity : Activity() {
         h.bridge.lock =
             object : LockSlot {
                 override fun unlock() {
+                    UnlockLog.mark("dismiss requested")
+                    UnlockLog.awaitHome = true
                     getSystemService(KeyguardManager::class.java).requestDismissKeyguard(
                         this@PowosLockActivity,
                         object : KeyguardManager.KeyguardDismissCallback() {
-                            override fun onDismissSucceeded() = finish()
+                            override fun onDismissSucceeded() {
+                                UnlockLog.mark("keyguard dismissed (face finishing)")
+                                finish()
+                            }
+
+                            override fun onDismissCancelled() = UnlockLog.mark("dismiss cancelled")
+
+                            override fun onDismissError() = UnlockLog.mark("dismiss error")
                         },
                     )
                 }
@@ -137,6 +149,7 @@ class PowosLockActivity : Activity() {
     override fun onResume() {
         super.onResume()
         val on = getSystemService(android.os.PowerManager::class.java).isInteractive
+        UnlockLog.mark("face resumed (screen ${if (on) "on" else "off"})")
         if (on && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
             finish()
             return
@@ -158,6 +171,7 @@ class PowosLockActivity : Activity() {
     override fun onBackPressed() {}
 
     override fun onDestroy() {
+        UnlockLog.mark("face gone")
         if (current === this) current = null
         val h = LockFace.host(this)
         (h.web.parent as? ViewGroup)?.removeView(h.web)
@@ -167,6 +181,38 @@ class PowosLockActivity : Activity() {
 
     companion object {
         var current: PowosLockActivity? = null
+    }
+}
+
+/**
+ * Every step from the lock face to home, under one logcat tag with the phone's uptime (ms) and the time since the
+ * screen came on: `adb logcat -d -s PowosUnlock`. Native: broadcast SCREEN_ON/USER_PRESENT, face resumed, dismiss
+ * requested, keyguard dismissed, face gone, home resumed, home first frame; the page's (lock.tsx, through lock.mark):
+ * ready, swipe start, swipe commit/fell back.
+ */
+object UnlockLog {
+    private var screenOn = 0L
+
+    /** A dismiss was asked: home's next resume and first frame are the unlock's last steps. */
+    @Volatile var awaitHome = false
+
+    fun mark(step: String) {
+        val now = SystemClock.uptimeMillis()
+        if (step == "broadcast SCREEN_ON") screenOn = now
+        Log.i("PowosUnlock", "$step t=$now${if (screenOn > 0) " +${now - screenOn}ms since screen on" else ""}")
+    }
+
+    /** Home resumed (ShellActivity): after an unlock, when it is resumed and when its page has drawn its next frame. */
+    fun homeResumed(web: android.webkit.WebView) {
+        if (!awaitHome) return
+        awaitHome = false
+        mark("home resumed")
+        web.postVisualStateCallback(
+            0,
+            object : android.webkit.WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) = mark("home first frame")
+            },
+        )
     }
 }
 

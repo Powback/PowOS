@@ -5,8 +5,12 @@
  *
  * The swipe follows the finger as home's drawer and notification panel do (gesture.ts): how far the face is lifted,
  * 0..1, goes straight onto the page as --lift on every move, never through a render (a render per move was the
- * stutter); let go past a third of the way, or flicked up, it slides the rest of the way and only then unlocks, else
- * it falls back.
+ * stutter); let go past a third of the way, or flicked up, the unlock is asked that moment and the face slides the rest
+ * of the way meanwhile, else it falls back. Asking only once the slide had ended (220 ms) was time the user waited for
+ * nothing (2026-10-29 "far too long to transition from lock screen to unlocked").
+ *
+ * Every step is marked (powos.lock.mark: logcat PowosUnlock, with the phone's uptime, next to the native steps):
+ * ready (the page shown and painting), swipe start, swipe commit.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
@@ -20,8 +24,6 @@ const UNLOCK = 0.33;
 const FLICK = 0.45;
 /** ms without a move before the release: the finger was held still. */
 const STILL = 80;
-/** The face sliding the rest of the way, or back: as long as the drawer's settle. */
-const SETTLE = 220;
 /** What's new, at most. */
 const SHOWN = 5;
 
@@ -52,15 +54,16 @@ export function Lock() {
     last: [number, number];
     v: number;
   } | null>(null);
-  /** The face on its way out (unlock asked at the end of the slide). */
-  const going = useRef<number | null>(null);
+  /** The face on its way out (unlock asked): no new swipe until it is shown again. */
+  const going = useRef(false);
   useEffect(() => {
     const refresh = () => {
       // Shown again (the screen back on, the PIN pad backed out of): the face whole, wherever it was left.
-      if (going.current != null) clearTimeout(going.current);
-      going.current = null;
+      going.current = false;
       drag.current = null;
       lift(0, false);
+      // Painting again (a frame after being shown): from here the swipe is answered.
+      requestAnimationFrame(() => void powos.lock.mark("ready"));
       powos.system.battery().then(setBattery);
       powos.notifications.list().then(setList);
     };
@@ -80,19 +83,19 @@ export function Lock() {
     // A flick decides; otherwise where it was let go. Taken away (a system gesture had the finger): it falls back.
     const open = !cancelled && (v > FLICK ? true : v < -FLICK ? false : p > UNLOCK);
     lift(open ? 1 : 0, true);
-    if (!open) return;
-    // Unlocked once the face is out of the way: asked at once, Android's own unlock cut the slide short.
-    going.current = window.setTimeout(() => {
-      going.current = null;
-      powos.lock.unlock();
-    }, SETTLE);
+    if (!open) return void powos.lock.mark(`swipe fell back p=${p.toFixed(2)} v=${v.toFixed(2)}`);
+    // Asked the moment the swipe commits; the face's slide out runs alongside (no wait for it to end).
+    going.current = true;
+    void powos.lock.mark(`swipe commit p=${p.toFixed(2)} v=${v.toFixed(2)}`);
+    void powos.lock.unlock();
   };
 
   return (
     <div
       class="lock"
       onPointerDown={(e) => {
-        if (drag.current || going.current != null) return;
+        if (drag.current || going.current) return;
+        void powos.lock.mark("swipe start");
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         drag.current = {
           id: e.pointerId,
