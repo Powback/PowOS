@@ -24,7 +24,7 @@ import { openAssistant } from "./assistant.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
-import { Dock } from "./home.tsx";
+import { Dock, DockTray } from "./home.tsx";
 import { drawerDrag, drawerOpen, drawerShown, followOpenness, homeGestures } from "./gesture.ts";
 import { AiView } from "./powai.tsx";
 
@@ -70,10 +70,11 @@ powos.on("pull.hide", () => {
 const keyboardUp = signal(false);
 powos.on("system.insets", (i: { keyboard?: number } | null) => (keyboardUp.value = (i?.keyboard ?? 0) > 0));
 
-/** Home's dock under the pill, as on home: on the app grid only - not in the chat, not with the keyboard up (the user:
-    the dock stays with the launcher so it's there when the launcher is used over other apps). At the bottom only: a side
-    dock would cover the launcher's list, which spans the width (home faded its side dock under its old drawer). */
-const dockShown = computed(() => pullKind.value === "apps" && !chatting.value && !keyboardUp.value && dockPosition.value === "bottom");
+/** Home's dock where home has it (state.ts dockPosition): under the pill, or a side column with its recents, the drawer
+    and A-Z bar clear of it (shell.css .pull-screen.dock-*). On the app grid only - not in the chat, not with the keyboard
+    up (the user: the dock stays with the launcher so it's there when the launcher is used over other apps; 2026-10-29,
+    the side dock hidden here: "This is supposed to be wired in..."). */
+const dockShown = computed(() => pullKind.value === "apps" && !chatting.value && !keyboardUp.value);
 
 /** A finger on the panel: a render when that starts and ends, not one for every frame of the drag. */
 const pullDragging = computed(() => drawerDrag.value != null);
@@ -94,7 +95,7 @@ export function Pull() {
     return () => clearTimeout(t);
   }, [open, screenUp]);
   return (
-    <div class={`home pull-screen dock-${dockPosition.value} ${wideHome.value ? "unfolded" : ""} ${open ? "open" : ""} ${pullDragging.value ? "dragging" : ""}`} {...homeGestures()}>
+    <div class={`home pull-screen dock-${dockPosition.value} ${wideHome.value ? "wide unfolded" : ""} ${open ? "open" : ""} ${pullDragging.value ? "dragging" : ""}`} {...homeGestures()}>
       <div class="stage">
         <div class="launcher-frame tile" data-p ref={followOpenness} />
         <div class="launcher-clip" data-p ref={followOpenness}>
@@ -113,6 +114,9 @@ export function Pull() {
       </div>
       <Bar />
       {dockShown.value && <Dock />}
+      {/* Unfolded the launcher is home's wide one (the user, 2026-10-29: "It's supposed to be wide"): .home.wide's grid,
+          the foot's pinned apps | pill | recent apps (DockTray: bottom dock only) as on home. */}
+      {dockShown.value && wideHome.value && <DockTray />}
       {/* A held app's menu ("add to home" puts it on home's page). */}
       <AppMenu />
       <Screens />

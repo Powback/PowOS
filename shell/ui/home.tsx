@@ -393,7 +393,7 @@ export function Dock() {
  * middle, and here on the right the apps opened lately (last first, not the pinned ones), a row that scrolls on with
  * the finger past what fits. It gives way with the dock as the launcher opens (a .dock: the same fade and slide).
  */
-function DockTray() {
+export function DockTray() {
   if (dockPosition.value !== "bottom") return null;
   if (!recent.value.some((k) => !dock.value.includes(k) && !windowed.value.has(k) && byKey.value.has(k))) return null;
   return (

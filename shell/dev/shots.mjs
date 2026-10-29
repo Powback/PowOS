@@ -250,6 +250,8 @@ const SCENES = [
   ["desktop-launcher", "desktop", DESKTOP_HOME + " S.drawer.value = 1;", "wallpaper"],
   ["desktop-chat", "desktop", DESKTOP_HOME + ` S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["pull-apps", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
+  // Home's dock on the right: the launcher shows it as that column (its recents too), the list clear of it.
+  ["pull-apps-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
   ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
   ["assist", "assist", "await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp });", "app"],
   // Its field is the one pill: a long question wraps to three rows, then scrolls inside; dictation streams in, newest in view.
@@ -567,6 +569,14 @@ for (let i = 0; i <= 10; i++)
   SCENES.push([`film-b-${String(i).padStart(2, "0")}`, "shade", FILM_N + `S.notif.value = true; await sleep(500); const X = await U('./ui/ccexpand.ts'); X.stretch(1); await sleep(30); const h = document.querySelector('.cc-more, .cc-ext, .cc')?.scrollHeight ?? 300; X.stretch(${i / 10} * (window.__ccH ?? 260)); await sleep(60);`, "blurred", undefined, FOLDED]);
 for (let i = 0; i <= 5; i++)
   SCENES.push([`film-c-${String(i).padStart(2, "0")}`, "shade", FILM_N + `E.emit('shade.panel', { panel: 'notifications' }); S.notif.value = true; await sleep(500); E.emit('shade.drag', { q: 0.99 }); await sleep(60); E.emit('shade.drag', { q: ${1 - i / 5} }); await sleep(120);`, "blurred", undefined, FOLDED]);
+
+// The launcher's close as a filmstrip: open, then a finger takes it down p 1 -> 0 - the pill and the dock (bottom folded,
+// the right column unfolded) leave with the panel on the same --p.
+const PULL_OPEN = "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true }); await sleep(500); E.emit('pull.drag', { p: 1 }); await sleep(60); ";
+for (let i = 0; i <= 4; i++) {
+  SCENES.push([`film-l-${String(i).padStart(2, "0")}`, "pull", PULL_OPEN + `E.emit('pull.drag', { p: ${1 - i / 4} }); await sleep(120);`, "blurred", undefined, FOLDED]);
+  SCENES.push([`film-lr-${String(i).padStart(2, "0")}`, "pull", "S.dockPlacement.value = 'right'; await sleep(100); " + PULL_OPEN + `E.emit('pull.drag', { p: ${1 - i / 4} }); await sleep(120);`, "blurred", undefined, { unfolded: SIZES.unfolded }]);
+}
 
 
 try {
