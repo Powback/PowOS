@@ -207,7 +207,12 @@ object TaskSurfaces {
     /** Every leash that comes gets PowOS's window look at once (the size known by then, else at the next [dress]). */
     private fun dressLeashes(c: Context) {
         density = c.resources.displayMetrics.density
-        listen { id, leash -> if (leash != null) look(id, leash, on = id !in bare) }
+        // Only a window WindowFrames dressed ([sizes]) gets the look: a leash recorded for any other task (full screen,
+        // a fixed-size app in OnePlus's compat box) stays exactly as WM left it - no crop, corners or shadow.
+        listen { id, leash ->
+            if (leash == null) return@listen
+            if (id in sizes) look(id, leash, on = true) else Log.i(TAG, "task $id: not a PowOS window, its surface left as WM placed it")
+        }
     }
 
     /** Task id -> the window's size (px) last [dress]ed: the crop its rounded corners are cut at. */

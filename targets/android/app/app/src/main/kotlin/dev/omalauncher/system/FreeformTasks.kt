@@ -69,13 +69,32 @@ object FreeformTasks {
     /** This [list] call hit [window]'s unreadable case at least once (reset at its start). */
     @Volatile private var failedThisList = false
 
-    /** Task [t] as a floating window, or null (another mode, or its window configuration unreadable). */
+    /** Tasks already logged as left to Android ([resizable] false), so the line comes once per task. */
+    private val compatLogged = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+
+    /** Whether task [t]'s app can be resized (TaskInfo.isResizeable, hidden; unreadable = yes, as before). */
+    private fun resizable(t: ActivityManager.RunningTaskInfo): Boolean =
+        runCatching { android.app.TaskInfo::class.java.getField("isResizeable").getBoolean(t) }.getOrDefault(true)
+
+    /** Task [t] as a floating window, or null (another mode, a fixed-size app, or its window configuration unreadable). */
     private fun window(t: ActivityManager.RunningTaskInfo): Window? {
         val wc = runCatching { windowConfiguration(t) }.onFailure { if (!unreadable) Log.w(TAG, "can't read task ${t.taskId}'s window", it) }.getOrNull()
         unreadable = wc == null
         if (wc == null) { failedThisList = true; return null }
         if (wc.javaClass.getMethod("getWindowingMode").invoke(wc) != FREEFORM) return null
         val bounds = Rect(wc.javaClass.getMethod("getBounds").invoke(wc) as Rect)
+        // A fixed-size (non-resizable) app is never a PowOS window, whatever its mode says: on the unfolded screen
+        // OnePlus shows it in its compat box (a phone-sized portrait box centred on black, OplusCompatModeBgSurface)
+        // and its task's bounds are that box, not where its surface is drawn - PowOS framed and dressed it as a
+        // floating window and its crop at the box size, cut in the leash's own coordinates, drew Camera/Photos in a
+        // box at the top-left with the UI cut off (the user, 2026-10-29: "I tried to open the photo app and it's...
+        // or the camera app and it's broken"). Left exactly where Android puts it; WindowFrames drops its look.
+        if (!resizable(t)) {
+            if (compatLogged.add(t.taskId)) {
+                Log.i(TAG, "task ${t.taskId} (${(t.baseActivity ?: t.topActivity)?.packageName}) not resizable: Android places it (compat), PowOS leaves its surface alone")
+            }
+            return null
+        }
         val visible = runCatching { android.app.TaskInfo::class.java.getField("isVisible").getBoolean(t) }.getOrDefault(true)
         val dpi = runCatching { (android.app.TaskInfo::class.java.getField("configuration").get(t) as Configuration).densityDpi }.getOrDefault(0)
         return Window(t.taskId, (t.baseActivity ?: t.topActivity)?.packageName, bounds, visible, dpi, t.taskDescription?.label?.toString())
