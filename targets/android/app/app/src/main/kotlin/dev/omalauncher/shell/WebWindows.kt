@@ -168,24 +168,22 @@ class WebWindows(
         y: Double,
     ): Boolean {
         val w = wins[id] ?: return false
-        val d = density()
-        val px = (x * d).toFloat()
-        val py = (y * d).toFloat()
-        val act =
-            when (action) {
-                "down" -> MotionEvent.ACTION_DOWN
-                "move" -> MotionEvent.ACTION_MOVE
-                "up" -> MotionEvent.ACTION_UP
-                else -> MotionEvent.ACTION_CANCEL
-            }
+        val act = ACTIONS[action] ?: MotionEvent.ACTION_CANCEL
         val now = SystemClock.uptimeMillis()
         if (act == MotionEvent.ACTION_DOWN) w.downAt = now
-        if (injectWorks != false && injectReflect(w.displayId, w.downAt, now, act, px, py)) {
-            if (injectWorks == null) Log.i(TAG, "input path: InputManager.injectInputEvent (reflection, setDisplayId)").also { injectWorks = true }
-            return true
+        val ev = MotionEvent.obtain(w.downAt, now, act, (x * density()).toFloat(), (y * density()).toFloat(), 0)
+        try {
+            if (injectWorks != false && injectReflect(w.displayId, ev)) {
+                if (injectWorks == null) Log.i(TAG, "input path: InputManager.injectInputEvent (reflection, setDisplayId)")
+                injectWorks = true
+                return true
+            }
+            if (injectWorks != false) Log.i(TAG, "input path: root `input -d <id> motionevent` (reflection refused)")
+            injectWorks = false
+            injectRoot(w.displayId, ev)
+        } finally {
+            ev.recycle()
         }
-        if (injectWorks != false) Log.i(TAG, "input path: root `input -d <id> motionevent` (reflection refused)").also { injectWorks = false }
-        injectRoot(w.displayId, act, px, py)
         return true
     }
 
@@ -287,15 +285,10 @@ class WebWindows(
 
     private fun injectReflect(
         displayId: Int,
-        downAt: Long,
-        now: Long,
-        action: Int,
-        x: Float,
-        y: Float,
+        ev: MotionEvent,
     ): Boolean {
         val inject = injectMethod ?: return false
         val setId = setDisplayId ?: return false
-        val ev = MotionEvent.obtain(downAt, now, action, x, y, 0)
         return try {
             ev.source = InputDevice.SOURCE_TOUCHSCREEN
             setId.invoke(ev, displayId)
@@ -304,8 +297,6 @@ class WebWindows(
         } catch (e: Exception) {
             Log.w(TAG, "injectInputEvent refused: ${(e.cause ?: e)}")
             false
-        } finally {
-            ev.recycle()
         }
     }
 
@@ -315,28 +306,20 @@ class WebWindows(
 
     private fun injectRoot(
         displayId: Int,
-        action: Int,
-        x: Float,
-        y: Float,
+        ev: MotionEvent,
     ) {
-        val verb =
-            when (action) {
-                MotionEvent.ACTION_DOWN -> "DOWN"
-                MotionEvent.ACTION_MOVE -> "MOVE"
-                MotionEvent.ACTION_UP -> "UP"
-                else -> "CANCEL"
-            }
-        val cmd = "input -d $displayId touchscreen motionevent $verb ${x.toInt()} ${y.toInt()}"
-        if (action == MotionEvent.ACTION_MOVE) {
-            val queued = synchronized(moveLock) { (pendingMove != null).also { pendingMove = cmd } }
-            if (queued) return
-            io.post {
-                val c = synchronized(moveLock) { pendingMove.also { pendingMove = null } }
-                if (c != null) runCatching { andro.marchy.RootShell.run(c) }
-            }
+        val verb = VERBS[ev.actionMasked] ?: "CANCEL"
+        val cmd = "input -d $displayId touchscreen motionevent $verb ${ev.x.toInt()} ${ev.y.toInt()}"
+        if (ev.actionMasked != MotionEvent.ACTION_MOVE) {
+            io.post { runCatching { andro.marchy.RootShell.run(cmd) }.onFailure { Log.w(TAG, "root input failed", it) } }
             return
         }
-        io.post { runCatching { andro.marchy.RootShell.run(cmd) }.onFailure { Log.w(TAG, "root input failed", it) } }
+        val queued = synchronized(moveLock) { (pendingMove != null).also { pendingMove = cmd } }
+        if (queued) return
+        io.post {
+            val c = synchronized(moveLock) { pendingMove.also { pendingMove = null } }
+            if (c != null) runCatching { andro.marchy.RootShell.run(c) }
+        }
     }
 
     companion object {
@@ -344,6 +327,8 @@ class WebWindows(
         const val SETTING = "powos_web_windows"
         private const val PLACE_LOG_MS = 1000L
         private const val IME_POLICY_FALLBACK_DISPLAY = 1
+        private val ACTIONS = mapOf("down" to MotionEvent.ACTION_DOWN, "move" to MotionEvent.ACTION_MOVE, "up" to MotionEvent.ACTION_UP)
+        private val VERBS = mapOf(MotionEvent.ACTION_DOWN to "DOWN", MotionEvent.ACTION_MOVE to "MOVE", MotionEvent.ACTION_UP to "UP")
 
         // VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL (@hide, 1 shl 8): closing the window ends its task instead of
         // Android moving it onto the main screen.
