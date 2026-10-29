@@ -214,7 +214,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       access: () => call("notifications.access"),
       action: (key, index, text) => call("notifications.action", key, index, text ?? null),
     },
-    lock: { unlock: () => call("lock.unlock"), mark: (step) => call("lock.mark", step) },
+    lock: { unlock: () => call("lock.unlock"), mark: (step) => call("lock.mark", step).catch(() => {}) }, // detect: lock.mark - timing only, an older APK lacks it
     pad: {
       state: () => call<boolean>("pad.state"),
       overlay: (on) => call<boolean>("pad.overlay", on),
