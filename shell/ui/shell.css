@@ -504,7 +504,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 
 /* Two pages (drawer.tsx Pages): all apps | folders, side by side, moved by transform only. */
 .drawer-pages { grid-column: 1 / -1; grid-row: 1; min-height: 0; overflow: hidden; }
-.drawer-track { display: flex; height: 100%; will-change: transform; }
+.drawer-track { display: flex; gap: var(--page-gap, 0px); height: 100%; will-change: transform; }
 .drawer-page { flex: 0 0 100%; min-width: 0; min-height: 0; display: grid; grid-template-columns: 1fr var(--letter-bar); grid-template-rows: minmax(0, 1fr); }
 .drawer-page > .drawer-folders { grid-column: 1 / -1; padding-right: 0; }
 .folder-empty { padding: 24px 8px; text-align: center; }
@@ -2803,6 +2803,9 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
 .home.pull-screen:is(.dock-left, .dock-right) > .dock:not(.dock-tray) { pointer-events: auto; }
 .home.pull-screen.dock-left .drawer-clip { padding-left: var(--side-dock); }
 .home.pull-screen.dock-right .drawer-clip { padding-right: var(--side-dock); }
+/* The folders page waits a dock, an A-Z bar and a gutter beyond the apps page (drawer.tsx Pages steps by width + gap):
+   with the drawer narrowed by the dock it sat right after the apps page's clip, under the side dock on the cover. */
+.home.pull-screen:is(.dock-left, .dock-right) .drawer-track { --page-gap: calc(var(--side-dock) + var(--letter-bar) + 4px + var(--edge)); }
 .home.pull-screen:is(.dock-left, .dock-right):has(> .dock) .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
 /* Unfolded, the launcher's recent apps (the dock's recent page) sit at the app grid's spacing, not a sixth of the width
    each: a couple more icons in the row, same icon size (the user, 2026-10-29: "the recent ones are too spread out"). */

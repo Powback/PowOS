@@ -228,7 +228,7 @@ function Pages() {
     el.style.transition = ms ? `transform ${ms}ms cubic-bezier(0.1, 0.8, 0.2, 1)` : "none";
     el.style.transform = `translate3d(${px}px, 0, 0)`;
   };
-  const width = () => track.current?.clientWidth || innerWidth;
+  const width = () => (track.current ? track.current.clientWidth + (parseFloat(getComputedStyle(track.current).columnGap) || 0) : 0) || innerWidth;
   useEffect(() => put(-view * width(), 0), []);
   const start = (e: TouchEvent) => {
     const t = e.touches[0];
