@@ -15,6 +15,7 @@
 
 #include <QApplication>
 #include <QDBusConnection>
+#include <QDBusError>
 #include <QMultiHash>
 #include <QIcon>
 #include <QJsonObject>
