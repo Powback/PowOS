@@ -184,7 +184,7 @@ export const pullKind = signal<"apps" | "ai">("apps");
  */
 export const pullPanels = stored("pullPanels", "on");
 /**
- * The same corners over any app (CornerPull.kt: home's own launcher): read by the host from the shell's
+ * The same corners over any app (ui/pull.tsx in the edge gestures' overlay window): read by the host from the shell's
  * store (files/shell-data/pullOverApps.json), so it's written there too. Off: no corner is claimed over apps.
  */
 export const pullOverApps = stored("pullOverApps", "on");

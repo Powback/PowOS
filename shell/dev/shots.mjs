@@ -230,6 +230,7 @@ const SCENES = [
   ["ai-wide", "home", board(true), "wallpaper", undefined, WIDE_SIZES],
   // The same AiView in home's AI panel and the pull-up over apps: one column folded, two panes wide.
   ["ai-panel-wide", "home", board(true).replace(" S.page.value = -1;", "") + " S.openPanel('ai'); await sleep(500);", "wallpaper", undefined, WIDE_SIZES],
+  ["pull-ai-wide", "pull", board(true).replace(" S.page.value = -1;", "") + " E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(500);", "blurred", undefined, WIDE_SIZES],
   ["ai-v2-calm", "home", board(true).replace("P.board.value = B.map", "P.board.value = B.filter((r) => r.status !== 'waiting').map"), "wallpaper"],
   ["queued", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["queued-ai", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.page.value = -1;`, "wallpaper"],
@@ -248,6 +249,8 @@ const SCENES = [
   ["desktop", "desktop", DESKTOP_HOME, "wallpaper"],
   ["desktop-launcher", "desktop", DESKTOP_HOME + " S.drawer.value = 1;", "wallpaper"],
   ["desktop-chat", "desktop", DESKTOP_HOME + ` S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
+  ["pull-apps", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
+  ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
   ["assist", "assist", "await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp });", "app"],
   // Its field is the one pill: a long question wraps to three rows, then scrolls inside; dictation streams in, newest in view.
   ["assist-typing", "assist", "await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(1500); const f = document.querySelector('.assist-ask textarea'); if (f) { f.value = 'which of these three unread mails need an answer from me today, and draft a short reply to the one from the landlord about the heating'; f.dispatchEvent(new Event('input', { bubbles: true })); } await sleep(200);", "app"],

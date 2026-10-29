@@ -291,7 +291,7 @@ abstract class OverlayHost(
     }
 }
 
-/** What an overlay's page reaches through the bridge (overlay.closed). */
+/** What an overlay's page reaches through the bridge (overlay.closed / pull.closed, pull.launched). */
 interface OverlaySlot {
     /** The page is shut: the window can go. */
     fun closed()

@@ -76,6 +76,11 @@ if (mode === "aod") {
   // the watchdog and the rollback breaks instead of a live one. Imported here alone: a broken one breaks nothing else.
   const { GateTest } = await import("./test/gate-test.tsx");
   render(<GateTest />, document.body);
+} else if (mode === "pull") {
+  // The pull-up panel over an app (the edge gestures' overlay window): the drawer or PowOS AI's, nothing else of home.
+  await load();
+  const { Pull } = await import("./ui/pull.tsx");
+  render(<Pull />, document.body);
 } else if (mode === "assist") {
   // Over another app: PowOS AI's chat only (the rest of home isn't loaded).
   chat.value = await powos.ai.chat();

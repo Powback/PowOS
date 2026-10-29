@@ -207,7 +207,7 @@ effect(() => {
   if (drag != null) return follow(drag);
   const shown = drawer.value > 0 ? 1 : 0;
   if (followers) {
-    // The drag's end and the drawer's new state come as two writes (gesture.ts end, or the host's "pull.end"): settle once both are in.
+    // The drag's end and the drawer's new state come as two writes (gesture.ts end, pull.tsx): settle once both are in.
     const p = followers[0] ? Number(followers[0].anim.currentTime ?? 0) / SPAN : shown;
     queueMicrotask(() => followers && drawerDrag.value == null && settle(p, drawer.value > 0 ? 1 : 0));
     return;
@@ -806,23 +806,6 @@ powos.on("panel.close.end", (e: { shut?: boolean }) => {
   drawerDrag.value = null;
   if (e?.shut) closeDrawer();
   else drawer.value = 1;
-});
-
-/*
- * One launcher (the user, 2026-10-29: "Why do we have two different launchers? ... it should activate the same shit"):
- * a swipe up from a bottom corner (CornerPull.kt, over home or over an app - HomePull.kt brings home forward) drives
- * THIS drawer, the same one home's own swipe up and the pill open: "pull.begin" { kind } as it starts, "pull.drag" { p }
- * every frame, "pull.end" { open } when it's let go. There is no second launcher window any more.
- */
-powos.on("pull.begin", (e: { kind?: string }) => {
-  pullKind.value = e?.kind === "ai" ? "ai" : "apps";
-  drawerDrag.value = 0;
-});
-powos.on("pull.drag", (e: { p: number }) => (drawerDrag.value = Math.max(0, Math.min(1, e?.p ?? 0))));
-powos.on("pull.end", (e: { open: boolean }) => {
-  drawerDrag.value = null;
-  if (e?.open) drawer.value = 1;
-  else closeDrawer();
 });
 
 /** Tells the host which panel is open, so its home gesture closes it (feature-detected: an older host has no panels). */

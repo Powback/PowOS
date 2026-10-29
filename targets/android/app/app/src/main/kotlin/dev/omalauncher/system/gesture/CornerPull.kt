@@ -9,7 +9,7 @@ import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.ViewConfiguration
 import android.view.WindowManager
-import dev.omalauncher.system.HomePull
+import dev.omalauncher.system.PullHost
 import dev.omalauncher.system.Switcher
 import dev.omalauncher.system.Tasks
 import java.io.File
@@ -17,7 +17,7 @@ import kotlin.math.abs
 
 /**
  * The pull-up panels over any app (home has them in its own page): a swipe up from the bottom-LEFT corner brings
- * PowOS AI's panel, from the bottom-RIGHT corner the drawer - home's own launcher, the one every entry opens ([HomePull]), following the
+ * PowOS AI's panel, from the bottom-RIGHT corner the drawer ([PullHost], shell/ui/pull.tsx) - the panel following the
  * finger as on home. The middle of the bottom edge stays gesture navigation's ([NavGesture]: home, the switcher, the
  * quick switch), and so does every corner swipe that isn't clearly up.
  *
@@ -75,7 +75,7 @@ class CornerPull(
         navFollows = nav.onDown(e)
         state = State.NAV
         if (!navFollows) return false
-        if (!on()) return true
+        if (PullHost.current == null || !on()) return true
         val s = screen()
         val zone = s.width() * CORNER
         val left = e.rawX < s.left + zone
@@ -110,8 +110,9 @@ class CornerPull(
             }
             State.PULLING -> {
                 velocity?.addMovement(e)
+                val host = PullHost.current ?: return GestureConsumer.Verdict.DROP
                 when (e.actionMasked) {
-                    MotionEvent.ACTION_MOVE -> HomePull.drag(openness(e))
+                    MotionEvent.ACTION_MOVE -> host.pullDrag(openness(e))
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         val v = velocity
                         velocity = null
@@ -120,7 +121,7 @@ class CornerPull(
                         v?.recycle()
                         val open = e.actionMasked == MotionEvent.ACTION_UP && PanelPull.opens(vy, openness(e).toDouble(), cancelled = false, openFlick = PanelPull.OPEN_FLICK)
                         Log.i(TAG, "corner pull: let go at ${"%.2f".format(openness(e))}, ${"%.2f".format(vy)} dp/ms -> ${if (open) "open" else "shut"}")
-                        HomePull.end(service, open)
+                        host.pullEnd(open)
                         state = State.NAV
                         return GestureConsumer.Verdict.DROP
                     }
@@ -140,7 +141,7 @@ class CornerPull(
             cancel.recycle()
         }
         Log.i(TAG, "corner pull: $kind")
-        HomePull.begin(service, kind)
+        PullHost.current?.pullBegin(kind)
     }
 
     private fun openness(e: MotionEvent) = PanelPull.openness(y0 - e.rawY, height)
