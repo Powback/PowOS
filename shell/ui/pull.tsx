@@ -16,6 +16,8 @@ import { computed, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { aiDraft, chatting, closeDrawer, dockPosition, drawer, pullKind, type LauncherOpen } from "../state.ts";
 import { AppMenu } from "./apps.tsx";
+import { Screens } from "./screens.tsx";
+import { screens } from "../screens.ts";
 import { openAssistant } from "./assistant.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { Bar } from "./bar.tsx";
@@ -67,8 +69,9 @@ const keyboardUp = signal(false);
 powos.on("system.insets", (i: { keyboard?: number } | null) => (keyboardUp.value = (i?.keyboard ?? 0) > 0));
 
 /** Home's dock under the pill, as on home: on the app grid only - not in the chat, not with the keyboard up (the user:
-    the dock stays with the launcher so it's there when the launcher is used over other apps). */
-const dockShown = computed(() => pullKind.value === "apps" && !chatting.value && !keyboardUp.value);
+    the dock stays with the launcher so it's there when the launcher is used over other apps). At the bottom only: a side
+    dock would cover the launcher's list, which spans the width (home faded its side dock under its old drawer). */
+const dockShown = computed(() => pullKind.value === "apps" && !chatting.value && !keyboardUp.value && dockPosition.value === "bottom");
 
 /** A finger on the panel: a render when that starts and ends, not one for every frame of the drag. */
 const pullDragging = computed(() => drawerDrag.value != null);
@@ -78,13 +81,15 @@ const SETTLE_MS = 300;
 
 export function Pull() {
   const open = drawerOpen.value;
+  // A setting found in the launcher's search opens here, over everything (Screens): the window stays while it shows.
+  const screenUp = screens.value.length > 0;
   // Shut and settled - let go, Back, a tap beside it, an app launched from it (state.ts launch closes the drawer) - the
   // host hides the window.
   useEffect(() => {
-    if (open) return;
-    const t = window.setTimeout(() => drawerShown() === 0 && void host()?.closed?.(), SETTLE_MS);
+    if (open || screenUp) return;
+    const t = window.setTimeout(() => drawerShown() === 0 && !screens.value.length && void host()?.closed?.(), SETTLE_MS);
     return () => clearTimeout(t);
-  }, [open]);
+  }, [open, screenUp]);
   return (
     <div class={`home pull-screen dock-${dockPosition.value} ${wideHome.value ? "unfolded" : ""} ${open ? "open" : ""} ${pullDragging.value ? "dragging" : ""}`} {...homeGestures()}>
       <div class="stage">
@@ -107,6 +112,7 @@ export function Pull() {
       {dockShown.value && <Dock />}
       {/* A held app's menu ("add to home" puts it on home's page). */}
       <AppMenu />
+      <Screens />
     </div>
   );
 }

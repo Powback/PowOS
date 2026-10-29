@@ -1186,7 +1186,7 @@ export function Pages() {
             })(itemsOn(n))}
           </div>
         ))}
-        <LibraryPage here={page.value === list.length} onHold={(app, from, e, grab) => startCarry({ app, fromFolder: from }, e, grab)} />
+        <LibraryPage here={page.value === list.length} />
       </div>
       <Preview />
       <Marquee />
