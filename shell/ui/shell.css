@@ -1391,11 +1391,19 @@ input.folder-title:focus { background: var(--soft-fill); }
 .notif-own > .notif-list { padding: 10px 10px 16px; overflow-anchor: none; }
 /*
  * Scrolled, folded (notifications.tsx .cc-away: only while the list's scrollTop > 0 and --cc-h > 0): the list's box
- * reaches up to the control center's top - translated up by --cc-h, padded and grown by as much, so its cards stay put
- * and scroll on into the card's room - while the card rides the scroll away 1:1 (--away) and fades over its last half.
+ * reaches up to the control center's header row's bottom - translated up by --cc-h, padded and grown by as much, so
+ * its cards stay put and scroll on into the card's room - while the card under its header rides the scroll away 1:1
+ * (--away) and fades over its last half. The card's empty box takes no touches (the list under it scrolls).
  * Transforms and padding only, no negative margins; without the class (no JS, at rest) nothing here applies.
  */
-.panel-body.cc-away > .cc { position: relative; z-index: 1; transform: translateY(calc(-1 * var(--away, 0px))); opacity: var(--away-o, 1); }
+.panel-body.cc-away > .cc { position: relative; z-index: 1; pointer-events: none; }
+.panel-body.cc-away > .cc > * { pointer-events: auto; }
+/* The card's header row (date, edit, settings) never moves: only what's under it slides, clipped at the header's bottom. */
+.panel-body.cc-away > .cc > :not(.notif-bar) {
+  transform: translateY(calc(-1 * var(--away, 0px)));
+  clip-path: inset(max(0px, calc(var(--away, 0px) - var(--d, 0px))) 0 0 0);
+  opacity: var(--away-o, 1);
+}
 .panel-body.cc-away > .notif-own > .notif-list {
   flex: none;
   height: calc(100% + var(--cc-h, 0px));

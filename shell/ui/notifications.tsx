@@ -396,7 +396,7 @@ export function NotificationPanel() {
   // notifications ... it should hide the control center ... right now we're just cutting off"). Folded, one panel only
   // (unfolded the two are columns side by side: nothing is cut off). At rest NOTHING is written: the card and the list
   // are laid out by CSS alone. Only while the list is scrolled (scrollTop > 0) and the room between the card's top and
-  // the list's top (h, measured as it starts, ccexpand's fold carry included) is > 0, .cc-away goes on the panel body
+  // the list's top (h, from the card's header row, measured as it starts, ccexpand's fold carry included) is > 0, .cc-away goes on the panel body
   // (shell.css): the list's box reaches up to the card's top by a translate, padded and grown by as much (its cards stay
   // where they were), and the card rides the scroll up 1:1 (--away), fading over its last half. Back at the top: all off.
   // Attempt 1 (reverted 80ad021f/32fd146f) kept a negative margin at rest and wrote the card's inline translate, which
@@ -406,18 +406,28 @@ export function NotificationPanel() {
     const body = l?.closest<HTMLElement>(".panel-body");
     if (!together || two || !l || !body) return;
     let h = 0;
+    let moved: HTMLElement[] = [];
     const off = () => {
       h = 0;
       body.classList.remove("cc-away");
       for (const k of ["--cc-h", "--away", "--away-o"]) body.style.removeProperty(k);
+      for (const el of moved) el.style.removeProperty("--d");
+      moved = [];
     };
     const follow = () => {
       const s = l.scrollTop;
       if (s <= 0) return off();
       if (!h) {
-        const top = body.querySelector<HTMLElement>(":scope > .cc")?.getBoundingClientRect().top;
-        h = top == null ? 0 : Math.round(l.getBoundingClientRect().top - top);
+        // The header row (date, edit, settings: .cc > .notif-bar) stays put (the user, 2026-10-29 "the notification
+        // center title can still be on the top"): h is from its bottom; what's under it slides away, each part clipped
+        // at the header's bottom (--d: its own distance below it).
+        const card = body.querySelector<HTMLElement>(":scope > .cc");
+        const head = card?.querySelector<HTMLElement>(":scope > .notif-bar");
+        const hb = (head ?? card)?.getBoundingClientRect()[head ? "bottom" : "top"];
+        h = !card || hb == null ? 0 : Math.round(l.getBoundingClientRect().top - hb);
         if (h <= 0) return off();
+        moved = [...card!.children].filter((el): el is HTMLElement => el !== head && el instanceof HTMLElement);
+        for (const el of moved) el.style.setProperty("--d", `${Math.round(el.getBoundingClientRect().top - hb!)}px`);
         body.style.setProperty("--cc-h", `${h}px`);
         body.classList.add("cc-away");
       }
