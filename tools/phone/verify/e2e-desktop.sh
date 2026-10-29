@@ -209,6 +209,7 @@ part2() {
   local d=$((W * 35 / 100)) pg0; pg0=$(hpage)
   p=$(freept "$(tbounds "$CT")" -1 "$d")
   if [ "$p" != none ] && [ -n "$p" ]; then set -- $p; x=$1; y=$2; local to=$((x - d)); [ $to -lt 20 ] && to=20
+    [ $((x - to)) -lt $((d * 2 / 3)) ] && fail "the swipe beside the window had only $((x - to)) px of room (want $d): a check limit, not the page swipe"
     swipe $x $y $to $y 250 "beside the window to the next page" && { sleep 1.5; chk page2
       step page2 "a swipe beside the window: the next page (the window stays on its own page)"
       [ "$(hpage)" = $((pg0 + 1)) ] && [ "$(tvis "$CT")" = false ] && pass "page $((pg0 + 2)) shows, Calculator hidden with its page" || fail "after the swipe: page $(hpage) (from $pg0), Calculator visible=$(tvis "$CT")"
