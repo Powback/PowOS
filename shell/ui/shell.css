@@ -91,7 +91,7 @@
 /*
  * The panel. The drag moves it up by --rise and fades it in (an ease-out, 1 - (1 - p/0.8)^3: ~95% there half-way,
  * whole by 80% of the way, the rest is motion only; closing the same in reverse) - each piece its own compositor
- * layer, so a frame of the drag is transforms and opacities, nothing else. On the phone (home.tsx, pull.tsx) the frost
+ * layer, so a frame of the drag is transforms and opacities, nothing else. On the phone (home.tsx) the frost
  * (.stage > .launcher-frame) reaches the screen's foot, under the search pill and the navigation bar, while the drawer
  * (.launcher-clip > .launcher) is cut off at the pill's top with a short fade - no app row ever under the pill, moving
  * or at rest. The desktop (desktop.tsx) keeps the frost inside the launcher.
@@ -130,16 +130,11 @@
    always at the pill's top - and the drawer in it is moved back by as much: transforms only, all of them. */
 .home > .stage > .launcher-clip { transform: translateY(calc((var(--p) - 1) * var(--strip-height))); will-change: transform; }
 .home > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * (var(--rise) + var(--strip-height)))); }
-:is(.home.pill-below, .pull-screen, .home:not(:has(> .bar))) > .stage > .launcher-clip { transform: none; }
-:is(.home.pill-below, .pull-screen, .home:not(:has(> .bar))) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
-/* No search bar at the foot (the search widget): down over the dock's place to the screen's foot, no pill to clear.
-   Over an app (pull.tsx): the pill right under the stage, the dock (on the app grid) under the pill. */
+:is(.home.pill-below, .home:not(:has(> .bar))) > .stage > .launcher-clip { transform: none; }
+:is(.home.pill-below, .home:not(:has(> .bar))) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
+/* No search bar at the foot (the search widget): down over the dock's place to the screen's foot, no pill to clear. */
 .home:not(:has(> .bar)) .launcher-clip { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); mask-image: none; }
 .home:not(:has(> .bar)) .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
-.pull-screen .launcher-clip { inset: 0 0 4px; }
-.pull-screen .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
-/* With home's dock under the pill (pull.tsx dockShown): the frost down under the dock to the screen's foot, as home's. */
-.pull-screen:has(> .dock) .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--strip-height) + var(--foot))); }
 /* The reference material (theme.css --text-fill); home's content fades out under it (.home-content), nothing to blur. */
 .home .launcher-frame.tile {
   background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
@@ -159,13 +154,7 @@
 .home.open :is(.launcher-frame, .launcher .drawer, .launcher .ai-panel) { pointer-events: auto; }
 /* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
 .home > .bar { transform: translateY(calc(var(--p) * var(--strip-height))); }
-.home.pill-below > .bar, .pull-screen > .bar { transform: none; }
-/* Over an app (pull.tsx) the foot is home's: the pill in the flow right above the dock, the dock at the screen's foot, both
-   held in place (no --p slide, no shrinking) - the dock was drawn over the pill (the user, 2026-10-28). With the dock
-   hidden (chat, keyboard, PowOS AI) it isn't rendered and the pill takes the foot. */
-.home.pull-screen > :is(.bar, .dock) { flex: none; transform: none; translate: none; margin: 0; }
-.home.pull-screen > .bar { order: 1; height: 48px; }
-.home.pull-screen > .dock { order: 2; height: var(--strip-height); opacity: 1; }
+.home.pill-below > .bar { transform: none; }
 /* The dock stays while the launcher is open (bottom dock, search bar above it): the pill and dock don't move, the drawer's
    window ends at the pill's top, and the drawer only rises (as pill-below). Wide and side docks keep giving way. */
 .home:not(.pill-below):not(.wide):not(.dock-left):not(.dock-right):has(> .bar) > :is(.bar, .dock) { transform: none; }
@@ -1482,7 +1471,7 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-view.wide > .ai-top { grid-column: 1 / -1; }
 /* The panel, wide: its panes scroll, not it; its own pill under the conversation instead of home's bar. */
 .ai-panel.wide { overflow: hidden; }
-:is(.home, .pull-screen).open:has(.ai-panel.wide) > .bar { visibility: hidden; }
+.home.open:has(.ai-panel.wide) > .bar { visibility: hidden; }
 /*
  * Its pill where home's bar pill is, with or without the keyboard: the panel's window reaches down over the bar's place
  * (no fade, no gap under it), so the pill's foot is --ai-foot's as on the AI page. Dragged, the bar (over the launcher)
@@ -1494,7 +1483,6 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .home > .stage > .launcher-clip:has(.ai-panel) { mask-image: none; }
 /* Wide home's one-row foot (.home.wide): the stage already ends at the row's top. */
 .home.wide:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * var(--strip-height)); }
-.pull-screen:has(.ai-panel.wide) > .stage > .launcher-clip { bottom: -48px; }
 .home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip .launcher-inner { padding-bottom: 0; }
 .ai-view.wide > .ai-side { grid-column: 1; grid-row: 2 / 4; margin-bottom: var(--ai-foot); }
 .ai-view.wide > .ai-talk { grid-column: 2; grid-row: 2; flex-direction: column-reverse; }
@@ -2758,18 +2746,11 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
 .home.wide:is(.dock-left, .dock-right) > .bar .bar-pill { bottom: 2px; }
 .home.wide:is(.dock-left, .dock-right) { grid-template-rows: minmax(0, 1fr) 48px; }
 .home:is(.dock-left, .dock-right).open > .dock:not(.dock-tray) { pointer-events: none; }
-/* Over an app (pull.tsx) the launcher's dock sits where home's is (state.ts dockPosition, the same setting as .home's
-   dock-*): a side column held in place at its edge, the drawer clear of it; bottom stays under the pill (the user,
-   2026-10-29: "the launcher shows the dock on the bottom even though I set the dock to be on the right side"). Still
-   only on the app grid (pull.tsx dockShown: not in the chat, not with the keyboard). */
-.home.pull-screen:is(.dock-left, .dock-right) > .dock:not(.dock-tray) { transform: none; opacity: 1; pointer-events: auto; }
-.home.pull-screen.dock-left .drawer-clip { padding-left: var(--side-dock); }
-.home.pull-screen.dock-right .drawer-clip { padding-right: var(--side-dock); }
-.home.pull-screen:is(.dock-left, .dock-right):has(> .dock) .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
-/* Unfolded, the launcher's recent apps (the dock's recent page) sit at the app grid's spacing, not a sixth of the width
-   each: a couple more icons in the row, same icon size (the user, 2026-10-29: "the recent ones are too spread out"). */
-.home.pull-screen.unfolded.dock-bottom .dock .dock-recent { gap: var(--gap); }
-.home.pull-screen.unfolded.dock-bottom .dock .dock-recent .app { flex: 0 0 min(60px, var(--cell, 60px)); }
+/* Unfolded, the launcher's recent apps (the dock's recent page while it's open) sit at the app grid's spacing, not a sixth
+   of the width each: a couple more icons in the row, same icon size (the user, 2026-10-29: "the recent ones are too
+   spread out"). Home's own launcher is the only one now (every entry opens it), so this holds for all of them. */
+.home.wide.dock-bottom.open .dock .dock-recent { gap: var(--gap); }
+.home.wide.dock-bottom.open .dock .dock-recent .app { flex: 0 0 min(60px, var(--cell, 60px)); }
 
 /* Quick launchers (launchers.tsx): the toggles' chips holding an app's icon, in a row of their own under the toggles. */
 .cc3-launchers { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--soft-fill); }

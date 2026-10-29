@@ -850,7 +850,7 @@ function useWide() {
 
 /**
  * PowOS AI's screen, wherever it's held - its page beside home, the pull-up panel on home and over apps (home.tsx,
- * pull.tsx): one component, so every change lands in all of them. The header, then by the holder's width (useWide, never
+ * corners): one component, so every change lands in all of them. The header, then by the holder's width (useWide, never
  * the device's): narrow one column; wide what needs the user and the board (left), the conversation at reading width
  * with its pill (right, by the right thumb), each pane its own scroll. [pill] false: the holder's own pill asks (home's
  * bar under a narrow panel); wide always has its own, under the conversation.

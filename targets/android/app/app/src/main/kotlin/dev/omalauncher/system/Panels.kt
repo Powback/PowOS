@@ -3,7 +3,7 @@ package dev.omalauncher.system
 import dev.omalauncher.shell.ShellBridge
 
 /**
- * Which shell panel is open (the launcher drawer "apps", PowOS AI's "ai" - on home or in a [PullHost] window), as the
+ * Which shell panel is open (the launcher drawer "apps", PowOS AI's "ai" - home's, the one launcher), as the
  * page tells it ("panels.open" / "panels.closed"). The bottom-edge home gesture ([dev.omalauncher.system.gesture.NavGesture])
  * then closes THAT panel: it follows the finger ("panel.close.begin" / ".drag" { p } / ".end" { shut }) instead of
  * going home or raising the switcher. Only this gesture closes panels - a swipe inside the content never does.
@@ -21,10 +21,11 @@ object Panels {
         if (kind == null && bridge !== from) return
         this.kind = kind
         bridge = if (kind == null) null else from
+        if (kind == null) HomePull.closed()
     }
 
-    /** The page that has a panel open and can be seen (home started, or the pull window up), else null. */
-    fun live(): ShellBridge? = bridge.takeIf { kind != null && (Switcher.homeVisible || PullHost.current != null) }
+    /** The page that has a panel open and can be seen (home started), else null. */
+    fun live(): ShellBridge? = bridge.takeIf { kind != null && Switcher.homeVisible }
 
     fun begin(b: ShellBridge) = b.emit("panel.close.begin", org.json.JSONObject().put("kind", kind))
 

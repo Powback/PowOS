@@ -51,6 +51,9 @@ object Switcher {
 
     /** Home's page (ShellActivity's, while it lives) and its window's refresh-rate boost. */
     private var shell: ShellBridge? = null
+
+    /** Home's page, while its activity lives (HomePull drives its launcher from the corner swipes). */
+    val homePage: ShellBridge? get() = shell
     private var shellBoost: ((Boolean) -> Unit)? = null
     private var shellBlur: ((Float) -> Unit)? = null
 

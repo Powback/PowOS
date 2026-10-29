@@ -113,7 +113,7 @@ class ShellBridge(
     /** Set by the shade host (its page is the shade): the window to put away once the panel is shut. */
     var shade: dev.omalauncher.system.ShadeSlot? = null
 
-    /** Set by an overlay host (Quick Tools, the pull-up panels over apps): its window, put away once the page is shut. */
+    /** Set by an overlay host (Quick Tools): its window, put away once the page is shut. */
     var overlay: dev.omalauncher.system.OverlaySlot? = null
 
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
@@ -318,8 +318,7 @@ class ShellBridge(
             "shade.homePull" -> homePull(a.getBoolean(0), a.optJSONObject(1), a.optBoolean(2, false))
             // Home without the gesture input: the shade down, not following the finger.
             "shade.open" -> dev.omalauncher.system.ShadeHost.current?.let { s -> main.post { s.openPanel(control = false) } } ?: notifications(true)
-            "overlay.closed", "pull.closed" -> overlay?.closed()
-            "pull.launched" -> overlay?.launched()
+            "overlay.closed" -> overlay?.closed()
             // Which shell panel is open (system/Panels.kt): the bottom-edge home gesture closes it.
             "panels.open" -> dev.omalauncher.system.Panels.set(a.getString(0), this)
             "panels.closed" -> dev.omalauncher.system.Panels.set(null, this)
@@ -978,9 +977,9 @@ class ShellBridge(
 
     private fun keyboard(show: Boolean) {
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        // An overlay's page (the pull-up panel over apps/desktop, Quick Tools): its own window must be the IME target -
-        // home's focus (homeTyping below) has nothing to do with it, and lifting home's non-focusable flag from here
-        // let WM hand the focus to home under the panel (2026-10-28: no keyboard in the pull-up panel's search).
+        // An overlay's page (Quick Tools): its own window must be the IME target - home's focus (homeTyping below) has
+        // nothing to do with it, and lifting home's non-focusable flag from here let WM hand the focus to home under the
+        // overlay (2026-10-28: no keyboard in the old over-apps launcher window's search).
         overlay?.let { o ->
             overlayKeyboard(o, show, imm)
             return

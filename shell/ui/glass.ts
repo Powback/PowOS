@@ -120,7 +120,7 @@ function refrost(): Promise<void> {
 // The desktop's home (powos-shell) draws its own wallpaper (ui/desktop.tsx): its tiles frost that picture too.
 const OVER_WALLPAPER = new Set(["home", "lock", "desktop"]);
 const CHROME = new Set(["windowbar", "windowgrip", "statusbar"]);
-const TINT_ONLY = new Set(["shade", "recents", "pull", "quicktools", ...CHROME]);
+const TINT_ONLY = new Set(["shade", "recents", "quicktools", ...CHROME]);
 
 let lastSource: GlassSource | null = null;
 /** The assistant's: the screen it was opened over (its screenshot), and whether it's live (then no picture). */

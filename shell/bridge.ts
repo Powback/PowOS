@@ -246,10 +246,6 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     overlay: {
       closed: () => call("overlay.closed"),
     },
-    pull: {
-      closed: () => call("pull.closed"),
-      launched: () => call("pull.launched"),
-    },
     windows: {
       list: () => call<DesktopWindow[]>("windows.list"),
       activate: (id) => call<boolean>("windows.activate", id), // host: panel (the Qt desktop host serves it; never the Android app)
@@ -809,10 +805,6 @@ function mock(): Bridge {
       open: async () => console.log("[mock] shade open"),
     },
     overlay: { closed: async () => console.log("[mock] overlay closed") },
-    pull: {
-      closed: async () => console.log("[mock] pull closed"),
-      launched: async () => console.log("[mock] pull launched"),
-    },
     windows: mockWindows(events, icon),
     // The browser has no KWin: one desktop, nothing to switch.
     desktops: {

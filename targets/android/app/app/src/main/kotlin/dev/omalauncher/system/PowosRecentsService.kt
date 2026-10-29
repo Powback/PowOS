@@ -32,7 +32,7 @@ import dev.omalauncher.system.gesture.RecentsTransition
  *   the bottom edge ([NavGesture]: home, the switcher, the previous app; the app's window following the finger through
  *   WM Shell's recents transition, [RecentsTransition]) and the shade's pull from the top ([ShadeHost.pull]). Back stays
  *   SystemUI's edge swipe, except on PowOS's edge handles ([EdgeGestures]: Good Lock-style edge swipes, Quick Tools).
- *   Up from a bottom corner over an app: home's pull-up panels ([CornerPull], [PullHost]).
+ *   Up from a bottom corner over an app: home's pull-up panels ([CornerPull] -> [HomePull]: home's own launcher).
  */
 class PowosRecentsService : Service() {
     private val main = Handler(Looper.getMainLooper())
@@ -41,7 +41,6 @@ class PowosRecentsService : Service() {
     private var nav: NavGesture? = null
     private var edge: EdgeGestures? = null
     private var quickTools: QuickToolsHost? = null
-    private var pull: PullHost? = null
     private var pet: PetOverlay? = null
     private var frames: WindowFrames? = null
     private var gestureRetries = 0
@@ -94,7 +93,6 @@ class PowosRecentsService : Service() {
                     Switcher.prepare(this@PowosRecentsService)
                     if (shade == null) shade = ShadeHost(this@PowosRecentsService).takeIf { it.start() }
                     if (quickTools == null) quickTools = runCatching { QuickToolsHost(this@PowosRecentsService).takeIf { it.begin() } }.onFailure { Log.w(TAG, "no Quick Tools", it) }.getOrNull()
-                    if (pull == null) pull = runCatching { PullHost(this@PowosRecentsService).takeIf { it.begin() } }.onFailure { Log.w(TAG, "no pull-up panels over apps", it) }.getOrNull()
                     // The pet over apps (docs/PET.md step d).
                     if (pet == null) pet = runCatching { PetOverlay(this@PowosRecentsService).takeIf { it.start() } }.onFailure { Log.w(TAG, "no pet overlay", it) }.getOrNull()
                     pet?.homeVisible(Switcher.homeVisible)
@@ -186,8 +184,6 @@ class PowosRecentsService : Service() {
         edge = null
         quickTools?.stop()
         quickTools = null
-        pull?.stop()
-        pull = null
         pet?.stop()
         pet = null
         frames?.stop()
