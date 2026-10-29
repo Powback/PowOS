@@ -106,7 +106,15 @@ const extra = signal<SearchResult[]>([]);
 export const searchPending = signal(false);
 /** What's searched: the pill's text - except in a chat, where it's the next message, never a search (the user, 2026-10-28:
  * "launcher chat refreshes every keypress" - each key ran every provider, and its results re-rendered the launcher). */
-const searched = computed(() => (chatting.value ? "" : query.value.trim()));
+/** The shortest text that found nothing (lower case), or "". The user, 2026-10-29: "im typing in the launcherchat and it
+ * triggers a search even after no search results" - a new chat message is typed before `chatting` is set, so every key
+ * searched again and the launcher swapped between results and the chat. Text that still starts with this is the
+ * message, not a search; deleting back to a shorter text (or clearing the pill) searches again. */
+const noMatch = signal("");
+const searched = computed(() => {
+  const q = chatting.value ? "" : query.value.trim();
+  return q && noMatch.value && q.toLocaleLowerCase().startsWith(noMatch.value) ? "" : q;
+});
 export const searchResults = computed(() => {
   const q = searched.value;
   if (!q) return [];
@@ -124,6 +132,10 @@ export function openSearchResult(result: SearchResult) {
 }
 // State imports shell UI too; start after the module graph has initialized.
 queueMicrotask(() => effect(() => {
+  const m = noMatch.value;
+  if (m && !query.value.trim().toLocaleLowerCase().startsWith(m)) noMatch.value = "";
+}));
+queueMicrotask(() => effect(() => {
   const q = searched.value;
   const sources = providers.value;
   nativeSettingsRevision.value;
@@ -139,8 +151,9 @@ queueMicrotask(() => effect(() => {
       found.set(id, results);
       extra.value = [...found.values()].flat();
       searchPending.value = --remaining > 0;
+      if (!remaining && !searchResults.peek().length) noMatch.value = q.toLocaleLowerCase();
     };
-    if (!remaining) searchPending.value = false;
+    if (!remaining) { searchPending.value = false; if (!searchResults.peek().length) noMatch.value = q.toLocaleLowerCase(); }
     for (const provider of sources) {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {

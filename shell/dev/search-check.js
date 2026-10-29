@@ -150,6 +150,43 @@ export async function launcherChatTypingCheck() {
     s.closeDrawer();
   }
   const failures = chatTypingFailures(counts);
+  // A new chat message (not yet `chatting`; the user, 2026-10-29: "im typing in the launcherchat and it triggers a search
+  // even after no search results"): once the text found nothing, more letters - even an app's name, which a provider
+  // here would match - neither search nor show results; the "↵ ask" line still shows the text.
+  const app = s.apps.value[0]?.label ?? 'Settings';
+  let probeSearches = 0;
+  const offProbe = search.registerSearchProvider({ id: 'chat-nomatch-probe', search(text) {
+    probeSearches++;
+    return text.toLocaleLowerCase().includes(app.toLocaleLowerCase()) ? [{ id: 'probe:' + text, label: text, source: 'Probe', open() {} }] : [];
+  } });
+  try {
+    s.closeDrawer();
+    s.query.value = '';
+    s.drawer.value = 1;
+    for (const ch of 'zqxw') { s.query.value += ch; await new Promise(r => setTimeout(r, 160)); }
+    await wait(() => !search.searchPending.value);
+    if (s.chatting.value) failures.push('no-match typing: chatting was already set, the case is not tested');
+    probeSearches = 0;
+    counts.noMatchShown = 0;
+    for (const ch of ` open ${app}`) {
+      s.query.value += ch;
+      await new Promise(r => setTimeout(r, 160));
+      if (search.searchResults.value.length || document.querySelector('[data-search-result]')) counts.noMatchShown++;
+    }
+    counts.noMatchSearches = probeSearches;
+    if (probeSearches) failures.push(`no-match typing: ${probeSearches} searches after the text found nothing`);
+    if (counts.noMatchShown) failures.push(`no-match typing: results shown on ${counts.noMatchShown} keys after the text found nothing`);
+    await frame();
+    if (!document.querySelector('.msg.ask')?.textContent.includes(app)) failures.push('no-match typing: no "↵ ask" line for the text');
+    s.query.value = 'zq';
+    await new Promise(r => setTimeout(r, 160));
+    await wait(() => !search.searchPending.value);
+    if (!probeSearches) failures.push('no-match typing: deleting back to a shorter text did not search again');
+  } finally {
+    offProbe();
+    s.query.value = '';
+    s.closeDrawer();
+  }
   return [failures, counts];
 }
 
