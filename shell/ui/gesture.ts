@@ -658,7 +658,9 @@ function settleDrawer(mode: "open" | "close", v: number) {
   const p = drawerDrag.value ?? 0;
   drawerDrag.value = null;
   // Let go past the over-pull: open, with the search focused and the keyboard up (overpull.ts).
-  if (overRelease() || drawerWanted(mode, v, p)) drawer.value = 1;
+  const open = overRelease() || drawerWanted(mode, v, p);
+  logSwipe(`drawer ${mode} p=${p.toFixed(2)} v=${v.toFixed(2)}px/ms -> ${open ? "open" : "closed"}`);
+  if (open) drawer.value = 1;
   else closeDrawer();
 }
 
@@ -735,7 +737,12 @@ export function homeGestures() {
       if (p) releaseGesture(p.clientX, p.clientY);
       else endGesture();
     },
-    onTouchCancel: endGesture,
+    // A cancel (the host or the system took the touch) settles where the drag got to: logged, so a missed drawer swipe
+    // shows whether it was cut short (e2e-desktop 1029-1428: a 30% swipe up settled closed with no move logged).
+    onTouchCancel: () => {
+      if (g) logSwipe(`touchcancel mode=${g.mode} dy=${r(g.last[1] - g.y0)} dur=${r(performance.now() - g.t0)}ms p=${drawerDrag.peek()?.toFixed(2)}`);
+      endGesture();
+    },
     // A mouse (working on the shell in a desktop browser).
     onPointerDown: (e: PointerEvent) => e.pointerType === "mouse" && startGesture(e.clientX, e.clientY, e.target as Element),
     onPointerMove: (e: PointerEvent) => e.pointerType === "mouse" && e.buttons && moveGesture(e.clientX, e.clientY, null),
