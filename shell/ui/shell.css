@@ -1489,6 +1489,9 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
  * covers the pill riding into its place; open, the bar hides and the pill is there already.
  */
 .home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * (48px + var(--strip-height))); mask-image: none; }
+/* Narrow too: PowOS AI in the launcher never fades at its foot (the user, 2026-10-29: "remove the bottom cutoff fade"); its
+   content runs to the window's edge and scrolls. The drawer's own apps keep the 12 px fade. */
+.home > .stage > .launcher-clip:has(.ai-panel) { mask-image: none; }
 /* Wide home's one-row foot (.home.wide): the stage already ends at the row's top. */
 .home.wide:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * var(--strip-height)); }
 .pull-screen:has(.ai-panel.wide) > .stage > .launcher-clip { bottom: -48px; }

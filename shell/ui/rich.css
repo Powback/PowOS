@@ -188,7 +188,7 @@
 .ai-steps li.current { font-weight: 600; }
 .ai-steps li.next { color: var(--color-muted); }
 .ai-commits li { overflow-wrap: anywhere; }
-.ai-imgs { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-imgs { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
 .ai-img { padding: 0; line-height: 0; overflow: hidden; border: 0; border-radius: 8px; background: var(--soft-fill); }
 .ai-img img { display: block; width: auto; height: auto; max-width: 128px; max-height: 128px; object-fit: contain; }
 .ai-img-name { padding: 2px 8px; border-radius: 8px; background: var(--soft-fill); overflow-wrap: anywhere; }
@@ -214,8 +214,8 @@
 .queued-x { display: grid; place-items: center; width: 28px; height: 28px; margin: -6px -8px -6px 0; padding: 0; font-size: 14px; color: var(--color-foreground); background: none; border: 0; }
 .ai-queued { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 
-/* The images a message sent: thumbnails under its words (the screen's top, a tap: full screen); cleaned up, a quiet line. */
-.sent-imgs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+/* Each thumbnail its image's own shape (flex-start: never stretched to the row's tallest). The images a message sent: thumbnails under its words (the screen's top, a tap: full screen); cleaned up, a quiet line. */
+.sent-imgs { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; gap: 6px; margin-top: 6px; }
 .ai-asked .sent-imgs { justify-content: flex-start; }
 .sent-img { padding: 0; line-height: 0; overflow: hidden; border: 0; border-radius: 8px; background: var(--soft-fill); }
 .sent-img img { display: block; width: auto; height: auto; max-width: 112px; max-height: 112px; object-fit: contain; }
