@@ -272,6 +272,15 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       area: (barTop: number) => call<boolean>("windows.area", barTop),
       slide: (op: string, data?: unknown) => call<boolean>("windows.slide", op, data ?? null),
     },
+    // Web windows (ui/webwindows.tsx): the phone's only.
+    webwindows: host.name === "powos" ? undefined : {
+      enabled: () => call<boolean>("webwindows.enabled"),
+      open: (key, rect) => call<number>("webwindows.open", key, rect),
+      place: (id, rect, visible) => call<boolean>("webwindows.place", id, rect, visible),
+      raise: (id) => call<boolean>("webwindows.raise", id),
+      input: (id, action, x, y) => call<boolean>("webwindows.input", id, action, x, y),
+      close: (id) => call<boolean>("webwindows.close", id),
+    },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),
       open: (id, from) => call<boolean>("tasks.open", id, from ?? null),

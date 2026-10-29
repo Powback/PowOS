@@ -356,6 +356,9 @@ export interface ChromeState {
 }
 export interface ChromeRegion { action: string; x: number; y: number; width: number; height: number }
 
+/** A web window's element rect (CSS px, the viewport). */
+export interface WebWindowRect { left: number; top: number; width: number; height: number }
+
 export interface Bridge {
   /** Perf traces (?: hosts from before it): saves JSON under the AI shared dir, returns its path in PowOS. */
   perf?: { save(json: string): Promise<string | null>; /** Main shell frame sample to the other windows (hosts from before it: absent). */ publish?(json: string): Promise<unknown> };
@@ -819,6 +822,24 @@ export interface Bridge {
      * desktop change, committed when it lands), "cancel".
      */
     slide?(op: "start" | "move" | "settle" | "cancel", data?: unknown): Promise<boolean>;
+  };
+  /**
+   * Web windows (the phone's only; off unless Settings.Global powos_web_windows = 1): an Android app's window as an
+   * element of home (ui/webwindows.tsx) - the page owns its place, page, z-order and title bar; the host draws the
+   * app's own display behind the WebView at the element's rect (rects are CSS px in the viewport).
+   * "webwindows.closed" (its id) when the host ended it.
+   */
+  webwindows?: {
+    enabled(): Promise<boolean>;
+    /** The app (an "a:" key) launched into a new window at [rect]: its id, or -1. */
+    open(key: string, rect: WebWindowRect): Promise<number>;
+    /** The element's rect now, and whether it's in sight. */
+    place(id: number, rect: WebWindowRect, visible: boolean): Promise<boolean>;
+    /** Its content above the other windows' (the element was raised). */
+    raise(id: number): Promise<boolean>;
+    /** A touch on its body, CSS px from the body's top-left. */
+    input(id: number, action: "down" | "move" | "up" | "cancel", x: number, y: number): Promise<boolean>;
+    close(id: number): Promise<boolean>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up

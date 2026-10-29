@@ -22,6 +22,7 @@ import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen, held } from "./gesture.ts";
 import { LibraryPage } from "./library.tsx";
+import { WebWindowsOn } from "./webwindows.tsx";
 import { FolderView } from "./folderview.tsx";
 import { FolderFace, folderable, morphing, folderName, groupIntoFolder, loadFolderNames } from "./folders.tsx";
 import { chosen, isChosen, marquee, MARQUEE_DWELL, partyCells, partyOf, startMarquee, toggleChosen } from "./homeselect.ts";
@@ -1179,6 +1180,7 @@ export function Pages() {
                   <GroupShadow items={on} joined={joined} id={String(n)} />
                   <Seams items={on} joined={joined} />
                   {on.map((item) => renderTile(item, joined.get(item.key)))}
+                  <WebWindowsOn page={n} />
                 </>
               );
             })(itemsOn(n))}

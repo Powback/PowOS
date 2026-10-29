@@ -12,6 +12,7 @@ import { recentsBack, recentsHome } from "./ui/recents.tsx";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, AppWindow, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
 import { wideHome } from "./hosts/wide.ts";
+import { openWebWindow } from "./ui/webwindows.tsx";
 
 /** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
 const hostApps = signal<App[]>([]);
@@ -368,6 +369,11 @@ export async function launch(key: string) {
   // A PowOS app: its page, full screen in this one (ui/appscreen.tsx).
   if (key.startsWith(PREFIX)) {
     openApp(key.slice(PREFIX.length));
+    closeDrawer();
+    return;
+  }
+  // Unfolded with web windows on (Settings.Global powos_web_windows): the app opens as an element of this page.
+  if (await openWebWindow(key, byKey.value.get(key)?.label ?? key, pages.value[page.value] ?? 1)) {
     closeDrawer();
     return;
   }

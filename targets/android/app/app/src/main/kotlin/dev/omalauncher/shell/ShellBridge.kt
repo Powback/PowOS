@@ -66,6 +66,9 @@ class ShellBridge(
     private val widgets = ShellWidgets(runtime, scope, ::emit)
     private val terminals = ShellTerminals(runtime, scope, ::emit)
     private val media = ShellMedia(context, runtime, scope, ::emit)
+    /** Android apps as home elements (off unless Settings.Global powos_web_windows = 1; home's activity only). */
+    private val webWindows by lazy { WebWindows(context, web, ::emit) }
+    private var webWindowsMade = false
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
     private val speech = Speech(context.applicationContext).also { it.warm() }
     /** The panel's quick settings: what an app may switch, and Android's panels for the rest. */
@@ -231,6 +234,17 @@ class ShellBridge(
         when (method) {
             "apps.list" -> apps()
             "apps.launch" -> launch(a.getString(0))
+            "webwindows.enabled" -> activity != null && webWindows.also { webWindowsMade = true }.enabled()
+            "webwindows.open" ->
+                if (activity == null) -1
+                else android(a.getString(0))?.let { app ->
+                    runtime.usage.record(a.getString(0))
+                    webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1))
+                } ?: -1
+            "webwindows.place" -> webWindowsMade && webWindows.place(a.getInt(0), a.getJSONObject(1), a.optBoolean(2, true))
+            "webwindows.raise" -> webWindowsMade && webWindows.raise(a.getInt(0))
+            "webwindows.input" -> webWindowsMade && webWindows.input(a.getInt(0), a.getString(1), a.getDouble(2), a.getDouble(3))
+            "webwindows.close" -> webWindowsMade && webWindows.close(a.getInt(0))
             "apps.info" -> android(a.getString(0))?.let { runtime.androidApps.openInfo(it) }
             "apps.uninstall" -> android(a.getString(0))?.let { runtime.androidApps.uninstall(it) }
             // App API's "+ add app": the deep links an app opens, read from its manifest - nothing fired (AppLinks.kt).
@@ -1156,6 +1170,7 @@ class ShellBridge(
 
     fun close() {
         health.close()
+        if (webWindowsMade) webWindows.closeAll()
         runCatching { context.getSystemService(android.hardware.display.DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         ShellWallpaper.onChange.remove(wallpaperChanged)
         runCatching { android.app.WallpaperManager.getInstance(context).removeOnColorsChangedListener(wallpaperColors) }
