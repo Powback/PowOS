@@ -13,6 +13,7 @@ import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
 import type { WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
+import { memo } from "./memo.ts";
 
 const TITLE = 36;
 const RADIUS = 12;
@@ -1115,29 +1116,32 @@ function snapSlot(x: number, y: number): Slot | null {
   return SNAPS_AT[side][row];
 }
 
-/** Its bar's buttons, right to left: close, full screen, minimise, tile (the old native bar's order). */
-function Controls({ win }: { win: WebWin }) {
+/**
+ * Its bar's buttons, right to left: close, full screen, minimise, tile (the old native bar's order). Only the id and
+ * whether it is maximised: the whole window re-rendered them (4 Marks) on every frame of its drag (render scan 10-31).
+ */
+const Controls = memo(function Controls({ id, restore }: { id: number; restore: boolean }) {
   const press = (f: () => void) => ({
     onPointerDown: (e: PointerEvent) => e.stopPropagation(),
     onClick: (e: MouseEvent) => (e.stopPropagation(), f()),
   });
   return (
     <div class="ww-controls">
-      <button class="ww-button" aria-label="Tile" {...press(() => (tileMenu.value = tileMenu.value === win.id ? null : win.id))}>
+      <button class="ww-button" aria-label="Tile" {...press(() => (tileMenu.value = tileMenu.value === id ? null : id))}>
         <Mark kind="tile" />
       </button>
-      <button class="ww-button" aria-label="Minimise" {...press(() => minimise(win.id))}>
+      <button class="ww-button" aria-label="Minimise" {...press(() => minimise(id))}>
         <Mark kind="minimise" />
       </button>
-      <button class="ww-button" aria-label="Full screen" {...press(() => fullScreen(win.id))}>
-        <Mark kind={win.restore ? "restore" : "maximise"} />
+      <button class="ww-button" aria-label="Full screen" {...press(() => fullScreen(id))}>
+        <Mark kind={restore ? "restore" : "maximise"} />
       </button>
-      <button class="ww-button ww-close" aria-label="Close" {...press(() => close(win.id))}>
+      <button class="ww-button ww-close" aria-label="Close" {...press(() => close(id))}>
         <Mark kind="close" />
       </button>
     </div>
   );
-}
+});
 
 /** Full screen = a real full-screen app on the main display (WebWindows.fullScreen); with no host, the work area. */
 function fullScreen(id: number) {
@@ -1305,7 +1309,7 @@ function TitleBar({ win }: { win: WebWin }) {
       </div>
       <div class="ww-spacer" />
       <div class={merged ? "tile ww-controls-glass" : "ww-controls-glass"}>
-        <Controls win={win} />
+        <Controls id={win.id} restore={merged} />
       </div>
     </div>
   );
@@ -1404,14 +1408,14 @@ function sideAt(side: string, e: PointerEvent): string {
  * DOM's hit test). The frame follows the finger, the app's size paced ([pace]: RS1), the final on release; a haptic
  * tick on the grab, the live size outline ([resizeView]) while it lasts, tile sizes snapped to ([snapLen]: RZ4).
  */
-function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
+function Edge({ id, side }: { id: number; side: (typeof EDGES)[number] }) {
   const start = useRef<(Grab & { side: string }) | null>(null);
   const stop = (e: PointerEvent) => {
     if (!start.current) return;
     e.stopPropagation();
     start.current = null;
     resizeView.value = null;
-    resizeEnd(win.id);
+    resizeEnd(id);
   };
   return (
     <div
@@ -1419,21 +1423,23 @@ function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
       style={{ height: zoneHeight(win, side) }}
       onPointerDown={(e) => {
         e.stopPropagation();
-        raise(win.id);
-        flashGrips(win.id);
+        const win = webWins.value.find((w) => w.id === id);
+        if (!win) return;
+        raise(id);
+        flashGrips(id);
         capture(e);
-        if (tiledOn(win.id) != null) untile(win.id, "keep");
+        if (tiledOn(id) != null) untile(id, "keep");
         start.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, w: win.w, h: win.h, side: sideAt(side, e) };
         navigator.vibrate?.(8);
-        resizeView.value = { id: win.id, snapped: "" };
-        resizeStart(win.id);
-        oneFinger.set(win.id, () => ((start.current = null), (resizeView.value = null), resizeEnd(win.id)));
+        resizeView.value = { id, snapped: "" };
+        resizeStart(id);
+        oneFinger.set(id, () => ((start.current = null), (resizeView.value = null), resizeEnd(id)));
       }}
       onPointerMove={(e) => {
         const s = start.current;
         if (!s) return;
         e.stopPropagation();
-        resizeBy(win.id, { ...s, k: win.scale ?? 1 }, e);
+        resizeBy(id, { ...s, k: webWins.value.find((w) => w.id === id)?.scale ?? 1 }, e);
       }}
       onPointerUp={stop}
       onPointerCancel={stop}
@@ -1503,6 +1509,19 @@ function Grip({ corner }: { corner: (typeof CORNERS)[number] }) {
     </svg>
   );
 }
+
+/**
+ * A free window's 8 resize zones and 4 grips: only its id, so a frame of its own move or resize (the window re-renders)
+ * leaves them, and their arrays' Fragments, alone (render scan 10-31: all 8 Edges, 4 Grips every frame).
+ */
+const Handles = memo(function Handles({ id }: { id: number }) {
+  return (
+    <>
+      {EDGES.map((side) => <Edge key={side} id={id} side={side} />)}
+      {CORNERS.map((c) => <Grip key={c} corner={c} />)}
+    </>
+  );
+});
 
 /** RZ4: the live size outline round a frame being resized, its size (screen px) in it; brighter on a snapped tile size. */
 function ResizeOutline({ win }: { win: WebWin }) {
@@ -1691,8 +1710,7 @@ function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
       <div class={cls} data-wwid={win.id} data-z={z} style={{ ...frame, "--ww-k": s }} {...pinch}>
         {!win.ownFrame && <TitleBar win={win} />}
         <Body win={win} body={body} />
-        {free && EDGES.map((side) => <Edge key={side} win={win} side={side} />)}
-        {free && CORNERS.map((c) => <Grip key={c} corner={c} />)}
+        {free && <Handles id={win.id} />}
         {sizing && <ResizeOutline win={win} />}
         {tileMenu.value === win.id && <TileMenu win={win} />}
       </div>
