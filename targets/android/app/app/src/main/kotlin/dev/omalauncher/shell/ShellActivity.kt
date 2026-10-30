@@ -125,7 +125,7 @@ class ShellActivity : Activity() {
             val base = info.baseActivity ?: info.baseIntent.component
             // By the activity (the alias resolves to it): the HOME alias's tasks and any started by name.
             val ours = base?.className == mine || base?.className == "andro.marchy.HomeShell" || info.topActivity?.className == mine
-            if (ours) runCatching { task.finishAndRemoveTask() }.onSuccess { Log.i(TAG, "dropped a second home task ${info.taskId}") }
+            if (ours) dropHome(task, info.taskId)
         }
     }
 
@@ -197,13 +197,24 @@ class ShellActivity : Activity() {
     }
 
     /** Drops Recents cards whose Linux window no longer exists (app exited or process restarted). */
+    private fun dropHome(
+        task: ActivityManager.AppTask,
+        id: Int,
+    ) {
+        dev.omalauncher.system.Tasks.logRemove("finishAndRemoveTask", id, "a second home task", removes = true)
+        runCatching { task.finishAndRemoveTask() }.onSuccess { Log.i(TAG, "dropped a second home task $id") }
+    }
+
     private fun removeStaleWindowTasks() {
         for (task in getSystemService(ActivityManager::class.java).appTasks) {
             val base = runCatching { task.taskInfo?.baseIntent }.getOrNull() ?: continue
             // By its data rather than its class: windows start through aliases too.
             if (base.data?.let { it.scheme == "omarchy" && it.host == "window" } != true) continue
             // A window that just closed removes its own task meanwhile; finishing it again throws.
-            if (runtime.wm.windowByHandle(base.data?.lastPathSegment) == null) runCatching { task.finishAndRemoveTask() }
+            if (runtime.wm.windowByHandle(base.data?.lastPathSegment) == null) {
+                dev.omalauncher.system.Tasks.logRemove("finishAndRemoveTask", runCatching { task.taskInfo?.taskId }.getOrNull() ?: -1, "a stale Linux window task", removes = true)
+                runCatching { task.finishAndRemoveTask() }
+            }
         }
     }
 

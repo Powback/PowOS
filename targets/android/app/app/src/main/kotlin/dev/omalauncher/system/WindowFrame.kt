@@ -258,6 +258,7 @@ class WindowFrame(
 
     /** The close button: the task removed, and said so (E2E round 2: a tap left Calculator and Dolphin open, unlogged). */
     private fun close() {
+        Tasks.logRemove("close", id, "WindowFrame close button (${app.pkg})")
         val ok = Tasks.remove(context, id)
         android.util.Log.i("PowosWindowFrame", "close task $id (${app.pkg}): ${if (ok) "removed" else "NOT removed"}")
         WindowFrames.current?.changed()
