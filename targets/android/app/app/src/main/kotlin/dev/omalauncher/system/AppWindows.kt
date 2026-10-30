@@ -29,8 +29,16 @@ object AppWindows {
     fun floating(context: Context): Boolean =
         context.resources.configuration.smallestScreenWidthDp >= DESKTOP_MIN_DP &&
             Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0) == 1
-    // Not the web-windows setting: with powos_web_windows = 1 only the web windows themselves stand this path down, per
-    // task (shell/WebWindowDisplays.isWebWindow); Linux windows (Dolphin, Steam) and every other app still float.
+    /**
+     * The unfolded desktop with web windows on (`powos_web_windows` = 1): every app window is a web window then
+     * (docs/WEB_WINDOWS.md) - whatever opened it. A task that still comes up as an Android freeform window (an intent
+     * with these options, a notification, another app, OnePlus' floating window) is handed to ShellBridge.toWebWindow
+     * (shell/SystemFloat, WindowFrames' adopt) and WindowFrames never dresses one.
+     */
+    fun webDesktop(context: Context): Boolean = floating(context) && dev.omalauncher.shell.WebWindows.on(context)
+
+    // Not the web-windows setting: launches still get freeform options with powos_web_windows = 1 (a small window, not a
+    // full-screen flash, for the moment before [webDesktop]'s hand-over moves the task onto its web window's display).
 
     /**
      * [base] (or plain options) made a floating window's when apps float now ([floating]): the next cascaded bounds and

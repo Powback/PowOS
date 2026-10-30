@@ -87,14 +87,43 @@ object SystemFloat {
             full.clear()
             return
         }
-        // Freeform or OnePlus' zoom window (its menu's item makes the latter, WINDOWING_MODE_ZOOM).
-        val floated = FreeformTasks.floatingApps(ctx).filter { (id, pkg) -> id in full && pkg != ctx.packageName && !FreeformTasks.isOwnFloat(id) }
+        handOver(ctx)
+    }
+
+    /**
+     * Floating app tasks (freeform or OnePlus' zoom window - its menu's item makes the latter, WINDOWING_MODE_ZOOM) on
+     * the main display to [onFloat]. The unfolded desktop: EVERY one, however it got there - launched with AppWindows'
+     * freeform options (the launcher overlay, a notification, a widget, settings search, the AI), started floating by
+     * another app, OnePlus' floating window, PowOS's own Tasks.float. Each task once ([handed]): one whose hand-over
+     * failed (no drawer app) isn't asked again every task event; WindowFrames never dresses it meanwhile. Folded: the
+     * system's own float of a full-screen app only, as before.
+     */
+    private fun handOver(ctx: Context) {
+        val floating = FreeformTasks.floatingApps(ctx).filter { (_, pkg) -> pkg != null && pkg != ctx.packageName }
+        handed.retainAll(floating.map { it.first }.toSet())
+        val desktop = dev.omalauncher.system.AppWindows.floating(ctx)
+        val floated = floating.filter { (id, _) -> id !in handed && (desktop || (id in full && !FreeformTasks.isOwnFloat(id))) }
         full.clear()
         FreeformTasks.fullScreen(ctx, hiddenToo = true).forEach { (id, pkg) -> if (pkg != ctx.packageName) full += id }
         floated.forEach { (id, pkg) ->
-            Log.i(TAG, "task $id ($pkg) floated by the system (its menu's \"$LABEL\"): to a web window")
+            Log.i(TAG, "task $id ($pkg) floating on the main display (${if (desktop) "any launch path" else "the system's menu"}): to a web window")
+            handed += id
             onFloat?.invoke(id)
         }
+    }
+
+    /** Floating tasks handed to [onFloat] already (while they still float on the main display). */
+    private val handed = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+
+    /**
+     * Task [id] into a web window (ShellBridge.toWebWindow on home's main thread): WindowFrames' adopt of a stray
+     * full-screen app with web windows on. False: no home bridge watching.
+     */
+    fun toWebWindow(id: Int): Boolean {
+        val float = onFloat ?: return false
+        handed += id
+        float(id)
+        return true
     }
 
     /** The menu item says [LABEL] ([on]) or OnePlus' own "Floating window" again; one root call, skipped when already so. */
