@@ -2630,6 +2630,115 @@ function wwMaximise(ww, W) {
   ww.expect(!r?.restore && r?.w === 360 && r?.h === 300, `restore: ${JSON.stringify(r)} isn't back at 360x300`);
 }
 
+/** In the page: the LW3 run's modules, its mock host's log, its windows' elements by app key. */
+async function lw3Env() {
+  const mod = window.__gw.mod;
+  const [S, W, B, H] = await Promise.all([mod("./state.ts"), mod("./ui/webwindows.tsx"), mod("./bridge.ts"), mod("./hosts/wide.ts")]);
+  const g = (window.__lw3 ??= { launched: [], opened: [] });
+  const els = (key) => [...document.querySelectorAll(".webwindow")].filter((e) => W.webWins.value.find((w) => String(w.id) === e.dataset.wwid)?.key === key);
+  return { S, W, powos: B.powos, wideHome: H.wideHome, g, els, wait: (ms) => new Promise((ok) => setTimeout(ok, ms)) };
+}
+
+/** LW3: a mock web-windows host, then a Linux launch: its placeholder at once (no host geometry), the launch sent. */
+async function lw3Launch() {
+  const { S, W, powos, wideHome, g, els } = await window.__lw3f.lw3Env();
+  wideHome.value = true;
+  g.restore = { ww: powos.webwindows, launch: powos.apps.launch };
+  powos.webwindows = {
+    enabled: async () => true,
+    open: async (key, rect, task, kwin) => (g.opened.push({ key, kwin, rect }), 77),
+    close: async (id) => ((W.webWins.value = W.webWins.value.filter((w) => w.id !== id)), true),
+    input: async () => true,
+  };
+  // A deliberately bad exec: the host's launch fails.
+  powos.apps.launch = async (key) => {
+    g.launched.push(key);
+    if (key === "l:gate.bad") throw new Error("exec: not found");
+  };
+  W.LINUX_START.ms = 600_000;
+  await S.launch("l:org.kde.dolphin");
+  await window.__gw.settled();
+  const w = W.webWins.value.find((v) => v.key === "l:org.kde.dolphin");
+  g.el = els("l:org.kde.dolphin")[0];
+  return [
+    !(w?.pending && w.id < 0) && `a Linux launch made no placeholder window (${JSON.stringify(w)})`,
+    !g.launched.includes("l:org.kde.dolphin") && "the placeholder's launch never reached the host (apps.launch)",
+    !g.el?.querySelector(".ww-placeholder .ww-progress") && "the placeholder window shows no progress line",
+    W.geometry().split(" ")[1] !== "0" && `a placeholder's geometry went to the host: ${W.geometry()}`,
+  ].filter(Boolean);
+}
+
+/** LW3: another app's offer leaves the placeholder; Dolphin's takes it - the same element, the host's window id. */
+async function lw3Offer() {
+  const { W, g, els } = await window.__lw3f.lw3Env();
+  // The KDE Wallet that came instead of Dolphin (2026-10-30 21:01) never takes Dolphin's placeholder.
+  window.__mockEvents.emit("webwindows.adopt", { kwin: 36, key: "l:org.kde.ksecretd", label: "KDE Wallet Service" });
+  window.__mockEvents.emit("webwindows.adopt", { kwin: 35, key: "l:org.kde.dolphin", label: "Dolphin" });
+  await window.__gw.settled();
+  const d = W.webWins.value.filter((v) => v.key === "l:org.kde.dolphin");
+  const fails = [
+    !(d.length === 1 && d[0].id === 77 && !d[0].pending) && `KWin's Dolphin did not take the placeholder: ${JSON.stringify(d)}`,
+    els("l:org.kde.dolphin")[0] !== g.el && "the offered window is a new element, not the placeholder's (it jumps)",
+    g.opened.find((o) => o.key === "l:org.kde.dolphin")?.kwin !== 35 && "the host opened no window for KWin's Dolphin (35)",
+  ].filter(Boolean);
+  window.__mockEvents.emit("webwindows.live", 77);
+  W.webWins.value = d;
+  return fails;
+}
+
+/** LW3: no window in LINUX_START - "couldn't start" with a close; a tap again is a new try. */
+async function lw3Timeout() {
+  const { S, W, g, els, wait } = await window.__lw3f.lw3Env();
+  W.webWins.value = [];
+  W.LINUX_START.ms = 200;
+  await S.launch("l:org.kde.kate");
+  await wait(400);
+  await window.__gw.settled();
+  const w = W.webWins.value.find((v) => v.key === "l:org.kde.kate");
+  return [!(w?.failed && els("l:org.kde.kate")[0]?.querySelector(".ww-failed-close")) && `no "couldn't start" after the timeout: ${JSON.stringify(w)}`].filter(Boolean);
+}
+
+/** LW3: a tap on an app that couldn't start is a new try (a stuck window never blocks the app). */
+async function lw3Retry() {
+  const { S, W, g, wait } = await window.__lw3f.lw3Env();
+  const fails = [];
+  W.LINUX_START.ms = 600_000;
+  const n = g.launched.length;
+  await S.launch("l:org.kde.kate");
+  const kate = W.webWins.value.filter((v) => v.key === "l:org.kde.kate");
+  fails.push(!(g.launched.length === n + 1 && kate.length === 1 && !kate[0].failed) && "a tap on an app that couldn't start did not launch it again");
+  W.LINUX_START.ms = 200;
+  await wait(400);
+  return fails.filter(Boolean);
+}
+
+/** LW3: a launch that fails (a bad exec) - "couldn't start" at once; its Close removes it. */
+async function lw3BadExec() {
+  const { S, W, els } = await window.__lw3f.lw3Env();
+  W.webWins.value = [];
+  await S.launch("l:gate.bad");
+  await window.__gw.settled();
+  const el = els("l:gate.bad")[0];
+  const fails = [!el?.querySelector(".ww-failed-text")?.textContent.includes("launch failed") && `a bad exec shows no "couldn't start": ${el?.textContent}`];
+  el?.querySelector(".ww-failed-close")?.click();
+  await window.__gw.settled();
+  fails.push(W.webWins.value.some((v) => v.key === "l:gate.bad") && "its Close left the window");
+  return fails.filter(Boolean);
+}
+
+/** LW3: the real host back. */
+async function lw3End() {
+  const { W, powos, g } = await window.__lw3f.lw3Env();
+  powos.webwindows = g.restore.ww;
+  powos.apps.launch = g.restore.launch;
+  W.webWins.value = [];
+  W.LINUX_START.ms = 20_000;
+  return [];
+}
+
+/** The LW3 run's steps into the page (window.__lw3f); evaluates to []. */
+const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Timeout, lw3Retry, lw3BadExec, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+
 /** [webWindowMaskCheck]'s helpers into the page (window.__wwg); evaluates to [] (no problems) as a gate step. */
 const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
@@ -2966,6 +3075,25 @@ try {
     })));
 
   }
+  // LW3 (the user, 2026-10-30: "they shoulf have a splash screen"): a Linux launch on the unfolded home with web
+  // windows on shows its placeholder window at once; KWin's offer with its key takes it (the same element); a launch
+  // that fails, or no window in LINUX_START, shows "couldn't start" with a close. Renders: /cache/lw3-*.png.
+  runs.push(open(browser, `${ORIGIN}/index.html`, "linux-splash", { width: 821, height: 883 }).then((r) => whenReady(r, async () => {
+    const shot = (name) => r.page.screenshot({ path: `/cache/lw3-${name}.png` });
+    await r.page.evaluate(LW3_HELPERS);
+    const step = (what) => r.page.evaluate((f) => window.__lw3f[f](), what);
+    const fails = [...(await step("lw3Launch"))];
+    await shot("1-placeholder");
+    fails.push(...(await step("lw3Offer")));
+    await shot("2-taken");
+    fails.push(...(await step("lw3Timeout")));
+    await shot("3-couldnt-start");
+    fails.push(...(await step("lw3Retry")));
+    fails.push(...(await step("lw3BadExec")));
+    await shot("4-bad-exec");
+    fails.push(...(await step("lw3End")));
+    return fails;
+  })));
   // The launcher's chat while typing (the user, 2026-10-28: "launcher chat refreshes every keypress"): no search, no
   // re-render of the chat or its messages, the scroll where it was (dev/search-check.js launcherChatTypingCheck).
   // In the launcher: the overlay's page (index.html?mode=pull).

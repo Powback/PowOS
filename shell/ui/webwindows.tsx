@@ -45,6 +45,15 @@ export interface WebWin {
   untiled?: { x: number; y: number; w: number; h: number };
   /** Its app's content shows ("webwindows.live"): the body paints nothing; until then, the placeholder. */
   live?: boolean;
+  /**
+   * LW3: a Linux launch's window before KWin offers its toplevel - the placeholder at once, at its place (id < 0: the
+   * host knows nothing of it, no geometry goes out). The first offer with its key takes it ([takePlaceholder]).
+   */
+  pending?: boolean;
+  /** Its element's key: a placeholder's id, kept when KWin's window takes it (the same element: no jump). */
+  el?: number;
+  /** Not live in [LINUX_START] (or its app gone): "couldn't start", with the reason - its body shows it and a close. */
+  failed?: string;
 }
 
 /** An app's icon URL by its key (state.ts sets it: this file can't import that one), or undefined. */
@@ -82,22 +91,78 @@ export async function webWindowsOn(): Promise<boolean> {
 
 /** Opens an Android app as a home element on [page] (unfolded, the setting on): false leaves the launch to the caller. */
 export async function openWebWindow(key: string, label: string, page: number): Promise<boolean> {
-  if (key.startsWith("l:")) return (await linuxWindow(key, page)) != null;
+  if (key.startsWith("l:")) return (await linuxWindow(key, label, page)) != null;
   return (await openWindow(key, label, page)) != null;
 }
 
 /** [openWebWindow], with the window's id (null: not a window). A page tiling with an empty tile puts it there. */
 /**
- * A Linux app ("l:"): its windows come from KWin ("webwindows.adopt" with a KWin id), so a tap launches it as before
- * (the host); one that has a web window already comes to [page], on top, as an Android app's does. null: not one.
+ * A Linux app ("l:"): its windows come from KWin ("webwindows.adopt" with a KWin id). One that has a web window already
+ * comes to [page], on top, as an Android app's does; else (or that window couldn't start) the tap launches it with a
+ * placeholder window on [page] at once (LW3: the user, 2026-10-30, "they shoulf have a splash screen"), which its first
+ * toplevel takes. null: not one (the caller launches it as before).
  */
-async function linuxWindow(key: string, page: number): Promise<number | null> {
+async function linuxWindow(key: string, label: string, page: number): Promise<number | null> {
   if (!wideHome.value || !(await enabled())) return null;
-  const open = webWins.value.find((w) => w.key === key && !w.full);
-  if (!open) return null;
-  update(open.id, { page, minimised: false });
-  raise(open.id);
-  return open.id;
+  const open = webWins.value.find((w) => w.key === key && !w.full && !w.failed);
+  if (open) {
+    update(open.id, { page, minimised: false });
+    raise(open.id);
+    return open.id;
+  }
+  // One that couldn't start goes: a tap is a new try (a stuck one never blocks the app: Dolphin, 2026-10-30 21:01).
+  for (const w of webWins.value.filter((v) => v.key === key && v.failed)) close(w.id);
+  return linuxPlaceholder(key, label, page);
+}
+
+/** How long a Linux launch's window may take to show (LW3): then "couldn't start". The gate shortens it. */
+export const LINUX_START = { ms: 20_000 };
+let placeholders = 0;
+
+/** A Linux launch's placeholder window (LW3) on [page], on top, and the launch itself (the host: powos-run). */
+function linuxPlaceholder(key: string, label: string, page: number): number {
+  const id = --placeholders;
+  webWins.value = [...webWins.value, { id, el: id, key, label, page, ...cascade(), pending: true }];
+  fillEmptyTile(page, id);
+  watchStart(id);
+  void powos.apps.launch(key).catch(() => update(id, { failed: "The launch failed." }));
+  return id;
+}
+
+/** Window [id] not live in [LINUX_START] (no toplevel, or one that never drew): "couldn't start" - never forever. */
+function watchStart(id: number) {
+  setTimeout(() => {
+    const w = webWins.value.find((v) => v.id === id);
+    if (w && !w.live && !w.failed) update(id, { failed: w.pending ? "It opened no window." : "Its window never drew." });
+  }, LINUX_START.ms);
+}
+
+/** A new window's default frame (page px): half the screen wide, cascaded by the windows there are. */
+function cascade(): { x: number; y: number; w: number; h: number } {
+  const n = webWins.value.length;
+  return { x: 48 + 32 * (n % 6), y: 72 + 32 * (n % 6), w: Math.round(innerWidth * 0.5), h: Math.round(innerHeight * 0.6) };
+}
+
+/**
+ * KWin's toplevel [kwin] for placeholder [ph] (LW3): the host's window at the placeholder's body, then the same model
+ * entry and element under the host's id (its frame, page, tile and z kept). Closed meanwhile: the window goes too.
+ */
+async function takePlaceholder(ph: WebWin, kwin: number): Promise<boolean> {
+  const b = document.querySelector(`.webwindow[data-wwid="${ph.id}"] .webwindow-body`)?.getBoundingClientRect();
+  const o = pageOrigin();
+  const rect = b?.width ? { left: b.left, top: b.top, width: b.width, height: b.height } : { left: ph.x + o.x, top: ph.y + o.y + TITLE, width: ph.w, height: ph.h - TITLE };
+  const id = await powos.webwindows!.open(ph.key, rect, undefined, kwin).catch(() => -1);
+  if (id < 0) return false;
+  if (!webWins.value.some((w) => w.id === ph.id)) {
+    void powos.webwindows!.close(id);
+    return true;
+  }
+  webWins.value = webWins.value.map((w) => (w.id === ph.id ? { ...w, id, el: w.el ?? ph.id, pending: undefined, failed: undefined } : w));
+  const t = tiledOn(ph.id);
+  if (t != null) setTiling(t, { ...tilings.value[t], ids: tilings.value[t].ids.map((v) => (v === ph.id ? id : v)) });
+  if (tileMenu.value === ph.id) tileMenu.value = id;
+  watchStart(id);
+  return true;
 }
 
 export async function openWindow(key: string, label: string, page: number): Promise<number | null> {
@@ -114,11 +179,7 @@ export async function openWindow(key: string, label: string, page: number): Prom
     raise(open.id);
     return open.id;
   }
-  const n = webWins.value.length;
-  const w = Math.round(innerWidth * 0.5);
-  const h = Math.round(innerHeight * 0.6);
-  const x = 48 + 32 * (n % 6);
-  const y = 72 + 32 * (n % 6);
+  const { x, y, w, h } = cascade();
   // Its first rect is a guess; the element reports its real one on its first frame.
   const id = await powos.webwindows!.open(key, { left: x, top: y + TITLE, width: w, height: h - TITLE }).catch(() => -1);
   if (id < 0) return null;
@@ -140,6 +201,9 @@ export async function adoptWebWindow(
 ): Promise<boolean> {
   const ww = powos.webwindows;
   if (!ww) return false;
+  // A Linux launch's placeholder waiting for this app (LW3; by its key - the host matched app_id to the .desktop): taken.
+  const ph = m.kwin != null ? webWins.value.find((w) => w.pending && w.key === m.key) : undefined;
+  if (ph) return takePlaceholder(ph, m.kwin!);
   const a = workArea();
   const o = pageOrigin();
   const aw = a.right - a.left;
@@ -156,6 +220,7 @@ export async function adoptWebWindow(
   const id = await ww.open(m.key, { left: vx, top: vy + TITLE, width: w, height: h - TITLE }, m.task, m.kwin).catch(() => -1);
   if (id < 0) return false;
   webWins.value = [...webWins.value, { id, key: m.key, label: m.label, page, x: vx - o.x, y: vy - o.y, w, h, task: m.task }];
+  if (m.kwin != null) watchStart(id);
   // As any window opened on the page: a tiling there with an empty tile takes it (its floating frame kept for a float
   // out); otherwise it floats at that frame on top.
   fillEmptyTile(page, id);
@@ -321,7 +386,7 @@ export function WebWindowsOn({ page }: { page: number }) {
     // Clipped to its page (PS2): a window bigger than its page never shows on the next one.
     <div class="page-windows">
       {here.map((w, i) => (
-        <WebWindowEl key={w.id} win={w} z={webWins.value.indexOf(w)} above={here.slice(i + 1)} />
+        <WebWindowEl key={w.el ?? w.id} win={w} z={webWins.value.indexOf(w)} above={here.slice(i + 1)} />
       ))}
       {t && dividers(t, tileArea()).map((d) => <DividerEl key={d.axis} page={page} d={d} o={o} />)}
     </div>
@@ -730,7 +795,7 @@ export function entry(w: WebWin): string | null {
 
 /** "<dpr> <n> <entries...>": every window the page shows, bottom first (DOM order = z-order). */
 export function geometry(): string {
-  const parts = webWins.value.map(entry).filter((e): e is string => e != null);
+  const parts = webWins.value.filter((w) => !w.pending).map(entry).filter((e): e is string => e != null);
   return [devicePixelRatio, parts.length, ...parts].join(" ");
 }
 
@@ -818,13 +883,14 @@ function Controls({ win }: { win: WebWin }) {
 /** Full screen = a real full-screen app on the main display (WebWindows.fullScreen); with no host, the work area. */
 function fullScreen(id: number) {
   tileMenu.value = null;
-  if (native.value && powos.webwindows?.fullScreen) void powos.webwindows.fullScreen(id);
+  if (native.value && powos.webwindows?.fullScreen && id >= 0) void powos.webwindows.fullScreen(id);
   else toggleMaximise(id);
 }
 
 function close(id: number) {
   tileMenu.value = null;
-  if (native.value && powos.webwindows?.close) void powos.webwindows.close(id);
+  // A placeholder (id < 0, LW3) is the page's alone.
+  if (native.value && powos.webwindows?.close && id >= 0) void powos.webwindows.close(id);
   else {
     untile(id, "gone");
     webWins.value = webWins.value.filter((w) => w.id !== id);
@@ -973,7 +1039,7 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
     e.stopPropagation();
     const r = body.current?.getBoundingClientRect();
     const s = win.scale ?? 1;
-    if (r) void powos.webwindows?.input(win.id, action, (e.clientX - r.left) / s, (e.clientY - r.top) / s);
+    if (r && win.id >= 0) void powos.webwindows?.input(win.id, action, (e.clientX - r.left) / s, (e.clientY - r.top) / s);
   };
   const end = (e: PointerEvent, action: "up" | "cancel") => {
     if (!pressed.current) return;
@@ -996,11 +1062,22 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
       onPointerUp={(e) => end(e, "up")}
       onPointerCancel={(e) => end(e, "cancel")}
     >
-      {!win.live && (
-        <div class="ww-placeholder">
-          {icon && <img class="ww-placeholder-icon" src={icon} alt="" draggable={false} />}
-          <div class="ww-progress" />
-        </div>
+      {!win.live && <Placeholder win={win} icon={icon} />}
+    </div>
+  );
+}
+
+/** Until its first frame: its icon and a progress line; one that couldn't start (LW3) says so, with a close. */
+function Placeholder({ win, icon }: { win: WebWin; icon: string | undefined }) {
+  return (
+    <div class={`ww-placeholder ${win.failed ? "failed" : ""}`}>
+      {icon && <img class="ww-placeholder-icon" src={icon} alt="" draggable={false} />}
+      {!win.failed && <div class="ww-progress" />}
+      {win.failed && <div class="ww-failed-text">Couldn't start {win.label}. {win.failed}</div>}
+      {win.failed && (
+        <button class="ww-failed-close" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => (e.stopPropagation(), close(win.id))}>
+          Close
+        </button>
       )}
     </div>
   );
