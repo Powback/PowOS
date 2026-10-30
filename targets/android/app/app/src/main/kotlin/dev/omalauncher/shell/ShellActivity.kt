@@ -67,7 +67,8 @@ class ShellActivity : Activity() {
         setContentView(host.web)
         keepFocusOnPage(host.web)
         // The switcher is a layer of this page: the gestures and the overview button reach it here.
-        val blur = WindowBlur(window, glass = host::wholeWindow)
+        // Its whole-window blur is the switcher's depth: never on once the switcher isn't up (WindowBlur's watchdog).
+        val blur = WindowBlur(window, glass = host::wholeWindow, keep = { dev.omalauncher.system.Switcher.open })
         // Home's window, left out when the wallpaper's picture is taken from the display (WallpaperBackdrop.still).
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             WallpaperBackdrop.homeWindow = { if (inFront) host.windowSurface() else null }
