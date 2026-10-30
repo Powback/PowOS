@@ -3112,7 +3112,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-edge-ne { bottom: 100%; left: 100%; } .ww-edge-nw { bottom: 100%; right: 100%; }
 .ww-edge-se { top: 100%; left: 100%; } .ww-edge-sw { top: 100%; right: 100%; }
 /* RZ1: the focused window's corner grips - a short arc (~28 dp) hugging each rounded corner just outside it, the theme's
-   light stroke; the top ones subtler. They fade in on the focused window, full while it is being resized. */
+   light stroke; the top ones subtler. They fade in briefly on activation (RZ6), full while it is being resized. */
 .ww-grip {
   position: absolute; width: 22px; height: 22px; overflow: visible; pointer-events: none; opacity: 0;
   transition: opacity 180ms ease-out;
@@ -3120,8 +3120,10 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-grip path { fill: none; stroke: var(--color-foreground); stroke-width: 4; stroke-linecap: round; }
 .ww-grip-se { right: -8px; bottom: -8px; } .ww-grip-sw { left: -8px; bottom: -8px; transform: scaleX(-1); }
 .ww-grip-ne { right: -8px; top: -8px; transform: scaleY(-1); } .ww-grip-nw { left: -8px; top: -8px; transform: scale(-1, -1); }
-.webwindow.focused .ww-grip-se, .webwindow.focused .ww-grip-sw { opacity: 0.7; }
-.webwindow.focused .ww-grip-ne, .webwindow.focused .ww-grip-nw { opacity: 0.25; }
+/* RZ6: shown briefly - for GRIPS_MS (webwindows.tsx) after a window is activated or its edge pressed, then they fade. */
+.webwindow.ww-grips .ww-grip { transition-duration: 120ms; }
+.webwindow.ww-grips .ww-grip-se, .webwindow.ww-grips .ww-grip-sw { opacity: 0.7; }
+.webwindow.ww-grips .ww-grip-ne, .webwindow.ww-grips .ww-grip-nw { opacity: 0.25; }
 .webwindow.ww-resizing .ww-grip { opacity: 0.9; }
 /* RZ4: the live size outline while a window is resized: a ring in the theme's foreground, the accent on a tile size. */
 .ww-outline {

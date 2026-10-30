@@ -355,6 +355,23 @@ function trackBase() {
 /** Home's own layers have the touch: a tile carried or picked, a menu, an open folder. */
 const busy = () => !!(carry.value || selected.value || menu.value || folder.value);
 
+/**
+ * RZ5 (the user, 10-31: "When I try to resize an application ... It sometimes activates the launcher or the notification
+ * panel"): the pointers that went down on a web window - its resize zones (outside its frame, but its elements), its
+ * bar, its body - by id. While any is down the whole touch is the window's: home's swipe up, pull down and page swipe
+ * never start or claim it, however vertical or fast it goes or wherever it ends. Seen in the capture phase, before
+ * the window's own handlers stop it and before the touch events home's swipes listen to.
+ */
+const windowPointers = new Set<number>();
+const WINDOW_PARTS = ".webwindow, .ww-edge";
+addEventListener("pointerdown", (e) => {
+  if (e.isPrimary) windowPointers.clear();
+  if ((e.target as Element | null)?.closest?.(WINDOW_PARTS)) windowPointers.add(e.pointerId);
+}, true);
+for (const type of ["pointerup", "pointercancel"] as const) addEventListener(type, (e) => windowPointers.delete(e.pointerId), true);
+/** A web window's gesture is under way (a finger down on it): home's gestures keep off. */
+export const windowGestureActive = () => windowPointers.size > 0;
+
 /** A touch down on home: what's under it, and what the drawer and the panels are doing. */
 function startGesture(x: number, y: number, target: Element) {
   // A new touch while one is under way: the old one's end was lost.
@@ -363,7 +380,7 @@ function startGesture(x: number, y: number, target: Element) {
   // A touch inside a floating app window is the app's, always (a scroll in Chrome must never pull the launcher up or
   // the shade down): home's swipes start only outside every window (ui/desktops.ts inWindow).
   // A web window (ui/webwindows.tsx) the same: its title bar drags only the window, its body is the app's.
-  if (busy() || inWindow(x, y) || target.closest?.(".dock, .webwindow")) return;
+  if (busy() || windowGestureActive() || inWindow(x, y) || target.closest?.(".dock, .webwindow")) return;
   g = {
     x0: x,
     y0: y,
@@ -406,11 +423,16 @@ function listUnder(target: Element) {
   return { inList: true, listTop: list.scrollTop <= 0, listBottom: list.scrollTop + list.clientHeight >= list.scrollHeight - 1 };
 }
 
+/**
+ * Someone else has the finger now: an app picked up (onto home, or along the dock), or a window's gesture that began
+ * after this one (a second finger on it).
+ */
+const handsOff = () => !!(carry.value || dockDrag.value || held.value) || windowGestureActive();
+
 /** A finger moving: its velocity, the gesture's kind once it's clear (SLOP), then what follows it. */
 function moveGesture(x: number, y: number, e: Event | null) {
   if (!g || g.own) return;
-  // An app picked up (onto home, or along the dock) has the finger now.
-  if (carry.value || dockDrag.value || held.value) return abandon();
+  if (handsOff()) return abandon();
   const dx = x - g.x0;
   const dy = y - g.y0;
   track(g, x, y);

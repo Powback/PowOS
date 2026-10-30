@@ -2502,10 +2502,84 @@ async function webWindowResizeCheck() {
       ].filter(Boolean);
     };
     fails.push(...judge(W.webWins.value.find((w) => w.id === 903)));
+    // RB1: a corner drag resizes; the bar stays 36 px.
+    const f903 = document.querySelector('.webwindow[data-wwid="903"]');
+    const b903 = f903?.querySelector(".webwindow-body");
+    const bar = b903 ? b903.getBoundingClientRect().top - f903.getBoundingClientRect().top : NaN;
+    if (Math.abs(bar - 36) > 0.5) fails.push(`RB1: after a corner drag the bar is ${bar} px (want 36, fixed)`);
   } finally {
     W.webWins.value = [];
   }
   return fails;
+}
+
+/**
+ * In the page: RZ5 (the user, 10-31: "When I try to resize an application ... It sometimes activates the launcher or the
+ * notification panel"). A fast vertical drag up from a bottom-corner zone, and one down from it, resize the window and
+ * open neither the launcher nor the shade (pull and drawer state stay closed, the page stays); a zone never reaches
+ * into the bottom gesture strip. RZ6: the grips show on activation and are gone after GRIPS_MS.
+ */
+async function webWindowZoneKeepsHome() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const G = await window.__gw.mod("./ui/gesture.ts");
+  const [sel, sleep, win] = ['.webwindow[data-wwid="905"]', (ms) => new Promise((ok) => setTimeout(ok, ms)), () => W.webWins.value.find((w) => w.id === 905)];
+  // One finger [a] -> [b] fast, pointer AND touch events (as webWindowCheck's drag): whether home pulled meanwhile.
+  const drag = async (el, a, b) => {
+    const send = (kind, k) => {
+      const [x, y] = [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+      el.dispatchEvent(new PointerEvent(`pointer${kind}`, { pointerId: 12, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true }));
+      const t = [new Touch({ identifier: 12, target: el, clientX: x, clientY: y })];
+      const name = { down: "Start", move: "Move", up: "End" }[kind];
+      const init = { touches: kind === "up" ? [] : t, changedTouches: t, bubbles: true, cancelable: true };
+      for (const type of [`touch${name.toLowerCase()}`, `Touch${name}`]) el.dispatchEvent(new TouchEvent(type, init));
+    };
+    const pulled = () => S.drawer.value > 0 || G.drawerDrag.value != null || S.notif.value || G.notifDrag.value != null;
+    let seen = (send("down", 0), false);
+    for (let i = 1; i <= 6; i++) (send("move", i / 6), await sleep(8), (seen ||= pulled()));
+    await (send("up", 1), window.__gw.settled());
+    return seen || pulled();
+  };
+  // A drag [dy] from 20 px off the bottom-right corner: it resizes, home stays as it was.
+  const zoneDrag = async (label, dy) => {
+    const f = document.querySelector(sel).getBoundingClientRect();
+    const at = [f.right + 20, f.bottom + 20];
+    const t = document.elementFromPoint(...at);
+    if (!t?.closest?.(".ww-edge")) return [`RZ5: ${at} off the bottom-right corner is ${t?.className} (want a resize zone)`];
+    const h0 = win().h;
+    const pulled = await drag(t, at, [at[0], at[1] + dy]);
+    return [
+      win().h === h0 && `RZ5: a fast drag ${label} from the bottom-right zone didn't resize (h ${h0})`,
+      pulled && `RZ5: a drag ${label} from a window's corner zone pulled the launcher or the shade`,
+      S.page.value !== 0 && `RZ5: a drag ${label} from a window's corner zone turned the page`,
+      G.windowGestureActive() && "RZ5: the window's gesture is still active after the finger lifted",
+    ].filter(Boolean);
+  };
+  // The window's bottom 10 px over the gesture strip: its bottom zones are no taller than that.
+  const stripKept = async () => {
+    const strip = Math.max(24, parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-bottom")) || 0);
+    const o = document.querySelector(sel).getBoundingClientRect().top - win().y;
+    W.webWins.value = W.webWins.value.map((w) => ({ ...w, h: 240, y: innerHeight - strip - 10 - 240 - o }));
+    await window.__gw.settled();
+    const se = document.querySelector(`${sel} .ww-edge-se`).getBoundingClientRect();
+    return se.bottom > innerHeight - strip + 0.5 ? [`RZ5: the bottom-right zone reaches ${se.bottom} into the gesture strip (from ${innerHeight - strip})`] : [];
+  };
+  const grips = () => document.querySelector(sel)?.classList.contains("ww-grips");
+  const was = S.page.value;
+  try {
+    S.page.value = 0;
+    await window.__gw.settled();
+    W.webWins.value = [{ id: 905, key: "a:gate.zone", label: "Zone", page: S.pages.value[0], x: 200, y: Math.max(140, innerHeight - 420), w: 320, h: 240, live: true }];
+    await window.__gw.settled();
+    const fails = grips() ? [] : ["RZ6: a window just activated shows no grips"];
+    fails.push(...(await zoneDrag("up", -320)), ...(await zoneDrag("down", 320)), ...(await stripKept()));
+    await sleep(W.GRIPS_MS + 400);
+    if (grips() || getComputedStyle(document.querySelector(`${sel} .ww-grip-se`)).opacity !== "0") fails.push(`RZ6: the grips still show ${W.GRIPS_MS + 400} ms after activation`);
+    return fails;
+  } finally {
+    W.webWins.value = [];
+    S.page.value = was;
+  }
 }
 
 /**
@@ -2810,12 +2884,17 @@ async function webWindowTileInputCheck() {
 }
 
 async function webWindowPinchCheck() {
-  // RB1 after a pinch 200 -> 140 px on window [pw] (400x320): resized to 280x224, scale 1, no transform, a 36 px bar.
-  const pinchResized = (pw, body) => {
-    const frame = document.querySelector(`.webwindow[data-wwid="${pw.id}"]`);
-    const [tf, bar] = [getComputedStyle(frame).transform, body.getBoundingClientRect().top - frame.getBoundingClientRect().top];
-    const bad = [(pw.scale ?? 1) !== 1 && `scale ${pw.scale} (want 1)`, (Math.abs(pw.w - 280) > 3 || Math.abs(pw.h - 224) > 3) && `size ${pw.w}x${pw.h} (want 280x224)`,
-      tf !== "none" && `a transform on the frame (${tf})`, Math.abs(bar - 36) > 0.5 && `a ${bar} px bar (want 36, fixed)`];
+  // SC1 after a pinch 200 -> 140 px on window [pw] (400x320): scaled to 0.7, still 400x320 (no relayout), the frame
+  // transformed (bar and body zoom together), the app's size in w.f unchanged and never a resize.
+  const pinchScaled = (pw, body, from) => {
+    const ours = (t) => [...Array(Math.floor(t.length / 24)).keys()].map((i) => t.slice(i * 24, i * 24 + 24)).find((e) => e[0] === "902");
+    const entries = window.__ww.sent.slice(from).map((l) => ours(l.split(" ").slice(4))).filter(Boolean);
+    const [tf, sizes] = [getComputedStyle(body.closest(".webwindow")).transform, new Set(entries.map((e) => `${e[21]}x${e[22]}`))];
+    const bad = [Math.abs((pw.scale ?? 1) - 0.7) > 0.03 && `scale ${pw.scale} (want 0.7)`, (pw.w !== 400 || pw.h !== 320) && `size ${pw.w}x${pw.h} (want 400x320, unchanged)`,
+      tf === "none" && "no transform on the frame (want the whole window zoomed)",
+      Math.abs(body.getBoundingClientRect().width / body.offsetWidth - (pw.scale ?? 1)) > 0.01 && `a measured body scale ${body.getBoundingClientRect().width / body.offsetWidth} (the model's ${pw.scale})`,
+      entries.some((e) => e[20] === "1") && "an app resize (w.f said resizing)",
+      sizes.size > 1 && `the app's size changed: ${[...sizes].join(", ")}`];
     return bad.filter(Boolean).map((b) => `a pinch 200 -> 140 px on the body left ${b}`);
   };
   const W = await window.__gw.mod("./ui/webwindows.tsx");
@@ -2833,7 +2912,7 @@ async function webWindowPinchCheck() {
     if (!body) return ["pinch: no web window body on the page on screen"];
     const pb = body.getBoundingClientRect();
     const [cx, cy] = [pb.left + pb.width / 2, pb.top + pb.height / 2];
-    const pe = (type, id, x) => body.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", clientX: x, clientY: cy, bubbles: true }));
+    const [pe, sentFrom] = [(type, id, x) => body.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", isPrimary: id === 21, clientX: x, clientY: cy, bubbles: true })), window.__ww.sent.length];
     // Two fingers 200 px apart come together to 140 px (8 moves).
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].forEach((i) => {
       const t = i === 0 ? "pointerdown" : i === 9 ? "pointerup" : "pointermove";
@@ -2841,10 +2920,8 @@ async function webWindowPinchCheck() {
       (pe(t, 21, cx - 100 + q), pe(t, 22, cx + 100 - q));
     });
     await window.__gw.settled();
-    // RB1: a pinch resizes (w, h x 140/200), never scales; the bar keeps its height.
-    const pw = W.webWins.value.find((w) => w.id === 902);
-    const k = pw.scale ?? 1;
-    fails.push(...pinchResized(pw, body));
+    const [pw, k] = [W.webWins.value.find((w) => w.id === 902), W.webWins.value.find((w) => w.id === 902).scale ?? 1];
+    fails.push(...pinchScaled(pw, body, sentFrom));
     const b2 = body.getBoundingClientRect();
     const acts = calls.map((c) => c[0]).join(",");
     if (acts !== "down,cancel") fails.push(`a pinch on the body reached the app: ${acts} (want down,cancel)`);
@@ -2865,7 +2942,7 @@ async function webWindowPinchCheck() {
     one("pointerup", 32, p[0] + 60, true);
     await window.__gw.settled();
     const p2 = W.webWins.value.find((w) => w.id === 902);
-    if (p2.w !== pw.w || p2.h !== pw.h || (p2.scale ?? 1) !== 1) fails.push(`a one-finger drag after a finger lifted outside the window resized it ${pw.w}x${pw.h} -> ${p2.w}x${p2.h} (scale ${p2.scale})`);
+    if (p2.w !== pw.w || p2.h !== pw.h || p2.scale !== pw.scale) fails.push(`a one-finger drag after a finger lifted outside the window changed it ${pw.w}x${pw.h}@${pw.scale} -> ${p2.w}x${p2.h}@${p2.scale}`);
   } finally {
     W.webWins.value = [];
     powos.webwindows = had;
@@ -3689,7 +3766,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowResizeCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowResizeCheck, webWindowZoneKeepsHome, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

@@ -6,8 +6,8 @@
 // web input. Only the app's pixels are native: the host (WebWindows.kt) puts the app's own buffers in a layer UNDER
 // home's surface, exactly where this file measures the body every frame (position, clip, visibility, z), on the same
 // draw. Over the body the page is transparent; anything above it in the DOM paints over the app and takes its taps.
-import { signal } from "@preact/signals";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { effect, signal } from "@preact/signals";
+import { useRef, useState } from "preact/hooks";
 import { geometryChannel, native, nextFrameId, sendGeometry } from "../apps/port.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
@@ -1101,47 +1101,43 @@ addEventListener("pointerdown", (e) => {
  */
 const oneFinger = new Map<number, () => void>();
 
+/** A pinch's floor (the old native frame's MIN_SCALE) and ceiling (never past the work area either: [usePinch]). */
+export const MIN_SCALE = 0.4;
+export const MAX_SCALE = 1.5;
+
 /**
- * RB1 (the user, 10-30: "The title bar should stay like the same size for like the icons and whatever"): two fingers on
- * a window (bar or body) RESIZE it, as an edge does - its width and height times the fingers' spread / the start
- * spread, the window point under the fingers' centroid kept under it (as a fraction of the frame), [MIN_W] x [MIN_H] up
- * to the work area. Never a transform: the bar, its icon, title and buttons keep their size at every window size and
- * during the gesture (before, the pinch set a CSS scale on the whole frame and the bar shrank with it). The app's size
- * goes the edges' paced way ([resizeStart] / [pace] / [resizeEnd]: RS1), one final on the last finger up. The first
- * finger's gesture ends unfinished ([oneFinger]): the body's pinch never reaches the app.
+ * SC1 (the user, 10-31: "Doing the two finger scaling motion is no longer scaling it, it's resizing it"): two fingers
+ * on a window (bar or body) SCALE it - the whole frame, bar and app, zoomed uniformly like a picture; the app keeps its
+ * size (w, h: no relayout), its layer is drawn at the frame's measured scale (entry()). Scale = start x spread / start
+ * spread, [MIN_SCALE]..[MAX_SCALE] and no bigger than the work area; the window point under the fingers' centroid stays
+ * under it. The scale is saved with the window. An edge or a grip RESIZES (w, h; the bar stays [TITLE]: RB1). The
+ * first finger's gesture ends unfinished ([oneFinger]): the body's pinch never reaches the app. One finger never
+ * scales: a primary pointer down starts a new touch.
  */
 function usePinch(win: WebWin) {
   const fingers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<{ spread0: number; w0: number; h0: number; fx: number; fy: number } | null>(null);
+  const pinch = useRef<{ spread0: number; s0: number; px: number; py: number } | null>(null);
   const live = useRef(win);
   live.current = win;
   const spread = () => {
     const [a, b] = [...fingers.current.values()];
     return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) };
   };
-  const end = () => {
-    if (!pinch.current) return;
-    pinch.current = null;
-    resizeEnd(live.current.id);
-  };
   const down = (e: PointerEvent) => {
     // The first finger of a new touch starts clean: an earlier finger's up that landed outside this frame was never
     // seen here, and a stale entry made the next one-finger drag a pinch (10-30: "dragging with one finger rescales").
-    if (e.isPrimary) (fingers.current.clear(), end());
+    if (e.isPrimary) (fingers.current.clear(), (pinch.current = null));
     fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (fingers.current.size !== 2 || pinch.current) return;
     e.stopPropagation();
     oneFinger.get(win.id)?.();
     oneFinger.delete(win.id);
-    let w = live.current;
+    const w = live.current;
     if (tiledOn(w.id) != null) untile(w.id, "keep");
-    // A window still carrying an old pinch's scale (before RB1) is made that size first: from here it is 1.
-    if ((w.scale ?? 1) !== 1) normaliseScale(w);
-    w = webWins.value.find((v) => v.id === w.id) ?? w;
     const o = pageOrigin();
     const f = spread();
-    pinch.current = { spread0: f.d, w0: w.w, h0: w.h, fx: (f.cx - o.x - w.x) / w.w, fy: (f.cy - o.y - w.y) / w.h };
-    resizeStart(w.id);
+    const s0 = w.scale ?? 1;
+    pinch.current = { spread0: f.d, s0, px: (f.cx - o.x - w.x) / s0, py: (f.cy - o.y - w.y) / s0 };
   };
   const move = (e: PointerEvent) => {
     if (!fingers.current.has(e.pointerId)) return;
@@ -1151,31 +1147,21 @@ function usePinch(win: WebWin) {
     e.stopPropagation();
     if (fingers.current.size < 2) return;
     const f = spread();
-    const k = p.spread0 > 0 ? f.d / p.spread0 : 1;
-    const a = workArea();
-    const ww = Math.round(Math.min(a.right - a.left, Math.max(MIN_W, p.w0 * k)));
-    const wh = Math.round(Math.min(a.bottom - a.top, Math.max(MIN_H, p.h0 * k)));
-    const o = pageOrigin();
     const w = live.current;
-    const at = clampPlace(f.cx - o.x - p.fx * ww, f.cy - o.y - p.fy * wh, ww);
-    const pacing = resizing.get(w.id);
-    if (pacing) pacing.steps++;
-    update(w.id, { x: Math.round(at.x), y: Math.round(at.y), w: ww, h: wh, scale: 1, restore: undefined });
+    const a = workArea();
+    const top = Math.max(MIN_SCALE, Math.min(MAX_SCALE, (a.right - a.left) / w.w, (a.bottom - a.top) / w.h));
+    const k = p.spread0 > 0 ? Math.min(top, Math.max(MIN_SCALE, (p.s0 * f.d) / p.spread0)) : p.s0;
+    const o = pageOrigin();
+    const at = clampPlace(f.cx - o.x - p.px * k, f.cy - o.y - p.py * k, w.w * k);
+    update(w.id, { x: Math.round(at.x), y: Math.round(at.y), scale: Math.round(k * 1000) / 1000, restore: undefined });
   };
   const up = (e: PointerEvent) => {
     fingers.current.delete(e.pointerId);
     if (!pinch.current) return;
     e.stopPropagation();
-    if (fingers.current.size === 0) end();
+    if (fingers.current.size === 0) pinch.current = null;
   };
   return { onPointerDownCapture: down, onPointerMoveCapture: move, onPointerUpCapture: up, onPointerCancelCapture: up };
-}
-
-/** A window saved with an old pinch's scale (before RB1): its on-screen size as its size, scale 1. */
-function normaliseScale(w: WebWin) {
-  const s = w.scale ?? 1;
-  if (s === 1) return;
-  update(w.id, { w: Math.max(MIN_W, Math.round(w.w * s)), h: Math.max(MIN_H, Math.round(w.h * s)), scale: 1 });
 }
 
 /** Its title bar: moves it (a drag), full screen (a double tap), snaps it to a tile (let go at an edge). */
@@ -1340,9 +1326,11 @@ function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
   return (
     <div
       class={`ww-edge ww-edge-${side}`}
+      style={{ height: zoneHeight(win, side) }}
       onPointerDown={(e) => {
         e.stopPropagation();
         raise(win.id);
+        flashGrips(win.id);
         capture(e);
         if (tiledOn(win.id) != null) untile(win.id, "keep");
         start.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, w: win.w, h: win.h, side: sideAt(side, e) };
@@ -1364,6 +1352,58 @@ function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
 }
 
 const CORNERS = ["se", "sw", "ne", "nw"] as const;
+
+/** RZ6 (the user, 10-31: "We just need to show this briefly ... like when we activate the windows"): how long the grips show. */
+export const GRIPS_MS = 1500;
+/** The window whose corner grips show now ([flashGrips]); null: none (the zones stay live without them). */
+export const gripsOn = signal<number | null>(null);
+let gripsTimer = 0;
+
+/** Shows window [id]'s grips for [GRIPS_MS] (an activation, a press on its edge zones), then they fade out. */
+export function flashGrips(id: number) {
+  gripsOn.value = id;
+  clearTimeout(gripsTimer);
+  gripsTimer = window.setTimeout(() => {
+    if (gripsOn.peek() === id) gripsOn.value = null;
+  }, GRIPS_MS);
+}
+
+// A window coming to the front (opened, raised, focused): its grips flash.
+let frontId: number | undefined;
+effect(() => {
+  const top = webWins.value.at(-1)?.id;
+  if (top === frontId) return;
+  frontId = top;
+  if (top != null) flashGrips(top);
+});
+
+/** The screen's system strips (px from the top / bottom): the status bar's and the gesture bar's, 24 px at least. */
+function systemStrips(): { top: number; bottom: number } {
+  const css = getComputedStyle(document.documentElement);
+  const inset = (name: string) => parseFloat(css.getPropertyValue(name)) || 0;
+  return { top: Math.max(24, inset("--inset-top")), bottom: Math.max(24, inset("--inset-bottom")) };
+}
+
+/**
+ * RZ5: zone [side]'s height clamped out of the system strips (frame px at scale [k]): an n/ne/nw zone never reaches
+ * into the status strip, an s/se/sw one never into the bottom gesture area - those touches stay the system's. Undefined:
+ * the zone's own size (CSS).
+ */
+function zoneHeight(win: WebWin, side: string): string | undefined {
+  const k = win.scale ?? 1;
+  const strips = systemStrips();
+  const top = pageOrigin().y + win.y;
+  const zone = side.length === 2 ? 48 : 32;
+  if (side.startsWith("n")) {
+    const room = Math.max(0, top - strips.top);
+    return room < zone ? `${room / k}px` : undefined;
+  }
+  if (side.startsWith("s")) {
+    const room = Math.max(0, innerHeight - strips.bottom - (top + win.h * k));
+    return room < zone ? `${room / k}px` : undefined;
+  }
+  return undefined;
+}
 
 /** RZ1: a corner's grip - a short arc hugging the frame's rounded corner, outside it (drawn; the zone takes the press). */
 function Grip({ corner }: { corner: (typeof CORNERS)[number] }) {
@@ -1536,15 +1576,16 @@ function appDragEnd(id: number, e: PointerEvent, cancelled: boolean): boolean {
 function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
   const body = useRef<HTMLDivElement>(null);
   const pinch = usePinch(win);
-  // RB1: never a transform on the frame (the bar keeps its size); an old saved scale becomes the window's size.
-  useEffect(() => normaliseScale(win), [win.scale]);
-  const s = 1;
+  // SC1: a pinch's scale zooms the whole frame (bar and body); the app keeps its size (sizeOf sends the layout size).
+  const s = win.scale ?? 1;
   const frame = {
     position: "absolute",
     left: `${win.x}px`,
     top: `${win.y}px`,
     width: `${win.w}px`,
     height: `${win.h}px`,
+    transform: s === 1 ? undefined : `scale(${s})`,
+    transformOrigin: "0 0",
     zIndex: 20 + z,
     display: "flex",
     flexDirection: "column",
@@ -1571,7 +1612,7 @@ function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
 
 /** The frame element's classes: maximised, live, focused (the top window: its grips, RZ1), being resized. */
 function frameClass(win: WebWin, focused: boolean, sizing: boolean): string {
-  const on: [boolean, string][] = [[!!win.restore, "maximised"], [!!win.live, "live"], [focused, "focused"], [sizing, "ww-resizing"]];
+  const on: [boolean, string][] = [[!!win.restore, "maximised"], [!!win.live, "live"], [focused, "focused"], [sizing, "ww-resizing"], [gripsOn.value === win.id, "ww-grips"]];
   return ["webwindow", ...on.filter(([b]) => b).map(([, c]) => c)].join(" ");
 }
 
