@@ -116,6 +116,11 @@
   /* What's behind the open shade (the app, home): blurred by the compositor, dp. Was 360 (2026-10-28: "too much"); 160 is
      still past reading text, close to home's glass (--glass-blur-native 140), so the two read as one material. */
   --shade-blur-native: 160px;
+  /* The open shade's tint over what the compositor blurs behind it (.notif-scrim, the notification screen's background),
+     and home's widget glass wears the very same (shell.css: the widgets, the search pill, the seams, folders; the
+     web-window bar, webwindows.tsx): one token (2026-10-30 "make the widgets use the same tint as the notification
+     screen background"). Each keeps its own blur. A light theme's below. */
+  --shade-tint: rgb(0 0 0 / 55%);
   /* One material (docs/DESIGN-LANGUAGE.md): every surface is the reference fill - home's tiles as PowOS AI's cards. */
   --glass-fill: var(--text-fill);
   /*
@@ -162,6 +167,8 @@
   --glass-brightness: 1.08;
   --glass-veil: rgb(255 255 255 / 8%);
   --glass-behind-tint: 66%;
+  /* Light: the theme's own ground at the same strength (dark text stays readable on the shade and the widgets). */
+  --shade-tint: color-mix(in srgb, var(--color-background) 55%, transparent);
 }
 .glass, .glass-native { --glass-tint: 32%; }
 :is(.glass, .glass-native)[data-light="true"] { --glass-tint: 40%; }

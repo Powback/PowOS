@@ -674,14 +674,14 @@ function bytesOf(css: string): string {
 }
 
 /**
- * The bar's glass: a home widget's (.tile under live glass, theme.css) - its fill over its veil, its --line edge
+ * The bar's glass: a home widget's (.tile under live glass) - its tint (theme.css --shade-tint, no veil), its --line edge
  * --frame wide, the compositor radius home's tiles get (glassblur.ts) and --radius - device px. The host draws
  * the bar of that material (WebWindowChrome.glass), so nothing of the widget style is copied natively.
  */
 function glass(): string {
   const css = getComputedStyle(document.documentElement);
   const len = (name: string) => (parseFloat(css.getPropertyValue(name)) || 0) * devicePixelRatio;
-  return `${bytesOf("var(--glass-fill)")} ${bytesOf("var(--glass-veil)")} ${bytesOf("var(--line)")} ${len("--frame")} ${themeBlur() * devicePixelRatio} ${len("--radius")}`;
+  return `${bytesOf("var(--shade-tint)")} ${bytesOf("transparent")} ${bytesOf("var(--line)")} ${len("--frame")} ${themeBlur() * devicePixelRatio} ${len("--radius")}`;
 }
 
 /**

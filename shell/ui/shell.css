@@ -1262,7 +1262,7 @@ input.folder-title:focus { background: var(--soft-fill); }
   position: fixed;
   z-index: 13;
   inset: 0;
-  background: rgb(0 0 0 / 0.55);
+  background: var(--shade-tint);
   opacity: var(--q);
   pointer-events: none;
 }
@@ -2511,6 +2511,16 @@ html:root .page .search-face .bar-pill {
   background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
 }
 html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
+/* Home's widget glass - the widgets, the library's cards, a group's seams, the search pills, an open folder - takes the
+   open shade's tint (theme.css --shade-tint) in place of the frost's: the same colour and opacity, no veil under it,
+   their own compositor blur kept, no sheen (the shade has none). Over a wallpaper of the other tone they still flip
+   (below), as their text needs. The faces had no tint at all before this: their background names --frost-sheen, which
+   only the frost block above defines, and a widget face isn't in it - the whole background was invalid, so none. */
+:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) :is(.page .home-tile > .tile, .lib-card.tile, .page .seam, .home > .bar .bar-pill, .page .search-face .bar-pill, .folder-sheet .folder-bg.tile) {
+  --frost-fill: var(--shade-tint);
+  --frost-sheen: transparent;
+  --glass-veil: transparent;
+}
 /*
  * Over a wallpaper of the other tone (a dark theme over a bright picture, a light one over a dark): the frost takes
  * the wallpaper's tone, its text the theme's two colours swapped - as the wallpaper's labels turn (theme.css
