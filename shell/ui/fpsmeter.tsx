@@ -92,9 +92,15 @@ function drawGraph(cv: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
   }
 }
 
+/** The number to show: home's, the bar's own, or -2 = asleep while home is away (a dash). */
+function shownNumber(): number {
+  if (main.gone && !raf) return -2;
+  return mainFresh() ? main.fps : fpsNow();
+}
+
 function drawText(u: NonNullable<typeof ui>) {
-  const f = mainFresh() ? main.fps : fpsNow();
-  if (f !== shownFps) { shownFps = f; u.num.textContent = String(f).padStart(3, "\u2007"); }
+  const f = shownNumber();
+  if (f !== shownFps) { shownFps = f; u.num.textContent = f < 0 ? "\u2007\u2007\u2013" : String(f).padStart(3, "\u2007"); }
   const label = rec ? `REC ${Math.floor((performance.now() - recStart) / 1000)}s` : busy ? "SEND" : "";
   if (label !== shownRec) { shownRec = label; u.label.textContent = label; u.root.classList.toggle("rec", rec); }
 }
@@ -108,7 +114,9 @@ function tick(count: number) {
 /** Home idle (and no recording): the meter shows 0 and its loop sleeps until home samples again. */
 function follow() {
   if (!enabled || document.hidden) return;
-  if (!main.idle || rec) return start();
+  // HACK: home away (an app/game in front) = asleep with a dash, not the bar's own frames. Real fix: the front
+  // PowOS window's presented frames (native_consumer.c's queueBuffer count) as the number.
+  if ((!main.idle && !main.gone) || rec) return start();
   if (!raf) return;
   stopLoop();
   if (ui?.ctx) drawGraph(ui.cv, ui.ctx);
