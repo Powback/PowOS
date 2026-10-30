@@ -7,7 +7,7 @@
 // home's surface, exactly where this file measures the body every frame (position, clip, visibility, z), on the same
 // draw. Over the body the page is transparent; anything above it in the DOM paints over the app and takes its taps.
 import { signal } from "@preact/signals";
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { geometryChannel, native, nextFrameId, sendGeometry } from "../apps/port.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
@@ -834,7 +834,7 @@ export function entry(w: WebWin): string | null {
   const { clip, alpha } = shown(body);
   const visible = !document.querySelector(OVERLAYS) && alpha > 0.01 && clip[2] > clip[0] && clip[3] > clip[1];
   const rects = [f.left, f.top, f.width, f.height, b.left, b.top, b.width, b.height, ...clip].map(px);
-  return [w.id, ...rects, RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), w.restore ? 1 : 0, mergeOf(w, el), sizeOf(w), fillOf()].join(" ");
+  return [w.id, ...rects, RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), w.restore ? 1 : 0, mergeOf(w, el), sizeOf(w, body), fillOf()].join(" ");
 }
 
 // ---- RS1/RS2: a resize drag paces the app's relayouts --------------------------------------------------------------
@@ -886,10 +886,15 @@ function pace(id: number, r: Resizing, now: number) {
   (r.cw = w), (r.ch = h), (r.last = r.frame), (r.lastAt = now), r.reqs++;
 }
 
-/** "<resizing> <app w> <app h>": a paced drag's app size, else "0 0 0" (the host uses the body's). */
-function sizeOf(w: WebWin): string {
+/**
+ * "<resizing> <app w> <app h>": the app's size in CSS px - a paced drag's, else the body's layout size. Always the
+ * layout size, never one measured after transforms: the host rounds it to device px ONCE (x dpr), so a page zoom, a
+ * swipe or a rounded scale can't move the app's display by a pixel each frame (10-30: "After I rescaled YouTube it's
+ * like flickering" - the size came from the transformed rect / a 2-decimal scale, a resize per frame).
+ */
+function sizeOf(w: WebWin, body: HTMLElement): string {
   const r = resizing.get(w.id);
-  return r && r.cw > 0 ? `1 ${r.cw} ${r.ch}` : "0 0 0";
+  return r && r.cw > 0 ? `1 ${r.cw} ${r.ch}` : `0 ${body.offsetWidth} ${body.offsetHeight}`;
 }
 
 /** The theme's surface as "rrggbb" (the host's fill under a resized app's last buffer), cached by its token's value. */
@@ -1078,41 +1083,47 @@ addEventListener("pointerdown", (e) => {
  */
 const oneFinger = new Map<number, () => void>();
 
-/** A pinch's floor (the old native frame's MIN_SCALE) and ceiling. */
-export const MIN_SCALE = 0.4;
-const MAX_SCALE = 1;
-
 /**
- * Two fingers on a window (bar or body) zoom it (restored from the native frame, removed with it in 28001157): the
- * window point under the fingers' centroid stays under it at scale start x spread / start spread, [MIN_SCALE]..1. The
- * frame's transform scales it live and the w.f entry's measured scale follows, so the app's layer scales with it; the
- * app's size (w, h) is unchanged - nothing to relayout. The first finger's gesture ends unfinished ([oneFinger]): the
- * body's pinch never reaches the app. A finger lifting ends the pinch (the rest of that touch does nothing).
+ * RB1 (the user, 10-30: "The title bar should stay like the same size for like the icons and whatever"): two fingers on
+ * a window (bar or body) RESIZE it, as an edge does - its width and height times the fingers' spread / the start
+ * spread, the window point under the fingers' centroid kept under it (as a fraction of the frame), [MIN_W] x [MIN_H] up
+ * to the work area. Never a transform: the bar, its icon, title and buttons keep their size at every window size and
+ * during the gesture (before, the pinch set a CSS scale on the whole frame and the bar shrank with it). The app's size
+ * goes the edges' paced way ([resizeStart] / [pace] / [resizeEnd]: RS1), one final on the last finger up. The first
+ * finger's gesture ends unfinished ([oneFinger]): the body's pinch never reaches the app.
  */
 function usePinch(win: WebWin) {
   const fingers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<{ spread0: number; s0: number; px: number; py: number } | null>(null);
+  const pinch = useRef<{ spread0: number; w0: number; h0: number; fx: number; fy: number } | null>(null);
   const live = useRef(win);
   live.current = win;
   const spread = () => {
     const [a, b] = [...fingers.current.values()];
     return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) };
   };
+  const end = () => {
+    if (!pinch.current) return;
+    pinch.current = null;
+    resizeEnd(live.current.id);
+  };
   const down = (e: PointerEvent) => {
     // The first finger of a new touch starts clean: an earlier finger's up that landed outside this frame was never
     // seen here, and a stale entry made the next one-finger drag a pinch (10-30: "dragging with one finger rescales").
-    if (e.isPrimary) (fingers.current.clear(), (pinch.current = null));
+    if (e.isPrimary) (fingers.current.clear(), end());
     fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (fingers.current.size !== 2 || pinch.current) return;
     e.stopPropagation();
     oneFinger.get(win.id)?.();
     oneFinger.delete(win.id);
-    const w = live.current;
+    let w = live.current;
     if (tiledOn(w.id) != null) untile(w.id, "keep");
+    // A window still carrying an old pinch's scale (before RB1) is made that size first: from here it is 1.
+    if ((w.scale ?? 1) !== 1) normaliseScale(w);
+    w = webWins.value.find((v) => v.id === w.id) ?? w;
     const o = pageOrigin();
     const f = spread();
-    const s0 = w.scale ?? 1;
-    pinch.current = { spread0: f.d, s0, px: (f.cx - o.x - w.x) / s0, py: (f.cy - o.y - w.y) / s0 };
+    pinch.current = { spread0: f.d, w0: w.w, h0: w.h, fx: (f.cx - o.x - w.x) / w.w, fy: (f.cy - o.y - w.y) / w.h };
+    resizeStart(w.id);
   };
   const move = (e: PointerEvent) => {
     if (!fingers.current.has(e.pointerId)) return;
@@ -1122,19 +1133,31 @@ function usePinch(win: WebWin) {
     e.stopPropagation();
     if (fingers.current.size < 2) return;
     const f = spread();
-    const k = p.spread0 > 0 ? Math.min(MAX_SCALE, Math.max(MIN_SCALE, (p.s0 * f.d) / p.spread0)) : p.s0;
+    const k = p.spread0 > 0 ? f.d / p.spread0 : 1;
+    const a = workArea();
+    const ww = Math.round(Math.min(a.right - a.left, Math.max(MIN_W, p.w0 * k)));
+    const wh = Math.round(Math.min(a.bottom - a.top, Math.max(MIN_H, p.h0 * k)));
     const o = pageOrigin();
     const w = live.current;
-    const at = clampPlace(f.cx - o.x - p.px * k, f.cy - o.y - p.py * k, w.w * k);
-    update(w.id, { x: Math.round(at.x), y: Math.round(at.y), scale: k, restore: undefined });
+    const at = clampPlace(f.cx - o.x - p.fx * ww, f.cy - o.y - p.fy * wh, ww);
+    const pacing = resizing.get(w.id);
+    if (pacing) pacing.steps++;
+    update(w.id, { x: Math.round(at.x), y: Math.round(at.y), w: ww, h: wh, scale: 1, restore: undefined });
   };
   const up = (e: PointerEvent) => {
     fingers.current.delete(e.pointerId);
     if (!pinch.current) return;
     e.stopPropagation();
-    if (fingers.current.size === 0) pinch.current = null;
+    if (fingers.current.size === 0) end();
   };
   return { onPointerDownCapture: down, onPointerMoveCapture: move, onPointerUpCapture: up, onPointerCancelCapture: up };
+}
+
+/** A window saved with an old pinch's scale (before RB1): its on-screen size as its size, scale 1. */
+function normaliseScale(w: WebWin) {
+  const s = w.scale ?? 1;
+  if (s === 1) return;
+  update(w.id, { w: Math.max(MIN_W, Math.round(w.w * s)), h: Math.max(MIN_H, Math.round(w.h * s)), scale: 1 });
 }
 
 /** Its title bar: moves it (a drag), full screen (a double tap), snaps it to a tile (let go at an edge). */
@@ -1495,15 +1518,15 @@ function appDragEnd(id: number, e: PointerEvent, cancelled: boolean): boolean {
 function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
   const body = useRef<HTMLDivElement>(null);
   const pinch = usePinch(win);
-  const s = win.scale ?? 1;
+  // RB1: never a transform on the frame (the bar keeps its size); an old saved scale becomes the window's size.
+  useEffect(() => normaliseScale(win), [win.scale]);
+  const s = 1;
   const frame = {
     position: "absolute",
     left: `${win.x}px`,
     top: `${win.y}px`,
     width: `${win.w}px`,
     height: `${win.h}px`,
-    transform: s === 1 ? undefined : `scale(${s})`,
-    transformOrigin: "0 0",
     zIndex: 20 + z,
     display: "flex",
     flexDirection: "column",

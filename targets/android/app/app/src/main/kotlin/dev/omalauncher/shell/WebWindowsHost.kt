@@ -50,13 +50,14 @@ import android.os.Looper
 object WebWindowsHost {
     private val FLAGS =
         DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
+            (1 shl 6) or // SUPPORTS_TOUCH: touch = TOUCH_VIRTUAL, so input has a viewport for it ([Touch])
             (1 shl 8) or // DESTROY_CONTENT_ON_REMOVAL: the window's activities finish with it
             (1 shl 10) // TRUSTED
 
     private const val SHELL_UID = 2000
 
 
-    private class Vd(val display: VirtualDisplay, val reader: ImageReader) {
+    private class Vd(val display: VirtualDisplay, val reader: ImageReader, val touch: Touch?) {
         /** RS1's settle watch ([Host.settle]): its start, its last display frame (uptime ms), what to log with it. */
         var settleFrom = 0L
         var lastFrame = 0L
@@ -129,7 +130,8 @@ object WebWindowsHost {
                 r.close()
                 return
             }
-            made = Vd(vd, r)
+            val touch = Touch.attach(vd.display)
+            made = Vd(vd, r, touch)
             vds[vd.display.displayId] = made
             say("display $tag ${vd.display.displayId}")
             say("log display ${vd.display.displayId} ${w}x$h dpi $dpi: sw ${minOf(w, h) * 160 / dpi}dp")
@@ -177,11 +179,115 @@ object WebWindowsHost {
         }
 
         private fun release(v: Vd) {
+            v.touch?.detach()
             v.display.release()
             v.reader.close()
         }
 
         fun releaseAll() = vds.values.forEach { runCatching { release(it) } }
+    }
+
+    /**
+     * A window's display reports a touchscreen (Configuration.touchscreen FINGER, as the phone's screen), not NOTOUCH.
+     * WM sets a display's touchscreen from the input devices that can dispatch to it (DisplayContent
+     * computeScreenConfiguration: a non-virtual TOUCHSCREEN device whose associated display is this one); the phone's
+     * panels are associated with its own screens, so a bare VD said "-touch" and apps chose their non-touch (TV /
+     * desktop-like) layouts - YouTube's feed rows split, small thumbnails, gaps, no top bar (10-30: "The YouTube app
+     * also looks fucked"). So each display gets its own idle touchscreen: a uinput device (the platform's
+     * /system/bin/uinput; the helper runs with group uhid for it) whose port is associated with the display's unique id
+     * (IInputManager.addUniqueIdAssociationByPort: ASSOCIATE_INPUT_DEVICE_TO_DISPLAY, held by shell), the display made
+     * with SUPPORTS_TOUCH so input has a VIRTUAL viewport for it. The device never sends an event: the app's input
+     * still comes from PowOS's injector. Measured 2026-10-30 (spikes/webwindows-touch/T1.java, a 1298x1761 442 dpi
+     * trusted VD): bare "-touch"; with SUPPORTS_TOUCH alone "-touch"; with SUPPORTS_TOUCH + this device "finger".
+     *
+     * HACK: a placeholder input device per window only to make the display count as touch. Real fix: the display made
+     * from the platform side with its DisplayDeviceInfo touch honoured by WM (or the injector itself becoming this
+     * uinput touchscreen, S4), so the device that says "touch" is the one that delivers it.
+     */
+    private class Touch(
+        private val proc: Process,
+        private val port: String,
+    ) {
+        fun detach() {
+            runCatching { associate("removeUniqueIdAssociationByPort", "removeUniqueIdAssociation", port) }
+            runCatching { proc.outputStream.close() }
+            proc.destroy()
+        }
+
+        companion object {
+            private const val WAIT_MS = 1500L
+
+            fun attach(d: android.view.Display): Touch? {
+                val port = "powos-ww-${d.displayId}"
+                val unique =
+                    runCatching { android.view.Display::class.java.getMethod("getUniqueId").invoke(d) as String? }.getOrNull()
+                if (unique.isNullOrEmpty()) return null.also { say("log display ${d.displayId}: no unique id, no touch") }
+                val name = "PowOS window touch ${d.displayId}"
+                // The association first (so the device is never the phone screen's, even for a moment), then the
+                // device, then a wait for it: WM recomputes the display's configuration when input devices change,
+                // before the app starts on it.
+                val ok = runCatching { associate("addUniqueIdAssociationByPort", "addUniqueIdAssociation", port, unique) }
+                if (ok.isFailure) say("log display ${d.displayId}: touch association failed: ${ok.exceptionOrNull()}")
+                val p = register(d.displayId, name, port) ?: return null
+                val seen = waitFor(name)
+                say("log display ${d.displayId}: touch device ${if (seen) "up" else "NOT seen in $WAIT_MS ms"} (port $port -> $unique)")
+                return Touch(p, port)
+            }
+
+            /** /system/bin/uinput registering an idle multi-touch screen [name] on [port] (alive while its stdin is). */
+            private fun register(
+                id: Int,
+                name: String,
+                port: String,
+            ): Process? {
+                val json =
+                    """{"id":1,"command":"register","name":"$name","vid":6353,"pid":${0x7700 + (id and 0xff)},"bus":"virtual","port":"$port",""" +
+                        """"configuration":[{"type":100,"data":[1,3]},{"type":101,"data":[330]},{"type":103,"data":[47,53,54,57]},{"type":110,"data":[1]}],""" +
+                        """"abs_info":[${abs(47, 9)},${abs(53, 4095)},${abs(54, 4095)},${abs(57, 65535)}]}"""
+                return try {
+                    val p = ProcessBuilder("/system/bin/uinput", "-").redirectErrorStream(true).start()
+                    // Drain its output (a full pipe would block it).
+                    Thread({ runCatching { p.inputStream.copyTo(java.io.OutputStream.nullOutputStream()) } }, "ww-uinput").apply { isDaemon = true }.start()
+                    p.outputStream.write((json + "\n").toByteArray())
+                    p.outputStream.flush()
+                    p
+                } catch (e: java.io.IOException) {
+                    null.also { say("log display $id: uinput touch not registered: $e") }
+                }
+            }
+
+            private fun abs(
+                code: Int,
+                max: Int,
+            ) = """{"code":$code,"info":{"value":0,"minimum":0,"maximum":$max,"fuzz":0,"flat":0,"resolution":0}}"""
+
+            /** True once input lists a device named [name] (at most [WAIT_MS]). */
+            private fun waitFor(name: String): Boolean {
+                val g = runCatching { Class.forName("android.hardware.input.InputManagerGlobal").getMethod("getInstance").invoke(null) }.getOrNull() ?: return false
+                val ids = g.javaClass.getMethod("getInputDeviceIds")
+                val dev = g.javaClass.getMethod("getInputDevice", Int::class.javaPrimitiveType)
+                val until = android.os.SystemClock.uptimeMillis() + WAIT_MS
+                while (android.os.SystemClock.uptimeMillis() < until) {
+                    val found = runCatching { (ids.invoke(g) as IntArray).any { (dev.invoke(g, it) as android.view.InputDevice?)?.name == name } }.getOrDefault(false)
+                    if (found) return true
+                    Thread.sleep(20)
+                }
+                return false
+            }
+
+            /** IInputManager's [name] (Android 15+), else [old] (14), with [args]. */
+            private fun associate(
+                name: String,
+                old: String,
+                vararg args: String,
+            ) {
+                val b = Class.forName("android.os.ServiceManager").getMethod("getService", String::class.java).invoke(null, "input") as android.os.IBinder
+                val svc = Class.forName("android.hardware.input.IInputManager\$Stub").getMethod("asInterface", android.os.IBinder::class.java).invoke(null, b)!!
+                val types = Array(args.size) { String::class.java }
+                val m = runCatching { svc.javaClass.getMethod(name, *types) }.getOrElse { svc.javaClass.getMethod(old, *types) }
+                m.invoke(svc, *args)
+            }
+        }
     }
 
     /** The system context under the shell package's name (the uid this runs as), as scrcpy's server does. */
