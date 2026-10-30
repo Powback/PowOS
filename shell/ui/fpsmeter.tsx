@@ -3,6 +3,8 @@
  * Stable by construction: the component renders its DOM once and is then only touched imperatively (a text node and a
  * canvas), never re-rendered per frame; fixed width + tabular digits; the rAF loop does no allocation (ring buffers);
  * text updates at 4 Hz from a 1 s window, the sparkline at 10 Hz on its own 2D canvas.
+ * Asleep while the main shell says it is idle ({idle} samples, fpssample.ts): no rAF loop, no redraws - the bar's own
+ * loop was a frame every vsync for a meter showing a home that drew nothing (10-30, the idle WebView load).
  */
 import { useEffect, useRef } from "preact/hooks";
 import { powos } from "../bridge.ts";
@@ -103,6 +105,16 @@ function tick(count: number) {
   if (count % 3 === 0) drawText(ui);
 }
 
+/** Home idle (and no recording): the meter shows 0 and its loop sleeps until home samples again. */
+function follow() {
+  if (!enabled || document.hidden) return;
+  if (!main.idle || rec) return start();
+  if (!raf) return;
+  stopLoop();
+  if (ui?.ctx) drawGraph(ui.cv, ui.ctx);
+  if (ui) drawText(ui);
+}
+
 function start() {
   if (raf) return;
   last = 0; raf = requestAnimationFrame(frame);
@@ -115,10 +127,10 @@ function setEnabled(on: boolean) {
   if (on === enabled) return;
   enabled = on;
   if (ui) ui.root.hidden = !on;
-  if (on && !document.hidden) start(); else stopLoop();
+  if (on && !document.hidden) { start(); follow(); } else stopLoop();
   window.dispatchEvent(new Event("fps-layout"));
 }
-document.addEventListener("visibilitychange", () => { if (enabled && !rec) { if (document.hidden) stopLoop(); else start(); } });
+document.addEventListener("visibilitychange", () => { if (enabled && !rec) { if (document.hidden) stopLoop(); else { start(); follow(); } } });
 
 async function readSetting() {
   const v = await powos.store.get<{ on?: boolean }>(STORE).catch(() => null);
@@ -197,6 +209,7 @@ async function endRecord() {
   recT = new Float32Array(0); recDt = new Float32Array(0);
   await saveAndSend(full, sum);
   busy = false;
+  if (ui && !raf) drawText(ui); // the loop may sleep (home idle): clear the SEND label
 }
 
 async function toggleRecord() {
@@ -214,7 +227,7 @@ export function FpsMeter() {
     ui.root.hidden = !enabled;
     void readSetting();
     const poll = window.setInterval(() => { if (!rec) void readSetting(); }, 30000); // backstop; the host pushes changes
-    const offs = [powos.on("perf.meter", (v: { on?: boolean } | null) => setEnabled(!!v?.on)), powos.on("perf.sample", (s: ({ recPart?: number } & Parameters<typeof onSample>[0]) | null) => s && "recPart" in s ? onPart(s) : onSample(s))];
+    const offs = [powos.on("perf.meter", (v: { on?: boolean } | null) => setEnabled(!!v?.on)), powos.on("perf.sample", (s: ({ recPart?: number } & Parameters<typeof onSample>[0]) | null) => s && "recPart" in s ? onPart(s) : (onSample(s), follow()))];
     return () => { themeChanges.disconnect(); clearInterval(poll); offs.forEach((o) => o()); ui = null; };
   }, []);
   // Rendered always (hidden while off) so the node and canvas are stable; the bar never re-renders it per frame.

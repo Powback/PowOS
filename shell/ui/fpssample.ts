@@ -3,13 +3,22 @@
  * and sends them to the status bar's meter (fpsmeter.tsx) through the host (perf.publish -> "perf.sample"), ~4 Hz:
  * { fps, dts: the frame times since the last sample }. Only while the meter is on (store perf.meter, "perf.meter" event)
  * and the page is visible. The rAF callback allocates nothing (a ring); the sample is built 4x a second.
+ *
+ * Only while something happens (an input, a CSS animation or transition starting on the page, a recording) and IDLE_MS
+ * after: a rAF loop is itself a frame every vsync - in an Android WebView it makes the view draw on each one (HWUI's
+ * RenderThread, the in-process GPU and viz threads, the IO thread relaying BeginFrames), so a meter that sampled all the
+ * time kept home drawing at the display rate while nothing changed (10-30: home and the bar both at rAF 60/s, 182
+ * BeginFrames/s each, every other page 0). Going quiet it says {idle: true} once: the bar shows idle instead of falling
+ * back to its own frames. Nothing moving draws nothing, so "idle" is the true frame rate then.
  */
 import { powos } from "../bridge.ts";
 import { onMeter } from "./perfrec.ts";
 
-const SIZE = 512, SAMPLE_MS = 250, CAP = 40;
+const SIZE = 512, SAMPLE_MS = 250, CAP = 40, IDLE_MS = 1500;
+// What wakes the sampler: input anywhere on the page, and CSS motion starting (capture: events from any element).
+const WAKE = ["pointerdown", "pointermove", "wheel", "keydown", "scroll", "animationstart", "transitionrun"];
 const ring = new Float32Array(SIZE);
-let head = 0, sent = 0, last = 0, raf = 0, timer = 0, on = false;
+let head = 0, sent = 0, last = 0, raf = 0, timer = 0, on = false, active = 0, recording = false;
 const marks = new Float64Array(240);
 let markHead = 0;
 
@@ -37,16 +46,28 @@ function sample() {
   const dts: number[] = [];
   for (let i = from; i < head; i++) dts.push(Math.round(ring[i % SIZE] * 10) / 10);
   sent = head;
-  void powos.perf?.publish?.(JSON.stringify({ fps, dts, at: Date.now() }))?.catch?.(() => {});
+  publish({ fps, dts, at: Date.now() });
+  if (!recording && performance.now() - active > IDLE_MS) { stop(); publish({ idle: true, at: Date.now() }); }
+}
+
+function publish(v: object) {
+  void powos.perf?.publish?.(JSON.stringify(v))?.catch?.(() => {});
+}
+
+function stop() {
+  cancelAnimationFrame(raf); clearInterval(timer); raf = timer = 0; marks.fill(0); last = 0;
 }
 
 function run() {
-  if (!on || document.hidden) {
-    cancelAnimationFrame(raf); clearInterval(timer); raf = timer = 0; marks.fill(0); last = 0;
-    return;
-  }
+  if (!on || document.hidden) return stop();
   if (raf) return;
   sent = head; raf = requestAnimationFrame(frame); timer = window.setInterval(sample, SAMPLE_MS);
+}
+
+/** Something happened on the page: sample (again) until it has been quiet for IDLE_MS. */
+function wake() {
+  active = performance.now();
+  if (on && !raf && !document.hidden) run();
 }
 
 /**
@@ -55,11 +76,19 @@ function run() {
  * disk is updated (the bar, reloaded, runs the new one) - home then never recorded nor answered the bar's stop.
  */
 function recorder(v: { rec?: number; stop?: number } | null) {
+  // A recording measures every frame of it, idle or not.
+  recording = !!v?.rec;
+  if (recording) wake();
   try { onMeter(v); } catch (e) { console.error("perfrec", e); }
 }
 
 export function startSampler() {
-  powos.on("perf.meter", (v: { on?: boolean; rec?: number; stop?: number } | null) => { on = !!v?.on; run(); recorder(v); });
-  document.addEventListener("visibilitychange", run);
-  powos.store.get<{ on?: boolean }>("perf.meter").then((v) => { on = !!v?.on; run(); }, () => {});
+  powos.on("perf.meter", (v: { on?: boolean; rec?: number; stop?: number } | null) => { on = !!v?.on; if (on) wake(); else stop(); recorder(v); });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) return wake();
+    stop();
+    if (on) publish({ gone: true }); // the bar measures its own frames while home is away
+  });
+  for (const t of WAKE) window.addEventListener(t, wake, { capture: true, passive: true });
+  powos.store.get<{ on?: boolean }>("perf.meter").then((v) => { on = !!v?.on; if (on) wake(); }, () => {});
 }

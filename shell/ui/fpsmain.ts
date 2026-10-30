@@ -5,18 +5,30 @@
  */
 export const MRING = 90, MAX = 20_000, FRESH_MS = 1500;
 export const mring = new Float32Array(MRING);
-export const m = { head: 0, filled: 0, fps: 0, at: 0, recDt: new Float32Array(0), recN: 0, recording: false };
+export const m = { head: 0, filled: 0, fps: 0, at: 0, idle: false, recDt: new Float32Array(0), recN: 0, recording: false };
 
-export const mainFresh = () => performance.now() - m.at < FRESH_MS;
+export const mainFresh = () => m.idle || performance.now() - m.at < FRESH_MS;
 
-export function onSample(s: { fps?: number; dts?: number[] } | null) {
-  if (!s || !Array.isArray(s.dts)) return;
+/**
+ * {idle: true}: the main shell went quiet (fpssample.ts samples only while something happens) - it draws nothing, so
+ * 0 fps, and the bar stays asleep instead of measuring its own frames. {gone: true}: it was hidden - the bar's own
+ * frames again. Any other sample ends idle.
+ */
+export function onSample(s: { fps?: number; dts?: number[]; idle?: boolean; gone?: boolean } | null) {
+  if (!s) return;
+  if (s.idle || s.gone) return quiet(!!s.idle);
+  if (!Array.isArray(s.dts)) return;
+  m.idle = false;
   m.fps = Math.max(0, Math.min(999, Math.round(Number(s.fps) || 0))); m.at = performance.now();
-  for (const d of s.dts) {
-    const x = Number(d); if (!(x > 0)) continue;
-    mring[m.head] = x; m.head = (m.head + 1) % MRING; if (m.filled < MRING) m.filled++;
-    if (m.recording && m.recN < MAX) m.recDt[m.recN++] = x;
-  }
+  for (const d of s.dts) push(Number(d));
+}
+function quiet(idle: boolean) {
+  m.idle = idle; m.fps = 0; m.at = idle ? performance.now() : 0;
+}
+function push(x: number) {
+  if (!(x > 0)) return;
+  mring[m.head] = x; m.head = (m.head + 1) % MRING; if (m.filled < MRING) m.filled++;
+  if (m.recording && m.recN < MAX) m.recDt[m.recN++] = x;
 }
 export function beginMain() { m.recDt = new Float32Array(MAX); m.recN = 0; m.recording = true; }
 /** Frame times collected (and the times of their ends, cumulative) since beginMain. */
