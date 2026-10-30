@@ -217,6 +217,12 @@ class WebWindows(
 
         /** Its Linux window is full screen ([linuxFullScreen], kwin 0043): the whole screen, no bar, the page's place kept. */
         var linuxFull = false
+
+        /**
+         * Its container hangs under [root], ordered among the page's windows by [Geo.z]. False while [fillScreen] hangs
+         * it on home's surface itself (above home's buffer, at [FULL_LAYER]); [place] puts it back under the root.
+         */
+        var underRoot = true
     }
 
     /**
@@ -684,9 +690,71 @@ class WebWindows(
             attached.applyTransactionOnDraw(t)
         }
         logFrame(frame, geos)
+        orderCheckSoon(geos)
     }
 
-    /** Every window in [geos] placed into [t]; one the page left out hidden. */
+    // ---- the layer order check: SurfaceFlinger's composition against the page's z ----------------------------------------
+
+    /** The page's z order of the shown windows (bottom first) last checked, and when the last check ran (uptime ms). */
+    private var checkedOrder: List<Int> = emptyList()
+    private var lastOrderCheck = 0L
+    @Volatile private var orderCheckBroken = false
+
+    /**
+     * After [apply]: when the shown windows' page order changed (a raise, an open), or [ORDER_RECHECK_MS] after the last
+     * check while two or more are shown, SurfaceFlinger's last composition is compared with the page's order
+     * ([orderCheck]) a little later, once it has composed. Not every frame: a SurfaceFlinger dump takes its locks.
+     */
+    private fun orderCheckSoon(geos: List<Geo>) {
+        if (orderCheckBroken) return
+        val order = geos.filter { g -> g.visible && wins[g.id]?.let { it.shown && !it.linuxFull && it.mirror != null } == true }.sortedBy { it.z }.map { it.id }
+        val now = SystemClock.uptimeMillis()
+        if (order.size < 2) {
+            checkedOrder = order
+            return
+        }
+        if (order == checkedOrder && now - lastOrderCheck < ORDER_RECHECK_MS) return
+        checkedOrder = order
+        lastOrderCheck = now
+        val names = order.associateWith { id -> wins[id]?.let(::layerKey) ?: "" }
+        io.postDelayed({ orderCheck(order, names) }, ORDER_CHECK_DELAY_MS)
+    }
+
+    /** What names [win]'s content in SurfaceFlinger's output: its Linux layer, or its app's package (the mirror's clones). */
+    private fun layerKey(win: Win): String = if (win.linux != null) "powos-ww-${win.id}-linux" else "${win.component.packageName}/"
+
+    /** On [io]: SurfaceFlinger's output layer order for the shown display against the page's [order] (bottom first). */
+    private fun orderCheck(
+        order: List<Int>,
+        names: Map<Int, String>,
+    ) {
+        val dump =
+            runCatching {
+                val p = ProcessBuilder("dumpsys", "SurfaceFlinger").redirectErrorStream(true).start()
+                p.inputStream.bufferedReader().use { it.readText() }.also { p.waitFor() }
+            }.getOrElse {
+                orderCheckBroken = true
+                Log.w(TAG, "layer order check: no SurfaceFlinger dump ($it); off")
+                return
+            }
+        val layers = outputLayers(dump)
+        if (layers == null) {
+            if (!dump.contains("Output Layer")) {
+                orderCheckBroken = true
+                Log.w(TAG, "layer order check: the dump has no output layers (${dump.take(120).replace('\n', ' ')}); off")
+            }
+            return
+        }
+        val at = order.associateWith { id -> names[id]?.takeIf { it.isNotEmpty() }?.let { n -> layers.indexOfFirst { it.contains(n) } } ?: -1 }
+        val divergence = orderDivergence(order, at) ?: return
+        val home = layers.indexOfFirst { it.contains("HomeShell") }
+        Log.w(
+            TAG,
+            "layer order != page order: $divergence; page (bottom first) ${order.joinToString { "$it(${names[it]})" }}, " +
+                "SurfaceFlinger's output: ${layers.withIndex().joinToString { (i, n) -> "$i ${n.take(60)}" }} (home's buffer at $home)",
+        )
+    }
+
     private fun placeAll(
         t: SurfaceControl.Transaction,
         geos: List<Geo>,
@@ -790,13 +858,32 @@ class WebWindows(
     ) {
         val c = win.container
         if (!c.isValid) return
+        underRoot(t, win)
         frameAt(t, win, g)
         cornerRadius(t, c, g.radius)
+        // Every window's z is its page order, a Linux one's as an Android one's: one parent (the root), one z each.
         t.setLayer(c, g.z)
         t.setAlpha(c, g.alpha)
         // Hidden is the layer, never the display's surface (a null surface stops the app).
         t.setVisibility(c, g.visible && !g.clip.isEmpty && win.mirror != null)
         resizeContent(win, g.bw, g.bh)
+    }
+
+    /**
+     * [win]'s container back under [root] when it hangs elsewhere (home's surface, left by [fillScreen]): a container
+     * outside the root is ordered against home's surface's children, not against the other windows, so its [Geo.z]
+     * meant nothing there (docs/WEB_WINDOWS.md S6). A no-op for one under the root already.
+     */
+    private fun underRoot(
+        t: SurfaceControl.Transaction,
+        win: Win,
+    ) {
+        if (win.underRoot || win.linuxFull) return
+        val r = root?.takeIf { it.isValid } ?: return
+        if (!win.container.isValid) return
+        t.reparent(win.container, r)
+        win.underRoot = true
+        Log.w(TAG, "window ${win.id}: its layer was outside the windows' root (left by full screen): back under it, at the page's z")
     }
 
     /** A new body size ([bw]x[bh] px) to [win]'s source: KWin's window size, or its display's (the helper). */
@@ -1451,7 +1538,9 @@ class WebWindows(
             fillScreen(t, win, src)
         } else {
             // Back under home's surface among the page's windows: the page's next frame places it.
-            root?.takeIf { it.isValid && win.container.isValid }?.let { t.reparent(win.container, it) }
+            // In this transaction, at the page's last place and z: left to the page's next frame it kept FULL_LAYER
+            // (above every other window) until the page measured a change - and none comes while nothing moves.
+            win.geo?.let { place(t, win, it) } ?: underRoot(t, win)
             t.apply()
         }
         Log.i(TAG, "window ${win.id}: KWin window ${src.kwin} ${if (on) "full screen" else "back in its window"}")
@@ -1474,7 +1563,10 @@ class WebWindows(
             // windows' root is), so nothing of the page paints over it; the root's own layer is -1, under home.
             // HACK: home's surface recreated while it is full screen leaves it on the old surface ([reattach] moves only
             // the root); real fix: a second root above home's buffer, re-attached the same way.
-            web.rootSurfaceControl?.buildReparentTransaction(c)?.let { t.merge(it) }
+            web.rootSurfaceControl?.buildReparentTransaction(c)?.let {
+                t.merge(it)
+                win.underRoot = false
+            }
             t.setPosition(c, 0f, 0f).setScale(c, 1f, 1f).setCrop(c, screen).setLayer(c, FULL_LAYER).setVisibility(c, true)
             cornerRadius(t, c, 0f)
         }
@@ -1957,6 +2049,43 @@ class WebWindows(
 
         /** A Linux web window's switcher card id: this + its window id (no Android task id gets near it). */
         const val LINUX_CARD = 1 shl 29
+
+        /** The order check ([orderCheckSoon]) waits this long after the apply, for SurfaceFlinger to compose it. */
+        private const val ORDER_CHECK_DELAY_MS = 300L
+
+        /** ... and runs again at most this often while the order is unchanged and two or more windows are shown. */
+        private const val ORDER_RECHECK_MS = 10_000L
+
+        /**
+         * The output layer names (bottom first) of the enabled display that composed home in a "dumpsys SurfaceFlinger"
+         * [dump] ("Display <id> ... isEnabled=true ... - Output Layer 0x...(<name>)"), or null: none such.
+         */
+        fun outputLayers(dump: String): List<String>? {
+            val displays = dump.split(Regex("(?m)^Display \\d+ "))
+            val shown = displays.drop(1).firstOrNull { it.contains("isEnabled=true") && it.contains("HomeShell") } ?: return null
+            return Regex("(?m)^\\s*- Output Layer 0x[0-9a-f]+\\((.*)\\)\\s*$").findAll(shown).map { it.groupValues[1] }.toList()
+        }
+
+        /**
+         * The page's [order] (window ids, bottom first) against [at] (each window's first output layer index, -1: not
+         * composed): a line naming the first pair SurfaceFlinger drew the other way round, or null when they agree.
+         */
+        fun orderDivergence(
+            order: List<Int>,
+            at: Map<Int, Int>,
+        ): String? {
+            val seen = order.filter { (at[it] ?: -1) >= 0 }
+            for (i in seen.indices) {
+                for (j in i + 1 until seen.size) {
+                    val lo = seen[i]
+                    val hi = seen[j]
+                    if (at.getValue(lo) > at.getValue(hi)) {
+                        return "window $hi is above window $lo in the page but drawn under it (layers ${at.getValue(hi)} < ${at.getValue(lo)})"
+                    }
+                }
+            }
+            return null
+        }
 
         /** A full-screen Linux window's layer among the windows ([linuxFullScreen]): above every page-ordered one. */
         private const val FULL_LAYER = 1 shl 20
