@@ -42,6 +42,7 @@ import android.widget.FrameLayout
  *   b.r <dpr> <n> <region...>          the glass surfaces' rounded rectangles, blurred live by the compositor
  *   b.f <id> <dpr> <n> <region...>     the same, measured on the page's frame <id>: applied on the draw that shows
  *                                      that frame (WebView.postVisualStateCallback); the host says "b.sync 1"
+ *   b.rest 1|0                         home still (the rest glass: [RestGlass], no live regions) / moving again
  *   b.lag <frames>                     test knob: when the regions apply (-1 at once, 0 on the next draw, n later)
  *   b.liquid <dpr> <band> <refraction> <rim> <dispersion>   liquid glass's look (theme.css --liquid-*): [LiquidGlass]
  *   w.f <id> <dpr> <n> <window...>     web windows' frames and bodies, measured on the page's frame <id>: their layers
@@ -183,6 +184,8 @@ class ShellNative(
                 "b.hello" -> if (glass != null) glass.hello() else main.post { port?.postMessage(WebMessage("b.state 0")) }
                 "b.r" -> glass?.command(rest)
                 "b.f" -> glass?.frameCommand(rest)
+                // Home still / moving again: the rest glass (RestGlass) for the live regions and back.
+                "b.rest" -> glass?.restCommand(rest)
                 // Web windows' geometry, frame-synced like "b.f" (WebWindows.frameCommand; home's page only).
                 "w.f" -> windowFrame?.invoke(rest, false)
                 "b.lag" -> glass?.let { it.lag = rest.trim().toInt() }

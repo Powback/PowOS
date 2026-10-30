@@ -1,5 +1,6 @@
 package dev.omalauncher.shell
 
+import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Build
 import android.os.Handler
@@ -207,6 +208,109 @@ internal class GlassBlur(
         return l
     }
 
+    /**
+     * Home's glass at rest ([RestGlass]): the compositor's blur rendered once and drawn under the page while nothing
+     * moves, the window's blur regions off - home DEVICE-composited instead of GPU-composited every frame.
+     */
+    private var rest: RestGlass? = null
+
+    /** The page is still ("b.rest 1") and wants the rest glass. */
+    private var restWanted = false
+
+    /** The rest glass is up and the window's surface has no blur regions of its own. */
+    private var resting = false
+
+    /**
+     * "b.rest 1|0" (home's page, ui/nativeglass.ts): still - the live regions swapped for the rest glass once it's
+     * rendered; moving - the live regions back on the window's next draw, the picture off on that same draw.
+     */
+    fun restCommand(arg: String) {
+        val still = arg.trim() == "1"
+        main.post { if (still) enterRest() else leaveRest() }
+    }
+
+    /** Whether the regions on the window now can go still: nothing over or under them but the wallpaper. */
+    private fun restable(): Boolean =
+        on && whole < 1f && regions.isNotEmpty() && regions.none { it.under } && !(liquidOn && liquid != null) && holes().isEmpty() &&
+            rest?.dead != true &&
+            runCatching { Settings.Global.getInt(view.context.contentResolver, "powos_glass_rest", 1) == 1 }.getOrDefault(true)
+
+    private fun restGlass(): RestGlass? {
+        rest?.let { return it }
+        val m = methods ?: return null
+        val parent = view.parent as? android.view.ViewGroup ?: return null
+        val r = RestGlass(view.context) { t, sc, shown -> m.setBlurRegions.invoke(t, sc, shown) }
+        // Under the page (and under the liquid layer, if any): the page's tint draws over it as over the live blur.
+        parent.addView(r.view, parent.indexOfChild(view), android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+        rest = r
+        return r
+    }
+
+    private fun enterRest() {
+        restWanted = true
+        if (resting || !restable()) return
+        val shown = lastShown ?: return
+        val r = restGlass() ?: return
+        val regionsNow = regions
+        r.render(view.display?.displayId ?: 0, Rect(0, 0, view.rootView.width.coerceAtLeast(1), view.rootView.height.coerceAtLeast(1)), shown) { pic ->
+            // Moved (or changed) while it rendered: the live glass stays.
+            if (stillAs(regionsNow, shown)) showRest(r, pic)
+        }
+    }
+
+    /** Still wanted, and the window's regions still the ones rendered. */
+    private fun stillAs(
+        regionsNow: List<Region>,
+        shown: Array<FloatArray>,
+    ) = restWanted && !resting && regions === regionsNow && lastShown?.contentDeepEquals(shown) == true && restable()
+
+    /** [pic] under the page and the window's live regions off, on one draw. */
+    private fun showRest(
+        r: RestGlass,
+        pic: android.graphics.Bitmap,
+    ) {
+        val m = methods ?: return
+        try {
+            val root = view.rootSurfaceControl ?: return
+            val surface = m.surface.invoke(m.viewRoot.invoke(view) ?: return) as SurfaceControl? ?: return
+            if (!surface.isValid) return
+            val at = IntArray(2).also(view::getLocationInWindow)
+            // Each region's box, 2 px out: its rounded corners come with the picture (the wallpaper's own pixels past them).
+            r.show(pic, regions.map { RectF(it.l + at[0] - 2f, it.t + at[1] - 2f, it.r + at[0] + 2f, it.b + at[1] + 2f) })
+            // The live regions off on the draw that first shows the picture: both on for that frame look the same.
+            val t = SurfaceControl.Transaction()
+            m.setBlurRegions.invoke(t, surface, emptyArray<FloatArray>())
+            root.applyTransactionOnDraw(t)
+            resting = true
+            Log.d(TAG, "at rest: ${regions.size} regions drawn still, none on the window")
+        } catch (e: Throwable) {
+            Log.w(TAG, "no rest glass", e)
+            r.hide()
+        }
+    }
+
+    /** A set while at rest (the page moving, a hole, the switcher's depth, a clear): live again, the picture off. */
+    private fun dropRest(next: List<Region>) {
+        if (!resting && !(restWanted && next != regions)) return
+        restWanted = false
+        rest?.cancel()
+        if (!resting) return
+        resting = false
+        rest?.hide()
+        forget()
+    }
+
+    /** Moving again (or anything else set on the window): the live regions back, the picture off - the same draw. */
+    private fun leaveRest() {
+        restWanted = false
+        rest?.cancel()
+        if (!resting) return
+        resting = false
+        rest?.hide()
+        forget()
+        set(regions, 0)
+    }
+
     /** The page asked (again, on its reload): tell it. */
     fun hello() =
         main.post {
@@ -411,6 +515,7 @@ internal class GlassBlur(
     fun close() {
         ShellWallpaper.onChange.remove(pictureChanged)
         backdrop?.close()
+        rest?.close()
         runCatching { windows.removeCrossWindowBlurEnabledListener(blurListener) }
         main.post {
             if (regions.isNotEmpty()) set(emptyList(), -1)
@@ -424,6 +529,7 @@ internal class GlassBlur(
         regions: List<Region>,
         lag: Int,
     ) {
+        dropRest(regions)
         this.regions = regions
         // The whole window's blur goes with the switcher: any set (a page's regions, a new surface) after it closed
         // drops it - the guard in [wholeWindow] only refused new ones, nothing cleared the one already on, and home sat
