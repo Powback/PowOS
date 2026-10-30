@@ -317,6 +317,11 @@ const SCENES = [
   ["pill-below-dock", "home", "(await U('./ui/searchwidget.tsx')).footBelow.value = '1';", "wallpaper"],
   ["ai-panel", "home", "S.openPanel('ai');", "wallpaper"],
   ["search-typing", "home", "const f = document.querySelector('.bar textarea, .bar input'); f?.focus(); if (f) { f.value = 'weather tomorrow in oslo and remind me to bring an umbrella'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
+  // The bar's send button (ui/bar.tsx Send; the user, 2026-10-30: "add like a send button on the right side"): none
+  // while empty, right of the mic once there's text - in home's bar and in the launcher's.
+  ["send-empty", "home", "S.query.value = ''; await sleep(300);", "wallpaper"],
+  ["send-text", "home", "S.query.value = 'weather'; await sleep(300);", "wallpaper"],
+  ["send-launcher", "home", "S.openPanel('apps', { search: true }); await sleep(400); S.query.value = 'weather'; await sleep(300);", "wallpaper"],
   ["ai", "home", "S.page.value = -1;", "wallpaper"],
   ["chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["chat-open", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelector('.chat .tl-row')?.click(); await sleep(100); document.querySelectorAll('.chat .tl-row.has-out')[0]?.click(); document.querySelectorAll('.chat .tl-row.has-out')[2]?.click();`, "wallpaper"],
