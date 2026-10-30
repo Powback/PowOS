@@ -4,14 +4,12 @@ import android.content.AttributionSource
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.PixelFormat
-import android.graphics.Point
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
-import android.view.Display
 
 /**
  * The web windows' display maker (docs/WEB_WINDOWS.md S1), run as the shell user with app_process from this APK
@@ -36,13 +34,14 @@ import android.view.Display
  * and the app STOPS within ~40 ms, S0), the app draws at its full rate, and SurfaceFlinger's composition into it is 1
  * pixel. What the user sees is not this output but the display's mirror under home ([WebWindows]).
  *
- * The dpi PowOS sends is the phone's (its screen's density). The display is made at [windowDpi] of it: a window's
- * display is only the window's size, so at the screen's 442 dpi a 1135x1364 window is 411x494 dp - smallest width
- * below 600 dp, and apps (Chrome: phone toolbar, no tab strip) lay out compact although full screen on the inner
- * display (2268x2440 @ 442 = 821x883 dp) they are large-screen. On a large screen the window's display gets the
- * density that makes it 600 dp at its smallest side, down to 2/3 of the screen's (a window at least ~half the inner
- * screen), so the app takes its large-screen layout; smaller windows stay at the screen's density (compact, as on the
- * folded screen, which is never changed: 1116 px @ 442 = 404 dp).
+ * The dpi PowOS sends is the phone's (its screen's density) and the display is made AT it, always: a window's app
+ * lays out at the same density as full screen, its display exactly the body's device px, 1:1. A window's display at
+ * another density (the sw600 rule of 5e74d81c: 302 dpi for a 1135x1364 window against the screen's 442) made the app
+ * change density whenever it moved between the window and full screen or a resize crossed the rule, and apps that
+ * keep metrics from the density they started at (Discord, React Native: avatars, names and timestamps at
+ * 302/442 = 0.68 of their size, labels cut to "Messa", the bottoms of glyphs clipped - measured 2026-10-30) drew
+ * mixed and cut, in the window and full screen both. A window narrower than 600 dp gets the app's compact layout,
+ * as a phone that size would.
  *
  * HACK: a root-spawned shell-uid helper because an app can't hold ADD_TRUSTED_DISPLAY. Real fix: the displays made
  * from the platform-signed side (PowOS's system module) or a role that grants it; the S4 input injector will be the
@@ -56,8 +55,6 @@ object WebWindowsHost {
 
     private const val SHELL_UID = 2000
 
-    /** Android's large-screen line (sw600dp: tablet layouts, Chrome's tab strip). */
-    private const val SW_LARGE = 600
 
     private class Vd(val display: VirtualDisplay, val reader: ImageReader)
 
@@ -92,44 +89,11 @@ object WebWindowsHost {
         private val frames: Handler,
     ) {
         private val vds = HashMap<Int, Vd>()
-        private val dpis = HashMap<Int, Int>()
-
-        /** True when the phone's own screen is large (>= 600 dp at its smallest side): unfolded, not the cover. */
-        private fun largeScreen(): Boolean {
-            val d = dm.getDisplay(Display.DEFAULT_DISPLAY) ?: return false
-            val p = Point().also { @Suppress("DEPRECATION") d.getRealSize(it) }
-            @Suppress("DEPRECATION")
-            val dpi = android.util.DisplayMetrics().also { d.getRealMetrics(it) }.densityDpi
-            return dpi > 0 && minOf(p.x, p.y) * 160 / dpi >= SW_LARGE
-        }
-
-        /**
-         * The window's display dpi: [base] (the screen's), lowered on a large screen so the window's smallest side is
-         * [SW_LARGE] dp, never below 2/3 of [base]; a window too small for that keeps [base]. [cur] (the display's dpi
-         * now) is kept while it still gives >= [SW_LARGE] dp and is not above [base], so a resize changes only the
-         * size, not the density, unless the layout class would change.
-         */
-        private fun windowDpi(
-            w: Int,
-            h: Int,
-            base: Int,
-            cur: Int?,
-        ): Int {
-            if (!largeScreen()) return base
-            val ideal = minOf(w, h) * 160 / SW_LARGE // the highest dpi that still gives SW_LARGE dp
-            if (ideal >= base) return base
-            if (ideal < base * 2 / 3) return base
-            return if (cur != null && cur in base * 2 / 3..ideal) cur else ideal
-        }
-
         fun command(a: List<String>) {
             when (a[0]) {
                 "create" -> create(a[1], a[2].toInt(), a[3].toInt(), a[4].toInt())
                 "resize" -> resize(a[1].toInt(), a[2].toInt(), a[3].toInt(), a[4].toInt())
-                "release" -> {
-                    dpis.remove(a[1].toInt())
-                    vds.remove(a[1].toInt())?.let(::release)
-                }
+                "release" -> vds.remove(a[1].toInt())?.let(::release)
             }
         }
 
@@ -137,9 +101,8 @@ object WebWindowsHost {
             tag: String,
             w: Int,
             h: Int,
-            base: Int,
+            dpi: Int,
         ) {
-            val dpi = windowDpi(w, h, base, null)
             val r = ImageReader.newInstance(1, 1, PixelFormat.RGBA_8888, 2)
             r.setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, frames)
             val vd =
@@ -153,21 +116,17 @@ object WebWindowsHost {
                 return
             }
             vds[vd.display.displayId] = Vd(vd, r)
-            dpis[vd.display.displayId] = dpi
             say("display $tag ${vd.display.displayId}")
-            say("log display ${vd.display.displayId} ${w}x$h dpi $dpi (screen $base): sw ${minOf(w, h) * 160 / dpi}dp")
+            say("log display ${vd.display.displayId} ${w}x$h dpi $dpi: sw ${minOf(w, h) * 160 / dpi}dp")
         }
 
         private fun resize(
             id: Int,
             w: Int,
             h: Int,
-            base: Int,
+            dpi: Int,
         ) {
-            val v = vds[id] ?: return
-            val dpi = windowDpi(w, h, base, dpis[id])
-            dpis[id] = dpi
-            v.display.resize(w, h, dpi)
+            vds[id]?.display?.resize(w, h, dpi)
         }
 
         private fun release(v: Vd) {
