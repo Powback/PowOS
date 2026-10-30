@@ -350,6 +350,11 @@ export interface Chat {
 /** An app that runs, or one frozen (asleep in RAM: powos-sleep-gui, a game frozen with Steam). */
 export type RunState = "running" | "frozen";
 
+/** A main-thread message that held the host's UI thread (the WebView's draw thread) over thresholdMs. Times: epoch ms. */
+export type NativeBlock = { at: number; ms: number; msg?: string; bridge?: string; lastCall?: string; lastCallAgoMs?: number | null; stack?: string | null };
+/** The host's native section of a perf trace (perf.native). */
+export type NativePerf = { thresholdMs: number; blocks: NativeBlock[]; frameGaps: { at: number; ms: number; lastCall?: string }[] };
+
 /** Visible system chrome is shared web UI; hosts supply state and perform scoped actions. */
 export interface ChromeState {
   kind: "window" | "grip" | "status";
@@ -376,7 +381,8 @@ export interface WebWindowRect { left: number; top: number; width: number; heigh
 
 export interface Bridge {
   /** Perf traces (?: hosts from before it): saves JSON under the AI shared dir, returns its path in PowOS. */
-  perf?: { save(json: string): Promise<string | null>; /** Main shell frame sample to the other windows (hosts from before it: absent). */ publish?(json: string): Promise<unknown> };
+  perf?: { save(json: string): Promise<string | null>; /** Main shell frame sample to the other windows (hosts from before it: absent). */ publish?(json: string): Promise<unknown>;
+    /** The host's main-thread blocks while recording (true: started; the trace section on stop). Older hosts: absent. */ native?(on: boolean): Promise<NativePerf | true | null> };
   chrome: {
     state(): Promise<ChromeState>;
     ready(): Promise<void>;
