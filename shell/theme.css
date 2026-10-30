@@ -41,6 +41,9 @@
   --lift-shadow: 0 6px 20px -10px rgb(0 0 0 / 50%);
   --lift-shadow-up: 0 -6px 20px -12px rgb(0 0 0 / 50%);
   --lift: var(--lift-edge), var(--lift-shadow);
+  /* A window's (ui/webwindows.tsx WS1): the lift, deeper - a window floats higher than a widget; the focused one higher. */
+  --lift-window: 0 14px 36px -10px rgb(0 0 0 / 45%), 0 3px 10px -2px rgb(0 0 0 / 25%);
+  --lift-window-focused: 0 22px 56px -12px rgb(0 0 0 / 60%), 0 6px 16px -4px rgb(0 0 0 / 35%);
   /* A thing held up by a finger (a carried tile), as a filter: its shadow, larger. */
   --lift-drop: drop-shadow(0 8px 16px rgb(0 0 0 / 40%));
   /* Labels straight on the wallpaper (home's app labels): the one text shadow, so they read on any picture. */

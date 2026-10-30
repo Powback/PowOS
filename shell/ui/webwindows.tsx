@@ -1187,22 +1187,61 @@ const EDGES = ["n", "s", "e", "w", "ne", "nw", "se", "sw"] as const;
 
 type Grab = { px: number; py: number; x: number; y: number; w: number; h: number };
 
+/** RZ4: a resized frame's side this near (screen px) a tile's (half, third, quarter of the work area, gaps out) snaps to it. */
+const SNAP_SIZE = 16;
+const SNAP_PARTS = [2, 3, 4];
+
+/** Length [len] (frame px at scale [k]) snapped to a tile's along a work area [span] wide (screen px), or as it is. */
+function snapLen(len: number, k: number, span: number): number {
+  for (const n of SNAP_PARTS) {
+    const t = (span - (n - 1) * TILE_GAP) / n / k;
+    if (Math.abs(len - t) * k <= SNAP_SIZE) return t;
+  }
+  return len;
+}
+
+/** One axis of a resize: the frame's new length when its far side ([sign] 1) or near side (-1) follows [d] (0: neither). */
+function resizeLen(len: number, d: number, sign: number, o: { min: number; k: number; span: number }): number {
+  if (!sign) return len;
+  return Math.max(o.min, snapLen(len + sign * d, o.k, o.span));
+}
+/** A side's sign along an axis: [far] in [side] 1, [near] -1, neither 0. */
+const signOf = (side: string, far: string, near: string) => (side.includes(far) ? 1 : side.includes(near) ? -1 : 0);
+
+/** RZ4: the resize in progress (its live size outline): the window, and its snapped sides ("w", "h", "wh" or ""). */
+export const resizeView = signal<{ id: number; snapped: string } | null>(null);
+
 /** Window [id]'s frame resized from [s] by pointer [e] on edges [side] (an Edge grab, or the app's own), scale [k]. */
 function resizeBy(id: number, s: Grab & { side: string; k: number }, e: PointerEvent) {
   const { side, k } = s;
+  const a = tileArea();
   const dx = (e.clientX - s.px) / k;
   const dy = (e.clientY - s.py) / k;
-  const r = { x: s.x, y: s.y, w: s.w, h: s.h };
-  if (side.includes("e")) r.w = Math.max(MIN_W, s.w + dx);
-  if (side.includes("s")) r.h = Math.max(MIN_H, s.h + dy);
-  if (side.includes("w")) (r.w = Math.max(MIN_W, s.w - dx), (r.x = s.x + s.w - r.w));
-  if (side.includes("n")) (r.h = Math.max(MIN_H, s.h - dy), (r.y = s.y + s.h - r.h));
+  const r = {
+    x: s.x,
+    y: s.y,
+    w: resizeLen(s.w, dx, signOf(side, "e", "w"), { min: MIN_W, k, span: a.right - a.left }),
+    h: resizeLen(s.h, dy, signOf(side, "s", "n"), { min: MIN_H, k, span: a.bottom - a.top }),
+  };
+  if (side.includes("w")) r.x = s.x + s.w - r.w;
+  if (side.includes("n")) r.y = s.y + s.h - r.h;
   // DB1: the top edge stops at the status bar (the bar stays reachable).
   const top = clampPlace(r.x, r.y, r.w).y;
   if (r.y < top) (r.h -= top - r.y), (r.y = top);
   const pacing = resizing.get(id);
   if (pacing) pacing.steps++;
+  showSnap(id, r, k, a);
   update(id, { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h), restore: undefined });
+}
+
+/** The outline's snapped sides for frame [r]; a haptic tick as a side snaps (RZ4). */
+function showSnap(id: number, r: { w: number; h: number }, k: number, a: Area) {
+  const on = (len: number, span: number) => SNAP_PARTS.some((n) => Math.abs(len - (span - (n - 1) * TILE_GAP) / n / k) < 0.5);
+  const snapped = (on(r.w, a.right - a.left) ? "w" : "") + (on(r.h, a.bottom - a.top) ? "h" : "");
+  const was = resizeView.value;
+  if (was?.id === id && was.snapped === snapped) return;
+  if (snapped && snapped !== was?.snapped) navigator.vibrate?.(5);
+  resizeView.value = { id, snapped };
 }
 
 /** A hold this long, still, on the app's own drag (its tab strip): the tile menu - PowOS's frame features for it. */
@@ -1217,13 +1256,31 @@ interface AppDrag {
 }
 const appDrags = new Map<number, AppDrag>();
 
-/** A resize grab on an edge or corner: the frame follows the finger, the app's size paced ([pace]: RS1), the final on release. */
+/** An edge zone's press this near (frame px) a corner resizes from that corner (RZ2: the strips' ends are the corner's). */
+const CORNER_ALONG = 24;
+
+/** The sides a press [e] on edge zone [side] resizes: a strip's end near a corner is that corner. */
+function sideAt(side: string, e: PointerEvent): string {
+  if (side.length === 2) return side;
+  const f = (e.currentTarget as HTMLElement).parentElement!.getBoundingClientRect();
+  const near = (v: number, lo: number, hi: number) => (v < lo + CORNER_ALONG ? 0 : v > hi - CORNER_ALONG ? 1 : -1);
+  if (side === "e" || side === "w") return (["n", "s"][near(e.clientY, f.top, f.bottom)] ?? "") + side;
+  return side + (["w", "e"][near(e.clientX, f.left, f.right)] ?? "");
+}
+
+/**
+ * A resize grab (RZ2): an invisible zone OUTSIDE the frame - 32 dp along each edge, 48x48 dp off each corner - so it
+ * never covers the app or the bar's buttons; a higher window's content is over a lower window's zones (z order: the
+ * DOM's hit test). The frame follows the finger, the app's size paced ([pace]: RS1), the final on release; a haptic
+ * tick on the grab, the live size outline ([resizeView]) while it lasts, tile sizes snapped to ([snapLen]: RZ4).
+ */
 function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
-  const start = useRef<Grab | null>(null);
+  const start = useRef<(Grab & { side: string }) | null>(null);
   const stop = (e: PointerEvent) => {
     if (!start.current) return;
     e.stopPropagation();
     start.current = null;
+    resizeView.value = null;
     resizeEnd(win.id);
   };
   return (
@@ -1234,21 +1291,72 @@ function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
         raise(win.id);
         capture(e);
         if (tiledOn(win.id) != null) untile(win.id, "keep");
-        start.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, w: win.w, h: win.h };
+        start.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, w: win.w, h: win.h, side: sideAt(side, e) };
+        navigator.vibrate?.(8);
+        resizeView.value = { id: win.id, snapped: "" };
         resizeStart(win.id);
-        oneFinger.set(win.id, () => ((start.current = null), resizeEnd(win.id)));
+        oneFinger.set(win.id, () => ((start.current = null), (resizeView.value = null), resizeEnd(win.id)));
       }}
       onPointerMove={(e) => {
         const s = start.current;
         if (!s) return;
         e.stopPropagation();
-        resizeBy(win.id, { ...s, side, k: win.scale ?? 1 }, e);
+        resizeBy(win.id, { ...s, k: win.scale ?? 1 }, e);
       }}
       onPointerUp={stop}
       onPointerCancel={stop}
     />
   );
 }
+
+const CORNERS = ["se", "sw", "ne", "nw"] as const;
+
+/** RZ1: a corner's grip - a short arc hugging the frame's rounded corner, outside it (drawn; the zone takes the press). */
+function Grip({ corner }: { corner: (typeof CORNERS)[number] }) {
+  return (
+    <svg class={`ww-grip ww-grip-${corner}`} viewBox="0 0 22 22" aria-hidden="true">
+      <path d="M19 2A17 17 0 0 1 2 19" />
+    </svg>
+  );
+}
+
+/** RZ4: the live size outline round a frame being resized, its size (screen px) in it; brighter on a snapped tile size. */
+function ResizeOutline({ win }: { win: WebWin }) {
+  const k = win.scale ?? 1;
+  const v = resizeView.value;
+  return (
+    <div class={`ww-outline ${v?.snapped ? "snapped" : ""}`}>
+      <span class="ww-outline-size tile">
+        {Math.round(win.w * k)} × {Math.round(win.h * k)}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * WS1: a window's drop shadow, the widgets' lift but deeper (it floats higher), the focused one's stronger: its own
+ * element under the frame, so the frame's mask (a higher window's hole) never cuts it; masked itself where the windows
+ * above it are (a lower window's shadow never darkens a higher one's app). Outside the frame only: never on its app.
+ */
+function WindowShadow({ win, z, above, focused }: { win: WebWin; z: number; above: WebWin[]; focused: boolean }) {
+  if (win.restore) return null;
+  const b = frameBox(win);
+  const style = {
+    left: `${b.x - SHADOW_PAD}px`,
+    top: `${b.y - SHADOW_PAD}px`,
+    width: `${b.w + 2 * SHADOW_PAD}px`,
+    height: `${b.h + 2 * SHADOW_PAD}px`,
+    zIndex: 20 + z,
+    ...holes(above, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, s: 1 }),
+  };
+  return (
+    <div class={`ww-shadow ${focused ? "focused" : ""}`} style={style}>
+      <div style={{ inset: `${SHADOW_PAD}px` }} />
+    </div>
+  );
+}
+/** How far past the frame its shadow's element reaches (its blur and offset fit in it). */
+const SHADOW_PAD = 64;
 
 /**
  * The app's place. Live, it paints NOTHING: the page is transparent over it and the app's layer (under home's buffer)
@@ -1358,7 +1466,7 @@ function appDragEnd(id: number, e: PointerEvent, cancelled: boolean): boolean {
   appDrags.delete(id);
   clearTimeout(d.hold);
   e.stopPropagation();
-  if (d.edges !== "move") resizeEnd(id);
+  if (d.edges !== "move") (resizeEnd(id), (resizeView.value = null));
   if (!cancelled && d.moved && d.edges === "move") {
     const slot = snapSlot(e.clientX, e.clientY);
     if (slot) tile(id, slot);
@@ -1388,14 +1496,29 @@ function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
     flexDirection: "column",
     ...holes(above, { x: win.x, y: win.y, s }),
   } as const;
+  const free = !win.restore && tiledOn(win.id) == null;
+  const focused = !above.length;
+  const sizing = resizeView.value?.id === win.id;
+  const cls = frameClass(win, focused, sizing);
   return (
-    <div class={`webwindow ${win.restore ? "maximised" : ""} ${win.live ? "live" : ""}`} data-wwid={win.id} data-z={z} style={frame} {...pinch}>
-      {!win.ownFrame && <TitleBar win={win} />}
-      <Body win={win} body={body} />
-      {!win.restore && tiledOn(win.id) == null && EDGES.map((side) => <Edge key={side} win={win} side={side} />)}
-      {tileMenu.value === win.id && <TileMenu win={win} />}
-    </div>
+    <>
+      <WindowShadow win={win} z={z} above={above} focused={focused} />
+      <div class={cls} data-wwid={win.id} data-z={z} style={{ ...frame, "--ww-k": s }} {...pinch}>
+        {!win.ownFrame && <TitleBar win={win} />}
+        <Body win={win} body={body} />
+        {free && EDGES.map((side) => <Edge key={side} win={win} side={side} />)}
+        {free && CORNERS.map((c) => <Grip key={c} corner={c} />)}
+        {sizing && <ResizeOutline win={win} />}
+        {tileMenu.value === win.id && <TileMenu win={win} />}
+      </div>
+    </>
   );
+}
+
+/** The frame element's classes: maximised, live, focused (the top window: its grips, RZ1), being resized. */
+function frameClass(win: WebWin, focused: boolean, sizing: boolean): string {
+  const on: [boolean, string][] = [[!!win.restore, "maximised"], [!!win.live, "live"], [focused, "focused"], [sizing, "ww-resizing"]];
+  return ["webwindow", ...on.filter(([b]) => b).map(([, c]) => c)].join(" ");
 }
 
 /** A window's whole frame (bar and body) in its page's px (the model; scaled about its top left). */
