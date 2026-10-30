@@ -50,11 +50,14 @@ internal object SpeechEngines {
         val app = c.applicationContext
         val engine = choice(app)
         val s =
-            if (engine == GPU && !SttServer.knownDown()) {
+            // GPU: always the server - never a silent switch to the on-device model (2026-10-30: one slow request
+            // over the VPN moved the user's dictation onto Android's recognizer, unseen; and a "known down" kept the
+            // next 30 s there too). Unreachable, the session ends at once with a message (GpuSession.fail).
+            // On-device is the explicit choice in Settings > voice only.
+            if (engine == GPU) {
                 callbacks.onEngine(GPU)
                 GpuSession(++ids, app, hold, callbacks, MicSource()).also { it.begin() }
             } else {
-                if (engine == GPU) Log.i(TAG, "stt.pow is down (checked ${SttServer.checkedAgoMs() / 1000} s ago): on-device")
                 callbacks.onEngine(ON_DEVICE)
                 NativeSpeech.start(app, hold, callbacks)
             }
@@ -70,8 +73,9 @@ internal object SpeechEngines {
     /**
      * A test with recorded audio instead of the mic (16 kHz mono 16-bit WAV under the app's files/speech-test/): the
      * whole dictation as a tap's, logged as "test: ..." - nothing reaches a page. [mode]: "gpu" (as a dictation would),
-     * "fallback" (stt.pow made to fail after its first answer: the rest replays into the on-device recognizer), "down"
-     * (stt.pow known down before the start: on-device from the file).
+     * "fallback" (stt.pow made to fail after its first answer: partials are tolerated, the finals' failure ends the
+     * session with a message and what was heard kept - no on-device fallback), "down" (the on-device recognizer from
+     * the file, as the explicit on-device setting).
      */
     fun test(
         c: Context,
@@ -104,7 +108,10 @@ internal object SpeechEngines {
             }
             else -> {
                 cb.onEngine(GPU)
-                GpuSession(++ids, app, false, cb, FileSource(f), failAfterFirst = mode == "fallback").begin()
+                val src = FileSource(f)
+                val s = GpuSession(++ids, app, false, cb, src, failAfterFirst = mode == "fallback").also { it.begin() }
+                // Pauses don't end a dictation any more: the test's tap on the mic comes 1.5 s after the file's end.
+                Handler(Looper.getMainLooper()).postDelayed({ s.stop() }, src.durationMs + 1500)
             }
         }
         return "started"
@@ -132,8 +139,6 @@ internal object SttServer {
     fun checkedAgoMs() = SystemClock.elapsedRealtime() - checkedAt
 
     private fun fresh() = healthy != null && checkedAgoMs() < HEALTH_TTL_MS
-
-    fun knownDown() = healthy == false && fresh()
 
     fun knownUp() = healthy == true && fresh()
 
@@ -416,9 +421,13 @@ internal class AudioFeed(
  * transcribe each segment as it grows (partials, back to back: ~60-150 ms a request) and once more when it ends (its
  * final, with the text before it as the prompt). Release-to-send (the page's) takes the text shown at that moment.
  *
- * Falls back to Android's recognizer FOR THIS SESSION when stt.pow is down (the health check), errs, or is slow (no
- * answer within [FIRST_ANSWER_MS] of the first voice, or a request over its timeout): what wasn't transcribed yet -
- * from the first unfinished segment's start - replays into it from the recording, then live, so nothing said is lost.
+ * Like the swipe keyboard's dictation (android-app-dev swipe-keyboard VoiceClient): pauses never end or reset it - a
+ * tap's goes on until the mic is tapped again, sent, or [MAX_SESSION_MS]; the text accumulates segment by segment. Only
+ * a tap with no voice at all ends on its own (after the tap's silence), or a quiet() asked for explicitly (side button).
+ *
+ * No fallback to Android's recognizer: a failed or slow partial is skipped (the next one covers its audio); a final
+ * that fails is retried; stt.pow unreachable (the health check, a connect failure) or not answering at all ends the
+ * session at once with a message ([fail]), keeping what was heard.
  */
 internal class GpuSession(
     val id: Int,
@@ -431,16 +440,19 @@ internal class GpuSession(
 ) : SpeechSession {
     companion object {
         private const val TAG = "speech"
-        private const val FIRST_ANSWER_MS = 1500L
-        private const val PARTIAL_READ_MS = 1500
-        private const val FINAL_READ_MS = 4000
+        /** No answer at all this long after the first voice: the server isn't answering - the session ends with that. */
+        private const val FIRST_ANSWER_MS = 6000L
+        private const val PARTIAL_READ_MS = 2500
+        private const val FINAL_READ_MS = 8000
+        private const val FINAL_TRIES = 3
+        const val UNREACHABLE = "speech server unreachable (stt.pow) - offline? Settings > Voice > on-device"
         private const val BYTES_PER_MS = 32
         private const val PAUSE_MS = 700L
         private const val MIN_SEGMENT_MS = 1200L
         private const val MAX_SEGMENT_MS = 25_000L
         private const val MIN_NEW_AUDIO_MS = 250L
         private const val MAX_SESSION_MS = 5 * 60_000L
-        private const val STOP_GRACE_MS = 4000L
+        private const val STOP_GRACE_MS = 2L * FINAL_READ_MS
         private val net = Executors.newSingleThreadExecutor { Thread(it, "stt-net").apply { isDaemon = true } }
     }
 
@@ -476,31 +488,30 @@ internal class GpuSession(
     /** stt.pow's 500s in a row ([SttServer.HttpError]); touched on the network thread only. */
     @Volatile private var errorRuns = 0
     private var inFlight = false
-    private var inFlightSince = 0L
     private var partialUpTo = 0
     private var language: String? = null
     private var ended = false
     private var stopAt = 0L
 
-    /** After a fallback: Android's recognizer, fed from the recording. */
-    private var inner: SpeechSession? = null
-    private var feed: AudioFeed? = null
-    private var innerText = ""
+    /** Failed tries of each final, by segment start. */
+    private val finalFails = HashMap<Int, Int>()
+
+    /** An explicit quiet() (the side button's quick ask): a tap then ends after that silence even after speech. */
+    private var quietAsked = false
 
     // Voice from loudness: above the room's own floor (tracked slowly upward, at once downward).
     private var floorDb = -60.0
 
-    val text get() = segs.joinToString(" ") { it.text.trim() }.trim().let { if (innerText.isBlank()) it else "$it $innerText".trim() }
+    val text get() = segs.joinToString(" ") { it.text.trim() }.trim()
 
     fun begin() {
         Log.i(TAG, "session #$id (gpu): start (${if (d.hold) "hold" else "tap"})")
         if (!SttServer.knownUp()) {
-            SttServer.check { ok -> if (!ok && !ended) fallBack("stt.pow didn't answer its health check") }
+            SttServer.check { ok -> if (!ok && !ended) fail(UNREACHABLE) }
         }
         source.start { b, n ->
             val db = db(b, n)
             synchronized(pcm) { pcm.write(b, 0, n) }
-            feed?.write(b.copyOf(n))
             main.post { frame(db) }
         }
         main.postDelayed(watch, 250)
@@ -525,7 +536,7 @@ internal class GpuSession(
         if (ended) return
         floorDb = if (db < floorDb) db else floorDb + 0.02
         cb.onLevel(((db + 60) / 50).toFloat().coerceIn(0f, 1f))
-        if (inner != null || d.stopping) return
+        if (d.stopping) return
         val now = recorded()
         val voice = db > floorDb + 12 && db > -55
         if (voice) {
@@ -549,7 +560,7 @@ internal class GpuSession(
 
     /** One request at a time: the oldest unfinished final first, else the live segment's partial. */
     private fun pump() {
-        if (inFlight || ended || inner != null) return
+        if (inFlight || ended) return
         val f = segs.firstOrNull { it.end >= 0 && !it.final }
         if (f != null) return send(f, final = true)
         val now = recorded()
@@ -565,7 +576,6 @@ internal class GpuSession(
         val prompt = segs.takeWhile { it !== s }.joinToString(" ") { it.text }
         val lang = language
         inFlight = true
-        inFlightSince = SystemClock.elapsedRealtime()
         if (!final) partialUpTo = to
         net.execute {
             val r =
@@ -582,7 +592,7 @@ internal class GpuSession(
                 }
             main.post {
                 inFlight = false
-                if (ended || inner != null) return@post
+                if (ended) return@post
                 r.onSuccess { h ->
                     answers++
                     SttServer.markUp()
@@ -596,8 +606,21 @@ internal class GpuSession(
                     cb.onText(text)
                     if (d.stopping && segs.all { it.final || (it === live && it.end < 0 && !it.voiced) }) end(null) else pump()
                 }.onFailure {
-                    SttServer.markDown("${it.javaClass.simpleName}: ${it.message}")
-                    fallBack("stt.pow failed (${it.message})")
+                    Log.w(TAG, "session #$id (gpu): ${if (final) "final" else "partial"} failed: ${it.javaClass.simpleName}: ${it.message}")
+                    when {
+                        unreachable(it) -> {
+                            SttServer.markDown("${it.javaClass.simpleName}: ${it.message}")
+                            return@post fail(UNREACHABLE)
+                        }
+                        // A partial is a preview: the next one (or the final) covers its audio.
+                        !final -> {}
+                        (finalFails.merge(s.start, 1, Int::plus) ?: 0) >= FINAL_TRIES -> {
+                            // What its partials heard stays in the text.
+                            s.final = true
+                            return@post fail("the speech server failed (${it.message})")
+                        }
+                    }
+                    if (d.stopping && segs.all { it.final || (it === live && it.end < 0 && !it.voiced) }) end(null) else pump()
                 }
             }
         }
@@ -609,8 +632,8 @@ internal class GpuSession(
                 if (ended) return
                 val now = SystemClock.elapsedRealtime()
                 when {
-                    inner != null -> return
-                    d.silent() -> {
+                    // Pauses don't end it: only a tap that never heard a voice, or an explicit quiet().
+                    d.silent() && (quietAsked || firstVoiceAt == 0L) -> {
                         Log.i(TAG, "session #$id (gpu): silence, ending the dictation")
                         stop()
                     }
@@ -620,63 +643,28 @@ internal class GpuSession(
                     }
                     answers == 0 && firstVoiceAt > 0 && now - firstVoiceAt > FIRST_ANSWER_MS -> {
                         SttServer.markDown("no answer ${now - firstVoiceAt} ms after the first voice")
-                        return fallBack("stt.pow is slow")
+                        return fail("the speech server isn't answering")
                     }
-                    inFlight && now - inFlightSince > FINAL_READ_MS + 500 -> return fallBack("a request hung")
-                    d.stopping && now - stopAt > STOP_GRACE_MS -> return fallBack("finals didn't come in time")
+                    // What the partials heard is the text: the dictation ends with it.
+                    d.stopping && now - stopAt > STOP_GRACE_MS -> return end(null)
                 }
                 if (!ended) main.postDelayed(this, 100)
             }
         }
 
-    /**
-     * This session goes on with Android's recognizer, from the first segment stt.pow hasn't finished: that audio
-     * replays from the recording, then the live mic follows through the same pipe. What stt.pow finished stays.
-     */
-    private fun fallBack(why: String) {
-        if (ended || inner != null) return
-        val from = segs.firstOrNull { !it.final }?.start ?: recorded()
-        val kept = segs.filter { it.final }
-        val backlog = slice(from, recorded())
-        Log.w(TAG, "session #$id (gpu): falling back to on-device ($why), replaying ${backlog.size / BYTES_PER_MS} ms")
-        segs.retainAll(kept)
-        cb.onEngine(SpeechEngines.ON_DEVICE)
-        val f = AudioFeed(backlog)
-        feed = f
-        val stopping = d.stopping
-        if (stopping) {
-            // Already let go: the recording is all there is - end of file after it, and the recognizer ends with it.
-            source.stop()
-            f.finish()
-        }
-        inner =
-            NativeSpeech.start(
-                c,
-                d.hold,
-                SpeechCallbacks(
-                    onText = {
-                        innerText = it
-                        cb.onText(text)
-                    },
-                    onLevel = cb.onLevel,
-                    onEnd = { heard, err ->
-                        innerText = heard
-                        end(if (text.isBlank()) err else null)
-                    },
-                ),
-                f,
-            ).also { if (d.silenceMs != NativeSpeech.TAP_SILENCE_MS) it.quiet(d.silenceMs) }
+    /** Ends now with [why] shown (the bar's placeholder when nothing was heard); what was heard is kept. */
+    private fun fail(why: String) {
+        if (ended) return
+        Log.w(TAG, "session #$id (gpu): $why")
+        end(why)
     }
 
+    private fun unreachable(e: Throwable) =
+        e is java.net.ConnectException || e is java.net.UnknownHostException || e is java.net.NoRouteToHostException ||
+            (e is java.net.SocketTimeoutException && e.message.orEmpty().contains("connect", ignoreCase = true))
+
     override fun stop() {
-        if (ended) return
-        inner?.let {
-            Log.i(TAG, "session #$id (gpu): stop (on-device)")
-            source.stop()
-            feed?.finish()
-            return it.stop()
-        }
-        if (d.stopping) return
+        if (ended || d.stopping) return
         Log.i(TAG, "session #$id (gpu): stop")
         d.stopping = true
         stopAt = SystemClock.elapsedRealtime()
@@ -689,17 +677,15 @@ internal class GpuSession(
 
     override fun letGo() {
         d.hold = false
-        inner?.letGo()
     }
 
     override fun hold() {
         d.hold = true
-        inner?.hold()
     }
 
     override fun quiet(ms: Long) {
         d.silenceMs = ms.coerceIn(800, 10_000)
-        inner?.quiet(ms)
+        quietAsked = true
     }
 
     override fun cancel() {
@@ -708,8 +694,6 @@ internal class GpuSession(
         Log.i(TAG, "session #$id (gpu): cancel")
         main.removeCallbacks(watch)
         source.stop()
-        inner?.cancel()
-        feed?.close()
     }
 
     private fun end(why: String?) {
@@ -717,7 +701,6 @@ internal class GpuSession(
         ended = true
         main.removeCallbacks(watch)
         source.stop()
-        feed?.close()
         val t = text
         Log.i(TAG, "session #$id (gpu): end (${t.length} chars, ${segs.size} segments${if (why != null) ", $why" else ""})")
         cb.onEnd(t, why)
