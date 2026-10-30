@@ -79,13 +79,7 @@ class ShellBridge(
      */
     private val linuxWindows =
         object : andro.marchy.WebWindowSource.Host {
-            // HACK: Linux windows as web windows only with powos_web_windows_linux=1 (default off) until their input
-            // reaches the toplevel (Dolphin froze twice 10-30 19:4x); off = the old floating path, which works.
-            // Real fix: the ww-linux2 input/close work, then this setting goes.
-            override fun wants() =
-                WebWindows.on(context) && context.resources.configuration.smallestScreenWidthDp >= 600 &&
-                    runCatching { android.provider.Settings.Global.getInt(context.contentResolver, "powos_web_windows_linux", 0) == 1 }
-                        .getOrDefault(false)
+            override fun wants() = WebWindows.on(context) && context.resources.configuration.smallestScreenWidthDp >= 600
 
             override fun open(
                 id: Int,
