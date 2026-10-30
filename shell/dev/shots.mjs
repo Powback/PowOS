@@ -256,6 +256,11 @@ const SCENES = [
   ["ww-tiles-3", "home", TILES(3), "wallpaper", undefined, TILE_SIZES],
   ["ww-tiles-4", "home", TILES(4), "wallpaper", undefined, TILE_SIZES],
   ["edit", "home", "S.editing.value = true;", "wallpaper"],
+  // The side dock unfolded (the user, 2026-10-30: "The search bar turns weird"): edit mode keeps the search bar as it
+  // is, the edit bar below it; the dock column starts under the status bar (its battery uncovered).
+  ["home-dockright", "home", "S.dockTry.value = 'right'; await sleep(200);", "wallpaper"],
+  ["edit-dockright", "home", "S.dockTry.value = 'right'; await sleep(200); S.editing.value = true;", "wallpaper"],
+  ["edit-land", "home", "S.editing.value = true;", "wallpaper", undefined, LAND_SIZES],
   ["edit-theme", "home", "S.editing.value = true; await sleep(200); [...document.querySelectorAll('.edit-act')].find(b => b.textContent.trim() === 'theme')?.click();", "wallpaper"],
   // Picking tiles in edit mode (ui/homeselect.ts) and a folder made of them, open (ui/folders.tsx).
   ["edit-add-app", "home", "S.editing.value = true; await sleep(300); [...document.querySelectorAll('.edit-act')].find((b) => b.textContent.trim() === '+ app').click(); await sleep(400);", "wallpaper"],

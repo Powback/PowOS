@@ -3,48 +3,24 @@
  * width the cells it spans). By default the pill sits in home's foot, above the dock; put on the grid it leaves the
  * foot. In the foot it can sit above the dock or below it (footBelow, swapped from the edit bar). On the grid the foot's
  * pill stays the drawer's search (home.tsx .search-parked): the tile opens the drawer, the foot's pill types. Never
- * removed: put back (its button, a drop on the bar's slot or the dock) it's the foot's again.
+ * removed: put back (its button, a drop on the bar's slot or the dock) it's the foot's again. Edit mode leaves the foot's
+ * pill as it is - same size, width, glass and place, the edit bar below it (the user, 2026-10-30: "The search bar turns
+ * weird"); it no longer turns into a grid tile there. It goes on the grid from the widget picker.
  */
-import { computed, signal } from "@preact/signals";
-import { carry, editing, home, page, pages, selected, stored, type Carry } from "../state.ts";
-import type { Cell, HomeItem } from "../types.ts";
+import { signal } from "@preact/signals";
+import { carry, home, selected, stored, type Carry } from "../state.ts";
+import type { Cell } from "../types.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { powos } from "../bridge.ts";
 import { Bar } from "./bar.tsx";
-import { geometry } from "./grid.tsx";
-import { recentsSpot } from "./recentwidget.tsx";
 
 export const hasSearchWidget = () => home.value.items.some((i) => i.kind === "panel" && i.name === "search");
 
 /** The search widget's key on home (the host's "panel:<name>"). */
 export const SEARCH_KEY = "panel:search";
 
-/**
- * In edit mode the foot's pill is on the grid too, a tile like the others (the user, 2026-10-22: in edit mode the
- * search bar is a widget, folded and unfolded): on the page on screen, in its lowest free row - the whole row folded,
- * the middle five columns wide. Moved or resized there (placeItem), it's put on home as the search widget and leaves
- * the foot; left where it is, "done" gives the pill back to the foot.
- */
-export const footSearch = computed<HomeItem | null>(() => {
-  // Folded under the dock (footBelow) the pill stays in the foot, under the dock, in edit mode too: the grid's lowest
-  // free row is above the dock, so the tile there read as the pill jumping back on top (the user, 2026-10-28: "i put
-  // the search bar under the dock and it moved back on top when in edit mode"). Over the dock it's the grid's tile.
-  if (!editing.value || hasSearchWidget() || (footBelow.value && !wideHome.value)) return null;
-  const n = pages.value[page.value] ?? 1;
-  const spot = recentsSpot(n, geometry.value.rows || 6);
-  if (!spot) return null;
-  const cols = home.value.columns;
-  const w = cols > 6 ? 5 : cols;
-  const cell = { ...spot.cell, x: Math.floor((cols - w) / 2), w };
-  return { key: SEARCH_KEY, kind: "panel", name: "search", page: n, cell, resizable: true, minSize: [2, 1], size: null };
-});
-
-/** The foot's pill shown on the grid in edit mode, not (yet) on home. */
-export const isFootSearch = (key: string) => key === SEARCH_KEY && footSearch.value != null;
-
-/** A tile moved or resized: the foot's pill becomes the search widget there; anything else is placed as it is. */
+/** A tile moved or resized: placed as it is. */
 export function placeItem(key: string, cell: Cell, page: number): Promise<unknown> {
-  if (isFootSearch(key)) return powos.home.addPanel("search", page, cell);
   return powos.home.place(key, cell, page);
 }
 

@@ -1,4 +1,4 @@
 # The import-cycle lint's known cycles (dev/lint-cycles.mjs): one per line, its modules sorted, relative to shell/.
 # AUDIT: each is existing debt to break (move the shared piece to a leaf module); a cycle not listed fails the gate.
 ui/desktops.ts ui/gesture.ts
-ui/apppicker.tsx ui/apps.tsx ui/appwidget.tsx ui/creationwidgets.tsx ui/folders.tsx ui/folderview.tsx ui/grid.tsx ui/library.tsx ui/recentwidget.tsx ui/searchwidget.tsx
+ui/apppicker.tsx ui/apps.tsx ui/appwidget.tsx ui/creationwidgets.tsx ui/folders.tsx ui/folderview.tsx ui/grid.tsx ui/library.tsx ui/recentwidget.tsx

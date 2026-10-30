@@ -31,7 +31,7 @@ import { AppWidgetFace } from "./appwidget.tsx";
 import { Island } from "./island.tsx";
 import { AgentsPanel } from "./agents.tsx";
 import { migrateRecents, RecentsPanel } from "./recentwidget.tsx";
-import { dropSearchOnFoot, footSearch, hoverFoot, isFootSearch, placeItem, putBackInBar, SEARCH_KEY, SearchPanel } from "./searchwidget.tsx";
+import { dropSearchOnFoot, hoverFoot, placeItem, putBackInBar, SEARCH_KEY, SearchPanel } from "./searchwidget.tsx";
 import { openAgents } from "../agents.ts";
 import { creationIdOf, creationWidgets, discardWidgetCreation, watchCreations } from "./creationwidgets.tsx";
 import { PendingDetailSheet, SkeletonWidgetTile } from "./pending.tsx";
@@ -125,10 +125,9 @@ function box(c: Cell) {
 const overlaps = (a: Cell, b: Cell) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 /** Items on the page number [n] (home.pages' numbers, not indices). */
-/** Page [n]'s placed items - in edit mode with the foot's search pill on the grid too (searchwidget.tsx footSearch),
- * plus any widget still being composed (creationwidgets.tsx: client-only until it's done, never through the host). */
+/** Page [n]'s placed items, plus any widget still being composed (creationwidgets.tsx: client-only until it's done, never through the host). */
 const itemsOn = (n: number) =>
-  [...home.value.items, ...(footSearch.value ? [footSearch.value] : []), ...creationWidgets.value.items].filter((i) => i.page === n && i.cell);
+  [...home.value.items, ...creationWidgets.value.items].filter((i) => i.page === n && i.cell);
 
 /** A tile's own cell (its stored span): apps and folders are always 1x1. */
 const own = (i: HomeItem): Cell => (i.resizable ? i.cell! : { ...i.cell!, w: 1, h: 1 });
@@ -163,7 +162,7 @@ const groupSpans = computed(() => {
   const out = new Map<string, Cell>();
   if (typeof document !== "undefined" && document.documentElement.dataset.mode === "desktop") return out;
   const lifted = carry.value?.item?.key;
-  const all = [...home.value.items, ...(footSearch.value ? [footSearch.value] : []), ...creationWidgets.value.items].filter((i) => i.cell && i.key !== lifted);
+  const all = [...home.value.items, ...creationWidgets.value.items].filter((i) => i.cell && i.key !== lifted);
   const lim = { cols: home.value.columns, rows: geometry.value.rows || Infinity };
   for (const n of new Set(all.map((i) => i.page))) {
     const on = all.filter((i) => i.page === n);
@@ -805,7 +804,7 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
       {item.kind === "panel" && item.name === "search" && <SearchPanel />}
       {item.kind === "app" && <AppFace appKey={item.app!} label={item.label} />}
       {item.kind === "folder" && <FolderFace item={item} />}
-      {isSelected && !lifted && !isFootSearch(item.key) && <Actions item={item} />}
+      {isSelected && !lifted && <Actions item={item} />}
       {isSelected && !lifted && item.resizable && <ResizeHandle item={item} />}
     </div>
   );

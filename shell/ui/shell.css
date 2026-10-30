@@ -1120,19 +1120,21 @@ input.folder-title:focus { background: var(--soft-fill); }
 .screen-body { flex: 1; min-height: 0; overflow-y: auto; }
 
 /*
- * Edit mode (editsheet.tsx, state.ts editing): the foot's search pill is on the grid, a tile like the others
- * (searchwidget.tsx footSearch: shown, lifted, moved and resized; its field doesn't take the press there), so the
- * edit sheet takes the pill's place in the foot; the dock stays where it is. The pages stay as they are. Folded under
- * the dock (.pill-below) the pill stays in the foot instead: dock, pill, then the edit bar at the very bottom.
+ * Edit mode (editsheet.tsx, state.ts editing): the foot's search pill stays the foot's, its size, width and glass as
+ * outside edit mode (the user, 2026-10-30: "The search bar turns weird" - it had become a narrow grid tile); the edit
+ * bar sits under it at the very bottom. The pages stay as they are.
  */
-.home.editing:is(.wide, :not(.pill-below)) .bar:not(.search-face .bar),
 .home.editing .launcher,
 .home.editing .launcher-frame { visibility: hidden; }
 /* The edit bar sits under the dock at the screen's very foot, the lowest element (the user, folded: "move the edit bar
    to under the dock on the very very bottom"): flush on the gesture-nav inset, where the gesture-handle strip is when
    there's no room above it. The search pill's row and the dock don't move. Folded, unfolded and with a side dock alike
    it is one centred bar at the bottom. */
-.home { --edit-foot: max(var(--inset-bottom, env(safe-area-inset-bottom)), 44px); }
+.home {
+  --edit-foot: max(var(--inset-bottom, env(safe-area-inset-bottom)), 44px);
+  /* How far the foot's row rises in edit mode to leave the edit bar its own space (never down). */
+  --edit-rise: max(0px, calc(var(--edit-foot) - max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot)))));
+}
 .edit-sheet,
 .home.wide > .edit-sheet,
 .home.wide:is(.dock-left, .dock-right) > .edit-sheet {
@@ -1155,12 +1157,12 @@ input.folder-title:focus { background: var(--soft-fill); }
 /* Its own space: in edit mode the dock and the pill's row rise by the bar's height above the foot's inset (never
    down), so nothing lies under the bar and a drop on the dock lands on the dock. `translate`, not `transform`, so the
    launcher's --p transform stays as it is; outside edit mode it is 0. */
+/* A side dock is a column pinned under the status bar (top: --inset-top): it doesn't rise - risen, its first icon covered
+   the status bar's battery (the user's screenshot, 2026-10-30); its foot ends above the risen pill instead. */
 .home > .dock:not(.dock-tray),
 .home > .bar { transition: translate 180ms ease-out; }
-.home.editing > .dock:not(.dock-tray),
-.home.editing > .bar {
-  translate: 0 min(0px, calc(max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) - var(--edit-foot)));
-}
+.home.editing:not(.dock-left, .dock-right) > .dock:not(.dock-tray),
+.home.editing > .bar { translate: 0 calc(-1 * var(--edit-rise)); }
 .edit-act {
   font: var(--text-item) var(--font);
   color: var(--color-foreground);
@@ -2803,13 +2805,14 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
   grid-area: auto;
   position: absolute;
   top: calc(var(--inset-top, env(safe-area-inset-top)) + 8px);
-  bottom: calc(max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + 48px + var(--edge));
+  bottom: calc(max(var(--inset-bottom, env(safe-area-inset-bottom)), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + 48px + var(--edge) + var(--side-rise, 0px));
   width: var(--side-dock);
   height: auto;
   margin: 0;
   /* Slides out to its own edge as --p rises (same --p transition as the bottom dock), transform only. */
   transform: translateX(calc(var(--p) * var(--side-dir, -1) * (100% + var(--side-edge, 0px))));
 }
+.home.editing:is(.dock-left, .dock-right) { --side-rise: var(--edit-rise); }
 .home.dock-left { --side-dir: -1; --side-edge: var(--inset-left, env(safe-area-inset-left)); }
 .home.dock-right { --side-dir: 1; --side-edge: var(--inset-right, env(safe-area-inset-right)); }
 .home.dock-left > .dock { left: var(--inset-left, env(safe-area-inset-left)); }
