@@ -1333,6 +1333,8 @@ input.folder-title:focus { background: var(--soft-fill); }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* Several lines (an update's changes, one per line: AgentMail's deploy notice): each on its own, up to six. */
+.notif-text.lines { white-space: pre-line; -webkit-line-clamp: 6; }
 .notif-access { font: var(--text-small) var(--font); color: var(--accent-text); text-align: start; }
 .notif-empty { padding: 18px 2px; text-align: center; font-size: var(--text-small); }
 /* Nothing new: the message in the middle of the (now always full-height) panel. */
@@ -2200,6 +2202,8 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .lock-note-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .lock-note-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
 .lock-note-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
+/* A text of several lines (an update's changes, one per line: AgentMail's deploy notice) shows them, up to six. */
+.lock-note-text.lines { white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; }
 .lock-note-time { font-size: var(--text-small); }
 .lock-hint { margin-top: auto; font-size: var(--text-small); }
 

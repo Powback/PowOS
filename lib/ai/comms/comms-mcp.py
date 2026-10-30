@@ -208,9 +208,10 @@ def _plain_change(c, cap=60):
     return c[:1].upper() + c[1:]
 
 
-def _deploy_md(notes, shown=6):
-    """A deploy batch as Markdown: a short headline (what the notification's collapsed line shows), then one short
-    bullet per change, newest first; the rest folded into "+N more". Technical subjects are not repeated."""
+def _deploy_md(notes, shown=4):
+    """A deploy batch as Markdown: a short headline ("Update installed · N changes"), then one plain line per change,
+    newest first, [shown] of them and "and N more" for the rest. The phone puts the lines in the notification's
+    collapsed text (AgentMail: the shade and the lock screen show them unexpanded). Technical subjects are dropped."""
     items = []
     for n in reversed(notes):
         for c in _split_note(n):
@@ -223,43 +224,77 @@ def _deploy_md(notes, shown=6):
     head = "Update installed" + (f" \u00b7 {k} changes" if k > 1 else "")
     lines = [head, ""] + [f"- {c}" for c in items[:shown]]
     if k > shown:
-        lines.append(f"- +{k - shown} more")
+        lines.append(f"- and {k - shown} more")
     return "\n".join(lines)
 
 
-def _batched(key, text, window):
-    """--batch: notices of one kind within [window] s of the last become one. Returns (the text to post: the latest
-    note first, then every note of the batch as a list; the batch's previous message id to take back, or None).
-    State: <root>/batches/<key>.json, under a lock (two deploys at once still make one batch)."""
-    import fcntl
+# --batch also folds into the previous card while the user hasn't read it (still in their inbox), up to this long
+# after it: deploys minutes apart (one ship per merge) made a card each - 4 "Update installed" cards in a row.
+BATCH_UNREAD = 30 * 60
 
+
+def _batch_path(key):
     d = os.path.join(ROOT, "batches")
     os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, f"{_safe_name(key)}.json")
-    with open(path + ".lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    return os.path.join(d, f"{_safe_name(key)}.json")
+
+
+def _batch_lock(key):
+    """The batch's lock, held from reading its state to recording the posted id (_batched .. _batch_sent): two deploys
+    at once otherwise both see no earlier card and both stay."""
+    import contextlib
+    import fcntl
+
+    @contextlib.contextmanager
+    def held():
+        with open(_batch_path(key) + ".lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+
+    return held()
+
+
+def _unread(mid):
+    """[mid] is still in the user's inbox (not read on the phone, in the feed or by `comms inbox`)."""
+    for path in _pending_files("user"):
         try:
             with open(path) as f:
-                st = json.load(f)
+                if json.load(f).get("id") == mid:
+                    return True
         except (OSError, json.JSONDecodeError):
-            st = {}
-        now = time.time()
-        fresh = now - float(st.get("ts", 0)) < window
-        notes = (st.get("notes") or []) if fresh else []
-        prev = st.get("id") if fresh else None
-        notes = [n for n in notes if n != text] + [text]
-        # Line 1 is what the collapsed notification shows; the list is what a tap expands to.
-        body = _deploy_md(notes) if key == "deploy" else text if len(notes) == 1 else (
-            f"{text} (+{len(notes) - 1} more)\n" + "\n".join(f"• {n}" for n in reversed(notes)))
-        st = {"ts": now, "notes": notes[-20:], "id": None}
-        with open(path + ".tmp", "w") as f:
-            json.dump(st, f)
-        os.replace(path + ".tmp", path)
+            continue
+    return False
+
+
+def _batched(key, text, window):
+    """--batch: notices of one kind become one - within [window] s of the last, or while the last is unread (up to
+    BATCH_UNREAD). Returns (the text to post: the latest note first, then every note of the batch as a list; the
+    batch's previous message id to take back, or None). State: <root>/batches/<key>.json; call under _batch_lock."""
+    path = _batch_path(key)
+    try:
+        with open(path) as f:
+            st = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        st = {}
+    now = time.time()
+    age = now - float(st.get("ts", 0))
+    last = st.get("id")
+    fresh = age < window or (age < BATCH_UNREAD and bool(last) and _unread(last))
+    notes = (st.get("notes") or []) if fresh else []
+    prev = last if fresh else None
+    notes = [n for n in notes if n != text] + [text]
+    # Line 1 is what the collapsed notification shows; the list is what a tap expands to.
+    body = _deploy_md(notes) if key == "deploy" else text if len(notes) == 1 else (
+        f"{text} (+{len(notes) - 1} more)\n" + "\n".join(f"\u2022 {n}" for n in reversed(notes)))
+    st = {"ts": now, "notes": notes[-20:], "id": None}
+    with open(path + ".tmp", "w") as f:
+        json.dump(st, f)
+    os.replace(path + ".tmp", path)
     return body, prev
 
 
 def _batch_sent(key, mid):
-    path = os.path.join(ROOT, "batches", f"{_safe_name(key)}.json")
+    path = _batch_path(key)
     try:
         with open(path) as f:
             st = json.load(f)
@@ -914,15 +949,18 @@ def run_cli(argv):
             _quiet_log(text)
             print("Logged quietly (no notification).")
             return 0
-        prev = None
-        if a.batch:
-            text, prev = _batched(a.batch, text, a.window)
-        mid = _deliver("user", "notify", text, a.priority)
-        if prev:
-            # The batch's earlier notice: out of the inbox, the feed and the shade - this one replaces it.
-            _consume("user", [prev])
-        if a.batch:
-            _batch_sent(a.batch, mid)
+        import contextlib
+
+        with _batch_lock(a.batch) if a.batch else contextlib.nullcontext():
+            prev = None
+            if a.batch:
+                text, prev = _batched(a.batch, text, a.window)
+            mid = _deliver("user", "notify", text, a.priority)
+            if prev:
+                # The batch's earlier notice: out of the inbox, the feed and the shade - this one replaces it.
+                _consume("user", [prev])
+            if a.batch:
+                _batch_sent(a.batch, mid)
         _desktop_notify(text, a.priority, mid)
         print(f"User notified (id {mid}).")
     elif a.cmd == "inbox":

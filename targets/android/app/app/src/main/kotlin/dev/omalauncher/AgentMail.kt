@@ -312,11 +312,7 @@ class AgentMail private constructor(
                 n,
                 Notification.Builder(context, channel(context, mail.priority))
                     .setSmallIcon(R.drawable.ic_notification)
-                    .setContentTitle("PowOS AI · ${mail.from}")
-                    // Collapsed: the first line. Expanded: the text, as much as a notification holds; the tap opens
-                    // all of it in the chat ([opened]: the stored mail, never cut).
-                    .setContentText(firstLine(mail.text))
-                    .setStyle(Notification.BigTextStyle().bigText(expanded(mail.text)))
+                    .content(mail)
                     .setWhen(mail.time * 1000)
                     .setShowWhen(true)
                     .setContentIntent(open)
@@ -341,6 +337,35 @@ class AgentMail private constructor(
          */
         private const val NOTIFICATION_TEXT_MAX = 5 * 1024
         private const val EXPANDED_MAX = NOTIFICATION_TEXT_MAX - 200
+
+        /**
+         * Title, text and style. An update (comms' deploy batch, [changeList]): the text is the headline and then its
+         * changes, one line each - PowOS's shade and lock screen show them without expanding; Android's own, the
+         * headline collapsed and every line expanded. The title stays "PowOS AI · deploy" (the shade groups by it).
+         * Other mail: collapsed, the first line; expanded, the text, as much as a notification holds (the tap opens all
+         * of it in the chat: [opened], the stored mail, never cut).
+         */
+        private fun Notification.Builder.content(mail: Mail): Notification.Builder {
+            setContentTitle("PowOS AI · ${mail.from}")
+            val (head, items) = changeList(mail)
+                ?: return setContentText(firstLine(mail.text)).setStyle(Notification.BigTextStyle().bigText(expanded(mail.text)))
+            val inbox = Notification.InboxStyle().setBigContentTitle(head)
+            items.forEach { inbox.addLine(it) }
+            return setContentText((listOf(head) + items).joinToString("\n")).setStyle(inbox)
+        }
+
+        /**
+         * A deploy notice's (headline, changes): comms' `--batch deploy` text is "Update installed · N changes", a blank
+         * line, then one "- change" line each (at most 4, then "- and N more"; lib/ai/comms/comms-mcp.py _deploy_md).
+         * Null for any other mail, or a deploy note in another shape.
+         */
+        fun changeList(mail: Mail): Pair<String, List<String>>? {
+            if (mail.from != "deploy") return null
+            val lines = mail.text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            val head = lines.firstOrNull() ?: return null
+            val items = lines.drop(1).filter { it.startsWith("- ") }.map { it.removePrefix("- ").trim() }
+            return if (items.isEmpty()) null else head to items
+        }
 
         /** The collapsed line: the text's first non-blank line (the system ellipsizes it to the width). */
         fun firstLine(text: String): String = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: text

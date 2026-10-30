@@ -209,7 +209,7 @@ function Card({ n, onTap, onDismiss, clearable = n.clearable, name, more = 0, cl
       {n.title && !(name && (name.toLowerCase().endsWith(`· ${n.title.trim().toLowerCase()}`) || (name === UPDATES && n.title.trim().toLowerCase() === "deploy"))) && (
         <div class="notif-title">{n.title}</div>
       )}
-      {n.text && <div class="notif-text">{n.text}</div>}
+      {n.text && <div class={`notif-text${n.text.includes("\n") ? " lines" : ""}`}>{n.text}</div>}
       <Actions n={n} />
       {replying.value?.key === n.key && <Reply n={n} index={replying.value.index} />}
     </div>

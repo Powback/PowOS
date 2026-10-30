@@ -136,7 +136,7 @@ export function Lock() {
             {notifIconSrc(n) && <img src={notifIconSrc(n)!} alt="" />}
             <span class="lock-note-main">
               <span class="lock-note-title">{n.title || n.app}</span>
-              <span class="lock-note-text muted">{n.text}</span>
+              <span class={`lock-note-text muted${n.text.includes("\n") ? " lines" : ""}`}>{n.text}</span>
             </span>
             <span class="muted lock-note-time">{ago(n.time)}</span>
           </div>

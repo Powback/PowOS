@@ -1,8 +1,9 @@
 #!/bin/bash
 # The phone's quiet "update applied" notification, after anything lands on it (an APK, a shell push, an app, the
 # system module, the rootfs or a package): one plain line for the user - what changed for them ("Switcher now follows
-# your finger"), never a commit or a file. Silent, shade only (comms' low priority), in the PowOS AI feed too; notes
-# within 2 minutes of each other become one notification, the latest first and the whole list on a tap.
+# your finger"), never a commit or a file. Silent, shade only (comms' low priority), in the PowOS AI feed too. Notes
+# fold into one notification - within 2 minutes of each other, or while the last one is unread (up to 30 minutes) -
+# that lists the changes one per line, newest first: "Update installed · 3 changes" and up to 4, then "and N more".
 #   targets/android/tools/deploy-note.sh "<what changed, for the user>"
 #   targets/android/tools/deploy-note.sh --silent "<what landed>"   a change the user can't see (refactor, lint,
 #                                    tooling): no notification, only a line in comms' quiet log (`powos comms quiet`)

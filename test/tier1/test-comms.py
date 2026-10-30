@@ -275,17 +275,71 @@ class CliTests(unittest.TestCase):
 
 
 class DeployNoteTests(unittest.TestCase):
-    def test_deploy_batch_is_a_headline_and_short_bullets(self):
+    def test_deploy_batch_is_a_headline_and_short_lines(self):
         with tempfile.TemporaryDirectory() as d:
             m = load_server(d)
             raw = "; ".join(f"area{i}: change number {i} (some detail; more detail) in ship.sh --flag" for i in range(8))
             body, _ = m._batched("deploy", raw, 120)
             lines = body.split("\n")
             self.assertEqual(lines[0], "Update installed \u00b7 8 changes")
-            self.assertEqual(len([l for l in lines if l.startswith("- ")]), 7)
-            self.assertIn("- +2 more", lines)
+            self.assertEqual(len([l for l in lines if l.startswith("- ")]), 5)
+            self.assertEqual(lines[-1], "- and 4 more")
             self.assertNotIn("ship.sh", body)
             self.assertNotIn("detail", body)
+
+    def _notify(self, d, note, age=None):
+        """`notify --batch deploy` as deploy-note.sh runs it; [age]: the batch's last card made [age] s ago."""
+        if age is not None:
+            path = os.path.join(d, "batches", "deploy.json")
+            with open(path) as f:
+                st = json.load(f)
+            st["ts"] = time.time() - age
+            with open(path, "w") as f:
+                json.dump(st, f)
+        env = dict(os.environ, COMMS_ROOT=d, COMMS_AGENT_ID="", POWOS_PLATFORM="desktop")
+        p = subprocess.run([sys.executable, SERVER, "notify", "--from", "deploy", "--priority", "low", "--batch",
+                            "deploy", note], capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+    def _cards(self, d):
+        env = dict(os.environ, COMMS_ROOT=d, COMMS_AGENT_ID="")
+        out = subprocess.run([sys.executable, SERVER, "inbox", "--agent", "user", "--peek", "--json"],
+                             capture_output=True, text=True, env=env, timeout=30).stdout
+        return [json.loads(l)["body"] for l in out.splitlines() if l.strip()]
+
+    def test_unread_deploy_card_takes_the_next_ships_minutes_later(self):
+        """10-30: four ships minutes apart made four "Update installed" cards with no changes listed."""
+        with tempfile.TemporaryDirectory() as d:
+            self._notify(d, "Floating windows show as normal cards; Tapping one brings it back where it was")
+            self._notify(d, "A full-screen app's card has Back to window", age=600)
+            cards = self._cards(d)
+            self.assertEqual(len(cards), 1, cards)
+            self.assertEqual(cards[0], "Update installed \u00b7 3 changes\n\n"
+                             "- A full-screen app's card has Back to window\n"
+                             "- Floating windows show as normal cards\n"
+                             "- Tapping one brings it back where it was")
+
+    def test_read_or_old_card_starts_a_new_one(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._notify(d, "Switcher now follows your finger")
+            env = dict(os.environ, COMMS_ROOT=d, COMMS_AGENT_ID="")
+            subprocess.run([sys.executable, SERVER, "inbox", "--agent", "user"], capture_output=True, env=env, timeout=30)
+            self._notify(d, "Edit mode keeps the search bar", age=600)
+            self.assertEqual(self._cards(d), ["Update installed\n\n- Edit mode keeps the search bar"])
+            self._notify(d, "Side dock sits under the status bar", age=3 * 3600)
+            self.assertEqual(len(self._cards(d)), 2)
+
+    def test_deploys_at_once_still_make_one_card(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, COMMS_ROOT=d, COMMS_AGENT_ID="", POWOS_PLATFORM="desktop")
+            ps = [subprocess.Popen([sys.executable, SERVER, "notify", "--from", "deploy", "--batch", "deploy",
+                                    f"Change number {i} for you"], stdout=subprocess.DEVNULL, env=env)
+                  for i in range(4)]
+            for p in ps:
+                p.wait(timeout=30)
+            cards = self._cards(d)
+            self.assertEqual(len(cards), 1, cards)
+            self.assertTrue(cards[0].startswith("Update installed \u00b7 4 changes"), cards[0])
 
 
 if __name__ == "__main__":
