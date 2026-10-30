@@ -160,6 +160,18 @@ internal class VoiceSocket(
         )
         o.flush()
         val inp = BufferedInputStream(s.getInputStream())
+        handshake(inp, key)
+        s.soTimeout = 0
+        out = o
+        lastSent = System.currentTimeMillis()
+        threads(inp)
+    }
+
+    /** The server's 101 with the right accept key, or an IOException. */
+    private fun handshake(
+        inp: InputStream,
+        key: String,
+    ) {
         val status = line(inp)
         var accept: String? = null
         while (true) {
@@ -170,9 +182,9 @@ internal class VoiceSocket(
         }
         if (!status.startsWith("HTTP/1.1 101")) throw IOException("upgrade refused: ${status.take(60)}")
         if (accept != WsFrames.accept(key)) throw IOException("bad handshake")
-        s.soTimeout = 0
-        out = o
-        lastSent = System.currentTimeMillis()
+    }
+
+    private fun threads(inp: InputStream) {
         Thread({ readLoop(inp) }, "voice-ws-read").apply {
             isDaemon = true
             start()
