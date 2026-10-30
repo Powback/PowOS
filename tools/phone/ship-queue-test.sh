@@ -82,7 +82,10 @@ echo 'class Main' > targets/android/app/Main.kt
 mkdir -p apps/x; echo '{}' > apps/x/powos-app.json; echo 0 > apps/x/f.txt
 printf '#!/bin/bash\necho "APPBUILD $*" >> "$LOG"\n' > apps/build.sh
 printf '#!/bin/bash\necho "APPINSTALL $*" >> "$LOG"\n' > apps/install.sh
-chmod +x tools/phone/*.sh shell/dev/gate.sh shell/push.sh apps/*.sh
+# rooted.sh deploy stub: records its tip + args (an input of it: targets/android/session/*)
+mkdir -p targets/android/rooted targets/android/session; echo 0 > targets/android/session/powos-app-quit
+printf '#!/bin/bash\necho "ROOTED $(git rev-parse HEAD) svc=${POWOS_SHIP_SERVICE:-} $*" >> "$LOG"\n' > targets/android/rooted/rooted.sh
+chmod +x tools/phone/*.sh shell/dev/gate.sh shell/push.sh apps/*.sh targets/android/rooted/rooted.sh
 git add -A; git commit -qm base; git push -q origin worktree-powos-multiplatform 2>/dev/null
 git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"   # the phone runs base's APK
 git clone -q -b worktree-powos-multiplatform "$T/origin.git" "$T/B" 2>/dev/null
@@ -249,6 +252,25 @@ land targets/android/app/Main.kt 'class Main11' "kt11"; req --note "eleven"; t11
 drained && grep -q "^APK $t11 svc=1 --note eleven --now\$" "$LOG" && ok "no-idle setting passes --now" || { bad "no --now"; cat "$LOG"; }
 grep -q 'no idle wait' <<<"$(bash tools/phone/ship.sh status)" && ok "status shows the no-idle setting" || bad "status no-idle"
 rm -f "$HOME/.config/powos/ship-no-idle-wait"
+
+# 12. 2026-10-30 (46120ff9 powos-app-quit): APK inputs + a rooted input in one tip. The APK install finishes the
+#     request; the rooted deploy must still run after it, before the runner exits (it left with the queue empty, and
+#     measured rooted changes from the APK-installed tip, so the deploy never ran). status says it's pending meanwhile.
+: > "$LOG"; touch "$HOME/hold-apk"
+git pull -q --rebase 2>/dev/null; echo 'class Main12' > targets/android/app/Main.kt; echo 1 > targets/android/session/powos-app-quit
+git add -A; git commit -qm "kt12 + rooted"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null
+req --note "swipe closes it"; t12=$(tip)
+for _ in $(seq 100); do grep -q '^APKSTART' "$LOG" && break; sleep 0.2; done
+sleep 1
+st=$(bash tools/phone/ship.sh status)
+grep -q "rooted deploy pending since" <<<"$st" && ok "status: rooted deploy pending" || { bad "status rooted pending"; echo "$st"; }
+! grep -q '^ROOTED' "$LOG" && ok "no rooted deploy while the APK ship is out" || bad "rooted deploy beside the APK"
+rm -f "$HOME/hold-apk"
+for _ in $(seq 100); do grep -q '^ROOTED' "$LOG" && break; sleep 0.2; done
+[ "$(grep -E '^(APK |ROOTED)' "$LOG" | awk '{print $1}' | paste -sd, -)" = "APK,ROOTED" ] && ok "APK installed, then the rooted deploy" || { bad "APK then rooted"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+grep -q "^ROOTED $t12 svc=1 deploy --note swipe closes it\$" "$LOG" && ok "rooted deploy from the tip, with the request's note" || { bad "rooted args"; grep ROOTED "$LOG"; }
+[ "$(cat "$Q/rooted-live" 2>/dev/null)" = "$t12" ] && [ ! -e "$Q/rooted-pending" ] && grep -q "${t12:0:9}: rooted deploy done" "$Q/runner.log" &&
+  ok "rooted-live recorded, pending cleared" || { bad "rooted records"; tail -5 "$Q/runner.log"; }
 
 for _ in $(seq 75); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 0.2; done
 runner_left=$(cat "$Q/runner.lock/pid" 2>/dev/null)

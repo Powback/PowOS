@@ -126,6 +126,7 @@ status)
   echo "live: $(cut -c1-9 "$Q/live" 2>/dev/null || echo -)  installed APK: $(cut -c1-9 "$HOME/.cache/powos-installed-commit" 2>/dev/null || echo -)$([ -s "$Q/failed" ] && echo "  failed at: $(cut -c1-9 "$Q/failed") (waits for a new origin commit)")"
   [ -s "$Q/shell-held" ] && { read -r ht hc < "$Q/shell-held"; echo "shell held for its APK ${ht:0:9} (APK inputs + shell in the same commit: $hc) - they land together at the install"; }
   [ -e "$HOME/.config/powos/ship-no-idle-wait" ] && echo "APK installs: at once, no idle wait (~/.config/powos/ship-no-idle-wait)"
+  [ -s "$Q/rooted-pending" ] && { read -r rb rt < "$Q/rooted-pending"; echo "rooted deploy pending since ${rb:0:9} (origin ${rt:0:9}; runs after the APK, under the phone-busy rules)"; }
   [ -d "$Q/apk" ] && echo "APK ship out: $(cut -c1-9 "$Q/apk/tip" 2>/dev/null) (log $(cat "$Q/apk/log" 2>/dev/null))"
   echo "last ships:"; tail -6 "$Q/shipped.log" 2>/dev/null | sed 's/^/  /' ;;
 run)
@@ -211,6 +212,20 @@ run)
     targets/android/pkgs/fex-emu bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop \
     lib/powos-tmux-shell lib/self-phone.sh config/etc/profile.d/60-powos-picker-key.sh lib/ai/agents lib/ai/comms/comms-mcp.py \
     tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid 2>/dev/null | grep -v '^lib/ai/sandbox/node_modules/'; }
+  # rooted_due: rooted_inputs changed since the last rooted deploy ($Q/rooted-live) up to this checkout's HEAD, and
+  # the deploy didn't fail on HEAD. Sets rbase/rchg; keeps $Q/rooted-pending ("BASE TIP", for status) in step.
+  # It keeps the runner up until the deploy ran (2026-10-30: a tip with APK + rooted inputs installed its APK, which
+  # finished every request, and the runner left before step 4 got a pass - powos-app-quit never reached the phone).
+  # Measured from rooted-live only, never from the shell-live/installed tip: neither ships rooted pieces (the same
+  # bug apps had, 1d3a80ac). No rooted-live yet: the installed APK's commit is the first base, recorded at once so a
+  # later APK install can't move it.
+  rooted_due() { local h; h=$(git rev-parse HEAD 2>/dev/null) || return 1
+    rbase=$(cat "$Q/rooted-live" 2>/dev/null || true)
+    [ -n "$rbase" ] || { rbase=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true); [ -z "$rbase" ] || echo "$rbase" > "$Q/rooted-live"; }
+    rchg=; [ -n "$rbase" ] && git cat-file -e "$rbase^{commit}" 2>/dev/null && rchg=$(rooted_inputs "$rbase" "$h" | paste -sd' ' -)
+    if [ -n "$rchg" ] && [ "$(cat "$Q/failed-rooted" 2>/dev/null)" != "$h" ]; then
+      [ "$(cat "$Q/rooted-pending" 2>/dev/null)" = "$rbase $h" ] || echo "$rbase $h" > "$Q/rooted-pending"; return 0; fi
+    rm -f "$Q/rooted-pending"; return 1; }
   # The APK ship runs BESIDE the loop, in its own checkout (it builds from it for minutes while ship_tree resets $SR),
   # so a shell change never queues behind an APK's build or idle wait (2026-10-23: shell fixes waited 25-30 min behind
   # one APK). State in $Q/apk/: tip, pid, rc (written when it ends).
@@ -311,7 +326,7 @@ run)
   }
   reap_apk   # runner start: a previous runner's finished APK
   while :; do
-    while ls "$Q"/*.req >/dev/null 2>&1; do
+    while ls "$Q"/*.req >/dev/null 2>&1 || rooted_due; do
       ship_tree >/dev/null || { sleep "$POLL"; continue; }
       T=$(git rev-parse HEAD)
       inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
@@ -345,8 +360,9 @@ run)
           sreqs+=("$r")
         fi
       done
-      [ ${#whos[@]} -gt 0 ] || { sleep "$POLL"; continue; }
-      who_s=$(printf '%s\n' "${whos[@]}" | sort -u | paste -sd, -)
+      # No request covers this tip: only a pending rooted deploy keeps the loop here (rooted_due above).
+      [ ${#whos[@]} -gt 0 ] || rooted_due || { sleep "$POLL"; continue; }
+      who_s=$(printf '%s\n' ${whos[@]+"${whos[@]}"} | sed '/^$/d' | sort -u | paste -sd, -); who_s=${who_s:-"$(cut -c6- "$Q/rooted-note" 2>/dev/null | head -1)"}
       joined() { printf '%s\n' "$@" | sed '/^$/d' | paste -sd';' - | sed 's/;/; /g'; }
       # 1. The shell part, now: exactly the shell files that differ from what's live - also while an APK builds or
       #    waits for idle (its install resets the overrides and re-pushes everything origin changed since its build).
@@ -469,37 +485,40 @@ run)
       # 4. The rooted-mode deploy (targets/android/rooted/rooted.sh deploy, f105 part 1): rooted_inputs changed
       #    since the last rooted-mode ship, built... nothing to build, just pushed - after the APK, under the
       #    same debounce and phone-busy rules as the apps step above.
-      rlv=$(cat "$Q/rooted-live" 2>/dev/null || true)
-      rbase=$inst
-      [ -n "$rlv" ] && rbase=$rlv
-      [ -n "$live" ] && [ -n "$rbase" ] && git merge-base --is-ancestor "$rbase" "$live" 2>/dev/null && rbase=$live
-      rchg=; [ -n "$rbase" ] && git cat-file -e "$rbase^{commit}" 2>/dev/null && rchg=$(rooted_inputs "$rbase" "$T")
-      if [ -n "$rchg" ] && ! apk_alive && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-rooted" 2>/dev/null)" != "$T" ]; then
+      #    Its notes are kept in $Q/rooted-note ("who" line, then the note): the APK's install finishes the requests
+      #    before this step gets its turn.
+      rn=$(joined ${snotes[@]+"${snotes[@]}"} ${anotes[@]+"${anotes[@]}"})
+      if rooted_due; then
+        [ -z "$rn" ] || printf 'who: %s\n%s\n' "$who_s" "$rn" > "$Q/rooted-note"
+      else rchg=; fi
+      if [ -n "$rchg" ] && ! apk_alive && [ "$age" -ge "$QS" ]; then
         if verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
           echo $$ > "$Q/installing"
-          rn=$(joined ${snotes[@]+"${snotes[@]}"} ${anotes[@]+"${anotes[@]}"}); rn=${rn:-"rooted update"}
+          [ -n "$rn" ] || rn=$(sed -n 2p "$Q/rooted-note" 2>/dev/null); rn=${rn:-"rooted update"}
           rlog=$Q/done/$(date +%Y%m%d-%H%M%S)-${T:0:9}-rooted.log
           echo "$(date +%T) ship ${T:0:9} as a rooted deploy ($rchg) for $who_s" | tee -a "$rlog" >/dev/null
           rrc=0
           ( PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 targets/android/rooted/rooted.sh deploy --note "$rn" ) >> "$rlog" 2>&1 || rrc=$?
           rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
           if [ $rrc = 0 ]; then
-            echo "$T" > "$Q/rooted-live"; rm -f "$Q/failed-rooted"
+            echo "$T" > "$Q/rooted-live"; rm -f "$Q/failed-rooted" "$Q/rooted-pending" "$Q/rooted-note"
             echo "$(date '+%F %T') ${T:0:9} rooted ($rchg) for $who_s: $rn" >> "$Q/shipped.log"
             echo "$(date +%T) ${T:0:9}: rooted deploy done ($rchg)"
           else
-            echo "$T" > "$Q/failed-rooted"
+            echo "$T" > "$Q/failed-rooted"; rm -f "$Q/rooted-pending" "$Q/rooted-note"
             echo "$(date +%T) ${T:0:9}: rooted deploy FAILED rc $rrc (log $rlog) - waiting for a new origin commit"
             mail "ship ${T:0:9} (rooted:$rchg) FAILED rc $rrc: $(tail -1 "$rlog" | cut -c1-200) - log $rlog on the Mac; fix it on origin, then ship.sh request again"
           fi
         fi
       fi
-      ! ls "$Q"/*.req >/dev/null 2>&1 || sleep "$POLL"
+      ! { ls "$Q"/*.req >/dev/null 2>&1 || rooted_due; } || sleep "$POLL"
     done
     # An APK ship still out: stay and reap it (the loop above reaps once its rc exists) before the idle exit.
     apk_alive && { sleep "$POLL"; continue; }
     [ -f "$Q/apk/rc" ] && { reap_apk; continue; }
+    # A rooted deploy still due (its APK just installed, say): one more pass, never while paused.
+    [ ! -e "$Q/paused" ] && ship_tree >/dev/null && rooted_due && continue
     rm -rf "$L"
     [ -e "$Q/paused" ] && break
     # A request written while this runner was on its way out: take the lock again and serve it.
