@@ -794,6 +794,19 @@ With the APK installed, unfolded, `powos_web_windows` = 1 and the user idle: ope
   reworked by bar-merge).
 - **Full screen:** an app going full screen (`fullscreen <id> 1`) stays in its window; the bar's full-screen button is
   the work-area maximise. A Linux full-screen app as a real full-screen surface is open.
-- **Client-side bars** (`move`/`maximize`/`minimize` from Steam's own bar): logged, not acted on.
+- **Client-side frames (CSD, kwin 0046 / 3.53, 2026-10-30):** KWin says `decor <id> 0 own` for an undecorated normal
+  window or dialog that draws its own frame (Wayland: kept client-side decorations; X11: `_MOTIF_WM_HINTS` no
+  decorations or `_GTK_FRAME_EXTENTS`). The page shows no PowOS bar over it (`WebWin.ownFrame`, adopt payload +
+  `webwindows.frame`); the task path's `WindowTasks.drawsOwnBar` follows the same rule (an older KWin: PowOS's bar). Its
+  own drag/resize (`xdg_toplevel.move/resize`, `_NET_WM_MOVERESIZE`) is cancelled in KWin and sent as
+  `moveresize <id> move|<edges>`: `WebWindows.linuxMoveResize` cancels the touch to KWin, the page's Body drives the
+  frame with the same pointer (`appDragMove`: moves/untiles/snaps like the bar, resizes like an edge; held still 500 ms:
+  the tile menu). Its maximize (button or double click on its tab strip) = PowOS full screen, minimize = the dock.
+- **Content = the visible frame (kwin 0046):** an undecorated window is shown and sized by KWin's `frameGeometry` (the
+  X11 client geometry includes `_GTK_FRAME_EXTENTS`, the shadow): before, Brave's frame sat ~16 logical px inside the
+  body with a dark gutter left/right/bottom and KWin's refit loop ("took 543x628 itself, the task is 504x606").
+- **Frame pacing (kwin 0046):** `window task N frames: last 5 s C commits, D drawn (fps); commit -> drawn median/p90/max`
+  in KWin's log (`/run/powos-app/hyprland.log`) every 5 s while the window draws: commits > drawn or a long
+  commit -> drawn = the per-toplevel path holds frames; commits ~= drawn at low fps = the client (Xwayland/Brave).
 - **Home restart:** windows are handed back as tasks; re-adopting them as web windows when home returns (KWin's
   `session` list) is open.

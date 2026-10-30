@@ -118,6 +118,12 @@ public final class WindowTasks {
      */
     static final Map<Integer, Boolean> kwinBar = new ConcurrentHashMap<>();
     /**
+     * The windows that draw their own complete frame - title bar, buttons, edges: KWin's "decor <id> 0 own" (kwin 0046:
+     * an undecorated normal window or dialog with client-side decorations - Brave, Chrome, Steam, a GTK header bar).
+     * They get no PowOS bar over theirs (one bar, never two); their own move/resize/maximize/minimize drive PowOS's.
+     */
+    static final java.util.Set<Integer> ownFrame = ConcurrentHashMap.newKeySet();
+    /**
      * A new window's parent, by surface id ("parent <id> <parent id>", kwin 0044, told before its "open"): another
      * window of its application (same process) that has a task or a web window - Steam's "Steam Dialog" and
      * "Authorization" have no transient-for, so KWin can't draw them into Steam's task. [open] shows the new one with
@@ -345,6 +351,7 @@ public final class WindowTasks {
             java.util.Set<Integer> live = liveIds(f);
             Log.i(TAG, "KWin session " + session + ", its tasks " + live);
             kwinBar.keySet().retainAll(live);
+            ownFrame.retainAll(live);
             parents.keySet().retainAll(live);
             finishStale(context, session, live);
             WebWindowSource.session(live);
@@ -486,11 +493,27 @@ public final class WindowTasks {
                 break;
             case "close":
                 kwinBar.remove(id);
+                ownFrame.remove(id);
                 WebWindowSource.closed(id);
                 break;
             case "decor":
                 onWindow(id, f);
+                WebWindowSource.ownFrame(id, ownFrame.contains(id));
                 break;
+            case "moveresize":
+                // Its own frame dragged (kwin 0046: xdg_toplevel.move/resize, _NET_WM_MOVERESIZE): the web window's
+                // frame follows the rest of that touch - "move" or the edges ("n", "se", ...).
+                if (f.length > 2)
+                    WebWindowSource.moveResize(id, f[2]);
+                break;
+            case "maximize":
+            case "minimize":
+                // Its own frame's maximize (a button, a double click on its tab strip) = PowOS full screen (the user's
+                // rule: max = full screen); its minimize = PowOS's.
+                WebWindowSource.control(id, f[0]);
+                break;
+            case "move":
+                break; // an older app's task drag; "moveresize" is the web window's
             case "fullscreen":
                 // The window full screen or back (kwin 0043's answer to the app's request, or its own F11/video).
                 if (f.length > 2)
@@ -506,6 +529,8 @@ public final class WindowTasks {
         switch (f[0]) {
             case "decor": {
                 boolean kwin = !(f.length > 2 && f[2].equals("0"));
+                boolean own = !kwin && f.length > 3 && f[3].equals("own");
+                boolean wasOwn = own ? !ownFrame.add(id) : ownFrame.remove(id);
                 Boolean was = kwinBar.put(id, kwin);
                 Log.i(TAG, "decor " + id + ": " + (kwin ? "KWin's title bar (the frame's bar)" : "its own title bar (no frame bar)"));
                 // Every desktop window uses PowOS's bar: a server-side decorated one has KWin's Breeze border taken off
@@ -513,10 +538,12 @@ public final class WindowTasks {
                 if (kwin && kwinCan("nodecor"))
                     send("nodecor", id);
                 Runnable r = barChanged;
-                if (r != null && was != null && was != kwin)
+                if (r != null && ((was != null && was != kwin) || wasOwn != own))
                     r.run();
                 break;
             }
+            case "moveresize":
+                break; // a task's drag comes as "move" (its frame's grip resizes)
             case "move": {
                 PowosWindowActivity a = tasks.get(id);
                 Log.i(TAG, "move " + id + ": its own title bar dragged" + (a == null ? " (no task)" : ""));
@@ -541,6 +568,7 @@ public final class WindowTasks {
             }
             case "close": {
                 kwinBar.remove(id);
+                ownFrame.remove(id);
                 PowosWindowActivity a = tasks.get(id);
                 if (a != null)
                     a.runOnUiThread(a::closedByKWin);
@@ -564,15 +592,21 @@ public final class WindowTasks {
     }
 
     /**
-     * Android task [taskId] shows a Linux window that draws its own title bar (KWin's "decor <id> 0": client-side
-     * decorations): its frame adds none. False for every other task, and while KWin hasn't said (an older KWin).
+     * Android task [taskId] shows a Linux window that draws its own complete frame (KWin's "decor <id> 0 own", kwin
+     * 0046): its frame adds no bar - one bar, never two. An undecorated window without a frame of its own (a splash) and
+     * every window of an older KWin (no "own") get PowOS's bar: before 0046 "decor 0" also meant "no bar at all", and
+     * such a window lost its only title bar (the user, 10-30 20:30: "Steam is missing its title bar").
      */
     public static boolean drawsOwnBar(int taskId) {
-        // Every window gets PowOS's title bar, its own frame or not (the user, 10-30 20:30: "Steam is missing its title
-        // bar"): an app that keeps a client-side frame (Steam, a GTK header bar, Brave) shows it under PowOS's bar.
-        // HACK: the app's own bar stays drawn under ours; the real fix is the app taking server-side decorations
-        // (KWin's xdg-decoration default) - apps that can't (Steam's CEF frame, GTK4) keep both.
+        for (PowosWindowActivity a : tasks.values())
+            if (a.getTaskId() == taskId && a.live())
+                return ownFrame.contains(a.windowId());
         return false;
+    }
+
+    /** KWin window [id] draws its own complete frame (see [ownFrame]). */
+    public static boolean drawsOwnFrame(int id) {
+        return ownFrame.contains(id);
     }
 
     /**

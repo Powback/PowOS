@@ -375,7 +375,9 @@ class WebWindows(
         offer.key = key
         pendingLinux[kwin] = offer
         Log.i(TAG, "KWin window $kwin (${offer.appId}, \"${offer.title}\"): offered to the page as $key")
-        emit("webwindows.adopt", JSONObject().put("kwin", kwin).put("key", key).put("label", offer.label))
+        // "ownFrame": it draws its own complete frame (Brave, Steam, GTK CSD; kwin 0046) - the page shows no bar over it.
+        val own = andro.marchy.WebWindowSource.ownFrame(kwin)
+        emit("webwindows.adopt", JSONObject().put("kwin", kwin).put("key", key).put("label", offer.label).put("ownFrame", own))
         main.postDelayed({
             pendingLinux.remove(kwin)?.let { p ->
                 Log.w(TAG, "fallback: KWin window $kwin (${p.appId}): the page made no web window in $LINUX_ADOPT_MS ms, a task instead")
@@ -1478,6 +1480,62 @@ class WebWindows(
     ) {
         val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
         linuxFullScreen(w, on)
+    }
+
+    // ---- Linux windows that draw their own frame (CSD: Brave, Chrome, Steam, GTK header bars; kwin 0046) -------------
+
+    /** KWin window [kwin] draws its own frame now ([own]) or not: the page shows its bar or not (main thread). */
+    fun linuxOwnFrame(
+        kwin: Int,
+        own: Boolean,
+    ) {
+        val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
+        Log.i(TAG, "window ${w.id}: KWin window $kwin ${if (own) "draws its own frame: no PowOS bar" else "has PowOS's bar"}")
+        emit("webwindows.frame", mapOf("id" to w.id, "own" to own))
+    }
+
+    /**
+     * KWin window [kwin]'s own frame dragged ("moveresize <id> move|<edges>": its tab strip, its edge): the touch doing
+     * it stops going to KWin (a cancel for every pointer), and the page's frame follows the rest of it - a move as its
+     * bar's drag, a resize as its edge grab ("webwindows.moveresize" {id, edges}; the page's Body holds the pointer).
+     * Main thread.
+     */
+    fun linuxMoveResize(
+        kwin: Int,
+        edges: String,
+    ) {
+        val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
+        if (w.linuxFull) return
+        val g = gesture
+        if (linuxTouch === w && g != null) {
+            val src = w.linux
+            val cancel = MotionEvent.obtain(g).apply { action = MotionEvent.ACTION_CANCEL }
+            if (src != null) {
+                val at = IntArray(2).also(web::getLocationInWindow)
+                val geo = w.geo
+                if (geo != null) andro.marchy.WebWindowSource.touch(src.handle, cancel, at[0] - geo.body.left.toFloat(), at[1] - geo.body.top.toFloat(), geo.scale)
+            }
+            cancel.recycle()
+            linuxTouch = null
+        }
+        Log.i(TAG, "window ${w.id}: KWin window $kwin's own frame ${if (edges == "move") "dragged: the window moves" else "resized ($edges): the window resizes"}")
+        emit("webwindows.moveresize", mapOf("id" to w.id, "edges" to edges))
+    }
+
+    /**
+     * KWin window [kwin]'s own frame's buttons (main thread): "maximize" = PowOS full screen (the user's rule: max = full
+     * screen; a double click on its tab strip too), "minimize" = the page's minimise (to the dock).
+     */
+    fun linuxControl(
+        kwin: Int,
+        action: String,
+    ) {
+        val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
+        Log.i(TAG, "window ${w.id}: KWin window $kwin's own $action button")
+        when (action) {
+            "maximize" -> if (w.linuxFull) toWindow(w.id) else fullScreen(w.id)
+            "minimize" -> emit("webwindows.control", mapOf("id" to w.id, "action" to "minimise"))
+        }
     }
 
     /** The page's "webwindows.fullScreen": window [id]'s app full screen ([fullScreen]); false: no such window. */

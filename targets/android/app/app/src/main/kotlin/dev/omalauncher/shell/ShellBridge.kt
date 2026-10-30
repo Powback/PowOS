@@ -112,6 +112,27 @@ class ShellBridge(
             ) {
                 main.post { if (webWindowsMade) webWindows.linuxFullScreen(id, on) }
             }
+
+            override fun ownFrame(
+                id: Int,
+                own: Boolean,
+            ) {
+                main.post { if (webWindowsMade) webWindows.linuxOwnFrame(id, own) }
+            }
+
+            override fun moveResize(
+                id: Int,
+                edges: String,
+            ) {
+                main.post { if (webWindowsMade) webWindows.linuxMoveResize(id, edges) }
+            }
+
+            override fun control(
+                id: Int,
+                action: String,
+            ) {
+                main.post { if (webWindowsMade) webWindows.linuxControl(id, action) }
+            }
         }
 
     /** An app the system's window menu floated ([SystemFloat]): a web window, as the switcher's "PowOS desktop window". */
