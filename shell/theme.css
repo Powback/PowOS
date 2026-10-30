@@ -21,6 +21,8 @@
   --color-red: #e82424;
 
   --font: ui-monospace, "JetBrainsMono Nerd Font", "DejaVu Sans Mono", monospace;
+  /* The proportional face, for what reads as prose from elsewhere (a track's title on the media card). */
+  --font-ui: system-ui, Roboto, "Noto Sans", "DejaVu Sans", sans-serif;
   --text-small: 11px;
   --text-body: 14px;
   --text-item: 15px;

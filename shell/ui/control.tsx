@@ -440,14 +440,17 @@ function appIcon(pkg?: string): string | null {
 
 const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
 
-/** The seek bar: where it is, and dragged, where to go (a session that doesn't take seeking: no thumb). */
+/**
+ * The progress line: a thin line, the times at its ends; no knob until it's dragged (the line is a range input, so a
+ * drag still seeks). A session that doesn't take seeking: the line only shows where it is.
+ */
 function Seek({ m }: { m: MediaState }) {
   const [drag, setDrag] = useState<number | null>(null);
   const duration = m.duration ?? 0;
   const at = drag ?? Math.min(duration, m.position ?? 0);
   const value = (e: Event) => Number((e.target as HTMLInputElement).value);
   return (
-    <div class="cc-seek">
+    <div class={`cc-seek ${drag === null ? "" : "dragging"}`}>
       <span class="cc-time">{duration ? clock(at) : ""}</span>
       <input
         type="range"
@@ -461,7 +464,7 @@ function Seek({ m }: { m: MediaState }) {
         onInput={(e) => setDrag(value(e))}
         onChange={(e) => {
           powos.media.seek(m.package, value(e)).catch(() => {});
-          // The host's next tick brings the new position; the thumb stays where it was let go till then.
+          // The host's next tick brings the new position; the line stays where it was let go till then.
           window.setTimeout(() => setDrag(null), 1200);
         }}
       />
@@ -470,7 +473,7 @@ function Seek({ m }: { m: MediaState }) {
   );
 }
 
-/** Previous, play/pause, next - on this session. */
+/** Previous, play/pause (the larger), next - on this session. */
 function Transport({ m }: { m: MediaState }) {
   const pkg = m.package;
   return (
@@ -489,15 +492,18 @@ function Transport({ m }: { m: MediaState }) {
 }
 
 /**
- * One session's card, as OnePlus's: the art, the track (a tap opens the app), the app's icon (its output picker:
- * speaker, Bluetooth, cast), the seek bar and the transport. Every control acts on this session (its package), not
- * whichever plays.
+ * One session's card (the user, 2026-10-30: "surely there's some better way to do the media"): its background is the
+ * art itself, blurred and darkened under the shade's tint (one pseudo-element, shell.css .cc-media.has-art); the art
+ * again as a rounded tile, the track beside it (a tap opens the app), the app's icon small at the corner (its output
+ * picker: speaker, Bluetooth, cast); the transport centred under them, the progress line under that. Every control
+ * acts on this session (its package), not whichever plays.
  */
 function MediaCard({ m }: { m: MediaState }) {
   const icon = appIcon(m.package);
+  const art = m.art ? `/_media/${encodeURIComponent(m.art)}` : null;
   return (
-    <div class="cc-media tile">
-      {m.art ? <img class="cc-art" src={`/_media/${encodeURIComponent(m.art)}`} alt="" /> : <span class="cc-art cc-art-none"><Icon name="musicNote" /></span>}
+    <div class={`cc-media tile ${art ? "has-art" : ""}`} style={art ? { "--art": `url("${art}")` } : undefined}>
+      {art ? <img class="cc-art" src={art} alt="" /> : <span class="cc-art cc-art-none"><Icon name="musicNote" /></span>}
       <button type="button" class="cc-track" onClick={() => (shut(), powos.media.control("open", m.package))}>
         <span class="cc-label">{m.title}</span>
         <span class="cc-detail">{m.artist ?? ""}</span>
@@ -505,8 +511,8 @@ function MediaCard({ m }: { m: MediaState }) {
       <button type="button" class="cc-media-app" aria-label={`output: ${m.app ?? "this app"}`} onClick={() => (shut(), powos.media.output(m.package))}>
         {icon ? <img src={icon} alt="" /> : <Icon name="speakerWireless" />}
       </button>
-      <Seek m={m} />
       <Transport m={m} />
+      <Seek m={m} />
     </div>
   );
 }
