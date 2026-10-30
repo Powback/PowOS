@@ -496,8 +496,17 @@ internal class GlassBlur(
             surfaceField = runCatching { viewRoot.javaClass.getDeclaredField("mSurface").apply { isAccessible = true } }.getOrNull()
             noSurfaceField = surfaceField == null
         }
-        return runCatching { (surfaceField?.get(viewRoot) as android.view.Surface?)?.generationId }.getOrNull() ?: -1
+        val surface = runCatching { surfaceField?.get(viewRoot) }.getOrNull() ?: return -1
+        // Surface.getGenerationId() is hidden too (not in the SDK stubs): reflected, like mSurface above.
+        if (generationMethod == null && !noGenerationMethod) {
+            generationMethod = runCatching { surface.javaClass.getMethod("getGenerationId") }.getOrNull()
+            noGenerationMethod = generationMethod == null
+        }
+        return runCatching { generationMethod?.invoke(surface) as Int? }.getOrNull() ?: -1
     }
+
+    private var generationMethod: java.lang.reflect.Method? = null
+    private var noGenerationMethod = false
 
     private var surfaceField: java.lang.reflect.Field? = null
     private var noSurfaceField = false
