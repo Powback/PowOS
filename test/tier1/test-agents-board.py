@@ -141,6 +141,10 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(self.steps(), [("follow the finger", "done"), ("settle", "done"), ("fix the snap", "current"),
                                         ("test on device", "next")])
         self.assertEqual((self.row()["progress_done"], self.row()["progress_total"]), (2, 4))
+        # Not done while a planned step is still to do (2026-10-30: a PASS closed a task over its open steps).
+        self.assertIn("1 planned step to do (test on device)", self.cli("done", "switcher", ok=False).stderr)
+        self.assertEqual(self.row()["status"], "working")
+        self.cli("set", "switcher", "--step", "test on device")
         self.cli("done", "switcher")
         self.assertEqual(self.row()["status"], "done")
         self.assertEqual(self.steps()[2], ("fix the snap", "done"))
