@@ -12,7 +12,8 @@ import android.webkit.WebView
  * ([android.view.AttachedSurfaceControl.applyTransactionOnDraw]), so the change and the page's pixels land on the same
  * composited frame. Both channels ride the same draw when the page sent them for the same frame.
  *
- * Newest wins, per channel: a callback for a frame older than one already applied is dropped. Trace: async section
+ * Newest wins, per channel: a callback for a frame older than one already applied is dropped. Never waits for a draw
+ * longer than [MAX_WAIT_MS] (an idle page draws only on damage): applied without one then. Trace: async section
  * "<name> f<id>", receipt to apply.
  */
 internal class FrameSync(
@@ -47,17 +48,34 @@ internal class FrameSync(
             apply()
             return
         }
+        var done = false
+        val fire = { why: String ->
+            if (!done) {
+                done = true
+                Trace.endAsyncSection("$name f$id", cookie)
+                if (id > applied) {
+                    applied = id
+                    if (why != "draw") android.util.Log.i("PowosFrameSync", "$name f$id: no draw in $MAX_WAIT_MS ms, applied without one")
+                    apply()
+                }
+            }
+        }
         web.postVisualStateCallback(
             id,
             object : WebView.VisualStateCallback() {
-                override fun onComplete(requestId: Long) {
-                    Trace.endAsyncSection("$name f$id", cookie)
-                    if (requestId <= applied) return
-                    applied = requestId
-                    apply()
-                }
+                override fun onComplete(requestId: Long) = fire("draw")
             },
         )
+        // The callback fires on the WebView's next draw, and an idle page whose change paints nothing (a web window's
+        // element is invisible: the host draws it) asks for none - the window waited for an unrelated redraw (a touch,
+        // 15-20 s, 2026-10-30 20:40). So: a draw now, and the change applied anyway if none came in [MAX_WAIT_MS].
+        web.invalidate()
+        web.postDelayed({ fire("timeout") }, MAX_WAIT_MS)
+    }
+
+    companion object {
+        /** A bound change waits at most this long for its draw (two frames at 60 Hz plus slack). */
+        const val MAX_WAIT_MS = 50L
     }
 
     /** Another page (a reload): its frame ids start again at 1. */

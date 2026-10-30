@@ -127,7 +127,7 @@ class WebWindows(
 
     /**
      * Main thread: each Android window's display read on [io]; one that had its app and is empty now is checked again
-     * [RECONCILE_MS] later (a trampoline activity, a move in progress) and, still [orphaned], closed - the frame never
+     * [ORPHAN_CONFIRM_MS] later (a trampoline activity, a move in progress) and, still [orphaned], closed - the frame never
      * outlives its task.
      */
     private fun reconcile() {
@@ -135,11 +135,11 @@ class WebWindows(
         if (ws.isNotEmpty()) io.post { ws.forEach(::checkOrphan) }
     }
 
-    /** On [io]: [w]'s display read; empty after it had its app: read again [RECONCILE_MS] later ([confirmOrphan]). */
+    /** On [io]: [w]'s display read; empty after it had its app: read again [ORPHAN_CONFIRM_MS] later ([confirmOrphan]). */
     private fun checkOrphan(w: Win) {
         val n = tasksOn(w.displayId)
         if (n != null && n > 0) w.landed = true
-        if (gone(w, n)) io.postDelayed({ confirmOrphan(w) }, RECONCILE_MS)
+        if (gone(w, n)) io.postDelayed({ confirmOrphan(w) }, ORPHAN_CONFIRM_MS)
     }
 
     /** On [io]: [w]'s display still empty - the window closed the bar's way (main thread). */
@@ -183,6 +183,11 @@ class WebWindows(
     ) {
         @Volatile var displayId = -1
         var mirror: SurfaceControl? = null
+
+        /** When [open] made it (uptime ms), and when it was first on screen (0: not yet): "shown N ms after open". */
+        val openedAt = SystemClock.uptimeMillis()
+        @Volatile var displayAt = 0L
+        var shownAt = 0L
 
         /** The last geometry the page gave it (main thread): applied again when the mirror arrives. */
         var geo: Geo? = null
@@ -348,6 +353,7 @@ class WebWindows(
                 return@create
             }
             win.displayId = displayId
+            win.displayAt = SystemClock.uptimeMillis()
             WebWindowDisplays.add(displayId, id)
             // Closed while its display was being made: the display goes too.
             if (win.closed) return@create helper.release(displayId)
@@ -567,7 +573,10 @@ class WebWindows(
         val t = SurfaceControl.Transaction().reparent(out, win.container).setLayer(out, 0).setVisibility(out, true)
         // Boundless until cropped: nothing of it shows until the page's geometry says where the body is.
         t.setCrop(out, Rect(0, 0, 0, 0))
-        win.geo?.let { place(t, win, it) }
+        win.geo?.let {
+            place(t, win, it)
+            shown(win, it)
+        }
         t.apply()
         imePolicy(win.displayId)
         if (win.adopt >= 0) io.post { adoptNow(win) } else launch(win)
@@ -697,6 +706,7 @@ class WebWindows(
             if (held(win, g)) continue
             win.geo = g
             place(t, win, g)
+            shown(win, g)
         }
         for (win in wins.values) {
             if (win.id in shown || !win.container.isValid) continue
@@ -761,6 +771,22 @@ class WebWindows(
     private var lastPlaceLog = 0L
     private var behindFrames = 0
     private var appliedFrames = 0
+
+    /**
+     * [win] on screen for the first time (frame placed by the page's geometry and its display mirrored): the open's
+     * latency logged, the number the next regression shows in (2026-10-30: Chrome's window 15-20 s after the tap).
+     */
+    private fun shown(
+        win: Win,
+        g: Geo,
+    ) {
+        if (win.shownAt != 0L || !g.visible || win.mirror == null) return
+        win.shownAt = SystemClock.uptimeMillis()
+        val ms = win.shownAt - win.openedAt
+        val display = if (win.displayAt > 0) "display after ${win.displayAt - win.openedAt} ms" else "no display (KWin)"
+        val line = "window ${win.id} (${win.linux?.offer?.appId ?: win.component.packageName}): shown $ms ms after open ($display)"
+        if (ms > SHOWN_SLOW_MS) Log.w(TAG, "$line - slow, over $SHOWN_SLOW_MS ms") else Log.i(TAG, line)
+    }
 
     /** [g] into [t]: the container at the frame (cropped, rounded, ordered, shown), the mirror at the body. */
     private fun place(
@@ -2416,6 +2442,12 @@ class WebWindows(
 
         /** A task change's [reconcile] waits this long, and an empty display is read again this long after. */
         private const val RECONCILE_MS = 400L
+
+        /** An empty display is read again this long after: a window closes only when its task was gone over a second. */
+        private const val ORPHAN_CONFIRM_MS = 1000L
+
+        /** An open slower than this to show is logged as a warning ([shown]). */
+        private const val SHOWN_SLOW_MS = 1000L
 
         /**
          * [reconcile]'s rule: an Android window is an orphan (its frame closes) when its display is known empty
