@@ -18,6 +18,7 @@ test-agents-board.py does).
 import http.server
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -608,6 +609,50 @@ class PassClosesOnlyItsOwnTaskCliTest(unittest.TestCase):
         self.run_cli("task", "works", "ww")
         self.assertEqual(FakeStdb.db["work"]["ww"]["status"], "done")
         self.assertEqual(self.run_cli("task", "works", "ww").stdout.strip(), "ww", "again on a done task: no error")
+
+    def bridge_works(self, wid, old_cli=False):
+        """The page's "works" tap as the phone runs it: ShellBridge.callVerdict's own command (read from the Kotlin),
+        through a `powos` on PATH. [old_cli]: a stale phone copy - no `task works` verb, and a `task done` that closes
+        without the open-steps rule (what the phone had on 2026-10-30 19:4x)."""
+        kt = open(os.path.join(ROOT, "targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/ShellBridge.kt")).read()
+        m = re.search(r'if \(works\) "((?:[^"\\]|\\.)*)"', kt)
+        self.assertTrue(m, "ShellBridge.callVerdict's works command")
+        cmd = m.group(1).replace("$job", f"you-{wid}-1").replace("$t", wid)
+        self.assertNotRegex(cmd, r"task done|--status done", "a works tap never runs a closer")
+        bin_ = os.path.join(self.tmp, "bin")
+        os.makedirs(bin_, exist_ok=True)
+        old = ('[ "$1 $2" = "task works" ] && { echo "powos agents: unknown: task works (powos agents help)" >&2; exit 1; }\n'
+               '[ "$1" = "help" ] && { "$PY" "$CLI" help | grep -v "task works"; exit 0; }\n'
+               '[ "$1 $2" = "task done" ] && { echo "$*" >> "$HOME/old-done"; exit 0; }\n') if old_cli else ""
+        open(os.path.join(bin_, "powos"), "w").write(f'#!/bin/sh\nshift\nPY="{sys.executable}"; CLI="{CLI}"\n{old}'
+                                                     'exec "$PY" "$CLI" "$@"\n')
+        os.chmod(os.path.join(bin_, "powos"), 0o755)
+        env = dict(self.env, PATH=bin_ + os.pathsep + self.env["PATH"])
+        return subprocess.run(["sh", "-c", cmd], cwd=self.tmp, env=env, capture_output=True, text=True, timeout=60)
+
+    def test_a_works_tap_never_closes_a_task_with_an_open_step(self):
+        # The web-windows epic (2026-10-30 ~19:47): a works tap closed it while its step W1 was still open. A tap
+        # records the user PASS and finishes only the slice the card showed; the task stays open while any step is.
+        for old_cli in (False, True):
+            FakeStdb.reset()
+            self.run_cli("task", "add", "Web windows", "--id", "ww", "--plan", "W1 element model; W2 title bar")
+            self.run_cli("task", "set", "ww", "--step", "P0 native moves")
+            p = self.bridge_works("ww", old_cli)
+            self.assertEqual(p.returncode, 0, p.stderr)   # never an error for the page
+            w = FakeStdb.db["work"]["ww"]
+            self.assertEqual(w["status"], "working", f"old CLI: {old_cli} - closed with W1 open")
+            self.assertFalse(os.path.exists(os.path.join(self.tmp, "old-done")), "the bridge ran task done")
+            self.assertEqual([(c["name"], c["state"]) for c in FakeStdb.db["work_check"].values() if c["task"] == "ww"],
+                             [("you", "PASS")])
+            steps = [(x["text"], x["state"]) for x in json.loads(w["steps"])]
+            if not old_cli:
+                self.assertEqual(steps, [("P0 native moves", "done"), ("W1 element model", "next"),
+                                         ("W2 title bar", "next")], "only the shipped slice is done")
+        # The card's slice is the one current step; W1 on as the current one, then tapped: done once nothing is open.
+        self.run_cli("task", "set", "ww", "--plan", "")
+        self.run_cli("task", "set", "ww", "--step", "W1 element model")
+        self.assertEqual(self.bridge_works("ww").returncode, 0)
+        self.assertEqual(FakeStdb.db["work"]["ww"]["status"], "done")
 
     def test_merge_moves_children_and_steps_to_the_target(self):
         self.run_cli("task", "add", "Target", "--id", "t")
