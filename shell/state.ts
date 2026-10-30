@@ -11,7 +11,7 @@ import { backScreen, closeScreens } from "./screens.ts";
 import { recentsBack, recentsHome } from "./ui/recents.tsx";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, AppWindow, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
-import { wideHome } from "./hosts/wide.ts";
+import { sidewaysHome, wideHome } from "./hosts/wide.ts";
 import { openWebWindow } from "./ui/webwindows.tsx";
 
 /** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
@@ -168,7 +168,15 @@ export function validDockPosition(value: string, fallback: string): string {
  * choice above - a check killed before its restore left the folded home with a side dock (2026-10-28 13:46 run).
  */
 export const dockTry = signal("");
-export const dockPosition = computed(() => validDockPosition(dockTry.value || dockPlacement.value, dockMode.value === "desktop" ? "left" : "bottom"));
+export const dockPosition = computed(() => validDockPosition(dockTry.value || sidewaysDock(dockPlacement.value), dockMode.value === "desktop" ? "left" : "bottom"));
+/**
+ * The folded home turned sideways (hosts/wide.ts sidewaysHome): the bottom dock becomes the right column, with its
+ * recents, so the tiles get the height back (the user, 2026-10-30). A side the user picked for mobile stays; folded
+ * portrait and unfolded keep their own placement.
+ */
+function sidewaysDock(placement: string) {
+  return dockMode.value === "mobile" && sidewaysHome.value && placement !== "left" && placement !== "right" ? "right" : placement;
+}
 
 /** The drawer: open or not (a finger dragging it is gesture.ts's drawerDrag). */
 export const drawer = signal(0);
