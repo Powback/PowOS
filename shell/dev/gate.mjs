@@ -786,6 +786,41 @@ async function otherColumns(page, to, fresh) {
  * (wide), hidden, back at [to] with that resize event eaten, then shown. hosts/wide.ts measures the viewport again on
  * every show and read: home at a portrait [to] must not stay wide.
  */
+/** In the page: the render scan's hooks are there only while it's used, and the very originals after (renderscan.ts). */
+async function renderScanCheck() {
+  const fails = [], KEYS = ["__r", "diffed", "__c", "__e"];
+  const options = (await window.importShim("preact")).options;
+  const orig = KEYS.map((k) => options[k]);
+  const same = () => KEYS.every((k, i) => options[k] === orig[i]);
+  const R = await window.__gw.mod("./ui/renderscan.ts"), O = await window.__gw.mod("./ui/renderoverlay.ts");
+  const P = await window.__gw.mod("./ui/perfrec.ts"), S = await window.__gw.mod("./state.ts");
+  if (!same()) fails.push("options hooks changed by loading the render scan (it must install nothing while off)");
+  R.startScan("gate");
+  if (same()) fails.push("startScan installed no hooks");
+  S.editing.value = !S.editing.value;
+  await window.__gw.frames(3);
+  S.editing.value = !S.editing.value;
+  await window.__gw.frames(3);
+  const rep = R.renderReport();
+  if (!(rep.renders > 0)) fails.push(`no renders counted across an edit-mode flip: ${JSON.stringify(rep).slice(0, 200)}`);
+  O.setOverlay(true);
+  P.onMeter({ on: true, rec: 4242 });
+  S.editing.value = !S.editing.value;
+  await window.__gw.frames(3);
+  S.editing.value = !S.editing.value;
+  await window.__gw.frames(3);
+  if (document.querySelectorAll("html > canvas").length !== 1) fails.push("the overlay's canvas isn't up while it's on");
+  R.stopScan("gate");
+  O.setOverlay(false);
+  if (same()) fails.push("hooks gone while a recording still uses them");
+  P.onMeter({ on: true });
+  await window.__gw.frames(2);
+  if (!same()) fails.push(`options hooks not restored after the last user stopped: ${KEYS.filter((k, i) => options[k] !== orig[i]).join(", ")}`);
+  if (R.scanning()) fails.push("still scanning after every user stopped");
+  if (document.querySelector("html > canvas")) fails.push("the overlay's canvas left behind");
+  return fails;
+}
+
 async function staleWide(page, to) {
   const isWide = () => page.evaluate(() => !!document.querySelector(".home.wide"));
   const desk = { width: 1280, height: 800 };
@@ -3678,6 +3713,10 @@ try {
       ["unfold", { width: 900, height: 1000 }, { width: 404, height: 900 }],
     ])
       runs.push(open(browser, `${ORIGIN}/index.html`, `relayout-${label}`, to).then((r) => whenReady(r, () => relayout(r.page, to, from))));
+  // The render scan (ui/renderscan.ts, renderoverlay.ts): collects while on (a recording, the overlay, a dev session),
+  // and when the last user stops Preact's options hooks are the originals again - zero cost when off.
+  if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/renderscan.ts")))
+    runs.push(open(browser, `${ORIGIN}/index.html`, "render-scan").then((r) => whenReady(r, () => r.page.evaluate(renderScanCheck))));
   // Never a stale wide home on the cover screen (staleWide: a desktop size, a resize dropped while hidden, a show).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "stale-wide", { width: 412, height: 900 }).then((r) => whenReady(r, () => staleWide(r.page, { width: 412, height: 900 }))));
