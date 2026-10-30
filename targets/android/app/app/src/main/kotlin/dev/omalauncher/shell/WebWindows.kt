@@ -66,8 +66,11 @@ import java.io.OutputStreamWriter
  * S4's injector (a persistent shell-uid helper holding INJECT_EVENTS - [WebWindowsHost] grows it).
  * HACK: IWindowManager.mirrorDisplay, the SurfaceControl() out-constructor, Transaction.setCornerRadius and the task
  * calls are hidden, reflected ([HiddenApi]). Real fix: none public for an app (a platform-signed system module).
- * Not yet: the app finishing its task on the display does not emit "webwindows.closed" (only close(), the display or
- * the helper gone do) - real fix: a TaskStackListener watching the windows' display ids.
+ * Task reconcile ([reconcile]): a task stack listener (FreeformTasks.listen) re-checks every Android window's display
+ * on each task change; a window whose display had its app and is empty now (the app finished, its task moved to another
+ * display or was re-parented - OnePlus' Open Canvas took Chrome off its display into com.oplus.pscanvas, then removed
+ * it, 2026-10-30) is closed the bar's way ("webwindows.closed"), so no empty frame stays and the next launch of the app
+ * makes a new window instead of raising the orphan.
  *
  * Linux windows (S6): KWin's "open" comes here instead of a PowosWindowActivity task ([linuxOpened], through
  * andro.marchy.WebWindowSource and ShellBridge's host); the window is the same container, frame, geometry and touches as
@@ -109,6 +112,54 @@ class WebWindows(
                 }
             }
         }
+
+    private val reconcileRun = Runnable { reconcile() }
+
+    /** Stops the task stack listener ([reconcile]); null where it can't be registered. */
+    private val stopTasks: (() -> Unit)? = dev.omalauncher.system.FreeformTasks.listen { main.post { scheduleReconcile() } }
+
+    /** A task changed (main thread): one [reconcile] [RECONCILE_MS] after the last change of a burst. */
+    private fun scheduleReconcile() {
+        if (wins.isEmpty()) return
+        main.removeCallbacks(reconcileRun)
+        main.postDelayed(reconcileRun, RECONCILE_MS)
+    }
+
+    /**
+     * Main thread: each Android window's display read on [io]; one that had its app and is empty now is checked again
+     * [RECONCILE_MS] later (a trampoline activity, a move in progress) and, still [orphaned], closed - the frame never
+     * outlives its task.
+     */
+    private fun reconcile() {
+        val ws = wins.values.filter { it.linux == null && !it.closed && it.displayId >= 0 }
+        if (ws.isNotEmpty()) io.post { ws.forEach(::checkOrphan) }
+    }
+
+    /** On [io]: [w]'s display read; empty after it had its app: read again [RECONCILE_MS] later ([confirmOrphan]). */
+    private fun checkOrphan(w: Win) {
+        val n = tasksOn(w.displayId)
+        if (n != null && n > 0) w.landed = true
+        if (gone(w, n)) io.postDelayed({ confirmOrphan(w) }, RECONCILE_MS)
+    }
+
+    /** On [io]: [w]'s display still empty - the window closed the bar's way (main thread). */
+    private fun confirmOrphan(w: Win) {
+        val again = tasksOn(w.displayId)
+        if (!gone(w, again)) return
+        main.post {
+            if (!gone(w, again)) return@post
+            Log.i(TAG, "window ${w.id} (${w.component.packageName}): its app's task left display ${w.displayId} (finished, moved to another display or re-parented): window closed")
+            drop(w)
+        }
+    }
+
+    private fun gone(
+        w: Win,
+        tasks: Int?,
+    ): Boolean {
+        val held = w.full || w.adopt >= 0 || (w.taskId >= 0 && WebWindowDisplays.fullScreenWindow(w.taskId) == w.id)
+        return orphaned(w.closed, w.landed, held, tasks)
+    }
 
     init {
         current = this
@@ -153,6 +204,9 @@ class WebWindows(
         @Volatile var full = false
 
         @Volatile var closed = false
+
+        /** Its display has had its app's task (seen by [checkLanded] / [reconcile]); false again on each [launch]. */
+        @Volatile var landed = false
 
         /** A Linux (KWin) window's source instead of a display ([LinuxSource]; docs/WEB_WINDOWS.md S6), else null. */
         var linux: LinuxSource? = null
@@ -1696,6 +1750,8 @@ class WebWindows(
         wins.values.toList().forEach { drop(it, handBack = it.linux != null) }
         pendingLinux.keys.toList().forEach { kwin -> pendingLinux.remove(kwin)?.let { andro.marchy.WebWindowSource.fallback(context, kwin, it.appId, it.title) } }
         runCatching { dm.unregisterDisplayListener(displayListener) }
+        main.removeCallbacks(reconcileRun)
+        stopTasks?.invoke()
         helper.stop()
         root?.let { r ->
             if (r.isValid) SurfaceControl.Transaction().reparent(r, null).apply()
@@ -2053,6 +2109,7 @@ class WebWindows(
         io.postDelayed({
             if (w.closed) return@postDelayed
             val n = tasksOn(w.displayId)
+            if (n != null && n > 0) w.landed = true
             if (n == null || n > 0) return@postDelayed
             Log.w(TAG, "fallback: ${w.component.packageName} has no task on display ${w.displayId} ${ESCAPE_CHECK_MS} ms after its launch: Android's own window instead of web window ${w.id}")
             main.post {
@@ -2073,6 +2130,7 @@ class WebWindows(
         }.getOrNull()
 
     private fun launch(w: Win) {
+        w.landed = false
         checkLanded(w)
         val intent =
             Intent(Intent.ACTION_MAIN)
@@ -2285,6 +2343,22 @@ class WebWindows(
             }
 
         private const val TAG = "PowosWebWindows"
+
+        /** A task change's [reconcile] waits this long, and an empty display is read again this long after. */
+        private const val RECONCILE_MS = 400L
+
+        /**
+         * [reconcile]'s rule: an Android window is an orphan (its frame closes) when its display is known empty
+         * ([tasks] == 0) after it had its app ([landed]) - not while launching (checkLanded's), nor while [held]: adopting
+         * a task, or a full-screen app out of it (also marked before its move to display 0). [tasks] null: unreadable,
+         * never a close on a guess.
+         */
+        fun orphaned(
+            closed: Boolean,
+            landed: Boolean,
+            held: Boolean,
+            tasks: Int?,
+        ): Boolean = !closed && landed && !held && tasks == 0
 
         /** A Linux web window's switcher card id: this + its window id (no Android task id gets near it). */
         const val LINUX_CARD = 1 shl 29
