@@ -841,7 +841,8 @@ const sent: string[] = [];
 
 /**
  * Each frame while there are windows: their geometry tagged with this page frame, when it changed. The line ends with
- * the frame's rAF time as wall-clock ms (performance.timeOrigin + its timestamp): the host counts the window draws
+ * the frame's rAF time as wall-clock ms (Date.now() less the time since the rAF timestamp; WebView's timeOrigin read
+ * ~593 s off the host's clock on the phone, 10-30): the host counts the window draws
  * between it and the apply (FrameSync.pageLag, "pf=" in the host's "w.f" log).
  */
 function tick(ts: number) {
@@ -850,7 +851,7 @@ function tick(ts: number) {
   if (g !== lastGeometry) {
     lastGeometry = g;
     const id = nextFrameId();
-    const line = `w.f ${id} ${g} ${(performance.timeOrigin + ts).toFixed(2)}`;
+    const line = `w.f ${id} ${g} ${(Date.now() - (performance.now() - ts)).toFixed(2)}`;
     sent.push(line);
     if (sent.length > 120) sent.shift();
     if (native.value) {
