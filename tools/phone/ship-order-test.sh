@@ -152,5 +152,33 @@ grep -q '^REINSTALL install -r -d' "$LOG" && cmp -s "$PHONE/app/base.apk" "$T/pr
 [ "$(cat "$HOME/.cache/powos-installed-commit")" = "$prev" ] && ok "installed-commit record put back" || bad "installed record"
 grep -q '^MAIL.*rolled.*back' "$LOG" && ok "coder told" || bad "no mail"
 
+# 6. (b) 2026-10-30 f0b895fa: the APK is built from an OLDER commit than the shell the service already put live, and
+#    its re-apply after the install can't bring that shell (here: origin unreachable, so push.sh refuses the file as
+#    "not origin's version"). The install reset the overrides, so the phone runs the APK's own shell: ship-apk must go
+#    on (retry, WARNING, boot check) and tell the service so (apk/shell-tip = its own build) - tools/phone/ship.sh then
+#    re-applies the newer shell itself (ship-queue-test.sh case 13). Old ship-apk: the refused push ended it under
+#    set -e (rc 1, no boot check) and the service went on reporting S live.
+landB 'export const ai = "ok6"' "fix6" >/dev/null
+(cd "$T/A" && git pull -q --ff-only 2>/dev/null); R=$(git -C "$T/A" rev-parse HEAD)
+S=$(landB 'export const ai = "S6"' "shell S6")
+(cd "$T/B/shell" && ./push.sh --vpn --silent ui/ai.tsx) >/dev/null 2>&1   # the service pushed S's shell: live = S
+export SHIP_DIR=$T/q; mkdir -p "$SHIP_DIR/apk"; echo "$S" > "$SHIP_DIR/live"
+grep -q '"S6"' "$PHONE/files/shell/ui/ai.tsx" && ok "S6 live on the phone before the APK" || bad "S6 not pushed"
+git -C "$T/A" fetch -q origin "$S" 2>/dev/null; git -C "$T/A" remote set-url origin "$T/unreachable.git"   # S's objects, a stale ref
+: > "$LOG"; (cd "$T/A" && SHIP_APK_CURRENT=1 bash tools/phone/ship-apk.sh --silent --now) > "$T/ship.out" 2>&1; rc=$?
+[ $rc -eq 0 ] && grep -q '^INSTALL' "$LOG" && ok "APK from the older commit ${R:0:9} installed" || { bad "install (rc $rc)"; echo "--- ship.out"; cat "$T/ship.out"; echo "--- log"; cat "$LOG"; }
+grep -q "every page booted" "$T/ship.out" && ! grep -q '"S6"' "$PHONE/files/shell/ui/ai.tsx" 2>/dev/null && ok "the install reset S6; ship-apk went on to the boot check" || { bad "after the install"; cat "$T/ship.out"; }
+[ "$(cat "$SHIP_DIR/apk/shell-tip" 2>/dev/null)" = "$R" ] && ok "the service is told the phone runs the APK's own shell (${R:0:9}), not S" || bad "shell-tip: $(cat "$SHIP_DIR/apk/shell-tip" 2>/dev/null)"
+git -C "$T/A" remote set-url origin "$T/origin.git"
+# ...and with origin reachable, a shell landing during the build is re-applied from origin's CURRENT tip, and that
+# tip is what the service records as the phone's shell.
+(cd "$T/A" && git pull -q --ff-only 2>/dev/null); rm -f "$HOME/.cache/powos-installed-commit"
+export DURING_BUILD="cd $T/B && git pull -q --rebase && echo 'export const ai = \"S7\"' > shell/ui/ai.tsx && git commit -qam S7 && git push -q origin HEAD:worktree-powos-multiplatform"
+: > "$LOG"; (cd "$T/A" && SHIP_APK_CURRENT=1 bash tools/phone/ship-apk.sh --silent --now) > "$T/ship.out" 2>&1; rc=$?; unset DURING_BUILD
+S7=$(git -C "$T/B" rev-parse HEAD)
+grep -q '"S7"' "$PHONE/files/shell/ui/ai.tsx" 2>/dev/null && [ "$(cat "$SHIP_DIR/apk/shell-tip" 2>/dev/null)" = "$S7" ] &&
+  ok "re-applied from origin's current tip, recorded as the phone's shell" || { bad "re-apply from the tip (rc $rc)"; cat "$T/ship.out"; }
+unset SHIP_DIR
+
 [ $fails -eq 0 ] && echo "all pass" || echo "$fails failed"
 exit $fails

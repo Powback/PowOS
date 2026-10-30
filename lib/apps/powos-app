@@ -564,6 +564,13 @@ def publish_module(d, m):
     wasm = os.path.join(d, "out", "module.wasm")
     if not os.path.isfile(wasm):
         die(f"{wasm} missing (powos app build {d})")
+    # Published outside the ship service (apps/install.sh run by it sets POWOS_SHIPPED=1): said loudly - a schema
+    # ahead of what other apps' bindings decode breaks their subscriptions (2026-10-30: powos-agents' work.try_line,
+    # published from an agent's worktree before the shell's bindings had it).
+    if not os.environ.get("POWOS_SHIPPED"):
+        print(f"powos app: WARNING - publishing {mod['database']} outside the ship service: if its schema changed, "
+              "every client's bindings must already have the change (tools/phone/ship.sh ships the module with them)",
+              file=sys.stderr)
     t0 = time.monotonic()
     # Additive schema changes migrate in place; anything destructive is refused by the server (no --delete-data).
     spacetime("publish", "-y", "-s", SERVER, "--bin-path", wasm, mod["database"], quiet=True)

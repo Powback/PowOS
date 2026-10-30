@@ -9,6 +9,8 @@
 # A module the bindings are AHEAD of (they add tables or columns at the end) is published when this commit's
 # apps/<app>/module builds exactly these bindings (apps/vendor.sh, byte for byte): apps/install.sh <app> publish.
 # Anything else fails (exit 1) with the command that fixes it. --no-publish: fail instead of publishing.
+# --publishing "APP..." (the ship service, before its shell push): bindings AHEAD of those apps' modules pass - the same
+# ship publishes them right after the bindings (additive change: bindings first, then the module).
 # Tests: BINDINGS_ADB, BINDINGS_VENDOR, BINDINGS_PUBLISH replace the adb call, apps/vendor.sh and apps/install.sh.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -16,17 +18,19 @@ pairs=$(sed -n 's|^\([a-z0-9-]*\)\.js  *generated  *apps/\([a-z0-9-]*\):.*|\1 \2
 dbs=$(echo "$pairs" | awk '{print $1}' | tr '\n' ' ')
 remote="su -c 'for d in $dbs; do echo @@\$d; chroot /data/powos/root /usr/bin/curl -s -m 5 http://127.0.0.1:3410/v1/database/\$d/schema?version=9; echo; done'"
 [ "${1:-}" = --remote-cmd ] && { echo "$remote"; exit 0; }
-schemas="" dirs=() publish=1
+schemas="" dirs=() publish=1 publishing=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --schemas) schemas=$2; shift 2 ;;
     --vendor) dirs+=("$2"); shift 2 ;;
     --no-publish) publish=""; shift ;;
+    --publishing) publishing=" $2 "; shift 2 ;;
     *) echo "bindings-check: unknown $1" >&2; exit 2 ;;
   esac
 done
 [ ${#dirs[@]} -gt 0 ] || dirs=("$ROOT/shell/vendor")
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/bindings-check.XXXXXX"); trap 'rm -rf "$tmp"' EXIT
+# Under ~ (Colima mounts it; /tmp and $TMPDIR it doesn't): apps/vendor.sh --out writes here through docker.
+mkdir -p "$HOME/.cache"; tmp=$(mktemp -d "$HOME/.cache/powos-bindings-check.XXXXXX"); trap 'rm -rf "$tmp"' EXIT
 if [ -z "$schemas" ]; then
   schemas=$tmp/schemas
   ${BINDINGS_ADB:-"$ROOT/tools/phone/adb.sh"} shell "$remote" | tr -d '\r' > "$schemas"
@@ -50,12 +54,16 @@ while read -r db state what; do
     ok) echo "bindings: $db matches the phone" ;;
     absent) echo "bindings: $db isn't on the phone - not checked" ;;
     ahead)
-      if [ -f "$ROOT/apps/$app/powos-app.json" ] && [ -d "$ROOT/apps/$app/module" ] &&
+      if [[ "$publishing" == *" $app "* ]]; then
+        echo "bindings: $db is ahead of the phone's module ($what) - this ship publishes apps/$app/module right after"
+      elif [ -f "$ROOT/apps/$app/powos-app.json" ] && [ -d "$ROOT/apps/$app/module" ] &&
          ${BINDINGS_VENDOR:-"$ROOT/apps/vendor.sh"} "$app" --out "$tmp/$db.js" >/dev/null && cmp -s "$tmp/$db.js" "$file"; then
         if [ -n "$publish" ]; then
           echo "bindings: $db on the phone lacks $what - publishing apps/$app/module (this commit builds these bindings)"
           name=$(sed -n 's/^ *"name": *"\([^"]*\)".*/\1/p' "$ROOT/apps/$app/powos-app.json" | head -1)
-          ADB=${ADB:-"docker exec powos-vadb adb"} ${BINDINGS_PUBLISH:-"$ROOT/apps/install.sh"} "$app" publish --note "${name:-$app} updated" ||
+          # Safe by construction (this commit's module builds exactly the bindings the phone runs): allowed past
+          # apps/install.sh's direct-publish guard.
+          POWOS_SHIP_SERVICE=${POWOS_SHIP_SERVICE:-bindings-check} ADB=${ADB:-"docker exec powos-vadb adb"} ${BINDINGS_PUBLISH:-"$ROOT/apps/install.sh"} "$app" publish --note "${name:-$app} updated" ||
             { echo "bindings: publishing $db failed (above)" >&2; rc=1; }
         else
           echo "bindings: $db on the phone lacks $what - fix: apps/install.sh $app publish --note \"...\"" >&2; rc=1

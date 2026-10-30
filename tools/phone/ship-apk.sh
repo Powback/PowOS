@@ -253,14 +253,10 @@ if ! docker run --rm --network container:powos-vadb -v "$PWD/targets/android":/t
   exit 5
 fi
 git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"
-# The shell it just installed decodes the phone's live modules only with bindings of their shape (home couldn't read
-# local-pet's rows twice on 2026-10-21): checked in one call; bindings ahead of a module that this commit builds are
-# published, anything else is reported with its fix (the install stands either way).
-tools/phone/bindings-check.sh || echo "ship-apk: the shell's bindings don't match the phone's modules - fix above" >&2
 # Then, in ONE push, every shell file origin's tip (now: it may have moved during the wait) has differently from the
 # APK's own shell. The set gated before the install goes on without a second gate (the stamp is for exactly it at that
 # tree); a different set (origin moved) is gated as any push, from the new tip.
-git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+git fetch -q origin worktree-powos-multiplatform 2>/dev/null || echo "ship-apk: fetch failed - re-applying from the last fetched origin (the service re-applies anything newer: apk/shell-tip below)" >&2
 tip2=$(git rev-parse origin/worktree-powos-multiplatform)
 full=$(apk_delta "$tip2")
 pushok=1
@@ -279,9 +275,11 @@ if [ -n "$full" ]; then
     # A loaded Mac timed every page out at 30 s and the re-push was refused (2026-10-22, 29878209): 60 s, one retry.
     rp() { (cd "$t/tree/shell" && READY_MS=${READY_MS:-60000} env $sg ./push.sh --vpn --silent $full 2>&1 | tail -3); }
   fi
-  out=$(rp); echo "$out"
+  # || true: under set -e a refused push ended the ship right here, silently (rc 1) - before the retry, the WARNING,
+  # the live record and the boot check below.
+  out=$(rp) || true; echo "$out"
   if ! echo "$out" | grep -q "^pushed "; then
-    echo "ship-apk: the push was refused - retrying once" >&2; out=$(READY_MS=90000 stamp= rp); echo "$out"
+    echo "ship-apk: the push was refused - retrying once" >&2; out=$(READY_MS=90000 stamp= rp) || true; echo "$out"
     echo "$out" | grep -q "^pushed " || { pushok=""; echo "ship-apk: WARNING - the phone runs the APK's own shell, without origin's newer files: $(echo $full)" >&2; }
   fi
   rm -f "$stamp"
@@ -289,6 +287,17 @@ fi
 gone=$(unzip -Z1 "$apk" 'assets/shell/*' 2>/dev/null | sed 's|^assets/shell/||' | grep -v '/$' |
   while read -r f; do git cat-file -e "$tip2:shell/$f" 2>/dev/null || echo "$f"; done)
 [ -z "$gone" ] || echo "ship-apk: note - the APK carries shell files origin's tip deleted (an override can't remove them): $(echo $gone)"
+# What the phone's shell now IS, for the ship service's live record (tools/phone/ship.sh reap_apk): origin's tip
+# when the re-apply landed (or there was nothing to re-apply), else only this APK's own build - the service then
+# pushes everything newer itself instead of believing the older live record (f0b895fa, 2026-10-30).
+if [ -n "$pushok" ]; then shell_at=$tip2; else shell_at=$(git rev-parse HEAD); fi
+[ -d "$sq/apk" ] && echo "$shell_at" > "$sq/apk/shell-tip"
+# The shell the phone now runs decodes the phone's live modules only with bindings of their shape (home couldn't read
+# local-pet's rows twice on 2026-10-21; powos-agents' work.try_line on 2026-10-30): checked AFTER the re-apply, with
+# that tree's bindings (the APK's own were stale at 19:33 while origin had the fixed ones). Bindings ahead of a
+# module that tree builds are published; anything else is reported with its fix (the install stands either way).
+bt=.; [ -n "$t" ] && [ -x "$t/tree/tools/phone/bindings-check.sh" ] && [ "$shell_at" = "$tip2" ] && bt=$t/tree
+"$bt/tools/phone/bindings-check.sh" || echo "ship-apk: the shell's bindings don't match the phone's modules - fix above" >&2
 # Every page must boot on what the phone now runs; if one doesn't within 2 min, the WHOLE snapshot goes back.
 if ! g=$(tools/phone/ship-guard.sh check "${GUARD_WAIT_S:-120}"); then
   echo "$g" >&2
