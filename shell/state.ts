@@ -219,6 +219,14 @@ export const aiDraft = stored("powai.draft");
  * (PullHost.kt, page mode=pull) over whatever shows - home, an app, floating windows - for every way in.
  */
 export const homePage = !new URLSearchParams(location.search).get("mode");
+/**
+ * This page's launcher is the overlay (pull.tsx, opened through Bridge.pull.open), not one of its own: home's page, and
+ * the desktop home inside the phone's Plasma app (mode=desktop, powos-shell: its host says launcherOverlay and forwards
+ * pull.open to the APK's PullHost - bridge.cpp phoneLauncher). The user, 2026-10-30, over Plasma: "doesn't seem to have
+ * the latest changes, like the wide menu, and it doesn't adjust to the keyboard" - that was desktop.tsx's own column.
+ * A desktop PC's powos-shell has no overlay and keeps desktop.tsx's launcher.
+ */
+export const launcherIsOverlay = homePage || !!window.PowosHost?.launcherOverlay;
 
 /**
  * The home page on screen (its id in home.pages): home shares it through the store, so the launcher overlay's "add to
@@ -247,7 +255,7 @@ export interface LauncherOpen {
  * widget). On home: the launcher overlay over it (home never draws a drawer); in the overlay's own page: in place.
  */
 export function openPanel(kind: "apps" | "ai", how: LauncherOpen = {}) {
-  if (homePage) {
+  if (launcherIsOverlay) {
     void powos.pull.open?.(kind, how).catch(() => {});
     return;
   }

@@ -8,6 +8,8 @@
 #include <QDesktopServices>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QTimer>
 #include <QUrl>
 #include <QJsonDocument>
@@ -92,6 +94,19 @@ void Bridge::call(int id, const QString &method, const QString &args)
     }
 }
 
+/**
+ * Inside the phone's Plasma app (POWOS_PLATFORM=phone, Andromarchy's android-request on PATH) the launcher is PowOS's
+ * one launcher, the APK's overlay (PullHost, shell/ui/pull.tsx), not this page's own column: "pull.open" asks it
+ * through run/android-request (AndroidRequests.java "launcher"). A desktop PC has neither and keeps desktop.tsx's.
+ */
+static QString phoneLauncher()
+{
+    static const QString helper = qEnvironmentVariable("POWOS_PLATFORM") == QLatin1String("phone")
+        ? QStandardPaths::findExecutable(QStringLiteral("android-request"))
+        : QString();
+    return helper;
+}
+
 QJsonValue Bridge::dispatch(const QString &method, const QJsonArray &a)
 {
     // Areas this host doesn't have yet reject with "unsupported", as the phone's does for desktop-only ones.
@@ -119,6 +134,13 @@ QJsonValue Bridge::dispatch(const QString &method, const QJsonArray &a)
     if (method == QLatin1String("panel.height")) {
         Q_EMIT surfaceHeight(a.at(0).toInt());
         return QJsonValue::Null;
+    }
+    if (method == QLatin1String("pull.open")) {
+        if (phoneLauncher().isEmpty())
+            throw Unsupported("unsupported: " + method.toStdString());
+        const QString kind = a.at(0).toString() == QLatin1String("ai") ? QStringLiteral("ai") : QStringLiteral("apps");
+        const QString how = QString::fromUtf8(QJsonDocument(a.at(1).toObject()).toJson(QJsonDocument::Compact));
+        return QProcess::startDetached(phoneLauncher(), {QStringLiteral("launcher"), kind, how});
     }
     if (method == QLatin1String("store.get"))
         return m_services.store->get(a.at(0).toString());
@@ -168,6 +190,7 @@ QString bridgeScript()
   let host = null;
   window.PowosHost = {
     name: "powos",
+    launcherOverlay: )JS") + (phoneLauncher().isEmpty() ? QStringLiteral("false") : QStringLiteral("true")) + QStringLiteral(R"JS(,
     call(id, method, args) { host ? host.call(id, method, args) : queue.push([id, method, args]); },
   };
   new QWebChannel(qt.webChannelTransport, (channel) => {

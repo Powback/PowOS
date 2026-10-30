@@ -1023,7 +1023,7 @@ declare global {
      * call(); the phone has postMessage(JSON [id, method, args]) - a web message listener only the page's top frame at
      * its own origin gets (ShellOrigin.kt), never an iframe.
      */
-    PowosHost?: { name?: string; call?(id: number, method: string, args: string): void; postMessage?(message: string): void };
+    PowosHost?: { name?: string; launcherOverlay?: boolean; call?(id: number, method: string, args: string): void; postMessage?(message: string): void };
     __powosHost?: {
       resolve(id: number, v: unknown): void;
       reject(id: number, m: string): void;
