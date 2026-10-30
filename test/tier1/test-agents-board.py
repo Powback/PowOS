@@ -340,6 +340,10 @@ class BoardTest(unittest.TestCase):
         self.cli("add", "Split screen side by side", "--id", "w")
         self.cli("add", "Something nobody can place", "--id", "x")
         self.assertEqual([self.row(i)["project"] for i in "kgwx"], ["Kernel & system", "Games", "Windows", "Other"])
+        # The title's lead word wins over words further on (the live board's "Launcher: ... chat typing" was AI page).
+        self.cli("add", "Launcher: dock, search, chat typing, folder page", "--id", "l")
+        self.cli("add", "Home: layout per mode, edit mode, widgets", "--id", "h")
+        self.assertEqual((self.row("l")["project"], self.row("h")["project"]), ("Home & launcher", "Home & launcher"))
         self.cli("set", "x", "--project", "games")
         self.assertEqual(self.row("x")["project"], "Games")
         p = self.cli("set", "x", "--project", "PowOS · phone UI", ok=False)

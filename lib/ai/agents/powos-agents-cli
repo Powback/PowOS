@@ -226,10 +226,15 @@ PROJECT_WORDS = [
     (r"kernel|netfilter|\bgki\b|selinux|\bboot", "Kernel & system"),
     (r"\bgames?\b|steam|minecraft|controller|emulat", "Games"),
     (r"\bfps\b|perf|jank|smooth|latency|stutter|\b120\b", "Performance"),
+    (r"^(home|launcher|dock|search|widgets?|icons?|folders?|glass)\b|native glass", "Home & launcher"),
+    (r"^(health|any app)\b", "Apps"),
+    (r"^powos android|screenshot|^request\b", "Agents & tooling"),
+    (r"^(ai page|powos ai|board|chat)\b", "AI page"),
+    (r"window|split|title bar|desktop mode|switcher|floating|kwin|linux app|resize|maximi|fullscreen|full screen",
+     "Windows"),
     (r"ai page|powos ai|\bboard\b|\bchat\b|\basks?\b", "AI page"),
-    (r"window|split|title bar|desktop|switcher|floating|kwin|linux app|resize", "Windows"),
     (r"shade|lock|notification|control cent|quick launch|toast|\balert", "Shade & lock"),
-    (r"home|launcher|dock|icon|widget|folder|search|page dots|edit mode|keyboard|gesture|swipe|wallpaper",
+    (r"home|launcher|dock|icon|widget|folder|search|page dots|edit mode|keyboard|gesture|swipe|wallpaper|glass|blur",
      "Home & launcher"),
     (r"\bapps?\b|health|registry|module|spacetimedb|shopping|create-app", "Apps"),
     (r"agent|codex|sandbox|\brepo\b|disk|\bmac\b|test|ship|build|spacetimeai|tool|verify|remote|refactor",
@@ -261,10 +266,11 @@ def project_opt(o):
 
 
 def infer_project(owner, wid, title):
-    text = f"{wid} {title}".lower()
-    for rx, proj in PROJECT_WORDS:
-        if re.search(rx, text):
-            return proj
+    """The title's own words first (its lead word: "Launcher: ... chat typing" is the launcher), then the id's."""
+    for text in (title.lower().strip(), f"{wid} {title}".lower()):
+        for rx, proj in PROJECT_WORDS:
+            if re.search(rx, text):
+                return proj
     return PROJECT_OWNERS.get(owner, "Other")
 
 
