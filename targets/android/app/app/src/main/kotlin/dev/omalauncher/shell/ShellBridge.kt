@@ -309,13 +309,44 @@ class ShellBridge(
     ) {
         if (method.startsWith("health.")) return callHealth(id, method, args)
         if (method == "ai.verdict") return callVerdict(id, args)
+        if (method in OFF_MAIN) return callOffMain(id, method, args)
         main.post {
+            MainStallWatch.call = method
             try {
                 val a = if (args.isBlank()) JSONArray() else JSONArray(args)
                 respond(id, dispatch(method, a))
             } catch (e: Exception) {
                 Log.w(TAG, "$method failed", e)
                 js(reply("reject($id, ${JSONObject.quote(e.message ?: e.toString())})"))
+            } finally {
+                MainStallWatch.call = null
+                MainStallWatch.lastCall = method
+                MainStallWatch.lastCallEnd = android.os.SystemClock.uptimeMillis()
+            }
+        }
+    }
+
+    /**
+     * The page's file calls ([OFF_MAIN]: store.get / store.set / perf.save) on one IO thread, in the order sent, the
+     * answer posted back to the main thread: the same results, without disk reads and writes on the UI thread - the
+     * thread the WebView draws on (a slow flash write there is a page frame lost).
+     */
+    private fun callOffMain(
+        id: Int,
+        method: String,
+        args: String,
+    ) {
+        fileIo.execute {
+            val r =
+                runCatching {
+                    val a = if (args.isBlank()) JSONArray() else JSONArray(args)
+                    dispatch(method, a)
+                }
+            main.post {
+                r.fold({ respond(id, it) }, { e ->
+                    Log.w(TAG, "$method failed", e)
+                    js(reply("reject($id, ${JSONObject.quote(e.message ?: e.toString())})"))
+                })
             }
         }
     }
@@ -356,6 +387,8 @@ class ShellBridge(
             "perf.publish" -> a.getString(0).takeIf { it.length < 8192 }?.let { broadcast("perf.sample", JSONObject(it).toString(), except = this) }
             // Perf trace from the status bar's fps meter: saved where PowOS AI sees it (the shared run dir), the last 20 kept,
             // and mailed to the coordinator (the Mac session running PowOS) so every recording reaches it with its full data.
+            // The fps meter's native trace section (MainStallWatch): main-thread blocks and frame gaps while it records.
+            "perf.native" -> if (a.optBoolean(0, false)) MainStallWatch.start().let { true } else MainStallWatch.stop()
             "perf.save" -> {
                 val dir = java.io.File(context.filesDir, "run/powos-ai-shared").apply { mkdirs() }
                 val name = "perf-${System.currentTimeMillis()}.json"
@@ -1440,6 +1473,12 @@ class ShellBridge(
     }
 
     companion object {
+        /** The bridge calls that only touch files: run by [callOffMain], never on the main thread. */
+        private val OFF_MAIN = setOf("store.get", "store.set", "perf.save")
+
+        /** One thread for them all, so a page's set then get stay in that order. */
+        private val fileIo = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-store").apply { isDaemon = true } }
+
         /** Every open shell window's bridge (weak: a closed window just drops out), for events meant for all of them. */
         private val live: MutableSet<ShellBridge> = java.util.Collections.newSetFromMap(java.util.WeakHashMap())
 

@@ -10,6 +10,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { m as main, mring, MRING, mainFresh, onSample, beginMain, endMain } from "./fpsmain.ts";
 import { loafEntry, type Loaf } from "./loaf.ts";
+import type { NativePerf } from "../types.ts";
 
 // The first SETTLE_MS after the tap are the meter's own UI reacting (REC label, panel/graph opening): not recorded.
 const SETTLE_MS = 300;
@@ -49,6 +50,25 @@ function attribution(home: { loaf?: Loaf[]; inputs?: unknown[]; state?: unknown[
 /** The summary's home entry: its attribution, or why there is none. */
 function homeLine(home: (NonNullable<Parameters<typeof attribution>[0]> & { missed?: string; error?: string }) | undefined) {
   return home?.missed ?? home?.error ?? attribution(home) ?? "no detail from home (older shell there, or it didn't answer in 3 s)";
+}
+/**
+ * The host's main-thread blocks (perf.native) on the recording's clock: `start` ms from the settle point like every other
+ * time here (the host gives epoch ms). The UI thread is the WebView's draw thread, so these are the stalls with no script.
+ */
+function nativeSection(n: NativePerf | true | null | undefined, from: number) {
+  if (!n || n === true) return undefined;
+  const zero = performance.timeOrigin + from, rel = (at: number) => Math.round(at - zero);
+  return { thresholdMs: n.thresholdMs, blocks: n.blocks.map((b) => ({ start: rel(b.at), ...b })), frameGaps: n.frameGaps.map((g) => ({ start: rel(g.at), ...g })) };
+}
+/** Stops the host's side of the recording and reads it (undefined: an older host). */
+async function stopNative(from: number) {
+  return nativeSection(await powos.perf?.native?.(false).catch(() => null), from);
+}
+/** The summary's native entry: the longest blocks with their cause, or why there are none. */
+function nativeLine(n: ReturnType<typeof nativeSection>) {
+  if (!n) return "no native section (host without perf.native)";
+  return { blocks: n.blocks.length, gaps: n.frameGaps.length, longest: [...n.blocks].sort((a, b) => b.ms - a.ms).slice(0, 5)
+    .map((b) => ({ start: b.start, ms: b.ms, msg: b.msg, bridge: b.bridge ?? null, lastCall: b.lastCall ?? null, lastCallAgoMs: b.lastCallAgoMs ?? null, stack: b.stack?.split(" < ").slice(0, 8).join(" < ") ?? null })) };
 }
 let po: PerformanceObserver | null = null;
 let ui: { root: HTMLElement; num: HTMLElement; cv: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null; label: HTMLElement } | null = null;
@@ -186,6 +206,7 @@ function beginRecord() {
   settleTimer = window.setTimeout(() => { if (rec) beginMain(); }, SETTLE_MS); // home's frames, from the same point
   recId = Date.now(); homeParts = []; homeGot = 0;
   void powos.store.set(STORE, { on: true, rec: recId }).catch(() => {});
+  void powos.perf?.native?.(true).catch(() => null); // the host's main-thread blocks (MainStallWatch.kt), from now
   if (!raf) start();
   stopTimer = window.setTimeout(() => void toggleRecord(), MAX_REC_MS);
 }
@@ -203,6 +224,7 @@ async function endRecord() {
   const durMs = Math.max(0, performance.now() - settleAt), n = recN;
   const mode = new URLSearchParams(location.search).get("mode") ?? "?";
   const mn = endMain(), fromMain = mn.n > 1;
+  const native = await stopNative(settleAt);
   void powos.store.set(STORE, { on: true, stop: recId }).catch(() => {}); // home stops and sends its detail (or why not)
   await new Promise<void>((r) => { homeDone = r; setTimeout(r, homeGot && homeGot === homeParts.length ? 0 : 3000); });
   homeDone = null;
@@ -211,9 +233,9 @@ async function endRecord() {
   homeParts = []; homeGot = 0;
   const sum = fromMain ? summarise({ ...mn, evs: events, durMs, mode: `main shell (home), ${mode} bar recorded` })
     : summarise({ t: recT, dt: recDt, n, evs: events, durMs, mode: `${mode} window only, main shell not reporting (${powos.host})` });
-  Object.assign(sum, { settle: SETTLE_MS, home: homeLine(home) });
+  Object.assign(sum, { settle: SETTLE_MS, home: homeLine(home), native: nativeLine(native) });
   const full = { summary: sum, main: fromMain ? { frameDeltas: Array.from(mn.dt, (x) => Math.round(x * 10) / 10) } : undefined, when: new Date().toISOString(), ua: navigator.userAgent, dpr: devicePixelRatio,
-    frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events, home };
+    frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events, home, native };
   recT = new Float32Array(0); recDt = new Float32Array(0);
   await saveAndSend(full, sum);
   busy = false;

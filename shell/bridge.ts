@@ -9,6 +9,7 @@ import type {
   AgentEvent,
   AgentMail,
   AgentsDelta,
+  NativePerf,
   App,
   AppWidgetProvider,
   AssistScreen,
@@ -145,7 +146,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       get: <T>(name: string) => call<T | null>("store.get", name),
       set: (name, value) => call("store.set", name, value),
     },
-    perf: { save: (json) => call<string | null>("perf.save", json), publish: (json) => call("perf.publish", json) },
+    perf: { save: (json) => call<string | null>("perf.save", json), publish: (json) => call("perf.publish", json), native: (on) => call<NativePerf | true | null>("perf.native", on) },
     ai: {
       chat: () => call<Chat>("ai.chat"),
       send: (text, recents = true) => call("ai.send", text, recents),
@@ -584,7 +585,7 @@ function mock(): Bridge {
       page: async () => {},
     },
     // A stand-in that answers after a tool call, as a streamed turn does.
-    perf: { publish: async () => {}, save: async (json) => (console.log("[mock] perf.save", json.length), "/run/powos-app/powos-ai-shared/perf-mock.json") },
+    perf: { publish: async () => {}, native: async (on) => (on ? true : { thresholdMs: 50, blocks: [], frameGaps: [] }), save: async (json) => (console.log("[mock] perf.save", json.length), "/run/powos-app/powos-ai-shared/perf-mock.json") },
     ai: {
       chat: async () => chat,
       send: async function send(text: string): Promise<void> {
