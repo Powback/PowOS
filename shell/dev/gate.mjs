@@ -2809,6 +2809,69 @@ async function webWindowTileInputCheck() {
   }
 }
 
+/**
+ * In the page: the tile LAYOUT (10-31). TG1: two corner snaps make a 2-split filling the whole tile area (no empty slot,
+ * a lone snap is no tiling); TG2: a divider dragged to near an edge stays there (only the minimum tile limits it);
+ * TL2: every tile has its bar with a close, none merged into the status bar (its spans stay full width); SC1: closing
+ * one of two leaves no tiling.
+ */
+async function webWindowTileLayoutCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const page = S.pages.value[0];
+  const fails = [];
+  const near = (a, b) => Math.abs(a - b) <= 2;
+  try {
+    S.page.value = 0;
+    await window.__gw.settled();
+    const win = (id, i) => ({ id, key: `a:gate.lay${i}`, label: `Lay ${i}`, page, x: 80 + 60 * i, y: 120 + 60 * i, w: 320, h: 260, live: true });
+    W.webWins.value = [win(921, 0)];
+    W.tile(921, "tl");
+    if (W.tilings.value[page]) fails.push("TG1: the only window snapped to a corner made a tiling (a reserved empty slot)");
+    W.webWins.value = [...W.webWins.value, win(922, 1)];
+    W.tile(922, "tr");
+    await window.__gw.settled();
+    const t = W.tilings.value[page];
+    if (!t || t.ids.length !== 2 || t.ids.includes(null)) return [...fails, `TG1: two corner snaps gave ${JSON.stringify(t)}, not a 2-split`];
+    const a = W.tileArea();
+    const box = (id) => document.querySelector(`.webwindow[data-wwid="${id}"]`)?.getBoundingClientRect();
+    const [l, r] = t.ids.map(box);
+    if (!l || !r) return [...fails, "TG1: a tile has no frame"];
+    const xs = [l.left, r.right], hs = [l.top, l.bottom, r.top, r.bottom];
+    if (!near(Math.min(...xs), a.left) || !near(Math.max(...xs), a.right) || !near(hs[0], a.top) || !near(hs[1], a.bottom) || !near(hs[2], a.top) || !near(hs[3], a.bottom))
+      fails.push(`TG1: 2 tiles don't fill the area ${JSON.stringify(a)}: ${[l, r].map((b) => `${b.left|0},${b.top|0} ${b.width|0}x${b.height|0}`).join(" | ")}`);
+    for (const id of t.ids) {
+      const f = document.querySelector(`.webwindow[data-wwid="${id}"]`);
+      if (!f?.querySelector(".webwindow-title .ww-close")) fails.push(`TL2: tile ${id} has no title bar with a close`);
+      if (f?.querySelector(".webwindow-title.merged") || f?.classList.contains("maximised")) fails.push(`status bar: tile ${id} is maximised, its bar merged into the status bar (squeezes it)`);
+    }
+    // TG2: the divider, dragged to 40 px from the right edge, stays there (no snap to two thirds).
+    const div = document.querySelector(".ww-divider");
+    if (!div) fails.push("TG2: no divider");
+    else {
+      const d = div.getBoundingClientRect();
+      const y = d.top + d.height / 2;
+      const to = a.right - W.MIN_TILE.x - 4;
+      const ev = (type, x) => div.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 81, isPrimary: true, clientX: x, clientY: y }));
+      ev("pointerdown", d.left + d.width / 2);
+      for (let k = 1; k <= 8; k++) ev("pointermove", d.left + d.width / 2 + ((to - d.left - d.width / 2) * k) / 8);
+      ev("pointerup", to);
+      await window.__gw.settled();
+      const rx = W.tilings.value[page]?.rx ?? 0;
+      const want = (to - a.left) / (a.right - a.left);
+      if (Math.abs(rx - want) > 0.02) fails.push(`TG2: the divider let go at ${want.toFixed(2)} of the area sits at ${rx.toFixed(2)}`);
+    }
+    // SC1: one of two closed (minimised here: the same untile) - no tiling left.
+    W.minimise(922);
+    await window.__gw.settled();
+    if (W.tilings.value[page] || W.tiledOn(921) != null) fails.push("SC1: a split down to one window is still a tiling");
+    return fails;
+  } finally {
+    W.webWins.value = [];
+    W.tilings.value = {};
+  }
+}
+
 async function webWindowPinchCheck() {
   // RB1 after a pinch 200 -> 140 px on window [pw] (400x320): resized to 280x224, scale 1, no transform, a 36 px bar.
   const pinchResized = (pw, body) => {
@@ -3689,7 +3752,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowResizeCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, webWindowResizeCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

@@ -541,10 +541,33 @@ export function tiledOn(id: number): number | null {
 
 function setTiling(page: number, t: Tiling | null) {
   const next = { ...tilings.value };
-  if (t && t.ids.some((v) => v != null)) next[page] = t;
+  if (t) t = compact(t);
+  if (t && t.ids.filter((v) => v != null).length >= 2) next[page] = t;
   else delete next[page];
   tilings.value = next;
   if (t) relayout(page);
+}
+
+/**
+ * TG1 (the user, 10-31 00:17: "Why can't I expand grid further than a certain point? I mean, I guess it's expecting me
+ * to have four apps"): never an empty tile. The grid follows the count - 2 apps fill the whole area (side by side, or
+ * stacked when it is clearly portrait), 3 = one big + two, 4 = 2x2 - so a tiling with an empty slot (a corner snap, a
+ * grid of fewer than four) is closed up to its windows, in slot order. Two left of a 2x2 grid in one column stack.
+ */
+function compact(t: Tiling): Tiling {
+  if (!t.ids.includes(null)) return t;
+  const at = t.ids.flatMap((v, i) => (v == null ? [] : [i]));
+  const list = at.map((i) => t.ids[i] as number);
+  if (list.length < 2) return { ...t, ids: list };
+  const layout = compactLayout(t.layout, at);
+  return { layout, ids: list, rx: layout === t.layout ? t.rx : 0.5, ry: layout === t.layout ? t.ry : 0.5 };
+}
+
+/** The layout for the windows left at slots [at] (2-4) of [was]: a 2-split keeps its direction, one column stacks. */
+function compactLayout(was: Layout, at: number[]): Layout {
+  if (at.length !== 2) return layoutFor(at.length, tileArea());
+  if (was === "2h" || was === "2v") return was;
+  return was === "4" && at[1] - at[0] === 2 ? "2v" : layoutFor(2, tileArea());
 }
 
 /** The page's tiled windows put at their tiles (full size, unzoomed, shown). */
@@ -579,11 +602,25 @@ export function tile(id: number, slot: Slot) {
   const page = w.page;
   const others = (tilings.value[page]?.ids ?? []).filter((v): v is number => v != null && v !== id);
   const { layout, ids } = slot === "grid" ? gridOf(page, id, others) : slotOf(page, id, slot, others);
+  // Alone: no tiling of one (SC1) - a half or a corner is just where it goes, a floating window at that tile's rect.
+  if (ids.filter((v) => v != null).length < 2) return snapAlone(id, layout, ids.indexOf(id));
   // Tiled windows that found no tile float again.
   const left = others.filter((o) => !ids.includes(o));
   setTiling(page, { layout, ids, rx: 0.5, ry: 0.5 });
   for (const o of left) refloat(o);
   console.info(`[tiles] page ${page}: ${layout} [${ids.join(",")}] (${slot} for window ${id})`);
+}
+
+/** Window [id], the page's only one to tile, at tile [i] of [layout]'s rect (restore: its frame before). */
+function snapAlone(id: number, layout: Layout, i: number) {
+  const w = webWins.value.find((v) => v.id === id);
+  if (!w || i < 0) return;
+  const r = tileRects({ layout, ids: [], rx: 0.5, ry: 0.5 }, tileArea())[i];
+  const o = pageOrigin();
+  // Not "maximised" (no restore): a maximised window's bar merges into the status bar and squeezes it (TB1).
+  update(id, { x: Math.round(r.x - o.x), y: Math.round(r.y - o.y), w: Math.round(r.w), h: Math.round(r.h), scale: 1, restore: undefined });
+  raise(id);
+  console.info(`[tiles] window ${id} alone: snapped to ${layout} tile ${i}, no tiling`);
 }
 
 /**
@@ -620,11 +657,14 @@ function gridOf(page: number, id: number, others: number[]): { layout: Layout; i
 
 const HALVES: Record<string, Layout> = { left: "2h", right: "2h", top: "2v", bottom: "2v" };
 
-/** A half or a corner: [id] there, the other tiled windows in the rest (a half: then the topmost floating one). */
+/** A half or a corner: [id] there, the other tiled windows in the rest (a half: then the topmost floating one). The
+ * empty corners close up ([compact]). */
 function slotOf(page: number, id: number, slot: Slot, others: number[]): { layout: Layout; ids: (number | null)[] } {
   const layout = HALVES[slot] ?? "4";
   const ids: (number | null)[] = SLOTS[layout].map((s) => (s === slot ? id : null));
-  const fill = layout === "4" ? others : [...others, ...floatingOn(page, [id, ...others])];
+  // A corner takes the other tiled windows; with none, the topmost floating one (two corner snaps: a 2-split, TG1).
+  const floating = floatingOn(page, [id, ...others]);
+  const fill = layout !== "4" ? [...others, ...floating] : others.length ? others : floating.slice(0, 1);
   for (const o of fill) {
     const i = ids.indexOf(null);
     if (i < 0) break;
@@ -710,10 +750,20 @@ function fillEmptyTile(page: number, id: number) {
   setTiling(page, { ...t, ids });
 }
 
-/** A divider snaps to a third, a half or two thirds; dragged within this share of an edge, the squeezed side goes. */
-const SNAPS = [1 / 3, 1 / 2, 2 / 3];
-export const DROP_SHARE = 0.12;
-export const snapRatio = (r: number) => SNAPS.reduce((b, s) => (Math.abs(s - r) < Math.abs(b - r) ? s : b), 0.5);
+/**
+ * TG2: a divider goes anywhere across the area - only a tile's minimum size ([MIN_TILE], CSS px along the divider's
+ * axis) limits it, with a light pull to the half (within [HALF_PULL] px). Pushed past that minimum to within
+ * [DROP_PX] of the edge, the squeezed side goes to the dock.
+ */
+export const MIN_TILE = { x: 160, y: 96 };
+const HALF_PULL = 12;
+export const DROP_PX = 32;
+/** The divider's ratio of [span] px let go at [r]: a tile at least [MIN_TILE] each side, pulled to the half. */
+export function dividerRatio(r: number, span: number, axis: "x" | "y"): number {
+  const min = Math.min(0.5, MIN_TILE[axis] / span);
+  const near = Math.abs(r - 0.5) * span < HALF_PULL ? 0.5 : r;
+  return Math.min(1 - min, Math.max(min, near));
+}
 
 /**
  * A divider drag ended ([DividerEl]): "<page>:<axis>" at [ratio] (already snapped), or [drop]: the windows squeezed to an
@@ -730,8 +780,7 @@ function divided(m: { key: string; ratio: number; drop?: number[] }) {
     for (const id of m.drop) untile(id, "minimise");
     return;
   }
-  const r = Math.min(1 - DROP_SHARE, Math.max(DROP_SHARE, m.ratio));
-  setTiling(page, axis === "x" ? { ...t, rx: r } : { ...t, ry: r });
+  setTiling(page, axis === "x" ? { ...t, rx: m.ratio } : { ...t, ry: m.ratio });
 }
 
 /**
@@ -756,13 +805,16 @@ function DividerEl({ page, d, o }: { page: number; d: Divider; o: { x: number; y
   const end = (e: PointerEvent, cancelled: boolean) => {
     if (start.current == null) return;
     e.stopPropagation();
-    const r = (d.pos + at(e) - start.current - d.lo) / (d.hi - d.lo);
+    const span = d.hi - d.lo;
+    const p = d.pos + at(e) - start.current - d.lo;
+    const r = p / span;
     start.current = null;
     setShift(0);
     if (cancelled) return;
-    const drop = r < DROP_SHARE ? d.before : r > 1 - DROP_SHARE ? d.after : [];
-    divided({ key: `${page}:${d.axis}`, ratio: snapRatio(r), drop });
-    console.info(`[tiles] divider ${page}:${d.axis} let go at ${r.toFixed(2)} -> ${drop.length ? `windows ${drop} to the dock` : `snapped ${snapRatio(r).toFixed(2)}`}`);
+    const drop = p < DROP_PX ? d.before : p > span - DROP_PX ? d.after : [];
+    const ratio = dividerRatio(r, span, d.axis);
+    divided({ key: `${page}:${d.axis}`, ratio, drop });
+    console.info(`[tiles] divider ${page}:${d.axis} let go at ${r.toFixed(2)} -> ${drop.length ? `windows ${drop} to the dock` : `at ${ratio.toFixed(2)}`}`);
   };
   return (
     <div
@@ -777,8 +829,9 @@ function DividerEl({ page, d, o }: { page: number; d: Divider; o: { x: number; y
       onPointerMove={(e) => {
         if (start.current == null) return;
         e.stopPropagation();
-        const lo = d.lo + 48 - d.pos;
-        const hi = d.hi - 48 - d.pos;
+        // To the very edge (TG2): past the minimum tile it shows the drop to the dock.
+        const lo = d.lo + TILE_GAP - d.pos;
+        const hi = d.hi - TILE_GAP - d.pos;
         setShift(Math.min(hi, Math.max(lo, at(e) - start.current)));
       }}
       onPointerUp={(e) => end(e, false)}
@@ -830,11 +883,17 @@ function shown(el: HTMLElement): { clip: Clip; alpha: number } {
   return { clip, alpha };
 }
 
-/** Maximised, the bar merges with the status bar: "<title's end> <controls' start>" (the status bar's between), else "-1 -1". */
+/**
+ * Maximised, the bar merges with the status bar: "<title's end> <controls' start>" (the status bar's between), else "-1 -1".
+ * Never a tiled window's (the status bar spans the full screen while tiled - 10-31: its clock sat at x 234, laid out
+ * to a lone tile's bar, when the last tile was made a maximised window), and only while that bar is on the strip.
+ */
 function mergeOf(w: WebWin, el: HTMLElement): string {
+  if (!w.restore || tiledOn(w.id) != null) return "-1 -1";
   const title = el.querySelector(".ww-title-label")?.getBoundingClientRect();
   const controls = el.querySelector(".ww-controls")?.getBoundingClientRect();
-  return w.restore && title && controls ? `${px(title.right)} ${px(controls.left)}` : "-1 -1";
+  const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || TITLE;
+  return title && controls && title.top < inset ? `${px(title.right)} ${px(controls.left)}` : "-1 -1";
 }
 
 /**

@@ -518,7 +518,7 @@ class ShellBridge(
             "tasks.list" -> tasks()
             "tasks.open" -> openTask(a.getInt(0), a.opt(1))
             "tasks.remove" -> dev.omalauncher.system.Tasks.remove(context, a.getInt(0)).also { appWidgets.heal() }
-            "tasks.split" -> dev.omalauncher.system.Tasks.split(a.getInt(0), a.getInt(1))
+            "tasks.split" -> dev.omalauncher.system.Tasks.splitApps(context, a.getInt(0), a.getInt(1))
             "tasks.openSplit" -> openSplit(a.getInt(0), a.getInt(1))
             "tasks.desktopWindow" -> desktopWindow(a.getInt(0), a.optBoolean(1, true))
             "tasks.float" -> dev.omalauncher.system.Tasks.float(context, a.getInt(0))
