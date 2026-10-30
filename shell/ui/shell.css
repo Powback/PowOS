@@ -2561,6 +2561,9 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
   grid-template-columns: repeat(auto-fill, minmax(max(var(--cell), calc(12ch + 4px)), 1fr));
   column-gap: var(--gap);
 }
+/* ...and the rows as far apart (the user, 2026-10-30: "spread them out vertically a bit as well"): the icons' gap down
+   near their gap across (only the list's grid: the recent row is one row, its hidden rows would grow by the gaps). */
+.home.wide .drawer .drawer-list .grid { row-gap: 16px; }
 /* The bar under it stays: no slide, no fade, still tappable (PowOS AI's wide panel still covers the foot). */
 .home.wide:not(.dock-left):not(.dock-right):not(:has(.ai-panel.wide)) > .dock { transform: none; opacity: 1; pointer-events: auto; }
 
