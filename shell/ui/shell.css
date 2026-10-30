@@ -1915,10 +1915,14 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 }
 .cc-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
 /*
- * The media cards (control.tsx MediaCards): the shade's card look (a .tile, as the notifications'), one per session.
- * Art, the track, the app's icon (its output picker) on top; the seek bar and the transport under them. A card comes
- * and goes by its slot's height (a grid row 0fr <-> 1fr, as the notification stacks' rest): nothing under it jumps.
- * The slots carry the gap above each card, the wrapper takes the container's own gap back - an empty one adds none.
+ * The media cards (control.tsx MediaCards), one per session (the user, 2026-10-30: "surely there's some better way to
+ * do the media"). The art fills the card as its ambient colour: one ::before, the art under the shade's tint, blurred
+ * and darkened by one filter (blurring a flat tint over the art is the tint over the blurred art: one layer, no
+ * backdrop-filter); without art the card is the theme's tile. The art again as a rounded tile at the left, the title
+ * (two lines, the proportional face) and the artist beside it, the app's icon small at the top right; the transport
+ * centred under them, the progress line under that, the times at its ends. A card comes and goes by its slot's height
+ * (a grid row 0fr <-> 1fr, as the notification stacks' rest): nothing under it jumps. The slots carry the gap above
+ * each card, the wrapper takes the container's own gap back - an empty one adds none.
  */
 .cc-medias { display: flex; flex-direction: column; margin-top: -10px; }
 .cc-media-slot { display: grid; grid-template-rows: 1fr; animation: cc-media-in 300ms cubic-bezier(0.2, 0.9, 0.3, 1) both; }
@@ -1928,36 +1932,49 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 @keyframes cc-media-out { to { grid-template-rows: 0fr; opacity: 0; } }
 .cc-media {
   position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) auto;
-  grid-template-areas: "art track app" "seek seek transport";
+  grid-template-columns: 56px minmax(0, 1fr) 24px;
+  grid-template-areas: "art track app" "transport transport transport" "seek seek seek";
   align-items: center;
   column-gap: 12px;
-  row-gap: 4px;
-  padding: 10px 10px 6px 12px;
+  padding: 10px 12px 2px;
 }
-.cc-art { grid-area: art; width: 52px; height: 52px; border-radius: var(--radius); object-fit: cover; }
+.cc-media.has-art { border-color: transparent; }
+.cc-media.has-art::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -32px;
+  background: linear-gradient(var(--shade-tint), var(--shade-tint)), var(--art) center / cover no-repeat;
+  filter: blur(22px) brightness(0.62) saturate(1.4);
+  pointer-events: none;
+}
+:root[data-light="true"] .cc-media.has-art::before { filter: blur(22px) brightness(1.12) saturate(1.2); }
+.cc-art { grid-area: art; width: 56px; height: 56px; border-radius: var(--radius); object-fit: cover; }
 .cc-art-none { display: flex; align-items: center; justify-content: center; font-size: 24px; background: var(--soft-fill); color: var(--color-muted); }
-.cc-track { grid-area: track; display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font: var(--text-small) var(--font); color: var(--color-foreground); }
-.cc-track .cc-label { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
-.cc-track .cc-detail { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--color-muted); }
-.cc-media-app { grid-area: app; align-self: start; justify-self: end; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: var(--soft-fill); color: var(--color-foreground); font-size: 18px; }
-.cc-media-app img { width: 22px; height: 22px; border-radius: 6px; }
-.cc-seek { grid-area: seek; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; font: 11px var(--font); color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.cc-track { grid-area: track; display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font: var(--text-body) / 1.25 var(--font-ui); color: var(--color-foreground); }
+.cc-track .cc-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-weight: 600; }
+.cc-track .cc-detail { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; color: var(--color-muted); }
+.cc-media-app { grid-area: app; align-self: start; justify-self: end; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: -2px -2px 0 0; padding: 0; border: 0; background: none; color: var(--color-muted); font-size: 18px; }
+.cc-media-app img { width: 20px; height: 20px; border-radius: 5px; }
+.cc-media .cc-transport { grid-area: transport; justify-self: center; align-items: center; gap: 24px; margin-top: 2px; }
+.cc-transport { display: flex; gap: 2px; }
+.cc-transport button { display: flex; align-items: center; justify-content: center; font: 22px var(--font); width: 32px; height: 32px; padding: 0; background: none; border: 0; border-radius: 50%; color: var(--color-foreground); }
+.cc-media .cc-transport .cc-play { width: 40px; height: 40px; font-size: 26px; background: var(--soft-fill); }
+.cc-seek { grid-area: seek; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; font: 10px var(--font-ui); color: var(--color-muted); font-variant-numeric: tabular-nums; }
 .cc-seek input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 24px;
+  height: 16px;
   margin: 0;
-  background: linear-gradient(var(--color-accent), var(--color-accent)) 0 50% / calc(var(--p) * 100%) 4px no-repeat, linear-gradient(var(--soft-fill), var(--soft-fill)) 0 50% / 100% 4px no-repeat;
+  background: linear-gradient(var(--color-foreground), var(--color-foreground)) 0 50% / calc(var(--p) * 100%) 3px no-repeat, linear-gradient(var(--soft-fill), var(--soft-fill)) 0 50% / 100% 3px no-repeat;
 }
-.cc-seek input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--color-accent); border: 0; }
+.cc-seek input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--color-foreground); border: 0; opacity: 0; transition: opacity 120ms; }
+.cc-seek.dragging input[type="range"]::-webkit-slider-thumb, .cc-seek input[type="range"]:active::-webkit-slider-thumb { opacity: 1; }
 .cc-seek input[type="range"]:disabled::-webkit-slider-thumb { visibility: hidden; }
-.cc-media .cc-transport { grid-area: transport; }
-.cc-media .cc-play { background: var(--soft-fill); border-radius: 50%; }
-.cc-transport { display: flex; gap: 2px; }
-.cc-transport button { font: 18px var(--font); width: 36px; height: 36px; background: none; border: 0; color: var(--color-foreground); }
 /* Icons (icons.tsx) and the panels drawn with them: the control center's tiles as round icons over a one-line label,
    the header's actions and the notification panel's quick strip as icon buttons. These come last and win. */
 .icon { display: block; flex: none; }
