@@ -288,3 +288,82 @@ Chrome usable alone, so the user can see Chrome as a web window after about 4-5 
 | R10 | HWC overlay planes are limited (SM8550 count unknown). Beyond them SF falls back to GPU composition: no extra app copy, but more GPU and power | `dumpsys SurfaceFlinger` composition types with 1/3/6 windows | none needed for correctness; measure power |
 | R11 | Architecture conflict with DESKTOP-KWIN-NATIVE.md (KWin composites in desktop mode). Two plans in flight would double the window code | the manager confirms this note supersedes it for windows | — |
 | R12 | Memory: one VD per Android window plus screen-sized Linux buffers (about 22 MB each at 2268x2440 RGBA, times 3) | PSS with 4 windows open | Linux buffers sized to the window plus a margin, reallocated past it |
+
+---
+
+## S0 results (measured)
+
+Measured 2026-10-30 on the OnePlus Open (SDK 36, SELinux enforcing), spike code in
+`targets/android/spikes/webwindows-s0/` (`S0.java`, `build.sh`, `run.sh`; runs as `shell` through `app_process`).
+Setup: Chrome on a 720x800 VD **A**; a second VD **B** (output = ImageReader) stands in for home's display; a root
+container layer on B's layer stack stands in for home's window. Under it: the **mirror** of A
+(`IWindowManager.mirrorDisplay`, x=0) and a **copy** layer whose `Surface(sc)` is A's output (x=800, the S1 path). The
+page paints its rAF counter as 8 black/white blocks, so every B frame says which Chrome frame each path shows.
+Note: most runs had the phone's own screen off (dozing). A VD in the default display group follows display 0 to
+OFF, so those runs added `TRUSTED|OWN_DISPLAY_GROUP|ALWAYS_UNLOCKED` (`0x1c00`, shell may set them) to A and B.
+
+### (a) Mirror (U1 / R1)
+
+- `mirrorDisplay(A)` **works as shell** (READ_FRAME_BUFFER) and returns a `MirrorRoot` layer; reparented under the host
+  it shows Chrome's live content (`dumpsys SurfaceFlinger --list`: `MirrorRoot#2441 parentId=<s0-host>`). It returns
+  `false` if called before WM has added the display (~100 ms after `createVirtualDisplay`): wait for
+  `dumpsys window displays` / a display listener first.
+- **Latency** (A surface on, 10.2 s, Chrome 59.6 frames/s, SF at 120 Hz → B composed 1125 times): the mirror shows each
+  Chrome frame in the **same composition** in which SF composites it into A; the copy shows it **one composition
+  later** (lag histogram mirror−copy: `{0: 519, 1: 606}` B frames, never more than 1). So S1 costs one SF frame
+  (8.3 ms at 120 Hz) plus one GPU pass; the mirror removes both.
+- **Extra copy:** while A has any output surface, SF composites A with **client (GPU) composition every frame**
+  (`usesClientComposition=true` in the A section of `dumpsys SurfaceFlinger`), mirrored or not. A also carries
+  display 0's colour transform (`colorTransformMatrix` diag `1, .923, .788`, night light), so the S1 copy path gets
+  night light applied **twice** (once into A's buffer, again on display 0). The mirror path does not.
+- **Output surface and lifecycle** (Chrome frames per second seen through the mirror):
+
+  | A's output | display A state | Chrome | frames/s via mirror |
+  |---|---|---|---|
+  | `Surface(copy)` shown | ON | RESUMED, visible | 59.6 |
+  | `setSurface(null)` | **OFF** | **STOPPED**, `mVisible=false` within ~40 ms (last mirror frame 42 ms later); still STOPPED after 65 s | 0 |
+  | unread ImageReader, `maxImages` 1 | ON | RESUMED | 59.3 (SF still GPU-composites A, into a buffer nobody reads) |
+  | 1x1 ImageReader (read) | ON | RESUMED | 59.8 (the GPU pass now writes 1 pixel) |
+  | `Surface(copy)`, copy layer **hidden** | ON | RESUMED | 59.8 |
+  | copy shown, **mirror hidden** | ON | RESUMED | copy 59.7 |
+
+  So the AOSP tie is real: **null surface = display OFF = app stopped.** Hiding the layer that shows A's output does not
+  stop anything; only the VD's surface (and its display group's power state) matters.
+- **Untrusted VD + Chrome's launcher intent lands on display 0.** With the WebWindows.kt flags
+  (`PUBLIC|OWN_CONTENT_ONLY|DESTROY_CONTENT_ON_REMOVAL`, untrusted), `am start --display A ... com.android.chrome`
+  started `ChromeLauncherActivity` on A, and its trampoline then put `ChromeTabbedActivity` (task) on **display 0**
+  (seen twice: screen off and screen on). With the trusted own-group flags it stayed on A. Not yet split into which
+  flag fixes it, nor tried with `setLaunchDisplayId` + the explicit component.
+- `DESTROY_CONTENT_ON_REMOVAL` finishes Chrome's activity when A is released but **leaves its task in recents**:
+  the window close path must also remove the task (`removeTask`).
+
+### (c) Keyboard (U3 / R3)
+
+Trusted own-group VD A, `setDisplayImePolicy(A, FALLBACK_DISPLAY)` (accepted from shell), one `input -d A tap` on the
+page's text field:
+- WM **moved the top focused display to A** (`mTopFocusedDisplayId=26`, `imeInputTarget in display# 26 ChromeTabbedActivity`):
+  a touch on the VD takes global focus even without per-display focus.
+- The IME **bound to Chrome** (`mCurClient ... mUid=10194 (Chrome) mSelfReportedDisplayId=26`) and **showed on
+  display 0** (`mCurTokenDisplayId=0`, `mInputShown=true`, the `InputMethod` window `mDisplayId=0 isVisibleRequested=true`).
+- A tap that misses an editor still moves focus to A but shows no IME; the IME client stays Chrome.
+- After A was released, focus went back to display 0 (`mTopFocusedDisplayId=0`, `mInputShown=false`).
+- Not measured: text committed by the IME into Chrome (that needs a touch on the keyboard on the user's display), the
+  untrusted VD (Chrome did not stay on it, see above), and LOCAL policy.
+
+### What it means for S1-S3, S5
+
+- **S1:** `Surface(contentSc)` as the VD output works and keeps the app resumed even when that layer is hidden. Never set
+  the VD's surface to null for a minimised/hidden window (it stops the app); hide the layer instead. The copy path is
+  one frame late and double-applies night light. Wait for WM to know the VD before launching or mirroring. Check that
+  Chrome actually lands on the VD with the production flags; if not, the VD must be trusted (needs
+  ADD_TRUSTED_DISPLAY, which shell has: create it from the root/shell helper of S4) or Chrome launched by component.
+  Remove the task on close.
+- **S2:** unchanged; geometry on the mirror/content layer is ordinary SC transactions (crop/position worked).
+- **S3: passes.** `mirrorDisplay` gives zero-latency content (same composition as the app's commit). For the remaining
+  GPU pass on A, give A a **1x1 ImageReader** surface once the mirror is in place: display stays ON, Chrome stays at 60
+  frames/s, and SF's per-frame A composition shrinks to 1 pixel (still one tiny client composition; A's size must then
+  come from `VirtualDisplay.resize`, not the surface). Not yet checked through `mirrorDisplay` from the PowOS app's own
+  uid (recents role) rather than shell, and with home's real window as parent.
+- **S5:** FALLBACK works as designed: tap on the VD → top focus moves to the VD → the phone keyboard on display 0 serves
+  Chrome's editor. S5 must handle the focus side effect: while a web window has focus, home (display 0) is not the
+  top focused display, so home's own inputs/IME need focus handed back (a tap on home's area does that today).
