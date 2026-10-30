@@ -1,0 +1,88 @@
+From 48ff37e2704247970704e57d5d7cd7d51d374ccf Mon Sep 17 00:00:00 2001
+From: Mats Bakken <mats@powback.com>
+Date: Fri, 30 Oct 2026 20:37:38 +0100
+Subject: [PATCH] backends/anland: a new window of an application with a task
+ belongs with it
+
+---
+ src/backends/anland/anland_window_task.cpp | 33 +++++++++++++++++++++-
+ src/backends/anland/anland_window_task.h   |  5 ++++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index ce38691..6a387a5 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -1085,7 +1085,7 @@ void AnlandWindowTasks::announce()
+ {
+     // What this KWin understands beyond "closed"/"focus": the app only sends it then (an older KWin, buffers of the
+     // task's size as before).
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request parent")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).
+@@ -1660,6 +1660,14 @@ bool AnlandWindowTasks::show(Window *window, bool fullScreen)
+         send({QStringLiteral("close"), QString::number(task->id())});
+         remove(task);
+     });
++    // A new toplevel of an application that has a task already (a dialog without transient-for: Steam's, an X11 app's
++    // second window): told before "open", so the app shows it where its parent is and in front of it - a web window
++    // over a web window, a task over a task. Before, Steam's dialog became a web window of home under Steam's task.
++    if (AnlandWindowTask *parent = relatedTask(window)) {
++        qCInfo(KWIN_ANLAND) << "window task" << id << "belongs with window task" << parent->id() << "(" << window->caption()
++                            << "of" << (parent->window() ? parent->window()->caption() : QString()) << ")";
++        send({QStringLiteral("parent"), QString::number(id), QString::number(parent->id())});
++    }
+     QStringList open{QStringLiteral("open"), QString::number(id), window->desktopFileName(), window->caption()};
+     if (fullScreen) {
+         open.append(QStringLiteral("fullscreen"));
+@@ -1668,6 +1676,29 @@ bool AnlandWindowTasks::show(Window *window, bool fullScreen)
+     return true;
+ }
+ 
++AnlandWindowTask *AnlandWindowTasks::relatedTask(const Window *window) const
++{
++    if (!window || window->pid() <= 0) {
++        return nullptr;
++    }
++    const auto related = [window](const AnlandWindowTask *task) {
++        const Window *w = task ? task->window() : nullptr;
++        return w && w != window && !w->isDeleted() && w->pid() == window->pid();
++    };
++    // The one the user was on (it opened the dialog), then any other of the same process.
++    for (const Window *w = workspace()->activeWindow(); w; w = w->transientFor()) {
++        if (AnlandWindowTask *task = taskFor(w); related(task)) {
++            return task;
++        }
++    }
++    for (AnlandWindowTask *task : m_tasks) {
++        if (related(task)) {
++            return task;
++        }
++    }
++    return nullptr;
++}
++
+ void AnlandWindowTasks::closeAll()
+ {
+     const auto tasks = m_tasks;
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 1a65eae..70c1d18 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -271,6 +271,11 @@ private:
+     void integrate();
+     bool exportable(Window *window) const;
+     AnlandWindowTask *taskFor(const Window *window) const;
++    /**
++     * The task of another window of [window]'s application (same process): the window it belongs with - a separate
++     * toplevel with no transient-for (Steam's "Steam Dialog", an X11 app's second window). The active one's first.
++     */
++    AnlandWindowTask *relatedTask(const Window *window) const;
+     /** An Android app's own window (powos-android-app): back to Android, the app itself in front. */
+     bool handBackAndroidApp(Window *window);
+     void watchFullScreen(Window *window);
+-- 
+2.50.1 (Apple Git-155)
+

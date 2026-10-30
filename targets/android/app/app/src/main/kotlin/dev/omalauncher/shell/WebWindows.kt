@@ -445,6 +445,8 @@ class WebWindows(
             Log.i(TAG, "window $id: KWin window $kwin (${p.appId}) consumer up, buffers ${bw}x$bh, body ${win.w}x${win.h}")
         }
         andro.marchy.WebWindowSource.size(kwin, w, h)
+        // KWin focused the new window (its task's start): a touch back on the window it came from focuses that again.
+        linuxFocused = kwin
         Log.i(TAG, "window $id: KWin window $kwin (${p.appId}) as a web window, ${w}x$h")
         return id
     }
@@ -1971,6 +1973,8 @@ class WebWindows(
         val src = win.linux ?: return
         if (win.closed || win.linuxFull == on) return
         win.linuxFull = on
+        // Covers every web window now: a new window of its app opens as a task in front of it (WindowTasks.open).
+        andro.marchy.WebWindowSource.shownFullScreen(src.kwin, on)
         val t = SurfaceControl.Transaction()
         win.chrome?.shown(t, !on)
         if (on) fillScreen(t, win, src) else t.apply()
