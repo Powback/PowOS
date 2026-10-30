@@ -21,7 +21,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLI = os.path.normpath(os.path.join(HERE, "..", "..", "lib", "ai", "agents", "powos-agents-cli"))
 COLS = ["id", "title", "owner", "status", "note", "created", "updated", "done", "project", "progress_done",
-        "progress_total", "step", "steps", "commits", "images", "activity"]
+        "progress_total", "step", "steps", "commits", "images", "activity", "try_line"]
 
 
 class FakeStdb(http.server.BaseHTTPRequestHandler):
@@ -66,6 +66,11 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
                     assert isinstance(json.loads(s), list)
             self.work[wid].update(progress_done=pd, progress_total=pt, step=step, steps=steps, commits=commits,
                                   images=images, updated=now, activity=now)
+        elif name == "work_try":
+            wid, line = args
+            if wid not in self.work:
+                return self.reply(400, "work_try: no work item")
+            self.work[wid].update(try_line=line[:90], updated=now, activity=now)
         elif name == "work_drop":
             self.work.pop(args[0], None)
         return self.reply(200, "")
@@ -298,10 +303,59 @@ class BoardTest(unittest.TestCase):
         pairs = json.loads(self.cli("dupes", "--json").stdout)
         self.assertEqual([(p["a"], p["b"]) for p in pairs], [("broforce-a", "broforce-b")])
 
+    def test_try_line_is_its_own_plain_field(self):
+        # 2026-10-30: Ready to try showed the coordinator's --step notes ("P0 fixed 18:23 (APK 46120ff9)..."). The card's
+        # line is its own field, set only by --try, never the step or the note.
+        self.cli("add", "Floating windows", "--id", "fw", "--step", "P0 fixed 18:23 (APK 46120ff9)")
+        self.assertEqual(self.row("fw")["try_line"], "")
+        self.cli("set", "fw", "--try", "Floating windows are back, try moving and resizing one")
+        self.assertEqual(self.row("fw")["try_line"], "Floating windows are back, try moving and resizing one")
+        self.assertEqual(self.row("fw")["step"], "P0 fixed 18:23 (APK 46120ff9)", "--try leaves the step alone")
+        self.cli("set", "fw", "--note", "agents' words")
+        self.assertEqual(self.row("fw")["try_line"], "Floating windows are back, try moving and resizing one")
+        self.cli("add", "Page dots", "--id", "pd", "--try", "Swipe between home pages and watch the dots")
+        self.assertEqual(self.row("pd")["try_line"], "Swipe between home pages and watch the dots")
+        self.cli("set", "fw", "--try", "-")
+        self.assertEqual(self.row("fw")["try_line"], "")
+
+    def test_try_guard_refuses_hashes_paths_and_long_lines(self):
+        self.cli("add", "Floating windows", "--id", "fw")
+        for bad, why in (("Fixed in 17a445cb, try it", "commit hash"), ("rAF loops gone in shell/ui/powai.tsx", "path"),
+                         ("Try " + "moving the floating windows around the screen " * 3, "at most 90"), ("  ", "empty")):
+            p = self.cli("set", "fw", "--try", bad, ok=False)
+            self.assertNotEqual(p.returncode, 0, bad)
+            self.assertIn(why, p.stderr)
+            self.assertIn("one plain sentence", p.stderr)
+        self.assertEqual(self.row("fw")["try_line"], "", "a refused --try writes nothing")
+        self.assertNotIn("work_try", [c[0] for c in FakeStdb.calls])
+        p = self.cli("add", "Other thing", "--id", "ot", "--try", "see deadbeef1234", ok=False)
+        self.assertIn("commit hash", p.stderr)
+        self.assertNotIn("ot", FakeStdb.work, "a refused add adds nothing")
+        # Plain words that happen to be hex letters ("defaced") are no hash.
+        self.cli("set", "fw", "--try", "The defaced icon is fixed, open the dock")
+
+    def test_projects_are_the_page_areas(self):
+        self.cli("add", "Kernel netfilter modules", "--id", "k")
+        self.cli("add", "Steam games resize live", "--id", "g")
+        self.cli("add", "Split screen side by side", "--id", "w")
+        self.cli("add", "Something nobody can place", "--id", "x")
+        self.assertEqual([self.row(i)["project"] for i in "kgwx"], ["Kernel & system", "Games", "Windows", "Other"])
+        self.cli("set", "x", "--project", "games")
+        self.assertEqual(self.row("x")["project"], "Games")
+        p = self.cli("set", "x", "--project", "PowOS · phone UI", ok=False)
+        self.assertIn("isn't an area", p.stderr)
+        # infer --all: old projects to their area, keeping the board's newest-first order.
+        FakeStdb.work["k"]["project"] = "PowOS · kernel"
+        FakeStdb.work["w"]["project"] = "PowOS · phone UI"
+        before = sorted(FakeStdb.work, key=lambda i: FakeStdb.work[i]["activity"])
+        self.cli("infer", "--all")
+        self.assertEqual((self.row("k")["project"], self.row("w")["project"]), ("Kernel & system", "Windows"))
+        self.assertEqual(sorted(FakeStdb.work, key=lambda i: FakeStdb.work[i]["activity"]), before)
+
     def test_help_documents_it(self):
         out = subprocess.run([sys.executable, CLI, "help"], capture_output=True, text=True).stdout
         for flag in ("--progress N/M", "--step TEXT", "--plan", "--commit SHA", "--image PATH", "--image-rm PATH",
-                     "--unowned", "add|new", "task merge", "--into", "task dupes"):
+                     "--unowned", "add|new", "task merge", "--into", "task dupes", '--try "plain sentence"'):
             self.assertIn(flag, out)
 
 

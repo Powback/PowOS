@@ -45,7 +45,7 @@ def load(name, path):
 
 cli = load("powos_agents_cli", CLI)
 WORK_COLS = ["id", "title", "owner", "status", "note", "created", "updated", "done", "project", "progress_done",
-             "progress_total", "step", "steps", "commits", "images", "activity", "parent"]
+             "progress_total", "step", "steps", "commits", "images", "activity", "parent", "try_line"]
 
 
 def norm(s):
@@ -110,6 +110,11 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
     def r_work_track(self, wid, pd, pt, step, steps, commits, images):
         self.db["work"][wid].update(progress_done=pd, progress_total=pt, step=step, steps=steps, commits=commits,
                                     images=images, updated=self.clock[0], activity=self.clock[0])
+
+    def r_work_try(self, wid, line):
+        if wid not in self.db["work"]:
+            raise ValueError("work_try: no work item")
+        self.db["work"][wid]["try_line"] = line
 
     def r_work_parent(self, wid, parent):
         if wid not in self.db["work"] or (parent and parent not in self.db["work"]):
@@ -581,9 +586,11 @@ class PassClosesOnlyItsOwnTaskCliTest(unittest.TestCase):
         # The page's "works" on the web-windows epic (2026-10-30): its last slice was ready, two steps still planned.
         # It records the pass, marks that slice done and stays open - never an error; the closer rule holds.
         self.run_cli("task", "add", "Web windows", "--id", "ww", "--plan", "close from switcher; full screen; resize")
-        self.run_cli("task", "set", "ww", "--step", "close from switcher")
+        self.run_cli("task", "set", "ww", "--step", "close from switcher", "--try", "Close a window from the switcher")
+        self.assertEqual(FakeStdb.db["work"]["ww"]["try_line"], "Close a window from the switcher")
         self.run_cli("check", "set", "ww", "you-1", "PASS", "--name", "you")
         p = self.run_cli("task", "works", "ww")
+        self.assertEqual(FakeStdb.db["work"]["ww"]["try_line"], "", "tried: the next slice gets its own --try line")
         self.assertIn("still open: 2 planned steps to do", p.stderr)
         w = FakeStdb.db["work"]["ww"]
         self.assertEqual(w["status"], "working")

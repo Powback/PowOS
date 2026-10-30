@@ -177,28 +177,31 @@ const TEST_NOW =
 const GROUPED = (() => {
   const c = (n) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ sha: `a${i}b2c3d4`, subject: `change ${i + 1}` })));
   const st = (done, total) => JSON.stringify(Array.from({ length: total }, (_, i) => ({ text: `step ${i + 1}`, state: i < done ? "done" : i === done ? "current" : "next" })));
-  const t = (id, title, o) => ({ id, title, owner: "coder", status: "working", note: "", project: "PowOS · phone UI", progressDone: 0, progressTotal: 0, step: "", steps: "", commits: "", images: "", ...o });
+  const t = (id, title, o) => ({ id, title, owner: "coder", status: "working", note: "", project: "Home & launcher", progressDone: 0, progressTotal: 0, step: "", steps: "", commits: "", images: "", ...o });
   return JSON.stringify([
-    t("plug-usb", "Kernel test build for the phone's new display driver", { status: "waiting", note: "Plug the phone into the Mac's USB once, for the kernel test" }),
-    t("pick-wall", "Lock screen wallpaper", { status: "waiting", note: "Pick one of the three lock screen wallpapers" }),
-    t("home-layout", "Home: layout per mode, edit mode, widgets, folders, status bar", { progressDone: 14, progressTotal: 33, step: "icon size reverted (debd259f2, live 14:05) as asked", steps: st(14, 33), commits: c(6) }),
+    t("plug-usb", "Kernel test build for the phone's new display driver", { status: "waiting", project: "Kernel & system", note: "Plug the phone into the Mac's USB once, for the kernel test" }),
+    t("pick-wall", "Lock screen wallpaper", { status: "waiting", project: "Shade & lock", note: "Pick one of the three lock screen wallpapers" }),
+    t("home-layout", "Home: layout per mode, edit mode, widgets, folders, status bar", { tryLine: "Icons on home are back to their old size", progressDone: 14, progressTotal: 33, step: "icon size reverted (debd259f2, live 14:05) as asked", steps: st(14, 33), commits: c(6) }),
     t("launcher", "Launcher: dock, search, chat typing, folder page, animations", { progressDone: 8, progressTotal: 14, step: "L8 LIVE 14:57: 24 px margins", steps: st(8, 14), commits: c(11) }),
-    t("shade", "Notification screen + control center (S1-S10)", { progressDone: 10, progressTotal: 24, step: "one shared mode rule LIVE 14:57", steps: st(10, 24), commits: c(17) }),
+    t("shade", "Notification screen + control center (S1-S10)", { project: "Shade & lock", tryLine: "Pull down from the top: the control centre floats over your notifications", progressDone: 10, progressTotal: 24, step: "one shared mode rule LIVE 14:57", steps: st(10, 24), commits: c(17) }),
     t("glass", "One native glass: frame-synced blur, same tint everywhere (widgets, search, dock, folders)", { progressDone: 7, progressTotal: 20, step: "LIVE: native glass skips unchanged region sets", steps: st(7, 20), commits: c(6) }),
     t("gestures", "Gestures: home swipe closes everything, page swipes reliable", { progressDone: 17, progressTotal: 27, step: "LIVE: drags on scroll strips", steps: st(17, 27), commits: c(8) }),
-    t("lock", "Lock screen: no brown strip, real icons, notification cards use the shared glass", { progressDone: 2, progressTotal: 8, step: "landed e1b89706; live on the phone (d224ac4b)", steps: st(2, 8), commits: c(1) }),
+    t("lock", "Lock screen: no brown strip, real icons, notification cards use the shared glass", { project: "Shade & lock", progressDone: 2, progressTotal: 8, step: "landed e1b89706; live on the phone (d224ac4b)", steps: st(2, 8), commits: c(1) }),
     // Epics (planned steps still open): one with a slice ready to try (named on its line), one whose last slice the
     // user said works (no slice ready: waiting, not to try), one with a sub-task open and no slice (waiting).
-    t("web-windows", "Web windows: Android apps as real windows on home", { progressDone: 3, progressTotal: 6, step: "close from the switcher", steps: JSON.stringify([["open as a window", "done"], ["move and resize", "done"], ["title bar controls", "done"], ["close from the switcher", "current"], ["full screen button", "next"], ["snap to halves", "next"]].map(([text, state]) => ({ text, state }))), commits: c(5) }),
+    t("web-windows", "Web windows: Android apps as real windows on home", { project: "Windows", tryLine: "Floating windows are back, try moving and resizing one", progressDone: 3, progressTotal: 6, step: "close from the switcher", steps: JSON.stringify([["open as a window", "done"], ["move and resize", "done"], ["title bar controls", "done"], ["close from the switcher", "current"], ["full screen button", "next"], ["snap to halves", "next"]].map(([text, state]) => ({ text, state }))), commits: c(5) }),
     t("dock-epic", "Dock: recents, pinned apps, landscape column", { progressDone: 2, progressTotal: 4, step: "", steps: JSON.stringify([["pinned apps", "done"], ["recents", "done"], ["landscape column", "next"], ["drag to reorder", "next"]].map(([text, state]) => ({ text, state }))), commits: c(3) }),
     t("search-epic", "Search: apps, settings and files in one list", { progressDone: 2, progressTotal: 2, step: "", steps: JSON.stringify([["apps", "done"], ["settings", "done"]].map(([text, state]) => ({ text, state }))), commits: c(2) }),
     t("search-files", "Search: files results", { parent: "search-epic", progressDone: 0, progressTotal: 0 }),
-    t("ai-board", "PowOS AI page + chat: board grouped by what each task means for you", { owner: "powos-chat", progressDone: 2, progressTotal: 6, step: "grouping rows", steps: st(2, 6), commits: c(2) }),
-    t("perf", "Performance: steady 120 fps, FPS meter, trace record and replay", { owner: "powos-perf", progressDone: 4, progressTotal: 15, step: "LIVE: idle cost root cause", steps: st(4, 15) }),
-    t("speech", "Speech: hold-to-talk sends after release, no cut-off last word", { progressDone: 3, progressTotal: 5, step: "phone check queued", steps: st(3, 5), commits: c(3) }),
+    t("ai-board", "PowOS AI page + chat: board grouped by what each task means for you", { owner: "powos-chat", project: "AI page", progressDone: 2, progressTotal: 6, step: "grouping rows", steps: st(2, 6), commits: c(2) }),
+    t("perf", "Performance: steady 120 fps, FPS meter, trace record and replay", { owner: "powos-perf", project: "Performance", progressDone: 4, progressTotal: 15, step: "LIVE: idle cost root cause", steps: st(4, 15) }),
+    t("speech", "Speech: hold-to-talk sends after release, no cut-off last word", { project: "AI page", progressDone: 3, progressTotal: 5, step: "phone check queued", steps: st(3, 5), commits: c(3) }),
     t("pet", "Pet walks along the dock without covering the icons", { progressDone: 5, progressTotal: 9, step: "verify FAIL rc=1: FAIL: pet over icon", steps: st(5, 9), commits: c(4) }),
-    t("wifi", "Wi-Fi card shows the network name on the cover screen", { progressDone: 0, progressTotal: 4, steps: st(0, 4) }),
-    t("razr", "Second phone: boot PowOS on the razr fold", {}),
+    t("wifi", "Wi-Fi card shows the network name on the cover screen", { project: "Shade & lock", progressDone: 0, progressTotal: 4, steps: st(0, 4) }),
+    t("razr", "Second phone: boot PowOS on the razr fold", { project: "PowOS · phone UI" }),
+    t("game-close", "Swiping a game away in the switcher closes it", { project: "Games", tryLine: "Swipe a game away in the switcher, it closes for good", progressDone: 1, progressTotal: 1, step: "P0 fixed 18:23 (APK 46120ff9), ship.sh holds a shell push", steps: st(1, 1), commits: c(1) }),
+    t("game-res", "Games: right resolution in every mode, controller, Steam", { project: "Games", progressDone: 2, progressTotal: 7, steps: st(2, 7), commits: c(2) }),
+    t("netfilter", "Kernel: netfilter modules for the VPN", { project: "PowOS · kernel", owner: "kernel", progressDone: 1, progressTotal: 3, steps: st(1, 3) }),
   ]);
 })();
 const GROUPED_SCENE =

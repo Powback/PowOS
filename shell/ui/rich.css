@@ -193,6 +193,11 @@
 .ai-group-title { font-weight: 600; }
 .ai-group-count { font-size: var(--text-small); color: var(--color-muted); }
 .ai-group-caret { margin-left: auto; font-size: var(--text-small); color: var(--color-muted); }
+/* An area inside a group (Windows, Games, ...): a small header with its count, a tap folds it. */
+.ai-area { display: flex; flex-direction: column; }
+.ai-area-fold { display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 6px 12px 2px; font: inherit; font-size: var(--text-small); text-align: start; color: var(--color-muted); background: none; border: 0; }
+.ai-area-title { font-weight: 600; letter-spacing: 0.02em; }
+.ai-area-caret { width: 8px; }
 .ai-group-more { align-self: flex-start; margin: 0 12px 6px calc(12px + 8px + 10px); padding: 4px 0; font: inherit; font-size: var(--text-small); color: var(--accent-text); background: none; border: 0; }
 /* A row the user can act on: its state and, at the line's end (wrapping under it when narrow), done / skip or works /
    still broken. */

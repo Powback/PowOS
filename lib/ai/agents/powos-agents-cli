@@ -21,7 +21,7 @@ import urllib.request
 # the Mac just finished validating for itself, and that parse error reads as a real bug. __cli_version__
 # (below) lets the Mac tell "phone copy is stale" apart from "the command itself is wrong" before passing
 # an error through.
-CLI_VERSION = 2
+CLI_VERSION = 3
 
 DB = "powos-agents"
 SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
@@ -48,7 +48,17 @@ Usage:
   powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT] [--project P]
                                    [--progress N/M] [--step TEXT] [--plan "a; b; c"] [--commit SHA]...
                                    [--image PATH]... [--image-rm PATH]... [--parent P|-]
+                                   [--try "plain sentence"|-]
                                    --parent: make it a sub-task of P (add takes it too; "-" clears it).
+                                   --try: what the user can try now, ONE plain sentence - the task's line
+                                   under "Ready to try" on the PowOS AI page (never --step or --note,
+                                   which are for agents). At most 90 characters; refused with a commit
+                                   hash, a path or file name with "/"; "-" clears it. Cleared when the
+                                   user says it works. e.g. --try "Floating windows are back, try moving
+                                   and resizing one". Without it the card says only "ready to try".
+                                   --project: the task's area on the page, one of Windows, Home &
+                                   launcher, Shade & lock, Games, Performance, Kernel & system, AI page,
+                                   Apps, Agents & tooling (or a short alias: kernel, games, home, ...).
                                    Change a task. <task> (same for set/done/rm/merge): its exact id, a
                                    unique PREFIX of an id, or whole words of its title matching ONE
                                    open task - never guessed: a prefix several ids share, an unknown
@@ -100,7 +110,8 @@ How far along (the page shows a bar, the steps done / now / next, the commits an
                                    takes one with `task set <t> --owner <expert>`. --owner: one expert's.
                                    --state: only one state (stalled, no-check, ...). --json adds
                                    "truth" and "why" to each row.
-  powos agents task infer          Give every task without a project the inferred one.
+  powos agents task infer [--all]  Give every task without a project the inferred one; --all: every open
+                                   task whose project is not an area gets its area.
 
 Statuses (what you set): working | blocked | waiting (on the user) | done.
 The board shows each task's TRUE state, computed from facts - never from the status alone:
@@ -193,32 +204,89 @@ def rows():
     return table("work")
 
 
-# Inference for a task given no --project: first match on owner, then on id + title words.
-PROJECT_OWNERS = {
-    "switcher": "PowOS · phone UI", "icons": "PowOS · phone UI", "widgets": "PowOS · phone UI",
-    "assist": "PowOS · phone UI", "notify": "PowOS · phone UI", "shell": "PowOS · phone UI",
-    "kernel": "PowOS · kernel", "apps": "PowOS · apps platform", "remote": "PowOS · remote",
+# The areas the PowOS AI page groups tasks by inside each section (shell/ui/powai.tsx AREAS, same names and order); a
+# task's project is one of these. Anything else shows under "Other" there.
+AREAS = ("Windows", "Home & launcher", "Shade & lock", "Games", "Performance", "Kernel & system", "AI page", "Apps",
+         "Agents & tooling")
+# --project accepts an area or one of these (any case); the "PowOS · ..." names are the board's old projects.
+AREA_ALIASES = {
+    "windows": "Windows", "window": "Windows", "desktop": "Windows", "desktop mode": "Windows", "switcher": "Windows",
+    "home": "Home & launcher", "launcher": "Home & launcher", "home & launcher": "Home & launcher",
+    "shade": "Shade & lock", "lock": "Shade & lock", "notifications": "Shade & lock", "shade & lock": "Shade & lock",
+    "games": "Games", "game": "Games", "perf": "Performance", "performance": "Performance",
+    "kernel": "Kernel & system", "system": "Kernel & system", "kernel & system": "Kernel & system",
+    "ai page": "AI page", "ai": "AI page", "apps": "Apps", "app": "Apps", "apps platform": "Apps",
+    "agents": "Agents & tooling", "tooling": "Agents & tooling", "agents & tooling": "Agents & tooling",
+    "powos · kernel": "Kernel & system", "powos · games": "Games", "powos · ai page": "AI page",
+    "powos · desktop mode": "Windows", "powos · apps platform": "Apps", "powos · ai": "Agents & tooling",
+    "powos · remote": "Agents & tooling", "spacetimeai": "Agents & tooling", "shopping app": "Apps",
 }
+# Inference for a task given no --project: first match on id + title words, then on the owner, else "Other".
 PROJECT_WORDS = [
-    (r"spacetimeai", "SpaceTimeAI"),
-    (r"shopping", "Shopping app"),
-    (r"kernel|netfilter|\bgki\b", "PowOS · kernel"),
-    (r"powos app|app creation|create-app|apps platform|registry|module|spacetimedb", "PowOS · apps platform"),
-    (r"remote", "PowOS · remote"),
-    (r"switcher|icon|widget|keyboard|search|shell|home|notification|alert|flicker|toast|control center|"
-     r"circle|assist|lock|swipe|page|update-applied|work-in-progress|"
-     r"board|powos ai|black flash|push", "PowOS · phone UI"),
+    (r"kernel|netfilter|\bgki\b|selinux|\bboot", "Kernel & system"),
+    (r"\bgames?\b|steam|minecraft|controller|emulat", "Games"),
+    (r"\bfps\b|perf|jank|smooth|latency|stutter|\b120\b", "Performance"),
+    (r"ai page|powos ai|\bboard\b|\bchat\b|\basks?\b", "AI page"),
+    (r"window|split|title bar|desktop|switcher|floating|kwin|linux app|resize", "Windows"),
+    (r"shade|lock|notification|control cent|quick launch|toast|\balert", "Shade & lock"),
+    (r"home|launcher|dock|icon|widget|folder|search|page dots|edit mode|keyboard|gesture|swipe|wallpaper",
+     "Home & launcher"),
+    (r"\bapps?\b|health|registry|module|spacetimedb|shopping|create-app", "Apps"),
+    (r"agent|codex|sandbox|\brepo\b|disk|\bmac\b|test|ship|build|spacetimeai|tool|verify|remote|refactor",
+     "Agents & tooling"),
 ]
+PROJECT_OWNERS = {
+    "kernel": "Kernel & system", "windows": "Windows", "powos-switcher": "Windows", "switcher": "Windows",
+    "icons": "Home & launcher", "widgets": "Home & launcher", "powos-widgets": "Home & launcher",
+    "powos-drawer": "Home & launcher", "powos-gestures": "Home & launcher", "notify": "Shade & lock",
+    "shade-film": "Shade & lock", "powos-games": "Games", "powos-perf": "Performance", "powos-chat": "AI page",
+    "apps": "Apps", "devops": "Agents & tooling", "verify": "Agents & tooling", "remote": "Agents & tooling",
+}
+
+
+def area_of(project):
+    """--project as an area (AREAS), or None for one that isn't."""
+    p = (project or "").strip()
+    return p if p in AREAS else AREA_ALIASES.get(p.lower())
+
+
+def project_opt(o):
+    """--project as one of the AREAS ("" when not given); refused when it names none of them."""
+    if not o.get("project"):
+        return ""
+    a = area_of(o["project"])
+    if not a:
+        die(f"--project {o['project']!r} isn't an area of the board - one of: {', '.join(AREAS)}")
+    return a
 
 
 def infer_project(owner, wid, title):
-    if owner in PROJECT_OWNERS:
-        return PROJECT_OWNERS[owner]
     text = f"{wid} {title}".lower()
     for rx, proj in PROJECT_WORDS:
         if re.search(rx, text):
             return proj
-    return "PowOS"
+    return PROJECT_OWNERS.get(owner, "Other")
+
+
+TRY_MAX = 90
+
+
+def try_line(o):
+    """--try: what the user is to try, one plain sentence (the Ready-to-try line on the page), checked; None when not
+    given, "" to clear (--try -)."""
+    if "try" not in o:
+        return None
+    t = " ".join(str(o["try"]).split())
+    if t == "-":
+        return ""
+    why = ("is empty" if not t else
+           f"is {len(t)} characters (at most {TRY_MAX})" if len(t) > TRY_MAX else
+           "has a commit hash in it" if re.search(r"\b[0-9a-f]{7,}\b", t, re.I) and re.search(r"[0-9]", t) else
+           "has a path in it" if "/" in t else "")
+    if why:
+        die(f"--try {why}: say in one plain sentence what the user can try now, no hashes, file names or jargon "
+            f"(e.g. --try \"Floating windows are back, try moving and resizing one\")")
+    return t
 
 
 def _words(t):
@@ -446,7 +514,7 @@ def resolve_commits(argv):
     if not argv or argv[0] not in ("add", "new", "set", "done"):
         return argv
     verb = "add" if argv[0] == "new" else argv[0]
-    o, rest = opts(argv[1:], ["owner", "status", "note", "title", "project", "id", "ask", "no-check", "parent"] + TRACK)
+    o, rest = opts(argv[1:], ["owner", "status", "note", "title", "project", "id", "ask", "no-check", "parent", "try"] + TRACK)
     wid = o.get("id") or (slug(" ".join(rest)) if verb == "add" else " ".join(rest))
     mention = wid if re.fullmatch(r"[a-z0-9][a-z0-9._-]{3,63}", wid or "") else None
     commits = (json.loads(o["commits-json"]) if o.get("commits-json") else []) + git_commits(o.get("commit") or [], mention)
@@ -568,7 +636,7 @@ def task(argv):
     if verb == "new":
         verb = "add"
     if verb == "add":
-        o, rest = opts(argv, ["owner", "status", "note", "id", "project", "ask", "no-check", "parent"] + TRACK)
+        o, rest = opts(argv, ["owner", "status", "note", "id", "project", "ask", "no-check", "parent", "try"] + TRACK)
         title = " ".join(rest).strip()
         if not title:
             die("usage: powos agents task add <title...> [--owner ROLE] [--status S] [--note TEXT]")
@@ -583,7 +651,8 @@ def task(argv):
             print(dup["id"])
             return
         owner = o.get("owner", "")
-        project = o.get("project") or infer_project(owner, wid, title)
+        project = project_opt(o) or infer_project(owner, wid, title)
+        tl = try_line(o)
         st = status_of(o.get("status")) or "working"
         if st == "done":
             die("a new task isn't done: add it, then `task done` once its check passed")
@@ -591,24 +660,28 @@ def task(argv):
         call("work_set", wid, title, owner, st, o.get("note", ""), project)
         if parent:
             call("work_parent", wid, parent)
+        if tl:
+            call("work_try", wid, tl)
         w = next((w for w in rows() if w["id"] == wid), None)
         if w:
             apply_track(w, o)
         link_ask(o, wid)
         print(wid)
     elif verb == "set":
-        o, rest = opts(argv, ["owner", "status", "note", "title", "project", "ask", "no-check", "parent"] + TRACK)
+        o, rest = opts(argv, ["owner", "status", "note", "title", "project", "ask", "no-check", "parent", "try"] + TRACK)
         if not rest:
             die("usage: powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT]")
         w = find(" ".join(rest))
         st = status_of(o.get("status"))
+        project, tl = project_opt(o), try_line(o)
         if o.get("parent"):
             call("work_parent", w["id"], "" if o["parent"] == "-" else find(o["parent"])["id"])
         if st == "done":
             refuse_open(w)
             no_check(w["id"], o)
-        call("work_set", w["id"], o.get("title", ""), o.get("owner", ""), st, o.get("note", ""),
-             o.get("project", ""))
+        call("work_set", w["id"], o.get("title", ""), o.get("owner", ""), st, o.get("note", ""), project)
+        if tl is not None:
+            call("work_try", w["id"], tl)
         apply_track(w, o, done=st == "done")
         link_ask(o, w["id"])
         print(w["id"])
@@ -636,6 +709,8 @@ def task(argv):
             print(w["id"])
             return
         slice_ = _line(w.get("step", ""))
+        if w.get("try_line"):
+            call("work_try", w["id"], "")  # what was to try is tried: the next slice gets its own line
         new = track(w, slice_done=True)
         if new:
             call("work_track", w["id"], new["progress_done"], new["progress_total"], new["step"], new["steps"],
@@ -684,12 +759,22 @@ def task(argv):
         call("work_drop", w["id"])
         print(w["id"])
     elif verb == "infer":
+        # Every task with no project gets one. --all: every open task is written with its area (its project if that is
+        # one, its old project's area, else inferred) - all of them, oldest activity first, so the board's newest-first
+        # order stays as it was (a write moves a task's activity to now).
+        o, _ = opts(argv, ["all!"])
         n = 0
-        for w in rows():
-            if not w.get("project"):
-                call("work_set", w["id"], "", "", "", "", infer_project(w["owner"], w["id"], w["title"]))
-                n += 1
-        print(f"{n} task(s) given a project")
+        ws = sorted(rows(), key=lambda w: int(w.get("activity") or 0) or int(w["updated"]))
+        for w in ws:
+            p = w.get("project") or ""
+            if p and (not o.get("all") or w["status"] == "done"):
+                continue
+            a = area_of(p) or infer_project(w["owner"], w["id"], w["title"])
+            call("work_set", w["id"], "", "", "", "", a)
+            if a != p:
+                print(f"{w['id']}: {p or '-'} -> {a}")
+            n += 1
+        print(f"{n} task(s) given an area")
     elif verb in ("list", "ls"):
         o, _ = opts(argv, ["all!", "json!", "project", "unowned!", "owner", "state", "raw!", "id*"])
         if o.get("state") and o["state"] not in TRUTH:
@@ -698,7 +783,7 @@ def task(argv):
         ws = [w for w in board_truth() if (ids or o.get("all") or w["status"] != "done")
               and (not ids or w["id"] in ids)
               and (not o.get("state") or w["truth"] == o["state"])
-              and (not o.get("project") or w.get("project") == o["project"])
+              and (not o.get("project") or w.get("project") == (area_of(o["project"]) or o["project"]))
               and (not o.get("unowned") or (w.get("owner") or "") in GENERIC_OWNERS)
               and (not o.get("owner") or w.get("owner") == o["owner"])]
         ws.sort(key=lambda w: (w.get("project") or "~", w["status"] == "done", -int(w["updated"])))
