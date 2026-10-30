@@ -52,39 +52,70 @@ object WebWindowsHost {
     fun main(args: Array<String>) {
         Looper.prepareMainLooper()
         val frames = HandlerThread("ww-frames").apply { start() }
-        val frameHandler = Handler(frames.looper)
         val dm = DisplayManager::class.java.getDeclaredConstructor(Context::class.java).apply { isAccessible = true }.newInstance(shellContext())
-        val vds = HashMap<Int, Vd>()
-        val out = System.out
-        fun say(line: String) = synchronized(out) { out.println(line); out.flush() }
+        val host = Host(dm, Handler(frames.looper))
         say("hello")
         val input = System.`in`.bufferedReader()
         while (true) {
             val line = input.readLine() ?: break
-            val a = line.trim().split(' ')
             try {
-                when (a[0]) {
-                    "create" -> {
-                        val tag = a[1]
-                        val r = ImageReader.newInstance(1, 1, PixelFormat.RGBA_8888, 2)
-                        r.setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, frameHandler)
-                        val vd =
-                            runCatching { dm.createVirtualDisplay("powos-ww-$tag", a[2].toInt(), a[3].toInt(), a[4].toInt(), r.surface, FLAGS) }
-                                .getOrElse { e -> r.close(); say("error $tag ${e.toString().replace('\n', ' ')}"); null }
-                        if (vd != null) {
-                            vds[vd.display.displayId] = Vd(vd, r)
-                            say("display $tag ${vd.display.displayId}")
-                        }
-                    }
-                    "resize" -> vds[a[1].toInt()]?.display?.resize(a[2].toInt(), a[3].toInt(), a[4].toInt())
-                    "release" -> vds.remove(a[1].toInt())?.let { it.display.release(); it.reader.close() }
-                }
+                host.command(line.trim().split(' '))
             } catch (e: RuntimeException) {
                 say("log $line: $e")
             }
         }
-        vds.values.forEach { runCatching { it.display.release(); it.reader.close() } }
+        host.releaseAll()
         System.exit(0)
+    }
+
+    private fun say(line: String) =
+        synchronized(System.out) {
+            System.out.println(line)
+            System.out.flush()
+        }
+
+    private class Host(
+        private val dm: DisplayManager,
+        private val frames: Handler,
+    ) {
+        private val vds = HashMap<Int, Vd>()
+
+        fun command(a: List<String>) {
+            when (a[0]) {
+                "create" -> create(a[1], a[2].toInt(), a[3].toInt(), a[4].toInt())
+                "resize" -> vds[a[1].toInt()]?.display?.resize(a[2].toInt(), a[3].toInt(), a[4].toInt())
+                "release" -> vds.remove(a[1].toInt())?.let(::release)
+            }
+        }
+
+        private fun create(
+            tag: String,
+            w: Int,
+            h: Int,
+            dpi: Int,
+        ) {
+            val r = ImageReader.newInstance(1, 1, PixelFormat.RGBA_8888, 2)
+            r.setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, frames)
+            val vd =
+                try {
+                    dm.createVirtualDisplay("powos-ww-$tag", w, h, dpi, r.surface, FLAGS)
+                } catch (e: RuntimeException) {
+                    null.also { say("error $tag ${e.toString().replace('\n', ' ')}") }
+                }
+            if (vd == null) {
+                r.close()
+                return
+            }
+            vds[vd.display.displayId] = Vd(vd, r)
+            say("display $tag ${vd.display.displayId}")
+        }
+
+        private fun release(v: Vd) {
+            v.display.release()
+            v.reader.close()
+        }
+
+        fun releaseAll() = vds.values.forEach { runCatching { release(it) } }
     }
 
     /** The system context under the shell package's name (the uid this runs as), as scrcpy's server does. */
