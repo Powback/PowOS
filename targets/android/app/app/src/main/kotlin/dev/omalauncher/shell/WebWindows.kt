@@ -71,6 +71,8 @@ class WebWindows(
     private val context: Context,
     private val web: WebView,
     private val emit: (String, Any?) -> Unit,
+    /** The shown bodies changed ([bodies]): the glass's blur regions leave them out (they'd blur over the app). */
+    private val bodiesChanged: () -> Unit = {},
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val dm = context.getSystemService(DisplayManager::class.java)
@@ -81,7 +83,7 @@ class WebWindows(
     private val helper = Helper()
 
     /** Off unless `settings put global powos_web_windows 1`. */
-    fun enabled(): Boolean = runCatching { Settings.Global.getInt(context.contentResolver, SETTING, 0) == 1 }.getOrDefault(false)
+    fun enabled(): Boolean = on(context)
 
     private val displayListener =
         object : DisplayManager.DisplayListener {
@@ -294,6 +296,11 @@ class WebWindows(
             place(t, win, g)
         }
         for (win in wins.values) if (win.id !in shown && win.container.isValid) t.setVisibility(win.container, false)
+        val now = geos.filter { it.visible && wins[it.id]?.mirror != null }.map { android.graphics.RectF(it.body) }
+        if (now != shownBodies) {
+            shownBodies = now
+            bodiesChanged()
+        }
         val attached = web.rootSurfaceControl
         if (attached == null) {
             t.apply()
@@ -313,6 +320,11 @@ class WebWindows(
     }
 
     private var lastPlaceLog = 0L
+
+    /** The bodies shown now, window px (main thread writes; the glass reads on the main thread). */
+    @Volatile private var shownBodies: List<android.graphics.RectF> = emptyList()
+
+    fun bodies(): List<android.graphics.RectF> = shownBodies
 
     /** [g] into [t]: the container at the frame (cropped, rounded, ordered, shown), the mirror at the body. */
     private fun place(
@@ -652,6 +664,9 @@ class WebWindows(
     companion object {
         private const val TAG = "PowosWebWindows"
         const val SETTING = "powos_web_windows"
+
+        /** Windows are web windows: home's page owns them, the old floating-window path stands down (AppWindows.floating). */
+        fun on(context: Context): Boolean = runCatching { Settings.Global.getInt(context.contentResolver, SETTING, 0) == 1 }.getOrDefault(false)
         private const val PLACE_LOG_MS = 1000L
         private const val MIRROR_WAIT_MS = 2000L
         private const val IME_POLICY_FALLBACK_DISPLAY = 1

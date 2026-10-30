@@ -22,7 +22,7 @@ import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen, held } from "./gesture.ts";
 import { LibraryPage } from "./library.tsx";
-import { WebWindowsOn } from "./webwindows.tsx";
+import { pageMask, WebWindowsOn } from "./webwindows.tsx";
 import { FolderView } from "./folderview.tsx";
 import { FolderFace, folderable, morphing, folderName, groupIntoFolder, loadFolderNames } from "./folders.tsx";
 import { chosen, isChosen, marquee, MARQUEE_DWELL, partyCells, partyOf, startMarquee, toggleChosen } from "./homeselect.ts";
@@ -1171,7 +1171,8 @@ export function Pages() {
       <div class="page-track">
         {list.map((n, i) => (
           // Not the page on screen: its animations pause (shell.css .page.away).
-          <div class={i === page.value ? "page" : "page away"} key={n}>
+          // Its windows' bodies cut out of it (ui/webwindows.tsx pageMask): the apps show under home's pixels there.
+          <div class={i === page.value ? "page" : "page away"} key={n} style={pageMask(n)}>
             {((on) => {
               const joined = joins(on);
               return (

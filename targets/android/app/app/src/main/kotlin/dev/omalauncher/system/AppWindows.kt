@@ -28,7 +28,11 @@ object AppWindows {
     /** Whether apps opened now get a floating window. */
     fun floating(context: Context): Boolean =
         context.resources.configuration.smallestScreenWidthDp >= DESKTOP_MIN_DP &&
-            Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0) == 1
+            Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0) == 1 &&
+            // Windows are web windows (powos_web_windows = 1): home's page owns every window (shell/WebWindows.kt), and
+            // this whole path - freeform launches, WindowFrames' overlay bars and grips, TaskSurfaces' dressing,
+            // TaskLeash/PageSlide, PanelLift, adopting full-screen apps - stands down, as it does folded. One switch.
+            !dev.omalauncher.shell.WebWindows.on(context)
 
     /**
      * [base] (or plain options) made a floating window's when apps float now ([floating]): the next cascaded bounds and
