@@ -3076,6 +3076,75 @@ try {
       }),
     );
   }
+  // An app's menu (apps.tsx AppMenu) puts it on the control center's quick-launch row and takes it off again
+  // (launchers.tsx toggleLauncher, the row's own add/remove): "add to quick launch" -> the shade's row ends with it;
+  // then the item reads "remove from quick launch" -> the row no longer has it. Home and the shade are pages of their
+  // own (the store between them, as on the phone): the same context, navigated.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "quick-launch-menu").then(async (r) => {
+        const KEY = "a:discord";
+        const ready = () => r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+        // On home: the menu's item for the app, its label, then a tap on it; then the store has the row changed.
+        const tapItem = (want) =>
+          r.page
+            .evaluate(async (key, want) => {
+              const S = await window.__gw.mod("./state.ts");
+              const { powos } = await window.__gw.mod("./bridge.ts");
+              const app = (await powos.apps.list()).find((a) => a.key === key);
+              S.menu.value = { app, at: new DOMRect(150, 300, 60, 60) };
+              const label = () => [...document.querySelectorAll(".menu-item")].find((b) => /quick launch/.test(b.textContent));
+              const t0 = performance.now();
+              while (label()?.textContent !== want && performance.now() - t0 < 10000) await new Promise((ok) => setTimeout(ok, 30));
+              if (label()?.textContent === want) label().click();
+              return label()?.textContent ?? "no quick-launch item";
+            }, KEY, want)
+            .catch((e) => `evaluate: ${e.message.split("\n")[0]}`);
+        const stored = (adding) =>
+          r.page
+            .waitForFunction(
+              async (key, adding) => {
+                const { powos } = await window.__gw.mod("./bridge.ts");
+                return ((await powos.store.get("controls.launchers")) ?? []).includes(key) === adding;
+              },
+              { timeout: 20000, polling: 50 },
+              KEY,
+              adding,
+            )
+            .then(() => true, () => false);
+        const menuStep = async (want) => {
+          const got = await tapItem(want);
+          if (got !== want) return `the menu shows "${got}", not "${want}"`;
+          const adding = want.startsWith("add");
+          return (await stored(adding)) ? "" : `after "${want}" the stored row ${adding ? "lacks" : "still has"} ${KEY}`;
+        };
+        // In the shade (opened as the host opens it): the quick-launch row's keys.
+        const row = async () => {
+          await r.page.goto(`${ORIGIN}/index.html?mode=shade`).catch(() => {});
+          await ready();
+          return r.page
+            .evaluate(async () => {
+              const S = await window.__gw.mod("./state.ts");
+              S.notif.value = true;
+              const keys = () => [...document.querySelectorAll(".cc3-launchers .cc3-grid:not(.cc3-spare) [data-key]")].map((e) => e.dataset.key);
+              await window.__gw.steady(() => keys().join(), 4);
+              return keys();
+            })
+            .catch(() => null);
+        };
+        await ready();
+        const fail = (m) => m && r.problems.push(m);
+        fail(await menuStep("add to quick launch"));
+        let keys = await row();
+        if (keys?.at(-1) !== KEY) fail(`after "add to quick launch" the shade's row is ${JSON.stringify(keys)}, not ending in ${KEY}`);
+        await r.page.goto(`${ORIGIN}/index.html`).catch(() => {});
+        await ready();
+        fail(await menuStep("remove from quick launch"));
+        keys = await row();
+        if (!keys || keys.includes(KEY)) fail(`after "remove from quick launch" the shade's row is ${JSON.stringify(keys)}`);
+        return { ...r, ready: true, ms: Date.now() - r.started };
+      }),
+    );
   // The shade's further pull (ccexpand.ts; the user, 2026-10-22: only "no notifications" moved, the rest stood still):
   // driven through gesture.ts as a finger (a mouse's pointer events on the panel), the whole panel follows it - what's
   // under the control center moves down by the finger's travel and the rest's toggles show under the row, the row
