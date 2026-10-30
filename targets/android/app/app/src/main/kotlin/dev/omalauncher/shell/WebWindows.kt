@@ -84,7 +84,7 @@ class WebWindows(
     private val sync = FrameSync(web, "ww")
 
     /** PowOS's own split screen: dividers, the snap hint, the tile menu ([WebWindowTiles]; docs "Tiles"). */
-    private val tiles = WebWindowTiles(context) { t, sc, r -> cornerRadius(t, sc, r) }
+    private val tiles = WebWindowTiles(context, { root?.takeIf { it.isValid } }) { t, sc, r -> cornerRadius(t, sc, r) }
     private val helper = Helper()
 
     /** Off unless `settings put global powos_web_windows 1`. */
@@ -326,7 +326,8 @@ class WebWindows(
             // Along x: pos/lo/hi are x, from is y; along y the other way round.
             val (across, along) = if (vertical) at[0] to at[1] else at[1] to at[0]
             val f = { s: String, o: Int -> s.toFloat() * dpr + o }
-            WebWindowTiles.Divider(key, vertical, f(t[i++], across), f(t[i++], along), f(t[i++], 0), f(t[i++], across), f(t[i++], across), ids(t[i++]), ids(t[i++]))
+            val geo = floatArrayOf(f(t[i++], across), f(t[i++], along), f(t[i++], 0), f(t[i++], across), f(t[i++], across))
+            WebWindowTiles.Divider(key, vertical, geo, ids(t[i++]) to ids(t[i++]))
         }
     }
 
@@ -377,7 +378,7 @@ class WebWindows(
     ) {
         val t = SurfaceControl.Transaction()
         placeAll(t, geos)
-        root?.takeIf { it.isValid }?.let { tiles.place(t, it, divs, theme, divDrag?.d?.key) }
+        if (root?.isValid == true) tiles.place(t, divs, divDrag?.d?.key)
         val attached = web.rootSurfaceControl
         if (attached == null) {
             t.apply()
@@ -693,6 +694,7 @@ class WebWindows(
         val th = WebWindowChrome.Theme.parse(rest) ?: return
         main.post {
             theme = th
+            tiles.theme = th
             val t = SurfaceControl.Transaction()
             for (w in wins.values) w.geo?.let { g -> if (w.container.isValid) place(t, w, g) }
             t.apply()
@@ -890,12 +892,11 @@ class WebWindows(
     /** The bar's tile button: the tile menu under it (left, right, top, bottom, grid, float). */
     private fun tileMenu(win: Win) {
         val g = win.geo ?: return
-        val r = root?.takeIf { it.isValid } ?: return
         val chrome = win.chrome ?: return
         val anchor = g.frame.left + chrome.centerOf("tile", g.frame.width()) * g.scale
         val top = g.frame.top + (chrome.title + 4 * density()) * g.scale
         val tiled = tiles.dividers.any { win.id in it.before || win.id in it.after }
-        tiles.openMenu(r, win.id, anchor, top, area, tiled, theme)
+        tiles.openMenu(win.id, android.graphics.PointF(anchor, top), area, tiled)
     }
 
     /** A finger came or went (or the gesture began): the gesture goes on from here, the window doesn't jump. */
@@ -944,7 +945,7 @@ class WebWindows(
         val slot = if (f.n == 1 && d.spread0 == 0f) snapSlot(f.x, f.y) else null
         if (slot == d.slot) return
         d.slot = slot
-        root?.takeIf { it.isValid }?.let { tiles.hint(it, slot?.let(::slotRect), theme) }
+        tiles.hint(slot?.let(::slotRect))
     }
 
     /** Move and zoom: the window point under the centroid at the rebase stays under it, at the fingers' scale. */
@@ -1027,7 +1028,7 @@ class WebWindows(
         cancelled: Boolean,
     ): Boolean {
         val slot = d.slot ?: return false
-        root?.takeIf { it.isValid }?.let { tiles.hint(it, null, theme) }
+        tiles.hint(null)
         if (cancelled) return false
         val win = d.win
         d.frame.set(slotRect(slot))
@@ -1139,7 +1140,7 @@ class WebWindows(
         f: Fingers,
     ): Boolean {
         val starts = (dv.before + dv.after).toList().mapNotNull { id -> wins[id]?.geo?.let { id to Rect(it.frame) } }.toMap()
-        val handle = root?.takeIf { it.isValid }?.let { tiles.handle(it, dv, theme) }
+        val handle = tiles.handle(dv)
         divDrag = DivDrag(dv, handle, if (dv.vertical) f.x else f.y, starts)
         return true
     }

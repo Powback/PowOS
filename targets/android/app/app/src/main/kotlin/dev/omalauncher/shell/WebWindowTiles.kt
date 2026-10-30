@@ -24,9 +24,14 @@ import android.view.SurfaceControl
  */
 internal class WebWindowTiles(
     context: Context,
+    /** The windows' root layer (null: home has no surface yet). */
+    private val rootOf: () -> SurfaceControl?,
     private val cornerRadius: (SurfaceControl.Transaction, SurfaceControl, Float) -> Unit,
 ) {
     private val dp = context.resources.displayMetrics.density
+
+    /** The page's colours ("w.theme"), set by [WebWindows]. */
+    var theme = WebWindowChrome.Theme.DEFAULT
 
     /**
      * One divider from the page's "w.f" (window px): [key] "<page>:<x|y>"; a vertical one ("x") is the line at [pos]
@@ -36,14 +41,18 @@ internal class WebWindowTiles(
     class Divider(
         val key: String,
         val vertical: Boolean,
-        val pos: Float,
-        val from: Float,
-        val len: Float,
-        val lo: Float,
-        val hi: Float,
-        val before: IntArray,
-        val after: IntArray,
+        /** pos, from, len, lo, hi. */
+        geo: FloatArray,
+        sides: Pair<IntArray, IntArray>,
     ) {
+        val pos = geo[0]
+        val from = geo[1]
+        val len = geo[2]
+        val lo = geo[3]
+        val hi = geo[4]
+        val before = sides.first
+        val after = sides.second
+
         fun ratio(at: Float) = ((at - lo) / (hi - lo).coerceAtLeast(1f))
     }
 
@@ -70,9 +79,7 @@ internal class WebWindowTiles(
     /** The dividers into [t] under [root] (a divider being dragged is the caller's: [skip]). */
     fun place(
         t: SurfaceControl.Transaction,
-        root: SurfaceControl,
         list: List<Divider>,
-        theme: WebWindowChrome.Theme,
         skip: String?,
     ) {
         dividers = list
@@ -80,7 +87,7 @@ internal class WebWindowTiles(
         for (k in handles.keys.filter { it !in keys }) handles.remove(k)?.let { h -> if (h.sc.isValid) t.reparent(h.sc, null) }
         for (d in list) {
             if (d.key == skip) continue
-            val h = handle(root, d, theme) ?: continue
+            val h = handle(d) ?: continue
             at(t, h, d.pos, d)
         }
     }
@@ -100,25 +107,22 @@ internal class WebWindowTiles(
     }
 
     /** [d]'s handle layer (made and drawn on first use; redrawn when the theme changes). */
-    fun handle(
-        root: SurfaceControl,
-        d: Divider,
-        theme: WebWindowChrome.Theme,
-    ): Any? {
-        var h = handles[d.key]?.takeIf { it.vertical == d.vertical && it.sc.isValid }
-        if (h == null) {
-            handles.remove(d.key)?.let { old -> if (old.sc.isValid) SurfaceControl.Transaction().reparent(old.sc, null).apply() }
-            val (w, l) = handleSize()
-            val sc = layer(root, "powos-ww-divider-${d.key}", if (d.vertical) w else l, if (d.vertical) l else w) ?: return null
-            h = Handle(sc, d.vertical)
-            handles[d.key] = h
-        }
+    fun handle(d: Divider): Any? {
+        val h = handles[d.key]?.takeIf { it.vertical == d.vertical && it.sc.isValid } ?: newHandle(d) ?: return null
         val key = "${theme.bg} ${theme.fg}"
         if (h.drawn != key) {
             h.drawn = key
             paint(h.sc) { c -> pill(c, h.vertical, theme) }
         }
         return h
+    }
+
+    private fun newHandle(d: Divider): Handle? {
+        handles.remove(d.key)?.let { old -> if (old.sc.isValid) SurfaceControl.Transaction().reparent(old.sc, null).apply() }
+        val root = rootOf() ?: return null
+        val (w, l) = handleSize()
+        val sc = layer(root, "powos-ww-divider-${d.key}", if (d.vertical) w else l, if (d.vertical) l else w) ?: return null
+        return Handle(sc, d.vertical).also { handles[d.key] = it }
     }
 
     /** The handle's buffer: thick and long (dp-sized; across x along). */
@@ -156,17 +160,14 @@ internal class WebWindowTiles(
     // ---- snap hint ------------------------------------------------------------------------------------------------------
 
     /** Where a window let go now would tile ([r], window px), or nothing (null). */
-    fun hint(
-        root: SurfaceControl,
-        r: Rect?,
-        theme: WebWindowChrome.Theme,
-    ) {
+    fun hint(r: Rect?) {
         val t = SurfaceControl.Transaction()
         if (r == null) {
             hint?.takeIf { it.isValid }?.let { t.setVisibility(it, false) }
             t.apply()
             return
         }
+        val root = rootOf() ?: return
         val sc = hint?.takeIf { it.isValid } ?: layer(root, "powos-ww-snap", HINT, HINT)?.also { hint = it } ?: return
         if (hintDrawn != theme.fg) {
             hintDrawn = theme.fg
@@ -184,14 +185,14 @@ internal class WebWindowTiles(
      * when it is [tiled].
      */
     fun openMenu(
-        root: SurfaceControl,
         id: Int,
-        anchorX: Float,
-        top: Float,
+        anchor: android.graphics.PointF,
         area: Rect,
         tiled: Boolean,
-        theme: WebWindowChrome.Theme,
     ) {
+        val root = rootOf() ?: return
+        val anchorX = anchor.x
+        val top = anchor.y
         menuItems = listOf("left", "right", "top", "bottom", "grid") + if (tiled) listOf("float") else emptyList()
         val cell = CELL_DP * dp
         val pad = 6 * dp
@@ -204,7 +205,7 @@ internal class WebWindowTiles(
         val sc = layer(root, "powos-ww-tilemenu", w.toInt(), h.toInt()) ?: return
         menu = sc
         menuFor = id
-        paint(sc) { c -> drawMenu(c, cell, pad, theme) }
+        paint(sc) { c -> drawMenu(c, cell, pad) }
         val t = SurfaceControl.Transaction().setPosition(sc, x, y).setLayer(sc, LAYER_MENU).setVisibility(sc, true)
         cornerRadius(t, sc, 12 * dp)
         t.apply()
@@ -231,7 +232,6 @@ internal class WebWindowTiles(
         c: Canvas,
         cell: Float,
         pad: Float,
-        theme: WebWindowChrome.Theme,
     ) {
         c.drawColor(theme.bg, PorterDuff.Mode.SRC)
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -345,24 +345,28 @@ internal class WebWindowTiles(
                 runCatching {
                     val prefs = app.getSharedPreferences("powos_split_entry_points", Context.MODE_PRIVATE)
                     val on = WebWindows.on(app)
-                    for ((ns, key) in OPLUS_SPLIT) {
-                        val now = andro.marchy.RootShell.run("settings get $ns $key").output.trim()
-                        val saved = prefs.getString("$ns/$key", null)
-                        when {
-                            on && now != "0" -> {
-                                prefs.edit().putString("$ns/$key", now).apply()
-                                andro.marchy.RootShell.run("settings put $ns $key 0")
-                                Log.i(TAG, "web windows on: OnePlus split entry $ns/$key $now -> 0 (PowOS tiles instead)")
-                            }
-                            !on && saved != null -> {
-                                if (saved != "null") andro.marchy.RootShell.run("settings put $ns $key $saved")
-                                prefs.edit().remove("$ns/$key").apply()
-                                Log.i(TAG, "web windows off: OnePlus split entry $ns/$key back to $saved")
-                            }
-                        }
-                    }
+                    for ((ns, key) in OPLUS_SPLIT) entryPoint(prefs, on, "$ns $key")
                 }.onFailure { Log.w(TAG, "OnePlus split entry points not changed", it) }
             }, "powos-ww-split-entry").start()
+        }
+
+        /** One entry point ("<namespace> <key>"): 0 while [on] (its value kept), else back to the kept value. */
+        private fun entryPoint(
+            prefs: android.content.SharedPreferences,
+            on: Boolean,
+            setting: String,
+        ) {
+            val now = andro.marchy.RootShell.run("settings get $setting").output.trim()
+            val saved = prefs.getString(setting, null)
+            if (on && now != "0") {
+                prefs.edit().putString(setting, now).apply()
+                andro.marchy.RootShell.run("settings put $setting 0")
+                Log.i(TAG, "web windows on: OnePlus split entry $setting $now -> 0 (PowOS tiles instead)")
+            } else if (!on && saved != null) {
+                if (saved != "null") andro.marchy.RootShell.run("settings put $setting $saved")
+                prefs.edit().remove(setting).apply()
+                Log.i(TAG, "web windows off: OnePlus split entry $setting back to $saved")
+            }
         }
 
         private val OPLUS_SPLIT = listOf("secure" to "double_finger_split_screen_enable", "system" to "recommender_split_screen_enable")
