@@ -2474,6 +2474,106 @@ async function webWindowResizeCheck() {
 }
 
 /**
+ * In the page: RZ1-RZ4 (the user, 10-30: "It's really hard to get hold of the resize bars; we need a better way to
+ * resize windows") and WS1 ("the windows don't have a shadow"). Presses found by the DOM's hit test (as a finger's):
+ * 20 dp outside the right edge resizes the width only; 30 dp off the bottom-right corner both; on the content 6 dp in
+ * from the edge goes to the app (no resize); a lower window's zone under a higher window's content gives way to it.
+ * A grab ticks the haptic and shows the size outline; a drag near half the work area snaps to it; the focused window
+ * has visible grips and a shadow outside its frame.
+ */
+async function webWindowGrabCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const vib = navigator.vibrate;
+  const g = { S, W, ticks: 0, sel: '.webwindow[data-wwid="904"]', win: () => W.webWins.value.find((w) => w.id === 904) };
+  navigator.vibrate = () => (g.ticks++, true);
+  try {
+    return [...(await window.__grab.grabLooks(g)), ...(await window.__grab.grabZones(g)), ...(await window.__grab.grabContent(g)), ...(await window.__grab.grabSnap(g))];
+  } finally {
+    navigator.vibrate = vib;
+    W.webWins.value = [];
+  }
+}
+
+/** A finger at ([x], [y]) on whatever the DOM's hit test finds there, moved by ([dx], [dy]): what it hit, and whether the outline showed. */
+async function grabPress(g, [x, y], [dx, dy]) {
+  const t = document.elementFromPoint(x, y);
+  const pe = (type, k) => t.dispatchEvent(new PointerEvent(type, { pointerId: 43, pointerType: "touch", isPrimary: true, clientX: x + k * dx, clientY: y + k * dy, bubbles: true }));
+  pe("pointerdown", 0);
+  await window.__gw.settled();
+  const outline = !!document.querySelector(`${g.sel} .ww-outline`);
+  pe("pointermove", 1);
+  await window.__gw.settled();
+  pe("pointerup", 1);
+  await window.__gw.settled();
+  return { t, outline };
+}
+
+/** One 300x260 window, alone and focused: its frame on screen. */
+async function grabReset(g) {
+  g.W.webWins.value = [{ id: 904, key: "a:gate.grab", label: "Grab", page: g.S.pages.value[0], x: 120, y: 160, w: 300, h: 260, live: true }];
+  await window.__gw.settled();
+  return document.querySelector(g.sel).getBoundingClientRect();
+}
+
+/** RZ1 + WS1: the focused window's grips show; its shadow is its own element, the frame unmasked. */
+async function grabLooks(g) {
+  await window.__grab.grabReset(g);
+  const grip = document.querySelector(`${g.sel} .ww-grip-se`);
+  const sh = document.querySelector(".ww-shadow.focused > div");
+  return [
+    (!grip || getComputedStyle(grip).opacity === "0") && "RZ1: the focused window shows no bottom-right grip",
+    (!sh || getComputedStyle(sh).boxShadow === "none") && "WS1: the focused window has no drop shadow element",
+  ].filter(Boolean);
+}
+
+/** RZ2 + RZ4: 20 dp outside the right edge - width only, a haptic tick, the outline; 30 dp off the corner - both. */
+async function grabZones(g) {
+  let f = await window.__grab.grabReset(g);
+  const r = await window.__grab.grabPress(g, [f.right + 20, f.top + f.height / 2], [30, 30]);
+  const edge = g.win();
+  const fails = [
+    !r.t.classList.contains("ww-edge") && `RZ2: a press 20 dp outside the right edge hit .${r.t.className} (want a resize zone)`,
+    (edge.w !== 330 || edge.h !== 260) && `RZ2: a drag 20 dp outside the right edge left ${edge.w}x${edge.h} (want 330x260: width only)`,
+    !r.outline && "RZ4: no live size outline during a resize",
+    !g.ticks && "RZ4: no haptic tick on the grab",
+    !!document.querySelector(`${g.sel} .ww-outline`) && "RZ4: the size outline stayed after release",
+  ];
+  f = await window.__grab.grabReset(g);
+  await window.__grab.grabPress(g, [f.right + 30, f.bottom + 30], [30, 20]);
+  const c = g.win();
+  fails.push((c.w !== 330 || c.h !== 280) && `RZ2: a drag 30 dp off the bottom-right corner left ${c.w}x${c.h} (want 330x280: both)`);
+  return fails.filter(Boolean);
+}
+
+/** RZ2: a press on the content near the edge is the app's; a higher window's content beats a lower one's zone (z). */
+async function grabContent(g) {
+  const f = await window.__grab.grabReset(g);
+  const content = document.elementFromPoint(f.right - 6, f.top + f.height / 2);
+  if (!content?.closest(".webwindow-body")) return [`RZ2: a press on the content 6 dp in from the right edge hit .${content?.className} (want the app's body)`];
+  await window.__grab.grabPress(g, [f.right - 6, f.top + f.height / 2], [30, 0]);
+  const fails = [g.win().w !== 300 && `RZ2: a drag on the content near the edge resized the window to ${g.win().w} (want the app's)`];
+  g.W.webWins.value = [...g.W.webWins.value, { id: 905, key: "a:gate.grab2", label: "Over", page: g.S.pages.value[0], x: 424, y: 200, w: 260, h: 200, live: true }];
+  await window.__gw.settled();
+  const over = document.elementFromPoint(f.right + 20, f.top + 120);
+  fails.push(!over?.closest('.webwindow[data-wwid="905"] .webwindow-body') && `RZ2: the lower window's zone took a press on a higher window's content (.${over?.className})`);
+  return fails.filter(Boolean);
+}
+
+/** RZ4: a drag let go 9 px past half the work area's width snaps to the half. */
+async function grabSnap(g) {
+  const f = await window.__grab.grabReset(g);
+  const a = g.W.tileArea();
+  const half = (a.right - a.left - g.W.TILE_GAP) / 2;
+  await window.__grab.grabPress(g, [f.right + 16, f.top + f.height / 2], [half - 300 + 9, 0]);
+  const w = g.win().w;
+  return Math.abs(w - half) > 1 ? [`RZ4: a drag to 9 px past half the work area left the window ${w} wide (want the half's ${Math.round(half)})`] : [];
+}
+
+// webWindowGrabCheck's helpers: page functions too (evaluated just before it: page.evaluate sends only that function).
+const GRAB_HELPERS = `(window.__grab = { ${[grabPress, grabReset, grabLooks, grabZones, grabContent, grabSnap].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+
+/**
  * In the page, after webWindowCheck: TB4 (the user, 2026-10-30: "If I click on the icon of an open window I should be
  * able to minimize it that way") - a dock tap on an app with web windows (ui/webwindows.tsx dockToggle): in front ->
  * minimised; again -> back in front; under another app's window -> raised; on another page -> home goes there, it in
@@ -3425,7 +3525,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, webWindowResizeCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, webWindowResizeCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step);
             if (problems.length) return problems;
           }

@@ -300,6 +300,10 @@ const SCENES = [
   // The element model's proofs: a DOM menu (the tile menu) over a window's body, and a window mid page swipe (the
   // page track 40% across: the window goes with its page, the next page's edge beside it).
   ["ww-menu", "home", WINDOWS("W.webWins.value = W.webWins.value.map((w) => ({ ...w, live: true })); W.tileMenu.value = 2; await sleep(200);"), "wallpaper"],
+  // RZ1/WS1: the focused (top) window's corner grips and both windows' drop shadows (the focused one's deeper) over the
+  // widgets; RZ4: the top window mid resize - its live size outline, snapped to a tile size (the accent).
+  ["ww-grips", "home", WINDOWS("W.webWins.value = W.webWins.value.map((w) => ({ ...w, live: true })); await sleep(300);"), "wallpaper"],
+  ["ww-resizing", "home", WINDOWS("W.webWins.value = W.webWins.value.map((w) => ({ ...w, live: true })); W.resizeView.value = { id: 2, snapped: 'w' }; await sleep(300);"), "wallpaper"],
   ["ww-swipe", "home", WINDOWS("const t = document.querySelector('.page-track'); t.style.transition = 'none'; t.style.transform = 'translateX(' + Math.round(-innerWidth * 0.4) + 'px)'; await sleep(200);"), "wallpaper"],
   // PowOS's own split screen (ui/webwindows.tsx "tiles"): 2, 3 and 4 web windows tiled above the dock, unfolded and
   // unfolded sideways (folded has no web windows). The phone draws the windows natively (WebWindows.kt); here

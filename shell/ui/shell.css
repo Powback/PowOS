@@ -3031,7 +3031,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .page-under > :not(.page-glass, .group-shadow, .seam) { pointer-events: auto; }
 .page-windows { overflow: clip; pointer-events: none; }
 .page-windows > * { pointer-events: auto; }
-.webwindow:not(.ww-divider) { border-radius: 12px; box-shadow: var(--lift); }
+.webwindow:not(.ww-divider) { border-radius: 12px; box-shadow: var(--lift-edge); }
 .webwindow.maximised { border-radius: 0; box-shadow: none; }
 /* The bar: a home widget's glass (.tile: theme.css's fill and veil, the compositor's blur behind the bar strip only). */
 .webwindow-title {
@@ -3067,13 +3067,39 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-placeholder.failed .ww-placeholder-icon { opacity: 0.5; }
 .ww-failed-text { max-width: 260px; padding: 0 16px; text-align: center; font-size: 14px; line-height: 1.4; color: var(--color-muted); }
 .ww-failed-close { padding: 8px 20px; border: none; border-radius: 999px; font: inherit; font-size: 14px; color: var(--color-foreground); background: color-mix(in srgb, var(--color-foreground) 12%, transparent); }
-.ww-edge { position: absolute; touch-action: none; }
-.ww-edge-n, .ww-edge-s { left: 12px; right: 12px; height: 16px; }
-.ww-edge-e, .ww-edge-w { top: 12px; bottom: 12px; width: 16px; }
-.ww-edge-n { top: -8px; height: 8px; } .ww-edge-s { bottom: -12px; } .ww-edge-e { right: -12px; } .ww-edge-w { left: -12px; }
-.ww-edge-ne, .ww-edge-nw, .ww-edge-se, .ww-edge-sw { width: 24px; height: 24px; }
-.ww-edge-ne { top: -12px; right: -12px; } .ww-edge-nw { top: -12px; left: -12px; }
-.ww-edge-se { bottom: -12px; right: -12px; } .ww-edge-sw { bottom: -12px; left: -12px; }
+/* RZ2: the resize zones, all OUTSIDE the frame (never over the app or the bar's buttons): 32 dp along each edge, 48x48 dp
+   off each corner, in screen dp whatever the window's pinch scale (--ww-k). A strip's ends act as its corners. */
+.ww-edge { position: absolute; touch-action: none; --ww-zone: calc(32px / var(--ww-k, 1)); --ww-corner: calc(48px / var(--ww-k, 1)); }
+.ww-edge-n, .ww-edge-s { left: 0; right: 0; height: var(--ww-zone); }
+.ww-edge-e, .ww-edge-w { top: 0; bottom: 0; width: var(--ww-zone); }
+.ww-edge-n { bottom: 100%; } .ww-edge-s { top: 100%; } .ww-edge-e { left: 100%; } .ww-edge-w { right: 100%; }
+.ww-edge-ne, .ww-edge-nw, .ww-edge-se, .ww-edge-sw { width: var(--ww-corner); height: var(--ww-corner); }
+.ww-edge-ne { bottom: 100%; left: 100%; } .ww-edge-nw { bottom: 100%; right: 100%; }
+.ww-edge-se { top: 100%; left: 100%; } .ww-edge-sw { top: 100%; right: 100%; }
+/* RZ1: the focused window's corner grips - a short arc (~28 dp) hugging each rounded corner just outside it, the theme's
+   light stroke; the top ones subtler. They fade in on the focused window, full while it is being resized. */
+.ww-grip {
+  position: absolute; width: 22px; height: 22px; overflow: visible; pointer-events: none; opacity: 0;
+  transition: opacity 180ms ease-out;
+}
+.ww-grip path { fill: none; stroke: var(--color-foreground); stroke-width: 4; stroke-linecap: round; }
+.ww-grip-se { right: -8px; bottom: -8px; } .ww-grip-sw { left: -8px; bottom: -8px; transform: scaleX(-1); }
+.ww-grip-ne { right: -8px; top: -8px; transform: scaleY(-1); } .ww-grip-nw { left: -8px; top: -8px; transform: scale(-1, -1); }
+.webwindow.focused .ww-grip-se, .webwindow.focused .ww-grip-sw { opacity: 0.7; }
+.webwindow.focused .ww-grip-ne, .webwindow.focused .ww-grip-nw { opacity: 0.25; }
+.webwindow.ww-resizing .ww-grip { opacity: 0.9; }
+/* RZ4: the live size outline while a window is resized: a ring in the theme's foreground, the accent on a tile size. */
+.ww-outline {
+  position: absolute; inset: -3px; border-radius: 15px; pointer-events: none; display: grid; place-items: center;
+  box-shadow: 0 0 0 2px var(--color-foreground); opacity: 0.6;
+}
+.ww-outline.snapped { box-shadow: 0 0 0 3px var(--color-accent); opacity: 1; }
+.ww-outline-size { padding: 6px 12px; border-radius: 999px; font: var(--text-small) var(--font); color: var(--color-foreground); }
+/* WS1: a window's drop shadow (its own element under the frame: a hole in the frame never cuts it), deeper than a
+   widget's lift as a window floats higher; the focused window's stronger. The frame keeps only --lift-edge. */
+.ww-shadow { position: absolute; pointer-events: none; }
+.ww-shadow > div { position: absolute; border-radius: 12px; box-shadow: var(--lift-window); }
+.ww-shadow.focused > div { box-shadow: var(--lift-window-focused); }
 .ww-tile-menu {
   position: absolute; top: 40px; right: 8px; z-index: 2; display: flex; flex-direction: column; min-width: 160px;
   padding: 6px; border-radius: 14px; box-shadow: var(--lift);
