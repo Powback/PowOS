@@ -15,6 +15,7 @@
  */
 import { AppIcon } from "./apps.tsx";
 import { tapTaken } from "./taps.ts";
+import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
 import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, selected, setDocked, type Carry } from "../state.ts";
@@ -502,6 +503,21 @@ function joinOf(at: Map<string, string>, i: HomeItem): Record<string, number> | 
   };
 }
 
+/**
+ * A page's items and their joins, the very same objects while nothing they come from changed (the items themselves,
+ * groupSpans, the mode): Pages re-renders on every page turn, and with a fresh array and Map each time every page's
+ * PageGlass, GroupShadow, Seams and Tile rendered again with equal content (render scan, 10-30: about half their
+ * renders in a page swipe needless, PageGlass ~9 ms each in the headless unfolded home).
+ */
+const pageCache = new Map<number, { items: HomeItem[]; joined: Map<string, Record<string, number>>; mode?: string; spans: unknown }>();
+function pageItems(n: number) {
+  const items = itemsOn(n), mode = document.documentElement.dataset.mode, spans = groupSpans.value, c = pageCache.get(n);
+  if (c && c.mode === mode && c.spans === spans && c.items.length === items.length && c.items.every((x, i) => x === items[i])) return c;
+  const next = { items, joined: joins(items), mode, spans };
+  pageCache.set(n, next);
+  return next;
+}
+
 function joins(items: HomeItem[]): Map<string, Record<string, number>> {
   // The desktop's home (powos-shell under Plasma): widgets stay separate surfaces, like plasmoids - never merged.
   if (document.documentElement.dataset.mode === "desktop") return new Map();
@@ -755,6 +771,15 @@ function CreationTile({ item }: { item: HomeItem }) {
       )}
     </div>
   );
+}
+
+/**
+ * A page's own content, cut where its web windows' bodies are: its own component, so a window moved or resized
+ * re-renders this one div's style - not Pages and with it every page's tiles (render scan 10-30: Pages, 8 Fragment and 6
+ * AppCell renders on every frame of a window drag; its children are Pages' vnodes, unchanged, so Preact skips them).
+ */
+function PageUnder({ n, children }: { n: number; children: ComponentChildren }) {
+  return <div class="page-under" style={underWindows(n)}>{children}</div>;
 }
 
 /** Dispatches a page's item to its tile (the map call site, never inside Tile itself - keeping Tile's own branching
@@ -1171,22 +1196,21 @@ export function Pages() {
         {list.map((n, i) => (
           // Not the page on screen: its animations pause (shell.css .page.away).
           <div class={i === page.value ? "page" : "page away"} key={n}>
-            {((on) => {
-              const joined = joins(on);
+            {(({ items: on, joined }) => {
               return (
                 <>
                   {/* The page's own content, cut where its web windows' bodies are (the app shows there, under home's
                       pixels: ui/webwindows.tsx "Element model"); the windows are above it, in z by DOM order. */}
-                  <div class="page-under" style={underWindows(n)}>
+                  <PageUnder n={n}>
                     <PageGlass items={on} joined={joined} />
                     <GroupShadow items={on} joined={joined} id={String(n)} />
                     <Seams items={on} joined={joined} />
                     {on.map((item) => renderTile(item, joined.get(item.key)))}
-                  </div>
+                  </PageUnder>
                   <WebWindowsOn page={n} />
                 </>
               );
-            })(itemsOn(n))}
+            })(pageItems(n))}
           </div>
         ))}
         <LibraryPage here={page.value === list.length} />

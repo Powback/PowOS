@@ -273,6 +273,9 @@ function DockRecents({ count }: { count: number }) {
  * The floating app windows (unfolded home) by the app they're of: app key -> "running" | "minimised" (a dot under its
  * icon; a tap on it brings the window back - the host restores rather than launches, ShellBridge.launch).
  */
+// The last value, kept while equal: a new Map on every webWins change re-rendered the dock (and each of its cells)
+// on every frame of a web window's move or resize (render scan 10-30), where only a window's place changed.
+let lastWindowed = new Map<string, string>();
 const windowed = computed(() => {
   const out = new Map<string, string>();
   for (const w of windows.value) {
@@ -280,7 +283,8 @@ const windowed = computed(() => {
     if (key && byKey.value.has(key) && !out.has(key)) out.set(key, w.minimised ? "minimised" : "running");
   }
   webWindowed(out);
-  return out;
+  if (out.size === lastWindowed.size && [...out].every(([k, v]) => lastWindowed.get(k) === v)) return lastWindowed;
+  return (lastWindowed = out);
 });
 
 /** Web windows (ui/webwindows.tsx) into [out]: a minimised one stays in the dock; its tap brings it back (launch -> openWebWindow). */
