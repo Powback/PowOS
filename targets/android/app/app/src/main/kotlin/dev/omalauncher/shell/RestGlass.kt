@@ -81,35 +81,39 @@ internal class RestGlass(
         if (dead) return
         val id = ++seq
         worker.removeCallbacksAndMessages(null)
-        worker.post { if (id == seq) work(id, display, size, shown, ready) }
+        val ask = Ask(id, display, size, shown, ready)
+        worker.post { if (id == seq) work(ask) }
     }
 
+    /** One [render] request. */
+    private class Ask(
+        val id: Int,
+        val display: Int,
+        val size: Rect,
+        val shown: Array<FloatArray>,
+        val ready: (Bitmap) -> Unit,
+    )
+
     /** On the worker: [render]'s capture, the wallpaper's motion check first. */
-    private fun work(
-        id: Int,
-        display: Int,
-        size: Rect,
-        shown: Array<FloatArray>,
-        ready: (Bitmap) -> Unit,
-    ) {
-        val again = stillWallpaper(display, size, id)
-        if (again == null) {
-            // The wallpaper plays (a video one, after an unlock), or no capture now: live blur, asked again later.
-            retry = (retry * 2).coerceIn(RETRY_MS, MAX_RETRY_MS)
-            // Not for good (home gone, a wallpaper that never stops): the page asks again when it next settles.
-            if (retry >= MAX_RETRY_MS) return
-            worker.postDelayed({ if (id == seq) main.post { if (id == seq) render(display, size, shown, ready) } }, retry)
-            return
-        }
+    private fun work(ask: Ask) {
+        val again = stillWallpaper(ask.display, ask.size, ask.id) ?: return later(ask)
         retry = 0
-        val hit = cache?.takeIf { cacheFor?.contentDeepEquals(shown) == true && cacheTiny?.let { same(it, again) } == true }
-        val pic = hit ?: probe(display, size, shown) ?: return
+        val hit = cache?.takeIf { cacheFor?.contentDeepEquals(ask.shown) == true && cacheTiny?.let { same(it, again) } == true }
+        val pic = hit ?: probe(ask.display, ask.size, ask.shown) ?: return
         if (hit == null) {
             cache = pic
-            cacheFor = shown
+            cacheFor = ask.shown
             cacheTiny = again
         }
-        main.post { if (id == seq) ready(pic) }
+        main.post { if (ask.id == seq) ask.ready(pic) }
+    }
+
+    /** The wallpaper plays (a video one, after an unlock), or no capture now: live blur, asked again a little later. */
+    private fun later(ask: Ask) {
+        retry = (retry * 2).coerceIn(RETRY_MS, MAX_RETRY_MS)
+        // Not for good (home gone, a wallpaper that never stops): the page asks again when it next settles.
+        if (retry >= MAX_RETRY_MS) return
+        worker.postDelayed({ if (ask.id == seq) main.post { if (ask.id == seq) render(ask.display, ask.size, ask.shown, ask.ready) } }, retry)
     }
 
     /** The wallpaper small, if it's the same twice [MOTION_MS] apart (and this is still request [id]); else null. */
