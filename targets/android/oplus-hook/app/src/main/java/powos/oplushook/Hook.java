@@ -24,9 +24,14 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class Hook implements IXposedHookLoadPackage {
     private static final String TAG = "PowOS-oplushook";
     private static final String LAUNCHER = "com.android.launcher";
+    private static final String SYSTEMUI = "com.android.systemui";
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
+        if (SYSTEMUI.equals(lp.packageName)) {
+            darkSplitVeil(lp.classLoader);
+            return;
+        }
         if (!LAUNCHER.equals(lp.packageName))
             return;
         swipeToHome(lp.classLoader);
@@ -343,6 +348,82 @@ public class Hook implements IXposedHookLoadPackage {
         panels.put(a, panel);
         XposedBridge.log(TAG + ": trigger panel " + panel.getClass().getSimpleName() + " in " + a.getClass().getSimpleName());
         return panel;
+    }
+
+    /**
+     * The split-screen divider drag. The user, 2026-10-30: "it turns white while im dragging the splitscreen handle".
+     * While the divider moves, WM Shell's SplitDecorManager.onResizing (StageTaskListener.onResizing, from
+     * ResizingEffectPolicy.applyDividerPosition) covers each app whose size changes with a veil: a colour layer
+     * ("ResizingBackground", plus "GapBackground" where the stage outgrows its old bounds) filled with
+     * getResizingBackgroundColor(task) = the task's TaskDescription background colour, white for most apps, and the
+     * app's icon on top. Same in drawNextVeilFrameForSwapAnimation (the swap). OnePlus's SplitDecorManagerExt
+     * (a Gaussian-blurred screenshot veil) is on this build but nothing calls its veil path.
+     *
+     * Signatures from this phone's SystemUI.apk (CPH2551_16.0.5.1301, classes2.dex, dexdump 2026-10-30):
+     *   private static float[] getResizingBackgroundColor(ActivityManager.RunningTaskInfo)
+     *   public void onResizing(RunningTaskInfo, Rect, Rect, Rect, SurfaceControl.Transaction, int, int, boolean)
+     *   public void drawNextVeilFrameForSwapAnimation(RunningTaskInfo, Rect, SurfaceControl.Transaction, boolean,
+     *       SurfaceControl, float, float)
+     *   fields mBackgroundLeash, mGapBackgroundLeash (SurfaceControl)
+     *
+     * The veil stays (the apps can't relayout every frame, without it they'd show stretched or cut off) but in PowOS's
+     * dark tone. getResizingBackgroundColor is a 19-unit private static method that ART may inline into its callers
+     * (as it did with updateOverviewTargets above), so the layers are also recoloured in the same transaction after
+     * onResizing / drawNextVeilFrameForSwapAnimation: the later setColor wins whichever hook ran.
+     *
+     * HACK: a hook in SystemUI, because OxygenOS gives no setting or resource for the veil colour (it is the app's
+     * TaskDescription colour). Real fix: PowOS's own split (WM Shell) veil, or a snapshot veil, once PowOS owns that.
+     */
+    private static final float[] VEIL_RGBA = {0x0f / 255f, 0x11 / 255f, 0x15 / 255f, 1f}; // #0f1115, PowOS's --bg
+    private static volatile boolean veilLogged;
+
+    private static void darkSplitVeil(ClassLoader cl) {
+        try {
+            Class<?> decor = XposedHelpers.findClass("com.android.wm.shell.common.split.SplitDecorManager", cl);
+            XposedHelpers.findAndHookMethod(decor, "getResizingBackgroundColor",
+                android.app.ActivityManager.RunningTaskInfo.class, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        param.setResult(VEIL_RGBA.clone());
+                    }
+                });
+            XC_MethodHook recolour = new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    try {
+                        android.view.SurfaceControl.Transaction t = null;
+                        for (Object a : param.args)
+                            if (a instanceof android.view.SurfaceControl.Transaction) {
+                                t = (android.view.SurfaceControl.Transaction) a;
+                                break;
+                            }
+                        if (t == null)
+                            return;
+                        boolean any = false;
+                        for (String f : new String[] {"mBackgroundLeash", "mGapBackgroundLeash"}) {
+                            Object sc = XposedHelpers.getObjectField(param.thisObject, f);
+                            if (sc instanceof android.view.SurfaceControl && ((android.view.SurfaceControl) sc).isValid()) {
+                                // Transaction.setColor(SurfaceControl, float[]) is @hide; SystemUI may call it.
+                                XposedHelpers.callMethod(t, "setColor", sc, VEIL_RGBA.clone());
+                                any = true;
+                            }
+                        }
+                        if (any && !veilLogged) {
+                            veilLogged = true;
+                            android.util.Log.i(TAG, "split veil: dark #0f1115 (" + param.method.getName() + ")");
+                        }
+                    } catch (Throwable t) {
+                        log("darkSplitVeil " + param.method.getName(), t);
+                    }
+                }
+            };
+            int n = XposedBridge.hookAllMethods(decor, "onResizing", recolour).size()
+                + XposedBridge.hookAllMethods(decor, "drawNextVeilFrameForSwapAnimation", recolour).size();
+            android.util.Log.i(TAG, "split veil hooks installed in SystemUI (" + (n + 1) + " methods)");
+        } catch (Throwable t) {
+            log("darkSplitVeil", t);
+            android.util.Log.w(TAG, "split veil hooks not installed: " + t);
+        }
     }
 
     private static void log(String what, Throwable t) {

@@ -51,6 +51,15 @@ floating window over PowOS's home (no RecentsActivity left behind), and Split Vi
    and the app stays (endTarget LAST_TASK). Earlier wrong lead, for the record: the consumer
    `TYPE_OTHER_ACTIVITY:TYPE_TASKBAR_STASH:TYPE_CURSOR_HOVER` is fine, that's the unstash consumer wrapping it.
 
+6. **Split divider drag without the white flash** (SystemUI, scope `com.android.systemui`). While the divider is
+   dragged, WM Shell's `SplitDecorManager` veils each resizing app in its TaskDescription background colour (white
+   for most apps). Hook: `getResizingBackgroundColor(RunningTaskInfo)` returns PowOS's `#0f1115`, and the veil
+   layers (`mBackgroundLeash`, `mGapBackgroundLeash`) are recoloured after `onResizing` /
+   `drawNextVeilFrameForSwapAnimation` in case ART inlined the colour method. Signatures from the phone's
+   SystemUI.apk (CPH2551_16.0.5.1301). Logcat: `PowOS-oplushook: split veil hooks installed in SystemUI (3 methods)`
+   at SystemUI start, `split veil: dark #0f1115 (onResizing)` at the first drag. Needs SystemUI restarted with the
+   scope on.
+
 Build: `targets/android/build-oplus-hook.sh` (android-app-dev). Install: Zygisk on in Magisk, the Vector (LSPosed
-fork, JingMatrix) Magisk module, this APK, then enable it in Vector with scope `com.android.launcher` and restart the
-launcher (or reboot). Remove: disable the module in Vector.
+fork, JingMatrix) Magisk module, this APK, then enable it in Vector with scopes `com.android.launcher` and `com.android.systemui` and restart
+the launcher and SystemUI (or reboot). Remove: disable the module in Vector.

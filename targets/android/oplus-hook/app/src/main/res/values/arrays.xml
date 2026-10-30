@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- LSPosed scope: OnePlus's launcher (also the recents/gesture provider). -->
+    <!-- LSPosed scope: OnePlus launcher (also the recents/gesture provider) and SystemUI. -->
     <string-array name="xposed_scope">
         <item>com.android.launcher</item>
+        <!-- The split-screen divider veil (WM Shell runs in SystemUI). -->
+        <item>com.android.systemui</item>
     </string-array>
 </resources>
