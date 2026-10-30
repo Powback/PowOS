@@ -1,0 +1,279 @@
+From ac861c40f1be435564c3e3610b6543a106664de8 Mon Sep 17 00:00:00 2001
+From: Mats Bakken <mats@powback.com>
+Date: Fri, 30 Oct 2026 20:02:41 +0100
+Subject: [PATCH] backends/anland: the Android keyboard on a window task's own
+ consumer, and full screen asked by the app
+
+---
+ src/backends/anland/anland_backend.cpp     | 32 ++++++++-
+ src/backends/anland/anland_backend.h       | 11 ++++
+ src/backends/anland/anland_window_task.cpp | 75 +++++++++++++++++++++-
+ src/backends/anland/anland_window_task.h   | 22 +++++++
+ 4 files changed, 136 insertions(+), 4 deletions(-)
+
+diff --git a/src/backends/anland/anland_backend.cpp b/src/backends/anland/anland_backend.cpp
+index e78ac64..d959b17 100644
+--- a/src/backends/anland/anland_backend.cpp
++++ b/src/backends/anland/anland_backend.cpp
+@@ -721,18 +721,44 @@ void AnlandBackend::hideConsumerKeyboard(const char *why)
+ 
+ void AnlandBackend::setConsumerKeyboard(bool want, const char *why)
+ {
+-    if (want == m_keyboardRequested)
++    // PowOS (kwin 0043): the keyboard goes to the focused window's own task when the app hosts one there (a web
++    // window of home: the desktop's surface 0 often has no consumer then, and its show was dropped); else the desktop's.
++    AnlandWindowTask *to = want && m_windowTasks ? m_windowTasks->keyboardTask() : nullptr;
++    const bool moved = m_keyboardRequested && want && (m_keyboardOnTask != (to != nullptr) || m_keyboardTask.data() != to);
++    if (want == m_keyboardRequested && !moved)
+         return;
+-    qCInfo(KWIN_ANLAND) << "Android keyboard" << (want ? "shown" : "hidden") << "-" << why;
++    qCInfo(KWIN_ANLAND) << "Android keyboard" << (want ? "shown" : "hidden") << "-" << why
++                        << (want ? (to ? "on window task" : "on the desktop") : "") << (to ? int(to->id()) : 0);
++    if (m_keyboardRequested)
++        pushKeyboard(m_keyboardTask.data(), m_keyboardOnTask, false); // where it was: hidden there (also on a move)
+     m_keyboardRequested = want;
++    m_keyboardTask = to;
++    m_keyboardOnTask = to != nullptr;
++    if (want)
++        pushKeyboard(to, to != nullptr, true);
++}
++
++void AnlandBackend::pushKeyboard(AnlandWindowTask *task, bool onTask, bool visible)
++{
++    if (onTask) {
++        if (task)
++            task->setKeyboard(visible);
++        return;
++    }
+     if (m_inFallback)
+         return;
+     OutputEvent ev = {};
+     ev.type = OUTPUT_TYPE_KEYBOARD;
+-    ev.keyboard.visible = want ? 1 : 0;
++    ev.keyboard.visible = visible ? 1 : 0;
+     push_output_event(m_display, &ev);
+ }
+ 
++void AnlandBackend::refreshConsumerKeyboard(const char *why)
++{
++    if (m_keyboardRequested)
++        setConsumerKeyboard(true, why);
++}
++
+ /*
+  * Called whenever KWin's SeatInterface::selectionChanged fires.
+  * Reads the new clipboard content and pushes it to the consumer.
+diff --git a/src/backends/anland/anland_backend.h b/src/backends/anland/anland_backend.h
+index 755f97d..9b52be0 100644
+--- a/src/backends/anland/anland_backend.h
++++ b/src/backends/anland/anland_backend.h
+@@ -17,6 +17,7 @@
+ 
+ #include <QByteArray>
+ #include <QPointF>
++#include <QPointer>
+ #include <QVector>
+ #include <memory>
+ 
+@@ -33,6 +34,7 @@ namespace KWin
+ 
+ class AnlandEglBackend;
+ class AnlandOutput;
++class AnlandWindowTask;
+ class AnlandWindowTasks;
+ class AnlandInputDevice;
+ class BackendOutput;
+@@ -118,6 +120,11 @@ private:
+     void updateConsumerKeyboard(bool showRequested, const char *why);
+     void hideConsumerKeyboard(const char *why);
+     void setConsumerKeyboard(bool want, const char *why);
++    void pushKeyboard(AnlandWindowTask *task, bool onTask, bool visible);
++
++public:
++    /** The keyboard's place decided again (a task's "ime" changed who hosts it): moved if it is up. */
++    void refreshConsumerKeyboard(const char *why);
+ public Q_SLOTS:
+     // PowOS: an X11 (Xwayland) app's text field gained/lost the focus. Xwayland has no text-input, so
+     // powos-ime-bridge (the session's IBus panel) reports IBus's input-context focus here over D-Bus.
+@@ -155,6 +162,10 @@ private:
+     // QByteArray is trivially sent over the data channel as UTF-8.
+     QByteArray m_clipboardText;
+     bool m_keyboardRequested = false;
++    // Where the shown keyboard is (kwin 0043): a task's own consumer (m_keyboardOnTask, AnlandWindowTasks::keyboardTask)
++    // or the desktop's (surface 0).
++    QPointer<AnlandWindowTask> m_keyboardTask;
++    bool m_keyboardOnTask = false;
+     bool m_x11TextFocus = false; // SetX11TextFocus: an X11 text field has IBus's focus
+     QElapsedTimer m_showRequestedAt; // a client's last request to show the keyboard (see updateConsumerKeyboard)
+ };
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 7f144bc..ce38691 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -15,6 +15,7 @@
+ #include "core/rendertarget.h"
+ #include "core/renderviewport.h"
+ #include "effect/effect.h"
++#include "inputmethod.h"
+ #include "main.h"
+ #include "opengl/eglcontext.h"
+ #include "opengl/eglnativefence.h"
+@@ -395,6 +396,13 @@ void AnlandWindowTask::goLive()
+     connect(m_inputNotifier, &QSocketNotifier::activated, this, &AnlandWindowTask::onInputReadable);
+     m_bufReadyNotifier = new QSocketNotifier(get_buffer_ready_fd(m_display), QSocketNotifier::Read, this);
+     connect(m_bufReadyNotifier, &QSocketNotifier::activated, this, &AnlandWindowTask::onBufferReady);
++    if (m_ownKeyboard && m_keyboardShown) {
++        // Asked for while the consumer was away: its keyboard comes up now.
++        OutputEvent ev = {};
++        ev.type = OUTPUT_TYPE_KEYBOARD;
++        ev.keyboard.visible = 1;
++        push_output_event(m_display, &ev);
++    }
+ 
+     if (!m_window) {
+         return;
+@@ -956,6 +964,24 @@ void AnlandWindowTask::processInputEvent(const InputEvent &ev)
+     case INPUT_TYPE_TOUCH_FRAME:
+         seat->notifyTouchFrame();
+         break;
++    case INPUT_TYPE_TEXT_INPUT: {
++        // The task's own Android keyboard committed text (window-ime): into KWin's input method, as the desktop's
++        // (AnlandBackend::sendTextInputToKWin) - to the focused text field, this window's while its task has the focus.
++        const uint32_t size = ev.text_input.size;
++        if (size == 0 || size > 65536) {
++            break;
++        }
++        QByteArray text(int(size), Qt::Uninitialized);
++        if (poll_input_event_extend_data(m_display, text.data(), size, 5000) != 1) {
++            break;
++        }
++        const QString str = QString::fromUtf8(text);
++        InputMethod *im = kwinApp()->inputMethod();
++        if (im && !str.isEmpty()) {
++            im->commitText(str);
++        }
++        break;
++    }
+     default:
+         break;
+     }
+@@ -1059,7 +1085,7 @@ void AnlandWindowTasks::announce()
+ {
+     // What this KWin understands beyond "closed"/"focus": the app only sends it then (an older KWin, buffers of the
+     // task's size as before).
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).
+@@ -1165,6 +1191,25 @@ void AnlandWindowTasks::handleLine(const QString &line)
+         task->holdNoBorder();
+     } else if (f[0] == QLatin1String("focus")) {
+         task->focus();
++    } else if (f[0] == QLatin1String("ime") && f.size() >= 3) {
++        // The app hosts this task's Android keyboard on its own consumer (window-ime): show/hide and text go there.
++        task->setOwnKeyboard(f[2] == QLatin1String("1"));
++        qCInfo(KWIN_ANLAND) << "window task" << id << ": its own Android keyboard" << (f[2] == QLatin1String("1"));
++        m_backend->refreshConsumerKeyboard("ime");
++    } else if (f[0] == QLatin1String("fullscreen") && f.size() >= 3) {
++        // The app's full-screen button for this window (fullscreen-request): the window itself goes full screen, as
++        // its own F11 would - it lays out at the task's size with no decoration. KWin's fullScreenChanged then says
++        // "fullscreen <id> 1|0" back (onFullScreenChanged), the same as when the window does it by itself.
++        const bool on = f[2] == QLatin1String("1");
++        Window *window = task->window();
++        if (window && !window->isDeleted() && (!on || window->isFullScreenable()) && window->isFullScreen() != on) {
++            qCInfo(KWIN_ANLAND) << "window task" << id << ": full screen" << on << "asked by the app";
++            window->setFullScreen(on);
++        } else if (window && !window->isDeleted()) {
++            // Nothing changes (already so, or a window that can't): tell the app where it stands, so it never waits.
++            qCInfo(KWIN_ANLAND) << "window task" << id << ": full screen" << on << "asked, stays" << window->isFullScreen();
++            send({QStringLiteral("fullscreen"), QString::number(id), window->isFullScreen() ? QStringLiteral("1") : QStringLiteral("0")});
++        }
+     } else if (f[0] == QLatin1String("size") && f.size() >= 4) {
+         // A floating task resized (its frame dragged): the window follows, live.
+         task->resizeTo(QSize(f[2].toInt(), f[3].toInt()));
+@@ -1545,6 +1590,34 @@ bool AnlandWindowTasks::exportable(Window *window) const
+         && window->desktopFileName() != QLatin1String("org.kde.plasmashell");
+ }
+ 
++void AnlandWindowTask::setKeyboard(bool visible)
++{
++    m_keyboardShown = visible;
++    if (m_state != State::Live || !m_display) {
++        return;
++    }
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << ": Android keyboard" << (visible ? "shown" : "hidden");
++    OutputEvent ev = {};
++    ev.type = OUTPUT_TYPE_KEYBOARD;
++    ev.keyboard.visible = visible ? 1 : 0;
++    push_output_event(m_display, &ev);
++}
++
++AnlandWindowTask *AnlandWindowTasks::keyboardTask() const
++{
++    if (!workspace()) {
++        return nullptr;
++    }
++    // The text field's window is the active one (text input follows the keyboard focus); a dialog or a popup of a
++    // task's window counts as that task's.
++    for (Window *w = workspace()->activeWindow(); w; w = w->transientFor()) {
++        if (AnlandWindowTask *task = taskFor(w)) {
++            return task->ownKeyboard() ? task : nullptr;
++        }
++    }
++    return nullptr;
++}
++
+ AnlandWindowTask *AnlandWindowTasks::taskFor(const Window *window) const
+ {
+     for (AnlandWindowTask *task : m_tasks) {
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 5570220..1a65eae 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -104,6 +104,21 @@ public:
+      * frame's bar instead; restored when the window goes back to the desktop. A client-side decorated one is untouched.
+      */
+     void holdNoBorder();
++    /**
++     * "ime <id> 1" from the app (cap window-ime): the app hosts an Android keyboard for this task's own consumer (a web
++     * window of home). While it does, the keyboard's show/hide for this window goes to this task's connection
++     * ([setKeyboard]) and its committed text arrives on it; without, both stay the desktop's (surface 0), as before.
++     */
++    void setOwnKeyboard(bool on)
++    {
++        m_ownKeyboard = on;
++    }
++    bool ownKeyboard() const
++    {
++        return m_ownKeyboard && m_state == State::Live;
++    }
++    /** The Android keyboard for this window shown or hidden: OUTPUT_TYPE_KEYBOARD on this task's connection. */
++    void setKeyboard(bool visible);
+     /**
+      * What the task shows of the window's surroundings, in KWin's coordinates: its client area at the task's size (a
+      * floating task crops the buffers to that), the whole window when it is scaled to fit. Popups are kept inside it.
+@@ -163,6 +178,8 @@ private:
+     int m_decorTold = -1; // the last "decor" told: 1 KWin's title bar, 0 the window's own, -1 not yet
+     bool m_noBorderHeld = false; // "nodecor": KWin's border taken off while a task (holdNoBorder)
+     bool m_noBorderBefore = false; // its noBorder before, restored on the desktop
++    bool m_ownKeyboard = false; // "ime <id> 1": the app's keyboard for this task listens on its connection
++    bool m_keyboardShown = false; // the last setKeyboard (sent again when the task goes live)
+     display_ctx *m_display = nullptr;
+     State m_state = State::Handshake;
+     QSocketNotifier *m_ctrlNotifier = nullptr;
+@@ -230,6 +247,11 @@ public:
+     }
+     /** One control line to the app (fields joined by tabs; tabs and newlines inside them become spaces). */
+     void send(const QStringList &fields);
++    /**
++     * The task whose own consumer takes the Android keyboard now: the active window's (or the window it is a dialog
++     * of), when the app said "ime" for it and it is live. Null: the desktop's keyboard (surface 0), as before.
++     */
++    AnlandWindowTask *keyboardTask() const;
+     /** The virtual desktop exported windows live on, made on first use. */
+     VirtualDesktop *tasksDesktop();
+     /** A task is done (the app closed it, or its window closed): forget it. */
+-- 
+2.50.1 (Apple Git-155)
+

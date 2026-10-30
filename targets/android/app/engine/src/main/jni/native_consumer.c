@@ -237,10 +237,49 @@ static void send_refresh_rate(struct consumer_state *s)
  * Event thread: listens for output events (clipboard, etc.) from the producer
  * on the data_fd. Runs while s->event_running is true.
  */
+/* PowOS (kwin 0043, cap window-ime): a window consumer's output events. KWin sends the Android keyboard's show/hide for
+ * a web window of home to that window's own connection; it goes to WebWindowSource.nativeKeyboard(handle, visible),
+ * which shows home's keyboard bound to this window. Resolved in nativeStartWindow (a Java thread: the app's loader). */
+static jclass g_wws_class = NULL;
+static jmethodID g_wws_keyboard = NULL;
+
+static void window_events(JNIEnv *env, struct consumer_state *s)
+{
+    while (s->event_running) {
+        if (!s->ctx) {
+            usleep(50000);
+            continue;
+        }
+        struct OutputEvent ev;
+        if (poll_output_event(s->ctx, &ev, 500) <= 0)
+            continue;
+        if (ev.type == OUTPUT_TYPE_KEYBOARD && g_wws_class && g_wws_keyboard) {
+            (*env)->CallStaticVoidMethod(env, g_wws_class, g_wws_keyboard, (jlong)(intptr_t)s,
+                                         (jboolean)(ev.keyboard.visible != 0));
+            if ((*env)->ExceptionCheck(env))
+                (*env)->ExceptionClear(env);
+        } else {
+            LOGI("window %u: output event type=%u not for windows", s->surface_id, ev.type);
+        }
+    }
+}
+
 static void *event_thread_func(void *arg)
 {
     struct consumer_state *s = arg;
-    LOGI("event thread started");
+    LOGI("event thread started (surface %u)", s->surface_id);
+
+    if (!s->primary) {
+        JNIEnv *wenv = NULL;
+        if ((*g_jvm)->AttachCurrentThread(g_jvm, &wenv, NULL) != 0) {
+            LOGE("window event thread: AttachCurrentThread failed");
+            return NULL;
+        }
+        window_events(wenv, s);
+        (*g_jvm)->DetachCurrentThread(g_jvm);
+        LOGI("event thread stopped (surface %u)", s->surface_id);
+        return NULL;
+    }
 
     JNIEnv *env = NULL;
     if ((*g_jvm)->AttachCurrentThread(g_jvm, &env, NULL) != 0) {
@@ -696,9 +735,12 @@ static void on_exit_fallback(void *userdata)
     LOGI("exit fallback triggered (surface %u)", s->surface_id);
 
     send_refresh_rate(s);
-    /* Clipboard, keyboard visibility and resource requests are the desktop's: no event thread for the others. */
-    if (!s->primary)
+    /* Clipboard and resource requests are the desktop's. A window's event thread carries only its keyboard's show/hide
+     * (kwin 0043: a web window of home; an older KWin sends nothing on it). */
+    if (!s->primary) {
+        start_event_thread(s);
         return;
+    }
 
     JNIEnv *env = NULL;
     if ((*g_jvm)->AttachCurrentThread(g_jvm, &env, NULL) != 0) {
@@ -1287,6 +1329,17 @@ Java_andro_marchy_Native_nativeStartWindow(
     }
     if (!g_jvm)
         (*env)->GetJavaVM(env, &g_jvm);
+    if (!g_wws_class) {
+        jclass c = (*env)->FindClass(env, "andro/marchy/WebWindowSource");
+        if (c) {
+            g_wws_keyboard = (*env)->GetStaticMethodID(env, c, "nativeKeyboard", "(JZ)V");
+            if (g_wws_keyboard)
+                g_wws_class = (*env)->NewGlobalRef(env, c);
+            (*env)->DeleteLocalRef(env, c);
+        }
+        if ((*env)->ExceptionCheck(env))
+            (*env)->ExceptionClear(env);
+    }
     s->refresh_mhz = g_state.refresh_mhz;
     s->running = true;
     s->need_reconnect = true;
@@ -1382,4 +1435,25 @@ Java_andro_marchy_Native_nativeSendWindowKey(
         .key = { .action = action, .keycode = keycode },
     };
     push_to(handle, &ev);
+}
+
+/* The window's Android keyboard committed [text] (UTF-8): to KWin on this window's connection (kwin 0043 takes it there
+ * as the desktop's; window-ime). */
+JNIEXPORT void JNICALL
+Java_andro_marchy_Native_nativeSendWindowTextInput(
+    JNIEnv *env, jclass clazz, jlong handle, jbyteArray text)
+{
+    struct consumer_state *s = (struct consumer_state *)(intptr_t)handle;
+    if (!s || !s->ctx || !text)
+        return;
+    jsize len = (*env)->GetArrayLength(env, text);
+    if (len <= 0)
+        return;
+    jbyte *buf = (*env)->GetByteArrayElements(env, text, NULL);
+    if (!buf)
+        return;
+    struct InputEvent ev = { .type = INPUT_TYPE_TEXT_INPUT };
+    ev.text_input.size = (uint32_t)len;
+    push_input_event_with_length(s->ctx, &ev, buf, len);
+    (*env)->ReleaseByteArrayElements(env, text, buf, JNI_ABORT);
 }

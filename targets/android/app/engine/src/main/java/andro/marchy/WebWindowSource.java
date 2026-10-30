@@ -1,9 +1,13 @@
 package andro.marchy;
 
+import android.app.Activity;
 import android.content.Context;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.Surface;
+import android.view.ViewGroup;
+
+import java.lang.ref.WeakReference;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -41,6 +45,12 @@ public final class WebWindowSource {
 
         /** KWin closed window [id] (the app closed it, or it exited). */
         void closed(int id);
+
+        /**
+         * Window [id] is full screen now ([on]) or not: KWin's "fullscreen <id> 1|0" - the answer to [fullScreen], or
+         * the window's own (F11, a video). Control channel's thread.
+         */
+        default void fullScreen(int id, boolean on) {}
     }
 
     /** Set by home's bridge (ShellBridge) while it lives; null = every Linux window is a task (as before). */
@@ -117,7 +127,13 @@ public final class WebWindowSource {
      * ones). The handle, 0 = failed. Blocks (a daemon connect): never on the main thread.
      */
     public static long start(Surface surface, int id, int buffersW, int buffersH) {
-        return Native.nativeStartWindow(surface, id, buffersW, buffersH);
+        long handle = Native.nativeStartWindow(surface, id, buffersW, buffersH);
+        if (handle != 0) {
+            synchronized (IME_LOCK) {
+                liveHandles.add(handle);
+            }
+        }
+        return handle;
     }
 
     /** The part of the buffers shown: the window's body size (KWin draws the window from their top left). */
@@ -133,8 +149,175 @@ public final class WebWindowSource {
 
     /** Joins the consumer's thread: never on the main thread. */
     public static void stop(long handle) {
-        if (handle != 0)
-            Native.nativeStopWindow(handle);
+        if (handle == 0)
+            return;
+        // Home's keyboard bound to it lets go first: no text is sent to a freed consumer.
+        boolean bound;
+        synchronized (IME_LOCK) {
+            liveHandles.remove(handle);
+            bound = imeHandle == handle;
+            if (bound)
+                imeHandle = 0;
+        }
+        if (bound)
+            onUi(() -> {
+                SystemIME i = ime;
+                if (i != null && i.ownsKeyboard())
+                    i.hideKeyboard();
+            });
+        Native.nativeStopWindow(handle);
+    }
+
+    /**
+     * KWin (cap window-ime, kwin 0043) gives window [id]'s keyboard to its consumer [handle]: show/hide arrive on it
+     * ([nativeKeyboard]) and home's keyboard types into it. After [start]; older KWin: nothing, the desktop's path.
+     */
+    public static void ownKeyboard(int id, long handle) {
+        if (handle != 0 && WindowTasks.kwinCan("window-ime"))
+            WindowTasks.sendLine("ime\t" + id + "\t1");
+    }
+
+    // ---- The Android keyboard for Linux web windows (kwin 0043, docs/WEB_WINDOWS.md 3.1) ----
+
+    private static final Object IME_LOCK = new Object();
+    /** Home's activity, hosting the keyboard (ShellBridge, home only). */
+    private static volatile WeakReference<Activity> imeHome;
+    /** The keyboard's hidden input in home (made on the first show, main thread only). */
+    private static SystemIME ime;
+    private static Activity imeActivity;
+    /** The consumer the keyboard types into now (0: none). Guarded by IME_LOCK for sends vs [stop]. */
+    private static long imeHandle;
+    /** Consumers between [start] and [stop] (IME_LOCK): a show that arrives late never binds a stopped one. */
+    private static final Set<Long> liveHandles = new java.util.HashSet<>();
+
+    /** Home's bridge: [home] hosts Linux web windows' keyboard ([nativeKeyboard]). null when it goes. */
+    public static void hostIme(Activity home) {
+        imeHome = home == null ? null : new WeakReference<>(home);
+    }
+
+    /** [home]'s bridge went: it hosts the keyboard no more (a newer home's registration is kept). */
+    public static void unhostIme(Activity home) {
+        WeakReference<Activity> ref = imeHome;
+        if (ref != null && ref.get() == home)
+            imeHome = null;
+    }
+
+    /** Text and keys of home's keyboard: to the bound window's consumer, on its own connection. */
+    private static final SystemIME.Sink WINDOW_SINK = new SystemIME.Sink() {
+        @Override
+        public void text(byte[] utf8) {
+            synchronized (IME_LOCK) {
+                if (imeHandle != 0)
+                    Native.nativeSendWindowTextInput(imeHandle, utf8);
+            }
+        }
+
+        @Override
+        public void key(int action, int evdevCode) {
+            synchronized (IME_LOCK) {
+                if (imeHandle != 0)
+                    Native.nativeSendWindowKey(imeHandle, action, evdevCode);
+            }
+        }
+    };
+
+    private static void onUi(Runnable r) {
+        WeakReference<Activity> ref = imeHome;
+        Activity a = ref == null ? null : ref.get();
+        if (a != null)
+            a.runOnUiThread(r);
+    }
+
+    /**
+     * Called by native_consumer.c's window event thread: KWin's OUTPUT_TYPE_KEYBOARD on window consumer [handle] (a
+     * Linux text field in that web window gained / lost the focus). Name and signature are fixed by the JNI side.
+     */
+    static void nativeKeyboard(long handle, boolean visible) {
+        WeakReference<Activity> ref = imeHome;
+        Activity a = ref == null ? null : ref.get();
+        if (a == null) {
+            Log.w(TAG, "keyboard " + (visible ? "show" : "hide") + " for a web window: no home to host it");
+            return;
+        }
+        a.runOnUiThread(() -> keyboard(a, handle, visible));
+    }
+
+    /** Main thread: [nativeKeyboard]'s show or hide. */
+    private static void keyboard(Activity a, long handle, boolean visible) {
+        if (visible) {
+            SystemIME i = imeFor(a);
+            if (i == null)
+                return;
+            synchronized (IME_LOCK) {
+                if (!liveHandles.contains(handle))
+                    return;
+                imeHandle = handle;
+            }
+            Log.i(TAG, "keyboard up for a web window (its consumer types)");
+            i.showKeyboard();
+            return;
+        }
+        boolean bound;
+        synchronized (IME_LOCK) {
+            bound = imeHandle == handle;
+            if (bound)
+                imeHandle = 0;
+        }
+        SystemIME i = ime;
+        // Only ours: home's own page may have the keyboard now (the user tapped the launcher's search).
+        if (bound && i != null && i.ownsKeyboard()) {
+            Log.i(TAG, "keyboard down for a web window");
+            i.hideKeyboard();
+        }
+    }
+
+    /** Home's keyboard input, made once per activity: a 1x1 hidden view on its decor (as MainActivity's). */
+    private static SystemIME imeFor(Activity a) {
+        if (ime != null && imeActivity == a)
+            return ime;
+        if (ime != null) {
+            android.view.View old = ime.getInputView();
+            if (old.getParent() instanceof ViewGroup)
+                ((ViewGroup) old.getParent()).removeView(old);
+        }
+        android.view.View decor = a.getWindow() == null ? null : a.getWindow().getDecorView();
+        if (!(decor instanceof ViewGroup)) {
+            Log.w(TAG, "home has no decor view for the keyboard's input");
+            return null;
+        }
+        SystemIME i = new SystemIME(a, new SystemIME.Host() {
+            @Override
+            public ExtraKeysBar getExtraKeysBar() {
+                return null;
+            }
+
+            @Override
+            public void onImeVisibilityChanged(boolean visible) {}
+        }, WINDOW_SINK);
+        ((ViewGroup) decor).addView(i.getInputView(), new ViewGroup.LayoutParams(1, 1));
+        ime = i;
+        imeActivity = a;
+        return i;
+    }
+
+    // ---- Full screen for Linux web windows (kwin 0043 "fullscreen-request") ----
+
+    /** KWin puts a web window's window itself full screen on request ([fullScreen]). */
+    public static boolean canFullScreen() {
+        return WindowTasks.kwinCan("fullscreen-request");
+    }
+
+    /** Window [id] full screen ([on]) or back: KWin calls setFullScreen; its "fullscreen <id> 1|0" answers. */
+    public static void fullScreen(int id, boolean on) {
+        if (canFullScreen())
+            WindowTasks.sendLine("fullscreen\t" + id + "\t" + (on ? 1 : 0));
+    }
+
+    /** KWin's "fullscreen <id> 1|0" for a web window's [id]. Control channel's thread. */
+    static void fullScreened(int id, boolean on) {
+        Host h = host;
+        if (h != null && ids.contains(id))
+            h.fullScreen(id, on);
     }
 
     /** KWin resizes window [id] to [width] x [height] px (its client: PowOS draws the bar). Older KWin: nothing. */

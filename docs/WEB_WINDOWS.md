@@ -200,6 +200,17 @@ host:  postVisualStateCallback(frameId) -> one SurfaceControl.Transaction -> roo
 | Android | the whole MotionEvent (all pointers, history), offset to the body and `setDisplayId(vd)`, sent to a **root-side injector**: a persistent `app_process` helper running as shell/root that holds INJECT_EVENTS (the scrcpy/Shizuku pattern), reached over a local socket. Root `input` per event is removed | `KeyEvent` to the focused window's VD through the same injector | `setDisplayImePolicy(vd, FALLBACK_DISPLAY)` (exists, `WebWindows.kt:269-277`): the phone's real keyboard serves the app's own InputConnection on its VD, so it is the real window's IME (as in DeX). Unknown U3: does the top-focused display follow the injected touch? |
 | Linux | `Native.nativeSendWindowTouch/TouchFrame` to KWin (exists, `PowosWindowActivity.java:611-641`). KWin delivers to the surface or popup under the point | `nativeSendWindowKey` (`:656`) | `SystemIME` hosted by home for the focused Linux web window. KWin's text-input focus shows and hides it (kwin 0010/0012/0016), exactly as in `PowosWindowActivity` today |
 
+**Linux IME and full screen as built (kwin 0043, pkg 3.50).** KWin's caps add `window-ime` and `fullscreen-request`.
+When a web window's consumer is up, the app sends `ime <id> 1`. From then on, KWin sends `OUTPUT_TYPE_KEYBOARD` for
+the active window (or its dialog) to that task's own connection instead of surface 0, and it takes
+`INPUT_TYPE_TEXT_INPUT` there (InputMethod::commitText). The window consumer's event thread
+(native_consumer.c `window_events`) calls `WebWindowSource.nativeKeyboard(handle, visible)`. Home then hosts one
+`SystemIME` with a sink bound to that handle (`hostIme`, from ShellBridge), so the text goes to KWin for that toplevel.
+An older KWin sends no cap, so the app sends no `ime` and the desktop path stays. An older app never sends `ime`, so
+KWin keeps the desktop path. The full-screen button sends `fullscreen <id> 1`; KWin calls `setFullScreen`, and its
+`fullscreen <id> 1|0` confirms or reverts the window. The host lays the container over the whole screen, with no bar.
+"Back to window" (`toWindow`) or the app's own F11/Esc brings the window back.
+
 Keyboard cover: when the IME's inset covers the focused body, the page lifts that window above the inset, and the
 lift is ordinary geometry in `w.f`. Plasma does not do this, but on a phone it is needed.
 

@@ -94,6 +94,15 @@ internal class WebWindowChrome(
         width: Int,
     ): Float = width - button * (CONTROLS.indexOf(control).coerceAtLeast(0) + 0.5f)
 
+    /** The bar and the body's backing shown ([on]) or hidden (a full-screen Linux window: no frame at all). */
+    fun shown(
+        t: SurfaceControl.Transaction,
+        on: Boolean,
+    ) {
+        bar?.takeIf { it.isValid }?.let { t.setVisibility(it, on) }
+        back?.takeIf { it.isValid }?.let { t.setVisibility(it, on) }
+    }
+
     /** The frame for a [width] x [height] window (px, unscaled) into [t]; the bar redrawn when it changed. */
     fun layout(
         t: SurfaceControl.Transaction,
