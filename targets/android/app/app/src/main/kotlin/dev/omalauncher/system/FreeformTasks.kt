@@ -159,7 +159,7 @@ object FreeformTasks {
         id: Int,
         bounds: Rect,
     ): Boolean =
-        transact(context, id) { wct, token ->
+        transact(context, id.also { markOwnFloat(it) }) { wct, token ->
             wct.javaClass.getMethod("setWindowingMode", token.javaClass, Int::class.javaPrimitiveType).invoke(wct, token, FREEFORM)
             wct.javaClass.getMethod("setBounds", token.javaClass, Rect::class.java).invoke(wct, token, bounds)
         }.onFailure { Log.w(TAG, "can't make task $id a window", it) }.isSuccess
@@ -178,6 +178,7 @@ object FreeformTasks {
         bounds: Rect?,
     ): Boolean {
         val mode = if (on) UNDEFINED else FREEFORM
+        if (!on) markOwnFloat(id)
         val to = if (on) Rect() else bounds ?: Rect()
         // Full screen has square corners and no shadow; a window again is dressed at the next WindowFrames refresh.
         if (on) android.os.Handler(android.os.Looper.getMainLooper()).post { TaskSurfaces.undress(id) }
@@ -567,6 +568,42 @@ object FreeformTasks {
             }.onFailure { Log.w(TAG, "can't set task $id's bounds", it) }.getOrElse { resize(id, bounds).let { false } }
         }
     }
+
+    /**
+     * The app tasks floating now - Android's freeform (5) or OnePlus' own floating window (WindowConfiguration
+     * WINDOWING_MODE_ZOOM, 100: its "..." menu's "Floating window", OxygenOS 16 SystemUI TransitionUtil) - on the main
+     * display, as task id -> its package. Web windows (their own displays) never.
+     */
+    fun floatingApps(context: Context): List<Pair<Int, String?>> {
+        HiddenApi.allow()
+        @Suppress("DEPRECATION")
+        val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
+        return tasks.filter { t ->
+            !dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t) &&
+                runCatching { windowConfiguration(t).let { it.javaClass.getMethod("getWindowingMode").invoke(it) } }.getOrNull().let { it == FREEFORM || it == ZOOM }
+        }.map { it.taskId to (it.baseActivity ?: it.topActivity)?.packageName }
+    }
+
+    /** OnePlus' WINDOWING_MODE_ZOOM: its own floating ("zoom") window. */
+    private const val ZOOM = 100
+
+    /** Task id -> when PowOS itself last made it float (uptime ms): shell/SystemFloat leaves those alone. */
+    private val ownFloats = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
+    /** PowOS is making task [id] a floating window now (not the system's own menu): shell/SystemFloat skips it. */
+    fun markOwnFloat(id: Int) {
+        ownFloats[id] = android.os.SystemClock.uptimeMillis()
+    }
+
+    /** Task [id] floated by PowOS's own hand within the last [OWN_FLOAT_MS]. */
+    fun isOwnFloat(id: Int): Boolean {
+        val at = ownFloats[id] ?: return false
+        if (android.os.SystemClock.uptimeMillis() - at < OWN_FLOAT_MS) return true
+        ownFloats.remove(id)
+        return false
+    }
+
+    private const val OWN_FLOAT_MS = 5000L
 
     /**
      * Calls [changed] (on a binder thread) whenever Android's tasks change - opened, raised, moved, closed; a handle to

@@ -647,3 +647,31 @@ With the APK shipped and the user idle, open two apps from the launcher (web win
 - Divider handles sit above floating windows that overlap a tiling.
 - No swap of two tiles by dragging one onto the other; no per-tile resize from the outer edges (dividers only).
 - The snap hint is a plain rectangle (no corner radius: the layer is scaled from 8x8).
+
+---
+
+## An app into a desktop window (2026-10-30)
+
+One path makes a running app a web window: `ShellBridge.toWebWindow(task)`. A web window's full-screen app goes back
+into its window; a web window already is shown; any other app gets a new window on home's current page holding its
+existing task (`webwindows.adopt` -> `adoptWebWindow` -> `webwindows.open(key, rect, task)` -> `WebWindows.adoptNow`
+moves the task onto the window's trusted display), at its freeform bounds, else its last place by hand
+(`WindowPlaces`), else a centred default. Callers: the switcher card's "PowOS desktop window" and "Back to window", and
+the system's "..." app-handle menu.
+
+That menu is OnePlus' `FullscreenCaptionHandleMenu` (Split screen / Floating window / Close), not AOSP's desktop handle
+menu: its items are fixed, and AOSP's menu (with its Desktop button) only exists when `config_isDesktopModeSupported`
+(false here) swaps in `DesktopModeWindowDecorViewModel` for every task. So `SystemFloat` relabels the menu's "Floating
+window" (`com.android.systemui:string/caption_menu_text_zoom`) to "Desktop window" with a fabricated overlay
+(`com.android.shell:PowosDesktopWindowItem`) while `powos_web_windows` is 1, and converts a task that goes from full
+screen to floating (OnePlus' zoom mode 100, or freeform) without PowOS's hand (`FreeformTasks.markOwnFloat`). Setting
+off: the overlay is disabled, nothing converted.
+
+With tiles (above): the adopted window joins home's current page like any window opened there. If that page has a
+tiling with an empty tile, it fills that tile (`fillEmptyTile`, the same rule as `openWindow`; its adopted frame is kept
+as `untiled`, so a float out puts it back where the app was). Otherwise it floats at that frame, on top, and a full
+tiling stays untouched. Chosen this way because an empty tile only exists to wait for the next window, and an adopted
+app is that next window, so it gets no exception. Pushing a tiled window out to make room would rearrange what the user
+set up. Full screen, close, minimise and the tile menu then behave as for any web window (a tiled one leaves its tile
+as in "Leaving a tiling"). An app whose activity can't be a web window (`unresizeable`) returns -1 from `open` and
+keeps its task where it is.

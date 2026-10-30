@@ -10,9 +10,9 @@ import { agentsView, closeAgents } from "./agents.ts";
 import { backScreen, closeScreens } from "./screens.ts";
 import { recentsBack, recentsHome } from "./ui/recents.tsx";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
-import type { App, AppWindow, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
+import type { App, AppWindow, Chat, Home, HomeItem, WebWindowRect, WidgetScreen } from "./types.ts";
 import { sidewaysHome, wideHome } from "./hosts/wide.ts";
-import { onWebWindowPage, openWebWindow, setShownPage } from "./ui/webwindows.tsx";
+import { adoptWebWindow, onWebWindowPage, openWebWindow, setShownPage } from "./ui/webwindows.tsx";
 
 /** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
 const hostApps = signal<App[]>([]);
@@ -437,6 +437,10 @@ powos.on("home.panel", ({ kind, draft }: { kind: "apps" | "ai"; draft?: string }
 onWebWindowPage((p) => {
   const i = pages.value.indexOf(p);
   if (i >= 0) page.value = i;
+});
+// An app's task made a PowOS desktop window (ShellBridge.toWebWindow): a web window on the page home shows now.
+powos.on("webwindows.adopt", (m: { task: number; key: string; label?: string; body?: WebWindowRect }) => {
+  void adoptWebWindow({ ...m, label: m.label ?? byKey.value.get(m.key)?.label ?? m.key }, pages.value[page.value] ?? 1);
 });
 
 export async function launch(key: string) {

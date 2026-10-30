@@ -281,7 +281,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     // Web windows (ui/webwindows.tsx): the phone's only.
     webwindows: host.name === "powos" ? undefined : {
       enabled: () => call<boolean>("webwindows.enabled"),
-      open: (key, rect) => call<number>("webwindows.open", key, rect),
+      open: (key, rect, task) => call<number>("webwindows.open", key, rect, task ?? -1),
       input: (id, action, x, y) => call<boolean>("webwindows.input", id, action, x, y),
       close: (id) => call<boolean>("webwindows.close", id),
       fullScreen: (id) => call<boolean>("webwindows.fullScreen", id),

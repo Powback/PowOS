@@ -71,6 +71,9 @@ class ShellBridge(
 
     @Volatile private var webWindowsMade = false
 
+    /** An app the system's window menu floated ([SystemFloat]): a web window, as the switcher's "PowOS desktop window". */
+    private val systemFloat: (Int) -> Unit = { id -> main.post { toWebWindow(id) } }
+
     /** The page's web-window geometry, "w.f ..." over its native port ([ShellNative], port thread): [WebWindows.frameCommand]. */
     fun webWindowFrame(rest: String) {
         if (webWindowsMade) webWindows.frameCommand(rest)
@@ -159,6 +162,8 @@ class ShellBridge(
     private val themeChanged: () -> Unit = { ShellWallpaper.refresh(context) }
 
     init {
+        // Home's bridge: an app the system's own window menu floats becomes a web window (SystemFloat, web windows on).
+        if (activity != null) SystemFloat.start(context, systemFloat)
         ShellWallpaper.onChange.add(wallpaperChanged)
         runCatching { android.app.WallpaperManager.getInstance(context).addOnColorsChangedListener(wallpaperColors, main) }
         dev.omalauncher.theme.ThemeStore.changeListeners.add(themeChanged)
@@ -293,7 +298,7 @@ class ShellBridge(
                 if (activity == null) -1
                 else android(a.getString(0))?.let { app ->
                     runtime.usage.record(a.getString(0))
-                    webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1))
+                    webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1), a.optInt(2, -1))
                 } ?: -1
             "webwindows.input" -> webWindowsMade && webWindows.input(a.getInt(0), a.getString(1), a.getDouble(2), a.getDouble(3))
             "webwindows.close" -> webWindowsMade && webWindows.close(a.getInt(0))
@@ -402,7 +407,7 @@ class ShellBridge(
             "tasks.split" -> dev.omalauncher.system.Tasks.split(a.getInt(0), a.getInt(1))
             "tasks.desktopWindow" -> desktopWindow(a.getInt(0), a.optBoolean(1, true))
             "tasks.float" -> dev.omalauncher.system.Tasks.float(context, a.getInt(0))
-            "tasks.toWindow" -> WebWindows.toWindowForTask(a.getInt(0)).also { if (it) dev.omalauncher.system.Switcher.hide() }
+            "tasks.toWindow" -> toWebWindow(a.getInt(0)).also { if (it) dev.omalauncher.system.Switcher.hide() }
             "tasks.info" -> dev.omalauncher.system.Tasks.info(context, a.getInt(0))
             "tasks.screenshot" -> dev.omalauncher.system.Tasks.screenshot(context, a.getInt(0))
             // Home's switcher layer (shell/ui/recents.tsx, system/Switcher.kt).
@@ -657,6 +662,8 @@ class ShellBridge(
         on: Boolean,
     ): Boolean {
         if (!dev.omalauncher.system.AppWindows.floating(context)) return false
+        // Web windows on: a PowOS desktop window IS a web window on home (toWebWindow), the switcher closing onto it.
+        if (on && activity != null && WebWindows.on(context)) return toWebWindow(id).also { if (it) dev.omalauncher.system.Switcher.hide() }
         val ok =
             if (on) {
                 dev.omalauncher.system.Tasks.open(context, id, dev.omalauncher.system.AppWindows.taskOptions(context, id, android.app.ActivityOptions.makeBasic()))
@@ -665,6 +672,54 @@ class ShellBridge(
             }
         if (ok) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ dev.omalauncher.system.Switcher.hide() }, WINDOW_UP_MS)
         return ok
+    }
+
+    /**
+     * THE way an app's task becomes a PowOS desktop window when web windows are on - the switcher card's "PowOS desktop
+     * window" / "Back to window" and the system's own window menu (the "..." app handle's item, WebWindows.watchSystemFloat)
+     * all come here. A web window's full-screen app goes back into its window (WebWindows.toWindow); a web window
+     * already is shown where it is; any other app gets a new web window on home's current page holding ITS task
+     * (moved onto the window's trusted display, never relaunched): at the task's floating bounds when it floats now,
+     * else where its window was last put by hand (WindowPlaces), else the page's default centred size. False: not
+     * possible here (web windows off, no home activity, the task gone, an app the drawer doesn't list).
+     */
+    fun toWebWindow(id: Int): Boolean {
+        if (WebWindows.toWindowForTask(id)) return true
+        if (WebWindows.openForTask(context, id)) return true
+        if (activity == null || !WebWindows.on(context)) return false
+        return newWebWindow(id)
+    }
+
+    /** [toWebWindow] for an app that has no web window: the page told to make one holding task [id] ("webwindows.adopt"). */
+    private fun newWebWindow(id: Int): Boolean {
+        val component = taskComponent(id) ?: return false.also { Log.w(TAG, "task $id: not running, no web window for it") }
+        val app = drawerApp(component) ?: return false.also { Log.w(TAG, "task $id (${component.packageName}): no drawer app, no web window for it") }
+        val bounds = lastBounds(id, component.packageName)
+        val payload = JSONObject().put("task", id).put("key", "a:${app.key}").put("label", app.label)
+        bounds?.let { payload.put("body", pageRect(it)) }
+        Log.i(TAG, "task $id (${component.packageName}) to a web window at ${bounds?.toShortString() ?: "the default place"}")
+        emit("webwindows.adopt", payload)
+        return true
+    }
+
+    /** The drawer's app for [component] (that activity, else its package's). */
+    private fun drawerApp(component: android.content.ComponentName) =
+        runtime.androidApps.apps.firstOrNull { it.component == component }
+            ?: runtime.androidApps.apps.firstOrNull { it.component.packageName == component.packageName }
+
+    /** Where task [id] floats now (screen px), else where [pkg]'s window was last put by hand (WindowPlaces), else null. */
+    private fun lastBounds(
+        id: Int,
+        pkg: String,
+    ): android.graphics.Rect? =
+        dev.omalauncher.system.FreeformTasks.list(context).firstOrNull { it.id == id }?.bounds
+            ?: dev.omalauncher.system.WindowPlaces.get(context, dev.omalauncher.system.WindowPlaces.key(context, pkg))
+
+    /** Running task [id]'s app (its base activity), or null: not running. */
+    private fun taskComponent(id: Int): android.content.ComponentName? {
+        @Suppress("DEPRECATION")
+        val tasks = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(64) }.getOrDefault(emptyList())
+        return tasks.firstOrNull { it.taskId == id }?.let { it.baseActivity ?: it.topActivity }
     }
 
     private fun density() = context.resources.displayMetrics.density
@@ -1293,6 +1348,7 @@ class ShellBridge(
 
     fun close() {
         health.close()
+        if (activity != null) SystemFloat.stop(systemFloat)
         if (webWindowsMade) webWindows.closeAll()
         runCatching { context.getSystemService(android.hardware.display.DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         ShellWallpaper.onChange.remove(wallpaperChanged)
