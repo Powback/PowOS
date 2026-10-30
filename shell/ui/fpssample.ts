@@ -13,6 +13,7 @@
  */
 import { powos } from "../bridge.ts";
 import { onMeter } from "./perfrec.ts";
+import { setOverlay } from "./renderoverlay.ts";
 
 const SIZE = 512, SAMPLE_MS = 250, CAP = 40, IDLE_MS = 1500;
 // What wakes the sampler: input anywhere on the page, and CSS motion starting (capture: events from any element).
@@ -75,7 +76,8 @@ function wake() {
  * home is the long-lived page, and an on-demand import() of a chunk from the bundle it loaded fails once the shell on
  * disk is updated (the bar, reloaded, runs the new one) - home then never recorded nor answered the bar's stop.
  */
-function recorder(v: { rec?: number; stop?: number } | null) {
+function recorder(v: { on?: boolean; rec?: number; stop?: number; renders?: boolean } | null) {
+  try { setOverlay(!!(v?.on && v.renders)); } catch (e) { console.error("render overlay", e); } // the meter's "rs" (renderoverlay.ts)
   // A recording measures every frame of it, idle or not.
   recording = !!v?.rec;
   if (recording) wake();
@@ -83,12 +85,12 @@ function recorder(v: { rec?: number; stop?: number } | null) {
 }
 
 export function startSampler() {
-  powos.on("perf.meter", (v: { on?: boolean; rec?: number; stop?: number } | null) => { on = !!v?.on; if (on) wake(); else stop(); recorder(v); });
+  powos.on("perf.meter", (v: { on?: boolean; rec?: number; stop?: number; renders?: boolean } | null) => { on = !!v?.on; if (on) wake(); else stop(); recorder(v); });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) return wake();
     stop();
     if (on) publish({ gone: true }); // the bar measures its own frames while home is away
   });
   for (const t of WAKE) window.addEventListener(t, wake, { capture: true, passive: true });
-  powos.store.get<{ on?: boolean }>("perf.meter").then((v) => { on = !!v?.on; if (on) wake(); }, () => {});
+  powos.store.get<{ on?: boolean; renders?: boolean }>("perf.meter").then((v) => { on = !!v?.on; if (on) wake(); setOverlay(!!(on && v?.renders)); }, () => {});
 }

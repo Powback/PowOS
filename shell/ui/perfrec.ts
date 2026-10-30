@@ -20,6 +20,7 @@ import { sessions } from "../agents.ts";
 import { notifList } from "./notifications.tsx";
 import { board } from "./powai.tsx";
 import { loafEntry, type Loaf } from "./loaf.ts";
+import { renderReport, reset as resetScan, scanClock, startScan, stopScan } from "./renderscan.ts";
 
 const MAX_INPUTS = 4000, MAX_STATE = 2000, MAX_LOAF = 300, MAX_EVT = 300, MAX_REC_MS = 125_000, PART = 2500;
 const STORE_KEYS = ["dock", "home.wide", "controls.launchers", "controls.layout", "glasses"];
@@ -111,21 +112,30 @@ export function begin(recId: number) {
     try { po.observe({ type: "event", durationThreshold: 16, buffered: false } as PerformanceObserverInit); } catch { /* not supported */ }
     offs.push(() => po.disconnect());
   } catch { /* no PerformanceObserver */ }
+  startScan("rec"); resetScan(); // render scan (renderscan.ts): which components rendered, needless ones, per long frame
+  offs.push(() => stopScan("rec"));
   stopTimer = window.setTimeout(() => end(), MAX_REC_MS);
 }
 
 /** Stops and sends the detail to the bar: { recPart: i, of: n, rec: id, data } over perf.publish. */
 export function end() {
   if (!id) return;
-  clearTimeout(stopTimer); offs.forEach((o) => o()); offs = [];
+  clearTimeout(stopTimer);
+  const renders = rendersSection();
+  offs.forEach((o) => o()); offs = [];
   const rec = id; id = 0;
   let json: string;
   try {
-    json = JSON.stringify({ v: 1, durationMs: Math.round(performance.now() - t0), snapshot, inputs, state, loaf, evt,
+    json = JSON.stringify({ v: 1, durationMs: Math.round(performance.now() - t0), snapshot, inputs, state, loaf, evt, renders,
     capped: { inputs: inputs.length >= MAX_INPUTS, state: state.length >= MAX_STATE, loaf: loaf.length >= MAX_LOAF, evt: evt.length >= MAX_EVT } });
   } catch (e) { json = JSON.stringify({ v: 1, error: `home's detail could not be serialised: ${e}` }); } // still answer the bar
   inputs = []; state = []; loaf = []; evt = []; snapshot = {};
   send(rec, json);
+}
+
+/** The render scan's report, each long frame's renders on this recording's clock (the scan may have started earlier: the overlay). */
+function rendersSection() {
+  try { return renderReport(loaf, scanClock() - t0); } catch (e) { return { error: String(e) }; }
 }
 
 /** The detail to the bar in parts (each < the host's 8 KB per perf.publish). */

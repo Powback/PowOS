@@ -10,6 +10,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { m as main, mring, MRING, mainFresh, onSample, beginMain, endMain } from "./fpsmain.ts";
 import { loafEntry, type Loaf } from "./loaf.ts";
+import { rendersSummary } from "./renderscan.ts";
 import type { FrontPresents, NativePerf } from "../types.ts";
 
 // The first SETTLE_MS after the tap are the meter's own UI reacting (REC label, panel/graph opening): not recorded.
@@ -71,7 +72,7 @@ function nativeLine(n: ReturnType<typeof nativeSection>) {
     .map((b) => ({ start: b.start, ms: b.ms, msg: b.msg, bridge: b.bridge ?? null, lastCall: b.lastCall ?? null, lastCallAgoMs: b.lastCallAgoMs ?? null, stack: b.stack?.split(" < ").slice(0, 8).join(" < ") ?? null })) };
 }
 let po: PerformanceObserver | null = null;
-let ui: { root: HTMLElement; num: HTMLElement; cv: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null; label: HTMLElement } | null = null;
+let ui: { root: HTMLElement; num: HTMLElement; cv: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null; label: HTMLElement; rs: HTMLElement } | null = null;
 let timer = 0, stopTimer = 0, busy = false;
 
 function frame(t: number) {
@@ -201,11 +202,24 @@ function setEnabled(on: boolean) {
 document.addEventListener("visibilitychange", () => { if (enabled && !rec) { if (document.hidden) { stopLoop(); stopGame(); } else { start(); follow(); } } });
 
 async function readSetting() {
-  const v = await powos.store.get<{ on?: boolean }>(STORE).catch(() => null);
-  setEnabled(!!v?.on);
+  const v = await powos.store.get<{ on?: boolean; renders?: boolean }>(STORE).catch(() => null);
+  setEnabled(!!v?.on); showOverlay(v?.on && v.renders);
 }
 /** Turn the meter on/off (persisted). Other windows pick it up within a few seconds. */
 export function setMeter(on: boolean) { setEnabled(on); void powos.store.set(STORE, { on }).catch(() => {}); }
+
+// The render scan's live overlay on home (renderoverlay.ts): {renders} in "perf.meter", flipped by the meter's "rs".
+let overlay = false;
+function showOverlay(v: unknown) {
+  overlay = !!v;
+  ui?.rs.classList.toggle("on", overlay);
+  ui?.rs.setAttribute("aria-checked", String(overlay));
+}
+function toggleOverlay(e: Event) {
+  e.stopPropagation(); // not a record tap
+  showOverlay(!overlay);
+  void powos.store.set(STORE, rec ? { on: true, rec: recId, renders: overlay } : { on: true, renders: overlay }).catch(() => {});
+}
 
 function observe() {
   events = [];
@@ -245,7 +259,7 @@ function beginRecord() {
   observe(); rec = true;
   settleTimer = window.setTimeout(() => { if (rec) beginMain(); }, SETTLE_MS); // home's frames, from the same point
   recId = Date.now(); homeParts = []; homeGot = 0;
-  void powos.store.set(STORE, { on: true, rec: recId }).catch(() => {});
+  void powos.store.set(STORE, { on: true, rec: recId, renders: overlay }).catch(() => {});
   void powos.perf?.native?.(true).catch(() => null); // the host's main-thread blocks (MainStallWatch.kt), from now
   if (!raf) start();
   stopTimer = window.setTimeout(() => void toggleRecord(), MAX_REC_MS);
@@ -259,13 +273,20 @@ async function saveAndSend(full: object, sum: object) {
   try { await powos.ai.send(text, false); } catch (e) { console.error("perf send failed", e); }
 }
 
+/** Home's render scan (renderscan.ts) out of its detail: the trace's own "renders" section, not there twice. */
+function takeRenders(home: Record<string, unknown> | undefined) {
+  const r = home?.renders as Parameters<typeof rendersSummary>[0];
+  if (home) delete home.renders;
+  return r;
+}
+
 async function endRecord() {
   rec = false; busy = true; clearTimeout(stopTimer); clearTimeout(settleTimer); po?.disconnect(); po = null;
   const durMs = Math.max(0, performance.now() - settleAt), n = recN;
   const mode = new URLSearchParams(location.search).get("mode") ?? "?";
   const mn = endMain(), fromMain = mn.n > 1;
   const native = await stopNative(settleAt);
-  void powos.store.set(STORE, { on: true, stop: recId }).catch(() => {}); // home stops and sends its detail (or why not)
+  void powos.store.set(STORE, { on: true, stop: recId, renders: overlay }).catch(() => {}); // home stops and sends its detail (or why not)
   await new Promise<void>((r) => { homeDone = r; setTimeout(r, homeGot && homeGot === homeParts.length ? 0 : 3000); });
   homeDone = null;
   let home: ({ loaf?: Loaf[]; inputs?: unknown[]; state?: unknown[]; missed?: string; error?: string } & Record<string, unknown>) | undefined;
@@ -273,9 +294,10 @@ async function endRecord() {
   homeParts = []; homeGot = 0;
   const sum = fromMain ? summarise({ ...mn, evs: events, durMs, mode: `main shell (home), ${mode} bar recorded` })
     : summarise({ t: recT, dt: recDt, n, evs: events, durMs, mode: `${mode} window only, main shell not reporting (${powos.host})` });
-  Object.assign(sum, { settle: SETTLE_MS, home: homeLine(home), native: nativeLine(native) });
+  const renders = takeRenders(home);
+  Object.assign(sum, { settle: SETTLE_MS, home: homeLine(home), native: nativeLine(native), renders: rendersSummary(renders) });
   const full = { summary: sum, main: fromMain ? { frameDeltas: Array.from(mn.dt, (x) => Math.round(x * 10) / 10) } : undefined, when: new Date().toISOString(), ua: navigator.userAgent, dpr: devicePixelRatio,
-    frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events, home, native };
+    frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events, home, native, renders };
   recT = new Float32Array(0); recDt = new Float32Array(0);
   await saveAndSend(full, sum);
   busy = false;
@@ -288,16 +310,16 @@ async function toggleRecord() {
 }
 
 export function FpsMeter() {
-  const root = useRef<HTMLButtonElement>(null), num = useRef<HTMLSpanElement>(null), cv = useRef<HTMLCanvasElement>(null), label = useRef<HTMLSpanElement>(null);
+  const root = useRef<HTMLButtonElement>(null), num = useRef<HTMLSpanElement>(null), cv = useRef<HTMLCanvasElement>(null), label = useRef<HTMLSpanElement>(null), rs = useRef<HTMLSpanElement>(null);
   useEffect(() => {
-    ui = { root: root.current!, num: num.current!, cv: cv.current!, ctx: cv.current!.getContext("2d"), label: label.current! };
+    ui = { root: root.current!, num: num.current!, cv: cv.current!, ctx: cv.current!.getContext("2d"), label: label.current!, rs: rs.current! };
     readGraphColors();
     const themeChanges = new MutationObserver(readGraphColors);
     themeChanges.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
     ui.root.hidden = !enabled;
     void readSetting();
     const poll = window.setInterval(() => { if (!rec) void readSetting(); }, 30000); // backstop; the host pushes changes
-    const offs = [powos.on("perf.meter", (v: { on?: boolean } | null) => setEnabled(!!v?.on)), powos.on("perf.sample", (s: ({ recPart?: number } & Parameters<typeof onSample>[0]) | null) => s && "recPart" in s ? onPart(s) : (onSample(s), follow()))];
+    const offs = [powos.on("perf.meter", (v: { on?: boolean; renders?: boolean } | null) => { setEnabled(!!v?.on); showOverlay(v?.on && v.renders); }), powos.on("perf.sample", (s: ({ recPart?: number } & Parameters<typeof onSample>[0]) | null) => s && "recPart" in s ? onPart(s) : (onSample(s), follow()))];
     return () => { themeChanges.disconnect(); clearInterval(poll); offs.forEach((o) => o()); ui = null; };
   }, []);
   // Rendered always (hidden while off) so the node and canvas are stable; the bar never re-renders it per frame.
@@ -306,5 +328,6 @@ export function FpsMeter() {
     <canvas ref={cv} width={90} height={16} aria-hidden="true" />
     <span class="fps-num" ref={num}>{"   "}</span><span class="fps-unit">fps</span>
     <span class="fps-rec" ref={label} />
+    <span class="fps-rs" ref={rs} role="switch" aria-label="render scan overlay on home" onClick={toggleOverlay}>rs</span>
   </button>;
 }

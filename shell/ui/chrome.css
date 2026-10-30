@@ -41,5 +41,7 @@ html:root .chrome-surface { --frost-fill: color-mix(in srgb, var(--frost-base) 8
 .fps-meter .fps-num { width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
 .fps-meter .fps-unit { font-size: 9px; opacity: .7; }
 .fps-meter .fps-rec { width: 6ch; font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fps-meter .fps-rs { font-size: 9px; opacity: .45; padding: 0 2px; }
+.fps-meter .fps-rs.on { opacity: 1; color: var(--color-accent); font-weight: 600; }
 .fps-meter.rec .fps-rec { color: var(--color-red); font-weight: 600; }
 .fps-meter.rec { box-shadow: inset 0 0 0 1.5px var(--color-red); border-radius: 10px; }
