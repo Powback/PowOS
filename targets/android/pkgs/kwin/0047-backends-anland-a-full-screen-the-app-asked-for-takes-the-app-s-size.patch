@@ -1,0 +1,86 @@
+From ddcedd68f7330d130980e394efc5a787937e9b5c Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Fri, 30 Oct 2026 22:40:37 +0100
+Subject: [PATCH] backends/anland: a full screen the app asked for takes the
+ app's size, never KWin's output
+
+
+Dolphin's full-screen button on the unfolded phone (2026-10-30 22:19): the window was laid out at 496x1048 logical
+(1116x2358 px) and pillarboxed in the 2268x2440 screen. KWin's own full screen (setFullScreen: FullScreenArea) is its
+OUTPUT's size, and the output follows the desktop consumer - the folded cover's 1116x2358 last ("resizing output to
+QSize(1116, 2358)") while home on the inner screen shows the windows. An xdg toplevel is full screen only once it acks,
+so the web window's "size" (sent with the request) arrived first and became the "floating" size of 0040's
+fullScreenTaskSize, which then fell back to the output: "full screen follows its task: QSizeF(1008, 1084) ->
+QSizeF(496, 1048) for QSize(1116, 2358)".
+
+A full screen the app asked for ("fullscreen <id> 1") now always takes the task's size the app gives ("size"); the
+output's is used only for a window that goes full screen by itself in a floating task (a game, 0040).
+---
+ src/backends/anland/anland_window_task.cpp | 11 +++++++++++
+ src/backends/anland/anland_window_task.h   |  7 +++++++
+ 2 files changed, 18 insertions(+)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 7fa8185..3df725b 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -829,6 +829,9 @@ bool AnlandWindowTask::setAppFullScreen(bool on)
+         return false;
+     }
+     m_appFullScreen = on;
++    if (!on) {
++        m_fullScreenAsked = false; // left full screen (asked or by itself): the next one is asked afresh
++    }
+     // The floating task's size now: until the app reports the full-screen task's own (fullScreenTaskSize), the
+     // window takes the screen's at once instead of this one.
+     m_floatingTaskSize = on ? taskSize() : QSize();
+@@ -898,6 +901,13 @@ QSize AnlandWindowTask::fullScreenTaskSize() const
+     // (the container: folded or unfolded, as the output is now) at once; the task's own size wins once it differs
+     // from the floating one. Drawn scaled into the old buffers for that moment (scale()/viewport(): fitsWindow).
+     const QSize task = taskSize();
++    // PowOS (kwin 0047): a full screen the app asked for is the app's size, not the output's. The output is the desktop
++    // consumer's - the folded cover's 1116x2358 still while the inner screen shows home - and a web window's size came
++    // before KWin's full screen took effect (an xdg toplevel is full screen only once it acks), so it equalled the
++    // "floating" one and Dolphin was laid out at the cover's size, pillarboxed on the 2268x2440 screen (10-30 22:19).
++    if (m_fullScreenAsked) {
++        return task;
++    }
+     if (!m_appFullScreen || m_floatingTaskSize.isEmpty() || task != m_floatingTaskSize || !m_window) {
+         return task;
+     }
+@@ -1303,6 +1313,7 @@ void AnlandWindowTasks::handleLine(const QString &line)
+         // its own F11 would - it lays out at the task's size with no decoration. KWin's fullScreenChanged then says
+         // "fullscreen <id> 1|0" back (onFullScreenChanged), the same as when the window does it by itself.
+         const bool on = f[2] == QLatin1String("1");
++        task->setFullScreenAsked(on);
+         Window *window = task->window();
+         if (window && !window->isDeleted() && (!on || window->isFullScreenable()) && window->isFullScreen() != on) {
+             qCInfo(KWIN_ANLAND) << "window task" << id << ": full screen" << on << "asked by the app";
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index b26958e..07722df 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -109,6 +109,10 @@ public:
+      * window of home). While it does, the keyboard's show/hide for this window goes to this task's connection
+      * ([setKeyboard]) and its committed text arrives on it; without, both stay the desktop's (surface 0), as before.
+      */
++    void setFullScreenAsked(bool on)
++    {
++        m_fullScreenAsked = on;
++    }
+     void setOwnKeyboard(bool on)
+     {
+         m_ownKeyboard = on;
+@@ -180,6 +184,9 @@ private:
+     const uint32_t m_id;
+     const bool m_fullScreen;
+     bool m_appFullScreen = false;
++    // PowOS (kwin 0047): the app asked this window full screen ("fullscreen", a web window's button). The app sizes the
++    // task then ("size" after KWin's answer): never KWin's output, which is the desktop consumer's.
++    bool m_fullScreenAsked = false;
+     bool m_givingBack = false; // giveBack restoring the window's own maximize: not a request of its own
+     int m_decorTold = -1; // the last "decor" told: 1 KWin's title bar, 0 the window's own, -1 not yet
+     bool m_noBorderHeld = false; // "nodecor": KWin's border taken off while a task (holdNoBorder)
+-- 
+2.50.1 (Apple Git-155)
+
