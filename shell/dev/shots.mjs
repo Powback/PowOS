@@ -24,6 +24,17 @@ const SCALE = Number(process.env.SHOTS_SCALE || 1);
 const ONLY = process.env.SHOTS_ONLY ? new RegExp(process.env.SHOTS_ONLY) : null;
 /** A shot had overlapping tiles or missing glyphs (SHOTS_STRICT=1 fails the run on it). */
 let strictFailed = false;
+/** Launcher scenes whose dock wasn't drawn (launcherDockWrong): fails the run, SHOTS_STRICT or not. */
+const dockFailed = [];
+/** A pull-dock-* scene (dev/dock-check.js launcherDockOpens, its failures in window.__dockWrong): a miss fails the run. */
+async function checkLauncherDock(page, name, sizeName, errors) {
+  if (!/^pull-dock-/.test(name)) return;
+  const wrong = await page.evaluate(() => window.__dockWrong ?? ["scene never checked"]).catch((e) => [`probe: ${e.message}`]);
+  for (const w of wrong) {
+    errors.push(`launcher dock: ${w}`);
+    dockFailed.push(`${name}-${sizeName}: ${w}`);
+  }
+}
 
 /** The phone's screens (OnePlus Open, density 442: 2.7625 px a CSS px) and its insets there. */
 const SIZES = {
@@ -357,6 +368,22 @@ const SCENES = [
   ["pull-kbd-chat", "pull", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true }); await sleep(300); S.chatting.value = true; await sleep(500);`, "blurred"],
   ["pull-apps-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
   ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
+  // The launcher opened for apps after PowOS AI's pull (dev/dock-check.js launcherDockOpens): the dock mounts as the drag
+  // starts, after the drag's followers were taken (gesture.ts follow) - it stayed at --p 0, invisible (the user,
+  // 2026-10-30: "the dock is still hiding in the launcher in unfolded mode"). Right and bottom, with and without the
+  // keyboard; folded the same (with the keyboard it gives way there: checked unfolded only).
+  ["pull-dock-right", "pull", "window.__dockWrong = await (await U('./dev/dock-check.js')).launcherDockOpens('right', false);", "blurred"],
+  ["pull-dock-bottom", "pull", "window.__dockWrong = await (await U('./dev/dock-check.js')).launcherDockOpens('bottom', false);", "blurred"],
+  ["pull-dock-right-kbd", "pull", "const F = await (await U('./dev/dock-check.js')).launcherDockOpens('right', true); window.__dockWrong = innerWidth > 700 ? F : []; S.query.value = 'ch'; await sleep(500);", "blurred"],
+  ["pull-dock-bottom-kbd", "pull", "const F = await (await U('./dev/dock-check.js')).launcherDockOpens('bottom', true); window.__dockWrong = innerWidth > 700 ? F : []; S.query.value = 'ch'; await sleep(500);", "blurred"],
+  ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
+  // The launcher opened for apps after PowOS AI's pull (the side button): the dock mounts as the drag starts, after the
+  // drag's followers were taken (gesture.ts follow) - it stayed at --p 0, invisible (the user, 2026-10-30: "the dock is
+  // still hiding in the launcher in unfolded mode"). Right and bottom, with and without the keyboard; folded the same.
+  ["pull-dock-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(400); E.emit('pull.end', { open: false }); await sleep(500); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
+  ["pull-dock-bottom", "pull", "S.dockPlacement.value = 'bottom'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(400); E.emit('pull.end', { open: false }); await sleep(500); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
+  ["pull-dock-right-kbd", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(400); E.emit('pull.end', { open: false }); await sleep(500); E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true }); await sleep(300); S.query.value = 'ch'; await sleep(500);", "blurred"],
+  ["pull-dock-bottom-kbd", "pull", "S.dockPlacement.value = 'bottom'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(400); E.emit('pull.end', { open: false }); await sleep(500); E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true }); await sleep(300); S.query.value = 'ch'; await sleep(500);", "blurred"],
   ["pull-apps-land", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred", undefined, LAND_SIZES],
   ["pull-apps-right-land", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred", undefined, LAND_SIZES],
   // A search for "app" (the user, 2026-10-30): the apps grid, then the settings and app actions as a list grouped
@@ -711,8 +738,9 @@ try {
   await browser.close();
   if (treesWrong) console.error(`shots: ${treesWrong} shot(s) drew mock OWL trees of another theme than ${THEME_NAME}`);
   const strict = strictFailed && process.env.SHOTS_STRICT === "1";
+  for (const f of dockFailed) console.error(`shots: FAIL - launcher dock not shown: ${f}`);
   if (strict) console.error("shots: FAIL - overlapping tiles, partial joins, uneven desktop gutters or missing glyphs (report.json)");
-  process.exit(treesWrong || strict ? 1 : 0);
+  process.exit(treesWrong || strict || dockFailed.length ? 1 : 0);
 }
 
 async function shoot(name, mode, setup, behind, sizeName, size, touch) {
@@ -813,6 +841,8 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
       for (const o of layout.overlaps) errors.push(`overlap: ${o}`);
       for (const g of layout.glyphs) errors.push(`missing glyphs: ${g}`);
       if (layout.overlaps.length || layout.glyphs.length) strictFailed = true;
+      // The launcher's dock (LD1, the user 2026-10-30: "the dock is still hiding in the launcher in unfolded mode").
+      await checkLauncherDock(page, name, sizeName, errors);
       const out = path.join(OUT, `${name}-${sizeName}.png`);
       await page.screenshot({ path: out });
       // Contrast: the same frame without its text, under each run of text.

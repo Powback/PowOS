@@ -163,15 +163,17 @@ function settleAt(f: number) {
   return (lo + hi) / 2;
 }
 
+function followerOf(el: HTMLElement): Follower {
+  const table = tableOf(el);
+  const anim = el.animate(table, { duration: SPAN, fill: "both", easing: "linear", id: "drawer" });
+  anim.pause();
+  return { el, table, anim };
+}
+
 function follow(p: number) {
   if (!followers) {
     for (const el of document.querySelectorAll<HTMLElement>("[data-p]")) el.getAnimations().forEach((a) => a.id === "drawer" && a.cancel());
-    followers = [...document.querySelectorAll<HTMLElement>("[data-p]")].map((el) => {
-      const table = tableOf(el);
-      const anim = el.animate(table, { duration: SPAN, fill: "both", easing: "linear", id: "drawer" });
-      anim.pause();
-      return { el, table, anim };
-    });
+    followers = [...document.querySelectorAll<HTMLElement>("[data-p]")].map(followerOf);
   }
   for (const f of followers) f.anim.currentTime = p * SPAN;
 }
@@ -266,7 +268,16 @@ export function applyTrack() {
 export function followOpenness(el: HTMLElement | null) {
   // peek: a ref callback runs inside its component's render tracking - a read here subscribed Home (and all under it:
   // the pages, their glass, every app cell, the pet) to drawerDrag, a re-render on every move of a drag.
-  el?.style.setProperty("--p", String(drawerDrag.peek() ?? (drawer.peek() > 0 ? 1 : 0)));
+  const drag = drawerDrag.peek();
+  el?.style.setProperty("--p", String(drag ?? (drawer.peek() > 0 ? 1 : 0)));
+  // Mounted while a finger drives the drawer (or before its settle): one of the followers too, or it stays at the --p
+  // it mounted with - the launcher's dock, mounted by the render after pull.begin (pull.tsx: kind "apps" after PowOS
+  // AI's pull, dockShown), sat at --p 0, invisible, the launcher open over it (the user, 2026-10-30: "the dock is still
+  // hiding in the launcher in unfolded mode").
+  if (!el || !followers || followers.some((f) => f.el === el)) return;
+  const f = followerOf(el);
+  f.anim.currentTime = (drag ?? Number(followers[0]?.anim.currentTime ?? 0) / SPAN) * SPAN;
+  followers.push(f);
 }
 
 /** The same for the notification panel's (--q). */
