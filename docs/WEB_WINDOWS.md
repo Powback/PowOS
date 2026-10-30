@@ -447,3 +447,85 @@ whole page", and the widgets painted over Chrome's body.
   reports every web window as a claim-free region to the host's pulls. Gate check: `desktops` scene →
   `webWindowCheck` drags the title bar and swipes the body sideways, asserts the page didn't turn, and asserts that a
   control swipe at the same spot without a window does turn it. Before the fix it failed with "turned the page (0 -> 1)".
+
+---
+
+## Native frame and move (2026-10-30, branch ww-native-drag)
+
+The user, 2026-10-30: "the web windows work but its like its content is lagging behind slightly even when I move
+windows, compared to the native android floating windows"; then "nobody asked for the cutoff" and windows "f*** up the
+transparency of the widgets". This section **supersedes** the page mask (§S1-S3 "Z-order (Z1 kept)"), the glass holes
+for bodies, the DOM title bar, and §2's "Z2, drag and resize" bullet.
+
+### Measured lag before
+
+Not measured on the phone: the user was active the whole session (idle.sh `idle=1-2`) and no web window was open, so
+neither a read-only trace of their drag nor an injected one was possible. What the code shows instead (the old path):
+finger → Chromium → pointermove → DOM → rAF `w.f <id>` → port thread → main → `postVisualStateCallback(id)` →
+`applyTransactionOnDraw`. A VisualStateCallback fires once the WebView's next draw holds the page state **as of the
+call** (on the main thread, after two thread hops), not as of frame `<id>`. While the finger moves, the page has usually
+painted frame `<id>+1` by then, so the geometry for frame `<id>` rides a draw showing a newer DOM: the content trails the
+DOM bar by >= 1 frame on every move frame, 2 when the callback misses a vsync. The old `logFrame` now prints that
+directly: `w.f f<id> behind=<K> (<n>/<m> applies behind)`, K = page frames already newer when `<id>` was bound. It still
+applies to the page-driven path (page swipes); a page swipe while a window shows gives the old drag's lag figure.
+
+### Design
+
+- **Windows above home.** `powos-webwindows` is a child of home's surface at layer **+1** (was -1). A window is a card
+  on home: nothing of home is masked, cut or blurred differently under it (`pageMask`, `GlassBlur.holes` for bodies
+  and the `bodies()` wiring are deleted). Every other window (launcher overlay, shade, PowOS AI, status bar, IME) is
+  a separate window above home's whole layer tree, so above the web windows too. The surface-changed reattach
+  (`reattach`/`watchSurface`) only re-parents the root; the layer comes with it.
+- **The frame is native** (`WebWindowChrome.kt`), in each window's container: a background buffer (layer -1, 8x8
+  scaled over the body: shown where the app hasn't drawn yet during a resize), the mirror (0) under the bar, and the
+  bar (1: app icon and label from PackageManager, minimise, full screen/restore, close; ui/chrome.tsx's Mark glyphs,
+  colours from the page's `--color-surface` / `--color-foreground` via `w.theme`). The container is cropped to the
+  frame, rounded, scaled (`setScale`) and cut at the **work area** bottom (`w.area`: the screen above `.home > .dock`
+  and `.home > .bar`), so windows never cover the dock and bar.
+- **The page keeps the model.** `ui/webwindows.tsx` keeps page, x/y/w/h, scale, minimised, restore rect, z order; it
+  renders each window as an **invisible** element (no paint) at its place for gesture exclusions and the body's touches
+  (v0 forwarding, divided by the scale). `w.f` entries gained `<scale> <maximised>`. With no native port (the browser
+  gate) the invisible bar still moves the model, so `webWindowCheck` runs as before.
+- **Why this is same-frame:** bar and content are children of one container; a move is that container's
+  `setPosition` in one transaction. They cannot be a frame apart, whatever the WebView does. The DOM never has to keep
+  up during a gesture, because nothing of the window is DOM. Rejected: native move + DOM bar following from the
+  native position (the DOM is >= 1 frame behind any native position, the lag just flips sides); native move with a
+  pixel copy of the DOM bar during the drag and a hand-back at the end (built first, dropped with the mask: two swaps
+  per drag and the window had to jump layers mid-gesture).
+
+### Touches (`WebWindows.onTouch`, from `HomeWebView.touchHook`)
+
+Every touch reaches the hook before the WebView. A DOWN on a shown window's bar, button or edge is the host's whole
+gesture (the page never sees it; a gesture the page already saw gets one CANCEL). Hit test = topmost window by z whose
+frame grown by 20 dp contains the point, below the work area's bottom; a body hit is the page's (the app's).
+
+| where | one finger | two fingers |
+|---|---|---|
+| bar | move; past the touch slop; one `setPosition` per batched MOVE (one per vsync, as WMShell's DragPositioningCallback), applied at once | move by the **centroid** + zoom by the spread, 0.4-1.0x, about the point under the fingers; a finger coming or going rebases (no jump: the old "jumps between the finger positions") |
+| edges / corners (20 dp outside, 12 dp inside; the top edge is above the bar) | resize: the frame, crop and bar follow every frame; the app's last frame stays anchored top-left on the background; `VirtualDisplay.resize` once at the end (the page takes the size → `w.f` → `place` → helper) | as one finger (centroid) |
+| buttons | minimise (layer hidden at once; the page drops it from `w.f`; its dock icon shows "minimised" and a tap restores it via `launch` → `openWebWindow`), full screen/restore, close | — |
+| bar double tap | full screen / restore | — |
+| body | the app's (forwarded by the page, v0) - an app's own pinch stays the app's | the app's |
+
+Full screen fills the work area (above the dock: the dock stays usable, chosen over hiding it) and remembers the frame
+to restore; moving or resizing a maximised window makes it a free window at its size. Moves keep 64 dp of the window on
+screen sideways and the bar inside the work area vertically. Up: `webwindows.moved {id, dx, dy, dw, dh, scale}` (CSS
+px); the layer is **held** where the gesture left it until a `w.f` carries that place (2 px) or 1 s passes, so a page
+frame from before the up can't snap it back. `webwindows.raise` on every frame press; the layer is raised at once.
+
+### Phone check (lag after)
+
+`tools/phone/verify/ww-drag-lag.sh` (read-only) or `--drag` (waits for 2 min idle, injects one bar swipe):
+- structure: `powos-ww-<id>-bar` and the mirror are children of `powos-ww-<id>`, under `powos-webwindows` above
+  home's buffer → 0 frames between bar and content by construction;
+- cadence: `native move wN: M layer moves in T ms` → moves per frame ~ 1.0 (every input frame);
+- old path for comparison: `behind=K` on page swipes.
+Renders to check by eye: Chrome over two widgets (the widgets identical to no window: glass, blur, pixels around the
+window), the window opaque with content, the dock and bar never covered, launcher/shade/PowOS AI over windows.
+
+### Not yet
+
+- Measured numbers on the phone (above). Body input is still v0 (page forwarding, S4).
+- During a resize the bar is redrawn by a canvas post, which can land a frame after the crop (buttons only; the bar's
+  background is the same colour).
+- Corners of the crop at the work area's bottom are rounded like the frame's.
