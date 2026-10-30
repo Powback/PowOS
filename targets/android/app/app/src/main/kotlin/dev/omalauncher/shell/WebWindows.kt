@@ -428,14 +428,52 @@ class WebWindows(
         root?.takeIf { it.isValid }?.let { return it }
         val attached = web.rootSurfaceControl ?: return null.also { Log.w(TAG, "home's window has no surface yet") }
         val sc = SurfaceControl.Builder().setName("powos-webwindows").build()
-        val t = attached.buildReparentTransaction(sc) ?: return null.also { sc.release(); Log.w(TAG, "home's surface refused a child") }
-        // BELOW home's own buffer (as a SurfaceView): the window is an element of the page - the page is transparent over
-        // its body, and every DOM element above it in the page (menus, popovers, bars, the dock) paints over it.
-        t.setLayer(sc, -1).setVisibility(sc, !underSwitcher).apply()
+        val t = underHome(sc, "made") ?: return null.also { sc.release(); Log.w(TAG, "home's surface refused a child") }
+        t.setVisibility(sc, !underSwitcher).apply()
         root = sc
         watchSurface()
         return sc
     }
+
+    /**
+     * [r] re-parented BELOW home's own buffer, at -1: a direct child of home's window surface - the layer that holds the
+     * buffer - so SurfaceFlinger draws it before that buffer. The window is an element of the page: the page is
+     * transparent over its body, and every DOM element above it (another window's bar, the tile menu, popovers, the
+     * dock) paints over it. Not the public `buildReparentTransaction`: that hangs it under the window's BOUNDS layer, a
+     * z=0 child of the buffer layer, so a -1 there is still ABOVE the buffer - every app's pixels covered every DOM
+     * element over its body (Z3, 10-30: SurfaceFlinger's composition list Wallpaper, HomeShell, Discord; Calculator's
+     * keypad over Discord's bar, the tile menu opened under its own window's app).
+     *
+     * HACK: ViewRootImpl.getSurfaceControl is hidden (WindowBlur and GlassBlur reflect it too); without it, the public
+     * bounds-layer parent is kept (and logged): windows then cover the page's DOM over them. Real fix: none public for
+     * a child under a window's own buffer (SurfaceView uses the same hidden surface).
+     */
+    private fun underHome(
+        r: SurfaceControl,
+        why: String,
+    ): SurfaceControl.Transaction? {
+        val home = homeSurface()
+        if (home != null) {
+            if (rootParent != "home's buffer") Log.i(TAG, "windows' root under home's buffer ($why)")
+            rootParent = "home's buffer"
+            return SurfaceControl.Transaction().reparent(r, home).setLayer(r, -1)
+        }
+        val t = web.rootSurfaceControl?.buildReparentTransaction(r) ?: return null
+        if (rootParent != "bounds") Log.w(TAG, "windows' root on home's bounds layer ($why): no window surface by reflection - apps cover the DOM over them")
+        rootParent = "bounds"
+        return t.setLayer(r, -1)
+    }
+
+    /** Where [root] hangs, for the log: "home's buffer" or "bounds". */
+    private var rootParent = ""
+
+    /** Home's window surface (ViewRootImpl.getSurfaceControl: the layer that holds its buffer), valid, or null. */
+    private fun homeSurface(): SurfaceControl? =
+        runCatching {
+            HiddenApi.allow()
+            val vri = web.rootSurfaceControl ?: return null
+            vri.javaClass.getMethod("getSurfaceControl").invoke(vri) as SurfaceControl?
+        }.onFailure { if (rootParent != "bounds") Log.w(TAG, "home's window surface unreadable", it) }.getOrNull()?.takeIf { it.isValid }
 
     /** The switcher is up: every window's layer hidden under it (main thread). */
     private var underSwitcher = false
@@ -756,6 +794,11 @@ class WebWindows(
 
     @Volatile private var lastDpr = 1f
 
+    /** Sums of the page's share (rAF frame time to its send) and the hop (send to receipt), ms, over [rxSplit] frames. */
+    @Volatile private var rxPage = 0.0
+    @Volatile private var rxHop = 0.0
+    @Volatile private var rxSplit = 0
+
     /** How the last "w.f" came: "direct" (ShellNative's geometry interface, a binder thread) or "port" (main first). */
     @Volatile private var via = "port"
 
@@ -768,7 +811,14 @@ class WebWindows(
             // The WebView's place in its window (none for home: full screen): geometry is in the window surface's space.
             val c = Cursor(t, 3, dpr, IntArray(2).also(web::getLocationInWindow))
             val geos = List(t[2].toInt()) { z -> entry(c, z) }
-            Triple(t[0].toLong(), geos, t.getOrNull(c.i)?.toDoubleOrNull() ?: Double.NaN)
+            val page = t.getOrNull(c.i)?.toDoubleOrNull() ?: Double.NaN
+            // The page's send time (its second stamp, wall-clock ms): "rx=" split into the page's share and the hop.
+            t.getOrNull(c.i + 1)?.toDoubleOrNull()?.takeIf { !page.isNaN() }?.let { sent ->
+                rxPage += sent - page
+                rxHop += System.currentTimeMillis() - sent
+                rxSplit++
+            }
+            Triple(t[0].toLong(), geos, page)
         } catch (e: RuntimeException) {
             Log.w(TAG, "w.f: bad geometry ($e)")
             null
@@ -846,6 +896,8 @@ class WebWindows(
     private var checkedOrder: List<Int> = emptyList()
     private var lastOrderCheck = 0L
     @Volatile private var orderCheckBroken = false
+    @Volatile private var orderCheckOk = false
+    @Volatile private var orderCheckViaRoot = false
 
     /**
      * After [apply]: when the shown windows' page order changed (a raise, an open), or [ORDER_RECHECK_MS] after the last
@@ -856,7 +908,7 @@ class WebWindows(
         if (orderCheckBroken) return
         val order = geos.filter { g -> g.visible && wins[g.id]?.let { it.shown && !it.linuxFull && it.mirror != null } == true }.sortedBy { it.z }.map { it.id }
         val now = SystemClock.uptimeMillis()
-        if (order.size < 2) {
+        if (order.isEmpty()) {
             checkedOrder = order
             return
         }
@@ -875,15 +927,7 @@ class WebWindows(
         order: List<Int>,
         names: Map<Int, String>,
     ) {
-        val dump =
-            runCatching {
-                val p = ProcessBuilder("dumpsys", "SurfaceFlinger").redirectErrorStream(true).start()
-                p.inputStream.bufferedReader().use { it.readText() }.also { p.waitFor() }
-            }.getOrElse {
-                orderCheckBroken = true
-                Log.w(TAG, "layer order check: no SurfaceFlinger dump ($it); off")
-                return
-            }
+        val dump = surfaceFlingerDump() ?: return
         val layers = outputLayers(dump)
         if (layers == null) {
             if (!dump.contains("Output Layer")) {
@@ -893,14 +937,46 @@ class WebWindows(
             return
         }
         val at = order.associateWith { id -> names[id]?.takeIf { it.isNotEmpty() }?.let { n -> layers.indexOfFirst { it.contains(n) } } ?: -1 }
-        val divergence = orderDivergence(order, at) ?: return
         val home = layers.indexOfFirst { it.contains("HomeShell") }
+        val divergence = orderDivergence(order, at) ?: overHome(at, home)
+        if (divergence == null) {
+            if (!orderCheckOk) Log.i(TAG, "layer order check: ok - page (bottom first) ${order.joinToString()} at output layers ${order.map { at[it] }}, home's buffer at $home (logged once)")
+            orderCheckOk = true
+            return
+        }
         Log.w(
             TAG,
             "layer order != page order: $divergence; page (bottom first) ${order.joinToString { "$it(${names[it]})" }}, " +
                 "SurfaceFlinger's output: ${layers.withIndex().joinToString { (i, n) -> "$i ${n.take(60)}" }} (home's buffer at $home)",
         )
     }
+
+    /** Z3: every window's content under home's buffer ([home]: its output layer), or the DOM over it is covered; null: so. */
+    private fun overHome(
+        at: Map<Int, Int>,
+        home: Int,
+    ): String? {
+        val over = at.filterValues { it > home && home >= 0 }.keys
+        return if (over.isEmpty()) null else "window(s) ${over.joinToString()} drawn OVER home's buffer (layer $home): the page's DOM over them is covered"
+    }
+
+    /**
+     * On [io]: SurfaceFlinger's dump, or null (the check then off, logged). The app's uid gets "Permission Denial: can't
+     * dump SurfaceFlinger" (10-30, why the check never said anything): root's dump then, logged once.
+     */
+    private fun surfaceFlingerDump(): String? =
+        runCatching {
+            val p = ProcessBuilder("dumpsys", "SurfaceFlinger").redirectErrorStream(true).start()
+            val own = p.inputStream.bufferedReader().use { it.readText() }.also { p.waitFor() }
+            if (!own.startsWith("Permission Denial")) return@runCatching own
+            if (!orderCheckViaRoot) Log.i(TAG, "layer order check: SurfaceFlinger refuses the app's uid, read as root")
+            orderCheckViaRoot = true
+            andro.marchy.RootShell.run("dumpsys SurfaceFlinger", null, ROOT_DUMP_MS).output
+        }.getOrElse {
+            orderCheckBroken = true
+            Log.w(TAG, "layer order check: no SurfaceFlinger dump ($it); off")
+            null
+        }
 
     private fun placeAll(
         t: SurfaceControl.Transaction,
@@ -973,7 +1049,7 @@ class WebWindows(
         val now = SystemClock.uptimeMillis()
         if (now - lastPlaceLog < PLACE_LOG_MS || geos.isEmpty()) return
         lastPlaceLog = now
-        Log.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} pf=${sync.pageLag.joinToString("/")} rx=${"%.1f".format(sync.receiptMs / sync.pageLag.sum().coerceAtLeast(1))}ms via=$via " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
+        Log.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} pf=${sync.pageLag.joinToString("/")} rx=${"%.1f".format(sync.receiptMs / sync.pageLag.sum().coerceAtLeast(1))}ms (page ${"%.1f".format(rxPage / rxSplit.coerceAtLeast(1))} + hop ${"%.1f".format(rxHop / rxSplit.coerceAtLeast(1))}) via=$via " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
     }
 
     private var lastPlaceLog = 0L
@@ -1288,10 +1364,12 @@ class WebWindows(
         why: String,
     ) {
         val r = root?.takeIf { it.isValid } ?: return
-        val re = web.rootSurfaceControl?.buildReparentTransaction(r) ?: run { Log.w(TAG, "home's surface $why: no surface to re-attach to"); return }
+        val re = underHome(r, "home's surface $why") ?: run { Log.w(TAG, "home's surface $why: no surface to re-attach to"); return }
         if (t != null) t.merge(re) else re.apply()
         Log.i(TAG, "home's surface $why: windows' root re-attached (${wins.size} window(s): ${wins.values.joinToString { "${it.id}@d${it.displayId}" }})")
         for (w in wins.values) if (w.displayId >= 0 && w.mirror?.isValid == false) io.post { remirror(w) }
+        // Every window's whole layer state again, from the page's next frame (not only when its geometry next changes).
+        resend("home's surface $why")
     }
 
     /** On [io]: [w]'s display mirrored again into its container (its mirror lost), the app left running as it is. */
@@ -1306,6 +1384,7 @@ class WebWindows(
             w.geo?.let { place(t, w, it) }
             t.apply()
             Log.i(TAG, "window ${w.id}: display ${w.displayId} mirrored again")
+            resend("window ${w.id} mirrored again")
         }
     }
 
@@ -1766,6 +1845,18 @@ class WebWindows(
         if (win.closed) return@post
         win.full = full
         emit("webwindows.full", mapOf("id" to win.id, "on" to full, "task" to win.taskId))
+        if (!full) resend("window ${win.id} back from full screen")
+    }
+
+    /**
+     * The page sends every window's geometry again on its next frame ("webwindows.resend"), changed or not, so the
+     * whole layer state - parent, z, crop, position, visibility - is committed after a transition the page's geometry
+     * string may not see: back from full screen, a mirror made again, home's surface re-attached. Before (10-30 22:59):
+     * a Discord window back from full screen showed a bare hole until the user dragged it (its next changed geometry).
+     */
+    private fun resend(why: String) {
+        Log.i(TAG, "geometry resend asked: $why")
+        emit("webwindows.resend", 0)
     }
 
     /**
@@ -1796,6 +1887,7 @@ class WebWindows(
         Log.i(TAG, "window ${win.id}: KWin window ${src.kwin} ${if (on) "full screen" else "back in its window"}")
         win.full = on
         emit("webwindows.full", mapOf("id" to win.id, "on" to on))
+        if (!on) resend("window ${win.id} back from full screen")
         publishBars()
     }
 
@@ -2381,6 +2473,9 @@ class WebWindows(
 
         /** The order check ([orderCheckSoon]) waits this long after the apply, for SurfaceFlinger to compose it. */
         private const val ORDER_CHECK_DELAY_MS = 300L
+
+        /** The order check's root dump gives up after this long (it shares the root shell with input's fallback). */
+        private const val ROOT_DUMP_MS = 3_000L
 
         /** ... and runs again at most this often while the order is unchanged and two or more windows are shown. */
         private const val ORDER_RECHECK_MS = 10_000L
