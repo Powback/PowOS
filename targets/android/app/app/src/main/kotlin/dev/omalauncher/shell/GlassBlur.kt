@@ -100,6 +100,21 @@ internal class GlassBlur(
      * the state said again), so the page's own resend after a resume (nativeglass.ts resend) still lands.
      */
     private var lastShown: Array<FloatArray>? = null
+    private var lastUnder: Array<FloatArray>? = null
+
+    /**
+     * The glass of surfaces a web window overlaps (Region.under): a container layer on this window's surface BELOW
+     * every child of it - under the web windows' root (WebWindows.root, layer -1) and home's own buffer - holding their
+     * blur regions. SurfaceFlinger blurs what's drawn before a layer, so a region on home's surface blurred the windows
+     * under home's buffer too (the app's pixels in the widget's glass); the page cut such regions around the window
+     * and dropped them when the rest wasn't one rounded rect ("if they're above some of the widgets the widget stops
+     * having like blur", 2026-10-30). Here they blur the wallpaper alone, whole, and the window's layer draws over
+     * them: the uncovered part keeps its blur up to the window's edge, the covered part is simply under the window
+     * (the page masks its tint there: .page-under). Surfaces above every window (the dock, menus) stay on the window's
+     * surface and blur the app under them.
+     */
+    private var under: SurfaceControl? = null
+    private var underGeneration = Int.MIN_VALUE
     private var lastGeneration = -1
 
     /** Each region's encoding, from the last set: a set where most surfaces stayed put encodes only the moved ones. */
@@ -258,7 +273,8 @@ internal class GlassBlur(
     }
 
     /**
-     * "b.r <dpr> <n> [x y w h tl tr br bl alpha radius] * n" (CSS px of the page; radius: the blur's), on the port's
+     * "b.r <dpr> <n> [x y w h tl tr br bl alpha radius] * n [u <k>]" (CSS px of the page; radius: the blur's; the first
+     * k under web windows, [under]), on the port's
      * thread: parsed there, set on the main thread on the window's next draw - not tied to the page frame it was
      * measured on (pages without "b.f", and the page's clear). Any frame-synced set still in flight is dropped.
      */
@@ -297,11 +313,21 @@ internal class GlassBlur(
                 val alpha = t[i++].toFloat()
                 val radius = t[i++].toFloat() * dpr
                 Region(x, y, x + w, y + h, tl, tr, br, bl, alpha, radius)
-            }
+            }.let { list -> markUnder(list, t, i) }
         } catch (e: RuntimeException) {
             Log.w(TAG, "$verb: bad regions ($e)")
             null
         }
+
+    /** "u <k>" at [i] of [t] (after the regions): the first k of [list] are under web windows; a page from before sends none. */
+    private fun markUnder(
+        list: List<Region>,
+        t: List<String>,
+        i: Int,
+    ): List<Region> {
+        val k = if (t.getOrNull(i) == "u") t[i + 1].toInt() else 0
+        return if (k == 0) list else list.mapIndexed { j, r -> if (j < k) r.under() else r }
+    }
 
     /** "b.f"'s binding to the page's frames (newest received / applied): shared with the web windows' "w.f" ([FrameSync]). */
     private val sync = (view as? WebView)?.let { FrameSync(it, "glass") }
@@ -386,7 +412,11 @@ internal class GlassBlur(
         ShellWallpaper.onChange.remove(pictureChanged)
         backdrop?.close()
         runCatching { windows.removeCrossWindowBlurEnabledListener(blurListener) }
-        main.post { if (regions.isNotEmpty()) set(emptyList(), -1) }
+        main.post {
+            if (regions.isNotEmpty()) set(emptyList(), -1)
+            under?.let { if (it.isValid) SurfaceControl.Transaction().reparent(it, null).apply() }
+            under = null
+        }
     }
 
     /** On the main thread. Any failure turns the live glass off - it never takes the app down with it. */
@@ -409,35 +439,30 @@ internal class GlassBlur(
             val holes = holes()
             val next = HashMap<Region, FloatArray>()
             val enc = { r: Region -> next.getOrPut(r) { encoded[r] ?: c!!.encode(r) } }
+            val clear = regions.filter { r -> holes.none { h -> RectF.intersects(h, RectF(r.l, r.t, r.r, r.b)) } }
+            val shownUnder = clear.filter { it.under }.map { r -> enc(r.moved(at[0].toFloat(), at[1].toFloat())) }.toTypedArray()
             val shown =
-                regions
-                    .filter { r -> holes.none { h -> RectF.intersects(h, RectF(r.l, r.t, r.r, r.b)) } }
+                clear
+                    .filter { !it.under }
                     .map { r -> enc(r.moved(at[0].toFloat(), at[1].toFloat())) }
                     .let { list ->
                         if (whole < 1f) list else listOf(enc(Region(0f, 0f, view.rootView.width.toFloat(), view.rootView.height.toFloat(), 0f, 0f, 0f, 0f, 1f, whole))) + list
                     }.toTypedArray()
             encoded = next
-            // The liquid rims, drawn by a view in this window: on the same frame as the blur's transaction.
-            val kept = regions.filter { r -> holes.none { h -> RectF.intersects(h, RectF(r.l, r.t, r.r, r.b)) } }
-            // Not over the system bars: the backdrop may be the display's capture (WallpaperBackdrop DISPLAY), the bars
-            // in it - a rim there would bend the status icons or the gesture bar into the glass.
-            val bars = view.rootWindowInsets?.getInsets(android.view.WindowInsets.Type.systemBars())
-            val top = (bars?.top ?: 0).toFloat()
-            val bottom = view.height - (bars?.bottom ?: 0).toFloat()
-            val rims = if (backdrop?.barsInFrames == true) kept.filter { it.t >= top && it.b <= bottom + 0.5f } else kept
-            if (liquidOn && rims.isNotEmpty()) {
-                liquidView()?.set(rims.map { LiquidGlass.Rim(it.l, it.t, it.r, it.b, it.tl, it.tr, it.br, it.bl, it.alpha) })
-            } else {
-                liquid?.set(emptyList())
-            }
+            // The liquid rims, drawn by a view in this window: on the same frame as the blur's transaction. Not those
+            // under windows: the rims draw in this window's buffer, over the windows.
+            setRims(clear.filter { !it.under })
             // The same regions on the same surface: nothing to apply, no draw asked for (the page re-sending what it sent).
             val generation = generationOf(viewRoot)
             val prev = lastShown
-            if (prev != null && generation == lastGeneration && lag <= 0 && prev.contentDeepEquals(shown)) return
-            lastShown = shown
-            lastGeneration = generation
+            val prevUnder = lastUnder
+            if (prev != null && prevUnder != null && generation == lastGeneration && lag <= 0 && prev.contentDeepEquals(shown) && prevUnder.contentDeepEquals(shownUnder)) return
             val t = SurfaceControl.Transaction()
             m.setBlurRegions.invoke(t, surface, shown)
+            setUnder(t, surface, shownUnder, generation)
+            lastShown = shown
+            lastUnder = shownUnder
+            lastGeneration = generation
             when {
                 lag < 0 -> t.apply()
                 lag == 0 -> {
@@ -460,6 +485,40 @@ internal class GlassBlur(
         } catch (e: Throwable) {
             fail(e)
         }
+    }
+
+    /** The liquid rims of [kept] (the regions on this window's surface), drawn by a view in this window. */
+    private fun setRims(kept: List<Region>) {
+        // Not over the system bars: the backdrop may be the display's capture (WallpaperBackdrop DISPLAY), the bars
+        // in it - a rim there would bend the status icons or the gesture bar into the glass.
+        val bars = view.rootWindowInsets?.getInsets(android.view.WindowInsets.Type.systemBars())
+        val top = (bars?.top ?: 0).toFloat()
+        val bottom = view.height - (bars?.bottom ?: 0).toFloat()
+        val rims = if (backdrop?.barsInFrames == true) kept.filter { it.t >= top && it.b <= bottom + 0.5f } else kept
+        if (liquidOn && rims.isNotEmpty()) {
+            liquidView()?.set(rims.map { LiquidGlass.Rim(it.l, it.t, it.r, it.b, it.tl, it.tr, it.br, it.bl, it.alpha) })
+        } else {
+            liquid?.set(emptyList())
+        }
+    }
+
+    /**
+     * [shown] onto the [under] layer in [t]: hung on the window's [surface] again whenever WM gave it a new one (the
+     * old one's children go with it), made the first time a region wants it.
+     */
+    private fun setUnder(
+        t: SurfaceControl.Transaction,
+        surface: SurfaceControl,
+        shown: Array<FloatArray>,
+        generation: Int,
+    ) {
+        val m = methods ?: return
+        val u = under?.takeIf { it.isValid } ?: if (shown.isNotEmpty()) SurfaceControl.Builder().setName("powos-glass-under").build().also { under = it } else return
+        if (generation != underGeneration || generation == -1 || lastShown == null) {
+            t.reparent(u, surface).setLayer(u, UNDER_LAYER).setVisibility(u, true)
+            underGeneration = generation
+        }
+        m.setBlurRegions.invoke(t, u, shown)
     }
 
     private fun fail(e: Throwable) {
@@ -497,7 +556,10 @@ internal class GlassBlur(
     private var surfaceField: java.lang.reflect.Field? = null
     private var noSurfaceField = false
 
-    /** A region in the window's pixels: its box, corners, how much of the blur shows, the blur's radius. */
+    /**
+     * A region in the window's pixels: its box, corners, how much of the blur shows, the blur's radius; [under]: a web
+     * window above it overlaps it, so it's blurred on the [under] layer, below the windows, not on the window's surface.
+     */
     private class Region(
         val l: Float,
         val t: Float,
@@ -510,10 +572,15 @@ internal class GlassBlur(
         val alpha: Float,
         val radius: Float,
     ) {
+        var under = false
+            private set
+
         fun moved(
             dx: Float,
             dy: Float,
-        ) = if (dx == 0f && dy == 0f) this else Region(l + dx, t + dy, r + dx, b + dy, tl, tr, br, bl, alpha, radius)
+        ) = if (dx == 0f && dy == 0f) this else Region(l + dx, t + dy, r + dx, b + dy, tl, tr, br, bl, alpha, radius).also { it.under = under }
+
+        fun under() = Region(l, t, r, b, tl, tr, br, bl, alpha, radius).also { it.under = true }
 
         /** Its values, for [GlassBlur.encoded]'s key: a region equal to one encoded before reuses that encoding. */
         private val key get() = floatArrayOf(l, t, r, b, tl, tr, br, bl, alpha, radius)
@@ -578,6 +645,9 @@ internal class GlassBlur(
 
     companion object {
         private const val TAG = "PowosGlassBlur"
+
+        /** [under]'s z on the window's surface: below the web windows' root (-1) and anything else hung there. */
+        private const val UNDER_LAYER = -(1 shl 20)
 
         /** [view]'s window surface (ViewRootImpl.getSurfaceControl: WM's surface of the window), valid, or null. */
         fun surfaceOf(view: View): SurfaceControl? =

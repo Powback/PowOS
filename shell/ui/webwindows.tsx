@@ -1431,9 +1431,9 @@ export function underWindows(page: number): Record<string, string> | undefined {
 }
 
 /**
- * For the compositor's glass (nativeglass.ts): the windows (bar and body) on screen (viewport CSS px, l t r b) a surface in
- * [el] must not blur over - those of windows above it (a window's own bar: the windows above that one; page content:
- * every window on its page; anything outside the pages: none).
+ * For the compositor's glass (nativeglass.ts): the windows (bar and body) on screen (viewport CSS px, l t r b) above a
+ * surface in [el] (a window's own bar: the windows above that one; page content: every window on its page; anything
+ * outside the pages: none). A surface one of them overlaps is blurred on the host's layer under the windows.
  */
 export function bodiesOver(el: Element): Clip[] {
   const page = el.closest(".page");

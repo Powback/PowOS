@@ -37,61 +37,29 @@ const OVER_WALLPAPER = new Set(["home", "lock", "quicktools", "desktop", "status
 const SURFACES = ".tile, .notif-panel, .status-chrome .chrome-surface";
 
 /**
- * The web windows' bodies a surface must not blur over (ui/webwindows.tsx bodiesOver: the app's pixels are under home's
- * buffer there, and a blur region would blur the app): viewport CSS px, l t r b. That file sets globalThis.__wwCutouts
- * (an import either way closes a module cycle through apps/native.ts).
+ * The web windows above a surface ([el]): ui/webwindows.tsx bodiesOver, viewport CSS px, l t r b. That file sets
+ * globalThis.__wwCutouts (an import either way closes a module cycle through apps/native.ts).
  */
-const cutoutsOf = (el: Element): [number, number, number, number][] =>
+const windowsOver = (el: Element): [number, number, number, number][] =>
   (globalThis as { __wwCutouts?: (el: Element) => [number, number, number, number][] }).__wwCutouts?.(el) ?? [];
 
 /**
- * [box] (l t r b) less the bodies over it: a body covering a whole side's span shrinks it from that side; one inside it
- * (a region is one rounded box) drops it: null.
- * HACK: a blur region is one rounded rect, so a widget with a window over its middle loses its blur (its tint stays);
- * real fix: several regions per surface split around the body.
+ * A surface's region box (its joined sides reaching over) and its own box, whole, and whether a web window above it
+ * overlaps it. Such a region goes to the host's glass layer UNDER the windows (GlassBlur.under: it blurs the wallpaper
+ * only, and the window's layer draws over it), never trimmed or dropped: the uncovered part keeps its blur right up to
+ * the window's edge and the covered part is simply under the window. (Before 2026-10-30 the region was cut around the
+ * window - and dropped when the rest wasn't one rounded rect: "if they're above some of the widgets the widget stops
+ * having like blur".)
  */
-function cutOut(box: [number, number, number, number], bodies: [number, number, number, number][]): [number, number, number, number] | null {
-  let b: [number, number, number, number] | null = [...box];
-  for (const body of bodies) if (b) b = cutOne(b, body);
-  return b;
-}
-
-/**
- * A surface's region box (its joined sides reaching over) and its own box, less the web window bodies over [el] (see
- * [cutOut]); null: no region.
- */
-function regionBoxes(el: Element, s: Shape, r: DOMRect): [[number, number, number, number], [number, number, number, number]] | null {
+function regionBoxes(el: Element, s: Shape, r: DOMRect): { box: [number, number, number, number]; own: [number, number, number, number]; under: boolean } {
   // A side joined to a neighbour reaches half a CSS px into it: two regions meeting at a fractional device pixel each
   // antialias the shared edge, and unblurred wallpaper showed through between them as a hairline.
   const [jt, jr, jb, jl] = s.joined;
   const reach = el.classList.contains("bridge") ? BRIDGE_REACH : JOIN_OVERLAP;
   const box: [number, number, number, number] = [r.left - reach * jl, r.top - reach * jt, r.right + reach * jr, r.bottom + reach * jb];
   const own: [number, number, number, number] = [r.left, r.top, r.right, r.bottom];
-  const bodies = cutoutsOf(el);
-  if (!bodies.length) return [box, own];
-  const b = cutOut(box, bodies);
-  const o = cutOut(own, bodies);
-  return b && o ? [b, o] : null;
-}
-
-/** [b] less one body [c] (see [cutOut]). */
-function cutOne(b: [number, number, number, number], c: [number, number, number, number]): [number, number, number, number] | null {
-  if (c[2] <= b[0] || c[0] >= b[2] || c[3] <= b[1] || c[1] >= b[3]) return b;
-  const out = cutSide(b, c, 0) ?? cutSide(b, c, 1);
-  return out && out[2] - out[0] >= 1 && out[3] - out[1] >= 1 ? out : null;
-}
-
-/** [b] cut by [c] spanning it across [axis] (0: c spans its height, cut from the left or right; 1: its width, from the top or bottom). */
-function cutSide(b: [number, number, number, number], c: [number, number, number, number], axis: 0 | 1): [number, number, number, number] | null {
-  const lo = axis;
-  const hi = axis + 2;
-  const across = 1 - axis;
-  if (c[across] > b[across] || c[across + 2] < b[across + 2]) return null;
-  const out: [number, number, number, number] = [...b];
-  if (c[lo] <= b[lo]) out[lo] = c[hi];
-  else if (c[hi] >= b[hi]) out[hi] = c[lo];
-  else return null;
-  return out;
+  const under = windowsOver(el).some((c) => c[0] < box[2] && c[2] > box[0] && c[1] < box[3] && c[3] > box[1]);
+  return { box, own, under };
 }
 
 /** The host blurs for this page (b.state 1). */
@@ -278,6 +246,8 @@ interface Raw {
   clipsFollow?: boolean[];
   /** Its own compositor radius, or the theme's (0). */
   blur?: number;
+  /** A web window above it overlaps it: its blur goes under the windows' layers (see [regionBoxes]). */
+  under?: boolean;
 }
 
 /** The theme's blur radius for the compositor, read when the theme or the shapes change (not every frame). */
@@ -327,15 +297,15 @@ function measureRaw(followers: Element[] = []): Raw[] {
     if (r.width < 1 || r.height < 1) continue;
     if (!el.checkVisibility({ visibilityProperty: true })) continue;
     const cut = regionBoxes(el, s, r);
-    if (!cut) continue;
     let alpha = 1;
     for (const a of s.chain) alpha *= opacity(a);
     // Scaled (home's pages shrink a little as the drawer opens): the corners with it.
     const k = r.width / ((el as HTMLElement).offsetWidth || r.width);
     const follower = followerOf(el);
     out.push({
-      box: cut[0],
-      own: cut[1],
+      box: cut.box,
+      own: cut.own,
+      under: cut.under,
       clips: s.clips.map(clipBox),
       radii: s.radii.map((v) => v * k),
       alpha,
@@ -356,7 +326,11 @@ function measureRaw(followers: Element[] = []): Raw[] {
   return out;
 }
 
-/** The regions as the host wants them: "x y w h tl tr br bl alpha radius" per surface on screen, CSS px. */
+/**
+ * The regions as the host wants them: "<dpr> <n> [x y w h tl tr br bl alpha radius] * n u <k>" per surface on screen,
+ * CSS px; the first k are under web windows (GlassBlur: blurred on the layer below the windows). A host from before
+ * reads n regions and ignores the rest.
+ */
 /**
  * The viewport, read on resize only: innerWidth/innerHeight/devicePixelRatio bring the page's style and layout up to
  * date when read - in a drag frame, right after gesture.ts set its animations' time, that was a forced style recalc
@@ -366,39 +340,41 @@ let view = { w: innerWidth, h: innerHeight, dpr: devicePixelRatio };
 addEventListener("resize", () => (view = { w: innerWidth, h: innerHeight, dpr: devicePixelRatio }));
 
 function format(raws: Raw[]): string {
-  const W = view.w;
-  const H = view.h;
-  const out: string[] = [];
+  const under: string[] = [];
+  const over: string[] = [];
   for (const g of raws) {
-    if (g.alpha < 0.01) continue;
-    let [x0, y0, x1, y1] = g.box;
-    for (const k of g.clips) {
-      x0 = Math.max(x0, k[0]);
-      y0 = Math.max(y0, k[1]);
-      x1 = Math.min(x1, k[2]);
-      y1 = Math.min(y1, k[3]);
-    }
-    x0 = Math.max(x0, 0);
-    y0 = Math.max(y0, 0);
-    x1 = Math.min(x1, W);
-    y1 = Math.min(y1, H);
-    if (x1 - x0 < 1 || y1 - y0 < 1) continue;
-    if (g.square) {
-      out.push(`${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)} 0 0 0 0 1 ${blur}`);
-      continue;
-    }
-    // A corner cut by a clip is square there (a tile half under the screen's edge keeps its own corners on screen).
-    const [tl, tr, br, bl] = g.radii;
-    const cut = (edge: boolean, v: number) => (edge ? 0 : v);
-    const L = x0 > g.own[0] + 0.25;
-    const T = y0 > g.own[1] + 0.25;
-    const R = x1 < g.own[2] - 0.25;
-    const B = y1 < g.own[3] - 0.25;
-    out.push(
-      `${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)} ${f(cut(L || T, tl))} ${f(cut(R || T, tr))} ${f(cut(R || B, br))} ${f(cut(L || B, bl))} ${g.alpha.toFixed(2)} ${g.blur || blur}`,
-    );
+    const text = regionText(g, view.w, view.h);
+    if (text) (g.under ? under : over).push(text);
   }
-  return `${view.dpr} ${out.length}${out.length ? " " + out.join(" ") : ""}`;
+  const k = under.length;
+  const all = [...under, ...over];
+  return `${view.dpr} ${all.length}${all.length ? " " + all.join(" ") : ""}${k ? ` u ${k}` : ""}`;
+}
+
+/** One region's "x y w h tl tr br bl alpha radius" on a [W]x[H] viewport, or null: nothing of it shows. */
+function regionText(g: Raw, W: number, H: number): string | null {
+  if (g.alpha < 0.01) return null;
+  let [x0, y0, x1, y1] = g.box;
+  for (const k of g.clips) {
+    x0 = Math.max(x0, k[0]);
+    y0 = Math.max(y0, k[1]);
+    x1 = Math.min(x1, k[2]);
+    y1 = Math.min(y1, k[3]);
+  }
+  x0 = Math.max(x0, 0);
+  y0 = Math.max(y0, 0);
+  x1 = Math.min(x1, W);
+  y1 = Math.min(y1, H);
+  if (x1 - x0 < 1 || y1 - y0 < 1) return null;
+  if (g.square) return `${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)} 0 0 0 0 1 ${blur}`;
+  // A corner cut by a clip is square there (a tile half under the screen's edge keeps its own corners on screen).
+  const [tl, tr, br, bl] = g.radii;
+  const cut = (edge: boolean, v: number) => (edge ? 0 : v);
+  const L = x0 > g.own[0] + 0.25;
+  const T = y0 > g.own[1] + 0.25;
+  const R = x1 < g.own[2] - 0.25;
+  const B = y1 < g.own[3] - 0.25;
+  return `${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)} ${f(cut(L || T, tl))} ${f(cut(R || T, tr))} ${f(cut(R || B, br))} ${f(cut(L || B, bl))} ${g.alpha.toFixed(2)} ${g.blur || blur}`;
 }
 
 const measure = () => format(measureRaw());
