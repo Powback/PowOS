@@ -51,19 +51,42 @@ const cutoutsOf = (el: Element): [number, number, number, number][] =>
  * real fix: several regions per surface split around the body.
  */
 function cutOut(box: [number, number, number, number], bodies: [number, number, number, number][]): [number, number, number, number] | null {
-  const b: [number, number, number, number] = [...box];
-  for (const [l, t, r, bo] of bodies) {
-    if (r <= b[0] || l >= b[2] || bo <= b[1] || t >= b[3]) continue;
-    const spansY = t <= b[1] && bo >= b[3];
-    const spansX = l <= b[0] && r >= b[2];
-    if (spansY && l <= b[0]) b[0] = Math.max(b[0], r);
-    else if (spansY && r >= b[2]) b[2] = Math.min(b[2], l);
-    else if (spansX && t <= b[1]) b[1] = Math.max(b[1], bo);
-    else if (spansX && bo >= b[3]) b[3] = Math.min(b[3], t);
-    else return null;
-    if (b[2] - b[0] < 1 || b[3] - b[1] < 1) return null;
-  }
+  let b: [number, number, number, number] | null = [...box];
+  for (const body of bodies) if (b) b = cutOne(b, body);
   return b;
+}
+
+/**
+ * A surface's region box (its joined sides reaching over) and its own box, less the web window bodies over [el] (see
+ * [cutOut]); null: no region.
+ */
+function regionBoxes(el: Element, s: Shape, r: DOMRect): [[number, number, number, number], [number, number, number, number]] | null {
+  // A side joined to a neighbour reaches half a CSS px into it: two regions meeting at a fractional device pixel each
+  // antialias the shared edge, and unblurred wallpaper showed through between them as a hairline.
+  const [jt, jr, jb, jl] = s.joined;
+  const reach = el.classList.contains("bridge") ? BRIDGE_REACH : JOIN_OVERLAP;
+  const box: [number, number, number, number] = [r.left - reach * jl, r.top - reach * jt, r.right + reach * jr, r.bottom + reach * jb];
+  const own: [number, number, number, number] = [r.left, r.top, r.right, r.bottom];
+  const bodies = cutoutsOf(el);
+  if (!bodies.length) return [box, own];
+  const b = cutOut(box, bodies);
+  const o = cutOut(own, bodies);
+  return b && o ? [b, o] : null;
+}
+
+/** [b] less one body [c] (see [cutOut]). */
+function cutOne(b: [number, number, number, number], c: [number, number, number, number]): [number, number, number, number] | null {
+  const [l, t, r, bo] = c;
+  if (r <= b[0] || l >= b[2] || bo <= b[1] || t >= b[3]) return b;
+  const spansY = t <= b[1] && bo >= b[3];
+  const spansX = l <= b[0] && r >= b[2];
+  const out: [number, number, number, number] | null =
+    spansY && l <= b[0] ? [r, b[1], b[2], b[3]]
+    : spansY && r >= b[2] ? [b[0], b[1], l, b[3]]
+    : spansX && t <= b[1] ? [b[0], bo, b[2], b[3]]
+    : spansX && bo >= b[3] ? [b[0], b[1], b[2], t]
+    : null;
+  return out && out[2] - out[0] >= 1 && out[3] - out[1] >= 1 ? out : null;
 }
 
 /** The host blurs for this page (b.state 1). */
@@ -298,19 +321,14 @@ function measureRaw(followers: Element[] = []): Raw[] {
     const r = el.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) continue;
     if (!el.checkVisibility({ visibilityProperty: true })) continue;
-    // A side joined to a neighbour reaches half a CSS px into it: two regions meeting at a fractional device pixel each
-    // antialias the shared edge, and unblurred wallpaper showed through between them as a hairline.
-    const [jt, jr, jb, jl] = s.joined;
-    const reach = el.classList.contains("bridge") ? BRIDGE_REACH : JOIN_OVERLAP;
+    const cut = regionBoxes(el, s, r);
+    if (!cut) continue;
+    const [box, own] = cut;
     let alpha = 1;
     for (const a of s.chain) alpha *= opacity(a);
     // Scaled (home's pages shrink a little as the drawer opens): the corners with it.
     const k = r.width / ((el as HTMLElement).offsetWidth || r.width);
     const follower = followerOf(el);
-    const bodies = cutoutsOf(el);
-    const box = cutOut([r.left - reach * jl, r.top - reach * jt, r.right + reach * jr, r.bottom + reach * jb], bodies);
-    const own = bodies.length ? cutOut([r.left, r.top, r.right, r.bottom], bodies) : ([r.left, r.top, r.right, r.bottom] as [number, number, number, number]);
-    if (!box || !own) continue;
     out.push({
       box,
       own,

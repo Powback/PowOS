@@ -2996,6 +2996,9 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
    The app's pixels are a layer UNDER home's surface at the body: the body paints nothing once live, so the page is
    transparent exactly there; everything above it in the DOM paints over the app. */
 .page-under, .page-windows { position: absolute; inset: 0; }
+/* Empty page space stays the page's own (presses, the marquee): the wrappers take no touches, their content does. */
+.page-under { pointer-events: none; }
+.page-under > :not(.page-glass, .group-shadow, .seam) { pointer-events: auto; }
 .page-windows { overflow: clip; pointer-events: none; }
 .page-windows > * { pointer-events: auto; }
 .webwindow:not(.ww-divider) { border-radius: 12px; box-shadow: var(--lift); }
@@ -3019,7 +3022,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
   background: none; color: inherit; padding: 0;
 }
 .ww-button:active { background: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
-.ww-button.ww-close:active { background: color-mix(in srgb, #e5484d 70%, transparent); }
+.ww-button.ww-close:active { background: color-mix(in srgb, var(--color-red) 70%, transparent); }
 .ww-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .webwindow-body { position: relative; border-radius: 0 0 12px 12px; }
 .webwindow.maximised .webwindow-body { border-radius: 0; }
@@ -3046,6 +3049,6 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .ww-divider { touch-action: none; }
 .ww-divider::after {
   content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 56px; transform: translate(-50%, -50%);
-  border-radius: 3px; background: var(--color-foreground); outline: 1.5px solid var(--color-surface);
+  border-radius: 3px; background: var(--color-foreground); box-shadow: 0 0 0 1.5px var(--color-surface);
 }
 .ww-divider[data-div$=":y"]::after { width: 56px; height: 5px; }
