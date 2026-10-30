@@ -3435,6 +3435,18 @@ try {
       await r.page.screenshot({ path: `/cache/send-dictation-${name}.png` });
       return r.page.evaluate(async (f) => (await importShim("./dev/send-dictation-check.js")).sendDictationEnd(f), form);
     })));
+    // Typed text, sent by the button and by Enter: asked once, the field empty after (the user, 2026-10-30 23:08).
+    for (const how of ["button", "enter"]) {
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, `send-clear-${how}-${name}`, viewport).then((r) => whenReady(r, async () => {
+        await r.page.evaluate(async (s) => {
+          const S = await importShim("./state.ts");
+          if (s) (S.chatting.value = true), (S.drawer.value = 1);
+          if (s === "ai") S.pullKind.value = "ai";
+        }, setup);
+        await r.page.waitForSelector(`form${form} .mic`, { timeout: READY_MS });
+        return r.page.evaluate(async (f, h) => (await importShim("./dev/send-dictation-check.js")).sendTypedCheck(f, h), form, how);
+      })));
+    }
   }
   runs.push(open(browser, `${ORIGIN}/index.html`, "dock-key-migration", { width: 821, height: 883 }).then((r) => whenReady(r, () => dockKeyMigration(r))));
   const dockViews = { cover: { width: 404, height: 900 }, inner: { width: 821, height: 883 }, desktop: { width: 1280, height: 800 } };

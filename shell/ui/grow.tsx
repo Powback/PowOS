@@ -15,6 +15,38 @@ interface Props {
   [attr: string]: any;
 }
 
+/**
+ * What the field itself last reported (onInput), and whether the keyboard is composing a word in it (Gboard composes
+ * the word under the cursor until a space or a commit). Cleared from outside (a send: the user, 2026-10-30 23:08, "the
+ * input is not clear"): the DOM value follows at once, and a word the keyboard was still composing is dropped with it -
+ * the send button keeps the field focused (bar.tsx Send's pointerdown), so the IME's composing buffer outlived the
+ * clear and was committed back into the field. A blur and focus in the same task restarts the IME's input (its buffer
+ * empty); the keyboard stays up.
+ */
+function useClearDropsComposition(own: { current: HTMLTextAreaElement | null }, value: string) {
+  const reported = useRef(value);
+  const composing = useRef(false);
+  useLayoutEffect(() => {
+    const t = own.current;
+    const was = reported.current;
+    reported.current = value;
+    if (!t || value !== "" || was === "") return;
+    if (t.value !== "") t.value = "";
+    if (!composing.current || document.activeElement !== t) return;
+    composing.current = false;
+    t.blur();
+    t.focus({ preventScroll: true });
+  }, [value]);
+  return {
+    reported,
+    /** The textarea's composition handlers. */
+    ime: {
+      onCompositionStart: () => void (composing.current = true),
+      onCompositionEnd: () => void (composing.current = false),
+    },
+  };
+}
+
 export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props) {
   const own = useRef<HTMLTextAreaElement>(null);
   const el = () => own.current;
@@ -41,6 +73,7 @@ export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props
     if (need > h && document.activeElement !== t) t.scrollTop = t.scrollHeight;
   };
   useLayoutEffect(fit, [value, rows]);
+  const { reported, ime } = useClearDropsComposition(own, value);
   // Its width changing (laid out late, a fold, a widget resized) wraps its text again: measured again then.
   useEffect(() => {
     const t = el();
@@ -57,6 +90,7 @@ export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props
   return (
     <textarea
       {...rest}
+      {...ime}
       ref={(n) => {
         own.current = n;
         if (typeof inputRef === "function") inputRef(n);
@@ -65,7 +99,7 @@ export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props
       class={`grow ${rest.class ?? ""}`}
       rows={1}
       value={value}
-      onInput={(e) => onInput((e.currentTarget as HTMLTextAreaElement).value)}
+      onInput={(e) => onInput((reported.current = (e.currentTarget as HTMLTextAreaElement).value))}
       onKeyDown={(e) => {
         if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
           e.preventDefault();
