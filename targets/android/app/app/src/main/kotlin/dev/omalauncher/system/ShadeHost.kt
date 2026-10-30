@@ -345,6 +345,95 @@ class ShadeHost(
         return r != null || dev.omalauncher.shell.ControllerPad.covers(x, y)
     }
 
+    /** The status bar's height now (px, from the strip's insets): a maximised web window's bar lines up with it. */
+    val barHeight: Int get() = stripHeight
+
+    /** Web windows' title bars on screen (display px; WebWindows.publishBars): theirs, wherever they reach the strip. */
+    private var windowBars: List<android.graphics.Rect> = emptyList()
+
+    /** A maximised web window's bar under the strip: its title's right end and its controls' left (display px). */
+    private var windowMerge: IntArray? = null
+
+    /**
+     * Spec G-R on the status bar (one list for the strip's touches and the shade's pull, as home's claim-free regions
+     * are for home's body): what on the strip is an app's or a window's own - Android's app handles over split and
+     * full-screen apps ([AppWindowAt.handles]) and, while home shows, the web windows' title bars and controls. A tap
+     * there reaches them ([edgeRegion] leaves them out), a drag down from there isn't the shade's ([pullable]).
+     */
+    private fun barClaims(): List<android.graphics.Rect> {
+        val bars = if (homeShowing()) windowBars.filter { it.top < stripHeight.coerceAtLeast(1) } else emptyList()
+        return handles + bars
+    }
+
+    /** The app handles as last read ([refreshHandles]): the strip's region is computed on every draw, never a binder call. */
+    private var handles: List<android.graphics.Rect> = emptyList()
+    private var handlesAt = 0L
+
+    /** The app handles read again (one binder call, at most every [HANDLES_MS]): on a finger down, before it's judged. */
+    private fun refreshHandles() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - handlesAt < HANDLES_MS) return
+        handlesAt = now
+        val h = AppWindowAt.handles(service, stripHeight.coerceAtLeast(1), (HANDLE_DP * service.resources.displayMetrics.density).toInt())
+        if (h == handles) return
+        handles = h
+        edge?.requestLayout()
+    }
+
+    private fun homeShowing() = Switcher.onHome && Switcher.homeVisible && !Switcher.open
+
+    /**
+     * The web windows' bars now ([bars], display px) and a maximised one's merge with the status bar ([merge]: its
+     * title's right end, its controls' left; null: none): the strip's touches and its layout follow (main thread).
+     */
+    fun windowBars(
+        bars: List<android.graphics.Rect>,
+        merge: IntArray?,
+    ) {
+        if (bars == windowBars && merge.contentEquals(windowMerge)) return
+        windowBars = bars
+        windowMerge = merge
+        barClaimsChanged()
+    }
+
+    /** Home came or went (Switcher), or the windows' bars moved: the strip's merge and touchable region again. */
+    fun barClaimsChanged() {
+        val strip = edge ?: return
+        strip.post {
+            val m = windowMerge?.takeIf { homeShowing() }
+            statusChrome?.merge(m?.get(0), m?.get(1))
+            strip.requestLayout()
+        }
+    }
+
+    /**
+     * The strip's touchable region (display px; it sits at the screen's top left): the status bar page's own controls
+     * (chrome.regions: the clock, the indicators, the FPS meter) less [barClaims] - everything else on the strip is
+     * the app's or window's under it (the shade's pull doesn't need the strip: the input monitor sees every touch).
+     * Without the monitor (the class HACK) the strip takes the pull itself: the whole strip, less the claims.
+     */
+    private fun edgeRegion(region: android.graphics.Region, width: Int, height: Int) {
+        val controls = statusChrome?.controls.orEmpty()
+        if (!monitored || controls.isEmpty()) region.set(0, 0, width, height) else {
+            region.setEmpty()
+            for (r in controls) region.op(r, android.graphics.Region.Op.UNION)
+        }
+        for (r in barClaims()) region.op(r, android.graphics.Region.Op.DIFFERENCE)
+    }
+
+    /** An app handle or a web window's bar/controls on the strip at ([x], [y]): the tap or drag is theirs (spec G-R). */
+    private fun claimedOnBar(
+        x: Float,
+        y: Float,
+    ): Boolean {
+        // On the strip the handles must be as they are now (a split just made).
+        handlesAt = 0L
+        refreshHandles()
+        val r = barClaims().firstOrNull { it.contains(x.toInt(), y.toInt()) } ?: return false
+        Log.i(TAG, "not pulling: claimed (${x.toInt()},${y.toInt()}) in $r")
+        return true
+    }
+
     /** Whether a finger down at ([x], [y]) (display px) may be the shade's pull, and from where. */
     private fun pullable(
         x: Float,
@@ -353,11 +442,20 @@ class ShadeHost(
         // Never over a locked phone (the lock face reports the keyguard OCCLUDED, which [keyguard] doesn't count).
         if (DeviceLock.locked(service)) return null
         val edge = stripHeight.coerceAtLeast((24 * service.resources.displayMetrics.density).toInt())
-        if (y > edge) return if (homePullable(x, y)) From.HOME else null
+        if (y > edge) {
+            // A throttled read keeps the strip's region fresh for the next tap.
+            refreshHandles()
+            return if (homePullable(x, y)) From.HOME else null
+        }
+        return if (!claimedOnBar(x, y) && barPullable()) From.STATUS_BAR else null
+    }
+
+    /** The status bar's pull is PowOS's shade's now (not over the lock screen, nor with SystemUI's panel lent). */
+    private fun barPullable(): Boolean {
         val ok = host != null && !shown && !keyguard && !lent && statusBarShown
         // A finger down on the status bar that isn't a pull: why, as it's the first thing to ask when the shade won't come.
         if (!ok) Log.i(TAG, "not pulling: host=${host != null} shown=$shown keyguard=$keyguard lent=$lent statusBarShown=$statusBarShown")
-        return if (ok) From.STATUS_BAR else null
+        return ok
     }
 
     /**
@@ -808,6 +906,38 @@ class ShadeHost(
             }
         }
 
+        init {
+            touchRegion()
+        }
+
+        /**
+         * The strip's touches only where [edgeRegion] says: a tap on an app handle or a window's control under it
+         * reaches them. HACK: ViewTreeObserver's internal-insets listener is hidden (the IME's and SystemUI's own touch
+         * regions; PanelLift's keyboard hole the same way), reflected past the checks. Real fix: none public for a
+         * window's touchable region (WindowManager.LayoutParams has no region).
+         */
+        private fun touchRegion() {
+            runCatching {
+                HiddenApi.allow()
+                val type = Class.forName("android.view.ViewTreeObserver\$OnComputeInternalInsetsListener")
+                val listener =
+                    java.lang.reflect.Proxy.newProxyInstance(type.classLoader, arrayOf(type)) { proxy, method, args ->
+                        when (method.name) {
+                            "onComputeInternalInsets" -> {
+                                val info = args!![0]
+                                info.javaClass.getMethod("setTouchableInsets", Int::class.javaPrimitiveType).invoke(info, TOUCHABLE_INSETS_REGION)
+                                edgeRegion(info.javaClass.getField("touchableRegion").get(info) as android.graphics.Region, width, height)
+                                null
+                            }
+                            "equals" -> proxy === args?.getOrNull(0)
+                            "hashCode" -> System.identityHashCode(proxy)
+                            else -> "ShadeHost.edgeRegion"
+                        }
+                    }
+                android.view.ViewTreeObserver::class.java.getMethod("addOnComputeInternalInsetsListener", type).invoke(viewTreeObserver, listener)
+            }.onFailure { Log.w(TAG, "the status bar takes its whole strip (no touch region)", it) }
+        }
+
         override fun onInterceptTouchEvent(e: MotionEvent): Boolean = !monitored
 
         @SuppressLint("ClickableViewAccessibility")
@@ -862,6 +992,15 @@ class ShadeHost(
 
         /** Lifted flags first, then the expand. */
         private const val EXPAND_DELAY_MS = 80L
+
+        /** ViewTreeObserver.InternalInsetsInfo.TOUCHABLE_INSETS_REGION (hidden). */
+        private const val TOUCHABLE_INSETS_REGION = 3
+
+        /** The app handles are read at most this often (ms): every finger down asks. */
+        private const val HANDLES_MS = 250L
+
+        /** An app handle's width on the strip (dp): the "•••" and a finger's slack either side. */
+        private const val HANDLE_DP = 72
 
         /** The status bar's right part (from this fraction of its width) pulls the control center, as on OnePlus's. */
         private const val CONTROL_SPLIT = 0.5f

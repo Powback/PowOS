@@ -12,6 +12,7 @@ import { useRef } from "preact/hooks";
 import { native, nextFrameId, send } from "../apps/port.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
+import { themeBlur } from "./glassblur.ts";
 
 const TITLE = 36;
 const RADIUS = 12;
@@ -245,11 +246,40 @@ function resolved(css: string): string {
   return `${n[0]} ${n[1]} ${n[2]} ${n[3] ?? 1}`;
 }
 
-/** The host's bar in the page's colours ("w.theme <bg r g b a> <fg r g b a>"): checked at most once a second. */
+/** "r g b a" (bytes, alpha 0..1) of a CSS colour through a 1px canvas: any syntax the page resolves (color-mix too). */
+let pixel: CanvasRenderingContext2D | null = null;
+function bytesOf(css: string): string {
+  pixel ??= Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext("2d", { willReadFrequently: true });
+  if (!pixel) return resolved(css);
+  pixel.clearRect(0, 0, 1, 1);
+  const probe = document.body.appendChild(document.createElement("i"));
+  probe.style.color = css;
+  pixel.fillStyle = getComputedStyle(probe).color;
+  probe.remove();
+  pixel.fillRect(0, 0, 1, 1);
+  const [r, g, b, a] = pixel.getImageData(0, 0, 1, 1).data;
+  return `${r} ${g} ${b} ${(a / 255).toFixed(3)}`;
+}
+
+/**
+ * The bar's glass: a home widget's (.tile under live glass, theme.css) - its fill over its veil, its --line edge
+ * --frame wide, the compositor radius home's tiles get (glassblur.ts) and --radius - device px. The host draws
+ * the bar of that material (WebWindowChrome.glass), so nothing of the widget style is copied natively.
+ */
+function glass(): string {
+  const css = getComputedStyle(document.documentElement);
+  const len = (name: string) => (parseFloat(css.getPropertyValue(name)) || 0) * devicePixelRatio;
+  return `${bytesOf("var(--glass-fill)")} ${bytesOf("var(--glass-veil)")} ${bytesOf("var(--line)")} ${len("--frame")} ${themeBlur() * devicePixelRatio} ${len("--radius")}`;
+}
+
+/**
+ * The host's bar in the page's colours and widget glass ("w.theme <bg r g b a> <fg r g b a> <glass>"): checked at most
+ * once a second.
+ */
 function theme() {
   if (performance.now() - themeAt < 1000) return;
   themeAt = performance.now();
-  const t = `${resolved("var(--color-surface)")} ${resolved("var(--color-foreground)")}`;
+  const t = `${resolved("var(--color-surface)")} ${resolved("var(--color-foreground)")} ${glass()}`;
   if (t !== lastTheme) send(`w.theme ${(lastTheme = t)}`);
 }
 

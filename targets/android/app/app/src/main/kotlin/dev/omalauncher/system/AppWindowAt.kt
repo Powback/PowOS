@@ -66,6 +66,47 @@ object AppWindowAt {
         return tasks.firstOrNull { runCatching { covers(it, x, y) }.getOrDefault(false) }?.let { (it.baseActivity ?: it.topActivity)?.packageName ?: "task ${it.taskId}" }
     }
 
+    /**
+     * Where Android's app handle ("•••" at the top centre of a split or full-screen app; OnePlus draws one on each half
+     * of a split) sits on the status bar strip: one rect per visible app task that reaches the screen's top, centred on
+     * its bounds, [handleW] wide and [strip] high (display px). Floating windows have none (PowOS frames them, their
+     * caption is 1 px: [OemCaption]). The status bar leaves these to the app ([ShadeHost.barClaims]): the user,
+     * 2026-10-30, "Dot dot dot menu doesn't open when I'm in split screen" - PowOS's strip took the tap.
+     *
+     * HACK: the handle's place is derived (task bounds + a fixed width), not read: SystemUI's handle window has no
+     * public bounds. Real fix: the handle's own input window's frame (WM Shell's AppHandle) once PowOS is the window
+     * decor provider (see [OemCaption]).
+     */
+    fun handles(
+        context: Context,
+        strip: Int,
+        handleW: Int,
+    ): List<Rect> =
+        runCatching {
+            HiddenApi.allow()
+            @Suppress("DEPRECATION")
+            val tasks = context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS)
+            tasks.mapNotNull { t -> runCatching { handleOf(t, strip, handleW) }.getOrNull() }
+        }.onFailure { Log.w(TAG, "can't read app handles", it) }.getOrDefault(emptyList())
+
+    private fun handleOf(
+        t: ActivityManager.RunningTaskInfo,
+        strip: Int,
+        handleW: Int,
+    ): Rect? {
+        if (!android.app.TaskInfo::class.java.getField("isVisible").getBoolean(t)) return null
+        val c = android.app.TaskInfo::class.java.getField("configuration").get(t) as Configuration
+        val wc = Configuration::class.java.getField("windowConfiguration").get(c)!!
+        if (wc.javaClass.getMethod("getActivityType").invoke(wc) as Int !in APP_TYPES) return null
+        if (wc.javaClass.getMethod("getWindowingMode").invoke(wc) as Int == FREEFORM) return null
+        val b = wc.javaClass.getMethod("getBounds").invoke(wc) as Rect
+        if (b.isEmpty || b.top >= strip) return null
+        return Rect(b.centerX() - handleW / 2, 0, b.centerX() + handleW / 2, strip)
+    }
+
+    /** WindowConfiguration.WINDOWING_MODE_FREEFORM. */
+    private const val FREEFORM = 5
+
     /** Task [t] is a visible app whose bounds (WM's, whatever its windowing mode) contain ([x], [y]). */
     private fun covers(
         t: ActivityManager.RunningTaskInfo,

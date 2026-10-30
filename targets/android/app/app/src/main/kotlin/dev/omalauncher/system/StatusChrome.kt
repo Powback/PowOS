@@ -72,6 +72,52 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         changed()
         watchdog.start()
     }
+    /**
+     * The page's own controls on the strip (chrome.regions: every [data-action] element - the clock, the indicators,
+     * the FPS meter), display px: the strip is touchable only there ([ShadeHost] edgeRegion).
+     */
+    var controls: List<android.graphics.Rect> = emptyList()
+        private set
+
+    override fun regions(regions: org.json.JSONArray) {
+        val d = context.resources.displayMetrics.density
+        val list =
+            (0 until regions.length()).mapNotNull { i ->
+                regions.optJSONObject(i)?.let { r ->
+                    val x = r.optDouble("x").toFloat() * d
+                    val y = r.optDouble("y").toFloat() * d
+                    android.graphics.Rect(x.toInt(), y.toInt(), Math.round(x + r.optDouble("width").toFloat() * d), Math.round(y + r.optDouble("height").toFloat() * d))
+                }
+            }.filter { !it.isEmpty }
+        web.post {
+            if (list == controls) return@post
+            controls = list
+            web.rootView.requestLayout()
+        }
+    }
+
+    /**
+     * A maximised web window's bar under the strip (TB1): the title ends at [titleEnd] and the window's controls start
+     * at [controlsStart] (display px; null: no merge). The page lays the clock out after the title and the indicators
+     * before the controls ("mergeLeft"/"mergeRight", CSS px from each side).
+     */
+    private var merged: Pair<Int?, Int?> = null to null
+
+    fun merge(
+        titleEnd: Int?,
+        controlsStart: Int?,
+    ) {
+        if (merged == titleEnd to controlsStart) return
+        merged = titleEnd to controlsStart
+        val d = context.resources.displayMetrics.density
+        val width = context.resources.displayMetrics.widthPixels
+        val left = titleEnd?.let { it / d }
+        val right = controlsStart?.let { (width - it) / d }
+        if (left != null) data.put("mergeLeft", left.toDouble()) else data.remove("mergeLeft")
+        if (right != null) data.put("mergeRight", right.toDouble()) else data.remove("mergeRight")
+        publish()
+    }
+
     override fun action(name: String) { when (name) { "notifications" -> open(false); "controls" -> open(true) } }
     private fun connection() {
         val caps = connectivity.getNetworkCapabilities(connectivity.activeNetwork)

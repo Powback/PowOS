@@ -17,6 +17,7 @@
 import { signal } from "@preact/signals";
 import { fromNative, native, nextFrameId, send } from "../apps/native.ts";
 import { powos } from "../bridge.ts";
+import { themeBlur } from "./glassblur.ts";
 
 const root = document.documentElement;
 const mode = new URLSearchParams(location.search).get("mode") ?? "home";
@@ -224,10 +225,7 @@ interface Raw {
 /** The theme's blur radius for the compositor, read when the theme or the shapes change (not every frame). */
 let blur = 28;
 function readBlur() {
-  // The compositor's radius, not a Gaussian's sigma: its blur is ~0.15-0.3 of what it's given (measured on the phone,
-  // 2026-10-21), so the theme says it on its own (--glass-blur-native); without it, --glass-blur.
-  const css = getComputedStyle(root);
-  blur = parseFloat(css.getPropertyValue("--glass-blur-native")) || parseFloat(css.getPropertyValue("--glass-blur")) || 28;
+  blur = themeBlur();
 }
 
 /** Every surface's region as laid out now (one layout read of each surface, its clips and its fading ancestors). */

@@ -135,6 +135,7 @@ object Switcher {
         private set(v) {
             if (field == v) return
             field = v
+            ShadeHost.current?.barClaimsChanged()
             // Home's panels aren't over the windows while the switcher is up (PanelLift); back after, if still open.
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 if (v) dev.omalauncher.shell.PanelLift.dropNow("switcher") else dev.omalauncher.shell.PanelLift.current?.again()
@@ -265,6 +266,8 @@ object Switcher {
         if (bridge !== home) return
         homeVisible = true
         PetOverlay.current?.homeVisible(true)
+        // The web windows' bars on the status bar are home's: claimed and merged only while it shows (ShadeHost.barClaims).
+        ShadeHost.current?.barClaimsChanged()
     }
 
     /** The layer's page went out of sight (an app opened from a card, or over it): the layer goes, unless a swipe owns it. */
@@ -272,6 +275,8 @@ object Switcher {
         if (bridge !== home) return
         homeVisible = false
         PetOverlay.current?.homeVisible(false)
+        // The web windows' bars on the status bar are home's: claimed and merged only while it shows (ShadeHost.barClaims).
+        ShadeHost.current?.barClaimsChanged()
         hideStopped()
         // The app that just came up is the newest task now: the cards are laid out for the next swipe already (the
         // page renders them hidden, their snapshots load), so it shows them from its first frame.
