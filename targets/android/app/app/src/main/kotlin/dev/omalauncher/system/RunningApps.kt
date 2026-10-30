@@ -23,6 +23,7 @@ object RunningApps {
     private const val FILE = "apps.json"
     private const val SETTLE_MS = 120L
     private const val MAX_TASKS = 64
+    private const val TASKS_STAMP = "android-tasks"
 
     /** Packages with a running task, any windowing mode (PowOS's own aside: its tasks are Linux windows and its own screens). */
     val tasks = mutableStateOf<List<String>>(emptyList())
@@ -31,8 +32,15 @@ object RunningApps {
     val linux = mutableStateOf("{}")
 
     private val main = Handler(Looper.getMainLooper())
-    private val readTasksNow = Runnable { readTasks() }
+    private val readTasksNow =
+        Runnable {
+            readTasks()
+            stampTasks()
+        }
     private var app: Context? = null
+
+    /** The run dir's android-tasks, bumped on every task change: powos-android-tasks re-reads the task list then. */
+    private var stamp: File? = null
     private var observer: FileObserver? = null
 
     /** From the app's start (main process): the task listener, and the session's file under [runDir] where it runs. */
@@ -50,7 +58,25 @@ object RunningApps {
             }
         Log.i(TAG, if (listening != null) "task listener on" else "task listener MISSING: the dots keep the start-up read")
         readTasks()
-        runDir?.let { watch(File(it, "running")) }
+        runDir?.let {
+            stamp = File(it, TASKS_STAMP)
+            stampTasks()
+            watch(File(it, "running"))
+        }
+    }
+
+    /**
+     * Tells the PowOS session's taskbar watcher (powos-android-tasks) that Android's tasks changed, instead of it running
+     * `am stack list` every 2 s: a new file renamed into place (a directory event its QFileSystemWatcher sees).
+     */
+    private fun stampTasks() {
+        val f = stamp ?: return
+        runCatching {
+            val tmp = File(f.parentFile, "$TASKS_STAMP.tmp")
+            tmp.writeText(System.nanoTime().toString())
+            tmp.setReadable(true, false)
+            if (!tmp.renameTo(f)) tmp.delete()
+        }.onFailure { Log.w(TAG, "can't write $f", it) }
     }
 
     private fun readTasks() {
