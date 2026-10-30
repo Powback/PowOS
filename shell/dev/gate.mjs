@@ -3421,6 +3421,14 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar)), ...(await r.page.evaluate(wideLauncherBar)), ...(await r.page.evaluate(wideBarParked))])));
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard", { width: 1280, height: 800 }).then((r) => whenReady(r, () => launcherKeyboardKeepsFocus(r.page))));
+  // The launcher's dock, opened after PowOS AI's pull (dev/dock-check.js launcherDockOpens - the user, 2026-10-30, the
+  // third report: "the dock is still hiding in the launcher in unfolded mode"): unfolded right/bottom with and without the
+  // keyboard; folded without it (with it the dock gives way there).
+  const dockOpens = [["unfolded", "right", false], ["unfolded", "right", true], ["unfolded", "bottom", false], ["unfolded", "bottom", true], ["folded", "right", false], ["folded", "bottom", false]];
+  const dockOpensView = { unfolded: { width: 821, height: 883 }, folded: { width: 404, height: 899 } };
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, position, keyboard] of dockOpens)
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `launcher-dock-${label}-${position}${keyboard ? "-kbd" : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos, kb) => (await importShim("./dev/dock-check.js")).launcherDockOpens(pos, kb), position, keyboard))));
   // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard-side", { width: 821, height: 883 }).then((r) => whenReady(r, () => launcherKeyboardSide(r.page, { width: 821, height: 883 }))));
