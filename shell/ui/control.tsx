@@ -440,20 +440,43 @@ function appIcon(pkg?: string): string | null {
 
 const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
 
+/** Previous, play/pause (the larger), next - on this session - the elapsed time [at] and the total at the row's ends. */
+function Transport({ m, at }: { m: MediaState; at: number }) {
+  const pkg = m.package;
+  const duration = m.duration ?? 0;
+  return (
+    <span class="cc-transport">
+      <span class="cc-time">{duration ? clock(at) : ""}</span>
+      <button type="button" aria-label="previous" onClick={() => powos.media.control("previous", pkg)}>
+        <Icon name="skipPrevious" />
+      </button>
+      <button type="button" class="cc-play" aria-label={m.playing ? "pause" : "play"} onClick={() => powos.media.control("toggle", pkg)}>
+        <Icon name={m.playing ? "pause" : "play"} />
+      </button>
+      <button type="button" aria-label="next" onClick={() => powos.media.control("next", pkg)}>
+        <Icon name="skipNext" />
+      </button>
+      <span class="cc-time">{duration ? clock(duration) : ""}</span>
+    </span>
+  );
+}
+
 /**
- * The progress line: a thin line, the times at its ends; no knob until it's dragged (the line is a range input, so a
- * drag still seeks). A session that doesn't take seeking: the line only shows where it is.
+ * The transport row and the progress line under it (the card <= 112 px, the spec's old height): the times small at the
+ * row's two ends, not under it; the line is a range input, no knob till it's dragged (a drag seeks; the elapsed time
+ * follows the finger). A session that doesn't take seeking: the line only shows where it is.
  */
-function Seek({ m }: { m: MediaState }) {
+function Playback({ m }: { m: MediaState }) {
   const [drag, setDrag] = useState<number | null>(null);
   const duration = m.duration ?? 0;
   const at = drag ?? Math.min(duration, m.position ?? 0);
   const value = (e: Event) => Number((e.target as HTMLInputElement).value);
   return (
-    <div class={`cc-seek ${drag === null ? "" : "dragging"}`}>
-      <span class="cc-time">{duration ? clock(at) : ""}</span>
+    <>
+      <Transport m={m} at={at} />
       <input
         type="range"
+        class={`cc-seek ${drag === null ? "" : "dragging"}`}
         aria-label="seek"
         min={0}
         max={duration || 1}
@@ -468,26 +491,7 @@ function Seek({ m }: { m: MediaState }) {
           window.setTimeout(() => setDrag(null), 1200);
         }}
       />
-      <span class="cc-time">{duration ? clock(duration) : ""}</span>
-    </div>
-  );
-}
-
-/** Previous, play/pause (the larger), next - on this session. */
-function Transport({ m }: { m: MediaState }) {
-  const pkg = m.package;
-  return (
-    <span class="cc-transport">
-      <button type="button" aria-label="previous" onClick={() => powos.media.control("previous", pkg)}>
-        <Icon name="skipPrevious" />
-      </button>
-      <button type="button" class="cc-play" aria-label={m.playing ? "pause" : "play"} onClick={() => powos.media.control("toggle", pkg)}>
-        <Icon name={m.playing ? "pause" : "play"} />
-      </button>
-      <button type="button" aria-label="next" onClick={() => powos.media.control("next", pkg)}>
-        <Icon name="skipNext" />
-      </button>
-    </span>
+    </>
   );
 }
 
@@ -495,8 +499,8 @@ function Transport({ m }: { m: MediaState }) {
  * One session's card (the user, 2026-10-30: "surely there's some better way to do the media"): its background is the
  * art itself, blurred and darkened under the shade's tint (one pseudo-element, shell.css .cc-media.has-art); the art
  * again as a rounded tile, the track beside it (a tap opens the app), the app's icon small at the corner (its output
- * picker: speaker, Bluetooth, cast); the transport centred under them, the progress line under that. Every control
- * acts on this session (its package), not whichever plays.
+ * picker: speaker, Bluetooth, cast); the transport centred under them, the times at its ends, the progress line under
+ * that. Every control acts on this session (its package), not whichever plays.
  */
 function MediaCard({ m }: { m: MediaState }) {
   const icon = appIcon(m.package);
@@ -511,8 +515,7 @@ function MediaCard({ m }: { m: MediaState }) {
       <button type="button" class="cc-media-app" aria-label={`output: ${m.app ?? "this app"}`} onClick={() => (shut(), powos.media.output(m.package))}>
         {icon ? <img src={icon} alt="" /> : <Icon name="speakerWireless" />}
       </button>
-      <Transport m={m} />
-      <Seek m={m} />
+      <Playback m={m} />
     </div>
   );
 }
