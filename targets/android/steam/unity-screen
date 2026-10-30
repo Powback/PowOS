@@ -7,7 +7,8 @@
 #
 # Runs where Steam puts launch-option prefixes: inside the Steam Linux Runtime container, under FEX (x86). That runtime
 # has no xrandr and only `python3.13`, so the size comes from libX11 through ctypes; outside it the host's python3 does
-# the same. No display or no python: the game starts unchanged.
+# the same. No display or no python: the game starts unchanged. Unreal Engine games need no launch option: the steam
+# package's Proton user_settings.py (_ue_screen) does the same for every one of them.
 #
 #   unity-screen --install <appid>...   (in the session, Steam NOT running) copy this file to
 #                                       ~/.local/share/powos/unity-screen and set it as the LaunchOptions of each appid

@@ -110,7 +110,8 @@ case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
     # (powos-steam-compat: per-game policy, measured launches): written into config.vdf now, while no Steam runs.
     command -v powos-steam-compat >/dev/null && timeout 20 powos-steam-compat apply 2>&1 | sed 's/^/steam: /' >&2
     # PowOS's Proton user_settings.py (/usr/lib/powos-steam/user_settings.py: skips the install script evaluator when it
-    # has nothing to do, ~/.config/powos/proton-settings.json) in every Proton, unless that Proton has the user's own.
+    # has nothing to do, Unreal Engine games at the current screen size, ~/.config/powos/proton-settings.json) in every
+    # Proton, unless that Proton has the user's own.
     for d in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/common/Proton* \
              "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/compatibilitytools.d/*; do
       [ -f "$d/proton" ] && [ -f /usr/lib/powos-steam/user_settings.py ] || continue

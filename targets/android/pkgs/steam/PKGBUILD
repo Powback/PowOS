@@ -3,7 +3,7 @@
 # Arch's steam PKGBUILD) stays as the STEAM_X86=1 fallback, through FEX.
 pkgname=steam
 pkgver=1.0.0.87
-pkgrel=29
+pkgrel=30
 pkgdesc="Steam: Valve's native ARM64 client (games through FEX) - PowOS phone build"
 arch=(any)
 url=https://steampowered.com/
@@ -28,7 +28,8 @@ package() {
   ln -sf /usr/bin/true "$pkgdir/usr/bin/steamdeps"
   # The launcher in FEX's x86 world, with System V IPC (see the file).
   install -m755 "$srcdir/steam" "$pkgdir/usr/bin/steam"
-  # Proton's user_settings.py, put into each Proton by /usr/bin/steam (see the file).
+  # Proton's user_settings.py, put into each Proton by /usr/bin/steam: install script evaluator skip, Unreal Engine
+  # games at the current screen size (see the file).
   install -Dm644 "$srcdir/user_settings.py" "$pkgdir/usr/lib/powos-steam/user_settings.py"
   # Which way each game runs (native Linux build / ARM64 Proton / x86 Proton), per game, measured (see the file);
   # /usr/bin/steam applies it before each Steam start.
