@@ -18,6 +18,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
 import android.webkit.WebMessage
 import android.webkit.WebMessagePort
 import android.webkit.WebView
@@ -106,13 +107,51 @@ class ShellNative(
             )
             port = mine
             web.postWebMessage(WebMessage("powos-native", arrayOf(theirs)), Uri.parse(origin))
+            // The geometry interface's key, to this page's top frame only (the port): a new one per page.
+            val key = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
+            geo.key = key
+            mine.postMessage(WebMessage("w.key $key"))
             // A new page: its glass asks again (b.hello); the last page's regions go with it.
             glass?.reset()
         }
     }
 
-    /** Where "w.f" goes (ShellHost: the bridge's web windows). */
-    @Volatile var windowFrame: ((String) -> Unit)? = null
+    /** Where "w.f" goes (ShellHost: the bridge's web windows); [direct]: it came on [Geometry], not the port. */
+    @Volatile var windowFrame: ((rest: String, direct: Boolean) -> Unit)? = null
+
+    /**
+     * "w.f" off the main thread: the port's messages reach home's MAIN thread first (the WebView receives them there,
+     * then posts to the port's handler), so a window draw in that hop already showed the moved DOM bar while the
+     * layers' transaction rode the next one - the content a frame behind the title bar during drags (the user,
+     * 2026-10-30: "why is the window content suddenly lagging behind the titlebar positions"). A JavaScript interface
+     * method runs on the WebView's binder thread, synchronously inside the page's rAF, so the geometry is in hand before
+     * the page's commit and [FrameSync.next]'s async post lands before the draw that shows that frame.
+     *
+     * A JavaScript interface is in EVERY frame of the page and can't see its caller (ShellOrigin), so this one does one
+     * thing only - web window geometry - and only with the key the port gave the page's top frame ("w.key"): an iframe
+     * can't read it. Every word must be a number; anything else is dropped.
+     */
+    private val geo = Geometry()
+
+    private inner class Geometry {
+        @Volatile var key: String? = null
+
+        @JavascriptInterface
+        fun frame(
+            key: String?,
+            line: String?,
+        ) {
+            val want = this.key ?: return
+            if (key == null || line == null || line.length > MAX_GEOMETRY) return
+            if (!java.security.MessageDigest.isEqual(key.toByteArray(), want.toByteArray())) return
+            if (!line.startsWith("w.f ") || !GEOMETRY.matches(line.substring(4))) return
+            windowFrame?.invoke(line.substring(4), true)
+        }
+    }
+
+    init {
+        web.addJavascriptInterface(geo, "PowosGeometry")
+    }
 
     /** Home's panels over the floating windows: made at home's page's "p.hello". */
     @Volatile private var lift: PanelLift? = null
@@ -145,7 +184,7 @@ class ShellNative(
                 "b.r" -> glass?.command(rest)
                 "b.f" -> glass?.frameCommand(rest)
                 // Web windows' geometry, frame-synced like "b.f" (WebWindows.frameCommand; home's page only).
-                "w.f" -> windowFrame?.invoke(rest)
+                "w.f" -> windowFrame?.invoke(rest, false)
                 "b.lag" -> glass?.let { it.lag = rest.trim().toInt() }
                 "b.liquid" -> glass?.liquidCommand(rest)
                 "s.draw" -> {
@@ -393,6 +432,12 @@ class ShellNative(
 
     companion object {
         private const val TAG = "PowosNative"
+
+        /** "w.f"'s words: numbers and single spaces only (ids, CSS px, flags, the page frame's time). */
+        private val GEOMETRY = Regex("[0-9.eE+-]+( [0-9.eE+-]+)*")
+
+        /** Longer than any real "w.f" (~200 chars a window). */
+        private const val MAX_GEOMETRY = 32_768
         private val SCHEMES = setOf("http", "https", "mailto", "tel", "geo", "market")
     }
 }

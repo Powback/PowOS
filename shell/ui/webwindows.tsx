@@ -8,7 +8,7 @@
 // draw. Over the body the page is transparent; anything above it in the DOM paints over the app and takes its taps.
 import { signal } from "@preact/signals";
 import { useRef, useState } from "preact/hooks";
-import { native, nextFrameId, send } from "../apps/port.ts";
+import { geometryChannel, native, nextFrameId, sendGeometry } from "../apps/port.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
 import type { WebWindowRect } from "../types.ts";
@@ -822,21 +822,34 @@ export function geometry(): string {
 
 /** For the gate and CDP (`__ww.sent`): the last "w.f" lines (sent, or measured with no host), newest last. */
 const sent: string[] = [];
-(globalThis as { __ww?: unknown }).__ww = { sent, geometry };
+(globalThis as { __ww?: unknown }).__ww = {
+  sent,
+  geometry,
+  get direct() {
+    return geometryChannel.direct;
+  },
+  set direct(on: boolean) {
+    geometryChannel.direct = on;
+  },
+};
 
-/** Each frame while there are windows: their geometry tagged with this page frame, when it changed. */
-function tick() {
+/**
+ * Each frame while there are windows: their geometry tagged with this page frame, when it changed. The line ends with
+ * the frame's rAF time as wall-clock ms (performance.timeOrigin + its timestamp): the host counts the window draws
+ * between it and the apply (FrameSync.pageLag, "pf=" in the host's "w.f" log).
+ */
+function tick(ts: number) {
   raf = 0;
   const g = geometry();
   if (g !== lastGeometry) {
     lastGeometry = g;
     const id = nextFrameId();
-    const line = `w.f ${id} ${g}`;
+    const line = `w.f ${id} ${g} ${(performance.timeOrigin + ts).toFixed(2)}`;
     sent.push(line);
     if (sent.length > 120) sent.shift();
     if (native.value) {
       console.timeStamp(`ww f${id}`);
-      send(line);
+      sendGeometry(line);
     }
   }
   if (webWins.value.length) raf = requestAnimationFrame(tick);

@@ -7,6 +7,7 @@ import { signal } from "@preact/signals";
 declare global {
   interface Window {
     PowosNative?: { connect?(): void; postMessage?(message: string): void };
+    PowosGeometry?: { frame(key: string, line: string): void };
   }
 }
 
@@ -34,6 +35,34 @@ try {
 } catch {}
 
 export const send = (command: string) => native.value?.postMessage(command);
+
+/**
+ * The geometry interface's key (ShellNative.Geometry): the host hands it over the port ("w.key <hex>") so only this
+ * frame can use window.PowosGeometry, which Android puts into every frame of the page.
+ */
+let geometryKey: string | null = null;
+fromNative.add((text) => {
+  if (text.startsWith("w.key ")) geometryKey = text.slice(6);
+});
+
+/** Test knob (CDP: `__ww.direct = false`): "w.f" over the port, as before the direct interface. */
+export const geometryChannel = { direct: true };
+
+/**
+ * A "w.f" line to the host, off its main thread when it can be: the direct interface runs on the WebView's binder
+ * thread, synchronously in this rAF, so the host has the geometry before this frame's commit (ShellNative.Geometry).
+ * The port otherwise (an older APK, no key yet).
+ */
+export function sendGeometry(line: string) {
+  const g = window.PowosGeometry;
+  if (geometryChannel.direct && g && geometryKey) {
+    try {
+      g.frame(geometryKey, line);
+      return;
+    } catch {}
+  }
+  send(line);
+}
 
 /**
  * Page frame ids for the host's frame-synced commands ("b.f" glass regions, "w.f" web windows): one counter, so what

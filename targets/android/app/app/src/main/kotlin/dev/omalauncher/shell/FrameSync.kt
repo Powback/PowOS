@@ -38,13 +38,31 @@ internal class FrameSync(
 
     /** The window's draws so far (main thread writes; the port thread reads it at receipt). */
     @Volatile private var draws = 0L
-    private val counter = ViewTreeObserver.OnDrawListener { draws++ }
+
+    /** When each of the last [RING] draws ran (monotonic ms, System.nanoTime's clock; main thread only). */
+    private val drawAt = DoubleArray(RING)
+    private val counter =
+        ViewTreeObserver.OnDrawListener {
+            drawAt[(draws % RING).toInt()] = System.nanoTime() / 1e6
+            draws++
+        }
 
     /** Main, ahead of a pending traversal's sync barrier (a plain post runs after that draw: a frame late). */
     private val ui = Handler.createAsync(Looper.getMainLooper())
 
     /** [next]'s applies by window draws between receipt and apply: 0 (the same draw as the page frame), 1, 2, 3+. */
     val lag = LongArray(4)
+
+    /**
+     * [next]'s applies by window draws between the PAGE frame (its rAF's vsync time, the page's clock) and the apply: 0 =
+     * nothing drew since the page frame began (the transaction rides the draw that shows it), 1, 2, 3+ (that many draws
+     * went out first: the content trailed the DOM by up to that many frames). Unlike [lag], it sees a draw that ran
+     * before the message reached the host at all.
+     */
+    val pageLag = LongArray(4)
+
+    /** Sum of (receipt - page frame) ms over [pageLag]'s applies: how long the message took to reach the host. */
+    var receiptMs = 0.0
 
     init {
         // A view's observer is merged into its window's on attach and lost on detach: counted on each window it joins.
@@ -68,18 +86,35 @@ internal class FrameSync(
     fun next(
         id: Long,
         cookie: Int,
+        pageEpochMs: Double = Double.NaN,
         apply: () -> Unit,
     ) {
         val at = draws
+        val nowMs = System.nanoTime() / 1e6
+        // The page's rAF time (performance.timeOrigin + its timestamp: wall-clock ms) on the monotonic clock.
+        val page = pageEpochMs - (System.currentTimeMillis() - nowMs)
         ui.post {
             Trace.endAsyncSection("$name f$id", cookie)
             if (id <= applied) return@post
             applied = id
             lag[(draws - at).coerceIn(0, 3).toInt()]++
+            if (!page.isNaN()) countPageLag(page, nowMs)
             apply()
             val then = draws
             ui.postDelayed({ if (draws == then) web.invalidate() }, MAX_WAIT_MS)
         }
+    }
+
+    /** Main: the draws since page frame time [page] (monotonic ms) into [pageLag]; its receipt at [receivedMs]. */
+    private fun countPageLag(
+        page: Double,
+        receivedMs: Double,
+    ) {
+        var since = 0
+        val n = minOf(draws, RING.toLong()).toInt()
+        while (since < n && drawAt[((draws - 1 - since) % RING).toInt()] > page) since++
+        pageLag[since.coerceAtMost(3)]++
+        receiptMs += receivedMs - page
     }
 
     /** On the port's thread: [id] arrived. The cookie for [bind]. */
@@ -133,6 +168,9 @@ internal class FrameSync(
     companion object {
         /** A bound change waits at most this long for its draw (two frames at 60 Hz plus slack). */
         const val MAX_WAIT_MS = 50L
+
+        /** Draw times kept for [pageLag]. */
+        private const val RING = 8
     }
 
     /** Another page (a reload): its frame ids start again at 1. */
