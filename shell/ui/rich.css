@@ -150,32 +150,21 @@
 .md th { font-weight: 600; }
 .md tbody tr:nth-child(odd) td { background: var(--soft-fill); }
 
-/* PowOS AI's page (powai.tsx): what needs you, then the conversation, then the board. */
-.ai-needs { display: flex; flex-direction: column; gap: 8px; }
-.ai-need { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; }
-.ai-need-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 0; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
-.ai-need-do { font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
-.ai-need-what { font-size: var(--text-small); overflow-wrap: anywhere; }
-.ai-need-acts { flex: none; display: flex; flex-direction: column; gap: 6px; }
-.ai-need-act { min-height: 32px; padding: 4px 14px; font: inherit; color: var(--color-foreground); background: none; border: 0; border-radius: 20px; }
+/* PowOS AI's page (powai.tsx): the conversation, then the board. */
 /* Folds on the wallpaper (not on a surface): a label's colour and shadow, as the page's headings. */
 .ai-screen .ai-fold:not(.tile *) { color: var(--on-wallpaper); text-shadow: var(--label-shadow); }
 
-/* The board's rows: a dot, the title up to two lines, an age only past a day. */
+/* The board's rows: a dot, the title up to two lines, its state in plain words under it. */
 .ai-item { display: flex; flex-direction: column; }
-/* A grid so the progress (bar + "1/4 · step") sits above the title's column and the dot stays beside the title. */
 .ai-item-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; column-gap: 10px; row-gap: 2px; width: 100%; padding: 8px 12px; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
 .ai-item-row .ai-dot { margin-top: 0.45em; }
-.ai-item-progress { grid-column: 2 / -1; display: flex; flex-direction: column; min-width: 0; }
 .ai-item-row > .ai-dot { grid-column: 1; }
 .ai-item-main { grid-column: 2; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ai-item-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.35; overflow-wrap: anywhere; }
 .ai-item-row[aria-expanded="true"] .ai-item-title { -webkit-line-clamp: unset; }
 .ai-item-note { margin: 0; font-size: var(--text-small); line-height: 1.4; overflow-wrap: anywhere; }
-/* Tracked: above the title a thin bar (how far along) and "3/10 · the step"; under it "owner · 2 commits · 2h ago". */
-.ai-bar { display: block; height: 3px; margin: 2px 0 3px; border-radius: 2px; background: var(--soft-fill); overflow: hidden; }
-.ai-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--color-accent); }
-.ai-item-step, .ai-item-facts { font-size: var(--text-small); line-height: 1.35; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Under the title: "ready to try", "an agent is on it · step 2 of 6". */
+.ai-item-facts { font-size: var(--text-small); line-height: 1.35; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ai-item-facts { color: var(--color-muted); }
 /* Open: the note, the steps (done / now / next), the commits in plain words, the review images. */
 .ai-item-more { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 10px calc(12px + 8px + 10px); font-size: var(--text-small); line-height: 1.4; }
@@ -193,18 +182,31 @@
 .ai-img img { display: block; width: auto; height: auto; max-width: 128px; max-height: 128px; object-fit: contain; }
 .ai-img-name { padding: 2px 8px; border-radius: 8px; background: var(--soft-fill); overflow-wrap: anywhere; }
 .ai-img-full { display: block; max-width: 100%; margin: 0 auto; border-radius: 8px; }
-.ai-item-age { flex: none; font-size: var(--text-small); color: var(--color-muted); }
 .ai-item.done .ai-item-title { color: var(--color-muted); }
-.ai-group + .ai-group { margin-top: 6px; }
-.ai-group-name { padding: 6px 12px 2px; font-size: var(--text-small); color: var(--color-muted); }
+/*
+ * The board's groups (powai.tsx GROUPS): Needs you, Ready to try, Being worked on, Waiting for an agent. Each a name and
+ * its count (a tap folds it; the last starts folded), its first five rows, "N more" for the rest.
+ */
+.ai-group { display: flex; flex-direction: column; }
+.ai-group + .ai-group { margin-top: 6px; border-top: var(--frame) solid var(--line); padding-top: 4px; }
+.ai-group-fold { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 8px 12px 4px; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
+.ai-group-title { font-weight: 600; }
+.ai-group-count { font-size: var(--text-small); color: var(--color-muted); }
+.ai-group-caret { margin-left: auto; font-size: var(--text-small); color: var(--color-muted); }
+.ai-group-more { align-self: flex-start; margin: 0 12px 6px calc(12px + 8px + 10px); padding: 4px 0; font: inherit; font-size: var(--text-small); color: var(--accent-text); background: none; border: 0; }
+/* A row the user can act on: its state and, at the line's end (wrapping under it when narrow), done / skip or works /
+   still broken. */
+.ai-item-line { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 4px; margin: -4px 12px 8px calc(12px + 8px + 10px); }
+.ai-item-line > .ai-item-facts { flex: 1 1 auto; min-width: 0; }
+.ai-item-acts { display: flex; gap: 6px; margin-left: auto; }
+.ai-act { min-height: 30px; padding: 3px 14px; font: inherit; font-size: var(--text-small); color: var(--color-foreground); background: var(--soft-fill); border: 0; border-radius: 999px; white-space: nowrap; }
+.ai-act:first-child { color: var(--color-background); background: var(--color-accent); }
 .ai-work-list { display: flex; flex-direction: column; }
 .ai-work-list > .ai-heading { margin: 4px 12px 2px; display: flex; align-items: baseline; gap: 6px; }
 /* A queued phone check: a quiet "test now" under the row (the queue runs it at once); "test all" on the header. */
 .ai-test { align-self: flex-start; margin: -2px 12px 8px calc(12px + 8px + 10px); padding: 4px 12px; font: inherit; font-size: var(--text-small); color: var(--color-foreground); background: var(--soft-fill); border: 0; border-radius: 999px; }
 .ai-heading .ai-test-all { margin: 0 0 0 auto; }
 .ai-heading span.ai-test-all { font-size: var(--text-small); }
-.ai-result.bad { color: var(--color-red); }
-.ai-result-shot { padding: 0 12px 10px calc(12px + 8px + 10px); }
 /* A folded line: paused, done recently, the earlier conversation. */
 .ai-fold { align-self: flex-start; padding: 8px 12px; font: inherit; font-size: var(--text-small); color: var(--color-foreground); background: none; border: 0; }
 

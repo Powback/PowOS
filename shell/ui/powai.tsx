@@ -1,7 +1,8 @@
 /**
- * The PowOS AI page: left of home's first page, the whole screen (home, its bar and dock slide away for it). What
- * waits on the user (one card each, what to do), the conversation - the last ask, its steps as they run, its answer -
- * the work in progress (the agents' tasks, live from the powos-agents module's work board: `powos agents task ...`),
+ * The PowOS AI page: left of home's first page, the whole screen (home, its bar and dock slide away for it). The
+ * conversation - the last ask, its steps as they run, its answer - the work in progress (the agents' tasks, live from
+ * the powos-agents module's work board: `powos agents task ...`), grouped by what each means for the user: needs you,
+ * ready to try (works / still broken), being worked on, waiting for an agent;
  * the agents at work (PowOS's tmux sessions,
  * each with the task its pane's title names, a spinner's mark while it works; a tap opens its terminal), what they told
  * you lately, the whole conversation (folded; wide, in full), and a field to ask it (the mic: hold to talk and send, tap to dictate).
@@ -21,7 +22,7 @@ import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
 import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf, onLink, openFull, qaUrl, toolLabel } from "./rich.tsx";
-import { askQueued, openAssistant, waiting } from "./assistant.ts";
+import { askQueued, waiting } from "./assistant.ts";
 
 const sessions = signal<AgentSession[]>([]);
 const mail = signal<AgentMail[]>([]);
@@ -213,17 +214,11 @@ const boardLive = signal(false);
 export const boardSeen = signal(false);
 /** Done this long ago or less: under "done recently". */
 const RECENT_MS = 24 * 3600 * 1000;
-/** Ages show only past this: anything younger is "now-ish" and says nothing. */
-const DAY_S = 86400;
-/** Needs-you cards shown at once (the conversation stays in view); the rest behind "N more". */
-const NEEDS_SHOWN = 3;
-/** More open items than this: grouped by project, a quiet header each. */
-const GROUP_OVER = 6;
 const sec = (ms: bigint | number) => Number(ms) / 1000;
 
 const WORK_QUERY = "SELECT * FROM work";
 /** The board's facts (apps/agents work_check: each task's phone checks, synced from the verify queue) and friction. */
-const checks = signal<BoardCheck[]>([]);
+export const checks = signal<BoardCheck[]>([]);
 /** A friction row (apps/agents `friction`: what got in an agent's way; `powos friction`). */
 interface FrictionRow {
   id: string;
@@ -287,13 +282,10 @@ function WorkFeed() {
 }
 
 /**
- * The verify queue's marker on a task (tools/phone/verify/queue.sh QUEUED_STEP): a phone check of it waits for a free
- * window. "Test now" hands the phone over: the queue runs it at once (powos.ai.verifyGo); its result replaces the step
- * ("verify PASS: ..." / "verify FAIL rc=N: ...", a FAIL with a screenshot as the task's last review image).
+ * "Test now" on a task with a phone check waiting for a free window (agents.ts boardState "awaiting check") hands the
+ * phone over: the queue runs it at once (powos.ai.verifyGo); its result lands on the board's checks.
+ * Tapped "test now" (task id, or "all"): when. "testing…" shows until the check runs out of the queue, or this long.
  */
-const QUEUED_STEP = "phone check queued";
-const checkQueued = (w: WorkRow) => w.status === "working" && w.step === QUEUED_STEP;
-/** Tapped "test now" (task id, or "all"): when. "testing…" shows until the step changes, or this long. */
 const testing = signal<Record<string, number>>({});
 const TESTING_MS = 20 * 60_000;
 const testError = signal("");
@@ -314,7 +306,7 @@ function probeTest() {
     );
 }
 const isTesting = (w: WorkRow) =>
-  checkQueued(w) && [testing.value[w.id], testing.value.all].some((t) => t !== undefined && Date.now() - t < TESTING_MS);
+  [testing.value[w.id], testing.value.all].some((t) => t !== undefined && Date.now() - t < TESTING_MS);
 
 function testNow(id: string) {
   testError.value = "";
@@ -411,40 +403,6 @@ function useHealthTaskDone(items: WorkRow[]) {
   }, [key]);
 }
 
-/** What waits on the user: one card each, saying what to do; a tap asks about it, done / skip answer it. */
-function NeedsYou() {
-  const [all, setAll] = useState(false);
-  const items = board.value.filter((w) => w.status === "waiting" && !isAnswered(w)).sort((a, b) => Number(b.updated) - Number(a.updated));
-  useHealthTaskDone(items);
-  if (!items.length) return null;
-  const shown = all ? items : items.slice(0, NEEDS_SHOWN);
-  return (
-    <section class="ai-needs">
-      <h3 class="ai-heading">needs you</h3>
-      {shown.map((w) => (
-        <div key={w.id} class="ai-need tile">
-          <button type="button" class="ai-need-body" onClick={() => openAssistant({ text: `About "${w.title}": ` })}>
-            <span class="ai-need-do">{w.note || w.title}</span>
-            {w.note && <span class="ai-need-what">{w.title}</span>}
-          </button>
-          <span class="ai-need-acts">
-            <button type="button" class="ai-need-act" onClick={() => answer(w, "skip")}>
-              skip
-            </button>
-            <button type="button" class="ai-need-act" onClick={() => answer(w, "done")}>
-              done
-            </button>
-          </span>
-        </div>
-      ))}
-      {items.length > shown.length && (
-        <button type="button" class="ai-fold" onClick={() => setAll(true)}>
-          ▸ {items.length - shown.length} more
-        </button>
-      )}
-    </section>
-  );
-}
 
 const fileName = (path: string) => path.split("/").pop() ?? path;
 
@@ -460,30 +418,14 @@ function Review({ path }: { path: string }) {
   );
 }
 
-/** The step it's on; a queued phone check ("testing…" once test now was tapped), or a check's result in one line. */
-function StepLine({ w, count }: { w: WorkRow; count: string }) {
-  const result = resultOf(w.step ?? "");
-  const pre = count && w.step ? `${count} · ` : count;
-  if (!w.step) return <span class="ai-item-step">{pre}</span>;
-  if (checkQueued(w)) return <span class="ai-item-step muted">{pre}{isTesting(w) ? "testing… don't touch the phone" : QUEUED_STEP}</span>;
-  if (!result) return <span class="ai-item-step">{pre}{w.step}</span>;
-  return <span class={`ai-item-step ai-result ${result.ok ? "ok" : "bad"}`}>{pre}{result.ok ? "check passed" : `check failed: ${result.line}`}</span>;
-}
-
-/** Under a row: "test now" while its phone check is queued; a failed check's screenshot (its last verify-*.png). */
-function CheckActs({ w, images }: { w: WorkRow; images: string[] }) {
-  if (checkQueued(w))
-    return isTesting(w) || !canTest.value ? null : (
-      <button type="button" class="ai-test" onClick={() => testNow(w.id)}>
-        test now
-      </button>
-    );
-  const shot = resultOf(w.step ?? "")?.ok === false ? images.filter((p) => /\/verify-[^/]*\.png$/.test(p)).pop() : undefined;
-  return shot ? (
-    <div class="ai-imgs ai-result-shot">
-      <Review path={shot} />
-    </div>
-  ) : null;
+/** Under a queued check's row: "test now" (gone once tapped, or on a host that can't). */
+function CheckActs({ w }: { w: WorkRow }) {
+  if (boardState(w, checks.value) !== "awaiting check") return null;
+  return isTesting(w) || !canTest.value ? null : (
+    <button type="button" class="ai-test" onClick={() => testNow(w.id)}>
+      test now
+    </button>
+  );
 }
 
 /**
@@ -491,7 +433,7 @@ function CheckActs({ w, images }: { w: WorkRow; images: string[] }) {
  * instead while the runner is paused or silent - both write the go flag (verifyGo "all"), which also ends a pause.
  */
 function TestAll({ rows }: { rows: WorkRow[] }) {
-  const queued = rows.filter(checkQueued);
+  const queued = rows.filter((w) => boardState(w, checks.value) === "awaiting check");
   useEffect(probeTest, []);
   useRunnerState(queued.length > 0 && canTest.value);
   if (!queued.length || !canTest.value) return null;
@@ -510,82 +452,206 @@ function TestAll({ rows }: { rows: WorkRow[] }) {
   );
 }
 
-/** An open item's state in words ("working" only while a live agent holds it); null for blocked/waiting/done. */
-const rowState = (w: WorkRow) => (w.status === "working" ? boardState(w, checks.value) : null);
+/**
+ * The board's groups, in this order (the user, 2026-10-30: "let's group the PowOS AI in-progress things" - by what each
+ * task means for them): what waits on them, what's shipped for them to try, what an agent is on, and what nobody is
+ * on yet (folded: nothing for the user to do there).
+ */
+type Group = "you" | "try" | "on" | "free";
+const GROUPS: { key: Group; name: string; folded?: boolean }[] = [
+  { key: "you", name: "Needs you" },
+  { key: "try", name: "Ready to try" },
+  { key: "on", name: "Being worked on" },
+  { key: "free", name: "Waiting for an agent", folded: true },
+];
+/** Rows a group shows before "N more". */
+const GROUP_SHOWN = 5;
+/** The check a verdict is recorded as (ShellBridge.callVerdict: `--name you`). */
+const USER_CHECK = "you";
+/** Results that decide (SKIP / INVALID say nothing about the fix). */
+const DECIDING = new Set(["PASS", "FAIL", "none"]);
 
-/** Above a tracked row's title: the thin bar and "1/4 · the step". */
-function Progress({ w, done, total }: { w: WorkRow; done: number; total: number }) {
-  if (!total && !w.step) return null;
+/** [w]'s latest deciding check, or the result the queue wrote into its step before the sweeper synced it. */
+function lastResult(w: WorkRow): { ok: boolean; you: boolean } | null {
+  const c = checks.value.filter((x) => x.task === w.id && DECIDING.has(x.state)).sort((a, b) => Number(a.at) - Number(b.at)).pop();
+  if (c) return { ok: c.state !== "FAIL", you: c.name === USER_CHECK };
+  const r = resultOf(w.step ?? "");
+  return r ? { ok: r.ok, you: false } : null;
+}
+
+/**
+ * "works" / "still broken", sent and not yet on the board: id -> the verdict and the `updated` the row had. Shown at
+ * once (works: the row goes; still broken: it moves to "Waiting for an agent"), dropped when the board moves the row
+ * or the call fails (then the row is back where it was, with the reason).
+ */
+const verdicts = signal<Record<string, { works: boolean; updated: number }>>({});
+const verdictError = signal("");
+const verdictOf = (w: WorkRow) => {
+  const v = verdicts.value[w.id];
+  return v && v.updated === Number(w.updated) ? v : null;
+};
+
+/** The user tried a shipped task: the board's CLI records it (bridge ai.verdict); an older host: told to the manager. */
+function verdict(w: WorkRow, works: boolean) {
+  verdictError.value = "";
+  verdicts.value = { ...verdicts.value, [w.id]: { works, updated: Number(w.updated) } };
+  const viaManager = () =>
+    askQueued(works ? `Works: ${w.title} (task ${w.id}) - I tried it, close it as a user PASS` : `Still broken: ${w.title} (task ${w.id}) - I tried it, reopen it with a user FAIL`);
+  const send = powos.ai.verdict;
+  if (!send) return viaManager();
+  send(w.id, works).catch((e) => {
+    if (/no such call/.test(String(e))) return viaManager();
+    const { [w.id]: _, ...rest } = verdicts.value;
+    verdicts.value = rest;
+    verdictError.value = `couldn't save "${w.title}" - ${String(e).replace(/^Error:\s*/, "")}`;
+  });
+}
+
+/** Which group an open row is in (null: not on the board's groups - paused, done, answered). */
+function groupOf(w: WorkRow): Group | null {
+  if (w.status === "waiting") return isAnswered(w) ? null : "you";
+  if (w.status !== "working") return null;
+  const v = verdictOf(w);
+  if (v) return v.works ? null : "free";
+  return workingGroup(w);
+}
+
+/** An open task's group: an agent on it or a phone test waiting; else shipped (to try) or failed / never pushed. */
+function workingGroup(w: WorkRow): Group {
+  const s = boardState(w, checks.value);
+  if (s === "working" || s === "awaiting check") return "on";
+  const last = lastResult(w);
+  if (last) return last.ok ? "try" : "free";
+  return w.commits && w.commits !== "[]" ? "try" : "free";
+}
+
+/** "step 3 of 8" (the step it's on, not the ones done), "" untracked. */
+function stepOf(w: WorkRow) {
+  const total = w.progressTotal ?? 0;
+  if (!total) return "";
+  const done = Math.min(w.progressDone ?? 0, total);
+  return done >= total ? "all steps done" : `step ${done + 1} of ${total}`;
+}
+
+const withStep = (w: WorkRow, state: string) => [state, stepOf(w)].filter(Boolean).join(" · ");
+
+/** Being worked on: an agent, or a phone test (waiting for a free window, or running now). */
+const onState = (w: WorkRow) =>
+  boardState(w, checks.value) !== "awaiting check" ? "an agent is on it" : isTesting(w) ? "being tested on the phone now" : "waiting for a test on the phone";
+
+/** Nobody on it: the user said it's still broken, its last test failed, or nobody has started. */
+function freeState(w: WorkRow) {
+  const last = lastResult(w);
+  if (verdictOf(w) || (last && !last.ok && last.you)) return "you said it's still broken";
+  return last && !last.ok ? "its last test failed" : "nobody on it yet";
+}
+
+/** A row's state in plain words per group: no hashes, no raw step text, no check jargon. */
+const STATES: Record<Group, (w: WorkRow) => string> = {
+  you: (w) => (w.note ? w.title : "waiting on you"),
+  try: () => "ready to try",
+  on: (w) => withStep(w, onState(w)),
+  free: (w) => withStep(w, freeState(w)),
+};
+
+const plainState = (w: WorkRow, g: Group | null) =>
+  g ? STATES[g](w) : w.status === "done" ? "done" : withStep(w, w.status === "blocked" ? "paused" : "");
+
+/** What the user can do about a row, beside its state: done / skip (needs you), works / still broken (ready to try). */
+function actsOf(w: WorkRow, g: Group | null): [string, () => void][] | null {
+  if (g === "you") return [["done", () => answer(w, "done")], ["skip", () => answer(w, "skip")]];
+  if (g === "try") return [["works", () => verdict(w, true)], ["still broken", () => verdict(w, false)]];
+  return null;
+}
+
+/** An open row's detail: its note, the steps done / now / next, the changes in words, its review images. */
+function Details({ w, g }: { w: WorkRow; g: Group | null }) {
+  const steps = list<Step>(w.steps);
+  const commits = list<Commit>(w.commits);
+  const images = list<string>(w.images);
   return (
-    <span class="ai-item-progress">
-      {total > 0 && (
-        <span class="ai-bar" role="progressbar" aria-valuenow={done} aria-valuemax={total}>
-          <span style={{ width: `${(100 * done) / total}%` }} />
-        </span>
+    <div class="ai-item-more">
+      {w.note && g !== "you" && <p class="ai-item-note">{w.note}</p>}
+      {steps.length > 0 && (
+        <ol class="ai-steps">
+          {steps.map((x, i) => (
+            <li key={i} class={x.state}>
+              <span class="ai-step-mark">{x.state === "done" ? "✓" : ""}</span>
+              {x.text}
+            </li>
+          ))}
+        </ol>
       )}
-      <StepLine w={w} count={total > 0 ? `${done}/${total}` : ""} />
-    </span>
+      {commits.length > 0 && (
+        <ul class="ai-commits">
+          {commits.map((c) => (
+            <li key={c.sha}>{c.subject || "a change"}</li>
+          ))}
+        </ul>
+      )}
+      {images.length > 0 && (
+        <div class="ai-imgs">
+          {images.map((p) => (
+            <Review key={p} path={p} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
 /**
- * One open item: when it's tracked, a thin bar and "3/10 · <step>" above; a dot and its title (up to two lines);
- * then "owner · 2 commits · 2h ago" (untracked: the owner, its age past a day). A tap shows its note, the steps done /
- * now / next, the commits in plain words and its review images.
+ * One task: a dot, its title (what to do, for one that needs the user) and its state in plain words under it, with
+ * what the user can do about it at that line's end (actsOf) or "test now" under a queued phone test. A tap: Details.
  */
-function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => void }) {
-  const total = w.progressTotal ?? 0;
-  const done = Math.min(w.progressDone ?? 0, total);
-  const steps = list<Step>(w.steps);
-  const commits = list<Commit>(w.commits);
-  const images = list<string>(w.images);
-  const moved = sec(Number(w.activity) || (w.status === "done" && Number(w.done) ? w.done : w.updated));
-  const tracked = total > 0 || !!w.step || commits.length > 0;
-  // Who has it: "free" when nobody does (the board's "" or the catch-all "coder"), so a free task shows as one.
-  const who = !w.owner || w.owner === "coder" ? "free" : w.owner;
-  // "working" only while a live agent holds it; else awaiting check / no check / stalled (agents.ts boardState).
-  const state = rowState(w);
-  const facts = [state, who, commits.length > 0 && `${commits.length} commit${commits.length > 1 ? "s" : ""}`, ago(moved) === "now" ? "just now" : `${ago(moved)} ago`].filter(Boolean).join(" · ");
+function WorkLine({ w, g, open, onTap }: { w: WorkRow; g: Group | null; open: boolean; onTap: () => void }) {
+  const on = g === "on" && boardState(w, checks.value) === "working";
+  const acts = actsOf(w, g);
   return (
-    <div class={`ai-item ${w.status}`}>
+    <div class={`ai-item ${w.status} ${g ?? ""}`}>
       <button type="button" class="ai-item-row" onClick={onTap} aria-expanded={open}>
-        <Progress w={w} done={done} total={total} />
-        <span class={`ai-dot ${state === "working" ? "on" : ""}`} />
+        <span class={`ai-dot ${on ? "on" : ""}`} />
         <span class="ai-item-main">
-          <span class="ai-item-title">{w.title}</span>
-          {tracked ? <span class="ai-item-facts">{facts}</span> : <span class="ai-item-facts">{[state, who].filter(Boolean).join(" · ")}</span>}
+          <span class="ai-item-title">{g === "you" ? w.note || w.title : w.title}</span>
+          {!acts && <span class="ai-item-facts">{plainState(w, g)}</span>}
         </span>
-        {!tracked && Date.now() / 1000 - moved > DAY_S && <span class="ai-item-age">{ago(moved)}</span>}
       </button>
-      {!open && <CheckActs w={w} images={images} />}
-      {open && (
-        <div class="ai-item-more">
-          {w.note && <p class="ai-item-note">{w.note}</p>}
-          {steps.length > 0 && (
-            <ol class="ai-steps">
-              {steps.map((x, i) => (
-                <li key={i} class={x.state}>
-                  <span class="ai-step-mark">{x.state === "done" ? "✓" : ""}</span>
-                  {x.text}
-                </li>
-              ))}
-            </ol>
-          )}
-          {commits.length > 0 && (
-            <ul class="ai-commits">
-              {commits.map((c) => (
-                <li key={c.sha}>{c.subject || "a change"}</li>
-              ))}
-            </ul>
-          )}
-          {images.length > 0 && (
-            <div class="ai-imgs">
-              {images.map((p) => (
-                <Review key={p} path={p} />
-              ))}
-            </div>
-          )}
+      {acts && (
+        <div class="ai-item-line">
+          <span class="ai-item-facts">{plainState(w, g)}</span>
+          <span class="ai-item-acts">
+            {acts.map(([label, act]) => (
+              <button key={label} type="button" class="ai-act" onClick={act}>
+                {label}
+              </button>
+            ))}
+          </span>
         </div>
+      )}
+      {g === "on" && !open && <CheckActs w={w} />}
+      {open && <Details w={w} g={g} />}
+    </div>
+  );
+}
+
+/** One group: its name and count (a tap folds it), its first GROUP_SHOWN rows, the rest behind "N more". */
+function GroupList({ name, rows, g, folded, opened, tap }: { name: string; rows: WorkRow[]; g: Group; folded?: boolean; opened: string | null; tap: (id: string) => void }) {
+  const [open, setOpen] = useState(!folded);
+  const [all, setAll] = useState(false);
+  if (!rows.length) return null;
+  const shown = all ? rows : rows.slice(0, GROUP_SHOWN);
+  return (
+    <div class={`ai-group ${g}`}>
+      <button type="button" class="ai-group-fold" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span class="ai-group-title">{name}</span>
+        <span class="ai-group-count">{rows.length}</span>
+        <span class="ai-group-caret">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && shown.map((w) => <WorkLine key={w.id} w={w} g={g} open={opened === w.id} onTap={() => tap(w.id)} />)}
+      {open && rows.length > GROUP_SHOWN && (
+        <button type="button" class="ai-group-more" onClick={() => setAll(!all)} aria-expanded={all}>
+          {all ? "show fewer" : `${rows.length - GROUP_SHOWN} more`}
+        </button>
       )}
     </div>
   );
@@ -600,12 +666,11 @@ function Fold({ label, rows, opened, tap }: { label: string; rows: WorkRow[]; op
       <button type="button" class="ai-fold" onClick={() => setOpen(!open)} aria-expanded={open}>
         {open ? "▾" : "▸"} {label} · {rows.length}
       </button>
-      {open && rows.map((w) => <WorkLine key={w.id} w={w} open={opened === w.id} onTap={() => tap(w.id)} />)}
+      {open && rows.map((w) => <WorkLine key={w.id} w={w} g={null} open={opened === w.id} onTap={() => tap(w.id)} />)}
     </>
   );
 }
 
-const projectOf = (w: WorkRow) => w.project || "Other";
 /** Friction lines shown when the fold opens: the most frequent first. */
 const FRICTION_SHOWN = 8;
 
@@ -633,41 +698,37 @@ function Friction() {
 }
 
 /**
- * In progress: what's being worked on, newest first - a dot and the title each. Grouped by project only when there are
- * many. What's paused (blocked) and what's done lately are folded lines under it.
+ * In progress, grouped by what each task means for the user (GROUPS), newest activity first in each. What's paused
+ * (blocked) and what's done lately are folded lines under it.
  */
 function Work({ shown }: { shown: boolean }) {
   const [opened, setOpened] = useState<string | null>(null);
-  const all = [...board.value].sort((a, b) => Number(b.updated) - Number(a.updated));
-  const working = all.filter((w) => w.status === "working");
+  const all = [...board.value].sort((a, b) => Number(b.activity || b.updated) - Number(a.activity || a.updated));
+  const groups = new Map<Group, WorkRow[]>(GROUPS.map((x) => [x.key, []]));
+  for (const w of all) {
+    const g = groupOf(w);
+    if (g) groups.get(g)!.push(w);
+  }
+  useHealthTaskDone(groups.get("you")!);
   const paused = all.filter((w) => w.status === "blocked");
   const now = Date.now();
   const done = all.filter((w) => w.status === "done" && now - Number(w.done || w.updated) < RECENT_MS);
   const tap = (id: string) => setOpened(opened === id ? null : id);
-  // Groups in the order of their newest activity (working is newest first, so first seen = newest).
-  const groups = new Map<string, WorkRow[]>();
-  for (const w of working) groups.set(projectOf(w), [...(groups.get(projectOf(w)) ?? []), w]);
-  const grouped = working.length > GROUP_OVER && groups.size > 1;
+  const open = [...groups.values()].flat();
   return (
     <section class="ai-work-list">
       {shown && <WorkFeed />}
       <h3 class="ai-heading">
         in progress
         {!boardLive.value && shown && <span> · connecting…</span>}
-        <TestAll rows={working} />
+        <TestAll rows={groups.get("on")!} />
       </h3>
       <TestError />
-      {grouped
-        ? [...groups].map(([p, ws]) => (
-            <div key={p} class="ai-group">
-              <div class="ai-group-name">{p}</div>
-              {ws.map((w) => (
-                <WorkLine key={w.id} w={w} open={opened === w.id} onTap={() => tap(w.id)} />
-              ))}
-            </div>
-          ))
-        : working.map((w) => <WorkLine key={w.id} w={w} open={opened === w.id} onTap={() => tap(w.id)} />)}
-      {!working.length && <div class="ai-work-empty muted">{boardSeen.value ? "nothing in progress" : "…"}</div>}
+      {verdictError.value && <div class="ai-work-empty muted">{verdictError.value}</div>}
+      {GROUPS.map((x) => (
+        <GroupList key={x.key} name={x.name} g={x.key} folded={x.folded} rows={groups.get(x.key)!} opened={opened} tap={tap} />
+      ))}
+      {!open.length && <div class="ai-work-empty muted">{boardSeen.value ? "nothing in progress" : "…"}</div>}
       <Fold label="paused" rows={paused} opened={opened} tap={tap} />
       <Fold label="done recently" rows={done} opened={opened} tap={tap} />
       <Friction />
@@ -775,9 +836,9 @@ function AiHeader() {
 }
 
 /**
- * What PowOS AI shows (the page now, the AI panel next - the same content in whatever holds it): what needs the user
- * (only when something does), the conversation (the last exchange open, the earlier folded), the work board (in
- * progress; paused and done folded), units, the agents. [shown]: on screen - its feeds run only then. [part]: the
+ * What PowOS AI shows (the page now, the AI panel next - the same content in whatever holds it): the conversation (the
+ * last exchange open, the earlier folded), the work board (in progress in its groups, needs you first; paused and done
+ * folded), units, the agents. [shown]: on screen - its feeds run only then. [part]: the
  * wide page's two panes - "talk" (the conversation) and "side" (needs you, the board, the agents); none = all of it,
  * in one column.
  */
@@ -787,7 +848,6 @@ function AiContent({ shown, part }: { shown: boolean; part?: "talk" | "side" }) 
   useAiRefresh(shown && side);
   return (
     <>
-      {side && <NeedsYou />}
       {part === "talk" ? <History /> : talk && <Earlier />}
       {talk && <Now />}
       {/* The board: work in progress, what's installed and running, the agents - one surface, its parts by spacing. */}
