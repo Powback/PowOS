@@ -47,7 +47,8 @@ Usage:
                                    (use set to change it). No --project: inferred from owner and title.
   powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT] [--project P]
                                    [--progress N/M] [--step TEXT] [--plan "a; b; c"] [--commit SHA]...
-                                   [--image PATH]... [--image-rm PATH]...
+                                   [--image PATH]... [--image-rm PATH]... [--parent P|-]
+                                   --parent: make it a sub-task of P (add takes it too; "-" clears it).
                                    Change a task. <task> (same for set/done/rm/merge): its exact id, a
                                    unique PREFIX of an id, or whole words of its title matching ONE
                                    open task - never guessed: a prefix several ids share, an unknown
@@ -59,6 +60,9 @@ Usage:
                                    check FAILED or none passed, unless --no-check gives the reason no
                                    device check is possible ("docs only", "Mac tooling, tier-1 tested").
                                    queue.sh add --close <task> closes it on the pass by itself.
+                                   A check closes ONLY the task it was queued for, and never while that
+                                   task has planned steps still to do or an open sub-task (--parent):
+                                   do them (or drop the plan: --plan "") - every closer obeys this.
   powos agents task merge <dup...> --into <task> [--note TEXT]
                                    Fold one or more duplicates into <task>: each dup's title, note and
                                    still-open steps land on <task> (its commits and images carried over
@@ -436,7 +440,7 @@ def resolve_commits(argv):
     if not argv or argv[0] not in ("add", "new", "set", "done"):
         return argv
     verb = "add" if argv[0] == "new" else argv[0]
-    o, rest = opts(argv[1:], ["owner", "status", "note", "title", "project", "id", "ask", "no-check"] + TRACK)
+    o, rest = opts(argv[1:], ["owner", "status", "note", "title", "project", "id", "ask", "no-check", "parent"] + TRACK)
     wid = o.get("id") or (slug(" ".join(rest)) if verb == "add" else " ".join(rest))
     mention = wid if re.fullmatch(r"[a-z0-9][a-z0-9._-]{3,63}", wid or "") else None
     commits = (json.loads(o["commits-json"]) if o.get("commits-json") else []) + git_commits(o.get("commit") or [], mention)
@@ -467,6 +471,34 @@ def apply_track(w, o, done=False):
              new["commits"], new["images"])
 
 
+def open_items(w, ws=None):
+    """What is still open on [w], besides the check: (its open sub-tasks' ids, its planned steps' texts). A task with
+    either can't be done - not by `task done`, not by a check's PASS (queue.sh --close, close_passed), not by the
+    board's truth (the module's may_close holds the same rule). The current step isn't open work: a close finishes it.
+    The user, 2026-10-30: a chat-overflow PASS queued against the AI-page board task closed it while its W1-W4 steps
+    were still to do, and the work it tracked was never built."""
+    ws = rows() if ws is None else ws
+    kids = [c["id"] for c in ws if (c.get("parent") or "") == w["id"] and c.get("status") != "done"]
+    steps = [_line(x.get("text", "")) for x in _jl(w.get("steps", "")) if isinstance(x, dict) and x.get("state") == "next"]
+    return kids, [t for t in steps if t]
+
+
+def open_why(kids, steps):
+    bits = []
+    if kids:
+        bits.append(f"{len(kids)} open sub-task{'s' if len(kids) != 1 else ''} ({', '.join(kids)[:120]})")
+    if steps:
+        bits.append(f"{len(steps)} planned step{'s' if len(steps) != 1 else ''} to do ({'; '.join(steps)[:120]})")
+    return " and ".join(bits)
+
+
+def refuse_open(w):
+    kids, steps = open_items(w)
+    if kids or steps:
+        die(f"'{w['id']}' can't be done: {open_why(kids, steps)} - each sub-task closes on its own check first; "
+            f"do the steps or drop them from the plan (task set {w['id']} --plan \"\")")
+
+
 def merge_into(target, dups, note):
     """Fold [dups] into [target]: each dup's title/note and still-open steps, plus its commits and images, land on
     [target]; each dup is then marked done, its note "merged into <target>" (no device check needed - its scope
@@ -493,10 +525,19 @@ def merge_into(target, dups, note):
         call("work_track", tgt["id"], new["progress_done"], new["progress_total"], new["step"], new["steps"],
              new["commits"], new["images"])
     for w in dups:
-        call("work_set", w["id"], "", "", "done", f"merged into {target['id']}", "")
+        # Its scope moved to the target: its sub-tasks follow it, its planned steps are on the target now (else the
+        # done rule - nothing open on it - refuses the dup's close), and its "no check" mark goes first.
+        for kid in open_items(w)[0]:
+            call("work_parent", kid, target["id"])
+        cur = next((x for x in rows() if x["id"] == w["id"]), w)
+        moved = track(cur, plan="")
+        if moved:
+            call("work_track", w["id"], moved["progress_done"], moved["progress_total"], moved["step"], moved["steps"],
+                 moved["commits"], moved["images"])
         call("check_set", json.dumps({"job": f"nocheck:{w['id']}", "task": w["id"],
                                       "name": "no device check possible", "state": "none",
                                       "line": f"merged into {target['id']}"}))
+        call("work_set", w["id"], "", "", "done", f"merged into {target['id']}", "")
 
 
 def no_check(wid, o):
@@ -521,7 +562,7 @@ def task(argv):
     if verb == "new":
         verb = "add"
     if verb == "add":
-        o, rest = opts(argv, ["owner", "status", "note", "id", "project", "ask", "no-check"] + TRACK)
+        o, rest = opts(argv, ["owner", "status", "note", "id", "project", "ask", "no-check", "parent"] + TRACK)
         title = " ".join(rest).strip()
         if not title:
             die("usage: powos agents task add <title...> [--owner ROLE] [--status S] [--note TEXT]")
@@ -540,19 +581,25 @@ def task(argv):
         st = status_of(o.get("status")) or "working"
         if st == "done":
             die("a new task isn't done: add it, then `task done` once its check passed")
+        parent = find(o["parent"])["id"] if o.get("parent") else ""
         call("work_set", wid, title, owner, st, o.get("note", ""), project)
+        if parent:
+            call("work_parent", wid, parent)
         w = next((w for w in rows() if w["id"] == wid), None)
         if w:
             apply_track(w, o)
         link_ask(o, wid)
         print(wid)
     elif verb == "set":
-        o, rest = opts(argv, ["owner", "status", "note", "title", "project", "ask", "no-check"] + TRACK)
+        o, rest = opts(argv, ["owner", "status", "note", "title", "project", "ask", "no-check", "parent"] + TRACK)
         if not rest:
             die("usage: powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT]")
         w = find(" ".join(rest))
         st = status_of(o.get("status"))
+        if o.get("parent"):
+            call("work_parent", w["id"], "" if o["parent"] == "-" else find(o["parent"])["id"])
         if st == "done":
+            refuse_open(w)
             no_check(w["id"], o)
         call("work_set", w["id"], o.get("title", ""), o.get("owner", ""), st, o.get("note", ""),
              o.get("project", ""))
@@ -564,6 +611,7 @@ def task(argv):
         if not rest:
             die('usage: powos agents task done <task> [--note TEXT] [--no-check "<why no device check is possible>"]')
         w = find(" ".join(rest))
+        refuse_open(w)
         no_check(w["id"], o)
         call("work_set", w["id"], "", "", "done", o.get("note", ""), "")
         apply_track(w, o, done=True)
@@ -719,7 +767,7 @@ def _check_name(c):
     return c.get("name") or c.get("job", "?")
 
 
-def truth(w, held, idle_roles, checks, now_ms=None):
+def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
     """(state, why) of one board row, from facts only: a live agent holding it, its phone checks (queued, results),
     its commits, its status (blocked/waiting/done are the owner's word and stay). One of TRUTH."""
     now_ms = now_ms or int(time.time() * 1000)
@@ -745,6 +793,12 @@ def truth(w, held, idle_roles, checks, now_ms=None):
         word = {"FAIL": "FAILED", "INVALID": "was INVALID", "SKIP": "was SKIPPED"}[last["state"]]
         return "no-check", f"last check {_check_name(last)} {word}: {last.get('line', '')[:120]} - nobody on it"
     if last and last["state"] == "PASS":
+        # A PASS speaks only for the task it was queued for, and only when nothing else is open on it ([ws]: the
+        # board, for its sub-tasks; its planned steps): a parent with open children or steps stays open.
+        kids, steps = open_items(w, list(ws))
+        if kids or steps:
+            return "no-check", (f"check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago, but "
+                                f"{open_why(kids, steps)} - not done")
         # A newer PASS of a shipped build supersedes every older FAIL (results[-1] is the latest by time); with the fix
         # landed (commits recorded) that is the done rule's evidence - the board no longer waits for someone to close it.
         if last.get("shipped", True) and _jl(w.get("commits", "")):
@@ -771,7 +825,7 @@ def board_truth(ws=None, checks=None, agents=None, now_ms=None):
     by = checks_by_task(checks)
     out = []
     for w in ws:
-        st, why = truth(w, held, idle_roles, by.get(w["id"], []), now_ms)
+        st, why = truth(w, held, idle_roles, by.get(w["id"], []), now_ms, ws)
         out.append(dict(w, truth=st, why=why))
     return out
 
@@ -832,10 +886,14 @@ def close_passed(cs):
             latest[c["task"]] = c
     # Only while nothing happened to the task since that result (the runner's step write follows it within seconds): a
     # task its owner reopened or moved after the pass is theirs.
-    open_ = {w["id"]: int(w.get("updated") or 0) for w in rows() if w["status"] != "done"}
+    ws = rows()
+    open_ = {w["id"]: int(w.get("updated") or 0) for w in ws if w["status"] != "done"}
+    # ... and only a task with nothing else open on it (its sub-tasks, its planned steps): a PASS closes the task it was
+    # queued for, never a parent that still has work.
+    blocked = {w["id"] for w in ws if w["status"] != "done" and any(open_items(w, ws))}
     n = 0
     for t, c in latest.items():
-        if (t in open_ and c.get("close") and c["state"] == "PASS" and c.get("shipped", True)
+        if (t in open_ and t not in blocked and c.get("close") and c["state"] == "PASS" and c.get("shipped", True)
                 and open_[t] - int(c.get("at") or 0) <= 300_000):
             call("work_set", t, "", "", "done", "", "")
             n += 1

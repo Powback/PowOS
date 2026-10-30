@@ -45,7 +45,7 @@ def load(name, path):
 
 cli = load("powos_agents_cli", CLI)
 WORK_COLS = ["id", "title", "owner", "status", "note", "created", "updated", "done", "project", "progress_done",
-             "progress_total", "step", "steps", "commits", "images", "activity"]
+             "progress_total", "step", "steps", "commits", "images", "activity", "parent"]
 
 
 def norm(s):
@@ -111,7 +111,24 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
         self.db["work"][wid].update(progress_done=pd, progress_total=pt, step=step, steps=steps, commits=commits,
                                     images=images, updated=self.clock[0], activity=self.clock[0])
 
+    def r_work_parent(self, wid, parent):
+        if wid not in self.db["work"] or (parent and parent not in self.db["work"]):
+            raise ValueError("work_parent: no work item")
+        up = parent
+        while up:
+            if up == wid:
+                raise ValueError("work_parent: a cycle")
+            up = self.db["work"].get(up, {}).get("parent", "")
+        self.db["work"][wid]["parent"] = parent
+
     def may_close(self, wid):
+        # as the module's may_close: no open sub-task, no planned step, then the check rule
+        kids = [w["id"] for w in self.db["work"].values() if w.get("parent") == wid and w["status"] != "done"]
+        if kids:
+            raise ValueError(f"'{wid}' can't be done: {len(kids)} open sub-task(s): {', '.join(kids)}")
+        steps = json.loads(self.db["work"].get(wid, {}).get("steps") or "[]")
+        if any(x["state"] == "next" for x in steps):
+            raise ValueError(f"'{wid}' can't be done: planned step(s) still open")
         res = [c for c in self.db["work_check"].values() if c["task"] == wid and c["state"] in ("PASS", "FAIL", "none")]
         last = max(res, key=lambda c: c["at"]) if res else None
         if last and (last["state"] == "none" or (last["state"] == "PASS" and last["shipped"])):
@@ -255,6 +272,49 @@ class TruthTest(unittest.TestCase):
         self.assertEqual(self.t(row("a", status="waiting", note="fold it"))[1], "waiting on the user: fold it")
         self.assertEqual(self.t(row("a", status="done"), [agent("a")])[0], "done")
         self.assertEqual(self.t(row("a"))[0], "stalled")
+
+
+class PassClosesOnlyItsOwnTaskTest(unittest.TestCase):
+    """2026-10-30: a chat-overflow PASS for a folded-in sub-item, queued against the parent's id, made the board call
+    the parent `ai-page-work-board-adhd-friendly-grouped-by-what` done while its W1-W4 steps were never built. A check
+    closes only the task it was queued for, and only when that task has no open sub-task and no planned step."""
+
+    def t(self, w, checks, ws):
+        return cli.truth(w, {}, {}, list(checks), NOW, ws)
+
+    def test_truth_a_pass_never_closes_a_parent_with_open_children(self):
+        ok = lambda task, at=NOW - 1000: {"job": f"j-{task}-{at}", "task": task, "state": "PASS", "at": at, "shipped": True,
+                                          "name": f"{task}-check"}
+        landed = '[{"sha": "abc1234", "subject": "x"}]'
+        p = row("p", commits=landed)
+        a, b = row("a", parent="p", commits=landed), row("b", parent="p", commits=landed)
+        ws = [p, a, b]
+        # A PASS for child A closes A only.
+        self.assertEqual(self.t(a, [ok("a")], ws)[0], "done")
+        self.assertEqual(self.t(b, [], ws)[0], "no-check")
+        st, why = self.t(p, [], ws)
+        self.assertNotEqual(st, "done")
+        # The parent's own PASS doesn't close it while a child is open ...
+        st, why = self.t(p, [ok("p")], ws)
+        self.assertEqual(st, "no-check")
+        self.assertIn("2 open sub-tasks (a, b)", why)
+        ws = [p, dict(a, status="done"), b]
+        st, why = self.t(p, [ok("p")], ws)
+        self.assertEqual(st, "no-check")
+        self.assertIn("1 open sub-task (b)", why)
+        # ... and only every child done AND its own PASS does.
+        ws = [p, dict(a, status="done"), dict(b, status="done")]
+        self.assertEqual(self.t(p, [], ws)[0], "no-check")
+        self.assertEqual(self.t(p, [ok("p")], ws)[0], "done")
+
+    def test_truth_a_pass_never_closes_a_task_with_planned_steps(self):
+        # The incident as it was: the sub-item's check queued against the parent's id, its W steps still planned.
+        steps = json.dumps([{"text": "verify PASS: chat-overflow", "state": "current"},
+                            {"text": "W1 groups", "state": "next"}, {"text": "W2 one plain line", "state": "next"}])
+        p = row("p", commits='[{"sha": "abc1234", "subject": "x"}]', steps=steps)
+        st, why = self.t(p, [{"job": "j", "task": "p", "state": "PASS", "at": NOW - 1000, "shipped": True}], [p])
+        self.assertEqual(st, "no-check")
+        self.assertIn("2 planned steps to do (W1 groups; W2 one plain line)", why)
 
 
 class ScanTest(unittest.TestCase):
@@ -462,6 +522,70 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(len(self.mails_sent()), 2)
         self.run_cli("sweep")
         self.assertIn("[stalled] Dry one", self.mails_sent()[2])
+
+
+class PassClosesOnlyItsOwnTaskCliTest(unittest.TestCase):
+    """The same rule through every closer: `task done`, queue.sh's `--close` (it runs `task done`) and the sweeper's
+    close_passed (`check sync`), against the stand-in module (BoardTest's harness)."""
+
+    setUpClass = classmethod(BoardTest.setUpClass.__func__)
+    tearDownClass = classmethod(BoardTest.tearDownClass.__func__)
+    setUp, tearDown, run_cli = BoardTest.setUp, BoardTest.tearDown, BoardTest.run_cli
+
+    def test_parent_with_two_open_children(self):
+        self.run_cli("task", "add", "AI page board", "--id", "p")
+        self.run_cli("task", "add", "Chat overflow", "--id", "a", "--parent", "p")
+        self.run_cli("task", "add", "Board groups", "--id", "b", "--parent", "p")
+        work = FakeStdb.db["work"]
+        self.assertEqual((work["a"]["parent"], work["b"]["parent"]), ("p", "p"))
+        self.assertIn("a cycle", self.run_cli("task", "set", "p", "--parent", "a", ok=False).stderr)
+        # A PASS for child A (queued with --close) closes A only.
+        at = FakeStdb.clock[0]
+        cs = [{"job": "ja", "task": "a", "state": "PASS", "close": True, "shipped": True, "at": at}]
+        f = os.path.join(self.tmp, "c.json")
+        json.dump(cs, open(f, "w"))
+        self.assertIn("1 task(s) closed", self.run_cli("check", "sync", f).stdout)
+        self.assertEqual([work[t]["status"] for t in "pab"], ["working", "done", "working"])
+        # The parent's own PASS (with --close too) leaves it open while B is: not by the sync, not by task done.
+        cs.append({"job": "jp", "task": "p", "state": "PASS", "close": True, "shipped": True, "at": FakeStdb.clock[0]})
+        json.dump(cs, open(f, "w"))
+        self.assertIn("0 task(s) closed", self.run_cli("check", "sync", f).stdout)
+        p = self.run_cli("task", "done", "p", ok=False)
+        self.assertIn("1 open sub-task (b)", p.stderr)
+        self.assertEqual(work["p"]["status"], "working")
+        js = {w["id"]: w for w in json.loads(self.run_cli("task", "list", "--json").stdout)}
+        self.assertEqual(js["p"]["truth"], "no-check")
+        # Every child done AND its own check passed: now it closes.
+        self.run_cli("check", "set", "b", "jb", "PASS")
+        self.run_cli("task", "done", "b")
+        self.run_cli("task", "done", "p")
+        self.assertEqual([work[t]["status"] for t in "pab"], ["done", "done", "done"])
+
+    def test_parent_children_done_but_no_own_pass(self):
+        self.run_cli("task", "add", "Parent", "--id", "p")
+        self.run_cli("task", "add", "Kid", "--id", "k", "--parent", "p")
+        self.run_cli("check", "set", "k", "jk", "PASS")
+        self.run_cli("task", "done", "k")
+        self.assertIn("no phone check passed", self.run_cli("task", "done", "p", ok=False).stderr)
+
+    def test_planned_steps_block_the_close_until_done_or_dropped(self):
+        self.run_cli("task", "add", "Board redesign", "--id", "p", "--plan", "W1 groups; W2 plain line")
+        self.run_cli("check", "set", "p", "j1", "PASS")
+        self.assertIn("2 planned steps to do", self.run_cli("task", "done", "p", ok=False).stderr)
+        self.assertEqual(FakeStdb.db["work"]["p"]["status"], "working")
+        self.run_cli("task", "set", "p", "--plan", "")
+        self.run_cli("task", "done", "p")
+        self.assertEqual(FakeStdb.db["work"]["p"]["status"], "done")
+
+    def test_merge_moves_children_and_steps_to_the_target(self):
+        self.run_cli("task", "add", "Target", "--id", "t")
+        self.run_cli("task", "add", "Dup", "--id", "d", "--plan", "W1 groups")
+        self.run_cli("task", "add", "Dup kid", "--id", "k", "--parent", "d")
+        self.run_cli("task", "merge", "d", "--into", "t")
+        work = FakeStdb.db["work"]
+        self.assertEqual(work["d"]["status"], "done")
+        self.assertEqual(work["k"]["parent"], "t")
+        self.assertIn("W1 groups", work["t"]["steps"])
 
 
 class RefusalTest(unittest.TestCase):

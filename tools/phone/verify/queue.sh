@@ -4,7 +4,8 @@
 #        queue a Mac-side check (a tools/phone/verify/*.sh or any command that drives the phone) and return at once;
 #        starts the runner if none runs, and marks the board task's step "phone check queued" (the AI page's "test now")
 #        env vars: queue them through env, e.g. `queue.sh add t env PROFILE=1 shell/dev/perf/drag-raster.sh 12`
-#        --close: a PASS also marks the board task done (use when this check is the task's last proof)
+#        --close: a PASS also marks the board task done (use when this check is the task's last proof) - only that task, and only
+#             when nothing else is open on it: a planned step or an open sub-task keeps it open (the done rule, may_close)
 #        --name: what the phone's status pill says is being tested (default: the script's name)
 #        --screen: the screen it needs (the pill asks to fold / unfold); default either
 #        --budget: seconds it may run (default 300); past it the runner kills it: "FAIL timeout" on the board and pill

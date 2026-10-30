@@ -151,6 +151,10 @@ pub struct Work {
     /// The last activity on it (ms): any change, step or commit link. 0 on rows from before it (use `updated`).
     #[default(0u64)]
     activity: u64,
+    /// The task this one is a sub-task of ("" = none): `powos agents task add|set --parent P` (work_parent). A parent
+    /// can't close while a child is open (may_close). Last, with a default, so the table migrates in place.
+    #[default("")]
+    parent: String,
 }
 
 /// The unit registry's fleet view (lib/apps/powos-units, `powos units publish`): every unit on every host - what is
@@ -632,6 +636,7 @@ pub fn work_set(
                 commits: o.commits,
                 images: o.images,
                 activity: now,
+                parent: o.parent,
             }
         }
         None => {
@@ -656,6 +661,7 @@ pub fn work_set(
                 commits: String::new(),
                 images: String::new(),
                 activity: now,
+                parent: String::new(),
             }
         }
     };
@@ -776,6 +782,40 @@ pub fn work_track(
     Ok(())
 }
 
+/// [id] and the tasks above it (its parent, theirs, ...; at most 64 - a cycle can't loop).
+fn ancestors(ctx: &ReducerContext, id: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut up = id.to_string();
+    while !up.is_empty() && out.len() < 64 && !out.contains(&up) {
+        out.push(up.clone());
+        up = ctx.db.work().id().find(up).map(|w| w.parent).unwrap_or_default();
+    }
+    out
+}
+
+/// Makes [id] a sub-task of [parent] ("" = none): `powos agents task add|set --parent P`. The parent must exist and
+/// not be [id] or one of its own sub-tasks (no cycles). A parent can't close while a child is open (may_close).
+#[spacetimedb::reducer]
+pub fn work_parent(ctx: &ReducerContext, id: String, parent: String) -> Result<(), String> {
+    if ctx.db.reporter().identity().find(ctx.sender()).is_none() {
+        return Err("not a reporter".into());
+    }
+    let parent = parent.trim().to_string();
+    let Some(o) = ctx.db.work().id().find(id.clone()) else {
+        return Err(format!("work_parent: no work item '{id}'"));
+    };
+    if !parent.is_empty() && ctx.db.work().id().find(parent.clone()).is_none() {
+        return Err(format!("work_parent: no work item '{parent}'"));
+    }
+    if ancestors(ctx, &parent).contains(&id) {
+        return Err(format!("work_parent: '{parent}' is '{id}' or one of its sub-tasks"));
+    }
+    let now = now_ms(ctx);
+    ctx.db.work().id().delete(id.clone());
+    ctx.db.work().insert(Work { parent: cut(parent, 64), updated: now, activity: now, ..o });
+    Ok(())
+}
+
 /// Removes a work item (a mistake, a duplicate): `powos agents task rm`.
 #[spacetimedb::reducer]
 pub fn work_drop(ctx: &ReducerContext, id: String) -> Result<(), String> {
@@ -847,7 +887,35 @@ fn is_reporter(ctx: &ReducerContext) -> Result<(), String> {
 /// "Done" means its phone check passed on a shipped build (the user, 2026-10-23: fixes were called done while not yet on
 /// the phone). Its latest result decides (SKIP/INVALID are no result); a `none` mark (no device check possible, with
 /// a reason) lets it close too.
+///
+/// And a check closes only the task it was queued for, and only when nothing else is open on it (2026-10-30: a
+/// chat-overflow PASS queued against a parent closed it while its board redesign steps W1-W4 were still to do): no
+/// planned step ("next" in [steps] - the current one is what the close finishes) and no open sub-task (a row whose
+/// [parent] is it). That holds for every closer - `task done`, `queue.sh add --close`, the sweeper's close_passed.
 fn may_close(ctx: &ReducerContext, id: &str) -> Result<(), String> {
+    let kids: Vec<String> = ctx.db.work().iter().filter(|w| w.parent == id && w.status != "done").map(|w| w.id).collect();
+    if !kids.is_empty() {
+        return Err(format!(
+            "'{id}' can't be done: {} open sub-task(s): {} - each closes on its own check first",
+            kids.len(),
+            cut(kids.join(", "), 200)
+        ));
+    }
+    if let Some(w) = ctx.db.work().id().find(id.to_string()) {
+        let open: Vec<String> = serde_json::from_str::<Vec<StepIn>>(&w.steps)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| s.state == "next")
+            .map(|s| s.text)
+            .collect();
+        if !open.is_empty() {
+            return Err(format!(
+                "'{id}' can't be done: {} planned step(s) still open: {} - do them, or drop them from the plan (task set {id} --plan \"\")",
+                open.len(),
+                cut(open.join("; "), 200)
+            ));
+        }
+    }
     let last = ctx
         .db
         .work_check()
