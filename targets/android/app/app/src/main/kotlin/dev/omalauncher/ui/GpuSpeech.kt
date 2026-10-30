@@ -33,8 +33,23 @@ internal object SpeechEngines {
     const val GPU = "gpu"
     const val ON_DEVICE = "ondevice"
 
-    private var current: SpeechSession? = null
+    /** The one dictation, whichever window started it ([SessionSlot]): a new start ends it first, its owner told. */
+    private class Owned(
+        val session: SpeechSession,
+        val callbacks: SpeechCallbacks,
+        val who: String,
+    )
+
+    private val slot =
+        SessionSlot<Owned> {
+            Log.i(TAG, "dictation of ${it.who}: superseded by a new start")
+            it.session.cancel()
+            it.callbacks.onSuperseded()
+        }
     private var ids = 0
+
+    /** The dictation under way (any window's), or null. */
+    val current: SpeechSession? get() = slot.current?.session
 
     fun choice(c: Context): String =
         runCatching {
@@ -45,8 +60,17 @@ internal object SpeechEngines {
         c: Context,
         hold: Boolean,
         callbacks: SpeechCallbacks,
+        /** Which window asks (logged: who started, who was superseded). */
+        who: String = "?",
+    ): SpeechSession = slot.start { Owned(make(c, hold, callbacks, who), callbacks, who) }.session
+
+    private fun make(
+        c: Context,
+        hold: Boolean,
+        callbacks: SpeechCallbacks,
+        who: String,
     ): SpeechSession {
-        current?.cancel()
+        Log.i(TAG, "dictation start by $who (${if (hold) "hold" else "tap"})")
         val app = c.applicationContext
         val engine = choice(app)
         val s =
@@ -61,7 +85,6 @@ internal object SpeechEngines {
                 callbacks.onEngine(ON_DEVICE)
                 NativeSpeech.start(app, hold, callbacks)
             }
-        current = s
         return s
     }
 
@@ -257,28 +280,42 @@ internal class MicSource : PcmSource {
         running = true
         thread =
             Thread({
-                val min = AudioRecord.getMinBufferSize(SttServer.RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-                val rec =
-                    runCatching {
-                        AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SttServer.RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 640 * 8))
-                    }.getOrNull()
-                if (rec == null || rec.state != AudioRecord.STATE_INITIALIZED) {
-                    Log.w("speech", "the mic didn't open")
-                    rec?.release()
-                    return@Thread
-                }
-                val buf = ByteArray(640)
+                // The previous recording's recorder stopped and released first: one AudioRecord at a time (MicGate).
+                val turn = MicGate.shared.enter()
                 try {
-                    rec.startRecording()
-                    while (running) {
-                        val n = rec.read(buf, 0, buf.size)
-                        if (n > 0) onPcm(buf, n) else if (n < 0) break
-                    }
+                    if (running) record(turn, onPcm)
                 } finally {
-                    runCatching { rec.stop() }
-                    rec.release()
+                    MicGate.shared.leave(turn)
                 }
             }, "speech-mic").apply { start() }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun record(
+        turn: MicGate.Turn,
+        onPcm: (ByteArray, Int) -> Unit,
+    ) {
+        val min = AudioRecord.getMinBufferSize(SttServer.RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val rec =
+            runCatching {
+                AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SttServer.RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 640 * 8))
+            }.getOrNull()
+        if (rec == null || rec.state != AudioRecord.STATE_INITIALIZED) {
+            Log.w("speech", "the mic didn't open")
+            rec?.release()
+            return
+        }
+        val buf = ByteArray(640)
+        try {
+            rec.startRecording()
+            while (running && turn.mine) {
+                val n = rec.read(buf, 0, buf.size)
+                if (n > 0) onPcm(buf, n) else if (n < 0) break
+            }
+        } finally {
+            runCatching { rec.stop() }
+            rec.release()
+        }
     }
 
     override fun stop() {

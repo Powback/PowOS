@@ -4,6 +4,7 @@ import android.app.assist.AssistStructure
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.os.SystemClock
 import android.service.voice.VoiceInteractionSession
 import android.view.View
 import android.view.ViewGroup
@@ -73,6 +74,10 @@ class PowosAssistSession(
         // Hold to talk: the side button still down, the dictation lasts until it's let go, and then sends (PowerKey
         // reads the release as root; Android doesn't pass it on). Already up (or no reader): it ends at a short pause.
         PowerKey.start()
+        android.util.Log.i(
+            "speech",
+            "assist: shown (flags $showFlags, side button ${if (PowerKey.down) "down ${SystemClock.elapsedRealtime() - PowerKey.downAt} ms: held" else "up: quick"})",
+        )
         if (PowerKey.down) {
             host?.bridge?.emit("assist.held", null)
             PowerKey.onRelease = {
@@ -117,6 +122,7 @@ class PowosAssistSession(
     }
 
     override fun onHide() {
+        android.util.Log.i("speech", "assist: hidden")
         dev.omalauncher.system.PetOverlay.assistShowing = false
         watchdog?.stop()
         PowerKey.onRelease = null

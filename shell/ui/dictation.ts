@@ -6,8 +6,14 @@
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 
-/** What the recognizer hears, as it hears it. */
-export const speech = signal<{ listening: boolean; text: string; error: string | null }>({ listening: false, text: "", error: null });
+/** What the recognizer hears, as it hears it; [elsewhere]: another window's dictation has the mic (one in the app). */
+export interface SpeechState {
+  listening: boolean;
+  text: string;
+  error: string | null;
+  elsewhere?: boolean;
+}
+export const speech = signal<SpeechState>({ listening: false, text: "", error: null });
 
 /** Where a recognition's words go: the field it's for (what was typed before it, and what to do with the whole). */
 export interface MicTarget {
@@ -37,9 +43,15 @@ let finished: { done: Promise<void>; end: (text?: string) => void } | null = nul
 export const hearing = (target: MicTarget) =>
   (speech.value.listening || finishing.value === target) && pending?.target === target ? join(pending.typed, speech.value.text) : null;
 
+/** In logcat (the page's console): every start, and whose dictation it ends. */
+const logStart = (hold: boolean) =>
+  console.info(`dictation start (${hold ? "hold" : "tap"})${pending ? " over this page's own" : ""}${speech.value.elsewhere ? " over another window's" : ""}`);
+
 export async function listen(hold: boolean, target: MicTarget) {
-  // The recognizer first, then the UI: the call is on its way before anything else runs.
+  // The recognizer first, then the UI: the call is on its way before anything else runs. One dictation at a time
+  // (AO3): this start ends any other, here or in another window (the native side's SessionSlot).
   const starting = powos.speech.start(hold);
+  logStart(hold);
   pending = { send: hold, typed: target.typed(), target };
   // Listening shows in this frame, not when the recognizer reports it.
   speech.value = { listening: true, text: "", error: null };
@@ -60,7 +72,10 @@ export async function listen(hold: boolean, target: MicTarget) {
  * comes to target.heard as a send (as a held mic's does) - an interruption never does.
  */
 export function dictate(target: MicTarget, send = false) {
-  if (pending || asked || speech.value.listening) return;
+  // Already this target's (or the mic permission asked): nothing new. A stale "listening" with nothing pending (a
+  // dictation that ended unseen) no longer refuses it - the side button's summoning started nothing (AO3).
+  if (pending?.target === target || asked) return void console.info(`dictate refused: ${asked ? "mic permission asked" : "already listening for it"}`);
+  if (pending) interrupt();
   listen(false, target).then(() => {
     if (send && pending?.target === target) pending.send = true;
   });
@@ -140,6 +155,9 @@ function stopNow() {
 /** A tap on a mic that is listening: it ends now - what's heard goes to its field; a stuck "listening" with nothing pending resets too. */
 export function stopTap() {
   if (pending) interrupt();
+  // Another window's dictation (home's, under the launcher overlay that came up for it): this tap ends it - never a
+  // second one (AO3, 2026-10-31 00:11:12: a second tap here started one, superseding home's). Its words go to its field.
+  else if (speech.value.elsewhere) (console.info("dictation stop: another window's"), void powos.speech.stop());
   else stopNow();
 }
 
@@ -172,7 +190,18 @@ export function release(target?: MicTarget) {
   p.target.heard(now, !!now.trim());
 }
 
-powos.on("speech.state", (s: { listening: boolean; text: string; error: string | null }) => (speech.value = s));
+powos.on("speech.state", (s: SpeechState) => (speech.value = s));
+// Another window's start ended this page's dictation (one in the app at a time, AO3): no speech.done comes for it.
+// What was heard stays in its field; nothing is sent.
+powos.on("speech.cancelled", ({ why }: { why: string }) => {
+  console.info(`dictation cancelled: ${why}`);
+  // A send waiting for its final words: what showed is what's sent.
+  if (finished) return finished.end(speech.value.text);
+  const p = pending;
+  pending = null;
+  speech.value = { ...speech.value, listening: false };
+  if (p) p.target.heard(join(p.typed, speech.value.text), false);
+});
 powos.on("speech.done", ({ text }: { text: string }) => {
   if (finished) return finished.end(text);
   const p = pending;

@@ -984,8 +984,10 @@ export interface Bridge {
     interrupt(agent: string): Promise<void>;
   };
   /**
-   * Speech to text (the phone's recognizer; the page's own has none). "speech.state" ({ listening, text, error })
-   * as it hears; "speech.done" ({ text }) once it ends; "speech.permission" ({ granted }) after it asked for the mic.
+   * Speech to text (the phone's recognizer; the page's own has none). "speech.state" ({ listening, text, error,
+   * elsewhere: another window's dictation has the mic }) as it hears; "speech.done" ({ text }) once it ends;
+   * "speech.cancelled" ({ why: "superseded" }) when another window's start ended this one's (one dictation in the app at
+   * a time); "speech.permission" ({ granted }) after it asked for the mic. stop() ends another window's dictation too.
    */
   speech: {
     /**

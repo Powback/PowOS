@@ -147,7 +147,19 @@ class ShellBridge(
     }
 
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
-    private val speech = Speech(context.applicationContext).also { it.warm() }
+    private val speech = Speech(context.applicationContext) { pageName() }.also { it.warm() }
+
+    /** The page's mode (home, pull, assist, ...), for the speech log. */
+    private fun pageName() = runCatching { web.url?.let { android.net.Uri.parse(it).getQueryParameter("mode") } }.getOrNull() ?: "home"
+
+    /**
+     * A page (re)loaded in this window (ShellHost.onPageStarted): a dictation the old page started has no page to
+     * end it any more - a hold's would listen on until its cap. It goes (AO3); the new page starts its own.
+     */
+    fun pageStarted() {
+        if (speech.listening) Log.i("speech", "${pageName()}: page reloaded mid-dictation, its dictation cancelled")
+        speech.cancel()
+    }
     /** The panel's quick settings: what an app may switch, and Android's panels for the rest. */
     private val quick: QuickSettings =
         QuickSettings(context) { main.post { emit("qs.changed", quick.state()) } }.also {
@@ -239,10 +251,15 @@ class ShellBridge(
         scope.launch { snapshotFlow { theme().toString() }.drop(1).collect { emit("theme.changed", JSONObject(it)) } }
         // What's heard so far, while listening (and why it failed).
         scope.launch {
-            snapshotFlow { JSONObject().put("listening", speech.listening).put("text", speech.text).put("error", speech.error ?: JSONObject.NULL).toString() }
+            snapshotFlow {
+                JSONObject().put("listening", speech.listening).put("text", speech.text).put("error", speech.error ?: JSONObject.NULL)
+                    .put("elsewhere", speech.elsewhere).toString()
+            }
                 .drop(1)
                 .collect { emit("speech.state", JSONObject(it)) }
         }
+        // Another window's start ended this one's dictation: the page drops it (no speech.done comes for it).
+        scope.launch { snapshotFlow { speech.superseded }.drop(1).collect { emit("speech.cancelled", JSONObject().put("why", "superseded")) } }
         // Installs, removals, Linux apps, and an app's icon drawn anew or for the first time (ShellIcons names each by
         // its pixels): the page reloads its list. An icon arriving that looks as it did last time changes nothing.
         scope.launch {
