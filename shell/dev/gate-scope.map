@@ -18,6 +18,8 @@ ui/terminal.*           none
 ui/remote.*             none
 ui/glasses.*            none
 ui/rich.*               none
+ui/assist.*             ^(assist-draw-.*|send-dictation-assist-.*)$
+dev/assist-draw-check.js  ^assist-draw-.*$
 ui/pet.*                ^pet$
 ui/pet/*                ^pet$
 ui/desktop.css          ^(desktops|dock-position-desktop-.*)$

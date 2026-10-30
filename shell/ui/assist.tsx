@@ -6,8 +6,8 @@
  * this?" means the screen. A tap above the panel puts it away.
  *
  * Summoned (the side button), it listens at once and sends by itself: what's said goes into the field, and when it ends
- * - the side button let go when it was held (PowerKey reads the release as root: assist.held / assist.keyup), else
- * ~1.5 s with nothing heard (assist.quick), or the mic tapped - the text shows for a moment (SEND_DELAY_MS) and goes,
+ * - the side button let go when it was held (PowerKey reads the release as root: assist.held / assist.keyup), or, a
+ * short press (assist.quick), the mic tapped (pauses don't end it) - the text shows for a moment (SEND_DELAY_MS) and goes,
  * with the screen and the circled part. A tap on the field in that moment,
  * or typing or tapping it while it listens, keeps the text there to edit instead; the panel going away stops it.
  * The mic button itself keeps its own ways (tap: fill in; hold: send on release).
@@ -15,6 +15,8 @@
  * The screenshot always goes along (PowOS AI reads it: the host saves it where PowOS sees it, the question names the
  * path). Circling is always on, no mode: draw around anything on the screen above the panel and that part is cut out
  * of the screenshot and sent too, the whole screen with it for context. A tap there (no stroke) puts the panel away.
+ * While a stroke is drawn the panel fades out and takes no touches (the whole screen is drawn on, under it too) and
+ * the dictation pauses; both come back when it ends, the cut-out attached.
  *
  * Live mode: the screen a frame a second (LiveCapture; Android asks once), the panel a bar at the bottom - the app
  * under it stays usable (only the bar takes touches) - and each question takes the last moments that changed as one
@@ -25,15 +27,13 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { stored } from "../state.ts";
 import { Pill, dictate, hearing, interrupt, speech, type MicTarget } from "./bar.tsx";
-import { makeHold, release } from "./dictation.ts";
+import { listeningFor, makeHold, release } from "./dictation.ts";
 import { askQueued, setAskContext } from "./assistant.ts";
 import { ChatView } from "./chat.tsx";
 
 /** The side button is held to talk (assist.held): its release sends at once. */
 let pushToTalk = false;
 
-/** A summoning with the side button already let go: its dictation ends after this much silence. */
-const QUICK_SILENCE_MS = 1500;
 import type { AssistScreen } from "../types.ts";
 
 const screen = signal<AssistScreen | null>(null);
@@ -45,6 +45,12 @@ const asked = signal(false);
 const region = signal<string | null>(null);
 /** The circle drawn over the screen (px), left showing so it's clear what goes along. */
 const stroke = signal<[number, number][]>([]);
+/**
+ * A stroke under way (AO1, the user 2026-10-30: "It should hide while I'm drawing so that I can draw like under the
+ * drawer"): the panel fades out and takes no touches until it ends, so the whole screen - where the panel was too -
+ * is drawn on and seen.
+ */
+const drawing = signal(false);
 /** Live mode: on, and how many different moments it holds. */
 const live = signal({ on: false, frames: 0 });
 powos.on("assist.live", (l: { on: boolean; frames: number }) => (live.value = l));
@@ -54,6 +60,8 @@ powos.on("assist.context", (s: AssistScreen) => (screen.value = s));
 // and it listens.
 powos.on("assist.reset", () => {
   screen.value = null;
+  drawing.value = false;
+  paused = null;
   asked.value = false;
   region.value = null;
   stroke.value = [];
@@ -70,12 +78,42 @@ powos.on("assist.held", () => {
   pushToTalk = true;
   makeHold(mic);
 });
-powos.on("assist.quick", () => autoSend && powos.speech.quiet(QUICK_SILENCE_MS));
+// Already up (a short press): it listens on as a tap on the mic does - pauses don't end it (GpuSpeech, 68e85417); the
+// mic, typing or a send does (AO2, the user 2026-10-30: "when I activate it with like a short click, we should still
+// activate the transcription"). It used to end after QUICK_SILENCE_MS of nothing heard: before the first word, often.
+powos.on("assist.quick", () => {
+  if (!autoSend || listeningFor(mic)) return;
+  // The summoning's dictation didn't start (the recognizer was busy or the page not up yet): it starts now.
+  summoned();
+});
 powos.on("assist.keyup", () => {
   if (!pushToTalk) return;
   pushToTalk = false;
+  // Let go mid-stroke (the dictation paused, its words in the field): the stroke's end sends them (resume).
+  if (paused) return void (paused.send = true);
   release(mic);
 });
+
+/** The dictation a stroke paused (AO2): how it went on - sending by itself, held - to pick up again after the stroke. */
+let paused: { auto: boolean; held: boolean; send: boolean } | null = null;
+
+/** A stroke started: the dictation under way stops, what's heard so far into the field (never sent). */
+function pauseDictation() {
+  if (!listeningFor(mic)) return;
+  paused = { auto: autoSend, held: pushToTalk, send: false };
+  interrupt(mic);
+}
+
+/** The stroke ended: the paused dictation listens on after the words it had (or, let go meanwhile, they go). */
+function resumeDictation() {
+  const p = paused;
+  paused = null;
+  if (!p) return;
+  if (p.send) return void send();
+  autoSend = p.auto;
+  dictate(mic, p.auto);
+  if (p.held) makeHold(mic);
+}
 
 /** The screen's text that goes along with a question, at most (the host caps it too). */
 const SCREEN_TEXT = 4000;
@@ -122,13 +160,48 @@ const PAD = 12;
 /** Moved less than this (px), a press on the screen is a tap: it puts the panel away instead of circling. */
 const TAP = 12;
 
+/** The drawing layer's touches: a stroke (the panel away and the dictation paused while it lasts, AO1/AO2), or a tap. */
+function strokes(pts: { current: [number, number][] | null }, cut: (d: [number, number][]) => void) {
+  return {
+    onPointerDown: (e: PointerEvent) => {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      pts.current = [[e.clientX, e.clientY]];
+    },
+    onPointerMove: (e: PointerEvent) => {
+      const d = pts.current;
+      if (!d) return;
+      d.push([e.clientX, e.clientY]);
+      const far = Math.hypot(e.clientX - d[0][0], e.clientY - d[0][1]) >= TAP;
+      // A stroke, not a tap: the panel goes and the dictation pauses for it (AO1/AO2).
+      if (far && !drawing.value) (drawing.value = true), pauseDictation();
+      if (d.length > 2 || far) stroke.value = [...d];
+    },
+    onPointerUp: (e: PointerEvent) => {
+      const d = pts.current;
+      pts.current = null;
+      if (!d) return;
+      d.push([e.clientX, e.clientY]);
+      const moved = Math.max(...d.map((p) => Math.hypot(p[0] - d[0][0], p[1] - d[0][1])));
+      if (moved < TAP) return void ((drawing.value = false), powos.assist.close());
+      stroke.value = d;
+      cut(d);
+      drawing.value = false;
+      resumeDictation();
+    },
+    onPointerCancel: () => {
+      pts.current = null;
+      if (drawing.value) (drawing.value = false), resumeDictation();
+    },
+  };
+}
+
 /**
  * Over the screen above the panel, always: a stroke drawn there (a circle, a scribble) cuts its bounds out of the
  * screenshot as the part that goes with the question; a tap puts the panel away. The overlay covers the whole display,
  * as the screenshot does, so a point on the overlay is the same point in the screenshot (scaled to its pixels).
  */
 function Draw({ src }: { src: string | undefined }) {
-  const drawing = useRef<[number, number][] | null>(null);
+  const pts = useRef<[number, number][] | null>(null);
   const shot = useRef<HTMLImageElement | null>(null);
   useEffect(() => {
     if (!src) return void (shot.current = null);
@@ -159,27 +232,7 @@ function Draw({ src }: { src: string | undefined }) {
   return (
     <div
       class="assist-draw"
-      onPointerDown={(e) => {
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        drawing.current = [[e.clientX, e.clientY]];
-      }}
-      onPointerMove={(e) => {
-        const d = drawing.current;
-        if (!d) return;
-        d.push([e.clientX, e.clientY]);
-        if (d.length > 2 || Math.hypot(e.clientX - d[0][0], e.clientY - d[0][1]) >= TAP) stroke.value = [...d];
-      }}
-      onPointerUp={(e) => {
-        const d = drawing.current;
-        drawing.current = null;
-        if (!d) return;
-        d.push([e.clientX, e.clientY]);
-        const moved = Math.max(...d.map((p) => Math.hypot(p[0] - d[0][0], p[1] - d[0][1])));
-        if (moved < TAP) return powos.assist.close();
-        stroke.value = d;
-        cut(d);
-      }}
-      onPointerCancel={() => (drawing.current = null)}
+      {...strokes(pts, cut)}
     >
       <svg class="crop-stroke">
         <polyline points={stroke.value.map((p) => p.join(",")).join(" ")} />
@@ -256,7 +309,8 @@ function swipeAway(panel: { current: HTMLDivElement | null }) {
   const move = (dyPx: number, animate: boolean) => {
     const el = panel.current;
     if (!el) return;
-    el.style.transition = animate ? "transform 0.18s ease-out, opacity 0.18s ease-out" : "none";
+    // At rest (no drag): no inline transition, so the stroke's fade (shell.css .assist.drawing) keeps its own.
+    el.style.transition = animate ? "transform 0.18s ease-out, opacity 0.18s ease-out" : dyPx ? "none" : "";
     el.style.transform = dyPx ? `translateY(${dyPx}px)` : "";
     el.style.opacity = dyPx ? String(Math.max(0.25, 1 - Math.abs(dyPx) / 400)) : "";
   };
@@ -332,7 +386,7 @@ export function Assist() {
   }, [on]);
   const s = screen.value;
   return (
-    <div class={`assist ${on ? "live" : ""}`}>
+    <div class={`assist ${on ? "live" : ""} ${drawing.value ? "drawing" : ""}`}>
       {!on && <Draw src={s?.screenshot ?? undefined} />}
       <div class="assist-panel tile" ref={panel}>
         <div class="assist-grip" {...swipe} aria-hidden="true"><span /></div>
