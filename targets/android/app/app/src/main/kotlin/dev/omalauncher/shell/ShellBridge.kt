@@ -73,6 +73,9 @@ class ShellBridge(
 
     @Volatile private var webWindowsMade = false
 
+    /** Home / Back (ShellActivity, main thread): a full-screen Linux web window leaves full screen; true if one did. */
+    fun leaveFullScreen(why: String): Boolean = webWindowsMade && webWindows.leaveFullScreen(why)
+
     /**
      * Linux (KWin) windows as web windows (docs/WEB_WINDOWS.md S6): KWin's "open" comes here instead of a
      * PowosWindowActivity task while web windows are on and the home is the wide one. Set by home's bridge only.

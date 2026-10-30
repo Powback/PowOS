@@ -1089,9 +1089,70 @@ class WebWindows(
             drag?.takeIf { !it.ended }?.let { drag = null }
             divDrag?.takeIf { !it.ended }?.let { divDrag = null }
             pressed = null
+            fullEdge = null
+            // A full-screen Linux window's top / bottom edge strip stays home's (FL2): the status bar's pull-down and
+            // the home gesture reach the page, and pulling in from there leaves full screen.
+            fullEdgeAt(ev)?.let { e ->
+                fullEdge = e
+                return false
+            }
             return linuxDown(ev) || frameTouch(ev)
         }
+        fullEdge?.let { e ->
+            edgePull(e, ev)
+            return false
+        }
         return linuxTouch?.let { linuxInput(it, ev) } ?: frameTouch(ev)
+    }
+
+    /** A gesture begun in a full-screen Linux window's edge strip ([fullEdgeAt]): its window, start and side (-1 top, 1 bottom). */
+    private class FullEdge(
+        val id: Int,
+        val y0: Float,
+        val side: Int,
+    )
+
+    private var fullEdge: FullEdge? = null
+
+    /** [ev]'s first finger in the edge strip of the full-screen Linux window, if one is full screen; else null. */
+    private fun fullEdgeAt(ev: MotionEvent): FullEdge? {
+        val w = wins.values.firstOrNull { it.linuxFull } ?: return null
+        val f = fingers(ev)
+        val h = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds.height()
+        val insets = web.rootWindowInsets
+        val min = (EDGE_STRIP_DP * density()).toInt()
+        val top = maxOf(min, insets?.getInsets(android.view.WindowInsets.Type.statusBars())?.top ?: 0)
+        val bottom = maxOf(min, insets?.getInsets(android.view.WindowInsets.Type.systemGestures())?.bottom ?: 0)
+        val side = fullScreenEdge(f.y, h, top, bottom)
+        return if (side == 0) null else FullEdge(w.id, f.y, side)
+    }
+
+    /** A pull in from [e]'s edge, past the touch slop: the window leaves full screen ([leaveFullScreen]). */
+    private fun edgePull(
+        e: FullEdge,
+        ev: MotionEvent,
+    ) {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> fullEdge = null
+            MotionEvent.ACTION_MOVE -> {
+                val dy = fingers(ev).y - e.y0
+                if (dy * -e.side > EDGE_PULL_DP * density()) {
+                    fullEdge = null
+                    Log.i(TAG, "window ${e.id}: ${if (e.side < 0) "top" else "bottom"} edge pull: leaves full screen")
+                    toWindow(e.id)
+                }
+            }
+        }
+    }
+
+    /**
+     * Home or Back with a full-screen Linux window (FL3: no app state leaves the user without a way home): it leaves
+     * full screen, back in its window. True: one did (ShellActivity's Back then stops there).
+     */
+    fun leaveFullScreen(why: String): Boolean {
+        val w = wins.values.firstOrNull { it.linuxFull } ?: return false
+        Log.i(TAG, "window ${w.id}: $why: leaves full screen")
+        return toWindow(w.id)
     }
 
     /** [onTouch] for the frames: bars, buttons, edges, dividers, the tile menu. */
@@ -1177,7 +1238,7 @@ class WebWindows(
         y: Float,
     ): Win? {
         if (underSwitcher) return null
-        // A full-screen Linux window takes every touch on the screen (nothing of home is over it).
+        // A full-screen Linux window takes every touch but its edge strips' ([fullEdgeAt], home's: checked before).
         wins.values.firstOrNull { it.linuxFull && it.linux != null }?.let { return it }
         if (y >= area.bottom || tiles.menuFor != null) return null
         val win = wins.values.filter { it.shown && it.mirror != null }.sortedByDescending { it.geo?.z ?: -1 }.firstOrNull { partAt(it, x, y) != null }
@@ -1245,6 +1306,8 @@ class WebWindows(
         y: Float,
     ): Pair<Win, String>? {
         if (y >= area.bottom) return null
+        // Full screen: no bar is on screen - none to press under it.
+        if (wins.values.any { it.linuxFull }) return null
         for (win in wins.values.filter { it.shown && it.mirror != null }.sortedByDescending { it.geo?.z ?: -1 }) {
             val part = partAt(win, x, y) ?: continue
             return if (part.isEmpty()) null else win to part
@@ -1964,7 +2027,7 @@ class WebWindows(
         val w = wins[id] ?: return false
         w.linux?.let { src ->
             // A full-screen Linux window: KWin takes it out of full screen (its "fullscreen 0" confirms), shown back now.
-            if (w.linuxFull) andro.marchy.WebWindowSource.fullScreen(src.kwin, false)
+            if (w.linuxFull && andro.marchy.WebWindowSource.canFullScreen()) andro.marchy.WebWindowSource.fullScreen(src.kwin, false)
             if (w.linuxFull) linuxFullScreen(w, false) else emit("webwindows.full", mapOf("id" to w.id, "on" to false))
             return true
         }
@@ -2368,6 +2431,25 @@ class WebWindows(
 
         /** A full-screen Linux window's layer among the windows ([linuxFullScreen]): above every page-ordered one. */
         private const val FULL_LAYER = 1 shl 20
+
+        /** A full-screen Linux window's edge strips stay home's at least this tall (dp): the status bar, the home gesture. */
+        private const val EDGE_STRIP_DP = 24
+
+        /** How far in from an edge strip (dp) a pull leaves full screen. */
+        private const val EDGE_PULL_DP = 24
+
+        /** Which edge strip [y] is in on an [h] px tall screen: -1 the top ([top] px), 1 the bottom ([bottom] px), 0 neither. */
+        fun fullScreenEdge(
+            y: Float,
+            h: Int,
+            top: Int,
+            bottom: Int,
+        ): Int =
+            when {
+                y < top -> -1
+                y >= h - bottom -> 1
+                else -> 0
+            }
 
         /** [shot] as a card's JPEG, at most [width] px wide. */
         private fun jpeg(
