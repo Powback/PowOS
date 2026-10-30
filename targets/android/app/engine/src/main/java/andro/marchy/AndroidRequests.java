@@ -11,7 +11,8 @@ import java.nio.file.Files;
 
 /**
  * Requests from the Linux session for things only Android can do, written to run/android-request by the
- * android-request helper (atomically, by rename): "wifi-panel", "open <package>" (full screen; a floating window on the unfolded home, [openOptions]), "split <package>" (beside Andromarchy), "float <package>" (floating window).
+ * android-request helper (atomically, by rename): "wifi-panel", "open <package>" (full screen; a floating window on the unfolded home, [openOptions]), "split <package>" (beside Andromarchy), "float <package>" (floating window),
+ * "launcher <apps|ai> [how json]" (PowOS's one launcher, [launcher]).
  */
 public final class AndroidRequests implements DirWatch.Listener {
     private static final String TAG = "AndroidRequests";
@@ -22,6 +23,12 @@ public final class AndroidRequests implements DirWatch.Listener {
      * see the app module, so it hands it in. A PowOS window's own task (WindowTasks "open") takes the same.
      */
     public static volatile java.util.function.Function<Context, android.os.Bundle> openOptions = null;
+    /**
+     * "launcher <kind> [how]": the desktop home inside Plasma (powos-shell's page, mode=desktop) opening the launcher -
+     * PowOS's one launcher, the app module's overlay (dev.omalauncher.system.PullHost, shell/ui/pull.tsx), not a
+     * second one in the Linux page. Kind "apps" or "ai", how the page's LauncherOpen JSON ("" for none). Set by App.
+     */
+    public static volatile java.util.function.BiConsumer<String, String> launcher = null;
     private final Context ctx;
     private final File file;
     private DirWatch.Handle watch;
@@ -128,6 +135,15 @@ public final class AndroidRequests implements DirWatch.Listener {
         }
         if (req[0].equals("socket-test")) { // PowOS (temporary): can the app and the shell helper (ShellHelper) talk?
             socketTest();
+            return;
+        }
+        if (req[0].equals("launcher") && req.length == 2) {
+            String[] arg = req[1].trim().split(" ", 2);
+            java.util.function.BiConsumer<String, String> host = launcher;
+            if (host == null)
+                Log.w(TAG, "no launcher host for: " + line);
+            else
+                host.accept(arg[0], arg.length == 2 ? arg[1] : "");
             return;
         }
         if (req[0].equals("power") && req.length == 2) { // Omarchy's shutdown / reboot / log out / suspend

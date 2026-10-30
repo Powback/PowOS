@@ -23,7 +23,7 @@ import { dropKeyboard } from "./keyboard.ts";
 import { overPull, overRelease } from "./overpull.ts";
 import { inWindow } from "./desktops.ts";
 import { ccEditing, ccExpanded, EXPAND_AT, expandedByDefault, FOLD_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
-import { carry, closeDrawer, dockDrag, drawer, editing, folder, homePage, menu, notif, onLibrary, openPanel, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
+import { carry, closeDrawer, dockDrag, drawer, editing, folder, launcherIsOverlay, menu, notif, onLibrary, openPanel, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
 /** Page swipe (iOS rule): commit past this share of a page's width, or on a flick. 0.3 / 0.3 px/ms were too hard
@@ -558,7 +558,7 @@ function claimUp(gs: Gesture): Gesture["mode"] {
   // The pull-up corners (state.ts pullPanels): from the left half PowOS AI's panel, from the right the apps.
   const kind = pullPanels.value === "on" && gs.x0 < innerWidth / 2 ? "ai" : "apps";
   // Home's page: the launcher is the overlay (pull.tsx) - the host's own pull takes the finger; without it, asked.
-  if (!homePage) {
+  if (!launcherIsOverlay) {
     pullKind.value = kind;
     return "open";
   }

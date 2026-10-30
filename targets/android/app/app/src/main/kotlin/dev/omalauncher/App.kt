@@ -59,6 +59,17 @@ class App : Application() {
         val windows = dev.omalauncher.system.AppWindows
         // The Linux side's "open <package>" (the AI, scripts) and a PowOS window's task: a floating window unfolded.
         andro.marchy.AndroidRequests.openOptions = java.util.function.Function { windows.bundle(it) }
+        // The desktop home inside Plasma (powos-shell, mode=desktop) opening the launcher: the one launcher overlay
+        // (PullHost, pull.tsx) over the Plasma app - wide unfolded, its pill above the keyboard - as from home's pill.
+        andro.marchy.AndroidRequests.launcher =
+            java.util.function.BiConsumer { kind, how ->
+                val k = if (kind == "ai") "ai" else "apps"
+                val o = runCatching { org.json.JSONObject(how) }.getOrNull()
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    val pull = dev.omalauncher.system.PullHost.current
+                    if (pull == null || !pull.open(k, o)) android.util.Log.w("PowosPull", "launcher from the desktop: no overlay host")
+                }
+            }
         // A PowOS window's task shown again (the launcher, the dock): to the front, floating if it was full screen.
         andro.marchy.WindowTasks.raiseTask =
             java.util.function.BiPredicate { c, id ->

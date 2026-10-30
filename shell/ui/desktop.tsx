@@ -21,7 +21,7 @@ import { Carried, Pages } from "./grid.tsx";
 import { Pet } from "./pet.tsx";
 import { AppScreen } from "./appscreen.tsx";
 import { Screens } from "./screens.tsx";
-import { back, chatting, closeDrawer, dockPosition, drawer, editing, page, pages, pullKind } from "../state.ts";
+import { back, chatting, closeDrawer, dockPosition, drawer, editing, launcherIsOverlay, openPanel, page, pages, pullKind } from "../state.ts";
 
 // Its own stylesheet, here so the phone's pages never load it (hot.ts swaps it in place like the others).
 const css = document.createElement("link");
@@ -87,6 +87,14 @@ function followDesktops() {
 }
 followDesktops();
 
+/** The launcher up with its search focused: inside the phone's Plasma app the one overlay (state.ts launcherIsOverlay). */
+function openLauncher() {
+  if (launcherIsOverlay) return openPanel("apps", { search: true });
+  if (drawer.value === 0) pullKind.value = "apps";
+  drawer.value = 1;
+  document.querySelector<HTMLTextAreaElement>(".bar-pill textarea")?.focus();
+}
+
 function useKeys() {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -95,18 +103,14 @@ function useKeys() {
         if (back()) e.preventDefault();
       } else if ((e.key === "/" && !typing) || (e.key === " " && e.ctrlKey)) {
         e.preventDefault();
-        if (drawer.value === 0) pullKind.value = "apps";
-        drawer.value = 1;
-        document.querySelector<HTMLTextAreaElement>(".bar-pill textarea")?.focus();
+        openLauncher();
       }
     };
     addEventListener("keydown", key);
     // Meta / KWin's swipe-up (powos-shell's org.powos.Shell /Launcher), sent here when no panel runs: as "/" does.
     const offToggle = powos.on("launcher.toggle", () => {
       if (drawer.value > 0) return void closeDrawer();
-      pullKind.value = "apps";
-      drawer.value = 1;
-      document.querySelector<HTMLTextAreaElement>(".bar-pill textarea")?.focus();
+      openLauncher();
     });
     return () => (removeEventListener("keydown", key), offToggle());
   }, []);
