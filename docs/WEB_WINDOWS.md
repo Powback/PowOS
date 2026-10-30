@@ -529,3 +529,110 @@ window), the window opaque with content, the dock and bar never covered, launche
 - During a resize the bar is redrawn by a canvas post, which can land a frame after the crop (buttons only; the bar's
   background is the same colour).
 - Corners of the crop at the work area's bottom are rounded like the frame's.
+
+---
+
+## Tiles: PowOS's own split screen (2026-10-30, branch ww-tiles)
+
+The user, 2026-10-30: **"lets take full control and replace that too so we can unlock our own splitscreen
+capabilities maybe with like 3 of 4 apps at once"**. Android's split (WM Shell) holds 2 apps and paints a veil while its
+divider moves (`SplitDecorManager`: a layer in the app's TaskDescription background colour, white for most apps). With
+`powos_web_windows` = 1 PowOS tiles its own web windows instead. Folded is unaffected (no web windows there).
+
+### Model (page: `shell/ui/webwindows.tsx`, section "tiles")
+
+- A **tiling** is a state of one home page's windows: `tilings[page] = {layout, ids, rx, ry}`. A window listed in
+  `ids` is *tiled*, every other window floats as before. `ids` may hold `null`, an empty tile. The next window opened
+  on that page fills it (`fillEmptyTile`).
+- Layouts: `2h` left | right, `2v` top / bottom, `3` one big left plus two stacked right, `4` a 2x2 grid. Two apps
+  split left | right unless the tile area is clearly portrait (h > 1.3 w). The unfolded screen is portrait by a hair, and
+  the user asked for left | right there on 10-29, so top/bottom applies only to a truly tall area.
+- Tiles fill the **tile area**: the work area below the status bar (`--inset-top`; a bar under the status bar could
+  not be grabbed) and 8 CSS px above the dock (`tileArea`). There are 8 px gaps between tiles (`TILE_GAP`), and home
+  shows through them.
+- A tiled window's frame is simply its tile's rect (x/y/w/h, scale 1, not maximised). The host places it like any
+  window (`w.f`), and a new body size resizes its display (`VirtualDisplay.resize` via the helper), so the app lays out
+  at the real tile size.
+- Leaving a tiling (`untile`): **float** (back to the floating frame it had before, `untiled`), **minimise**
+  (dock), **keep** (dragged out by its bar: it stays where it was let go), or **gone** (closed). The rest close up: 2-3
+  windows get the layout for their count, and a 2-split keeps its direction and ratio. A last window alone fills the work
+  area (maximised, with restore = its floating frame), as Android's split ending gives the other app the screen.
+  Maximise or minimise on a tiled window takes it out of the tiling first.
+
+### Dividers (native: `WebWindowTiles.kt`, `WebWindows.kt` "tiles")
+
+- The page sends the dividers in `w.f` after the windows: `<n> [<page:axis> <x|y> <pos> <from> <len> <lo> <hi>
+  <before ids> <after ids>]`, measured from invisible `.webwindow.ww-divider` elements in the page. They therefore move
+  with a page swipe, and home's swipes and pulls leave them alone (`gesture.ts` / `home.tsx` already skip `.webwindow`).
+- The host draws one handle layer per divider (a 5 dp pill in the page's foreground colour with a surface-coloured rim)
+  under `powos-webwindows`, above every window (layer 10000). Touch target: 44 dp across, the divider's whole length.
+  It is hit before any window's bar or edge.
+- **Drag: native and live.** Each MOVE is one transaction: the before side's far edge and the after side's near edge
+  follow the finger (`dividerFrames`). Each app's **last frame** is cropped where its tile shrank and **scaled up to cover**
+  where it grew (`Geo.cover` → mirror `setScale` + crop in `frameAt`), so there is never a background, veil or white. A
+  tile stops 48 dp from the span's ends.
+- **Release:** the divider snaps to the nearest of **1/3, 1/2, 2/3** right away (one transaction). The layers are held
+  there (`heldByDivider`) until the page's next `w.f` has those frames (2 px) or 1 s passes. The page takes the ratio
+  (`webwindows.divider {key, ratio}`), and its frame resizes each display.
+- **To an edge** (within 12 % of the span): the squeezed side's window(s) **go to the dock** (minimised, still running; a
+  tap on the dock icon brings them back floating), and the rest close up (`webwindows.divider {key, ratio, drop:
+  [ids]}`). Decided this way because closing would lose the app's state, and floating it on top would cover the tile the
+  user just widened. The user asked the same of Android's split on 10-29 ("putting it inside of a drawer or something"
+  instead of closing).
+
+### Entry points
+
+- **Title bar:** a 4th button, *tile* (two panes), left of minimise. It opens a native menu under it (layer 10002):
+  left, right, top, bottom, grid, and float when the window is tiled. Pick = `webwindows.tile {id, slot}` →
+  `tile()`. A half makes a 2-split; the page's other tiled windows keep a tile, and an empty half takes the page's
+  topmost floating window (two windows, one split). Grid tiles the window with the page's other windows (2-4, layout
+  by count, this one first). A corner makes the 2x2 grid; empty corners stay empty until a window opens.
+- **Drag to an edge:** moving a window by its bar (one finger) with the finger within 24 dp of the work area's
+  left/right edge shows a translucent snap hint (layer 10001) of the half. Within 120 dp of the top/bottom there, it
+  shows the quarter. Letting go there puts the window into that tile at once (its last frame covering the tile), then
+  the page tiles it. A tiled window dragged elsewhere by its bar floats again.
+- **Switcher:** "Split screen" with web windows on: pick the first app, then 1-3 more. A banner counts them and has a
+  **Split** button; the 4th pick tiles at once (`ui/recents.tsx splitTiles` → `tileApps`). The apps open as web
+  windows on the home page on screen, tiled in pick order. With web windows off, it stays Android's split (second pick).
+- **OnePlus's own split entry points** are off while web windows are on: `Settings.Secure
+  double_finger_split_screen_enable` and `Settings.System recommender_split_screen_enable` (both 1 on the phone,
+  read 2026-10-30). They are set to 0 at SystemUI's connect, and the old values are restored when the setting goes off
+  (`WebWindowTiles.splitEntryPoints`, HACK: OxygenOS private keys).
+
+### Fallback: Android's split
+
+- `WebWindows.open` refuses an activity with `resizeMode` UNRESIZEABLE and targetSdk < 36 (Android 16 ignores the flag
+  on large screens from 36). Log: `fallback: <pkg> keeps Android's own window/split, not a web window: not resizeable
+  ...`. The launcher then launches it as before; the switcher's split uses `tasks.split` (Android's) for the first
+  two picks.
+- After every launch on a window's display: no task on that display 3 s later (the app refused it, or its launch
+  escaped) → the window goes and the app opens as Android's own window. Log: `fallback: <pkg> has no task on display N
+  3000 ms after its launch`.
+
+### Shots
+
+`shell/dev/shots.mjs` scenes `ww-tiles-2/3/4` (unfolded, unfolded-land): the page's tile rects painted with stand-ins
+for the native frame, bar and handles (`TILE_PAINT`; on the phone those are layers). Run:
+`shell/dev/shot.sh OUT 'ww-tiles'`.
+
+### Phone check
+
+With the APK shipped and the user idle, open two apps from the launcher (web windows), then:
+- tap the *tile* button on one bar → menu; pick left → `window N: tile left (its tile menu)`, page console
+  `[tiles] page P: 2h [N,M] (left for window N)`;
+- drag the divider → `divider P:x: K live moves in T ms (last frames scaled/cropped, no veil), 0.41 -> snapped 0.33`;
+  then helper resizes for both displays; no white flashes while dragging;
+- drag a divider to the edge → `... let go at 0.05: windows N leave the tiles (to the dock)`;
+- drag a window by its bar to the left edge → hint shows, `window N: snapped to tile left ...`;
+- switcher → card menu → Split screen, pick 2-4 → `[tiles] page P: 3 [..] (split screen)`;
+- `dumpsys SurfaceFlinger --list | grep powos-ww-divider` shows the handle layers;
+- `settings get secure double_finger_split_screen_enable` → 0 while web windows are on.
+
+### Not yet
+
+- Touch routing into the app is still v0 (the page forwards body touches).
+- In a 2x2 grid the two handles cross at the centre. The vertical divider wins a press there; there is no 2-D drag of
+  both at once.
+- Divider handles sit above floating windows that overlap a tiling.
+- No swap of two tiles by dragging one onto the other; no per-tile resize from the outer edges (dividers only).
+- The snap hint is a plain rectangle (no corner radius: the layer is scaled from 8x8).

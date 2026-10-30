@@ -108,6 +108,8 @@ class PowosRecentsService : Service() {
                     startGestures()
                     // Web windows on: home back on display 0 if the restart left none (WebWindows.homeAfterRestart).
                     dev.omalauncher.shell.WebWindows.homeAfterRestart(this@PowosRecentsService)
+                    // Web windows on: OnePlus's own split entry points off (PowOS tiles instead); off: back as they were.
+                    dev.omalauncher.shell.WebWindowTiles.splitEntryPoints(this@PowosRecentsService)
                     nav?.systemUi = sysui
                     edge?.systemUi = sysui
                     nav?.recentTasks = recentTasks

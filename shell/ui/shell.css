@@ -2112,6 +2112,11 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   background: var(--color-surface); color: var(--color-foreground); border: var(--frame) solid var(--line);
   box-shadow: var(--lift);
 }
+/* PowOS tiles' split (web windows on): the picks so far, and the button that tiles them. */
+.recents-banner-go {
+  margin-left: 10px; padding: 4px 14px; border-radius: 999px; border: none; font: var(--text-small) var(--font);
+  background: var(--color-foreground); color: var(--color-surface);
+}
 .recents-menu-scrim { position: fixed; inset: 0; z-index: 1; }
 .recents-menu {
   position: fixed; z-index: 2; width: 220px; display: flex; flex-direction: column; padding: 6px 0;

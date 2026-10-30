@@ -213,6 +213,23 @@ const GROUPED_SCENE =
  * wallpaper (KWin blurs its region on the device).
  */
 const DESKTOP_HOME = `{ const B = (await U('./bridge.ts')).powos; for (const i of (await B.home.get()).items) await B.home.remove(i.key); const cols = Math.max(4, Math.round(innerWidth / 100)); const w = cols >= 8 ? 3 : Math.max(2, Math.floor((cols - 1) / 2)); const across = Math.max(1, Math.floor((cols + 1) / (w + 1))); let i = 0, y = 0, rowH = 0; for (const [n, h] of [['agents', 2], ['app:local.lights/main', 2], ['app:local.shopping/main', 2]]) { if (i % across === 0 && i > 0) { y += rowH + 1; rowH = 0; } rowH = Math.max(rowH, h); await B.home.addPanel(n, 1, { x: (i % across) * (w + 1), y, w, h }); i++; } await sleep(300); S.home.value = { ...S.home.value, columns: cols }; const st = document.createElement('style'); st.textContent = '.launcher { will-change: auto !important; transform: none !important; }'; document.head.append(st); await sleep(300); }`;
+/** The native windows' stand-ins for the tiles scenes (the page's window elements are invisible on the phone). */
+const TILE_PAINT = `
+.webwindow:not(.ww-divider) { background: var(--color-surface); border-radius: 12px; overflow: hidden; box-shadow: var(--lift); }
+.webwindow-title { display: flex; align-items: center; padding: 0 12px; font: var(--text-small) var(--font); color: var(--color-foreground); }
+.webwindow-title::after { content: "\u25eb   \u2013   \u25a1   \u2715"; margin-left: auto; letter-spacing: 2px; opacity: 0.85; }
+.webwindow-body { background: repeating-linear-gradient(180deg, color-mix(in srgb, var(--color-foreground) 7%, var(--color-background)) 0 22px, var(--color-background) 22px 44px); }
+.ww-divider::after { content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 56px; transform: translate(-50%, -50%); border-radius: 3px; background: var(--color-foreground); outline: 1.5px solid var(--color-surface); }
+.ww-divider[data-div$=":y"]::after { width: 56px; height: 5px; }
+`;
+const TILES = (n) =>
+  `const W = await U('./ui/webwindows.tsx'); const p = S.pages.value[0]; const names = ['Chrome', 'Files', 'Calculator', 'Messages'];` +
+  ` W.webWins.value = names.slice(0, ${n}).map((label, i) => ({ id: i + 1, key: 'a:' + label, label, page: p, x: 40 + 30 * i, y: 80 + 30 * i, w: 300, h: 260 }));` +
+  ` W.tileWindows(p, W.webWins.value.map((w) => w.id)); await sleep(300);` +
+  ` document.head.insertAdjacentHTML('beforeend', '<style>' + ${JSON.stringify(TILE_PAINT)} + '</style>');` +
+  ` for (const w of W.webWins.value) { const t = document.querySelector('.webwindow[data-wwid="' + w.id + '"] .webwindow-title'); if (t) t.textContent = w.label; } await sleep(200);`;
+const TILE_SIZES = { unfolded: SIZES.unfolded, "unfolded-land": LAND_SIZES["unfolded-land"] };
+
 const SCENES = [
   ["chrome-status", "statusbar", "E.emit('chrome.changed', {kind:'status', battery:74, charging:true, network:'wifi', vpn:true, left:44});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
   ["chrome-window", "windowbar", "E.emit('chrome.changed', {kind:'window', title:'Calculator'});", "blurred", null, { narrow: {width:280,height:27,insets:{top:0,bottom:0}}, wide: {width:650,height:27,insets:{top:0,bottom:0}} }],
@@ -226,6 +243,12 @@ const SCENES = [
   // Web windows (ui/webwindows.tsx) over the widgets: the bodies are holes (the app shows under home's pixels on the
   // phone, the wallpaper here) - no widget, icon or lower title bar painted in them; the top window's title bar whole.
   ["webwindows", "home", "const W = await U('./ui/webwindows.tsx'); const p = S.pages.value[0]; W.webWins.value = [{ id: 1, key: 'a:x', label: 'Chrome', page: p, x: 20, y: 70, w: Math.round(innerWidth * 0.55), h: 420 }, { id: 2, key: 'a:y', label: 'Files', page: p, x: Math.round(innerWidth * 0.3), y: 260, w: Math.round(innerWidth * 0.5), h: 300 }]; await sleep(300);", "wallpaper"],
+  // PowOS's own split screen (ui/webwindows.tsx "tiles"): 2, 3 and 4 web windows tiled above the dock, unfolded and
+  // unfolded sideways (folded has no web windows). The phone draws the windows natively (WebWindows.kt); here
+  // TILE_PAINT paints stand-ins at the same rects: frame, bar with the app's name, body, and the dividers' handles.
+  ["ww-tiles-2", "home", TILES(2), "wallpaper", undefined, TILE_SIZES],
+  ["ww-tiles-3", "home", TILES(3), "wallpaper", undefined, TILE_SIZES],
+  ["ww-tiles-4", "home", TILES(4), "wallpaper", undefined, TILE_SIZES],
   ["edit", "home", "S.editing.value = true;", "wallpaper"],
   ["edit-theme", "home", "S.editing.value = true; await sleep(200); [...document.querySelectorAll('.edit-act')].find(b => b.textContent.trim() === 'theme')?.click();", "wallpaper"],
   // Picking tiles in edit mode (ui/homeselect.ts) and a folder made of them, open (ui/folders.tsx).

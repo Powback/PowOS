@@ -21,6 +21,7 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { RecentTask } from "../types.ts";
 import { TaskCard, type Rect } from "./switcher.tsx";
+import { tileApps, webWindowsOn } from "./webwindows.tsx";
 import { spring } from "./spring.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { appView, closeApp, forgetOpened, mergeTasks, openApp, taskApp } from "../apps/pages.ts";
@@ -54,6 +55,11 @@ const size = signal(bounds());
 const menu = signal<{ id: number; left: number; top: number } | null>(null);
 /** Split screen: the first app picked, waiting for the second. */
 const splitFirst = signal<number | null>(null);
+/**
+ * Web windows on: PowOS's own split (tiles, ui/webwindows.tsx) instead of Android's - up to 3 more picks after the
+ * first (2-4 apps), "Split" tiles them; null: Android's split (the second pick splits at once).
+ */
+const splitMore = signal<number[] | null>(null);
 /** A card growing to the screen as its app opens. */
 const opening = signal<{ id: number; rect: Rect; src: string; radius: string; to?: Rect } | null>(null);
 /** Apps kept from "clear all" (by app, as Android's lock: task ids don't outlive a reboot). */
@@ -130,6 +136,7 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()
 function reset() {
   menu.value = null;
   splitFirst.value = null;
+  splitMore.value = null;
   opening.value = null;
 }
 
@@ -335,10 +342,32 @@ function pickForSplit(id: number) {
   const first = splitFirst.value;
   if (first == null) {
     splitFirst.value = id;
+    splitMore.value = null;
+    void webWindowsOn().then((on) => splitFirst.value === id && on && (splitMore.value = []));
     return;
   }
+  const more = splitMore.value;
+  if (more == null) {
+    splitFirst.value = null;
+    if (first !== id) powos.tasks.split(first, id);
+    return;
+  }
+  if (id === first || more.includes(id)) return;
+  splitMore.value = [...more, id];
+  if (splitMore.value.length >= 3) void splitTiles();
+}
+
+/** The picks (2-4) as PowOS tiles on home; one that can't be a web window: Android's split of the first two. */
+async function splitTiles() {
+  const ids = [splitFirst.value, ...(splitMore.value ?? [])].filter((v): v is number => v != null);
   splitFirst.value = null;
-  if (first !== id) powos.tasks.split(first, id);
+  splitMore.value = null;
+  if (ids.length < 2) return;
+  const apps = ids.map((i) => tasks.value.find((t) => t.id === i)).filter((t): t is RecentTask => !!t?.key);
+  close();
+  if (apps.length === ids.length && (await tileApps(apps.map((t) => ({ key: t.key!, label: t.label }))))) return;
+  console.info(`[tiles] split screen of tasks ${ids.join(",")}: Android's split (not all are web windows)`);
+  powos.tasks.split(ids[0], ids[1]);
 }
 
 function showNote(text: string) {
@@ -616,7 +645,17 @@ export function Recents() {
       }}
     >
       <div class="recents-scrim" />
-      {first != null && <div class="recents-banner">Pick an app to split the screen with</div>}
+      {first != null && splitMore.value == null && <div class="recents-banner">Pick an app to split the screen with</div>}
+      {first != null && splitMore.value != null && (
+        <div class="recents-banner">
+          {splitMore.value.length ? `${splitMore.value.length + 1} apps picked - pick up to ${3 - splitMore.value.length} more, or` : "Pick 1 to 3 more apps to tile with it"}
+          {splitMore.value.length > 0 && (
+            <button type="button" class="recents-banner-go" onClick={() => void splitTiles()}>
+              Split
+            </button>
+          )}
+        </div>
+      )}
       <div class="task-row" ref={rowEl} onClick={(e) => e.target === e.currentTarget && (first != null ? (splitFirst.value = null) : close())}>
         {list.length ? (
           list.map((t, i) => (
@@ -627,7 +666,7 @@ export function Recents() {
               eager={i < 4}
               load={loaded.value}
               pinned={pinned.value.has(pinKey(t))}
-              picked={first === t.id}
+              picked={first === t.id || !!splitMore.value?.includes(t.id)}
               onOpen={(id, shot) => (first != null ? pickForSplit(id) : open(id, shot))}
               onRemove={remove}
               onMenu={(id, card) => {
