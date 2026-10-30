@@ -1278,12 +1278,25 @@ class ShellBridge(
                     if (id != null) emit("windows.raised", id) else runtime.androidApps.open(app)
                 }
             // A PowOS app's floating window likewise (unfolded: its task floats, WindowTasks), else it opens.
-            key.startsWith("l:") ->
-                restoreLinux(key)?.let { emit("windows.raised", it) }
-                    ?: runtime.linuxApps.firstOrNull { "l:${it.id}" == key }?.let { runtime.launch(it) }
+            key.startsWith("l:") -> launchLinux(key)
         }
         // The strip shows it first next time home shows (the Compose launcher settles on stop, likewise).
         runtime.usage.settle()
+    }
+
+    /** PowOS app [key]: its floating window back, else it starts; one that can't start tells the pages why ("apps.launchfailed"). */
+    private fun launchLinux(key: String) {
+        val raised = restoreLinux(key)
+        val app = if (raised == null) runtime.linuxApps.firstOrNull { "l:${it.id}" == key } else null
+        // Each way a tap goes, in logcat: Dolphin's 2026-10-30 21:00 tap left no trace of which one it took.
+        Log.i(TAG, "launch $key: " + if (raised != null) "its window $raised came back" else if (app != null) "starting ${app.exec}" else "no such app")
+        val failed = { why: String -> broadcast("apps.launchfailed", JSONObject().put("key", key).put("reason", why).toString()) }
+        when {
+            raised != null -> emit("windows.raised", raised)
+            // The page's placeholder says why at once, not "loading" for 20 s.
+            app != null -> runtime.launch(app, failed)
+            else -> failed("It isn't installed")
+        }
     }
 
     /** Not home's bridge, web windows on: home's page asked to open [key] as a web window ("webwindows.launch"); false: not so here. */

@@ -135,6 +135,12 @@ function linuxPlaceholder(key: string, label: string, page: number): number {
   return id;
 }
 
+// The host: a Linux launch of [key] couldn't start (its command ended with no window, or never ran; Runtime.openRooted):
+// its waiting window says so with the reason at once, not "loading" until [LINUX_START] (Dolphin, 2026-10-30 21:00).
+powos.on("apps.launchfailed", ({ key, reason }: { key: string; reason?: string }) => {
+  for (const w of webWins.value.filter((v) => v.key === key && !v.live && !v.failed)) update(w.id, { failed: `${(reason || "The launch failed").replace(/\.$/, "")}.` });
+});
+
 /** Window [id] not live in [LINUX_START] (no toplevel, or one that never drew): "couldn't start" - never forever. */
 function watchStart(id: number) {
   setTimeout(() => {

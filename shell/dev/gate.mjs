@@ -2867,6 +2867,20 @@ async function lw3BadExec() {
   return fails.filter(Boolean);
 }
 
+/** LW3: the host says a launch's command ended with no window ("apps.launchfailed") - "couldn't start: <why>" at once. */
+async function lw3HostFailed() {
+  const { S, W, els } = await window.__lw3f.lw3Env();
+  W.webWins.value = [];
+  W.LINUX_START.ms = 600_000;
+  await S.launch("l:org.kde.kate");
+  window.__mockEvents.emit("apps.launchfailed", { key: "l:org.kde.kate", reason: "It exited 1 with no window: kate: cannot open display" });
+  await window.__gw.settled();
+  const text = els("l:org.kde.kate")[0]?.querySelector(".ww-failed-text")?.textContent ?? "";
+  W.webWins.value = [];
+  W.LINUX_START.ms = 200;
+  return [!text.includes("cannot open display") && `the host's launch failure shows no reason: "${text}"`].filter(Boolean);
+}
+
 /** LW3: the real host back. */
 async function lw3End() {
   const { W, powos, g } = await window.__lw3f.lw3Env();
@@ -2878,7 +2892,7 @@ async function lw3End() {
 }
 
 /** The LW3 run's steps into the page (window.__lw3f); evaluates to []. */
-const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Timeout, lw3Retry, lw3BadExec, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+const LW3_HELPERS = `(window.__lw3f = { ${[lw3Env, lw3Launch, lw3Offer, lw3Timeout, lw3Retry, lw3BadExec, lw3HostFailed, lw3End].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** [webWindowMaskCheck]'s helpers into the page (window.__wwg); evaluates to [] (no problems) as a gate step. */
 const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
@@ -3232,6 +3246,7 @@ try {
     fails.push(...(await step("lw3Retry")));
     fails.push(...(await step("lw3BadExec")));
     await shot("4-bad-exec");
+    fails.push(...(await step("lw3HostFailed")));
     fails.push(...(await step("lw3End")));
     return fails;
   })));
