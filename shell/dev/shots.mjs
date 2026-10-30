@@ -288,6 +288,10 @@ const SCENES = [
   // Web windows (ui/webwindows.tsx) over the widgets: the bodies are holes (the app shows under home's pixels on the
   // phone, the wallpaper here) - no widget, icon or lower title bar painted in them; the top window's title bar whole.
   ["webwindows", "home", WINDOWS(""), "wallpaper"],
+  // WG1/WG2 (2026-10-30): a window half over a widget and half over the search bar - the uncovered halves keep their
+  // whole glass up to the window's edge (on the phone their blur is on GlassBlur's layer under the windows, never cut
+  // or dropped), the window's frame and shadow over them.
+  ["webwindow-glass", "home", `const W = await U('./ui/webwindows.tsx'); const p = S.pages.value[0]; await sleep(200); const rs = [...document.querySelectorAll('.tile')].map((e) => e.getBoundingClientRect()).filter((r) => r.width > 40 && r.left >= 0 && r.right <= innerWidth); const t = rs.find((r) => r.top < innerHeight / 2); const bar = rs.filter((r) => r.bottom > innerHeight - 160 && r.width > 120).sort((a, b) => a.left - b.left)[0]; const x = Math.round(t.left + t.width / 2); const y = Math.round(t.top + t.height / 2); const w = Math.round(bar ? Math.max(bar.left + bar.width / 2 - x, 160) : innerWidth * 0.45); const h = Math.round(bar ? bar.top + bar.height / 2 - y : innerHeight * 0.5); W.webWins.value = [{ id: 1, key: 'a:x', label: 'Chrome', page: p, x, y, w, h, live: true }];` + PAINT + ` await sleep(300);`, "wallpaper"],
   // TB4: the dock's taskbar taps on web windows (webwindows.tsx dockToggle) - a docked app's window in front, then its
   // icon tapped (minimised: off the page, its dock dot dimmed), then tapped again (back in front).
   ["dock-toggle-front", "home", DOCK_WIN(""), "wallpaper", null, TILE_SIZES],
