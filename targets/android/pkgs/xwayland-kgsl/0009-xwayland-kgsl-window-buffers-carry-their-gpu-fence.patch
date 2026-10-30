@@ -1,0 +1,249 @@
+From: PowOS
+Subject: xwayland/kgsl: a window buffer carries the GPU fence of its rendering instead of a glFinish per commit
+
+KGSL has no implicit sync. lfdevs's backend (0002) synchronized a commit with a
+glFinish in xwl_glamor_pixmap_get_wl_buffer: every commit stalled Xwayland's main
+loop on the GPU, and nothing in the buffer told the compositor when it was ready.
+On the OnePlus Open (ABZU, unfolded) the window showed black vertical stripes and
+whole black frames on and off, and the game's frame rate was poor.
+
+- Before each commit (a reused buffer, a new one, and a forced-commit refresh's
+  new wl_buffer), a native fence of all GL work so far (EGL_ANDROID_native_fence_sync,
+  xwl_glamor_get_fence) is attached to the buffer's dma-buf as its write fence
+  (DMA_BUF_IOCTL_IMPORT_SYNC_FILE; kernel backport targets/android/kernel/patches/0004).
+  The compositor's dma-buf readiness wait (KWin: EXPORT_SYNC_FILE) waits for the GPU.
+  The pixmap keeps a dup of its plane-0 dma-buf fd for this (closed with the pixmap).
+- HACK fallback: no extension, no kept fd, a failed dup or a failed import ->
+  glFinish for that commit only (as before), logged once; ENOTTY / no extension
+  disable the fence for good.
+- init_buffer_params_kgsl_surfaceless's glFinish moved to its DRI3 export caller
+  (glamor_egl_fds_from_pixmap), so a commit's new wl_buffer isn't finished twice.
+- The "Xwayland KGSL:" stats line adds "N fenced, M finished on the CPU", and is
+  also printed when anything was finished on the CPU.
+---
+diff --git a/hw/xwayland/xwayland-glamor-gbm.c b/hw/xwayland/xwayland-glamor-gbm.c
+index 5a4cbdb..c70da5b 100644
+--- a/hw/xwayland/xwayland-glamor-gbm.c
++++ b/hw/xwayland/xwayland-glamor-gbm.c
+@@ -122,6 +122,10 @@ struct xwl_pixmap {
+     unsigned int texture;
+     struct gbm_bo *bo;
+     Bool implicit_modifier;
++    /* PowOS (KGSL): a dup of the dma-buf behind this pixmap's wl_buffer (plane 0), to attach the write fence of
++     * Xwayland's rendering to it before each commit (xwl_glamor_kgsl_fence_wl_buffer). */
++    Bool kgsl_has_wl_fd;
++    int kgsl_wl_fd;
+ #ifdef DRI3
+     struct dri3_syncobj *syncobj;
+     uint64_t timeline_point;
+@@ -183,6 +187,100 @@ xwl_glamor_kgsl_refresh_wl_buffer(PixmapPtr pixmap)
+     xwl_pixmap->buffer = NULL;
+ }
+ 
++/* PowOS: how the commits of the last interval were synchronized (Xwayland KGSL stats line). */
++static unsigned int kgsl_commits_fenced, kgsl_commits_finished;
++
++void
++xwl_glamor_kgsl_sync_stats(unsigned int *fenced, unsigned int *finished)
++{
++    *fenced = kgsl_commits_fenced;
++    *finished = kgsl_commits_finished;
++    kgsl_commits_fenced = kgsl_commits_finished = 0;
++}
++
++/*
++ * PowOS: everything glamor drew into a window buffer is done before the compositor reads it - without Xwayland's
++ * CPU waiting for that.
++ *
++ * KGSL has no implicit sync. lfdevs's backend (0002) made it safe with a glFinish before every commit, which
++ * stalls Xwayland's main loop (and so every client's next frame) on each window copy. Instead, a native fence of
++ * the rendering so far (EGL_ANDROID_native_fence_sync) goes into the buffer's dma-buf as its write fence
++ * (DMA_BUF_IOCTL_IMPORT_SYNC_FILE, Linux 6.0, backported to the phone's 5.15 by targets/android/kernel/patches/0004).
++ * The compositor's dma-buf readiness check (KWin: EXPORT_SYNC_FILE of the read fence, transaction.cpp) then waits
++ * for the GPU before it samples the buffer - the window never shows a frame still being written (black stripes,
++ * black frames: a fresh buffer is black until its copy lands).
++ */
++static void
++xwl_glamor_kgsl_fence_wl_buffer(struct xwl_screen *xwl_screen, struct xwl_pixmap *xwl_pixmap)
++{
++#if defined(DMA_BUF_IOCTL_IMPORT_SYNC_FILE)
++    static Bool unsupported, logged, checked, has_native_fence;
++    struct dma_buf_import_sync_file args = {
++        .flags = DMA_BUF_SYNC_WRITE,
++        .fd = -1,
++    };
++    const char *why = NULL;
++    int err = 0;
++
++    if (unsupported)
++        goto finish;
++    if (!checked) {
++        checked = TRUE;
++        has_native_fence = epoxy_has_egl_extension(xwl_screen->egl_display, "EGL_ANDROID_native_fence_sync");
++    }
++    if (!has_native_fence) {
++        unsupported = TRUE;
++        why = "EGL has no EGL_ANDROID_native_fence_sync";
++        goto fallback;
++    }
++    if (!xwl_pixmap->kgsl_has_wl_fd) {
++        why = "no dma-buf fd kept for the buffer";
++        goto fallback;
++    }
++
++    /* Creates the fence after (and flushes) every GL command so far, the window copy included. */
++    args.fd = xwl_glamor_get_fence(xwl_screen);
++    if (args.fd < 0) {
++        why = "eglDupNativeFenceFDANDROID failed";
++        goto fallback;
++    }
++    if (drmIoctl(xwl_pixmap->kgsl_wl_fd, DMA_BUF_IOCTL_IMPORT_SYNC_FILE, &args) != 0) {
++        err = errno;
++        close(args.fd);
++        if (err == ENOTTY)
++            unsupported = TRUE;
++        why = "DMA_BUF_IOCTL_IMPORT_SYNC_FILE failed";
++        goto fallback;
++    }
++    close(args.fd);
++    kgsl_commits_fenced++;
++    return;
++
++fallback:
++    if (!logged) {
++        logged = TRUE;
++        ErrorF("Xwayland glamor: KGSL window buffers can't carry a GPU fence (%s%s%s): each commit waits for "
++               "the GPU on the CPU (glFinish) instead\n", why, err ? ": " : "", err ? strerror(err) : "");
++    }
++finish:
++#endif
++    /* HACK: a CPU wait for this commit's rendering (the pre-0009 behaviour), only when the buffer can't carry a
++     * fence: a kernel without the dma-buf sync_file ioctls, an EGL without native fences, or an import failing.
++     * The real fix is the fence above working everywhere (the phone's kernel has the backport). */
++    xwl_glamor_egl_make_current(xwl_screen);
++    glFinish();
++    kgsl_commits_finished++;
++}
++
++static void
++xwl_glamor_kgsl_keep_wl_fd(struct xwl_pixmap *xwl_pixmap, int fd)
++{
++    if (xwl_pixmap->kgsl_has_wl_fd)
++        close(xwl_pixmap->kgsl_wl_fd);
++    xwl_pixmap->kgsl_wl_fd = fd;
++    xwl_pixmap->kgsl_has_wl_fd = fd >= 0;
++}
++
+ Bool
+ xwl_glamor_has_wl_drm(struct xwl_screen *xwl_screen)
+ {
+@@ -963,6 +1061,7 @@ xwl_glamor_gbm_destroy_pixmap(PixmapPtr pixmap)
+         if (xwl_pixmap->bo)
+            gbm_bo_destroy(xwl_pixmap->bo);
+         xwl_glamor_gbm_dispose_syncpts(pixmap);
++        xwl_glamor_kgsl_keep_wl_fd(xwl_pixmap, -1);
+ #ifdef DRI3
+         xwl_glamor_kgsl_close_import_fds(xwl_pixmap);
+ #endif /* DRI3 */
+@@ -1094,7 +1193,8 @@ init_buffer_params_kgsl_surfaceless(struct xwl_screen *xwl_screen,
+         }
+     }
+ 
+-    glFinish();
++    /* PowOS: no glFinish here any more: a wl_buffer gets its write fence (xwl_glamor_kgsl_fence_wl_buffer), the
++     * DRI3 export (glamor_egl_fds_from_pixmap) finishes itself. */
+ 
+     if (!xwl_gbm->export_dmabuf_image_query(xwl_screen->egl_display,
+                                             xwl_pixmap->image,
+@@ -1180,10 +1280,9 @@ xwl_glamor_pixmap_get_wl_buffer(PixmapPtr pixmap)
+     xwl_pixmap = xwl_pixmap_get(pixmap);
+ 
+     if (xwl_pixmap->buffer) {
+-        if (xwl_glamor_is_kgsl_surfaceless(xwl_screen)) {
+-            xwl_glamor_egl_make_current(xwl_screen);
+-            glFinish();
+-        }
++        /* PowOS: GPU-fenced instead of lfdevs's glFinish (see xwl_glamor_kgsl_fence_wl_buffer). */
++        if (xwl_glamor_is_kgsl_surfaceless(xwl_screen))
++            xwl_glamor_kgsl_fence_wl_buffer(xwl_screen, xwl_pixmap);
+         /* Buffer already exists. */
+         return xwl_pixmap->buffer;
+     }
+@@ -1269,8 +1368,16 @@ xwl_glamor_pixmap_get_wl_buffer(PixmapPtr pixmap)
+                                        0, 0);
+     }
+ 
+-    for (i = 0; i < num_planes; i++)
+-        close(prime_fds[i]);
++    /* PowOS: a KGSL buffer's plane-0 fd stays open for its write fences; a new wl_buffer (the first commit, or a
++     * forced-commit refresh) is fenced like a reused one. */
++    for (i = 0; i < num_planes; i++) {
++        if (i == 0 && xwl_pixmap->buffer && xwl_glamor_is_kgsl_surfaceless(xwl_screen))
++            xwl_glamor_kgsl_keep_wl_fd(xwl_pixmap, prime_fds[0]);
++        else
++            close(prime_fds[i]);
++    }
++    if (xwl_pixmap->buffer && xwl_glamor_is_kgsl_surfaceless(xwl_screen))
++        xwl_glamor_kgsl_fence_wl_buffer(xwl_screen, xwl_pixmap);
+ 
+     /* Add our listener now */
+     if (xwl_pixmap->buffer) {
+@@ -1548,6 +1655,9 @@ glamor_egl_fds_from_pixmap(ScreenPtr screen, PixmapPtr pixmap, int *fds,
+                                                 &num_planes, fds,
+                                                 strides, offsets))
+           return 0;
++       /* PowOS: the client reads this right away, with no fence of ours on it (moved here from
++        * init_buffer_params_kgsl_surfaceless; not a commit's path). */
++       glFinish();
+ 
+        return num_planes;
+     }
+diff --git a/hw/xwayland/xwayland-glamor-gbm.h b/hw/xwayland/xwayland-glamor-gbm.h
+index ea8e847..8a59421 100644
+--- a/hw/xwayland/xwayland-glamor-gbm.h
++++ b/hw/xwayland/xwayland-glamor-gbm.h
+@@ -43,6 +43,7 @@ Bool xwl_glamor_gbm_init_screen(struct xwl_screen *xwl_screen);
+ drmDevice *xwl_gbm_get_main_device(struct xwl_screen *xwl_screen);
+ Bool xwl_glamor_is_kgsl_surfaceless(struct xwl_screen *xwl_screen);
+ void xwl_glamor_kgsl_refresh_wl_buffer(PixmapPtr pixmap);
++void xwl_glamor_kgsl_sync_stats(unsigned int *fenced, unsigned int *finished);
+ Bool xwl_glamor_kgsl_refresh_dri3_pixmap(PixmapPtr pixmap);
+ int xwl_glamor_kgsl_export_read_fence(PixmapPtr pixmap);
+ 
+diff --git a/hw/xwayland/xwayland-screen.c b/hw/xwayland/xwayland-screen.c
+index e5fed6c..b49ee05 100644
+--- a/hw/xwayland/xwayland-screen.c
++++ b/hw/xwayland/xwayland-screen.c
+@@ -461,7 +461,7 @@ static void
+ kgsl_stats_report(void)
+ {
+     CARD32 now = GetTimeInMillis();
+-    unsigned int releases;
++    unsigned int releases, fenced, finished;
+ 
+     if (!kgsl_stats.since)
+         kgsl_stats.since = now;
+@@ -469,13 +469,17 @@ kgsl_stats_report(void)
+         return;
+ 
+     xwl_window_buffers_stats(&releases);
+-    if (kgsl_stats.forced || kgsl_stats.capped)
++    /* PowOS 0009: how the commits were synchronized - GPU-fenced, or a CPU glFinish (the HACK fallback). */
++    xwl_glamor_kgsl_sync_stats(&fenced, &finished);
++    if (kgsl_stats.forced || kgsl_stats.capped || finished)
+         ErrorF("Xwayland KGSL: last %us: %u commits (%u forced past a stale "
+                "frame callback, %u held back at %d buffers), %u buffers "
+-               "released, up to %d held by the compositor\n",
++               "released, up to %d held by the compositor; %u fenced, "
++               "%u finished on the CPU\n",
+                (unsigned) ((now - kgsl_stats.since) / 1000), kgsl_stats.commits,
+                kgsl_stats.forced, kgsl_stats.capped,
+-               KGSL_FORCED_COMMIT_MAX_HELD, releases, kgsl_stats.max_held);
++               KGSL_FORCED_COMMIT_MAX_HELD, releases, kgsl_stats.max_held,
++               fenced, finished);
+     memset(&kgsl_stats, 0, sizeof(kgsl_stats));
+     kgsl_stats.since = now;
+ }
+-- 
+2.50.1 (Apple Git-155)
+

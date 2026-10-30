@@ -8,6 +8,7 @@
 #   0006       a copy presentation doesn't wait on its wait fence again (Steam's frozen web UI, swap interval 0)
 #   0007       window buffers come back after a KGSL forced commit (the dma-buf leak that got the session killed)
 #   0008       a Present copy waits for the client's rendering (dma-buf sync_file) and finishes before the buffer goes back
+#   0009       a window buffer carries its rendering's GPU fence (dma-buf IMPORT_SYNC_FILE) instead of a glFinish per commit
 # Was built inside the rootfs only (build-inside.sh); a package so a fix reaches phones without a new rootfs:
 # rooted.sh deploy installs it (powos-deploy.sh), the rootfs build installs it with our other packages.
 #
@@ -17,7 +18,7 @@
 
 pkgname=xwayland-kgsl
 pkgver=24.1.13
-pkgrel=2
+pkgrel=3
 pkgdesc='Xwayland with glamor/DRI3 on KGSL surfaceless (PowOS Android: Turnip without /dev/dri)'
 arch=(aarch64)
 url='https://gitlab.freedesktop.org/xorg/xserver'
@@ -33,7 +34,8 @@ _lfdevs=(0001-xwayland-support-kgsl-dmabuf-v3-fallback-paths.patch
 _patches=(0005-present-fence-callback-fires-once.patch
           0006-xwayland-present-no-wait-after-copy.patch
           0007-xwayland-kgsl-window-buffers-come-back.patch
-          0008-xwayland-kgsl-wait-for-client-rendering.patch)
+          0008-xwayland-kgsl-wait-for-client-rendering.patch
+          0009-xwayland-kgsl-window-buffers-carry-their-gpu-fence.patch)
 source=("xserver::git+https://gitlab.freedesktop.org/xorg/xserver.git#tag=xwayland-$pkgver"
         "${_lfdevs[@]/#/https://raw.githubusercontent.com/lotfibennour/andromarchy/$_andromarchy/patches/xwayland/}"
         "${_patches[@]}")
@@ -42,7 +44,7 @@ sha256sums=(SKIP
             88f40f91416cc76d3ed3588fc93d4a892e414442938e25b2555e50dfcdf88f97
             652094faa7e89ff05726d9b7c2c3f5631b1c3e6a0e5460ebf4afe52612e07a2f
             d175913cbbd23e80c6bb7fd17565f1fad9ccf247171bf5a939fb157117f05b88
-            SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   for p in "${_lfdevs[@]}" "${_patches[@]}"; do
