@@ -215,7 +215,7 @@ function Peek() {
         <span class="notif-app">{n.app}</span>
       </div>
       {n.title && <div class="notif-title">{n.title}</div>}
-      {n.text && <div class="notif-text">{n.text}</div>}
+      {n.text && <div class={`notif-text${n.text.includes("\n") ? " lines" : ""}`}>{n.text}</div>}
       <Actions n={n} onDone={(reply) => (reply ? expand() : unpeek())} />
     </div>
   );
