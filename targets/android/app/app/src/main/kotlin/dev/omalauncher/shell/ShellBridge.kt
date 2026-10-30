@@ -225,6 +225,38 @@ class ShellBridge(
         }
     }
 
+    /**
+     * The AI page's "works" / "still broken" on a Ready-to-try task ([args]: task id, works): the user's verdict through
+     * the board's own CLI in the PowOS session (`powos agents check set` = the reporter-only check_set reducer, a check
+     * named "you", PASS or FAIL; works then `powos agents task done` = work_set done, which the PASS lets close). The
+     * page's own database connection isn't a reporter, so it can't call those reducers itself. Off the main thread;
+     * answers when the board has it, or rejects with the CLI's last line.
+     */
+    private fun callVerdict(
+        id: Int,
+        args: String,
+    ) {
+        val a = JSONArray(args)
+        val task = a.getString(0)
+        val works = a.getBoolean(1)
+        thread(name = "ai-verdict", isDaemon = true) {
+            val err =
+                runCatching {
+                    require(VERDICT_TASK.matches(task)) { "bad task id: $task" }
+                    check(RootedGuest.enabled) { "PowOS isn't running" }
+                    val t = dev.omalauncher.linux.shellQuote(task)
+                    val job = dev.omalauncher.linux.shellQuote("you-$task-${System.currentTimeMillis()}")
+                    val command =
+                        if (works) "powos agents check set $t $job PASS --name you --line 'works: the user tried it' --shipped 1 && powos agents task done $t --note 'works: you tried it'"
+                        else "powos agents check set $t $job FAIL --name you --line 'still broken: the user tried it' --shipped 1 && powos agents task set $t --status working"
+                    val out = ArrayList<String>()
+                    val code = RootedGuest.run(command) { out += it }
+                    check(code == 0) { out.lastOrNull { it.isNotBlank() } ?: "powos agents failed ($code)" }
+                }.exceptionOrNull()
+            main.post { if (err == null) respond(id, null) else js(reply("reject($id, ${JSONObject.quote(err.message ?: err.toString())})")) }
+        }
+    }
+
     /** One call from the page (PowosHost.postMessage, ShellHost.listen: its top frame at its own origin only). */
     fun call(
         id: Int,
@@ -232,6 +264,7 @@ class ShellBridge(
         args: String,
     ) {
         if (method.startsWith("health.")) return callHealth(id, method, args)
+        if (method == "ai.verdict") return callVerdict(id, args)
         main.post {
             try {
                 val a = if (args.isBlank()) JSONArray() else JSONArray(args)
@@ -1255,6 +1288,9 @@ class ShellBridge(
         private val live: MutableSet<ShellBridge> = java.util.Collections.newSetFromMap(java.util.WeakHashMap())
 
         private const val TAG = "PowosShell"
+
+        /** A board task id, as the page's "works" / "still broken" may name one (apps/agents caps ids at 64). */
+        private val VERDICT_TASK = Regex("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 
         /** logcat tag of every display/fold push (and the page's wide/narrow switch, via its console). */
         private const val DISPLAY_TAG = "PowosDisplay"

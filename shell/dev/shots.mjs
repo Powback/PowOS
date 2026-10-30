@@ -169,6 +169,40 @@ const TEST_NOW =
   " w[2].step = 'verify FAIL rc=1: FAIL: not freeform (log ~/.cache/powos-verify-queue/done/x.log)'; w[2].images = JSON.stringify(['/home/powos/design-qa/verify-x.png']);" +
   " w[3].step = 'verify PASS: 3 swipes ok (log ~/.cache/powos-verify-queue/done/y.log)'; P.board.value = [...R]; await sleep(200); document.querySelector('.ai-work-list').scrollIntoView();";
 /**
+ * The grouped work board (powai.tsx Work, the user 2026-10-30: "let's group the PowOS AI in-progress things"): 13 tasks
+ * across its four groups - two waiting on the user, six shipped and waiting on the user's verdict (five shown, one
+ * behind "more"), three an agent is on (one being tested on the phone), three nobody is on (one whose last test
+ * failed) - with long titles, steps, commits and agents holding the worked-on ones (agents.ts holder).
+ */
+const GROUPED = (() => {
+  const c = (n) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ sha: `a${i}b2c3d4`, subject: `change ${i + 1}` })));
+  const st = (done, total) => JSON.stringify(Array.from({ length: total }, (_, i) => ({ text: `step ${i + 1}`, state: i < done ? "done" : i === done ? "current" : "next" })));
+  const t = (id, title, o) => ({ id, title, owner: "coder", status: "working", note: "", project: "PowOS · phone UI", progressDone: 0, progressTotal: 0, step: "", steps: "", commits: "", images: "", ...o });
+  return JSON.stringify([
+    t("plug-usb", "Kernel test build for the phone's new display driver", { status: "waiting", note: "Plug the phone into the Mac's USB once, for the kernel test" }),
+    t("pick-wall", "Lock screen wallpaper", { status: "waiting", note: "Pick one of the three lock screen wallpapers" }),
+    t("home-layout", "Home: layout per mode, edit mode, widgets, folders, status bar", { progressDone: 14, progressTotal: 33, step: "icon size reverted (debd259f2, live 14:05) as asked", steps: st(14, 33), commits: c(6) }),
+    t("launcher", "Launcher: dock, search, chat typing, folder page, animations", { progressDone: 8, progressTotal: 14, step: "L8 LIVE 14:57: 24 px margins", steps: st(8, 14), commits: c(11) }),
+    t("shade", "Notification screen + control center (S1-S10)", { progressDone: 10, progressTotal: 24, step: "one shared mode rule LIVE 14:57", steps: st(10, 24), commits: c(17) }),
+    t("glass", "One native glass: frame-synced blur, same tint everywhere (widgets, search, dock, folders)", { progressDone: 7, progressTotal: 20, step: "LIVE: native glass skips unchanged region sets", steps: st(7, 20), commits: c(6) }),
+    t("gestures", "Gestures: home swipe closes everything, page swipes reliable", { progressDone: 17, progressTotal: 27, step: "LIVE: drags on scroll strips", steps: st(17, 27), commits: c(8) }),
+    t("lock", "Lock screen: no brown strip, real icons, notification cards use the shared glass", { progressDone: 2, progressTotal: 8, step: "landed e1b89706; live on the phone (d224ac4b)", steps: st(2, 8), commits: c(1) }),
+    t("ai-board", "PowOS AI page + chat: board grouped by what each task means for you", { owner: "powos-chat", progressDone: 2, progressTotal: 6, step: "grouping rows", steps: st(2, 6), commits: c(2) }),
+    t("perf", "Performance: steady 120 fps, FPS meter, trace record and replay", { owner: "powos-perf", progressDone: 4, progressTotal: 15, step: "LIVE: idle cost root cause", steps: st(4, 15) }),
+    t("speech", "Speech: hold-to-talk sends after release, no cut-off last word", { progressDone: 3, progressTotal: 5, step: "phone check queued", steps: st(3, 5), commits: c(3) }),
+    t("pet", "Pet walks along the dock without covering the icons", { progressDone: 5, progressTotal: 9, step: "verify FAIL rc=1: FAIL: pet over icon", steps: st(5, 9), commits: c(4) }),
+    t("wifi", "Wi-Fi card shows the network name on the cover screen", { progressDone: 0, progressTotal: 4, steps: st(0, 4) }),
+    t("razr", "Second phone: boot PowOS on the razr fold", {}),
+  ]);
+})();
+const GROUPED_SCENE =
+  `const now = Date.now(); const P = await U('./ui/powai.tsx'); P.board.value = ${GROUPED}.map((r, i) => ({ ...r, created: now - 9e6 - i * 6e5, updated: now - i * 9e5, done: 0, activity: now - i * 9e5 }));` +
+  ` P.boardSeen.value = true; if (P.checks) P.checks.value = [{ job: 'j1', task: 'speech', name: 'speech-release', state: 'queued', line: '', at: now - 6e4, shipped: true }, { job: 'j2', task: 'pet', name: 'pet-dock', state: 'FAIL', line: 'pet over icon', at: now - 3e5, shipped: true }];` +
+  ` S.chat.value = { busy: false, items: [{ kind: "user", text: "how is the board?" }, { kind: "assistant", text: "Six things are ready for you to try." }] }; S.page.value = -1; await sleep(400);` +
+  ` const ag = (id, work, role) => ({ id, host: 'phone', role, parent: null, state: 'working', title: work, step: '', cwd: '~', pid: 1, subs: 0, unread: 0, report: '', work, started: now - 6e5, last: Date.now(), rev: 1 });` +
+  ` E.emit('agents.delta', { agents: [ag('a-chat', 'ai-board', 'powos-chat'), ag('a-perf', 'perf', 'powos-perf')] }); await sleep(300); document.querySelector('.ai-work-list').scrollIntoView();`;
+
+/**
  * The scenes: [name, mode, setup] - setup runs in the page once it's ready (S: state.ts, U: an import by path, E: the
  * mock's events, sleep). `behind`: what the window is over - "wallpaper" (home: native glass), "blurred" (the shade,
  * the switcher: the host blurs the app under them), "app" (the assistant, over an app as it is).
@@ -231,6 +265,8 @@ const SCENES = [
   ["present", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["present-md", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[0]?.click();`, "wallpaper"],
   ["present-html", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[1]?.click(); await sleep(200);`, "wallpaper"],
+  ["ai-board", "home", GROUPED_SCENE, "wallpaper"],
+  ["ai-board-open", "home", GROUPED_SCENE + " document.querySelectorAll('.ai-work-list .ai-group-fold[aria-expanded=false]').forEach((b) => b.click()); await sleep(200); document.querySelectorAll('.ai-work-list .ai-group-more').forEach((b) => b.click()); await sleep(200); (document.querySelector('.ai-group.on') ?? document.querySelector('.ai-work-list')).scrollIntoView();", "wallpaper"],
   ["ai-v2", "home", board(false), "wallpaper"],
   ["ai-v2-actions", "home", board(true), "wallpaper"],
   ["ai-v2-open", "home", board(true) + " document.querySelectorAll('.ai-work-list .ai-fold, .ai-history .ai-fold').forEach((b) => b.click()); await sleep(100); document.querySelector('.ai-screen .ai-item')?.click(); await sleep(100); document.querySelector('.ai-work-list').scrollIntoView();", "wallpaper"],

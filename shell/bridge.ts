@@ -151,6 +151,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       send: (text, recents = true) => call("ai.send", text, recents),
       unqueue: (id) => call("ai.unqueue", id),
       verifyGo: (task) => call("verify.go", task),
+      verdict: (task, works) => call("ai.verdict", task, works),
       verifyState: () => call("verify.state"),
       verifyStop: (dry = false) => call("verify.stop", dry),
       open: () => call("ai.open"),
@@ -609,6 +610,7 @@ function mock(): Bridge {
         }
       },
       unqueue: async (id) => void events.emit("ai.changed", (chat = { ...chat, queued: (chat.queued ?? []).filter((q) => q.id !== id) })),
+      verdict: async (task, works) => console.log(`[mock] verdict: ${task} ${works ? "works" : "still broken"}`),
       verifyGo: async (task) => {
         console.log(`[mock] test now: ${task}`);
         if (mockRunner === "paused") mockRunner = "waiting";
