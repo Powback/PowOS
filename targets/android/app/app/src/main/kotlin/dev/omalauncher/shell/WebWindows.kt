@@ -69,6 +69,12 @@ import java.io.OutputStreamWriter
  * Not yet: the app finishing its task on the display does not emit "webwindows.closed" (only close(), the display or
  * the helper gone do) - real fix: a TaskStackListener watching the windows' display ids.
  *
+ * Linux windows (S6): KWin's "open" comes here instead of a PowosWindowActivity task ([linuxOpened], through
+ * andro.marchy.WebWindowSource and ShellBridge's host); the window is the same container, frame, geometry and touches as
+ * an Android app's, with KWin's per-window buffers drawn by the consumer into a layer of its own ([LinuxSource]) in the
+ * mirror's place. Body touches go natively to KWin ([linuxInput]); the body size is KWin's window size ("size"); close
+ * is KWin's quit. Not yet: popups as their own surfaces (S7), the switcher card, the keyboard (SystemIME), title updates.
+ *
  * Doesn't touch the freeform windows (system/WindowFrames.kt): with the setting off nothing here runs.
  */
 class WebWindows(
@@ -147,7 +153,45 @@ class WebWindows(
         @Volatile var full = false
 
         @Volatile var closed = false
+
+        /** A Linux (KWin) window's source instead of a display ([LinuxSource]; docs/WEB_WINDOWS.md S6), else null. */
+        var linux: LinuxSource? = null
     }
+
+    /**
+     * A Linux window's content: KWin's per-window buffers (the display daemon's surface [kwin], kwin 0013) drawn by the
+     * consumer (native_consumer.c, as PowosWindowActivity's SurfaceView) into [content], a buffer layer in the window's
+     * container that takes the mirror's place (Win.mirror = content: geometry, crop, hit test and visibility are the
+     * same code for both sources). Buffers are the screen's size; the window's body size is their crop and the size
+     * KWin lays the window out at ("size"), so a resize allocates nothing and the content is shown 1:1 from the top
+     * left: never stretched, never offset.
+     */
+    private class LinuxSource(
+        val kwin: Int,
+        val offer: LinuxOffer,
+        val content: SurfaceControl,
+        val surface: android.view.Surface,
+    ) {
+        /** The consumer (0 until it started, and after it stopped). */
+        @Volatile var handle = 0L
+
+        /** KWin closed the window itself: nothing to tell it on the way out. */
+        var kwinClosed = false
+    }
+
+    /** A KWin window for a web window: its app id and caption (KWin's), its name and icon (PowOS's, for the bar). */
+    class LinuxOffer(
+        val appId: String,
+        val title: String,
+        val label: String,
+        val icon: android.graphics.drawable.Drawable?,
+    )
+
+    /** KWin windows on their way to a web window: offered to the page ("webwindows.adopt"), not opened yet (main thread). */
+    private val pendingLinux = HashMap<Int, LinuxOffer>()
+
+    /** The consumers' starts and stops: one at a time, in order, never on main (a stop joins its render thread). */
+    private val consumers by lazy { java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "powos-ww-linux") } }
 
     /** A window's frame and body, in home's window surface px; z: its place in DOM order (0 = bottom). */
     private class Geo(
@@ -251,6 +295,123 @@ class WebWindows(
             io.post { mirrorWhenKnown(win, SystemClock.uptimeMillis()) }
         }
         return id
+    }
+
+    // ---- Linux windows (docs/WEB_WINDOWS.md S6) ------------------------------------------------------------------------
+
+    /**
+     * KWin opened window [kwin] ([andro.marchy.WebWindowSource]; main thread): a web window of it on home's page on screen,
+     * made when the page takes it ("webwindows.adopt" {kwin, key, label} -> adoptWebWindow -> "webwindows.open" ->
+     * [openLinux]) - the page owns its place, page and z as for an Android app. One that is a web window already (KWin
+     * shows it again: the launcher, the dock) comes back where it was. No page answer within [LINUX_ADOPT_MS] (no
+     * page, a page from before S6): it opens as its own task after all, as without web windows.
+     */
+    fun linuxOpened(
+        kwin: Int,
+        key: String,
+        offer: LinuxOffer,
+    ) {
+        wins.values.firstOrNull { it.linux?.kwin == kwin }?.let { w ->
+            Log.i(TAG, "KWin window $kwin (${offer.appId}) again: web window ${w.id} shown where it was")
+            emit("webwindows.show", w.id)
+            return
+        }
+        if (pendingLinux.containsKey(kwin)) return
+        pendingLinux[kwin] = offer
+        Log.i(TAG, "KWin window $kwin (${offer.appId}, \"${offer.title}\"): offered to the page as $key")
+        emit("webwindows.adopt", JSONObject().put("kwin", kwin).put("key", key).put("label", offer.label))
+        main.postDelayed({
+            pendingLinux.remove(kwin)?.let { p ->
+                Log.w(TAG, "fallback: KWin window $kwin (${p.appId}): the page made no web window in $LINUX_ADOPT_MS ms, a task instead")
+                andro.marchy.WebWindowSource.fallback(context, kwin, p.appId, p.title)
+            }
+        }, LINUX_ADOPT_MS)
+    }
+
+    /**
+     * The page's "webwindows.open" for KWin window [kwin] ([linuxOpened]), its body at [rect] (CSS px): the window's id,
+     * or -1. Its container as an Android app's, its native frame (the app's icon and name), and a buffer layer the
+     * consumer draws KWin's window into ([LinuxSource]).
+     */
+    fun openLinux(
+        kwin: Int,
+        rect: JSONObject,
+    ): Int {
+        val p = pendingLinux.remove(kwin) ?: return -1.also { Log.w(TAG, "open KWin window $kwin: not offered (or taken already)") }
+        val parent = root() ?: return -1.also { andro.marchy.WebWindowSource.fallback(context, kwin, p.appId, p.title) }
+        val id = nextId++
+        val d = density()
+        val w = (rect.optDouble("width") * d).toInt().coerceAtLeast(1)
+        val h = (rect.optDouble("height") * d).toInt().coerceAtLeast(1)
+        val container = SurfaceControl.Builder().setName("powos-ww-$id").setParent(parent).setHidden(true).build()
+        // The screen's size, either way round (a resize or a rotation needs no new buffers): PowosWindowActivity's buffersFor.
+        val metrics = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
+        val bw = maxOf(metrics.width(), w)
+        val bh = maxOf(metrics.height(), h)
+        // Its buffer queue's size = the body (the consumer's crop): a queued buffer shows 1:1, as in a SurfaceView.
+        val content =
+            SurfaceControl.Builder().setName("powos-ww-$id-linux").setParent(container).setBufferSize(w, h)
+                .setFormat(android.graphics.PixelFormat.TRANSLUCENT).build()
+        val src = LinuxSource(kwin, p, content, android.view.Surface(content))
+        val win = Win(id, ComponentName(context.packageName, "kwin:${p.appId}"), container, w, h)
+        win.linux = src
+        win.chrome = WebWindowChrome(context, container, p.label, p.icon)
+        // The content takes the mirror's place: shown under the bar, cropped to the body (nothing until KWin's first frame).
+        win.mirror = content
+        SurfaceControl.Transaction().setLayer(content, 0).setVisibility(content, true).setCrop(content, Rect(0, 0, 0, 0)).apply()
+        wins[id] = win
+        val rate = web.display?.refreshRate ?: 0f
+        consumers.execute {
+            if (win.closed) return@execute
+            andro.marchy.WebWindowSource.configure(context)
+            val handle = andro.marchy.WebWindowSource.start(src.surface, kwin, bw, bh)
+            if (handle == 0L) {
+                Log.e(TAG, "window $id (KWin window $kwin): consumer did not start")
+                return@execute
+            }
+            andro.marchy.WebWindowSource.crop(handle, win.w, win.h)
+            andro.marchy.WebWindowSource.refreshRate(handle, rate)
+            if (win.closed) {
+                andro.marchy.WebWindowSource.stop(handle)
+                return@execute
+            }
+            src.handle = handle
+            Log.i(TAG, "window $id: KWin window $kwin (${p.appId}) consumer up, buffers ${bw}x$bh, body ${win.w}x${win.h}")
+        }
+        andro.marchy.WebWindowSource.size(kwin, w, h)
+        Log.i(TAG, "window $id: KWin window $kwin (${p.appId}) as a web window, ${w}x$h")
+        return id
+    }
+
+    /** KWin closed window [kwin] (main thread): its web window goes, nothing told back. */
+    fun linuxClosed(kwin: Int) {
+        pendingLinux.remove(kwin)
+        val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
+        w.linux?.kwinClosed = true
+        Log.i(TAG, "KWin closed window $kwin: web window ${w.id} goes")
+        drop(w)
+    }
+
+    /**
+     * A Linux window [w] going ([drop]; nothing for an Android one): its touch over, its consumer off (on its thread)
+     * and, unless KWin closed it, KWin told: [handBack] = a task again, else quit.
+     */
+    private fun dropLinux(
+        w: Win,
+        handBack: Boolean,
+    ) {
+        if (linuxTouch === w) linuxTouch = null
+        val src = w.linux ?: return
+        consumers.execute {
+            val h = src.handle
+            src.handle = 0
+            andro.marchy.WebWindowSource.stop(h)
+            src.surface.release()
+        }
+        if (src.kwinClosed) return
+        if (handBack) andro.marchy.WebWindowSource.fallback(context, src.kwin, src.offer.appId, src.offer.title)
+        else andro.marchy.WebWindowSource.quit(context, src.kwin)
+        Log.i(TAG, "close window ${w.id}: KWin window ${src.kwin} ${if (handBack) "handed back as a task" else "quit (KWin closes it, then ends the app)"}")
     }
 
     /**
@@ -515,7 +676,18 @@ class WebWindows(
         t.setVisibility(c, g.visible && win.mirror != null)
         val bw = g.body.width().coerceAtLeast(1)
         val bh = g.body.height().coerceAtLeast(1)
-        if (win.displayId >= 0 && (bw != win.w || bh != win.h)) {
+        val src = win.linux
+        if (src != null && (bw != win.w || bh != win.h)) {
+            win.w = bw
+            win.h = bh
+            // KWin lays the window out at the body's size; the consumer's crop and the buffer queue's size follow in
+            // this transaction, so its next frames show 1:1 (one of the old size is dropped by the queue, never stretched).
+            // Its own transaction, applied now: a buffer size riding [t] (applyTransactionOnDraw merges it into the
+            // view's next frame natively) would skip SurfaceControl's Java-side queue resize - every later frame rejected.
+            if (src.content.isValid) SurfaceControl.Transaction().setBufferSize(src.content, bw, bh).apply()
+            andro.marchy.WebWindowSource.crop(src.handle, bw, bh)
+            andro.marchy.WebWindowSource.size(src.kwin, bw, bh)
+        } else if (win.displayId >= 0 && (bw != win.w || bh != win.h)) {
             win.w = bw
             win.h = bh
             // The app lays out at the body's real size; the crop already follows the DOM (its last frame shows anchored
@@ -799,6 +971,13 @@ class WebWindows(
 
     /** Every touch on home, first ([HomeWebView.touchHook], main thread): true = the frame's, the page doesn't get it. */
     private fun onTouch(ev: MotionEvent): Boolean {
+        // A Linux window's body: the gesture is KWin's ([linuxTouch]), from its first finger to its last.
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) return linuxDown(ev) || frameTouch(ev)
+        return linuxTouch?.let { linuxInput(it, ev) } ?: frameTouch(ev)
+    }
+
+    /** [onTouch] for the frames: bars, buttons, edges, dividers, the tile menu. */
+    private fun frameTouch(ev: MotionEvent): Boolean {
         val f = fingers(ev)
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) return down(f)
         pressed?.let { p -> return pressUp(p, ev, f) }
@@ -859,6 +1038,58 @@ class WebWindows(
         if (underSwitcher || f.y >= area.bottom) return false
         val dv = tiles.dividerAt(f.x, f.y) ?: return false
         return dividerDown(dv, f)
+    }
+
+    /**
+     * A Linux window's body touched (docs/WEB_WINDOWS.md S6, Z4): the whole gesture is its, every pointer, straight to
+     * KWin over the consumer's input path (as PowosWindowActivity's SurfaceView sends a task's) - never the page's, never
+     * re-injected. KWin delivers it to the surface (or popup) under the point.
+     */
+    private var linuxTouch: Win? = null
+
+    /** The KWin window that last got "focus" from a touch here: told again only when another one is touched. */
+    private var linuxFocused = -1
+
+    /** The topmost shown window at ([x], [y]) when the point is on a Linux window's body, else null. */
+    private fun linuxBodyAt(
+        x: Float,
+        y: Float,
+    ): Win? {
+        if (y >= area.bottom || underSwitcher || tiles.menuFor != null) return null
+        val win = wins.values.filter { it.shown && it.mirror != null }.sortedByDescending { it.geo?.z ?: -1 }.firstOrNull { partAt(it, x, y) != null }
+        return win?.takeIf { it.linux != null && partAt(it, x, y) == "" }
+    }
+
+    /** A first finger down: on a Linux window's body, the gesture is its ([linuxTouch]); false: anything else's. */
+    private fun linuxDown(ev: MotionEvent): Boolean {
+        linuxTouch = null
+        val f = fingers(ev)
+        val win = linuxBodyAt(f.x, f.y) ?: return false
+        linuxTouch = win
+        emit("webwindows.raise", win.id)
+        if (win.container.isValid) SurfaceControl.Transaction().setLayer(win.container, wins.size + 1).apply()
+        val src = win.linux ?: return true
+        if (linuxFocused != src.kwin) {
+            linuxFocused = src.kwin
+            andro.marchy.WebWindowSource.focus(src.kwin)
+        }
+        return linuxInput(win, ev)
+    }
+
+    /** [ev] to [win]'s KWin window in its body's own px (its frame's place and scale, under the bar). */
+    private fun linuxInput(
+        win: Win,
+        ev: MotionEvent,
+    ): Boolean {
+        val a = ev.actionMasked
+        if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) linuxTouch = null
+        val src = win.linux ?: return true
+        val g = win.geo ?: return true
+        val title = win.chrome?.title ?: 0
+        val at = IntArray(2).also(web::getLocationInWindow)
+        val s = g.scale
+        andro.marchy.WebWindowSource.touch(src.handle, ev, at[0] - g.frame.left.toFloat(), at[1] - g.frame.top - title * s, s)
+        return true
     }
 
     /** The topmost shown window at ([x], [y]) and what of it: "bar", "button:<control>", an edge mask, or null (its body). */
@@ -1367,7 +1598,10 @@ class WebWindows(
         divDrag = null
         tiles.release()
         (web as? HomeWebView)?.touchHook = null
-        wins.values.toList().forEach { drop(it) }
+        // Linux windows keep running as their own tasks (home's page is going: nothing would show them); Android ones
+        // close with their displays as before.
+        wins.values.toList().forEach { drop(it, handBack = it.linux != null) }
+        pendingLinux.keys.toList().forEach { kwin -> pendingLinux.remove(kwin)?.let { andro.marchy.WebWindowSource.fallback(context, kwin, it.appId, it.title) } }
         runCatching { dm.unregisterDisplayListener(displayListener) }
         helper.stop()
         root?.let { r ->
@@ -1381,9 +1615,11 @@ class WebWindows(
     private fun drop(
         w: Win,
         released: Boolean = false,
+        handBack: Boolean = false,
     ) {
         if (wins.remove(w.id) == null) return
         w.closed = true
+        dropLinux(w, handBack)
         Log.i(TAG, "close window ${w.id} (${w.component.packageName}, display ${w.displayId}, task ${w.taskId}${if (w.full) ", full screen" else ""}): 1/4 layers off")
         if (drag?.win === w) drag = null
         if (divDrag?.starts?.containsKey(w.id) == true) divDrag = null
@@ -1457,6 +1693,12 @@ class WebWindows(
      * meanwhile) and its frame: [toWindow] puts the app back there. On [io]: binder calls.
      */
     private fun fullScreen(win: Win) {
+        if (win.linux != null) {
+            // Not yet a full-screen app for a Linux window (S6 next steps): its button fills the work area instead.
+            Log.i(TAG, "window ${win.id}: full screen for a Linux window is the work area's maximise (for now)")
+            emit("webwindows.control", mapOf("id" to win.id, "action" to "maximise"))
+            return
+        }
         if (win.displayId < 0 || win.full) return
         // Out of its tile (the page closes the others up on "webwindows.full"): no divider drag or tile menu on it.
         if (divDrag?.starts?.containsKey(win.id) == true) divDrag = null
@@ -2008,6 +2250,9 @@ class WebWindows(
         private const val EDGE_R = 4
         private const val EDGE_B = 8
         private const val MIRROR_WAIT_MS = 2000L
+
+        /** A KWin window offered to the page ([linuxOpened]) and not taken by then opens as its own task. */
+        private const val LINUX_ADOPT_MS = 3000L
         private const val ESCAPE_CHECK_MS = 3000L
         private const val RESIZE_MODE_UNRESIZEABLE = 0
         private const val IME_POLICY_FALLBACK_DISPLAY = 1

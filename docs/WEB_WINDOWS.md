@@ -675,3 +675,99 @@ app is that next window, so it gets no exception. Pushing a tiled window out to 
 set up. Full screen, close, minimise and the tile menu then behave as for any web window (a tiled one leaves its tile
 as in "Leaving a tiling"). An app whose activity can't be a web window (`unresizeable`) returns -1 from `open` and
 keeps its task where it is.
+
+---
+
+## S6: Linux windows as web windows (2026-10-30, branch ww-linux; first slice, not yet run on the phone)
+
+The user, 2026-10-30: **"The Linux windows are not launching like the other Android Windows with like the web OS
+window"** and **"Linux apps still use the old launcher."** Before this, with `powos_web_windows` = 1, Dolphin still
+opened as a `PowosWindowActivity` freeform task with the old `WindowFrames` overlay bar (plain "Dolphin", no icon,
+another bar and glass): shots `screen-1793381345898.jpg`, `screen-1793382050699.jpg` in the phone's powos-ai-shared.
+Manager spec X1-X3: Linux windows open through the same web-window component (bar, glass, shadow, move, resize,
+two-finger scale, z-order, tiles); the content fills its frame exactly; nothing draws outside its frame.
+
+### Design: one window model, two sources
+
+A web window (`WebWindows.Win`) has a container, the native frame (`WebWindowChrome`), geometry from the page (`w.f`)
+and the finger, and a **content layer** in the mirror's place (`Win.mirror`). The source is either an Android
+app's VirtualDisplay mirror (S1-S3) or, new, a **KWin toplevel** (`Win.linux: LinuxSource`). Everything that places,
+crops, rounds, orders, hides, hit-tests and moves a window is the same code for both; only the source-specific steps
+branch on `linux` (size, input, close).
+
+| step | Android app (S1-S3) | Linux window (S6) |
+|---|---|---|
+| opens | page `openWindow` → `webwindows.open(key, rect)` → helper VD + mirror → launch | KWin `open <id> <app> <caption>` → `WindowTasks.open` → `WebWindowSource.offer` (instead of a `PowosWindowActivity` task) → ShellBridge's host → `WebWindows.linuxOpened` → page `webwindows.adopt {kwin, key, label}` → `adoptWebWindow` → `webwindows.open(key, rect, -1, kwin)` → `WebWindows.openLinux` |
+| content | `mirrorDisplay` layer tree | a buffer layer `powos-ww-<id>-linux` in the container; `Surface(content)` given to the **same consumer** (`Native.nativeStartWindow`, native_consumer.c, pre-rotated buffers of kwin 0041) PowosWindowActivity's SurfaceView used |
+| size | `VirtualDisplay.resize` (helper) | `size <id> <w> <h>` to KWin + the consumer's crop + the buffer queue's size (`Transaction.setBufferSize`, applied at once) |
+| body touches | page forwards (v0) | **native**: `onTouch` → `linuxBodyAt` → the whole gesture (every pointer) to KWin with `nativeSendWindowTouch/TouchFrame`, mapped to body px through the frame's place and scale; `focus <id>` to KWin on the first touch of another window |
+| close (bar) | tasks removed, VD released | `quit <id>` (KWin closes the window, then ends the app, kwin 0041) |
+| KWin closes it | — | `close <id>` → `linuxClosed` → the window goes, nothing told back |
+| full screen button | a real full-screen app on display 0 | (not yet) the work area's maximise |
+
+**X2 (no crop, no offset).** The buffers are the screen's size (as PowosWindowActivity's `buffersFor`); KWin draws the
+window from their top left at the size it was told (`size` = the body's px); the consumer's crop and the content
+layer's buffer-queue size are that same body size, so a buffer shows 1:1 at the body's top left. A resize allocates
+nothing; until KWin lays out at the new size the last frame stays anchored top-left (a queued frame of the old size
+is dropped by the queue, never stretched). On the shots, Dolphin's Places panel is whole while its compact view's
+first column is cut and its own horizontal scroll bar shows: that cut is inside Dolphin's view (scrolled), not the
+Android crop, which would cut the Places panel first. To recheck on the phone with the new path.
+
+**X3.** The container is cropped to the frame and the work area, the content to the body (`frameAt`, unchanged).
+Popups still render inside the toplevel's buffer (kwin 0013) and are confined to it (0027), so nothing of a Linux
+window draws outside its frame - the price is Z3 (S7 below).
+
+**Fallbacks (the old path stays).** Web windows off, folded, no home bridge, a KWin without `size`, a full-screen
+application (`open ... fullscreen`: a game stays a full-screen task), or a window that already has a task: a
+`PowosWindowActivity` task exactly as before. A window offered to the page and not taken within 3 s
+(`LINUX_ADOPT_MS`: no page, a page from before S6), or `openLinux` without a surface: `WebWindowSource.fallback` →
+`WindowTasks.openAsTask`. Home's bridge closing (`closeAll`: the activity destroyed, a fold) hands every Linux web
+window back as a task (`handBack`), never quits the app. Launch windows (LaunchWindows' splash tasks) are not opened
+while web windows want Linux windows (`Runtime.openRooted`); a launcher tap on a Linux app that has a web window
+brings it to the page (`ui/webwindows.tsx linuxWindow`), as an Android app's does.
+
+No KWin change: the slice uses only what KWin 6.7.5-3.49 (installed) already says (`caps`: `size`, `quit`, `nodecor`,
+pre-rotation). Install order: any. An older APK keeps the task path; the new APK with an older KWin without `size`
+keeps it too.
+
+Files: `engine/.../WebWindowSource.java` (new: the host interface, the consumer and control calls for the app module),
+`WindowTasks.java` (`open(..., web)`, `openAsTask`, `onWebWindow`, `session`), `shell/WebWindows.kt` (`LinuxSource`,
+`linuxOpened`, `openLinux`, `linuxClosed`, `dropLinux`, `linuxBodyAt/linuxDown/linuxInput`, the Linux branch of
+`place`, `fullScreen`), `shell/ShellBridge.kt` (`linuxWindows` host: app id → `l:<desktop id>` key, name, icon;
+`webwindows.open` with a KWin id), `Runtime.kt` (no launch window), page `ui/webwindows.tsx` (`adoptWebWindow` with
+`kwin`, `linuxWindow`), `state.ts`, `bridge.ts`, `types.ts`.
+
+### Phone check
+
+With the APK installed, unfolded, `powos_web_windows` = 1 and the user idle: open Dolphin from the launcher.
+- logcat `WebWindowSource: open N (org.kde.dolphin): a web window`, `PowosWebWindows: KWin window N ... offered to the
+  page as l:org.kde.dolphin`, `window W: KWin window N ... as a web window, WxH`, `consumer up, buffers ...`; no
+  `PowosWindow` / `LaunchWindows` lines for it, no `fallback:`.
+- `dumpsys SurfaceFlinger --list | grep powos-ww-W` shows `powos-ww-W`, `powos-ww-W-linux`, `-bar`, `-back`;
+  `dumpsys activity recents` has no `powos-window://N` task.
+- the shot: Dolphin with the same bar as Chrome's (icon, "Dolphin", tile/min/full/close), its Places panel at the
+  body's left edge, nothing outside the frame; drag the bar (moves), an edge (resizes: then
+  `size N w h` and Dolphin re-lays out), two fingers on the bar (scales); tap a folder (opens: touches reach it); the
+  close button → `quit N` and Dolphin's process gone a few s later.
+
+### Next steps (not in this slice)
+
+- **Z3 / S7, popups as their own surfaces:** KWin control word `web <id> 1` (new kwin patch): popups not rendered into
+  the toplevel's buffer and not confined (0027 off for it), each exported as its own surface id
+  (`popup <id> <parent> x y w h`), placed by the host under the window's container above the content (not cut by its
+  crop). Until then Dolphin's menus stay inside its window.
+- **Transient toplevels** (File > Properties) already arrive as their own KWin windows, so they open as their own web
+  windows; grouping them in z above their parent is not done.
+- **Tiles:** a Linux web window is in the page's model like any window, so the tile menu, dividers and snap use it
+  unchanged (a divider's live cover scale uses its body size); not yet tried on the phone.
+- **Switcher card:** a Linux web window has no Android task, so no card; it needs a card from the host
+  (`contentShot` of its content layer) in `recents.tasks`, and the dock's running state for `l:` keys.
+- **Keyboard:** `SystemIME` hosted by home for the focused Linux web window (kwin 0010/0012/0016 text focus), and
+  hardware keys (`nativeSendWindowKey`) from home's key dispatch while a Linux web window has focus (S5).
+- **Title updates** (`title <id>`): the bar shows the app's name; a caption change is ignored (WebWindowChrome is being
+  reworked by bar-merge).
+- **Full screen:** an app going full screen (`fullscreen <id> 1`) stays in its window; the bar's full-screen button is
+  the work-area maximise. A Linux full-screen app as a real full-screen surface is open.
+- **Client-side bars** (`move`/`maximize`/`minimize` from Steam's own bar): logged, not acted on.
+- **Home restart:** windows are handed back as tasks; re-adopting them as web windows when home returns (KWin's
+  `session` list) is open.

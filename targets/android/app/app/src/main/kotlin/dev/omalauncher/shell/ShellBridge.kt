@@ -16,9 +16,11 @@ import android.view.inputmethod.InputMethodManager
 import android.webkit.WebView
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.graphics.asAndroidBitmap
 import dev.omalauncher.AgentMail
 import dev.omalauncher.PowosAiActivity
 import dev.omalauncher.linux.RootedGuest
+import dev.omalauncher.linux.matches
 import dev.omalauncher.system.RunningApps
 import kotlin.concurrent.thread
 import dev.omalauncher.PowosAiChat
@@ -70,6 +72,37 @@ class ShellBridge(
     private val webWindows by lazy { WebWindows(context, web, ::emit) }
 
     @Volatile private var webWindowsMade = false
+
+    /**
+     * Linux (KWin) windows as web windows (docs/WEB_WINDOWS.md S6): KWin's "open" comes here instead of a
+     * PowosWindowActivity task while web windows are on and the home is the wide one. Set by home's bridge only.
+     */
+    private val linuxWindows =
+        object : andro.marchy.WebWindowSource.Host {
+            override fun wants() = WebWindows.on(context) && context.resources.configuration.smallestScreenWidthDp >= 600
+
+            override fun open(
+                id: Int,
+                appId: String,
+                title: String,
+            ) {
+                val app = runtime.linuxApps.firstOrNull { it.matches(appId) }
+                val key = "l:${app?.id ?: appId}"
+                val label = runtime.displayName(appId, title)
+                val icon = app?.let { runtime.linuxIcons[it.id] }?.let { android.graphics.drawable.BitmapDrawable(context.resources, it.asAndroidBitmap()) }
+                val offer = WebWindows.LinuxOffer(appId, title, label, icon)
+                main.post { webWindows.also { webWindowsMade = true }.linuxOpened(id, key, offer) }
+            }
+
+            override fun title(
+                id: Int,
+                title: String,
+            ) {}
+
+            override fun closed(id: Int) {
+                main.post { if (webWindowsMade) webWindows.linuxClosed(id) }
+            }
+        }
 
     /** An app the system's window menu floated ([SystemFloat]): a web window, as the switcher's "PowOS desktop window". */
     private val systemFloat: (Int) -> Unit = { id -> main.post { toWebWindow(id) } }
@@ -164,6 +197,7 @@ class ShellBridge(
     init {
         // Home's bridge: an app the system's own window menu floats becomes a web window (SystemFloat, web windows on).
         if (activity != null) SystemFloat.start(context, systemFloat)
+        if (activity != null) andro.marchy.WebWindowSource.host = linuxWindows
         ShellWallpaper.onChange.add(wallpaperChanged)
         runCatching { android.app.WallpaperManager.getInstance(context).addOnColorsChangedListener(wallpaperColors, main) }
         dev.omalauncher.theme.ThemeStore.changeListeners.add(themeChanged)
@@ -296,6 +330,8 @@ class ShellBridge(
             "webwindows.enabled" -> activity != null && webWindows.also { webWindowsMade = true }.enabled()
             "webwindows.open" ->
                 if (activity == null) -1
+                // A Linux window KWin opened ("webwindows.adopt" with its KWin id): its consumer in a web window.
+                else if (a.getString(0).startsWith("l:")) webWindows.also { webWindowsMade = true }.openLinux(a.optInt(3, -1), a.getJSONObject(1))
                 else android(a.getString(0))?.let { app ->
                     runtime.usage.record(a.getString(0))
                     webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1), a.optInt(2, -1))
@@ -1349,6 +1385,7 @@ class ShellBridge(
     fun close() {
         health.close()
         if (activity != null) SystemFloat.stop(systemFloat)
+        if (andro.marchy.WebWindowSource.host === linuxWindows) andro.marchy.WebWindowSource.host = null
         if (webWindowsMade) webWindows.closeAll()
         runCatching { context.getSystemService(android.hardware.display.DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         ShellWallpaper.onChange.remove(wallpaperChanged)

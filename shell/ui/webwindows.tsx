@@ -75,10 +75,24 @@ export async function webWindowsOn(): Promise<boolean> {
 
 /** Opens an Android app as a home element on [page] (unfolded, the setting on): false leaves the launch to the caller. */
 export async function openWebWindow(key: string, label: string, page: number): Promise<boolean> {
+  if (key.startsWith("l:")) return (await linuxWindow(key, page)) != null;
   return (await openWindow(key, label, page)) != null;
 }
 
 /** [openWebWindow], with the window's id (null: not a window). A page tiling with an empty tile puts it there. */
+/**
+ * A Linux app ("l:"): its windows come from KWin ("webwindows.adopt" with a KWin id), so a tap launches it as before
+ * (the host); one that has a web window already comes to [page], on top, as an Android app's does. null: not one.
+ */
+async function linuxWindow(key: string, page: number): Promise<number | null> {
+  if (!wideHome.value || !(await enabled())) return null;
+  const open = webWins.value.find((w) => w.key === key && !w.full);
+  if (!open) return null;
+  update(open.id, { page, minimised: false });
+  raise(open.id);
+  return open.id;
+}
+
 export async function openWindow(key: string, label: string, page: number): Promise<number | null> {
   if (!wideHome.value || !key.startsWith("a:") || !(await enabled())) return null;
   // Already a window: it comes to this page, on top - never a second display for the same app (its task would move).
@@ -113,7 +127,10 @@ export async function openWindow(key: string, label: string, page: number): Prom
  * last place by hand) inside the work area, else a default size centred in it. Home goes to [page], the window on top.
  * A tiling on [page] with an empty tile puts it there (fillEmptyTile), as [openWindow] does.
  */
-export async function adoptWebWindow(m: { task: number; key: string; label: string; body?: WebWindowRect }, page: number): Promise<boolean> {
+export async function adoptWebWindow(
+  m: { task?: number; kwin?: number; key: string; label: string; body?: WebWindowRect },
+  page: number,
+): Promise<boolean> {
   const ww = powos.webwindows;
   if (!ww) return false;
   const a = workArea();
@@ -129,7 +146,7 @@ export async function adoptWebWindow(m: { task: number; key: string; label: stri
   // Screen (viewport) place clamped into the work area, then page-local as the model keeps it.
   const vx = Math.round(Math.min(Math.max(sx, a.left), a.right - w));
   const vy = Math.round(Math.min(Math.max(sy, a.top), a.bottom - h));
-  const id = await ww.open(m.key, { left: vx, top: vy + TITLE, width: w, height: h - TITLE }, m.task).catch(() => -1);
+  const id = await ww.open(m.key, { left: vx, top: vy + TITLE, width: w, height: h - TITLE }, m.task, m.kwin).catch(() => -1);
   if (id < 0) return false;
   webWins.value = [...webWins.value, { id, key: m.key, label: m.label, page, x: vx - o.x, y: vy - o.y, w, h, task: m.task }];
   // As any window opened on the page: a tiling there with an empty tile takes it (its floating frame kept for a float
