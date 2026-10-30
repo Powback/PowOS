@@ -254,7 +254,20 @@ function capture(e: PointerEvent) {
 }
 
 export function update(id: number, change: Partial<WebWin>) {
+  const was = change.minimised === undefined ? undefined : !!webWins.value.find((w) => w.id === id)?.minimised;
   webWins.value = webWins.value.map((w) => (w.id === id ? { ...w, ...change } : w));
+  if (was !== undefined && was !== !!change.minimised) minimisedChanged(id, !was);
+}
+
+/**
+ * MN1/MN2 (the user, 2026-10-30 22:52: "Click the minimize button on for example YouTube. It should act as if I swiped
+ * home on it"): every minimise (bar button, dock toggle, a tile's drop) and every way back reaches the host, which gives
+ * the app a home gesture's lifecycle (it may go picture-in-picture) and brings it back into its window.
+ */
+function minimisedChanged(id: number, on: boolean) {
+  if (!native.value || id < 0) return;
+  if (on) void powos.webwindows?.minimise?.(id);
+  else void powos.webwindows?.restore?.(id);
 }
 
 export function raise(id: number) {
