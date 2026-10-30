@@ -327,10 +327,9 @@ class Media(
 
     /** The session's app: its own activity for the session, else its launcher activity. */
     private fun open(c: MediaController) {
-        val bundle = dev.omalauncher.system.AppWindows.bundle(context)
         // send() throws CanceledException, which isn't a RuntimeException: the tap handler wouldn't catch it.
-        c.sessionActivity?.let { runCatching { it.send(context, 0, null, null, null, null, bundle) } }
-            ?: context.packageManager.getLaunchIntentForPackage(c.packageName)?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), bundle) }
+        c.sessionActivity?.let { runCatching { dev.omalauncher.system.AppWindows.send(context, it) } }
+            ?: context.packageManager.getLaunchIntentForPackage(c.packageName)?.let { dev.omalauncher.system.AppWindows.startActivity(context, it) }
     }
 
     /** Moves [pkg]'s session (else the one shown) to [seconds] in, when it takes seeking. */

@@ -59,7 +59,7 @@ class SettingsSearch(private val context: Context) {
         if (id.startsWith("indexed:")) return NativeSettingsIndex.open(context, id)
         val page = pages.firstOrNull { "settings:${it.action}" == id } ?: error("Unknown settings page")
         check(available(page)) { "Settings page unavailable" }
-        context.startActivity(intent(page).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context))
+        dev.omalauncher.system.AppWindows.startActivity(context, intent(page))
     }
 
     private fun intent(page: Page) = Intent("android.settings.${page.action}")

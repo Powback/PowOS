@@ -164,21 +164,18 @@ class Notifications(
             RemoteInput.addResultsToIntent(inputs, fill, results)
             RemoteInput.setResultsSource(fill, RemoteInput.SOURCE_FREE_FORM_INPUT)
         }
-        runCatching { action.actionIntent.send(context, 0, fill, null, null, null, startOptions()) }
+        runCatching { dev.omalauncher.system.AppWindows.send(context, action.actionIntent, fill, startOptions()) }
     }
 
     /** The launcher is in front, so it may start the app; since Android 14 it has to say so. */
+    // Unfolded: the app opens in its window, as from the dock (AppWindows.send).
     private fun startOptions() =
-        // Unfolded: the app opens in a floating window, as from the dock (AppWindows).
-        dev.omalauncher.system.AppWindows.bundle(
-            context,
-            if (Build.VERSION.SDK_INT >= 34) {
-                @Suppress("DEPRECATION")
-                ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
-            } else {
-                null
-            },
-        )
+        if (Build.VERSION.SDK_INT >= 34) {
+            @Suppress("DEPRECATION")
+            ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+        } else {
+            null
+        }
 
     /** Whether the launcher may read notifications (the user granted it notification access). */
     val available get() = media.granted && MediaListener.connected != null
@@ -221,7 +218,7 @@ class Notifications(
         when (command) {
             "open" -> {
                 val intent = sbn.notification.contentIntent ?: return
-                runCatching { intent.send(context, 0, null, null, null, null, startOptions()) }
+                runCatching { dev.omalauncher.system.AppWindows.send(context, intent, null, startOptions()) }
                 if (sbn.notification.flags and Notification.FLAG_AUTO_CANCEL != 0) listener.cancelNotification(key)
             }
             "dismiss" -> listener.cancelNotification(key)

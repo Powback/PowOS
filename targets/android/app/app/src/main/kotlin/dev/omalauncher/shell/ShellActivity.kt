@@ -172,12 +172,14 @@ class ShellActivity : Activity() {
         super.onPause()
         dockLog("paused")
         inFront = false
+        WebWindowLaunch.homeInFront = false
     }
 
     override fun onResume() {
         super.onResume()
         dockLog("resumed")
         inFront = true
+        WebWindowLaunch.homeInFront = true
         UnlockLog.homeResumed(host.web)
         // The page may have missed a fold while hidden: the display state again, whatever it was.
         host.bridge.pushDisplay(force = true)

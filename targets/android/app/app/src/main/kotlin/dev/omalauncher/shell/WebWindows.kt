@@ -508,6 +508,8 @@ class WebWindows(
         unresizeable(component)?.let { why ->
             // Fallback: Android's own window (the caller launches it as before; the switcher uses Android's split).
             Log.w(TAG, "fallback: ${component.packageName} keeps Android's own window/split, not a web window: $why")
+            // A launch held for this window (WebWindowLaunch) goes the old way now, not after its wait.
+            WebWindowLaunch.refused(component.packageName)
             return -1
         }
         val parent = root() ?: return -1
@@ -2209,6 +2211,9 @@ class WebWindows(
     private fun launch(w: Win) {
         w.landed = false
         checkLanded(w)
+        // A launch held for this window (a notification, a widget, settings search: WebWindowLaunch) starts on its
+        // display instead of the app's launcher activity - straight into the window, never via display 0.
+        if (WebWindowLaunch.take(w.component.packageName, w.displayId)) return
         val intent =
             Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LAUNCHER)
@@ -2459,6 +2464,20 @@ class WebWindows(
          * WM1: task [taskId] (floating on display 0: SystemFloat's hand-over) is a web window's app - followed back into
          * that window ([follow], at once), never a second window. False: no window's.
          */
+        /** [displayOfApp]: [pkg]'s window holds a full-screen app on display 0 now. */
+        const val FULL_APP = -2
+
+        /**
+         * The display of [pkg]'s Android web window (WebWindowLaunch: a launch goes straight onto it), -1 while it is
+         * being made, [FULL_APP] when its app is full screen now, null: no window. Any thread (a snapshot).
+         */
+        fun displayOfApp(pkg: String): Int? {
+            val ww = current ?: return null
+            // wins is main-thread state; a copy taken off it may race a change: then no window (the old way).
+            val w = (runCatching { ww.wins.values.toList() }.getOrNull() ?: return null).firstOrNull { it.linux == null && !it.closed && it.component.packageName == pkg } ?: return null
+            return if (w.full) FULL_APP else w.displayId
+        }
+
         fun followTask(taskId: Int): Boolean {
             val ww = current ?: return false
             val w = ww.wins.values.firstOrNull { it.taskId == taskId && it.linux == null && !it.closed && !it.full } ?: return false
