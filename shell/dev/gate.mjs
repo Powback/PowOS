@@ -1118,47 +1118,76 @@ async function dockPinnedNoFade() {
 }
 
 /**
- * In the page, in edit mode (the user, 2026-10-22, three reports): the search bar is ON the grid as a tile like the
- * others, the dock stays in view; moved, it becomes the search widget there (and leaves the foot); resized, it keeps
- * the new size. Folded and unfolded.
+ * In the page, edit mode (the user, 2026-10-30: "The search bar turns weird"): the foot's search bar keeps its size,
+ * width and glass (no grid tile in its place), the edit bar sits below it, the dock stays in view; a side dock's column
+ * keeps its top (under the status bar). Bottom dock and right dock, folded and unfolded.
  */
 async function editSearchCheck() {
   const S = await window.__gw.mod("./state.ts");
-  const shown = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible";
-  S.editing.value = true;
-  // Edit mode in: the search bar's tile on the grid, the foot's bar gone (its fade over).
-  const tileOf = () => document.querySelector('.home-tile[data-key="panel:search"]');
-  await window.__gw.settled(() => shown(tileOf()?.querySelector(".bar-pill")) && !shown(document.querySelector(".home > .bar")));
   const fails = [];
-  const tile = tileOf();
-  if (!shown(tile?.querySelector(".bar-pill"))) fails.push("edit mode: no search bar tile on the grid");
-  if (!shown(document.querySelector(".home > .dock .app"))) fails.push("edit mode: the dock isn't in view");
-  if (shown(document.querySelector(".home > .bar"))) fails.push("edit mode: the foot's search bar still shows beside its tile");
+  for (const place of ["bottom", "right"]) fails.push(...(await window.__es.at(S, place)));
+  S.editing.value = false;
+  S.dockTry.value = "";
   return fails;
 }
 
-/** In the page, in edit mode after editSearchCheck: the search bar's tile moved and resized becomes the search widget. */
-async function editSearchMoved() {
+/** editSearchCheck's page helpers: the foot's pill, the dock, and one dock placement's edit mode in and its findings. */
+const editSearchHelpers = `window.__es = {
+  shown: (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible",
+  pill: () => document.querySelector(".home > .bar .bar-pill"),
+  dock: () => document.querySelector(".home > .dock:not(.dock-tray)"),
+  box: (r) => \`\${Math.round(r.left)}+\${Math.round(r.width)}x\${Math.round(r.height)}\`,
+  // The pill as it was, as it is: same box (left, width, height) and glass; the edit bar below it.
+  pillKept: (at, was, glass) => {
+    const E = window.__es, el = E.pill();
+    if (!E.shown(el)) return [\`\${at}: the foot's search bar is hidden\`];
+    const now = el.getBoundingClientRect(), sheet = document.querySelector(".home > .edit-sheet").getBoundingClientRect();
+    const out = [];
+    if (E.box(now) !== E.box(was)) out.push(\`\${at}: the search bar changed from \${E.box(was)} to \${E.box(now)}\`);
+    if (getComputedStyle(el).background !== glass) out.push(\`\${at}: the search bar's glass changed\`);
+    if (sheet.top < now.bottom - 1) out.push(\`\${at}: the edit bar (top \${Math.round(sheet.top)}) isn't below the search bar (bottom \${Math.round(now.bottom)})\`);
+    return out;
+  },
+  at: async (S, place) => {
+    const E = window.__es, at = \`edit mode, dock \${place}\`;
+    S.dockTry.value = place;
+    S.editing.value = false;
+    await window.__gw.settled(() => E.shown(E.pill()) && !document.querySelector(".home.editing"));
+    const was = E.pill().getBoundingClientRect(), glass = getComputedStyle(E.pill()).background, dockTop = E.dock()?.getBoundingClientRect().top;
+    S.editing.value = true;
+    await window.__gw.settled(() => document.querySelector(".home.editing > .edit-sheet"));
+    await new Promise((ok) => setTimeout(ok, 250)); // the row's 180 ms rise
+    const out = E.pillKept(at, was, glass);
+    if (E.shown(document.querySelector('.home-tile[data-key="panel:search"]'))) out.push(\`\${at}: the search bar turned into a grid tile\`);
+    if (!E.shown(document.querySelector(".home > :is(.dock, .dock-tray) .app"))) out.push(\`\${at}: the dock isn't in view\`);
+    const top = E.dock()?.getBoundingClientRect().top;
+    if (place === "right" && Math.abs(top - dockTop) > 1) out.push(\`\${at}: the dock column moved from \${Math.round(dockTop)} to \${Math.round(top)} (over the status bar)\`);
+    return out;
+  },
+}`;
+
+/** In the page: the search widget put on the grid (the widget picker's way), on the page in view, in its lowest free
+ *  row, the middle five columns wide. Its home item, once placed. */
+async function placeSearchWidget() {
   const S = await window.__gw.mod("./state.ts");
-  const W = await window.__gw.mod("./ui/searchwidget.tsx");
-  await window.__gw.until(() => W.footSearch.value);
-  const was = W.footSearch.value;
-  if (!was) return [`edit mode: no foot search item (searchwidget.tsx footSearch; editing ${S.editing.value}, a search widget ${W.hasSearchWidget()}, page ${S.page.value})`];
-  const to = { x: 0, y: Math.max(0, was.cell.y - 1), w: 2, h: 1 };
-  await W.placeItem("panel:search", to, was.page);
+  const G = await window.__gw.mod("./ui/grid.tsx");
+  const R = await window.__gw.mod("./ui/recentwidget.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const n = S.pages.value[S.page.value] ?? 1;
+  const spot = R.recentsSpot(n, G.geometry.value.rows || 6);
+  if (!spot) return null;
+  const cols = S.home.value.columns, w = cols > 6 ? 5 : cols;
+  await powos.home.addPanel("search", n, { ...spot.cell, x: Math.floor((cols - w) / 2), w });
   const placed = () => S.home.value.items.find((i) => i.kind === "panel" && i.name === "search");
-  await window.__gw.until(() => JSON.stringify(placed()?.cell ?? null) === JSON.stringify(to));
-  S.editing.value = false;
-  const real = placed();
-  const at = JSON.stringify(real?.cell ?? null);
-  return at === JSON.stringify(to) ? [] : [`moved and resized to ${JSON.stringify(to)}, the search widget is at ${at}`];
+  await window.__gw.until(placed);
+  return placed() ?? null;
 }
 
 /** In the page: the first free 1x1 cell of the page in view, worked out here (not by grid.tsx placeNew), and a tap. */
 const addAppHelpers = `window.__aa = {
   firstFree: (S, G, W) => {
     const n = S.pages.value[S.page.value] ?? 1;
-    const items = [...S.home.value.items, ...(W.footSearch.value ? [W.footSearch.value] : [])].filter((i) => i.page === n && i.cell);
+    const items = S.home.value.items.filter((i) => i.page === n && i.cell);
     const taken = items.map((i) => (i.resizable ? i.cell : { ...i.cell, w: 1, h: 1 }));
     const rows = G.geometry.value.rows, cols = S.home.value.columns;
     for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++)
@@ -1564,13 +1593,8 @@ async function searchLauncherCheck() {
   await pullUpFrom(document.querySelector(".home > .bar .bar-pill"));
   fails.push(...drawerWithPill("pulled up from the bar"));
   await closeDrawerNow();
-  // Moved onto the grid (edit mode, as a finger does: placeItem).
-  S.editing.value = true;
-  await window.__gw.until(() => W.footSearch.value);
-  const was = W.footSearch.value;
-  if (!was) return [...fails, "edit mode: no search tile to move"];
-  await W.placeItem("panel:search", { ...was.cell, y: Math.max(0, was.cell.y - 1) }, was.page);
-  S.editing.value = false;
+  // Put on the grid (the widget picker's way).
+  if (!(await window.__sp.placeSearchWidget())) return [...fails, "no room on the page for the search widget"];
   // Until the widget is on the grid and the bar's pill faded out (a fade: on a busy gate it hadn't ended in 500 ms).
   const widget = () => document.querySelector('.home-tile[data-key="panel:search"] .bar-pill');
   await window.__gw.settled(() => widget() && +getComputedStyle(document.querySelector(".home > .bar")).opacity <= 0.1);
@@ -1599,14 +1623,14 @@ async function pillBelowDockInEdit(W, wide) {
   // The dock's icons, not its box: the box has transparent padding under the icons that the pill may sit in.
   const icons = [...document.querySelectorAll(".home > .dock:not(.dock-tray) .app-icon")].map((e) => e.getBoundingClientRect()).filter((r) => r.height);
   const d = { bottom: Math.max(...icons.map((r) => r.bottom), -Infinity) };
-  const fails = W.footSearch.value ? ["edit mode after the drop under the dock: the pill is a grid tile again"] : [];
+  const fails = document.querySelector('.home-tile[data-key="panel:search"]') ? ["edit mode after the drop under the dock: the pill is a grid tile again"] : [];
   if (getComputedStyle(bar).visibility !== "visible" || p.top < d.bottom - 1)
     fails.push(`edit mode after the drop under the dock: the pill isn't below the dock (pill top ${p.top}, dock bottom ${d.bottom})`);
   return fails;
 }
 
 /**
- * The user's own move (2026-10-23, 5th report): edit mode, the search bar's tile carried down onto the dock and let
+ * The user's own move (2026-10-23, 5th report): edit mode, the search widget's tile carried down onto the dock and let
  * go - the pill is in the foot under the dock (folded), back in the bar (unfolded), and the drawer still has it.
  */
 async function searchToDock() {
@@ -1615,15 +1639,16 @@ async function searchToDock() {
   const W = await window.__gw.mod("./ui/searchwidget.tsx");
   const wide = !!document.querySelector(".home.wide");
   W.footBelow.value = "";
+  const item = await window.__sp.placeSearchWidget();
   S.editing.value = true;
   // Folded the dock's row (under the dock); wide the one bar's middle (no "under" there).
   const foot = wide ? ".home > .edit-sheet" : ".home > .dock:not(.dock-tray)";
-  await window.__gw.settled(() => document.querySelector('.home-tile[data-key="panel:search"]') && W.footSearch.value && document.querySelector(foot));
+  await window.__gw.settled(() => document.querySelector('.home-tile[data-key="panel:search"]') && document.querySelector(foot));
   const tile = document.querySelector('.home-tile[data-key="panel:search"]')?.getBoundingClientRect();
   const to = document.querySelector(foot)?.getBoundingClientRect();
-  if (!tile || !W.footSearch.value || !to) return ["edit mode: no search tile or foot to drag it to"];
+  if (!tile || !item || !to) return ["edit mode: no search tile or foot to drag it to"];
   const at = (type, x, y) => new PointerEvent(type, { pointerId: 11, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true });
-  G.startCarry({ item: W.footSearch.value }, at("pointerdown", tile.left + 20, tile.top + 10), { x: 20, y: 10 });
+  G.startCarry({ item }, at("pointerdown", tile.left + 20, tile.top + 10), { x: 20, y: 10 });
   window.dispatchEvent(at("pointermove", to.left + to.width / 2, to.top + to.height / 2));
   await window.__gw.frames(2);
   window.dispatchEvent(at("pointerup", to.left + to.width / 2, to.top + to.height / 2));
@@ -2768,10 +2793,10 @@ try {
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
       }),
     );
-  // Edit mode: the search bar a tile on the grid, the dock in view (the user, 2026-10-22). Folded and unfolded.
+  // Edit mode: the search bar as it is, the edit bar below it, the dock in view (the user, 2026-10-30). Folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
-      runs.push(open(browser, `${ORIGIN}/index.html`, `edit-search-${label}`, viewport).then((r) => whenReady(r, async () => [...(await r.page.evaluate(editSearchCheck)), ...(await r.page.evaluate(editSearchMoved))])));
+      runs.push(open(browser, `${ORIGIN}/index.html`, `edit-search-${label}`, viewport).then((r) => whenReady(r, async () => r.page.evaluate(editSearchHelpers).then(() => r.page.evaluate(editSearchCheck)))));
   // Edit mode's "+ app" (the user, 2026-10-23): the drawer's list and search, a pick at the first free cell of the page
   // in view, kept after a reload (the mock keeps its layout in localStorage once "mock.keepHome" is set). Both screens.
   if (process.env.SHELL_PAGES !== "0")
@@ -2807,7 +2832,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `search-launcher-${label}`, viewport).then(async (r) => {
-        const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock}, pillBelowDockInEdit: ${pillBelowDockInEdit}, overlayAsked: ${overlayAsked} }`;
+        const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock}, pillBelowDockInEdit: ${pillBelowDockInEdit}, placeSearchWidget: ${placeSearchWidget}, overlayAsked: ${overlayAsked} }`;
         const s = await whenReady(r, async () => [...(await r.page.evaluate(searchDefaultCheck)), ...(await r.page.evaluate(helpers).then(() => r.page.evaluate(homeAsks)).then(() => r.page.evaluate(searchLauncherCheck)))]);
         if (s.problems.length) return s;
         await r.page.reload().catch(() => {});
