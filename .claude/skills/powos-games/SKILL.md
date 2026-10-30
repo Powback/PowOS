@@ -267,6 +267,16 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   `unity-screen --install <appid>` / `--remove` in the session with Steam OFF (it rewrites localconfig.vdf on exit;
   backup localconfig.vdf.powos-bak). Installed for 274190. Fold/rotate mid-game: see Fold below.
 
+- Minimised game (Broforce 2026-10-30: WM_STATE Iconic + _NET_WM_STATE_HIDDEN = isMinimized, since KWin clears
+  HIDDEN for a window merely on another desktop): a full-screen Wine/Unity game minimises ITSELF when it loses KWin's
+  activation. Its task hidden as "off page" (WindowFrames.showOnly -> FreeformTasks.away) or never live was enough.
+  Fixed: kwin 0040 (a full-screen task's window minimise is undone; a never-live task restores it on the desktop;
+  floating task gone full screen takes the output size at once, not 1360x1708) + WindowFrames.mayHide (never hide a
+  window full screen or launched/activated < 10 s ago). Check: `grep minimized itself` in KWin's log, `xprop WM_STATE`.
+- ABZU (UE4, 384190) pillarbox: our window IS the container size; the game's own GameUserSettings.ini has
+  DesiredScreenWidth/Height=1280x720, Fullscreen=ON, bUseDesktopResolutionForFullscreen=False, so it renders 1280x720
+  and Proton's fullscreen hack scales it. Lever: a UE twin of unity-screen (`-ResX=W -ResY=H` / desktop resolution).
+
 ## Teardown (1167630; board task teardown-doesn-t-start)
 - Build 25295735 is D3D12 (D3D12/ Agility SDK, dxcompiler/dxil, WinPixEventRuntime, sentry/crashpad, mimalloc):
   VKD3D-Proton, not GL. Prefix pfx registry is good ("WINE REGISTRY Version 2", powos-reg copy exists).

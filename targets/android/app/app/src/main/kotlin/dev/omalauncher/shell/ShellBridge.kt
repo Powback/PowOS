@@ -173,6 +173,11 @@ class ShellBridge(
         }
         // A floating window opened, minimised, brought back or closed: the dock shows the windows again.
         scope.launch { snapshotFlow { dev.omalauncher.system.WindowFrames.running.value }.drop(1).collect { emit("windows.changed", windows()) } }
+        // A window kept on screen though home had it on another page (just launched/activated, or full screen:
+        // WindowFrames.mayHide): home moves it to the page on screen, as for a window brought back.
+        scope.launch {
+            snapshotFlow { dev.omalauncher.system.WindowFrames.keptOnPage.value }.drop(1).collect { k -> k?.ids?.forEach { emit("windows.raised", it) } }
+        }
         // A window let go at a screen edge: home moves it to the next page (ui/desktops.ts).
         scope.launch {
             snapshotFlow { dev.omalauncher.system.WindowFrames.edges.value }.drop(1).collect { d ->
