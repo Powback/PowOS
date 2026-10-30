@@ -291,25 +291,50 @@ run)
       done < <(git diff-tree --no-commit-id --name-only -r "$c" 2>/dev/null)
       [ -n "$ak" ] && [ -n "$sh" ] && git rev-parse --short=9 "$c"
     done; }
+  # schema_gate ADD: the checks (a)+(c) of a tip that changes a vendored app's module or pushes a vendored binding.
+  # Silent and 0 when neither; else prints what it checked. vmods/T from the loop; SHIP_VENDOR_CHECK and
+  # SHIP_BINDINGS_CHECK replace apps/vendor.sh --check / tools/phone/bindings-check.sh (tests).
+  vendored_dbs() { sed -n 's|^\([a-z0-9-]*\)\.js  *generated .*|\1|p' shell/vendor/VERSIONS 2>/dev/null; }
+  vendor_ok() {   # vendor_ok APP...: committed bindings = what the module builds; remembered per tip
+    local a; for a in "$@"; do grep -qx "$T $a" "$Q/vendor-ok" 2>/dev/null && continue
+      ${SHIP_VENDOR_CHECK:-apps/vendor.sh --check} "$a" || return 1; echo "$T $a" >> "$Q/vendor-ok"; done; }
+  schema_gate() { local f db touch= pub
+    for db in $(vendored_dbs); do for f in $1; do [ "$f" = "vendor/$db.js" ] && touch=1; done; done
+    [ -n "$vmods" ] || [ -n "$touch" ] || return 0
+    pub=$(echo "$vmods" | awk 'NF {print $1}' | paste -sd' ' -)
+    [ -z "$pub" ] || vendor_ok $pub || return 1
+    ${SHIP_BINDINGS_CHECK:-tools/phone/bindings-check.sh} --no-publish --vendor shell/vendor ${pub:+--publishing "$pub"}; }
   # reap_apk: an APK ship that ended (rc exists) is recorded + its requests done. Called every loop turn, at the
   # runner start (a previous runner's finished APK) and before it exits (f252: the runner left while the APK was
   # out, so a finished install was never recorded and phone checks kept waiting for their ship).
   reap_apk() {
-    local inst A arc alog n r sha live ht
+    local inst A arc alog n r sha live ht st
     inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
     # An APK ship that ended: its requests are done (installed is installed - its exit is its last check's: a logcat
     # grep with no match was 1, 2026-10-23), or it's tried again (the user stayed active), or it failed.
     if [ -f "$Q/apk/rc" ]; then
       A=$(cat "$Q/apk/tip") arc=$(cat "$Q/apk/rc") alog=$(cat "$Q/apk/log")
       if [ "$arc" = 0 ] || [ "$inst" = "$A" ]; then
-        n=0; for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
-          git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "shipped:${A:0:9}:apk"; n=$((n+1)); }; done
         live=$(cat "$Q/live" 2>/dev/null || true)
-        # The install reset the overrides and re-pushed origin's newer shell: live is at least A.
-        { [ -n "$live" ] && git merge-base --is-ancestor "$A" "$live" 2>/dev/null; } || echo "$A" > "$Q/live"
+        # The install RESET every override, then re-pushed what origin's tip had differently from the APK: the phone's
+        # shell is what ship-apk says it left there ($Q/apk/shell-tip: the tip it re-applied, or the APK's own build
+        # when that push failed) - never the older "live" record kept as is (2026-10-30: APK f0b895fa installed, the
+        # service went on reporting 49afb819 live). Behind the previous live tip: a silent request re-applies the
+        # newer shell from here (the loop's delta from this live record).
+        st=$(cat "$Q/apk/shell-tip" 2>/dev/null || true)
+        git cat-file -e "${st:-x}^{commit}" 2>/dev/null || st=$A
+        echo "$st" > "$Q/live"
+        if [ -n "$live" ] && [ "$live" != "$st" ] && ! git merge-base --is-ancestor "$live" "$st" 2>/dev/null; then
+          echo "$(date +%T) ${A:0:9}: the install left the phone's shell at ${st:0:9}, behind the live ${live:0:9} - re-applying the newer shell"
+          r=$Q/$(date +%Y%m%d-%H%M%S)-reapply-$$.req
+          printf 'sha=%q\nnote=\nsilent=1\nwho=ship-apk-reapply\nat=%s\n' "$live" "$(date +%s)" > "$r.tmp" && mv "$r.tmp" "$r"
+        fi
         rm -f "$Q/failed-apk"
         # A shell held for this APK came with its install (ship-apk pushes origin's tip shell after it).
         { read -r ht _ < "$Q/shell-held" && git merge-base --is-ancestor "$ht" "$A"; } 2>/dev/null && rm -f "$Q/shell-held"
+        # The records above first, THEN its requests done: a watcher seeing them done sees the records too.
+        n=0; for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
+          git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "shipped:${A:0:9}:apk"; n=$((n+1)); }; done
         echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
         echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
         e2e_round
@@ -364,6 +389,16 @@ run)
       [ ${#whos[@]} -gt 0 ] || rooted_due || { sleep "$POLL"; continue; }
       who_s=$(printf '%s\n' ${whos[@]+"${whos[@]}"} | sed '/^$/d' | sort -u | paste -sd, -); who_s=${who_s:-"$(cut -c6- "$Q/rooted-note" 2>/dev/null | head -1)"}
       joined() { printf '%s\n' "$@" | sed '/^$/d' | paste -sd';' - | sed 's/;/; /g'; }
+      # The apps step's changes (step 3), known up front: a vendored app's module change (vmods: "app db" lines) ties
+      # the shell's bindings (shell/vendor/<db>.js) to its publish.
+      alv=$(cat "$Q/apps-live" 2>/dev/null || true)
+      abase=$inst
+      [ -n "$alv" ] && abase=$alv
+      # HACK-fix (2026-10-24): this used to advance abase to the SHELL-live tip, which hid every apps/<app>/ change from
+      # the apps ship (shell ships never build apps; app-api's detail page + add-app fix sat unshipped, journey failed).
+      # abase moves only when an apps ship records $Q/apps-live (or the APK was installed).
+      achg=; vmods=; [ -n "$abase" ] && git cat-file -e "$abase^{commit}" 2>/dev/null && achg=$(apps_changed "$abase" "$T") &&
+        vmods=$(apps/vendor.sh --changed "$abase" "$T" 2>/dev/null | while read -r va vd; do [[ " $(echo $achg) " == *" $va "* ]] && echo "$va $vd"; done)
       # 1. The shell part, now: exactly the shell files that differ from what's live - also while an APK builds or
       #    waits for idle (its install resets the overrides and re-pushes everything origin changed since its build).
       live=$(cat "$Q/live" 2>/dev/null || true)
@@ -406,6 +441,19 @@ run)
           if [ -n "${SHIP_BRIDGE_STRICT:-}" ]; then
             echo "$(date +%T) ${T:0:9}: shell ship held by SHIP_BRIDGE_STRICT (f307)"; rm -rf "$held"; rm -f "$Q/installing"; echo "$T" > "$Q/failed"; continue; fi
         fi
+        # Schema changes ship atomically (2026-10-30, powos-agents work.try_line): a vendored app's module change in
+        # this tip needs its committed bindings to be exactly what the module builds (apps/vendor.sh --check), and the
+        # bindings the phone will run after this push must decode its live modules - ahead only of the modules this
+        # ship publishes right after (the apps step: bindings first, then the module). Else the whole tip is refused.
+        if ! bok=$(schema_gate "$add" 2>&1); then
+          echo "$bok" | sed 's/^/  /'
+          rm -rf "$held"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
+          echo "$T" > "$Q/failed"; echo "$T" > "$Q/failed-apps"
+          echo "$(date +%T) ${T:0:9}: shell ship REFUSED - the bindings and the modules wouldn't match (above)"
+          mail "ship ${T:0:9} (shell) REFUSED for $who_s: $(echo "$bok" | grep -E 'REFUSED|bindings:.*(fix|isn)' | head -2 | cut -c1-240 | paste -sd' ' -) - log $Q/runner.log on the Mac; fix it on origin, then ship.sh request again"
+          continue
+        fi
+        [ -z "$bok" ] || echo "$bok" | sed 's/^/  /'
         echo "$(date +%T) ship ${T:0:9} as shell:$(echo $add)$([ -n "$gone" ] && echo " reset:$(echo $gone)") for $who_s$(apk_alive && echo ' (beside the APK ship)')"
         rc=0; sg=POWOS_SKIP_GATE=1; [ -z "${SHIP_GATE_FIRST:-}" ] || sg=
         if [ -n "$add" ]; then
@@ -453,23 +501,35 @@ run)
       #    (never while one's out, same debounce as the shell ship above so this never waits on an open request
       #    the shell section already closed) and under the shell ship's own phone-busy rules (never inside a
       #    verify window, never during another install).
-      alv=$(cat "$Q/apps-live" 2>/dev/null || true)
-      abase=$inst
-      [ -n "$alv" ] && abase=$alv
-      # HACK-fix (2026-10-24): this used to advance abase to the SHELL-live tip, which hid every apps/<app>/ change from
-      # the apps ship (shell ships never build apps; app-api's detail page + add-app fix sat unshipped, journey failed).
-      # abase moves only when an apps ship records $Q/apps-live (or the APK was installed).
-      achg=; [ -n "$abase" ] && git cat-file -e "$abase^{commit}" 2>/dev/null && achg=$(apps_changed "$abase" "$T")
-      if [ -n "$achg" ] && ! apk_alive && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ]; then
+      # A vendored module waits for its bindings to be live (the shell part held for an APK, or not pushed yet).
+      # What the phone's shell is at: the live record, or the installed APK's own when that's newer / there's none.
+      vwait=; lv=$(cat "$Q/live" 2>/dev/null || true)
+      { [ -n "$lv" ] && { [ -z "$inst" ] || git merge-base --is-ancestor "$inst" "$lv" 2>/dev/null; }; } || lv=$inst
+      while read -r va vd; do [ -n "$va" ] || continue
+        { [ -n "$lv" ] && git diff --quiet "$lv" "$T" -- "shell/vendor/$vd.js" 2>/dev/null; } || vwait="$vwait $vd"
+      done <<< "$vmods"
+      if [ -n "$vwait" ] && [ -n "$achg" ]; then
+        [ "$(cat "$Q/apps-held" 2>/dev/null)" = "$T" ] || { echo "$T" > "$Q/apps-held"
+          echo "$(date +%T) ${T:0:9}: apps held - the shell's bindings for$vwait aren't live yet (they ship first)"; }
+      elif [ -n "$achg" ] && ! apk_alive && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ]; then
+        rm -f "$Q/apps-held"
         if verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
           echo $$ > "$Q/installing"
           an=$(joined ${snotes[@]+"${snotes[@]}"} ${anotes[@]+"${anotes[@]}"}); an=${an:-"app update"}
           alog=$Q/done/$(date +%Y%m%d-%H%M%S)-${T:0:9}-apps.log; arc=0
           echo "$(date +%T) ship ${T:0:9} as apps ($achg) for $who_s" | tee -a "$alog" >/dev/null
-          for a in $achg; do
-            ( PATH="$here/bin:$PATH" apps/build.sh "$a" && PATH="$here/bin:$PATH" apps/install.sh "$a" install --note "$an" ) >> "$alog" 2>&1 || { arc=$?; break; }
-          done
+          # A vendored app's module goes out only with its bindings: committed = what it builds (checked before the
+          # shell push already, remembered), and LIVE on the phone (the shell part of this tip shipped them first) -
+          # never a module ahead of the shell's bindings (2026-10-30 19:31: home's board subscription stopped decoding).
+          vpub=$(echo "$vmods" | awk 'NF {print $1}' | paste -sd' ' -)
+          if [ -n "$vpub" ] && ! vendor_ok $vpub >> "$alog" 2>&1; then arc=9; echo "apps: REFUSED - committed bindings aren't what the module builds" >> "$alog"; fi
+          if [ $arc = 0 ]; then for a in $achg; do
+            ( PATH="$here/bin:$PATH" apps/build.sh "$a" && PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 apps/install.sh "$a" install --note "$an" ) >> "$alog" 2>&1 || { arc=$?; break; }
+          done; fi
+          # And after the publish: the shell's bindings decode the phone's modules (no auto-publish here).
+          if [ $arc = 0 ] && [ -n "$vpub" ] && ! ${SHIP_BINDINGS_CHECK:-tools/phone/bindings-check.sh} --no-publish --vendor shell/vendor >> "$alog" 2>&1; then
+            arc=10; echo "apps: the phone's modules and the shell's bindings don't match after the publish (above)" >> "$alog"; fi
           rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
           if [ $arc = 0 ]; then
             echo "$T" > "$Q/apps-live"; rm -f "$Q/failed-apps"

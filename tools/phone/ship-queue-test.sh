@@ -65,6 +65,14 @@ until mkdir "$l/phone" 2>/dev/null; do sleep 0.3; done
 echo $$ > "$SHIP_DIR/installing"; [ -e "$SHIP_DIR/paused" ] && exit 7
 sleep "${APK_INSTALL_S:-0}"
 echo "APK $(git rev-parse HEAD) svc=${POWOS_SHIP_SERVICE:-} $*" >> "$LOG"; git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"
+# $HOME/apk-stale-shell: its re-apply of origin's newer shell didn't land (f0b895fa, 2026-10-30) - the install reset
+# the overrides newer than this build and the phone runs this APK's own copies; it tells the service so, as the real
+# one does (apk/shell-tip = its own build). Otherwise it says nothing: the service then takes the APK's own commit.
+if [ -e "$HOME/apk-stale-shell" ]; then
+  o=$(git ls-remote origin refs/heads/worktree-powos-multiplatform | cut -f1)
+  git diff --name-only HEAD "$o" -- shell 2>/dev/null | sed 's|^shell/||' | while read -r f; do rm -f "$PHONE/files/shell/$f"; done
+  echo "APKSTALE" >> "$LOG"; [ -d "$SHIP_DIR/apk" ] && git rev-parse HEAD > "$SHIP_DIR/apk/shell-tip"
+fi
 rm -rf "$l"
 EOF
 cat > shell/dev/gate.sh <<'EOF'
@@ -240,7 +248,7 @@ grep -q "shell held for its APK ${t10:0:9}" <<<"$st" && ok "status: shell held f
 grep -q "shell held for its APK ${t10:0:9}" "$Q/runner.log" && ok "runner log: shell held for its APK" || bad "runner log hold"
 rm -f "$HOME/hold-apk"
 drained && [ "$(grep -m1 -E '^(PUSH|APK )' "$LOG")" = "APK $t10 svc=1 --note windows drawn natively" ] && [ ! -e "$Q/shell-held" ] &&
-  ok "APK installed first (its install brings the shell), hold cleared, request done" || { bad "after the hold"; cat "$LOG"; tail -5 "$Q/runner.log"; }
+  ok "APK installed first (its install brings the shell), hold cleared, request done" || { bad "after the hold"; cp "$Q/runner.log" /tmp/runner-trace.log; }
 # 10b. A shell-only tip right after ships at once (no APK, no hold).
 : > "$LOG"
 land shell/ui/b.tsx 'export const b = 10' "b10"; req --note "shell only"
@@ -271,6 +279,24 @@ for _ in $(seq 100); do grep -q '^ROOTED' "$LOG" && break; sleep 0.2; done
 grep -q "^ROOTED $t12 svc=1 deploy --note swipe closes it\$" "$LOG" && ok "rooted deploy from the tip, with the request's note" || { bad "rooted args"; grep ROOTED "$LOG"; }
 [ "$(cat "$Q/rooted-live" 2>/dev/null)" = "$t12" ] && [ ! -e "$Q/rooted-pending" ] && grep -q "${t12:0:9}: rooted deploy done" "$Q/runner.log" &&
   ok "rooted-live recorded, pending cleared" || { bad "rooted records"; tail -5 "$Q/runner.log"; }
+
+# 13. (b) 2026-10-30 f0b895fa: an APK built from an OLDER tip than the live shell installs, and its re-apply of the
+#     newer shell doesn't land (the phone runs the APK's own copy). The service must not keep the newer live record:
+#     live = what ship-apk says is on the phone, then the newer shell is re-pushed by the service itself.
+#     Old ship.sh: live stayed at the shell tip, nothing re-pushed - the phone kept the APK's stale file.
+: > "$LOG"; touch "$HOME/hold-apk" "$HOME/apk-stale-shell"
+land targets/android/app/Main.kt 'class Main13' "kt13"; req --note "K13"; tk=$(tip)
+for _ in $(seq 100); do grep -q '^APKSTART' "$LOG" && break; sleep 0.2; done
+land shell/ui/b.tsx 'export const b = 13' "b13"; req --note "B13"; t13=$(tip)
+for _ in $(seq 75); do grep -q 'b = 13' "$PHONE/files/shell/ui/b.tsx" 2>/dev/null && [ "$(cat "$Q/live")" = "$t13" ] && break; sleep 0.2; done
+grep -q 'b = 13' "$PHONE/files/shell/ui/b.tsx" && [ "$(cat "$Q/live")" = "$t13" ] && ok "b13 pushed beside the APK build, live = its tip" || { bad "b13 beside the APK"; cat "$LOG"; }
+rm -f "$HOME/hold-apk"
+for _ in $(seq 100); do grep -q '^APKSTALE' "$LOG" && break; sleep 0.2; done
+for _ in $(seq 100); do grep -q 'b = 13' "$PHONE/files/shell/ui/b.tsx" 2>/dev/null && break; sleep 0.2; done
+grep -q '^APKSTALE' "$LOG" && grep -q 'b = 13' "$PHONE/files/shell/ui/b.tsx" 2>/dev/null && ok "the install's stale shell was re-pushed by the service" || { bad "phone left on the APK's older b.tsx"; cat "$LOG"; tail -6 "$Q/runner.log"; }
+grep -q "the install left the phone's shell at ${tk:0:9}, behind the live ${t13:0:9}" "$Q/runner.log" && ok "runner says why it re-applies" || { bad "re-apply log line"; tail -6 "$Q/runner.log"; }
+drained && [ "$(cat "$Q/live")" = "$t13" ] && ok "live = t13 again, after the re-push (what's on the phone)" || { bad "live record: $(cat "$Q/live")"; tail -6 "$Q/runner.log"; }
+rm -f "$HOME/apk-stale-shell"
 
 for _ in $(seq 75); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 0.2; done
 runner_left=$(cat "$Q/runner.lock/pid" 2>/dev/null)

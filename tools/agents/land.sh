@@ -92,6 +92,23 @@ for p in "${paths[@]}"; do
 done
 echo "land: ${#paths[@]} path(s) are this worktree's own changes"
 
+# 1b. A schema change lands atomically (2026-10-30: powos-agents' work.try_line went out before the shell's bindings had
+# it - home's board subscription stopped decoding): a vendored app's module (apps/<app>/module, shell/vendor/VERSIONS
+# "generated") lands only with shell/vendor/<db>.js exactly as that module builds it (apps/vendor.sh --check), in
+# this same commit. The ship service checks the same again before it publishes.
+if [ -x apps/vendor.sh ] && [ -f shell/vendor/VERSIONS ]; then
+  while read -r vdb vapp; do
+    [ -n "$vapp" ] || continue
+    vmod= vbind=
+    for p in "${paths[@]}"; do case "$p" in apps/$vapp/module|apps/$vapp/module/*|apps/$vapp) vmod=1 ;; shell/vendor/$vdb.js|shell/vendor|shell) vbind=1 ;; esac; done
+    [ -n "$vmod" ] && [ -n "$(git status --porcelain -- "apps/$vapp/module" 2>/dev/null | grep -v 'Cargo.lock$')" ] || continue
+    if [ -z "$vbind" ] && [ -n "$(git status --porcelain -- "shell/vendor/$vdb.js")" ]; then
+      echo "land.sh: refused - apps/$vapp/module and its regenerated shell/vendor/$vdb.js land together: add shell/vendor/$vdb.js to this landing" >&2; exit 3; fi
+    echo "land: apps/$vapp/module changed - checking shell/vendor/$vdb.js is what it builds (apps/vendor.sh --check $vapp)"
+    apps/vendor.sh --check "$vapp" >&2 || { echo "land.sh: refused - run apps/vendor.sh $vapp, then land the module and shell/vendor/$vdb.js together" >&2; exit 3; }
+  done < <(sed -n 's|^\([a-z0-9-]*\)\.js  *generated  *apps/\([a-z0-9-]*\):.*|\1 \2|p' shell/vendor/VERSIONS)
+fi
+
 # 2. commit by pathspec only. -f: a path under the gitignored .claude/ that's meant to be tracked (settings.json,
 # hooks, skills) needs it once to enter the index; already-tracked paths are unaffected either way.
 git add -f -- "${paths[@]}" || { echo "land.sh: git add failed" >&2; exit 3; }
