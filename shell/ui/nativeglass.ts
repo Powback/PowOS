@@ -76,17 +76,22 @@ function regionBoxes(el: Element, s: Shape, r: DOMRect): [[number, number, numbe
 
 /** [b] less one body [c] (see [cutOut]). */
 function cutOne(b: [number, number, number, number], c: [number, number, number, number]): [number, number, number, number] | null {
-  const [l, t, r, bo] = c;
-  if (r <= b[0] || l >= b[2] || bo <= b[1] || t >= b[3]) return b;
-  const spansY = t <= b[1] && bo >= b[3];
-  const spansX = l <= b[0] && r >= b[2];
-  const out: [number, number, number, number] | null =
-    spansY && l <= b[0] ? [r, b[1], b[2], b[3]]
-    : spansY && r >= b[2] ? [b[0], b[1], l, b[3]]
-    : spansX && t <= b[1] ? [b[0], bo, b[2], b[3]]
-    : spansX && bo >= b[3] ? [b[0], b[1], b[2], t]
-    : null;
+  if (c[2] <= b[0] || c[0] >= b[2] || c[3] <= b[1] || c[1] >= b[3]) return b;
+  const out = cutSide(b, c, 0) ?? cutSide(b, c, 1);
   return out && out[2] - out[0] >= 1 && out[3] - out[1] >= 1 ? out : null;
+}
+
+/** [b] cut by [c] spanning it across [axis] (0: c spans its height, cut from the left or right; 1: its width, from the top or bottom). */
+function cutSide(b: [number, number, number, number], c: [number, number, number, number], axis: 0 | 1): [number, number, number, number] | null {
+  const lo = axis;
+  const hi = axis + 2;
+  const across = 1 - axis;
+  if (c[across] > b[across] || c[across + 2] < b[across + 2]) return null;
+  const out: [number, number, number, number] = [...b];
+  if (c[lo] <= b[lo]) out[lo] = c[hi];
+  else if (c[hi] >= b[hi]) out[hi] = c[lo];
+  else return null;
+  return out;
 }
 
 /** The host blurs for this page (b.state 1). */
@@ -323,15 +328,14 @@ function measureRaw(followers: Element[] = []): Raw[] {
     if (!el.checkVisibility({ visibilityProperty: true })) continue;
     const cut = regionBoxes(el, s, r);
     if (!cut) continue;
-    const [box, own] = cut;
     let alpha = 1;
     for (const a of s.chain) alpha *= opacity(a);
     // Scaled (home's pages shrink a little as the drawer opens): the corners with it.
     const k = r.width / ((el as HTMLElement).offsetWidth || r.width);
     const follower = followerOf(el);
     out.push({
-      box,
-      own,
+      box: cut[0],
+      own: cut[1],
       clips: s.clips.map(clipBox),
       radii: s.radii.map((v) => v * k),
       alpha,

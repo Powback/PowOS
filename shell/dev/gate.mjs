@@ -2345,13 +2345,10 @@ async function webWindowCheck() {
 async function webWindowMaskCheck() {
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
-  const page = S.pages.value[S.page.value] ?? 1;
   // Its helpers are page functions too (WW_HELPERS, evaluated first): page.evaluate sends only this function.
   const g = window.__wwg;
   const ww = g.wwHelpers(W);
-  const track = document.querySelector(".page-track");
-  const screens = document.querySelector(".screens");
-  const was = { track: track?.style.transform ?? "", screens: screens?.style.transform ?? "" };
+  const page = S.pages.value[S.page.value] || 1;
   try {
     W.webWins.value = [
       { id: 903, key: "a:gate.ww", label: "Gate", page, x: 400, y: 120, w: 360, h: 300, live: true },
@@ -2361,25 +2358,37 @@ async function webWindowMaskCheck() {
     await ww.frame();
     const el = document.querySelector('.webwindow[data-wwid="903"]');
     const top = document.querySelector('.webwindow[data-wwid="905"]');
-    if (!el || !top || !el.closest(".page")?.querySelector(".page-under")) return ["web windows: no elements (or no .page-under) on the page on screen"];
+    if (!g.wwFound(el, top)) return ["web windows: no elements (or no .page-under) on the page on screen"];
     g.wwCuts(ww, el, top);
     await g.wwMenu(ww, W, top);
-    await g.wwSwipe(ww, W, el, track, screens, was);
+    await g.wwSwipe(ww, el);
+    await g.wwHidden(ww);
     g.wwMaximise(ww, W);
     return ww.fails;
   } finally {
-    if (track) track.style.transform = was.track;
-    if (screens) screens.style.transform = was.screens;
+    ww.restore();
     W.webWins.value = [];
   }
+}
+
+/** Both windows' elements on the page on screen, and the page's content wrapper. */
+function wwFound(el, top) {
+  return !!(el && top && el.closest(".page") && el.closest(".page").querySelector(".page-under"));
 }
 
 /** The web window checks' shared bits: failures, a frame, mask layers, the last "w.f" entry of a window. */
 function wwHelpers(W) {
   const fails = [];
+  const track = document.querySelector(".page-track");
+  const screens = document.querySelector(".screens");
+  const was = [track, screens].map((e) => (e ? e.style.transform : ""));
   return {
     W,
     fails,
+    track,
+    screens,
+    // The page track and the screens back where they were (the swipe checks move them).
+    restore: () => [track, screens].forEach((e, i) => e && (e.style.transform = was[i])),
     expect: (ok, msg) => ok || fails.push(msg),
     frame: () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))),
     masks: (el) => (getComputedStyle(el).maskImage.match(/linear-gradient/g) ?? []).length,
@@ -2397,8 +2406,8 @@ function wwHelpers(W) {
 /** Cut: the page under both bodies, the lower window under the higher one's body; live body clear, new a placeholder. */
 function wwCuts(ww, el, top) {
   const under = el.closest(".page").querySelector(".page-under");
-  ww.expect(ww.masks(under) === 3, `page content: ${ww.masks(under)} mask layers, want 3 (the page less 2 bodies)`);
-  ww.expect(ww.masks(el) === 2, `lower window: ${ww.masks(el)} mask layers, want 2 (itself less the higher body)`);
+  ww.expect(ww.masks(under) === 3, `page content: ${ww.masks(under)} mask layers, want 3 (the page less 2 windows)`);
+  ww.expect(ww.masks(el) === 2, `lower window: ${ww.masks(el)} mask layers, want 2 (itself less the higher window)`);
   ww.expect(ww.masks(top) === 0, "top window: masked (nothing is above it)");
   ww.expect(!document.querySelector('.webwindow[data-wwid="904"]'), "a minimised web window still has its element on the page");
   ww.expect(ww.bg(el.querySelector(".webwindow-body")) === "rgba(0, 0, 0, 0)", "a live window's body paints (it must be transparent over the app)");
@@ -2427,37 +2436,40 @@ async function wwMenu(ww, W, top) {
   await ww.frame();
 }
 
-/** "w.f" each frame of a page swipe: pixel-exact with the page, clipped to it, hidden off it / on PowOS AI / under a folder. */
-async function wwSwipe(ww, W, el, track, screens, was) {
+/** "w.f" each frame of a page swipe: pixel-exact with the page, hidden off it, clipped to it (PS2). */
+async function wwSwipe(ww, el) {
   const at0 = ww.sentFor(903);
   if (!ww.expect(!!at0, "w.f: window 903 not in the last geometry sent")) return;
-  track.style.transition = "none";
-  track.style.transform = "translateX(-200px)";
+  ww.track.style.transition = "none";
+  ww.track.style.transform = "translateX(-200px)";
   await ww.frame();
-  const at1 = ww.sentFor(903);
+  const at1 = ww.sentFor(903) || [];
   const b1 = el.querySelector(".webwindow-body").getBoundingClientRect();
-  ww.expect(!!at1 && Math.abs(at1[4] - b1.left) < 0.01 && Math.abs(at1[4] - (at0[4] - 200)) < 0.5, `page swipe: w.f body x ${at1?.[4]} (want ${b1.left}, ${at0[4] - 200}: 200 px left with its page)`);
-  ww.expect(at1?.[13] === 1, "page swipe: the window went hidden mid-swipe");
-  track.style.transform = `translateX(${-innerWidth}px)`;
+  ww.expect(Math.abs(at1[4] - b1.left) < 0.01 && Math.abs(at1[4] - (at0[4] - 200)) < 0.5, `page swipe: w.f body x ${at1[4]} (want ${b1.left}, ${at0[4] - 200}: 200 px left with its page)`);
+  ww.expect(at1[13] === 1, "page swipe: the window went hidden mid-swipe");
+  ww.track.style.transform = `translateX(${-innerWidth}px)`;
   await ww.frame();
-  ww.expect(ww.sentFor(903)?.[13] === 0, "page swiped away: the window is still visible in w.f");
-  track.style.transform = was.track;
-  // Its page's area clips it (PS2): a window hanging past the page's right edge.
+  ww.expect((ww.sentFor(903) || [])[13] === 0, "page swiped away: the window is still visible in w.f");
+  ww.restore();
   const pr = el.closest(".page").getBoundingClientRect();
-  W.update(903, { x: pr.width - 100 });
+  ww.W.update(903, { x: pr.width - 100 });
   await ww.frame();
-  const hang = ww.sentFor(903);
-  ww.expect(!!hang && hang[10] <= pr.right + 0.5, `page clip: w.f clip right ${hang?.[10]} past its page's right ${pr.right}`);
-  W.update(903, { x: 400 });
-  if (screens) {
-    screens.style.transform = `translateX(${innerWidth}px)`;
+  const hang = ww.sentFor(903) || [];
+  ww.expect(hang[10] <= pr.right + 0.5, `page clip: w.f clip right ${hang[10]} past its page's right ${pr.right}`);
+  ww.W.update(903, { x: 400 });
+}
+
+/** Hidden on the PowOS AI side (home slid away) and under a folder open over home. */
+async function wwHidden(ww) {
+  if (ww.screens) {
+    ww.screens.style.transform = `translateX(${innerWidth}px)`;
     await ww.frame();
-    ww.expect(ww.sentFor(903)?.[13] === 0, "PowOS AI page: the window stays visible");
-    screens.style.transform = was.screens;
+    ww.expect((ww.sentFor(903) || [])[13] === 0, "PowOS AI page: the window stays visible");
+    ww.restore();
   }
   const f = document.body.appendChild(Object.assign(document.createElement("div"), { className: "folder-view open" }));
   await ww.frame();
-  ww.expect(ww.sentFor(903)?.[13] === 0, "a folder open over home: the window stays visible");
+  ww.expect((ww.sentFor(903) || [])[13] === 0, "a folder open over home: the window stays visible");
   f.remove();
 }
 
@@ -2473,7 +2485,7 @@ function wwMaximise(ww, W) {
 }
 
 /** [webWindowMaskCheck]'s helpers into the page (window.__wwg); evaluates to [] (no problems) as a gate step. */
-const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwCuts, wwMenu, wwSwipe, wwMaximise].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwSwipe, wwHidden, wwMaximise].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** In the page, loaded afresh after desktopsCheck: the stored windows go back on their pages (page 2's hidden). */
 async function desktopsReloaded() {

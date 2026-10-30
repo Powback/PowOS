@@ -985,8 +985,8 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
 
 /**
  * The window: an element of its page (it slides with it, sits in z by DOM order). Its frame, bar and edges paint
- * here; over its body the page is transparent (the app's layer). A lower window's bar and edges are masked where a
- * higher window's body is (the app's pixels are under home's buffer, so DOM there would paint over that app).
+ * here; over its body the page is transparent (the app's layer). A lower window is masked where a higher window is
+ * (the app's pixels are under home's buffer, so DOM there would paint over that app, or show through its bar's glass).
  */
 function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
   const body = useRef<HTMLDivElement>(null);
@@ -1014,20 +1014,21 @@ function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
   );
 }
 
-/** A window's body in its page's px (the model; scaled about the frame's top left). */
-export function bodyBox(w: WebWin): Box {
+/** A window's whole frame (bar and body) in its page's px (the model; scaled about its top left). */
+export function frameBox(w: WebWin): Box {
   const s = w.scale ?? 1;
-  return { x: w.x, y: w.y + TITLE * s, w: w.w * s, h: (w.h - TITLE) * s };
+  return { x: w.x, y: w.y, w: w.w * s, h: w.h * s };
 }
 
 /**
- * A CSS mask that leaves out [cut] (window bodies) from an element at [at] in the page (page px; [at].s: the element's
+ * A CSS mask that leaves out [cut] (whole windows: the body is the app's layer, and the bar's glass must show what is
+ * UNDER home's surface - the wallpaper, a lower app - blurred, never the page's own widget pixels) from an element at [at] in the page (page px; [at].s: the element's
  * own scale, the mask is in its unscaled box): the whole box minus each body. Undefined: nothing to cut.
  */
 export function holes(cut: WebWin[], at: { x: number; y: number; s: number }): Record<string, string> | undefined {
   if (!cut.length) return undefined;
   const full = "linear-gradient(black, black)";
-  const boxes = cut.map(bodyBox).map((b) => ({ x: (b.x - at.x) / at.s, y: (b.y - at.y) / at.s, w: b.w / at.s, h: b.h / at.s }));
+  const boxes = cut.map(frameBox).map((b) => ({ x: (b.x - at.x) / at.s, y: (b.y - at.y) / at.s, w: b.w / at.s, h: b.h / at.s }));
   return {
     maskImage: [full, ...boxes.map(() => full)].join(", "),
     maskSize: ["100% 100%", ...boxes.map((b) => `${px(b.w)}px ${px(b.h)}px`)].join(", "),
@@ -1037,7 +1038,7 @@ export function holes(cut: WebWin[], at: { x: number; y: number; s: number }): R
   };
 }
 
-/** The page's own content (widgets, apps, its glass) masked where its windows' bodies are: grid.tsx's .page-under. */
+/** The page's own content (widgets, apps, its glass) masked where its windows are: grid.tsx's .page-under. */
 export function underWindows(page: number): Record<string, string> | undefined {
   return holes(
     webWins.value.filter((w) => w.page === page && !w.minimised && !w.full),
@@ -1046,7 +1047,7 @@ export function underWindows(page: number): Record<string, string> | undefined {
 }
 
 /**
- * For the compositor's glass (nativeglass.ts): the window bodies on screen (viewport CSS px, l t r b) a surface in
+ * For the compositor's glass (nativeglass.ts): the windows (bar and body) on screen (viewport CSS px, l t r b) a surface in
  * [el] must not blur over - those of windows above it (a window's own bar: the windows above that one; page content:
  * every window on its page; anything outside the pages: none).
  */
@@ -1058,8 +1059,8 @@ export function bodiesOver(el: Element): Clip[] {
   const out: Clip[] = [];
   for (const w of page.querySelectorAll<HTMLElement>(".webwindow[data-wwid]")) {
     if (Number(w.dataset.z) <= z) continue;
-    const b = w.querySelector(".webwindow-body")?.getBoundingClientRect();
-    if (b) out.push([b.left, b.top, b.right, b.bottom]);
+    const b = w.getBoundingClientRect();
+    out.push([b.left, b.top, b.right, b.bottom]);
   }
   return out;
 }
