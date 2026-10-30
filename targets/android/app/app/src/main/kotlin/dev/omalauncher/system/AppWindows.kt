@@ -28,11 +28,9 @@ object AppWindows {
     /** Whether apps opened now get a floating window. */
     fun floating(context: Context): Boolean =
         context.resources.configuration.smallestScreenWidthDp >= DESKTOP_MIN_DP &&
-            Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0) == 1 &&
-            // Windows are web windows (powos_web_windows = 1): home's page owns every window (shell/WebWindows.kt), and
-            // this whole path - freeform launches, WindowFrames' overlay bars and grips, TaskSurfaces' dressing,
-            // TaskLeash/PageSlide, PanelLift, adopting full-screen apps - stands down, as it does folded. One switch.
-            !dev.omalauncher.shell.WebWindows.on(context)
+            Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0) == 1
+    // Not the web-windows setting: with powos_web_windows = 1 only the web windows themselves stand this path down, per
+    // task (shell/WebWindowDisplays.isWebWindow); Linux windows (Dolphin, Steam) and every other app still float.
 
     /**
      * [base] (or plain options) made a floating window's when apps float now ([floating]): the next cascaded bounds and
@@ -62,6 +60,8 @@ object AppWindows {
         FoldedWindows.beforeOpen(context, id)
         // Sent full screen by its maximise button: it floats again at its place (adopt never floats it back).
         if (WindowFrames.current?.floatBack(id) == true) return base
+        // A web window (on its own display; home's page owns it) comes back where it is, never pulled into freeform.
+        if (dev.omalauncher.shell.WebWindowDisplays.isWebWindow(context, id)) return base
         if (!floating(context) || FreeformTasks.list(context).any { it.id == id }) return base
         return options(context, base) ?: base
     }
