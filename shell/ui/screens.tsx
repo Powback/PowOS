@@ -365,12 +365,19 @@ function SettingsScreen() {
     ["packageVariant", "packages", installed ? "pacman and the AUR" : "needs linux", needs("aur")],
     ["cellphoneCog", "android settings", "the phone's own", () => act("settings", "android")],
     ["arrowLeft", "gestures", "edge gestures, quick tools", () => openScreen("gestures")],
-    // Dictation's engine: a tap switches it (Whisper on the GPU server, else the phone's own).
+    // Dictation's engine: a tap cycles it - streamed to the GPU voice agent (the default), stt.pow's requests, the
+    // phone's own (GpuSpeech.kt SpeechEngines).
     [
       "microphoneOutline",
       "voice",
-      speechEngine.value === "ondevice" ? "transcription: on the phone" : "transcription: GPU (Whisper)",
-      () => (speechEngine.value = speechEngine.value === "ondevice" ? "gpu" : "ondevice"),
+      speechEngine.value === "ondevice"
+        ? "transcription: on the phone"
+        : speechEngine.value === "gpu-http"
+          ? "transcription: GPU (stt.pow requests)"
+          : "transcription: GPU (streaming)",
+      () =>
+        (speechEngine.value =
+          speechEngine.value === "ondevice" ? "gpu" : speechEngine.value === "gpu-http" ? "ondevice" : "gpu-http"),
     ],
     ["scaleBalance", "licenses", "open source in PowOS", () => openScreen("licenses")],
   ];

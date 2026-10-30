@@ -243,8 +243,8 @@ export const ccV3 = stored("ccLayout", "v3");
 // The plain value: store.set writes a string as a JSON string ("on" / "off"), what CornerPull.kt reads.
 effect(() => void powos.store.set("pullOverApps", pullOverApps.value).catch(() => {}));
 /**
- * Which engine dictates (settings -> voice): "gpu" - Whisper on the GPU server (stt.pow), on-device when it can't be
- * reached - or "ondevice" (Android's own). Read by the app from the shell's store (files/shell-data/speech.json,
+ * Which engine dictates (settings -> voice): "gpu" - streamed to the GPU voice agent (voiceagent.pow/ws, the swipe
+ * keyboard's protocol), "gpu-http" - stt.pow's requests, only when chosen - or "ondevice" (Android's own). Read by the app from the shell's store (files/shell-data/speech.json,
  * GpuSpeech.kt SpeechEngines), so it's written there too.
  */
 export const speechEngine = stored("speechEngine", "gpu");
