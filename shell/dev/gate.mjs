@@ -2893,53 +2893,58 @@ async function webWindowTileLayoutCheck() {
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
   const page = S.pages.value[0];
-  const fails = [];
   const near = (a, b) => Math.abs(a - b) <= 2;
+  const frame = (id) => document.querySelector(`.webwindow[data-wwid="${id}"]`);
+  const win = (id, i) => ({ id, key: `a:gate.lay${i}`, label: `Lay ${i}`, page, x: 80 + 60 * i, y: 120 + 60 * i, w: 320, h: 260, live: true });
+  // TG1: the two frames span the tile area edge to edge, top to bottom.
+  const fills = (ids) => {
+    const a = W.tileArea();
+    const [l, r] = ids.map((id) => frame(id)?.getBoundingClientRect());
+    if (!l || !r) return ["TG1: a tile has no frame"];
+    const ok = [near(l.left, a.left), near(r.right, a.right), ...[l, r].flatMap((b) => [near(b.top, a.top), near(b.bottom, a.bottom)])].every(Boolean);
+    return ok ? [] : [`TG1: 2 tiles don't fill the area ${JSON.stringify(a)}: ${[l, r].map((b) => `${b.left | 0},${b.top | 0} ${b.width | 0}x${b.height | 0}`).join(" | ")}`];
+  };
+  // TL2 + the status bar: a bar with a close on each tile, none maximised (a merged bar squeezes the status bar).
+  const bars = (ids) =>
+    ids.flatMap((id) => {
+      const f = frame(id);
+      const no = f?.querySelector(".webwindow-title .ww-close") ? [] : [`TL2: tile ${id} has no title bar with a close`];
+      const merged = f?.querySelector(".webwindow-title.merged") || f?.classList.contains("maximised");
+      return merged ? [...no, `status bar: tile ${id} is maximised, its bar merged into the status bar (squeezes it)`] : no;
+    });
+  // TG2: the divider, dragged to just past the minimum tile from the right edge, stays there (no snap to two thirds).
+  const dragDivider = async () => {
+    const div = document.querySelector(".ww-divider");
+    if (!div) return ["TG2: no divider"];
+    const a = W.tileArea();
+    const d = div.getBoundingClientRect();
+    const [x0, y] = [d.left + d.width / 2, d.top + d.height / 2];
+    const to = a.right - W.MIN_TILE.x - 4;
+    const ev = (type, x) => div.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 81, isPrimary: true, clientX: x, clientY: y }));
+    ev("pointerdown", x0);
+    for (let k = 1; k <= 8; k++) ev("pointermove", x0 + ((to - x0) * k) / 8);
+    ev("pointerup", to);
+    await window.__gw.settled();
+    const rx = W.tilings.value[page]?.rx ?? 0;
+    const want = (to - a.left) / (a.right - a.left);
+    return Math.abs(rx - want) > 0.02 ? [`TG2: the divider let go at ${want.toFixed(2)} of the area sits at ${rx.toFixed(2)}`] : [];
+  };
   try {
     S.page.value = 0;
     await window.__gw.settled();
-    const win = (id, i) => ({ id, key: `a:gate.lay${i}`, label: `Lay ${i}`, page, x: 80 + 60 * i, y: 120 + 60 * i, w: 320, h: 260, live: true });
     W.webWins.value = [win(921, 0)];
     W.tile(921, "tl");
-    if (W.tilings.value[page]) fails.push("TG1: the only window snapped to a corner made a tiling (a reserved empty slot)");
+    const fails = W.tilings.value[page] ? ["TG1: the only window snapped to a corner made a tiling (a reserved empty slot)"] : [];
     W.webWins.value = [...W.webWins.value, win(922, 1)];
     W.tile(922, "tr");
     await window.__gw.settled();
-    const t = W.tilings.value[page];
-    if (!t || t.ids.length !== 2 || t.ids.includes(null)) return [...fails, `TG1: two corner snaps gave ${JSON.stringify(t)}, not a 2-split`];
-    const a = W.tileArea();
-    const box = (id) => document.querySelector(`.webwindow[data-wwid="${id}"]`)?.getBoundingClientRect();
-    const [l, r] = t.ids.map(box);
-    if (!l || !r) return [...fails, "TG1: a tile has no frame"];
-    const xs = [l.left, r.right], hs = [l.top, l.bottom, r.top, r.bottom];
-    if (!near(Math.min(...xs), a.left) || !near(Math.max(...xs), a.right) || !near(hs[0], a.top) || !near(hs[1], a.bottom) || !near(hs[2], a.top) || !near(hs[3], a.bottom))
-      fails.push(`TG1: 2 tiles don't fill the area ${JSON.stringify(a)}: ${[l, r].map((b) => `${b.left|0},${b.top|0} ${b.width|0}x${b.height|0}`).join(" | ")}`);
-    for (const id of t.ids) {
-      const f = document.querySelector(`.webwindow[data-wwid="${id}"]`);
-      if (!f?.querySelector(".webwindow-title .ww-close")) fails.push(`TL2: tile ${id} has no title bar with a close`);
-      if (f?.querySelector(".webwindow-title.merged") || f?.classList.contains("maximised")) fails.push(`status bar: tile ${id} is maximised, its bar merged into the status bar (squeezes it)`);
-    }
-    // TG2: the divider, dragged to 40 px from the right edge, stays there (no snap to two thirds).
-    const div = document.querySelector(".ww-divider");
-    if (!div) fails.push("TG2: no divider");
-    else {
-      const d = div.getBoundingClientRect();
-      const y = d.top + d.height / 2;
-      const to = a.right - W.MIN_TILE.x - 4;
-      const ev = (type, x) => div.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 81, isPrimary: true, clientX: x, clientY: y }));
-      ev("pointerdown", d.left + d.width / 2);
-      for (let k = 1; k <= 8; k++) ev("pointermove", d.left + d.width / 2 + ((to - d.left - d.width / 2) * k) / 8);
-      ev("pointerup", to);
-      await window.__gw.settled();
-      const rx = W.tilings.value[page]?.rx ?? 0;
-      const want = (to - a.left) / (a.right - a.left);
-      if (Math.abs(rx - want) > 0.02) fails.push(`TG2: the divider let go at ${want.toFixed(2)} of the area sits at ${rx.toFixed(2)}`);
-    }
-    // SC1: one of two closed (minimised here: the same untile) - no tiling left.
+    const ids = W.tilings.value[page]?.ids ?? [];
+    if (ids.length !== 2 || ids.includes(null)) return [...fails, `TG1: two corner snaps gave ${JSON.stringify(ids)}, not a 2-split`];
+    fails.push(...fills(ids), ...bars(ids), ...(await dragDivider()));
+    // SC1: one of two gone (minimised: the same untile) - no tiling left.
     W.minimise(922);
     await window.__gw.settled();
-    if (W.tilings.value[page] || W.tiledOn(921) != null) fails.push("SC1: a split down to one window is still a tiling");
-    return fails;
+    return W.tilings.value[page] || W.tiledOn(921) != null ? [...fails, "SC1: a split down to one window is still a tiling"] : fails;
   } finally {
     W.webWins.value = [];
     W.tilings.value = {};
