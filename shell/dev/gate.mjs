@@ -2697,8 +2697,9 @@ function wwHelpers(W) {
     // The newest "w.f" entry of window [id]: its 19 numbers after the id (frame 0-3, body 4-7, clip 8-11, radius 12,
     // visible 13, alpha 14, scale 15, maximised 16, merge 17-18).
     sentFor: (id) => {
+      // An entry is 24 words (ui/webwindows.tsx entry: ... <maximised> <titleEnd> <controls> <resizing> <app w> <app h> <fill>).
       const t = (window.__ww.sent.at(-1) ?? "").split(" ");
-      for (let i = 4, n = Number(t[3]); n-- > 0; i += 20) if (Number(t[i]) === id) return t.slice(i + 1, i + 20).map(Number);
+      for (let i = 4, n = Number(t[3]); n-- > 0; i += 24) if (Number(t[i]) === id) return t.slice(i + 1, i + 20).map(Number);
       return null;
     },
   };
@@ -2748,7 +2749,7 @@ async function wwRaise(ww, W) {
     await ww.frame();
     const t = (window.__ww.sent.at(-1) ?? "").split(" ");
     const ids = [];
-    for (let i = 4, n = Number(t[3]); n-- > 0; i += 20) ids.push(Number(t[i]));
+    for (let i = 4, n = Number(t[3]); n-- > 0; i += 24) ids.push(Number(t[i]));
     if (ww.expect(ids.join() === want, `raise(${id}): w.f order ${ids} (want ${want}: the raised window last)`)) window.__wwg.wwStacked(ww, ids, id);
   }
 }
