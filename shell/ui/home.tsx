@@ -266,8 +266,14 @@ const windowed = computed(() => {
     const key = appOf(w);
     if (key && byKey.value.has(key) && !out.has(key)) out.set(key, w.minimised ? "minimised" : "running");
   }
+  webWindowed(out);
   return out;
 });
+
+/** Web windows (ui/webwindows.tsx) into [out]: a minimised one stays in the dock; its tap brings it back (launch -> openWebWindow). */
+function webWindowed(out: Map<string, string>) {
+  for (const w of webWins.value) if (byKey.value.has(w.key) && !out.has(w.key)) out.set(w.key, w.minimised ? "minimised" : "running");
+}
 
 /** The apps with a floating window that aren't in [pinned]: (key, "running" | "minimised"). */
 function windowedOnly(pinned: string[]): [string, string][] {

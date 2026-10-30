@@ -201,7 +201,7 @@ function geometry(): string {
 }
 
 /** "r g b a" of a CSS colour, as the page resolves it. */
-function rgba(css: string): string {
+function resolved(css: string): string {
   const probe = document.createElement("i");
   probe.style.color = css;
   document.body.append(probe);
@@ -215,7 +215,7 @@ function rgba(css: string): string {
 function theme() {
   if (performance.now() - themeAt < 1000) return;
   themeAt = performance.now();
-  const t = `${rgba("var(--color-surface)")} ${rgba("var(--color-foreground)")}`;
+  const t = `${resolved("var(--color-surface)")} ${resolved("var(--color-foreground)")}`;
   if (t !== lastTheme) send(`w.theme ${(lastTheme = t)}`);
 }
 

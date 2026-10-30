@@ -2279,23 +2279,45 @@ async function webWindowCheck() {
  * bodies and the top window's title bar cut back in (it is DOM over the lower app). ui/webwindows.tsx pageMask.
  */
 async function webWindowMaskCheck() {
+  // The user, 2026-10-30: "nobody asked for the cutoff" - a web window is a card over home (the host draws it above
+  // home's surface); the page under it is never masked or cut, and the window's element is invisible (its model).
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
   const page = S.pages.value[S.page.value] ?? 1;
+  // The page under a window isn't cut, the window's element paints nothing, a minimised one has none.
+  const uncut = (el, pageEl) => {
+    const fails = [];
+    const mask = getComputedStyle(pageEl).maskImage || "none";
+    if (mask !== "none" || pageEl.style.mask) fails.push(`web windows: their page is masked ("${mask}") - nothing under a window may be cut`);
+    const paints = (c) => c.backgroundColor !== "rgba(0, 0, 0, 0)" || c.boxShadow !== "none";
+    if ([el, ...el.querySelectorAll("*")].some((e) => paints(getComputedStyle(e)))) fails.push("web window: its element paints (the host draws the window; the page's element must be invisible)");
+    if (document.querySelector('.webwindow[data-wwid="904"]')) fails.push("a minimised web window still has its element on the page");
+    return fails;
+  };
+  // Full screen fills the work area (above the dock), and restores the frame it had.
+  const near = (a, b) => Math.abs(a - b) <= 1;
+  const fills = (m, a) => !!m?.restore && near(m.w, a.right - a.left) && near(m.h, a.bottom - a.top);
+  const maximise = () => {
+    const fails = [];
+    W.toggleMaximise(903);
+    const a = W.workArea();
+    const m = W.webWins.value.find((w) => w.id === 903);
+    if (!fills(m, a)) fails.push(`full screen: ${JSON.stringify(m)} doesn't fill the work area ${JSON.stringify(a)}`);
+    W.toggleMaximise(903);
+    const r = W.webWins.value.find((w) => w.id === 903);
+    if (r?.restore || r?.w !== 360 || r?.h !== 300) fails.push(`restore: ${JSON.stringify(r)} isn't back at 360x300`);
+    return fails;
+  };
   try {
     W.webWins.value = [
       { id: 903, key: "a:gate.ww", label: "Gate", page, x: 400, y: 120, w: 360, h: 300 },
-      { id: 904, key: "a:gate.ww2", label: "Gate 2", page, x: 160, y: 200, w: 300, h: 240 },
+      { id: 904, key: "a:gate.ww2", label: "Gate 2", page, x: 160, y: 200, w: 300, h: 240, minimised: true },
     ];
     await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
-    const pageEl = document.querySelector('.webwindow[data-wwid="903"]')?.closest(".page");
+    const el = document.querySelector('.webwindow[data-wwid="903"]');
+    const pageEl = el?.closest(".page");
     if (!pageEl) return ["web windows: not on the page on screen"];
-    const fails = [];
-    const composite = getComputedStyle(pageEl).maskComposite || "";
-    if (!composite.includes("subtract")) fails.push(`web windows: their page isn't masked over the bodies (mask-composite "${composite}")`);
-    const images = (pageEl.style.mask.match(/url\(/g) || []).length;
-    if (images !== 3) fails.push(`two web windows: ${images} mask images on the page (want 3)`);
-    return fails;
+    return [...uncut(el, pageEl), ...maximise()];
   } finally {
     W.webWins.value = [];
   }
