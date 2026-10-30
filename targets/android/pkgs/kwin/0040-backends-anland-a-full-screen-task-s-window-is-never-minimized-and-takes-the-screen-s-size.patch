@@ -1,0 +1,147 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: a full-screen task's window is never minimized, and takes the screen's size at once
+
+Broforce launched from PowOS (2026-10-30): its window 0x5400003 (steam_app_274190) was WM_STATE Iconic,
+_NET_WM_STATE_HIDDEN+FULLSCREEN, unmapped, at 1360x1708 on the unfolded 2268x2440 screen. Opening it showed the
+Plasma desktop while its music played.
+
+1. A full-screen Wine/Unity/SDL game minimizes itself when it loses KWin's activation (0031 notes it too).
+   handOverMinimize (0036) skipped full-screen tasks, so the minimize stayed: the task showed nothing, and a task
+   that never went live handed the minimized window to the desktop (0034). Now a full-screen task's window (opened
+   full screen, or a floating one gone full screen) is restored at once, live or not, and the app isn't told
+   (the user didn't minimize it). A game that keeps minimizing itself is left so after 3 tries within 2 s: focus()
+   (0028) restores it when its task comes to the front.
+2. A floating task whose window goes full screen kept the floating task's size until the app made the task full
+   screen and its buffers followed. The game was configured to that size (1360x1708 = the 60x70% floating size)
+   and kept it. Now fitFullScreen takes the screen's (the output's, folded or unfolded) size at once, until the
+   task reports a size of its own that differs from the floating one.
+3. A task that never went live and ends (0034) leaves a minimized full-screen window restored and active on the
+   desktop, not minimized where nothing shows it.
+---
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 13608b8..f9b2beb 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -191,10 +191,41 @@ void AnlandWindowTask::handOverMaximize()
+ 
+ void AnlandWindowTask::handOverMinimize()
+ {
++    if (!m_window || m_givingBack || !m_window->isMinimized()) {
++        return;
++    }
++    if (m_fullScreen || m_appFullScreen || m_window->isFullScreen()) {
++        // A full-screen window in its task (a game) is never minimized: the task is what's on screen or not. A
++        // full-screen Wine/Unity/SDL game minimizes ITSELF (WM_CHANGE_STATE iconic) when it loses KWin's activation -
++        // Broforce did on launch (2026-10-30: WM_STATE Iconic, _NET_WM_STATE_HIDDEN+FULLSCREEN, unmapped): its task
++        // then showed nothing, opening it showed the Plasma desktop while its music played, and a task that never
++        // went live because of it handed the minimized window to the desktop (0034). Undone at once, before or after
++        // the task went live, and not told to the app: the user didn't ask for it. Its focus comes with the task's
++        // ("focus", 0028).
++        // HACK: a game that keeps asking (minimizes again every time it's restored while inactive) is left minimized
++        // after a few tries in a row - focus() restores it when its task comes to the front. The real fix is the
++        // game not seeing a focus loss while its task is on screen (Proton's fullscreen focus handling).
++        const auto now = std::chrono::steady_clock::now();
++        if (now - m_minimizeUndoneAt > std::chrono::seconds(2)) {
++            m_minimizeUndos = 0;
++        }
++        m_minimizeUndoneAt = now;
++        if (++m_minimizeUndos > 3) {
++            qCWarning(KWIN_ANLAND) << "window task" << m_id << "full-screen window keeps minimizing itself: left so until its task takes the focus";
++            return;
++        }
++        qCInfo(KWIN_ANLAND) << "window task" << m_id << "full-screen window minimized itself (live" << m_exported << "): restored, a full-screen task's window is never minimized";
++        QMetaObject::invokeMethod(this, [w = m_window]() {
++            if (w && !w->isDeleted() && w->isMinimized()) {
++                w->setMinimized(false);
++            }
++        }, Qt::QueuedConnection);
++        return;
++    }
+     // A floating task's window minimized by its own request (a client-side bar's minimize button): the task goes into
+     // the dock ("minimize <id>"). The window itself is shown again at once - the task shows it, and an unmapped window
+     // is a black task when it comes back (0028 restores it on focus as well).
+-    if (!m_window || !m_exported || m_givingBack || m_fullScreen || m_appFullScreen || !m_window->isMinimized()) {
++    if (!m_exported) {
+         return;
+     }
+     qCInfo(KWIN_ANLAND) << "window task" << m_id << "asked to be minimized: the task minimizes";
+@@ -282,6 +313,14 @@ AnlandWindowTask::~AnlandWindowTask()
+             m_window->checkWorkspacePosition(); // still full screen: the screen's size again (kept while exported)
+         }
+         workspace()->activateWindow(m_window);
++    } else if (m_window && !m_exported && !m_window->isDeleted() && workspace() && m_window->isFullScreen()
++               && m_window->isMinimized()) {
++        // A full-screen window (a game) whose task never went live (0034: the desktop came on screen first) minimized
++        // itself meanwhile - it never had KWin's activation. It stays on the desktop shown and in front, not minimized
++        // where nothing shows it (Broforce: opening it showed the Plasma desktop while its music played, 2026-10-30).
++        qCInfo(KWIN_ANLAND) << "window task" << m_id << "never went live: its minimized full-screen window is restored on the desktop";
++        m_window->setMinimized(false);
++        workspace()->activateWindow(m_window);
+     }
+ }
+ 
+@@ -677,6 +716,9 @@ bool AnlandWindowTask::setAppFullScreen(bool on)
+         return false;
+     }
+     m_appFullScreen = on;
++    // The floating task's size now: until the app reports the full-screen task's own (fullScreenTaskSize), the
++    // window takes the screen's at once instead of this one.
++    m_floatingTaskSize = on ? taskSize() : QSize();
+     // Kept through output changes while the task shows it full screen (as a game's own full-screen task, goLive).
+     m_window->setProperty("powosKeepFullScreenGeometry", on);
+     qCInfo(KWIN_ANLAND) << "window task" << m_id << (on ? "full screen (the app's own)" : "floating again") << m_window->clientGeometry();
+@@ -718,7 +760,7 @@ void AnlandWindowTask::fitFullScreen()
+         return;
+     }
+     const qreal targetScale = m_window->targetScale();
+-    const QSize task = taskSize();
++    const QSize task = fullScreenTaskSize();
+     if (task.isEmpty() || targetScale <= 0) {
+         return;
+     }
+@@ -734,6 +776,23 @@ void AnlandWindowTask::fitFullScreen()
+     scheduleRender(); // drawn at the task's scale until the client commits its new size
+ }
+ 
++QSize AnlandWindowTask::fullScreenTaskSize() const
++{
++    // A floating task whose window went full screen (a game: Unity/Proton maps it windowed, then full screen) is still
++    // the floating task's size until the app has made the task full screen and its buffers follow ("size"). The game
++    // was configured to that size and kept it: Broforce rendered 1360x1708 (the 60x70% floating size) on the unfolded
++    // 2268x2440 screen (2026-10-30). The full-screen task covers the screen, so the window takes the screen's size
++    // (the container: folded or unfolded, as the output is now) at once; the task's own size wins once it differs
++    // from the floating one. Drawn scaled into the old buffers for that moment (scale()/viewport(): fitsWindow).
++    const QSize task = taskSize();
++    if (!m_appFullScreen || m_floatingTaskSize.isEmpty() || task != m_floatingTaskSize || !m_window) {
++        return task;
++    }
++    const LogicalOutput *output = m_window->output();
++    const QSize screen = output ? output->pixelSize() : QSize();
++    return screen.isEmpty() ? task : screen;
++}
++
+ void AnlandWindowTask::noteResized()
+ {
+     // The client committed the size resizeTo asked for: how long it took (the log line after the resize).
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 3357631..f978e1b 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -152,6 +152,7 @@ private:
+     void handOverMoveResize();
+     void handOverMaximize();
+     void handOverMinimize();
++    QSize fullScreenTaskSize() const;
+ 
+     AnlandWindowTasks *m_tasks;
+     QPointer<Window> m_window;
+@@ -176,6 +177,9 @@ private:
+     bool m_stale[MAX_BUFS] = {};
+     QSize m_bufferSize;
+     QSize m_taskSize; // resizeTo's, empty until the app says one
++    QSize m_floatingTaskSize; // the task's size when its window went full screen (setAppFullScreen), until it changes
++    std::chrono::steady_clock::time_point m_minimizeUndoneAt; // handOverMinimize: a full-screen window's own minimize undone
++    int m_minimizeUndos = 0; // ... how many times in a row (2 s apart at most)
+     // Configure -> commit latency of resizeTo's steps (one log line per resize, 500 ms after its last step).
+     std::chrono::steady_clock::time_point m_resizeAsked;
+     QSizeF m_resizeWanted;

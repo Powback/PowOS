@@ -334,7 +334,9 @@ object PageSlide {
         settleAt = 0L
         newer = false
         Choreographer.getInstance().removeFrameCallback(tick)
-        val gone = wins.filter { it.id in hidden || (why != "landed" && it.rel != 0) }.map { it.id }.toSet()
+        // Never one just launched/activated or full screen (WindowFrames.mayHide): it stays on the page on screen.
+        val frames = WindowFrames.current
+        val gone = wins.filter { (it.id in hidden && frames?.mayHide(it.id) != false) || (why != "landed" && it.rel != 0) }.map { it.id }.toSet()
         WindowFrames.current?.slideEnd(gone, why == "landed")
         s.hidden = gone
         // The windows left on another page go under home in the transition's own finish change (what a minimise

@@ -521,6 +521,16 @@ class WindowFrames(
     ) {
         val ids = all.map { it.id }.toSet()
         minimised.retainAll(ids)
+        // A window listed for the first time was just launched: on the page on screen, never hidden as off page at once.
+        if (floating) {
+            // Not the first listing after the app (re)started: those windows were open before, not just launched.
+            if (primed) (ids - listed).forEach { activated(it) }
+            primed = true
+            // Never dropped while it lives: a task briefly missing from one listing (hadUnreadableTask) isn't new again.
+            if (listed.size > LISTED_MAX) listed.retainAll(ids)
+            listed.addAll(ids)
+            activatedAt.keys.retainAll(ids + fullBefore.keys)
+        }
         // Folded, the windows aren't listed but still belong to their pages: kept for the unfold.
         if (floating) away.retainAll(ids)
         // Folded, apps aren't windows: the dock shows none.
@@ -608,6 +618,7 @@ class WindowFrames(
      */
     fun floatBack(id: Int): Boolean {
         if (id !in buttonFull || !AppWindows.floating(context)) return false
+        activated(id)
         val ok = toWindowAgain(id)
         // Kept until it floats (backFromFullScreen clears it): a failed try leaves the next tap able to float it again.
         if (!ok) Log.w(TAG, "task $id can't float again yet: kept for the next tap")
@@ -629,6 +640,7 @@ class WindowFrames(
         on: Boolean,
     ) {
         main.post {
+            activated(taskId)
             if (!AppWindows.floating(context)) return@post
             val ok = if (on) toFullScreen(taskId) else toWindowAgain(taskId)
             Log.i(TAG, "task $taskId ${if (on) "full screen (its app's own)" else "a window again"}: ${fullBefore[taskId]?.toShortString()} ok=$ok")
@@ -830,9 +842,17 @@ class WindowFrames(
         return true
     }
 
-    private fun showOnly(hide: Set<Int>) {
+    private fun showOnly(asked: Set<Int>) {
         // A page swipe's change committed: its frames are ordinary again (the refresh below frames the new page).
         sliding.clear()
+        // Never off its page: a window just launched or activated, or one full screen (a game). Home is told it's on
+        // the page on screen (keptOnPage -> "windows.raised"), so its list agrees from now on.
+        val kept = asked.filterNot { mayHide(it) }.toSet()
+        val hide = asked - kept
+        if (kept.isNotEmpty()) {
+            Log.i(TAG, "not hidden off page (just launched/activated or full screen): $kept")
+            keptOnPage.value = Kept(kept, android.os.SystemClock.uptimeMillis())
+        }
         val back = away - hide
         away.clear()
         away.addAll(hide)
@@ -859,8 +879,26 @@ class WindowFrames(
     /** Task [id]'s window is out of sight because it lives on another home page ([desktop]'s hide list). */
     fun isAway(id: Int): Boolean = id in away
 
+    /**
+     * Whether task [id]'s window may leave the screen for another home page (hidden in WM: [showOnly], a page slide's
+     * finish). Never a window full screen (a game: [fullBefore], its app's own or its maximise button's) and never one
+     * the user just launched or activated ([activated], [FRESH_MS]): Broforce, opened while home's page state didn't
+     * match, was hidden as off page, lost its focus and minimised itself (2026-10-30).
+     */
+    fun mayHide(id: Int): Boolean {
+        if (id in fullBefore) return false
+        val at = activatedAt[id] ?: return true
+        return android.os.SystemClock.uptimeMillis() - at > FRESH_MS
+    }
+
+    /** Task [id]'s window was just launched (first listed), brought back or activated: [mayHide] keeps it on screen. */
+    fun activated(id: Int) {
+        activatedAt[id] = android.os.SystemClock.uptimeMillis()
+    }
+
     /** Task [id]'s window back where it was, on top (a tap on it in the dock; home goes to its page, windows.raised). */
     fun restore(id: Int): Boolean {
+        activated(id)
         minimised.remove(id)
         if (away.remove(id)) {
             // Its page's leash-hidden window: shown again (the raise below brings it to the top).
@@ -983,6 +1021,27 @@ class WindowFrames(
 
         /** Windows of the home pages not on screen ([desktop]); kept across a rebind like [minimised]. */
         private val away = mutableSetOf<Int>()
+
+        /** Task -> when it was last launched (first listed), brought back or activated ([activated], [mayHide]). */
+        private val activatedAt = mutableMapOf<Int, Long>()
+
+        /** The floating windows listed so far since the app started (a new one in [track] was just launched). */
+        private val listed = mutableSetOf<Int>()
+
+        /** [listed] has had its first listing since the app started. */
+        private var primed = false
+
+        /** How long after its launch or activation a window is never hidden as another page's ([mayHide]). */
+        private const val FRESH_MS = 10_000L
+
+        /** [listed] is trimmed to the live windows past this many ids. */
+        private const val LISTED_MAX = 256
+
+        /** Windows [showOnly] kept on screen though home listed them as another page's: home moves them to its page. */
+        data class Kept(val ids: Set<Int>, val at: Long)
+
+        /** The last [Kept] (home's page reads it: "windows.raised", ui/desktops.ts). */
+        val keptOnPage = mutableStateOf<Kept?>(null)
 
         /** Of [away]: the ones that left under home (no leash to hide - HACK in showOnly), brought back by a raise. */
         private val underHome = mutableSetOf<Int>()
