@@ -1578,6 +1578,9 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-screen.wide > .ai-compose { margin-top: 0; grid-row: 3; }
 .ai-screen.wide > .ai-top { grid-row: 1; }
 .ai-screen.wide > .ai-side { margin-bottom: 0; }
+/* Wide, nothing floats over the chat pane's top: it starts under the status bar on the left column's line (--ai-head-top),
+   so its text never runs through the clock and battery (the user's screenshot, 2026-10-30). */
+.ai-screen.wide > .ai-talk { margin-top: var(--ai-head-top); padding-top: 0; scroll-padding-top: 0; }
 /* Wide, a fold heading a pane ("needs you", "paused") sits on the panes' top line. */
 .ai-view.wide .ai-fold:not(.tile *) { margin: 0 0 0 2px; }
 /* The board (powai.tsx AiContent): one surface - what was a card each is a section on it, parted by spacing. */
