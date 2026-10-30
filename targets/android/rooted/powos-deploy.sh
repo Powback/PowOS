@@ -48,8 +48,10 @@ printf '%s\n' '# PowOS rooted mode (rooted/powos-deploy.sh): links open in the p
 M=$R/home/powos/.config/mimeapps.list
 mkdir -p $R/home/powos/.config && touch $M
 grep -q '^\[Default Applications\]' $M || printf '[Default Applications]\n' >> $M
-for s in http https; do # the image's GNU sed (Android's toybox sed differs on `a`)
-  chroot $R sed -i "/^x-scheme-handler\/$s=/d; /^\[Default Applications\]/a x-scheme-handler/$s=powos-android-open.desktop" \
+# The image's GNU sed (Android's toybox sed differs on `a`), by full path: chroot keeps Android's PATH, which has no
+# /usr/bin ("exec sed: No such file" stopped every rooted deploy here from 10-29 to 10-30).
+for s in http https; do
+  chroot $R /usr/bin/sed -i "/^x-scheme-handler\/$s=/d; /^\[Default Applications\]/a x-scheme-handler/$s=powos-android-open.desktop" \
     /home/powos/.config/mimeapps.list
 done
 chown $(stat -c %u /data/data/com.powos.app):$(stat -c %u /data/data/com.powos.app) $M
