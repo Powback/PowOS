@@ -147,6 +147,11 @@ QJsonValue Bridge::dispatch(const QString &method, const QJsonArray &a)
         return m_services.windows->minimize(a.at(0).toString());
     if (method == QLatin1String("windows.close"))
         return m_services.windows->close(a.at(0).toString());
+    // Home pages are KWin virtual desktops only in desktop mode, where powos-shell IS the desktop. Beside Plasma
+    // (POWOS_DESKTOP_MODE != 1) the user's own KWin desktops are left alone: ensure() once filled Plasma with one
+    // "Page 1" desktop per home page (10-30, "why does the Plasma screen have so many virtual desktops?").
+    if (method.startsWith(QLatin1String("desktops.")) && qEnvironmentVariable("POWOS_DESKTOP_MODE") != QLatin1String("1"))
+        throw Unsupported("unsupported: " + method.toStdString());
     if (method == QLatin1String("desktops.list"))
         return m_services.desktops->list();
     if (method == QLatin1String("desktops.setCurrent"))
