@@ -14,6 +14,7 @@ import { powos } from "../bridge.ts";
 import type { AppWindow } from "../types.ts";
 import { byKey, desktopPages, launch, page, pages, windows } from "../state.ts";
 import { pageDrag } from "./gesture.ts";
+import { dockToggle } from "./webwindows.tsx";
 
 const STORE = "home.windows";
 /** Window ids kept for closed tasks at most (folded, the list is empty but the windows aren't gone). */
@@ -213,6 +214,8 @@ export async function startDesktops() {
  * launcher (planned in docs/DESKTOP-WEB-SHELL.md; Runtime.launch brings a running one to the front meanwhile).
  */
 export async function dockTap(key: string) {
+  // Web windows (unfolded, the setting on): the page's own windows, the same taskbar rule (webwindows.tsx dockToggle, TB4).
+  if (dockToggle(key)) return void console.debug("dockTap", key, "web window");
   // The top-most one SHOWING: a listed task that isn't visible (no bounds - e.g. a translucent PowOS task left in
   // freeform, seen 2026-10-23) is no one's front, or a tap on Chrome in front launched instead of minimising (e2e r3).
   // PowOS's own non-Linux tasks (no app key: a translucent host left in freeform) are no one's front either - likely why
