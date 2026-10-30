@@ -147,6 +147,7 @@ class WebWindows(
         // Below home's own buffer, as a SurfaceView (-1: its media overlay level; the page's surface tiles are -2).
         t.setLayer(sc, -1).setVisibility(sc, true).apply()
         root = sc
+        watchSurface()
         return sc
     }
 
@@ -172,6 +173,7 @@ class WebWindows(
                 return@create
             }
             win.displayId = displayId
+            WebWindowDisplays.add(displayId)
             // Closed while its display was being made: the display goes too.
             if (win.closed) return@create helper.release(displayId)
             Log.i(TAG, "window $id: trusted display $displayId ${w}x$h dpi $dpi (${component.packageName})")
@@ -370,6 +372,100 @@ class WebWindows(
         runCatching { setCornerRadius?.invoke(t, sc, r) }
     }
 
+    // ---- home's surface recreated (stop/start, screen off/on, fold) --------------------------------------------------------
+
+    /**
+     * Home's window surface is destroyed when home stops and made anew when it shows again (WindowManager: "HomeShell
+     * ... state from DRAW_PENDING to NO_SURFACE; reason: destroySurface"; VRI "relayoutWindow result ...
+     * surfaceControlChanged:true"). [root] was a child of the OLD surface: it stayed a valid handle but an orphan
+     * (`dumpsys SurfaceFlinger --list`: "powos-webwindows#5397 z=-1" with no parentId), so every window - and every
+     * window opened after (root() reused it) - showed nothing (the user, 2026-10-30: "when I got to the home again the
+     * chrome window had no content"). Now the root is re-parented onto each new surface in the transaction that goes
+     * with its first frame; containers and mirrors hang under the root and come with it, the apps never relaunch.
+     *
+     * HACK: ViewRootImpl.addSurfaceChangedCallback / SurfaceChangedCallback are hidden (what SurfaceView uses),
+     * reflected through a Proxy. Fallback (public, API 34): window visibility back to VISIBLE -> re-parent on the next
+     * pre-draw. Real fix: none public for a child layer of a window's own surface.
+     */
+    private var surfaceWatched = false
+
+    private fun watchSurface() {
+        if (surfaceWatched) return
+        val vri = web.rootSurfaceControl ?: return
+        surfaceWatched = true
+        if (hookSurfaceChanged(vri)) return
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) reattachWhenVisible()
+    }
+
+    /** ViewRootImpl.addSurfaceChangedCallback with a Proxy of its hidden interface; false: refused. */
+    private fun hookSurfaceChanged(vri: Any): Boolean =
+        runCatching {
+            HiddenApi.allow()
+            val cb = Class.forName("android.view.ViewRootImpl\$SurfaceChangedCallback")
+            val proxy = java.lang.reflect.Proxy.newProxyInstance(cb.classLoader, arrayOf(cb)) { p, m, args -> surfaceCall(p, m.name, args) }
+            vri.javaClass.getMethod("addSurfaceChangedCallback", cb).invoke(vri, proxy)
+        }.onFailure { Log.w(TAG, "no surface callback: re-attached on window visibility instead", it) }.isSuccess
+
+    /** One call on the surface callback's Proxy (UI thread). */
+    private fun surfaceCall(
+        proxy: Any,
+        name: String,
+        args: Array<out Any?>?,
+    ): Any? =
+        when (name) {
+            "surfaceCreated", "surfaceReplaced" -> reattach(args?.getOrNull(0) as? SurfaceControl.Transaction, name).let { null }
+            "surfaceDestroyed" -> Log.i(TAG, "home's surface destroyed: ${wins.size} window(s) wait for the next one").let { null }
+            "hashCode" -> System.identityHashCode(proxy)
+            "equals" -> proxy === args?.getOrNull(0)
+            "toString" -> "powos-webwindows surface watch"
+            else -> null
+        }
+
+    /** The public fallback: window visible again -> re-parent on the next pre-draw (the new surface is made in that traversal). */
+    @androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    private fun reattachWhenVisible() {
+        web.viewTreeObserver.addOnWindowVisibilityChangeListener { v ->
+            if (v != android.view.View.VISIBLE) return@addOnWindowVisibilityChangeListener
+            val vto = web.viewTreeObserver
+            vto.addOnPreDrawListener(
+                object : android.view.ViewTreeObserver.OnPreDrawListener {
+                    override fun onPreDraw(): Boolean {
+                        if (vto.isAlive) vto.removeOnPreDrawListener(this)
+                        reattach(null, "visible")
+                        return true
+                    }
+                },
+            )
+        }
+    }
+
+    /** Main thread: [root] onto home's current surface ([t]: the new surface's first-frame transaction, else applied now); lost mirrors made again. */
+    private fun reattach(
+        t: SurfaceControl.Transaction?,
+        why: String,
+    ) {
+        val r = root?.takeIf { it.isValid } ?: return
+        val re = web.rootSurfaceControl?.buildReparentTransaction(r) ?: run { Log.w(TAG, "home's surface $why: no surface to re-attach to"); return }
+        if (t != null) t.merge(re) else re.apply()
+        Log.i(TAG, "home's surface $why: windows' root re-attached (${wins.size} window(s): ${wins.values.joinToString { "${it.id}@d${it.displayId}" }})")
+        for (w in wins.values) if (w.displayId >= 0 && w.mirror?.isValid == false) io.post { remirror(w) }
+    }
+
+    /** On [io]: [w]'s display mirrored again into its container (its mirror lost), the app left running as it is. */
+    private fun remirror(w: Win) {
+        if (w.closed) return
+        val out = runCatching { mirror(w.displayId) }.getOrNull() ?: run { Log.w(TAG, "window ${w.id}: display ${w.displayId} not mirrored again"); return }
+        main.post {
+            if (w.closed || !w.container.isValid) return@post out.release()
+            w.mirror?.release()
+            w.mirror = out
+            val t = SurfaceControl.Transaction().reparent(out, w.container).setLayer(out, 0).setVisibility(out, true).setCrop(out, Rect(0, 0, 0, 0))
+            w.geo?.let { place(t, w, it) }
+            t.apply()
+            Log.i(TAG, "window ${w.id}: display ${w.displayId} mirrored again")
+        }
+    }
+
     // ---- input (v0, until S4) ------------------------------------------------------------------------------------------
 
     /** A touch on the element's body (CSS px from its top-left): injected on its display. */
@@ -434,6 +530,7 @@ class WebWindows(
         w.mirror?.release()
         w.container.release()
         val displayId = w.displayId
+        WebWindowDisplays.remove(displayId)
         if (displayId >= 0 && !released) {
             io.post {
                 // DESTROY_CONTENT_ON_REMOVAL finishes the activities but leaves the task in recents (S0): removed first.
@@ -691,7 +788,7 @@ class WebWindows(
 
         private const val HOME_GRACE_MS = 4000L
 
-        /** Windows are web windows: home's page owns them, the old floating-window path stands down (AppWindows.floating). */
+        /** Web windows on: Android apps opened from the wide home are web windows (only those stand the old path down: WebWindowDisplays). */
         fun on(context: Context): Boolean = runCatching { Settings.Global.getInt(context.contentResolver, SETTING, 0) == 1 }.getOrDefault(false)
         private const val PLACE_LOG_MS = 1000L
         private const val MIRROR_WAIT_MS = 2000L

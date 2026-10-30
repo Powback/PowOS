@@ -57,14 +57,10 @@ object FreeformTasks {
         @Suppress("DEPRECATION")
         val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
         val z = stackOrder()?.withIndex()?.associate { (i, id) -> id to i }
-        webWindows = dev.omalauncher.shell.WebWindows.on(context)
         val result = (if (z == null) tasks else tasks.sortedBy { z[it.taskId] ?: Int.MAX_VALUE }).mapNotNull { window(it) }
         hadUnreadableTask = failedThisList
         return result
     }
-
-    /** powos_web_windows as [list] read it this call. */
-    @Volatile private var webWindows = false
 
     /** Set by [list] after each call: see its doc. */
     @Volatile var hadUnreadableTask = false
@@ -76,19 +72,15 @@ object FreeformTasks {
     /** Tasks already logged as left to Android ([resizable] false), so the line comes once per task. */
     private val compatLogged = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
-    /** Task [t] lives on a display other than the phone's own (TaskInfo.displayId, hidden; unreadable = no). */
-    private fun onOtherDisplay(t: ActivityManager.RunningTaskInfo): Boolean =
-        runCatching { android.app.TaskInfo::class.java.getField("displayId").getInt(t) != android.view.Display.DEFAULT_DISPLAY }.getOrDefault(false)
-
     /** Whether task [t]'s app can be resized (TaskInfo.isResizeable, hidden; unreadable = yes, as before). */
     private fun resizable(t: ActivityManager.RunningTaskInfo): Boolean =
         runCatching { android.app.TaskInfo::class.java.getField("isResizeable").getBoolean(t) }.getOrDefault(true)
 
     /** Task [t] as a floating window, or null (another mode, a fixed-size app, or its window configuration unreadable). */
     private fun window(t: ActivityManager.RunningTaskInfo): Window? {
-        // Windows are web windows: a task on another display (a web window's own virtual display, shell/WebWindows.kt) is
-        // never a floating window of this path, whatever its mode - no frame, no full-screen fix-up. (Flag off: as before.)
-        if (webWindows && onOtherDisplay(t)) return null
+        // A web window (a task on a web window's own display, shell/WebWindowDisplays) is never a floating window of this
+        // path, whatever its mode - no frame, no full-screen fix-up. Every other task (Linux windows too): as before.
+        if (dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t)) return null
         val wc = runCatching { windowConfiguration(t) }.onFailure { if (!unreadable) Log.w(TAG, "can't read task ${t.taskId}'s window", it) }.getOrNull()
         unreadable = wc == null
         if (wc == null) { failedThisList = true; return null }
@@ -147,6 +139,8 @@ object FreeformTasks {
         t: ActivityManager.RunningTaskInfo,
         hiddenToo: Boolean,
     ): Boolean {
+        // A web window is home's page's, never adopted as a floating window (WindowFrames' adopt).
+        if (dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t)) return false
         val wc = runCatching { windowConfiguration(t) }.getOrNull() ?: return false
         val mode = wc.javaClass.getMethod("getWindowingMode").invoke(wc)
         val type = wc.javaClass.getMethod("getActivityType").invoke(wc)
