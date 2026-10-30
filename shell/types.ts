@@ -305,6 +305,21 @@ export interface RecentTask {
   webwindow?: number;
   /** A web window's app made a full-screen app (its bar's button): its card offers "Back to window". */
   fullScreen?: boolean;
+  /**
+   * Android's split screen (WM Shell's) as one card: its apps left / top first, each with its share of the screen.
+   * The card's [id] is the first one's; a tap restores the split (tasks.openSplit), a swipe closes them all.
+   */
+  split?: SplitSide[];
+}
+
+/** One app of a split card ([RecentTask.split]). */
+export interface SplitSide {
+  id: number;
+  label: string;
+  icon: string | null;
+  snapshot: string;
+  /** Its share of the screen (0..1). */
+  share: number;
 }
 /** [available]: the launcher may read them (it has notification access). */
 /**
@@ -866,6 +881,8 @@ export interface Bridge {
     remove(id: number): Promise<boolean>;
     /** Two tasks side by side (WM Shell's split screen): [first] left / top. */
     split(first: number, second: number): Promise<boolean>;
+    /** A split card's split back ([first] left / top): restored while WM Shell still has it, else split again. */
+    openSplit(first: number, second: number): Promise<boolean>;
     /** The task in a floating window (freeform). */
     float(id: number): Promise<boolean>;
     /** Host-optional (f307: feature-detect): the task in a PowOS desktop window ([on], AppWindows' size/placement) or full screen. */

@@ -145,7 +145,27 @@ function prefetch(list: RecentTask[]) {
   for (const t of list.slice(0, 4)) fetch(t.snapshot).catch(() => {});
 }
 
+/** The card of task [id]: a split's card for either of its apps (the card's id is its first app's). */
+function cardOf(id: number | null, list: RecentTask[]): number | null {
+  if (id == null) return null;
+  return list.find((t) => t.split?.some((s) => s.id === id))?.id ?? id;
+}
+
+/** Task [t] closed: a split card's apps all of them (WM Shell's split ends with them). */
+function removeTask(t: RecentTask | undefined, id: number) {
+  if (t?.split) t.split.forEach((s) => powos.tasks.remove(s.id));
+  else powos.tasks.remove(id);
+}
+
+/** A split card ([t]) tapped: the split back, never one of its apps alone or in a floating window. */
+function openSplit(t: RecentTask) {
+  const [a, b] = t.split!;
+  close();
+  powos.tasks.openSplit(a.id, b.id).then((ok) => void (ok || refresh()));
+}
+
 function begin(e: { from: number | null; tasks: RecentTask[] }) {
+  e = { ...e, from: cardOf(e.from, e.tasks) };
   // The keyboard goes as the swipe starts, as for a page swipe (gesture.ts): the cards are laid out without it.
   dropKeyboard();
   loaded.value = true;
@@ -162,6 +182,7 @@ function begin(e: { from: number | null; tasks: RecentTask[] }) {
 
 /** Shown without a swipe (the overview button, up and hold over home): it comes up over home. */
 async function show(e: { from: number | null; tasks: RecentTask[] }) {
+  e = { ...e, from: cardOf(e.from, e.tasks) };
   dropKeyboard();
   // Ordered while a PowOS app open full screen in home still counts as showing: its card comes first.
   const list = order(e.tasks, e.from);
@@ -205,7 +226,8 @@ async function landed(snapshot: string | null) {
   phase.value = "shown";
   frame(1);
   const id = from.value;
-  if (snapshot && id != null) tasks.value = tasks.value.map((t) => (t.id === id ? { ...t, snapshot } : t));
+  // (A split card keeps its sides' pictures: the fresh one is one app's.)
+  if (snapshot && id != null) tasks.value = tasks.value.map((t) => (t.id === id && !t.split ? { ...t, snapshot } : t));
   // The render (a microtask), then the card's image decoded, shown, and painted - then the host lets the window go.
   await Promise.resolve();
   // The first card's shot is a <div> placeholder when it has no snapshot (a PowOS app, a fresh task): a div has no
@@ -240,6 +262,15 @@ function floatingWebWindow(t: RecentTask): boolean {
  * once the window is up (ShellBridge.openTask).
  */
 function open(id: number, shot?: HTMLElement) {
+  const split = tasks.value.find((x) => x.id === id && x.split);
+  if (split) {
+    menu.value = null;
+    openSplit(split);
+  } else openOne(id, shot);
+}
+
+/** [open] of a single app's card. */
+function openOne(id: number, shot?: HTMLElement) {
   menu.value = null;
   // A PowOS app's card: the switcher goes back into home and the app opens full screen there (ui/appscreen.tsx).
   const app = taskApp(id);
@@ -269,6 +300,8 @@ function open(id: number, shot?: HTMLElement) {
 
 /** The growing card reached the screen's edges: the app now. */
 function opened(id: number) {
+  const split = tasks.value.find((x) => x.id === id && x.split);
+  if (split) return openSplit(split);
   powos.tasks.open(id, "instant").then((ok) => {
     if (ok) return;
     opening.value = null;
@@ -288,7 +321,7 @@ function remove(id: number) {
   menu.value = null;
   const t = tasks.value.find((x) => x.id === id);
   if (id < 0) forgetOpened(t!.key!);
-  else powos.tasks.remove(id);
+  else removeTask(t, id);
   flipFrom = cardPositions();
   tasks.value = tasks.value.filter((t) => t.id !== id);
   if (splitFirst.value === id) splitFirst.value = null;
@@ -310,7 +343,7 @@ function clearAll() {
     const card = row?.querySelector<HTMLElement>(`.task[data-task="${t.id}"]`);
     const done = () => {
       if (t.id < 0) forgetOpened(t.key!);
-      else powos.tasks.remove(t.id);
+      else removeTask(t, t.id);
       if (--left) return;
       flipFrom = cardPositions();
       tasks.value = keep;
@@ -440,8 +473,10 @@ powos.on("recents.hide", () => collapse(false));
 powos.on("recents.update", (e: { tasks: RecentTask[] }) => {
   if (phase.value === "closed") return;
   const next = order(e.tasks, from.value);
-  const same = next.length === tasks.value.length && next.every((t, i) => t.id === tasks.value[i].id);
-  if (!same) tasks.value = next.map((t) => tasks.value.find((o) => o.id === t.id) ?? t);
+  // A split card has its first app's id: the same id as that app's own card, but not the same card.
+  const kin = (a: RecentTask, b: RecentTask) => a.id === b.id && !a.split === !b.split;
+  const same = next.length === tasks.value.length && next.every((t, i) => kin(t, tasks.value[i]));
+  if (!same) tasks.value = next.map((t) => tasks.value.find((o) => kin(o, t)) ?? t);
 });
 // The list for the next swipe, while an app is in front: laid out (hidden) now, snapshots loading.
 powos.on("recents.tasks", (e: { tasks: RecentTask[] }) => {

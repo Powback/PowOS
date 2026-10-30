@@ -2,7 +2,8 @@
  * A task's card in the switcher (recents.tsx, a layer of home): its app's icon and label above its last frame. A tap
  * opens it (the card grows to the screen, then the app is there); flung or pushed up it's removed, carried on at the
  * finger's speed; let go short of that it springs back; sideways the row scrolls (the browser's, with momentum). The
- * icon (or a long press) opens its menu.
+ * icon (or a long press) opens its menu. Android's split screen is one card (t.split): every app's icon over the whole
+ * split - each side's last frame at its share of the screen, side by side as on the screen.
  */
 import { useRef } from "preact/hooks";
 import type { RecentTask } from "../types.ts";
@@ -178,11 +179,8 @@ export function TaskCard({
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div class="task-head">
-        {t.icon ? <img class="task-icon" src={t.icon} alt="" draggable={false} /> : <span class="task-icon blank" />}
-        <span class="task-label">{t.label}</span>
-      </div>
-      <img
+      <TaskHead t={t} />
+      {t.split ? <SplitShot t={t} load={load} eager={eager || current} /> : <img
         ref={shot}
         class="task-shot"
         src={load ? t.snapshot : undefined}
@@ -192,7 +190,54 @@ export function TaskCard({
         loading={eager || current ? "eager" : "lazy"}
         onLoad={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "")}
         onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")}
-      />
+      />}
+    </div>
+  );
+}
+
+/** An app's icon, or a blank in its place. */
+function Icon({ src }: { src: string | null }) {
+  return src ? <img class="task-icon" src={src} alt="" draggable={false} /> : <span class="task-icon blank" />;
+}
+
+/** A card's head: its app's icon (a split's: every app's) and its label. */
+function TaskHead({ t }: { t: RecentTask }) {
+  return (
+    <div class="task-head">
+      {t.split ? (
+        <span class="task-icons">
+          {t.split.map((s) => (
+            <Icon key={s.id} src={s.icon} />
+          ))}
+        </span>
+      ) : (
+        <Icon src={t.icon} />
+      )}
+      <span class="task-label">{t.label}</span>
+    </div>
+  );
+}
+
+/**
+ * A split card's picture: the whole split, each side's last frame at its share of the screen, side by side (a <div>
+ * as .task-shot: recents.tsx's landing decodes only an <img> shot, and leaves this one as it is).
+ */
+function SplitShot({ t, load, eager }: { t: RecentTask; load: boolean; eager?: boolean }) {
+  return (
+    <div class="task-shot task-split">
+      {t.split!.map((s) => (
+        <img
+          key={s.id}
+          class="task-split-side"
+          style={{ flexGrow: s.share }}
+          src={load ? s.snapshot : undefined}
+          alt=""
+          draggable={false}
+          decoding="async"
+          loading={eager ? "eager" : "lazy"}
+          onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")}
+        />
+      ))}
     </div>
   );
 }
