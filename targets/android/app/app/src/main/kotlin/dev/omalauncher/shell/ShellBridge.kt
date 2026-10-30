@@ -1167,6 +1167,13 @@ class ShellBridge(
 
     private fun launch(key: String) {
         runtime.usage.record(key)
+        // Web windows on (unfolded): an app opened from another of PowOS's windows (the launcher overlay, Quick Tools,
+        // the AI) opens as a web window on home, as home's own launch does (state.ts launch -> openWebWindow) - never
+        // an Android freeform window with the old WindowFrames bar (the Phone app from the launcher, 2026-10-30).
+        if (launchOnHome(key)) {
+            runtime.usage.settle()
+            return
+        }
         when {
             // An app with a floating window already (shown or minimised): that window comes back, no second launch.
             key.startsWith("a:") ->
@@ -1182,6 +1189,15 @@ class ShellBridge(
         }
         // The strip shows it first next time home shows (the Compose launcher settles on stop, likewise).
         runtime.usage.settle()
+    }
+
+    /** Not home's bridge, web windows on: home's page asked to open [key] as a web window ("webwindows.launch"); false: not so here. */
+    private fun launchOnHome(key: String): Boolean {
+        if (activity != null || !key.startsWith("a:") || !dev.omalauncher.system.AppWindows.webDesktop(context)) return false
+        val home = synchronized(live) { live.firstOrNull { it.activity != null } } ?: return false
+        Log.i(TAG, "$key launched from an overlay: a web window on home")
+        home.emit("webwindows.launch", JSONObject().put("key", key))
+        return true
     }
 
     /** One of the shell's data files: a plain name, so the page can't reach outside its folder. */

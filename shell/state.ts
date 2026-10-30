@@ -472,6 +472,14 @@ powos.on("webwindows.adopt", (m: { task?: number; kwin?: number; key: string; la
   void adoptWebWindow({ ...m, label: m.label ?? byKey.value.get(m.key)?.label ?? m.key }, pages.value[page.value] ?? 1);
 });
 
+// An app opened from another PowOS window (the launcher overlay, Quick Tools, the AI; ShellBridge.launchOnHome): a web
+// window on this page, as home's own launch makes one. Not one here (no window for it): the host launches it as before.
+powos.on("webwindows.launch", ({ key }: { key: string }) => {
+  void openWebWindow(key, byKey.value.get(key)?.label ?? key, pages.value[page.value] ?? 1).then((ok) => {
+    if (!ok) void powos.apps.launch(key);
+  });
+});
+
 export async function launch(key: string) {
   menu.value = null;
   // A PowOS app: its page, full screen in this one (ui/appscreen.tsx).

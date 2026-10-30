@@ -184,7 +184,11 @@ class WindowFrames(
         if (adopting(floating)) return
         logChange(all, floating)
         track(all, floating)
-        reframe(all, floating)
+        // Web windows on: no old frame ever (no bar, grip, look) - a freeform task here is being handed to its web
+        // window (shell/SystemFloat); the Phone app opened from the launcher got a "PowOS window bar" (2026-10-30).
+        val web = floating && AppWindows.webDesktop(context)
+        if (web) TaskSurfaces.dressed().forEach(TaskSurfaces::undress)
+        reframe(all, floating && !web)
     }
 
     /** The frames for windows [all]: dropped, added, placed and stacked as they show now. */
@@ -236,7 +240,7 @@ class WindowFrames(
         sliding.clear()
         tasks.forEach { sliding[it.id] = 0f }
         if (sliding.isNotEmpty()) slidingSince = android.os.SystemClock.uptimeMillis()
-        if (keyguard || Switcher.open || !AppWindows.floating(context)) return
+        if (keyguard || Switcher.open || !AppWindows.floating(context) || AppWindows.webDesktop(context)) return
         frameArrivals(tasks)
         hideBars(tasks)
     }
@@ -488,15 +492,24 @@ class WindowFrames(
             Log.i(TAG, "task $id ($pkg) went full screen by itself (was ${lastBounds[id]?.toShortString()})")
         }
         val stray = full.filter { (id, pkg) -> pkg != null && pkg != context.packageName && strayFull(id) }
-        stray.forEach { (id, pkg) ->
-            adopted.add(id)
-            val ok = FreeformTasks.toWindow(context, id, AppWindows.nextBounds(context))
-            Log.i(TAG, "task $id ($pkg) was full screen: ${if (ok) "now a window" else "can't float it"}")
-        }
+        // Web windows on: the stray becomes a web window (ShellBridge.toWebWindow, its task moved onto a new display),
+        // never an Android freeform window under the old frame.
+        stray.forEach { (id, pkg) -> floatStray(id, pkg) }
         if (stray.isEmpty()) return false
         main.removeCallbacks(refreshNow)
         main.postDelayed(refreshNow, SETTLE_MS)
         return true
+    }
+
+    /** Stray full-screen task [id] made a window: a web window with web windows on, else an Android freeform one. */
+    private fun floatStray(
+        id: Int,
+        pkg: String?,
+    ) {
+        adopted.add(id)
+        val web = AppWindows.webDesktop(context)
+        val ok = if (web) dev.omalauncher.shell.SystemFloat.toWebWindow(id) else FreeformTasks.toWindow(context, id, AppWindows.nextBounds(context))
+        Log.i(TAG, "task $id ($pkg) was full screen: ${if (!ok) "can't float it" else if (web) "now a web window" else "now a window"}")
     }
 
     /**
