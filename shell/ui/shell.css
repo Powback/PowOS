@@ -1132,6 +1132,10 @@ input.folder-title:focus { background: var(--soft-fill); }
 .session-back { font: 22px var(--font); line-height: 1; width: 36px; height: 32px; background: none; border: 0; color: var(--accent-text); }
 .session-title { color: var(--color-foreground); white-space: nowrap; }
 .session-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* View-only / taken over (session.tsx TakeOver): at the head's end. */
+.session-mode { margin-left: auto; flex: none; font: inherit; font-size: var(--text-small); background: none; border: 0; padding: 4px 6px; color: var(--accent-text); white-space: nowrap; }
+.session-mode.asked { color: var(--color-foreground); font-weight: 600; }
+.session-mode.taken { color: var(--color-muted); opacity: 0.7; }
 .session-term { flex: 1; min-height: 0; }
 /* The card the session grew out of: hidden under it while it's open, so the shrink lands on an empty place. */
 .ai-session.opened { visibility: hidden; }
@@ -1707,6 +1711,11 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-session-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ai-session-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-session-meta { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "at work" per host (powai.tsx AtWork): the host's name and state over its sessions. */
+.ai-session-host { display: flex; flex-direction: column; gap: 6px; }
+.ai-session-host + .ai-session-host { margin-top: 10px; }
+.ai-session-host-head { font-size: var(--text-small); padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-session-agent { color: var(--accent-text); }
 /* Work in progress (powai.tsx Work): one line per task, the detail under it on a tap. */
 .ai-work-box { padding: 4px 0; display: flex; flex-direction: column; gap: 2px; }
 .ai-work { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; text-align: start; font: inherit; color: inherit; }

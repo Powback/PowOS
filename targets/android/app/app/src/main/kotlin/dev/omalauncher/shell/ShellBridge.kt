@@ -1130,32 +1130,69 @@ class ShellBridge(
         JSONArray(AgentMail.recent.map { JSONObject().put("id", it.id).put("from", it.from).put("text", it.text).put("time", it.time).put("priority", it.priority) })
 
     /**
-     * The agents at work: PowOS's tmux sessions (where agents run), listed off the main thread and sent as
-     * "ai.sessions" - name, last activity (Unix seconds), attached, and the active pane's title (an agent's current
-     * task: Claude Code titles it), folder and command. Only read; nothing is sent to them. Empty off PowOS's session.
+     * The agents at work: the tmux sessions (where agents run) of PowOS and of every host it has a link to (`powos
+     * terms list`: the Mac over its existing ssh link, read in the background so this never waits on the network),
+     * listed off the main thread and sent as "ai.sessions" - per session its host, name, windows, last activity (Unix
+     * seconds), attached, the active pane's title (an agent's current task: Claude Code titles it), folder, command and
+     * whether an agent runs in it - and each host's state as "ai.hosts". Only read; nothing is sent to them. A PowOS
+     * without `powos terms` (an older rootfs): its own tmux only. Empty off PowOS's session.
      */
     private fun aiSessions() {
         if (!runtime.powosSession) return emit("ai.sessions", JSONArray())
         thread(name = "ai-sessions", isDaemon = true) {
-            val format = listOf("session_name", "session_activity", "session_attached", "pane_title", "pane_current_path", "pane_current_command").joinToString("\t") { "#{$it}" }
-            val lines = ArrayList<String>()
-            runCatching { RootedGuest.run("tmux list-sessions -F '$format' 2>/dev/null") { lines += it } }
-            val list =
-                JSONArray(
-                    lines.mapNotNull { line ->
-                        val f = line.split('\t')
-                        if (f.size < 6) return@mapNotNull null
-                        JSONObject()
-                            .put("name", f[0])
-                            .put("activity", f[1].toLongOrNull() ?: 0)
-                            .put("attached", f[2] != "0")
-                            .put("title", f[3])
-                            .put("path", f[4])
-                            .put("command", f[5])
-                    },
-                )
-            main.post { emit("ai.sessions", list) }
+            val terms = termsHosts()
+            if (terms == null) {
+                val list = ownTmuxSessions()
+                main.post { emit("ai.sessions", list) }
+                return@thread
+            }
+            val (hosts, list) = splitTerms(terms)
+            main.post {
+                emit("ai.hosts", hosts)
+                emit("ai.sessions", list)
+            }
         }
+    }
+
+    /** `powos terms list --json`'s hosts, or null from a PowOS without it. */
+    private fun termsHosts(): JSONArray? {
+        val out = StringBuilder()
+        runCatching { RootedGuest.run("powos terms list --json 2>/dev/null") { out.append(it).append('\n') } }
+        return runCatching { JSONObject(out.toString().trim()).getJSONArray("hosts") }.getOrNull()
+    }
+
+    /** The hosts (each with its session count, without its sessions) and every host's sessions in one list. */
+    private fun splitTerms(terms: JSONArray): Pair<JSONArray, JSONArray> {
+        val list = JSONArray()
+        val hosts = JSONArray()
+        for (i in 0 until terms.length()) {
+            val h = terms.getJSONObject(i)
+            val sessions = h.optJSONArray("sessions") ?: JSONArray()
+            for (j in 0 until sessions.length()) list.put(sessions.getJSONObject(j))
+            h.remove("sessions")
+            hosts.put(h.put("count", sessions.length()))
+        }
+        return hosts to list
+    }
+
+    /** PowOS's own tmux sessions, read directly (a PowOS without `powos terms`). */
+    private fun ownTmuxSessions(): JSONArray {
+        val format = listOf("session_name", "session_activity", "session_attached", "pane_title", "pane_current_path", "pane_current_command").joinToString("\t") { "#{$it}" }
+        val lines = ArrayList<String>()
+        runCatching { RootedGuest.run("tmux list-sessions -F '$format' 2>/dev/null") { lines += it } }
+        return JSONArray(
+            lines.mapNotNull { line ->
+                val f = line.split('\t')
+                if (f.size < 6) return@mapNotNull null
+                JSONObject()
+                    .put("name", f[0])
+                    .put("activity", f[1].toLongOrNull() ?: 0)
+                    .put("attached", f[2] != "0")
+                    .put("title", f[3])
+                    .put("path", f[4])
+                    .put("command", f[5])
+            },
+        )
     }
 
     /** Opens a terminal on tmux session [name] (an agent's), as the tile's picker would. */

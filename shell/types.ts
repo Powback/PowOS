@@ -228,6 +228,24 @@ export interface AgentSession {
   title: string;
   path: string;
   command: string;
+  /** Where it runs (`powos terms list`: phone, mac, ...); absent from a PowOS without it (its own tmux only). */
+  host?: string;
+  windows?: number;
+  /** An agent runs in it (a live Claude Code session): it opens view-only until the user takes it over. */
+  agent?: boolean;
+}
+
+/** A host "at work" lists sessions of ("ai.hosts"): how it's reached ("local" or "ssh user@address") and its state. */
+export interface AgentHost {
+  host: string;
+  via: string;
+  ok: boolean;
+  error: string;
+  /** When its list was read (Unix seconds); 0: never yet. */
+  seen: number;
+  /** Being read for the first time. */
+  pending?: boolean;
+  count: number;
 }
 
 /** One entry of PowOS AI's chat; a tool's ok is null while it runs. */
