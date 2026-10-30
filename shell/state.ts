@@ -67,6 +67,14 @@ export const carry = signal<Carry | null>(null);
  * there's an empty page after the last to fill - swiping to an empty page needs it.
  */
 export const editing = signal(false);
+/** A fold or unfold ends edit mode: the long press that starts it often lands while the phone is being folded (the
+ *  user, 10-31: "When I change the fold state we should close the edit mode"). */
+let wasWide = wideHome.peek();
+effect(() => {
+  const wide = wideHome.value;
+  if (wide !== wasWide && editing.peek()) editing.value = false;
+  wasWide = wide;
+});
 /** Page ids that hold a live floating window (ui/desktops.ts): unfolded, a page of its own even with no tiles. */
 export const desktopPages = signal<number[]>([]);
 /**
