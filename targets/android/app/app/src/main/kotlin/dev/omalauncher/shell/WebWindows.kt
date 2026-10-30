@@ -16,6 +16,7 @@ import android.view.InputDevice
 import android.view.InputEvent
 import android.view.MotionEvent
 import android.view.SurfaceControl
+import android.view.WindowManager
 import android.webkit.WebView
 import dev.omalauncher.system.HiddenApi
 import org.json.JSONObject
@@ -956,6 +957,7 @@ class WebWindows(
 
     private fun onTouch(ev: MotionEvent): Boolean {
         val a = ev.actionMasked
+        imeGesture(a)
         if (a == MotionEvent.ACTION_DOWN) {
             gesture?.recycle()
             gesture = MotionEvent.obtain(ev)
@@ -1132,7 +1134,11 @@ class WebWindows(
         if (w.displayId < 0) return false
         val act = ACTIONS[action] ?: MotionEvent.ACTION_CANCEL
         val now = SystemClock.uptimeMillis()
-        if (act == MotionEvent.ACTION_DOWN) w.downAt = now
+        if (act == MotionEvent.ACTION_DOWN) {
+            w.downAt = now
+            androidGesture = true
+            main.post { homeIme(false) }
+        }
         val ev = MotionEvent.obtain(w.downAt, now, act, (x * density()).toFloat(), (y * density()).toFloat(), 0)
         try {
             if (injectWorks != false && injectReflect(w.displayId, ev)) {
@@ -1149,6 +1155,56 @@ class WebWindows(
         return true
     }
 
+    // ---- the keyboard (K2) ---------------------------------------------------------------------------------------------
+
+    /** The current gesture pressed an Android window's body ([forward] "down"); reset at each DOWN on home. */
+    @Volatile private var androidGesture = false
+
+    /** Home's window is the IME target (no FLAG_ALT_FOCUSABLE_IM): what [homeIme] last set. */
+    private var homeImeOn = true
+
+    /**
+     * Every touch on home ([onTouch]): a gesture that was not an Android window's body (home's own UI, a title bar, a
+     * Linux body) gives home the keyboard back at its UP. Posted: the page's "down" for this gesture (bridge thread) is
+     * in long before its UP.
+     */
+    private fun imeGesture(action: Int) {
+        if (action == MotionEvent.ACTION_DOWN) androidGesture = false
+        if (action == MotionEvent.ACTION_UP) main.post { if (!androidGesture) homeIme(true) }
+    }
+
+    /**
+     * On main: home's window may (true) or may not (false) take the keyboard. Off from a press on an Android window's
+     * body until a gesture on home that is not one, so the app keeps the keyboard and its input connection.
+     * Why (measured 2026-10-30 20:46, Discord on trusted display 90, dumpsys input_method): Discord's showSoftInput
+     * reached the IME (mSoftInputShowHideHistory SHOW_SOFT_INPUT focused/request = Discord) and failed ("TYPE_SHOW -
+     * STATUS_FAIL - com.discord ... PHASE_SERVER_UPDATE_CLIENT_VISIBILITY"), because 2 ms later home's WebView took the
+     * IME client back ("StartInput #1210 20:46:00.366 reason=CHECK_FOCUS targetWin=[com.powos.app] targetDisplayId=0")
+     * - the real finger is on home's window, which keeps display 0's focus (both displays hold a focused window here).
+     * From then on mCurClient / mCurFocusedWindow = HomeShell, the IME's insets control target on display 0 = HomeShell
+     * (which asks for no keyboard): none shows, and any later home touch hid it again. With ALT_FOCUSABLE_IM home's
+     * window can't be an IME target, so the app's request stands and the keyboard (DISPLAY_IME_POLICY_FALLBACK_DISPLAY,
+     * [imePolicy]) shows on display 0 over home; touches on the keyboard go to the IME window, never through home.
+     * HACK: a window flag toggled from touches. Real fix: the S4 injector's process takes the real touch for bodies
+     * (home never sees it, so never takes the focus or the IME), or the page tells the host which element owns the IME.
+     */
+    private fun homeIme(on: Boolean) {
+        if (on == homeImeOn) return
+        val window = activityOf(web.context)?.window ?: return
+        homeImeOn = on
+        if (on) window.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM) else window.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
+        Log.i(TAG, "home's window ${if (on) "takes the keyboard again" else "leaves the keyboard to the web window's app"}")
+    }
+
+    private fun activityOf(c: Context): android.app.Activity? {
+        var x: Context? = c
+        while (x != null) {
+            if (x is android.app.Activity) return x
+            x = (x as? android.content.ContextWrapper)?.baseContext
+        }
+        return null
+    }
+
     // ---- closing -------------------------------------------------------------------------------------------------------
 
     /** Gone: its tasks removed, its display released, "webwindows.closed" for the page. */
@@ -1161,6 +1217,7 @@ class WebWindows(
     fun closeAll() {
         if (current === this) current = null
         (web as? HomeWebView)?.touchHook = null
+        homeIme(true)
         gesture?.recycle()
         gesture = null
         // Linux windows keep running as their own tasks (home's page is going: nothing would show them); Android ones
