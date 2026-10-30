@@ -460,8 +460,15 @@ def track(w, progress=None, step=None, plan=None, commits=(), images=(), done=Fa
             at = next((i for i, x in enumerate(steps) if x["state"] == "next"), len(steps))
             steps.insert(at, {"text": step, "state": "current"})
         cur = step
-    if done or slice_done:
+    if done:
         steps = [dict(x, state="done") if x["state"] == "current" else x for x in steps]
+        cur = ""
+    elif slice_done:
+        # Only the slice the card showed (its current step, the row's `step`): any other step stays as it is.
+        at = next((i for i, x in enumerate(steps) if x["state"] == "current" and x["text"] == cur),
+                  next((i for i, x in enumerate(steps) if x["state"] == "current"), None))
+        if at is not None:
+            steps[at] = dict(steps[at], state="done")
         cur = ""
     if progress is not None:
         pd, pt = progress
@@ -723,6 +730,11 @@ def task(argv):
                  new["commits"], new["images"])
             w = dict(w, **new)
         kids, steps = open_items(w)
+        # The close needs EVERY step done (and every sub-task): open_items leaves out a current step (a `task done`
+        # finishes it), but a works tap only speaks for the slice it tried - one still current here is a later slice
+        # that didn't ship, never something this tap may finish (2026-10-30: the web-windows epic closed with W1 open).
+        steps += [_line(x.get("text", "")) for x in _jl(w.get("steps", "")) if isinstance(x, dict)
+                  and x.get("state") == "current" and _line(x.get("text", ""))]
         if kids or steps:
             print(f"powos agents: {w['id']}: works{(' - ' + slice_) if slice_ else ''}; still open: "
                   f"{open_why(kids, steps)}", file=sys.stderr)

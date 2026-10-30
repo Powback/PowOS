@@ -272,7 +272,10 @@ class ShellBridge(
      * The AI page's "works" / "still broken" on a Ready-to-try task ([args]: task id, works): the user's verdict through
      * the board's own CLI in the PowOS session (`powos agents check set` = the reporter-only check_set reducer, a check
      * named "you", PASS or FAIL; works then `powos agents task works`: the slice it tried done, the task closed only
-     * when nothing else is open on it - an epic with planned steps stays open, no error; `task done` on an older CLI). The
+     * when nothing else is open on it - an epic with planned steps stays open, no error). Never `task done`: a works tap
+     * isn't a close, and an older CLI copy's `task done` closed the web-windows epic with its W1 step still open
+     * (2026-10-30 19:4x - the phone's CLI had no `task works`, so the old `|| task done` fallback ran, without the
+     * open-steps rule). A CLI without `task works`: the user PASS is recorded and the task stays for its owner. The
      * page's own database connection isn't a reporter, so it can't call those reducers itself. Off the main thread;
      * answers when the board has it, or rejects with the CLI's last line.
      */
@@ -290,8 +293,10 @@ class ShellBridge(
                     check(RootedGuest.enabled) { "PowOS isn't running" }
                     val t = dev.omalauncher.linux.shellQuote(task)
                     val job = dev.omalauncher.linux.shellQuote("you-$task-${System.currentTimeMillis()}")
+                    // HACK: an older phone CLI copy has no `task works` (unknown verb): the PASS above is the record and
+                    // nothing closes. Real fix: the CLI ships with the APK that calls it (one versioned bridge contract).
                     val command =
-                        if (works) "powos agents check set $t $job PASS --name you --line 'works: the user tried it' --shipped 1 && { powos agents task works $t || powos agents task done $t --note 'works: you tried it'; }"
+                        if (works) "powos agents check set $t $job PASS --name you --line 'works: the user tried it' --shipped 1 && { powos agents task works $t || ! powos agents help 2>/dev/null | grep -q 'agents task works'; }"
                         else "powos agents check set $t $job FAIL --name you --line 'still broken: the user tried it' --shipped 1 && powos agents task set $t --status working"
                     val out = ArrayList<String>()
                     val code = RootedGuest.run(command) { out += it }
