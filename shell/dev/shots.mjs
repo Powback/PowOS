@@ -238,6 +238,8 @@ const TILE_SIZES = { unfolded: SIZES.unfolded, "unfolded-land": LAND_SIZES["unfo
 
 const SCENES = [
   ["chrome-status", "statusbar", "E.emit('chrome.changed', {kind:'status', battery:74, charging:true, network:'wifi', vpn:true, left:44});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
+  // A maximised web window's bar merged under the status bar (StatusChrome.merge): the clock after its title, the icons before its controls.
+  ["chrome-status-merged", "statusbar", "E.emit('chrome.changed', {kind:'status', clock:'18:40', battery:88, network:'wifi', left:8, mergeLeft:150, mergeRight:120});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
   ["chrome-window", "windowbar", "E.emit('chrome.changed', {kind:'window', title:'Calculator'});", "blurred", null, { narrow: {width:280,height:27,insets:{top:0,bottom:0}}, wide: {width:650,height:27,insets:{top:0,bottom:0}} }],
   ["chrome-restore", "windowbar", "E.emit('chrome.changed', {kind:'window', title:'A long document title that must leave all three window controls visible', maximised:true});", "blurred", null, { narrow: {width:280,height:27,insets:{top:0,bottom:0}} }],
   ["chrome-grip", "windowgrip", "", "blurred", null, { grip: {width:28,height:28,insets:{top:0,bottom:0}} }],

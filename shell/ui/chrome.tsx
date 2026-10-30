@@ -63,18 +63,34 @@ function statusLabel(state: ChromeState, battery: number | null) {
   return parts.filter(Boolean).join(", ");
 }
 
+/**
+ * The bar's side padding (CSS px): the screen's cutouts, and a maximised web window's bar under this one
+ * (StatusChrome.merge, TB1) - one bar: its icon and title, then the clock; the status icons, then its controls. Each
+ * keeps its own space; the host leaves the window's parts untouchable here.
+ */
+function sides(state: ChromeState) {
+  const merged = state.mergeLeft != null || state.mergeRight != null;
+  return {
+    merged,
+    left: Math.max(8, state.left ?? 0, state.mergeLeft ?? 0),
+    right: Math.max(8, state.right ?? 0, (state.mergeRight ?? 0) + 8),
+  };
+}
+
 export function StatusBar({ state, action }: { state: ChromeState; action: ChromeAction }) {
   const now = useClock();
   const time = state.clock ?? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const battery = state.battery == null ? null : Math.round(Math.max(0, Math.min(100, state.battery)));
   // A camera hole in the middle (folded cover screen, StatusChrome.kt holeLeft): the meter ends left of it, not under it.
   const hole = (state as { holeLeft?: number }).holeLeft;
-  return <div class={`status-chrome${hole != null ? " has-hole" : ""}`} style={{ paddingLeft: `${Math.max(8, state.left ?? 0)}px`, paddingRight: `${Math.max(8, state.right ?? 0)}px`, ...(hole != null ? { "--hole-left": `${hole}px` } : {}) }}>
-    <button class="status-clock" aria-label={`Notifications${state.notifications ? `, ${state.notifications} new` : ""}, ${time}`} onClick={() => action("notifications")}>
+  const { merged, left, right } = sides(state);
+  return <div class={`status-chrome${hole != null ? " has-hole" : ""}${merged ? " merged" : ""}`} style={{ paddingLeft: `${left}px`, paddingRight: `${right}px`, ...(hole != null ? { "--hole-left": `${hole}px` } : {}) }}>
+    {/* data-action: the host makes only these touchable on the strip (chrome.regions -> ShadeHost edgeRegion). */}
+    <button class="status-clock" data-action="notifications" aria-label={`Notifications${state.notifications ? `, ${state.notifications} new` : ""}, ${time}`} onClick={() => action("notifications")}>
       <time dateTime={now.toISOString()}>{time}</time>
     </button>
     <FpsMeter />
-    <button class="status-indicators" aria-label={statusLabel(state, battery)} onClick={() => action("controls")}>
+    <button class="status-indicators" data-action="controls" aria-label={statusLabel(state, battery)} onClick={() => action("controls")}>
       <Indicators state={state} battery={battery} />
     </button>
   </div>;

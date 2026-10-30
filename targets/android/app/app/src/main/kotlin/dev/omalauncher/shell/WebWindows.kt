@@ -442,6 +442,40 @@ class WebWindows(
             win.shown = false
             t.setVisibility(win.container, false)
         }
+        publishBars()
+    }
+
+    /**
+     * The status bar's share of the windows (ShadeHost.windowBars, spec G-R): each shown window's title bar on screen -
+     * a maximised one's title and controls only, its middle being the status bar's (TB1/TB2) - and the top-most
+     * maximised window's merge. Home's surface is at the screen's top left, so window px are display px (main thread).
+     */
+    private fun publishBars() {
+        val bars = ArrayList<Rect>()
+        var merge: IntArray? = null
+        for (win in wins.values.sortedBy { it.geo?.z ?: -1 }) merge = barsOf(win, bars) ?: merge
+        dev.omalauncher.system.ShadeHost.current?.windowBars(bars, merge)
+    }
+
+    /** [win]'s bar parts on screen into [out]; maximised, its merge (title end, controls start), else null. */
+    private fun barsOf(
+        win: Win,
+        out: MutableList<Rect>,
+    ): IntArray? {
+        val g = win.geo?.takeIf { win.shown && it.visible && win.mirror != null } ?: return null
+        val chrome = win.chrome ?: return null
+        val f = g.frame
+        val s = g.scale
+        val right = f.left + Math.round(f.width() * s)
+        val bottom = f.top + Math.round(chrome.title * s)
+        if (!g.maximised) {
+            out += Rect(f.left, f.top, right, bottom)
+            return null
+        }
+        val (titleEnd, controls) = chrome.parts(f.width()).map { f.left + Math.round(it * s) }
+        out += Rect(f.left, f.top, titleEnd, bottom)
+        out += Rect(controls, f.top, right, bottom)
+        return intArrayOf(titleEnd, controls)
     }
 
     /**
@@ -1355,6 +1389,7 @@ class WebWindows(
         if (divDrag?.starts?.containsKey(w.id) == true) divDrag = null
         if (tiles.menuFor == w.id) tiles.closeMenu()
         releaseLayers(w)
+        main.post { publishBars() }
         val displayId = w.displayId
         WebWindowDisplays.remove(displayId)
         WebWindowDisplays.windowGone(w.id)

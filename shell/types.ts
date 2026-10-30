@@ -365,6 +365,9 @@ export interface ChromeState {
   vpn?: boolean;
   left?: number;
   right?: number;
+  /** A maximised web window's bar merged with the status bar: its title's end / its controls' width (CSS px from each side). */
+  mergeLeft?: number;
+  mergeRight?: number;
 }
 export interface ChromeRegion { action: string; x: number; y: number; width: number; height: number }
 
