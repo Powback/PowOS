@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { closeDrawer, dock, launch, menu, setDocked, shownHomePage } from "../state.ts";
 import { startCarry } from "./grid.tsx";
 import { closeApp, windowsOf } from "./desktops.ts";
+import { inLaunchers, toggleLauncher } from "./launchers.tsx";
 import { powos } from "../bridge.ts";
 import type { App, AppWindow } from "../types.ts";
 
@@ -197,9 +198,12 @@ export function AppMenu() {
   if (!m) return null;
   const { app, at } = m;
   const docked = dock.value.includes(app.key);
+  const quick = inLaunchers(app.key);
   const items: Item[] = [
     ...windowItems(app.key),
     [docked ? "unpin from dock" : "pin to dock", () => setDocked(app.key, !docked)],
+    // The control center's quick-launch row, at its end (launchers.tsx: the row's own add/remove).
+    [quick ? "remove from quick launch" : "add to quick launch", () => void toggleLauncher(app.key)],
     // On the page home shows (also from the launcher overlay's own page: state.ts shownHomePage), in its first free cell.
     ["add to home", () => shownHomePage().then((p) => powos.home.add(app.key, p))],
     ...(app.kind === "android" ? ([["app info", () => powos.apps.info(app.key)]] as Item[]) : []),
