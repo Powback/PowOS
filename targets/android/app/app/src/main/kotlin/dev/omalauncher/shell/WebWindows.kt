@@ -1241,18 +1241,18 @@ class WebWindows(
         control: String,
     ) {
         Log.i(TAG, "window ${win.id}: $control (its bar)")
-        when (control) {
-            "close" -> close(win.id)
-            "minimise" -> {
+        when (buttonAction(control)) {
+            BarAction.CLOSE -> close(win.id)
+            BarAction.MINIMISE -> {
                 // At once (the page drops it from its geometry a frame later): the app keeps running.
                 if (win.container.isValid) SurfaceControl.Transaction().setVisibility(win.container, false).apply()
                 win.shown = false
                 emit("webwindows.control", mapOf("id" to win.id, "action" to "minimise"))
             }
-            "tile" -> tileMenu(win)
+            BarAction.TILE_MENU -> tileMenu(win)
             // The button: the app becomes a real full-screen app (the manager's rule, 10-29). The bar's double tap is
-            // the window's own maximise ([tapped]).
-            else -> fullScreen(win)
+            // the window's own maximise ([tapped]). Pinned by WebWindowsBarTest.
+            BarAction.FULL_SCREEN -> fullScreen(win)
         }
     }
 
@@ -1762,8 +1762,11 @@ class WebWindows(
      */
     private fun fullScreen(win: Win) {
         if (win.linux != null) {
-            // Not yet a full-screen app for a Linux window (S6 next steps): its button fills the work area instead.
-            Log.i(TAG, "window ${win.id}: full screen for a Linux window is the work area's maximise (for now)")
+            // HACK: a Linux window's full screen button fills the work area (the page's maximise), not the whole screen.
+            // KWin only REPORTS a toplevel's own full screen to PowOS (kwin patch 0021, "fullscreen <id> 0|1"); there
+            // is no PowOS -> KWin request to make one full screen. Real fix: a kwin patch taking "fullscreen <id> 1"
+            // from the app (setFullScreen on the toplevel), then this sends it and hides the window's bar.
+            Log.i(TAG, "window ${win.id}: full screen for a Linux window is the work area's maximise (no KWin request yet)")
             emit("webwindows.control", mapOf("id" to win.id, "action" to "maximise"))
             return
         }
@@ -2176,7 +2179,23 @@ class WebWindows(
         }
     }
 
+    /** What a title bar button does (see [buttonAction]). */
+    enum class BarAction { CLOSE, MINIMISE, TILE_MENU, FULL_SCREEN }
+
     companion object {
+        /**
+         * Bar button [control] (WebWindowChrome.control: "close", "maximise" - the middle one -, "minimise", "tile") to
+         * its action. The middle button is ALWAYS full screen (a real full-screen app on display 0), never the work
+         * area's maximise - that is the bar's double tap. Regressed 3 times; WebWindowsBarTest pins it.
+         */
+        fun buttonAction(control: String): BarAction =
+            when (control) {
+                "close" -> BarAction.CLOSE
+                "minimise" -> BarAction.MINIMISE
+                "tile" -> BarAction.TILE_MENU
+                else -> BarAction.FULL_SCREEN
+            }
+
         private const val TAG = "PowosWebWindows"
 
         /** A Linux web window's switcher card id: this + its window id (no Android task id gets near it). */
