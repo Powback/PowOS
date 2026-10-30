@@ -117,7 +117,7 @@ function update() {
   last = "";
   sendLook();
   if (on) kick();
-  else send("b.r 1 0");
+  else (send("b.r 1 0"), (resting = false));
 }
 
 fromNative.add((text) => {
@@ -562,6 +562,7 @@ function sendRegions(text: string) {
 function frame() {
   if (!nativeGlass.value) {
     running = false;
+    resting = false;
     return;
   }
   counts.measured++;
@@ -576,7 +577,10 @@ function frame() {
   // Still for a few frames: stop - unless glass is animating (a settle, a fade), which can be still between frames.
   // (While tracking the drawer's animations, they are what's running: no scan of every animation for it.)
   if (still < STILL_FRAMES || (still < MOVING_STILL_FRAMES && (tracks ? tracks.some((t) => t.anim.playState === "running") : moving()))) requestAnimationFrame(frame);
-  else running = false;
+  else {
+    running = false;
+    settle();
+  }
 }
 
 /** For CDP (`__glass.live.kicks`): what set off the last measures - the cause and when (a ring of 30). */
@@ -589,8 +593,48 @@ const why = (cause: string, t?: EventTarget | Node | null) => {
   if (kicks.length > 30) kicks.shift();
 };
 
+// ---- at rest ---------------------------------------------------------------------------------------------------------
+/*
+ * Home still: the host swaps its live regions for the compositor's blur rendered once and drawn under the page
+ * (RestGlass.kt), so a still home has no blur regions and SurfaceFlinger composites it in hardware (DEVICE), not on
+ * the GPU every frame (any blur region made every layer up to it CLIENT, clientType=BLUR: dumpsys SurfaceFlinger,
+ * 2026-10-30). "b.rest 1" REST_MS after the loop stopped (nothing moved); "b.rest 0" the moment anything may move again
+ * (kick), before that frame's regions, so the live blur is back on the frame motion starts. The picture is the
+ * compositor's own blur of the same regions: live and at rest look the same.
+ * Home only, and only with no web window on screen: a window under the dock's glass (or a widget's over one) changes
+ * what that glass shows, and stays live.
+ */
+const REST_MS = 300;
+/** For CDP A/B (`__glass.live.rest(false)`): live regions always, as before. */
+let restOn = true;
+let resting = false;
+let restTimer = 0;
+const windowOnScreen = () =>
+  [...document.querySelectorAll(".webwindow[data-wwid]")].some((w) => {
+    const b = w.getBoundingClientRect();
+    return b.width > 0 && b.height > 0 && b.right > 0 && b.left < view.w && b.bottom > 0 && b.top < view.h;
+  });
+/** The loop stopped: still in REST_MS unless something kicks it first. */
+function settle() {
+  clearTimeout(restTimer);
+  if (mode !== "home" || !restOn || held) return;
+  restTimer = window.setTimeout(() => {
+    if (running || resting || !nativeGlass.value || document.hidden || windowOnScreen()) return;
+    resting = true;
+    send("b.rest 1");
+  }, REST_MS);
+}
+/** Something may move: the live regions back before this frame's (the host leaves rest on any set anyway). */
+function wake() {
+  clearTimeout(restTimer);
+  if (!resting) return;
+  resting = false;
+  send("b.rest 0");
+}
+
 /** Something may move: measured every frame until it's still. */
 function kick() {
+  wake();
   still = 0;
   if (running || !nativeGlass.value) return;
   running = true;
@@ -651,6 +695,8 @@ addEventListener("focus", () => resend("focus"));
 addEventListener("pageshow", () => resend("pageshow"));
 powos.on("lock.shown", () => resend("lock.shown"));
 powos.on("system.home", () => resend("system.home"));
+// Another wallpaper: the rest glass is a render of the old one - live, then rendered again once still.
+powos.on("system.glass", () => resend("system.glass"));
 const animated = (e: Event) => carries(e.target) && (why(e.type, e.target), kick());
 for (const ev of ["transitionrun", "transitionstart", "transitionend", "transitioncancel", "animationstart", "animationend"]) addEventListener(ev, animated, { capture: true, passive: true });
 addEventListener("resize", () => (why("resize"), changed()));
@@ -681,6 +727,11 @@ export const debug = {
   },
   lag: (frames: number) => send(`b.lag ${frames}`),
   hold: (on: boolean) => void (held = on),
+  /** The rest glass (`__glass.live.rest(false)`: the live regions always) and whether home is at rest now. */
+  rest: (on: boolean) => void ((restOn = on), on ? (settle(), 0) : wake()),
+  get resting() {
+    return resting;
+  },
   /** For CDP A/B (`__glass.live.sync(false)`): "b.r" as an older host gets, though this one says "b.sync 1". */
   sync: (on: boolean) => void (syncOff = !on),
   compute: (on: boolean) => void ((computing = on), (tracks = null)),
