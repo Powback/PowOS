@@ -194,7 +194,10 @@ deploy)
     gc=$(mktemp "${TMPDIR:-/tmp}/powos-gate.XXXXXX") && echo "url=${POWOS_SHIP_GATE_URL:-http://192.168.50.99:7433}" > "$gc" &&
       adb push -q "$gc" /data/local/tmp/ship-gate.conf; rm -f "$gc"
   else echo "rooted.sh: no $gs (tools/phone/ship-deploy.sh gate-install makes it) - the phone's ship gate not configured"; fi
-  asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh"
+  # Its exit status is the deploy's, not the rm's: powos-deploy.sh stopping half way under set -e (10-30: after
+  # mimeapps.list, before powos-output-scale) was logged "rooted deploy done", and nothing after it (comms-mcp.py,
+  # the agents, the manager) had landed since 10-29.
+  asu "sh /data/local/tmp/powos-deploy.sh; rc=\$?; rm -f /data/local/tmp/powos-deploy.sh; exit \$rc"
   noted ;;
 module)
   # The system module (system-module/build-module.sh): staged in Magisk, on from the next reboot.
