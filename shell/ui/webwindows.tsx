@@ -420,6 +420,20 @@ powos.on("webwindows.control", (m: { id: number; action: string }) => {
 });
 
 /** The windows pinned to home page [page] (not minimised), and its tiles' dividers: elements of that page, in z order. */
+/**
+ * The windows above [id], the same array while they are the same windows: a fresh slice each render re-rendered every
+ * window (its bar, body, 8 edges) on each frame of another one's move or resize (render scan 10-30: half of
+ * WebWindowEl's renders in a drag needless, with all of their Edges and Marks).
+ */
+const aboveOf = new Map<number, WebWin[]>();
+function sameAbove(id: number, list: WebWin[]): WebWin[] {
+  const was = aboveOf.get(id);
+  if (was && was.length === list.length && was.every((w, i) => w === list[i])) return was;
+  aboveOf.set(id, list);
+  if (aboveOf.size > 64) aboveOf.delete(aboveOf.keys().next().value!);
+  return list;
+}
+
 export function WebWindowsOn({ page }: { page: number }) {
   const here = webWins.value.filter((w) => w.page === page && !w.minimised && !w.full);
   if (!here.length) return null;
@@ -429,7 +443,7 @@ export function WebWindowsOn({ page }: { page: number }) {
     // Clipped to its page (PS2): a window bigger than its page never shows on the next one.
     <div class="page-windows">
       {here.map((w, i) => (
-        <WebWindowEl key={w.el ?? w.id} win={w} z={webWins.value.indexOf(w)} above={here.slice(i + 1)} />
+        <WebWindowEl key={w.el ?? w.id} win={w} z={webWins.value.indexOf(w)} above={sameAbove(w.id, here.slice(i + 1))} />
       ))}
       {t && dividers(t, tileArea()).map((d) => <DividerEl key={d.axis} page={page} d={d} o={o} />)}
     </div>
