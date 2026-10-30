@@ -100,8 +100,6 @@ class ShellHost(
 
     init {
         native.windowFrame = bridge::webWindowFrame
-        native.windowHoles = bridge::webWindowBodies
-        bridge.webWindowBodiesChanged = native::windowHolesChanged
         ShellIcons.init(context.applicationContext, runtime)
         overrides.mkdirs()
         // The page's native objects, to its own top frame only (ShellOrigin: no iframe, no other origin).

@@ -31,7 +31,6 @@ import { appOf, dockTap } from "./desktops.ts";
 import { overWindows } from "./panellift.ts";
 import { footBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
-import { webWins } from "./webwindows.tsx";
 import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
@@ -99,12 +98,6 @@ function claimFree(dockNode: HTMLElement | null): PageRect[] {
   home?.querySelectorAll("*").forEach((el) => {
     if (!dockNode?.contains(el) && scrolls(el)) add(el);
   });
-  // A web window (ui/webwindows.tsx) whole - title bar, body, edges - whatever its size: dragging it moves the window,
-  // and its body is the app's, never a pull (the user, 2026-10-30: "when i try to move the window it moves the whole page").
-  document.querySelectorAll(".page:not(.away) .webwindow").forEach((el) => {
-    const r = el.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) out.push(pageRect(r));
-  });
   return out;
 }
 function followDock(el: HTMLElement | null) {
@@ -118,7 +111,6 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
   const mainPage = on && page.value === 0;
   pullPanels.value; // Re-report when the pull-up corners change.
   dockPosition.value; // Re-report when placement changes, even if its size stays the same.
-  webWins.value; // A web window opened, moved, resized, raised or closed: its region with it (after the render).
   const dockNode = dockElement.value;
   const report = () => {
     const r = dockNode?.getBoundingClientRect();

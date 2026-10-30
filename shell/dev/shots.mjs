@@ -186,9 +186,6 @@ const SCENES = [
   ["chrome-grip", "windowgrip", "", "blurred", null, { grip: {width:28,height:28,insets:{top:0,bottom:0}} }],
   ["home", "home", "", "wallpaper"],
   ["home-p2", "home", "S.page.value = 1;", "wallpaper"],
-  // Web windows (ui/webwindows.tsx) over the widgets: the bodies are holes (the app shows under home's pixels on the
-  // phone, the wallpaper here) - no widget, icon or lower title bar painted in them; the top window's title bar whole.
-  ["webwindows", "home", "const W = await U('./ui/webwindows.tsx'); const p = S.pages.value[0]; W.webWins.value = [{ id: 1, key: 'a:x', label: 'Chrome', page: p, x: 20, y: 70, w: Math.round(innerWidth * 0.55), h: 420 }, { id: 2, key: 'a:y', label: 'Files', page: p, x: Math.round(innerWidth * 0.3), y: 260, w: Math.round(innerWidth * 0.5), h: 300 }]; await sleep(300);", "wallpaper"],
   ["edit", "home", "S.editing.value = true;", "wallpaper"],
   ["edit-theme", "home", "S.editing.value = true; await sleep(200); [...document.querySelectorAll('.edit-act')].find(b => b.textContent.trim() === 'theme')?.click();", "wallpaper"],
   // Picking tiles in edit mode (ui/homeselect.ts) and a folder made of them, open (ui/folders.tsx).

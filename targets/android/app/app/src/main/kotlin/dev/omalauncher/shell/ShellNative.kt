@@ -73,8 +73,7 @@ class ShellNative(
     internal val glass: GlassBlur? =
         if (pageGlass && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             GlassBlur(web) { text -> port?.postMessage(WebMessage(text)) }.also { g ->
-                // No blur over a surface tile, nor over a web window's body (its app is under home's pixels there).
-                g.holes = { synchronized(tiles) { tiles.values.mapNotNull { it.shownRect() } } + windowHoles() }
+                g.holes = { synchronized(tiles) { tiles.values.mapNotNull { it.shownRect() } } }
             }
         } else {
             null
@@ -108,12 +107,6 @@ class ShellNative(
             glass?.reset()
         }
     }
-
-    /** The web windows' shown bodies, window px ([WebWindows.bodies]; ShellHost wires it): holes in the glass. */
-    @Volatile var windowHoles: () -> List<android.graphics.RectF> = { emptyList() }
-
-    /** The web windows' bodies moved: the glass regions again without what's under them. */
-    fun windowHolesChanged() = glass?.holesChanged()
 
     /** Where "w.f" goes (ShellHost: the bridge's web windows). */
     @Volatile var windowFrame: ((String) -> Unit)? = null
