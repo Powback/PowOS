@@ -591,12 +591,13 @@ class WebWindows(
      * "w.f <frame> <dpr> <n> [<id> <frame x y w h> <body x y w h> <clip l t r b> <radius> <visible> <alpha> <scale>
      * <maximised> <titleEnd> <controls>] * n" (viewport CSS px, measured after transforms; bottom window first: its index
      * is its z), on the port's thread. Every window the page shows is in it; one that isn't is hidden. Applied on the
-     * draw that shows page frame <frame> ([FrameSync]).
+     * draw that shows page frame <frame> ([FrameSync.next]: the window's next draw, not the visual-state callback's
+     * draw a frame or more later).
      */
     fun frameCommand(rest: String) {
         val (frame, geos) = parse(rest) ?: return
         val cookie = sync.receive(frame)
-        main.post { sync.bind(frame, cookie) { apply(frame, geos) } }
+        sync.next(frame, cookie) { apply(frame, geos) }
     }
 
     @Volatile private var lastDpr = 1f
@@ -667,8 +668,8 @@ class WebWindows(
         if (attached == null) {
             t.apply()
         } else {
+            // No invalidate: the page's commit draws ([FrameSync.next]).
             attached.applyTransactionOnDraw(t)
-            web.invalidate()
         }
         logFrame(frame, geos)
     }
@@ -729,8 +730,9 @@ class WebWindows(
 
     /**
      * At most one line a second (a page-driven move sends one a frame). "behind": how many newer page frames had already
-     * arrived when this one was bound to a draw - the page's DOM on that draw is at least that many frames newer than
-     * the geometry, so the content trails the DOM chrome by that much (docs/WEB_WINDOWS.md "Measured lag").
+     * arrived when this one was applied (0 now: each applies before the next draw). "lag": applies by window draws
+     * between the frame's receipt and its apply ([FrameSync.lag]: 0 = on the draw that shows its page frame, 1, 2, 3+),
+     * the content trailing the DOM chrome by that many frames (docs/WEB_WINDOWS.md "Measured lag").
      */
     private fun logFrame(
         frame: Long,
@@ -742,7 +744,7 @@ class WebWindows(
         val now = SystemClock.uptimeMillis()
         if (now - lastPlaceLog < PLACE_LOG_MS || geos.isEmpty()) return
         lastPlaceLog = now
-        Log.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
+        Log.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
     }
 
     private var lastPlaceLog = 0L

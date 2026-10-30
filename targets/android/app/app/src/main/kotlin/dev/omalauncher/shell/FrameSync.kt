@@ -1,6 +1,10 @@
 package dev.omalauncher.shell
 
+import android.os.Handler
+import android.os.Looper
 import android.os.Trace
+import android.view.View
+import android.view.ViewTreeObserver
 import android.webkit.WebView
 
 /**
@@ -15,6 +19,13 @@ import android.webkit.WebView
  * Newest wins, per channel: a callback for a frame older than one already applied is dropped. Never waits for a draw
  * longer than [MAX_WAIT_MS] (an idle page draws only on damage): applied without one then. Trace: async section
  * "<name> f<id>", receipt to apply.
+ *
+ * [bind] is at least a frame late, though: the visual-state request reaches the renderer after the page frame that
+ * measured the change was already committed (the page sends from its rAF, then commits), so it rides the NEXT commit -
+ * the web windows' content trailed their DOM frame by 1-4 frames (2026-10-30, 888 of 932 applies). [next] is exact
+ * instead: the WebView is a synchronous compositor (it draws the renderer's newest active frame inside the window's own
+ * draw), and the page's message arrives before the commit it measured, so the first window draw after the receipt is
+ * the one that shows that page frame. [next] puts the change on that draw.
  */
 internal class FrameSync(
     private val web: WebView,
@@ -24,6 +35,52 @@ internal class FrameSync(
     @Volatile var received = -1L
         private set
     var applied = -1L
+
+    /** The window's draws so far (main thread writes; the port thread reads it at receipt). */
+    @Volatile private var draws = 0L
+    private val counter = ViewTreeObserver.OnDrawListener { draws++ }
+
+    /** Main, ahead of a pending traversal's sync barrier (a plain post runs after that draw: a frame late). */
+    private val ui = Handler.createAsync(Looper.getMainLooper())
+
+    /** [next]'s applies by window draws between receipt and apply: 0 (the same draw as the page frame), 1, 2, 3+. */
+    val lag = LongArray(4)
+
+    init {
+        // A view's observer is merged into its window's on attach and lost on detach: counted on each window it joins.
+        if (web.isAttachedToWindow) web.viewTreeObserver.addOnDrawListener(counter)
+        web.addOnAttachStateChangeListener(
+            object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) = v.viewTreeObserver.addOnDrawListener(counter)
+
+                override fun onViewDetachedFromWindow(v: View) = v.viewTreeObserver.removeOnDrawListener(counter)
+            },
+        )
+    }
+
+    /**
+     * On the port's thread, right at receipt of page frame [id] ([receive]'s [cookie]): [apply] runs on the main thread
+     * before the window's next draw - the draw that shows that page frame (see the class) - and puts its transaction on
+     * it ([android.view.AttachedSurfaceControl.applyTransactionOnDraw]). It asks for no draw itself (that could draw
+     * before the page's commit is ready, the content then a frame AHEAD): the page's commit asks for one; one whose
+     * change paints nothing (an idle page) gets one after [MAX_WAIT_MS].
+     */
+    fun next(
+        id: Long,
+        cookie: Int,
+        apply: () -> Unit,
+    ) {
+        val at = draws
+        ui.post {
+            Trace.endAsyncSection("$name f$id", cookie)
+            if (id <= applied) return@post
+            applied = id
+            lag[(draws - at).coerceIn(0, 3).toInt()]++
+            apply()
+            val then = draws
+            ui.postDelayed({ if (draws == then) web.invalidate() }, MAX_WAIT_MS)
+        }
+    }
 
     /** On the port's thread: [id] arrived. The cookie for [bind]. */
     fun receive(id: Long): Int {
