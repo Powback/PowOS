@@ -486,7 +486,7 @@ object FreeformTasks {
     }
 
     /** PowOS's home task (this app's CATEGORY_HOME activity), or null when it isn't running. */
-    private fun homeTaskId(context: Context): Int? =
+    fun homeTaskId(context: Context): Int? =
         runCatching {
             @Suppress("DEPRECATION")
             context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS).firstOrNull {

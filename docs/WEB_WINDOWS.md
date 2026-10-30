@@ -302,6 +302,11 @@ page paints its rAF counter as 8 black/white blocks, so every B frame says which
 Note: most runs had the phone's own screen off (dozing). A VD in the default display group follows display 0 to
 OFF, so those runs added `TRUSTED|OWN_DISPLAY_GROUP|ALWAYS_UNLOCKED` (`0x1c00`, shell may set them) to A and B.
 
+Cleanup note (2026-10-30): the S0 runs opened the test page (`http://127.0.0.1:8765/`) as an ordinary Chrome tab,
+and that tab stayed in the user's Chrome ("This site can't be reached"). S0.java now opens the page as a session-less
+Custom Tab: it has its own task, the task ends with display A, and the page never enters Chrome's tab list. This is
+not yet verified on the phone. Every spike must close what it opens. P1 (S1) launches nothing.
+
 ### (a) Mirror (U1 / R1)
 
 - `mirrorDisplay(A)` **works as shell** (READ_FRAME_BUFFER) and returns a `MirrorRoot` layer; reparented under the host
@@ -401,6 +406,20 @@ page's text field:
 - Page: `ui/webwindows.tsx` measures every window each frame while any exist and sends
   `w.f <frame> <dpr> <n> [<id> <frame x y w h> <body x y w h> <radius> <visible>]*n` (bottom first) when it changed.
   The async `webwindows.place` / `raise` bridge calls are gone. Input stays v0 (S4).
+
+### The d41c991b rollback (2026-10-30 15:45)
+
+The APK installed while a web window (Calculator, display 37) held the phone's top focus. The update killed home and
+the old process, and with the process its helper, so display 37 went away
+(`15:45:59.479 Changing focus from Window{... Calculator} to null,diplayid=37`). Android never ran
+`startHomeOnDisplay` for display 0 again. There is none between 15:45:59 and the rollback at 15:48:23. Home never
+started and the boot check timed out. The rollback booted because no web window existed by then. The app's own logs of
+that run were lost (main log buffer 256 KiB, overwritten from 15:48), so no home crash can be ruled in or out from
+logs. The system log shows home was never launched at all. Fix: `WebWindows.homeAfterRestart`, called at SystemUI's
+connect (`PowosRecentsService.onInitialize`). With the flag on, it starts home on display 0 when no home task runs
+4 s after the restart. It runs off the main thread and never starts a second home. Real fix (S5): hand the top focus
+back to display 0 whenever a web window's display goes. The browser gate cannot catch this (no native host, no
+displays).
 
 ### First phone test (2026-10-30 15:15) and fixes
 

@@ -665,6 +665,32 @@ class WebWindows(
         private const val TAG = "PowosWebWindows"
         const val SETTING = "powos_web_windows"
 
+        /**
+         * After PowOS's process came back (an APK update, a crash) with web windows on: home started again if nothing
+         * did it within [HOME_GRACE_MS]. Seen 2026-10-30 15:45:59 (d41c991b rolled back): the update killed home while
+         * a web window's app (Calculator, display 37) had the phone's top focus - "Changing focus from
+         * Window{... Calculator} to null,diplayid=37" - its display went with the old process's helper, and Android
+         * never ran startHomeOnDisplay for display 0 again (none until the rollback 2.5 min later): no home, the boot
+         * check failed. A touch on a web window's display takes the global focus (S0 (c)), so this can follow any
+         * restart. Off the main thread, after a grace, only when no home task runs: never a second home.
+         * HACK: a self-heal. Real fix: S5 hands the top focus back to display 0 whenever a web window's display goes
+         * (and the system restarting home on its own display regardless of focus).
+         */
+        fun homeAfterRestart(context: Context) {
+            if (!on(context)) return
+            val app = context.applicationContext
+            Thread({
+                runCatching { Thread.sleep(HOME_GRACE_MS) }
+                if (dev.omalauncher.system.FreeformTasks.homeTaskId(app) != null) return@Thread
+                val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(app.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                runCatching { app.startActivity(home, ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY).toBundle()) }
+                    .onSuccess { Log.w(TAG, "no home ${HOME_GRACE_MS} ms after PowOS came back (web windows on): started it on display 0") }
+                    .onFailure { Log.w(TAG, "no home after PowOS came back, and starting it failed", it) }
+            }, "powos-ww-home").start()
+        }
+
+        private const val HOME_GRACE_MS = 4000L
+
         /** Windows are web windows: home's page owns them, the old floating-window path stands down (AppWindows.floating). */
         fun on(context: Context): Boolean = runCatching { Settings.Global.getInt(context.contentResolver, SETTING, 0) == 1 }.getOrDefault(false)
         private const val PLACE_LOG_MS = 1000L
