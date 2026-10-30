@@ -79,6 +79,22 @@ public final class WebWindowSource {
         return true;
     }
 
+    /** The web windows' ids shown full screen now ([shownFullScreen]): they cover every other web window. */
+    private static final Set<Integer> full = ConcurrentHashMap.newKeySet();
+
+    /** The host shows window [id] full screen ([on]) or not: a new window of its app opens as a task over it. */
+    public static void shownFullScreen(int id, boolean on) {
+        if (on)
+            full.add(id);
+        else
+            full.remove(id);
+    }
+
+    /** Window [id] is a web window shown full screen (over every other web window). */
+    static boolean coversScreen(int id) {
+        return ids.contains(id) && full.contains(id);
+    }
+
     /** Window [id] is a web window's (its control lines go to the host). */
     static boolean isWeb(int id) {
         return ids.contains(id);
@@ -93,6 +109,7 @@ public final class WebWindowSource {
     /** KWin's "close" for a web window's [id]. */
     static void closed(int id) {
         ids.remove(id);
+        full.remove(id);
         Host h = host;
         if (h != null)
             h.closed(id);
@@ -113,6 +130,7 @@ public final class WebWindowSource {
      */
     public static void fallback(Context context, int id, String appId, String title) {
         ids.remove(id);
+        full.remove(id);
         Log.i(TAG, "window " + id + " (" + appId + "): no web window for it, a task instead");
         WindowTasks.openAsTask(context.getApplicationContext(), id, appId, title);
     }
@@ -337,6 +355,7 @@ public final class WebWindowSource {
     /** Its close button: KWin closes the window, then ends the app if it stays (kwin 0041 "quit"; older: "closed"). */
     public static void quit(Context context, int id) {
         ids.remove(id);
+        full.remove(id);
         WindowTasks.quit(context.getApplicationContext(), id);
     }
 

@@ -117,6 +117,13 @@ public final class WindowTasks {
      * second bar). Told before "open"; none for an older KWin (a bar, as before).
      */
     static final Map<Integer, Boolean> kwinBar = new ConcurrentHashMap<>();
+    /**
+     * A new window's parent, by surface id ("parent <id> <parent id>", kwin 0044, told before its "open"): another
+     * window of its application (same process) that has a task or a web window - Steam's "Steam Dialog" and
+     * "Authorization" have no transient-for, so KWin can't draw them into Steam's task. [open] shows the new one with
+     * its parent and in front of it: a task over a task, a web window over a web window.
+     */
+    static final Map<Integer, Integer> parents = new ConcurrentHashMap<>();
     /** A window's "decor" changed for a task that may be framed already (the app's frames refresh). */
     public static volatile Runnable barChanged = null;
     /**
@@ -338,6 +345,7 @@ public final class WindowTasks {
             java.util.Set<Integer> live = liveIds(f);
             Log.i(TAG, "KWin session " + session + ", its tasks " + live);
             kwinBar.keySet().retainAll(live);
+            parents.keySet().retainAll(live);
             finishStale(context, session, live);
             WebWindowSource.session(live);
             return;
@@ -349,6 +357,16 @@ public final class WindowTasks {
             Log.w(TAG, "bad control message: " + line);
             return;
         }
+        if (f[0].equals("parent")) {
+            try {
+                parents.put(id, Integer.parseInt(f.length > 2 ? f[2] : ""));
+            } catch (NumberFormatException e) {
+                Log.w(TAG, "bad control message: " + line);
+            }
+            return;
+        }
+        if (f[0].equals("close"))
+            parents.remove(id);
         if (f[0].equals("open"))
             open(context, id, f, true);
         else if (WebWindowSource.isWeb(id))
@@ -389,7 +407,16 @@ public final class WindowTasks {
         String title = f.length > 3 ? f[3] : "";
         // A web window already, or a new window with web windows on: home's (a window that has a task keeps it; a
         // full-screen application - a game - stays a full-screen task until web windows have a full screen of their own).
-        if (web && (WebWindowSource.isWeb(id) || (!fullScreen && !tasks.containsKey(id) && !opening.containsKey(id)))
+        // A window of an app whose other window is a task, or a full-screen web window (which covers every other web
+        // window): a task too, so it opens IN FRONT of that window with the focus. As a web window of home it was
+        // under Steam's task, unseen (the user, 10-30 20:29: "Steam got a dialog window which I couldn't see").
+        Integer parent = parents.get(id);
+        boolean withTask = parent != null && !WebWindowSource.isWeb(parent) && (tasks.containsKey(parent) || opening.containsKey(parent));
+        boolean overFull = parent != null && WebWindowSource.isWeb(parent) && WebWindowSource.coversScreen(parent);
+        if (web && (withTask || overFull) && !WebWindowSource.isWeb(id))
+            Log.i(TAG, "open " + id + " (" + appId + ", \"" + title + "\"): a task, in front of window " + parent
+                    + (withTask ? "'s task" : ", a full-screen web window"));
+        else if (web && (WebWindowSource.isWeb(id) || (!fullScreen && !tasks.containsKey(id) && !opening.containsKey(id)))
                 && WebWindowSource.offer(id, appId, title))
             return;
         // One task per KWin window: a window that has one already (KWin's show again - the launcher, the
@@ -541,9 +568,10 @@ public final class WindowTasks {
      * decorations): its frame adds none. False for every other task, and while KWin hasn't said (an older KWin).
      */
     public static boolean drawsOwnBar(int taskId) {
-        for (PowosWindowActivity a : tasks.values())
-            if (a.getTaskId() == taskId && a.live())
-                return Boolean.FALSE.equals(kwinBar.get(a.windowId()));
+        // Every window gets PowOS's title bar, its own frame or not (the user, 10-30 20:30: "Steam is missing its title
+        // bar"): an app that keeps a client-side frame (Steam, a GTK header bar, Brave) shows it under PowOS's bar.
+        // HACK: the app's own bar stays drawn under ours; the real fix is the app taking server-side decorations
+        // (KWin's xdg-decoration default) - apps that can't (Steam's CEF frame, GTK4) keep both.
         return false;
     }
 
