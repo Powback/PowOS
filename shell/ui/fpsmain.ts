@@ -5,25 +5,26 @@
  */
 export const MRING = 90, MAX = 20_000, FRESH_MS = 1500;
 export const mring = new Float32Array(MRING);
-export const m = { head: 0, filled: 0, fps: 0, at: 0, idle: false, recDt: new Float32Array(0), recN: 0, recording: false };
+export const m = { head: 0, filled: 0, fps: 0, at: 0, idle: false, gone: false, recDt: new Float32Array(0), recN: 0, recording: false };
 
 export const mainFresh = () => m.idle || performance.now() - m.at < FRESH_MS;
 
 /**
  * {idle: true}: the main shell went quiet (fpssample.ts samples only while something happens) - it draws nothing, so
- * 0 fps, and the bar stays asleep instead of measuring its own frames. {gone: true}: it was hidden - the bar's own
- * frames again. Any other sample ends idle.
+ * 0 fps, and the bar stays asleep instead of measuring its own frames. {gone: true}: it was hidden (an app or game in
+ * front): the bar sleeps too and shows a dash - its own frames were a 60 Hz WebView loop over the game (10-30 ABZU:
+ * statusbar 60 rAF/s, ~24 ms script/s) measuring the bar, not the game. A recording still runs the loop. Any other sample ends idle.
  */
 export function onSample(s: { fps?: number; dts?: number[]; idle?: boolean; gone?: boolean } | null) {
   if (!s) return;
   if (s.idle || s.gone) return quiet(!!s.idle);
   if (!Array.isArray(s.dts)) return;
-  m.idle = false;
+  m.idle = false; m.gone = false;
   m.fps = Math.max(0, Math.min(999, Math.round(Number(s.fps) || 0))); m.at = performance.now();
   for (const d of s.dts) push(Number(d));
 }
 function quiet(idle: boolean) {
-  m.idle = idle; m.fps = 0; m.at = idle ? performance.now() : 0;
+  m.idle = idle; m.gone = !idle; m.fps = 0; m.at = idle ? performance.now() : 0;
 }
 function push(x: number) {
   if (!(x > 0)) return;
