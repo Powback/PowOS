@@ -322,6 +322,7 @@ const SCENES = [
   ["send-empty", "home", "S.query.value = ''; await sleep(300);", "wallpaper"],
   ["send-text", "home", "S.query.value = 'weather'; await sleep(300);", "wallpaper"],
   ["send-launcher", "home", "S.openPanel('apps', { search: true }); await sleep(400); S.query.value = 'weather'; await sleep(300);", "wallpaper"],
+  ["send-ai", "home", "S.page.value = -1; await sleep(400); const f = document.querySelector('.ai-compose textarea'); if (f) { f.value = 'what is on tonight'; f.dispatchEvent(new Event('input', { bubbles: true })); } await sleep(300);", "wallpaper"],
   ["ai", "home", "S.page.value = -1;", "wallpaper"],
   ["chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["chat-open", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelector('.chat .tl-row')?.click(); await sleep(100); document.querySelectorAll('.chat .tl-row.has-out')[0]?.click(); document.querySelectorAll('.chat .tl-row.has-out')[2]?.click();`, "wallpaper"],

@@ -376,6 +376,7 @@ export function Assist() {
               heard streams in as it's said, newest in view, and stays editable. */}
           <Pill
             target={mic}
+            send
             sending={sending.value}
             value={hearing(mic) ?? draft.value}
             onInput={(v: string) => {

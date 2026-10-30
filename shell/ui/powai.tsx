@@ -958,6 +958,7 @@ function AiCompose() {
     >
       <Pill
         target={pageMic}
+        send
         inputRef={input}
         value={hearing(pageMic) ?? draft.value}
         onInput={(v: string) => (draft.value = v)}
