@@ -2582,6 +2582,14 @@ async function webDockToggleCell() {
  * body's centre goes to the app's centre (body px, unscaled: Body.toApp divides by the measured scale).
  */
 async function webWindowPinchCheck() {
+  // RB1 after a pinch 200 -> 140 px on window [pw] (400x320): resized to 280x224, scale 1, no transform, a 36 px bar.
+  const pinchResized = (pw, body) => {
+    const frame = document.querySelector(`.webwindow[data-wwid="${pw.id}"]`);
+    const [tf, bar] = [getComputedStyle(frame).transform, body.getBoundingClientRect().top - frame.getBoundingClientRect().top];
+    const bad = [(pw.scale ?? 1) !== 1 && `scale ${pw.scale} (want 1)`, (Math.abs(pw.w - 280) > 3 || Math.abs(pw.h - 224) > 3) && `size ${pw.w}x${pw.h} (want 280x224)`,
+      tf !== "none" && `a transform on the frame (${tf})`, Math.abs(bar - 36) > 0.5 && `a ${bar} px bar (want 36, fixed)`];
+    return bad.filter(Boolean).map((b) => `a pinch 200 -> 140 px on the body left ${b}`);
+  };
   const W = await window.__gw.mod("./ui/webwindows.tsx");
   const { powos } = await window.__gw.mod("./bridge.ts");
   // The app's input, recorded (restored after: the gate's host may have no webwindows at all).
@@ -2605,10 +2613,11 @@ async function webWindowPinchCheck() {
       (pe(t, 21, cx - 100 + q), pe(t, 22, cx + 100 - q));
     });
     await window.__gw.settled();
-    const k = W.webWins.value.find((w) => w.id === 902).scale;
-    if (Math.abs(k - 0.7) > 0.03) fails.push(`a pinch 200 -> 140 px on the body scaled the window to ${k} (want 0.7)`);
+    // RB1: a pinch resizes (w, h x 140/200), never scales; the bar keeps its height.
+    const pw = W.webWins.value.find((w) => w.id === 902);
+    const k = pw.scale ?? 1;
+    fails.push(...pinchResized(pw, body));
     const b2 = body.getBoundingClientRect();
-    if (Math.abs(b2.width / body.offsetWidth - k) > 0.01) fails.push(`after the pinch the body's measured scale is ${b2.width / body.offsetWidth}, the model's ${k}`);
     const acts = calls.map((c) => c[0]).join(",");
     if (acts !== "down,cancel") fails.push(`a pinch on the body reached the app: ${acts} (want down,cancel)`);
     calls.length = 0;
@@ -2627,8 +2636,8 @@ async function webWindowPinchCheck() {
     [20, 40, 60].forEach((dx) => one("pointermove", 32, p[0] + dx, true));
     one("pointerup", 32, p[0] + 60, true);
     await window.__gw.settled();
-    const k2 = W.webWins.value.find((w) => w.id === 902).scale;
-    if (Math.abs(k2 - k) > 0.001) fails.push(`a one-finger drag after a finger lifted outside the window rescaled it ${k} -> ${k2}`);
+    const p2 = W.webWins.value.find((w) => w.id === 902);
+    if (p2.w !== pw.w || p2.h !== pw.h || (p2.scale ?? 1) !== 1) fails.push(`a one-finger drag after a finger lifted outside the window resized it ${pw.w}x${pw.h} -> ${p2.w}x${p2.h} (scale ${p2.scale})`);
   } finally {
     W.webWins.value = [];
     powos.webwindows = had;
@@ -3401,7 +3410,7 @@ try {
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
           for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, webWindowResizeCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
-            const problems = await r.page.evaluate(step);
+            const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
           return [];

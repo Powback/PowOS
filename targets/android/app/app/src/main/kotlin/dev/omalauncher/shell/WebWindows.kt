@@ -693,15 +693,32 @@ class WebWindows(
             maximised = c.word() == "1"
             titleEnd = c.x()
             controls = c.x()
-            bw = Math.round(body.width() / scale).coerceAtLeast(1)
-            bh = Math.round(body.height() / scale).coerceAtLeast(1)
             resizing = c.word() == "1"
             val pw = c.word().toFloat()
             val ph = c.word().toFloat()
-            cw = if (resizing && pw > 0) Math.round(pw * c.dpr).coerceAtLeast(1) else bw
-            ch = if (resizing && ph > 0) Math.round(ph * c.dpr).coerceAtLeast(1) else bh
+            appSize(pw * c.dpr, ph * c.dpr)
             fill = (0xff000000.toInt() or c.word().toInt(16))
         }
+
+    /**
+     * [Geo.bw]/[Geo.bh] and [Geo.cw]/[Geo.ch] from the page's app size [pw] x [ph] (its CSS layout size x dpr: device
+     * px, rounded ONCE here). Never derived from the measured (transformed, rounded) body and its 2-decimal scale when
+     * the page gave the size: that moved by a pixel whenever an ancestor's transform did, and each pixel was a display
+     * resize - YouTube flickered after a rescale (10-30). During a drag the body's measured size stays the step count's.
+     */
+    private fun Geo.appSize(
+        pw: Float,
+        ph: Float,
+    ) {
+        val mw = Math.round(body.width() / scale).coerceAtLeast(1)
+        val mh = Math.round(body.height() / scale).coerceAtLeast(1)
+        val gw = if (pw > 0) Math.round(pw).coerceAtLeast(1) else mw
+        val gh = if (ph > 0) Math.round(ph).coerceAtLeast(1) else mh
+        bw = if (resizing) mw else gw
+        bh = if (resizing) mh else gh
+        cw = gw
+        ch = gh
+    }
 
     /** On the main thread, on the draw that shows the page frame the geometry was measured on. */
     private fun apply(
@@ -2001,7 +2018,9 @@ class WebWindows(
             val apk = context.applicationInfo.sourceDir
             val cmd = "CLASSPATH='$apk' exec app_process /system/bin ${WebWindowsHost::class.java.name}"
             return try {
-                val p = ProcessBuilder("su", "2000", "-c", cmd).redirectErrorStream(true).start()
+                // Group uhid (3011) as adb's shell has it: the helper's per-display touchscreen is a uinput device
+                // (WebWindowsHost.Touch); a bare `su 2000` gets no supplementary groups and /dev/uinput is refused.
+                val p = ProcessBuilder("su", "-g", "2000", "-G", "3011", "2000", "-c", cmd).redirectErrorStream(true).start()
                 process = p
                 writer = BufferedWriter(OutputStreamWriter(p.outputStream))
                 Thread({ read(p) }, "powos-ww-helper").apply { isDaemon = true }.start()
