@@ -433,8 +433,23 @@ class NavGesture(
         // PowOS's lock face over the lock screen (it occludes it: SystemUI clears KEYGUARD_SHOWING for OCCLUDED): the
         // swipe up from the bottom is the face's own unlock, not home's - taken here, it cut the face's swipe short.
         if (s and SYSUI_KEYGUARD_OCCLUDED != 0L && PowosLockActivity.current != null) return true
-        return s and SYSUI_NAV_BAR_HIDDEN != 0L && s and SYSUI_ALLOW_GESTURE_IGNORING_BAR_VISIBILITY == 0L
+        if (s and SYSUI_NAV_BAR_HIDDEN == 0L || s and SYSUI_ALLOW_GESTURE_IGNORING_BAR_VISIBILITY != 0L) return false
+        // A full-screen app (a game) hides the bar: its first swipe only reveals it (SystemUI's transient bar). The next
+        // swipe within REVEAL_MS is home's/the switcher's even if SystemUI's state still says the bar is hidden.
+        // HACK: blocking on NAV_BAR_HIDDEN alone relied on SystemUI clearing it while the transient bar shows; in a
+        // full-screen game the user could not reach home or the switcher at all ("can't swipe up to show the switcher
+        // or the home when I'm using a full screen game", 2026-10-30), so this ROM's SystemUI may well keep it set
+        // (not measured yet). Real fix: SystemUI's state following the transient bar (its NavigationBar's window
+        // state), then this timer goes.
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - revealedAt <= REVEAL_MS) return false
+        revealedAt = now
+        Log.i(TAG, "full screen: this swipe reveals the bar; the next within $REVEAL_MS ms is ours")
+        return true
     }
+
+    /** When a swipe last only revealed a full-screen app's hidden bar ([blocked]). */
+    private var revealedAt = -REVEAL_MS
 
     /** Gesture navigation is on (config_navBarInteractionMode 2, the overlay SystemUI's setting switches). */
     @SuppressLint("DiscouragedApi")
@@ -467,6 +482,10 @@ class NavGesture(
 
     private companion object {
         const val TAG = "PowosNavGesture"
+
+        /** How long after a full-screen app's bar was revealed by a swipe the next one still counts (SystemUI's
+         *  transient bars hide again after about 3 s). */
+        const val REVEAL_MS = 3500L
         /** Over home: the lift (a share of the screen height) that brings the switcher layer all the way up. */
         const val HOME_TRAVEL = 0.4f
         const val PANEL_TRAVEL = 0.4f

@@ -107,16 +107,40 @@ public class MainActivity extends Activity
      * light the inner screen inside the fold.
      */
     private void applyBackScreen(boolean gameMode) {
-        SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        applyBackScreen(this, gameMode);
+    }
+
+    /**
+     * The same for any activity that shows the game controls (a full-screen Linux window's task too). A pad is only
+     * started for something on screen now (CoverPadActivity.wanted): the focus watcher also fires while the desktop is
+     * in the background, and a pad started then was a black task with nothing to serve.
+     */
+    static void applyBackScreen(Activity from, boolean gameMode) {
+        SharedPreferences p = from.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         int want = FoldWatcher.folded ? -1
             : gameMode && p.getBoolean(KEY_BACK_GAME, true) ? CoverPadActivity.MODE_GAME
             : !gameMode && p.getBoolean(KEY_BACK_DESKTOP, false) ? CoverPadActivity.MODE_DESKTOP
             : -1;
+        if (want >= 0 && !CoverPadActivity.wanted(want)) want = -1;
         if (want < 0) {
             if (CoverPadActivity.running()) CoverPadActivity.stop();
         } else if (CoverPadActivity.mode() != want) {
-            CoverPadActivity.start(this, want); // starts it, or switches the running one's mode
+            CoverPadActivity.start(from, want); // starts it, or switches the running one's mode
         }
+    }
+
+    /** The desktop is on screen (started, not stopped). */
+    private static volatile boolean sShown;
+
+    static boolean desktopShown() {
+        MainActivity m = sInstance;
+        return sShown && m != null && !m.isFinishing();
+    }
+
+    /** The desktop is on screen with its game controls up (a game played on it). */
+    static boolean gameShown() {
+        MainActivity m = sInstance;
+        return desktopShown() && m.mGamepadOverlay != null && m.mGamepadOverlay.getVisibility() == View.VISIBLE;
     }
     private GamepadOverlay mGamepadOverlay;
     private DirWatch.Handle mFocusWatcher;
@@ -884,12 +908,16 @@ public class MainActivity extends Activity
         super.onStart();
         // PowOS: the desktop (the Plasma app) is on screen - its windows are KDE windows on it, not floating tasks.
         WindowTasks.desktopShown(this, true);
+        sShown = true;
     }
 
     @Override
     protected void onStop() {
         super.onStop();
         WindowTasks.desktopShown(this, false);
+        sShown = false;
+        // Left (home, another app, the screen off): a back-screen pad serving it goes, unless a game window still shows.
+        CoverPadActivity.check();
         // Left: folded, the next time it steps aside again (unless asked for again).
         sShownOnPurpose = false;
     }
