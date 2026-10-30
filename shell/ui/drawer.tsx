@@ -15,7 +15,7 @@ import { pendingApp } from "./appbuild.tsx";
 import { PendingDetailSheet, PendingIconBadge } from "./pending.tsx";
 import type { App } from "../types.ts";
 
-import { searchResults, searchPending, openSearchResult } from "../search.ts";
+import { searchResults, searchSections, searchPending, openSearchResult, type SearchResult } from "../search.ts";
 
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
@@ -302,17 +302,32 @@ export function Drawer() {
   // Closing clears the search and ends the chat (state.ts closeDrawer) at once: the panel swapped to the app pages
   // under its fade, and the cards it showed vanished instead of fading out as they faded in (the user, 2026-10-28).
   // What was on screen stays for the close's fade (--p, 180 ms), then the drawer goes back to its pages.
-  const live = { searching, asking: liveAsking, results: searchResults.value, pending: searchPending.value };
-  const { searching: shownSearch, asking, results, pending } = useHeldWhileClosing(open, live);
+  const live = { searching, asking: liveAsking, sections: searchSections.value, pending: searchPending.value };
+  const { searching: shownSearch, asking, sections, pending } = useHeldWhileClosing(open, live);
   return (
     // The launcher panel's lower part (home.tsx): it comes in (shell.css, by --p) as the recent bar grows into the panel.
     <div class={`drawer ${open ? "shown" : ""}`} aria-hidden={!open}>
       {asking ? <ChatView /> : shownSearch ? <div class="drawer-list results"><div class="launcher-search-results">
-        {results.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><SearchIcon icon={result.icon} label={result.label} /><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>)}
+        {sections.apps.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><SearchIcon icon={result.icon} label={result.label} /><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>)}
+        {/* Settings and app actions: a list under the app each comes from, each name whole (the user, 2026-10-30: "I
+            should be able to see the whole line like hey this app has these controls"). */}
+        {sections.groups.map((group) => <section class="search-group" key={group.id} data-search-group={group.id}>
+          <div class="search-group-head"><SearchIcon icon={group.icon} label={group.label} /><span class="search-group-name">{group.label}</span></div>
+          {group.items.map((result) => <SearchRow key={result.id} result={result} />)}
+        </section>)}
         {pending && <div class="scr-note muted" role="status">Searching…</div>}
       </div></div> : <Pages />}
       {!shownSearch && !asking && <RecentRow />}
     </div>
+  );
+}
+
+function SearchRow({ result }: { result: SearchResult }) {
+  return (
+    <button type="button" class="search-group-row" data-search-result={result.id} onClick={() => openSearchResult(result)}>
+      <span class="search-group-label">{result.label}</span>
+      {result.detail && <span class="search-group-detail">{result.detail}</span>}
+    </button>
   );
 }
 

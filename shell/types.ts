@@ -694,7 +694,7 @@ export interface Bridge {
   };
   qs: {
     /** Resolvable native settings pages; absent on older hosts. */
-    destinations?(): Promise<{ id: string; label: string; keywords: string; breadcrumb?: string }[]>;
+    destinations?(): Promise<NativeSetting[]>;
     state(): Promise<QuickState>;
     /** A tile tapped: a switch flipped, an action run (screenshot, lock), a page opened. */
     toggle(name: string): Promise<QuickState>;
@@ -1210,3 +1210,7 @@ export interface VirtualDesktop {
   index: number;
   current: boolean;
 }
+
+/** A settings page or control the host can open (SettingsSearch.kt), and the app it opens in: [package], its name
+ * [app] and picture [appIcon] (a data: URL, for one that isn't a launcher app). Older hosts send no app. */
+export interface NativeSetting { id: string; label: string; keywords: string; breadcrumb?: string; package?: string; app?: string; appIcon?: string }
