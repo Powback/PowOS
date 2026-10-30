@@ -72,11 +72,12 @@ internal class WebWindowChrome(
     /** The frame for a [width] x [height] window (px, unscaled) into [t]; the bar redrawn when it changed. */
     fun layout(
         t: SurfaceControl.Transaction,
-        width: Int,
-        height: Int,
+        size: android.util.Size,
         maximised: Boolean,
         theme: Theme,
     ) {
+        val width = size.width
+        val height = size.height
         back?.takeIf { it.isValid }?.let { b ->
             val bodyH = (height - title).coerceAtLeast(1)
             t.setPosition(b, 0f, title.toFloat())
@@ -148,7 +149,7 @@ internal class WebWindowChrome(
         }
         listOf("close", if (maximised) "restore" else "maximise", "minimise").forEachIndexed { i, kind ->
             val cx = width - button * (i + 0.5f)
-            mark(c, kind, cx, title / 2f, stroke)
+            mark(c, kind, android.graphics.PointF(cx, title / 2f), stroke)
         }
     }
 
@@ -156,10 +157,11 @@ internal class WebWindowChrome(
     private fun mark(
         c: Canvas,
         kind: String,
-        cx: Float,
-        cy: Float,
+        at: android.graphics.PointF,
         p: Paint,
     ) {
+        val cx = at.x
+        val cy = at.y
         val u = 12 * dp / 24f
         fun pt(v: Float, o: Float) = o + (v - 12f) * u
         val path = Path()

@@ -420,7 +420,7 @@ class WebWindows(
         val bottom = ((area.bottom - y) / scale).toInt().coerceIn(0, h)
         t.setCrop(c, Rect(0, 0, w, bottom))
         val chrome = win.chrome ?: return
-        chrome.layout(t, w, h, maximised, theme)
+        chrome.layout(t, android.util.Size(w, h), maximised, theme)
         win.mirror?.takeIf { it.isValid }?.let { m ->
             t.setPosition(m, 0f, chrome.title.toFloat())
             t.setCrop(m, Rect(0, 0, w, (h - chrome.title).coerceAtLeast(1)))
