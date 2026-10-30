@@ -41,7 +41,7 @@ QList<Desktops::Desktop> Desktops::fetch() const
 {
     QList<Desktop> out;
     // desktops: a(uss) - KWin's DBusDesktopDataStruct {position, id, name}, read off the wire (no registered type).
-    const QVariant v = property(QStringLiteral("desktops"));
+    const QVariant v = property("desktops");
     if (!v.canConvert<QDBusArgument>())
         return out;
     const QDBusArgument arg = v.value<QDBusArgument>();
@@ -60,7 +60,7 @@ QList<Desktops::Desktop> Desktops::fetch() const
 
 QString Desktops::current() const
 {
-    return property(QStringLiteral("current")).toString();
+    return property("current").toString();
 }
 
 QJsonArray Desktops::list() const
