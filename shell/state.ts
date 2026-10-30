@@ -103,16 +103,36 @@ export const menu = signal<{ app: App; at: DOMRect } | null>(null);
  */
 export const sessionView = signal<{
   name: string;
+  /** Its host (`powos terms`) and whether that's this one (attached with tmux directly). */
+  host?: string;
+  local?: boolean;
+  agent?: boolean;
+  /** Taken over: keys reach the session. Every session opens view-only (a read-only tmux client) until then. */
+  write?: boolean;
   task?: string;
   from: DOMRect | null;
   card: HTMLElement | null;
   closing?: boolean;
 } | null>(null);
 
-/** Opens [name] (a tmux session's, as PowOS lists them) from [card]. */
-export function openSession(name: string, card: HTMLElement | null, task?: string) {
-  if (!/^[A-Za-z0-9_.:-]+$/.test(name)) return;
-  sessionView.value = { name, task, card, from: card?.getBoundingClientRect() ?? null };
+/**
+ * Opens [name] (a tmux session's, as PowOS lists them: on [host], this one when [local]) from [card], view-only (a
+ * read-only client: nothing typed reaches a live agent by accident) - takeOver gives it the keys.
+ */
+export function openSession(
+  name: string,
+  card: HTMLElement | null,
+  task?: string,
+  at: { host?: string; local?: boolean; agent?: boolean } = { local: true },
+) {
+  if (!/^[A-Za-z0-9_.:-]+$/.test(name) || (at.host && !/^[A-Za-z0-9_.:-]+$/.test(at.host))) return;
+  sessionView.value = { name, task, ...at, write: false, card, from: card?.getBoundingClientRect() ?? null };
+}
+
+/** The open session's keys to the user (a read-write client in place of the read-only one). */
+export function takeOver() {
+  const s = sessionView.value;
+  if (s && !s.closing) sessionView.value = { ...s, write: true };
 }
 
 export function closeSession() {

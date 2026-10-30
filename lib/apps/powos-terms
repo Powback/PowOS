@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""powos terms - the terminal (tmux) sessions of every host this one has a link to, and a way to open one.
+
+  powos terms list [--json] [--wait]   every host's tmux sessions: this host's live, each linked host's from its last
+                                       read (refreshed in the background when older than a few seconds; --wait reads
+                                       them now). Per session: name, windows, last activity, attached, the active
+                                       pane's title / folder / command, and whether an agent runs in it.
+  powos terms attach <host> <session> [--write]
+                                       opens it in this terminal: view-only (a read-only tmux client: nothing typed
+                                       reaches the session) unless --write. Agents' sessions are live Claude Code
+                                       sessions; --write is only for when the user takes one over.
+  powos terms hosts                    the links: host name and how it's reached.
+
+Transport per host: this host's tmux directly; a linked host over the ssh link the host already has (BatchMode, its
+existing key and known_hosts: nothing here adds keys or changes auth). Links: ~/.config/powos/terms-hosts, one
+"<host> <user@address>" per line, or POWOS_TERMS_HOSTS="host=user@address,...".
+"""
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+
+FIELDS = ("session_name", "session_windows", "session_activity", "session_attached",
+          "pane_title", "pane_current_path", "pane_current_command")
+FORMAT = "\t".join("#{%s}" % f for f in FIELDS)
+NAME = re.compile(r"^[A-Za-z0-9_.:-]+$")
+TARGET = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._:-]+$")
+# A linked host's list is read again when older than this (the page asks every 5 s).
+FRESH_S = 4
+# A refresh that hasn't finished in this long is taken as dead (its lock is ignored).
+LOCK_S = 20
+CACHE = os.path.expanduser(os.environ.get("POWOS_TERMS_CACHE", "~/.cache/powos/terms"))
+HOSTS_CONF = os.path.expanduser(os.environ.get("POWOS_TERMS_HOSTS_CONF", "~/.config/powos/terms-hosts"))
+# HACK: the Mac's address is a constant until the host directory exists (docs/REMOTE-POWOS.md 2.2, powos-hosts: a
+# host found by name and enrolled key). It is the same login the app builder already uses (powos app builder).
+DEFAULT_LINKS = [("mac", "macback@192.168.50.99")]
+# The Mac's tmux is Homebrew's; a command over ssh gets no login PATH.
+REMOTE_PATH = "PATH=/opt/homebrew/bin:/usr/local/bin:$PATH; "
+# One connection per host, kept a minute: the list every few seconds and an attach reuse it (no new login each time).
+SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", "-o", "ServerAliveInterval=15",
+       "-o", "ControlMaster=auto", "-o", f"ControlPath={CACHE}/%C.ssh", "-o", "ControlPersist=60"]
+AGENT_COMMANDS = {"claude", "codex", "aider"}
+
+
+def die(msg, code=2):
+    print(f"powos terms: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def this_host():
+    h = os.environ.get("POWOS_TERMS_HOST")
+    if h:
+        return h
+    if sys.platform == "darwin":
+        return "mac"
+    try:
+        with open("/etc/powos/platform") as f:
+            plat = f.read().strip()
+    except OSError:
+        plat = ""
+    return plat or "desktop"
+
+
+def links():
+    """The linked hosts, (name, user@address), never this host itself."""
+    raw = os.environ.get("POWOS_TERMS_HOSTS")
+    pairs = []
+    if raw is not None:
+        pairs = [tuple(p.split("=", 1)) for p in raw.split(",") if "=" in p]
+    else:
+        try:
+            with open(HOSTS_CONF) as f:
+                pairs = [tuple(l.split(None, 1)) for l in f if l.strip() and not l.startswith("#")]
+        except OSError:
+            pairs = DEFAULT_LINKS
+    me = this_host()
+    out = []
+    for p in pairs:
+        if len(p) != 2:
+            continue
+        name, target = p[0].strip(), p[1].strip()
+        if NAME.match(name) and TARGET.match(target) and name != me:
+            out.append((name, target))
+    return out
+
+
+def is_agent(command, title):
+    if command in AGENT_COMMANDS or re.match(r"^\d+\.\d+\.\d+$", command):
+        return True
+    # Claude Code titles its pane with a braille spinner frame while it works, a mark when it's done.
+    return bool(re.match(r"^[⠀-⣿✳]", title))
+
+
+def parse(text, host):
+    rows = []
+    for line in text.splitlines():
+        f = line.split("\t")
+        if len(f) < len(FIELDS) or not NAME.match(f[0]):
+            continue
+        rows.append({
+            "host": host, "name": f[0],
+            "windows": int(f[1]) if f[1].isdigit() else 0,
+            "activity": int(f[2]) if f[2].isdigit() else 0,
+            "attached": f[3] not in ("", "0"),
+            "title": f[4], "path": f[5], "command": f[6],
+            "agent": is_agent(f[6], f[4]),
+        })
+    return rows
+
+
+def tmux_list_cmd():
+    return ["tmux", "list-sessions", "-F", FORMAT]
+
+
+def read_local():
+    try:
+        r = subprocess.run(tmux_list_cmd(), capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "error": str(e)[:200], "sessions": []}
+    # No tmux server is no sessions, not a failure.
+    if r.returncode != 0 and "no server running" not in r.stderr and "error connecting" not in r.stderr:
+        return {"ok": False, "error": r.stderr.strip()[:200], "sessions": []}
+    return {"ok": True, "error": "", "sessions": parse(r.stdout, this_host())}
+
+
+def remote_cmd(target, command):
+    os.makedirs(CACHE, exist_ok=True)
+    return SSH + [target, REMOTE_PATH + command]
+
+
+def read_remote(name, target):
+    cmd = remote_cmd(target, " ".join(shlex.quote(a) for a in tmux_list_cmd()) + " 2>&1 || true")
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=12, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "error": f"{name} didn't answer ({str(e)[:120]})", "sessions": []}
+    if r.returncode == 255:
+        return {"ok": False, "error": f"{name} unreachable: {r.stderr.strip()[:160]}", "sessions": []}
+    return {"ok": True, "error": "", "sessions": parse(r.stdout, name)}
+
+
+def cache_file(name):
+    return os.path.join(CACHE, f"{name}.json")
+
+
+def cached(name):
+    try:
+        with open(cache_file(name)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def refresh(name, target):
+    os.makedirs(CACHE, exist_ok=True)
+    got = read_remote(name, target)
+    old = cached(name) or {}
+    if not got["ok"] and old.get("sessions"):
+        # Unreachable: the last list stays, marked with its age and why.
+        got["sessions"], got["seen"] = old["sessions"], old.get("seen", 0)
+    else:
+        got["seen"] = int(time.time())
+    got["tried"] = int(time.time())
+    tmp = cache_file(name) + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(got, f)
+    os.replace(tmp, cache_file(name))
+    return got
+
+
+def refresh_in_background(name):
+    """One refresh at a time per host, detached: the list never waits on the network."""
+    os.makedirs(CACHE, exist_ok=True)
+    lock = cache_file(name) + ".lock"
+    try:
+        if time.time() - os.path.getmtime(lock) < LOCK_S:
+            return
+        os.unlink(lock)
+    except OSError:
+        pass
+    try:
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except OSError:
+        return
+    subprocess.Popen([sys.executable, os.path.abspath(__file__), "_refresh", name],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+def cmd_list(args):
+    wait = "--wait" in args
+    me = this_host()
+    local = read_local()
+    hosts = [{"host": me, "via": "local", "ok": local["ok"], "error": local["error"], "seen": int(time.time()), "pending": False,
+              "sessions": local["sessions"]}]
+    for name, target in links():
+        c = None if wait else cached(name)
+        if c is None or time.time() - c.get("tried", 0) > FRESH_S:
+            if wait or c is None:
+                c = refresh(name, target) if wait else {"ok": True, "error": "", "seen": 0, "sessions": [],
+                                                         "pending": True}
+            if not wait:
+                refresh_in_background(name)
+        hosts.append({"host": name, "via": f"ssh {target}", "ok": c.get("ok", False), "error": c.get("error", ""),
+                      "seen": c.get("seen", 0), "pending": bool(c.get("pending")), "sessions": c.get("sessions", [])})
+    if "--json" in args:
+        print(json.dumps({"hosts": hosts}))
+        return
+    for h in hosts:
+        state = "reading…" if h["pending"] else h["error"] or f"{len(h['sessions'])} sessions"
+        print(f"{h['host']} ({h['via']}): {state}")
+        for s in h["sessions"]:
+            mark = "agent " if s["agent"] else ""
+            print(f"  {s['name']:<16} {s['windows']}w  {mark}{s['command']:<8} {s['title'][:60]}")
+
+
+def cmd_attach(args):
+    write = "--write" in args
+    rest = [a for a in args if a != "--write"]
+    if len(rest) != 2:
+        die("usage: powos terms attach <host> <session> [--write]")
+    host, name = rest
+    if not NAME.match(name):
+        die(f"bad session name: {name}")
+    tmux = ["tmux", "attach"] + ([] if write else ["-r"]) + ["-t", name]
+    if host in (this_host(), "local"):
+        os.execvp("tmux", tmux)
+    target = dict(links()).get(host)
+    if not target:
+        die(f"no link to {host} (powos terms hosts)")
+    os.makedirs(CACHE, exist_ok=True)
+    os.execvp("ssh", SSH[:1] + ["-t"] + SSH[1:] + [target, REMOTE_PATH + "exec " + " ".join(shlex.quote(a) for a in tmux)])
+
+
+def cmd_hosts(_):
+    print(f"{this_host()}  local")
+    for name, target in links():
+        print(f"{name}  ssh {target}")
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("help", "-h", "--help"):
+        print(__doc__.strip())
+        return
+    if a[0] == "_refresh" and len(a) == 2:
+        target = dict(links()).get(a[1])
+        try:
+            if target:
+                refresh(a[1], target)
+        finally:
+            try:
+                os.unlink(cache_file(a[1]) + ".lock")
+            except OSError:
+                pass
+        return
+    cmds = {"list": cmd_list, "ls": cmd_list, "attach": cmd_attach, "hosts": cmd_hosts}
+    if a[0] not in cmds:
+        die(f"unknown command: {a[0]} (powos terms help)")
+    cmds[a[0]](a[1:])
+
+
+if __name__ == "__main__":
+    main()

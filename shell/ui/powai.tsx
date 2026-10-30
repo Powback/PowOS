@@ -3,8 +3,9 @@
  * conversation - the last ask, its steps as they run, its answer - the work in progress (the agents' tasks, live from
  * the powos-agents module's work board: `powos agents task ...`), grouped by what each means for the user: needs you,
  * ready to try (works / still broken), being worked on, waiting for an agent;
- * the agents at work (PowOS's tmux sessions,
- * each with the task its pane's title names, a spinner's mark while it works; a tap opens its terminal), what they told
+ * the agents at work (the tmux sessions of PowOS and of every host it has a link to, grouped per host by the names
+ * "installed & running" uses, each with the task its pane's title names, a spinner's mark while it works, its agent
+ * marked; a tap opens its terminal, view-only until taken over), what they told
  * you lately, the whole conversation (folded; wide, in full), and a field to ask it (the mic: hold to talk and send, tap to dictate).
  */
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -17,9 +18,9 @@ import { md } from "./md.ts";
 import { boardState, openAgents, useAgents, type BoardCheck } from "../agents.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { checkAlive, useDb, useRows } from "../apps/stdb.ts";
-import type { AgentMail, AgentSession, ChatItem, VerifyState } from "../types.ts";
+import type { AgentHost, AgentMail, AgentSession, ChatItem, VerifyState } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
-import { Units } from "./units.tsx";
+import { HOSTS, Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
 import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf, onLink, openFull, imageUrl, toolLabel } from "./rich.tsx";
 import { askQueued, waiting } from "./assistant.ts";
@@ -27,8 +28,11 @@ import { BrokenReply, clearBroken, type Broken } from "./brokenreply.tsx";
 
 const sessions = signal<AgentSession[]>([]);
 const mail = signal<AgentMail[]>([]);
+/** The hosts the sessions come from (`powos terms list`); empty from a PowOS without it (its own tmux only). */
+const hosts = signal<AgentHost[]>([]);
 
 powos.on("ai.sessions", (s: AgentSession[]) => (sessions.value = s));
+powos.on("ai.hosts", (h: AgentHost[]) => (hosts.value = h));
 powos.on("ai.mail", (m: AgentMail[]) => (mail.value = m));
 
 /** How often the agents at work are listed again while the page shows. */
@@ -857,28 +861,67 @@ function Work({ shown }: { shown: boolean }) {
   );
 }
 
+/** A host's line "at work": its name ("installed & running"'s), how many sessions, and when it was read if not now. */
+function hostState(h: AgentHost | undefined, n: number) {
+  const count = `${n} session${n === 1 ? "" : "s"}`;
+  if (!h) return count;
+  if (h.pending) return "reading…";
+  if (!h.ok) return h.seen ? `${h.error} · as of ${ago(h.seen)}` : h.error;
+  return h.via === "local" || Date.now() / 1000 - h.seen < 30 ? count : `${count} · as of ${ago(h.seen)}`;
+}
+
+const rank = (h: string) => HOSTS.indexOf(h) + 1 || 99;
+
+/** Per host (this one first, then as "installed & running" orders them): its sessions, working agents first. */
 function AtWork() {
-  const list = [...sessions.value].sort((a, b) => Number(working(b)) - Number(working(a)) || b.activity - a.activity);
-  if (!list.length) return null;
+  const local = hosts.value.find((h) => h.via === "local")?.host;
+  const names = [...new Set([...hosts.value.map((h) => h.host), ...sessions.value.map((s) => s.host ?? local ?? "")])];
+  names.sort((a, b) => Number(b === local) - Number(a === local) || rank(a) - rank(b) || a.localeCompare(b));
+  if (!sessions.value.length && !hosts.value.some((h) => !h.ok || h.pending)) return null;
   return (
     <section>
       <h3 class="ai-heading muted">at work</h3>
-      {list.map((s) => (
-        <button
-          type="button"
-          key={s.name}
-          class={`ai-session tile ${sessionView.value?.name === s.name ? "opened" : ""}`}
-          onClick={(e) => openSession(s.name, e.currentTarget as HTMLElement, task(s))}
-        >
-          <span class={`ai-dot ${working(s) ? "on" : ""}`} />
-          <span class="ai-session-main">
-            <span class="ai-session-task">{task(s)}</span>
-            <span class="ai-session-meta muted">
-              {s.name} · {folder(s.path)} · {ago(s.activity)}
-            </span>
-          </span>
-        </button>
-      ))}
+      {names.map((host) => {
+        const list = sessions.value
+          .filter((s) => (s.host ?? local ?? "") === host)
+          .sort((a, b) => Number(working(b)) - Number(working(a)) || Number(!!b.agent) - Number(!!a.agent) || b.activity - a.activity);
+        const h = hosts.value.find((x) => x.host === host);
+        const isLocal = !host || host === local;
+        return (
+          <div key={host || "local"} class="ai-session-host">
+            {names.length > 1 && (
+              <div class="ai-session-host-head muted">
+                {host || "here"} · {hostState(h, list.length)}
+              </div>
+            )}
+            {list.map((s) => {
+              const open = sessionView.value;
+              return (
+                <button
+                  type="button"
+                  key={`${host}:${s.name}`}
+                  class={`ai-session tile ${open?.name === s.name && (open.host ?? "") === (s.host ?? "") ? "opened" : ""}`}
+                  onClick={(e) =>
+                    openSession(s.name, e.currentTarget as HTMLElement, task(s), { host: s.host, local: isLocal, agent: s.agent ?? working(s) })
+                  }
+                >
+                  <span class={`ai-dot ${working(s) ? "on" : ""}`} />
+                  <span class="ai-session-main">
+                    <span class="ai-session-task">
+                      {s.agent && <span class="ai-session-agent">agent · </span>}
+                      {task(s)}
+                    </span>
+                    <span class="ai-session-meta muted">
+                      {s.name}
+                      {s.windows && s.windows > 1 ? ` · ${s.windows} windows` : ""} · {s.command} · {folder(s.path)} · {ago(s.activity)}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })}
     </section>
   );
 }

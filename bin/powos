@@ -176,6 +176,7 @@ Layers & rollback:
 
 Packages, containers & build:
   units               What is installed/running here: owner, purpose, status, limits (check/remove/enforce)
+  terms [list|attach] Every linked host's tmux sessions; attach view-first (--write to take over)
   platform            Compose policy: check, plan, fleet, units, register, status (same adapter as pow-compose)
   containers          List containers and images
   containers run      Run a container with hard limits (--memory/--cpus/--pids-limit; phone too)
@@ -3209,6 +3210,11 @@ case "${1:-}" in
         _platform_cli="$POWOS_LIB/../bin/pow-compose"
         [[ -f "$_platform_cli" ]] || _platform_cli=/usr/bin/pow-compose
         exec bash "$_platform_cli" "$@"
+        ;;
+    terms|term)
+        # Every linked host's tmux sessions, and opening one view-first (lib/apps/powos-terms; PowOS AI's "at work").
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-terms" "$@"
         ;;
     units|unit)
         # Everything installed or running on this host, with owner, purpose, limits and removal (lib/apps/powos-units).
