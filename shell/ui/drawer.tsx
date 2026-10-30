@@ -9,6 +9,7 @@ import { computed } from "@preact/signals";
 import { AppCell, AppIcon } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
 import { drawerOpen, pageDecision, sampleVx } from "./gesture.ts";
+import { PageDots, paintDots } from "./pagedots.tsx";
 import { apps, byKey, chatting, query, recent, stored } from "../state.ts";
 import { library } from "./library.tsx";
 import { pendingApp } from "./appbuild.tsx";
@@ -220,6 +221,7 @@ function FolderView() {
  */
 function Pages() {
   const track = useRef<HTMLDivElement>(null);
+  const dots = useRef<HTMLDivElement>(null);
   const [view, setView] = useState(0);
   const s = useRef({ x0: 0, y0: 0, lock: "" as "" | "x" | "y", samples: [] as [number, number][], base: 0 });
   const put = (px: number, ms: number) => {
@@ -227,6 +229,8 @@ function Pages() {
     if (!el) return;
     el.style.transition = ms ? `transform ${ms}ms cubic-bezier(0.1, 0.8, 0.2, 1)` : "none";
     el.style.transform = `translate3d(${px}px, 0, 0)`;
+    // The dots under the finger too: where the track is, in pages (ms 0 = a finger on it).
+    paintDots(dots.current, Math.max(0, Math.min(1, -px / width())), !ms);
   };
   const width = () => (track.current ? track.current.clientWidth + (parseFloat(getComputedStyle(track.current).columnGap) || 0) : 0) || innerWidth;
   useEffect(() => put(-view * width(), 0), []);
@@ -265,6 +269,7 @@ function Pages() {
         <div class="drawer-page"><AppList found={null} /></div>
         <div class="drawer-page"><FolderView /></div>
       </div>
+      <PageDots count={2} dotsRef={dots} />
     </div>
   );
 }

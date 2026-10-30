@@ -275,6 +275,23 @@
 .dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
 .dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
 .dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
+
+/*
+ * Page dots (ui/pagedots.tsx): home's pages and the launcher's, one style - the dock's dots' size and tints. Each dot's
+ * --on (0..1, how much its page is on screen) is written as the swipe moves: the bright fill fades in and the dot
+ * grows a little with it. Opacity and transform only; .live (a finger on it) tracks exactly, at rest it eases.
+ */
+.page-dots { display: flex; justify-content: center; align-items: center; gap: 7px; height: 14px; pointer-events: none; }
+.page-dots i { --on: 0; position: relative; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); transform: scale(calc(1 + var(--on) * 0.25)); transition: transform 220ms cubic-bezier(0.1, 0.8, 0.2, 1); }
+.page-dots i::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--color-foreground) 85%, transparent); opacity: var(--on); transition: opacity 220ms cubic-bezier(0.1, 0.8, 0.2, 1); }
+.page-dots.live i, .page-dots.live i::after { transition: none; }
+/* Home's: at the stage's foot, in the gap above the pill / dock, over the pages' width only (the stage is already
+   clear of a side dock); it fades with the pages as the launcher opens. */
+.home-dots { position: absolute; left: 0; right: 0; bottom: calc(var(--gap) / 2 - 7px); opacity: calc(1 - var(--p)); pointer-events: none; }
+/* The launcher's: a row of its own under the two pages, above its recent row and the search pill. */
+.drawer-pages { display: flex; flex-direction: column; }
+.drawer-pages > .drawer-track { flex: 1; min-height: 0; height: auto; }
+.drawer-pages > .page-dots { flex: none; margin-top: 4px; }
 .dock .app { flex: 1 1 0; min-width: 0; height: calc(var(--strip-height) - 2 * var(--frame)); justify-content: center; padding: 0; }
 .dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 
@@ -2854,6 +2871,9 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
 .home:is(.dock-left, .dock-right) { padding-left: var(--inset-left, env(safe-area-inset-left)); padding-right: var(--inset-right, env(safe-area-inset-right)); }
 .home.dock-left > .stage > .home-content { margin-left: var(--side-dock); }
 .home.dock-right > .stage > .home-content { margin-right: var(--side-dock); }
+/* Home's page dots the same: centred on the pages, not on the screen with the dock's column in it. */
+.home.dock-left > .stage > .home-dots { left: var(--side-dock); }
+.home.dock-right > .stage > .home-dots { right: var(--side-dock); }
 /* The cover screen turned sideways (hosts/wide.ts data-sideways, state.ts dockPosition: the dock goes right there): 404 px
    tall, so the column runs the screen's height and the pill takes the width beside it - above the pill it had room for
    five icons and scrolled the rest (the user, 2026-10-30: "in horizontal mode ... put the docking on the right side"). */

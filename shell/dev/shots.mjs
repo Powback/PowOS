@@ -279,6 +279,14 @@ const SCENES = [
   ["library-opening", "home", "S.page.value = S.pages.value.length; await sleep(400); document.querySelectorAll('.page.library .lib-card')[2]?.click(); await sleep(90);", "wallpaper"],
   ["edit-picker", "home", "S.editing.value = true; await sleep(150); (await U('./ui/appwidget.tsx')).picker.value = true;", "wallpaper"],
   ["drawer", "home", "S.drawer.value = 1;", "wallpaper"],
+  // Page dots (ui/pagedots.tsx): home's (PowOS AI's page, home's, the library) and the launcher's (apps | folders), at
+  // rest and mid-swipe - the active dot between two pages as the finger is (40% of the way).
+  ["dots-home", "home", "await sleep(200);", "wallpaper", undefined, { ...SIZES, ...LAND_SIZES }],
+  ["dots-home-swipe", "home", "const G = await U('./ui/gesture.ts'); G.pageDrag.value = -0.4 * document.querySelector('.pages').clientWidth; await sleep(200);", "wallpaper"],
+  ["dots-home-dockright", "home", "S.dockTry.value = 'right'; await sleep(300);", "wallpaper", undefined, { ...SIZES, ...LAND_SIZES }],
+  ["dots-launcher", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true }); await sleep(400);", "blurred", undefined, { ...SIZES, ...LAND_SIZES }],
+  ["dots-launcher-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true }); await sleep(400);", "blurred", undefined, { ...SIZES, ...LAND_SIZES }],
+  ["dots-pull-swipe", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true }); await sleep(400); const el = document.querySelector('.drawer-pages'); const r = el.getBoundingClientRect(); const T = (x) => [new Touch({ identifier: 1, target: el, clientX: x, clientY: r.y + 200 })]; const at = r.x + r.width * 0.8; el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: T(at), changedTouches: T(at) })); for (let k = 1; k <= 8; k++) el.dispatchEvent(new TouchEvent('touchmove', { bubbles: true, touches: T(at - k * r.width * 0.05), changedTouches: T(at - k * r.width * 0.05) })); await sleep(100);", "blurred"],
   // The running bar under icons (ui/running.ts; the mock: Chrome, Konsole, Spotify, Signal running, Dolphin and Steam
   // frozen): the pinned dock, and the drawer with its recent row.
   ["running-dock", "home", "S.dock.value = ['a:chrome', 'l:steam', 'a:maps', 'l:konsole', 'l:dolphin']; await sleep(200); document.querySelector('.dock-pages').scrollLeft = 0; await sleep(300);", "wallpaper"],
