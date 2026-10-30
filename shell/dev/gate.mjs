@@ -2570,6 +2570,17 @@ async function webWindowPinchCheck() {
     const d = [...(calls[0] ?? []), NaN, NaN, NaN];
     const want = [body.offsetWidth / 2, body.offsetHeight / 2];
     if (Math.hypot(d[1] - want[0], d[2] - want[1]) > 1) fails.push(`at scale ${k}, a press at the body's centre went to the app at ${d[1]},${d[2]} (want ${want})`);
+    // One finger whose up landed outside the frame (never seen by it), then a new one-finger drag: only a move, no
+    // scale (10-30 "dragging with one finger rescales").
+    const one = (type, id, x, primary) => body.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", isPrimary: primary, clientX: x, clientY: p[1], bubbles: true }));
+    one("pointerdown", 31, p[0] - 80, true);
+    document.body.dispatchEvent(new PointerEvent("pointerup", { pointerId: 31, pointerType: "touch", isPrimary: true, bubbles: true }));
+    one("pointerdown", 32, p[0], true);
+    [20, 40, 60].forEach((dx) => one("pointermove", 32, p[0] + dx, true));
+    one("pointerup", 32, p[0] + 60, true);
+    await window.__gw.settled();
+    const k2 = W.webWins.value.find((w) => w.id === 902).scale;
+    if (Math.abs(k2 - k) > 0.001) fails.push(`a one-finger drag after a finger lifted outside the window rescaled it ${k} -> ${k2}`);
   } finally {
     W.webWins.value = [];
     powos.webwindows = had;

@@ -974,6 +974,9 @@ function usePinch(win: WebWin) {
     return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) };
   };
   const down = (e: PointerEvent) => {
+    // The first finger of a new touch starts clean: an earlier finger's up that landed outside this frame was never
+    // seen here, and a stale entry made the next one-finger drag a pinch (10-30: "dragging with one finger rescales").
+    if (e.isPrimary) (fingers.current.clear(), (pinch.current = null));
     fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (fingers.current.size !== 2 || pinch.current) return;
     e.stopPropagation();
