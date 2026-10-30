@@ -30,4 +30,17 @@ class WebWindowsBarTest {
         val full = src.substringAfter("private fun fullScreenNow(").substringBefore("\n    }\n")
         assertTrue("fullScreen no longer moves the task to display 0", full.contains("moveTask(task, android.view.Display.DEFAULT_DISPLAY)"))
     }
+
+    /**
+     * A Linux window under a KWin without "fullscreen-request" still goes full screen (10-30 20:17: Dolphin's button
+     * logged "KWin takes no full-screen request: the work area's maximise" - the user's "still maximising").
+     */
+    @Test
+    fun fullScreenNeverFallsBackToMaximise() {
+        val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
+        val body = src.substringAfter("private fun fullScreen(win: Win) {").substringBefore("\n    }\n")
+        assertTrue("fullScreen(win) sends the work area's maximise", !body.contains("\"maximise\""))
+        val oldKwin = body.substringAfter("canFullScreen()) {").substringBefore("return")
+        assertTrue("the old-KWin path no longer goes full screen", oldKwin.contains("linuxFullScreen(win, true)"))
+    }
 }
