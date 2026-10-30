@@ -11,7 +11,11 @@ import os
 import sys
 import time
 
-user_settings = {}
+# No xalia: Proton's accessibility/gamepad-UI helper (xalia.exe) runs beside the game for its whole session - under FEX
+# it took 13-16% of a core next to ABZU (10-30 17:50) for nothing (touch and the PowOS pad drive games here). Proton
+# applies this before its own default ("PROTON_USE_XALIA" not in env). proton-settings.json {"PROTON_USE_XALIA": "1"}
+# turns it back on for a check.
+user_settings = {"PROTON_USE_XALIA": "0"}
 try:
     with open(os.path.expanduser("~/.config/powos/proton-settings.json")) as _f:
         user_settings.update({str(k): str(v) for k, v in json.load(_f).items()})
