@@ -25,16 +25,20 @@ class WebWindowsFullScreenWayOutTest {
         assertEquals(0, WebWindows.fullScreenEdge(1200f, h, 80, 60))
     }
 
-    /** The edge strip is checked BEFORE the full-screen window takes the touch, and it is left to the page. */
+    /**
+     * The edge strip is checked BEFORE the full-screen window takes the touch, and it is left to the page; every other
+     * touch is the window's (nothing of the page - no bar, no menu - can be pressed under it).
+     */
     @Test
     fun theFullScreenLayerLeavesTheEdgeStripsToHome() {
         val touch = body("private fun onTouch(ev: MotionEvent): Boolean {")
         val edge = touch.indexOf("fullEdgeAt(ev)")
+        val takes = touch.indexOf("fullLinux()?.let { return linuxInput(it, ev) }")
         assertTrue("onTouch no longer checks the edge strips", edge >= 0)
-        assertTrue("the edge strip is checked after the Linux window takes the touch", edge < touch.indexOf("linuxDown(ev)"))
+        assertTrue("the full-screen window no longer takes the other touches", takes >= 0)
+        assertTrue("the edge strip is checked after the Linux window takes the touch", edge < takes)
         assertTrue("an edge strip touch no longer goes to the page", Regex("""fullEdge = e\s*return false""").containsMatchIn(touch))
         assertTrue("an edge pull no longer leaves full screen", body("private fun edgePull(").contains("toWindow(e.id)"))
-        assertTrue("no bar can be pressed under a full-screen window", body("private fun hit(").contains("it.linuxFull }) return null"))
     }
 
     @Test
@@ -44,11 +48,12 @@ class WebWindowsFullScreenWayOutTest {
         assertTrue(body("fun leaveFullScreen(why: String): Boolean {").contains("toWindow(w.id)"))
     }
 
-    /** Maximise (the bar's double tap, the page's toggleMaximise) fills the work area, never full screen. */
+    /** Maximise (the DOM bar's double tap: the page's toggleMaximise) fills the work area, never full screen. */
     @Test
     fun maximiseNeverCallsLinuxFullScreen() {
-        val tapped = src.substringAfter("maximise (bar double tap)").substringBefore("\n    }\n")
-        assertTrue(tapped.contains("\"action\" to \"maximise\""))
-        assertFalse(tapped.contains("linuxFullScreen") || tapped.contains("fullScreen("))
+        val page = File("../../../shell/ui/webwindows.tsx").takeIf { it.exists() } ?: return
+        val max = page.readText().substringAfter("export function toggleMaximise(id: number) {").substringBefore("\n}\n")
+        assertTrue("toggleMaximise no longer fills the work area", max.contains("workArea()"))
+        assertFalse("toggleMaximise goes full screen", max.contains("fullScreen"))
     }
 }

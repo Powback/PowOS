@@ -1,19 +1,18 @@
-// Web windows: an Android app's window over home (unfolded; off unless Settings.Global powos_web_windows = 1).
-// The user, 2026-10-29: "the powos home typescript should deal with the windows and their content", "it should be
-// pinned to a page properly natively". This file is the windows' MODEL: page, position, size, scale, z-order (list
-// order), minimised/maximised. The host (WebWindows.kt) draws each window natively ABOVE home's surface: the app's own
-// buffers (the display's mirror) plus a native frame and title bar (icon, title, minimise, full screen, close), as one
-// layer stack - the user, 2026-10-30: "nobody asked for the cutoff" (the old page mask), widgets under a window are
-// never altered. The page renders each window as an INVISIBLE element at its place (gesture exclusions, the body's
-// touches to the app); the host moves, resizes and scales the window itself under the finger (title bar, edges, two
-// fingers) and tells this file where it ended ("webwindows.moved"), so the bar and the content can't lag each other.
+// Web windows: an app's window as an ELEMENT of home's page (unfolded; off unless Settings.Global powos_web_windows =
+// 1). docs/WEB_WINDOWS.md "Element model". The user, 2026-10-30: "the whole way we integrate windows is still hacky, it
+// needs to be handled properly fully inside the powos web ui", "The apps were supposed to be working directly in the
+// webview". This file is the window: its model (page, position, size, scale, z-order = list order = DOM order,
+// minimised/maximised, tiles) AND its element - the title bar, buttons, edges, tile menu and dividers are DOM, plain
+// web input. Only the app's pixels are native: the host (WebWindows.kt) puts the app's own buffers in a layer UNDER
+// home's surface, exactly where this file measures the body every frame (position, clip, visibility, z), on the same
+// draw. Over the body the page is transparent; anything above it in the DOM paints over the app and takes its taps.
 import { signal } from "@preact/signals";
-import { useRef } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import { native, nextFrameId, send } from "../apps/port.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
 import type { WebWindowRect } from "../types.ts";
-import { themeBlur } from "./glassblur.ts";
+import { Mark } from "./chrome.tsx";
 
 const TITLE = 36;
 const RADIUS = 12;
@@ -44,6 +43,14 @@ export interface WebWin {
   task?: number;
   /** In a tile (see "Tiles" below): the floating frame it had before, where "float" puts it back. */
   untiled?: { x: number; y: number; w: number; h: number };
+  /** Its app's content shows ("webwindows.live"): the body paints nothing; until then, the placeholder. */
+  live?: boolean;
+}
+
+/** An app's icon URL by its key (state.ts sets it: this file can't import that one), or undefined. */
+let iconOf: (key: string) => string | undefined = () => undefined;
+export function setIconOf(f: (key: string) => string | undefined) {
+  iconOf = f;
 }
 
 /** The home page on screen (its number), as state.ts knows it: where the switcher's split screen tiles. */
@@ -201,23 +208,29 @@ powos.on("webwindows.full", (m: { id: number; on: boolean; task?: number }) => {
   update(m.id, { full: m.on, task: m.task ?? webWins.value.find((w) => w.id === m.id)?.task, minimised: false });
   if (!m.on) bringBack(m.id);
 });
+/** Its app's first frame shows (WebWindows.liveWhenDrawn): the placeholder goes, the body is the app's. */
+powos.on("webwindows.live", (id: number) => update(id, { live: true }));
 /** Its switcher card tapped (ShellBridge.openTask): back where it was, floating, on its page. */
 powos.on("webwindows.show", (id: number) => bringBack(id));
 
 // ---- the work area, and the host's events ----------------------------------------------------------------------------
 
 /**
- * Where windows may be, viewport CSS px: the screen above home's foot (the dock and the bar - windows never cover
- * them, a desktop's reserved dock strip). Maximise fills it; the host clamps moves and resizes to it and crops a window
- * at its bottom.
+ * Where windows may be, viewport CSS px: the screen above home's foot (the dock and the bar - maximise and tiles stop
+ * there, a desktop's reserved dock strip).
  */
 export function workArea(): { left: number; top: number; right: number; bottom: number } {
+  // The pages' own box (a side dock's column is not theirs: PS1, a maximised window never reaches the next page). The
+  // box, not the page on screen: mid-swipe the area stays where the page rests.
+  const pages = document.querySelector(".pages")?.getBoundingClientRect();
+  const left = pages && pages.width > 0 ? Math.max(0, pages.left) : 0;
+  const right = pages && pages.width > 0 ? Math.min(innerWidth, pages.right) : innerWidth;
   let bottom = innerHeight;
   for (const el of document.querySelectorAll<HTMLElement>(".home > .dock, .home > .bar")) {
     const r = el.getBoundingClientRect();
     if (r.height > 0 && r.top > innerHeight / 2) bottom = Math.min(bottom, r.top);
   }
-  return { left: 0, top: 0, right: innerWidth, bottom };
+  return { left, top: 0, right, bottom };
 }
 
 /**
@@ -236,13 +249,28 @@ function pageOrigin(): { x: number; y: number } {
   return r ? { x: r.left, y: r.top } : { x: 0, y: 0 };
 }
 
+/**
+ * DB1 (the user, 2026-10-30: "We need to prevent windows from going up past the status bar"): a floating window's
+ * place (page px) clamped so its bar never goes above the status bar's bottom and at least a third of the bar stays
+ * on screen sideways and above the work area's bottom.
+ */
+export function clampPlace(x: number, y: number, w: number): { x: number; y: number } {
+  const o = pageOrigin();
+  const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || 0;
+  const a = workArea();
+  const keep = w / 3;
+  const vx = Math.min(Math.max(x + o.x, keep - w), innerWidth - keep);
+  const vy = Math.min(Math.max(y + o.y, inset), Math.max(inset, a.bottom - TITLE));
+  return { x: vx - o.x, y: vy - o.y };
+}
+
 /** Fills the work area, or goes back to where it was. */
 export function toggleMaximise(id: number) {
   // A tile goes full screen as a free window (its tile closes up); restore brings back its floating frame.
   if (tiledOn(id) != null) untile(id, "float");
   const w = webWins.value.find((v) => v.id === id);
   if (!w) return;
-  if (w.restore) return update(id, { ...w.restore, restore: undefined });
+  if (w.restore) return update(id, { ...w.restore, ...clampPlace(w.restore.x, w.restore.y, w.restore.w), restore: undefined });
   const a = workArea();
   const o = pageOrigin();
   update(id, { x: a.left - o.x, y: a.top - o.y, w: a.right - a.left, h: a.bottom - a.top, scale: 1, restore: { x: w.x, y: w.y, w: w.w, h: w.h } });
@@ -254,46 +282,26 @@ export function minimise(id: number) {
   update(id, { minimised: true });
 }
 
-const isResized = (m: { dw?: number; dh?: number }) => !!m.dw || !!m.dh;
-
-/** The host's move/resize/zoom under the finger ended (CSS px deltas): the model takes the place it left the window at. */
-powos.on("webwindows.moved", (m: { id: number; dx: number; dy: number; dw?: number; dh?: number; scale?: number }) => {
-  const w = webWins.value.find((v) => v.id === m.id);
-  if (!w) return;
-  const moved = m.dx !== 0 || m.dy !== 0 || isResized(m);
-  // Dragged out of its tile (not onto an edge: that's "webwindows.tile"): a free window where it was let go.
-  if (moved && tiledOn(m.id) != null) untile(m.id, "keep");
-  update(m.id, {
-    x: w.x + m.dx,
-    y: w.y + m.dy,
-    w: w.w + (m.dw ?? 0),
-    h: w.h + (m.dh ?? 0),
-    scale: m.scale ?? w.scale,
-    // Moved or resized out of its maximised frame: a free window again (its size kept), as Android's.
-    restore: moved ? undefined : w.restore,
-  });
-});
-/** A press on its native bar or edge: on top. */
-powos.on("webwindows.raise", (id: number) => raise(id));
-/** Its bar's minimise / full screen buttons, or a double tap on the bar. */
+/** The host's maximise (a Linux window's full screen button, for now: WebWindows.fullScreen). */
 powos.on("webwindows.control", (m: { id: number; action: string }) => {
   if (m.action === "minimise") minimise(m.id);
   else if (m.action === "maximise") toggleMaximise(m.id);
 });
 
-/** The windows pinned to home page [page] (not minimised), and its tiles' dividers: invisible elements in that page. */
+/** The windows pinned to home page [page] (not minimised), and its tiles' dividers: elements of that page, in z order. */
 export function WebWindowsOn({ page }: { page: number }) {
   const here = webWins.value.filter((w) => w.page === page && !w.minimised && !w.full);
   if (!here.length) return null;
   const t = tilings.value[page];
   const o = pageOrigin();
   return (
-    <>
-      {here.map((w) => (
-        <WebWindowEl key={w.id} win={w} z={webWins.value.indexOf(w)} />
+    // Clipped to its page (PS2): a window bigger than its page never shows on the next one.
+    <div class="page-windows">
+      {here.map((w, i) => (
+        <WebWindowEl key={w.id} win={w} z={webWins.value.indexOf(w)} above={here.slice(i + 1)} />
       ))}
       {t && dividers(t, tileArea()).map((d) => <DividerEl key={d.axis} page={page} d={d} o={o} />)}
-    </>
+    </div>
   );
 }
 
@@ -303,8 +311,7 @@ export function WebWindowsOn({ page }: { page: number }) {
 // own splitscreen capabilities maybe with like 3 of 4 apps at once"). A tiling is a state of one page's windows: a
 // layout and which window is in which tile (a window in one is "tiled", the rest float above or below as usual). The
 // windows' frames are the tiles' rects (the model stays x/y/w/h, so the host needs nothing new to place them); the
-// dividers between tiles are the host's (native, like the bar): it moves them under the finger and reports the new
-// split ("webwindows.divider"). docs/WEB_WINDOWS.md "Tiles".
+// dividers between tiles are DOM handles here ([DividerEl]). docs/WEB_WINDOWS.md "Tiles".
 
 /** "2h" left | right, "2v" top / bottom, "3" one big left + two stacked right, "4" a 2x2 grid. */
 export type Layout = "2h" | "2v" | "3" | "4";
@@ -560,12 +567,12 @@ export const DROP_SHARE = 0.12;
 export const snapRatio = (r: number) => SNAPS.reduce((b, s) => (Math.abs(s - r) < Math.abs(b - r) ? s : b), 0.5);
 
 /**
- * The host's divider drag ended: "<page>:<axis>" at [ratio] (already snapped), or [drop]: the windows squeezed to an
+ * A divider drag ended ([DividerEl]): "<page>:<axis>" at [ratio] (already snapped), or [drop]: the windows squeezed to an
  * edge. Those go to the dock (minimised, alive: a tap on their dock icon brings them back floating), the rest close
  * up. Not closed (the app's state would go) and not floated on top (it would cover the tile the user just widened);
  * the user asked the same of Android's split, 2026-10-29: dragging it to the edge should tuck it away, not close it.
  */
-powos.on("webwindows.divider", (m: { key: string; ratio: number; drop?: number[] }) => {
+function divided(m: { key: string; ratio: number; drop?: number[] }) {
   const [p, axis] = m.key.split(":");
   const page = Number(p);
   const t = tilings.value[page];
@@ -576,145 +583,148 @@ powos.on("webwindows.divider", (m: { key: string; ratio: number; drop?: number[]
   }
   const r = Math.min(1 - DROP_SHARE, Math.max(DROP_SHARE, m.ratio));
   setTiling(page, axis === "x" ? { ...t, rx: r } : { ...t, ry: r });
-});
-/** The bar's tile menu, or a window let go at a screen edge or corner. */
-powos.on("webwindows.tile", (m: { id: number; slot: Slot }) => tile(m.id, m.slot));
+}
 
-/** A divider's place in its page (invisible): it moves with a page swipe, and home's swipes leave it alone. */
+/**
+ * A divider between tiles: a DOM handle in its page (it moves with a page swipe, home's swipes leave it alone). Its drag
+ * follows the finger; let go, the split snaps to a third, a half or two thirds - or, within [DROP_SHARE] of an edge,
+ * the squeezed side's windows go to the dock (see "webwindows.divider" above, the same rules).
+ */
 function DividerEl({ page, d, o }: { page: number; d: Divider; o: { x: number; y: number } }) {
+  const [shift, setShift] = useState(0);
+  const start = useRef<number | null>(null);
   const vertical = d.axis === "x";
   const style = {
     position: "absolute",
-    left: `${(vertical ? d.pos - TILE_GAP / 2 : d.from) - o.x}px`,
-    top: `${(vertical ? d.from : d.pos - TILE_GAP / 2) - o.y}px`,
+    left: `${(vertical ? d.pos - TILE_GAP / 2 + shift : d.from) - o.x}px`,
+    top: `${(vertical ? d.from : d.pos - TILE_GAP / 2 + shift) - o.y}px`,
     width: `${vertical ? TILE_GAP : d.len}px`,
     height: `${vertical ? d.len : TILE_GAP}px`,
-    zIndex: 60,
+    zIndex: 1000,
+    touchAction: "none",
   } as const;
-  return <div class="webwindow ww-divider" data-div={`${page}:${d.axis}`} style={style} />;
+  const at = (e: PointerEvent) => (vertical ? e.clientX : e.clientY);
+  const end = (e: PointerEvent, cancelled: boolean) => {
+    if (start.current == null) return;
+    e.stopPropagation();
+    const r = (d.pos + at(e) - start.current - d.lo) / (d.hi - d.lo);
+    start.current = null;
+    setShift(0);
+    if (cancelled) return;
+    const drop = r < DROP_SHARE ? d.before : r > 1 - DROP_SHARE ? d.after : [];
+    divided({ key: `${page}:${d.axis}`, ratio: snapRatio(r), drop });
+    console.info(`[tiles] divider ${page}:${d.axis} let go at ${r.toFixed(2)} -> ${drop.length ? `windows ${drop} to the dock` : `snapped ${snapRatio(r).toFixed(2)}`}`);
+  };
+  return (
+    <div
+      class="webwindow ww-divider"
+      data-div={`${page}:${d.axis}`}
+      style={style}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        capture(e);
+        start.current = at(e);
+      }}
+      onPointerMove={(e) => {
+        if (start.current == null) return;
+        e.stopPropagation();
+        const lo = d.lo + 48 - d.pos;
+        const hi = d.hi - 48 - d.pos;
+        setShift(Math.min(hi, Math.max(lo, at(e) - start.current)));
+      }}
+      onPointerUp={(e) => end(e, false)}
+      onPointerCancel={(e) => end(e, true)}
+    />
+  );
 }
 
-// ---- geometry to the host ----------------------------------------------------------------------------------------------
+// ---- geometry to the host (docs/WEB_WINDOWS.md "Element model") ----------------------------------------------------------
+//
+// Each frame while there are windows, every window's BODY element is measured as it shows: its rect after every
+// transform (a page swipe, the screens' slide to PowOS AI, the drawer's zoom, the window's own scale), the part its
+// ancestors' clips and the screen let show, its visibility (off page, under a full-screen overlay, faded out) and its
+// DOM order. The host puts the app's layer exactly there, on the draw that shows this frame (FrameSync), so the layer
+// and the page's pixels can't be a frame apart - mid-swipe too.
 
 const px = (v: number) => (Math.round(v * 100) / 100).toString();
 let lastGeometry = "";
-let lastArea = "";
-let lastTheme = "";
-let themeAt = 0;
 let raf = 0;
 
-const onScreen = (left: number, top: number, w: number, h: number) => w > 0 && h > 0 && left + w > 0 && left < innerWidth && top + h > 0 && top < innerHeight;
+/** Overlays that cover all of home: a window under one is hidden (its layer, not only its pixels). */
+const OVERLAYS = ".folder-view.open";
+
+type Clip = [number, number, number, number];
+
+/** What of [el] its clipping ancestors and the screen let show (viewport CSS px, l t r b), and its ancestors' opacity. */
+function shown(el: HTMLElement): { clip: Clip; alpha: number } {
+  const r = el.getBoundingClientRect();
+  const clip: Clip = [Math.max(0, r.left), Math.max(0, r.top), Math.min(innerWidth, r.right), Math.min(innerHeight, r.bottom)];
+  let alpha = 1;
+  for (let a: HTMLElement | null = el.parentElement; a && a !== document.body; a = a.parentElement) {
+    const cs = getComputedStyle(a);
+    alpha *= parseFloat(cs.opacity) || 0;
+    // Its own page's area always clips it (PS2), whatever the page's overflow.
+    if (a.classList.contains("page")) {
+      const q = a.getBoundingClientRect();
+      clip[0] = Math.max(clip[0], q.left);
+      clip[1] = Math.max(clip[1], q.top);
+      clip[2] = Math.min(clip[2], q.right);
+      clip[3] = Math.min(clip[3], q.bottom);
+    }
+    if (cs.visibility === "hidden" || cs.display === "none") alpha = 0;
+    if (cs.overflowX === "visible" && cs.overflowY === "visible" && cs.clipPath === "none") continue;
+    const q = a.getBoundingClientRect();
+    if (cs.overflowX !== "visible") (clip[0] = Math.max(clip[0], q.left), (clip[2] = Math.min(clip[2], q.right)));
+    if (cs.overflowY !== "visible") (clip[1] = Math.max(clip[1], q.top), (clip[3] = Math.min(clip[3], q.bottom)));
+  }
+  return { clip, alpha };
+}
 
 /**
- * One window's entry, or null (its page isn't in the DOM): "<id> <frame x y w h> <body x y w h> <radius> <visible>
- * <scale> <maximised>", viewport CSS px. The frame's place is measured (a page swipe moves it); its size is the
- * model's, unscaled (the host scales the layer; the app's display stays at the body's real size).
+ * One window's entry, or null (its page isn't in the DOM): "<id> <frame x y w h> <body x y w h> <clip l t r b>
+ * <radius> <visible> <alpha> <scale> <maximised> <titleEnd> <controls>", viewport CSS px after transforms.
  */
-function entry(w: WebWin): string | null {
+export function entry(w: WebWin): string | null {
   const el = document.querySelector<HTMLElement>(`.webwindow[data-wwid="${w.id}"]`);
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  const s = w.scale ?? 1;
-  const frame = `${px(r.left)} ${px(r.top)} ${px(w.w)} ${px(w.h)}`;
-  const body = `${px(r.left)} ${px(r.top + TITLE)} ${px(w.w)} ${px(Math.max(1, w.h - TITLE))}`;
-  return `${w.id} ${frame} ${body} ${RADIUS} ${onScreen(r.left, r.top, w.w * s, w.h * s) ? 1 : 0} ${px(s)} ${w.restore ? 1 : 0}`;
+  const body = el?.querySelector<HTMLElement>(".webwindow-body");
+  if (!el || !body) return null;
+  const f = el.getBoundingClientRect();
+  const b = body.getBoundingClientRect();
+  const scale = body.offsetWidth ? b.width / body.offsetWidth : 1;
+  const { clip, alpha } = shown(body);
+  const covered = !!document.querySelector(OVERLAYS);
+  const visible = !covered && alpha > 0.01 && clip[2] > clip[0] && clip[3] > clip[1];
+  // Maximised, the bar merges with the status bar: its title's end and its controls' start (the status bar's between).
+  const title = el.querySelector(".ww-title-label")?.getBoundingClientRect();
+  const controls = el.querySelector(".ww-controls")?.getBoundingClientRect();
+  const merged = w.restore && title && controls ? `${px(title.right)} ${px(controls.left)}` : "-1 -1";
+  return [w.id, px(f.left), px(f.top), px(f.width), px(f.height), px(b.left), px(b.top), px(b.width), px(b.height), ...clip.map(px), RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), w.restore ? 1 : 0, merged].join(" ");
 }
 
-/**
- * One divider's entry, measured from its element (a page swipe moves it): "<page:axis> <x|y> <pos> <from> <len> <lo>
- * <hi> <before ids,|-> <after ids,|->", viewport CSS px; lo/hi shifted with the page as pos is.
- */
-function dividerEntries(): string[] {
-  const a = tileArea();
-  return Object.entries(tilings.value).flatMap(([p, t]) => dividers(t, a).map((d) => dividerEntry(p, d)).filter((e): e is string => e != null));
-}
-
-function dividerEntry(p: string, d: Divider): string | null {
-  const el = document.querySelector<HTMLElement>(`.ww-divider[data-div="${p}:${d.axis}"]`);
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  const vertical = d.axis === "x";
-  // The element's offset from where the model put it: the page's slide.
-  const shift = (vertical ? r.left : r.top) + TILE_GAP / 2 - d.pos;
-  const from = vertical ? r.top : r.left;
-  const ids = (l: number[]) => (l.length ? l.join(",") : "-");
-  return `${p}:${d.axis} ${d.axis} ${px(d.pos + shift)} ${px(from)} ${px(d.len)} ${px(d.lo + shift)} ${px(d.hi + shift)} ${ids(d.before)} ${ids(d.after)}`;
-}
-
-function geometry(): string {
+/** "<dpr> <n> <entries...>": every window the page shows, bottom first (DOM order = z-order). */
+export function geometry(): string {
   const parts = webWins.value.map(entry).filter((e): e is string => e != null);
-  const divs = dividerEntries();
-  return [devicePixelRatio, parts.length, ...parts, divs.length, ...divs].join(" ");
+  return [devicePixelRatio, parts.length, ...parts].join(" ");
 }
 
-/** "r g b a" of a CSS colour, as the page resolves it. */
-function resolved(css: string): string {
-  const probe = document.createElement("i");
-  probe.style.color = css;
-  document.body.append(probe);
-  const c = getComputedStyle(probe).color;
-  probe.remove();
-  const n = c.match(/[\d.]+/g)?.map(Number) ?? [0, 0, 0];
-  return `${n[0]} ${n[1]} ${n[2]} ${n[3] ?? 1}`;
-}
+/** For the gate and CDP (`__ww.sent`): the last "w.f" lines (sent, or measured with no host), newest last. */
+const sent: string[] = [];
+(globalThis as { __ww?: unknown }).__ww = { sent, geometry };
 
-/** "r g b a" (bytes, alpha 0..1) of a CSS colour through a 1px canvas: any syntax the page resolves (color-mix too). */
-let pixel: CanvasRenderingContext2D | null = null;
-function bytesOf(css: string): string {
-  pixel ??= Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext("2d", { willReadFrequently: true });
-  if (!pixel) return resolved(css);
-  pixel.clearRect(0, 0, 1, 1);
-  const probe = document.body.appendChild(document.createElement("i"));
-  probe.style.color = css;
-  pixel.fillStyle = getComputedStyle(probe).color;
-  probe.remove();
-  pixel.fillRect(0, 0, 1, 1);
-  const [r, g, b, a] = pixel.getImageData(0, 0, 1, 1).data;
-  return `${r} ${g} ${b} ${(a / 255).toFixed(3)}`;
-}
-
-/**
- * The bar's glass: a home widget's (.tile under live glass) - its tint (theme.css --shade-tint, no veil), its --line edge
- * --frame wide, the compositor radius home's tiles get (glassblur.ts) and --radius - device px. The host draws
- * the bar of that material (WebWindowChrome.glass), so nothing of the widget style is copied natively.
- */
-function glass(): string {
-  const css = getComputedStyle(document.documentElement);
-  const len = (name: string) => (parseFloat(css.getPropertyValue(name)) || 0) * devicePixelRatio;
-  return `${bytesOf("var(--shade-tint)")} ${bytesOf("transparent")} ${bytesOf("var(--line)")} ${len("--frame")} ${themeBlur() * devicePixelRatio} ${len("--radius")}`;
-}
-
-/**
- * The host's bar in the page's colours and widget glass ("w.theme <bg r g b a> <fg r g b a> <glass>"): checked at most
- * once a second.
- */
-function theme() {
-  if (performance.now() - themeAt < 1000) return;
-  themeAt = performance.now();
-  const t = `${resolved("var(--color-surface)")} ${resolved("var(--color-foreground)")} ${glass()}`;
-  if (t !== lastTheme) send(`w.theme ${(lastTheme = t)}`);
-}
-
-/** Each frame while there are windows: the work area, then their geometry tagged with this page frame, when changed. */
+/** Each frame while there are windows: their geometry tagged with this page frame, when it changed. */
 function tick() {
   raf = 0;
-  if (!native.value) return;
-  theme();
-  const a = workArea();
-  const ta = tileArea();
-  // Then the tiles' area: the host's edge snapping makes the same tiles as tileRects.
-  const area = `${devicePixelRatio} ${px(a.left)} ${px(a.top)} ${px(a.right)} ${px(a.bottom)} ${px(ta.left)} ${px(ta.top)} ${px(ta.right)} ${px(ta.bottom)}`;
-  if (area !== lastArea) {
-    send(`w.area ${(lastArea = area)}`);
-    // The screen turned or the dock moved: tiles follow the work area.
-    for (const p of Object.keys(tilings.value)) relayout(Number(p));
-  }
   const g = geometry();
   if (g !== lastGeometry) {
     lastGeometry = g;
     const id = nextFrameId();
-    console.timeStamp(`ww f${id}`);
-    send(`w.f ${id} ${g}`);
+    const line = `w.f ${id} ${g}`;
+    sent.push(line);
+    if (sent.length > 120) sent.shift();
+    if (native.value) {
+      console.timeStamp(`ww f${id}`);
+      send(line);
+    }
   }
   if (webWins.value.length) raf = requestAnimationFrame(tick);
 }
@@ -726,77 +736,253 @@ webWins.subscribe(kick);
 tilings.subscribe(kick);
 // A new port (the page reloaded or the host came back): its layers know nothing yet.
 native.subscribe(() => {
-  lastGeometry = lastArea = lastTheme = "";
-  themeAt = 0;
+  lastGeometry = "";
   kick();
 });
 
-/**
- * Its title bar's place: invisible, the host draws the bar and takes its touches (moves, buttons). With no host (the
- * browser gate, a page without the native port) it moves the model itself.
- */
+// ---- the window element: DOM title bar, buttons, edges, tile menu, the body ------------------------------------------
+
+/** The window whose tile menu is open, or null. */
+export const tileMenu = signal<number | null>(null);
+
+/** A double tap on the bar within this (ms): maximise / restore. */
+const DOUBLE_TAP_MS = 350;
+/** A bar drag let go this near the work area's left/right edge snaps to that half; near a corner, its quarter. */
+const SNAP_EDGE = 24;
+const SNAP_CORNER = 120;
+const SLOP = 6;
+
+/** Where a bar drag let go at ([x], [y]) snaps (docs "Tiles": drag to an edge), or null. */
+function snapSlot(x: number, y: number): Slot | null {
+  const a = tileArea();
+  const side = x <= a.left + SNAP_EDGE ? "l" : x >= a.right - SNAP_EDGE ? "r" : null;
+  if (!side) return null;
+  if (y <= a.top + SNAP_CORNER) return side === "l" ? "tl" : "tr";
+  if (y >= a.bottom - SNAP_CORNER) return side === "l" ? "bl" : "br";
+  return side === "l" ? "left" : "right";
+}
+
+/** Its bar's buttons, right to left: close, full screen, minimise, tile (the old native bar's order). */
+function Controls({ win }: { win: WebWin }) {
+  const press = (f: () => void) => ({
+    onPointerDown: (e: PointerEvent) => e.stopPropagation(),
+    onClick: (e: MouseEvent) => (e.stopPropagation(), f()),
+  });
+  return (
+    <div class="ww-controls">
+      <button class="ww-button" aria-label="Tile" {...press(() => (tileMenu.value = tileMenu.value === win.id ? null : win.id))}>
+        <Mark kind="tile" />
+      </button>
+      <button class="ww-button" aria-label="Minimise" {...press(() => minimise(win.id))}>
+        <Mark kind="minimise" />
+      </button>
+      <button class="ww-button" aria-label="Full screen" {...press(() => fullScreen(win.id))}>
+        <Mark kind={win.restore ? "restore" : "maximise"} />
+      </button>
+      <button class="ww-button ww-close" aria-label="Close" {...press(() => close(win.id))}>
+        <Mark kind="close" />
+      </button>
+    </div>
+  );
+}
+
+/** Full screen = a real full-screen app on the main display (WebWindows.fullScreen); with no host, the work area. */
+function fullScreen(id: number) {
+  tileMenu.value = null;
+  if (native.value && powos.webwindows?.fullScreen) void powos.webwindows.fullScreen(id);
+  else toggleMaximise(id);
+}
+
+function close(id: number) {
+  tileMenu.value = null;
+  if (native.value && powos.webwindows?.close) void powos.webwindows.close(id);
+  else {
+    untile(id, "gone");
+    webWins.value = webWins.value.filter((w) => w.id !== id);
+  }
+}
+
+/** The tile menu, under the tile button: DOM over the window's body (it takes its taps by DOM order). */
+function TileMenu({ win }: { win: WebWin }) {
+  const tiled = tiledOn(win.id) != null;
+  const items: [Slot, string][] = [["left", "Left half"], ["right", "Right half"], ["top", "Top half"], ["bottom", "Bottom half"], ["grid", "Grid"]];
+  if (tiled) items.push(["float", "Float"]);
+  return (
+    <div class="ww-tile-menu tile sheet" onPointerDown={(e) => e.stopPropagation()}>
+      {items.map(([slot, label]) => (
+        <button
+          key={slot}
+          class="ww-tile-item"
+          data-slot={slot}
+          onClick={(e) => {
+            e.stopPropagation();
+            tileMenu.value = null;
+            tile(win.id, slot);
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+// A press anywhere else closes the tile menu.
+addEventListener("pointerdown", (e) => {
+  if (tileMenu.value != null && !(e.target as Element | null)?.closest?.(".ww-tile-menu, .ww-button")) tileMenu.value = null;
+}, true);
+
+/** Its title bar: moves it (a drag), maximises it (a double tap), snaps it to a tile (let go at an edge). */
 function TitleBar({ win }: { win: WebWin }) {
-  const drag = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
-  const up = (e: PointerEvent) => {
+  const drag = useRef<{ px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
+  const lastTap = useRef(0);
+  const merged = !!win.restore;
+  const end = (e: PointerEvent, cancelled: boolean) => {
+    const d = drag.current;
+    if (!d) return;
     e.stopPropagation();
     drag.current = null;
+    if (cancelled) return;
+    if (!d.moved) {
+      const now = performance.now();
+      if (now - lastTap.current < DOUBLE_TAP_MS) (toggleMaximise(win.id), (lastTap.current = 0));
+      else lastTap.current = now;
+      return;
+    }
+    const slot = snapSlot(e.clientX, e.clientY);
+    if (slot) tile(win.id, slot);
   };
   return (
     <div
-      class="webwindow-title"
+      class={`webwindow-title ${merged ? "merged" : "tile"}`}
       style={{ height: `${TITLE}px`, flex: `0 0 ${TITLE}px`, touchAction: "none" }}
       onPointerDown={(e) => {
         e.stopPropagation();
         raise(win.id);
-        if (native.value) return;
         capture(e);
-        drag.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y };
+        drag.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, moved: false };
       }}
       onPointerMove={(e) => {
         const d = drag.current;
         if (!d) return;
         e.stopPropagation();
-        update(win.id, { x: d.x + e.clientX - d.px, y: Math.max(0, d.y + e.clientY - d.py), restore: undefined });
+        const dx = e.clientX - d.px;
+        const dy = e.clientY - d.py;
+        if (!d.moved && Math.hypot(dx, dy) < SLOP) return;
+        if (!d.moved && tiledOn(win.id) != null) untile(win.id, "keep");
+        d.moved = true;
+        update(win.id, { ...clampPlace(d.x + dx, d.y + dy, win.w), restore: undefined });
       }}
-      onPointerUp={up}
-      onPointerCancel={up}
+      onPointerUp={(e) => end(e, false)}
+      onPointerCancel={(e) => end(e, true)}
+    >
+      <div class={`ww-title-label ${merged ? "tile" : ""}`}>
+        {iconOf(win.key) && <img class="ww-icon" src={iconOf(win.key)!} alt="" draggable={false} />}
+        <span>{win.label}</span>
+      </div>
+      <div class="ww-spacer" />
+      <div class={merged ? "tile ww-controls-glass" : "ww-controls-glass"}>
+        <Controls win={win} />
+      </div>
+    </div>
+  );
+}
+
+const MIN_W = 220;
+const MIN_H = 160;
+const EDGES = ["n", "s", "e", "w", "ne", "nw", "se", "sw"] as const;
+
+/** A resize grab on an edge or corner: the frame follows the finger (the app's display gets the size on each frame's w.f). */
+function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
+  const start = useRef<{ px: number; py: number; x: number; y: number; w: number; h: number } | null>(null);
+  const stop = (e: PointerEvent) => {
+    if (!start.current) return;
+    e.stopPropagation();
+    start.current = null;
+  };
+  return (
+    <div
+      class={`ww-edge ww-edge-${side}`}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        raise(win.id);
+        capture(e);
+        if (tiledOn(win.id) != null) untile(win.id, "keep");
+        start.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, w: win.w, h: win.h };
+      }}
+      onPointerMove={(e) => {
+        const s = start.current;
+        if (!s) return;
+        e.stopPropagation();
+        const k = win.scale ?? 1;
+        const dx = (e.clientX - s.px) / k;
+        const dy = (e.clientY - s.py) / k;
+        const r = { x: s.x, y: s.y, w: s.w, h: s.h, restore: undefined };
+        if (side.includes("e")) r.w = Math.max(MIN_W, s.w + dx);
+        if (side.includes("s")) r.h = Math.max(MIN_H, s.h + dy);
+        if (side.includes("w")) (r.w = Math.max(MIN_W, s.w - dx), (r.x = s.x + s.w - r.w));
+        if (side.includes("n")) (r.h = Math.max(MIN_H, s.h - dy), (r.y = s.y + s.h - r.h));
+        // DB1: the top edge stops at the status bar (the bar stays reachable).
+        const top = clampPlace(r.x, r.y, r.w).y;
+        if (r.y < top) (r.h -= top - r.y), (r.y = top);
+        update(win.id, { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h), restore: undefined });
+      }}
+      onPointerUp={stop}
+      onPointerCancel={stop}
     />
   );
 }
 
-/** The app's place: its touches go to the app (mapped through the window's zoom). */
+/**
+ * The app's place. Live, it paints NOTHING: the page is transparent over it and the app's layer (under home's buffer)
+ * shows there. Until its first frame it is a solid placeholder (the app's icon and a quiet progress line on the theme's
+ * surface: the manager's LW1), never a hole. A press on it (the DOM's hit test: anything above it in the DOM wins) goes
+ * to the app - the window raised, so it is in front and focused, the same for Android and Linux apps.
+ */
 function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | null } }) {
   const pressed = useRef(false);
-  const send = (e: PointerEvent, action: "down" | "move" | "up" | "cancel") => {
+  const toApp = (e: PointerEvent, action: "down" | "move" | "up" | "cancel") => {
     e.stopPropagation();
     const r = body.current?.getBoundingClientRect();
     const s = win.scale ?? 1;
     if (r) void powos.webwindows?.input(win.id, action, (e.clientX - r.left) / s, (e.clientY - r.top) / s);
   };
   const end = (e: PointerEvent, action: "up" | "cancel") => {
+    if (!pressed.current) return;
     pressed.current = false;
-    send(e, action);
+    toApp(e, action);
   };
+  const icon = iconOf(win.key);
   return (
     <div
-      class="webwindow-body"
+      class={`webwindow-body ${win.live ? "live" : "placeholder"}`}
       ref={body}
       style={{ flex: 1, touchAction: "none" }}
       onPointerDown={(e) => {
         raise(win.id);
         capture(e);
         pressed.current = true;
-        send(e, "down");
+        toApp(e, "down");
       }}
-      onPointerMove={(e) => pressed.current && send(e, "move")}
+      onPointerMove={(e) => pressed.current && toApp(e, "move")}
       onPointerUp={(e) => end(e, "up")}
       onPointerCancel={(e) => end(e, "cancel")}
-    />
+    >
+      {!win.live && (
+        <div class="ww-placeholder">
+          {icon && <img class="ww-placeholder-icon" src={icon} alt="" draggable={false} />}
+          <div class="ww-progress" />
+        </div>
+      )}
+    </div>
   );
 }
 
-/** Invisible: the host draws the window above home; this keeps its place in the page (swipes, exclusions, touches). */
-function WebWindowEl({ win, z }: { win: WebWin; z: number }) {
+/**
+ * The window: an element of its page (it slides with it, sits in z by DOM order). Its frame, bar and edges paint
+ * here; over its body the page is transparent (the app's layer). A lower window's bar and edges are masked where a
+ * higher window's body is (the app's pixels are under home's buffer, so DOM there would paint over that app).
+ */
+function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
   const body = useRef<HTMLDivElement>(null);
   const s = win.scale ?? 1;
   const frame = {
@@ -810,11 +996,66 @@ function WebWindowEl({ win, z }: { win: WebWin; z: number }) {
     zIndex: 20 + z,
     display: "flex",
     flexDirection: "column",
+    ...holes(above, { x: win.x, y: win.y, s }),
   } as const;
   return (
-    <div class="webwindow" data-wwid={win.id} style={frame}>
+    <div class={`webwindow ${win.restore ? "maximised" : ""} ${win.live ? "live" : ""}`} data-wwid={win.id} data-z={z} style={frame}>
       <TitleBar win={win} />
       <Body win={win} body={body} />
+      {!win.restore && tiledOn(win.id) == null && EDGES.map((side) => <Edge key={side} win={win} side={side} />)}
+      {tileMenu.value === win.id && <TileMenu win={win} />}
     </div>
   );
 }
+
+/** A window's body in its page's px (the model; scaled about the frame's top left). */
+export function bodyBox(w: WebWin): Box {
+  const s = w.scale ?? 1;
+  return { x: w.x, y: w.y + TITLE * s, w: w.w * s, h: (w.h - TITLE) * s };
+}
+
+/**
+ * A CSS mask that leaves out [cut] (window bodies) from an element at [at] in the page (page px; [at].s: the element's
+ * own scale, the mask is in its unscaled box): the whole box minus each body. Undefined: nothing to cut.
+ */
+export function holes(cut: WebWin[], at: { x: number; y: number; s: number }): Record<string, string> | undefined {
+  if (!cut.length) return undefined;
+  const full = "linear-gradient(#000, #000)";
+  const boxes = cut.map(bodyBox).map((b) => ({ x: (b.x - at.x) / at.s, y: (b.y - at.y) / at.s, w: b.w / at.s, h: b.h / at.s }));
+  return {
+    maskImage: [full, ...boxes.map(() => full)].join(", "),
+    maskSize: ["100% 100%", ...boxes.map((b) => `${px(b.w)}px ${px(b.h)}px`)].join(", "),
+    maskPosition: ["0 0", ...boxes.map((b) => `${px(b.x)}px ${px(b.y)}px`)].join(", "),
+    maskRepeat: "no-repeat",
+    maskComposite: ["subtract", ...boxes.map(() => "add")].join(", "),
+  };
+}
+
+/** The page's own content (widgets, apps, its glass) masked where its windows' bodies are: grid.tsx's .page-under. */
+export function underWindows(page: number): Record<string, string> | undefined {
+  return holes(
+    webWins.value.filter((w) => w.page === page && !w.minimised && !w.full),
+    { x: 0, y: 0, s: 1 },
+  );
+}
+
+/**
+ * For the compositor's glass (nativeglass.ts): the window bodies on screen (viewport CSS px, l t r b) a surface in
+ * [el] must not blur over - those of windows above it (a window's own bar: the windows above that one; page content:
+ * every window on its page; anything outside the pages: none).
+ */
+export function bodiesOver(el: Element): Clip[] {
+  const page = el.closest(".page");
+  if (!page) return [];
+  const own = el.closest<HTMLElement>(".webwindow[data-wwid]");
+  const z = own ? Number(own.dataset.z) : -1;
+  const out: Clip[] = [];
+  for (const w of page.querySelectorAll<HTMLElement>(".webwindow[data-wwid]")) {
+    if (Number(w.dataset.z) <= z) continue;
+    const b = w.querySelector(".webwindow-body")?.getBoundingClientRect();
+    if (b) out.push([b.left, b.top, b.right, b.bottom]);
+  }
+  return out;
+}
+// To the glass (nativeglass.ts reads it; an import either way would close a module cycle through apps/native.ts).
+(globalThis as { __wwCutouts?: typeof bodiesOver }).__wwCutouts = bodiesOver;

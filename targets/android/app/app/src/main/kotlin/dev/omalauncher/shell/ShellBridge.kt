@@ -122,14 +122,6 @@ class ShellBridge(
         if (webWindowsMade) webWindows.frameCommand(rest)
     }
 
-    /** "w.area" / "w.theme" over the port: the windows' work area and bar colours. */
-    fun webWindowCommand(
-        verb: String,
-        rest: String,
-    ) {
-        if (!webWindowsMade) return
-        if (verb == "w.area") webWindows.areaCommand(rest) else webWindows.themeCommand(rest)
-    }
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
     private val speech = Speech(context.applicationContext).also { it.warm() }
     /** The panel's quick settings: what an app may switch, and Android's panels for the rest. */

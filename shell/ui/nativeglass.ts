@@ -36,6 +36,36 @@ const OVER_WALLPAPER = new Set(["home", "lock", "quicktools", "desktop", "status
 /** The surfaces with glass (theme.css): one inside another is only a soft fill on it, not glass of its own. */
 const SURFACES = ".tile, .notif-panel, .status-chrome .chrome-surface";
 
+/**
+ * The web windows' bodies a surface must not blur over (ui/webwindows.tsx bodiesOver: the app's pixels are under home's
+ * buffer there, and a blur region would blur the app): viewport CSS px, l t r b. That file sets globalThis.__wwCutouts
+ * (an import either way closes a module cycle through apps/native.ts).
+ */
+const cutoutsOf = (el: Element): [number, number, number, number][] =>
+  (globalThis as { __wwCutouts?: (el: Element) => [number, number, number, number][] }).__wwCutouts?.(el) ?? [];
+
+/**
+ * [box] (l t r b) less the bodies over it: a body covering a whole side's span shrinks it from that side; one inside it
+ * (a region is one rounded box) drops it: null.
+ * HACK: a blur region is one rounded rect, so a widget with a window over its middle loses its blur (its tint stays);
+ * real fix: several regions per surface split around the body.
+ */
+function cutOut(box: [number, number, number, number], bodies: [number, number, number, number][]): [number, number, number, number] | null {
+  const b: [number, number, number, number] = [...box];
+  for (const [l, t, r, bo] of bodies) {
+    if (r <= b[0] || l >= b[2] || bo <= b[1] || t >= b[3]) continue;
+    const spansY = t <= b[1] && bo >= b[3];
+    const spansX = l <= b[0] && r >= b[2];
+    if (spansY && l <= b[0]) b[0] = Math.max(b[0], r);
+    else if (spansY && r >= b[2]) b[2] = Math.min(b[2], l);
+    else if (spansX && t <= b[1]) b[1] = Math.max(b[1], bo);
+    else if (spansX && bo >= b[3]) b[3] = Math.min(b[3], t);
+    else return null;
+    if (b[2] - b[0] < 1 || b[3] - b[1] < 1) return null;
+  }
+  return b;
+}
+
 /** The host blurs for this page (b.state 1). */
 const hostBlurs = signal(false);
 /** CDP's override for this page: false keeps the CSS glass whatever the host says. */
@@ -277,9 +307,13 @@ function measureRaw(followers: Element[] = []): Raw[] {
     // Scaled (home's pages shrink a little as the drawer opens): the corners with it.
     const k = r.width / ((el as HTMLElement).offsetWidth || r.width);
     const follower = followerOf(el);
+    const bodies = cutoutsOf(el);
+    const box = cutOut([r.left - reach * jl, r.top - reach * jt, r.right + reach * jr, r.bottom + reach * jb], bodies);
+    const own = bodies.length ? cutOut([r.left, r.top, r.right, r.bottom], bodies) : ([r.left, r.top, r.right, r.bottom] as [number, number, number, number]);
+    if (!box || !own) continue;
     out.push({
-      box: [r.left - reach * jl, r.top - reach * jt, r.right + reach * jr, r.bottom + reach * jb],
-      own: [r.left, r.top, r.right, r.bottom],
+      box,
+      own,
       clips: s.clips.map(clipBox),
       radii: s.radii.map((v) => v * k),
       alpha,
