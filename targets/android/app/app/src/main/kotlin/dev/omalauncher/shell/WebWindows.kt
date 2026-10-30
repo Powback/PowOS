@@ -219,6 +219,14 @@ class WebWindows(
         var linuxFull = false
 
         /**
+         * PowOS asked KWin to put it full screen ([fullScreen]) and KWin hasn't confirmed yet ("fullscreen <id> 1"): its
+         * full-screen size goes to KWin only then ([fullScreenConfirmed]). Sent with the request, KWin took the size
+         * before the window's own full screen and then laid it out at KWin's OUTPUT size - the desktop consumer's, still
+         * the folded cover's 1116x2358 on the unfolded screen (the user, 10-30 22:19: Dolphin pillarboxed at ~1116 px).
+         */
+        var fullAsked = false
+
+        /**
          * Its container hangs under [root], ordered among the page's windows by [Geo.z]. False while [fillScreen] hangs
          * it on home's surface itself (above home's buffer, at [FULL_LAYER]); [place] puts it back under the root.
          */
@@ -333,8 +341,17 @@ class WebWindows(
     /** The windows' root shown ([on]) or hidden, at once (main thread): [switcherOpen]. */
     private fun rootShown(on: Boolean) {
         underSwitcher = !on
-        val r = root?.takeIf { it.isValid } ?: return
-        SurfaceControl.Transaction().setVisibility(r, on).apply()
+        val t = SurfaceControl.Transaction()
+        // FL3: a full-screen Linux window hangs on home's surface itself, ABOVE home's buffer ([fillScreen]), not under
+        // the root: hiding the root left it over the switcher, which opened (NavGesture "gesture: Switcher", 10-30
+        // 22:34) under it, unseen - the user, 22:20: "I can't open the switcher now either". Hidden with the root.
+        for (w in wins.values) if (!w.underRoot && w.container.isValid) t.setVisibility(w.container, on && w.shown)
+        val r = root?.takeIf { it.isValid }
+        if (r == null) {
+            t.apply()
+            return
+        }
+        t.setVisibility(r, on).apply()
         Log.i(TAG, "windows ${if (on) "shown again (switcher down)" else "hidden under the switcher (each is its card)"}: ${wins.size} window(s)")
     }
 
@@ -1350,8 +1367,9 @@ class WebWindows(
         val src = win.linux ?: return true
         val at = IntArray(2).also(web::getLocationInWindow)
         if (win.linuxFull) {
-            // Full screen: the window is at the screen's top left, 1:1.
-            andro.marchy.WebWindowSource.touch(src.handle, ev, at[0].toFloat(), at[1].toFloat(), 1f)
+            // Full screen: the window is at its full-screen place (below the status bar, [fullScreenArea]), 1:1.
+            val area = fullScreenArea()
+            andro.marchy.WebWindowSource.touch(src.handle, ev, at[0] - area.left.toFloat(), at[1] - area.top.toFloat(), 1f)
             return true
         }
         val g = win.geo ?: return true
@@ -1606,8 +1624,12 @@ class WebWindows(
             }
             // KWin puts the window itself full screen (its F11); shown so at once, KWin's "fullscreen <id> 1|0" confirms.
             Log.i(TAG, "window ${win.id}: KWin window ${src.kwin} full screen asked")
+            win.fullAsked = true
             andro.marchy.WebWindowSource.fullScreen(src.kwin, true)
             linuxFullScreen(win, true)
+            // HACK: KWin that never answers (a window that can't go full screen says "stays", so this is a lost line):
+            // sized anyway. Real fix: kwin 0047 sizes a requested full screen by the task, never by its output.
+            main.postDelayed({ if (win.fullAsked) fullScreenConfirmed(win, "no answer from KWin in 1.5 s") }, 1_500L)
             return
         }
         if (win.displayId < 0 || win.full) return
@@ -1656,6 +1678,7 @@ class WebWindows(
         val src = win.linux ?: return
         if (win.closed || win.linuxFull == on) return
         win.linuxFull = on
+        if (!on) win.fullAsked = false
         // Covers every web window now: a new window of its app opens as a task in front of it (WindowTasks.open).
         andro.marchy.WebWindowSource.shownFullScreen(src.kwin, on)
         val t = SurfaceControl.Transaction()
@@ -1674,15 +1697,17 @@ class WebWindows(
         publishBars()
     }
 
-    /** [linuxFullScreen]'s on: [win]'s layers over the whole screen at 1:1, KWin's window at the screen's size. */
+    /**
+     * [linuxFullScreen]'s on: [win]'s layers over the whole screen at 1:1 below the status bar ([fullScreenArea]), KWin's
+     * window at that size - at once, or on KWin's confirmation when PowOS asked for the full screen ([Win.fullAsked]).
+     */
     private fun fillScreen(
         t: SurfaceControl.Transaction,
         win: Win,
         src: LinuxSource,
     ) {
         if (linuxTouch !== win) linuxTouch = null
-        val b = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
-        val screen = Rect(0, 0, b.width(), b.height())
+        val area = fullScreenArea()
         win.container.takeIf { it.isValid }?.let { c ->
             // Full screen is not an element of the page: ABOVE home's buffer (a child of home's surface itself, as the
             // windows' root is), so nothing of the page paints over it; the root's own layer is -1, under home.
@@ -1692,13 +1717,48 @@ class WebWindows(
                 t.merge(it)
                 win.underRoot = false
             }
-            t.setPosition(c, 0f, 0f).setScale(c, 1f, 1f).setCrop(c, screen).setLayer(c, FULL_LAYER).setVisibility(c, true)
+            // FL5: the app's area starts below the status bar, never under it (the user, 10-30 22:19: Dolphin's toolbar
+            // drawn through the clock and icons).
+            t.setPosition(c, area.left.toFloat(), area.top.toFloat()).setScale(c, 1f, 1f)
+                .setCrop(c, Rect(0, 0, area.width(), area.height())).setLayer(c, FULL_LAYER).setVisibility(c, !underSwitcher)
             cornerRadius(t, c, 0f)
         }
-        src.content.takeIf { it.isValid }?.let { m -> t.setPosition(m, 0f, 0f).setScale(m, 1f, 1f).setCrop(m, screen) }
+        src.content.takeIf { it.isValid }?.let { m -> t.setPosition(m, 0f, 0f).setScale(m, 1f, 1f).setCrop(m, Rect(0, 0, area.width(), area.height())) }
         t.apply()
         win.shown = true
-        linuxResize(win, src, b.width(), b.height())
+        if (win.fullAsked) {
+            Log.i(TAG, "window ${win.id}: full screen ${area.width()}x${area.height()} at ${area.left},${area.top}: sized on KWin's answer")
+        } else {
+            linuxResize(win, src, area.width(), area.height())
+        }
+    }
+
+    /** A full-screen Linux window's place: the whole screen less the status bar on top (display px = home's window px). */
+    private fun fullScreenArea(): Rect {
+        val b = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
+        val insets = web.rootWindowInsets
+        val bar = insets?.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.statusBars())?.top ?: 0
+        val cut = insets?.getInsets(android.view.WindowInsets.Type.displayCutout())?.top ?: 0
+        return Rect(0, fullScreenTop(b.height(), maxOf(bar, cut)), b.width(), b.height())
+    }
+
+    /**
+     * KWin confirmed [win]'s full screen (or never answered): its window to the full-screen size now. KWin's own full
+     * screen took its output's size (setFullScreen: FullScreenArea) - and that output is the desktop consumer's, the
+     * folded cover's while unfolded - and kwin 0040 kept it while the task's size equalled the one from before the full
+     * screen. A size sent after the answer differs from that one: the task's size wins.
+     */
+    private fun fullScreenConfirmed(
+        win: Win,
+        why: String,
+    ) {
+        if (!win.fullAsked) return
+        win.fullAsked = false
+        val src = win.linux ?: return
+        if (win.closed || !win.linuxFull) return
+        val area = fullScreenArea()
+        Log.i(TAG, "window ${win.id}: KWin window ${src.kwin} full screen ($why): sized ${area.width()}x${area.height()}")
+        linuxResize(win, src, area.width(), area.height())
     }
 
     /** KWin's "fullscreen <kwin> 1|0" (ShellBridge's host, main thread): the window went full screen or left it. */
@@ -1707,6 +1767,7 @@ class WebWindows(
         on: Boolean,
     ) {
         val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
+        if (on && w.linuxFull) fullScreenConfirmed(w, "KWin's answer")
         linuxFullScreen(w, on)
     }
 
@@ -2227,6 +2288,12 @@ class WebWindows(
         /** How far in from an edge strip (dp) a pull leaves full screen. */
         private const val EDGE_PULL_DP = 24
 
+        /** A full-screen Linux window's top on an [h] px tall screen whose status bar is [bar] px: below the bar. */
+        fun fullScreenTop(
+            h: Int,
+            bar: Int,
+        ): Int = bar.coerceIn(0, h / 4)
+
         /** Which edge strip [y] is in on an [h] px tall screen: -1 the top ([top] px), 1 the bottom ([bottom] px), 0 neither. */
         fun fullScreenEdge(
             y: Float,
@@ -2266,6 +2333,16 @@ class WebWindows(
         fun switcherOpen(open: Boolean) {
             val ww = current ?: return
             ww.main.post { ww.rootShown(!open) }
+        }
+
+        /**
+         * Home from the switcher (its "recents.end" to home, or its close): a full-screen Linux window leaves full screen
+         * as on Home ([leaveFullScreen], FL3) - shown again with the windows' root, it covered home after "swipe up to the
+         * switcher, then home". Any thread.
+         */
+        fun switcherHome(why: String) {
+            val ww = current ?: return
+            ww.main.post { ww.leaveFullScreen(why) }
         }
 
         /**

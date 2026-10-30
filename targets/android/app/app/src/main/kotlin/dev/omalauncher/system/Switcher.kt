@@ -362,6 +362,7 @@ object Switcher {
         release = null
         boost?.invoke(false)
         depthTo(0f)
+        if (to == "home") dev.omalauncher.shell.WebWindows.switcherHome("switcher to home")
         home?.emit("recents.end", JSONObject().put("to", to))
     }
 
@@ -484,6 +485,7 @@ object Switcher {
         open = false
         from = null
         depthTo(0f)
+        dev.omalauncher.shell.WebWindows.switcherHome("switcher closed to home")
         home?.emit("recents.end", JSONObject().put("to", "home"))
     }
 
@@ -508,6 +510,7 @@ object Switcher {
         open = false
         from = null
         depthTo(0f)
+        dev.omalauncher.shell.WebWindows.switcherHome("switcher closed by the page")
         if (!onHome) {
             runCatching {
                 context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
