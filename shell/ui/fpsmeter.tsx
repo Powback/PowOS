@@ -10,7 +10,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { m as main, mring, MRING, mainFresh, onSample, beginMain, endMain } from "./fpsmain.ts";
 import { loafEntry, type Loaf } from "./loaf.ts";
-import type { NativePerf } from "../types.ts";
+import type { FrontPresents, NativePerf } from "../types.ts";
 
 // The first SETTLE_MS after the tap are the meter's own UI reacting (REC label, panel/graph opening): not recorded.
 const SETTLE_MS = 300;
@@ -112,9 +112,45 @@ function drawGraph(cv: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
   }
 }
 
-/** The number to show: home's, the bar's own, or -2 = asleep while home is away (a dash). */
+// Home away (a game in front): the front PowOS window's own rate - its surface's presents (native_consumer.c's
+// queueBuffer count, host "perf.front"), polled at 1 Hz; -1 = none yet (a dash). Undrawn presents go in the tooltip.
+let game = -1, gameUndrawn = 0, gameTimer = 0, gamePrev: FrontPresents | null = null;
+/** Presents and undrawn per second between two samples of the same window, or undefined (another window, no time). */
+function rates(p: FrontPresents, prev: FrontPresents | null) {
+  const dt = prev ? p.at - prev.at : 0;
+  if (!prev || p.id !== prev.id || dt <= 0 || p.presented < prev.presented) return undefined;
+  return { fps: Math.round((p.presented - prev.presented) * 1000 / dt), undrawn: Math.round((p.undrawn - prev.undrawn) * 1000 / dt) };
+}
+function frontPresents(): Promise<FrontPresents | null> {
+  const front = powos.perf?.front;
+  return front ? front().catch(() => null) : Promise.resolve(null);
+}
+async function pollGame() {
+  const p = await frontPresents();
+  if (!gameTimer) return;
+  const r = p && rates(p, gamePrev);
+  if (!p) game = -1;
+  else if (r) { game = r.fps; gameUndrawn = r.undrawn; }
+  gamePrev = p;
+  if (!ui) return;
+  ui.root.title = p && game >= 0 ? `window ${p.id}: ${game} presents/s, ${gameUndrawn}/s not drawn` : "";
+  drawText(ui);
+}
+function startGame() {
+  if (gameTimer || !powos.perf?.front) return;
+  gamePrev = null; game = -1;
+  gameTimer = window.setInterval(() => void pollGame(), 1000);
+  void pollGame();
+}
+function stopGame() {
+  if (!gameTimer) return;
+  clearInterval(gameTimer); gameTimer = 0; gamePrev = null; game = -1;
+  if (ui) ui.root.title = "";
+}
+
+/** The number to show: home's, the bar's own, the front game's, or -2 = home away and no game rate yet (a dash). */
 function shownNumber(): number {
-  if (main.gone && !raf) return -2;
+  if (main.gone && !raf) return game >= 0 ? game : -2;
   return mainFresh() ? main.fps : fpsNow();
 }
 
@@ -131,11 +167,15 @@ function tick(count: number) {
   if (count % 3 === 0) drawText(ui);
 }
 
+/** Home away (an app/game in front): not the bar's own frames - the front window's presents (pollGame). */
+function followGame() {
+  if (enabled && !document.hidden && main.gone && !rec) startGame(); else stopGame();
+}
+
 /** Home idle (and no recording): the meter shows 0 and its loop sleeps until home samples again. */
 function follow() {
+  followGame();
   if (!enabled || document.hidden) return;
-  // HACK: home away (an app/game in front) = asleep with a dash, not the bar's own frames. Real fix: the front
-  // PowOS window's presented frames (native_consumer.c's queueBuffer count) as the number.
   if ((!main.idle && !main.gone) || rec) return start();
   if (!raf) return;
   stopLoop();
@@ -155,10 +195,10 @@ function setEnabled(on: boolean) {
   if (on === enabled) return;
   enabled = on;
   if (ui) ui.root.hidden = !on;
-  if (on && !document.hidden) { start(); follow(); } else stopLoop();
+  if (on && !document.hidden) { start(); follow(); } else { stopLoop(); stopGame(); }
   window.dispatchEvent(new Event("fps-layout"));
 }
-document.addEventListener("visibilitychange", () => { if (enabled && !rec) { if (document.hidden) stopLoop(); else { start(); follow(); } } });
+document.addEventListener("visibilitychange", () => { if (enabled && !rec) { if (document.hidden) { stopLoop(); stopGame(); } else { start(); follow(); } } });
 
 async function readSetting() {
   const v = await powos.store.get<{ on?: boolean }>(STORE).catch(() => null);

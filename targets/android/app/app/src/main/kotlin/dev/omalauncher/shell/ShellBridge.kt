@@ -398,6 +398,10 @@ class ShellBridge(
             // and mailed to the coordinator (the Mac session running PowOS) so every recording reaches it with its full data.
             // The fps meter's native trace section (MainStallWatch): main-thread blocks and frame gaps while it records.
             "perf.native" -> if (a.optBoolean(0, false)) MainStallWatch.start().let { true } else MainStallWatch.stop()
+            // The PowOS window in front (a game): its presents since its consumer started, for the meter's rate; null = none.
+            "perf.front" -> andro.marchy.PowosWindowActivity.frontPresents()?.let { p ->
+                JSONObject().put("id", p[0]).put("presented", p[1]).put("undrawn", p[2]).put("at", System.currentTimeMillis())
+            }
             "perf.save" -> {
                 val dir = java.io.File(context.filesDir, "run/powos-ai-shared").apply { mkdirs() }
                 val name = "perf-${System.currentTimeMillis()}.json"

@@ -52,4 +52,6 @@ public final class Native {
     public static native void nativeSendWindowKey(long handle, int action, int keycode);
     /** A window's Android keyboard text (UTF-8) to KWin on its own connection (kwin 0043, window-ime). */
     public static native void nativeSendWindowTextInput(long handle, byte[] text);
+    /** Surface [surfaceId]'s presents since its consumer started: {presented, undrawn}; null = no consumer/frames yet. */
+    public static native long[] nativeWindowPresents(int surfaceId);
 }

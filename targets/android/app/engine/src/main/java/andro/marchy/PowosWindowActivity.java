@@ -452,10 +452,29 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         return front;
     }
 
+    /** The window whose task is Android's top resumed activity now, null when none is (home, another app). */
+    private static volatile PowosWindowActivity frontWindow;
+
+    /**
+     * The front window's presents (the fps meter's game rate, ShellBridge "perf.front"): {surface id, presented,
+     * undrawn} since its consumer started, null when no PowOS window is in front or it has shown nothing yet. Any thread.
+     */
+    public static long[] frontPresents() {
+        PowosWindowActivity w = frontWindow;
+        if (w == null || w.handle == 0)
+            return null;
+        long[] p = Native.nativeWindowPresents(w.id);
+        return p == null ? null : new long[] {w.id, p[0], p[1]};
+    }
+
     @Override
     public void onTopResumedActivityChanged(boolean isTop) {
         super.onTopResumedActivityChanged(isTop);
         front = isTop;
+        if (isTop)
+            frontWindow = this;
+        else if (frontWindow == this)
+            frontWindow = null;
         if (!isTop)
             focusSent = false;
     }
@@ -718,6 +737,8 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     @Override
     protected void onDestroy() {
         CHROME.remove(this);
+        if (frontWindow == this)
+            frontWindow = null;
         LaunchWindows.remove(this);
         surfaceGen++;
         stopConsumer();

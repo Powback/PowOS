@@ -358,6 +358,8 @@ export type RunState = "running" | "frozen";
 export type NativeBlock = { at: number; ms: number; msg?: string; bridge?: string; lastCall?: string; lastCallAgoMs?: number | null; stack?: string | null };
 /** The host's native section of a perf trace (perf.native). */
 export type NativePerf = { thresholdMs: number; blocks: NativeBlock[]; frameGaps: { at: number; ms: number; lastCall?: string }[] };
+/** The PowOS window in front (a game): its surface's presents since its consumer started; `at` = host epoch ms. */
+export type FrontPresents = { id: number; presented: number; undrawn: number; at: number };
 
 /** Visible system chrome is shared web UI; hosts supply state and perform scoped actions. */
 export interface ChromeState {
@@ -386,7 +388,8 @@ export interface WebWindowRect { left: number; top: number; width: number; heigh
 export interface Bridge {
   /** Perf traces (?: hosts from before it): saves JSON under the AI shared dir, returns its path in PowOS. */
   perf?: { save(json: string): Promise<string | null>; /** Main shell frame sample to the other windows (hosts from before it: absent). */ publish?(json: string): Promise<unknown>;
-    /** The host's main-thread blocks while recording (true: started; the trace section on stop). Older hosts: absent. */ native?(on: boolean): Promise<NativePerf | true | null> };
+    /** The host's main-thread blocks while recording (true: started; the trace section on stop). Older hosts: absent. */ native?(on: boolean): Promise<NativePerf | true | null>;
+    /** The front PowOS window's presents (null: none in front); hosts from before it reject it. */ front?(): Promise<FrontPresents | null> };
   chrome: {
     state(): Promise<ChromeState>;
     ready(): Promise<void>;

@@ -515,11 +515,63 @@ static int wanted_pretransform(struct consumer_state *s, int bufs)
     return kind_for_hint(query_transform_hint(s));
 }
 
+/* PowOS: every surface's presents (queued buffers) and undrawn ones (cancelled), since its consumer started: the fps
+ * meter's rate of the window in front (nativeWindowPresents). Kept by surface id, not in consumer_state, so a reader
+ * never touches a consumer being stopped. A slot is taken at a surface's first count and given back on its stop. */
+#define PRESENT_SLOTS 32
+static struct present_slot {
+    uint32_t id; /* 0 = free */
+    uint64_t presented, undrawn;
+} g_presents[PRESENT_SLOTS];
+static pthread_mutex_t g_presents_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* The slot of surface [id] (taken if [take]), or NULL. Under g_presents_lock. */
+static struct present_slot *present_slot_locked(uint32_t id, bool take)
+{
+    struct present_slot *free_slot = NULL;
+    for (int i = 0; i < PRESENT_SLOTS; i++) {
+        if (g_presents[i].id == id)
+            return &g_presents[i];
+        if (!free_slot && g_presents[i].id == 0)
+            free_slot = &g_presents[i];
+    }
+    if (!take || !free_slot)
+        return NULL;
+    free_slot->id = id;
+    free_slot->presented = free_slot->undrawn = 0;
+    return free_slot;
+}
+
+static void count_present(struct consumer_state *s, bool shown)
+{
+    if (s->surface_id == 0) /* the desktop: the shell's own meter covers it */
+        return;
+    pthread_mutex_lock(&g_presents_lock);
+    struct present_slot *slot = present_slot_locked(s->surface_id, true);
+    if (slot) {
+        if (shown)
+            slot->presented++;
+        else
+            slot->undrawn++;
+    }
+    pthread_mutex_unlock(&g_presents_lock);
+}
+
+static void forget_presents(uint32_t id)
+{
+    pthread_mutex_lock(&g_presents_lock);
+    struct present_slot *slot = present_slot_locked(id, false);
+    if (slot)
+        slot->id = 0;
+    pthread_mutex_unlock(&g_presents_lock);
+}
+
 /* A buffer the producer drew nothing into was not shown (cancelled: the surface keeps its last frame). Counted, and
  * logged at most every 5 s - a black or stale frame on screen used to come from queueing these. */
 static void note_undrawn(struct consumer_state *s, const char *why)
 {
     s->undrawn++;
+    count_present(s, false);
     int64_t now = now_ms();
     if (now - s->undrawn_log_ms < 5000)
         return;
@@ -903,6 +955,7 @@ static void *render_thread_func(void *arg)
 
         apply_crop(s);
         api.queueBuffer(s->window, anb, rfence);
+        count_present(s, true);
 
         /* Follow the transform hint (rotation, fold to the other screen): buffers for the new one. A queue is when
          * the window learns a new hint, so look right after it. */
@@ -1373,8 +1426,32 @@ Java_andro_marchy_Native_nativeStopWindow(
     if (s->window)
         ANativeWindow_release(s->window);
     LOGI("window consumer stopped for surface %u", s->surface_id);
+    forget_presents(s->surface_id);
     pthread_mutex_destroy(&s->lock);
     free(s);
+}
+
+/* PowOS: surface [surfaceId]'s presents since its consumer started: {presented, undrawn}, null if it has none (no
+ * consumer, or not one frame yet). Any thread; the fps meter polls it for the window in front. */
+JNIEXPORT jlongArray JNICALL
+Java_andro_marchy_Native_nativeWindowPresents(JNIEnv *env, jclass clazz, jint surfaceId)
+{
+    jlong v[2];
+    bool found = false;
+    pthread_mutex_lock(&g_presents_lock);
+    struct present_slot *slot = surfaceId > 0 ? present_slot_locked((uint32_t)surfaceId, false) : NULL;
+    if (slot) {
+        v[0] = (jlong)slot->presented;
+        v[1] = (jlong)slot->undrawn;
+        found = true;
+    }
+    pthread_mutex_unlock(&g_presents_lock);
+    if (!found)
+        return NULL;
+    jlongArray out = (*env)->NewLongArray(env, 2);
+    if (out)
+        (*env)->SetLongArrayRegion(env, out, 0, 2, v);
+    return out;
 }
 
 static void push_to(jlong handle, struct InputEvent *ev)
