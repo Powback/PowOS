@@ -499,6 +499,23 @@ The touch hook stays as a **watcher** (`WebWindows.onTouch` returns false): it k
 claim and never takes a touch. ww-linux2 owns Linux input delivery: its change goes into `linuxInput` / `linuxClaim`,
 the forwarding call site stays `forward`.
 
+### Measured lag
+
+The app's layer must move on the same displayed frame as its DOM frame. 2026-10-30 (APK c68a9eb7, user: "the windows are
+disconnected from their contents, like it's lagging behind"): `FrameSync.bind` put each "w.f" on the draw its
+`postVisualStateCallback` fired on, and 888 of 932 applies had 1-4 newer page frames already received (`behind=` in the
+`w.f f<id>` log line). Cause: the page sends "w.f" from its rAF and then commits that frame; the visual-state request
+reaches the renderer after that commit, so it rides the NEXT commit - always a frame or more late. Home's WebView is a
+synchronous compositor (it draws the renderer's newest active frame inside the window's draw), so the first window draw
+after the receipt is the one that shows the measured frame: `FrameSync.next` applies the geometry on the main thread
+ahead of that draw (an async handler, so a pending traversal's sync barrier doesn't push it a frame later) and asks for no
+draw itself (an invalidate could draw before the commit is ready: content a frame ahead). The log's `lag=a/b/c/d`
+counts applies by window draws between receipt and apply (0 = the draw that shows that page frame).
+
+Left: a CSS transition the compositor runs (the page track's 280 ms snap after a swipe's release) is ticked with the
+draw's frame time, the page's rAF measured it at the previous one: during that snap the DOM leads the content by about a
+frame. Finger-driven moves (drag, resize, swipe while held) are main-thread and exact.
+
 ### Removed
 
 - `WebWindowChrome.kt` (native bar, background, glass), the native tile menu/dividers/snap hint of
