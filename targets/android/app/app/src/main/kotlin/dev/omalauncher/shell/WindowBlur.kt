@@ -26,8 +26,14 @@ internal class WindowBlur(
     private val cornersDp: FloatArray = FloatArray(4),
     /** Unblurred at the window's top, dp (a window bar's touch strip above its glass). */
     private val topDp: Float = 0f,
+    /**
+     * Whether a blur may still be on ([watch]): home's is the switcher's depth, only while the switcher is up. A
+     * blur whose owner forgot to clear it (a lost gesture end, a cancelled settle) is cleared once this says no.
+     */
+    private val keep: () -> Boolean = { true },
 ) {
-    constructor(window: Window, maxRadiusDp: Float = MAX_RADIUS_DP, glass: ((Float) -> Boolean)? = null) : this({ window.decorView }, maxRadiusDp, glass)
+    constructor(window: Window, maxRadiusDp: Float = MAX_RADIUS_DP, glass: ((Float) -> Boolean)? = null, keep: () -> Boolean = { true }) :
+        this({ window.decorView }, maxRadiusDp, glass, keep = keep)
 
     private var radius = -1
     private var broken = false
@@ -89,10 +95,12 @@ internal class WindowBlur(
             v.addOnLayoutChangeListener(resized)
             watched = v
         }
+        // Home's page glass (GlassBlur.wholeWindow) keeps what it was given and skips the same radius itself; it may
+        // also have refused or dropped one (the switcher not up): never skipped here on a cached radius it doesn't have.
         // Same radius at the same size: nothing to send. A region sent while the window was another size (the banner's
         // strip, or the size before a GONE window was shown again and laid out) covered only that: the shade opened
         // at once (a flick, the banner pulled) kept a strip of blur at the top and home read through (2026-10-23).
-        if (r == radius && key(v) == sentFor) return
+        if (glass == null && r == radius && key(v) == sentFor) return
         // A blur region over the window: the way this compositor blurs (the background
         // blur radius left home's widgets sharp under the shade, 2026-10-21). The page's own glass, on home, merges it.
         val handled: Boolean? =
@@ -110,6 +118,7 @@ internal class WindowBlur(
         if (handled) {
             radius = r
             sentFor = key(v)
+            watch(v)
             return
         }
         runCatching {
@@ -122,13 +131,58 @@ internal class WindowBlur(
             t.apply()
             radius = r
             sentFor = key(v)
+            watch(v)
         }.onFailure {
             Log.w("PowosBlur", "no blur behind the window", it)
             broken = true
         }
     }
 
+    private var watching = false
+
+    /**
+     * The watchdog: a blur on ([radius] > 0) never outlives its window being seen or its owner's [keep] - every
+     * [WATCH_MS] while one is on, it's cleared once the window is hidden (GONE, detached, its window invisible) or
+     * [keep] says no. A whole-window blur left on composites everything under it on the GPU every frame (SurfaceFlinger
+     * forces client composition up to the topmost blurring layer): home stuck at 386 px, 2026-10-30 ("GPU missed frames").
+     */
+    private fun watch(v: View) {
+        if (watching || radius <= 0) return
+        watching = true
+        v.postDelayed(
+            object : Runnable {
+                override fun run() {
+                    watching = stillOn(v)
+                    if (watching) v.postDelayed(this, WATCH_MS)
+                }
+            },
+            WATCH_MS,
+        )
+    }
+
+    /** [watch]'s check: the blur still wanted (true: look again later), or cleared now. */
+    private fun stillOn(v: View): Boolean {
+        if (radius <= 0 || broken) return false
+        val seen = v.isAttachedToWindow && v.windowVisibility == View.VISIBLE && v.isShown
+        if (seen && keep()) return true
+        Log.w("PowosBlur", "whole-window blur $radius px cleared: ${if (!seen) "its window isn't seen" else "its owner is done"}")
+        clear()
+        return false
+    }
+
+    /** No blur, sent whatever was cached ([watch]'s): amount 0, the region dropped. */
+    private fun clear() {
+        radius = -1
+        sentFor = 0L
+        set(0f)
+        // Still not ready (no surface: the window is gone, its layer with it): nothing shows any blur.
+        if (radius < 0) radius = 0
+    }
+
     companion object {
+        /** How often a blur that's on is checked against its window's visibility ([watch]). */
+        private const val WATCH_MS = 250L
+
         /**
          * The compositor's radius at full openness, dp: the same as home's glass (theme.css --glass-blur-native,
          * 140). Its blur is only ~0.15-0.3 of the radius it's given (measured on the phone, 2026-10-21): at the old

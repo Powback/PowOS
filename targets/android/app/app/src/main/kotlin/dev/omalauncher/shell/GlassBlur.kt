@@ -425,6 +425,13 @@ internal class GlassBlur(
         lag: Int,
     ) {
         this.regions = regions
+        // The whole window's blur goes with the switcher: any set (a page's regions, a new surface) after it closed
+        // drops it - the guard in [wholeWindow] only refused new ones, nothing cleared the one already on, and home sat
+        // full-screen blurred at 386 px, every layer under the shade GPU-composited (SurfaceFlinger dump, 2026-10-30).
+        if (whole >= 1f && !dev.omalauncher.system.Switcher.open) {
+            Log.w(TAG, "whole-window blur ${whole.toInt()} px dropped: the switcher isn't up")
+            whole = 0f
+        }
         val m = methods ?: return
         try {
             val root = view.rootSurfaceControl ?: return

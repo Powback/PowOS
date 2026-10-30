@@ -144,6 +144,9 @@ object Switcher {
             WindowFrames.current?.let { f -> android.os.Handler(android.os.Looper.getMainLooper()).post { f.refresh() } }
             // The web windows (a layer of home above its page) go too: the switcher is home's page, so they'd cover it.
             dev.omalauncher.shell.WebWindows.switcherOpen(v)
+            // Home's whole-window blur is the switcher's depth: off the moment it closes, whichever way it did (a swipe's
+            // end that never came, a hide, the page) - not left to a settle animation that may not run (2026-10-30).
+            if (!v) shellBlur?.invoke(0f)
         }
 
     /** The task it was opened over (null: home). */
