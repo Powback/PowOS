@@ -88,15 +88,23 @@ internal object WsFrames {
         var op = -1
         val acc = ByteArrayOutputStream()
         while (true) {
-            val f = read(inp)
-            if (f.op >= 0x8) {
-                onControl(f)
-                if (f.op == CLOSE) return f
-                continue
-            }
+            val f = nextData(inp, onControl) ?: return Frame(true, CLOSE, ByteArray(0))
             if (f.op != CONT) op = f.op
             acc.write(f.payload)
             if (f.fin && op >= 0) return Frame(true, op, acc.toByteArray())
+        }
+    }
+
+    /** The next data frame, control frames to [onControl] on the way; null at a close. */
+    private fun nextData(
+        inp: InputStream,
+        onControl: (Frame) -> Unit,
+    ): Frame? {
+        while (true) {
+            val f = read(inp)
+            if (f.op < 0x8) return f
+            onControl(f)
+            if (f.op == CLOSE) return null
         }
     }
 
