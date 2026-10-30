@@ -1831,7 +1831,12 @@ html:root .assist-panel .tile.pill { background: var(--soft-fill); }
 .chat.headless > :first-child { margin-top: auto; }
 .assist-panel .bar { flex: none; }
 .assist-hint { font-size: var(--text-small); }
-.crop-stroke { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* Over everything, the panel and the edge strip too (.assist-draw makes no stacking context of its own). */
+.crop-stroke { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
+/* A stroke under way (assist.tsx drawing): the panel and the edge strip out of the way - unseen, no touches - so the
+   screen under them is drawn on too; back when it ends. */
+.assist-panel, .assist-edge { transition: opacity 120ms ease-out; }
+.assist.drawing .assist-panel, .assist.drawing .assist-edge { opacity: 0; pointer-events: none; }
 .crop-stroke polyline { fill: none; stroke: var(--color-accent); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
 .assist-live { font: var(--text-small) var(--font); padding: 4px 10px; border-radius: 999px; border: var(--frame) solid var(--color-border); color: var(--color-foreground); }
 .assist-live.on { border-color: var(--color-red); color: var(--color-red); }

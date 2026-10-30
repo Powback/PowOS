@@ -3336,6 +3336,21 @@ try {
       return r.page.evaluate(async (f) => (await importShim("./dev/send-dictation-check.js")).sendDictationEnd(f), form);
     })));
   }
+  // AO1/AO2 (the user, 2026-10-30: "It should hide while I'm drawing so that I can draw like under the drawer"; "when
+  // I activate it with like a short click, we should still activate the transcription"): the side-button overlay's
+  // short press listens at once, and a stroke into the panel's area hides the panel and goes to the drawing
+  // (dev/assist-draw-check.js). Renders: /cache/assist-draw-<case>-{mid,after}.png.
+  for (const [name, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]]) {
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=assist`, `assist-draw-${name}`, viewport).then((r) => whenReady(r, async () => {
+      await r.page.waitForSelector("form.assist-ask .mic", { timeout: READY_MS });
+      const started = await r.page.evaluate(async () => (await importShim("./dev/assist-draw-check.js")).assistDrawStart());
+      await r.page.screenshot({ path: `/cache/assist-draw-${name}-mid.png` });
+      if (started.length) return started;
+      const ended = await r.page.evaluate(async () => (await importShim("./dev/assist-draw-check.js")).assistDrawEnd());
+      await r.page.screenshot({ path: `/cache/assist-draw-${name}-after.png` });
+      return ended;
+    })));
+  }
   runs.push(open(browser, `${ORIGIN}/index.html`, "dock-key-migration", { width: 821, height: 883 }).then((r) => whenReady(r, () => dockKeyMigration(r))));
   const dockViews = { cover: { width: 404, height: 900 }, inner: { width: 821, height: 883 }, desktop: { width: 1280, height: 800 } };
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
