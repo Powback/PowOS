@@ -415,6 +415,10 @@ const SCENES = [
   ["pull-kbd-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true }); await sleep(300); S.query.value = 'ch'; await sleep(500);", "blurred"],
   ["pull-kbd-chat", "pull", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true }); await sleep(300); S.chatting.value = true; await sleep(500);`, "blurred"],
   ["pull-apps-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
+  // Home's page dots beside a side dock (the user, 2026-10-30: "the page indicator is taking the docking into account"):
+  // .home-dots and the launcher's dots, right and left.
+  ["home-dots-right", "home", "S.dockPlacement.value = 'right'; await sleep(300);", "wallpaper"],
+  ["home-dots-left", "home", "S.dockPlacement.value = 'left'; await sleep(300);", "wallpaper"],
   ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
   // The launcher opened for apps after PowOS AI's pull (dev/dock-check.js launcherDockOpens): the dock mounts as the drag
   // starts, after the drag's followers were taken (gesture.ts follow) - it stayed at --p 0, invisible (the user,
@@ -424,14 +428,6 @@ const SCENES = [
   ["pull-dock-bottom", "pull", "window.__dockWrong = await (await U('./dev/dock-check.js')).launcherDockOpens('bottom', false);", "blurred"],
   ["pull-dock-right-kbd", "pull", "const F = await (await U('./dev/dock-check.js')).launcherDockOpens('right', true); window.__dockWrong = innerWidth > 700 ? F : []; S.query.value = 'ch'; await sleep(500);", "blurred"],
   ["pull-dock-bottom-kbd", "pull", "const F = await (await U('./dev/dock-check.js')).launcherDockOpens('bottom', true); window.__dockWrong = innerWidth > 700 ? F : []; S.query.value = 'ch'; await sleep(500);", "blurred"],
-  ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
-  // The launcher opened for apps after PowOS AI's pull (the side button): the dock mounts as the drag starts, after the
-  // drag's followers were taken (gesture.ts follow) - it stayed at --p 0, invisible (the user, 2026-10-30: "the dock is
-  // still hiding in the launcher in unfolded mode"). Right and bottom, with and without the keyboard; folded the same.
-  ["pull-dock-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(400); E.emit('pull.end', { open: false }); await sleep(500); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
-  ["pull-dock-bottom", "pull", "S.dockPlacement.value = 'bottom'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(400); E.emit('pull.end', { open: false }); await sleep(500); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
-  ["pull-dock-right-kbd", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(400); E.emit('pull.end', { open: false }); await sleep(500); E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true }); await sleep(300); S.query.value = 'ch'; await sleep(500);", "blurred"],
-  ["pull-dock-bottom-kbd", "pull", "S.dockPlacement.value = 'bottom'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(400); E.emit('pull.end', { open: false }); await sleep(500); E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true }); await sleep(300); S.query.value = 'ch'; await sleep(500);", "blurred"],
   ["pull-apps-land", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred", undefined, LAND_SIZES],
   ["pull-apps-right-land", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred", undefined, LAND_SIZES],
   // A search for "app" (the user, 2026-10-30): the apps grid, then the settings and app actions as a list grouped
