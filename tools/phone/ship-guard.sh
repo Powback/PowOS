@@ -43,6 +43,17 @@ check)
       r=$(CDP_TIMEOUT_S=15 "$here/cdp.sh" eval "$pg" 'window.__powosAlive === true' 2>/dev/null | tr -d '\r' | tail -1)
       [ "$r" = true ] || bad="$bad ${pg:-home}"
     done
+    # Home's page only exists once Android starts home. After an install it does that only when home is needed: with
+    # another app in front (the user in Chrome, a game, a web window's display holding focus) it doesn't, and two good
+    # APKs were rolled back for it (10-30 15:48, 15:58: Calculator / Chrome on top). Then home isn't required; shade
+    # and assist (same process) still are.
+    if [ "$bad" = " home" ]; then
+      top=$("$here/adb.sh" shell 'dumpsys activity activities' 2>/dev/null | grep -m1 'topResumedActivity' | grep -o 'u0 [^ ]*' | cut -d' ' -f2)
+      case "$top" in
+        com.powos.app/*|"") ;;
+        *) echo "ship-guard: every page booted (shade assist); home not started by Android: $top is in front"; exit 0 ;;
+      esac
+    fi
     [ -z "$bad" ] && { echo "ship-guard: every page booted (home shade assist)"; exit 0; }
     [ "$(date +%s)" -ge "$end" ] && { echo "ship-guard: not booted within ${2:-120} s:$bad"; exit 1; }
     sleep "${GUARD_POLL_S:-10}"
