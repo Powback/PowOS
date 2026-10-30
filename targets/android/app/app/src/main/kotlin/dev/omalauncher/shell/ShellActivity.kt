@@ -244,6 +244,8 @@ class ShellActivity : Activity() {
 
     /** SystemUI can deliver Home directly instead of going through our navigation consumer. */
     private fun homePressed() {
+        // A full-screen Linux web window leaves full screen on Home (FL3), then Home goes on as ever.
+        host.bridge.leaveFullScreen("home")
         val switcher = dev.omalauncher.system.Switcher
         if (switcher.homeVisible && switcher.homeMainPage && !switcher.open) {
             switcher.show(this, null)
@@ -255,6 +257,8 @@ class ShellActivity : Activity() {
     /** Back goes to the page: it closes the drawer, a folder or edit mode. A home screen has nowhere to go back to. */
     @Deprecated("Back reaches the page instead", ReplaceWith(""))
     override fun onBackPressed() {
+        // Back from a full-screen Linux web window: it leaves full screen, nothing else (FL3).
+        if (host.bridge.leaveFullScreen("back")) return
         host.bridge.emit("system.back", null)
     }
 
