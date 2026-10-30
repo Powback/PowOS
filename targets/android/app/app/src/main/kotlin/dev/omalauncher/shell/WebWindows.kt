@@ -185,7 +185,10 @@ class WebWindows(
         val title: String,
         val label: String,
         val icon: android.graphics.drawable.Drawable?,
-    )
+    ) {
+        /** Its app's drawer key ("l:<desktop id>", [linuxOpened]): the app menu's close and its switcher card find it. */
+        var key = ""
+    }
 
     /** KWin windows on their way to a web window: offered to the page ("webwindows.adopt"), not opened yet (main thread). */
     private val pendingLinux = HashMap<Int, LinuxOffer>()
@@ -317,6 +320,7 @@ class WebWindows(
             return
         }
         if (pendingLinux.containsKey(kwin)) return
+        offer.key = key
         pendingLinux[kwin] = offer
         Log.i(TAG, "KWin window $kwin (${offer.appId}, \"${offer.title}\"): offered to the page as $key")
         emit("webwindows.adopt", JSONObject().put("kwin", kwin).put("key", key).put("label", offer.label))
@@ -369,18 +373,52 @@ class WebWindows(
                 Log.e(TAG, "window $id (KWin window $kwin): consumer did not start")
                 return@execute
             }
+            // Published before the crop: a resize placed meanwhile (place() on main) crops this consumer too, and a
+            // touch on the body reaches KWin from the first frame (a 0 handle drops both silently).
+            src.handle = handle
             andro.marchy.WebWindowSource.crop(handle, win.w, win.h)
             andro.marchy.WebWindowSource.refreshRate(handle, rate)
             if (win.closed) {
+                src.handle = 0
                 andro.marchy.WebWindowSource.stop(handle)
                 return@execute
             }
-            src.handle = handle
             Log.i(TAG, "window $id: KWin window $kwin (${p.appId}) consumer up, buffers ${bw}x$bh, body ${win.w}x${win.h}")
         }
         andro.marchy.WebWindowSource.size(kwin, w, h)
         Log.i(TAG, "window $id: KWin window $kwin (${p.appId}) as a web window, ${w}x$h")
         return id
+    }
+
+    /**
+     * The switcher's cards for Linux web windows (they have no Android task): (card id, window id, app key, name), top
+     * window first. Card ids are [LINUX_CARD] + the window id, above any task id, so Tasks.remove / tasks.open / the
+     * card picture come back here ([closeForTask], [openForTask], [cardShot]). Main thread.
+     */
+    fun linuxCards(): List<LinuxCard> =
+        wins.values.filter { it.linux != null }.sortedByDescending { it.geo?.z ?: -1 }.map { w ->
+            val o = w.linux!!.offer
+            LinuxCard(LINUX_CARD + w.id, w.id, o.key, o.label)
+        }
+
+    class LinuxCard(
+        val id: Int,
+        val window: Int,
+        val key: String,
+        val label: String,
+    )
+
+    /**
+     * Closes every Linux web window of app [key] ("l:<desktop id>"; the app menu's close) as its bar's close does:
+     * KWin closes each window, then ends the app if it stays (quit). True if it had one. Main thread.
+     */
+    fun closeLinuxApp(key: String): Boolean {
+        val ws = wins.values.filter { it.linux?.offer?.key == key }
+        ws.forEach { w ->
+            Log.i(TAG, "window ${w.id}: closed with its app $key (the app menu's close)")
+            drop(w)
+        }
+        return ws.isNotEmpty()
     }
 
     /** KWin closed window [kwin] (main thread): its web window goes, nothing told back. */
@@ -972,7 +1010,16 @@ class WebWindows(
     /** Every touch on home, first ([HomeWebView.touchHook], main thread): true = the frame's, the page doesn't get it. */
     private fun onTouch(ev: MotionEvent): Boolean {
         // A Linux window's body: the gesture is KWin's ([linuxTouch]), from its first finger to its last.
-        if (ev.actionMasked == MotionEvent.ACTION_DOWN) return linuxDown(ev) || frameTouch(ev)
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            // A first finger is a new gesture: a move or divider drag whose UP never came is over. Left "not ended", it
+            // held its window (held(): the page's places and visibility skipped - the layer stuck where it was, on
+            // every page, while hit tests used the page's geometry), and only a touch on a bar cleared it - never one
+            // on a Linux window's body, which goes to KWin.
+            drag?.takeIf { !it.ended }?.let { drag = null }
+            divDrag?.takeIf { !it.ended }?.let { divDrag = null }
+            pressed = null
+            return linuxDown(ev) || frameTouch(ev)
+        }
         return linuxTouch?.let { linuxInput(it, ev) } ?: frameTouch(ev)
     }
 
@@ -1050,6 +1097,9 @@ class WebWindows(
     /** The KWin window that last got "focus" from a touch here: told again only when another one is touched. */
     private var linuxFocused = -1
 
+    /** At most one "touch to KWin window" line a second ([linuxDown]). */
+    private var lastLinuxLog = 0L
+
     /** The topmost shown window at ([x], [y]) when the point is on a Linux window's body, else null. */
     private fun linuxBodyAt(
         x: Float,
@@ -1073,7 +1123,25 @@ class WebWindows(
             linuxFocused = src.kwin
             andro.marchy.WebWindowSource.focus(src.kwin)
         }
+        logLinuxTouch(win, src, f)
         return linuxInput(win, ev)
+    }
+
+    /** A first finger on [win]'s body, at most once a second (and always when its consumer isn't up): where it went. */
+    private fun logLinuxTouch(
+        win: Win,
+        src: LinuxSource,
+        f: Fingers,
+    ) {
+        val now = SystemClock.uptimeMillis()
+        if (src.handle != 0L && now - lastLinuxLog < PLACE_LOG_MS) return
+        lastLinuxLog = now
+        val g = win.geo ?: return
+        val s = g.scale
+        val bx = ((f.x - g.frame.left) / s).toInt()
+        val by = ((f.y - g.frame.top) / s).toInt() - (win.chrome?.title ?: 0)
+        val dropped = if (src.handle == 0L) ": its consumer isn't up, dropped" else ""
+        Log.i(TAG, "window ${win.id}: touch to KWin window ${src.kwin} at body px ($bx, $by) x$s$dropped")
     }
 
     /** [ev] to [win]'s KWin window in its body's own px (its frame's place and scale, under the bar). */
@@ -2110,6 +2178,21 @@ class WebWindows(
 
     companion object {
         private const val TAG = "PowosWebWindows"
+
+        /** A Linux web window's switcher card id: this + its window id (no Android task id gets near it). */
+        const val LINUX_CARD = 1 shl 29
+
+        /** [shot] as a card's JPEG, at most [width] px wide. */
+        private fun jpeg(
+            shot: android.graphics.Bitmap,
+            width: Int,
+        ): ByteArray {
+            val scaled = if (shot.width > width) android.graphics.Bitmap.createScaledBitmap(shot, width, shot.height * width / shot.width, true) else shot
+            return java.io.ByteArrayOutputStream().also { scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }.toByteArray()
+        }
+
+        /** The Linux web window card [taskId] stands for ([linuxCards]), or null for a real task. */
+        private fun linuxCardWindow(taskId: Int): Int? = (taskId - LINUX_CARD).takeIf { taskId >= LINUX_CARD }
         const val SETTING = "powos_web_windows"
 
         /** Home's web windows (the one home page's), or null: what [closeForTask] closes through. */
@@ -2140,6 +2223,11 @@ class WebWindows(
             taskId: Int,
         ): Boolean {
             val ww = current ?: return false
+            linuxCardWindow(taskId)?.let { id ->
+                Log.i(TAG, "card $taskId removed (switcher / Tasks.remove): Linux web window $id - closing it (the bar's close path)")
+                ww.main.post { ww.close(id) }
+                return true
+            }
             val id = WebWindowDisplays.windowOf(context, taskId) ?: return false
             Log.i(TAG, "task $taskId removed (switcher / Tasks.remove): it is web window $id - closing the window (the bar's close path)")
             ww.main.post { ww.close(id) }
@@ -2156,6 +2244,11 @@ class WebWindows(
             taskId: Int,
         ): Boolean {
             val ww = current ?: return false
+            linuxCardWindow(taskId)?.let { id ->
+                Log.i(TAG, "card $taskId opened from the switcher: Linux web window $id shown where it was, on its page")
+                ww.main.post { ww.emit("webwindows.show", id) }
+                return true
+            }
             if (WebWindowDisplays.fullScreenWindow(taskId) != null) return false
             val id = WebWindowDisplays.windowOf(context, taskId) ?: return false
             Log.i(TAG, "task $taskId opened from the switcher: web window $id shown where it was, on its page")
@@ -2182,14 +2275,14 @@ class WebWindows(
             width: Int = 720,
         ): ByteArray? {
             val ww = current ?: return null
+            linuxCardWindow(taskId)?.let { return ww.contentShot(it)?.let { shot -> jpeg(shot, width) } }
             val id = WebWindowDisplays.windowOf(context, taskId) ?: return null
             if (WebWindowDisplays.fullScreenWindow(taskId) != null) return null
             dev.omalauncher.system.Tasks.capture(taskId)
             dev.omalauncher.system.Tasks.snapshot(taskId, width)?.let { return it }
             val shot = ww.contentShot(id) ?: return null.also { Log.w(TAG, "task $taskId (window $id): no picture for its card") }
-            val scaled = if (shot.width > width) android.graphics.Bitmap.createScaledBitmap(shot, width, shot.height * width / shot.width, true) else shot
             Log.i(TAG, "task $taskId (window $id): card picture from its mirror (no task snapshot)")
-            return java.io.ByteArrayOutputStream().also { scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }.toByteArray()
+            return jpeg(shot, width)
         }
 
         /**
