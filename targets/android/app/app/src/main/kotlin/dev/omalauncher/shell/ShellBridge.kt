@@ -791,7 +791,28 @@ class ShellBridge(
         val windows = if (floats) dev.omalauncher.system.FreeformTasks.list(context).associateBy { it.id } else emptyMap()
         @Suppress("DEPRECATION")
         val running = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(64) }.getOrDefault(emptyList())
-        return JSONArray(dev.omalauncher.system.Tasks.list(context).map { t -> taskJson(t, stamp, windows[t.id]?.bounds, running) })
+        val list = dev.omalauncher.system.Tasks.list(context).map { t -> taskJson(t, stamp, windows[t.id]?.bounds, running) }
+        return JSONArray(linuxCards(stamp) + list)
+    }
+
+    /**
+     * Linux web windows have no Android task: a card each all the same (WebWindows.linuxCards), so the switcher shows,
+     * opens and swipes them away and the app menu's close (ui/desktops.ts closeApp: its tasks by key) closes them -
+     * Tasks.remove / tasks.open / the card picture reach WebWindows by the card's id. First: the most recent windows.
+     */
+    private fun linuxCards(stamp: Long): List<JSONObject> {
+        if (!webWindowsMade) return emptyList()
+        return webWindows.linuxCards().map { c ->
+            val key = c.key.takeIf { it.isNotEmpty() }
+            JSONObject()
+                .put("id", c.id)
+                .put("label", c.label)
+                .put("key", key ?: JSONObject.NULL)
+                .put("icon", key?.let(::icon) ?: JSONObject.NULL)
+                .put("webwindow", c.window)
+                .put("snapshot", "${ShellHost.ORIGIN}/_task/${c.id}?v=$stamp")
+                .apply { if (dev.omalauncher.system.AppWindows.floating(context)) put("floats", true) }
+        }
     }
 
     /** One recent task as the switcher lists it ([tasks]); [w]: its floating window's bounds, [floats]: unfolded. */
