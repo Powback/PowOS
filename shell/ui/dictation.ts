@@ -103,6 +103,18 @@ export function finish(...targets: MicTarget[]): Promise<void> | null {
   return done;
 }
 
+/**
+ * A send went from a field dictated into by one of [targets] (bar.tsx Pill): nothing of that dictation is left - no
+ * pending recognition to write the old words back (hearing() would keep showing them), the mic off. A send still
+ * waiting for its final words (finish) is left to finish.
+ */
+export function settle(...targets: MicTarget[]) {
+  if (finished) return;
+  const p = pending;
+  if (p && targets.includes(p.target)) pending = null;
+  if (!pending && speech.value.listening) stopNow();
+}
+
 /** [target]'s dictation is under way (or starting). */
 export const listeningFor = (target: MicTarget) => pending?.target === target;
 

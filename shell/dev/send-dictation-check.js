@@ -74,8 +74,69 @@ export async function sendDictationEnd(form) {
     else if (got[0] !== FINAL) fails.push(`${form}: sent "${got[0]}", not the final "${FINAL}" (partial was "${partial}")`);
     if (mic.classList.contains("on")) fails.push(`${form}: the mic is still on after send`);
     if (send()?.classList.contains("waiting")) fails.push(`${form}: the spinner stayed`);
+    fails.push(...clearedAfterSend(form).map((f) => `dictated: ${f}`));
   } finally {
     restore();
   }
   return fails;
+}
+
+/**
+ * The field after a send (the user, 2026-10-30 23:08: "After I click on the send icon on the search bar or whatever,
+ * the input should be cleared ... right now it's just a press send and then it's sent, but the input is not clear"):
+ * the textarea empty and the pill showing its placeholder (the prompt glyph, or the placeholder text), the mic off.
+ */
+export function clearedAfterSend(form) {
+  const el = document.querySelector(`form${form}`);
+  const field = el?.querySelector("textarea");
+  const pill = el?.querySelector(".pill");
+  const fails = [];
+  if (!field) return [`${form}: no field`];
+  if (field.value !== "") fails.push(`${form}: the field still holds "${field.value}" after send`);
+  if (!pill.classList.contains("empty") && !field.placeholder) fails.push(`${form}: the pill shows no placeholder after send`);
+  if (el.querySelector(".mic.on")) fails.push(`${form}: the mic is on after send`);
+  if (el.querySelector(".send.shown")) fails.push(`${form}: send still shown after send`);
+  return fails;
+}
+
+/** Types [text] into [field] as the keyboard does; [composing]: its last word still in the IME's composing span. */
+function typeInto(field, text, composing) {
+  field.focus();
+  if (composing) field.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+  field.value = text;
+  field.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
+}
+
+/** Waits up to [ms] for [f]. */
+async function until(f, ms) {
+  const sleep = (t) => new Promise((r) => setTimeout(r, t));
+  for (const t0 = Date.now(); !f() && Date.now() - t0 < ms; ) await sleep(30);
+}
+
+/**
+ * Typed text sent by [how] ("button": the send button, mid-composition as Gboard's last word is; "enter": Enter in the
+ * field): it is asked once, the field is empty after (clearedAfterSend), and a field that had the focus keeps it.
+ */
+export async function sendTypedCheck(form, how) {
+  const S = await importShim("./state.ts");
+  const el = document.querySelector(`form${form}`);
+  if (!el) return [`${form}: no such form`];
+  const mic = el.querySelector(".mic");
+  await until(() => !mic.classList.contains("on"), 5000);
+  await until(() => false, 400);
+  const asked = () => (S.chat.value.items ?? []).filter((i) => i.kind === "user").map((i) => i.text.split("\n\n")[0]);
+  const before = asked().length;
+  const field = el.querySelector("textarea");
+  const TEXT = `typed ${how} question`;
+  typeInto(field, TEXT, how === "button");
+  await until(() => false, 100);
+  const focused = document.activeElement === field;
+  if (how === "button") el.querySelector(".send")?.click();
+  else field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await until(() => asked().length > before, 3000);
+  await until(() => false, 200);
+  const got = asked().slice(before);
+  const fails = got.length === 1 && got[0] === TEXT ? [] : [`${form} ${how}: asked ${JSON.stringify(got)}, not "${TEXT}" once`];
+  if (focused && field.isConnected && document.activeElement !== field) fails.push(`${form} ${how}: the field lost its focus after send`);
+  return [...fails, ...clearedAfterSend(form).map((f) => `${how}: ${f}`)];
 }

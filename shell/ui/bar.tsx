@@ -15,7 +15,7 @@ import { followOpenness } from "./gesture.ts";
 import { chatting, drawer, launcherIsOverlay, openPanel, pullKind, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
-import { finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, speech, stopTap, type MicTarget } from "./dictation.ts";
+import { finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
 
 /** A press longer than this is a hold (talk, then send); shorter, a tap (dictate). */
 const HOLD_MS = 250;
@@ -154,8 +154,15 @@ function useSubmitFinishes(box: { current: HTMLDivElement | null }, targets: Mic
       e.stopImmediatePropagation();
       wait.then(() => form.isConnected && form.requestSubmit());
     };
+    // After the form's own onSubmit: sent (its field emptied), the dictation is over - the mic off, nothing pending.
+    const sent = () =>
+      setTimeout(() => {
+        const field = box.current?.querySelector("textarea");
+        if (field && !field.value.trim() && !finishing.peek()) settle(...all.current);
+      }, 0);
     form.addEventListener("submit", onSubmit, true);
-    return () => form.removeEventListener("submit", onSubmit, true);
+    form.addEventListener("submit", sent);
+    return () => (form.removeEventListener("submit", onSubmit, true), form.removeEventListener("submit", sent));
   }, []);
 }
 
