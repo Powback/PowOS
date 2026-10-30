@@ -666,7 +666,9 @@ function untile(id: number, how: "float" | "minimise" | "keep" | "gone") {
   if (rest.length >= 2) closeUp(page, t, rest);
   else {
     setTiling(page, null);
-    if (rest.length) fillArea(rest[0]);
+    // SC1 (the user, 10-31 00:06: "When there's only like one split-screen application left, it should return to like
+    // a normal full-screen application"): no tiling of one - the last window goes full screen at once, the bar's way.
+    if (rest.length) lastOfSplit(rest[0]);
   }
   console.info(`[tiles] window ${id} out of page ${page}'s tiles (${how}); ${rest.length} left`);
 }
@@ -687,13 +689,15 @@ function closeUp(page: number, t: Tiling, rest: number[]) {
   setTiling(page, { layout, ids: SLOTS[layout].map((_, i) => rest[i] ?? null), rx: keep ? t.rx : 0.5, ry: keep ? t.ry : 0.5 });
 }
 
-/** The last window of a split fills the work area (restore: its floating frame). */
-function fillArea(id: number) {
+/**
+ * The last window of a split: back at its floating frame (what "restore" gives back), then full screen as the bar's
+ * button does it (F1: a real full-screen app on the host; with none, the work area).
+ */
+function lastOfSplit(id: number) {
   const w = webWins.value.find((v) => v.id === id);
   if (!w) return;
-  const a = workArea();
-  const o = pageOrigin();
-  update(id, { x: a.left - o.x, y: a.top - o.y, w: a.right - a.left, h: a.bottom - a.top, restore: w.untiled ?? { x: w.x, y: w.y, w: w.w, h: w.h }, untiled: undefined });
+  update(id, { ...(w.untiled ?? {}), untiled: undefined, restore: undefined });
+  fullScreen(id);
 }
 
 /** A new window on [page] takes the first empty tile of its tiling. */

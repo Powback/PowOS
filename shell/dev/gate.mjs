@@ -2716,6 +2716,99 @@ async function webDockToggleCell() {
  * entry's) follows; the pinch never reaches the app (its press ends in one cancel); and at that scale a press at the
  * body's centre goes to the app's centre (body px, unscaled: Body.toApp divides by the measured scale).
  */
+/**
+ * In the page: tiled web windows take input through the forward path (TL1, the user 10-31 00:05: "Can't interact with
+ * the tabs that I put into like split screen"). Three windows tiled; at each tile's body centre the DOM hit test must
+ * find that body (not a divider, a page hole or another window), and a tap and a vertical drag sent THERE (where the
+ * finger's events go) reach powos.webwindows.input with the tile's id and body coordinates, every move included. Each
+ * tile has its bar and its close works. SC1: a split down to one window ends - the last one is full screen, no tiling.
+ * TILE_HELPERS first (page.evaluate sends only the one function).
+ */
+function TILE_HELPERS() {
+  const pe = (el, type, [x, y], id) => el.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true }));
+  const seen = (calls) => calls.map((c) => `${c[0]}:${c[1]}`).join(",") || "nothing";
+  // A tap at the centre: down and up for [id], at the body's centre in body px.
+  const tap = (id, { body, hit }, calls, [cx, cy]) => {
+    calls.length = 0;
+    (pe(hit, "pointerdown", [cx, cy], 40 + id), pe(hit, "pointerup", [cx, cy], 40 + id));
+    if (seen(calls) !== `${id}:down,${id}:up`) return [`tile ${id}: a tap reached the app as ${seen(calls)} (want ${id}:down,${id}:up)`];
+    const off = Math.hypot(calls[0][2] - body.offsetWidth / 2, calls[0][3] - body.offsetHeight / 2);
+    return off > 1 ? [`tile ${id}: a tap at its centre went to the app at ${calls[0][2]},${calls[0][3]} (want ${body.offsetWidth / 2},${body.offsetHeight / 2})`] : [];
+  };
+  // A 120 px drag up (a scroll): down, 6 moves, up, all for [id].
+  const drag = (id, hit, calls, [cx, cy]) => {
+    calls.length = 0;
+    pe(hit, "pointerdown", [cx, cy + 60], 40 + id);
+    for (let k = 1; k <= 6; k++) pe(hit, "pointermove", [cx, cy + 60 - 20 * k], 40 + id);
+    pe(hit, "pointerup", [cx, cy - 60], 40 + id);
+    const want = ["down", ...Array(6).fill("move"), "up"].map((a) => `${id}:${a}`).join(",");
+    if (seen(calls) !== want) return [`tile ${id}: a vertical drag reached the app as ${seen(calls)} (want down, 6 moves, up for ${id})`];
+    return Math.abs(calls[0][3] - calls[7][3] - 120) > 1 ? [`tile ${id}: a 120 px drag reached the app as ${calls[0][3] - calls[7][3]} px`] : [];
+  };
+  const one = (id, calls) => {
+    const frame = document.querySelector(`.webwindow[data-wwid="${id}"]`);
+    const body = frame?.querySelector(".webwindow-body");
+    if (!body) return [`tile ${id}: no body element`];
+    const bar = frame.querySelector(".webwindow-title .ww-close") ? [] : [`tile ${id}: no title bar with a close button`];
+    const b = body.getBoundingClientRect();
+    const c = [b.left + b.width / 2, b.top + b.height / 2];
+    const hit = document.elementFromPoint(...c);
+    if (hit !== body) return [...bar, `tile ${id}: the hit test at its body's centre found ${hit ? `${hit.tagName}.${hit.className}` : "nothing"}, not its body`];
+    return [...bar, ...tap(id, { body, hit }, calls, c), ...drag(id, hit, calls, c)];
+  };
+  // Its bar's close, pressed where the finger is (the hit test's element).
+  const closeTile = async (W, id) => {
+    const close = document.querySelector(`.webwindow[data-wwid="${id}"] .ww-close`);
+    if (!close) return [];
+    const r = close.getBoundingClientRect();
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    const fails = close.contains(at) ? [] : [`tile ${id}: the hit test at its close button found ${at?.className}`];
+    (pe(at, "pointerdown", [r.left + 4, r.top + 4], 70), pe(at, "pointerup", [r.left + 4, r.top + 4], 70));
+    at.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: r.left + 4, clientY: r.top + 4 }));
+    await window.__gw.settled();
+    if (W.webWins.value.some((w) => w.id === id)) fails.push(`tile ${id}: its close button didn't close it`);
+    return fails;
+  };
+  // SC1: the last window of a split is full screen (the work area, with no host), no tiling left.
+  const lastAlone = (W, id, page) => {
+    const last = W.webWins.value.find((w) => w.id === id);
+    const a = W.workArea();
+    const fails = W.tiledOn(id) != null || W.tilings.value[page] ? ["SC1: a split down to one window is still a tiling"] : [];
+    const full = last?.restore && Math.abs(last.w - (a.right - a.left)) <= 1 && Math.abs(last.h - (a.bottom - a.top)) <= 1;
+    return full ? fails : [...fails, `SC1: the last window of a split isn't full screen (${last?.w}x${last?.h}, restore ${!!last?.restore})`];
+  };
+  window.__tileg = { one, closeTile, lastAlone };
+  return [];
+}
+
+async function webWindowTileInputCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const had = powos.webwindows;
+  const calls = [];
+  powos.webwindows = { ...had, input: (id, action, x, y) => (calls.push([id, action, x, y]), Promise.resolve(true)) };
+  const page = S.pages.value[0];
+  try {
+    S.page.value = 0;
+    await window.__gw.settled();
+    W.webWins.value = [911, 912, 913].map((id, i) => ({ id, key: `a:gate.tile${i}`, label: `Tile ${i}`, page, x: 60 + 40 * i, y: 100 + 40 * i, w: 300, h: 260, live: true }));
+    W.tileWindows(page, [911, 912, 913]);
+    await window.__gw.settled();
+    const fails = [911, 912, 913].flatMap((id) => window.__tileg.one(id, calls));
+    // A tile's own close (its bar): gone, the others close up; then a split of two down to one ends (SC1).
+    fails.push(...(await window.__tileg.closeTile(W, 913)));
+    if (W.tiledOn(911) == null || W.tiledOn(912) == null) fails.push("a tile closed out of three: the other two left their split");
+    W.minimise(912);
+    await window.__gw.settled();
+    return [...fails, ...window.__tileg.lastAlone(W, 911, page)];
+  } finally {
+    W.webWins.value = [];
+    W.tilings.value = {};
+    powos.webwindows = had;
+  }
+}
+
 async function webWindowPinchCheck() {
   // RB1 after a pinch 200 -> 140 px on window [pw] (400x320): resized to 280x224, scale 1, no transform, a 36 px bar.
   const pinchResized = (pw, body) => {
@@ -3596,7 +3689,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, webWindowResizeCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowResizeCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
