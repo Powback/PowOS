@@ -612,14 +612,18 @@ class Runtime(
         shortcut.component?.let { androidApps.open(it, shortcut.profile) }
     }
 
-    fun launch(app: LinuxApp) {
+    /** [onFailed]: it couldn't start (rooted: its command ended with no window, or never ran), with why, on the launch thread. */
+    fun launch(
+        app: LinuxApp,
+        onFailed: (String) -> Unit = {},
+    ) {
         // Our own Files app: open it directly rather than round-tripping through the guest.
         if (app.exec == FILES_COMMAND) return openFiles()
         // Plasma itself, as an app: its full desktop (the "PowOS" activity), nothing started in the session.
         if (app.exec == PLASMA_COMMAND) return showDesktop()
         if (app.terminal) return terminal(app.exec, app.name)
         // PowOS rooted mode: like a phone app, its window as its own Android task (KWin exports it), not the desktop.
-        if (!linux && rootedTerminals) return openRooted(app)
+        if (!linux && rootedTerminals) return openRooted(app, onFailed)
         // Like an Android icon: an app that already has a window comes back to it. Single-instance
         // apps would otherwise just exit on a second launch, showing nothing. Quickshell apps (App Finder)
         // all share the app_id org.quickshell, so their window title, which is their name, decides.
@@ -633,20 +637,31 @@ class Runtime(
      * Rooted mode: [app] in its own Android task (RootedGuest.openAsTask) - its window if it has one, else it starts.
      * Where it can't be a task (no window tasks yet, a window KWin doesn't export), the desktop comes up to show it.
      */
-    private fun openRooted(app: LinuxApp) {
+    private fun openRooted(
+        app: LinuxApp,
+        onFailed: (String) -> Unit,
+    ) {
         Log.i(TAG, "open as task: ${app.id}")
         // Its launch window at once, where its window will be (LaunchWindows): the app's first window becomes it.
         val ids = listOfNotNull(app.id, app.wmClass).filter { it.isNotBlank() }.toTypedArray()
         // Web windows on (docs/WEB_WINDOWS.md S6): the window opens as home's web window when KWin opens it - no task.
         if (!andro.marchy.WebWindowSource.wanted() && !andro.marchy.WindowTasks.hasWindow(ids)) andro.marchy.LaunchWindows.open(context, app.id, ids, app.name)
         thread(name = "guest-open", isDaemon = true) {
-            val log: (String) -> Unit = { Log.i(TAG, "[${app.id.take(24)}] $it") }
+            val outcome = LaunchOutcome()
+            val log: (String) -> Unit = { line ->
+                Log.i(TAG, "[${app.id.take(24)}] $line")
+                outcome.line(line)
+            }
             val desktop = {
                 andro.marchy.LaunchWindows.done(app.id)
                 showDesktop()
             }
-            val code = runCatching { RootedGuest.openAsTask(app.id, app.wmClass, app.exec, desktop, log) }.getOrElse { -1 }
+            val code = runCatching { RootedGuest.openAsTask(app.id, app.wmClass, app.exec, desktop, log) }.getOrElse { e -> outcome.error(e); -1 }
             Log.i(TAG, "exited $code: ${app.exec}")
+            outcome.failure(code)?.let { why ->
+                Log.w(TAG, "launch failed: ${app.id}: $why")
+                runCatching { onFailed(why) }
+            }
             // Its window's "open" may still be on its way from KWin: a moment, then a launch window still waiting goes.
             Thread.sleep(LAUNCH_GRACE_MS)
             andro.marchy.LaunchWindows.done(app.id)
@@ -728,9 +743,46 @@ class Runtime(
         }
     }
 
+    /**
+     * A rooted launch's output (stderr merged in), for "couldn't start: <why>": powos-open-task's "failed" status (its
+     * command ended with no window: exit 3) and the command's last words - not Qt's locale notice every KDE app prints.
+     */
+    private class LaunchOutcome {
+        private val last = ArrayDeque<String>()
+        private var failed: String? = null
+
+        fun line(line: String) {
+            when {
+                line.startsWith(OPEN_FAILED) -> failed = "It ${line.removePrefix(OPEN_FAILED).trimStart(':', ' ')} with no window"
+                line.startsWith("powos-open-task:") || LAUNCH_NOISE.containsMatchIn(line) || line.isBlank() -> {}
+                else -> {
+                    last.addLast(line.trim().take(200))
+                    if (last.size > 3) last.removeFirst()
+                }
+            }
+        }
+
+        fun error(e: Throwable) {
+            failed = "It didn't run (${e.message})"
+        }
+
+        /** Why nothing will show, or null: 0/2 are powos-open-task's task/desktop; anything else is the helper's own end
+         * (powos-run found no session: 1, su refused, ...). */
+        fun failure(code: Int): String? {
+            if (failed == null && (code == 0 || code == 2)) return null
+            return listOfNotNull(failed ?: "It ended (exit $code)", last.lastOrNull()).joinToString(": ")
+        }
+    }
+
     companion object {
         private const val TAG = "runtime"
         private const val LAUNCH_GRACE_MS = 3000L
+
+        /** powos-open-task's status for a command that ended with no window (session/powos-open-task). */
+        private const val OPEN_FAILED = "powos-open-task: failed"
+
+        /** Output that says nothing about why a launch failed (Qt's locale notice, Solid's missing UDisks2). */
+        private val LAUNCH_NOISE = Regex("""Detected locale|Qt depends on a UTF-8|reconfigure your locale|^for more information|kf\.solid\.backends""")
         private val STEAM_GAME = Regex("""steam://rungameid/(\d+)""")
         private const val SETUP_DONE = "setup_done"
         private const val SYSTEM_THEME_KEY = "system_theme_applied"

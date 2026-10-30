@@ -42,6 +42,10 @@ Prints one status line for the caller, then exits (COMMAND keeps running; its ou
     powos-open-task: task       shown as its own task
     powos-open-task: desktop    not as a task - no window tasks (the PowOS app isn't connected to KWin, KWin not up),
                                 a window KWin doesn't export, or no window in time: the caller shows the desktop
+    powos-open-task: failed: exited N   COMMAND ended (it and every process it started) with no window: nothing will
+                                show. Said within GONE_GRACE_S of its end, not after WAIT_S, so the caller's placeholder
+                                says "couldn't start" with COMMAND's last output at once (exit 3). Not for Steam/games:
+                                `steam` hands the launch to the running client and exits by design.
 """
 import glob
 import json
@@ -62,6 +66,9 @@ WAIT_GAME_S = 150
 WAIT_STEAM_S = 120
 # A newly started app's shown window counts once it has lasted this long; one closing earlier is replaced by the next.
 SETTLE_S = 8
+# COMMAND and everything it started gone with no window yet: a window of the app's may still come this long after (a
+# launch handed to an instance of it in another session, which then opens one); then the launch failed.
+GONE_GRACE_S = 3
 # A show KWin refused for a new window: tried again this often, this far apart (its surface may come a moment later).
 SHOW_TRIES = 10
 SHOW_RETRY_MS = 500
@@ -190,6 +197,22 @@ class LaunchRecord:
             pass
 
 
+def session_alive(sid):
+    """Any process left in session [sid] (COMMAND runs as a session of its own: start_new_session)."""
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/stat") as f:
+                fields = f.read().rsplit(")", 1)[1].split()
+        except (OSError, IndexError):
+            continue
+        # fields[0] is the state, [1] ppid, [2] pgrp, [3] session; a zombie (Z) is ended.
+        if len(fields) > 3 and fields[3] == str(sid) and fields[0] != "Z":
+            return True
+    return False
+
+
 def main():
     args = sys.argv[1:]
     ids = set()
@@ -226,6 +249,24 @@ def main():
         if game:
             state["launch"] = LaunchRecord(game)
         state["child"] = subprocess.Popen(["/bin/bash", "-c", "exec " + command], start_new_session=True)
+        if not game and not steam_client:
+            QTimer.singleShot(500, watch_child)
+
+    def watch_child(gone_at=None):
+        """COMMAND ended with nothing left of it and no window of the app's came: "failed" at once, not after WAIT_S
+        (Dolphin 2026-10-30 21:00: the placeholder said loading for 20 s, and the reason was nowhere)."""
+        if state["done"] or state["picked"] or state["shown"]:
+            return
+        child = state["child"]
+        rc = child.poll()
+        if rc is None or session_alive(child.pid):
+            QTimer.singleShot(500, watch_child)
+            return
+        if gone_at is None:
+            QTimer.singleShot(GONE_GRACE_S * 1000, lambda: watch_child(time.monotonic()))
+            return
+        state["timer"] += 1  # the WAIT_S timeout is moot now
+        finish(f"failed: exited {rc}")
 
     def kwin(method, *call_args):
         msg = QDBusMessage.createMethodCall("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", method)
@@ -261,7 +302,7 @@ def main():
                 os.remove(path)
             except OSError:
                 pass
-        app.exit(0 if what == "task" else 2)
+        app.exit(0 if what == "task" else 3 if what.startswith("failed") else 2)
 
     def matches(desktop_file, resource_class, resource_name, pid=""):
         if ids & {desktop_file.lower(), resource_class.lower(), resource_name.lower()}:
