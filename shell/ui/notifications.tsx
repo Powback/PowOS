@@ -10,7 +10,6 @@ import { effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel, separatePanels } from "../state.ts";
 import { ControlCenter } from "./control.tsx";
-import { attachPeek, ccExpanded, ccPeeking } from "./ccexpand.ts";
 import { Icon } from "./icons.tsx";
 import { followNotif, notifOpen, notifShown } from "./gesture.ts";
 import { ago } from "./time.ts";
@@ -266,14 +265,15 @@ function grouped(items: GroupedNotification[]): Group[] {
 }
 
 /**
- * The stacks tapped out of their resting state, by group: a tap on a stack opens it, a tap on its head closes it. At
- * rest every stack is folded; the shade's further pull (ccexpand.ts ccExpanded) shows everything, so then every stack
- * is open and these are the ones folded again. Each change of that state starts them over.
+ * The groups tapped open: at rest every group with more than one card is a folded stack (its newest on top, two
+ * peeking under it, its count in its head), so every app fits on the screen at once - folded or unfolded, whatever the
+ * control center shows (the user, 2026-10-30: "Maybe group to notification sold that I can see all the types at once
+ * ... Max 3 in one In one stack"; unfolded, ccExpanded opened every stack and PowOS's ten deploy cards pushed every other app off).
+ * A tap on a stack opens that one only; a tap on its head folds it again. Shut, the shade starts folded next time.
  */
 const expanded = signal<Set<string>>(new Set());
 effect(() => {
-  void ccExpanded.value;
-  expanded.value = new Set();
+  if (!notif.value && expanded.peek().size) expanded.value = new Set();
 });
 const toggle = (id: string) => {
   const s = new Set(expanded.value);
@@ -283,55 +283,35 @@ const toggle = (id: string) => {
 };
 
 /**
- * Whether a stack is [open] (tapped, or the shade's whole view), and [shown] open: also while a pull of the shade
- * (ccexpand.ts) is about to unfold it - then its rest rides the finger. [driven]: the pull drives it either way (its
-^ * "pulled": the top card's "+N" and the peeking cards under it are kept, faded by the finger - ccexpand.ts attachPeek).
- */
-function useStackOpen(id: string) {
-  const has = expanded.value.has(id);
-  const peek = ccPeeking.value;
-  const open = has !== ccExpanded.value;
-  const shown = open || (peek === "open" && !has);
-  const ref = useRef<HTMLDivElement>(null);
-  // Driven by the pull: the stacks it unfolds, or folds (shown open, not tapped open on their own).
-  const driven = !!peek && shown && !has;
-  useLayoutEffect(() => {
-    if (driven && ref.current) attachPeek(ref.current);
-  }, [peek, shown]);
-  // The stack's classes, and whether the top card keeps its folded look ("+N"): folded, or driven by the pull.
-  const cls = `notif-stack ${shown ? "open" : ""} ${driven ? "pulled" : ""}`;
-  return { open, shown, driven, cls, folded: !open || driven, ref };
-}
-
-/**
- * One group: a single notification is its card. More than one: a stack - its newest on top with the group's name and
- * "+N", two slim cards peeking under it; a tap opens it in place (the others unfold under the newest, no jump), its
- * head closes it again. Slid away, a closed stack dismisses the whole group; open, each card goes on its own.
+ * One group: a single notification is its card. More than one: a stack - its head (the group's name, its count, the
+ * fold chevron), its newest card, and under it either two slim cards peeking (folded) or the others (open), unfolding
+ * in place. The cards look the same both ways - only the rest's height and the peeking slivers animate (an earlier
+ * complaint: a style switch mid-transition). Slid away, a folded stack dismisses the whole group; open, each card.
  */
 function Stack({ g }: { g: Group }) {
   const [top, ...rest] = g.items;
-  const { open, shown, driven, cls, folded, ref } = useStackOpen(g.id);
   if (!rest.length) return <Card n={top} name={g.name !== top.app ? g.name : undefined} />;
+  const open = expanded.value.has(g.id);
   const clearAll = () => g.items.filter((n) => n.clearable).forEach((n) => powos.notifications.dismiss(n.key));
   return (
-    <div ref={ref} class={cls} data-depth={Math.min(2, rest.length)}>
-      {shown ? (
-        <button type="button" class="notif-group-head" onClick={() => toggle(g.id)}>
-          <span class="notif-app">{g.name}</span>
-          <span class="notif-more">{g.items.length}</span>
-          <span class="notif-fold" aria-label="collapse">⌃</span>
-        </button>
-      ) : null}
+    <div class={`notif-stack ${open ? "open" : ""}`} data-depth={Math.min(2, rest.length)}>
+      <button type="button" class="notif-group-head" aria-expanded={open} onClick={() => toggle(g.id)}>
+        {notifIconSrc(top) && <img class="notif-icon" src={notifIconSrc(top)!} alt="" />}
+        <span class="notif-app">{g.name}</span>
+        <span class="notif-more">{g.items.length}</span>
+        <span class="notif-fold" aria-label={open ? "collapse" : "expand"}>
+          ⌃
+        </span>
+      </button>
       <Card
         n={top}
         name={g.name}
-        class={open && !driven ? "in-group" : ""}
-        more={folded ? rest.length : 0}
+        class="in-group"
         onTap={open ? undefined : () => toggle(g.id)}
         onDismiss={open ? undefined : clearAll}
         clearable={open ? top.clearable : g.items.some((n) => n.clearable)}
       />
-      <div class="notif-rest">
+      <div class="notif-rest" inert={!open}>
         <div>
           {rest.map((n) => (
             <Card key={n.key} n={n} name={g.name} class="in-group" />
