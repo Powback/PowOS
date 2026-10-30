@@ -94,6 +94,9 @@ function scrolls(el: Element): boolean {
  * Home's pager and anything near screen-sized are left out: they're the empty home the pulls start from. The user,
  * 2026-10-29: "Trying to scroll the recent bar triggers the notification center or the launcher."
  */
+/** A web window's resize zones reach this far outside its frame (screen px: the corners', shell.css .ww-edge). */
+const WINDOW_ZONE = 48;
+
 function claimFree(dockNode: HTMLElement | null): PageRect[] {
   const out: PageRect[] = [];
   const big = innerWidth * innerHeight * 0.5;
@@ -111,9 +114,17 @@ function claimFree(dockNode: HTMLElement | null): PageRect[] {
   });
   // A web window (ui/webwindows.tsx) whole - title bar, body, edges - whatever its size: dragging it moves the window,
   // and its body is the app's, never a pull (the user, 2026-10-30: "when i try to move the window it moves the whole page").
+  // RZ5: with its resize zones outside the frame (32 dp edges, 48 dp corners: the rect grown by the corners'), kept out
+  // of the status strip and the bottom gesture area - those stay the system's.
+  const app = fullScreenAppRegion();
   document.querySelectorAll(".page:not(.away) .webwindow").forEach((el) => {
     const r = el.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) out.push(pageRect(r));
+    if (r.width <= 0 || r.height <= 0) return;
+    const top = Math.max(app.top, r.top - WINDOW_ZONE);
+    const bottom = Math.min(app.top + app.height, r.bottom + WINDOW_ZONE);
+    const left = Math.max(0, r.left - WINDOW_ZONE);
+    const right = Math.min(innerWidth, r.right + WINDOW_ZONE);
+    if (bottom > top && right > left) out.push({ left, top, width: right - left, height: bottom - top });
   });
   // FL4: a full-screen Linux window (over all of home, no element on the page) is the app's everywhere but the edge
   // strips: the shade's pull only from the top strip, home / the launcher only from the bottom one.
