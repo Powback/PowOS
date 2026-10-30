@@ -655,29 +655,37 @@ const OVERLAYS = ".folder-view.open";
 
 type Clip = [number, number, number, number];
 
+/** [clip] narrowed to [q] along x and/or y. */
+function narrow(clip: Clip, q: DOMRect, x: boolean, y: boolean) {
+  if (x) (clip[0] = Math.max(clip[0], q.left), (clip[2] = Math.min(clip[2], q.right)));
+  if (y) (clip[1] = Math.max(clip[1], q.top), (clip[3] = Math.min(clip[3], q.bottom)));
+}
+
+/** One ancestor's share of [shown]: its opacity (0: hidden), and its clip into [clip]. */
+function ancestor(a: HTMLElement, clip: Clip): number {
+  const cs = getComputedStyle(a);
+  // Its own page's area always clips it (PS2), whatever the page's overflow.
+  const page = a.classList.contains("page");
+  const x = page || cs.overflowX !== "visible";
+  const y = page || cs.overflowY !== "visible";
+  if (x || y) narrow(clip, a.getBoundingClientRect(), x, y);
+  return cs.visibility === "hidden" || cs.display === "none" ? 0 : parseFloat(cs.opacity) || 0;
+}
+
 /** What of [el] its clipping ancestors and the screen let show (viewport CSS px, l t r b), and its ancestors' opacity. */
 function shown(el: HTMLElement): { clip: Clip; alpha: number } {
   const r = el.getBoundingClientRect();
   const clip: Clip = [Math.max(0, r.left), Math.max(0, r.top), Math.min(innerWidth, r.right), Math.min(innerHeight, r.bottom)];
   let alpha = 1;
-  for (let a: HTMLElement | null = el.parentElement; a && a !== document.body; a = a.parentElement) {
-    const cs = getComputedStyle(a);
-    alpha *= parseFloat(cs.opacity) || 0;
-    // Its own page's area always clips it (PS2), whatever the page's overflow.
-    if (a.classList.contains("page")) {
-      const q = a.getBoundingClientRect();
-      clip[0] = Math.max(clip[0], q.left);
-      clip[1] = Math.max(clip[1], q.top);
-      clip[2] = Math.min(clip[2], q.right);
-      clip[3] = Math.min(clip[3], q.bottom);
-    }
-    if (cs.visibility === "hidden" || cs.display === "none") alpha = 0;
-    if (cs.overflowX === "visible" && cs.overflowY === "visible" && cs.clipPath === "none") continue;
-    const q = a.getBoundingClientRect();
-    if (cs.overflowX !== "visible") (clip[0] = Math.max(clip[0], q.left), (clip[2] = Math.min(clip[2], q.right)));
-    if (cs.overflowY !== "visible") (clip[1] = Math.max(clip[1], q.top), (clip[3] = Math.min(clip[3], q.bottom)));
-  }
+  for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) alpha *= ancestor(a, clip);
   return { clip, alpha };
+}
+
+/** Maximised, the bar merges with the status bar: "<title's end> <controls' start>" (the status bar's between), else "-1 -1". */
+function mergeOf(w: WebWin, el: HTMLElement): string {
+  const title = el.querySelector(".ww-title-label")?.getBoundingClientRect();
+  const controls = el.querySelector(".ww-controls")?.getBoundingClientRect();
+  return w.restore && title && controls ? `${px(title.right)} ${px(controls.left)}` : "-1 -1";
 }
 
 /**
@@ -692,13 +700,9 @@ export function entry(w: WebWin): string | null {
   const b = body.getBoundingClientRect();
   const scale = body.offsetWidth ? b.width / body.offsetWidth : 1;
   const { clip, alpha } = shown(body);
-  const covered = !!document.querySelector(OVERLAYS);
-  const visible = !covered && alpha > 0.01 && clip[2] > clip[0] && clip[3] > clip[1];
-  // Maximised, the bar merges with the status bar: its title's end and its controls' start (the status bar's between).
-  const title = el.querySelector(".ww-title-label")?.getBoundingClientRect();
-  const controls = el.querySelector(".ww-controls")?.getBoundingClientRect();
-  const merged = w.restore && title && controls ? `${px(title.right)} ${px(controls.left)}` : "-1 -1";
-  return [w.id, px(f.left), px(f.top), px(f.width), px(f.height), px(b.left), px(b.top), px(b.width), px(b.height), ...clip.map(px), RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), w.restore ? 1 : 0, merged].join(" ");
+  const visible = !document.querySelector(OVERLAYS) && alpha > 0.01 && clip[2] > clip[0] && clip[3] > clip[1];
+  const rects = [f.left, f.top, f.width, f.height, b.left, b.top, b.width, b.height, ...clip].map(px);
+  return [w.id, ...rects, RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), w.restore ? 1 : 0, mergeOf(w, el)].join(" ");
 }
 
 /** "<dpr> <n> <entries...>": every window the page shows, bottom first (DOM order = z-order). */
@@ -752,14 +756,16 @@ const SNAP_EDGE = 24;
 const SNAP_CORNER = 120;
 const SLOP = 6;
 
+/** The corner or half each side snaps to: top, middle, bottom of the work area. */
+const SNAPS_AT: Record<"l" | "r", [Slot, Slot, Slot]> = { l: ["tl", "left", "bl"], r: ["tr", "right", "br"] };
+
 /** Where a bar drag let go at ([x], [y]) snaps (docs "Tiles": drag to an edge), or null. */
 function snapSlot(x: number, y: number): Slot | null {
   const a = tileArea();
   const side = x <= a.left + SNAP_EDGE ? "l" : x >= a.right - SNAP_EDGE ? "r" : null;
   if (!side) return null;
-  if (y <= a.top + SNAP_CORNER) return side === "l" ? "tl" : "tr";
-  if (y >= a.bottom - SNAP_CORNER) return side === "l" ? "bl" : "br";
-  return side === "l" ? "left" : "right";
+  const row = y <= a.top + SNAP_CORNER ? 0 : y >= a.bottom - SNAP_CORNER ? 2 : 1;
+  return SNAPS_AT[side][row];
 }
 
 /** Its bar's buttons, right to left: close, full screen, minimise, tile (the old native bar's order). */
@@ -808,7 +814,7 @@ function TileMenu({ win }: { win: WebWin }) {
   const items: [Slot, string][] = [["left", "Left half"], ["right", "Right half"], ["top", "Top half"], ["bottom", "Bottom half"], ["grid", "Grid"]];
   if (tiled) items.push(["float", "Float"]);
   return (
-    <div class="ww-tile-menu tile sheet" onPointerDown={(e) => e.stopPropagation()}>
+    <div class="ww-tile-menu tile sheet pop" onPointerDown={(e) => e.stopPropagation()}>
       {items.map(([slot, label]) => (
         <button
           key={slot}
@@ -1020,7 +1026,7 @@ export function bodyBox(w: WebWin): Box {
  */
 export function holes(cut: WebWin[], at: { x: number; y: number; s: number }): Record<string, string> | undefined {
   if (!cut.length) return undefined;
-  const full = "linear-gradient(#000, #000)";
+  const full = "linear-gradient(black, black)";
   const boxes = cut.map(bodyBox).map((b) => ({ x: (b.x - at.x) / at.s, y: (b.y - at.y) / at.s, w: b.w / at.s, h: b.h / at.s }));
   return {
     maskImage: [full, ...boxes.map(() => full)].join(", "),
