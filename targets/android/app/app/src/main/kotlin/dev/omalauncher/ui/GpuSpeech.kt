@@ -23,14 +23,16 @@ import kotlin.math.log10
 import kotlin.math.sqrt
 
 /**
- * Which engine dictates (Settings > voice > transcription, the shell's store "speech": {"engine": "gpu"|"ondevice"}).
- * GPU (the default): Whisper on the GPU box (stt.pow, [SttServer]) from PowOS's own recording ([GpuSession]); on-device:
- * Android's recognizer ([NativeSpeech]). Every dictation (the mic, hold to talk, the side button) starts here: one
+ * Which engine dictates (Settings > voice > transcription, the shell's store "speech": {"engine": "gpu"|"gpu-http"|"ondevice"}).
+ * GPU (the default): PowOS's own recording streamed to the voice agent's transcription (voiceagent.pow/ws, the swipe
+ * keyboard's protocol, [StreamSession]); "gpu-http": the same recording re-POSTed to stt.pow ([GpuSession]), only when
+ * chosen explicitly; on-device: Android's recognizer ([NativeSpeech]). Every dictation (the mic, hold to talk, the side button) starts here: one
  * session at a time across both engines, the latest start wins.
  */
 internal object SpeechEngines {
     private const val TAG = "speech"
     const val GPU = "gpu"
+    const val GPU_HTTP = "gpu-http"
     const val ON_DEVICE = "ondevice"
 
     /** The one dictation, whichever window started it ([SessionSlot]): a new start ends it first, its owner told. */
@@ -54,7 +56,7 @@ internal object SpeechEngines {
     fun choice(c: Context): String =
         runCatching {
             JSONObject(File(c.filesDir, "shell-data/speech.json").readText()).optString("engine", GPU)
-        }.getOrDefault(GPU).takeIf { it == ON_DEVICE } ?: GPU
+        }.getOrDefault(GPU).takeIf { it == ON_DEVICE || it == GPU_HTTP } ?: GPU
 
     fun start(
         c: Context,
@@ -78,7 +80,11 @@ internal object SpeechEngines {
             // over the VPN moved the user's dictation onto Android's recognizer, unseen; and a "known down" kept the
             // next 30 s there too). Unreachable, the session ends at once with a message (GpuSession.fail).
             // On-device is the explicit choice in Settings > voice only.
+            // The streaming engine is the default; stt.pow's POSTs only as the explicit "gpu-http" setting.
             if (engine == GPU) {
+                callbacks.onEngine(GPU)
+                StreamSession(++ids, hold, callbacks, MicSource()).also { it.begin() }
+            } else if (engine == GPU_HTTP) {
                 callbacks.onEngine(GPU)
                 GpuSession(++ids, app, hold, callbacks, MicSource()).also { it.begin() }
             } else {
@@ -89,14 +95,14 @@ internal object SpeechEngines {
     }
 
     fun warm(c: Context) {
-        if (choice(c) == GPU) SttServer.checkIfStale()
+        if (choice(c) == GPU_HTTP) SttServer.checkIfStale()
         NativeSpeech.warm(c)
     }
 
     /**
      * A test with recorded audio instead of the mic (16 kHz mono 16-bit WAV under the app's files/speech-test/): the
-     * whole dictation as a tap's, logged as "test: ..." - nothing reaches a page. [mode]: "gpu" (as a dictation would),
-     * "fallback" (stt.pow made to fail after its first answer: partials are tolerated, the finals' failure ends the
+     * whole dictation as a tap's, logged as "test: ..." - nothing reaches a page. [mode]: "gpu" (as a dictation would:
+     * streamed to voiceagent.pow), "gpu-http" (stt.pow's POSTs, the explicit setting), "fallback" (stt.pow made to fail after its first answer: partials are tolerated, the finals' failure ends the
      * session with a message and what was heard kept - no on-device fallback), "down" (the on-device recognizer from
      * the file, as the explicit on-device setting).
      */
@@ -128,6 +134,12 @@ internal object SpeechEngines {
                     feed.finish()
                 }, src.durationMs + 300)
                 NativeSpeech.start(app, false, cb, feed)
+            }
+            "gpu" -> {
+                cb.onEngine(GPU)
+                val src = FileSource(f)
+                val s = StreamSession(++ids, false, cb, src).also { it.begin() }
+                Handler(Looper.getMainLooper()).postDelayed({ s.stop() }, src.durationMs + 1500)
             }
             else -> {
                 cb.onEngine(GPU)
@@ -740,6 +752,313 @@ internal class GpuSession(
         source.stop()
         val t = text
         Log.i(TAG, "session #$id (gpu): end (${t.length} chars, ${segs.size} segments${if (why != null) ", $why" else ""})")
+        cb.onEnd(t, why)
+    }
+}
+
+/**
+ * The voice agent's transcription protocol, as the swipe keyboard speaks it (android-app-dev swipe-keyboard
+ * VoiceClient): `{"type":"start","mode":"transcription_only"}`, then raw 16 kHz mono Int16 PCM in binary frames of
+ * [CHUNK_BYTES] (512 samples, 32 ms: Silero VAD's frame), and back `{"type":"transcript","text":...,"final":bool}` -
+ * the server's VAD cuts segments; a partial is the current segment so far, a final is that segment's text (not the
+ * whole). `{"type":"stop"}` ends it (the server drops what it hasn't transcribed: [StreamSession] flushes with silence
+ * first). Also `{"type":"state","phase":"listening"|"processing"|"idle"}` and `{"type":"error",...}`.
+ */
+internal object VoiceAgentProtocol {
+    const val URL = "ws://voiceagent.pow/ws"
+    const val CHUNK_BYTES = 1024
+    const val START = """{"type":"start","mode":"transcription_only"}"""
+    const val STOP = """{"type":"stop"}"""
+
+    sealed class Msg {
+        data class Transcript(
+            val text: String,
+            val final: Boolean,
+        ) : Msg()
+
+        data class Phase(
+            val phase: String,
+        ) : Msg()
+
+        data class Error(
+            val message: String,
+        ) : Msg()
+
+        object Other : Msg()
+    }
+
+    fun parse(json: String): Msg =
+        runCatching {
+            val j = JSONObject(json)
+            when (j.optString("type")) {
+                "transcript" -> Msg.Transcript(j.optString("text").trim(), j.optBoolean("final", false))
+                "state" -> Msg.Phase(j.optString("phase"))
+                "error" -> Msg.Error(j.optString("message").ifBlank { j.optString("code", "error") })
+                else -> Msg.Other
+            }
+        }.getOrDefault(Msg.Other)
+
+    /** Any-size PCM in, exact [CHUNK_BYTES] frames out (the server's VAD takes a frame as given). */
+    class Rechunker(
+        private val emit: (ByteArray) -> Unit,
+    ) {
+        private val buf = ByteArray(CHUNK_BYTES)
+        private var n = 0
+
+        fun write(
+            b: ByteArray,
+            len: Int,
+        ) {
+            var off = 0
+            while (off < len) {
+                val k = minOf(CHUNK_BYTES - n, len - off)
+                System.arraycopy(b, off, buf, n, k)
+                n += k
+                off += k
+                if (n == CHUNK_BYTES) {
+                    emit(buf.copyOf())
+                    n = 0
+                }
+            }
+        }
+
+        /** The last partial frame, padded with silence. */
+        fun flush() {
+            if (n == 0) return
+            java.util.Arrays.fill(buf, n, CHUNK_BYTES, 0)
+            emit(buf.copyOf())
+            n = 0
+        }
+    }
+}
+
+/**
+ * One dictation streamed to the voice agent (voiceagent.pow/ws, GPU0's realtime voice path, transcription only), the
+ * swipe keyboard's way: the server's VAD cuts segments, each final is appended at once, a partial shows the segment
+ * still being spoken. Pauses never end it; a tap's ends at [stop] (or with no voice at all, after the tap's silence;
+ * or a quiet() asked for). No read timeout. A connection that fails or drops ends it at once with "voice: <why>",
+ * keeping what was heard - no fallback.
+ *
+ * [stop]: the audio ends with [FLUSH_MS] of silence (the server's VAD then ends the segment and transcribes it), the
+ * last final is awaited - quiet for [QUIET_MS] with nothing processing, at most [STOP_MAX_MS] (under dictation.ts's
+ * FINISH_MS) - then the server gets its stop; a partial never finalized stays in the text (the keyboard commits it too).
+ */
+internal class StreamSession(
+    val id: Int,
+    hold: Boolean,
+    private val cb: SpeechCallbacks,
+    private val source: PcmSource,
+) : SpeechSession {
+    companion object {
+        private const val TAG = "speech"
+        private const val FLUSH_MS = 800
+        private const val QUIET_MS = 500L
+        private const val STOP_MAX_MS = 2500L
+        // HACK: a forgotten tap's mic would stream forever; the keyboard has no cap. Real fix: the shell's own
+        // mic-on indicator/timeout policy - until then 15 min.
+        private const val MAX_SESSION_MS = 15 * 60_000L
+    }
+
+    private val main = Handler(Looper.getMainLooper())
+    private val d = Dictation(hold, NativeSpeech.TAP_SILENCE_MS) { SystemClock.elapsedRealtime() }
+    private val startedAt = SystemClock.elapsedRealtime()
+
+    /** Connect, then every frame in order, then the stop: one thread, so nothing overtakes the handshake. */
+    private val io = Executors.newSingleThreadExecutor { Thread(it, "voice-ws").apply { isDaemon = true } }
+    private val ws = VoiceSocket(VoiceAgentProtocol.URL, { t -> main.post { message(t) } }, { why -> main.post { dropped(why) } })
+
+    @Volatile private var up = false
+    private val chunks = VoiceAgentProtocol.Rechunker { f -> send { ws.send(f) } }
+
+    private val finals = mutableListOf<String>()
+    private var partial = ""
+    private var phase = ""
+    private var firstVoiceAt = 0L
+    private var lastEventAt = 0L
+    private var answers = 0
+    private var ended = false
+    private var stopAt = 0L
+    private var flushedAt = 0L
+    private var quietAsked = false
+    private var floorDb = -60.0
+
+    val text get() = (finals + partial).filter { it.isNotBlank() }.joinToString(" ").trim()
+
+    fun begin() {
+        Log.i(TAG, "session #$id (gpu stream): start (${if (d.hold) "hold" else "tap"})")
+        io.execute {
+            try {
+                ws.connect()
+                ws.sendText(VoiceAgentProtocol.START)
+                up = true
+            } catch (e: Exception) {
+                main.post { fail("voice: speech server unreachable (voiceagent.pow: ${e.message ?: e.javaClass.simpleName})") }
+            }
+        }
+        source.start { b, n ->
+            val db = db(b, n)
+            // Before the handshake ends the frames queue behind it (io is one thread): the first words aren't lost.
+            synchronized(chunks) { chunks.write(b, n) }
+            main.post { frame(db) }
+        }
+        main.postDelayed(watch, 100)
+    }
+
+    private fun send(what: () -> Unit) {
+        if (io.isShutdown) return
+        runCatching {
+            io.execute {
+                if (!up) return@execute
+                try {
+                    what()
+                } catch (e: IOException) {
+                    up = false
+                    main.post { dropped(e.message ?: e.javaClass.simpleName) }
+                }
+            }
+        }
+    }
+
+    private fun db(
+        b: ByteArray,
+        n: Int,
+    ): Double {
+        var sum = 0.0
+        var i = 0
+        while (i + 1 < n) {
+            val s = ((b[i + 1].toInt() shl 8) or (b[i].toInt() and 0xff)).toShort().toDouble()
+            sum += s * s
+            i += 2
+        }
+        return 20 * log10(maxOf(sqrt(sum / maxOf(1, n / 2)), 1.0) / 32768.0)
+    }
+
+    private fun frame(db: Double) {
+        if (ended) return
+        floorDb = if (db < floorDb) db else floorDb + 0.02
+        cb.onLevel(((db + 60) / 50).toFloat().coerceIn(0f, 1f))
+        if (d.stopping) return
+        if (db > floorDb + 12 && db > -55) {
+            if (firstVoiceAt == 0L) firstVoiceAt = SystemClock.elapsedRealtime()
+            d.voice()
+        }
+    }
+
+    private fun message(json: String) {
+        if (ended) return
+        lastEventAt = SystemClock.elapsedRealtime()
+        when (val m = VoiceAgentProtocol.parse(json)) {
+            is VoiceAgentProtocol.Msg.Transcript -> transcript(m)
+            is VoiceAgentProtocol.Msg.Phase -> phase = m.phase
+            // The keyboard ignores these too: one segment's failure, the stream goes on.
+            is VoiceAgentProtocol.Msg.Error -> Log.w(TAG, "session #$id (gpu stream): server error: ${m.message}")
+            VoiceAgentProtocol.Msg.Other -> {}
+        }
+    }
+
+    /** A final is its segment's text, appended at once; a partial, the segment still being spoken. */
+    private fun transcript(m: VoiceAgentProtocol.Msg.Transcript) {
+        // Whisper's words for silence or noise (subtitle credits, "Thank you."): dropped, see WhisperJunk.
+        val t = WhisperJunk.clean(m.text)
+        if (t != m.text) Log.i(TAG, "session #$id (gpu stream): dropped Whisper junk \"${m.text}\"")
+        if (m.final) {
+            if (t.isNotBlank()) finals.add(t)
+            partial = ""
+        } else {
+            partial = t
+        }
+        if (t.isNotBlank()) {
+            d.voice()
+            if (++answers == 1) Log.i(TAG, "session #$id (gpu stream): first words ${SystemClock.elapsedRealtime() - startedAt} ms after the start")
+        }
+        cb.onText(text)
+    }
+
+    private fun dropped(why: String?) {
+        if (ended) return
+        // During the stop the last final may still be missing: what was heard stands, with the reason.
+        fail("voice: ${why ?: "connection closed"}")
+    }
+
+    private val watch =
+        object : Runnable {
+            override fun run() {
+                if (ended) return
+                val now = SystemClock.elapsedRealtime()
+                when {
+                    d.silent() && (quietAsked || firstVoiceAt == 0L) -> {
+                        Log.i(TAG, "session #$id (gpu stream): silence, ending the dictation")
+                        stop()
+                    }
+                    !d.stopping && now - startedAt > MAX_SESSION_MS -> {
+                        Log.w(TAG, "session #$id (gpu stream): listened ${MAX_SESSION_MS / 60_000} min, ending the dictation")
+                        stop()
+                    }
+                    d.stopping && now - stopAt > STOP_MAX_MS -> return end(null)
+                    d.stopping && flushedAt > 0 && phase != "processing" && now - flushedAt >= QUIET_MS && now - lastEventAt >= QUIET_MS ->
+                        return end(null)
+                }
+                if (!ended) main.postDelayed(this, 50)
+            }
+        }
+
+    private fun fail(why: String) {
+        if (ended) return
+        Log.w(TAG, "session #$id (gpu stream): $why")
+        end(why)
+    }
+
+    override fun stop() {
+        if (ended || d.stopping) return
+        Log.i(TAG, "session #$id (gpu stream): stop")
+        d.stopping = true
+        stopAt = SystemClock.elapsedRealtime()
+        source.stop()
+        // Nothing heard and nothing pending: no need to wait for the server.
+        if (firstVoiceAt == 0L && text.isEmpty() && partial.isEmpty()) return end(null)
+        // The last partial frame, then silence: the server's VAD ends the segment and transcribes it.
+        synchronized(chunks) { chunks.flush() }
+        send {
+            val silence = ByteArray(VoiceAgentProtocol.CHUNK_BYTES)
+            repeat(FLUSH_MS / 32) { ws.send(silence) }
+            main.post { flushedAt = SystemClock.elapsedRealtime() }
+        }
+    }
+
+    override fun letGo() {
+        d.hold = false
+    }
+
+    override fun hold() {
+        d.hold = true
+    }
+
+    override fun quiet(ms: Long) {
+        d.silenceMs = ms.coerceIn(800, 10_000)
+        quietAsked = true
+    }
+
+    override fun cancel() {
+        if (ended) return
+        Log.i(TAG, "session #$id (gpu stream): cancel")
+        ended = true
+        close()
+    }
+
+    private fun close() {
+        main.removeCallbacks(watch)
+        source.stop()
+        send { ws.sendText(VoiceAgentProtocol.STOP) }
+        runCatching { io.execute { ws.close() } }
+        io.shutdown()
+    }
+
+    private fun end(why: String?) {
+        if (ended) return
+        ended = true
+        close()
+        val t = text
+        Log.i(TAG, "session #$id (gpu stream): end (${t.length} chars, ${finals.size} finals${if (partial.isNotBlank()) " + a partial" else ""}${if (why != null) ", $why" else ""})")
         cb.onEnd(t, why)
     }
 }
