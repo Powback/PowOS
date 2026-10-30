@@ -131,8 +131,107 @@ class WebWindows(
      */
     private fun reconcile() {
         val ws = wins.values.filter { it.linux == null && !it.closed && it.displayId >= 0 }
-        if (ws.isNotEmpty()) io.post { ws.forEach(::checkOrphan) }
+        if (ws.isEmpty()) return
+        io.post {
+            @Suppress("DEPRECATION")
+            val running = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrNull()
+            ws.forEach { if (running == null || !follow(it, running)) checkOrphan(it) }
+        }
     }
+
+    /**
+     * On [io] (WM1): [w]'s app's task, wherever the system or the app took it - OnePlus' "Floating window" (its "..."
+     * menu, WINDOWING_MODE_ZOOM) or freeform, PiP, a split, full screen, on display 0 or in the window's own display -
+     * followed by the window, never left as an empty frame beside a native window ([followOf]): floating -> back on its
+     * display, full screen there, the same window at its place and size; full screen / split on display 0 -> the
+     * window's full-screen state; PiP -> minimised (the frame hidden). True: the task is alive and the window holds it
+     * (no orphan check); false: not this window's to follow (gone, another display) - [checkOrphan] decides.
+     * Its task is learned from its display while it's there ([Win.taskId]).
+     */
+    private fun follow(
+        w: Win,
+        running: List<android.app.ActivityManager.RunningTaskInfo>,
+    ): Boolean {
+        val t = followedTask(w, running) ?: return false
+        val display = WebWindowDisplays.displayOf(t)
+        val mode = modeOf(t)
+        val act = followOf(display == w.displayId, display == android.view.Display.DEFAULT_DISPLAY, mode)
+        if (act == null) {
+            if (display == w.displayId) w.followed = null
+            return display == w.displayId
+        }
+        val key = "$display/$mode"
+        if (w.followed == key) return true
+        w.followed = key
+        Log.i(TAG, "window ${w.id} (${w.component.packageName}): its task ${t.taskId} went to display $display mode $mode by the system or the app: $act")
+        followNow(w, t.taskId, act)
+        return true
+    }
+
+    /** On [io]: [w]'s app's task in [running] (learned from its display while it's there), or null: none to follow. */
+    private fun followedTask(
+        w: Win,
+        running: List<android.app.ActivityManager.RunningTaskInfo>,
+    ): android.app.ActivityManager.RunningTaskInfo? {
+        if (w.closed || w.full || w.adopt >= 0) return null
+        val mine = running.filter { WebWindowDisplays.displayOf(it) == w.displayId }
+        if (mine.none { it.taskId == w.taskId }) mine.firstOrNull()?.let { w.taskId = it.taskId }
+        val task = w.taskId
+        if (task < 0 || WebWindowDisplays.fullScreenWindow(task) == w.id) return null
+        return running.firstOrNull { it.taskId == task }
+    }
+
+    /** On [io]: [follow]'s [act] for [w]'s [task]. */
+    private fun followNow(
+        w: Win,
+        task: Int,
+        act: Follow,
+    ) {
+        when (act) {
+            Follow.BACK -> followBack(w, task)
+            Follow.FULL -> {
+                // As fullScreenNow, but the system already put it there: the window hidden, held as its full-screen app.
+                main.post { hideFrame(w) }
+                WebWindowDisplays.fullScreen(task, w.id, true)
+                announce(w, true)
+            }
+            Follow.PIP -> main.post {
+                // HACK: the page's own minimise (to the dock) stands for PiP until ww-pip's MN1/MN2 state lands here: the
+                // frame hidden, never empty. Real fix: call its PiP state (the window's dock entry restores from PiP).
+                hideFrame(w)
+                if (!w.closed) emit("webwindows.control", mapOf("id" to w.id, "action" to "minimise"))
+            }
+        }
+    }
+
+    /** On [io]: [w]'s floating [task] back on its display, full screen there; the window shown where it was. */
+    private fun followBack(
+        w: Win,
+        task: Int,
+    ) {
+        val ok = moveTask(task, w.displayId)
+        Log.i(TAG, "window ${w.id}: task $task followed back onto its display ${w.displayId}: $ok")
+        if (!ok) {
+            w.followed = null
+            return
+        }
+        main.post { if (!w.closed) emit("webwindows.show", w.id) }
+    }
+
+    /** Main thread: [w]'s container hidden at once (the page drops it from "w.f" a frame later). */
+    private fun hideFrame(w: Win) {
+        if (w.container.isValid) SurfaceControl.Transaction().setVisibility(w.container, false).apply()
+        w.shown = false
+    }
+
+    /** Task [t]'s windowing mode (WindowConfiguration, hidden: reflected), or 0 (undefined/unreadable). */
+    private fun modeOf(t: android.app.TaskInfo): Int =
+        runCatching {
+            HiddenApi.allow()
+            val c = android.app.TaskInfo::class.java.getField("configuration").get(t) as android.content.res.Configuration
+            val wc = android.content.res.Configuration::class.java.getField("windowConfiguration").get(c)!!
+            wc.javaClass.getMethod("getWindowingMode").invoke(wc) as Int
+        }.getOrDefault(0)
 
     /** On [io]: [w]'s display read; empty after it had its app: read again [ORPHAN_CONFIRM_MS] later ([confirmOrphan]). */
     private fun checkOrphan(w: Win) {
@@ -203,6 +302,9 @@ class WebWindows(
 
         /** A running task to move onto its display instead of a launch (ShellBridge.toWebWindow: an app made a window), or -1. */
         @Volatile var adopt = -1
+
+        /** The task's "display/mode" [follow] last acted on (once per change), null while it's back in its display. */
+        @Volatile var followed: String? = null
 
         /** Its app is a full-screen app on display 0 now ([fullScreen]): the window is hidden, its display empty. */
         @Volatile var full = false
@@ -2239,6 +2341,41 @@ class WebWindows(
             tasks: Int?,
         ): Boolean = !closed && landed && !held && tasks == 0
 
+        /** [follow]'s answer for a window's task. */
+        enum class Follow { BACK, FULL, PIP }
+
+        /**
+         * [follow]'s rule, by where the task is ([own]: the window's display, [main]: display 0) and its windowing mode:
+         * floating (freeform 5, OnePlus' zoom 100) anywhere of these two -> [Follow.BACK] (full screen on its display);
+         * PiP (2) -> [Follow.PIP]; full screen (1) or a split (6) on display 0 -> [Follow.FULL]; else (full screen in its
+         * own display, another display) nothing.
+         */
+        fun followOf(
+            own: Boolean,
+            main: Boolean,
+            mode: Int,
+        ): Follow? =
+            when {
+                !own && !main -> null
+                mode == WINDOWING_MODE_PINNED -> Follow.PIP
+                mode == WINDOWING_MODE_FREEFORM || mode == WINDOWING_MODE_ZOOM -> Follow.BACK
+                main && (mode == WINDOWING_MODE_FULLSCREEN || mode == WINDOWING_MODE_MULTI_WINDOW) -> Follow.FULL
+                else -> null
+            }
+
+        /**
+         * WM1: task [taskId] (floating on display 0: SystemFloat's hand-over) is a web window's app - followed back into
+         * that window ([follow], at once), never a second window. False: no window's.
+         */
+        fun followTask(taskId: Int): Boolean {
+            val ww = current ?: return false
+            val w = ww.wins.values.firstOrNull { it.taskId == taskId && it.linux == null && !it.closed && !it.full } ?: return false
+            Log.i(TAG, "task $taskId floating on display 0 is window ${w.id}'s app: followed, no second window")
+            ww.main.removeCallbacks(ww.reconcileRun)
+            ww.main.post(ww.reconcileRun)
+            return true
+        }
+
         /** A Linux web window's switcher card id: this + its window id (no Android task id gets near it). */
         const val LINUX_CARD = 1 shl 29
 
@@ -2468,6 +2605,12 @@ class WebWindows(
         private const val RESIZE_MODE_UNRESIZEABLE = 0
         private const val IME_POLICY_FALLBACK_DISPLAY = 1
         private const val WINDOWING_MODE_FULLSCREEN = 1
+        private const val WINDOWING_MODE_PINNED = 2
+        private const val WINDOWING_MODE_FREEFORM = 5
+        private const val WINDOWING_MODE_MULTI_WINDOW = 6
+
+        /** OnePlus' own floating ("zoom") window: its "..." menu's "Floating window". */
+        private const val WINDOWING_MODE_ZOOM = 100
         private const val MAX_TASKS = 64
         private val ACTIONS = mapOf("down" to MotionEvent.ACTION_DOWN, "move" to MotionEvent.ACTION_MOVE, "up" to MotionEvent.ACTION_UP)
         private val VERBS = mapOf(MotionEvent.ACTION_DOWN to "DOWN", MotionEvent.ACTION_MOVE to "MOVE", MotionEvent.ACTION_UP to "UP")

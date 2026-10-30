@@ -795,6 +795,8 @@ class ShellBridge(
      */
     fun toWebWindow(id: Int): Boolean {
         if (WebWindows.toWindowForTask(id)) return true
+        // WM1: a web window's own app floated out of it (OnePlus' "Floating window"): that window takes it back.
+        if (WebWindows.followTask(id)) return true
         if (WebWindows.openForTask(context, id)) return true
         if (activity == null || !WebWindows.on(context)) return false
         return newWebWindow(id)
