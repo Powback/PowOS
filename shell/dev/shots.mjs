@@ -244,6 +244,11 @@ const TILES = (n) =>
 const WINDOWS = (extra) =>
   `const W = await U('./ui/webwindows.tsx'); const p = S.pages.value[0]; W.webWins.value = [{ id: 1, key: 'a:x', label: 'Chrome', page: p, x: 20, y: 70, w: Math.round(innerWidth * 0.55), h: 420, live: true }, { id: 2, key: 'a:y', label: 'Files', page: p, x: Math.round(innerWidth * 0.3), y: 260, w: Math.round(innerWidth * 0.5), h: 300 }];` +
   PAINT + ` await sleep(300); ${extra}`;
+/** A docked Android app's window over another app's (k: its key), then [extra] (dock taps: ui/desktops.ts dockTap). */
+const DOCK_WIN = (extra) =>
+  `const W = await U('./ui/webwindows.tsx'); const D = await U('./ui/desktops.ts'); const p = S.pages.value[0]; const k = S.dock.value.find((d) => d.startsWith('a:')) ?? 'a:x';` +
+  ` W.webWins.value = [{ id: 2, key: 'a:y', label: 'Files', page: p, x: Math.round(innerWidth * 0.35), y: 200, w: Math.round(innerWidth * 0.45), h: 300, live: true }, { id: 1, key: k, label: 'Docked app', page: p, x: 30, y: 80, w: Math.round(innerWidth * 0.5), h: 380, live: true }];` +
+  PAINT + ` await sleep(300); ${extra}`;
 const TILE_SIZES = { unfolded: SIZES.unfolded, "unfolded-land": LAND_SIZES["unfolded-land"] };
 
 const SCENES = [
@@ -261,6 +266,11 @@ const SCENES = [
   // Web windows (ui/webwindows.tsx) over the widgets: the bodies are holes (the app shows under home's pixels on the
   // phone, the wallpaper here) - no widget, icon or lower title bar painted in them; the top window's title bar whole.
   ["webwindows", "home", WINDOWS(""), "wallpaper"],
+  // TB4: the dock's taskbar taps on web windows (webwindows.tsx dockToggle) - a docked app's window in front, then its
+  // icon tapped (minimised: off the page, its dock dot dimmed), then tapped again (back in front).
+  ["dock-toggle-front", "home", DOCK_WIN(""), "wallpaper", null, TILE_SIZES],
+  ["dock-toggle-minimised", "home", DOCK_WIN("await D.dockTap(k); await sleep(300);"), "wallpaper", null, TILE_SIZES],
+  ["dock-toggle-restored", "home", DOCK_WIN("await D.dockTap(k); await sleep(300); await D.dockTap(k); await sleep(300);"), "wallpaper", null, TILE_SIZES],
   // The element model's proofs: a DOM menu (the tile menu) over a window's body, and a window mid page swipe (the
   // page track 40% across: the window goes with its page, the next page's edge beside it).
   ["ww-menu", "home", WINDOWS("W.webWins.value = W.webWins.value.map((w) => ({ ...w, live: true })); W.tileMenu.value = 2; await sleep(200);"), "wallpaper"],

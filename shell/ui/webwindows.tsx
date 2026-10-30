@@ -201,6 +201,29 @@ function bringBack(id: number) {
   toPage(w.page);
 }
 
+/**
+ * TB4 (the user, 2026-10-30: "If I click on the icon of an open window I should be able to minimize it that way"): a
+ * dock tap on app [key] with web windows, taskbar style - one code path for Android and Linux windows. Its window in
+ * front (the top-most one showing on the page on screen) minimises; with several windows of the app the tap cycles
+ * instead (its bottom-most one comes to the front, so each gets its turn). Not in front - minimised, under another
+ * window or on another page - its top-most window comes back in front on ITS page (home goes there). false: no window
+ * here (folded, none, or only a full-screen one): the caller goes on as before (launch -> openWebWindow).
+ */
+export function dockToggle(key: string): boolean {
+  if (!wideHome.value) return false;
+  const mine = webWins.value.filter((w) => w.key === key && !w.full);
+  if (!mine.length) return false;
+  const here = shownPage();
+  const front = webWins.value.filter((w) => w.page === here && !w.minimised && !w.full).at(-1);
+  if (front?.key === key) {
+    if (mine.length === 1) minimise(front.id);
+    else bringBack(mine[0].id);
+    return true;
+  }
+  bringBack(mine[mine.length - 1].id);
+  return true;
+}
+
 /** Its app became a full-screen app (the window hides, its place kept) or is back in the window (shown on its page). */
 powos.on("webwindows.full", (m: { id: number; on: boolean; task?: number }) => {
   // A tile going full screen leaves its tile (the others close up); back in a window, it floats at its old frame.

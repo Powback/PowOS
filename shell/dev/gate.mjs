@@ -2346,6 +2346,108 @@ async function webWindowCheck() {
 }
 
 /**
+ * In the page, after webWindowCheck: TB4 (the user, 2026-10-30: "If I click on the icon of an open window I should be
+ * able to minimize it that way") - a dock tap on an app with web windows (ui/webwindows.tsx dockToggle): in front ->
+ * minimised; again -> back in front; under another app's window -> raised; on another page -> home goes there, it in
+ * front; several of one app -> cycled; a Linux window the same; the dock's own cell taps through it. Never a launch.
+ * Its steps share the helpers DT_HELPERS puts on window.__dtg (page.evaluate sends one function only).
+ */
+async function dtHelpers() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const D = await window.__gw.mod("./ui/desktops.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const P = S.pages.value;
+  const win = (id, key, page = P[0]) => ({ id, key, label: key, page, x: 80 + (id % 10) * 40, y: 120, w: 300, h: 240, live: true });
+  const top = () => W.webWins.value.at(-1)?.id;
+  const min = (id) => !!W.webWins.value.find((w) => w.id === id)?.minimised;
+  const tap = async (key) => (await D.dockTap(key), await window.__gw.frames(2));
+  // A step with launches caught (a dock tap on a running window must never launch), all put back after.
+  const step = async (body) => {
+    const fails = [];
+    const launched = [];
+    // The mock may have no webwindows bridge (the windows here are the model's only): a stand-in then.
+    const ww = powos.webwindows ?? {};
+    const was = { page: S.page.value, launch: powos.apps.launch, open: ww.open };
+    powos.apps.launch = async (key) => void launched.push(key);
+    ww.open = async () => (launched.push("open"), -1);
+    try {
+      S.page.value = 0;
+      await window.__gw.settled();
+      await body(fails);
+      if (launched.length) fails.push(`TB4: dock taps on running web windows launched [${launched}]`);
+    } finally {
+      W.webWins.value = [];
+      powos.apps.launch = was.launch;
+      ww.open = was.open;
+      S.page.value = was.page;
+    }
+    return fails;
+  };
+  window.__dtg = { S, W, P, win, top, min, tap, step };
+  return [];
+}
+
+/** TB4: one window - in front minimised, back in front; under another app's window raised. */
+async function webDockToggleOne() {
+  const { W, win, top, min, tap, step } = window.__dtg;
+  return step(async (fails) => {
+    W.webWins.value = [win(911, "a:gate.wa")];
+    await tap("a:gate.wa");
+    if (!min(911) || document.querySelector('.webwindow[data-wwid="911"]')) fails.push("TB4: a dock tap on the app of the window in front didn't minimise it");
+    await tap("a:gate.wa");
+    if (min(911) || !document.querySelector('.webwindow[data-wwid="911"]')) fails.push("TB4: a second dock tap didn't bring it back in front");
+    W.webWins.value = [win(911, "a:gate.wa"), win(912, "a:gate.wb")];
+    await tap("a:gate.wa");
+    if (top() !== 911 || min(911) || min(912)) fails.push(`TB4: two windows, the icon of the one behind didn't raise it (top=${top()})`);
+  });
+}
+
+/** TB4: its window on another page - home goes to that page, the window in front. */
+async function webDockTogglePage() {
+  const { S, W, P, win, top, tap, step } = window.__dtg;
+  return step(async (fails) => {
+    if (P.length < 2) return void fails.push("TB4: one home page only, the other-page case untested");
+    W.webWins.value = [win(911, "a:gate.wa"), win(913, "a:gate.wc", P[1])];
+    await tap("a:gate.wc");
+    if (S.page.value !== 1 || top() !== 913) fails.push(`TB4: its window on another page: home on ${S.page.value} (want 1), top=${top()}`);
+  });
+}
+
+/** TB4: several windows of one app cycle (none minimised); a Linux window toggles the same as an Android one. */
+async function webDockToggleMany() {
+  const { W, win, top, min, tap, step } = window.__dtg;
+  return step(async (fails) => {
+    W.webWins.value = [win(921, "a:gate.wd"), win(922, "a:gate.wd"), win(923, "a:gate.we")];
+    const order = [];
+    for (let i = 0; i < 3; i++) (await tap("a:gate.wd"), order.push(top()));
+    if (order.join() !== "922,921,922" || W.webWins.value.some((w) => w.minimised)) fails.push(`TB4: two windows of one app: taps brought [${order}] to the front, not [922,921,922]`);
+    W.webWins.value = [win(931, "l:gate.linux")];
+    await tap("l:gate.linux");
+    const first = min(931);
+    await tap("l:gate.linux");
+    if (!first || min(931)) fails.push(`TB4: a Linux window: tap minimised=${first}, tap again minimised=${min(931)}`);
+  });
+}
+
+/** TB4: the dock's own cell taps through dockTap: a pinned app's cell, its web window in front, minimises it. */
+async function webDockToggleCell() {
+  const { W, win, min, step } = window.__dtg;
+  return step(async (fails) => {
+    const cell = document.querySelector('.dock .app[data-key^="a:"]');
+    if (!cell) return void fails.push("TB4: no Android app in the dock to tap");
+    W.webWins.value = [win(941, cell.dataset.key)];
+    await window.__gw.frames(2);
+    const r = cell.getBoundingClientRect();
+    const at = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, pointerId: 7, button: 0 };
+    cell.dispatchEvent(new PointerEvent("pointerdown", at));
+    cell.dispatchEvent(new PointerEvent("pointerup", at));
+    await window.__gw.until(() => min(941));
+    if (!min(941)) fails.push(`TB4: a tap on the dock's ${cell.dataset.key}, its web window in front, didn't minimise it`);
+  });
+}
+
+/**
  * In the page: web windows as ELEMENTS of their page (docs/WEB_WINDOWS.md "Element model"). The page's content is cut
  * over the bodies, a lower window over a higher one's body; a live body paints nothing, a new one its placeholder; the
  * DOM tile menu over a body takes the tap; and each frame's "w.f" follows a page swipe pixel-exact, clipped to the
@@ -2931,7 +3033,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step);
             if (problems.length) return problems;
           }
