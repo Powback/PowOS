@@ -517,42 +517,21 @@ async function overpullHalf() {
   };
 
   /**
-   * Half way (k about 0.5), down or back up: every stack the pull drives is partly unfolded - its rest's visible part
-   * (the rest's bottom on screen under the top card's) neither none nor all of it - and the top card's "+N" partly faded:
-   * both follow the finger, not switched at the settle.
+   * Half way (k about 0.5), down or back up: the notification stacks don't follow the pull - every one stays folded,
+   * in flow and where it was (2026-10-30: every group is a folded stack, the control center's whole view or not, so
+   * all apps fit on screen at once; they used to unfold with this pull).
    */
   o.midPull = (fails, way) => {
     return (k) => {
-      const stacks = [...document.querySelectorAll(".panel-body.together .notif-stack.pulled")];
-      if (!stacks.length) return fails.push(`${way} half way (k ${k.toFixed(2)}), no notification stack follows the pull`);
-      for (const st of stacks) {
-        const rest = st.querySelector(":scope > .notif-rest"), card = st.querySelector(":scope > .notif");
-        const full = rest.firstElementChild.scrollHeight;
-        const f = (rest.getBoundingClientRect().bottom - card.getBoundingClientRect().bottom) / full;
-        if (!(f > 0.1 && f < 0.9)) fails.push(`${way} half way (k ${k.toFixed(2)}), a stack is ${Math.round(f * 100)}% unfolded (not between)`);
-        o.restWhole(fails, `${way} half way (k ${k.toFixed(2)})`, rest, card); o.inFlow(fails, `${way} half way (k ${k.toFixed(2)})`, st);
-        const badge = card.querySelector(".notif-more");
-        const op = badge ? Number(getComputedStyle(badge).opacity) : NaN;
-        if (!(op > 0.05 && op < 0.95)) fails.push(`${way} half way (k ${k.toFixed(2)}), the top card's +N badge's opacity is ${op} (not between 0 and 1)`);
-        o.headLook(fails, way, k, card);
-        o.half[way] = [...(o.half[way] ?? []), o.topPart(st)];
-      }
+      const at = `${way} half way (k ${k.toFixed(2)})`;
+      const stacks = [...document.querySelectorAll(".panel-body.together .notif-stack")];
+      if (!stacks.length) return fails.push(`${at}, no notification stack in the shade`);
+      if (stacks.some((st) => st.classList.contains("open"))) fails.push(`${at}, a notification stack unfolds with the pull`);
+      for (const st of stacks) o.inFlow(fails, at, st);
+      o.half[way] = stacks.map(o.topPart);
     };
   };
   o.half = {};
-  // Every card keeps its full width and its own opaque material at every frame: the rest never fades, never insets.
-  o.restWhole = (fails, at, rest, card) => {
-    const ro = Number(getComputedStyle(rest).opacity), rw = rest.getBoundingClientRect().width, cw = card.getBoundingClientRect().width;
-    if (ro !== 1) fails.push(`${at}, a stack's rest is faded (opacity ${ro}, want 1)`);
-    if (Math.abs(rw - cw) > 1) fails.push(`${at}, a stack's rest is ${Math.round(rw)} px wide, its top card ${Math.round(cw)} px`);
-  };
-  // The group header look morphs too: the icon's partly faded half way; and the part above the rest (head band + card)
-  // is the height it has settled - no layout change mid-pull, none at the settle ([settled] compares after it).
-  o.headLook = (fails, way, k, card) => {
-    const icon = card.querySelector(".notif-icon");
-    const io = icon ? Number(getComputedStyle(icon).opacity) : NaN;
-    if (icon && !(io > 0.05 && io < 0.95)) fails.push(`${way} half way (k ${k.toFixed(2)}), the top card's icon opacity is ${io} (not between 0 and 1)`);
-  };
   // What sits above a stack's rest (the head and the top card), in px.
   o.topPart = (st) => st.querySelector(":scope > .notif-rest").offsetTop; // (not the rect: a folding rest is translated)
   // After the settle: each stack's [topPart] within 2 px of what it was half way (the layout didn't jump on the commit).
@@ -648,7 +627,7 @@ async function overpullShort() {
 
 /**
  * All the way, from the compact row: the rest shown and laid out, what's under it moved down to where the whole view
- * had it, the row still, every stack unfolded. Pulled from the NOTIFICATIONS' list (the user, 2026-10-28: folded, a
+ * had it, the row still, every notification stack still folded. Pulled from the NOTIFICATIONS' list (the user, 2026-10-28: folded, a
  * down-pull on the notifications expands the control center as one on the card does - gesture.ts ccShowWay).
  */
 async function overpullExpand() {
@@ -661,10 +640,10 @@ async function overpullExpand() {
   if (o.shown() !== o.n0) fails.push(`expanded again, ${o.shown()} toggles show, not ${o.n0}`);
   if (o.row() !== o.row0) fails.push(`the first row moved on the expand: ${o.row0} -> ${o.row()}`);
   if (o.ownBottom() < innerHeight - 1) fails.push(`expanded, the notifications' panel ends ${Math.round(innerHeight - o.ownBottom())} px above the screen's bottom`);
-  // The notifications show everything too (the user, 2026-10-24): every grouped stack unfolded into its cards.
+  // The notifications stay stacked (2026-10-30, replacing 2026-10-24's "every stack unfolds"): all groups fit at once.
   const stacks = [...document.querySelectorAll(".panel-body.together .notif-stack")];
-  if (!stacks.length) fails.push("no grouped notifications in the shade to unfold");
-  else if (stacks.some((g) => !g.classList.contains("open"))) fails.push(`expanded, ${stacks.filter((g) => !g.classList.contains("open")).length} of ${stacks.length} notification stacks stay folded`);
+  if (!stacks.length) fails.push("no grouped notifications in the shade");
+  else if (stacks.some((g) => g.classList.contains("open"))) fails.push(`expanded, ${stacks.filter((g) => g.classList.contains("open")).length} of ${stacks.length} notification stacks unfolded with it`);
   return fails;
 }
 
