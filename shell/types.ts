@@ -357,7 +357,11 @@ export type RunState = "running" | "frozen";
 /** A main-thread message that held the host's UI thread (the WebView's draw thread) over thresholdMs. Times: epoch ms. */
 export type NativeBlock = { at: number; ms: number; msg?: string; bridge?: string; lastCall?: string; lastCallAgoMs?: number | null; stack?: string | null };
 /** The host's native section of a perf trace (perf.native). */
-export type NativePerf = { thresholdMs: number; blocks: NativeBlock[]; frameGaps: { at: number; ms: number; lastCall?: string }[] };
+/** One slow frame of home's window (FrameMetrics, ms per phase; `delay` = waiting for the UI thread to start it). */
+export type NativeFrame = { at: number; ms: number; delay: number; input: number; animation: number; layout: number; draw: number; sync: number; command: number; swap: number; gpu?: number; deadline?: number };
+/** A gap: `seen` = the sampler's lines while it was open with no long message ("main=<state> <stack> | rt=<RenderThread state>"). */
+export type NativeGap = { at: number; ms: number; lastCall?: string; seen?: string[] };
+export type NativePerf = { thresholdMs: number; blocks: NativeBlock[]; frameGaps: NativeGap[]; frames?: { count: number; missed: number; slow: NativeFrame[] } };
 /** The PowOS window in front (a game): its surface's presents since its consumer started; `at` = host epoch ms. */
 export type FrontPresents = { id: number; presented: number; undrawn: number; at: number };
 

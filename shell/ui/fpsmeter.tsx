@@ -58,7 +58,10 @@ function homeLine(home: (NonNullable<Parameters<typeof attribution>[0]> & { miss
 function nativeSection(n: NativePerf | true | null | undefined, from: number) {
   if (!n || n === true) return undefined;
   const zero = performance.timeOrigin + from, rel = (at: number) => Math.round(at - zero);
-  return { thresholdMs: n.thresholdMs, blocks: n.blocks.map((b) => ({ start: rel(b.at), ...b })), frameGaps: n.frameGaps.map((g) => ({ start: rel(g.at), ...g })) };
+  return {
+    thresholdMs: n.thresholdMs, blocks: n.blocks.map((b) => ({ start: rel(b.at), ...b })), frameGaps: n.frameGaps.map((g) => ({ start: rel(g.at), ...g })),
+    frames: n.frames && { count: n.frames.count, missed: n.frames.missed, slow: n.frames.slow.map((f) => ({ start: rel(f.at), ...f })) },
+  };
 }
 /** Stops the host's side of the recording and reads it (undefined: an older host). */
 async function stopNative(from: number) {
@@ -67,7 +70,14 @@ async function stopNative(from: number) {
 /** The summary's native entry: the longest blocks with their cause, or why there are none. */
 function nativeLine(n: ReturnType<typeof nativeSection>) {
   if (!n) return "no native section (host without perf.native)";
-  return { blocks: n.blocks.length, gaps: n.frameGaps.length, longest: [...n.blocks].sort((a, b) => b.ms - a.ms).slice(0, 5)
+  // The slow frames' longest phase (FrameMetrics) and what the gaps were waiting in: names the thread for a stall with no block.
+  const phases = ["delay", "input", "animation", "layout", "draw", "sync", "command", "swap", "gpu"] as const;
+  const slow = [...(n.frames?.slow ?? [])].sort((a, b) => b.ms - a.ms).slice(0, 5).map((f) => {
+    const top = phases.reduce((m, p) => ((f[p] ?? 0) > (f[m] ?? 0) ? p : m), phases[0]);
+    return { start: f.start, ms: f.ms, phase: top, phaseMs: f[top] ?? 0 };
+  });
+  const gapSeen = [...n.frameGaps].sort((a, b) => b.ms - a.ms).slice(0, 3).map((g) => ({ start: g.start, ms: g.ms, seen: g.seen?.slice(0, 3) ?? [] }));
+  return { frames: n.frames ? { count: n.frames.count, missed: n.frames.missed, slow } : null, gapSeen, blocks: n.blocks.length, gaps: n.frameGaps.length, longest: [...n.blocks].sort((a, b) => b.ms - a.ms).slice(0, 5)
     .map((b) => ({ start: b.start, ms: b.ms, msg: b.msg, bridge: b.bridge ?? null, lastCall: b.lastCall ?? null, lastCallAgoMs: b.lastCallAgoMs ?? null, stack: b.stack?.split(" < ").slice(0, 8).join(" < ") ?? null })) };
 }
 let po: PerformanceObserver | null = null;
