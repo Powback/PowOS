@@ -68,6 +68,58 @@ function mime(p) {
   );
 }
 
+/** dock-key-migration's steps: the page reloaded and up again, and its dock state and keys. */
+async function reloadReady(r) {
+  await r.page.reload().catch(() => {});
+  await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+}
+function dockState(r) {
+  return r.page.evaluate(async () => {
+    const S = await importShim("./state.ts");
+    const keys = Object.fromEntries(Object.keys(localStorage).filter((k) => /dock\.(position|migrated)/.test(k)).map((k) => [k, localStorage[k]]));
+    return { mode: S.dockMode.value, pos: S.dockPosition.value, unfolded: S.unfoldedDockPlacement.value, keys };
+  });
+}
+/** Seeds [seed] as the only storage, reloads twice: the unfolded dock is right after the migration and after a reload. */
+async function dockSeedRight(r, seed) {
+  await r.page.evaluate((seed) => { localStorage.clear(); for (const [k, v] of Object.entries(seed)) localStorage.setItem(k, v); }, seed);
+  const fails = [];
+  for (const when of ["migrated", "reloaded"]) {
+    await reloadReady(r);
+    const s = await dockState(r);
+    const right = s.mode === "unfolded" && s.unfolded === "right" && s.pos === "right" && s.keys["powos.dock.position.unfolded"] === "right";
+    if (!right) fails.push(`${when} from ${JSON.stringify(seed)}: unfolded dock not right: ${JSON.stringify(s)}`);
+  }
+  return fails;
+}
+/**
+ * The dock's old keys (the user, 2026-10-30 18:30: the right dock jumped to the bottom after closing a window): the old
+ * `powos.dock.position` right becomes the unfolded key's right (also over the "bottom" stored() wrote unasked), reloads
+ * keep it, a check's dockTry never reaches storage, and a choice made after the migration isn't undone.
+ */
+async function dockKeyMigration(r) {
+  const fails = [];
+  fails.push(...(await dockSeedRight(r, { "powos.dock.position": "right" })));
+  fails.push(...(await dockSeedRight(r, { "powos.dock.position": "right", "powos.dock.position.unfolded": "bottom", "powos.dock.position.desktop": "left" })));
+  // A check's placement: shown, never stored, gone on a reload.
+  const tried = await r.page.evaluate(async () => {
+    const S = await importShim("./state.ts");
+    S.dockTry.value = "left";
+    await new Promise((res) => setTimeout(res, 50));
+    return { pos: S.dockPosition.value, stored: localStorage.getItem("powos.dock.position.unfolded") };
+  });
+  if (tried.pos !== "left" || tried.stored !== "right") fails.push(`dockTry: ${JSON.stringify(tried)}`);
+  await reloadReady(r);
+  const after = await dockState(r);
+  if (after.pos !== "right") fails.push(`dockTry outlived a reload: ${JSON.stringify(after)}`);
+  // The user's later pick (Settings) stays: the migration ran once.
+  await r.page.evaluate(async () => { (await importShim("./state.ts")).unfoldedDockPlacement.value = "bottom"; await new Promise((res) => setTimeout(res, 50)); });
+  await reloadReady(r);
+  const picked = await dockState(r);
+  if (picked.pos !== "bottom") fails.push(`a pick after the migration was undone on reload: ${JSON.stringify(picked)}`);
+  return fails;
+}
+
 /**
  * Side docks keep usable icons, reserve home space, and calculate drops on the vertical axis. [part]: "home" (home's
  * page: no launcher of its own since the launcher is one overlay, pull.tsx), "launcher" (the overlay's page,
@@ -2694,6 +2746,7 @@ try {
     if (process.env.DOCK_SHOTS) await r.page.screenshot({path: `${process.env.DOCK_SHOTS}/${name}.png`});
     return failures;
   }));
+  runs.push(open(browser, `${ORIGIN}/index.html`, "dock-key-migration", { width: 821, height: 883 }).then((r) => whenReady(r, () => dockKeyMigration(r))));
   const dockViews = { cover: { width: 404, height: 900 }, inner: { width: 821, height: 883 }, desktop: { width: 1280, height: 800 } };
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
     for (const position of ["bottom", "left", "right"]) {

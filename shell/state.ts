@@ -147,6 +147,7 @@ export function stored(key: string, initial = ""): Signal<string> {
  * side dock shows only where it was chosen for that mode. (2026-10-28: unfolded home read the desktop key, default
  * "left", left at "right" by a check run - every unfolded or stuck-wide moment showed a side dock.)
  */
+migrateDockKeys();
 export const mobileDockPlacement = stored("dock.position.mobile", "bottom");
 export const unfoldedDockPlacement = stored("dock.position.unfolded", "bottom");
 export const desktopDockPlacement = stored("dock.position.desktop", "left");
@@ -162,6 +163,33 @@ export const dockPlacement = {
   get value() { return activeDockPlacement().value; },
   set value(value: string) { activeDockPlacement().value = value; },
 };
+/**
+ * Once per install, before the per-mode signals read their keys: the placement the user picked under the older keys
+ * moves to the keys read now. 47c7a46a kept one `powos.dock.position` for every mode; 82181576 split it into .mobile
+ * and .desktop (unfolded home read .desktop) and b5469edc gave unfolded its own key - neither carried the old choice
+ * over, and stored() writes a key's default the moment it's read, so an unfolded "right" (the old key) became a stored
+ * "bottom" on the first reload (the user, 2026-10-30 18:30: the right dock jumped to the bottom after closing a
+ * window). Unfolded takes the old key's side, else .desktop's side (what unfolded showed before b5469edc), over a
+ * missing or default "bottom"; folded and desktop take the old key only where they have none. Written once (the
+ * flag): after that only Settings > style > home changes a placement - never a reload, a re-layout or a fold.
+ */
+function migrateDockKeys() {
+  try {
+    if (localStorage.getItem("powos.dock.migrated") === "1") return;
+    const old = validDockPosition(localStorage.getItem("powos.dock.position") ?? "", "");
+    const side = (v: string) => (v === "bottom" ? "" : v);
+    const was = old ? side(old) : side(validDockPosition(localStorage.getItem("powos.dock.position.desktop") ?? "", ""));
+    const unfolded = localStorage.getItem("powos.dock.position.unfolded") ?? "bottom";
+    if (was && unfolded === "bottom") localStorage.setItem("powos.dock.position.unfolded", was);
+    for (const mode of ["mobile", "desktop"]) fillDockKey(mode, old);
+    localStorage.setItem("powos.dock.migrated", "1");
+  } catch {}
+}
+/** [mode]'s key from the old single key, only where it has none. */
+function fillDockKey(mode: string, old: string) {
+  const key = `powos.dock.position.${mode}`;
+  if (old && !localStorage.getItem(key)) localStorage.setItem(key, old);
+}
 export function validDockPosition(value: string, fallback: string): string {
   return ["bottom", "left", "right"].includes(value) ? value : fallback;
 }
