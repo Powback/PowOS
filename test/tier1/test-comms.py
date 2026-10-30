@@ -329,6 +329,37 @@ class DeployNoteTests(unittest.TestCase):
             self._notify(d, "Side dock sits under the status bar", age=3 * 3600)
             self.assertEqual(len(self._cards(d)), 2)
 
+    def test_identical_note_is_never_posted_twice(self):
+        """10-30: one ship's note posted again 147 s later (past the 2-min window): two identical cards."""
+        with tempfile.TemporaryDirectory() as d:
+            note = "The menu's Floating window works again; Works on the AI board never errors"
+            self._notify(d, note)
+            first = self._cards(d)
+            self.assertEqual(len(first), 1)
+            self._notify(d, note, age=147)
+            self.assertEqual(self._cards(d), first)
+            # Read, then the same ship again an hour later: still nothing new.
+            env = dict(os.environ, COMMS_ROOT=d, COMMS_AGENT_ID="")
+            subprocess.run([sys.executable, SERVER, "inbox", "--agent", "user"], capture_output=True, env=env, timeout=30)
+            self._notify(d, note, age=3600)
+            self.assertEqual(self._cards(d), [])
+
+    def test_repeated_change_folds_without_a_duplicate_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._notify(d, "Switcher now follows your finger")
+            self._notify(d, "Edit mode keeps the search bar; Switcher now follows your finger", age=200)
+            self.assertEqual(self._cards(d), ["Update installed \u00b7 2 changes\n\n- Edit mode keeps the search bar\n"
+                                              "- Switcher now follows your finger"])
+
+    def test_deploys_within_two_minutes_fold_even_when_read(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._notify(d, "Switcher now follows your finger")
+            env = dict(os.environ, COMMS_ROOT=d, COMMS_AGENT_ID="")
+            subprocess.run([sys.executable, SERVER, "inbox", "--agent", "user"], capture_output=True, env=env, timeout=30)
+            self._notify(d, "Edit mode keeps the search bar", age=60)
+            self.assertEqual(self._cards(d), ["Update installed \u00b7 2 changes\n\n- Edit mode keeps the search bar\n"
+                                              "- Switcher now follows your finger"])
+
     def test_deploys_at_once_still_make_one_card(self):
         with tempfile.TemporaryDirectory() as d:
             env = dict(os.environ, COMMS_ROOT=d, COMMS_AGENT_ID="", POWOS_PLATFORM="desktop")

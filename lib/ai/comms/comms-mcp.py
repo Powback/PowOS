@@ -231,6 +231,15 @@ def _deploy_md(notes, shown=4):
 # --batch also folds into the previous card while the user hasn't read it (still in their inbox), up to this long
 # after it: deploys minutes apart (one ship per merge) made a card each - 4 "Update installed" cards in a row.
 BATCH_UNREAD = 30 * 60
+# --batch deploy: a change already posted within this long isn't posted again (_batched).
+SEEN_KEEP = 24 * 3600
+
+
+def _note_changes(key, text):
+    """A note's changes as the card shows them (deploys: each plain line), the identity _batched dedupes on."""
+    if key != "deploy":
+        return [text.strip()]
+    return [c for c in (_plain_change(x) for x in _split_note(text)) if c]
 
 
 def _batch_path(key):
@@ -269,7 +278,7 @@ def _unread(mid):
 def _batched(key, text, window):
     """--batch: notices of one kind become one - within [window] s of the last, or while the last is unread (up to
     BATCH_UNREAD). Returns (the text to post: the latest note first, then every note of the batch as a list; the
-    batch's previous message id to take back, or None). State: <root>/batches/<key>.json; call under _batch_lock."""
+    batch's previous message id to take back, or None); (None, None) for a note already posted. State: <root>/batches/<key>.json; call under _batch_lock."""
     path = _batch_path(key)
     try:
         with open(path) as f:
@@ -282,11 +291,19 @@ def _batched(key, text, window):
     fresh = age < window or (age < BATCH_UNREAD and bool(last) and _unread(last))
     notes = (st.get("notes") or []) if fresh else []
     prev = last if fresh else None
+    # An identical note is never posted twice (10-30: one ship's note posted again 147 s later, past the window - two
+    # identical cards). Already on the card that's still up: nothing to post. A deploy's changes, each one already
+    # posted in the last SEEN_KEEP (a re-ship of the same merge, the card read or not): nothing to post either.
+    seen = {c: t for c, t in (st.get("seen") or {}).items() if now - float(t) < SEEN_KEEP}
+    changes = _note_changes(key, text)
+    if (fresh and last and text in notes) or (key == "deploy" and changes and all(c in seen for c in changes)):
+        return None, None
+    seen.update({c: now for c in changes})
     notes = [n for n in notes if n != text] + [text]
     # Line 1 is what the collapsed notification shows; the list is what a tap expands to.
     body = _deploy_md(notes) if key == "deploy" else text if len(notes) == 1 else (
         f"{text} (+{len(notes) - 1} more)\n" + "\n".join(f"\u2022 {n}" for n in reversed(notes)))
-    st = {"ts": now, "notes": notes[-20:], "id": None}
+    st = {"ts": now, "notes": notes[-20:], "id": None, "seen": seen}
     with open(path + ".tmp", "w") as f:
         json.dump(st, f)
     os.replace(path + ".tmp", path)
@@ -954,7 +971,11 @@ def run_cli(argv):
         with _batch_lock(a.batch) if a.batch else contextlib.nullcontext():
             prev = None
             if a.batch:
-                text, prev = _batched(a.batch, text, a.window)
+                body, prev = _batched(a.batch, text, a.window)
+                if body is None:
+                    print("Already notified (an identical note): nothing posted.")
+                    return 0
+                text = body
             mid = _deliver("user", "notify", text, a.priority)
             if prev:
                 # The batch's earlier notice: out of the inbox, the feed and the shade - this one replaces it.
