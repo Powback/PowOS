@@ -51,6 +51,18 @@ public final class WebWindowSource {
          * the window's own (F11, a video). Control channel's thread.
          */
         default void fullScreen(int id, boolean on) {}
+
+        /** Window [id] draws its own complete frame ([own]: no PowOS bar over it) or not (kwin 0046 "decor ... own"). */
+        default void ownFrame(int id, boolean own) {}
+
+        /**
+         * Window [id]'s own frame was dragged (kwin 0046 "moveresize"): [edges] "move" or the edges its resize drags
+         * ("n", "se", ...). The touch that did it goes on moving the web window's frame. Control channel's thread.
+         */
+        default void moveResize(int id, String edges) {}
+
+        /** Window [id]'s own frame's "maximize" or "minimize" button (or its double click). Control channel's thread. */
+        default void control(int id, String action) {}
     }
 
     /** Set by home's bridge (ShellBridge) while it lives; null = every Linux window is a task (as before). */
@@ -66,6 +78,29 @@ public final class WebWindowSource {
         Host h = host;
         // A KWin without "size" (before kwin 0018) lays a window out at its buffers' size (the screen's): no web window.
         return h != null && WindowTasks.kwinCan("size") && h.wants();
+    }
+
+    static void ownFrame(int id, boolean own) {
+        Host h = host;
+        if (h != null && ids.contains(id))
+            h.ownFrame(id, own);
+    }
+
+    static void moveResize(int id, String edges) {
+        Host h = host;
+        if (h != null && ids.contains(id))
+            h.moveResize(id, edges);
+    }
+
+    static void control(int id, String action) {
+        Host h = host;
+        if (h != null && ids.contains(id))
+            h.control(id, action);
+    }
+
+    /** Window [id] draws its own complete frame (KWin's "decor <id> 0 own"; told before its "open"). */
+    public static boolean ownFrame(int id) {
+        return WindowTasks.drawsOwnFrame(id);
     }
 
     /** KWin's "open" for window [id]: true = the host took it (no task). Control channel's thread. */

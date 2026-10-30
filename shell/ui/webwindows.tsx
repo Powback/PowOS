@@ -45,6 +45,12 @@ export interface WebWin {
   untiled?: { x: number; y: number; w: number; h: number };
   /** Its app's content shows ("webwindows.live"): the body paints nothing; until then, the placeholder. */
   live?: boolean;
+  /**
+   * Its app draws its own complete frame (a Linux window with client-side decorations: Brave, Chrome, Steam, a GTK
+   * header bar; kwin 0046 "decor ... own"): no PowOS bar over it (one bar, never two) - its own drag moves this frame
+   * ("webwindows.moveresize"), a hold on that drag opens the tile menu.
+   */
+  ownFrame?: boolean;
 }
 
 /** An app's icon URL by its key (state.ts sets it: this file can't import that one), or undefined. */
@@ -135,9 +141,11 @@ export async function openWindow(key: string, label: string, page: number): Prom
  * A tiling on [page] with an empty tile puts it there (fillEmptyTile), as [openWindow] does.
  */
 export async function adoptWebWindow(
-  m: { task?: number; kwin?: number; key: string; label: string; body?: WebWindowRect },
+  m: { task?: number; kwin?: number; key: string; label: string; body?: WebWindowRect; ownFrame?: boolean },
   page: number,
 ): Promise<boolean> {
+  // A window that draws its own frame has no PowOS bar: its body is the whole frame.
+  const bar = m.ownFrame ? 0 : TITLE;
   const ww = powos.webwindows;
   if (!ww) return false;
   const a = workArea();
@@ -145,17 +153,17 @@ export async function adoptWebWindow(
   const aw = a.right - a.left;
   const ah = a.bottom - a.top;
   let w = Math.min(aw, Math.round(m.body ? m.body.width : innerWidth * 0.5));
-  let h = Math.min(ah, Math.round(m.body ? m.body.height + TITLE : innerHeight * 0.6));
+  let h = Math.min(ah, Math.round(m.body ? m.body.height + bar : innerHeight * 0.6));
   w = Math.max(w, 200);
   h = Math.max(h, 160);
   const sx = m.body ? m.body.left : a.left + (aw - w) / 2;
-  const sy = m.body ? m.body.top - TITLE : a.top + (ah - h) / 2;
+  const sy = m.body ? m.body.top - bar : a.top + (ah - h) / 2;
   // Screen (viewport) place clamped into the work area, then page-local as the model keeps it.
   const vx = Math.round(Math.min(Math.max(sx, a.left), a.right - w));
   const vy = Math.round(Math.min(Math.max(sy, a.top), a.bottom - h));
-  const id = await ww.open(m.key, { left: vx, top: vy + TITLE, width: w, height: h - TITLE }, m.task, m.kwin).catch(() => -1);
+  const id = await ww.open(m.key, { left: vx, top: vy + bar, width: w, height: h - bar }, m.task, m.kwin).catch(() => -1);
   if (id < 0) return false;
-  webWins.value = [...webWins.value, { id, key: m.key, label: m.label, page, x: vx - o.x, y: vy - o.y, w, h, task: m.task }];
+  webWins.value = [...webWins.value, { id, key: m.key, label: m.label, page, x: vx - o.x, y: vy - o.y, w, h, task: m.task, ownFrame: m.ownFrame || undefined }];
   // As any window opened on the page: a tiling there with an empty tile takes it (its floating frame kept for a float
   // out); otherwise it floats at that frame on top.
   fillEmptyTile(page, id);
@@ -233,6 +241,15 @@ powos.on("webwindows.full", (m: { id: number; on: boolean; task?: number }) => {
 });
 /** Its app's first frame shows (WebWindows.liveWhenDrawn): the placeholder goes, the body is the app's. */
 powos.on("webwindows.live", (id: number) => update(id, { live: true }));
+/** Its app draws its own frame now, or no longer (WebWindows.linuxOwnFrame): its PowOS bar goes or comes. */
+powos.on("webwindows.frame", (m: { id: number; own: boolean }) => update(m.id, { ownFrame: m.own || undefined }));
+/**
+ * Its app's own frame dragged (WebWindows.linuxMoveResize: its tab strip's drag, an edge of its own): the press on its
+ * body that did it now moves ("move") or resizes (the edges) this frame, from the next pointer move on (Body).
+ */
+powos.on("webwindows.moveresize", (m: { id: number; edges: string }) => {
+  appDrags.set(m.id, { edges: m.edges, start: null, moved: false, hold: 0 });
+});
 /** Its switcher card tapped (ShellBridge.openTask): back where it was, floating, on its page. */
 powos.on("webwindows.show", (id: number) => bringBack(id));
 
@@ -920,9 +937,39 @@ const MIN_W = 220;
 const MIN_H = 160;
 const EDGES = ["n", "s", "e", "w", "ne", "nw", "se", "sw"] as const;
 
+type Grab = { px: number; py: number; x: number; y: number; w: number; h: number };
+
+/** Window [id]'s frame resized from [s] by pointer [e] on edges [side] (an Edge grab, or the app's own), scale [k]. */
+function resizeBy(id: number, s: Grab & { side: string; k: number }, e: PointerEvent) {
+  const { side, k } = s;
+  const dx = (e.clientX - s.px) / k;
+  const dy = (e.clientY - s.py) / k;
+  const r = { x: s.x, y: s.y, w: s.w, h: s.h };
+  if (side.includes("e")) r.w = Math.max(MIN_W, s.w + dx);
+  if (side.includes("s")) r.h = Math.max(MIN_H, s.h + dy);
+  if (side.includes("w")) (r.w = Math.max(MIN_W, s.w - dx), (r.x = s.x + s.w - r.w));
+  if (side.includes("n")) (r.h = Math.max(MIN_H, s.h - dy), (r.y = s.y + s.h - r.h));
+  // DB1: the top edge stops at the status bar (the bar stays reachable).
+  const top = clampPlace(r.x, r.y, r.w).y;
+  if (r.y < top) (r.h -= top - r.y), (r.y = top);
+  update(id, { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h), restore: undefined });
+}
+
+/** A hold this long, still, on the app's own drag (its tab strip): the tile menu - PowOS's frame features for it. */
+const HOLD_MS = 500;
+
+/** An app's own frame drag in progress ("webwindows.moveresize"), by window id: the Body's pointer drives it. */
+interface AppDrag {
+  edges: string;
+  start: Grab | null;
+  moved: boolean;
+  hold: number;
+}
+const appDrags = new Map<number, AppDrag>();
+
 /** A resize grab on an edge or corner: the frame follows the finger (the app's display gets the size on each frame's w.f). */
 function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
-  const start = useRef<{ px: number; py: number; x: number; y: number; w: number; h: number } | null>(null);
+  const start = useRef<Grab | null>(null);
   const stop = (e: PointerEvent) => {
     if (!start.current) return;
     e.stopPropagation();
@@ -942,18 +989,7 @@ function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
         const s = start.current;
         if (!s) return;
         e.stopPropagation();
-        const k = win.scale ?? 1;
-        const dx = (e.clientX - s.px) / k;
-        const dy = (e.clientY - s.py) / k;
-        const r = { x: s.x, y: s.y, w: s.w, h: s.h, restore: undefined };
-        if (side.includes("e")) r.w = Math.max(MIN_W, s.w + dx);
-        if (side.includes("s")) r.h = Math.max(MIN_H, s.h + dy);
-        if (side.includes("w")) (r.w = Math.max(MIN_W, s.w - dx), (r.x = s.x + s.w - r.w));
-        if (side.includes("n")) (r.h = Math.max(MIN_H, s.h - dy), (r.y = s.y + s.h - r.h));
-        // DB1: the top edge stops at the status bar (the bar stays reachable).
-        const top = clampPlace(r.x, r.y, r.w).y;
-        if (r.y < top) (r.h -= top - r.y), (r.y = top);
-        update(win.id, { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h), restore: undefined });
+        resizeBy(win.id, { ...s, side, k: win.scale ?? 1 }, e);
       }}
       onPointerUp={stop}
       onPointerCancel={stop}
@@ -978,6 +1014,7 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
   const end = (e: PointerEvent, action: "up" | "cancel") => {
     if (!pressed.current) return;
     pressed.current = false;
+    if (appDragEnd(win.id, e, action === "cancel")) return;
     toApp(e, action);
   };
   const icon = iconOf(win.key);
@@ -992,7 +1029,7 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
         pressed.current = true;
         toApp(e, "down");
       }}
-      onPointerMove={(e) => pressed.current && toApp(e, "move")}
+      onPointerMove={(e) => pressed.current && !appDragMove(win.id, e) && toApp(e, "move")}
       onPointerUp={(e) => end(e, "up")}
       onPointerCancel={(e) => end(e, "cancel")}
     >
@@ -1004,6 +1041,50 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
       )}
     </div>
   );
+}
+
+/**
+ * The app's own frame drag ([appDrags]) with this body's pointer: true = the move was the frame's (the host stopped
+ * sending the touch to the app). Its first move is the start; a move as the bar's drag (untiles, clamped), a resize as
+ * an edge grab. Held still for [HOLD_MS] from its start: the tile menu instead (PowOS's frame features without a bar).
+ */
+function appDragMove(id: number, e: PointerEvent): boolean {
+  const d = appDrags.get(id);
+  if (!d) return false;
+  e.stopPropagation();
+  const w = webWins.value.find((v) => v.id === id);
+  if (!w) return true;
+  if (!d.start) {
+    d.start = { px: e.clientX, py: e.clientY, x: w.x, y: w.y, w: w.w, h: w.h };
+    d.hold = window.setTimeout(() => {
+      if (appDrags.get(id) !== d || d.moved) return;
+      appDrags.delete(id);
+      tileMenu.value = id;
+    }, HOLD_MS);
+    return true;
+  }
+  const dx = e.clientX - d.start.px;
+  const dy = e.clientY - d.start.py;
+  if (!d.moved && Math.hypot(dx, dy) < SLOP) return true;
+  if (!d.moved && tiledOn(id) != null) untile(id, "keep");
+  d.moved = true;
+  if (d.edges === "move") update(id, { ...clampPlace(d.start.x + dx, d.start.y + dy, w.w), restore: undefined });
+  else resizeBy(id, { ...d.start, side: d.edges, k: w.scale ?? 1 }, e);
+  return true;
+}
+
+/** The press ended: an app's own frame drag ends with it (let go at an edge: tiled, as the bar's). True: it was one. */
+function appDragEnd(id: number, e: PointerEvent, cancelled: boolean): boolean {
+  const d = appDrags.get(id);
+  if (!d) return false;
+  appDrags.delete(id);
+  clearTimeout(d.hold);
+  e.stopPropagation();
+  if (!cancelled && d.moved && d.edges === "move") {
+    const slot = snapSlot(e.clientX, e.clientY);
+    if (slot) tile(id, slot);
+  }
+  return true;
 }
 
 /**
@@ -1029,7 +1110,7 @@ function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
   } as const;
   return (
     <div class={`webwindow ${win.restore ? "maximised" : ""} ${win.live ? "live" : ""}`} data-wwid={win.id} data-z={z} style={frame}>
-      <TitleBar win={win} />
+      {!win.ownFrame && <TitleBar win={win} />}
       <Body win={win} body={body} />
       {!win.restore && tiledOn(win.id) == null && EDGES.map((side) => <Edge key={side} win={win} side={side} />)}
       {tileMenu.value === win.id && <TileMenu win={win} />}

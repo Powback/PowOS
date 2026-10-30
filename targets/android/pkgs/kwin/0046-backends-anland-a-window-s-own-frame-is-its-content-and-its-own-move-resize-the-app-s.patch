@@ -1,0 +1,317 @@
+From 8480a6e20394f3c1dc5dbc401b723d54bd2c95cc Mon Sep 17 00:00:00 2001
+From: powos <powos@local>
+Date: Fri, 30 Oct 2026 21:08:14 +0100
+Subject: [PATCH] backends/anland: a window's own frame is its content, its own
+ move/resize is the app's
+
+---
+ src/backends/anland/anland_window_task.cpp | 134 ++++++++++++++++++---
+ src/backends/anland/anland_window_task.h   |  14 +++
+ 2 files changed, 131 insertions(+), 17 deletions(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 93d0124..7fa8185 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -26,6 +26,8 @@
+ #include "scene/windowitem.h"
+ #include "scene/workspacescene.h"
+ #include "virtualdesktops.h"
++#include "x11window.h"
++#include "xdgshellwindow.h"
+ #include "wayland/seat.h"
+ #include "wayland_server.h"
+ #include "window.h"
+@@ -110,6 +112,8 @@ AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uin
+         m_resizeLatencies.clear();
+     });
+     connect(window, &Window::frameGeometryChanged, this, &AnlandWindowTask::noteResized);
++    m_statsReport.setInterval(5000);
++    connect(&m_statsReport, &QTimer::timeout, this, &AnlandWindowTask::noteFrameStats);
+     // The task's size wins over the window's own: an X client may configure itself to a size it remembers (Steam:
+     // 1659x1746 in a 1351 px wide floating task, its right part cut off) - KWin permits that for a normal window, so
+     // it is sized back to the task (a few times; one that keeps refusing is logged).
+@@ -169,8 +173,16 @@ void AnlandWindowTask::tellDecoration(bool again)
+         return;
+     }
+     m_decorTold = decorated;
+-    qCInfo(KWIN_ANLAND) << "window task" << m_id << (decorated ? "has KWin's title bar" : "draws its own title bar (or none)");
+-    m_tasks->send({QStringLiteral("decor"), QString::number(m_id), QString::number(decorated)});
++    // Undecorated: a normal window or dialog that draws its own complete frame (Brave, Chrome, Steam, a GTK header
++    // bar) says so ("own"): the app shows no second bar over it. Anything else undecorated (a splash) has no bar at all.
++    const bool own = !decorated && drawsOwnFrame();
++    qCInfo(KWIN_ANLAND) << "window task" << m_id
++                        << (decorated ? "has KWin's title bar" : own ? "draws its own frame (client-side decorations)" : "has no title bar");
++    QStringList line{QStringLiteral("decor"), QString::number(m_id), QString::number(decorated)};
++    if (own) {
++        line.append(QStringLiteral("own"));
++    }
++    m_tasks->send(line);
+ }
+ 
+ void AnlandWindowTask::handOverMaximize()
+@@ -257,15 +269,33 @@ void AnlandWindowTask::handOverMoveResize()
+         return;
+     }
+     const bool move = m_window->isInteractiveMove();
+-    qCInfo(KWIN_ANLAND) << "window task" << m_id << "asked to be" << (move ? "moved: the task moves" : "resized: the task's grip resizes");
++    // Which edges a resize drags (its gravity), as the app's frame names them: n s e w ne nw se sw.
++    QString edges = QStringLiteral("move");
++    if (!move) {
++        switch (m_window->interactiveMoveResizeGravity()) {
++        case Gravity::Top: edges = QStringLiteral("n"); break;
++        case Gravity::Bottom: edges = QStringLiteral("s"); break;
++        case Gravity::Left: edges = QStringLiteral("w"); break;
++        case Gravity::Right: edges = QStringLiteral("e"); break;
++        case Gravity::TopLeft: edges = QStringLiteral("nw"); break;
++        case Gravity::TopRight: edges = QStringLiteral("ne"); break;
++        case Gravity::BottomLeft: edges = QStringLiteral("sw"); break;
++        case Gravity::BottomRight: edges = QStringLiteral("se"); break;
++        default: edges = QStringLiteral("se"); break;
++        }
++    }
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "asked to be" << (move ? "moved: the task moves" : "resized: the task resizes") << edges;
+     QMetaObject::invokeMethod(this, [w = m_window]() {
+         if (w && (w->isInteractiveMove() || w->isInteractiveResize())) {
+             w->cancelInteractiveMoveResize();
+         }
+     }, Qt::QueuedConnection);
+     if (move) {
+-        m_tasks->send({QStringLiteral("move"), QString::number(m_id)});
++        m_tasks->send({QStringLiteral("move"), QString::number(m_id)}); // an older app's (a task's frame drag)
+     }
++    // The app's own window drag/resize with the rest of that touch ("moveresize <id> move|<edges>": a web window's
++    // frame follows the finger as its own bar's and edges' drags do).
++    m_tasks->send({QStringLiteral("moveresize"), QString::number(m_id), edges});
+ }
+ 
+ void AnlandWindowTask::holdNoBorder()
+@@ -455,6 +485,14 @@ void AnlandWindowTask::watchWindow(Window *window)
+     watched.window = window;
+     watched.damaged = connect(window, &Window::damaged, this, [this]() {
+         std::fill(std::begin(m_stale), std::end(m_stale), true);
++        m_statCommits++;
++        if (!m_damagePending) {
++            m_damagePending = true;
++            m_damagedAt = std::chrono::steady_clock::now();
++        }
++        if (!m_statsReport.isActive()) {
++            m_statsReport.start();
++        }
+         scheduleRender();
+     });
+     watched.closed = connect(window, &Window::closed, this, [this, window]() {
+@@ -596,7 +634,7 @@ void AnlandWindowTask::releaseBuffers()
+ 
+ bool AnlandWindowTask::fitsWindow() const
+ {
+-    return m_window && m_window->isFullScreen() && !m_window->clientGeometry().isEmpty() && !taskSize().isEmpty();
++    return m_window && m_window->isFullScreen() && !contentGeometry().isEmpty() && !taskSize().isEmpty();
+ }
+ 
+ qreal AnlandWindowTask::scale() const
+@@ -604,7 +642,7 @@ qreal AnlandWindowTask::scale() const
+     if (fitsWindow()) {
+         // Full screen keeps its size (powosKeepFullScreenGeometry): scaled to fit the task, aspect kept. The task's
+         // size, not the buffers': a floating task shows only its part of them (the crop, "size").
+-        const QSizeF client = m_window->clientGeometry().size();
++        const QSizeF client = contentGeometry().size();
+         const QSize task = taskSize();
+         return std::min(task.width() / client.width(), task.height() / client.height());
+     }
+@@ -614,7 +652,7 @@ qreal AnlandWindowTask::scale() const
+ RectF AnlandWindowTask::viewport() const
+ {
+     // The client area, at the task's size: no title bar (the task has its own), the window's popups where they open.
+-    const RectF client = m_window ? m_window->clientGeometry() : RectF();
++    const RectF client = contentGeometry();
+     const QSizeF size = QSizeF(m_bufferSize) / scale();
+     if (fitsWindow()) {
+         // Centred in the task: black bars where its shape differs from the window's (the cover screen after a fold).
+@@ -629,7 +667,7 @@ RectF AnlandWindowTask::area() const
+     if (!m_window) {
+         return RectF();
+     }
+-    const RectF client = m_window->clientGeometry();
++    const RectF client = contentGeometry();
+     if (fitsWindow() || taskSize().isEmpty()) {
+         return client;
+     }
+@@ -657,6 +695,63 @@ QSizeF AnlandWindowTask::wantedClientSize() const
+     return QSizeF(taskSize()) / scale();
+ }
+ 
++RectF AnlandWindowTask::contentGeometry() const
++{
++    if (!m_window) {
++        return RectF();
++    }
++    // KWin's frame of an undecorated window is what the user sees of it: an X11 client's _GTK_FRAME_EXTENTS (Brave,
++    // Chrome, GTK CSD: their shadow, drawn inside the X window) and a Wayland client's xdg_surface window geometry are
++    // outside it. The client geometry of such an X11 window includes the shadow: shown at its top left, Brave's frame
++    // sat ~16 logical px in, a dark gutter left, right and below it inside the task (the user, 10-30 20:55, "a weird
++    // border"). A decorated window: its client area (the task draws the bar instead of KWin's).
++    return m_window->isDecorated() ? m_window->clientGeometry() : m_window->frameGeometry();
++}
++
++QSizeF AnlandWindowTask::contentToFrameSize(const QSizeF &content) const
++{
++    return m_window && m_window->isDecorated() ? m_window->clientSizeToFrameSize(content) : content;
++}
++
++bool AnlandWindowTask::drawsOwnFrame() const
++{
++    // Draws its own complete frame (title bar, buttons, edges): an undecorated normal window or dialog - on Wayland one
++    // that took client-side decorations (no xdg-decoration server mode: GTK, Chromium's Wayland frame), on X11 one that
++    // asked KWin for none (_MOTIF_WM_HINTS no decorations: Steam, Chrome, Brave) or has GTK frame extents. Not a
++    // full-screen window (no frame at all then) nor one whose KWin border the task took off (noBorder held: it has
++    // the task's bar).
++    if (!m_window || m_window->isDeleted() || m_window->isDecorated() || m_noBorderHeld || m_window->isFullScreen()) {
++        return false;
++    }
++    if (!m_window->isNormalWindow() && !m_window->isDialog()) {
++        return false;
++    }
++    if (auto x11 = qobject_cast<const X11Window *>(m_window)) {
++        return x11->isClientSideDecorated() || x11->noBorder();
++    }
++    // An undecorated xdg toplevel: KWin offered server-side decorations (xdg-decoration) and it kept its own.
++    return qobject_cast<const XdgToplevelWindow *>(m_window) != nullptr;
++}
++
++void AnlandWindowTask::noteFrameStats()
++{
++    if (m_statFrames == 0 && m_statCommits == 0) {
++        m_statsReport.stop(); // idle: started again by the next commit
++        return;
++    }
++    QList<int> w = m_statWaitBuffer;
++    std::sort(w.begin(), w.end());
++    const auto pct = [&w](int p) {
++        return w.isEmpty() ? 0 : w[std::min<qsizetype>(w.size() - 1, w.size() * p / 100)];
++    };
++    qCInfo(KWIN_ANLAND).noquote() << QStringLiteral("window task %1 frames: last 5 s %2 commits, %3 drawn (%4 fps); commit -> drawn median %5 ms, p90 %6 ms, max %7 ms")
++                                         .arg(m_id).arg(m_statCommits).arg(m_statFrames).arg(m_statFrames / 5.0, 0, 'f', 1)
++                                         .arg(pct(50)).arg(pct(90)).arg(w.isEmpty() ? 0 : w.last());
++    m_statCommits = 0;
++    m_statFrames = 0;
++    m_statWaitBuffer.clear();
++}
++
+ static bool sameSize(const QSizeF &a, const QSizeF &b)
+ {
+     // Within half a logical pixel: X11 geometry goes through X's integer pixels (Xcb::toXNative) and back.
+@@ -668,7 +763,7 @@ void AnlandWindowTask::keepTaskSize()
+     if (m_state != State::Live || !m_window || m_window->isDeleted() || m_window->isFullScreen() || m_bufferSize.isEmpty()) {
+         return;
+     }
+-    if (sameSize(m_window->clientGeometry().size(), wantedClientSize())) {
++    if (sameSize(contentGeometry().size(), wantedClientSize())) {
+         m_refits = 0;
+         return;
+     }
+@@ -680,7 +775,7 @@ void AnlandWindowTask::refit()
+     if (m_state != State::Live || !m_window || m_window->isDeleted() || m_window->isFullScreen()) {
+         return;
+     }
+-    const QSizeF has = m_window->clientGeometry().size();
++    const QSizeF has = contentGeometry().size();
+     const QSizeF wanted = wantedClientSize();
+     if (sameSize(has, wanted)) {
+         return;
+@@ -758,10 +853,10 @@ void AnlandWindowTask::fitWindow()
+     // latest size wins - KWin configures the client, which commits when it has laid itself out (render() draws
+     // whatever it has meanwhile, at its real size from the top left: never stretched).
+     const QSizeF client = wantedClientSize();
+-    if (!sameSize(m_window->clientGeometry().size(), client)) {
++    if (!sameSize(contentGeometry().size(), client)) {
+         m_resizeAsked = std::chrono::steady_clock::now();
+         m_resizeWanted = client;
+-        m_window->moveResize(RectF(m_window->frameGeometry().topLeft(), m_window->clientSizeToFrameSize(client)));
++        m_window->moveResize(RectF(m_window->frameGeometry().topLeft(), contentToFrameSize(client)));
+     }
+ }
+ 
+@@ -783,14 +878,14 @@ void AnlandWindowTask::fitFullScreen()
+         return;
+     }
+     const QSizeF client = QSizeF(task) / targetScale;
+-    if (sameSize(m_window->clientGeometry().size(), client)) {
++    if (sameSize(contentGeometry().size(), client)) {
+         return;
+     }
+-    qCInfo(KWIN_ANLAND) << "window task" << m_id << "full screen follows its task:" << m_window->clientGeometry().size() << "->" << client
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "full screen follows its task:" << contentGeometry().size() << "->" << client
+                         << "for" << task;
+     m_resizeAsked = std::chrono::steady_clock::now();
+     m_resizeWanted = client;
+-    m_window->moveResize(RectF(m_window->frameGeometry().topLeft(), m_window->clientSizeToFrameSize(client)));
++    m_window->moveResize(RectF(m_window->frameGeometry().topLeft(), contentToFrameSize(client)));
+     scheduleRender(); // drawn at the task's scale until the client commits its new size
+ }
+ 
+@@ -814,7 +909,7 @@ QSize AnlandWindowTask::fullScreenTaskSize() const
+ void AnlandWindowTask::noteResized()
+ {
+     // The client committed the size resizeTo asked for: how long it took (the log line after the resize).
+-    if (!m_window || m_resizeWanted.isEmpty() || m_window->clientGeometry().size() != m_resizeWanted) {
++    if (!m_window || m_resizeWanted.isEmpty() || !sameSize(contentGeometry().size(), m_resizeWanted)) {
+         return;
+     }
+     m_resizeWanted = QSizeF();
+@@ -892,6 +987,11 @@ void AnlandWindowTask::render(bool keepalive)
+         EGLNativeFence fence{egl->openglContext()->displayObject()};
+         set_render_fence(m_display, fence.takeFileDescriptor().take());
+         m_stale[idx] = false;
++        m_statFrames++;
++        if (m_damagePending) {
++            m_damagePending = false;
++            m_statWaitBuffer.append(int(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_damagedAt).count()));
++        }
+     }
+     trigger_refresh(m_display);
+     m_offered = false;
+@@ -1087,7 +1187,7 @@ void AnlandWindowTasks::announce()
+ {
+     // What this KWin understands beyond "closed"/"focus": the app only sends it then (an older KWin, buffers of the
+     // task's size as before).
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request parent")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit window-ime fullscreen-request parent moveresize ownframe")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 70c1d18..b26958e 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -159,6 +159,12 @@ private:
+     bool fillsAsFullScreen();
+     void noteResized();
+     QSizeF wantedClientSize() const;
++    // The window as the user sees it: its visible frame for a window that draws its own (client-side shadow margins -
++    // X11 _GTK_FRAME_EXTENTS, xdg_surface.set_window_geometry - left out), KWin's client area for a decorated one.
++    RectF contentGeometry() const;
++    QSizeF contentToFrameSize(const QSizeF &content) const;
++    bool drawsOwnFrame() const;
++    void noteFrameStats();
+     void keepTaskSize();
+     void refit();
+     Window *touchTarget(const QPointF &pos) const;
+@@ -205,6 +211,14 @@ private:
+     QTimer m_refit; // sizes the window back to the task after it resized itself (keepTaskSize)
+     int m_refits = 0; // in a row without the window keeping the task's size; gives up after 5
+     bool m_offered = false; // the consumer handed us a buffer to fill (buf_ready) and waits for it
++    // Frame pacing (one log line per 5 s while frames flow): commits, frames drawn, how long a commit waited for the
++    // consumer's next buffer, how long the consumer's buffer waited for a commit.
++    QTimer m_statsReport;
++    int m_statCommits = 0;
++    int m_statFrames = 0;
++    QList<int> m_statWaitBuffer; // commit -> render, ms: the client's frame held for want of a buffer
++    std::chrono::steady_clock::time_point m_damagedAt; // the first commit not yet drawn (or epoch)
++    bool m_damagePending = false;
+     bool m_renderScheduled = false;
+ 
+     // What the window was on the desktop, restored when the task closes.
+-- 
+2.50.1 (Apple Git-155)
+
