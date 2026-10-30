@@ -313,7 +313,10 @@ powos.on("webwindows.full", (m: { id: number; on: boolean; task?: number }) => {
   if (m.on) untile(m.id, "float");
   update(m.id, { full: m.on, task: m.task ?? webWins.value.find((w) => w.id === m.id)?.task, minimised: false });
   if (!m.on) bringBack(m.id);
+  resendGeometry();
 });
+/** The host lost or re-made layer state (a mirror made again, home's surface re-attached): every window's state again. */
+powos.on("webwindows.resend", () => resendGeometry());
 /** Its app's first frame shows (WebWindows.liveWhenDrawn): the placeholder goes, the body is the app's. */
 powos.on("webwindows.live", (id: number) => update(id, { live: true }));
 /** Its app draws its own frame now, or no longer (WebWindows.linuxOwnFrame): its PowOS bar goes or comes. */
@@ -855,7 +858,7 @@ function resizeEnd(id: number) {
   if (!r) return;
   resizing.delete(id);
   lastResize = { id, steps: r.steps, reqs: r.reqs };
-  kick();
+  resendGeometry();
 }
 let lastResize: { id: number; steps: number; reqs: number } | null = null;
 
@@ -927,7 +930,10 @@ function tick(ts: number) {
   if (g !== lastGeometry) {
     lastGeometry = g;
     const id = nextFrameId();
-    const line = `w.f ${id} ${g} ${(Date.now() - (performance.now() - ts)).toFixed(2)}`;
+    const now = Date.now();
+    // Two stamps (wall-clock ms): the rAF's frame time, and now - the send - so the host splits its "rx=" into the page's
+    // own share (vsync to this send: rAF scheduling and measuring) and the hop to the host.
+    const line = `w.f ${id} ${g} ${(now - (performance.now() - ts)).toFixed(2)} ${now}`;
     sent.push(line);
     if (sent.length > 120) sent.shift();
     if (native.value) {
@@ -940,6 +946,16 @@ function tick(ts: number) {
 
 function kick() {
   if (!raf) raf = requestAnimationFrame(tick);
+}
+
+/**
+ * The next frame sends every window's geometry even if unchanged: a transition (full screen and back, a resize's end,
+ * a layer the host re-made) commits the whole layer state - parent, z, crop, position, visibility - at once, never
+ * only on the next move (10-30 22:59: a window back from full screen showed a bare hole until it was dragged).
+ */
+function resendGeometry() {
+  lastGeometry = "";
+  kick();
 }
 webWins.subscribe(kick);
 tilings.subscribe(kick);
