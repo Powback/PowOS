@@ -32,7 +32,7 @@ interface UnitRow {
 }
 
 /** As last seen: shown at once when the page comes back. */
-const units = signal<UnitRow[]>([]);
+export const units = signal<UnitRow[]>([]);
 const open = stored("powai.units.open", "[]");
 const opened = () => {
   try {
@@ -84,7 +84,33 @@ function Line({ u, onTap, wide }: { u: UnitRow; onTap: () => void; wide: boolean
   );
 }
 
-/** Per host: a folding group (orphans and drift in its header), its units orphans-first, then by status. */
+/** A host's header: its name whole on one line, its counts, orphans, drift and age as a smaller subtitle under it. */
+function HostHead({ h, rows, check, shut, onTap }: { h: string; rows: UnitRow[]; check?: UnitRow; shut: boolean; onTap: () => void }) {
+  const orph = rows.filter((u) => u.orphan).length;
+  const run = rows.filter((u) => u.status === "running").length;
+  const asleep = rows.filter((u) => u.status === "asleep").length;
+  return (
+    <button type="button" class="ai-work ai-work-project ai-unit-host" onClick={onTap}>
+      <span class="ai-work-line">
+        <span class="ai-work-caret muted">{shut ? "▸" : "▾"}</span>
+        <span class="ai-unit-host-text">
+          <span class="ai-work-title">{h}</span>
+          <span class="ai-work-meta muted">
+            {rows.length} units · {run} running{asleep ? ` · ${asleep} asleep` : ""}
+            {orph > 0 && <span class="ai-unit-flag"> · {orph} orphan{orph > 1 ? "s" : ""}</span>}
+            {check?.status === "drift" && <span class="ai-work-blocked"> · drift</span>}
+            {check && <span> · {ago(Number(check.updated) / 1000)}</span>}
+          </span>
+        </span>
+      </span>
+      {!shut && check?.status === "drift" && (
+        <span class="ai-work-detail muted">unregistered: {check.purpose} (powos units check)</span>
+      )}
+    </button>
+  );
+}
+
+/** Per host: a folding group (HostHead), its units orphans-first, then by status. */
 export function Units({ shown }: { shown: boolean }) {
   const [tapped, setTapped] = useState<string | null>(null);
   const all = units.value;
@@ -108,9 +134,6 @@ export function Units({ shown }: { shown: boolean }) {
         {hosts.map((h) => {
           const rows = all.filter((u) => u.host === h && u.id !== "_check");
           const check = all.find((u) => u.host === h && u.id === "_check");
-          const orph = rows.filter((u) => u.orphan).length;
-          const run = rows.filter((u) => u.status === "running").length;
-          const asleep = rows.filter((u) => u.status === "asleep").length;
           const shut = !isOpen.has(h);
           rows.sort(
             (a, b) => Number(b.orphan) - Number(a.orphan) || (RANK[a.status] ?? 9) - (RANK[b.status] ?? 9) ||
@@ -118,21 +141,7 @@ export function Units({ shown }: { shown: boolean }) {
           );
           return (
             <div key={h} class="ai-work-group">
-              <button type="button" class="ai-work ai-work-project" onClick={() => toggle(h)}>
-                <span class="ai-work-line">
-                  <span class="ai-work-caret muted">{shut ? "▸" : "▾"}</span>
-                  <span class="ai-work-title">{h}</span>
-                  <span class="ai-work-meta muted">
-                    {rows.length} units · {run} running{asleep ? ` · ${asleep} asleep` : ""}
-                    {orph > 0 && <span class="ai-unit-flag"> · {orph} orphan{orph > 1 ? "s" : ""}</span>}
-                    {check?.status === "drift" && <span class="ai-work-blocked"> · drift</span>}
-                    {check && <span> · {ago(Number(check.updated) / 1000)}</span>}
-                  </span>
-                </span>
-                {!shut && check?.status === "drift" && (
-                  <span class="ai-work-detail muted">unregistered: {check.purpose} (powos units check)</span>
-                )}
-              </button>
+              <HostHead h={h} rows={rows} check={check} shut={shut} onTap={() => toggle(h)} />
               {!shut &&
                 rows.map((u) => (
                   <Line key={u.key} u={u} wide={tapped === u.key} onTap={() => setTapped(tapped === u.key ? null : u.key)} />

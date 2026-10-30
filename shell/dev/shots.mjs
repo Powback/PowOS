@@ -141,6 +141,14 @@ const PRESENT_SAMPLE = JSON.stringify([
   { kind: "assistant", text: "```present\n" + JSON.stringify({ title: "Review: chat cards", format: "html", body: SHEET_HTML }) + "\n```" },
 ]);
 
+/** Five hosts' units as `powos units publish` leaves them (41 on the phone, drift on two), for ui/units.tsx. */
+const UNITS_SCENE =
+  "const M = await U('./ui/units.tsx'); const now = Date.now(); const R = []; const hosts = [['phone', 41, 14, 'drift'], ['phone-android', 23, 9, 'clean'], ['mac', 37, 21, 'drift'], ['colima', 58, 44, 'clean'], ['powstation', 12, 7, 'clean']];" +
+  " for (const [h, n, run, st] of hosts) { R.push({ key: h + '/_check', host: h, id: '_check', name: '', kind: '', owner: '', purpose: 'powos-cdn-sync', status: st, memKb: 0, cpuPermille: 0, limits: '', autosleep: '', orphan: false, decide: '', updated: now - 6 * 60e3 });" +
+  " for (let i = 0; i < n; i++) R.push({ key: h + '/u' + i, host: h, id: 'u' + i, name: 'unit-' + i, kind: 'service', owner: 'powos', purpose: 'sample', status: i < run ? 'running' : i % 3 ? 'stopped' : 'asleep', memKb: 40000 + i * 9000, cpuPermille: i * 3, limits: '', autosleep: '', orphan: i === n - 1 && h === 'mac', decide: '', updated: now }); }" +
+  " M.units.value = R; S.page.value = -1; await sleep(300); [...document.querySelectorAll('.ai-unit-host')].find((b) => b.textContent.startsWith('▸mac'))?.click(); await sleep(200);" +
+  " document.querySelector('.ai-unit-host')?.closest('.ai-work-list').scrollIntoView(); await sleep(100);";
+
 /** The work board as it was live (dev/sample-board.json, ages as offsets), for PowOS AI's page. */
 const BOARD = (() => {
   // In the render container the shell is at /shell (dev/shot.sh, gate.sh); run in place, next to this file.
@@ -325,6 +333,11 @@ const SCENES = [
   ["test-now", "home", board(false) + TEST_NOW, "wallpaper"],
   ["test-now-testing", "home", board(false) + TEST_NOW + " document.querySelector('.ai-test')?.click(); await sleep(200);", "wallpaper"],
   ["ai-wide", "home", board(true), "wallpaper", undefined, WIDE_SIZES],
+  // PowOS AI's "installed & running" (ui/units.tsx, the user 2026-10-30: "text is cutoff here do a newline subtitle"):
+  // each host's name whole on its own line, its counts as a subtitle under it; mac unfolded to show its units too.
+  // Its left column scrolled (the user, 2026-10-30: "This part doesn't need to be sticky"): the header goes with it.
+  ["ai-scrolled", "home", UNITS_SCENE + " document.querySelectorAll('.ai-scroll').forEach((e) => { e.scrollTop = 160; }); await sleep(100);", "wallpaper", undefined, { ...SIZES, "unfolded-land": LAND_SIZES["unfolded-land"] }],
+  ["ai-units", "home", UNITS_SCENE, "wallpaper", undefined, { ...SIZES, "unfolded-land": LAND_SIZES["unfolded-land"] }],
   // The same AiView in home's AI panel and the pull-up over apps: one column folded, two panes wide.
   ["ai-panel-wide", "home", board(true).replace(" S.page.value = -1;", "") + " S.openPanel('ai'); await sleep(500);", "wallpaper", undefined, WIDE_SIZES],
   ["pull-ai-wide", "pull", board(true).replace(" S.page.value = -1;", "") + " E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(500);", "blurred", undefined, WIDE_SIZES],
