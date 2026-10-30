@@ -170,6 +170,8 @@ install -m 755 "$P/session/powos-plasma-bridge" /usr/local/bin/powos-plasma-brid
 install -Dm 644 "$P/session/powos-plasma-bridge.desktop" /etc/xdg/autostart/powos-plasma-bridge.desktop
 install -Dm 644 "$P/session/plasma/org.powos.plasma.desktop" /usr/share/applications/org.powos.plasma.desktop
 install -m 755 "$P/session/powos-open-task" /usr/local/bin/powos-open-task
+# A swiped window task's app ends (KWin 0042 "quit" runs it 3 s after closing the window, if it's still there).
+install -m 755 "$P/session/powos-app-quit" /usr/local/bin/powos-app-quit
 install -m 755 "$P/session/powos-android-open" /usr/local/bin/powos-android-open   # links -> the phone's browser
 install -Dm 644 "$P/session/powos-android-open.desktop" /usr/share/applications/powos-android-open.desktop
 # The app's touch controls as a gamepad (started by powos-rooted-session).

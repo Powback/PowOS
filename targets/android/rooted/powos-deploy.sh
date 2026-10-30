@@ -36,6 +36,8 @@ install -m 755 $T/powos-plasma-bridge $R/usr/local/bin/powos-plasma-bridge
 install -m 644 $T/powos-plasma-bridge.desktop $R/etc/xdg/autostart/powos-plasma-bridge.desktop
 # A PowOS app tapped on Android opens in its own Android task, like a phone app (the PowOS app runs this).
 install -m 755 $T/powos-open-task $R/usr/local/bin/powos-open-task
+# A swiped window task's app ends (KWin 0042 "quit" runs it 3 s after closing the window, if it's still there).
+install -m 755 $T/powos-app-quit $R/usr/local/bin/powos-app-quit
 install -m 644 $T/powos-android-tasks.desktop $R/etc/xdg/autostart/powos-android-tasks.desktop
 # Links open in the phone's own browser (Android's default, Chrome) - the PowOS app's OpenSpool: powos-android-open,
 # the user's http/https handler (their mimeapps.list, which outranks every other default) and every shell's $BROWSER.
@@ -115,7 +117,7 @@ rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-sess
   $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task \
   $T/powos-apps-watch $T/powos-apps-watch.desktop $T/powos-plasma-bridge $T/powos-plasma-bridge.desktop \
   $T/powos-ime-bridge $T/powos-ime-bridge.desktop $T/powos-output-scale $T/android-nm \
-  $T/powos-android-open $T/powos-android-open.desktop
+  $T/powos-android-open $T/powos-android-open.desktop $T/powos-app-quit
 
 # The user: powos, as on every PowOS (password powos, sudo through wheel). Its uid is the PowOS app's Android uid:
 # the app's run dir (display socket, phone state) is then the user's own, as XDG_RUNTIME_DIR should be. Re-run

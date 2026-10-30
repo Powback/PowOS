@@ -44,6 +44,12 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
      * id may be another window's of the running KWin. Set from the control thread, read on finishing.
      */
     private volatile boolean closedByKWin;
+    /**
+     * The user closed this task for good - its card swiped away in the switcher, its frame's close (Tasks.remove ->
+     * WindowTasks.quitting): the APP goes too, not only the task ("quit": KWin closes the window, then ends the app's
+     * process tree if it is still there ~3 s later, kwin 0041). Any thread; read on finishing.
+     */
+    volatile boolean quit;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -711,9 +717,14 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         consumerThread.shutdown();
         if (id > 0) {
             WindowTasks.tasks.remove(id, this);
-            // Closed for good (swiped from Recents, Back): KWin shows the window on the desktop again.
-            if (isFinishing() && !closedByKWin)
-                WindowTasks.closed(this, id);
+            // Closed for good: swiped from the switcher / the frame's close (quit: the app goes), or Back (KWin shows the
+            // window on the desktop again, or closes it on the unfolded home).
+            if (isFinishing() && !closedByKWin) {
+                if (quit)
+                    WindowTasks.quit(this, id);
+                else
+                    WindowTasks.closed(this, id);
+            }
         }
         super.onDestroy();
     }

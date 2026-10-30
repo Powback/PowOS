@@ -211,6 +211,9 @@ object Tasks {
         val task = list(context).firstOrNull { it.id == id }
         val pkg = task?.component?.packageName
         if (pkg == context.packageName) {
+            // A Linux window's task (PowosWindowActivity): the user closed it (swiped its card, the frame's close), so
+            // the app goes too - KWin closes its window, then ends its process tree if it stays (WindowTasks.quit).
+            andro.marchy.WindowTasks.quitting(id)
             val own = context.getSystemService(ActivityManager::class.java).appTasks.firstOrNull { runCatching { it.taskInfo?.taskId }.getOrNull() == id }
             if (own != null) return runCatching { own.finishAndRemoveTask() }.onFailure { Log.w(TAG, "can't finish own task $id", it) }.isSuccess
             Log.w(TAG, "task $id is PowOS's own but not among its app tasks: removeTask")

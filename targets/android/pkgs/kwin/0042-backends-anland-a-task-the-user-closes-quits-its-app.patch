@@ -1,0 +1,128 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: a task the user closes quits its app
+
+The user (2026-10-30): "When I swipe up a game or like a Linux application whatever from the switcher it should
+close that application". Swiping a window task's card away sent "closed": KWin closed the window only on the
+unfolded home ("export-new 1") and never for a full-screen task, so a game went back on the hidden desktop and kept
+running - ABZU's and Broforce's launch chains were left running overnight, music playing.
+
+The app now sends "quit <id>" (cap "quit") when the user closes the task - its card swiped in the switcher, its
+frame's close (Tasks.remove). KWin closes the window as its own close button would (closeWindow:
+WM_DELETE_WINDOW / xdg close), full screen or not, wherever the desktop is. 3 s later, if the window's process still
+runs, it starts `powos-app-quit <pid>` (session/powos-app-quit: a Steam game's whole launch chain by its AppId, else
+the process's own tree; never Steam, the session, KWin or Xwayland) - unless the process has other windows of its own
+(a second Dolphin window: left running) or the window asks first (a modal transient: save changes? - left to the
+user). Every step logs ("quit <id>: ..."). "closed" (Back) is unchanged.
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index f9b2beb..30b6664 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -36,7 +36,10 @@
+ #endif
+ 
+ #include <QDBusConnection>
++#include <QProcess>
+ #include <QSocketNotifier>
++#include <cerrno>
++#include <csignal>
+ 
+ #include <algorithm>
+ #include <cmath>
+@@ -1051,7 +1054,7 @@ void AnlandWindowTasks::announce()
+ {
+     // What this KWin understands beyond "closed"/"focus": the app only sends it then (an older KWin, buffers of the
+     // task's size as before).
+-    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor")});
++    send({QStringLiteral("caps"), QStringLiteral("size export-new fullscreen session desktop decor move maximize minimize nodecor quit")});
+     // Which KWin this is and the tasks it shows now (window ids restart at 1 with each KWin): the app finishes every
+     // window task of an earlier KWin, or one this KWin no longer has, instead of showing a new window in it (after a
+     // session restart, Kate's launcher tap raised the old session's dead Kate task).
+@@ -1150,6 +1153,8 @@ void AnlandWindowTasks::handleLine(const QString &line)
+                 }
+             });
+         }
++    } else if (f[0] == QLatin1String("quit")) {
++        quit(task);
+     } else if (f[0] == QLatin1String("nodecor")) {
+         // The app draws its title bar: KWin's decoration off while it's a task (holdNoBorder).
+         task->holdNoBorder();
+@@ -1161,6 +1166,66 @@ void AnlandWindowTasks::handleLine(const QString &line)
+     }
+ }
+ 
++void AnlandWindowTasks::quit(AnlandWindowTask *task)
++{
++    // The user closed the task for good - its card swiped away in the switcher, its frame's close - and means the app:
++    // the window is closed as its own close button would (WM_DELETE_WINDOW / xdg close), wherever the desktop is, full
++    // screen too ("closed" leaves a full-screen game, or any window while the desktop shows, running on the desktop).
++    // An app still running ~3 s later is ended, its process tree (powos-app-quit: a Steam game's whole launch chain,
++    // never Steam, the session, KWin or Xwayland) - unless it has other windows of its own (a second Dolphin window)
++    // or the window asks first (a modal dialog: save changes?).
++    Window *window = task->window();
++    const uint32_t id = task->id();
++    const pid_t pid = window && !window->isDeleted() ? window->pid() : 0;
++    const bool reshow = m_exportNew && !task->fullScreen();
++    remove(task);
++    if (!window || window->isDeleted()) {
++        qCInfo(KWIN_ANLAND) << "quit" << id << ": its window is gone already";
++        return;
++    }
++    qCInfo(KWIN_ANLAND) << "quit" << id << ": closing" << window->resourceClass() << "pid" << pid;
++    window->closeWindow();
++    if (reshow) {
++        // As "closed": one that stays (it asks to save first) comes back as a task with its question.
++        QTimer::singleShot(1500, this, [this, w = QPointer<Window>(window)]() {
++            if (w && !w->isDeleted()) {
++                exportNew(w);
++            }
++        });
++    }
++    if (pid <= 1 || pid == ::getpid()) {
++        qCInfo(KWIN_ANLAND) << "quit" << id << ": no process of its own to end (pid" << pid << ")";
++        return;
++    }
++    QTimer::singleShot(3000, this, [id, pid, w = QPointer<Window>(window)]() {
++        if (::kill(pid, 0) != 0 && errno == ESRCH) {
++            qCInfo(KWIN_ANLAND) << "quit" << id << ": pid" << pid << "exited after its window closed";
++            return;
++        }
++        const Window *closing = w && !w->isDeleted() ? w.data() : nullptr;
++        for (Window *other : workspace()->windows()) {
++            if (other == closing || other->isDeleted() || other->pid() != pid || !other->isClient()) {
++                continue;
++            }
++            if (closing && closing->hasTransient(other, true)) {
++                if (other->isModal()) {
++                    qCInfo(KWIN_ANLAND) << "quit" << id << ": pid" << pid << "asks first (" << other->caption() << "): left to the user";
++                    return;
++                }
++                continue;
++            }
++            if (!other->isTransient()) {
++                qCInfo(KWIN_ANLAND) << "quit" << id << ": pid" << pid << "has other windows (" << other->caption() << "): left running";
++                return;
++            }
++        }
++        qCInfo(KWIN_ANLAND) << "quit" << id << ": pid" << pid << (closing ? "kept its window" : "still runs without it") << "after 3 s: powos-app-quit" << pid;
++        if (!QProcess::startDetached(QStringLiteral("powos-app-quit"), {QString::number(pid)})) {
++            qCWarning(KWIN_ANLAND) << "quit" << id << ": powos-app-quit didn't start";
++        }
++    });
++}
++
+ void AnlandWindowTasks::send(const QStringList &fields)
+ {
+     if (m_controlFd < 0) {
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index f978e1b..5570220 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -258,6 +258,7 @@ private:
+     void announce();
+     void onControlReadable();
+     void handleLine(const QString &line);
++    void quit(AnlandWindowTask *task);
+     void setExportNew(bool on);
+     /** The app's "desktop 1|0": the desktop (the Plasma app) is on screen; its windows stay on it ([ownedByDesktop]). */
+     void setDesktopShown(bool on);

@@ -234,6 +234,36 @@ public final class WindowTasks {
         Log.i(TAG, "closed " + id + " (caps:" + caps + "export-new " + exportNewSent + ")" + (out == null ? ": channel down, dropped" : ""));
     }
 
+    /**
+     * Task [taskId] is being closed by the user - its card swiped away in the switcher, its frame's close button
+     * (Tasks.remove, before it finishes the task): if it shows a Linux window, the application goes with it, not only
+     * the task ([quit]). False for any other task (an Android app's: as before). Any thread.
+     */
+    public static boolean quitting(int taskId) {
+        for (PowosWindowActivity a : tasks.values())
+            if (a.getTaskId() == taskId) {
+                a.quit = true;
+                Log.i(TAG, "task " + taskId + " (window " + a.windowId() + "): closed by the user, its app goes too");
+                return true;
+            }
+        return false;
+    }
+
+    /**
+     * Window [id]'s task was closed by the user ([quitting]): KWin closes the window as its own close button would
+     * (WM_DELETE_WINDOW / xdg close) and, if the app hasn't exited ~3 s later, ends its process tree - a Steam game's
+     * whole launch chain, never Steam itself (kwin 0041 "quit" -> powos-app-quit). An older KWin: "closed", as before.
+     */
+    static void quit(Context context, int id) {
+        if (!kwinCan("quit")) {
+            Log.i(TAG, "quit " + id + ": KWin can't (caps:" + caps + "), closed instead");
+            closed(context, id);
+            return;
+        }
+        send("quit", id);
+        Log.i(TAG, "quit " + id + ": KWin closes the window, then ends the app" + (out == null ? ": channel down, dropped" : ""));
+    }
+
     /** The control channel reached the display daemon. */
     static boolean connected() {
         return out != null;

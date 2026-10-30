@@ -195,6 +195,12 @@ description: Use when working on PowOS window tasks - floating Android windows (
   no dolphin process). Queue with --close.
   KWin closes a window on "closed" only with export-new 1 (else: back on the hidden desktop, the app keeps running);
   WindowTasks.closed re-sends export-new first. Logs: logcat WindowTasks "KWin caps:", "export-new N", "closed N";
+- Swipe/close = quit the app (kwin 0042, pkg 3.48, 2026-10-30): Tasks.remove -> WindowTasks.quitting(taskId) marks the
+  PowosWindowActivity; its onDestroy sends "quit <id>" (cap "quit"; older KWin: "closed"). KWin closeWindow()s it (full
+  screen too, any export-new), 3 s later `powos-app-quit <pid>` if the pid still runs, has no other window and no modal
+  dialog. Helper (session/powos-app-quit): Steam game -> `powos game <appid> stop` (reaper ancestor / SteamAppId env),
+  else pid's tree; never Steam client/FEXServer/session/KWin/Xwayland. Logs: logcat WindowTasks "quit N", KWin "quit N:",
+  $XDG_RUNTIME_DIR/powos-app-quit.log. Back still sends "closed". Launch windows (splash, id 0) send nothing yet.
   KWin's anland info lines in /run/powos-app/hyprland.log (QT_LOGGING_RULES in powos-rooted-session); the display
   daemon's control connects in the app's files/run/andromarchy.log.
 - BLACK Linux windows (Kate, Dolphin, games; 2026-10-23): the consumer's daemon address was set only by MainActivity

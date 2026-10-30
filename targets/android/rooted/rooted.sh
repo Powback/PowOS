@@ -105,7 +105,7 @@ deploy)
   for f in powos-android-app powos-android-tasks powos-android-tasks.desktop powos-padd powos-focus-watch powos-apps-export \
     powos-apps-watch powos-apps-watch.desktop powos-plasma-bridge powos-plasma-bridge.desktop powos-open-task powos-ime-bridge powos-ime-bridge.desktop \
     powos-android-open powos-android-open.desktop \
-    powos-output-scale android-nm; do
+    powos-output-scale android-nm powos-app-quit; do
     adb push -q "$HERE/../session/$f" "/data/local/tmp/$f"
   done
   # PowOS's own scripts the phone's features rely on (shipped in the PowOS image - a rootfs from an older image

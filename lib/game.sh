@@ -557,6 +557,10 @@ _game_descendants() {
 _game_steam_close() {
     local app=$1 all=$2 t0 g s="" left how="" me=" $$ ${BASHPID:-} $PPID "  # me: never kill ourselves (_gsc_set)
     t0=$(date +%s%N)
+    # The game alone: Steam's client and its launchers stay, even when one carries the game's SteamAppId (a game that
+    # started Steam itself passes its environment on) - powos-app-quit (a swiped game's card) relies on this.
+    [[ $all == 1 ]] || { local a; a="$(cat "$HOME/.steam/steam.pid" 2>/dev/null || true)"
+        while [[ -n "$a" && "$a" -gt 1 ]]; do me+="$a "; a="$(awk '{print $4}' "/proc/$a/stat" 2>/dev/null || true)"; done; }
     g=$(_gsc_set $(_game_launch_pids "$app"))
     [[ -n "$g" ]] && kill -TERM $g 2>/dev/null || true
     if [[ $all == 1 ]]; then
