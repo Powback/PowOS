@@ -271,7 +271,9 @@ class ShellBridge(
         // PowOS AI's conversation (shared with its own app): every item and the busy flag, as they stream in.
         PowosAiChat.load(context.applicationContext)
         appWidgets.listen(appWidgetEvents)
-        scope.launch { snapshotFlow { aiChat().toString() }.drop(1).collect { emit("ai.changed", JSONObject(it)) } }
+        // Built and serialized off the main thread (the whole conversation, every streamed token: 54 ms of JSONStringer
+        // on main in perf-1793396392624, a dropped home frame each); only the page's emit is posted to main.
+        scope.launch(Dispatchers.Default) { snapshotFlow { aiChat().toString() }.drop(1).collect { emit("ai.changed", it) } }
         // Something that needs Linux was asked for without it (a terminal, a Linux widget): home offers to install it.
         if (activity is ShellActivity) {
             scope.launch {
@@ -424,7 +426,7 @@ class ShellBridge(
             // Perf trace from the status bar's fps meter: saved where PowOS AI sees it (the shared run dir), the last 20 kept,
             // and mailed to the coordinator (the Mac session running PowOS) so every recording reaches it with its full data.
             // The fps meter's native trace section (MainStallWatch): main-thread blocks and frame gaps while it records.
-            "perf.native" -> if (a.optBoolean(0, false)) MainStallWatch.start().let { true } else MainStallWatch.stop()
+            "perf.native" -> if (a.optBoolean(0, false)) MainStallWatch.start(homeWindow()).let { true } else MainStallWatch.stop()
             // The PowOS window in front (a game): its presents since its consumer started, for the meter's rate; null = none.
             "perf.front" -> andro.marchy.PowosWindowActivity.frontPresents()?.let { p ->
                 JSONObject().put("id", p[0]).put("presented", p[1]).put("undrawn", p[2]).put("at", System.currentTimeMillis())
@@ -1544,6 +1546,9 @@ class ShellBridge(
         synchronized(live) { live.add(this) }
     }
 
+    /** Home's window (the launcher activity's), whichever shell window asked: the meter records from the status bar. */
+    private fun homeWindow(): android.view.Window? = (activity as? ShellActivity ?: synchronized(live) { live.firstNotNullOfOrNull { it.activity as? ShellActivity } })?.window
+
     private fun broadcast(event: String, json: String, except: ShellBridge? = null) {
         val all = synchronized(live) { live.toList() }
         all.forEach { if (it !== except) it.emit(event, json) }
@@ -1566,8 +1571,8 @@ class ShellBridge(
             return true
         }
 
-        /** The bridge calls that only touch files: run by [callOffMain], never on the main thread. */
-        private val OFF_MAIN = setOf("store.get", "store.set", "perf.save")
+        /** The bridge calls that only touch files or re-serialize (perf.publish: the meter's own ~4 Hz cost): run by [callOffMain], never on the main thread. */
+        private val OFF_MAIN = setOf("store.get", "store.set", "perf.save", "perf.publish")
 
         /** One thread for them all, so a page's set then get stay in that order. */
         private val fileIo = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-store").apply { isDaemon = true } }

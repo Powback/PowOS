@@ -125,6 +125,10 @@ function followDock(el: HTMLElement | null) {
   dockElement.value = el;
 }
 
+/** How long a web window holds still before home re-reports its pull regions (see the effect below). */
+const REPORT_SETTLE_MS = 120;
+let lastWins: unknown;
+
 // Home's page only (app.tsx imports this module in every mode).
 if (!new URLSearchParams(location.search).get("mode")) effect(() => {
   const on = homePullOk.value;
@@ -148,11 +152,20 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
       () => (launcherTakesHome.value = false),
     );
   };
-  const frame = requestAnimationFrame(report);
-  const observer = new ResizeObserver(report);
+  // One report per frame at most, however many observers fire in it (claimFree walks home and reads computed styles:
+  // a forced layout, 44 ms in perf-1793396392624). A web window moving or resizing re-runs this effect every pointer
+  // step: that report waits until the window holds still (REPORT_SETTLE_MS) - the finger is the window's meanwhile.
+  const settling = lastWins !== undefined && lastWins !== webWins.peek();
+  lastWins = webWins.peek();
+  let frame = 0;
+  const soon = () => {
+    if (!frame) frame = requestAnimationFrame(() => ((frame = 0), report()));
+  };
+  const timer = settling ? setTimeout(soon, REPORT_SETTLE_MS) : (soon(), 0);
+  const observer = new ResizeObserver(soon);
   if (dockNode) observer.observe(dockNode);
-  addEventListener("resize", report);
-  return () => { cancelAnimationFrame(frame); observer.disconnect(); removeEventListener("resize", report); };
+  addEventListener("resize", soon);
+  return () => { clearTimeout(timer); cancelAnimationFrame(frame); observer.disconnect(); removeEventListener("resize", soon); };
 });
 
 /** How far above the dock a held app has to go to leave it for the home screen. */
