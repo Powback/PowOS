@@ -339,6 +339,7 @@ public final class WindowTasks {
             Log.i(TAG, "KWin session " + session + ", its tasks " + live);
             kwinBar.keySet().retainAll(live);
             finishStale(context, session, live);
+            WebWindowSource.session(live);
             return;
         }
         int id;
@@ -349,7 +350,9 @@ public final class WindowTasks {
             return;
         }
         if (f[0].equals("open"))
-            open(context, id, f);
+            open(context, id, f, true);
+        else if (WebWindowSource.isWeb(id))
+            onWebWindow(id, f);
         else
             onWindow(id, f);
     }
@@ -367,12 +370,28 @@ public final class WindowTasks {
         return live;
     }
 
-    /** KWin's "open <id> <app id> <caption> [fullscreen]": the window in a task of its own, or back in the one it has. */
-    private static void open(Context context, int id, String[] f) {
+    /**
+     * Window [id] as its own task after all ([WebWindowSource.fallback]: home showed no web window for it) - the "open"
+     * KWin sent, without offering it to web windows again.
+     */
+    static void openAsTask(Context context, int id, String appId, String title) {
+        open(context, id, new String[] {"open", String.valueOf(id), appId, title}, false);
+    }
+
+    /**
+     * KWin's "open <id> <app id> <caption> [fullscreen]": the window in a task of its own, or back in the one it has -
+     * or, [web] and home's web windows want it, a web window of home (WebWindowSource; docs/WEB_WINDOWS.md S6).
+     */
+    private static void open(Context context, int id, String[] f, boolean web) {
         // A document task per surface id: its own card in Recents, split screen, floating window.
         boolean fullScreen = f.length > 4 && f[4].equals("fullscreen");
         String appId = f.length > 2 ? f[2] : "";
         String title = f.length > 3 ? f[3] : "";
+        // A web window already, or a new window with web windows on: home's (a window that has a task keeps it; a
+        // full-screen application - a game - stays a full-screen task until web windows have a full screen of their own).
+        if (web && (WebWindowSource.isWeb(id) || (!fullScreen && !tasks.containsKey(id) && !opening.containsKey(id)))
+                && WebWindowSource.offer(id, appId, title))
+            return;
         // One task per KWin window: a window that has one already (KWin's show again - the launcher, the
         // dock, a window activated the desktop way) brings that one back, never a second activity; one that
         // is full screen floats then on the unfolded home (it opened folded, or before apps floated).
@@ -402,7 +421,7 @@ public final class WindowTasks {
         // The launch window of its app (LaunchWindows: opened at the tap) becomes this window: same task, same place.
         Runnable orElse = () -> {
             opening.remove(id);
-            open(context, id, f);
+            open(context, id, f, false);
         };
         if (LaunchWindows.adopt(appId, title, fullScreen, a -> a.runOnUiThread(() -> a.become(id, data, appId, title, orElse)))) {
             Log.i(TAG, "open " + id + " (" + appId + "): in its launch window");
@@ -425,6 +444,29 @@ public final class WindowTasks {
     private static Uri windowData(int id) {
         String s = session;
         return Uri.parse("powos-window://" + id + (s != null ? "?session=" + Uri.encode(s) : ""));
+    }
+
+    /**
+     * KWin's lines about a web window's [id] (WebWindowSource): its caption and its close go to home's web windows.
+     * Not yet for web windows (logged): "fullscreen" (a game going full screen: stays in its window), "move" /
+     * "maximize" / "minimize" from a window's own client-side title bar (Steam), "decor" is answered as for a task.
+     */
+    private static void onWebWindow(int id, String[] f) {
+        switch (f[0]) {
+            case "title":
+                if (f.length > 2)
+                    WebWindowSource.title(id, f[2]);
+                break;
+            case "close":
+                kwinBar.remove(id);
+                WebWindowSource.closed(id);
+                break;
+            case "decor":
+                onWindow(id, f);
+                break;
+            default:
+                Log.i(TAG, "web window " + id + ": " + String.join(" ", f) + " (not yet for web windows)");
+        }
     }
 
     /** KWin's lines about window [id] other than "open". */

@@ -439,7 +439,8 @@ onWebWindowPage((p) => {
   if (i >= 0) page.value = i;
 });
 // An app's task made a PowOS desktop window (ShellBridge.toWebWindow): a web window on the page home shows now.
-powos.on("webwindows.adopt", (m: { task: number; key: string; label?: string; body?: WebWindowRect }) => {
+// A Linux window KWin opened (web windows on, docs/WEB_WINDOWS.md S6) comes the same way, with its KWin id instead of a task.
+powos.on("webwindows.adopt", (m: { task?: number; kwin?: number; key: string; label?: string; body?: WebWindowRect }) => {
   void adoptWebWindow({ ...m, label: m.label ?? byKey.value.get(m.key)?.label ?? m.key }, pages.value[page.value] ?? 1);
 });
 
