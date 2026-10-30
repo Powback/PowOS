@@ -9,7 +9,9 @@
  * from CDP for this page only).
  *
  * The page sends where its surfaces are as rounded rectangles on the screen ("b.r ..."), every frame while anything
- * moves (a swipe, a transition, a panel sliding) and once when they come, go or change - nothing while home is still.
+ * moves (a swipe, a transition, a panel sliding) and once when they come, go or change - nothing while home is still:
+ * no frame callback at rest (the loop stops a few still frames after the last change, MOVING_STILL_FRAMES at most
+ * while a carrier animates without moving glass), and only a set that differs is sent.
  * The host applies each set on the window's next drawn frame, the frame that shows the page as it was measured.
  */
 import { signal } from "@preact/signals";
@@ -133,6 +135,13 @@ function joinedSides(el: HTMLElement, j: (side: string) => number): [number, num
   return el.parentElement?.classList.contains("joined") ? [j("t"), j("r"), j("b"), j("l")] : [0, 0, 0, 0];
 }
 
+/**
+ * Whether an ancestor clips (overflow other than visible, a clip-path): read once per reshape for all the surfaces
+ * under it. 2026-10-30: each surface read every ancestor's computed style again - a page of tiles shares them - and a
+ * reshape was the one attributed long frame of an idle home (nativeglass.ts:frame 28 ms of script).
+ */
+let clipsOf = new Map<Element, boolean>();
+
 function shapeOf(el: HTMLElement): Shape {
   const cs = getComputedStyle(el);
   const r = (v: string) => parseFloat(v) || 0;
@@ -140,8 +149,12 @@ function shapeOf(el: HTMLElement): Shape {
   const chain: Element[] = [el];
   for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
     chain.push(p);
-    const s = getComputedStyle(p);
-    if (s.overflowX !== "visible" || s.overflowY !== "visible" || s.clipPath !== "none") clips.push(p);
+    let c = clipsOf.get(p);
+    if (c === undefined) {
+      const s = getComputedStyle(p);
+      clipsOf.set(p, (c = s.overflowX !== "visible" || s.overflowY !== "visible" || s.clipPath !== "none"));
+    }
+    if (c) clips.push(p);
   }
   const j = (side: string) => (parseFloat(cs.getPropertyValue(`--j${side}`)) >= 1 ? 1 : 0);
   return {
@@ -155,6 +168,7 @@ function shapeOf(el: HTMLElement): Shape {
 
 function reshape() {
   shapesDirty = false;
+  clipsOf = new Map();
   const next = new Map<Element, Shape>();
   for (const el of document.querySelectorAll<HTMLElement>(SURFACES)) {
     // A surface inside another: a soft fill on that one's glass (theme.css), none of its own.
@@ -169,6 +183,7 @@ function reshape() {
     next.set(el, shapeOf(el));
   }
   shapes = next;
+  clipsOf = new Map();
   // A surface's size changing with its content (a widget's text, a list growing): measured then, and only then.
   sized.disconnect();
   for (const el of shapes.keys()) sized.observe(el);
@@ -240,6 +255,17 @@ function measureRaw(followers: Element[] = []): Raw[] {
     }
     return f;
   };
+  // A clip is shared by the surfaces in it (a page's tiles, the track): its box read once a frame.
+  const clipBoxes = new Map<Element, [number, number, number, number]>();
+  const clipBox = (c: Element) => {
+    let b = clipBoxes.get(c);
+    if (!b) {
+      const q = c.getBoundingClientRect();
+      const [ft, fb] = fadeOf(c);
+      clipBoxes.set(c, (b = [q.left, q.top + ft, q.right, q.bottom - fb]));
+    }
+    return b;
+  };
   const followerOf = (e: Element) => followers.find((f) => f.contains(e));
   for (const [el, s] of shapes) {
     if (!el.isConnected) continue;
@@ -258,11 +284,7 @@ function measureRaw(followers: Element[] = []): Raw[] {
     out.push({
       box: [r.left - reach * jl, r.top - reach * jt, r.right + reach * jr, r.bottom + reach * jb],
       own: [r.left, r.top, r.right, r.bottom],
-      clips: s.clips.map((c) => {
-        const q = c.getBoundingClientRect();
-        const [ft, fb] = fadeOf(c);
-        return [q.left, q.top + ft, q.right, q.bottom - fb] as [number, number, number, number];
-      }),
+      clips: s.clips.map(clipBox),
       radii: s.radii.map((v) => v * k),
       alpha,
       follower,
@@ -468,6 +490,12 @@ let last = "";
 let still = 0;
 let running = false;
 const STILL_FRAMES = 6;
+/**
+ * Still frames in a row the loop keeps measuring while an animation on a glass carrier runs: past them it stops (an
+ * animation that moves no glass - a colour, a shadow, an endless pulse - kept home measuring every frame at rest), and
+ * the next start, end or change of any of them kicks it again (transitionstart: a delayed one once it moves).
+ */
+const MOVING_STILL_FRAMES = 60;
 /** Counters for CDP (`__glass.live.counts`): measured frames and region sets sent to the host. */
 const counts = { measured: 0, sent: 0, since: performance.now() };
 /** For CDP A/B only (`__glass.live.hold(true)`): measured as ever, but the regions not sent to the host. */
@@ -518,7 +546,7 @@ function frame() {
   }
   // Still for a few frames: stop - unless glass is animating (a settle, a fade), which can be still between frames.
   // (While tracking the drawer's animations, they are what's running: no scan of every animation for it.)
-  if (still < STILL_FRAMES || (tracks ? tracks.some((t) => t.anim.playState === "running") : moving())) requestAnimationFrame(frame);
+  if (still < STILL_FRAMES || (still < MOVING_STILL_FRAMES && (tracks ? tracks.some((t) => t.anim.playState === "running") : moving()))) requestAnimationFrame(frame);
   else running = false;
 }
 
@@ -556,6 +584,8 @@ new MutationObserver((records) => {
   if (!nativeGlass.value) return;
   let moved = false;
   for (const r of records) {
+    // Written but the same (a re-render setting the class or style it already had): nothing moved.
+    if (r.type === "attributes" && r.oldValue === (r.target as Element).getAttribute(r.attributeName ?? "")) continue;
     if (r.type === "childList") {
       if (holds(r.addedNodes) || holds(r.removedNodes)) return why("nodes", r.target), changed();
       continue;
@@ -567,7 +597,7 @@ new MutationObserver((records) => {
     moved = true;
   }
   if (moved) kick();
-}).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class"] });
+}).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeOldValue: true, attributeFilter: ["style", "class"] });
 
 // A finger moving the drawer: measured until still again (gesture.ts scrubs paused animations by currentTime - no
 // style written, nothing the observer above sees; its touchmoves are what says it moved). Only then: any other touch
@@ -593,7 +623,7 @@ addEventListener("pageshow", () => resend("pageshow"));
 powos.on("lock.shown", () => resend("lock.shown"));
 powos.on("system.home", () => resend("system.home"));
 const animated = (e: Event) => carries(e.target) && (why(e.type, e.target), kick());
-for (const ev of ["transitionrun", "transitionend", "transitioncancel", "animationstart", "animationend"]) addEventListener(ev, animated, { capture: true, passive: true });
+for (const ev of ["transitionrun", "transitionstart", "transitionend", "transitioncancel", "animationstart", "animationend"]) addEventListener(ev, animated, { capture: true, passive: true });
 addEventListener("resize", () => (why("resize"), changed()));
 // A scroll moves only what's in the scrolled box: the drawer's list holds no glass (the launcher's is its frame's), so
 // its scroll measures nothing - nothing re-sent, nothing re-read, a frame of the list is the list's alone.

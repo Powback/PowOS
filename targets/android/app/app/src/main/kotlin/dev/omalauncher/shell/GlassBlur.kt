@@ -92,9 +92,39 @@ internal class GlassBlur(
 
     private val blurListener = Consumer<Boolean> { on -> compositorBlurs = on; update() }
 
+    /**
+     * What the window's surface was last given (the encoded regions, the whole-window one included) and that surface's
+     * generation: the same set again is no transaction and no draw. Each applied set invalidates the WebView, and a
+     * WebView draw is a synchronous draw of the page on this (the UI) thread - an idle home must cost it nothing.
+     * Forgotten whenever the window may have lost its regions (focus or window gone and back, a new surface, a reload,
+     * the state said again), so the page's own resend after a resume (nativeglass.ts resend) still lands.
+     */
+    private var lastShown: Array<FloatArray>? = null
+    private var lastGeneration = -1
+
+    /** Each region's encoding, from the last set: a set where most surfaces stayed put encodes only the moved ones. */
+    private var encoded = HashMap<Region, FloatArray>()
+
+    /** The newest "b.r" received (port thread): an older one still queued on the main thread is skipped, not applied. */
+    @Volatile private var latestR = 0L
+    private var rSeq = 0L
+
     init {
         runCatching { windows.addCrossWindowBlurEnabledListener({ main.post(it) }, blurListener) }
         main.post { update() }
+        view.viewTreeObserver.addOnWindowFocusChangeListener { forget() }
+        view.viewTreeObserver.addOnWindowAttachListener(
+            object : android.view.ViewTreeObserver.OnWindowAttachListener {
+                override fun onWindowAttached() = forget()
+
+                override fun onWindowDetached() = forget()
+            },
+        )
+    }
+
+    /** The next set goes to the window whatever it was given before. */
+    private fun forget() {
+        lastShown = null
     }
 
     val on get() = allowed && compositorBlurs && !broken && checked == true
@@ -166,6 +196,7 @@ internal class GlassBlur(
     fun hello() =
         main.post {
             told = null
+            forget()
             update()
             // This host bends the live wallpaper (WallpaperBackdrop), never a stale picture of it: the page may ask
             // for liquid edges.
@@ -185,6 +216,7 @@ internal class GlassBlur(
         val now = on
         if (!now && regions.isNotEmpty()) set(emptyList(), -1)
         if (told == now) return
+        forget()
         told = now
         state("b.state ${if (now) 1 else 0}")
     }
@@ -233,7 +265,11 @@ internal class GlassBlur(
     fun command(rest: String) {
         val regions = parse(rest, "b.r") ?: return
         val lag = lag
+        val seq = ++rSeq
+        latestR = seq
         main.post {
+            // A newer set is already queued behind this one (the UI thread was busy): only the newest goes on a draw.
+            if (seq != latestR) return@post
             applied = maxOf(applied, received)
             if (on) set(regions, lag)
         }
@@ -325,6 +361,7 @@ internal class GlassBlur(
     /** Another page (a reload): its regions are its own to set; until then none. */
     fun reset() = main.post {
         told = null
+        forget()
         // Its frame ids start again at 1.
         received = -1L
         applied = -1L
@@ -384,13 +421,16 @@ internal class GlassBlur(
             // The window's own offset (none for home: full screen) - regions are in the window surface's space.
             val at = IntArray(2).also(view::getLocationInWindow)
             val holes = holes()
+            val next = HashMap<Region, FloatArray>()
+            val enc = { r: Region -> next.getOrPut(r) { encoded[r] ?: c!!.encode(r) } }
             val shown =
                 regions
                     .filter { r -> holes.none { h -> RectF.intersects(h, RectF(r.l, r.t, r.r, r.b)) } }
-                    .map { r -> c!!.encode(r.moved(at[0].toFloat(), at[1].toFloat())) }
+                    .map { r -> enc(r.moved(at[0].toFloat(), at[1].toFloat())) }
                     .let { list ->
-                        if (whole < 1f) list else listOf(c!!.encode(Region(0f, 0f, view.rootView.width.toFloat(), view.rootView.height.toFloat(), 0f, 0f, 0f, 0f, 1f, whole))) + list
+                        if (whole < 1f) list else listOf(enc(Region(0f, 0f, view.rootView.width.toFloat(), view.rootView.height.toFloat(), 0f, 0f, 0f, 0f, 1f, whole))) + list
                     }.toTypedArray()
+            encoded = next
             // The liquid rims, drawn by a view in this window: on the same frame as the blur's transaction.
             val kept = regions.filter { r -> holes.none { h -> RectF.intersects(h, RectF(r.l, r.t, r.r, r.b)) } }
             // Not over the system bars: the backdrop may be the display's capture (WallpaperBackdrop DISPLAY), the bars
@@ -404,6 +444,12 @@ internal class GlassBlur(
             } else {
                 liquid?.set(emptyList())
             }
+            // The same regions on the same surface: nothing to apply, no draw asked for (the page re-sending what it sent).
+            val generation = generationOf(viewRoot)
+            val prev = lastShown
+            if (prev != null && generation == lastGeneration && lag <= 0 && prev.contentDeepEquals(shown)) return
+            lastShown = shown
+            lastGeneration = generation
             val t = SurfaceControl.Transaction()
             m.setBlurRegions.invoke(t, surface, shown)
             when {
@@ -433,12 +479,31 @@ internal class GlassBlur(
     private fun fail(e: Throwable) {
         Log.w(TAG, "blur regions failed: the page goes back to its own glass", e)
         broken = true
+        forget()
         regions = emptyList()
         update()
     }
 
+    /**
+     * The window's Surface's generation (Surface.getGenerationId: bumped each time WM gives the window a new surface,
+     * which carries none of the old one's blur regions), or -1 where ViewRootImpl.mSurface can't be read.
+     * HACK: ViewRootImpl.mSurface is hidden, reflected past the checks ([HiddenApi], as the calls above); without it
+     * the window focus/attach listeners alone forget the last set. Real fix: the regions set from the platform side
+     * (see the class's HACK).
+     */
+    private fun generationOf(viewRoot: Any): Int {
+        if (surfaceField == null && !noSurfaceField) {
+            surfaceField = runCatching { viewRoot.javaClass.getDeclaredField("mSurface").apply { isAccessible = true } }.getOrNull()
+            noSurfaceField = surfaceField == null
+        }
+        return runCatching { (surfaceField?.get(viewRoot) as android.view.Surface?)?.generationId }.getOrNull() ?: -1
+    }
+
+    private var surfaceField: java.lang.reflect.Field? = null
+    private var noSurfaceField = false
+
     /** A region in the window's pixels: its box, corners, how much of the blur shows, the blur's radius. */
-    private class Region(
+    private data class Region(
         val l: Float,
         val t: Float,
         val r: Float,
