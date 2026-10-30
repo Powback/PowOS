@@ -25,6 +25,13 @@
 #     stayed SHIP_QUIET_S (60) s on the tip: ship-apk.sh from the tip in its own checkout ($POWOS_RUN_ROOT/
 #     ship-runner-apk), BESIDE the loop, one at a time (it pre-gates, waits for the verify lock and a free phone, resets
 #     the overrides and re-pushes newer shell). A request whose commit has Kotlin is done once the APK is installed.
+#   - HOLD (2026-10-30): a tip whose not-yet-installed APK inputs came in the same commit(s) as shell changes holds its
+#     shell part until that APK installs - ship-apk's own post-install push brings the shell, so both land together
+#     (10-29 the overlay launcher shell broke the home swipe-up without its APK; 10-30 the web-windows shell left the
+#     phone with no floating windows). Shell-only tips, and Kotlin + shell in separate commits, still ship at once.
+#     Shown by status and the runner log: "shell held for its APK <sha>".
+#   - ~/.config/powos/ship-no-idle-wait (the user's setting; file present = on): APK ships pass --now to ship-apk.sh -
+#     install at once instead of waiting for the user to be idle / the screen off. Delete the file to wait again.
 #   The notes of the requests a part finishes go into ONE update notification ("a; b"; all --silent = silent). The tip shipped
 #   goes to <queue>/live, a line to <queue>/shipped.log, the run's log to <queue>/done/. A failed ship mails the
 #   coder inbox and isn't retried until origin moves (a user who stayed active: retried). ship-apk.sh / push.sh
@@ -117,6 +124,8 @@ status)
   echo "requests:"; for r in "$Q"/*.req; do [ -f "$r" ] || continue; ( . "$r"; echo "  ${sha:0:9} $who: $([ "$silent" = 1 ] && echo '(silent)' || echo "$note")" ); done
   echo "service: $(runner_up && echo "running (pid $(cat "$Q/runner.lock/pid"))" || echo idle)$(agent_loaded && echo " (launchd $LABEL)")"
   echo "live: $(cut -c1-9 "$Q/live" 2>/dev/null || echo -)  installed APK: $(cut -c1-9 "$HOME/.cache/powos-installed-commit" 2>/dev/null || echo -)$([ -s "$Q/failed" ] && echo "  failed at: $(cut -c1-9 "$Q/failed") (waits for a new origin commit)")"
+  [ -s "$Q/shell-held" ] && { read -r ht hc < "$Q/shell-held"; echo "shell held for its APK ${ht:0:9} (APK inputs + shell in the same commit: $hc) - they land together at the install"; }
+  [ -e "$HOME/.config/powos/ship-no-idle-wait" ] && echo "APK installs: at once, no idle wait (~/.config/powos/ship-no-idle-wait)"
   [ -d "$Q/apk" ] && echo "APK ship out: $(cut -c1-9 "$Q/apk/tip" 2>/dev/null) (log $(cat "$Q/apk/log" 2>/dev/null))"
   echo "last ships:"; tail -6 "$Q/shipped.log" 2>/dev/null | sed 's/^/  /' ;;
 run)
@@ -209,6 +218,7 @@ run)
   # ~/Projects as /Projects - from ~/pw every APK ship failed ("Project 'powos' not found", 2026-10-24 06:30-15:30).
   # It is no agent's cwd, so it doesn't add to agents' context (f190: still no .claude/worktrees fallback).
   SA=${POWOS_APK_RUN:-$HOME/Projects/.powos-runners/ship-runner-apk}
+  NOIDLE=$HOME/.config/powos/ship-no-idle-wait
   apk_alive() {   # an APK ship out; one whose runner died (killed, restarted) without an rc goes again (rc 4)
     [ -d "$Q/apk" ] && [ ! -f "$Q/apk/rc" ] || return 1
     kill -0 "$(cat "$Q/apk/pid" 2>/dev/null)" 2>/dev/null && return 0
@@ -223,6 +233,8 @@ run)
     [ -d "$nm" ] || nm=$REPO/.claude/worktrees/powos-multiplatform/shell/node_modules
     [ -e "$SA/shell/node_modules" ] || [ ! -d "$nm" ] || ln -s "$nm" "$SA/shell/node_modules"
     rm -rf "$Q/apk"; mkdir -p "$Q/apk"; echo "$a" > "$Q/apk/tip"; echo "$Q/done/$(date +%Y%m%d-%H%M%S)-${a:0:9}-apk.log" > "$Q/apk/log"
+    # The user's no-idle-wait setting (file present = on): install at once, don't wait for the user to be idle.
+    [ -e "$NOIDLE" ] && set -- "$@" --now
     ( cd "$SA" && POWOS_SHIP_SERVICE=1 SHIP_DIR=$Q GATE_PRIORITY=ship bash tools/phone/ship-apk.sh "$@" > "$(cat "$Q/apk/log")" 2>&1; echo $? > "$Q/apk/rc" ) &
     echo $! > "$Q/apk/pid"
   }
@@ -251,11 +263,24 @@ run)
   # then), even while someone else's Kotlin below it waits for the APK; `noted=1` keeps the APK from repeating it.
   pending_apk() { [ -z "$inst" ] || { ! git merge-base --is-ancestor "$1" "$inst" 2>/dev/null && [ -n "$(apk_inputs "$inst" "$1")" ]; }; }
   own_apk() { [ -n "$(apk_inputs "$1~1" "$1")" ]; }
+  # coupled BASE TIP: the commits in BASE..TIP (not installed yet) that changed APK inputs AND shell files together -
+  # a shell that needs its APK (10-29: the overlay launcher shell went live without its APK and broke the home swipe-up;
+  # 10-30: the web-windows shell stopped drawing window chrome the APK now draws - "There is no floating windows at all
+  # anymore"). Printed as short shas, one per line; empty = nothing coupled.
+  coupled() { local c f ak sh
+    git rev-list --no-merges "$1..$2" -- targets/android/app targets/android/build-app.sh 2>/dev/null | while read -r c; do
+      ak= sh=
+      while read -r f; do case "$f" in
+        targets/android/app/version.properties) ;; targets/android/app/*|targets/android/build-app.sh) ak=1 ;;
+        shell/dev/*|shell/test/*) ;; shell/*) sh=1 ;; esac
+      done < <(git diff-tree --no-commit-id --name-only -r "$c" 2>/dev/null)
+      [ -n "$ak" ] && [ -n "$sh" ] && git rev-parse --short=9 "$c"
+    done; }
   # reap_apk: an APK ship that ended (rc exists) is recorded + its requests done. Called every loop turn, at the
   # runner start (a previous runner's finished APK) and before it exits (f252: the runner left while the APK was
   # out, so a finished install was never recorded and phone checks kept waiting for their ship).
   reap_apk() {
-    local inst A arc alog n r sha live
+    local inst A arc alog n r sha live ht
     inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
     # An APK ship that ended: its requests are done (installed is installed - its exit is its last check's: a logcat
     # grep with no match was 1, 2026-10-23), or it's tried again (the user stayed active), or it failed.
@@ -268,6 +293,8 @@ run)
         # The install reset the overrides and re-pushed origin's newer shell: live is at least A.
         { [ -n "$live" ] && git merge-base --is-ancestor "$A" "$live" 2>/dev/null; } || echo "$A" > "$Q/live"
         rm -f "$Q/failed-apk"
+        # A shell held for this APK came with its install (ship-apk pushes origin's tip shell after it).
+        { read -r ht _ < "$Q/shell-held" && git merge-base --is-ancestor "$ht" "$A"; } 2>/dev/null && rm -f "$Q/shell-held"
         echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
         echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
         e2e_round
@@ -328,7 +355,18 @@ run)
       [ -n "$live" ] && [ -n "$inst" ] && git merge-base --is-ancestor "$inst" "$live" 2>/dev/null && base=$live
       d=; [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null && d=$(delta "$base" "$T")
       add=$(echo "$d" | sed -n 's/^+//p'); gone=$(echo "$d" | sed -n 's/^-//p')
-      if [ -n "$d" ] && [ "$(cat "$Q/failed" 2>/dev/null)" != "$T" ]; then
+      # The shell HOLD: this tip has APK inputs not installed yet, and some of them came in the same commits as
+      # shell changes (coupled, above) - that shell needs its APK, so it goes WITH it: the APK install (ship-apk.sh)
+      # resets the overrides and pushes every shell file origin's tip has differently from the APK's own assets, so
+      # holding the shell part here is all it takes. A shell-only tip, or Kotlin and shell in separate commits, ships
+      # at once as before (2026-10-23: shell fixes must not queue behind an APK's idle wait). <queue>/shell-held:
+      # "TIP COUPLED..." for status; cleared once nothing is held.
+      cpl=; [ -n "$d" ] && [ -n "$inst" ] && pending_apk "$T" && cpl=$(coupled "$inst" "$T" | paste -sd' ' -)
+      if [ -n "$cpl" ]; then
+        [ "$(cat "$Q/shell-held" 2>/dev/null)" = "$T $cpl" ] || { echo "$T $cpl" > "$Q/shell-held"
+          echo "$(date +%T) ${T:0:9}: shell held for its APK ${T:0:9} (APK inputs + shell in the same commit: $cpl) - they land together at the install"; }
+      else rm -f "$Q/shell-held"; fi
+      if [ -n "$d" ] && [ -z "$cpl" ] && [ "$(cat "$Q/failed" 2>/dev/null)" != "$T" ]; then
         # Never inside a verify window. The phone is taken with $SL/phone while our own APK ship holds the ship
         # lock (ship-apk takes it for its install), else with the ship lock itself (a --direct ship).
         # Held: ask the verify queue to yield before its next check (queue.sh reads wants-phone, as for ship-apk) - it
@@ -383,7 +421,7 @@ run)
           mail "ship ${T:0:9} (shell) FAILED rc $rc for $who_s: $(grep -E 'REFUSED|refused|FAIL|error' "$log" | tail -1 | cut -c1-200) - log $log on the Mac; fix it on origin, then ship.sh request again"
           continue
         fi
-      elif [ -z "$d" ] && [ -n "$base" ]; then
+      elif [ -z "$d" ] && [ -n "$base" ] && [ -z "$cpl" ]; then
         for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "shipped:${T:0:9}:none"; done
         [ ${#sreqs[@]} -gt 0 ] && echo "$(date +%T) ${T:0:9}: nothing differs from what's live - ${#sreqs[@]} request(s) done"
       fi
