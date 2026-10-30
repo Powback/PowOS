@@ -339,6 +339,8 @@ const SCENES = [
   ["kbd-panel", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${MAIL_SAMPLE} }; S.openPanel('ai');`, "wallpaper"],
   ["kbd-ai-wide", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${MAIL_SAMPLE} }; S.page.value = -1;`, "wallpaper", undefined, WIDE_SIZES],
   ["ai-chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.page.value = -1;`, "wallpaper"],
+  /* A long conversation scrolled mid-way: unfolded, the chat pane stops under the status bar like the left column. */
+  ["ai-chat-scrolled", "home", `S.chat.value = { busy: false, items: [...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}] }; S.page.value = -1; await sleep(400); const t = document.querySelector('.ai-screen .ai-talk') ?? document.querySelector('.ai-screen .ai-scroll'); t.scrollTop = -(t.scrollHeight - t.clientHeight) / 2; await sleep(100);`, "wallpaper", undefined, { ...SIZES, "unfolded-land": LAND_SIZES["unfolded-land"] }],
   ["ai-compose", "home", "S.page.value = -1; await sleep(300); const f = document.querySelector('.ai-compose textarea, .ai-compose input'); f?.focus(); if (f) { f.value = 'summarise what the agents did overnight and what needs me'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
   ["widget-screen", "home", "const w = S.home.value.items.find((i) => i.kind === 'widget'); S.screen.value = { key: w.key, title: 'weather' };", "wallpaper"],
   ["settings", "home", "(await U('./screens.ts')).openScreen('settings');", "wallpaper"],
