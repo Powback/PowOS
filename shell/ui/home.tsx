@@ -13,7 +13,8 @@ import { powos } from "../bridge.ts";
 import type { PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
-import { drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, shadeTakesHome } from "./gesture.ts";
+import { drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome } from "./gesture.ts";
+import { PageDots } from "./pagedots.tsx";
 import { Carried, Folders, Pages, startCarry } from "./grid.tsx";
 import { carriedApp, shownLess } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
@@ -32,7 +33,7 @@ import { overWindows } from "./panellift.ts";
 import { footBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
 import { webWins } from "./webwindows.tsx";
-import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
+import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
 import { remoteOpen } from "../remote.ts";
@@ -421,6 +422,29 @@ export function DockTray() {
   );
 }
 
+/**
+ * Home's position for its dots (pagedots.tsx): PowOS AI's page first (-1), then home's pages and the app library - as
+ * the track and the screens slide (gesture.ts applyTrack), so the dot moves with the finger, not after the settle.
+ */
+function homeDotsAt(): [number, boolean] {
+  const dx = pageDrag.value;
+  const at = page.value;
+  if (dx == null) return [at + 1, false];
+  // Toward PowOS AI's page the whole screen slides; between home's pages, the pages' own width.
+  const toAi = at === -1 || (at === 0 && dx > 0);
+  const w = (toAi ? null : document.querySelector<HTMLElement>(".pages")?.clientWidth) || innerWidth;
+  return [Math.max(0, Math.min(pageCount.value, at + 1 - dx / w)), true];
+}
+
+/** Home's page dots: above the foot (the search pill and dock), centred on the pages - never under a side dock. */
+function HomeDots() {
+  return (
+    <div class="home-dots" data-p ref={followOpenness}>
+      <PageDots count={pageCount.value + 1} follow={homeDotsAt} />
+    </div>
+  );
+}
+
 export function Home() {
   // data-p: these follow the panel's openness (--p, written by gesture.ts, not through a render).
   return (
@@ -435,6 +459,7 @@ export function Home() {
             <div class="home-content" data-p ref={followOpenness}>
               <Pages />
             </div>
+            <HomeDots />
             {/* No launcher here: it's the overlay over home (pull.tsx), as the shade is - one for every way in. */}
           </div>
           {/* Always the foot's pill: the launcher's face - a tap opens the overlay with its search (bar.tsx). With the
