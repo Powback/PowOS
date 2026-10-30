@@ -1,0 +1,88 @@
+From 9f8ea85b83a88aa807d796e6b29162f96ed41dc1 Mon Sep 17 00:00:00 2001
+From: Mats Bakken <mats@powback.com>
+Date: Fri, 30 Oct 2026 20:53:06 +0100
+Subject: [PATCH] backends/anland: the consumer buffers' layout at import, and
+ a warning for one that can't be right
+
+---
+ src/backends/anland/anland_egl_backend.cpp | 22 ++++++++++++++++++++--
+ src/backends/anland/anland_egl_backend.h   |  2 ++
+ src/backends/anland/anland_window_task.cpp |  2 ++
+ 3 files changed, 24 insertions(+), 2 deletions(-)
+
+diff --git a/src/backends/anland/anland_egl_backend.cpp b/src/backends/anland/anland_egl_backend.cpp
+index 845d2a8..9dd6437 100644
+--- a/src/backends/anland/anland_egl_backend.cpp
++++ b/src/backends/anland/anland_egl_backend.cpp
+@@ -135,6 +135,8 @@ bool AnlandEglLayer::importBuffers(int count)
+          * only need to check the first buffer. */
+         // PowOS: a pre-rotated buffer is the output's size rotated (map() swaps a size for 90/270).
+         const QSize unrotated = m_preTransform.map(imported.size);
++        // PowOS: a 90/270 pre-rotated buffer is the output turned on its side: its width is the output's height.
++        AnlandEglBackend::warnPreRotatedWidth("desktop", m_preTransform, imported.size, m_output->modeSize());
+         if (i == 0 && unrotated != m_output->modeSize() && unrotated.isValid()) {
+             qCInfo(KWIN_ANLAND) << "dmabuf size changed, resizing output to" << unrotated;
+             m_output->resize(unrotated);
+@@ -253,6 +255,15 @@ display_ctx *AnlandEglBackend::display() const
+     return m_backend->display();
+ }
+ 
++void AnlandEglBackend::warnPreRotatedWidth(const char *what, OutputTransform preTransform, const QSize &buffer, const QSize &logical)
++{
++    const bool sideways = preTransform.kind() == OutputTransform::Rotate90 || preTransform.kind() == OutputTransform::Rotate270;
++    if (sideways && logical.isValid() && buffer.width() != logical.height()) {
++        qCWarning(KWIN_ANLAND) << what << "buffer pre-rotated by" << preTransform.kind() << "is" << buffer
++                               << "but its width should be the output's height" << logical.height() << "(output" << logical << ")";
++    }
++}
++
+ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_ctx *display, int index, OutputTransform contentTransform)
+ {
+     const int fd = get_dmabuf_fd_at(display, index);
+@@ -289,8 +300,15 @@ AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_
+         qCWarning(KWIN_ANLAND) << "framebuffer for dmabuf" << index << "is not complete";
+         return {};
+     }
+-    qCDebug(KWIN_ANLAND) << "imported buffer" << index << "fd" << fd << size
+-                         << "fmt" << Qt::hex << attrs.format << "mod" << attrs.modifier;
++    // PowOS: info, once per buffer (this runs once per buffer set import): the game-stripes investigation needed the
++    // layout every consumer buffer was imported with, and debug lines are off in the session.
++    qCInfo(KWIN_ANLAND) << "imported buffer" << index << "fd" << fd << size << "stride" << info.stride
++                        << "offset" << info.offset << "fmt" << Qt::hex << attrs.format << "mod" << attrs.modifier;
++    // A 4-byte format whose rows are shorter than the image: KWin would sample past each row into the next (stripes).
++    if (info.stride < uint64_t(size.width()) * 4) {
++        qCWarning(KWIN_ANLAND) << "buffer" << index << "stride" << info.stride << "is less than its width"
++                               << size.width() << "x 4 bytes";
++    }
+     return ImportedBuffer{.texture = std::move(texture), .fbo = std::move(fbo), .size = size};
+ }
+ 
+diff --git a/src/backends/anland/anland_egl_backend.h b/src/backends/anland/anland_egl_backend.h
+index 7020bb3..2b69325 100644
+--- a/src/backends/anland/anland_egl_backend.h
++++ b/src/backends/anland/anland_egl_backend.h
+@@ -99,6 +99,8 @@ public:
+         QSize size;
+     };
+     ImportedBuffer importConsumerBuffer(display_ctx *display, int index, OutputTransform contentTransform);
++    // PowOS: warns when a 90/270 pre-rotated consumer buffer's width isn't its output's (logical) height.
++    static void warnPreRotatedWidth(const char *what, OutputTransform preTransform, const QSize &buffer, const QSize &logical);
+ 
+ private:
+     bool initializeEgl();
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 6a387a5..93d0124 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -567,6 +567,8 @@ bool AnlandWindowTask::importBuffers()
+             releaseBuffers();
+             return false;
+         }
++        // PowOS: against the size the app gave the task (its surface), when it gave one.
++        AnlandEglBackend::warnPreRotatedWidth("window task", preTransform, imported.size, m_taskSize);
+         // The task's own (logical) size: a pre-rotated buffer is it rotated (map() swaps a size for 90/270).
+         m_bufferSize = preTransform.map(imported.size);
+         m_textures[i] = std::move(imported.texture);
+-- 
+2.50.1 (Apple Git-155)
+
