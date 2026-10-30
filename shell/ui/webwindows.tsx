@@ -194,6 +194,21 @@ export async function openWindow(key: string, label: string, page: number): Prom
   return id;
 }
 
+/** Where an adopted window goes: its [body] (viewport CSS px) plus its [bar], else a default size centred in the work
+ * area; clamped into the work area (viewport px). */
+function adoptPlace(body: WebWindowRect | undefined, bar: number): { vx: number; vy: number; w: number; h: number } {
+  const a = workArea();
+  const aw = a.right - a.left;
+  const ah = a.bottom - a.top;
+  const w = Math.max(Math.min(aw, Math.round(body ? body.width : innerWidth * 0.5)), 200);
+  const h = Math.max(Math.min(ah, Math.round(body ? body.height + bar : innerHeight * 0.6)), 160);
+  const sx = body ? body.left : a.left + (aw - w) / 2;
+  const sy = body ? body.top - bar : a.top + (ah - h) / 2;
+  const vx = Math.round(Math.min(Math.max(sx, a.left), a.right - w));
+  const vy = Math.round(Math.min(Math.max(sy, a.top), a.bottom - h));
+  return { vx, vy, w, h };
+}
+
 /**
  * An app's running task made a window here (the host's "webwindows.adopt": the switcher's "PowOS desktop window", the
  * system window menu's "Desktop window" - ShellBridge.toWebWindow is the one path): a new window on [page] holding THAT
@@ -212,19 +227,8 @@ export async function adoptWebWindow(
   // A Linux launch's placeholder waiting for this app (LW3; by its key - the host matched app_id to the .desktop): taken.
   const ph = m.kwin != null ? webWins.value.find((w) => w.pending && w.key === m.key) : undefined;
   if (ph) return takePlaceholder(ph, m.kwin!, m.ownFrame);
-  const a = workArea();
   const o = pageOrigin();
-  const aw = a.right - a.left;
-  const ah = a.bottom - a.top;
-  let w = Math.min(aw, Math.round(m.body ? m.body.width : innerWidth * 0.5));
-  let h = Math.min(ah, Math.round(m.body ? m.body.height + bar : innerHeight * 0.6));
-  w = Math.max(w, 200);
-  h = Math.max(h, 160);
-  const sx = m.body ? m.body.left : a.left + (aw - w) / 2;
-  const sy = m.body ? m.body.top - bar : a.top + (ah - h) / 2;
-  // Screen (viewport) place clamped into the work area, then page-local as the model keeps it.
-  const vx = Math.round(Math.min(Math.max(sx, a.left), a.right - w));
-  const vy = Math.round(Math.min(Math.max(sy, a.top), a.bottom - h));
+  const { vx, vy, w, h } = adoptPlace(m.body, bar);
   const id = await ww.open(m.key, { left: vx, top: vy + bar, width: w, height: h - bar }, m.task, m.kwin).catch(() => -1);
   if (id < 0) return false;
   webWins.value = [...webWins.value, { id, key: m.key, label: m.label, page, x: vx - o.x, y: vy - o.y, w, h, task: m.task, ownFrame: m.ownFrame || undefined }];
