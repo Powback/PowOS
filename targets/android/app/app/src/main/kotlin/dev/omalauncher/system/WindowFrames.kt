@@ -521,16 +521,7 @@ class WindowFrames(
     ) {
         val ids = all.map { it.id }.toSet()
         minimised.retainAll(ids)
-        // A window listed for the first time was just launched: on the page on screen, never hidden as off page at once.
-        if (floating) {
-            // Not the first listing after the app (re)started: those windows were open before, not just launched.
-            if (primed) (ids - listed).forEach { activated(it) }
-            primed = true
-            // Never dropped while it lives: a task briefly missing from one listing (hadUnreadableTask) isn't new again.
-            if (listed.size > LISTED_MAX) listed.retainAll(ids)
-            listed.addAll(ids)
-            activatedAt.keys.retainAll(ids + fullBefore.keys)
-        }
+        if (floating) noteLaunched(ids)
         // Folded, the windows aren't listed but still belong to their pages: kept for the unfold.
         if (floating) away.retainAll(ids)
         // Folded, apps aren't windows: the dock shows none.
@@ -539,6 +530,17 @@ class WindowFrames(
         dense(if (floating) all.filter { it.pkg != context.packageName } else emptyList())
         keepMaximised(all)
         if (floating) backFromFullScreen(all)
+    }
+
+    /** A window listed ([ids]) for the first time was just launched: on the page on screen, never hidden off page at once. */
+    private fun noteLaunched(ids: Set<Int>) {
+        // Not the first listing after the app (re)started: those windows were open before, not just launched.
+        if (primed) (ids - listed).forEach { activated(it) }
+        primed = true
+        // Never dropped while it lives: a task briefly missing from one listing (hadUnreadableTask) isn't new again.
+        if (listed.size > LISTED_MAX) listed.retainAll(ids)
+        listed.addAll(ids)
+        activatedAt.keys.retainAll(ids + fullBefore.keys)
     }
 
     /**
