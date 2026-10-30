@@ -38,8 +38,25 @@ public final class AndroidRequests implements DirWatch.Listener {
         this.file = new File(runDir, "android-request");
     }
 
+    /**
+     * The verbs this APK answers, one per line, in run/android-request.verbs: the Linux side asks it before relying on
+     * a newer one (powos-shell's bridge.cpp reads "launcher" there before forwarding its launcher to [launcher]), so a
+     * Linux piece that lands before the APK keeps its own fallback instead of writing a request nobody serves.
+     */
+    private void writeVerbs() {
+        StringBuilder v = new StringBuilder("wifi-panel\nopen\nsplit\nfloat\npower\n");
+        if (launcher != null)
+            v.append("launcher\n");
+        File out = new File(file.getParentFile(), "android-request.verbs");
+        File tmp = new File(file.getParentFile(), "android-request.verbs.tmp");
+        write(tmp, v.toString());
+        if (!tmp.renameTo(out))
+            Log.w(TAG, "could not write " + out);
+    }
+
     /** The run dir is watched by others too (focused-window, ...): through DirWatch, never a FileObserver of its own. */
     void startWatching() {
+        writeVerbs();
         if (watch == null)
             watch = DirWatch.watch(file.getParentFile(), FileObserver.MOVED_TO | FileObserver.CLOSE_WRITE, this);
     }

@@ -222,9 +222,10 @@ export const homePage = !new URLSearchParams(location.search).get("mode");
 /**
  * This page's launcher is the overlay (pull.tsx, opened through Bridge.pull.open), not one of its own: home's page, and
  * the desktop home inside the phone's Plasma app (mode=desktop, powos-shell: its host says launcherOverlay and forwards
- * pull.open to the APK's PullHost - bridge.cpp phoneLauncher). The user, 2026-10-30, over Plasma: "doesn't seem to have
- * the latest changes, like the wide menu, and it doesn't adjust to the keyboard" - that was desktop.tsx's own column.
- * A desktop PC's powos-shell has no overlay and keeps desktop.tsx's launcher.
+ * pull.open to the APK's PullHost - bridge.cpp overlayLauncher). The user, 2026-10-30, over Plasma: "doesn't seem to
+ * have the latest changes, like the wide menu, and it doesn't adjust to the keyboard" - that was desktop.tsx's own
+ * column. The desktop's host answers false while the APK doesn't serve it yet (an older APK): openPanel then opens
+ * desktop.tsx's launcher in place. A desktop PC's powos-shell has no overlay and keeps desktop.tsx's launcher.
  */
 export const launcherIsOverlay = homePage || !!window.PowosHost?.launcherOverlay;
 
@@ -255,10 +256,24 @@ export interface LauncherOpen {
  * widget). On home: the launcher overlay over it (home never draws a drawer); in the overlay's own page: in place.
  */
 export function openPanel(kind: "apps" | "ai", how: LauncherOpen = {}) {
-  if (launcherIsOverlay) {
+  if (homePage) {
     void powos.pull.open?.(kind, how).catch(() => {});
     return;
   }
+  if (launcherIsOverlay) {
+    // The desktop home: the overlay when the APK serves it, else this page's own launcher (never nothing).
+    const own = () => {
+      openInPlace(kind);
+      if (how.search) document.querySelector<HTMLTextAreaElement>(".bar-pill textarea")?.focus();
+    };
+    void Promise.resolve(powos.pull.open?.(kind, how)).then((ok) => ok || own(), own);
+    return;
+  }
+  openInPlace(kind);
+}
+
+/** This page's own launcher up (the overlay's page; the desktop's column). */
+function openInPlace(kind: "apps" | "ai") {
   pullKind.value = kind;
   drawer.value = 1;
 }

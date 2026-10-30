@@ -95,16 +95,38 @@ void Bridge::call(int id, const QString &method, const QString &args)
 }
 
 /**
- * Inside the phone's Plasma app (POWOS_PLATFORM=phone, Andromarchy's android-request on PATH) the launcher is PowOS's
- * one launcher, the APK's overlay (PullHost, shell/ui/pull.tsx), not this page's own column: "pull.open" asks it
- * through run/android-request (AndroidRequests.java "launcher"). A desktop PC has neither and keeps desktop.tsx's.
+ * Inside the phone's Plasma app the launcher is PowOS's one launcher, the APK's overlay (PullHost, shell/ui/pull.tsx),
+ * not this page's own column: "pull.open" asks it through Andromarchy's android-request ("launcher <kind> <how>",
+ * AndroidRequests.java). The phone: POWOS_PLATFORM or /etc/powos/platform says so and the helper is on PATH; a desktop
+ * PC has neither and keeps desktop.tsx's launcher.
  */
-static QString phoneLauncher()
+static QString requestHelper()
 {
-    static const QString helper = qEnvironmentVariable("POWOS_PLATFORM") == QLatin1String("phone")
-        ? QStandardPaths::findExecutable(QStringLiteral("android-request"))
-        : QString();
+    static const QString helper = [] {
+        QString platform = qEnvironmentVariable("POWOS_PLATFORM");
+        if (platform.isEmpty()) {
+            QFile f(QStringLiteral("/etc/powos/platform"));
+            if (f.open(QIODevice::ReadOnly))
+                platform = QString::fromUtf8(f.readAll()).trimmed();
+        }
+        return platform == QLatin1String("phone") ? QStandardPaths::findExecutable(QStringLiteral("android-request")) : QString();
+    }();
     return helper;
+}
+
+/**
+ * Whether the APK serves "launcher" now: it lists the verbs it answers in run/android-request.verbs (written when its
+ * session service starts). Read on every ask, so an APK installed after this process started is used at once, and one
+ * from before it (no such verb) leaves the page its own launcher (pull.open answers false).
+ */
+static bool overlayLauncher()
+{
+    if (requestHelper().isEmpty())
+        return false;
+    QFile verbs(qEnvironmentVariable("XDG_RUNTIME_DIR", QStringLiteral("/tmp")) + QStringLiteral("/android-request.verbs"));
+    if (!verbs.open(QIODevice::ReadOnly))
+        return false;
+    return QString::fromUtf8(verbs.readAll()).split(QLatin1Char('\n')).contains(QStringLiteral("launcher"));
 }
 
 QJsonValue Bridge::dispatch(const QString &method, const QJsonArray &a)
@@ -136,11 +158,13 @@ QJsonValue Bridge::dispatch(const QString &method, const QJsonArray &a)
         return QJsonValue::Null;
     }
     if (method == QLatin1String("pull.open")) {
-        if (phoneLauncher().isEmpty())
+        if (requestHelper().isEmpty())
             throw Unsupported("unsupported: " + method.toStdString());
+        if (!overlayLauncher())
+            return false;
         const QString kind = a.at(0).toString() == QLatin1String("ai") ? QStringLiteral("ai") : QStringLiteral("apps");
         const QString how = QString::fromUtf8(QJsonDocument(a.at(1).toObject()).toJson(QJsonDocument::Compact));
-        return QProcess::startDetached(phoneLauncher(), {QStringLiteral("launcher"), kind, how});
+        return QProcess::startDetached(requestHelper(), {QStringLiteral("launcher"), kind, how});
     }
     if (method == QLatin1String("store.get"))
         return m_services.store->get(a.at(0).toString());
@@ -190,7 +214,7 @@ QString bridgeScript()
   let host = null;
   window.PowosHost = {
     name: "powos",
-    launcherOverlay: )JS") + (phoneLauncher().isEmpty() ? QStringLiteral("false") : QStringLiteral("true")) + QStringLiteral(R"JS(,
+    launcherOverlay: )JS") + (requestHelper().isEmpty() ? QStringLiteral("false") : QStringLiteral("true")) + QStringLiteral(R"JS(,
     call(id, method, args) { host ? host.call(id, method, args) : queue.push([id, method, args]); },
   };
   new QWebChannel(qt.webChannelTransport, (channel) => {
