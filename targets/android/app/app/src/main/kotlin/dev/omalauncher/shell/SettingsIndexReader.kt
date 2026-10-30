@@ -56,14 +56,17 @@ class SettingsIndexReader(private val context: Context) {
         if (title.isBlank() || key in excluded || entries.size >= 20000) return
         val user = data.optString("user_id").toIntOrNull() ?: -1
         if (user != -1 && user != Process.myUid() / 100000) return
-        val intent = destination(provider, data) ?: return
+        val (intent, pkg) = destination(provider, data) ?: return
         val id = "indexed:${provider.authority}:${data.optString("className")}:${key.ifBlank { title }}"
         entries[id] = JSONObject().put("id", id).put("label", title)
             .put("keywords", entries[id]?.optString("label").orEmpty() + " " + listOf("screenTitle", "summaryOn", "summaryOff", "entries", "keywords").map { data.optString(it) }.joinToString(" "))
             .put("breadcrumb", data.optString("screenTitle")).put("intent", intent.toUri(Intent.URI_INTENT_SCHEME))
+            // The app the page opens in: the launcher groups its results under it (SettingsSearch adds its name and icon).
+            .put("package", pkg)
     }
 
-    private fun destination(provider: ProviderInfo, data: JSONObject): Intent? {
+    /** Where [data] opens, and the package of the activity that shows it. */
+    private fun destination(provider: ProviderInfo, data: JSONObject): Pair<Intent, String>? {
         val action = data.optString("intentAction")
         val key = data.optString("key")
         val intent = if (action.isBlank()) {
@@ -77,7 +80,7 @@ class SettingsIndexReader(private val context: Context) {
         }
         intent.putExtra(":settings:fragment_args_key", key)
         val info = pm.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo ?: return null
-        return intent.takeIf { info.enabled && info.exported && info.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0 }
+        return (intent to info.packageName).takeIf { info.enabled && info.exported && info.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0 }
     }
 
     private fun Cursor.text(name: String): String = getColumnIndex(name).let { if (it < 0 || isNull(it)) "" else getString(it).orEmpty() }

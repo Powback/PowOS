@@ -4,6 +4,7 @@ import { apps, chatting, closeDrawer, launch, query } from "./state.ts";
 import { openScreen, type ScreenName } from "./screens.ts";
 import { installedApps, openApp } from "./apps/pages.ts";
 import { powos } from "./bridge.ts";
+import type { NativeSetting } from "./types.ts";
 import { net } from "./apps/net.ts";
 
 export interface SearchResult {
@@ -12,8 +13,20 @@ export interface SearchResult {
   source: string;
   icon?: string;
   keywords?: string;
+  /** A setting or an action: the app it belongs to. Shown in the launcher as a list under that app's icon and name
+   * (the user, 2026-10-30: "show which app the settings came from"); none for an app itself, which is a grid tile. */
+  group?: SearchGroup;
+  /** Where it is in its app, for a setting ("Apps › Default apps"). */
+  detail?: string;
   open(): void;
 }
+export interface SearchGroup { id: string; label: string; icon?: string }
+/** The launcher app that is [pkg] (an Android app's key is "a:<package>/<activity>[@profile]"), its own profile first. */
+function androidApp(pkg: string) {
+  const mine = apps.value.filter((a) => a.kind === "android" && a.key.slice(2).split(/[/@]/)[0] === pkg);
+  return mine.find((a) => !a.work && !a.clone) ?? mine[0];
+}
+const POWOS_SETTINGS: SearchGroup = { id: "powos", label: "PowOS settings", icon: "./icons/powos.svg" };
 export interface SearchProvider {
   id: string;
   search(text: string, signal: AbortSignal): SearchResult[] | Promise<SearchResult[]>;
@@ -53,13 +66,13 @@ export const settingDestinations: { screen: ScreenName; label: string; target?: 
   { screen: "licenses", label: "Licenses", keywords: "about version open source" },
 ];
 registerSearchProvider({ id: "settings", search: () => settingDestinations.map((s) => ({
-  id: `settings:${s.screen}:${s.target ?? ""}`, label: s.label, source: "Settings", keywords: s.keywords,
+  id: `settings:${s.screen}:${s.target ?? ""}`, label: s.label, source: "Settings", keywords: s.keywords, group: POWOS_SETTINGS,
   open: () => openScreen(s.screen, s.target),
 })) });
 
 // The host lists only pages this device can actually open. Old APKs and non-Android
 // hosts can reject/omit discovery without delaying the other providers.
-let nativeSettings: { id: string; label: string; keywords: string; breadcrumb?: string }[] = [];
+let nativeSettings: NativeSetting[] = [];
 let nativeSettingsFetched = 0;
 const nativeSettingsRevision = signal(0);
 powos.on("qs.destinations", () => { nativeSettingsFetched = 0; nativeSettingsRevision.value++; });
@@ -70,12 +83,30 @@ registerSearchProvider({ id: "android-settings", async search() {
   }
   // No catch-all search action: unmatched text belongs to the launcher chat flow.
   const entries = nativeSettings.filter((entry) => entry.id !== "settings-search");
-  return entries.map((entry) => ({
-    id: `android-settings:${entry.id}`, label: entry.label, source: entry.breadcrumb ? `Android settings · ${entry.breadcrumb.replaceAll(";", " › ")}` : "Android settings",
-    keywords: `${entry.keywords} settings preferences android`,
-    open: () => { void powos.qs.open(entry.id); },
-  }));
+  const groups = new Map<string, SearchGroup>();
+  return entries.map((entry) => {
+    const detail = entry.breadcrumb ? entry.breadcrumb.replaceAll(";", " › ") : undefined;
+    const group = settingGroup(entry, groups);
+    return {
+      id: `android-settings:${entry.id}`, label: entry.label, source: detail ? `${group.label} · ${detail}` : group.label, group, detail,
+      keywords: `${entry.keywords} settings preferences android`,
+      open: () => { void powos.qs.open(entry.id); },
+    };
+  });
 } });
+
+/** The app [entry] opens in (SettingsSearch.kt: package, its name and picture): the launcher's own icon for it where it's
+ * a launcher app, as in the grid. An older host sends none: one "Android settings" group. One per package, in [cache]. */
+function settingGroup(entry: NativeSetting, cache: Map<string, SearchGroup>): SearchGroup {
+  const pkg = entry.package;
+  if (!pkg) return { id: "android", label: "Android settings" };
+  let group = cache.get(pkg);
+  if (!group) {
+    const app = androidApp(pkg);
+    cache.set(pkg, group = { id: `android:${pkg}`, label: entry.app || app?.label || pkg, icon: app?.icon ?? entry.appIcon });
+  }
+  return group;
+}
 
 interface CatalogApp { app: string; name: string; enabled: boolean; error?: string; actions?: Record<string, { summary?: string; enabled?: boolean }> }
 let catalog: CatalogApp[] = [];
@@ -93,13 +124,17 @@ registerSearchProvider({ id: "app-api", async search(_text, signal) {
     await loading;
   }
   if (signal.aborted) return [];
-  return catalog.filter((a) => a.enabled && !a.error).flatMap((a) => Object.entries(a.actions ?? {})
+  return catalog.filter((a) => a.enabled && !a.error).flatMap((a) => {
+    const installed = androidApp(a.app) ?? apps.value.find((x) => x.label.toLocaleLowerCase() === a.name.toLocaleLowerCase());
+    const group = { id: `app-api:${a.app}`, label: a.name, icon: installed?.icon };
+    return Object.entries(a.actions ?? {})
     .filter(([, action]) => action.enabled !== false)
     .map(([id, action]) => ({
-      id: `app-api:${a.app}:${id}`, label: id.replace(/[_.-]/g, " "), source: a.name,
+      id: `app-api:${a.app}:${id}`, label: id.replace(/[_.-]/g, " ").trim(), source: a.name, group, detail: action.summary,
       keywords: a.name,
       open: () => openApp("local.app-api", null, { app: a.app, action: id }),
-    })));
+    }));
+  });
 } });
 
 const extra = signal<SearchResult[]>([]);
@@ -125,11 +160,34 @@ export const searchResults = computed(() => {
   if (!q) return [];
   const entries: SearchResult[] = apps.value.map((a) => ({ id: `app:${a.key}`, label: a.label, source: "Apps", icon: a.icon, open: () => { void launch(a.key); } }));
   // Apps and settings pages come first; App API capabilities (hundreds of "open <url>" actions) are a capped tail so they cannot bury them.
-  const tier = (r: SearchResult) => r.id.startsWith("app-api:") ? 1 : 0;
+  // The apps themselves before everything else: they're the grid at the top (the user, 2026-10-30).
+  const tier = (r: SearchResult) => r.id.startsWith("app-api:") ? 2 : r.group ? 1 : 0;
   const ranked = [...entries, ...extra.value].map((r) => ({ r, rank: searchRank(q, r.label, r.keywords) }))
     .filter(({ rank }) => rank >= 0).sort((a, b) => tier(a.r) - tier(b.r) || a.rank - b.rank || a.r.label.localeCompare(b.r.label)).map(({ r }) => r);
+  // The same thing twice - one setting indexed from two Android sources, an action under two ids - shows once: same
+  // app, same name, same place in it.
+  const seen = new Set<string>();
+  const norm = (s = "") => s.trim().replace(/\s+/g, " ").toLocaleLowerCase();
   let capi = 0;
-  return ranked.filter((r) => !r.id.startsWith("app-api:") || ++capi <= 8).slice(0, 60);
+  return ranked.filter((r) => {
+    const key = `${r.group?.id ?? r.id}\u0000${norm(r.label)}\u0000${norm(r.detail)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return !r.id.startsWith("app-api:") || ++capi <= 8;
+  }).slice(0, 60);
+});
+/** [searchResults] as the launcher shows them: the apps (a grid), then each app's settings and actions under it, the
+ * groups in the order of their best match. */
+export const searchSections = computed(() => {
+  const appsFound: SearchResult[] = [];
+  const groups = new Map<string, SearchGroup & { items: SearchResult[] }>();
+  for (const r of searchResults.value) {
+    if (!r.group) { appsFound.push(r); continue; }
+    let g = groups.get(r.group.id);
+    if (!g) groups.set(r.group.id, g = { ...r.group, items: [] });
+    g.items.push(r);
+  }
+  return { apps: appsFound, groups: [...groups.values()] };
 });
 export function openSearchResult(result: SearchResult) {
   closeDrawer();
