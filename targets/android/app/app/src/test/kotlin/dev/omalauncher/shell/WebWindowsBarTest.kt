@@ -35,7 +35,7 @@ class WebWindowsBarTest {
     /** The page's bar: its "Full screen" button calls fullScreen, which asks the host (not toggleMaximise) when it can. */
     @Test
     fun thePageButtonAsksTheHost() {
-        val page = File("../../../shell/ui/webwindows.tsx").takeIf { it.exists() } ?: return
+        val page = File("../../../../shell/ui/webwindows.tsx").takeIf { it.exists() } ?: return
         val src = page.readText()
         assertTrue("the bar's Full screen button no longer calls fullScreen(win.id)", Regex("""aria-label="Full screen" \{\.\.\.press\(\(\) => fullScreen\(win\.id\)\)\}""").containsMatchIn(src))
         val fn = src.substringAfter("function fullScreen(id: number) {").substringBefore("\n}\n")
