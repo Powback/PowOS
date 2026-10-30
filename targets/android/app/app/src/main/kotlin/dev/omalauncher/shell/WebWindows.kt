@@ -192,9 +192,20 @@ class WebWindows(
     /** The windows' root shown ([on]) or hidden, at once (main thread): [switcherOpen]. */
     private fun rootShown(on: Boolean) {
         underSwitcher = !on
+        if (!on) tilesUnderSwitcher()
         val r = root?.takeIf { it.isValid } ?: return
         SurfaceControl.Transaction().setVisibility(r, on).apply()
         Log.i(TAG, "windows ${if (on) "shown again (switcher down)" else "hidden under the switcher (each is its card)"}: ${wins.size} window(s)")
+    }
+
+    /**
+     * The switcher came up: the tiles' dividers, snap hint and tile menu are children of the windows' root, so they hide
+     * with it; a divider drag in progress is let go as cancelled (its split stays), the menu and the hint go.
+     */
+    private fun tilesUnderSwitcher() {
+        divDrag?.takeIf { !it.ended }?.let { dividerUp(it, cancelled = true) }
+        tiles.closeMenu()
+        tiles.hint(null)
     }
 
     /** A window for [component], its body at [rect] (CSS px): its id, or -1 (setting off, no surface to host it). */
@@ -788,7 +799,8 @@ class WebWindows(
 
     /** A divider is above every window (its touch target is wider than the gap: it overlaps the tiles' edges). */
     private fun tilesDown(f: Fingers): Boolean {
-        if (f.y >= area.bottom) return false
+        // Hidden under the switcher: no divider to grab.
+        if (underSwitcher || f.y >= area.bottom) return false
         val dv = tiles.dividerAt(f.x, f.y) ?: return false
         return dividerDown(dv, f)
     }

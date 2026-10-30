@@ -564,6 +564,10 @@ divider moves (`SplitDecorManager`: a layer in the app's TaskDescription backgro
   switcher: `Tasks.remove` → `closeForTask` → the same `drop`) frees its tile (`webwindows.closed` → **gone**).
   The switcher's split picking an app that is a full-screen app now brings it back into its window first
   (`webwindows.toWindow`), then tiles it.
+  With the switcher up (`WebWindows.switcherOpen` hides the windows' root) the dividers, the snap hint and the tile
+  menu hide with it - they are children of that root; a divider drag in progress is let go as cancelled and the menu
+  and hint close (`tilesUnderSwitcher`), and no divider takes a touch until the switcher is down. The card menu keeps
+  both *Split screen* (2-4 apps tiled) and the new *Back to window* / *Floating window* item.
 
 ### Dividers (native: `WebWindowTiles.kt`, `WebWindows.kt` "tiles")
 
