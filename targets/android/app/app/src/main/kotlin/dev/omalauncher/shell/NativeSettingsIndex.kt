@@ -63,11 +63,12 @@ object NativeSettingsIndex {
         }
         if (!intent.getStringExtra(":settings:show_fragment").isNullOrBlank() && RootMode.enabled() && android.os.Process.myUid() / 100000 == 0) {
             intent.setClassName("com.android.settings", "com.android.settings.SubSettings")
-            openFragment(context, intent, entry.getString("label"))
+            // Web desktop: Settings' window first, the page started on its display (AppWindows.launch).
+            dev.omalauncher.system.AppWindows.launch(context, "com.android.settings") { openFragment(context, intent, entry.getString("label"), it) }
             return
         }
         try {
-            context.startActivity(intent, dev.omalauncher.system.AppWindows.bundle(context))
+            dev.omalauncher.system.AppWindows.startActivity(context, intent)
         } catch (e: SecurityException) {
             unavailable(context, entry.getString("label"))
         } catch (e: android.content.ActivityNotFoundException) {
@@ -75,12 +76,12 @@ object NativeSettingsIndex {
         }
     }
 
-    private fun openFragment(context: Context, intent: Intent, title: String) {
+    private fun openFragment(context: Context, intent: Intent, title: String, options: android.os.Bundle?) {
         val parcel = android.os.Parcel.obtain()
         val payload = try {
             parcel.writeBundle(android.os.Bundle().apply {
                 putParcelable("intent", intent)
-                putBundle("options", dev.omalauncher.system.AppWindows.bundle(context))
+                putBundle("options", options)
             })
             android.util.Base64.encodeToString(parcel.marshall(), android.util.Base64.NO_WRAP)
         } finally { parcel.recycle() }

@@ -326,7 +326,7 @@ class WidgetServices(
             // Any scheme an app handles: tel:, geo:, mailto:, ... One nothing handles mustn't crash the launcher.
             "url" ->
                 try {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(arg)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context))
+                    dev.omalauncher.system.AppWindows.startActivity(context, Intent(Intent.ACTION_VIEW, android.net.Uri.parse(arg)))
                 } catch (e: ActivityNotFoundException) {
                     Toast.makeText(context, "no app opens $arg", Toast.LENGTH_SHORT).show()
                 }
@@ -334,7 +334,7 @@ class WidgetServices(
             "media" -> media.control(arg)
             "volume" -> volume.control(args[0])
             "notification" -> args.getOrNull(1)?.takeIf { it != Null }?.let { notifications.control(arg, it.toString()) }
-            "androidApp" -> context.packageManager.getLaunchIntentForPackage(arg)?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context)) }
+            "androidApp" -> context.packageManager.getLaunchIntentForPackage(arg)?.let { dev.omalauncher.system.AppWindows.startActivity(context, it) }
             "copy" -> copy(arg)
             "notify" -> notify(arg, args.getOrNull(1)?.takeIf { it != Null }?.toString())
             "torch" -> modes.torch(args[0])

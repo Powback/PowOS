@@ -770,7 +770,9 @@ class AppWidgets private constructor(
         }
         return runCatching {
             // Unfolded: the app opens in a floating window, as from the dock (AppWindows).
-            context.startIntentSender(pendingIntent.intentSender, launch?.first, 0, 0, 0, (dev.omalauncher.system.AppWindows.options(context, options) ?: options).toBundle())
+            // Web desktop: straight into the creator app's web window (AppWindows.launch), never via display 0.
+            val pkg = if (Build.VERSION.SDK_INT >= 31 && pendingIntent.isActivity) pendingIntent.creatorPackage else null
+            dev.omalauncher.system.AppWindows.launch(context, pkg, options) { context.startIntentSender(pendingIntent.intentSender, launch?.first, 0, 0, 0, it ?: options.toBundle()) }
             true
         }.onFailure { Log.w(TAG, "widget click failed", it) }.getOrDefault(false)
     }

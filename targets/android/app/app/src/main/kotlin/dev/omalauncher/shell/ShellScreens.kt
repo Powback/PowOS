@@ -603,7 +603,7 @@ class ShellScreens(
 
     private fun start(intent: Intent) {
         // runCatching: there may be no browser, no live wallpaper picker (Android Go).
-        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context)) }.onFailure { Log.w(TAG, "can't open $intent", it) }
+        runCatching { dev.omalauncher.system.AppWindows.startActivity(context, intent) }.onFailure { Log.w(TAG, "can't open $intent", it) }
     }
 
     fun close() {

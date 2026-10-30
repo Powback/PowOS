@@ -1271,6 +1271,9 @@ class ShellBridge(
             runtime.usage.settle()
             return
         }
+        // Home's page couldn't make the window a held launch asked for (WebWindowLaunch; its "webwindows.launch"
+        // fallback is apps.launch): that launch (a notification's, a settings page) goes the old way, not the app's main screen.
+        if (activity != null && android(key)?.let { WebWindowLaunch.refused(it.component.packageName) } == true) return
         when {
             // An app with a floating window already (shown or minimised): that window comes back, no second launch.
             key.startsWith("a:") ->
@@ -1547,6 +1550,22 @@ class ShellBridge(
     }
 
     companion object {
+        /**
+         * WebWindowLaunch: home's page asked for [pkg]'s web window ("webwindows.launch", as from the launcher overlay:
+         * its frame shows at once; an open one comes up). False: no home page, or [pkg] has no drawer app.
+         */
+        fun openOnHome(
+            context: Context,
+            pkg: String,
+        ): Boolean {
+            val home = synchronized(live) { live.firstOrNull { it.activity != null } } ?: return false
+            val apps = home.runtime.androidApps.apps
+            val app = apps.firstOrNull { it.component.packageName == pkg && it.profile == null } ?: apps.firstOrNull { it.component.packageName == pkg } ?: return false
+            if (!dev.omalauncher.system.AppWindows.webDesktop(context)) return false
+            home.emit("webwindows.launch", JSONObject().put("key", "a:${app.key}"))
+            return true
+        }
+
         /** The bridge calls that only touch files: run by [callOffMain], never on the main thread. */
         private val OFF_MAIN = setOf("store.get", "store.set", "perf.save")
 

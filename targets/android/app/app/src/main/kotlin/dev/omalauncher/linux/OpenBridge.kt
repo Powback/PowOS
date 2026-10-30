@@ -94,7 +94,7 @@ fun openUrl(
         return false
     }
     return try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context))
+        dev.omalauncher.system.AppWindows.startActivity(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         Log.i(TAG, "opened $url")
         true
     } catch (e: ActivityNotFoundException) {

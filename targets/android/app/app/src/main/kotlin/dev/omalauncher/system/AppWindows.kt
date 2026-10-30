@@ -1,7 +1,9 @@
 package dev.omalauncher.system
 
 import android.app.ActivityOptions
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.graphics.Rect
 import android.os.Bundle
 import android.provider.Settings
@@ -81,6 +83,63 @@ object AppWindows {
         context: Context,
         base: ActivityOptions? = null,
     ): Bundle? = options(context, base)?.toBundle()
+
+    /**
+     * THE launch of an app's activity from PowOS ([start] does it, given its options): on the web desktop
+     * ([webDesktop]) straight into [pkg]'s web window - home's page makes the window first, the activity starts on its
+     * display (shell/WebWindowLaunch) - never full screen or freeform on display 0 first and moved after (the user,
+     * 10-30 23:07). Elsewhere, or not routable (no home page, [pkg] null or without a drawer app), [start] runs now
+     * with [bundle]'s options, as before. Exceptions of an immediate [start] reach the caller; a held one's are logged.
+     */
+    fun launch(
+        context: Context,
+        pkg: String?,
+        base: ActivityOptions? = null,
+        start: (Bundle?) -> Unit,
+    ) {
+        if (pkg != null && webDesktop(context) &&
+            dev.omalauncher.shell.WebWindowLaunch.route(context, pkg, dev.omalauncher.shell.WebWindowLaunch.Pending(base, start) { start(bundle(context, base)) })
+        ) {
+            return
+        }
+        start(bundle(context, base))
+    }
+
+    /** [launch] of [intent] (a new task) with context.startActivity. */
+    fun startActivity(
+        context: Context,
+        intent: Intent,
+        base: ActivityOptions? = null,
+    ) {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        launch(context, packageOf(context, intent), base) { context.startActivity(intent, it) }
+    }
+
+    /**
+     * [launch] of [pi] (a notification's, a tile's, a media session's): its creator's window when it starts an
+     * activity; a broadcast or service (a reply, a trampoline) is sent now as before - nothing to put in a window.
+     */
+    fun send(
+        context: Context,
+        pi: PendingIntent,
+        fill: Intent? = null,
+        base: ActivityOptions? = null,
+    ) {
+        val pkg = if (android.os.Build.VERSION.SDK_INT >= 31 && pi.isActivity) pi.creatorPackage else null
+        launch(context, pkg, base) { pi.send(context, 0, fill, null, null, null, it) }
+    }
+
+    /** The app [intent] opens: its package or component's, else the one activity it resolves to (null: a chooser, none). */
+    fun packageOf(
+        context: Context,
+        intent: Intent,
+    ): String? {
+        intent.component?.let { return it.packageName }
+        intent.`package`?.let { return it }
+        val info = runCatching { context.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo }.getOrNull() ?: return null
+        // The resolver ("android") is a chooser between apps: no one app's window to make.
+        return info.packageName.takeIf { it != "android" }
+    }
 
     /** Launch options for an app opened from home: a floating window when [floating], else null (full screen). */
     fun launchOptions(context: Context): Bundle? = bundle(context)

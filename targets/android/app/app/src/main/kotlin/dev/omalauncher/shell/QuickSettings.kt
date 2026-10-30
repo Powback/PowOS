@@ -288,7 +288,7 @@ class QuickSettings(
                             .takeIf { context.packageManager.resolveActivity(it, 0) != null } ?: launch(cn.packageName)
                     } ?: error("no quick setting $name")
             } ?: return
-        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), dev.omalauncher.system.AppWindows.bundle(context)) }
+        runCatching { dev.omalauncher.system.AppWindows.startActivity(context, intent) }
             .onFailure { Log.w(TAG, "can't open $name", it) }
     }
 
