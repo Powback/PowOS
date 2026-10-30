@@ -20,6 +20,39 @@ import java.io.ByteArrayOutputStream
 object Tasks {
     private const val TAG = "PowosTasks"
 
+    /** Every task removal / window close PowOS makes logs one line under this tag, with its caller (`logcat -s PowosTaskRemove`). */
+    const val REMOVE_TAG = "PowosTaskRemove"
+
+    /** Tasks PowOS asked to remove lately (task id -> uptime): a removal the system reports that isn't here was someone else's. */
+    private val asked = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
+    /**
+     * One [REMOVE_TAG] line for [what] ("removeTask", "finishAndRemoveTask", "Tasks.remove", "closeForTask", "drop",
+     * "close") of task [id] (-1: none known) and [why], with the PowOS frames of the call stack that made it. A real
+     * task removal ([removes]) is remembered for [removedBy].
+     */
+    fun logRemove(
+        what: String,
+        id: Int,
+        why: String,
+        removes: Boolean = false,
+    ) {
+        if (removes && id >= 0) asked[id] = android.os.SystemClock.uptimeMillis()
+        val frames =
+            Throwable().stackTrace.asSequence()
+                .drop(1)
+                .filter { (it.className.startsWith("dev.omalauncher") || it.className.startsWith("andro.marchy")) && !it.methodName.startsWith("logRemove") }
+                .take(6)
+                .joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+        Log.i(REMOVE_TAG, "$what task=$id ($why) thread=${Thread.currentThread().name} by $frames")
+    }
+
+    /** Task [id] gone: "PowOS (N ms after it asked)" when PowOS removed it lately, else "not PowOS" (the system, the app, OnePlus). */
+    fun removedBy(id: Int): String {
+        val at = asked.remove(id) ?: return "not PowOS (no PowOS removal of it logged)"
+        return "PowOS (${android.os.SystemClock.uptimeMillis() - at} ms after it asked)"
+    }
+
     /** A recent task: its id, the app it's of (package, base activity) and its title. */
     data class Task(
         val id: Int,
@@ -234,9 +267,13 @@ object Tasks {
     ): Boolean {
         // A web window's task (on its display, or its full-screen app): the window closes, its task and display with it -
         // one close path with the window's own close button (WebWindows.closeForTask).
+        logRemove("Tasks.remove", id, "asked")
         if (dev.omalauncher.shell.WebWindows.closeForTask(context, id)) return true
         val task = list(context).firstOrNull { it.id == id }
         val pkg = task?.component?.packageName
+        logRemove(if (pkg == context.packageName) "finishAndRemoveTask" else "removeTask", id, "Tasks.remove of $pkg (no web window's)", removes = true)
+        // Its window too, if a web window still thinks it holds it (a stale task map): never a ghost frame.
+        dev.omalauncher.shell.WebWindows.taskRemovedByPowos(id)
         if (pkg == context.packageName) {
             // A Linux window's task (PowosWindowActivity): the user closed it (swiped its card, the frame's close), so
             // the app goes too - KWin closes its window, then ends its process tree if it stays (WindowTasks.quit).

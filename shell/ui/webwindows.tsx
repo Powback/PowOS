@@ -177,24 +177,37 @@ async function takePlaceholder(ph: WebWin, kwin: number, ownFrame?: boolean): Pr
   return true;
 }
 
-export async function openWindow(key: string, label: string, page: number): Promise<number | null> {
-  if (!wideHome.value || !key.startsWith("a:") || !(await enabled())) return null;
+/** App [key]'s window already (its id, brought to [page] - or to the front as its full-screen app), or null: none. */
+function existingWindow(key: string, page: number): number | null {
   // Already a window: it comes to this page, on top - never a second display for the same app (its task would move).
   const open = webWins.value.find((w) => w.key === key);
+  if (!open) return null;
   // A full-screen app now: it comes to the front as one (never a second window).
-  if (open?.full && powos.webwindows?.fullScreen) {
+  if (open.full && powos.webwindows?.fullScreen) {
     void powos.webwindows.fullScreen(open.id);
     return open.id;
   }
-  if (open) {
-    update(open.id, { page, minimised: false });
-    raise(open.id);
-    return open.id;
-  }
+  return cameHere(open.id, page);
+}
+
+/** Window [id] to [page], not minimised, on top: its id. */
+function cameHere(id: number, page: number): number {
+  update(id, { page, minimised: false });
+  raise(id);
+  return id;
+}
+
+export async function openWindow(key: string, label: string, page: number): Promise<number | null> {
+  if (!wideHome.value || !key.startsWith("a:") || !(await enabled())) return null;
+  const had = existingWindow(key, page);
+  if (had != null) return had;
   const { x, y, w, h } = cascade();
   // Its first rect is a guess; the element reports its real one on its first frame.
   const id = await powos.webwindows!.open(key, { left: x, top: y + TITLE, width: w, height: h - TITLE }).catch(() => -1);
   if (id < 0) return null;
+  // The host's window for this app already (a second tap while the first open was in flight, a model the host knows
+  // better): that one comes here, never a second entry or display.
+  if (webWins.value.some((v) => v.id === id)) return cameHere(id, page);
   webWins.value = [...webWins.value, { id, key, label, page, x, y, w, h }];
   fillEmptyTile(page, id);
   return id;
@@ -237,6 +250,12 @@ export async function adoptWebWindow(
   const { vx, vy, w, h } = adoptPlace(m.body, bar);
   const id = await ww.open(m.key, { left: vx, top: vy + bar, width: w, height: h - bar }, m.task, m.kwin).catch(() => -1);
   if (id < 0) return false;
+  // The host gave the app's existing window (one display per app task): it comes to [page], no second entry.
+  if (webWins.value.some((v) => v.id === id)) {
+    cameHere(id, page);
+    toPage(page);
+    return true;
+  }
   webWins.value = [...webWins.value, { id, key: m.key, label: m.label, page, x: vx - o.x, y: vy - o.y, w, h, task: m.task, ownFrame: m.ownFrame || undefined }];
   if (m.kwin != null) watchStart(id);
   // As any window opened on the page: a tiling there with an empty tile takes it (its floating frame kept for a float
@@ -281,6 +300,18 @@ export function raise(id: number) {
 powos.on("webwindows.closed", (id: number) => {
   untile(id, "gone");
   webWins.value = webWins.value.filter((w) => w.id !== id);
+});
+/**
+ * The host's windows, by id (each reconcile, at least every 2 s): an entry it has no window for is a ghost - it goes,
+ * as on "webwindows.closed". Placeholders (negative ids, a Linux launch's) are the page's own.
+ */
+powos.on("webwindows.alive", (ids: number[]) => {
+  const alive = new Set(ids);
+  for (const w of webWins.value) {
+    if (w.id < 0 || w.pending || alive.has(w.id)) continue;
+    untile(w.id, "gone");
+    webWins.value = webWins.value.filter((v) => v.id !== w.id);
+  }
 });
 /** Home to a page (by its number, as pages lists them): state.ts sets it (it imports this file, not the reverse). */
 let toPage: (page: number) => void = () => {};

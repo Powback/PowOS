@@ -131,20 +131,67 @@ class WebWindows(
      * outlives its task.
      */
     private fun reconcile() {
+        tick()
         val ws = wins.values.filter { it.linux == null && !it.closed && it.displayId >= 0 }
         if (ws.isEmpty()) return
         // A window minimised as a home gesture (MN1: its task left for display 0 / PiP) is checkLeft's, not follow's.
-        val left = ws.filter { it.leftAt != 0L }
-        val rest = ws.filter { it.leftAt == 0L }
-        if (rest.isNotEmpty()) {
-            io.post {
-                @Suppress("DEPRECATION")
-                val running = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrNull()
-                rest.forEach { if (running == null || !follow(it, running)) checkOrphan(it) }
-            }
-        }
-        if (left.isNotEmpty()) io.post { left.forEach(::checkLeft) }
+        io.post { reconcileNow(ws) }
     }
+
+    /** [reconcile]'s next run [HEARTBEAT_MS] on, and the host's window ids to the page (its model agrees: no stale entry in "w.f"). */
+    private fun tick() {
+        main.removeCallbacks(heartbeat)
+        if (wins.isNotEmpty()) main.postDelayed(heartbeat, HEARTBEAT_MS)
+        emit("webwindows.alive", org.json.JSONArray(wins.keys.toList()))
+    }
+
+    /** On [io]: [reconcile]'s reads for Android windows [ws]. */
+    private fun reconcileNow(ws: List<Win>) {
+        @Suppress("DEPRECATION")
+        val running = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrNull()
+        // A window whose app's task is gone closes, whatever state it is in (on its display, full screen, minimised,
+        // removed by PowOS itself or anyone else): the frame never outlives its task.
+        running?.let { r -> ws.filter { taskDead(it, r) }.forEach { w -> io.postDelayed({ confirmDead(w) }, DEAD_CONFIRM_MS) } }
+        ws.filter { it.leftAt == 0L }.forEach { if (running == null || !follow(it, running)) checkOrphan(it) }
+        ws.filter { it.leftAt != 0L }.forEach(::checkLeft)
+    }
+
+    /** While there are windows, a [reconcile] at least every [HEARTBEAT_MS]: a missed task change never leaves a ghost. */
+    private val heartbeat = Runnable { reconcile() }
+
+    /**
+     * On [io]: [w]'s app's task (known: [Win.taskId]) is in no running task and its display holds none - its app is
+     * gone, wherever the window had it (its display, full screen on display 0, minimised / PiP). Not while adopting.
+     */
+    private fun taskDead(
+        w: Win,
+        running: List<android.app.ActivityManager.RunningTaskInfo>,
+    ): Boolean {
+        if (w.closed || w.adopt >= 0 || w.taskId < 0) return false
+        if (running.any { it.taskId == w.taskId }) return false
+        return tasksOn(w.displayId) == 0
+    }
+
+    /** On [io]: [taskDead] still true [DEAD_CONFIRM_MS] later - the window closed the bar's way (main thread). */
+    private fun confirmDead(w: Win) {
+        @Suppress("DEPRECATION")
+        val running = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrNull() ?: return
+        if (!taskDead(w, running)) return
+        val task = w.taskId
+        main.post {
+            if (w.closed) return@post
+            Log.i(TAG, "window ${w.id} (${w.component.packageName}${stateOf(w)}): its app's task $task is gone (removed by ${dev.omalauncher.system.Tasks.removedBy(task)}): window closed")
+            WebWindowDisplays.fullScreen(task, w.id, false)
+            // Nothing left to remove: its task is gone already.
+            w.full = false
+            w.leftAt = 0L
+            drop(w)
+        }
+    }
+
+    /** The Android window that holds (or held) task [taskId], whatever its state: the stale-map fallback of [closeForTask]. */
+    internal fun windowOfTask(taskId: Int): Int? =
+        if (taskId < 0) null else runCatching { wins.values.toList() }.getOrNull()?.firstOrNull { it.linux == null && !it.closed && it.taskId == taskId }?.id
 
     /**
      * On [io] (WM1): [w]'s app's task, wherever the system or the app took it - OnePlus' "Floating window" (its "..."
@@ -329,6 +376,10 @@ class WebWindows(
 
         /** Its Linux window is full screen ([linuxFullScreen], kwin 0043): the whole screen, no bar, the page's place kept. */
         var linuxFull = false
+
+        /** When [linuxFull] last went on (uptime ms), and since when the page's "w.f" lists it as a plain window anyway (0: not): IR1. */
+        var linuxFullAt = 0L
+        var fullListedAt = 0L
 
         /**
          * PowOS asked KWin to put it full screen ([fullScreen]) and KWin hasn't confirmed yet ("fullscreen <id> 1"): its
@@ -522,6 +573,7 @@ class WebWindows(
             WebWindowLaunch.refused(component.packageName)
             return -1
         }
+        existingFor(component, task)?.let { return it }
         val parent = root() ?: return -1
         val id = nextId++
         val d = density()
@@ -544,9 +596,53 @@ class WebWindows(
             // Closed while its display was being made: the display goes too.
             if (win.closed) return@create helper.release(displayId)
             Log.i(TAG, "window $id: trusted display $displayId ${w}x$h dpi $dpi (${component.packageName})")
+            main.post { scheduleReconcile() }
             io.post { mirrorWhenKnown(win, SystemClock.uptimeMillis()) }
         }
         return id
+    }
+
+    /**
+     * One display per app task: [component]'s app has an Android window already - that window's id (the page raises it,
+     * "webwindows.show"), never a second display. [task] (an adopt) of the window's own task: the same. Another task of
+     * the app: moved into that window (its display shows the newest), unless it is a new document by design
+     * (FLAG_ACTIVITY_NEW_DOCUMENT / MULTIPLE_TASK: Chrome's or Docs' own extra windows) - then a window of its own.
+     * Null: none, make one.
+     */
+    private fun existingFor(
+        component: ComponentName,
+        task: Int,
+    ): Int? {
+        val pkg = component.packageName
+        val w = wins.values.firstOrNull { it.linux == null && !it.closed && it.component.packageName == pkg } ?: return null
+        if (task >= 0 && task != w.taskId && !secondTask(w, task)) return null
+        Log.i(TAG, "open $pkg task $task: window ${w.id} (display ${w.displayId}) has the app already: raised, no second display")
+        emit("webwindows.show", w.id)
+        return w.id
+    }
+
+    /**
+     * [existingFor]: another task [task] of [w]'s app - false: a new document, a window of its own; true: moved into [w]
+     * (when it shows on its display now).
+     */
+    private fun secondTask(
+        w: Win,
+        task: Int,
+    ): Boolean {
+        if (newDocument(task)) {
+            Log.i(TAG, "open ${w.component.packageName} task $task: a new document of the app (window ${w.id} has task ${w.taskId}): a window of its own")
+            return false
+        }
+        val onDisplay = w.displayId >= 0 && !w.full && w.leftAt == 0L
+        if (onDisplay) io.post { Log.i(TAG, "open ${w.component.packageName} task $task: its second task moved into window ${w.id} (display ${w.displayId}): ${moveTask(task, w.displayId)}") }
+        return true
+    }
+
+    /** Task [task] was started as a new document (FLAG_ACTIVITY_NEW_DOCUMENT / MULTIPLE_TASK): a window of its own by design. */
+    private fun newDocument(task: Int): Boolean {
+        @Suppress("DEPRECATION")
+        val info = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrNull()?.firstOrNull { it.taskId == task }
+        return (info?.baseIntent?.flags ?: 0) and (Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK) != 0
     }
 
     // ---- Linux windows (docs/WEB_WINDOWS.md S6) ------------------------------------------------------------------------
@@ -1013,6 +1109,7 @@ class WebWindows(
     ) {
         // A full-screen Linux window keeps its own place ([linuxFullScreen]): neither placed nor hidden by the page.
         val shown = wins.values.filter { it.linuxFull }.mapTo(HashSet()) { it.id }
+        pageAgrees(geos)
         for (g in geos.filterNot { it.id in shown }) {
             val win = wins[g.id] ?: continue
             shown += g.id
@@ -1517,7 +1614,59 @@ class WebWindows(
     }
 
     /** The full-screen Linux window, unless the switcher is up, else null. */
-    private fun fullLinux(): Win? = if (underSwitcher) null else wins.values.firstOrNull { it.linuxFull && it.linux != null }
+    private fun fullLinux(): Win? {
+        if (underSwitcher) return null
+        val w = wins.values.firstOrNull { it.linuxFull && it.linux != null } ?: return null
+        // IR1: a stale full screen (its window closed, its layer or consumer gone, KWin closed it) never takes touches.
+        val why = staleFull(w) ?: return w
+        if (staleFullLogged != w.id) {
+            staleFullLogged = w.id
+            Log.w(TAG, "IR1: window ${w.id} is marked full screen but $why: its touches go to home's page")
+            // The page's model wins: back in its window, as the page shows it.
+            if (w.fullListedAt != 0L && !w.closed) main.post { linuxFullScreen(w, false) }
+        }
+        return null
+    }
+
+    /**
+     * The page's "w.f" against the host's windows: an id the host has no more is told closed ([staleInPage]); a
+     * full-screen Linux window it lists as a plain window (its "webwindows.full" lost, a page reload) is marked since
+     * when, for [fullLinux]'s IR1 check.
+     */
+    private fun pageAgrees(geos: List<Geo>) {
+        val listed = geos.mapTo(HashSet()) { it.id }
+        listed.filterNot { it in wins }.forEach(::staleInPage)
+        val now = SystemClock.uptimeMillis()
+        wins.values.filter { it.linuxFull }.forEach { w -> w.fullListedAt = if (w.id !in listed) 0L else w.fullListedAt.takeIf { it != 0L } ?: now }
+    }
+
+    /** The window [fullLinux] last refused (logged once). */
+    private var staleFullLogged = -1
+
+    /** Why full-screen Linux window [w] must not take touches (IR1), or null: it may. */
+    private fun staleFull(w: Win): String? {
+        val src = w.linux ?: return "not a Linux window"
+        val now = SystemClock.uptimeMillis()
+        val listed = w.fullListedAt != 0L && now - w.fullListedAt > STALE_FULL_MS && now - w.linuxFullAt > STALE_FULL_MS
+        return when {
+            w.closed -> "closed"
+            !w.container.isValid -> "its layer is gone"
+            src.kwinClosed -> "KWin closed it"
+            src.handle == 0L -> "its consumer is stopped"
+            listed -> "the page shows it as a plain window (not full screen) for ${now - w.fullListedAt} ms"
+            else -> null
+        }
+    }
+
+    /** Ids in the page's "w.f" this host has no window for (each told once). */
+    private val staleIds = HashSet<Int>()
+
+    /** The page's "w.f" lists window [id], which the host has no more: the page drops it ("webwindows.closed"). */
+    private fun staleInPage(id: Int) {
+        if (id < 0 || !staleIds.add(id)) return
+        Log.w(TAG, "window $id is in the page's w.f but not the host's: the page told it is closed")
+        emit("webwindows.closed", id)
+    }
 
     /**
      * The page pressed [win]'s body ("webwindows.input" "down"): the gesture is the Linux window's from here, its DOWN
@@ -1717,6 +1866,7 @@ class WebWindows(
     /** Gone: its tasks removed, its display released, "webwindows.closed" for the page. */
     fun close(id: Int): Boolean {
         val w = wins[id] ?: return false
+        dev.omalauncher.system.Tasks.logRemove("close", w.taskId, "web window $id (${w.component.packageName}, display ${w.displayId})")
         drop(w)
         return true
     }
@@ -1750,6 +1900,7 @@ class WebWindows(
     ) {
         if (wins.remove(w.id) == null) return
         w.closed = true
+        logDrop(w, released)
         dropLinux(w, handBack)
         Log.i(TAG, "close window ${w.id} (${w.component.packageName}, display ${w.displayId}, task ${w.taskId}${if (w.full) ", full screen" else ""}): 1/4 layers off")
         releaseLayers(w)
@@ -1771,6 +1922,22 @@ class WebWindows(
         Log.i(TAG, "close window ${w.id}: 2/4 layers gone (container, mirror), page told (webwindows.closed) - 4/4")
         emit("webwindows.closed", w.id)
     }
+
+    private fun logDrop(
+        w: Win,
+        released: Boolean,
+    ) {
+        val gone = if (released) ", display gone" else ""
+        dev.omalauncher.system.Tasks.logRemove("drop", w.taskId, "web window ${w.id} (${w.component.packageName}, display ${w.displayId}$gone${stateOf(w)})")
+    }
+
+    /** ", full screen" / ", minimised" / "": [w]'s app's state for a log line. */
+    private fun stateOf(w: Win): String =
+        when {
+            w.full -> ", full screen"
+            w.leftAt != 0L -> ", minimised"
+            else -> ""
+        }
 
     /** [w]'s layers (mirror, frame, container) off the screen in one transaction, then released. */
     private fun releaseLayers(w: Win) {
@@ -1798,6 +1965,7 @@ class WebWindows(
             }
             val remove = atm.javaClass.getMethod("removeTask", Int::class.javaPrimitiveType)
             for (id in ids) {
+                dev.omalauncher.system.Tasks.logRemove("removeTask", id, "every task on closed web window display $displayId", removes = true)
                 val ok = runCatching { remove.invoke(atm, id) as Boolean }.getOrDefault(false)
                 Log.i(TAG, "display $displayId: task $id removed=$ok")
             }
@@ -1808,6 +1976,7 @@ class WebWindows(
         id: Int,
         why: String,
     ) {
+        dev.omalauncher.system.Tasks.logRemove("removeTask", id, why, removes = true)
         val ok = runCatching { atm().javaClass.getMethod("removeTask", Int::class.javaPrimitiveType).invoke(atm(), id) as Boolean }.getOrDefault(false)
         Log.i(TAG, "task $id removed=$ok ($why)")
     }
@@ -2022,7 +2191,7 @@ class WebWindows(
     ) {
         val src = win.linux ?: return
         if (win.closed || win.linuxFull == on) return
-        win.linuxFull = on
+        markLinuxFull(win, on)
         if (!on) win.fullAsked = false
         // Covers every web window now: a new window of its app opens as a task in front of it (WindowTasks.open).
         andro.marchy.WebWindowSource.shownFullScreen(src.kwin, on)
@@ -2041,6 +2210,17 @@ class WebWindows(
         emit("webwindows.full", mapOf("id" to win.id, "on" to on))
         if (!on) resend("window ${win.id} back from full screen")
         publishBars()
+    }
+
+    /** [win]'s [Win.linuxFull] set to [on], its IR1 marks reset. */
+    private fun markLinuxFull(
+        win: Win,
+        on: Boolean,
+    ) {
+        win.linuxFull = on
+        win.linuxFullAt = SystemClock.uptimeMillis()
+        win.fullListedAt = 0L
+        if (staleFullLogged == win.id) staleFullLogged = -1
     }
 
     /**
@@ -2574,6 +2754,15 @@ class WebWindows(
         /** An empty display is read again this long after: a window closes only when its task was gone over a second. */
         private const val ORPHAN_CONFIRM_MS = 1000L
 
+        /** A dead task ([taskDead]) is read again this long after: with [RECONCILE_MS], its window closes within 1 s. */
+        private const val DEAD_CONFIRM_MS = 300L
+
+        /** [reconcile] runs at least this often while there are windows (task changes run it sooner). */
+        private const val HEARTBEAT_MS = 2000L
+
+        /** IR1: a full-screen Linux window the page lists as a plain window this long is stale (no full-screen touches). */
+        private const val STALE_FULL_MS = 500L
+
         /** [WebWindows.minimise]: its move + home (and the PiP entry) settle in this; [checkLeft] waits it out. */
         private const val LEFT_SETTLE_MS = 2000L
 
@@ -2640,6 +2829,19 @@ class WebWindows(
             ww.main.removeCallbacks(ww.reconcileRun)
             ww.main.post(ww.reconcileRun)
             return true
+        }
+
+        /**
+         * PowOS removed task [taskId] directly (Tasks.remove found no web window by its display maps): a window that
+         * still holds it by id closes now, the bar's way - never a ghost frame left for the reconcile. Any thread.
+         */
+        fun taskRemovedByPowos(taskId: Int) {
+            val ww = current ?: return
+            ww.main.post {
+                val id = ww.windowOfTask(taskId) ?: return@post
+                Log.w(TAG, "task $taskId removed by PowOS outside its window's close: web window $id closed with it (a stale task map)")
+                ww.close(id)
+            }
         }
 
         /** A Linux web window's switcher card id: this + its window id (no Android task id gets near it). */
@@ -2769,7 +2971,8 @@ class WebWindows(
                 ww.main.post { ww.close(id) }
                 return true
             }
-            val id = WebWindowDisplays.windowOf(context, taskId) ?: return false
+            val id = WebWindowDisplays.windowOf(context, taskId) ?: ww.windowOfTask(taskId) ?: return false
+            dev.omalauncher.system.Tasks.logRemove("closeForTask", taskId, "web window $id")
             Log.i(TAG, "task $taskId removed (switcher / Tasks.remove): it is web window $id - closing the window (the bar's close path)")
             ww.main.post { ww.close(id) }
             return true
