@@ -56,12 +56,12 @@ class WebWindowsReconcileTest {
     @Test
     fun followsTheTaskWhereverItGoes() {
         val f = WebWindows.Companion
-        assertEquals("OnePlus' Floating window (zoom) on display 0", WebWindows.Follow.BACK, f.followOf(own = false, main = true, mode = 100))
-        assertEquals("freeform on display 0", WebWindows.Follow.BACK, f.followOf(own = false, main = true, mode = 5))
-        assertEquals("zoom inside its own display", WebWindows.Follow.BACK, f.followOf(own = true, main = false, mode = 100))
-        assertEquals("full screen on display 0", WebWindows.Follow.FULL, f.followOf(own = false, main = true, mode = 1))
-        assertEquals("a split on display 0", WebWindows.Follow.FULL, f.followOf(own = false, main = true, mode = 6))
-        assertEquals("PiP", WebWindows.Follow.PIP, f.followOf(own = false, main = true, mode = 2))
+        assertEquals("OnePlus' Floating window (zoom) on display 0", WebWindows.Companion.Follow.BACK, f.followOf(own = false, main = true, mode = 100))
+        assertEquals("freeform on display 0", WebWindows.Companion.Follow.BACK, f.followOf(own = false, main = true, mode = 5))
+        assertEquals("zoom inside its own display", WebWindows.Companion.Follow.BACK, f.followOf(own = true, main = false, mode = 100))
+        assertEquals("full screen on display 0", WebWindows.Companion.Follow.FULL, f.followOf(own = false, main = true, mode = 1))
+        assertEquals("a split on display 0", WebWindows.Companion.Follow.FULL, f.followOf(own = false, main = true, mode = 6))
+        assertEquals("PiP", WebWindows.Companion.Follow.PIP, f.followOf(own = false, main = true, mode = 2))
         assertNull("full screen in its own display: nothing", f.followOf(own = true, main = false, mode = 1))
         assertNull("another display (Open Canvas): the orphan rule decides", f.followOf(own = false, main = false, mode = 100))
         val bridge = File("src/main/kotlin/dev/omalauncher/shell/ShellBridge.kt").readText()
