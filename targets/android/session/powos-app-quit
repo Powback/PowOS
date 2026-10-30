@@ -8,7 +8,8 @@
 #   - a Steam game (the pid is under Steam's reaper `SteamLaunch AppId=<id>`, or its environment says SteamAppId /
 #     SteamGameId / STEAM_COMPAT_APP_ID): the game's whole launch chain for that AppId - reaper, pressure-vessel,
 #     wine/wineserver and children, the FEX-run processes - through `powos game <id> stop` (lib/game.sh: TERM, KILL
-#     after 2 s, a sweep for what a launcher started meanwhile). Steam's client stays.
+#     after 2 s, a sweep for what a launcher started meanwhile); whatever that leaves (it failed, no powos), this
+#     script ends itself: the tree of the launch's outermost `SteamLaunch AppId=<id>` process. Steam's client stays.
 #   - anything else (Dolphin, a Wine app): the process and its descendants - TERM, KILL whatever is left after 2 s.
 # Never: Steam's client (and its web helpers / launcher), FEXServer (every FEX process shares it), the PowOS session,
 # KWin, Xwayland, Plasma, the buses, audio - nor another user's process, nor this script's own ancestors. A protected
@@ -62,11 +63,17 @@ fi
 
 # A Steam game? Its reaper above it (not the install-script evaluator, `SteamLaunch AppId=<id> Install=1`), else its
 # environment.
-app=
+# root: the outermost process of that launch (Steam's pw-audio-namespace / reaper carry the same `SteamLaunch AppId=`
+# argv) - a Proton game's window pid (AbzuGame-Win64-Shipping.exe) is a sibling of its wineserver, winedevice.exe and
+# launcher exe under pressure-vessel, not their parent: its own tree alone leaves the game running.
+app= root=$pid
 a=$pid
 while [[ -n "$a" && "$a" -gt 1 ]]; do
   c=$(argv "$a" | tr '\n' ' ')
-  if [[ "$c" =~ SteamLaunch\ AppId=([0-9]+)\ -- ]]; then app=${BASH_REMATCH[1]}; break; fi
+  if [[ "$c" =~ SteamLaunch\ AppId=([0-9]+)\ -- ]] && [[ -z "$app" || "$app" == "${BASH_REMATCH[1]}" ]] \
+      && ! protected "$a"; then
+    app=${BASH_REMATCH[1]} root=$a
+  fi
   a=$(ppid_of "$a")
 done
 if [[ -z "$app" ]]; then
@@ -80,13 +87,19 @@ if [[ -n "$app" ]]; then
   if command -v powos >/dev/null; then
     timeout 20 powos game "$app" stop 2>&1 | while read -r l; do log "powos game: $l"; done
     log "game $app: done (exit ${PIPESTATUS[0]})"
-    exit 0
+  else
+    log "no powos command"
   fi
-  log "no powos command: ending the process's own tree instead"
+  # Whatever `powos game stop` left (it failed, timed out, resolved no installed game, or there is no powos): the
+  # launch chain from its root, here - a swipe ends the game, always.
+  [[ -d /proc/$root || -d /proc/$pid ]] || exit 0
+  log "game $app still runs: ending its launch chain from $root:$(comm_of "$root")"
 fi
 
-# The process and its descendants (one ps call), minus anything protected (a terminal's Steam).
-tree=$(ps -e -o pid=,ppid= 2>/dev/null | awk -v r="$pid" '{c[$2] = c[$2] " " $1}
+# The process (a Steam game: its launch chain's root) and its descendants (one ps call), minus anything protected (a
+# terminal's Steam). A root gone meanwhile: the window's own process.
+[[ -d /proc/$root ]] || root=$pid
+tree=$(ps -e -o pid=,ppid= 2>/dev/null | awk -v r="$root" '{c[$2] = c[$2] " " $1}
   END {n = 1; q[1] = r; for (i = 1; i <= n; i++) {p = q[i]; if (s[p]++) continue; print p
        m = split(c[p], k, " "); for (j = 1; j <= m; j++) q[++n] = k[j]}}')
 go=() kept=()
