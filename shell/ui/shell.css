@@ -2842,6 +2842,11 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
 .home:is(.dock-left, .dock-right) { padding-left: var(--inset-left, env(safe-area-inset-left)); padding-right: var(--inset-right, env(safe-area-inset-right)); }
 .home.dock-left > .stage > .home-content { margin-left: var(--side-dock); }
 .home.dock-right > .stage > .home-content { margin-right: var(--side-dock); }
+/* The cover screen turned sideways (hosts/wide.ts data-sideways, state.ts dockPosition: the dock goes right there): 404 px
+   tall, so the column runs the screen's height and the pill takes the width beside it - above the pill it had room for
+   five icons and scrolled the rest (the user, 2026-10-30: "in horizontal mode ... put the docking on the right side"). */
+html[data-sideways] .home.dock-right:not(.wide) > .dock:not(.dock-tray) { bottom: calc(var(--inset-bottom, env(safe-area-inset-bottom)) + var(--edge)); }
+html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--side-dock); }
 .home:is(.dock-left, .dock-right) > .bar { transform: none; }
 .home:is(.dock-left, .dock-right) > .stage > .launcher-clip { inset: 0 0 4px; transform: none; }
 .home:is(.dock-left, .dock-right) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }

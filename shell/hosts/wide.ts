@@ -83,6 +83,22 @@ function heldWhileTyping(now: boolean, was: boolean, m: { w: number; h: number }
 
 /** Home laid out wide now (home.tsx: one bottom bar - dock left, search, recent apps right). */
 export const wideHome = signal(isWide());
+/**
+ * Home (or its launcher) on the cover screen turned sideways: still mobile (desktopScreen), but 404 px tall - the bottom
+ * dock and the pill under the tiles took a third of it (the user, 2026-10-30: "when I put the phone screen in horizontal
+ * mode, we should probably put the docking on the right side"). state.ts dockPosition puts the dock on the right for it.
+ * Measured with the wide decision (recheck): a rotation, a fold and a return to home update both.
+ */
+const sidewaysNow = (m = measure()) => isHome && !desktopScreen(m) && m.w > m.h;
+export const sidewaysHome = signal(sidewaysNow());
+/** On <html> too (data-sideways): shell.css gives the side dock the screen's height and the pill the rest beside it. */
+const mark = (on: boolean) => document.documentElement.toggleAttribute("data-sideways", on);
+mark(sidewaysHome.value);
+/** Sideways or not, measured again - a keyboard only shortens a page: never turned sideways by one (the pill typing). */
+function turned(m: { w: number; h: number }) {
+  if (m.w === lastW && typing()) return;
+  mark((sidewaysHome.value = sidewaysNow(m)));
+}
 
 const STORE = "home.wide";
 const BACKUP = "home.wide.backup";
@@ -261,6 +277,7 @@ export function wide(n: Bridge): Bridge {
     // Hidden, the window may still have an app's size (landscape game): judged again the moment it's shown.
     if (document.hidden) return;
     const m = measure();
+    turned(m);
     const now = heldWhileTyping(decide(m), was, m, why);
     const changed = now !== was;
     // Every decision that changes something, and every one asked by a show or a host push, is logged with its inputs
