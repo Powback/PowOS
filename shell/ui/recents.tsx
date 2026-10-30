@@ -216,6 +216,17 @@ async function landed(snapshot: string | null) {
 }
 
 /**
+ * A web window floating on its display ([t]): back where it was, on its page - the host shows it (ShellBridge.openTask),
+ * no card growing to it. False: not one.
+ */
+function floatingWebWindow(t: RecentTask): boolean {
+  if (t.webwindow == null || t.fullScreen) return false;
+  close();
+  powos.tasks.open(t.id).then((ok) => void (ok || refresh()));
+  return true;
+}
+
+/**
  * Opens task [id] from its card: the card's frame grows to the screen (a spring), then the app is opened with no
  * animation of its own - it appears over its own snapshot. The layer stays till home is out of sight ("recents.hide").
  * Unfolded the card grows to the app's floating window instead; home stays in sight, so the host sends "recents.hide"
@@ -236,6 +247,7 @@ function open(id: number, shot?: HTMLElement) {
     powos.tasks.open(id).then((ok) => void (ok || refresh()));
     return;
   }
+  if (floatingWebWindow(t)) return;
   const r = img.getBoundingClientRect();
   const rect = { left: r.left, top: r.top, width: r.width, height: r.height };
   // A full-screen task that comes back as a new floating window (unfolded): where it lands isn't known here, so the
@@ -460,6 +472,26 @@ function Opening() {
   return <img ref={el} class="recents-expand" src={o.src} alt="" />;
 }
 
+/**
+ * A card's window item: a web window's full-screen app (its bar's full screen button) goes back into its window, where
+ * it was; any other app into a floating window.
+ */
+function WindowItem({ t, act }: { t: RecentTask; act: (f: () => void) => () => void }) {
+  if (t.fullScreen && powos.tasks.toWindow) {
+    const back = () => void powos.tasks.toWindow?.(t.id).then((ok) => (ok ? close() : showNote("Not supported by this build yet")));
+    return (
+      <button type="button" onClick={act(back)}>
+        Back to window
+      </button>
+    );
+  }
+  return (
+    <button type="button" onClick={act(() => powos.tasks.float(t.id))}>
+      Floating window
+    </button>
+  );
+}
+
 function Menu() {
   const m = menu.value;
   if (!m) return null;
@@ -480,9 +512,7 @@ function Menu() {
             <button type="button" onClick={act(() => pickForSplit(t.id))}>
               Split screen
             </button>
-            <button type="button" onClick={act(() => powos.tasks.float(t.id))}>
-              Floating window
-            </button>
+            <WindowItem t={t} act={act} />
             {/* Unfolded only. A window goes back to full screen. A host without the call (an older APK, f307) rejects
                 "no such call": say so instead of leaving an unhandled rejection. */}
             {t.floats && powos.tasks.desktopWindow && (

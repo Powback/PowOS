@@ -401,6 +401,7 @@ class ShellBridge(
             "tasks.split" -> dev.omalauncher.system.Tasks.split(a.getInt(0), a.getInt(1))
             "tasks.desktopWindow" -> desktopWindow(a.getInt(0), a.optBoolean(1, true))
             "tasks.float" -> dev.omalauncher.system.Tasks.float(context, a.getInt(0))
+            "tasks.toWindow" -> WebWindows.toWindowForTask(a.getInt(0)).also { if (it) dev.omalauncher.system.Switcher.hide() }
             "tasks.info" -> dev.omalauncher.system.Tasks.info(context, a.getInt(0))
             "tasks.screenshot" -> dev.omalauncher.system.Tasks.screenshot(context, a.getInt(0))
             // Home's switcher layer (shell/ui/recents.tsx, system/Switcher.kt).
@@ -616,6 +617,8 @@ class ShellBridge(
                 }
                 else -> android.app.ActivityOptions.makeBasic()
             }
+        // A web window floating on its display: shown where it was, on its page (home's page does it).
+        if (WebWindows.openForTask(context, id)) return true.also { dev.omalauncher.system.Switcher.hide() }
         // Unfolded: a full-screen task comes back as a floating window, like any app opened there.
         val floats = dev.omalauncher.system.AppWindows.floating(context)
         // Its window hidden on another home page: shown there, home goes to that page (openAway).
@@ -694,28 +697,60 @@ class ShellBridge(
         // it is ("window", CSS px of this page): its card grows to there, never to the full screen.
         val floats = dev.omalauncher.system.AppWindows.floating(context)
         val windows = if (floats) dev.omalauncher.system.FreeformTasks.list(context).associateBy { it.id } else emptyMap()
-        return JSONArray(
-            dev.omalauncher.system.Tasks.list(context).map { t ->
-                val w = windows[t.id]?.bounds
-                val (key, name) = taskApp(t)
-                JSONObject()
-                    .put("id", t.id)
-                    .put("label", t.label ?: name ?: t.component?.packageName ?: "")
-                    .put("key", key ?: JSONObject.NULL)
-                    .put("icon", key?.let(::icon) ?: JSONObject.NULL)
-                    // A window's picture is taken fresh as it's served (ShellHost): its version names its bounds too,
-                    // so a window resized since is fetched again, not the cached one of its old size.
-                    .put("snapshot", "${ShellHost.ORIGIN}/_task/${t.id}?v=${t.lastActive.takeIf { it > 0 } ?: stamp}${w?.let { "-${it.width()}x${it.height()}" } ?: ""}")
-                    .apply {
-                        if (floats) put("floats", true)
-                        if (w != null) {
-                            val at = IntArray(2).also(web::getLocationOnScreen)
-                            val d = density()
-                            put("window", JSONObject().put("left", (w.left - at[0]) / d).put("top", (w.top - at[1]) / d).put("width", w.width() / d).put("height", w.height() / d))
-                        }
-                    }
-            },
-        )
+        @Suppress("DEPRECATION")
+        val running = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(64) }.getOrDefault(emptyList())
+        return JSONArray(dev.omalauncher.system.Tasks.list(context).map { t -> taskJson(t, stamp, windows[t.id]?.bounds, running) })
+    }
+
+    /** One recent task as the switcher lists it ([tasks]); [w]: its floating window's bounds, [floats]: unfolded. */
+    private fun taskJson(
+        t: dev.omalauncher.system.Tasks.Task,
+        stamp: Long,
+        w: android.graphics.Rect?,
+        running: List<android.app.ActivityManager.RunningTaskInfo>,
+    ): JSONObject {
+        val o = taskBase(t)
+        // A window's picture is taken fresh as it's served (ShellHost): its version names its bounds too, so a window
+        // resized since is fetched again, not the cached one of its old size.
+        val version = webWindowFields(o, t.id, running) ?: t.lastActive.takeIf { it > 0 } ?: stamp
+        o.put("snapshot", "${ShellHost.ORIGIN}/_task/${t.id}?v=$version${w?.let { "-${it.width()}x${it.height()}" } ?: ""}")
+        if (dev.omalauncher.system.AppWindows.floating(context)) o.put("floats", true)
+        if (w != null) o.put("window", pageRect(w))
+        return o
+    }
+
+    /** Task [t]'s id, label, drawer key and icon. */
+    private fun taskBase(t: dev.omalauncher.system.Tasks.Task): JSONObject {
+        val (key, name) = taskApp(t)
+        return JSONObject()
+            .put("id", t.id)
+            .put("label", t.label ?: name ?: t.component?.packageName ?: "")
+            .put("key", key ?: JSONObject.NULL)
+            .put("icon", key?.let(::icon) ?: JSONObject.NULL)
+    }
+
+    /**
+     * A web window's task (floating on its display, or its full-screen app): which window ("webwindow", "fullScreen")
+     * into [o]. A floating one's picture version: now (its lastActive never moves while it stays on screen; its card
+     * gets its content as it is). Null: not floating as a web window.
+     */
+    private fun webWindowFields(
+        o: JSONObject,
+        id: Int,
+        running: List<android.app.ActivityManager.RunningTaskInfo>,
+    ): Long? {
+        val ww = WebWindowDisplays.windowOf(context, id, running) ?: return null
+        o.put("webwindow", ww)
+        if (WebWindowDisplays.fullScreenWindow(id) == null) return System.currentTimeMillis()
+        o.put("fullScreen", true)
+        return null
+    }
+
+    /** A screen rect (px) as a rect of this page (CSS px). */
+    private fun pageRect(w: android.graphics.Rect): JSONObject {
+        val at = IntArray(2).also(web::getLocationOnScreen)
+        val d = density()
+        return JSONObject().put("left", (w.left - at[0]) / d).put("top", (w.top - at[1]) / d).put("width", w.width() / d).put("height", w.height() / d)
     }
 
     /**

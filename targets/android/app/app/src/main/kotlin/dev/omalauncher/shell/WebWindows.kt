@@ -170,10 +170,21 @@ class WebWindows(
         // ABOVE home's own buffer (the user, 2026-10-30: "nobody asked for the cutoff"): a window is a card on home,
         // the widgets under it untouched. Still a child of home's surface, so every other window (the launcher overlay,
         // the shade, PowOS AI, the status bar, the IME) stays above it.
-        t.setLayer(sc, 1).setVisibility(sc, true).apply()
+        t.setLayer(sc, 1).setVisibility(sc, !underSwitcher).apply()
         root = sc
         watchSurface()
         return sc
+    }
+
+    /** The switcher is up: every window's layer hidden under it (main thread). */
+    private var underSwitcher = false
+
+    /** The windows' root shown ([on]) or hidden, at once (main thread): [switcherOpen]. */
+    private fun rootShown(on: Boolean) {
+        underSwitcher = !on
+        val r = root?.takeIf { it.isValid } ?: return
+        SurfaceControl.Transaction().setVisibility(r, on).apply()
+        Log.i(TAG, "windows ${if (on) "shown again (switcher down)" else "hidden under the switcher (each is its card)"}: ${wins.size} window(s)")
     }
 
     /** A window for [component], its body at [rect] (CSS px): its id, or -1 (setting off, no surface to host it). */
@@ -1409,6 +1420,18 @@ class WebWindows(
         @Volatile private var current: WebWindows? = null
 
         /**
+         * The switcher up ([open]) or down (Switcher.open's setter). It is home's own page, and the windows are a layer
+         * of home ABOVE its page: up, they covered the switcher - the live window at full size, its bar over the cards
+         * (the user, 10-30 18:39: "They still show up wrong in the switcher. When they are like floating."). So the
+         * windows' root is hidden while it's up (each window then is its card: its content as a picture, ShellHost
+         * /_task via [cardShot]) and shown again after; a card tapped shows its window where it was.
+         */
+        fun switcherOpen(open: Boolean) {
+            val ww = current ?: return
+            ww.main.post { ww.rootShown(!open) }
+        }
+
+        /**
          * THE close of a web window for a task (Tasks.remove: the switcher's swipe away, "Clear all", any task removal
          * PowOS makes): when task [taskId] is a web window's - on its display, or a full-screen app out of one - that
          * window is closed exactly as its bar's close does ([close] -> [drop]: its layers off at once in one transaction,
@@ -1425,6 +1448,52 @@ class WebWindows(
             Log.i(TAG, "task $taskId removed (switcher / Tasks.remove): it is web window $id - closing the window (the bar's close path)")
             ww.main.post { ww.close(id) }
             return true
+        }
+
+        /**
+         * Task [taskId]'s switcher card tapped: a web window's floating window comes back where it was - shown,
+         * on top, home on its page ("webwindows.show" to home's page) - never startActivityFromRecents (that would pull
+         * the task off its display). Its full-screen app: false, the caller opens it as any full-screen task. True: done.
+         */
+        fun openForTask(
+            context: Context,
+            taskId: Int,
+        ): Boolean {
+            val ww = current ?: return false
+            if (WebWindowDisplays.fullScreenWindow(taskId) != null) return false
+            val id = WebWindowDisplays.windowOf(context, taskId) ?: return false
+            Log.i(TAG, "task $taskId opened from the switcher: web window $id shown where it was, on its page")
+            ww.main.post { ww.emit("webwindows.show", id) }
+            return true
+        }
+
+        /** Task [taskId], a web window's full-screen app, back into its window (its card's "Back to window"). */
+        fun toWindowForTask(taskId: Int): Boolean {
+            val ww = current ?: return false
+            val id = WebWindowDisplays.fullScreenWindow(taskId) ?: return false
+            ww.main.post { ww.toWindow(id) }
+            return true
+        }
+
+        /**
+         * Task [taskId]'s picture for its switcher card when it's a web window on its display: takeTaskSnapshot now
+         * (the system never snapshots a task on a display that stays on), else its window's content captured from
+         * the mirror. JPEG, at most [width] px wide; null: not a web window, or no picture.
+         */
+        fun cardShot(
+            context: Context,
+            taskId: Int,
+            width: Int = 720,
+        ): ByteArray? {
+            val ww = current ?: return null
+            val id = WebWindowDisplays.windowOf(context, taskId) ?: return null
+            if (WebWindowDisplays.fullScreenWindow(taskId) != null) return null
+            dev.omalauncher.system.Tasks.capture(taskId)
+            dev.omalauncher.system.Tasks.snapshot(taskId, width)?.let { return it }
+            val shot = ww.contentShot(id) ?: return null.also { Log.w(TAG, "task $taskId (window $id): no picture for its card") }
+            val scaled = if (shot.width > width) android.graphics.Bitmap.createScaledBitmap(shot, width, shot.height * width / shot.width, true) else shot
+            Log.i(TAG, "task $taskId (window $id): card picture from its mirror (no task snapshot)")
+            return java.io.ByteArrayOutputStream().also { scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }.toByteArray()
         }
 
         /**

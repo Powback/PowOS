@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Binder
 import android.os.Build
 import android.os.Bundle
@@ -408,9 +409,16 @@ class RecentsTransition private constructor(
         val radius = Switcher.slotRadius * p
         runCatching {
             val t = SurfaceControl.Transaction()
-            for (app in apps) {
+            for ((i, app) in apps.withIndex()) {
                 if (!app.surface.isValid) continue
                 if (app.bounds.width() <= 0 || app.bounds.height() <= 0) continue
+                // A floating window: the window itself becomes the card (its content filling it), not the whole screen
+                // shrunk with the window a small rectangle in it (the user, 10-30: "they still show us like floating
+                // windows"). The top one goes to the card; any other floating window fades where it is.
+                if (floating(app)) {
+                    if (i == 0) floatingToCard(t, app, look, RectF(left, top, left + w, top + h)) else t.setAlpha(app.surface, look.alpha * (1f - p))
+                    continue
+                }
                 t.setScale(app.surface, scale, scale)
                 t.setPosition(app.surface, left + (app.bounds.left - screen.left) * scale, top + (app.bounds.top - screen.top) * scale)
                 t.setAlpha(app.surface, look.alpha)
@@ -418,6 +426,39 @@ class RecentsTransition private constructor(
             }
             t.apply()
         }.onFailure { Log.w(TAG, "can't move the app's window", it) }
+    }
+
+    /** [app] is a floating window (its bounds aren't the screen's). */
+    private fun floating(app: Leash): Boolean = app.bounds.width() < screen.width() - FLOAT_SLACK || app.bounds.height() < screen.height() - FLOAT_SLACK
+
+    /**
+     * Floating window [app] (the top one) at this frame: from its own bounds (progress 0) to [card] (the card's frame
+     * now), its content covering the card at one scale (cropped like the card's picture: centred, top kept), so on the
+     * card it looks like any full-screen app's card.
+     */
+    private fun floatingToCard(
+        t: SurfaceControl.Transaction,
+        app: Leash,
+        look: Look,
+        card: RectF,
+    ) {
+        val b = app.bounds
+        val p = look.progress
+        val radius = Switcher.slotRadius * p
+        val l = lerp(b.left.toFloat(), card.left, p)
+        val tp = lerp(b.top.toFloat(), card.top, p)
+        val rw = lerp(b.width().toFloat(), card.width(), p)
+        val rh = lerp(b.height().toFloat(), card.height(), p)
+        // One scale that covers the rect; the window's part shown: as wide/tall as the rect at that scale, centred, top.
+        val s = maxOf(rw / b.width(), rh / b.height())
+        val cw = (rw / s).coerceAtMost(b.width().toFloat())
+        val ch = (rh / s).coerceAtMost(b.height().toFloat())
+        val cx = (b.width() - cw) / 2f
+        t.setScale(app.surface, s, s)
+        t.setPosition(app.surface, l - cx * s, tp)
+        t.setAlpha(app.surface, look.alpha)
+        t.setCrop(app.surface, Rect(Math.round(cx), 0, Math.round(cx + cw), Math.round(ch)))
+        cornerRadius?.let { m -> runCatching { m.invoke(t, app.surface, radius / s) } }
     }
 
     /**
@@ -480,6 +521,9 @@ class RecentsTransition private constructor(
 
     companion object {
         private const val TAG = "PowosRecentsAnim"
+
+        /** Bounds this much (px) short of the screen still count as full screen (insets, rounding). */
+        private const val FLOAT_SLACK = 8
 
         /** The bundle key onInitialize keys WM Shell's IRecentTasks by: its descriptor. */
         const val RECENT_TASKS = "com.android.wm.shell.recents.IRecentTasks"
