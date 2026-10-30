@@ -267,7 +267,11 @@ public class S0 {
             });
             poke.setDaemon(true);
             if (pokeOn) poke.start();
-            log("am start: " + sh("am start --display " + idA + " -W -a android.intent.action.VIEW -d http://127.0.0.1:8765/ -f 0x18000000 com.android.chrome"));
+            // As a Custom Tab (the session extra marks it one; Chrome takes a session-less one): it lives in its own task,
+            // which goes with display A (DESTROY_CONTENT_ON_REMOVAL), and is never added to Chrome's tabs. A plain VIEW
+            // intent left the test page as a tab in the user's Chrome ("This site can't be reached", 2026-10-30).
+            // Unverified on the phone; check Chrome's tab list after a run.
+            log("am start: " + sh("am start --display " + idA + " -W -a android.intent.action.VIEW -d http://127.0.0.1:8765/ -f 0x18000000 --es android.support.customtabs.extra.SESSION s0 com.android.chrome"));
             Thread.sleep(1500);
             String where = sh("dumpsys activity activities | grep -E 'Display #|Hist.*com.android.chrome'");
             log("chrome placement: " + where.replace('\n', '|'));

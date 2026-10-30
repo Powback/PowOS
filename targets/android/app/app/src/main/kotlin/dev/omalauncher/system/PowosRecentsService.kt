@@ -106,6 +106,8 @@ class PowosRecentsService : Service() {
                     // PowOS's frames on the floating app windows (OxygenOS draws none).
                     if (frames == null) frames = runCatching { WindowFrames(this@PowosRecentsService).also { it.start() } }.onFailure { Log.w(TAG, "no window frames", it) }.getOrNull()
                     startGestures()
+                    // Web windows on: home back on display 0 if the restart left none (WebWindows.homeAfterRestart).
+                    dev.omalauncher.shell.WebWindows.homeAfterRestart(this@PowosRecentsService)
                     nav?.systemUi = sysui
                     edge?.systemUi = sysui
                     nav?.recentTasks = recentTasks
