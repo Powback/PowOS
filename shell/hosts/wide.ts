@@ -47,7 +47,20 @@ const measure = () => {
   const w = Math.round(Math.min(innerWidth, vv?.width || innerWidth));
   return { w, h: Math.round(innerHeight) };
 };
-const decide = ({ w, h }: { w: number; h: number }) => isHome && w >= WIDE && w >= h * TALL;
+/**
+ * The cover screen's short side is ~404 CSS px, the inner display's ~821 (698 at the panel's own density): turned
+ * sideways the cover is 899 px wide and passed the width test, so folded landscape laid out as desktop mode. The
+ * screen's short side does not change with rotation or a keyboard, so it tells the two screens apart in any orientation.
+ */
+const SHORT = 600;
+const shortSide = () => (typeof screen === "object" && screen.width > 0 ? Math.min(screen.width, screen.height) : Infinity);
+/**
+ * THE mode rule, for every page (home, the launcher, the shade's control center): the inner display is desktop mode in
+ * any orientation, the cover screen is mobile in any orientation (the user, 2026-10-30: the launcher and the control
+ * center in landscape). Pages read this, never innerWidth on their own.
+ */
+export const desktopScreen = ({ w, h }: { w: number; h: number } = measure()) => w >= WIDE && w >= h * TALL && shortSide() >= SHORT;
+const decide = (m: { w: number; h: number }) => isHome && desktopScreen(m);
 const isWide = () => decide(measure());
 /** The width the last decision was made at (a keyboard changes only the height). */
 let lastW = measure().w;

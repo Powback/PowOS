@@ -2549,6 +2549,18 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
    between the side insets up to 1600 px, centred, the grid's auto-fill adding columns of the phone's tile size, the
    A-Z bar at the panel's right edge. Folded keeps the 600 px column (.drawer). */
 .home.wide .drawer { max-width: 1600px; width: 100%; box-sizing: border-box; }
+/* ...with room around it (the user, 2026-10-30: "the launcher is very cramped in landscape mode"): the grid hugged the
+   screen's left edge (12 px), the A-Z bar sat against the dock column, and the auto-fill packed the phone's 76 px cells -
+   9 columns across, most names cut ("Clone Pho...", "Avahi SSH..."). Desktop mode, either orientation: a side margin, a
+   gutter before the A-Z bar and one before the dock, and columns as wide as an 11-character name in the label's own
+   font (12ch at the label's size, its 2 px padding each side) - fewer, roomier columns. */
+.home.wide .drawer { --wide-margin: 24px; --wide-gutter: 16px; padding: 0 var(--wide-margin); }
+.home.wide .drawer :is(.drawer-list, .drawer-recents) { padding-right: calc(var(--letter-bar) + var(--wide-gutter)); }
+.home.wide .drawer :is(.drawer-list .grid, .drawer-recents) {
+  font-size: var(--text-small);
+  grid-template-columns: repeat(auto-fill, minmax(max(var(--cell), calc(12ch + 4px)), 1fr));
+  column-gap: var(--gap);
+}
 /* The bar under it stays: no slide, no fade, still tappable (PowOS AI's wide panel still covers the foot). */
 .home.wide:not(.dock-left):not(.dock-right):not(:has(.ai-panel.wide)) > .dock { transform: none; opacity: 1; pointer-events: auto; }
 
@@ -2843,6 +2855,7 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
 /* The folders page waits a dock, an A-Z bar and a gutter beyond the apps page (drawer.tsx Pages steps by width + gap):
    with the drawer narrowed by the dock it sat right after the apps page's clip, under the side dock on the cover. */
 .home.pull-screen:is(.dock-left, .dock-right) .drawer-track { --page-gap: calc(var(--side-dock) + var(--letter-bar) + 4px + var(--edge)); }
+.home.wide.pull-screen:is(.dock-left, .dock-right) .drawer-track { --page-gap: calc(var(--side-dock) + var(--letter-bar) + 2 * var(--wide-margin)); }
 .home.pull-screen:is(.dock-left, .dock-right):has(> .dock) .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
 /* Unfolded, the launcher's recent apps (the dock's recent page) sit at the app grid's spacing, not a sixth of the width
    each: a couple more icons in the row, same icon size (the user, 2026-10-29: "the recent ones are too spread out"). */

@@ -30,6 +30,14 @@ const SIZES = {
   folded: { width: 404, height: 899, insets: { top: 45.6, bottom: 16.3 } },
   unfolded: { width: 821, height: 883, insets: { top: 45.6, bottom: 16.3 } },
 };
+/**
+ * The same two screens turned sideways (the user, 2026-10-30: "the launcher is very cramped in landscape mode"): the
+ * mode follows the screen, not its orientation - the inner display is desktop mode either way, the cover is mobile.
+ */
+const LAND_SIZES = {
+  "folded-land": { width: 899, height: 404, insets: { top: 0, bottom: 16.3 } },
+  "unfolded-land": { width: 883, height: 821, insets: { top: 45.6, bottom: 16.3 } },
+};
 /** The desktop's home (mode=desktop, powos-shell): the phone's own Plasma session's screen, and a laptop's. */
 const DESKTOP_SIZES = {
   plasma: { width: 558, height: 1198, insets: { top: 0, bottom: 0 } },
@@ -253,11 +261,14 @@ const SCENES = [
   // Home's dock on the right: the launcher shows it as that column (its recents too), the list clear of it.
   ["pull-apps-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
   ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
+  ["pull-apps-land", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred", undefined, LAND_SIZES],
+  ["pull-apps-right-land", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred", undefined, LAND_SIZES],
   ["assist", "assist", "await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp });", "app"],
   // Its field is the one pill: a long question wraps to three rows, then scrolls inside; dictation streams in, newest in view.
   ["assist-typing", "assist", "await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(1500); const f = document.querySelector('.assist-ask textarea'); if (f) { f.value = 'which of these three unread mails need an answer from me today, and draft a short reply to the one from the landlord about the heating'; f.dispatchEvent(new Event('input', { bubbles: true })); } await sleep(200);", "app"],
   ["assist-dictating", "assist", "await sleep(1500); E.emit('assist.reset', null); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); E.emit('assist.held', null); const B = (await U('./bridge.ts')).powos; await B.speech.cancel(); E.emit('speech.state', { listening: true, error: null, text: 'okay so look at this inbox and tell me which of these mails I actually have to answer today because I keep forgetting the one from the landlord about the heating and the plumber is coming on thursday' }); await sleep(250);", "app"],
   ["shade", "shade", "S.panel.value = 'notifications'; S.notif.value = true;", "blurred"],
+  ["shade-land", "shade", "S.panel.value = 'notifications'; S.notif.value = true;", "blurred", undefined, LAND_SIZES],
   ["shade-group-open", "shade", "S.panel.value = 'notifications'; S.notif.value = true; await sleep(300); [...document.querySelectorAll('.notif-stack .notif')].find((c) => c.textContent.includes('Gmail'))?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 50, clientY: 50 })); document.querySelectorAll('.notif-stack .notif')[0] && [...document.querySelectorAll('.notif-stack .notif')].find((c) => c.textContent.includes('Gmail'))?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 50, clientY: 50 }));", "blurred"],
   ["pull-3-start", "shade", "const now = Math.floor(Date.now() / 1000); E.emit('notifications.changed', { available: true, items: [['Signal', 'Mats', 'are we still on for tonight?', 120, true], ['Gmail', 'Your order has shipped', 'It arrives Thursday.', 3600], ['Calendar', 'Dentist', 'Tomorrow 09:30', 7200]].map(([app, title, text, ago, conversation], i) => ({ key: 'f' + i, app, icon: null, title, text, time: now - ago, clearable: true, profile: null, conversation: !!conversation })) }); await sleep(200); S.panel.value = 'notifications'; (await U('./ui/gesture.ts')).notifDrag.value = 0.25;", "blurred"],
   ["pull-3-half", "shade", "const now = Math.floor(Date.now() / 1000); E.emit('notifications.changed', { available: true, items: [['Signal', 'Mats', 'are we still on for tonight?', 120, true], ['Gmail', 'Your order has shipped', 'It arrives Thursday.', 3600], ['Calendar', 'Dentist', 'Tomorrow 09:30', 7200]].map(([app, title, text, ago, conversation], i) => ({ key: 'f' + i, app, icon: null, title, text, time: now - ago, clearable: true, profile: null, conversation: !!conversation })) }); await sleep(200); S.panel.value = 'notifications'; (await U('./ui/gesture.ts')).notifDrag.value = 0.5;", "blurred"],

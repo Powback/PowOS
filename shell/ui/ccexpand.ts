@@ -18,11 +18,33 @@
  * out once, each row played from where the finger left it (a FLIP).
  */
 import { signal } from "@preact/signals";
+import { desktopScreen } from "../hosts/wide.ts";
 
 /** Every category's members shown (only in the one panel, only while it's open). */
-/** Desktop mode (wide) opens expanded; the phone opens folded, its quick launchers still shown (the user, 2026-10-28). */
-export const expandedByDefault = () => typeof innerWidth === "number" && innerWidth >= 700;
+/**
+ * Desktop mode opens expanded; the phone opens folded, its quick launchers still shown (the user, 2026-10-28). The mode
+ * is home's one rule (hosts/wide.ts desktopScreen): the inner display in any orientation, never the cover's.
+ */
+export const expandedByDefault = () => desktopScreen();
 export const ccExpanded = signal(expandedByDefault());
+/**
+ * The mode changes under a live page (a fold, an unfold, a turn): the control center takes the new mode's state. It was
+ * decided once when the page loaded, so a shade loaded folded stayed folded on the inner display (the user, 2026-10-30:
+ * "the control center is not automatically extended in landscape mode").
+ */
+let lastDefault = ccExpanded.value;
+const follow = () => {
+  if (typeof document !== "undefined" && document.hidden) return;
+  const now = expandedByDefault();
+  if (now === lastDefault) return;
+  lastDefault = now;
+  ccExpanded.value = now;
+};
+if (typeof addEventListener === "function") {
+  addEventListener("resize", follow);
+  addEventListener("orientationchange", follow);
+  document.addEventListener("visibilitychange", follow);
+}
 /**
  * v3 pull under way: "open" (stacks are shown unfolded for the pull, their rest driven by the finger) or "fold" (the
  * open ones are driven back down). null at rest. notifications.tsx's Stack reads it and hands its elements to
