@@ -206,8 +206,9 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
         // the blur's relatedTarget says who took the focus.
         onFocus={(e: FocusEvent) => {
           console.info(`search focus drawer=${drawer.value}`);
-          // Home's pill types nowhere: the overlay's pill does (openHere, from the click).
-          if (launcherIsOverlay) return void (e.target as HTMLElement | null)?.blur();
+          // Home's pill types nowhere: the overlay's pill does (openHere, from the click). The desktop's own launcher
+          // (an APK without the overlay forward: state.ts openPanel) is open by the time its pill is focused.
+          if (launcherIsOverlay && drawer.value === 0) return void (e.target as HTMLElement | null)?.blur();
           takeOver();
           setFocused(true);
         }}
