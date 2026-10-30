@@ -81,29 +81,50 @@ internal class RestGlass(
         if (dead) return
         val id = ++seq
         worker.removeCallbacksAndMessages(null)
-        worker.post {
-            if (id != seq) return@post
-            val tiny = WallpaperBackdrop.still(display, size, TINY) ?: return@post
-            Thread.sleep(MOTION_MS)
-            if (id != seq) return@post
-            val again = WallpaperBackdrop.still(display, size, TINY) ?: return@post
-            if (!same(tiny, again)) {
-                // The wallpaper plays (a video one, after an unlock): live blur until it's still.
-                retry = (retry * 2).coerceIn(RETRY_MS, MAX_RETRY_MS)
-                Log.i(TAG, "the wallpaper moves: live glass, again in ${retry} ms")
-                worker.postDelayed({ if (id == seq) main.post { if (id == seq) render(display, size, shown, ready) } }, retry)
-                return@post
-            }
-            retry = 0
-            val hit = cache?.takeIf { cacheFor?.contentDeepEquals(shown) == true && cacheTiny?.let { same(it, again) } == true }
-            val pic = hit ?: probe(display, size, shown) ?: return@post
-            if (hit == null) {
-                cache = pic
-                cacheFor = shown
-                cacheTiny = again
-            }
-            main.post { if (id == seq) ready(pic) }
+        worker.post { if (id == seq) work(id, display, size, shown, ready) }
+    }
+
+    /** On the worker: [render]'s capture, the wallpaper's motion check first. */
+    private fun work(
+        id: Int,
+        display: Int,
+        size: Rect,
+        shown: Array<FloatArray>,
+        ready: (Bitmap) -> Unit,
+    ) {
+        val again = stillWallpaper(display, size, id)
+        if (again == null) {
+            // The wallpaper plays (a video one, after an unlock), or no capture now: live blur, asked again later.
+            retry = (retry * 2).coerceIn(RETRY_MS, MAX_RETRY_MS)
+            // Not for good (home gone, a wallpaper that never stops): the page asks again when it next settles.
+            if (retry >= MAX_RETRY_MS) return
+            worker.postDelayed({ if (id == seq) main.post { if (id == seq) render(display, size, shown, ready) } }, retry)
+            return
         }
+        retry = 0
+        val hit = cache?.takeIf { cacheFor?.contentDeepEquals(shown) == true && cacheTiny?.let { same(it, again) } == true }
+        val pic = hit ?: probe(display, size, shown) ?: return
+        if (hit == null) {
+            cache = pic
+            cacheFor = shown
+            cacheTiny = again
+        }
+        main.post { if (id == seq) ready(pic) }
+    }
+
+    /** The wallpaper small, if it's the same twice [MOTION_MS] apart (and this is still request [id]); else null. */
+    private fun stillWallpaper(
+        display: Int,
+        size: Rect,
+        id: Int,
+    ): Bitmap? {
+        val tiny = WallpaperBackdrop.still(display, size, TINY) ?: return null
+        Thread.sleep(MOTION_MS)
+        if (id != seq) return null
+        val again = WallpaperBackdrop.still(display, size, TINY) ?: return null
+        if (same(tiny, again)) return again
+        Log.i(TAG, "the wallpaper moves: the live glass stays for now")
+        return null
     }
 
     /** Whatever render is under way: its answer goes nowhere. */
@@ -229,12 +250,17 @@ internal class RestGlass(
             b: Bitmap,
         ): Boolean {
             if (a.width != b.width || a.height != b.height) return false
-            for (y in 0 until a.height) for (x in 0 until a.width) {
-                val p = a.getPixel(x, y)
-                val q = b.getPixel(x, y)
-                for (s in intArrayOf(0, 8, 16)) if (kotlin.math.abs((p shr s and 0xff) - (q shr s and 0xff)) > 3) return false
-            }
-            return true
+            val p = IntArray(a.width * a.height)
+            val q = IntArray(p.size)
+            a.getPixels(p, 0, a.width, 0, 0, a.width, a.height)
+            b.getPixels(q, 0, b.width, 0, 0, b.width, b.height)
+            return p.indices.all { i -> near(p[i], q[i]) }
         }
+
+        /** Each colour channel within a few levels (the capture's own dither). */
+        private fun near(
+            p: Int,
+            q: Int,
+        ) = intArrayOf(0, 8, 16).all { s -> kotlin.math.abs((p shr s and 0xff) - (q shr s and 0xff)) <= 3 }
     }
 }
