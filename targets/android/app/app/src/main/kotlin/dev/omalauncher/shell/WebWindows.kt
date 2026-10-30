@@ -41,16 +41,20 @@ import java.io.OutputStreamWriter
  *   tree showing the app's own buffers, so SurfaceFlinger composites the app at the element in the same frame the app
  *   commits (S0: the copy path is a frame later and applies night light twice).
  * - Surfaces: one container layer per window (powos-ww-<id>) under one "powos-webwindows" layer that is a child of
- *   home's own window surface (AttachedSurfaceControl.buildReparentTransaction) BELOW home's buffer (layer -1, as a
- *   SurfaceView): whatever the page paints over a window's body (the drawer, a panel, another window's title bar)
- *   covers it; the body itself is an unpainted hole. The container is cropped to the window's frame with its corner
- *   radius; the mirror sits in it at the body's offset, cropped to the body. Z-order = DOM order (setLayer); every
- *   window is under home's own pixels and so under every PowOS system UI window.
- * - Geometry: the page sends "w.f <frame> ..." over its native port every frame a window's rect, visibility or order
- *   changed; it goes on the draw that shows that page frame ([FrameSync], the glass's binding), so the content and
- *   the DOM chrome move in the same composited frame. A window off its page or out of sight: its layer hidden, never
+ *   home's own window surface (AttachedSurfaceControl.buildReparentTransaction) ABOVE home's buffer (layer 1): a window
+ *   is a card on home, nothing of home is cut or altered under it (the user, 2026-10-30: "nobody asked for the
+ *   cutoff"; windows "f*** up the transparency of the widgets"). Every other window (launcher overlay, shade, PowOS AI,
+ *   status bar, IME) is above home's whole layer tree, so above the web windows too. In the container: the native
+ *   frame ([WebWindowChrome]: background -1, title bar 1) and the mirror (0) under the bar. The container is cropped to
+ *   the frame and to the work area ("w.area": never over the dock and bar) with its corner radius; z-order = the
+ *   page's order (setLayer). The page's DOM for a window is invisible: its model, gesture exclusions and body touches.
+ * - Geometry: the page sends "w.f <frame> ..." over its native port every frame a window's rect, visibility, order or
+ *   scale changed; it goes on the draw that shows that page frame ([FrameSync], the glass's binding), so a page swipe
+ *   moves the windows with their page. A window off its page, minimised or out of sight: its layer hidden, never
  *   its display's surface (that would STOP the app within ~40 ms, S0). A new body size resizes the display
  *   (VirtualDisplay.resize in the helper): the app lays out at its real pixel size.
+ * - The frame's touches (bar, edges, buttons, two fingers) are the host's from their first event ([onTouch]): moves,
+ *   resizes and zooms follow the finger every input frame, one transaction each, as Android's freeform drag.
  * - Mirrored and launched only once WM knows the display (mirrorDisplay says false for its first ~100 ms).
  * - Closed: the display's tasks removed (DESTROY_CONTENT_ON_REMOVAL alone leaves the task in recents), then the display.
  *
@@ -71,8 +75,6 @@ class WebWindows(
     private val context: Context,
     private val web: WebView,
     private val emit: (String, Any?) -> Unit,
-    /** The shown bodies changed ([bodies]): the glass's blur regions leave them out (they'd blur over the app). */
-    private val bodiesChanged: () -> Unit = {},
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val dm = context.getSystemService(DisplayManager::class.java)
@@ -101,6 +103,8 @@ class WebWindows(
 
     init {
         runCatching { dm.registerDisplayListener(displayListener, main) }
+        // Every touch on home first (Z2): a title-bar move the page handed over is the host's from then on.
+        (web as? HomeWebView)?.touchHook = ::onTouch
     }
 
     private fun density() = context.resources.displayMetrics.density
@@ -123,6 +127,12 @@ class WebWindows(
         var geo: Geo? = null
         var downAt = 0L
 
+        /** Its native frame and title bar ([WebWindowChrome]). */
+        var chrome: WebWindowChrome? = null
+
+        /** In the page's last "w.f" and visible (main thread): only those take touches ([hit]). */
+        var shown = false
+
         @Volatile var closed = false
     }
 
@@ -134,7 +144,13 @@ class WebWindows(
         val radius: Float,
         val visible: Boolean,
         val z: Int,
-    )
+    ) {
+        /** Two fingers zoomed it (its layer's matrix; the app keeps its resolution). */
+        var scale = 1f
+
+        /** Filling the work area (the bar shows restore). */
+        var maximised = false
+    }
 
     /** The layer all windows hang under: home's window surface, under its own buffer. Made on first use (main thread). */
     private var root: SurfaceControl? = null
@@ -144,8 +160,10 @@ class WebWindows(
         val attached = web.rootSurfaceControl ?: return null.also { Log.w(TAG, "home's window has no surface yet") }
         val sc = SurfaceControl.Builder().setName("powos-webwindows").build()
         val t = attached.buildReparentTransaction(sc) ?: return null.also { sc.release(); Log.w(TAG, "home's surface refused a child") }
-        // Below home's own buffer, as a SurfaceView (-1: its media overlay level; the page's surface tiles are -2).
-        t.setLayer(sc, -1).setVisibility(sc, true).apply()
+        // ABOVE home's own buffer (the user, 2026-10-30: "nobody asked for the cutoff"): a window is a card on home,
+        // the widgets under it untouched. Still a child of home's surface, so every other window (the launcher overlay,
+        // the shade, PowOS AI, the status bar, the IME) stays above it.
+        t.setLayer(sc, 1).setVisibility(sc, true).apply()
         root = sc
         watchSurface()
         return sc
@@ -165,6 +183,7 @@ class WebWindows(
         // Hidden until the page's first "w.f" places it.
         val container = SurfaceControl.Builder().setName("powos-ww-$id").setParent(parent).setHidden(true).build()
         val win = Win(id, component, container, w, h)
+        win.chrome = chromeFor(component, container)
         wins[id] = win
         helper.create(id, w, h) { displayId, error ->
             if (displayId < 0) {
@@ -252,7 +271,7 @@ class WebWindows(
     fun frameCommand(rest: String) {
         val (frame, geos) = parse(rest) ?: return
         val cookie = sync.receive(frame)
-        main.post { sync.bind(frame, cookie) { apply(geos) } }
+        main.post { sync.bind(frame, cookie) { apply(frame, geos) } }
     }
 
     private fun parse(rest: String): Pair<Long, List<Geo>>? =
@@ -260,6 +279,7 @@ class WebWindows(
             val t = rest.trim().split(' ')
             val frame = t[0].toLong()
             val dpr = t[1].toFloat()
+            lastDpr = dpr
             val n = t[2].toInt()
             var i = 3
             // The WebView's place in its window (none for home: full screen): geometry is in the window surface's space.
@@ -280,7 +300,12 @@ class WebWindows(
                     val body = Rect(bx, by, bx + px(t[i++], 0), by + px(t[i++], 0))
                     val radius = t[i++].toFloat() * dpr
                     val visible = t[i++] == "1"
-                    Geo(id, frameRect, body, radius, visible, z)
+                    val scale = t.getOrNull(i++)?.toFloatOrNull() ?: 1f
+                    val maximised = t.getOrNull(i++) == "1"
+                    Geo(id, frameRect, body, radius, visible, z).also {
+                        it.scale = scale.coerceIn(MIN_SCALE, 1f)
+                        it.maximised = maximised
+                    }
                 }
         } catch (e: RuntimeException) {
             Log.w(TAG, "w.f: bad geometry ($e)")
@@ -288,21 +313,12 @@ class WebWindows(
         }
 
     /** On the main thread, on the draw that shows the page frame the geometry was measured on. */
-    private fun apply(geos: List<Geo>) {
+    private fun apply(
+        frame: Long,
+        geos: List<Geo>,
+    ) {
         val t = SurfaceControl.Transaction()
-        val shown = HashSet<Int>()
-        for (g in geos) {
-            val win = wins[g.id] ?: continue
-            shown += g.id
-            win.geo = g
-            place(t, win, g)
-        }
-        for (win in wins.values) if (win.id !in shown && win.container.isValid) t.setVisibility(win.container, false)
-        val now = geos.filter { it.visible && wins[it.id]?.mirror != null }.map { android.graphics.RectF(it.body) }
-        if (now != shownBodies) {
-            shownBodies = now
-            bodiesChanged()
-        }
+        placeAll(t, geos)
         val attached = web.rootSurfaceControl
         if (attached == null) {
             t.apply()
@@ -310,23 +326,52 @@ class WebWindows(
             attached.applyTransactionOnDraw(t)
             web.invalidate()
         }
-        logFrame(geos)
+        logFrame(frame, geos)
     }
 
-    /** At most one line a second (a drag sends one a frame). */
-    private fun logFrame(geos: List<Geo>) {
+    /** Every window in [geos] placed into [t]; one the page left out hidden. */
+    private fun placeAll(
+        t: SurfaceControl.Transaction,
+        geos: List<Geo>,
+    ) {
+        val shown = HashSet<Int>()
+        for (g in geos) {
+            val win = wins[g.id] ?: continue
+            shown += g.id
+            win.shown = g.visible
+            // Moved by the finger (Z2): the layer stays where the gesture left it until the page has taken that place.
+            if (held(win, g)) continue
+            win.geo = g
+            place(t, win, g)
+        }
+        for (win in wins.values) {
+            if (win.id in shown || !win.container.isValid) continue
+            win.shown = false
+            t.setVisibility(win.container, false)
+        }
+    }
+
+    /**
+     * At most one line a second (a page-driven move sends one a frame). "behind": how many newer page frames had already
+     * arrived when this one was bound to a draw - the page's DOM on that draw is at least that many frames newer than
+     * the geometry, so the content trails the DOM chrome by that much (docs/WEB_WINDOWS.md "Measured lag").
+     */
+    private fun logFrame(
+        frame: Long,
+        geos: List<Geo>,
+    ) {
+        val behind = sync.received - frame
+        if (behind > 0) behindFrames++
+        appliedFrames++
         val now = SystemClock.uptimeMillis()
         if (now - lastPlaceLog < PLACE_LOG_MS || geos.isEmpty()) return
         lastPlaceLog = now
-        Log.i(TAG, "w.f: " + geos.joinToString { "${it.id}@${it.body.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
+        Log.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) " + geos.joinToString { "${it.id}@${it.body.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
     }
 
     private var lastPlaceLog = 0L
-
-    /** The bodies shown now, window px (main thread writes; the glass reads on the main thread). */
-    @Volatile private var shownBodies: List<android.graphics.RectF> = emptyList()
-
-    fun bodies(): List<android.graphics.RectF> = shownBodies
+    private var behindFrames = 0
+    private var appliedFrames = 0
 
     /** [g] into [t]: the container at the frame (cropped, rounded, ordered, shown), the mirror at the body. */
     private fun place(
@@ -336,16 +381,11 @@ class WebWindows(
     ) {
         val c = win.container
         if (!c.isValid) return
-        t.setPosition(c, g.frame.left.toFloat(), g.frame.top.toFloat())
-        t.setCrop(c, Rect(0, 0, g.frame.width(), g.frame.height()))
+        frameAt(t, win, g)
         cornerRadius(t, c, g.radius)
         t.setLayer(c, g.z)
         // Hidden is the layer, never the display's surface (a null surface stops the app).
         t.setVisibility(c, g.visible && win.mirror != null)
-        win.mirror?.takeIf { it.isValid }?.let { m ->
-            t.setPosition(m, (g.body.left - g.frame.left).toFloat(), (g.body.top - g.frame.top).toFloat())
-            t.setCrop(m, Rect(0, 0, g.body.width(), g.body.height()))
-        }
         val bw = g.body.width().coerceAtLeast(1)
         val bh = g.body.height().coerceAtLeast(1)
         if (win.displayId >= 0 && (bw != win.w || bh != win.h)) {
@@ -354,6 +394,36 @@ class WebWindows(
             // The app lays out at the body's real size; the crop already follows the DOM (its last frame shows anchored
             // top-left until it draws at the new size).
             helper.resize(win.displayId, bw, bh, dpi)
+        }
+    }
+
+    /**
+     * The window's layers for [g]'s frame (place, unscaled size) zoomed by its scale, into [t]: the container there (its
+     * scale, cropped to the frame and to the work area - never over the dock), the native frame laid out, the mirror
+     * under the bar cropped to the body. Shared by the page's geometry and the finger's moves.
+     */
+    private fun frameAt(
+        t: SurfaceControl.Transaction,
+        win: Win,
+        g: Geo,
+    ) {
+        val x = g.frame.left.toFloat()
+        val y = g.frame.top.toFloat()
+        val w = g.frame.width()
+        val h = g.frame.height()
+        val scale = g.scale
+        val maximised = g.maximised
+        val c = win.container
+        t.setPosition(c, x, y)
+        t.setScale(c, scale, scale)
+        // The work area's bottom in the window's own (unscaled) space: the dock strip stays home's.
+        val bottom = ((area.bottom - y) / scale).toInt().coerceIn(0, h)
+        t.setCrop(c, Rect(0, 0, w, bottom))
+        val chrome = win.chrome ?: return
+        chrome.layout(t, w, h, maximised, theme)
+        win.mirror?.takeIf { it.isValid }?.let { m ->
+            t.setPosition(m, 0f, chrome.title.toFloat())
+            t.setCrop(m, Rect(0, 0, w, (h - chrome.title).coerceAtLeast(1)))
         }
     }
 
@@ -466,6 +536,369 @@ class WebWindows(
         }
     }
 
+    // ---- the native frame's touches: move, resize, zoom, its buttons (Z2) --------------------------------------------
+
+    /**
+     * Touches on a window's native bar, edges and frame are the host's, from the first one (docs/WEB_WINDOWS.md
+     * "Native frame and move"). The window is above home, so home's own hit test has the same answer: nothing of home is
+     * over it. The body's touches stay the page's (it forwards them to the app, v0) - an app's own pinch is the app's.
+     *
+     * Why: the user, 2026-10-30, "its like its content is lagging behind slightly even when I move windows, compared to
+     * the native android floating windows". A page-driven move binds the geometry to the first draw whose page state is
+     * AT LEAST that frame's; with the finger moving, the page is a frame or more further by then ([logFrame]'s
+     * "behind"). Here each batched MOVE (Choreographer delivers one per vsync) moves the window's layer in one
+     * transaction applied at once, as WMShell's DragPositioningCallback does, and the bar is a layer of the window:
+     * the bar and the content are one unit, they can't be a frame apart.
+     *
+     * - Bar: one finger moves, two fingers move by their centroid and zoom by their distance ("if I touch the titlebar
+     *   with two fingers it jumps between the finger positions instead of allowing me to scale down the window"), a
+     *   finger coming or going rebases, never jumps. Scale [MIN_SCALE]..1, the window's layer matrix: content and frame
+     *   together, the app's resolution unchanged; the page maps body touches through it.
+     * - Edges and corners ([EDGE_OUT_DP] outside, [EDGE_IN_DP] inside): resize. The frame and the crop follow the finger
+     *   every frame (the app's last frame anchored top-left on the frame's background); the app's display is resized
+     *   once, when the page takes the new size ("w.f" -> [place] -> the helper's VirtualDisplay.resize).
+     * - Buttons: minimise (hidden at once, the page keeps it in the dock), full screen/restore and close; a double tap
+     *   on the bar is full screen/restore.
+     * - Up: "webwindows.moved {id, dx, dy, dw, dh, scale}" (CSS px); the layer stays put until a "w.f" has that place
+     *   ([held]).
+     * Moves and resizes are clamped to the work area ("w.area": above the dock and bar, which windows never cover).
+     */
+    private class Drag(
+        val win: Win,
+        /** [EDGE_L]|[EDGE_T]|[EDGE_R]|[EDGE_B]: a resize from those edges; 0: a move (and zoom). */
+        val edges: Int,
+        /** Its frame when the gesture began: place (window px) and unscaled size. */
+        val start: Rect,
+        val startScale: Float,
+        val maximised: Boolean,
+        val downAt: Long,
+    ) {
+        /** Where the gesture has it now. */
+        val frame = Rect(start)
+        var scale = startScale
+
+        /** The fingers' centroid and spread, and the frame then, at the gesture's start or the last finger change. */
+        var c0x = 0f
+        var c0y = 0f
+        var spread0 = 0f
+        var o0x = 0f
+        var o0y = 0f
+        var s0 = 1f
+        var downX = 0f
+        var downY = 0f
+        var moved = false
+        var moves = 0
+        var ended = false
+        var endedAt = 0L
+    }
+
+    private var drag: Drag? = null
+
+    /** A press on a bar button: its window and control, run if the finger lifts on it. */
+    private var pressed: Pair<Win, String>? = null
+    private var lastTap: Pair<Int, Long>? = null
+
+    @Volatile private var lastDpr = 1f
+    private val slop by lazy { android.view.ViewConfiguration.get(context).scaledTouchSlop }
+
+    /** Where windows may be, window px ("w.area"): above home's dock and bar. */
+    private var area = Rect(0, 0, Int.MAX_VALUE / 4, Int.MAX_VALUE / 4)
+    private var theme = WebWindowChrome.Theme.DEFAULT
+
+    /** "w.area <dpr> <l> <t> <r> <b>" (viewport CSS px), the port's thread. */
+    fun areaCommand(rest: String) {
+        val n = rest.trim().split(' ').mapNotNull { it.toFloatOrNull() }
+        if (n.size < 5) return
+        val at = IntArray(2).also(web::getLocationInWindow)
+        val r = Rect(Math.round(n[1] * n[0]) + at[0], Math.round(n[2] * n[0]) + at[1], Math.round(n[3] * n[0]) + at[0], Math.round(n[4] * n[0]) + at[1])
+        main.post { area = r }
+    }
+
+    /** "w.theme <bg r g b a> <fg r g b a>": the bars in the page's colours (redrawn on their next placing). */
+    fun themeCommand(rest: String) {
+        val th = WebWindowChrome.Theme.parse(rest) ?: return
+        main.post {
+            theme = th
+            val t = SurfaceControl.Transaction()
+            for (w in wins.values) w.geo?.let { g -> if (w.container.isValid) place(t, w, g) }
+            t.apply()
+        }
+    }
+
+    private fun chromeFor(
+        component: ComponentName,
+        container: SurfaceControl,
+    ): WebWindowChrome {
+        val pm = context.packageManager
+        val info = runCatching { pm.getActivityInfo(component, 0) }.getOrNull()
+        val label = info?.loadLabel(pm)?.toString() ?: component.packageName
+        val icon = runCatching { info?.loadIcon(pm) }.getOrNull()
+        return WebWindowChrome(context, container, label, icon)
+    }
+
+    /** The fingers now: centroid (window px, without one lifting) and spread (mean distance to it). */
+    private data class Fingers(
+        val x: Float,
+        val y: Float,
+        val spread: Float,
+        val n: Int,
+    )
+
+    private fun fingers(ev: MotionEvent): Fingers {
+        val at = IntArray(2).also(web::getLocationInWindow)
+        val lifting = if (ev.actionMasked == MotionEvent.ACTION_POINTER_UP) ev.actionIndex else -1
+        val idx = (0 until ev.pointerCount).filter { it != lifting }.ifEmpty { listOf(0) }
+        val x = idx.sumOf { ev.getX(it).toDouble() }.toFloat() / idx.size
+        val y = idx.sumOf { ev.getY(it).toDouble() }.toFloat() / idx.size
+        val spread = idx.sumOf { Math.hypot((ev.getX(it) - x).toDouble(), (ev.getY(it) - y).toDouble()) }.toFloat() / idx.size
+        return Fingers(x + at[0], y + at[1], spread, idx.size)
+    }
+
+    /** Every touch on home, first ([HomeWebView.touchHook], main thread): true = the frame's, the page doesn't get it. */
+    private fun onTouch(ev: MotionEvent): Boolean {
+        val f = fingers(ev)
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) return down(f)
+        pressed?.let { p -> return pressUp(p, ev, f) }
+        val d = drag?.takeIf { !it.ended } ?: return false
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP -> rebase(d, f)
+            MotionEvent.ACTION_MOVE -> follow(d, f)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> endDrag(d, ev.actionMasked == MotionEvent.ACTION_CANCEL)
+        }
+        return true
+    }
+
+    /** A finger down: on a window's bar, button or edge = the host's gesture; on a body or off every window = the page's. */
+    private fun down(f: Fingers): Boolean {
+        pressed = null
+        if (drag?.ended == false) drag = null
+        val (win, part) = hit(f.x, f.y) ?: return false
+        val g = win.geo ?: return false
+        emit("webwindows.raise", win.id)
+        if (win.container.isValid) SurfaceControl.Transaction().setLayer(win.container, wins.size + 1).apply()
+        if (part.startsWith("button:")) {
+            pressed = win to part.removePrefix("button:")
+            return true
+        }
+        val edges = if (part == "bar") 0 else part.toInt()
+        val d = Drag(win, edges, Rect(g.frame), g.scale, g.maximised, SystemClock.uptimeMillis())
+        d.downX = f.x
+        d.downY = f.y
+        rebase(d, f)
+        drag = d
+        return true
+    }
+
+    /** The topmost shown window at ([x], [y]) and what of it: "bar", "button:<control>", an edge mask, or null (its body). */
+    private fun hit(
+        x: Float,
+        y: Float,
+    ): Pair<Win, String>? {
+        if (y >= area.bottom) return null
+        for (win in wins.values.filter { it.shown && it.mirror != null }.sortedByDescending { it.geo?.z ?: -1 }) {
+            val part = partAt(win, x, y) ?: continue
+            return if (part.isEmpty()) null else win to part
+        }
+        return null
+    }
+
+    /** What of [win] is at ([x], [y]): "bar", "button:<control>", an edge mask, "" (its body), or null (not on it). */
+    private fun partAt(
+        win: Win,
+        x: Float,
+        y: Float,
+    ): String? {
+        val g = win.geo ?: return null
+        val chrome = win.chrome ?: return null
+        val s = g.scale
+        // Window-local, unscaled; its size as shown (cut at the work area's bottom).
+        val p = android.graphics.PointF((x - g.frame.left) / s, (y - g.frame.top) / s)
+        val size = android.graphics.PointF(g.frame.width().toFloat(), minOf(g.frame.height().toFloat(), (area.bottom - g.frame.top) / s))
+        val out = EDGE_OUT_DP * density() / s
+        if (!android.graphics.RectF(-out, -out, size.x + out, size.y + out).contains(p.x, p.y)) return null
+        if (p.y in 0f..chrome.title.toFloat() && p.x in 0f..size.x) return chrome.control(p.x, size.x.toInt())?.let { "button:$it" } ?: "bar"
+        val edges = edgesAt(p, size, EDGE_IN_DP * density() / s)
+        return if (edges != 0) edges.toString() else ""
+    }
+
+    /** Which edges window-local [p] is on, in a window of [size] ([inner]: how far inside counts; above it is the top). */
+    private fun edgesAt(
+        p: android.graphics.PointF,
+        size: android.graphics.PointF,
+        inner: Float,
+    ): Int {
+        var e = 0
+        if (p.x < inner) e = e or EDGE_L
+        if (p.x > size.x - inner) e = e or EDGE_R
+        if (p.y > size.y - inner) e = e or EDGE_B
+        if (p.y < 0) e = e or EDGE_T
+        return e
+    }
+
+    /** A bar button's press: it runs when the finger lifts on the same button. */
+    private fun pressUp(
+        p: Pair<Win, String>,
+        ev: MotionEvent,
+        f: Fingers,
+    ): Boolean {
+        val a = ev.actionMasked
+        if (a != MotionEvent.ACTION_UP && a != MotionEvent.ACTION_CANCEL) return true
+        pressed = null
+        val (win, control) = p
+        if (a == MotionEvent.ACTION_CANCEL || hit(f.x, f.y)?.let { it.first === win && it.second == "button:$control" } != true) return true
+        control(win, control)
+        return true
+    }
+
+    private fun control(
+        win: Win,
+        control: String,
+    ) {
+        Log.i(TAG, "window ${win.id}: $control (its bar)")
+        when (control) {
+            "close" -> close(win.id)
+            "minimise" -> {
+                // At once (the page drops it from its geometry a frame later): the app keeps running.
+                if (win.container.isValid) SurfaceControl.Transaction().setVisibility(win.container, false).apply()
+                win.shown = false
+                emit("webwindows.control", mapOf("id" to win.id, "action" to "minimise"))
+            }
+            else -> emit("webwindows.control", mapOf("id" to win.id, "action" to "maximise"))
+        }
+    }
+
+    /** A finger came or went (or the gesture began): the gesture goes on from here, the window doesn't jump. */
+    private fun rebase(
+        d: Drag,
+        f: Fingers,
+    ) {
+        d.c0x = f.x
+        d.c0y = f.y
+        d.spread0 = if (f.n >= 2) f.spread else 0f
+        d.o0x = d.frame.left.toFloat()
+        d.o0y = d.frame.top.toFloat()
+        d.s0 = d.scale
+    }
+
+    /** One batched MOVE (one per vsync): the window where the fingers have it, one transaction, applied now. */
+    private fun follow(
+        d: Drag,
+        f: Fingers,
+    ) {
+        if (!d.moved) {
+            d.moved = Math.hypot((f.x - d.downX).toDouble(), (f.y - d.downY).toDouble()) > slop || (d.spread0 > 0 && Math.abs(f.spread - d.spread0) > slop)
+            if (!d.moved) return
+        }
+        if (d.edges == 0) moveTo(d, f) else resizeTo(d, f)
+        d.moves++
+        val t = SurfaceControl.Transaction()
+        val live = Geo(d.win.id, Rect(d.frame), Rect(d.frame), 0f, true, 0).also {
+            it.scale = d.scale
+            it.maximised = d.maximised
+        }
+        if (d.win.container.isValid) frameAt(t, d.win, live)
+        t.apply()
+    }
+
+    /** Move and zoom: the window point under the centroid at the rebase stays under it, at the fingers' scale. */
+    private fun moveTo(
+        d: Drag,
+        f: Fingers,
+    ) {
+        d.scale = if (d.spread0 > 0 && f.n >= 2) (d.s0 * f.spread / d.spread0).coerceIn(MIN_SCALE, 1f) else d.s0
+        val px = (d.c0x - d.o0x) / d.s0
+        val py = (d.c0y - d.o0y) / d.s0
+        val w = d.frame.width() * d.scale
+        val keep = KEEP_DP * density()
+        val bar = (d.win.chrome?.title ?: 0) * d.scale
+        val x = (f.x - px * d.scale).coerceIn(area.left - w + keep, area.right - keep)
+        val y = (f.y - py * d.scale).coerceIn(area.top.toFloat(), (area.bottom - bar).coerceAtLeast(area.top.toFloat()))
+        d.frame.offsetTo(Math.round(x), Math.round(y))
+    }
+
+    /** Resize from the gesture's edges: the opposite edges stay, the frame follows the finger, inside the work area. */
+    private fun resizeTo(
+        d: Drag,
+        f: Fingers,
+    ) {
+        val s = d.scale
+        val st = d.start
+        val minW = MIN_W_DP * density() * s
+        val minH = MIN_H_DP * density() * s
+        // Screen px: the start's edges, the dragged ones moved by the finger.
+        var l = st.left.toFloat()
+        var t = st.top.toFloat()
+        var r = l + st.width() * s
+        var b = t + st.height() * s
+        val dx = f.x - d.downX
+        val dy = f.y - d.downY
+        if (d.edges and EDGE_L != 0) l = (l + dx).coerceIn(area.left.toFloat(), r - minW)
+        if (d.edges and EDGE_R != 0) r = (r + dx).coerceIn(l + minW, area.right.toFloat())
+        if (d.edges and EDGE_T != 0) t = (t + dy).coerceIn(area.top.toFloat(), b - minH)
+        if (d.edges and EDGE_B != 0) b = (b + dy).coerceIn(t + minH, area.bottom.toFloat())
+        val left = Math.round(l)
+        val top = Math.round(t)
+        d.frame.set(left, top, left + Math.round((r - l) / s), top + Math.round((b - t) / s))
+    }
+
+    private fun endDrag(
+        d: Drag,
+        cancelled: Boolean,
+    ) {
+        d.ended = true
+        d.endedAt = SystemClock.uptimeMillis()
+        val ms = d.endedAt - d.downAt
+        val dpr = lastDpr
+        val win = d.win
+        val tap = !d.moved && !cancelled && ms < TAP_MS
+        Log.i(TAG, "native ${if (d.edges == 0) "move" else "resize"} w${win.id}: ${d.moves} layer moves in $ms ms (one per input frame), frame ${d.start.toShortString()} -> ${d.frame.toShortString()} x${"%.2f".format(d.scale)}${if (tap) ", a tap" else ""}")
+        if (tap && d.edges == 0) tapped(win, d.endedAt)
+        if (!d.moved) {
+            drag = null
+            return
+        }
+        emit(
+            "webwindows.moved",
+            mapOf(
+                "id" to win.id,
+                "dx" to (d.frame.left - d.start.left) / dpr,
+                "dy" to (d.frame.top - d.start.top) / dpr,
+                "dw" to (d.frame.width() - d.start.width()) / dpr,
+                "dh" to (d.frame.height() - d.start.height()) / dpr,
+                "scale" to d.scale,
+            ),
+        )
+    }
+
+    /** A tap on [win]'s bar at [at]: the second one soon after on the same bar is full screen / restore. */
+    private fun tapped(
+        win: Win,
+        at: Long,
+    ) {
+        val last = lastTap
+        lastTap = win.id to at
+        if (last == null || last.first != win.id || at - last.second >= DOUBLE_TAP_MS) return
+        lastTap = null
+        control(win, "maximise")
+    }
+
+    /**
+     * In [placeAll]: true = the finger's gesture owns [win]'s layer this frame (not placed from [g]). After the up, the
+     * page's frames still show the old place until it took the new one: held until a frame has it (2 px), or a second.
+     */
+    private fun held(
+        win: Win,
+        g: Geo,
+    ): Boolean {
+        val d = drag?.takeIf { it.win === win } ?: return false
+        if (!d.ended) return true
+        val close = { a: Int, b: Int -> Math.abs(a - b) <= 2 }
+        val there = close(g.frame.left, d.frame.left) && close(g.frame.top, d.frame.top) && close(g.frame.width(), d.frame.width()) && close(g.frame.height(), d.frame.height())
+        if (!there && SystemClock.uptimeMillis() - d.endedAt < HOLD_MS) return true
+        drag = null
+        return false
+    }
+
     // ---- input (v0, until S4) ------------------------------------------------------------------------------------------
 
     /** A touch on the element's body (CSS px from its top-left): injected on its display. */
@@ -506,6 +939,8 @@ class WebWindows(
     }
 
     fun closeAll() {
+        drag = null
+        (web as? HomeWebView)?.touchHook = null
         wins.values.toList().forEach { drop(it) }
         runCatching { dm.unregisterDisplayListener(displayListener) }
         helper.stop()
@@ -524,9 +959,12 @@ class WebWindows(
         if (wins.remove(w.id) == null) return
         w.closed = true
         val t = SurfaceControl.Transaction()
+        if (drag?.win === w) drag = null
         w.mirror?.let { if (it.isValid) t.reparent(it, null) }
+        w.chrome?.release(t)
         if (w.container.isValid) t.reparent(w.container, null)
         t.apply()
+        w.chrome?.releaseNow()
         w.mirror?.release()
         w.container.release()
         val displayId = w.displayId
@@ -791,6 +1229,26 @@ class WebWindows(
         /** Web windows on: Android apps opened from the wide home are web windows (only those stand the old path down: WebWindowDisplays). */
         fun on(context: Context): Boolean = runCatching { Settings.Global.getInt(context.contentResolver, SETTING, 0) == 1 }.getOrDefault(false)
         private const val PLACE_LOG_MS = 1000L
+        /** A press on the bar that didn't move and lifted within this: a tap (two make a double tap: maximise). */
+        private const val TAP_MS = 300L
+        private const val DOUBLE_TAP_MS = 350L
+
+        /** After the finger's up, how long the layer waits for the page to take the place (then the page's wins). */
+        private const val HOLD_MS = 1000L
+        private const val MIN_SCALE = 0.4f
+
+        /** Resize grabs: outside the frame and inside its edges (the bar's top edge is its move). */
+        private const val EDGE_OUT_DP = 20f
+        private const val EDGE_IN_DP = 12f
+        private const val MIN_W_DP = 220f
+        private const val MIN_H_DP = 160f
+
+        /** How much of a window's width stays on screen when it's moved sideways off it. */
+        private const val KEEP_DP = 64f
+        private const val EDGE_L = 1
+        private const val EDGE_T = 2
+        private const val EDGE_R = 4
+        private const val EDGE_B = 8
         private const val MIRROR_WAIT_MS = 2000L
         private const val IME_POLICY_FALLBACK_DISPLAY = 1
         private val ACTIONS = mapOf("down" to MotionEvent.ACTION_DOWN, "move" to MotionEvent.ACTION_MOVE, "up" to MotionEvent.ACTION_UP)

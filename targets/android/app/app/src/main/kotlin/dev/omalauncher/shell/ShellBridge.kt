@@ -67,18 +67,22 @@ class ShellBridge(
     private val terminals = ShellTerminals(runtime, scope, ::emit)
     private val media = ShellMedia(context, runtime, scope, ::emit)
     /** Android apps as home elements (off unless Settings.Global powos_web_windows = 1; home's activity only). */
-    private val webWindows by lazy { WebWindows(context, web, ::emit) { webWindowBodiesChanged() } }
+    private val webWindows by lazy { WebWindows(context, web, ::emit) }
 
-    /** The web windows' bodies moved, came or went (ShellHost: the glass leaves them out). */
-    @Volatile var webWindowBodiesChanged: () -> Unit = {}
-
-    /** The web windows' shown bodies, window px (empty until a window opened). */
-    fun webWindowBodies(): List<android.graphics.RectF> = if (webWindowsMade) webWindows.bodies() else emptyList()
     @Volatile private var webWindowsMade = false
 
     /** The page's web-window geometry, "w.f ..." over its native port ([ShellNative], port thread): [WebWindows.frameCommand]. */
     fun webWindowFrame(rest: String) {
         if (webWindowsMade) webWindows.frameCommand(rest)
+    }
+
+    /** "w.area" / "w.theme" over the port: the windows' work area and bar colours. */
+    fun webWindowCommand(
+        verb: String,
+        rest: String,
+    ) {
+        if (!webWindowsMade) return
+        if (verb == "w.area") webWindows.areaCommand(rest) else webWindows.themeCommand(rest)
     }
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
     private val speech = Speech(context.applicationContext).also { it.warm() }

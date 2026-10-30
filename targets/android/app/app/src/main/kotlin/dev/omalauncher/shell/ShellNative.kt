@@ -45,6 +45,8 @@ import android.widget.FrameLayout
  *   b.liquid <dpr> <band> <refraction> <rim> <dispersion>   liquid glass's look (theme.css --liquid-*): [LiquidGlass]
  *   w.f <id> <dpr> <n> <window...>     web windows' frames and bodies, measured on the page's frame <id>: their layers
  *                                      placed on the draw that shows it, as "b.f" ([WebWindows.frameCommand])
+ *   w.area <dpr> <l> <t> <r> <b>       where web windows may be (above the dock and bar) ([WebWindows.areaCommand])
+ *   w.theme <bg rgba> <fg rgba>        the web windows' native bars in the page's colours ([WebWindows.themeCommand])
  *
  * Why surfaces: a canvas in the page, however it's drawn (an OffscreenCanvas in a worker included), makes the whole
  * WebView composite again for each frame - in the app's own render threads - which cost ~2% of a core per frame per
@@ -74,7 +76,7 @@ class ShellNative(
         if (pageGlass && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             GlassBlur(web) { text -> port?.postMessage(WebMessage(text)) }.also { g ->
                 // No blur over a surface tile, nor over a web window's body (its app is under home's pixels there).
-                g.holes = { synchronized(tiles) { tiles.values.mapNotNull { it.shownRect() } } + windowHoles() }
+                g.holes = { synchronized(tiles) { tiles.values.mapNotNull { it.shownRect() } } }
             }
         } else {
             null
@@ -109,14 +111,11 @@ class ShellNative(
         }
     }
 
-    /** The web windows' shown bodies, window px ([WebWindows.bodies]; ShellHost wires it): holes in the glass. */
-    @Volatile var windowHoles: () -> List<android.graphics.RectF> = { emptyList() }
-
-    /** The web windows' bodies moved: the glass regions again without what's under them. */
-    fun windowHolesChanged() = glass?.holesChanged()
-
     /** Where "w.f" goes (ShellHost: the bridge's web windows). */
     @Volatile var windowFrame: ((String) -> Unit)? = null
+
+    /** Where "w.area" / "w.theme" go (ShellHost: the bridge's web windows). */
+    @Volatile var windowCommand: ((String, String) -> Unit)? = null
 
     /** Home's panels over the floating windows: made at home's page's "p.hello". */
     @Volatile private var lift: PanelLift? = null
@@ -150,6 +149,8 @@ class ShellNative(
                 "b.f" -> glass?.frameCommand(rest)
                 // Web windows' geometry, frame-synced like "b.f" (WebWindows.frameCommand; home's page only).
                 "w.f" -> windowFrame?.invoke(rest)
+                // A web window's title-bar move handed to the host (WebWindows.dragCommand: native move, Z2).
+                "w.area", "w.theme" -> windowCommand?.invoke(verb, rest)
                 "b.lag" -> glass?.let { it.lag = rest.trim().toInt() }
                 "b.liquid" -> glass?.liquidCommand(rest)
                 "s.draw" -> {

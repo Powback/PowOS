@@ -34,6 +34,8 @@ internal class HighRefresh(
             touched(e)
             false
         }
+        // A web window moved by the host takes the touches before the listener (HomeWebView.touchHook).
+        (view as? HomeWebView)?.stolenWatch = ::touched
     }
 
     /**
