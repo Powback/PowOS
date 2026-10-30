@@ -519,6 +519,7 @@ class ShellBridge(
             "tasks.open" -> openTask(a.getInt(0), a.opt(1))
             "tasks.remove" -> dev.omalauncher.system.Tasks.remove(context, a.getInt(0)).also { appWidgets.heal() }
             "tasks.split" -> dev.omalauncher.system.Tasks.split(a.getInt(0), a.getInt(1))
+            "tasks.openSplit" -> openSplit(a.getInt(0), a.getInt(1))
             "tasks.desktopWindow" -> desktopWindow(a.getInt(0), a.optBoolean(1, true))
             "tasks.float" -> dev.omalauncher.system.Tasks.float(context, a.getInt(0))
             "tasks.toWindow" -> toWebWindow(a.getInt(0)).also { if (it) dev.omalauncher.system.Switcher.hide() }
@@ -872,7 +873,51 @@ class ShellBridge(
         @Suppress("DEPRECATION")
         val running = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(64) }.getOrDefault(emptyList())
         val list = dev.omalauncher.system.Tasks.list(context).map { t -> taskJson(t, stamp, windows[t.id]?.bounds, running) }
-        return JSONArray(linuxCards(stamp) + list)
+        return JSONArray(linuxCards(stamp) + splitCard(list))
+    }
+
+    /**
+     * Android's split screen (WM Shell's, as SplitDrawer hears it) as ONE card where its newer app was: the left / top
+     * app's id, both labels, and "split" - each side's { id, label, icon, snapshot, share } - which the page draws as
+     * both icons over the whole split (ui/switcher.tsx). A tap restores the split ([openSplit]), a swipe closes both.
+     * [list] as it is when there's no split or one of its tasks isn't listed.
+     */
+    private fun splitCard(list: List<JSONObject>): List<JSONObject> {
+        val pair = dev.omalauncher.system.SplitDrawer.pair
+        if (pair.size != 2) return list
+        val sides = pair.map { id -> list.firstOrNull { it.optInt("id") == id } ?: return list }
+        val card = JSONObject(sides[0].toString())
+        // Never pulled into a floating window as a single app's card is unfolded: the split comes back as a split.
+        card.remove("floats")
+        card.remove("window")
+        card.put("label", sides.joinToString(" | ") { it.optString("label") })
+        card.put(
+            "split",
+            JSONArray(
+                sides.map { o ->
+                    JSONObject().put("id", o.getInt("id")).put("label", o.optString("label")).put("icon", o.opt("icon"))
+                        .put("snapshot", o.optString("snapshot"))
+                        .put("share", (dev.omalauncher.system.SplitDrawer.splitShare(o.getInt("id")) ?: 0.5f).toDouble())
+                },
+            ),
+        )
+        val at = list.indexOfFirst { it.optInt("id") in pair }
+        return list.filterNot { it.optInt("id") in pair }.toMutableList().apply { add(at, card) }
+    }
+
+    /**
+     * The switcher's split card tapped: the split back as it was. Still split (WM Shell keeps both stages, in the
+     * background): its left / top task from recents brings the whole split root to front, as Quickstep's grouped task
+     * does - plain options, never AppWindows' floating ones. The split gone meanwhile: split again ([Tasks.split]).
+     */
+    private fun openSplit(
+        first: Int,
+        second: Int,
+    ): Boolean {
+        val pair = dev.omalauncher.system.SplitDrawer.pair
+        val staged = first in pair && second in pair
+        Log.i(TAG, "split card $first | $second: ${if (staged) "restored (still split)" else "split again"}")
+        return if (staged) dev.omalauncher.system.Tasks.open(context, first) else dev.omalauncher.system.Tasks.split(first, second)
     }
 
     /**

@@ -74,15 +74,35 @@ object SplitDrawer {
     /** Read from the main thread (edge gestures), written on [work]. */
     private val tucked = AtomicReferenceArray<Tuck?>(2)
 
-    // The split as WM Shell reports it: task -> stage, task -> visible, stage -> position.
-    private val stageOf = HashMap<Int, Int>()
+    // The split as WM Shell reports it: task -> stage (in the order staged: a stage's last one is on top), stage -> position.
+    private val stageOf = LinkedHashMap<Int, Int>()
     private val positionOf = HashMap<Int, Int>()
 
     /** Tasks that just left the split, with the position they were on. */
     private val leaving = HashMap<Int, Int>()
 
-    /** The last measured screen share of each split task. */
-    private val share = HashMap<Int, Float>()
+    /** The last measured screen share of each split task (read by the switcher's split card: any thread). */
+    private val share = java.util.concurrent.ConcurrentHashMap<Int, Float>()
+
+    /**
+     * The split as it stands, left / top first: the top task of each of WM Shell's two stages, or empty (no split). The
+     * switcher lists it as one card ([dev.omalauncher.shell.ShellBridge] tasks: "split"). It lives as long as WM Shell
+     * keeps both stages - in the background too (home, another app over it); one side closed or dragged out ends the
+     * split (the other app goes full screen) and the card with it. Written on [work], read from any thread.
+     */
+    @Volatile var pair: List<Int> = emptyList()
+        private set
+
+    /** Task [task]'s screen share in the split (0..1), or null before it was measured. */
+    fun splitShare(task: Int): Float? = share[task]
+
+    /** [pair] again from [stageOf] and the stages' positions; on [work]. */
+    private fun publishPair() {
+        val top = stageOf.entries.groupBy { it.value }.mapValues { (_, tasks) -> tasks.last().key }
+        val next = if (top.size == 2) top.entries.sortedBy { position(it.key) ?: it.key }.map { it.value } else emptyList()
+        if (next != pair) Log.i(TAG, "split pair ${if (next.isEmpty()) "gone" else next.joinToString(" | ")}")
+        pair = next
+    }
 
     fun tucked(side: Int): Tuck? = if (side in 0 until tucked.length()) tucked.get(side) else null
 
@@ -181,6 +201,7 @@ object SplitDrawer {
     ) {
         Log.i(TAG, "stage $stage at ${sideName(position)}")
         positionOf[stage] = position
+        publishPair()
     }
 
     private fun taskStage(
@@ -190,7 +211,10 @@ object SplitDrawer {
     ) {
         Log.i(TAG, "task $task -> stage $stage visible $visible")
         if (stage != STAGE_UNDEFINED) {
+            // Re-staged: last in its stage's order (its top).
+            stageOf.remove(task)
             stageOf[task] = stage
+            publishPair()
             leaving.remove(task)
             // A tucked app back in a split (from the switcher, or pulled back) isn't tucked any more.
             drop(task, "back in a split")
@@ -198,6 +222,7 @@ object SplitDrawer {
             return
         }
         val was = stageOf.remove(task) ?: return
+        publishPair()
         position(was)?.let { leaving[task] = it }
         if (stageOf.size < 2) work?.removeCallbacks(sample)
         if (stageOf.isEmpty()) {

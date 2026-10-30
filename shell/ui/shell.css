@@ -2199,6 +2199,10 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents .task { direction: ltr; width: var(--card-w); max-width: none; }
 .recents .task-head { justify-content: center; gap: 10px; padding: 0 4px 12px; font: 500 var(--text-small) var(--font); color: var(--color-foreground); }
 .recents .task-icon { width: 28px; height: 28px; border-radius: 8px; }
+/* A split card (Android's split screen): its apps' icons together, its picture the whole split side by side. */
+.recents .task-icons { display: flex; gap: 4px; }
+.recents .task-split { display: flex; gap: 4px; aspect-ratio: var(--screen-ratio, 9 / 19); overflow: hidden; }
+.recents .task-split-side { flex: 1 1 0; min-width: 0; height: 100%; object-fit: cover; object-position: top left; }
 .recents .task-shot {
   max-height: none;
   border: none;
