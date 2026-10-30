@@ -557,7 +557,13 @@ divider moves (`SplitDecorManager`: a layer in the app's TaskDescription backgro
   (dock), **keep** (dragged out by its bar: it stays where it was let go), or **gone** (closed). The rest close up: 2-3
   windows get the layout for their count, and a 2-split keeps its direction and ratio. A last window alone fills the work
   area (maximised, with restore = its floating frame), as Android's split ending gives the other app the screen.
-  Maximise or minimise on a tiled window takes it out of the tiling first.
+  The bar's double tap (the work-area maximise) or minimise on a tiled window takes it out of the tiling first. Its
+  *full screen* button (a real full-screen app, "Full screen = a full-screen app") does too: on `webwindows.full {on}`
+  the window leaves its tile as **float** (back in a window later, it floats at its old frame) and the others close
+  up; the host drops any divider drag or tile menu on it. Closing a tiled window (its bar, or a swipe away in the
+  switcher: `Tasks.remove` → `closeForTask` → the same `drop`) frees its tile (`webwindows.closed` → **gone**).
+  The switcher's split picking an app that is a full-screen app now brings it back into its window first
+  (`webwindows.toWindow`), then tiles it.
 
 ### Dividers (native: `WebWindowTiles.kt`, `WebWindows.kt` "tiles")
 
@@ -582,7 +588,8 @@ divider moves (`SplitDecorManager`: a layer in the app's TaskDescription backgro
 
 ### Entry points
 
-- **Title bar:** a 4th button, *tile* (two panes), left of minimise. It opens a native menu under it (layer 10002):
+- **Title bar:** a 4th button, *tile* (two panes), left of minimise (the bar, right to left: close, full screen,
+  minimise, tile). It opens a native menu under it (layer 10002):
   left, right, top, bottom, grid, and float when the window is tiled. Pick = `webwindows.tile {id, slot}` →
   `tile()`. A half makes a 2-split; the page's other tiled windows keep a tile, and an empty half takes the page's
   topmost floating window (two windows, one split). Grid tiles the window with the page's other windows (2-4, layout
