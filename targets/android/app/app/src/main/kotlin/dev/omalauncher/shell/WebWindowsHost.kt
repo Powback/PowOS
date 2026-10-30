@@ -56,7 +56,16 @@ object WebWindowsHost {
     private const val SHELL_UID = 2000
 
 
-    private class Vd(val display: VirtualDisplay, val reader: ImageReader)
+    private class Vd(val display: VirtualDisplay, val reader: ImageReader) {
+        /** RS1's settle watch ([Host.settle]): its start, its last display frame (uptime ms), what to log with it. */
+        var settleFrom = 0L
+        var lastFrame = 0L
+        var counts: String? = null
+    }
+
+    /** A display that composed nothing new for this long after a resize has settled (its app drew at the size). */
+    private const val SETTLE_QUIET_MS = 150L
+    private const val SETTLE_MAX_MS = 3000L
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -94,6 +103,7 @@ object WebWindowsHost {
                 "create" -> create(a[1], a[2].toInt(), a[3].toInt(), a[4].toInt())
                 "resize" -> resize(a[1].toInt(), a[2].toInt(), a[3].toInt(), a[4].toInt())
                 "release" -> vds.remove(a[1].toInt())?.let(::release)
+                "settle" -> settle(a[1].toInt(), a.drop(2).joinToString(" "))
             }
         }
 
@@ -104,7 +114,11 @@ object WebWindowsHost {
             dpi: Int,
         ) {
             val r = ImageReader.newInstance(1, 1, PixelFormat.RGBA_8888, 2)
-            r.setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, frames)
+            var made: Vd? = null
+            r.setOnImageAvailableListener({
+                it.acquireLatestImage()?.close()
+                made?.lastFrame = android.os.SystemClock.uptimeMillis()
+            }, frames)
             val vd =
                 try {
                     dm.createVirtualDisplay("powos-ww-$tag", w, h, dpi, r.surface, FLAGS)
@@ -115,7 +129,8 @@ object WebWindowsHost {
                 r.close()
                 return
             }
-            vds[vd.display.displayId] = Vd(vd, r)
+            made = Vd(vd, r)
+            vds[vd.display.displayId] = made
             say("display $tag ${vd.display.displayId}")
             say("log display ${vd.display.displayId} ${w}x$h dpi $dpi: sw ${minOf(w, h) * 160 / dpi}dp")
         }
@@ -127,6 +142,38 @@ object WebWindowsHost {
             dpi: Int,
         ) {
             vds[id]?.display?.resize(w, h, dpi)
+        }
+
+        /**
+         * RS1: display [id] was given its final size (just before this, in order): its frames watched until it's quiet
+         * for [SETTLE_QUIET_MS] - "log <counts>, settled X ms after release (its last frame)".
+         */
+        fun settle(
+            id: Int,
+            counts: String,
+        ) {
+            val v = vds[id] ?: return
+            v.settleFrom = android.os.SystemClock.uptimeMillis()
+            v.lastFrame = 0L
+            v.counts = counts
+            frames.postDelayed({ settleCheck(id, v) }, SETTLE_QUIET_MS)
+        }
+
+        private fun settleCheck(
+            id: Int,
+            v: Vd,
+        ) {
+            val counts = v.counts ?: return
+            val now = android.os.SystemClock.uptimeMillis()
+            val last = maxOf(v.lastFrame, v.settleFrom)
+            if (now - last < SETTLE_QUIET_MS && now - v.settleFrom < SETTLE_MAX_MS) {
+                frames.postDelayed({ settleCheck(id, v) }, SETTLE_QUIET_MS - (now - last))
+                return
+            }
+            v.counts = null
+            val info = v.display.display
+            val settled = if (v.lastFrame > 0) "${v.lastFrame - v.settleFrom} ms" else "no frame"
+            say("log $counts, settled $settled after release (display $id ${info.mode.physicalWidth}x${info.mode.physicalHeight})")
         }
 
         private fun release(v: Vd) {

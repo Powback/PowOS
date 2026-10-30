@@ -2426,6 +2426,54 @@ async function webWindowCheck() {
 }
 
 /**
+ * In the page: RS1 (the user, 10-30: "I try to resize windows, it's just lagging after, eventually it's catching up") -
+ * a corner drag, one move per frame for 30 frames: every frame's "w.f" has the new body (the frame follows the finger),
+ * but the app's size (the host's real resize: a relayout, a new buffer) changes at most once per 2 frames, and on
+ * release the last "w.f" says the drag ended with the body's final size.
+ */
+async function webWindowResizeCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const fails = [];
+  try {
+    W.webWins.value = [{ id: 903, key: "a:gate.resize", label: "Resize", page: S.pages.value[0], x: 200, y: 160, w: 360, h: 300, live: true }];
+    await window.__gw.settled();
+    const edge = document.querySelector('.webwindow[data-wwid="903"] .ww-edge-se');
+    if (!edge) return ["resize: no se edge on the web window"];
+    const r = edge.getBoundingClientRect();
+    const [x0, y0] = [r.left + r.width / 2, r.top + r.height / 2];
+    const pe = (type, k) => edge.dispatchEvent(new PointerEvent(type, { pointerId: 41, pointerType: "touch", isPrimary: true, clientX: x0 + k * 6, clientY: y0 + k * 4, bubbles: true }));
+    const frame = () => new Promise((ok) => requestAnimationFrame(ok));
+    const from = window.__ww.sent.length;
+    const FRAMES = 30;
+    pe("pointerdown", 0);
+    for (let k = 1; k <= FRAMES; k++) (pe("pointermove", k), await frame());
+    pe("pointerup", FRAMES);
+    await frame(), await frame(), await frame();
+    // Each line: "w.f <id> <dpr> <n> <entry>..."; an entry is 24 words, its last four "<resizing> <app w> <app h> <fill>".
+    const ours = (t) => [...Array(Math.floor(t.length / 24)).keys()].map((i) => t.slice(i * 24, i * 24 + 24)).find((e) => e[0] === "903");
+    const mine = window.__ww.sent.slice(from).map((l) => ours(l.split(" ").slice(4))).filter(Boolean);
+    const judge = (end) => {
+      const during = mine.filter((e) => e[20] === "1");
+      const sizes = new Set(during.map((e) => `${e[21]}x${e[22]}`));
+      const bodies = new Set(during.map((e) => `${e[7]}x${e[8]}`));
+      const last = mine.at(-1) ?? [];
+      return [
+        bodies.size < FRAMES / 2 && `RS1: a 30-frame corner drag gave only ${bodies.size} body sizes (the frame must follow the finger each frame)`,
+        sizes.size * 2 > during.length + 1 && `RS1: ${sizes.size} app resizes for ${during.length} drag frames (want <= 1 per 2 frames)`,
+        last[20] !== "0" && `RS1: after release the last w.f still says resizing (${last.slice(20).join(" ")}): no final resize`,
+        end?.w !== 360 + FRAMES * 6 && `RS1: the corner drag left the window ${end?.w} wide (want ${360 + FRAMES * 6})`,
+        !/^[0-9a-f]{6}$/.test(last[23] ?? "") && `RS1: the fill colour in w.f is "${last[23]}" (want rrggbb)`,
+      ].filter(Boolean);
+    };
+    fails.push(...judge(W.webWins.value.find((w) => w.id === 903)));
+  } finally {
+    W.webWins.value = [];
+  }
+  return fails;
+}
+
+/**
  * In the page, after webWindowCheck: TB4 (the user, 2026-10-30: "If I click on the icon of an open window I should be
  * able to minimize it that way") - a dock tap on an app with web windows (ui/webwindows.tsx dockToggle): in front ->
  * minimised; again -> back in front; under another app's window -> raised; on another page -> home goes there, it in
@@ -3352,7 +3400,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, webWindowResizeCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step);
             if (problems.length) return problems;
           }

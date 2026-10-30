@@ -805,7 +805,8 @@ function mergeOf(w: WebWin, el: HTMLElement): string {
 
 /**
  * One window's entry, or null (its page isn't in the DOM): "<id> <frame x y w h> <body x y w h> <clip l t r b>
- * <radius> <visible> <alpha> <scale> <maximised> <titleEnd> <controls>", viewport CSS px after transforms.
+ * <radius> <visible> <alpha> <scale> <maximised> <titleEnd> <controls> <resizing> <app w> <app h> <fill>", viewport
+ * CSS px after transforms ([sizeOf]: the app's paced size during a resize drag, unscaled; [fillOf]: the theme surface).
  */
 export function entry(w: WebWin): string | null {
   const el = document.querySelector<HTMLElement>(`.webwindow[data-wwid="${w.id}"]`);
@@ -817,7 +818,78 @@ export function entry(w: WebWin): string | null {
   const { clip, alpha } = shown(body);
   const visible = !document.querySelector(OVERLAYS) && alpha > 0.01 && clip[2] > clip[0] && clip[3] > clip[1];
   const rects = [f.left, f.top, f.width, f.height, b.left, b.top, b.width, b.height, ...clip].map(px);
-  return [w.id, ...rects, RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), w.restore ? 1 : 0, mergeOf(w, el)].join(" ");
+  return [w.id, ...rects, RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), w.restore ? 1 : 0, mergeOf(w, el), sizeOf(w), fillOf()].join(" ");
+}
+
+// ---- RS1/RS2: a resize drag paces the app's relayouts --------------------------------------------------------------
+// The frame (and the layer's crop) follows the finger every frame; the app's own size - what the host resizes its
+// display / KWin window to, each one a relayout and a new buffer - only every [RELAYOUT_FRAMES] frames and at least
+// [RELAYOUT_MS] apart, newest size wins. Until it draws at it, the host shows the app's last buffer anchored top left,
+// clipped to the body, over the theme's surface (never stretched). The press ends: the body's size, once (the final).
+// Before (10-30, the user: "it's just lagging after, eventually it's catching up"): one VD resize per step, queued.
+
+/** RS1: at least this many page frames, and ms, between two of the app's relayouts while an edge is dragged. */
+const RELAYOUT_FRAMES = 3;
+const RELAYOUT_MS = 40;
+
+/** A resize drag in progress, by window id: the app's paced size (body CSS px, unscaled), its counts for the log. */
+interface Resizing {
+  cw: number;
+  ch: number;
+  frame: number;
+  last: number;
+  lastAt: number;
+  steps: number;
+  reqs: number;
+}
+const resizing = new Map<number, Resizing>();
+
+/** A resize grab on window [id] began: its app's size paced from now ([pace]) until [resizeEnd]. */
+function resizeStart(id: number) {
+  resizing.set(id, { cw: -1, ch: -1, frame: 0, last: -Infinity, lastAt: -Infinity, steps: 0, reqs: 0 });
+}
+
+/** The grab ended: the next "w.f" has the body's size as the app's (the final relayout); the counts kept for the gate. */
+function resizeEnd(id: number) {
+  const r = resizing.get(id);
+  if (!r) return;
+  resizing.delete(id);
+  lastResize = { id, steps: r.steps, reqs: r.reqs };
+  kick();
+}
+let lastResize: { id: number; steps: number; reqs: number } | null = null;
+
+/** Once per page frame, before measuring: window [id]'s app size moves to its body's when its pace allows. */
+function pace(id: number, r: Resizing, now: number) {
+  r.frame++;
+  const body = document.querySelector<HTMLElement>(`.webwindow[data-wwid="${id}"] .webwindow-body`);
+  if (!body) return;
+  const [w, h] = [body.offsetWidth, body.offsetHeight];
+  if (w === r.cw && h === r.ch) return;
+  if (r.frame - r.last < RELAYOUT_FRAMES || now - r.lastAt < RELAYOUT_MS) return;
+  (r.cw = w), (r.ch = h), (r.last = r.frame), (r.lastAt = now), r.reqs++;
+}
+
+/** "<resizing> <app w> <app h>": a paced drag's app size, else "0 0 0" (the host uses the body's). */
+function sizeOf(w: WebWin): string {
+  const r = resizing.get(w.id);
+  return r && r.cw > 0 ? `1 ${r.cw} ${r.ch}` : "0 0 0";
+}
+
+/** The theme's surface as "rrggbb" (the host's fill under a resized app's last buffer), cached by its token's value. */
+let fillKey = "";
+let fillHex = "000000";
+function fillOf(): string {
+  const v = getComputedStyle(document.documentElement).getPropertyValue("--color-surface").trim();
+  if (v === fillKey) return fillHex;
+  fillKey = v;
+  const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  if (!ctx || !v) return fillHex;
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+  fillHex = [r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("");
+  return fillHex;
 }
 
 /** "<dpr> <n> <entries...>": every window the page shows, bottom first (DOM order = z-order). */
@@ -831,6 +903,9 @@ const sent: string[] = [];
 (globalThis as { __ww?: unknown }).__ww = {
   sent,
   geometry,
+  get lastResize() {
+    return lastResize;
+  },
   get direct() {
     return geometryChannel.direct;
   },
@@ -847,6 +922,7 @@ const sent: string[] = [];
  */
 function tick(ts: number) {
   raf = 0;
+  for (const [id, r] of resizing) pace(id, r, ts);
   const g = geometry();
   if (g !== lastGeometry) {
     lastGeometry = g;
@@ -1108,6 +1184,8 @@ function resizeBy(id: number, s: Grab & { side: string; k: number }, e: PointerE
   // DB1: the top edge stops at the status bar (the bar stays reachable).
   const top = clampPlace(r.x, r.y, r.w).y;
   if (r.y < top) (r.h -= top - r.y), (r.y = top);
+  const pacing = resizing.get(id);
+  if (pacing) pacing.steps++;
   update(id, { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h), restore: undefined });
 }
 
@@ -1123,13 +1201,14 @@ interface AppDrag {
 }
 const appDrags = new Map<number, AppDrag>();
 
-/** A resize grab on an edge or corner: the frame follows the finger (the app's display gets the size on each frame's w.f). */
+/** A resize grab on an edge or corner: the frame follows the finger, the app's size paced ([pace]: RS1), the final on release. */
 function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
   const start = useRef<Grab | null>(null);
   const stop = (e: PointerEvent) => {
     if (!start.current) return;
     e.stopPropagation();
     start.current = null;
+    resizeEnd(win.id);
   };
   return (
     <div
@@ -1140,7 +1219,8 @@ function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
         capture(e);
         if (tiledOn(win.id) != null) untile(win.id, "keep");
         start.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, w: win.w, h: win.h };
-        oneFinger.set(win.id, () => (start.current = null));
+        resizeStart(win.id);
+        oneFinger.set(win.id, () => ((start.current = null), resizeEnd(win.id)));
       }}
       onPointerMove={(e) => {
         const s = start.current;
@@ -1242,11 +1322,17 @@ function appDragMove(id: number, e: PointerEvent): boolean {
   const dx = e.clientX - d.start.px;
   const dy = e.clientY - d.start.py;
   if (!d.moved && Math.hypot(dx, dy) < SLOP) return true;
-  if (!d.moved && tiledOn(id) != null) untile(id, "keep");
+  if (!d.moved) appDragBegins(id, d.edges);
   d.moved = true;
   if (d.edges === "move") update(id, { ...clampPlace(d.start.x + dx, d.start.y + dy, w.w), restore: undefined });
   else resizeBy(id, { ...d.start, side: d.edges, k: w.scale ?? 1 }, e);
   return true;
+}
+
+/** An app's own frame drag's first move: a tiled window untiled; a resize's app size paced from now (RS1). */
+function appDragBegins(id: number, edges: string) {
+  if (tiledOn(id) != null) untile(id, "keep");
+  if (edges !== "move") resizeStart(id);
 }
 
 /** The press ended: an app's own frame drag ends with it (let go at an edge: tiled, as the bar's). True: it was one. */
@@ -1256,6 +1342,7 @@ function appDragEnd(id: number, e: PointerEvent, cancelled: boolean): boolean {
   appDrags.delete(id);
   clearTimeout(d.hold);
   e.stopPropagation();
+  if (d.edges !== "move") resizeEnd(id);
   if (!cancelled && d.moved && d.edges === "move") {
     const slot = snapSlot(e.clientX, e.clientY);
     if (slot) tile(id, slot);

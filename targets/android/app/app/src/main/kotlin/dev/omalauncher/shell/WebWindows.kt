@@ -223,6 +223,17 @@ class WebWindows(
          * it on home's surface itself (above home's buffer, at [FULL_LAYER]); [place] puts it back under the root.
          */
         var underRoot = true
+
+        /** RS1: a resize drag's counts ([paced]), the last body size, and the fill under its app ([fillUnder]). */
+        var resizing = false
+        var steps = 0
+        var relayouts = 0
+        var lastBw = 0
+        var lastBh = 0
+        var fill: SurfaceControl? = null
+        var fillColor = 0
+        var fillUntil = 0L
+        var fillPending = false
     }
 
     /**
@@ -287,6 +298,17 @@ class WebWindows(
         /** Maximised (the bar merges with the status bar): where its title ends and its controls start, else -1. */
         var titleEnd = -1
         var controls = -1
+
+        /**
+         * RS1: a resize drag is in progress - [cw]x[ch] px is the app's paced size (the page sends a new one at most every
+         * 3 frames, ui/webwindows.tsx pace), the body only cropped and the last buffer anchored; else the body's own.
+         */
+        var resizing = false
+        var cw = 1
+        var ch = 1
+
+        /** The theme's surface (0xAARRGGBB): what a body shows where its app hasn't drawn yet (a grow mid-resize). */
+        var fill = 0xff000000.toInt()
     }
 
     /** The layer all windows hang under: home's window surface, under its own buffer. Made on first use (main thread). */
@@ -673,6 +695,12 @@ class WebWindows(
             controls = c.x()
             bw = Math.round(body.width() / scale).coerceAtLeast(1)
             bh = Math.round(body.height() / scale).coerceAtLeast(1)
+            resizing = c.word() == "1"
+            val pw = c.word().toFloat()
+            val ph = c.word().toFloat()
+            cw = if (resizing && pw > 0) Math.round(pw * c.dpr).coerceAtLeast(1) else bw
+            ch = if (resizing && ph > 0) Math.round(ph * c.dpr).coerceAtLeast(1) else bh
+            fill = (0xff000000.toInt() or c.word().toInt(16))
         }
 
     /** On the main thread, on the draw that shows the page frame the geometry was measured on. */
@@ -866,7 +894,102 @@ class WebWindows(
         t.setAlpha(c, g.alpha)
         // Hidden is the layer, never the display's surface (a null surface stops the app).
         t.setVisibility(c, g.visible && !g.clip.isEmpty && win.mirror != null)
-        resizeContent(win, g.bw, g.bh)
+        fillUnder(t, win, g)
+        val released = paced(win, g)
+        resizeContent(win, g.cw, g.ch)
+        released?.let { counts -> if (win.linux == null && win.displayId >= 0) helper.settle(win.displayId, counts) else Log.i(TAG, "$counts (Linux: no settle measure)") }
+    }
+
+    /**
+     * RS1's counts: each step of a resize drag (a new body size) and each real resize ([resizeContent]) while it lasts;
+     * on release (the first geometry without [Geo.resizing]) the final resize goes out and the settle is measured -
+     * "window N: resize: R relayouts for S steps, settled X ms after release" (Android: the helper's display frames,
+     * [Helper.settle]; Linux: no frame signal here, the counts only).
+     */
+    private fun paced(
+        win: Win,
+        g: Geo,
+    ): String? {
+        var released: String? = null
+        if (g.resizing) {
+            pacedStep(win, g)
+        } else if (win.resizing) {
+            win.resizing = false
+            val final = if (g.bw != win.w || g.bh != win.h) 1 else 0
+            released = "window ${win.id}: resize: ${win.relayouts + final} relayouts for ${win.steps} steps"
+        }
+        win.lastBw = g.bw
+        win.lastBh = g.bh
+        return released
+    }
+
+    /** One geometry of a resize drag: a step when the body changed, a relayout when the app's paced size did. */
+    private fun pacedStep(
+        win: Win,
+        g: Geo,
+    ) {
+        if (!win.resizing) {
+            win.resizing = true
+            win.steps = 0
+            win.relayouts = 0
+        }
+        if (g.bw != win.lastBw || g.bh != win.lastBh) win.steps++
+        if (g.cw != win.w || g.ch != win.h) win.relayouts++
+    }
+
+    /**
+     * RS1: the theme's surface under the app's layer in [win]'s container - what a grow shows until the app draws at
+     * its new size (its last buffer anchored top left over it, never stretched). A 1x1 buffer scaled past any body; the
+     * container's crop clips it. Shown only while resizing and [FILL_HOLD_MS] after (an app's own translucency is never
+     * filled otherwise).
+     */
+    private fun fillUnder(
+        t: SurfaceControl.Transaction,
+        win: Win,
+        g: Geo,
+    ) {
+        val now = SystemClock.uptimeMillis()
+        if (g.resizing) win.fillUntil = now + FILL_HOLD_MS
+        val on = now < win.fillUntil
+        if (!on && win.fill == null) return
+        val f = win.fill ?: newFill(win) ?: return
+        if (win.fillColor != g.fill) paintFill(win, f, g.fill)
+        t.setLayer(f, -1)
+        t.setVisibility(f, on)
+        if (on && !win.fillPending) {
+            win.fillPending = true
+            main.postDelayed({ win.fillPending = false; hideFill(win) }, FILL_HOLD_MS + 16)
+        }
+    }
+
+    /** [win]'s fill hidden once its hold ran out with no new geometry (the page sends none when nothing moved). */
+    private fun hideFill(win: Win) {
+        val f = win.fill?.takeIf { it.isValid } ?: return
+        if (SystemClock.uptimeMillis() < win.fillUntil) return
+        SurfaceControl.Transaction().setVisibility(f, false).apply()
+    }
+
+    private fun newFill(win: Win): SurfaceControl? {
+        if (!win.container.isValid) return null
+        val f = SurfaceControl.Builder().setName("powos-ww-${win.id}-fill").setParent(win.container).setBufferSize(1, 1).setOpaque(true).setHidden(true).build()
+        SurfaceControl.Transaction().setScale(f, FILL_SCALE, FILL_SCALE).apply()
+        win.fill = f
+        return f
+    }
+
+    private fun paintFill(
+        win: Win,
+        f: SurfaceControl,
+        argb: Int,
+    ) {
+        win.fillColor = argb
+        val surface = android.view.Surface(f)
+        runCatching {
+            val canvas = surface.lockCanvas(null)
+            canvas.drawColor(argb)
+            surface.unlockCanvasAndPost(canvas)
+        }.onFailure { Log.w(TAG, "window ${win.id}: fill not drawn", it) }
+        surface.release()
     }
 
     /**
@@ -1427,6 +1550,8 @@ class WebWindows(
         w.mirror?.let { if (it.isValid) t.reparent(it, null) }
         if (w.container.isValid) t.reparent(w.container, null)
         t.apply()
+        w.fill?.release()
+        w.fill = null
         w.mirror?.release()
         w.container.release()
     }
@@ -1946,6 +2071,12 @@ class WebWindows(
             if (first) io.post { synchronized(sizes) { sizes.remove(displayId) }?.let { send(it) } }
         }
 
+        /** After a resize drag's final resize: the helper logs [counts] with the settle time ("settled ..."). */
+        fun settle(
+            displayId: Int,
+            counts: String,
+        ) = io.post { send("settle $displayId $counts") }
+
         fun release(displayId: Int) {
             io.post { send("release $displayId") }
         }
@@ -2241,6 +2372,12 @@ class WebWindows(
         /** Web windows on: Android apps opened from the wide home are web windows (only those stand the old path down: WebWindowDisplays). */
         fun on(context: Context): Boolean = runCatching { Settings.Global.getInt(context.contentResolver, SETTING, 0) == 1 }.getOrDefault(false)
         private const val PLACE_LOG_MS = 1000L
+
+        /** RS1: the fill under a resized app stays this long after release (its final relayout's ~100-200 ms). */
+        private const val FILL_HOLD_MS = 400L
+
+        /** The 1x1 fill's scale: past any body; the container's crop is its size. */
+        private const val FILL_SCALE = 8192f
         /** After a task lands on a window's display (or a Linux consumer starts): its first frame is taken as drawn. */
         private const val LIVE_AFTER_MS = 250L
 
