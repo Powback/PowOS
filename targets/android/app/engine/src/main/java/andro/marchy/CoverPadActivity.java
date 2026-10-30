@@ -52,6 +52,10 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
     /** Game pad (six finger zones -> Deck buttons) or desktop (right half = trackpad, left fingers = mouse buttons). */
     static final int MODE_GAME = 0, MODE_DESKTOP = 1;
     static final String EXTRA_MODE = "mode";
+    /** The display it was opened on (the cover panel) and the one it was opened from (the inner screen). */
+    static final String EXTRA_DISPLAY = "display", EXTRA_FROM_DISPLAY = "from_display";
+    /** How often a running pad checks that what it serves is still on screen ([check]); the first check waits as long. */
+    static final long CHECK_MS = 1500;
 
     private static CoverPadActivity current;
     private SensorManager sensors;
@@ -92,6 +96,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                         ui.post(() -> {
                             ActivityOptions o = ActivityOptions.makeBasic().setLaunchDisplayId(id);
                             from.startActivity(new Intent(from, CoverPadActivity.class).putExtra(EXTRA_MODE, mode)
+                                .putExtra(EXTRA_DISPLAY, id).putExtra(EXTRA_FROM_DISPLAY, own)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK), o.toBundle());
                         });
                         return;
@@ -110,8 +115,62 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
     }
 
     static void stop() {
-        if (current != null) current.finish();
+        if (current != null) current.finishAndRemoveTask();
         else SU.execute(() -> su("cmd device_state state reset"));
+    }
+
+    /**
+     * Whether the pad in [mode] serves something on screen now: the finger pad a game whose controls show in front (a
+     * full-screen Linux window's task, or the desktop with its controls up), the trackpad the desktop. Nothing shown -
+     * the game ended, its process died and its task went, the user went home or to another app - and the pad is only a
+     * black task holding both screens on.
+     */
+    static boolean wanted(int mode) {
+        return mode == MODE_DESKTOP ? MainActivity.desktopShown()
+            : PowosWindowActivity.gameShown() || MainActivity.gameShown();
+    }
+
+    /** A running pad that serves nothing on screen any more ([wanted]) goes, with its task (any thread). */
+    static void check() {
+        CoverPadActivity c = current;
+        if (c == null) return;
+        c.runOnUiThread(() -> {
+            if (current != c || c.isFinishing() || wanted(c.mode)) return;
+            Log.i(TAG, "nothing on screen for the " + (c.mode == MODE_DESKTOP ? "trackpad" : "game pad") + ": closing it");
+            c.finishAndRemoveTask();
+        });
+    }
+
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private final Runnable watchdog = new Runnable() {
+        @Override
+        public void run() {
+            check();
+            if (current == CoverPadActivity.this && !isFinishing()) ui.postDelayed(this, CHECK_MS);
+        }
+    };
+    /** The cover display this pad belongs on, and the inner screen's (-1: unknown, an older start). */
+    private int coverDisplay = -1, innerDisplay = -1;
+    private DisplayManager displays;
+    private final DisplayManager.DisplayListener displayListener = new DisplayManager.DisplayListener() {
+        @Override public void onDisplayAdded(int id) { }
+        @Override public void onDisplayRemoved(int id) { if (id == coverDisplay) offCover("its display went"); }
+        @Override public void onDisplayChanged(int id) {
+            if (id != coverDisplay) return;
+            Display d = displays.getDisplay(id);
+            if (d == null || d.getState() == Display.STATE_OFF) offCover("its display turned off");
+        }
+    };
+
+    /**
+     * The pad belongs on the cover panel only. When that display goes (the device state reset under it: a fold, the
+     * system cancelling the both-screens state), Android moves its task to the inner screen, where it was an all-black
+     * task on top of home - P0 2026-10-30, the user stuck on it for hours. It goes instead.
+     */
+    private void offCover(String why) {
+        if (isFinishing()) return;
+        Log.i(TAG, "the cover display is gone (" + why + "): closing the pad");
+        finishAndRemoveTask();
     }
 
     /** Every device-state change and the start sequence, one at a time and in order: an "off" (reset) still running
@@ -131,8 +190,20 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        current = this;
         mode = getIntent().getIntExtra(EXTRA_MODE, MODE_GAME);
+        coverDisplay = getIntent().getIntExtra(EXTRA_DISPLAY, -1);
+        innerDisplay = getIntent().getIntExtra(EXTRA_FROM_DISPLAY, -1);
+        Display at = getDisplay();
+        int on = at != null ? at.getDisplayId() : -1;
+        // Recreated (moved to another display, the process restarted) or opened anywhere but the cover panel: a pad
+        // here would be a black task over the inner screen. It only ever comes up fresh, from start().
+        if (b != null || (coverDisplay >= 0 && on != coverDisplay) || (coverDisplay < 0 && on == Display.DEFAULT_DISPLAY)) {
+            Log.i(TAG, "opened on display " + on + (b != null ? " (recreated)" : "") + ", not the cover panel " + coverDisplay
+                + ": closing it");
+            finishAndRemoveTask();
+            return;
+        }
+        current = this;
         Log.i(TAG, "opened on display " + (getDisplay() != null ? getDisplay().getDisplayId() : -1)
             + (mode == MODE_DESKTOP ? " (desktop trackpad)" : " (game pad)"));
         // Not focusable: touches still arrive, but the desktop on the inner screen keeps the focus (keyboard,
@@ -144,6 +215,9 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
         sensors = getSystemService(SensorManager.class);
         Sensor hinge = sensors.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE);
         if (hinge != null) sensors.registerListener(this, hinge, SensorManager.SENSOR_DELAY_NORMAL);
+        displays = getSystemService(DisplayManager.class);
+        displays.registerDisplayListener(displayListener, ui);
+        ui.postDelayed(watchdog, CHECK_MS);
     }
 
     /**
@@ -151,19 +225,47 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
      * Android then has a focused app with no focused window, and the next key event (power, volume, a gamepad
      * button, the keyboard) waits for one - after 5 s an ANR ("Application does not have a focused window") that
      * kills the whole app, and the PowOS session with it (2026-10-20, Broforce: a power press while the pad was up).
-     * So whenever this becomes top, the desktop's task goes back to the front: keys and focus stay with the desktop,
-     * and touches still reach this pad (a tap on a non-focusable window never takes the focus).
+     * So whenever this becomes top, the focus goes back to the inner screen: keys stay with what is shown there, and
+     * touches still reach this pad (a tap on a non-focusable window never takes the focus).
+     *
+     * The focus goes back to whatever is in front on the inner screen - the game's task, home, any app - never a fixed
+     * task. It used to be the desktop's (MainActivity) always: in phone mode that raised the desktop's surface, black
+     * with no Plasma on it, over the game or home every time the pad became top (a touch on the back, the assistant's
+     * overlay coming or going, a game's task finishing). That was the black screen the user could not leave
+     * (2026-10-30, ABZÛ: even a new task of the app was buried again), the game "minimised" and the flicker with the
+     * assistant open.
      */
     @Override
     public void onTopResumedActivityChanged(boolean top) {
         super.onTopResumedActivityChanged(top);
-        MainActivity main = MainActivity.sInstance;
-        if (!top || main == null || main.isFinishing()) return;
-        try {
-            getSystemService(android.app.ActivityManager.class).moveTaskToFront(main.getTaskId(), 0);
-            Log.i(TAG, "focus back to the desktop (task " + main.getTaskId() + ")");
+        if (!top || isFinishing() || current != this) return;
+        android.app.ActivityManager am = getSystemService(android.app.ActivityManager.class);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) try { // TaskInfo.isVisible: API 31
+            // PowOS is the recents provider: it sees every task, newest first; the newest visible one that isn't this
+            // pad's is the one in front on the inner screen (an app, a game's task, a floating window).
+            @SuppressWarnings("deprecation")
+            java.util.List<android.app.ActivityManager.RecentTaskInfo> tasks =
+                am.getRecentTasks(8, android.app.ActivityManager.RECENT_IGNORE_UNAVAILABLE);
+            for (android.app.ActivityManager.RecentTaskInfo t : tasks) {
+                if (t.taskId == getTaskId() || !t.isVisible()) continue;
+                if (t.topActivity != null && CoverPadActivity.class.getName().equals(t.topActivity.getClassName())) continue;
+                am.moveTaskToFront(t.taskId, 0); // in front already: only the focus moves, nothing is reordered
+                Log.i(TAG, "focus back to the inner screen's front task " + t.taskId + " (" + t.topActivity + ")");
+                return;
+            }
         } catch (RuntimeException e) {
-            Log.w(TAG, "focus back to the desktop: " + e);
+            Log.w(TAG, "focus back to the inner screen: " + e);
+        }
+        // Nothing listed in front there: home is (home isn't a recent task). Home again on the inner screen takes the
+        // focus back without changing what shows.
+        try {
+            ActivityOptions o = ActivityOptions.makeBasic();
+            if (innerDisplay >= 0) o.setLaunchDisplayId(innerDisplay);
+            startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), o.toBundle());
+            Log.i(TAG, "focus back to home on the inner screen");
+        } catch (RuntimeException e) {
+            Log.w(TAG, "focus back to home: " + e);
         }
     }
 
@@ -171,7 +273,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
     public void onSensorChanged(SensorEvent e) {
         if (e.values[0] < 150f) { // folding: give the screens back to the phone
             Log.i(TAG, "folding (" + e.values[0] + " deg), closing the cover pad");
-            finish();
+            finishAndRemoveTask();
         }
     }
 
@@ -182,10 +284,16 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
     @Override
     protected void onDestroy() {
         Log.i(TAG, "closed" + (isFinishing() ? "" : " by the system"));
+        ui.removeCallbacks(watchdog);
+        if (current != this) { // closed in onCreate (not on the cover panel): nothing of it was set up
+            super.onDestroy();
+            return;
+        }
+        if (displays != null) displays.unregisterDisplayListener(displayListener);
         sensors.unregisterListener(this);
         PadHub.get(this).setButtons(PadHub.COVER, 0);
         view.releaseMouseButtons();
-        if (current == this) current = null;
+        current = null;
         SU.execute(() -> su("cmd device_state state reset"));
         super.onDestroy();
     }

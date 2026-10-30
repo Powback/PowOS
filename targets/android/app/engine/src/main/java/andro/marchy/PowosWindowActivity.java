@@ -144,6 +144,40 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         if (padOverlay == null) return;
         padOverlay.setShown(show);
         padButton.setAlpha(show ? 1f : 0.6f);
+        // The back screen follows the controls of the game on screen (only while this window shows).
+        if (shown) MainActivity.applyBackScreen(this, show);
+    }
+
+    /** This window's task is on screen (started, not stopped). Main thread. */
+    private boolean shown;
+
+    /**
+     * A full-screen Linux window with its game controls up is on screen: what the back screen's finger pad serves
+     * (CoverPadActivity.wanted). Main thread.
+     */
+    static boolean gameShown() {
+        for (PowosWindowActivity w : CHROME)
+            if (w.shown && !w.isFinishing() && w.padOverlay != null && w.padOverlay.getVisibility() == View.VISIBLE)
+                return true;
+        return false;
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        shown = true;
+        // Back in the game (from home, the switcher): the back screen's pad again, as its controls say.
+        if (padOverlay != null && padOverlay.getVisibility() == View.VISIBLE)
+            MainActivity.applyBackScreen(this, true);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        shown = false;
+        // Left (home, the switcher, another app, the game's window closed): the back screen's pad goes with it, unless
+        // another game still shows - never a black pad task left behind.
+        CoverPadActivity.check();
     }
 
     /**
@@ -416,12 +450,23 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     public void onTopResumedActivityChanged(boolean isTop) {
         super.onTopResumedActivityChanged(isTop);
         front = isTop;
+        if (!isTop)
+            focusSent = false;
     }
+
+    /**
+     * KWin was told this window has the focus, and the task has stayed the top one since: a window over it that is no
+     * activity (the assistant's overlay, the shade, a dialog of the system) took Android's window focus and gave it
+     * back, and KWin's focus never had to change. Telling it again re-activated the game's window under a running game
+     * as the overlay came and went (the flicker with the side-button assistant open, 2026-10-30).
+     */
+    private boolean focusSent;
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus && id > 0) {
+        if (hasFocus && id > 0 && !(focusSent && front)) {
+            focusSent = true;
             WindowTasks.send("focus", id);
             // PowOS: Android's clipboard to the session as this Linux window takes focus (the app can read it now;
             // the desktop's MainActivity does the same through KWin). Set by the app (PlasmaBridge.pushClip).
