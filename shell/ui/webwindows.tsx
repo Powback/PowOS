@@ -46,6 +46,13 @@ async function enabled(): Promise<boolean> {
 /** Opens an Android app as a home element on [page] (unfolded, the setting on): false leaves the launch to the caller. */
 export async function openWebWindow(key: string, label: string, page: number): Promise<boolean> {
   if (!wideHome.value || !key.startsWith("a:") || !(await enabled())) return false;
+  // Already a window: it comes to this page, on top - never a second display for the same app (its task would move).
+  const open = webWins.value.find((w) => w.key === key);
+  if (open) {
+    update(open.id, { page });
+    raise(open.id);
+    return true;
+  }
   const n = webWins.value.length;
   const w = Math.round(innerWidth * 0.5);
   const h = Math.round(innerHeight * 0.6);
@@ -56,6 +63,13 @@ export async function openWebWindow(key: string, label: string, page: number): P
   if (id < 0) return false;
   webWins.value = [...webWins.value, { id, key, label, page, x, y, w, h }];
   return true;
+}
+
+/** The pointer kept by its element (a synthetic or already-ended pointer can't be: the drag still works). */
+function capture(e: PointerEvent) {
+  try {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  } catch {}
 }
 
 function update(id: number, change: Partial<WebWin>) {
@@ -73,6 +87,56 @@ function raise(id: number) {
 powos.on("webwindows.closed", (id: number) => {
   webWins.value = webWins.value.filter((w) => w.id !== id);
 });
+
+// ---- the page's content cut out under the windows ------------------------------------------------------------------
+
+/**
+ * The app's content is composited UNDER home's own pixels (WebWindows.kt: a child layer below home's buffer - the
+ * zero-copy mirror, and everything home draws over a window covers it, as DOM does). So whatever the page paints where
+ * a body is - a widget, an icon, a lower window's title bar - would paint over the app (the user, 2026-10-30: the
+ * weather card and the "Mats's room" chip over Chrome). The page element is masked instead: transparent over every
+ * window body, except where a higher window's title bar is (that's DOM over the lower app, as it should be). The dock,
+ * bar, drawer and panels are outside the page element: never cut, always over the windows.
+ *
+ * The mask is a fold of layers (CSS mask-composite, bottom layer first): H = the holes, built bottom window up as
+ * H = (H ∩ not-title-bar(i)) ∪ body(i); the page = everything minus H. Page-local CSS px from the windows' own state
+ * (no measuring): it changes in the same render as the windows, on the same frame as their "w.f".
+ */
+const svg = (body: string) => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' ${body}</svg>`)}")`;
+const FAR = 20000;
+/** A body: square top (the title bar is on it), rounded bottom corners as the window's. */
+function bodyLayer(w: WebWin): string {
+  const bh = Math.max(1, w.h - TITLE);
+  const r = Math.min(RADIUS, w.w / 2, bh / 2);
+  const path = `M0 0H${w.w}V${bh - r}A${r} ${r} 0 0 1 ${w.w - r} ${bh}H${r}A${r} ${r} 0 0 1 0 ${bh - r}Z`;
+  return `${svg(`width='${w.w}' height='${bh}'><path d='${path}'/>`)} ${w.x}px ${w.y + TITLE}px / ${w.w}px ${bh}px no-repeat`;
+}
+/** Everything but a title bar (a big square with the bar cut out, from the page's top left). */
+function notTitleLayer(w: WebWin): string {
+  const path = `M0 0H${FAR}V${FAR}H0Z M${w.x} ${w.y}H${w.x + w.w}V${w.y + TITLE}H${w.x}Z`;
+  return `${svg(`width='${FAR}' height='${FAR}'><path fill-rule='evenodd' d='${path}'/>`)} 0 0 / ${FAR}px ${FAR}px no-repeat`;
+}
+
+/** Page [page]'s element style: masked over its windows' bodies, or nothing (no windows there). */
+export function pageMask(page: number): Record<string, string> | undefined {
+  const here = webWins.value.filter((w) => w.page === page);
+  if (!here.length) return undefined;
+  // Bottom window first; listed top layer first, so built from the top window down.
+  const layers: string[] = [];
+  const ops: string[] = [];
+  here.forEach((w, i) => {
+    layers.unshift(bodyLayer(w));
+    ops.unshift("add");
+    if (i > 0) {
+      layers.splice(1, 0, notTitleLayer(w));
+      ops.splice(1, 0, "intersect");
+    }
+  });
+  // The whole page (any opaque image: a mask reads only its alpha).
+  const mask = [`linear-gradient(black, black)`, ...layers].join(", ");
+  const composite = ["subtract", ...ops].join(", ");
+  return { mask, maskComposite: composite };
+}
 
 /** The windows pinned to home page [page]: rendered inside that page's element, so they move with it. */
 export function WebWindowsOn({ page }: { page: number }) {
@@ -166,7 +230,7 @@ function TitleBar({ win }: { win: WebWin }) {
       onPointerDown={(e) => {
         e.stopPropagation();
         raise(win.id);
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        capture(e);
         drag.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y };
       }}
       onPointerMove={(e) => {
@@ -214,7 +278,7 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
       style={{ flex: 1, touchAction: "none" }}
       onPointerDown={(e) => {
         raise(win.id);
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        capture(e);
         pressed.current = true;
         send(e, "down");
       }}

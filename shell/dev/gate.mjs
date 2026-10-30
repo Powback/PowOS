@@ -2214,6 +2214,93 @@ async function windowTouchCheck() {
   return fails;
 }
 
+/**
+ * In the page: a web window (ui/webwindows.tsx; Android app content under home's pixels) - its title bar drags only the
+ * window, a sideways swipe on it or its body never turns home's page (the user, 2026-10-30: "when i try to move the
+ * window it moves the whole page"), it is in the claim-free regions, and its page is masked over its body (the widgets
+ * under it never paint over the app) with a higher window's title bar kept.
+ */
+async function webWindowCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  // One finger from [a] to [b] (client px), as the phone sends it: pointer events (the title bar's drag) AND touch
+  // events (home's swipes, gesture.ts homeGestures - a control's pointer stopPropagation doesn't stop those). The gate's
+  // Chromium has no touch input, so Preact bound home's onTouchStart under its own name ("TouchStart", not a DOM
+  // event there): each touch event goes out under both names, whichever is bound.
+  const drag = async (el, a, b) => {
+    const send = (kind, k) => {
+      const [x, y] = [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+      el.dispatchEvent(new PointerEvent(`pointer${kind}`, { pointerId: 11, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true }));
+      const t = [new Touch({ identifier: 11, target: el, clientX: x, clientY: y })];
+      const name = { down: "Start", move: "Move", up: "End" }[kind];
+      const init = { touches: kind === "up" ? [] : t, changedTouches: t, bubbles: true, cancelable: true };
+      for (const type of [`touch${name.toLowerCase()}`, `Touch${name}`]) el.dispatchEvent(new TouchEvent(type, init));
+    };
+    send("down", 0);
+    for (let i = 1; i <= 10; i++) (send("move", i / 10), await sleep(16));
+    send("up", 1);
+    await window.__gw.settled();
+  };
+  const turned = (what) => (S.page.value === 0 ? [] : [`${what} turned the page (0 -> ${S.page.value})`]);
+  const was = S.page.value;
+  const fails = [];
+  try {
+    // The first home page, with a page after it (desktopsCheck added one): a swipe there could turn it.
+    S.page.value = 0;
+    await window.__gw.settled();
+    W.webWins.value = [{ id: 901, key: "a:gate.ww", label: "Gate", page: S.pages.value[0], x: 400, y: 120, w: 360, h: 300 }];
+    await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+    const el = document.querySelector('.webwindow[data-wwid="901"]');
+    if (!el) return ["web window: no .webwindow element on the page on screen"];
+    const r = el.querySelector(".webwindow-title").getBoundingClientRect();
+    await drag(el.querySelector(".webwindow-title"), [r.left + 60, r.top + 18], [r.left - 240, r.top + 18]);
+    fails.push(...turned("dragging a web window's title bar"));
+    const x = W.webWins.value.find((w) => w.id === 901)?.x;
+    if (x !== 100) fails.push(`dragging the title bar 300 px left moved the window to x=${x} (want 100)`);
+    const b = el.querySelector(".webwindow-body").getBoundingClientRect();
+    await drag(el.querySelector(".webwindow-body"), [b.left + 320, b.top + 80], [b.left + 20, b.top + 80]);
+    fails.push(...turned("a sideways swipe on a web window's body"));
+    // The control: the same swipe there with no window does turn the page (else this check proves nothing).
+    W.webWins.value = [];
+    await window.__gw.settled();
+    const under = document.elementFromPoint(b.left + 320, b.top + 80) ?? document.querySelector(".page");
+    await drag(under, [b.left + 320, b.top + 80], [b.left + 20, b.top + 80]);
+    if (S.page.value === 0) fails.push(`the control swipe (no window there, on .${under.className}) didn't turn the page either`);
+  } finally {
+    W.webWins.value = [];
+    S.page.value = was;
+  }
+  return fails;
+}
+
+/**
+ * In the page: two overlapping web windows - their page masked over the bodies (subtract) from three images: both
+ * bodies and the top window's title bar cut back in (it is DOM over the lower app). ui/webwindows.tsx pageMask.
+ */
+async function webWindowMaskCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const page = S.pages.value[S.page.value] ?? 1;
+  try {
+    W.webWins.value = [
+      { id: 903, key: "a:gate.ww", label: "Gate", page, x: 400, y: 120, w: 360, h: 300 },
+      { id: 904, key: "a:gate.ww2", label: "Gate 2", page, x: 160, y: 200, w: 300, h: 240 },
+    ];
+    await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+    const pageEl = document.querySelector('.webwindow[data-wwid="903"]')?.closest(".page");
+    if (!pageEl) return ["web windows: not on the page on screen"];
+    const fails = [];
+    const composite = getComputedStyle(pageEl).maskComposite || "";
+    if (!composite.includes("subtract")) fails.push(`web windows: their page isn't masked over the bodies (mask-composite "${composite}")`);
+    const images = (pageEl.style.mask.match(/url\(/g) || []).length;
+    if (images !== 3) fails.push(`two web windows: ${images} mask images on the page (want 3)`);
+    return fails;
+  } finally {
+    W.webWins.value = [];
+  }
+}
+
 /** In the page, loaded afresh after desktopsCheck: the stored windows go back on their pages (page 2's hidden). */
 async function desktopsReloaded() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -2648,7 +2735,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step);
             if (problems.length) return problems;
           }
