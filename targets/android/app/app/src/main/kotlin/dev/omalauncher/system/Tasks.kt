@@ -127,6 +127,29 @@ object Tasks {
         }.onFailure { Log.w(TAG, "can't split $first and $second", it) }.isSuccess
     }
 
+    /**
+     * The switcher's split ([split]) of two real apps only: never PowOS home itself as a side (10-31 logcat
+     * `split=[com.powos.app, com.discord]`: a pick of home's own task, or of a PowOS app in home, split home in half),
+     * never one task twice, never a task no longer listed. False (nothing split) otherwise.
+     */
+    fun splitApps(
+        context: Context,
+        first: Int,
+        second: Int,
+    ): Boolean {
+        val listed = list(context).associateBy { it.id }
+        val bad =
+            listOf(first, second).firstOrNull { id ->
+                val pkg = listed[id]?.component?.packageName
+                id < 0 || pkg == null || pkg == context.packageName
+            }
+        if (first == second || bad != null) {
+            Log.w(TAG, "split of $first and $second refused: ${if (first == second) "the same task" else "task $bad is home or not an app"}")
+            return false
+        }
+        return split(first, second)
+    }
+
     /** Task [id] in a floating window (freeform: the OS's pop-up view), in the middle of the screen. */
     fun float(
         context: Context,

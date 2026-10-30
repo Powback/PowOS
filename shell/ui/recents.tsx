@@ -382,7 +382,7 @@ function pickForSplit(id: number) {
   const more = splitMore.value;
   if (more == null) {
     splitFirst.value = null;
-    if (first !== id) powos.tasks.split(first, id);
+    if (first !== id) nativeSplit(first, id);
     return;
   }
   if (id === first || more.includes(id)) return;
@@ -400,7 +400,23 @@ async function splitTiles() {
   close();
   if (apps.length === ids.length && (await tileApps(apps.map((t) => ({ key: t.key!, label: t.label }))))) return;
   console.info(`[tiles] split screen of tasks ${ids.join(",")}: Android's split (not all are web windows)`);
-  powos.tasks.split(ids[0], ids[1]);
+  nativeSplit(ids[0], ids[1]);
+}
+
+/**
+ * A card that can be a side of Android's split: a real app's task. Not a PowOS app open in home (negative id) and not
+ * PowOS home's own task - 10-31 logcat `split=[com.powos.app, com.discord]`: home itself became one half.
+ */
+function nativeSide(id: number): boolean {
+  const t = tasks.value.find((v) => v.id === id);
+  return !!t && id >= 0 && !(t.key ?? "").startsWith("com.powos.app");
+}
+
+/** Android's split of two real apps ([nativeSide]), or nothing (a note; the host refuses it too: Tasks.splitApps). */
+function nativeSplit(a: number, b: number) {
+  if (a !== b && nativeSide(a) && nativeSide(b)) return void powos.tasks.split(a, b);
+  console.info(`[tiles] split of tasks ${a},${b} refused: PowOS home is never one side of Android's split`);
+  showNote("Pick two apps to split");
 }
 
 function showNote(text: string) {

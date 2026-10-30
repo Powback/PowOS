@@ -487,7 +487,7 @@ the title bar's input was dead and full screen regressed.
 | buttons | `Controls` | tile (opens the DOM tile menu), minimise, full screen (`powos.webwindows.fullScreen`: moveTask to display 0, 82d7b688, unchanged in `WebWindows.fullScreen`), close |
 | resize | `Edge` | 8 DOM grabs; the top edge stops at the status bar (DB1) |
 | tile menu | `TileMenu` | DOM sheet over the window's body: it takes its taps by DOM order (gate-checked) |
-| dividers | `DividerEl` | DOM handle; the drag moves the handle, let go: `snapRatio` or, within 12 % of an edge, the squeezed side to the dock - the same rules as before (`divided`) |
+| dividers | `DividerEl` | DOM handle; the drag goes to the edges, let go: `dividerRatio` (only `MIN_TILE` limits it, a light pull to the half) or, within `DROP_PX` of an edge, the squeezed side to the dock (`divided`) |
 | merged bar | `TitleBar` merged + `barsOf` | maximised: the bar's middle is transparent, its title and controls glass pieces; the page sends `titleEnd`/`controls`, the host gives `ShadeHost.windowBars` the bar rects and merge, unchanged |
 | glass under windows | `nativeglass.ts cutOut` | a blur region is shrunk off a window above it that spans a side, else dropped (HACK: one rounded rect per region) - a widget under a window never blurs the app |
 | input | `Body` → `webwindows.input` → `WebWindows.input/forward` | the DOM hit test decides (anything above the body wins). One call site: Android = v0 injection on its display; Linux = `linuxClaim`: the gesture's DOWN replayed from the watched gesture, then every native event of the gesture (all pointers) to KWin (`linuxInput`). HACK: moves between the DOWN and the page's answer (~1 frame) aren't replayed |
@@ -568,8 +568,9 @@ divider moves (`SplitDecorManager`: a layer in the app's TaskDescription backgro
 ### Model (page: `shell/ui/webwindows.tsx`, section "tiles")
 
 - A **tiling** is a state of one home page's windows: `tilings[page] = {layout, ids, rx, ry}`. A window listed in
-  `ids` is *tiled*, every other window floats as before. `ids` may hold `null`, an empty tile. The next window opened
-  on that page fills it (`fillEmptyTile`).
+  `ids` is *tiled*, every other window floats as before. Never an empty tile (TG1, 10-31): `setTiling` closes a tiling
+  up to its windows (`compact`: 2 fill the whole area, 3 = one big + two, 4 = 2x2), a tiling of one is none (SC1:
+  `lastOfSplit`), and a lone window snapped to a half or corner just goes there, floating (`snapAlone`).
 - Layouts: `2h` left | right, `2v` top / bottom, `3` one big left plus two stacked right, `4` a 2x2 grid. Two apps
   split left | right unless the tile area is clearly portrait (h > 1.3 w). The unfolded screen is portrait by a hair, and
   the user asked for left | right there on 10-29, so top/bottom applies only to a truly tall area.
