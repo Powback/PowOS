@@ -15,7 +15,6 @@ apps/pages.ts || "#222"  # fallback before the theme's tokens exist (first frame
 apps/pages.ts || "#ddd"  # fallback before the theme's tokens exist (first frame)
 apps/pages.ts fill="#567"  # a PowOS app's placeholder icon (an SVG data URL, no CSS)
 ui/shell.css .ai-unit.orphan { box-shadow: inset 3px 0 0 var(--color-accent); }  # a state mark (orphaned unit), theme colour
-ui/shell.css background: rgb(0 0 0 / 0.55);  # AUDIT: the notification panel's page dim on home
 ui/shell.css background: rgb(0 0 0 / 0.25);  # AUDIT: the assistant's dim over the app
 ui/shell.css html[data-mode="lock"] { background: rgb(0 0 0 / calc(0.55  # AUDIT: the lock face's page dim
 ui/shell.css border: var(--frame) solid var(--color-border); }  # assist: yesterday's look restored (the exception: the real screen 1:1)
