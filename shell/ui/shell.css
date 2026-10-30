@@ -34,7 +34,6 @@
   inherits: false;
   initial-value: 0;
 }
-.cc-media::after { --p: inherit; }
 /* How far the drawer rises as it opens - THE knob for where its open starts (gesture.ts maps the finger onto it, so a
    shorter rise opens it with less finger too): from ~15% of the screen down, close to where it rests, fading in - the
    user's (2026-10-22: 30vh, then "further up"). A length, so JS reads it in px. */
@@ -1463,9 +1462,10 @@ input.folder-title:focus { background: var(--soft-fill); }
 /* v3 is a grid unfolded (below): every child on an explicit row, an empty 1fr row above and below the body centres it. */
 .panel-body.two > .cc-col > .cc.v3 { grid-template-rows: auto 1fr auto auto auto 1fr; padding-top: 0; }
 .panel-body.two > .cc-col > .cc.v3 > .notif-bar { grid-row: 1; }
-.panel-body.two > .cc-col > .cc.v3 > .cc-media { grid-row: 3; }
-.panel-body.two > .cc-col > .cc.v3 > :is(.cc3-list, .cc-sliders) { grid-row: 4; }
-.panel-body.two > .cc-col > .cc.v3 > .cc3-launchers { grid-row: 5; }
+.panel-body.two > .cc-col > .cc.v3 > :is(.cc3-list, .cc-sliders) { grid-row: 3; }
+.panel-body.two > .cc-col > .cc.v3 > .cc3-launchers { grid-row: 4; }
+/* The media cards under the quick launchers (the user, 2026-10-30). */
+.panel-body.two > .cc-col > .cc.v3 > .cc-medias { grid-row: 5; }
 
 /*
  * PowOS AI's page (powai.tsx), left of home: it and home slide as one (gesture.ts applyTrack sets both transforms) -
@@ -1879,23 +1879,48 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   box-shadow: var(--lift);
 }
 .cc-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
+/*
+ * The media cards (control.tsx MediaCards): the shade's card look (a .tile, as the notifications'), one per session.
+ * Art, the track, the app's icon (its output picker) on top; the seek bar and the transport under them. A card comes
+ * and goes by its slot's height (a grid row 0fr <-> 1fr, as the notification stacks' rest): nothing under it jumps.
+ * The slots carry the gap above each card, the wrapper takes the container's own gap back - an empty one adds none.
+ */
+.cc-medias { display: flex; flex-direction: column; margin-top: -10px; }
+.cc-media-slot { display: grid; grid-template-rows: 1fr; animation: cc-media-in 300ms cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+.cc-media-slot > div { min-height: 0; overflow: hidden; padding-top: 10px; }
+.cc-media-slot.out { animation: cc-media-out 300ms cubic-bezier(0.2, 0.9, 0.3, 1) both; pointer-events: none; }
+@keyframes cc-media-in { from { grid-template-rows: 0fr; opacity: 0; } }
+@keyframes cc-media-out { to { grid-template-rows: 0fr; opacity: 0; } }
 .cc-media {
   position: relative;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  grid-template-areas: "art track app" "seek seek transport";
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px 10px;
-  border-radius: calc(var(--radius) * 1.5);
-  background: var(--control-fill);
-  border: var(--frame) solid var(--line);
-  overflow: hidden;
-  box-shadow: var(--lift);
+  column-gap: 12px;
+  row-gap: 4px;
+  padding: 10px 10px 6px 12px;
 }
-.cc-media::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--p) * 100%); background: var(--color-accent); }
-.cc-art { width: 44px; height: 44px; border-radius: var(--radius); object-fit: cover; }
-.cc-track { display: flex; flex-direction: column; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font: var(--text-small) var(--font); color: var(--color-foreground); }
-.cc-track .cc-label { display: block; white-space: nowrap; text-overflow: ellipsis; }
+.cc-art { grid-area: art; width: 52px; height: 52px; border-radius: var(--radius); object-fit: cover; }
+.cc-art-none { display: flex; align-items: center; justify-content: center; font-size: 24px; background: var(--soft-fill); color: var(--color-muted); }
+.cc-track { grid-area: track; display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font: var(--text-small) var(--font); color: var(--color-foreground); }
+.cc-track .cc-label { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+.cc-track .cc-detail { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--color-muted); }
+.cc-media-app { grid-area: app; align-self: start; justify-self: end; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: var(--soft-fill); color: var(--color-foreground); font-size: 18px; }
+.cc-media-app img { width: 22px; height: 22px; border-radius: 6px; }
+.cc-seek { grid-area: seek; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; font: 11px var(--font); color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.cc-seek input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  background: linear-gradient(var(--color-accent), var(--color-accent)) 0 50% / calc(var(--p) * 100%) 4px no-repeat, linear-gradient(var(--soft-fill), var(--soft-fill)) 0 50% / 100% 4px no-repeat;
+}
+.cc-seek input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--color-accent); border: 0; }
+.cc-seek input[type="range"]:disabled::-webkit-slider-thumb { visibility: hidden; }
+.cc-media .cc-transport { grid-area: transport; }
+.cc-media .cc-play { background: var(--soft-fill); border-radius: 50%; }
 .cc-transport { display: flex; gap: 2px; }
 .cc-transport button { font: 18px var(--font); width: 36px; height: 36px; background: none; border: 0; color: var(--color-foreground); }
 /* Icons (icons.tsx) and the panels drawn with them: the control center's tiles as round icons over a one-line label,
@@ -2702,6 +2727,7 @@ html:root .notif-panel .cc.v3 { background: none; border: 0; box-shadow: none; b
 .panel-body.two .cc.v3 > .cc3-list { grid-column: 1; order: 1; }
 .panel-body.two .cc.v3 > .cc-sliders { grid-column: 2; order: 1; grid-template-columns: 40px 40px; gap: 8px; min-height: 150px; }
 .panel-body.two .cc.v3 > .cc3-launchers { order: 2; }
+.panel-body.two .cc.v3 > .cc-medias { order: 3; }
 .panel-body.two .cc.v3 .cc-slider {
   height: auto;
   border-radius: 20px;

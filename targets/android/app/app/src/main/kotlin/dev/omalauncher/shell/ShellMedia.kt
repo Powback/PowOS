@@ -6,6 +6,7 @@ import android.content.Intent
 import android.util.Log
 import dev.omalauncher.Runtime
 import dev.omalauncher.widgets.lang.Bool
+import dev.omalauncher.widgets.lang.Lst
 import dev.omalauncher.widgets.lang.Num
 import dev.omalauncher.widgets.lang.Obj
 import dev.omalauncher.widgets.lang.Str
@@ -14,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -30,13 +32,25 @@ class ShellMedia(
     private val media get() = runtime.widgets.media
     private var listening: Job? = null
 
+    /** The session shown (as before), with every active one up to two under "sessions": the control center's cards. */
     fun state(): JSONObject {
-        if (listening == null) listening = scope.launch { media.updates().drop(1).collect { emit("media.changed", json(it)) } }
-        return json(media.value())
+        if (listening == null) listening = scope.launch { media.updates(::read).drop(1).collect { emit("media.changed", json(it)) } }
+        return json(read()) as JSONObject
     }
 
-    /** "toggle", "play", "pause", "next", "previous", "open" (the playing app). */
-    fun control(command: String) = media.control(command)
+    private fun read(): Value = Obj(((media.value() as? Obj)?.fields ?: emptyMap()) + ("sessions" to media.sessions(2)))
+
+    /** "toggle", "play", "pause", "next", "previous", "open" (the playing app); on [pkg]'s session when named. */
+    fun control(
+        command: String,
+        pkg: String? = null,
+    ) = media.control(command, pkg)
+
+    /** Moves [pkg]'s session to [seconds] in. */
+    fun seek(
+        pkg: String?,
+        seconds: Double,
+    ) = media.seek(pkg, seconds)
 
     /**
      * The phone's output picker for what's playing (phone speaker, Bluetooth, cast): SystemUI's own dialog.
@@ -55,21 +69,20 @@ class ShellMedia(
         listening?.cancel()
     }
 
-    private fun json(v: Value): JSONObject {
-        val out = JSONObject()
-        (v as? Obj)?.fields?.forEach { (k, x) ->
-            out.put(
-                k,
-                when (x) {
-                    is Str -> x.v
-                    is Num -> x.v.takeIf { it.isFinite() } ?: JSONObject.NULL
-                    is Bool -> x.v
-                    else -> JSONObject.NULL
-                },
-            )
+    private fun json(x: Value): Any =
+        when (x) {
+            is Obj -> JSONObject().also { out -> x.fields.forEach { (k, v) -> out.put(k, json(v)) } }
+            is Lst -> JSONArray().also { out -> x.items.forEach { out.put(json(it)) } }
+            else -> scalar(x)
         }
-        return out
-    }
+
+    private fun scalar(x: Value): Any =
+        when (x) {
+            is Str -> x.v
+            is Num -> x.v.takeIf { it.isFinite() } ?: JSONObject.NULL
+            is Bool -> x.v
+            else -> JSONObject.NULL
+        }
 
     companion object {
         private const val TAG = "PowosMedia"

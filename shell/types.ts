@@ -180,6 +180,10 @@ export interface MediaState {
   position?: number | null;
   duration?: number | null;
   art?: string | null;
+  /** The session takes seeking (PlaybackState.ACTION_SEEK_TO). */
+  seekable?: boolean;
+  /** Every active session with a track, playing first, at most two (one per app): the control center's cards. Older hosts: absent. */
+  sessions?: MediaState[];
 }
 
 /** One control center tile: a switch (on true/false) or an action/page (on null). */
@@ -707,7 +711,10 @@ export interface Bridge {
   /** What's playing ("media.changed" brings it again once asked): the control center's media card. */
   media: {
     state(): Promise<MediaState>;
-    control(command: "toggle" | "play" | "pause" | "next" | "previous" | "open"): Promise<void>;
+    /** On [pkg]'s session when named (a card's), else the one shown. */
+    control(command: "toggle" | "play" | "pause" | "next" | "previous" | "open", pkg?: string): Promise<void>;
+    /** Moves [pkg]'s session to [seconds] in. */
+    seek(pkg: string | undefined, seconds: number): Promise<void>;
     /** The phone's output picker (speaker, Bluetooth, cast) for that app's audio. */
     output(pkg?: string): Promise<void>;
   };

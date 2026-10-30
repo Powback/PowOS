@@ -38,7 +38,8 @@ const DEFAULT = CATALOG.slice(0, 5).map((l) => l.id);
 
 /** The user's chosen ids in order (store "controls.launchers"); null until read, then DEFAULT if never edited. */
 const chosen = signal<string[] | null>(null);
-const apps = signal<App[]>([]);
+/** The apps list, read with the row (the shade is its own page: home's list isn't here); the media cards' icons too. */
+export const apps = signal<App[]>([]);
 /** The launcher just tapped: its chip shows at once (optimistic), until the app is in front. */
 const pressed = signal<string | null>(null);
 

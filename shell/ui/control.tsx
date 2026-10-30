@@ -17,7 +17,7 @@ import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
 import { openGlasses } from "../glasses/open.ts";
 import { useMinuteClock } from "./time.ts";
-import { Launchers } from "./launchers.tsx";
+import { Launchers, apps } from "./launchers.tsx";
 import { PAD_ID, askPad, editPad, padTile, togglePad } from "./padtile.ts";
 import { FPS_ID, askFps, toggleFps } from "./fpstile.ts";
 import { TESTS_ID, askTests, testsTile, toggleTests } from "./tests.ts";
@@ -426,33 +426,124 @@ function askMedia() {
   powos.media.state().then((m) => (media.value = m));
 }
 
-/** The media card, as OnePlus's: the track, its art, play/pause and skip, the output picker. Nothing playing: none. */
-function MediaCard({ i = 0 }: { i?: number }) {
-  useEffect(askMedia, []);
-  const m = media.value;
-  if (!m?.available || !m.title) return null;
-  const progress = m.duration ? Math.min(1, (m.position ?? 0) / m.duration) : 0;
+/** The sessions to show a card for: each one with a track, at most two (an older host sends only the one: [m] itself). */
+function sessionsOf(m: MediaState | null): MediaState[] {
+  if (!m?.available) return [];
+  return (m.sessions ?? [m]).filter((x) => x.title).slice(0, 2);
+}
+
+/** A session's app icon: its app in the list the quick launchers read (an Android key is "a:<package>/<activity>"). */
+function appIcon(pkg?: string): string | null {
+  if (!pkg) return null;
+  return apps.value.find((a) => a.key === `a:${pkg}` || a.key.startsWith(`a:${pkg}/`))?.icon ?? null;
+}
+
+const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
+
+/** The seek bar: where it is, and dragged, where to go (a session that doesn't take seeking: no thumb). */
+function Seek({ m }: { m: MediaState }) {
+  const [drag, setDrag] = useState<number | null>(null);
+  const duration = m.duration ?? 0;
+  const at = drag ?? Math.min(duration, m.position ?? 0);
+  const value = (e: Event) => Number((e.target as HTMLInputElement).value);
   return (
-    <div class="cc-media cascade" data-q ref={followNotif} style={{ "--p": String(progress), "--i": i }}>
-      {m.art && <img class="cc-art" src={`/_media/${encodeURIComponent(m.art)}`} alt="" />}
-      <button type="button" class="cc-track" onClick={() => (shut(), powos.media.control("open"))}>
-        <span class="cc-label">{m.title}</span>
-        <span class="cc-detail">{[m.artist, m.app].filter(Boolean).join(" · ")}</span>
+    <div class="cc-seek">
+      <span class="cc-time">{duration ? clock(at) : ""}</span>
+      <input
+        type="range"
+        aria-label="seek"
+        min={0}
+        max={duration || 1}
+        step={1}
+        value={at}
+        style={{ "--p": String(duration ? at / duration : 0) }}
+        disabled={!duration || m.seekable === false}
+        onInput={(e) => setDrag(value(e))}
+        onChange={(e) => {
+          powos.media.seek(m.package, value(e)).catch(() => {});
+          // The host's next tick brings the new position; the thumb stays where it was let go till then.
+          window.setTimeout(() => setDrag(null), 1200);
+        }}
+      />
+      <span class="cc-time">{duration ? clock(duration) : ""}</span>
+    </div>
+  );
+}
+
+/** Previous, play/pause, next - on this session. */
+function Transport({ m }: { m: MediaState }) {
+  const pkg = m.package;
+  return (
+    <span class="cc-transport">
+      <button type="button" aria-label="previous" onClick={() => powos.media.control("previous", pkg)}>
+        <Icon name="skipPrevious" />
       </button>
-      <span class="cc-transport">
-        <button type="button" aria-label="previous" onClick={() => powos.media.control("previous")}>
-          <Icon name="skipPrevious" />
-        </button>
-        <button type="button" aria-label={m.playing ? "pause" : "play"} onClick={() => powos.media.control("toggle")}>
-          <Icon name={m.playing ? "pause" : "play"} />
-        </button>
-        <button type="button" aria-label="next" onClick={() => powos.media.control("next")}>
-          <Icon name="skipNext" />
-        </button>
-        <button type="button" aria-label="output" onClick={() => (shut(), powos.media.output(m.package))}>
-          <Icon name="speakerWireless" />
-        </button>
-      </span>
+      <button type="button" class="cc-play" aria-label={m.playing ? "pause" : "play"} onClick={() => powos.media.control("toggle", pkg)}>
+        <Icon name={m.playing ? "pause" : "play"} />
+      </button>
+      <button type="button" aria-label="next" onClick={() => powos.media.control("next", pkg)}>
+        <Icon name="skipNext" />
+      </button>
+    </span>
+  );
+}
+
+/**
+ * One session's card, as OnePlus's: the art, the track (a tap opens the app), the app's icon (its output picker:
+ * speaker, Bluetooth, cast), the seek bar and the transport. Every control acts on this session (its package), not
+ * whichever plays.
+ */
+function MediaCard({ m }: { m: MediaState }) {
+  const icon = appIcon(m.package);
+  return (
+    <div class="cc-media tile">
+      {m.art ? <img class="cc-art" src={`/_media/${encodeURIComponent(m.art)}`} alt="" /> : <span class="cc-art cc-art-none"><Icon name="musicNote" /></span>}
+      <button type="button" class="cc-track" onClick={() => (shut(), powos.media.control("open", m.package))}>
+        <span class="cc-label">{m.title}</span>
+        <span class="cc-detail">{m.artist ?? ""}</span>
+      </button>
+      <button type="button" class="cc-media-app" aria-label={`output: ${m.app ?? "this app"}`} onClick={() => (shut(), powos.media.output(m.package))}>
+        {icon ? <img src={icon} alt="" /> : <Icon name="speakerWireless" />}
+      </button>
+      <Seek m={m} />
+      <Transport m={m} />
+    </div>
+  );
+}
+
+/**
+ * The media cards (the user, 2026-10-30: "under the quick launcher ... a media player controller thing if we're playing
+ * any media"): one per active session, at most two; none when nothing plays. A card coming or going opens or closes its
+ * height (its slot's grid row 0fr <-> 1fr), so what's under it moves with it instead of jumping; a gone session's card
+ * is kept, closing, until that's done.
+ */
+function MediaCards({ i = 0 }: { i?: number }) {
+  useEffect(askMedia, []);
+  const now = sessionsOf(media.value);
+  const kept = useRef(new Map<string, { m: MediaState; out: boolean }>());
+  const [, rerender] = useState(0);
+  const live = new Set(now.map((m) => m.package ?? m.title!));
+  for (const m of now) kept.current.set(m.package ?? m.title!, { m, out: false });
+  for (const [k, c] of kept.current) if (!live.has(k) && !c.out) kept.current.set(k, { ...c, out: true });
+  const leaving = [...kept.current].filter(([, c]) => c.out).map(([k]) => k).join();
+  useEffect(() => {
+    if (!leaving) return;
+    const t = window.setTimeout(() => {
+      for (const [k, c] of kept.current) if (c.out) kept.current.delete(k);
+      rerender((n) => n + 1);
+    }, 320);
+    return () => clearTimeout(t);
+  }, [leaving]);
+  if (!kept.current.size) return null;
+  return (
+    <div class="cc-medias cascade" data-q ref={followNotif} style={{ "--i": i }}>
+      {[...kept.current].map(([k, c]) => (
+        <div key={k} class={`cc-media-slot ${c.out ? "out" : ""}`}>
+          <div>
+            <MediaCard m={c.m} />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -790,7 +881,7 @@ function Categories() {
           onIcon={() => powos.qs.set("ringer", ((v.ringer + 2) % 3) / 2).then(update)}
         />
       </div>
-      <MediaCard i={2} />
+      <MediaCards i={2} />
       <div class={`cc-main ${grid.carrying ? "dragging" : ""}`} {...grid.handlers}>
         {rows.map((row, r) => (
           <Fragment key={r}>
@@ -1011,7 +1102,6 @@ function Controls() {
           onIcon={() => powos.qs.set("ringer", ((v.ringer + 2) % 3) / 2).then(update)}
         />
       </div>
-      <MediaCard i={2} />
       {/*
         * One ordered list (the user's order; edit mode rearranges it): the first six are the first pull's row, and a
         * further pull only reveals the rest under them - the row never moves (the user: icons mustn't reorganize).
@@ -1020,6 +1110,7 @@ function Controls() {
         <ToggleGrid ts={list} save={saveOrder} />
       </div>
       <Launchers hooks={editHooks} shut={shut} />
+      <MediaCards i={5} />
     </div>
   );
 }
