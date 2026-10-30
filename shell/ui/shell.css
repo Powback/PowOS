@@ -338,6 +338,28 @@
   touch-action: none;
 }
 .pill .mic.on { background: var(--color-red); color: var(--color-background); }
+/* Send (bar.tsx Send), right of the mic while there's text: empty, it's zero wide and its gap taken back, so the empty
+   pill is as it was; it opens (width, opacity) rather than jumping in. */
+.pill .send {
+  flex: none;
+  align-self: flex-end;
+  display: grid;
+  place-items: center;
+  width: 0;
+  height: 40px;
+  margin-left: calc(-1 * var(--gap));
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 20px;
+  background: none;
+  color: var(--color-foreground);
+  opacity: 0;
+  pointer-events: none;
+  transition: width 160ms ease-out, margin-left 160ms ease-out, opacity 160ms ease-out;
+}
+.pill .send.shown { width: 40px; margin-left: 0; opacity: 1; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .pill .send { transition: none; } }
 /* An autosend dictation's words, a moment before they go (assistant.ts): a touch keeps them to edit. */
 .pill.sending .grow { color: var(--accent-text); }
 /* The search bar's place in home's layout is a fixed 48 px; the pill sits in it and grows upward, over home. */

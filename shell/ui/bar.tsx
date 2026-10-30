@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { Ref } from "preact";
 import { GrowField } from "./grow.tsx";
+import { Icon } from "./icons.tsx";
 import { searchResults, searchPending, openSearchResult } from "../search.ts";
 import { followOpenness } from "./gesture.ts";
 import { chatting, drawer, launcherIsOverlay, openPanel, pullKind, query } from "../state.ts";
@@ -104,9 +105,33 @@ function logBlur(e: FocusEvent, field: HTMLTextAreaElement | null) {
   console.trace("search blur");
 }
 
+/**
+ * Send, right of the mic while the field has text ([shown]): the form's submit, so it does exactly what Enter does
+ * (grow.tsx requestSubmit -> the form's onSubmit) without the keyboard. Empty, it folds to nothing (shell.css .pill
+ * .send: width and opacity), so the empty pill's layout is the one it always had.
+ */
+function Send({ shown }: { shown: boolean }) {
+  return (
+    <button
+      type="submit"
+      class={`send ${shown ? "shown" : ""}`}
+      aria-label="send"
+      aria-hidden={!shown || undefined}
+      tabIndex={shown ? undefined : -1}
+      disabled={!shown}
+      // The field keeps its focus (and the keyboard stays as it was); the form's onClick (open, focus) isn't run.
+      onPointerDown={(e) => e.preventDefault()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <Icon name="arrowUp" size={22} />
+    </button>
+  );
+}
+
 export function Pill({
   target,
   sending = false,
+  send = false,
   class: cls = "",
   ...field
 }: {
@@ -114,6 +139,8 @@ export function Pill({
   value: string;
   onInput: (v: string) => void;
   sending?: boolean;
+  /** A send button right of the mic while there's text (the bar's pill): submits the pill's form, as Enter does. */
+  send?: boolean;
   class?: string;
   inputRef?: Ref<HTMLTextAreaElement>;
   [attr: string]: any;
@@ -125,6 +152,7 @@ export function Pill({
       {empty && <span class="prompt" aria-hidden="true">&gt;</span>}
       <GrowField {...(field as { value: string; onInput: (v: string) => void })} />
       <Mic target={target} />
+      {send && <Send shown={!!field.value.trim()} />}
     </div>
   );
 }
@@ -194,6 +222,7 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
       <Pill
         class="bar-pill"
         target={barMic}
+        send
         sending={sending.value}
         inputRef={input}
         value={shown}
