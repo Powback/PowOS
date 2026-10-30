@@ -196,6 +196,8 @@ export interface WorkRow {
   activity?: bigint | number;
   /** The task it is a sub-task of ("" = none; `task set --parent`). */
   parent?: string;
+  /** What the user can try now, one plain sentence (`task set --try`): its Ready-to-try line ("" = none). */
+  tryLine?: string;
 }
 
 /** A JSON-array column ("" or bad = none). */
@@ -466,7 +468,23 @@ const GROUPS: { key: Group; name: string; folded?: boolean }[] = [
   { key: "on", name: "Being worked on" },
   { key: "free", name: "Waiting for an agent", folded: true },
 ];
-/** Rows a group shows before "N more". */
+/**
+ * The areas inside each group (but Needs you), in this order - the board's project names (the CLI's AREAS, `task set
+ * --project`); the board's old "PowOS · ..." projects that name one area map to it, anything else is "Other".
+ */
+const AREAS = ["Windows", "Home & launcher", "Shade & lock", "Games", "Performance", "Kernel & system", "AI page", "Apps", "Agents & tooling"];
+const OLD_AREAS: Record<string, string> = {
+  "PowOS · kernel": "Kernel & system",
+  "PowOS · games": "Games",
+  "PowOS · AI page": "AI page",
+  "PowOS · desktop mode": "Windows",
+  "PowOS · apps platform": "Apps",
+  "PowOS · AI": "Agents & tooling",
+};
+const OTHER = "Other";
+const areaOf = (w: WorkRow) => (AREAS.includes(w.project) ? w.project : OLD_AREAS[w.project] ?? OTHER);
+
+/** Rows an area shows before "N more". */
 const GROUP_SHOWN = 5;
 /** The check a verdict is recorded as (ShellBridge.callVerdict: `--name you`). */
 const USER_CHECK = "you";
@@ -584,7 +602,8 @@ function freeState(w: WorkRow) {
 /** A row's state in plain words per group: no hashes, no raw step text, no check jargon. */
 const STATES: Record<Group, (w: WorkRow) => string> = {
   you: (w) => (w.note ? w.title : "waiting on you"),
-  try: (w) => (openRest(w) && sliceOf(w) ? `ready to try: ${sliceOf(w)}` : "ready to try"),
+  // Only the plain line written for the user (--try): never the agents' step or note (hashes, file names, jargon).
+  try: (w) => w.tryLine?.trim() || "ready to try",
   on: (w) => withStep(w, onState(w)),
   free: (w) => withStep(w, freeState(w)),
 };
@@ -669,18 +688,17 @@ function WorkLine({ w, g, open, onTap }: { w: WorkRow; g: Group | null; open: bo
   );
 }
 
-/** One group: its name and count (a tap folds it), its first GROUP_SHOWN rows, the rest behind "N more". */
-function GroupList({ name, rows, g, folded, opened, tap }: { name: string; rows: WorkRow[]; g: Group; folded?: boolean; opened: string | null; tap: (id: string) => void }) {
-  const [open, setOpen] = useState(!folded);
+/** One area inside a group: its name and count (a tap folds it), its first GROUP_SHOWN rows, the rest behind "N more". */
+function AreaList({ name, rows, g, opened, tap }: { name: string; rows: WorkRow[]; g: Group; opened: string | null; tap: (id: string) => void }) {
+  const [open, setOpen] = useState(true);
   const [all, setAll] = useState(false);
-  if (!rows.length) return null;
   const shown = all ? rows : rows.slice(0, GROUP_SHOWN);
   return (
-    <div class={`ai-group ${g}`}>
-      <button type="button" class="ai-group-fold" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span class="ai-group-title">{name}</span>
+    <div class="ai-area">
+      <button type="button" class="ai-area-fold" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span class="ai-area-caret">{open ? "▾" : "▸"}</span>
+        <span class="ai-area-title">{name}</span>
         <span class="ai-group-count">{rows.length}</span>
-        <span class="ai-group-caret">{open ? "▾" : "▸"}</span>
       </button>
       {open && shown.map((w) => <WorkLine key={w.id} w={w} g={g} open={opened === w.id} onTap={() => tap(w.id)} />)}
       {open && rows.length > GROUP_SHOWN && (
@@ -688,6 +706,30 @@ function GroupList({ name, rows, g, folded, opened, tap }: { name: string; rows:
           {all ? "show fewer" : `${rows.length - GROUP_SHOWN} more`}
         </button>
       )}
+    </div>
+  );
+}
+
+/** [rows] by area, in AREAS order, Other last (each keeps its newest-first order). */
+function byArea(rows: WorkRow[]): [string, WorkRow[]][] {
+  const m = new Map<string, WorkRow[]>([...AREAS, OTHER].map((a) => [a, []]));
+  for (const w of rows) m.get(areaOf(w))!.push(w);
+  return [...m].filter(([, r]) => r.length);
+}
+
+/** One group: its name and count (a tap folds it), its rows by area (Needs you: flat, every row). */
+function GroupList({ name, rows, g, folded, opened, tap }: { name: string; rows: WorkRow[]; g: Group; folded?: boolean; opened: string | null; tap: (id: string) => void }) {
+  const [open, setOpen] = useState(!folded);
+  if (!rows.length) return null;
+  return (
+    <div class={`ai-group ${g}`}>
+      <button type="button" class="ai-group-fold" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span class="ai-group-title">{name}</span>
+        <span class="ai-group-count">{rows.length}</span>
+        <span class="ai-group-caret">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && g === "you" && rows.map((w) => <WorkLine key={w.id} w={w} g={g} open={opened === w.id} onTap={() => tap(w.id)} />)}
+      {open && g !== "you" && byArea(rows).map(([a, r]) => <AreaList key={a} name={a} rows={r} g={g} opened={opened} tap={tap} />)}
     </div>
   );
 }
