@@ -14,7 +14,7 @@ import android.view.SurfaceControl
 
 /**
  * A web window's own frame, drawn natively in its layer stack (docs/WEB_WINDOWS.md "Native frame"): the title bar
- * (icon, title, minimise, full screen/restore, close - the shell's window-control look, ui/chrome.tsx) above the app's
+ * (icon, title, tile, minimise, full screen/restore, close - the shell's window-control look, ui/chrome.tsx) above the app's
  * mirror, and a background under the mirror (shown where the app hasn't drawn yet: a resize before the app lays out).
  *
  * Why native: the user, 2026-10-30, "nobody asked for the cutoff" - the window sits on home like a card, so it can't be
@@ -54,7 +54,10 @@ internal class WebWindowChrome(
 
     private fun nameOf(sc: SurfaceControl) = sc.toString().substringAfter("{").substringBefore(" ").ifEmpty { "powos-ww" }
 
-    /** Which control is at [x] (window px from its left, in a [width]-wide bar): "close", "maximise", "minimise", or null. */
+    /**
+     * Which control is at [x] (window px from its left, in a [width]-wide bar): "close", "maximise", "minimise", "tile"
+     * (PowOS's split screen: its menu - docs/WEB_WINDOWS.md "Tiles"), or null.
+     */
     fun control(
         x: Float,
         width: Int,
@@ -65,9 +68,16 @@ internal class WebWindowChrome(
             fromRight < button -> "close"
             fromRight < 2 * button -> "maximise"
             fromRight < 3 * button -> "minimise"
+            fromRight < 4 * button -> "tile"
             else -> null
         }
     }
+
+    /** [control]'s centre, window px from the left of a [width]-wide bar. */
+    fun centerOf(
+        control: String,
+        width: Int,
+    ): Float = width - button * (CONTROLS.indexOf(control).coerceAtLeast(0) + 0.5f)
 
     /** The frame for a [width] x [height] window (px, unscaled) into [t]; the bar redrawn when it changed. */
     fun layout(
@@ -135,7 +145,7 @@ internal class WebWindowChrome(
             color = theme.fg
             textSize = 14 * dp
         }
-        val room = width - 3 * button - x - 8 * dp
+        val room = width - CONTROLS.size * button - x - 8 * dp
         if (room > 0) {
             val shown = android.text.TextUtils.ellipsize(label, android.text.TextPaint(text), room, android.text.TextUtils.TruncateAt.END)
             c.drawText(shown, 0, shown.length, x, title / 2f - (text.descent() + text.ascent()) / 2, text)
@@ -147,7 +157,7 @@ internal class WebWindowChrome(
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
         }
-        listOf("close", if (maximised) "restore" else "maximise", "minimise").forEachIndexed { i, kind ->
+        listOf("close", if (maximised) "restore" else "maximise", "minimise", "tile").forEachIndexed { i, kind ->
             val cx = width - button * (i + 0.5f)
             mark(c, kind, android.graphics.PointF(cx, title / 2f), stroke)
         }
@@ -172,6 +182,11 @@ internal class WebWindowChrome(
         fun box(l: Float, t: Float, r: Float, b: Float) = path.addRect(pt(l, cx), pt(t, cy), pt(r, cx), pt(b, cy), Path.Direction.CW)
         when (kind) {
             "minimise" -> line(4f, 12f, 20f, 12f)
+            // Two panes side by side: the tile menu.
+            "tile" -> {
+                box(4f, 5f, 20f, 19f)
+                line(12f, 5f, 12f, 19f)
+            }
             "maximise" -> box(5f, 5f, 19f, 19f)
             "restore" -> {
                 box(5f, 9f, 15f, 19f)
@@ -220,5 +235,8 @@ internal class WebWindowChrome(
         const val TITLE_DP = 36f
         private const val BUTTON_DP = 40f
         private const val BACK = 8
+
+        /** The bar's buttons, right to left. */
+        private val CONTROLS = listOf("close", "maximise", "minimise", "tile")
     }
 }

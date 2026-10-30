@@ -82,6 +82,9 @@ class WebWindows(
     private var nextId = 1
     private val io by lazy { Handler(HandlerThread("powos-webwindows").apply { start() }.looper) }
     private val sync = FrameSync(web, "ww")
+
+    /** PowOS's own split screen: dividers, the snap hint, the tile menu ([WebWindowTiles]; docs "Tiles"). */
+    private val tiles = WebWindowTiles(context) { t, sc, r -> cornerRadius(t, sc, r) }
     private val helper = Helper()
 
     /** Off unless `settings put global powos_web_windows 1`. */
@@ -150,6 +153,13 @@ class WebWindows(
 
         /** Filling the work area (the bar shows restore). */
         var maximised = false
+
+        /**
+         * A divider is moving it: its app's last frame is scaled up to cover a body bigger than its display (cropped
+         * when smaller), so the tile never shows the background (Android's split shows a veil there). The display
+         * gets the real size when the page takes the new split.
+         */
+        var cover = false
     }
 
     /** The layer all windows hang under: home's window surface, under its own buffer. Made on first use (main thread). */
@@ -175,6 +185,11 @@ class WebWindows(
         rect: JSONObject,
     ): Int {
         if (!enabled()) return -1.also { Log.w(TAG, "open ${component.packageName}: $SETTING is off") }
+        unresizeable(component)?.let { why ->
+            // Fallback: Android's own window (the caller launches it as before; the switcher uses Android's split).
+            Log.w(TAG, "fallback: ${component.packageName} keeps Android's own window/split, not a web window: $why")
+            return -1
+        }
         val parent = root() ?: return -1
         val id = nextId++
         val d = density()
@@ -269,12 +284,35 @@ class WebWindows(
      * in it; one that isn't is hidden. Applied on the draw that shows page frame <frame> ([FrameSync]).
      */
     fun frameCommand(rest: String) {
-        val (frame, geos) = parse(rest) ?: return
+        val (frame, geos, divs) = parse(rest) ?: return
         val cookie = sync.receive(frame)
-        main.post { sync.bind(frame, cookie) { apply(frame, geos) } }
+        main.post { sync.bind(frame, cookie) { apply(frame, geos, divs) } }
     }
 
-    private fun parse(rest: String): Pair<Long, List<Geo>>? =
+    /**
+     * After the windows: "<n> [<page:axis> <x|y> <pos> <from> <len> <lo> <hi> <before ids,|-> <after ids,|->]*n", the
+     * tiles' dividers (ui/webwindows.tsx dividerEntries); absent from an older page.
+     */
+    private fun parseDividers(
+        t: List<String>,
+        start: Int,
+        dpr: Float,
+        at: IntArray,
+    ): List<WebWindowTiles.Divider> {
+        var i = start
+        val n = t.getOrNull(i++)?.toIntOrNull() ?: return emptyList()
+        val ids = { s: String -> if (s == "-") IntArray(0) else s.split(',').map { it.toInt() }.toIntArray() }
+        return List(n) {
+            val key = t[i++]
+            val vertical = t[i++] == "x"
+            // Along x: pos/lo/hi are x, from is y; along y the other way round.
+            val (across, along) = if (vertical) at[0] to at[1] else at[1] to at[0]
+            val f = { s: String, o: Int -> s.toFloat() * dpr + o }
+            WebWindowTiles.Divider(key, vertical, f(t[i++], across), f(t[i++], along), f(t[i++], 0), f(t[i++], across), f(t[i++], across), ids(t[i++]), ids(t[i++]))
+        }
+    }
+
+    private fun parse(rest: String): Triple<Long, List<Geo>, List<WebWindowTiles.Divider>>? =
         try {
             val t = rest.trim().split(' ')
             val frame = t[0].toLong()
@@ -289,7 +327,7 @@ class WebWindows(
                 v: String,
                 o: Int,
             ) = Math.round(v.toFloat() * dpr) + o
-            frame to
+            val geos =
                 List(n) { z ->
                     val id = t[i++].toInt()
                     val fx = px(t[i++], at[0])
@@ -307,6 +345,7 @@ class WebWindows(
                         it.maximised = maximised
                     }
                 }
+            Triple(frame, geos, parseDividers(t, i, dpr, at))
         } catch (e: RuntimeException) {
             Log.w(TAG, "w.f: bad geometry ($e)")
             null
@@ -316,9 +355,11 @@ class WebWindows(
     private fun apply(
         frame: Long,
         geos: List<Geo>,
+        divs: List<WebWindowTiles.Divider>,
     ) {
         val t = SurfaceControl.Transaction()
         placeAll(t, geos)
+        root?.takeIf { it.isValid }?.let { tiles.place(t, it, divs, theme, divDrag?.d?.key) }
         val attached = web.rootSurfaceControl
         if (attached == null) {
             t.apply()
@@ -422,8 +463,12 @@ class WebWindows(
         val chrome = win.chrome ?: return
         chrome.layout(t, android.util.Size(w, h), maximised, theme)
         win.mirror?.takeIf { it.isValid }?.let { m ->
+            val bodyH = (h - chrome.title).coerceAtLeast(1)
+            // A divider drag: the app's last frame scaled to cover the bigger tile, cropped in the smaller (no veil).
+            val s = if (g.cover && win.w > 0 && win.h > 0) maxOf(1f, w / win.w.toFloat(), bodyH / win.h.toFloat()) else 1f
             t.setPosition(m, 0f, chrome.title.toFloat())
-            t.setCrop(m, Rect(0, 0, w, (h - chrome.title).coerceAtLeast(1)))
+            t.setScale(m, s, s)
+            t.setCrop(m, Rect(0, 0, Math.ceil(w / s.toDouble()).toInt(), Math.ceil(bodyH / s.toDouble()).toInt()))
         }
     }
 
@@ -590,6 +635,9 @@ class WebWindows(
         var moves = 0
         var ended = false
         var endedAt = 0L
+
+        /** A move with the finger at a screen edge or corner: the tile it snaps to when let go there (docs "Tiles"). */
+        var slot: String? = null
     }
 
     private var drag: Drag? = null
@@ -605,13 +653,21 @@ class WebWindows(
     private var area = Rect(0, 0, Int.MAX_VALUE / 4, Int.MAX_VALUE / 4)
     private var theme = WebWindowChrome.Theme.DEFAULT
 
-    /** "w.area <dpr> <l> <t> <r> <b>" (viewport CSS px), the port's thread. */
+    /** Where tiles go, window px (below the status bar, a gap above the dock): ui/webwindows.tsx tileArea. */
+    private var tileArea = area
+
+    /** "w.area <dpr> <l> <t> <r> <b> [<tile l> <t> <r> <b>]" (viewport CSS px), the port's thread. */
     fun areaCommand(rest: String) {
         val n = rest.trim().split(' ').mapNotNull { it.toFloatOrNull() }
         if (n.size < 5) return
         val at = IntArray(2).also(web::getLocationInWindow)
-        val r = Rect(Math.round(n[1] * n[0]) + at[0], Math.round(n[2] * n[0]) + at[1], Math.round(n[3] * n[0]) + at[0], Math.round(n[4] * n[0]) + at[1])
-        main.post { area = r }
+        val rect = { i: Int -> Rect(Math.round(n[i] * n[0]) + at[0], Math.round(n[i + 1] * n[0]) + at[1], Math.round(n[i + 2] * n[0]) + at[0], Math.round(n[i + 3] * n[0]) + at[1]) }
+        val r = rect(1)
+        val tr = if (n.size >= 9) rect(5) else r
+        main.post {
+            area = r
+            tileArea = tr
+        }
     }
 
     /** "w.theme <bg r g b a> <fg r g b a>": the bars in the page's colours (redrawn on their next placing). */
@@ -659,6 +715,13 @@ class WebWindows(
         val f = fingers(ev)
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) return down(f)
         pressed?.let { p -> return pressUp(p, ev, f) }
+        divDrag?.takeIf { !it.ended }?.let { dd ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_MOVE -> dividerMove(dd, f)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dividerUp(dd, ev.actionMasked == MotionEvent.ACTION_CANCEL)
+            }
+            return true
+        }
         val d = drag?.takeIf { !it.ended } ?: return false
         when (ev.actionMasked) {
             MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP -> rebase(d, f)
@@ -672,6 +735,8 @@ class WebWindows(
     private fun down(f: Fingers): Boolean {
         pressed = null
         if (drag?.ended == false) drag = null
+        if (divDrag?.ended == false) divDrag = null
+        if (menuDown(f) || tilesDown(f)) return true
         val (win, part) = hit(f.x, f.y) ?: return false
         val g = win.geo ?: return false
         emit("webwindows.raise", win.id)
@@ -687,6 +752,25 @@ class WebWindows(
         rebase(d, f)
         drag = d
         return true
+    }
+
+    /** The tile menu open: a press on it picks (when the finger lifts there); anywhere else closes it (false). */
+    private fun menuDown(f: Fingers): Boolean {
+        val id = tiles.menuFor ?: return false
+        val item = tiles.menuAt(f.x, f.y)
+        if (item == null) {
+            tiles.closeMenu()
+            return false
+        }
+        wins[id]?.let { pressed = it to "menu:$item" }
+        return true
+    }
+
+    /** A divider is above every window (its touch target is wider than the gap: it overlaps the tiles' edges). */
+    private fun tilesDown(f: Fingers): Boolean {
+        if (f.y >= area.bottom) return false
+        val dv = tiles.dividerAt(f.x, f.y) ?: return false
+        return dividerDown(dv, f)
     }
 
     /** The topmost shown window at ([x], [y]) and what of it: "bar", "button:<control>", an edge mask, or null (its body). */
@@ -745,8 +829,23 @@ class WebWindows(
         if (a != MotionEvent.ACTION_UP && a != MotionEvent.ACTION_CANCEL) return true
         pressed = null
         val (win, control) = p
+        if (control.startsWith("menu:")) return menuUp(win, control.removePrefix("menu:"), a, f)
         if (a == MotionEvent.ACTION_CANCEL || hit(f.x, f.y)?.let { it.first === win && it.second == "button:$control" } != true) return true
         control(win, control)
+        return true
+    }
+
+    /** A tile menu item pressed: it runs when the finger lifts on it. */
+    private fun menuUp(
+        win: Win,
+        item: String,
+        action: Int,
+        f: Fingers,
+    ): Boolean {
+        if (action != MotionEvent.ACTION_UP || item.isEmpty() || tiles.menuAt(f.x, f.y) != item) return true
+        tiles.closeMenu()
+        Log.i(TAG, "window ${win.id}: tile $item (its tile menu)")
+        emit("webwindows.tile", mapOf("id" to win.id, "slot" to item))
         return true
     }
 
@@ -763,8 +862,20 @@ class WebWindows(
                 win.shown = false
                 emit("webwindows.control", mapOf("id" to win.id, "action" to "minimise"))
             }
+            "tile" -> tileMenu(win)
             else -> emit("webwindows.control", mapOf("id" to win.id, "action" to "maximise"))
         }
+    }
+
+    /** The bar's tile button: the tile menu under it (left, right, top, bottom, grid, float). */
+    private fun tileMenu(win: Win) {
+        val g = win.geo ?: return
+        val r = root?.takeIf { it.isValid } ?: return
+        val chrome = win.chrome ?: return
+        val anchor = g.frame.left + chrome.centerOf("tile", g.frame.width()) * g.scale
+        val top = g.frame.top + (chrome.title + 4 * density()) * g.scale
+        val tiled = tiles.dividers.any { win.id in it.before || win.id in it.after }
+        tiles.openMenu(r, win.id, anchor, top, area, tiled, theme)
     }
 
     /** A finger came or went (or the gesture began): the gesture goes on from here, the window doesn't jump. */
@@ -789,7 +900,12 @@ class WebWindows(
             d.moved = Math.hypot((f.x - d.downX).toDouble(), (f.y - d.downY).toDouble()) > slop || (d.spread0 > 0 && Math.abs(f.spread - d.spread0) > slop)
             if (!d.moved) return
         }
-        if (d.edges == 0) moveTo(d, f) else resizeTo(d, f)
+        if (d.edges == 0) {
+            moveTo(d, f)
+            trackSlot(d, f)
+        } else {
+            resizeTo(d, f)
+        }
         d.moves++
         val t = SurfaceControl.Transaction()
         val live = Geo(d.win.id, Rect(d.frame), Rect(d.frame), 0f, true, 0).also {
@@ -798,6 +914,17 @@ class WebWindows(
         }
         if (d.win.container.isValid) frameAt(t, d.win, live)
         t.apply()
+    }
+
+    /** A one-finger move at a screen edge or corner: the snap hint shows that tile (only when it changes). */
+    private fun trackSlot(
+        d: Drag,
+        f: Fingers,
+    ) {
+        val slot = if (f.n == 1 && d.spread0 == 0f) snapSlot(f.x, f.y) else null
+        if (slot == d.slot) return
+        d.slot = slot
+        root?.takeIf { it.isValid }?.let { tiles.hint(it, slot?.let(::slotRect), theme) }
     }
 
     /** Move and zoom: the window point under the centroid at the rebase stays under it, at the fingers' scale. */
@@ -852,6 +979,7 @@ class WebWindows(
         val win = d.win
         val tap = !d.moved && !cancelled && ms < TAP_MS
         Log.i(TAG, "native ${if (d.edges == 0) "move" else "resize"} w${win.id}: ${d.moves} layer moves in $ms ms (one per input frame), frame ${d.start.toShortString()} -> ${d.frame.toShortString()} x${"%.2f".format(d.scale)}${if (tap) ", a tap" else ""}")
+        if (snapEnd(d, cancelled)) return
         if (tap && d.edges == 0) tapped(win, d.endedAt)
         if (!d.moved) {
             drag = null
@@ -868,6 +996,28 @@ class WebWindows(
                 "scale" to d.scale,
             ),
         )
+    }
+
+    /**
+     * Let go at an edge or corner: into that tile at once (the tile's rect as the page will make it, so the hold ends
+     * on the page's first frame with it), the app's last frame covering it until it resizes. False: not at one.
+     */
+    private fun snapEnd(
+        d: Drag,
+        cancelled: Boolean,
+    ): Boolean {
+        val slot = d.slot ?: return false
+        root?.takeIf { it.isValid }?.let { tiles.hint(it, null, theme) }
+        if (cancelled) return false
+        val win = d.win
+        d.frame.set(slotRect(slot))
+        d.scale = 1f
+        val t = SurfaceControl.Transaction()
+        if (win.container.isValid) frameAt(t, win, Geo(win.id, Rect(d.frame), Rect(d.frame), 0f, true, 0).also { it.cover = true })
+        t.apply()
+        Log.i(TAG, "window ${win.id}: snapped to tile $slot ${d.frame.toShortString()} (let go at the screen's edge)")
+        emit("webwindows.tile", mapOf("id" to win.id, "slot" to slot))
+        return true
     }
 
     /** A tap on [win]'s bar at [at]: the second one soon after on the same bar is full screen / restore. */
@@ -890,14 +1040,196 @@ class WebWindows(
         win: Win,
         g: Geo,
     ): Boolean {
+        heldByDivider(win, g)?.let { return it }
         val d = drag?.takeIf { it.win === win } ?: return false
         if (!d.ended) return true
-        val close = { a: Int, b: Int -> Math.abs(a - b) <= 2 }
-        val there = close(g.frame.left, d.frame.left) && close(g.frame.top, d.frame.top) && close(g.frame.width(), d.frame.width()) && close(g.frame.height(), d.frame.height())
-        if (!there && SystemClock.uptimeMillis() - d.endedAt < HOLD_MS) return true
+        if (!near(g.frame, d.frame) && SystemClock.uptimeMillis() - d.endedAt < HOLD_MS) return true
         drag = null
         return false
     }
+
+    // ---- tiles: snapping at the screen's edges, dividers ---------------------------------------------------------------
+
+    /** A move's finger at the work area's left/right edge (a corner: its top/bottom too): that tile, or null. */
+    private fun snapSlot(
+        x: Float,
+        y: Float,
+    ): String? {
+        val edge = SNAP_EDGE_DP * density()
+        val corner = SNAP_CORNER_DP * density()
+        val left = x <= area.left + edge
+        if (!left && x < area.right - edge) return null
+        val row =
+            when {
+                y <= area.top + corner -> 0
+                y >= area.bottom - corner -> 2
+                else -> 1
+            }
+        return SNAP_SLOTS[row][if (left) 0 else 1]
+    }
+
+    /** Tile [slot]'s rect (window px), as ui/webwindows.tsx tileRects makes it for a new tiling (at a half). */
+    private fun slotRect(slot: String): Rect {
+        val area = tileArea
+        val g = WebWindowTiles.GAP_CSS * lastDpr / 2
+        val mx = (area.left + area.right) / 2f
+        val my = (area.top + area.bottom) / 2f
+        val l = area.left.toFloat()
+        val t = area.top.toFloat()
+        val r = area.right.toFloat()
+        val b = area.bottom.toFloat()
+        val (x0, y0, x1, y1) =
+            when (slot) {
+                "left" -> listOf(l, t, mx - g, b)
+                "right" -> listOf(mx + g, t, r, b)
+                "tl" -> listOf(l, t, mx - g, my - g)
+                "tr" -> listOf(mx + g, t, r, my - g)
+                "bl" -> listOf(l, my + g, mx - g, b)
+                else -> listOf(mx + g, my + g, r, b)
+            }
+        return Rect(Math.round(x0), Math.round(y0), Math.round(x1), Math.round(y1))
+    }
+
+    /** A divider under the finger: the tiles on both sides follow it live (native, no page round trip). */
+    private class DivDrag(
+        val d: WebWindowTiles.Divider,
+        val handle: Any?,
+        /** The finger's coordinate across the divider at the down. */
+        val down: Float,
+        /** The tiles' frames at the down (window px). */
+        val starts: Map<Int, Rect>,
+    ) {
+        val downAt = SystemClock.uptimeMillis()
+        var pos = d.pos
+        var moved = false
+        var moves = 0
+        var ended = false
+        var endedAt = 0L
+
+        /** After the up: where each tile was let go (held there until the page's frame has it). */
+        val targets = HashMap<Int, Rect>()
+    }
+
+    private var divDrag: DivDrag? = null
+
+    private fun dividerDown(
+        dv: WebWindowTiles.Divider,
+        f: Fingers,
+    ): Boolean {
+        val starts = (dv.before + dv.after).toList().mapNotNull { id -> wins[id]?.geo?.let { id to Rect(it.frame) } }.toMap()
+        val handle = root?.takeIf { it.isValid }?.let { tiles.handle(it, dv, theme) }
+        divDrag = DivDrag(dv, handle, if (dv.vertical) f.x else f.y, starts)
+        return true
+    }
+
+    /** Each tile's frame with the divider at [pos]: the before side's far edge and the after side's near edge follow it. */
+    private fun dividerFrames(
+        dd: DivDrag,
+        pos: Float,
+    ): Map<Int, Rect> {
+        val g = WebWindowTiles.GAP_CSS * lastDpr / 2
+        val out = HashMap<Int, Rect>()
+        for ((id, start) in dd.starts) {
+            val r = Rect(start)
+            val before = id in dd.d.before
+            when {
+                dd.d.vertical && before -> r.right = Math.round(pos - g)
+                dd.d.vertical -> r.left = Math.round(pos + g)
+                before -> r.bottom = Math.round(pos - g)
+                else -> r.top = Math.round(pos + g)
+            }
+            out[id] = r
+        }
+        return out
+    }
+
+    /** The tiles and the handle with the divider at [pos], one transaction now: each app's last frame scaled or cropped. */
+    private fun dividerShow(
+        dd: DivDrag,
+        pos: Float,
+    ) {
+        val t = SurfaceControl.Transaction()
+        for ((id, r) in dividerFrames(dd, pos)) {
+            val win = wins[id]?.takeIf { it.container.isValid } ?: continue
+            frameAt(t, win, Geo(id, r, r, 0f, true, 0).also { it.cover = true })
+        }
+        dd.handle?.let { tiles.at(t, it, pos, dd.d) }
+        t.apply()
+    }
+
+    private fun dividerMove(
+        dd: DivDrag,
+        f: Fingers,
+    ) {
+        val at = if (dd.d.vertical) f.x else f.y
+        if (!dd.moved) {
+            dd.moved = Math.abs(at - dd.down) > slop
+            if (!dd.moved) return
+        }
+        val min = MIN_TILE_DP * density()
+        dd.pos = (dd.d.pos + at - dd.down).coerceIn(dd.d.lo + min, (dd.d.hi - min).coerceAtLeast(dd.d.lo + min))
+        dd.moves++
+        dividerShow(dd, dd.pos)
+    }
+
+    /**
+     * Let go: within [WebWindowTiles.DROP] of an edge the squeezed side's windows leave the tiles (the page minimises
+     * them, the rest close up); else it snaps to 1/3, 1/2 or 2/3, at once, and the page takes that split (its next
+     * frame resizes the displays: each app lays out at its real tile size).
+     */
+    private fun dividerUp(
+        dd: DivDrag,
+        cancelled: Boolean,
+    ) {
+        dd.ended = true
+        dd.endedAt = SystemClock.uptimeMillis()
+        if (!dd.moved) {
+            divDrag = null
+            return
+        }
+        val r = dd.d.ratio(dd.pos)
+        val ms = dd.endedAt - dd.downAt
+        val drop =
+            when {
+                cancelled -> null
+                r < WebWindowTiles.DROP -> dd.d.before
+                r > 1 - WebWindowTiles.DROP -> dd.d.after
+                else -> null
+            }
+        if (drop != null && drop.isNotEmpty()) {
+            Log.i(TAG, "divider ${dd.d.key}: ${dd.moves} live moves in $ms ms, let go at ${"%.2f".format(r)}: windows ${drop.joinToString()} leave the tiles (to the dock)")
+            divDrag = null
+            emit("webwindows.divider", mapOf("key" to dd.d.key, "ratio" to r, "drop" to drop.toList()))
+            return
+        }
+        val snapped = if (cancelled) dd.d.ratio(dd.d.pos) else WebWindowTiles.snap(r)
+        dd.pos = dd.d.lo + snapped * (dd.d.hi - dd.d.lo)
+        dd.targets.putAll(dividerFrames(dd, dd.pos))
+        dividerShow(dd, dd.pos)
+        Log.i(TAG, "divider ${dd.d.key}: ${dd.moves} live moves in $ms ms (last frames scaled/cropped, no veil), ${"%.2f".format(r)} -> snapped ${"%.2f".format(snapped)}")
+        emit("webwindows.divider", mapOf("key" to dd.d.key, "ratio" to snapped))
+    }
+
+    /** [held] for a divider's tiles: null = not one of them; else whether its layer stays where the drag left it. */
+    private fun heldByDivider(
+        win: Win,
+        g: Geo,
+    ): Boolean? {
+        val dd = divDrag ?: return null
+        if (win.id !in dd.starts) return null
+        if (!dd.ended) return true
+        val target = dd.targets[win.id] ?: return null
+        if (!near(g.frame, target) && SystemClock.uptimeMillis() - dd.endedAt < HOLD_MS) return true
+        dd.targets.remove(win.id)
+        if (dd.targets.isEmpty()) divDrag = null
+        return false
+    }
+
+    /** The page's frame [a] has the gesture's place [b] (2 px either way: rounding). */
+    private fun near(
+        a: Rect,
+        b: Rect,
+    ): Boolean = maxOf(Math.abs(a.left - b.left), Math.abs(a.top - b.top), Math.abs(a.width() - b.width()), Math.abs(a.height() - b.height())) <= 2
 
     // ---- input (v0, until S4) ------------------------------------------------------------------------------------------
 
@@ -940,6 +1272,8 @@ class WebWindows(
 
     fun closeAll() {
         drag = null
+        divDrag = null
+        tiles.release()
         (web as? HomeWebView)?.touchHook = null
         wins.values.toList().forEach { drop(it) }
         runCatching { dm.unregisterDisplayListener(displayListener) }
@@ -960,6 +1294,8 @@ class WebWindows(
         w.closed = true
         val t = SurfaceControl.Transaction()
         if (drag?.win === w) drag = null
+        if (divDrag?.starts?.containsKey(w.id) == true) divDrag = null
+        if (tiles.menuFor == w.id) tiles.closeMenu()
         w.mirror?.let { if (it.isValid) t.reparent(it, null) }
         w.chrome?.release(t)
         if (w.container.isValid) t.reparent(w.container, null)
@@ -1002,7 +1338,52 @@ class WebWindows(
 
     // ---- launch, IME -----------------------------------------------------------------------------------------------------
 
+    /**
+     * Why [component] can't be a web window (a tile resizes it at will), or null. An activity declaring
+     * resizeableActivity=false and targeting below SDK 36 (Android 16 ignores the flag on large screens for 36+) would
+     * run letterboxed in size-compat on the display: Android's own window and split handle it better.
+     * HACK: ActivityInfo.resizeMode is hidden (reflected). Real fix: none public (isResizeableActivity is the hidden
+     * twin).
+     */
+    private fun unresizeable(component: ComponentName): String? =
+        runCatching {
+            HiddenApi.allow()
+            val info = context.packageManager.getActivityInfo(component, 0)
+            val mode = android.content.pm.ActivityInfo::class.java.getField("resizeMode").getInt(info)
+            val target = info.applicationInfo.targetSdkVersion
+            if (mode == RESIZE_MODE_UNRESIZEABLE && target < 36) "not resizeable (resizeMode 0, targetSdk $target)" else null
+        }.getOrNull()
+
+    /**
+     * After the launch: the app must have a task on the window's display. None after [ESCAPE_CHECK_MS] (it refused the
+     * display, or its launch went to the default display): the window goes and the app opens as Android's own window
+     * (fallback, logged).
+     */
+    private fun checkLanded(w: Win) {
+        io.postDelayed({
+            if (w.closed) return@postDelayed
+            val n = tasksOn(w.displayId)
+            if (n == null || n > 0) return@postDelayed
+            Log.w(TAG, "fallback: ${w.component.packageName} has no task on display ${w.displayId} ${ESCAPE_CHECK_MS} ms after its launch: Android's own window instead of web window ${w.id}")
+            main.post {
+                drop(w)
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(w.component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }.onFailure { Log.w(TAG, "fallback launch of ${w.component.packageName} failed", it) }
+            }
+        }, ESCAPE_CHECK_MS)
+    }
+
+    /** How many root tasks [displayId] has, or null (unknown: no fallback on a guess). */
+    private fun tasksOn(displayId: Int): Int? =
+        runCatching {
+            HiddenApi.allow()
+            val atm = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!!
+            (atm.javaClass.getMethod("getAllRootTaskInfosOnDisplay", Int::class.javaPrimitiveType).invoke(atm, displayId) as List<*>).size
+        }.getOrNull()
+
     private fun launch(w: Win) {
+        checkLanded(w)
         val intent =
             Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LAUNCHER)
@@ -1243,6 +1624,14 @@ class WebWindows(
         private const val MIN_W_DP = 220f
         private const val MIN_H_DP = 160f
 
+        /** A divider stops this far from its span's ends (a tile that small is about to leave: [WebWindowTiles.DROP]). */
+        private const val MIN_TILE_DP = 48f
+
+        /** A move snaps to a tile with the finger this near the work area's left/right edge (corner: and its top/bottom). */
+        private const val SNAP_EDGE_DP = 24f
+        private const val SNAP_CORNER_DP = 120f
+        private val SNAP_SLOTS = listOf(listOf("tl", "tr"), listOf("left", "right"), listOf("bl", "br"))
+
         /** How much of a window's width stays on screen when it's moved sideways off it. */
         private const val KEEP_DP = 64f
         private const val EDGE_L = 1
@@ -1250,6 +1639,8 @@ class WebWindows(
         private const val EDGE_R = 4
         private const val EDGE_B = 8
         private const val MIRROR_WAIT_MS = 2000L
+        private const val ESCAPE_CHECK_MS = 3000L
+        private const val RESIZE_MODE_UNRESIZEABLE = 0
         private const val IME_POLICY_FALLBACK_DISPLAY = 1
         private val ACTIONS = mapOf("down" to MotionEvent.ACTION_DOWN, "move" to MotionEvent.ACTION_MOVE, "up" to MotionEvent.ACTION_UP)
         private val VERBS = mapOf(MotionEvent.ACTION_DOWN to "DOWN", MotionEvent.ACTION_MOVE to "MOVE", MotionEvent.ACTION_UP to "UP")
