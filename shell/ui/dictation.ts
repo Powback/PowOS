@@ -26,8 +26,16 @@ let asked: MicTarget | null = null;
 
 const join = (...parts: string[]) => parts.map((p) => p.trim()).filter(Boolean).join(" ");
 
-/** What a field shows while it listens: what was typed, then what's heard so far. */
-export const hearing = (target: MicTarget) => (speech.value.listening && pending?.target === target ? join(pending.typed, speech.value.text) : null);
+/** A send tapped while dictating into this target: the recognizer is stopping and its final words are awaited. */
+export const finishing = signal<MicTarget | null>(null);
+/** The send's wait for those final words; past it, what's heard so far is what's sent. */
+const FINISH_MS = 3000;
+/** The finishing dictation's promise (one per send, a second tap shares it) and its end. */
+let finished: { done: Promise<void>; end: (text?: string) => void } | null = null;
+
+/** What a field shows while it listens: what was typed, then what's heard so far - kept while a send finishes it. */
+export const hearing = (target: MicTarget) =>
+  (speech.value.listening || finishing.value === target) && pending?.target === target ? join(pending.typed, speech.value.text) : null;
 
 export async function listen(hold: boolean, target: MicTarget) {
   // The recognizer first, then the UI: the call is on its way before anything else runs.
@@ -56,6 +64,43 @@ export function dictate(target: MicTarget, send = false) {
   listen(false, target).then(() => {
     if (send && pending?.target === target) pending.send = true;
   });
+}
+
+/**
+ * A send (the button, Enter) while one of [targets] dictates (SB3, the user 2026-10-30: "I can't press send like it
+ * doesn't disable the transcription and then send"): the recognizer stops, its final words come (speech.done) - or
+ * FINISH_MS passes and what's heard so far stands - and the whole goes into the field as a dictation (heard(full,
+ * false)); the promise resolves once it's there, so the caller then submits it as Enter does. Not dictating: null.
+ */
+export function finish(...targets: MicTarget[]): Promise<void> | null {
+  if (finished) return finished.done;
+  const p = pending;
+  if (!p || !targets.includes(p.target)) return null;
+  p.send = false;
+  // The last partial: a recognizer whose final result comes back empty (stopped mid-word) still sends what showed.
+  const partial = speech.value.text;
+  let resolve = () => {};
+  const done = new Promise<void>((r) => (resolve = r));
+  const timer = window.setTimeout(() => finished?.end(), FINISH_MS);
+  finished = {
+    done,
+    end: (text) => {
+      clearTimeout(timer);
+      finished = null;
+      finishing.value = null;
+      if (pending === p) {
+        pending = null;
+        speech.value = { ...speech.value, listening: false };
+        // Timed out: the recognizer never ended - let it go.
+        if (text === undefined) powos.speech.cancel();
+        p.target.heard(join(p.typed, text?.trim() ? text : speech.value.text || partial), false);
+      }
+      resolve();
+    },
+  };
+  finishing.value = p.target;
+  powos.speech.stop();
+  return done;
 }
 
 /** [target]'s dictation is under way (or starting). */
@@ -117,6 +162,7 @@ export function release(target?: MicTarget) {
 
 powos.on("speech.state", (s: { listening: boolean; text: string; error: string | null }) => (speech.value = s));
 powos.on("speech.done", ({ text }: { text: string }) => {
+  if (finished) return finished.end(text);
   const p = pending;
   pending = null;
   speech.value = { ...speech.value, listening: false };

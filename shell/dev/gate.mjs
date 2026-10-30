@@ -3263,6 +3263,30 @@ try {
     if (process.env.DOCK_SHOTS) await r.page.screenshot({path: `${process.env.DOCK_SHOTS}/${name}.png`});
     return failures;
   }));
+  // SB3 (the user, 2026-10-30: "I can't press send like it doesn't disable the transcription and then send"): send
+  // tapped mid-dictation stops the recognizer, waits for its final words (the send spins), then sends them once, the
+  // mic off - in every pill with send (dev/send-dictation-check.js). Renders: /cache/send-dictation-<case>.png.
+  for (const [name, mode, viewport, form, setup] of [
+    ["bar-folded", "pull", { width: 404, height: 900 }, ".bar", "chat"],
+    ["bar-unfolded", "pull", { width: 821, height: 883 }, ".bar", "chat"],
+    ["powai-unfolded", "pull", { width: 821, height: 883 }, ".ai-compose", "ai"],
+    ["assist-folded", "assist", { width: 404, height: 900 }, ".assist-ask", ""],
+    ["assist-unfolded", "assist", { width: 821, height: 883 }, ".assist-ask", ""],
+  ]) {
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, `send-dictation-${name}`, viewport).then((r) => whenReady(r, async () => {
+      await r.page.evaluate(async (how) => {
+        const S = await importShim("./state.ts");
+        // A chat under way: Enter (and send) asks, never opens a search hit; "ai": PowOS AI's page, its own compose.
+        if (how) (S.chatting.value = true), (S.drawer.value = 1);
+        if (how === "ai") S.pullKind.value = "ai";
+      }, setup);
+      await r.page.waitForSelector(`form${form} .mic`, { timeout: READY_MS });
+      const started = await r.page.evaluate(async (f) => (await importShim("./dev/send-dictation-check.js")).sendDictationStart(f), form);
+      if (started.length) return started;
+      await r.page.screenshot({ path: `/cache/send-dictation-${name}.png` });
+      return r.page.evaluate(async (f) => (await importShim("./dev/send-dictation-check.js")).sendDictationEnd(f), form);
+    })));
+  }
   runs.push(open(browser, `${ORIGIN}/index.html`, "dock-key-migration", { width: 821, height: 883 }).then((r) => whenReady(r, () => dockKeyMigration(r))));
   const dockViews = { cover: { width: 404, height: 900 }, inner: { width: 821, height: 883 }, desktop: { width: 1280, height: 800 } };
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {

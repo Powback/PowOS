@@ -15,7 +15,7 @@ import { followOpenness } from "./gesture.ts";
 import { chatting, drawer, launcherIsOverlay, openPanel, pullKind, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
-import { forget, hearing, listen, listeningFor, makeHold, release, speech, stopTap, type MicTarget } from "./dictation.ts";
+import { finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, speech, stopTap, type MicTarget } from "./dictation.ts";
 
 /** A press longer than this is a hold (talk, then send); shorter, a tap (dictate). */
 const HOLD_MS = 250;
@@ -106,15 +106,17 @@ function logBlur(e: FocusEvent, field: HTMLTextAreaElement | null) {
 }
 
 /**
- * Send, right of the mic while the field has text ([shown]): the form's submit, so it does exactly what Enter does
- * (grow.tsx requestSubmit -> the form's onSubmit) without the keyboard. Empty, it folds to nothing (shell.css .pill
- * .send: width and opacity), so the empty pill's layout is the one it always had.
+ * Send, right of the mic while the field has text or a dictation is on ([shown]): the form's submit, so it does
+ * exactly what Enter does (grow.tsx requestSubmit -> the form's onSubmit) without the keyboard. Empty, it folds to
+ * nothing (shell.css .pill .send: width and opacity), so the empty pill's layout is the one it always had.
+ * [waiting]: a send tapped mid-dictation waits for the final words (dictation.ts finish): it spins meanwhile.
  */
-function Send({ shown }: { shown: boolean }) {
+function Send({ shown, waiting }: { shown: boolean; waiting: boolean }) {
   return (
     <button
       type="submit"
-      class={`send ${shown ? "shown" : ""}`}
+      class={`send ${shown ? "shown" : ""} ${waiting ? "waiting" : ""}`}
+      aria-busy={waiting || undefined}
       aria-label="send"
       aria-hidden={!shown || undefined}
       tabIndex={shown ? undefined : -1}
@@ -123,19 +125,58 @@ function Send({ shown }: { shown: boolean }) {
       onPointerDown={(e) => e.preventDefault()}
       onClick={(e) => e.stopPropagation()}
     >
-      <Icon name="arrowUp" size={22} />
+      {waiting ? (
+        <svg class="send-spin" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+          <path d="M12 3a9 9 0 1 1-9 9" />
+        </svg>
+      ) : (
+        <Icon name="arrowUp" size={22} />
+      )}
     </button>
   );
 }
 
+/**
+ * SB3: a submit of [form] (the send button, Enter) while one of [targets] dictates first ends the dictation and waits
+ * for its final words (dictation.ts finish, ~3 s at most), then submits again - the form's own onSubmit then sends the
+ * whole text, as Enter does, the mic off. A capture listener on the form runs before its (bubble) onSubmit.
+ */
+function useSubmitFinishes(box: { current: HTMLDivElement | null }, targets: MicTarget[]) {
+  const all = useRef(targets);
+  all.current = targets;
+  useEffect(() => {
+    const form = box.current?.closest("form");
+    if (!form) return;
+    const onSubmit = (e: Event) => {
+      const wait = finish(...all.current);
+      if (!wait) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      wait.then(() => form.isConnected && form.requestSubmit());
+    };
+    form.addEventListener("submit", onSubmit, true);
+    return () => form.removeEventListener("submit", onSubmit, true);
+  }, []);
+}
+
+/** The pill's send: shown while there's text, or while one of [targets] dictates - before its first words land too
+ *  (the field is empty until then) - and spinning while a send waits for a dictation's final words. */
+function PillSend({ targets, value }: { targets: MicTarget[]; value: string }) {
+  const waiting = !!finishing.value && targets.includes(finishing.value);
+  return <Send shown={!!value.trim() || waiting || targets.some(listeningFor)} waiting={waiting} />;
+}
+
 export function Pill({
   target,
+  hears = [],
   sending = false,
   send = false,
   class: cls = "",
   ...field
 }: {
   target: MicTarget;
+  /** Other dictations that write into this field (the bar: the assistant's): a send finishes those too. */
+  hears?: MicTarget[];
   value: string;
   onInput: (v: string) => void;
   sending?: boolean;
@@ -147,12 +188,15 @@ export function Pill({
 }) {
   // Empty and no status to say (listening, an error): the prompt glyph stands in for a placeholder (shell.css .prompt).
   const empty = !field.value && !field.placeholder;
+  const box = useRef<HTMLDivElement>(null);
+  const targets = [target, ...hears];
+  useSubmitFinishes(box, targets);
   return (
-    <div class={`${cls} pill tile ${sending ? "sending" : ""} ${empty ? "empty" : ""}`}>
+    <div ref={box} class={`${cls} pill tile ${sending ? "sending" : ""} ${empty ? "empty" : ""}`}>
       {empty && <span class="prompt" aria-hidden="true">&gt;</span>}
       <GrowField {...(field as { value: string; onInput: (v: string) => void })} />
       <Mic target={target} />
-      {send && <Send shown={!!field.value.trim()} />}
+      {send && <PillSend targets={targets} value={field.value} />}
     </div>
   );
 }
@@ -222,6 +266,7 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
       <Pill
         class="bar-pill"
         target={barMic}
+        hears={[pillTarget]}
         send
         sending={sending.value}
         inputRef={input}
