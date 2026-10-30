@@ -2323,6 +2323,15 @@ async function webWindowCheck() {
     const b = el.querySelector(".webwindow-body").getBoundingClientRect();
     await drag(el.querySelector(".webwindow-body"), [b.left + 320, b.top + 80], [b.left + 20, b.top + 80]);
     fails.push(...turned("a sideways swipe on a web window's body"));
+    // FL4: maximised, a swipe on the body is the app's only; full screen (Linux), home's pulls keep only the edge strips.
+    W.toggleMaximise(901);
+    await window.__gw.settled();
+    const mb = el.querySelector(".webwindow-body").getBoundingClientRect();
+    await drag(el.querySelector(".webwindow-body"), [mb.left + mb.width * 0.8, mb.top + 200], [mb.left + mb.width * 0.2, mb.top + 200]);
+    await drag(el.querySelector(".webwindow-body"), [mb.left + 200, mb.top + 300], [mb.left + 200, mb.top + 40]);
+    fails.push(...turned("a swipe on a maximised web window's body"));
+    const fr = (await window.__gw.mod("./ui/home.tsx")).fullScreenAppRegion();
+    if (!(fr.top >= 24 && fr.top + fr.height <= innerHeight - 24)) fails.push(`full-screen Linux window: its claimed region ${JSON.stringify(fr)} leaves no edge strips to home`);
     // The control: the same swipe there with no window does turn the page (else this check proves nothing).
     W.webWins.value = [];
     await window.__gw.settled();

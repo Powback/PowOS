@@ -65,6 +65,15 @@ const homePullOk = computed(
 );
 const dockElement = signal<HTMLElement | null>(null);
 
+/** The screen less its top and bottom edge strips (24 px at least, the status bar / gesture insets where taller). */
+export function fullScreenAppRegion(): PageRect {
+  const css = getComputedStyle(document.documentElement);
+  const inset = (name: string) => parseFloat(css.getPropertyValue(name)) || 0;
+  const top = Math.max(24, inset("--inset-top"));
+  const bottom = Math.max(24, inset("--inset-bottom"));
+  return { left: 0, top, width: innerWidth, height: Math.max(0, innerHeight - top - bottom) };
+}
+
 function pageRect(r: DOMRect): PageRect {
   return { left: r.left, top: r.top, width: r.width, height: r.height };
 }
@@ -106,6 +115,9 @@ function claimFree(dockNode: HTMLElement | null): PageRect[] {
     const r = el.getBoundingClientRect();
     if (r.width > 0 && r.height > 0) out.push(pageRect(r));
   });
+  // FL4: a full-screen Linux window (over all of home, no element on the page) is the app's everywhere but the edge
+  // strips: the shade's pull only from the top strip, home / the launcher only from the bottom one.
+  if (webWins.value.some((w) => w.full && w.key.startsWith("l:"))) out.push(fullScreenAppRegion());
   return out;
 }
 function followDock(el: HTMLElement | null) {
