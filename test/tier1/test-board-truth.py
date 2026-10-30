@@ -577,6 +577,31 @@ class PassClosesOnlyItsOwnTaskCliTest(unittest.TestCase):
         self.run_cli("task", "done", "p")
         self.assertEqual(FakeStdb.db["work"]["p"]["status"], "done")
 
+    def test_works_on_an_epic_marks_the_slice_done_and_keeps_it_open(self):
+        # The page's "works" on the web-windows epic (2026-10-30): its last slice was ready, two steps still planned.
+        # It records the pass, marks that slice done and stays open - never an error; the closer rule holds.
+        self.run_cli("task", "add", "Web windows", "--id", "ww", "--plan", "close from switcher; full screen; resize")
+        self.run_cli("task", "set", "ww", "--step", "close from switcher")
+        self.run_cli("check", "set", "ww", "you-1", "PASS", "--name", "you")
+        p = self.run_cli("task", "works", "ww")
+        self.assertIn("still open: 2 planned steps to do", p.stderr)
+        w = FakeStdb.db["work"]["ww"]
+        self.assertEqual(w["status"], "working")
+        self.assertEqual(w["step"], "")
+        self.assertEqual([x["state"] for x in json.loads(w["steps"])], ["done", "next", "next"])
+        self.assertIn("2 planned steps to do", self.run_cli("task", "done", "ww", ok=False).stderr, "closer rule kept")
+        # An open sub-task keeps it open too.
+        self.run_cli("task", "set", "ww", "--plan", "")
+        self.run_cli("task", "add", "Resize grip", "--id", "rg", "--parent", "ww")
+        self.assertIn("1 open sub-task", self.run_cli("task", "works", "ww").stderr)
+        self.assertEqual(FakeStdb.db["work"]["ww"]["status"], "working")
+        # Nothing left open: works closes it.
+        self.run_cli("check", "set", "rg", "j", "PASS")
+        self.run_cli("task", "done", "rg")
+        self.run_cli("task", "works", "ww")
+        self.assertEqual(FakeStdb.db["work"]["ww"]["status"], "done")
+        self.assertEqual(self.run_cli("task", "works", "ww").stdout.strip(), "ww", "again on a done task: no error")
+
     def test_merge_moves_children_and_steps_to_the_target(self):
         self.run_cli("task", "add", "Target", "--id", "t")
         self.run_cli("task", "add", "Dup", "--id", "d", "--plan", "W1 groups")

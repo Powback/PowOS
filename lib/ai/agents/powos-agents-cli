@@ -63,6 +63,11 @@ Usage:
                                    A check closes ONLY the task it was queued for, and never while that
                                    task has planned steps still to do or an open sub-task (--parent):
                                    do them (or drop the plan: --plan "") - every closer obeys this.
+  powos agents task works <task> [--note TEXT]
+                                   The user tried what was ready (after their `check set ... PASS --name
+                                   you`): its current step (the slice shipped to try) is marked done. It
+                                   closes only when nothing else is open (the done rule above); an epic
+                                   with planned steps or open sub-tasks stays open - not an error.
   powos agents task merge <dup...> --into <task> [--note TEXT]
                                    Fold one or more duplicates into <task>: each dup's title, note and
                                    still-open steps land on <task> (its commits and images carried over
@@ -356,9 +361,10 @@ def progress_of(s):
     return int(m.group(1)), int(m.group(2))
 
 
-def track(w, progress=None, step=None, plan=None, commits=(), images=(), done=False, images_rm=()):
+def track(w, progress=None, step=None, plan=None, commits=(), images=(), done=False, images_rm=(), slice_done=False):
     """The work row [w]'s progress columns after this change: the step history kept (the current step done when the
-    next one starts), the count following the steps unless --progress set it. None when nothing changes."""
+    next one starts), the count following the steps unless --progress set it. None when nothing changes. [slice_done]:
+    the current step is finished (the user tried it: `task works`) - the planned ones stay to do."""
     steps = [{"text": _line(x.get("text", "")), "state": x.get("state", "next")} for x in _jl(w.get("steps", ""))
              if isinstance(x, dict) and _line(x.get("text", ""))]
     pd, pt = int(w.get("progress_done") or 0), int(w.get("progress_total") or 0)
@@ -380,7 +386,7 @@ def track(w, progress=None, step=None, plan=None, commits=(), images=(), done=Fa
             at = next((i for i, x in enumerate(steps) if x["state"] == "next"), len(steps))
             steps.insert(at, {"text": step, "state": "current"})
         cur = step
-    if done:
+    if done or slice_done:
         steps = [dict(x, state="done") if x["state"] == "current" else x for x in steps]
         cur = ""
     if progress is not None:
@@ -615,6 +621,33 @@ def task(argv):
         no_check(w["id"], o)
         call("work_set", w["id"], "", "", "done", o.get("note", ""), "")
         apply_track(w, o, done=True)
+        print(w["id"])
+    elif verb == "works":
+        # The user tried what was ready (the page's "works", after its `check set ... PASS --name you`): the slice
+        # shipped for them to try - the current step - is done; the task closes only when nothing else is open on it
+        # (refuse_open's rule, unweakened: an epic with planned steps or open sub-tasks stays open). Never an error for
+        # an open epic - the user's pass is recorded either way (the page, 2026-10-30: "I try to press like works, but
+        # it just shows me like this error message").
+        o, rest = opts(argv, ["note"])
+        if not rest:
+            die('usage: powos agents task works <task> [--note TEXT]')
+        w = find(" ".join(rest))
+        if w["status"] == "done":
+            print(w["id"])
+            return
+        slice_ = _line(w.get("step", ""))
+        new = track(w, slice_done=True)
+        if new:
+            call("work_track", w["id"], new["progress_done"], new["progress_total"], new["step"], new["steps"],
+                 new["commits"], new["images"])
+            w = dict(w, **new)
+        kids, steps = open_items(w)
+        if kids or steps:
+            print(f"powos agents: {w['id']}: works{(' - ' + slice_) if slice_ else ''}; still open: "
+                  f"{open_why(kids, steps)}", file=sys.stderr)
+        else:
+            call("work_set", w["id"], "", "", "done", o.get("note") or "works: you tried it", "")
+            apply_track(w, {}, done=True)
         print(w["id"])
     elif verb == "merge":
         o, rest = opts(argv, ["into", "note"])

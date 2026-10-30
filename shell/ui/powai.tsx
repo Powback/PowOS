@@ -194,6 +194,8 @@ export interface WorkRow {
   images?: string;
   /** When it last moved (ms; 0 on old rows: `updated`). */
   activity?: bigint | number;
+  /** The task it is a sub-task of ("" = none; `task set --parent`). */
+  parent?: string;
 }
 
 /** A JSON-array column ("" or bad = none). */
@@ -481,7 +483,8 @@ function lastResult(w: WorkRow): { ok: boolean; you: boolean } | null {
 
 /**
  * "works" / "still broken", sent and not yet on the board: id -> the verdict and the `updated` the row had. Shown at
- * once (works: the row goes; still broken: it moves to "Waiting for an agent"), dropped when the board moves the row
+ * once (works: the row goes, or an epic with more open moves to "Waiting for an agent"; still broken: it moves there),
+ * dropped when the board moves the row
  * or the call fails (then the row is back where it was, with the reason).
  */
 const verdicts = signal<Record<string, { works: boolean; updated: number }>>({});
@@ -496,15 +499,36 @@ function verdict(w: WorkRow, works: boolean) {
   verdictError.value = "";
   verdicts.value = { ...verdicts.value, [w.id]: { works, updated: Number(w.updated) } };
   const viaManager = () =>
-    askQueued(works ? `Works: ${w.title} (task ${w.id}) - I tried it, close it as a user PASS` : `Still broken: ${w.title} (task ${w.id}) - I tried it, reopen it with a user FAIL`);
+    askQueued(works ? `Works: ${w.title} (task ${w.id}) - I tried it: a user PASS for what was ready, close it if nothing else is open` : `Still broken: ${w.title} (task ${w.id}) - I tried it, reopen it with a user FAIL`);
   const send = powos.ai.verdict;
   if (!send) return viaManager();
   send(w.id, works).catch((e) => {
     if (/no such call/.test(String(e))) return viaManager();
     const { [w.id]: _, ...rest } = verdicts.value;
     verdicts.value = rest;
-    verdictError.value = `couldn't save "${w.title}" - ${String(e).replace(/^Error:\s*/, "")}`;
+    // One plain line, never the CLI's text (the user, 2026-10-30: "I try to press like works, but it just shows me like
+    // this error message"); the reason stays in the log.
+    console.warn(`ai.verdict ${w.id}:`, e);
+    verdictError.value = `couldn't save that for "${w.title}" - try again in a moment`;
   });
+}
+
+/**
+ * What else is open on [w] besides the slice it's on: its planned steps and its open sub-tasks (the CLI's open_items -
+ * such a task can't close). "works" on it records the slice and the task stays (powos agents task works).
+ */
+function openRest(w: WorkRow): number {
+  const next = list<Step>(w.steps).filter((x) => x.state === "next").length;
+  return next + board.value.filter((x) => x.parent === w.id && x.status !== "done").length;
+}
+
+/** tools/phone/verify/queue.sh's step marker (the CLI's QUEUED_STEP): a check's state, not a slice. */
+const QUEUED_STEP = "phone check queued";
+
+/** The slice an epic has ready to try: its current step, in its own words (a queue's verify line isn't one). */
+function sliceOf(w: WorkRow): string {
+  const steps = list<Step>(w.steps).filter((x) => x.text && !resultOf(x.text) && x.text !== QUEUED_STEP);
+  return steps.find((x) => x.state === "current")?.text ?? "";
 }
 
 /** Which group an open row is in (null: not on the board's groups - paused, done, answered). */
@@ -512,7 +536,8 @@ function groupOf(w: WorkRow): Group | null {
   if (w.status === "waiting") return isAnswered(w) ? null : "you";
   if (w.status !== "working") return null;
   const v = verdictOf(w);
-  if (v) return v.works ? null : "free";
+  // "works" on an epic: the slice is done, the rest still open - it leaves Ready to try, it doesn't go.
+  if (v) return v.works && !openRest(w) ? null : "free";
   return workingGroup(w);
 }
 
@@ -521,8 +546,9 @@ function workingGroup(w: WorkRow): Group {
   const s = boardState(w, checks.value);
   if (s === "working" || s === "awaiting check") return "on";
   const last = lastResult(w);
-  if (last) return last.ok ? "try" : "free";
-  return w.commits && w.commits !== "[]" ? "try" : "free";
+  const shipped = last ? last.ok : !!w.commits && w.commits !== "[]";
+  // An epic (planned steps / sub-tasks still open) is to try only while a slice of it is ready, never as a whole.
+  return shipped && (!openRest(w) || sliceOf(w)) ? "try" : "free";
 }
 
 /** "step 3 of 8" (the step it's on, not the ones done), "" untracked. */
@@ -539,17 +565,26 @@ const withStep = (w: WorkRow, state: string) => [state, stepOf(w)].filter(Boolea
 const onState = (w: WorkRow) =>
   boardState(w, checks.value) !== "awaiting check" ? "an agent is on it" : isTesting(w) ? "being tested on the phone now" : "waiting for a test on the phone";
 
+/** What the user last said about [w] here (sent, or their check on the board): "" if nothing. */
+function userSaid(w: WorkRow, last: { ok: boolean; you: boolean } | null) {
+  const v = verdictOf(w);
+  const works = v ? v.works : last?.you ? last.ok : null;
+  if (works === null) return "";
+  return works ? "you said the last part works · more to do" : "you said it's still broken";
+}
+
 /** Nobody on it: the user said it's still broken, its last test failed, or nobody has started. */
 function freeState(w: WorkRow) {
   const last = lastResult(w);
-  if (verdictOf(w) || (last && !last.ok && last.you)) return "you said it's still broken";
+  const said = userSaid(w, last);
+  if (said) return said;
   return last && !last.ok ? "its last test failed" : "nobody on it yet";
 }
 
 /** A row's state in plain words per group: no hashes, no raw step text, no check jargon. */
 const STATES: Record<Group, (w: WorkRow) => string> = {
   you: (w) => (w.note ? w.title : "waiting on you"),
-  try: () => "ready to try",
+  try: (w) => (openRest(w) && sliceOf(w) ? `ready to try: ${sliceOf(w)}` : "ready to try"),
   on: (w) => withStep(w, onState(w)),
   free: (w) => withStep(w, freeState(w)),
 };

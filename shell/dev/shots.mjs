@@ -187,6 +187,12 @@ const GROUPED = (() => {
     t("glass", "One native glass: frame-synced blur, same tint everywhere (widgets, search, dock, folders)", { progressDone: 7, progressTotal: 20, step: "LIVE: native glass skips unchanged region sets", steps: st(7, 20), commits: c(6) }),
     t("gestures", "Gestures: home swipe closes everything, page swipes reliable", { progressDone: 17, progressTotal: 27, step: "LIVE: drags on scroll strips", steps: st(17, 27), commits: c(8) }),
     t("lock", "Lock screen: no brown strip, real icons, notification cards use the shared glass", { progressDone: 2, progressTotal: 8, step: "landed e1b89706; live on the phone (d224ac4b)", steps: st(2, 8), commits: c(1) }),
+    // Epics (planned steps still open): one with a slice ready to try (named on its line), one whose last slice the
+    // user said works (no slice ready: waiting, not to try), one with a sub-task open and no slice (waiting).
+    t("web-windows", "Web windows: Android apps as real windows on home", { progressDone: 3, progressTotal: 6, step: "close from the switcher", steps: JSON.stringify([["open as a window", "done"], ["move and resize", "done"], ["title bar controls", "done"], ["close from the switcher", "current"], ["full screen button", "next"], ["snap to halves", "next"]].map(([text, state]) => ({ text, state }))), commits: c(5) }),
+    t("dock-epic", "Dock: recents, pinned apps, landscape column", { progressDone: 2, progressTotal: 4, step: "", steps: JSON.stringify([["pinned apps", "done"], ["recents", "done"], ["landscape column", "next"], ["drag to reorder", "next"]].map(([text, state]) => ({ text, state }))), commits: c(3) }),
+    t("search-epic", "Search: apps, settings and files in one list", { progressDone: 2, progressTotal: 2, step: "", steps: JSON.stringify([["apps", "done"], ["settings", "done"]].map(([text, state]) => ({ text, state }))), commits: c(2) }),
+    t("search-files", "Search: files results", { parent: "search-epic", progressDone: 0, progressTotal: 0 }),
     t("ai-board", "PowOS AI page + chat: board grouped by what each task means for you", { owner: "powos-chat", progressDone: 2, progressTotal: 6, step: "grouping rows", steps: st(2, 6), commits: c(2) }),
     t("perf", "Performance: steady 120 fps, FPS meter, trace record and replay", { owner: "powos-perf", progressDone: 4, progressTotal: 15, step: "LIVE: idle cost root cause", steps: st(4, 15) }),
     t("speech", "Speech: hold-to-talk sends after release, no cut-off last word", { progressDone: 3, progressTotal: 5, step: "phone check queued", steps: st(3, 5), commits: c(3) }),
@@ -197,7 +203,7 @@ const GROUPED = (() => {
 })();
 const GROUPED_SCENE =
   `const now = Date.now(); const P = await U('./ui/powai.tsx'); P.board.value = ${GROUPED}.map((r, i) => ({ ...r, created: now - 9e6 - i * 6e5, updated: now - i * 9e5, done: 0, activity: now - i * 9e5 }));` +
-  ` P.boardSeen.value = true; if (P.checks) P.checks.value = [{ job: 'j1', task: 'speech', name: 'speech-release', state: 'queued', line: '', at: now - 6e4, shipped: true }, { job: 'j2', task: 'pet', name: 'pet-dock', state: 'FAIL', line: 'pet over icon', at: now - 3e5, shipped: true }];` +
+  ` P.boardSeen.value = true; if (P.checks) P.checks.value = [{ job: 'j1', task: 'speech', name: 'speech-release', state: 'queued', line: '', at: now - 6e4, shipped: true }, { job: 'j2', task: 'pet', name: 'pet-dock', state: 'FAIL', line: 'pet over icon', at: now - 3e5, shipped: true }, { job: 'you-dock', task: 'dock-epic', name: 'you', state: 'PASS', line: 'works: the user tried it', at: now - 2e5, shipped: true }];` +
   ` S.chat.value = { busy: false, items: [{ kind: "user", text: "how is the board?" }, { kind: "assistant", text: "Six things are ready for you to try." }] }; S.page.value = -1; await sleep(400);` +
   ` const ag = (id, work, role) => ({ id, host: 'phone', role, parent: null, state: 'working', title: work, step: '', cwd: '~', pid: 1, subs: 0, unread: 0, report: '', work, started: now - 6e5, last: Date.now(), rev: 1 });` +
   ` E.emit('agents.delta', { agents: [ag('a-chat', 'ai-board', 'powos-chat'), ag('a-perf', 'perf', 'powos-perf')] }); await sleep(300); document.querySelector('.ai-work-list').scrollIntoView();`;
