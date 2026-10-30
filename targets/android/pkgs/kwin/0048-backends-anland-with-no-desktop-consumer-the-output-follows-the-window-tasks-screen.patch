@@ -1,0 +1,83 @@
+From 45f7bbb257a937d9a3a37f192b6519b12964d10b Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Sat, 31 Oct 2026 00:21:12 +0100
+Subject: [PATCH] backends/anland: with no desktop consumer the output follows
+ the window tasks' screen
+
+Dolphin's hamburger menu on the unfolded phone (the user, 2026-10-31 00:14: "The pop-up that shows when I click on
+the properties panel of Dolphin don't show up on the right place"): it opened at x 184-496 logical, ~150 logical px
+left of the button at the window's right edge (window 648 logical wide at x 0). KWin's log: "connected to daemon ...
+screen 1116 x 2484", "consumer disconnected, entering fallback", then "window task 2 also draws ... (dolphin, popup,
+312x400+184+251)". KWin started on the folded cover screen and its only output keeps that size (496x1104 logical at
+2.25) until a desktop consumer's buffers resize it - with web windows none ever connects. Qt clamps a QMenu to its
+QScreen: 496 - 312 = 184, exactly where the menu landed. The same small screen bounds X11 override-redirect menus
+(Xwayland's root) and xdg popups of windows without a task area (0027), and was 0047's full-screen symptom.
+
+A window task's buffers are made at the Android screen's size (a resize needs none). When they are imported and no
+desktop consumer is connected, the output takes that size (AnlandBackend::followWindowScreen); a live desktop
+consumer's buffers keep deciding, as before. Folding hands the windows back as tasks on the cover screen, whose
+buffers bring the output back down.
+---
+ src/backends/anland/anland_backend.cpp     | 10 ++++++++++
+ src/backends/anland/anland_backend.h       |  9 +++++++++
+ src/backends/anland/anland_window_task.cpp |  3 +++
+ 3 files changed, 22 insertions(+)
+
+diff --git a/src/backends/anland/anland_backend.cpp b/src/backends/anland/anland_backend.cpp
+index d959b17..8996ad9 100644
+--- a/src/backends/anland/anland_backend.cpp
++++ b/src/backends/anland/anland_backend.cpp
+@@ -287,6 +287,16 @@ QList<BackendOutput *> AnlandBackend::outputs() const
+     return ret;
+ }
+ 
++void AnlandBackend::followWindowScreen(const QSize &screen)
++{
++    if (!m_inFallback || m_outputs.isEmpty() || !screen.isValid() || screen == m_outputs[0]->modeSize()) {
++        return;
++    }
++    qCInfo(KWIN_ANLAND) << "no desktop consumer: the output follows the window tasks' screen" << m_outputs[0]->modeSize()
++                        << "->" << screen;
++    m_outputs[0]->resize(screen);
++}
++
+ EglDisplay *AnlandBackend::sceneEglDisplayObject() const
+ {
+     return m_renderDevice ? m_renderDevice->eglDisplay() : nullptr;
+diff --git a/src/backends/anland/anland_backend.h b/src/backends/anland/anland_backend.h
+index 9b52be0..32e14d0 100644
+--- a/src/backends/anland/anland_backend.h
++++ b/src/backends/anland/anland_backend.h
+@@ -103,6 +103,15 @@ public:
+     {
+         Q_EMIT outputsQueried();
+     }
++    /**
++     * PowOS: the Android screen a window task's buffers were made for (the consumer allocates them at the screen's
++     * size, so a resize needs none). With no desktop consumer (fallback: web windows, nothing shows the desktop) the
++     * output follows it: else it keeps the size of the screen KWin started on - the folded phone's cover screen while
++     * the windows are on the unfolded one - and clients place their menus inside that smaller screen (Qt clamps a
++     * QMenu to its QScreen: Dolphin's hamburger menu opened ~150 px left of its button). A live desktop consumer's
++     * buffers keep deciding (AnlandEglLayer::importBuffers).
++     */
++    void followWindowScreen(const QSize &screen);
+ 
+ private:
+     void setupNotifiers();
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 3df725b..115c04c 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -614,6 +614,9 @@ bool AnlandWindowTask::importBuffers()
+         m_stale[i] = true;
+     }
+     m_bufCount = count;
++    // KWin's screen is the one the windows are on: placed against a smaller one (the cover screen KWin started on),
++    // a client's menus and X11 override-redirect popups landed far from their parent's buttons.
++    m_tasks->backend()->followWindowScreen(m_bufferSize);
+     return true;
+ }
+ 
+-- 
+2.50.1 (Apple Git-155)
+

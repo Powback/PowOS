@@ -66,7 +66,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.54
+pkgrel=3.55
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -129,11 +129,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0044-backends-anland-a-new-window-of-an-app-with-a-task-belongs-with-it.patch
           0045-backends-anland-consumer-buffer-layout-logged-at-import.patch
           0046-backends-anland-a-window-s-own-frame-is-its-content-and-its-own-move-resize-the-app-s.patch
-          0047-backends-anland-a-full-screen-the-app-asked-for-takes-the-app-s-size.patch)
+          0047-backends-anland-a-full-screen-the-app-asked-for-takes-the-app-s-size.patch
+          0048-backends-anland-with-no-desktop-consumer-the-output-follows-the-window-tasks-screen.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

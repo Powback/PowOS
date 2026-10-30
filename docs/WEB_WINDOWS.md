@@ -809,5 +809,12 @@ With the APK installed, unfolded, `powos_web_windows` = 1 and the user idle: ope
 - **Frame pacing (kwin 0046):** `window task N frames: last 5 s C commits, D drawn (fps); commit -> drawn median/p90/max`
   in KWin's log (`/run/powos-app/hyprland.log`) every 5 s while the window draws: commits > drawn or a long
   commit -> drawn = the per-toplevel path holds frames; commits ~= drawn at low fps = the client (Xwayland/Brave).
+- **KWin's screen = the windows' screen (kwin 0048 / 3.55, 2026-10-31):** with web windows no desktop consumer
+  connects, so KWin's only output kept the size of the screen KWin started on (the folded cover: 1116x2484 px =
+  496x1104 logical) while the windows sat on the 2268x2440 inner screen. Qt clamps a QMenu to its QScreen: Dolphin's
+  hamburger menu (312 logical wide) opened at x 184 = 496 - 312, far left of its button (log "also draws ... popup,
+  312x400+184+251"). Now a window task's buffers (made at the Android screen's size) resize the output while no
+  desktop consumer is connected (log "no desktop consumer: the output follows the window tasks' screen"); a live
+  desktop consumer still decides. Popup placement itself was right: drawn relative to the toplevel's client area.
 - **Home restart:** windows are handed back as tasks; re-adopting them as web windows when home returns (KWin's
   `session` list) is open.
