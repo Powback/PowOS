@@ -43,6 +43,8 @@ import android.widget.FrameLayout
  *                                      that frame (WebView.postVisualStateCallback); the host says "b.sync 1"
  *   b.lag <frames>                     test knob: when the regions apply (-1 at once, 0 on the next draw, n later)
  *   b.liquid <dpr> <band> <refraction> <rim> <dispersion>   liquid glass's look (theme.css --liquid-*): [LiquidGlass]
+ *   w.f <id> <dpr> <n> <window...>     web windows' frames and bodies, measured on the page's frame <id>: their layers
+ *                                      placed on the draw that shows it, as "b.f" ([WebWindows.frameCommand])
  *
  * Why surfaces: a canvas in the page, however it's drawn (an OffscreenCanvas in a worker included), makes the whole
  * WebView composite again for each frame - in the app's own render threads - which cost ~2% of a core per frame per
@@ -106,6 +108,9 @@ class ShellNative(
         }
     }
 
+    /** Where "w.f" goes (ShellHost: the bridge's web windows). */
+    @Volatile var windowFrame: ((String) -> Unit)? = null
+
     /** Home's panels over the floating windows: made at home's page's "p.hello". */
     @Volatile private var lift: PanelLift? = null
 
@@ -136,6 +141,8 @@ class ShellNative(
                 "b.hello" -> if (glass != null) glass.hello() else main.post { port?.postMessage(WebMessage("b.state 0")) }
                 "b.r" -> glass?.command(rest)
                 "b.f" -> glass?.frameCommand(rest)
+                // Web windows' geometry, frame-synced like "b.f" (WebWindows.frameCommand; home's page only).
+                "w.f" -> windowFrame?.invoke(rest)
                 "b.lag" -> glass?.let { it.lag = rest.trim().toInt() }
                 "b.liquid" -> glass?.liquidCommand(rest)
                 "s.draw" -> {

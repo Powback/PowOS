@@ -12,36 +12,8 @@ import { signal } from "@preact/signals";
 import { page } from "../state.ts";
 import { powos } from "../bridge.ts";
 
-declare global {
-  interface Window {
-    PowosNative?: { connect?(): void; postMessage?(message: string): void };
-  }
-}
-
-/** The port, once the app has handed it over (null: an APK without ShellNative, or not yet). */
-export const native = signal<MessagePort | null>(null);
-
-/** What the app says back over the port ("n.res ...": apps/net.ts), to each listener. */
-export const fromNative = new Set<(text: string) => void>();
-
-addEventListener("message", (e: MessageEvent) => {
-  if (e.data !== "powos-native" || !e.ports?.[0]) return;
-  native.value?.close();
-  const p = e.ports[0];
-  // A page that reloaded leaves the last one's tiles behind: they go first.
-  p.postMessage("s.reset");
-  p.onmessage = (m: MessageEvent) => {
-    if (typeof m.data === "string") for (const f of fromNative) f(m.data);
-  };
-  native.value = p;
-});
-try {
-  const n = window.PowosNative;
-  if (n?.postMessage) n.postMessage("connect");
-  else n?.connect?.();
-} catch {}
-
-export const send = (command: string) => native.value?.postMessage(command);
+export { fromNative, native, nextFrameId, send } from "./port.ts";
+import { native, send } from "./port.ts";
 
 /** Opens a link in the app that handles it (http(s), mailto, tel, geo, market). False when there's no port. */
 export function openLink(url: string): boolean {

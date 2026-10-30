@@ -15,7 +15,7 @@
  * The host applies each set on the window's next drawn frame, the frame that shows the page as it was measured.
  */
 import { signal } from "@preact/signals";
-import { fromNative, native, send } from "../apps/native.ts";
+import { fromNative, native, nextFrameId, send } from "../apps/native.ts";
 import { powos } from "../bridge.ts";
 
 const root = document.documentElement;
@@ -77,8 +77,6 @@ liquidWanted.subscribe(() => sendLook());
  * An older host never says it: "b.r" then, applied on its next draw (a frame early or late under load).
  */
 let frameSync = false;
-/** Page frame ids for "b.f": in the trace as console.timeStamp("glass f<id>"), the host's async section the same. */
-let fid = 0;
 let syncOff = false;
 fromNative.add((text) => {
   if (text === "b.sync 1") frameSync = true;
@@ -524,7 +522,8 @@ const moving = () =>
 function sendRegions(text: string) {
   counts.sent++;
   if (frameSync && !syncOff) {
-    fid++;
+    // In the trace as console.timeStamp("glass f<id>"), the host's async section the same.
+    const fid = nextFrameId();
     console.timeStamp(`glass f${fid}`);
     send(`b.f ${fid} ${text}`);
   } else send(`b.r ${text}`);

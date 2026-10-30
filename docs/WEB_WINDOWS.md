@@ -367,3 +367,37 @@ page's text field:
 - **S5:** FALLBACK works as designed: tap on the VD → top focus moves to the VD → the phone keyboard on display 0 serves
   Chrome's editor. S5 must handle the focus side effect: while a web window has focus, home (display 0) is not the
   top focused display, so home's own inputs/IME need focus handed back (a tap on home's area does that today).
+
+---
+
+## S1-S3 (built 2026-10-30, behind `powos_web_windows`, not yet run on the phone)
+
+### Probe results (measured, `targets/android/spikes/webwindows-s1/P1.java`, run as the real uids under Magisk `su <uid>`)
+
+| question | result |
+|---|---|
+| `mirrorDisplay` from **PowOS's uid** (10359, READ_FRAME_BUFFER granted) | **works**: `true`, valid layer, reparented under a PowOS-made SurfaceControl. Also on a VD that **another uid** (shell) created. Returned `false` for the first ~20-90 ms (one retry) |
+| VD flags PowOS's uid may set | `PUBLIC\|OWN_CONTENT_ONLY\|DESTROY_CONTENT_ON_REMOVAL` ok; `+TRUSTED` → `SecurityException: Requires ADD_TRUSTED_DISPLAY permission to create a trusted virtual display`; `+OWN_DISPLAY_GROUP` → `Requires ADD_TRUSTED_DISPLAY ... not in the default DisplayGroup`; `+ALWAYS_UNLOCKED` accepted. ADD_TRUSTED_DISPLAY is `signature\|role` on this phone (no privapp allow-list can grant it); shell (2000) has it |
+| why Chrome escaped to display 0 | `ActivityManager.isActivityStartAllowedOnDisplay` (the same `canPlaceEntityOnDisplay` ActivityStarter uses before moving a launch to the default display): on an **untrusted** VD owned by PowOS, PowOS's uid → `true` for any Chrome activity, **Chrome's uid → `false`** (its trampoline `ChromeLauncherActivity` → `ChromeTabbedActivity` is Chrome's own launch). On a **TRUSTED** VD (shell-made, `0x409` or `0x509`) Chrome's uid → `true`, PowOS's → `true` |
+| the minimal fix | **TRUSTED alone** (`1<<10`). OWN_DISPLAY_GROUP / ALWAYS_UNLOCKED are not needed (the S0 runs needed them only because the screen was off). Launching by component would not do it: every later launch Chrome makes itself (a new window, its settings) would still escape |
+
+### What was built
+
+- `WebWindowsHost.kt`: a shell-uid helper (`su 2000 -c "CLASSPATH=<apk> app_process /system/bin dev.omalauncher.shell.WebWindowsHost"`,
+  started at the first window, stdin/stdout line protocol). It creates each window's VD with
+  `PUBLIC|OWN_CONTENT_ONLY|DESTROY_CONTENT_ON_REMOVAL|TRUSTED` and a **1x1 ImageReader** output (read and dropped), resizes it
+  (`VirtualDisplay.resize`), releases it. Its stdin closing (home gone) releases everything. HACK: real fix is the
+  platform-signed system module; the S4 injector will live in the same helper.
+- `WebWindows.kt`: per window a container SC `powos-ww-<id>` under one `powos-webwindows` SC, a child of home's window
+  surface (`buildReparentTransaction`) at layer -1 (below home's buffer, above the page's surface tiles at -2). The
+  content is the VD's **mirror** (`mirrorDisplay` from the app, retried every 16 ms up to 2 s until WM knows the
+  display); only then the app is launched on it. Container: position = DOM frame, crop = frame, corner radius, layer = DOM
+  order, visibility; mirror: offset = body, crop = body. Hidden = layer hidden, never a null surface. Body size change →
+  helper resize (coalesced). Close: tasks on the display removed (`getAllRootTaskInfosOnDisplay` + `removeTask`), then
+  the VD released.
+- Frame sync: `FrameSync.kt` is GlassBlur's `postVisualStateCallback` → `applyTransactionOnDraw` binding, extracted;
+  GlassBlur and WebWindows both use it. One page frame id counter (`apps/port.ts nextFrameId`) for `b.f` and `w.f`, so
+  both channels of one page frame ride the same draw.
+- Page: `ui/webwindows.tsx` measures every window each frame while any exist and sends
+  `w.f <frame> <dpr> <n> [<id> <frame x y w h> <body x y w h> <radius> <visible>]*n` (bottom first) when it changed.
+  The async `webwindows.place` / `raise` bridge calls are gone. Input stays v0 (S4).

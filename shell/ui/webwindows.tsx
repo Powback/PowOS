@@ -1,16 +1,18 @@
 // Web windows: an Android app's window as an element of home (unfolded; off unless Settings.Global
 // powos_web_windows = 1). The user, 2026-10-29: "the powos home typescript should deal with the windows and their
 // content", "it should be pinned to a page properly natively". So the window is this page's: its page, position,
-// size, z-order (DOM order) and title bar live here; the host (WebWindows.kt) only draws the app's own display behind
-// the WebView at the body's rect, which this file reports every frame it changes. The body is an unpainted hole:
-// whatever home paints over it (drawer, panels, another window's title bar) covers the app, as DOM does.
+// size, z-order (DOM order) and title bar live here; the host (WebWindows.kt) composites the app's own display (its
+// mirror: the app's buffers) under the page at the window, from the geometry this file sends over the native port
+// every frame it changes ("w.f", frame-synced: content and chrome move on the same frame). The body is an unpainted
+// hole: whatever home paints over it (drawer, panels, another window's title bar) covers the app, as DOM does.
 import { signal } from "@preact/signals";
-import { useEffect, useRef } from "preact/hooks";
+import { useRef } from "preact/hooks";
+import { native, nextFrameId, send } from "../apps/port.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
-import type { WebWindowRect } from "../types.ts";
 
 const TITLE = 36;
+const RADIUS = 12;
 
 export interface WebWin {
   id: number;
@@ -66,7 +68,6 @@ function raise(id: number) {
   const win = list.find((w) => w.id === id);
   if (!win) return;
   webWins.value = [...list.filter((w) => w.id !== id), win];
-  void powos.webwindows?.raise(id);
 }
 
 powos.on("webwindows.closed", (id: number) => {
@@ -86,33 +87,57 @@ export function WebWindowsOn({ page }: { page: number }) {
   );
 }
 
-/** The body's rect to the host each frame it changed (a drag, a page swipe, a resize, out of sight). */
-function usePlace(win: WebWin, body: { current: HTMLDivElement | null }) {
-  useEffect(() => {
-    let last = "";
-    let raf = 0;
-    const tick = () => {
-      const el = body.current;
-      if (el) {
-        const r = el.getBoundingClientRect();
-        const visible = r.width > 0 && r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight;
-        const rect: WebWindowRect = { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };
-        const s = `${rect.left},${rect.top},${rect.width},${rect.height},${visible}`;
-        if (s !== last) {
-          last = s;
-          void powos.webwindows?.place(win.id, rect, visible);
-        }
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(raf);
-      // Its page gone from the DOM: out of sight until it's shown again.
-      void powos.webwindows?.place(win.id, { left: 0, top: 0, width: win.w, height: win.h - TITLE }, false);
-    };
-  }, [win.id]);
+// ---- geometry to the host ----------------------------------------------------------------------------------------------
+
+const px = (v: number) => (Math.round(v * 100) / 100).toString();
+let lastGeometry = "";
+let raf = 0;
+
+/**
+ * This frame's windows, bottom first (DOM order = z): "<dpr> <n> [<id> <frame x y w h> <body x y w h> <radius>
+ * <visible>]*n", CSS px of the viewport after transforms (a page swipe moves them). A window whose page isn't in the
+ * DOM is left out: the host hides it (its layer, never its app).
+ */
+const onScreen = (b: DOMRect) => b.width > 0 && b.height > 0 && b.right > 0 && b.left < innerWidth && b.bottom > 0 && b.top < innerHeight;
+const rect = (r: DOMRect) => `${px(r.left)} ${px(r.top)} ${px(r.width)} ${px(r.height)}`;
+
+/** One window's entry, or null: its page isn't in the DOM. */
+function entry(w: WebWin): string | null {
+  const frame = document.querySelector<HTMLElement>(`.webwindow[data-wwid="${w.id}"]`);
+  const body = frame?.querySelector<HTMLElement>(".webwindow-body");
+  if (!frame || !body) return null;
+  const b = body.getBoundingClientRect();
+  return `${w.id} ${rect(frame.getBoundingClientRect())} ${rect(b)} ${RADIUS} ${onScreen(b) ? 1 : 0}`;
 }
+
+function geometry(): string {
+  const parts = webWins.value.map(entry).filter((e): e is string => e != null);
+  return [devicePixelRatio, parts.length, ...parts].join(" ");
+}
+
+/** Each frame while there are windows: their geometry, tagged with the page frame it was measured on, when it changed. */
+function tick() {
+  raf = 0;
+  if (!native.value) return;
+  const g = geometry();
+  if (g !== lastGeometry) {
+    lastGeometry = g;
+    const id = nextFrameId();
+    console.timeStamp(`ww f${id}`);
+    send(`w.f ${id} ${g}`);
+  }
+  if (webWins.value.length) raf = requestAnimationFrame(tick);
+}
+
+function kick() {
+  if (!raf) raf = requestAnimationFrame(tick);
+}
+webWins.subscribe(kick);
+// A new port (the page reloaded or the host came back): its layers know nothing yet.
+native.subscribe(() => {
+  lastGeometry = "";
+  kick();
+});
 
 const titleStyle = {
   height: `${TITLE}px`,
@@ -202,7 +227,6 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
 
 function WebWindowEl({ win, z }: { win: WebWin; z: number }) {
   const body = useRef<HTMLDivElement>(null);
-  usePlace(win, body);
   const frame = {
     position: "absolute",
     left: `${win.x}px`,
@@ -212,12 +236,12 @@ function WebWindowEl({ win, z }: { win: WebWin; z: number }) {
     zIndex: 20 + z,
     display: "flex",
     flexDirection: "column",
-    borderRadius: "12px",
+    borderRadius: `${RADIUS}px`,
     overflow: "hidden",
     boxShadow: "0 0 0 1px var(--color-border)",
   } as const;
   return (
-    <div class="webwindow" style={frame}>
+    <div class="webwindow" data-wwid={win.id} style={frame}>
       <TitleBar win={win} />
       <Body win={win} body={body} />
     </div>

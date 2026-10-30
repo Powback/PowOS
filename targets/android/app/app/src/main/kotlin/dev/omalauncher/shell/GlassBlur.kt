@@ -270,7 +270,7 @@ internal class GlassBlur(
         main.post {
             // A newer set is already queued behind this one (the UI thread was busy): only the newest goes on a draw.
             if (seq != latestR) return@post
-            applied = maxOf(applied, received)
+            sync?.let { it.applied = maxOf(it.applied, it.received) }
             if (on) set(regions, lag)
         }
     }
@@ -303,9 +303,8 @@ internal class GlassBlur(
             null
         }
 
-    /** The newest "b.f" id received (port thread writes, main reads) and the newest one put on a draw (main only). */
-    @Volatile private var received = -1L
-    private var applied = -1L
+    /** "b.f"'s binding to the page's frames (newest received / applied): shared with the web windows' "w.f" ([FrameSync]). */
+    private val sync = (view as? WebView)?.let { FrameSync(it, "glass") }
 
     /**
      * "b.f <id> <regions as b.r>": the regions the page measured for its frame <id>. They go on the window's draw
@@ -324,9 +323,7 @@ internal class GlassBlur(
             return
         }
         val regions = parse(s.substring(sp + 1), "b.f") ?: return
-        val cookie = id.toInt()
-        Trace.beginAsyncSection("glass f$id", cookie)
-        if (id > received) received = id
+        val cookie = sync?.receive(id) ?: id.toInt()
         val lag = lag
         main.post { bindToDraw(id, cookie, regions, lag) }
     }
@@ -338,24 +335,14 @@ internal class GlassBlur(
         regions: List<Region>,
         lag: Int,
     ) {
-        val web = view as? WebView
+        val sync = sync
         // The lag knob is a test override; no WebView (never here today): the old next-draw path.
-        if (!on || lag != 0 || web == null) {
+        if (!on || lag != 0 || sync == null) {
             Trace.endAsyncSection("glass f$id", cookie)
             if (on) set(regions, lag)
             return
         }
-        web.postVisualStateCallback(
-            id,
-            object : WebView.VisualStateCallback() {
-                override fun onComplete(requestId: Long) {
-                    Trace.endAsyncSection("glass f$id", cookie)
-                    if (requestId <= applied || !on) return
-                    applied = requestId
-                    set(regions, 0)
-                }
-            },
-        )
+        sync.bind(id, cookie) { if (on) set(regions, 0) }
     }
 
     /** Another page (a reload): its regions are its own to set; until then none. */
@@ -363,8 +350,7 @@ internal class GlassBlur(
         told = null
         forget()
         // Its frame ids start again at 1.
-        received = -1L
-        applied = -1L
+        sync?.reset()
         if (regions.isNotEmpty()) set(emptyList(), -1)
     }
 

@@ -19,3 +19,6 @@
 -keep class dev.omalauncher.shell.SettingsIndexReader { public static void main(java.lang.String[]); }
 
 -keep class dev.omalauncher.shell.SettingsIndexLauncher { public static void main(java.lang.String[]); }
+
+# The web windows' display maker, run as the shell user with app_process from this APK (shell/WebWindowsHost.kt).
+-keep class dev.omalauncher.shell.WebWindowsHost { public static void main(java.lang.String[]); }

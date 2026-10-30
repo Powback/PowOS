@@ -849,18 +849,15 @@ export interface Bridge {
   };
   /**
    * Web windows (the phone's only; off unless Settings.Global powos_web_windows = 1): an Android app's window as an
-   * element of home (ui/webwindows.tsx) - the page owns its place, page, z-order and title bar; the host draws the
-   * app's own display behind the WebView at the element's rect (rects are CSS px in the viewport).
+   * element of home (ui/webwindows.tsx) - the page owns its place, page, z-order and title bar; the host composites
+   * the app's display under the page at the element (rects are CSS px in the viewport). Geometry and z-order go over the
+   * native port, frame-synced ("w.f", ui/webwindows.tsx), not through this bridge.
    * "webwindows.closed" (its id) when the host ended it.
    */
   webwindows?: {
     enabled(): Promise<boolean>;
     /** The app (an "a:" key) launched into a new window at [rect]: its id, or -1. */
     open(key: string, rect: WebWindowRect): Promise<number>;
-    /** The element's rect now, and whether it's in sight. */
-    place(id: number, rect: WebWindowRect, visible: boolean): Promise<boolean>;
-    /** Its content above the other windows' (the element was raised). */
-    raise(id: number): Promise<boolean>;
     /** A touch on its body, CSS px from the body's top-left. */
     input(id: number, action: "down" | "move" | "up" | "cancel", x: number, y: number): Promise<boolean>;
     close(id: number): Promise<boolean>;
