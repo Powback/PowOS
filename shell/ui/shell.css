@@ -1546,7 +1546,6 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   padding-inline: max(var(--edge), calc((100% - 70ch - 40rem - 20px) / 2));
 }
 .ai-view.wide > * { max-width: none; margin-inline: 0; }
-.ai-view.wide > .ai-top { grid-column: 1 / -1; }
 /* The panel, wide: its panes scroll, not it; its own pill under the conversation instead of home's bar. */
 .ai-panel.wide { overflow: hidden; }
 :is(.home, .pull-screen).open:has(.ai-panel.wide) > .bar { visibility: hidden; }
@@ -1563,8 +1562,8 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .home.wide:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * var(--strip-height)); }
 .pull-screen:has(.ai-panel.wide) > .stage > .launcher-clip { bottom: -48px; }
 .home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip .launcher-inner { padding-bottom: 0; }
-.ai-view.wide > .ai-side { grid-column: 1; grid-row: 2 / 4; margin-bottom: var(--ai-foot); }
-.ai-view.wide > .ai-talk { grid-column: 2; grid-row: 2; flex-direction: column-reverse; }
+.ai-view.wide > .ai-side { grid-column: 1; grid-row: 1 / 4; margin-bottom: var(--ai-foot); }
+.ai-view.wide > .ai-talk { grid-column: 2; grid-row: 1 / 3; flex-direction: column-reverse; }
 /* The whole conversation (powai.tsx History): reversed, the pane opens at the newest and holds it; short, it sits on top. */
 .ai-talk-in { display: flex; flex-direction: column; gap: 14px; margin-bottom: auto; min-width: 0; }
 /* No child of the conversation is wider than its pane: flex items' min-width defaults to their longest word. */
@@ -1595,6 +1594,10 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-screen.wide > .ai-compose { margin-top: 0; grid-row: 3; }
 .ai-screen.wide > .ai-top { grid-row: 1; }
 .ai-screen.wide > .ai-side { margin-bottom: 0; }
+/* Wide, the header is the left pane's first row (powai.tsx AiView), so it scrolls away with the board: the pane starts on
+   the chat pane's line, nothing floats over it. */
+.ai-screen.wide > .ai-side { padding-top: var(--ai-head-top); scroll-padding-top: 0; }
+.ai-side > .ai-top { min-height: 36px; margin-bottom: 10px; }
 /* Wide, nothing floats over the chat pane's top: it starts under the status bar on the left column's line (--ai-head-top),
    so its text never runs through the clock and battery (the user's screenshot, 2026-10-30). */
 .ai-screen.wide > .ai-talk { margin-top: var(--ai-head-top); padding-top: 0; scroll-padding-top: 0; }
@@ -1706,6 +1709,12 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-unit-decide { color: var(--accent-text); }
 .ai-dot.asleep { background: color-mix(in srgb, var(--color-accent) 45%, transparent); }
 .ai-unit .ai-work-meta { max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+/* A host header: the name on its own line, whole; the counts as a smaller subtitle under it - neither is cut. */
+.ai-unit-host .ai-work-line { align-items: flex-start; }
+.ai-unit-host .ai-work-caret { line-height: 1.4; }
+.ai-unit-host-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ai-unit-host .ai-work-title { white-space: normal; overflow-wrap: anywhere; }
+.ai-unit-host .ai-work-meta { white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
 .ai-work.done .ai-work-title { color: var(--color-muted); }
 .ai-dot.done { background: var(--color-muted); }
 .ai-work-detail { display: flex; flex-direction: column; gap: 3px; padding-left: 17px; font-size: var(--text-small); line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }

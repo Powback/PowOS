@@ -996,10 +996,13 @@ export function AiView({ shown, cls, pill = true }: { shown: boolean; cls: strin
   const [ref, wide] = useWide();
   return (
     <div ref={ref} class={`${cls} ai-view ${wide ? "wide" : ""}`}>
-      <AiHeader />
+      {!wide && <AiHeader />}
       {wide ? (
         <>
+          {/* Wide, the header heads the left pane and scrolls away with it (the user, 2026-10-30: "This part doesn't
+              need to be sticky"); one column, it still floats over the page. */}
           <div class="ai-scroll ai-side">
+            <AiHeader />
             <AiContent shown={shown} part="side" />
           </div>
           <div class="ai-scroll ai-talk">
