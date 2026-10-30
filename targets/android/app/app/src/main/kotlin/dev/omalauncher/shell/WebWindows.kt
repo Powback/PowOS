@@ -597,22 +597,31 @@ class WebWindows(
      * draw that shows page frame <frame> ([FrameSync.next]: the window's next draw, not the visual-state callback's
      * draw a frame or more later).
      */
-    fun frameCommand(rest: String) {
-        val (frame, geos) = parse(rest) ?: return
+    fun frameCommand(
+        rest: String,
+        direct: Boolean = false,
+    ) {
+        val (frame, geos, pageMs) = parse(rest) ?: return
         val cookie = sync.receive(frame)
-        sync.next(frame, cookie) { apply(frame, geos) }
+        via = if (direct) "direct" else "port"
+        sync.next(frame, cookie, pageMs) { apply(frame, geos) }
     }
 
     @Volatile private var lastDpr = 1f
 
-    private fun parse(rest: String): Pair<Long, List<Geo>>? =
+    /** How the last "w.f" came: "direct" (ShellNative's geometry interface, a binder thread) or "port" (main first). */
+    @Volatile private var via = "port"
+
+    /** The frame id, the windows, and the page frame's time (epoch ms; NaN when the page didn't stamp it). */
+    private fun parse(rest: String): Triple<Long, List<Geo>, Double>? =
         try {
             val t = rest.trim().split(' ')
             val dpr = t[1].toFloat()
             lastDpr = dpr
             // The WebView's place in its window (none for home: full screen): geometry is in the window surface's space.
             val c = Cursor(t, 3, dpr, IntArray(2).also(web::getLocationInWindow))
-            t[0].toLong() to List(t[2].toInt()) { z -> entry(c, z) }
+            val geos = List(t[2].toInt()) { z -> entry(c, z) }
+            Triple(t[0].toLong(), geos, t.getOrNull(c.i)?.toDoubleOrNull() ?: Double.NaN)
         } catch (e: RuntimeException) {
             Log.w(TAG, "w.f: bad geometry ($e)")
             null
@@ -735,7 +744,9 @@ class WebWindows(
      * At most one line a second (a page-driven move sends one a frame). "behind": how many newer page frames had already
      * arrived when this one was applied (0 now: each applies before the next draw). "lag": applies by window draws
      * between the frame's receipt and its apply ([FrameSync.lag]: 0 = on the draw that shows its page frame, 1, 2, 3+),
-     * the content trailing the DOM chrome by that many frames (docs/WEB_WINDOWS.md "Measured lag").
+     * the content trailing the DOM chrome by that many frames (docs/WEB_WINDOWS.md "Measured lag"). "pf": the same counted
+     * from the page frame itself ([FrameSync.pageLag]: catches a draw before the message reached the host), "rx": the
+     * mean ms from the page frame to the host's receipt, "via": the channel the last one came on.
      */
     private fun logFrame(
         frame: Long,
@@ -747,7 +758,7 @@ class WebWindows(
         val now = SystemClock.uptimeMillis()
         if (now - lastPlaceLog < PLACE_LOG_MS || geos.isEmpty()) return
         lastPlaceLog = now
-        Log.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
+        Log.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} pf=${sync.pageLag.joinToString("/")} rx=${"%.1f".format(sync.receiptMs / sync.pageLag.sum().coerceAtLeast(1))}ms via=$via " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
     }
 
     private var lastPlaceLog = 0L

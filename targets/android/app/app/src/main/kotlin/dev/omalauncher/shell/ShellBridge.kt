@@ -139,8 +139,11 @@ class ShellBridge(
     private val systemFloat: (Int) -> Unit = { id -> main.post { toWebWindow(id) } }
 
     /** The page's web-window geometry, "w.f ..." over its native port ([ShellNative], port thread): [WebWindows.frameCommand]. */
-    fun webWindowFrame(rest: String) {
-        if (webWindowsMade) webWindows.frameCommand(rest)
+    fun webWindowFrame(
+        rest: String,
+        direct: Boolean,
+    ) {
+        if (webWindowsMade) webWindows.frameCommand(rest, direct)
     }
 
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
