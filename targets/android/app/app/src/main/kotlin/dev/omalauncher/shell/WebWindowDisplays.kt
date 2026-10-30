@@ -18,15 +18,51 @@ import java.util.concurrent.ConcurrentHashMap
 object WebWindowDisplays {
     private val ids = ConcurrentHashMap.newKeySet<Int>()
 
-    /** [WebWindows]: display [displayId] holds a web window now (its helper made it). */
-    fun add(displayId: Int) {
-        if (displayId >= 0) ids += displayId
+    /** Display id -> the web window (WebWindows' id) it holds. */
+    private val windows = ConcurrentHashMap<Int, Int>()
+
+    /**
+     * A web window's app made a full-screen app (its bar's full screen button, [WebWindows.fullScreen]): task id -> the
+     * web window it came out of. Its task is on display 0 then, so [isWebWindow] says no (the old paths treat it as any
+     * full-screen app); the switcher and the dock still know whose it is.
+     */
+    private val full = ConcurrentHashMap<Int, Int>()
+
+    /** [WebWindows]: display [displayId] holds web window [windowId] now (its helper made it). */
+    fun add(
+        displayId: Int,
+        windowId: Int,
+    ) {
+        if (displayId < 0) return
+        ids += displayId
+        windows[displayId] = windowId
     }
 
     /** [WebWindows]: display [displayId] is gone (window closed, display removed, helper gone). */
     fun remove(displayId: Int) {
         ids -= displayId
+        windows.remove(displayId)
     }
+
+    /** The web window display [displayId] holds, or null. */
+    fun windowOn(displayId: Int): Int? = windows[displayId]
+
+    /** [WebWindows]: task [taskId] of window [windowId] is a full-screen app now ([on]), or back in its window. */
+    fun fullScreen(
+        taskId: Int,
+        windowId: Int,
+        on: Boolean,
+    ) {
+        if (on) full[taskId] = windowId else full.remove(taskId)
+    }
+
+    /** [WebWindows]: window [windowId] closed: none of its tasks is a full-screen web window any more. */
+    fun windowGone(windowId: Int) {
+        full.values.removeAll { it == windowId }
+    }
+
+    /** The web window task [taskId] came out of while it's a full-screen app, or null. */
+    fun fullScreenWindow(taskId: Int): Int? = full[taskId]
 
     /** Display [displayId] is a web window's. */
     fun isWebWindowDisplay(displayId: Int): Boolean = displayId in ids
@@ -35,6 +71,25 @@ object WebWindowDisplays {
     fun isWebWindow(t: TaskInfo): Boolean {
         if (ids.isEmpty()) return false
         return runCatching { TaskInfo::class.java.getField("displayId").getInt(t) in ids }.getOrDefault(false)
+    }
+
+    /** Task [t]'s display (TaskInfo.displayId, hidden), or -1. */
+    fun displayOf(t: TaskInfo): Int = runCatching { TaskInfo::class.java.getField("displayId").getInt(t) }.getOrDefault(-1)
+
+    /**
+     * The web window task [taskId] belongs to: on its display (floating) or a full-screen app out of one. Null: no web
+     * window's. [running] is a getRunningTasks list the caller has already (else looked up here).
+     */
+    fun windowOf(
+        context: Context,
+        taskId: Int,
+        running: List<ActivityManager.RunningTaskInfo>? = null,
+    ): Int? {
+        full[taskId]?.let { return it }
+        if (windows.isEmpty()) return null
+        @Suppress("DEPRECATION")
+        val tasks = running ?: runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
+        return tasks.firstOrNull { it.taskId == taskId }?.let { windows[displayOf(it)] }
     }
 
     /** Task [taskId] is a web window (a running-tasks lookup; none open: no binder call). */

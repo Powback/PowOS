@@ -473,6 +473,12 @@ class WindowFrames(
         return floating && !keyguard && !Switcher.open && adopt()
     }
 
+    /**
+     * Task [id], full screen, is one adopt floats: not floated already, and not a web window's app made a full-screen
+     * app by its bar's button (WebWindows.fullScreen) - that one is meant to be full screen.
+     */
+    private fun strayFull(id: Int): Boolean = id !in adopted && id !in windowed && dev.omalauncher.shell.WebWindowDisplays.fullScreenWindow(id) == null
+
     private fun adopt(): Boolean {
         val full = FreeformTasks.fullScreen(context)
         // A window that is full screen now went there by its app's own request (a video, a game: Activity.
@@ -481,7 +487,7 @@ class WindowFrames(
             fullBefore[id] = lastBounds[id] ?: Rect()
             Log.i(TAG, "task $id ($pkg) went full screen by itself (was ${lastBounds[id]?.toShortString()})")
         }
-        val stray = full.filter { (id, pkg) -> pkg != null && pkg != context.packageName && id !in adopted && id !in windowed }
+        val stray = full.filter { (id, pkg) -> pkg != null && pkg != context.packageName && strayFull(id) }
         stray.forEach { (id, pkg) ->
             adopted.add(id)
             val ok = FreeformTasks.toWindow(context, id, AppWindows.nextBounds(context))

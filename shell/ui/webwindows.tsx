@@ -33,6 +33,13 @@ export interface WebWin {
   minimised?: boolean;
   /** Filling the work area (above the dock); the frame to go back to. */
   restore?: { x: number; y: number; w: number; h: number };
+  /**
+   * Its app is a real full-screen app on the main display now (its bar's full screen button, WebWindows.fullScreen):
+   * the window is hidden, its place kept; "Back to window" on its switcher card brings it back here.
+   */
+  full?: boolean;
+  /** Its app's task, once the host told it ("webwindows.full"). */
+  task?: number;
 }
 
 /** Bottom first: the last one is on top. */
@@ -56,6 +63,11 @@ export async function openWebWindow(key: string, label: string, page: number): P
   if (!wideHome.value || !key.startsWith("a:") || !(await enabled())) return false;
   // Already a window: it comes to this page, on top - never a second display for the same app (its task would move).
   const open = webWins.value.find((w) => w.key === key);
+  // A full-screen app now: it comes to the front as one (never a second window).
+  if (open?.full && powos.webwindows?.fullScreen) {
+    void powos.webwindows.fullScreen(open.id);
+    return true;
+  }
   if (open) {
     update(open.id, { page, minimised: false });
     raise(open.id);
@@ -94,6 +106,11 @@ export function raise(id: number) {
 
 powos.on("webwindows.closed", (id: number) => {
   webWins.value = webWins.value.filter((w) => w.id !== id);
+});
+/** Its app became a full-screen app (the window hides, its place kept) or is back in the window (shown on its page). */
+powos.on("webwindows.full", (m: { id: number; on: boolean; task?: number }) => {
+  update(m.id, { full: m.on, task: m.task ?? webWins.value.find((w) => w.id === m.id)?.task, minimised: false });
+  if (!m.on) raise(m.id);
 });
 
 // ---- the work area, and the host's events ----------------------------------------------------------------------------
@@ -158,7 +175,7 @@ powos.on("webwindows.control", (m: { id: number; action: string }) => {
 
 /** The windows pinned to home page [page] (not minimised): invisible elements in that page, so they move with it. */
 export function WebWindowsOn({ page }: { page: number }) {
-  const here = webWins.value.filter((w) => w.page === page && !w.minimised);
+  const here = webWins.value.filter((w) => w.page === page && !w.minimised && !w.full);
   if (!here.length) return null;
   return (
     <>

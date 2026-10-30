@@ -147,7 +147,9 @@ internal class WebWindowChrome(
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
         }
-        listOf("close", if (maximised) "restore" else "maximise", "minimise").forEachIndexed { i, kind ->
+        // The middle button is always "full screen app" (WebWindows.fullScreen): a window filling the work area (the bar's
+        // double tap) is still a window, so the glyph doesn't turn into restore.
+        listOf("close", "maximise", "minimise").forEachIndexed { i, kind ->
             val cx = width - button * (i + 0.5f)
             mark(c, kind, android.graphics.PointF(cx, title / 2f), stroke)
         }

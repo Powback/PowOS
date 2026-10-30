@@ -102,6 +102,7 @@ class WebWindows(
         }
 
     init {
+        current = this
         runCatching { dm.registerDisplayListener(displayListener, main) }
         // Every touch on home first (Z2): a title-bar move the page handed over is the host's from then on.
         (web as? HomeWebView)?.touchHook = ::onTouch
@@ -132,6 +133,12 @@ class WebWindows(
 
         /** In the page's last "w.f" and visible (main thread): only those take touches ([hit]). */
         var shown = false
+
+        /** Its app's task (learned from its display when first needed; kept while it's a full-screen app). */
+        @Volatile var taskId = -1
+
+        /** Its app is a full-screen app on display 0 now ([fullScreen]): the window is hidden, its display empty. */
+        @Volatile var full = false
 
         @Volatile var closed = false
     }
@@ -192,7 +199,7 @@ class WebWindows(
                 return@create
             }
             win.displayId = displayId
-            WebWindowDisplays.add(displayId)
+            WebWindowDisplays.add(displayId, id)
             // Closed while its display was being made: the display goes too.
             if (win.closed) return@create helper.release(displayId)
             Log.i(TAG, "window $id: trusted display $displayId ${w}x$h dpi $dpi (${component.packageName})")
@@ -763,7 +770,9 @@ class WebWindows(
                 win.shown = false
                 emit("webwindows.control", mapOf("id" to win.id, "action" to "minimise"))
             }
-            else -> emit("webwindows.control", mapOf("id" to win.id, "action" to "maximise"))
+            // The button: the app becomes a real full-screen app (the manager's rule, 10-29). The bar's double tap is
+            // the window's own maximise ([tapped]).
+            else -> fullScreen(win)
         }
     }
 
@@ -879,7 +888,9 @@ class WebWindows(
         lastTap = win.id to at
         if (last == null || last.first != win.id || at - last.second >= DOUBLE_TAP_MS) return
         lastTap = null
-        control(win, "maximise")
+        // Fill the work area above the dock / restore (the page's toggleMaximise): not the full screen button's.
+        Log.i(TAG, "window ${win.id}: maximise (bar double tap)")
+        emit("webwindows.control", mapOf("id" to win.id, "action" to "maximise"))
     }
 
     /**
@@ -939,6 +950,7 @@ class WebWindows(
     }
 
     fun closeAll() {
+        if (current === this) current = null
         drag = null
         (web as? HomeWebView)?.touchHook = null
         wins.values.toList().forEach { drop(it) }
@@ -958,8 +970,30 @@ class WebWindows(
     ) {
         if (wins.remove(w.id) == null) return
         w.closed = true
-        val t = SurfaceControl.Transaction()
+        Log.i(TAG, "close window ${w.id} (${w.component.packageName}, display ${w.displayId}, task ${w.taskId}${if (w.full) ", full screen" else ""}): 1/4 layers off")
         if (drag?.win === w) drag = null
+        releaseLayers(w)
+        val displayId = w.displayId
+        WebWindowDisplays.remove(displayId)
+        WebWindowDisplays.windowGone(w.id)
+        // A full-screen app out of this window (its task on display 0 now): it goes with the window.
+        val fullTask = w.taskId.takeIf { w.full && it >= 0 }
+        if (fullTask != null) io.post { removeTask(fullTask, "full screen app of window ${w.id}") }
+        if (displayId >= 0 && !released) {
+            io.post {
+                // DESTROY_CONTENT_ON_REMOVAL finishes the activities but leaves the task in recents (S0): removed first.
+                removeTasks(displayId)
+                Log.i(TAG, "close window ${w.id}: 3/4 display $displayId released")
+                helper.release(displayId)
+            }
+        }
+        Log.i(TAG, "close window ${w.id}: 2/4 layers gone (container, mirror, frame), page told (webwindows.closed) - 4/4")
+        emit("webwindows.closed", w.id)
+    }
+
+    /** [w]'s layers (mirror, frame, container) off the screen in one transaction, then released. */
+    private fun releaseLayers(w: Win) {
+        val t = SurfaceControl.Transaction()
         w.mirror?.let { if (it.isValid) t.reparent(it, null) }
         w.chrome?.release(t)
         if (w.container.isValid) t.reparent(w.container, null)
@@ -967,17 +1001,6 @@ class WebWindows(
         w.chrome?.releaseNow()
         w.mirror?.release()
         w.container.release()
-        val displayId = w.displayId
-        WebWindowDisplays.remove(displayId)
-        if (displayId >= 0 && !released) {
-            io.post {
-                // DESTROY_CONTENT_ON_REMOVAL finishes the activities but leaves the task in recents (S0): removed first.
-                removeTasks(displayId)
-                helper.release(displayId)
-            }
-        }
-        Log.i(TAG, "closed window ${w.id} (display $displayId, ${w.component.packageName})")
-        emit("webwindows.closed", w.id)
     }
 
     /** Every task on [displayId] removed (MANAGE_ACTIVITY_TASKS / REMOVE_TASKS, held as the recents provider). */
@@ -998,6 +1021,188 @@ class WebWindows(
                 Log.i(TAG, "display $displayId: task $id removed=$ok")
             }
         }.onFailure { Log.w(TAG, "display $displayId: its tasks not removed (they stay in recents)", it) }
+    }
+
+    private fun removeTask(
+        id: Int,
+        why: String,
+    ) {
+        val ok = runCatching { atm().javaClass.getMethod("removeTask", Int::class.javaPrimitiveType).invoke(atm(), id) as Boolean }.getOrDefault(false)
+        Log.i(TAG, "task $id removed=$ok ($why)")
+    }
+
+    // ---- full screen app, and back to a window ------------------------------------------------------------------------
+
+    /**
+     * The bar's full screen button (the manager's rule, 10-29): [win]'s app becomes a real FULL-SCREEN APP - its task
+     * moved off its display to display 0, full screen and in front: home gestures, its own switcher card, never a big
+     * floating window. The window stays in the page's model, hidden ("webwindows.full" on), with its display (empty
+     * meanwhile) and its frame: [toWindow] puts the app back there. On [io]: binder calls.
+     */
+    private fun fullScreen(win: Win) {
+        if (win.displayId < 0 || win.full) return
+        // Hidden at once (the page drops it from "w.f" a frame later), as minimise.
+        if (win.container.isValid) SurfaceControl.Transaction().setVisibility(win.container, false).apply()
+        win.shown = false
+        io.post { fullScreenNow(win) }
+    }
+
+    /** On [io]: [fullScreen]'s move. */
+    private fun fullScreenNow(win: Win) {
+        val task = taskOn(win.displayId)
+        if (task == null) {
+            Log.w(TAG, "window ${win.id}: no task on display ${win.displayId} to make full screen")
+            announce(win, false)
+            return
+        }
+        win.taskId = task
+        // Known as a full-screen web window BEFORE it lands on display 0: the old path's adopt must never float it.
+        WebWindowDisplays.fullScreen(task, win.id, true)
+        val ok = moveTask(task, android.view.Display.DEFAULT_DISPLAY)
+        if (!ok) WebWindowDisplays.fullScreen(task, win.id, false)
+        Log.i(TAG, "window ${win.id}: ${if (ok) "its app (task $task) is a full-screen app on display 0" else "full screen FAILED (task $task stays on display ${win.displayId})"}")
+        announce(win, ok)
+    }
+
+    /** On the main thread: [win] is a full-screen app ([full]) or a window again - "webwindows.full" to the page. */
+    private fun announce(
+        win: Win,
+        full: Boolean,
+    ) = main.post {
+        if (win.closed) return@post
+        win.full = full
+        emit("webwindows.full", mapOf("id" to win.id, "on" to full, "task" to win.taskId))
+    }
+
+    /** The page's "webwindows.fullScreen": window [id]'s app full screen ([fullScreen]); false: no such window. */
+    fun fullScreen(id: Int): Boolean {
+        val w = wins[id] ?: return false
+        if (w.full) return front(id)
+        fullScreen(w)
+        return true
+    }
+
+    /**
+     * Window [id]'s full-screen app back into its window (the switcher card's "Back to window"): its task moved back to
+     * the window's display, the window shown where it was ("webwindows.full" off: the page shows it on its page).
+     */
+    fun toWindow(id: Int): Boolean {
+        val w = wins[id] ?: return false
+        if (!w.full) return true.also { emit("webwindows.full", mapOf("id" to w.id, "on" to false)) }
+        io.post { toWindowNow(w) }
+        return true
+    }
+
+    /** On [io]: [toWindow]'s move. */
+    private fun toWindowNow(w: Win) {
+        val task = w.taskId
+        // Still running: moved back. Gone meanwhile (its app finished): the app launched on its display afresh.
+        val alive = taskDisplay(task) != null
+        val ok = if (alive) moveTask(task, w.displayId) else true.also { main.post { if (!w.closed) launch(w) } }
+        Log.i(TAG, "window ${w.id}: back to a window (task $task ${if (alive) "moved back to display ${w.displayId}: $ok" else "gone: launched again"})")
+        if (!ok) return
+        WebWindowDisplays.fullScreen(task, w.id, false)
+        announce(w, false)
+    }
+
+    /** Window [id]'s full-screen app to the front again (a dock tap on it): back on display 0, full screen. */
+    private fun front(id: Int): Boolean {
+        val w = wins[id] ?: return false
+        io.post {
+            if (taskDisplay(w.taskId) == null) {
+                Log.i(TAG, "window ${w.id}: its full-screen app (task ${w.taskId}) is gone: back to its window")
+                main.post { toWindow(id) }
+                return@post
+            }
+            moveTask(w.taskId, android.view.Display.DEFAULT_DISPLAY)
+        }
+        return true
+    }
+
+    /** The window (its id) task [taskId] belongs to while it's a full-screen app out of one ([fullScreen]), or null. */
+    fun windowOfFullTask(taskId: Int): Int? = wins.values.firstOrNull { it.full && it.taskId == taskId }?.id
+
+    /** The app's task on [displayId] (its first root task's top leaf), or null. */
+    private fun taskOn(displayId: Int): Int? =
+        runCatching {
+            val roots = atm().javaClass.getMethod("getAllRootTaskInfosOnDisplay", Int::class.javaPrimitiveType).invoke(atm(), displayId) as List<*>
+            roots.filterNotNull().firstNotNullOfOrNull { r ->
+                val children = runCatching { r.javaClass.getField("childTaskIds").get(r) as IntArray }.getOrNull()
+                children?.firstOrNull() ?: android.app.TaskInfo::class.java.getField("taskId").getInt(r)
+            }
+        }.onFailure { Log.w(TAG, "display $displayId: its tasks unreadable", it) }.getOrNull()
+
+    /** The display task [taskId] runs on, or null (not running). */
+    private fun taskDisplay(taskId: Int): Int? {
+        if (taskId < 0) return null
+        @Suppress("DEPRECATION")
+        val tasks = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
+        return tasks.firstOrNull { it.taskId == taskId }?.let { WebWindowDisplays.displayOf(it) }
+    }
+
+    /**
+     * Task [taskId] onto display [displayId], full screen and in front: IActivityTaskManager.moveRootTaskToDisplay
+     * (MANAGE_ACTIVITY_TASKS, held as the recents provider), then startActivityFromRecents with that display and
+     * WINDOWING_MODE_FULLSCREEN (START_TASKS_FROM_RECENTS: in front, focused, its windowing mode set). Still elsewhere:
+     * root `cmd activity display move-stack` (shell's own path to the same call). True once the task is there.
+     * HACK: the task calls and ActivityOptions.setLaunchWindowingMode are hidden, reflected ([HiddenApi]); root is the
+     * last resort. Real fix: none public for an app (a platform-signed system module would call WM directly).
+     */
+    private fun moveTask(
+        taskId: Int,
+        displayId: Int,
+    ): Boolean {
+        HiddenApi.allow()
+        val moved =
+            runCatching { atm().javaClass.getMethod("moveRootTaskToDisplay", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(atm(), taskId, displayId) }
+                .onFailure { Log.w(TAG, "moveRootTaskToDisplay($taskId, $displayId) refused: ${it.cause ?: it}") }.isSuccess
+        val started = fromRecents(taskId, displayId)
+        var now = taskDisplay(taskId)
+        if (now != displayId) {
+            val r = runCatching { andro.marchy.RootShell.run("cmd activity display move-stack $taskId $displayId") }.getOrNull()
+            Log.w(TAG, "task $taskId still on display $now: root move-stack -> code ${r?.code} ${r?.output?.take(160)}")
+            fromRecents(taskId, displayId)
+            now = taskDisplay(taskId)
+        }
+        Log.i(TAG, "task $taskId to display $displayId: moveRootTaskToDisplay=$moved startActivityFromRecents=$started, now on display $now")
+        return now == displayId
+    }
+
+    /** startActivityFromRecents([taskId]) on [displayId], full screen: its result >= 0. */
+    private fun fromRecents(
+        taskId: Int,
+        displayId: Int,
+    ): Boolean {
+        val opts = ActivityOptions.makeBasic().setLaunchDisplayId(displayId)
+        runCatching { ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(opts, WINDOWING_MODE_FULLSCREEN) }
+        return runCatching {
+            (atm().javaClass.getMethod("startActivityFromRecents", Int::class.javaPrimitiveType, android.os.Bundle::class.java).invoke(atm(), taskId, opts.toBundle()) as Int) >= 0
+        }.onFailure { Log.w(TAG, "startActivityFromRecents($taskId) on display $displayId refused: ${it.cause ?: it}") }.getOrDefault(false)
+    }
+
+    private fun atm(): Any = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!!
+
+    // ---- the switcher's card picture ------------------------------------------------------------------------------------
+
+    /**
+     * Window [windowId]'s content now (its display's mirror, captured: what the window shows), as a bitmap, or null.
+     * The switcher's card for a web window when the system has no task snapshot of it (a task on a display that never
+     * leaves the screen is never snapshotted on its own; ShellHost asks takeTaskSnapshot first). HACK: ScreenCapture is
+     * hidden, reflected. Real fix: none for an app.
+     */
+    fun contentShot(windowId: Int): android.graphics.Bitmap? {
+        val w = wins[windowId] ?: return null
+        val m = w.mirror?.takeIf { it.isValid } ?: return null
+        return runCatching {
+            HiddenApi.allow()
+            val sc = Class.forName("android.window.ScreenCapture")
+            val builder = Class.forName("android.window.ScreenCapture\$LayerCaptureArgs\$Builder").getConstructor(SurfaceControl::class.java).newInstance(m)
+            builder.javaClass.getMethod("setSourceCrop", Rect::class.java).invoke(builder, Rect(0, 0, w.w, w.h))
+            val args = builder.javaClass.getMethod("build").invoke(builder)
+            val shot = sc.getMethod("captureLayers", args.javaClass).invoke(null, args) ?: return null
+            val hw = shot.javaClass.getMethod("asBitmap").invoke(shot) as android.graphics.Bitmap? ?: return null
+            hw.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+        }.onFailure { Log.w(TAG, "window $windowId: its content not captured", it) }.getOrNull()
     }
 
     // ---- launch, IME -----------------------------------------------------------------------------------------------------
@@ -1200,6 +1405,28 @@ class WebWindows(
         private const val TAG = "PowosWebWindows"
         const val SETTING = "powos_web_windows"
 
+        /** Home's web windows (the one home page's), or null: what [closeForTask] closes through. */
+        @Volatile private var current: WebWindows? = null
+
+        /**
+         * THE close of a web window for a task (Tasks.remove: the switcher's swipe away, "Clear all", any task removal
+         * PowOS makes): when task [taskId] is a web window's - on its display, or a full-screen app out of one - that
+         * window is closed exactly as its bar's close does ([close] -> [drop]: its layers off at once in one transaction,
+         * its tasks removed, its display released, the page told). True: it was one (the caller does nothing more).
+         * Before (2026-10-30 18:30, the user: "I try to close it while the switcher but it just left me with this
+         * gray"): the switcher removed only the task; the window, its frame's background and its empty display stayed.
+         */
+        fun closeForTask(
+            context: Context,
+            taskId: Int,
+        ): Boolean {
+            val ww = current ?: return false
+            val id = WebWindowDisplays.windowOf(context, taskId) ?: return false
+            Log.i(TAG, "task $taskId removed (switcher / Tasks.remove): it is web window $id - closing the window (the bar's close path)")
+            ww.main.post { ww.close(id) }
+            return true
+        }
+
         /**
          * After PowOS's process came back (an APK update, a crash) with web windows on: home started again if nothing
          * did it within [HOME_GRACE_MS]. Seen 2026-10-30 15:45:59 (d41c991b rolled back): the update killed home while
@@ -1251,6 +1478,8 @@ class WebWindows(
         private const val EDGE_B = 8
         private const val MIRROR_WAIT_MS = 2000L
         private const val IME_POLICY_FALLBACK_DISPLAY = 1
+        private const val WINDOWING_MODE_FULLSCREEN = 1
+        private const val MAX_TASKS = 64
         private val ACTIONS = mapOf("down" to MotionEvent.ACTION_DOWN, "move" to MotionEvent.ACTION_MOVE, "up" to MotionEvent.ACTION_UP)
         private val VERBS = mapOf(MotionEvent.ACTION_DOWN to "DOWN", MotionEvent.ACTION_MOVE to "MOVE", MotionEvent.ACTION_UP to "UP")
     }

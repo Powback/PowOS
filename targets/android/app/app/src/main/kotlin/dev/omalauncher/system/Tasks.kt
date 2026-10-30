@@ -208,6 +208,9 @@ object Tasks {
         context: Context,
         id: Int,
     ): Boolean {
+        // A web window's task (on its display, or its full-screen app): the window closes, its task and display with it -
+        // one close path with the window's own close button (WebWindows.closeForTask).
+        if (dev.omalauncher.shell.WebWindows.closeForTask(context, id)) return true
         val task = list(context).firstOrNull { it.id == id }
         val pkg = task?.component?.packageName
         if (pkg == context.packageName) {

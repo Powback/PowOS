@@ -858,7 +858,8 @@ export interface Bridge {
    * element of home (ui/webwindows.tsx) - the page owns its place, page, z-order and title bar; the host composites
    * the app's display under the page at the element (rects are CSS px in the viewport). Geometry and z-order go over the
    * native port, frame-synced ("w.f", ui/webwindows.tsx), not through this bridge.
-   * "webwindows.closed" (its id) when the host ended it.
+   * "webwindows.closed" (its id) when the host ended it. "webwindows.full" ({ id, on, task }): its app became a real
+   * full-screen app on the main display (its bar's full screen button; the window hidden, kept) or is a window again.
    */
   webwindows?: {
     enabled(): Promise<boolean>;
@@ -867,6 +868,10 @@ export interface Bridge {
     /** A touch on its body, CSS px from the body's top-left. */
     input(id: number, action: "down" | "move" | "up" | "cancel", x: number, y: number): Promise<boolean>;
     close(id: number): Promise<boolean>;
+    /** Host-optional: its app as a real full-screen app (moved to the main display; again: to the front). */
+    fullScreen?(id: number): Promise<boolean>;
+    /** Host-optional: its full-screen app back into the window, where it was. */
+    toWindow?(id: number): Promise<boolean>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up
