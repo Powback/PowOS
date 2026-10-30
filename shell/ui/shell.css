@@ -1628,9 +1628,9 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
    the chat pane's line, nothing floats over it. */
 .ai-screen.wide > .ai-side { padding-top: var(--ai-head-top); scroll-padding-top: 0; }
 .ai-side > .ai-top { min-height: 36px; margin-bottom: 10px; }
-/* Wide, nothing floats over the chat pane's top: it starts under the status bar on the left column's line (--ai-head-top),
-   so its text never runs through the clock and battery (the user's screenshot, 2026-10-30). */
-.ai-screen.wide > .ai-talk { margin-top: var(--ai-head-top); padding-top: 0; scroll-padding-top: 0; }
+/* Wide, the chat pane scrolls up to the screen's top edge like the left pane (no clip line under the status bar, the
+   user 10-30 23:15): its first message starts on the left column's line (--ai-head-top) as padding, not a margin. */
+.ai-screen.wide > .ai-talk { padding-top: var(--ai-head-top); scroll-padding-top: 0; }
 /* Wide, a fold heading a pane ("needs you", "paused") sits on the panes' top line. */
 .ai-view.wide .ai-fold:not(.tile *) { margin: 0 0 0 2px; }
 /* The board (powai.tsx AiContent): one surface - what was a card each is a section on it, parted by spacing. */
