@@ -21,6 +21,7 @@ target_link_options(andromarchy_consumer PRIVATE -flto -fuse-ld=lld)
 
 target_link_libraries(andromarchy_consumer
     android
+    nativewindow
     log
     dl
     aaudio
