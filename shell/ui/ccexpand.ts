@@ -244,11 +244,11 @@ let pull: Pull | null = null;
 let doneTimer = 0;
 
 /**
- * What's under the toggle grid: the quick launchers (inside the card) and the notifications' own panel (a sibling under
+ * What's under the toggle grid: the quick launchers and the media cards (inside the card) and the notifications' own panel (a sibling under
  * the card, to the screen's bottom). The launchers ride with the rest: left out they stayed where the laid-out grid
  * pushed them, over the notifications, a gap above.
  */
-const below = () => [...document.querySelectorAll<HTMLElement>(".panel-body.together .cc3-launchers, .panel-body.together > .notif-own")];
+const below = () => [...document.querySelectorAll<HTMLElement>(".panel-body.together :is(.cc3-launchers, .cc-medias), .panel-body.together > .notif-own")];
 const list3 = () => document.querySelector<HTMLElement>(".panel-body.together .cc3-list");
 
 /** The pull under way, or a new one: v3's rest laid out (once), everything at where it is on screen. */

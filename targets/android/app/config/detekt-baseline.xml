@@ -70,7 +70,6 @@
     <ID>CognitiveComplexMethod:Lexer.kt$Lexer$private fun skipSpace()</ID>
     <ID>CognitiveComplexMethod:Lexer.kt$Lexer$private fun string()</ID>
     <ID>CognitiveComplexMethod:ManagedFiles.kt$ManagedFiles$fun sync(desired: List&lt;Managed&gt;)</ID>
-    <ID>CognitiveComplexMethod:Media.kt$Media$fun updates(): Flow&lt;Value&gt;</ID>
     <ID>CognitiveComplexMethod:NavGesture.kt$NavGesture$override fun onEvent(e: MotionEvent): GestureConsumer.Verdict</ID>
     <ID>CognitiveComplexMethod:NavGesture.kt$NavGesture$private fun began()</ID>
     <ID>CognitiveComplexMethod:NavGesture.kt$NavGesture$private fun endOverHome(outcome: NavGestureClassifier.Outcome)</ID>
@@ -225,9 +224,6 @@
     <ID>CyclomaticComplexMethod:Lexer.kt$Lexer$private fun skipSpace()</ID>
     <ID>CyclomaticComplexMethod:Lexer.kt$Lexer$private fun string()</ID>
     <ID>CyclomaticComplexMethod:ManagedFiles.kt$ManagedFiles$fun sync(desired: List&lt;Managed&gt;)</ID>
-    <ID>CyclomaticComplexMethod:Media.kt$Media$fun control(command: String)</ID>
-    <ID>CyclomaticComplexMethod:Media.kt$Media$fun updates(): Flow&lt;Value&gt;</ID>
-    <ID>CyclomaticComplexMethod:Media.kt$Media$fun value(): Value</ID>
     <ID>CyclomaticComplexMethod:NavGesture.kt$NavGesture$override fun onEvent(e: MotionEvent): GestureConsumer.Verdict</ID>
     <ID>CyclomaticComplexMethod:NavGesture.kt$NavGesture$private fun began()</ID>
     <ID>CyclomaticComplexMethod:NavGesture.kt$NavGesture$private fun ended( outcome: NavGestureClassifier.Outcome, why: String = "", )</ID>

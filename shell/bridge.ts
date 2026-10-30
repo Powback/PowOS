@@ -225,7 +225,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     },
     media: {
       state: () => call<MediaState>("media.state"),
-      control: (command) => call("media.control", command),
+      control: (command, pkg) => call("media.control", command, pkg ?? ""),
+      seek: (pkg, seconds) => call("media.seek", pkg ?? "", seconds),
       output: (pkg) => call("media.output", pkg ?? ""),
     },
     qs: {
@@ -705,21 +706,29 @@ function mock(): Bridge {
       };
     })(),
     media: (() => {
-      let st: MediaState = {
+      // One session by default; dev/shots.mjs's media scenes emit "media.changed" with none or two.
+      const one: MediaState = {
         available: true,
         playing: true,
         title: "Teardrop",
         artist: "Massive Attack",
         app: "Spotify",
-        package: "com.spotify.music",
+        package: "spotify", // the mock's app key is "a:spotify" (its card finds the icon by it)
         position: 42,
         duration: 330,
         art: null,
+        seekable: true,
       };
+      let st: MediaState = { ...one, sessions: [one] };
       return {
         state: async () => st,
-        control: async (command: string) => {
-          if (command === "toggle") st = { ...st, playing: !st.playing };
+        control: async (command: string, pkg?: string) => {
+          const of = (s: MediaState) => (command === "toggle" && (!pkg || s.package === pkg) ? { ...s, playing: !s.playing } : s);
+          st = { ...of(st), sessions: st.sessions?.map(of) };
+          events.emit("media.changed", st);
+        },
+        seek: async (pkg: string | undefined, seconds: number) => {
+          st = { ...st, sessions: st.sessions?.map((s) => (s.package === pkg ? { ...s, position: seconds } : s)) };
           events.emit("media.changed", st);
         },
         output: async () => console.log("[mock] media output picker"),
