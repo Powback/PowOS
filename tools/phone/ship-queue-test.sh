@@ -222,6 +222,34 @@ drained 40
 for _ in $(seq 150); do grep -q '^APPINSTALL' "$LOG" && break; sleep 0.2; done
 grep -q 'a = 9' "$PHONE/files/shell/ui/a.tsx" && grep -q '^APPINSTALL x install' "$LOG" && ok "apps ship after a shell ship" || { bad "apps not shipped after a shell ship"; cat "$LOG" "$Q/runner.log"; }
 
+# 10. 2026-10-30: APK inputs + shell in the SAME commit (the web-windows redesign: the shell stopped drawing window
+#     chrome the APK now draws): the shell is held until that APK installs - nothing pushed before the install; status
+#     and the runner log say "shell held for its APK <sha>".
+: > "$LOG"; touch "$HOME/hold-apk"
+git pull -q --rebase 2>/dev/null; echo 'class Main10' > targets/android/app/Main.kt; echo 'export const a = 10' > shell/ui/a.tsx
+git add -A; git commit -qm "kt10 + shell together"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null
+req --note "windows drawn natively"; t10=$(tip)
+for _ in $(seq 100); do grep -q '^APKSTART' "$LOG" && break; sleep 0.2; done
+sleep 1
+! grep -q '^PUSH' "$LOG" && ! grep -q 'a = 10' "$PHONE/files/shell/ui/a.tsx" && ok "coupled shell held while its APK waits" || { bad "coupled shell pushed before its APK"; cat "$LOG"; tail -5 "$Q/runner.log"; }
+st=$(bash tools/phone/ship.sh status)
+grep -q "shell held for its APK ${t10:0:9}" <<<"$st" && ok "status: shell held for its APK" || { bad "status hold"; echo "$st"; }
+grep -q "shell held for its APK ${t10:0:9}" "$Q/runner.log" && ok "runner log: shell held for its APK" || bad "runner log hold"
+rm -f "$HOME/hold-apk"
+drained && [ "$(grep -m1 -E '^(PUSH|APK )' "$LOG")" = "APK $t10 svc=1 --note windows drawn natively" ] && [ ! -e "$Q/shell-held" ] &&
+  ok "APK installed first (its install brings the shell), hold cleared, request done" || { bad "after the hold"; cat "$LOG"; tail -5 "$Q/runner.log"; }
+# 10b. A shell-only tip right after ships at once (no APK, no hold).
+: > "$LOG"
+land shell/ui/b.tsx 'export const b = 10' "b10"; req --note "shell only"
+drained && grep -q '^PUSH' "$LOG" && ! grep -q '^APK' "$LOG" && grep -q 'b = 10' "$PHONE/files/shell/ui/b.tsx" && ok "shell-only tip ships at once" || { bad "shell-only after a hold"; cat "$LOG"; }
+
+# 11. ~/.config/powos/ship-no-idle-wait present: the APK ship passes --now (installs without waiting for idle).
+: > "$LOG"; mkdir -p "$HOME/.config/powos"; touch "$HOME/.config/powos/ship-no-idle-wait"
+land targets/android/app/Main.kt 'class Main11' "kt11"; req --note "eleven"; t11=$(tip)
+drained && grep -q "^APK $t11 svc=1 --note eleven --now\$" "$LOG" && ok "no-idle setting passes --now" || { bad "no --now"; cat "$LOG"; }
+grep -q 'no idle wait' <<<"$(bash tools/phone/ship.sh status)" && ok "status shows the no-idle setting" || bad "status no-idle"
+rm -f "$HOME/.config/powos/ship-no-idle-wait"
+
 for _ in $(seq 75); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 0.2; done
 runner_left=$(cat "$Q/runner.lock/pid" 2>/dev/null)
 [ -z "$runner_left" ] && ok "runner exits when nothing is requested" || bad "runner still up ($runner_left)"
