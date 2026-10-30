@@ -4,6 +4,7 @@ import android.app.ActivityOptions
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.os.Handler
@@ -132,6 +133,8 @@ class WebWindows(
     private fun reconcile() {
         val ws = wins.values.filter { it.linux == null && !it.closed && it.displayId >= 0 }
         if (ws.isNotEmpty()) io.post { ws.forEach(::checkOrphan) }
+        val left = ws.filter { it.leftAt != 0L }
+        if (left.isNotEmpty()) io.post { left.forEach(::checkLeft) }
     }
 
     /** On [io]: [w]'s display read; empty after it had its app: read again [ORPHAN_CONFIRM_MS] later ([confirmOrphan]). */
@@ -206,6 +209,9 @@ class WebWindows(
 
         /** Its app is a full-screen app on display 0 now ([fullScreen]): the window is hidden, its display empty. */
         @Volatile var full = false
+
+        /** Minimised the home gesture's way ([minimise]): its task on display 0 (in PiP, or behind home); uptime then, else 0. */
+        @Volatile var leftAt = 0L
 
         @Volatile var closed = false
 
@@ -1530,8 +1536,8 @@ class WebWindows(
         WebWindowDisplays.remove(displayId)
         WebWindowDisplays.windowGone(w.id)
         // A full-screen app out of this window (its task on display 0 now): it goes with the window.
-        val fullTask = w.taskId.takeIf { w.full && it >= 0 }
-        if (fullTask != null) io.post { removeTask(fullTask, "full screen app of window ${w.id}") }
+        val fullTask = w.taskId.takeIf { (w.full || w.leftAt != 0L) && it >= 0 }
+        if (fullTask != null) io.post { removeTask(fullTask, "full screen / minimised (PiP) app of window ${w.id}") }
         if (displayId >= 0 && !released) {
             io.post {
                 // DESTROY_CONTENT_ON_REMOVAL finishes the activities but leaves the task in recents (S0): removed first.
@@ -1582,6 +1588,129 @@ class WebWindows(
     ) {
         val ok = runCatching { atm().javaClass.getMethod("removeTask", Int::class.javaPrimitiveType).invoke(atm(), id) as Boolean }.getOrDefault(false)
         Log.i(TAG, "task $id removed=$ok ($why)")
+    }
+
+    // ---- minimise: a home gesture's lifecycle (MN1/MN2) -------------------------------------------------------------------
+
+    /**
+     * MN1 (the user, 2026-10-30 22:52: "Click the minimize button on for example YouTube. It should act as if I swiped
+     * home on it ... If I swipe home on YouTube it's activating this picture in picture floating YouTube thing"): the
+     * page's minimise of Android window [id] (bar button, dock toggle, a tile dropped to the dock). An app whose top
+     * activity declares picture-in-picture gets exactly a home swipe: its task moved to display 0, then home started
+     * there - a user-initiated start, so the app pauses as the user leaving (onUserLeaveHint, onPause, onStop) and may
+     * enter PiP (enterPictureInPictureMode from the hint, or auto-enter): native PiP, draggable, over home and windows.
+     * Display 0 because Android's PiP is the pinned task of the display the activity is on - entered on the window's
+     * own (hidden) display it would never show. An app without PiP is just hidden, as before (moving it would cost a
+     * relayout for nothing). The window keeps its display (empty meanwhile) and frame: [restore] / [checkLeft] (PiP
+     * expanded, its switcher card opened) put the app back in it (MN2). Main thread.
+     */
+    fun minimise(id: Int): Boolean {
+        val w = wins[id] ?: return false
+        if (w.linux != null || w.full || w.leftAt != 0L || w.displayId < 0) return true
+        io.post { leaveNow(w) }
+        return true
+    }
+
+    /** On [io]: [minimise]'s home gesture for [w]'s task. */
+    private fun leaveNow(w: Win) {
+        if (w.closed || w.leftAt != 0L) return
+        val task = taskOn(w.displayId) ?: return Unit.also { Log.w(TAG, "window ${w.id}: no task on display ${w.displayId} to minimise") }
+        val top = taskInfo(task)?.topActivity
+        if (top == null || !supportsPip(top)) {
+            Log.i(TAG, "window ${w.id}: minimised (${top?.flattenToShortString()} has no picture-in-picture: just hidden)")
+            return
+        }
+        w.taskId = task
+        w.leftAt = android.os.SystemClock.uptimeMillis()
+        // Known as its window's BEFORE it lands on display 0: the old path's adopt must never float it, the switcher's
+        // card opens it as a task ([checkLeft] then brings it back into its window).
+        WebWindowDisplays.fullScreen(task, w.id, true)
+        if (!moveTask(task, android.view.Display.DEFAULT_DISPLAY)) {
+            WebWindowDisplays.fullScreen(task, w.id, false)
+            w.leftAt = 0L
+            Log.w(TAG, "window ${w.id}: minimise's move to display 0 FAILED: just hidden")
+            return
+        }
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val ok = runCatching { context.startActivity(home, ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY).toBundle()) }
+            .onFailure { Log.w(TAG, "window ${w.id}: home not started for the minimise", it) }.isSuccess
+        Log.i(TAG, "window ${w.id}: minimised as a home gesture (${top.flattenToShortString()}, task $task on display 0, home started=$ok)")
+        io.postDelayed({ Log.i(TAG, "window ${w.id}: after its minimise task $task is ${taskInfo(task)?.let { "mode ${windowingMode(it)} visible ${visibleOf(it)} on display ${WebWindowDisplays.displayOf(it)}" } ?: "gone"}") }, LEFT_SETTLE_MS)
+    }
+
+    /** MN2: the page's way back from minimised (dock, switcher, its page): an app [minimise] moved out, back in window [id]. */
+    fun restore(id: Int): Boolean {
+        val w = wins[id] ?: return false
+        if (w.leftAt == 0L) return true
+        io.post { backNow(w, "restored") }
+        return true
+    }
+
+    /** On [io]: [w]'s task back on its display, in front (out of PiP too: startActivityFromRecents full screen there). */
+    private fun backNow(
+        w: Win,
+        why: String,
+    ) {
+        if (w.closed || w.leftAt == 0L) return
+        w.leftAt = 0L
+        val task = w.taskId
+        val alive = taskDisplay(task) != null
+        val ok = if (alive) moveTask(task, w.displayId) else true.also { main.post { if (!w.closed) launch(w) } }
+        WebWindowDisplays.fullScreen(task, w.id, false)
+        Log.i(TAG, "window ${w.id}: back in its window ($why; task $task ${if (alive) "moved back to display ${w.displayId}: $ok" else "gone: launched again"})")
+    }
+
+    /**
+     * On [io], on a task change: minimised window [w]'s task. Gone (its PiP dismissed): the window closes with it, as
+     * the app did. Full screen and visible on display 0 after the leave settled (PiP expanded, its switcher card or a
+     * launch brought it to the front): back into its window, shown on its page (MN2: "PiP expand brings it back to its
+     * window, not to full screen").
+     */
+    private fun checkLeft(w: Win) {
+        if (w.closed || w.leftAt == 0L) return
+        if (android.os.SystemClock.uptimeMillis() - w.leftAt < LEFT_SETTLE_MS) return
+        val t = taskInfo(w.taskId)
+        if (t == null) {
+            main.post { leftGone(w) }
+            return
+        }
+        if (windowingMode(t) != WINDOWING_MODE_FULLSCREEN || visibleOf(t) != true) return
+        backNow(w, "PiP expanded / brought to the front")
+        main.post { if (!w.closed) emit("webwindows.show", w.id) }
+    }
+
+    /** Main thread: [checkLeft] found [w]'s minimised app gone (its PiP dismissed): the window closes with it. */
+    private fun leftGone(w: Win) {
+        if (w.closed || w.leftAt == 0L) return
+        Log.i(TAG, "window ${w.id}: its minimised app (task ${w.taskId}) is gone (PiP dismissed): window closed")
+        w.leftAt = 0L
+        WebWindowDisplays.fullScreen(w.taskId, w.id, false)
+        drop(w)
+    }
+
+    /** Task [taskId]'s info, or null: not running. */
+    private fun taskInfo(taskId: Int): android.app.ActivityManager.RunningTaskInfo? {
+        if (taskId < 0) return null
+        @Suppress("DEPRECATION")
+        val tasks = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
+        return tasks.firstOrNull { it.taskId == taskId }
+    }
+
+    /** HACK: TaskInfo.getWindowingMode is hidden (reflected). Real fix: none public for an app. -1: unreadable. */
+    private fun windowingMode(t: android.app.TaskInfo): Int =
+        runCatching { android.app.TaskInfo::class.java.getMethod("getWindowingMode").invoke(t) as Int }.getOrDefault(-1)
+
+    /** HACK: TaskInfo.isVisible is hidden before API 34's isVisible() (reflected). Real fix: none for older APIs. */
+    private fun visibleOf(t: android.app.TaskInfo): Boolean? =
+        runCatching { android.app.TaskInfo::class.java.getField("isVisible").getBoolean(t) }.getOrNull()
+
+    /**
+     * [component] declares android:supportsPictureInPicture. HACK: ActivityInfo.FLAG_SUPPORTS_PICTURE_IN_PICTURE is
+     * hidden (read reflected, its AOSP value as the fallback). Real fix: none public (it's the manifest attribute's flag).
+     */
+    private fun supportsPip(component: ComponentName): Boolean {
+        val flag = runCatching { ActivityInfo::class.java.getField("FLAG_SUPPORTS_PICTURE_IN_PICTURE").getInt(null) }.getOrDefault(0x400000)
+        return runCatching { context.packageManager.getActivityInfo(component, 0).flags and flag != 0 }.getOrDefault(false)
     }
 
     // ---- full screen app, and back to a window ------------------------------------------------------------------------
@@ -2161,6 +2290,9 @@ class WebWindows(
 
         /** An empty display is read again this long after: a window closes only when its task was gone over a second. */
         private const val ORPHAN_CONFIRM_MS = 1000L
+
+        /** [WebWindows.minimise]: its move + home (and the PiP entry) settle in this; [checkLeft] waits it out. */
+        private const val LEFT_SETTLE_MS = 2000L
 
         /** An open slower than this to show is logged as a warning ([shown]). */
         private const val SHOWN_SLOW_MS = 1000L

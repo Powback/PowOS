@@ -407,6 +407,8 @@ class ShellBridge(
             "webwindows.close" -> webWindowsMade && webWindows.close(a.getInt(0))
             "webwindows.fullScreen" -> webWindowsMade && webWindows.fullScreen(a.getInt(0))
             "webwindows.toWindow" -> webWindowsMade && webWindows.toWindow(a.getInt(0))
+            "webwindows.minimise" -> webWindowsMade && webWindows.minimise(a.getInt(0))
+            "webwindows.restore" -> webWindowsMade && webWindows.restore(a.getInt(0))
             "apps.info" -> android(a.getString(0))?.let { runtime.androidApps.openInfo(it) }
             "apps.uninstall" -> android(a.getString(0))?.let { runtime.androidApps.uninstall(it) }
             // App API's "+ add app": the deep links an app opens, read from its manifest - nothing fired (AppLinks.kt).

@@ -901,6 +901,10 @@ export interface Bridge {
     fullScreen?(id: number): Promise<boolean>;
     /** Host-optional: its full-screen app back into the window, where it was. */
     toWindow?(id: number): Promise<boolean>;
+    /** Host-optional: minimised - its app gets a home gesture's lifecycle (it may go picture-in-picture). */
+    minimise?(id: number): Promise<boolean>;
+    /** Host-optional: back from minimised - its app (out of picture-in-picture too) back in its window. */
+    restore?(id: number): Promise<boolean>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up
