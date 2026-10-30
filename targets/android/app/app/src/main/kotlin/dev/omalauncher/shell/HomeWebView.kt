@@ -16,8 +16,9 @@ class HomeWebView(context: Context) : WebView(context) {
     private var deferredFocusLoss = false
 
     /**
-     * Sees every touch first (WebWindows: a web window's native bar, edges and buttons, docs/WEB_WINDOWS.md "Native
-     * frame and move"): true = the rest of this gesture is the host's. A gesture the page already saw gets one cancel.
+     * Sees every touch first (WebWindows watches them: a Linux window's body the page pressed gets the whole gesture,
+     * docs/WEB_WINDOWS.md "Element model"): true = the rest of this gesture is the host's. A gesture the page already saw
+     * gets one cancel.
      */
     var touchHook: ((MotionEvent) -> Boolean)? = null
 

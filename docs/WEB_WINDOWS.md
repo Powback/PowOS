@@ -461,85 +461,83 @@ whole page", and the widgets painted over Chrome's body.
 
 ---
 
-## Native frame and move (2026-10-30, branch ww-native-drag)
+## Element model (2026-10-30, branch ww-element)
 
-The user, 2026-10-30: "the web windows work but its like its content is lagging behind slightly even when I move
-windows, compared to the native android floating windows"; then "nobody asked for the cutoff" and windows "f*** up the
-transparency of the widgets". This section **supersedes** the page mask (§S1-S3 "Z-order (Z1 kept)"), the glass holes
-for bodies, the DOM title bar, and §2's "Z2, drag and resize" bullet.
+The user, 2026-10-30: **"the whole way we integrate windows is still hacky, it needs to be handled properly fully
+inside the powos web ui"** and **"The apps were supposed to be working directly in the webview."** Manager W1: position,
+clip, z-order, page membership, transforms during swipes and animations, and hit-testing are decided by the web layer
+every frame; shell elements sit above or below a window by DOM order; zero copy (Z1) stays. This section **replaces**
+"Native frame and move" (windows above home, `WebWindowChrome.kt`, `HomeWebView.touchHook` taking the bar, the
+invisible page model) and the native dividers, snap hint and tile menu of "Tiles" (`WebWindowTiles.kt`). What that
+caused: windows did not follow page swipes, showed over the PowOS AI page, popups and menus over them got no taps,
+the title bar's input was dead and full screen regressed.
 
-### Measured lag before
+### Design as built (the SurfaceView model)
 
-Not measured on the phone: the user was active the whole session (idle.sh `idle=1-2`) and no web window was open, so
-neither a read-only trace of their drag nor an injected one was possible. What the code shows instead (the old path):
-finger → Chromium → pointermove → DOM → rAF `w.f <id>` → port thread → main → `postVisualStateCallback(id)` →
-`applyTransactionOnDraw`. A VisualStateCallback fires once the WebView's next draw holds the page state **as of the
-call** (on the main thread, after two thread hops), not as of frame `<id>`. While the finger moves, the page has usually
-painted frame `<id>+1` by then, so the geometry for frame `<id>` rides a draw showing a newer DOM: the content trails the
-DOM bar by >= 1 frame on every move frame, 2 when the callback misses a vsync. The old `logFrame` now prints that
-directly: `w.f f<id> behind=<K> (<n>/<m> applies behind)`, K = page frames already newer when `<id>` was bound. It still
-applies to the page-driven path (page swipes); a page swipe while a window shows gives the old drag's lag figure.
-
-### Design
-
-- **Windows above home.** `powos-webwindows` is a child of home's surface at layer **+1** (was -1). A window is a card
-  on home: nothing of home is masked, cut or blurred differently under it (`pageMask`, `GlassBlur.holes` for bodies
-  and the `bodies()` wiring are deleted). Every other window (launcher overlay, shade, PowOS AI, status bar, IME) is
-  a separate window above home's whole layer tree, so above the web windows too. The surface-changed reattach
-  (`reattach`/`watchSurface`) only re-parents the root; the layer comes with it.
-- **The frame is native** (`WebWindowChrome.kt`), in each window's container: a background buffer (layer -1, 8x8
-  scaled over the body: shown where the app hasn't drawn yet during a resize), the mirror (0) under the bar, and the
-  bar (1: app icon and label from PackageManager, minimise, full screen/restore, close; ui/chrome.tsx's Mark glyphs,
-  colours from the page's `--color-surface` / `--color-foreground` via `w.theme`). The container is cropped to the
-  frame, rounded, scaled (`setScale`) and cut at the **work area** bottom (`w.area`: the screen above `.home > .dock`
-  and `.home > .bar`), so windows never cover the dock and bar.
-- **The page keeps the model.** `ui/webwindows.tsx` keeps page, x/y/w/h, scale, minimised, restore rect, z order; it
-  renders each window as an **invisible** element (no paint) at its place for gesture exclusions and the body's touches
-  (v0 forwarding, divided by the scale). `w.f` entries gained `<scale> <maximised>`. With no native port (the browser
-  gate) the invisible bar still moves the model, so `webWindowCheck` runs as before.
-- **Why this is same-frame:** bar and content are children of one container; a move is that container's
-  `setPosition` in one transaction. They cannot be a frame apart, whatever the WebView does. The DOM never has to keep
-  up during a gesture, because nothing of the window is DOM. Rejected: native move + DOM bar following from the
-  native position (the DOM is >= 1 frame behind any native position, the lag just flips sides); native move with a
-  pixel copy of the DOM bar during the drag and a hand-back at the end (built first, dropped with the mask: two swaps
-  per drag and the window had to jump layers mid-gesture).
-
-### Touches (`WebWindows.onTouch`, from `HomeWebView.touchHook`)
-
-Every touch reaches the hook before the WebView. A DOWN on a shown window's bar, button or edge is the host's whole
-gesture (the page never sees it; a gesture the page already saw gets one CANCEL). Hit test = topmost window by z whose
-frame grown by 20 dp contains the point, below the work area's bottom; a body hit is the page's (the app's).
-
-| where | one finger | two fingers |
+| part | where | what |
 |---|---|---|
-| bar | move; past the touch slop; one `setPosition` per batched MOVE (one per vsync, as WMShell's DragPositioningCallback), applied at once | move by the **centroid** + zoom by the spread, 0.4-1.0x, about the point under the fingers; a finger coming or going rebases (no jump: the old "jumps between the finger positions") |
-| edges / corners (20 dp outside, 12 dp inside; the top edge is above the bar) | resize: the frame, crop and bar follow every frame; the app's last frame stays anchored top-left on the background; `VirtualDisplay.resize` once at the end (the page takes the size → `w.f` → `place` → helper) | as one finger (centroid) |
-| buttons | minimise (layer hidden at once; the page drops it from `w.f`; its dock icon shows "minimised" and a tap restores it via `launch` → `openWebWindow`), full screen/restore, close | — |
-| bar double tap | full screen / restore | — |
-| body | the app's (forwarded by the page, v0) - an app's own pinch stays the app's | the app's |
+| content layer | `WebWindows.kt root()` | `powos-webwindows` is a child of home's surface at layer **-1** (under home's buffer, as a SurfaceView); one container `powos-ww-<id>` per window, the Android VD mirror or the Linux content layer in it at 0,0 |
+| per-frame measure | `ui/webwindows.tsx entry()/shown()/geometry()/tick()` | each rAF while windows exist: the **body element's** `getBoundingClientRect` (after every transform: page track, the `.screens` slide to PowOS AI, the drawer zoom, the window's scale), intersected with every ancestor that clips (overflow, and always its own `.page`: PS2) and the screen; visibility = non-empty clip, ancestors' opacity > 0.01, no full-screen overlay (`.folder-view.open`); alpha = the ancestors' opacity product; z = DOM order |
+| message | same | `w.f <frame> <dpr> <n> [<id> <frame x y w h> <body x y w h> <clip l t r b> <radius> <visible> <alpha> <scale> <maximised> <titleEnd> <controls>]*n`, tagged with `nextFrameId()` (`apps/port.ts`), the glass's id counter |
+| same draw | `WebWindows.frameCommand/apply` | `FrameSync` (postVisualStateCallback → `applyTransactionOnDraw`), the glass's binding: the layer and the page's pixels change in one draw |
+| layer from geometry | `WebWindows.frameAt/place` | container at the body's place, `setScale` = the element's scale, crop = the clip in the body's own px (extended `radius` up under the bar so only the bottom corners round), `setAlpha`, `setLayer(z)`, visibility; mirror at 0,0 cropped to the body's size; a new body size resizes the display / KWin window (`resizeContent`) on every change: tile, divider let go, maximise, restore, resize |
+| transparent body | `ui/shell.css` "Web windows" | the live body paints nothing; the page's own content is in `.page-under` (`grid.tsx`), masked over the page's window bodies (`underWindows`); a lower window's element is masked over higher bodies (`holes`) - otherwise DOM under the app's layer would paint over it |
+| placeholder (LW1) | `Body` + `.ww-placeholder` | until `webwindows.live`: the theme's surface, the app's icon, a quiet progress line - never a hole. HACK: live = a task on the display (Linux: the consumer up) + 250 ms (`WebWindows.liveWhenDrawn`); real fix: the mirror's first-buffer callback |
+| title bar | `TitleBar` | DOM, the widget glass (`.tile`: the same CSS fill/veil and compositor blur as the widgets, region = the bar strip only, so the old `blurs = false` HACK is gone with the native bar). Drag moves (clamped, DB1), double tap maximises, let go at a screen edge/corner tiles (24 px / 120 px) |
+| buttons | `Controls` | tile (opens the DOM tile menu), minimise, full screen (`powos.webwindows.fullScreen`: moveTask to display 0, 82d7b688, unchanged in `WebWindows.fullScreen`), close |
+| resize | `Edge` | 8 DOM grabs; the top edge stops at the status bar (DB1) |
+| tile menu | `TileMenu` | DOM sheet over the window's body: it takes its taps by DOM order (gate-checked) |
+| dividers | `DividerEl` | DOM handle; the drag moves the handle, let go: `snapRatio` or, within 12 % of an edge, the squeezed side to the dock - the same rules as before (`divided`) |
+| merged bar | `TitleBar` merged + `barsOf` | maximised: the bar's middle is transparent, its title and controls glass pieces; the page sends `titleEnd`/`controls`, the host gives `ShadeHost.windowBars` the bar rects and merge, unchanged |
+| glass over bodies | `nativeglass.ts cutOut` | a blur region is shrunk off a body that spans a side, else dropped (HACK: one rounded rect per region) - a widget under a window never blurs the app |
+| input | `Body` → `webwindows.input` → `WebWindows.input/forward` | the DOM hit test decides (anything above the body wins). One call site: Android = v0 injection on its display; Linux = `linuxClaim`: the gesture's DOWN replayed from the watched gesture, then every native event of the gesture (all pointers) to KWin (`linuxInput`). HACK: moves between the DOWN and the page's answer (~1 frame) aren't replayed |
+| raise / focus | `Body`/`TitleBar` pointerdown → `raise` | one implementation for both kinds: the window goes last in `webWins` = top in the DOM = top layer (z in the same `w.f`), and the press is forwarded (Android: the injected touch moves the top focused display to the window's VD, S0c; Linux: KWin `focus`) |
+| work area | `workArea()` | the `.pages` box (PS1: a side dock's column is not a page's), above the dock and bar |
+| DB1 | `clampPlace` | a floating window's bar never above the status bar's bottom (`--inset-top`), at least a third of it on screen sideways and above the work area's bottom; drag, top-edge resize and restore |
 
-Full screen fills the work area (above the dock: the dock stays usable, chosen over hiding it) and remembers the frame
-to restore; moving or resizing a maximised window makes it a free window at its size. Moves keep 64 dp of the window on
-screen sideways and the bar inside the work area vertically. Up: `webwindows.moved {id, dx, dy, dw, dh, scale}` (CSS
-px); the layer is **held** where the gesture left it until a `w.f` carries that place (2 px) or 1 s passes, so a page
-frame from before the up can't snap it back. `webwindows.raise` on every frame press; the layer is raised at once.
+The touch hook stays as a **watcher** (`WebWindows.onTouch` returns false): it keeps the current gesture for the Linux
+claim and never takes a touch. ww-linux2 owns Linux input delivery: its change goes into `linuxInput` / `linuxClaim`,
+the forwarding call site stays `forward`.
 
-### Phone check (lag after)
+### Removed
 
-`tools/phone/verify/ww-drag-lag.sh` (read-only) or `--drag` (waits for 2 min idle, injects one bar swipe):
-- structure: `powos-ww-<id>-bar` and the mirror are children of `powos-ww-<id>`, under `powos-webwindows` above
-  home's buffer → 0 frames between bar and content by construction;
-- cadence: `native move wN: M layer moves in T ms` → moves per frame ~ 1.0 (every input frame);
-- old path for comparison: `behind=K` on page swipes.
-Renders to check by eye: Chrome over two widgets (the widgets identical to no window: glass, blur, pixels around the
-window), the window opaque with content, the dock and bar never covered, launcher/shade/PowOS AI over windows.
+- `WebWindowChrome.kt` (native bar, background, glass), the native tile menu/dividers/snap hint of
+  `WebWindowTiles.kt` (only `splitEntryPoints`, OnePlus's split settings, stays: now an `object`).
+- In `WebWindows.kt`: the native drag/resize/zoom/divider/menu touch code (`Drag`, `down`, `hit`, `follow`,
+  `endDrag`, `held`, `dividerDown..dividerUp`, `snapSlot`, ~700 lines), `w.area` / `w.theme` (and their plumbing in
+  `ShellNative`, `ShellBridge`, `ShellHost`), the `webwindows.moved/raise/tile/divider` events.
+- Two-finger zoom of a window (it was the native bar's). The model's `scale` is still honoured (CSS transform, measured).
+
+### Proof
+
+- Gate (`dev/gate.mjs webWindowMaskCheck`, desktops scene): page content and a lower window masked over bodies, a live
+  body transparent, a new body a placeholder, the bar a `.tile`, a tap on the DOM tile menu over a body hits the menu
+  and tiles; **`w.f` on a page swipe**: with the page track at -200 px the body's x in the last `w.f` equals its
+  `getBoundingClientRect` and is 200 px left of before, still visible; swiped a page away, PowOS AI side, a folder
+  open → `visible 0`; a window hanging past its page's right edge is clipped at it (PS2); maximise/restore.
+  `webWindowCheck`: bar drag moves the window and never turns the page; dragged up it stops at the status bar (DB1).
+- Shots: `webwindows` (two windows, one live = stand-in stripes, one placeholder), `ww-menu` (tile menu over a body),
+  `ww-swipe` (mid swipe: the windows go with their page), `ww-tiles-2/3/4`.
+
+### Phone check (read-only; the coordinator ships)
+
+Unfolded, `powos_web_windows` = 1, Chrome open as a window:
+- `dumpsys SurfaceFlinger --list | grep powos-ww`: `powos-webwindows` under home's layer **below** its buffer
+  (layer -1), `powos-ww-<id>` with the mirror; no `-bar`/`-back` layers, no `powos-ww-divider`.
+- swipe pages slowly: Chrome's content stays inside its DOM frame mid-swipe; logcat `PowosWebWindows: w.f f<id>
+  behind=0 ... clip ...` once a second; on the PowOS AI page and with a folder open the window is `hidden`.
+- tap the tile button → the DOM menu over Chrome takes the tap (Left half tiles it); Calculator tiled left/right/
+  quarter lays out at the tile's size (`helper resize` lines per settle).
+- drag the bar (moves, stops at the status bar), an edge (resizes), double tap (maximise: the bar merges with the
+  status bar), full screen (a real full-screen task on display 0: `window N: its app (task T) is a full-screen app`).
 
 ### Not yet
 
-- Measured numbers on the phone (above). Body input is still v0 (page forwarding, S4).
-- During a resize the bar is redrawn by a canvas post, which can land a frame after the crop (buttons only; the bar's
-  background is the same colour).
-- Corners of the crop at the work area's bottom are rounded like the frame's.
+- During a live edge/divider drag the app's display resizes every frame (coalesced in the helper); the app's last
+  frame shows anchored top-left (cropped, never stretched), the rest of a bigger body shows home under it until the
+  app draws. No cover-scaling yet (it was the native divider's).
+- Android body input is still v0 (single pointer, injected); the S4 injector replaces `forward`'s Android branch.
+- Linux popups (S7) and the switcher's Linux cards are unchanged.
 
 ---
 
@@ -580,7 +578,7 @@ divider moves (`SplitDecorManager`: a layer in the app's TaskDescription backgro
   and hint close (`tilesUnderSwitcher`), and no divider takes a touch until the switcher is down. The card menu keeps
   both *Split screen* (2-4 apps tiled) and the new *Back to window* / *Floating window* item.
 
-### Dividers (native: `WebWindowTiles.kt`, `WebWindows.kt` "tiles")
+### Dividers (superseded: DOM handles now, see "Element model"; the rules below are unchanged)
 
 - The page sends the dividers in `w.f` after the windows: `<n> [<page:axis> <x|y> <pos> <from> <len> <lo> <hi>
   <before ids> <after ids>]`, measured from invisible `.webwindow.ww-divider` elements in the page. They therefore move

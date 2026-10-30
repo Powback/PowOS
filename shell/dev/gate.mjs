@@ -2314,6 +2314,12 @@ async function webWindowCheck() {
     fails.push(...turned("dragging a web window's title bar"));
     const x = W.webWins.value.find((w) => w.id === 901)?.x;
     if (x !== 100) fails.push(`dragging the title bar 300 px left moved the window to x=${x} (want 100)`);
+    // DB1: dragged far up, the bar stops at the status bar's bottom (--inset-top), never above it.
+    const r2 = el.querySelector(".webwindow-title").getBoundingClientRect();
+    await drag(el.querySelector(".webwindow-title"), [r2.left + 60, r2.top + 18], [r2.left + 60, r2.top - 400]);
+    const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || 0;
+    const barTop = el.querySelector(".webwindow-title").getBoundingClientRect().top;
+    if (Math.abs(barTop - inset) > 1) fails.push(`dragged up past the status bar: the bar's top is at ${barTop}, want ${inset} (DB1)`);
     const b = el.querySelector(".webwindow-body").getBoundingClientRect();
     await drag(el.querySelector(".webwindow-body"), [b.left + 320, b.top + 80], [b.left + 20, b.top + 80]);
     fails.push(...turned("a sideways swipe on a web window's body"));
@@ -2331,50 +2337,114 @@ async function webWindowCheck() {
 }
 
 /**
- * In the page: two overlapping web windows - their page masked over the bodies (subtract) from three images: both
- * bodies and the top window's title bar cut back in (it is DOM over the lower app). ui/webwindows.tsx pageMask.
+ * In the page: web windows as ELEMENTS of their page (docs/WEB_WINDOWS.md "Element model"). The page's content is cut
+ * over the bodies, a lower window over a higher one's body; a live body paints nothing, a new one its placeholder; the
+ * DOM tile menu over a body takes the tap; and each frame's "w.f" follows a page swipe pixel-exact, clipped to the
+ * page and the screen, hidden off page, on the PowOS AI side and under a folder.
  */
 async function webWindowMaskCheck() {
-  // The user, 2026-10-30: "nobody asked for the cutoff" - a web window is a card over home (the host draws it above
-  // home's surface); the page under it is never masked or cut, and the window's element is invisible (its model).
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const frame = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
   const page = S.pages.value[S.page.value] ?? 1;
-  // The page under a window isn't cut, the window's element paints nothing, a minimised one has none.
-  const uncut = (el, pageEl) => {
-    const fails = [];
-    const mask = getComputedStyle(pageEl).maskImage || "none";
-    if (mask !== "none" || pageEl.style.mask) fails.push(`web windows: their page is masked ("${mask}") - nothing under a window may be cut`);
-    const paints = (c) => c.backgroundColor !== "rgba(0, 0, 0, 0)" || c.boxShadow !== "none";
-    if ([el, ...el.querySelectorAll("*")].some((e) => paints(getComputedStyle(e)))) fails.push("web window: its element paints (the host draws the window; the page's element must be invisible)");
-    if (document.querySelector('.webwindow[data-wwid="904"]')) fails.push("a minimised web window still has its element on the page");
-    return fails;
+  const fails = [];
+  const masks = (el) => (getComputedStyle(el).maskImage.match(/linear-gradient/g) ?? []).length;
+  // The newest "w.f" entry of window [id]: its numbers after the id.
+  const sentFor = (id) => {
+    const line = window.__ww.sent.at(-1) ?? "";
+    const t = line.split(" ");
+    for (let i = 4, n = Number(t[3]); n-- > 0; i += 20) if (Number(t[i]) === id) return t.slice(i + 1, i + 20).map(Number);
+    return null;
   };
-  // Full screen fills the work area (above the dock), and restores the frame it had.
-  const near = (a, b) => Math.abs(a - b) <= 1;
-  const fills = (m, a) => !!m?.restore && near(m.w, a.right - a.left) && near(m.h, a.bottom - a.top);
-  const maximise = () => {
-    const fails = [];
+  const track = document.querySelector(".page-track");
+  const screens = document.querySelector(".screens");
+  const was = { track: track?.style.transform ?? "", screens: screens?.style.transform ?? "" };
+  try {
+    W.webWins.value = [
+      { id: 903, key: "a:gate.ww", label: "Gate", page, x: 400, y: 120, w: 360, h: 300, live: true },
+      { id: 905, key: "a:gate.ww3", label: "Gate 3", page, x: 300, y: 200, w: 300, h: 240 },
+      { id: 904, key: "a:gate.ww2", label: "Gate 2", page, x: 160, y: 200, w: 300, h: 240, minimised: true },
+    ];
+    await frame();
+    const el = document.querySelector('.webwindow[data-wwid="903"]');
+    const top = document.querySelector('.webwindow[data-wwid="905"]');
+    const under = el?.closest(".page")?.querySelector(".page-under");
+    if (!el || !top || !under) return ["web windows: no elements (or no .page-under) on the page on screen"];
+    // Cut: the page under both bodies, the lower window under the higher one's body, the top one nowhere.
+    if (masks(under) !== 3) fails.push(`page content: ${masks(under)} mask layers, want 3 (the page less 2 bodies)`);
+    if (masks(el) !== 2) fails.push(`lower window: ${masks(el)} mask layers, want 2 (itself less the higher body)`);
+    if (masks(top) !== 0) fails.push("top window: masked (nothing is above it)");
+    if (document.querySelector('.webwindow[data-wwid="904"]')) fails.push("a minimised web window still has its element on the page");
+    // Live: the body paints nothing (the app's layer shows); new: a solid placeholder with progress.
+    const bg = (e) => getComputedStyle(e).backgroundColor;
+    if (bg(el.querySelector(".webwindow-body")) !== "rgba(0, 0, 0, 0)") fails.push("a live window's body paints (it must be transparent over the app)");
+    const ph = top.querySelector(".webwindow-body");
+    if (bg(ph) === "rgba(0, 0, 0, 0)" || !ph.querySelector(".ww-progress")) fails.push("a new window's body is a hole (want the placeholder: surface, icon, progress)");
+    // The bar is the widget glass (.tile), and its buttons are DOM.
+    if (!el.querySelector(".webwindow-title.tile")) fails.push("the title bar isn't a .tile (the widget glass)");
+    // The DOM tile menu over the top window's body takes the tap there.
+    top.querySelector('.ww-button[aria-label="Tile"]').click();
+    await frame();
+    const item = top.querySelector('.ww-tile-item[data-slot="left"]');
+    const ir = item?.getBoundingClientRect();
+    const hit = ir && document.elementFromPoint(ir.left + ir.width / 2, ir.top + ir.height / 2);
+    const body = top.querySelector(".webwindow-body").getBoundingClientRect();
+    if (!item) fails.push("tile menu: not open after a tap on the tile button");
+    else if (!(ir.top >= body.top && ir.top < body.bottom)) fails.push("tile menu: not over the window's body (the check needs it there)");
+    else if (hit !== item && !item.contains(hit)) fails.push(`tile menu: a tap over the body hits ${hit?.className} instead of the menu item`);
+    else {
+      hit.click();
+      await frame();
+      if (W.tiledOn(905) == null) fails.push("tile menu: picking Left half didn't tile the window");
+      W.tile(905, "float");
+    }
+    await frame();
+    // Page swipe: the body's rect in w.f follows the page's transform pixel-exact, clipped to the screen.
+    const at0 = sentFor(903);
+    if (!at0) return [...fails, "w.f: window 903 not in the last geometry sent"];
+    track.style.transition = "none";
+    track.style.transform = `translateX(-200px)`;
+    await frame();
+    const at1 = sentFor(903);
+    const b1 = el.querySelector(".webwindow-body").getBoundingClientRect();
+    if (!at1 || Math.abs(at1[4] - b1.left) > 0.01 || Math.abs(at1[4] - (at0[4] - 200)) > 0.5) fails.push(`page swipe: w.f body x ${at1?.[4]} (want ${b1.left}, ${at0[4] - 200} = 200 px left with its page)`);
+    if (at1 && at1[13] !== 1) fails.push("page swipe: the window went hidden mid-swipe");
+    track.style.transform = `translateX(${-innerWidth + 0}px)`;
+    await frame();
+    const off = sentFor(903);
+    if (!off || off[13] !== 0) fails.push(`page swiped away: window still visible in w.f (${off?.slice(8, 14)})`);
+    track.style.transform = was.track;
+    // Its page's area clips it (PS2): a window hanging past the page's right edge.
+    const pr = el.closest(".page").getBoundingClientRect();
+    W.update(903, { x: pr.width - 100 });
+    await frame();
+    const hang = sentFor(903);
+    if (!hang || hang[10] > pr.right + 0.5) fails.push(`page clip: w.f clip right ${hang?.[10]} past its page's right ${pr.right}`);
+    W.update(903, { x: 400 });
+    // The PowOS AI side: home slid away, the window hidden.
+    if (screens) {
+      screens.style.transform = `translateX(${innerWidth}px)`;
+      await frame();
+      if (sentFor(903)?.[13] !== 0) fails.push("PowOS AI page: the window stays visible");
+      screens.style.transform = was.screens;
+    }
+    // A folder open over home: hidden.
+    const f = document.body.appendChild(Object.assign(document.createElement("div"), { className: "folder-view open" }));
+    await frame();
+    if (sentFor(903)?.[13] !== 0) fails.push("a folder open over home: the window stays visible");
+    f.remove();
+    // Full screen fills the work area (above the dock), and restores the frame it had.
     W.toggleMaximise(903);
     const a = W.workArea();
     const m = W.webWins.value.find((w) => w.id === 903);
-    if (!fills(m, a)) fails.push(`full screen: ${JSON.stringify(m)} doesn't fill the work area ${JSON.stringify(a)}`);
+    if (!m?.restore || Math.abs(m.w - (a.right - a.left)) > 1 || Math.abs(m.h - (a.bottom - a.top)) > 1) fails.push(`full screen: ${JSON.stringify(m)} doesn't fill the work area ${JSON.stringify(a)}`);
     W.toggleMaximise(903);
     const r = W.webWins.value.find((w) => w.id === 903);
     if (r?.restore || r?.w !== 360 || r?.h !== 300) fails.push(`restore: ${JSON.stringify(r)} isn't back at 360x300`);
     return fails;
-  };
-  try {
-    W.webWins.value = [
-      { id: 903, key: "a:gate.ww", label: "Gate", page, x: 400, y: 120, w: 360, h: 300 },
-      { id: 904, key: "a:gate.ww2", label: "Gate 2", page, x: 160, y: 200, w: 300, h: 240, minimised: true },
-    ];
-    await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
-    const el = document.querySelector('.webwindow[data-wwid="903"]');
-    const pageEl = el?.closest(".page");
-    if (!pageEl) return ["web windows: not on the page on screen"];
-    return [...uncut(el, pageEl), ...maximise()];
   } finally {
+    if (track) track.style.transform = was.track;
+    if (screens) screens.style.transform = was.screens;
     W.webWins.value = [];
   }
 }

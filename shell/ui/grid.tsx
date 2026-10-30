@@ -22,7 +22,7 @@ import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen, held } from "./gesture.ts";
 import { LibraryPage } from "./library.tsx";
-import { WebWindowsOn } from "./webwindows.tsx";
+import { underWindows, WebWindowsOn } from "./webwindows.tsx";
 import { FolderView } from "./folderview.tsx";
 import { FolderFace, folderable, morphing, folderName, groupIntoFolder, loadFolderNames } from "./folders.tsx";
 import { chosen, isChosen, marquee, MARQUEE_DWELL, partyCells, partyOf, startMarquee, toggleChosen } from "./homeselect.ts";
@@ -1175,10 +1175,14 @@ export function Pages() {
               const joined = joins(on);
               return (
                 <>
-                  <PageGlass items={on} joined={joined} />
-                  <GroupShadow items={on} joined={joined} id={String(n)} />
-                  <Seams items={on} joined={joined} />
-                  {on.map((item) => renderTile(item, joined.get(item.key)))}
+                  {/* The page's own content, cut where its web windows' bodies are (the app shows there, under home's
+                      pixels: ui/webwindows.tsx "Element model"); the windows are above it, in z by DOM order. */}
+                  <div class="page-under" style={underWindows(n)}>
+                    <PageGlass items={on} joined={joined} />
+                    <GroupShadow items={on} joined={joined} id={String(n)} />
+                    <Seams items={on} joined={joined} />
+                    {on.map((item) => renderTile(item, joined.get(item.key)))}
+                  </div>
                   <WebWindowsOn page={n} />
                 </>
               );

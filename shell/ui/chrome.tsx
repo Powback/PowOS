@@ -5,10 +5,10 @@ import { FpsMeter } from "./fpsmeter.tsx";
 
 export type ChromeAction = (action: string) => void;
 
-function Mark({ kind }: { kind: string }) {
+export function Mark({ kind }: { kind: string }) {
   const paths: Record<string, string> = {
     minimise: "M4 12h16", maximise: "M5 5h14v14H5z", restore: "M5 9h10v10H5z M9 5h10v10",
-    close: "M5 5l14 14M5 19L19 5", resize: "M9 17l8-8M15 18l3-3",
+    close: "M5 5l14 14M5 19L19 5", tile: "M4 5h7v14H4z M13 5h7v14h-7z", resize: "M9 17l8-8M15 18l3-3",
     wifi: "M3 8a15 15 0 0 1 18 0M6 12a10 10 0 0 1 12 0M9 16a5 5 0 0 1 6 0M12 20h.01",
     cellular: "M4 20v-3M9 20v-7M14 20V9M19 20V4", ethernet: "M4 5h16v10H4zM12 15v5M8 20h8",
     charging: "M14 2L5 13h7l-2 9 9-13h-7z",

@@ -114,9 +114,6 @@ class ShellNative(
     /** Where "w.f" goes (ShellHost: the bridge's web windows). */
     @Volatile var windowFrame: ((String) -> Unit)? = null
 
-    /** Where "w.area" / "w.theme" go (ShellHost: the bridge's web windows). */
-    @Volatile var windowCommand: ((String, String) -> Unit)? = null
-
     /** Home's panels over the floating windows: made at home's page's "p.hello". */
     @Volatile private var lift: PanelLift? = null
 
@@ -149,8 +146,6 @@ class ShellNative(
                 "b.f" -> glass?.frameCommand(rest)
                 // Web windows' geometry, frame-synced like "b.f" (WebWindows.frameCommand; home's page only).
                 "w.f" -> windowFrame?.invoke(rest)
-                // A web window's title-bar move handed to the host (WebWindows.dragCommand: native move, Z2).
-                "w.area", "w.theme" -> windowCommand?.invoke(verb, rest)
                 "b.lag" -> glass?.let { it.lag = rest.trim().toInt() }
                 "b.liquid" -> glass?.liquidCommand(rest)
                 "s.draw" -> {
