@@ -427,6 +427,15 @@ export function SentImages({ text }: { text: string }) {
 export const qaUrl = (path: string) =>
   /^\/home\/powos\/design-qa\/[A-Za-z0-9._-]+\.(png|jpg)$/.test(path) && !path.includes("..") ? `/_qa/${encodeURIComponent(path.split("/").pop()!)}` : null;
 
+/**
+ * A review image as the page can load it: design-qa's (/_qa/) or one PowOS AI was sent (powos-ai-shared, /_shared/:
+ * the side button's screen, a "still broken" screenshot), else null.
+ */
+export function imageUrl(path: string): string | null {
+  const shared = path.match(/\/powos-ai-shared\/([A-Za-z0-9._-]+\.(?:png|jpg))$/);
+  return qaUrl(path) ?? (shared && !shared[1].includes("..") ? `/_shared/${encodeURIComponent(shared[1])}` : null);
+}
+
 /** "mail from coder: …" (PowosAiChat's line for an agent's message): who sent it and what it says. */
 export function mailOf(text: string): { from: string; body: string } | null {
   const m = text.match(/^mail from ([^:]{1,40}): ([\s\S]*)$/);

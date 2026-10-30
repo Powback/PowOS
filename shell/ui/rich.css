@@ -206,6 +206,15 @@
 .ai-item-acts { display: flex; gap: 6px; margin-left: auto; }
 .ai-act { min-height: 30px; padding: 3px 14px; font: inherit; font-size: var(--text-small); color: var(--color-foreground); background: var(--soft-fill); border: 0; border-radius: 999px; white-space: nowrap; }
 .ai-act:first-child { color: var(--color-background); background: var(--color-accent); }
+/* A secondary action beside them (skip, cancel, add screenshot): text only, never the accent. */
+.ai-act.quiet, .ai-act.quiet:first-child { color: var(--color-muted); background: none; padding-inline: 8px; }
+/* "Still broken"'s reply line on the card: the words (the mic, send), then add screenshot / its thumbnail and cancel. */
+.ai-reply { display: flex; flex-direction: column; gap: 6px; margin: 0 12px 10px calc(12px + 8px + 10px); }
+.ai-reply-foot { display: flex; align-items: center; gap: 6px; }
+.ai-reply-foot > .ai-act:last-child { margin-left: auto; }
+.ai-reply-thumb { position: relative; display: inline-flex; }
+.ai-reply-thumb .ai-img img { max-width: 72px; max-height: 72px; }
+.ai-reply-x { position: absolute; top: -8px; right: -8px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; font: inherit; font-size: 14px; color: var(--color-foreground); background: var(--soft-fill); border: 0; border-radius: 999px; }
 .ai-work-list { display: flex; flex-direction: column; }
 .ai-work-list > .ai-heading { margin: 4px 12px 2px; display: flex; align-items: baseline; gap: 6px; }
 /* A queued phone check: a quiet "test now" under the row (the queue runs it at once); "test all" on the header. */

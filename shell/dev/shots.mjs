@@ -220,6 +220,17 @@ const GROUPED_SCENE =
   ` E.emit('agents.delta', { agents: [ag('a-chat', 'ai-board', 'powos-chat'), ag('a-perf', 'perf', 'powos-perf')] }); await sleep(300); document.querySelector('.ai-work-list').scrollIntoView();`;
 
 /**
+ * A Needs-you card that asks the user to try something (the user, 2026-10-30: "How am I supposed to give feedback to
+ * this?"): works / still broken / skip; open, its screenshot a thumbnail (no file names, no "a change"); "still broken"'s
+ * reply line with words and a screenshot. Images from dev/.qa/ (untracked): screen-ny.png, screen-mock.png.
+ */
+const NY_CARD = (img) =>
+  `const now = Date.now(); const P = await U('./ui/powai.tsx'); P.board.value = [{ id: 'overlap', title: 'Windows: tap the one behind to raise it', owner: 'coder', status: 'waiting', note: 'Overlap two windows and tap the one behind: it should come to the front', project: 'Windows', created: now - 9e5, updated: now - 6e4, done: 0, progressDone: 0, progressTotal: 0, step: '', steps: '', commits: JSON.stringify([{ sha: 'abc1234', subject: '' }, { sha: 'def5678', subject: 'Tapping a window behind raises it' }]), images: JSON.stringify(${img ? "['/run/powos-app/powos-ai-shared/screen-ny.png']" : "[]"}), activity: now - 6e4 }, { id: 'plug', title: 'Kernel test build', owner: 'kernel', status: 'waiting', note: "Plug the phone into the Mac's USB once, for the kernel test", project: 'Kernel & system', created: now - 9e5, updated: now - 9e4, done: 0, steps: '', commits: '', images: '', activity: now - 9e4 }];` +
+  ` P.boardSeen.value = true; S.chat.value = { busy: false, items: [] }; S.page.value = -1; await sleep(400); document.querySelector('.ai-work-list').scrollIntoView();`;
+const NY_OPEN = " document.querySelector('.ai-work-list .ai-item-row').click(); await sleep(300);";
+const NY_REPLY = " [...document.querySelectorAll('.ai-act')].find((b) => b.textContent.trim() === 'still broken').click(); await sleep(200); const f = document.querySelector('.ai-reply textarea'); f.value = 'the one behind stays behind'; f.dispatchEvent(new Event('input', { bubbles: true })); await sleep(100); [...document.querySelectorAll('.ai-reply .ai-act')].find((b) => /screenshot/.test(b.textContent)).click(); await sleep(400); document.activeElement?.blur();";
+
+/**
  * The scenes: [name, mode, setup] - setup runs in the page once it's ready (S: state.ts, U: an import by path, E: the
  * mock's events, sleep). `behind`: what the window is over - "wallpaper" (home: native glass), "blurred" (the shade,
  * the switcher: the host blurs the app under them), "app" (the assistant, over an app as it is).
@@ -332,6 +343,11 @@ const SCENES = [
   ["present", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["present-md", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[0]?.click();`, "wallpaper"],
   ["present-html", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[1]?.click(); await sleep(200);`, "wallpaper"],
+  ["ny-card", "home", NY_CARD(true), "wallpaper"],
+  ["ny-card-open", "home", NY_CARD(true) + NY_OPEN, "wallpaper"],
+  ["ny-card-open-noimg", "home", NY_CARD(false) + NY_OPEN, "wallpaper"],
+  ["ny-card-reply", "home", NY_CARD(false) + NY_REPLY, "wallpaper"],
+  ["ny-card-reply-open", "home", NY_CARD(true) + NY_OPEN + NY_REPLY, "wallpaper"],
   ["ai-board", "home", GROUPED_SCENE, "wallpaper"],
   ["ai-board-open", "home", GROUPED_SCENE + " document.querySelectorAll('.ai-work-list .ai-group-fold[aria-expanded=false]').forEach((b) => b.click()); await sleep(200); document.querySelectorAll('.ai-work-list .ai-group-more').forEach((b) => b.click()); await sleep(200); (document.querySelector('.ai-group.on') ?? document.querySelector('.ai-work-list')).scrollIntoView();", "wallpaper"],
   ["ai-v2", "home", board(false), "wallpaper"],
@@ -492,7 +508,8 @@ function file(url) {
   if (p === "__wallpaper.jpg" && WALLPAPER) return { path: WALLPAPER, name: p };
   if (p === "dev/sample-trees.json") return { path: TREES, name: p };
   // The host's review images (ShellHost _qa/: the phone's /home/powos/design-qa) from local copies in dev/.qa/ (untracked).
-  if (p.startsWith("_qa/")) {
+  // And the images sent to PowOS AI (ShellHost _shared/: powos-ai-shared), from the same folder.
+  if (p.startsWith("_qa/") || p.startsWith("_shared/")) {
     const f = path.join(ROOT, "dev/.qa", path.basename(p));
     return fs.existsSync(f) ? { path: f, name: path.basename(p) } : null;
   }

@@ -1105,6 +1105,86 @@ async function closeUpCheck() {
  * scroll-fade; the user, 2026-10-24) - the drawer's apps: at the top only the foot fades, part-way both ends, at the end
  * only the top. Then closed again.
  */
+const AI_TRY_ID = "gate-overlap";
+
+/** In the page: the bridge's verdict / message recorded (window.__nyGot), a Needs-you card to try on the board, opened. */
+async function aiTrySetup(id) {
+  const G = window.__gw;
+  const [S, P, { powos }] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/powai.tsx"), G.mod("./bridge.ts")]);
+  const got = (window.__nyGot = []);
+  window.__nyRestore = [powos.ai.verdict, powos.agents.message];
+  powos.ai.verdict = async (...a) => void got.push(["verdict", ...a]);
+  powos.agents.message = async (...a) => void got.push(["message", ...a]);
+  const now = Date.now();
+  P.board.value = [{ id, title: "Windows: tap the one behind to raise it", owner: "coder", status: "waiting", note: "Overlap two windows and tap the one behind: it should come to the front", project: "Windows", created: now - 9e5, updated: now - 6e4, done: 0, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: JSON.stringify([{ sha: "abc1234", subject: "" }]), images: JSON.stringify(["/run/powos-app/powos-ai-shared/screen-1793386307690.jpg"]), activity: now - 6e4 }];
+  P.boardSeen.value = true;
+  S.page.value = -1;
+  const card = () => [...document.querySelectorAll(".ai-work-list .ai-item")].find((e) => e.textContent.includes("Overlap two windows"));
+  if (!(await G.until(card, 4000))) return false;
+  card().querySelector(".ai-item-row").click();
+  return !!(await G.until(() => card()?.querySelector(".ai-item-more"), 2000));
+}
+
+/** In the page: the card's actions and words - works / still broken / skip, no raw file name or "a change". */
+function aiTryCardFails() {
+  const card = [...document.querySelectorAll(".ai-work-list .ai-item")].find((e) => e.textContent.includes("Overlap two windows"));
+  const fails = [];
+  const acts = [...card.querySelectorAll(".ai-item-acts .ai-act")].map((b) => b.textContent.trim()).join(" / ");
+  if (acts !== "works / still broken / skip") fails.push(`its actions are ${acts || "none"}, not works / still broken / skip`);
+  const raw = card.textContent.match(/a change|\S+\.(jpg|png)/);
+  if (raw) fails.push(`it shows a raw label or file name: "${raw[0]}"`);
+  return fails;
+}
+
+/** In the page: "still broken", "x" typed in the reply line, sent; then what the bridge got (null: no reply line). */
+async function aiReplyX() {
+  const G = window.__gw;
+  const card = () => [...document.querySelectorAll(".ai-work-list .ai-item")].find((e) => e.textContent.includes("Overlap two windows"));
+  [...card().querySelectorAll(".ai-act")].find((b) => b.textContent.trim() === "still broken")?.click();
+  if (!(await G.until(() => card()?.querySelector(".ai-reply textarea"), 2000))) return null;
+  const field = card().querySelector(".ai-reply textarea");
+  field.value = "x";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await G.frames(2);
+  card().querySelector(".ai-reply").requestSubmit();
+  await G.until(() => window.__nyGot.length >= 2, 2000);
+  return window.__nyGot;
+}
+
+/** In the page: the card out of Needs you, in "Waiting for an agent" at once; then the bridge and board as they were. */
+async function aiMovedAndRestore() {
+  const G = window.__gw;
+  const moved = () => !document.querySelector(".ai-work-list .ai-group.you") && document.querySelector(".ai-work-list .ai-group.free .ai-group-count")?.textContent === "1";
+  const ok = !!(await G.until(moved, 2000));
+  const [{ powos }, P] = await Promise.all([G.mod("./bridge.ts"), G.mod("./ui/powai.tsx")]);
+  [powos.ai.verdict, powos.agents.message] = window.__nyRestore;
+  P.board.value = [];
+  return ok;
+}
+
+const nyCall = (got, kind) => got.find((c) => c[0] === kind) ?? null;
+/** The user FAIL check with the words "x" on the task. */
+const failCheckOk = (v) => !!v && v[1] === AI_TRY_ID && v[2] === false && v[3] === "still broken: x";
+/** The manager's mail naming the task, with the words. */
+const managerMailOk = (m) => !!m && m[1] === "manager" && m[2].includes(AI_TRY_ID) && m[2].includes('"x"');
+
+/**
+ * A Needs-you card that asks the user to try something (the user, 2026-10-30 20:52: "How am I supposed to give feedback
+ * to this?" - it had only done / skip, and "a change · screen-....jpg" under it): works / still broken (skip quiet), no
+ * raw file names or "a change"; "still broken", "x", send -> the bridge gets the user FAIL check with those words and
+ * the manager's mail naming the task, and the card moves at once.
+ */
+async function aiStillBrokenCheck(page) {
+  if (!(await page.evaluate(aiTrySetup, AI_TRY_ID))) return ["the Needs-you card to try didn't show (or open)"];
+  const fails = await page.evaluate(aiTryCardFails);
+  const got = await page.evaluate(aiReplyX);
+  if (!got) return [...fails, "still broken opened no reply line"];
+  if (!failCheckOk(nyCall(got, "verdict"))) fails.push(`the bridge got no user FAIL check with the words (${JSON.stringify(nyCall(got, "verdict"))})`);
+  if (!managerMailOk(nyCall(got, "message"))) fails.push(`the manager got no mail naming the task (${JSON.stringify(nyCall(got, "message"))})`);
+  if (!(await page.evaluate(aiMovedAndRestore))) fails.push("the card didn't move to Waiting for an agent at once");
+  return fails;
+}
+
 async function scrollFadeCheck() {
   const S = await window.__gw.mod("./state.ts");
   S.drawer.value = 1;
@@ -3011,6 +3091,9 @@ try {
         }
         return [];
       })));
+  // A Needs-you card to try: works / still broken, the reply line reaches the board and the manager (2026-10-30).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-still-broken", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiStillBrokenCheck(r.page))));
   // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
