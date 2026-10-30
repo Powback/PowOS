@@ -503,7 +503,7 @@ internal class GlassBlur(
     private var noSurfaceField = false
 
     /** A region in the window's pixels: its box, corners, how much of the blur shows, the blur's radius. */
-    private data class Region(
+    private class Region(
         val l: Float,
         val t: Float,
         val r: Float,
@@ -519,6 +519,13 @@ internal class GlassBlur(
             dx: Float,
             dy: Float,
         ) = if (dx == 0f && dy == 0f) this else Region(l + dx, t + dy, r + dx, b + dy, tl, tr, br, bl, alpha, radius)
+
+        /** Its values, for [GlassBlur.encoded]'s key: a region equal to one encoded before reuses that encoding. */
+        private val key get() = floatArrayOf(l, t, r, b, tl, tr, br, bl, alpha, radius)
+
+        override fun equals(other: Any?) = other is Region && key.contentEquals(other.key)
+
+        override fun hashCode() = key.contentHashCode()
     }
 
     /**
