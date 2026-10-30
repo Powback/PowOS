@@ -290,6 +290,9 @@ class ShellBridge(
         val a = JSONArray(args)
         val task = a.getString(0)
         val works = a.getBoolean(1)
+        // "still broken: <the user's words>" from the card's reply line (absent from an older page): one line, bounded.
+        val said = a.optString(2).replace(Regex("\\s+"), " ").trim().take(VERDICT_LINE_MAX)
+        val failLine = said.ifEmpty { "still broken: the user tried it" }
         thread(name = "ai-verdict", isDaemon = true) {
             val err =
                 runCatching {
@@ -301,7 +304,7 @@ class ShellBridge(
                     // nothing closes. Real fix: the CLI ships with the APK that calls it (one versioned bridge contract).
                     val command =
                         if (works) "powos agents check set $t $job PASS --name you --line 'works: the user tried it' --shipped 1 && { powos agents task works $t || ! powos agents help 2>/dev/null | grep -q 'agents task works'; }"
-                        else "powos agents check set $t $job FAIL --name you --line 'still broken: the user tried it' --shipped 1 && powos agents task set $t --status working"
+                        else "powos agents check set $t $job FAIL --name you --line ${dev.omalauncher.linux.shellQuote(failLine)} --shipped 1 && powos agents task set $t --status working"
                     val out = ArrayList<String>()
                     val code = RootedGuest.run(command) { out += it }
                     check(code == 0) { out.lastOrNull { it.isNotBlank() } ?: "powos agents failed ($code)" }
@@ -1518,6 +1521,9 @@ class ShellBridge(
 
         /** A board task id, as the page's "works" / "still broken" may name one (apps/agents caps ids at 64). */
         private val VERDICT_TASK = Regex("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
+
+        /** A verdict's check line, at most (the user's reply on a "still broken" card). */
+        private const val VERDICT_LINE_MAX = 300
 
         /** logcat tag of every display/fold push (and the page's wide/narrow switch, via its console). */
         private const val DISPLAY_TAG = "PowosDisplay"

@@ -21,8 +21,9 @@ import type { AgentMail, AgentSession, ChatItem, VerifyState } from "../types.ts
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
-import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf, onLink, openFull, qaUrl, toolLabel } from "./rich.tsx";
+import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf, onLink, openFull, imageUrl, toolLabel } from "./rich.tsx";
 import { askQueued, waiting } from "./assistant.ts";
+import { BrokenReply, clearBroken, type Broken } from "./brokenreply.tsx";
 
 const sessions = signal<AgentSession[]>([]);
 const mail = signal<AgentMail[]>([]);
@@ -408,16 +409,14 @@ function useHealthTaskDone(items: WorkRow[]) {
 }
 
 
-const fileName = (path: string) => path.split("/").pop() ?? path;
-
-/** A review image: its picture (a tap: full screen), or its name where the page can't load it (an older host). */
-function Review({ path }: { path: string }) {
+/** A review image: a small thumbnail (a tap: full screen); nothing where the page can't load it - never its file name. */
+function Review({ path, title }: { path: string; title: string }) {
   const [failed, setFailed] = useState(false);
-  const url = qaUrl(path);
-  if (!url || failed) return <span class="ai-img-name">{fileName(path)}</span>;
+  const url = imageUrl(path);
+  if (!url || failed) return null;
   return (
-    <button type="button" class="ai-img" onClick={() => openFull(fileName(path), <img class="ai-img-full" src={url} alt="" />)}>
-      <img src={url} alt={fileName(path)} loading="lazy" onError={() => setFailed(true)} />
+    <button type="button" class="ai-img" onClick={() => openFull(title, <img class="ai-img-full" src={url} alt="" />)}>
+      <img src={url} alt="" loading="lazy" onError={() => setFailed(true)} />
     </button>
   );
 }
@@ -512,23 +511,43 @@ const verdictOf = (w: WorkRow) => {
   return v && v.updated === Number(w.updated) ? v : null;
 };
 
-/** The user tried a shipped task: the board's CLI records it (bridge ai.verdict); an older host: told to the manager. */
-function verdict(w: WorkRow, works: boolean) {
+/** The manager's mail for a "still broken" reply: the task id first, so it lands linked to the task. */
+const brokenMail = (w: WorkRow, b: Broken) =>
+  `Still broken (task ${w.id}): ${w.title}. The user tried it: "${b.text}"${b.image ? ` - their screenshot: ${b.image}` : ""}`;
+
+/** The told-the-manager fallback (a host without ai.verdict): the same words, in the one conversation. */
+const verdictAsk = (w: WorkRow, works: boolean, b?: Broken) =>
+  works
+    ? `Works: ${w.title} (task ${w.id}) - I tried it: a user PASS for what was ready, close it if nothing else is open`
+    : `${b ? brokenMail(w, b) : `Still broken: ${w.title} (task ${w.id}) - I tried it`} - reopen it with a user FAIL`;
+
+/**
+ * The user tried a shipped task: the board's CLI records it (bridge ai.verdict: a user check, FAIL with their words);
+ * "still broken" with a reply also goes to the manager's inbox with the task id (agents.message). Shown at once; a
+ * failed call puts the card back with one plain line. An older host: told to the manager.
+ */
+function verdict(w: WorkRow, works: boolean, b?: Broken): Promise<boolean> {
   verdictError.value = "";
   verdicts.value = { ...verdicts.value, [w.id]: { works, updated: Number(w.updated) } };
-  const viaManager = () =>
-    askQueued(works ? `Works: ${w.title} (task ${w.id}) - I tried it: a user PASS for what was ready, close it if nothing else is open` : `Still broken: ${w.title} (task ${w.id}) - I tried it, reopen it with a user FAIL`);
   const send = powos.ai.verdict;
-  if (!send) return viaManager();
-  send(w.id, works).catch((e) => {
-    if (/no such call/.test(String(e))) return viaManager();
-    const { [w.id]: _, ...rest } = verdicts.value;
-    verdicts.value = rest;
-    // One plain line, never the CLI's text (the user, 2026-10-30: "I try to press like works, but it just shows me like
-    // this error message"); the reason stays in the log.
-    console.warn(`ai.verdict ${w.id}:`, e);
-    verdictError.value = `couldn't save that for "${w.title}" - try again in a moment`;
-  });
+  if (!send) return Promise.resolve((askQueued(verdictAsk(w, works, b)), true));
+  const line = b ? `still broken: ${b.text}`.slice(0, 300) : undefined;
+  return send(w.id, works, line).then(
+    () => {
+      if (b) powos.agents.message("manager", brokenMail(w, b)).catch((e) => console.warn(`agents.message ${w.id}:`, e));
+      return true;
+    },
+    (e) => {
+      if (/no such call/.test(String(e))) return (askQueued(verdictAsk(w, works, b)), true);
+      const { [w.id]: _, ...rest } = verdicts.value;
+      verdicts.value = rest;
+      // One plain line, never the CLI's text (the user, 2026-10-30: "I try to press like works, but it just shows me
+      // like this error message"); the reason stays in the log.
+      console.warn(`ai.verdict ${w.id}:`, e);
+      verdictError.value = `couldn't save that for "${w.title}" - try again in a moment`;
+      return false;
+    },
+  );
 }
 
 /**
@@ -551,11 +570,12 @@ function sliceOf(w: WorkRow): string {
 
 /** Which group an open row is in (null: not on the board's groups - paused, done, answered). */
 function groupOf(w: WorkRow): Group | null {
-  if (w.status === "waiting") return isAnswered(w) ? null : "you";
-  if (w.status !== "working") return null;
+  if (w.status !== "waiting" && w.status !== "working") return null;
   const v = verdictOf(w);
-  // "works" on an epic: the slice is done, the rest still open - it leaves Ready to try, it doesn't go.
+  // "works" on an epic: the slice is done, the rest still open - it leaves Ready to try, it doesn't go. "Still
+  // broken" (here or on a Needs-you card): waiting for an agent.
   if (v) return v.works && !openRest(w) ? null : "free";
+  if (w.status === "waiting") return isAnswered(w) ? null : "you";
   return workingGroup(w);
 }
 
@@ -611,18 +631,41 @@ const STATES: Record<Group, (w: WorkRow) => string> = {
 const plainState = (w: WorkRow, g: Group | null) =>
   g ? STATES[g](w) : w.status === "done" ? "done" : withStep(w, w.status === "blocked" ? "paused" : "");
 
-/** What the user can do about a row, beside its state: done / skip (needs you), works / still broken (ready to try). */
-function actsOf(w: WorkRow, g: Group | null): [string, () => void][] | null {
-  if (g === "you") return [["done", () => answer(w, "done")], ["skip", () => answer(w, "skip")]];
-  if (g === "try") return [["works", () => verdict(w, true)], ["still broken", () => verdict(w, false)]];
+/** A card that asks the user to try something: Ready to try, or a Needs-you card for something shipped (its try line, its changes). */
+const asksToTry = (w: WorkRow, g: Group | null) => g === "try" || (g === "you" && (!!w.tryLine?.trim() || list<Commit>(w.commits).length > 0));
+
+/** The card whose "still broken" reply line is open (one at a time). */
+const replying = signal<string | null>(null);
+
+type Act = [label: string, act: () => void, quiet?: boolean];
+
+/**
+ * What the user can do about a row, beside its state: works / still broken on anything to try ("still broken" opens
+ * the reply line; skip, quiet, on a Needs-you one), done / skip on the other Needs-you cards.
+ */
+function actsOf(w: WorkRow, g: Group | null): Act[] | null {
+  const skip: Act = ["skip", () => answer(w, "skip"), true];
+  if (asksToTry(w, g)) {
+    const acts: Act[] = [["works", () => void verdict(w, true)], ["still broken", () => (replying.value = replying.value === w.id ? null : w.id)]];
+    return g === "you" ? [...acts, skip] : acts;
+  }
+  if (g === "you") return [["done", () => answer(w, "done")], skip];
   return null;
+}
+
+/** "Still broken" sent from the reply line: shown at once (the card moves), the line back with its words on a failure. */
+async function sendBroken(w: WorkRow, b: Broken) {
+  replying.value = null;
+  if (await verdict(w, false, b)) clearBroken(w.id);
+  else replying.value = w.id;
 }
 
 /** An open row's detail: its note, the steps done / now / next, the changes in words, its review images. */
 function Details({ w, g }: { w: WorkRow; g: Group | null }) {
   const steps = list<Step>(w.steps);
-  const commits = list<Commit>(w.commits);
-  const images = list<string>(w.images);
+  // A change with no subject says nothing to the user ("a change"): only the ones in words.
+  const commits = list<Commit>(w.commits).filter((c) => c.subject?.trim());
+  const images = list<string>(w.images).filter((p) => imageUrl(p));
   return (
     <div class="ai-item-more">
       {w.note && g !== "you" && <p class="ai-item-note">{w.note}</p>}
@@ -639,14 +682,14 @@ function Details({ w, g }: { w: WorkRow; g: Group | null }) {
       {commits.length > 0 && (
         <ul class="ai-commits">
           {commits.map((c) => (
-            <li key={c.sha}>{c.subject || "a change"}</li>
+            <li key={c.sha}>{c.subject}</li>
           ))}
         </ul>
       )}
       {images.length > 0 && (
         <div class="ai-imgs">
           {images.map((p) => (
-            <Review key={p} path={p} />
+            <Review key={p} path={p} title={w.title} />
           ))}
         </div>
       )}
@@ -674,14 +717,15 @@ function WorkLine({ w, g, open, onTap }: { w: WorkRow; g: Group | null; open: bo
         <div class="ai-item-line">
           <span class="ai-item-facts">{plainState(w, g)}</span>
           <span class="ai-item-acts">
-            {acts.map(([label, act]) => (
-              <button key={label} type="button" class="ai-act" onClick={act}>
+            {acts.map(([label, act, quiet]) => (
+              <button key={label} type="button" class={`ai-act ${quiet ? "quiet" : ""}`} onClick={act} aria-expanded={label === "still broken" ? replying.value === w.id : undefined}>
                 {label}
               </button>
             ))}
           </span>
         </div>
       )}
+      {acts && replying.value === w.id && <BrokenReply id={w.id} onSend={(b) => void sendBroken(w, b)} onCancel={() => (replying.value = null)} />}
       {g === "on" && !open && <CheckActs w={w} />}
       {open && <Details w={w} g={g} />}
     </div>

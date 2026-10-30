@@ -528,9 +528,10 @@ export interface Bridge {
     /**
      * The user's verdict on a shipped task (the AI page's "works" / "still broken"): the board's own CLI in the PowOS
      * session records it as a phone check named "you" (PASS / FAIL) and closes the task (works) or leaves it open for
-     * an agent (still broken). Resolves once the board has it. ?: hosts from before it ("no such call").
+     * an agent (still broken). [line]: the check's line - "still broken: <the user's words>" (an older host ignores
+     * it). Resolves once the board has it. ?: hosts from before it ("no such call").
      */
-    verdict?(task: string, works: boolean): Promise<void>;
+    verdict?(task: string, works: boolean, line?: string): Promise<void>;
     /**
      * Asks for the verify runner's state; it comes as "verify.state" (VerifyState). ?: hosts from before it (their
      * call rejects "no such call": the page then shows no "checks paused").
