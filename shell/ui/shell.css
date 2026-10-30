@@ -823,14 +823,6 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
    whole width (the icon's % is of it): the icon's face has no intrinsic size to widen it the way a bare img did. */
 .tile-app { width: 100%; }
 .tile-app .app-icon { width: min(var(--icon), 58%); height: auto; aspect-ratio: 1; }
-/* Unfolded, home's 13 columns make ~61 px cells: 58% of one (less the tile's gutter) drew placed apps at ~31 px, half
-   the dock's 48 (the user, 2026-10-29: "they need to be bigger"). An app tile there takes its whole cell - no gutter,
-   a tighter label gap - so the icon is the dock's --icon with its label under it, still inside the cell: neighbours
-   and widgets keep their cells (the widget layout is unchanged). Folded keeps the rule above. */
-.home.wide .home-tile.app { padding: 0; }
-.home.wide .home-tile.app .tile-app { gap: 2px; }
-.home.wide .home-tile.app .tile-app .app-icon { width: min(var(--icon), 100%); flex: none; }
-.home.wide .home-tile.app .tile-app .app-label { line-height: 1.1; }
 .tile-app .app-label,
 .strip .app-label {
   max-width: 100%;
