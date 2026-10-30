@@ -359,20 +359,26 @@ function notifBar(count: number, clearable: boolean) {
 }
 
 /**
- * The scroll-away's room (NotificationPanel): from the control center's header row (date, edit, settings: .cc >
- * .notif-bar), which stays put (the user, 2026-10-29 "the notification center title can still be on the top"), down to
- * the list's top; and what's under the header, each given --d (its distance below it: shell.css clips it there).
+ * The sticky collapse's geometry (NotificationPanel), measured once as a scroll starts: the control center's header row
+ * (date, edit, settings: .cc > .notif-bar) stays put; what's under it (sliders, media) slides up under it by [up] px,
+ * clipped at its bottom, until the toggle row (.cc3-list) sits right under the header; the card's bottom edge comes up
+ * by [room] px in all, to the first toggle row's bottom (the compact card: header + one row; a whole grid's further
+ * rows and the launchers are clipped under it). Each moved element is given --d (its distance below the header's
+ * bottom: shell.css clips it there). Nothing to collapse (no toggle row, or already compact): room 0.
  */
-function awayRoom(body: HTMLElement, l: HTMLElement): [number, HTMLElement[]] {
-  const card = body.querySelector<HTMLElement>(":scope > .cc");
-  if (!card) return [0, []];
+function stickyRoom(card: HTMLElement): { room: number; up: number; moved: HTMLElement[] } {
   const head = card.querySelector<HTMLElement>(":scope > .notif-bar");
-  const hb = head ? head.getBoundingClientRect().bottom : card.getBoundingClientRect().top;
-  const h = Math.round(l.getBoundingClientRect().top - hb);
-  if (h <= 0) return [0, []];
+  const row = card.querySelector<HTMLElement>(":scope > .cc3-list");
   const moved = [...card.children].filter((el): el is HTMLElement => el !== head && el instanceof HTMLElement);
+  if (!head || !row || !moved.length) return { room: 0, up: 0, moved: [] };
+  const hb = head.getBoundingClientRect().bottom;
+  const up = Math.max(0, Math.round(row.getBoundingClientRect().top - moved[0].getBoundingClientRect().top));
+  const rowEnd = (row.querySelector(".cc3-cell") ?? row).getBoundingClientRect().bottom;
+  const pad = parseFloat(getComputedStyle(card).paddingBottom) || 0;
+  const room = Math.round(card.getBoundingClientRect().bottom - (rowEnd + pad) + up);
+  if (room <= 0) return { room: 0, up: 0, moved: [] };
   for (const el of moved) el.style.setProperty("--d", `${Math.round(el.getBoundingClientRect().top - hb)}px`);
-  return [h, moved];
+  return { room, up, moved };
 }
 
 export function NotificationPanel() {
@@ -409,40 +415,44 @@ export function NotificationPanel() {
     ro.observe(c);
     return () => ro.disconnect();
   }, [panel.value, together, two]);
-  // Scrolling the notifications slides the control center away with them (the user, 2026-10-29: "when I scroll up to
-  // notifications ... it should hide the control center ... right now we're just cutting off"). Folded, one panel only
-  // (unfolded the two are columns side by side: nothing is cut off). At rest NOTHING is written: the card and the list
-  // are laid out by CSS alone. Only while the list is scrolled (scrollTop > 0) and the room between the card's top and
-  // the list's top (h, from the card's header row, measured as it starts, ccexpand's fold carry included) is > 0, .cc-away goes on the panel body
-  // (shell.css): the list's box reaches up to the card's top by a translate, padded and grown by as much (its cards stay
-  // where they were), and the card rides the scroll up 1:1 (--away), fading over its last half. Back at the top: all off.
-  // Attempt 1 (reverted 80ad021f/32fd146f) kept a negative margin at rest and wrote the card's inline translate, which
-  // ccexpand.ts also owns.
+  // The control center stays at the top and collapses as the notifications scroll (the user, 2026-10-30: "the control
+  // center should be sticky at the top and just be able to like collapse"; it used to slide away with them, 7c1166ce -
+  // two things moving under one finger). ONE scroller, the list: its scroll drives the card's collapse 1:1 - its bottom
+  // edge comes up by exactly what the list scrolled, to the compact card (header + the toggle row, stickyRoom), then
+  // stays, sticky, the notifications scrolling on under it. Back at the top it is all there again. Folded, one panel
+  // only (unfolded the two are columns side by side). At rest NOTHING is written: the card and the list are laid out by
+  // CSS alone (ccexpand.ts's pull and fold run at the list's top only, and own the card's inline styles; this writes
+  // vars on the panel body and --d on the card's rows, never their inline transforms). Only while scrollTop > 0,
+  // .cc-sticky goes on the body (shell.css): the list's box reaches up under the card by the room (translated, padded
+  // and grown by as much: its cards stay where they were, so its scroll moves them 1:1), its top clipped at the card's
+  // bottom edge, which comes up by --sc-a = min(scroll, room).
   useLayoutEffect(() => {
     const l = listEl.current;
     const body = l?.closest<HTMLElement>(".panel-body");
     if (!together || two || !l || !body) return;
-    let h = 0;
-    let moved: HTMLElement[] = [];
+    let room = 0;
+    let fold: ReturnType<typeof stickyRoom> = { room: 0, up: 0, moved: [] };
     const off = () => {
-      h = 0;
-      body.classList.remove("cc-away");
-      for (const k of ["--cc-h", "--away", "--away-o"]) body.style.removeProperty(k);
-      for (const el of moved) el.style.removeProperty("--d");
-      moved = [];
+      room = 0;
+      body.classList.remove("cc-sticky");
+      for (const k of ["--sc-room", "--sc-a", "--sc-up"]) body.style.removeProperty(k);
+      for (const el of fold.moved) el.style.removeProperty("--d");
+      fold = { room: 0, up: 0, moved: [] };
     };
     const follow = () => {
       const s = l.scrollTop;
       if (s <= 0) return off();
-      if (!h) {
-        [h, moved] = awayRoom(body, l);
-        if (h <= 0) return off();
-        body.style.setProperty("--cc-h", `${h}px`);
-        body.classList.add("cc-away");
+      if (!room) {
+        const card = body.querySelector<HTMLElement>(":scope > .cc");
+        fold = card ? stickyRoom(card) : fold;
+        room = fold.room;
+        if (room <= 0) return off();
+        body.style.setProperty("--sc-room", `${room}px`);
+        body.classList.add("cc-sticky");
       }
-      const a = Math.min(s, h);
-      body.style.setProperty("--away", `${a}px`);
-      body.style.setProperty("--away-o", String(Math.min(1, 2 * (1 - a / h))));
+      const a = Math.min(s, room);
+      body.style.setProperty("--sc-a", `${a}px`);
+      body.style.setProperty("--sc-up", `${Math.min(a, fold.up)}px`);
     };
     l.addEventListener("scroll", follow, { passive: true });
     // Shut: the list back at its top, so the control center is all there on the next open.
