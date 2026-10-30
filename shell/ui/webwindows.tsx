@@ -107,11 +107,28 @@ export function raise(id: number) {
 powos.on("webwindows.closed", (id: number) => {
   webWins.value = webWins.value.filter((w) => w.id !== id);
 });
+/** Home to a page (by its number, as pages lists them): state.ts sets it (it imports this file, not the reverse). */
+let toPage: (page: number) => void = () => {};
+export function onWebWindowPage(f: (page: number) => void) {
+  toPage = f;
+}
+
+/** Window [id] shown where it was: not minimised, on top, home on its page. */
+function bringBack(id: number) {
+  const w = webWins.value.find((v) => v.id === id);
+  if (!w) return;
+  update(id, { minimised: false });
+  raise(id);
+  toPage(w.page);
+}
+
 /** Its app became a full-screen app (the window hides, its place kept) or is back in the window (shown on its page). */
 powos.on("webwindows.full", (m: { id: number; on: boolean; task?: number }) => {
   update(m.id, { full: m.on, task: m.task ?? webWins.value.find((w) => w.id === m.id)?.task, minimised: false });
-  if (!m.on) raise(m.id);
+  if (!m.on) bringBack(m.id);
 });
+/** Its switcher card tapped (ShellBridge.openTask): back where it was, floating, on its page. */
+powos.on("webwindows.show", (id: number) => bringBack(id));
 
 // ---- the work area, and the host's events ----------------------------------------------------------------------------
 

@@ -141,6 +141,8 @@ object Switcher {
             }
             // The floating windows' frames go while the switcher is up, and come back after.
             WindowFrames.current?.let { f -> android.os.Handler(android.os.Looper.getMainLooper()).post { f.refresh() } }
+            // The web windows (a layer of home above its page) go too: the switcher is home's page, so they'd cover it.
+            dev.omalauncher.shell.WebWindows.switcherOpen(v)
         }
 
     /** The task it was opened over (null: home). */

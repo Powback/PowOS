@@ -279,6 +279,10 @@ export interface RecentTask {
   floats?: boolean;
   /** A floating window already: where it is (CSS px of the page), where it comes back. */
   window?: { left: number; top: number; width: number; height: number };
+  /** A web window's task (ui/webwindows.tsx): that window's id - on its display, or [fullScreen]. */
+  webwindow?: number;
+  /** A web window's app made a full-screen app (its bar's button): its card offers "Back to window". */
+  fullScreen?: boolean;
 }
 /** [available]: the launcher may read them (it has notification access). */
 /**
@@ -828,6 +832,8 @@ export interface Bridge {
     info(id: number): Promise<boolean>;
     /** Its last frame saved to Pictures/Screenshots: the file's name, or null. */
     screenshot(id: number): Promise<string | null>;
+    /** Host-optional: a web window's full-screen app back into its window. */
+    toWindow?(id: number): Promise<boolean>;
   };
   /**
    * The floating app windows (unfolded home), top-most first, for the dock; "windows.changed" (AppWindow[]) after.

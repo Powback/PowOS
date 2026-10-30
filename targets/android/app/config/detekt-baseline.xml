@@ -265,7 +265,6 @@
     <ID>CyclomaticComplexMethod:Share.kt$Share$fun prepare(text: String): String</ID>
     <ID>CyclomaticComplexMethod:Share.kt$Share$private fun apart( a: Token, b: Token, ): Boolean</ID>
     <ID>CyclomaticComplexMethod:ShellBridge.kt$ShellBridge$private fun dispatch( method: String, a: JSONArray, ): Any?</ID>
-    <ID>CyclomaticComplexMethod:ShellBridge.kt$ShellBridge$private fun tasks(): JSONArray</ID>
     <ID>CyclomaticComplexMethod:ShellErrors.kt$ShellErrors$fun rollback( context: Context, mode: String, cause: String, ): List&lt;String&gt;</ID>
     <ID>CyclomaticComplexMethod:ShellErrors.kt$ShellErrors$private fun send( context: Context, text: String, test: Boolean = false, force: Boolean = false, )</ID>
     <ID>CyclomaticComplexMethod:ShellHost.kt$ShellHost$private fun checkBoot( serial: Int, after: Long, )</ID>

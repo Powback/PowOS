@@ -12,7 +12,7 @@ import { recentsBack, recentsHome } from "./ui/recents.tsx";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, AppWindow, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
 import { sidewaysHome, wideHome } from "./hosts/wide.ts";
-import { openWebWindow } from "./ui/webwindows.tsx";
+import { onWebWindowPage, openWebWindow } from "./ui/webwindows.tsx";
 
 /** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
 const hostApps = signal<App[]>([]);
@@ -429,6 +429,12 @@ powos.on("home.panel", ({ kind, draft }: { kind: "apps" | "ai"; draft?: string }
   // A share to the retired AI app's entry: its words wait in PowOS AI's field (the overlay's page reads the store).
   if (draft) aiDraft.value = aiDraft.value ? `${aiDraft.value}\n${draft}` : draft;
   openPanel(kind === "ai" ? "ai" : "apps", { draft });
+});
+
+// A web window brought back (its switcher card, "Back to window"): home goes to its page.
+onWebWindowPage((p) => {
+  const i = pages.value.indexOf(p);
+  if (i >= 0) page.value = i;
 });
 
 export async function launch(key: string) {

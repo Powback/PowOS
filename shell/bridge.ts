@@ -296,6 +296,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       desktopWindow: (id, on = true) => call<boolean>("tasks.desktopWindow", id, on),
       info: (id) => call<boolean>("tasks.info", id),
       screenshot: (id) => call<string | null>("tasks.screenshot", id),
+      toWindow: (id) => call<boolean>("tasks.toWindow", id),
     },
     recents: {
       slot: (rect) => call("recents.slot", rect),
