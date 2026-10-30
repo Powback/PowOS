@@ -529,3 +529,20 @@ window), the window opaque with content, the dock and bar never covered, launche
 - During a resize the bar is redrawn by a canvas post, which can land a frame after the crop (buttons only; the bar's
   background is the same colour).
 - Corners of the crop at the work area's bottom are rounded like the frame's.
+
+## An app into a desktop window (2026-10-30)
+
+One path makes a running app a web window: `ShellBridge.toWebWindow(task)`. A web window's full-screen app goes back
+into its window; a web window already is shown; any other app gets a new window on home's current page holding its
+existing task (`webwindows.adopt` -> `adoptWebWindow` -> `webwindows.open(key, rect, task)` -> `WebWindows.adoptNow`
+moves the task onto the window's trusted display), at its freeform bounds, else its last place by hand
+(`WindowPlaces`), else a centred default. Callers: the switcher card's "PowOS desktop window" and "Back to window", and
+the system's "..." app-handle menu.
+
+That menu is OnePlus' `FullscreenCaptionHandleMenu` (Split screen / Floating window / Close), not AOSP's desktop handle
+menu: its items are fixed, and AOSP's menu (with its Desktop button) only exists when `config_isDesktopModeSupported`
+(false here) swaps in `DesktopModeWindowDecorViewModel` for every task. So `SystemFloat` relabels the menu's "Floating
+window" (`com.android.systemui:string/caption_menu_text_zoom`) to "Desktop window" with a fabricated overlay
+(`com.android.shell:PowosDesktopWindowItem`) while `powos_web_windows` is 1, and converts a task that goes from full
+screen to floating (OnePlus' zoom mode 100, or freeform) without PowOS's hand (`FreeformTasks.markOwnFloat`). Setting
+off: the overlay is disabled, nothing converted.

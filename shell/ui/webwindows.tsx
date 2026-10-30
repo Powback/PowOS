@@ -12,6 +12,7 @@ import { useRef } from "preact/hooks";
 import { native, nextFrameId, send } from "../apps/port.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
+import type { WebWindowRect } from "../types.ts";
 
 const TITLE = 36;
 const RADIUS = 12;
@@ -82,6 +83,35 @@ export async function openWebWindow(key: string, label: string, page: number): P
   const id = await powos.webwindows!.open(key, { left: x, top: y + TITLE, width: w, height: h - TITLE }).catch(() => -1);
   if (id < 0) return false;
   webWins.value = [...webWins.value, { id, key, label, page, x, y, w, h }];
+  return true;
+}
+
+/**
+ * An app's running task made a window here (the host's "webwindows.adopt": the switcher's "PowOS desktop window", the
+ * system window menu's "Desktop window" - ShellBridge.toWebWindow is the one path): a new window on [page] holding THAT
+ * task (moved onto the window's display, not launched again), at [body] (viewport CSS px: where the app floated, or its
+ * last place by hand) inside the work area, else a default size centred in it. Home goes to [page], the window on top.
+ */
+export async function adoptWebWindow(m: { task: number; key: string; label: string; body?: WebWindowRect }, page: number): Promise<boolean> {
+  const ww = powos.webwindows;
+  if (!ww) return false;
+  const a = workArea();
+  const o = pageOrigin();
+  const aw = a.right - a.left;
+  const ah = a.bottom - a.top;
+  let w = Math.min(aw, Math.round(m.body ? m.body.width : innerWidth * 0.5));
+  let h = Math.min(ah, Math.round(m.body ? m.body.height + TITLE : innerHeight * 0.6));
+  w = Math.max(w, 200);
+  h = Math.max(h, 160);
+  const sx = m.body ? m.body.left : a.left + (aw - w) / 2;
+  const sy = m.body ? m.body.top - TITLE : a.top + (ah - h) / 2;
+  // Screen (viewport) place clamped into the work area, then page-local as the model keeps it.
+  const vx = Math.round(Math.min(Math.max(sx, a.left), a.right - w));
+  const vy = Math.round(Math.min(Math.max(sy, a.top), a.bottom - h));
+  const id = await ww.open(m.key, { left: vx, top: vy + TITLE, width: w, height: h - TITLE }, m.task).catch(() => -1);
+  if (id < 0) return false;
+  webWins.value = [...webWins.value, { id, key: m.key, label: m.label, page, x: vx - o.x, y: vy - o.y, w, h, task: m.task }];
+  toPage(page);
   return true;
 }
 

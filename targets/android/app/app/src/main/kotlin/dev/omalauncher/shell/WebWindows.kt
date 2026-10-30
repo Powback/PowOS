@@ -137,6 +137,9 @@ class WebWindows(
         /** Its app's task (learned from its display when first needed; kept while it's a full-screen app). */
         @Volatile var taskId = -1
 
+        /** A running task to move onto its display instead of a launch (ShellBridge.toWebWindow: an app made a window), or -1. */
+        @Volatile var adopt = -1
+
         /** Its app is a full-screen app on display 0 now ([fullScreen]): the window is hidden, its display empty. */
         @Volatile var full = false
 
@@ -187,10 +190,14 @@ class WebWindows(
         Log.i(TAG, "windows ${if (on) "shown again (switcher down)" else "hidden under the switcher (each is its card)"}: ${wins.size} window(s)")
     }
 
-    /** A window for [component], its body at [rect] (CSS px): its id, or -1 (setting off, no surface to host it). */
+    /**
+     * A window for [component], its body at [rect] (CSS px): its id, or -1 (setting off, no surface to host it). [task]:
+     * an app's running task to move into it (ShellBridge.toWebWindow) instead of launching the app afresh.
+     */
     fun open(
         component: ComponentName,
         rect: JSONObject,
+        task: Int = -1,
     ): Int {
         if (!enabled()) return -1.also { Log.w(TAG, "open ${component.packageName}: $SETTING is off") }
         val parent = root() ?: return -1
@@ -201,6 +208,7 @@ class WebWindows(
         // Hidden until the page's first "w.f" places it.
         val container = SurfaceControl.Builder().setName("powos-ww-$id").setParent(parent).setHidden(true).build()
         val win = Win(id, component, container, w, h)
+        win.adopt = task
         win.chrome = chromeFor(component, container)
         wins[id] = win
         helper.create(id, w, h) { displayId, error ->
@@ -276,7 +284,21 @@ class WebWindows(
         win.geo?.let { place(t, win, it) }
         t.apply()
         imePolicy(win.displayId)
-        launch(win)
+        if (win.adopt >= 0) io.post { adoptNow(win) } else launch(win)
+    }
+
+    /**
+     * On [io]: [win]'s app is an app already running (task [Win.adopt]) - the switcher's "PowOS desktop window", the
+     * system menu's "Desktop window": that task moved onto the window's display ([moveTask], as the full screen button's
+     * way back), never a second launch. Not movable (gone, refused): the app launched there instead.
+     */
+    private fun adoptNow(win: Win) {
+        if (win.closed) return
+        val task = win.adopt
+        win.adopt = -1
+        val ok = moveTask(task, win.displayId)
+        Log.i(TAG, "window ${win.id}: app's task $task ${if (ok) "moved onto display ${win.displayId}" else "NOT moved: launched there instead"}")
+        if (ok) win.taskId = task else main.post { if (!win.closed) launch(win) }
     }
 
     // ---- geometry ------------------------------------------------------------------------------------------------------

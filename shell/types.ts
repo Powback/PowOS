@@ -869,8 +869,8 @@ export interface Bridge {
    */
   webwindows?: {
     enabled(): Promise<boolean>;
-    /** The app (an "a:" key) launched into a new window at [rect]: its id, or -1. */
-    open(key: string, rect: WebWindowRect): Promise<number>;
+    /** The app (an "a:" key) launched into a new window at [rect]: its id, or -1. [task]: its running task moved in instead. */
+    open(key: string, rect: WebWindowRect, task?: number): Promise<number>;
     /** A touch on its body, CSS px from the body's top-left. */
     input(id: number, action: "down" | "move" | "up" | "cancel", x: number, y: number): Promise<boolean>;
     close(id: number): Promise<boolean>;

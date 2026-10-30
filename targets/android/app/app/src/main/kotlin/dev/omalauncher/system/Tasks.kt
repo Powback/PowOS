@@ -135,6 +135,7 @@ object Tasks {
         val screen = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
         val w = screen.width() * 3 / 4
         val h = screen.height() / 2
+        FreeformTasks.markOwnFloat(id)
         return open(context, id, freeformOptions(android.graphics.Rect(screen.centerX() - w / 2, screen.centerY() - h / 2, screen.centerX() + w / 2, screen.centerY() + h / 2)))
     }
 
