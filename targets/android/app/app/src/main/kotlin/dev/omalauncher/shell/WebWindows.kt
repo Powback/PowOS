@@ -1845,9 +1845,12 @@ class WebWindows(
         val src = win.linux
         if (src != null) {
             if (!andro.marchy.WebWindowSource.canFullScreen()) {
-                // A KWin before 0043 can't be asked: its button fills the work area (maximise), as before.
-                Log.i(TAG, "window ${win.id}: KWin takes no full-screen request: the work area's maximise")
-                emit("webwindows.control", mapOf("id" to win.id, "action" to "maximise"))
+                // A KWin before 0043 can't be asked for its F11, but the button is still FULL SCREEN, never the work
+                // area's maximise (the user, 10-30 20:15: "When I press maximise, I still mean full screen"; Dolphin
+                // under the old KWin got "the work area's maximise"): PowOS puts it over the whole screen itself, no
+                // bar, KWin's window at the screen's size. Pinned by WebWindowsBarTest.
+                Log.i(TAG, "window ${win.id}: KWin takes no full-screen request: full screen by PowOS alone")
+                linuxFullScreen(win, true)
                 return
             }
             // KWin puts the window itself full screen (its F11); shown so at once, KWin's "fullscreen <id> 1|0" confirms.
