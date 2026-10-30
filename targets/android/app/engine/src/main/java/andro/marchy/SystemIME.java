@@ -52,16 +52,36 @@ public final class SystemIME {
     private static final int EVDEV_DOWN = 108;
     private static final int EVDEV_DELETE = 111;
 
+    /**
+     * Where the keyboard's text and keys go: the desktop's connection (surface 0, Native.nativeSend*) by default, or a
+     * web window's own (WebWindowSource.Ime, kwin 0043).
+     */
+    interface Sink {
+        void text(byte[] utf8);
+        void key(int action, int evdevCode);
+    }
+
+    static final Sink DESKTOP = new Sink() {
+        @Override public void text(byte[] utf8) { Native.nativeSendTextInput(utf8); }
+        @Override public void key(int action, int evdevCode) { Native.nativeSendKey(action, evdevCode); }
+    };
+
     private final Activity activity;
     private final Host host;
+    private final Sink sink;
     private InputMethodManager imm;
     private EditText hiddenInput;
     /** Incremented whenever a pending show becomes obsolete (for example, hide). */
     private int showRequestId;
 
     SystemIME(Activity activity, Host host) {
+        this(activity, host, DESKTOP);
+    }
+
+    SystemIME(Activity activity, Host host, Sink sink) {
         this.activity = activity;
         this.host = host;
+        this.sink = sink;
         initHiddenInput();
     }
 
@@ -131,12 +151,12 @@ public final class SystemIME {
         if (mMirror.length() > MIRROR_CAP) {
             mMirror.delete(0, mMirror.length() - MIRROR_CAP);
         }
-        Native.nativeSendTextInput(text.getBytes(StandardCharsets.UTF_8));
+        sink.text(text.getBytes(StandardCharsets.UTF_8));
     }
 
     private void tapKey(int evdevCode) {
-        Native.nativeSendKey(0, evdevCode);
-        Native.nativeSendKey(1, evdevCode);
+        sink.key(0, evdevCode);
+        sink.key(1, evdevCode);
     }
 
     // Maps soft-keyboard characters to Android key codes so a bar modifier can be
@@ -324,11 +344,11 @@ public final class SystemIME {
             // only sees evdev key presses, so press the modifiers around the key (Andromarchy fix: ':' gave ';').
             final int[] mods = modifierKeys(event, evdev);
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                for (int m : mods) Native.nativeSendKey(0, m);
-                Native.nativeSendKey(0, evdev);
+                for (int m : mods) sink.key(0, m);
+                sink.key(0, evdev);
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                Native.nativeSendKey(1, evdev);
-                for (int m : mods) Native.nativeSendKey(1, m);
+                sink.key(1, evdev);
+                for (int m : mods) sink.key(1, m);
                 // Keep the mirror consistent with a raw key edit. A backspace pops the
                 // tail; anything else (Enter, Tab, arrows, ...) moves the cursor or
                 // inserts content our tail-only model can't track, so drop the mirror
@@ -444,14 +464,20 @@ public final class SystemIME {
     void toggleSystemKeyboard() {
         if (imm == null) imm = activity.getSystemService(InputMethodManager.class);
         if (imm == null) return;
-        if (isImeVisible()) {
-            showRequestId++;
-            imm.hideSoftInputFromWindow(hiddenInput.getWindowToken(), 0);
-            releaseHiddenInput();
-            // In freeform mode the inset callback may not fire; hide the bar
-            // explicitly so it tracks the IME state in all modes.
-            host.onImeVisibilityChanged(false);
-        } else {
+        if (isImeVisible()) hideKeyboard();
+        else showKeyboard();
+    }
+
+    /** True while the keyboard serves this object's hidden input (not another view of the same window). */
+    boolean ownsKeyboard() {
+        return hiddenInput.isEnabled() && hiddenInput.hasFocus();
+    }
+
+    /** The keyboard up for this object's hidden input, whatever else of the window had it (home's own page). */
+    void showKeyboard() {
+        if (imm == null) imm = activity.getSystemService(InputMethodManager.class);
+        if (imm == null) return;
+        {
             hiddenInput.setEnabled(true);
             hiddenInput.setFocusable(true);
             hiddenInput.setFocusableInTouchMode(true);
@@ -467,5 +493,17 @@ public final class SystemIME {
             // explicitly here so the bar appears alongside the IME in all modes.
             host.onImeVisibilityChanged(true);
         }
+    }
+
+    /** The keyboard down, and this object's hidden input let go. */
+    void hideKeyboard() {
+        if (imm == null) imm = activity.getSystemService(InputMethodManager.class);
+        if (imm == null) return;
+        showRequestId++;
+        imm.hideSoftInputFromWindow(hiddenInput.getWindowToken(), 0);
+        releaseHiddenInput();
+        // In freeform mode the inset callback may not fire; hide the bar
+        // explicitly so it tracks the IME state in all modes.
+        host.onImeVisibilityChanged(false);
     }
 }

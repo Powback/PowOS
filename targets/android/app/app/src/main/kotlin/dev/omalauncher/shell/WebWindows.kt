@@ -156,6 +156,9 @@ class WebWindows(
 
         /** A Linux (KWin) window's source instead of a display ([LinuxSource]; docs/WEB_WINDOWS.md S6), else null. */
         var linux: LinuxSource? = null
+
+        /** Its Linux window is full screen ([linuxFullScreen], kwin 0043): the whole screen, no bar, the page's place kept. */
+        var linuxFull = false
     }
 
     /**
@@ -376,6 +379,8 @@ class WebWindows(
             // Published before the crop: a resize placed meanwhile (place() on main) crops this consumer too, and a
             // touch on the body reaches KWin from the first frame (a 0 handle drops both silently).
             src.handle = handle
+            // Its own Android keyboard (kwin 0043 window-ime): KWin's show/hide for it and its typed text on this consumer.
+            andro.marchy.WebWindowSource.ownKeyboard(kwin, handle)
             andro.marchy.WebWindowSource.crop(handle, win.w, win.h)
             andro.marchy.WebWindowSource.refreshRate(handle, rate)
             if (win.closed) {
@@ -626,8 +631,9 @@ class WebWindows(
         t: SurfaceControl.Transaction,
         geos: List<Geo>,
     ) {
-        val shown = HashSet<Int>()
-        for (g in geos) {
+        // A full-screen Linux window keeps its own place ([linuxFullScreen]): neither placed nor hidden by the page.
+        val shown = wins.values.filter { it.linuxFull }.mapTo(HashSet()) { it.id }
+        for (g in geos.filterNot { it.id in shown }) {
             val win = wins[g.id] ?: continue
             shown += g.id
             win.shown = g.visible
@@ -661,6 +667,7 @@ class WebWindows(
         win: Win,
         out: MutableList<Rect>,
     ): IntArray? {
+        if (win.linuxFull) return null // full screen: no bar of its own on screen
         val g = win.geo?.takeIf { win.shown && it.visible && win.mirror != null } ?: return null
         val chrome = win.chrome ?: return null
         val f = g.frame
@@ -716,15 +723,7 @@ class WebWindows(
         val bh = g.body.height().coerceAtLeast(1)
         val src = win.linux
         if (src != null && (bw != win.w || bh != win.h)) {
-            win.w = bw
-            win.h = bh
-            // KWin lays the window out at the body's size; the consumer's crop and the buffer queue's size follow in
-            // this transaction, so its next frames show 1:1 (one of the old size is dropped by the queue, never stretched).
-            // Its own transaction, applied now: a buffer size riding [t] (applyTransactionOnDraw merges it into the
-            // view's next frame natively) would skip SurfaceControl's Java-side queue resize - every later frame rejected.
-            if (src.content.isValid) SurfaceControl.Transaction().setBufferSize(src.content, bw, bh).apply()
-            andro.marchy.WebWindowSource.crop(src.handle, bw, bh)
-            andro.marchy.WebWindowSource.size(src.kwin, bw, bh)
+            linuxResize(win, src, bw, bh)
         } else if (win.displayId >= 0 && (bw != win.w || bh != win.h)) {
             win.w = bw
             win.h = bh
@@ -732,6 +731,24 @@ class WebWindows(
             // top-left until it draws at the new size).
             helper.resize(win.displayId, bw, bh, dpi)
         }
+    }
+
+    /** KWin's window [src] of [win] laid out at [bw] x [bh] px, its buffer queue and the consumer's crop the same. */
+    private fun linuxResize(
+        win: Win,
+        src: LinuxSource,
+        bw: Int,
+        bh: Int,
+    ) {
+        win.w = bw
+        win.h = bh
+        // KWin lays the window out at the body's size; the consumer's crop and the buffer queue's size follow in
+        // this transaction, so its next frames show 1:1 (one of the old size is dropped by the queue, never stretched).
+        // Its own transaction, applied now: a buffer size riding [t] (applyTransactionOnDraw merges it into the
+        // view's next frame natively) would skip SurfaceControl's Java-side queue resize - every later frame rejected.
+        if (src.content.isValid) SurfaceControl.Transaction().setBufferSize(src.content, bw, bh).apply()
+        andro.marchy.WebWindowSource.crop(src.handle, bw, bh)
+        andro.marchy.WebWindowSource.size(src.kwin, bw, bh)
     }
 
     /**
@@ -1105,7 +1122,10 @@ class WebWindows(
         x: Float,
         y: Float,
     ): Win? {
-        if (y >= area.bottom || underSwitcher || tiles.menuFor != null) return null
+        if (underSwitcher) return null
+        // A full-screen Linux window takes every touch on the screen (nothing of home is over it).
+        wins.values.firstOrNull { it.linuxFull && it.linux != null }?.let { return it }
+        if (y >= area.bottom || tiles.menuFor != null) return null
         val win = wins.values.filter { it.shown && it.mirror != null }.sortedByDescending { it.geo?.z ?: -1 }.firstOrNull { partAt(it, x, y) != null }
         return win?.takeIf { it.linux != null && partAt(it, x, y) == "" }
     }
@@ -1152,9 +1172,14 @@ class WebWindows(
         val a = ev.actionMasked
         if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) linuxTouch = null
         val src = win.linux ?: return true
+        val at = IntArray(2).also(web::getLocationInWindow)
+        if (win.linuxFull) {
+            // Full screen: the window is at the screen's top left, 1:1.
+            andro.marchy.WebWindowSource.touch(src.handle, ev, at[0].toFloat(), at[1].toFloat(), 1f)
+            return true
+        }
         val g = win.geo ?: return true
         val title = win.chrome?.title ?: 0
-        val at = IntArray(2).also(web::getLocationInWindow)
         val s = g.scale
         andro.marchy.WebWindowSource.touch(src.handle, ev, at[0] - g.frame.left.toFloat(), at[1] - g.frame.top - title * s, s)
         return true
@@ -1761,13 +1786,18 @@ class WebWindows(
      * meanwhile) and its frame: [toWindow] puts the app back there. On [io]: binder calls.
      */
     private fun fullScreen(win: Win) {
-        if (win.linux != null) {
-            // HACK: a Linux window's full screen button fills the work area (the page's maximise), not the whole screen.
-            // KWin only REPORTS a toplevel's own full screen to PowOS (kwin patch 0021, "fullscreen <id> 0|1"); there
-            // is no PowOS -> KWin request to make one full screen. Real fix: a kwin patch taking "fullscreen <id> 1"
-            // from the app (setFullScreen on the toplevel), then this sends it and hides the window's bar.
-            Log.i(TAG, "window ${win.id}: full screen for a Linux window is the work area's maximise (no KWin request yet)")
-            emit("webwindows.control", mapOf("id" to win.id, "action" to "maximise"))
+        val src = win.linux
+        if (src != null) {
+            if (!andro.marchy.WebWindowSource.canFullScreen()) {
+                // A KWin before 0043 can't be asked: its button fills the work area (maximise), as before.
+                Log.i(TAG, "window ${win.id}: KWin takes no full-screen request: the work area's maximise")
+                emit("webwindows.control", mapOf("id" to win.id, "action" to "maximise"))
+                return
+            }
+            // KWin puts the window itself full screen (its F11); shown so at once, KWin's "fullscreen <id> 1|0" confirms.
+            Log.i(TAG, "window ${win.id}: KWin window ${src.kwin} full screen asked")
+            andro.marchy.WebWindowSource.fullScreen(src.kwin, true)
+            linuxFullScreen(win, true)
             return
         }
         if (win.displayId < 0 || win.full) return
@@ -1807,9 +1837,61 @@ class WebWindows(
         emit("webwindows.full", mapOf("id" to win.id, "on" to full, "task" to win.taskId))
     }
 
+    /**
+     * Linux window [win] full screen ([on]: the container over the whole screen above the other windows, no bar, every
+     * touch its; "webwindows.full" lets the page keep its place) or back in its window (the page's next frame places it
+     * and KWin's window takes the body's size again). Main thread.
+     */
+    private fun linuxFullScreen(
+        win: Win,
+        on: Boolean,
+    ) {
+        val src = win.linux ?: return
+        if (win.closed || win.linuxFull == on) return
+        win.linuxFull = on
+        val t = SurfaceControl.Transaction()
+        win.chrome?.shown(t, !on)
+        if (on) fillScreen(t, win, src) else t.apply()
+        Log.i(TAG, "window ${win.id}: KWin window ${src.kwin} ${if (on) "full screen" else "back in its window"}")
+        win.full = on
+        emit("webwindows.full", mapOf("id" to win.id, "on" to on))
+        publishBars()
+    }
+
+    /** [linuxFullScreen]'s on: [win]'s layers over the whole screen at 1:1, KWin's window at the screen's size. */
+    private fun fillScreen(
+        t: SurfaceControl.Transaction,
+        win: Win,
+        src: LinuxSource,
+    ) {
+        if (divDrag?.starts?.containsKey(win.id) == true) divDrag = null
+        if (tiles.menuFor == win.id) tiles.closeMenu()
+        if (linuxTouch !== win) linuxTouch = null
+        val b = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
+        val screen = Rect(0, 0, b.width(), b.height())
+        win.container.takeIf { it.isValid }?.let { c ->
+            t.setPosition(c, 0f, 0f).setScale(c, 1f, 1f).setCrop(c, screen).setLayer(c, FULL_LAYER).setVisibility(c, true)
+            cornerRadius(t, c, 0f)
+        }
+        src.content.takeIf { it.isValid }?.let { m -> t.setPosition(m, 0f, 0f).setScale(m, 1f, 1f).setCrop(m, screen) }
+        t.apply()
+        win.shown = true
+        linuxResize(win, src, b.width(), b.height())
+    }
+
+    /** KWin's "fullscreen <kwin> 1|0" (ShellBridge's host, main thread): the window went full screen or left it. */
+    fun linuxFullScreen(
+        kwin: Int,
+        on: Boolean,
+    ) {
+        val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
+        linuxFullScreen(w, on)
+    }
+
     /** The page's "webwindows.fullScreen": window [id]'s app full screen ([fullScreen]); false: no such window. */
     fun fullScreen(id: Int): Boolean {
         val w = wins[id] ?: return false
+        if (w.linuxFull) return true
         if (w.full) return front(id)
         fullScreen(w)
         return true
@@ -1821,6 +1903,12 @@ class WebWindows(
      */
     fun toWindow(id: Int): Boolean {
         val w = wins[id] ?: return false
+        w.linux?.let { src ->
+            // A full-screen Linux window: KWin takes it out of full screen (its "fullscreen 0" confirms), shown back now.
+            if (w.linuxFull) andro.marchy.WebWindowSource.fullScreen(src.kwin, false)
+            if (w.linuxFull) linuxFullScreen(w, false) else emit("webwindows.full", mapOf("id" to w.id, "on" to false))
+            return true
+        }
         if (!w.full) return true.also { emit("webwindows.full", mapOf("id" to w.id, "on" to false)) }
         io.post { toWindowNow(w) }
         return true
@@ -2200,6 +2288,9 @@ class WebWindows(
 
         /** A Linux web window's switcher card id: this + its window id (no Android task id gets near it). */
         const val LINUX_CARD = 1 shl 29
+
+        /** A full-screen Linux window's layer among the windows ([linuxFullScreen]): above every page-ordered one. */
+        private const val FULL_LAYER = 1 shl 20
 
         /** [shot] as a card's JPEG, at most [width] px wide. */
         private fun jpeg(

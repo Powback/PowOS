@@ -102,6 +102,13 @@ class ShellBridge(
             override fun closed(id: Int) {
                 main.post { if (webWindowsMade) webWindows.linuxClosed(id) }
             }
+
+            override fun fullScreen(
+                id: Int,
+                on: Boolean,
+            ) {
+                main.post { if (webWindowsMade) webWindows.linuxFullScreen(id, on) }
+            }
         }
 
     /** An app the system's window menu floated ([SystemFloat]): a web window, as the switcher's "PowOS desktop window". */
@@ -198,6 +205,8 @@ class ShellBridge(
         // Home's bridge: an app the system's own window menu floats becomes a web window (SystemFloat, web windows on).
         if (activity != null) SystemFloat.start(context, systemFloat)
         if (activity != null) andro.marchy.WebWindowSource.host = linuxWindows
+        // Linux web windows' Android keyboard is hosted by home (kwin 0043 window-ime: show/hide on each window's consumer).
+        if (activity != null) andro.marchy.WebWindowSource.hostIme(activity)
         ShellWallpaper.onChange.add(wallpaperChanged)
         runCatching { android.app.WallpaperManager.getInstance(context).addOnColorsChangedListener(wallpaperColors, main) }
         dev.omalauncher.theme.ThemeStore.changeListeners.add(themeChanged)
@@ -1423,6 +1432,7 @@ class ShellBridge(
         health.close()
         if (activity != null) SystemFloat.stop(systemFloat)
         if (andro.marchy.WebWindowSource.host === linuxWindows) andro.marchy.WebWindowSource.host = null
+        if (activity != null) andro.marchy.WebWindowSource.unhostIme(activity)
         if (webWindowsMade) webWindows.closeAll()
         runCatching { context.getSystemService(android.hardware.display.DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         ShellWallpaper.onChange.remove(wallpaperChanged)

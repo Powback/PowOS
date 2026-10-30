@@ -50,6 +50,9 @@
 #               inner panel (install orientation 270); each frame's render-done byte says the rotation it was drawn with
 #   0042        ours: "quit <id>" from the app (the user swiped the task's card / its frame's close): the window is closed
 #               (full screen too), and 3 s later a process still running is ended by session/powos-app-quit
+#   0043        ours: "ime <id> 1" (cap window-ime): the Android keyboard's show/hide for the focused window goes to its
+#               task's own consumer (a web window of home) and its committed text is taken there; "fullscreen <id> 1|0"
+#               from the app (cap fullscreen-request) puts the window itself full screen (setFullScreen)
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -59,7 +62,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.49
+pkgrel=3.50
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -117,11 +120,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0039-backends-anland-a-window-task-s-own-title-bar-drag-starts-KWin-s-move.patch
           0040-backends-anland-a-full-screen-task-s-window-is-never-minimized-and-takes-the-screen-s-size.patch
           0041-backends-anland-pre-rotated-buffers-for-the-consumer-s-transform-hint.patch
-          0042-backends-anland-a-task-the-user-closes-quits-its-app.patch)
+          0042-backends-anland-a-task-the-user-closes-quits-its-app.patch
+          0043-backends-anland-keyboard-on-a-window-task-s-own-consumer-and-full-screen-asked-by-the-app.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

@@ -448,7 +448,7 @@ public final class WindowTasks {
 
     /**
      * KWin's lines about a web window's [id] (WebWindowSource): its caption and its close go to home's web windows.
-     * Not yet for web windows (logged): "fullscreen" (a game going full screen: stays in its window), "move" /
+     * "fullscreen" goes to the host (WebWindowSource.fullScreened). Not yet for web windows (logged): "move" /
      * "maximize" / "minimize" from a window's own client-side title bar (Steam), "decor" is answered as for a task.
      */
     private static void onWebWindow(int id, String[] f) {
@@ -463,6 +463,11 @@ public final class WindowTasks {
                 break;
             case "decor":
                 onWindow(id, f);
+                break;
+            case "fullscreen":
+                // The window full screen or back (kwin 0043's answer to the app's request, or its own F11/video).
+                if (f.length > 2)
+                    WebWindowSource.fullScreened(id, f[2].equals("1"));
                 break;
             default:
                 Log.i(TAG, "web window " + id + ": " + String.join(" ", f) + " (not yet for web windows)");
