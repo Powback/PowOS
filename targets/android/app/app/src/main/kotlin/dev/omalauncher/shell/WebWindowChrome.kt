@@ -108,7 +108,10 @@ internal class WebWindowChrome(
             t.setPosition(b, 0f, title.toFloat())
             t.setScale(b, width / BACK.toFloat(), bodyH / BACK.toFloat())
         }
-        val blurs = theme.glass != null && setBackgroundBlurRadius != null && compositorBlurs()
+        // HACK: no blur behind the bar for now - setBackgroundBlurRadius on the bar layer blurred the whole window's
+        // app content (user 19:29: "we just wanted the blur on the title bar not the whole element"). Real fix: a
+        // blur layer cropped to the title strip only, under the bar and above nothing of the app.
+        val blurs = false && theme.glass != null && setBackgroundBlurRadius != null && compositorBlurs()
         val key = "$width $maximised $theme $blurs ${rowCentre(maximised)}"
         if (key == drawn) return
         drawn = key
