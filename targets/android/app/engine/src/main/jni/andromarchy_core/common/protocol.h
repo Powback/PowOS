@@ -55,6 +55,24 @@ struct buf_info {
     uint32_t offset;
 } __attribute__((packed));
 
+/* PowOS: pre-rotation (no GPU composition in SurfaceFlinger for a rotated panel). The consumer asks the producer to
+ * render its buffers already rotated - the surface's transform hint - and SurfaceFlinger shows them with no rotation
+ * of its own (HWC scans them out directly):
+ *  - consumer -> producer: a struct bufs_ext right after DATA_MSG_BUFS_READY's buf_info array (inside its size).
+ *    transform is an OutputTransform/wl_output kind (0 normal, 1 90, 2 180, 3 270 degrees counter-clockwise): the
+ *    rotation from the surface's logical space into the buffers, which are that logical size rotated (swapped for 1/3).
+ *  - producer -> consumer: each frame's render-done byte (the fence channel) is FRAME_TAG_PRETRANSFORM | the kind the
+ *    frame was drawn with; an older producer sends 0 (it can't pre-rotate: the consumer goes back to normal buffers).
+ * HACK: the trailer rides inside BUFS_READY so an older producer (count = size / sizeof(buf_info), then reads `size`
+ * bytes into infos[MAX_BUFS]) skips it unharmed - only while count < MAX_BUFS, so the consumer sends it only then.
+ * The real fix is a versioned handshake (capabilities in the HELLOs); this protocol has none yet. */
+#define BUFS_EXT_MAGIC 0x4d465850u /* "PXFM" */
+struct bufs_ext {
+    uint32_t magic;
+    uint32_t transform;
+} __attribute__((packed));
+#define FRAME_TAG_PRETRANSFORM 0x80
+
 #define INPUT_TYPE_TOUCH          1
 #define INPUT_TYPE_KEY            2
 #define INPUT_TYPE_POINTER_MOTION 3

@@ -45,6 +45,9 @@
 #               Steam's own header drag starts the move 0026 hands to the task (it was dropped: no button/touch down)
 #   0040        ours: a full-screen task's window is never minimized (a Wine/Unity game minimizes itself on focus loss:
 #               undone at once), and a floating task gone full screen takes the screen's size at once, not the floating one
+#   0041        ours: the consumer's buffers pre-rotated (its surface's transform hint, struct bufs_ext in protocol.h): KWin
+#               renders the desktop and task windows already rotated, so SurfaceFlinger needs no GPU rotation on the
+#               inner panel (install orientation 270); each frame's render-done byte says the rotation it was drawn with
 #   0042        ours: "quit <id>" from the app (the user swiped the task's card / its frame's close): the window is closed
 #               (full screen too), and 3 s later a process still running is ended by session/powos-app-quit
 #
@@ -56,7 +59,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.48
+pkgrel=3.49
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -113,11 +116,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0038-backends-anland-the-app-s-own-title-bar-replaces-KWin-s-on-a-task-s-window.patch
           0039-backends-anland-a-window-task-s-own-title-bar-drag-starts-KWin-s-move.patch
           0040-backends-anland-a-full-screen-task-s-window-is-never-minimized-and-takes-the-screen-s-size.patch
+          0041-backends-anland-pre-rotated-buffers-for-the-consumer-s-transform-hint.patch
           0042-backends-anland-a-task-the-user-closes-quits-its-app.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

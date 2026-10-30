@@ -1,0 +1,234 @@
+From: PowOS <mats@powback.com>
+Subject: [PATCH] backends/anland: pre-rotated buffers for the consumer's transform hint
+
+ABZU in a window task on the inner screen (2026-10-30): SurfaceFlinger composited every frame on the GPU (the
+SurfaceView was the only CLIENT layer, 275 of 317 presents, 85 GPU deadline misses in 8 s) because the panel's install
+orientation is 270 and HWC can't rotate a linear buffer. Android's own windows are pre-rotated and stay on HWC.
+
+The consumer now reads its surface's transform hint and may ask for its buffers rotated: a struct bufs_ext after
+BUFS_READY's buf_info array (protocol.h). The desktop layer and window tasks render through that rotation (combined with
+the output's own transform and the vertical flip), keep their logical size (the buffer size rotated back), and every
+render-done byte says the rotation the frame was drawn with, so a consumer meeting an older KWin (byte 0) goes back to
+normal buffers. An older consumer sends no trailer: rotation 0, as before.
+
+---
+ src/backends/anland/anland_egl_backend.cpp | 19 +++++++++----
+ src/backends/anland/anland_egl_backend.h   |  1 +
+ src/backends/anland/anland_window_task.cpp | 15 ++++++----
+ src/backends/anland/display_producer.c     | 33 +++++++++++++++++++---
+ src/backends/anland/display_producer.h     |  3 ++
+ src/backends/anland/protocol.h             | 18 ++++++++++++
+ 6 files changed, 75 insertions(+), 14 deletions(-)
+
+diff --git a/src/backends/anland/anland_egl_backend.cpp b/src/backends/anland/anland_egl_backend.cpp
+index 52bc5d6..845d2a8 100644
+--- a/src/backends/anland/anland_egl_backend.cpp
++++ b/src/backends/anland/anland_egl_backend.cpp
+@@ -112,7 +112,14 @@ bool AnlandEglLayer::importBuffers(int count)
+     // backend exactly (drmOutput()->transform().combine(OutputTransform::FlipY)).
+     // The tag is sticky on each texture; after import it is only ever updated
+     // reactively, in onOutputTransformChanged().
+-    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
++    // PowOS: the consumer's pre-rotation on top (protocol.h, struct bufs_ext): its surface's transform hint, so
++    // SurfaceFlinger shows the buffers with no rotation of its own - no GPU composition on a rotated panel. The
++    // output keeps its logical size (the surface's); only the buffers are rotated (their size swapped for 90/270).
++    m_preTransform = OutputTransform(OutputTransform::Kind(get_buffer_transform(m_display) & 3));
++    const OutputTransform contentTransform = m_output->transform().combine(m_preTransform).combine(OutputTransform::FlipY);
++    if (m_preTransform != OutputTransform::Normal) {
++        qCInfo(KWIN_ANLAND) << "desktop buffers pre-rotated by the consumer:" << m_preTransform.kind();
++    }
+ 
+     for (int i = 0; i < count; i++) {
+         AnlandEglBackend::ImportedBuffer imported = m_backend->importConsumerBuffer(m_display, i, contentTransform);
+@@ -126,9 +133,11 @@ bool AnlandEglLayer::importBuffers(int count)
+          * OutputMode, resize the output to match — the consumer may have rotated or
+          * switched display modes. All buffers in a set share the same size, so we
+          * only need to check the first buffer. */
+-        if (i == 0 && imported.size != m_output->modeSize() && imported.size.isValid()) {
+-            qCInfo(KWIN_ANLAND) << "dmabuf size changed, resizing output to" << imported.size;
+-            m_output->resize(imported.size);
++        // PowOS: a pre-rotated buffer is the output's size rotated (map() swaps a size for 90/270).
++        const QSize unrotated = m_preTransform.map(imported.size);
++        if (i == 0 && unrotated != m_output->modeSize() && unrotated.isValid()) {
++            qCInfo(KWIN_ANLAND) << "dmabuf size changed, resizing output to" << unrotated;
++            m_output->resize(unrotated);
+         }
+ 
+         m_textures[i] = std::move(imported.texture);
+@@ -147,7 +156,7 @@ bool AnlandEglLayer::importBuffers(int count)
+ 
+ void AnlandEglLayer::onOutputTransformChanged()
+ {
+-    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
++    const OutputTransform contentTransform = m_output->transform().combine(m_preTransform).combine(OutputTransform::FlipY);
+     for (int i = 0; i < m_bufCount; i++) {
+         m_textures[i]->setContentTransform(contentTransform);
+         // The cached RenderTarget captured the old transform; rebuild it so the
+diff --git a/src/backends/anland/anland_egl_backend.h b/src/backends/anland/anland_egl_backend.h
+index c23ee1a..7020bb3 100644
+--- a/src/backends/anland/anland_egl_backend.h
++++ b/src/backends/anland/anland_egl_backend.h
+@@ -65,6 +65,7 @@ private:
+     uint8_t m_damageFlags = 0;
+     uint8_t m_damageMask = 0;
+     bool m_traceNextFrame = false;
++    OutputTransform m_preTransform; // PowOS: the consumer's rotation of the current buffers (importBuffers)
+     std::array<std::shared_ptr<GLTexture>, MAX_BUFS> m_textures;
+     std::array<std::unique_ptr<GLFramebuffer>, MAX_BUFS> m_fbos;
+     std::array<std::optional<RenderTarget>, MAX_BUFS> m_renderTargets;
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index f9b2beb..40b582c 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -385,7 +385,8 @@ void AnlandWindowTask::goLive()
+         return;
+     }
+     m_state = State::Live;
+-    qCInfo(KWIN_ANLAND) << "window task" << m_id << "live," << m_bufferSize << "for" << (m_window ? m_window->caption() : QString());
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "live," << m_bufferSize << "pre-rotated" << get_buffer_transform(m_display)
++                        << "for" << (m_window ? m_window->caption() : QString());
+ 
+     m_inputNotifier = new QSocketNotifier(get_data_fd(m_display), QSocketNotifier::Read, this);
+     connect(m_inputNotifier, &QSocketNotifier::activated, this, &AnlandWindowTask::onInputReadable);
+@@ -544,15 +545,19 @@ bool AnlandWindowTask::importBuffers()
+     if (count <= 0 || count > MAX_BUFS) {
+         return false;
+     }
++    // The task's surface is already in its own orientation; the consumer may still ask for its buffers pre-rotated
++    // (protocol.h, struct bufs_ext: its surface's transform hint), so SurfaceFlinger shows them with no rotation of its
++    // own - on a rotated panel (the inner screen's install orientation) that is HWC instead of GPU composition.
++    const OutputTransform preTransform(OutputTransform::Kind(get_buffer_transform(m_display) & 3));
+     for (int i = 0; i < count; i++) {
+-        // Top-down for the consumer, as the desktop's buffers (AnlandEglLayer): a vertical flip, no rotation - the
+-        // task's surface is already in its own orientation.
+-        auto imported = egl->importConsumerBuffer(m_display, i, OutputTransform::FlipY);
++        // Top-down for the consumer, as the desktop's buffers (AnlandEglLayer): a vertical flip after the rotation.
++        auto imported = egl->importConsumerBuffer(m_display, i, preTransform.combine(OutputTransform::FlipY));
+         if (!imported.texture) {
+             releaseBuffers();
+             return false;
+         }
+-        m_bufferSize = imported.size;
++        // The task's own (logical) size: a pre-rotated buffer is it rotated (map() swaps a size for 90/270).
++        m_bufferSize = preTransform.map(imported.size);
+         m_textures[i] = std::move(imported.texture);
+         m_fbos[i] = std::move(imported.fbo);
+         m_stale[i] = true;
+diff --git a/src/backends/anland/display_producer.c b/src/backends/anland/display_producer.c
+index 4511350..3c5b26a 100644
+--- a/src/backends/anland/display_producer.c
++++ b/src/backends/anland/display_producer.c
+@@ -32,6 +32,7 @@ struct display_ctx {
+     int      dmabuf_fds[MAX_BUFS];
+     struct buf_info dmabuf_infos[MAX_BUFS];
+     int      buf_count;
++    uint32_t buf_transform;   /* PowOS: the consumer's pre-rotation for this buffer set (struct bufs_ext), 0 = none */
+ 
+     void (*fallback_cb)(void *);
+     void  *fallback_userdata;
+@@ -163,16 +164,34 @@ static int receive_dmabufs(display_ctx *ctx)
+         return -1;
+     }
+ 
+-    struct buf_info infos[MAX_BUFS];
+-    if (recv_all(ctx->data_fd, infos, dhdr.size) < 0) {
++    /* PowOS: the infos, then (a newer consumer) its struct bufs_ext - nothing else fits in the size. */
++    const size_t infos_size = (size_t)count * sizeof(struct buf_info);
++    const size_t extra = dhdr.size - infos_size;
++    if (extra != 0 && extra != sizeof(struct bufs_ext)) {
+         for (int i = 0; i < fd_count; i++)
+             close(fds[i]);
+         return -1;
+     }
++    union {
++        struct buf_info infos[MAX_BUFS];
++        uint8_t raw[MAX_BUFS * sizeof(struct buf_info) + sizeof(struct bufs_ext)];
++    } in;
++    if (recv_all(ctx->data_fd, in.raw, dhdr.size) < 0) {
++        for (int i = 0; i < fd_count; i++)
++            close(fds[i]);
++        return -1;
++    }
++    ctx->buf_transform = 0;
++    if (extra == sizeof(struct bufs_ext)) {
++        struct bufs_ext ext;
++        memcpy(&ext, in.raw + infos_size, sizeof(ext));
++        if (ext.magic == BUFS_EXT_MAGIC && ext.transform <= 3)
++            ctx->buf_transform = ext.transform;
++    }
+ 
+     for (int i = 0; i < count; i++) {
+         ctx->dmabuf_fds[i] = fds[i];
+-        ctx->dmabuf_infos[i] = infos[i];
++        ctx->dmabuf_infos[i] = in.infos[i];
+     }
+     ctx->buf_count = count;
+     return 0;
+@@ -316,7 +335,8 @@ int trigger_refresh(display_ctx *ctx)
+      * buffer never fills; a momentary miss self-heals via the consumer's 5s
+      * poll->fallback rather than freezing the compositor. data_fd's reverse direction
+      * is intentionally left unused (reserved for future extension). */
+-    char b = 0;
++    /* PowOS: the byte says how the frame was drawn (FRAME_TAG_PRETRANSFORM | the buffers' rotation; protocol.h). */
++    char b = (char)(FRAME_TAG_PRETRANSFORM | (ctx->buf_transform & 3));
+     struct iovec iov = { .iov_base = &b, .iov_len = 1 };
+     union {
+         char buf[CMSG_SPACE(sizeof(int))];
+@@ -611,6 +631,11 @@ int get_buffer_ready_fd(display_ctx *ctx)
+     return ctx->buf_ready_efd;
+ }
+ 
++uint32_t get_buffer_transform(display_ctx *ctx)
++{
++    return ctx->buf_count > 0 ? ctx->buf_transform : 0;
++}
++
+ int get_buf_count(display_ctx *ctx)
+ {
+     return ctx->buf_count;
+diff --git a/src/backends/anland/display_producer.h b/src/backends/anland/display_producer.h
+index b6120b8..cace4be 100644
+--- a/src/backends/anland/display_producer.h
++++ b/src/backends/anland/display_producer.h
+@@ -95,6 +95,9 @@ int  get_data_fd(display_ctx *ctx);
+ int  get_audio_fd(display_ctx *ctx);
+ int  get_buffer_ready_fd(display_ctx *ctx);
+ int  get_buf_count(display_ctx *ctx);
++/* PowOS: the rotation the consumer asked for this buffer set (struct bufs_ext: an OutputTransform kind 0-3, 0 = none):
++ * render into the buffers through it. Their buf_info size is the rotated one (swapped for 1 and 3). */
++uint32_t get_buffer_transform(display_ctx *ctx);
+ int  get_selected_idx(display_ctx *ctx);
+ int  get_dmabuf_fd(display_ctx *ctx);
+ int  get_dmabuf_fd_at(display_ctx *ctx, int idx);
+diff --git a/src/backends/anland/protocol.h b/src/backends/anland/protocol.h
+index f07703f..81dd6dc 100644
+--- a/src/backends/anland/protocol.h
++++ b/src/backends/anland/protocol.h
+@@ -55,6 +55,24 @@ struct buf_info {
+     uint32_t offset;
+ } __attribute__((packed));
+ 
++/* PowOS: pre-rotation (no GPU composition in SurfaceFlinger for a rotated panel). The consumer asks the producer to
++ * render its buffers already rotated - the surface's transform hint - and SurfaceFlinger shows them with no rotation
++ * of its own (HWC scans them out directly):
++ *  - consumer -> producer: a struct bufs_ext right after DATA_MSG_BUFS_READY's buf_info array (inside its size).
++ *    transform is an OutputTransform/wl_output kind (0 normal, 1 90, 2 180, 3 270 degrees counter-clockwise): the
++ *    rotation from the surface's logical space into the buffers, which are that logical size rotated (swapped for 1/3).
++ *  - producer -> consumer: each frame's render-done byte (the fence channel) is FRAME_TAG_PRETRANSFORM | the kind the
++ *    frame was drawn with; an older producer sends 0 (it can't pre-rotate: the consumer goes back to normal buffers).
++ * HACK: the trailer rides inside BUFS_READY so an older producer (count = size / sizeof(buf_info), then reads `size`
++ * bytes into infos[MAX_BUFS]) skips it unharmed - only while count < MAX_BUFS, so the consumer sends it only then.
++ * The real fix is a versioned handshake (capabilities in the HELLOs); this protocol has none yet. */
++#define BUFS_EXT_MAGIC 0x4d465850u /* "PXFM" */
++struct bufs_ext {
++    uint32_t magic;
++    uint32_t transform;
++} __attribute__((packed));
++#define FRAME_TAG_PRETRANSFORM 0x80
++
+ #define INPUT_TYPE_TOUCH          1
+ #define INPUT_TYPE_KEY            2
+ #define INPUT_TYPE_POINTER_MOTION 3
+-- 
+2.50.1 (Apple Git-155)
+

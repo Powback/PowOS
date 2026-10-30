@@ -485,8 +485,14 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     /** Run as a Linux window's task gains focus (the app sets it: PlasmaBridge's clipboard push). */
     public static volatile Runnable focusHook;
 
+    /** Surfaces this activity got (surfaceCreated): a new one mid-game means a reconnect and a frame of nothing. */
+    private int surfacesCreated;
+
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
+        // Logged: a SurfaceView surface recreated while a game plays is a candidate for its black flicker (10-30, ABZU).
+        surfacesCreated++;
+        Log.i(TAG, "surface " + id + " created (" + surfacesCreated + (surfacesCreated > 1 ? ": recreated)" : ")"));
     }
 
     @Override
@@ -567,6 +573,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
+        Log.i(TAG, "surface " + id + " destroyed" + (isFinishing() ? " (finishing)" : ""));
         this.holder = null;
         surfaceGen++;
         stopConsumer();

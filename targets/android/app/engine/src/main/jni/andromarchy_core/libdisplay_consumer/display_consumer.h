@@ -14,6 +14,12 @@ int  set_screen_info(display_ctx *ctx, uint32_t width, uint32_t height, uint32_t
 int  push_dmabufs(display_ctx *ctx, const int *fds, const struct buf_info *infos, int count);
 int  select_dmabuf(display_ctx *ctx, int idx);
 int  refresh_done(display_ctx *ctx);
+/* PowOS: 1 = the producer finished a frame (*fence_out its render-done fence or -1, *tag_out its tag byte - protocol.h
+ * FRAME_TAG_PRETRANSFORM); 0 = no frame was asked (fallback), -1 = the producer timed out or went away. Not 1: the
+ * buffer holds nothing new - don't show it. */
+int  refresh_done_tagged(display_ctx *ctx, int *fence_out, uint8_t *tag_out);
+/* PowOS: the pre-rotation (OutputTransform kind 0-3, struct bufs_ext) to ask for with the next push_dmabufs. */
+int  set_buffers_transform(display_ctx *ctx, uint32_t transform);
 int  push_input_event(display_ctx *ctx, const struct InputEvent *event);
 int  push_input_event_with_length(display_ctx *ctx, const struct InputEvent *event, void* payload, size_t size);
 int  set_fallback_callback(display_ctx *ctx, void (*on_fallback)(void *), void *userdata);

@@ -15,6 +15,7 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <dirent.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "anw_hidden.h"
@@ -77,6 +78,22 @@ struct consumer_state {
     volatile int crop_w;
     volatile int crop_h;
 
+    /* PowOS: pre-rotation (protocol.h, struct bufs_ext). The buffers are screen_w x screen_h rotated by [pretransform]
+     * (an OutputTransform kind 0-3: swapped for 1 and 3), queued with the Android buffer transform that undoes it, so
+     * SurfaceFlinger needs no rotation of its own - on the inner panel (install orientation 270) that is HWC instead of
+     * GPU composition every frame. It follows the surface's transform hint (rotation, fold: another display). */
+    int pretransform;
+    /* The geometry the collected buffers were made for: a reconnect with the same one reuses them (no enumeration
+     * frames - fresh, never-drawn buffers - shown on every reconnect). recollect: they are no good any more. */
+    int coll_w, coll_h, coll_kind;
+    bool recollect;
+    int foreign_bufs;       /* consecutive dequeues of a buffer not in the collected set */
+    int mismatch_reconnects;/* consecutive reconnects for frames drawn with another rotation than the buffers' */
+    /* Buffers never shown because the producer drew nothing into them (render thread only); logged rate-limited. */
+    unsigned undrawn;
+    unsigned undrawn_logged;
+    int64_t undrawn_log_ms;
+
     // Latest display refresh rate (milli-Hz) reported from Java. Read on
     // (re)connect to seed the producer; updated live by nativeSetRefreshRate.
     volatile uint32_t refresh_mhz;
@@ -106,6 +123,11 @@ static bool cfg_use_compatible_bridge = false;
 static int cfg_compatible_fd = -1;
 static char cfg_helper_path[512] = "";
 static char cfg_bridge_path[512] = "";
+
+/* PowOS: the producer (KWin) said it can pre-rotate (a frame tagged FRAME_TAG_PRETRANSFORM). Until then - and again
+ * after an untagged frame, an older KWin - every surface asks for normal buffers. Shared by all surfaces: the desktop's
+ * first frame tells the window tasks too. */
+static volatile bool g_producer_prerotates = false;
 
 static bool motion_has_last = false;
 static float motion_last_x = 0.0f;
@@ -405,6 +427,70 @@ static int recv_fd_via_root_helper(const char *daemon_sock,
     return fd;
 }
 
+/* AOSP system/window.h NATIVE_WINDOW_TRANSFORM_HINT: the transform SurfaceFlinger would apply to this surface's
+ * buffers (the display's orientation, its install orientation included). */
+#define ANW_QUERY_TRANSFORM_HINT 8
+
+static int64_t now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/* The OutputTransform kind (protocol.h) the producer renders with for transform hint [hint]: logical (x, y) to
+ * buffer (y, W - x) for hint ROT_270 is KWin's Rotate90 (HWUI's GetPreTransformMatrix for the same hint). */
+static int kind_for_hint(int hint)
+{
+    switch (hint) {
+    case ANATIVEWINDOW_TRANSFORM_ROTATE_90:  return 3;
+    case ANATIVEWINDOW_TRANSFORM_ROTATE_180: return 2;
+    case ANATIVEWINDOW_TRANSFORM_ROTATE_270: return 1;
+    default:                                 return 0;   /* none, or a flip: not pre-rotated */
+    }
+}
+
+/* The buffer transform SurfaceFlinger applies to show buffers drawn with [kind]: the hint's inverse (as HWUI's
+ * InvertTransformToNative), so the composed transform is none. */
+static int anw_transform_for_kind(int kind)
+{
+    static const int t[4] = { 0, ANATIVEWINDOW_TRANSFORM_ROTATE_90, ANATIVEWINDOW_TRANSFORM_ROTATE_180,
+                              ANATIVEWINDOW_TRANSFORM_ROTATE_270 };
+    return t[kind & 3];
+}
+
+static int query_transform_hint(struct consumer_state *s)
+{
+    int hint = 0;
+    if (api.query(s->window, ANW_QUERY_TRANSFORM_HINT, &hint) != 0)
+        return 0;
+    return hint;
+}
+
+/* The pre-rotation this surface should have now. [bufs]: how many buffers it has - the request rides in a trailer
+ * that only fits below MAX_BUFS (protocol.h). */
+static int wanted_pretransform(struct consumer_state *s, int bufs)
+{
+    if (!g_producer_prerotates || bufs >= MAX_BUFS)
+        return 0;
+    return kind_for_hint(query_transform_hint(s));
+}
+
+/* A buffer the producer drew nothing into was not shown (cancelled: the surface keeps its last frame). Counted, and
+ * logged at most every 5 s - a black or stale frame on screen used to come from queueing these. */
+static void note_undrawn(struct consumer_state *s, const char *why)
+{
+    s->undrawn++;
+    int64_t now = now_ms();
+    if (now - s->undrawn_log_ms < 5000)
+        return;
+    LOGE("surface %u: %u buffer(s) not shown in %lld ms, %u in all (the producer drew nothing into them: %s)",
+         s->surface_id, s->undrawn - s->undrawn_logged,
+         (long long)(s->undrawn_log_ms ? now - s->undrawn_log_ms : 0), s->undrawn, why);
+    s->undrawn_logged = s->undrawn;
+    s->undrawn_log_ms = now;
+}
+
 static int do_connect(struct consumer_state *s)
 {
     /* Snapshot the connection config for this attempt. */
@@ -445,7 +531,6 @@ static int do_connect(struct consumer_state *s)
         disconnect(s->ctx);
         s->ctx = NULL;
     }
-    cleanup_dmabufs(s);
 
     ANativeWindow *win = s->window;
     pthread_mutex_lock(&cfg_lock);
@@ -464,32 +549,53 @@ static int do_connect(struct consumer_state *s)
        s->screen_h = ANativeWindow_getHeight(win);
     }
 
-    /* dequeueBuffer needs the window connected to an API first (ANativeWindow_lock
-     * did this internally). Disconnect first so reconnect is idempotent. */
-    anw_api_disconnect(win, ANW_API_CPU);
-    if (anw_api_connect(win, ANW_API_CPU) != 0) {
-        LOGE("api_connect(CPU) failed");
-        return -1;
+    /* PowOS: the buffers from the last connection, when they still fit (same size and rotation, none reallocated):
+     * no new enumeration, whose never-drawn buffers would be shown for a moment (black) on every reconnect. */
+    bool reuse = s->buf_count > 0 && !s->recollect && s->coll_w == s->screen_w && s->coll_h == s->screen_h;
+    if (reuse && wanted_pretransform(s, s->buf_count) != s->coll_kind)
+        reuse = false;
+
+    if (!reuse) {
+        cleanup_dmabufs(s);
+        s->recollect = false;
+
+        /* dequeueBuffer needs the window connected to an API first (ANativeWindow_lock
+         * did this internally). Disconnect first so reconnect is idempotent. */
+        anw_api_disconnect(win, ANW_API_CPU);
+        if (anw_api_connect(win, ANW_API_CPU) != 0) {
+            LOGE("api_connect(CPU) failed");
+            return -1;
+        }
+
+        int min_undequeued = 0;
+        api.query(win, ANATIVEWINDOW_QUERY_MIN_UNDEQUEUED_BUFFERS, &min_undequeued);
+        int total = min_undequeued + 2;
+        if (total > MAX_COLLECT_BUFS)
+            total = MAX_COLLECT_BUFS;
+
+        /* Pre-rotated (the hint, read after the connect that delivers it): the buffers are the logical size turned. */
+        int kind = wanted_pretransform(s, total);
+        int bw = (kind & 1) ? s->screen_h : s->screen_w;
+        int bh = (kind & 1) ? s->screen_w : s->screen_h;
+        ANativeWindow_setBuffersGeometry(win, bw, bh, AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);
+        ANativeWindow_setBuffersTransform(win, anw_transform_for_kind(kind));
+
+        api.setBufferCount(win, total);
+
+        s->buf_count = total;
+        if (collect_dmabufs(s) < 0) {
+            s->buf_count = 0;   /* closed: never reused */
+            return -1;
+        }
+        s->pretransform = kind;
+        s->coll_w = s->screen_w;
+        s->coll_h = s->screen_h;
+        s->coll_kind = kind;
     }
 
-    ANativeWindow_setBuffersGeometry(win, s->screen_w, s->screen_h,
-                                     AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);
-
-    int min_undequeued = 0;
-    api.query(win, ANATIVEWINDOW_QUERY_MIN_UNDEQUEUED_BUFFERS, &min_undequeued);
-    int total = min_undequeued + 2;
-    if (total > MAX_COLLECT_BUFS)
-        total = MAX_COLLECT_BUFS;
-
-    api.setBufferCount(win, total);
-
-    s->buf_count = total;
-    if (collect_dmabufs(s) < 0)
-        return -1;
-
-    LOGI("connecting to %s (%dx%d, %d bufs, root=%d, compatible=%d)", sock,
-         s->screen_w, s->screen_h, s->buf_count, use_root,
-         use_compatible_bridge);
+    LOGI("connecting to %s (%dx%d, %d bufs%s, pre-rotation %d for hint %d, root=%d, compatible=%d)", sock,
+         s->screen_w, s->screen_h, s->buf_count, reuse ? " kept" : "", s->pretransform,
+         query_transform_hint(s), use_root, use_compatible_bridge);
 
     if (use_compatible_bridge) {
         pthread_mutex_lock(&cfg_lock);
@@ -523,6 +629,7 @@ static int do_connect(struct consumer_state *s)
 
     set_screen_info(s->ctx, s->screen_w, s->screen_h,
                     PIXEL_FORMAT_RGBA_8888, s->refresh_mhz);
+    set_buffers_transform(s->ctx, (uint32_t)s->pretransform);
     push_dmabufs(s->ctx, s->dmabuf_fds, s->dmabuf_infos, s->buf_count);
 
     /* Register the camera service only when it was initialised (i.e. the user
@@ -624,7 +731,20 @@ static void apply_crop(struct consumer_state *s)
     int w = s->crop_w, h = s->crop_h;
     if (w <= 0 || h <= 0)
         return;
-    int32_t rect[4] = { 0, 0, w < s->screen_w ? w : s->screen_w, h < s->screen_h ? h : s->screen_h };
+    const int W = s->screen_w, H = s->screen_h;
+    if (w > W)
+        w = W;
+    if (h > H)
+        h = H;
+    /* The crop is in buffer space, before the buffer transform: the logical top-left w x h where the pre-rotation
+     * put it (kind 1: (x, y) -> (y, W - x); 2: (W - x, H - y); 3: (H - y, x)). */
+    int32_t rect[4];
+    switch (s->pretransform) {
+    case 1:  rect[0] = 0;     rect[1] = W - w; rect[2] = h; rect[3] = W; break;
+    case 2:  rect[0] = W - w; rect[1] = H - h; rect[2] = W; rect[3] = H; break;
+    case 3:  rect[0] = H - h; rect[1] = 0;     rect[2] = H; rect[3] = w; break;
+    default: rect[0] = 0;     rect[1] = 0;     rect[2] = w; rect[3] = h; break;
+    }
     struct anw_window *aw = (struct anw_window *)s->window;
     aw->perform(aw, ANW_SET_CROP, rect);
 }
@@ -667,13 +787,24 @@ static void *render_thread_func(void *arg)
         }
 
         if (idx < 0) {
-            api.queueBuffer(s->window, anb, -1);
+            /* PowOS: not one of the buffers the producer has (the queue reallocated them): never drawn, so never
+             * shown - it was queued as is, a black frame. A few in a row: collect them afresh. */
+            api.cancelBuffer(s->window, anb, -1);
+            note_undrawn(s, "not one of the collected buffers");
+            if (++s->foreign_bufs >= 8) {
+                LOGE("surface %u: the window's buffers were reallocated, collecting them again", s->surface_id);
+                s->foreign_bufs = 0;
+                s->recollect = true;
+                s->need_reconnect = true;
+            }
             usleep(16000);
             continue;
         }
+        s->foreign_bufs = 0;
 
         if (select_dmabuf(s->ctx, idx) < 0) {
-            api.queueBuffer(s->window, anb, -1);
+            api.cancelBuffer(s->window, anb, -1);
+            note_undrawn(s, "select_dmabuf failed");
             /* PowOS: a link that fails every frame for ~2 s is dead even if no fallback was signalled. */
             if (++s->select_failures >= 120) {
                 LOGE("select_dmabuf failing for ~2 s, reconnecting");
@@ -689,9 +820,56 @@ static void *render_thread_func(void *arg)
          * over data_fd (reverse). Queue with it so SurfaceFlinger waits GPU-side
          * before scanout -- this lets the producer submit before its GPU render
          * completes (no glFinish stall). rfence == -1 falls back to "ready now". */
-        int rfence = refresh_done(s->ctx);
+        int rfence = -1;
+        uint8_t tag = 0;
+        int done = refresh_done_tagged(s->ctx, &rfence, &tag);
+        if (done != 1) {
+            /* PowOS: no frame in it (0: no producer yet - fallback; -1: it timed out or went away). Queueing it showed
+             * whatever the buffer last held, or a never-drawn one: the black flicker. Not shown: the surface keeps its
+             * last frame. Only a failure is worth a log line; waiting for a producer is normal. */
+            api.cancelBuffer(s->window, anb, -1);
+            if (done < 0)
+                note_undrawn(s, "the producer gave no frame");
+            usleep(16000);
+            continue;
+        }
+
+        /* PowOS: the rotation the producer drew with (protocol.h FRAME_TAG_PRETRANSFORM; 0 from an older KWin). */
+        if ((tag & FRAME_TAG_PRETRANSFORM) && !g_producer_prerotates) {
+            LOGI("surface %u: the producer pre-rotates", s->surface_id);
+            g_producer_prerotates = true;
+        }
+        int drawn = (tag & FRAME_TAG_PRETRANSFORM) ? (tag & 3) : 0;
+        if (drawn != s->pretransform) {
+            /* Drawn for other buffers than these (an older KWin that can't rotate): never shown. Reconnect with
+             * buffers that fit; three times in a row with a producer that says it can - give pre-rotation up. */
+            api.cancelBuffer(s->window, anb, rfence);
+            note_undrawn(s, "drawn with another rotation than the buffers'");
+            if (!(tag & FRAME_TAG_PRETRANSFORM)) {
+                if (g_producer_prerotates)
+                    LOGI("surface %u: an older producer, no pre-rotation", s->surface_id);
+                g_producer_prerotates = false;
+            } else if (++s->mismatch_reconnects >= 3) {
+                LOGE("surface %u: the producer keeps drawing rotation %d into buffers for %d, pre-rotation off",
+                     s->surface_id, drawn, s->pretransform);
+                g_producer_prerotates = false;
+            }
+            s->need_reconnect = true;
+            continue;
+        }
+        s->mismatch_reconnects = 0;
+
         apply_crop(s);
         api.queueBuffer(s->window, anb, rfence);
+
+        /* Follow the transform hint (rotation, fold to the other screen): buffers for the new one. A queue is when
+         * the window learns a new hint, so look right after it. */
+        int want = wanted_pretransform(s, s->buf_count);
+        if (want != s->pretransform) {
+            LOGI("surface %u: transform hint %d: pre-rotation %d -> %d, reconnecting", s->surface_id,
+                 query_transform_hint(s), s->pretransform, want);
+            s->need_reconnect = true;
+        }
     }
 
     LOGI("render thread stopped");

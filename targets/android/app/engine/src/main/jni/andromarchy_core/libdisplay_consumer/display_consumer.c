@@ -51,6 +51,7 @@ struct display_ctx {
     int              stored_fds[MAX_BUFS];
     struct buf_info  stored_infos[MAX_BUFS];
     int              stored_count;
+    uint32_t         stored_transform;   /* PowOS: the pre-rotation asked for these buffers (struct bufs_ext) */
 
     void (*fallback_cb)(void *);
     void (*exit_fallback_cb)(void *);
@@ -208,17 +209,26 @@ static int push_dmabufs_internal(display_ctx *ctx)
     if (ctx->stored_count <= 0)
         return 0;
 
+    /* PowOS: the infos, then the pre-rotation (struct bufs_ext, protocol.h) - only below MAX_BUFS, where an older
+     * producer's infos[MAX_BUFS] still holds it (it reads `size` bytes there and ignores the rest). */
+    const size_t infos_size = (size_t)ctx->stored_count * sizeof(struct buf_info);
+    const bool ext = ctx->stored_count < MAX_BUFS;
+    uint8_t body[MAX_BUFS * sizeof(struct buf_info) + sizeof(struct bufs_ext)];
+    memcpy(body, ctx->stored_infos, infos_size);
+    if (ext) {
+        struct bufs_ext e = { .magic = BUFS_EXT_MAGIC, .transform = ctx->stored_transform };
+        memcpy(body + infos_size, &e, sizeof(e));
+    }
     struct data_msg dhdr = {
         .type = DATA_MSG_BUFS_READY,
-        .size = ctx->stored_count * sizeof(struct buf_info),
+        .size = infos_size + (ext ? sizeof(struct bufs_ext) : 0),
     };
     if (send_fds(ctx->data_fd, &dhdr, sizeof(dhdr),
                  ctx->stored_fds, ctx->stored_count) < 0) {
         enter_fallback(ctx);
         return -1;
     }
-    if (send_all(ctx->data_fd, ctx->stored_infos,
-                 ctx->stored_count * sizeof(struct buf_info)) < 0) {
+    if (send_all(ctx->data_fd, body, dhdr.size) < 0) {
         enter_fallback(ctx);
         return -1;
     }
@@ -390,6 +400,14 @@ int set_screen_info(display_ctx *ctx, uint32_t width, uint32_t height, uint32_t 
     return send_all(ctx->ctrl_fd, msg, sizeof(msg));
 }
 
+int set_buffers_transform(display_ctx *ctx, uint32_t transform)
+{
+    if (transform > 3)
+        return -1;
+    ctx->stored_transform = transform;
+    return 0;
+}
+
 int push_dmabufs(display_ctx *ctx, const int *fds, const struct buf_info *infos, int count)
 {
     if (count > MAX_BUFS) count = MAX_BUFS;
@@ -432,8 +450,21 @@ int select_dmabuf(display_ctx *ctx, int idx)
  * on error. */
 int refresh_done(display_ctx *ctx)
 {
+    int fence = -1;
+    refresh_done_tagged(ctx, &fence, NULL);
+    return fence;
+}
+
+/* PowOS: refresh_done that says whether the producer actually finished a frame (1) or not (0: no frame was asked -
+ * fallback; -1: the producer timed out or went away), and the frame's tag byte (FRAME_TAG_PRETRANSFORM | the rotation
+ * it was drawn with; 0 from an older producer). On 0 the buffer holds nothing new: don't show it. */
+int refresh_done_tagged(display_ctx *ctx, int *fence_out, uint8_t *tag_out)
+{
+    *fence_out = -1;
+    if (tag_out)
+        *tag_out = 0;
     if (!ctx->buffer_pending)
-        return -1;
+        return 0;
 
     /* Block (with a 5s safety timeout) on the fence channel: the arrival of the
      * producer's per-frame message is the render-done signal. Timeout / no POLLIN
@@ -469,12 +500,15 @@ int refresh_done(display_ctx *ctx)
         enter_fallback(ctx);
         return -1;
     }
-    if (n > 0) {
-        struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
-        if (c && c->cmsg_type == SCM_RIGHTS)
-            memcpy(&rfence, CMSG_DATA(c), sizeof(int));
-    }
-    return rfence;
+    if (n < 0)
+        return -1;   /* no frame message read (the channel was swapped under us): nothing to show */
+    struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
+    if (c && c->cmsg_type == SCM_RIGHTS)
+        memcpy(&rfence, CMSG_DATA(c), sizeof(int));
+    *fence_out = rfence;
+    if (tag_out)
+        *tag_out = (uint8_t)b;
+    return 1;
 }
 
 int push_input_event(display_ctx *ctx, const struct InputEvent *event)
