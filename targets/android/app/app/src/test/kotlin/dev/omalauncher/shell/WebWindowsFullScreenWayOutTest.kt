@@ -48,7 +48,7 @@ class WebWindowsFullScreenWayOutTest {
         assertTrue(body("fun leaveFullScreen(why: String): Boolean {").contains("toWindow(w.id)"))
     }
 
-    /** Maximise (the DOM bar's double tap: the page's toggleMaximise) fills the work area, never full screen. */
+    /** Maximise (the page's toggleMaximise; the bar's double tap is full screen since 10-30) fills the work area, never full screen. */
     @Test
     fun maximiseNeverCallsLinuxFullScreen() {
         val page = File("../../../../shell/ui/webwindows.tsx").takeIf { it.exists() } ?: return

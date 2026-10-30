@@ -749,7 +749,7 @@ native.subscribe(() => {
 /** The window whose tile menu is open, or null. */
 export const tileMenu = signal<number | null>(null);
 
-/** A double tap on the bar within this (ms): maximise / restore. */
+/** A double tap on the bar within this (ms): full screen, as its bar's full screen button (the user, 10-30). */
 const DOUBLE_TAP_MS = 350;
 /** A bar drag let go this near the work area's left/right edge snaps to that half; near a corner, its quarter. */
 const SNAP_EDGE = 24;
@@ -837,7 +837,7 @@ addEventListener("pointerdown", (e) => {
   if (tileMenu.value != null && !(e.target as Element | null)?.closest?.(".ww-tile-menu, .ww-button")) tileMenu.value = null;
 }, true);
 
-/** Its title bar: moves it (a drag), maximises it (a double tap), snaps it to a tile (let go at an edge). */
+/** Its title bar: moves it (a drag), full screen (a double tap), snaps it to a tile (let go at an edge). */
 function TitleBar({ win }: { win: WebWin }) {
   const drag = useRef<{ px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
   const lastTap = useRef(0);
@@ -850,7 +850,7 @@ function TitleBar({ win }: { win: WebWin }) {
     if (cancelled) return;
     if (!d.moved) {
       const now = performance.now();
-      if (now - lastTap.current < DOUBLE_TAP_MS) (toggleMaximise(win.id), (lastTap.current = 0));
+      if (now - lastTap.current < DOUBLE_TAP_MS) (fullScreen(win.id), (lastTap.current = 0));
       else lastTap.current = now;
       return;
     }

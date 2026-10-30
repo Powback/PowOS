@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * The web window title bar's full screen button is a real full-screen app (its task on display 0), never the work
- * area's maximise (that is the bar's double tap). Regressed 3 times. The bar is DOM now (docs/WEB_WINDOWS.md "Element
+ * area's maximise (the page's toggleMaximise; the bar's double tap is full screen too since 10-30). Regressed 3 times. The bar is DOM now (docs/WEB_WINDOWS.md "Element
  * model"): the page's button -> "webwindows.fullScreen" -> [WebWindows.fullScreen] -> moveTask to display 0.
  */
 class WebWindowsBarTest {
