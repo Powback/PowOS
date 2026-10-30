@@ -3677,6 +3677,15 @@ try {
       return ended;
     })));
   }
+  // AO3 (the user, 2026-10-31: "I'm starting two microphone conversations"): one dictation at a time - start->start
+  // leaves one session, a tap on a mic while another window dictates ends that one instead of starting a second, a
+  // superseded dictation leaves nothing pending (dev/mic-one-check.js; the mock's speech counts its sessions).
+  for (const [name, mode, form] of [["launcher", "pull", ".bar"], ["assist", "assist", ".assist-ask"]]) {
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, `mic-one-${name}`, { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      await r.page.waitForSelector(`form${form} .mic`, { timeout: READY_MS });
+      return r.page.evaluate(async (f) => (await importShim("./dev/mic-one-check.js")).micOneCheck(f), form);
+    })));
+  }
   runs.push(open(browser, `${ORIGIN}/index.html`, "dock-key-migration", { width: 821, height: 883 }).then((r) => whenReady(r, () => dockKeyMigration(r))));
   const dockViews = { cover: { width: 404, height: 900 }, inner: { width: 821, height: 883 }, desktop: { width: 1280, height: 800 } };
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {

@@ -385,6 +385,7 @@ class ShellHost(
         ) {
             super.onPageStarted(view, url, favicon)
             bootStarted()
+            bridge.pageStarted()
         }
 
         /**

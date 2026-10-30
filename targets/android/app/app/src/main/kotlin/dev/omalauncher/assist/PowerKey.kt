@@ -60,10 +60,12 @@ object PowerKey {
                 if (!line.contains("KEY_POWER")) return@forEachLine
                 when {
                     line.contains("DOWN") -> {
+                        Log.i(TAG, "power key: down")
                         down = true
                         downAt = SystemClock.elapsedRealtime()
                     }
                     line.contains("UP") -> {
+                        Log.i(TAG, "power key: up (${SystemClock.elapsedRealtime() - downAt} ms held)")
                         down = false
                         main.post {
                             val r = onRelease

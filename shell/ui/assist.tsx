@@ -59,6 +59,7 @@ powos.on("assist.context", (s: AssistScreen) => (screen.value = s));
 // Summoned again (the page stays warm between summonings, AssistWeb): last time's question, answer and cut-out go,
 // and it listens.
 powos.on("assist.reset", () => {
+  console.info(`assist.reset (dictating=${listeningFor(mic)})`);
   screen.value = null;
   drawing.value = false;
   paused = null;
@@ -73,6 +74,7 @@ powos.on("assist.hidden", () => takeOver());
 // release as root), then ends, and so sends. Already up: it ends after QUICK_SILENCE_MS of nothing heard.
 // Push to talk: no preview, no silence - the release sends what's heard at once (release()).
 powos.on("assist.held", () => {
+  console.info(`assist.held (autoSend=${autoSend} dictating=${listeningFor(mic)})`);
   if (!autoSend) return;
   autoSend = false;
   pushToTalk = true;
@@ -82,11 +84,13 @@ powos.on("assist.held", () => {
 // mic, typing or a send does (AO2, the user 2026-10-30: "when I activate it with like a short click, we should still
 // activate the transcription"). It used to end after QUICK_SILENCE_MS of nothing heard: before the first word, often.
 powos.on("assist.quick", () => {
+  console.info(`assist.quick (autoSend=${autoSend} dictating=${listeningFor(mic)})`);
   if (!autoSend || listeningFor(mic)) return;
   // The summoning's dictation didn't start (the recognizer was busy or the page not up yet): it starts now.
   summoned();
 });
 powos.on("assist.keyup", () => {
+  console.info(`assist.keyup (pushToTalk=${pushToTalk})`);
   if (!pushToTalk) return;
   pushToTalk = false;
   // Let go mid-stroke (the dictation paused, its words in the field): the stroke's end sends them (resume).

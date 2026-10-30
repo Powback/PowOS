@@ -18,6 +18,7 @@ import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.util.Locale
@@ -29,6 +30,8 @@ import java.util.Locale
  */
 class Speech(
     private val context: Context,
+    /** Which window it is (home, pull, assist, ...): in the log of every start, stop and cancel. */
+    private val who: () -> String = { "?" },
 ) {
     var listening by mutableStateOf(false)
         private set
@@ -44,7 +47,18 @@ class Speech(
     /** Why recognition failed; the UI clears it once shown. */
     var error by mutableStateOf<String?>(null)
 
+    /** Bumped when another window's start ended this one's dictation (the page drops it: speech.cancelled). */
+    var superseded by mutableIntStateOf(0)
+        private set
+
     private var session: SpeechSession? = null
+        set(v) {
+            field = v
+            if (v != null) owner = this else if (owner === this) owner = null
+        }
+
+    /** Another window's dictation is under way (its mic is the one on): a tap on this one's mic ends it. */
+    val elsewhere get() = owner.let { it != null && it !== this }
 
     val available get() = NativeSpeech.available(context)
 
@@ -69,6 +83,14 @@ class Speech(
             SpeechCallbacks(
                 onText = { if (session === mine) text = it },
                 onLevel = { if (session === mine) level = it },
+                onSuperseded = {
+                    if (session === mine) {
+                        session = null
+                        listening = false
+                        level = 0f
+                        superseded++
+                    }
+                },
                 onEnd = { heard, why ->
                     if (session === mine) {
                         session = null
@@ -82,13 +104,17 @@ class Speech(
                 },
             )
         // Which engine (Settings > voice > transcription): stt.pow on the GPU box, or Android's own (GpuSpeech.kt).
-        mine = SpeechEngines.start(context, hold, callbacks)
+        mine = SpeechEngines.start(context, hold, callbacks, who())
         session = mine
     }
 
-    /** Ends recognition now; the text so far goes to onDone. */
+    /**
+     * Ends recognition now; the text so far goes to onDone. Not listening here, it ends the one another window started
+     * (the launcher overlay over home's dictation: its mic shows the dictation and a tap there ends it, AO3).
+     */
     fun stop() {
-        session?.stop()
+        Log.i("speech", "stop by ${who()}${if (session == null) " (another window's)" else ""}")
+        (session ?: SpeechEngines.current)?.stop()
     }
 
     /** Keeps listening, but ends after a tap's silence instead of at [stop]. */
@@ -112,12 +138,16 @@ class Speech(
     /** Ends recognition without calling onDone. */
     fun cancel() {
         val s = session
+        if (s != null) Log.i("speech", "cancel by ${who()}")
         session = null
         s?.cancel()
         listening = false
         level = 0f
     }
 }
+
+/** The window whose dictation is under way (at most one: SpeechEngines), or null. */
+private var owner by mutableStateOf<Speech?>(null)
 
 /** One recognition, from start to its end (onEnd, exactly once, unless cancelled). */
 interface SpeechSession {
@@ -144,6 +174,8 @@ class SpeechCallbacks(
     val onEnd: (String, String?) -> Unit,
     /** Which engine it runs on now (SpeechEngines.GPU / ON_DEVICE): at its start, and again on a fallback. */
     val onEngine: (String) -> Unit = {},
+    /** A newer start (any window's) ended it: no onEnd comes. */
+    val onSuperseded: () -> Unit = {},
 )
 
 /**

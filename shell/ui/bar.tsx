@@ -27,7 +27,8 @@ export { dictate, hearing, interrupt, speech, type MicTarget } from "./dictation
 /** A mic for [target]: hold to talk and send, tap to dictate; held and dragged well away, cancelled. */
 export function Mic({ target }: { target: MicTarget }) {
   const press = useRef<{ x: number; y: number; timer: number; held: boolean; cancelled: boolean } | null>(null);
-  const on = speech.value.listening || listeningFor(target);
+  // Another window's dictation shows here too (home's, under the launcher overlay): a tap ends it, never a second.
+  const on = speech.value.listening || !!speech.value.elsewhere || listeningFor(target);
   // Shown: the recognizer bound and ready (it doesn't listen), so a press starts at once.
   useEffect(() => void powos.speech.warm(), []);
   return (
