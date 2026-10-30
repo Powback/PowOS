@@ -1257,7 +1257,8 @@ class ShellBridge(
 
     /** Not home's bridge, web windows on: home's page asked to open [key] as a web window ("webwindows.launch"); false: not so here. */
     private fun launchOnHome(key: String): Boolean {
-        if (activity != null || !key.startsWith("a:") || !dev.omalauncher.system.AppWindows.webDesktop(context)) return false
+        // A Linux app too (LW3): home's page shows its placeholder window at once and launches it from there.
+        if (activity != null || !(key.startsWith("a:") || key.startsWith("l:")) || !dev.omalauncher.system.AppWindows.webDesktop(context)) return false
         val home = synchronized(live) { live.firstOrNull { it.activity != null } } ?: return false
         Log.i(TAG, "$key launched from an overlay: a web window on home")
         home.emit("webwindows.launch", JSONObject().put("key", key))
