@@ -1087,7 +1087,37 @@ class WebWindows(
         gesture?.let { linuxInput(win, it) }
     }
 
-    /** [ev] to [win]'s KWin window in its body's own px (the body's place and scale on screen, as the page measured it). */
+    /**
+     * [forward] for a Linux window: a DOWN claims the native gesture ([linuxClaim]); a "cancel" (the page ended the press
+     * unfinished: a second finger made it the window's pinch) gives KWin a CANCEL and home the rest ([linuxRelease]).
+     */
+    private fun forwardLinux(
+        w: Win,
+        action: String,
+    ): Boolean {
+        if (action == "down") linuxClaim(w)
+        if (action == "cancel") main.post { linuxRelease(w) }
+        return true
+    }
+
+    /** [win]'s claim of the current gesture ended early ([forward] "cancel"): KWin gets a CANCEL, home keeps the rest. */
+    private fun linuxRelease(win: Win) {
+        if (linuxTouch !== win) return
+        val g = gesture
+        if (g == null) {
+            linuxTouch = null
+            return
+        }
+        val ev = MotionEvent.obtain(g).apply { action = MotionEvent.ACTION_CANCEL }
+        try {
+            linuxInput(win, ev)
+        } finally {
+            ev.recycle()
+        }
+        linuxTouch = null
+    }
+
+        /** [ev] to [win]'s KWin window in its body's own px (the body's place and scale on screen, as the page measured it). */
     private fun linuxInput(
         win: Win,
         ev: MotionEvent,
@@ -1156,10 +1186,7 @@ class WebWindows(
         x: Double,
         y: Double,
     ): Boolean {
-        if (w.linux != null) {
-            if (action == "down") linuxClaim(w)
-            return true
-        }
+        if (w.linux != null) return forwardLinux(w, action)
         if (w.displayId < 0) return false
         val act = ACTIONS[action] ?: MotionEvent.ACTION_CANCEL
         val now = SystemClock.uptimeMillis()

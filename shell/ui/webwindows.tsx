@@ -926,6 +926,68 @@ addEventListener("pointerdown", (e) => {
   if (tileMenu.value != null && !(e.target as Element | null)?.closest?.(".ww-tile-menu, .ww-button")) tileMenu.value = null;
 }, true);
 
+/**
+ * A window's one-finger gesture in progress (its bar's move, an edge's resize, its body's press to the app): how to end
+ * it unfinished when a second finger makes the gesture a pinch ([usePinch]). The body's sends the app a cancel.
+ */
+const oneFinger = new Map<number, () => void>();
+
+/** A pinch's floor (the old native frame's MIN_SCALE) and ceiling. */
+export const MIN_SCALE = 0.4;
+const MAX_SCALE = 1;
+
+/**
+ * Two fingers on a window (bar or body) zoom it (restored from the native frame, removed with it in 28001157): the
+ * window point under the fingers' centroid stays under it at scale start x spread / start spread, [MIN_SCALE]..1. The
+ * frame's transform scales it live and the w.f entry's measured scale follows, so the app's layer scales with it; the
+ * app's size (w, h) is unchanged - nothing to relayout. The first finger's gesture ends unfinished ([oneFinger]): the
+ * body's pinch never reaches the app. A finger lifting ends the pinch (the rest of that touch does nothing).
+ */
+function usePinch(win: WebWin) {
+  const fingers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ spread0: number; s0: number; px: number; py: number } | null>(null);
+  const live = useRef(win);
+  live.current = win;
+  const spread = () => {
+    const [a, b] = [...fingers.current.values()];
+    return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) };
+  };
+  const down = (e: PointerEvent) => {
+    fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (fingers.current.size !== 2 || pinch.current) return;
+    e.stopPropagation();
+    oneFinger.get(win.id)?.();
+    oneFinger.delete(win.id);
+    const w = live.current;
+    if (tiledOn(w.id) != null) untile(w.id, "keep");
+    const o = pageOrigin();
+    const f = spread();
+    const s0 = w.scale ?? 1;
+    pinch.current = { spread0: f.d, s0, px: (f.cx - o.x - w.x) / s0, py: (f.cy - o.y - w.y) / s0 };
+  };
+  const move = (e: PointerEvent) => {
+    if (!fingers.current.has(e.pointerId)) return;
+    fingers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const p = pinch.current;
+    if (!p) return;
+    e.stopPropagation();
+    if (fingers.current.size < 2) return;
+    const f = spread();
+    const k = p.spread0 > 0 ? Math.min(MAX_SCALE, Math.max(MIN_SCALE, (p.s0 * f.d) / p.spread0)) : p.s0;
+    const o = pageOrigin();
+    const w = live.current;
+    const at = clampPlace(f.cx - o.x - p.px * k, f.cy - o.y - p.py * k, w.w * k);
+    update(w.id, { x: Math.round(at.x), y: Math.round(at.y), scale: k, restore: undefined });
+  };
+  const up = (e: PointerEvent) => {
+    fingers.current.delete(e.pointerId);
+    if (!pinch.current) return;
+    e.stopPropagation();
+    if (fingers.current.size === 0) pinch.current = null;
+  };
+  return { onPointerDownCapture: down, onPointerMoveCapture: move, onPointerUpCapture: up, onPointerCancelCapture: up };
+}
+
 /** Its title bar: moves it (a drag), full screen (a double tap), snaps it to a tile (let go at an edge). */
 function TitleBar({ win }: { win: WebWin }) {
   const drag = useRef<{ px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
@@ -955,6 +1017,7 @@ function TitleBar({ win }: { win: WebWin }) {
         raise(win.id);
         capture(e);
         drag.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, moved: false };
+        oneFinger.set(win.id, () => (drag.current = null));
       }}
       onPointerMove={(e) => {
         const d = drag.current;
@@ -1003,6 +1066,7 @@ function Edge({ win, side }: { win: WebWin; side: (typeof EDGES)[number] }) {
         capture(e);
         if (tiledOn(win.id) != null) untile(win.id, "keep");
         start.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, w: win.w, h: win.h };
+        oneFinger.set(win.id, () => (start.current = null));
       }}
       onPointerMove={(e) => {
         const s = start.current;
@@ -1037,8 +1101,11 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
   const pressed = useRef(false);
   const toApp = (e: PointerEvent, action: "down" | "move" | "up" | "cancel") => {
     e.stopPropagation();
-    const r = body.current?.getBoundingClientRect();
-    const s = win.scale ?? 1;
+    const el = body.current;
+    const r = el?.getBoundingClientRect();
+    // The body's on-screen scale as measured (its own scale times every ancestor's: the page's zoom, a swipe), the same
+    // as entry()'s: dividing by win.scale alone put presses in the wrong place at a page zoom (x0.53).
+    const s = el && el.offsetWidth ? r!.width / el.offsetWidth : (win.scale ?? 1);
     if (r && win.id >= 0) void powos.webwindows?.input(win.id, action, (e.clientX - r.left) / s, (e.clientY - r.top) / s);
   };
   const end = (e: PointerEvent, action: "up" | "cancel") => {
@@ -1057,6 +1124,11 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
         capture(e);
         pressed.current = true;
         toApp(e, "down");
+        oneFinger.set(win.id, () => {
+          if (!pressed.current) return;
+          pressed.current = false;
+          toApp(e, "cancel");
+        });
       }}
       onPointerMove={(e) => pressed.current && toApp(e, "move")}
       onPointerUp={(e) => end(e, "up")}
@@ -1090,6 +1162,7 @@ function Placeholder({ win, icon }: { win: WebWin; icon: string | undefined }) {
  */
 function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[] }) {
   const body = useRef<HTMLDivElement>(null);
+  const pinch = usePinch(win);
   const s = win.scale ?? 1;
   const frame = {
     position: "absolute",
@@ -1105,7 +1178,7 @@ function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
     ...holes(above, { x: win.x, y: win.y, s }),
   } as const;
   return (
-    <div class={`webwindow ${win.restore ? "maximised" : ""} ${win.live ? "live" : ""}`} data-wwid={win.id} data-z={z} style={frame}>
+    <div class={`webwindow ${win.restore ? "maximised" : ""} ${win.live ? "live" : ""}`} data-wwid={win.id} data-z={z} style={frame} {...pinch}>
       <TitleBar win={win} />
       <Body win={win} body={body} />
       {!win.restore && tiledOn(win.id) == null && EDGES.map((side) => <Edge key={side} win={win} side={side} />)}

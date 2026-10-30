@@ -2528,6 +2528,56 @@ async function webDockToggleCell() {
 }
 
 /**
+ * In the page: two fingers on a web window's body (the native frame's zoom, back in the DOM, the user 10-30 21:04: "i
+ * can no longer use two fingers to rescale the windows") scale it, floor 0.4; the body's measured scale (the w.f
+ * entry's) follows; the pinch never reaches the app (its press ends in one cancel); and at that scale a press at the
+ * body's centre goes to the app's centre (body px, unscaled: Body.toApp divides by the measured scale).
+ */
+async function webWindowPinchCheck() {
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  // The app's input, recorded (restored after: the gate's host may have no webwindows at all).
+  const had = powos.webwindows;
+  const calls = [];
+  powos.webwindows = { ...had, input: (id, action, x, y) => (calls.push([action, x, y]), Promise.resolve(true)) };
+  const fails = [];
+  try {
+    const S = await window.__gw.mod("./state.ts");
+    W.webWins.value = [{ id: 902, key: "a:gate.pinch", label: "Pinch", page: S.pages.value[0], x: 300, y: 160, w: 400, h: 320 }];
+    await window.__gw.settled();
+    const body = document.querySelector('.webwindow[data-wwid="902"] .webwindow-body');
+    if (!body) return ["pinch: no web window body on the page on screen"];
+    const pb = body.getBoundingClientRect();
+    const [cx, cy] = [pb.left + pb.width / 2, pb.top + pb.height / 2];
+    const pe = (type, id, x) => body.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", clientX: x, clientY: cy, bubbles: true }));
+    // Two fingers 200 px apart come together to 140 px (8 moves).
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].forEach((i) => {
+      const t = i === 0 ? "pointerdown" : i === 9 ? "pointerup" : "pointermove";
+      const q = Math.min(i, 8) * 3.75;
+      (pe(t, 21, cx - 100 + q), pe(t, 22, cx + 100 - q));
+    });
+    await window.__gw.settled();
+    const k = W.webWins.value.find((w) => w.id === 902).scale;
+    if (Math.abs(k - 0.7) > 0.03) fails.push(`a pinch 200 -> 140 px on the body scaled the window to ${k} (want 0.7)`);
+    const b2 = body.getBoundingClientRect();
+    if (Math.abs(b2.width / body.offsetWidth - k) > 0.01) fails.push(`after the pinch the body's measured scale is ${b2.width / body.offsetWidth}, the model's ${k}`);
+    const acts = calls.map((c) => c[0]).join(",");
+    if (acts !== "down,cancel") fails.push(`a pinch on the body reached the app: ${acts} (want down,cancel)`);
+    calls.length = 0;
+    const p = [b2.left + b2.width / 2, b2.top + b2.height / 2];
+    body.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 23, pointerType: "touch", clientX: p[0], clientY: p[1], bubbles: true }));
+    body.dispatchEvent(new PointerEvent("pointerup", { pointerId: 23, pointerType: "touch", clientX: p[0], clientY: p[1], bubbles: true }));
+    const d = [...(calls[0] ?? []), NaN, NaN, NaN];
+    const want = [body.offsetWidth / 2, body.offsetHeight / 2];
+    if (Math.hypot(d[1] - want[0], d[2] - want[1]) > 1) fails.push(`at scale ${k}, a press at the body's centre went to the app at ${d[1]},${d[2]} (want ${want})`);
+  } finally {
+    W.webWins.value = [];
+    powos.webwindows = had;
+  }
+  return fails;
+}
+
+/**
  * In the page: web windows as ELEMENTS of their page (docs/WEB_WINDOWS.md "Element model"). The page's content is cut
  * over the bodies, a lower window over a higher one's body; a live body paints nothing, a new one its placeholder; the
  * DOM tile menu over a body takes the tap; and each frame's "w.f" follows a page swipe pixel-exact, clipped to the
@@ -3276,7 +3326,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step);
             if (problems.length) return problems;
           }
