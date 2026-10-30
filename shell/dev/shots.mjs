@@ -337,6 +337,11 @@ const SCENES = [
   ["desktop-chat", "desktop", DESKTOP_HOME + ` S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["pull-apps", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
   // Home's dock on the right: the launcher shows it as that column (its recents too), the list clear of it.
+  // The launcher with the keyboard up (search typing, the chat): unfolded the dock stays - right in its column, bottom
+  // above the pill above the keyboard; folded it gives way (the user, 2026-10-30: "The dock is still hiding in unfolded mode").
+  ["pull-kbd", "pull", "E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true }); await sleep(300); S.query.value = 'ch'; await sleep(500);", "blurred"],
+  ["pull-kbd-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true }); await sleep(300); S.query.value = 'ch'; await sleep(500);", "blurred"],
+  ["pull-kbd-chat", "pull", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.end', { open: true }); await sleep(300); S.chatting.value = true; await sleep(500);`, "blurred"],
   ["pull-apps-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
   ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
   ["pull-apps-land", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred", undefined, LAND_SIZES],
