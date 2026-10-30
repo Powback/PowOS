@@ -2472,6 +2472,7 @@ async function webWindowMaskCheck() {
     if (!g.wwFound(el, top)) return ["web windows: no elements (or no .page-under) on the page on screen"];
     g.wwCuts(ww, el, top);
     await g.wwMenu(ww, W, top);
+    await g.wwRaise(ww, W);
     await g.wwSwipe(ww, el);
     await g.wwHidden(ww);
     g.wwMaximise(ww, W);
@@ -2547,6 +2548,40 @@ async function wwMenu(ww, W, top) {
   await ww.frame();
 }
 
+/**
+ * raise(): one order drives both sides - the "w.f" the host stacks the apps' layers by (its index is the layer's z) and
+ * the page's own stacking of the frames (bar, body, edges, shadow: one element each). The user, 10-30 20:54: "kind of
+ * works for content ... But not the title bars" (the layers stayed in the old order while the bars went up).
+ */
+async function wwRaise(ww, W) {
+  for (const [id, want] of [[903, "905,903"], [905, "903,905"]]) {
+    W.raise(id);
+    await ww.frame();
+    const t = (window.__ww.sent.at(-1) ?? "").split(" ");
+    const ids = [];
+    for (let i = 4, n = Number(t[3]); n-- > 0; i += 20) ids.push(Number(t[i]));
+    if (ww.expect(ids.join() === want, `raise(${id}): w.f order ${ids} (want ${want}: the raised window last)`)) window.__wwg.wwStacked(ww, ids, id);
+  }
+}
+
+/** The frames of [ids] (w.f order, bottom first) stacked in that order: z-index, and the page's hit where they meet. */
+function wwStacked(ww, ids, id) {
+  const els = ids.map((w) => document.querySelector(`.webwindow[data-wwid="${w}"]`));
+  const zs = els.map((e) => (e ? Number(getComputedStyle(e).zIndex) : NaN));
+  ww.expect(zs.every((z, i) => i === 0 || z > zs[i - 1]), `raise(${id}): frames' z-index ${zs} doesn't follow w.f order ${ids}`);
+  // As painted: where the lower frame (its bar first) meets the higher, the higher one is hit - never a bar of the
+  // lower painted over it, whatever stacking context the bar's glass makes.
+  const [lo, hi] = els;
+  const b = hi.getBoundingClientRect();
+  for (const part of [lo.querySelector(".webwindow-title"), lo]) {
+    const a = part.getBoundingClientRect();
+    const l = Math.max(a.left, b.left), r = Math.min(a.right, b.right), t = Math.max(a.top, b.top), bt = Math.min(a.bottom, b.bottom);
+    if (r <= l || bt <= t) continue;
+    const hit = document.elementFromPoint((l + r) / 2, (t + bt) / 2);
+    ww.expect(hi.contains(hit), `raise(${id}): where window ${ids[0]}'s ${part === lo ? "frame" : "bar"} meets ${ids[1]} the page shows ${hit?.className} (want window ${ids[1]}, top of w.f)`);
+  }
+}
+
 /** "w.f" each frame of a page swipe: pixel-exact with the page, hidden off it, clipped to it (PS2). */
 async function wwSwipe(ww, el) {
   const at0 = ww.sentFor(903);
@@ -2596,7 +2631,7 @@ function wwMaximise(ww, W) {
 }
 
 /** [webWindowMaskCheck]'s helpers into the page (window.__wwg); evaluates to [] (no problems) as a gate step. */
-const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwSwipe, wwHidden, wwMaximise].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
+const WW_HELPERS = `(window.__wwg = { ${[wwHelpers, wwFound, wwCuts, wwMenu, wwRaise, wwStacked, wwSwipe, wwHidden, wwMaximise].map((f) => `${f.name}: ${f}`).join(", ")} }, [])`;
 
 /** In the page, loaded afresh after desktopsCheck: the stored windows go back on their pages (page 2's hidden). */
 async function desktopsReloaded() {
