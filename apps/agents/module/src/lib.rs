@@ -155,6 +155,11 @@ pub struct Work {
     /// can't close while a child is open (may_close). Last, with a default, so the table migrates in place.
     #[default("")]
     parent: String,
+    /// What to try, in one plain sentence for the user ("Floating windows are back, try moving and resizing one"):
+    /// the Ready-to-try line on the PowOS AI page, never the agents' step or note. `powos agents task set --try`
+    /// (work_try); cleared when the user says it works. Last, with a default, so the table migrates in place.
+    #[default("")]
+    try_line: String,
 }
 
 /// The unit registry's fleet view (lib/apps/powos-units, `powos units publish`): every unit on every host - what is
@@ -637,6 +642,7 @@ pub fn work_set(
                 images: o.images,
                 activity: now,
                 parent: o.parent,
+                try_line: o.try_line,
             }
         }
         None => {
@@ -662,6 +668,7 @@ pub fn work_set(
                 images: String::new(),
                 activity: now,
                 parent: String::new(),
+                try_line: String::new(),
             }
         }
     };
@@ -813,6 +820,22 @@ pub fn work_parent(ctx: &ReducerContext, id: String, parent: String) -> Result<(
     let now = now_ms(ctx);
     ctx.db.work().id().delete(id.clone());
     ctx.db.work().insert(Work { parent: cut(parent, 64), updated: now, activity: now, ..o });
+    Ok(())
+}
+
+/// Sets what the user is to try on [id], one plain sentence ("" clears it): `powos agents task set --try`. The CLI
+/// refuses hashes, paths and long lines; here it is only bounded.
+#[spacetimedb::reducer]
+pub fn work_try(ctx: &ReducerContext, id: String, line: String) -> Result<(), String> {
+    if ctx.db.reporter().identity().find(ctx.sender()).is_none() {
+        return Err("not a reporter".into());
+    }
+    let Some(o) = ctx.db.work().id().find(id.clone()) else {
+        return Err(format!("work_try: no work item '{id}'"));
+    };
+    let now = now_ms(ctx);
+    ctx.db.work().id().delete(id);
+    ctx.db.work().insert(Work { try_line: cut(line.trim().to_string(), 90), updated: now, activity: now, ..o });
     Ok(())
 }
 
