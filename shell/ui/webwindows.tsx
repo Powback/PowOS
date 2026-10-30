@@ -1408,7 +1408,7 @@ function sideAt(side: string, e: PointerEvent): string {
  * DOM's hit test). The frame follows the finger, the app's size paced ([pace]: RS1), the final on release; a haptic
  * tick on the grab, the live size outline ([resizeView]) while it lasts, tile sizes snapped to ([snapLen]: RZ4).
  */
-function Edge({ id, side }: { id: number; side: (typeof EDGES)[number] }) {
+function Edge({ id, side, height }: { id: number; side: (typeof EDGES)[number]; height?: string }) {
   const start = useRef<(Grab & { side: string }) | null>(null);
   const stop = (e: PointerEvent) => {
     if (!start.current) return;
@@ -1420,7 +1420,7 @@ function Edge({ id, side }: { id: number; side: (typeof EDGES)[number] }) {
   return (
     <div
       class={`ww-edge ww-edge-${side}`}
-      style={{ height: zoneHeight(win, side) }}
+      style={{ height }}
       onPointerDown={(e) => {
         e.stopPropagation();
         const win = webWins.value.find((w) => w.id === id);
@@ -1514,10 +1514,15 @@ function Grip({ corner }: { corner: (typeof CORNERS)[number] }) {
  * A free window's 8 resize zones and 4 grips: only its id, so a frame of its own move or resize (the window re-renders)
  * leaves them, and their arrays' Fragments, alone (render scan 10-31: all 8 Edges, 4 Grips every frame).
  */
-const Handles = memo(function Handles({ id }: { id: number }) {
+/** The top/bottom zones' heights near the system strips ([zoneHeight]), as one string: [Handles] re-renders only
+ *  when one of them changes, not on every frame of a drag. */
+const zoneKey = (win: WebWin) => EDGES.map((side) => zoneHeight(win, side) ?? "").join("|");
+
+const Handles = memo(function Handles({ id, zones }: { id: number; zones: string }) {
+  const heights = zones.split("|");
   return (
     <>
-      {EDGES.map((side) => <Edge key={side} id={id} side={side} />)}
+      {EDGES.map((side, i) => <Edge key={side} id={id} side={side} height={heights[i] || undefined} />)}
       {CORNERS.map((c) => <Grip key={c} corner={c} />)}
     </>
   );
@@ -1710,7 +1715,7 @@ function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
       <div class={cls} data-wwid={win.id} data-z={z} style={{ ...frame, "--ww-k": s }} {...pinch}>
         {!win.ownFrame && <TitleBar win={win} />}
         <Body win={win} body={body} />
-        {free && <Handles id={win.id} />}
+        {free && <Handles id={win.id} zones={zoneKey(win)} />}
         {sizing && <ResizeOutline win={win} />}
         {tileMenu.value === win.id && <TileMenu win={win} />}
       </div>
