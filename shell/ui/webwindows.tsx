@@ -1023,6 +1023,14 @@ function fillOf(): string {
   return fillHex;
 }
 
+/**
+ * W-IN1: bumped in the frame any window's geometry changes - a move, a resize, a snap or its transition, open, close,
+ * raise, full screen, a page swipe carrying it, a fold. Home re-reports the pull-exclusion regions from it (home.tsx),
+ * so they follow the same per-frame geometry as the layer (03:15: "the window resized, but ... the touch handlers
+ * didn't realize": they were refreshed only on webWins changes, then read mid-transition).
+ */
+export const windowFrame = signal(0);
+
 /** "<dpr> <n> <entries...>": every window the page shows, bottom first (DOM order = z-order). */
 export function geometry(): string {
   const parts = webWins.value.filter((w) => !w.pending).map(entry).filter((e): e is string => e != null);
@@ -1057,6 +1065,7 @@ function tick(ts: number) {
   const g = geometry();
   if (g !== lastGeometry) {
     lastGeometry = g;
+    windowFrame.value++;
     const id = nextFrameId();
     const now = Date.now();
     // Two stamps (wall-clock ms): the rAF's frame time, and now - the send - so the host splits its "rx=" into the page's

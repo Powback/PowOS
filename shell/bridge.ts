@@ -834,7 +834,8 @@ function mock(): Bridge {
       peekHeight: async (px) => console.log("[mock] banner height", px),
       blur: async (dp) => console.log("[mock] shade blur", dp),
       behind: async () => {},
-      homePull: async () => true,
+      // The gate reads the last regions home excluded from the host's pulls (W-IN1: they follow the windows).
+      homePull: async (...args: unknown[]) => (((globalThis as { __homePullRegions?: unknown }).__homePullRegions = args[3] ?? null), true),
       open: async () => console.log("[mock] shade open"),
     },
     overlay: { closed: async () => console.log("[mock] overlay closed") },
