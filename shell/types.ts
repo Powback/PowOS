@@ -263,8 +263,11 @@ export interface PhoneNotification {
   time: number;
   clearable: boolean;
   profile: string | null;
-  /** Its buttons in order (notifications.action's index); [input]: it takes a typed reply. */
-  actions?: { title: string; input: boolean }[];
+  /**
+   * Its buttons in order (notifications.action's index); [input]: it takes a typed reply; [semantic]: what the app
+   * says it does (Notification.Action.SEMANTIC_ACTION_*: 1 reply, 2 mark as read; 0 or absent: not said).
+   */
+  actions?: { title: string; input: boolean; semantic?: number }[];
   /** Notification.category ("alarm", "call", "msg", ...): an alarm's or a call's banner stays up longer. */
   category?: string | null;
   /** Its app's package (an older host: none). */
@@ -273,6 +276,13 @@ export interface PhoneNotification {
   group?: string | null;
   /** A conversation (a messaging-style one): shown on its own, above the groups. */
   conversation?: boolean;
+  /** MessagingStyle's messages, oldest first (the last few): [sender] "" is the phone's own user, [time] Unix ms. */
+  messages?: { sender: string; text: string; time: number }[];
+  /** MessagingStyle's conversation title (a group's or a channel's name), null for one-to-one. */
+  conversationTitle?: string | null;
+  groupConversation?: boolean;
+  /** It has a tap action: open() opens the conversation. */
+  tappable?: boolean;
 }
 /**
  * A recent task, as the switcher (ui/recents.tsx) shows it: [id] the system's, [key] and [icon] its app's in the drawer (null when it

@@ -20,6 +20,7 @@ import { powos } from "../bridge.ts";
 import type { AppLinks, AppWidgetData, Bridge } from "../types.ts";
 import { net, type Net } from "./net.ts";
 import { DetailSheet, type DetailSheetProps } from "./sheet.ts";
+import { notifications, type AppNotifications } from "./notify.tsx";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
 const GRACE_MS = 5000;
@@ -77,6 +78,11 @@ export interface IslandHost {
    * host has none (an older APK, the desktop): check for it, and catch the rejection of a call the APK doesn't know.
    */
   health?: NonNullable<Bridge["health"]>;
+  /**
+   * The phone's notifications from the packages the app's manifest names ("notifications:<package>" in permissions),
+   * and each one's own actions - reply, mark as read, open, dismiss (apps/notify.tsx). An older shell has none.
+   */
+  notifications?: AppNotifications;
 }
 
 export interface AppWidgetHost {
@@ -580,4 +586,5 @@ export const host: IslandHost = {
   addAppWidget,
   appWidget,
   health: powos.health,
+  notifications,
 };

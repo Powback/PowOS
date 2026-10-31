@@ -4490,6 +4490,12 @@ try {
       }),
     );
   }
+  // What needs me (apps/needs-me, its UI through --app): the widget on the real host.notifications over mock Discord /
+  // WhatsApp / Gmail notifications (MessagingStyle, a RemoteInput reply, mark-as-read), driven as the user does - the rows
+  // grouped (one person across two apps), a reply pressing the reply action exactly once with the text, a swipe pressing
+  // mark-as-read, and nothing pressed without a gesture.
+  if (apps().some((a) => a.id === "local.needs-me"))
+    runs.push(open(browser, `${ORIGIN}/__gate_app.html`, "app local.needs-me actions", { width: 404, height: 900 }).then((r) => settleNeedsMe(r)));
   for (const r of (await Promise.all(runs)).filter(Boolean)) {
     if (r.problems.length) {
       failed++;
@@ -4516,4 +4522,128 @@ function overpullInFlow() {
   if (Math.abs(sr.left - lr.left) > 1 || Math.abs(sr.right - lr.right) > 1)
     fails.push(`${at}, a stack is ${Math.round(sr.left - lr.left)}/${Math.round(lr.right - sr.right)} px in from its list's edges`);
   };
+}
+
+/** The What needs me case (above): mount, then each gesture, every step in the page (window.__nm); its problems. */
+async function settleNeedsMe(r) {
+  const steps = [nmMount, nmRows, nmReply, nmSwipe, nmOpen];
+  try {
+    await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
+    await r.page.evaluate(`window.__nmItems = ${nmItems.toString()}`);
+    for (const step of steps) {
+      const out = await r.page.evaluate(step);
+      r.problems.push(...out);
+      if (out.length && step === nmMount) break;
+    }
+  } catch (e) {
+    r.problems.push(`evaluate: ${e.message.split("\n")[0]}`);
+  }
+  r.problems.push(...r.uncaught);
+  return { ...r, ready: true, ms: Date.now() - r.started };
+}
+
+/** Mock Discord / WhatsApp / Gmail notifications (and one from a package the app may not read) on the mock bridge. */
+function nmItems() {
+  const now = Date.now();
+  const reply = { title: "Reply", input: true, semantic: 1 };
+  const read = { title: "Mark as read", input: false, semantic: 2 };
+  const msg = (sender, text, ago) => ({ sender, text, time: now - ago * 1000 });
+  const base = { icon: null, clearable: true, profile: null, tappable: true, conversation: true, groupConversation: false };
+  const t = (ago) => now / 1000 - ago;
+  return [
+    { ...base, key: "wa", app: "WhatsApp", pkg: "com.whatsapp", title: "Anna Berg", text: "", time: t(60), actions: [reply, read], messages: [msg("Anna Berg", "Coming tonight?", 60)] },
+    { ...base, key: "gm", app: "Gmail", pkg: "com.google.android.gm", title: "Anna Berg", text: "Photos", time: t(600), actions: [{ title: "Archive", input: false }] },
+    { ...base, key: "dc", app: "Discord", pkg: "com.discord", title: "#powos", text: "", time: t(300), actions: [read, reply], messages: [msg("kai", "build is green", 300)], conversationTitle: "#powos", groupConversation: true },
+    { ...base, key: "other", app: "Signal", pkg: "org.thoughtcrime.securesms", title: "Not ours", text: "hidden", time: t(0) },
+  ];
+}
+
+/** In the page: the widget on the shell's own host (apps/stdb.ts) over the mock list, every press recorded. */
+async function nmMount() {
+  const imp = (p) => window.importShim(p);
+  const { powos } = await imp("./bridge.ts");
+  const P = await imp("./apps/pages.ts");
+  const { host } = await imp("./apps/stdb.ts");
+  const { h, render } = await imp("preact");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const until = async (f, ms = 3000) => {
+    for (const end = Date.now() + ms; Date.now() < end; await sleep(25)) if (f()) return true;
+    return false;
+  };
+  const perms = ["notifications:com.discord", "notifications:com.whatsapp", "notifications:com.google.android.gm"];
+  P.installedApps.value = [{ id: "local.needs-me", name: "What needs me", version: "0", database: "", tier: 0, manifest: JSON.stringify({ permissions: perms }) }];
+  const calls = [];
+  const list = { available: true, items: window.__nmItems() };
+  Object.assign(powos.notifications, {
+    list: async () => list,
+    action: async (...a) => void calls.push(["action", ...a]),
+    dismiss: async (k) => void calls.push(["dismiss", k]),
+    open: async (k) => void calls.push(["open", k]),
+  });
+  const mod = await imp("./_app/local.needs-me/widgets/main.js");
+  const root = Object.assign(document.createElement("div"), { style: "width:360px;height:360px;position:relative;font:14px sans-serif" });
+  document.body.append(root);
+  render(h(mod.default, { host, app: "local.needs-me", base: "./_app/local.needs-me/", cells: [4, 4] }), root);
+  // By the row's group (a long name is shortened to fit, model.ts groupKey): a person's, or a conversation's.
+  const row = (name) => [...root.querySelectorAll(".nm-row")].find((r) => r.dataset.group.endsWith(name.toLowerCase()));
+  window.__nm = { calls, root, sleep, until, row, said: () => JSON.stringify(calls) };
+  if (!(await until(() => row("Anna Berg") && row(":#powos")))) return [`the rows didn't render: "${root.textContent.slice(0, 200)}"`];
+  await sleep(800);
+  return [];
+}
+
+/** Grouped: Anna Berg once for WhatsApp + Gmail, #powos, nothing from Signal - and nothing pressed by showing them. */
+async function nmRows() {
+  const { root, row, calls, said } = window.__nm;
+  const fails = [];
+  const n = root.querySelectorAll(".nm-row").length;
+  if (n !== 2) fails.push(`${n} rows, want 2 (Anna Berg across WhatsApp + Gmail, #powos; Signal not permitted)`);
+  if (row("Anna Berg").querySelectorAll("[data-open]").length !== 2) fails.push("Anna Berg's row doesn't group WhatsApp and Gmail (two app icons)");
+  if (root.textContent.includes("Not ours")) fails.push("a notification from a package the manifest doesn't permit shows");
+  if (calls.length) fails.push(`pressed without a gesture: ${said()}`);
+  return fails;
+}
+
+/** Tap the row, type, tap send twice fast: one press of WhatsApp's reply (action 0) with the text, nothing before send. */
+async function nmReply() {
+  const { row, calls, until, sleep, said } = window.__nm;
+  const anna = row("Anna Berg");
+  anna.querySelector("[role=button]").click();
+  if (!(await until(() => anna.querySelector("form textarea, form input")))) return ["no reply field after tapping the row"];
+  const field = anna.querySelector("form textarea, form input");
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), "value").set.call(field, "on my way");
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await sleep(150);
+  const before = calls.length ? [`tapping the row or typing pressed something: ${said()}`] : [];
+  const send = anna.querySelector("form [type=submit]");
+  send.click();
+  send.click();
+  await sleep(500);
+  const ok = said() === JSON.stringify([["action", "wa", 0, "on my way"]]);
+  return [...before, ...(ok ? [] : [`reply pressed ${said()}, want once ["action","wa",0,"on my way"]`])];
+}
+
+/** Swipe #powos sideways: Discord's own mark-as-read (action 0), once. */
+async function nmSwipe() {
+  const { row, calls, sleep, said } = window.__nm;
+  calls.length = 0;
+  const el = row(":#powos").querySelector("[role=button]");
+  const box = el.getBoundingClientRect();
+  const ev = (t, x) => el.dispatchEvent(new PointerEvent(t, { bubbles: true, clientX: box.left + x, clientY: box.top + box.height / 2, pointerId: 3, isPrimary: true }));
+  ev("pointerdown", 20);
+  for (let x = 20; x <= 20 + box.width * 0.6; x += 20) ev("pointermove", x);
+  ev("pointerup", 20 + box.width * 0.6);
+  await sleep(400);
+  const ok = calls.length === 1 && JSON.stringify(calls[0].slice(0, 3)) === JSON.stringify(["action", "dc", 0]) && calls[0][3] == null;
+  return ok ? [] : [`swipe pressed ${said()}, want once ["action","dc",0] (no text)`];
+}
+
+/** A tap on an app icon: that notification's own tap action (contentIntent), once. */
+async function nmOpen() {
+  const { row, calls, sleep, said, root } = window.__nm;
+  calls.length = 0;
+  row("Anna Berg").querySelector("[data-open]").click();
+  await sleep(200);
+  root.remove();
+  return said() === JSON.stringify([["open", "wa"]]) ? [] : [`icon tap pressed ${said()}, want once ["open","wa"]`];
 }
