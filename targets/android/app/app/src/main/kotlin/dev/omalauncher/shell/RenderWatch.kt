@@ -93,3 +93,26 @@ internal class RenderWatch {
         const val BACKOFF_MS = 30_000L
     }
 }
+
+/**
+ * A Linux web window's content check ([WebWindows.consumerCheck]), [CONSUMER_UP_MS] after its open, a reclaim by a
+ * reloaded page, or a render stall's rebind: its consumer up ([UP]: nothing to do), its start running ([STARTING]:
+ * logged), or never taken / failed ([REBIND]: started again on a new consumer thread). 10-31 16:00 Dolphin.
+ */
+internal object ConsumerCheck {
+    enum class Act { UP, STARTING, REBIND }
+
+    /** How long after an open or a reclaim the consumer must be up. */
+    const val CONSUMER_UP_MS = 1_000L
+
+    fun step(
+        closed: Boolean,
+        handle: Long,
+        starting: Boolean,
+    ): Act =
+        when {
+            closed || handle != 0L -> Act.UP
+            starting -> Act.STARTING
+            else -> Act.REBIND
+        }
+}

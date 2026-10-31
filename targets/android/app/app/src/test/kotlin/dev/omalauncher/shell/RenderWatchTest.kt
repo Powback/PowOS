@@ -66,7 +66,9 @@ class RenderWatchTest {
         val w = RenderWatch()
         w.step(10_000, 1, true, 0)
         assertEquals(Act.STALL, w.step(10_000 + REBIND_MS, 1, true, 0))
-        assertEquals(Act.NONE, w.step(10_000 + REBIND_MS + RELOAD_MS, 1, true, 10_000 + REBIND_MS + 30))
+        // Answered 30 ms after the rebind: no reload when it would have been due, a new watch from that frame.
+        assertEquals(Act.NONE, w.step(10_000 + REBIND_MS + 250, 1, true, 10_000 + REBIND_MS + 30))
+        assertEquals(Act.NONE, w.step(10_000 + REBIND_MS + 30 + PROBE_MS - 1, 1, true, 10_000 + REBIND_MS + 30))
     }
 
     @Test
@@ -77,5 +79,15 @@ class RenderWatchTest {
         // Home hidden (an app full screen, the screen off): its frames don't run - the watch starts over.
         assertEquals(Act.NONE, w.step(14_000, 1, false, 0))
         assertEquals(Act.PROBE, w.step(16_000, 1, true, 0))
+    }
+
+    @Test
+    fun aReclaimedLinuxWindowWithNoConsumerIsReboundAfterOneSecond() {
+        assertEquals(1_000L, ConsumerCheck.CONSUMER_UP_MS)
+        assertEquals(ConsumerCheck.Act.UP, ConsumerCheck.step(closed = false, handle = 42, starting = true))
+        assertEquals(ConsumerCheck.Act.UP, ConsumerCheck.step(closed = true, handle = 0, starting = false))
+        // 16:00 Dolphin: its start never taken (the consumers' thread wedged by a stop): re-bound.
+        assertEquals(ConsumerCheck.Act.REBIND, ConsumerCheck.step(closed = false, handle = 0, starting = false))
+        assertEquals(ConsumerCheck.Act.STARTING, ConsumerCheck.step(closed = false, handle = 0, starting = true))
     }
 }

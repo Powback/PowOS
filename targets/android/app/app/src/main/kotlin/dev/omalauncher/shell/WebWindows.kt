@@ -258,6 +258,7 @@ class WebWindows(
             RenderWatch.Act.STALL -> {
                 WindowLog.w(TAG, "RENDER STALL: $live live window(s), no geometry for ${stallFor(now)} (last w.f at ${lastFrameText()}): rebind")
                 pokeVisibility("render stall")
+                for (w in wins.values.toList()) consumerCheck(w, "render stall")
                 if (!reattach(null, "render stall")) resend("render stall")
             }
             RenderWatch.Act.RELOAD -> stallReload(now, live)
@@ -597,6 +598,14 @@ class WebWindows(
         /** The consumer (0 until it started, and after it stopped). */
         @Volatile var handle = 0L
 
+        /** Its start taken (by the queued start or a [consumerCheck] restart): exactly one start runs. */
+        val starting = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        /** Its buffers' size and the screen's refresh rate, for a restart ([consumerCheck]). */
+        var bw = 0
+        var bh = 0
+        var rate = 0f
+
         /** KWin closed the window itself: nothing to tell it on the way out. */
         var kwinClosed = false
     }
@@ -615,8 +624,14 @@ class WebWindows(
     /** KWin windows on their way to a web window: offered to the page ("webwindows.adopt"), not opened yet (main thread). */
     private val pendingLinux = HashMap<Int, LinuxOffer>()
 
-    /** The consumers' starts and stops: one at a time, in order, never on main (a stop joins its render thread). */
-    private val consumers by lazy { java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "powos-ww-linux") } }
+    /**
+     * The consumers' starts and stops: one at a time, in order, never on main (a stop joins its render thread). Made
+     * again by [consumerCheck] when a job wedged it (10-31 15:57 window 4's stop never returned: every later start
+     * queued behind it, Dolphin's window 5 "loading forever").
+     */
+    private var consumers = newConsumers()
+
+    private fun newConsumers() = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "powos-ww-linux") }
 
     /**
      * One window as the page measured it this frame, in home's window surface px, after transforms: [frame] the
@@ -947,35 +962,70 @@ class WebWindows(
         win.mirror = content
         SurfaceControl.Transaction().setLayer(content, 0).setVisibility(content, true).setCrop(content, Rect(0, 0, 0, 0)).apply()
         wins[id] = win
-        val rate = web.display?.refreshRate ?: 0f
-        consumers.execute {
-            if (win.closed) return@execute
-            andro.marchy.WebWindowSource.configure(context)
-            val handle = andro.marchy.WebWindowSource.start(src.surface, kwin, bw, bh)
-            if (handle == 0L) {
-                WindowLog.e(TAG, "window $id (KWin window $kwin): consumer did not start")
-                return@execute
-            }
-            // Published before the crop: a resize placed meanwhile (place() on main) crops this consumer too, and a
-            // touch on the body reaches KWin from the first frame (a 0 handle drops both silently).
-            src.handle = handle
-            // Its own Android keyboard (kwin 0043 window-ime): KWin's show/hide for it and its typed text on this consumer.
-            andro.marchy.WebWindowSource.ownKeyboard(kwin, handle)
-            andro.marchy.WebWindowSource.crop(handle, win.w, win.h)
-            andro.marchy.WebWindowSource.refreshRate(handle, rate)
-            if (win.closed) {
-                src.handle = 0
-                andro.marchy.WebWindowSource.stop(handle)
-                return@execute
-            }
-            WindowLog.i(TAG, "window $id: KWin window $kwin (${p.appId}) consumer up, buffers ${bw}x$bh, body ${win.w}x${win.h}")
-            liveWhenDrawn(win)
-        }
+        src.bw = bw
+        src.bh = bh
+        src.rate = web.display?.refreshRate ?: 0f
+        consumers.execute { startConsumer(win, src) }
+        main.postDelayed({ consumerCheck(win, "open") }, CONSUMER_UP_MS)
         andro.marchy.WebWindowSource.size(kwin, w, h)
         // KWin focused the new window (its task's start): a touch back on the window it came from focuses that again.
         linuxFocused = kwin
         WindowLog.i(TAG, "window $id: KWin window $kwin (${p.appId}) as a web window, ${w}x$h")
         return id
+    }
+
+    /** On a consumer thread: Linux window [win]'s consumer started, once ([LinuxSource.starting]). */
+    private fun startConsumer(
+        win: Win,
+        src: LinuxSource,
+    ) {
+        if (win.closed || !src.starting.compareAndSet(false, true)) return
+        val id = win.id
+        val kwin = src.kwin
+        andro.marchy.WebWindowSource.configure(context)
+        val handle = andro.marchy.WebWindowSource.start(src.surface, kwin, src.bw, src.bh)
+        if (handle == 0L) {
+            WindowLog.e(TAG, "window $id (KWin window $kwin): consumer did not start")
+            src.starting.set(false)
+            return
+        }
+        // Published before the crop: a resize placed meanwhile (place() on main) crops this consumer too, and a
+        // touch on the body reaches KWin from the first frame (a 0 handle drops both silently).
+        src.handle = handle
+        // Its own Android keyboard (kwin 0043 window-ime): KWin's show/hide for it and its typed text on this consumer.
+        andro.marchy.WebWindowSource.ownKeyboard(kwin, handle)
+        andro.marchy.WebWindowSource.crop(handle, win.w, win.h)
+        andro.marchy.WebWindowSource.refreshRate(handle, src.rate)
+        if (win.closed) {
+            src.handle = 0
+            andro.marchy.WebWindowSource.stop(handle)
+            return
+        }
+        WindowLog.i(TAG, "window $id: KWin window $kwin (${src.offer.appId}) consumer up, buffers ${src.bw}x${src.bh}, body ${win.w}x${win.h}")
+        liveWhenDrawn(win)
+    }
+
+    /**
+     * Main thread: Linux window [win]'s consumer up [CONSUMER_UP_MS] after its open, a page's reclaim after a reload, or
+     * a render stall's rebind ([why]) - else re-bound: a start never taken means the consumers' thread is wedged (a stop
+     * that never returned), so that thread is left behind and the start runs on a new one. One that did not start
+     * (handle 0, not starting) is started again. 10-31 16:00 Dolphin's window 5 showed its placeholder forever and
+     * dropped every touch ("its consumer isn't up").
+     */
+    private fun consumerCheck(
+        win: Win,
+        why: String,
+    ) {
+        val src = win.linux ?: return
+        when (ConsumerCheck.step(win.closed, src.handle, src.starting.get())) {
+            ConsumerCheck.Act.UP -> return
+            ConsumerCheck.Act.STARTING -> return WindowLog.w(TAG, "window ${win.id}: consumer still starting ($why)").let { }
+            ConsumerCheck.Act.REBIND -> Unit
+        }
+        WindowLog.w(TAG, "window ${win.id}: KWin window ${src.kwin}'s consumer not up ($why): re-bound on a new consumer thread")
+        consumers.shutdown()
+        consumers = newConsumers()
+        consumers.execute { startConsumer(win, src) }
     }
 
     /**
@@ -1352,7 +1402,11 @@ class WebWindows(
         for (g in geos.filterNot { it.id in shown }) {
             val win = wins[g.id] ?: continue
             shown += g.id
-            if (!win.claimed) WindowLog.i(TAG, "window ${win.id}: claimed by the reloaded page (its frame and bar are back)")
+            if (!win.claimed) {
+                WindowLog.i(TAG, "window ${win.id}: claimed by the reloaded page (its frame and bar are back)")
+                // Its content too: a Linux window's consumer up within [CONSUMER_UP_MS], else re-bound.
+                if (win.linux != null) main.postDelayed({ consumerCheck(win, "reclaimed") }, CONSUMER_UP_MS)
+            }
             win.claimed = true
             win.shown = g.visible
             win.geo = g
@@ -3190,6 +3244,9 @@ class WebWindows(
 
         /** KWin's app id prefix for the Linux session's Android-app stand-ins ([androidStandIn]). */
         private const val ANDROID_APP_ID = "android-"
+
+        /** A Linux window's consumer is up within this of its open or its reclaim, else re-bound ([consumerCheck]). */
+        private const val CONSUMER_UP_MS = ConsumerCheck.CONSUMER_UP_MS
 
         /** RL1: a window the page hasn't claimed this long after a page load is hidden ([pageStarted]). */
         private const val CLAIM_MS = 3000L
