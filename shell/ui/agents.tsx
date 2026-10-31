@@ -16,11 +16,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { holdRefresh } from "./refresh.ts";
 import { agent, agentsView, asks, closeAgents, live, messages, openAgents, recent, since, tasks, useAgentEvents, useAgents } from "../agents.ts";
-import { fleet, headline, ownWords, restartNote, shorten, stepsOf, taskOf, workRows, type Fleet, type WorkLite, type Worker } from "../fleet.ts";
+import { fleet, headline, ownWords, restartNote, shorten, stepsOf, taskOf, workRows, type Fleet, type Step, type WorkLite, type Worker } from "../fleet.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { takeTap } from "./taps.ts";
-import type { Agent, AgentEvent, HomeItem } from "../types.ts";
+import type { Agent, AgentEvent, AgentTask, HomeItem } from "../types.ts";
 
 /** "4m", "1h 5m": how long [ms] milliseconds took. */
 const took = (ms: number) => {
@@ -542,46 +542,59 @@ function List({ f }: { f: Fleet }) {
   );
 }
 
-/**
- * One agent, live: its task and progress, the steps so far (the board's: done, now, next), its open asks, its activity
- * as it happens (read-only), its last report, and message / stop.
- */
-function LiveView({ id, f }: { id: string; f: Fleet }) {
-  useAgentEvents(id);
-  const a = agent(id)?.value;
-  if (!a) return <div class="muted fl-none">This agent is gone.</div>;
-  const x = [...f.attention, ...f.working, ...(f.manager ? [f.manager] : [])].find((w) => w.a.id === id);
-  const w = taskOf(a.work);
-  const title = x?.title ?? (w?.title || ownWords(a) || `Session in ${a.cwd || a.host}`);
-  const steps = stepsOf(w);
-  const todo = tasks.value.get(id) ?? [];
-  const events = recent.value.agent === id ? recent.value.events.slice(-30) : [];
+/** What [a] is doing now, in words. */
+function nowOf(a: Agent, x: Worker | undefined) {
+  if (x?.now) return x.now;
+  if (a.state === "gone") return "Finished";
+  return a.state === "working" ? "Thinking" : "Idle";
+}
+
+/** The live card's progress line (none without a plan). */
+function LiveProgress({ x }: { x: Worker | undefined }) {
+  if (!x || !(x.total > 0)) return null;
+  return (
+    <div class="fl-prog">
+      <Bar done={x.done} total={x.total} />
+      <span class="muted">{stepLabel(x)}</span>
+    </div>
+  );
+}
+
+/** The live card's one action (restart / answer; "open" is this view). */
+function LiveAct({ x }: { x: Worker | undefined }) {
+  if (!x?.action || x.action === "open") return null;
+  return (
+    <div class="ag-ask-do">
+      <button type="button" class="ag-act danger" onClick={() => act(x)}>
+        {ACT_LABEL[x.action]}
+      </button>
+    </div>
+  );
+}
+
+/** The live view's head card: task, progress, what it's doing now, and its one action. */
+function LiveCard({ a, x, title }: { a: Agent; x: Worker | undefined; title: string }) {
+  return (
+    <section class={`fl-card tile fl-live ${x?.reason ? "fl-bad" : ""}`}>
+      <div class="fl-c1">
+        <span class="fl-title">{a.role === "manager" ? "Manager" : title}</span>
+        <Chip host={a.host} />
+      </div>
+      {x?.reason && <div class="fl-need">{x.reason}</div>}
+      <LiveProgress x={x} />
+      <div class="fl-c3">
+        <span class="fl-now">{nowOf(a, x)}</span>
+        <span class="muted fl-ago">{a.state === "working" ? running(a) : since(a.last)}</span>
+      </div>
+      <LiveAct x={x} />
+    </section>
+  );
+}
+
+/** The live view's steps: the board's (done, now, next) and the session's own todo list. */
+function LiveSteps({ steps, todo }: { steps: Step[]; todo: AgentTask[] }) {
   return (
     <>
-      <section class={`fl-card tile fl-live ${x?.reason ? "fl-bad" : ""}`}>
-        <div class="fl-c1">
-          <span class="fl-title">{a.role === "manager" ? "Manager" : title}</span>
-          <Chip host={a.host} />
-        </div>
-        {x?.reason && <div class="fl-need">{x.reason}</div>}
-        {x && x.total > 0 && (
-          <div class="fl-prog">
-            <Bar done={x.done} total={x.total} />
-            <span class="muted">{stepLabel(x)}</span>
-          </div>
-        )}
-        <div class="fl-c3">
-          <span class="fl-now">{x?.now || (a.state === "gone" ? "Finished" : a.state === "working" ? "Thinking" : "Idle")}</span>
-          <span class="muted fl-ago">{a.state === "working" ? running(a) : since(a.last)}</span>
-        </div>
-        {x?.action && x.action !== "open" && (
-          <div class="ag-ask-do">
-            <button type="button" class="ag-act danger" onClick={() => act(x)}>
-              {ACT_LABEL[x.action]}
-            </button>
-          </div>
-        )}
-      </section>
       {steps.length > 0 && (
         <section class="fl-sec">
           <h3 class="ai-heading muted">Steps</h3>
@@ -603,6 +616,28 @@ function LiveView({ id, f }: { id: string; f: Fleet }) {
           ))}
         </div>
       )}
+    </>
+  );
+}
+
+/**
+ * One agent, live: its task and progress, the steps so far (the board's: done, now, next), its open asks, its activity
+ * as it happens (read-only), its last report, and message / stop.
+ */
+function LiveView({ id, f }: { id: string; f: Fleet }) {
+  useAgentEvents(id);
+  const a = agent(id)?.value;
+  if (!a) return <div class="muted fl-none">This agent is gone.</div>;
+  const x = [...f.attention, ...f.working, ...(f.manager ? [f.manager] : [])].find((w) => w.a.id === id);
+  const w = taskOf(a.work);
+  const title = x?.title ?? (w?.title || ownWords(a) || `Session in ${a.cwd || a.host}`);
+  const steps = stepsOf(w);
+  const todo = tasks.value.get(id) ?? [];
+  const events = recent.value.agent === id ? recent.value.events.slice(-30) : [];
+  return (
+    <>
+      <LiveCard a={a} x={x} title={title} />
+      <LiveSteps steps={steps} todo={todo} />
       <Asks only={id} />
       <section class="fl-sec">
         <h3 class="ai-heading muted">Activity</h3>

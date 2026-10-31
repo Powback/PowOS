@@ -123,6 +123,20 @@ export function ownWords(a: Agent) {
   return plain(t);
 }
 
+/** Per tool: its words with the step's argument (null: the bare words always), and without one. */
+const TOOL_WORDS: Record<string, [((rest: string) => string) | null, string]> = {
+  Bash: [plain, "Running a command"],
+  Read: [(r) => `Reading ${r}`, "Reading a file"],
+  Edit: [(r) => `Editing ${r}`, "Editing a file"],
+  Write: [(r) => `Editing ${r}`, "Editing a file"],
+  Grep: [null, "Searching the code"],
+  Glob: [null, "Searching the code"],
+  WebFetch: [null, "Looking something up online"],
+  WebSearch: [null, "Looking something up online"],
+  Task: [(r) => `Starting a helper: ${r}`, "Starting a helper"],
+  Agent: [(r) => `Starting a helper: ${r}`, "Starting a helper"],
+};
+
 /** What the tool step says, as a sentence ("Bash final renders" → "Final renders"; "Grep" → "Searching the code"). */
 export function stepWords(step: string) {
   const s = (step || "").trim();
@@ -131,51 +145,58 @@ export function stepWords(step: string) {
   if (/^mcp__/i.test(s)) return "Using a tool";
   const m = s.match(/^(Bash|Read|Edit|Write|Grep|Glob|Task|Agent|WebFetch|WebSearch)\b\s*(.*)$/);
   if (!m) return plain(s);
-  const rest = m[2];
-  switch (m[1]) {
-    case "Bash":
-      return rest ? plain(rest) : "Running a command";
-    case "Read":
-      return rest ? `Reading ${rest}` : "Reading a file";
-    case "Edit":
-    case "Write":
-      return rest ? `Editing ${rest}` : "Editing a file";
-    case "Grep":
-    case "Glob":
-      return "Searching the code";
-    case "WebFetch":
-    case "WebSearch":
-      return "Looking something up online";
-    default:
-      return rest ? `Starting a helper: ${rest}` : "Starting a helper";
-  }
+  const [withRest, bare] = TOOL_WORDS[m[1]];
+  return m[2] && withRest ? withRest(m[2]) : bare;
 }
+
+/** The states in which a known failure in its words means it stopped on it. */
+const FAILED_STATES = new Set(["blocked", "idle", "paused"]);
+
+/** The known failure [a] stopped on, as the user should read it (undefined: none). */
+function failureOf(a: Agent): string | undefined {
+  if (!FAILED_STATES.has(a.state)) return undefined;
+  const text = `${a.step} ${a.title} ${a.report}`;
+  return ERRORS.find(([rx]) => rx.test(text))?.[1];
+}
+
+/** [a] waits on the user: its open ask, if any. */
+function askTrouble(a: Agent): Pick<Worker, "reason" | "action"> {
+  const ask = asks.value.find((x) => x.agent === a.id && x.answer == null);
+  if (!ask) return { reason: "Waiting for your answer", action: "open" };
+  return { reason: `Wants to ${ask.tool === "Bash" ? "run a command" : `use ${ask.tool}`}`, action: "answer" };
+}
+
+/** Idle on a task that waits for its phone check. */
+const awaitsCheck = (a: Agent, w: WorkLite | undefined) => a.state === "idle" && !!w && w.status !== "done" && w.step === QUEUED_STEP;
 
 /** Why [a] needs the user, plainly, and what to do ("" : it doesn't). */
 function trouble(a: Agent, w: WorkLite | undefined, now: number): Pick<Worker, "reason" | "action"> | null {
-  const text = `${a.step} ${a.title} ${a.report}`;
-  const err = a.state === "blocked" || a.state === "idle" || a.state === "paused" ? ERRORS.find(([rx]) => rx.test(text)) : undefined;
-  if (err) return { reason: err[1], action: "restart" };
-  if (a.state === "needs_you") {
-    const ask = asks.value.find((x) => x.agent === a.id && x.answer == null);
-    return { reason: ask ? `Wants to ${ask.tool === "Bash" ? "run a command" : `use ${ask.tool}`}` : "Waiting for your answer", action: ask ? "answer" : "open" };
-  }
+  const err = failureOf(a);
+  if (err) return { reason: err, action: "restart" };
+  if (a.state === "needs_you") return askTrouble(a);
   if (a.state === "blocked") return { reason: "Stuck: its last tries kept failing", action: "restart" };
   if (a.state === "working" && now - a.last > STUCK_MS) return { reason: "Quiet for over 30 minutes", action: "open" };
-  if (a.state === "idle" && w && w.status !== "done" && w.step === QUEUED_STEP) return { reason: "Waiting for its phone check", action: "open" };
+  if (awaitsCheck(a, w)) return { reason: "Waiting for its phone check", action: "open" };
   return null;
 }
+
+/** [a]'s task words: its board task's title, else its own plain words, else what and where it is. */
+function titleOf(a: Agent, w: WorkLite | undefined) {
+  if (w?.title) return plain(w.title);
+  return ownWords(a) || `${plain(a.role)} session in ${a.cwd || a.host}`;
+}
+
+/** The board's step for [w] ("" when none or only queued). */
+const boardStepOf = (w: WorkLite | undefined) => (w?.step && w.step !== QUEUED_STEP ? plain(w.step) : "");
 
 /** [a] as a fleet line: task words, progress and its step now. */
 function workerOf(a: Agent): Worker {
   const w = taskOf(a.work);
   const total = w?.progressTotal ?? 0;
   const done = Math.min(w?.progressDone ?? 0, total);
-  const boardStep = w?.step && w.step !== QUEUED_STEP ? plain(w.step) : "";
-  const title = w?.title ? plain(w.title) : ownWords(a) || `${plain(a.role)} session in ${a.cwd || a.host}`;
   // Its live tool step while working (what it does this second), the board's step otherwise.
   const live = a.state === "working" ? stepWords(a.step) : "";
-  return { a, title, done, total, now: live || boardStep, task: w };
+  return { a, title: titleOf(a, w), done, total, now: live || boardStepOf(w), task: w };
 }
 
 /** The manager's row: what it is doing, in plain words. */
@@ -192,6 +213,30 @@ function managerWords(a: Agent): string {
   return "Waiting for your next message";
 }
 
+/** The manager's row: the most recent manager session. */
+function placeManager(out: Fleet, a: Agent) {
+  if (!out.manager || a.last > out.manager.a.last) out.manager = { ...workerOf(a), now: managerWords(a) };
+}
+
+/** [a] (not the manager, not gone) into its group. [busyParents]: sessions shown by their working helpers. */
+function place(out: Fleet, a: Agent, now: number, busyParents: ReadonlySet<Agent["parent"]>) {
+  const sub = isSub(a);
+  const t = trouble(a, taskOf(a.work), now);
+  const fresh = now - a.last < DAY_MS;
+  if (t && (fresh || a.state === "needs_you")) {
+    out.attention.push({ ...workerOf(a), ...t });
+    return;
+  }
+  if (!sub && busyParents.has(a.id)) return;
+  if (a.state === "working") {
+    out.working.push(workerOf(a));
+    return;
+  }
+  if (sub) return;
+  if (!fresh) out.older.push(a);
+  else out.idle.push(a);
+}
+
 /** The whole fleet, grouped (reads the agent signals: a component calling it redraws when they change). */
 export function fleet(now = Date.now()): Fleet {
   const all = agentIds.value.map((id) => agent(id)?.value).filter((a): a is Agent => !!a);
@@ -199,30 +244,9 @@ export function fleet(now = Date.now()): Fleet {
   // A session whose helpers are working is shown by them (each is one piece of work); the session itself is not.
   const busyParents = new Set(all.filter((a) => isSub(a) && a.state === "working").map((a) => a.parent));
   for (const a of all) {
-    const sub = isSub(a);
-    if (!sub && MANAGER.has(a.role)) {
-      if (!out.manager || a.last > out.manager.a.last) out.manager = { ...workerOf(a), now: managerWords(a) };
-      continue;
-    }
-    if (a.state === "gone") {
-      if (now - a.last < DAY_MS) out.doneToday.push(a);
-      continue;
-    }
-    const w = taskOf(a.work);
-    const t = trouble(a, w, now);
-    const fresh = now - a.last < DAY_MS;
-    if (t && (fresh || a.state === "needs_you")) {
-      out.attention.push({ ...workerOf(a), ...t });
-      continue;
-    }
-    if (!sub && busyParents.has(a.id)) continue;
-    if (a.state === "working") {
-      out.working.push(workerOf(a));
-      continue;
-    }
-    if (sub) continue;
-    if (!fresh) out.older.push(a);
-    else out.idle.push(a);
+    if (!isSub(a) && MANAGER.has(a.role)) placeManager(out, a);
+    else if (a.state !== "gone") place(out, a, now, busyParents);
+    else if (now - a.last < DAY_MS) out.doneToday.push(a);
   }
   const recent = (x: { a: Agent }, y: { a: Agent }) => y.a.last - x.a.last;
   out.working.sort(recent);
