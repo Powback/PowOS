@@ -236,7 +236,12 @@ tools/phone/ship-guard.sh snapshot "$snap" || { echo "ship-apk: REFUSED - couldn
 # state.ts) - a dead page's hot.ts never runs, so no later reset or push reloaded them. Now they boot on the APK's own,
 # consistent shell; the old APK runs its own shell for the seconds until the install. Uncommitted pushes are lost by
 # design - commit before you push. The snapshot above has the overrides for a rollback.
-if ! out=$(shell/push.sh --vpn --reset 2>&1); then
+# Since the shell stamps (2026-10-31, ShellHost.kt ShellSource): a STAMPED APK serves whichever shell is newer, its
+# own or the shipped layer, so the overrides stay on through the install - resetting them first showed the OLD
+# running APK's own shell until the install (15:50: the search bar "reverted" for a minute). The stale ones go after
+# it (below). Only an unstamped APK still gets the reset here.
+stamped_apk=""; unzip -Z1 "$apk" assets/shell/shell-build.txt >/dev/null 2>&1 && stamped_apk=1
+if [ -z "$stamped_apk" ] && ! out=$(shell/push.sh --vpn --reset 2>&1); then
   echo "$out" | tail -3 >&2
   echo "ship-apk: REFUSED - couldn't reset the phone's shell overrides before the install (above): not installing (APK built, kept)" >&2
   tools/phone/ship-guard.sh restore-overrides "$snap" >&2 || true
@@ -260,6 +265,14 @@ git fetch -q origin worktree-powos-multiplatform 2>/dev/null || echo "ship-apk: 
 tip2=$(git rev-parse origin/worktree-powos-multiplatform)
 full=$(apk_delta "$tip2")
 pushok=1
+# The overrides kept on through a stamped install: those not in this push are stale (the new APK's copy is the tip's)
+# and go BEFORE the push stamps the layer as the tip (else they'd be served as the tip's). None to push: all of them.
+if [ -n "$stamped_apk" ]; then
+  extra=$(tar -tf "$snap/overrides.tar" 2>/dev/null | sed -n 's|^shell/||p' | grep -v '/$' | grep -vx '\.pushing' |
+    while read -r f; do echo "$full" | grep -qxF "$f" || echo "$f"; done)
+  if [ -z "$full" ]; then rs=$(shell/push.sh --vpn --reset 2>&1) || echo "ship-apk: WARNING - resetting the overrides after the install failed: $(echo "$rs" | tail -1)" >&2
+  elif [ -n "$extra" ]; then rs=$(shell/push.sh --vpn --reset $extra 2>&1) || echo "ship-apk: WARNING - removing the stale overrides failed: $(echo "$rs" | tail -1)" >&2; fi
+fi
 if [ -n "$full" ]; then
   if [ -z "$t" ]; then
     t=$(mktemp -d "$HOME/.cache/powos-reapply.XXXXXX"); git worktree add -q --detach "$t/tree" "$tip2" 2>/dev/null || true

@@ -19,3 +19,4 @@ keystore.properties
 store/collage/raw/
 # stamped by android-app-dev scripts/build-gradle.sh
 app/version.properties
+app/shell-build.txt

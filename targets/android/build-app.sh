@@ -35,6 +35,9 @@ case "$HERE/" in "$HOME/Projects/"*) ;; *)
 want=/Projects${HERE#$HOME/Projects}/app
 link=$AAD/projects/powos
 [ "$(readlink "$link" 2>/dev/null)" = "$want" ] || { rm -f "$link"; ln -s "$want" "$link"; }
+# The APK's shell stamp (assets/shell/shell-build.txt via build.gradle.kts copyShell): "<commit time> <commit>", which
+# the app compares with the shipped layer's (shell/push.sh: files/shell-layer.txt) to serve the NEWER shell (ShellSource).
+git -C "$ROOT" log -1 --format='%ct %H' HEAD > "$HERE/app/app/shell-build.txt"
 stamp=$(mktemp)
 # The warm builder (tools/warm-builder.sh, unit gradle-warm-mac: a long-lived Gradle daemon - no cold JVM, Gradle and
 # Kotlin daemon per APK) when it starts and answers; android-app-dev's cold `make build` otherwise, or with

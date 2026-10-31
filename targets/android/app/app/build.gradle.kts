@@ -82,6 +82,9 @@ android {
 val shellAssets = layout.buildDirectory.dir("generated/shell-assets").get().asFile
 val copyShell by tasks.registering(Sync::class) {
     from(rootProject.file("../../../shell")) { exclude("DESIGN.md", "dev/**", "push.sh", "node_modules/**", "package.json", "package-lock.json", "tsconfig.json", ".gitignore") }
+    // Its build commit ("<commit time> <sha>", written by build-app.sh): the app serves this shell or the shipped
+    // layer, whichever is newer (shell/ShellHost.kt ShellSource).
+    from(rootProject.file("app/shell-build.txt"))
     into(shellAssets.resolve("shell"))
 }
 android.sourceSets.getByName("main").assets.srcDir(shellAssets)
