@@ -3284,6 +3284,11 @@ SHELLHELP
         shift
         exec python3 "$POWOS_LIB/ai/agents/powos-agents-cli" "$@"
         ;;
+    progress)
+        # The Progress app's data: the daily-driver checklist and the known hacks (`powos progress help`).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-progress-cli" "$@"
+        ;;
     friction)
         # Friction log: what got in an agent's way, so it gets fixed for good (`powos friction help`).
         shift

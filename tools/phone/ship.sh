@@ -273,6 +273,10 @@ run)
   }
   # done_req FILE RESULT: a request fully on the phone.
   done_req() { echo "result=$2" >> "$1"; mv "$1" "$Q/done/"; }
+  # The known hacks to the Progress app (apps/powos-progress, its Hacks widget): the HACK registry of what just
+  # shipped, pushed whole after each ship - no polling. In the background and never fatal: a ship doesn't wait on it.
+  sync_hacks() { [ -x lib/apps/powos-progress-cli ] || return 0
+    ( python3 lib/apps/powos-progress-cli hacks sync > "$Q/hacks-sync.log" 2>&1 || echo "hacks sync failed (rc $?)" >> "$Q/hacks-sync.log" ) & }
   # pending_apk SHA: APK inputs changed up to it and aren't installed yet - its request is done once the APK is in.
   # own_apk SHA: its own commit changed them. A shell-only commit's note goes out with the shell push (it's visible
   # then), even while someone else's Kotlin below it waits for the APK; `noted=1` keeps the APK from repeating it.
@@ -476,6 +480,7 @@ run)
           for r in ${nreqs[@]+"${nreqs[@]}"}; do [ -f "$r" ] && echo "noted=1" >> "$r"; done
           for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "shipped:${T:0:9}:shell"; done
           echo "$(date +%T) ${T:0:9}: shipped (shell)"
+          sync_hacks
           e2e_round
         else
           git -C "$REPO" fetch -q origin "$BASE" 2>/dev/null
@@ -535,6 +540,7 @@ run)
             echo "$T" > "$Q/apps-live"; rm -f "$Q/failed-apps"
             echo "$(date '+%F %T') ${T:0:9} apps ($achg) for $who_s: $an" >> "$Q/shipped.log"
             echo "$(date +%T) ${T:0:9}: apps shipped ($achg)"
+            sync_hacks
           else
             echo "$T" > "$Q/failed-apps"
             echo "$(date +%T) ${T:0:9}: apps ship FAILED rc $arc (log $alog) - waiting for a new origin commit"

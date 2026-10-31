@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""powos progress - the Progress app's data (apps/powos-progress): the daily-driver checklist and the known hacks.
+
+  powos progress item add <id> --area A --capability "Calls + SMS work" [--state S] [--tasks t1,t2] [--note N] [--rank R]
+  powos progress item set <id> [--state S] [--area A] [--capability C] [--tasks t1,t2] [--add-task t] [--rm-task t]
+                               [--note N] [--rank R]
+  powos progress item list [--json]
+  powos progress item rm <id>
+  powos progress hacks sync [--repo DIR] [--dry-run]   the HACK registry (docs/REMOTE-POWOS.md §4) -> the app, whole
+  powos progress hacks list [--json]
+
+States: works | partly | broken | untested (the widget's "Daily driver NN%" = works / all items). --tasks are board
+ids (`powos agents task list`). The checklist is the manager's: only the module's owner identity may change it.
+Off the phone (the Mac) a command runs on the phone over the dev channel, as `powos agents` does; `hacks sync`
+reads the registry here (the repo) and sends it there. tools/phone/ship.sh runs `hacks sync` after each ship.
+"""
+import base64
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+import zlib
+
+DB = "local-powos-progress"
+SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
+STATES = ("works", "partly", "broken", "untested")
+REG = "docs/REMOTE-POWOS.md"
+
+
+class Down(Exception):
+    pass
+
+
+def die(msg, code=1):
+    print(f"powos progress: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def token():
+    try:
+        with open(os.path.expanduser("~/.config/spacetime/cli.toml")) as f:
+            for line in f:
+                k, _, v = line.partition("=")
+                if k.strip() == "spacetimedb_token":
+                    return v.strip().strip('"')
+    except OSError:
+        pass
+    return None
+
+
+def http(path, body, ctype):
+    tok = token()
+    if not tok:
+        raise Down("no SpacetimeDB identity (~/.config/spacetime/cli.toml)")
+    req = urllib.request.Request(f"{SERVER}{path}", data=body, method="POST",
+                                 headers={"Content-Type": ctype, "Authorization": f"Bearer {tok}"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.read().decode()
+    except urllib.error.HTTPError as e:
+        msg = e.read().decode(errors="replace").strip() or str(e)
+        if e.code == 404 and "database" in msg.lower():
+            die("the Progress app isn't installed here (powos app install apps/powos-progress)")
+        die(f"{path.rsplit('/', 1)[-1]}: {msg}")
+    except (urllib.error.URLError, OSError) as e:
+        raise Down(str(e))
+
+
+def call(reducer, *args):
+    http(f"/v1/database/{DB}/call/{reducer}", json.dumps(list(args)).encode(), "application/json")
+
+
+def table(name):
+    out = json.loads(http(f"/v1/database/{DB}/sql", f"SELECT * FROM {name}".encode(), "text/plain"))
+    res = out[0]
+    names = [e["name"]["some"] for e in res["schema"]["elements"]]
+    return [dict(zip(names, r)) for r in res["rows"]]
+
+
+def opts(argv, spec):
+    """--flag value pairs (spec: names that take a value; --json/--dry-run are switches) and the positionals."""
+    o, pos, i = {}, [], 0
+    while i < len(argv):
+        a = argv[i]
+        if a.startswith("--"):
+            k = a[2:].replace("-", "_")
+            if k in ("json", "dry_run"):
+                o[k] = True
+            elif k in spec:
+                if i + 1 >= len(argv):
+                    die(f"{a} needs a value")
+                if k in ("add_task", "rm_task"):
+                    o.setdefault(k, []).append(argv[i + 1])
+                else:
+                    o[k] = argv[i + 1]
+                i += 1
+            else:
+                die(f"unknown option {a} (powos progress help)")
+        else:
+            pos.append(a)
+        i += 1
+    return o, pos
+
+
+ITEM_OPTS = ("area", "capability", "state", "tasks", "note", "rank", "add_task", "rm_task")
+
+
+def items():
+    return {r["id"]: r for r in table("item")}
+
+
+def put(row):
+    if row["state"] not in STATES:
+        die(f"--state: one of {', '.join(STATES)}")
+    try:
+        row["rank"] = int(row.get("rank") or 0)
+    except ValueError:
+        die("--rank: a number")
+    call("item_put", json.dumps({k: row[k] for k in ("id", "area", "capability", "state", "tasks", "note", "rank")}))
+
+
+def item(argv):
+    verb, rest = (argv[0], argv[1:]) if argv else ("list", [])
+    o, pos = opts(rest, ITEM_OPTS)
+    if verb in ("list", "ls"):
+        rows = sorted(items().values(), key=lambda r: (r["area"], r["rank"], r["id"]))
+        if o.get("json"):
+            print(json.dumps(rows, indent=1))
+            return
+        if not rows:
+            print("the checklist is empty: powos progress item add <id> --area A --capability \"...\"")
+        works = sum(r["state"] == "works" for r in rows)
+        if rows:
+            print(f"daily driver: {round(100 * works / len(rows))}% ({works} of {len(rows)} work)")
+        for r in rows:
+            tasks = f"  [{r['tasks']}]" if r["tasks"] else ""
+            note = f" - {r['note']}" if r["note"] else ""
+            print(f"{r['state']:<9} {r['area']} · {r['capability']}  ({r['id']}){tasks}{note}")
+        return
+    if not pos:
+        die(f"item {verb}: which item (its id)?")
+    iid = pos[0]
+    if verb == "add":
+        if iid in items():
+            die(f"{iid} exists: powos progress item set {iid} ...")
+        if not o.get("area") or not o.get("capability"):
+            die("item add needs --area and --capability")
+        row = {"id": iid, "state": "untested", "tasks": "", "note": "", "rank": 0}
+    elif verb == "set":
+        row = items().get(iid) or die(f"no item {iid} (powos progress item list)")
+    elif verb in ("rm", "remove"):
+        call("item_rm", iid)
+        print(f"removed {iid}")
+        return
+    else:
+        die(f"unknown: item {verb} (add|set|list|rm)")
+    for k in ("area", "capability", "state", "tasks", "note", "rank"):
+        if k in o:
+            row[k] = o[k]
+    tasks = [t for t in (row.get("tasks") or "").split(",") if t.strip()]
+    tasks += [t for t in o.get("add_task", []) if t not in tasks]
+    row["tasks"] = ",".join(t for t in tasks if t not in o.get("rm_task", []))
+    row["state"] = (row["state"] or "").lower()
+    put(row)
+    print(f"{verb == 'add' and 'added' or 'set'} {iid}: {row['state']} · {row['capability']}")
+
+
+# ---- hacks: the HACK registry (docs/REMOTE-POWOS.md §4) ------------------------------------------------------------
+
+AREA_OF_PATH = [
+    (r"^kernel/|^rooted/|^lib/boot|^config/|^targets/android/kernel", "Kernel & system"),
+    (r"^shell/ui/(home|launcher|dock|drawer|widgets?|search|icons?)", "Home & launcher"),
+    (r"^shell/ui/(shade|lock|notif|quick)", "Shade & lock"),
+    (r"^shell/ui/(powai|chat|assistant)", "AI page"),
+    (r"window|desktop|kwin|switcher", "Windows"),
+    (r"game|steam|controller|^targets/android/play/|box64|fex", "Games"),
+    (r"^targets/android/app/", "Phone app"),
+    (r"^targets/android/", "Linux on the phone"),
+    (r"^targets/web/|^sources/powos-shell", "Web shell"),
+    (r"^hosts/|^units/", "Servers"),
+    (r"^docs/", "Agents & tooling"),
+    (r"^apps/|^lib/apps/|^shell/apps/", "Apps"),
+    (r"^lib/ai/|^tools/|^test/|^bin/", "Agents & tooling"),
+    (r"^shell/", "Home & launcher"),
+]
+
+
+def area_of(path):
+    for rx, area in AREA_OF_PATH:
+        if re.search(rx, path, re.I):
+            return area
+    return "Other"
+
+
+def strip_md(s):
+    return re.sub(r"\*\*|`", "", s).strip()
+
+
+def since_of(repo, path, line):
+    """When the marker's line came into the tree (ms), by git blame; 0 when it can't tell."""
+    try:
+        r = subprocess.run(["git", "-C", repo, "blame", "--porcelain", "-L", f"{line},{line}", "--", path],
+                           capture_output=True, text=True, timeout=10)
+        m = re.search(r"^author-time (\d+)$", r.stdout, re.M)
+        return int(m.group(1)) * 1000 if m else 0
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+
+
+def registry(repo):
+    try:
+        text = open(os.path.join(repo, REG)).read()
+    except OSError as e:
+        die(f"can't read the registry: {e}")
+    body = text.split("<!-- hack-registry:start -->", 1)[-1].split("<!-- hack-registry:end -->", 1)[0]
+    out = []
+    for line in body.splitlines():
+        m = re.match(r"^\| `([^`]*):(\d+)` \| (.*)$", line)
+        if not m:
+            continue
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", m.group(3))]
+        why, fix = (cells + ["", ""])[:2]
+        task = re.search(r"\btask[: ]+([a-z0-9][a-z0-9-]{6,})", fix)
+        path, ln = m.group(1), int(m.group(2))
+        out.append({"file": path, "line": ln, "area": area_of(path), "why": strip_md(why), "fix": strip_md(fix),
+                    "task": task.group(1) if task else "", "since": since_of(repo, path, ln)})
+    return out
+
+
+def hacks(argv):
+    verb, rest = (argv[0], argv[1:]) if argv else ("list", [])
+    o, _ = opts(rest, ("repo", "data_z"))
+    if verb == "sync":
+        repo = o.get("repo") or os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), "../.."))
+        rows = registry(repo)
+        if o.get("dry_run"):
+            print(json.dumps(rows, indent=1))
+            return
+        put_hacks(rows)
+        print(f"hacks: {len(rows)} synced")
+    elif verb == "put":   # the remote half of `sync`: the rows parsed on the caller's side
+        rows = json.loads(zlib.decompress(base64.b64decode(o.get("data_z") or die("put needs --data-z"))))
+        call("hacks_sync", json.dumps(rows))
+        print(f"hacks: {len(rows)} synced")
+    elif verb in ("list", "ls"):
+        rows = sorted(table("hack"), key=lambda h: (h["since"] or 1 << 62))
+        if o.get("json"):
+            print(json.dumps(rows, indent=1))
+            return
+        print(f"{len(rows)} open hacks")
+        for h in rows:
+            print(f"{h['area']:<17} {h['file']}:{h['line']}  {h['why'][:110]}")
+    else:
+        die(f"unknown: hacks {verb} (sync|list)")
+
+
+def put_hacks(rows):
+    try:
+        call("hacks_sync", json.dumps(rows))
+    except Down:
+        z = base64.b64encode(zlib.compress(json.dumps(rows).encode(), 9)).decode()
+        remote_or_die(["hacks", "put", "--data-z", z])
+
+
+# ---- off the phone --------------------------------------------------------------------------------------------------
+
+def remote_or_die(argv):
+    """HACK: the Progress module lives on the phone only, so off it (the Mac) a command runs there over the dev
+    channel (powos-vadb), as powos-agents-cli's remote() does. Real fix: the hub's copy of the module and the
+    REMOTE-POWOS.md M2 subscription."""
+    if not shutil.which("docker"):
+        die("SpacetimeDB isn't reachable here and there's no dev channel to the phone")
+    b = base64.b64encode(json.dumps(argv).encode()).decode()
+    inner = f"powos progress --argv-b64 {b}"
+    cmd = ["docker", "exec", "-i", "powos-vadb", "adb", "shell", "su -c \"sh /data/powos/powos-run.sh '" + inner + "'\""]
+    try:
+        r = subprocess.run(cmd, timeout=60, capture_output=True, text=True)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        die(f"the phone didn't answer ({e})")
+    sys.stdout.write(r.stdout)
+    sys.stderr.write(r.stderr)
+    sys.exit(r.returncode)
+
+
+def main(argv):
+    if argv[:1] == ["--argv-b64"]:
+        argv = json.loads(base64.b64decode(argv[1]))
+    if not argv or argv[0] in ("help", "-h", "--help"):
+        print(__doc__.strip())
+        return
+    cmd, rest = argv[0], argv[1:]
+    fn = {"item": item, "items": item, "hacks": hacks, "hack": hacks}.get(cmd) or die(f"unknown: {cmd} (powos progress help)")
+    try:
+        fn(rest)
+    except Down:
+        remote_or_die(argv)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

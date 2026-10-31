@@ -20,6 +20,7 @@ import { powos } from "../bridge.ts";
 import type { AppLinks, AppWidgetData, Bridge } from "../types.ts";
 import { net, type Net } from "./net.ts";
 import { DetailSheet, type DetailSheetProps } from "./sheet.ts";
+import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
 const GRACE_MS = 5000;
@@ -32,7 +33,7 @@ export interface IslandHost {
    * [schema]: the bindings' fingerprint (`powos app build` defines it): another one than the connection was made with
    * (the module's schema changed, the UI rebuilt with its new bindings) makes the connection again with these.
    */
-  useDb(database: string, DbConnection: Builder, schema?: string): Db;
+  useDb(database: string, DbConnection: Builder | undefined, schema?: string): Db;
   useRows<T = any>(db: Db, table: string, query: string): T[];
   /** The element on screen, home shown and uncovered (apps/onscreen.ts): an island that animates stops without it. */
   useOnScreen?(ref: { current: Element | null }): boolean;
@@ -429,12 +430,22 @@ function useVisible() {
   return v;
 }
 
-export function useDb(database: string, make: Builder, schema?: string): Db {
+/**
+ * The shell's own apps' databases another app may subscribe to by name, on the shell's bindings (vendor/, kept what
+ * the module builds by apps/vendor.sh --check): useDb(name, undefined). An app's UI is bundled from its own folder
+ * only (apps/build.sh mounts nothing else), so it can't carry these bindings itself without a copy that drifts from
+ * the module; the shell's copy is the one that's current. Reading only: an app writes its own database, never these
+ * (docs/POWOS-APPS-FEASIBILITY.md: one database per app). powos-progress reads the work board (`work`) this way.
+ */
+const SHARED: Record<string, Builder> = { "powos-agents": AgentsDb };
+
+export function useDb(database: string, given: Builder | undefined, schema?: string): Db {
+  const make = given ?? SHARED[database];
   const visible = useVisible();
   const [, force] = useState(0);
   const ref = useRef<Entry | null>(null);
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || !make) return;
     const e = acquire(database, make, schema);
     ref.current = e;
     const l = () => force((n) => n + 1);
@@ -448,6 +459,7 @@ export function useDb(database: string, make: Builder, schema?: string): Db {
     };
   }, [database, visible, schema]);
   const e = ref.current;
+  if (!make) return { conn: null, status: "error", error: `${database}: no bindings given and not a shared database`, epoch: 0 };
   return e ? { conn: e.conn, status: e.status, error: e.error, epoch: e.epoch, stale: e.stale } : { conn: null, status: "disconnected", epoch: 0 };
 }
 
