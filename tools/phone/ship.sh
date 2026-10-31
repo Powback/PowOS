@@ -331,6 +331,8 @@ run)
   # by the app's current process) with a `RENDER STALL` (WebWindows' watchdog, RenderWatch.kt) or no applied geometry
   # (`w.f f...` line) since the ship = WINDOWS BROKEN, marked as window_gate marks a FAIL. No geometry while home isn't
   # on screen (an app full screen) is not judged. SHIP_RENDER_WATCH=0 turns it off; off in tests (SHIP_DIR).
+  # Synchronous (20 s): the service is a launchd job that exits when idle, and launchd kills what it leaves running -
+  # a backgrounded check died mid-sleep (10-31 14:46, 38fdae87: only its first log line).
   render_watch() {
     [ "${SHIP_RENDER_WATCH:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] && [ -x "$here/adb.sh" ] || return 0
     local t=$1 what=$2
@@ -363,7 +365,7 @@ run)
       if [ "$what" = apk ]; then echo "$t" > "$Q/failed-apk"; else echo "$t" > "$Q/failed"; fi
       echo "$(date '+%F %T') ${t:0:9} $what render-watch FAILED: $bad" >> "$Q/shipped.log"
       echo "$(date +%T) ${t:0:9}: WINDOWS BROKEN on the device after this ship (render-watch FAIL, log $rl)"
-      mail "ship ${t:0:9} ($what) FAILED the passive window check - web windows are BROKEN on the phone: $bad - log $rl on the Mac; fix it on origin, then ship.sh request again" ) &
+      mail "ship ${t:0:9} ($what) FAILED the passive window check - web windows are BROKEN on the phone: $bad - log $rl on the Mac; fix it on origin, then ship.sh request again" )
   }
   # done_req FILE RESULT: a request fully on the phone.
   done_req() { echo "result=$2" >> "$1"; mv "$1" "$Q/done/"; }
