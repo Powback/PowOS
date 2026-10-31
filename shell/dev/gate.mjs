@@ -3722,6 +3722,177 @@ async function webWindowTileInputCheck() {
 }
 
 /**
+ * TI1 (the user, 10-31 15:08-15:10, unfolded, Chrome left, Settings over Discord on the right): "I can't interact with
+ * this" (the tiled windows' bar buttons), the divider's pill drawn upright across Discord's bar. In the page, three
+ * tiled windows in that layout: each bar button is what the hit test finds at its centre; no body rect in "w.f" (the
+ * app's touches) covers a bar; the top/bottom divider's pill lies flat in its gap, over no bar, the gap filled.
+ */
+function TI_HELPERS() {
+  const rect = (el) => el.getBoundingClientRect();
+  const meets = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+  const bars = () => [...document.querySelectorAll(".webwindow[data-wwid] .webwindow-title")].map(rect);
+  const buttons = (id) =>
+    [...document.querySelectorAll(`.webwindow[data-wwid="${id}"] .ww-controls .ww-button`)].flatMap((b) => {
+      const r = rect(b);
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return b.contains(hit) ? [] : [`TI1: window ${id}'s ${b.getAttribute("aria-label")} button: the hit test at its centre found ${hit ? `${hit.tagName}.${hit.className}` : "nothing"}`];
+    });
+  // The app's touch rects: each window's body in its "w.f" entry (fields 5-8, viewport CSS px).
+  const bodies = (W) =>
+    W.webWins.value.flatMap((w) => {
+      const f = W.entry(w)?.split(" ").map(Number);
+      return f ? [{ id: w.id, left: f[5], top: f[6], right: f[5] + f[7], bottom: f[6] + f[8] }] : [];
+    });
+  const pill = () => {
+    const d = document.querySelector('.ww-divider[data-axis="y"]');
+    if (!d) return ["TI1: no top/bottom divider for the Settings | Discord split"];
+    const r = rect(d);
+    const cs = getComputedStyle(d, "::after");
+    const [w, h] = [parseFloat(cs.width), parseFloat(cs.height)];
+    const p = { left: r.left + r.width / 2 - w / 2, right: r.left + r.width / 2 + w / 2, top: r.top + r.height / 2 - h / 2, bottom: r.top + r.height / 2 + h / 2 };
+    const fails = w > h ? [] : [`TI1: the top/bottom divider's pill is upright (${w}x${h})`];
+    if (bars().some((b) => meets(b, p))) fails.push(`TI1: the divider's pill ${JSON.stringify(p)} overlaps a window's bar`);
+    if (getComputedStyle(d).backgroundColor === "rgba(0, 0, 0, 0)") fails.push("TI1: the gap between Settings and Discord shows what's under the windows (no fill)");
+    return fails;
+  };
+  const centre = (id, label) => {
+    const b = document.querySelector(`.webwindow[data-wwid="${id}"] .ww-button[aria-label="${label}"]`);
+    if (!b) return null;
+    const r = rect(b);
+    return [r.left + r.width / 2, r.top + r.height / 2];
+  };
+  window.__ti = { meets, bars, buttons, bodies, pill, centre };
+  return [];
+}
+
+async function tileBarsSetup() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const page = S.pages.value[0];
+  S.page.value = 0;
+  await window.__gw.settled();
+  W.webWins.value = [931, 932, 933].map((id, i) => ({ id, key: `a:gate.ti${i}`, label: ["Chrome", "Settings", "Discord"][i], page, x: 60 + 40 * i, y: 100 + 40 * i, w: 300, h: 260, live: true }));
+  W.tileWindows(page, [931, 932, 933]);
+  await window.__gw.settled();
+  await window.__gw.frames(2);
+  if (W.tilings.value[page]?.layout !== "3") return [`TI1: three windows tiled as ${W.tilings.value[page]?.layout}, not one left + two stacked right`];
+  const t = window.__ti;
+  const fails = [931, 932, 933].flatMap(t.buttons);
+  for (const b of t.bodies(W)) if (t.bars().some((r) => t.meets(r, b))) fails.push(`TI1: window ${b.id}'s touch rect in w.f ${JSON.stringify(b)} covers a bar`);
+  return [...fails, ...t.pill()];
+}
+
+async function tileBarsState() {
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  await window.__gw.settled();
+  return { min: !!W.webWins.value.find((w) => w.id === 933)?.minimised, open: W.webWins.value.some((w) => w.id === 932) };
+}
+
+async function tileBarsDone() {
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  W.webWins.value = [];
+  W.tilings.value = {};
+  return [];
+}
+
+/**
+ * A finger (CDP touch: the phone's path - touch events, pointer events, the synthesized click) on [page], reloaded with
+ * touch on (Preact binds onTouchStart as "touchstart" only where the element has ontouchstart, as on the phone).
+ */
+async function fingerOf(page) {
+  const cdp = await page.target().createCDPSession();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  await page.reload().catch(() => {});
+  await page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const tap = async ([x, y]) => (await touch("touchStart", [{ x, y }]), await wait(50), await touch("touchEnd", []), await wait(80));
+  return { touch, wait, tap };
+}
+
+/** TI1 with a finger: Discord's minimise and then Settings' close, tapped where they are. */
+async function tileBarsScene(r) {
+  const f = await fingerOf(r.page);
+  await r.page.evaluate(TI_HELPERS);
+  const fails = await r.page.evaluate(tileBarsSetup);
+  try {
+    const min = await r.page.evaluate(() => window.__ti.centre(933, "Minimise"));
+    if (min) await f.tap(min);
+    if (!(await r.page.evaluate(tileBarsState)).min) fails.push("TI1: a tap on Discord's minimise button didn't minimise it");
+    const close = await r.page.evaluate(() => window.__ti.centre(932, "Close"));
+    if (close) await f.tap(close);
+    if ((await r.page.evaluate(tileBarsState)).open) fails.push("TI1: a tap on Settings' close button didn't close it");
+    return fails;
+  } finally {
+    await r.page.evaluate(tileBarsDone);
+  }
+}
+
+/**
+ * SB1 (the user, 10-31 15:11: "I should be able to swipe on the search bar to change page"): a finger's sideways swipe
+ * from home's bottom search bar pages home as one on empty home does - following the finger, the page index stepping
+ * once, never back and forth - with no windows and with two tiled windows (which follow the page in the same frame).
+ */
+async function barSwipeSetup(withWindows) {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  S.page.value = 0;
+  const page = S.pages.value[0];
+  W.webWins.value = withWindows ? [941, 942].map((id, i) => ({ id, key: `a:gate.sb${i}`, label: `SB ${i}`, page, x: 40 + 60 * i, y: 120, w: 160, h: 200, live: true })) : [];
+  if (withWindows) W.tileWindows(page, [941, 942]);
+  await window.__gw.settled();
+  await window.__gw.frames(2);
+  const bar = document.querySelector(".home > .bar");
+  if (!bar) return null;
+  const r = bar.getBoundingClientRect();
+  window.__sb = { seen: [] };
+  window.__sb.off = S.page.subscribe((p) => window.__sb.seen.push(p));
+  return [r.left + r.width * 0.7, r.top + r.height / 2];
+}
+
+const barSwipeLeft = () => document.querySelector('.webwindow[data-wwid="941"]')?.getBoundingClientRect().left ?? null;
+
+async function barSwipeResult() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  await window.__gw.settled();
+  await window.__gw.frames(4);
+  window.__sb.off();
+  const out = { page: S.page.value, steps: window.__sb.seen.slice(1), focused: document.activeElement?.tagName ?? "" };
+  W.webWins.value = [];
+  W.tilings.value = {};
+  S.page.value = 0;
+  await window.__gw.settled();
+  return out;
+}
+
+/** One SB1 swipe: 240 px left from the search bar in 8 moves, the tiled window checked 120 px in ([windows]). */
+async function barSwipeOnce(r, f, tag, windows) {
+  const at = await r.page.evaluate(barSwipeSetup, windows);
+  if (!at) return [`${tag}: no search bar`];
+  const fails = [];
+  const l0 = await r.page.evaluate(barSwipeLeft);
+  await f.touch("touchStart", [{ x: at[0], y: at[1] }]);
+  for (let k = 1; k <= 8; k++) {
+    await f.touch("touchMove", [{ x: at[0] - 30 * k, y: at[1] }]);
+    await f.wait(17);
+    const l = k === 4 && windows ? await r.page.evaluate(barSwipeLeft) : null;
+    if (l != null && Math.abs(l - (l0 - 120)) > 3) fails.push(`${tag}: 120 px into the swipe a tiled window moved ${Math.round(l - l0)} px (want -120, with the page)`);
+  }
+  await f.touch("touchEnd", []);
+  const out = await r.page.evaluate(barSwipeResult);
+  if (out.page !== 1 || out.steps.join(",") !== "1") fails.push(`${tag}: a 240 px swipe left on the search bar went to page ${out.page} via [${out.steps}] (want 1, once)`);
+  return fails;
+}
+
+/** SB1 with a finger, [label] the fold: no windows and then two tiled ones. */
+async function barSwipeScene(r, label) {
+  const f = await fingerOf(r.page);
+  const none = await barSwipeOnce(r, f, `SB1 ${label} no windows`, false);
+  return [...none, ...(await barSwipeOnce(r, f, `SB1 ${label} 2 tiled windows`, true))];
+}
+
+/**
  * In the page: the tile LAYOUT (10-31). TG1: two corner snaps make a 2-split filling the whole tile area (no empty slot,
  * a lone snap is no tiling); TG2: a divider dragged to near an edge stays there (only the minimum tile limits it);
  * TL2: every tile has its bar with a close, none merged into the status bar (its spans stay full width); SC1: closing
@@ -5059,6 +5230,13 @@ try {
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
       }),
     );
+  // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));
+  // SB1: a sideways swipe on the search bar pages home, with and without tiled windows. Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `bar-swipe-${label}`, viewport).then((r) => whenReady(r, () => barSwipeScene(r, label))));
   // Edit mode: the search bar as it is, the edit bar below it, the dock in view (the user, 2026-10-30). Folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])

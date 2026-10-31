@@ -158,6 +158,9 @@
 .home.open :is(.launcher-frame, .launcher .drawer, .launcher .ai-panel) { pointer-events: auto; }
 /* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
 .home > .bar { transform: translateY(calc(var(--p) * var(--strip-height))); }
+/* SB1: a finger on the bar is home's to page with (gesture.ts chromeWay): the WebView never pans it, nor moves the
+   text's caret or selection along a sideways swipe; a tap still focuses it, a hold still selects. */
+.home > .bar { touch-action: none; }
 .home.pill-below > .bar, .pull-screen > .bar { transform: none; }
 /* Over an app (pull.tsx) the foot is home's: the pill in the flow right above the dock, the dock at the screen's foot, both
    held in place (no --p slide, no shrinking) - the dock was drawn over the pill (the user, 2026-10-28). With the dock
@@ -3348,12 +3351,15 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 }
 .ww-tile-item { all: unset; padding: 10px 12px; border-radius: 8px; font: var(--text-small) var(--font); color: var(--color-foreground); }
 .ww-tile-item:active { background: color-mix(in srgb, var(--color-foreground) 12%, transparent); }
-.ww-divider { touch-action: none; }
+/* TI1 (10-31 15:10): the gap between tiles is the divider's own fill - never the wallpaper or a lower window showing
+   between one tile's content and the next one's bar - its pill along the gap (data-axis: "x" a left | right split,
+   upright; "y" a top / bottom one, flat), inside it, over no bar. */
+.ww-divider { touch-action: none; background: var(--color-surface); }
 .ww-divider::after {
   content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 56px; transform: translate(-50%, -50%);
   border-radius: 3px; background: var(--color-foreground); box-shadow: 0 0 0 1.5px var(--color-surface);
 }
-.ww-divider[data-div$=":y"]::after { width: 56px; height: 5px; }
+.ww-divider[data-axis="y"]::after { width: 56px; height: 5px; }
 
 /*
  * Home's search as a dock button (docksearch.tsx; Settings > style > home "search: dock button"): no pill in home's

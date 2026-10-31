@@ -162,13 +162,7 @@ class NavGesture(
                         homeDrag(c.lift, e.rawX - downX, c.homeness())
                         return GestureConsumer.Verdict.TAKE
                     }
-                    NavGestureClassifier.Axis.SIDEWAYS -> {
-                        if (panel != null) return drop()
-                        // Along the bar: the quick switch's, not the window's - back where it was.
-                        backToApp(transition)
-                        transition = null
-                        return if (pinned) drop() else GestureConsumer.Verdict.TAKE
-                    }
+                    NavGestureClassifier.Axis.SIDEWAYS -> return sideways()
                     NavGestureClassifier.Axis.IGNORED -> {
                         Log.i(TAG, "gesture: downwards from the bar - not ours")
                         return drop()
@@ -189,8 +183,7 @@ class NavGesture(
                 classifier = null
                 val outcome = c.up(e.rawX, e.rawY, e.eventTime)
                 releaseLift = c.speed().second
-                ended(outcome, c.why)
-                return GestureConsumer.Verdict.FOLLOW
+                return released(outcome, c.why)
             }
             MotionEvent.ACTION_CANCEL -> {
                 classifier = null
@@ -200,6 +193,41 @@ class NavGesture(
         }
         return GestureConsumer.Verdict.FOLLOW
     }
+
+    /** The swipe went along the bar. */
+    private fun sideways(): GestureConsumer.Verdict {
+        if (panel != null) return drop()
+        if (homeOwnsSideways()) {
+            Log.i(TAG, "gesture: sideways over home's page - home's page swipe (its search bar / dock), not the quick switch")
+            return drop()
+        }
+        // Along the bar: the quick switch's, not the window's - back where it was.
+        backToApp(transition)
+        transition = null
+        return if (pinned) drop() else GestureConsumer.Verdict.TAKE
+    }
+
+    /** Let go with [outcome]; a flick decided only at the up is still home's sideways over its page (homeOwnsSideways). */
+    private fun released(
+        outcome: NavGestureClassifier.Outcome,
+        why: String,
+    ): GestureConsumer.Verdict {
+        if (outcome is NavGestureClassifier.Outcome.QuickSwitch && homeOwnsSideways()) {
+            ended(NavGestureClassifier.Outcome.None, "sideways over home's page: home's page swipe")
+            return GestureConsumer.Verdict.DROP
+        }
+        ended(outcome, why)
+        return GestureConsumer.Verdict.FOLLOW
+    }
+
+    /**
+     * SB1 (10-31 15:09, the user: swiping sideways on home's search bar "flashes back and forth" - the trace: this
+     * quick switch, Tasks.open, 250 ms on the main thread): over home's own page (no app's window under the finger, no
+     * full-screen window, not the switcher) the bottom strip is home's search bar and dock, and a sideways swipe there
+     * is home's page swipe (shell/ui/gesture.ts chromeWay) - dropped here, the WebView keeps it. Over an app, sideways
+     * along the strip is still the quick switch.
+     */
+    private fun homeOwnsSideways(): Boolean = from == null && !overFullWindow && !Switcher.open && Switcher.onHome && Switcher.homeVisible
 
     private fun drop(): GestureConsumer.Verdict {
         classifier = null
