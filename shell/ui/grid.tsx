@@ -33,7 +33,7 @@ import { AppWidgetFace } from "./appwidget.tsx";
 import { Island } from "./island.tsx";
 import { AgentsPanel } from "./agents.tsx";
 import { migrateRecents, RecentsPanel } from "./recentwidget.tsx";
-import { dropSearchOnFoot, hoverFoot, placeItem, putBackInBar, SEARCH_KEY, SearchPanel } from "./searchwidget.tsx";
+import { dropSearchOnFoot, hoverFoot, placeItem, putBackInBar, SEARCH_KEY, SearchPanel, undockSearch } from "./searchwidget.tsx";
 import { openAgents } from "../agents.ts";
 import { creationIdOf, creationWidgets, discardWidgetCreation, watchCreations } from "./creationwidgets.tsx";
 import { PendingDetailSheet, SkeletonWidgetTile } from "./pending.tsx";
@@ -387,6 +387,8 @@ async function letGo(c: Carry | null, ev: PointerEvent) {
   navigator.vibrate?.(10);
   if (c.app) await powos.home.add(c.app, target.page, target.cell);
   else if (target.group) await powos.home.group(c.item!.key, target.group);
+  // The search (the dock's button, the foot's pill or its widget) let go on the grid: the bar widget there.
+  else if (c.item!.key === SEARCH_KEY) await undockSearch(target.page, target.cell!);
   else await placeItem(c.item!.key, target.cell!, target.page);
 }
 

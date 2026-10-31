@@ -2001,6 +2001,8 @@ async function editSearchCheck() {
 }
 
 /** editSearchCheck's page helpers: the foot's pill, the dock, and one dock placement's edit mode in and its findings. */
+/** Home's search as the pill in the foot (folded's default is the dock button since SW1): a check's, never stored. */
+const barOnHome = async () => ((await importShim("./state.ts")).searchTry.value = "bar");
 const editSearchHelpers = `window.__es = {
   shown: (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility === "visible",
   pill: () => document.querySelector(".home > .bar .bar-pill"),
@@ -5917,6 +5919,8 @@ try {
     const host = await joinPages(home.page, pull.page);
     return whenReady(home, async () => {
       await pull.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 });
+      // Home's pill (folded's default is the dock button since SW1).
+      await home.page.evaluate(async () => ((await importShim("./state.ts")).searchTry.value = "bar"));
       return [...pull.problems.map((p) => `launcher: ${p}`), ...(await barSyncCheck(home.page, pull.page, host))];
     });
   }));
@@ -6050,7 +6054,7 @@ try {
   // Edit mode: the search bar as it is, the edit bar below it, the dock in view (the user, 2026-10-30). Folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
-      runs.push(open(browser, `${ORIGIN}/index.html`, `edit-search-${label}`, viewport).then((r) => whenReady(r, async () => r.page.evaluate(editSearchHelpers).then(() => r.page.evaluate(editSearchCheck)))));
+      runs.push(open(browser, `${ORIGIN}/index.html`, `edit-search-${label}`, viewport).then((r) => whenReady(r, async () => r.page.evaluate(barOnHome).then(() => r.page.evaluate(editSearchHelpers)).then(() => r.page.evaluate(editSearchCheck)))));
   // Edit mode's "+ app" (the user, 2026-10-23): the drawer's list and search, a pick at the first free cell of the page
   // in view, kept after a reload (the mock keeps its layout in localStorage once "mock.keepHome" is set). Both screens.
   if (process.env.SHELL_PAGES !== "0")
@@ -6186,6 +6190,33 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position] of [["folded", "bottom"], ["folded", "right"], ["unfolded", "bottom"], ["unfolded", "right"], ["unfolded", "left"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `dock-search-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dockSearchCheck(pos), position))));
+  // SW1 (dev/dock-search-check.js; the user, 2026-10-31 15:34): edit mode's drag docks home's search and back - the old
+  // hidden setting migrates, the defaults, the bar onto the dock (a gap at the separator, then the button, no bar), the
+  // button onto home (the bar widget at the drop cell), the spot kept across reloads.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, position] of [["folded", "bottom"], ["unfolded", "bottom"], ["unfolded", "right"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `search-widget-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, async () => {
+        const call = (fn, ...args) => r.page.evaluate(async (f, a) => (await importShim("./dev/dock-search-check.js"))[f](...a), fn, args);
+        const reload = async () => {
+          await r.page.reload();
+          await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: 20000, polling: 50 });
+        };
+        const fails = [];
+        await call("searchSpotOld", "bar", "dock");
+        await reload();
+        fails.push(...(await call("searchSpotMigrates", "bar", "dock")));
+        await reload();
+        fails.push(...(await call("searchSpotDefaults")));
+        await call("searchDragSetup", position);
+        fails.push(...(await call("searchDragDocks")));
+        fails.push(...(await call("searchDragOut")));
+        await reload();
+        fails.push(...(await call("searchSpotKept", "bar", position)));
+        await call("searchDragDone");
+        await reload();
+        fails.push(...(await call("searchSpotKept", "dock", position)));
+        return fails.map((f) => `${position}: ${f}`);
+      })));
   // PI1 (dev/page-marks-check.js; the user, 2026-10-31 01:34): the dock marks the apps open on the page on screen - a
   // pill and full opacity for page 1's app, a dot and a fade for page 2's; a swipe to page 2 swaps them; no windows,
   // nothing fades. Folded: a running app's dot only. Renders: /cache/pi1-<case>-<step>.png.

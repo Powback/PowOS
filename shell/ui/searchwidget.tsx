@@ -8,8 +8,8 @@
  * weird"); it no longer turns into a grid tile there. It goes on the grid from the widget picker.
  */
 import { signal } from "@preact/signals";
-import { carry, home, selected, stored, type Carry } from "../state.ts";
-import type { Cell } from "../types.ts";
+import { byKey, carry, dock, dockAim, dockMode, dockPosition, home, searchInDock, searchPlacement, selected, stored, type Carry } from "../state.ts";
+import type { Cell, HomeItem } from "../types.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { powos } from "../bridge.ts";
 import { Bar } from "./bar.tsx";
@@ -34,6 +34,50 @@ export function putBackInBar(): Promise<unknown> {
   return powos.home.remove(SEARCH_KEY);
 }
 
+/** Sets this mode's search spot (state.ts searchSpot), logged as the old edit-sheet pick was: only edit mode's drag writes it. */
+function setSpot(v: "dock" | "bar", how: string) {
+  const place = searchPlacement.value;
+  if (!place || place.value === v) return;
+  console.info(`[powos] search placement (${dockMode.value}): ${place.value} -> ${v}, ${how}`);
+  place.value = v;
+}
+
+/**
+ * The search widget let go on the dock: docked - the round button between the pinned apps and the recent ones
+ * (docksearch.tsx). Off the grid if it was there, so it's in one place only.
+ */
+export function dockSearch(): Promise<unknown> {
+  setSpot("dock", "dragged onto the dock");
+  return putBackInBar();
+}
+
+/** The dock's button (or the foot's pill) let go on home's grid at [cell] of [page]: the bar widget there. */
+export function undockSearch(page: number, cell: Cell): Promise<unknown> {
+  setSpot("bar", "dragged onto home");
+  return hasSearchWidget() ? placeItem(SEARCH_KEY, cell, page) : powos.home.addPanel("search", page, cell);
+}
+
+/** The search as a home item to carry (grid.tsx startCarry): the grid's widget, or the foot's pill / the dock's button. */
+export function searchItem(): HomeItem {
+  const own = home.value.items.find((i) => i.key === SEARCH_KEY);
+  // Not on the grid yet: a full-width row, as the widget picker adds it (editsheet.tsx fullRow).
+  const cell = { x: 0, y: 0, w: home.value.columns, h: 1 };
+  return own?.cell ? own : { key: SEARCH_KEY, kind: "panel", name: "search", page: 1, cell, resizable: true, minSize: [2, 1], size: null };
+}
+
+/** The search is being carried (its button leaves the dock, its pill the foot, while it is). */
+export const carryingSearch = () => carry.value?.item?.key === SEARCH_KEY;
+
+/**
+ * The dock making room for the carried search widget (dockdrop.ts hoverDock reads it): a gap where the button would go,
+ * the dock's separator (dockdrop.ts buttonSlot). Null when it's not the search or not over the dock.
+ */
+export function aimSearch(c: Carry, x: number, y: number) {
+  if (c.item?.key !== SEARCH_KEY || footAimAt(SEARCH_KEY, x, y) !== "dock") return null;
+  const n = dock.value.filter((k) => byKey.value.has(k)).length;
+  return { key: SEARCH_KEY, slot: dockPosition.value !== "bottom" ? n : Math.floor((n + 1) / 2), swap: false };
+}
+
 /** [el]'s box grown by [reach] px on every side contains [x], [y]. */
 const near = (el: Element | null, x: number, y: number, reach: number) => {
   const r = el?.getBoundingClientRect();
@@ -43,24 +87,31 @@ const near = (el: Element | null, x: number, y: number, reach: number) => {
 const REACH = 24;
 
 /**
- * Where in the foot the search widget carried to [x], [y] would go: "bar" (the bar's slot - in edit mode the edit sheet
- * holds it: folded the pill's row, wide the one bar's middle), "below" (the dock's row or under it, folded: the pill
- * under the dock - the user, 2026-10-23: "move the search bar down to the dock"), or null (home's grid).
+ * Where the search widget carried to [x], [y] would go: "dock" (on the dock: docked as its button - the user,
+ * 2026-10-31 15:34), "bar" (the bar's slot - in edit mode the edit sheet holds it: folded the pill's row, wide the one
+ * bar's middle), "below" (under a bottom dock, folded: the pill under the dock - the user, 2026-10-23), or null (home's
+ * grid).
  */
-export function footAimAt(key: string | undefined, x: number, y: number): "bar" | "below" | null {
+export function footAimAt(key: string | undefined, x: number, y: number): "dock" | "bar" | "below" | null {
   if (key !== SEARCH_KEY) return null;
   // On the dock itself first: in edit mode the edit sheet sits just under the dock (shell.css), so its reach would
   // otherwise take a drop on the dock's lower half.
-  if (!wideHome.value && near(document.querySelector(".home > .dock:not(.dock-tray)"), x, y, 0)) return "below";
+  const dockEl = document.querySelector(".home > .dock:not(.dock-tray)");
+  const bottom = dockPosition.value === "bottom";
+  if (near(dockEl, x, y, bottom ? 0 : REACH / 2)) return "dock";
   if (near(document.querySelector(".home > .edit-sheet"), x, y, REACH)) return "bar";
-  const dock = document.querySelector(".home > .dock:not(.dock-tray)")?.getBoundingClientRect();
-  if (!dock?.width) return null;
-  if (y >= dock.top - REACH / 2) return wideHome.value ? "bar" : "below";
-  return null;
+  return bottom ? byBottomDock(dockEl?.getBoundingClientRect(), y) : null;
+}
+
+/** Off a bottom dock at [r], [y] down: under it the pill below it (wide: the bar's), just over it the dock. */
+function byBottomDock(r: DOMRect | undefined, y: number) {
+  if (!r?.width) return null;
+  if (y > r.bottom) return wideHome.value ? "bar" : "below";
+  return y >= r.top - REACH / 2 ? "dock" : null;
 }
 
 /** The search widget hovering over the foot (editsheet.tsx and the dock light up as the drop target). */
-export const footAim = signal<"bar" | "below" | null>(null);
+export const footAim = signal<"dock" | "bar" | "below" | null>(null);
 
 /** Follows a carried tile (grid.tsx startCarry): lights up the foot when it's the search widget over it. */
 export function hoverFoot(c: Carry | null, x: number, y: number) {
@@ -71,20 +122,27 @@ export function hoverFoot(c: Carry | null, x: number, y: number) {
   }
 }
 
-/** [c] let go at [ev]: the search widget over the foot goes back there (over or under the dock). True: handled. */
+/**
+ * [c] let go at [ev]: the search widget over the dock docks (its button), over the foot it goes back there (over or
+ * under the dock). True: handled.
+ */
 export function dropSearchOnFoot(c: Carry | null, ev: PointerEvent): boolean {
   footAim.value = null;
   const a = ev.type === "pointerup" ? footAimAt(c?.item?.key, ev.clientX, ev.clientY) : null;
   if (!a) return false;
+  dockAim.value = null;
   carry.value = null;
   selected.value = null;
+  navigator.vibrate?.(10);
+  if (a === "dock") return void dockSearch(), true;
   footBelow.value = a === "below" ? "1" : "";
+  setSpot("bar", "dragged onto the foot");
   void putBackInBar();
   return true;
 }
 
 /** Home's classes for the search widget (shell.css): on the grid (the foot's pill parked), carried under the dock. */
-export const searchClasses = () => `${hasSearchWidget() ? "search-parked" : ""} ${footAim.value === "below" ? "search-below-aim" : ""}`;
+export const searchClasses = () => `${hasSearchWidget() && !searchInDock.value ? "search-parked" : ""} ${footAim.value === "below" ? "search-below-aim" : ""} ${carryingSearch() ? "search-carried" : ""}`;
 
 /** In the foot: the pill under the dock ("1"), else over it. */
 export const footBelow = stored("search.belowDock", "");

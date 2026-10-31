@@ -318,19 +318,19 @@ function between(btn, above, recent) {
   return fails;
 }
 
-/** Unfolded with no choice of its own is the bar whatever folded picked (the user, 15:32); its own "dock" wins. */
+/** Folded and unfolded each keep their own spot (state.ts searchSpot): the other mode's "dock" never docks this one. */
 async function followsFolded(S) {
   if (S.dockMode.value !== "unfolded") return [];
-  const was = { mobile: S.mobileSearchPlacement.value, own: localStorage.getItem("powos.search.place.unfolded") ?? "" };
+  const was = { mobile: S.searchSpot.mobile.value, unfolded: S.searchSpot.unfolded.value };
   S.searchTry.value = "";
-  S.unfoldedSearch.value = "";
-  S.mobileSearchPlacement.value = "dock";
+  S.searchSpot.mobile.value = "dock";
+  S.searchSpot.unfolded.value = "bar";
   await sleep(100);
-  const fails = !S.searchInDock.value && S.unfoldedSearch.value === "bar" ? [] : ["folded \"dock button\", unfolded unset: not the bar unfolded"];
-  S.unfoldedSearch.value = "dock";
+  const fails = S.searchInDock.value ? ["folded docked, unfolded the bar: docked unfolded"] : [];
+  S.searchSpot.unfolded.value = "dock";
   if (!S.searchInDock.value) fails.push("unfolded's own \"dock\" didn't give the button");
-  S.mobileSearchPlacement.value = was.mobile;
-  S.unfoldedSearch.value = was.own;
+  S.searchSpot.mobile.value = was.mobile;
+  S.searchSpot.unfolded.value = was.unfolded;
   S.searchTry.value = "dock";
   await sleep(100);
   return fails;
@@ -373,4 +373,153 @@ export async function dk1Check(position) {
   S.dockTry.value = "";
   S.dock.value = was.dock;
   return fails.map((f) => `dk1 ${position}: ${f}`);
+}
+
+/*
+ * SW1 (the user, 2026-10-31 15:34: "grab the search as a widget and put it into the sidebar"): edit mode's drag docks
+ * and undocks home's search (ui/searchwidget.tsx). gate.mjs's search-widget-* cases call these in order, with reloads
+ * between: searchSpotMigrates / searchSpotDefaults (the old hidden setting, the defaults), searchDragDocks (the bar onto
+ * the dock: a gap at the separator while over it, then the button there and no bar), searchDragOut (the button onto
+ * home: the bar widget at the drop cell), searchSpotKept (after a reload).
+ */
+
+/** Before a reload: the old setting as it was stored, the new spot unset, not migrated yet. */
+export function searchSpotOld(mobile, unfolded) {
+  for (const k of ["mobile", "unfolded"]) localStorage.removeItem(`powos.search.spot.${k}`);
+  localStorage.removeItem("powos.search.spot.migrated");
+  localStorage.setItem("powos.search.place.mobile", mobile);
+  localStorage.setItem("powos.search.place.unfolded", unfolded);
+  localStorage.setItem("powos.search.place.migrated", "2");
+}
+
+/** After it: the old values became the spots, the old keys are gone. */
+export async function searchSpotMigrates(mobile, unfolded) {
+  const S = await importShim("./state.ts");
+  const fails = [];
+  if (S.searchSpot.mobile.value !== mobile) fails.push(`folded migrated to "${S.searchSpot.mobile.value}", not "${mobile}"`);
+  if (S.searchSpot.unfolded.value !== unfolded) fails.push(`unfolded migrated to "${S.searchSpot.unfolded.value}", not "${unfolded}"`);
+  for (const k of ["mobile", "unfolded", "migrated"]) if (localStorage.getItem(`powos.search.place.${k}`) != null) fails.push(`powos.search.place.${k} still stored`);
+  // Unset after the migration (a fresh device): the defaults next.
+  for (const k of ["mobile", "unfolded"]) localStorage.removeItem(`powos.search.spot.${k}`);
+  return fails.map((f) => `migrate: ${f}`);
+}
+
+/** A fresh device: folded docked, unfolded the bar - on screen too. */
+export async function searchSpotDefaults() {
+  const S = await importShim("./state.ts");
+  const fails = [];
+  if (S.searchSpot.mobile.value !== "dock") fails.push(`folded default "${S.searchSpot.mobile.value}", not "dock"`);
+  if (S.searchSpot.unfolded.value !== "bar") fails.push(`unfolded default "${S.searchSpot.unfolded.value}", not "bar"`);
+  const docked = S.dockMode.value === "mobile";
+  await sleep(200);
+  if (!!document.querySelector(".home > .dock .dock-search") !== docked) fails.push(`${S.dockMode.value} default: dock button ${docked ? "missing" : "shown"}`);
+  if (!!document.querySelector(".home > .bar") === docked) fails.push(`${S.dockMode.value} default: bar ${docked ? "shown" : "missing"}`);
+  return fails.map((f) => `defaults: ${f}`);
+}
+
+const at = (x, y) => ({ bubbles: true, pointerId: 11, isPrimary: true, pointerType: "touch", clientX: x, clientY: y });
+const centre = (el) => {
+  const r = el.getBoundingClientRect();
+  return [r.left + r.width / 2, r.top + r.height / 2];
+};
+
+/** A finger from [el]'s middle to [x], [y]: down on it, moves on the window, [mid] looked at over the target, up. */
+async function drag(el, x, y, mid) {
+  const [x0, y0] = centre(el);
+  el.dispatchEvent(new PointerEvent("pointerdown", at(x0, y0)));
+  for (const f of [0.1, 0.4, 0.8, 1]) {
+    dispatchEvent(new PointerEvent("pointermove", at(x0 + (x - x0) * f, y0 + (y - y0) * f)));
+    await sleep(60);
+  }
+  const seen = mid?.();
+  dispatchEvent(new PointerEvent("pointerup", at(x, y)));
+  await sleep(300);
+  return seen;
+}
+
+/** The dock's pinned row's cells, and where the search's would be (dockdrop.ts buttonSlot of [cells]). */
+function pinnedCells() {
+  const row = document.querySelector(".home > .dock:not(.dock-tray) .dock-page");
+  return row ? [...row.children].filter((c) => c.matches(".app")) : [];
+}
+
+/** Cell [i] of [n] is the dock's separator (dockdrop.ts buttonSlot): a side column's end, a bottom row's middle. */
+function atSeparator(what, { i, n }, vertical) {
+  const want = vertical ? n - 1 : Math.floor((n - 1) / 2);
+  if (i < 0) return [`no ${what}`];
+  return i === want ? [] : [`${what} at cell ${i} of ${n}, not the separator ${want}`];
+}
+
+/** Edit mode, this mode's search the bar (in the foot), 6 pinned apps, a side [position]. */
+export async function searchDragSetup(position) {
+  const S = await importShim("./state.ts");
+  if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6);
+  S.dockTry.value = position;
+  S.searchPlacement.value.value = "bar";
+  S.editing.value = true;
+  await sleep(400);
+}
+
+/** The foot's pill dragged onto the dock: a gap at the separator while over it; let go, the button there, no bar. */
+export async function searchDragDocks() {
+  const S = await importShim("./state.ts");
+  const fails = [];
+  const bar = document.querySelector(".home > .bar");
+  const dock = document.querySelector(".home > .dock:not(.dock-tray)");
+  if (!bar || !dock) return [`no ${bar ? "dock" : "bar"} on home to drag`];
+  const [x, y] = centre(dock);
+  const vertical = S.dockPosition.value !== "bottom";
+  const gapAt = await drag(bar, x, y, () => {
+    const cells = pinnedCells();
+    return { i: cells.findIndex((c) => c.matches(".dock-gap")), n: cells.length };
+  });
+  fails.push(...atSeparator("drop gap (over the dock)", gapAt, vertical));
+  if (!S.searchInDock.value) fails.push("let go on the dock: not docked");
+  const cells = pinnedCells();
+  fails.push(...atSeparator("dock button (dropped)", { i: cells.findIndex((c) => c.matches(".dock-search")), n: cells.length }, vertical));
+  if (document.querySelector(".home > .bar")) fails.push("the bar is still on home");
+  if (S.home.value.items.some((i) => i.key === "panel:search")) fails.push("a search widget left on the grid");
+  return fails.map((f) => `dock: ${f}`);
+}
+
+/** The dock's button dragged onto home's first free row: the bar widget at that cell, the button gone. */
+export async function searchDragOut() {
+  const S = await importShim("./state.ts");
+  const G = await importShim("./ui/grid.tsx");
+  const btn = document.querySelector(".home > .dock .dock-search");
+  if (!btn) return ["out: no dock button to drag"];
+  const spot = G.placeNewCells(S.home.value.columns, 1);
+  const g = G.geometry.value;
+  const x = g.left + g.pad + (spot.cell.w * g.cellW) / 2 + spot.cell.x * g.cellW;
+  const y = g.top + g.pad + (spot.cell.h * g.cellH) / 2 + spot.cell.y * g.cellH;
+  await drag(btn, x, y);
+  await sleep(200);
+  const fails = [];
+  const item = S.home.value.items.find((i) => i.key === "panel:search");
+  if (!item) fails.push("no bar widget on home after the drop");
+  else if (item.page !== spot.page || item.cell?.x !== spot.cell.x || item.cell?.y !== spot.cell.y) fails.push(`bar widget at ${JSON.stringify([item.page, item.cell])}, not the drop cell ${JSON.stringify([spot.page, spot.cell])}`);
+  if (S.searchInDock.value) fails.push("still docked");
+  if (document.querySelector(".home > .dock .dock-search")) fails.push("the dock button is still there");
+  return fails.map((f) => `out: ${f}`);
+}
+
+/** After a reload: the spot the drag left (undocked), then docked again and reloaded: docked. [want]: "bar" | "dock". */
+export async function searchSpotKept(want, position) {
+  const S = await importShim("./state.ts");
+  S.dockTry.value = position;
+  await sleep(300);
+  const fails = [];
+  if (S.searchPlacement.value.value !== want) fails.push(`reloaded: spot "${S.searchPlacement.value.value}", not "${want}"`);
+  if (!!document.querySelector(".home > .dock .dock-search") !== (want === "dock")) fails.push(`reloaded: dock button ${want === "dock" ? "missing" : "shown"}`);
+  return fails;
+}
+
+/** The end: the widget off the grid, docked again (the next reload checks it stayed). */
+export async function searchDragDone() {
+  const S = await importShim("./state.ts");
+  const W = await importShim("./ui/searchwidget.tsx");
+  S.editing.value = false;
+  await W.dockSearch();
+  S.dockTry.value = "";
+  await sleep(200);
 }

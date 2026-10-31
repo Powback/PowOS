@@ -420,6 +420,8 @@
 .home.search-parked:not(.wide) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
 .home.search-parked:not(.wide) > .stage > .launcher-frame { inset: 0 0 calc(-1 * (var(--strip-height) + var(--foot))); }
 .home.wide.search-parked > .bar { margin-top: 0; }
+/* Edit mode's pill picked up (searchwidget.tsx grabSearch): the carried copy is it; its place in the foot stays. */
+.home.search-carried > .bar { visibility: hidden; }
 /* Edit mode: the search widget carried over the bar's slot (searchwidget.tsx barAim) - let go, it's back in the bar. */
 .edit-sheet.drop-here, .home.search-below-aim > .dock:not(.dock-tray) { outline: var(--frame) dashed var(--color-accent); outline-offset: -2px; }
 /* The fields that grow with their text (grow.tsx): their height animates, they scroll past their last row. */
@@ -3446,8 +3448,6 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 /* A side column centres its pinned apps and the button after them (auto margins: nothing cut once it scrolls). */
 .home.search-dock:is(.dock-left, .dock-right) .dock-pages > .dock-page:first-child { margin-top: auto; }
 .home.search-dock:is(.dock-left, .dock-right) .dock-pages > .dock-page:last-child { margin-bottom: auto; }
-/* Edit mode's theme sheet: home's search, bar or dock button (editsheet.tsx SearchPlace). */
-.search-place-pick { display: flex; gap: 4px; }
 
 /*
  * PowOS AI's glanceable line (powai.tsx Strip, AI7): one slim row under the header - agents working · the task moving

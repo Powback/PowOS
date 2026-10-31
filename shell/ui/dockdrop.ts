@@ -6,6 +6,7 @@
 import { byKey, dock, dockPosition, dockAim, editing, homePage, searchInDock, selected, setDock, type Carry } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
+import { aimSearch } from "./searchwidget.tsx";
 
 /** The most apps the dock holds; a full one swaps instead of growing. */
 export const DOCK_MAX = 6;
@@ -72,7 +73,8 @@ function slotAt(el: HTMLElement, r: DOMRect, point: { x: number; y: number }, n:
 
 /** Follows the finger: the dock makes room as it comes and goes, with a tick for each new slot. */
 export function hoverDock(c: Carry, x: number, y: number) {
-  const a = aimDock(c, x, y);
+  // The search widget makes room too: a gap where its button would go (searchwidget.tsx; its drop is the foot's).
+  const a = aimDock(c, x, y) ?? aimSearch(c, x, y);
   const was = dockAim.value;
   if (a?.slot !== was?.slot || a?.key !== was?.key) {
     if (a) navigator.vibrate?.(5);

@@ -32,7 +32,7 @@ import {
   useScreen,
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, mobileSearchPlacement, unfoldedSearch, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
+import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
 import { ALIGNS, alignChoice, type AlignMode, type AlignSurface } from "./align.ts";
 
@@ -219,15 +219,6 @@ function DockOption({ label, placement, fallback }: { label: string; placement: 
   return (
     <Option label={label}>
       <Segmented options={DOCK_SIDES} picked={DOCK_SIDES.indexOf(validDockPosition(placement.value, fallback))} onPick={(i) => (placement.value = DOCK_SIDES[i])} />
-    </Option>
-  );
-}
-
-const SEARCH_PLACES = ["bar", "dock"];
-function SearchOption({ label, placement }: { label: string; placement: { value: string } }) {
-  return (
-    <Option label={label}>
-      <Segmented options={["bar", "dock button"]} picked={placement.value === "dock" ? 1 : 0} onPick={(i) => (placement.value = SEARCH_PLACES[i])} />
     </Option>
   );
 }
@@ -562,9 +553,6 @@ function StyleScreen() {
         <DockOption label="folded dock position" placement={mobileDockPlacement} fallback="bottom" />
         <DockOption label="unfolded dock position" placement={unfoldedDockPlacement} fallback="bottom" />
         <DockOption label="desktop dock position" placement={desktopDockPlacement} fallback="left" />
-        {/* Home's search: the pill over the dock, or a button in the dock's middle that expands into it (ui/docksearch.tsx). */}
-        <SearchOption label="folded search" placement={mobileSearchPlacement} />
-        <SearchOption label="unfolded search" placement={unfoldedSearch} />
         <Option label="swipe up from the left: PowOS AI">
           <Segmented options={["on", "off"]} picked={pullPanels.value === "on" ? 0 : 1} onPick={(i) => (pullPanels.value = i === 0 ? "on" : "off")} />
         </Option>

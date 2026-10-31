@@ -161,7 +161,8 @@ export async function adoptsHome(position, opts = {}) {
   if (S.dock.value.length < 4) S.dock.value = S.recent.value.slice(0, 4);
   S.dockTry.value = position;
   W.footBelow.value = opts.below ? "1" : "";
-  S.searchTry.value = opts.button ? "dock" : "";
+  // The pill on home, folded too (folded's default is the dock button since SW1).
+  S.searchTry.value = opts.button ? "dock" : "bar";
   await sleep(300);
   const fails = await openedAdopting(S, opts.button);
   if (S.drawer.value !== 1) fails.push("the launcher didn't open in place");

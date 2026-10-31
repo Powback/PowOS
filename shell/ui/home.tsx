@@ -13,7 +13,7 @@ import { powos } from "../bridge.ts";
 import type { App, PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
-import { DockSearchButton, dockButton } from "./docksearch.tsx";
+import { DockSearchButton, dockButton, grabPill } from "./docksearch.tsx";
 import { chromeWay, drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome, windowGestureActive } from "./gesture.ts";
 import { tick } from "./haptics.ts";
 import { PageDots } from "./pagedots.tsx";
@@ -36,10 +36,10 @@ import { DockGroupCell, groupedKeys, unpinnedGroups } from "./dockgroups.tsx";
 import { Recents } from "./recents.tsx";
 import { appOf, dockTap } from "./desktops.ts";
 import { overWindows } from "./panellift.ts";
-import { footBelow, searchClasses } from "./searchwidget.tsx";
+import { carryingSearch, footBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
 import { webWins, windowFrame } from "./webwindows.tsx";
-import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullKind, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
+import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullKind, pullPanels, recent, screen, searchInDock, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
 import { remoteOpen } from "../remote.ts";
@@ -610,7 +610,7 @@ function HomeDots() {
 }
 
 /** The foot's pill, unless home's search is the dock's button (docksearch.tsx: it opens the launcher, with the pill). */
-const HomeSearch = () => (dockButton.value && !drawerOpen.value ? null : <Bar />);
+const HomeSearch = () => ((dockButton.value || (searchInDock.value && carryingSearch())) && !drawerOpen.value ? null : <Bar />);
 
 let launcherUsed = false;
 
@@ -650,6 +650,7 @@ export function Home() {
       <div class="screens" {...homeGestures()}>
         <PowAiPage />
         <div
+          onPointerDownCapture={grabPill}
           class={`home adopts dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
         >
           <div class="stage">

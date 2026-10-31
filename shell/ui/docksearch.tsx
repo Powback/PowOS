@@ -4,7 +4,8 @@
  * button | 3 apps; an odd count puts the extra one on the right) is a round face with the prompt glyph the bar shows
  * empty (bar.tsx Pill .prompt) and a small mic badge (a hold dictates).
  * A side column (unfolded right / left) has it after its pinned apps instead: the separator between them and the recent
- * ones (the user, 13:31; dockdrop.ts buttonSlot). Unfolded with no choice of its own follows the folded one (state.ts).
+ * ones (the user, 13:31; dockdrop.ts buttonSlot). Docked by edit mode's drag of the search widget onto the dock, and
+ * dragged back out onto home it's the bar widget again (the user, 15:34; searchwidget.tsx dockSearch / undockSearch).
  *
  * DS2 (the user, 01:53: "clicking the button The launcher button should open the launcher. and if I hold it It should
  * activate the launcher with the voice button. And then... if I continue holding it, it's push to talk"):
@@ -20,17 +21,57 @@
 import { useRef } from "preact/hooks";
 import { computed } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { closeDrawer, dockPosition, drawer, homePage, openPanel, pullKind, pullPage, searchInDock } from "../state.ts";
+import { carry, closeDrawer, dockPosition, drawer, editing, homePage, openPanel, pullKind, pullPage, searchInDock } from "../state.ts";
 import { drawerDrag } from "./gesture.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { dictateBar, focusBar } from "./bar.tsx";
 import { speech } from "./dictation.ts";
 import { morphFrom } from "./launchmorph.ts";
+import { carryingSearch, searchItem } from "./searchwidget.tsx";
+import { geometry, startCarry } from "./grid.tsx";
 
 /** A press on the button held this long dictates (shorter: a tap, which opens the launcher to type). */
 const HOLD_MS = 300;
 /** Still held this long, it's push-to-talk: let go and the dictation stops (its words stay in the field). */
 const PTT_MS = 700;
+/** A press that moves this far in edit mode picks the foot's pill or the dock's button up. */
+const GRAB_SLOP = 10;
+
+/**
+ * Edit mode's press on the foot's pill or the dock's button ([e]): moved past the slop it's the search widget, carried
+ * (grid.tsx startCarry) - onto the dock it docks, onto home's grid it's the bar widget there, onto the foot it's the
+ * pill again. False when it isn't edit mode (the press is the pill's or the button's own).
+ */
+export function grabSearch(e: PointerEvent, el: Element): boolean {
+  if (!editing.value || e.button || carry.value) return false;
+  const from = el.getBoundingClientRect();
+  const done = () => (removeEventListener("pointermove", move), removeEventListener("pointerup", done), removeEventListener("pointercancel", done));
+  const move = (ev: PointerEvent) => {
+    if (ev.pointerId !== e.pointerId || Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) <= GRAB_SLOP) return;
+    done();
+    const item = searchItem();
+    const g = geometry.value;
+    // Held where the finger is on the pill; the button's small face: the carried row's middle.
+    const wide = from.width > 2 * from.height;
+    const grab = wide ? { x: e.clientX - from.left, y: e.clientY - from.top } : { x: (item.cell!.w * g.cellW) / 2, y: (item.cell!.h * g.cellH) / 2 };
+    navigator.vibrate?.(10);
+    startCarry({ item }, ev, grab);
+  };
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", done);
+  addEventListener("pointercancel", done);
+  return true;
+}
+
+/** Home's capture of a press (home.tsx): on the foot's pill in edit mode, the pill is picked up instead of typed in. */
+export function grabPill(e: PointerEvent) {
+  const pill = (e.target as HTMLElement).closest?.(".home > .bar");
+  if (!pill || !grabSearch(e, pill)) return;
+  // Edit mode's pill is the widget, not a field: no focus, no keyboard.
+  e.stopPropagation();
+  e.preventDefault();
+}
+
 /** A press that moves this far is the dock's scroll (sideways) or the launcher's swipe (up), not the button's. */
 const SLOP_PX = 10;
 /** gesture.ts / PanelPull.kt: the panel's openness for a finger's travel (GAIN over TRAVEL of the window's height). */
@@ -44,7 +85,7 @@ const OPEN_FLICK = 0.2;
  * dock lies exactly over home's and the morph starts from its own button (not the desktop's; side/wide docks of the
  * overlay keep their own layout - the morph starts from home's measured rect there).
  */
-export const dockButton = computed(() => searchInDock.value && (homePage || (pullPage && dockPosition.value === "bottom" && !wideHome.value)));
+export const dockButton = computed(() => searchInDock.value && !carryingSearch() && (homePage || (pullPage && dockPosition.value === "bottom" && !wideHome.value)));
 
 /** The button's face on this page, as a rect (the morph's start). */
 export function faceRect() {
@@ -154,7 +195,8 @@ export function DockSearchButton() {
       role="button"
       aria-label="search"
       tabIndex={0}
-      onPointerDown={(e) => (press.current = down(e))}
+      // Edit mode: the button is the search widget, dragged out onto home or along (searchwidget.tsx grabSearch).
+      onPointerDown={(e) => (press.current = grabSearch(e, e.currentTarget) ? null : down(e))}
       onPointerMove={(e) => press.current && !move(press.current, e) && (press.current = null)}
       onPointerUp={(e) => end(false, e.clientY)}
       onPointerCancel={(e) => end(true, e.clientY)}

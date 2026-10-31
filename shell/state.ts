@@ -252,45 +252,34 @@ export function validDockPosition(value: string, fallback: string): string {
 export const dockTry = signal("");
 export const dockPosition = computed(() => validDockPosition(dockTry.value || sidewaysDock(dockPlacement.value), dockMode.value === "desktop" ? "left" : "bottom"));
 /**
- * Home's search per mode (Settings > style > home, edit mode's theme sheet): "bar" - the pill over the dock, as always
- * (the default) - or "dock": no pill on home, an app-sized button in the middle of the dock that expands into the bar
- * in place (ui/docksearch.tsx; the user, 2026-10-31 01:24). Folded and unfolded each keep their own, as the dock's
- * placement does; the desktop shell has its own launcher and keeps the bar. [searchTry]: a check's choice for this
- * page only, never stored (as dockTry).
+ * Home's search per mode: where its widget is, folded and unfolded each their own (the user, 2026-10-31 15:34: "grab
+ * the search as a widget and put it into the sidebar"). "dock": the round button between the dock's pinned apps and its
+ * recent ones (ui/docksearch.tsx); "bar": the pill widget - in home's foot, or on the grid where it was put (the
+ * "panel:search" home item, ui/searchwidget.tsx). Written only by edit mode's drag (searchwidget.tsx dockSearch /
+ * undockSearch, logged). Defaults: folded docked, unfolded the bar. The desktop shell has its own launcher, the bar.
+ * [searchTry]: a check's choice for this page only, never stored (as dockTry).
  */
-export const mobileSearchPlacement = stored("search.place.mobile", "bar");
+migrateSearchPlace();
+export const searchSpot = { mobile: stored("search.spot.mobile", "dock"), unfolded: stored("search.spot.unfolded", "bar") };
 /**
- * Unfolded's own choice, "" while unset: then the wide bar, a coded default (the user, 15:32: "move the search bar
- * back" in landscape, after seeing the unfolded dock button - which had followed the folded choice since 13:31; a
- * default in code can't flip by a stray stored value). [unfoldedSearch] is what the settings show and set: the choice
- * in effect, a pick stored as unfolded's own (logged, ui/editsheet.tsx).
+ * Once: the old hidden setting (powos.search.place.mobile / .unfolded, the edit sheet's "bar | dock button" picker)
+ * becomes the widget's spot - "dock" docked, "bar" the pill at today's place (the foot). An unset one keeps the default.
  */
-migrateUnfoldedSearch();
-const unfoldedSearchOwn = stored("search.place.unfolded", "");
-export const unfoldedSearch = {
-  get value() {
-    return unfoldedSearchOwn.value || "bar";
-  },
-  set value(v: string) {
-    unfoldedSearchOwn.value = v;
-  },
-};
-/**
- * The unfolded key held "bar" on every device whether picked or not (stored() writes its default): once, a "bar" there
- * is taken as unset so unfolded follows the folded choice. An unfolded "dock" stays. Run again as "2" (10-31 15:13: the
- * phone's unfolded key was "bar" again after the first run, from a write nobody logged - "it was just here"; edit sheet
- * picks are logged since, ui/editsheet.tsx SearchPlace).
- */
-function migrateUnfoldedSearch() {
+function migrateSearchPlace() {
   try {
-    if (localStorage.getItem("powos.search.place.migrated") === "2") return;
-    if (localStorage.getItem("powos.search.place.unfolded") === "bar") localStorage.removeItem("powos.search.place.unfolded");
-    localStorage.setItem("powos.search.place.migrated", "2");
+    if (localStorage.getItem("powos.search.spot.migrated") === "1") return;
+    for (const mode of ["mobile", "unfolded"]) {
+      const old = localStorage.getItem(`powos.search.place.${mode}`);
+      if (old === "dock" || old === "bar") localStorage.setItem(`powos.search.spot.${mode}`, old);
+      localStorage.removeItem(`powos.search.place.${mode}`);
+    }
+    localStorage.removeItem("powos.search.place.migrated");
+    localStorage.setItem("powos.search.spot.migrated", "1");
   } catch {}
 }
 export const searchTry = signal("");
-/** The search placement setting of the mode in use (folded / unfolded); null in the desktop shell. */
-export const searchPlacement = computed(() => (dockMode.value === "unfolded" ? unfoldedSearch : dockMode.value === "mobile" ? mobileSearchPlacement : null));
+/** The search spot of the mode in use (folded / unfolded); null in the desktop shell. */
+export const searchPlacement = computed(() => (dockMode.value === "unfolded" ? searchSpot.unfolded : dockMode.value === "mobile" ? searchSpot.mobile : null));
 export const searchInDock = computed(() => (searchTry.value || searchPlacement.value?.value) === "dock");
 /**
  * The folded home turned sideways (hosts/wide.ts sidewaysHome): the bottom dock becomes the right column, with its
