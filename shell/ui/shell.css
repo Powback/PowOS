@@ -287,10 +287,11 @@
 /* Home's: at the stage's foot, in the gap above the pill / dock, over the pages' width only (the stage is already
    clear of a side dock); it fades with the pages as the launcher opens. */
 .home-dots { position: absolute; left: 0; right: 0; bottom: calc(var(--gap) / 2 - 7px); opacity: calc(1 - var(--p)); pointer-events: none; }
-/* The launcher's: a row of its own under the two pages, above its recent row and the search pill. */
-.drawer-pages { display: flex; flex-direction: column; }
-.drawer-pages > .drawer-track { flex: 1; min-height: 0; height: auto; }
-.drawer-pages > .page-dots { flex: none; margin-top: 4px; }
+/* The launcher's: no row of their own - laid over the gap under the pages (the launcher's 16 px over the pill, or the
+   recent row's margin), so the app grid runs down to it. The user, 2026-10-31: "The page indicator takes up a lot of
+   space." They sit in the drawer's grid beside the pages (same cell), over the pages' last 6 px: not inside the pages
+   (their clip cut them), not below them (.drawer-clip ends at the pages' foot and hides anything past it). */
+.drawer > .page-dots { grid-column: 1 / -1; grid-row: 1; align-self: end; position: relative; z-index: 1; height: 6px; }
 .dock .app { flex: 1 1 0; min-width: 0; height: calc(var(--strip-height) - 2 * var(--frame)); justify-content: center; padding: 0; }
 .dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 

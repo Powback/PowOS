@@ -264,13 +264,16 @@ function Pages() {
     put(-to * width(), 220);
   };
   return (
-    <div class="drawer-pages" data-view={view} onTouchStart={start} onTouchMove={move} onTouchEnd={end} onTouchCancel={end}>
-      <div class="drawer-track" ref={track}>
-        <div class="drawer-page"><AppList found={null} /></div>
-        <div class="drawer-page"><FolderView /></div>
+    <>
+      <div class="drawer-pages" data-view={view} onTouchStart={start} onTouchMove={move} onTouchEnd={end} onTouchCancel={end}>
+        <div class="drawer-track" ref={track}>
+          <div class="drawer-page"><AppList found={null} /></div>
+          <div class="drawer-page"><FolderView /></div>
+        </div>
       </div>
+      {/* Beside the pages, not in them: their clip-path cut the dots off at the pages' foot. */}
       <PageDots count={2} dotsRef={dots} />
-    </div>
+    </>
   );
 }
 
