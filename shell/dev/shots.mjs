@@ -17,6 +17,8 @@ import fs from "node:fs";
 import path from "node:path";
 import puppeteer from "puppeteer";
 import { FLEET_SETUP } from "./agents-fleet.mjs";
+/** Another project's working session (Working now lists it under "Other projects (1)", not with PowOS's own). */
+const OTHER_PROJECT = ` E.emit('agents.delta', { agents: [{ id: 'mac:x1', host: 'mac', role: 'coder', parent: null, state: 'working', title: '', step: 'Bash cargo test', cwd: '/Users/macback/Projects/rsi-native', pid: 0, subs: 0, unread: 0, report: '', work: '', started: Date.now() - 600000, last: Date.now() - 30000, rev: 1 }] }); await sleep(200); document.querySelector('.ai-ctx-other')?.click(); await sleep(100);`;
 
 const ORIGIN = "https://shell.powos";
 const ROOT = "/shell";
@@ -497,7 +499,7 @@ const SCENES = [
   ["ai-look-progress", "home", LOOK + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper"],
   // Unfolded three panes (the user, 2026-10-31 13:29): nav · Chat / Agents / Progress in the middle · Working now, Try this,
   // Needs attention; folded sideways the nav as icons; folded portrait the chat + strip as before.
-  ["ai-panes-chat", "home", LOOK + "{" + FLEET_SETUP + "}", "wallpaper", undefined, { ...SIZES, "folded-land": LAND_SIZES["folded-land"] }],
+  ["ai-panes-chat", "home", LOOK + "{" + FLEET_SETUP + OTHER_PROJECT + "}", "wallpaper", undefined, { ...SIZES, "folded-land": LAND_SIZES["folded-land"] }],
   ["ai-panes-agents", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'fleet'; await sleep(400);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
   ["ai-panes-progress", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
   ["ai-msgr-menu", "home", MSGR + " document.querySelector('.ai-screen .ai-more').click(); await sleep(300);", "wallpaper"],

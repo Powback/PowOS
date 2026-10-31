@@ -1702,6 +1702,24 @@ function aiPanesFails() {
   return fails;
 }
 
+/**
+ * In the page, unfolded: the name once, in the nav (UF-5); every nav label whole (UF-6); no page slab, each pane on the
+ * widgets' compositor blur (the user, 14:17: "There's actually no transparency on the AI page").
+ */
+function aiPanesGlassFails() {
+  const scr = document.querySelector(".ai-screen");
+  const fails = [];
+  if (scr.querySelector(".ai-mid .ai-top .ai-title")) fails.push(`the middle pane's header repeats "PowOS AI" (the nav has it)`);
+  const cut = [...scr.querySelectorAll(".ai-nav .ai-nav-name")].filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent.trim());
+  if (cut.length) fails.push(`the nav cuts ${cut.join(", ")}`);
+  const fill = getComputedStyle(scr).backgroundColor;
+  if (!/^rgba\(0, 0, 0, 0\)$|^transparent$/.test(fill)) fails.push(`the page paints ${fill} over the wallpaper (the panes are the glass, not a page slab)`);
+  const want = getComputedStyle(document.documentElement).getPropertyValue("--widget-blur-native").trim();
+  const off = [".ai-nav", ".ai-mid", ".ai-ctx"].filter((q) => getComputedStyle(scr.querySelector(q)).getPropertyValue("--glass-blur-native").trim() !== want);
+  if (off.length) fails.push(`${off.join(", ")} not on the widgets' blur (${want})`);
+  return fails;
+}
+
 /** The chat page before any answer: no old boxes, reading width, the strip, older messages on scroll-up. */
 async function aiChatLayout(page, size) {
   const fails = [];
@@ -1710,7 +1728,7 @@ async function aiChatLayout(page, size) {
   await page.screenshot({ path: `/cache/ai-page-${size}-chat.png` });
   const width = await page.evaluate(() => Math.round(document.querySelector(".ai-screen .ai-chat").getBoundingClientRect().width));
   if (width > 700) fails.push(`${size}: the chat is ${width} px wide, not centred at reading width`);
-  if (size === "unfolded") fails.push(...(await page.evaluate(aiPanesFails)).map((f) => `${size}: ${f}`));
+  if (size === "unfolded") fails.push(...[...(await page.evaluate(aiPanesFails)), ...(await page.evaluate(aiPanesGlassFails))].map((f) => `${size}: ${f}`));
   else {
     const strip = await page.evaluate(() => document.querySelector(".ai-screen .ai-strip")?.textContent ?? "");
     // "N working · Daily driver NN% · N to try": the try count is the chat's unanswered things to try; the daily driver
