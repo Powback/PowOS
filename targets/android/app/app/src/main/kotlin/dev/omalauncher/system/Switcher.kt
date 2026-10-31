@@ -66,6 +66,19 @@ object Switcher {
     var onHome = true
         private set
 
+    /**
+     * Tells home's own page (ShellActivity's, not the recents activity's) [event]: the corner swipe over home drives
+     * home's in-place launcher this way (CornerPull, "home.panel.*"). False while home's page isn't up.
+     */
+    fun emitHome(
+        event: String,
+        payload: JSONObject,
+    ): Boolean {
+        val page = shell ?: return false
+        page.emit(event, payload)
+        return true
+    }
+
     /** The page that carries the layer now. */
     private val home: ShellBridge? get() = if (onHome) shell else warm?.bridge
     private val boost: ((Boolean) -> Unit)? get() = if (onHome) shellBoost else hostBoost

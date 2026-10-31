@@ -177,6 +177,53 @@ export async function adoptsHome(position, opts = {}) {
   return [...new Set(fails)].map((f) => `${position}: ${f}`);
 }
 
+/** The corner swipe's drag, frame by frame: home's launcher in its page, one bar and one dock. */
+async function cornerDragged(E) {
+  const fails = [];
+  E.emit("home.panel.begin", { kind: "apps" });
+  for (const p of [0.2, 0.5, 0.8]) {
+    E.emit("home.panel.drag", { p });
+    await frame();
+    const f = foot();
+    if (f.bars !== 1 || f.docks !== 1) fails.push(`dragged to ${p}: ${f.bars} bars, ${f.docks} docks`);
+    if (!document.querySelector(".home > .stage .launcher")) fails.push(`dragged to ${p}: no launcher in home's page`);
+  }
+  return fails;
+}
+
+/** After the release: open in place with the apps, the overlay never asked, no launcher copy. */
+function cornerOpened(S, asked) {
+  return [
+    S.drawer.value !== 1 && "the corner swipe didn't open the launcher in place",
+    S.pullKind.value !== "apps" && `opened ${S.pullKind.value}, not the apps`,
+    asked.length > 0 && "asked the host's overlay over home",
+    !!document.querySelector(".pull-screen") && "a launcher copy (.pull-screen) on home's page",
+  ].filter(Boolean);
+}
+
+/**
+ * LC1: the host's corner swipe over home (CornerPull.kt "home.panel.begin" / ".drag" / ".end") opens home's launcher in
+ * place, following the finger: one bar and one dock in every frame, unmoved, the overlay never asked.
+ */
+export async function cornerOverHome() {
+  const S = await importShim("./state.ts");
+  const { powos } = await importShim("./bridge.ts");
+  const E = window.__mockEvents;
+  const asked = [];
+  powos.pull.open = async (kind) => (asked.push(kind), true);
+  if (S.dock.value.length < 4) S.dock.value = S.recent.value.slice(0, 4);
+  S.searchTry.value = "bar";
+  await sleep(300);
+  const before = foot();
+  const fails = before.bars === 1 && before.docks === 1 ? [] : [`at rest: ${before.bars} bars, ${before.docks} docks`];
+  fails.push(...(await cornerDragged(E)));
+  E.emit("home.panel.end", { open: true });
+  fails.push(...(await sampled(before)), ...cornerOpened(S, asked));
+  S.closeDrawer();
+  S.searchTry.value = "";
+  return [...new Set(fails)];
+}
+
 export async function ownDock() {
   const E = window.__mockEvents;
   E.emit("pull.begin", { kind: "apps" });

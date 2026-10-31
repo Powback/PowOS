@@ -950,6 +950,24 @@ powos.on("panel.close.end", (e: { shut?: boolean }) => {
   else drawer.value = 1;
 });
 
+/**
+ * The host's corner swipe over home (CornerPull.kt): home's own launcher comes up in place, under home's own dock and
+ * bar, following that finger ("home.panel.begin" { kind } / ".drag" { p } / ".end" { open }) - never the overlay
+ * window over home, which brings a second dock. Over an app the corner swipe is still the overlay's (pull.tsx).
+ */
+powos.on("home.panel.begin", (e: { kind?: string }) => {
+  pullKind.value = e?.kind === "ai" ? "ai" : "apps";
+  drawerDrag.value = 0;
+});
+powos.on("home.panel.drag", (e: { p?: number }) => {
+  if (drawerDrag.value != null) drawerDrag.value = clamp(e?.p ?? 0);
+});
+powos.on("home.panel.end", (e: { open?: boolean }) => {
+  drawerDrag.value = null;
+  if (e?.open) drawer.value = 1;
+  else closeDrawer();
+});
+
 /** Tells the host which panel is open, so its home gesture closes it (feature-detected: an older host has no panels). */
 function reportPanel(kind: "apps" | "ai" | null) {
   const panels = powos.panels;

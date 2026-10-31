@@ -26,7 +26,7 @@ import kotlin.math.abs
  * once it has gone [slop] mostly upwards - before nav has seen that move - it's the panel's: nav hears a cancel (its
  * window goes back where it was), the panel comes up. Anything else stays nav's, event for event.
  *
- * Over an app, and over home's main page (same zones, thresholds and follow), only in gesture navigation (nav takes the down), and only while
+ * Over an app (the overlay window), and over home's main page (home's own launcher in place, [CornerRoute]; same zones, thresholds and follow), only in gesture navigation (nav takes the down), and only while
  * the switch is on: the page store's `pullOverApps` (settings -> style -> home; files/shell-data/pullOverApps.json,
  * "off" turns it off).
  */
@@ -50,6 +50,9 @@ class CornerPull(
     private var height = 1f
     private var velocity: VelocityTracker? = null
 
+    /** Where this swipe's panel comes up ([CornerRoute]): home's own page, or the overlay window. */
+    private var target = CornerRoute.Target.WINDOW
+
     /**
      * The switch: the store's JSON string "on" / "off" (missing: on). An older page wrote it encoded twice ("\"off\""),
      * read too for one release.
@@ -65,23 +68,29 @@ class CornerPull(
     private fun screen(): Rect = runCatching { displayContext.getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds }.getOrElse { Rect(0, 0, 1080, 2400) }
 
     /**
-     * Over an app, or over home's main page with nothing open (the page reports it: shade.homePull mainPage): the same
-     * corner zones, thresholds and follow in both. Else home's own page has the touch.
+     * Over an app: the overlay window. Over home's main page with nothing open (the page reports it: shade.homePull
+     * mainPage): home's own launcher in place, its own dock and bar (state.ts homePage) - the window would bring a
+     * second dock. The same corner zones, thresholds and follow in both. Else home's own page has the touch.
      */
-    private fun overAppOrHomeMain(): Boolean =
-        runCatching { Tasks.visible(service) }.getOrNull() != null || (Switcher.homeVisible && Switcher.homeMainPage && !Switcher.open)
+    private fun route(): CornerRoute.Target =
+        CornerRoute.of(
+            appOver = runCatching { Tasks.visible(service) }.getOrNull() != null,
+            homeMain = Switcher.homeVisible && Switcher.homeMainPage && !Switcher.open,
+            window = PullHost.current != null,
+        )
 
     override fun onDown(e: MotionEvent): Boolean {
         navFollows = nav.onDown(e)
         state = State.NAV
         if (!navFollows) return false
-        if (PullHost.current == null || !on()) return true
+        if (!on()) return true
         val s = screen()
         val zone = s.width() * CORNER
         val left = e.rawX < s.left + zone
         val right = e.rawX >= s.right - zone
         if (!left && !right) return true
-        if (!overAppOrHomeMain()) return true
+        target = route()
+        if (target == CornerRoute.Target.NONE) return true
         state = State.WATCHING
         kind = if (left) "ai" else "apps"
         x0 = e.rawX
@@ -110,9 +119,9 @@ class CornerPull(
             }
             State.PULLING -> {
                 velocity?.addMovement(e)
-                val host = PullHost.current ?: return GestureConsumer.Verdict.DROP
+                val host = driving ?: return GestureConsumer.Verdict.DROP
                 when (e.actionMasked) {
-                    MotionEvent.ACTION_MOVE -> host.pullDrag(openness(e))
+                    MotionEvent.ACTION_MOVE -> host.drag(openness(e))
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         val v = velocity
                         velocity = null
@@ -121,7 +130,8 @@ class CornerPull(
                         v?.recycle()
                         val open = e.actionMasked == MotionEvent.ACTION_UP && PanelPull.opens(vy, openness(e).toDouble(), cancelled = false, openFlick = PanelPull.OPEN_FLICK)
                         Log.i(TAG, "corner pull: let go at ${"%.2f".format(openness(e))}, ${"%.2f".format(vy)} dp/ms -> ${if (open) "open" else "shut"}")
-                        host.pullEnd(open)
+                        host.end(open)
+                        driving = null
                         state = State.NAV
                         return GestureConsumer.Verdict.DROP
                     }
@@ -140,8 +150,48 @@ class CornerPull(
             runCatching { nav.onEvent(cancel) }
             cancel.recycle()
         }
-        Log.i(TAG, "corner pull: $kind")
-        PullHost.current?.pullBegin(kind)
+        Log.i(TAG, "corner pull: $kind on ${if (target == CornerRoute.Target.PAGE) "home's page" else "the overlay"}")
+        driving = panel()
+        driving?.begin(kind)
+    }
+
+    /** The panel this swipe drives, from its claim on. */
+    private var driving: Panel? = null
+
+    /** What the finger drives: home's page ("home.panel.begin" / ".drag" { p } / ".end" { open }: gesture.ts), or the overlay. */
+    private interface Panel {
+        fun begin(kind: String)
+
+        fun drag(p: Float)
+
+        fun end(open: Boolean)
+    }
+
+    private val homePanel =
+        object : Panel {
+            override fun begin(kind: String) {
+                Switcher.emitHome("home.panel.begin", org.json.JSONObject().put("kind", kind))
+            }
+
+            override fun drag(p: Float) {
+                Switcher.emitHome("home.panel.drag", org.json.JSONObject().put("p", p.coerceIn(0f, 1f).toDouble()))
+            }
+
+            override fun end(open: Boolean) {
+                Switcher.emitHome("home.panel.end", org.json.JSONObject().put("open", open))
+            }
+        }
+
+    private fun panel(): Panel? {
+        if (target == CornerRoute.Target.PAGE) return homePanel
+        val host = PullHost.current ?: return null
+        return object : Panel {
+            override fun begin(kind: String) = host.pullBegin(kind)
+
+            override fun drag(p: Float) = host.pullDrag(p)
+
+            override fun end(open: Boolean) = host.pullEnd(open)
+        }
     }
 
     private fun openness(e: MotionEvent) = PanelPull.openness(y0 - e.rawY, height)
@@ -152,4 +202,25 @@ class CornerPull(
         /** The corner zones: this much of the width on each side of the bottom edge. */
         const val CORNER = 0.22f
     }
+}
+
+/** CornerPull's routing decision, pure: which panel a corner swipe brings up. */
+object CornerRoute {
+    enum class Target { PAGE, WINDOW, NONE }
+
+    /**
+     * [appOver]: an app's task shows on the default display. [homeMain]: home's page shows its main page with nothing
+     * over it. [window]: the overlay's host is up. Over an app the overlay (with its own dock); over home, home's page
+     * opens its launcher in place under its own dock (never the overlay: two docks).
+     */
+    fun of(
+        appOver: Boolean,
+        homeMain: Boolean,
+        window: Boolean,
+    ): Target =
+        when {
+            appOver -> if (window) Target.WINDOW else Target.NONE
+            homeMain -> Target.PAGE
+            else -> Target.NONE
+        }
 }

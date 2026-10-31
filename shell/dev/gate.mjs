@@ -6306,6 +6306,8 @@ try {
       const opts = { below: foot.includes("below"), button: foot.includes("button") };
       runs.push(open(browser, `${ORIGIN}/index.html`, `launcher-adopt-${label}-${position}${foot ? `-${foot}` : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos, o) => (await importShim("./dev/launcher-adopt-check.js")).adoptsHome(pos, o), position, opts))));
     }
+    // LC1: the host's corner swipe over home opens home's own launcher in place, following the finger (CornerPull.kt).
+    runs.push(open(browser, `${ORIGIN}/index.html`, "launcher-corner-home", dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/launcher-adopt-check.js")).cornerOverHome()))));
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-adopt-overlay", dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/launcher-adopt-check.js")).ownDock()))));
     // LH1: the home gesture with the launcher open closes it (on home in place, and the pull window over an app).
     for (const kind of ["apps", "ai"]) {
