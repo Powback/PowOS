@@ -312,7 +312,7 @@ export const placeNewCells = (w: number, h: number) => placeNew(w * (geometry.va
  * Starts carrying [what] ({ item } or { app }) with the pointer of [e]: follows it on the window until it lifts, then
  * drops. [grab] is where the finger holds the tile.
  */
-export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boolean; fromFolder?: string }, e: PointerEvent, grab = { x: 0, y: 0 }) {
+export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boolean; lifted?: boolean; fromFolder?: string }, e: PointerEvent, grab = { x: 0, y: 0 }) {
   const g = geometry.value;
   carry.value = { ...what, x: e.clientX - g.left, y: e.clientY - g.top, grab };
   hoverDock(carry.value, e.clientX, e.clientY);

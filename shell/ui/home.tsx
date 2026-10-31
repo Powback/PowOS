@@ -14,7 +14,8 @@ import type { PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { DockSearchButton, dockButton } from "./docksearch.tsx";
-import { drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome, windowGestureActive } from "./gesture.ts";
+import { chromeWay, drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome, windowGestureActive } from "./gesture.ts";
+import { tick } from "./haptics.ts";
 import { PageDots } from "./pagedots.tsx";
 import { Carried, Folders, Pages, startCarry } from "./grid.tsx";
 import { DockOutGhost } from "./dockout.tsx";
@@ -286,6 +287,21 @@ function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
   window.addEventListener("pointercancel", cancel);
 }
 
+/**
+ * A dock app pressed and moved away from the dock (gesture.ts chromeWay "out": up from a bottom dock, in from a side one)
+ * lifts out at once, no hold (the user, 10-31 15:12: "If I hold it I enter edit mode ... I shouldn't have to hold it, I
+ * should just be able to drag it out"): a tick, and it's carried as a window's drag (dockout.tsx: a half splits, the
+ * middle floats, back on the dock cancels). Along the dock it's the page swipe's (false); short of deciding, undefined.
+ */
+function liftOut(key: string, e: PointerEvent, dx: number, dy: number): boolean | undefined {
+  const way = chromeWay(dockPosition.value === "bottom" ? "dock" : "dock-side", dx, dy);
+  if (way !== "out") return way === undefined ? undefined : false;
+  menu.value = null;
+  tick();
+  startCarry({ app: key, fromDock: true, lifted: true }, e, { x: 30, y: 30 });
+  return true;
+}
+
 function outsideDock(r: DOMRect, e: PointerEvent) {
   if (dockPosition.value === "left") return e.clientX > r.right + DOCK_EXIT;
   if (dockPosition.value === "right") return e.clientX < r.left - DOCK_EXIT;
@@ -491,6 +507,7 @@ export function Dock() {
         class={`${d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""} ${windowed.value.has(app.key) ? `windowed ${windowed.value.get(app.key)}` : ""} ${markClass(app.key)}`}
         style={style}
         onDrag={(e) => el.current && moveInDock(app.key, e, el.current)}
+        onMove={(e, dx, dy) => liftOut(app.key, e, dx, dy)}
         onTap={() => dockTap(app.key)}
       />
     );

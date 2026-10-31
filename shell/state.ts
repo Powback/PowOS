@@ -55,6 +55,8 @@ export interface Carry {
   app?: string;
   /** Taken up out of the dock: let go off it, it's unpinned (over an app it opens there instead: ui/dockout.tsx). */
   fromDock?: boolean;
+  /** Lifted out of the dock with no hold (home.tsx liftOut): a window's drag - its drop zones (dockout.tsx) on home too. */
+  lifted?: boolean;
   /** Taken out of this folder (its key): let go off it, it's out of the folder - on home where it's let go. */
   fromFolder?: string;
   x: number;

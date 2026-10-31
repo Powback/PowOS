@@ -18,9 +18,10 @@ const SLOP = 10;
 
 /**
  * Press-and-hold without a move opens the menu; a tap launches. Held and then moved ([onDrag]): the menu gives way to
- * dragging the app. A move before the hold is a scroll or a swipe, not the app's.
+ * dragging the app. A move before the hold is a scroll or a swipe, not the app's - unless [early] takes it (the dock: a
+ * move away from it lifts the app out at once): true taken, undefined not decided yet (kept), false not its.
  */
-export function usePress(onTap: () => void, onLong: (el: HTMLElement) => void, onDrag: ((e: PointerEvent) => void) | null) {
+export function usePress(onTap: () => void, onLong: (el: HTMLElement) => void, onDrag: ((e: PointerEvent) => void) | null, early?: Early) {
   const s = useRef<{ x: number; y: number; long: boolean; timer: number; el: HTMLElement } | null>(null);
   const cancel = () => {
     if (s.current) clearTimeout(s.current.timer);
@@ -47,7 +48,9 @@ export function usePress(onTap: () => void, onLong: (el: HTMLElement) => void, o
     onPointerMove: (e: PointerEvent) => {
       const state = s.current;
       if (!state) return;
-      if (Math.hypot(e.clientX - state.x, e.clientY - state.y) <= SLOP) return;
+      const way = !state.long && early ? early(e, e.clientX - state.x, e.clientY - state.y) : false;
+      if (way) return cancel();
+      if (way === undefined || Math.hypot(e.clientX - state.x, e.clientY - state.y) <= SLOP) return;
       if (!state.long) return cancel();
       if (onDrag) {
         cancel();
@@ -63,6 +66,9 @@ export function usePress(onTap: () => void, onLong: (el: HTMLElement) => void, o
   };
 }
 
+/** A move before the hold, [dx], [dy] from the press ([usePress]): true it took the press, undefined not yet, false not its. */
+type Early = (e: PointerEvent, dx: number, dy: number) => boolean | undefined;
+
 interface CellProps {
   app: App;
   /** A drawer cell: its name under it, and it can be dragged onto home. */
@@ -70,6 +76,8 @@ interface CellProps {
   draggable?: boolean;
   /** Held and moved: this instead of dragging it onto home (the dock reorders its own). */
   onDrag?: (e: PointerEvent, el: HTMLElement) => void;
+  /** A move before the hold ([Early]): the dock lifts its app out on a move away from it. */
+  onMove?: Early;
   class?: string;
   style?: Record<string, string>;
   /** A tap: this instead of launching it (the dock's taskbar taps, ui/desktops.ts dockTap). */
@@ -83,11 +91,12 @@ export function dragHome(key: string, e: PointerEvent) {
   startCarry({ app: key }, e, { x: 30, y: 30 });
 }
 
-export function AppCell({ app, labels = true, draggable = false, onDrag, class: cls = "", style, onTap }: CellProps) {
+export function AppCell({ app, labels = true, draggable = false, onDrag, onMove, class: cls = "", style, onTap }: CellProps) {
   const press = usePress(
     onTap ?? (() => launch(app.key)),
     (el) => (menu.value = { app, at: el.getBoundingClientRect() }),
     onDrag ? (e) => onDrag(e, e.currentTarget as HTMLElement) : draggable ? (e) => dragHome(app.key, e) : null,
+    onMove,
   );
   return (
     <div class={`app ${cls}`} style={style} data-key={app.key} data-run={running.value[app.key]} {...press}>
