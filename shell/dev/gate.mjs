@@ -811,7 +811,9 @@ async function panelTracksFinger() {
 async function launcherHapticsCheck() {
   const ev = window.__mockEvents, h = window.__hapticsMock;
   if (!ev || !h) return ["no mock events or mock haptics to drive the launcher's pull"];
-  const frame = () => new Promise((ok) => requestAnimationFrame(() => ok()));
+  // A timer, not requestAnimationFrame: a throttled page under load could stall rAF until the protocol dropped the
+  // evaluate ("Promise was collected", 3x on 10-31). The pull's drag handler is synchronous; nothing here needs a paint.
+  const frame = () => new Promise((ok) => setTimeout(ok, 16));
   const t0 = h.tick, fails = [];
   const to = async (ps, want, what) => {
     for (const p of ps) {
