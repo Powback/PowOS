@@ -3396,6 +3396,41 @@ async function webDockToggleCell() {
 }
 
 /**
+ * DB1 (the user, 2026-10-31 03:00: "by default it should launch in Full screen"): a dock tap on an app with no window
+ * launches it full screen - a plain launch, no web window opened and no new .webwindow - while the app grid's launch
+ * (S.launch) still opens one; a dock tap on an app that has a window still toggles it (TB4's steps above).
+ */
+async function webDockLaunchFull() {
+  const { S, W, tap } = window.__dtg;
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const key = [...S.byKey.value.keys()].find((k) => k.startsWith("a:"));
+  if (!key) return ["DB1: no Android app to launch"];
+  const ww = powos.webwindows ?? (powos.webwindows = {});
+  const was = { launch: powos.apps.launch, open: ww.open, enabled: ww.enabled, page: S.page.value };
+  const calls = [];
+  powos.apps.launch = async (k) => void calls.push(`launch:${k}`);
+  ww.open = async () => (calls.push("open"), -1);
+  ww.enabled = async () => true;
+  const fails = [];
+  try {
+    W.webWins.value = [];
+    S.page.value = 0;
+    await window.__gw.settled();
+    await tap(key);
+    if (calls.join() !== `launch:${key}` || document.querySelector(".webwindow[data-wwid]")) fails.push(`DB1: a dock tap on ${key} with no window gave [${calls}] (want one plain launch, no web window)`);
+    calls.length = 0;
+    await S.launch(key);
+    if (!calls.includes("open")) fails.push(`DB1: the app grid's launch of ${key} no longer tries a web window [${calls}]`);
+  } finally {
+    W.webWins.value = [];
+    Object.assign(ww, { open: was.open, enabled: was.enabled });
+    powos.apps.launch = was.launch;
+    S.page.value = was.page;
+  }
+  return fails;
+}
+
+/**
  * DG1 (ui/dockgroups.tsx; the user 10-31 03:18: "the homebar doesn't really show them as docked together"): two web
  * windows tiled on page 1 and one floating -> the dock has exactly one group cell (2 mini icons) and one single cell,
  * and no cell of their own for the tiled apps; a tap on the group cell raises both tiled windows over the floating one.
@@ -4789,7 +4824,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

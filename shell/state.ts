@@ -570,7 +570,12 @@ function openAsWebWindow(key: string): Promise<boolean> {
   return openWebWindow(key, app?.label ?? key, pages.value[page.value] ?? 1);
 }
 
-export async function launch(key: string) {
+/**
+ * Opens app [key]. [fullScreen]: full screen even where it would open as a web window (DB1, the user 2026-10-31 03:00:
+ * "by default it should launch in Full screen. But if I drag it out it should either do split screen or floating
+ * window") - a dock tap with no window yet asks for it (ui/desktops.ts dockTap); every other launcher keeps the window.
+ */
+export async function launch(key: string, { fullScreen = false }: { fullScreen?: boolean } = {}) {
   menu.value = null;
   // A PowOS app: its page, full screen in this one (ui/appscreen.tsx).
   if (key.startsWith(PREFIX)) {
@@ -579,7 +584,7 @@ export async function launch(key: string) {
     return;
   }
   // Unfolded with web windows on (Settings.Global powos_web_windows): the app opens as an element of this page.
-  if (await openAsWebWindow(key)) {
+  if (!fullScreen && (await openAsWebWindow(key))) {
     closeDrawer(true);
     return;
   }

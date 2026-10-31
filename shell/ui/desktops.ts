@@ -212,6 +212,7 @@ export async function startDesktops() {
  * A PowOS (Linux) app's window floats as its own task too (WindowTasks): the same rule, by its app key (appOf).
  * Linux windows still on the Plasma desktop: HOOK - the same rule once the Plasma backend lists them to the web
  * launcher (planned in docs/DESKTOP-WEB-SHELL.md; Runtime.launch brings a running one to the front meanwhile).
+ * No window at all: it launches full screen, folded and unfolded (DB1, the user 2026-10-31 03:00) - never a web window.
  */
 export async function dockTap(key: string) {
   // Web windows (unfolded, the setting on): the page's own windows, the same taskbar rule (webwindows.tsx dockToggle, TB4).
@@ -229,7 +230,7 @@ export async function dockTap(key: string) {
     console.debug("dockTap", key, front ? "raise" : "launch", front?.id);
   }
   toWindowPage(key);
-  await launch(key);
+  await launch(key, { fullScreen: true });
 }
 
 /**
