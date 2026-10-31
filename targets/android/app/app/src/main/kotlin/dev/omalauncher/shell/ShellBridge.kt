@@ -365,6 +365,7 @@ class ShellBridge(
         if (method.startsWith("health.")) return callHealth(id, method, args)
         if (method == "ai.verdict") return callVerdict(id, args)
         if (method in OFF_MAIN) return callOffMain(id, method, args)
+        if (method in LOOKUPS) return callOffMain(id, method, args, lookups)
         main.post {
             MainStallWatch.call = method
             try {
@@ -390,8 +391,9 @@ class ShellBridge(
         id: Int,
         method: String,
         args: String,
+        on: java.util.concurrent.Executor = fileIo,
     ) {
-        fileIo.execute {
+        on.execute {
             val r =
                 runCatching {
                     val a = if (args.isBlank()) JSONArray() else JSONArray(args)
@@ -1698,6 +1700,14 @@ class ShellBridge(
 
         /** The bridge calls that only touch files or re-serialize (perf.publish: the meter's own ~4 Hz cost): run by [callOffMain], never on the main thread. */
         private val OFF_MAIN = setOf("store.get", "store.set", "perf.save", "perf.publish")
+
+        /**
+         * Calls that are package manager lookups, answered from [lookups] (not [fileIo]: a store read mustn't wait on
+         * them). qs.destinations: SettingsSearch's per-package getLaunchIntentForPackage / icons, 153 ms on the main
+         * thread (perf-1793409701579); the same list, now built once per index/locale/app change (SettingsSearch.Key).
+         */
+        private val LOOKUPS = setOf("qs.destinations")
+        private val lookups = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-lookups").apply { isDaemon = true } }
 
         /** One thread for them all, so a page's set then get stay in that order. */
         private val fileIo = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-store").apply { isDaemon = true } }
