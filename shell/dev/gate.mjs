@@ -3043,7 +3043,7 @@ async function webWindowTileInputCheck() {
   const { powos } = await window.__gw.mod("./bridge.ts");
   const had = powos.webwindows;
   const calls = [];
-  powos.webwindows = { ...had, input: (id, action, x, y) => (calls.push([id, action, x, y]), Promise.resolve(true)) };
+  powos.webwindows = { ...had, input: (id, action, a) => (calls.push([id, action, a.x, a.y]), Promise.resolve(true)) };
   const page = S.pages.value[0];
   try {
     S.page.value = 0;
@@ -3133,71 +3133,102 @@ async function webWindowTileLayoutCheck() {
   }
 }
 
-async function webWindowPinchCheck() {
-  // SC1 after a pinch 200 -> 140 px on window [pw] (400x320): scaled to 0.7, still 400x320 (no relayout), the frame
-  // transformed (bar and body zoom together), the app's size in w.f unchanged and never a resize.
-  const pinchScaled = (pw, body, from) => {
+/**
+ * [webWindowPinchCheck]'s helpers into the page (window.__pzg; page.evaluate sends only the one function).
+ * PZ1 (the user, 10-31 01:40: "If I zoom normally IN the app, I'm now resizing the window"): a pinch whose fingers start
+ * on the BODY is the app's (Chrome's page zoom) - the window keeps its size and scale, the app gets ONE two-finger
+ * gesture (finger 0 down, finger 1 down, both moving, both up; no cancel). SC1: a pinch whose first finger is on the BAR
+ * (the second on the body) scales the window: 0.4..1.5, still 400x320 (no relayout), the frame transformed (bar and
+ * body zoom together), the app's size in w.f unchanged and never a resize, nothing to the app.
+ */
+function PINCH_HELPERS() {
+  const at = (el, type, id, [x, y]) => el.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", isPrimary: id % 2 === 1, clientX: x, clientY: y, bubbles: true }));
+  // Two fingers 200 px apart (about [cx]) come together to 140 px (8 moves): ids[0] on els[0] at ys[0], ids[1] on els[1].
+  const pinchOn = (els, ys, ids, cx) =>
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].forEach((i) => {
+      const t = i === 0 ? "pointerdown" : i === 9 ? "pointerup" : "pointermove";
+      const q = Math.min(i, 8) * 3.75;
+      (at(els[0], t, ids[0], [cx - 100 + q, ys[0]]), at(els[1], t, ids[1], [cx + 100 - q, ys[1]]));
+    });
+  // Both fingers in one gesture: down0, down1, moves of both, both up, never a cancel.
+  const oneGesture = (seq) =>
+    seq.slice(0, 2).join() === "down0,down1" && ["move0", "move1"].every((m) => seq.includes(m)) && seq.slice(-2).sort().join() === "up0,up1" && !seq.some((s) => s.startsWith("cancel"));
+  // PZ1: the body's pinch, on window [pw] after it; [calls]: the app's input as [action, x, y, finger].
+  const bodyPinch = (pw, body, calls) => {
+    const fails = (pw.scale ?? 1) !== 1 || pw.w !== 400 || pw.h !== 320 ? [`a pinch on the body changed the window: ${pw.w}x${pw.h}@${pw.scale} (want 400x320@1: the app's zoom)`] : [];
+    const seq = calls.map((c) => `${c[0]}${c[3]}`);
+    if (!oneGesture(seq)) fails.push(`a pinch on the body sent the app ${seq.join(",")} (want down0,down1, moves of both, up0 and up1: one two-finger gesture)`);
+    const m1 = calls.filter((c) => c[0] === "move" && c[3] === 1).at(-1);
+    if (m1 && Math.abs(m1[1] - (body.offsetWidth / 2 + 70)) > 1) fails.push(`finger 1's last move reached the app at x ${m1[1]} (want ${body.offsetWidth / 2 + 70})`);
+    return fails;
+  };
+  // SC1: the bar's pinch (40 px apart vertically: 204 -> 146 px, about 0.71) scaled [pw]; w.f entries from [from].
+  const barPinch = (pw, body, from) => {
     const ours = (t) => [...Array(Math.floor(t.length / 24)).keys()].map((i) => t.slice(i * 24, i * 24 + 24)).find((e) => e[0] === "902");
     const entries = window.__ww.sent.slice(from).map((l) => ours(l.split(" ").slice(4))).filter(Boolean);
     const [tf, sizes] = [getComputedStyle(body.closest(".webwindow")).transform, new Set(entries.map((e) => `${e[21]}x${e[22]}`))];
-    const bad = [Math.abs((pw.scale ?? 1) - 0.7) > 0.03 && `scale ${pw.scale} (want 0.7)`, (pw.w !== 400 || pw.h !== 320) && `size ${pw.w}x${pw.h} (want 400x320, unchanged)`,
+    const bad = [Math.abs((pw.scale ?? 1) - 0.71) > 0.03 && `scale ${pw.scale} (want 0.71)`, (pw.w !== 400 || pw.h !== 320) && `size ${pw.w}x${pw.h} (want 400x320, unchanged)`,
       tf === "none" && "no transform on the frame (want the whole window zoomed)",
       Math.abs(body.getBoundingClientRect().width / body.offsetWidth - (pw.scale ?? 1)) > 0.01 && `a measured body scale ${body.getBoundingClientRect().width / body.offsetWidth} (the model's ${pw.scale})`,
       entries.some((e) => e[20] === "1") && "an app resize (w.f said resizing)",
       sizes.size > 1 && `the app's size changed: ${[...sizes].join(", ")}`];
-    return bad.filter(Boolean).map((b) => `a pinch 200 -> 140 px on the body left ${b}`);
+    return bad.filter(Boolean).map((b) => `a pinch from the bar left ${b}`);
   };
+  // At scale [k], a press at the body's centre reaches the app there; one finger whose up landed outside the frame
+  // (never seen by it), then a new one-finger drag: only a move, no scale (10-30 "dragging with one finger rescales").
+  const afterScale = async (W, body, calls) => {
+    const pw = W.webWins.value.find((w) => w.id === 902);
+    const b2 = body.getBoundingClientRect();
+    const p = [b2.left + b2.width / 2, b2.top + b2.height / 2];
+    calls.length = 0;
+    (at(body, "pointerdown", 23, p), at(body, "pointerup", 23, p));
+    const d = [...(calls[0] ?? []), NaN, NaN, NaN];
+    const want = [body.offsetWidth / 2, body.offsetHeight / 2];
+    const fails = Math.hypot(d[1] - want[0], d[2] - want[1]) > 1 ? [`at scale ${pw.scale}, a press at the body's centre went to the app at ${d[1]},${d[2]} (want ${want})`] : [];
+    at(body, "pointerdown", 31, [p[0] - 80, p[1]]);
+    document.body.dispatchEvent(new PointerEvent("pointerup", { pointerId: 31, pointerType: "touch", isPrimary: true, bubbles: true }));
+    at(body, "pointerdown", 33, p);
+    [20, 40, 60].forEach((dx) => at(body, "pointermove", 33, [p[0] + dx, p[1]]));
+    at(body, "pointerup", 33, [p[0] + 60, p[1]]);
+    await window.__gw.settled();
+    const p2 = W.webWins.value.find((w) => w.id === 902);
+    if (p2.w !== pw.w || p2.h !== pw.h || p2.scale !== pw.scale) fails.push(`a one-finger drag after a finger lifted outside the window changed it ${pw.w}x${pw.h}@${pw.scale} -> ${p2.w}x${p2.h}@${p2.scale}`);
+    return fails;
+  };
+  window.__pzg = { pinchOn, bodyPinch, barPinch, afterScale };
+  return [];
+}
+
+async function webWindowPinchCheck() {
+  const g = window.__pzg;
   const W = await window.__gw.mod("./ui/webwindows.tsx");
   const { powos } = await window.__gw.mod("./bridge.ts");
   // The app's input, recorded (restored after: the gate's host may have no webwindows at all).
   const had = powos.webwindows;
   const calls = [];
-  powos.webwindows = { ...had, input: (id, action, x, y) => (calls.push([action, x, y]), Promise.resolve(true)) };
-  const fails = [];
+  powos.webwindows = { ...had, input: (id, action, a) => (calls.push([action, a.x, a.y, a.finger ?? 0]), Promise.resolve(true)) };
   try {
     const S = await window.__gw.mod("./state.ts");
     W.webWins.value = [{ id: 902, key: "a:gate.pinch", label: "Pinch", page: S.pages.value[0], x: 300, y: 160, w: 400, h: 320 }];
     await window.__gw.settled();
     const body = document.querySelector('.webwindow[data-wwid="902"] .webwindow-body');
-    if (!body) return ["pinch: no web window body on the page on screen"];
-    const pb = body.getBoundingClientRect();
-    const [cx, cy] = [pb.left + pb.width / 2, pb.top + pb.height / 2];
-    const [pe, sentFrom] = [(type, id, x) => body.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", isPrimary: id === 21, clientX: x, clientY: cy, bubbles: true })), window.__ww.sent.length];
-    // Two fingers 200 px apart come together to 140 px (8 moves).
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].forEach((i) => {
-      const t = i === 0 ? "pointerdown" : i === 9 ? "pointerup" : "pointermove";
-      const q = Math.min(i, 8) * 3.75;
-      (pe(t, 21, cx - 100 + q), pe(t, 22, cx + 100 - q));
-    });
+    const bar = document.querySelector('.webwindow[data-wwid="902"] .webwindow-title');
+    if (!body || !bar) return ["pinch: no web window body or bar on the page on screen"];
+    const [pb, pr] = [body.getBoundingClientRect(), bar.getBoundingClientRect()];
+    g.pinchOn([body, body], [pb.top + pb.height / 2, pb.top + pb.height / 2], [21, 22], pb.left + pb.width / 2);
     await window.__gw.settled();
-    const [pw, k] = [W.webWins.value.find((w) => w.id === 902), W.webWins.value.find((w) => w.id === 902).scale ?? 1];
-    fails.push(...pinchScaled(pw, body, sentFrom));
-    const b2 = body.getBoundingClientRect();
-    const acts = calls.map((c) => c[0]).join(",");
-    if (acts !== "down,cancel") fails.push(`a pinch on the body reached the app: ${acts} (want down,cancel)`);
+    const fails = g.bodyPinch(W.webWins.value.find((w) => w.id === 902), body, calls);
     calls.length = 0;
-    const p = [b2.left + b2.width / 2, b2.top + b2.height / 2];
-    body.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 23, pointerType: "touch", clientX: p[0], clientY: p[1], bubbles: true }));
-    body.dispatchEvent(new PointerEvent("pointerup", { pointerId: 23, pointerType: "touch", clientX: p[0], clientY: p[1], bubbles: true }));
-    const d = [...(calls[0] ?? []), NaN, NaN, NaN];
-    const want = [body.offsetWidth / 2, body.offsetHeight / 2];
-    if (Math.hypot(d[1] - want[0], d[2] - want[1]) > 1) fails.push(`at scale ${k}, a press at the body's centre went to the app at ${d[1]},${d[2]} (want ${want})`);
-    // One finger whose up landed outside the frame (never seen by it), then a new one-finger drag: only a move, no
-    // scale (10-30 "dragging with one finger rescales").
-    const one = (type, id, x, primary) => body.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", isPrimary: primary, clientX: x, clientY: p[1], bubbles: true }));
-    one("pointerdown", 31, p[0] - 80, true);
-    document.body.dispatchEvent(new PointerEvent("pointerup", { pointerId: 31, pointerType: "touch", isPrimary: true, bubbles: true }));
-    one("pointerdown", 32, p[0], true);
-    [20, 40, 60].forEach((dx) => one("pointermove", 32, p[0] + dx, true));
-    one("pointerup", 32, p[0] + 60, true);
+    const from = window.__ww.sent.length;
+    g.pinchOn([bar, body], [pr.top + pr.height / 2, pr.top + pr.height / 2 + 40], [25, 24], pb.left + pb.width / 2);
     await window.__gw.settled();
-    const p2 = W.webWins.value.find((w) => w.id === 902);
-    if (p2.w !== pw.w || p2.h !== pw.h || p2.scale !== pw.scale) fails.push(`a one-finger drag after a finger lifted outside the window changed it ${pw.w}x${pw.h}@${pw.scale} -> ${p2.w}x${p2.h}@${p2.scale}`);
+    fails.push(...g.barPinch(W.webWins.value.find((w) => w.id === 902), body, from));
+    if (calls.length) fails.push(`a pinch from the bar reached the app: ${calls.map((c) => c[0] + c[3]).join(",")} (want nothing)`);
+    return [...fails, ...(await g.afterScale(W, body, calls))];
   } finally {
     W.webWins.value = [];
     powos.webwindows = had;
   }
-  return fails;
 }
 
 /**
@@ -4039,7 +4070,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, webWindowResizeCheck, webWindowZoneKeepsHome, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, webWindowResizeCheck, webWindowZoneKeepsHome, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

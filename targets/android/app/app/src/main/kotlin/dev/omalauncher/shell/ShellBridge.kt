@@ -422,7 +422,7 @@ class ShellBridge(
                     runtime.usage.record(a.getString(0))
                     webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1), a.optInt(2, -1))
                 } ?: -1
-            "webwindows.input" -> webWindowsMade && webWindows.input(a.getInt(0), a.getString(1), a.getDouble(2), a.getDouble(3))
+            "webwindows.input" -> webWindowsMade && webWindows.input(a.getInt(0), a.getString(1), WebWindows.BodyTouch(a.getDouble(2), a.getDouble(3), a.optInt(4, 0)))
             "webwindows.close" -> webWindowsMade && webWindows.close(a.getInt(0))
             "webwindows.fullScreen" -> webWindowsMade && webWindows.fullScreen(a.getInt(0))
             "webwindows.toWindow" -> webWindowsMade && webWindows.toWindow(a.getInt(0))

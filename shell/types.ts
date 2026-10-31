@@ -936,8 +936,11 @@ export interface Bridge {
      * [kwin]: a Linux window KWin opened ("l:" key, "webwindows.adopt" with its KWin id) shown in it (docs/WEB_WINDOWS.md S6).
      */
     open(key: string, rect: WebWindowRect, task?: number, kwin?: number): Promise<number>;
-    /** A touch on its body, CSS px from the body's top-left. */
-    input(id: number, action: "down" | "move" | "up" | "cancel", x: number, y: number): Promise<boolean>;
+    /**
+     * A touch on its body at [at] (CSS px from the body's top-left); [at].finger: which finger (PZ1: every finger of a
+     * gesture that started on the body, one multi-touch gesture for the app; omitted: 0).
+     */
+    input(id: number, action: "down" | "move" | "up" | "cancel", at: { x: number; y: number; finger?: number }): Promise<boolean>;
     close(id: number): Promise<boolean>;
     /** Host-optional: its app as a real full-screen app (moved to the main display; again: to the front). */
     fullScreen?(id: number): Promise<boolean>;

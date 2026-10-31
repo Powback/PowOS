@@ -287,7 +287,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     webwindows: host.name === "powos" ? undefined : {
       enabled: () => call<boolean>("webwindows.enabled"),
       open: (key, rect, task, kwin) => call<number>("webwindows.open", key, rect, task ?? -1, kwin ?? -1),
-      input: (id, action, x, y) => call<boolean>("webwindows.input", id, action, x, y),
+      input: (id, action, at) => call<boolean>("webwindows.input", id, action, at.x, at.y, at.finger ?? 0),
       close: (id) => call<boolean>("webwindows.close", id),
       fullScreen: (id) => call<boolean>("webwindows.fullScreen", id),
       toWindow: (id) => call<boolean>("webwindows.toWindow", id),
