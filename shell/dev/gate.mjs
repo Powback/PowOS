@@ -2299,8 +2299,6 @@ async function pullUpFrom(el) {
     await new Promise((ok) => setTimeout(ok, 16));
   }
   fire("pointerup", 225, 0);
-  // Home's page: the launcher is the overlay (pull.tsx) - home asks the host for it (homeAsks).
-  if (window.__asked) return void (await window.__gw.settled(() => window.__asked.length));
   // Until it's open and come to rest - the bar's pill over it faded in (drawerWithPill's checks), at most 3 s.
   const bar = () => document.querySelector(".home > .bar");
   await window.__gw.settled(() => document.querySelector(".home.open") && bar() && +getComputedStyle(bar()).opacity >= 0.9);
@@ -2309,10 +2307,15 @@ async function pullUpFrom(el) {
 
 /**
  * The drawer is open with the bar's pill on screen, over the drawer's window (not under an app row). On home's page
- * (homeAsks): home asked the host for the launcher overlay - with its search focused when [search].
+ * (homeAsks): in place, adopting home's bar and dock - the host's overlay never asked; home's own field typing when [search].
  */
 function drawerWithPill(where, search) {
-  if (window.__asked) return window.__sp.overlayAsked(where, search);
+  if (window.__overlayAsks) return window.__sp.overlayAsked(where, search);
+  return window.__sp.pillOverDrawer(where);
+}
+
+/** The open drawer's pill on screen, over its window. */
+function pillOverDrawer(where) {
   const pill = document.querySelector(".home > .bar .bar-pill")?.getBoundingClientRect();
   const clip = document.querySelector(".home .launcher-clip")?.getBoundingClientRect();
   const bar = document.querySelector(".home > .bar");
@@ -2355,10 +2358,9 @@ async function searchLauncherCheck() {
   fails.push(...drawerWithPill("pulled up from the widget"));
   await closeDrawerNow();
   tile.click();
-  // Home's pill is only the launcher's face: the overlay's field types (search-launcher-overlay checks that side).
-  await window.__gw.settled(() => window.__asked.length);
+  // The launcher adopts home's bar (state.ts homePage): home's own field types, in place.
+  await window.__gw.settled(() => document.querySelector(".home.open"));
   fails.push(...drawerWithPill("tapped on the widget", true));
-  if (document.activeElement?.closest?.(".home > .bar, .home-tile")?.querySelector("textarea") === document.activeElement) fails.push("tapped on the widget: home's own field took the typing, not the launcher's");
   await closeDrawerNow();
   return [...fails, ...(await searchPutBack()), ...(await searchToDock())];
 }
@@ -2416,19 +2418,21 @@ async function searchToDock() {
   return fails;
 }
 
-/** Home's page (homeAsks): what home asked the host's launcher overlay for, since the last pull or tap. */
+/** Home's page (homeAsks): the launcher open in place over home - never the host's overlay (a second dock and bar). */
 function overlayAsked(where, search) {
-  const asked = window.__asked.splice(0);
-  if (!asked.length) return [`${where}: the launcher overlay wasn't asked to open`];
-  if (asked[0].kind !== "apps") return [`${where}: the launcher overlay was asked for ${asked[0].kind}, not the apps`];
-  return search && !asked[0].how?.search ? [`${where}: the launcher overlay wasn't asked to focus its search`] : [];
+  const asked = window.__overlayAsks.splice(0);
+  const fails = asked.length ? [`${where}: asked the host's launcher overlay over home (${asked[0].kind})`] : [];
+  fails.push(...window.__sp.pillOverDrawer(where));
+  const field = document.querySelector(".home > .bar textarea");
+  if (search && document.activeElement !== field) fails.push(`${where}: home's own bar isn't the one typing`);
+  return fails;
 }
 
-/** Home's page: the host's launcher overlay recorded, not opened (Bridge.pull.open; the browser gate has no host). */
+/** Home's page: any ask for the host's launcher overlay recorded (Bridge.pull.open; it must stay empty over home). */
 async function homeAsks() {
   const { powos } = await window.__gw.mod("./bridge.ts");
-  window.__asked = [];
-  powos.pull.open = async (kind, how) => (window.__asked.push({ kind, how }), true);
+  window.__overlayAsks = [];
+  powos.pull.open = async (kind, how) => (window.__overlayAsks.push({ kind, how }), true);
 }
 
 /**
@@ -5705,7 +5709,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `search-launcher-${label}`, viewport).then(async (r) => {
-        const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock}, pillBelowDockInEdit: ${pillBelowDockInEdit}, placeSearchWidget: ${placeSearchWidget}, overlayAsked: ${overlayAsked} }`;
+        const helpers = `window.__sp = { pullUpFrom: ${pullUpFrom}, drawerWithPill: ${drawerWithPill}, pillOverDrawer: ${pillOverDrawer}, closeDrawerNow: ${closeDrawerNow}, searchPutBack: ${searchPutBack}, searchToDock: ${searchToDock}, pillBelowDockInEdit: ${pillBelowDockInEdit}, placeSearchWidget: ${placeSearchWidget}, overlayAsked: ${overlayAsked} }`;
         const s = await whenReady(r, async () => [...(await r.page.evaluate(searchDefaultCheck)), ...(await r.page.evaluate(helpers).then(() => r.page.evaluate(homeAsks)).then(() => r.page.evaluate(searchLauncherCheck)))]);
         if (s.problems.length) return s;
         await r.page.reload().catch(() => {});
@@ -5715,7 +5719,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `search-launcher-overlay-${label}`, viewport).then((r) => whenReady(r, async () => {
-        await r.page.evaluate(`window.__sp = { drawerWithPill: ${drawerWithPill} }`);
+        await r.page.evaluate(`window.__sp = { drawerWithPill: ${drawerWithPill}, pillOverDrawer: ${pillOverDrawer} }`);
         return r.page.evaluate(overlaySearchCheck);
       })));
   // Edit mode: a rectangle drawn on empty space picks tiles, picked tiles move together (the user, 2026-10-22).
@@ -5781,6 +5785,13 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position, keyboard] of dockOpens)
       runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `launcher-dock-${label}-${position}${keyboard ? "-kbd" : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos, kb) => (await importShim("./dev/dock-check.js")).launcherDockOpens(pos, kb), position, keyboard))));
+  // LA1: the launcher over home adopts home's dock and bar - one of each in every frame, unmoved; over an app the overlay
+  // brings its own (dev/launcher-adopt-check.js; the user, 2026-10-31 15:44).
+  if (process.env.SHELL_PAGES !== "0") {
+    for (const [label, position] of [["folded", "bottom"], ["unfolded", "bottom"], ["unfolded", "right"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `launcher-adopt-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/launcher-adopt-check.js")).adoptsHome(pos), position))));
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-adopt-overlay", dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/launcher-adopt-check.js")).ownDock()))));
+  }
   // Home's search as a dock button (dev/dock-search-check.js; the user, 2026-10-31): no .bar, the button centred in the
   // dock, a tap expands it in place focused (not the launcher), folded and unfolded, bottom and side docks.
   if (process.env.SHELL_PAGES !== "0")

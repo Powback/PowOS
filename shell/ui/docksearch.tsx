@@ -20,7 +20,8 @@
 import { useRef } from "preact/hooks";
 import { computed } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { dockPosition, homePage, openPanel, pullPage, searchInDock } from "../state.ts";
+import { closeDrawer, dockPosition, drawer, homePage, openPanel, pullKind, pullPage, searchInDock } from "../state.ts";
+import { drawerDrag } from "./gesture.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { dictateBar, focusBar } from "./bar.tsx";
 import { speech } from "./dictation.ts";
@@ -51,14 +52,21 @@ export function faceRect() {
   return r && r.width > 0 ? { left: r.left, top: r.top, width: r.width, height: r.height } : undefined;
 }
 
-/** Opens the launcher from the button: home asks the host for the overlay; the overlay's own button acts in place. */
+/** Opens the launcher from the button, in place (home's grid adopts its dock and bar; the overlay's own button too). */
 function launch(listen: boolean) {
-  if (pullPage) return listen ? dictateBar() : focusBar();
-  openPanel("apps", { search: true, listen, from: faceRect() });
+  if (homePage) openPanel("apps");
+  return listen ? dictateBar() : focusBar();
 }
 
-/** The host's pull, driven by a swipe up from the button (PullHost.pullBegin/pullDrag/pullEnd); an older host: none. */
-const drive = (phase: "begin" | "drag" | "end", arg?: unknown) => void powos.pull.drive?.(phase, arg)?.catch(() => {});
+/** A swipe up from the button: home's own launcher follows the finger (gesture.ts drawerDrag), as its body's swipe does. */
+function drive(phase: "begin" | "drag" | "end", arg?: unknown) {
+  if (phase === "begin") return void (pullKind.value = "apps", (drawerDrag.value = 0));
+  if (phase === "drag") return void (drawerDrag.value = arg as number);
+  drawerDrag.value = null;
+  if (!arg) return closeDrawer();
+  drawer.value = 1;
+  focusBar();
+}
 
 interface Press {
   x: number;

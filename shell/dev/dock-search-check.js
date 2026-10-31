@@ -29,67 +29,91 @@ function fire(el, type, dx = 0, dy = 0) {
   el.dispatchEvent(new PointerEvent(type, at));
 }
 
-/** Home's page: the host's launcher overlay recorded, not opened (the browser has no host); speech calls counted. */
+/**
+ * Home's page: its launcher opens in place (state.ts homePage: it adopts home's dock and bar), never the host's overlay -
+ * any pull.open / pull.drive is recorded as a failure; speech calls counted.
+ */
 async function record() {
   const { powos } = await importShim("./bridge.ts");
+  const S = await importShim("./state.ts");
   const asked = [];
-  const speech = { hold: 0, stop: 0 };
+  const speech = { start: 0, hold: 0, stop: 0 };
   powos.pull.open = async (kind, how) => (asked.push({ kind, how }), true);
-  const { hold, stop } = powos.speech;
+  powos.pull.drive = async (phase) => (asked.push({ drive: phase }), true);
+  const { start, hold, stop } = powos.speech;
+  powos.speech.start = async (...a) => (speech.start++, start(...a));
   powos.speech.hold = async () => (speech.hold++, hold());
   powos.speech.stop = async () => (speech.stop++, stop());
-  return { asked, speech };
+  return { asked, speech, S };
 }
 
-/** A tap: the launcher opened with its field focused (pull.open { search, from }), no bar expanded in place. */
-async function tapOpens(btn, asked) {
+/** Shut again, settled, before the next press. */
+async function shutHome(S) {
+  S.closeDrawer();
+  await sleep(400);
+}
+
+/** What a press left: the launcher open in place, one bar and one dock on home, the overlay never asked. */
+function inPlace(what, S, asked) {
+  const fails = [];
+  if (S.drawer.value !== 1) fails.push(`${what}: the launcher didn't open in place`);
+  if (asked.length) fails.push(`${what}: asked the host's overlay (${JSON.stringify(asked.splice(0))})`);
+  const bars = document.querySelectorAll(".home > .bar").length;
+  const docks = document.querySelectorAll(".home > .dock:not(.dock-tray)").length;
+  if (bars !== 1 || docks !== 1) fails.push(`${what}: ${bars} bars, ${docks} docks (one each)`);
+  return fails;
+}
+
+/** A tap: the launcher open in place with home's own bar focused. */
+async function tapOpens(btn, asked, speech, S) {
   fire(btn, "pointerdown");
   fire(btn, "pointerup");
-  await sleep(100);
-  const tap = asked.shift();
-  if (!tap) return ["a tap didn't open the launcher"];
-  const ok = tap.how?.search && !tap.how.listen && tap.how.from?.width;
-  return ok ? [] : [`a tap opened it as ${JSON.stringify(tap.how)}`];
+  const field = () => document.querySelector(".home > .bar textarea");
+  for (let t = 0; t < 40 && !(field() && document.activeElement === field()); t++) await sleep(50);
+  const fails = inPlace("a tap", S, asked);
+  if (document.activeElement !== field()) fails.push("a tap: home's bar not focused");
+  await shutHome(S);
+  return fails;
 }
 
-/** Held 300 ms: the launcher dictating ({ listen }); let go soon after, the dictation goes on (no stop). */
-async function holdDictates(btn, asked, speech) {
+/** Held 300 ms: the launcher open in place, dictating; let go soon after, the dictation goes on (no stop). */
+async function holdDictates(btn, asked, speech, S) {
   fire(btn, "pointerdown");
   await sleep(400);
-  const hold = asked.shift();
   fire(btn, "pointerup");
   await sleep(100);
-  const fails = hold?.how?.listen ? [] : [`held 300 ms: ${hold ? JSON.stringify(hold.how) : "no launcher"}, not dictating`];
+  const fails = inPlace("held 300 ms", S, asked);
+  if (!speech.start) fails.push("held 300 ms: not dictating");
   if (speech.stop) fails.push("a short hold let go stopped the dictation (it goes on as a tap's)");
+  await shutHome(S);
   return fails;
 }
 
 /** Still held: push-to-talk (speech.hold); let go at 1.5 s, the dictation stops (speech.stop, never a send). */
-async function pushToTalk(btn, asked, speech) {
+async function pushToTalk(btn, asked, speech, S) {
+  speech.stop = 0;
   fire(btn, "pointerdown");
   await sleep(1500);
-  asked.length = 0;
   const fails = speech.hold ? [] : ["held 1.5 s: not push-to-talk (no speech.hold)"];
   fire(btn, "pointerup");
   await sleep(50);
   if (speech.stop !== 1) fails.push(`push-to-talk let go: ${speech.stop} stops`);
+  asked.length = 0;
+  await shutHome(S);
   return fails;
 }
 
-/** A swipe up from it: the host's pull, following the finger (pull.drive), never a tap's open. */
-async function swipeUp(btn, asked) {
-  const { powos } = await importShim("./bridge.ts");
-  const drives = [];
-  powos.pull.drive = async (phase, arg) => (drives.push([phase, arg]), true);
+/** A swipe up from it: home's own launcher follows the finger (drawerDrag) and opens, in place. */
+async function swipeUp(btn, asked, speech, S) {
+  const { drawerDrag } = await importShim("./ui/gesture.ts");
+  const seen = [];
   fire(btn, "pointerdown");
-  for (let i = 1; i <= 6; i++) fire(btn, "pointermove", 0, -i * 20);
+  for (let i = 1; i <= 6; i++) (fire(btn, "pointermove", 0, -i * 20), seen.push(drawerDrag.value));
   fire(btn, "pointerup", 0, -120);
   await sleep(50);
-  const phases = drives.map((d) => d[0]).join(",");
-  const fails = [];
-  if (!/^begin,(drag,)+end$/.test(phases)) fails.push(`swipe up: drove ${phases || "nothing"}`);
-  else if (drives.at(-1)[1] !== true) fails.push("swipe up 120 px: let go, it didn't open");
-  if (asked.length) fails.push("swipe up: also a tap's open");
+  const fails = seen.some((p) => p > 0) ? [] : ["swipe up: the launcher didn't follow the finger"];
+  fails.push(...inPlace("swipe up 120 px", S, asked));
+  await shutHome(S);
   return fails;
 }
 
@@ -97,8 +121,9 @@ async function swipeUp(btn, asked) {
 async function pressOpens(position) {
   const btn = document.querySelector(".home > .dock .dock-search");
   if (!btn) return [];
-  const { asked, speech } = await record();
-  const fails = [...(await tapOpens(btn, asked)), ...(await holdDictates(btn, asked, speech)), ...(await pushToTalk(btn, asked, speech)), ...(await swipeUp(btn, asked))];
+  const { asked, speech, S } = await record();
+  const fails = [];
+  for (const press of [tapOpens, holdDictates, pushToTalk, swipeUp]) fails.push(...(await press(btn, asked, speech, S)));
   if (document.querySelector(".dock-search-bar")) fails.push("a bar expanded in place");
   return fails.map((f) => `${position}: ${f}`);
 }

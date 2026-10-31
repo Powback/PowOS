@@ -28,7 +28,8 @@ import { GlassesScreen } from "./glasses.tsx";
 import { AgentsScreen } from "./agents.tsx";
 import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
-import { PowAiPage } from "./powai.tsx";
+import { AiView, PowAiPage } from "./powai.tsx";
+import { Drawer } from "./drawer.tsx";
 import { Pet } from "./pet.tsx";
 import { markClass, pageFocus } from "./pagemarks.ts";
 import { DockGroupCell, groupedKeys, unpinnedGroups } from "./dockgroups.tsx";
@@ -38,7 +39,7 @@ import { overWindows } from "./panellift.ts";
 import { footBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
 import { webWins, windowFrame } from "./webwindows.tsx";
-import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
+import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullKind, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
 import { remoteOpen } from "../remote.ts";
@@ -176,9 +177,10 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
       (taken) => (shadeTakesHome.value = !!taken),
       () => (shadeTakesHome.value = false),
     );
-    // Up is the launcher overlay's, the same way (PullHost.kt): it follows the finger over home.
+    // Up is home's own: its launcher opens in place, adopting this dock and bar (state.ts homePage) - the host's pull
+    // window over home would bring a second dock and bar. Told off, so a host that took it gives it back.
     const split = pullPanels.value === "on";
-    (powos.pull.homePull?.(on, exclude, split, regions) ?? Promise.resolve(false)).then(
+    (powos.pull.homePull?.(false, exclude, split, regions) ?? Promise.resolve(false)).then(
       (taken) => (launcherTakesHome.value = !!taken),
       () => (launcherTakesHome.value = false),
     );
@@ -607,8 +609,35 @@ function HomeDots() {
   );
 }
 
-/** The foot's pill, unless home's search is the dock's button (docksearch.tsx: it opens the launcher). */
-const HomeSearch = () => (dockButton.value ? null : <Bar />);
+/** The foot's pill, unless home's search is the dock's button (docksearch.tsx: it opens the launcher, with the pill). */
+const HomeSearch = () => (dockButton.value && !drawerOpen.value ? null : <Bar />);
+
+let launcherUsed = false;
+
+/**
+ * Home's launcher (the user, 2026-10-31 15:45: "If the docking and recents is already available, we should just reuse
+ * that"): the app grid (or PowOS AI's panel) in home's own page, the frost and the drawer rising behind and above the
+ * dock and bar - the same elements, in place, with their state, recents, text and focus. No second dock or bar.
+ */
+function HomeLauncher() {
+  // Mounted on its first open (a finger's pull or a tap) and kept: home's page doesn't carry the grid until it's used.
+  if (drawerOpen.value || drawerDragging.value) launcherUsed = true;
+  if (!launcherUsed) return null;
+  return (
+    <>
+      <div class="launcher-frame tile" data-p ref={followOpenness} />
+      <div class="launcher-clip" data-p ref={followOpenness}>
+        <div class="launcher" data-p ref={followOpenness}>
+          <div class="launcher-inner">
+            <div class="drawer-clip">
+              {pullKind.value === "ai" ? <AiView shown={drawerOpen.value} cls="ai-panel" pill={false} /> : <Drawer />}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
 
 /** Home's search as the dock's button (docksearch.tsx). */
 const searchDockClasses = () => (dockButton.value ? "search-dock" : "");
@@ -621,14 +650,15 @@ export function Home() {
       <div class="screens" {...homeGestures()}>
         <PowAiPage />
         <div
-          class={`home dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
+          class={`home adopts dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
         >
           <div class="stage">
             <div class="home-content" data-p ref={followOpenness}>
               <Pages />
             </div>
             <HomeDots />
-            {/* No launcher here: it's the overlay over home (pull.tsx), as the shade is - one for every way in. */}
+            {/* The launcher in place: only its grid layer moves; home's bar and dock below are its own (adopted). */}
+            <HomeLauncher />
           </div>
           {/* Always the foot's pill: the launcher's face - a tap opens the overlay with its search (bar.tsx). With the
               search widget on the grid it's parked (shell.css .search-parked). */}
