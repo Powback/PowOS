@@ -27,6 +27,7 @@ import { morphBegin, morphDrag, morphFrom, morphTo, morphing, reset as resetMorp
 import { dockButton } from "./docksearch.tsx";
 import { Drawer } from "./drawer.tsx";
 import { Dock, DockTray } from "./home.tsx";
+import { DockOutGhost } from "./dockout.tsx";
 import { drawerDrag, drawerOpen, drawerShown, followOpenness, homeGestures } from "./gesture.ts";
 import { AiView } from "./powai.tsx";
 
@@ -152,6 +153,7 @@ export function Pull() {
       </div>
       <Bar />
       {dockShown.value && <Dock />}
+      <DockOutGhost />
       {/* Unfolded the launcher is home's wide one (the user, 2026-10-29: "It's supposed to be wide"): .home.wide's grid,
           the foot's pinned apps | pill | recent apps (DockTray: bottom dock only) as on home. */}
       {dockShown.value && wideHome.value && <DockTray />}
