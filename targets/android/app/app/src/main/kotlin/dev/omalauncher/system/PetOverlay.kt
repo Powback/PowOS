@@ -25,7 +25,7 @@ import kotlin.math.hypot
  * The pet over apps (docs/PET.md v2, step d): the same creature as on home (shell/ui/petover.tsx, mode=petover) in a
  * small window at a screen edge while an app is in front - the agents' face wherever you are.
  *
- * - Shown only while: the user has it on ([enabled], "pet.overlay", default on), an app is in front (not home - home
+ * - Shown only while: the user has it on ([enabled], "pet.overlay", default off), an app is in front (not home - home
  *   has its own pet), the screen's unlocked, the shade's shut, the assistant (the side button's crop) isn't up, and the
  *   app isn't full screen (a game, a video: the status bar hidden). Otherwise GONE, its page paused (no frames).
  * - Its touches are native (no page round trip): a drag moves the window (the page gets "petover.drag" for the body's
@@ -56,8 +56,19 @@ class PetOverlay(
     private val density get() = context.resources.displayMetrics.density
     private val sizePx get() = (SIZE_DP * density).toInt()
 
+    /**
+     * Registers it; the window itself (a whole WebView) is made only once the user's switch is on ([window]) and taken
+     * down again when it goes off - the pet off means no overlay window at all (perf trace 5, 2026-10-31: the
+     * hidden window still existed with the pet off).
+     */
     fun start(): Boolean {
-        if (host != null) return true
+        current = this
+        if (enabled(service)) window()
+        return true
+    }
+
+    private fun window() {
+        if (host != null) return
         val runtime = (service.applicationContext as App).runtime
         runtime.start()
         val h = ShellHost(context, null, runtime, "petover")
@@ -70,17 +81,26 @@ class PetOverlay(
         root = r
         params = layout().also { wm.addView(r, it) }
         h.web.onPause()
-        current = this
+        shown = false
         Log.i(TAG, "pet overlay ready")
-        return true
+    }
+
+    private fun unwindow() {
+        val r = root ?: return
+        r.removeCallbacks(tuck)
+        runCatching { wm.removeView(r) }
+        root = null
+        params = null
+        host?.destroy()
+        host = null
+        shown = false
+        peeking = false
+        Log.i(TAG, "pet overlay gone (switched off)")
     }
 
     fun stop() {
         if (current === this) current = null
-        root?.let { runCatching { wm.removeView(it) } }
-        root = null
-        host?.destroy()
-        host = null
+        unwindow()
     }
 
     /** SystemUI's state flags: the lock screen and the shade hide it. */
@@ -98,8 +118,9 @@ class PetOverlay(
     }
 
     fun update() {
-        val fullScreen = ShadeHost.current?.statusBarShown == false
-        val want = enabled(service) && !homeVisible && !keyguard && !shadeOpen && !assistShowing && !fullScreen && !ime
+        if (!enabled(service)) return unwindow()
+        window()
+        val want = wanted()
         val r = root ?: return
         if (want == shown) return
         shown = want
@@ -108,6 +129,12 @@ class PetOverlay(
         r.removeCallbacks(tuck)
         if (want) r.postDelayed(tuck, PEEK_AFTER_MS)
         Log.i(TAG, "pet over apps ${if (want) "shown" else "hidden"}")
+    }
+
+    /** Over an app now (the switch on): not home, the lock, the shade, the assistant, a full screen app or the keyboard. */
+    private fun wanted(): Boolean {
+        val fullScreen = ShadeHost.current?.statusBarShown == false
+        return !homeVisible && !keyguard && !shadeOpen && !assistShowing && !fullScreen && !ime
     }
 
     private fun emit(
@@ -291,16 +318,24 @@ class PetOverlay(
                 current?.update()
             }
 
-        /** The user's switch (`powos pet overlay on|off`, through the page: "pet.overlay"); on by default. */
-        fun enabled(context: Context) = context.getSharedPreferences("pet", Context.MODE_PRIVATE).getBoolean("overlay", true)
+        /**
+         * The user's switch (`powos pet overlay on|off`, the pet's own on/off with it, through the page: "pet.overlay").
+         * OFF by default, like the pet (2026-10-22): a pet that's off needs no call at all - the page sends only when
+         * it wants it on (shell/ui/pet.tsx PetSwitch). A new key, so an old default-on "overlay" can't show a pet
+         * that's off.
+         */
+        fun enabled(context: Context) = context.getSharedPreferences("pet", Context.MODE_PRIVATE).getBoolean(KEY, false)
+
+        private const val KEY = "overlay.on"
 
         /** Reads it, or sets it ([on] non-null). */
         fun enabled(
             context: Context,
             on: Boolean?,
         ): Boolean {
-            if (on != null) {
-                context.getSharedPreferences("pet", Context.MODE_PRIVATE).edit().putBoolean("overlay", on).apply()
+            // Only a change writes or touches the window: the page repeating the same value costs nothing.
+            if (on != null && on != enabled(context)) {
+                context.getSharedPreferences("pet", Context.MODE_PRIVATE).edit().putBoolean(KEY, on).apply()
                 current?.update()
             }
             return enabled(context)

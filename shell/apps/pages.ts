@@ -11,6 +11,7 @@
 import { computed, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { RegistryApp } from "./registry.ts";
+import { stableRows } from "./stable.ts";
 import type { App } from "../types.ts";
 
 // No import of stdb.ts or registry.ts here: state.ts imports this, and they import state.ts (apps/onscreen.ts).
@@ -77,13 +78,22 @@ export const retryUrl = (url: string, n: number) => (n ? `${url}&t=${n}` : url);
 export const moduleUrl = (id: string, entry: string, version: string) =>
   `./_app/${id}/${entry}?v=${encodeURIComponent(version)}&r=${appRev.value[id] ?? 0}`;
 
-/** The installed apps that have a page, as launcher apps. */
-export const powosApps = computed<App[]>(() =>
-  installedApps.value.flatMap((a) => {
-    const m = manifestOf(a);
-    if (!m.page?.entry || m.surfaces?.launcher === false) return [];
-    return [{ key: PREFIX + a.id, label: a.name, icon: m.icon ? moduleUrl(a.id, m.icon, a.version) : initial(a.name), kind: "powos" as const }];
-  }),
+/**
+ * The installed apps that have a page, as launcher apps. Stable (apps/stable.ts): an App equal to the last one made for
+ * its key is that same object, and the list itself the same array when none changed - a registry message re-renders
+ * only the cells of the apps it changed (perf trace 5: every AppCell's "app~" on each one).
+ */
+let lastPowos: App[] = [];
+export const powosApps = computed<App[]>(
+  () =>
+    (lastPowos = stableRows(
+      lastPowos,
+      installedApps.value.flatMap((a) => {
+        const m = manifestOf(a);
+        if (!m.page?.entry || m.surfaces?.launcher === false) return [];
+        return [{ key: PREFIX + a.id, label: a.name, icon: m.icon ? moduleUrl(a.id, m.icon, a.version) : initial(a.name), kind: "powos" as const }];
+      }),
+    )),
 );
 
 /** No icon in its manifest: its initial on a tile. */

@@ -238,6 +238,8 @@ const forced = signal<State | null>(null);
 (window as unknown as { __pet?: object }).__pet = {
   force: (s: State | null) => (forced.value = s),
   on: (v: boolean) => (testOn.value = v),
+  /** What PetSwitch's effect does on each (re)connect (the gate's pet-overlay-off run: no SpacetimeDB there). */
+  overlay: (v: boolean) => sendOverlay(v),
   /** Put it on a perch (a tile's key or "bar", 0..1 along the edge); null: floating. */
   perch: (key: string | null, fx = 0.5) => (perchStored.value = key ? JSON.stringify({ key, fx }) : ""),
   edges,
@@ -539,8 +541,7 @@ function PetFeed() {
       gotoSeen.value = String(at);
       if (Date.now() - at < 5 * 60_000) goTo(p.gotoTarget ?? "", p.gotoSay ?? "");
     }
-    // The pet over apps follows the module's switch (the CLI sets it there; the host keeps it).
-    if (typeof p.overlay === "boolean") powos.pet?.overlay(p.overlay).catch(() => {});
+    // The pet over apps follows the module's switch: PetSwitch sends it (once per change).
     moodSet.value = { mood: p.mood, until: Number(p.moodUntil) };
   }, [pets]);
   useEffect(() => {
@@ -749,9 +750,24 @@ function PetSwitch({ children }: { children: preact.ComponentChildren }) {
   const overlay = on && rows[0]?.overlay !== false;
   useEffect(() => {
     if (db.status !== "connected" || !rows.length) return;
-    powos.pet?.overlay(overlay).catch(() => {});
+    sendOverlay(overlay);
   }, [overlay, db.status, rows.length]);
   return on ? <>{children}</> : null;
+}
+
+/**
+ * What the host was last told about the over-apps window. The host's switch is off by default (PetOverlay.enabled), so
+ * a pet that's off sends nothing at all: perf trace 5 (2026-10-31) had a `pet.overlay(false)` on every socket
+ * reconnect (each home/app/home cycle, the effect above re-ran on db.status) with the pet off, each one ahead of the
+ * three worst native frames.
+ */
+let overlaySent = false;
+function sendOverlay(on: boolean) {
+  if (on === overlaySent) return;
+  overlaySent = on;
+  powos.pet?.overlay(on).catch(() => {
+    overlaySent = !on;
+  });
 }
 
 /** Settings > Style > Pet: on or off (the module's `enabled`). */

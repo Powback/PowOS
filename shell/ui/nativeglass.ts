@@ -559,7 +559,34 @@ function sendRegions(text: string) {
   } else send(`b.r ${text}`);
 }
 
+/**
+ * The measure runs after this frame's layout, not in its rAF: a ResizeObserver's callback comes in the rendering steps
+ * right after style and layout and before paint, so its reads find layout clean - nothing forced - and the regions
+ * still go with this frame (the same frame id as before). Observing the root again is what asks for that callback
+ * (a new observation always reports once). In a rAF, after other callbacks' writes (gesture.ts, the web windows,
+ * a signal's render), every getBoundingClientRect forced a layout: perf trace 5 (2026-10-31), 4 ms in
+ * nativeglass.ts:frame.
+ */
+let pending = false;
+const afterLayout = new ResizeObserver(() => {
+  if (!pending) return;
+  pending = false;
+  measured();
+});
+
 function frame() {
+  if (!nativeGlass.value) {
+    running = false;
+    resting = false;
+    return;
+  }
+  pending = true;
+  afterLayout.unobserve(root);
+  afterLayout.observe(root);
+}
+
+/** This frame's regions (after its layout: [afterLayout]), sent if they changed; the loop goes on while they move. */
+function measured() {
   if (!nativeGlass.value) {
     running = false;
     resting = false;

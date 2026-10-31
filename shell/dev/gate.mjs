@@ -3806,6 +3806,150 @@ async function petSwitchScene() {
 }
 
 /**
+ * PERF5-PET (perf-1793474464493: a pet.overlay call ahead of each of the three worst native frames, the pet OFF): with
+ * the pet installed but off, a home/app/home cycle (hidden, shown, an app opened and closed) makes no pet.overlay
+ * bridge call - and PetSwitch's effect re-run on every reconnect (`__pet.overlay`) sends only a change, never off.
+ */
+async function petOverlayOffScene() {
+  const P = await window.__gw.mod("./apps/pages.ts");
+  const B = await window.__gw.mod("./bridge.ts");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const fails = [];
+  const calls = [];
+  const pet = B.powos.pet;
+  const had = pet?.overlay;
+  if (!pet) return ["no powos.pet on the bridge"];
+  pet.overlay = (on) => (calls.push(on), Promise.resolve(!!on));
+  const setHidden = (h) => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => h });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (h ? "hidden" : "visible") });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  try {
+    P.installedApps.value = [...P.installedApps.value, { id: "local.pet", name: "Pet", version: "0.1.0", database: "local-pet", tier: 0, manifest: "{}" }];
+    await window.__gw.until(() => window.__pet);
+    await window.__gw.settled();
+    for (let i = 0; i < 3; i++) {
+      P.openApp("local.pet");
+      await window.__gw.frames(3);
+      setHidden(true);
+      await sleep(60);
+      setHidden(false);
+      P.closeApp();
+      await window.__gw.frames(3);
+      window.__pet.overlay(false); // the effect on the reconnect back home
+    }
+    const off = calls.length;
+    window.__pet.overlay(true);
+    window.__pet.overlay(true);
+    window.__pet.overlay(false);
+    window.__pet.overlay(false);
+    const changes = calls.length - off;
+    window.__petOverlay = `pet off: ${off} pet.overlay calls over 3 home/app/home cycles; on/on/off/off: ${changes} calls`;
+    console.warn(`[gate] pet-overlay-off: ${window.__petOverlay}`);
+    if (off) fails.push(`PERF5: ${off} pet.overlay bridge calls with the pet off (want 0): ${JSON.stringify(calls)}`);
+    if (changes !== 2) fails.push(`PERF5: on, on, off, off sent ${changes} pet.overlay calls (want 2: one per change)`);
+  } finally {
+    pet.overlay = had;
+    delete document.hidden;
+    delete document.visibilityState;
+    document.dispatchEvent(new Event("visibilitychange"));
+  }
+  return fails;
+}
+
+/**
+ * PERF5-STDB (perf-1793474464493: one SpacetimeDB message re-rendered 30 Tiles and 14 AppCells, AppCell "app~"): the
+ * registry's rows delivered again as fresh copies (a message, a reconnect's resubscribe) with one app renamed render
+ * only that app's cells - and the same rows again render nothing (apps/stable.ts).
+ */
+async function stdbRowsStableScene() {
+  const P = await window.__gw.mod("./apps/pages.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const fails = [];
+  const row = (i, name) => ({ id: `gate.s${i}`, name: name ?? `Stable ${i}`, version: "1", database: "", tier: 0, manifest: JSON.stringify({ page: { entry: "index.js" } }) });
+  const base = Array.from({ length: 8 }, (_, i) => row(i));
+  P.installedApps.value = [...P.installedApps.value.filter((a) => !a.id.startsWith("gate.s")), ...base];
+  S.dock.value = [...S.dock.value.filter((k) => !k.startsWith("p:gate.s")), "p:gate.s1", "p:gate.s2", "p:gate.s3"];
+  await window.__gw.settled();
+  await window.__gw.frames(10);
+  const others = P.installedApps.value.filter((a) => !a.id.startsWith("gate.s"));
+  const count = async (rows) => {
+    window.__powosRenders.start();
+    window.__powosRenders.reset();
+    P.installedApps.value = [...others.map((a) => ({ ...a })), ...rows];
+    await window.__gw.frames(6);
+    const top = window.__powosRenders.top(500).byCount;
+    window.__powosRenders.stop();
+    const n = (name) => top.filter((r) => r.name === name || r.name === `memo(${name})`).reduce((s, r) => s + r.renders, 0);
+    return { cell: n("AppCell"), tile: n("Tile") };
+  };
+  const same = await count(base.map((r) => ({ ...r })));
+  const one = await count(base.map((r, i) => (i === 2 ? row(2, "Renamed 2") : { ...r })));
+  window.__stdbStable = `same rows again: ${same.cell} AppCell, ${same.tile} Tile; one row changed: ${one.cell} AppCell, ${one.tile} Tile`;
+  console.warn(`[gate] stdb-rows-stable: ${window.__stdbStable}`);
+  if (same.cell || same.tile) fails.push(`PERF5: equal rows again re-rendered ${same.cell} AppCell and ${same.tile} Tile (want 0)`);
+  // The renamed app's cell in the dock (and the drawer if mounted): its own cells only.
+  if (one.cell > 2) fails.push(`PERF5: one row changed re-rendered ${one.cell} AppCell (want <= 2: only that app's)`);
+  if (one.tile > 1) fails.push(`PERF5: one row changed re-rendered ${one.tile} Tile (want <= 1)`);
+  P.installedApps.value = others;
+  S.dock.value = S.dock.value.filter((k) => !k.startsWith("p:gate.s"));
+  return fails;
+}
+
+/**
+ * PERF5-GLASS (perf-1793474464493: nativeglass.ts:frame forced a 4 ms layout): with the live glass on and a surface's
+ * style written in a rAF every frame (what a gesture does), the glass loop reads no layout inside any rAF callback -
+ * it measures after the frame's layout (a ResizeObserver callback) - and still sends the moving regions.
+ */
+async function glassFrameLayoutScene() {
+  const N = await window.__gw.mod("./apps/native.ts");
+  const fails = [];
+  const sent = [];
+  const ch = new MessageChannel();
+  ch.port2.onmessage = (m) => sent.push(String(m.data));
+  const had = N.native.value;
+  N.native.value = ch.port1;
+  for (const f of N.fromNative) f("b.state 1");
+  let inRaf = 0, forced = 0, where = "";
+  const raf = window.requestAnimationFrame;
+  window.requestAnimationFrame = (cb) => raf.call(window, (t) => { inRaf++; try { cb(t); } finally { inRaf--; } });
+  const E = Element.prototype, H = HTMLElement.prototype;
+  const rect = E.getBoundingClientRect, ow = Object.getOwnPropertyDescriptor(H, "offsetWidth");
+  const note = () => {
+    if (!inRaf) return;
+    const st = new Error().stack ?? "";
+    if (/nativeglass\.ts/.test(st)) forced++, (where ||= st.split("\n").find((l) => /nativeglass\.ts/.test(l))?.trim() ?? "");
+  };
+  E.getBoundingClientRect = function () { note(); return rect.call(this); };
+  Object.defineProperty(H, "offsetWidth", { configurable: true, get() { note(); return ow.get.call(this); } });
+  const tile = document.querySelector(".home-tile");
+  try {
+    await window.__gw.settled();
+    await window.__gw.frames(4);
+    if (!tile) fails.push("no .home-tile to move");
+    const before = sent.filter((t) => /^b\.[fr] /.test(t)).length;
+    for (let i = 1; i <= 20 && tile; i++) {
+      await new Promise((ok) => window.requestAnimationFrame(() => ((tile.style.translate = `${i}px 0`), ok())));
+    }
+    await window.__gw.frames(8);
+    const regions = sent.filter((t) => /^b\.[fr] /.test(t)).length - before;
+    window.__glassLayout = `${forced} layout reads from nativeglass.ts inside a rAF over 20 moving frames; ${regions} region sets sent`;
+    console.warn(`[gate] glass-frame-layout: ${window.__glassLayout}`);
+    if (forced) fails.push(`PERF5: ${forced} layout reads from nativeglass.ts inside a rAF (first: ${where})`);
+    if (tile && regions < 5) fails.push(`PERF5: only ${regions} glass region sets sent while a tile moved 20 frames (want one per moved frame)`);
+  } finally {
+    window.requestAnimationFrame = raf;
+    E.getBoundingClientRect = rect;
+    Object.defineProperty(H, "offsetWidth", ow);
+    if (tile) tile.style.translate = "";
+    for (const f of N.fromNative) f("b.state 0");
+    N.native.value = had;
+  }
+  return fails;
+}
+
+/**
  * WS1 (10-31 15:37: home's surface re-made, then no "w.f" for ~9 s until the watchdog reloaded home): with the page's
  * rAF held (a WebView that paused it while hidden), a visibilitychange to hidden and back sends the windows' geometry
  * within 500 ms, and so does the host's "webwindows.resend" alone - neither waits for a frame.
@@ -6606,6 +6750,13 @@ try {
       console.log(`     pet-switch: ${await r.page.evaluate(() => window.__petSwitch).catch(() => "?")}`);
       return fails;
     })));
+    // PERF5 (perf-1793474464493): no pet.overlay with the pet off, stable registry rows, the glass measure after layout.
+    for (const [name, fn, out] of [["pet-overlay-off", petOverlayOffScene, "__petOverlay"], ["stdb-rows-stable", stdbRowsStableScene, "__stdbStable"], ["glass-frame-layout", glassFrameLayoutScene, "__glassLayout"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(fn);
+        console.log(`     ${name}: ${await r.page.evaluate((k) => window[k], out).catch(() => "?")}`);
+        return fails;
+      })));
   }
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")

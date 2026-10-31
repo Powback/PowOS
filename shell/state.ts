@@ -9,6 +9,7 @@ import { closeGlasses, glassesOpen } from "./glasses/open.ts";
 import { agentsView, closeAgents } from "./agents.ts";
 import { backScreen, closeScreens } from "./screens.ts";
 import { recentsBack, recentsHome } from "./ui/recents.tsx";
+import { stableRows } from "./apps/stable.ts";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, AppWindow, Chat, Home, HomeItem, WebWindowRect, WidgetScreen } from "./types.ts";
 import { sidewaysHome, wideHome } from "./hosts/wide.ts";
@@ -451,7 +452,7 @@ export async function load() {
   screen.value = scr;
   chat.value = c;
   home.value = h;
-  hostApps.value = withKept(list);
+  hostApps.value = stableRows(hostApps.value, withKept(list));
   noteHostRecent(keys);
   hostRecent.value = keys;
   dock.value = Array.isArray(pins) ? pins : [];
@@ -460,7 +461,7 @@ export async function load() {
 // The host's list arrives after the page (it loads apps and icons in the background): the recent strip, filtered to
 // installed apps, follows it. Back on screen, the strip shows what was opened meanwhile.
 powos.on("apps.changed", async () => {
-  hostApps.value = withKept(await powos.apps.list());
+  hostApps.value = stableRows(hostApps.value, withKept(await powos.apps.list()));
   await fetchRecent();
 });
 /** The floating app windows (unfolded home), top-most first: the dock marks and keeps them (ui/home.tsx). */
