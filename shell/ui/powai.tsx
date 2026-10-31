@@ -6,7 +6,7 @@
  * up. Things to try arrive as the manager's messages with works / still broken (trycard.tsx), mail the agents sent the
  * user as messages under it. The rest - Progress, Agents & terminals, Devices - is behind the header's ⋯, each its own
  * screen with back (aimenu.tsx). Under it the shared field to ask (the mic: hold to talk and send, tap to dictate).
- * Unfolded the same chat, centred at reading width; with Progress open, the two side by side.
+ * Unfolded the same chat, centred at reading width; Progress (from ⋯ or the strip) a glass sheet over its side.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
@@ -18,12 +18,12 @@ import { md } from "./md.ts";
 import type { AgentMail, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Item } from "./chat.tsx";
-import { Queued, Thread, onLink, toolLabel } from "./rich.tsx";
+import { AgentUpdates, Queued, Thread, onLink, toolLabel } from "./rich.tsx";
 import { askQueued } from "./assistant.ts";
-import { MenuScreen, SCREENS, type AiScreen } from "./aimenu.tsx";
-import { WorkFeed, headline, needsYou } from "./aiboard.tsx";
+import { MenuScreen, SCREENS, dailyDriver, type AiScreen } from "./aimenu.tsx";
+import { WorkFeed } from "./aiboard.tsx";
 import { agent, sessions as agentSessions } from "../agents.ts";
-import "./trycard.tsx";
+import { untried } from "./trycard.tsx";
 
 // The board's state, for what reads it from here (perfrec, the gate, the renders): it lives in aiboard.tsx now.
 export { board, boardSeen, checks, type WorkRow } from "./aiboard.tsx";
@@ -68,12 +68,12 @@ function readMail(m: AgentMail) {
   if (m.id) powos.ai.mailRead?.(m.id);
 }
 
-/** Mail an agent sent the user, unread: its own messages at the chat's end, oldest first; × reads one. */
+/** Mail an agent sent the user, unread: one plain line at the chat's end ("2 updates from agents"), a tap opens them; × reads one. */
 function Unread() {
   const ms = [...mail.value].slice(0, 5).reverse();
   if (!ms.length) return null;
   return (
-    <>
+    <AgentUpdates n={ms.length}>
       {ms.map((m) => (
         <div key={m.id ?? `${m.from}-${m.time}`} class="msg assistant ai-mail">
           <div class="ai-mail-head muted">
@@ -92,7 +92,7 @@ function Unread() {
           mark all read
         </button>
       )}
-    </>
+    </AgentUpdates>
   );
 }
 
@@ -170,26 +170,31 @@ const nameOf = (s: AiScreen) => SCREENS.find(([k]) => k === s)?.[1] ?? "";
 /** Session agents working now (the live hooks, agents.ts). */
 const agentsWorking = () => agentSessions.value.filter((id) => agent(id)?.value.state === "working").length;
 
-/** "1 needs you": the newest things-to-try message still unanswered, else Progress (the board's Needs you). */
-function showNeeds() {
+/** "3 to try": the newest things-to-try message still unanswered, in view. */
+function showTry() {
   const open = [...document.querySelectorAll<HTMLElement>(".ai-view .msg.try")].filter((m) => m.querySelector(".try-acts")).pop();
-  if (open) open.scrollIntoView({ block: "center", behavior: "smooth" });
-  else aiScreen.value = "progress";
+  open?.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+/** The strip's segments: agents working, the daily driver's percentage (powos-progress), things to try unanswered. */
+function stripSegs(): [string, string, () => void][] {
+  const n = agentsWorking();
+  const dd = dailyDriver();
+  const tries = untried(chat.value.items.flatMap((i) => (i.kind === "assistant" ? [i.text] : [])));
+  const segs: [string, string, () => void][] = [];
+  if (n) segs.push(["agents", `${n} agent${n === 1 ? "" : "s"} working`, () => (aiScreen.value = "agents")]);
+  if (dd != null) segs.push(["progress", `Daily driver ${dd}%`, () => (aiScreen.value = "progress")]);
+  if (tries) segs.push(["you", `${tries} to try`, showTry]);
+  return segs;
 }
 
 /**
- * The glanceable line at the chat's top (the user, 2026-10-31 02:36: "chat focused ... or chat primary"): what the agents
- * are doing, how far the task moving most is, what needs the user - each a tap into its screen. [shown]: the board's
- * feed runs only then. Nothing to say: no line.
+ * The glanceable line at the chat's top (the user, 2026-10-31 02:36: "chat focused ... or chat primary"):
+ * "1 agent working · Daily driver 50% · 3 to try" - each a tap into its screen, never a task's title. [shown]: the
+ * board's feed runs only then. Nothing to say: no line.
  */
 function Strip({ shown }: { shown: boolean }) {
-  const n = agentsWorking();
-  const h = headline();
-  const you = needsYou();
-  const segs: [string, string, () => void][] = [];
-  if (n) segs.push(["agents", `${n} agent${n === 1 ? "" : "s"} working`, () => (aiScreen.value = "agents")]);
-  if (h) segs.push(["progress", `${h.title} ${h.pct}%`, () => (aiScreen.value = "progress")]);
-  if (you) segs.push(["you", `${you} need${you === 1 ? "s" : ""} you`, showNeeds]);
+  const segs = stripSegs();
   return (
     <>
       {shown && <WorkFeed />}
@@ -277,10 +282,10 @@ function useWide() {
   return [ref, wide] as const;
 }
 
-/** A menu's screen beside the chat (wide, Progress only): its own header with back, its own scroll. */
+/** A menu's screen as a glass sheet over the chat's side (wide, Progress only): its own header with back, its own scroll; a tap beside it closes it. */
 function Aside({ s, shown }: { s: AiScreen; shown: boolean }) {
   return (
-    <div class="ai-aside">
+    <div class="ai-aside tile">
       <AiHeader sub={s} />
       <div class="ai-scroll ai-sub">
         <MenuScreen s={s} shown={shown} back={() => (aiScreen.value = "chat")} />
@@ -289,11 +294,21 @@ function Aside({ s, shown }: { s: AiScreen; shown: boolean }) {
   );
 }
 
+/** Progress as a sheet over the chat (wide) and the scrim beside it that closes it. */
+function Sheet({ s, shown }: { s: AiScreen; shown: boolean }) {
+  return (
+    <>
+      <div class="ai-sheet-scrim" onClick={() => (aiScreen.value = "chat")} />
+      <Aside s={s} shown={shown} />
+    </>
+  );
+}
+
 /**
  * PowOS AI's screen, wherever it's held - its page beside home, the pull-up panel on home and over apps (home.tsx,
  * pull.tsx): one component, so every change lands in all of them. The header, then the chat (or the menu's screen)
- * full height, then the field. Wide (useWide: the holder's width) the chat is centred at reading width; Progress
- * opened there sits beside it. [pill] false: the holder's own pill asks (home's bar under a narrow panel); wide always
+ * full height, then the field. Wide (useWide: the holder's width) the chat is centred at reading width - alone until
+ * Progress is opened (⋯ or the strip), then that as a sheet over its side. [pill] false: the holder's own pill asks (home's bar under a narrow panel); wide always
  * has its own.
  */
 function aiViewClass(cls: string, wide: boolean, split: boolean) {
@@ -326,7 +341,7 @@ export function AiView({ shown, cls, pill = true }: { shown: boolean; cls: strin
       <AiHeader sub={sub} shown={shown && !sub} />
       <AiBody sub={sub} shown={shown} />
       {!sub && (pill || wide) && <AiCompose />}
-      {split && <Aside s={s} shown={shown} />}
+      {split && <Sheet s={s} shown={shown} />}
     </div>
   );
 }

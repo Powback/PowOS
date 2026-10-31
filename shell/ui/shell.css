@@ -1618,22 +1618,8 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 }
 /*
  * Wide (the AI page or panel >= 700 px: unfolded, a wide window - powai.tsx AiView): the same chat, centred at reading
- * width. With Progress opened from ⋯ (.split) the chat and Progress side by side, each its own scroll; both end on the
- * pill's line.
+ * width. Progress opened from ⋯ or the strip (.split) is a glass sheet over the right side (.ai-aside), the chat under it.
  */
-.ai-view.split {
-  display: grid;
-  grid-template-columns: minmax(0, 680px) minmax(320px, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  column-gap: 20px;
-  row-gap: 10px;
-  padding-inline: max(var(--edge), calc((100% - 680px - 40rem - 20px) / 2));
-}
-.ai-view.split > * { max-width: none; margin-inline: 0; }
-.ai-view.split > .ai-top { grid-column: 1; grid-row: 1; }
-.ai-view.split > .ai-chat { grid-column: 1; grid-row: 2; }
-.ai-view.split > .ai-compose { grid-column: 1; grid-row: 3; }
-.ai-view.split > .ai-aside { grid-column: 2; grid-row: 1 / 4; display: flex; flex-direction: column; gap: 10px; min-height: 0; margin-bottom: var(--ai-foot); }
 /* The panel, wide: its panes scroll, not it; its own pill under the conversation instead of home's bar. */
 .ai-panel.wide { overflow: hidden; }
 :is(.home, .pull-screen).open:has(.ai-panel.wide) > .bar { visibility: hidden; }
@@ -1692,10 +1678,6 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   padding-bottom: var(--ai-tail);
   scroll-padding-block: var(--ai-head) var(--ai-tail);
 }
-/* Split (chat + Progress), the panes are grid cells under their headers: nothing floats over them. */
-.ai-screen.split > .ai-scroll { position: static; padding-top: 0; padding-bottom: 12px; scroll-padding-block: 0; }
-.ai-screen.split > .ai-compose { margin-top: 0; }
-.ai-screen.split > .ai-aside { padding-top: var(--ai-head-top); }
 .ai-aside > .ai-top { min-height: 36px; }
 .ai-aside > .ai-scroll { flex: 1; }
 /* The header's ⋯ (powai.tsx AiHeader): the menu under it at the right, over the chat; a tap outside closes it. */
@@ -3445,7 +3427,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
  */
 @property --ai-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
 .ai-chat { --ai-fade-at: 0px; -webkit-mask-image: linear-gradient(to top, transparent var(--ai-fade-at), black calc(var(--ai-fade-at) + var(--ai-fade))); mask-image: linear-gradient(to top, transparent var(--ai-fade-at), black calc(var(--ai-fade-at) + var(--ai-fade))); }
-.ai-screen:not(.split) > .ai-chat { --ai-fade-at: calc(var(--ai-tail) - 14px); }
+.ai-screen > .ai-chat { --ai-fade-at: calc(var(--ai-tail) - 14px); }
 @supports (animation-timeline: scroll()) {
   /* Column-reverse: the scroll origin is the newest end, so the timeline's start is "at the newest". */
   .ai-chat { animation: ai-fade linear both; animation-timeline: scroll(self y); animation-range: 0 48px; }
@@ -3457,3 +3439,65 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 /* The ⋯ menu over the chat: at the centred column's right edge, near-solid so the messages under it don't read through. */
 .ai-view > .ai-menu { right: max(var(--edge), calc((100% - 680px) / 2)); }
 html:root .ai-view > .ai-menu.tile { background: color-mix(in srgb, var(--color-background) 94%, transparent); }
+
+/*
+ * The AI page reads like a messenger (the user, 2026-10-31 13:03: "It looks complete trash" - text on the bright
+ * wallpaper through near-clear bubbles, rows drawn over the title). One solid surface for the whole page: the theme's
+ * background at --ai-dim over the (frosted) wallpaper, so any text passes 4.5:1 whatever the picture. The header and
+ * strip lie on that same surface; the list scrolls under them and fades out over --ai-head-fade before the title.
+ */
+.ai-screen, .ai-panel { --ai-surface: color-mix(in srgb, var(--color-background) 88%, transparent); }
+.ai-screen { background: var(--ai-surface); }
+.ai-screen > .ai-chat, .ai-screen > .ai-sub {
+  --ai-head-fade: 18px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--ai-head) - 4px), black calc(var(--ai-head) + var(--ai-head-fade)), black calc(100% - var(--ai-fade-at, 0px) - var(--ai-fade, 0px)), transparent calc(100% - var(--ai-fade-at, 0px)));
+  mask-image: linear-gradient(to bottom, transparent calc(var(--ai-head) - 4px), black calc(var(--ai-head) + var(--ai-head-fade)), black calc(100% - var(--ai-fade-at, 0px) - var(--ai-fade, 0px)), transparent calc(100% - var(--ai-fade-at, 0px)));
+}
+.ai-screen > .ai-sub { --ai-fade-at: 0px; }
+/* The header's words straight on the surface: no chips of their own. */
+html:root .ai-screen .ai-top > :is(.ai-title, .ai-state, .ai-more, .ai-back, .ai-strip) { background: none; box-shadow: none; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; text-shadow: none; }
+html:root .ai-screen .ai-top > .ai-state { padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
+.ai-top > .ai-strip { padding: 0; color: var(--color-foreground); }
+/* The manager's messages: a real bubble on the surface. The user's: the accent as a tint, the text the normal colour. */
+html:root .ai-view .ai-chat-in :is(.msg.assistant, .present, .choice-opt) { background: var(--color-surface); border-color: transparent; box-shadow: none; }
+html:root .ai-view .ai-chat-in .msg.user {
+  max-width: 80%;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-surface));
+  color: var(--color-foreground);
+}
+.ai-chat-in .msg.user .sent-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ai-chat-in .msg.user .sent-img { padding: 0; border: 0; background: none; line-height: 0; }
+html:root .ai-chat-in .msg.user .sent-img img { width: auto; max-width: 100%; max-height: 120px; border-radius: calc(var(--radius) / 2); }
+/* Steps and agents' mail: one quiet line each, no box. */
+html:root .ai-view .ai-chat-in > :is(.tl, .msg.note) { background: none; box-shadow: none; padding-inline: 4px; color: var(--color-muted); }
+.ai-chat-in .tl-row { font-size: var(--text-small); }
+.ai-updates { align-self: flex-start; max-width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.ai-updates-head { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 4px; font: inherit; font-size: var(--text-small); color: var(--color-muted); background: none; border: 0; }
+.ai-updates.open .ai-updates-head .mail-chev { transform: rotate(180deg); }
+.ai-updates-list { display: flex; flex-direction: column; gap: 6px; }
+html:root .ai-view .ai-updates-list :is(.mail, .msg.ai-mail) { background: var(--color-surface); border-radius: var(--radius); box-shadow: none; }
+/* Progress, wide: a glass sheet over the chat's right side, near-solid; a tap beside it closes it. */
+.ai-view > .ai-sheet-scrim { position: absolute; inset: 0; z-index: 3; max-width: none; margin: 0; }
+.ai-view.split > .ai-aside {
+  position: absolute;
+  z-index: 4;
+  top: var(--ai-head-top, 8px);
+  right: var(--edge);
+  bottom: var(--ai-tail, 16px);
+  width: min(440px, 48%);
+  max-width: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 12px 12px;
+  border-radius: var(--radius);
+}
+html:root .ai-view.split > .ai-aside.tile { background: color-mix(in srgb, var(--color-background) 92%, transparent); }
+.ai-aside > .ai-scroll { flex: 1; mask-image: none; -webkit-mask-image: none; }
+.ai-summary { display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; border-radius: var(--radius); }
+html:root .ai-screen .ai-summary.tile { background: var(--color-surface); }
+.ai-summary-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: var(--text-body); }
+.ai-summary-area { font-weight: 600; }
+.ai-summary-foot { padding: 10px 0 4px; font-size: var(--text-small); }

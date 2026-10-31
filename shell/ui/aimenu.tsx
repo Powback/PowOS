@@ -1,6 +1,7 @@
 /**
  * What PowOS AI's ⋯ menu opens (powai.tsx AiHeader), each its own screen with back: Progress (the powos-progress app's
- * page where it's installed; else the work board as the page had it, aiboard.tsx), Agents & terminals (the agents view
+ * page where it's installed; else a short summary per area - the things to try come in the chat, aiboard.tsx's board
+ * list with its works / still broken rows is gone from here: the user rejected it, 2026-10-31), Agents & terminals (the agents view
  * - tree, tasks, tools, comms - and the tmux sessions of PowOS and every host it has a link to, grouped per host by the
  * names "installed & running" uses, each with the task its pane's title names, a spinner's mark while it works, its
  * agent marked; a tap opens its terminal, view-only until taken over), Devices (installed & running per host),
@@ -17,7 +18,7 @@ import { host as appHost } from "../apps/stdb.ts";
 import type { AgentHost, AgentSession } from "../types.ts";
 import { ago } from "./time.ts";
 import { HOSTS, Units } from "./units.tsx";
-import { Friction, Work, WorkFeed } from "./aiboard.tsx";
+import { Friction, WorkFeed, board, boardSeen, type WorkRow } from "./aiboard.tsx";
 
 declare function importShim(url: string): Promise<{ default: ComponentType<any> }>;
 
@@ -142,8 +143,49 @@ function AgentsScreen({ shown }: { shown: boolean }) {
   );
 }
 
-/** The app Progress is (another agent's powos-progress); not installed: the board as the page had it. */
+/** The app Progress is (another agent's powos-progress); not installed: Summary. */
 export const PROGRESS_APP = "powos-progress";
+
+/** The daily-driver epic's percentage as powos-progress tracks it (its board row), null without the app or the row. */
+export function dailyDriver(): number | null {
+  if (!installedApps.value.some((a) => a.id === PROGRESS_APP)) return null;
+  const w = board.value.find((x) => /^daily driver\b/i.test(x.title) && (x.progressTotal ?? 0) > 0);
+  return w ? Math.round((100 * Math.min(w.progressDone ?? 0, w.progressTotal!)) / w.progressTotal!) : null;
+}
+
+const open = (w: WorkRow) => w.status !== "done";
+/** Open tasks per area, most first: [area, in progress, waiting on the user]. */
+function areas(): [string, number, number][] {
+  const by = new Map<string, [number, number]>();
+  for (const w of board.value.filter(open)) {
+    const k = w.project.trim() || "Other";
+    const [a, b] = by.get(k) ?? [0, 0];
+    by.set(k, w.status === "waiting" ? [a, b + 1] : [a + 1, b]);
+  }
+  return [...by.entries()].map(([k, [a, b]]): [string, number, number] => [k, a, b]).sort((x, y) => y[1] + y[2] - (x[1] + x[2]));
+}
+
+/** Progress without the app: what's open per area, and where the things to try are. No rows to answer here. */
+function Summary({ shown }: { shown: boolean }) {
+  const rows = areas();
+  return (
+    <section class="ai-summary tile">
+      {shown && <WorkFeed />}
+      {rows.map(([area, going, you]) => (
+        <div key={area} class="ai-summary-row">
+          <span class="ai-summary-area">{area}</span>
+          <span class="ai-summary-n muted">
+            {going ? `${going} in progress` : ""}
+            {going && you ? " · " : ""}
+            {you ? `${you} waiting on you` : ""}
+          </span>
+        </div>
+      ))}
+      {!rows.length && <div class="ai-summary-row muted">{boardSeen.value ? "nothing in progress" : "…"}</div>}
+      <div class="ai-summary-foot muted">Things to try arrive in the chat.</div>
+    </section>
+  );
+}
 
 /** The progress app's page module URL, when it is installed with a page. */
 function progressUrl(): string | null {
@@ -160,7 +202,7 @@ class Fallback extends Component<{ children?: any }, { failed: boolean }> {
     this.setState({ failed: true });
   }
   render() {
-    return this.state.failed ? <Work shown={true} /> : this.props.children;
+    return this.state.failed ? <Summary shown={true} /> : this.props.children;
   }
 }
 
@@ -179,7 +221,7 @@ function ProgressScreen({ shown, back }: { shown: boolean; back: () => void }) {
     return () => void (live = false);
   }, [url]);
   const C = mod && mod.url === url ? mod.c : null;
-  if (!url || failed) return <Work shown={shown} />;
+  if (!url || failed) return <Summary shown={shown} />;
   if (!C) return <div class="ai-empty muted">…</div>;
   return (
     <div class="ai-app-page">

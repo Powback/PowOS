@@ -1554,16 +1554,22 @@ async function aiChatMenu() {
     item.click();
     const opened = await G.until(() => titled(name) && document.querySelector(".ai-screen .ai-sub"), 2000);
     if (!opened) fails.push(`"${name}" didn't open as its own screen`);
-    if (name === "Progress" && !document.querySelector(".ai-screen .ai-sub .ai-work-list")) fails.push("Progress (no powos-progress app) shows no board");
+    // No powos-progress app: a summary per area, never the board's rows to answer (the try buttons live in the chat).
+    if (name === "Progress" && !document.querySelector(".ai-screen .ai-sub .ai-summary")) fails.push("Progress (no powos-progress app) shows no summary");
+    if (name === "Progress" && document.querySelector(".ai-screen .ai-sub :is(.ai-work-list, .ai-item-acts)")) fails.push("Progress still shows the board's rows to answer");
     document.querySelector(".ai-screen .ai-back")?.click();
     if (!(await G.until(() => document.querySelector(".ai-screen .ai-chat .msg.try"), 2000))) fails.push(`back from "${name}" didn't return to the chat`);
     return fails;
   };
   const fails = [];
   for (const name of ["Progress", "Agents & terminals", "Devices", "Friction"]) fails.push(...(await screen(name)));
-  [...document.querySelectorAll(".ai-screen .ai-strip-seg")].find((b) => /Daily driver/.test(b.textContent))?.click();
-  if (!(await G.until(() => titled("Progress"), 2000))) fails.push("the strip's progress didn't open Progress");
-  document.querySelector(".ai-screen .ai-back")?.click();
+  // The strip's "Daily driver NN%" (only with powos-progress installed) opens Progress.
+  const dd = [...document.querySelectorAll(".ai-screen .ai-strip-seg")].find((b) => /Daily driver/.test(b.textContent));
+  if (dd) {
+    dd.click();
+    if (!(await G.until(() => titled("Progress"), 2000))) fails.push("the strip's progress didn't open Progress");
+    document.querySelector(".ai-screen .ai-back")?.click();
+  }
   return fails;
 }
 
@@ -1635,7 +1641,9 @@ async function aiChatLayout(page, size) {
   const width = await page.evaluate(() => Math.round(document.querySelector(".ai-screen .ai-chat").getBoundingClientRect().width));
   if (width > 700) fails.push(`${size}: the chat is ${width} px wide, not centred at reading width`);
   const strip = await page.evaluate(() => document.querySelector(".ai-screen .ai-strip")?.textContent ?? "");
-  if (!/Daily driver 63%/.test(strip) || !/1 needs you/.test(strip)) fails.push(`${size}: the strip at the chat's top says "${strip}", not the progress and what needs you`);
+  // "N working · Daily driver NN% · N to try": the try count is the chat's unanswered things to try; the daily driver
+  // only from powos-progress (not installed here); never a task's title, never the board's waiting count.
+  if (!/(^|·)2 to try$/.test(strip.trim()) || /everything on the phone|need/.test(strip)) fails.push(`${size}: the strip at the chat's top says "${strip}", not "2 to try"`);
   const [before, after, rest, up] = await page.evaluate(aiChatOlder);
   if (!(after > before)) fails.push(`${size}: scrolling up loaded no older messages (${before} -> ${after})`);
   if (rest !== 0 || up < 40) fails.push(`${size}: the chat's foot fade is ${rest} px at the newest and ${up} px scrolled up (want 0, then ~48)`);
@@ -4973,15 +4981,11 @@ try {
         }
         return [];
       })));
-  // A Needs-you card to try: works / still broken, the reply line reaches the board and the manager (2026-10-30).
-  if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-still-broken", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiStillBrokenCheck(r.page))));
+  // (ai-still-broken and ai-needs-you-try retired 2026-10-31: Progress no longer lists the board's rows to answer -
+  // works / still broken live only on the manager's try messages, which ai-chat checks.)
   // The AI page is one chat: things to try as the manager's message, ⋯ for the rest, older on scroll-up (2026-10-31).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-chat", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiChatCheck(r.page))));
-  // Needs-you cards answer like Ready to try: works / still broken under their --try line; can't on a thing to do (2026-10-31).
-  if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-needs-you-try", { width: 404, height: 900 }).then((r) => whenReady(r, () => nyTryCheck(r.page))));
   // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));

@@ -41,26 +41,35 @@ const ICON: Record<string, IconName> = {
   Task: "robotOutline",
   Agent: "robotOutline",
 };
-const VERB: Record<string, string> = {
-  Bash: "ran",
-  Read: "read",
-  Edit: "edited",
-  Write: "wrote",
-  NotebookEdit: "edited",
-  Grep: "searched",
-  Glob: "listed",
-  WebFetch: "fetched",
+/**
+ * What a step says, in plain words (the user, 2026-10-31 13:03: "It looks complete trash" - "SendMessage a06c1853… 2
+ * steps"): never a tool's internal name or an id. Unknown tools read by what they touch, else "worked on it".
+ */
+const PLAIN: Record<string, string> = {
+  Bash: "ran a command",
+  Read: "read a file",
+  Edit: "edited a file",
+  Write: "wrote a file",
+  NotebookEdit: "edited a file",
+  Grep: "searched the code",
+  Glob: "looked for files",
+  WebFetch: "read a web page",
   WebSearch: "searched the web",
   Task: "asked an agent",
   Agent: "asked an agent",
+  SendMessage: "messaged an agent",
+  TaskStop: "stopped an agent",
   TodoWrite: "planned",
 };
+const PLAIN_MCP: [RegExp, string][] = [
+  [/board|task|work|progress/, "checked the board"],
+  [/mail|message|send|inbox/, "messaged an agent"],
+  [/agent|spawn|session/, "checked the agents"],
+  [/screen|shot|phone|device/, "looked at the phone"],
+];
 const iconOf = (t: ToolItem): IconName => ICON[t.name] ?? (t.name.startsWith("mcp__") ? "chip" : "cogOutline");
-/** Paths read as their file's name; a command as it is. */
-const argOf = (t: ToolItem) => (/^(Read|Edit|Write|NotebookEdit)$/.test(t.name) ? (t.hint.split("/").at(-1) ?? t.hint) : t.hint);
-
-/** What a step line says before its argument: "ran", "read", "send message". */
-export const toolLabel = (t: ToolItem) => VERB[t.name] ?? bare(t.name).replace(/_/g, " ");
+/** What a step line says: "read a file", "checked the board". */
+export const toolLabel = (t: ToolItem) => PLAIN[t.name] ?? PLAIN_MCP.find(([re]) => re.test(bare(t.name).toLowerCase()))?.[1] ?? "worked on it";
 
 function Status({ t }: { t: ToolItem }) {
   if (t.ok === null) return <span class="tl-spin" aria-label="running" />;
@@ -76,7 +85,6 @@ function Step({ t }: { t: ToolItem }) {
       <button type="button" class={`tl-row ${out ? "has-out" : ""}`} onClick={() => out && setOpen(!open)} aria-expanded={out ? open : undefined}>
         <Status t={t} />
         <span class="tl-verb">{toolLabel(t)}</span>
-        <span class={`tl-arg ${t.name === "Bash" ? "code" : ""}`}>{argOf(t)}</span>
       </button>
       {open && out && <pre class="tl-out">{out}</pre>}
     </>
@@ -108,8 +116,8 @@ export function ToolRun({ tools }: { tools: ToolItem[] }) {
       <button type="button" class="tl-row" onClick={() => setOpen(true)} aria-expanded={false}>
         <Status t={head} />
         <span class="tl-verb">{toolLabel(head)}</span>
-        <span class={`tl-arg ${head.name === "Bash" ? "code" : ""}`}>{argOf(head)}</span>
         <span class="tl-count">
+          {" · "}
           {failed ? `${failed} failed · ` : null}
           {shown.length} steps
         </span>
@@ -118,18 +126,45 @@ export function ToolRun({ tools }: { tools: ToolItem[] }) {
   );
 }
 
-type Entry = { tools: ToolItem[] } | { item: Exclude<ChatItem, ToolItem> };
+type NoteItem = Extract<ChatItem, { kind: "note" }>;
+type Entry = { tools: ToolItem[] } | { mails: NoteItem[] } | { item: Exclude<ChatItem, ToolItem> };
 
-/** The items with each run of consecutive tool calls as one entry. */
+const isMail = (i: ChatItem): i is NoteItem => i.kind === "note" && !i.error && !!mailOf(i.text);
+/** The host's "didn't answer" after a turn that did act (tool steps, a block): not an error the user should see. */
+const quietFail = (i: ChatItem, acted: boolean) => acted && i.kind === "note" && i.error && /didn't answer/.test(i.text);
+
+/** [item] onto [out]: a tool call onto the run before it, an agent's mail onto the mail before it, else its own entry. */
+function push(out: Entry[], item: ChatItem) {
+  const last = out.at(-1);
+  if (item.kind === "tool") return last && "tools" in last ? void last.tools.push(item) : void out.push({ tools: [item] });
+  if (isMail(item)) return last && "mails" in last ? void last.mails.push(item) : void out.push({ mails: [item] });
+  out.push({ item });
+}
+
+/** The items with each run of consecutive tool calls as one entry, each run of agents' mail as one. */
 export function entries(items: ChatItem[]): Entry[] {
   const out: Entry[] = [];
+  let acted = false;
   for (const item of items) {
-    const last = out.at(-1);
-    if (item.kind !== "tool") out.push({ item });
-    else if (last && "tools" in last) last.tools.push(item);
-    else out.push({ tools: [item] });
+    if (item.kind === "user") acted = false;
+    else if (item.kind === "tool" || item.kind === "assistant") acted = true;
+    if (!quietFail(item, acted)) push(out, item);
   }
   return out;
+}
+
+/** Agents' messages to the user: one plain line ("2 updates from agents"); a tap opens them, another folds them. */
+export function AgentUpdates({ n, children }: { n: number; children: preact.ComponentChildren }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div class={`ai-updates ${open ? "open" : ""}`}>
+      <button type="button" class="ai-updates-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {n === 1 ? "1 update from an agent" : `${n} updates from agents`}
+        <span class="mail-chev" aria-hidden="true" />
+      </button>
+      {open && <div class="ai-updates-list">{children}</div>}
+    </div>
+  );
 }
 
 /** What the user said next after entry [i] (a question's answer), null while nothing yet. */
@@ -137,6 +172,20 @@ const replyAfter = (list: Entry[], i: number) => {
   const next = list.slice(i + 1).find((e) => "item" in e && e.item.kind === "user") as { item: { text: string } } | undefined;
   return next ? next.item.text : null;
 };
+
+/** One entry: a tool run's line, agents' mail as one line, or the item as [render] draws it. */
+function EntryView({ e, reply, render }: { e: Entry; reply: () => string | null; render: (item: Exclude<ChatItem, ToolItem>, reply: string | null) => preact.ComponentChild }) {
+  if ("tools" in e) return <ToolRun tools={e.tools} />;
+  if ("mails" in e)
+    return (
+      <AgentUpdates n={e.mails.length}>
+        {e.mails.map((m, j) => (
+          <MailCard key={j} text={m.text} />
+        ))}
+      </AgentUpdates>
+    );
+  return <>{render(e.item, reply())}</>;
+}
 
 /** The conversation: each item as [render] draws it (with what the user said next), tool runs folded. */
 export function Thread({
@@ -149,9 +198,9 @@ export function Thread({
   const list = entries(items);
   return (
     <>
-      {list.map((e, i) =>
-        "tools" in e ? <ToolRun key={i} tools={e.tools} /> : <Fragment key={i}>{render(e.item, replyAfter(list, i))}</Fragment>,
-      )}
+      {list.map((e, i) => (
+        <EntryView key={i} e={e} reply={() => replyAfter(list, i)} render={render} />
+      ))}
     </>
   );
 }
