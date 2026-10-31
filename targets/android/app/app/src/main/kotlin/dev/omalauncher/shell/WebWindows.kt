@@ -887,6 +887,24 @@ class WebWindows(
         return (info?.baseIntent?.flags ?: 0) and (Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK) != 0
     }
 
+    // ---- Linux selftest (tools/phone/verify/window-render.sh --hidden; LinuxSelftest.kt) ------------------------------
+
+    @Volatile private var selftest: LinuxSelftest? = null
+
+    /** Arms [LinuxSelftest] for [appId]'s next KWin window; null = armed, else why not (one running, no Linux web windows here). */
+    fun selftestLinux(appId: String): String? {
+        selftest?.let { if (it.state != "done") return "a selftest is running (${it.json()})" }
+        // Not taken by web windows (folded, the setting off, an old KWin): KWin's window would open as a task on screen.
+        if (!andro.marchy.WebWindowSource.wanted()) return "web windows don't take Linux windows here (folded, off or an old KWin)"
+        val t = LinuxSelftest(context, main, appId)
+        selftest = t
+        WindowLog.i(TAG, "selftest: armed for $appId's next KWin window")
+        main.postDelayed({ if (t.kwin < 0 && t.state == "armed") t.end("no KWin window of $appId in ${LinuxSelftest.ARM_MS / 1000} s") }, LinuxSelftest.ARM_MS)
+        return null
+    }
+
+    fun selftestLinuxResult(): String = selftest?.json() ?: JSONObject().put("state", "none").toString()
+
     // ---- Linux windows (docs/WEB_WINDOWS.md S6) ------------------------------------------------------------------------
 
     /**
@@ -915,6 +933,8 @@ class WebWindows(
             return
         }
         if (pendingLinux.containsKey(kwin)) return
+        // The ship gate's hidden Linux check (selftestLinux): its app's next KWin window never reaches the page.
+        selftest?.let { t -> if (t.kwin < 0 && t.matches(offer.appId)) return t.take(kwin, offer.appId) }
         if (androidStandIn(offer.appId)) {
             WindowLog.i(TAG, "KWin window $kwin (${offer.appId}): the Linux session's stand-in for an Android app - its own window is the app's, not a second web window")
             return
@@ -1080,6 +1100,7 @@ class WebWindows(
     /** KWin closed window [kwin] (main thread): its web window goes, nothing told back. */
     fun linuxClosed(kwin: Int) {
         pendingLinux.remove(kwin)
+        selftest?.takeIf { it.kwin == kwin }?.let { it.kwinClosed = true; WindowLog.i(TAG, "selftest: KWin closed window $kwin") }
         val w = wins.values.firstOrNull { it.linux?.kwin == kwin } ?: return
         w.linux?.kwinClosed = true
         WindowLog.i(TAG, "KWin closed window $kwin: web window ${w.id} goes")

@@ -99,10 +99,12 @@ shot() {   # shot NAME: raw screencap gzipped on the phone -> $OUT/NAME.raw.gz
 #   content  `screencap -d <that display>` is the app, not a flat fill (dominant colour < 97%, edges >= 0.3%), within 15 s;
 #   tap      `input -d <that display> tap` on its "7" (WR_TAP fx fy of the display, 0.14 0.69) changes the number area
 #            (top 55%): >= 0.2% of it differs and > 3x the noise of two shots without a tap.
+#   linux    a Linux app (WR_LINUX_APP, foot) through the host's KWin -> web-window consumer path into an offscreen
+#            ImageReader, never offered to the page (webwindows.selftestLinux, LinuxSelftest.kt; see linux_step).
 # Then its task removed (`am stack remove`; a Calculator task the user had before is moved back to display 0, never
 # removed), the display released and the helper ended (its stdin closed: it releases what's left and exits; a holder
 # that keeps stdin open ends by itself after WR_HOLD_S, so a killed check leaves nothing either). Exit 0 PASS, 1 FAIL;
-# the whole run is bounded by WR_TIMEOUT_S (150, plus the hold): a timeout is a FAIL. Shots in WR_OUT/<stamp>/.
+# the whole run is bounded by WR_TIMEOUT_S (210: the Linux step adds up to ~50 s; plus the hold): a timeout is a FAIL. Shots in WR_OUT/<stamp>/.
 # --hold S (HOLD): after content+tap pass, the PASS line is logged at once (ship.sh window_gate waits for it, then runs
 # its passive render_watch) and the display stays up S s with Calculator on it: every ~5 s its content is measured again
 # and logged to the phone's logcat (tag PowosWrHidden: "hold display D ..." - the helper's display geometry first),
@@ -141,12 +143,49 @@ hidden() {
   # tasks_on DISPLAY: the task ids on a display; app_tasks: every task of $APP (any display).
   tasks_on() { sh_ "am stack list" | awk -v d="$1" '/^RootTask id=/{on=($0 ~ ("displayId=" d " "))} on && /^ *taskId=/{sub(/^ *taskId=/,"");sub(/:.*/,"");print}' | sort -u | paste -sd' ' -; }
   app_tasks() { sh_ "am stack list" | awk -v p="$APP/" '/^ *taskId=/ && index($0, " " p){x=$0;sub(/^ *taskId=/,"",x);sub(/:.*/,"",x);print x}' | sort -u | paste -sd' ' -; }
+  # hb METHOD 'JS args array': one bridge call of home's page (as the page's own PowosHost calls), its answer as text.
+  hb() { ev "new Promise(ok=>{const h=window.__powosHost,P=window.PowosHost;if(!h||!P)return ok('no bridge');const r=h.resolve,j=h.reject,id=931700+Math.floor(Math.random()*900);const done=v=>{h.resolve=r;h.reject=j;ok(typeof v==='string'?v:JSON.stringify(v))};h.resolve=(i,v)=>i===id?done(v):r(i,v);h.reject=(i,m)=>i===id?done('ERR '+m):j(i,m);setTimeout(()=>done('no answer'),8000);P.postMessage(JSON.stringify([id,'$1',JSON.stringify($2)]))})"; }
+  # jf JSON FIELD: one field of the selftest's JSON.
+  jf() { echo "$1" | python3 -c "import json,sys
+try: print(json.loads(sys.stdin.read()).get('$2',''))
+except Exception: print('')"; }
+  # linux_step: WR_LINUX_APP (foot: always in the PowOS chroot, starts in < 1 s) launched by the host
+  # ("webwindows.selftestLinux", LinuxSelftest.kt): its next KWin window is never offered to the page - the consumer a
+  # Linux web window uses (native_consumer.c, its own ConsumerLane) draws it into an offscreen ImageReader. Checked:
+  # (a) a KWin window of it came (kwin id); (b) the consumer up and >= 2 frames with content (dominant < 99.5%, edges
+  # >= 0.1%; the window is resized once after the first, so KWin draws a second); (c) the consumer's stop returned in
+  # <= 1 s; (d) the window quit and KWin said closed; the page's window list unchanged (wl0/wl1 below). Not run (logged,
+  # not a FAIL) where web windows don't take Linux windows (folded, the setting off): KWin would open a task on screen.
+  linux_step() {
+    local app=${WR_LINUX_APP:-foot} lr lj st
+    awake_or_nj "linux"
+    lr=$(hb webwindows.selftestLinux "['$app']"); log "linux: webwindows.selftestLinux $app: ${lr:-no answer}"
+    case $lr in
+      started) ;;
+      "web windows don't take"*) log "linux: not run ($lr)"; return 0 ;;
+      *) hfail "linux: the host didn't start the selftest ($lr)" ;;
+    esac
+    for _ in $(seq 1 60); do
+      sleep 1; lj=$(hb webwindows.selftestLinuxResult "[]"); st=$(jf "$lj" state); [ "$st" = done ] && break
+    done
+    log "linux: $lj"
+    [ "$st" = done ] || hfail "linux: the selftest never finished (${lj:-no answer})"
+    [ "$(jf "$lj" kwin)" -ge 0 ] 2>/dev/null || hfail "linux: no KWin window of $app came ($(jf "$lj" error))"
+    log "linux: (a) KWin window $(jf "$lj" kwin) ($(jf "$lj" kwinApp)) taken offscreen, never offered to the page"
+    [ "$(jf "$lj" upMs)" -ge 0 ] 2>/dev/null || hfail "linux: KWin window $(jf "$lj" kwin)'s consumer never came up ($(jf "$lj" error))"
+    [ "$(jf "$lj" content)" -ge 2 ] 2>/dev/null || hfail "linux: KWin window $(jf "$lj" kwin)'s consumer delivered $(jf "$lj" content) frames with content of $(jf "$lj" frames) (want >= 2; best $(jf "$lj" best))"
+    log "linux: (b) consumer up in $(jf "$lj" upMs) ms, $(jf "$lj" content) of $(jf "$lj" frames) frames with content ($(jf "$lj" best))"
+    st=$(jf "$lj" stopMs); { [ "$st" -ge 0 ] && [ "$st" -le 1000 ]; } 2>/dev/null || hfail "linux: the consumer's stop took ${st} ms (want <= 1000; -1 = still blocked after 3 s)"
+    log "linux: (c) stop returned in $st ms"
+    [ "$(jf "$lj" kwinClosed)" = True ] || hfail "linux: KWin window $(jf "$lj" kwin) wasn't closed after the quit"
+    log "linux: (d) KWin closed window $(jf "$lj" kwin)"
+  }
   trap 'hclean' EXIT
   # A timeout while the phone sleeps is the sleep, not the windows (10-31 17:57, 1943e3e5: an adb su call hung with the
   # phone Dozing after passing the start check) - NOT JUDGED like every other asleep path.
-  trap 'if asleep; then log "window-render: NOT JUDGED (the phone is $WAKE; timed out after ${WR_TIMEOUT_S:-150} s) - $OUT"; hclean; exit 2; fi; log "FAIL: timeout (${WR_TIMEOUT_S:-150} s)"; hclean; log "window-render: FAIL (hidden: timeout) - $OUT"; exit 1' TERM INT
+  trap 'if asleep; then log "window-render: NOT JUDGED (the phone is $WAKE; timed out after ${WR_TIMEOUT_S:-210} s) - $OUT"; hclean; exit 2; fi; log "FAIL: timeout (${WR_TIMEOUT_S:-210} s)"; hclean; log "window-render: FAIL (hidden: timeout) - $OUT"; exit 1' TERM INT
   # The watchdog: kills whatever adb call hangs (bash runs the trap only once its foreground child is gone), then us.
-  ( sleep $(( ${WR_TIMEOUT_S:-150} + HOLD )); pkill -P $$ 2>/dev/null; kill -TERM $$ 2>/dev/null ) & wd=$!
+  ( sleep $(( ${WR_TIMEOUT_S:-210} + HOLD )); pkill -P $$ 2>/dev/null; kill -TERM $$ 2>/dev/null ) & wd=$!
 
   "$A" get-state >/dev/null 2>&1 || hfail "no phone (adb get-state)"
   awake_or_nj "start"
@@ -228,6 +267,8 @@ EOF
   for _ in 1 2 3 4 5 6 7 8 9 10; do g1=$(vdinfo); [ "$g1" = "$W2 $H2 $3" ] && break; sleep 0.3; done
   log "display $D after 'resize $D $W2 $H2 $3': ${g1:-unreadable}"
   [ "$g1" = "$W2 $H2 $3" ] || hfail "display $D after the resize is '${g1:-unreadable}', not '$W2 $H2 $3' (size, density unchanged)"
+  # (d) a Linux window through the host's KWin -> web-window consumer path, offscreen (linux_step below).
+  linux_step
   wl1=$(wlist); log "the user's page's windows after: ${wl1:-unreadable}"
   [ "$wl0" = "$wl1" ] || hfail "the user's page's window list changed during the check ('${wl0:-unreadable}' -> '${wl1:-unreadable}')"
   if [ "$HOLD" -gt 0 ]; then
