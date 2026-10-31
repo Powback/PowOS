@@ -46,6 +46,13 @@ abstract class OverlayHost(
     private var params: WindowManager.LayoutParams? = null
     private var watchdog: PageWatchdog? = null
 
+    /**
+     * The window's fast-refresh vote (HighRefresh): the display's fastest mode while the gesture brings the panel or a
+     * finger is on its page, and a second after; the system's choice otherwise. Without it, as the top-most window over
+     * home, its no-ask let ColorOS pace the pull at 60 Hz (ShadeHost's 17:51 recording, the same for the shade).
+     */
+    private var refresh: dev.omalauncher.shell.HighRefresh? = null
+
     /** What the page was told since the window last went (by event name), for a page that reloaded meanwhile. */
     private val told = linkedMapOf<String, Any?>()
 
@@ -114,6 +121,7 @@ abstract class OverlayHost(
         r.visibility = View.GONE
         root = r
         params = layout().also { wm.addView(r, it) }
+        refresh = dev.omalauncher.shell.HighRefresh(h.web, ::windowDisplay, apply = ::preferMode)
         reload =
             OverlayReload(title, wm, { host?.web }, { root?.let { v -> params?.let { v to it } } }, { shown }) {
                 // The pull came while the page reloaded: the new page hears the gesture so far, then the window counts.
@@ -128,12 +136,25 @@ abstract class OverlayHost(
         return true
     }
 
+    /** The display the window is on now (its modes are per physical screen). */
+    private fun windowDisplay(): Display = root?.display ?: display
+
+    /** The window asks for display mode [id] (0: the system's choice) - [refresh]'s vote. */
+    private fun preferMode(id: Int) {
+        val v = root ?: return
+        val p = params ?: return
+        if (p.preferredDisplayModeId == id) return
+        dev.omalauncher.shell.HighRefresh.ask(p, windowDisplay(), id)
+        runCatching { wm.updateViewLayout(v, p) }
+    }
+
     open fun stop() {
         runCatching { service.unregisterReceiver(closer) }
         watchdog?.stop()
         watchdog = null
         root?.let { runCatching { wm.removeView(it) } }
         root = null
+        refresh = null
         host?.destroy()
         host = null
     }
@@ -159,6 +180,8 @@ abstract class OverlayHost(
         open = false
         wantOpen = false
         r.visibility = View.VISIBLE
+        // The finger brings it: fast until the gesture settles ([armOpen] / [armShut] / [hide]).
+        refresh?.boost(true, "gesture")
         setFlags(touchable = false, focusable = false)
         // A page reloading (a shell push) stays invisible (alpha 0) until it's up; the watchdog starts then.
         if (reload?.reloading != true) watchdog?.start()
@@ -166,6 +189,7 @@ abstract class OverlayHost(
 
     /** Settled open: touchable and focused once the page answers it's alive. */
     protected fun armOpen() {
+        refresh?.boost(false, "gesture")
         if (reload?.reloading == true) {
             wantOpen = true
             return
@@ -186,6 +210,7 @@ abstract class OverlayHost(
 
     /** Settling shut: the page says closed when it's done; else the window goes after [SHUT_MAX_MS]. */
     protected fun armShut() {
+        refresh?.boost(false, "gesture")
         open = false
         setFlags(touchable = false, focusable = false)
         val r = root ?: return
@@ -206,6 +231,7 @@ abstract class OverlayHost(
         val r = root ?: return
         watchdog?.stop()
         r.removeCallbacks(shutGone)
+        refresh?.boost(false, "gesture")
         if (!shown) return
         // The panel closing takes its keyboard with it.
         host?.web?.let { w -> (context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(w.windowToken, 0) }
