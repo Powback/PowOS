@@ -116,16 +116,25 @@
   --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 16%), transparent);
   --frost-blur-native: 360px;
   /* Home's widgets (and the search pill): the frost's tint, close to home's glass blur (--glass-blur-native 140). 2026-10-28:
-     "turn down the blur effect just a little", then "widgets still have too much blur" - 288 was not enough. */
-  --widget-blur-native: 170px;
+     "turn down the blur effect just a little", then "widgets still have too much blur" - 288 was not enough. Now the one
+     backdrop's (below). */
+  --widget-blur-native: var(--backdrop-blur-native);
   /* What's behind the open shade (the app, home): blurred by the compositor, dp. Was 360 (2026-10-28: "too much"); 160 is
-     still past reading text, close to home's glass (--glass-blur-native 140), so the two read as one material. */
-  --shade-blur-native: 160px;
+     still past reading text; now the one backdrop's radius (below), the widgets' own. */
+  --shade-blur-native: var(--backdrop-blur-native);
   /* The open shade's tint over what the compositor blurs behind it (.notif-scrim, the notification screen's background),
      and home's widget glass wears the very same (shell.css: the widgets, the search pill, the seams, folders; the
      web-window bar, webwindows.tsx): one token (2026-10-30 "make the widgets use the same tint as the notification
-     screen background"). Each keeps its own blur. A light theme's below. */
-  --shade-tint: rgb(0 0 0 / 55%);
+     screen background"). The one backdrop's tint (below); a light theme's further down. */
+  --shade-tint: var(--backdrop-tint);
+  /*
+   * THE backdrop (2026-10-31 "the launcher and the PowOS AI launcher is not using the same dark background as everything
+   * else"): one blur radius and one dark tint for every surface over the wallpaper or an app - home's widgets, PowOS AI's
+   * page, the launcher (its frame, home's and the pull window's: pull.tsx sends the radius to the host), its PowOS AI
+   * panel, the assistant's panel, a folder, the shade. No surface names its own blur or tint: they read these two.
+   */
+  --backdrop-blur-native: 170px;
+  --backdrop-tint: rgb(0 0 0 / 55%);
   /* One material (docs/DESIGN-LANGUAGE.md): every surface is the reference fill - home's tiles as PowOS AI's cards. */
   --glass-fill: var(--text-fill);
   /*
@@ -173,7 +182,7 @@
   --glass-veil: rgb(255 255 255 / 8%);
   --glass-behind-tint: 66%;
   /* Light: the theme's own ground at the same strength (dark text stays readable on the shade and the widgets). */
-  --shade-tint: color-mix(in srgb, var(--color-background) 55%, transparent);
+  --backdrop-tint: color-mix(in srgb, var(--color-background) 55%, transparent);
 }
 .glass, .glass-native { --glass-tint: 32%; }
 :is(.glass, .glass-native)[data-light="true"] { --glass-tint: 40%; }

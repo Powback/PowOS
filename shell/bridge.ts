@@ -258,6 +258,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     pull: {
       closed: () => call("pull.closed"),
       launched: () => call("pull.launched"),
+      blur: (dp) => call("pull.blur", dp),
       open: (kind, how) => call<boolean>("pull.open", kind, how ?? {}),
       drive: (phase, arg) => call<boolean>("pull.drive", phase, arg ?? null),
       homePull: (on, exclude, split, regions) =>
@@ -845,6 +846,7 @@ function mock(): Bridge {
     pull: {
       closed: async () => console.log("[mock] pull closed"),
       launched: async () => console.log("[mock] pull launched"),
+      blur: async (dp) => console.log("[mock] pull blur", dp),
     },
     windows: mockWindows(events, icon),
     // The browser has no KWin: one desktop, nothing to switch.

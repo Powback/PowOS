@@ -852,6 +852,8 @@ export interface Bridge {
   pull: {
     closed(): Promise<void>;
     launched(): Promise<void>;
+    /** The blur behind the window at full openness, dp (theme.css --backdrop-blur-native). An older host has none. */
+    blur?(dp: number): Promise<void>;
     /**
      * Home's page: the launcher overlay up over home (the pill, an "app drawer" entry, the side button's chat):
      * "pull.begin" { kind, ...how } then "pull.end" { open: true } to the overlay's page. An older host has none.
