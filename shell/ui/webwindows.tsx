@@ -1962,6 +1962,13 @@ function aroundWindow(t: Node | null): boolean {
   return false;
 }
 
+/** [t] contains a window or is inside one (a transition or animation on it moves or reshapes the window). */
+function carriesWindow(t: Node): boolean {
+  if (!(t instanceof Element)) return false;
+  for (let i = 0; i < winEls.length; i++) if (t.contains(winEls[i]) || winEls[i].contains(t)) return true;
+  return false;
+}
+
 /** For the gate's failure line: what last made a frame measure ("mutation <class>", "running <class>", an event). */
 let dirtyBy = "";
 function markDirty(e?: Event | string) {
@@ -1980,9 +1987,12 @@ new MutationObserver(() => {
 }).observe(document.documentElement, { subtree: true, childList: true });
 for (const type of ["transitionrun", "animationstart"] as const)
   addEventListener(type, (e) => {
-    if (!e.target || !aroundWindow(e.target as Node)) return;
+    // Only what carries or reshapes a window: it contains one or is inside one (not any descendant of a shared
+    // ancestor such as the page track - an SVG ring on another page is no reason to re-measure).
+    if (!e.target || !carriesWindow(e.target as Node)) return;
     running.add(e.target);
-    markDirty(`${e.type} ${(e.target as Element).className}`);
+    // getAttribute: an SVG element's className is an SVGAnimatedString, not its classes.
+    markDirty(`${e.type} ${(e.target as Element).localName}.${(e.target as Element).getAttribute("class") ?? ""}`);
   }, true);
 for (const type of ["transitionend", "transitioncancel", "animationend", "animationcancel"] as const)
   addEventListener(type, (e) => {

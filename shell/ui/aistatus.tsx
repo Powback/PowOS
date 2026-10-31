@@ -32,12 +32,25 @@ function statusLine(working: number, asks: number, busy: boolean) {
   return parts.filter(Boolean).join(" · ") || (boardSeen.value ? "All quiet" : "…");
 }
 
+/** The ring's spring to a new value (ms; shell.css .ais-ring.moving). */
+const RING_MS = 950;
+
 /** The daily driver's ring (the hero, ~56 dp): the percentage inside. */
 function HeroRing({ pct, label }: { pct: number; label: string }) {
   const r = 24;
   const c = 2 * Math.PI * r;
+  // The fill springs only when the value changes (never on mount or at rest; off screen the page's CSS stops it).
+  const last = useRef(pct);
+  const [moving, setMoving] = useState(false);
+  useEffect(() => {
+    if (last.current === pct) return;
+    last.current = pct;
+    setMoving(true);
+    const t = window.setTimeout(() => setMoving(false), RING_MS);
+    return () => clearTimeout(t);
+  }, [pct]);
   return (
-    <span class="ais-ring" role="img" aria-label={`${label} ${pct}%`}>
+    <span class={`ais-ring ${moving ? "moving" : ""}`} role="img" aria-label={`${label} ${pct}%`}>
       <svg viewBox="0 0 56 56" aria-hidden="true">
         <circle class="aip-ring-track" cx="28" cy="28" r={r} />
         <circle class="aip-ring-fill ais-ring-fill" cx="28" cy="28" r={r} stroke-dasharray={`${(c * pct) / 100} ${c}`} transform="rotate(-90 28 28)" />
