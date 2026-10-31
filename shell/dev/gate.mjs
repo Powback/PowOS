@@ -1579,6 +1579,45 @@ async function aiChatOlder() {
   return [before, count(), rest, fade()];
 }
 
+/**
+ * In the page: one turn in which the manager sends a ```present card ("Plan") and then a ```choices card ("Go ahead?"),
+ * as manager.py emits them (each tool call, then its block); the two cards' tops, null for one not drawn.
+ */
+async function aiChatOrder() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const plan = { title: "Plan", format: "md", body: "1. Do the thing\n2. Check it" };
+  const ask = { question: "Go ahead?", options: ["yes", "no"], multi: false, other: true };
+  const tool = (name) => ({ kind: "tool", name: `mcp__comms__${name}`, hint: "", ok: true, text: "", out: "" });
+  S.chat.value = {
+    busy: false,
+    items: [
+      { kind: "user", text: "plan it" },
+      tool("present"),
+      { kind: "assistant", text: "```present\n" + JSON.stringify(plan) + "\n```" },
+      tool("present_choices"),
+      { kind: "assistant", text: "```choices\n" + JSON.stringify(ask) + "\n```" },
+    ],
+  };
+  const cards = () => {
+    const card = [...document.querySelectorAll(".ai-screen .ai-chat .present")].find((e) => e.textContent.includes("Plan"));
+    const choice = [...document.querySelectorAll(".ai-screen .ai-chat .choice")].find((e) => e.textContent.includes("Go ahead?"));
+    return card && choice ? [card, choice] : null;
+  };
+  await G.until(cards, 3000);
+  await G.frames(2);
+  const got = cards();
+  return got ? got.map((e) => Math.round(e.getBoundingClientRect().top)) : null;
+}
+
+/** The manager's cards of one turn in the order sent (friction f346: the choices showed above the document). */
+async function aiChatOrderFails(page, size) {
+  const tops = await page.evaluate(aiChatOrder);
+  await page.screenshot({ path: `/cache/ai-page-${size}-order.png` });
+  if (!tops) return [`${size}: the "Plan" card and the "Go ahead?" choices sent in one turn didn't both render`];
+  return tops[0] < tops[1] ? [] : [`${size}: the "Go ahead?" choices (top ${tops[1]}) show above the "Plan" card sent before them (top ${tops[0]})`];
+}
+
 /** In the page: the bridge as it was. */
 async function aiChatRestore() {
   const { powos } = await window.__gw.mod("./bridge.ts");
@@ -1631,6 +1670,7 @@ async function aiChatAt(page, size) {
   await page.screenshot({ path: `/cache/ai-page-${size}-menu.png` });
   await page.evaluate(() => document.querySelector(".ai-screen .ai-menu-scrim")?.click());
   fails.push(...(await page.evaluate(aiChatMenu)).map((f) => `${size}: ${f}`));
+  fails.push(...(await aiChatOrderFails(page, size)));
   await page.evaluate(aiChatRestore);
   return fails;
 }
@@ -1639,7 +1679,8 @@ async function aiChatAt(page, size) {
  * The AI page is one chat (the user, 2026-10-31: "a bunch of different boxes ... stacked on top of each other"): folded
  * and unfolded no board boxes, no at-work list, no units; the manager's things to try (```try) render as its message
  * with works / still broken (done / can't on a thing to do), "still broken" + a reply records the user FAIL check and
- * mails the manager; ⋯ opens Progress / Agents & terminals / Devices, each with back; scrolling up loads older messages.
+ * mails the manager; ⋯ opens Progress / Agents & terminals / Devices, each with back; scrolling up loads older messages;
+ * a ```present card and the ```choices sent after it in one turn show in that order.
  * Renders: /cache/ai-page-<size>-*.png.
  */
 async function aiChatCheck(page) {
