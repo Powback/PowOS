@@ -274,13 +274,15 @@ export const unfoldedSearch = {
 };
 /**
  * The unfolded key held "bar" on every device whether picked or not (stored() writes its default): once, a "bar" there
- * is taken as unset so unfolded follows the folded choice. An unfolded "dock" stays.
+ * is taken as unset so unfolded follows the folded choice. An unfolded "dock" stays. Run again as "2" (10-31 15:13: the
+ * phone's unfolded key was "bar" again after the first run, from a write nobody logged - "it was just here"; edit sheet
+ * picks are logged since, ui/editsheet.tsx SearchPlace).
  */
 function migrateUnfoldedSearch() {
   try {
-    if (localStorage.getItem("powos.search.place.migrated") === "1") return;
+    if (localStorage.getItem("powos.search.place.migrated") === "2") return;
     if (localStorage.getItem("powos.search.place.unfolded") === "bar") localStorage.removeItem("powos.search.place.unfolded");
-    localStorage.setItem("powos.search.place.migrated", "1");
+    localStorage.setItem("powos.search.place.migrated", "2");
   } catch {}
 }
 export const searchTry = signal("");

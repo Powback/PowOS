@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { carry, editing, home, page, pages, searchPlacement } from "../state.ts";
+import { carry, dockMode, editing, home, page, pages, searchPlacement } from "../state.ts";
 import { openScreen } from "../screens.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
 import { geometry, placeNew, placeNewCells } from "./grid.tsx";
@@ -260,7 +260,10 @@ function AppPicker() {
 function SearchPlace() {
   const place = searchPlacement.value;
   if (!place) return null;
-  const pick = (v: string) => () => (place.value = v);
+  const pick = (v: string) => () => {
+    console.info(`[powos] search placement (${dockMode.value}): ${place.value} -> ${v}, picked in the edit sheet`);
+    place.value = v;
+  };
   return (
     <div class="sheet-row search-place">
       <span class="muted">search</span>
