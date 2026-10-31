@@ -45,7 +45,7 @@ export const HOSTS = ["phone", "phone-android", "mac", "colima", "powstation"];
 const RANK: Record<string, number> = { running: 0, asleep: 1, stopped: 2, installed: 3, missing: 4 };
 const mb = (kb: bigint | number) => (Number(kb) ? `${Math.round(Number(kb) / 1024)} MB` : "");
 
-function Feed() {
+export function Feed() {
   const db = useDb("powos-agents", AgentsDb);
   const rows = useRows<UnitRow>(db, "unit", "SELECT * FROM unit");
   useEffect(() => {

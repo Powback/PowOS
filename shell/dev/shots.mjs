@@ -495,6 +495,11 @@ const SCENES = [
   ["ai-msgr", "home", MSGR, "wallpaper", undefined, WIDE_SIZES],
   ["ai-look", "home", LOOK, "wallpaper"],
   ["ai-look-progress", "home", LOOK + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper"],
+  // Unfolded three panes (the user, 2026-10-31 13:29): nav · Chat / Agents / Progress in the middle · Working now, Try this,
+  // Needs attention; folded sideways the nav as icons; folded portrait the chat + strip as before.
+  ["ai-panes-chat", "home", LOOK + "{" + FLEET_SETUP + "}", "wallpaper", undefined, { ...SIZES, "folded-land": LAND_SIZES["folded-land"] }],
+  ["ai-panes-agents", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'fleet'; await sleep(400);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
+  ["ai-panes-progress", "home", LOOK + "{" + FLEET_SETUP + "}" + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, { unfolded: SIZES.unfolded }],
   ["ai-msgr-menu", "home", MSGR + " document.querySelector('.ai-screen .ai-more').click(); await sleep(300);", "wallpaper"],
   ["ai-msgr-split", "home", MSGR + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, WIDE_SIZES],
   ["ai-msgr-agents", "home", MSGR + " S.aiScreen.value = 'agents'; await sleep(400);", "wallpaper"],

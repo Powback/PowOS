@@ -196,3 +196,27 @@ export function untried(texts: string[]): number {
   const ids = bodies.flatMap((b) => read(b)?.items ?? []).map((it) => it.id);
   return new Set(ids.filter((id) => !answers.value[id])).size;
 }
+
+/**
+ * The newest things-to-try message only (the wide AI page's right column, "Try this"): its title and its unanswered
+ * lines with the same works / still broken as in the chat. Null when it has none left to answer.
+ */
+export function latestTry(texts: string[]): { t: TryBlock; open: TryItem[] } | null {
+  const body = texts.flatMap((t) => [...t.matchAll(/```try\s*\n([\s\S]*?)(?:\n```|$)/g)].map((m) => m[1])).at(-1);
+  const t = body ? read(body) : null;
+  const open = t?.items.filter((it) => !answers.value[it.id]) ?? [];
+  return t && open.length ? { t, open } : null;
+}
+export function LatestTry({ texts }: { texts: string[] }) {
+  const got = latestTry(texts);
+  if (!got) return null;
+  const { t, open } = got;
+  return (
+    <div class="ai-ctx-try">
+      <div class="try-title">{titleOf(t)}</div>
+      {open.map((it) => (
+        <TryLine key={it.id} it={it} />
+      ))}
+    </div>
+  );
+}

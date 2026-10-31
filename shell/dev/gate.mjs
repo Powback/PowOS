@@ -1632,6 +1632,26 @@ async function aiChatRestore() {
   [powos.ai.verdict, powos.agents.message] = window.__nyRestore;
 }
 
+/**
+ * In the page, unfolded (the user, 2026-10-31 13:29: three panes, "not a stretched chat"): the nav with Chat / Agents /
+ * Progress / Devices (Chat marked), the chat in the middle pane, the right column's "Try this" with the newest try
+ * message's works / still broken; no strip (the panes say it).
+ */
+function aiPanesFails() {
+  const scr = document.querySelector(".ai-screen");
+  const fails = [];
+  const nav = [...scr.querySelectorAll(".ai-nav .ai-nav-name")].map((e) => e.textContent.trim()).join(" / ");
+  if (nav !== "Chat / Agents / Progress / Devices") fails.push(`the nav lists "${nav}", not Chat / Agents / Progress / Devices`);
+  if (!scr.querySelector(".ai-nav .ai-nav-item.on")?.textContent.includes("Chat")) fails.push("the nav doesn't mark Chat as open");
+  if (!scr.querySelector(".ai-mid .ai-chat .msg.try")) fails.push("the middle pane has no chat");
+  const heads = [...scr.querySelectorAll(".ai-ctx .ai-ctx-head")].map((e) => e.textContent.trim());
+  if (!heads.includes("Try this")) fails.push(`the right column has no "Try this" (has ${heads.join(", ") || "nothing"})`);
+  const acts = [...scr.querySelectorAll(".ai-ctx .ai-ctx-try .try-acts")].length;
+  if (acts !== 2) fails.push(`"Try this" offers ${acts} lines with buttons, not the newest message's 2`);
+  if (scr.querySelector(".ai-strip")) fails.push("the strip still shows over the panes");
+  return fails;
+}
+
 /** The chat page before any answer: no old boxes, reading width, the strip, older messages on scroll-up. */
 async function aiChatLayout(page, size) {
   const fails = [];
@@ -1640,10 +1660,13 @@ async function aiChatLayout(page, size) {
   await page.screenshot({ path: `/cache/ai-page-${size}-chat.png` });
   const width = await page.evaluate(() => Math.round(document.querySelector(".ai-screen .ai-chat").getBoundingClientRect().width));
   if (width > 700) fails.push(`${size}: the chat is ${width} px wide, not centred at reading width`);
-  const strip = await page.evaluate(() => document.querySelector(".ai-screen .ai-strip")?.textContent ?? "");
-  // "N working · Daily driver NN% · N to try": the try count is the chat's unanswered things to try; the daily driver
-  // only from powos-progress (not installed here); never a task's title, never the board's waiting count.
-  if (!/(^|·)2 to try$/.test(strip.trim()) || /everything on the phone|need/.test(strip)) fails.push(`${size}: the strip at the chat's top says "${strip}", not "2 to try"`);
+  if (size === "unfolded") fails.push(...(await page.evaluate(aiPanesFails)).map((f) => `${size}: ${f}`));
+  else {
+    const strip = await page.evaluate(() => document.querySelector(".ai-screen .ai-strip")?.textContent ?? "");
+    // "N working · Daily driver NN% · N to try": the try count is the chat's unanswered things to try; the daily driver
+    // only from powos-progress (not installed here); never a task's title, never the board's waiting count.
+    if (!/(^|·)2 to try$/.test(strip.trim()) || /everything on the phone|need/.test(strip)) fails.push(`${size}: the strip at the chat's top says "${strip}", not "2 to try"`);
+  }
   const [before, after, rest, up] = await page.evaluate(aiChatOlder);
   if (!(after > before)) fails.push(`${size}: scrolling up loaded no older messages (${before} -> ${after})`);
   if (rest !== 0 || up < 40) fails.push(`${size}: the chat's foot fade is ${rest} px at the newest and ${up} px scrolled up (want 0, then ~48)`);

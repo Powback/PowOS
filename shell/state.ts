@@ -315,7 +315,7 @@ effect(() => void powos.store.set("speech", { engine: speechEngine.value }).catc
 /** What's typed in PowOS AI's page and not sent yet: kept across reloads (an update mustn't lose it). */
 export const aiDraft = stored("powai.draft");
 /** PowOS AI's screen (powai.tsx): its chat, or one its ⋯ menu opened (aimenu.tsx) - Back goes back to the chat. */
-export const aiScreen = signal<"chat" | "progress" | "agents" | "devices" | "friction">("chat");
+export const aiScreen = signal<"chat" | "progress" | "agents" | "devices" | "friction" | "fleet">("chat");
 /**
  * Home's page: it has no launcher of its own. The launcher is one overlay, as the notification shade is (the user,
  * 2026-10-29: "the launcher is supposed to be an overlay just like the notifications"): the host's pull-up window
