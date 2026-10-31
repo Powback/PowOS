@@ -4183,6 +4183,11 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position] of [["folded", "bottom"], ["folded", "right"], ["unfolded", "bottom"], ["unfolded", "right"], ["unfolded", "left"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `dock-search-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dockSearchCheck(pos), position))));
+  // The launcher's panel fits its window (dev/launcher-fit-check.js, LP1/LT1 2026-10-31): PowOS AI's pill above the nav
+  // inset or the keyboard, the app grid a row gap under the panel's top - folded and unfolded, every dock side.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, position, keyboard] of ["unfolded", "folded"].flatMap((l) => ["bottom", "left", "right"].flatMap((p) => [[l, p, false], [l, p, true]])))
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `launcher-fit-${label}-${position}${keyboard ? "-kbd" : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos, kb) => (await importShim("./dev/launcher-fit-check.js")).launcherFits(pos, kb), position, keyboard))));
   // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard-side", { width: 821, height: 883 }).then((r) => whenReady(r, () => launcherKeyboardSide(r.page, { width: 821, height: 883 }))));
