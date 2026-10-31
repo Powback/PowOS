@@ -63,7 +63,8 @@ object AppWindowAt {
         HiddenApi.allow()
         @Suppress("DEPRECATION")
         val tasks = context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS)
-        return tasks.firstOrNull { runCatching { covers(it, x, y) }.getOrDefault(false) }?.let { (it.baseActivity ?: it.topActivity)?.packageName ?: "task ${it.taskId}" }
+        val display = displayOf(context)
+        return tasks.firstOrNull { runCatching { onDisplay(it, display) && covers(it, x, y) }.getOrDefault(false) }?.let { (it.baseActivity ?: it.topActivity)?.packageName ?: "task ${it.taskId}" }
     }
 
     /**
@@ -86,7 +87,8 @@ object AppWindowAt {
             HiddenApi.allow()
             @Suppress("DEPRECATION")
             val tasks = context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS)
-            tasks.mapNotNull { t -> runCatching { handleOf(t, strip, handleW) }.getOrNull() }
+            val display = displayOf(context)
+            tasks.mapNotNull { t -> runCatching { if (onDisplay(t, display)) handleOf(t, strip, handleW) else null }.getOrNull() }
         }.onFailure { Log.w(TAG, "can't read app handles", it) }.getOrDefault(emptyList())
 
     private fun handleOf(
@@ -103,6 +105,22 @@ object AppWindowAt {
         if (b.isEmpty || b.top >= strip) return null
         return Rect(b.centerX() - handleW / 2, 0, b.centerX() + handleW / 2, strip)
     }
+
+    /** The display home's touch is on: [context]'s own, or the default display for a non-visual context. */
+    private fun displayOf(context: Context): Int =
+        runCatching { context.display?.displayId }.getOrNull() ?: android.view.Display.DEFAULT_DISPLAY
+
+    /**
+     * Task [t] lives on [display]. Bounds are in the task's own display's coordinates, so a task on another display -
+     * a PowOS web window's virtual display (Chrome on 232, Settings on 228; [WindowFrames] already claims those) -
+     * "contains" home points near the origin and stole page 1's pull-down: the user, 2026-10-31, "Can't activate the
+     * notifications in mobile mode ... like there's a floating window there that's not visible." Unreadable = keep it.
+     */
+    private fun onDisplay(
+        t: ActivityManager.RunningTaskInfo,
+        display: Int,
+    ): Boolean =
+        runCatching { android.app.TaskInfo::class.java.getField("displayId").getInt(t) == display }.getOrDefault(true)
 
     /** WindowConfiguration.WINDOWING_MODE_FREEFORM. */
     private const val FREEFORM = 5
