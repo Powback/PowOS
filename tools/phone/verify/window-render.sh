@@ -46,7 +46,7 @@ print(v if isinstance(v,str) else json.dumps(v))'
 ev() { CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20} "$T/cdp.sh" eval home "$1" 2>/dev/null | tr -d '\r' | tail -1 | python3 -c "$UNQ"; }
 WW='Promise.all([importShim("./state.ts"),importShim("./ui/webwindows.tsx")])'
 irq() { sh_ "awk '/touch-0/{for(i=2;i<=NF;i++) if(\$i ~ /^[0-9]+\$/) s+=\$i; else break} END{print s}' /proc/interrupts"; }
-ID= LOCKED=
+ID= LOCKED= P0=
 cleanup() {
   if [ -n "$ID" ]; then
     # Only our window: by its id, through the host (it removes the task it launched there).
@@ -58,6 +58,7 @@ cleanup() {
     [ -n "$gone" ] && log "closed window $ID" || log "WARNING: window $ID still in the page's list after close"
     ID=
   fi
+  [ -n "${P0:-}" ] && { ev "importShim('./state.ts').then(s=>{s.page.value=$P0;return 'ok'})" >/dev/null; log "home back on page $P0"; P0=; }
   [ -n "$LOCKED" ] && [ "$(cut -d' ' -f1 "$L/who" 2>/dev/null)" = window-render ] && rm -rf "$L"; LOCKED=
 }
 trap 'cleanup' EXIT
@@ -74,7 +75,7 @@ verdict() {
   log "window-render: $1 - shots: $OUT";ls "$OUT"/*.png 2>/dev/null | sed 's/^/  /' | tee -a "$OUT/log.txt"; }
 touched() { [ "$(irq)" = "$I0" ] || skip "user active (a real touch during the check at $1; its window closed)"; }
 shot() {   # shot NAME: raw screencap gzipped on the phone -> $OUT/NAME.raw.gz
-  "$A" exec-out "screencap | gzip -1" > "$OUT/$1.raw.gz" 2>/dev/null && [ -s "$OUT/$1.raw.gz" ] || { log "screencap $1 failed"; return 1; }
+  "$A" exec-out "screencap ${DISP:+-d $DISP} | gzip -1" > "$OUT/$1.raw.gz" 2>/dev/null && [ -s "$OUT/$1.raw.gz" ] || { log "screencap $1 failed"; return 1; }
 }
 
 # 1. A free phone: screen on, no touch for WR_IDLE_S, no keyguard, unfolded.
@@ -96,6 +97,15 @@ done
 log "free: $i, $kg, $fold"
 I0=$(irq)
 dpr=$(ev 'String(devicePixelRatio)')
+# The physical display home is on (two panels + every web window's virtual display: a bare screencap warns and picks
+# "the first one found"): the one whose size is home's viewport in device px.
+want=$(ev 'Math.round(innerWidth*devicePixelRatio)+"x"+Math.round(innerHeight*devicePixelRatio)'); DISP=
+for d in $(sh_ "dumpsys SurfaceFlinger --display-id" | sed -n 's/^Display \([0-9]*\) (HWC display.*/\1/p'); do
+  wh=$("$A" exec-out "screencap -d $d 2>/dev/null | head -c 8" 2>/dev/null | od -An -tu4 | awk '{print $1"x"$2}')
+  awk -v a="$wh" -v b="$want" 'BEGIN{split(a,x,"x"); split(b,y,"x"); d1=x[1]-y[1]; d2=x[2]-y[2]; exit !(x[1] > 0 && d1*d1 <= 16 && d2*d2 <= 16)}' && { DISP=$d; break; }
+done
+[ -n "$DISP" ] || skip "no physical display is home's size ($want) - can't tell which to screencap"
+log "display $DISP ($want)"
 on=$(ev "$WW.then(async([s,m])=>String(await m.webWindowsOn()))")
 [ "$on" = true ] || skip "web windows aren't on here (webWindowsOn: ${on:-no answer}) - unfolded with powos_web_windows=1?"
 # Never the user's: no window of the app, no task of it (an open would pull that task into our window, a close end it).
@@ -107,6 +117,10 @@ tasks=$(sh_ "dumpsys activity activities" | grep -c "ActivityRecord{[^}]* $APP/"
 # 2. Before: the screen as it is (home's page, the wallpaper) - the rect the window will cover is cut from it.
 shot before || skip "no screencap"
 touched "the first shot"
+# Home must show one of its desktop pages (not PowOS AI's page -1 or the app library): the window opens on the page
+# shown, as the dock's launch does. Another one: home goes to its first page for the check and back after it.
+P0=$(ev "importShim('./state.ts').then(s=>{const p=s.page.value;if(p>=0&&p<s.pages.value.length)return 'ok';s.page.value=0;return String(p)})")
+case "$P0" in ok) P0= ;; -[0-9]*|[0-9]*) log "home was on page $P0 (not a desktop page): to page 0 for the check, back after"; sleep 1.5 ;; *) skip "can't read home's page (${P0:-no answer})" ;; esac
 r=$(ev "$WW.then(async([s,m])=>{const k=[...s.byKey.value.keys()].find(k=>k.startsWith('a:$APP/'));if(!k)return 'no app key';const id=await m.openWindow(k,s.byKey.value.get(k).label,s.pages.value[s.page.value]??1);return id==null?'not a window':'id '+id})")
 case "$r" in "id "*) ID=${r#id }; log "opened $APP as web window $ID (webwindows.tsx openWindow)" ;; *) log "FAIL: the open didn't make a window: ${r:-no answer}"; verdict FAIL; exit 1 ;; esac
 
@@ -121,6 +135,8 @@ log "body: $rect (dpr $dpr), live=$live"
 set -- $rect
 [ $# -ge 4 ] && [ $(( $3 - $1 )) -gt 100 ] && [ $(( $4 - $2 )) -gt 100 ] || { log "FAIL: no body rect for window $ID ($rect)"; verdict FAIL; exit 1; }
 R="$1 $2 $3 $4"
+scr=$(ev 'Math.round(innerWidth*devicePixelRatio)+" "+Math.round(innerHeight*devicePixelRatio)'); set -- $R $scr
+[ "$1" -ge 0 ] && [ "$2" -ge 0 ] && [ "$3" -le "${5:-0}" ] && [ "$4" -le "${6:-0}" ] || { log "FAIL: window $ID's body ($R) isn't on the screen (0 0 $scr): it opened where it can't be seen"; verdict FAIL; exit 1; }
 touched "the open"
 
 # 4. Content.
@@ -149,6 +165,7 @@ touched "the tap"
 for n in before open pre tap; do $PY png "$OUT/$n.raw.gz" "$OUT/$n.png" $R "$OUT/$n-body.png" && rm -f "$OUT/$n.raw.gz"; done
 
 bad=
+for v in "$d0" "$dom" "$edg" "$d1" "$noise"; do case $v in ""|*[!0-9.]*) log "FAIL: a measurement is missing (d0=$d0 dom=$dom edges=$edg tap=$d1 noise=$noise)"; verdict FAIL; exit 1 ;; esac; done
 [ "$live" = true ] || bad="$bad; never live (no first frame from the app in 15 s)"
 awk "BEGIN{exit !($d0 >= 0.35)}" || bad="$bad; the body looks like the page under it ($d0 differs, want >= 0.35): an empty hole"
 awk "BEGIN{exit !($dom < 0.97 && $edg >= 0.003)}" || bad="$bad; the body is a flat fill (dominant $dom, edges $edg)"

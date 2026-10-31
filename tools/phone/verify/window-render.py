@@ -17,8 +17,13 @@ THRESH = 24
 
 
 def load(path):
-    with gzip.open(path, "rb") as f:
-        data = f.read()
+    with open(path, "rb") as f:
+        blob = f.read()
+    # screencap's own warnings ("[Warning] Multiple displays were found...") may come first on its stdout.
+    at = blob.find(b"\x1f\x8b")
+    if at < 0:
+        raise SystemExit(f"window-render.py: {path}: no gzip stream ({blob[:80]!r})")
+    data = gzip.decompress(blob[at:])
     w, h = struct.unpack_from("<II", data, 0)
     head = len(data) - w * h * 4
     if head not in (12, 16) or w <= 0 or h <= 0:
