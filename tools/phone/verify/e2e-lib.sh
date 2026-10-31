@@ -87,10 +87,19 @@ back() { sh_ "input keyevent 4"; sleep "${1:-0.8}"; }
 
 # pt <js expression of an element>: its centre in device px "x y", "none" (no element) or "off" (off screen / hidden).
 pt() { ev "(()=>{const e=($1);if(!e)return 'none';const r=e.getBoundingClientRect(),d=devicePixelRatio;if(r.width<2||r.height<2||r.bottom<1||r.top>innerHeight-1||r.right<1||r.left>innerWidth-1)return 'off';return Math.round((r.x+r.width/2)*d)+' '+Math.round((r.y+r.height/2)*d)})()"; }
+# Home's search, by the current rules (26e5c496/a481983d SW1): a bar on home (unfolded by default) is tapped in its
+# field; a search docked as the dock's button (folded by default) is tapped and opens the launcher with the bar
+# focused. searchpt: "x y" of what to tap, or none/off. SEARCHED: the field the keyboard is in after it.
+SEARCHPT="(document.querySelector('.home > .bar textarea')&&document.querySelector('.home > .bar').getBoundingClientRect().height>2?document.querySelector('.home > .bar textarea'):document.querySelector('.home .dock .app.dock-search'))"
+SEARCHED="document.activeElement&&document.activeElement.matches('.bar textarea')?'yes':'no'"
+searchpt() { pt "$SEARCHPT"; }
 # A dock cell by its key prefix (read only).
 dockel() { echo "[...document.querySelectorAll('.home .dock .app[data-key]')].find(a=>a.dataset.key.startsWith('$1'))"; }
 # winrects: every window on screen now (windows.list: not minimised, not on another page), "l t r b,l t r b" in device px.
-winrects() { local v; v=$(hcall windows.list "[]" "l=>l.filter(w=>!w.minimised&&!w.away&&w.bounds).map(w=>w.bounds.join(' ')).join(',')"); case $v in ERR*) echo "" ;; *) echo "$v" ;; esac; }
+# Both window models: the old floating tasks (windows.list) and the web windows (W1: .webwindow elements of home's page,
+# docs/WEB_WINDOWS.md) - round 189 read only windows.list, saw [] with Chrome open as a web window, and pulled/held on it.
+winrects() { local v w; v=$(hcall windows.list "[]" "l=>l.filter(w=>!w.minimised&&!w.away&&w.bounds).map(w=>w.bounds.join(' ')).join(',')"); case $v in ERR*) v="" ;; esac
+  w=$(ev "$WWRECTS"); case $w in none|ERR*|"") ;; *) v=${v:+$v,}$w ;; esac; echo "$v"; }
 # freept <window bounds or ""> <way -1|1|0> <length> [min x, 0..1] [min y, 0..1]: an empty spot on home's page (no tile,
 # app, bar, dock; outside the window) with room for a sideways swipe that long (float-touch.sh's: a short swipe doesn't
 # turn a page). Never under ANY window on screen: elementFromPoint sees only home's page, so a spot under a floating
@@ -100,17 +109,36 @@ freept() {
   # left its only roomy spot (2086-2116, between it and the side dock) between grid columns, so a 116 px swipe from
   # the left gap was all the check did and the page "didn't change" (e2e-desktop 1029-1430 [36-page2]).
   local ws; ws=$(winrects)
-  ev "(()=>{const b='$1'.split(' ').filter(Boolean).map(Number),ws='$ws'.split(',').filter(Boolean).map(s=>s.split(' ').map(Number)),r=devicePixelRatio,d=${2:-0},len=${3:-0},W=innerWidth*r;let best=null,room=-1;const x0=innerWidth*${4:-.06},xs=[];for(let x=${4:-.06};x<=.94;x+=.04)xs.push(innerWidth*x);for(const w of [b,...ws])if(w.length===4)for(const e of [(w[2]+61)/r,(w[0]-61)/r])if(e>=x0&&e<innerWidth)xs.push(e);for(let y=${5:-.2};y<=.75;y+=.05)for(const cx of xs){const cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;if(ws.some(w=>px>=w[0]-40&&px<=w[2]+40&&py>=w[1]-140&&py<=w[3]+40))continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.home-tile,.app,.panel,.widget,.island,.owl,button,a,input,textarea,.bar,.dock,[data-key]'))continue;const m=d<0?px-20:d>0?W-20-px:len;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()"
+  ev "(()=>{const b='$1'.split(' ').filter(Boolean).map(Number),ws='$ws'.split(',').filter(Boolean).map(s=>s.split(' ').map(Number)),r=devicePixelRatio,d=${2:-0},len=${3:-0},W=innerWidth*r;let best=null,room=-1;const x0=innerWidth*${4:-.06},xs=[];for(let x=${4:-.06};x<=.94;x+=.04)xs.push(innerWidth*x);for(const w of [b,...ws])if(w.length===4)for(const e of [(w[2]+61)/r,(w[0]-61)/r])if(e>=x0&&e<innerWidth)xs.push(e);for(let y=${5:-.2};y<=.75;y+=.05)for(const cx of xs){const cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;if(ws.some(w=>px>=w[0]-40&&px<=w[2]+40&&py>=w[1]-140&&py<=w[3]+40))continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.webwindow,.tile,.home-tile,.app,.panel,.widget,.island,.owl,button,a,input,textarea,.bar,.dock,[data-key]'))continue;const m=d<0?px-20:d>0?W-20-px:len;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()"
 }
 
 # Tasks and windows.
 tasks() { sh_ "am stack list" | grep -E 'taskId=[0-9]+:' | sed -nE 's/.*taskId=([0-9]+): ([^ ]+).*(visible=(true|false)).*/\1 \2 \4/p'; }
-tvis() { sh_ "am stack list" | grep -E "taskId=$1:" | grep -oE 'visible=(true|false)' | head -1 | cut -d= -f2; }
-tbounds() { sh_ "am stack list" | grep -E "taskId=$1:" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ' | xargs; }
-# win <key: pkg or l:app> <field>: from windows.list (front first): id | minimised | away | bounds | front
-win() { hcall windows.list "[]" "l=>{const w=l.find(w=>w.pkg==='$1'||w.app==='$1');if(!w)return 'none';const f='$2';return f==='bounds'?(w.bounds||[]).join(' '):f==='front'?String(l.find(x=>!x.minimised&&!x.away)===w):String(w[f])}"; }
-# waitwin <key> <s>: up to s seconds for its window; prints the task id or "none".
-waitwin() { local i id=none; for i in $(seq 1 "$2"); do id=$(win "$1" id); [ "$id" != none ] && [ -n "$id" ] && break; sleep 1; done; echo "$id"; }
+# Web windows (W1, docs/WEB_WINDOWS.md): their ids are "w<id>" here (the page's data-wwid), task ids stay plain numbers.
+# The truth is the host's list (webwindows.list: key "a:<drawer key>"/"l:<app>", state, task) and the page's element
+# (.webwindow[data-wwid]: where it is on screen now, device px). WWRECTS: every web window shown on screen, "l t r b,...".
+WWRECTS="(()=>{const d=devicePixelRatio;return [...document.querySelectorAll('.webwindow[data-wwid]')].map(e=>e.getBoundingClientRect()).filter(r=>r.width>2&&r.height>2&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight).map(r=>[r.left,r.top,r.right,r.bottom].map(v=>Math.round(v*d)).join(' ')).join(',')})()"
+# wwel <w-id> <js fn of the element -> string>: its frame element in home's page ("none" when it has none).
+wwel() { ev "(()=>{const e=document.querySelector('.webwindow[data-wwid=\"${1#w}\"]');return e?String(($2)(e)):'none'})()"; }
+# wwrect <w-id>: its frame on screen, "l t r b" device px ("" when it isn't on screen: minimised, another page).
+wwrect() { local v; v=$(wwel "$1" "e=>{const r=e.getBoundingClientRect(),d=devicePixelRatio;return r.width<2||r.height<2||r.right<1||r.bottom<1||r.left>innerWidth-1||r.top>innerHeight-1?'':[r.left,r.top,r.right,r.bottom].map(v=>Math.round(v*d)).join(' ')}"); [ "$v" = none ] && v=""; echo "$v"; }
+# wwhost <w-id> <field>: from the host's webwindows.list - state | task | key | gone (true when it isn't listed).
+wwhost() { hcall webwindows.list "[]" "l=>{const w=l.find(w=>w.id===${1#w});return '$2'==='gone'?String(!w):w?String(w['$2']):'none'}"; }
+tvis() { case $1 in w*) [ -n "$(wwrect "$1")" ] && [ "$(wwhost "$1" state)" = floating ] && echo true || echo false; return ;; esac
+  sh_ "am stack list" | grep -E "taskId=$1:" | grep -oE 'visible=(true|false)' | head -1 | cut -d= -f2; }
+tbounds() { case $1 in w*) wwrect "$1"; return ;; esac
+  sh_ "am stack list" | grep -E "taskId=$1:" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ' | xargs; }
+# win <key: pkg or l:app> <field>: id | minimised | away | bounds | front. A web window first (id "w<id>"; front = the
+# top .webwindow in its page's DOM order), else the old floating window (windows.list, front first).
+win() {
+  local v; v=$(hcall webwindows.list "[]" "l=>{const K='$1',w=l.filter(w=>w.key===K||w.key==='a:'+K||w.key.startsWith('a:'+K+'/')).pop();if(!w)return 'none';const f='$2',e=document.querySelector('.webwindow[data-wwid=\"'+w.id+'\"]'),r=e&&e.getBoundingClientRect(),on=!!r&&r.width>2&&r.right>0&&r.left<innerWidth&&r.bottom>0&&r.top<innerHeight,d=devicePixelRatio;if(f==='id')return 'w'+w.id;if(f==='minimised')return String(w.state==='minimised');if(f==='away')return String(w.state==='floating'&&!on);if(f==='bounds')return on?[r.left,r.top,r.right,r.bottom].map(v=>Math.round(v*d)).join(' '):'';if(f==='front'){const s=e&&e.parentElement?[...e.parentElement.querySelectorAll(':scope > .webwindow[data-wwid]')]:[];return String(!!e&&s[s.length-1]===e)}return String(w[f])}")
+  case $v in none|ERR*|"") ;; *) echo "$v"; return ;; esac
+  hcall windows.list "[]" "l=>{const w=l.find(w=>w.pkg==='$1'||w.app==='$1');if(!w)return 'none';const f='$2';return f==='bounds'?(w.bounds||[]).join(' '):f==='front'?String(l.find(x=>!x.minimised&&!x.away)===w):String(w[f])}"
+}
+# waitwin <key> <s>: up to s seconds for its window; prints its id (a task, or "w<id>" for a web window) or "none".
+waitwin() { local i id=none; for i in $(seq 1 "$2"); do id=$(win "$1" id); [ "$id" != none ] && [ -n "$id" ] && case $id in ERR*) ;; *) break ;; esac; id=none; sleep 1; done; echo "$id"; }
+# wgone <id>: true when that window is gone (a task: not in am stack list; a web window: not in webwindows.list).
+wgone() { case $1 in w*) [ "$(wwhost "$1" gone)" = true ] ;; *) [ -z "$(tasks | grep "^$1 ")" ] ;; esac; }
 # wframe <title text>: that window's frame (a plain substring: "PowOS window bar 12}" - the } ends the title).
 wframe() { sh_ "dumpsys window windows" | awk -v p="$1" '/^ *Window #/{f=(index($0,p)>0)} f' | grep -oE ' frame=\[-?[0-9]+,-?[0-9]+\]\[-?[0-9]+,-?[0-9]+\]' | head -1 | tr -c '0-9\n-' ' ' | xargs; }
 dp() { echo $(($1 * DENS / 160)); }
@@ -121,9 +149,14 @@ screenrect() { set -- $1; [ $# -ge 4 ] || { echo "$*"; return; }
   [ -n "${INST:-}" ] || INST=$(sh_ "dumpsys display" | grep -E "^  DisplayDeviceInfo" | grep " state ON," | grep -oE "installOrientation [0-3]" | head -1 | cut -d" " -f2)
   case ${INST:-0} in 3) echo "$((W - $4)) $1 $((W - $2)) $3" ;; 1) echo "$2 $((H - $3)) $4 $((H - $1))" ;; 2) echo "$((W - $3)) $((H - $4)) $((W - $1)) $((H - $2))" ;; *) echo "$*" ;; esac; }
 # closebtn <task>: its title bar's close button (21 dp from the bar's right), "x y" or "".
-closebtn() { local b; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b; echo "$(($3 - $(dp 21))) $((($2 + $4) / 2))"; }
+closebtn() { case $1 in w*) wwpt "$1" .ww-close; return ;; esac; local b; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b; echo "$(($3 - $(dp 21))) $((($2 + $4) / 2))"; }
+# wwpt <w-id> <selector>: the centre of that element inside the web window, "x y" device px, or "".
+wwpt() { local v; v=$(wwel "$1" "e=>{const b=e.querySelector('$2');if(!b)return '';const r=b.getBoundingClientRect(),d=devicePixelRatio;return r.width<1?'':Math.round((r.left+r.width/2)*d)+' '+Math.round((r.top+r.height/2)*d)}"); [ "$v" = none ] || echo "$v"; }
+# grippt <id>: its resize grip (bottom right), "x y" or "" - a web window's .ww-grip-br, else the old grip window.
+grippt() { case $1 in w*) wwpt "$1" ".ww-grip-se"; return ;; esac; local g; g=$(wframe "PowOS window grip $1}"); [ -n "$g" ] || return 0; set -- $g; echo "$((($1 + $3) / 2)) $((($2 + $4) / 2))"; }
 # barpt <task>: a spot on its title bar for a drag: the left part, away from the buttons, clear of the pill if it can.
-barpt() { local b x r; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b
+barpt() { case $1 in w*) local t; t=$(wwel "$1" "e=>{const b=e.querySelector('.webwindow-title');if(!b)return '';const r=b.getBoundingClientRect(),d=devicePixelRatio;return Math.round((r.left+r.width/4)*d)+' '+Math.round((r.top+r.height/2)*d)}"); [ "$t" = none ] || echo "$t"; return ;; esac
+  local b x r; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b
   r=$(pillrect); x=$(($1 + ($3 - $1) / 4))
   if [ -n "$(echo $r)" ]; then set -- "$@" $r; [ "$x" -ge $(($5 - 60)) ] && [ "$x" -le $(($7 + 60)) ] && x=$(($1 + $(dp 24))); fi
   echo "$x $((($2 + $4) / 2))"; }

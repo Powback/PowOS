@@ -41,9 +41,10 @@ dock_tap() { local p; p=$(pt "$(dockel "$1")"); case $p in none|off|"") fail "no
 # put_away <window key> <dock key prefix> <name>: a dock tap on the focused window's app minimises it.
 put_away() {
   local wl='l=>JSON.stringify(l.map(w=>({id:w.id,pkg:w.pkg,app:w.app,min:w.minimised,away:w.away,b:w.bounds})))'
-  local before after; before=$(hcall windows.list "[]" "$wl")
+  local ww='l=>JSON.stringify(l.map(w=>({id:w.id,key:w.key,state:w.state})))'
+  local before after; before="$(hcall windows.list "[]" "$wl") web: $(hcall webwindows.list "[]" "$ww")"
   dock_tap "$2" "$3" || return 1; sleep 1.8; chk "minimise $3"
-  after=$(hcall windows.list "[]" "$wl")
+  after="$(hcall windows.list "[]" "$wl") web: $(hcall webwindows.list "[]" "$ww")"
   note "windows.list before the dock tap: $before"; note "windows.list after: $after"
   step "$4" "$3 put away: a tap on its dock cell while its window is in front"
   local m; m=$(win "$1" minimised)
@@ -54,9 +55,9 @@ closebar() {
   local p; p=$(closebtn "$1"); [ -n "$p" ] || { fail "$2 has no title bar to close it by"; return 1; }
   set -- "$1" "$2" "$3" $p; tap "$4" "$5" "$2's close button" || return 1; sleep 2; chk "close $2"
   step "$3" "$2 closed by its title bar's close button"
-  [ -z "$(tasks | grep "^$1 ")" ] && pass "$2's window (task $1) is gone" || fail "$2's task $1 is still there after its close button"
+  wgone "$1" && pass "$2's window ($1) is gone" || fail "$2's window $1 is still there after its close button"
 }
-floating() { # <task> <name>: a window smaller than the screen
+floating() { # <id> <name>: a window smaller than the screen (a task, or "w<id>": a web window's frame on screen)
   local b; b=$(tbounds "$1"); set -- "$1" "$2" $b
   [ $# -ge 6 ] && [ $(($5 - $3)) -lt $((W * 9 / 10)) ] && [ $(($5 - $3)) -gt 200 ]
 }
@@ -95,13 +96,13 @@ part1_search_kate() {
     skip_linux search-kate "Kate from search (needs the Linux session)"
     return
   fi
-  local f; f=$(pt "document.querySelector('.home > .bar textarea')")
-  case $f in none|off|"") fail "no search pill on home ($f)" ;; *)
-    set -- $f; tap "$1" "$2" "the search pill"; sleep 1.2; chk pill
-    if [ "$(ev "document.activeElement&&document.activeElement.matches('.home > .bar textarea')?'yes':'no'")" = yes ] &&
+  local f; f=$(searchpt)
+  case $f in none|off|"") fail "no search on home - neither a bar nor the dock's search button ($f)" ;; *)
+    set -- $f; tap "$1" "$2" "home's search (the bar, or the dock's search button)"; sleep 1.2; chk pill
+    if [ "$(ev "$SEARCHED")" = yes ] &&
        sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -q "com.powos.app"; then
       sh_ "input text kate"; sleep 1.5; chk typed
-      step search-kate "\"kate\" typed into the search pill: the results"
+      step search-kate "\"kate\" typed into home's search: the results"
       p=$(pt "document.querySelector('.drawer-list.results .app[data-key=\"l:org.kde.kate\"]')")
       case $p in none|off|"") fail "no Kate in the search results ($p)"; back; back ;; *)
         pass "Kate in the search results"
@@ -113,7 +114,7 @@ part1_search_kate() {
         [ "$KT" != none ] && put_away l:org.kde.kate l:org.kde.kate Kate kate-away ;;
       esac
     else
-      step search "the search pill tapped"; fail "the search pill didn't take the focus - nothing typed"; back
+      step search "home's search tapped"; fail "home's search didn't take the focus - nothing typed"; back
     fi ;;
   esac
 }
@@ -177,8 +178,8 @@ part2() {
   else fail "no title bar on Calculator's window"; fi
 
   # Resize by the grip, 4 frames while the finger is down.
-  local g; g=$(wframe "PowOS window grip $CT}")
-  if [ -n "$g" ]; then set -- $g; x=$((($1 + $3) / 2)); y=$((($2 + $4) / 2))
+  local g; g=$(grippt "$CT")
+  if [ -n "$g" ]; then set -- $g; x=$1; y=$2
     b0=$(tbounds "$CT"); set -- $b0; local w0=$(($3 - $1)) wl=$(($3 - $1)) wi grow=0 mono=1
     if mdown $x $y "Calculator's grip"; then
       for i in 1 2 3 4; do
@@ -234,7 +235,8 @@ part2() {
   # Reopened from recents (the switcher): a real tap on its card.
   b0=$(tbounds "$CT"); sh_ "input keyevent KEYCODE_APP_SWITCH"; sleep 2; chk switcher
   step recents "the switcher (recents) over the window"
-  p=$(pt "document.querySelector('.recents.open .task[data-task=\"$CT\"] .task-shot')")
+  local ctask=$CT; case $CT in w*) ctask=$(wwhost "$CT" task) ;; esac
+  p=$(pt "document.querySelector('.recents.open .task[data-task=\"$ctask\"] .task-shot')")
   case $p in none|off|"") fail "the switcher shows no card for Calculator ($p)"; back ;; *)
     pass "Calculator's card in the switcher"
     set -- $p; tap "$1" "$2" "Calculator's card" && { sleep 2; chk reopen
@@ -291,8 +293,8 @@ part3() {
   local X=$((W * 3 / 4)) Y0
   open_drawer || true
   step drawer "stage 1: a plain swipe up - the drawer, no keyboard"
-  [ "$(isopen)" = true ] && [ "$(ev "document.activeElement&&document.activeElement.matches('.home > .bar textarea')?'yes':'no'")" = no ] && [[ "$(ime)" == *false* ]] &&
-    pass "the drawer is up, the search isn't focused, no keyboard" || fail "stage 1: drawer open=$(isopen), $(ime) (windows now: $(hcall windows.list "[]" "l=>JSON.stringify(l.map(w=>[w.id,w.minimised,w.away,w.bounds]))"); focus: $(sh_ "dumpsys window | grep -m1 mCurrentFocus"))"
+  [ "$(isopen)" = true ] && [ "$(ev "$SEARCHED")" = no ] && [[ "$(ime)" == *false* ]] &&
+    pass "the drawer is up, the search isn't focused, no keyboard" || fail "stage 1: drawer open=$(isopen), $(ime) (windows on screen: [$(winrects)]; web windows: $(hcall webwindows.list "[]" "l=>JSON.stringify(l.map(w=>[w.id,w.key,w.state]))"); focus: $(sh_ "dumpsys window | grep -m1 mCurrentFocus"))"
   back; back 0.6
   # A spot that is always free (footpt.js: a gap in the dock's or the bottom bar's row, right half - the left half is
   # PowOS AI's pull-up corner, 12:48 round 3): with windows open home had no empty spot above them (freept, 15:11).
@@ -304,8 +306,8 @@ part3() {
     mpath $X $((Y0 - H * 3 / 100)) $X $((Y0 - H * 48 / 100)) 8; sleep 0.3
     mup $X $((Y0 - H * 48 / 100)); sleep 1.5; chk pull2
     step search "stage 2: pulled further up - the search, with the keyboard"
-    [ "$(ev "document.activeElement&&document.activeElement.matches('.home > .bar textarea')?'yes':'no'")" = yes ] && [[ "$(ime)" == *true* ]] &&
-      pass "the search is focused and the keyboard is up" || fail "stage 2: search focused=$(ev "document.activeElement&&document.activeElement.matches('.home > .bar textarea')?'yes':'no'"), $(ime)"
+    [ "$(ev "$SEARCHED")" = yes ] && [[ "$(ime)" == *true* ]] &&
+      pass "the search is focused and the keyboard is up" || fail "stage 2: search focused=$(ev "$SEARCHED"), $(ime)"
     back; back; sleep 0.5
   else step search "stage 2: the long pull"; fail "no empty spot to start the long pull from"; fi
 
