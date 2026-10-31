@@ -1466,22 +1466,27 @@ async function aiChatBroken() {
 /** In the page: ⋯, then each screen and back; a fail per screen that didn't open, name itself, or come back. */
 async function aiChatMenu() {
   const G = window.__gw;
-  const fails = [];
-  for (const name of ["Progress", "Agents & terminals", "Devices", "Friction"]) {
+  const titled = (name) => [...document.querySelectorAll(".ai-screen .ai-top .ai-title")].some((t) => t.textContent.trim() === name);
+  // One screen from ⋯ and back; its fails. Inner (page.evaluate serialises only this function).
+  const screen = async (name) => {
+    const fails = [];
     document.querySelector(".ai-screen .ai-more")?.click();
     const find = () => [...document.querySelectorAll(".ai-screen .ai-menu-item")].find((b) => b.textContent.trim() === name);
     await G.until(find, 2000);
     const item = find();
-    if (!item) { fails.push(`⋯ has no "${name}"`); continue; }
+    if (!item) return [`⋯ has no "${name}"`];
     item.click();
-    const opened = await G.until(() => [...document.querySelectorAll(".ai-screen .ai-top .ai-title")].some((t) => t.textContent.trim() === name) && document.querySelector(".ai-screen .ai-sub"), 2000);
+    const opened = await G.until(() => titled(name) && document.querySelector(".ai-screen .ai-sub"), 2000);
     if (!opened) fails.push(`"${name}" didn't open as its own screen`);
     if (name === "Progress" && !document.querySelector(".ai-screen .ai-sub .ai-work-list")) fails.push("Progress (no powos-progress app) shows no board");
     document.querySelector(".ai-screen .ai-back")?.click();
     if (!(await G.until(() => document.querySelector(".ai-screen .ai-chat .msg.try"), 2000))) fails.push(`back from "${name}" didn't return to the chat`);
-  }
+    return fails;
+  };
+  const fails = [];
+  for (const name of ["Progress", "Agents & terminals", "Devices", "Friction"]) fails.push(...(await screen(name)));
   [...document.querySelectorAll(".ai-screen .ai-strip-seg")].find((b) => /Daily driver/.test(b.textContent))?.click();
-  if (!(await G.until(() => [...document.querySelectorAll(".ai-screen .ai-top .ai-title")].some((t) => t.textContent.trim() === "Progress"), 2000))) fails.push("the strip's progress didn't open Progress");
+  if (!(await G.until(() => titled("Progress"), 2000))) fails.push("the strip's progress didn't open Progress");
   document.querySelector(".ai-screen .ai-back")?.click();
   return fails;
 }
@@ -1506,10 +1511,9 @@ async function aiChatRestore() {
   [powos.ai.verdict, powos.agents.message] = window.__nyRestore;
 }
 
-/** The chat's checks at one size: no old boxes, the try message answered, ⋯'s screens, older on scroll-up. */
-async function aiChatAt(page, size) {
+/** The chat page before any answer: no old boxes, reading width, the strip, older messages on scroll-up. */
+async function aiChatLayout(page, size) {
   const fails = [];
-  if (!(await page.evaluate(aiChatSetup, [120, `-${size}-a`]))) return [`${size}: the manager's things-to-try message didn't render`];
   const boxes = await page.evaluate(aiChatBoxes);
   if (boxes.length) fails.push(`${size}: the chat page still shows ${boxes.join(", ")}`);
   await page.screenshot({ path: `/cache/ai-page-${size}-chat.png` });
@@ -1521,14 +1525,33 @@ async function aiChatAt(page, size) {
   if (!(after > before)) fails.push(`${size}: scrolling up loaded no older messages (${before} -> ${after})`);
   if (rest !== 0 || up < 40) fails.push(`${size}: the chat's foot fade is ${rest} px at the newest and ${up} px scrolled up (want 0, then ~48)`);
   await page.screenshot({ path: `/cache/ai-page-${size}-scrolled.png` });
-  await page.evaluate(aiChatSetup, [3, `-${size}`]);
-  const r = await page.evaluate(aiChatBroken);
+  return fails;
+}
+
+/** The try message's buttons and what "still broken" + "x" recorded (aiChatBroken's result). */
+function aiChatAnswerFails(r, size) {
+  const fails = [];
   if (r.acts !== "works / still broken") fails.push(`${size}: the thing to try offers ${r.acts || "nothing"}, not works / still broken`);
   if (r.doActs !== "done / can't / problem") fails.push(`${size}: the thing to do offers ${r.doActs || "nothing"}, not done / can't / problem`);
+  return [...fails, ...aiChatRecordFails(r, size)];
+}
+
+/** What "still broken" + "x" recorded: the user FAIL check, the manager's mail, the item's answer. */
+function aiChatRecordFails(r, size) {
+  const fails = [];
   const v = r.got && nyCall(r.got, "verdict");
   if (!(v && v[1] === `${AI_CHAT_TRY}-${size}` && v[2] === false && v[3] === "still broken: x")) fails.push(`${size}: still broken recorded no user FAIL check with the words (${JSON.stringify(r.got)})`);
   if (!(r.got && nyMailOk(nyCall(r.got, "message"), `${AI_CHAT_TRY}-${size}`))) fails.push(`${size}: still broken mailed the manager nothing naming the task`);
   if (!/still broken: "x"/.test(r.said ?? "")) fails.push(`${size}: the item doesn't say what was answered ("${r.said}")`);
+  return fails;
+}
+
+/** The chat's checks at one size: no old boxes, the try message answered, ⋯'s screens, older on scroll-up. */
+async function aiChatAt(page, size) {
+  if (!(await page.evaluate(aiChatSetup, [120, `-${size}-a`]))) return [`${size}: the manager's things-to-try message didn't render`];
+  const fails = await aiChatLayout(page, size);
+  await page.evaluate(aiChatSetup, [3, `-${size}`]);
+  fails.push(...aiChatAnswerFails(await page.evaluate(aiChatBroken), size));
   await page.screenshot({ path: `/cache/ai-page-${size}-answered.png` });
   await page.evaluate(() => document.querySelector(".ai-screen .ai-more")?.click());
   await page.screenshot({ path: `/cache/ai-page-${size}-menu.png` });

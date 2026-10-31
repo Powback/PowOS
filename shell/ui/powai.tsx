@@ -296,23 +296,35 @@ function Aside({ s, shown }: { s: AiScreen; shown: boolean }) {
  * opened there sits beside it. [pill] false: the holder's own pill asks (home's bar under a narrow panel); wide always
  * has its own.
  */
+function aiViewClass(cls: string, wide: boolean, split: boolean) {
+  return `${cls} ai-view ${wide ? "wide" : ""} ${split ? "split" : ""}`;
+}
+
+/** The view's body: a menu screen with back, or the chat. */
+function AiBody({ sub, shown }: { sub: AiScreen | null; shown: boolean }) {
+  if (sub) {
+    return (
+      <div class="ai-scroll ai-sub">
+        <MenuScreen s={sub} shown={shown} back={() => (aiScreen.value = "chat")} />
+      </div>
+    );
+  }
+  return (
+    <div class="ai-scroll ai-chat">
+      <ChatPane shown={shown} />
+    </div>
+  );
+}
+
 export function AiView({ shown, cls, pill = true }: { shown: boolean; cls: string; pill?: boolean }) {
   const [ref, wide] = useWide();
   const s = aiScreen.value;
   const split = wide && s === "progress";
   const sub = s !== "chat" && !split ? s : null;
   return (
-    <div ref={ref} class={`${cls} ai-view ${wide ? "wide" : ""} ${split ? "split" : ""}`}>
+    <div ref={ref} class={aiViewClass(cls, wide, split)}>
       <AiHeader sub={sub} shown={shown && !sub} />
-      {sub ? (
-        <div class="ai-scroll ai-sub">
-          <MenuScreen s={sub} shown={shown} back={() => (aiScreen.value = "chat")} />
-        </div>
-      ) : (
-        <div class="ai-scroll ai-chat">
-          <ChatPane shown={shown} />
-        </div>
-      )}
+      <AiBody sub={sub} shown={shown} />
       {!sub && (pill || wide) && <AiCompose />}
       {split && <Aside s={s} shown={shown} />}
     </div>
