@@ -128,12 +128,25 @@ export function recentlyDone(rows: WorkRow[] = board.value, now = Date.now()) {
   return rows.filter((w) => w.status === "done" && now - at(w) < RECENT_MS).sort((a, b) => at(b) - at(a));
 }
 
-/** Recently done: its heading a toggle, open at first (it fills what the page has left); one line per task with when. */
+/** Recently done shows this many rows, then a "more" row. */
+const DONE_ROWS = 5;
+
+/** One done task: its title and when. */
+const DoneRow = ({ w }: { w: WorkRow }) => (
+  <li class="ais-done-row">
+    <span class="ais-done-title">{w.title}</span>
+    <span class="ais-when">{ago(Number(w.done || w.updated))}</span>
+  </li>
+);
+
+/** Recently done: its heading a toggle, open at first; sized to its rows (DONE_ROWS, then "N more"). */
 function RecentlyDone({ rows }: { rows: WorkRow[] }) {
   const [open, setOpen] = useState(true);
+  const [all, setAll] = useState(false);
   if (!rows.length) return null;
+  const shown = all ? rows.slice(0, 20) : rows.slice(0, DONE_ROWS);
   return (
-    <section class={`ais-sec fill ${open ? "open" : ""}`} data-sec="done" aria-label="Recently done">
+    <section class="ais-sec" data-sec="done" aria-label="Recently done">
       <h3 class="ais-h">
         <button type="button" class="ais-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
           Recently done<span class="ais-n">{rows.length}</span>
@@ -142,12 +155,16 @@ function RecentlyDone({ rows }: { rows: WorkRow[] }) {
       </h3>
       {open && (
         <ul class="ais-list ais-done">
-          {rows.slice(0, 8).map((w) => (
-            <li key={w.id} class="ais-done-row">
-              <span class="ais-done-title">{w.title}</span>
-              <span class="ais-when">{ago(Number(w.done || w.updated))}</span>
-            </li>
+          {shown.map((w) => (
+            <DoneRow key={w.id} w={w} />
           ))}
+          {rows.length > shown.length && (
+            <li>
+              <button type="button" class="ais-more" onClick={() => setAll(true)}>
+                {rows.length - shown.length} more
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </section>

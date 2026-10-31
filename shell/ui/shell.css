@@ -3770,8 +3770,9 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 .ais .aip-need-more { padding: 0 4px 10px 22px; }
 .ais-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
 .ais-work-row { display: grid; grid-template-columns: 1fr; gap: 3px; width: 100%; padding: 9px 4px 10px; border: 0; background: none; font: inherit; color: var(--color-foreground); text-align: start; }
-.ais-work-line { display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
-.ais-work-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-item); font-weight: 600; }
+.ais-work-line { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.ais-work-line > .aip-dot { margin-top: 0.5em; }
+.ais-work-title { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; font-size: var(--text-item); font-weight: 600; }
 .ais-count, .ais-when { flex: none; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
 .ais-step { position: relative; display: block; height: 1.4em; margin-left: 18px; overflow: hidden; font-size: var(--text-small); color: var(--color-foreground); }
 .ais-step-t { position: absolute; inset: 0; opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3802,16 +3803,17 @@ html:root .ai-screen.status .ais > :is(.ais-sec:not(.ais-stack-sec), .ais-empty)
   --glass-blur-native: var(--backdrop-blur-native);
   padding: 12px 12px 8px; border-radius: var(--radius); background: var(--backdrop-tint);
 }
-/* With few items nothing is centred: Recently done (open) takes what's left. */
-.ais > .ais-sec.fill.open { flex: 1 0 auto; }
+/* With few items nothing is centred: every section its content's height, the rest just the backdrop. */
 /* Needs you: the card stack - the top card, the next ones peeking under it (their count), all of the backdrop's glass. */
 .ais-stack { position: relative; display: grid; padding-bottom: calc(var(--peek, 0) * 8px); }
+/* The peeking cards sit under the top one, their lower edges showing 8 / 16 dp below its own, each a little narrower. */
 html:root .ai-screen.status .ais-stack > :is(.ais-card-top, .ais-card-peek) { --glass-blur-native: var(--backdrop-blur-native); grid-area: 1 / 1; border-radius: calc(var(--radius) * 1.2); background: var(--backdrop-tint); }
 /* The stack's heading is its name for a screen reader only: the top card says what it is and how many are left. */
 .ais-stack-sec > .ais-h { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); }
 .ais-card-count { position: absolute; top: 16px; right: 16px; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
 html:root .ai-screen.status .ais-stack > .ais-card-peek { background: linear-gradient(color-mix(in srgb, var(--color-foreground) 10%, transparent), color-mix(in srgb, var(--color-foreground) 10%, transparent)), var(--backdrop-tint); }
-.ais-card-peek { align-self: end; height: 60px; transform: translateY(calc(var(--i) * 8px)) scale(calc(1 - var(--i) * 0.05)); opacity: calc(1 - var(--i) * 0.3); pointer-events: none; }
+/* Each a strip of its own (the cards are translucent: none may sit under the top card's area). */
+html:root .ai-screen.status .ais-stack > .ais-card-peek { align-self: end; height: 8px; margin-inline: calc(var(--i) * 10px); border-radius: 0 0 12px 12px; transform: translateY(calc(100% + (var(--i) - 1) * 8px)); opacity: calc(1 - var(--i) * 0.25); pointer-events: none; }
 .ais-card-top {
   position: relative; z-index: 1; display: flex; flex-direction: column; gap: 6px; min-height: 180px; padding: 16px; touch-action: none; user-select: none;
   color: var(--color-foreground); box-shadow: var(--lift); transition: transform 420ms var(--ais-spring), opacity 220ms ease-out; animation: ais-card-in 420ms var(--ais-spring) both;
@@ -3830,6 +3832,7 @@ html:root .ai-screen.status .ais-stack > .ais-card-peek { background: linear-gra
 .ais-shot img { display: block; max-width: 100%; max-height: 140px; object-fit: cover; }
 .ais-try { align-self: flex-start; min-height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--color-accent); color: var(--color-accent-foreground, var(--color-background)); font: inherit; font-weight: 650; }
 .ais-acts { display: flex; gap: 8px; margin-top: auto; padding-top: 8px; }
+.ais-more { min-height: 40px; padding: 0 4px; border: 0; background: none; font: inherit; font-size: var(--text-small); font-weight: 600; color: var(--color-foreground); }
 .ais-act { flex: 1; min-height: 44px; padding: 0 10px; border: 0; border-radius: 14px; background: color-mix(in srgb, var(--color-foreground) 12%, transparent); font: inherit; font-weight: 600; color: var(--color-foreground); }
 .ais-act.yes { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
 .ais-act.no { background: color-mix(in srgb, var(--aip-amber) 26%, transparent); }

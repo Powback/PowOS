@@ -2370,7 +2370,7 @@ function aiStatusLook(tone) {
   const mono = texts.filter((e) => /mono/i.test(getComputedStyle(e).fontFamily.split(",")[0]));
   const fails = mono.length ? [`monospace text: ${mono.slice(0, 3).map((e) => `"${e.textContent.trim().slice(0, 20)}"`).join(", ")}`] : [];
   const wraps = (e) => e.getBoundingClientRect().height > (parseFloat(getComputedStyle(e).lineHeight) || parseFloat(getComputedStyle(e).fontSize) * 1.4) * 1.5;
-  fails.push(...[...scr.querySelectorAll(".ais-h, .ais-title, .ais-line, .aip-need-title, .ais-work-title, .ais-step-t.in, .ais-done-title")].filter(wraps).map((e) => `"${e.textContent.trim().slice(0, 24)}" wraps`));
+  fails.push(...[...scr.querySelectorAll(".ais-h, .ais-title, .ais-line, .aip-need-title, .ais-step-t.in, .ais-done-title")].filter(wraps).map((e) => `"${e.textContent.trim().slice(0, 24)}" wraps`));
   const off = (bar) => {
     const want = Number(bar.dataset.done) / Number(bar.dataset.total);
     const got = bar.querySelector(".ais-bar-fill").getBoundingClientRect().width / bar.getBoundingClientRect().width;
