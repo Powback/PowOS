@@ -135,7 +135,7 @@ class ShellBridge(
             }
         }
 
-    /** An app the system's window menu floated ([SystemFloat]): a web window, as the switcher's "PowOS desktop window". */
+    /** An app floated not by the user's pick ([SystemFloat]): a web window, as the switcher's "Desktop window". */
     private val systemFloat: (Int) -> Unit = { id -> main.post { toWebWindow(id) } }
 
     /** The page's web-window geometry, "w.f ..." over its native port ([ShellNative], port thread): [WebWindows.frameCommand]. */
@@ -816,6 +816,10 @@ class ShellBridge(
      * possible here (web windows off, no home activity, the task gone, an app the drawer doesn't list).
      */
     fun toWebWindow(id: Int): Boolean {
+        // D1: "Desktop window" picked for a native floating window: it is PowOS's now (its native-float mark gone, and
+        // marked PowOS's own a moment so its zoom mode doesn't read as the user's float again while it moves).
+        dev.omalauncher.system.FreeformTasks.clearNativeFloat(id)
+        dev.omalauncher.system.FreeformTasks.markOwnFloat(id)
         if (WebWindows.toWindowForTask(id)) return true
         // WM1: a web window's own app floated out of it (OnePlus' "Floating window"): that window takes it back.
         if (WebWindows.followTask(id)) return true

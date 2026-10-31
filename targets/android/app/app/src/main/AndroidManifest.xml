@@ -462,6 +462,16 @@
             android:taskAffinity="com.powos.app.appwidgets"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- The same recon from adb (am broadcast): DUMP is held by adb's shell and the system, never by apps. -->
+        <!-- The system's "..." app handle menu (SystemUI, PowOS LSPosed hook): its "Desktop window" item and OnePlus'
+             Floating window picked (shell/SystemFloat, D1). Only SystemUI holds STATUS_BAR_SERVICE. -->
+        <receiver
+            android:name=".shell.CaptionMenuReceiver"
+            android:exported="true"
+            android:permission="android.permission.STATUS_BAR_SERVICE">
+            <intent-filter>
+                <action android:name="com.powos.app.action.CAPTION_MENU" />
+            </intent-filter>
+        </receiver>
         <receiver
             android:name=".widgets.recon.ReconReceiver"
             android:exported="true"

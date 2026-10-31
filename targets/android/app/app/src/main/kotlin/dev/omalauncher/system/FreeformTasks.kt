@@ -574,18 +574,63 @@ object FreeformTasks {
      * WINDOWING_MODE_ZOOM, 100: its "..." menu's "Floating window", OxygenOS 16 SystemUI TransitionUtil) - on the main
      * display, as task id -> its package. Web windows (their own displays) never.
      */
-    fun floatingApps(context: Context): List<Pair<Int, String?>> {
+    fun floatingApps(context: Context): List<Pair<Int, String?>> = floatingModes(context).map { (id, pkg, _) -> id to pkg }
+
+    /** [floatingApps] with each task's windowing mode (freeform 5 or OnePlus' zoom [ZOOM]). */
+    fun floatingModes(context: Context): List<Triple<Int, String?, Int>> {
         HiddenApi.allow()
         @Suppress("DEPRECATION")
         val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
-        return tasks.filter { t ->
-            !dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t) &&
-                runCatching { windowConfiguration(t).let { it.javaClass.getMethod("getWindowingMode").invoke(it) } }.getOrNull().let { it == FREEFORM || it == ZOOM }
-        }.map { it.taskId to (it.baseActivity ?: it.topActivity)?.packageName }
+        return tasks.mapNotNull { t ->
+            if (dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t)) return@mapNotNull null
+            val mode = runCatching { windowConfiguration(t).let { it.javaClass.getMethod("getWindowingMode").invoke(it) as Int } }.getOrNull()
+            if (mode != FREEFORM && mode != ZOOM) null else Triple(t.taskId, (t.baseActivity ?: t.topActivity)?.packageName, mode)
+        }
+    }
+
+    /**
+     * D1 (the user 2026-10-31: "we were supposed to add a desk.window option in addition to like the floating window
+     * thing"): task id -> when the user made it an Android floating window ON PURPOSE (uptime ms) - the "..." menu's or
+     * the switcher's "Floating window", OnePlus' swipe-and-hold Floating window. Such a task stays a native floating
+     * window: shell/SystemFloat never turns it into a web window, a web window never pulls it back (WebWindows.follow).
+     * Dropped once the task floats no more ([retainNativeFloats]).
+     */
+    private val nativeFloats = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
+    /** Task [id] is becoming a native floating window by the user's choice (see [nativeFloats]). */
+    fun markNativeFloat(id: Int) {
+        nativeFloats[id] = android.os.SystemClock.uptimeMillis()
+    }
+
+    /**
+     * Whether task [id], floating in windowing [mode] now, is a native floating window the user picked: marked
+     * ([markNativeFloat]), or in OnePlus' zoom mode (100) without PowOS doing it - only OnePlus' own UI makes that
+     * mode (its "..." menu's Floating window, its swipe-and-hold Floating window panel), an app can't ask for it. Such
+     * a zoom task is marked here, so it stays native when it later turns freeform (resized).
+     */
+    fun isNativeFloat(
+        id: Int,
+        mode: Int,
+    ): Boolean {
+        if (nativeFloats.containsKey(id)) return true
+        if (mode != ZOOM || isOwnFloat(id)) return false
+        markNativeFloat(id)
+        return true
+    }
+
+    /** Task [id] is no native floating window of the user's any more ("Desktop window" picked for it). */
+    fun clearNativeFloat(id: Int) {
+        nativeFloats.remove(id)
+    }
+
+    /** Marks of tasks no longer in [floating] dropped (a fresh mark kept [OWN_FLOAT_MS]: the task may not float yet). */
+    fun retainNativeFloats(floating: Set<Int>) {
+        val now = android.os.SystemClock.uptimeMillis()
+        nativeFloats.entries.removeIf { (id, at) -> id !in floating && now - at > OWN_FLOAT_MS }
     }
 
     /** OnePlus' WINDOWING_MODE_ZOOM: its own floating ("zoom") window. */
-    private const val ZOOM = 100
+    const val ZOOM = 100
 
     /** Task id -> when PowOS itself last made it float (uptime ms): shell/SystemFloat leaves those alone. */
     private val ownFloats = java.util.concurrent.ConcurrentHashMap<Int, Long>()

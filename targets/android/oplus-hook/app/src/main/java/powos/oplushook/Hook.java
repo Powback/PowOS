@@ -24,9 +24,14 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class Hook implements IXposedHookLoadPackage {
     private static final String TAG = "PowOS-oplushook";
     private static final String LAUNCHER = "com.android.launcher";
+    private static final String SYSTEMUI = "com.android.systemui";
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
+        if (SYSTEMUI.equals(lp.packageName)) {
+            desktopWindowItem(lp.classLoader);
+            return;
+        }
         if (!LAUNCHER.equals(lp.packageName))
             return;
         swipeToHome(lp.classLoader);
@@ -343,6 +348,136 @@ public class Hook implements IXposedHookLoadPackage {
         panels.put(a, panel);
         XposedBridge.log(TAG + ": trigger panel " + panel.getClass().getSimpleName() + " in " + a.getClass().getSimpleName());
         return panel;
+    }
+
+    /** The "..." menu's PowOS item: right after OnePlus' Floating window (list position 1). */
+    private static final int DESKTOP_AT = 2;
+    private static final String POWOS = "com.powos.app";
+    private static final String CAPTION_MENU = "com.powos.app.action.CAPTION_MENU";
+    /** Menu -> the "Desktop window" item it holds now. */
+    private static final Map<Object, Object> desktopItems = new WeakHashMap<>();
+    /** Menu -> the item taken out of its list for the length of one click (OnePlus' handler counts positions). */
+    private static final Map<Object, Object> lifted = new WeakHashMap<>();
+
+    /**
+     * SystemUI: the "..." app handle menu on a full-screen app (OnePlus' FullscreenCaptionHandleMenu, OxygenOS 16) gets a
+     * "Desktop window" item next to OnePlus' own "Floating window" (D1, the user 2026-10-31: "we were supposed to add a
+     * desk.window option in addition to like the floating window thing"). Its items are built in code
+     * (initPopupListWindow: Split View, Floating window, Close, [inner split]) - no resource can add one - and its click
+     * handler (lambda$initPopupListWindow$3) dispatches by position, so: after initPopupListWindow our item goes in at
+     * [DESKTOP_AT] and the list is handed to the popup again; a click on it tells PowOS (an explicit broadcast, which
+     * PowOS takes only from a STATUS_BAR_SERVICE holder) and closes the menu; a click below it is passed on with our item
+     * out of the list for that call, so OnePlus' positions hold. A click on Floating window also tells PowOS, so that
+     * task stays a native floating window. Guarded: a SystemUI update that renames any of this leaves OnePlus' menu as is.
+     */
+    private static void desktopWindowItem(ClassLoader cl) {
+        try {
+            Class<?> menu = XposedHelpers.findClass("com.android.wm.shell.fullscreen.FullscreenCaptionHandleMenu", cl);
+            Class<?> builder = XposedHelpers.findClass("com.coui.appcompat.poplist.PopupListItem$Builder", cl);
+            XposedHelpers.findAndHookMethod(menu, "initPopupListWindow", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    try {
+                        Object self = param.thisObject;
+                        @SuppressWarnings("unchecked")
+                        java.util.List<Object> items = (java.util.List<Object>) XposedHelpers.getObjectField(self, "mPopupListItems");
+                        Object window = XposedHelpers.getObjectField(self, "mPopupWindow");
+                        if (items == null || window == null || items.size() < DESKTOP_AT)
+                            return;
+                        android.content.Context ctx = (android.content.Context) XposedHelpers.getObjectField(self, "mContext");
+                        Object b = XposedHelpers.newInstance(builder);
+                        XposedHelpers.callMethod(b, "reset");
+                        int icon = ctx.getResources().getIdentifier("desktop_mode_ic_handle_menu_desktop", "drawable", ctx.getPackageName());
+                        if (icon == 0)
+                            icon = ctx.getResources().getIdentifier("fullscreen_caption_handle_menu_icon_freeform", "drawable", ctx.getPackageName());
+                        if (icon != 0)
+                            XposedHelpers.callMethod(b, "setIcon", ctx.getDrawable(icon));
+                        XposedHelpers.callMethod(b, "setTitle", "Desktop window");
+                        XposedHelpers.callMethod(b, "setIsEnable", true);
+                        XposedHelpers.callMethod(b, "setGroupId", XposedHelpers.getIntField(items.get(0), "mGroupId"));
+                        Object item = XposedHelpers.callMethod(b, "build");
+                        items.add(DESKTOP_AT, item);
+                        synchronized (desktopItems) {
+                            desktopItems.put(self, item);
+                        }
+                        XposedHelpers.callMethod(window, "setItemList", items);
+                    } catch (Throwable t) {
+                        log("desktopWindowItem add", t);
+                    }
+                }
+            });
+            XposedBridge.hookAllMethods(menu, "lambda$initPopupListWindow$3", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    try {
+                        if (param.args.length < 3 || !(param.args[2] instanceof Integer))
+                            return;
+                        Object self = param.thisObject;
+                        Object item;
+                        synchronized (desktopItems) {
+                            item = desktopItems.get(self);
+                        }
+                        if (item == null)
+                            return;
+                        @SuppressWarnings("unchecked")
+                        java.util.List<Object> items = (java.util.List<Object>) XposedHelpers.getObjectField(self, "mPopupListItems");
+                        int at = items.indexOf(item);
+                        int pos = (Integer) param.args[2];
+                        int task = XposedHelpers.getIntField(self, "mTaskId");
+                        if (at < 0)
+                            return;
+                        if (pos == at) {
+                            tell(self, task, "desktop");
+                            XposedHelpers.callMethod(self, "close");
+                            param.setResult(null);
+                            return;
+                        }
+                        if (pos == 1)
+                            tell(self, task, "float");
+                        if (pos > at) {
+                            items.remove(at);
+                            synchronized (lifted) {
+                                lifted.put(self, item);
+                            }
+                            param.args[2] = pos - 1;
+                        }
+                    } catch (Throwable t) {
+                        log("desktopWindowItem click", t);
+                    }
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Object item;
+                    synchronized (lifted) {
+                        item = lifted.remove(param.thisObject);
+                    }
+                    if (item == null)
+                        return;
+                    try {
+                        @SuppressWarnings("unchecked")
+                        java.util.List<Object> items = (java.util.List<Object>) XposedHelpers.getObjectField(param.thisObject, "mPopupListItems");
+                        items.add(Math.min(DESKTOP_AT, items.size()), item);
+                    } catch (Throwable t) {
+                        log("desktopWindowItem restore", t);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            log("desktopWindowItem", t);
+        }
+    }
+
+    /** PowOS told: the "..." menu's [item] picked for [task] (an explicit broadcast to the PowOS app, current user). */
+    private static void tell(Object menu, int task, String item) {
+        try {
+            android.content.Context ctx = (android.content.Context) XposedHelpers.getObjectField(menu, "mContext");
+            android.content.Intent i = new android.content.Intent(CAPTION_MENU).setPackage(POWOS).putExtra("task", task).putExtra("item", item);
+            Object current = XposedHelpers.getStaticObjectField(android.os.UserHandle.class, "CURRENT");
+            XposedHelpers.callMethod(ctx, "sendBroadcastAsUser", i, current);
+        } catch (Throwable t) {
+            log("desktopWindowItem tell", t);
+        }
     }
 
     private static void log(String what, Throwable t) {

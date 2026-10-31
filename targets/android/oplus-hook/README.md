@@ -51,6 +51,14 @@ floating window over PowOS's home (no RecentsActivity left behind), and Split Vi
    and the app stays (endTarget LAST_TASK). Earlier wrong lead, for the record: the consumer
    `TYPE_OTHER_ACTIVITY:TYPE_TASKBAR_STASH:TYPE_CURSOR_HOVER` is fine, that's the unstash consumer wrapping it.
 
+6. **"Desktop window" in SystemUI's "..." app handle menu** (scope `com.android.systemui`). OnePlus's
+   `FullscreenCaptionHandleMenu` builds its items in code (Split View, Floating window, Close, inner split) and its
+   click handler dispatches by position, so no overlay can add an item. Hook: after `initPopupListWindow` a "Desktop
+   window" item goes in after Floating window; clicking it sends `com.powos.app.action.CAPTION_MENU` (task, item) to
+   the PowOS app (its receiver requires `STATUS_BAR_SERVICE`, SystemUI's), which makes the task a PowOS web window
+   (`ShellBridge.toWebWindow`); a click below it is passed on with the item lifted out so OnePlus's positions hold.
+   Floating window also tells PowOS, so that task stays a native floating window.
+
 Build: `targets/android/build-oplus-hook.sh` (android-app-dev). Install: Zygisk on in Magisk, the Vector (LSPosed
-fork, JingMatrix) Magisk module, this APK, then enable it in Vector with scope `com.android.launcher` and restart the
-launcher (or reboot). Remove: disable the module in Vector.
+fork, JingMatrix) Magisk module, this APK, then enable it in Vector with scopes `com.android.launcher` and `com.android.systemui` and restart the
+launcher and SystemUI (or reboot). Remove: disable the module in Vector.
