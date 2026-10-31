@@ -734,16 +734,20 @@ class WebWindows(
             WebWindowLaunch.refused(component.packageName)
             return -1
         }
-        existingFor(component, task)?.let { return it }
+        val pkg = component.packageName
+        val how = launchDecision(component, task)
+        if (how is LaunchReuse.Decision.Reuse) return how.window
+        val adopt = (how as? LaunchReuse.Decision.Adopt)?.task ?: -1
         val parent = root() ?: return -1
         val id = nextId++
+        WindowLog.i(TAG, "launch $pkg: new window $id (running task moved in: $adopt; -1: launched)")
         val d = density()
         val w = (rect.optDouble("width") * d).toInt().coerceAtLeast(1)
         val h = (rect.optDouble("height") * d).toInt().coerceAtLeast(1)
         // Hidden until the page's first "w.f" places it.
         val container = SurfaceControl.Builder().setName("powos-ww-$id").setParent(parent).setHidden(true).build()
         val win = Win(id, component, container, w, h)
-        win.adopt = task
+        win.adopt = adopt
         wins[id] = win
         helper.create(id, w, h) { displayId, error ->
             if (displayId < 0) {
@@ -780,6 +784,38 @@ class WebWindows(
         WindowLog.i(TAG, "open $pkg task $task: window ${w.id} (display ${w.displayId}) has the app already: raised, no second display")
         emit("webwindows.show", w.id)
         return w.id
+    }
+
+    /**
+     * [open]'s rule: [component]'s window to raise (Reuse, "webwindows.show" sent), its task to move into a new window
+     * (Adopt: [task], or a fresh launch's app already running anywhere), or New. A fresh launch ([task] < 0): the app's
+     * window (one still launching too) or its running task anywhere is THAT one - never a second display (10-31
+     * "opening two instances of the app": a fresh display launched with NEW_TASK while the task lived on display 0
+     * stayed empty). [LaunchReuse] is the rule.
+     */
+    private fun launchDecision(
+        component: ComponentName,
+        task: Int,
+    ): LaunchReuse.Decision {
+        if (task >= 0) return existingFor(component, task)?.let { LaunchReuse.Decision.Reuse(it, task) } ?: LaunchReuse.Decision.Adopt(task)
+        val pkg = component.packageName
+        val d = LaunchReuse.decide(pkg, liveWindows(), if (pkg == context.packageName) emptyList() else runningTasks())
+        if (d is LaunchReuse.Decision.Reuse) {
+            WindowLog.i(TAG, "launch $pkg: reused window ${d.window} (task ${d.task})")
+            emit("webwindows.show", d.window)
+        }
+        return d
+    }
+
+    /** [LaunchReuse]'s windows: every live Android window (main thread). */
+    private fun liveWindows(): List<LaunchReuse.Window> =
+        wins.values.filter { it.linux == null && !it.closed }.map { LaunchReuse.Window(it.id, it.component.packageName, it.taskId, it.displayId) }
+
+    /** [LaunchReuse]'s running tasks with their displays (empty: not readable - a new window then, as before). */
+    private fun runningTasks(): List<LaunchReuse.Task> {
+        @Suppress("DEPRECATION")
+        val tasks = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
+        return tasks.map { LaunchReuse.Task(it.taskId, it.baseActivity?.packageName, it.topActivity?.packageName, WebWindowDisplays.displayOf(it)) }
     }
 
     /**

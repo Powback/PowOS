@@ -202,7 +202,31 @@ function cameHere(id: number, page: number): number {
   return id;
 }
 
+/**
+ * Opens in flight by app key (the user, 10-31: "Sometimes it shows it as empty if it's opening two instances of the
+ * app"): a second tap while the first open waits for the host gets THAT open's window, never a second bridge call.
+ */
+const opening = new Map<string, Promise<number | null>>();
+
+/** How long an Android window may stand with no task bound (never "live") before it goes: never left empty. */
+export const BOUND = { ms: 3000 };
+
 export async function openWindow(key: string, label: string, page: number): Promise<number | null> {
+  const inFlight = opening.get(key);
+  if (inFlight) {
+    const id = await inFlight;
+    return id == null || !webWins.value.some((v) => v.id === id) ? id : cameHere(id, page);
+  }
+  const p = openFresh(key, label, page);
+  opening.set(key, p);
+  try {
+    return await p;
+  } finally {
+    opening.delete(key);
+  }
+}
+
+async function openFresh(key: string, label: string, page: number): Promise<number | null> {
   if (!wideHome.value || !key.startsWith("a:") || !(await enabled())) return null;
   const had = existingWindow(key, page);
   if (had != null) return had;
@@ -210,13 +234,24 @@ export async function openWindow(key: string, label: string, page: number): Prom
   // Its first rect is a guess; the element reports its real one on its first frame.
   const id = await powos.webwindows!.open(key, { left: x, top: y + TITLE, width: w, height: h - TITLE }).catch(() => -1);
   if (id < 0) return null;
-  // The host's window for this app already (a second tap while the first open was in flight, a model the host knows
-  // better): that one comes here, never a second entry or display.
+  // The host's window for this app already (its task on another display or page, minimised, split): that one comes
+  // here, never a second entry or display.
   if (webWins.value.some((v) => v.id === id)) return cameHere(id, page);
   hostGave(id);
   webWins.value = [...webWins.value, { id, key, label, page, x, y, w, h }];
   fillEmptyTile(page, id);
+  watchBound(id, key);
   return id;
+}
+
+/** Window [id] with no task bound (never live) [BOUND] after its launch: removed, logged - never an empty frame. */
+function watchBound(id: number, key: string) {
+  setTimeout(() => {
+    const w = webWins.value.find((v) => v.id === id);
+    if (!w || w.live || w.task != null || w.full) return;
+    console.warn(`webwindows: window ${id} (${key}) has no task ${BOUND.ms} ms after its launch: removed, not left empty`);
+    close(id);
+  }, BOUND.ms);
 }
 
 /** Where an adopted window goes: its [body] (viewport CSS px) plus its [bar], else a default size centred in the work

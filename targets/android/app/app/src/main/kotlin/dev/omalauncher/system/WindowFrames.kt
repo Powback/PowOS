@@ -532,13 +532,27 @@ class WindowFrames(
             fullBefore[id] = lastBounds[id] ?: Rect()
             Log.i(TAG, "task $id ($pkg) went full screen by itself (was ${lastBounds[id]?.toShortString()})")
         }
-        val stray = full.filter { (id, pkg) -> pkg != null && pkg != context.packageName && strayFull(id) }
+        val stray = full.filter { (id, pkg) -> pkg != null && pkg != context.packageName && strayFull(id) && !launchedFull(id, pkg) }
         // Web windows on: the stray becomes a web window (ShellBridge.toWebWindow, its task moved onto a new display),
         // never an Android freeform window under the old frame.
         stray.forEach { (id, pkg) -> floatStray(id, pkg) }
         if (stray.isEmpty()) return false
         main.removeCallbacks(refreshNow)
         main.postDelayed(refreshNow, SETTLE_MS)
+        return true
+    }
+
+    /**
+     * Task [id] is a full-screen launch's (a dock tap: FullScreenLaunch): left full screen, never floated into a window
+     * afterwards (10-31 15:16 "they show immediately in full screen and then they show desktop mode").
+     */
+    private fun launchedFull(
+        id: Int,
+        pkg: String,
+    ): Boolean {
+        if (!FullScreenLaunch.claim(pkg, android.os.SystemClock.uptimeMillis())) return false
+        adopted.add(id)
+        Log.i(TAG, "task $id ($pkg) was launched full screen (dock tap): left full screen, not floated")
         return true
     }
 
