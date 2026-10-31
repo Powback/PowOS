@@ -1428,14 +1428,93 @@ function divided(m: { key: string; ratio: number; drop?: number[] }) {
   setTiling(page, which === "x" || which === "rx" ? { ...t, rx: m.ratio } : { ...t, ry: m.ratio });
 }
 
+// ---- WX1: swapping sides (the user, 10-31 15:47-15:52: "a swap icon ... so that I can like swap side", "If I click the
+// separator here, it should swap the windows") - a tap on a divider, or the ⇄ hint on a snapped window's inner edge.
+
+/** A split of one window against two flips its layout (one big left | two right <-> two left | one big right). */
+const MIRROR: Partial<Record<Layout, Layout>> = { "3": "3r", "3r": "3", "3t": "3b", "3b": "3t" };
+type Sides = Pick<Divider, "ratio" | "before" | "after">;
+
+/**
+ * [t] with divider [d]'s two sides traded: as many windows each side, pairwise in slot order; one against two, the
+ * layout mirrored. Each side keeps its size (the ratio flips), so every window keeps its own tile's size and state.
+ */
+export function swappedTiling(t: Tiling, d: Sides): Tiling {
+  const slot = (ids: number[]) => ids.map((id) => t.ids.indexOf(id));
+  const [a, b] = [slot(d.before), slot(d.after)];
+  const flip = { ...t, [d.ratio]: 1 - t[d.ratio] };
+  if (a.length === b.length) {
+    const ids = [...t.ids];
+    a.forEach((s, i) => ([ids[s], ids[b[i]]] = [t.ids[b[i]], t.ids[s]]));
+    return { ...flip, ids };
+  }
+  const ids = [...b, ...a].map((s) => t.ids[s]);
+  return { ...flip, layout: MIRROR[t.layout] ?? t.layout, ids };
+}
+
+/** Divider [d] of [page]'s tiling tapped: its sides swap, gliding there ([reflow]); the host gets the frames as usual. */
+export function swapAt(page: number, d: Sides) {
+  const t = tilings.value[page];
+  if (!t) return;
+  const next = swappedTiling(t, d);
+  reflow(page);
+  setTiling(page, next);
+  holdAppSizes(next.ids);
+  console.info(`[tiles] page ${page}: divider ${d.ratio} tapped, swapped -> ${next.layout} [${next.ids.join(",")}]`);
+}
+
+type Edge4 = "e" | "w" | "s" | "n";
+const halfEdge = (layout: "2h" | "2v", i: number): Edge4 => (layout === "2h" ? (i === 0 ? "e" : "w") : i === 0 ? "s" : "n");
+
+/** Which inner edge of window [w] the ⇄ hint sits on ("e": a left half's right edge...), or null: not a snapped half. */
+export function swapEdge(w: WebWin): Edge4 | null {
+  const page = tiledOn(w.id);
+  const t = page != null ? tilings.value[page] : null;
+  if (t) return t.layout === "2h" || t.layout === "2v" ? halfEdge(t.layout, t.ids.indexOf(w.id)) : null;
+  const half = aloneHalf(w);
+  return half ? halfEdge(half.layout, half.i) : null;
+}
+
+/** A lone window snapped to a half (SC1: no tiling of one): which, by its frame on the half's rect. */
+function aloneHalf(w: WebWin): { layout: "2h" | "2v"; i: number } | null {
+  if (w.restore || w.minimised || w.full || (w.scale ?? 1) !== 1) return null;
+  const o = pageOrigin();
+  const a = tileArea();
+  const on = (r: Box) => [r.x - o.x - w.x, r.y - o.y - w.y, r.w - w.w, r.h - w.h].every((v) => Math.abs(v) <= 2);
+  for (const layout of ["2h", "2v"] as const) {
+    const i = tileRects({ layout, ids: [], rx: 0.5, ry: 0.5 }, a).findIndex(on);
+    if (i >= 0) return { layout, i };
+  }
+  return null;
+}
+
+/** The ⇄ hint tapped on window [id]: its split's two sides swap; a lone snapped half moves to the empty other half. */
+export function swapWindow(id: number) {
+  const page = tiledOn(id);
+  const t = page != null ? tilings.value[page] : null;
+  if (page != null && t) return swapAt(page, { ratio: t.layout === "2v" ? "ry" : "rx", before: [t.ids[0]!], after: [t.ids[1]!] });
+  const w = webWins.value.find((v) => v.id === id);
+  const half = w && aloneHalf(w);
+  if (!w || !half) return;
+  reflow(w.page);
+  snapAlone(id, half.layout, 1 - half.i);
+  console.info(`[tiles] window ${id} swapped to the other ${half.layout} half`);
+}
+
+/** WX1: a press let go within [TAP_PX] of where it went down and inside [TAP_MS] is a tap (a swap), not a drag. */
+const TAP_PX = 6;
+const TAP_MS = 300;
+const isTap = (p: { x: number; y: number; at: number }, e: PointerEvent) => Math.hypot(e.clientX - p.x, e.clientY - p.y) < TAP_PX && e.timeStamp - p.at < TAP_MS;
+
 /**
  * A divider between tiles: a DOM handle in its page (it moves with a page swipe, home's swipes leave it alone). Its drag
  * follows the finger; let go, the split snaps to a third, a half or two thirds - or, within [DROP_SHARE] of an edge,
- * the squeezed side's windows go to the dock (see "webwindows.divider" above, the same rules).
+ * the squeezed side's windows go to the dock (see "webwindows.divider" above, the same rules). A tap swaps its sides.
  */
 function DividerEl({ page, d, o }: { page: number; d: Divider; o: { x: number; y: number } }) {
   const [shift, setShift] = useState(0);
   const start = useRef<number | null>(null);
+  const press = useRef({ x: 0, y: 0, at: 0 });
   const vertical = d.axis === "x";
   const style = {
     position: "absolute",
@@ -1450,6 +1529,11 @@ function DividerEl({ page, d, o }: { page: number; d: Divider; o: { x: number; y
   const end = (e: PointerEvent, cancelled: boolean) => {
     if (start.current == null) return;
     e.stopPropagation();
+    if (!cancelled && isTap(press.current, e)) {
+      start.current = null;
+      setShift(0);
+      return swapAt(page, d);
+    }
     const span = d.hi - d.lo;
     const p = d.pos + at(e) - start.current - d.lo;
     const r = p / span;
@@ -1473,6 +1557,7 @@ function DividerEl({ page, d, o }: { page: number; d: Divider; o: { x: number; y
         e.stopPropagation();
         capture(e);
         start.current = at(e);
+        press.current = { x: e.clientX, y: e.clientY, at: e.timeStamp };
       }}
       onPointerMove={(e) => {
         if (start.current == null) return;
@@ -2387,6 +2472,32 @@ function Grip({ corner }: { corner: (typeof CORNERS)[number] }) {
 }
 
 /**
+ * WX1: the ⇄ hint on a snapped half's inner edge, beside the divider's pill (centre-right of a left half...): round
+ * glass, shown and faded with the grips (RZ6: [flashGrips]), its hit area only its circle and nothing while faded.
+ * A tap swaps the two sides ([swapWindow]); its grips flash again so it stays to swap back.
+ */
+function SwapHint({ win }: { win: WebWin }) {
+  const edge = swapEdge(win);
+  if (!edge) return null;
+  return (
+    <button
+      class={`ww-swap tile ww-swap-${edge}`}
+      aria-label="Swap sides"
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => {
+        e.stopPropagation();
+        swapWindow(win.id);
+        flashGrips(win.id);
+      }}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d={edge === "e" || edge === "w" ? "M4 8h15l-4-4M20 16H5l4 4" : "M8 20V5L4 9M16 4v15l4-4"} />
+      </svg>
+    </button>
+  );
+}
+
+/**
  * A free window's 8 resize zones and 4 grips: only its id, so a frame of its own move or resize (the window re-renders)
  * leaves them, and their arrays' Fragments, alone (render scan 10-31: all 8 Edges, 4 Grips every frame).
  */
@@ -2609,6 +2720,7 @@ function WebWindowEl({ win, z, above }: { win: WebWin; z: number; above: WebWin[
         {(!win.ownFrame || orphaned(win.id)) && <TitleBar win={win} />}
         <Body win={win} body={body} />
         {free && <Handles id={win.id} zones={zoneKey(win)} />}
+        <SwapHint win={win} />
         {sizing && <ResizeOutline win={win} />}
         {tileMenu.value === win.id && <TileMenu win={win} />}
       </div>

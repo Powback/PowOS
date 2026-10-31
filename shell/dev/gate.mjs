@@ -4529,6 +4529,123 @@ async function webWindowTileLayoutCheck() {
 }
 
 /**
+ * In the page: WX1, swapping sides (the user, 10-31 15:47-15:52: "a swap icon ... so that I can like swap side", "If I
+ * click the separator here, it should swap the windows"). Two tiles left | right: a tap on the divider swaps their rects,
+ * a drag on it resizes (no swap), the ⇄ hint's tap swaps back; its hit area is its circle only. Top / bottom: a tap
+ * swaps top and bottom. One window snapped left, nothing right: ⇄ moves it right. Steps: [swapScene].
+ */
+async function SWAP_HELPERS() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  S.page.value = 0;
+  await window.__gw.settled();
+  const page = S.pages.value[0];
+  const ev = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 87, isPrimary: true, clientX: x, clientY: y }));
+  const rest = async () => (await new Promise((r) => setTimeout(r, 300)), await window.__gw.settled());
+  window.__wx = {
+    W,
+    page,
+    rest,
+    win: (id, i) => ({ id, key: `a:gate.swap${i}`, label: `Swap ${i}`, page, x: 60 + 50 * i, y: 140 + 40 * i, w: 300, h: 240, live: true }),
+    rect: (id) => { const w = W.webWins.value.find((v) => v.id === id); return w && `${w.x},${w.y} ${w.w}x${w.h}`; },
+    /** A press on [el]'s centre, moved by [dx], [dy] before it lets go (0, 0: a tap). */
+    async press(el, dx = 0, dy = 0) {
+      const b = el.getBoundingClientRect();
+      const [x, y] = [b.left + b.width / 2, b.top + b.height / 2];
+      ev(el, "pointerdown", x, y);
+      for (let k = 1; k <= 6 && (dx || dy); k++) ev(el, "pointermove", x + (dx * k) / 6, y + (dy * k) / 6);
+      ev(el, "pointerup", x + dx, y + dy);
+      await rest();
+    },
+    async hint(id) {
+      W.flashGrips(id);
+      await window.__gw.frames(2);
+      return document.querySelector(`.webwindow[data-wwid="${id}"] .ww-swap`);
+    },
+    async pair() {
+      W.webWins.value = [window.__wx.win(951, 0), window.__wx.win(952, 1)];
+      W.tilings.value = {};
+      W.tileWindows(page, [951, 952]);
+      await rest();
+      return [window.__wx.rect(951), window.__wx.rect(952)];
+    },
+    done: () => ((W.webWins.value = []), (W.tilings.value = {})),
+  };
+  return [];
+}
+
+async function swapDividerTap() {
+  const { W, page, rect, press, pair } = window.__wx;
+  const [a0, b0] = await pair();
+  const div = () => document.querySelector(".ww-divider");
+  if (!div()) return ["WX1: two tiles, no divider"];
+  await press(div());
+  const fails = rect(951) === b0 && rect(952) === a0 ? [] : [`WX1: a tap on the divider didn't swap the rects (${rect(951)} | ${rect(952)}, want ${b0} | ${a0})`];
+  const ids = JSON.stringify(W.tilings.value[page]?.ids);
+  await press(div(), -80, 0);
+  if (JSON.stringify(W.tilings.value[page]?.ids) !== ids) fails.push("WX1: a drag on the divider swapped the windows");
+  if (Math.abs((W.tilings.value[page]?.rx ?? 0.5) - 0.5) < 0.03) fails.push("WX1: a drag on the divider didn't resize");
+  return fails;
+}
+
+async function swapHintTap() {
+  const { rect, press, pair, hint } = window.__wx;
+  const [a1, b1] = await pair();
+  const h = await hint(951);
+  if (!h) return ["WX1: a left tile has no ⇄ hint"];
+  const b = h.getBoundingClientRect();
+  const cy = b.top + b.height / 2;
+  const hits = (x, y) => document.elementFromPoint(x, y)?.closest(".ww-swap");
+  const fails = [b.left - 30, b.right + 30].filter((x) => hits(x, cy)).map((x) => `WX1: elementFromPoint 30 px outside the ⇄ hint (${x | 0},${cy | 0}) is the hint`);
+  if (hits(b.left + 2, b.top + 2)) fails.push("WX1: the ⇄ hint's box corner (outside its circle) takes a press");
+  await press(h);
+  if (rect(951) !== b1 || rect(952) !== a1) fails.push(`WX1: a tap on the ⇄ hint didn't swap the rects (${rect(951)} | ${rect(952)})`);
+  return fails;
+}
+
+async function swapVertical() {
+  const { W, page, rect, press, rest } = window.__wx;
+  W.tile(951, "top");
+  W.tile(952, "bottom");
+  await rest();
+  const t = W.tilings.value[page];
+  if (t?.layout !== "2v") return [`WX1: top + bottom snaps gave ${JSON.stringify(t)}, not a 2v split`];
+  const [top, bottom] = [rect(t.ids[0]), rect(t.ids[1])];
+  const dv = document.querySelector('.ww-divider[data-axis="y"]');
+  if (!dv) return ["WX1: a top / bottom split has no flat divider"];
+  await press(dv);
+  return rect(t.ids[0]) === bottom && rect(t.ids[1]) === top ? [] : ["WX1: a tap on the top / bottom divider didn't swap top and bottom"];
+}
+
+async function swapAloneHalf() {
+  const { W, press, rest, hint, win } = window.__wx;
+  W.webWins.value = [win(953, 0)];
+  W.tilings.value = {};
+  W.tile(953, "left");
+  await rest();
+  const w0 = W.webWins.value[0];
+  const h = await hint(953);
+  if (!h) return ["WX1: a window snapped left alone has no ⇄ hint"];
+  await press(h);
+  const w = W.webWins.value[0];
+  const right = w.x > w0.x + w0.w / 2 && w.w === w0.w && w.y === w0.y;
+  return right ? [] : [`WX1: ⇄ on a lone left half moved it to ${w.x},${w.y} ${w.w}x${w.h}, not the right half`];
+}
+
+/** WX1's steps in one page, the windows cleared after. */
+async function swapScene(r) {
+  try {
+    for (const step of [SWAP_HELPERS, swapDividerTap, swapHintTap, swapVertical, swapAloneHalf]) {
+      const fails = await r.page.evaluate(step);
+      if (fails.length) return fails;
+    }
+    return [];
+  } finally {
+    await r.page.evaluate(() => window.__wx?.done()).catch(() => {});
+  }
+}
+
+/**
  * In the page: GL1, docking into the tiles (the user, 10-31 01:28: "drag them into a grid again. Like check out how
  * golden layout work"). Two tiles and a floating window: its bar dragged over the left tile's right edge shows the
  * preview there (and ticks); let go, three tiles with it where previewed; its bar dragged out again, two tiles.
@@ -5798,6 +5915,9 @@ try {
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
       }),
     );
+  // WX1: a tap on a divider / the ⇄ hint swaps the sides (ww-swap-unfolded; the user, 10-31 15:47-15:52).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-swap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => swapScene(r))));
   // WT-IDLE: the web windows' rAF tick does nothing while no window moves (ww-idle-tick).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-idle-tick", { width: 900, height: 1000 }).then((r) => whenReady(r, async () => {

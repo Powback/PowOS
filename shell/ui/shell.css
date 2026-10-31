@@ -3324,6 +3324,17 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .webwindow.ww-grips .ww-grip-se, .webwindow.ww-grips .ww-grip-sw { opacity: 0.7; }
 .webwindow.ww-grips .ww-grip-ne, .webwindow.ww-grips .ww-grip-nw { opacity: 0.25; }
 .webwindow.ww-resizing .ww-grip { opacity: 0.9; }
+/* WX1: the ⇄ swap hint (webwindows.tsx SwapHint) - round glass in the middle of a snapped half's inner edge, just in from
+   it beside the divider's pill; it shows and fades with the grips (RZ6), and only its circle takes a press, only shown. */
+.ww-swap {
+  all: unset; position: absolute; z-index: 3; width: calc(40px / var(--ww-k, 1)); height: calc(40px / var(--ww-k, 1));
+  display: grid; place-items: center; border-radius: 50%; clip-path: circle(50%); color: var(--color-foreground);
+  opacity: 0; pointer-events: none; transition: opacity 180ms ease-out; touch-action: none;
+}
+.ww-swap svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ww-swap-e { right: 10px; top: 50%; transform: translateY(-50%); } .ww-swap-w { left: 10px; top: 50%; transform: translateY(-50%); }
+.ww-swap-s { bottom: 10px; left: 50%; transform: translateX(-50%); } .ww-swap-n { top: 46px; left: 50%; transform: translateX(-50%); }
+.webwindow.ww-grips .ww-swap { transition-duration: 120ms; opacity: 0.9; pointer-events: auto; }
 /* RZ4: the live size outline while a window is resized: a ring in the theme's foreground, the accent on a tile size. */
 .ww-outline {
   position: absolute; inset: -3px; border-radius: 15px; pointer-events: none; display: grid; place-items: center;
