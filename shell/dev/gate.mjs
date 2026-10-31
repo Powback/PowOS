@@ -3265,6 +3265,67 @@ async function webWindowReloadCheck() {
  * rAF held (a WebView that paused it while hidden), a visibilitychange to hidden and back sends the windows' geometry
  * within 500 ms, and so does the host's "webwindows.resend" alone - neither waits for a frame.
  */
+/**
+ * WT-IDLE (perf-1793458433606: tick 61-83 ms of script with nothing moving): with 3 windows open and still, the rAF
+ * tick is a flag check - p95 < 1 ms over 120 frames, no "w.f" sent, no AppCell/Tile render in 60 frames - and a
+ * "webwindows.resend" still forces exactly one "w.f" (the RenderWatch probe expects a frame though nothing changed).
+ */
+async function webWindowIdleTick() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const fails = [];
+  const page = S.pages.value[0];
+  S.page.value = 0;
+  W.webWins.value = [971, 972, 973].map((id, i) => ({ id, key: `a:gate.idle${i}`, label: `Idle ${i}`, page, x: 40 + i * 60, y: 140 + i * 40, w: 260, h: 200, live: true }));
+  try {
+    await window.__gw.settled();
+    await sleep(800); // open transitions over
+    await window.__gw.frames(10);
+    const sentAt = window.__ww.sent.length, last = window.__ww.sent.at(-1);
+    window.__powosRenders.start();
+    window.__powosRenders.reset();
+    await window.__gw.frames(60);
+    const rows = window.__powosRenders.top(500).byCount.filter((r) => r.name === "AppCell" || r.name === "Tile");
+    const cells = rows.reduce((n, r) => n + r.renders, 0);
+    window.__powosRenders.stop();
+    if (cells) fails.push(`WT-IDLE: ${cells} AppCell/Tile renders in 60 idle frames with windows (${rows.map((r) => r.name + " " + r.renders).join(", ")})`);
+    await window.__gw.frames(60);
+    const ms = window.__ww.tickMs.slice(-120).sort((a, b) => a - b);
+    const p95 = ms[Math.floor(ms.length * 0.95)] ?? Infinity;
+    // The old tick's cost for reference: a full measure (what it did every frame before WT-IDLE).
+    const full = [];
+    for (let i = 0; i < 120; i++) {
+      const t = performance.now();
+      window.__ww.geometry();
+      full.push(performance.now() - t);
+      await window.__gw.frames(1);
+    }
+    full.sort((a, b) => a - b);
+    window.__wwIdle = `p95 ${p95.toFixed(3)} ms idle; a full measure p95 ${full[114].toFixed(3)} ms`;
+    console.warn(`[gate] ww-idle-tick p95 ${p95.toFixed(3)} ms over ${ms.length} frames (a full measure: p95 ${full[114].toFixed(3)} ms); dirtied by ${window.__ww.dirtyBy}`);
+    if (ms.length < 100) fails.push(`WT-IDLE: only ${ms.length} ticks measured`);
+    if (!(p95 < 1)) fails.push(`WT-IDLE: idle tick p95 ${p95.toFixed(2)} ms (want < 1; last dirtied by ${window.__ww.dirtyBy})`);
+    if (window.__ww.sent.length !== sentAt || window.__ww.sent.at(-1) !== last) fails.push(`WT-IDLE: ${window.__ww.sent.length - sentAt} w.f sent while idle`);
+    const before = window.__ww.sent.at(-1);
+    window.__mockEvents.emit("webwindows.resend", 0);
+    await window.__gw.frames(10);
+    const after = window.__ww.sent.slice(window.__ww.sent.lastIndexOf(before) + 1);
+    if (after.length !== 1) fails.push(`WT-IDLE: ${after.length} w.f after one webwindows.resend (want exactly 1)`);
+    // A real move still sends: window 972 dragged in its style.
+    const el = document.querySelector('.webwindow[data-wwid="972"]');
+    const was = window.__ww.sent.at(-1);
+    el.style.translate = "30px 0px";
+    await window.__gw.frames(3);
+    if (window.__ww.sent.at(-1) === was) fails.push("WT-IDLE: a window moved (its style) and no w.f was sent");
+    el.style.translate = "";
+    return fails;
+  } finally {
+    W.webWins.value = [];
+    await window.__gw.settled();
+  }
+}
+
 async function webWindowStallCheck() {
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
@@ -5587,6 +5648,13 @@ try {
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
       }),
     );
+  // WT-IDLE: the web windows' rAF tick does nothing while no window moves (ww-idle-tick).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-idle-tick", { width: 900, height: 1000 }).then((r) => whenReady(r, async () => {
+      const fails = await r.page.evaluate(webWindowIdleTick);
+      console.log(`     ww-idle-tick: ${await r.page.evaluate(() => window.__wwIdle).catch(() => "?")}`);
+      return fails;
+    })));
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));

@@ -1679,6 +1679,12 @@ const sent: string[] = [];
 (globalThis as { __ww?: unknown }).__ww = {
   sent,
   geometry,
+  get tickMs() {
+    return tickMs;
+  },
+  get dirtyBy() {
+    return `${dirtyBy}; running ${[...running].map((t) => (t as Element).className).join(", ")}`;
+  },
   get lastResize() {
     return lastResize;
   },
@@ -1698,10 +1704,78 @@ const sent: string[] = [];
  */
 function tick(ts: number) {
   raf = 0;
-  for (const [id, r] of resizing) pace(id, r, ts);
-  send(ts);
+  const t0 = performance.now();
+  if (moving()) {
+    dirty = false;
+    for (const [id, r] of resizing) pace(id, r, ts);
+    send(ts);
+  }
+  tickMs.push(performance.now() - t0);
+  if (tickMs.length > 240) tickMs.shift();
   if (webWins.value.length) raf = requestAnimationFrame(tick);
 }
+
+// ---- WT-IDLE: the tick measures only when something could have moved a window ------------------------------------
+// perf-1793458433606 (10-31): [geometry] every frame - a querySelector, two rects and a computed-style walk up to the
+// body per window - forced the layout the owl widget dirtied each frame: tick 61-83 ms of script with nothing moving.
+// Now a frame measures only when [dirty] (set by what moves windows: a style/class/child change on or around a window,
+// a page swipe's transform, a resize/scroll/viewport change, a window's size, webWins/tilings/stacks, a resend), or
+// while a transition or animation runs on a window or its ancestors, or a resize drag paces; else it's a flag check.
+
+/** Something may have moved a window since the last measure. */
+let dirty = true;
+/** Transitions/animations running on a window, inside one, or on one's ancestors (a snap, a page slide). */
+const running = new Set<EventTarget>();
+/** The last frames' tick durations (ms), for the gate (`__ww.tickMs`). */
+const tickMs: number[] = [];
+const winEls = document.getElementsByClassName("webwindow");
+
+function moving(): boolean {
+  if (dirty || resizing.size) return true;
+  if (!running.size) return false;
+  for (const t of running) if (!(t as Node).isConnected) running.delete(t);
+  return running.size > 0;
+}
+
+/** [t] can carry or reshape a window: the root, a window's ancestor or descendant, or a whole-home overlay. */
+function aroundWindow(t: Node | null): boolean {
+  if (!t || !(t instanceof Element)) return false;
+  if (t === document.documentElement || t === document.body || t.matches(".folder-view")) return true;
+  for (let i = 0; i < winEls.length; i++) {
+    const w = winEls[i];
+    if (t.contains(w) || w.contains(t)) return true;
+  }
+  return false;
+}
+
+/** For the gate's failure line: what last made a frame measure ("mutation <class>", "running <class>", an event). */
+let dirtyBy = "";
+function markDirty(e?: Event | string) {
+  dirty = true;
+  dirtyBy = typeof e === "string" ? e : (e?.type ?? "kick");
+}
+
+new MutationObserver((records) => {
+  if (dirty || !winEls.length) return;
+  for (const r of records) if (aroundWindow(r.target)) return markDirty(`mutation ${r.type} ${r.attributeName ?? ""} ${(r.target as Element).className}`);
+}).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class", "hidden", "data-z"] });
+const sizes = new ResizeObserver(() => markDirty("size"));
+new MutationObserver(() => {
+  sizes.disconnect();
+  for (let i = 0; i < winEls.length; i++) sizes.observe(winEls[i]);
+}).observe(document.documentElement, { subtree: true, childList: true });
+for (const type of ["transitionrun", "animationstart"] as const)
+  addEventListener(type, (e) => {
+    if (!e.target || !aroundWindow(e.target as Node)) return;
+    running.add(e.target);
+    markDirty(`${e.type} ${(e.target as Element).className}`);
+  }, true);
+for (const type of ["transitionend", "transitioncancel", "animationend", "animationcancel"] as const)
+  addEventListener(type, (e) => {
+    if (e.target && running.delete(e.target)) dirty = true;
+  }, true);
+for (const type of ["resize", "scroll", "pointerup", "pointercancel"] as const) addEventListener(type, markDirty, true);
+visualViewport?.addEventListener("resize", markDirty);
 
 /** [tick]'s send: the windows' geometry as one "w.f" line tagged with frame time [ts], when it changed. */
 function send(ts: number) {
@@ -1724,6 +1798,7 @@ function send(ts: number) {
 }
 
 function kick() {
+  dirty = true;
   if (!raf) raf = requestAnimationFrame(tick);
 }
 
@@ -1745,6 +1820,7 @@ function resendGeometry() {
  */
 function resendNow() {
   lastGeometry = "";
+  dirty = true;
   if (webWins.value.length) send(performance.now());
   restartFrames();
 }
@@ -1760,6 +1836,7 @@ document.addEventListener("visibilitychange", () => {
 });
 webWins.subscribe(kick);
 tilings.subscribe(kick);
+stacks.subscribe(kick);
 // A new port (the page reloaded or the host came back): its layers know nothing yet.
 native.subscribe(() => {
   lastGeometry = "";
