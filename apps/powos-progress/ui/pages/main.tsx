@@ -77,17 +77,21 @@ function HackRow({ h, byId }: { h: Hack; byId: Map<string, WorkRow> }) {
 
 const byArea = (ws: WorkRow[]) => [...AREAS, OTHER].map((a) => [a, ws.filter((w) => areaOf(w) === a)] as const).filter(([, l]) => l.length);
 
-export default function Main({ host, close }: Props) {
-  const p = useProgress(host);
-  const [focus] = useState(() => takeFocus());
-  const [open, setOpen] = useState<Record<string, boolean>>({ you: true });
-  const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
-  const byId = new Map(p.work.map((w) => [w.id, w]));
-  const lanes = new Map<Lane, WorkRow[]>(LANES.map((l) => [l.key, []]));
-  for (const w of p.work) lanes.get(laneOf(w))!.push(w);
-  for (const l of lanes.values()) l.sort((a, b) => Number(isP0(b)) - Number(isP0(a)));
-  const today = doneToday(p.work);
+type P = ReturnType<typeof useProgress>;
+type Open = Record<string, boolean>;
+type Toggle = (k: string) => void;
 
+function lanesOf(work: WorkRow[]) {
+  const lanes = new Map<Lane, WorkRow[]>(LANES.map((l) => [l.key, []]));
+  for (const w of work) lanes.get(laneOf(w))!.push(w);
+  for (const l of lanes.values()) l.sort((a, b) => Number(isP0(b)) - Number(isP0(a)));
+  return lanes;
+}
+
+/** Which sections are open, and the focus a widget handed over: a tapped blocker or the hacks. */
+function useOpen(p: P, focus: string | null, byId: Map<string, WorkRow>) {
+  const [open, setOpen] = useState<Open>({ you: true });
+  const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   // A tapped blocker: open where its task is (its checklist area, else its lane) and scroll to it once it's drawn.
   const focusRow = focus ? byId.get(focus) : undefined;
   useEffect(() => {
@@ -102,36 +106,57 @@ export default function Main({ host, close }: Props) {
     setOpen((o) => ({ ...o, hacks: true }));
     requestAnimationFrame(() => document.getElementById("hacks")?.scrollIntoView({ block: "start" }));
   }, []);
+  return [open, toggle] as const;
+}
 
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+
+function SummaryHeader({ p, close }: { p: P; close?: () => void }) {
+  const works = p.items.filter((i) => i.state === "works").length;
   return (
-    <div style={S.page}>
+    <>
       <header style={S.head}>
         <button style={S.back} onClick={close} aria-label="back">‹</button>
         <h1 style={S.title}>Road to daily driver</h1>
         <span style={S.big}>{p.pct === null ? "–" : `${p.pct}%`}</span>
       </header>
       <div style={S.summary}>
-        {p.items.length ? `${p.items.filter((i) => i.state === "works").length} of ${p.items.length} things work` : "The checklist isn't filled in yet"}
+        {p.items.length ? `${works} of ${p.items.length} things work` : "The checklist isn't filled in yet"}
         {" · "}
-        {p.on} being worked on · {p.you} need{p.you === 1 ? "s" : ""} you
+        {p.on} being worked on · {p.you} {plural(p.you, "needs", "need")} you
         {" · "}
-        {p.hacks.length} hack{p.hacks.length === 1 ? "" : "s"} open
+        {p.hacks.length} {plural(p.hacks.length, "hack", "hacks")} open
         {p.boardStatus !== "connected" && " · the board isn't reachable"}
       </div>
+    </>
+  );
+}
 
-      {(lanes.get("you")?.length ?? 0) > 0 && (
-        <Section title="Needs you" count={String(lanes.get("you")!.length)} open={!!open.you} toggle={() => toggle("you")}>
-          {lanes.get("you")!.map((w) => <TaskLine key={w.id} w={w} focus={focus} />)}
-        </Section>
-      )}
+function NeedsYou({ ws, open, toggle, focus }: { ws: WorkRow[]; open: Open; toggle: Toggle; focus: string | null }) {
+  if (!ws.length) return null;
+  return (
+    <Section title="Needs you" count={String(ws.length)} open={!!open.you} toggle={() => toggle("you")}>
+      {ws.map((w) => <TaskLine key={w.id} w={w} focus={focus} />)}
+    </Section>
+  );
+}
 
-      {p.areas.length > 0 && <h2 style={S.h2}>Daily-driver checklist</h2>}
-      {p.areas.map((a) => (
+function Checklist({ areas, byId, open, toggle, focus }: { areas: P["areas"]; byId: Map<string, WorkRow>; open: Open; toggle: Toggle; focus: string | null }) {
+  return (
+    <>
+      {areas.length > 0 && <h2 style={S.h2}>Daily-driver checklist</h2>}
+      {areas.map((a) => (
         <Section key={a.area} title={a.area} count={`${a.pct}%`} open={!!open[`area:${a.area}`]} toggle={() => toggle(`area:${a.area}`)}>
           {a.items.map((i) => <ItemRow key={i.id} i={i} byId={byId} focus={focus} />)}
         </Section>
       ))}
+    </>
+  );
+}
 
+function Board({ lanes, open, toggle, focus }: { lanes: Map<Lane, WorkRow[]>; open: Open; toggle: Toggle; focus: string | null }) {
+  return (
+    <>
       <h2 style={S.h2}>The board</h2>
       {LANES.filter((l) => l.key !== "you" && l.key !== "done").map((l) => {
         const ws = lanes.get(l.key)!;
@@ -147,12 +172,25 @@ export default function Main({ host, close }: Props) {
           </Section>
         );
       })}
+    </>
+  );
+}
 
+function Hacks({ hacks, byId, open, toggle }: { hacks: Hack[]; byId: Map<string, WorkRow>; open: Open; toggle: Toggle }) {
+  return (
+    <>
       <h2 style={S.h2} id="hacks">Known hacks</h2>
-      <Section title={`${p.hacks.length} open, oldest first`} open={!!open.hacks} toggle={() => toggle("hacks")}>
-        {byAge(p.hacks).map((h) => <HackRow key={h.key} h={h} byId={byId} />)}
+      <Section title={`${hacks.length} open, oldest first`} open={!!open.hacks} toggle={() => toggle("hacks")}>
+        {byAge(hacks).map((h) => <HackRow key={h.key} h={h} byId={byId} />)}
       </Section>
+    </>
+  );
+}
 
+function DoneToday({ work }: { work: WorkRow[] }) {
+  const today = doneToday(work);
+  return (
+    <>
       <h2 style={S.h2}>Done today</h2>
       {today.length ? (
         <div style={S.timeline}>
@@ -166,6 +204,24 @@ export default function Main({ host, close }: Props) {
       ) : (
         <div style={S.dim}>Nothing finished yet today</div>
       )}
+    </>
+  );
+}
+
+export default function Main({ host, close }: Props) {
+  const p = useProgress(host);
+  const [focus] = useState(() => takeFocus());
+  const byId = new Map(p.work.map((w) => [w.id, w]));
+  const [open, toggle] = useOpen(p, focus, byId);
+  const lanes = lanesOf(p.work);
+  return (
+    <div style={S.page}>
+      <SummaryHeader p={p} close={close} />
+      <NeedsYou ws={lanes.get("you") ?? []} open={open} toggle={toggle} focus={focus} />
+      <Checklist areas={p.areas} byId={byId} open={open} toggle={toggle} focus={focus} />
+      <Board lanes={lanes} open={open} toggle={toggle} focus={focus} />
+      <Hacks hacks={p.hacks} byId={byId} open={open} toggle={toggle} />
+      <DoneToday work={p.work} />
     </div>
   );
 }

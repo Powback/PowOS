@@ -44,36 +44,78 @@ function BlockerRow({ b, open }: { b: Blocker; open: (b: Blocker) => void }) {
   );
 }
 
+const NONE: Record<ItemState, number> = { works: 0, partly: 0, broken: 0, untested: 1 };
+
+/** The whole checklist's counts: every area's added up. */
+function totals(areas: AreaBar[]) {
+  return areas.reduce(
+    (c, a) => (STATE_ORDER.forEach((k) => (c[k] += a.counts[k])), c),
+    { works: 0, partly: 0, broken: 0, untested: 0 } as Record<ItemState, number>,
+  );
+}
+
+function countLines(p: ReturnType<typeof useProgress>, wide: boolean) {
+  return [wide ? `${p.on} being worked on` : `${p.on} on it`, `${p.you} need${p.you === 1 ? "s" : ""} you`, `${p.hacks.length} hacks`];
+}
+
+const heroSide = (works: number, items: number) => (items ? `${works} of ${items} work` : "no checklist yet");
+
+function Hero({ size, pct, side, open }: { size: number; pct: number | null; side: string; open: () => void }) {
+  return (
+    <button type="button" style={{ ...S.hero, height: `${size * 1.2}em` }} onClick={open} {...own}>
+      <span style={{ ...S.pct, fontSize: `${size}em` }}>
+        {pct ?? "–"}
+        <small style={S.pctSign}>%</small>
+      </span>
+      <span style={S.heroSide}>{side}</span>
+    </button>
+  );
+}
+
+function Blockers({ blockers, open }: { blockers: Blocker[]; open: (b: Blocker) => void }) {
+  return (
+    <Fit style={{ flex: "1 1 0" }}>
+      {blockers.length ? (
+        blockers.slice(0, 3).map((b) => <BlockerRow key={b.key} b={b} open={open} />)
+      ) : (
+        <span style={{ ...S.line, opacity: 0.6 }}>no blockers</span>
+      )}
+    </Fit>
+  );
+}
+
+function Foot({ counts }: { counts: string[] }) {
+  return (
+    <div style={S.foot}>
+      {counts.map((c, i) => (
+        <span key={i} style={S.count}>
+          {i ? "· " : ""}
+          {c}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function Widget({ host, app: id, cells }: Props) {
   const p = useProgress(host);
   const [cols, rows] = cells ?? [2, 2];
   const big = rows >= 3;
-  const all = p.areas.reduce(
-    (c, a) => (STATE_ORDER.forEach((k) => (c[k] += a.counts[k])), c),
-    { works: 0, partly: 0, broken: 0, untested: 0 } as Record<ItemState, number>,
-  );
+  const all = totals(p.areas);
   const openPage = () => host.openApp?.(id);
   const openBlocker = (b: Blocker) => {
     setFocus(b.task);
     openPage();
   };
-  const live = p.status === "connected";
-  const hero = big || cols >= 3 ? 3.2 : 3;
+  const pct = p.status === "connected" ? p.pct : null;
   // What's left over when the tile can't hold it all goes, whole: a Fit wraps it out of sight (never a cut line).
-  const counts = [cols >= 3 ? `${p.on} being worked on` : `${p.on} on it`, `${p.you} need${p.you === 1 ? "s" : ""} you`, `${p.hacks.length} hacks`];
   return (
     <div style={{ ...S.box, gap: big ? "0.45em" : "0.3em" }}>
       <button type="button" style={S.head} onClick={openPage} {...own}>
         Daily driver
       </button>
-      <button type="button" style={{ ...S.hero, height: `${hero * 1.2}em` }} onClick={openPage} {...own}>
-        <span style={{ ...S.pct, fontSize: `${hero}em` }}>
-          {live && p.pct !== null ? p.pct : "–"}
-          <small style={S.pctSign}>%</small>
-        </span>
-        <span style={S.heroSide}>{p.items.length ? `${all.works} of ${p.items.length} work` : "no checklist yet"}</span>
-      </button>
-      <Bar counts={p.items.length ? all : { works: 0, partly: 0, broken: 0, untested: 1 }} />
+      <Hero size={big || cols >= 3 ? 3.2 : 3} pct={pct} side={heroSide(all.works, p.items.length)} open={openPage} />
+      <Bar counts={p.items.length ? all : NONE} />
       {big && p.areas.length > 0 && (
         <Fit style={{ flex: rows >= 4 ? "1.4 1 0" : "1 1 0" }}>
           {p.areas.map((a) => (
@@ -81,21 +123,8 @@ export default function Widget({ host, app: id, cells }: Props) {
           ))}
         </Fit>
       )}
-      <Fit style={{ flex: "1 1 0" }}>
-        {p.blockers.length ? (
-          p.blockers.slice(0, 3).map((b) => <BlockerRow key={b.key} b={b} open={openBlocker} />)
-        ) : (
-          <span style={{ ...S.line, opacity: 0.6 }}>no blockers</span>
-        )}
-      </Fit>
-      <div style={S.foot}>
-        {counts.map((c, i) => (
-          <span key={i} style={S.count}>
-            {i ? "· " : ""}
-            {c}
-          </span>
-        ))}
-      </div>
+      <Blockers blockers={p.blockers} open={openBlocker} />
+      <Foot counts={countLines(p, cols >= 3)} />
     </div>
   );
 }
