@@ -445,19 +445,34 @@ function chromeAt(target: Element): Chrome | null {
 
 /** How far (CSS px, ~8 dp) a finger on the bottom chrome moves before its direction is decided. */
 const CHROME_DECIDE = 8;
+/** How far (CSS px, ~12 dp) a finger on the dock moves away from it before its app lifts out ("out"). */
+export const DOCK_OUT = 12;
 
 /**
  * The one direction rule for a swipe from home's bottom chrome ([chromeAt]), once the finger is past [CHROME_DECIDE]:
- * "pages" (home pages, as on empty home), "home" (home's usual rules: up from the bar is the launcher), null (not home's:
- * a move away from the dock is kept for dragging an app out to a window - never paged, never claimed), undefined (not
- * decided yet). Sideways on the search bar always pages; on the dock only along its own axis (a bottom dock: sideways),
- * unless the dock's own strip scrolls that way.
+ * "pages" (home pages, as on empty home), "home" (home's usual rules: up from the bar is the launcher), "out" (a move away
+ * from the dock past [DOCK_OUT]: the app under the finger lifts out at once, no hold - the user, 10-31 15:12: "I
+ * shouldn't have to hold it, I should just be able to drag it out"; home.tsx liftOut), null (not home's, nor a lift: a
+ * move along a side dock, or toward the screen's edge), undefined (not decided yet). Sideways on the search bar always
+ * pages; on the dock only along its own axis (a bottom dock: sideways), unless the dock's own strip scrolls that way.
  */
-export function chromeWay(chrome: Chrome, dx: number, dy: number, stripScrolls = false): "pages" | "home" | null | undefined {
+export function chromeWay(chrome: Chrome, dx: number, dy: number, stripScrolls = false): "pages" | "home" | "out" | null | undefined {
   const sideways = Math.abs(dx) > CHROME_DECIDE && Math.abs(dx) >= Math.abs(dy);
   if (!sideways && Math.hypot(dx, dy) <= CHROME_DECIDE) return undefined;
   if (chrome === "bar") return sideways ? "pages" : "home";
-  return chrome === "dock" && sideways && !stripScrolls ? "pages" : null;
+  if (chrome === "dock" && sideways) return stripScrolls ? null : "pages";
+  return awayWay(dx, dy);
+}
+
+/**
+ * A move [dx], [dy] on the dock that isn't along a bottom one: "out" when it's mostly away from the dock (up from a bottom
+ * one, in from a side one) and past [DOCK_OUT], undefined short of that, else null (toward its edge, or along a side one).
+ */
+function awayWay(dx: number, dy: number): "out" | null | undefined {
+  const at = dockPosition.peek();
+  const away = at === "bottom" ? -dy : at === "right" ? -dx : dx;
+  if (away < Math.abs(at === "bottom" ? dx : dy)) return null;
+  return away > DOCK_OUT ? "out" : undefined;
 }
 
 /** The dock's own sideways strip under [target] has more to show sideways (it scrolls itself). */
@@ -544,7 +559,8 @@ export function sampleVx(samples: [number, number][], now: number) {
 function claim(gs: Gesture, dx: number, dy: number): boolean {
   const way = gs.chrome ? chromeWay(gs.chrome, dx, dy, stripScrolls(gs.target)) : "home";
   if (way === undefined || (way === "home" && Math.hypot(dx, dy) < SLOP)) return false;
-  const mode = way && claimWay(gs, way, dx, dy);
+  // "out": the dock's app lifts out (home.tsx liftOut) - not home's.
+  const mode = way && way !== "out" && claimWay(gs, way, dx, dy);
   if (!mode) {
     g = null;
     return false;

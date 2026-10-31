@@ -4024,6 +4024,121 @@ async function barSwipeScene(r, label) {
 }
 
 /**
+ * DL1 (the user, 10-31 15:12: "I shouldn't have to hold it, I should just be able to drag it out"; dev/dock-lift-check.js):
+ * a finger (CDP touch: mouse events never bind home's onTouchStart) on a dock app. "folded" (?mode=pull, Chrome in
+ * front): up 40 px lifts it out (a carry, a tick), on to the top edge splits, to the middle floats. "home" (folded home):
+ * sideways pages, a still hold is the app's menu (edit), a tap opens full screen. "right" (unfolded, the right dock):
+ * left 40 px then to the middle opens a web window.
+ */
+const dl = (page, fn, ...args) => page.evaluate(async (fn, args) => (await importShim("./dev/dock-lift-check.js"))[fn](...args), fn, args);
+
+/** One finger from [from] through [path] (five moves to each point), let go at its end; the state at the points [at] names. */
+async function dlDrag(r, f, { from, path, at = {} }) {
+  const seen = {};
+  await f.touch("touchStart", [{ x: from[0], y: from[1] }]);
+  let p = from;
+  for (const [i, to] of path.entries()) {
+    for (let k = 1; k <= 5; k++) (await f.touch("touchMove", [{ x: p[0] + ((to[0] - p[0]) * k) / 5, y: p[1] + ((to[1] - p[1]) * k) / 5 }]), await f.wait(17));
+    p = to;
+    // The state each point waits for (DL_WANT): under the ship gate's load the moves are handled late.
+    if (at[i]) seen[at[i]] = await dlUntil(r, f, DL_WANT[at[i]]);
+  }
+  await f.touch("touchEnd", []);
+  await f.wait(400);
+  return seen;
+}
+
+/** What a point of [dlDrag] waits for: "lift" the carry, "end" the ghost, "mid" (a page swipe under way) anything. */
+const DL_WANT = { lift: (s) => s.carry && s.ticks, end: (s) => s.zone, mid: (s) => s.page || s.strip };
+
+/** Waits up to 8 s for [ok] on the page's state; the state then. */
+async function dlUntil(r, f, ok) {
+  let s = await dl(r.page, "state");
+  for (let t = 0; t < 80 && !ok(s); t++) (await f.wait(100), (s = await dl(r.page, "state")));
+  return s;
+}
+
+/** The lift: carried (lifted), a tick, no menu; then the ghost at the end shows [zone]. [tag] names the step. */
+function dlLifted(seen, zone, tag) {
+  const { lift = {}, end = {} } = seen;
+  return [
+    [!lift.carry?.lifted, `the move away from the dock didn't lift the app out (carry ${JSON.stringify(lift.carry)})`],
+    [!lift.ticks, "no haptic tick as the app lifted out"],
+    [lift.menu, "the move opened the app's menu (a hold), not a lift"],
+    [end.zone !== zone, `at the end the ghost shows ${end.zone ?? "nothing"}, not ${zone}`],
+  ].flatMap(([bad, what]) => (bad ? [`${tag}: ${what}`] : []));
+}
+
+/** Folded (?mode=pull, Chrome in front): [key] up 40 px and on to [end]: the ghost's [zone], then [want] of the host. */
+async function dlFoldedOnce(r, f, [key, end, zone, want]) {
+  await dl(r.page, "reset");
+  const c = await dl(r.page, "cell", key);
+  if (!c) return [`DL1 folded: no dock cell for ${key}`];
+  const tag = `DL1 folded ${key} to ${end}`;
+  const fails = dlLifted(await dlDrag(r, f, { from: c, path: [[c[0], c[1] - 40], end], at: { 0: "lift", 1: "end" } }), zone, tag);
+  const s = await dlUntil(r, f, want);
+  return want(s) ? fails : [...fails, `${tag}: let go: split ${JSON.stringify(s.split)} float ${JSON.stringify(s.float)} launch ${JSON.stringify(s.launch)}`];
+}
+
+async function dockLiftFolded(r, f) {
+  await dl(r.page, "setup", false);
+  const top = await dlFoldedOnce(r, f, ["a:signal", [202, 60], "first", (s) => String(s.split[0]) === "101,100"]);
+  return [...top, ...(await dlFoldedOnce(r, f, ["a:spotify", [202, 450], "window", (s) => String(s.float[0]) === "102"]))];
+}
+
+/** Folded home: a sideways drag along the dock pages (home's or the dock strip's own), never lifts. */
+async function dlSideways(r, f, c) {
+  await dl(r.page, "reset");
+  const s0 = await dl(r.page, "state");
+  const seen = await dlDrag(r, f, { from: c, path: [[c[0] - 300, c[1]]], at: { 0: "mid" } });
+  const side = await dl(r.page, "state");
+  if (side.carry || seen.mid?.carry || side.split.length || side.float.length) return [`DL1 home: a sideways drag on the dock lifted the app (carry ${JSON.stringify(seen.mid?.carry)})`];
+  const paged = [seen.mid, side].some((s) => s && (s.page !== s0.page || s.strip !== s0.strip));
+  return paged ? [] : [`DL1 home: a sideways drag on the dock paged nothing (page ${side.page}, strip ${seen.mid?.strip}/${side.strip})`];
+}
+
+async function dockLiftHome(r, f) {
+  await dl(r.page, "setup", false);
+  const c = await dl(r.page, "cell", "a:maps");
+  if (!c) return ["DL1 home: no dock cell for a:maps"];
+  const fails = await dlSideways(r, f, c);
+  // A still hold: the app's menu (edit), nothing lifted.
+  await dl(r.page, "reset");
+  const c2 = (await dl(r.page, "cell", "a:maps")) ?? c;
+  await f.touch("touchStart", [{ x: c2[0], y: c2[1] }]);
+  // The hold's 420 ms, then its menu (waited for: under load its timer runs late).
+  await f.wait(500);
+  const held = await dlUntil(r, f, (s) => s.menu);
+  await f.touch("touchEnd", []);
+  if (held.menu !== "a:maps" || held.carry) fails.push(`DL1 home: a still hold on a:maps: menu ${held.menu}, carry ${JSON.stringify(held.carry)} (want its menu)`);
+  // A tap: full screen.
+  await dl(r.page, "reset");
+  // Once the menu's scrim is gone and the cell is the finger's again (cell waits for it).
+  const c3 = await dl(r.page, "cell", "a:maps");
+  if (!c3) return [...fails, "DL1 home: after the menu, a:maps's dock cell never came back to a finger"];
+  await f.tap(c3);
+  const tapped = await dlUntil(r, f, (s) => s.launch.length);
+  if (String(tapped.launch[0]) !== "a:maps,true") fails.push(`DL1 home: a tap on a:maps launched ${JSON.stringify(tapped.launch)} (want a:maps full screen)`);
+  return fails;
+}
+
+async function dockLiftRight(r, f) {
+  const pos = await dl(r.page, "setup", true);
+  if (pos !== "right") return [`DL1 right: the dock is ${pos}, not right`];
+  const c = await dl(r.page, "cell", "a:maps");
+  if (!c) return ["DL1 right: no dock cell for a:maps"];
+  const fails = dlLifted(await dlDrag(r, f, { from: c, path: [[c[0] - 40, c[1]], [410, 440]], at: { 0: "lift", 1: "end" } }), "window", "DL1 right");
+  const s = await dlUntil(r, f, (st) => st.windows);
+  return s.windows ? fails : [...fails, `DL1 right: let go in the middle, no web window (float ${JSON.stringify(s.float)} launch ${JSON.stringify(s.launch)})`];
+}
+
+/** DL1 with a finger, [kind] the scene. */
+async function dockLiftScene(r, kind) {
+  const f = await fingerOf(r.page);
+  return { folded: dockLiftFolded, home: dockLiftHome, right: dockLiftRight }[kind](r, f);
+}
+
+/**
  * In the page: the tile LAYOUT (10-31). TG1: two corner snaps make a 2-split filling the whole tile area (no empty slot,
  * a lone snap is no tiling); TG2: a divider dragged to near an edge stays there (only the minimum tile limits it);
  * TL2: every tile has its bar with a close, none merged into the status bar (its spans stay full width); SC1: closing
@@ -5368,6 +5483,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `bar-swipe-${label}`, viewport).then((r) => whenReady(r, () => barSwipeScene(r, label))));
+  // DL1: a dock app dragged out with no hold, by a finger (dock-lift-*; the user, 10-31 15:12).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [kind, query, viewport] of [["folded", "?mode=pull", { width: 404, height: 900 }], ["home", "", { width: 404, height: 900 }], ["right", "", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html${query}`, `dock-lift-${kind}`, viewport).then((r) => whenReady(r, () => dockLiftScene(r, kind))));
   // Edit mode: the search bar as it is, the edit bar below it, the dock in view (the user, 2026-10-30). Folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
