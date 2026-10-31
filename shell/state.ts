@@ -257,10 +257,35 @@ export const dockPosition = computed(() => validDockPosition(dockTry.value || si
  * page only, never stored (as dockTry).
  */
 export const mobileSearchPlacement = stored("search.place.mobile", "bar");
-export const unfoldedSearchPlacement = stored("search.place.unfolded", "bar");
+/**
+ * Unfolded's own choice, "" while unset: then it follows the folded one (the user, 13:31: the dock button belongs in
+ * the unfolded dock too, as the separator between the pinned apps and the recent ones). [unfoldedSearch] is what the
+ * settings show and set: the choice in effect, a pick stored as unfolded's own.
+ */
+migrateUnfoldedSearch();
+const unfoldedSearchOwn = stored("search.place.unfolded", "");
+export const unfoldedSearch = {
+  get value() {
+    return unfoldedSearchOwn.value || mobileSearchPlacement.value;
+  },
+  set value(v: string) {
+    unfoldedSearchOwn.value = v;
+  },
+};
+/**
+ * The unfolded key held "bar" on every device whether picked or not (stored() writes its default): once, a "bar" there
+ * is taken as unset so unfolded follows the folded choice. An unfolded "dock" stays.
+ */
+function migrateUnfoldedSearch() {
+  try {
+    if (localStorage.getItem("powos.search.place.migrated") === "1") return;
+    if (localStorage.getItem("powos.search.place.unfolded") === "bar") localStorage.removeItem("powos.search.place.unfolded");
+    localStorage.setItem("powos.search.place.migrated", "1");
+  } catch {}
+}
 export const searchTry = signal("");
 /** The search placement setting of the mode in use (folded / unfolded); null in the desktop shell. */
-export const searchPlacement = computed(() => (dockMode.value === "unfolded" ? unfoldedSearchPlacement : dockMode.value === "mobile" ? mobileSearchPlacement : null));
+export const searchPlacement = computed(() => (dockMode.value === "unfolded" ? unfoldedSearch : dockMode.value === "mobile" ? mobileSearchPlacement : null));
 export const searchInDock = computed(() => (searchTry.value || searchPlacement.value?.value) === "dock");
 /**
  * The folded home turned sideways (hosts/wide.ts sidewaysHome): the bottom dock becomes the right column, with its

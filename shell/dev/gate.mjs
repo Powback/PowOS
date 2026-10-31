@@ -5042,9 +5042,9 @@ try {
         return fails.map((f) => `${position}: ${f}`);
       })));
   // DK1 + DK2: in dock-button mode the pinned dock stays its pinned apps + the button with running unpinned apps about
-  // (same cells, same icon size); a side column puts a separator between them and the recent apps.
+  // (same cells, same icon size); a side column has the button as the separator between them and the recent apps.
   if (process.env.SHELL_PAGES !== "0")
-    for (const [label, position] of [["folded", "bottom"], ["unfolded", "bottom"], ["unfolded", "right"]])
+    for (const [label, position] of [["folded", "bottom"], ["unfolded", "bottom"], ["unfolded", "right"], ["unfolded", "left"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `dk1-${label}-${position}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos) => (await importShim("./dev/dock-search-check.js")).dk1Check(pos), position))));
   // DS2: the launcher overlay's side - opened from the button, its bar's glass grows out of it (wider, higher, never
   // fading), a tap's open focused, a hold's dictating, push-to-talk's release leaving the words.

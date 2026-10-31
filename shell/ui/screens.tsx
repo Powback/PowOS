@@ -32,7 +32,7 @@ import {
   useScreen,
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, mobileSearchPlacement, unfoldedSearchPlacement, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
+import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, mobileSearchPlacement, unfoldedSearch, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
 
 /** "icon colours" options after "the apps'": theme hues, the accent. */
@@ -553,7 +553,7 @@ function StyleScreen() {
         <DockOption label="desktop dock position" placement={desktopDockPlacement} fallback="left" />
         {/* Home's search: the pill over the dock, or a button in the dock's middle that expands into it (ui/docksearch.tsx). */}
         <SearchOption label="folded search" placement={mobileSearchPlacement} />
-        <SearchOption label="unfolded search" placement={unfoldedSearchPlacement} />
+        <SearchOption label="unfolded search" placement={unfoldedSearch} />
         <Option label="swipe up from the left: PowOS AI">
           <Segmented options={["on", "off"]} picked={pullPanels.value === "on" ? 0 : 1} onPick={(i) => (pullPanels.value = i === 0 ? "on" : "off")} />
         </Option>

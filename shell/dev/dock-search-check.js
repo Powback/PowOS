@@ -13,8 +13,9 @@ function centred(position) {
   const row = btn.parentElement;
   const cells = [...row.children].filter((c) => c.matches(".app"));
   const i = cells.indexOf(btn);
+  // A side column: the button is the separator, after the pinned apps (separated checks the recent ones after it).
+  if (position !== "bottom") return i === cells.length - 1 ? "" : `button at cell ${i} of ${cells.length}, not after the pinned apps`;
   if (i !== Math.floor(cells.length / 2)) return `button at cell ${i} of ${cells.length}, not the centre`;
-  if (position !== "bottom") return "";
   const b = btn.getBoundingClientRect();
   const first = cells[0].getBoundingClientRect();
   const last = cells[cells.length - 1].getBoundingClientRect();
@@ -123,7 +124,7 @@ export async function dockSearchCheck(position) {
   if (document.querySelector(".home > .bar")) fails.push("a .bar on home in dock-button mode");
   const c = centred(position);
   if (c) fails.push(c);
-  fails.push(...(await pressOpens(position)), ...(await backToBar(S)));
+  fails.push(...(await followsFolded(S)), ...(await pressOpens(position)), ...(await backToBar(S)));
   S.searchTry.value = "";
   S.dockTry.value = "";
   S.dock.value = was;
@@ -266,15 +267,47 @@ function placed(row, keys) {
   return { inRow, inRecent };
 }
 
-/** DK2: a side column's pinned page, then .dock-sep, then the recent section. */
+/**
+ * DK2 (the user, 13:31): in a side column the search button is the separator - exactly one in the dock, after the last
+ * pinned app and before the first recent one (above / below on screen too), no .dock-sep line.
+ */
 function separated(row) {
-  const sep = document.querySelector(".home > .dock .dock-sep");
-  if (!sep) return ["no separator between the pinned group and the recent apps"];
   const fails = [];
-  if (sep.previousElementSibling !== row) fails.push("the separator isn't right after the pinned group");
-  if (!sep.nextElementSibling?.matches(".dock-recent")) fails.push("the recent section isn't right after the separator");
-  const r = sep.getBoundingClientRect();
-  if (!(r.width > 0 && r.height > 0 && r.height <= 3)) fails.push(`the separator is ${Math.round(r.width)}x${Math.round(r.height)}, not a short thin line`);
+  const buttons = document.querySelectorAll(".home > .dock:not(.dock-tray) .dock-search");
+  if (buttons.length !== 1) fails.push(`${buttons.length} search buttons in the dock, not 1`);
+  if (document.querySelector(".home > .dock .dock-sep")) fails.push("a .dock-sep line beside the button");
+  const btn = buttons[0];
+  const cells = [...row.children].filter((c) => c.matches(".app"));
+  if (!btn || cells.at(-1) !== btn) return [...fails, "the button isn't after the last pinned app"];
+  return [...fails, ...between(btn, cells.at(-2), row.nextElementSibling)];
+}
+
+/** On screen: the button below the last pinned app [above] and above the first app of the recent section [recent]. */
+function between(btn, above, recent) {
+  const first = recent?.matches(".dock-recent") && recent.querySelector(".app");
+  if (!first) return ["no recent app right after the pinned group"];
+  const b = btn.getBoundingClientRect();
+  const fails = [];
+  if (above && above.getBoundingClientRect().bottom > b.top + 1) fails.push("the button isn't below the last pinned app");
+  if (b.bottom > first.getBoundingClientRect().top + 1) fails.push("the button isn't above the first recent app");
+  return fails;
+}
+
+/** Unfolded with no choice of its own follows the folded one (the user, 13:31): folded "dock button", unfolded too. */
+async function followsFolded(S) {
+  if (S.dockMode.value !== "unfolded") return [];
+  const was = { mobile: S.mobileSearchPlacement.value, own: localStorage.getItem("powos.search.place.unfolded") ?? "" };
+  S.searchTry.value = "";
+  S.unfoldedSearch.value = "";
+  S.mobileSearchPlacement.value = "dock";
+  await sleep(100);
+  const fails = S.searchInDock.value && S.unfoldedSearch.value === "dock" ? [] : ["folded \"dock button\", unfolded unset: no button unfolded"];
+  S.unfoldedSearch.value = "bar";
+  if (S.searchInDock.value) fails.push("unfolded's own \"bar\" didn't win over the folded choice");
+  S.mobileSearchPlacement.value = was.mobile;
+  S.unfoldedSearch.value = was.own;
+  S.searchTry.value = "dock";
+  await sleep(100);
   return fails;
 }
 
@@ -292,7 +325,7 @@ function unchanged(before, after, extra) {
 /**
  * DK1 + DK2 (the user, 2026-10-31: "The dock is the same size always" / "a separator between the docking and the recent
  * items"): in dock-button mode three running apps that aren't pinned leave the pinned row's cell count and icon size
- * as they were and show in the recent section; a side column has the separator between the groups.
+ * as they were and show in the recent section; a side column has the button as the separator between the groups.
  */
 export async function dk1Check(position) {
   const S = await importShim("./state.ts");
