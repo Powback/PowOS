@@ -18,7 +18,8 @@ import { host as appHost } from "../apps/stdb.ts";
 import type { AgentHost, AgentSession } from "../types.ts";
 import { ago } from "./time.ts";
 import { HOSTS, Units } from "./units.tsx";
-import { Friction, WorkFeed, board, boardSeen, type WorkRow } from "./aiboard.tsx";
+import { Friction, WorkFeed, board, type WorkRow } from "./aiboard.tsx";
+import { ProgressView } from "./aiprogress.tsx";
 
 declare function importShim(url: string): Promise<{ default: ComponentType<any> }>;
 
@@ -165,27 +166,8 @@ export function areas(): [string, number, number][] {
   return [...by.entries()].map(([k, [a, b]]): [string, number, number] => [k, a, b]).sort((x, y) => y[1] + y[2] - (x[1] + x[2]));
 }
 
-/** Progress without the app: what's open per area, and where the things to try are. No rows to answer here. */
-function Summary({ shown }: { shown: boolean }) {
-  const rows = areas();
-  return (
-    <section class="ai-summary tile">
-      {shown && <WorkFeed />}
-      {rows.map(([area, going, you]) => (
-        <div key={area} class="ai-summary-row">
-          <span class="ai-summary-area">{area}</span>
-          <span class="ai-summary-n muted">
-            {going ? `${going} in progress` : ""}
-            {going && you ? " · " : ""}
-            {you ? `${you} waiting on you` : ""}
-          </span>
-        </div>
-      ))}
-      {!rows.length && <div class="ai-summary-row muted">{boardSeen.value ? "nothing in progress" : "…"}</div>}
-      <div class="ai-summary-foot muted">Things to try arrive in the chat.</div>
-    </section>
-  );
-}
+/** Progress without the app: the ring and the areas' cards (aiprogress.tsx). */
+const Summary = ProgressView;
 
 /** The progress app's page module URL, when it is installed with a page. */
 function progressUrl(): string | null {

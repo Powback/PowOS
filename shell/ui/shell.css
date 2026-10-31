@@ -3504,11 +3504,48 @@ html:root .ai-view .ai-updates-list :is(.mail, .msg.ai-mail) { background: var(-
   border-radius: var(--radius);
 }
 .ai-aside > .ai-scroll { flex: 1; mask-image: none; -webkit-mask-image: none; }
-.ai-summary { display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; border-radius: var(--radius); }
-html:root .ai-screen .ai-summary.tile { background: var(--ai-bubble); }
-.ai-summary-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: var(--text-body); }
-.ai-summary-area { font-weight: 600; }
-.ai-summary-foot { padding: 10px 0 4px; font-size: var(--text-small); }
+/*
+ * Progress (aiprogress.tsx; the user, 15:12: "The design of the progress page can be better"): the UI's proportional
+ * font, never the terminal's; a ring with the daily driver's percentage, then a glass row card per area - name left,
+ * an accent "N need you" chip, a thin bar (done of the month) and its counts right, all on one line; a tap opens the
+ * area's tasks under it, one line each with a state dot. Bars and the opening spring in (transform / opacity only).
+ */
+.ai-view { --aip-spring: linear(0, 0.25 8%, 0.68 18%, 1.02 30%, 1.1 38%, 1.04 50%, 0.99 62%, 1.005 78%, 1); }
+:is(.aip, .ai-view:has(> .ai-sub .aip) > .ai-top, .ai-mid:has(> .ai-sub .aip) > .ai-top, .ai-aside:has(.aip) > .ai-top, .ai-screen.panes > :is(.ai-nav, .ai-ctx)) { font-family: var(--font-ui); }
+.aip { display: flex; flex-direction: column; gap: 14px; padding: 4px 0 16px; }
+.aip-ring-wrap { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 18px; padding: 6px 4px 4px; }
+.aip-ring { grid-row: 1; grid-column: 1; width: 112px; height: 112px; animation: aip-pop 520ms var(--aip-spring) both; }
+.aip-ring-track, .aip-ring-fill { fill: none; stroke-width: 10; }
+.aip-ring-track { stroke: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
+.aip-ring-fill { stroke: var(--color-accent); stroke-linecap: round; }
+.aip-ring-mid { grid-row: 1; grid-column: 1; display: grid; place-items: center; pointer-events: none; }
+.aip-ring-pct { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-foreground); }
+.aip-ring-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.aip-ring-label { font-size: var(--text-item); font-weight: 600; color: var(--color-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aip-ring-sub { font-size: var(--text-small); color: var(--color-foreground); opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aip-areas { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.aip-area { display: block; width: auto; max-width: none; margin: 0; padding: 0; border-radius: calc(var(--radius) * 0.85); overflow: hidden; }
+html:root .ai-screen .aip-area.tile { background: var(--ai-bubble); box-shadow: none; }
+.aip-area-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 14px; border: 0; background: none; font: inherit; color: var(--color-foreground); text-align: start; white-space: nowrap; }
+.aip-area-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-body); font-weight: 600; }
+.aip-chip { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--color-accent); color: var(--color-background); font-size: 12px; font-weight: 600; }
+.aip-bar { flex: none; position: relative; width: clamp(56px, 18%, 120px); height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--color-foreground) 16%, transparent); overflow: hidden; }
+.aip-bar-fill { position: absolute; inset: 0; border-radius: inherit; background: var(--color-accent); transform-origin: left center; animation: aip-fill 700ms var(--aip-spring) both; }
+.aip-count { flex: none; min-width: 3.4em; text-align: end; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
+.aip-tasks { display: flex; flex-direction: column; margin: 0; padding: 0 14px 10px; list-style: none; animation: aip-open 380ms var(--aip-spring) both; transform-origin: top center; }
+.aip-task { display: flex; align-items: center; gap: 10px; min-height: 30px; font-size: var(--text-small); color: var(--color-foreground); white-space: nowrap; }
+.aip-task-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.aip-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 40%, transparent); }
+.aip-dot.working { background: var(--color-accent); }
+.aip-dot.waiting { background: color-mix(in srgb, var(--color-red) 70%, var(--color-foreground)); }
+.aip-dot.nocheck { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-muted); }
+.aip-empty { padding: 16px 4px; font-size: var(--text-body); color: var(--color-foreground); opacity: 0.86; }
+@keyframes aip-fill { from { transform: scaleX(0); } }
+@keyframes aip-open { from { opacity: 0; transform: translateY(-6px) scaleY(0.96); } }
+@keyframes aip-pop { from { opacity: 0; transform: scale(0.9); } }
+@media (prefers-reduced-motion: reduce) { .aip-ring, .aip-bar-fill, .aip-tasks { animation: none; } }
+/* The nav's counts on the pane's glass: the full foreground (muted read 4.06:1 there). */
+.ai-screen.panes .ai-nav .ai-nav-n { color: var(--color-foreground); }
 
 /*
  * PowOS AI wide, three panes (powai.tsx AiPanes, aipanes.tsx; the user, 2026-10-31 13:29): the nav, the middle pane,

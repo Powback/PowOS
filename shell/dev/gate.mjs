@@ -1637,7 +1637,7 @@ async function aiChatMenu() {
     const opened = await G.until(() => titled(name) && document.querySelector(".ai-screen .ai-sub"), 2000);
     if (!opened) fails.push(`"${name}" didn't open as its own screen`);
     // No powos-progress app: a summary per area, never the board's rows to answer (the try buttons live in the chat).
-    if (name === "Progress" && !document.querySelector(".ai-screen .ai-sub .ai-summary")) fails.push("Progress (no powos-progress app) shows no summary");
+    if (name === "Progress" && !document.querySelector(".ai-screen .ai-sub .aip")) fails.push("Progress (no powos-progress app) shows no ring and areas");
     if (name === "Progress" && document.querySelector(".ai-screen .ai-sub :is(.ai-work-list, .ai-item-acts)")) fails.push("Progress still shows the board's rows to answer");
     document.querySelector(".ai-screen .ai-back")?.click();
     if (!(await G.until(() => document.querySelector(".ai-screen .ai-chat .msg.try"), 2000))) fails.push(`back from "${name}" didn't return to the chat`);
@@ -1821,6 +1821,115 @@ async function aiChatCheck(page) {
   await page.setViewport({ width: 821, height: 883 });
   await page.evaluate(() => window.__gw.until(() => innerWidth === 821));
   fails.push(...(await aiChatAt(page, "unfolded")));
+  return fails;
+}
+
+/**
+ * The AI page's Progress (the user, 2026-10-31 15:12: "The design of the progress page can be better"; aiprogress.tsx):
+ * folded and unfolded, no monospace text in it, every area row on one line (an opened one's tasks one line each), a ring
+ * with the percentage, each bar's fill done/total of its track, and its text at 4.5:1 or more on its card.
+ * Renders: /cache/ai-progress-<size>.png.
+ */
+async function aiProgressSetup() {
+  const G = window.__gw;
+  const [S, P] = await Promise.all([G.mod("./state.ts"), G.mod("./ui/powai.tsx")]);
+  const now = Date.now();
+  const row = ([id, project, status, title], extra = {}) => ({ id, title, owner: "coder", status, note: "", project, created: now - 9e6, updated: now - 6e4, done: status === "done" ? now - 864e5 : 0, progressDone: 0, progressTotal: 0, step: "", steps: "", commits: "", images: "", activity: now - 6e4, ...extra });
+  P.board.value = [
+    row(["dd", "PowOS · phone UI", "working", "Daily driver: everything the phone needs every day"], { progressDone: 13, progressTotal: 20 }),
+    ...[1, 2, 3, 4, 5].map((i) => row([`w${i}`, "Windows", ["done", "done", "waiting", "working", "working"][i - 1], `Windows task number ${i} with a fairly long title that must not wrap onto a second line`])),
+    ...[1, 2, 3].map((i) => row([`h${i}`, "Home & launcher", i === 1 ? "done" : "waiting", `Home task ${i}`])),
+    row(["a1", "Agents & tooling", "working", "Agents view"]),
+    row(["old", "Games", "done", "Old"], { done: now - 40 * 864e5 }),
+  ];
+  P.boardSeen.value = true;
+  S.page.value = -1;
+  S.aiScreen.value = "progress";
+  return !!(await G.until(() => document.querySelector(".ai-screen .aip .aip-area"), 4000));
+}
+
+/** In the page: the first area opened, its animations settled; whether there is a Progress view. */
+async function aiProgressOpen() {
+  const view = document.querySelector(".ai-screen .aip");
+  if (!view) return false;
+  document.querySelector(".ai-screen .aip-area-row")?.click();
+  await window.__gw.until(() => document.querySelector(".ai-screen .aip-tasks"), 2000);
+  await Promise.all(document.getAnimations().filter((a) => view.contains(a.effect?.target)).map((a) => a.finished.catch(() => 0)));
+  return true;
+}
+
+/** The one-line texts the Progress view has (in the page: a selector list). */
+const AIP_LINES = ".ai-screen .aip :is(.aip-area-name, .aip-task-title, .aip-count, .aip-chip, .aip-ring-label, .aip-ring-sub)";
+
+/** In the page: monospace text in the view or its header; texts that wrap. */
+function aiProgressType(lines) {
+  const fails = [];
+  const mono = (e) => /mono/i.test(getComputedStyle(e).fontFamily.split(",")[0]);
+  const texts = [...document.querySelectorAll(".ai-screen .aip *")].filter((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()));
+  const bad = texts.filter(mono);
+  if (bad.length) fails.push(`monospace text: ${bad.slice(0, 3).map((e) => `"${e.textContent.trim().slice(0, 20)}"`).join(", ")}`);
+  const head = document.querySelector(".ai-screen .ai-top .ai-title");
+  if (head && mono(head)) fails.push("the Progress header is monospace");
+  for (const e of document.querySelectorAll(lines)) {
+    const cs = getComputedStyle(e);
+    const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5;
+    const h = e.getBoundingClientRect().height;
+    if (h > lh * 1.5) fails.push(`"${e.textContent.trim().slice(0, 24)}" wraps (${Math.round(h)} px, line ${Math.round(lh)})`);
+  }
+  return fails;
+}
+
+/** In the page: the ring (80 px or more, a percentage) and each bar's fill done/total of its track. */
+function aiProgressMarks() {
+  const fails = [];
+  const ring = document.querySelector(".ai-screen .aip .aip-ring");
+  if (!ring || ring.getBoundingClientRect().width < 80) fails.push("no ring at the top (80 px or more)");
+  else if (!/%$/.test(document.querySelector(".ai-screen .aip-ring-pct")?.textContent ?? "")) fails.push("the ring shows no percentage");
+  for (const bar of document.querySelectorAll(".ai-screen .aip .aip-bar")) {
+    const { done, total } = bar.dataset;
+    const want = Number(total) ? Number(done) / Number(total) : 0;
+    const got = bar.querySelector(".aip-bar-fill").getBoundingClientRect().width / bar.getBoundingClientRect().width;
+    if (Math.abs(got - want) > 0.03) fails.push(`a bar is ${got.toFixed(2)} full, not ${want.toFixed(2)} (${done}/${total})`);
+  }
+  return fails;
+}
+
+/** In the page: each one-line text at 4.5:1 or more on its fill (the chip's, else its card's), over the darkest and the lightest backdrop. */
+function aiProgressContrast(lines) {
+  const rgb = (c) => (c.match(/[\d.]+/g) ?? []).map(Number);
+  const lum = (c) => c.slice(0, 3).map((v) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)).reduce((n, v, i) => n + v * [0.2126, 0.7152, 0.0722][i], 0);
+  const mix = (top, a, under) => [0, 1, 2].map((i) => top[i] * a + under[i] * (1 - a));
+  const ratio = (x, y) => (Math.max(lum(x), lum(y)) + 0.05) / (Math.min(lum(x), lum(y)) + 0.05);
+  const fillOf = (e) => {
+    const own = rgb(getComputedStyle(e).backgroundColor);
+    return (own[3] ?? 1) > 0 ? own : rgb(getComputedStyle(e.closest(".aip-area")).backgroundColor);
+  };
+  // The worst of the two backdrops; a card see-through below 60% isn't measured here (the renders' report does).
+  const worst = (e) => {
+    const [fg, bg] = [rgb(getComputedStyle(e).color), fillOf(e)];
+    const a = bg[3] ?? 1;
+    if (a < 0.6) return 99;
+    const k = parseFloat(getComputedStyle(e).opacity) * (fg[3] ?? 1);
+    return Math.min(...[0, 255].map((u) => mix(bg, a, [u, u, u])).map((back) => ratio(mix(fg, k, back), back)));
+  };
+  const low = [...document.querySelectorAll(lines)].filter((e) => e.closest(".aip-area")).map((e) => [e, worst(e)]).filter(([, k]) => k < 4.5);
+  return [...new Set(low.map(([e, k]) => `"${e.textContent.trim().slice(0, 20)}" at ${k.toFixed(1)}:1 on its fill`))];
+}
+
+async function aiProgressCheck(page) {
+  const fails = [];
+  for (const [size, vp] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]]) {
+    await page.setViewport(vp);
+    await page.evaluate((w) => window.__gw.until(() => innerWidth === w), vp.width);
+    if (!(await page.evaluate(aiProgressSetup))) {
+      fails.push(`${size}: Progress shows no area rows`);
+      continue;
+    }
+    if (!(await page.evaluate(aiProgressOpen))) fails.push(`${size}: no Progress view (.aip)`);
+    const found = [...(await page.evaluate(aiProgressType, AIP_LINES)), ...(await page.evaluate(aiProgressMarks)), ...(await page.evaluate(aiProgressContrast, AIP_LINES))];
+    fails.push(...found.map((f) => `${size}: ${f}`));
+    await page.screenshot({ path: `/cache/ai-progress-${size}.png` });
+  }
   return fails;
 }
 
@@ -5561,6 +5670,9 @@ try {
   // The AI page is one chat: things to try as the manager's message, ⋯ for the rest, older on scroll-up (2026-10-31).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-chat", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiChatCheck(r.page))));
+  // Progress: a ring, one-line area cards with bars, no monospace, readable (the user, 2026-10-31 15:12).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-progress", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiProgressCheck(r.page))));
   // The pinned dock never fades (folded: the dock pages to the recent apps; the user, 2026-10-23).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "dock-no-fade", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(dockPinnedNoFade))));
