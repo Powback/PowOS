@@ -108,6 +108,18 @@ const pullDragging = computed(() => drawerDrag.value != null);
 /** How long the panel takes to settle shut (gesture.ts / shell.css --p transition) before the window can go. */
 const SETTLE_MS = 300;
 
+/** The pull screen's classes: where the dock is, the search-button dock and a morph from it, unfolded, open, a drag. */
+function pullClass(open: boolean): string {
+  const flags: [boolean, string][] = [
+    [dockButton.value, "search-dock"],
+    [!!morphFrom.value, "from-button"],
+    [wideHome.value, "wide unfolded"],
+    [open, "open"],
+    [pullDragging.value, "dragging"],
+  ];
+  return ["home pull-screen", `dock-${dockPosition.value}`, ...flags.filter(([on]) => on).map(([, c]) => c)].join(" ");
+}
+
 export function Pull() {
   const open = drawerOpen.value;
   // A setting found in the launcher's search opens here, over everything (Screens), as does a placeholder's being-built
@@ -121,7 +133,7 @@ export function Pull() {
     return () => clearTimeout(t);
   }, [open, screenUp]);
   return (
-    <div class={`home pull-screen dock-${dockPosition.value} ${dockButton.value ? "search-dock" : ""} ${morphFrom.value ? "from-button" : ""} ${wideHome.value ? "wide unfolded" : ""} ${open ? "open" : ""} ${pullDragging.value ? "dragging" : ""}`} {...homeGestures()}>
+    <div class={pullClass(open)} {...homeGestures()}>
       <div class="stage">
         <div class="launcher-frame tile" data-p ref={followOpenness} />
         <div class="launcher-clip" data-p ref={followOpenness}>
