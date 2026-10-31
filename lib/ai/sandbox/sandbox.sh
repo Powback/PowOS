@@ -48,8 +48,13 @@ sandbox_exec() {
     local rt
     rt=$(sandbox_runtime) || { echo "powos sandbox: needs bun or node >= 22.18: powos sandbox setup" >&2; return 1; }
     sandbox_deps_ok || { echo "powos sandbox: its deps are missing or stale: powos sandbox setup" >&2; return 1; }
-    [[ $rt == node ]] && exec node --no-warnings "$_SANDBOX_DIR/main.ts" "$@"
-    exec bun "$_SANDBOX_DIR/main.ts" "$@"
+    # In its unit's cgroup (ai-sandbox, 768m/64 pids) from its first instruction: the manager's claude starts it as
+    # the user, outside any unit's group, so a later `powos units enforce` pass was the only thing that ever moved it.
+    local enter=()
+    [[ -x /usr/lib/powos/apps/powos-units && $(uname -s) == Linux ]] &&
+        enter=(python3 /usr/lib/powos/apps/powos-units enter ai-sandbox --)
+    [[ $rt == node ]] && exec ${enter[@]+"${enter[@]}"} node --no-warnings "$_SANDBOX_DIR/main.ts" "$@"
+    exec ${enter[@]+"${enter[@]}"} bun "$_SANDBOX_DIR/main.ts" "$@"
 }
 
 # Does the manager get the sandbox? On when a runtime and the deps are here; POWOS_SANDBOX_ENABLED=0 opts out.

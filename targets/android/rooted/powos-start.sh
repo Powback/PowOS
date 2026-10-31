@@ -154,4 +154,6 @@ sleep_tier
  [ -f /data/powos/powos-units.sh ] && sh /data/powos/powos-units.sh enforce
  chroot "$R" /usr/bin/env -i PATH=/usr/bin:/usr/sbin python3 /usr/lib/powos/apps/powos-units publish
  [ -f /data/powos/powos-units.sh ] && sh /data/powos/powos-units.sh publish) > /dev/null 2>&1 < /dev/null &
+# The phone's timers (powos-periodic.sh, unit powos-periodic): App API health every 10 min, units published every 15.
+[ -f /data/powos/powos-periodic.sh ] && (sleep 60; exec sh /data/powos/powos-periodic.sh run) > /dev/null 2>&1 < /dev/null &
 echo "PowOS up"

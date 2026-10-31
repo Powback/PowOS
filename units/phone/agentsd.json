@@ -11,7 +11,7 @@
   ],
   "processes": [
     {
-      "match": "powos-agentsd"
+      "match": "^python3 \\S*/powos-agentsd(\\s|$)"
     }
   ],
   "limits": {

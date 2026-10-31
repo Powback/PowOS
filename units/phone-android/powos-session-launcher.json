@@ -10,7 +10,8 @@
     "/data/powos/powos-session.sh",
     "/data/powos/powos-run.sh",
     "/data/powos/session.log",
-    "/data/powos/termux-va.pid"
+    "/data/powos/termux-va.pid",
+    "/data/powos/session.args"
   ],
   "processes": [
     {

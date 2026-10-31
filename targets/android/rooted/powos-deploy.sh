@@ -22,6 +22,11 @@ install -m 755 $T/powos-units.sh /data/powos/powos-units.sh
 # The VPN client kept running while the phone rests (unit vpn-keep): applied now, and at every boot by powos-start.sh.
 install -m 755 $T/powos-vpn-keep.sh /data/powos/powos-vpn-keep.sh
 sh /data/powos/powos-vpn-keep.sh apply || true
+# The phone's timers (unit powos-periodic: App API health every 10 min, units published every 15): restarted onto
+# the new copy (started at every boot by powos-start.sh).
+install -m 755 $T/powos-periodic.sh /data/powos/powos-periodic.sh
+sh /data/powos/powos-periodic.sh stop
+(setsid sh /data/powos/powos-periodic.sh run > /dev/null 2>&1 < /dev/null &)
 install -m 755 $T/powos-rooted-session $R/usr/bin/powos-rooted-session
 install -m 755 $T/powos-android-app $R/usr/local/bin/powos-android-app
 install -m 755 $T/powos-android-tasks $R/usr/local/bin/powos-android-tasks
@@ -115,7 +120,7 @@ install -Dm644 $T/fex-Config.json $R/usr/share/fex-emu/Config.json
 install -Dm644 $T/fex-thunks.json $R/usr/share/fex-emu/thunks.json
 rm -f $T/fex-Config.json $T/fex-thunks.json
 rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
-  $T/powos-units.sh $T/powos-vpn-keep.sh \
+  $T/powos-units.sh $T/powos-vpn-keep.sh $T/powos-periodic.sh $T/powos-appdata.sh $T/powos-idle-sysupdate.sh \
   $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task \
   $T/powos-apps-watch $T/powos-apps-watch.desktop $T/powos-plasma-bridge $T/powos-plasma-bridge.desktop \
   $T/powos-ime-bridge $T/powos-ime-bridge.desktop $T/powos-output-scale $T/android-nm \
@@ -254,6 +259,8 @@ fi
 if [ -d $T/powos-app-api ]; then
   rm -rf $R/usr/lib/powos/app-api && mkdir -p $R/usr/lib/powos/app-api/examples $R/usr/lib/powos/app-api/sample
   install -m 644 $T/powos-app-api/*.py $R/usr/lib/powos/app-api/
+  # Its health check (unit app-api-health), run at boot and every 10 min by powos-periodic.sh.
+  [ -f $T/powos-app-api/health-check.sh ] && install -m 755 $T/powos-app-api/health-check.sh $R/usr/lib/powos/app-api/
   install -m 644 $T/powos-app-api/examples/*.appcap.json $R/usr/lib/powos/app-api/examples/
   if ls $T/powos-app-api/sample/*.openapi.json >/dev/null 2>&1; then
     install -m 644 $T/powos-app-api/sample/*.openapi.json $R/usr/lib/powos/app-api/sample/
