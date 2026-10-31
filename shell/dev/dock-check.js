@@ -4,6 +4,20 @@
  */
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const frame = () => new Promise((r) => requestAnimationFrame(r));
+
+/** launcherDockWrong() once the dock has settled: "" , or no animations on the launcher and the same answer for 5 frames, max [ms]. */
+async function settledWrong(ms = 3000) {
+  let last, same = 0;
+  for (const t0 = performance.now(); performance.now() - t0 < ms; await frame()) {
+    const wrong = launcherDockWrong();
+    if (!wrong) return "";
+    same = wrong === last ? same + 1 : 0;
+    last = wrong;
+    if (same >= 5 && !document.querySelector(".pull-screen")?.getAnimations({ subtree: true }).length) return wrong;
+  }
+  return launcherDockWrong();
+}
 
 /** Whether rect [r] sits on screen as home's dock does at [at]: a column at that edge, or a row at the foot. */
 function placedAt(r, at) {
@@ -48,6 +62,6 @@ export async function launcherDockOpens(position, keyboard) {
   await sleep(50);
   E.emit("pull.end", { open: true });
   await sleep(400);
-  const wrong = launcherDockWrong();
+  const wrong = await settledWrong();
   return wrong ? [`${position}${keyboard ? " +keyboard" : ""}: ${wrong}`] : [];
 }
