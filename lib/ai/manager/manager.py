@@ -330,7 +330,7 @@ class Manager:
         hint = str(hint).replace("\n", " ")
         return hint[:120] + "…" if len(hint) > 120 else hint
 
-    # What present / present_choices (comms) show in the chat: a fenced block in the
+    # What present / present_choices / present_try (comms) show in the chat: a fenced block in the
     # assistant's text (```choices / ```present + one JSON line), so every chat that
     # renders the event stream gets it with no new event kind; one that doesn't
     # shows the fence as code.
@@ -354,6 +354,15 @@ class Manager:
             data = {"title": str(inp.get("title", "")).strip()[:120] or "untitled", "format": fmt,
                     "body": body[:cls.PRESENT_MAX]}
             return "```present\n" + json.dumps(data, ensure_ascii=False) + "\n```"
+        if tool == "present_try":
+            items = [{"id": str(i.get("id", "")).strip()[:120], "line": str(i.get("line", "")).strip()[:300],
+                      **({"do": True} if i.get("do") else {})}
+                     for i in inp.get("items") or [] if isinstance(i, dict)]
+            items = [i for i in items if i["id"] and i["line"]][:8]
+            if not items:
+                return None
+            data = {"title": str(inp.get("title", "")).strip()[:120], "items": items}
+            return "```try\n" + json.dumps(data, ensure_ascii=False) + "\n```"
         return None
 
     @staticmethod

@@ -90,6 +90,12 @@ class NavGesture(
      */
     private var overHome = false
 
+    /**
+     * A full-screen Linux window is over home's page ([WebWindows.fullScreenUp]): no Android task is under the finger,
+     * but it is an app all the same - the swipe goes home (out of full screen, to the dock), a hold opens the switcher.
+     */
+    private var overFullWindow = false
+
     /** The layer was begun (the swipe went up; a tap or a sideways swipe never begins it). */
     private var homeBegun = false
     private var homeProgress = 0f
@@ -123,6 +129,7 @@ class NavGesture(
         from = null
         downX = e.rawX
         armedLogged = false
+        overFullWindow = false
         switcherTick.reset()
         homeTick.reset()
         swipe++
@@ -212,6 +219,11 @@ class NavGesture(
         // Over home's switcher there's no app under the finger: home's (the plain way).
         from = if (Switcher.open && Switcher.homeVisible) null else Tasks.visible(service)
         val tasks = recentTasks ?: run { Log.i(TAG, "gesture: no recents transition - SystemUI gave no IRecentTasks"); return }
+        if (from == null && dev.omalauncher.shell.WebWindows.fullScreenUp()) {
+            overFullWindow = true
+            Log.i(TAG, "gesture: over a full-screen window on home's page: an app's swipe (home, or the switcher on a hold)")
+            return
+        }
         if (from == null) {
             // One owner: the switcher layer follows the finger only over home's main page with nothing open. On the AI
             // page, an open drawer or another page the swipe is home's (it goes to the main page): no layer at all.
@@ -231,6 +243,10 @@ class NavGesture(
         if (!RecentsTransition.enabled(service) || Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) run { Log.i(TAG, "gesture: the recents transition is off"); return }
         // Behind the app: PowOS's web home (the switcher is a layer of it), or the recents activity (the desktop is home).
         val home = Switcher.target(service) ?: run { Log.i(TAG, "gesture: no recents transition - PowOS isn't the home app"); return }
+        // The previous swipe's transition hasn't finished: asking for another now makes WM Shell merge it and finish the
+        // previous one to home - a tap on the bottom strip right after another (the Plasma app's start menu button lies
+        // in the strip) took the app away. This swipe goes the plain way; the previous one still ends where it went.
+        if (RecentsTransition.inFlight()) run { Log.i(TAG, "gesture: the previous recents transition is still under way: the plain way"); return }
         val t = RecentsTransition.start(service, tasks, home, Rect(screen)) ?: return
         // The window heads for its card in home's switcher layer, which follows the window frame by frame.
         t.slot = { Switcher.slot }
@@ -262,6 +278,7 @@ class NavGesture(
         if (panel != null) return endPanel(outcome == NavGestureClassifier.Outcome.Home || outcome == NavGestureClassifier.Outcome.Switcher)
         if (overHome && homeBegun) return endOverHome(outcome)
         overHome = false
+        if (overFullWindow) return endOverFullWindow(outcome)
         if (pinned) {
             if (outcome == NavGestureClassifier.Outcome.Switcher) runCatching { systemUi?.stopScreenPinning() }.onFailure { Log.w(TAG, "can't unpin", it) }
             return
@@ -286,6 +303,19 @@ class NavGesture(
                 quickSwitch()
             }
             NavGestureClassifier.Outcome.None -> backToApp(t)
+        }
+    }
+
+    /** The swipe over a full-screen window let go ([overFullWindow]): as over an app, without a window to move. */
+    private fun endOverFullWindow(outcome: NavGestureClassifier.Outcome) {
+        overFullWindow = false
+        val toSwitcher = outcome == NavGestureClassifier.Outcome.Switcher && systemUiState and SYSUI_OVERVIEW_DISABLED == 0L
+        when {
+            toSwitcher -> switcher(null)
+            outcome == NavGestureClassifier.Outcome.Home || outcome == NavGestureClassifier.Outcome.Switcher ->
+                dev.omalauncher.shell.WebWindows.homeGesture("home swipe")
+            outcome is NavGestureClassifier.Outcome.QuickSwitch -> quickSwitch()
+            else -> Unit
         }
     }
 

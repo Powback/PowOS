@@ -289,6 +289,14 @@ class RichBlockTests(unittest.TestCase):
         self.assertEqual((head, data["format"], data["title"]), ("```present", "html", "Plan"))
         self.assertEqual(self.block("mcp__comms__present", {"title": "T", "body": "# x"})[1]["format"], "md")
 
+    def test_try_keeps_items_with_an_id_and_a_line(self):
+        head, data = self.block("mcp__comms__present_try", {"title": "2 things ready", "items": [
+            {"id": "overlap", "line": "Tap the window behind"}, {"id": "plug", "line": "Plug it in", "do": True},
+            {"id": "", "line": "no id"}, {"id": "x", "line": " "}]})
+        self.assertEqual(head, "```try")
+        self.assertEqual(data["items"], [{"id": "overlap", "line": "Tap the window behind"}, {"id": "plug", "line": "Plug it in", "do": True}])
+        self.assertEqual(self.block("mcp__comms__present_try", {"items": []}), (None, None))
+
     def test_other_tools_and_empty_bodies_show_nothing(self):
         self.assertEqual(self.block("Bash", {"command": "ls"}), (None, None))
         self.assertEqual(self.block("mcp__comms__present", {"title": "T", "body": "  "}), (None, None))

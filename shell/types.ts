@@ -51,6 +51,8 @@ export interface App {
   category?: number | null;
   /** Linux: its .desktop Categories ("Network;WebBrowser;"). */
   categories?: string | null;
+  /** Linux: the whole desktop (Plasma), shown in its own Android activity - it opens no KWin window of its own. */
+  desktop?: boolean;
 }
 
 /** CSS px; [keyboard] is the soft keyboard's height (0 while it's down). */
@@ -263,8 +265,11 @@ export interface PhoneNotification {
   time: number;
   clearable: boolean;
   profile: string | null;
-  /** Its buttons in order (notifications.action's index); [input]: it takes a typed reply. */
-  actions?: { title: string; input: boolean }[];
+  /**
+   * Its buttons in order (notifications.action's index); [input]: it takes a typed reply; [semantic]: what the app
+   * says it does (Notification.Action.SEMANTIC_ACTION_*: 1 reply, 2 mark as read; 0 or absent: not said).
+   */
+  actions?: { title: string; input: boolean; semantic?: number }[];
   /** Notification.category ("alarm", "call", "msg", ...): an alarm's or a call's banner stays up longer. */
   category?: string | null;
   /** Its app's package (an older host: none). */
@@ -273,6 +278,13 @@ export interface PhoneNotification {
   group?: string | null;
   /** A conversation (a messaging-style one): shown on its own, above the groups. */
   conversation?: boolean;
+  /** MessagingStyle's messages, oldest first (the last few): [sender] "" is the phone's own user, [time] Unix ms. */
+  messages?: { sender: string; text: string; time: number }[];
+  /** MessagingStyle's conversation title (a group's or a channel's name), null for one-to-one. */
+  conversationTitle?: string | null;
+  groupConversation?: boolean;
+  /** It has a tap action: open() opens the conversation. */
+  tappable?: boolean;
 }
 /**
  * A recent task, as the switcher (ui/recents.tsx) shows it: [id] the system's, [key] and [icon] its app's in the drawer (null when it
@@ -424,6 +436,9 @@ export interface WebWindowRect { left: number; top: number; width: number; heigh
 
 export interface Bridge {
   /** Perf traces (?: hosts from before it): saves JSON under the AI shared dir, returns its path in PowOS. */
+  /** The one search/chat bar input home's bar and the launcher overlay share (barsync.ts): the host keeps the latest and
+   *  broadcasts it to the other windows as "bar.input". Hosts from before it: absent. */
+  bar?: { publish(v: BarInput): Promise<BarInput | null>; get(): Promise<BarInput | null> };
   perf?: { save(json: string): Promise<string | null>; /** Main shell frame sample to the other windows (hosts from before it: absent). */ publish?(json: string): Promise<unknown>;
     /** The host's main-thread blocks while recording (true: started; the trace section on stop). Older hosts: absent. */ native?(on: boolean): Promise<NativePerf | true | null>;
     /** The front PowOS window's presents (null: none in front); hosts from before it reject it. */ front?(): Promise<FrontPresents | null> };
@@ -829,6 +844,11 @@ export interface Bridge {
      */
     open?(kind: "apps" | "ai", how?: object): Promise<boolean>;
     /**
+     * Home's page drives the overlay's pull itself (DS2: a swipe up from the dock's search button, which the host's own
+     * lift leaves to the dock): "begin" { ...how }, "drag" openness 0..1, "end" open. An older host has none.
+     */
+    drive?(phase: "begin" | "drag" | "end", arg?: unknown): Promise<boolean>;
+    /**
      * Home's page: a swipe up on home is the launcher's now ([on]: nothing open over home's pages), as [shade.homePull]
      * is a swipe down's; [split]: from home's left half it brings PowOS AI's panel (state.ts pullPanels). Resolves true
      * when the host takes that finger itself (its gesture input); false - home asks [open] on a swipe up instead. [regions]:
@@ -933,8 +953,11 @@ export interface Bridge {
      * [kwin]: a Linux window KWin opened ("l:" key, "webwindows.adopt" with its KWin id) shown in it (docs/WEB_WINDOWS.md S6).
      */
     open(key: string, rect: WebWindowRect, task?: number, kwin?: number): Promise<number>;
-    /** A touch on its body, CSS px from the body's top-left. */
-    input(id: number, action: "down" | "move" | "up" | "cancel", x: number, y: number): Promise<boolean>;
+    /**
+     * A touch on its body at [at] (CSS px from the body's top-left); [at].finger: which finger (PZ1: every finger of a
+     * gesture that started on the body, one multi-touch gesture for the app; omitted: 0).
+     */
+    input(id: number, action: "down" | "move" | "up" | "cancel", at: { x: number; y: number; finger?: number }): Promise<boolean>;
     close(id: number): Promise<boolean>;
     /** Host-optional: its app as a real full-screen app (moved to the main display; again: to the front). */
     fullScreen?(id: number): Promise<boolean>;
@@ -1305,3 +1328,13 @@ export interface VirtualDesktop {
 /** A settings page or control the host can open (SettingsSearch.kt), and the app it opens in: [package], its name
  * [app] and picture [appIcon] (a data: URL, for one that isn't a launcher app). Older hosts send no app. */
 export interface NativeSetting { id: string; label: string; keywords: string; breadcrumb?: string; package?: string; app?: string; appIcon?: string }
+
+/** The shared bar's input (barsync.ts): its text (with a dictation's words as heard), whether a dictation is writing it,
+ *  its generation (a clear starts a new one; the host refuses older ones) and the host's number for it (seq: newer wins;
+ *  a page's write sends 0). */
+export interface BarInput {
+  text: string;
+  hearing: boolean;
+  gen: number;
+  seq: number;
+}

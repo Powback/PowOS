@@ -12,10 +12,11 @@ import { GrowField } from "./grow.tsx";
 import { Icon } from "./icons.tsx";
 import { searchResults, searchPending, openSearchResult } from "../search.ts";
 import { followOpenness } from "./gesture.ts";
-import { chatting, drawer, launcherIsOverlay, openPanel, pullKind, query } from "../state.ts";
+import { chatting, drawer, launcherIsOverlay, openPanel, pullKind, query, sharesBar } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
-import { finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
+import { dictate, drop, finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
+import { remoteHearing, startBarSync } from "./barsync.ts";
 
 /** A press longer than this is a hold (talk, then send); shorter, a tap (dictate). */
 const HOLD_MS = 250;
@@ -171,7 +172,34 @@ function useSubmitFinishes(box: { current: HTMLDivElement | null }, targets: Mic
  *  (the field is empty until then) - and spinning while a send waits for a dictation's final words. */
 function PillSend({ targets, value }: { targets: MicTarget[]; value: string }) {
   const waiting = !!finishing.value && targets.includes(finishing.value);
-  return <Send shown={!!value.trim() || waiting || targets.some(listeningFor)} waiting={waiting} />;
+  // SI1: the shared bar's text written by another window's dictation (home's, under the launcher): its send shows here.
+  const elsewhere = targets.includes(barMic) && remoteHearing.value;
+  return <Send shown={!!value.trim() || waiting || elsewhere || targets.some(listeningFor)} waiting={waiting} />;
+}
+
+/**
+ * SB5 (the user, 2026-10-31 02:46: "we should have an x to clear on the left side of the inputs"): the pill's leading
+ * slot. Empty, the prompt glyph `>` (its placeholder); with text, an × that clears it - through the field's onInput, so
+ * the shared bar (barsync.ts) empties the other window's too - and ends a dictation into it without writing its words
+ * back (dictation.ts drop). One 40 px slot either way (shell.css .pill .lead): the text never moves as it turns.
+ */
+function Lead({ empty, filled, clear }: { empty: boolean; filled: boolean; clear: () => void }) {
+  return (
+    <button
+      type="button"
+      class={`lead ${filled ? "filled" : ""}`}
+      aria-label="clear"
+      aria-hidden={!filled}
+      tabIndex={filled ? undefined : -1}
+      disabled={!filled}
+      // The field keeps its focus (and the keyboard stays as it was); the form's onClick (open, focus) isn't run.
+      onPointerDown={(e) => e.preventDefault()}
+      onClick={(e) => (e.stopPropagation(), filled && clear())}
+    >
+      <span class={`prompt ${empty ? "" : "off"}`} aria-hidden="true">&gt;</span>
+      <Icon name="close" size={20} class="x" />
+    </button>
+  );
 }
 
 export function Pill({
@@ -201,7 +229,7 @@ export function Pill({
   useSubmitFinishes(box, targets);
   return (
     <div ref={box} class={`${cls} pill tile ${sending ? "sending" : ""} ${empty ? "empty" : ""}`}>
-      {empty && <span class="prompt" aria-hidden="true">&gt;</span>}
+      <Lead empty={empty} filled={!!field.value} clear={() => (drop(...targets), field.onInput(""))} />
       <GrowField {...(field as { value: string; onInput: (v: string) => void })} />
       <Mic target={target} />
       {send && <PillSend targets={targets} value={field.value} />}
@@ -214,6 +242,23 @@ const barMic: MicTarget = {
   typed: () => query.value,
   heard: (full, send) => (send ? askHere(full) : (query.value = full)),
   started: () => openHere(),
+};
+
+/** DS2: the launcher's bar dictating (home's dock search button held: pull.begin { listen }, or the overlay's own button). */
+export const dictateBar = () => dictate(barMic);
+
+/** The launcher's bar field focused, the keyboard up (ShellBridge.overlayKeyboard makes the overlay the IME's target). */
+export function focusBar() {
+  requestAnimationFrame(() => {
+    document.querySelector<HTMLTextAreaElement>(".pull-screen > .bar textarea")?.focus();
+    void powos.keyboard.show();
+  });
+}
+
+/** SI1: what the bar shows (barsync.ts writes it to the other window's bar): a dictation's words as heard, else the query. */
+const barShown = () => {
+  const heard = hearing(barMic) ?? hearing(pillTarget);
+  return { text: heard ?? query.value, hearing: heard !== null };
 };
 
 /**
@@ -242,6 +287,8 @@ function askHere(text: string) {
 export function Bar({ proxy = false }: { proxy?: boolean }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const [focused, setFocused] = useState(false);
+  // SI1: home's bar and the launcher overlay's are one input (barsync.ts); another window's edit ends a dictation here.
+  useEffect(() => void (sharesBar && startBarSync(barShown, () => drop(barMic, pillTarget))), []);
   const s = speech.value;
   // While it listens, the field shows what's heard after what was typed.
   // The assistant's dictation (the side button, the pet) writes into this field too.

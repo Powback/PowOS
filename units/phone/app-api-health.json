@@ -1,0 +1,26 @@
+{
+  "id": "app-api-health",
+  "name": "App API health + survivability",
+  "kind": "system",
+  "owner": "user",
+  "host": "phone",
+  "purpose": "keeps the App API from silently disappearing (the 2026-10-31 regression where a reboot cleared the /data/local/tmp staging copy and nobody noticed the runtime was down). On boot and on a timer it (1) verifies the runtime service (unit app-api, 127.0.0.1:3411) is up and re-stages it from the chroot if the loopback service died, (2) checks the ban-safe read path (launcher notification access) and the on-demand capture units, (3) fires a PowOS notification + a board task if the runtime - the part that must always be up - is down or gone. Health check only; it does NOT start capture, push frida, or install the CA (those stay user-gated).",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (health-check.sh staged with tools/app-api by rooted.sh deploy); scheduled by powos-start.sh at session start",
+  "files": [
+    "/usr/lib/powos/app-api/health-check.sh"
+  ],
+  "selinux": "unchanged - a read-only shell check run as the powos user; no policy change, no permissive",
+  "lifecycle": "runs once at session/boot start and every 10 min; exits non-zero only when the runtime service is down",
+  "checks": {
+    "runtime": "curl 127.0.0.1:3411/apps answers (FAIL -> notify + board task + restart service app-api)",
+    "read_path": "launcher holds notification access (the needs-me read path); WARN if revoked",
+    "capture_units": "app-frida / app-ca presence reported as info, not failure (default resting state is absent)"
+  },
+  "autosleep": "never",
+  "remove": {
+    "commands": [
+      "rm -f /usr/lib/powos/app-api/health-check.sh"
+    ],
+    "note": "removing the script stops the health check; the runtime (unit app-api) is unaffected."
+  }
+}

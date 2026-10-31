@@ -14,6 +14,7 @@ class NavGestureClassifierTest {
     private fun classifier() = NavGestureClassifier(density, height)
 
     /** Moves the finger from ([x0], [y0]) to ([x1], [y1]) in [ms], one event every 8 ms, starting at [t0]. */
+    @Suppress("LongParameterList") // a test's drag: two points, a duration, a start - grouping them only hides them
     private fun NavGestureClassifier.drag(
         x0: Float,
         y0: Float,
@@ -41,24 +42,23 @@ class NavGestureClassifierTest {
     }
 
     @Test
-    fun aSlowLongSwipeUpLetGoIsTheSwitcher() {
+    fun aSlowLongSwipeUpLetGoGoesHome() {
         val c = classifier()
         c.down(540f, bottom, 0)
-        // 700 px in 1.4 s: never a fling, never still, past the home distance (22% of the screen): the window is on
-        // its card by then, and a slow release leaves it there (Quickstep's non-fling end target).
+        // 700 px in 1.4 s: never a fling, never still - no hold, so home (the switcher only on a hold).
         val t = c.drag(540f, bottom, 540f, bottom - 700f, 1400)
         assertFalse(c.armed)
-        assertEquals(NavGestureClassifier.Outcome.Switcher, c.up(540f, bottom - 700f, t + 8))
+        assertEquals(NavGestureClassifier.Outcome.Home, c.up(540f, bottom - 700f, t + 8))
     }
 
     @Test
-    fun aRelaxedSwipeAndReleaseIsTheSwitcher() {
+    fun aRelaxedSwipeAndReleaseGoesHome() {
         val c = classifier()
         c.down(540f, bottom, 0)
-        // 480 px in 300 ms (1.6 px/ms, 0.64 dp/ms) and let go moving: no pause, no hold - the switcher all the same.
+        // 480 px in 300 ms (1.6 px/ms, 0.64 dp/ms) and let go moving: no pause, no hold - home.
         val t = c.drag(540f, bottom, 540f, bottom - 480f, 300)
         assertFalse(c.armed)
-        assertEquals(NavGestureClassifier.Outcome.Switcher, c.up(540f, bottom - 480f, t + 8))
+        assertEquals(NavGestureClassifier.Outcome.Home, c.up(540f, bottom - 480f, t + 8))
     }
 
     @Test
@@ -85,8 +85,8 @@ class NavGestureClassifierTest {
         val c = classifier()
         c.down(540f, bottom, 0)
         var t = c.drag(540f, bottom, 540f, bottom - 500f, 200)
-        // Held still for 300 ms, events still coming (a finger is never perfectly still).
-        for (i in 1..37) {
+        // Held still for 400 ms, events still coming (a finger is never perfectly still).
+        for (i in 1..50) {
             t += 8
             c.move(540f + (i % 2), bottom - 500f, t)
         }
@@ -110,7 +110,7 @@ class NavGestureClassifierTest {
         val c = classifier()
         c.down(540f, bottom, 0)
         var t = c.drag(540f, bottom, 540f, bottom - 500f, 200)
-        for (i in 1..37) {
+        for (i in 1..50) {
             t += 8
             c.move(540f, bottom - 500f, t)
         }

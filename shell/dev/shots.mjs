@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import puppeteer from "puppeteer";
+import { FLEET_SETUP } from "./agents-fleet.mjs";
 
 const ORIGIN = "https://shell.powos";
 const ROOT = "/shell";
@@ -152,6 +153,20 @@ const PRESENT_SAMPLE = JSON.stringify([
   { kind: "assistant", text: "```present\n" + JSON.stringify({ title: "Review: chat cards", format: "html", body: SHEET_HTML }) + "\n```" },
 ]);
 
+/** A document then a question, as the manager sends them (manager.py: tool_use, its ```block, tool_use, its block): A, B. */
+const PRESENT_ORDER = JSON.stringify([
+  { kind: "user", text: "plan the cleanup" },
+  { kind: "tool", name: "mcp__comms__present", hint: "", ok: true },
+  { kind: "assistant", text: "```present\n" + JSON.stringify({ title: "Cleanup plan", format: "md", body: PLAN_MD }) + "\n```" },
+  { kind: "tool", name: "mcp__comms__present_choices", hint: "", ok: true },
+  { kind: "assistant", text: "```choices\n" + JSON.stringify({ question: "Go ahead with the plan?", options: ["Yes", "Not now"] }) + "\n```" },
+]);
+/** The assist overlay with a 200x200 square circled on the screen above its panel (pointer events on .assist-draw). */
+const ASSIST_CROP =
+  "await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(800);" +
+  " const d = document.querySelector('.assist-draw'); const at = (type, x, y) => d.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, clientX: x, clientY: y }));" +
+  " const x0 = 80, y0 = 120; at('pointerdown', x0, y0); for (const [x, y] of [[x0 + 200, y0], [x0 + 200, y0 + 200], [x0, y0 + 200], [x0, y0]]) at('pointermove', x, y); at('pointerup', x0, y0); await sleep(400);";
+
 /** Five hosts' units as `powos units publish` leaves them (41 on the phone, drift on two), for ui/units.tsx. */
 const UNITS_SCENE =
   "const M = await U('./ui/units.tsx'); const now = Date.now(); const R = []; const hosts = [['phone', 41, 14, 'drift'], ['phone-android', 23, 9, 'clean'], ['mac', 37, 21, 'drift'], ['colima', 58, 44, 'clean'], ['powstation', 12, 7, 'clean']];" +
@@ -182,11 +197,14 @@ const board = (actions) =>
   ` P.board.value = B.map((r) => ({ ...r, note: A[r.id] ?? r.note, created: now - r.createdAgo, updated: now - r.updatedAgo, done: r.doneAgo ? now - r.doneAgo : 0, activity: r.activityAgo ? now - r.activityAgo : 0 }));` +
   ` P.boardSeen.value = true; S.chat.value = { busy: false, items: [{ kind: "user", text: "what changed overnight?" }, { kind: "assistant", text: "Three pushes: the shade, the pet, the speech fix." }, ...${CHAT_SAMPLE}] }; S.page.value = -1; await sleep(300);`;
 
+/** The AI page as one chat (AI1-AI8): the board's state for the strip, the manager's things to try last. */
+const MSGR_TRY = { kind: "assistant", text: "Shipped the window raise fix.\n\n```try\n" + JSON.stringify({ title: "2 things ready", items: [{ id: "overlap", line: "Tap a window behind another: it comes to the front" }, { id: "plug", line: "Plug the phone into the Mac once, for the kernel test", do: true }] }) + "\n```" };
+const MSGR = board(true).replace(" S.page.value = -1;", "") + ` S.chat.value = { busy: false, items: [...S.chat.value.items, ${JSON.stringify(MSGR_TRY)}] }; S.page.value = -1; await sleep(500);`;
 /** Rows with queued phone checks (queue.sh's marker), a failed check (its screenshot) and a passed one: "test now". */
 const TEST_NOW =
   " const R = P.board.value; const w = R.filter((r) => r.status === 'working'); w[0].step = 'phone check queued'; w[1].step = 'phone check queued';" +
   " w[2].step = 'verify FAIL rc=1: FAIL: not freeform (log ~/.cache/powos-verify-queue/done/x.log)'; w[2].images = JSON.stringify(['/home/powos/design-qa/verify-x.png']);" +
-  " w[3].step = 'verify PASS: 3 swipes ok (log ~/.cache/powos-verify-queue/done/y.log)'; P.board.value = [...R]; await sleep(200); document.querySelector('.ai-work-list').scrollIntoView();";
+  " w[3].step = 'verify PASS: 3 swipes ok (log ~/.cache/powos-verify-queue/done/y.log)'; P.board.value = [...R]; await sleep(200); S.aiScreen.value = 'progress'; await sleep(250); document.querySelector('.ai-work-list')?.scrollIntoView();";
 /**
  * The grouped work board (powai.tsx Work, the user 2026-10-30: "let's group the PowOS AI in-progress things"): 13 tasks
  * across its four groups - two waiting on the user, six shipped and waiting on the user's verdict (five shown, one
@@ -228,7 +246,7 @@ const GROUPED_SCENE =
   ` P.boardSeen.value = true; if (P.checks) P.checks.value = [{ job: 'j1', task: 'speech', name: 'speech-release', state: 'queued', line: '', at: now - 6e4, shipped: true }, { job: 'j2', task: 'pet', name: 'pet-dock', state: 'FAIL', line: 'pet over icon', at: now - 3e5, shipped: true }, { job: 'you-dock', task: 'dock-epic', name: 'you', state: 'PASS', line: 'works: the user tried it', at: now - 2e5, shipped: true }];` +
   ` S.chat.value = { busy: false, items: [{ kind: "user", text: "how is the board?" }, { kind: "assistant", text: "Six things are ready for you to try." }] }; S.page.value = -1; await sleep(400);` +
   ` const ag = (id, work, role) => ({ id, host: 'phone', role, parent: null, state: 'working', title: work, step: '', cwd: '~', pid: 1, subs: 0, unread: 0, report: '', work, started: now - 6e5, last: Date.now(), rev: 1 });` +
-  ` E.emit('agents.delta', { agents: [ag('a-chat', 'ai-board', 'powos-chat'), ag('a-perf', 'perf', 'powos-perf')] }); await sleep(300); document.querySelector('.ai-work-list').scrollIntoView();`;
+  ` E.emit('agents.delta', { agents: [ag('a-chat', 'ai-board', 'powos-chat'), ag('a-perf', 'perf', 'powos-perf')] }); await sleep(300); S.aiScreen.value = 'progress'; await sleep(250); document.querySelector('.ai-work-list')?.scrollIntoView();`;
 
 /**
  * A Needs-you card that asks the user to try something (the user, 2026-10-30: "How am I supposed to give feedback to
@@ -237,7 +255,7 @@ const GROUPED_SCENE =
  */
 const NY_CARD = (img) =>
   `const now = Date.now(); const P = await U('./ui/powai.tsx'); P.board.value = [{ id: 'overlap', title: 'Windows: tap the one behind to raise it', owner: 'coder', status: 'waiting', note: 'Overlap two windows and tap the one behind: it should come to the front', project: 'Windows', created: now - 9e5, updated: now - 6e4, done: 0, progressDone: 0, progressTotal: 0, step: '', steps: '', commits: JSON.stringify([{ sha: 'abc1234', subject: '' }, { sha: 'def5678', subject: 'Tapping a window behind raises it' }]), images: JSON.stringify(${img ? "['/run/powos-app/powos-ai-shared/screen-ny.png']" : "[]"}), activity: now - 6e4 }, { id: 'plug', title: 'Kernel test build', owner: 'kernel', status: 'waiting', note: "Plug the phone into the Mac's USB once, for the kernel test", project: 'Kernel & system', created: now - 9e5, updated: now - 9e4, done: 0, steps: '', commits: '', images: '', activity: now - 9e4 }];` +
-  ` P.boardSeen.value = true; S.chat.value = { busy: false, items: [] }; S.page.value = -1; await sleep(400); document.querySelector('.ai-work-list').scrollIntoView();`;
+  ` P.boardSeen.value = true; S.chat.value = { busy: false, items: [] }; S.page.value = -1; await sleep(400); S.aiScreen.value = 'progress'; await sleep(250); document.querySelector('.ai-work-list')?.scrollIntoView();`;
 const NY_OPEN = " document.querySelector('.ai-work-list .ai-item-row').click(); await sleep(300);";
 const NY_REPLY = " [...document.querySelectorAll('.ai-act')].find((b) => b.textContent.trim() === 'still broken').click(); await sleep(200); const f = document.querySelector('.ai-reply textarea'); f.value = 'the one behind stays behind'; f.dispatchEvent(new Event('input', { bubbles: true })); await sleep(100); [...document.querySelectorAll('.ai-reply .ai-act')].find((b) => /screenshot/.test(b.textContent)).click(); await sleep(400); document.activeElement?.blur();";
 
@@ -347,6 +365,20 @@ const SCENES = [
   ["edit", "home", "S.editing.value = true;", "wallpaper"],
   // The side dock unfolded (the user, 2026-10-30: "The search bar turns weird"): edit mode keeps the search bar as it
   // is, the edit bar below it; the dock column starts under the status bar (its battery uncovered).
+  // Home's search as a dock button (ui/docksearch.tsx; the user, 2026-10-31 01:24): the bar as it was, then the
+  // button in the dock's centre (3 | button | 3) bottom and side, and expanded in place (a tap) over the dock.
+  // DS2: the launcher opening from the button (ui/launchmorph.ts), frozen at 0/45/90/135/180 ms of its settle.
+  ["ds2-open-0", "pull", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'dock'; await sleep(300); const fe = document.querySelector('.pull-screen .dock .dock-search-face'); const f = fe ? fe.getBoundingClientRect() : { left: innerWidth / 2 - 24, top: innerHeight - 70, width: 48, height: 48 }; E.emit('pull.begin', { kind: 'apps', search: true, from: { left: f.left, top: f.top, width: f.width, height: f.height } }); E.emit('pull.drag', { p: 1 }); E.emit('pull.end', { open: true }); await new Promise(requestAnimationFrame); document.getAnimations().filter((a) => a.timeline === document.timeline).forEach((a) => { a.pause(); a.currentTime = 0; }); await sleep(50);", "blurred"],
+  ["ds2-open-45", "pull", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'dock'; await sleep(300); const fe = document.querySelector('.pull-screen .dock .dock-search-face'); const f = fe ? fe.getBoundingClientRect() : { left: innerWidth / 2 - 24, top: innerHeight - 70, width: 48, height: 48 }; E.emit('pull.begin', { kind: 'apps', search: true, from: { left: f.left, top: f.top, width: f.width, height: f.height } }); E.emit('pull.drag', { p: 1 }); E.emit('pull.end', { open: true }); await new Promise(requestAnimationFrame); document.getAnimations().filter((a) => a.timeline === document.timeline).forEach((a) => { a.pause(); a.currentTime = 45; }); await sleep(50);", "blurred"],
+  ["ds2-open-90", "pull", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'dock'; await sleep(300); const fe = document.querySelector('.pull-screen .dock .dock-search-face'); const f = fe ? fe.getBoundingClientRect() : { left: innerWidth / 2 - 24, top: innerHeight - 70, width: 48, height: 48 }; E.emit('pull.begin', { kind: 'apps', search: true, from: { left: f.left, top: f.top, width: f.width, height: f.height } }); E.emit('pull.drag', { p: 1 }); E.emit('pull.end', { open: true }); await new Promise(requestAnimationFrame); document.getAnimations().filter((a) => a.timeline === document.timeline).forEach((a) => { a.pause(); a.currentTime = 90; }); await sleep(50);", "blurred"],
+  ["ds2-open-135", "pull", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'dock'; await sleep(300); const fe = document.querySelector('.pull-screen .dock .dock-search-face'); const f = fe ? fe.getBoundingClientRect() : { left: innerWidth / 2 - 24, top: innerHeight - 70, width: 48, height: 48 }; E.emit('pull.begin', { kind: 'apps', search: true, from: { left: f.left, top: f.top, width: f.width, height: f.height } }); E.emit('pull.drag', { p: 1 }); E.emit('pull.end', { open: true }); await new Promise(requestAnimationFrame); document.getAnimations().filter((a) => a.timeline === document.timeline).forEach((a) => { a.pause(); a.currentTime = 135; }); await sleep(50);", "blurred"],
+  ["ds2-open-180", "pull", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'dock'; await sleep(300); const fe = document.querySelector('.pull-screen .dock .dock-search-face'); const f = fe ? fe.getBoundingClientRect() : { left: innerWidth / 2 - 24, top: innerHeight - 70, width: 48, height: 48 }; E.emit('pull.begin', { kind: 'apps', search: true, from: { left: f.left, top: f.top, width: f.width, height: f.height } }); E.emit('pull.drag', { p: 1 }); E.emit('pull.end', { open: true }); await new Promise(requestAnimationFrame); document.getAnimations().filter((a) => a.timeline === document.timeline).forEach((a) => { a.pause(); a.currentTime = 180; }); await sleep(50);", "blurred"],
+  ["dsearch-bar-bottom", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'bar'; await sleep(300);", "wallpaper"],
+  ["dsearch-btn-bottom", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'dock'; await sleep(300);", "wallpaper"],
+  ["dsearch-bar-right", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'right'; S.searchTry.value = 'bar'; await sleep(300);", "wallpaper"],
+  ["dsearch-btn-right", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'right'; S.searchTry.value = 'dock'; await sleep(300);", "wallpaper"],
+  ["dsearch-bar-left", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'left'; S.searchTry.value = 'bar'; await sleep(300);", "wallpaper"],
+  ["dsearch-btn-left", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'left'; S.searchTry.value = 'dock'; await sleep(300);", "wallpaper"],
   ["home-dockright", "home", "S.dockTry.value = 'right'; await sleep(200);", "wallpaper"],
   ["edit-dockright", "home", "S.dockTry.value = 'right'; await sleep(200); S.editing.value = true;", "wallpaper"],
   ["edit-land", "home", "S.editing.value = true;", "wallpaper", undefined, LAND_SIZES],
@@ -405,6 +437,11 @@ const SCENES = [
   ["present", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["present-md", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[0]?.click();`, "wallpaper"],
   ["present-html", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[1]?.click(); await sleep(200);`, "wallpaper"],
+  ["present-ai", "home", `S.chat.value = { busy: false, items: ${PRESENT_ORDER} }; S.page.value = -1; await sleep(400);`, "wallpaper"],
+  ["present-assist", "assist", `await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(800); const f = document.querySelector('.assist-ask textarea'); f.value = 'plan the cleanup'; f.dispatchEvent(new Event('input', { bubbles: true })); await sleep(100); document.querySelector('.assist-ask').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await sleep(2500); S.chat.value = { busy: false, items: ${PRESENT_ORDER} }; await sleep(400);`, "app"],
+  ["present-assist-long", "assist", `await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(800); const f = document.querySelector('.assist-ask textarea'); f.value = 'plan the cleanup'; f.dispatchEvent(new Event('input', { bubbles: true })); await sleep(100); document.querySelector('.assist-ask').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await sleep(2500); S.chat.value = { busy: false, items: [...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}, ...${PRESENT_ORDER}] }; await sleep(400);`, "app"],
+  ["present-assist-arrive", "assist", `await sleep(2500); E.emit('assist.reset', null); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(300); const B = (await U('./bridge.ts')).powos; await B.speech.cancel(); await sleep(300); const q = document.querySelectorAll('.assist .chat').length; window.__chatBefore = q; S.chat.value = { busy: false, items: [...S.chat.value.items, ...${PRESENT_ORDER}] }; await sleep(400);`, "app"],
+  ["assist-crop", "assist", ASSIST_CROP, "app"],
   ["ny-card", "home", NY_CARD(true), "wallpaper"],
   ["ny-card-open", "home", NY_CARD(true) + NY_OPEN, "wallpaper"],
   ["ny-card-open-noimg", "home", NY_CARD(false) + NY_OPEN, "wallpaper"],
@@ -414,8 +451,8 @@ const SCENES = [
   ["ai-board-open", "home", GROUPED_SCENE + " document.querySelectorAll('.ai-work-list .ai-group-fold[aria-expanded=false]').forEach((b) => b.click()); await sleep(200); document.querySelectorAll('.ai-work-list .ai-group-more').forEach((b) => b.click()); await sleep(200); (document.querySelector('.ai-group.on') ?? document.querySelector('.ai-work-list')).scrollIntoView();", "wallpaper"],
   ["ai-v2", "home", board(false), "wallpaper"],
   ["ai-v2-actions", "home", board(true), "wallpaper"],
-  ["ai-v2-open", "home", board(true) + " document.querySelectorAll('.ai-work-list .ai-fold, .ai-history .ai-fold').forEach((b) => b.click()); await sleep(100); document.querySelector('.ai-screen .ai-item')?.click(); await sleep(100); document.querySelector('.ai-work-list').scrollIntoView();", "wallpaper"],
-  ["progress", "home", board(false) + " document.querySelector('.ai-work-list').scrollIntoView();", "wallpaper"],
+  ["ai-v2-open", "home", board(true) + " document.querySelectorAll('.ai-work-list .ai-fold, .ai-history .ai-fold').forEach((b) => b.click()); await sleep(100); document.querySelector('.ai-screen .ai-item')?.click(); await sleep(100); S.aiScreen.value = 'progress'; await sleep(250); document.querySelector('.ai-work-list')?.scrollIntoView();", "wallpaper"],
+  ["progress", "home", board(false) + " S.aiScreen.value = 'progress'; await sleep(250); document.querySelector('.ai-work-list')?.scrollIntoView();", "wallpaper"],
   ["progress-open", "home", board(false) + " [...document.querySelectorAll('.ai-item-row')].find((b) => /queued/i.test(b.textContent))?.click(); await sleep(300); document.querySelector('.ai-item-more')?.scrollIntoView({ block: 'center' }); await sleep(300);", "wallpaper"],
   ["test-now", "home", board(false) + TEST_NOW, "wallpaper"],
   ["test-now-testing", "home", board(false) + TEST_NOW + " document.querySelector('.ai-test')?.click(); await sleep(200);", "wallpaper"],
@@ -438,11 +475,24 @@ const SCENES = [
   ["mail-ai", "home", `S.chat.value = { busy: false, items: ${MAIL_SAMPLE} }; S.page.value = -1;`, "wallpaper", undefined, WIDE_SIZES],
   ["kbd-panel", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${MAIL_SAMPLE} }; S.openPanel('ai');`, "wallpaper"],
   ["kbd-ai-wide", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${MAIL_SAMPLE} }; S.page.value = -1;`, "wallpaper", undefined, WIDE_SIZES],
+  ["ai-msgr", "home", MSGR, "wallpaper", undefined, WIDE_SIZES],
+  ["ai-msgr-menu", "home", MSGR + " document.querySelector('.ai-screen .ai-more').click(); await sleep(300);", "wallpaper"],
+  ["ai-msgr-split", "home", MSGR + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, WIDE_SIZES],
+  ["ai-msgr-agents", "home", MSGR + " S.aiScreen.value = 'agents'; await sleep(400);", "wallpaper"],
+  ["ai-msgr-panel", "home", MSGR.replace(" S.page.value = -1;", "") + " S.openPanel('ai'); await sleep(600);", "wallpaper", undefined, WIDE_SIZES],
   ["ai-chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.page.value = -1;`, "wallpaper"],
   /* A long conversation scrolled mid-way: unfolded, the chat pane stops under the status bar like the left column. */
   ["ai-chat-scrolled", "home", `S.chat.value = { busy: false, items: [...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}] }; S.page.value = -1; await sleep(400); const t = document.querySelector('.ai-screen .ai-talk') ?? document.querySelector('.ai-screen .ai-scroll'); t.scrollTop = -(t.scrollHeight - t.clientHeight) / 2; await sleep(100);`, "wallpaper", undefined, { ...SIZES, "unfolded-land": LAND_SIZES["unfolded-land"] }],
   ["ai-compose", "home", "S.page.value = -1; await sleep(300); const f = document.querySelector('.ai-compose textarea, .ai-compose input'); f?.focus(); if (f) { f.value = 'summarise what the agents did overnight and what needs me'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
   ["widget-screen", "home", "const w = S.home.value.items.find((i) => i.kind === 'widget'); S.screen.value = { key: w.key, title: 'weather' };", "wallpaper"],
+  // The Agents screen and widget in plain words (ui/agents.tsx, fleet.ts; the user 2026-10-31: "this agent screen is
+  // still not very informative"): 3 working on board tasks, 1 stopped (model_not_found), 12 idle folded into one line.
+  ["agents-screen", "home", "(await U('./agents.ts')).openAgents(null); await sleep(300);" + FLEET_SETUP, "wallpaper"],
+  ["agents-screen-open", "home", "(await U('./agents.ts')).openAgents(null); await sleep(300);" + FLEET_SETUP + " document.querySelector('.fl-fold-head')?.click(); await sleep(200);", "wallpaper"],
+  ["agents-live", "home", "(await U('./agents.ts')).openAgents(null); await sleep(300);" + FLEET_SETUP + " (await U('./agents.ts')).openAgents('mac:c0/s1'); await sleep(300);", "wallpaper"],
+  ["agents-widget-2x2", "home", "{ const B = (await U('./bridge.ts')).powos; for (const i of (await B.home.get()).items) await B.home.remove(i.key); const pg = (await B.home.get()).pages[0] ?? 1; await B.home.addPanel('agents', pg, { x: 0, y: 0, w: 2, h: 2 }); S.page.value = 0; await sleep(400); }" + FLEET_SETUP, "wallpaper"],
+  ["agents-widget-4x2", "home", "{ const B = (await U('./bridge.ts')).powos; for (const i of (await B.home.get()).items) await B.home.remove(i.key); const pg = (await B.home.get()).pages[0] ?? 1; await B.home.addPanel('agents', pg, { x: 0, y: 0, w: 4, h: 2 }); S.page.value = 0; await sleep(400); }" + FLEET_SETUP, "wallpaper"],
+  ["agents-widget-4x4", "home", "{ const B = (await U('./bridge.ts')).powos; for (const i of (await B.home.get()).items) await B.home.remove(i.key); const pg = (await B.home.get()).pages[0] ?? 1; await B.home.addPanel('agents', pg, { x: 0, y: 0, w: 4, h: 4 }); S.page.value = 0; await sleep(400); }" + FLEET_SETUP, "wallpaper"],
   ["settings", "home", "(await U('./screens.ts')).openScreen('settings');", "wallpaper"],
   // The desktop's home: a laptop-wide grid (as hosts/desktop.ts's first home: ~110 px a column), the launcher, the chat.
   ["desktop", "desktop", DESKTOP_HOME, "wallpaper"],
@@ -461,6 +511,9 @@ const SCENES = [
   ["home-dots-right", "home", "S.dockPlacement.value = 'right'; await sleep(300);", "wallpaper"],
   ["home-dots-left", "home", "S.dockPlacement.value = 'left'; await sleep(300);", "wallpaper"],
   ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
+  // PowOS AI's panel in the launcher with home's dock at the side (unfolded desktop docks left): its pill on screen.
+  ["pull-ai-left", "pull", "S.dockPlacement.value = 'left'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(300);", "blurred"],
+  ["pull-ai-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(300);", "blurred"],
   // The launcher opened for apps after PowOS AI's pull (dev/dock-check.js launcherDockOpens): the dock mounts as the drag
   // starts, after the drag's followers were taken (gesture.ts follow) - it stayed at --p 0, invisible (the user,
   // 2026-10-30: "the dock is still hiding in the launcher in unfolded mode"). Right and bottom, with and without the
@@ -492,6 +545,7 @@ const SCENES = [
   ["shade-media-two", "shade", "await (await U('./bridge.ts')).powos.store.set('controls.launchers', ['a:discord', 'a:chrome', 'a:signal', 'a:maps', 'a:spotify']); (await U('./ui/launchers.tsx')).loadLaunchers(); S.panel.value = 'notifications'; S.notif.value = true; await sleep(400); E.emit('media.changed', { ...{ available: true, playing: true, title: 'Teardrop', artist: 'Massive Attack', app: 'Spotify', package: 'spotify', position: 42, duration: 330, art: null, seekable: true }, sessions: [{ available: true, playing: true, title: 'Teardrop', artist: 'Massive Attack', app: 'Spotify', package: 'spotify', position: 42, duration: 330, art: null, seekable: true }, { available: true, playing: false, title: 'Persona - Live at Printworks', artist: 'Rival Consoles', app: 'YouTube', package: 'youtube', position: 1312, duration: 2710, art: null, seekable: true }] }); await sleep(800);", "blurred"],
   // The card with art (its blurred art behind it), a long title (two lines), two sessions with art.
   ["shade-media-art", "shade", "await (await U('./bridge.ts')).powos.store.set('controls.launchers', ['a:discord', 'a:chrome', 'a:signal', 'a:maps', 'a:spotify']); (await U('./ui/launchers.tsx')).loadLaunchers(); S.panel.value = 'notifications'; S.notif.value = true; await sleep(400); const ss = [{ available: true, playing: true, title: 'Teardrop', artist: 'Massive Attack', app: 'Spotify', package: 'spotify', position: 42, duration: 330, art: 'cover', seekable: true }]; E.emit('media.changed', { ...ss[0], sessions: ss }); await sleep(800);", "blurred"],
+  ["shade-media-paused", "shade", "await (await U('./bridge.ts')).powos.store.set('controls.launchers', ['a:discord', 'a:chrome', 'a:signal', 'a:maps', 'a:spotify']); (await U('./ui/launchers.tsx')).loadLaunchers(); S.panel.value = 'notifications'; S.notif.value = true; await sleep(400); const ss = [{ available: true, playing: false, title: 'Teardrop', artist: 'Massive Attack', app: 'Spotify', package: 'spotify', position: 201, duration: 330, art: 'cover', seekable: true }]; E.emit('media.changed', { ...ss[0], sessions: ss }); await sleep(800);", "blurred"],
   ["shade-media-long", "shade", "await (await U('./bridge.ts')).powos.store.set('controls.launchers', ['a:discord', 'a:chrome', 'a:signal', 'a:maps', 'a:spotify']); (await U('./ui/launchers.tsx')).loadLaunchers(); S.panel.value = 'notifications'; S.notif.value = true; await sleep(400); const ss = [{ available: true, playing: true, title: 'There\\'s way too many Wizards with Guns - the full soundtrack, extended edition', artist: 'Wizards with Guns', app: 'YouTube', package: 'youtube', position: 4, duration: 426, art: 'cover', seekable: true }]; E.emit('media.changed', { ...ss[0], sessions: ss }); await sleep(800);", "blurred"],
   ["shade-media-art-two", "shade", "await (await U('./bridge.ts')).powos.store.set('controls.launchers', ['a:discord', 'a:chrome', 'a:signal', 'a:maps', 'a:spotify']); (await U('./ui/launchers.tsx')).loadLaunchers(); S.panel.value = 'notifications'; S.notif.value = true; await sleep(400); const ss = [{ available: true, playing: true, title: 'Teardrop', artist: 'Massive Attack', app: 'Spotify', package: 'spotify', position: 42, duration: 330, art: 'cover', seekable: true }, { available: true, playing: false, title: 'Persona - Live at Printworks', artist: 'Rival Consoles', app: 'YouTube', package: 'youtube', position: 1312, duration: 2710, art: 'cover2', seekable: true }]; E.emit('media.changed', { ...ss[0], sessions: ss }); await sleep(800);", "blurred"],
   ["shade-land", "shade", "S.panel.value = 'notifications'; S.notif.value = true;", "blurred", undefined, LAND_SIZES],

@@ -13,10 +13,11 @@ import { powos } from "../bridge.ts";
 import type { PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
-import { drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome } from "./gesture.ts";
+import { DockSearchButton, dockButton } from "./docksearch.tsx";
+import { drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome, windowGestureActive } from "./gesture.ts";
 import { PageDots } from "./pagedots.tsx";
 import { Carried, Folders, Pages, startCarry } from "./grid.tsx";
-import { carriedApp, shownLess } from "./dockdrop.ts";
+import { buttonSlot, carriedApp, shownLess, slotPast } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
 import { SessionScreen } from "./session.tsx";
 import { AppScreen } from "./appscreen.tsx";
@@ -27,12 +28,13 @@ import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
 import { PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
+import { markClass, pageFocus } from "./pagemarks.ts";
 import { Recents } from "./recents.tsx";
 import { appOf, dockTap } from "./desktops.ts";
 import { overWindows } from "./panellift.ts";
 import { footBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
-import { webWins } from "./webwindows.tsx";
+import { webWins, windowFrame } from "./webwindows.tsx";
 import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
@@ -98,6 +100,11 @@ function scrolls(el: Element): boolean {
 const WINDOW_ZONE = 48;
 
 function claimFree(dockNode: HTMLElement | null): PageRect[] {
+  return [...claimStatic(dockNode), ...claimWindows()];
+}
+
+/** The dock's and home's scrollers (the costly walk). */
+function claimStatic(dockNode: HTMLElement | null): PageRect[] {
   const out: PageRect[] = [];
   const big = innerWidth * innerHeight * 0.5;
   const add = (el: Element) => {
@@ -112,6 +119,12 @@ function claimFree(dockNode: HTMLElement | null): PageRect[] {
   home?.querySelectorAll("*").forEach((el) => {
     if (!dockNode?.contains(el) && scrolls(el)) add(el);
   });
+  return out;
+}
+
+/** Every web window shown, with its resize zones (cheap: one rect per window). */
+function claimWindows(): PageRect[] {
+  const out: PageRect[] = [];
   // A web window (ui/webwindows.tsx) whole - title bar, body, edges - whatever its size: dragging it moves the window,
   // and its body is the app's, never a pull (the user, 2026-10-30: "when i try to move the window it moves the whole page").
   // RZ5: with its resize zones outside the frame (32 dp edges, 48 dp corners: the rect grown by the corners'), kept out
@@ -136,9 +149,12 @@ function followDock(el: HTMLElement | null) {
   dockElement.value = el;
 }
 
-/** How long a web window holds still before home re-reports its pull regions (see the effect below). */
+/** How long a web window under a finger (moved, resized) holds still before home re-reports its pull regions. */
 const REPORT_SETTLE_MS = 120;
-let lastWins: unknown;
+/** The dock's and scrollers' regions from the last full report, reused by the per-frame window-only ones. */
+let staticRegions: PageRect[] = [];
+/** The live effect's report (full: also re-walk home's scrollers), for the window-geometry effect below. */
+let reportRegions: ((full: boolean) => void) | null = null;
 
 // Home's page only (app.tsx imports this module in every mode).
 if (!new URLSearchParams(location.search).get("mode")) effect(() => {
@@ -146,12 +162,13 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
   const mainPage = on && page.value === 0;
   pullPanels.value; // Re-report when the pull-up corners change.
   dockPosition.value; // Re-report when placement changes, even if its size stays the same.
-  webWins.value; // A web window opened, moved, resized, raised or closed: its region with it (after the render).
+  // Web windows aren't read here: their rects follow windowFrame (below), window-only - a move re-ran this whole walk.
   const dockNode = dockElement.value;
-  const report = () => {
+  const report = (full: boolean) => {
     const r = dockNode?.getBoundingClientRect();
     const exclude = r ? pageRect(r) : undefined;
-    const regions = claimFree(dockNode);
+    if (full) staticRegions = claimStatic(dockNode);
+    const regions = [...staticRegions, ...claimWindows()];
     powos.shade.homePull(on, exclude, mainPage, regions).then(
       (taken) => (shadeTakesHome.value = !!taken),
       () => (shadeTakesHome.value = false),
@@ -163,21 +180,51 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
       () => (launcherTakesHome.value = false),
     );
   };
-  // One report per frame at most, however many observers fire in it (claimFree walks home and reads computed styles:
-  // a forced layout, 44 ms in perf-1793396392624). A web window moving or resizing re-runs this effect every pointer
-  // step: that report waits until the window holds still (REPORT_SETTLE_MS) - the finger is the window's meanwhile.
-  const settling = lastWins !== undefined && lastWins !== webWins.peek();
-  lastWins = webWins.peek();
+  // One full report per frame at most, however many observers fire in it (claimStatic walks home and reads computed
+  // styles: a forced layout, 44 ms in perf-1793396392624).
   let frame = 0;
   const soon = () => {
-    if (!frame) frame = requestAnimationFrame(() => ((frame = 0), report()));
+    if (!frame) frame = requestAnimationFrame(() => ((frame = 0), report(true)));
   };
-  const timer = settling ? setTimeout(soon, REPORT_SETTLE_MS) : (soon(), 0);
+  soon();
+  reportRegions = report;
   const observer = new ResizeObserver(soon);
   if (dockNode) observer.observe(dockNode);
   addEventListener("resize", soon);
-  return () => { clearTimeout(timer); cancelAnimationFrame(frame); observer.disconnect(); removeEventListener("resize", soon); };
+  return () => { reportRegions = null; cancelAnimationFrame(frame); observer.disconnect(); removeEventListener("resize", soon); };
 });
+
+/**
+ * W-IN1 (the user, 10-31: "Try to interact with one of the floating windows I still activate the launcher or the search
+ * or the AI page or the notifications"; "Seems like the window resized, but like the touch handlers ... didn't
+ * realize"): a touch that starts in a window is the window's, so the host's exclusion regions follow the windows'
+ * per-frame geometry (webwindows.tsx windowFrame: every move, resize, snap, open, close, raise, full screen, page swipe,
+ * fold) - reported in the frame after it changes, window rects only (cheap). Before, they were re-reported only when
+ * webWins changed, and read before a snap / page swipe / resize had settled: stale until the next move.
+ * While a finger moves or resizes a window, the report waits until it holds still: that finger is the window's anyway.
+ */
+if (!new URLSearchParams(location.search).get("mode")) {
+  let frame = 0;
+  let timer = 0;
+  const now = () => {
+    if (!frame) frame = requestAnimationFrame(() => ((frame = 0), reportRegions?.(false)));
+  };
+  effect(() => {
+    windowFrame.value;
+    clearTimeout(timer);
+    timer = 0;
+    if (windowGestureActive()) timer = setTimeout(() => ((timer = 0), now()), REPORT_SETTLE_MS) as unknown as number;
+    else now();
+  });
+  // The finger let go of a window it moved or resized: its final rect at once.
+  const release = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = 0;
+    setTimeout(now, 0);
+  };
+  for (const type of ["pointerup", "pointercancel"] as const) addEventListener(type, release, true);
+}
 
 /** How far above the dock a held app has to go to leave it for the home screen. */
 const DOCK_EXIT = 48;
@@ -190,10 +237,13 @@ const DOCK_EXIT = 48;
 function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
   const vertical = dockPosition.value !== "bottom";
   const axis = (ev: PointerEvent) => vertical ? ev.clientY : ev.clientX;
+  // The search button (docksearch.tsx) holds a slot of its own in the dock's middle: the apps' slots skip it.
+  const n = dock.value.length;
+  const cells = n + (dockButton.value ? 1 : 0);
   const slotOf = (x: number) => {
     const r = dockEl.getBoundingClientRect();
-    const slot = vertical ? (x - r.top) / 56 : ((x - r.left) / r.width) * dock.value.length;
-    return Math.max(0, Math.min(dock.value.length - 1, Math.floor(slot)));
+    const slot = vertical ? (x - r.top) / 56 : ((x - r.left) / r.width) * cells;
+    return Math.max(0, Math.min(n - 1, slotPast(Math.floor(slot), n)));
   };
   menu.value = null;
   dockDrag.value = { key, x: axis(e), slot: slotOf(axis(e)) };
@@ -287,7 +337,7 @@ function DockRecents({ count }: { count: number }) {
   return (
     <>
       {shown.map((app) => (
-        <AppCell key={app.key} app={app} labels={false} draggable onTap={() => dockTap(app.key)} />
+        <AppCell key={app.key} app={app} labels={false} class={markClass(app.key)} draggable onTap={() => dockTap(app.key)} />
       ))}
     </>
   );
@@ -328,9 +378,43 @@ function DockWindows({ pinned }: { pinned: string[] }) {
     <>
       {shown.map(([k, state]) => {
         const app = byKey.value.get(k);
-        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state}`} onTap={() => dockTap(k)} />;
+        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state} ${markClass(k)}`} onTap={() => dockTap(k)} />;
       })}
     </>
+  );
+}
+
+/** The held dock app at app slot [i] of [slots], its finger at [x]: drawn there (the search button's slot skipped). */
+function heldStyle(row: HTMLElement, i: number, slots: number, x: number) {
+  const vertical = dockPosition.value !== "bottom";
+  const r = row.getBoundingClientRect();
+  const button = dockButton.value ? 1 : 0;
+  const at = button && i >= buttonSlot(slots) ? i + 1 : i;
+  const slotCenter = vertical ? r.top + at * 56 + 28 : r.left + ((at + 0.5) * r.width) / (slots + button);
+  return { transform: `translate${vertical ? "Y" : "X"}(${x - slotCenter}px)` };
+}
+
+/**
+ * DK1 (the user, 2026-10-31: "The dock is the same size always" / "The docking should always have the set amount of
+ * items"): with the search button in it the dock is the pinned apps and the button, fixed - the apps with a floating
+ * window that aren't pinned go with the recent ones (their page folded, their section below a separator in a side
+ * column, the tray unfolded), never into the pinned row where they narrowed its slots.
+ */
+const pinnedOnly = () => dockButton.value;
+
+/** Any recent app or (DK1) unpinned window to show in the dock's recent section. */
+function hasRecents(): boolean {
+  if (recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k))) return true;
+  return pinnedOnly() && windowedOnly(dock.value).length > 0;
+}
+
+/** The dock's recent section: (DK1) the unpinned windows first, then the recent apps. */
+function RecentSection({ held }: { held: boolean }) {
+  return (
+    <div class="dock-page dock-recent">
+      {pinnedOnly() && !held && <DockWindows pinned={dock.value} />}
+      <DockRecents count={30} />
+    </div>
   );
 }
 
@@ -371,25 +455,25 @@ export function Dock() {
   const ghost = !dock.value.some((k) => byKey.value.has(k)) && windowed.value.size === 0;
   // Wide (unfolded), the recent apps are the bar's right end (DockTray): the dock is its pinned apps only.
   const wide = wideHome.value;
-  const recents = (!wide || vertical) && recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k));
-  if (ghost && !carried && !recents) return null;
+  const recents = (!wide || vertical) && hasRecents();
+  // Home's search as a dock button (docksearch.tsx): the dock is there for it even with nothing pinned.
+  const button = dockButton.value;
+  if (ghost && !carried && !recents && !button) return null;
   // While an app is carried or moved along it, the dock is its pinned page only.
-  const paged = !vertical && recents && !carried && !d && !ghost;
+  const paged = !vertical && recents && !carried && !d && (!ghost || button);
   const slots = pinned.length + (gap >= 0 ? 1 : 0);
+  // The pinned row's own windows (not with the search button: DK1, they're in the recent section).
+  const ownWindows = !d && !carried && !pinnedOnly();
+  const showRecents = recents && (paged || (vertical && !carried && !d) || (ghost && !carried));
   const cells = pinned.map((app, i) => {
     // The held one follows the finger from its new slot; the others have moved aside (a slot each, equal widths).
-    let style: Record<string, string> | undefined;
-    if (d?.key === app.key && el.current) {
-      const r = el.current.getBoundingClientRect();
-      const slotCenter = vertical ? r.top + i * 56 + 28 : r.left + ((i + 0.5) * r.width) / slots;
-      style = { transform: `translate${vertical ? "Y" : "X"}(${d.x - slotCenter}px)` };
-    }
+    const style = d?.key === app.key && el.current ? heldStyle(el.current, i, slots, d.x) : undefined;
     return (
       <AppCell
         key={app.key}
         app={app}
         labels={false}
-        class={`${d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""} ${windowed.value.has(app.key) ? `windowed ${windowed.value.get(app.key)}` : ""}`}
+        class={`${d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""} ${windowed.value.has(app.key) ? `windowed ${windowed.value.get(app.key)}` : ""} ${markClass(app.key)}`}
         style={style}
         onDrag={(e) => el.current && moveInDock(app.key, e, el.current)}
         onTap={() => dockTap(app.key)}
@@ -397,6 +481,8 @@ export function Dock() {
     );
   });
   if (gap >= 0) cells.splice(gap, 0, <div key=" gap" class="app dock-gap" />);
+  // The centre slot: as many apps left of it as right, an odd one more on the right (the user, 01:26: "3 | 3").
+  if (button) cells.splice(buttonSlot(cells.length), 0, <DockSearchButton key=" search" />);
   const r = aim?.swap && el.current?.getBoundingClientRect();
   return (
     <>
@@ -404,28 +490,27 @@ export function Dock() {
        * The pinned apps' page, then the recent apps in a row that scrolls on (the browser's own scroll, on the
        * compositor: momentum, snapping only near the two starts). The dots below follow when a scroll settles.
        */}
-      <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p ref={followDock}>
+      <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""} ${pageFocus.value ? "page-focus" : ""}`} data-p ref={followDock}>
         <div class="dock-pages" ref={pagesEl}>
-          {(!ghost || carried) && (
+          {(!ghost || carried || button) && (
             <div
               class="dock-page"
               // Wide, the cells share the bar's left end: more than six (the windows' apps after the pinned ones) get
               // narrower slots instead of running on under the pill (shell.css --cells; a Calculator window's icon
               // sat under the pill, its tap opened the drawer: dock-taskbar FAIL 2026-10-23).
-              style={{ "--cells": String(slots + (!d && !carried ? windowedOnly(dock.value).length : 0)) }}
+              style={{ "--cells": String(slots + (ownWindows ? windowedOnly(dock.value).length : 0)) }}
               ref={(node) => {
                 el.current = node;
               }}
             >
-              {ghost && gap < 0 ? <div class="dock-empty">drop here to pin</div> : cells}
-              {!d && !carried && <DockWindows pinned={dock.value} />}
+              {ghost && gap < 0 && !button ? <div class="dock-empty">drop here to pin</div> : cells}
+              {ownWindows && <DockWindows pinned={dock.value} />}
             </div>
           )}
-          {recents && (paged || (vertical && !carried && !d) || (ghost && !carried)) && (
-            <div class="dock-page dock-recent">
-              <DockRecents count={30} />
-            </div>
-          )}
+          {/* DK2 (the user: "We need a separator between the docking and the recent items"): a side column's pinned
+              group, a short thin line, then its recent ones - never one run of icons. */}
+          {showRecents && vertical && pinnedOnly() && <div class="dock-sep" aria-hidden="true" />}
+          {showRecents && <RecentSection held={!!d || !!carried} />}
         </div>
         {paged && (
           <div class="dock-dots">
@@ -450,13 +535,12 @@ export function Dock() {
  */
 export function DockTray() {
   if (dockPosition.value !== "bottom") return null;
-  if (!recent.value.some((k) => !dock.value.includes(k) && !windowed.value.has(k) && byKey.value.has(k))) return null;
+  const own = recent.value.some((k) => !dock.value.includes(k) && !windowed.value.has(k) && byKey.value.has(k));
+  if (!own && !(pinnedOnly() && windowedOnly(dock.value).length)) return null;
   return (
-    <div class="dock dock-tray paged" data-p ref={followOpenness}>
+    <div class={`dock dock-tray paged ${pageFocus.value ? "page-focus" : ""}`} data-p ref={followOpenness}>
       <div class="dock-pages">
-        <div class="dock-page dock-recent">
-          <DockRecents count={30} />
-        </div>
+        <RecentSection held={false} />
       </div>
     </div>
   );
@@ -485,6 +569,12 @@ function HomeDots() {
   );
 }
 
+/** The foot's pill, unless home's search is the dock's button (docksearch.tsx: it opens the launcher). */
+const HomeSearch = () => (dockButton.value ? null : <Bar />);
+
+/** Home's search as the dock's button (docksearch.tsx). */
+const searchDockClasses = () => (dockButton.value ? "search-dock" : "");
+
 export function Home() {
   // data-p: these follow the panel's openness (--p, written by gesture.ts, not through a render).
   return (
@@ -493,7 +583,7 @@ export function Home() {
       <div class="screens" {...homeGestures()}>
         <PowAiPage />
         <div
-          class={`home dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
+          class={`home dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${footBelow.value ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
         >
           <div class="stage">
             <div class="home-content" data-p ref={followOpenness}>
@@ -504,7 +594,9 @@ export function Home() {
           </div>
           {/* Always the foot's pill: the launcher's face - a tap opens the overlay with its search (bar.tsx). With the
               search widget on the grid it's parked (shell.css .search-parked). */}
-          <Bar />
+          {/* Or, as the user picked (Settings > style > home: "search: dock button"), no pill here: the dock's centre
+              button, which expands into this bar in place (docksearch.tsx). */}
+          <HomeSearch />
           <Dock />
           {wideHome.value && <DockTray />}
           <AppMenu />
