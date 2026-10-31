@@ -3384,6 +3384,125 @@ async function webWindowReloadCheck() {
 }
 
 /**
+ * HP1 (perf-1793458433606: "FrameRequestCallback ui/home.tsx ... forced 10-13 ms", 3x in one swipe to PowOS AI): while
+ * a finger swipes home toward PowOS AI's page - a web window open (its geometry bumps windowFrame every frame) and a
+ * resize mid-swipe (the full region walk) - no layout read from home.tsx runs inside a rAF callback, and the pull
+ * regions are still reported once the swipe ends.
+ */
+async function homeSwipeLayoutScene() {
+  const S = await window.__gw.mod("./state.ts");
+  const G = await window.__gw.mod("./ui/gesture.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const fails = [];
+  S.page.value = 0;
+  W.webWins.value = [{ id: 981, key: "a:gate.swipe", label: "Swipe", page: S.pages.value[0], x: 40, y: 160, w: 260, h: 200, live: true }];
+  let inRaf = 0, forced = 0, where = "";
+  const raf = window.requestAnimationFrame;
+  window.requestAnimationFrame = (cb) => raf.call(window, (t) => { inRaf++; try { cb(t); } finally { inRaf--; } });
+  const E = Element.prototype, H = HTMLElement.prototype;
+  const rect = E.getBoundingClientRect, cw = Object.getOwnPropertyDescriptor(E, "clientWidth");
+  const ow = Object.getOwnPropertyDescriptor(H, "offsetWidth");
+  const note = () => {
+    if (!inRaf || G.pageDrag.peek() == null) return;
+    const st = new Error().stack ?? "";
+    if (/ui\/home\.tsx/.test(st)) forced++, (where ||= st.split("\n").find((l) => /home\.tsx/.test(l))?.trim() ?? "");
+  };
+  E.getBoundingClientRect = function () { note(); return rect.call(this); };
+  Object.defineProperty(E, "clientWidth", { configurable: true, get() { note(); return cw.get.call(this); } });
+  Object.defineProperty(H, "offsetWidth", { configurable: true, get() { note(); return ow.get.call(this); } });
+  let reports = 0;
+  const pull = window.powos?.shade?.homePull;
+  try {
+    await window.__gw.settled();
+    await sleep(400);
+    if (pull) window.powos.shade.homePull = (...a) => (reports++, pull.apply(window.powos.shade, a));
+    for (let i = 1; i <= 40; i++) {
+      G.pageDrag.value = i * 10; // toward PowOS AI's page (right of home's first)
+      W.webWins.value = W.webWins.value.map((w) => ({ ...w, x: 40 + i })); // the window's geometry moves every frame
+      if (i === 20) dispatchEvent(new Event("resize"));
+      await window.__gw.frames(1);
+    }
+    const during = reports;
+    G.pageDrag.value = null;
+    await window.__gw.frames(4);
+    await sleep(100);
+    if (forced) fails.push(`HP1: ${forced} layout reads from home.tsx inside a rAF during the swipe (first: ${where})`);
+    if (pull && reports <= during) fails.push("HP1: no pull-region report after the swipe ended");
+    console.warn(`[gate] home-swipe-layout: ${forced} home.tsx layout reads in swipe rAFs; reports ${during} during, ${reports - during} after`);
+  } finally {
+    window.requestAnimationFrame = raf;
+    E.getBoundingClientRect = rect;
+    Object.defineProperty(E, "clientWidth", cw);
+    Object.defineProperty(H, "offsetWidth", ow);
+    if (pull) window.powos.shade.homePull = pull;
+    G.pageDrag.value = null;
+    W.webWins.value = [];
+  }
+  return fails;
+}
+
+/**
+ * HP3 (render scan 10-31: EntryView 254 renders, "reply/render" new every render; Item 136 needless): with a thread of
+ * 30 items on PowOS AI's page, one new message re-renders only its own entry - the rest stay as they are, though the
+ * chat's items arrive as new objects equal to the last.
+ */
+async function aiEntryMemoScene() {
+  const S = await window.__gw.mod("./state.ts");
+  const fails = [];
+  const items = [];
+  for (let i = 0; i < 15; i++) items.push({ kind: "user", text: `question ${i}` }, { kind: "assistant", text: `answer ${i}` });
+  S.chat.value = { ...S.chat.value, busy: false, items };
+  S.page.value = -1;
+  await window.__gw.settled();
+  await window.__gw.frames(10);
+  window.__powosRenders.start();
+  window.__powosRenders.reset();
+  // A new message: every item a fresh copy (as the host sends them), one more at the end.
+  S.chat.value = { ...S.chat.value, items: [...items.map((i) => ({ ...i })), { kind: "assistant", text: "a new answer" }] };
+  await window.__gw.frames(6);
+  const rows = window.__powosRenders.top(500).byCount;
+  window.__powosRenders.stop();
+  const n = (name) => rows.filter((r) => r.name === name).reduce((s, r) => s + r.renders, 0);
+  const entry = n("EntryView"), item = n("Item");
+  window.__aiMemo = `EntryView ${entry}, Item ${item} renders for one new message`;
+  console.warn(`[gate] ai-entry-memo: ${window.__aiMemo}`);
+  // The new one (in each Thread shown: PowOS AI's page, and the launcher's if mounted).
+  if (entry > 2) fails.push(`HP3: ${entry} EntryView renders for one new message (want <= 2: only the new entry)`);
+  if (item > 2) fails.push(`HP3: ${item} Item renders for one new message (want <= 2)`);
+  S.page.value = 0;
+  return fails;
+}
+
+/**
+ * HP2 (perf-1793458232732: a 133 ms frame on the pet's switch, PetSwitch + the lights island "Ct"): the pet switched
+ * on and off renders PetSwitch at most twice per switch, and nothing else on home (no island, no tile) re-renders.
+ */
+async function petSwitchScene() {
+  const P = await window.__gw.mod("./apps/pages.ts");
+  const fails = [];
+  P.installedApps.value = [...P.installedApps.value, { id: "local.pet", name: "Pet", version: "0.1.0", database: "local-pet", tier: 0, manifest: "{}" }];
+  await window.__gw.until(() => window.__pet);
+  await window.__gw.settled();
+  await window.__gw.frames(10);
+  window.__powosRenders.start();
+  window.__powosRenders.reset();
+  for (const on of [true, false]) {
+    window.__pet.on(on);
+    await window.__gw.frames(4);
+  }
+  const rows = window.__powosRenders.top(500).byCount;
+  window.__powosRenders.stop();
+  const sw = rows.filter((r) => r.name === "PetSwitch").reduce((s, r) => s + r.renders, 0);
+  const others = rows.filter((r) => /^(Ct|memo\(Ct\)|Island|Tile|AppCell)$/.test(r.name));
+  window.__petSwitch = `PetSwitch ${sw} renders for 2 switches; others: ${others.map((r) => r.name + " " + r.renders).join(", ") || "none"}`;
+  console.warn(`[gate] pet-switch: ${window.__petSwitch}`);
+  if (sw > 4) fails.push(`HP2: PetSwitch rendered ${sw} times for 2 switches (want <= 2 each)`);
+  if (others.length) fails.push(`HP2: a pet switch re-rendered home: ${others.map((r) => r.name + " " + r.renders).join(", ")}`);
+  return fails;
+}
+
+/**
  * WS1 (10-31 15:37: home's surface re-made, then no "w.f" for ~9 s until the watchdog reloaded home): with the page's
  * rAF held (a WebView that paused it while hidden), a visibilitychange to hidden and back sends the windows' geometry
  * within 500 ms, and so does the host's "webwindows.resend" alone - neither waits for a frame.
@@ -6036,6 +6155,21 @@ try {
       console.log(`     ww-idle-tick: ${await r.page.evaluate(() => window.__wwIdle).catch(() => "?")}`);
       return fails;
     })));
+  // HP1-3: home's perf (perf-1793458433606 / -232732): no forced layout in the swipe to PowOS AI, the pet's switch and
+  // a new chat message re-render only what changed.
+  if (process.env.SHELL_PAGES !== "0") {
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-swipe-layout", { width: 821, height: 883 }).then((r) => whenReady(r, () => r.page.evaluate(homeSwipeLayoutScene))));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-entry-memo", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      const fails = await r.page.evaluate(aiEntryMemoScene);
+      console.log(`     ai-entry-memo: ${await r.page.evaluate(() => window.__aiMemo).catch(() => "?")}`);
+      return fails;
+    })));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "pet-switch", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      const fails = await r.page.evaluate(petSwitchScene);
+      console.log(`     pet-switch: ${await r.page.evaluate(() => window.__petSwitch).catch(() => "?")}`);
+      return fails;
+    })));
+  }
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));

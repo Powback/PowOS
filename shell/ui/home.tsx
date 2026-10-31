@@ -155,6 +155,28 @@ function followDock(el: HTMLElement | null) {
 
 /** How long a web window under a finger (moved, resized) holds still before home re-reports its pull regions. */
 const REPORT_SETTLE_MS = 120;
+/**
+ * Runs [fn] once this frame is laid out: a frame, then a task after its rendering - its rect reads find layout clean.
+ * Read in the rAF itself they forced a layout over the swipe's fresh transforms (and the PowOS AI page it had just
+ * mounted): 10-14 ms forced, 3x in one swipe to PowOS AI (perf-1793458433606, "FrameRequestCallback ui/home.tsx").
+ * While a finger swipes the pages it waits for the swipe to end: nothing under it is a pull meanwhile (the pages are).
+ */
+function afterLayout(fn: () => void): () => void {
+  let timer = 0;
+  let stop = () => {};
+  const run = () => {
+    if (pageDrag.peek() == null) return fn();
+    const off = effect(() => {
+      if (pageDrag.value != null) return;
+      queueMicrotask(() => off());
+      timer = setTimeout(fn, 0) as unknown as number;
+    });
+    stop = off;
+  };
+  const frame = requestAnimationFrame(() => (timer = setTimeout(run, 0) as unknown as number));
+  return () => { cancelAnimationFrame(frame); clearTimeout(timer); stop(); };
+}
+
 /** The dock's and scrollers' regions from the last full report, reused by the per-frame window-only ones. */
 let staticRegions: PageRect[] = [];
 /** The live effect's report (full: also re-walk home's scrollers), for the window-geometry effect below. */
@@ -187,16 +209,16 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
   };
   // One full report per frame at most, however many observers fire in it (claimStatic walks home and reads computed
   // styles: a forced layout, 44 ms in perf-1793396392624).
-  let frame = 0;
+  let cancel: (() => void) | null = null;
   const soon = () => {
-    if (!frame) frame = requestAnimationFrame(() => ((frame = 0), report(true)));
+    if (!cancel) cancel = afterLayout(() => ((cancel = null), report(true)));
   };
   soon();
   reportRegions = report;
   const observer = new ResizeObserver(soon);
   if (dockNode) observer.observe(dockNode);
   addEventListener("resize", soon);
-  return () => { reportRegions = null; cancelAnimationFrame(frame); observer.disconnect(); removeEventListener("resize", soon); };
+  return () => { reportRegions = null; cancel?.(); observer.disconnect(); removeEventListener("resize", soon); };
 });
 
 /**
@@ -209,10 +231,10 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
  * While a finger moves or resizes a window, the report waits until it holds still: that finger is the window's anyway.
  */
 if (!new URLSearchParams(location.search).get("mode")) {
-  let frame = 0;
+  let pending = false;
   let timer = 0;
   const now = () => {
-    if (!frame) frame = requestAnimationFrame(() => ((frame = 0), reportRegions?.(false)));
+    if (!pending) (pending = true), afterLayout(() => ((pending = false), reportRegions?.(false)));
   };
   effect(() => {
     windowFrame.value;
@@ -586,6 +608,21 @@ export function DockTray() {
   );
 }
 
+/** The pages' width, kept by a ResizeObserver: read per frame of a swipe it was a layout read after the track's write. */
+let pagesW = 0;
+let pagesSeen: Element | null = null;
+const pagesSize = new ResizeObserver((es) => (pagesW = es[es.length - 1].contentRect.width));
+function pagesWidth(): number {
+  const el = document.querySelector(".pages");
+  if (el !== pagesSeen) {
+    if (pagesSeen) pagesSize.unobserve(pagesSeen);
+    pagesSeen = el;
+    pagesW = 0;
+    if (el) pagesSize.observe(el);
+  }
+  return pagesW;
+}
+
 /**
  * Home's position for its dots (pagedots.tsx): PowOS AI's page first (-1), then home's pages and the app library - as
  * the track and the screens slide (gesture.ts applyTrack), so the dot moves with the finger, not after the settle.
@@ -596,7 +633,7 @@ function homeDotsAt(): [number, boolean] {
   if (dx == null) return [at + 1, false];
   // Toward PowOS AI's page the whole screen slides; between home's pages, the pages' own width.
   const toAi = at === -1 || (at === 0 && dx > 0);
-  const w = (toAi ? null : document.querySelector<HTMLElement>(".pages")?.clientWidth) || innerWidth;
+  const w = (toAi ? null : pagesWidth()) || innerWidth;
   return [Math.max(0, Math.min(pageCount.value, at + 1 - dx / w)), true];
 }
 
