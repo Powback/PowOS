@@ -3044,6 +3044,24 @@ class WebWindows(
         }
 
         /**
+         * A full-screen Linux window is up on home's page (main thread). It is home's own page underneath, so no
+         * Android task is visible: the nav swipe asks this to treat it as an app (a swipe = home, a hold = the switcher)
+         * instead of as home's main page, where a swipe up opens the switcher (10-31 02:13, the user: "If I open an
+         * application full screen and then swipe home then it always activates the switcher instead").
+         */
+        fun fullScreenUp(): Boolean = current?.fullLinux() != null
+
+        /** The home swipe over a full-screen window: it leaves full screen and is minimised to the dock - home shows. */
+        fun homeGesture(why: String) {
+            val ww = current ?: return
+            ww.main.post {
+                val w = ww.wins.values.firstOrNull { it.linuxFull } ?: return@post
+                ww.leaveFullScreen(why)
+                if (!w.closed) ww.emit("webwindows.control", mapOf("id" to w.id, "action" to "minimise"))
+            }
+        }
+
+        /**
          * THE close of a web window for a task (Tasks.remove: the switcher's swipe away, "Clear all", any task removal
          * PowOS makes): when task [taskId] is a web window's - on its display, or a full-screen app out of one - that
          * window is closed exactly as its bar's close does ([close] -> [drop]: its layers off at once in one transaction,
