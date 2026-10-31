@@ -414,7 +414,7 @@ class ShellBridge(
     ): Any? =
         when (method) {
             "apps.list" -> apps()
-            "apps.launch" -> launch(a.getString(0))
+            "apps.launch" -> launch(a.getString(0), a.optJSONObject(1)?.optBoolean("fullScreen") == true)
             "webwindows.enabled" -> activity != null && webWindows.also { webWindowsMade = true }.enabled()
             "webwindows.open" ->
                 if (activity == null) -1
@@ -1425,7 +1425,10 @@ class ShellBridge(
 
     private fun android(key: String) = runtime.androidApps.apps.firstOrNull { "a:${it.key}" == key }
 
-    private fun launch(key: String) {
+    private fun launch(
+        key: String,
+        fullScreen: Boolean = false,
+    ) {
         runtime.usage.record(key)
         // Web windows on (unfolded): an app opened from another of PowOS's windows (the launcher overlay, Quick Tools,
         // the AI) opens as a web window on home, as home's own launch does (state.ts launch -> openWebWindow) - never
@@ -1443,7 +1446,7 @@ class ShellBridge(
                 android(key)?.let { app ->
                     // Brought back: home goes to the page it's on (windows.raised, ui/desktops.ts).
                     val id = dev.omalauncher.system.WindowFrames.current?.restoreApp(app.component.packageName)
-                    if (id != null) emit("windows.raised", id) else runtime.androidApps.open(app)
+                    if (id != null) emit("windows.raised", id) else runtime.androidApps.open(app, fullScreen)
                 }
             // A PowOS app's floating window likewise (unfolded: its task floats, WindowTasks), else it opens.
             key.startsWith("l:") -> launchLinux(key)

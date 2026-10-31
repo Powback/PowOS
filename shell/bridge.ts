@@ -104,7 +104,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     },
     apps: {
       list: () => call<App[]>("apps.list"),
-      launch: (key) => call("apps.launch", key),
+      launch: (key, opts) => (opts?.fullScreen ? call("apps.launch", key, { fullScreen: true }) : call("apps.launch", key)),
       info: (key) => call("apps.info", key),
       uninstall: (key) => call("apps.uninstall", key),
       running: () => call<Record<string, RunState>>("apps.running"),

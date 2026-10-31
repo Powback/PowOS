@@ -242,6 +242,26 @@ object Tasks {
         return options
     }
 
+    /**
+     * Launch options for a plain full-screen start on the main display (a dock tap, DB1): the windowing mode set to
+     * FULLSCREEN explicitly, no launch bounds. The dock launch used to carry [freeformOptions] (setLaunchBounds +
+     * WINDOWING_MODE_FREEFORM) even when asked for full screen, and at 2026-10-31 02:49:36 OxygenOS's Open Canvas
+     * (com.oplus.pscanvas, oplus.intent.action.pocket.studio.canvas) took that launch - Settings, from home, Chrome
+     * in front after its handle menu's split item - as "the app beside Chrome", built a two-app canvas and took home's
+     * task (2527) into it; folding then left home at the inner screen's size. The intent itself was plain (flg=0x10000000).
+     * HACK: OxygenOS-specific - an explicit fullscreen mode is what we can send to keep a launcher start out of its
+     * canvas/flexible pairing (setLaunchWindowingMode is hidden, reflected). Real fix: none for an app - the canvas
+     * rule is in OxygenOS's system_server (CanvasCalculateLayoutRect); a ROM without pscanvas, or a public opt-out, is.
+     */
+    fun fullScreenOptions(): ActivityOptions {
+        val options = ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY)
+        runCatching {
+            HiddenApi.allow()
+            ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(options, WINDOWING_MODE_FULLSCREEN)
+        }.onFailure { Log.w(TAG, "no full-screen launch mode", it) }
+        return options
+    }
+
     /** Task [id]'s app's info screen (Settings). */
     fun info(
         context: Context,
@@ -284,6 +304,7 @@ object Tasks {
     const val SNAP_TO_2_50_50 = 1
     const val SNAP_TO_2_66_33 = 2
     private const val WINDOWING_MODE_FREEFORM = 5
+    private const val WINDOWING_MODE_FULLSCREEN = 1
 
     /**
      * Removes task [id] from recents (and ends its activities, as the stock switcher's swipe away) - any app's, one

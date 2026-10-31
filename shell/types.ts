@@ -452,7 +452,8 @@ export interface Bridge {
   host: string;
   apps: {
     list(): Promise<App[]>;
-    launch(key: string): Promise<void>;
+    /** [opts.fullScreen]: a plain full-screen start (the Android host: no freeform/canvas options, DB1/no-canvas). */
+    launch(key: string, opts?: { fullScreen?: boolean }): Promise<void>;
     info(key: string): Promise<void>;
     uninstall(key: string): Promise<void>;
     /**

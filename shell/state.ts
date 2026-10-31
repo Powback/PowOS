@@ -588,7 +588,7 @@ export async function launch(key: string, { fullScreen = false }: { fullScreen?:
     closeDrawer(true);
     return;
   }
-  await powos.apps.launch(key);
+  await powos.apps.launch(key, fullScreen ? { fullScreen } : undefined);
   closeDrawer(true);
   await fetchRecent();
 }

@@ -198,7 +198,10 @@ class AndroidAppCatalog(
      * Opens [app] in its profile. One in a paused work profile asks to turn work apps back on
      * instead (the system may ask for the work PIN first); a second tap then opens it.
      */
-    fun open(app: AndroidApp) = open(app.component, app.user)
+    fun open(
+        app: AndroidApp,
+        fullScreen: Boolean = false,
+    ) = open(app.component, app.user, fullScreen)
 
     /** Opens a pinned app; [profile] as in [AndroidApp.profile]. */
     fun open(
@@ -216,13 +219,16 @@ class AndroidAppCatalog(
     private fun open(
         component: ComponentName,
         user: UserHandle,
+        fullScreen: Boolean = false,
     ) {
         if (userManager.isQuietModeEnabled(user)) {
             runCatching { userManager.requestQuietModeEnabled(false, user) }.onFailure { Log.w(TAG, "cannot resume profile $user", it) }
             return
         }
         // Uninstalled or disabled since the list was loaded.
-        runCatching { launcherApps.startMainActivity(component, user, null, dev.omalauncher.system.AppWindows.launchOptions(context)) }
+        // A dock tap asking for full screen (DB1): plain full-screen options, never the floating window's freeform ones.
+        val options = if (fullScreen) dev.omalauncher.system.Tasks.fullScreenOptions().toBundle() else dev.omalauncher.system.AppWindows.launchOptions(context)
+        runCatching { launcherApps.startMainActivity(component, user, null, options) }
             .onFailure { Log.w(TAG, "cannot open $component in $user", it) }
     }
 
