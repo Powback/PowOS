@@ -51,6 +51,8 @@ export interface App {
   category?: number | null;
   /** Linux: its .desktop Categories ("Network;WebBrowser;"). */
   categories?: string | null;
+  /** Linux: the whole desktop (Plasma), shown in its own Android activity - it opens no KWin window of its own. */
+  desktop?: boolean;
 }
 
 /** CSS px; [keyboard] is the soft keyboard's height (0 while it's down). */
