@@ -198,6 +198,7 @@ class ShadeHost(
         }
         stripHeight = statusBarHeight()
         edgeParams = edgeLayout(stripHeight).also { edgeWm.addView(strip, it) }
+        dev.omalauncher.shell.HighRefresh.followers += followHome
         // Out of the way at once if the gesture input already runs.
         edgeLayoutChanged()
         @Suppress("DEPRECATION")
@@ -214,6 +215,7 @@ class ShadeHost(
         if (current === this) current = null
         MediaListener.posted = null
         runCatching { service.unregisterReceiver(closer) }
+        dev.omalauncher.shell.HighRefresh.followers -= followHome
         edge?.let { runCatching { edgeWm.removeView(it) } }
         watchdog?.stop()
         watchdog = null
@@ -772,6 +774,20 @@ class ShadeHost(
             fitInsetsTypes = 0
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         }
+
+    /**
+     * The status bar strip asks for home's mode while home's page does (HighRefresh.wanted): always on screen and over
+     * home, its no-ask was the top-most PowOS window under every home swipe - ColorOS's 60 Hz for an unlisted package
+     * (the 10-31 trace: home paced at 60 with cheap frames, "statusbar bar recorded").
+     */
+    private val followHome: (Int) -> Unit = { id ->
+        val strip = edge
+        val p = edgeParams
+        if (strip != null && p != null && p.preferredDisplayModeId != id) {
+            dev.omalauncher.shell.HighRefresh.ask(p, strip.display ?: display, id)
+            runCatching { edgeWm.updateViewLayout(strip, p) }
+        }
+    }
 
     private fun edgeTouchable() = (!monitored || statusChrome?.ready == true) && statusBarShown && !keyguard && !lent
 
