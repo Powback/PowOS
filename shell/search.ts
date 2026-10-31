@@ -190,7 +190,7 @@ export const searchSections = computed(() => {
   return { apps: appsFound, groups: [...groups.values()] };
 });
 export function openSearchResult(result: SearchResult) {
-  closeDrawer();
+  closeDrawer(true);
   result.open();
 }
 // State imports shell UI too; start after the module graph has initialized.

@@ -3831,6 +3831,21 @@ try {
       return r.page.evaluate(async (f) => (await importShim("./dev/mic-one-check.js")).micOneCheck(f), form);
     })));
   }
+  // SI1 (the user, 2026-10-31 01:16: "The text inside the search widget and the launcher should be the same"): home's
+  // bar and the overlay's are one input - home's typing and dictation partials show in the launcher, a send there clears
+  // both (dev/bar-sync-check.js; the two pages' mock bridges joined as ShellBridge joins the windows).
+  runs.push(Promise.all([
+    open(browser, `${ORIGIN}/index.html`, "bar-sync", { width: 404, height: 900 }),
+    open(browser, `${ORIGIN}/index.html?mode=pull`, "bar-sync-launcher", { width: 404, height: 900 }),
+  ]).then(async ([home, pull]) => {
+    const { joinPages, barSyncCheck } = await import(path.join(ROOT, "dev/bar-sync-check.js"));
+    await joinPages(home.page, pull.page);
+    const r = await whenReady(home, async () => {
+      await pull.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 });
+      return [...pull.problems.map((p) => `launcher: ${p}`), ...(await barSyncCheck(home.page, pull.page))];
+    });
+    return r;
+  }));
   runs.push(open(browser, `${ORIGIN}/index.html`, "dock-key-migration", { width: 821, height: 883 }).then((r) => whenReady(r, () => dockKeyMigration(r))));
   const dockViews = { cover: { width: 404, height: 900 }, inner: { width: 821, height: 883 }, desktop: { width: 1280, height: 800 } };
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {

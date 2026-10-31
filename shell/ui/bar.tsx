@@ -12,10 +12,11 @@ import { GrowField } from "./grow.tsx";
 import { Icon } from "./icons.tsx";
 import { searchResults, searchPending, openSearchResult } from "../search.ts";
 import { followOpenness } from "./gesture.ts";
-import { chatting, drawer, launcherIsOverlay, openPanel, pullKind, query } from "../state.ts";
+import { chatting, drawer, launcherIsOverlay, openPanel, pullKind, query, sharesBar } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
-import { finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
+import { drop, finish, finishing, forget, hearing, listen, listeningFor, makeHold, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
+import { remoteHearing, startBarSync } from "./barsync.ts";
 
 /** A press longer than this is a hold (talk, then send); shorter, a tap (dictate). */
 const HOLD_MS = 250;
@@ -171,7 +172,9 @@ function useSubmitFinishes(box: { current: HTMLDivElement | null }, targets: Mic
  *  (the field is empty until then) - and spinning while a send waits for a dictation's final words. */
 function PillSend({ targets, value }: { targets: MicTarget[]; value: string }) {
   const waiting = !!finishing.value && targets.includes(finishing.value);
-  return <Send shown={!!value.trim() || waiting || targets.some(listeningFor)} waiting={waiting} />;
+  // SI1: the shared bar's text written by another window's dictation (home's, under the launcher): its send shows here.
+  const elsewhere = targets.includes(barMic) && remoteHearing.value;
+  return <Send shown={!!value.trim() || waiting || elsewhere || targets.some(listeningFor)} waiting={waiting} />;
 }
 
 export function Pill({
@@ -216,6 +219,12 @@ const barMic: MicTarget = {
   started: () => openHere(),
 };
 
+/** SI1: what the bar shows (barsync.ts writes it to the other window's bar): a dictation's words as heard, else the query. */
+const barShown = () => {
+  const heard = hearing(barMic) ?? hearing(pillTarget);
+  return { text: heard ?? query.value, hearing: heard !== null };
+};
+
 /**
  * Up from the pill: the drawer, unless the pull-up panel is already up (PowOS AI's stays). On home: the launcher
  * overlay (state.ts openPanel), its own pill focused - home's pill is only its face.
@@ -242,6 +251,8 @@ function askHere(text: string) {
 export function Bar({ proxy = false }: { proxy?: boolean }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const [focused, setFocused] = useState(false);
+  // SI1: home's bar and the launcher overlay's are one input (barsync.ts); another window's edit ends a dictation here.
+  useEffect(() => void (sharesBar && startBarSync(barShown, (at) => drop(at, barMic, pillTarget))), []);
   const s = speech.value;
   // While it listens, the field shows what's heard after what was typed.
   // The assistant's dictation (the side button, the pet) writes into this field too.

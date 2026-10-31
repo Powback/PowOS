@@ -316,6 +316,10 @@ export const homePage = !new URLSearchParams(location.search).get("mode");
  * desktop.tsx's launcher in place. A desktop PC's powos-shell has no overlay and keeps desktop.tsx's launcher.
  */
 export const launcherIsOverlay = homePage || !!window.PowosHost?.launcherOverlay;
+/** The launcher overlay's own page (PullHost.kt, mode=pull). */
+export const pullPage = new URLSearchParams(location.search).get("mode") === "pull";
+/** SI1: home's bar and the overlay's are one input (ui/barsync.ts); other pages' bars keep their own. */
+export const sharesBar = homePage || pullPage;
 
 /**
  * The home page on screen (its id in home.pages): home shares it through the store, so the launcher overlay's "add to
@@ -435,10 +439,14 @@ document.addEventListener("visibilitychange", async () => {
 /** Closes the pull-up panel (the drawer or PowOS AI's). */
 export const closePanel = () => closeDrawer();
 
-/** Closes the drawer: the search cleared, the keyboard down. */
-export function closeDrawer() {
+/**
+ * Closes the drawer: the keyboard down, the search cleared - [clear]: by default, except the launcher overlay's
+ * dismissal, whose bar is home's too (SI1, barsync.ts): the search widget keeps its text, and the next open shows it.
+ * A launch or an opened result from it (launch, search.ts openSearchResult) does clear it, in both.
+ */
+export function closeDrawer(clear = !pullPage) {
   drawer.value = 0;
-  query.value = "";
+  if (clear) query.value = "";
   chatting.value = false;
   (document.activeElement as HTMLElement | null)?.blur();
   powos.keyboard.hide();
@@ -535,16 +543,16 @@ export async function launch(key: string) {
   // A PowOS app: its page, full screen in this one (ui/appscreen.tsx).
   if (key.startsWith(PREFIX)) {
     openApp(key.slice(PREFIX.length));
-    closeDrawer();
+    closeDrawer(true);
     return;
   }
   // Unfolded with web windows on (Settings.Global powos_web_windows): the app opens as an element of this page.
   if (await openWebWindow(key, byKey.value.get(key)?.label ?? key, pages.value[page.value] ?? 1)) {
-    closeDrawer();
+    closeDrawer(true);
     return;
   }
   await powos.apps.launch(key);
-  closeDrawer();
+  closeDrawer(true);
   await fetchRecent();
 }
 

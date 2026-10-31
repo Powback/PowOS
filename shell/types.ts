@@ -424,6 +424,9 @@ export interface WebWindowRect { left: number; top: number; width: number; heigh
 
 export interface Bridge {
   /** Perf traces (?: hosts from before it): saves JSON under the AI shared dir, returns its path in PowOS. */
+  /** The one search/chat bar input home's bar and the launcher overlay share (barsync.ts): the host keeps the latest and
+   *  broadcasts it to the other windows as "bar.input". Hosts from before it: absent. */
+  bar?: { publish(v: BarInput): Promise<unknown>; get(): Promise<BarInput | null> };
   perf?: { save(json: string): Promise<string | null>; /** Main shell frame sample to the other windows (hosts from before it: absent). */ publish?(json: string): Promise<unknown>;
     /** The host's main-thread blocks while recording (true: started; the trace section on stop). Older hosts: absent. */ native?(on: boolean): Promise<NativePerf | true | null>;
     /** The front PowOS window's presents (null: none in front); hosts from before it reject it. */ front?(): Promise<FrontPresents | null> };
@@ -1305,3 +1308,11 @@ export interface VirtualDesktop {
 /** A settings page or control the host can open (SettingsSearch.kt), and the app it opens in: [package], its name
  * [app] and picture [appIcon] (a data: URL, for one that isn't a launcher app). Older hosts send no app. */
 export interface NativeSetting { id: string; label: string; keywords: string; breadcrumb?: string; package?: string; app?: string; appIcon?: string }
+
+/** The shared bar's input (barsync.ts): its text (with a dictation's words as heard), whether a dictation is writing it,
+ *  and when it was written (last writer wins). */
+export interface BarInput {
+  text: string;
+  hearing: boolean;
+  at: number;
+}

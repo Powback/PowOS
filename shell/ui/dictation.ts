@@ -26,7 +26,7 @@ export interface MicTarget {
 }
 
 /** The recognition under way, and whether it sends what's heard; typed is what its field had before it. */
-let pending: { send: boolean; typed: string; target: MicTarget } | null = null;
+let pending: { send: boolean; typed: string; target: MicTarget; since: number } | null = null;
 /** It asked for the mic first: the press that asked can't still be held, so a yes dictates. */
 let asked: MicTarget | null = null;
 
@@ -52,7 +52,7 @@ export async function listen(hold: boolean, target: MicTarget) {
   // (AO3): this start ends any other, here or in another window (the native side's SessionSlot).
   const starting = powos.speech.start(hold);
   logStart(hold);
-  pending = { send: hold, typed: target.typed(), target };
+  pending = { send: hold, typed: target.typed(), target, since: Date.now() };
   // Listening shows in this frame, not when the recognizer reports it.
   speech.value = { listening: true, text: "", error: null };
   target.started?.();
@@ -128,6 +128,20 @@ export function settle(...targets: MicTarget[]) {
   const p = pending;
   if (p && targets.includes(p.target)) pending = null;
   if (!pending && speech.value.listening) stopNow();
+}
+
+/**
+ * SI1: the shared bar was edited, sent or cleared in another window at [at] (barsync.ts) while one of [targets]
+ * dictates here: its words are already in that text (this page published them as heard), so the dictation ends without
+ * writing them back - the recognizer let go, nothing sent. One that started after that edit is left alone.
+ */
+export function drop(at: number, ...targets: MicTarget[]) {
+  const p = pending;
+  if (!p || !targets.includes(p.target) || p.since > at) return;
+  // A send here is waiting for its final words (finish): it goes on.
+  if (finished) return;
+  pending = null;
+  stopNow();
 }
 
 /** [target]'s dictation is under way (or starting). */
