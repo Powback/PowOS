@@ -5,7 +5,11 @@
 # PASS/FAIL); the manager looks at them as a user. Rules kept here so both journeys keep them:
 #   - NEVER a touch on the verify status pill (VerifyRun.kt "PowOS verify status", top centre): every DOWN is checked
 #     against its window frame (+48 px) right before it is made, and refused (a FAIL line, no touch) inside it;
-#   - a real finger (touch IRQs move) ends the run at once: exit 3, the runner re-queues it;
+#   - only while the user is idle (manager rule): e2e_idle_gate before each journey (part) - the last user input > 120 s
+#     ago and the screen Awake, else "journey <name>: skipped - user active N s ago"; a touch during it (touch IRQs move,
+#     or the last user activity runs > 1 s past the journey's own last injected input - touched(), at every chk and
+#     step) stops it at once: "journey <name>: aborted - the user touched the phone", the restore runs. Both exit 3 (the
+#     runner re-queues it; not a FAIL) and land in the round's skipped.txt, which the last part's mail names;
 #   - only what the journey opened is closed (new tasks of its apps, Linux apps it started); the page, the screen state
 #     and the app in front it started from come back; the layout (home.get + home.wide) must be the same at the end;
 #   - a step's FAIL doesn't end the journey (more screenshots for the manager): exit 0 with FAIL lines = a FAIL.
@@ -21,7 +25,12 @@ L=$HOME/.cache/powos-verify.lock
 TEST_APP=${TEST_APP:-com.oneplus.calculator}
 
 # Command-only calls must not drain a surrounding read loop (cleanup must visit every task).
-sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+# An injecting call (input tap/swipe/motionevent/keyevent/text) also stamps the phone's boot clock at its end into
+# $E2E_INJ, in the same shell: touched() tells the journey's own input from the user's by it.
+E2E_INJ=/data/local/tmp/powos-e2e-lastinj
+sh_() {
+  local m=; case "$*" in *"input tap"*|*"input swipe"*|*"input motionevent"*|*"input keyevent"*|*"input text"*|*"input draganddrop"*) m="; read u r < /proc/uptime; echo \$u > $E2E_INJ" ;; esac
+  "$A" shell "su -c '$*$m'" </dev/null 2>/dev/null | tr -d '\r'; }
 # ash: a script on stdin as Android root (any quoting inside).
 ash() { "$A" shell "su -c 'sh -s'" 2>/dev/null | tr -d '\r'; }
 # device_state_set <state>: set fold state; on emu, state 3 (inner) is a no-op, state 0 (cover) prints SKIP.
@@ -37,8 +46,59 @@ device_state_reset() {
 }
 # us: a script text inside PowOS as the session user (user.sh).
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; sh_ "input motionevent CANCEL 1 1" >/dev/null; exit 3; }; }
+# irq: the touch panels' interrupt count (only a real finger moves it). Read through useract: the old single-quoted awk
+# inside sh_'s su -c '...' came back empty on the phone, so I0 was "" and chk never saw a touch (10-31).
+irq() { useract | sed -nE 's/.*irq=([0-9]*).*/\1/p'; }
+# --- the user's idle time and their touches (manager rule: a journey runs only while the user is idle) ----------------
+# useract: one read-only call -> "idle=<s> wake=<Awake|Dozing|..> since=<ms> irq=<n>". idle: seconds since the user's last
+# input (dumpsys power: the newest of lastUserActivityTime / lastUserActivityTimeNoChangeLights /
+# mLastUserActivityTime(excludingAttention), all SystemClock.uptimeMillis; "now" in that clock = mLastWakeTime + its
+# "ms ago"). /proc/uptime is the boot clock (it also counts deep sleep), read in the same call: the two clocks' offset
+# turns the last activity into boot time, so since = last activity - the journey's own last injected input ($E2E_INJ)
+# in ms (negative/0: nothing after it; empty: no mark). Unreadable -> idle=-1 (not idle). Never wakes the screen.
+useract() {
+  [ "${POWOS_DEVICE:-phone}" = emu ] && { echo "idle=86400 wake=Awake since= irq="; return; }
+  sh_ "read b r < /proc/uptime; echo B \$b; [ -s $E2E_INJ ] && echo I \$(cat $E2E_INJ); echo Q \$(awk \"/touch-0/{s+=\\\$2+\\\$3+\\\$4+\\\$5+\\\$6+\\\$7+\\\$8+\\\$9} END{print s}\" /proc/interrupts); dumpsys power | grep -E \"mWakefulness=|mLastWakeTime=|astUserActivityTime\"" | awk '
+    /^B /{b=$2*1000} /^I /{i=$2*1000} /^Q /{q=$2}
+    /mWakefulness=/ && w==""{sub(/.*mWakefulness=/,""); w=$1}
+    /mLastWakeTime=/{split($0,a,/[=( ]+/); for(k in a) if(a[k]=="mLastWakeTime") t=a[k+1]; if(match($0,/\(([0-9]+) ms ago/)) now=t+substr($0,RSTART+1,RLENGTH-8)}
+    /astUserActivityTime/{v=$0; sub(/^[^=]*=/,"",v); v=v+0; if(v>last) last=v}
+    END{ if(now>0 && last>0){ idle=int((now-last)/1000); s=""; if(i>0) s=int(last+(b-now)-i) } else idle=-1
+      printf "idle=%s wake=%s since=%s irq=%s\n", idle, (w==""?"?":w), s, q }'
+}
+# e2e_idle_gate: before the journey - the user idle > E2E_IDLE_S (120) s and the screen Awake (asleep()'s rule: the
+# check never wakes it). Not idle: "journey <name>: skipped - user active N s ago" in the log, steps.txt and the round's
+# skipped.txt, and exit 3 - the runner puts it back for the next window (not a FAIL).
+e2e_jname() { echo "e2e-$JOURNEY part $PART/$LAST"; }
+e2e_idle_gate() {
+  local r idle wake why=; r=$(useract); idle=$(sed -nE 's/.*idle=(-?[0-9]+).*/\1/p' <<<"$r"); wake=$(sed -nE 's/.*wake=([^ ]*).*/\1/p' <<<"$r")
+  log "idle check: $r (need idle > ${E2E_IDLE_S:-120} s, Awake)"
+  if [ "${wake:-?}" != Awake ] && [ "$wake" != "?" ]; then why="the screen is $wake (not woken - rule)"
+  elif [ "${idle:--1}" -lt 0 ]; then why="user activity unreadable ($r)"
+  elif [ "$idle" -le "${E2E_IDLE_S:-120}" ]; then why="user active $idle s ago"; fi
+  [ -z "$why" ] && return 0
+  e2e_skip "journey $(e2e_jname): skipped - $why"
+}
+# e2e_skip <line>: a journey that didn't run / stopped for the user - logged, a SKIP line in steps.txt and the round's
+# skipped.txt on the phone (e2e_finish reports it), exit 3 (re-queued; not a FAIL). e2e_abort restores and publishes.
+e2e_skip() {
+  log "$1"; _res SKIP "$1"
+  [ -n "${PDIR:-}" ] && printf '%s\n' "$(date +%H:%M:%S) $1" | "$A" shell "su -c 'mkdir -p $PDIR; cat >> $PDIR/skipped.txt; chmod a+r $PDIR/skipped.txt'" >/dev/null 2>&1
+  echo "SKIP: $1"; exit 3
+}
+# touched [where]: the user touched the phone during the journey - the touch IRQs moved (a real finger only), or the
+# last user activity is more than E2E_TOUCH_SLACK_MS (1000) past the journey's own last injected input. Checked by
+# chk and before every step; the activity half only from the end of setup (E2E_WATCH=1: setup's own unfold and lock-face
+# swipe poke it) to the restore. Then: no more input, the journey's own put-away (e2e_abort -> e2e_restore), exit 3.
+touched() {
+  local r s q; r=$(useract); s=$(sed -nE 's/.*since=(-?[0-9]+).*/\1/p' <<<"$r"); q=$(sed -nE 's/.*irq=([0-9]+).*/\1/p' <<<"$r")
+  if { [ -n "$q" ] && [ -n "${I0:-}" ] && [ "$q" != "$I0" ]; } || { [ "${E2E_WATCH:-0}" = 1 ] && [ -n "$s" ] && [ "$s" -gt "${E2E_TOUCH_SLACK_MS:-1000}" ]; }; then
+    sh_ "input motionevent CANCEL 1 1" >/dev/null 2>&1
+    log "touch seen at ${1:-a step}: $r (irq at start ${I0:-?})"
+    e2e_skip "journey $(e2e_jname): aborted - the user touched the phone"
+  fi
+}
+chk() { touched "$1"; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 
 # ev <js> [page]: a CDP eval, its answer unquoted when it is a JSON string (cdp.sh prints "\"opened\"" - a quoted answer
@@ -187,6 +247,7 @@ EOF
 }
 # step <slug> <what the user does / sees>: the screenshot of this step, now.
 step() {
+  [ -n "${I0:-}" ] && touched "step $1"
   [ $N -lt $HI ] && N=$((N + 1)); CUR=$(printf '%02d-%s.png' "$N" "$1"); CURD=$2; CURN=0
   echo "-- $CUR: $2"
   "$T/shot.sh" --phone "$PDIR/$CUR" >/dev/null 2>&1; local rc=$?
@@ -247,7 +308,10 @@ chmod -R a+rX /data/powos/root/home/powos/design-qa/e2e-$JOURNEY
 EOF
 }
 mail_manager() {
-  printf 'powos comms send manager %q --from e2e\n' "E2E round $ROUND ready: $UDIR" > "$OUT/mail.sh"
+  local msg="E2E round $ROUND ready: $UDIR"
+  # The round's skipped / aborted journeys (user active, a touch): named, so a missing part isn't read as a pass.
+  [ -n "${sk:-}" ] && msg="$msg - skipped/aborted (re-queued, not FAILs): $(printf '%s\n' "$sk" | cut -d' ' -f2- | paste -sd';' - | sed 's/;/; /g')"
+  printf 'powos comms send manager %q --from e2e\n' "$msg" > "$OUT/mail.sh"
   # Capped: a hung `powos comms send` ran the App API journey past its 300 s budget after its last step (2026-10-23).
   perl -e 'alarm shift; exec @ARGV' 20 "$T/user.sh" "$OUT/mail.sh" >/dev/null 2>&1 && log "mailed the manager: E2E round $ROUND ready: $UDIR" || log "mail to the manager failed"
 }
@@ -262,6 +326,7 @@ e2e_setup() {
   . "$here/window-lock.sh"
   window_lock "e2e-$JOURNEY" 120
   trap 'e2e_abort' EXIT
+  e2e_idle_gate
   I0=$(irq)
   e2e_logcat_start
   if [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" != Awake ]; then
@@ -305,11 +370,13 @@ e2e_setup() {
   # The journey starts on page 1 (PowOS AI's page or another one: back to it at the end).
   hemit system.home null
   log "on: ${W}x${H} @${DENS} dpi, home page $PAGE0, layout $LAY0"
+  # From here a user activity past the journey's own last input is the user: the mark starts now.
+  sh_ "read u r < /proc/uptime; echo \$u > $E2E_INJ"; E2E_WATCH=1
 }
 # Everything the journey opened closed, the start state back (also on an abort: a touch, the budget, a FAIL exit).
 RESTORED=0
 e2e_restore() {
-  [ $RESTORED = 1 ] && return 0; RESTORED=1
+  [ $RESTORED = 1 ] && return 0; RESTORED=1; E2E_WATCH=0
   e2e_logcat_stop
   # Setup never read the start state (the screen asleep, no window): nothing of the journey's to close - without
   # TASKS0 every task looked new and a user's Linux window was closed (resize-probe, 2026-10-23 18:38).
@@ -362,6 +429,8 @@ e2e_finish() {
   local lay; lay=$(layout)
   [ "$lay" = "$LAY0" ] && pass "the home layout is unchanged (home.get + home.wide)" || fail "the home layout CHANGED during the journey ($LAY0 -> $lay) - check home.wide.backup"
   publish
+  sk=$(sh_ "cat $PDIR/skipped.txt 2>/dev/null")
+  [ -n "$sk" ] && log "skipped / aborted in this round so far (not FAILs, re-queued):" && printf '%s\n' "$sk" | sed 's/^/  /' | tee -a "$OUT/log.txt"
   [ "$PART" = "$LAST" ] && mail_manager
   DONE=1
   local s="e2e-$JOURNEY round $ROUND part $PART/$LAST: $NPASS passed, $NFAIL failed - $UDIR"
