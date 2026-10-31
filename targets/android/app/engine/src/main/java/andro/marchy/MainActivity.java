@@ -512,7 +512,7 @@ public class MainActivity extends Activity
         }
         HardwareKeyboard.watch(this); // the on-screen keyboard stays hidden while a physical one is connected
         backlight = Backlight.start(this); // Omarchy's brightness controls -> this window's brightness
-        SessionService.start(this);
+        SessionService.startAsync(this); // off the critical path: a binder call (see startAsync)
 
         setupMediaAudio();
         applyScreenOrientation();

@@ -103,6 +103,26 @@ public class SessionService extends Service {
         ctx.startForegroundService(new Intent(ctx, SessionService.class));
     }
 
+    /**
+     * {@link #start}, off the caller's thread: startForegroundService is a binder call into the activity manager -
+     * 137 ms on the UI thread in MainActivity.onCreate (perf-1793409569119). The service starts asynchronously either
+     * way (its onCreate runs later on the main thread); only the request moves. The caller is in front (an activity
+     * being created), so the foreground start stays allowed a few ms later.
+     */
+    public static void startAsync(Context ctx) {
+        Context app = ctx.getApplicationContext();
+        START.execute(() -> {
+            try {
+                start(app);
+            } catch (RuntimeException e) {
+                android.util.Log.w("SessionService", "session service start refused", e);
+            }
+        });
+    }
+
+    private static final java.util.concurrent.Executor START =
+        java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(r, "session-start"));
+
     @Override
     public void onCreate() {
         super.onCreate();
