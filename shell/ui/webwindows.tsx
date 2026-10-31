@@ -276,10 +276,16 @@ function adoptPlace(body: WebWindowRect | undefined, bar: number): { vx: number;
  * last place by hand) inside the work area, else a default size centred in it. Home goes to [page], the window on top.
  * A tiling on [page] with an empty tile puts it there (fillEmptyTile), as [openWindow] does.
  */
+/** The drawer key of KWin's stand-in window for an Android app ([adoptWebWindow]). */
+const ANDROID_STAND_IN = "l:android-";
+
 export async function adoptWebWindow(
   m: { task?: number; kwin?: number; key: string; label: string; body?: WebWindowRect; ownFrame?: boolean },
   page: number,
 ): Promise<boolean> {
+  // KWin's stand-in for an Android app ("l:android-<package>", the Linux session's powos-android-tasks / scrcpy
+  // window): the app's own window is it - never a second element (10-31 15:33, Termux's translucent ghost window).
+  if (m.key.startsWith(ANDROID_STAND_IN)) return false;
   // A window that draws its own frame has no PowOS bar: its body is the whole frame.
   const bar = m.ownFrame ? 0 : TITLE;
   const ww = powos.webwindows;
@@ -319,7 +325,12 @@ export async function rebuildFromHost(): Promise<number> {
   if (!list?.length) return 0;
   const have = new Set(webWins.value.map((w) => w.id));
   const page = shownPage();
-  const add = list.filter((h) => h.id >= 0 && !have.has(h.id)).map((h) => fromHost(h, page));
+  // One element per host window and task: a host window whose task the page shows already, or KWin's stand-in for an
+  // Android app, is not a second one.
+  const tasks = new Set(webWins.value.map((w) => w.task).filter((t) => t != null));
+  const add = list
+    .filter((h) => h.id >= 0 && !have.has(h.id) && !h.key.startsWith(ANDROID_STAND_IN) && !(h.task != null && h.task >= 0 && tasks.has(h.task)))
+    .map((h) => fromHost(h, page));
   if (!add.length) return 0;
   add.forEach((w) => hostGave(w.id));
   webWins.value = [...webWins.value, ...add];
@@ -470,7 +481,7 @@ powos.on("webwindows.full", (m: { id: number; on: boolean; task?: number }) => {
   resendGeometry();
 });
 /** The host lost or re-made layer state (a mirror made again, home's surface re-attached): every window's state again. */
-powos.on("webwindows.resend", () => resendGeometry());
+powos.on("webwindows.resend", () => resendNow());
 /** Its app's first frame shows (WebWindows.liveWhenDrawn): the placeholder goes, the body is the app's. */
 powos.on("webwindows.live", (id: number) => update(id, { live: true }));
 /** Its app draws its own frame now, or no longer (WebWindows.linuxOwnFrame): its PowOS bar goes or comes. */
@@ -1688,6 +1699,12 @@ const sent: string[] = [];
 function tick(ts: number) {
   raf = 0;
   for (const [id, r] of resizing) pace(id, r, ts);
+  send(ts);
+  if (webWins.value.length) raf = requestAnimationFrame(tick);
+}
+
+/** [tick]'s send: the windows' geometry as one "w.f" line tagged with frame time [ts], when it changed. */
+function send(ts: number) {
   const g = geometry();
   if (g !== lastGeometry) {
     lastGeometry = g;
@@ -1704,7 +1721,6 @@ function tick(ts: number) {
       sendGeometry(line);
     }
   }
-  if (webWins.value.length) raf = requestAnimationFrame(tick);
 }
 
 function kick() {
@@ -1720,6 +1736,28 @@ function resendGeometry() {
   lastGeometry = "";
   kick();
 }
+
+/**
+ * The host's resend ("webwindows.resend": home's surface re-made, the render watchdog's probe or rebind) sends now, not
+ * on the next rAF: 10-31 15:37 home's surface came back while the page's rAF was still paused (document hidden), the
+ * resend waited for a frame that never ran and the windows stayed empty ~9 s until the watchdog reloaded home. A rAF
+ * held from a hidden spell is dropped and asked for again, so the frame loop restarts on the new surface.
+ */
+function resendNow() {
+  lastGeometry = "";
+  if (webWins.value.length) send(performance.now());
+  restartFrames();
+}
+
+function restartFrames() {
+  if (raf) cancelAnimationFrame(raf);
+  raf = 0;
+  kick();
+}
+// Back from hidden (an app full screen, the screen off, home's surface re-made): every window's state at once.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) resendNow();
+});
 webWins.subscribe(kick);
 tilings.subscribe(kick);
 // A new port (the page reloaded or the host came back): its layers know nothing yet.
