@@ -31,7 +31,7 @@ object FoldedWindows {
     /** Folded ([AppWindows.floating] false): every freeform task full screen. True when one changed. */
     fun fullScreenIfFolded(context: Context): Boolean {
         if (AppWindows.floating(context)) return false
-        val windows = runCatching { FreeformTasks.list(context) }.getOrDefault(emptyList())
+        val windows = runCatching { FreeformTasks.cached(context) }.getOrDefault(emptyList())
         windows.forEach { w ->
             val ok = FreeformTasks.setFullScreen(context, w.id, true, null)
             Log.i(TAG, "folded: task ${w.id} (${w.pkg}) at ${w.bounds.toShortString()} ${if (ok) "now full screen" else "NOT made full screen"}")
@@ -45,7 +45,7 @@ object FoldedWindows {
         id: Int,
     ) {
         if (AppWindows.floating(context)) return
-        if (runCatching { FreeformTasks.list(context) }.getOrDefault(emptyList()).none { it.id == id }) return
+        if (runCatching { FreeformTasks.cached(context) }.getOrDefault(emptyList()).none { it.id == id }) return
         val ok = FreeformTasks.setFullScreen(context, id, true, null)
         Log.i(TAG, "folded: task $id opened ${if (ok) "full screen" else "while still a window (NOT made full screen)"}")
     }

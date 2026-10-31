@@ -103,7 +103,7 @@ object Tasks {
         // task moved only that one (#902: t2909 TO_FRONT, nothing else in the change). The dock, the switcher, a launcher
         // tap on an open Linux window and the quick switch all come through here. A task of another mode (full screen,
         // folded, gone) still takes startActivityFromRecents: it restarts a dead task and applies [options]' bounds.
-        if (AppWindows.floating(context) && FreeformTasks.list(context).any { it.id == id } && FreeformTasks.raise(context, id)) {
+        if (AppWindows.floating(context) && FreeformTasks.cached(context).any { it.id == id } && FreeformTasks.raise(context, id)) {
             Log.i(TAG, "task $id raised (moveTaskToFront: the other floating windows stay)")
             return true
         }

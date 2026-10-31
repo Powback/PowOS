@@ -74,7 +74,7 @@ object AppWindows {
         if (dev.omalauncher.shell.WebWindowDisplays.isWebWindow(context, id)) return base
         // A web window's app made a full-screen app (its bar's full screen button): it comes back full screen.
         if (dev.omalauncher.shell.WebWindowDisplays.fullScreenWindow(id) != null) return base
-        if (!floating(context) || FreeformTasks.list(context).any { it.id == id }) return base
+        if (!floating(context) || FreeformTasks.cached(context).any { it.id == id }) return base
         return options(context, base) ?: base
     }
 
