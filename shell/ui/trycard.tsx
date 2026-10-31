@@ -98,21 +98,28 @@ function setAnswer(id: string, a: Answer | null) {
   }
 }
 
-/** The item whose reply line is open (one at a time), and the one plain line of a save that failed. */
+/**
+ * Where a try line shows: the chat's message or the wide page's "Try this" column (the same item can be in both).
+ * The reply line opens only on the one pressed, so the open one is keyed by surface and item.
+ */
+type Surface = "chat" | "col";
+const replyKey = (s: Surface, id: string) => `${s}:${id}`;
+
+/** The reply line open (one at a time, as replyKey), and the one plain line of a save that failed. */
 const replying = signal<string | null>(null);
 const failed = signal<Record<string, string>>({});
 
 const taskOf = (it: TryItem): Tried => ({ id: it.id, title: it.line });
 
 /** works / still broken pressed (still broken: with the reply): shown at once, put back if it couldn't be saved. */
-async function tryVerdict(it: TryItem, works: boolean, b?: Broken) {
+async function tryVerdict(it: TryItem, works: boolean, b?: Broken, at: Surface = "chat") {
   replying.value = null;
   failed.value = { ...failed.value, [it.id]: "" };
   setAnswer(it.id, works ? { how: "works" } : { how: "broken", text: b?.text });
   if (await recordVerdict(taskOf(it), works, b)) return b && clearBroken(it.id);
   setAnswer(it.id, null);
   failed.value = { ...failed.value, [it.id]: "couldn't save that - try again in a moment" };
-  if (b) replying.value = it.id;
+  if (b) replying.value = replyKey(at, it.id);
 }
 
 /** done / can't on a thing to do: to the manager (it owns the board), marked at once. */
@@ -130,11 +137,12 @@ function doVerdict(it: TryItem, b?: Broken) {
 const SAID: Record<Answer["how"], string> = { works: "you said it works", broken: "you said it's still broken", done: "you did it", cant: "you said you can't" };
 
 /** One item: its sentence, then its buttons - or, answered, what the user said. */
-function TryLine({ it }: { it: TryItem }) {
+function TryLine({ it, at }: { it: TryItem; at: Surface }) {
   const a = answers.value[it.id];
-  const open = replying.value === it.id;
+  const key = replyKey(at, it.id);
+  const open = replying.value === key;
   const second = it.do ? "can't / problem" : "still broken";
-  const onSend = (b: Broken) => (it.do ? doVerdict(it, b) : void tryVerdict(it, false, b));
+  const onSend = (b: Broken) => (it.do ? doVerdict(it, b) : void tryVerdict(it, false, b, at));
   return (
     <div class={`try-item ${a ? "answered" : ""}`}>
       <div class="try-line">{it.line}</div>
@@ -148,7 +156,7 @@ function TryLine({ it }: { it: TryItem }) {
           <button type="button" class="ai-act" onClick={() => (it.do ? doVerdict(it) : void tryVerdict(it, true))}>
             {it.do ? "done" : "works"}
           </button>
-          <button type="button" class="ai-act" aria-expanded={open} onClick={() => (replying.value = open ? null : it.id)}>
+          <button type="button" class="ai-act" aria-expanded={open} onClick={() => (replying.value = open ? null : key)}>
             {second}
           </button>
         </div>
@@ -168,7 +176,7 @@ export function TryCard({ t }: { t: TryBlock }) {
     <div class="msg assistant try">
       <div class="try-title">{titleOf(t)}</div>
       {t.items.map((it) => (
-        <TryLine key={it.id} it={it} />
+        <TryLine key={it.id} it={it} at="chat" />
       ))}
     </div>
   );
@@ -215,7 +223,7 @@ export function LatestTry({ texts }: { texts: string[] }) {
     <div class="ai-ctx-try">
       <div class="try-title">{titleOf(t)}</div>
       {open.map((it) => (
-        <TryLine key={it.id} it={it} />
+        <TryLine key={it.id} it={it} at="col" />
       ))}
     </div>
   );

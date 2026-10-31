@@ -3538,7 +3538,7 @@ html:root .ai-mid .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .cho
 .ai-ctx-sec { display: flex; flex-direction: column; gap: 6px; }
 .ai-ctx-head { margin: 0 4px 2px; font-size: var(--text-small); font-weight: 600; color: var(--color-muted); }
 .ai-ctx-card { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 10px 12px; border: 0; border-radius: calc(var(--radius) * 0.8); background: var(--color-surface); font: inherit; color: var(--color-foreground); text-align: start; }
-.ai-ctx-card .fl-bar { height: 3px; }
+.ai-ctx-card .fl-bar { align-self: stretch; height: 3px; }
 .ai-ctx-title { font-weight: 600; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ai-ctx-now { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-ctx-card.bad .ai-ctx-title { color: var(--color-red); }
