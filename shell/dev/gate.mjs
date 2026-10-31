@@ -2703,29 +2703,11 @@ async function webWindowResizeCheck() {
  * hold a point in each newly grown part, and a drag up, down and sideways starting there (body and bar) opens no
  * launcher, shade or page swipe.
  */
-async function webWindowRegionsCheck() {
+async function webWindowRegionsTiled() {
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
-  const G = await window.__gw.mod("./ui/gesture.ts");
   const frames = async (n) => { for (let i = 0; i < n; i++) await new Promise((ok) => requestAnimationFrame(ok)); };
-  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const covered = (x, y) => (globalThis.__homePullRegions ?? []).some((r) => x >= r.left && x <= r.left + r.width && y >= r.top && y <= r.top + r.height);
-  const drag = async (el, a, b) => {
-    const send = (kind, k) => {
-      const [x, y] = [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
-      el.dispatchEvent(new PointerEvent(`pointer${kind}`, { pointerId: 13, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true }));
-      const t = [new Touch({ identifier: 13, target: el, clientX: x, clientY: y })];
-      const name = { down: "Start", move: "Move", up: "End" }[kind];
-      const init = { touches: kind === "up" ? [] : t, changedTouches: t, bubbles: true, cancelable: true };
-      for (const type of [`touch${name.toLowerCase()}`, `Touch${name}`]) el.dispatchEvent(new TouchEvent(type, init));
-    };
-    const pulled = () => S.drawer.value > 0 || G.drawerDrag.value != null || S.notif.value || G.notifDrag.value != null || S.page.value !== 0;
-    let seen = (send("down", 0), false);
-    for (let i = 1; i <= 6; i++) (send("move", i / 6), await sleep(8), (seen ||= pulled()));
-    await (send("up", 1), window.__gw.settled());
-    return seen || pulled();
-  };
-  const fails = [];
   const was = S.page.value;
   try {
     S.page.value = 0;
@@ -2737,48 +2719,70 @@ async function webWindowRegionsCheck() {
     ];
     await window.__gw.settled();
     W.tileWindows(p, [921, 922]);
-    await window.__gw.settled();
-    await frames(3);
-    const el = () => document.querySelector('.webwindow[data-wwid="921"]');
-    const before = el().getBoundingClientRect();
+    await (window.__gw.settled(), frames(3));
+    const el = () => document.querySelector('.webwindow[data-wwid="921"]').getBoundingClientRect();
+    const before = el();
     // The divider let go further right: the left window grows (tilings + relayout, no finger on the window).
     W.tilings.value = { ...W.tilings.value, [p]: { ...W.tilings.value[p], rx: 0.7 } };
-    W.webWins.value = [...W.webWins.value]; // as the divider's end does (divided -> relayout)
-    await window.__gw.settled();
-    await frames(3);
-    const after = el().getBoundingClientRect();
-    if (after.right > before.right + 20) {
-      const pt = [(before.right + after.right) / 2, after.top + after.height / 2];
-      if (!covered(...pt)) fails.push(`W-IN1: after the divider grew window 921 (${before.right} -> ${after.right}), ${pt} isn't in the host's excluded regions`);
-    }
-    // A floating window resized bigger (as a corner drag's end or a snap): the grown part is excluded.
-    W.webWins.value = [{ id: 923, key: "a:gate.r3", label: "R3", page: p, x: 80, y: 160, w: 240, h: 200, live: true }];
-    await window.__gw.settled();
-    await frames(3);
-    W.webWins.value = W.webWins.value.map((w) => (w.id === 923 ? { ...w, w: 420, h: 360 } : w));
-    await window.__gw.settled();
-    await frames(3);
-    const f = document.querySelector('.webwindow[data-wwid="923"]').getBoundingClientRect();
+    W.webWins.value = [...W.webWins.value];
+    await (window.__gw.settled(), frames(3));
+    const after = el();
+    const pt = [(before.right + after.right) / 2, after.top + after.height / 2];
+    if (after.right > before.right + 20 && !covered(...pt)) return [`W-IN1: after the divider grew window 921 (${before.right} -> ${after.right}), ${pt} isn't in the host's excluded regions`];
+    return [];
+  } finally {
+    W.webWins.value = [];
+    W.tilings.value = {};
+    S.page.value = was;
+  }
+}
+
+/** W-IN1, a floating window resized bigger: its grown corner is excluded, and drags from it (body, bar) stay the window's. */
+async function webWindowRegionsResized() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const G = await window.__gw.mod("./ui/gesture.ts");
+  const frames = async (n) => { for (let i = 0; i < n; i++) await new Promise((ok) => requestAnimationFrame(ok)); };
+  const covered = (x, y) => (globalThis.__homePullRegions ?? []).some((r) => x >= r.left && x <= r.left + r.width && y >= r.top && y <= r.top + r.height);
+  const pulled = () => S.drawer.value > 0 || G.drawerDrag.value != null || S.notif.value || G.notifDrag.value != null || S.page.value !== 0;
+  const drag = async (el, a, d) => {
+    const send = (kind, k) => {
+      const [x, y] = [a[0] + d[0] * k, a[1] + d[1] * k];
+      el.dispatchEvent(new PointerEvent(`pointer${kind}`, { pointerId: 13, pointerType: "touch", isPrimary: true, clientX: x, clientY: y, bubbles: true }));
+      const t = [new Touch({ identifier: 13, target: el, clientX: x, clientY: y })];
+      const name = { down: "Start", move: "Move", up: "End" }[kind];
+      const init = { touches: kind === "up" ? [] : t, changedTouches: t, bubbles: true, cancelable: true };
+      for (const type of [`touch${name.toLowerCase()}`, `Touch${name}`]) el.dispatchEvent(new TouchEvent(type, init));
+    };
+    let seen = (send("down", 0), false);
+    for (let i = 1; i <= 6; i++) (send("move", i / 6), await new Promise((ok) => setTimeout(ok, 8)), (seen ||= pulled()));
+    await (send("up", 1), window.__gw.settled());
+    return seen || pulled();
+  };
+  const was = S.page.value;
+  const fails = [];
+  try {
+    S.page.value = 0;
+    const home = { id: 923, key: "a:gate.r3", label: "R3", page: S.pages.value[0], x: 80, y: 160, w: 240, h: 200, live: true };
+    W.webWins.value = [home];
+    await (window.__gw.settled(), frames(3));
+    W.webWins.value = [{ ...home, w: 420, h: 360 }];
+    await (window.__gw.settled(), frames(3));
+    const sel = '.webwindow[data-wwid="923"]';
+    const f = document.querySelector(sel).getBoundingClientRect();
     const grown = [f.right - 30, f.bottom - 30];
     if (!covered(...grown)) fails.push(`W-IN1: window 923 resized to ${f.width}x${f.height}: its grown corner ${grown} isn't in the host's excluded regions`);
-    const body = document.querySelector('.webwindow[data-wwid="923"] .webwindow-body');
-    const bar = document.querySelector('.webwindow[data-wwid="923"] .webwindow-title');
+    const [body, bar] = [document.querySelector(`${sel} .webwindow-body`), document.querySelector(`${sel} .webwindow-title`)];
     const b = bar.getBoundingClientRect();
-    for (const [label, node, a, d] of [
-      ["up on the body", body, grown, [0, -260]],
-      ["down on the body", body, grown, [0, 260]],
-      ["sideways on the body", body, grown, [-300, 0]],
-      ["down on the bar", bar, [b.left + 40, b.top + 12], [0, 260]],
-      ["sideways on the bar", bar, [b.left + 40, b.top + 12], [-300, 0]],
-    ]) {
-      const start = W.webWins.value.find((w) => w.id === 923);
-      if (await drag(node, a, [a[0] + d[0], a[1] + d[1]])) fails.push(`W-IN1: a drag ${label} of a window opened the launcher, the shade or turned the page`);
-      W.webWins.value = W.webWins.value.map((w) => (w.id === 923 ? { ...w, x: start.x, y: start.y } : w));
+    const onBar = [b.left + 40, b.top + 12];
+    const cases = [["up on the body", body, grown, [0, -260]], ["down on the body", body, grown, [0, 260]], ["sideways on the body", body, grown, [-300, 0]], ["down on the bar", bar, onBar, [0, 260]], ["sideways on the bar", bar, onBar, [-300, 0]]];
+    for (const [label, node, a, d] of cases) {
+      if (await drag(node, a, d)) fails.push(`W-IN1: a drag ${label} of a window opened the launcher, the shade or turned the page`);
+      W.webWins.value = [{ ...home, w: 420, h: 360 }];
       await window.__gw.settled();
     }
   } finally {
     W.webWins.value = [];
-    W.tilings.value = {};
     S.page.value = was;
   }
   return fails;
@@ -4159,7 +4163,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsCheck, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
