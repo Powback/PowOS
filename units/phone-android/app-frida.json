@@ -20,5 +20,6 @@
       "rm -f /data/local/tmp/frida-server /data/powos/app-api/frida.pid"
     ],
     "note": "stop the process + delete the binary; nothing persists. Keep nothing."
-  }
+  },
+  "ondemand": true
 }

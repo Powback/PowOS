@@ -84,11 +84,18 @@ function Line({ u, onTap, wide }: { u: UnitRow; onTap: () => void; wide: boolean
   );
 }
 
+const STALE_MS = 3600_000;
+
 /** A host's header: its name whole on one line, its counts, orphans, drift and age as a smaller subtitle under it. */
 function HostHead({ h, rows, check, shut, onTap }: { h: string; rows: UnitRow[]; check?: UnitRow; shut: boolean; onTap: () => void }) {
   const orph = rows.filter((u) => u.orphan).length;
   const run = rows.filter((u) => u.status === "running").length;
   const asleep = rows.filter((u) => u.status === "asleep").length;
+  // Every host publishes on a timer (~15 min) and after each ship to it: over an hour without one is "stale", never a
+  // silent age. A publisher that ran but couldn't read its host says why (status "stale", the reason as its purpose).
+  const failed = check?.status === "stale";
+  const old = !!check && Date.now() - Number(check.updated) > STALE_MS;
+  const stale = failed || old || !check;
   return (
     <button type="button" class="ai-work ai-work-project ai-unit-host" onClick={onTap}>
       <span class="ai-work-line">
@@ -99,10 +106,16 @@ function HostHead({ h, rows, check, shut, onTap }: { h: string; rows: UnitRow[];
             {rows.length} units · {run} running{asleep ? ` · ${asleep} asleep` : ""}
             {orph > 0 && <span class="ai-unit-flag"> · {orph} orphan{orph > 1 ? "s" : ""}</span>}
             {check?.status === "drift" && <span class="ai-work-blocked"> · drift</span>}
+            {stale && <span class="ai-work-blocked"> · stale</span>}
             {check && <span> · {ago(Number(check.updated) / 1000)}</span>}
           </span>
         </span>
       </span>
+      {stale && (
+        <span class="ai-work-detail muted">
+          {failed ? check?.purpose : check ? `no publish for ${ago(Number(check.updated) / 1000)} - its publish timer isn't running (powos units publish)` : "never published (powos units publish)"}
+        </span>
+      )}
       {!shut && check?.status === "drift" && (
         <span class="ai-work-detail muted">unregistered: {check.purpose} (powos units check)</span>
       )}

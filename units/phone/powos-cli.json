@@ -39,9 +39,14 @@
     "/etc/powos/zones",
     "/etc/powos/ai/context",
     "/etc/powos/ai/endpoint.conf",
-    "/opt/powos"
+    "/opt/powos",
+    "/usr/lib/powos/.powos-src-commit"
   ],
   "remove": {
     "commands": []
-  }
+  },
+  "edits": [
+    "/var/lib/powos/src",
+    "/etc/powos/config"
+  ]
 }

@@ -1,0 +1,26 @@
+{
+  "id": "units-publish-mac",
+  "name": "Units publisher (Mac launchd agent)",
+  "kind": "service",
+  "owner": "system:powos-units",
+  "host": "mac",
+  "purpose": "every 15 min (launchd com.powos.units-publish, tools/units/publish.sh all): the Mac's units + PowStation's containers and the Colima VM's (over colima ssh) to the PowOS AI page; a host it can't read is republished from its last good snapshot marked stale with the reason. Fetches origin's powos-units each pass",
+  "installedBy": "tools/units/publish-deploy.sh install",
+  "files": [
+    "~/Library/LaunchAgents/com.powos.units-publish.plist",
+    "~/.local/share/powos/units-publish",
+    "~/.cache/powos-units-publish"
+  ],
+  "processes": [
+    {
+      "match": "units-publish/publish\\.sh",
+      "tree": true
+    }
+  ],
+  "unbounded": "macOS has no cgroups; one bash pass (a git fetch, two snapshots, two publishes, each capped at 4 min) every 15 minutes, niced",
+  "remove": {
+    "commands": [
+      "tools/units/publish-deploy.sh remove"
+    ]
+  }
+}

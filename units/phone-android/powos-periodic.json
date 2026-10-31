@@ -1,0 +1,30 @@
+{
+  "id": "powos-periodic",
+  "name": "The phone's timers",
+  "kind": "watcher",
+  "owner": "system:powos-deploy",
+  "host": "phone-android",
+  "purpose": "one sh loop as Android root (PowOS on the phone has no systemd): the App API health check every 10 min (unit app-api-health, its last result in /data/powos/state/app-api-health.txt) and both sides' units published to the PowOS AI page every 15 min (powos units publish), so a host there is never silently old",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (started at boot by powos-start.sh)",
+  "files": [
+    "/data/powos/powos-periodic.sh",
+    "/data/powos/powos-periodic.pid",
+    "/data/powos/state/periodic.log",
+    "/data/powos/state/app-api-health.txt"
+  ],
+  "processes": [
+    {
+      "match": "powos-periodic\\.sh",
+      "tree": true
+    }
+  ],
+  "unbounded": "one sh loop asleep 5 min at a time; each pass a health curl and, every third, one units snapshot per side",
+  "remove": {
+    "stop": [
+      "sh /data/powos/powos-periodic.sh stop"
+    ],
+    "commands": [
+      "rm -f /data/powos/powos-periodic.sh /data/powos/powos-periodic.pid /data/powos/state/periodic.log /data/powos/state/app-api-health.txt"
+    ]
+  }
+}
