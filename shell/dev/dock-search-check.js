@@ -235,3 +235,71 @@ export async function dockSearchLaunch(position) {
   S.dockTry.value = "";
   return { fails: fails.map((f) => `launch ${position}: ${f}`), samples };
 }
+
+/** The pinned row (the button's): its cell count and first app icon's size. */
+function pinnedRow() {
+  const btn = document.querySelector(".home > .dock:not(.dock-tray) .dock-search");
+  const row = btn?.parentElement;
+  if (!row) return null;
+  const icon = row.querySelector(".app:not(.dock-search) .app-icon")?.getBoundingClientRect();
+  return { row, cells: [...row.children].filter((c) => c.matches(".app")).length, w: Math.round(icon?.width ?? 0), h: Math.round(icon?.height ?? 0) };
+}
+
+/** Where the [keys] show: in the pinned row, or anywhere else in the dock / tray (the recent section). */
+function placed(row, keys) {
+  const inRow = keys.filter((k) => row.querySelector(`.app[data-key="${CSS.escape(k)}"]`));
+  const recent = [...document.querySelectorAll(".home .dock .dock-recent")];
+  const inRecent = keys.filter((k) => recent.some((r) => r.querySelector(`.app[data-key="${CSS.escape(k)}"]`)));
+  return { inRow, inRecent };
+}
+
+/** DK2: a side column's pinned page, then .dock-sep, then the recent section. */
+function separated(row) {
+  const sep = document.querySelector(".home > .dock .dock-sep");
+  if (!sep) return ["no separator between the pinned group and the recent apps"];
+  const fails = [];
+  if (sep.previousElementSibling !== row) fails.push("the separator isn't right after the pinned group");
+  if (!sep.nextElementSibling?.matches(".dock-recent")) fails.push("the recent section isn't right after the separator");
+  const r = sep.getBoundingClientRect();
+  if (!(r.width > 0 && r.height > 0 && r.height <= 3)) fails.push(`the separator is ${Math.round(r.width)}x${Math.round(r.height)}, not a short thin line`);
+  return fails;
+}
+
+/** The pinned row [before] and [after] the running [extra] apps: the same cells and icons, the apps elsewhere. */
+function unchanged(before, after, extra) {
+  const fails = [];
+  if (after.cells !== before.cells) fails.push(`3 running apps: the pinned row went ${before.cells} -> ${after.cells} cells`);
+  if (after.w !== before.w || after.h !== before.h) fails.push(`3 running apps: icons ${before.w}x${before.h} -> ${after.w}x${after.h}`);
+  const { inRow, inRecent } = placed(after.row, extra);
+  if (inRow.length) fails.push(`running apps in the pinned row: ${inRow.join(", ")}`);
+  if (inRecent.length !== extra.length) fails.push(`running apps in the recent section: ${inRecent.length} of ${extra.length}`);
+  return fails;
+}
+
+/**
+ * DK1 + DK2 (the user, 2026-10-31: "The dock is the same size always" / "a separator between the docking and the recent
+ * items"): in dock-button mode three running apps that aren't pinned leave the pinned row's cell count and icon size
+ * as they were and show in the recent section; a side column has the separator between the groups.
+ */
+export async function dk1Check(position) {
+  const S = await importShim("./state.ts");
+  const was = { dock: S.dock.value, windows: S.windows.value };
+  S.dock.value = S.recent.value.slice(0, 6);
+  S.dockTry.value = position;
+  S.searchTry.value = "dock";
+  await sleep(300);
+  const before = pinnedRow();
+  const fails = [];
+  if (!before) fails.push("no pinned row with the search button");
+  else if (before.cells !== 7) fails.push(`pinned row has ${before.cells} cells, not 6 + the button`);
+  const extra = [...S.byKey.value.keys()].filter((k) => !S.dock.value.includes(k) && !S.recent.value.includes(k)).slice(0, 3);
+  S.windows.value = extra.map((k, i) => ({ id: 900 + i, pkg: k, label: k, minimised: false, app: k }));
+  await sleep(300);
+  const after = pinnedRow();
+  if (before && after) fails.push(...unchanged(before, after, extra), ...(position !== "bottom" ? separated(after.row) : []));
+  S.windows.value = was.windows;
+  S.searchTry.value = "";
+  S.dockTry.value = "";
+  S.dock.value = was.dock;
+  return fails.map((f) => `dk1 ${position}: ${f}`);
+}

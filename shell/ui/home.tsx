@@ -348,6 +348,30 @@ function heldStyle(row: HTMLElement, i: number, slots: number, x: number) {
   return { transform: `translate${vertical ? "Y" : "X"}(${x - slotCenter}px)` };
 }
 
+/**
+ * DK1 (the user, 2026-10-31: "The dock is the same size always" / "The docking should always have the set amount of
+ * items"): with the search button in it the dock is the pinned apps and the button, fixed - the apps with a floating
+ * window that aren't pinned go with the recent ones (their page folded, their section below a separator in a side
+ * column, the tray unfolded), never into the pinned row where they narrowed its slots.
+ */
+const pinnedOnly = () => dockButton.value;
+
+/** Any recent app or (DK1) unpinned window to show in the dock's recent section. */
+function hasRecents(): boolean {
+  if (recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k))) return true;
+  return pinnedOnly() && windowedOnly(dock.value).length > 0;
+}
+
+/** The dock's recent section: (DK1) the unpinned windows first, then the recent apps. */
+function RecentSection({ held }: { held: boolean }) {
+  return (
+    <div class="dock-page dock-recent">
+      {pinnedOnly() && !held && <DockWindows pinned={dock.value} />}
+      <DockRecents count={30} />
+    </div>
+  );
+}
+
 /** Which of the dock's pages shows (0 pinned, 1 recent): its dots follow it, told when a scroll ends - never per frame. */
 const dockPage = signal(0);
 
@@ -385,13 +409,16 @@ export function Dock() {
   const ghost = !dock.value.some((k) => byKey.value.has(k)) && windowed.value.size === 0;
   // Wide (unfolded), the recent apps are the bar's right end (DockTray): the dock is its pinned apps only.
   const wide = wideHome.value;
-  const recents = (!wide || vertical) && recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k));
+  const recents = (!wide || vertical) && hasRecents();
   // Home's search as a dock button (docksearch.tsx): the dock is there for it even with nothing pinned.
   const button = dockButton.value;
   if (ghost && !carried && !recents && !button) return null;
   // While an app is carried or moved along it, the dock is its pinned page only.
   const paged = !vertical && recents && !carried && !d && (!ghost || button);
   const slots = pinned.length + (gap >= 0 ? 1 : 0);
+  // The pinned row's own windows (not with the search button: DK1, they're in the recent section).
+  const ownWindows = !d && !carried && !pinnedOnly();
+  const showRecents = recents && (paged || (vertical && !carried && !d) || (ghost && !carried));
   const cells = pinned.map((app, i) => {
     // The held one follows the finger from its new slot; the others have moved aside (a slot each, equal widths).
     const style = d?.key === app.key && el.current ? heldStyle(el.current, i, slots, d.x) : undefined;
@@ -425,20 +452,19 @@ export function Dock() {
               // Wide, the cells share the bar's left end: more than six (the windows' apps after the pinned ones) get
               // narrower slots instead of running on under the pill (shell.css --cells; a Calculator window's icon
               // sat under the pill, its tap opened the drawer: dock-taskbar FAIL 2026-10-23).
-              style={{ "--cells": String(slots + (!d && !carried ? windowedOnly(dock.value).length : 0)) }}
+              style={{ "--cells": String(slots + (ownWindows ? windowedOnly(dock.value).length : 0)) }}
               ref={(node) => {
                 el.current = node;
               }}
             >
               {ghost && gap < 0 && !button ? <div class="dock-empty">drop here to pin</div> : cells}
-              {!d && !carried && <DockWindows pinned={dock.value} />}
+              {ownWindows && <DockWindows pinned={dock.value} />}
             </div>
           )}
-          {recents && (paged || (vertical && !carried && !d) || (ghost && !carried)) && (
-            <div class="dock-page dock-recent">
-              <DockRecents count={30} />
-            </div>
-          )}
+          {/* DK2 (the user: "We need a separator between the docking and the recent items"): a side column's pinned
+              group, a short thin line, then its recent ones - never one run of icons. */}
+          {showRecents && vertical && pinnedOnly() && <div class="dock-sep" aria-hidden="true" />}
+          {showRecents && <RecentSection held={!!d || !!carried} />}
         </div>
         {paged && (
           <div class="dock-dots">
@@ -463,13 +489,12 @@ export function Dock() {
  */
 export function DockTray() {
   if (dockPosition.value !== "bottom") return null;
-  if (!recent.value.some((k) => !dock.value.includes(k) && !windowed.value.has(k) && byKey.value.has(k))) return null;
+  const own = recent.value.some((k) => !dock.value.includes(k) && !windowed.value.has(k) && byKey.value.has(k));
+  if (!own && !(pinnedOnly() && windowedOnly(dock.value).length)) return null;
   return (
     <div class="dock dock-tray paged" data-p ref={followOpenness}>
       <div class="dock-pages">
-        <div class="dock-page dock-recent">
-          <DockRecents count={30} />
-        </div>
+        <RecentSection held={false} />
       </div>
     </div>
   );

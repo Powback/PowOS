@@ -3208,5 +3208,9 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 /* A side column centres its pinned apps, so the button sits at its middle (auto margins: nothing cut once it scrolls). */
 .home.search-dock:is(.dock-left, .dock-right) .dock-pages > .dock-page:first-child { margin-top: auto; }
 .home.search-dock:is(.dock-left, .dock-right) .dock-pages > .dock-page:last-child { margin-bottom: auto; }
+/* DK2 (the user, 2026-10-31: "We need a separator between the docking and the recent items"): a short thin line in the
+   theme's border colour between a side column's pinned group (with the button) and its recent apps. The one divider
+   DESIGN-LANGUAGE allows here, asked for by name; rounded, not a hairline outline. */
+.home.search-dock:is(.dock-left, .dock-right) .dock-sep { flex: none; align-self: center; width: 24px; height: 2px; margin-top: 12px; border-radius: 1px; background: var(--color-border); }
 /* Edit mode's theme sheet: home's search, bar or dock button (editsheet.tsx SearchPlace). */
 .search-place-pick { display: flex; gap: 4px; }
