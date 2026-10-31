@@ -9,6 +9,11 @@
 #                                                  run - the host path on a display nobody sees (see hidden() below)
 #   tools/phone/verify/window-render.sh --hidden --hold S   the same, its display kept up S s after content+tap pass
 #                                                  (ship.sh runs render_watch across it; see hold below)
+#   --hidden exit 2 = NOT JUDGED: the phone isn't Awake (asleep()) - at the start, before a judged step (content, tap,
+#                                                  resize, each hold sample) or when one fails. The hidden display goes
+#                                                  dark with the screen (10-31 889b6cb5, a4dcb83b), so nothing can be
+#                                                  judged; ship.sh window_gate keeps the ship's requests and retries.
+#                                                  The check never wakes the screen.
 # What it does, touching nothing of the user's:
 #   1. waits (idle.sh --wait, AWAKE_ONLY) for the screen on and no touch for WR_IDLE_S (30) s, the keyguard down and the
 #      phone unfolded (web windows only exist there), up to WR_WAIT_S (900) s; else "SKIP: user active" (or folded),
@@ -40,6 +45,9 @@ PY="python3 -I $here/window-render.py"
 L=$HOME/.cache/powos-verify.lock
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+# asleep: true when the phone's power state isn't Awake (Dozing/Asleep/Dreaming); WAKE is that state. Read-only
+# (dumpsys power) - it never wakes the screen. Unreadable (no answer) counts as awake: the step is judged as before.
+asleep() { WAKE=$("$A" shell "dumpsys power | grep -m1 mWakefulness=" </dev/null 2>/dev/null | tr -d '\r ' | cut -d= -f2); [ -n "$WAKE" ] && [ "$WAKE" != Awake ]; }
 UNQ='import json,sys
 s=sys.stdin.read().strip()
 try:
@@ -105,7 +113,11 @@ HOLD=0
 hidden() {
   local tag=wrh$$ dir=/data/local/tmp/powos-wr-hidden-$$ W=${WR_W:-1080} H=${WR_H:-1500} dpi D= S= comp t0 pre task= st dom edg d1 noise fx fy wd
   t0=$(date +%s)
-  hfail() { log "FAIL: $*"; hclean; log "window-render: FAIL (hidden: $*) - $OUT"; exit 1; }
+  # hnj STEP: the phone isn't Awake - nothing on the hidden display can be judged (exit 2, cleaned up as a FAIL is).
+  hnj() { log "$1: the phone is $WAKE - not judged"; hclean; log "window-render: NOT JUDGED (the phone is $WAKE) - $OUT"; exit 2; }
+  awake_or_nj() { asleep && hnj "$1"; return 0; }
+  # A failed step on a phone that fell asleep is not a window fault (10-31 a4dcb83b: the tap "changed nothing", Dozing).
+  hfail() { asleep && hnj "FAIL ($*) while asleep"; log "FAIL: $*"; hclean; log "window-render: FAIL (hidden: $*) - $OUT"; exit 1; }
   hclean() {
     [ -n "${HCLEANED:-}" ] && return; HCLEANED=1
     [ -n "${wd:-}" ] && kill "$wd" 2>/dev/null
@@ -135,6 +147,7 @@ hidden() {
   ( sleep $(( ${WR_TIMEOUT_S:-150} + HOLD )); pkill -P $$ 2>/dev/null; kill -TERM $$ 2>/dev/null ) & wd=$!
 
   "$A" get-state >/dev/null 2>&1 || hfail "no phone (adb get-state)"
+  awake_or_nj "start"
   dpi=$(sh_ "wm density" | sed -n 's/^Override density: //p'); [ -n "$dpi" ] || dpi=$(sh_ "wm density" | sed -n 's/^Physical density: //p')
   apk=$(sh_ "pm path com.powos.app" | sed -n '1s/^package://p'); [ -n "$apk" ] || hfail "PowOS isn't installed (pm path com.powos.app)"
   comp=$(sh_ "cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $APP" | tail -1); case $comp in "$APP"/*) ;; *) hfail "no launcher activity for $APP ($comp)" ;; esac
@@ -171,6 +184,7 @@ EOF
   [ -n "$task" ] || hfail "$APP's task never reached display $D"
   for t in $task; do case "$pre" in *" $t "*) log "WARNING: task $t was the user's (it moved to the check's display; it goes back after)" ;; esac; done
   log "task $task on display $D"
+  awake_or_nj "content"
   for i in $(seq 1 15); do
     "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/display.raw.gz" 2>/dev/null
     st=$($PY stats "$OUT/display.raw.gz" 0 0 "$W" "$H" 2>&1)
@@ -194,7 +208,7 @@ EOF
   noise=$($PY diff "$OUT/display.raw.gz" "$OUT/pre.raw.gz" 0 $A0 "$W" $B0)
   set -- ${WR_TAP:-0.14 0.69}; fx=$1 fy=$2
   local x y; x=$(awk "BEGIN{print int($W*$fx)}"); y=$(awk "BEGIN{print int($H*$fy)}")
-  sh_ "input -d $D tap $x $y" >/dev/null; log "tap: input -d $D tap $x $y ($fx,$fy)"
+  awake_or_nj "tap"; sh_ "input -d $D tap $x $y" >/dev/null; log "tap: input -d $D tap $x $y ($fx,$fy)"
   sleep 1.5; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/tap.raw.gz" 2>/dev/null
   d1=$($PY diff "$OUT/pre.raw.gz" "$OUT/tap.raw.gz" 0 $A0 "$W" $B0)
   log "tap: $d1 of the number area changed (noise without a tap: $noise)"
@@ -205,7 +219,7 @@ EOF
   # (c) a resize through the helper (as WebWindows.resizeContent sends it): dumpsys display shows the new size at the
   # SAME density (a window's density is fixed for its life, WindowDpi - 10-31 Chrome lost its desktop layout).
   vdinfo() { sh_ "dumpsys display" | grep -m1 "DisplayDeviceInfo{\"powos-ww-$tag\"" | sed -n 's/.*", \([0-9]*\) x \([0-9]*\),.* density \([0-9]*\),.*/\1 \2 \3/p'; }
-  local g0 g1 W2 H2; g0=$(vdinfo); log "display $D before the resize: ${g0:-unreadable} (w h dpi)"
+  awake_or_nj "resize"; local g0 g1 W2 H2; g0=$(vdinfo); log "display $D before the resize: ${g0:-unreadable} (w h dpi)"
   [ -n "$g0" ] || hfail "dumpsys display has no powos-ww-$tag"
   set -- $g0; W2=$(( $1 * 3 / 4 )); H2=$(( $2 * 3 / 4 ))
   sh_ "echo resize $D $W2 $H2 $3 > $dir/in" >/dev/null
@@ -223,14 +237,14 @@ EOF
     h0=$(date +%s)
     while :; do
       sleep 5
+      asleep && { lc "hold display $D: phone $WAKE - not judged"; hnj "hold $(( $(date +%s) - h0 )) s"; }
       "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/hold.raw.gz" 2>/dev/null
       hs=$($PY stats "$OUT/hold.raw.gz" 0 0 "$W" "$H" 2>&1)
       hd=$(echo "$hs" | sed -n 's/.*dominant=\([0-9.]*\).*/\1/p'); he=$(echo "$hs" | sed -n 's/.*edges=\([0-9.]*\).*/\1/p')
       if [ -z "$hd" ] || ! awk "BEGIN{exit !($hd < 0.97 && $he >= 0.003)}"; then
         # The phone fell asleep: the test display (own group or not) goes dark with it - not a window fault (10-31 16:15,
-        # 889b6cb5: "went flat" with mWakefulness=Dozing). The checks before the hold already passed; the hold ends here.
-        wake=$("$A" shell "dumpsys power | grep -m1 mWakefulness=" </dev/null 2>/dev/null | tr -d '\r ' | cut -d= -f2)
-        if [ -n "$wake" ] && [ "$wake" != Awake ]; then lc "hold display $D: phone $wake - hold ended early, not judged"; log "hold: the phone went $wake after $(( $(date +%s) - h0 )) s - the hold ends early (not a window fault)"; break; fi
+        # 889b6cb5: "went flat" with mWakefulness=Dozing): NOT JUDGED (exit 2), never a FAIL.
+        asleep && { lc "hold display $D: phone $WAKE - not judged"; hnj "hold $(( $(date +%s) - h0 )) s"; }
         lc "hold display $D FLAT: $hs"; hfail "during the hold display $D went flat ($hs)"
       fi
       [ -n "$(tasks_on "$D")" ] || { lc "hold display $D: task gone"; hfail "during the hold $APP's task left display $D"; }

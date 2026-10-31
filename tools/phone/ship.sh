@@ -285,7 +285,7 @@ run)
   # DEVICE once it's live, synchronously: verify/window-render.sh --hidden starts the APK's own window host
   # (WebWindowsHost) on a display nobody sees, launches Calculator there, screencaps THAT display (app content, not a
   # flat fill) and taps it with `input -d` (the app redraws) - nothing on the user's screen, so it never waits for an
-  # idle phone and has no skip: exit 0 PASS, anything else (FAIL, timeout, no phone) is a FAIL. Why (2026-10-31): web
+  # idle phone and has no skip: exit 0 PASS, 2 NOT JUDGED (phone asleep: requests kept, retried ~60 s, window_wait), anything else (FAIL, timeout, no phone) is a FAIL. Why (2026-10-31): web
   # windows shipped as empty frames twice in one night with every headless gate green, and the old idle-waiting check
   # never ran once (the user is always active; manager rule G-1). Returns 1 on a FAIL: WINDOWS BROKEN ($Q/window-failed,
   # status, shipped.log, a mail) and the caller keeps the ship's requests and marks it failed, so nothing later ships as
@@ -322,6 +322,13 @@ run)
       [ $wrc -ge 128 ] && echo "window-render: FAIL (killed after ${WINDOW_GATE_TIMEOUT_S:-240} s, rc $wrc)" >> "$wl"
     else wrc=1; echo "window-render: FAIL (verify/window-render.sh missing or not copied)" >> "$wl"; fi
     grep -q '^window-render: ' "$wl" || echo "window-render: FAIL (no verdict, rc $wrc)" >> "$wl"
+    # rc 2 = NOT JUDGED (the phone isn't Awake: the hidden display goes dark with the screen). Neither a pass nor a skip
+    # that lets the ship through: the caller keeps its requests and retries every WINDOW_WAIT_S (60) s, no cap.
+    if [ $wrc = 2 ]; then
+      echo "$(date '+%F %T') ${t:0:9} $what window check waiting for an awake phone ($(grep -m1 '^window-render: NOT JUDGED' "$wl" | cut -c17-80))" >> "$Q/shipped.log"
+      echo "$(date +%T) ${t:0:9}: window check waiting for an awake phone - its requests are kept, retried in ${WINDOW_WAIT_S:-60} s (log $wl)"
+      return 2
+    fi
     if [ $wrc = 0 ]; then
       rm -f "$Q/window-failed"; echo "$(date '+%F %T') ${t:0:9} $what window-render PASS" >> "$Q/shipped.log"
       echo "$(date +%T) ${t:0:9}: device window check PASS"; return 0
@@ -454,6 +461,8 @@ run)
     # An APK ship that ended: its requests are done (installed is installed - its exit is its last check's: a logcat
     # grep with no match was 1, 2026-10-23), or it's tried again (the user stayed active), or it failed.
     if [ -f "$Q/apk/rc" ]; then
+      # A window check NOT JUDGED (phone asleep) is retried here, ~60 s after the last try; $Q/apk stays till judged.
+      [ -f "$Q/apk/window-wait" ] && [ $(( $(date +%s) - $(cat "$Q/apk/window-wait") )) -lt "${WINDOW_WAIT_S:-60}" ] && return 0
       A=$(cat "$Q/apk/tip") arc=$(cat "$Q/apk/rc") alog=$(cat "$Q/apk/log")
       if [ "$arc" = 0 ] || [ "$inst" = "$A" ]; then
         live=$(cat "$Q/live" 2>/dev/null || true)
@@ -472,7 +481,10 @@ run)
         fi
         # The device window check BEFORE its requests are done (the build it replaced: ship-apk's snapshot of the
         # previous install, ship-guard.sh snapshot DIR/commit): WINDOWS BROKEN keeps them and marks the APK failed.
-        wg=0; window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk || wg=1
+        wg=0; window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk || wg=$?
+        # NOT JUDGED (phone asleep): nothing recorded, its requests kept; the next reap tries again in ~60 s.
+        if [ $wg = 2 ]; then date +%s > "$Q/apk/window-wait"; return 0; fi
+        rm -f "$Q/apk/window-wait"
         # What the phone RENDERS, not the record: older than the shipped shell = the APK failed, the shell re-applied.
         [ -n "$live" ] && ! shell_check "$live" "$A" && wg=1
         if [ $wg = 0 ]; then rm -f "$Q/failed-apk"
@@ -498,6 +510,31 @@ run)
       rm -rf "$Q/apk"; inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
     fi
   }
+  # shell_done: a live shell ship of T whose window check passed (or wasn't needed): its records, then its requests done.
+  shell_done() {
+    render_watch "$T" shell
+    echo "$(date '+%F %T') ${T:0:9} shell ${#sreqs[@]} req ($who_s): ${sn:-(silent)}" >> "$Q/shipped.log"
+    units_publish
+    for r in ${nreqs[@]+"${nreqs[@]}"}; do [ -f "$r" ] && echo "noted=1" >> "$r"; done
+    for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "shipped:${T:0:9}:shell"; done
+    echo "$(date +%T) ${T:0:9}: shipped (shell)"
+    e2e_round
+  }
+  # window_wait: a window check NOT JUDGED (the phone asleep) blocks the loop - nothing else ships, no request is done -
+  # until it's judged: retried every WINDOW_WAIT_S (60) s, each try logged (window_gate), no cap. Returns 0 while it
+  # still waits (the caller sleeps and loops), 1 once judged (PASS: the ship's requests done; FAIL: as a FAIL).
+  window_wait() {
+    local ww_at ww_base ww_tip wgr
+    [ -s "$Q/window-wait" ] || { [ -f "$Q/apk/window-wait" ] && return 0; return 1; }
+    . "$Q/window-wait"
+    [ $(( $(date +%s) - ww_at )) -ge "${WINDOW_WAIT_S:-60}" ] || return 0
+    T=$ww_tip; window_gate "$ww_base" "$T" shell; wgr=$?
+    if [ $wgr = 2 ]; then sed -i '' "s/^ww_at=.*/ww_at=$(date +%s)/" "$Q/window-wait"; return 0; fi
+    rm -f "$Q/window-wait"
+    if [ $wgr = 0 ]; then shell_done
+    else echo "$T" > "$Q/failed"; echo "$(date +%T) ${T:0:9}: shell ship live but WINDOWS BROKEN - requests kept, waiting for a new origin commit"; fi
+    return 1
+  }
   reap_apk   # runner start: a previous runner's finished APK
   while :; do
     while ls "$Q"/*.req >/dev/null 2>&1 || rooted_due; do
@@ -511,6 +548,9 @@ run)
         apk_alive && { sleep "$POLL"; continue; }
         echo "$(date +%T) paused - $(ls "$Q"/*.req 2>/dev/null | wc -l | tr -d ' ') request(s) kept"; break
       fi
+      # A window check waiting for an awake phone (window-render rc 2): only its retry runs until it's judged.
+      if window_wait; then sleep "$POLL"; continue; fi
+      T=$(git rev-parse HEAD)
       # The debounce: shell after SHIP_QUIET_SHELL_S (0) s of origin on this tip, an APK after QUIET (60) s.
       { read -r seen at < "$Q/tip-seen"; } 2>/dev/null || seen=
       [ "$seen" = "$T" ] || { at=$(date +%s); echo "$T $at" > "$Q/tip-seen"; echo "$(date +%T) origin at ${T:0:9}"; }
@@ -630,17 +670,18 @@ run)
         if [ $rc = 0 ]; then
           echo "$T" > "$Q/live"; rm -f "$Q/failed"
           post_gate "$T" "$log" $add
-          if ! window_gate "$base" "$T" shell; then
+          window_gate "$base" "$T" shell; wgr=$?
+          if [ $wgr = 2 ]; then
+            # NOT JUDGED (phone asleep): live, but its requests stay NOT done; the loop top retries the check (~60 s).
+            { printf 'ww_at=%s\nww_base=%q\nww_tip=%q\nwho_s=%q\nsn=%q\n' "$(date +%s)" "$base" "$T" "$who_s" "$sn"
+              declare -p sreqs nreqs; } > "$Q/window-wait.tmp" && mv "$Q/window-wait.tmp" "$Q/window-wait"
+            continue
+          fi
+          if [ $wgr != 0 ]; then
             echo "$T" > "$Q/failed"; echo "$(date +%T) ${T:0:9}: shell ship live but WINDOWS BROKEN - requests kept, waiting for a new origin commit"
             continue
           fi
-          render_watch "$T" shell
-          echo "$(date '+%F %T') ${T:0:9} shell ${#sreqs[@]} req ($who_s): ${sn:-(silent)}" >> "$Q/shipped.log"
-          units_publish
-          for r in ${nreqs[@]+"${nreqs[@]}"}; do [ -f "$r" ] && echo "noted=1" >> "$r"; done
-          for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "shipped:${T:0:9}:shell"; done
-          echo "$(date +%T) ${T:0:9}: shipped (shell)"
-          e2e_round
+          shell_done
         else
           git -C "$REPO" fetch -q origin "$BASE" 2>/dev/null
           if [ "$(git rev-parse "origin/$BASE")" != "$T" ]; then echo "$(date +%T) ${T:0:9}: shell ship ended rc $rc while origin moved on - shipping the new tip"; continue; fi
