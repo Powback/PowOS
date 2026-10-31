@@ -144,7 +144,9 @@ export async function dockSearchCheck(position) {
   if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6);
   S.dockTry.value = position;
   S.searchTry.value = "dock";
-  await sleep(300);
+  // The dock's icons glide to their new places (home.tsx useGlide, 160 ms) as the apps and the button join: measured
+  // mid-glide under the ship gate's load the button sat -172 / -19 px off centre. Wait on the glide's end, not a clock.
+  await window.__gw.settled(() => document.querySelector(".home > .dock .dock-search"), ".home > .dock");
   const fails = [];
   if (document.querySelector(".home > .bar")) fails.push("a .bar on home in dock-button mode");
   const c = centred(position);
