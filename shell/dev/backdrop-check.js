@@ -51,6 +51,22 @@ async function home({ same, css, want, fails, read }) {
   same("folder dim", document.querySelector(".folder-view .folder-focus.tile"));
 }
 
+/** Whether rect [a] lies inside rect [b] (half a px of rounding). */
+const inside = (a, b) => a.left >= b.left - 0.5 && a.top >= b.top - 0.5 && a.right <= b.right + 0.5 && a.bottom <= b.bottom + 0.5;
+const box = (r) => [r.left, r.top, r.right, r.bottom].map(Math.round).join(",");
+
+/** The pull window's backdrop is the whole screen, the search pill and the dock inside it (no seam above them). */
+function cover(frame, fails, read) {
+  if (!frame) return;
+  const r = frame.getBoundingClientRect();
+  read.frame = box(r);
+  if (!inside(new DOMRect(0, 0, innerWidth, innerHeight), r)) fails.push(`launcher: its backdrop is ${box(r)}, not the whole ${innerWidth}x${innerHeight} screen`);
+  for (const el of document.querySelectorAll(".pull-screen > :is(.bar, .dock)")) {
+    const b = el.getBoundingClientRect();
+    if (b.width && !inside(b, r)) fails.push(`launcher: the ${el.classList[0]} (${box(b)}) is outside its backdrop`);
+  }
+}
+
 export async function backdrop(part) {
   const root = document.documentElement;
   const css = getComputedStyle(root);
@@ -84,6 +100,7 @@ export async function backdrop(part) {
   await sleep(300);
   same(part === "ai" ? "launcher (PowOS AI)" : "launcher", document.querySelector(".pull-screen .launcher-frame.tile"));
   read.sent = sent;
+  cover(document.querySelector(".pull-screen .launcher-frame.tile"), fails, read);
   if (!sent.length || sent.some((dp) => dp !== want.blur)) fails.push(`the pull window's blur behind: sent [${sent.join(", ")}] to the host, not the backdrop's ${want.blur}`);
   return { fails, read };
 }

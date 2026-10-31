@@ -3595,6 +3595,10 @@ html:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][
   --glass-veil: transparent;
   background: var(--backdrop-tint);
 }
+/* The pull window's launcher (pull.tsx, kinds "apps" and "ai"): its backdrop is the whole screen - behind the status
+   bar's row, the search pill and the dock too - one surface with no seam (design QA, 2026-10-31: it stopped above the
+   pill with a hard edge, the pill and dock on a lighter strip). Fixed to the window, so no layout rule cuts it short. */
+html:root .home.pull-screen:is(.wide, .pull-screen) > .stage > .launcher-frame.tile { position: fixed; inset: 0; border-radius: 0; box-shadow: none; }
 /* With CSS glass (no compositor blur, ui/glass.ts): the same tint over the frosted wallpaper, as the widgets' page glass. */
 html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) .home .launcher-frame.tile {
   background:
