@@ -1025,6 +1025,15 @@ export interface Bridge {
     show(): Promise<void>;
     hide(): Promise<void>;
   };
+  /**
+   * The system's touch feedback (ui/haptics.ts is the one caller): tick as a gesture crosses its commit threshold,
+   * confirm as it commits. Android: View.performHapticFeedback (the "touch feedback" setting decides). An older host or
+   * the desktop's has none: check.
+   */
+  haptics?: {
+    tick(): Promise<void>;
+    confirm(): Promise<void>;
+  };
   /** The pet over apps (system/PetOverlay.kt): on or off; no argument reads it. An older host has none: check. */
   pet?: {
     overlay(on?: boolean): Promise<boolean>;

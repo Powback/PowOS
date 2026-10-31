@@ -70,6 +70,10 @@ class NavGesture(
     /** The hold state last logged. */
     private var armedLogged = false
 
+    /** Haptics (ui/Haptics.kt): a tick as the swipe up crosses a commit point - held (the switcher), the home zone. */
+    private val switcherTick = dev.omalauncher.ui.Haptics.Crossing()
+    private val homeTick = dev.omalauncher.ui.Haptics.Crossing()
+
     /** The finger's upward speed at the last release (px/ms): the window's settle carries on with it. */
     private var releaseLift = 0f
 
@@ -119,6 +123,8 @@ class NavGesture(
         from = null
         downX = e.rawX
         armedLogged = false
+        switcherTick.reset()
+        homeTick.reset()
         swipe++
         Log.i(TAG, "gesture: down at ${e.rawX.toInt()},${e.rawY.toInt()}")
         classifier = NavGestureClassifier(displayContext.resources.displayMetrics.density, screen.height().toFloat(), slop).also { it.down(e.rawX, e.rawY, e.eventTime) }
@@ -141,6 +147,7 @@ class NavGesture(
                     armedLogged = c.armed
                     Log.i(TAG, "gesture: ${if (c.armed) "held (the switcher on release)" else "moving again"} at lift ${c.lift.toInt()} px")
                 }
+                if (c.axis == NavGestureClassifier.Axis.UP && (switcherTick.at(c.armed) or homeTick.at(c.homeness() >= 1f))) dev.omalauncher.ui.Haptics.tick(service)
                 when (axis) {
                     NavGestureClassifier.Axis.UP -> {
                         panelDrag(c.lift)
