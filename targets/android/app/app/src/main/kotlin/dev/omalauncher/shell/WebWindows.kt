@@ -486,7 +486,7 @@ class WebWindows(
     private var root: SurfaceControl? = null
 
     private fun root(): SurfaceControl? {
-        root?.takeIf { it.isValid }?.let { return it }
+        root?.takeIf { it.isValid }?.let { return it.also { rootAgain(it) } }
         val attached = web.rootSurfaceControl ?: return null.also { Log.w(TAG, "home's window has no surface yet") }
         val sc = SurfaceControl.Builder().setName("powos-webwindows").build()
         val t = underHome(sc, "made") ?: return null.also { sc.release(); Log.w(TAG, "home's surface refused a child") }
@@ -523,6 +523,22 @@ class WebWindows(
         if (rootParent != "bounds") Log.w(TAG, "windows' root on home's bounds layer ($why): no window surface by reflection - apps cover the DOM over them")
         rootParent = "bounds"
         return t.setLayer(r, -1)
+    }
+
+    /**
+     * EW1 (the user, 10-31 00:50: "Windows still don't load ... I have to full screen them"): each new window's open puts
+     * the existing root under home's CURRENT window surface again and shows it unless the switcher is really up. The
+     * root hangs on a native layer of home's surface taken when it was made; a surface change the callback didn't
+     * report ([reattach]) left it on a dead layer, and a switcher close that never reached [switcherOpen] left it
+     * hidden - either way every window afterwards was a hole showing the wallpaper (its app VISIBLE on its display)
+     * while full screen, which hangs the app elsewhere, still showed. Re-parenting to the same layer is a no-op.
+     */
+    private fun rootAgain(r: SurfaceControl) {
+        val switcher = dev.omalauncher.system.Switcher.open
+        if (underSwitcher && !switcher) Log.w(TAG, "windows' root was still hidden for a switcher that is gone: shown again")
+        underSwitcher = switcher
+        val t = underHome(r, "open") ?: return Log.w(TAG, "windows' root: home has no surface to hang it on at open").let { }
+        t.setVisibility(r, !underSwitcher).apply()
     }
 
     /** Where [root] hangs, for the log: "home's buffer" or "bounds". */
@@ -2515,19 +2531,50 @@ class WebWindows(
      * (fallback, logged).
      */
     private fun checkLanded(w: Win) {
-        io.postDelayed({
-            if (w.closed) return@postDelayed
-            val n = tasksOn(w.displayId)
-            if (n != null && n > 0) w.landed = true
-            if (n == null || n > 0) return@postDelayed
-            Log.w(TAG, "fallback: ${w.component.packageName} has no task on display ${w.displayId} ${ESCAPE_CHECK_MS} ms after its launch: Android's own window instead of web window ${w.id}")
-            main.post {
-                drop(w)
-                runCatching {
-                    context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(w.component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }.onFailure { Log.w(TAG, "fallback launch of ${w.component.packageName} failed", it) }
-            }
-        }, ESCAPE_CHECK_MS)
+        io.postDelayed({ if (!w.closed && tasksOn(w.displayId) == 0) pullStrayTask(w) }, STRAY_CHECK_MS)
+        io.postDelayed({ landedOrFallback(w) }, ESCAPE_CHECK_MS)
+    }
+
+    /** On [io], [ESCAPE_CHECK_MS] after the launch: landed, the app's stray task pulled in, or the fallback. */
+    private fun landedOrFallback(w: Win) {
+        if (w.closed) return
+        val n = tasksOn(w.displayId)
+        if (n != null && n > 0) w.landed = true
+        if (n == null || n > 0 || pullStrayTask(w)) return
+        Log.w(TAG, "fallback: ${w.component.packageName} has no task on display ${w.displayId} ${ESCAPE_CHECK_MS} ms after its launch: Android's own window instead of web window ${w.id}")
+        main.post {
+            drop(w)
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(w.component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure { Log.w(TAG, "fallback launch of ${w.component.packageName} failed", it) }
+        }
+    }
+
+    /**
+     * On [io], LN1 (10-31 00:22: PowApps from the launcher opened an empty window - its task was on display 0 with a
+     * package-installer dialog, and the launch onto the window's display only brought that task forward there): the
+     * app's own running task outside every other window ([w]'s display empty) is moved into [w], dialogs and all, so a
+     * frame never stands without a bound task. True: moved.
+     */
+    private fun pullStrayTask(w: Win): Boolean {
+        val stray = strayTask(w) ?: return false
+        val ok = moveTask(stray, w.displayId)
+        Log.w(TAG, "window ${w.id} (${w.component.packageName}): its display was empty, the app's task $stray ran elsewhere - ${if (ok) "moved into the window" else "NOT moved"}")
+        if (ok) w.landed = true
+        return ok
+    }
+
+    /** On [io]: [w]'s app's running task on a known display that is neither [w]'s nor another window's, or null. */
+    private fun strayTask(w: Win): Int? {
+        val pkg = w.component.packageName
+        // Read off main: a copy that races an open/close gives up (no move rather than a wrong one).
+        val windowDisplays = runCatching { wins.values.filter { !it.closed }.map { it.displayId }.toSet() }.getOrNull() ?: return null
+        @Suppress("DEPRECATION")
+        val tasks = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
+        return tasks.firstOrNull { t ->
+            val d = WebWindowDisplays.displayOf(t)
+            d >= 0 && d !in windowDisplays && (t.baseActivity?.packageName == pkg || t.topActivity?.packageName == pkg)
+        }?.taskId
     }
 
     /** How many root tasks [displayId] has, or null (unknown: no fallback on a guess). */
@@ -3074,6 +3121,9 @@ class WebWindows(
         /** A KWin window offered to the page ([linuxOpened]) and not taken by then opens as its own task. */
         private const val LINUX_ADOPT_MS = 3000L
         private const val ESCAPE_CHECK_MS = 3000L
+
+        /** LN1: an empty window's display checked this soon after its launch for the app's task elsewhere. */
+        private const val STRAY_CHECK_MS = 700L
         private const val RESIZE_MODE_UNRESIZEABLE = 0
         private const val IME_POLICY_FALLBACK_DISPLAY = 1
         private const val WINDOWING_MODE_FULLSCREEN = 1
