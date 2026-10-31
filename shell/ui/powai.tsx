@@ -22,7 +22,7 @@ import type { AgentHost, AgentMail, AgentSession, ChatItem, VerifyState } from "
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { HOSTS, Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
-import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf, onLink, openFull, imageUrl, toolLabel } from "./rich.tsx";
+import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf, onLink, openFull, imageUrl, shownElsewhere, toolLabel } from "./rich.tsx";
 import { askQueued, waiting } from "./assistant.ts";
 import { BrokenReply, clearBroken, type Broken } from "./brokenreply.tsx";
 
@@ -72,8 +72,10 @@ function lastTurn(items: ChatItem[]) {
     asked: (items[at] as { text: string }).text.split("\n\n[What's on my screen right now")[0],
     full: (items[at] as { text: string }).text,
     steps: after.filter((i) => i.kind === "tool") as Extract<ChatItem, { kind: "tool" }>[],
-    // The answer: what it said after its last step (a reply and the question it ends on are two items).
-    answer: after.slice(after.findLastIndex((i) => i.kind !== "assistant" && i.kind !== "note") + 1).filter((i) => i.kind === "assistant").map((i) => (i as { text: string }).text).join("\n\n") || null,
+    // The answer: what it said after its last step (a reply and the question it ends on are two items). A present /
+    // present_choices call isn't a step - its card is the answer - so a document then a question stay both, in the
+    // order sent (PC2, f346: only the question showed).
+    answer: after.slice(after.findLastIndex((i) => i.kind !== "assistant" && i.kind !== "note" && !(i.kind === "tool" && shownElsewhere(i))) + 1).filter((i) => i.kind === "assistant").map((i) => (i as { text: string }).text).join("\n\n") || null,
     notes: after.filter((i) => i.kind === "note") as Extract<ChatItem, { kind: "note" }>[],
   };
 }

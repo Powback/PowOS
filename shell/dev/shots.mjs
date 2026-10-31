@@ -152,6 +152,20 @@ const PRESENT_SAMPLE = JSON.stringify([
   { kind: "assistant", text: "```present\n" + JSON.stringify({ title: "Review: chat cards", format: "html", body: SHEET_HTML }) + "\n```" },
 ]);
 
+/** A document then a question, as the manager sends them (manager.py: tool_use, its ```block, tool_use, its block): A, B. */
+const PRESENT_ORDER = JSON.stringify([
+  { kind: "user", text: "plan the cleanup" },
+  { kind: "tool", name: "mcp__comms__present", hint: "", ok: true },
+  { kind: "assistant", text: "```present\n" + JSON.stringify({ title: "Cleanup plan", format: "md", body: PLAN_MD }) + "\n```" },
+  { kind: "tool", name: "mcp__comms__present_choices", hint: "", ok: true },
+  { kind: "assistant", text: "```choices\n" + JSON.stringify({ question: "Go ahead with the plan?", options: ["Yes", "Not now"] }) + "\n```" },
+]);
+/** The assist overlay with a 200x200 square circled on the screen above its panel (pointer events on .assist-draw). */
+const ASSIST_CROP =
+  "await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(800);" +
+  " const d = document.querySelector('.assist-draw'); const at = (type, x, y) => d.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, clientX: x, clientY: y }));" +
+  " const x0 = 80, y0 = 120; at('pointerdown', x0, y0); for (const [x, y] of [[x0 + 200, y0], [x0 + 200, y0 + 200], [x0, y0 + 200], [x0, y0]]) at('pointermove', x, y); at('pointerup', x0, y0); await sleep(400);";
+
 /** Five hosts' units as `powos units publish` leaves them (41 on the phone, drift on two), for ui/units.tsx. */
 const UNITS_SCENE =
   "const M = await U('./ui/units.tsx'); const now = Date.now(); const R = []; const hosts = [['phone', 41, 14, 'drift'], ['phone-android', 23, 9, 'clean'], ['mac', 37, 21, 'drift'], ['colima', 58, 44, 'clean'], ['powstation', 12, 7, 'clean']];" +
@@ -383,6 +397,11 @@ const SCENES = [
   ["present", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["present-md", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[0]?.click();`, "wallpaper"],
   ["present-html", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[1]?.click(); await sleep(200);`, "wallpaper"],
+  ["present-ai", "home", `S.chat.value = { busy: false, items: ${PRESENT_ORDER} }; S.page.value = -1; await sleep(400);`, "wallpaper"],
+  ["present-assist", "assist", `await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(800); const f = document.querySelector('.assist-ask textarea'); f.value = 'plan the cleanup'; f.dispatchEvent(new Event('input', { bubbles: true })); await sleep(100); document.querySelector('.assist-ask').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await sleep(2500); S.chat.value = { busy: false, items: ${PRESENT_ORDER} }; await sleep(400);`, "app"],
+  ["present-assist-long", "assist", `await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(800); const f = document.querySelector('.assist-ask textarea'); f.value = 'plan the cleanup'; f.dispatchEvent(new Event('input', { bubbles: true })); await sleep(100); document.querySelector('.assist-ask').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await sleep(2500); S.chat.value = { busy: false, items: [...${CHAT_SAMPLE}, ...${CHAT_SAMPLE}, ...${PRESENT_ORDER}] }; await sleep(400);`, "app"],
+  ["present-assist-arrive", "assist", `await sleep(2500); E.emit('assist.reset', null); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(300); const B = (await U('./bridge.ts')).powos; await B.speech.cancel(); await sleep(300); const q = document.querySelectorAll('.assist .chat').length; window.__chatBefore = q; S.chat.value = { busy: false, items: [...S.chat.value.items, ...${PRESENT_ORDER}] }; await sleep(400);`, "app"],
+  ["assist-crop", "assist", ASSIST_CROP, "app"],
   ["ny-card", "home", NY_CARD(true), "wallpaper"],
   ["ny-card-open", "home", NY_CARD(true) + NY_OPEN, "wallpaper"],
   ["ny-card-open-noimg", "home", NY_CARD(false) + NY_OPEN, "wallpaper"],
