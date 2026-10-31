@@ -6063,6 +6063,8 @@ try {
             const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
             const frames = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
             const { powos } = await window.__gw.mod("./bridge.ts");
+            // The widget on this grid (folded's default docks the search since SW1, and hides its widget there).
+            (await window.__gw.mod("./state.ts")).searchTry.value = "bar";
             const cells = [{ x: 0, y: 3, w: 6, h: 1 }, { x: 0, y: 5, w: 6, h: 2 }, { x: 0, y: 1, w: 2, h: 1 }];
             for (const c of cells) await Promise.race([powos.home.addPanel("search", 0, c), sleep(800)]).catch(() => {});
             // The widgets mounted and measured (the field sizes itself over frames), at rest.

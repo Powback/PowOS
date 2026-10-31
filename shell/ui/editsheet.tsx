@@ -11,7 +11,7 @@ import { openScreen } from "../screens.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
 import { geometry, placeNew, placeNewCells } from "./grid.tsx";
 import { hasRecentsWidget, recentsSpot } from "./recentwidget.tsx";
-import { footAim, footBelow, SEARCH_KEY, hasSearchWidget, putBackInBar } from "./searchwidget.tsx";
+import { footAim, footBelow, SEARCH_KEY, hasSearchWidget, putBackInBar, undockSearch } from "./searchwidget.tsx";
 import { startNewApp } from "./appbuild.tsx";
 import { AppList, findApps } from "./drawer.tsx";
 import { Pill, type MicTarget } from "./bar.tsx";
@@ -123,7 +123,8 @@ function ShellAdds({ done, q }: { done: () => void; q: string }) {
       // A full-width row (the pill is as wide as its cells): the lowest free row of the page on screen.
       add: () => {
         const spot = fullRow();
-        powos.home.addPanel("search", spot.page, spot.cell).catch(() => (note.value = "the search widget needs the app updated"));
+        // Docked on this screen it leaves the dock for the grid (searchwidget.tsx undockSearch, logged).
+        undockSearch(spot.page, spot.cell).catch(() => (note.value = "the search widget needs the app updated"));
       },
     });
     widgets.push({
