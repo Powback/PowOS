@@ -355,6 +355,7 @@ public class MainActivity extends Activity
     private void attachCompatibleFd() {
         if (!BuildConfig.COMPATIBLE || compatibleBridge == null || compatibleFdReady)
             return;
+        awaitPendingStop(); // nativeStop closes the native side's fd: a queued stop must not close this new one
 
         ParcelFileDescriptor pfd = null;
         int fd = -1;
@@ -396,8 +397,37 @@ public class MainActivity extends Activity
     /** Resumed (onResume..onPause). */
     private boolean inFront;
 
+    /**
+     * Native.nativeStop joins the render and event threads and tears the connection down: 577 ms on the UI thread
+     * in a recorded surfaceDestroyed (perf-1793409569119). It runs on this one serial thread instead; the native
+     * window is held by its own reference (ANativeWindow_fromSurface), so the teardown finishing after
+     * surfaceDestroyed has returned only finds an abandoned buffer queue. A start waits for a pending stop first
+     * (awaitPendingStop), so a stop and the start after it never overlap in the native state.
+     */
+    private static final java.util.concurrent.ExecutorService NATIVE_STOP =
+        java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(r, "native-stop"));
+    private static java.util.concurrent.Future<?> pendingStop;
+
+    private static void awaitPendingStop() {
+        java.util.concurrent.Future<?> f = pendingStop;
+        if (f == null)
+            return;
+        try {
+            f.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (java.util.concurrent.ExecutionException e) {
+            Log.w(TAG, "async nativeStop failed", e.getCause());
+        }
+        if (pendingStop == f)
+            pendingStop = null;
+    }
+
     private void startNative(Surface surface) {
-        stopNative();
+        awaitPendingStop(); // normally long done: a start follows a stop by a surface round trip
+        Native.nativeStop();
+        nativeOwner = null;
+        compatibleFdReady = false;
         applyConnectionConfig();
         Native.nativeStart(surface, clipboard);
         nativeOwner = this;
@@ -408,9 +438,9 @@ public class MainActivity extends Activity
     }
 
     private void stopNative() {
-        Native.nativeStop();
         nativeOwner = null;
         compatibleFdReady = false;
+        pendingStop = NATIVE_STOP.submit(Native::nativeStop);
     }
 
     /** Disconnects only if this instance holds the connection (see nativeOwner). */
@@ -482,7 +512,7 @@ public class MainActivity extends Activity
         }
         HardwareKeyboard.watch(this); // the on-screen keyboard stays hidden while a physical one is connected
         backlight = Backlight.start(this); // Omarchy's brightness controls -> this window's brightness
-        SessionService.start(this);
+        SessionService.startAsync(this); // off the critical path: a binder call (see startAsync)
 
         setupMediaAudio();
         applyScreenOrientation();
