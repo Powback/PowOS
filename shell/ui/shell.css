@@ -693,6 +693,26 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 }
 .app[data-run="frozen"] .app-icon::after,
 .dock .app.windowed.minimised:not([data-run="running"]) .app-icon::after { opacity: 0.4; }
+/*
+ * PI1 (ui/pagemarks.ts; the user, 2026-10-31 01:34): in the dock and its recent apps, an app with a window on the page
+ * on screen gets a wide bright pill; one running only elsewhere a small dim dot. With any app on this page, the other
+ * icons fade a little (still tappable); the search button never does. Eased on a page swipe or a window's move.
+ */
+.dock .app.mark-here .app-icon::after,
+.dock .app.mark-away .app-icon::after {
+  content: "";
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 50%;
+  translate: -50% 0;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-background);
+  transition: width 150ms, height 150ms, opacity 150ms;
+}
+.dock .app.mark-here .app-icon::after { width: 22px; height: 4px; border-radius: 2px; opacity: 1; }
+.dock .app.mark-away .app-icon::after { width: 4px; height: 4px; border-radius: 2px; opacity: 0.45; }
+.dock .app:not(.dock-search) .app-icon { transition: opacity 150ms; }
+.dock.page-focus .app:not(.mark-here, .dock-search) .app-icon { opacity: 0.65; }
 .app-icon img { display: block; width: 100%; height: 100%; object-fit: contain; transition: opacity 160ms; }
 /* Not loaded yet (apps.tsx AppIcon): a pulsing tile in its place, not a broken image. */
 /* Pulses ~10 s, not forever: an app with no icon at all (a Linux app like lstopo) stays "loading", and an endless
