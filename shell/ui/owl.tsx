@@ -4,12 +4,13 @@
  * gaps, alignments and text sizes - and sends back taps, drags and sizes. Lengths are dp, which are CSS px.
  */
 import type { JSX } from "preact";
-import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "preact/hooks";
 import { signal, type Signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { carry, selected } from "../state.ts";
 import { takeTap, tapTaken } from "./taps.ts";
 import { TerminalView } from "./terminal.tsx";
+import { memo } from "./memo.ts";
 import type { Cell, OwlNode, OwlOp, OwlRoot, ThemeColors } from "../types.ts";
 
 /**
@@ -630,7 +631,12 @@ function sprite(g: CanvasRenderingContext2D, a: any[], n: Props, fill: Paint) {
  * A widget as the host runs it: watched while mounted (its tree arrives on "widget.tree"), its tile's size reported.
  * [cells]: the tile's size in grid cells, for the widget's cols and rows.
  */
-export function OwlWidget({ widget, cells, screen = false }: { widget: string; cells?: Cell | null; screen?: boolean }) {
+type OwlProps = { widget: string; cells?: Cell | null; screen?: boolean };
+const sameCell = (a?: Cell | null, b?: Cell | null) => a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h);
+/** The grid hands a new cells object (the same cell) on each of its renders: the widget re-renders when its tile changes. */
+const sameOwl = (a: OwlProps, b: OwlProps) => a.widget === b.widget && a.screen === b.screen && sameCell(a.cells, b.cells);
+
+export const OwlWidget = memo(function OwlWidget({ widget, cells, screen = false }: OwlProps) {
   const t = tree(screen ? `${widget}#screen` : widget).value;
   const el = useRef<HTMLDivElement>(null);
   const images = useRef(new Map<string, HTMLImageElement>());
@@ -648,23 +654,27 @@ export function OwlWidget({ widget, cells, screen = false }: { widget: string; c
     ro.observe(el.current!);
     return () => ro.disconnect();
   }, [widget, screen, cells?.w, cells?.h]);
-  const ctx: Ctx = {
-    key: widget,
-    screen,
-    fire: (id, name, args) => void powos.widgets.fire(widget, screen, id, name, args),
-    canvas: (id, w, h) => void powos.widgets.canvas(widget, id, w, h),
-    image: (src) => {
-      if (!images.current.has(src)) {
-        const img = new Image();
-        img.src = `/_wimg/${encodeURIComponent(widget)}/${encodeURIComponent(src)}`;
-        images.current.set(src, img);
-      }
-      return images.current.get(src)!;
-    },
-  };
+  // One ctx per widget: a new one each render changed every Node's props (ctx: 1045 of Node's 1115 renders, render scan).
+  const ctx: Ctx = useMemo(
+    () => ({
+      key: widget,
+      screen,
+      fire: (id, name, args) => void powos.widgets.fire(widget, screen, id, name, args),
+      canvas: (id, w, h) => void powos.widgets.canvas(widget, id, w, h),
+      image: (src) => {
+        if (!images.current.has(src)) {
+          const img = new Image();
+          img.src = `/_wimg/${encodeURIComponent(widget)}/${encodeURIComponent(src)}`;
+          images.current.set(src, img);
+        }
+        return images.current.get(src)!;
+      },
+    }),
+    [widget, screen],
+  );
   return (
     <div ref={el} class="owl" style={{ padding: t ? px(Math.max(0, num(t.padding, 0))) : undefined, background: t?.background ?? undefined }}>
       {t && <Nodes nodes={t.c} ctx={ctx} parent="Column" />}
     </div>
   );
-}
+}, sameOwl);

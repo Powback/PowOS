@@ -10,7 +10,8 @@
  * (their own origin, a scoped bridge) - section 3.
  */
 import { Component, type ComponentType } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { memo } from "./memo.ts";
 import { host } from "../apps/stdb.ts";
 import { useOnScreen } from "../apps/onscreen.ts";
 import { useSleepReport } from "../apps/sleepreport.ts";
@@ -65,6 +66,12 @@ export function Island({ item }: { item: HomeItem }) {
   const [mod, setMod] = useState<{ c: ComponentType<any> } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tries, setTries] = useState(0);
+  // The app's component, re-rendered when its props change (its own hooks re-render it as ever), with its cells the
+  // same array while the tile's size is: a new [w, h] each render re-rendered it needlessly (render scan "Ct", cells~).
+  const cw = item.cell?.w;
+  const ch = item.cell?.h;
+  const cells = useMemo(() => (item.cell ? [cw, ch] : [4, 2]), [cw, ch, !item.cell]);
+  const Shown = useMemo(() => (mod ? memo(mod.c) : null), [mod]);
   // A new URL for each version and each change of its installed UI (hot reload): imported anew, swapped in once in.
   const base = widget && app ? moduleUrl(appId, widget.entry, app.version) : null;
   // The app changed: a fresh start (no retry count, its error goes once the new module is in).
@@ -99,11 +106,11 @@ export function Island({ item }: { item: HomeItem }) {
     const why = reg.status === "error" ? `SpacetimeDB: ${reg.error}` : reg.status === "connected" && !widget ? "not installed" : "…";
     return <Fault name={name} error={why} />;
   }
-  const C = mod.c;
+  const C = Shown!;
   return (
     <Boundary key={base ?? ""} name={name}>
       <Face id={key} name={`${app?.name ?? appId}: ${name}`}>
-        <C host={host} app={appId} cells={item.cell ? [item.cell.w, item.cell.h] : [4, 2]} base={`./_app/${appId}/`} />
+        <C host={host} app={appId} cells={cells} base={`./_app/${appId}/`} />
       </Face>
     </Boundary>
   );
