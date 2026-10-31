@@ -9,6 +9,7 @@ import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.PowerManager
 import android.os.Looper
 
 /**
@@ -64,13 +65,19 @@ object WebWindowsHost {
      * The device window check's display (`create ... selftest`): OWN_DISPLAY_GROUP (1 shl 11: its own power state, awake
      * while the phone's screen is off), ALWAYS_UNLOCKED (1 shl 12: no keyguard on it), OWN_FOCUS (1 shl 14: launching
      * Calculator there doesn't move the user's focus off their screen).
+     *
+     * Its own display group is also its own POWER group, with its own user-activity timeout: 10 s after the check's
+     * last injected touch PowerGroup "Powering off display group due to timeout (groupId= 1 ...)", the display goes OFF
+     * and screencap reads it black (11-01 00:37:56, window-render --hold: "went flat" ~10 s after the tap, with the phone
+     * Awake - the resize before it was innocent). So the helper holds a screen wake lock on that display's group for
+     * the display's life ([groupAwake]); the phone's own screen (group 0) still sleeps on its own timeout.
      */
     private val SELFTEST_FLAGS = FLAGS or (1 shl 11) or (1 shl 12) or (1 shl 14)
 
     private const val SHELL_UID = 2000
 
 
-    private class Vd(val display: VirtualDisplay, var reader: ImageReader, val touch: Touch?) {
+    private class Vd(val display: VirtualDisplay, var reader: ImageReader, val touch: Touch?, val awake: PowerManager.WakeLock? = null) {
         /** The frozen-app watch ([FrozenWatch]), on the frames thread only. */
         val freeze = FrozenWatch()
 
@@ -91,8 +98,9 @@ object WebWindowsHost {
     fun main(args: Array<String>) {
         Looper.prepareMainLooper()
         val frames = HandlerThread("ww-frames").apply { start() }
-        val dm = DisplayManager::class.java.getDeclaredConstructor(Context::class.java).apply { isAccessible = true }.newInstance(shellContext())
-        val host = Host(dm, Handler(frames.looper))
+        val ctx = shellContext()
+        val dm = DisplayManager::class.java.getDeclaredConstructor(Context::class.java).apply { isAccessible = true }.newInstance(ctx)
+        val host = Host(dm, Handler(frames.looper), ctx)
         say("hello")
         val input = System.`in`.bufferedReader()
         while (true) {
@@ -116,6 +124,7 @@ object WebWindowsHost {
     private class Host(
         private val dm: DisplayManager,
         private val frames: Handler,
+        private val ctx: Context,
     ) {
         private val vds = HashMap<Int, Vd>()
         fun command(a: List<String>) {
@@ -155,7 +164,8 @@ object WebWindowsHost {
                 return
             }
             val touch = Touch.attach(vd.display)
-            made = Vd(vd, r, touch)
+            val ownGroup = vd.display.flags and (1 shl 11) != 0
+            made = Vd(vd, r, touch, if (ownGroup) groupAwake(vd.display.displayId) else null)
             vds[vd.display.displayId] = made
             say("display $tag ${vd.display.displayId}")
             say("log display ${vd.display.displayId} ${w}x$h dpi $dpi: sw ${minOf(w, h) * 160 / dpi}dp")
@@ -245,12 +255,43 @@ object WebWindowsHost {
         }
 
         private fun release(v: Vd) {
+            runCatching { v.awake?.takeIf { it.isHeld }?.release() }
             v.touch?.detach()
             v.display.release()
             v.reader.close()
         }
 
         fun releaseAll() = vds.values.forEach { runCatching { release(it) } }
+
+        /**
+         * A screen wake lock on display [id]'s power group only (PowerManager's hidden newWakeLock(flags, tag,
+         * displayId): PowerManagerService counts it for that display's group, never the phone's screen), so an
+         * OWN_DISPLAY_GROUP display stays ON without user activity on it (see [SELFTEST_FLAGS]). Refused -> null and a log.
+         */
+        private fun groupAwake(id: Int): PowerManager.WakeLock? =
+            runCatching {
+                @Suppress("DEPRECATION")
+                val level = PowerManager.SCREEN_BRIGHT_WAKE_LOCK
+                val pm = powerManager()
+                val lock =
+                    PowerManager::class.java
+                        .getMethod("newWakeLock", Int::class.javaPrimitiveType, String::class.java, Int::class.javaPrimitiveType)
+                        .invoke(pm, level, "powos:ww-$id", id) as PowerManager.WakeLock
+                lock.setReferenceCounted(false)
+                lock.acquire()
+                say("log display $id: own power group held awake")
+                lock
+            }.onFailure { say("log display $id: group wake lock refused (${it.toString().replace('\n', ' ')}): it sleeps 10 s after its last touch") }
+                .getOrNull()
+
+        /** The shell's PowerManager (its wake locks are com.android.shell's, uid 2000: WAKE_LOCK held). */
+        private fun powerManager(): PowerManager {
+            val svc = Class.forName("android.os.ServiceManager").getMethod("getService", String::class.java).invoke(null, Context.POWER_SERVICE)
+            val ipm = Class.forName("android.os.IPowerManager\$Stub").getMethod("asInterface", android.os.IBinder::class.java).invoke(null, svc)
+            val ctor = PowerManager::class.java.declaredConstructors.first { it.parameterTypes.size == 4 }
+            ctor.isAccessible = true
+            return ctor.newInstance(ctx, ipm, null, frames) as PowerManager
+        }
     }
 
     /**
