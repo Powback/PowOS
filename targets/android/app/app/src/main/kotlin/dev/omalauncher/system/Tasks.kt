@@ -107,11 +107,20 @@ object Tasks {
             Log.i(TAG, "task $id raised (moveTaskToFront: the other floating windows stay)")
             return true
         }
+        return fromRecents(context, id, options.toBundle())
+    }
+
+    /** startActivityFromRecents of task [id] with launch options [bundle]; moveTaskToFront where that is refused. */
+    private fun fromRecents(
+        context: Context,
+        id: Int,
+        bundle: android.os.Bundle,
+    ): Boolean {
         val result =
             runCatching {
                 HiddenApi.allow()
                 atm().javaClass.getMethod("startActivityFromRecents", Int::class.javaPrimitiveType, android.os.Bundle::class.java)
-                    .invoke(atm(), id, options.toBundle()) as Int
+                    .invoke(atm(), id, bundle) as Int
             }.onFailure { Log.w(TAG, "can't start task $id from recents", it) }.getOrNull()
         // START_SUCCESS (0) and the other non-negative codes (delivered to top, task to front) are a switch.
         if (result != null) return result >= 0
@@ -183,17 +192,38 @@ object Tasks {
         return split(first, second)
     }
 
-    /** Task [id] in a floating window (freeform: the OS's pop-up view), in the middle of the screen. */
+    /**
+     * Task [id] in Android's own floating window: OnePlus' zoom window (WINDOWING_MODE_ZOOM, 100), exactly what the
+     * "..." app handle's "Floating window" makes (OxygenOS 16 SystemUI FullscreenTaskOperations.moveTaskToFreeform:
+     * startTask with android.activity.windowingMode 100 and flexibleStartFrom), so it carries OnePlus' own controls -
+     * the handle bar with its ... menu, drag, the resize arcs, minimise/close (SystemUI's ZoomDecorView, a child of
+     * the zoom task). NF1 (the user 2026-10-31 01:42: "The native android floating window is bugged, like I can't see
+     * the controls for it"): this used to launch the task FREEFORM (5) at a fixed spot; a freeform task's only
+     * decoration is AOSP's CaptionWindowDecoration, which PowOS's OemCaption overlay shrinks to 1 px with 0 dp resize
+     * handles (PowOS frames its own windows) - so the user's floating window came up as bare content with no control
+     * at all. OnePlus places and sizes the zoom window itself. Folded and unfolded alike.
+     */
     fun float(
         context: Context,
         id: Int,
     ): Boolean {
-        val screen = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
-        val w = screen.width() * 3 / 4
-        val h = screen.height() / 2
         FreeformTasks.markOwnFloat(id)
-        return open(context, id, freeformOptions(android.graphics.Rect(screen.centerX() - w / 2, screen.centerY() - h / 2, screen.centerX() + w / 2, screen.centerY() + h / 2)))
+        // The switcher's "Floating window" (and the split drawer's): the user's own pick, a native floating window that
+        // stays one (D1) - never turned into a web window; "Desktop window" is the path for that.
+        FreeformTasks.markNativeFloat(id)
+        val bundle = ActivityOptions.makeBasic().toBundle()
+        bundle.putInt(KEY_WINDOWING_MODE, FreeformTasks.ZOOM)
+        bundle.putString(KEY_FLEXIBLE_START_FROM, FLEXIBLE_START_FROM)
+        Log.i(TAG, "task $id to Android's own floating window (zoom mode ${FreeformTasks.ZOOM})")
+        return fromRecents(context, id, bundle)
     }
+
+    /** ActivityOptions' launch windowing mode key (KEY_LAUNCH_WINDOWING_MODE). */
+    private const val KEY_WINDOWING_MODE = "android.activity.windowingMode"
+
+    /** OnePlus' tag for where a floating window came from: the "..." menu's own value (SystemUI dexdump). */
+    private const val KEY_FLEXIBLE_START_FROM = "flexibleStartFrom"
+    private const val FLEXIBLE_START_FROM = "fullScreenOperation"
 
     /**
      * Launch options ([base]'s, else plain) for a floating (freeform) window at [bounds] (screen px). HACK: ActivityOptions.setLaunchWindowingMode

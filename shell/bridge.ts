@@ -5,6 +5,7 @@
  * the phone, so the shell still runs.
  */
 import type {
+  BarInput,
   Agent,
   AgentEvent,
   AgentMail,
@@ -147,6 +148,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       get: <T>(name: string) => call<T | null>("store.get", name),
       set: (name, value) => call("store.set", name, value),
     },
+    bar: { publish: (v) => call<BarInput | null>("bar.publish", v), get: () => call<BarInput | null>("bar.get") },
     perf: { save: (json) => call<string | null>("perf.save", json), publish: (json) => call("perf.publish", json), native: (on) => call<NativePerf | true | null>("perf.native", on), front: () => call<FrontPresents | null>("perf.front") },
     ai: {
       chat: () => call<Chat>("ai.chat"),
@@ -256,6 +258,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       closed: () => call("pull.closed"),
       launched: () => call("pull.launched"),
       open: (kind, how) => call<boolean>("pull.open", kind, how ?? {}),
+      drive: (phase, arg) => call<boolean>("pull.drive", phase, arg ?? null),
       homePull: (on, exclude, split, regions) =>
         call<boolean>("pull.homePull", on, exclude ?? null, split ?? false, regions ?? null),
     },
@@ -285,7 +288,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     webwindows: host.name === "powos" ? undefined : {
       enabled: () => call<boolean>("webwindows.enabled"),
       open: (key, rect, task, kwin) => call<number>("webwindows.open", key, rect, task ?? -1, kwin ?? -1),
-      input: (id, action, x, y) => call<boolean>("webwindows.input", id, action, x, y),
+      input: (id, action, at) => call<boolean>("webwindows.input", id, action, at.x, at.y, at.finger ?? 0),
       close: (id) => call<boolean>("webwindows.close", id),
       fullScreen: (id) => call<boolean>("webwindows.fullScreen", id),
       toWindow: (id) => call<boolean>("webwindows.toWindow", id),
@@ -594,6 +597,7 @@ function mock(): Bridge {
       page: async () => {},
     },
     // A stand-in that answers after a tool call, as a streamed turn does.
+    bar: mockBar(),
     perf: { publish: async () => {}, front: async () => null, native: async (on) => (on ? true : { thresholdMs: 50, blocks: [], frameGaps: [] }), save: async (json) => (console.log("[mock] perf.save", json.length), "/run/powos-app/powos-ai-shared/perf-mock.json") },
     ai: {
       chat: async () => chat,
@@ -831,7 +835,8 @@ function mock(): Bridge {
       peekHeight: async (px) => console.log("[mock] banner height", px),
       blur: async (dp) => console.log("[mock] shade blur", dp),
       behind: async () => {},
-      homePull: async () => true,
+      // The gate reads the last regions home excluded from the host's pulls (W-IN1: they follow the windows).
+      homePull: async (...args: unknown[]) => (((globalThis as { __homePullRegions?: unknown }).__homePullRegions = args[3] ?? null), true),
       open: async () => console.log("[mock] shade open"),
     },
     overlay: { closed: async () => console.log("[mock] overlay closed") },
@@ -1089,6 +1094,25 @@ function mock(): Bridge {
 
 /** The mock's Android widgets: a light switch and a note card, their frames SVG data URLs. */
 const dataTimers = new Map<number, ReturnType<typeof setInterval>>();
+
+/**
+ * The bar's host, as ShellBridge keeps it (an older generation refused, every kept write numbered). The browser preview
+ * has one page; the gate (dev/bar-sync-check.js) joins two through window.__barHost - one host in node for both, which
+ * sends each page's kept writes to the other as "bar.input".
+ */
+function mockBar(): Bridge["bar"] {
+  let v: BarInput | null = null;
+  const host = () => (window as unknown as { __barHost?: (op: string, v?: BarInput) => Promise<BarInput | null> }).__barHost;
+  return {
+    publish: async (next) => {
+      const shared = host();
+      if (shared) return shared("publish", next);
+      if (v && next.gen < v.gen) return v;
+      return (v = { ...next, seq: (v?.seq ?? 0) + 1 });
+    },
+    get: async () => (host() ? host()!("get") : v),
+  };
+}
 
 function mockAppWidgets(home: Home, changed: () => void, events: Events): Bridge["appWidgets"] {
   const providers: AppWidgetProvider[] = [

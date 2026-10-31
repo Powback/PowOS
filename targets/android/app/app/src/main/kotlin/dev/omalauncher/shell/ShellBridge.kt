@@ -135,7 +135,7 @@ class ShellBridge(
             }
         }
 
-    /** An app the system's window menu floated ([SystemFloat]): a web window, as the switcher's "PowOS desktop window". */
+    /** An app floated not by the user's pick ([SystemFloat]): a web window, as the switcher's "Desktop window". */
     private val systemFloat: (Int) -> Unit = { id -> main.post { toWebWindow(id) } }
 
     /** The page's web-window geometry, "w.f ..." over its native port ([ShellNative], port thread): [WebWindows.frameCommand]. */
@@ -365,6 +365,7 @@ class ShellBridge(
         if (method.startsWith("health.")) return callHealth(id, method, args)
         if (method == "ai.verdict") return callVerdict(id, args)
         if (method in OFF_MAIN) return callOffMain(id, method, args)
+        if (method in LOOKUPS) return callOffMain(id, method, args, lookups)
         main.post {
             MainStallWatch.call = method
             try {
@@ -390,8 +391,9 @@ class ShellBridge(
         id: Int,
         method: String,
         args: String,
+        on: java.util.concurrent.Executor = fileIo,
     ) {
-        fileIo.execute {
+        on.execute {
             val r =
                 runCatching {
                     val a = if (args.isBlank()) JSONArray() else JSONArray(args)
@@ -422,7 +424,7 @@ class ShellBridge(
                     runtime.usage.record(a.getString(0))
                     webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1), a.optInt(2, -1))
                 } ?: -1
-            "webwindows.input" -> webWindowsMade && webWindows.input(a.getInt(0), a.getString(1), a.getDouble(2), a.getDouble(3))
+            "webwindows.input" -> webWindowsMade && webWindows.input(a.getInt(0), a.getString(1), WebWindows.BodyTouch(a.getDouble(2), a.getDouble(3), a.optInt(4, 0)))
             "webwindows.close" -> webWindowsMade && webWindows.close(a.getInt(0))
             "webwindows.fullScreen" -> webWindowsMade && webWindows.fullScreen(a.getInt(0))
             "webwindows.toWindow" -> webWindowsMade && webWindows.toWindow(a.getInt(0))
@@ -440,6 +442,23 @@ class ShellBridge(
                 if (a.getString(0) == "perf.meter") runCatching { JSONObject(a.get(1).toString()).toString() }.getOrNull()?.let { broadcast("perf.meter", it) }
                 Unit
             }
+            // SI1: the one search/chat bar input home's bar (and its search widget) and the launcher overlay share (barsync.ts):
+            // re-built (never spliced raw), a write from an older generation refused (a dictation's late words after a send),
+            // every kept one numbered (seq: pages adopt only newer ones) and sent to the other windows. The answer is what
+            // is kept now - this write, or the newer state that refused it.
+            "bar.publish" -> a.optJSONObject(0)?.let { v ->
+                val kept = synchronized(live) {
+                    val cur = barInput
+                    if (cur != null && v.optLong("gen") < cur.optLong("gen")) return@synchronized null to cur
+                    val next = JSONObject().put("text", v.optString("text").take(BAR_TEXT_MAX)).put("hearing", v.optBoolean("hearing"))
+                        .put("gen", v.optLong("gen")).put("seq", (cur?.optLong("seq") ?: 0L) + 1)
+                    barInput = next
+                    next to next
+                }
+                kept.first?.let { broadcast("bar.input", it.toString(), except = this) }
+                RawJson(kept.second.toString())
+            }
+            "bar.get" -> synchronized(live) { barInput?.toString() }?.let { RawJson(it) }
             // The main shell's frame samples (fps + new frame times, ~4 Hz) to the other windows' meter: re-parsed, never spliced raw.
             "perf.publish" -> a.getString(0).takeIf { it.length < 8192 }?.let { broadcast("perf.sample", JSONObject(it).toString(), except = this) }
             // Perf trace from the status bar's fps meter: saved where PowOS AI sees it (the shared run dir), the last 20 kept,
@@ -513,6 +532,7 @@ class ShellBridge(
             "pull.launched" -> overlay?.launched()
             // Home's page: the launcher overlay up over home (the pill, the side button's chat) / its lift on home's body.
             "pull.open" -> launcherOpen(a.getString(0), a.optJSONObject(1))
+            "pull.drive" -> launcherDrive(a.getString(0), a.opt(1))
             "pull.homePull" -> launcherHomePull(a.getBoolean(0), a, a.optBoolean(2, false))
             // Which shell panel is open (system/Panels.kt): the bottom-edge home gesture closes it.
             "panels.open" -> dev.omalauncher.system.Panels.set(a.getString(0), this)
@@ -677,6 +697,9 @@ class ShellBridge(
                     .put("label", app.name)
                     .put("icon", icon("l:${app.id}"))
                     .put("kind", "linux")
+                    // Plasma (PLASMA_COMMAND) opens its own Android activity with the whole desktop (Runtime.showDesktop),
+                    // never a KWin toplevel: the page mustn't wait for one (its placeholder said "It opened no window.").
+                    .apply { if (app.exec == dev.omalauncher.linux.PLASMA_COMMAND) put("desktop", true) }
                     .putOpt("categories", app.categories),
             )
         }
@@ -687,6 +710,22 @@ class ShellBridge(
     private fun launcherOpen(kind: String, how: JSONObject?): Boolean {
         val pull = dev.omalauncher.system.PullHost.current ?: return false
         main.post { pull.open(kind, how) }
+        return true
+    }
+
+    /**
+     * Home's page drives the overlay's pull (DS2: a swipe up from the dock's search button, a strip the host's own lift
+     * leaves to the dock): "begin" with the open's how, "drag" with the openness, "end" with whether it opens.
+     */
+    private fun launcherDrive(phase: String, arg: Any?): Boolean {
+        val pull = dev.omalauncher.system.PullHost.current ?: return false
+        main.post {
+            when (phase) {
+                "begin" -> pull.pullBegin("apps", arg as? JSONObject)
+                "drag" -> pull.pullDrag((arg as? Number)?.toFloat() ?: 0f)
+                "end" -> pull.pullEnd(arg == true)
+            }
+        }
         return true
     }
 
@@ -819,6 +858,10 @@ class ShellBridge(
      * possible here (web windows off, no home activity, the task gone, an app the drawer doesn't list).
      */
     fun toWebWindow(id: Int): Boolean {
+        // D1: "Desktop window" picked for a native floating window: it is PowOS's now (its native-float mark gone, and
+        // marked PowOS's own a moment so its zoom mode doesn't read as the user's float again while it moves).
+        dev.omalauncher.system.FreeformTasks.clearNativeFloat(id)
+        dev.omalauncher.system.FreeformTasks.markOwnFloat(id)
         if (WebWindows.toWindowForTask(id)) return true
         // WM1: a web window's own app floated out of it (OnePlus' "Floating window"): that window takes it back.
         if (WebWindows.followTask(id)) return true
@@ -1043,28 +1086,42 @@ class ShellBridge(
 
     /**
      * A notification as the page shows it: { key, app, icon, title, text, time, clearable, profile, actions: [{ title,
-     * input }], category, pkg, group, conversation } - the panel's (grouped: notifications.tsx), and the shade's
+     * input, semantic }], category, pkg, group, conversation, messages: [{ sender, text, time }], conversationTitle,
+     * groupConversation, tappable } - the panel's (grouped: notifications.tsx), and the shade's
      * heads-up banner's ("shade.peek").
      */
     fun notificationJson(item: dev.omalauncher.widgets.runtime.Notifications.Item): JSONObject {
         // The app's drawer icon (its own profile's, badge and all, when it's from a work or cloned one).
         val app = runtime.androidApps.apps.firstOrNull { it.component.packageName == item.pkg && (item.profile == null) == (it.profile == null) }
-        return JSONObject()
-            .put("key", item.key)
-            .put("app", item.app)
-            .put("icon", linuxIcon(item) ?: app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
-            .put("title", item.title)
-            .put("text", item.text)
-            .put("time", item.time)
-            .put("clearable", item.clearable)
-            .put("profile", item.profile ?: JSONObject.NULL)
-            .put("actions", JSONArray(item.actions.map { JSONObject().put("title", it.title).put("input", it.input) }))
-            .put("category", item.category ?: JSONObject.NULL)
-            // A Plasma one groups by its Linux app (not with PowOS's own notifications, which share the app's package).
-            .put("pkg", item.linuxEntry?.let { "linux:" + it.ifEmpty { item.app } } ?: item.pkg)
-            .put("group", item.group ?: JSONObject.NULL)
-            .put("conversation", item.conversation)
+        return messaging(
+            item,
+            JSONObject()
+                .put("key", item.key)
+                .put("app", item.app)
+                .put("icon", linuxIcon(item) ?: app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
+                .put("title", item.title)
+                .put("text", item.text)
+                .put("time", item.time)
+                .put("clearable", item.clearable)
+                .put("profile", item.profile ?: JSONObject.NULL)
+                .put("actions", JSONArray(item.actions.map { JSONObject().put("title", it.title).put("input", it.input).put("semantic", it.semantic) }))
+                .put("category", item.category ?: JSONObject.NULL)
+                // A Plasma one groups by its Linux app (not with PowOS's own notifications, which share the app's package).
+                .put("pkg", item.linuxEntry?.let { "linux:" + it.ifEmpty { item.app } } ?: item.pkg)
+                .put("group", item.group ?: JSONObject.NULL)
+                .put("conversation", item.conversation),
+        )
     }
+
+    /** MessagingStyle's part of [item] (the What needs me app's who and line): sender "" is the user's own reply. */
+    private fun messaging(
+        item: dev.omalauncher.widgets.runtime.Notifications.Item,
+        o: JSONObject,
+    ): JSONObject =
+        o.put("messages", JSONArray(item.messages.map { JSONObject().put("sender", it.sender).put("text", it.text).put("time", it.time) }))
+            .put("conversationTitle", item.conversationTitle ?: JSONObject.NULL)
+            .put("groupConversation", item.groupConversation)
+            .put("tappable", item.tappable)
 
     /**
      * A Plasma notification's icon (PlasmaBridge): its Linux app's drawer icon - by its desktop entry, else the app
@@ -1678,11 +1735,25 @@ class ShellBridge(
         /** The bridge calls that only touch files or re-serialize (perf.publish: the meter's own ~4 Hz cost): run by [callOffMain], never on the main thread. */
         private val OFF_MAIN = setOf("store.get", "store.set", "perf.save", "perf.publish")
 
+        /**
+         * Calls that are package manager lookups, answered from [lookups] (not [fileIo]: a store read mustn't wait on
+         * them). qs.destinations: SettingsSearch's per-package getLaunchIntentForPackage / icons, 153 ms on the main
+         * thread (perf-1793409701579); the same list, now built once per index/locale/app change (SettingsSearch.Key).
+         */
+        private val LOOKUPS = setOf("qs.destinations")
+        private val lookups = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-lookups").apply { isDaemon = true } }
+
         /** One thread for them all, so a page's set then get stay in that order. */
         private val fileIo = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-store").apply { isDaemon = true } }
 
         /** Every open shell window's bridge (weak: a closed window just drops out), for events meant for all of them. */
         private val live: MutableSet<ShellBridge> = java.util.Collections.newSetFromMap(java.util.WeakHashMap())
+
+        /** SI1: the shared bar input ({text, hearing, gen, seq}, "bar.publish"), guarded by [live]'s lock; null until written. */
+        private var barInput: JSONObject? = null
+
+        /** The bar's text, at most (a long paste still syncs; the field never holds a book). */
+        private const val BAR_TEXT_MAX = 8000
 
         private const val TAG = "PowosShell"
 

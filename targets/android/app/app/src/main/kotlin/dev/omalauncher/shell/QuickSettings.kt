@@ -42,8 +42,95 @@ import kotlin.math.sqrt
  */
 class QuickSettings(
     private val context: Context,
-    private val changed: () -> Unit,
+    private val onChanged: () -> Unit,
 ) {
+    /**
+     * The tiles' system states that are binder calls (Wi-Fi, location, dark mode, NFC, battery saver, hotspot, the
+     * operator, do not disturb, volume and ringer, third-party tiles' labels), read on [reads] into [sys]: the page's
+     * reads ([state]) build the JSON from it on the main thread without a binder call (WifiManager.isWifiEnabled took
+     * 264 ms there in perf-1793409569119). Staleness: re-read after every change signal (the settings observer - Wi-Fi,
+     * location, dark mode, battery saver, airplane, Bluetooth and mobile data are all settings - the torch callback,
+     * the third-party tiles, a switch's root command finishing, a slider) before the page is told, and after every
+     * [state] read, which tells the page again if anything differed - so an unsignalled change (NFC, the operator)
+     * shows within one read (one binder round per value) of the next look.
+     */
+    private data class Sys(
+        val values: Map<String, Any?>,
+        val customs: Map<String, Pair<ComponentName, String>?>,
+    ) {
+        val wifi get() = values["wifi"] as Boolean?
+        val operator get() = values["operator"] as String?
+        val location get() = values["location"] as Boolean?
+        val dnd get() = values["dnd"] as Boolean?
+        val night get() = values["night"] as Int?
+        val hotspot get() = values["hotspot"] as Boolean?
+        val nfc get() = values["nfc"] as Boolean?
+        val powerSave get() = values["powerSave"] == true
+        val volume get() = values["volume"] as Double? ?: 0.0
+        val ringer get() = values["ringer"] as Int? ?: AudioManager.RINGER_MODE_NORMAL
+
+        /** This, with [key] (a slider just set) at [value]. */
+        fun with(
+            key: String,
+            value: Any?,
+        ) = copy(values = values + (key to value))
+    }
+
+    @Volatile private var sys: Sys? = null
+
+    /** Bumped by every slider [set] that writes [sys] itself. */
+    @Volatile private var slid = 0
+
+    /** A [readSys] is queued and not started: another ask needn't queue one more (it would read the same). */
+    private val readQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** A queued [readSys] tells the page when done, whether or not anything differed. */
+    private val tellQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Something changed: the states read again (off the main thread), then the page told ([onChanged]). */
+    private fun changed() = reread(tell = true)
+
+    private fun reread(tell: Boolean) {
+        if (tell) tellQueued.set(true)
+        if (!readQueued.compareAndSet(false, true)) return
+        reads.execute {
+            readQueued.set(false)
+            val told = tellQueued.getAndSet(false)
+            val before = sys
+            val wrote = slid
+            val now = runCatching { readSys() }.onFailure { Log.w(TAG, "quick settings unreadable", it) }.getOrNull() ?: return@execute
+            // A slider set meanwhile: this read may predate it (the volume jumping back); the read its change() queued wins.
+            if (wrote != slid) return@execute
+            sys = now
+            if (told || before != now) onChanged()
+        }
+    }
+
+    /** The binder-call states, on [reads]. */
+    private fun readSys(): Sys {
+        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        val ids = order ?: DEFAULT_ORDER
+        val old = sys?.customs.orEmpty()
+        val values =
+            mapOf(
+                "wifi" to wifi?.isWifiEnabled,
+                "operator" to telephony?.networkOperatorName?.takeIf { it.isNotBlank() },
+                "location" to location?.isLocationEnabled,
+                "dnd" to MediaListener.connected?.currentInterruptionFilter?.let { it > NotificationListenerService.INTERRUPTION_FILTER_ALL },
+                "night" to uiMode?.nightMode,
+                "hotspot" to hotspotOn(),
+                "nfc" to nfc?.isEnabled,
+                "powerSave" to power.isPowerSaveMode,
+                "volume" to audio.getStreamVolume(AudioManager.STREAM_MUSIC).toDouble() / max,
+                "ringer" to audio.ringerMode,
+            )
+        // A tile's component and label don't change while it's installed: read once per tile id.
+        return Sys(values, ids.filter { it.startsWith("custom(") }.associateWith { id -> if (id in old) old[id] else readCustom(id) })
+    }
+
+    /** [sys], read here if never read yet (the first look only; [init] queues the first read at once). */
+    private fun sysNow(): Sys = sys ?: readSys().also { sys = it }
+
     /** A third-party tile opened something (its activity, its dialog): the control center to go, as SystemUI's does. */
     var collapse: () -> Unit = {}
 
@@ -93,10 +180,13 @@ class QuickSettings(
         grantWriteSettings()
         TileHost.attach(context, tileListener)
         loadOrder()
+        reread(tell = false)
     }
 
     fun state(): JSONObject {
-        val dnd = MediaListener.connected?.currentInterruptionFilter?.let { it > NotificationListenerService.INTERRUPTION_FILTER_ALL }
+        val sys = sysNow()
+        reread(tell = false) // fresh for the next look; the page is told if this one was behind
+        val dnd = sys.dnd
         val tiles = JSONArray()
         for (id in order ?: DEFAULT_ORDER) tile(id)?.let(tiles::put)
         return JSONObject()
@@ -105,11 +195,12 @@ class QuickSettings(
             .put("dnd", dnd ?: JSONObject.NULL)
             .put("tiles", tiles)
             .put("brightness", brightness())
-            .put("volume", volume())
+            .put("volume", volume(sys))
     }
 
     /** One tile: { id, label, on (true/false, null: not a switch), detail, app (a third-party tile's package) }. */
     private fun tile(id: String): JSONObject? {
+        val sys = sysNow()
         val t = JSONObject().put("id", id)
         fun sw(
             label: String,
@@ -117,18 +208,18 @@ class QuickSettings(
             detail: String? = null,
         ) = t.put("label", label).put("on", on ?: JSONObject.NULL).put("detail", detail ?: JSONObject.NULL)
         return when (id) {
-            "wifi" -> sw("Wi-Fi", wifi?.isWifiEnabled)
+            "wifi" -> sw("Wi-Fi", sys.wifi)
             "bt" -> sw("Bluetooth", global("bluetooth_on") == 1)
-            "cell" -> sw("Mobile data", global("mobile_data") == 1, telephony?.networkOperatorName?.takeIf { it.isNotBlank() })
+            "cell" -> sw("Mobile data", global("mobile_data") == 1, sys.operator)
             "flashlight" -> if (torchCamera == null) null else sw("Torch", torch)
-            "location" -> sw("Location", location?.isLocationEnabled)
+            "location" -> sw("Location", sys.location)
             "airplane" -> sw("Airplane mode", global(Settings.Global.AIRPLANE_MODE_ON) == 1)
             "rotation" -> sw("Auto-rotate", system(Settings.System.ACCELEROMETER_ROTATION) == 1)
-            "dnd" -> sw("Do not disturb", MediaListener.connected?.currentInterruptionFilter?.let { it > NotificationListenerService.INTERRUPTION_FILTER_ALL })
-            "darkmode" -> sw("Dark mode", uiMode?.nightMode == UiModeManager.MODE_NIGHT_YES)
-            "hotspot" -> sw("Hotspot", hotspotOn())
-            "nfc" -> if (nfc == null) null else sw("NFC", nfc.isEnabled)
-            "battery", "powersave" -> sw("Battery saver", power.isPowerSaveMode)
+            "dnd" -> sw("Do not disturb", sys.dnd)
+            "darkmode" -> sw("Dark mode", sys.night == UiModeManager.MODE_NIGHT_YES)
+            "hotspot" -> sw("Hotspot", sys.hotspot)
+            "nfc" -> if (nfc == null) null else sw("NFC", sys.nfc)
+            "battery", "powersave" -> sw("Battery saver", sys.powerSave)
             "controls" -> sw("Device controls", null)
             "wallet" -> sw("Wallet", null)
             "screenshot" -> sw("Screenshot", null)
@@ -141,7 +232,7 @@ class QuickSettings(
                 if (id.contains("com.oplus.battery/")) {
                     tile("battery")
                 } else {
-                    custom(id)?.let { (cn, label) ->
+                    (if (id in sys.customs) sys.customs[id] else custom(id))?.let { (cn, label) ->
                         // Hosted ([TileHost]) and reported: its own state, a switch here. Until then, null: it opens.
                         val hosted = TileHost.state(id)
                         when {
@@ -154,8 +245,11 @@ class QuickSettings(
         }
     }
 
-    /** A third-party tile (custom(pkg/cls)): its component and the label its service declares. */
-    private fun custom(id: String): Pair<ComponentName, String>? {
+    /** A third-party tile (custom(pkg/cls)): its component and its label, as last read ([sys]) or read now. */
+    private fun custom(id: String): Pair<ComponentName, String>? = sys?.customs?.get(id) ?: readCustom(id)
+
+    /** A third-party tile (custom(pkg/cls)): its component and the label its service declares (a binder call). */
+    private fun readCustom(id: String): Pair<ComponentName, String>? {
         val spec = id.removePrefix("custom(").removeSuffix(")").takeIf { id.startsWith("custom(") } ?: return null
         val cn = ComponentName.unflattenFromString(spec) ?: return null
         val info = runCatching { context.packageManager.getServiceInfo(cn, 0) }.getOrNull() ?: return null
@@ -173,15 +267,15 @@ class QuickSettings(
                     )
                     changed()
                 }
-            "wifi" -> root("svc wifi ${if (wifi?.isWifiEnabled == true) "disable" else "enable"}")
+            "wifi" -> root("svc wifi ${if (sysNow().wifi == true) "disable" else "enable"}")
             "bt" -> root("svc bluetooth ${if (global("bluetooth_on") == 1) "disable" else "enable"}")
             "cell" -> root("svc data ${if (global("mobile_data") == 1) "disable" else "enable"}")
             "airplane" -> root("cmd connectivity airplane-mode ${if (global(Settings.Global.AIRPLANE_MODE_ON) == 1) "disable" else "enable"}")
-            "location" -> root("cmd location set-location-enabled ${location?.isLocationEnabled != true}")
+            "location" -> root("cmd location set-location-enabled ${sysNow().location != true}")
             "rotation" -> setSystem(Settings.System.ACCELEROMETER_ROTATION, if (system(Settings.System.ACCELEROMETER_ROTATION) == 1) 0 else 1)
-            "darkmode" -> root("cmd uimode night ${if (uiMode?.nightMode == UiModeManager.MODE_NIGHT_YES) "no" else "yes"}")
-            "nfc" -> root("svc nfc ${if (nfc?.isEnabled == true) "disable" else "enable"}")
-            "battery", "powersave" -> root("cmd power set-mode ${if (power.isPowerSaveMode) 0 else 1}")
+            "darkmode" -> root("cmd uimode night ${if (sysNow().night == UiModeManager.MODE_NIGHT_YES) "no" else "yes"}")
+            "nfc" -> root("svc nfc ${if (sysNow().nfc == true) "disable" else "enable"}")
+            "battery", "powersave" -> root("cmd power set-mode ${if (sysNow().powerSave) 0 else 1}")
             "hotspot" -> open("hotspot")
             // Actions, not switches: the panel shuts first (the page does), then they run.
             "screenshot" -> main.postDelayed({ root("input keyevent KEYCODE_SYSRQ") }, PANEL_GONE_MS)
@@ -214,10 +308,14 @@ class QuickSettings(
             "volume" -> {
                 val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 audio.setStreamVolume(AudioManager.STREAM_MUSIC, (max * v).roundToInt(), 0)
+                slid++
+                sys = sysNow().with("volume", (max * v).roundToInt().toDouble() / max.coerceAtLeast(1))
                 changed()
             }
             "ringer" -> {
                 audio.ringerMode = (v * 2).roundToInt().coerceIn(0, 2)
+                slid++
+                sys = sysNow().with("ringer", (v * 2).roundToInt().coerceIn(0, 2))
                 changed()
             }
             else -> error("no slider $name")
@@ -232,13 +330,11 @@ class QuickSettings(
             .put("auto", system(Settings.System.SCREEN_BRIGHTNESS_MODE) == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC)
     }
 
-    private fun volume(): JSONObject {
-        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-        return JSONObject()
-            .put("value", audio.getStreamVolume(AudioManager.STREAM_MUSIC).toDouble() / max)
+    private fun volume(sys: Sys): JSONObject =
+        JSONObject()
+            .put("value", sys.volume)
             // 0 silent, 1 vibrate, 2 ring (AudioManager.RINGER_MODE_*).
-            .put("ringer", audio.ringerMode)
-    }
+            .put("ringer", sys.ringer)
 
     /** The brightness setting's top: the framework's (this phone goes past 255). */
     private val brightnessMax: Int by lazy {
@@ -347,7 +443,7 @@ class QuickSettings(
         io.execute {
             val out = rootOut(cmd)
             if (out == null) Log.w(TAG, "root: $cmd failed")
-            main.post(changed)
+            changed()
         }
 
     fun close() {
@@ -365,6 +461,9 @@ class QuickSettings(
         private const val PANEL_GONE_MS = 450L
 
         private val io = Executors.newSingleThreadExecutor()
+
+        /** Where [QuickSettings.readSys] runs: not [io], whose root commands can take seconds. */
+        private val reads = Executors.newSingleThreadExecutor { r -> Thread(r, "qs-reads") }
 
         /** sysui_qs_tiles, read once. */
         @Volatile private var order: List<String>? = null

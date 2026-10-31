@@ -250,6 +250,19 @@ export function validDockPosition(value: string, fallback: string): string {
 export const dockTry = signal("");
 export const dockPosition = computed(() => validDockPosition(dockTry.value || sidewaysDock(dockPlacement.value), dockMode.value === "desktop" ? "left" : "bottom"));
 /**
+ * Home's search per mode (Settings > style > home, edit mode's theme sheet): "bar" - the pill over the dock, as always
+ * (the default) - or "dock": no pill on home, an app-sized button in the middle of the dock that expands into the bar
+ * in place (ui/docksearch.tsx; the user, 2026-10-31 01:24). Folded and unfolded each keep their own, as the dock's
+ * placement does; the desktop shell has its own launcher and keeps the bar. [searchTry]: a check's choice for this
+ * page only, never stored (as dockTry).
+ */
+export const mobileSearchPlacement = stored("search.place.mobile", "bar");
+export const unfoldedSearchPlacement = stored("search.place.unfolded", "bar");
+export const searchTry = signal("");
+/** The search placement setting of the mode in use (folded / unfolded); null in the desktop shell. */
+export const searchPlacement = computed(() => (dockMode.value === "unfolded" ? unfoldedSearchPlacement : dockMode.value === "mobile" ? mobileSearchPlacement : null));
+export const searchInDock = computed(() => (searchTry.value || searchPlacement.value?.value) === "dock");
+/**
  * The folded home turned sideways (hosts/wide.ts sidewaysHome): the bottom dock becomes the right column, with its
  * recents, so the tiles get the height back (the user, 2026-10-30). A side the user picked for mobile stays; folded
  * portrait and unfolded keep their own placement.
@@ -301,6 +314,8 @@ export const speechEngine = stored("speechEngine", "gpu");
 effect(() => void powos.store.set("speech", { engine: speechEngine.value }).catch(() => {}));
 /** What's typed in PowOS AI's page and not sent yet: kept across reloads (an update mustn't lose it). */
 export const aiDraft = stored("powai.draft");
+/** PowOS AI's screen (powai.tsx): its chat, or one its ⋯ menu opened (aimenu.tsx) - Back goes back to the chat. */
+export const aiScreen = signal<"chat" | "progress" | "agents" | "devices" | "friction">("chat");
 /**
  * Home's page: it has no launcher of its own. The launcher is one overlay, as the notification shade is (the user,
  * 2026-10-29: "the launcher is supposed to be an overlay just like the notifications"): the host's pull-up window
@@ -316,6 +331,10 @@ export const homePage = !new URLSearchParams(location.search).get("mode");
  * desktop.tsx's launcher in place. A desktop PC's powos-shell has no overlay and keeps desktop.tsx's launcher.
  */
 export const launcherIsOverlay = homePage || !!window.PowosHost?.launcherOverlay;
+/** The launcher overlay's own page (PullHost.kt, mode=pull). */
+export const pullPage = new URLSearchParams(location.search).get("mode") === "pull";
+/** SI1: home's bar and the overlay's are one input (ui/barsync.ts); other pages' bars keep their own. */
+export const sharesBar = homePage || pullPage;
 
 /**
  * The home page on screen (its id in home.pages): home shares it through the store, so the launcher overlay's "add to
@@ -337,6 +356,10 @@ export interface LauncherOpen {
   context?: boolean;
   text?: string;
   draft?: string;
+  /** DS2: opened from home's dock search button, at this rect (page px): the launcher grows out of it (launchmorph.ts). */
+  from?: { left: number; top: number; width: number; height: number };
+  /** With [from]: a swipe up from the button, the host's pull following it (pull.drive). */
+  drag?: boolean;
 }
 
 /**
@@ -435,10 +458,14 @@ document.addEventListener("visibilitychange", async () => {
 /** Closes the pull-up panel (the drawer or PowOS AI's). */
 export const closePanel = () => closeDrawer();
 
-/** Closes the drawer: the search cleared, the keyboard down. */
-export function closeDrawer() {
+/**
+ * Closes the drawer: the keyboard down, the search cleared - [clear]: by default, except the launcher overlay's
+ * dismissal, whose bar is home's too (SI1, barsync.ts): the search widget keeps its text, and the next open shows it.
+ * A launch or an opened result from it (launch, search.ts openSearchResult) does clear it, in both.
+ */
+export function closeDrawer(clear = !pullPage) {
   drawer.value = 0;
-  query.value = "";
+  if (clear) query.value = "";
   chatting.value = false;
   (document.activeElement as HTMLElement | null)?.blur();
   powos.keyboard.hide();
@@ -471,6 +498,8 @@ export function back(): boolean {
   else if (folder.value) folder.value = null;
   else if (selected.value) selected.value = null;
   else if (editing.value) editing.value = false;
+  // A screen PowOS AI's ⋯ menu opened: back to its chat.
+  else if (aiScreen.value !== "chat" && (page.value === -1 || (drawer.value > 0 && pullKind.value === "ai"))) aiScreen.value = "chat";
   // PowOS AI's page: back to home.
   else if (page.value === -1) page.value = 0;
   else if (drawer.value > 0) closeDrawer();
@@ -525,26 +554,37 @@ powos.on("webwindows.adopt", (m: { task?: number; kwin?: number; key: string; la
 // An app opened from another PowOS window (the launcher overlay, Quick Tools, the AI; ShellBridge.launchOnHome): a web
 // window on this page, as home's own launch makes one. Not one here (no window for it): the host launches it as before.
 powos.on("webwindows.launch", ({ key }: { key: string }) => {
-  void openWebWindow(key, byKey.value.get(key)?.label ?? key, pages.value[page.value] ?? 1).then((ok) => {
+  void openAsWebWindow(key).then((ok) => {
     if (!ok) void powos.apps.launch(key);
   });
 });
+
+/**
+ * [key] opened as a web window on this page (false: the host launches it as before). Not Plasma (App.desktop): it shows
+ * the whole desktop in its own activity and never opens a KWin window, so a placeholder waiting for one only ever said
+ * "Couldn't start Plasma. It opened no window." (the user, 2026-10-31 02:09) and kept the next dock taps for itself.
+ */
+function openAsWebWindow(key: string): Promise<boolean> {
+  const app = byKey.value.get(key);
+  if (app?.desktop) return Promise.resolve(false);
+  return openWebWindow(key, app?.label ?? key, pages.value[page.value] ?? 1);
+}
 
 export async function launch(key: string) {
   menu.value = null;
   // A PowOS app: its page, full screen in this one (ui/appscreen.tsx).
   if (key.startsWith(PREFIX)) {
     openApp(key.slice(PREFIX.length));
-    closeDrawer();
+    closeDrawer(true);
     return;
   }
   // Unfolded with web windows on (Settings.Global powos_web_windows): the app opens as an element of this page.
-  if (await openWebWindow(key, byKey.value.get(key)?.label ?? key, pages.value[page.value] ?? 1)) {
-    closeDrawer();
+  if (await openAsWebWindow(key)) {
+    closeDrawer(true);
     return;
   }
   await powos.apps.launch(key);
-  closeDrawer();
+  closeDrawer(true);
   await fetchRecent();
 }
 

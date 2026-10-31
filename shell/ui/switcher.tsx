@@ -8,6 +8,7 @@
 import { useRef } from "preact/hooks";
 import type { RecentTask } from "../types.ts";
 import { spring } from "./spring.ts";
+import { memo } from "./memo.ts";
 
 /** Pushed up this far (of its height), or flicked up (px/ms), a card is removed. */
 const REMOVE = 0.4;
@@ -195,13 +196,24 @@ export function TaskCard({
   );
 }
 
-/** An app's icon, or a blank in its place. */
-function Icon({ src }: { src: string | null }) {
+/**
+ * An app's icon, or a blank in its place. Memoised: its card re-renders on every recents update (new onOpen/onMenu),
+ * the icon's src the same - 117 of 131 renders needless in perf-1793409569119's render scan.
+ */
+const Icon = memo(function Icon({ src }: { src: string | null }) {
   return src ? <img class="task-icon" src={src} alt="" draggable={false} /> : <span class="task-icon blank" />;
-}
+});
 
-/** A card's head: its app's icon (a split's: every app's) and its label. */
-function TaskHead({ t }: { t: RecentTask }) {
+/** What a head shows of [t]: a new task object from each recents update is the same head when these are. */
+const sameHead = (a: { t: RecentTask }, b: { t: RecentTask }) =>
+  a.t === b.t ||
+  (a.t.icon === b.t.icon &&
+    a.t.label === b.t.label &&
+    (a.t.split ?? []).length === (b.t.split ?? []).length &&
+    (a.t.split ?? []).every((s, i) => s.id === b.t.split![i].id && s.icon === b.t.split![i].icon));
+
+/** A card's head: its app's icon (a split's: every app's) and its label. Re-rendered only when those change ([sameHead]). */
+const TaskHead = memo(function TaskHead({ t }: { t: RecentTask }) {
   return (
     <div class="task-head">
       {t.split ? (
@@ -216,7 +228,7 @@ function TaskHead({ t }: { t: RecentTask }) {
       <span class="task-label">{t.label}</span>
     </div>
   );
-}
+}, sameHead);
 
 /**
  * A split card's picture: the whole split, each side's last frame at its share of the screen, side by side (a <div>

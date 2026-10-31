@@ -130,6 +130,20 @@ export function settle(...targets: MicTarget[]) {
   if (!pending && speech.value.listening) stopNow();
 }
 
+/**
+ * SI1: another window started a newer generation of the shared bar (barsync.ts: a send, a clear, an edit over this
+ * dictation) while one of [targets] dictates here: its words up to now are already in that text (published as heard),
+ * so the dictation ends without writing them back - the recognizer let go, nothing sent, a send waiting here for its
+ * final words given up (its field is empty now).
+ */
+export function drop(...targets: MicTarget[]) {
+  const p = pending;
+  if (!p || !targets.includes(p.target)) return;
+  pending = null;
+  stopNow();
+  finished?.end("");
+}
+
 /** [target]'s dictation is under way (or starting). */
 export const listeningFor = (target: MicTarget) => pending?.target === target;
 

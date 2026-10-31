@@ -122,8 +122,8 @@ export const drawerDragging = computed(() => drawerDrag.value != null || notifDr
  */
 const SPAN = 1000;
 const SAMPLES = 41;
-const SETTLE_MS = 180;
-const SETTLE_CURVE = [0.1, 0.8, 0.2, 1] as const;
+export const SETTLE_MS = 180;
+export const SETTLE_CURVE = [0.1, 0.8, 0.2, 1] as const;
 interface Follower {
   el: HTMLElement;
   /** Its transform and opacity at --p 0, 1/40, ... 1. */
@@ -135,7 +135,7 @@ let followers: Follower[] | null = null;
 const tables = new WeakMap<HTMLElement, { key: string; table: Keyframe[] }>();
 
 function tableOf(el: HTMLElement): Keyframe[] {
-  const key = `${innerWidth}x${innerHeight} ${el.offsetWidth}x${el.offsetHeight} ${el.closest(".home")?.classList.contains("pill-below")} ${el.closest(".home")?.classList.contains("search-parked")} ${document.querySelector(".home")?.className.match(/dock-(bottom|left|right)/)?.[0]}`;
+  const key = `${innerWidth}x${innerHeight} ${el.offsetWidth}x${el.offsetHeight} ${el.closest(".home")?.classList.contains("pill-below")} ${el.closest(".home")?.classList.contains("search-parked")} ${el.closest(".home")?.classList.contains("from-button")} ${document.querySelector(".home")?.className.match(/dock-(bottom|left|right)/)?.[0]}`;
   const had = tables.get(el);
   if (had?.key === key) return had.table;
   const st = el.style;
