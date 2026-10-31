@@ -5819,6 +5819,17 @@ try {
         await shot("none");
         return fails.map((f) => `${position}: ${f}`);
       })));
+  // DR1 (dev/page-marks-check.js pageSwipeRenders; the user, 2026-10-31 15:55): page swipes on the unfolded home with two
+  // windows on different pages re-render only the dock cells whose mark changed, and never the switcher (Recents).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "dock-renders-swipe", dockOpensView.unfolded).then((r) => whenReady(r, async () => {
+      const call = (fn, ...args) => r.page.evaluate(async (f, a) => (await importShim("./dev/page-marks-check.js"))[f](...a), fn, args);
+      const { pages } = await call("pageMarksSetup", "bottom", true);
+      if (pages < 2) return [`only ${pages} home page(s) to put two windows on`];
+      const { fails } = await call("pageSwipeRenders");
+      await call("pageMarksNone", "a:none");
+      return fails;
+    })));
   // DK1 + DK2: in dock-button mode the pinned dock stays its pinned apps + the button with running unpinned apps about
   // (same cells, same icon size); a side column has the button as the separator between them and the recent apps.
   if (process.env.SHELL_PAGES !== "0")

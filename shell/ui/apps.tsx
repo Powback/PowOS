@@ -4,7 +4,7 @@
  */
 import { tinted } from "./icontint.ts";
 import { placement, shapeOf, type Shape } from "./iconshape.ts";
-import { running } from "./running.ts";
+import { running, runOf } from "./running.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { closeDrawer, dock, launch, menu, setDocked, shownHomePage } from "../state.ts";
 import { startCarry } from "./grid.tsx";
@@ -104,7 +104,7 @@ export const AppCell = memo(function AppCell({ app, labels = true, draggable = f
     onMove && ((e, dx, dy) => onMove(e, dx, dy, app)),
   );
   return (
-    <div class={`app ${cls}`} style={style} data-key={app.key} data-run={running.value[app.key]} {...press}>
+    <div class={`app ${cls}`} style={style} data-key={app.key} data-run={runOf(app.key).value} {...press}>
       <AppIcon src={app.icon} label={app.label} />
       {labels && <div class="app-label">{app.label}</div>}
     </div>
