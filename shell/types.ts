@@ -426,7 +426,7 @@ export interface Bridge {
   /** Perf traces (?: hosts from before it): saves JSON under the AI shared dir, returns its path in PowOS. */
   /** The one search/chat bar input home's bar and the launcher overlay share (barsync.ts): the host keeps the latest and
    *  broadcasts it to the other windows as "bar.input". Hosts from before it: absent. */
-  bar?: { publish(v: BarInput): Promise<unknown>; get(): Promise<BarInput | null> };
+  bar?: { publish(v: BarInput): Promise<BarInput | null>; get(): Promise<BarInput | null> };
   perf?: { save(json: string): Promise<string | null>; /** Main shell frame sample to the other windows (hosts from before it: absent). */ publish?(json: string): Promise<unknown>;
     /** The host's main-thread blocks while recording (true: started; the trace section on stop). Older hosts: absent. */ native?(on: boolean): Promise<NativePerf | true | null>;
     /** The front PowOS window's presents (null: none in front); hosts from before it reject it. */ front?(): Promise<FrontPresents | null> };
@@ -1310,9 +1310,11 @@ export interface VirtualDesktop {
 export interface NativeSetting { id: string; label: string; keywords: string; breadcrumb?: string; package?: string; app?: string; appIcon?: string }
 
 /** The shared bar's input (barsync.ts): its text (with a dictation's words as heard), whether a dictation is writing it,
- *  and when it was written (last writer wins). */
+ *  its generation (a clear starts a new one; the host refuses older ones) and the host's number for it (seq: newer wins;
+ *  a page's write sends 0). */
 export interface BarInput {
   text: string;
   hearing: boolean;
-  at: number;
+  gen: number;
+  seq: number;
 }

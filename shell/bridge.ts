@@ -148,7 +148,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       get: <T>(name: string) => call<T | null>("store.get", name),
       set: (name, value) => call("store.set", name, value),
     },
-    bar: { publish: (v) => call("bar.publish", v), get: () => call<BarInput | null>("bar.get") },
+    bar: { publish: (v) => call<BarInput | null>("bar.publish", v), get: () => call<BarInput | null>("bar.get") },
     perf: { save: (json) => call<string | null>("perf.save", json), publish: (json) => call("perf.publish", json), native: (on) => call<NativePerf | true | null>("perf.native", on), front: () => call<FrontPresents | null>("perf.front") },
     ai: {
       chat: () => call<Chat>("ai.chat"),
@@ -1094,13 +1094,22 @@ function mock(): Bridge {
 const dataTimers = new Map<number, ReturnType<typeof setInterval>>();
 
 /**
- * The browser preview has one page: the bar's input is kept, and handed to window.__barRelay when there is one - the
- * gate (dev/bar-sync-check.js) relays it to a second page as the host's "bar.input", as ShellBridge does.
+ * The bar's host, as ShellBridge keeps it (an older generation refused, every kept write numbered). The browser preview
+ * has one page; the gate (dev/bar-sync-check.js) joins two through window.__barHost - one host in node for both, which
+ * sends each page's kept writes to the other as "bar.input".
  */
 function mockBar(): Bridge["bar"] {
   let v: BarInput | null = null;
-  const relay = () => (window as unknown as { __barRelay?: (v: BarInput) => unknown }).__barRelay;
-  return { publish: async (next) => void ((v = next), relay()?.(next)), get: async () => v };
+  const host = () => (window as unknown as { __barHost?: (op: string, v?: BarInput) => Promise<BarInput | null> }).__barHost;
+  return {
+    publish: async (next) => {
+      const shared = host();
+      if (shared) return shared("publish", next);
+      if (v && next.gen < v.gen) return v;
+      return (v = { ...next, seq: (v?.seq ?? 0) + 1 });
+    },
+    get: async () => (host() ? host()!("get") : v),
+  };
 }
 
 function mockAppWidgets(home: Home, changed: () => void, events: Events): Bridge["appWidgets"] {

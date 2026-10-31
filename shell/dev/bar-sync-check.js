@@ -1,79 +1,98 @@
 /**
  * SI1 (the user, 2026-10-31 01:16: "The text inside the search widget and the launcher should be the same"): home's bar
  * and the launcher overlay's are one input (ui/barsync.ts). Runs from gate.mjs ("bar-sync") over two pages - home
- * (index.html) and the overlay's (index.html?mode=pull) - whose mock bridges are joined as ShellBridge joins the
- * windows: each page's bar.publish goes to the other as "bar.input" (window.__barRelay). Node-side: [home], [pull] are
- * puppeteer pages. Checks:
+ * (index.html) and the overlay's (index.html?mode=pull) - joined through ONE host here in node that keeps the bar as
+ * ShellBridge does (an older generation refused, every kept write numbered, sent to the other page as "bar.input").
+ * Adversarial on purpose: home's writes reach the host HOME_LAG ms late, so a send in the launcher lands before home's
+ * last dictation words (the 2026-10-31 race: they came back after the send). Every wait is on state, never a sleep.
+ * Node-side: [home], [pull] are puppeteer pages. Checks:
  *  1. text typed in home shows in the launcher's field;
- *  2. a dictation in home: its partial words show in the launcher's field (and its send), the final text after;
+ *  2. a dictation in home: its words show in the launcher's field while it listens (and its send), the final text after;
  *  3. send in the launcher clears both;
  *  4. send in the launcher while home dictates: both empty, home's dictation ended, its words never written back.
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const HOME = ".home > .bar";
 const PULL = ".pull-screen > .bar";
+const HOME_LAG = 60;
 
-/** Joins the two pages' mock bridges: a publish in one is the other's "bar.input". */
+/** The one host both pages' mock bridges use (bridge.ts mockBar -> window.__barHost). */
 export async function joinPages(home, pull) {
-  const to = (page) => (v) => page.evaluate((x) => window.__mockEvents.emit("bar.input", x), v).catch(() => {});
-  await home.exposeFunction("__barRelay", to(pull));
-  await pull.exposeFunction("__barRelay", to(home));
+  const host = { v: null, busy: 0 };
+  const deliver = (page, v) => page.evaluate((x) => window.__mockEvents.emit("bar.input", x), v).catch(() => {});
+  const serve = (self, other, lag) => async (op, next) => {
+    host.busy++;
+    try {
+      if (lag) await sleep(lag);
+      if (op === "get") return host.v;
+      if (host.v && next.gen < host.v.gen) return host.v;
+      host.v = { text: next.text, hearing: !!next.hearing, gen: next.gen, seq: (host.v?.seq ?? 0) + 1 };
+      await deliver(other, host.v);
+      return host.v;
+    } finally {
+      host.busy--;
+    }
+  };
+  await home.exposeFunction("__barHost", serve(home, pull, HOME_LAG));
+  await pull.exposeFunction("__barHost", serve(pull, home, 0));
+  return host;
 }
 
 const field = (page, form) => page.evaluate((f) => document.querySelector(`${f} textarea`)?.value ?? null, form);
 const query = (page) => page.evaluate(async () => (await importShim("./state.ts")).query.value);
 
-async function waitFor(fails, what, f, ms = 3000) {
-  for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(40)) if (await f()) return true;
+async function waitFor(fails, what, f, ms = 4000) {
+  for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(30)) if (await f()) return true;
   fails.push(`timed out: ${what}`);
   return false;
 }
 
-/** A tap on home's bar mic: a tap's dictation (the mock hears "how much battery is left", then ends by itself). */
-const tapHomeMic = (home, hold = false) =>
-  home.evaluate(async (f, hold) => {
+/** A tap on home's bar mic, its recognizer a held one (no end of its own: it stops only when told, never on a timer). */
+const tapHomeMic = (home) =>
+  home.evaluate(async (f) => {
     const { powos } = await importShim("./bridge.ts");
-    const mic = document.querySelector(`${f} .mic`);
     Element.prototype.setPointerCapture = () => {};
-    // A held recognizer (no end of its own) for step 4: the launcher's send ends it, not its silence.
-    if (hold && !powos.speech.__orig) (powos.speech.__orig = powos.speech.start), (powos.speech.start = () => powos.speech.__orig(true));
+    if (!powos.speech.__orig) (powos.speech.__orig = powos.speech.start), (powos.speech.start = () => powos.speech.__orig(true));
+    const mic = document.querySelector(`${f} .mic`);
     const at = { bubbles: true, pointerId: 1, isPrimary: true };
     mic.dispatchEvent(new PointerEvent("pointerdown", at));
     mic.dispatchEvent(new PointerEvent("pointerup", at));
-  }, HOME, hold);
+  }, HOME);
 
 const homeMicOn = (home) => home.evaluate((f) => !!document.querySelector(`${f} .mic.on`), HOME);
+/** The mock recognizer has heard all its words ("how much battery is left") and is still open. */
+const heardAll = (home) => home.evaluate(() => window.__speechMock.open === 1 && document.querySelector(".home > .bar textarea")?.value.endsWith("battery is left"));
+const micClosed = (home) => home.evaluate(() => window.__speechMock.open === 0);
 const submitPull = (pull) => pull.evaluate((f) => document.querySelector(f).requestSubmit(), PULL);
+const setQuery = (page, v) => page.evaluate(async (x) => ((await importShim("./state.ts")).query.value = x), v);
 
-export async function barSyncCheck(home, pull) {
+export async function barSyncCheck(home, pull, host) {
   const fails = [];
   await home.waitForSelector(`${HOME} .mic`);
   await pull.waitForSelector(`${PULL} textarea`);
   await pull.evaluate(async () => ((await importShim("./state.ts")).drawer.value = 1));
   // 1. Typed in home (its bar's query, as its onInput writes it): the launcher's field shows it.
-  await home.evaluate(async () => ((await importShim("./state.ts")).query.value = "weather"));
+  await setQuery(home, "weather");
   await waitFor(fails, "home's typed 'weather' in the launcher's field", async () => (await field(pull, PULL)) === "weather");
-  // 2. A dictation in home: its partial in the launcher's field while it listens, its send shown; the final text after.
+  // 2. A dictation in home: its words in the launcher's field while it listens, its send shown; the final text after.
   await tapHomeMic(home);
-  await waitFor(fails, "home's dictation partial in the launcher's field", async () => {
-    const v = await field(pull, PULL);
-    return (await homeMicOn(home)) && /^weather how( much)?$/.test(v ?? "");
-  });
+  await waitFor(fails, "home's dictation words in the launcher's field", async () => (await homeMicOn(home)) && (await field(pull, PULL)) === "weather how much battery is left");
   if (!(await pull.evaluate((f) => !!document.querySelector(`${f} .send.shown`), PULL))) fails.push("the launcher's send hidden while home dictates");
-  await waitFor(fails, "home's final words in the launcher's field", async () => (await field(pull, PULL)) === "weather how much battery is left" && !(await homeMicOn(home)));
+  await home.evaluate(async () => (await importShim("./bridge.ts")).powos.speech.stop());
+  await waitFor(fails, "home's dictation over, its words in both fields", async () => !(await homeMicOn(home)) && (await query(home)) === "weather how much battery is left" && (await field(pull, PULL)) === "weather how much battery is left");
   // 3. Send in the launcher: both empty.
   await submitPull(pull);
-  await waitFor(fails, "send in the launcher clears both", async () => (await query(pull)) === "" && (await query(home)) === "" && (await field(home, HOME)) === "");
-  // 4. Send in the launcher while home still dictates (a held recognizer): both empty, home's dictation over, and its
-  //    words never come back into either field.
-  await home.evaluate(async () => ((await importShim("./state.ts")).query.value = "note"));
+  await waitFor(fails, "send in the launcher clears both", async () => host.busy === 0 && (await query(pull)) === "" && (await query(home)) === "" && (await field(home, HOME)) === "");
+  // 4. Send in the launcher while home still dictates: both empty, home's dictation over, its words never back - home's
+  //    last words reach the host after the send (HOME_LAG), and the final words come once the mic is told to stop.
+  await setQuery(home, "note");
   await waitFor(fails, "home's 'note' in the launcher's field", async () => (await field(pull, PULL)) === "note");
-  await tapHomeMic(home, true);
-  await waitFor(fails, "home's held dictation partial in the launcher", async () => /^note how/.test((await field(pull, PULL)) ?? ""));
+  await tapHomeMic(home);
+  await waitFor(fails, "home's dictation heard all its words", () => heardAll(home));
   await submitPull(pull);
-  await waitFor(fails, "send mid-dictation clears both and ends home's dictation", async () => (await query(pull)) === "" && (await query(home)) === "" && !(await homeMicOn(home)));
-  await sleep(800);
-  const after = [await query(home), await query(pull)];
-  if (after.some((v) => v !== "")) fails.push(`dictation words written back after the send: home=${JSON.stringify(after[0])} launcher=${JSON.stringify(after[1])}`);
+  await waitFor(fails, "send mid-dictation ends home's dictation", async () => !(await homeMicOn(home)) && (await micClosed(home)));
+  await waitFor(fails, "send mid-dictation: both empty, nothing in flight", async () => host.busy === 0 && (await query(pull)) === "" && (await query(home)) === "");
+  const after = [await query(home), await query(pull), host.v?.text];
+  if (after.some((v) => v !== "")) fails.push(`dictation words written back after the send: home=${JSON.stringify(after[0])} launcher=${JSON.stringify(after[1])} host=${JSON.stringify(after[2])}`);
   return fails;
 }

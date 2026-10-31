@@ -252,7 +252,7 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const [focused, setFocused] = useState(false);
   // SI1: home's bar and the launcher overlay's are one input (barsync.ts); another window's edit ends a dictation here.
-  useEffect(() => void (sharesBar && startBarSync(barShown, (at) => drop(at, barMic, pillTarget))), []);
+  useEffect(() => void (sharesBar && startBarSync(barShown, () => drop(barMic, pillTarget))), []);
   const s = speech.value;
   // While it listens, the field shows what's heard after what was typed.
   // The assistant's dictation (the side button, the pet) writes into this field too.
