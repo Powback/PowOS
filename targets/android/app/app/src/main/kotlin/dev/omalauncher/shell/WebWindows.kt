@@ -19,6 +19,7 @@ import android.view.SurfaceControl
 import android.view.WindowManager
 import android.webkit.WebView
 import dev.omalauncher.system.HiddenApi
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -94,6 +95,72 @@ class WebWindows(
     private val sync = FrameSync(web, "ww")
 
     private val helper = Helper()
+
+    /**
+     * RL1 (the user, 10-31 14:19: "my widgets A window behind my widgets."): home's page (re)loaded - its window list is
+     * gone while these windows live on. Each is unclaimed until the new page names it in a "w.f" (it rebuilds its list
+     * from [list] on load); one still unclaimed [CLAIM_MS] later has its layers hidden, never drawn without its frame.
+     */
+    fun pageStarted() {
+        // RL0 (10-31 14:20, "the windows doesn't render again"): a new page's "w.f" frame ids start at 1 again; the
+        // last page's count (f399) made FrameSync drop every new frame as old - no geometry, empty bodies.
+        sync.reset()
+        if (wins.isEmpty()) return
+        wins.values.forEach { it.claimed = false }
+        WindowLog.i(TAG, "page (re)loaded: ${wins.size} window(s) wait for the page to claim them (${wins.keys})")
+        main.removeCallbacks(hideUnclaimedRun)
+        main.postDelayed(hideUnclaimedRun, CLAIM_MS)
+    }
+
+    private val hideUnclaimedRun = Runnable { hideUnclaimed() }
+
+    /** Main thread: every window the page hasn't claimed since its load, hidden (layers only; its app keeps running). */
+    private fun hideUnclaimed() {
+        val left = wins.values.filter { !it.claimed && !it.closed && it.container.isValid && !it.linuxFull }
+        if (left.isEmpty()) return
+        val t = SurfaceControl.Transaction()
+        left.forEach { it.shown = false; t.setVisibility(it.container, false) }
+        t.apply()
+        publishBars()
+        WindowLog.w(TAG, "page reload: window(s) ${left.map { it.id }} not claimed in $CLAIM_MS ms: hidden until the page claims them")
+    }
+
+    /**
+     * RL1: the host's live windows for a (re)loaded page ("webwindows.list"): each one's id, app key and label
+     * ([appOf]: an Android window's component -> its drawer key and name), display, task, state ("floating",
+     * "minimised", "full") and, once the page placed it, its frame and body (viewport CSS px) - the page rebuilds its
+     * list from it. Tilings and stacks are the page's alone: they come back as floating windows at their last frames.
+     */
+    fun list(appOf: (ComponentName) -> Pair<String, String>?): JSONArray {
+        val out = JSONArray()
+        val at = IntArray(2).also(web::getLocationInWindow)
+        val dpr = lastDpr.takeIf { it > 0f } ?: density()
+        wins.values.filter { !it.closed }.forEach { out.put(listed(it, appOf, at, dpr)) }
+        return out
+    }
+
+    /** [list]'s entry for [w]: geometry from window px ([at]: the WebView's place) to CSS px by [dpr]. */
+    private fun listed(
+        w: Win,
+        appOf: (ComponentName) -> Pair<String, String>?,
+        at: IntArray,
+        dpr: Float,
+    ): JSONObject {
+        fun css(r: Rect) = JSONObject().put("left", (r.left - at[0]) / dpr).put("top", (r.top - at[1]) / dpr).put("width", r.width() / dpr).put("height", r.height() / dpr)
+        val src = w.linux
+        val (key, label) = src?.let { it.offer.key to it.offer.label } ?: appOf(w.component) ?: ("a:${w.component.packageName}" to w.component.packageName)
+        val o = JSONObject().put("id", w.id).put("key", key).put("label", label).put("display", w.displayId).put("task", w.taskId).put("state", listedState(w)).put("live", w.live)
+        if (src != null) o.put("kwin", src.kwin).put("ownFrame", andro.marchy.WebWindowSource.ownFrame(src.kwin))
+        w.geo?.let { g -> o.put("frame", css(g.frame)).put("body", css(g.body)).put("maximised", g.maximised) }
+        return o
+    }
+
+    private fun listedState(w: Win): String =
+        when {
+            w.full || w.linuxFull -> "full"
+            w.leftAt != 0L -> "minimised"
+            else -> "floating"
+        }
 
     /** Off unless `settings put global powos_web_windows 1`. */
     fun enabled(): Boolean = on(context)
@@ -393,6 +460,12 @@ class WebWindows(
         @Volatile var leftAt = 0L
 
         @Volatile var closed = false
+
+        /**
+         * RL1: the page loaded since names it in a "w.f" (claimed it). False from a page load ([pageStarted]) until then:
+         * unclaimed [CLAIM_MS] after the load, its layers are hidden ([hideUnclaimed]) - never a frameless window.
+         */
+        var claimed = true
 
         /** Its display has had its app's task (seen by [checkLanded] / [reconcile]); false again on each [launch]. */
         @Volatile var landed = false
@@ -1155,6 +1228,8 @@ class WebWindows(
         for (g in geos.filterNot { it.id in shown }) {
             val win = wins[g.id] ?: continue
             shown += g.id
+            if (!win.claimed) WindowLog.i(TAG, "window ${win.id}: claimed by the reloaded page (its frame and bar are back)")
+            win.claimed = true
             win.shown = g.visible
             win.geo = g
             place(t, win, g)
@@ -2935,6 +3010,9 @@ class WebWindows(
 
         /** [reconcile] runs at least this often while there are windows (task changes run it sooner). */
         private const val HEARTBEAT_MS = 2000L
+
+        /** RL1: a window the page hasn't claimed this long after a page load is hidden ([pageStarted]). */
+        private const val CLAIM_MS = 3000L
 
         /** IR1: a full-screen Linux window the page lists as a plain window this long is stale (no full-screen touches). */
         private const val STALE_FULL_MS = 500L

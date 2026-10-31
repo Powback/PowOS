@@ -95,7 +95,7 @@ internal class FrameSync(
         val page = pageEpochMs - (System.currentTimeMillis() - nowMs)
         ui.post {
             Trace.endAsyncSection("$name f$id", cookie)
-            if (id <= applied) return@post
+            if (id <= applied) return@post staleOnce(id)
             applied = id
             lag[(draws - at).coerceIn(0, 3).toInt()]++
             if (!page.isNaN()) countPageLag(page, nowMs)
@@ -169,6 +169,9 @@ internal class FrameSync(
         /** A bound change waits at most this long for its draw (two frames at 60 Hz plus slack). */
         const val MAX_WAIT_MS = 50L
 
+        /** A frame this far behind the applied one is no reordering: [staleOnce] logs it. */
+        private const val STALE_GAP = 30L
+
         /** Draw times kept for [pageLag]. */
         private const val RING = 8
     }
@@ -177,5 +180,15 @@ internal class FrameSync(
     fun reset() {
         received = -1L
         applied = -1L
+        staleSaid = false
+    }
+
+    /** [next] dropped page frame [id] as older than the last applied: said once per page (a missed [reset] shows). */
+    private var staleSaid = false
+
+    private fun staleOnce(id: Long) {
+        if (staleSaid || applied - id < STALE_GAP) return
+        staleSaid = true
+        android.util.Log.w("PowosFrameSync", "$name f$id dropped: f$applied applied already (a page reload without reset?)")
     }
 }

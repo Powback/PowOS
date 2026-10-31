@@ -159,6 +159,8 @@ class ShellBridge(
     fun pageStarted() {
         if (speech.listening) Log.i("speech", "${pageName()}: page reloaded mid-dictation, its dictation cancelled")
         speech.cancel()
+        // RL1: the old page's web windows wait for the new page to claim them (hidden if it doesn't).
+        if (webWindowsMade) webWindows.pageStarted()
     }
     /** The panel's quick settings: what an app may switch, and Android's panels for the rest. */
     private val quick: QuickSettings =
@@ -425,6 +427,10 @@ class ShellBridge(
                     webWindows.also { webWindowsMade = true }.open(app.component, a.getJSONObject(1), a.optInt(2, -1))
                 } ?: -1
             "webwindows.input" -> webWindowsMade && webWindows.input(a.getInt(0), a.getString(1), WebWindows.BodyTouch(a.getDouble(2), a.getDouble(3), a.optInt(4, 0)))
+            // RL1: a (re)loaded page's window list rebuilt from the host's live windows.
+            "webwindows.list" ->
+                if (!webWindowsMade) JSONArray()
+                else webWindows.list { c -> runtime.androidApps.apps.firstOrNull { it.component == c }?.let { "a:${it.key}" to it.label } }
             "webwindows.close" -> webWindowsMade && webWindows.close(a.getInt(0))
             "webwindows.fullScreen" -> webWindowsMade && webWindows.fullScreen(a.getInt(0))
             "webwindows.toWindow" -> webWindowsMade && webWindows.toWindow(a.getInt(0))
