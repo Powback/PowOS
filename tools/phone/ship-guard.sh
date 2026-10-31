@@ -22,7 +22,7 @@ snapshot)
   [ -n "$p" ] || { echo "ship-guard: no installed $PKG (pm path)" >&2; exit 1; }
   "$A" exec-out "su -c 'cat $p'" > "$D/prev.apk" 2>/dev/null
   unzip -l "$D/prev.apk" >/dev/null 2>&1 || { echo "ship-guard: couldn't pull the installed APK ($p)" >&2; exit 1; }
-  "$A" exec-out "su -c 'cd $F && tar -cf - shell shell-commits.txt shell-push.json 2>/dev/null'" > "$D/overrides.tar" 2>/dev/null
+  "$A" exec-out "su -c 'cd $F && tar -cf - shell shell-commits.txt shell-push.json shell-layer.txt 2>/dev/null'" > "$D/overrides.tar" 2>/dev/null
   tar -tf "$D/overrides.tar" >/dev/null 2>&1 || { echo "ship-guard: couldn't read the app's overrides" >&2; exit 1; }
   cp "$HOME/.cache/powos-installed-commit" "$D/commit" 2>/dev/null || : > "$D/commit"
   echo "ship-guard: snapshot $D ($(du -h "$D/prev.apk" | cut -f1) APK, $(tar -tf "$D/overrides.tar" | grep -c '^shell/.*[^/]$') overrides)" ;;
@@ -66,7 +66,7 @@ restore|restore-overrides)
   D=${2:?dir}
   [ -s "$D/prev.apk" ] && [ -f "$D/overrides.tar" ] || { echo "ship-guard: no snapshot in $D" >&2; exit 1; }
   if [ "$1" = restore ]; then
-    "$A" shell "su -c 'cd $F && mkdir -p shell && echo > shell/.pushing && find shell -mindepth 1 -maxdepth 1 ! -name .pushing -exec rm -rf {} + ; rm -rf shell-commits.txt shell-push.json shell-prev; rm -f shell/.pushing'" ||
+    "$A" shell "su -c 'cd $F && mkdir -p shell && echo > shell/.pushing && find shell -mindepth 1 -maxdepth 1 ! -name .pushing -exec rm -rf {} + ; rm -rf shell-commits.txt shell-push.json shell-layer.txt shell-prev; rm -f shell/.pushing'" ||
       echo "ship-guard: clearing the overrides before the reinstall failed - reinstalling anyway" >&2
     "$A" install -r -d "$D/prev.apk" || { echo "ship-guard: reinstalling the previous APK failed" >&2; exit 1; }
     # The re-base copy (powos-idle-sysupdate.sh reinstalls it) must be the APK that's installed again.
@@ -75,7 +75,7 @@ restore|restore-overrides)
   "$A" push "$D/overrides.tar" /data/local/tmp/powos-ship-restore.tar >/dev/null || { echo "ship-guard: pushing the old overrides failed" >&2; exit 1; }
   # As one change, between files/shell/.pushing written and removed (the shell reloads once, on the whole set);
   # owned by the app again (root wrote them).
-  "$A" shell "su -c 'cd $F && u=\$(ls -nd .. | awk \"{print \\\$3\\\":\\\"\\\$4}\") && mkdir -p shell && echo > shell/.pushing && find shell -mindepth 1 -maxdepth 1 ! -name .pushing -exec rm -rf {} + ; rm -rf shell-commits.txt shell-push.json shell-prev; tar -xf /data/local/tmp/powos-ship-restore.tar && chown -R \$u shell \$(ls shell-commits.txt shell-push.json 2>/dev/null); rc=\$?; rm -f shell/.pushing /data/local/tmp/powos-ship-restore.tar; exit \$rc'" ||
+  "$A" shell "su -c 'cd $F && u=\$(ls -nd .. | awk \"{print \\\$3\\\":\\\"\\\$4}\") && mkdir -p shell && echo > shell/.pushing && find shell -mindepth 1 -maxdepth 1 ! -name .pushing -exec rm -rf {} + ; rm -rf shell-commits.txt shell-push.json shell-layer.txt shell-prev; tar -xf /data/local/tmp/powos-ship-restore.tar && chown -R \$u shell \$(ls shell-commits.txt shell-push.json shell-layer.txt 2>/dev/null); rc=\$?; rm -f shell/.pushing /data/local/tmp/powos-ship-restore.tar; exit \$rc'" ||
     { echo "ship-guard: restoring the old overrides failed" >&2; exit 1; }
   [ "$1" = restore-overrides ] && { echo "ship-guard: restored the $(tar -tf "$D/overrides.tar" | grep -c '^shell/.*[^/]$') overrides"; exit 0; }
   [ -s "$D/commit" ] && cp "$D/commit" "$HOME/.cache/powos-installed-commit"

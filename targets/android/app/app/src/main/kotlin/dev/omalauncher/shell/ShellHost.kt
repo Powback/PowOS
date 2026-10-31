@@ -386,6 +386,21 @@ class ShellHost(
             super.onPageStarted(view, url, favicon)
             bootStarted()
             bridge.pageStarted()
+            markShellCommit(view)
+        }
+
+        override fun onPageFinished(
+            view: WebView,
+            url: String?,
+        ) {
+            super.onPageFinished(view, url)
+            markShellCommit(view)
+        }
+
+        /** window.__powosShellCommit: the commit this page's shell is served from (ShellSource), read by ship.sh. */
+        private fun markShellCommit(view: WebView) {
+            val c = ShellSource.servedCommit(context).filter { it.isLetterOrDigit() }
+            view.evaluateJavascript("window.__powosShellCommit='$c'", null)
         }
 
         /**
@@ -409,9 +424,9 @@ class ShellHost(
         return WebResourceResponse(mime(name), "utf-8", file.inputStream()).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
     }
 
-    /** The override folder's file, else the shipped one. */
+    /** The override folder's file while that layer is the newer shell ([ShellSource]), else the APK's own. */
     private fun open(path: String): InputStream? {
-        File(overrides, path).takeIf { it.isFile }?.let { return it.inputStream() }
+        if (ShellSource.shippedWins(context)) File(overrides, path).takeIf { it.isFile }?.let { return it.inputStream() }
         return runCatching { context.assets.open("shell/$path") }.getOrNull()
     }
 
@@ -517,6 +532,76 @@ class ShellHost(
 
         /** A PowOS app's id (powos-app.json; the registry allows the same). */
         private val APP_ID = Regex("[a-z0-9.-]{1,64}")
+    }
+}
+
+/**
+ * Which shell a page serves: the APK's own (assets/shell, stamped at build time by targets/android/build-app.sh:
+ * shell/shell-build.txt) or the shipped layer (files/shell, stamped by each shell/push.sh: files/shell-layer.txt) -
+ * whichever is NEWER by its commit's time, never "the APK wins" or "the layer wins". A stamp is "<commit unix time>
+ * <commit sha>" (git order can't be checked on the phone; the commit time is monotonic along origin's first-parent
+ * line). 2026-10-31 15:50: an install reset the layer and the older running APK showed its own shell (the search bar
+ * gone) until the next APK; an APK older than the shipped layer must not hide it, a newer one must not be hidden by it.
+ * No layer stamp (a push from before stamps, or a hand push): the layer wins, as before. Read again when the layer's
+ * stamp changes (a push), logged once per decision.
+ */
+internal object ShellSource {
+    private const val TAG = "PowosShellHost"
+    private const val APK_STAMP = "shell/shell-build.txt"
+    const val LAYER_STAMP = "shell-layer.txt"
+
+    private data class Stamp(val time: Long, val commit: String)
+
+    private var apk: Stamp? = null
+    private var apkRead = false
+    private var layerMtime = -1L
+    private var layer: Stamp? = null
+    private var logged: String? = null
+
+    private fun parse(text: String?): Stamp? {
+        val p = text?.trim()?.split(Regex("\\s+")) ?: return null
+        val t = p.getOrNull(0)?.toLongOrNull() ?: return null
+        return Stamp(t, p.getOrNull(1).orEmpty())
+    }
+
+    private fun readApk(context: Context) {
+        if (apkRead) return
+        apk = parse(runCatching { context.assets.open(APK_STAMP).bufferedReader().use { it.readText() } }.getOrNull())
+        apkRead = true
+    }
+
+    private fun readLayer(context: Context) {
+        val f = File(context.filesDir, LAYER_STAMP)
+        val m = if (f.isFile) f.lastModified() else 0L
+        if (m == layerMtime) return
+        layerMtime = m
+        layer = if (m == 0L) null else parse(runCatching { f.readText() }.getOrNull())
+    }
+
+    private fun label(s: Stamp?) = s?.commit?.take(9) ?: "unstamped"
+
+    /** The shipped layer (files/shell) serves its files: it's at least as new as the APK's shell, or unstamped. */
+    @Synchronized
+    fun shippedWins(context: Context): Boolean {
+        readApk(context)
+        readLayer(context)
+        val a = apk
+        val l = layer
+        val shipped = a == null || l == null || l.time >= a.time
+        val line = if (shipped) "serving shipped shell ${label(l)} (other: ${label(a)})" else "serving apk shell ${label(a)} (other: ${label(l)})"
+        if (line != logged) {
+            logged = line
+            Log.i(TAG, line)
+        }
+        return shipped
+    }
+
+    /** The commit the page is served from, for window.__powosShellCommit (ship.sh's post-install check). */
+    fun servedCommit(context: Context): String {
+        shippedWins(context)
+        val a = apk
+        val l = layer
+        return (if (a == null || l == null || l.time >= a.time) l ?: a else a)?.commit.orEmpty()
     }
 }
 

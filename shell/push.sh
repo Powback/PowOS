@@ -79,6 +79,10 @@ if [ -z "${POWOS_GATE_DONE:-}" ] && ! reset_or_errors "$@" && [ -z "$pregate" ];
     [ -n "$c" ] && POWOS_PUSH_COMMITS="$POWOS_PUSH_COMMITS $f=$c"
   done
   export POWOS_PUSH_COMMITS
+  # The layer's stamp (files/shell-layer.txt, "<commit time> <commit>" of this tree): the app serves the shipped layer
+  # only while it is at least as new as the APK's own shell (ShellHost.kt ShellSource).
+  POWOS_PUSH_LAYER=$(git log -1 --format='%ct %H' HEAD 2>/dev/null || true)
+  export POWOS_PUSH_LAYER
 fi
 # check_newer RECORD FILE...: refuse FILE when the phone's copy came from a commit HEAD doesn't contain.
 check_newer() {
@@ -226,7 +230,7 @@ if [ "${1:-}" = "--vpn" ]; then
     fi
   fi
   exec docker run --rm -i --network container:wireguard -v "$HOME/.android:/root/.android" -v "$PWD:/shell" \
-    -e ANDROID_SERIAL="$addr" -e POWOS_GATE_DONE=1 -e POWOS_PUSH_COMMITS="${POWOS_PUSH_COMMITS:-}" android-app-dev-android-builder:latest \
+    -e ANDROID_SERIAL="$addr" -e POWOS_GATE_DONE=1 -e POWOS_PUSH_COMMITS="${POWOS_PUSH_COMMITS:-}" -e POWOS_PUSH_LAYER="${POWOS_PUSH_LAYER:-}" android-app-dev-android-builder:latest \
     bash -c 'adb connect "$ANDROID_SERIAL" >/dev/null 2>&1; sleep 1; bash /shell/push.sh "$@"' _ "$@"
 fi
 note="" test="" test_to="" silent=""
@@ -277,7 +281,7 @@ if [ "${1:-}" = "--reset" ]; then
     # Its contents, not the folder: the shell watches the folder itself, and a new one would go unwatched. No push
     # left to roll back either. Between .pushing and its removal like a push: HotReload holds the deletions and the
     # pages reload once, on the APK's shell - not per file on a half-removed mix (home failed on one, 2026-10-21).
-    as_app "cd files/shell && echo > .pushing && find . -mindepth 1 -maxdepth 1 ! -name .pushing -exec rm -rf {} + ; rm -f .pushing; rm -rf ../shell-push.json ../shell-prev ../shell-commits.txt"
+    as_app "cd files/shell && echo > .pushing && find . -mindepth 1 -maxdepth 1 ! -name .pushing -exec rm -rf {} + ; rm -f .pushing; rm -rf ../shell-push.json ../shell-prev ../shell-commits.txt ../shell-layer.txt"
   else
     m=""; for f in "$@"; do m="$m files/shell/$f"; done
     as_app "echo > files/shell/.pushing; rm -f$m; rm -f files/shell/.pushing"
@@ -313,6 +317,8 @@ files_json=$(printf '"%s",' "$@"); files_json="[${files_json%,}]"
 json_note=$(printf '%s' "$note" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g' | cut -c1-300)
 manifest=$(printf '{"at":%s,"files":%s,"note":"%s","from":"%s","test":%s,"testTo":"%s","silent":%s}' "$(date +%s)" "$files_json" "$json_note" "$(hostname -s 2>/dev/null || echo mac)" "$([ -n "$test" ] && echo true || echo false)" "$test_to" "$([ -n "$silent" ] && echo true || echo false)" | base64 | tr -d '\n')
 as_app "rm -rf files/shell-prev && echo $manifest | base64 -d > files/shell-push.json"
+# Only a push whose tree is known: a test/ push leaves the layer's stamp as it is.
+case "${POWOS_PUSH_LAYER:-}" in [0-9]*\ [0-9a-f]*) only_test "$@" || as_app "echo '$POWOS_PUSH_LAYER' > files/shell-layer.txt" ;; esac
 # Atomic: every file staged on the phone first (one adb push of a tar, unpacked into files/shell-staging - the same
 # filesystem as files/shell), then all of them renamed into files/shell in one call, between files/shell/.pushing
 # written (echo, a CLOSE_WRITE - touch only opens it read-only) and removed. A page reloads once, on the whole push:

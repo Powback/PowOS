@@ -392,6 +392,31 @@ run)
   # pending_apk SHA: APK inputs changed up to it and aren't installed yet - its request is done once the APK is in.
   # own_apk SHA: its own commit changed them. A shell-only commit's note goes out with the shell push (it's visible
   # then), even while someone else's Kotlin below it waits for the APK; `noted=1` keeps the APK from repeating it.
+  # served_shell: the commit the phone's home page is actually served from (ShellHost.kt ShellSource ->
+  # window.__powosShellCommit: the APK's own shell or the shipped layer, whichever is newer), full sha; empty when it
+  # can't be read (no phone, an APK from before the stamps) - then the records are all there is. Why (2026-10-31
+  # 15:50): the service believed its "live" record while the phone showed an older shell (the search bar "reverted").
+  # Off in tests (SHIP_DIR) unless SHIP_SERVED_CMD stands in for the read.
+  served_shell() { local o c
+    if [ -n "${SHIP_SERVED_CMD:-}" ]; then o=$($SHIP_SERVED_CMD 2>/dev/null) || true
+    else [ -z "${SHIP_DIR:-}" ] || return 0
+      o=$(CDP_TIMEOUT_S=15 "$SR/tools/phone/cdp.sh" eval home 'window.__powosShellCommit || ""' 2>/dev/null) || true; fi
+    c=$(echo "$o" | grep -oE '[0-9a-f]{40}' | head -1)
+    [ -n "$c" ] && git cat-file -e "$c^{commit}" 2>/dev/null && echo "$c"; }
+  # shell_check WHAT TIP: after an install, the shell the phone renders must contain the latest shipped shell (the
+  # "live" record before the install, $1 here: LIVE). Older = SHELL BEHIND, marked as window_gate marks a FAIL (the
+  # APK failed, shipped.log, a mail) and the newer shell re-applied at once by a silent request. Returns 1 on a FAIL.
+  shell_check() { local want=$1 a=$2 s r
+    [ -n "$want" ] || return 0
+    s=$(served_shell); [ -n "$s" ] || { echo "$(date +%T) ${a:0:9}: the phone's served shell commit couldn't be read - not judged"; return 0; }
+    git merge-base --is-ancestor "$want" "$s" 2>/dev/null && { echo "$(date '+%F %T') ${a:0:9} apk shell-check PASS (serves ${s:0:9}, live ${want:0:9})" >> "$Q/shipped.log"; return 0; }
+    echo "$(date '+%F %T') ${a:0:9} apk SHELL BEHIND - the phone serves ${s:0:9}, older than the shipped ${want:0:9}" >> "$Q/shipped.log"
+    echo "$(date +%T) ${a:0:9}: SHELL BEHIND after the install (serves ${s:0:9}, shipped ${want:0:9}) - re-applying the newer shell"
+    echo "$s" > "$Q/live"
+    r=$Q/$(date +%Y%m%d-%H%M%S)-reapply-shell-$$.req
+    printf 'sha=%q\nnote=\nsilent=1\nwho=ship-apk-reapply\nat=%s\n' "$want" "$(date +%s)" > "$r.tmp" && mv "$r.tmp" "$r"
+    mail "ship ${a:0:9} (apk) FAILED the shell check: the phone renders shell ${s:0:9}, older than the shipped ${want:0:9} - re-applying it now; log $Q/runner.log on the Mac"
+    return 1; }
   pending_apk() { [ -z "$inst" ] || { ! git merge-base --is-ancestor "$1" "$inst" 2>/dev/null && [ -n "$(apk_inputs "$inst" "$1")" ]; }; }
   own_apk() { [ -n "$(apk_inputs "$1~1" "$1")" ]; }
   # coupled BASE TIP: the commits in BASE..TIP (not installed yet) that changed APK inputs AND shell files together -
@@ -448,6 +473,8 @@ run)
         # The device window check BEFORE its requests are done (the build it replaced: ship-apk's snapshot of the
         # previous install, ship-guard.sh snapshot DIR/commit): WINDOWS BROKEN keeps them and marks the APK failed.
         wg=0; window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk || wg=1
+        # What the phone RENDERS, not the record: older than the shipped shell = the APK failed, the shell re-applied.
+        [ -n "$live" ] && ! shell_check "$live" "$A" && wg=1
         if [ $wg = 0 ]; then rm -f "$Q/failed-apk"
         else echo "$A" > "$Q/failed-apk"; echo "$(date +%T) ${A:0:9}: APK installed but WINDOWS BROKEN - its requests kept, waiting for a new origin commit"; fi
         # A shell held for this APK came with its install (ship-apk pushes origin's tip shell after it).
@@ -527,6 +554,15 @@ run)
       base=$inst
       [ -n "$live" ] && [ -n "$inst" ] && git merge-base --is-ancestor "$inst" "$live" 2>/dev/null && base=$live
       d=; [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null && d=$(delta "$base" "$T")
+      # "Nothing differs" only against what the phone SERVES (served_shell), never the record alone: a record ahead of
+      # the rendered shell (an install left an older one) diffs from the rendered commit instead.
+      if [ -z "$d" ] && [ -n "$base" ]; then
+        sv=$(served_shell)
+        if [ -n "$sv" ] && [ "$sv" != "$base" ] && ! git merge-base --is-ancestor "$T" "$sv" 2>/dev/null; then
+          echo "$(date +%T) ${T:0:9}: the phone serves ${sv:0:9}, not the recorded ${base:0:9} - shipping the difference from what it serves"
+          base=$sv; d=$(delta "$base" "$T")
+        fi
+      fi
       add=$(echo "$d" | sed -n 's/^+//p'); gone=$(echo "$d" | sed -n 's/^-//p')
       # The shell HOLD: this tip has APK inputs not installed yet, and some of them came in the same commits as
       # shell changes (coupled, above) - that shell needs its APK, so it goes WITH it: the APK install (ship-apk.sh)
