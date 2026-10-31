@@ -17,6 +17,15 @@ description: Use to reach, inspect, ship to, verify, or measure perf on the PowO
   (budget ~3% of one core idle on home, screen on; 0 frames/paints/rAF at rest).
 - Ship/land: `tools/agents/land.sh "msg" -- <paths> [--ship "note"] [--queue <check args>]` then END YOUR TURN.
   Never ship-apk/push/queue-wait yourself.
+- Web windows on the glass: `tools/phone/verify/window-render.sh` (exit 0 PASS / 1 FAIL / 2 SKIP: user active, locked,
+  folded, the test app already open). Waits for a free unfolded phone, opens Calculator through webwindows.tsx
+  `openWindow` (the dock's path), screencaps the `.webwindow-body` rect: PASS needs >=35% of it to differ from the same
+  rect before the open (an empty hole shows the page under it), no flat fill (dominant colour <97%, edges >=0.3%), and
+  a tap dispatched on the body (Body's handler -> `webwindows.input` -> helper) to change the app's pixels (>=0.1%, >3x
+  noise). Closes only its own window. Shots + log in `$WR_OUT/<stamp>/`. The ship service runs it by itself after any
+  shell/APK ship touching `webwindows*`, `WebWindows*.kt`, `WebWindowLaunch.kt`, `FreeformTasks.kt`, `SystemFloat.kt`,
+  `home.tsx`, `shell.css` (ship.sh `window_gate`): a FAIL = "WINDOWS BROKEN" in `ship.sh status`, the ship marked failed,
+  the coder mailed - fix forward, no rollback.
 - Evidence off PowOS's root: `tools/phone/pull-root.sh <path-under-/data/powos/root> <mac-dir>` (plain `adb.sh pull` there is Permission denied; it copies via `su cp` to /data/local/tmp first).
 - Friction: `tools/agents/friction add --area phone --kind <refused|broken-tool|flaky-check|unclear-rule|slow> "<title>" --repro "<cmd>"`.
 
