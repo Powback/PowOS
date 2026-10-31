@@ -428,6 +428,9 @@ const SCENES = [
   ["home-dots-right", "home", "S.dockPlacement.value = 'right'; await sleep(300);", "wallpaper"],
   ["home-dots-left", "home", "S.dockPlacement.value = 'left'; await sleep(300);", "wallpaper"],
   ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
+  // PowOS AI's panel in the launcher with home's dock at the side (unfolded desktop docks left): its pill on screen.
+  ["pull-ai-left", "pull", "S.dockPlacement.value = 'left'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(300);", "blurred"],
+  ["pull-ai-right", "pull", "S.dockPlacement.value = 'right'; await sleep(100); E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true }); await sleep(300);", "blurred"],
   // The launcher opened for apps after PowOS AI's pull (dev/dock-check.js launcherDockOpens): the dock mounts as the drag
   // starts, after the drag's followers were taken (gesture.ts follow) - it stayed at --p 0, invisible (the user,
   // 2026-10-30: "the dock is still hiding in the launcher in unfolded mode"). Right and bottom, with and without the

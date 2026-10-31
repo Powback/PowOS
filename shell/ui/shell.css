@@ -1588,8 +1588,10 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 /* Narrow too: PowOS AI in the launcher never fades at its foot (the user, 2026-10-29: "remove the bottom cutoff fade"); its
    content runs to the window's edge and scrolls. The drawer's own apps keep the 12 px fade. */
 .home > .stage > .launcher-clip:has(.ai-panel) { mask-image: none; }
-/* Wide home's one-row foot (.home.wide): the stage already ends at the row's top. */
-.home.wide:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * var(--strip-height)); }
+/* Wide home's one-row foot (.home.wide, --wide-foot): the stage already ends at the row's top. The row is the dock's
+   height with the dock at the bottom but only the pill's 48 px with a side dock: reaching down by the dock's height there
+   ran the panel's pill past the screen's foot (the user, 2026-10-31: "I can't see the bottom of the search bar"). */
+.home.wide:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip { bottom: calc(-1 * var(--wide-foot)); }
 .pull-screen:has(.ai-panel.wide) > .stage > .launcher-clip { bottom: -48px; }
 .home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip .launcher-inner { padding-bottom: 0; }
 .ai-view.wide > .ai-side { grid-column: 1; grid-row: 1 / 4; margin-bottom: var(--ai-foot); }
@@ -2668,7 +2670,9 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
   --pill-mid: calc((var(--strip-height) - 44px) / 2);
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--wide-pill) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) var(--strip-height);
+  /* The foot row's height: the dock's (side docks: the pill's, below). The AI panel's window reaches down over it. */
+  --wide-foot: var(--strip-height);
+  grid-template-rows: minmax(0, 1fr) var(--wide-foot);
   column-gap: 8px;
 }
 .home.wide > .stage { grid-area: 1 / 1 / 2 / -1; }
@@ -2996,7 +3000,7 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .home:is(.dock-left, .dock-right) > .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
 .home.wide:is(.dock-left, .dock-right) > .bar { width: 100%; }
 .home.wide:is(.dock-left, .dock-right) > .bar .bar-pill { bottom: 2px; }
-.home.wide:is(.dock-left, .dock-right) { grid-template-rows: minmax(0, 1fr) 48px; }
+.home.wide:is(.dock-left, .dock-right) { --wide-foot: 48px; }
 .home:is(.dock-left, .dock-right).open > .dock:not(.dock-tray) { pointer-events: none; }
 /* Over an app (pull.tsx) the launcher's dock sits where home's is (state.ts dockPosition, the same setting as .home's
    dock-*): a side column held in place at its edge, the drawer clear of it; bottom stays under the pill (the user,
