@@ -3520,6 +3520,135 @@ function DOCK_HELPERS() {
   return [];
 }
 
+/**
+ * In the page: WT1-WT3, tabs (the user, 10-31 01:31: "grab the title bar of Dolphin and drag it into the title bar of
+ * Chrome, and then they can share a title bar and they can tap between them"). Helpers for [webWindowTabsCheck].
+ */
+function TAB_HELPERS() {
+  const frame = (id) => document.querySelector(`.webwindow[data-wwid="${id}"]`);
+  const pe = (el, type, [x, y]) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 84, isPrimary: true, clientX: x, clientY: y }));
+  const mid = (r) => [r.left + r.width / 2, r.top + r.height / 2];
+  const settle = async () => (await new Promise((r) => setTimeout(r, 300)), await window.__gw.settled());
+  window.__tabg = {
+    frame,
+    /** Press [el] at [from], move in 8 steps to [to], let go there unless [hold]. */
+    async drag(el, from, to, hold) {
+      pe(el, "pointerdown", from);
+      for (let k = 1; k <= 8; k++) pe(el, "pointermove", [from[0] + ((to[0] - from[0]) * k) / 8, from[1] + ((to[1] - from[1]) * k) / 8]);
+      await settle();
+      if (!hold) (pe(el, "pointerup", to), await settle());
+    },
+    /** Window [id]'s bar (its free end) dragged onto window [onto]'s bar. */
+    async barOnto(id, onto, hold) {
+      const b = frame(id).querySelector(".webwindow-title").getBoundingClientRect();
+      const t = frame(onto).querySelector(".webwindow-title").getBoundingClientRect();
+      this.at = [t.left + t.width * 0.4, t.top + t.height / 2];
+      await this.drag(frame(id).querySelector(".webwindow-title"), [b.left + 60, b.top + b.height / 2], this.at, hold);
+    },
+    async let(id) {
+      pe(frame(id).querySelector(".webwindow-title"), "pointerup", this.at);
+      await settle();
+    },
+    tab: (shown, id) => frame(shown)?.querySelector(`.ww-tab[data-tab="${id}"]`),
+    async tap(shown, id) {
+      const el = this.tab(shown, id);
+      const at = mid(el.getBoundingClientRect());
+      pe(el, "pointerdown", at);
+      pe(el, "pointerup", at);
+      await settle();
+    },
+    async tabOut(shown, id) {
+      const el = this.tab(shown, id);
+      const at = mid(el.getBoundingClientRect());
+      await this.drag(el, at, [at[0] + 40, at[1] + 220]);
+    },
+  };
+  return [];
+}
+
+/** WT1-WT3's judges ([webWindowTabsCheck]). */
+function TAB_JUDGES() {
+  const frame = (id) => document.querySelector(`.webwindow[data-wwid="${id}"]`);
+  const near = (r, b) => r && [r.left - b.left, r.top - b.top, r.width - b.width, r.height - b.height].every((d) => Math.abs(d) <= 3);
+  window.__tabj = {
+    /** While B's bar is held over A's: the tab target A, its bar lit, a ghost tab, a tick since [ticks]. */
+    aimed(W, a, ticks) {
+      const v = W.tabView.value;
+      const fails = v?.target === a ? [] : [`WT1: over the other bar the tab target is ${JSON.stringify(v)}`];
+      if (!frame(a)?.querySelector(".webwindow-title.ww-tab-target")) fails.push("WT1: the target bar isn't lit");
+      if (!frame(a)?.querySelector(".ww-tab.ghost")) fails.push("WT1: no ghost tab on the target bar");
+      if ((window.__hapticsMock?.tick ?? 0) <= ticks) fails.push("WT1: no haptic tick as the tab target showed");
+      return fails;
+    },
+    /** One stack [ids] shown as [shown] at [rect]: one element, the others none. */
+    stacked(W, ids, shown, rect) {
+      const s = W.stacks.value;
+      if (s.length !== 1 || s[0].ids.join() !== ids.join() || s[0].active !== shown) return [`WT2: stacks ${JSON.stringify(s)} (want [${ids}] showing ${shown})`];
+      const fails = ids.filter((id) => id !== shown && frame(id)).map((id) => `WT2: hidden tab ${id} still has an element`);
+      if (!near(frame(shown)?.getBoundingClientRect(), rect)) fails.push("WT2: the shown tab isn't at the stack's frame");
+      return [...fails, ...this.hiddenSent(W, ids.filter((v) => v !== shown))];
+    },
+    /** WT3: hidden tabs [ids] in the host's geometry, not visible (the host hides their layers, sizes kept). */
+    hiddenSent(W, ids) {
+      const geo = W.geometry().split(" ");
+      return ids.flatMap((id) => {
+        const i = geo.indexOf(String(id));
+        return i >= 0 && geo[i + 14] === "0" ? [] : [`WT3: hidden tab ${id} not sent hidden (${i < 0 ? "absent" : "visible"})`];
+      });
+    },
+    /** A 2-tab stack tiles as one tile: with a third window, a 2-split; a tab switch keeps the tile. */
+    async tiles(W, g, page, win) {
+      await g.barOnto(942, 941);
+      W.webWins.value = [...W.webWins.value, win(943, 300, 500)];
+      await window.__gw.settled();
+      W.tileWindows(page, [942, 943]);
+      await window.__gw.settled();
+      const ids = JSON.stringify(W.tilings.value[page]?.ids);
+      const tile = W.tileRects(W.tilings.value[page], W.tileArea())[0];
+      const fails = ids === "[942,943]" ? [] : [`WT2: the stack + one window tile as ${ids} (want [942,943])`];
+      await g.tap(942, 941);
+      const now = JSON.stringify(W.tilings.value[page]?.ids);
+      if (now !== "[941,943]") fails.push(`WT2: a tab switch in a tile left the tiles ${now} (want [941,943])`);
+      const r = frame(941)?.getBoundingClientRect();
+      if (!r || Math.abs(r.left - tile.x) > 3 || Math.abs(r.width - tile.w) > 3) fails.push("WT2: the switched-to tab isn't in the stack's tile");
+      return fails;
+    },
+  };
+  return [];
+}
+
+async function webWindowTabsCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const g = window.__tabg;
+  const j = window.__tabj;
+  const page = S.pages.value[0];
+  const win = (id, x, y) => ({ id, key: `a:gate.tab${id}`, label: `Tab ${id}`, page, x, y, w: 340, h: 260, live: true });
+  try {
+    S.page.value = 0;
+    await window.__gw.settled();
+    W.webWins.value = [win(941, 40, 120), win(942, 460, 300)];
+    await window.__gw.settled();
+    const rect = g.frame(941).getBoundingClientRect();
+    const ticks = window.__hapticsMock?.tick ?? 0;
+    await g.barOnto(942, 941, true);
+    const fails = j.aimed(W, 941, ticks);
+    await g.let(942);
+    const one = j.stacked(W, [941, 942], 942, rect);
+    if (one.length) return [...fails, ...one];
+    await g.tap(942, 941);
+    fails.push(...j.stacked(W, [941, 942], 941, rect));
+    await g.tabOut(941, 942);
+    if (W.stacks.value.length || !g.frame(941) || !g.frame(942)) fails.push(`WT2: a tab dragged out leaves ${JSON.stringify(W.stacks.value)} (want two windows)`);
+    return [...fails, ...(await j.tiles(W, g, page, win))];
+  } finally {
+    W.webWins.value = [];
+    W.tilings.value = {};
+    W.stacks.value = [];
+    W.tabView.value = W.dropView.value = null;
+  }
+}
+
 async function webWindowTileDockCheck() {
   const S = await window.__gw.mod("./state.ts");
   const W = await window.__gw.mod("./ui/webwindows.tsx");
@@ -4496,7 +4625,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

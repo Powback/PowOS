@@ -301,6 +301,17 @@ const DOCK_WIN = (extra) =>
   ` W.webWins.value = [{ id: 2, key: 'a:y', label: 'Files', page: p, x: Math.round(innerWidth * 0.35), y: 200, w: Math.round(innerWidth * 0.45), h: 300, live: true }, { id: 1, key: k, label: 'Docked app', page: p, x: 30, y: 80, w: Math.round(innerWidth * 0.5), h: 380, live: true }];` +
   PAINT + ` await sleep(300); ${extra}`;
 const TILE_SIZES = { unfolded: SIZES.unfolded, "unfolded-land": LAND_SIZES["unfolded-land"] };
+/**
+ * WT1/WT2: two floating windows (Chrome, Dolphin); Dolphin's bar dragged onto Chrome's, held ([up] false: the lit bar and
+ * the ghost tab) or let go (one window, two tabs, Dolphin shown).
+ */
+const TABS = (up) =>
+  `const W = await U('./ui/webwindows.tsx'); const p = S.pages.value[0]; W.webWins.value = [{ id: 1, key: 'a:Chrome', label: 'Chrome', page: p, x: 30, y: 90, w: Math.round(innerWidth * 0.55), h: 420, live: true }, { id: 2, key: 'a:Dolphin', label: 'Dolphin', page: p, x: Math.round(innerWidth * 0.4), y: 380, w: Math.round(innerWidth * 0.5), h: 320, live: true }];` +
+  PAINT + ` await sleep(300); const bar = (id) => document.querySelector('.webwindow[data-wwid="' + id + '"] .webwindow-title'); const b = bar(2).getBoundingClientRect(); const t = bar(1).getBoundingClientRect();` +
+  ` const x0 = b.left + 60, y0 = b.top + b.height / 2, tx = t.left + t.width * 0.45, ty = t.top + t.height / 2;` +
+  ` const ev = (t2, x, y) => bar(2).dispatchEvent(new PointerEvent(t2, { bubbles: true, cancelable: true, pointerId: 7, isPrimary: true, clientX: x, clientY: y }));` +
+  ` ev('pointerdown', x0, y0); for (let k = 1; k <= 8; k++) ev('pointermove', x0 + (tx - x0) * k / 8, y0 + (ty - y0) * k / 8); await sleep(300);` +
+  (up ? ` ev('pointerup', tx, ty); await sleep(400);` : "");
 
 const SCENES = [
   ["chrome-status", "statusbar", "E.emit('chrome.changed', {kind:'status', battery:74, charging:true, network:'wifi', vpn:true, left:44});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
@@ -346,6 +357,11 @@ const SCENES = [
   ["ww-tile-dock-swap", "home", TILES(2) + DOCK_DRAG(1.5, 0.6, false), "wallpaper", undefined, TILE_SIZES],
   ["ww-tile-dock-edge", "home", TILES(2) + DOCK_DRAG(0.5, -1, false), "wallpaper", undefined, TILE_SIZES],
   ["ww-tile-dock-3", "home", TILES(2) + DOCK_DRAG(0.92, 0.6, true), "wallpaper", undefined, TILE_SIZES],
+  // WT1/WT2: tabs - Dolphin's bar held over Chrome's (the lit bar, the ghost tab), let go (one window, two tabs), and the
+  // stack tiled beside a third window.
+  ["ww-tabs-aim", "home", TABS(false), "wallpaper", undefined, TILE_SIZES],
+  ["ww-tabs", "home", TABS(true), "wallpaper", undefined, TILE_SIZES],
+  ["ww-tabs-tiled", "home", TABS(true) + ` W.webWins.value = [...W.webWins.value, { id: 3, key: 'a:Files', label: 'Files', page: p, x: 200, y: 500, w: 320, h: 260, live: true }]; await sleep(100); W.tileWindows(p, [2, 3]); await sleep(400);`, "wallpaper", undefined, TILE_SIZES],
   ["edit", "home", "S.editing.value = true;", "wallpaper"],
   // The side dock unfolded (the user, 2026-10-30: "The search bar turns weird"): edit mode keeps the search bar as it
   // is, the edit bar below it; the dock column starts under the status bar (its battery uncovered).

@@ -14,8 +14,8 @@ import { wideHome } from "../hosts/wide.ts";
 import type { WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
 import { memo } from "./memo.ts";
-import { tick as hapticTick } from "./haptics.ts";
-import { dropAt, dropInto, leaves, splitBox, treeRects, zoneKey as dropKey, type Tree, type Zone } from "./tiledrop.ts";
+import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
+import { dropAt, dropInto, insertAt, leaves, splitBox, tabAt, treeRects, zoneKey as dropKey, type Bar, type Tree, type Zone } from "./tiledrop.ts";
 
 const TITLE = 36;
 const RADIUS = 12;
@@ -195,6 +195,7 @@ function existingWindow(key: string, page: number): number | null {
 
 /** Window [id] to [page], not minimised, on top: its id. */
 function cameHere(id: number, page: number): number {
+  showTab(id);
   update(id, { page, minimised: false });
   raise(id);
   return id;
@@ -301,6 +302,7 @@ export function raise(id: number) {
 }
 
 powos.on("webwindows.closed", (id: number) => {
+  leaveStack(id);
   untile(id, "gone");
   webWins.value = webWins.value.filter((w) => w.id !== id);
 });
@@ -312,6 +314,7 @@ powos.on("webwindows.alive", (ids: number[]) => {
   const alive = new Set(ids);
   for (const w of webWins.value) {
     if (w.id < 0 || w.pending || alive.has(w.id)) continue;
+    leaveStack(w.id);
     untile(w.id, "gone");
     webWins.value = webWins.value.filter((v) => v.id !== w.id);
   }
@@ -324,6 +327,7 @@ export function onWebWindowPage(f: (page: number) => void) {
 
 /** Window [id] shown where it was: not minimised, on top, home on its page. */
 function bringBack(id: number) {
+  showTab(id);
   const w = webWins.value.find((v) => v.id === id);
   if (!w) return;
   update(id, { minimised: false });
@@ -344,7 +348,7 @@ export function dockToggle(key: string): boolean {
   const mine = webWins.value.filter((w) => w.key === key && !w.full);
   if (!mine.length) return false;
   const here = shownPage();
-  const front = webWins.value.filter((w) => w.page === here && !w.minimised && !w.full).at(-1);
+  const front = webWins.value.filter((w) => w.page === here && !w.minimised && !w.full && !hiddenTab(w.id)).at(-1);
   if (front?.key === key) {
     if (mine.length === 1) minimise(front.id);
     else bringBack(mine[0].id);
@@ -469,7 +473,7 @@ function sameAbove(id: number, list: WebWin[]): WebWin[] {
 }
 
 export function WebWindowsOn({ page }: { page: number }) {
-  const here = webWins.value.filter((w) => w.page === page && !w.minimised && !w.full);
+  const here = webWins.value.filter((w) => w.page === page && !w.minimised && !w.full && !hiddenTab(w.id));
   if (!here.length) return null;
   const t = tilings.value[page];
   const o = pageOrigin();
@@ -677,7 +681,7 @@ function relayout(page: number) {
 
 /** Floating windows on [page] other than [skip], topmost first. */
 const floatingOn = (page: number, skip: number[]) =>
-  webWins.value.filter((w) => w.page === page && !w.minimised && !w.full && !skip.includes(w.id)).map((w) => w.id).reverse();
+  webWins.value.filter((w) => w.page === page && !w.minimised && !w.full && !hiddenTab(w.id) && !skip.includes(w.id)).map((w) => w.id).reverse();
 
 /**
  * Window [id] into tile [slot] of its page (the title bar's tile menu, a drag to a screen edge or corner): a half makes
@@ -914,15 +918,45 @@ function fourOf(tree: Tree): Tiling {
 
 const perms = (a: number[]): number[][] => (a.length <= 1 ? [a] : a.flatMap((v, i) => perms([...a.slice(0, i), ...a.slice(i + 1)]).map((p) => [v, ...p])));
 
-/** Window [id]'s bar dragged to (x, y): the drop it would make there, previewed; a haptic tick as the zone changes. */
-function aim(id: number, x: number, y: number) {
+/**
+ * Window [id]'s bar dragged to (x, y): the drop it would make there, previewed; a haptic tick as the target changes.
+ * Another window's bar (floating or tiled: WT1) takes it as a tab; else, [docks] (a floating window's drag), the tiles'
+ * zones (GL1).
+ */
+function aim(id: number, x: number, y: number, docks = true) {
+  const tab = tabTarget(id, x, y);
+  const next = tab || !docks ? null : tileDrop(id, x, y);
+  if (dropKey(next?.zone) + tabKey(tab) === dropKey(dropView.value?.zone) + tabKey(tabView.value)) return;
+  if (next || tab) hapticTick();
+  dropView.value = next;
+  tabView.value = tab;
+}
+
+/** WT1: the tab drop window [id]'s bar makes at (x, y) - another window's bar there - or null. */
+function tabTarget(id: number, x: number, y: number) {
+  const z = tabAt(x, y, barsUnder(id));
+  return z?.kind === "tab" ? { id, target: z.tile, at: z.at } : null;
+}
+
+/** GL1: the tile drop window [id] makes at (x, y) over its page's tiles (a tile's bar is the tab drop's), or null. */
+function tileDrop(id: number, x: number, y: number) {
   const w = webWins.value.find((v) => v.id === id);
   const t = w && tilings.value[w.page];
-  const grid = t && { tiles: tileRects(t, tileArea()), area: boxOf(tileArea()), bar: TITLE };
-  const next = w && grid ? dropAt(x, y, grid, (z) => landing(w.page, id, z)) : null;
-  if (dropKey(next?.zone) === dropKey(dropView.value?.zone)) return;
-  if (next) hapticTick();
-  dropView.value = next;
+  if (!w || !t) return null;
+  const grid = { tiles: tileRects(t, tileArea()), area: boxOf(tileArea()), bar: TITLE };
+  return dropAt(x, y, grid, (z) => (z.kind === "tab" ? null : landing(w.page, id, z)));
+}
+
+/** Let go of window [id]'s bar drag at (x, y): the previewed tab drop or tile drop, else an edge snap. */
+function release(id: number, x: number, y: number) {
+  const drop = dropView.value;
+  const tab = tabView.value;
+  dropView.value = tabView.value = null;
+  if (tab?.id === id) return joinStack(tab);
+  // GL1: over the tiles, the previewed drop; with none (no tiles yet, a full grid), an edge snap as before.
+  if (drop?.id === id) return dock(drop);
+  const slot = snapSlot(x, y);
+  if (slot) tile(id, slot);
 }
 
 /** The previewed drop made: the new tiling, a swapped-out window floating again, the tiles re-flowing ([reflow]). */
@@ -932,6 +966,116 @@ function dock(l: Landing) {
   for (const o of l.out) refloat(o);
   holdAppSizes(l.tiling.ids);
   console.info(`[tiles] window ${l.id} docked: page ${l.page} ${l.tiling.layout} [${l.tiling.ids.join(",")}]`);
+}
+
+// ---- tabs: windows stacked under one bar (WT1-WT3) -------------------------------------------------------------------
+//
+// The user, 10-31 01:30/01:31: "we should be able to like add tabs. So that I can like, group Dolphin and Chrome
+// together." / "grab the title bar of Dolphin and drag it into the title bar of Chrome, and then they can share a title
+// bar and they can tap between them." A stack is windows (Android or Linux alike) sharing one frame: its shown tab is a
+// window like any other (moved, resized, tiled, paged, minimised as one), the others are hidden - not rendered, sent to
+// the host as hidden entries of the same size ([hiddenEntry]) - and keep running. A switch hands the shown tab's frame,
+// tile and z place to the new one ([showTab]). Held in a signal beside [tilings], with the same lifetime.
+
+export interface Stack {
+  /** Its windows, in tab order (2 or more: a stack of one is no stack). */
+  ids: number[];
+  /** The shown tab. */
+  active: number;
+}
+export const stacks = signal<Stack[]>([]);
+/** A drag's tab drop in progress: window [id] (with its stack) onto [target]'s bar, at tab index [at] (-1: the end). */
+export const tabView = signal<{ id: number; target: number; at: number } | null>(null);
+const tabKey = (v: { target: number; at: number } | null | undefined) => (v ? `tab:${v.target}:${v.at}` : "");
+
+export const stackOf = (id: number) => stacks.value.find((s) => s.ids.includes(id));
+/** Window [id] is a stack's hidden tab (not shown, running). */
+export const hiddenTab = (id: number) => {
+  const s = stackOf(id);
+  return !!s && s.active !== id;
+};
+const setStacks = (next: Stack[]) => (stacks.value = next.filter((s) => s.ids.length >= 2));
+
+/** Tab [id] shown: it takes the shown tab's frame, tile and place in the z order; that one is hidden (running). */
+export function showTab(id: number) {
+  const s = stackOf(id);
+  if (!s || s.active === id) return;
+  const from = webWins.value.find((w) => w.id === s.active);
+  const me = webWins.value.find((w) => w.id === id);
+  stacks.value = stacks.value.map((v) => (v === s ? { ...v, active: id } : v));
+  if (!from || !me) return;
+  const rest = webWins.value.filter((w) => w.id !== id);
+  rest.splice(rest.indexOf(from) + 1, 0, me);
+  webWins.value = rest;
+  const p = tiledOn(from.id);
+  if (p != null) tilings.value = { ...tilings.value, [p]: { ...tilings.value[p], ids: tilings.value[p].ids.map((v) => (v === from.id ? id : v)) } };
+  if (tileMenu.value === from.id) tileMenu.value = null;
+  const { page, x, y, w, h, scale, restore, untiled, minimised } = from;
+  update(id, { page, x, y, w, h, scale, restore, untiled, minimised });
+}
+
+/** Window [id] out of its stack (closed, undocked): shown, its neighbour takes its place first. */
+function leaveStack(id: number) {
+  const s = stackOf(id);
+  if (!s) return;
+  const i = s.ids.indexOf(id);
+  if (s.active === id) showTab(s.ids[i + 1] ?? s.ids[i - 1]);
+  setStacks(stacks.value.map((v) => (v.ids.includes(id) ? { ...v, ids: v.ids.filter((t) => t !== id) } : v)));
+}
+
+/** The previewed tab drop made: window [id] (its whole stack, if it has one) into [target]'s tabs at [at], shown. */
+function joinStack(t: { id: number; target: number; at: number }) {
+  const moving = stackOf(t.id)?.ids ?? [t.id];
+  const into = stackOf(t.target);
+  const base = (into?.ids ?? [t.target]).filter((v) => !moving.includes(v));
+  const at = t.at < 0 ? base.length : Math.min(t.at, base.length);
+  const ids = [...base.slice(0, at), ...moving, ...base.slice(at)];
+  setStacks([...stacks.value.filter((v) => v !== into && !v.ids.includes(t.id)), { ids, active: into?.active ?? t.target }]);
+  showTab(t.id);
+  hapticConfirm();
+  console.info(`[tabs] window ${t.id} joined ${t.target}: [${ids.join(",")}]`);
+}
+
+/** Tab [id] dragged out of its stack's bar: a floating window of the stack's size, shown, on top (the drag goes on). */
+function undock(id: number) {
+  const s = stackOf(id);
+  const from = s && webWins.value.find((w) => w.id === s.active);
+  if (!from) return;
+  const size = from.restore ?? from;
+  leaveStack(id);
+  update(id, { page: from.page, w: size.w, h: size.h, scale: from.scale, restore: undefined, untiled: undefined, minimised: false });
+  raise(id);
+  hapticTick();
+}
+
+/** Tab [id] dragged along its bar to [x]: its place among the others' tabs (a tick as it changes). */
+function reorder(id: number, shown: number, x: number) {
+  const s = stackOf(id);
+  if (!s) return;
+  const els = [...document.querySelectorAll<HTMLElement>(`.webwindow[data-wwid="${shown}"] .ww-tab[data-tab]`)].filter((e) => Number(e.dataset.tab) !== id);
+  const others = els.map((e) => Number(e.dataset.tab));
+  const at = insertAt(els.map((e) => boxOfRect(e.getBoundingClientRect())), x);
+  const ids = [...others.slice(0, at), id, ...others.slice(at)];
+  if (ids.join() === s.ids.join()) return;
+  stacks.value = stacks.value.map((v) => (v === s ? { ...v, ids } : v));
+  hapticTick();
+}
+
+const boxOfRect = (r: DOMRect): Box => ({ x: r.left, y: r.top, w: r.width, h: r.height });
+
+/** The other windows on [id]'s page (bottom first): their frames, bars and tabs, viewport px ([tabAt]). */
+function barsUnder(id: number): Bar[] {
+  const own = document.querySelector<HTMLElement>(`.webwindow[data-wwid="${id}"]`);
+  const out: Bar[] = [];
+  for (const el of own?.parentElement?.querySelectorAll<HTMLElement>(":scope > .webwindow[data-wwid]") ?? []) {
+    const wid = Number(el.dataset.wwid);
+    if (wid === id) continue;
+    const bar = el.querySelector(".webwindow-title");
+    const tabs = [...el.querySelectorAll(".ww-tab[data-tab]")];
+    const list = tabs.length ? tabs : [...el.querySelectorAll(".ww-title-label")];
+    out.push({ id: wid, frame: boxOfRect(el.getBoundingClientRect()), bar: bar ? boxOfRect(bar.getBoundingClientRect()) : undefined, tabs: list.map((t) => boxOfRect(t.getBoundingClientRect())) });
+  }
+  return out;
 }
 
 /** How long the windows glide to their new tiles after a drop ("ww-reflow" in shell.css: the same time). */
@@ -1223,8 +1367,30 @@ export const windowFrame = signal(0);
 
 /** "<dpr> <n> <entries...>": every window the page shows, bottom first (DOM order = z-order). */
 export function geometry(): string {
-  const parts = webWins.value.filter((w) => !w.pending).map(entry).filter((e): e is string => e != null);
+  const parts: string[] = [];
+  for (const w of webWins.value) {
+    const e = w.pending || hiddenTab(w.id) ? null : entry(w);
+    if (!e) continue;
+    for (const t of stackOf(w.id)?.ids ?? []) if (t !== w.id) parts.push(hiddenEntry(e, t));
+    parts.push(e);
+  }
   return [devicePixelRatio, parts.length, ...parts].join(" ");
+}
+
+/**
+ * WT3: a stack's hidden tab [id] as its shown tab's [entry] - the same frame, body and app size (so its display keeps
+ * the stack's size and a switch is instant, no relayout) - but not visible: the host hides its layer (WebWindows.place:
+ * "hidden is the layer, never the display's surface"), as for any window off screen, and it composites nothing. Its app
+ * keeps running on its display; never minimised (that is a home gesture: PiP, its task to display 0).
+ */
+function hiddenEntry(entry: string, id: number): string {
+  const f = entry.split(" ");
+  // 0 id, 1-12 frame/body/clip, 13 radius, 14 visible, 15 alpha, 16 scale, 17 maximised, 18-19 merge.
+  f[0] = String(id);
+  f[14] = "0";
+  f[17] = "0";
+  f[18] = f[19] = "-1";
+  return f.join(" ");
 }
 
 /** For the gate and CDP (`__ww.sent`): the last "w.f" lines (sent, or measured with no host), newest last. */
@@ -1355,6 +1521,7 @@ function close(id: number) {
   // A placeholder (id < 0, LW3) is the page's alone.
   if (native.value && powos.webwindows?.close && id >= 0) void powos.webwindows.close(id);
   else {
+    leaveStack(id);
     untile(id, "gone");
     webWins.value = webWins.value.filter((w) => w.id !== id);
   }
@@ -1484,8 +1651,7 @@ function TitleBar({ win }: { win: WebWin }) {
     if (!d) return;
     e.stopPropagation();
     drag.current = null;
-    const drop = dropView.value;
-    dropView.value = null;
+    if (cancelled || !d.moved) dropView.value = tabView.value = null;
     if (cancelled) return;
     if (!d.moved) {
       const now = performance.now();
@@ -1493,21 +1659,19 @@ function TitleBar({ win }: { win: WebWin }) {
       else lastTap.current = now;
       return;
     }
-    // GL1: over the tiles, the previewed drop; with none (no tiles yet, a full grid), an edge snap as before.
-    if (drop?.id === win.id) return dock(drop);
-    const slot = snapSlot(e.clientX, e.clientY);
-    if (slot) tile(win.id, slot);
+    release(win.id, e.clientX, e.clientY);
   };
+  const aimed = tabView.value?.target === win.id ? tabView.value : null;
   return (
     <div
-      class={`webwindow-title ${merged ? "merged" : "tile"}`}
+      class={`webwindow-title ${merged ? "merged" : "tile"}${aimed ? " ww-tab-target" : ""}`}
       style={{ height: `${TITLE}px`, flex: `0 0 ${TITLE}px`, touchAction: "none" }}
       onPointerDown={(e) => {
         e.stopPropagation();
         raise(win.id);
         capture(e);
         drag.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, moved: false, tiled: tiledOn(win.id) != null };
-        oneFinger.set(win.id, () => ((drag.current = null), (dropView.value = null)));
+        oneFinger.set(win.id, () => ((drag.current = null), (dropView.value = tabView.value = null)));
       }}
       onPointerMove={(e) => {
         const d = drag.current;
@@ -1520,21 +1684,126 @@ function TitleBar({ win }: { win: WebWin }) {
         d.moved = true;
         update(win.id, { ...clampPlace(d.x + dx, d.y + dy, win.w), restore: undefined });
         // GL1: a floating window docks; one dragged out of the tiles floats (the tiles fill the area: it would re-dock).
-        if (!d.tiled) aim(win.id, e.clientX, e.clientY);
+        // WT1: either one joins another window's bar as a tab.
+        aim(win.id, e.clientX, e.clientY, !d.tiled);
       }}
       onPointerUp={(e) => end(e, false)}
       onPointerCancel={(e) => end(e, true)}
     >
-      <div class={`ww-title-label ${merged ? "tile" : ""}`}>
-        {iconOf(win.key) && <img class="ww-icon" src={iconOf(win.key)!} alt="" draggable={false} />}
-        <span>{win.label}</span>
-      </div>
+      <BarLabel win={win} aimed={aimed} merged={merged} />
       <div class="ww-spacer" />
       <div class={merged ? "tile ww-controls-glass" : "ww-controls-glass"}>
         <Controls id={win.id} restore={merged} />
       </div>
     </div>
   );
+}
+
+/**
+ * WT2: a stack's bar is its tab strip - each tab its app's icon, name and a close; the shown one lit. A drop aimed at
+ * this bar ([tabView]) lights the bar and shows a ghost tab where it would land, browser-style (also on a window of
+ * one: what the stack would look like).
+ */
+/** The bar's title: its icon and name, or (a stack, or a tab drop aimed here) the tab strip. */
+function BarLabel({ win, aimed, merged }: { win: WebWin; aimed: { id: number; at: number } | null; merged: boolean }) {
+  const stack = stackOf(win.id);
+  if (stack || aimed) return <Tabs win={win} ids={stack?.ids ?? [win.id]} aimed={aimed} merged={merged} />;
+  return (
+    <div class={`ww-title-label ${merged ? "tile" : ""}`}>
+      {iconOf(win.key) && <img class="ww-icon" src={iconOf(win.key)!} alt="" draggable={false} />}
+      <span>{win.label}</span>
+    </div>
+  );
+}
+
+function Tabs({ win, ids, aimed, merged }: { win: WebWin; ids: number[]; aimed: { id: number; at: number } | null; merged: boolean }) {
+  const list = ids.map((id) => webWins.value.find((w) => w.id === id)).filter((w): w is WebWin => !!w);
+  const items = list.map((w) => <Tab key={w.id} w={w} active={w.id === win.id} shown={win.id} />);
+  const ghost = aimed && webWins.value.find((w) => w.id === aimed.id);
+  if (ghost) {
+    items.splice(aimed.at < 0 ? items.length : aimed.at, 0, (
+      <div key="ghost" class="ww-tab ghost">
+        {iconOf(ghost.key) && <img class="ww-icon" src={iconOf(ghost.key)!} alt="" draggable={false} />}
+        <span>{ghost.label}</span>
+      </div>
+    ));
+  }
+  return <div class={`ww-title-label ww-tabs ${merged ? "tile" : ""}`}>{items}</div>;
+}
+
+function Tab({ w, active, shown }: { w: WebWin; active: boolean; shown: number }) {
+  return (
+    <div class={`ww-tab${active ? " active" : ""}`} data-tab={w.id} onPointerDown={(e) => tabPress(e, w.id, shown)}>
+      {iconOf(w.key) && <img class="ww-icon" src={iconOf(w.key)!} alt="" draggable={false} />}
+      <span>{w.label}</span>
+      <button
+        class="ww-tab-close"
+        aria-label={`Close ${w.label}`}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => (e.stopPropagation(), close(w.id))}
+      >
+        <Mark kind="close" />
+      </button>
+    </div>
+  );
+}
+
+let lastTabTap = { id: 0, at: 0 };
+/**
+ * A press on tab [id] of the stack shown as [shown]: a tap shows it (a double tap: full screen, as the bar's), a drag
+ * along the bar reorders it, out of the bar (a bar's height off it, or past its ends) undocks it - then it is a bar drag
+ * (move, tile drop, edge snap, another bar's tabs). Window listeners: the tab's element goes when its stack does.
+ */
+function tabPress(e: PointerEvent, id: number, shown: number) {
+  if (!e.isPrimary) return;
+  e.stopPropagation();
+  raise(shown);
+  const pid = e.pointerId;
+  const bar = (e.currentTarget as HTMLElement).closest(".webwindow-title")!.getBoundingClientRect();
+  const grabX = Math.min(e.clientX - (e.currentTarget as HTMLElement).getBoundingClientRect().left, 120);
+  const start = { x: e.clientX, y: e.clientY };
+  let moved = false;
+  let out = false;
+  const stop = () => {
+    removeEventListener("pointermove", move, true);
+    removeEventListener("pointerup", up, true);
+    removeEventListener("pointercancel", cancel, true);
+    oneFinger.delete(shown);
+  };
+  const cancel = (ev: PointerEvent) => {
+    if (ev.pointerId !== pid) return;
+    stop();
+    dropView.value = tabView.value = null;
+  };
+  const move = (ev: PointerEvent) => {
+    if (ev.pointerId !== pid) return;
+    ev.stopPropagation();
+    if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < SLOP) return;
+    moved = true;
+    const off = Math.abs(ev.clientY - (bar.top + bar.height / 2)) > bar.height || ev.clientX < bar.left - TITLE || ev.clientX > bar.right + TITLE;
+    if (!out && off) (out = true), undock(id);
+    if (!out) return reorder(id, shown, ev.clientX);
+    const w = webWins.value.find((v) => v.id === id);
+    if (!w) return;
+    const o = pageOrigin();
+    update(id, clampPlace(ev.clientX - o.x - grabX, ev.clientY - o.y - TITLE / 2, w.w));
+    aim(id, ev.clientX, ev.clientY);
+  };
+  const up = (ev: PointerEvent) => {
+    if (ev.pointerId !== pid) return;
+    ev.stopPropagation();
+    stop();
+    if (out) return release(id, ev.clientX, ev.clientY);
+    if (moved) return;
+    const now = performance.now();
+    if (lastTabTap.id === id && now - lastTabTap.at < DOUBLE_TAP_MS) return (fullScreen(id), (lastTabTap = { id: 0, at: 0 }));
+    lastTabTap = { id, at: now };
+    showTab(id);
+  };
+  addEventListener("pointermove", move, true);
+  addEventListener("pointerup", up, true);
+  addEventListener("pointercancel", cancel, true);
+  oneFinger.set(shown, () => (stop(), (dropView.value = tabView.value = null)));
 }
 
 const MIN_W = 220;
@@ -1995,7 +2264,7 @@ export function holes(cut: WebWin[], at: { x: number; y: number; s: number }): R
 /** The page's own content (widgets, apps, its glass) masked where its windows are: grid.tsx's .page-under. */
 export function underWindows(page: number): Record<string, string> | undefined {
   return holes(
-    webWins.value.filter((w) => w.page === page && !w.minimised && !w.full),
+    webWins.value.filter((w) => w.page === page && !w.minimised && !w.full && !hiddenTab(w.id)),
     { x: 0, y: 0, s: 1 },
   );
 }
