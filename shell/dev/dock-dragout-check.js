@@ -7,6 +7,9 @@
  *   the ghost on the left half, tasks.split(dragged, front); an app with no task is launched and its task split.
  * - "float" (?mode=pull folded, Chrome in front): to the middle - tasks.float(its task).
  * - "window" (home unfolded, a mock web-windows host, a window open on the page): to the middle - a new .webwindow.
+ * - "place" (home unfolded, two widgets, a window open): let go at the top, bottom, left, right, in a free region and
+ *   over a widget - a web window opens exactly on the last ghost (+-1 px): the free region there (touching no widget)
+ *   or, over a widget, floating centred under the finger; no home drop spot meanwhile.
  * - "home" (home folded, no app in front): onto home's grid - unpinned and placed there as before, no ghost, no split
  *   or float; back onto the dock - neither split nor float.
  */
@@ -41,7 +44,7 @@ async function drag(G, key, from, path) {
   for (const p of path) (window.dispatchEvent(ev("pointermove", p)), await frames(1));
   await sleep(250); // the ghost's 140 ms glide between zones (shell.css .ww-drop)
   const ghost = document.querySelector(".ww-drop.dock-out");
-  const seen = ghost ? { zone: ghost.dataset.zone, rect: ghost.getBoundingClientRect() } : null;
+  const seen = ghost ? { zone: ghost.dataset.zone, place: ghost.dataset.place, rect: ghost.getBoundingClientRect(), spot: !!document.querySelector(".drop-spot") } : null;
   window.dispatchEvent(ev("pointerup", path.at(-1)));
   return seen;
 }
@@ -129,10 +132,63 @@ async function windowCase({ S, G, W, H, powos, calls }, fails, dockAt) {
   if (calls.float.length) fails.push(`unfolded, middle: tasks.float(${calls.float}) instead of a web window`);
 }
 
+/** "place": unfolded, every drop opens its web window exactly on the ghost (WG1, the user 10-31 20:19). */
+async function placeCase(e, fails, dockAt) {
+  const { W } = e;
+  const widgets = await placeSetup(e);
+  const a = W.tileArea();
+  const w1 = widgets[0];
+  const at = { top: [(a.left + a.right) / 2, a.top + 30], bottom: [(a.left + a.right) / 2, a.bottom - 40], left: [a.left + 4, (a.top + a.bottom) / 2], right: [a.right - 4, (a.top + a.bottom) / 2], free: [a.left + (a.right - a.left) * 0.4, a.top + (a.bottom - a.top) * 0.6], widget: [w1.x + w1.w / 2, w1.y + w1.h / 2] };
+  for (const [name, [x, y]] of Object.entries(at)) fails.push(...(await placeDrop(e, widgets, dockAt, { name, x, y })));
+}
+
+/** Unfolded home with two widgets and a window open (the dock is a taskbar); the widgets' rects (viewport px). */
+async function placeSetup({ S, G, W, H, powos }) {
+  H.wideHome.value = true;
+  const page = S.pages.value[S.page.value];
+  const cols = S.home.value.columns;
+  const wid = (k, cell) => ({ key: `widget:gate.dp${k}`, kind: "widget", name: `gate-dp${k}`, page, cell, resizable: true, minSize: [1, 1], size: [cell.w, cell.h] });
+  S.home.value = { ...S.home.value, items: [wid(1, { x: 0, y: 0, w: 2, h: 2 }), wid(2, { x: cols - 2, y: 2, w: 2, h: 2 })] };
+  W.tilings.value = {};
+  W.webWins.value = [{ id: 951, key: "a:gate.open", label: "Open", page, x: 300, y: 500, w: 200, h: 160, live: true }];
+  let next = 700;
+  powos.webwindows = { enabled: async () => true, open: async () => ++next, close: async () => true, input: async () => true, minimise: async () => true, restore: async () => true };
+  await window.__gw.settled();
+  const g = G.geometry.value;
+  return S.home.value.items.map(({ cell: c }) => ({ x: g.left + g.pad + c.x * g.cellW, y: g.top + g.pad + c.y * g.cellH, w: c.w * g.cellW, h: c.h * g.cellH }));
+}
+
+const hit = (a, b) => a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5;
+
+/** The ghost [seen] (at [ghost]) of drop [name]: floating over a widget, a free region on none, no home spot. */
+function ghostFails(seen, ghost, widgets, name) {
+  const fails = [];
+  if (name === "widget" && seen.place !== "float") fails.push(`over a widget: the ghost is ${seen.place}, not floating`);
+  if (seen.place === "region" && widgets.some((w) => hit(ghost, w))) fails.push(`${name}: the free region ghost ${JSON.stringify(ghost)} overlaps a widget`);
+  if (seen.spot) fails.push(`${name}: home's drop spot shows beside the ghost`);
+  return fails;
+}
+
+/** One dock drag-out let go at [d] (x, y): its ghost judged, then the web window it opens against the ghost. */
+async function placeDrop({ G, W }, widgets, dockAt, d) {
+  const key = `a:gate.place.${d.name}`;
+  const seen = await drag(G, key, dockAt, [{ x: innerWidth / 2, y: innerHeight - 200 }, { x: d.x, y: d.y }]);
+  if (!seen) return [`${d.name}: no ghost`];
+  const ghost = { x: seen.rect.left, y: seen.rect.top, w: seen.rect.width, h: seen.rect.height };
+  const fails = ghostFails(seen, ghost, widgets, d.name);
+  if (!(await until(() => W.webWins.value.some((v) => v.key === key)))) return [...fails, `${d.name}: no web window opened`];
+  await window.__gw.frames(2);
+  const o = document.querySelector(".page:not(.away)").getBoundingClientRect();
+  const v = W.webWins.value.find((u) => u.key === key);
+  const got = { x: o.left + v.x, y: o.top + v.y, w: v.w * (v.scale ?? 1), h: v.h * (v.scale ?? 1) };
+  if (["x", "y", "w", "h"].some((k) => Math.abs(got[k] - ghost[k]) > 1)) fails.push(`${d.name}: the window opened at ${JSON.stringify(got)}, not its ghost ${JSON.stringify(ghost)}`);
+  return fails;
+}
+
 export async function dockDragOut(kind) {
   const e = await env();
   e.O.TASK_WAIT.ms = 3000;
   const fails = [];
-  await { split: splitCase, float: floatCase, window: windowCase, home: homeCase }[kind](e, fails, { x: innerWidth / 2, y: innerHeight - 30 });
+  await { split: splitCase, float: floatCase, window: windowCase, home: homeCase, place: placeCase }[kind](e, fails, { x: innerWidth / 2, y: innerHeight - 30 });
   return fails;
 }

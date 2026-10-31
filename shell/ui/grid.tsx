@@ -145,8 +145,8 @@ const own = (i: HomeItem): Cell => (i.resizable ? i.cell! : { ...i.cell!, w: 1, 
  */
 const shown = (i: HomeItem): Cell => groupSpans.value.get(i.key) ?? own(i);
 
-// WG1: a web window dragged on home snaps into the cells around the tiles (webwindows.tsx cellAim): every placed tile's
-// cells, as shown, are taken; where the grid sits on screen.
+// WG1: a web window dragged on home fills the free region around the finger (webwindows.tsx regionAt): every placed
+// tile's cells, as shown, bound it; where the grid sits on screen.
 provideHomeGrid((n) => {
   const g = geometry.peek();
   return { cols: home.value.columns, rows: g.rows, taken: itemsOn(n).map(shown), left: g.left + g.pad, top: g.top + g.pad, cellW: g.cellW, cellH: g.cellH };
@@ -956,7 +956,8 @@ function Preview() {
   if (!c) return null;
   const party = partyAim(c);
   if (party) return <>{[...(party.cells ?? new Map<string, Cell>()).entries()].map(([key, cell]) => <Spot key={key} cell={shownCell(party.party, key, cell)} />)}</>;
-  const target = dockAim.value ? null : aim(c);
+  // Over the dock it goes there; aimed off it as a window (dockout.tsx's ghost) it opens there: no home spot either way.
+  const target = dockAim.value || outAim.value ? null : aim(c);
   const spot = target?.cell ? box(target.cell) : null;
   return spot && <div class="drop-spot" style={{ left: `${spot.left}px`, top: `${spot.top}px`, width: `${spot.width}px`, height: `${spot.height}px` }} />;
 }

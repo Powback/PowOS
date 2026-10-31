@@ -6,8 +6,11 @@
  * - a half of the screen (left / right; top / bottom on a screen taller than wide): split screen, the app on that half
  *   and the app in front on the other (powos.tasks.split, task ids; the app launched first when it has no task yet).
  *   No app in front: it opens full screen.
- * - the middle third: a window - unfolded a PowOS web window (openWebWindow), folded Android's floating window
- *   (powos.tasks.float).
+ * - the middle third: a window - folded Android's floating window (powos.tasks.float).
+ *
+ * Unfolded (web windows on) there are no halves: anywhere off the dock it's a web window, at the free region around the
+ * finger between the widgets, else floating centred under it (webwindows.tsx placeAt) - the ghost is that exact rect
+ * and the window opens on it (the user, 10-31 20:19: top / bottom drops opened Android's split, not where previewed).
  *
  * Let go back over the dock it's the dock's again (dockdrop.ts dropOnDock: reorder, or back where it was). On home with
  * no app in front ([overApps]) none of this after a hold: let go on home's grid it's unpinned and placed there, as before.
@@ -20,11 +23,11 @@ import { byKey, launch, page, pages, pullPage, type Carry } from "../state.ts";
 import { PREFIX } from "../apps/pages.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { aimDock, carriedApp } from "./dockdrop.ts";
-import { openWebWindow, webWins } from "./webwindows.tsx";
+import { openWindowAt, placeAt, webWins, type Place } from "./webwindows.tsx";
 import type { RecentTask } from "../types.ts";
 
 export type OutZone = "first" | "second" | "window";
-interface OutAim { key: string; zone: OutZone; rect: { x: number; y: number; w: number; h: number } }
+interface OutAim { key: string; zone: OutZone; rect: { x: number; y: number; w: number; h: number }; place?: Place }
 
 /** The drop a carried dock app would make where it is now ([DockOutGhost] draws it); null over the dock or not one. */
 export const outAim = signal<OutAim | null>(null);
@@ -36,10 +39,18 @@ export const TASK_WAIT = { ms: 6000 };
 export function aimOut(c: Carry, x: number, y: number): OutAim | null {
   const key = carriedApp(c);
   if (!c.fromDock || !key || !(c.lifted || overApps()) || aimDock(c, x, y)) return null;
+  const place = placeOut(key, x, y);
+  if (place) return { key, zone: "window", rect: place.rect, place };
   const w = window.innerWidth, h = window.innerHeight;
   const at = w >= h ? x / w : y / h;
   const zone: OutZone = at < 1 / 3 ? "first" : at > 2 / 3 ? "second" : "window";
   return { key, zone, rect: zoneRect(zone, w, h) };
+}
+
+/** Unfolded on home (web windows; not over an Android app, whose halves are its split): the web window's place. */
+function placeOut(key: string, x: number, y: number): Place | null {
+  if (!wideHome.value || pullPage || key.startsWith(PREFIX)) return null;
+  return placeAt(pages.value[page.value] ?? 1, x, y);
 }
 
 /**
@@ -62,20 +73,34 @@ function zoneRect(zone: OutZone, w: number, h: number) {
 /** Follows the finger off the dock: the ghost moves between the halves and the middle, a tick for each new one. */
 export function hoverOut(c: Carry, x: number, y: number) {
   const a = aimOut(c, x, y);
-  if (a?.zone !== outAim.value?.zone) {
+  if (outKey(a) !== outKey(outAim.value)) {
     if (a) navigator.vibrate?.(5);
     outAim.value = a;
-  }
+  } else if (a?.place) outAim.value = a; // floating: the ghost follows the finger
+}
+
+/** What a ghost targets: its zone, and unfolded its free region (a floating one counts as one target). */
+function outKey(a: OutAim | null) {
+  const r = a?.place?.kind === "region" ? a.rect : null;
+  return a ? `${a.zone}|${a.place?.kind ?? ""}|${r ? [r.x, r.y, r.w, r.h].map(Math.round).join(",") : ""}` : "";
+}
+
+/** The last ghost shown, or where [c] aims now: the drop lands on what was previewed. */
+function lastAim(c: Carry, x: number, y: number) {
+  const was = outAim.value;
+  const now = aimOut(c, x, y);
+  return was && now && was.key === now.key ? was : now;
 }
 
 /** [c] let go at [x], [y]: true when it was a dock app let go off the dock (it opens there - split or window). */
 export function dropOut(c: Carry, x: number, y: number): boolean {
-  const a = aimOut(c, x, y);
+  const a = lastAim(c, x, y);
   outAim.value = null;
   if (!a) return false;
   navigator.vibrate?.(10);
   // A PowOS app is a page of home's own (no task to split or float): it opens as a tap opens it.
   if (a.key.startsWith(PREFIX)) void launch(a.key);
+  else if (a.place) void openPlaced(a.key, a.place);
   else void (a.zone === "window" ? openWindowed(a.key) : openSplit(a.key, a.zone));
   return true;
 }
@@ -114,12 +139,16 @@ async function openSplit(key: string, zone: "first" | "second") {
   await (zone === "first" ? powos.tasks.split(id, front.id) : powos.tasks.split(front.id, id));
 }
 
-/** [key] as a window: unfolded a web window on this page (where they're on), else Android's floating window. */
+/** [key] as Android's floating window (folded, or an app that can't be a web window). */
 async function openWindowed(key: string) {
-  const label = byKey.value.get(key)?.label ?? key;
-  if (wideHome.value && (await openWebWindow(key, label, pages.value[page.value] ?? 1))) return;
   const id = await taskOf(key);
   if (id != null) await powos.tasks.float(id);
+}
+
+/** Unfolded: [key] as a web window exactly at [p] (the ghost's rect); one that can't be: Android's floating window. */
+async function openPlaced(key: string, p: Place) {
+  const label = byKey.value.get(key)?.label ?? key;
+  if (!(await openWindowAt(key, label, p))) await openWindowed(key);
 }
 
 /** The ghost of where the carried dock app goes ([outAim]): the tiles' drop look (webwindows.tsx DropPreview). */
@@ -129,8 +158,8 @@ export function DockOutGhost() {
   const r = a.rect;
   const style = { position: "fixed", left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px`, zIndex: 999 };
   return (
-    <div class={`ww-drop dock-out ${a.zone}`} data-zone={a.zone} style={style}>
-      <span class="ww-drop-label">{a.zone === "window" ? "Window" : "Split screen"}</span>
+    <div class={`ww-drop dock-out ${a.zone} ${a.place?.kind ?? ""}`} data-zone={a.zone} data-place={a.place?.kind} style={style}>
+      {!a.place && <span class="ww-drop-label">{a.zone === "window" ? "Window" : "Split screen"}</span>}
     </div>
   );
 }
