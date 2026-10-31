@@ -13,6 +13,7 @@ import { batch, effect, signal, untracked } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { AppWindow } from "../types.ts";
 import { byKey, desktopPages, launch, page, pages, windows } from "../state.ts";
+import { wideHome } from "../hosts/wide.ts";
 import { pageDrag } from "./gesture.ts";
 import { dockToggle } from "./webwindows.tsx";
 
@@ -212,7 +213,10 @@ export async function startDesktops() {
  * A PowOS (Linux) app's window floats as its own task too (WindowTasks): the same rule, by its app key (appOf).
  * Linux windows still on the Plasma desktop: HOOK - the same rule once the Plasma backend lists them to the web
  * launcher (planned in docs/DESKTOP-WEB-SHELL.md; Runtime.launch brings a running one to the front meanwhile).
- * No window at all: it launches full screen, folded and unfolded (DB1, the user 2026-10-31 03:00) - never a web window.
+ * No window at all: folded it launches full screen (DB1, the user 2026-10-31 03:00); unfolded it opens straight into a
+ * desktop web window (DW1, the user 10-31 15:57: "Apps should open to desktop window by default when I'm in Desktop
+ * mode"; 15:19 "It still shows full screen immediately and then goes to desktop mode") - no full-screen frame first.
+ * Full screen stays a maximise (or a title-bar double tap) away.
  */
 export async function dockTap(key: string) {
   // Web windows (unfolded, the setting on): the page's own windows, the same taskbar rule (webwindows.tsx dockToggle, TB4).
@@ -230,7 +234,7 @@ export async function dockTap(key: string) {
     console.debug("dockTap", key, front ? "raise" : "launch", front?.id);
   }
   toWindowPage(key);
-  await launch(key, { fullScreen: true });
+  await launch(key, { fullScreen: !wideHome.value });
 }
 
 /**
