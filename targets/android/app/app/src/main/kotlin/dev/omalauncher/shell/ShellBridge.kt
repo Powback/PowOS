@@ -694,6 +694,9 @@ class ShellBridge(
                     .put("label", app.name)
                     .put("icon", icon("l:${app.id}"))
                     .put("kind", "linux")
+                    // Plasma (PLASMA_COMMAND) opens its own Android activity with the whole desktop (Runtime.showDesktop),
+                    // never a KWin toplevel: the page mustn't wait for one (its placeholder said "It opened no window.").
+                    .apply { if (app.exec == dev.omalauncher.linux.PLASMA_COMMAND) put("desktop", true) }
                     .putOpt("categories", app.categories),
             )
         }

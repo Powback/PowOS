@@ -231,6 +231,10 @@ class NavGesture(
         if (!RecentsTransition.enabled(service) || Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) run { Log.i(TAG, "gesture: the recents transition is off"); return }
         // Behind the app: PowOS's web home (the switcher is a layer of it), or the recents activity (the desktop is home).
         val home = Switcher.target(service) ?: run { Log.i(TAG, "gesture: no recents transition - PowOS isn't the home app"); return }
+        // The previous swipe's transition hasn't finished: asking for another now makes WM Shell merge it and finish the
+        // previous one to home - a tap on the bottom strip right after another (the Plasma app's start menu button lies
+        // in the strip) took the app away. This swipe goes the plain way; the previous one still ends where it went.
+        if (RecentsTransition.inFlight()) run { Log.i(TAG, "gesture: the previous recents transition is still under way: the plain way"); return }
         val t = RecentsTransition.start(service, tasks, home, Rect(screen)) ?: return
         // The window heads for its card in home's switcher layer, which follows the window frame by frame.
         t.slot = { Switcher.slot }

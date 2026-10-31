@@ -544,6 +544,17 @@ class RecentsTransition private constructor(
 
         private const val START_TIMEOUT_MS = 700L
 
+        /** The newest transition asked for (main thread only). */
+        private var last: RecentsTransition? = null
+
+        /**
+         * A transition asked for earlier is still WM Shell's (starting, following the finger or settling). A second one
+         * asked for now is merged into it by WM Shell's RecentsTransitionHandler, which then finishes the first one TO
+         * HOME (`RecentsController.finishInner: toHome=true` right after `Transition was merged`): two quick taps on the
+         * bottom strip over an app (the Plasma app's panel and its start menu button sit there) sent the app away.
+         */
+        fun inFlight(): Boolean = last?.let { it.state != State.DONE } == true
+
         /**
          * The settle's spring (1/s², 1/s): critically damped (c = 2 sqrt k), settled in about 280 ms from rest - the
          * drawer's and the shade's settle.
@@ -610,6 +621,7 @@ class RecentsTransition private constructor(
                 } finally {
                     data.recycle()
                 }
+                last = transition
                 transition
             }.onFailure { Log.w(TAG, "can't start the recents transition", it) }.getOrNull()
         }
