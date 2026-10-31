@@ -1864,6 +1864,83 @@ async function aiChatOrderFails(page, size) {
   return tops[0] < tops[1] ? [] : [`${size}: the "Go ahead?" choices (top ${tops[1]}) show above the "Plan" card sent before them (top ${tops[0]})`];
 }
 
+/**
+ * In the page: a turn with four steps and a reply, the steps opened ("2 more"... a tap on their line): the list's radius
+ * and width, the standard radius, the reply bubble's width (the user, 10-31 20:06, unfolded: "This doesn't look right" -
+ * the opened list on a dark ellipse, the folded pill's 999px radius on a tall narrow box).
+ */
+async function aiChatSteps() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const tool = (name) => ({ kind: "tool", name, hint: "", ok: true, text: "", out: "" });
+  S.chat.value = { busy: false, items: [{ kind: "user", text: "do it" }, tool("Bash"), tool("Read"), tool("SendMessage"), tool("Bash"), { kind: "assistant", text: "Done - the change is in." }] };
+  const run = () => [...document.querySelectorAll(".ai-screen .ai-chat-in > .tl")].pop();
+  if (!(await G.until(() => run()?.querySelector(".tl-row"), 3000))) return null;
+  run().querySelector(".tl-row").click();
+  if (!(await G.until(() => run()?.querySelector(".tl-more"), 2000))) return null;
+  await G.frames(2);
+  const el = run(), cs = getComputedStyle(el), box = el.getBoundingClientRect();
+  const probe = document.createElement("div");
+  probe.style.borderRadius = "var(--radius)";
+  el.append(probe);
+  const radius = parseFloat(getComputedStyle(probe).borderTopLeftRadius);
+  probe.remove();
+  const bubble = [...document.querySelectorAll(".ai-screen .ai-chat-in > .msg.assistant")].pop()?.getBoundingClientRect().width ?? 0;
+  const more = el.querySelector(".tl-more").getBoundingClientRect(), row = el.querySelector(".tl-row").getBoundingClientRect();
+  return { r: parseFloat(cs.borderTopLeftRadius) || 0, radius, w: Math.round(box.width), bubble: Math.round(bubble), moreIn: more.left >= box.left - 1 && more.bottom <= box.bottom + 1, aligned: Math.abs(more.left - row.left) <= 2 };
+}
+
+/** The opened steps: radius at most the standard one, as wide as a bubble at least, "fewer" inside and on their edge. */
+async function aiChatStepsFails(page, size) {
+  const got = await page.evaluate(aiChatSteps);
+  await page.screenshot({ path: `/cache/ai-page-${size}-steps.png` });
+  if (!got) return [`${size}: four steps sent in one turn didn't render as one opened list with "fewer"`];
+  const fails = [];
+  if (got.r > got.radius) fails.push(`${size}: the opened steps list has a ${got.r}px radius, over the standard ${got.radius}px (an ellipse)`);
+  if (got.w < got.bubble) fails.push(`${size}: the opened steps list is ${got.w}px wide, narrower than a bubble (${got.bubble}px)`);
+  if (!got.moreIn || !got.aligned) fails.push(`${size}: "fewer" isn't inside the steps list on its rows' edge`);
+  return fails;
+}
+
+/**
+ * In the page: home's dock and bar hidden (as a sheet over them, or a bug, would), then each full-screen sheet opened
+ * over it through its own signal - Settings, Settings › style, edit mode, the launcher in place, the AI page, the shade:
+ * the detector says "" under each, and names the blank once they are all shut.
+ */
+async function homeBlankCovered() {
+  const G = window.__gw;
+  if (!(await G.until(() => window.__powosHomeBlank, 4000))) return ["window.__powosHomeBlank is not installed"];
+  const [S, Sc] = await Promise.all([G.mod("./state.ts"), G.mod("./screens.ts")]);
+  // Headless Chrome's screen is 800x600 whatever the viewport: this phone's screen is the viewport.
+  for (const [k, v] of [["width", innerWidth], ["height", innerHeight]]) Object.defineProperty(screen, k, { value: v, configurable: true });
+  const fails = [];
+  if (window.__powosHomeBlank()) fails.push(`home as drawn reports blank: "${window.__powosHomeBlank()}"`);
+  const gone = document.createElement("style");
+  gone.textContent = ".home .dock, .home .bar { display: none !important; }";
+  document.head.append(gone);
+  await G.frames(2);
+  const sheets = [
+    ["Settings", () => (Sc.screens.value = ["settings"]), () => (Sc.screens.value = [])],
+    ["Settings › style", () => (Sc.screens.value = ["settings", "style"]), () => (Sc.screens.value = [])],
+    ["edit mode", () => (S.editing.value = true), () => (S.editing.value = false)],
+    ["the launcher", () => (S.drawer.value = 1), () => (S.drawer.value = 0)],
+    ["the AI page", () => (S.page.value = -1), () => (S.page.value = 0)],
+    ["the shade", () => (S.notif.value = true), () => (S.notif.value = false)],
+  ];
+  for (const [name, show, shut] of sheets) {
+    show();
+    await G.frames(2);
+    const why = window.__powosHomeBlank();
+    if (why) fails.push(`${name} open over home: reported blank ("${why}")`);
+    shut();
+    await G.frames(2);
+  }
+  const bug = window.__powosHomeBlank();
+  if (!bug) fails.push("home with its dock and bar gone and nothing over it reports not blank");
+  gone.remove();
+  return fails;
+}
+
 /** In the page: the bridge as it was. */
 async function aiChatRestore() {
   const { powos } = await window.__gw.mod("./bridge.ts");
@@ -1960,6 +2037,7 @@ async function aiChatAt(page, size) {
   await page.evaluate(() => document.querySelector(".ai-screen .ai-menu-scrim")?.click());
   fails.push(...(await page.evaluate(aiChatMenu)).map((f) => `${size}: ${f}`));
   fails.push(...(await aiChatOrderFails(page, size)));
+  fails.push(...(await aiChatStepsFails(page, size)));
   await page.evaluate(aiChatRestore);
   return fails;
 }
@@ -6839,6 +6917,15 @@ try {
         }
         return [];
       })));
+  // The blank-home detector (ui/homedrawn.ts) quiet under every full-screen sheet over home (false "home is blank": 10-31
+  // 14:14 the AI page, 20:05 Settings › style), still loud for a home whose dock and bar are gone; the pull window never.
+  if (process.env.SHELL_PAGES !== "0") {
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-blank-covered", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(homeBlankCovered))));
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "home-blank-pull", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      const why = await r.page.evaluate(async () => (await window.__gw.mod("./ui/homedrawn.ts")).homeBlank());
+      return why ? [`the pull window reports home blank: "${why}"`] : [];
+    })));
+  }
   // (ai-still-broken and ai-needs-you-try retired 2026-10-31: Progress no longer lists the board's rows to answer -
   // works / still broken live only on the manager's try messages, which ai-chat checks.)
   // The AI page is one chat: things to try as the manager's message, ⋯ for the rest, older on scroll-up (2026-10-31).

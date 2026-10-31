@@ -1650,7 +1650,7 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-scroll > * { min-width: 0; max-width: 100%; }
 /* On the AI page the chat lies on the wallpaper: the manager's bubbles, its quiet step lines and cards carry the text tint. */
 .ai-screen .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .choice-opt) { background: var(--text-fill); box-shadow: var(--lift); }
-.ai-screen .ai-chat-in > .tl { align-self: flex-start; width: fit-content; max-width: 100%; padding: 0 12px; border-radius: 999px; }
+.ai-screen .ai-chat-in > .tl { align-self: flex-start; width: fit-content; max-width: 100%; padding: 0 12px; border-radius: var(--radius); }
 .ai-screen .ai-chat-in > .msg.note { align-self: flex-start; width: fit-content; padding: 4px 12px; border-radius: 999px; }
 .ai-chat-in > .tl { color: var(--color-muted); }
 /* Images in their own shape, a size a phone chat shows them at. */
@@ -3516,6 +3516,8 @@ html:root .ai-view .ai-chat-in .msg.user {
 html:root .ai-chat-in .msg.user .sent-img img { width: auto; max-width: 100%; max-height: 120px; border-radius: calc(var(--radius) / 2); }
 /* Steps and agents' mail: one quiet line each, no box. */
 html:root .ai-view .ai-chat-in > :is(.tl, .msg.note) { background: none; box-shadow: none; padding-inline: 4px; color: var(--color-muted); }
+/* An opened step list spans the chat like a bubble; "fewer" under its rows, on their edge. */
+html:root .ai-view .ai-chat-in > .tl:has(> .tl-more) { align-self: stretch; width: auto; }
 .ai-chat-in .tl-row { font-size: var(--text-small); }
 .ai-updates { align-self: flex-start; max-width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .ai-updates-head { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 4px; font: inherit; font-size: var(--text-small); color: var(--color-muted); background: none; border: 0; }
@@ -3638,7 +3640,9 @@ html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-n
 .ai-mid > .ai-menu-scrim { position: fixed; inset: 0; z-index: 4; }
 .ai-mid > .ai-menu { position: absolute; z-index: 5; top: 48px; right: 12px; min-width: 220px; display: flex; flex-direction: column; padding: 6px 0; border-radius: var(--radius); }
 /* Inside the pane the chat's bubbles keep their own solid fill (not the page's wallpaper tint twice). */
-html:root .ai-mid .ai-chat-in :is(.msg.assistant, .msg.note, .tl, .present, .choice-opt) { background: var(--ai-bubble); box-shadow: none; }
+/* Not the steps nor a note: those stay plain lines on the chat (".ai-view ... no box" above). With the fill, a step list
+   opened in the pane was a dark ellipse - the folded pill's 999px radius on a tall narrow box (the user, 10-31 20:06). */
+html:root .ai-mid .ai-chat-in :is(.msg.assistant, .present, .choice-opt) { background: var(--ai-bubble); box-shadow: none; }
 /* The context column: Working now, Try this, Needs attention - sections parted by spacing, cards on the pane. */
 .ai-ctx { flex: none; width: clamp(220px, 30%, 340px); display: flex; flex-direction: column; gap: 18px; padding: 14px 12px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
 .ai-ctx-sec { display: flex; flex-direction: column; gap: 6px; }
