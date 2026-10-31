@@ -3,6 +3,8 @@
  * bar, it's just like... An app ... placed in like the middle of the dock"). The dock's centre slot (3 apps | the
  * button | 3 apps; an odd count puts the extra one on the right) is a round face with the prompt glyph the bar shows
  * empty (bar.tsx Pill .prompt) and a small mic badge (a hold dictates).
+ * A side column (unfolded right / left) has it after its pinned apps instead: the separator between them and the recent
+ * ones (the user, 13:31; dockdrop.ts buttonSlot). Unfolded with no choice of its own follows the folded one (state.ts).
  *
  * DS2 (the user, 01:53: "clicking the button The launcher button should open the launcher. and if I hold it It should
  * activate the launcher with the voice button. And then... if I continue holding it, it's push to talk"):

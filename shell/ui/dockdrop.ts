@@ -44,8 +44,12 @@ function overDock(r: DOMRect, x: number, y: number, vertical: boolean) {
   return r.width > 0 && y >= r.top - REACH && x >= r.left - reach && x <= r.right + reach && (!vertical || y <= r.bottom);
 }
 
-/** The search button's index among [cells] dock cells (docksearch.tsx): the middle, an odd extra app on the right. */
-export const buttonSlot = (cells: number) => Math.floor(cells / 2);
+/**
+ * The search button's index among [cells] dock cells (docksearch.tsx): a bottom dock's middle, an odd extra app on the
+ * right; a side column's end - the button is the separator between its pinned apps and its recent ones (the user,
+ * 2026-10-31 13:31), never also mid-column.
+ */
+export const buttonSlot = (cells: number) => (dockPosition.value !== "bottom" ? cells : Math.floor(cells / 2));
 
 /** The app slot (of [n]) for the dock's rendered cell [cell], which counts the search button when it's there. */
 export function slotPast(cell: number, n: number) {

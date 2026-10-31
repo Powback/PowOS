@@ -496,7 +496,8 @@ export function Dock() {
     );
   });
   if (gap >= 0) cells.splice(gap, 0, <div key=" gap" class="app dock-gap" />);
-  // The centre slot: as many apps left of it as right, an odd one more on the right (the user, 01:26: "3 | 3").
+  // The centre slot: as many apps left of it as right, an odd one more on the right (the user, 01:26: "3 | 3"); a side
+  // column's end, right before its recent apps: the separator between the two (buttonSlot).
   if (button) cells.splice(buttonSlot(cells.length), 0, <DockSearchButton key=" search" />);
   const r = aim?.swap && el.current?.getBoundingClientRect();
   return (
@@ -522,9 +523,8 @@ export function Dock() {
               {ownWindows && <DockWindows pinned={dock.value} />}
             </div>
           )}
-          {/* DK2 (the user: "We need a separator between the docking and the recent items"): a side column's pinned
-              group, a short thin line, then its recent ones - never one run of icons. */}
-          {showRecents && vertical && pinnedOnly() && <div class="dock-sep" aria-hidden="true" />}
+          {/* DK2 (the user: "We need a separator between the docking and the recent items"): in a side column the
+              search button, last in the pinned group, is that separator (13:31) - never one run of icons. */}
           {showRecents && <RecentSection held={!!d || !!carried} />}
         </div>
         {paged && (
