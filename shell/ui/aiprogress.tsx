@@ -3,10 +3,12 @@
  * ring with the daily driver's percentage, under it one glass row card per area - its name, a thin bar of what's done of
  * the last 30 days' work and the counts, an amber "N need you" chip (the needs-you colour) - and a tap opens an area in place: its open tasks,
  * one line each, a state dot (working / waiting on you / no check). The parts are exported for the folded status page.
+ * Above the areas, the Needs you card (needsyou.tsx): what really waits on the user, each answered in place.
  */
 import { useState } from "preact/hooks";
 import { boardState } from "../agents.ts";
 import { board, boardSeen, checks, WorkFeed, type WorkRow } from "./aiboard.tsx";
+import { needIds, needsYou, NeedsYouCard } from "./needsyou.tsx";
 
 const MONTH_MS = 30 * 24 * 3_600_000;
 
@@ -44,7 +46,7 @@ const doneAt = (w: WorkRow) => Number(w.done || w.updated || 0);
 const inMonth = (w: WorkRow, now: number) => w.status !== "done" || now - doneAt(w) < MONTH_MS;
 
 /** The board per area: the most waiting on the user first, then the most open. */
-export function areaStats(rows: WorkRow[] = board.value, now = Date.now()): AreaStat[] {
+export function areaStats(rows: WorkRow[] = board.value, now = Date.now(), you: Set<string> = needIds(needsYou(rows))): AreaStat[] {
   const by = new Map<string, AreaStat>();
   for (const w of rows) {
     if (!inMonth(w, now)) continue;
@@ -53,7 +55,7 @@ export function areaStats(rows: WorkRow[] = board.value, now = Date.now()): Area
     a.total++;
     if (w.status === "done") a.done++;
     else a.open.push(w);
-    if (w.status === "waiting") a.you++;
+    if (you.has(w.id)) a.you++;
     by.set(name, a);
   }
   // Those that need the user first, then the most open.
@@ -111,8 +113,8 @@ export const DOTS: [Dot, string][] = [
 const DOT_WORDS = Object.fromEntries(DOTS) as Record<Dot, string>;
 
 /** An open task's true state: waiting on the user, an agent on it, its phone check queued or running, else stalled. */
-export function dotOf(w: WorkRow): Dot {
-  if (w.status === "waiting") return "waiting";
+export function dotOf(w: WorkRow, you: Set<string> = needIds()): Dot {
+  if (you.has(w.id)) return "waiting";
   const s = boardState(w, checks.value);
   return s === "working" ? "working" : s === "awaiting check" ? "check" : "stalled";
 }
@@ -133,10 +135,11 @@ export function DotLegend() {
 
 /** An area's open tasks, up to two lines each. */
 function Tasks({ open }: { open: WorkRow[] }) {
+  const you = needIds();
   return (
     <ul class="aip-tasks">
       {open.map((w) => {
-        const d = dotOf(w);
+        const d = dotOf(w, you);
         return (
           <li key={w.id} class="aip-task">
             <span class={`aip-dot ${d}`} role="img" aria-label={DOT_WORDS[d]} />
@@ -175,12 +178,14 @@ function subLine(stats: AreaStat[]) {
 /** The Progress view: the ring, then every area's card. [shown]: the board's feed runs only then. */
 export function ProgressView({ shown }: { shown: boolean }) {
   const [opened, setOpened] = useState<string | null>(null);
-  const stats = areaStats();
+  const needs = needsYou();
+  const stats = areaStats(board.value, Date.now(), needIds(needs));
   const ring = driverPct(stats);
   return (
     <section class="aip">
       {shown && <WorkFeed />}
       {ring && <ProgressRing pct={ring.pct} label={ring.label} sub={subLine(stats)} />}
+      <NeedsYouCard needs={needs} />
       {stats.length > 0 && <DotLegend />}
       <ul class="aip-areas">
         {stats.map((a) => (

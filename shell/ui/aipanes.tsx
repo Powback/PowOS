@@ -2,7 +2,8 @@
  * The unfolded PowOS AI page's side panes (the user, 2026-10-31 13:29: a three-pane app, "not a stretched chat"): the
  * left nav (the title, Chat / Agents / Progress / Devices with their live counts, the open one marked; a tap swaps the
  * middle pane) and the right context column (Working now: the fleet's working agents, a tap opens one live in the
- * middle; Try this: the newest things-to-try message only; Needs attention: stuck agents). Each a glass pane of its own;
+ * middle; Try this: the board's open asks - needsyou.tsx, the same rows as Progress's Needs you; Needs attention: stuck
+ * agents). Each a glass pane of its own;
  * an empty section isn't drawn. Folded sideways (rail) the nav is icons and the column is gone. powai.tsx lays them out.
  */
 import { useEffect, useState } from "preact/hooks";
@@ -14,7 +15,7 @@ import { AgentsView, Bar, BoardFeed, needsBoard } from "./agents.tsx";
 import { areas, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { WorkFeed } from "./aiboard.tsx";
 import { Feed as UnitsFeed, units } from "./units.tsx";
-import { LatestTry, latestTry } from "./trycard.tsx";
+import { needsYou, TryThis } from "./needsyou.tsx";
 
 /** The agent open in the middle pane's Agents view (null: the list). */
 export const aiAgent = signal<string | null>(null);
@@ -137,18 +138,21 @@ function WorkingNow({ working }: { working: Worker[] }) {
   );
 }
 
-/** The right context column: Working now, Try this (the newest bundle), Needs attention. */
+/**
+ * The right context column: Working now, Try this, Needs attention. Try this reads the board (needsyou.tsx), not the
+ * chat's newest try message: with that answered (or none in the loaded history) it said "nothing to try" while
+ * Progress listed what waits on the user. The board's feed is the nav's (AiNav, beside it whenever this shows).
+ */
 export function AiContext() {
   useAgents();
   const f = fleet();
-  const texts = chat.value.items.flatMap((i) => (i.kind === "assistant" ? [i.text] : []));
-  const hasTry = latestTry(texts) != null;
-  const empty = !f.working.length && !f.attention.length && !hasTry;
+  const needs = needsYou();
+  const empty = !f.working.length && !f.attention.length && !needs.length;
   return (
     <aside class="ai-ctx tile" aria-label="right now">
       <WorkingNow working={f.working} />
-      <Sec title="Try this" when={hasTry}>
-        <LatestTry texts={texts} />
+      <Sec title="Try this" when={needs.length > 0}>
+        <TryThis needs={needs} />
       </Sec>
       <Sec title="Needs attention" when={f.attention.length > 0}>
         {f.attention.slice(0, 6).map((x) => (

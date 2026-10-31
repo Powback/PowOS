@@ -66,19 +66,27 @@ export function sendCantMail(t: Tried, b: Broken) {
   powos.agents.message("manager", mail).catch((e) => (console.warn(`agents.message ${t.id}:`, e), askQueued(mail)));
 }
 
-/** One item of a ```try block: a board task and the plain sentence of what to try (or, [do], what to do). */
-interface TryItem {
+/**
+ * One item of a ```try block: a board task and the plain sentence of what to try (or, [do], what to do). A board row
+ * waiting on the user's answer to a question (needsyou.tsx) is [ask], with the question's [options] when it named some.
+ */
+export interface TryItem {
   id: string;
   line: string;
   do?: boolean;
+  ask?: boolean;
+  options?: string[];
 }
 interface TryBlock {
   title?: string;
   items: TryItem[];
 }
 
-/** How the user answered an item: kept across reloads (the message stays in the history; its answer with it). */
-type Answer = { how: "works" | "broken" | "done" | "cant"; text?: string };
+/**
+ * How the user answered an item: kept across reloads (the message stays in the history; its answer with it). [at]: when
+ * (ms), so a board task asked again after it (its `updated` later) needs the user again (needsyou.tsx).
+ */
+export type Answer = { how: "works" | "broken" | "done" | "cant" | "answered"; text?: string; at?: number };
 const KEY = "powos.ai.tried";
 function load(): Record<string, Answer> {
   try {
@@ -87,10 +95,11 @@ function load(): Record<string, Answer> {
     return {};
   }
 }
-const answers = signal<Record<string, Answer>>(load());
+/** Every answer by task id: the chat's try messages, the wide page's Try this and Progress's Needs you share it. */
+export const answers = signal<Record<string, Answer>>(load());
 function setAnswer(id: string, a: Answer | null) {
   const { [id]: _, ...rest } = answers.value;
-  answers.value = a ? { ...rest, [id]: a } : rest;
+  answers.value = a ? { ...rest, [id]: { ...a, at: Date.now() } } : rest;
   try {
     localStorage.setItem(KEY, JSON.stringify(answers.value));
   } catch {
@@ -102,7 +111,7 @@ function setAnswer(id: string, a: Answer | null) {
  * Where a try line shows: the chat's message or the wide page's "Try this" column (the same item can be in both).
  * The reply line opens only on the one pressed, so the open one is keyed by surface and item.
  */
-type Surface = "chat" | "col";
+type Surface = "chat" | "col" | "board";
 const replyKey = (s: Surface, id: string) => `${s}:${id}`;
 
 /** The reply line open (one at a time, as replyKey), and the one plain line of a save that failed. */
@@ -134,35 +143,84 @@ function doVerdict(it: TryItem, b?: Broken) {
   sendCantMail(taskOf(it), b);
 }
 
-const SAID: Record<Answer["how"], string> = { works: "you said it works", broken: "you said it's still broken", done: "you did it", cant: "you said you can't" };
+/** The manager's mail for the user's answer to a task's question: the task id first, as brokenMail. */
+export const answerMail = (t: Tried, text: string) => `Answer (task ${t.id}): ${t.title}. The user says: "${text}"`;
 
-/** One item: its sentence, then its buttons - or, answered, what the user said. */
-function TryLine({ it, at }: { it: TryItem; at: Surface }) {
+/**
+ * A question answered (an option or their words): to the manager's inbox naming the task, marked at once; put back
+ * with one plain line when it couldn't be sent. An older host (no agents.message): told in the conversation.
+ */
+async function askVerdict(it: TryItem, text: string, at: Surface) {
+  replying.value = null;
+  failed.value = { ...failed.value, [it.id]: "" };
+  setAnswer(it.id, { how: "answered", text });
+  const ok = await powos.agents.message("manager", answerMail(taskOf(it), text)).then(
+    () => true,
+    (e) => (/no such call/.test(String(e)) ? (askQueued(answerMail(taskOf(it), text)), true) : (console.warn(`agents.message ${it.id}:`, e), false)),
+  );
+  if (ok) return clearBroken(it.id);
+  setAnswer(it.id, null);
+  failed.value = { ...failed.value, [it.id]: "couldn't send that - try again in a moment" };
+  replying.value = replyKey(at, it.id);
+}
+
+const SAID: Record<Answer["how"], string> = { works: "you said it works", broken: "you said it's still broken", done: "you did it", cant: "you said you can't", answered: "you answered" };
+
+/** A question's buttons: each of its options, then "answer" opening the reply line for their own words. */
+function AskActs({ it, at, open, toggle }: { it: TryItem; at: Surface; open: boolean; toggle: () => void }) {
+  return (
+    <div class="try-acts">
+      {(it.options ?? []).map((o) => (
+        <button key={o} type="button" class="ai-act" onClick={() => void askVerdict(it, o, at)}>
+          {o}
+        </button>
+      ))}
+      <button type="button" class="ai-act" aria-expanded={open} onClick={toggle}>
+        answer
+      </button>
+    </div>
+  );
+}
+
+/** works / still broken (a thing to do: done / can't / problem); the second opens the reply line. */
+function VerdictActs({ it, open, toggle }: { it: TryItem; at?: Surface; open: boolean; toggle: () => void }) {
+  return (
+    <div class="try-acts">
+      <button type="button" class="ai-act" onClick={() => (it.do ? doVerdict(it) : void tryVerdict(it, true))}>
+        {it.do ? "done" : "works"}
+      </button>
+      <button type="button" class="ai-act" aria-expanded={open} onClick={toggle}>
+        {it.do ? "can't / problem" : "still broken"}
+      </button>
+    </div>
+  );
+}
+
+/** What the user said about an item (answered): the chat card's answered state, also a Needs you row's once answered. */
+export const Said = ({ a }: { a: Answer }) => (
+  <div class="try-said muted">
+    {SAID[a.how]}
+    {a.text ? `: "${a.text}"` : ""}
+  </div>
+);
+
+/** The reply line's words sent: the question's answer, a thing to do's problem, or what's still broken. */
+const sendOf = (it: TryItem, at: Surface) => (b: Broken) =>
+  it.ask ? void askVerdict(it, b.text, at) : it.do ? doVerdict(it, b) : void tryVerdict(it, false, b, at);
+
+/** One item: its sentence, then its buttons - or, answered, what the user said. [bare]: no sentence (its row shows it). */
+export function TryLine({ it, at, bare = false }: { it: TryItem; at: Surface; bare?: boolean }) {
   const a = answers.value[it.id];
   const key = replyKey(at, it.id);
   const open = replying.value === key;
-  const second = it.do ? "can't / problem" : "still broken";
-  const onSend = (b: Broken) => (it.do ? doVerdict(it, b) : void tryVerdict(it, false, b, at));
+  const toggle = () => (replying.value = open ? null : key);
+  const Acts = it.ask ? AskActs : VerdictActs;
   return (
     <div class={`try-item ${a ? "answered" : ""}`}>
-      <div class="try-line">{it.line}</div>
-      {a ? (
-        <div class="try-said muted">
-          {SAID[a.how]}
-          {a.text ? `: "${a.text}"` : ""}
-        </div>
-      ) : (
-        <div class="try-acts">
-          <button type="button" class="ai-act" onClick={() => (it.do ? doVerdict(it) : void tryVerdict(it, true))}>
-            {it.do ? "done" : "works"}
-          </button>
-          <button type="button" class="ai-act" aria-expanded={open} onClick={() => (replying.value = open ? null : key)}>
-            {second}
-          </button>
-        </div>
-      )}
+      {!bare && <div class="try-line">{it.line}</div>}
+      {a ? <Said a={a} /> : <Acts it={it} at={at} open={open} toggle={toggle} />}
       {failed.value[it.id] && <div class="try-said error">{failed.value[it.id]}</div>}
-      {!a && open && <BrokenReply id={it.id} onSend={onSend} onCancel={() => (replying.value = null)} />}
+      {!a && open && <BrokenReply id={it.id} onSend={sendOf(it, at)} onCancel={() => (replying.value = null)} ask={it.ask ? "your answer" : undefined} />}
     </div>
   );
 }
