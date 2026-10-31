@@ -128,6 +128,12 @@ export function settle(...targets: MicTarget[]) {
   const p = pending;
   if (p && targets.includes(p.target)) pending = null;
   if (!pending && speech.value.listening) stopNow();
+  forgetWords();
+}
+
+/** The sent (or cleared) words leave the transcript too: the next mic start never shows them again. */
+function forgetWords() {
+  if (!pending && speech.value.text) speech.value = { ...speech.value, text: "" };
 }
 
 /**
@@ -138,10 +144,11 @@ export function settle(...targets: MicTarget[]) {
  */
 export function drop(...targets: MicTarget[]) {
   const p = pending;
-  if (!p || !targets.includes(p.target)) return;
+  if (!p || !targets.includes(p.target)) return forgetWords();
   pending = null;
   stopNow();
   finished?.end("");
+  forgetWords();
 }
 
 /** [target]'s dictation is under way (or starting). */

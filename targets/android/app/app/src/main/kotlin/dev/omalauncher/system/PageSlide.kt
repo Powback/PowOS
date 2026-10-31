@@ -176,7 +176,7 @@ object PageSlide {
     ): List<Win>? {
         WindowFrames.current ?: return null
         val running = WindowFrames.running.value.associateBy { it.id }
-        return FreeformTasks.list(context).asReversed().mapNotNull { t ->
+        return FreeformTasks.cached(context).asReversed().mapNotNull { t ->
             val rel = rels[t.id] ?: return@mapNotNull null
             val r = running[t.id] ?: return@mapNotNull null
             // A window the user minimised stays in the dock; the page's own ones must be showing.

@@ -42,6 +42,7 @@ export async function joinPages(home, pull) {
 }
 
 const field = (page, form) => page.evaluate((f) => document.querySelector(`${f} textarea`)?.value ?? null, form);
+const transcript = (page) => page.evaluate(async () => (await importShim("./ui/dictation.ts")).speech.value.text);
 const query = (page) => page.evaluate(async () => (await importShim("./state.ts")).query.value);
 
 async function waitFor(fails, what, f, ms = 4000) {
@@ -98,6 +99,7 @@ export async function barSyncCheck(home, pull, host) {
   // 3. Send in the launcher: both empty.
   await submitPull(pull);
   await waitFor(fails, "send in the launcher clears both", async () => host.busy === 0 && (await query(pull)) === "" && (await query(home)) === "" && (await field(home, HOME)) === "");
+  await waitFor(fails, "send in the launcher: the launcher's field and both transcripts empty", async () => (await field(pull, PULL)) === "" && (await transcript(home)) === "" && (await transcript(pull)) === "");
   // 4. Send in the launcher while home still dictates: both empty, home's dictation over, its words never back - home's
   //    last words reach the host after the send (HOME_LAG), and the final words come once the mic is told to stop.
   await setQuery(home, "note");

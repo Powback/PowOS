@@ -39,6 +39,8 @@ class WindowFrames(
         OemCaption.off(context)
         // Split screen left | right on the unfolded screen, not top / bottom (SplitSideBySide).
         SplitSideBySide.on(context)
+        // The main thread reads the task list from this snapshot (FreeformTasks.cached): its first reading now.
+        FreeformTasks.warm(context)
         stopListening =
             FreeformTasks.listen {
                 events++
@@ -683,7 +685,7 @@ class WindowFrames(
         r: Rect,
     ) {
         if (id in maximised || !AppWindows.floating(context)) return
-        val w = FreeformTasks.list(context).firstOrNull { it.id == id } ?: return
+        val w = FreeformTasks.cached(context).firstOrNull { it.id == id } ?: return
         lastBounds[id] = Rect(r)
         WindowPlaces.put(context, placeKey(w), r)
     }
@@ -771,7 +773,7 @@ class WindowFrames(
      * - its title bar's maximise; again, back where it was. Moved or resized by hand, it's an ordinary window again.
      */
     fun maximise(id: Int) {
-        val now = frames[id]?.bounds ?: FreeformTasks.list(context).firstOrNull { it.id == id }?.bounds ?: return
+        val now = frames[id]?.bounds ?: FreeformTasks.cached(context).firstOrNull { it.id == id }?.bounds ?: return
         val back = maximised.remove(id)
         val target = back?.before?.let { AppWindows.onScreen(context, it) } ?: AppWindows.area(context)
         if (back == null) maximised[id] = Max(Rect(now), Rect(target), android.os.SystemClock.uptimeMillis())
@@ -788,7 +790,7 @@ class WindowFrames(
      */
     fun fullScreen(id: Int) {
         if (id in maximised || !AppWindows.floating(context)) return maximise(id)
-        val now = frames[id]?.bounds ?: FreeformTasks.list(context).firstOrNull { it.id == id }?.bounds
+        val now = frames[id]?.bounds ?: FreeformTasks.cached(context).firstOrNull { it.id == id }?.bounds
         if (now != null) fullBefore[id] = Rect(now)
         buttonFull.add(id)
         val ok = toFullScreen(id)
@@ -985,7 +987,7 @@ class WindowFrames(
         if (floatBack(id)) return true
         val ok = FreeformTasks.raise(context, id) || Tasks.open(context, id)
         // Back where it was - on screen (AppWindows.onScreen): a place from another bottom bar or fold isn't kept.
-        FreeformTasks.list(context).firstOrNull { it.id == id }?.bounds?.let { b ->
+        FreeformTasks.cached(context).firstOrNull { it.id == id }?.bounds?.let { b ->
             val to = AppWindows.onScreen(context, b)
             if (to != b) Log.i(TAG, "task $id restored off screen (${b.toShortString()}): to ${to.toShortString()} ok=${FreeformTasks.moveTo(context, id, to)}")
         }

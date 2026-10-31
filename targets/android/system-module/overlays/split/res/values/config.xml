@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- WM Shell split screen left | right in portrait on a large screen (the unfolded inner display); the folded cover
+         screen isn't large and keeps top | bottom. -->
+    <bool name="config_leftRightSplitInPortrait">true</bool>
+</resources>

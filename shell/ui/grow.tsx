@@ -25,26 +25,19 @@ interface Props {
  */
 function useClearDropsComposition(own: { current: HTMLTextAreaElement | null }, value: string) {
   const reported = useRef(value);
-  const composing = useRef(false);
   useLayoutEffect(() => {
     const t = own.current;
     const was = reported.current;
     reported.current = value;
     if (!t || value !== "" || was === "") return;
     if (t.value !== "") t.value = "";
-    if (!composing.current || document.activeElement !== t) return;
-    composing.current = false;
+    // Restarted whether or not a composition is reported: Chrome ends it (compositionend) on the send button's press,
+    // before the submit, yet the keyboard keeps the word as its composing region and commits it back after the clear.
+    if (document.activeElement !== t) return;
     t.blur();
     t.focus({ preventScroll: true });
   }, [value]);
-  return {
-    reported,
-    /** The textarea's composition handlers. */
-    ime: {
-      onCompositionStart: () => void (composing.current = true),
-      onCompositionEnd: () => void (composing.current = false),
-    },
-  };
+  return reported;
 }
 
 export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props) {
@@ -73,7 +66,7 @@ export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props
     if (need > h && document.activeElement !== t) t.scrollTop = t.scrollHeight;
   };
   useLayoutEffect(fit, [value, rows]);
-  const { reported, ime } = useClearDropsComposition(own, value);
+  const reported = useClearDropsComposition(own, value);
   // Its width changing (laid out late, a fold, a widget resized) wraps its text again: measured again then.
   useEffect(() => {
     const t = el();
@@ -90,7 +83,6 @@ export function GrowField({ value, onInput, rows = 3, inputRef, ...rest }: Props
   return (
     <textarea
       {...rest}
-      {...ime}
       ref={(n) => {
         own.current = n;
         if (typeof inputRef === "function") inputRef(n);

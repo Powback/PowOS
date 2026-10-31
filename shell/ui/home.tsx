@@ -7,10 +7,10 @@
  * the drawer move with it in CSS, so a frame of the swipe moves an edge, not a re-laid-out list of apps.
  */
 import { WidgetSheet } from "./widgetsheet.tsx";
-import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import type { PageRect } from "../types.ts";
+import type { App, PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { DockSearchButton, dockButton } from "./docksearch.tsx";
@@ -238,6 +238,9 @@ const DOCK_EXIT = 48;
  * room) - over an app it opens there instead, split screen or a window (dockout.tsx); brought back over the dock it goes
  * where it's let go (dockdrop.ts).
  */
+/** A dock cell's tap (one handler for all: it takes the app; AppCell is memoised). */
+const tapDock = (app: App) => dockTap(app.key);
+
 function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
   const vertical = dockPosition.value !== "bottom";
   const axis = (ev: PointerEvent) => vertical ? ev.clientY : ev.clientX;
@@ -293,7 +296,8 @@ function moveInDock(key: string, e: PointerEvent, dockEl: HTMLElement) {
  * should just be able to drag it out"): a tick, and it's carried as a window's drag (dockout.tsx: a half splits, the
  * middle floats, back on the dock cancels). Along the dock it's the page swipe's (false); short of deciding, undefined.
  */
-function liftOut(key: string, e: PointerEvent, dx: number, dy: number): boolean | undefined {
+function liftOut(e: PointerEvent, dx: number, dy: number, app: App): boolean | undefined {
+  const key = app.key;
   const way = chromeWay(dockPosition.value === "bottom" ? "dock" : "dock-side", dx, dy);
   if (way !== "out") return way === undefined ? undefined : false;
   menu.value = null;
@@ -357,7 +361,7 @@ function DockRecents({ count }: { count: number }) {
   return (
     <>
       {shown.map((app) => (
-        <AppCell key={app.key} app={app} labels={false} class={markClass(app.key)} draggable onTap={() => dockTap(app.key)} />
+        <AppCell key={app.key} app={app} labels={false} class={markClass(app.key)} draggable onTap={tapDock} />
       ))}
     </>
   );
@@ -409,7 +413,7 @@ function DockWindows({ pinned }: { pinned: string[] }) {
       ))}
       {shown.map(([k, state]) => {
         const app = byKey.value.get(k);
-        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state} ${markClass(k)}`} onTap={() => dockTap(k)} />;
+        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state} ${markClass(k)}`} onTap={tapDock} />;
       })}
     </>
   );
@@ -455,6 +459,8 @@ const dockPage = signal(0);
 /** Exported for the desktop's home (ui/desktop.tsx): the same dock under its pill. */
 export function Dock() {
   const el = useRef<HTMLDivElement>(null);
+  // One handler for every cell (it takes the app): AppCell is memoised, a closure per render re-rendered them all.
+  const dragDock = useCallback((e: PointerEvent, _cell: HTMLElement, app: App) => el.current && moveInDock(app.key, e, el.current), []);
   const vertical = dockPosition.value !== "bottom";
   const d = dockDrag.value;
   const aim = dockAim.value;
@@ -506,9 +512,9 @@ export function Dock() {
         labels={false}
         class={`${d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""} ${windowed.value.has(app.key) ? `windowed ${windowed.value.get(app.key)}` : ""} ${markClass(app.key)}`}
         style={style}
-        onDrag={(e) => el.current && moveInDock(app.key, e, el.current)}
-        onMove={(e, dx, dy) => liftOut(app.key, e, dx, dy)}
-        onTap={() => dockTap(app.key)}
+        onDrag={dragDock}
+        onMove={liftOut}
+        onTap={tapDock}
       />
     );
   });
