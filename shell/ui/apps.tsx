@@ -11,6 +11,7 @@ import { startCarry } from "./grid.tsx";
 import { closeApp, windowsOf } from "./desktops.ts";
 import { inLaunchers, toggleLauncher } from "./launchers.tsx";
 import { powos } from "../bridge.ts";
+import { memo } from "./memo.ts";
 import type { App, AppWindow } from "../types.ts";
 
 const LONG_PRESS_MS = 420;
@@ -69,11 +70,11 @@ interface CellProps {
   labels?: boolean;
   draggable?: boolean;
   /** Held and moved: this instead of dragging it onto home (the dock reorders its own). */
-  onDrag?: (e: PointerEvent, el: HTMLElement) => void;
+  onDrag?: (e: PointerEvent, el: HTMLElement, app: App) => void;
   class?: string;
   style?: Record<string, string>;
   /** A tap: this instead of launching it (the dock's taskbar taps, ui/desktops.ts dockTap). */
-  onTap?: () => void;
+  onTap?: (app: App) => void;
 }
 
 /** Holding [key] and moving: the menu gives way, the launcher closes, and the app follows the finger onto home. */
@@ -83,11 +84,15 @@ export function dragHome(key: string, e: PointerEvent) {
   startCarry({ app: key }, e, { x: 30, y: 30 });
 }
 
-export function AppCell({ app, labels = true, draggable = false, onDrag, class: cls = "", style, onTap }: CellProps) {
+/**
+ * Memoised: [onTap] / [onDrag] take the app, so a parent passes one stable handler for all its cells (never a closure per
+ * render - a new one each dock render re-rendered every cell, 152x in perf-1793456386286).
+ */
+export const AppCell = memo(function AppCell({ app, labels = true, draggable = false, onDrag, class: cls = "", style, onTap }: CellProps) {
   const press = usePress(
-    onTap ?? (() => launch(app.key)),
+    onTap ? () => onTap(app) : () => launch(app.key),
     (el) => (menu.value = { app, at: el.getBoundingClientRect() }),
-    onDrag ? (e) => onDrag(e, e.currentTarget as HTMLElement) : draggable ? (e) => dragHome(app.key, e) : null,
+    onDrag ? (e) => onDrag(e, e.currentTarget as HTMLElement, app) : draggable ? (e) => dragHome(app.key, e) : null,
   );
   return (
     <div class={`app ${cls}`} style={style} data-key={app.key} data-run={running.value[app.key]} {...press}>
@@ -95,7 +100,7 @@ export function AppCell({ app, labels = true, draggable = false, onDrag, class: 
       {labels && <div class="app-label">{app.label}</div>}
     </div>
   );
-}
+});
 
 /**
  * How long an icon URL that failed may stay unanswered before the app gets its initial instead. The host draws icons

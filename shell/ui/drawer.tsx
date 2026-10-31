@@ -154,7 +154,7 @@ export function AppList({ found, onTap }: { found: App[] | null; onTap?: (app: A
     const el = l != null ? list.current?.querySelector<HTMLElement>(`.az > :nth-child(${first.get(l)! + 1})`) : null;
     if (el) list.current!.scrollTop += el.getBoundingClientRect().top - list.current!.getBoundingClientRect().top;
   };
-  const cell = (app: App) => <AppCell key={app.key} app={app} draggable={!onTap} onTap={onTap && (() => onTap(app))} />;
+  const cell = (app: App) => <AppCell key={app.key} app={app} draggable={!onTap} onTap={onTap} />;
   return (
     <>
       {/* Searching: by the bar, bottom-up - the best match nearest to it (shell.css .results). */}

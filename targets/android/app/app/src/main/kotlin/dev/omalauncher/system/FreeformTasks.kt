@@ -71,8 +71,37 @@ object FreeformTasks {
         val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
         val z = stackOrder()?.withIndex()?.associate { (i, id) -> id to i }
         val result = (if (z == null) tasks else tasks.sortedBy { z[it.taskId] ?: Int.MAX_VALUE }).mapNotNull { window(it, failed) }
-        return Read(result, failed[0])
+        return Read(result, failed[0]).also { if (!it.unreadable) snapshot?.offer(it) }
     }
+
+    /**
+     * [list] without its binder calls, for the main thread (a gesture, a bridge call): the last reading, refreshed on
+     * its own thread after every task stack event ([listen]) - empty before the first. A window opened in the last
+     * read's time (~100-250 ms) may be missing; callers treat a miss as "not a floating window" (the ordinary path).
+     */
+    fun cached(context: Context): List<Window> = snapshot(context).cached()?.windows ?: emptyList()
+
+    /** Starts the snapshot ([cached]) early, so the first gesture finds a reading. */
+    fun warm(context: Context) {
+        snapshot(context)
+    }
+
+    @Volatile private var snapshot: TaskSnapshot<Read>? = null
+
+    private val snapshotThread by lazy { android.os.Handler(android.os.HandlerThread("powos-tasks-read").apply { start() }.looper) }
+
+    private fun snapshot(context: Context): TaskSnapshot<Read> =
+        snapshot ?: synchronized(this) {
+            snapshot ?: run {
+                val app = context.applicationContext ?: context
+                val s = TaskSnapshot({ read(app) }, { snapshotThread.post(it) })
+                snapshot = s
+                // Registering the listener is a binder call too: on the snapshot's thread, never the caller's.
+                snapshotThread.post { listen { s.invalidate() } }
+                s.cached()
+                s
+            }
+        }
 
     /** Set by [list] after each call: see its doc. */
     @Volatile var hadUnreadableTask = false

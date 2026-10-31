@@ -245,7 +245,30 @@ internal object NativeSpeech {
     private var downloadAsked = false
     private var sessionIds = 0
 
-    private fun onDeviceAvailable(c: Context) = Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(c)
+    private fun onDeviceAvailable(c: Context) = lookup(c).onDevice
+
+    /** The recognizers' package manager / settings lookups ([onDeviceAvailable], [regularService]) at one time. */
+    private class Lookup(
+        val onDevice: Boolean,
+        val service: ComponentName?,
+        val at: Long,
+    )
+
+    @Volatile private var lookedUp: Lookup? = null
+
+    /**
+     * [Lookup], kept [LOOKUP_TTL_MS]: binder calls into the package manager - [warm] makes them off the main thread so
+     * the main thread's support check and press find them done (a recognizer installed or switched is seen within it).
+     */
+    private fun lookup(c: Context): Lookup =
+        lookedUp?.takeIf { System.currentTimeMillis() - it.at < LOOKUP_TTL_MS }
+            ?: Lookup(
+                Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(c),
+                findRegularService(c),
+                System.currentTimeMillis(),
+            ).also { lookedUp = it }
+
+    private const val LOOKUP_TTL_MS = 60_000L
 
     fun available(c: Context) = onDeviceAvailable(c) || regularService(c) != null
 
@@ -253,7 +276,9 @@ internal object NativeSpeech {
      * The phone's default recognition service (Settings.Secure voice_recognition_service), unless that's PowOS's own
      * forwarding service or missing: then the first other one installed, Google's speech services first.
      */
-    fun regularService(c: Context): ComponentName? {
+    fun regularService(c: Context): ComponentName? = lookup(c).service
+
+    private fun findRegularService(c: Context): ComponentName? {
         val installed =
             c.packageManager
                 .queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)
@@ -396,7 +421,13 @@ internal object NativeSpeech {
      */
     fun warm(c: Context) {
         if (active != null) return
-        main.post { if (active == null && (plan == null || System.currentTimeMillis() - planAt >= PLAN_TTL_MS)) refresh(c.applicationContext) {} }
+        // Called off the main thread (ShellBridge's lookups): the package manager lookups here; the recognizer's
+        // creation and binding (main thread only, SpeechRecognizer) when the main thread is idle, not mid-frame.
+        lookup(c.applicationContext)
+        Looper.getMainLooper().queue.addIdleHandler {
+            if (active == null && (plan == null || System.currentTimeMillis() - planAt >= PLAN_TTL_MS)) refresh(c.applicationContext) {}
+            false
+        }
     }
 
     private fun remember(p: Plan): Plan {

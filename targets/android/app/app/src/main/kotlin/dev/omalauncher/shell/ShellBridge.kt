@@ -147,7 +147,7 @@ class ShellBridge(
     }
 
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
-    private val speech = Speech(context.applicationContext) { pageName() }.also { it.warm() }
+    private val speech = Speech(context.applicationContext) { pageName() }.also { s -> lookups.execute { s.warm() } }
 
     /** The page's mode (home, pull, assist, ...), for the speech log. */
     private fun pageName() = runCatching { web.url?.let { android.net.Uri.parse(it).getQueryParameter("mode") } }.getOrNull() ?: "home"
@@ -898,7 +898,7 @@ class ShellBridge(
         id: Int,
         pkg: String,
     ): android.graphics.Rect? =
-        dev.omalauncher.system.FreeformTasks.list(context).firstOrNull { it.id == id }?.bounds
+        dev.omalauncher.system.FreeformTasks.cached(context).firstOrNull { it.id == id }?.bounds
             ?: dev.omalauncher.system.WindowPlaces.get(context, dev.omalauncher.system.WindowPlaces.key(context, pkg))
 
     /** Running task [id]'s app (its base activity), or null: not running. */
@@ -938,7 +938,7 @@ class ShellBridge(
         // Unfolded, every task comes back as a floating window ("floats"); one that is a window already comes back where
         // it is ("window", CSS px of this page): its card grows to there, never to the full screen.
         val floats = dev.omalauncher.system.AppWindows.floating(context)
-        val windows = if (floats) dev.omalauncher.system.FreeformTasks.list(context).associateBy { it.id } else emptyMap()
+        val windows = if (floats) dev.omalauncher.system.FreeformTasks.cached(context).associateBy { it.id } else emptyMap()
         @Suppress("DEPRECATION")
         val running = runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(64) }.getOrDefault(emptyList())
         val list = dev.omalauncher.system.Tasks.list(context).map { t -> taskJson(t, stamp, windows[t.id]?.bounds, running) }
@@ -1749,7 +1749,10 @@ class ShellBridge(
          * them). qs.destinations: SettingsSearch's per-package getLaunchIntentForPackage / icons, 153 ms on the main
          * thread (perf-1793409701579); the same list, now built once per index/locale/app change (SettingsSearch.Key).
          */
-        private val LOOKUPS = setOf("qs.destinations")
+        // speech.warm: the recognizers' package manager / settings lookups (and speech.json) ran on the main thread
+        // and a 58 ms frame landed 54 ms after it (perf-1793456386286): looked up here; only the recognizer binding,
+        // which Android requires on the main thread, is posted back there (NativeSpeech.warm).
+        private val LOOKUPS = setOf("qs.destinations", "speech.warm")
         private val lookups = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-lookups").apply { isDaemon = true } }
 
         /** One thread for them all, so a page's set then get stay in that order. */

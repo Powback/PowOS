@@ -1078,6 +1078,38 @@ async function homeReturnCheck() {
   return [...new Set(fails)].slice(0, 8);
 }
 
+/**
+ * One recents update re-renders only the card that changed (perf-1793456386286: TaskCard 122 renders from onOpen/onMenu
+ * made afresh each Recents render; recents.tsx now passes one handler per kind, TaskCard is memoised). The switcher up
+ * with 4 cards; then the window lands on the first one with a fresh snapshot (recents.end to: switcher -> that card's
+ * task changes), then a recents.update adds a task: each step may render exactly one TaskCard.
+ */
+async function recentsRendersCheck() {
+  const fails = [];
+  const host = (event, data) => window.__mockEvents.emit(event, data);
+  const raf = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => ok())));
+  const scan = await window.__gw.mod("./ui/renderscan.ts");
+  const task = (id, label) => ({ id, label, key: null, icon: null, snapshot: "" });
+  const tasks = [task(601, "Chrome"), task(602, "Camera"), task(603, "Clock"), task(604, "Maps")];
+  host("recents.show", { open: true, from: 601, tasks });
+  await raf();
+  if (document.querySelectorAll(".task[data-task]").length < 4) return [`recents-renders: ${document.querySelectorAll(".task[data-task]").length} cards shown, expected 4`];
+  const cards = () => scan.scanStats().filter((x) => x.name === "TaskCard").reduce((n, x) => n + x.renders, 0);
+  const step = async (what, act) => {
+    scan.startScan("gate-recents");
+    scan.reset();
+    act();
+    await raf();
+    const n = cards();
+    scan.stopScan("gate-recents");
+    console.log(`recents-renders: ${what}: TaskCard rendered ${n}x`);
+    if (n !== 1) fails.push(`${what}: TaskCard rendered ${n}x, expected 1 (only the changed card)`);
+  };
+  await step("landed with a fresh snapshot", () => host("recents.end", { to: "switcher", snapshot: "data:image/gif;base64,R0lGODlhAQABAAAAACw=" }));
+  await step("a task added", () => host("recents.update", { tasks: [...tasks, task(605, "Notes")] }));
+  return fails;
+}
+
 async function wideMigrated() {
   const S = await window.__gw.mod("./state.ts");
   const { powos } = await window.__gw.mod("./bridge.ts");
@@ -5429,6 +5461,8 @@ try {
   // side-by-side pages without moving a tile.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "home-return", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(homeReturnCheck))));
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "recents-renders", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(recentsRendersCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar)), ...(await r.page.evaluate(wideLauncherBar)), ...(await r.page.evaluate(wideBarParked))])));
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard", { width: 1280, height: 800 }).then((r) => whenReady(r, () => launcherKeyboardKeepsFocus(r.page))));

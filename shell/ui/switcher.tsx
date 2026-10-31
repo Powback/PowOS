@@ -24,7 +24,8 @@ export interface Rect {
   height: number;
 }
 
-export function TaskCard({
+/** Memoised: recents.tsx passes stable handlers (by task id), so a card renders again only when its own task does. */
+export const TaskCard = memo(function TaskCard({
   t,
   current,
   eager,
@@ -194,7 +195,7 @@ export function TaskCard({
       />}
     </div>
   );
-}
+});
 
 /**
  * An app's icon, or a blank in its place. Memoised: its card re-renders on every recents update (new onOpen/onMenu),

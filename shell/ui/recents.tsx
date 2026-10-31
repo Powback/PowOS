@@ -372,6 +372,19 @@ function togglePin(t: RecentTask) {
 }
 
 /** A card picked for split screen: the first one waits for the second; the second splits them. */
+/**
+ * A card's tap and its menu: one handler each for every card (they take the task's id), never a closure per render -
+ * TaskCard is memoised, and a new function each Recents render re-rendered every card (122x in perf-1793456386286).
+ */
+function openCard(id: number, shot: HTMLElement) {
+  if (splitFirst.value != null) pickForSplit(id);
+  else open(id, shot);
+}
+function menuCard(id: number, card: HTMLElement) {
+  const r = card.getBoundingClientRect();
+  menu.value = { id, left: Math.max(8, Math.min(innerWidth - 228, r.left + 8)), top: r.top + 36 };
+}
+
 function pickForSplit(id: number) {
   const first = splitFirst.value;
   if (first == null) {
@@ -719,12 +732,9 @@ export function Recents() {
               load={loaded.value}
               pinned={pinned.value.has(pinKey(t))}
               picked={first === t.id || !!splitMore.value?.includes(t.id)}
-              onOpen={(id, shot) => (first != null ? pickForSplit(id) : open(id, shot))}
+              onOpen={openCard}
               onRemove={remove}
-              onMenu={(id, card) => {
-                const r = card.getBoundingClientRect();
-                menu.value = { id, left: Math.max(8, Math.min(innerWidth - 228, r.left + 8)), top: r.top + 36 };
-              }}
+              onMenu={menuCard}
             />
           ))
         ) : (
