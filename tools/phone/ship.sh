@@ -128,7 +128,7 @@ status)
   [ -e "$HOME/.config/powos/ship-no-idle-wait" ] && echo "APK installs: at once, no idle wait (~/.config/powos/ship-no-idle-wait)"
   [ -s "$Q/rooted-pending" ] && { read -r rb rt < "$Q/rooted-pending"; echo "rooted deploy pending since ${rb:0:9} (origin ${rt:0:9}; runs after the APK, under the phone-busy rules)"; }
   [ -s "$Q/window-failed" ] && { read -r wt ww wf < "$Q/window-failed"; echo "WINDOWS BROKEN: ${wt:0:9} ($ww) failed the device window check (verify/window-render.sh; changed: $wf) - log $Q/done/window-render-${wt:0:9}.log"; }
-  [ -s "$Q/window-gate.pid" ] && kill -0 "$(cat "$Q/window-gate.pid")" 2>/dev/null && echo "device window check running (pid $(cat "$Q/window-gate.pid"); waits for a free, unfolded phone)"
+  [ -s "$Q/window-gate.pid" ] && kill -0 "$(cat "$Q/window-gate.pid")" 2>/dev/null && echo "device window check running (pid $(cat "$Q/window-gate.pid"); hidden display, no wait)"
   [ -d "$Q/apk" ] && echo "APK ship out: $(cut -c1-9 "$Q/apk/tip" 2>/dev/null) (log $(cat "$Q/apk/log" 2>/dev/null))"
   echo "last ships:"; tail -6 "$Q/shipped.log" 2>/dev/null | sed 's/^/  /' ;;
 run)
@@ -282,42 +282,48 @@ run)
     echo $! > "$Q/postgate.pid"
   }
   # window_gate BASE TIP WHAT: a ship whose BASE..TIP diff touches web-window files (WINDOW_FILES) is checked ON THE
-  # DEVICE after it's live: verify/window-render.sh opens Calculator as a web window, screencaps its body (app content,
-  # not the page under it, not a flat fill) and taps it (the app redraws). Why (2026-10-31): web windows shipped as
-  # empty frames twice in one night with every headless gate green. In the background, one at a time (a newer ship's
-  # check replaces a running one); the check waits for a free, unfolded phone itself and SKIPs (exit 2) while the user
-  # is active - tried again up to WINDOW_GATE_TRIES (8) times, ~15 min each. A FAIL marks the ship failed
-  # ($Q/window-failed, $Q/failed or $Q/failed-apk, shipped.log, status) and mails the coder + logs friction, as a
-  # failed ship does. No rollback (fix forward). SHIP_WINDOW_GATE=0 turns it off; off in tests (SHIP_DIR), as e2e_round.
+  # DEVICE once it's live, synchronously: verify/window-render.sh --hidden starts the APK's own window host
+  # (WebWindowsHost) on a display nobody sees, launches Calculator there, screencaps THAT display (app content, not a
+  # flat fill) and taps it with `input -d` (the app redraws) - nothing on the user's screen, so it never waits for an
+  # idle phone and has no skip: exit 0 PASS, anything else (FAIL, timeout, no phone) is a FAIL. Why (2026-10-31): web
+  # windows shipped as empty frames twice in one night with every headless gate green, and the old idle-waiting check
+  # never ran once (the user is always active; manager rule G-1). Returns 1 on a FAIL: WINDOWS BROKEN ($Q/window-failed,
+  # status, shipped.log, a mail) and the caller keeps the ship's requests and marks it failed, so nothing later ships as
+  # done while windows are broken: as long as $Q/window-failed is there EVERY ship runs the check, window files or not,
+  # and only a PASS clears it. No rollback (fix forward). The log ($Q/done/window-render-<tip>.log) is always written.
+  # SHIP_WINDOW_GATE=0 turns it off; off in tests (SHIP_DIR), as e2e_round. WINDOW_GATE_TIMEOUT_S (240) bounds it.
   WINDOW_FILES='(^|/)(webwindows[^/]*|WebWindows[^/]*\.kt|WebWindowLaunch\.kt|FreeformTasks\.kt|SystemFloat\.kt|home\.tsx|shell\.css)$'
   window_gate() {
-    [ "${SHIP_WINDOW_GATE:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] && [ -x "$here/verify/window-render.sh" ] || return 0
-    local b=$1 t=$2 what=$3 f old wb
+    [ "${SHIP_WINDOW_GATE:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] || return 0
+    local b=$1 t=$2 what=$3 f= wb wl wrc gp wdg
     if [ -n "$b" ] && git cat-file -e "$b^{commit}" 2>/dev/null; then
       f=$(git diff --name-only "$b" "$t" 2>/dev/null | grep -E "$WINDOW_FILES" | sed 's|.*/||' | sort -u | paste -sd' ' -)
-      [ -n "$f" ] || return 0
     else f="(no base: every window file)"; fi
-    old=$(cat "$Q/window-gate.pid" 2>/dev/null) && [ -n "$old" ] && killtree "$old" 2>/dev/null
+    [ -s "$Q/window-failed" ] && f="${f:+$f; }(windows broken since $(cut -c1-9 "$Q/window-failed"): every ship is checked)"
+    [ -n "$f" ] || return 0
+    wl=$Q/done/window-render-${t:0:9}.log
+    echo "$(date '+%F %T') ${t:0:9} $what: window files changed ($f) - device window check (--hidden)" > "$wl"
     # A copy to run: this checkout is reset under a running script (bash reads it as it goes).
-    wb=$Q/window-render/bin; mkdir -p "$wb"; cp "$here/verify/window-render.sh" "$here/verify/window-render.py" "$wb/" || return 0
-    echo "$(date +%T) ${t:0:9}: window files changed ($f) - device window check queued ($Q/done/window-render-${t:0:9}.log)"
-    ( wl=$Q/done/window-render-${t:0:9}.log; : > "$wl"; n=0
-      while :; do
-        n=$((n + 1)); WR_TOOLS=$here WR_OUT=$Q/window-render bash "$wb/window-render.sh" >> "$wl" 2>&1; wrc=$?
-        [ $wrc = 2 ] && [ $n -lt "${WINDOW_GATE_TRIES:-8}" ] && { sleep 60; continue; }; break
-      done
-      res=$(grep '^window-render: ' "$wl" | tail -1 | cut -c1-300)
-      case $wrc in
-        0) rm -f "$Q/window-failed"; echo "$(date '+%F %T') ${t:0:9} $what window-render PASS" >> "$Q/shipped.log" ;;
-        2) echo "$(date '+%F %T') ${t:0:9} $what window-render NOT RUN after $n tries: $res" >> "$Q/shipped.log" ;;
-        *) echo "$t $what $f" > "$Q/window-failed"
-           if [ "$what" = apk ]; then echo "$t" > "$Q/failed-apk"; else echo "$t" > "$Q/failed"; fi
-           echo "$(date '+%F %T') ${t:0:9} $what window-render FAILED: $(grep -m1 '^FAIL' "$wl" | cut -c1-200)" >> "$Q/shipped.log"
-           echo "$(date +%T) ${t:0:9}: WINDOWS BROKEN on the device after this ship (window-render FAIL, log $wl)"
-           mail "ship ${t:0:9} ($what) FAILED the device window check - web windows are BROKEN on the phone (changed: $f): $(grep -m1 '^FAIL' "$wl" | cut -c1-220) - log $wl on the Mac (shots beside it); fix it on origin, then ship.sh request again" ;;
-      esac
-      rm -f "$Q/window-gate.pid" ) &
-    echo $! > "$Q/window-gate.pid"
+    wb=$Q/window-render/bin; mkdir -p "$wb"
+    if [ -x "$here/verify/window-render.sh" ] && cp "$here/verify/window-render.sh" "$here/verify/window-render.py" "$wb/"; then
+      echo "$(date +%T) ${t:0:9}: window files changed ($f) - device window check running ($wl)"
+      WR_TOOLS=$here WR_OUT=$Q/window-render bash "$wb/window-render.sh" --hidden >> "$wl" 2>&1 & gp=$!
+      echo "$gp" > "$Q/window-gate.pid"
+      ( sleep "${WINDOW_GATE_TIMEOUT_S:-240}"; killtree "$gp" ) & wdg=$!
+      wait "$gp"; wrc=$?
+      kill "$wdg" 2>/dev/null; rm -f "$Q/window-gate.pid"
+      [ $wrc -ge 128 ] && echo "window-render: FAIL (killed after ${WINDOW_GATE_TIMEOUT_S:-240} s, rc $wrc)" >> "$wl"
+    else wrc=1; echo "window-render: FAIL (verify/window-render.sh missing or not copied)" >> "$wl"; fi
+    grep -q '^window-render: ' "$wl" || echo "window-render: FAIL (no verdict, rc $wrc)" >> "$wl"
+    if [ $wrc = 0 ]; then
+      rm -f "$Q/window-failed"; echo "$(date '+%F %T') ${t:0:9} $what window-render PASS" >> "$Q/shipped.log"
+      echo "$(date +%T) ${t:0:9}: device window check PASS"; return 0
+    fi
+    echo "$t $what $f" > "$Q/window-failed"
+    echo "$(date '+%F %T') ${t:0:9} $what WINDOWS BROKEN - window-render FAILED rc $wrc: $(grep -m1 '^FAIL' "$wl" | cut -c1-200)" >> "$Q/shipped.log"
+    echo "$(date +%T) ${t:0:9}: WINDOWS BROKEN on the device after this ship (window-render rc $wrc, log $wl) - its requests are kept, later ships stay checked"
+    mail "ship ${t:0:9} ($what) FAILED the device window check - web windows are BROKEN on the phone (changed: $f): $(grep -m1 '^FAIL' "$wl" | cut -c1-220) - log $wl on the Mac (shots beside it); fix it on origin, then ship.sh request again"
+    return 1
   }
   # done_req FILE RESULT: a request fully on the phone.
   done_req() { echo "result=$2" >> "$1"; mv "$1" "$Q/done/"; }
@@ -356,7 +362,7 @@ run)
   # runner start (a previous runner's finished APK) and before it exits (f252: the runner left while the APK was
   # out, so a finished install was never recorded and phone checks kept waiting for their ship).
   reap_apk() {
-    local inst A arc alog n r sha live ht st
+    local inst A arc alog n r sha live ht st wg
     inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
     # An APK ship that ended: its requests are done (installed is installed - its exit is its last check's: a logcat
     # grep with no match was 1, 2026-10-23), or it's tried again (the user stayed active), or it failed.
@@ -377,17 +383,19 @@ run)
           r=$Q/$(date +%Y%m%d-%H%M%S)-reapply-$$.req
           printf 'sha=%q\nnote=\nsilent=1\nwho=ship-apk-reapply\nat=%s\n' "$live" "$(date +%s)" > "$r.tmp" && mv "$r.tmp" "$r"
         fi
-        rm -f "$Q/failed-apk"
+        # The device window check BEFORE its requests are done (the build it replaced: ship-apk's snapshot of the
+        # previous install, ship-guard.sh snapshot DIR/commit): WINDOWS BROKEN keeps them and marks the APK failed.
+        wg=0; window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk || wg=1
+        if [ $wg = 0 ]; then rm -f "$Q/failed-apk"
+        else echo "$A" > "$Q/failed-apk"; echo "$(date +%T) ${A:0:9}: APK installed but WINDOWS BROKEN - its requests kept, waiting for a new origin commit"; fi
         # A shell held for this APK came with its install (ship-apk pushes origin's tip shell after it).
         { read -r ht _ < "$Q/shell-held" && git merge-base --is-ancestor "$ht" "$A"; } 2>/dev/null && rm -f "$Q/shell-held"
         # The records above first, THEN its requests done: a watcher seeing them done sees the records too.
-        n=0; for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
+        n=0; [ $wg = 0 ] && for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
           git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "shipped:${A:0:9}:apk"; n=$((n+1)); }; done
         echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
         units_publish
         echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
-        # The build it replaced: ship-apk's snapshot of the previous install (ship-guard.sh snapshot DIR/commit).
-        window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk
         e2e_round
       elif [ "$arc" = 8 ]; then echo "$(date +%T) ${A:0:9}: a newer APK is wanted - the pending one is replaced"
       elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
@@ -523,7 +531,10 @@ run)
         if [ $rc = 0 ]; then
           echo "$T" > "$Q/live"; rm -f "$Q/failed"
           post_gate "$T" "$log" $add
-          window_gate "$base" "$T" shell
+          if ! window_gate "$base" "$T" shell; then
+            echo "$T" > "$Q/failed"; echo "$(date +%T) ${T:0:9}: shell ship live but WINDOWS BROKEN - requests kept, waiting for a new origin commit"
+            continue
+          fi
           echo "$(date '+%F %T') ${T:0:9} shell ${#sreqs[@]} req ($who_s): ${sn:-(silent)}" >> "$Q/shipped.log"
           units_publish
           for r in ${nreqs[@]+"${nreqs[@]}"}; do [ -f "$r" ] && echo "noted=1" >> "$r"; done

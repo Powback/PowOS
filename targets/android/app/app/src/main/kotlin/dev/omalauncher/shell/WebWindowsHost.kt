@@ -16,7 +16,11 @@ import android.os.Looper
  * ([WebWindows] starts it: `su 2000 -c "CLASSPATH=<apk> app_process /system/bin dev.omalauncher.shell.WebWindowsHost"`),
  * talking line by line over its stdin/stdout:
  *
- *   create <tag> <w> <h> <dpi>      -> "display <tag> <displayId>" | "error <tag> <why>"
+ *   create <tag> <w> <h> <dpi> [selftest]   -> "display <tag> <displayId>" | "error <tag> <why>"
+ *                                   selftest (tools/phone/verify/window-render.sh --hidden, run from adb, never by the
+ *                                   app): also its own display group, focus and lock state ([SELFTEST_FLAGS]), so the
+ *                                   check's display stays on with the screen off or locked and never takes the
+ *                                   user's focus; refused -> the window flags
  *   resize <displayId> <w> <h> <dpi>
  *   release <displayId>
  *   touch <displayId> <action> <downTime> <id>,<x>,<y> ...   -> an injected touch on that display, every finger down
@@ -55,6 +59,13 @@ object WebWindowsHost {
             (1 shl 6) or // SUPPORTS_TOUCH: touch = TOUCH_VIRTUAL, so input has a viewport for it ([Touch])
             (1 shl 8) or // DESTROY_CONTENT_ON_REMOVAL: the window's activities finish with it
             (1 shl 10) // TRUSTED
+
+    /**
+     * The device window check's display (`create ... selftest`): OWN_DISPLAY_GROUP (1 shl 11: its own power state, awake
+     * while the phone's screen is off), ALWAYS_UNLOCKED (1 shl 12: no keyguard on it), OWN_FOCUS (1 shl 14: launching
+     * Calculator there doesn't move the user's focus off their screen).
+     */
+    private val SELFTEST_FLAGS = FLAGS or (1 shl 11) or (1 shl 12) or (1 shl 14)
 
     private const val SHELL_UID = 2000
 
@@ -103,7 +114,7 @@ object WebWindowsHost {
         private val vds = HashMap<Int, Vd>()
         fun command(a: List<String>) {
             when (a[0]) {
-                "create" -> create(a[1], a[2].toInt(), a[3].toInt(), a[4].toInt())
+                "create" -> create(a)
                 "resize" -> resize(a[1].toInt(), a[2].toInt(), a[3].toInt(), a[4].toInt())
                 "release" -> vds.remove(a[1].toInt())?.let(::release)
                 "settle" -> settle(a[1].toInt(), a.drop(2).joinToString(" "))
@@ -111,12 +122,13 @@ object WebWindowsHost {
             }
         }
 
-        private fun create(
-            tag: String,
-            w: Int,
-            h: Int,
-            dpi: Int,
-        ) {
+        /** `create <tag> <w> <h> <dpi> [selftest]` (the command's words). */
+        private fun create(a: List<String>) {
+            val tag = a[1]
+            val w = a[2].toInt()
+            val h = a[3].toInt()
+            val dpi = a[4].toInt()
+            val selftest = a.getOrNull(5) == "selftest"
             val r = ImageReader.newInstance(1, 1, PixelFormat.RGBA_8888, 2)
             var made: Vd? = null
             r.setOnImageAvailableListener({
@@ -125,7 +137,12 @@ object WebWindowsHost {
             }, frames)
             val vd =
                 try {
-                    dm.createVirtualDisplay("powos-ww-$tag", w, h, dpi, r.surface, FLAGS)
+                    val own =
+                        if (!selftest) null
+                        else runCatching { dm.createVirtualDisplay("powos-ww-$tag", w, h, dpi, r.surface, SELFTEST_FLAGS) }
+                            .onFailure { say("log display $tag: selftest flags refused (${it.toString().replace('\n', ' ')}): window flags") }
+                            .getOrNull()
+                    own ?: dm.createVirtualDisplay("powos-ww-$tag", w, h, dpi, r.surface, FLAGS)
                 } catch (e: RuntimeException) {
                     null.also { say("error $tag ${e.toString().replace('\n', ' ')}") }
                 }
