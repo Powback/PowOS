@@ -200,6 +200,23 @@ const board = (actions) =>
 /** The AI page as one chat (AI1-AI8): the board's state for the strip, the manager's things to try last. */
 const MSGR_TRY = { kind: "assistant", text: "Shipped the window raise fix.\n\n```try\n" + JSON.stringify({ title: "2 things ready", items: [{ id: "overlap", line: "Tap a window behind another: it comes to the front" }, { id: "plug", line: "Plug the phone into the Mac once, for the kernel test", do: true }] }) + "\n```" };
 const MSGR = board(true).replace(" S.page.value = -1;", "") + ` S.chat.value = { busy: false, items: [...S.chat.value.items, ${JSON.stringify(MSGR_TRY)}] }; S.page.value = -1; await sleep(500);`;
+/**
+ * The chat as the user saw it 2026-10-31 13:03 ("It looks complete trash"): agents' mail rows, a SendMessage run with
+ * an agent id, a long answer, the user's message with a screenshot, a turn that only acted ("didn't answer (exit 0)").
+ */
+const LOOK_ITEMS = JSON.stringify([
+  { kind: "user", text: "what happened overnight?" },
+  { kind: "assistant", text: "Overnight the coordinator cleared the whole queue, each change shipped and checked one at a time. Among the biggest:\n\n- **Windows:** taps work inside them, the home swipe from a fullscreen app goes home, Clear all leaves nothing behind.\n- **Dock:** it stays a fixed size with a divider before recents.\n- **Home:** it now recovers by itself if it goes blank.\n\nNothing has been checked on the phone yet, since you were using it." },
+  { kind: "note", error: false, text: "mail from shell: shell: Shell home: blank: home is blank: neither the dock nor the bar on the 821x884 screen after the fold" },
+  { kind: "note", error: false, text: "mail from coordinator: coordinator: Queue cleared: window touch regions, blank-home recovery, home swipe+Plasma start menu" },
+  { kind: "tool", name: "SendMessage", hint: "a06c1853defd888e7", ok: true, text: "", out: "" },
+  { kind: "tool", name: "mcp__comms__work_board", hint: "list", ok: true, text: "", out: "" },
+  { kind: "assistant", text: "The 'Desktop window' option in the app ⋯ menu needs the app-hooking module turned back on, then a reboot. OK to do that?" },
+  { kind: "user", text: "That AI page really, really sucks now.\n\n[What's on my screen right now: /run/powos-app/powos-ai-shared/screen-look.jpg]" },
+  { kind: "tool", name: "mcp__comms__present_try", hint: "", ok: true, text: "", out: "" },
+  { kind: "note", error: true, text: "PowOS AI didn't answer (exit 0)" },
+]);
+const LOOK = board(true).replace(" S.page.value = -1;", "") + ` S.chat.value = { busy: false, items: [...${LOOK_ITEMS}, ${JSON.stringify(MSGR_TRY)}] }; S.page.value = -1; await sleep(600);`;
 /** Rows with queued phone checks (queue.sh's marker), a failed check (its screenshot) and a passed one: "test now". */
 const TEST_NOW =
   " const R = P.board.value; const w = R.filter((r) => r.status === 'working'); w[0].step = 'phone check queued'; w[1].step = 'phone check queued';" +
@@ -476,6 +493,8 @@ const SCENES = [
   ["kbd-panel", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${MAIL_SAMPLE} }; S.openPanel('ai');`, "wallpaper"],
   ["kbd-ai-wide", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${MAIL_SAMPLE} }; S.page.value = -1;`, "wallpaper", undefined, WIDE_SIZES],
   ["ai-msgr", "home", MSGR, "wallpaper", undefined, WIDE_SIZES],
+  ["ai-look", "home", LOOK, "wallpaper"],
+  ["ai-look-progress", "home", LOOK + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper"],
   ["ai-msgr-menu", "home", MSGR + " document.querySelector('.ai-screen .ai-more').click(); await sleep(300);", "wallpaper"],
   ["ai-msgr-split", "home", MSGR + " S.aiScreen.value = 'progress'; await sleep(600);", "wallpaper", undefined, WIDE_SIZES],
   ["ai-msgr-agents", "home", MSGR + " S.aiScreen.value = 'agents'; await sleep(400);", "wallpaper"],

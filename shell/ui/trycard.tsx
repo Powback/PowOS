@@ -189,3 +189,10 @@ blocks.try = (body) => {
   const t = read(body);
   return t ? <TryCard t={t} /> : null;
 };
+
+/** Things to try still unanswered in [texts] (the manager's messages): the strip's "N to try", each task once. */
+export function untried(texts: string[]): number {
+  const bodies = texts.flatMap((t) => [...t.matchAll(/```try\s*\n([\s\S]*?)(?:\n```|$)/g)].map((m) => m[1]));
+  const ids = bodies.flatMap((b) => read(b)?.items ?? []).map((it) => it.id);
+  return new Set(ids.filter((id) => !answers.value[id])).size;
+}

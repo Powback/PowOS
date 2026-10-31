@@ -746,15 +746,3 @@ export function Work({ shown }: { shown: boolean }) {
   );
 }
 
-/** Needs you on the board now: the tasks waiting on the user (the chat's strip counts them). */
-export const needsYou = () => board.value.filter((w) => groupOf(w) === "you").length;
-
-/** The task most lately moved with a step count ("Daily driver", 62): the strip's progress, null with none. */
-export function headline(): { title: string; pct: number } | null {
-  const w = board.value
-    .filter((x) => x.status === "working" && (x.progressTotal ?? 0) > 0)
-    .sort((a, b) => Number(b.activity || b.updated) - Number(a.activity || a.updated))[0];
-  if (!w) return null;
-  const pct = Math.round((100 * Math.min(w.progressDone ?? 0, w.progressTotal!)) / w.progressTotal!);
-  return { title: w.title.split(/[:(]/)[0].trim(), pct };
-}
