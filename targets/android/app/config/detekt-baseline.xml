@@ -235,7 +235,6 @@
     <ID>CyclomaticComplexMethod:Parser.kt$Parser$private fun decl(): Decl</ID>
     <ID>CyclomaticComplexMethod:Parser.kt$Parser$private fun primary(): Expr</ID>
     <ID>CyclomaticComplexMethod:Paste.kt$Paste$fun download( id: String, userAgent: String, ): String</ID>
-    <ID>CyclomaticComplexMethod:PetOverlay.kt$PetOverlay$fun update()</ID>
     <ID>CyclomaticComplexMethod:PetOverlay.kt$PetOverlay.Root$override fun onTouchEvent(ev: MotionEvent): Boolean</ID>
     <ID>CyclomaticComplexMethod:PowosAiChat.kt$PowosAiChat$private fun turn(prompt: String?)</ID>
     <ID>CyclomaticComplexMethod:PowosRecentsService.kt$PowosRecentsService$private fun startGestures()</ID>

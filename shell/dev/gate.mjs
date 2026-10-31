@@ -1864,6 +1864,83 @@ async function aiChatOrderFails(page, size) {
   return tops[0] < tops[1] ? [] : [`${size}: the "Go ahead?" choices (top ${tops[1]}) show above the "Plan" card sent before them (top ${tops[0]})`];
 }
 
+/**
+ * In the page: a turn with four steps and a reply, the steps opened ("2 more"... a tap on their line): the list's radius
+ * and width, the standard radius, the reply bubble's width (the user, 10-31 20:06, unfolded: "This doesn't look right" -
+ * the opened list on a dark ellipse, the folded pill's 999px radius on a tall narrow box).
+ */
+async function aiChatSteps() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const tool = (name) => ({ kind: "tool", name, hint: "", ok: true, text: "", out: "" });
+  S.chat.value = { busy: false, items: [{ kind: "user", text: "do it" }, tool("Bash"), tool("Read"), tool("SendMessage"), tool("Bash"), { kind: "assistant", text: "Done - the change is in." }] };
+  const run = () => [...document.querySelectorAll(".ai-screen .ai-chat-in > .tl")].pop();
+  if (!(await G.until(() => run()?.querySelector(".tl-row"), 3000))) return null;
+  run().querySelector(".tl-row").click();
+  if (!(await G.until(() => run()?.querySelector(".tl-more"), 2000))) return null;
+  await G.frames(2);
+  const el = run(), cs = getComputedStyle(el), box = el.getBoundingClientRect();
+  const probe = document.createElement("div");
+  probe.style.borderRadius = "var(--radius)";
+  el.append(probe);
+  const radius = parseFloat(getComputedStyle(probe).borderTopLeftRadius);
+  probe.remove();
+  const bubble = [...document.querySelectorAll(".ai-screen .ai-chat-in > .msg.assistant")].pop()?.getBoundingClientRect().width ?? 0;
+  const more = el.querySelector(".tl-more").getBoundingClientRect(), row = el.querySelector(".tl-row").getBoundingClientRect();
+  return { r: parseFloat(cs.borderTopLeftRadius) || 0, radius, w: Math.round(box.width), bubble: Math.round(bubble), moreIn: more.left >= box.left - 1 && more.bottom <= box.bottom + 1, aligned: Math.abs(more.left - row.left) <= 2 };
+}
+
+/** The opened steps: radius at most the standard one, as wide as a bubble at least, "fewer" inside and on their edge. */
+async function aiChatStepsFails(page, size) {
+  const got = await page.evaluate(aiChatSteps);
+  await page.screenshot({ path: `/cache/ai-page-${size}-steps.png` });
+  if (!got) return [`${size}: four steps sent in one turn didn't render as one opened list with "fewer"`];
+  const fails = [];
+  if (got.r > got.radius) fails.push(`${size}: the opened steps list has a ${got.r}px radius, over the standard ${got.radius}px (an ellipse)`);
+  if (got.w < got.bubble) fails.push(`${size}: the opened steps list is ${got.w}px wide, narrower than a bubble (${got.bubble}px)`);
+  if (!got.moreIn || !got.aligned) fails.push(`${size}: "fewer" isn't inside the steps list on its rows' edge`);
+  return fails;
+}
+
+/**
+ * In the page: home's dock and bar hidden (as a sheet over them, or a bug, would), then each full-screen sheet opened
+ * over it through its own signal - Settings, Settings › style, edit mode, the launcher in place, the AI page, the shade:
+ * the detector says "" under each, and names the blank once they are all shut.
+ */
+async function homeBlankCovered() {
+  const G = window.__gw;
+  if (!(await G.until(() => window.__powosHomeBlank, 4000))) return ["window.__powosHomeBlank is not installed"];
+  const [S, Sc] = await Promise.all([G.mod("./state.ts"), G.mod("./screens.ts")]);
+  // Headless Chrome's screen is 800x600 whatever the viewport: this phone's screen is the viewport.
+  for (const [k, v] of [["width", innerWidth], ["height", innerHeight]]) Object.defineProperty(screen, k, { value: v, configurable: true });
+  const fails = [];
+  if (window.__powosHomeBlank()) fails.push(`home as drawn reports blank: "${window.__powosHomeBlank()}"`);
+  const gone = document.createElement("style");
+  gone.textContent = ".home .dock, .home .bar { display: none !important; }";
+  document.head.append(gone);
+  await G.frames(2);
+  const sheets = [
+    ["Settings", () => (Sc.screens.value = ["settings"]), () => (Sc.screens.value = [])],
+    ["Settings › style", () => (Sc.screens.value = ["settings", "style"]), () => (Sc.screens.value = [])],
+    ["edit mode", () => (S.editing.value = true), () => (S.editing.value = false)],
+    ["the launcher", () => (S.drawer.value = 1), () => (S.drawer.value = 0)],
+    ["the AI page", () => (S.page.value = -1), () => (S.page.value = 0)],
+    ["the shade", () => (S.notif.value = true), () => (S.notif.value = false)],
+  ];
+  for (const [name, show, shut] of sheets) {
+    show();
+    await G.frames(2);
+    const why = window.__powosHomeBlank();
+    if (why) fails.push(`${name} open over home: reported blank ("${why}")`);
+    shut();
+    await G.frames(2);
+  }
+  const bug = window.__powosHomeBlank();
+  if (!bug) fails.push("home with its dock and bar gone and nothing over it reports not blank");
+  gone.remove();
+  return fails;
+}
+
 /** In the page: the bridge as it was. */
 async function aiChatRestore() {
   const { powos } = await window.__gw.mod("./bridge.ts");
@@ -1960,6 +2037,7 @@ async function aiChatAt(page, size) {
   await page.evaluate(() => document.querySelector(".ai-screen .ai-menu-scrim")?.click());
   fails.push(...(await page.evaluate(aiChatMenu)).map((f) => `${size}: ${f}`));
   fails.push(...(await aiChatOrderFails(page, size)));
+  fails.push(...(await aiChatStepsFails(page, size)));
   await page.evaluate(aiChatRestore);
   return fails;
 }
@@ -3932,6 +4010,150 @@ async function petSwitchScene() {
 }
 
 /**
+ * PERF5-PET (perf-1793474464493: a pet.overlay call ahead of each of the three worst native frames, the pet OFF): with
+ * the pet installed but off, a home/app/home cycle (hidden, shown, an app opened and closed) makes no pet.overlay
+ * bridge call - and PetSwitch's effect re-run on every reconnect (`__pet.overlay`) sends only a change, never off.
+ */
+async function petOverlayOffScene() {
+  const P = await window.__gw.mod("./apps/pages.ts");
+  const B = await window.__gw.mod("./bridge.ts");
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const fails = [];
+  const calls = [];
+  const pet = B.powos.pet;
+  const had = pet?.overlay;
+  if (!pet) return ["no powos.pet on the bridge"];
+  pet.overlay = (on) => (calls.push(on), Promise.resolve(!!on));
+  const setHidden = (h) => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => h });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (h ? "hidden" : "visible") });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  try {
+    P.installedApps.value = [...P.installedApps.value, { id: "local.pet", name: "Pet", version: "0.1.0", database: "local-pet", tier: 0, manifest: "{}" }];
+    await window.__gw.until(() => window.__pet);
+    await window.__gw.settled();
+    for (let i = 0; i < 3; i++) {
+      P.openApp("local.pet");
+      await window.__gw.frames(3);
+      setHidden(true);
+      await sleep(60);
+      setHidden(false);
+      P.closeApp();
+      await window.__gw.frames(3);
+      window.__pet.overlay(false); // the effect on the reconnect back home
+    }
+    const off = calls.length;
+    window.__pet.overlay(true);
+    window.__pet.overlay(true);
+    window.__pet.overlay(false);
+    window.__pet.overlay(false);
+    const changes = calls.length - off;
+    window.__petOverlay = `pet off: ${off} pet.overlay calls over 3 home/app/home cycles; on/on/off/off: ${changes} calls`;
+    console.warn(`[gate] pet-overlay-off: ${window.__petOverlay}`);
+    if (off) fails.push(`PERF5: ${off} pet.overlay bridge calls with the pet off (want 0): ${JSON.stringify(calls)}`);
+    if (changes !== 2) fails.push(`PERF5: on, on, off, off sent ${changes} pet.overlay calls (want 2: one per change)`);
+  } finally {
+    pet.overlay = had;
+    delete document.hidden;
+    delete document.visibilityState;
+    document.dispatchEvent(new Event("visibilitychange"));
+  }
+  return fails;
+}
+
+/**
+ * PERF5-STDB (perf-1793474464493: one SpacetimeDB message re-rendered 30 Tiles and 14 AppCells, AppCell "app~"): the
+ * registry's rows delivered again as fresh copies (a message, a reconnect's resubscribe) with one app renamed render
+ * only that app's cells - and the same rows again render nothing (apps/stable.ts).
+ */
+async function stdbRowsStableScene() {
+  const P = await window.__gw.mod("./apps/pages.ts");
+  const S = await window.__gw.mod("./state.ts");
+  const fails = [];
+  const row = (i, name) => ({ id: `gate.s${i}`, name: name ?? `Stable ${i}`, version: "1", database: "", tier: 0, manifest: JSON.stringify({ page: { entry: "index.js" } }) });
+  const base = Array.from({ length: 8 }, (_, i) => row(i));
+  P.installedApps.value = [...P.installedApps.value.filter((a) => !a.id.startsWith("gate.s")), ...base];
+  S.dock.value = [...S.dock.value.filter((k) => !k.startsWith("p:gate.s")), "p:gate.s1", "p:gate.s2", "p:gate.s3"];
+  await window.__gw.settled();
+  await window.__gw.frames(10);
+  const others = P.installedApps.value.filter((a) => !a.id.startsWith("gate.s"));
+  const count = async (rows) => {
+    window.__powosRenders.start();
+    window.__powosRenders.reset();
+    P.installedApps.value = [...others.map((a) => ({ ...a })), ...rows];
+    await window.__gw.frames(6);
+    const top = window.__powosRenders.top(500).byCount;
+    window.__powosRenders.stop();
+    const n = (name) => top.filter((r) => r.name === name || r.name === `memo(${name})`).reduce((s, r) => s + r.renders, 0);
+    return { cell: n("AppCell"), tile: n("Tile") };
+  };
+  const same = await count(base.map((r) => ({ ...r })));
+  const one = await count(base.map((r, i) => (i === 2 ? row(2, "Renamed 2") : { ...r })));
+  window.__stdbStable = `same rows again: ${same.cell} AppCell, ${same.tile} Tile; one row changed: ${one.cell} AppCell, ${one.tile} Tile`;
+  console.warn(`[gate] stdb-rows-stable: ${window.__stdbStable}`);
+  if (same.cell || same.tile) fails.push(`PERF5: equal rows again re-rendered ${same.cell} AppCell and ${same.tile} Tile (want 0)`);
+  // The renamed app's cell in the dock (and the drawer if mounted): its own cells only.
+  if (one.cell > 2) fails.push(`PERF5: one row changed re-rendered ${one.cell} AppCell (want <= 2: only that app's)`);
+  if (one.tile > 1) fails.push(`PERF5: one row changed re-rendered ${one.tile} Tile (want <= 1)`);
+  P.installedApps.value = others;
+  S.dock.value = S.dock.value.filter((k) => !k.startsWith("p:gate.s"));
+  return fails;
+}
+
+/**
+ * PERF5-GLASS (perf-1793474464493: nativeglass.ts:frame forced a 4 ms layout): with the live glass on and a surface's
+ * style written in a rAF every frame (what a gesture does), the glass loop reads no layout inside any rAF callback -
+ * it measures after the frame's layout (a ResizeObserver callback) - and still sends the moving regions.
+ */
+async function glassFrameLayoutScene() {
+  const N = await window.__gw.mod("./apps/native.ts");
+  const fails = [];
+  const sent = [];
+  const ch = new MessageChannel();
+  ch.port2.onmessage = (m) => sent.push(String(m.data));
+  const had = N.native.value;
+  N.native.value = ch.port1;
+  for (const f of N.fromNative) f("b.state 1");
+  let inRaf = 0, forced = 0, where = "";
+  const raf = window.requestAnimationFrame;
+  window.requestAnimationFrame = (cb) => raf.call(window, (t) => { inRaf++; try { cb(t); } finally { inRaf--; } });
+  const E = Element.prototype, H = HTMLElement.prototype;
+  const rect = E.getBoundingClientRect, ow = Object.getOwnPropertyDescriptor(H, "offsetWidth");
+  const note = () => {
+    if (!inRaf) return;
+    const st = new Error().stack ?? "";
+    if (/nativeglass\.ts/.test(st)) forced++, (where ||= st.split("\n").find((l) => /nativeglass\.ts/.test(l))?.trim() ?? "");
+  };
+  E.getBoundingClientRect = function () { note(); return rect.call(this); };
+  Object.defineProperty(H, "offsetWidth", { configurable: true, get() { note(); return ow.get.call(this); } });
+  const tile = document.querySelector(".home-tile");
+  try {
+    await window.__gw.settled();
+    await window.__gw.frames(4);
+    if (!tile) fails.push("no .home-tile to move");
+    const before = sent.filter((t) => /^b\.[fr] /.test(t)).length;
+    for (let i = 1; i <= 20 && tile; i++) {
+      await new Promise((ok) => window.requestAnimationFrame(() => ((tile.style.translate = `${i}px 0`), ok())));
+    }
+    await window.__gw.frames(8);
+    const regions = sent.filter((t) => /^b\.[fr] /.test(t)).length - before;
+    window.__glassLayout = `${forced} layout reads from nativeglass.ts inside a rAF over 20 moving frames; ${regions} region sets sent`;
+    console.warn(`[gate] glass-frame-layout: ${window.__glassLayout}`);
+    if (forced) fails.push(`PERF5: ${forced} layout reads from nativeglass.ts inside a rAF (first: ${where})`);
+    if (tile && regions < 5) fails.push(`PERF5: only ${regions} glass region sets sent while a tile moved 20 frames (want one per moved frame)`);
+  } finally {
+    window.requestAnimationFrame = raf;
+    E.getBoundingClientRect = rect;
+    Object.defineProperty(H, "offsetWidth", ow);
+    if (tile) tile.style.translate = "";
+    for (const f of N.fromNative) f("b.state 0");
+    N.native.value = had;
+  }
+  return fails;
+}
+
+/**
  * WS1 (10-31 15:37: home's surface re-made, then no "w.f" for ~9 s until the watchdog reloaded home): with the page's
  * rAF held (a WebView that paused it while hidden), a visibilitychange to hidden and back sends the windows' geometry
  * within 500 ms, and so does the host's "webwindows.resend" alone - neither waits for a frame.
@@ -4823,6 +5045,61 @@ async function aiScrollScene(r) {
   return r.page.evaluate(async (m, top) => (await importShim(m)).aiScrollAfter(top), chk, at.top);
 }
 
+/**
+ * E2E1: the phone journey's three home gestures with a real finger (tools/phone/verify/e2e-desktop.sh part 3, round 189
+ * read them as broken): a plain swipe up from empty home space opens the drawer (search not focused); home's search
+ * (the bar, or the dock's search button) tapped takes the focus; a hold on empty space enters edit mode.
+ */
+async function homeGesturesScene(r) {
+  const f = await fingerOf(r.page);
+  const fails = [];
+  const reset = () => r.page.evaluate(async () => { const S = await importShim("./state.ts"); S.drawer.value = 0; S.editing && (S.editing.value = false); document.activeElement?.blur?.(); });
+  // An empty spot of home's page, right half (the left is PowOS AI's pull-up corner), clear of anything that takes a touch.
+  const empty = () => r.page.evaluate(() => {
+    for (let y = innerHeight * 0.3; y <= innerHeight * 0.7; y += 12)
+      for (let x = innerWidth * 0.9; x >= innerWidth * 0.55; x -= 12) {
+        const e = document.elementFromPoint(x, y);
+        if (e && e.closest(".page-track") && !e.closest(".webwindow,.tile,.home-tile,.app,.panel,.widget,.island,button,a,input,textarea,.bar,.dock,[data-key]")) return [Math.round(x), Math.round(y)];
+      }
+    return null;
+  });
+  await f.wait(400);
+  let at = await empty();
+  if (!at) return ["E2E1: no empty spot on home"];
+  await f.touch("touchStart", [{ x: at[0], y: at[1] }]);
+  for (let i = 1; i <= 8; i++) { await f.touch("touchMove", [{ x: at[0], y: at[1] - i * 30 }]); await f.wait(16); }
+  await f.touch("touchEnd", []);
+  // Polled, not a fixed wait: under the full gate's load the drawer's settle took longer than 700 ms (it passed alone).
+  const until = (fn, ms) => r.page.waitForFunction(fn, { timeout: ms, polling: 50 }).then(() => true, () => false);
+  await until(() => !!document.querySelector(".home.open"), 4000);
+  const st = await r.page.evaluate(() => ({ open: !!document.querySelector(".home.open"), focused: !!document.activeElement?.matches(".bar textarea") }));
+  if (!st.open) fails.push("E2E1: a plain swipe up from empty home space didn't open the drawer");
+  if (st.focused) fails.push("E2E1: a plain swipe up focused the search");
+  await reset(); await f.wait(500);
+  const sp = await r.page.evaluate(() => {
+    const bar = document.querySelector(".home > .bar textarea"), btn = document.querySelector(".home .dock .app.dock-search");
+    const e = bar && bar.getBoundingClientRect().height > 2 ? bar : btn;
+    if (!e) return null;
+    const b = e.getBoundingClientRect();
+    return [Math.round(b.x + b.width / 2), Math.round(b.y + b.height / 2)];
+  });
+  if (!sp) fails.push("E2E1: no search on home (neither the bar nor the dock's button)");
+  else {
+    await f.tap(sp);
+    const ok = await until(() => document.activeElement?.matches(".bar textarea"), 4000);
+    if (!ok) fails.push("E2E1: a tap on home's search didn't focus its field");
+  }
+  await reset(); await f.wait(500);
+  at = await empty();
+  if (!at) return [...fails, "E2E1: no empty spot on home to hold"];
+  await f.touch("touchStart", [{ x: at[0], y: at[1] }]);
+  await f.wait(900);
+  await f.touch("touchEnd", []);
+  if (!(await until(() => !!document.querySelector(".home.editing"), 3000))) fails.push("E2E1: a hold on empty home space didn't enter edit mode");
+  await reset();
+  return fails;
+}
+
 /** TI1 with a finger: Discord's minimise and then Settings' close, tapped where they are. */
 async function tileBarsScene(r) {
   const f = await fingerOf(r.page);
@@ -5281,6 +5558,7 @@ async function gridDropAt([name, x, y]) {
   const { W, drag, send, rest } = window.__wg;
   await drag(x, y, true);
   await new Promise((ok) => setTimeout(ok, 250));
+  await Promise.all([...document.querySelectorAll(".ww-drop")].flatMap((g) => g.getAnimations()).map((a) => a.finished.catch(() => {})));
   const p = W.placeView.value ?? W.snapView.value ?? W.dropView.value;
   const fails = window.__wg.ghostFails(name, p);
   send("pointerup", x, y);
@@ -6732,6 +7010,13 @@ try {
       console.log(`     pet-switch: ${await r.page.evaluate(() => window.__petSwitch).catch(() => "?")}`);
       return fails;
     })));
+    // PERF5 (perf-1793474464493): no pet.overlay with the pet off, stable registry rows, the glass measure after layout.
+    for (const [name, fn, out] of [["pet-overlay-off", petOverlayOffScene, "__petOverlay"], ["stdb-rows-stable", stdbRowsStableScene, "__stdbStable"], ["glass-frame-layout", glassFrameLayoutScene, "__glassLayout"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(fn);
+        console.log(`     ${name}: ${await r.page.evaluate((k) => window[k], out).catch(() => "?")}`);
+        return fails;
+      })));
   }
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
@@ -6814,6 +7099,15 @@ try {
         }
         return [];
       })));
+  // The blank-home detector (ui/homedrawn.ts) quiet under every full-screen sheet over home (false "home is blank": 10-31
+  // 14:14 the AI page, 20:05 Settings › style), still loud for a home whose dock and bar are gone; the pull window never.
+  if (process.env.SHELL_PAGES !== "0") {
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-blank-covered", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(homeBlankCovered))));
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "home-blank-pull", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
+      const why = await r.page.evaluate(async () => (await window.__gw.mod("./ui/homedrawn.ts")).homeBlank());
+      return why ? [`the pull window reports home blank: "${why}"`] : [];
+    })));
+  }
   // (ai-still-broken and ai-needs-you-try retired 2026-10-31: Progress no longer lists the board's rows to answer -
   // works / still broken live only on the manager's try messages, which ai-chat checks.)
   // The AI page is one chat: things to try as the manager's message, ⋯ for the rest, older on scroll-up (2026-10-31).
@@ -6896,6 +7190,28 @@ try {
       runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `launcher-home-gesture-pull-${kind}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async (k) => (await importShim("./dev/launcher-adopt-check.js")).homeGestureCloses(k), kind))));
     }
   }
+  // RO1: home folded/unfolded, the drawer, edit mode and a long query in the bar raise no "ResizeObserver loop completed
+  // with undelivered notifications" (grow.tsx fit() in its observer resized the bar in the same loop; phone log 10-31).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ro-loop", dockOpensView.unfolded).then((r) => whenReady(r, async () => {
+      await r.page.evaluateOnNewDocument(() => {
+        const RO = window.ResizeObserver; window.__roLog = []; window.__roErr = [];
+        window.ResizeObserver = class extends RO { constructor(cb) { const where = (new Error().stack || "").split("\n").slice(2, 4).join(" | "); super((es, o) => { window.__roLog.push(performance.now().toFixed(0) + " " + where + " " + es.map((e) => e.target.className && String(e.target.className).slice(0, 30)).join(",")); if (window.__roLog.length > 60) window.__roLog.shift(); return cb(es, o); }); } };
+        addEventListener("error", (e) => { if (/ResizeObserver/.test(e.message)) window.__roErr.push(window.__roLog.slice(-8)); });
+      });
+      await r.page.reload(); await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS });
+      const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      await wait(1500);
+      for (const [w, h] of [[404, 899], [821, 883], [404, 899], [821, 883]]) { await r.page.setViewport({ width: w, height: h }); await wait(800); }
+      await r.page.evaluate(async () => { const S = await importShim("./state.ts"); S.drawer.value = 1; await new Promise((o) => setTimeout(o, 700)); S.drawer.value = 0; S.editing.value = true; await new Promise((o) => setTimeout(o, 700)); S.editing.value = false; S.query.value = "hello there this is a long query that wraps the bar"; await new Promise((o) => setTimeout(o, 700)); S.query.value = ""; });
+      await wait(800);
+      const errs = await r.page.evaluate(() => window.__roErr);
+      return errs.length ? ["RO1: ResizeObserver loop errors; the observers' callbacks before each: " + JSON.stringify(errs)] : [];
+    })));
+  // E2E1: the e2e journey's home gestures with a finger (swipe up -> drawer, search tap -> focused, hold -> edit mode).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const label of ["folded", "unfolded"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `e2e-home-gestures-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => homeGesturesScene(r))));
   // Home's search as a dock button (dev/dock-search-check.js; the user, 2026-10-31): no .bar, the button centred in the
   // dock, a tap expands it in place focused (not the launcher), folded and unfolded, bottom and side docks.
   if (process.env.SHELL_PAGES !== "0")

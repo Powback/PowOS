@@ -5,7 +5,11 @@
 # PASS/FAIL); the manager looks at them as a user. Rules kept here so both journeys keep them:
 #   - NEVER a touch on the verify status pill (VerifyRun.kt "PowOS verify status", top centre): every DOWN is checked
 #     against its window frame (+48 px) right before it is made, and refused (a FAIL line, no touch) inside it;
-#   - a real finger (touch IRQs move) ends the run at once: exit 3, the runner re-queues it;
+#   - only while the user is idle (manager rule): e2e_idle_gate before each journey (part) - the last user input > 120 s
+#     ago and the screen Awake, else "journey <name>: skipped - user active N s ago"; a touch during it (touch IRQs move,
+#     or the last user activity runs > 1 s past the journey's own last injected input - touched(), at every chk and
+#     step) stops it at once: "journey <name>: aborted - the user touched the phone", the restore runs. Both exit 3 (the
+#     runner re-queues it; not a FAIL) and land in the round's skipped.txt, which the last part's mail names;
 #   - only what the journey opened is closed (new tasks of its apps, Linux apps it started); the page, the screen state
 #     and the app in front it started from come back; the layout (home.get + home.wide) must be the same at the end;
 #   - a step's FAIL doesn't end the journey (more screenshots for the manager): exit 0 with FAIL lines = a FAIL.
@@ -21,7 +25,12 @@ L=$HOME/.cache/powos-verify.lock
 TEST_APP=${TEST_APP:-com.oneplus.calculator}
 
 # Command-only calls must not drain a surrounding read loop (cleanup must visit every task).
-sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+# An injecting call (input tap/swipe/motionevent/keyevent/text) also stamps the phone's boot clock at its end into
+# $E2E_INJ, in the same shell: touched() tells the journey's own input from the user's by it.
+E2E_INJ=/data/local/tmp/powos-e2e-lastinj
+sh_() {
+  local m=; case "$*" in *"input tap"*|*"input swipe"*|*"input motionevent"*|*"input keyevent"*|*"input text"*|*"input draganddrop"*) m="; read u r < /proc/uptime; echo \$u > $E2E_INJ" ;; esac
+  "$A" shell "su -c '$*$m'" </dev/null 2>/dev/null | tr -d '\r'; }
 # ash: a script on stdin as Android root (any quoting inside).
 ash() { "$A" shell "su -c 'sh -s'" 2>/dev/null | tr -d '\r'; }
 # device_state_set <state>: set fold state; on emu, state 3 (inner) is a no-op, state 0 (cover) prints SKIP.
@@ -37,8 +46,59 @@ device_state_reset() {
 }
 # us: a script text inside PowOS as the session user (user.sh).
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
-irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
-chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; sh_ "input motionevent CANCEL 1 1" >/dev/null; exit 3; }; }
+# irq: the touch panels' interrupt count (only a real finger moves it). Read through useract: the old single-quoted awk
+# inside sh_'s su -c '...' came back empty on the phone, so I0 was "" and chk never saw a touch (10-31).
+irq() { useract | sed -nE 's/.*irq=([0-9]*).*/\1/p'; }
+# --- the user's idle time and their touches (manager rule: a journey runs only while the user is idle) ----------------
+# useract: one read-only call -> "idle=<s> wake=<Awake|Dozing|..> since=<ms> irq=<n>". idle: seconds since the user's last
+# input (dumpsys power: the newest of lastUserActivityTime / lastUserActivityTimeNoChangeLights /
+# mLastUserActivityTime(excludingAttention), all SystemClock.uptimeMillis; "now" in that clock = mLastWakeTime + its
+# "ms ago"). /proc/uptime is the boot clock (it also counts deep sleep), read in the same call: the two clocks' offset
+# turns the last activity into boot time, so since = last activity - the journey's own last injected input ($E2E_INJ)
+# in ms (negative/0: nothing after it; empty: no mark). Unreadable -> idle=-1 (not idle). Never wakes the screen.
+useract() {
+  [ "${POWOS_DEVICE:-phone}" = emu ] && { echo "idle=86400 wake=Awake since= irq="; return; }
+  sh_ "read b r < /proc/uptime; echo B \$b; [ -s $E2E_INJ ] && echo I \$(cat $E2E_INJ); echo Q \$(awk \"/touch-0/{s+=\\\$2+\\\$3+\\\$4+\\\$5+\\\$6+\\\$7+\\\$8+\\\$9} END{print s}\" /proc/interrupts); dumpsys power | grep -E \"mWakefulness=|mLastWakeTime=|astUserActivityTime\"" | awk '
+    /^B /{b=$2*1000} /^I /{i=$2*1000} /^Q /{q=$2}
+    /mWakefulness=/ && w==""{sub(/.*mWakefulness=/,""); w=$1}
+    /mLastWakeTime=/{split($0,a,/[=( ]+/); for(k in a) if(a[k]=="mLastWakeTime") t=a[k+1]; if(match($0,/\(([0-9]+) ms ago/)) now=t+substr($0,RSTART+1,RLENGTH-8)}
+    /astUserActivityTime/{v=$0; sub(/^[^=]*=/,"",v); v=v+0; if(v>last) last=v}
+    END{ if(now>0 && last>0){ idle=int((now-last)/1000); s=""; if(i>0) s=int(last+(b-now)-i) } else idle=-1
+      printf "idle=%s wake=%s since=%s irq=%s\n", idle, (w==""?"?":w), s, q }'
+}
+# e2e_idle_gate: before the journey - the user idle > E2E_IDLE_S (120) s and the screen Awake (asleep()'s rule: the
+# check never wakes it). Not idle: "journey <name>: skipped - user active N s ago" in the log, steps.txt and the round's
+# skipped.txt, and exit 3 - the runner puts it back for the next window (not a FAIL).
+e2e_jname() { echo "e2e-$JOURNEY part $PART/$LAST"; }
+e2e_idle_gate() {
+  local r idle wake why=; r=$(useract); idle=$(sed -nE 's/.*idle=(-?[0-9]+).*/\1/p' <<<"$r"); wake=$(sed -nE 's/.*wake=([^ ]*).*/\1/p' <<<"$r")
+  log "idle check: $r (need idle > ${E2E_IDLE_S:-120} s, Awake)"
+  if [ "${wake:-?}" != Awake ] && [ "$wake" != "?" ]; then why="the screen is $wake (not woken - rule)"
+  elif [ "${idle:--1}" -lt 0 ]; then why="user activity unreadable ($r)"
+  elif [ "$idle" -le "${E2E_IDLE_S:-120}" ]; then why="user active $idle s ago"; fi
+  [ -z "$why" ] && return 0
+  e2e_skip "journey $(e2e_jname): skipped - $why"
+}
+# e2e_skip <line>: a journey that didn't run / stopped for the user - logged, a SKIP line in steps.txt and the round's
+# skipped.txt on the phone (e2e_finish reports it), exit 3 (re-queued; not a FAIL). e2e_abort restores and publishes.
+e2e_skip() {
+  log "$1"; _res SKIP "$1"
+  [ -n "${PDIR:-}" ] && printf '%s\n' "$(date +%H:%M:%S) $1" | "$A" shell "su -c 'mkdir -p $PDIR; cat >> $PDIR/skipped.txt; chmod a+r $PDIR/skipped.txt'" >/dev/null 2>&1
+  echo "SKIP: $1"; exit 3
+}
+# touched [where]: the user touched the phone during the journey - the touch IRQs moved (a real finger only), or the
+# last user activity is more than E2E_TOUCH_SLACK_MS (1000) past the journey's own last injected input. Checked by
+# chk and before every step; the activity half only from the end of setup (E2E_WATCH=1: setup's own unfold and lock-face
+# swipe poke it) to the restore. Then: no more input, the journey's own put-away (e2e_abort -> e2e_restore), exit 3.
+touched() {
+  local r s q; r=$(useract); s=$(sed -nE 's/.*since=(-?[0-9]+).*/\1/p' <<<"$r"); q=$(sed -nE 's/.*irq=([0-9]+).*/\1/p' <<<"$r")
+  if { [ -n "$q" ] && [ -n "${I0:-}" ] && [ "$q" != "$I0" ]; } || { [ "${E2E_WATCH:-0}" = 1 ] && [ -n "$s" ] && [ "$s" -gt "${E2E_TOUCH_SLACK_MS:-1000}" ]; }; then
+    sh_ "input motionevent CANCEL 1 1" >/dev/null 2>&1
+    log "touch seen at ${1:-a step}: $r (irq at start ${I0:-?})"
+    e2e_skip "journey $(e2e_jname): aborted - the user touched the phone"
+  fi
+}
+chk() { touched "$1"; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 
 # ev <js> [page]: a CDP eval, its answer unquoted when it is a JSON string (cdp.sh prints "\"opened\"" - a quoted answer
@@ -87,10 +147,19 @@ back() { sh_ "input keyevent 4"; sleep "${1:-0.8}"; }
 
 # pt <js expression of an element>: its centre in device px "x y", "none" (no element) or "off" (off screen / hidden).
 pt() { ev "(()=>{const e=($1);if(!e)return 'none';const r=e.getBoundingClientRect(),d=devicePixelRatio;if(r.width<2||r.height<2||r.bottom<1||r.top>innerHeight-1||r.right<1||r.left>innerWidth-1)return 'off';return Math.round((r.x+r.width/2)*d)+' '+Math.round((r.y+r.height/2)*d)})()"; }
+# Home's search, by the current rules (26e5c496/a481983d SW1): a bar on home (unfolded by default) is tapped in its
+# field; a search docked as the dock's button (folded by default) is tapped and opens the launcher with the bar
+# focused. searchpt: "x y" of what to tap, or none/off. SEARCHED: the field the keyboard is in after it.
+SEARCHPT="(document.querySelector('.home > .bar textarea')&&document.querySelector('.home > .bar').getBoundingClientRect().height>2?document.querySelector('.home > .bar textarea'):document.querySelector('.home .dock .app.dock-search'))"
+SEARCHED="document.activeElement&&document.activeElement.matches('.bar textarea')?'yes':'no'"
+searchpt() { pt "$SEARCHPT"; }
 # A dock cell by its key prefix (read only).
 dockel() { echo "[...document.querySelectorAll('.home .dock .app[data-key]')].find(a=>a.dataset.key.startsWith('$1'))"; }
 # winrects: every window on screen now (windows.list: not minimised, not on another page), "l t r b,l t r b" in device px.
-winrects() { local v; v=$(hcall windows.list "[]" "l=>l.filter(w=>!w.minimised&&!w.away&&w.bounds).map(w=>w.bounds.join(' ')).join(',')"); case $v in ERR*) echo "" ;; *) echo "$v" ;; esac; }
+# Both window models: the old floating tasks (windows.list) and the web windows (W1: .webwindow elements of home's page,
+# docs/WEB_WINDOWS.md) - round 189 read only windows.list, saw [] with Chrome open as a web window, and pulled/held on it.
+winrects() { local v w; v=$(hcall windows.list "[]" "l=>l.filter(w=>!w.minimised&&!w.away&&w.bounds).map(w=>w.bounds.join(' ')).join(',')"); case $v in ERR*) v="" ;; esac
+  w=$(ev "$WWRECTS"); case $w in none|ERR*|"") ;; *) v=${v:+$v,}$w ;; esac; echo "$v"; }
 # freept <window bounds or ""> <way -1|1|0> <length> [min x, 0..1] [min y, 0..1]: an empty spot on home's page (no tile,
 # app, bar, dock; outside the window) with room for a sideways swipe that long (float-touch.sh's: a short swipe doesn't
 # turn a page). Never under ANY window on screen: elementFromPoint sees only home's page, so a spot under a floating
@@ -100,17 +169,36 @@ freept() {
   # left its only roomy spot (2086-2116, between it and the side dock) between grid columns, so a 116 px swipe from
   # the left gap was all the check did and the page "didn't change" (e2e-desktop 1029-1430 [36-page2]).
   local ws; ws=$(winrects)
-  ev "(()=>{const b='$1'.split(' ').filter(Boolean).map(Number),ws='$ws'.split(',').filter(Boolean).map(s=>s.split(' ').map(Number)),r=devicePixelRatio,d=${2:-0},len=${3:-0},W=innerWidth*r;let best=null,room=-1;const x0=innerWidth*${4:-.06},xs=[];for(let x=${4:-.06};x<=.94;x+=.04)xs.push(innerWidth*x);for(const w of [b,...ws])if(w.length===4)for(const e of [(w[2]+61)/r,(w[0]-61)/r])if(e>=x0&&e<innerWidth)xs.push(e);for(let y=${5:-.2};y<=.75;y+=.05)for(const cx of xs){const cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;if(ws.some(w=>px>=w[0]-40&&px<=w[2]+40&&py>=w[1]-140&&py<=w[3]+40))continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.tile,.home-tile,.app,.panel,.widget,.island,.owl,button,a,input,textarea,.bar,.dock,[data-key]'))continue;const m=d<0?px-20:d>0?W-20-px:len;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()"
+  ev "(()=>{const b='$1'.split(' ').filter(Boolean).map(Number),ws='$ws'.split(',').filter(Boolean).map(s=>s.split(' ').map(Number)),r=devicePixelRatio,d=${2:-0},len=${3:-0},W=innerWidth*r;let best=null,room=-1;const x0=innerWidth*${4:-.06},xs=[];for(let x=${4:-.06};x<=.94;x+=.04)xs.push(innerWidth*x);for(const w of [b,...ws])if(w.length===4)for(const e of [(w[2]+61)/r,(w[0]-61)/r])if(e>=x0&&e<innerWidth)xs.push(e);for(let y=${5:-.2};y<=.75;y+=.05)for(const cx of xs){const cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;if(ws.some(w=>px>=w[0]-40&&px<=w[2]+40&&py>=w[1]-140&&py<=w[3]+40))continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.webwindow,.tile,.home-tile,.app,.panel,.widget,.island,.owl,button,a,input,textarea,.bar,.dock,[data-key]'))continue;const m=d<0?px-20:d>0?W-20-px:len;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()"
 }
 
 # Tasks and windows.
 tasks() { sh_ "am stack list" | grep -E 'taskId=[0-9]+:' | sed -nE 's/.*taskId=([0-9]+): ([^ ]+).*(visible=(true|false)).*/\1 \2 \4/p'; }
-tvis() { sh_ "am stack list" | grep -E "taskId=$1:" | grep -oE 'visible=(true|false)' | head -1 | cut -d= -f2; }
-tbounds() { sh_ "am stack list" | grep -E "taskId=$1:" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ' | xargs; }
-# win <key: pkg or l:app> <field>: from windows.list (front first): id | minimised | away | bounds | front
-win() { hcall windows.list "[]" "l=>{const w=l.find(w=>w.pkg==='$1'||w.app==='$1');if(!w)return 'none';const f='$2';return f==='bounds'?(w.bounds||[]).join(' '):f==='front'?String(l.find(x=>!x.minimised&&!x.away)===w):String(w[f])}"; }
-# waitwin <key> <s>: up to s seconds for its window; prints the task id or "none".
-waitwin() { local i id=none; for i in $(seq 1 "$2"); do id=$(win "$1" id); [ "$id" != none ] && [ -n "$id" ] && break; sleep 1; done; echo "$id"; }
+# Web windows (W1, docs/WEB_WINDOWS.md): their ids are "w<id>" here (the page's data-wwid), task ids stay plain numbers.
+# The truth is the host's list (webwindows.list: key "a:<drawer key>"/"l:<app>", state, task) and the page's element
+# (.webwindow[data-wwid]: where it is on screen now, device px). WWRECTS: every web window shown on screen, "l t r b,...".
+WWRECTS="(()=>{const d=devicePixelRatio;return [...document.querySelectorAll('.webwindow[data-wwid]')].map(e=>e.getBoundingClientRect()).filter(r=>r.width>2&&r.height>2&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight).map(r=>[r.left,r.top,r.right,r.bottom].map(v=>Math.round(v*d)).join(' ')).join(',')})()"
+# wwel <w-id> <js fn of the element -> string>: its frame element in home's page ("none" when it has none).
+wwel() { ev "(()=>{const e=document.querySelector('.webwindow[data-wwid=\"${1#w}\"]');return e?String(($2)(e)):'none'})()"; }
+# wwrect <w-id>: its frame on screen, "l t r b" device px ("" when it isn't on screen: minimised, another page).
+wwrect() { local v; v=$(wwel "$1" "e=>{const r=e.getBoundingClientRect(),d=devicePixelRatio;return r.width<2||r.height<2||r.right<1||r.bottom<1||r.left>innerWidth-1||r.top>innerHeight-1?'':[r.left,r.top,r.right,r.bottom].map(v=>Math.round(v*d)).join(' ')}"); [ "$v" = none ] && v=""; echo "$v"; }
+# wwhost <w-id> <field>: from the host's webwindows.list - state | task | key | gone (true when it isn't listed).
+wwhost() { hcall webwindows.list "[]" "l=>{const w=l.find(w=>w.id===${1#w});return '$2'==='gone'?String(!w):w?String(w['$2']):'none'}"; }
+tvis() { case $1 in w*) [ -n "$(wwrect "$1")" ] && [ "$(wwhost "$1" state)" = floating ] && echo true || echo false; return ;; esac
+  sh_ "am stack list" | grep -E "taskId=$1:" | grep -oE 'visible=(true|false)' | head -1 | cut -d= -f2; }
+tbounds() { case $1 in w*) wwrect "$1"; return ;; esac
+  sh_ "am stack list" | grep -E "taskId=$1:" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ' | xargs; }
+# win <key: pkg or l:app> <field>: id | minimised | away | bounds | front. A web window first (id "w<id>"; front = the
+# top .webwindow in its page's DOM order), else the old floating window (windows.list, front first).
+win() {
+  local v; v=$(hcall webwindows.list "[]" "l=>{const K='$1',w=l.filter(w=>w.key===K||w.key==='a:'+K||w.key.startsWith('a:'+K+'/')).pop();if(!w)return 'none';const f='$2',e=document.querySelector('.webwindow[data-wwid=\"'+w.id+'\"]'),r=e&&e.getBoundingClientRect(),on=!!r&&r.width>2&&r.right>0&&r.left<innerWidth&&r.bottom>0&&r.top<innerHeight,d=devicePixelRatio;if(f==='id')return 'w'+w.id;if(f==='minimised')return String(w.state==='minimised');if(f==='away')return String(w.state==='floating'&&!on);if(f==='bounds')return on?[r.left,r.top,r.right,r.bottom].map(v=>Math.round(v*d)).join(' '):'';if(f==='front'){const s=e&&e.parentElement?[...e.parentElement.querySelectorAll(':scope > .webwindow[data-wwid]')]:[];return String(!!e&&s[s.length-1]===e)}return String(w[f])}")
+  case $v in none|ERR*|"") ;; *) echo "$v"; return ;; esac
+  hcall windows.list "[]" "l=>{const w=l.find(w=>w.pkg==='$1'||w.app==='$1');if(!w)return 'none';const f='$2';return f==='bounds'?(w.bounds||[]).join(' '):f==='front'?String(l.find(x=>!x.minimised&&!x.away)===w):String(w[f])}"
+}
+# waitwin <key> <s>: up to s seconds for its window; prints its id (a task, or "w<id>" for a web window) or "none".
+waitwin() { local i id=none; for i in $(seq 1 "$2"); do id=$(win "$1" id); [ "$id" != none ] && [ -n "$id" ] && case $id in ERR*) ;; *) break ;; esac; id=none; sleep 1; done; echo "$id"; }
+# wgone <id>: true when that window is gone (a task: not in am stack list; a web window: not in webwindows.list).
+wgone() { case $1 in w*) [ "$(wwhost "$1" gone)" = true ] ;; *) [ -z "$(tasks | grep "^$1 ")" ] ;; esac; }
 # wframe <title text>: that window's frame (a plain substring: "PowOS window bar 12}" - the } ends the title).
 wframe() { sh_ "dumpsys window windows" | awk -v p="$1" '/^ *Window #/{f=(index($0,p)>0)} f' | grep -oE ' frame=\[-?[0-9]+,-?[0-9]+\]\[-?[0-9]+,-?[0-9]+\]' | head -1 | tr -c '0-9\n-' ' ' | xargs; }
 dp() { echo $(($1 * DENS / 160)); }
@@ -121,9 +209,14 @@ screenrect() { set -- $1; [ $# -ge 4 ] || { echo "$*"; return; }
   [ -n "${INST:-}" ] || INST=$(sh_ "dumpsys display" | grep -E "^  DisplayDeviceInfo" | grep " state ON," | grep -oE "installOrientation [0-3]" | head -1 | cut -d" " -f2)
   case ${INST:-0} in 3) echo "$((W - $4)) $1 $((W - $2)) $3" ;; 1) echo "$2 $((H - $3)) $4 $((H - $1))" ;; 2) echo "$((W - $3)) $((H - $4)) $((W - $1)) $((H - $2))" ;; *) echo "$*" ;; esac; }
 # closebtn <task>: its title bar's close button (21 dp from the bar's right), "x y" or "".
-closebtn() { local b; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b; echo "$(($3 - $(dp 21))) $((($2 + $4) / 2))"; }
+closebtn() { case $1 in w*) wwpt "$1" .ww-close; return ;; esac; local b; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b; echo "$(($3 - $(dp 21))) $((($2 + $4) / 2))"; }
+# wwpt <w-id> <selector>: the centre of that element inside the web window, "x y" device px, or "".
+wwpt() { local v; v=$(wwel "$1" "e=>{const b=e.querySelector('$2');if(!b)return '';const r=b.getBoundingClientRect(),d=devicePixelRatio;return r.width<1?'':Math.round((r.left+r.width/2)*d)+' '+Math.round((r.top+r.height/2)*d)}"); [ "$v" = none ] || echo "$v"; }
+# grippt <id>: its resize grip (bottom right), "x y" or "" - a web window's .ww-grip-br, else the old grip window.
+grippt() { case $1 in w*) wwpt "$1" ".ww-grip-se"; return ;; esac; local g; g=$(wframe "PowOS window grip $1}"); [ -n "$g" ] || return 0; set -- $g; echo "$((($1 + $3) / 2)) $((($2 + $4) / 2))"; }
 # barpt <task>: a spot on its title bar for a drag: the left part, away from the buttons, clear of the pill if it can.
-barpt() { local b x r; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b
+barpt() { case $1 in w*) local t; t=$(wwel "$1" "e=>{const b=e.querySelector('.webwindow-title');if(!b)return '';const r=b.getBoundingClientRect(),d=devicePixelRatio;return Math.round((r.left+r.width/4)*d)+' '+Math.round((r.top+r.height/2)*d)}"); [ "$t" = none ] || echo "$t"; return ;; esac
+  local b x r; b=$(wframe "PowOS window bar $1}"); [ -n "$b" ] || return 0; set -- $b
   r=$(pillrect); x=$(($1 + ($3 - $1) / 4))
   if [ -n "$(echo $r)" ]; then set -- "$@" $r; [ "$x" -ge $(($5 - 60)) ] && [ "$x" -le $(($7 + 60)) ] && x=$(($1 + $(dp 24))); fi
   echo "$x $((($2 + $4) / 2))"; }
@@ -154,6 +247,7 @@ EOF
 }
 # step <slug> <what the user does / sees>: the screenshot of this step, now.
 step() {
+  [ -n "${I0:-}" ] && touched "step $1"
   [ $N -lt $HI ] && N=$((N + 1)); CUR=$(printf '%02d-%s.png' "$N" "$1"); CURD=$2; CURN=0
   echo "-- $CUR: $2"
   "$T/shot.sh" --phone "$PDIR/$CUR" >/dev/null 2>&1; local rc=$?
@@ -214,7 +308,10 @@ chmod -R a+rX /data/powos/root/home/powos/design-qa/e2e-$JOURNEY
 EOF
 }
 mail_manager() {
-  printf 'powos comms send manager %q --from e2e\n' "E2E round $ROUND ready: $UDIR" > "$OUT/mail.sh"
+  local msg="E2E round $ROUND ready: $UDIR"
+  # The round's skipped / aborted journeys (user active, a touch): named, so a missing part isn't read as a pass.
+  [ -n "${sk:-}" ] && msg="$msg - skipped/aborted (re-queued, not FAILs): $(printf '%s\n' "$sk" | cut -d' ' -f2- | paste -sd';' - | sed 's/;/; /g')"
+  printf 'powos comms send manager %q --from e2e\n' "$msg" > "$OUT/mail.sh"
   # Capped: a hung `powos comms send` ran the App API journey past its 300 s budget after its last step (2026-10-23).
   perl -e 'alarm shift; exec @ARGV' 20 "$T/user.sh" "$OUT/mail.sh" >/dev/null 2>&1 && log "mailed the manager: E2E round $ROUND ready: $UDIR" || log "mail to the manager failed"
 }
@@ -229,6 +326,7 @@ e2e_setup() {
   . "$here/window-lock.sh"
   window_lock "e2e-$JOURNEY" 120
   trap 'e2e_abort' EXIT
+  e2e_idle_gate
   I0=$(irq)
   e2e_logcat_start
   if [ "$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")" != Awake ]; then
@@ -272,11 +370,13 @@ e2e_setup() {
   # The journey starts on page 1 (PowOS AI's page or another one: back to it at the end).
   hemit system.home null
   log "on: ${W}x${H} @${DENS} dpi, home page $PAGE0, layout $LAY0"
+  # From here a user activity past the journey's own last input is the user: the mark starts now.
+  sh_ "read u r < /proc/uptime; echo \$u > $E2E_INJ"; E2E_WATCH=1
 }
 # Everything the journey opened closed, the start state back (also on an abort: a touch, the budget, a FAIL exit).
 RESTORED=0
 e2e_restore() {
-  [ $RESTORED = 1 ] && return 0; RESTORED=1
+  [ $RESTORED = 1 ] && return 0; RESTORED=1; E2E_WATCH=0
   e2e_logcat_stop
   # Setup never read the start state (the screen asleep, no window): nothing of the journey's to close - without
   # TASKS0 every task looked new and a user's Linux window was closed (resize-probe, 2026-10-23 18:38).
@@ -329,6 +429,8 @@ e2e_finish() {
   local lay; lay=$(layout)
   [ "$lay" = "$LAY0" ] && pass "the home layout is unchanged (home.get + home.wide)" || fail "the home layout CHANGED during the journey ($LAY0 -> $lay) - check home.wide.backup"
   publish
+  sk=$(sh_ "cat $PDIR/skipped.txt 2>/dev/null")
+  [ -n "$sk" ] && log "skipped / aborted in this round so far (not FAILs, re-queued):" && printf '%s\n' "$sk" | sed 's/^/  /' | tee -a "$OUT/log.txt"
   [ "$PART" = "$LAST" ] && mail_manager
   DONE=1
   local s="e2e-$JOURNEY round $ROUND part $PART/$LAST: $NPASS passed, $NFAIL failed - $UDIR"
