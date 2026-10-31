@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { computed } from "@preact/signals";
 import { AppCell, AppIcon } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
-import { drawerOpen, pageDecision, sampleVx } from "./gesture.ts";
+import { drawerOpen, eventTime, pageDecision, sampleVx } from "./gesture.ts";
 import { PageDots, paintDots } from "./pagedots.tsx";
 import { apps, byKey, chatting, query, recent, stored } from "../state.ts";
 import { library } from "./library.tsx";
@@ -240,7 +240,7 @@ function Pages() {
     st.x0 = t.clientX;
     st.y0 = t.clientY;
     st.lock = (e.target as Element).closest?.(".letter-bar") ? "y" : "";
-    st.samples = [[t.clientX, performance.now()]];
+    st.samples = [[t.clientX, eventTime(e)]];
   };
   const move = (e: TouchEvent) => {
     const t = e.touches[0];
@@ -248,7 +248,7 @@ function Pages() {
     const dx = t.clientX - st.x0;
     if (!st.lock && Math.hypot(dx, t.clientY - st.y0) >= 10) st.lock = Math.abs(dx) > Math.abs(t.clientY - st.y0) ? "x" : "y";
     if (st.lock !== "x") return;
-    st.samples.push([t.clientX, performance.now()]);
+    st.samples.push([t.clientX, eventTime(e)]);
     if (st.samples.length > 12) st.samples.shift();
     const off = (view === 0 && dx > 0) || (view === 1 && dx < 0) ? dx / 3 : dx;
     put(-view * width() + off, 0);
@@ -258,7 +258,7 @@ function Pages() {
     if (st.lock !== "x") return;
     st.lock = "";
     const dx = (e.changedTouches[0]?.clientX ?? st.x0) - st.x0;
-    const { dir } = pageDecision(dx, dx, sampleVx(st.samples), width());
+    const { dir } = pageDecision(dx, dx, sampleVx(st.samples, eventTime(e)), width());
     const to = Math.max(0, Math.min(1, view + dir));
     setView(to);
     put(-to * width(), 220);

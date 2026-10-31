@@ -323,6 +323,8 @@ interface Gesture {
   /** A page settle was in flight at touch-down: how far (px) the track still was from the page's rest. */
   base: number;
   t0: number;
+  /** The release's event time (ms, performance.now()'s clock): the velocity is the finger's up to it. */
+  up: number;
   /** Where it started: a tap closes the launcher unless it was on something that takes taps. */
   target: Element;
   own: boolean;
@@ -390,7 +392,7 @@ for (const type of ["pointerup", "pointercancel"] as const) addEventListener(typ
 export const windowGestureActive = () => windowPointers.size > 0;
 
 /** A touch down on home: what's under it, and what the drawer and the panels are doing. */
-function startGesture(x: number, y: number, target: Element) {
+function startGesture(x: number, y: number, target: Element, t: number) {
   // A new touch while one is under way: the old one's end was lost.
   if (g) abandon();
   // An open folder (ui/folderview.tsx) takes its own taps and swipes (down closes it).
@@ -401,12 +403,13 @@ function startGesture(x: number, y: number, target: Element) {
   g = {
     x0: x,
     y0: y,
-    last: [x, y, performance.now()],
+    last: [x, y, t],
     v: 0,
     mode: null,
-    samples: [[x, performance.now()]],
+    samples: [[x, t]],
     base: trackBase(),
-    t0: performance.now(),
+    t0: t,
+    up: t,
     open: drawer.value > 0,
     notif: notif.value,
     ...listUnder(target),
@@ -447,20 +450,22 @@ function listUnder(target: Element) {
 const handsOff = () => !!(carry.value || dockDrag.value || held.value) || windowGestureActive();
 
 /** A finger moving: its velocity, the gesture's kind once it's clear (SLOP), then what follows it. */
-function moveGesture(x: number, y: number, e: Event | null) {
+function moveGesture(x: number, y: number, e: Event | null, t: number) {
   if (!g || g.own) return;
   if (handsOff()) return abandon();
   const dx = x - g.x0;
   const dy = y - g.y0;
-  track(g, x, y);
+  track(g, x, y, t);
   if (!g.mode && !claim(g, dx, dy)) return;
   if (e?.cancelable) e.preventDefault();
   dragTo(g, dx, dy);
 }
 
-/** Velocity along the gesture's axis (sideways for the pages and the panels), px/ms. */
-function track(gs: Gesture, x: number, y: number) {
-  const now = performance.now();
+/**
+ * Velocity along the gesture's axis (sideways for the pages and the panels), px/ms. [t] is the event's own time, not
+ * the handler's: under load handlers run late and bunched, and timing them would read a flick as a dwell (v=0).
+ */
+function track(gs: Gesture, x: number, y: number, now: number) {
   const [lx, ly, lt] = gs.last;
   if (now > lt) gs.v = gs.mode === "pages" || gs.mode === "panel" ? (x - lx) / (now - lt) : (y - ly) / (now - lt);
   gs.last = [x, y, now];
@@ -468,12 +473,17 @@ function track(gs: Gesture, x: number, y: number) {
   while (gs.samples.length > 2 && now - gs.samples[1][1] > 150) gs.samples.shift();
 }
 
-/** Sideways release velocity, px/ms: the finger over the last PAGE_V_WINDOW ms up to now (a dwell before lifting = 0). */
-const releaseVx = (gs: Gesture) => sampleVx(gs.samples);
+/** Sideways release velocity, px/ms: the finger over the last PAGE_V_WINDOW ms up to the release (a dwell before lifting = 0). */
+const releaseVx = (gs: Gesture) => sampleVx(gs.samples, gs.up);
 
-/** [releaseVx] for any [x, t] samples (the drawer's own two-page swipe shares the home pager's rule). */
-export function sampleVx(samples: [number, number][]) {
-  const now = performance.now();
+/** An input event's own time (performance.now()'s clock), else now: when it happened, not when its handler runs. */
+export const eventTime = (e: Event | null | undefined) => (e?.timeStamp ? e.timeStamp : performance.now());
+
+/**
+ * [releaseVx] for any [x, t] samples up to the release at [now] (the release event's time); the drawer's own two-page
+ * swipe shares the home pager's rule.
+ */
+export function sampleVx(samples: [number, number][], now: number) {
   const [x1, t1] = samples[samples.length - 1];
   if (now - t1 > PAGE_V_WINDOW) return 0;
   // The first sample in the window; when the last one is alone in it (sparse moves), the one before it.
@@ -667,10 +677,11 @@ function pageOffset(dx: number) {
 }
 
 /** The finger up: a tap, or the gesture settles. */
-function endGesture() {
+function endGesture(t: number) {
   if (!g) return;
   const gs = g;
   g = null;
+  gs.up = t;
   if (!gs.mode) return tapAt(gs);
   if (gs.mode === "over") return void overRelease();
   settleGesture(gs, gs.last[1] - gs.y0);
@@ -761,7 +772,7 @@ function settlePages(gs: Gesture) {
   page.value = to;
   const outcome = to !== from ? "commit" : dir !== 0 ? "edge-cancel" : "cancel";
   logSwipe(
-    `dx=${r(dx)} dy=${r(gs.last[1] - gs.y0)} total=${r(total)} base=${r(gs.base)} dur=${r(performance.now() - gs.t0)}ms v=${vx.toFixed(2)}px/ms thr=${r(width * PAGE_AT)}px/${PAGE_FLICK} page=${from}->${to} ${outcome} why=${why}`,
+    `dx=${r(dx)} dy=${r(gs.last[1] - gs.y0)} total=${r(total)} base=${r(gs.base)} dur=${r(gs.up - gs.t0)}ms v=${vx.toFixed(2)}px/ms thr=${r(width * PAGE_AT)}px/${PAGE_FLICK} page=${from}->${to} ${outcome} why=${why}`,
   );
 }
 
@@ -781,34 +792,34 @@ function byDistance(total: number, vx: number, width: number) {
 }
 
 /** Include a release's last position before deciding where the gesture settles. */
-function releaseGesture(x: number, y: number) {
+function releaseGesture(x: number, y: number, t: number) {
   // WebView can coalesce moves under load; the release still has the final position.
   // Do not replace a flick's velocity with zero when the last move already reached it.
-  if (g && (x !== g.last[0] || y !== g.last[1])) moveGesture(x, y, null);
-  endGesture();
+  if (g && (x !== g.last[0] || y !== g.last[1])) moveGesture(x, y, null, t);
+  endGesture(t);
 }
 
 /** Handlers for home's root element. */
 export function homeGestures() {
   return {
     onTouchStart: (e: TouchEvent) =>
-      e.touches.length === 1 ? startGesture(e.touches[0].clientX, e.touches[0].clientY, e.target as Element) : abandon(),
-    onTouchMove: (e: TouchEvent) => moveGesture(e.touches[0].clientX, e.touches[0].clientY, e),
+      e.touches.length === 1 ? startGesture(e.touches[0].clientX, e.touches[0].clientY, e.target as Element, eventTime(e)) : abandon(),
+    onTouchMove: (e: TouchEvent) => moveGesture(e.touches[0].clientX, e.touches[0].clientY, e, eventTime(e)),
     onTouchEnd: (e: TouchEvent) => {
       const p = e.changedTouches[0];
-      if (p) releaseGesture(p.clientX, p.clientY);
-      else endGesture();
+      if (p) releaseGesture(p.clientX, p.clientY, eventTime(e));
+      else endGesture(eventTime(e));
     },
     // A cancel (the host or the system took the touch) settles where the drag got to: logged, so a missed drawer swipe
     // shows whether it was cut short (e2e-desktop 1029-1428: a 30% swipe up settled closed with no move logged).
-    onTouchCancel: () => {
+    onTouchCancel: (e: TouchEvent) => {
       if (g) logSwipe(`touchcancel mode=${g.mode} dy=${r(g.last[1] - g.y0)} dur=${r(performance.now() - g.t0)}ms p=${drawerDrag.peek()?.toFixed(2)}`);
-      endGesture();
+      endGesture(eventTime(e));
     },
     // A mouse (working on the shell in a desktop browser).
-    onPointerDown: (e: PointerEvent) => e.pointerType === "mouse" && startGesture(e.clientX, e.clientY, e.target as Element),
-    onPointerMove: (e: PointerEvent) => e.pointerType === "mouse" && e.buttons && moveGesture(e.clientX, e.clientY, null),
-    onPointerUp: (e: PointerEvent) => e.pointerType === "mouse" && releaseGesture(e.clientX, e.clientY),
+    onPointerDown: (e: PointerEvent) => e.pointerType === "mouse" && startGesture(e.clientX, e.clientY, e.target as Element, eventTime(e)),
+    onPointerMove: (e: PointerEvent) => e.pointerType === "mouse" && e.buttons && moveGesture(e.clientX, e.clientY, null, eventTime(e)),
+    onPointerUp: (e: PointerEvent) => e.pointerType === "mouse" && releaseGesture(e.clientX, e.clientY, eventTime(e)),
   };
 }
 

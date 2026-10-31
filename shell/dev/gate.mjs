@@ -2630,14 +2630,17 @@ async function desktopReleaseCheck() {
     S.drawer.value = 0;
     await sleep(350);
     const x0 = width * 0.8;
-    handlers.onTouchStart({ touches: [{ clientX: x0, clientY: 300 }], target });
+    // Each event carries its own time (timeStamp = start + the step's ms): the gesture's real timing, however late the
+    // page gets to run the handlers (GATE_THROTTLE, a loaded host).
+    const t0 = performance.now();
+    handlers.onTouchStart({ touches: [{ clientX: x0, clientY: 300 }], target, timeStamp: t0 });
     let t = 0;
     for (const [dx, ms] of steps) {
       await sleep(ms - t);
       t = ms;
-      handlers.onTouchMove({ touches: [{ clientX: x0 + dx, clientY: 300 + (dyEnd * dx) / steps[steps.length - 1][0] }], cancelable: false });
+      handlers.onTouchMove({ touches: [{ clientX: x0 + dx, clientY: 300 + (dyEnd * dx) / steps[steps.length - 1][0] }], cancelable: false, timeStamp: t0 + ms });
     }
-    handlers.onTouchEnd({ changedTouches: [{ clientX: x0 + steps[steps.length - 1][0], clientY: 300 + dyEnd }] });
+    handlers.onTouchEnd({ changedTouches: [{ clientX: x0 + steps[steps.length - 1][0], clientY: 300 + dyEnd }], timeStamp: t0 + t + 5 });
     if (S.page.value !== want) failures.push(`${name}: page ${S.page.value}, wanted ${want} (${logged.join(" | ")} w=${width} drag=${JSON.stringify(steps)} dyEnd=${dyEnd})`);
   };
   const d = width;
