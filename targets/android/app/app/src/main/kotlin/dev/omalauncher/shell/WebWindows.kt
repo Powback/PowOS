@@ -212,7 +212,7 @@ class WebWindows(
         main.removeCallbacks(heartbeat)
         if (wins.isNotEmpty()) main.postDelayed(heartbeat, HEARTBEAT_MS)
         emit("webwindows.alive", org.json.JSONArray(wins.keys.toList()))
-        watch()
+        watchSoon()
     }
 
     // ---- the render watchdog: live windows with no page geometry ([RenderWatch]) ---------------------------------------
@@ -228,7 +228,25 @@ class WebWindows(
         web.isShown && web.windowVisibility == android.view.View.VISIBLE && !underSwitcher &&
             context.getSystemService(android.os.PowerManager::class.java).isInteractive
 
-    /** Main thread, on each [tick] (every [HEARTBEAT_MS] while there are windows): [RenderWatch]'s step, acted on. */
+    /**
+     * The watch's own beat, every [RenderWatch.WATCH_MS] while there are windows (the reconcile heartbeat's 2 s made its
+     * steps 2 s apart: 10-31 15:37 ~9 s to recover). Started by [tick]; it stops when the last window goes.
+     */
+    private var watching = false
+    private val watcher =
+        Runnable {
+            watching = false
+            watch()
+            watchSoon()
+        }
+
+    private fun watchSoon() {
+        if (watching || wins.isEmpty()) return
+        watching = true
+        main.postDelayed(watcher, RenderWatch.WATCH_MS)
+    }
+
+    /** Main thread, every [RenderWatch.WATCH_MS] while there are windows ([watcher]): [RenderWatch]'s step, acted on. */
     private fun watch() {
         val now = SystemClock.uptimeMillis()
         val live = wins.values.count { it.live && !it.closed && !it.full && !it.linuxFull }
@@ -236,9 +254,11 @@ class WebWindows(
             RenderWatch.Act.NONE -> Unit
             // Quiet: the page sends only changed geometry, so an idle second is normal; a working page answers this.
             RenderWatch.Act.PROBE -> emit("webwindows.resend", 0)
+            // The rebind: the windows' root onto home's current surface, the WebView's visibility poked, and resent.
             RenderWatch.Act.STALL -> {
-                WindowLog.w(TAG, "RENDER STALL: $live live window(s), no geometry for ${stallFor(now)} (last w.f at ${lastFrameText()})")
-                resend("render stall")
+                WindowLog.w(TAG, "RENDER STALL: $live live window(s), no geometry for ${stallFor(now)} (last w.f at ${lastFrameText()}): rebind")
+                pokeVisibility("render stall")
+                if (!reattach(null, "render stall")) resend("render stall")
             }
             RenderWatch.Act.RELOAD -> stallReload(now, live)
         }
@@ -859,6 +879,14 @@ class WebWindows(
      * shows it again: the launcher, the dock) comes back where it was. No page answer within [LINUX_ADOPT_MS] (no
      * page, a page from before S6): it opens as its own task after all, as without web windows.
      */
+    /**
+     * KWin's "android-<package>" toplevel (sources/powos-shell services.cpp, powos-android-tasks / scrcpy): the Linux
+     * session's stand-in for an Android app. 10-31 15:32 Termux (task 2676) had web window 5 and then this offered as
+     * window 6 ("l:android-com.termux"): a second, translucent title-bar-only element over the real one. The app's own
+     * web window (or its task) is it - never a Linux web window, never its fallback task.
+     */
+    private fun androidStandIn(appId: String) = appId.startsWith(ANDROID_APP_ID)
+
     fun linuxOpened(
         kwin: Int,
         key: String,
@@ -870,6 +898,10 @@ class WebWindows(
             return
         }
         if (pendingLinux.containsKey(kwin)) return
+        if (androidStandIn(offer.appId)) {
+            WindowLog.i(TAG, "KWin window $kwin (${offer.appId}): the Linux session's stand-in for an Android app - its own window is the app's, not a second web window")
+            return
+        }
         offer.key = key
         pendingLinux[kwin] = offer
         WindowLog.i(TAG, "KWin window $kwin (${offer.appId}, \"${offer.title}\"): offered to the page as $key")
@@ -1668,7 +1700,10 @@ class WebWindows(
         args: Array<out Any?>?,
     ): Any? =
         when (name) {
-            "surfaceCreated", "surfaceReplaced" -> reattach(args?.getOrNull(0) as? SurfaceControl.Transaction, name).let { null }
+            "surfaceCreated", "surfaceReplaced" -> {
+                pokeVisibility(name)
+                reattach(args?.getOrNull(0) as? SurfaceControl.Transaction, name).let { null }
+            }
             "surfaceDestroyed" -> WindowLog.i(TAG, "home's surface destroyed: ${wins.size} window(s) wait for the next one").let { null }
             "hashCode" -> System.identityHashCode(proxy)
             "equals" -> proxy === args?.getOrNull(0)
@@ -1698,14 +1733,29 @@ class WebWindows(
     private fun reattach(
         t: SurfaceControl.Transaction?,
         why: String,
-    ) {
-        val r = root?.takeIf { it.isValid } ?: return
-        val re = underHome(r, "home's surface $why") ?: run { WindowLog.w(TAG, "home's surface $why: no surface to re-attach to"); return }
+    ): Boolean {
+        val r = root?.takeIf { it.isValid } ?: return false
+        val re = underHome(r, "home's surface $why") ?: run { WindowLog.w(TAG, "home's surface $why: no surface to re-attach to"); return false }
         if (t != null) t.merge(re) else re.apply()
         WindowLog.i(TAG, "home's surface $why: windows' root re-attached (${wins.size} window(s): ${wins.values.joinToString { "${it.id}@d${it.displayId}" }})")
         for (w in wins.values) if (w.displayId >= 0 && w.mirror?.isValid == false) io.post { remirror(w) }
         // Every window's whole layer state again, from the page's next frame (not only when its geometry next changes).
         resend("home's surface $why")
+        return true
+    }
+
+    /**
+     * HACK: home's WebView told it is hidden and shown again (two visibility changes in one UI message: nothing draws
+     * between them), so Chromium updates the page's visibility and restarts its frames. 10-31 15:37: home's surface
+     * came back but the page's rAF stayed paused, no "w.f" for ~9 s. Real fix: Chromium re-derives the page's
+     * visibility when the WebView's window surface is re-made (it does on a window visibility change only).
+     */
+    private fun pokeVisibility(why: String) {
+        if (web.visibility != android.view.View.VISIBLE) return
+        web.visibility = android.view.View.INVISIBLE
+        web.visibility = android.view.View.VISIBLE
+        web.invalidate()
+        WindowLog.i(TAG, "home's page visibility poked: $why")
     }
 
     /**
@@ -3137,6 +3187,9 @@ class WebWindows(
 
         /** [reconcile] runs at least this often while there are windows (task changes run it sooner). */
         private const val HEARTBEAT_MS = 2000L
+
+        /** KWin's app id prefix for the Linux session's Android-app stand-ins ([androidStandIn]). */
+        private const val ANDROID_APP_ID = "android-"
 
         /** RL1: a window the page hasn't claimed this long after a page load is hidden ([pageStarted]). */
         private const val CLAIM_MS = 3000L
