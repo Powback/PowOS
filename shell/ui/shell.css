@@ -3683,3 +3683,28 @@ html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="t
     linear-gradient(var(--backdrop-tint), var(--backdrop-tint)) border-box,
     var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
 }
+
+/*
+ * Alignment (ui/align.ts, Settings > style > alignment): per surface, html[data-align-launcher|shade|control] is top
+ * (as before), middle or bottom - unfolded bottom unless picked, folded top. Flex/grid placement only, nothing per
+ * frame; "safe": content taller than its surface starts at its top edge and scrolls (the bottom ones open scrolled to
+ * their foot, drawer.tsx/notifications.tsx), never pushed out of the scroll's reach.
+ */
+/* The launcher: the app grid (and the folders page) at the panel's foot or centred; the A-Z bar ending where the grid does. */
+:root:is([data-align-launcher="bottom"], [data-align-launcher="middle"]) .drawer-page > .drawer-list:not(.results) { display: flex; flex-direction: column; }
+:root:is([data-align-launcher="bottom"], [data-align-launcher="middle"]) .drawer-page > .drawer-list:not(.results) > * { flex: none; }
+:root[data-align-launcher="bottom"] .drawer-page > .drawer-list:not(.results) { justify-content: safe flex-end; padding-bottom: var(--align-foot, 8px); }
+:root[data-align-launcher="middle"] .drawer-page > .drawer-list:not(.results) { justify-content: safe center; }
+:root[data-align-launcher="bottom"] .drawer-page > .letter-bar { align-self: end; margin-bottom: var(--align-foot, 8px); }
+/* The notifications: under their header, at the list's foot - the newest card lowest, nearest the thumb - or centred. */
+:root[data-align-shade="bottom"] .notif-list > .notif-items { margin-top: auto; flex-direction: column-reverse; }
+:root[data-align-shade="middle"] .notif-list > .notif-items { margin-block: auto; }
+/* The control center unfolded (its column): its body under the header at the top, centred (10-29's), or at the foot. */
+:root[data-align-control="top"] .panel-body.two > .cc-col > .cc.v3 { grid-template-rows: auto 0 auto auto auto 1fr; }
+:root[data-align-control="bottom"] .panel-body.two > .cc-col > .cc.v3 { grid-template-rows: auto 1fr auto auto auto 0; }
+:root[data-align-control="top"] .panel-body.two > .cc-col > .cc:not(.v3) > .notif-bar + * { margin-top: 0; }
+:root[data-align-control="bottom"] .panel-body.two > .cc-col > .cc:not(.v3) > :last-child:not(.notif-bar) { margin-bottom: 0; }
+/* ...and its own panel folded (separate panels): the same, in the panel's height. The folded one panel keeps its card on top. */
+:root:is([data-align-control="bottom"], [data-align-control="middle"]) .panel-body:not(.together) > .cc { flex: 1 1 auto; }
+:root:is([data-align-control="bottom"], [data-align-control="middle"]) .panel-body:not(.together) > .cc > .notif-bar + * { margin-top: auto; }
+:root[data-align-control="middle"] .panel-body:not(.together) > .cc > :last-child:not(.notif-bar) { margin-bottom: auto; }

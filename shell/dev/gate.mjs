@@ -6119,6 +6119,25 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, position, keyboard] of ["unfolded", "folded"].flatMap((l) => ["bottom", "left", "right"].flatMap((p) => [[l, p, false], [l, p, true]])))
       runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `launcher-fit-${label}-${position}${keyboard ? "-kbd" : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (pos, kb) => (await importShim("./dev/launcher-fit-check.js")).launcherFits(pos, kb), position, keyboard))));
+  // AL1-AL3 (dev/align-check.js; the user, 2026-10-31 15:42): the theme's alignment per surface - unfolded, each of the
+  // launcher (in place over home, and the overlay), the notifications and the control center at its edge in top /
+  // middle / bottom; unset unfolded is bottom, folded top; a pick applies at once. Renders: /cache/align-<case>-<mode>.png.
+  if (process.env.SHELL_PAGES !== "0") {
+    const alignCases = [["launcher-home", "index.html", "home", ["launcher"]], ["launcher-pull", "index.html?mode=pull", "pull", ["launcher"]], ["shade", "index.html?mode=shade", "shade", ["shade", "control"]]];
+    for (const [name, url, where, surfaces] of alignCases)
+      runs.push(open(browser, `${ORIGIN}/${url}`, `align-${name}`, dockOpensView.unfolded).then((r) => whenReady(r, async () => {
+        const call = (fn, ...args) => r.page.evaluate(async (f, a) => (await importShim("./dev/align-check.js"))[f](...a), fn, args);
+        const fails = [...(await call("alignDefaults", "unfolded"))];
+        await call("alignOpen", where);
+        for (const mode of ["top", "middle", "bottom"]) {
+          for (const s of surfaces) fails.push(...(await call("alignAt", s, mode, `${name} ${s} ${mode}`)));
+          await r.page.screenshot({ path: `/cache/align-${name}-${mode}.png` });
+        }
+        return fails;
+      })));
+    for (const [name, url] of [["folded-home", "index.html"], ["folded-shade", "index.html?mode=shade"]])
+      runs.push(open(browser, `${ORIGIN}/${url}`, `align-${name}`, dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/align-check.js")).alignDefaults("folded")))));
+  }
   // The same in the user's unfolded home: the dock on the right, the pill below it, 821x883 (the phone, 2026-10-28).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard-side", { width: 821, height: 883 }).then((r) => whenReady(r, () => launcherKeyboardSide(r.page, { width: 821, height: 883 }))));

@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel, separatePanels } from "../state.ts";
+import { alignOf, wideShade } from "./align.ts";
 import { ControlCenter } from "./control.tsx";
 import { Icon } from "./icons.tsx";
 import { followNotif, notifOpen, notifShown } from "./gesture.ts";
@@ -19,12 +20,8 @@ const list = signal<NotificationList>({ available: true, items: [] });
 /** The list, read by the meter recording's snapshot (perfrec.ts). */
 export { list as notifList };
 
-/**
- * Unfolded (wider than the cover's 404, as hosts/wide.ts's 700): the panel is two columns side by side - the
- * notifications left, the control center right, each its own scroll. Folded it stays the one stacked list.
- */
-export const wideShade = signal(innerWidth >= 700);
-addEventListener("resize", () => (wideShade.value = innerWidth >= 700));
+/** Unfolded: two columns (ui/align.ts, where the theme's alignment reads it too). */
+export { wideShade };
 
 /**
  * Opening (pulled down from shut, until it's settled open): the cards ride on the sheet's bottom edge (shell.css
@@ -440,6 +437,13 @@ export function NotificationPanel() {
     follow();
     return () => (l.removeEventListener("scroll", follow), off());
   }, [together, two, shown]);
+  // Bottom-aligned (ui/align.ts): the newest card nearest the thumb, so a list taller than its column opens scrolled to
+  // its foot and scrolls up for more. Not the folded one panel: its scroll collapses the control center's card.
+  const bottom = alignOf("shade") === "bottom";
+  useLayoutEffect(() => {
+    const l = listEl.current;
+    if (shown && bottom && l && (two || !together)) l.scrollTop = l.scrollHeight;
+  }, [shown, bottom, two, together, items.length]);
   // The cards, newest first, each group a row of the cascade (shell.css .cascade) from --i [from], after the rows above.
   const items$ = (from: number) => (
     <div class="notif-items" ref={itemsEl}>
