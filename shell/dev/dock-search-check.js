@@ -146,45 +146,58 @@ const opened = (E, how) => {
   E.emit("pull.end", { open: true });
 };
 
-/** The glass's rect every frame of the open (260 ms: past the settle), and the lowest opacity of its pieces. */
-async function sampleOpen(E, from) {
-  const samples = [];
+/** Polls [fn] (every 16 ms) until it's truthy or [ms] pass: state, not wall-clock samples. Resolves its last value. */
+async function until(fn, ms = 4000) {
   const t0 = performance.now();
-  opened(E, { from });
-  while (performance.now() - t0 < 260) {
-    const g = glassRect();
-    const op = [...document.querySelectorAll(".pull-screen > .bar .launch-glass")].map((e) => +getComputedStyle(e).opacity);
-    if (g) samples.push({ t: Math.round(performance.now() - t0), w: Math.round(g.width), top: Math.round(g.top), op: Math.min(...op) });
-    await new Promise(requestAnimationFrame);
+  let v = fn();
+  while (!v && performance.now() - t0 < ms) {
+    await new Promise((r) => setTimeout(r, 16));
+    v = fn();
   }
-  return samples;
+  return v;
 }
 
-/** Out of the button's width, wider every frame, higher (the bottom dock's), never fading. */
-function grows(samples, from, rises) {
-  if (samples.length < 4) return [`the open had ${samples.length} morph frames`];
-  const [a, z] = [samples[0], samples.at(-1)];
+const pill = () => document.querySelector(".pull-screen > .bar .bar-pill");
+const morphAnims = () => [...document.querySelectorAll(".pull-screen > .bar .launch-glass")].flatMap((e) => e.getAnimations());
+const settled = () => morphAnims().every((a) => a.playState === "finished");
+const scaleX = (t) => +(/scale\(([-\d.e]+)/.exec(t ?? "")?.[1] ?? NaN);
+
+/** Right after the open: the glass's middle piece runs a transform animation from narrow to wide, its pieces never fading. */
+function animates() {
+  const mid = [...document.querySelectorAll(".pull-screen > .bar .launch-glass")][1];
+  if (!mid) return ["the open has no morph pieces"];
+  const a = mid.getAnimations().find((x) => x.playState === "running" && x.effect?.getKeyframes().some((k) => k.transform));
+  if (!a) return ["the open didn't animate: no running transform animation on the glass"];
+  const frames = a.effect.getKeyframes();
   const fails = [];
-  if (Math.abs(a.w - from.width) > from.width * 0.5) fails.push(`first frame ${a.w} px wide, not the button's ${Math.round(from.width)}`);
-  if (!(z.w > a.w * 2)) fails.push(`the glass didn't widen: ${a.w} -> ${z.w}`);
-  if (rises && !(z.top < a.top - 4)) fails.push(`the glass didn't rise: top ${a.top} -> ${z.top}`);
-  if (samples.some((s, i) => i && s.w < samples[i - 1].w - 1)) fails.push("the glass narrowed on the way");
-  if (samples.some((s) => s.op < 0.99)) fails.push("the glass faded (opacity < 1)");
+  if (!(scaleX(frames.at(-1).transform) > scaleX(frames[0].transform) * 2)) fails.push(`the glass didn't widen in its keyframes: ${frames[0].transform} -> ${frames.at(-1).transform}`);
+  const op = morphAnims().flatMap((x) => x.effect.getKeyframes()).filter((k) => k.opacity != null && +k.opacity < 0.99);
+  if (op.length) fails.push("the glass faded (opacity < 1)");
   return fails;
 }
 
-/** Open: the pill is the bar again, focused (a tap's); shut: the glass back on the button. */
-async function openThenShut(S, E, from) {
-  await sleep(150);
-  const fails = [];
-  if (document.querySelector(".launch-glass")) fails.push("the morph's pieces stayed after the open");
-  if (document.activeElement !== document.querySelector(".pull-screen > .bar textarea")) fails.push(`tap's open: the field isn't focused (${document.activeElement?.tagName})`);
+/** The open from the button: animates, then (settled) the bar's rect is wider and higher than the button's, the pieces gone. */
+async function morphOpen(E, from, rises) {
+  opened(E, { from });
+  const fails = animates();
+  const done = await until(() => !document.querySelector(".launch-glass") && pill());
+  if (!done) return [...fails, "the morph's pieces stayed after the open"];
+  const end = pill().getBoundingClientRect();
+  if (!(end.width > from.width * 2)) fails.push(`the glass didn't widen: ${Math.round(from.width)} -> ${Math.round(end.width)}`);
+  if (rises && !(end.top < from.top - 4)) fails.push(`the glass didn't rise: top ${Math.round(from.top)} -> ${Math.round(end.top)}`);
+  const field = () => document.querySelector(".pull-screen > .bar textarea");
+  if (!(await until(() => field() && document.activeElement === field(), 1000))) fails.push(`tap's open: the field isn't focused (${document.activeElement?.tagName})`);
+  return fails;
+}
+
+/** Shut: the glass settles back on the button. */
+async function shut(S, E, from) {
   S.drawer.value = 0;
-  await sleep(250);
+  await until(() => document.querySelector(".launch-glass") && morphAnims().length && settled());
   const back = glassRect();
-  if (!back || Math.abs(back.width - from.width) > from.width * 0.5) fails.push(`shut: the glass isn't back on the button (${back ? Math.round(back.width) : "none"})`);
+  const fails = !back || Math.abs(back.width - from.width) > from.width * 0.5 ? [`shut: the glass isn't back on the button (${back ? Math.round(back.width) : "none"})`] : [];
   E.emit("pull.hide", {});
-  await sleep(50);
+  await until(() => !document.querySelector(".launch-glass"), 1000);
   return fails;
 }
 
@@ -215,9 +228,10 @@ function buttonRect() {
 
 /**
  * The launcher overlay's side (DS2): opened from home's button ({ from }), the bar's glass grows out of the button -
- * wider and higher frame by frame, never fading - then the pill is the bar, focused; a hold's ({ listen }) dictates
- * into the bar, and home's push-to-talk release (speech.stop) leaves the words in the field, nothing sent. Closed, the
- * glass goes back into the button. Unfolded, the overlay's dock keeps its own layout and its bar sits beside it.
+ * a running transform animation, never fading, settling wider and higher than the button - then the pill is the bar,
+ * focused; a hold's ({ listen }) dictates into the bar, and home's push-to-talk release (speech.stop) leaves the words
+ * in the field, nothing sent. Closed, the glass goes back into the button. Unfolded, the overlay's dock keeps its own
+ * layout and its bar sits beside it. Waits on state (the morph's animations), never on sampled frame times.
  */
 export async function dockSearchLaunch(position) {
   const S = await importShim("./state.ts");
@@ -229,11 +243,10 @@ export async function dockSearchLaunch(position) {
   const folded = position === "bottom" && !document.querySelector(".pull-screen.wide");
   const fails = folded && !document.querySelector(".pull-screen .dock .dock-search-face") ? ["the overlay's dock has no button slot"] : [];
   const from = buttonRect();
-  const samples = await sampleOpen(E, from);
-  fails.push(...grows(samples, from, folded), ...(await openThenShut(S, E, from)), ...(await holdOpen(S, E, from)));
+  fails.push(...(await morphOpen(E, from, folded)), ...(await shut(S, E, from)), ...(await holdOpen(S, E, from)));
   S.searchTry.value = "";
   S.dockTry.value = "";
-  return { fails: fails.map((f) => `launch ${position}: ${f}`), samples };
+  return { fails: fails.map((f) => `launch ${position}: ${f}`) };
 }
 
 /** The pinned row (the button's): its cell count and first app icon's size. */
