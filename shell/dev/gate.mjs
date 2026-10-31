@@ -3867,35 +3867,62 @@ async function webDockToggleCell() {
 }
 
 /**
- * DB1 (the user, 2026-10-31 03:00: "by default it should launch in Full screen"): a dock tap on an app with no window
- * launches it full screen - a plain launch, no web window opened and no new .webwindow - while the app grid's launch
- * (S.launch) still opens one; a dock tap on an app that has a window still toggles it (TB4's steps above).
+ * DW1 (the user, 10-31 15:57: "Apps should open to desktop window by default when I'm in Desktop mode"; 15:19 "It
+ * still shows full screen immediately and then goes to desktop mode"). Unfolded: a dock tap, a launcher-overlay tap
+ * ("webwindows.launch") and a home icon's launch (S.launch: grid, folders, search) each make exactly ONE
+ * "webwindows.open" (a key and a rect: the host's own display) and no plain launch; the app opened again is its window
+ * focused, no second open. Folded (DB1, 03:00 "by default it should launch in Full screen"): a dock tap is one plain
+ * full-screen launch and no web window.
  */
 async function webDockLaunchFull() {
   const { S, W, tap } = window.__dtg;
-  const { powos } = await window.__gw.mod("./bridge.ts");
-  const key = [...S.byKey.value.keys()].find((k) => k.startsWith("a:"));
-  if (!key) return ["DB1: no Android app to launch"];
+  const [{ powos }, H] = await Promise.all([window.__gw.mod("./bridge.ts"), window.__gw.mod("./hosts/wide.ts")]);
   const ww = powos.webwindows ?? (powos.webwindows = {});
-  const was = { launch: powos.apps.launch, open: ww.open, enabled: ww.enabled, page: S.page.value };
-  const calls = [];
-  powos.apps.launch = async (k) => void calls.push(`launch:${k}`);
-  ww.open = async () => (calls.push("open"), -1);
+  const was = { launch: powos.apps.launch, open: ww.open, enabled: ww.enabled, page: S.page.value, wide: H.wideHome.value };
+  const opens = [];
+  const plain = [];
+  let next = 8800;
+  powos.apps.launch = async (k, o) => void plain.push(`${k}${o?.fullScreen ? " full" : ""}`);
+  ww.open = async (k, rect) => (opens.push({ k, rect }), next++);
   ww.enabled = async () => true;
   const fails = [];
+  const reset = () => ((W.webWins.value = []), (opens.length = 0), (plain.length = 0));
+  const one = (what, key) => {
+    const ok = opens.length === 1 && opens[0].k === key && opens[0].rect?.width > 0 && !plain.length && document.querySelectorAll(`.webwindow[data-wwid]`).length === 1;
+    if (!ok) fails.push(`DW1: unfolded, a ${what} of ${key} gave opens [${opens.map((o) => o.k)}], plain launches [${plain}] (want one webwindows.open with a rect, no launch)`);
+  };
   try {
-    W.webWins.value = [];
     S.page.value = 0;
+    H.wideHome.value = true;
+    reset();
     await window.__gw.settled();
-    await tap(key);
-    if (calls.join() !== `launch:${key}` || document.querySelector(".webwindow[data-wwid]")) fails.push(`DB1: a dock tap on ${key} with no window gave [${calls}] (want one plain launch, no web window)`);
-    calls.length = 0;
-    await S.launch(key);
-    if (!calls.includes("open")) fails.push(`DB1: the app grid's launch of ${key} no longer tries a web window [${calls}]`);
+    await tap("a:gate.dw.dock/.Main");
+    await window.__gw.settled();
+    one("dock tap", "a:gate.dw.dock/.Main");
+    reset();
+    window.__mockEvents.emit("webwindows.launch", { key: "a:gate.dw.launcher/.Main" });
+    await window.__gw.until(() => opens.length > 0 || plain.length > 0);
+    await window.__gw.settled();
+    one("launcher tap", "a:gate.dw.launcher/.Main");
+    reset();
+    await S.launch("a:gate.dw.home/.Main");
+    await window.__gw.settled();
+    one("home icon's launch", "a:gate.dw.home/.Main");
+    opens.length = 0;
+    await S.launch("a:gate.dw.home/.Main");
+    await window.__gw.settled();
+    if (opens.length || plain.length || W.webWins.value.length !== 1) fails.push(`DW1: the home app launched again with its window open gave opens [${opens.map((o) => o.k)}], plain [${plain}], ${W.webWins.value.length} windows (want its window focused: none, none, 1)`);
+    reset();
+    H.wideHome.value = false;
+    await window.__gw.settled();
+    await tap("a:gate.dw.fold/.Main");
+    await window.__gw.settled();
+    if (opens.length || plain.join() !== "a:gate.dw.fold/.Main full" || W.webWins.value.length) fails.push(`DW1: folded, a dock tap gave opens [${opens.map((o) => o.k)}], plain [${plain}] (want one full-screen launch, no web window)`);
   } finally {
     W.webWins.value = [];
     Object.assign(ww, { open: was.open, enabled: was.enabled });
     powos.apps.launch = was.launch;
+    H.wideHome.value = was.wide;
     S.page.value = was.page;
   }
   return fails;

@@ -606,7 +606,8 @@ function openAsWebWindow(key: string): Promise<boolean> {
 /**
  * Opens app [key]. [fullScreen]: full screen even where it would open as a web window (DB1, the user 2026-10-31 03:00:
  * "by default it should launch in Full screen. But if I drag it out it should either do split screen or floating
- * window") - a dock tap with no window yet asks for it (ui/desktops.ts dockTap); every other launcher keeps the window.
+ * window") - a folded dock tap with no window yet asks for it (ui/desktops.ts dockTap); unfolded every launch keeps the
+ * window (DW1, 10-31 15:57: "Apps should open to desktop window by default when I'm in Desktop mode").
  */
 export async function launch(key: string, { fullScreen = false }: { fullScreen?: boolean } = {}) {
   menu.value = null;
