@@ -1,0 +1,17 @@
+{
+  "id": "local.needs-me",
+  "name": "What needs me",
+  "version": "0.1.0",
+  "description": "Discord, WhatsApp and Gmail messages waiting for you, in one list grouped by person, with an inline reply. Reads only the notifications those apps already post on this phone and acts only through each notification's own buttons (reply, mark as read, open), one per tap. Talks to no service itself.",
+  "icon": "icon.svg",
+  "ui": { "dir": "out/ui/" },
+  "page": { "entry": "pages/main.js" },
+  "module": null,
+  "backend": null,
+  "widgets": [
+    { "id": "main", "name": "What needs me", "kind": "island", "entry": "widgets/main.js", "size": "4x3", "minSize": "2x2" }
+  ],
+  "surfaces": { "launcher": true, "desktop": true },
+  "permissions": ["notifications:com.discord", "notifications:com.whatsapp", "notifications:com.whatsapp.w4b", "notifications:com.google.android.gm"],
+  "budget": { "phone": { "memMB": 8, "idle": "unload" }, "desktop": { "memMB": 16 } }
+}

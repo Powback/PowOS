@@ -7,6 +7,8 @@ import { chat, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import type { ChatItem } from "../types.ts";
 import { MailCard, Queued, Said, SentImages, Thread, ToolRun, mailOf } from "./rich.tsx";
+// Its ```try blocks (things to try, with works / still broken): registered with rich.tsx on import.
+import "./trycard.tsx";
 
 /** How much of the conversation the launcher shows; the rest is in PowOS AI's page (left of home). */
 const SHOWN = 40;

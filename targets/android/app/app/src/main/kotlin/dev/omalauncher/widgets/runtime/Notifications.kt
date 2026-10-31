@@ -80,12 +80,46 @@ class Notifications(
         val linuxEntry: String? = null,
         /** ...and the icon name it gave. */
         val linuxIcon: String? = null,
+        /** A MessagingStyle notification's messages, oldest first (the last [MAX_MESSAGES]); empty for any other. */
+        val messages: List<Message> = emptyList(),
+        /** MessagingStyle's conversation title (a group or channel name), null for a one-to-one or none. */
+        val conversationTitle: String? = null,
+        /** MessagingStyle says it's a group conversation. */
+        val groupConversation: Boolean = false,
+        /** It has a tap action (contentIntent): "open" opens the conversation. */
+        val tappable: Boolean = false,
     )
 
     data class Action(
         val title: String,
         val input: Boolean,
+        /** Notification.Action.getSemanticAction: 1 reply, 2 mark as read, ... 0 none said. */
+        val semantic: Int = 0,
     )
+
+    /** One MessagingStyle message: [sender] "" when it's the phone's own user (their reply), [time] Unix ms. */
+    data class Message(
+        val sender: String,
+        val text: String,
+        val time: Long,
+    )
+
+    /**
+     * [sbn]'s MessagingStyle messages, read from its extras as SystemUI reads them (EXTRA_MESSAGES: one Bundle per
+     * message - "text", "time", "sender" / "sender_person"); a message without a sender is the user's own.
+     */
+    private fun messages(sbn: StatusBarNotification): List<Message> {
+        val extras = sbn.notification.extras
+        @Suppress("DEPRECATION")
+        val raw = runCatching { extras.getParcelableArray(Notification.EXTRA_MESSAGES) }.getOrNull() ?: return emptyList()
+        return raw.filterIsInstance<Bundle>().takeLast(MAX_MESSAGES).mapNotNull { b ->
+            val text = b.getCharSequence("text")?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            @Suppress("DEPRECATION")
+            val person = runCatching { b.getParcelable<android.app.Person>("sender_person") }.getOrNull()
+            val sender = person?.name?.toString() ?: b.getCharSequence("sender")?.toString()
+            Message(sender.orEmpty(), text, b.getLong("time"))
+        }
+    }
 
     /** [sbn] as listed. */
     fun item(sbn: StatusBarNotification) =
@@ -100,7 +134,7 @@ class Notifications(
             sbn.postTime / 1000,
             sbn.isClearable,
             sbn.notification.actions.orEmpty().map { a ->
-                Action(a.title?.toString().orEmpty(), a.remoteInputs.orEmpty().any { it.allowFreeFormInput })
+                Action(a.title?.toString().orEmpty(), a.remoteInputs.orEmpty().any { it.allowFreeFormInput }, a.semanticAction)
             },
             sbn.notification.category,
             sbn.notification.group,
@@ -108,6 +142,10 @@ class Notifications(
                 (sbn.notification.category == Notification.CATEGORY_MESSAGE && sbn.notification.shortcutId != null),
             sbn.notification.extras.getString(dev.omalauncher.PlasmaBridge.EXTRA_ENTRY),
             sbn.notification.extras.getString(dev.omalauncher.PlasmaBridge.EXTRA_ICON),
+            messages(sbn),
+            sbn.notification.extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.takeIf { it.isNotBlank() },
+            sbn.notification.extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION),
+            sbn.notification.contentIntent != null,
         )
 
     /** Keys of what had a banner (the time it was posted), for once-only alerts' updates. */
@@ -237,6 +275,7 @@ class Notifications(
     companion object {
         private const val MAX_ITEMS = 50
         private const val MAX_ALERTED = 200
+        private const val MAX_MESSAGES = 5
 
         /** In a notification's extras: posted again quietly (dev.omalauncher.AgentMail) - no banner for it. */
         const val EXTRA_QUIET = "powos.quiet"

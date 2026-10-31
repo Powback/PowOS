@@ -258,6 +258,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       closed: () => call("pull.closed"),
       launched: () => call("pull.launched"),
       open: (kind, how) => call<boolean>("pull.open", kind, how ?? {}),
+      drive: (phase, arg) => call<boolean>("pull.drive", phase, arg ?? null),
       homePull: (on, exclude, split, regions) =>
         call<boolean>("pull.homePull", on, exclude ?? null, split ?? false, regions ?? null),
     },
@@ -287,7 +288,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     webwindows: host.name === "powos" ? undefined : {
       enabled: () => call<boolean>("webwindows.enabled"),
       open: (key, rect, task, kwin) => call<number>("webwindows.open", key, rect, task ?? -1, kwin ?? -1),
-      input: (id, action, x, y) => call<boolean>("webwindows.input", id, action, x, y),
+      input: (id, action, at) => call<boolean>("webwindows.input", id, action, at.x, at.y, at.finger ?? 0),
       close: (id) => call<boolean>("webwindows.close", id),
       fullScreen: (id) => call<boolean>("webwindows.fullScreen", id),
       toWindow: (id) => call<boolean>("webwindows.toWindow", id),
@@ -834,7 +835,8 @@ function mock(): Bridge {
       peekHeight: async (px) => console.log("[mock] banner height", px),
       blur: async (dp) => console.log("[mock] shade blur", dp),
       behind: async () => {},
-      homePull: async () => true,
+      // The gate reads the last regions home excluded from the host's pulls (W-IN1: they follow the windows).
+      homePull: async (...args: unknown[]) => (((globalThis as { __homePullRegions?: unknown }).__homePullRegions = args[3] ?? null), true),
       open: async () => console.log("[mock] shade open"),
     },
     overlay: { closed: async () => console.log("[mock] overlay closed") },
