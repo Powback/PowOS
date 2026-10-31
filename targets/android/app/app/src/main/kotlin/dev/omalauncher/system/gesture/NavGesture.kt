@@ -238,7 +238,7 @@ class NavGesture(
         sidewaysHome ?: run {
             val homeShown = !overFullWindow && !Switcher.open && Switcher.onHome && Switcher.homeVisible
             val full = homeShown && from?.let(::fullScreenApp) == true
-            val owner = SidewaysOwner.decide(homeShown, full, downY, screen.bottom.toFloat(), homeStrip().toFloat())
+            val owner = SidewaysOwner.decide(homeShown, full, downY, (screen.bottom - homeStrip()).toFloat())
             Log.i(TAG, "gesture: sideways from y ${downY.toInt()} (strip ${homeStrip()} px, home shown $homeShown, full-screen app $full): $owner")
             (owner == SidewaysOwner.Owner.HOME_PAGE).also { sidewaysHome = it }
         }

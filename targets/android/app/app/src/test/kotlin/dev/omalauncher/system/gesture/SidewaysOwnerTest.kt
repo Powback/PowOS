@@ -15,7 +15,7 @@ class SidewaysOwnerTest {
         homeShown: Boolean,
         fullScreenApp: Boolean,
         dpUp: Float,
-    ) = SidewaysOwner.decide(homeShown, fullScreenApp, bottom - dpUp * density, bottom, strip)
+    ) = SidewaysOwner.decide(homeShown, fullScreenApp, bottom - dpUp * density, bottom - strip)
 
     @Test fun homeInStripIsQuickSwitch() = assertEquals(Owner.QUICK_SWITCH, owner(homeShown = true, fullScreenApp = false, dpUp = 8f))
 
@@ -23,7 +23,7 @@ class SidewaysOwnerTest {
 
     @Test fun homeWithWebWindowTaskUnderFingerAboveStripIsPage() {
         // The report's swipe: down at 349,2353 with task 2688 (a web window, not full screen) "under" the finger.
-        assertEquals(Owner.HOME_PAGE, SidewaysOwner.decide(homeShown = true, fullScreenApp = false, downY = 2353f, screenBottom = bottom, stripPx = strip))
+        assertEquals(Owner.HOME_PAGE, SidewaysOwner.decide(homeShown = true, fullScreenApp = false, downY = 2353f, stripTop = bottom - strip))
     }
 
     @Test fun fullScreenAppAboveStripIsUnchanged() = assertEquals(Owner.QUICK_SWITCH, owner(homeShown = false, fullScreenApp = true, dpUp = 32f))

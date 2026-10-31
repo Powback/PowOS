@@ -7,8 +7,8 @@ package dev.omalauncher.system.gesture
  *
  * Over a real full-screen app (or when home isn't the shown surface): the quick switch, as before. With home shown
  * (its page front, the switcher not up, no real full-screen app on display 0 - floating / web window tasks don't
- * count) the quick switch is only the system's thin gesture strip at the very bottom ([stripPx], the navigation bar's
- * inset); any sideways swipe starting above it is home's page swipe (its dock / search bar, shell/ui/gesture.ts).
+ * count) the quick switch is only the system's thin gesture strip at the very bottom (from [stripTop] down: the navigation
+ * bar's inset); any sideways swipe starting above it is home's page swipe (its dock / search bar, shell/ui/gesture.ts).
  */
 object SidewaysOwner {
     enum class Owner { QUICK_SWITCH, HOME_PAGE }
@@ -17,10 +17,9 @@ object SidewaysOwner {
         homeShown: Boolean,
         fullScreenApp: Boolean,
         downY: Float,
-        screenBottom: Float,
-        stripPx: Float,
+        stripTop: Float,
     ): Owner {
         if (!homeShown || fullScreenApp) return Owner.QUICK_SWITCH
-        return if (downY >= screenBottom - stripPx) Owner.QUICK_SWITCH else Owner.HOME_PAGE
+        return if (downY >= stripTop) Owner.QUICK_SWITCH else Owner.HOME_PAGE
     }
 }
