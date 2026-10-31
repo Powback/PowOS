@@ -74,24 +74,105 @@ function under(sel) {
   return !!b && !el.contains(document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2));
 }
 
-export async function adoptsHome(position) {
+/** The rects of home's foot on screen: the dock, its search button, the bar. */
+function footRects() {
+  return [["dock", ".home > .dock:not(.dock-tray)"], ["dock button", ".home > .dock .dock-search"], ["bar", ".home > form.bar"]]
+    .map(([name, sel]) => [name, document.querySelector(sel)])
+    .filter(([, el]) => el && shown(el))
+    .map(([name, el]) => [name, el.getBoundingClientRect()]);
+}
+
+const hit = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+const box = (r) => [r.left, r.top, r.right, r.bottom].map(Math.round).join(",");
+
+/** The grid's cells on screen: inside the list's view and above its window's (.launcher-clip) foot. */
+function seenCells(list) {
+  const l = list.getBoundingClientRect();
+  const clip = list.closest(".launcher-clip")?.getBoundingClientRect() ?? l;
+  return [...list.querySelectorAll(".app")].filter(shown).map((el) => el.getBoundingClientRect())
+    .filter((r) => r.bottom > l.top + 1 && r.top < Math.min(l.bottom, clip.bottom) - 1);
+}
+
+/** The last row: wholly inside the grid's window and (a bottom dock) [gap] px over the dock's top. */
+function lastRowFails(list, cells, dock, gap) {
+  const last = cells.reduce((a, b) => (b.bottom > a.bottom ? b : a));
+  const clip = list.closest(".launcher-clip")?.getBoundingClientRect();
+  const fails = [];
+  if (dock && last.bottom > dock.top - gap) fails.push(`the last row ends at ${Math.round(last.bottom)}, not ${gap} px over the dock's top ${Math.round(dock.top)}`);
+  if (clip && last.bottom > clip.bottom + 0.5) fails.push(`the last row (${Math.round(last.bottom)}) is cut by the grid's window (${Math.round(clip.bottom)})`);
+  return fails;
+}
+
+/**
+ * LB1 (the user, 2026-10-31 18:27: "This doesn't look right in the bottom."): the grid scrolled to its end, its last row
+ * sits wholly above home's foot - a bottom dock: the last cell's bottom 8 px over the dock's top - and no cell touches
+ * the dock, the dock's search button or the bar (a side dock: the grid ends beside it and above the bar).
+ */
+async function gridClear(position) {
+  const list = document.querySelector(".home > .stage .drawer-list:not(.drawer-folders)");
+  if (!list) return ["no drawer list"];
+  list.scrollTop = list.scrollHeight;
+  await sleep(150);
+  await frame();
+  const cells = seenCells(list);
+  if (!cells.length) return ["no app cells on screen"];
+  const feet = footRects();
+  const fails = cells.flatMap((r) => feet.filter(([, f]) => hit(r, f)).map(([name]) => `a grid cell (${box(r)}) overlaps the ${name}`));
+  const dock = position === "bottom" ? feet.find(([n]) => n === "dock")?.[1] : null;
+  fails.push(...lastRowFails(list, cells, dock, 8));
+  list.scrollTop = 0;
+  return [...new Set(fails)];
+}
+
+/**
+ * Opens the launcher; one bar and one dock, unmoved, through the open. With home's search as the dock's button there is
+ * no bar at rest - the pill comes with the launcher (home.tsx HomeSearch) - so only the open's result is looked at there.
+ */
+async function openedAdopting(S, button) {
+  const before = foot();
+  if (button) {
+    S.openPanel("apps", { search: true });
+    await sleep(500);
+    return [];
+  }
+  const fails = before.bars === 1 && before.docks === 1 ? [] : [`at rest: ${before.bars} bars, ${before.docks} docks`];
+  S.openPanel("apps", { search: true });
+  return [...fails, ...(await sampled(before))];
+}
+
+/** A phone's worth of apps (60), so the grid scrolls and its last row meets the foot (the mock's few fit on one page). */
+async function manyApps(powos) {
+  const list = await powos.apps.list();
+  if (list.length >= 60 || !list.length) return;
+  const more = Array.from({ length: 60 - list.length }, (_, i) => ({ ...list[i % list.length], key: `a:dev.lb1/.A${i}`, label: `Zz ${i}` }));
+  powos.apps.list = async () => [...list, ...more];
+  window.__mockEvents.emit("apps.changed", {});
+  await sleep(300);
+}
+
+/** [opts]: below - the pill under the dock (footBelow); button - home's search as the dock's button (searchTry "dock"). */
+export async function adoptsHome(position, opts = {}) {
   const S = await importShim("./state.ts");
+  const W = await importShim("./ui/searchwidget.tsx");
   const { powos } = await importShim("./bridge.ts");
   const asked = [];
   powos.pull.open = async (kind) => (asked.push(kind), true);
+  await manyApps(powos);
   if (S.dock.value.length < 4) S.dock.value = S.recent.value.slice(0, 4);
   S.dockTry.value = position;
+  W.footBelow.value = opts.below ? "1" : "";
+  S.searchTry.value = opts.button ? "dock" : "";
   await sleep(300);
-  const before = foot();
-  const fails = before.bars === 1 && before.docks === 1 ? [] : [`at rest: ${before.bars} bars, ${before.docks} docks`];
-  S.openPanel("apps", { search: true });
-  fails.push(...(await sampled(before)));
+  const fails = await openedAdopting(S, opts.button);
   if (S.drawer.value !== 1) fails.push("the launcher didn't open in place");
   fails.push(...backdropFails());
   if (asked.length) fails.push("asked the host's overlay over home");
   if (document.querySelector(".pull-screen")) fails.push("a launcher copy (.pull-screen) on home's page");
+  fails.push(...(await gridClear(position)));
   S.closeDrawer();
   S.dockTry.value = "";
+  S.searchTry.value = "";
+  W.footBelow.value = "";
   return [...new Set(fails)].map((f) => `${position}: ${f}`);
 }
 

@@ -3199,6 +3199,14 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
   pointer-events: auto !important;
 }
 
+/* LB1: so the app grid's window ends at the stage's foot - above the adopted dock and bar, wherever they sit (the pill
+   under the dock, the dock's search button, the parked pill, no pill yet while it opens) - and the last row scrolls
+   into view a gap over the dock (the user, 2026-10-31 18:27: "This doesn't look right in the bottom." - the grid ran on
+   under the dock, which stays now). The older layouts reached past the stage's foot, over where the dock gave way.
+   Not the wide foot (its own rule), the chat (the dock gives way there) or PowOS AI's panel (its own reach). */
+.home.adopts:not(.wide):not(:has(.drawer .chat)):not(:has(.ai-panel)) > .stage > .launcher-clip { inset: 0 0 4px; transform: none; }
+.home.adopts:not(.wide):not(:has(.drawer .chat)):not(:has(.ai-panel)) > .stage > .launcher-clip > .launcher { transform: translateY(calc((1 - var(--p)) * var(--rise))); }
+
 /* DS2: opened from home's dock search button (launchmorph.ts), the foot stays put - the dock lies over home's, the bar's
    glass grows out of the button itself - only the panel rises and fades in. */
 .home.pull-screen.from-button > :is(.bar, .dock) { transform: none; opacity: 1; }
