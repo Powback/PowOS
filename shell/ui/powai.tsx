@@ -24,6 +24,7 @@ import { MenuScreen, SCREENS, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { WorkFeed } from "./aiboard.tsx";
 import { agent, sessions as agentSessions } from "../agents.ts";
 import { untried } from "./trycard.tsx";
+import { AiContext, AiNav, FleetPane, useAgentsInPane } from "./aipanes.tsx";
 
 // The board's state, for what reads it from here (perfrec, the gate, the renders): it lives in aiboard.tsx now.
 export { board, boardSeen, checks, type WorkRow } from "./aiboard.tsx";
@@ -213,7 +214,7 @@ function Strip({ shown }: { shown: boolean }) {
 }
 
 /** Its header: the chat's name and what the manager is doing and ⋯, or - on a menu's screen - back and that screen's name. */
-function AiHeader({ sub, shown = false }: { sub: AiScreen | null; shown?: boolean }) {
+function AiHeader({ sub, shown = false, strip = true }: { sub: AiScreen | null; shown?: boolean; strip?: boolean }) {
   const [menu, setMenu] = useState(false);
   if (sub)
     return (
@@ -233,7 +234,7 @@ function AiHeader({ sub, shown = false }: { sub: AiScreen | null; shown?: boolea
         <button type="button" class="ai-more" aria-label="more" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
           ⋯
         </button>
-        <Strip shown={shown} />
+        {strip && <Strip shown={shown} />}
       </header>
       {menu && <div class="ai-menu-scrim" onClick={() => setMenu(false)} />}
       {menu && <Menu close={() => setMenu(false)} />}
@@ -269,17 +270,23 @@ function AiCompose() {
 
 /** The page's width, not the device's, picks the layout: chat + Progress side by side from WIDE_PX (the inner screen). */
 const WIDE_PX = 700;
+/** Under this height, wide is the folded screen turned sideways: the nav as icons, no right column. */
+const RAIL_H = 600;
 function useWide() {
   const ref = useRef<HTMLDivElement>(null);
-  const [wide, setWide] = useState(false);
+  const [size, setSize] = useState({ wide: false, rail: false });
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setWide(el.clientWidth >= WIDE_PX));
+    const ro = new ResizeObserver(() => {
+      const wide = el.clientWidth >= WIDE_PX;
+      const rail = wide && el.clientHeight < RAIL_H;
+      setSize((s) => (s.wide === wide && s.rail === rail ? s : { wide, rail }));
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  return [ref, wide] as const;
+  return [ref, size.wide, size.rail] as const;
 }
 
 /** A menu's screen as a glass sheet over the chat's side (wide, Progress only): its own header with back, its own scroll; a tap beside it closes it. */
@@ -331,23 +338,59 @@ function AiBody({ sub, shown }: { sub: AiScreen | null; shown: boolean }) {
   );
 }
 
-export function AiView({ shown, cls, pill = true }: { shown: boolean; cls: string; pill?: boolean }) {
-  const [ref, wide] = useWide();
+/**
+ * The wide AI page in three panes (the user, 2026-10-31 13:29): the nav, the middle pane (the chat at reading width with
+ * its field at the pane's foot, or the screen the nav or ⋯ picked, with back), the right context column (not in [rail]).
+ */
+function AiPanes({ shown, rail }: { shown: boolean; rail: boolean }) {
+  const s = aiScreen.value;
+  useAgentsInPane(shown);
+  const sub = s === "chat" || s === "fleet" ? null : s;
+  return (
+    <>
+      <AiNav rail={rail} shown={shown} />
+      <div class="ai-mid tile">
+        {s === "fleet" ? (
+          <FleetPane />
+        ) : (
+          <>
+            <AiHeader sub={sub} strip={false} />
+            <AiBody sub={sub} shown={shown} />
+            {!sub && <AiCompose />}
+          </>
+        )}
+      </div>
+      {!rail && <AiContext />}
+    </>
+  );
+}
+
+export function AiView({ shown, cls, pill = true, panes = false }: { shown: boolean; cls: string; pill?: boolean; panes?: boolean }) {
+  const [ref, wide, rail] = useWide();
+  return (
+    <div ref={ref} class={panes && wide ? `${aiViewClass(cls, true, false)} panes ${rail ? "rail" : ""}` : aiViewClass(cls, wide, wide && aiScreen.value === "progress")}>
+      {panes && wide ? <AiPanes shown={shown} rail={rail} /> : <AiColumn shown={shown} wide={wide} pill={pill} />}
+    </div>
+  );
+}
+
+/** The one column (folded, or a holder without panes): the header, the chat or a menu screen, the field; Progress a sheet wide. */
+function AiColumn({ shown, wide, pill }: { shown: boolean; wide: boolean; pill: boolean }) {
   const s = aiScreen.value;
   const split = wide && s === "progress";
   const sub = s !== "chat" && !split ? s : null;
   return (
-    <div ref={ref} class={aiViewClass(cls, wide, split)}>
+    <>
       <AiHeader sub={sub} shown={shown && !sub} />
       <AiBody sub={sub} shown={shown} />
       {!sub && (pill || wide) && <AiCompose />}
       {split && <Sheet s={s} shown={shown} />}
-    </div>
+    </>
   );
 }
 
 /** Its page, to the left of home. */
 export function PowAiPage() {
   const shown = page.value === -1;
-  return <AiView shown={shown} cls={`ai-screen ${shown ? "shown" : ""}`} />;
+  return <AiView shown={shown} cls={`ai-screen ${shown ? "shown" : ""}`} panes />;
 }

@@ -214,7 +214,7 @@ const own = {
  * The board's tasks while the fleet shows and an agent holds one (the words, steps and progress the lines say). The
  * connection is apps/stdb.ts's, shared with PowOS AI's board by database name; it goes 5 s after nothing shows it.
  */
-function BoardFeed() {
+export function BoardFeed() {
   const db = useDb("powos-agents", AgentsDb);
   const rows = useRows<WorkLite>(db, "work", "SELECT * FROM work");
   useEffect(() => {
@@ -222,7 +222,7 @@ function BoardFeed() {
   }, [rows, db.status]);
   return null;
 }
-const needsBoard = (f: Fleet) => [...f.working, ...f.attention, ...(f.manager ? [f.manager] : [])].some((x) => !!x.a.work);
+export const needsBoard = (f: Fleet) => [...f.working, ...f.attention, ...(f.manager ? [f.manager] : [])].some((x) => !!x.a.work);
 
 /** The one action of an attention line: restart (the manager does it), allow the open ask, or open its live view. */
 function act(x: Worker) {
@@ -235,7 +235,7 @@ function act(x: Worker) {
 const ACT_LABEL = { restart: "restart", answer: "allow", open: "open" } as const;
 
 /** A thin progress bar: step [done + 1] of [total] (nothing without a plan). */
-function Bar({ done, total }: { done: number; total: number }) {
+export function Bar({ done, total }: { done: number; total: number }) {
   if (!total) return null;
   return (
     <div class="fl-bar" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>

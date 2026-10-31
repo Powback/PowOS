@@ -22,7 +22,7 @@ import { Friction, WorkFeed, board, boardSeen, type WorkRow } from "./aiboard.ts
 
 declare function importShim(url: string): Promise<{ default: ComponentType<any> }>;
 
-export type AiScreen = "chat" | "progress" | "agents" | "devices" | "friction";
+export type AiScreen = "chat" | "progress" | "agents" | "devices" | "friction" | "fleet";
 /** The menu's screens in its order, by name. */
 export const SCREENS: [AiScreen, string][] = [
   ["progress", "Progress"],
@@ -155,7 +155,7 @@ export function dailyDriver(): number | null {
 
 const open = (w: WorkRow) => w.status !== "done";
 /** Open tasks per area, most first: [area, in progress, waiting on the user]. */
-function areas(): [string, number, number][] {
+export function areas(): [string, number, number][] {
   const by = new Map<string, [number, number]>();
   for (const w of board.value.filter(open)) {
     const k = w.project.trim() || "Other";
@@ -245,7 +245,7 @@ function FrictionScreen({ shown }: { shown: boolean }) {
 /** The screen [s] (not the chat), [shown]: on screen - its feeds run only then. */
 export function MenuScreen({ s, shown, back }: { s: AiScreen; shown: boolean; back: () => void }) {
   if (s === "progress") return <ProgressScreen shown={shown} back={back} />;
-  if (s === "agents") return <AgentsScreen shown={shown} />;
+  if (s === "agents" || s === "fleet") return <AgentsScreen shown={shown} />;
   if (s === "devices") return <Units shown={shown} />;
   if (s === "friction") return <FrictionScreen shown={shown} />;
   return null;

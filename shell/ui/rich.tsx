@@ -130,8 +130,11 @@ type NoteItem = Extract<ChatItem, { kind: "note" }>;
 type Entry = { tools: ToolItem[] } | { mails: NoteItem[] } | { item: Exclude<ChatItem, ToolItem> };
 
 const isMail = (i: ChatItem): i is NoteItem => i.kind === "note" && !i.error && !!mailOf(i.text);
-/** The host's "didn't answer" after a turn that did act (tool steps, a block): not an error the user should see. */
-const quietFail = (i: ChatItem, acted: boolean) => acted && i.kind === "note" && i.error && /didn't answer/.test(i.text);
+/**
+ * The host's "didn't answer" after a turn that did act (tool steps, a block), or one a later reply answered anyway (the
+ * old manager's exit-0 notes, before its fix): not an error the user should see. [answered]: an assistant message follows.
+ */
+const quietFail = (i: ChatItem, acted: boolean, answered: boolean) => (acted || answered) && i.kind === "note" && i.error && /didn't answer/.test(i.text);
 
 /** [item] onto [out]: a tool call onto the run before it, an agent's mail onto the mail before it, else its own entry. */
 function push(out: Entry[], item: ChatItem) {
@@ -145,11 +148,12 @@ function push(out: Entry[], item: ChatItem) {
 export function entries(items: ChatItem[]): Entry[] {
   const out: Entry[] = [];
   let acted = false;
-  for (const item of items) {
+  const lastReply = items.findLastIndex((i) => i.kind === "assistant");
+  items.forEach((item, at) => {
     if (item.kind === "user") acted = false;
     else if (item.kind === "tool" || item.kind === "assistant") acted = true;
-    if (!quietFail(item, acted)) push(out, item);
-  }
+    if (!quietFail(item, acted, at < lastReply)) push(out, item);
+  });
   return out;
 }
 
