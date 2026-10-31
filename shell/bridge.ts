@@ -355,6 +355,10 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       // Who took the keyboard down, in logcat (chromium console): desktop-mode search kept closing it (2026-10-28).
       hide: () => (console.info("keyboard.hide from", new Error().stack?.split("\n").slice(2, 5).join(" <- ")), call("keyboard.hide")),
     },
+    haptics: {
+      tick: () => call("haptics.tick"),
+      confirm: () => call("haptics.confirm"),
+    },
     pet: {
       overlay: (on) => call<boolean>("pet.overlay", on ?? null),
     },
@@ -1053,6 +1057,16 @@ function mock(): Bridge {
       };
     })(),
     keyboard: { show: async () => {}, hide: async () => {} },
+    // The dev/mock host's touch feedback: a short buzz where the browser has one; window.__hapticsMock counts the calls
+    // (dev/gate.mjs launcher-haptics: once per threshold crossing).
+    haptics: (() => {
+      const counts = { tick: 0, confirm: 0 };
+      (window as unknown as { __hapticsMock: typeof counts }).__hapticsMock = counts;
+      return {
+        tick: async () => void (counts.tick++, navigator.vibrate?.(8)),
+        confirm: async () => void (counts.confirm++, navigator.vibrate?.(8)),
+      };
+    })(),
     pet: {
       overlay: async () => true,
     },

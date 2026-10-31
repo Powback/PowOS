@@ -588,6 +588,9 @@ class ShellBridge(
             "speech.cancel" -> speech.cancel()
             // Tests with recorded audio instead of the mic (GpuSpeech.kt SpeechEngines.test): logged, nothing reaches a page.
             "speech.test" -> dev.omalauncher.ui.SpeechEngines.test(context, a.getString(0), a.optString(1, "gpu"))
+            // A gesture past its commit threshold (the page's ui/haptics.ts): the system's touch feedback, on this page's view.
+            "haptics.tick" -> dev.omalauncher.ui.Haptics.tick(web)
+            "haptics.confirm" -> dev.omalauncher.ui.Haptics.confirm(web)
             "keyboard.show" -> keyboard(true)
             "keyboard.hide" -> keyboard(false)
             "system.insets" -> lastInsets

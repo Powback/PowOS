@@ -729,6 +729,33 @@ async function panelTracksFinger() {
   return fails;
 }
 
+/**
+ * The launcher's pull (pull.tsx, the host's pull.drag p) ticks the haptics (ui/haptics.ts; the mock counts them in
+ * window.__hapticsMock) once as it crosses its threshold (gesture.ts OPEN_AT): nothing short of it, nothing more held
+ * past it, once more back and over again (the user, 10-31: "some small haptics thing there").
+ */
+async function launcherHapticsCheck() {
+  const ev = window.__mockEvents, h = window.__hapticsMock;
+  if (!ev || !h) return ["no mock events or mock haptics to drive the launcher's pull"];
+  const frame = () => new Promise((ok) => requestAnimationFrame(() => ok()));
+  const t0 = h.tick, fails = [];
+  const to = async (ps, want, what) => {
+    for (const p of ps) {
+      ev.emit("pull.drag", { p });
+      await frame();
+    }
+    if (h.tick - t0 !== want) fails.push(`${what}: ${h.tick - t0} haptic ticks, want ${want}`);
+  };
+  ev.emit("pull.begin", { kind: "apps" });
+  await to([0.02, 0.06, 0.1], 0, "short of the threshold");
+  await to([0.3], 1, "past the threshold");
+  await to([0.5, 0.8, 1, 0.9, 0.6, 0.4], 1, "held past it");
+  await to([0.1, 0.05], 1, "back under it");
+  await to([0.35], 2, "over it again");
+  ev.emit("pull.end", { open: false });
+  return fails;
+}
+
 /** At rest: no animation in the panel, nothing the pull left inline. */
 async function overpullRest() {
   const o = window.__op;
@@ -3982,6 +4009,8 @@ try {
   // The drawer's list fades at an edge with more to scroll (2026-10-24): a short screen, so the mock's apps scroll.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "scroll-fade", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(scrollFadeCheck))));
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-haptics", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(launcherHapticsCheck))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "close-up", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(closeUpCheck))));
   // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
   // side-by-side pages without moving a tile.

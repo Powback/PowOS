@@ -106,6 +106,7 @@ export function desktop(n: Bridge): Bridge {
     // No Android widget screens or pages here (OWL widgets need the engine's JS port: docs/DESKTOP-SHELL.md).
     widgets: { ...n.widgets, screen: async () => ({ key: null }), closeScreen: none, page: none },
     keyboard: { show: none, hide: none },
+    haptics: { tick: none, confirm: none },
     // Dictation on the desktop is round 2 (the GPU box's speech, as the phone's GpuSpeech): the pill shows no mic.
     speech: { start: async () => "unavailable" as const, stop: none, cancel: none, hold: none, warm: none, quiet: none },
     on: (event, handler) => {

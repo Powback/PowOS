@@ -14,6 +14,7 @@ import { wideHome } from "../hosts/wide.ts";
 import type { WebWindowRect } from "../types.ts";
 import { Mark } from "./chrome.tsx";
 import { memo } from "./memo.ts";
+import { tick } from "./haptics.ts";
 
 const TITLE = 36;
 const RADIUS = 12;
@@ -1374,7 +1375,7 @@ function showSnap(id: number, r: { w: number; h: number }, k: number, a: Area) {
   const snapped = (on(r.w, a.right - a.left) ? "w" : "") + (on(r.h, a.bottom - a.top) ? "h" : "");
   const was = resizeView.value;
   if (was?.id === id && was.snapped === snapped) return;
-  if (snapped && snapped !== was?.snapped) navigator.vibrate?.(5);
+  if (snapped && snapped !== was?.snapped) tick();
   resizeView.value = { id, snapped };
 }
 
@@ -1430,7 +1431,7 @@ function Edge({ id, side, height }: { id: number; side: (typeof EDGES)[number]; 
         capture(e);
         if (tiledOn(id) != null) untile(id, "keep");
         start.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, w: win.w, h: win.h, side: sideAt(side, e) };
-        navigator.vibrate?.(8);
+        tick();
         resizeView.value = { id, snapped: "" };
         resizeStart(id);
         oneFinger.set(id, () => ((start.current = null), (resizeView.value = null), resizeEnd(id)));
