@@ -25,7 +25,7 @@
 import { useEffect, useMemo, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { stored } from "../state.ts";
+import { chat, stored } from "../state.ts";
 import { Pill, dictate, hearing, interrupt, speech, type MicTarget } from "./bar.tsx";
 import { listeningFor, makeHold, release } from "./dictation.ts";
 import { askQueued, setAskContext } from "./assistant.ts";
@@ -41,6 +41,16 @@ const screen = signal<AssistScreen | null>(null);
 const draft = stored("assist.draft");
 /** Asked something since it opened: the answer shows. */
 const asked = signal(false);
+/** The manager's cards (```present / ```choices, rich.tsx Said) in the chat: their texts. */
+const cards = () => chat.value.items.flatMap((i) => (i.kind === "assistant" && /^\s*```(present|choices)\s*$/m.test(i.text) ? [i.text] : []));
+/** The cards there were when it opened; null until the first summoning. */
+let seenCards: Set<string> | null = null;
+/**
+ * A card sent since it opened (f347: a document presented to the overlay never showed - the chat only opens once
+ * something's asked here): the chat opens for it too.
+ */
+const cardSince = () => seenCards !== null && cards().some((t) => !seenCards!.has(t));
+
 /** The part of the screen circled (a PNG cut out of the screenshot), sent with the whole screen; null: just the screen. */
 const region = signal<string | null>(null);
 /** The circle drawn over the screen (px), left showing so it's clear what goes along. */
@@ -55,7 +65,10 @@ const drawing = signal(false);
 const live = signal({ on: false, frames: 0 });
 powos.on("assist.live", (l: { on: boolean; frames: number }) => (live.value = l));
 
-powos.on("assist.context", (s: AssistScreen) => (screen.value = s));
+powos.on("assist.context", (s: AssistScreen) => {
+  screen.value = s;
+  seenCards ??= new Set(cards());
+});
 // Summoned again (the page stays warm between summonings, AssistWeb): last time's question, answer and cut-out go,
 // and it listens.
 powos.on("assist.reset", () => {
@@ -64,6 +77,7 @@ powos.on("assist.reset", () => {
   drawing.value = false;
   paused = null;
   asked.value = false;
+  seenCards = new Set(cards());
   region.value = null;
   stroke.value = [];
   summoned();
@@ -396,7 +410,9 @@ export function Assist() {
         <div class="assist-grip" {...swipe} aria-hidden="true"><span /></div>
         <div class="assist-head" {...swipe}>
           {!on && s?.screenshot ? (
-            <img class="assist-shot" src={region.value ?? s.screenshot} alt="" />
+            // The circled part at its own shape (AO4: "if I draw a little square, I should show a little square"); the
+            // whole screen as the screen's tall strip.
+            <img class={`assist-shot ${region.value ? "crop" : ""}`} src={region.value ?? s.screenshot} alt="" />
           ) : (
             !on && <span class="assist-shot blank" />
           )}
@@ -420,9 +436,9 @@ export function Assist() {
             )}
           </div>
         )}
-        {/* The one chat (the pill's, chat.tsx): this conversation's newest, once something's asked here - until then
-            the screen above stays free to circle. */}
-        {asked.value && <ChatView head={false} />}
+        {/* The one chat (the pill's, chat.tsx): this conversation's newest, once something's asked here or a card is
+            sent to it - until then the screen above stays free to circle. */}
+        {(asked.value || cardSince()) && <ChatView head={false} />}
         <form
           class="assist-ask"
           onSubmit={(e) => {

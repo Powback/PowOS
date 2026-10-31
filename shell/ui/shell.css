@@ -1836,6 +1836,8 @@ html[data-mode="assist"] .assist {
 .assist-head { display: flex; align-items: center; gap: 10px; }
 .assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; border: var(--frame) solid var(--color-border); }
 .assist-shot.blank { background: var(--color-surface); }
+/* The circled part (assist.tsx cut): its own aspect, inside the head's 64px box - never stretched or cropped to the screen's. */
+.assist-shot.crop { width: auto; height: auto; max-width: 64px; max-height: 64px; object-fit: contain; }
 .assist-title { font-weight: bold; }
 .assist-sub { flex: 1; font-size: var(--text-small); }
 .assist-open { font: var(--text-small) var(--font); color: var(--accent-text); }
