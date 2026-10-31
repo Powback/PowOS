@@ -4,7 +4,7 @@
 #                                -> DIR/prev.apk, the app's exact override set (files/shell + shell-commits.txt +
 #                                shell-push.json) -> DIR/overrides.tar, the installed commit -> DIR/commit. Exit 1 = no
 #                                snapshot (ship-apk then doesn't install).
-#   ship-guard.sh check [S]      every page boots: window.__powosAlive on home, shade and assist (read-only CDP), polled
+#   ship-guard.sh check [S]      every page boots: window.__powosAlive on home (and home drawn: __powosHomeBlank), shade and assist (read-only CDP), polled
 #                                for up to S (120) s after the install + re-push. Exit 1 = a page didn't (named).
 #   ship-guard.sh restore DIR    the WHOLE snapshot back: the overrides cleared FIRST (the previous APK must not boot on
 #                                the new overrides - the 00:59 race), the previous APK reinstalled (install -r -d: data
@@ -40,7 +40,11 @@ check)
   while :; do
     bad=""
     for pg in "" shade assist; do
-      r=$(CDP_TIMEOUT_S=15 "$here/cdp.sh" eval "$pg" 'window.__powosAlive === true' 2>/dev/null | tr -d '\r' | tail -1)
+      # Home alive and drawn: __powosHomeBlank (shell/ui/homedrawn.ts) names a home laid out off the screen (10-31 02:50:
+      # alive, no errors, only the wallpaper showing).
+      js='window.__powosAlive === true'
+      [ -z "$pg" ] && js='window.__powosAlive === true && !(window.__powosHomeBlank && window.__powosHomeBlank())'
+      r=$(CDP_TIMEOUT_S=15 "$here/cdp.sh" eval "$pg" "$js" 2>/dev/null | tr -d '\r' | tail -1)
       [ "$r" = true ] || bad="$bad ${pg:-home}"
     done
     # Home's page only exists once Android starts home. After an install it does that only when home is needed: with

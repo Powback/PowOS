@@ -1,246 +1,164 @@
 /**
  * Home's search as a dock button (state.ts searchInDock; the user, 2026-10-31 01:24-01:26: "instead of being like a
- * bar, it's just like... An app ... placed in like the middle of the dock" - "we activate it and EXPAND it by pressing
- * the app-sized [button]"). The dock's centre slot (3 apps | the button | 3 apps; an odd count puts the extra one on
- * the right) is a round face with the prompt glyph the bar shows empty (bar.tsx Pill .prompt) and a small mic.
+ * bar, it's just like... An app ... placed in like the middle of the dock"). The dock's centre slot (3 apps | the
+ * button | 3 apps; an odd count puts the extra one on the right) is a round face with the prompt glyph the bar shows
+ * empty (bar.tsx Pill .prompt) and a small mic badge (a hold dictates).
  *
- * A tap expands it in place into the search bar (DockSearchBar): the pill grows out of the button over the dock's
- * icons, which fade under it (a side dock's grows out of its column to the foot), focused, the keyboard up. What's
- * typed shows its results as the bar's do: in the launcher overlay, which takes the field over (pull.tsx, the text
- * carried). Enter opens the best hit or asks PowOS AI, as the bar. A hold on the button, or a tap on its mic, dictates
- * into the expanded bar. Dismissed (a touch elsewhere, back/Escape, sent, the launcher up) it folds back into the button.
- *
- * Bar and Pill are used as they are: this is only another face and another place for the same Pill.
+ * DS2 (the user, 01:53: "clicking the button The launcher button should open the launcher. and if I hold it It should
+ * activate the launcher with the voice button. And then... if I continue holding it, it's push to talk"):
+ *  - a tap opens the launcher with its field focused, the keyboard up;
+ *  - held HOLD_MS it opens the launcher dictating (the launcher's own bar dictates: its field shows the words);
+ *  - still held at PTT_MS it's push-to-talk: let go, the dictation stops and its words stay in the field (not sent);
+ *    let go before PTT_MS, the dictation goes on as a tap's (tap the mic to stop);
+ *  - a swipe up from it brings the launcher with the finger (the host's pull, driven from here: pull.drive).
+ * The launcher opens FROM the button (launchmorph.ts): the overlay's dock has the same slot (dockButton there too), its
+ * bar's glass grows out of the button's circle sideways and up into the bar while the panel rises on the launcher
+ * swipe's settle; closed, it goes back into the button.
  */
-import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
-import { computed, effect, signal } from "@preact/signals";
+import { useRef } from "preact/hooks";
+import { computed } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { chatting, homePage, launcherIsOverlay, openPanel, pullKind, query, searchInDock, dockPosition } from "../state.ts";
-import { searchResults, searchPending, openSearchResult } from "../search.ts";
-import { askQueued, openAssistant, pillTarget, sending, takeOver } from "./assistant.ts";
-import { dictate, hearing, speech, type MicTarget } from "./dictation.ts";
-import { Mic, Pill } from "./bar.tsx";
-import { drawerOpen } from "./gesture.ts";
+import { dockPosition, homePage, openPanel, pullPage, searchInDock } from "../state.ts";
+import { wideHome } from "../hosts/wide.ts";
+import { dictateBar, focusBar } from "./bar.tsx";
+import { speech } from "./dictation.ts";
+import { morphFrom } from "./launchmorph.ts";
 
-/** A press on the button held this long dictates (shorter: a tap, which expands it to type). */
-const HOLD_MS = 350;
-/** A press that moves this far is the dock's scroll, not the button's. */
+/** A press on the button held this long dictates (shorter: a tap, which opens the launcher to type). */
+const HOLD_MS = 300;
+/** Still held this long, it's push-to-talk: let go and the dictation stops (its words stay in the field). */
+const PTT_MS = 700;
+/** A press that moves this far is the dock's scroll (sideways) or the launcher's swipe (up), not the button's. */
 const SLOP_PX = 10;
-/** The morph between the button and the bar, either way. */
-const MORPH_MS = 200;
-const EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+/** gesture.ts / PanelPull.kt: the panel's openness for a finger's travel (GAIN over TRAVEL of the window's height). */
+const GAIN = 1.5;
+const TRAVEL = 0.15;
+const OPEN_AT = 0.15;
+const OPEN_FLICK = 0.2;
 
-/** The button in the dock: home's page only (not the launcher overlay's dock, which has its bar; not the desktop's). */
-export const dockButton = computed(() => homePage && searchInDock.value);
+/**
+ * The button in the dock: home's page, and the launcher overlay's bottom dock over it (pull.tsx), so the overlay's
+ * dock lies exactly over home's and the morph starts from its own button (not the desktop's; side/wide docks of the
+ * overlay keep their own layout - the morph starts from home's measured rect there).
+ */
+export const dockButton = computed(() => searchInDock.value && (homePage || (pullPage && dockPosition.value === "bottom" && !wideHome.value)));
 
-/** "closed" (the button), "open" (the bar, in the dock's place), "closing" (folding back, then closed). */
-export const dockSearch = signal<"closed" | "open" | "closing">("closed");
-/** The next expand focuses the field (a tap) or not (a dictation: no keyboard for it). */
-let focusNext = false;
-
-/** Where a mic of the button or the expanded bar writes: the bar's own target's behaviour, its own identity. */
-export const dockMic: MicTarget = {
-  typed: () => query.value,
-  heard: (full, send) => (send ? ask(full) : (query.value = full)),
-  started: () => expand(false),
-};
-
-export function expand(focus: boolean) {
-  focusNext = focus;
-  if (dockSearch.value !== "open") dockSearch.value = "open";
-  else if (focus) focusField();
+/** The button's face on this page, as a rect (the morph's start). */
+export function faceRect() {
+  const r = document.querySelector(".home .dock .dock-search-face")?.getBoundingClientRect();
+  return r && r.width > 0 ? { left: r.left, top: r.top, width: r.width, height: r.height } : undefined;
 }
 
-export function collapse() {
-  if (dockSearch.value === "open") dockSearch.value = "closing";
+/** Opens the launcher from the button: home asks the host for the overlay; the overlay's own button acts in place. */
+function launch(listen: boolean) {
+  if (pullPage) return listen ? dictateBar() : focusBar();
+  openPanel("apps", { search: true, listen, from: faceRect() });
 }
 
-/** Asked (Enter with no hit, a held mic): PowOS AI takes it, its chat shown (on home: the launcher overlay's). */
-function ask(text: string) {
-  pullKind.value = "apps";
-  askQueued(text);
-  if (homePage) openAssistant({});
-  collapse();
+/** The host's pull, driven by a swipe up from the button (PullHost.pullBegin/pullDrag/pullEnd); an older host: none. */
+const drive = (phase: "begin" | "drag" | "end", arg?: unknown) => void powos.pull.drive?.(phase, arg)?.catch(() => {});
+
+interface Press {
+  x: number;
+  y: number;
+  hold: number;
+  ptt: number;
+  /** "tap" (nothing yet), "held" (dictating), "ptt" (push-to-talk), "swipe" (the launcher follows). */
+  kind: "tap" | "held" | "ptt" | "swipe";
+  last: [number, number];
 }
 
-/** What's typed shows its results where the bar's do: the launcher overlay, its pill taking the field over. */
-function showResults(text: string) {
-  if (!launcherIsOverlay) return;
-  openPanel("apps", { search: true, text });
-  collapse();
+const openness = (y: number, p: Press) => Math.max(0, Math.min(1, ((p.y - y) * GAIN) / (innerHeight * TRAVEL)));
+const clear = (p: Press) => (clearTimeout(p.hold), clearTimeout(p.ptt));
+
+/** A finger down: a tap until HOLD_MS (then dictating), push-to-talk from PTT_MS. */
+function down(e: PointerEvent): Press {
+  try {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  } catch {
+    // A pointer the browser doesn't know as active (synthetic): nothing to capture.
+  }
+  const p: Press = { x: e.clientX, y: e.clientY, hold: 0, ptt: 0, kind: "tap", last: [e.clientY, performance.now()] };
+  p.hold = window.setTimeout(() => {
+    p.kind = "held";
+    navigator.vibrate?.(10);
+    launch(true);
+  }, HOLD_MS);
+  p.ptt = window.setTimeout(() => {
+    if (p.kind !== "held") return;
+    p.kind = "ptt";
+    // The recognizer goes on through pauses until the release's stop().
+    void powos.speech.hold();
+    navigator.vibrate?.(5);
+  }, PTT_MS);
+  return p;
 }
 
-const field = () => document.querySelector<HTMLTextAreaElement>(".home > .dock-search-bar textarea");
-function focusField() {
-  requestAnimationFrame(() => {
-    field()?.focus();
-    void powos.keyboard.show();
-  });
+/** It moved: the launcher's swipe follows; past the slop a tap is a swipe up (home only) or the dock's (false). */
+function move(p: Press, e: PointerEvent): boolean {
+  if (p.kind === "swipe") {
+    drive("drag", openness(e.clientY, p));
+    p.last = [e.clientY, performance.now()];
+    return true;
+  }
+  if (p.kind !== "tap") return true;
+  const up = p.y - e.clientY;
+  const dx = Math.abs(e.clientX - p.x);
+  if (Math.hypot(dx, up) <= SLOP_PX) return true;
+  clear(p);
+  // Sideways (or on the overlay's own dock): the dock's scroll, not the button's.
+  if (!homePage || up <= dx * 1.2) return false;
+  p.kind = "swipe";
+  drive("begin", { search: true, from: faceRect(), drag: true });
+  drive("drag", openness(e.clientY, p));
+  p.last = [e.clientY, performance.now()];
+  return true;
 }
 
-// Folded back when the launcher comes up over home, or the option is switched off.
-effect(() => {
-  if (dockSearch.peek() === "open" && (drawerOpen.value || !dockButton.value)) collapse();
-});
+/** Let go (or taken away: [cancelled]). */
+function up(p: Press, cancelled: boolean, y: number) {
+  clear(p);
+  if (p.kind === "tap" && !cancelled) return launch(false);
+  // Push-to-talk let go: the dictation stops, its words stay in the launcher's field (its page dictates: its
+  // speech.done writes them as a tap's dictation does, never a send). A cancel (the press taken away) too.
+  if (p.kind === "ptt") return void powos.speech.stop();
+  if (p.kind !== "swipe") return;
+  const [ly, lt] = p.last;
+  const v = (ly - y) / Math.max(1, performance.now() - lt);
+  drive("end", !cancelled && (v > OPEN_FLICK || openness(y, p) > OPEN_AT));
+}
 
 /** The button's face: the dock's cell in the centre slot (home.tsx Dock places it). */
 export function DockSearchButton() {
-  const press = useRef<{ x: number; y: number; timer: number; held: boolean } | null>(null);
-  const open = dockSearch.value !== "closed";
-  const listening = speech.value.listening && !!hearing(dockMic);
-  const end = () => {
+  const press = useRef<Press | null>(null);
+  const listening = speech.value.listening || !!speech.value.elsewhere;
+  const end = (cancelled: boolean, y: number) => {
     const p = press.current;
     press.current = null;
-    if (p) clearTimeout(p.timer);
-    return p;
+    if (p) up(p, cancelled, y);
   };
   return (
     <div
-      class={`app dock-search ${open ? "away" : ""} ${listening ? "on" : ""}`}
+      class={`app dock-search ${morphFrom.value ? "away" : ""} ${listening ? "on" : ""}`}
       data-key=" search"
       role="button"
       aria-label="search"
       tabIndex={0}
-      onPointerDown={(e) => {
-        const p = { x: e.clientX, y: e.clientY, timer: 0, held: false };
-        p.timer = window.setTimeout(() => {
-          p.held = true;
-          navigator.vibrate?.(10);
-          expand(false);
-          dictate(dockMic);
-        }, HOLD_MS);
-        press.current = p;
-      }}
-      onPointerMove={(e) => {
-        const p = press.current;
-        if (p && !p.held && Math.hypot(e.clientX - p.x, e.clientY - p.y) > SLOP_PX) end();
-      }}
-      onPointerUp={() => {
-        const p = end();
-        if (p && !p.held) expand(true);
-      }}
-      onPointerCancel={end}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), expand(true))}
+      onPointerDown={(e) => (press.current = down(e))}
+      onPointerMove={(e) => press.current && !move(press.current, e) && (press.current = null)}
+      onPointerUp={(e) => end(false, e.clientY)}
+      onPointerCancel={(e) => end(true, e.clientY)}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), launch(false))}
     >
       <span class="dock-search-face dsb-glass tile">
         <span class="dock-search-glyph" aria-hidden="true">&gt;</span>
       </span>
-      <Mic target={dockMic} />
+      <span class="mic" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <rect x="9" y="2" width="6" height="12" rx="3" />
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" />
+        </svg>
+      </span>
     </div>
-  );
-}
-
-/** The bar's place as the button expands: over the bottom dock's row (measured), or the foot's for a side dock (CSS). */
-function placeOver(form: HTMLElement) {
-  const home = form.parentElement?.getBoundingClientRect();
-  const dock = form.parentElement?.querySelector(":scope > .dock:not(.dock-tray)")?.getBoundingClientRect();
-  if (!home || !dock || dockPosition.peek() !== "bottom") return;
-  form.style.setProperty("--dsb-l", `${dock.left - home.left}px`);
-  form.style.setProperty("--dsb-r", `${home.right - dock.right}px`);
-}
-
-/** The morph: the bar's pill clipped to the button's circle (moved onto it) and grown out to its own shape. */
-function morph(form: HTMLElement, opening: boolean) {
-  const pill = form.querySelector<HTMLElement>(".pill");
-  const face = document.querySelector<HTMLElement>(".home .dock .dock-search-face");
-  if (!pill || !face || matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
-  const r = pill.getBoundingClientRect();
-  const b = face.getBoundingClientRect();
-  const d = Math.min(b.width, r.height, r.width);
-  // The circle inside the pill nearest the button, then moved onto the button.
-  const cx = Math.max(r.left + d / 2, Math.min(r.right - d / 2, b.left + b.width / 2));
-  const cy = r.top + r.height / 2;
-  const dx = b.left + b.width / 2 - cx;
-  const dy = b.top + b.height / 2 - cy;
-  const at = (left: number) => `inset(${(r.height - d) / 2}px ${r.right - left - d}px ${(r.height - d) / 2}px ${left - r.left}px round ${d / 2}px)`;
-  const small = { clipPath: at(cx - d / 2), transform: `translate(${dx}px, ${dy}px)`, opacity: 0.6 };
-  const full = { clipPath: `inset(0px 0px 0px 0px round ${Math.min(20, r.height / 2)}px)`, transform: "translate(0px, 0px)", opacity: 1 };
-  return pill.animate(opening ? [small, full] : [full, small], { duration: MORPH_MS, easing: EASE, fill: "both" });
-}
-
-/** The bar grown out of the button as it opens (focused, for a tap), folded back into it as it closes. */
-function useMorph(form: { current: HTMLFormElement | null }, phase: string) {
-  useLayoutEffect(() => {
-    const el = form.current;
-    if (!el) return;
-    if (phase === "open") {
-      placeOver(el);
-      morph(el, true);
-      if (focusNext) focusField();
-      focusNext = false;
-      return;
-    }
-    if (phase !== "closing") return;
-    field()?.blur();
-    const a = morph(el, false);
-    const done = () => dockSearch.value === "closing" && (dockSearch.value = "closed");
-    if (a) a.finished.then(done, done);
-    else done();
-  }, [phase]);
-}
-
-/** A touch anywhere else, or back (Escape), folds it back. */
-function useDismiss(form: { current: HTMLFormElement | null }, phase: string) {
-  useEffect(() => {
-    if (phase !== "open") return;
-    const away = (e: PointerEvent) => {
-      const t = e.target as Node | null;
-      if (t && (form.current?.contains(t) || (t as Element).closest?.(".dock-search"))) return;
-      collapse();
-    };
-    const key = (e: KeyboardEvent) => e.key === "Escape" && collapse();
-    document.addEventListener("pointerdown", away, true);
-    document.addEventListener("keydown", key);
-    return () => (document.removeEventListener("pointerdown", away, true), document.removeEventListener("keydown", key));
-  }, [phase]);
-}
-
-/** Enter (or send): the best hit opens, else PowOS AI is asked - as bar.tsx's form; in a chat it's never a hit. */
-function submit(e: Event) {
-  e.preventDefault();
-  const best = pullKind.value === "apps" && !chatting.value ? searchResults.value[0] : null;
-  if (best) (openSearchResult(best), collapse());
-  else if (searchPending.value) return;
-  else if (query.value.trim()) ask(query.value);
-  else collapse();
-}
-
-/** The search bar the button expands into: the bar's Pill, in its own form (home.tsx renders it while not closed). */
-export function DockSearchBar() {
-  const form = useRef<HTMLFormElement>(null);
-  const input = useRef<HTMLTextAreaElement>(null);
-  const phase = dockSearch.value;
-  const shown = hearing(dockMic) ?? hearing(pillTarget) ?? query.value;
-  const s = speech.value;
-  useMorph(form, phase);
-  useDismiss(form, phase);
-  if (phase === "closed") return null;
-  return (
-    <form
-      ref={form}
-      class={`dock-search-bar ${phase}`}
-      onSubmit={submit}
-    >
-      <Pill
-        class="dsb-glass dock-search-pill"
-        target={dockMic}
-        hears={[pillTarget]}
-        send
-        sending={sending.value}
-        inputRef={input}
-        value={shown}
-        onInput={(v: string) => {
-          takeOver();
-          query.value = v;
-          if (v.trim()) showResults(v);
-        }}
-        placeholder={s.listening ? "listening…" : (s.error ?? undefined)}
-        aria-label="Search"
-        enterKeyHint="go"
-        autocomplete="off"
-        autoCapitalize="off"
-        spellcheck={false}
-      />
-    </form>
   );
 }

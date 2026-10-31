@@ -440,7 +440,10 @@ function appIcon(pkg?: string): string | null {
 
 const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
 
-/** Previous, play/pause (the larger), next - on this session - the elapsed time [at] and the total at the row's ends. */
+/**
+ * Previous, play/pause (the filled disc), next - on this session - centred on the card, each a 44 px target; the elapsed
+ * time [at] and what's left at the row's two ends, only while the card is wide enough for them (shell.css container query).
+ */
 function Transport({ m, at }: { m: MediaState; at: number }) {
   const pkg = m.package;
   const duration = m.duration ?? 0;
@@ -456,15 +459,17 @@ function Transport({ m, at }: { m: MediaState; at: number }) {
       <button type="button" aria-label="next" onClick={() => powos.media.control("next", pkg)}>
         <Icon name="skipNext" />
       </button>
-      <span class="cc-time">{duration ? clock(duration) : ""}</span>
+      <span class="cc-time">{duration ? `−${clock(Math.max(0, duration - at))}` : ""}</span>
     </span>
   );
 }
 
 /**
- * The transport row and the progress line under it (the card <= 112 px, the spec's old height): the times small at the
- * row's two ends, not under it; the line is a range input, no knob till it's dragged (a drag seeks; the elapsed time
- * follows the finger). A session that doesn't take seeking: the line only shows where it is.
+ * The transport row and the progress line under it (the card 110 px): the times small at the row's two ends, not under
+ * it; the line is a range input drawn 3 px thin, no knob till it's dragged (a drag seeks; the elapsed time follows the
+ * finger). While it plays the line glides between the host's one-second ticks (shell.css .cc-seek.live, --p registered);
+ * keyed by the track, so a new one starts from its own place instead of sweeping back. A session that doesn't take
+ * seeking: the line only shows where it is.
  */
 function Playback({ m }: { m: MediaState }) {
   const [drag, setDrag] = useState<number | null>(null);
@@ -476,7 +481,8 @@ function Playback({ m }: { m: MediaState }) {
       <Transport m={m} at={at} />
       <input
         type="range"
-        class={`cc-seek ${drag === null ? "" : "dragging"}`}
+        key={m.title ?? ""}
+        class={`cc-seek ${drag === null ? (m.playing ? "live" : "") : "dragging"}`}
         aria-label="seek"
         min={0}
         max={duration || 1}
@@ -496,21 +502,25 @@ function Playback({ m }: { m: MediaState }) {
 }
 
 /**
- * One session's card (the user, 2026-10-30: "surely there's some better way to do the media"): its background is the
- * art itself, blurred and darkened under the shade's tint (one pseudo-element, shell.css .cc-media.has-art); the art
- * again as a rounded tile, the track beside it (a tap opens the app), the app's icon small at the corner (its output
- * picker: speaker, Bluetooth, cast); the transport centred under them, the times at its ends, the progress line under
- * that. Every control acts on this session (its package), not whichever plays.
+ * One session's card (the user, 2026-10-30: "surely there's some better way to do the media"; 10-31 board: "blurred
+ * artwork background, proper font, centred controls, thin progress"). 110 px, folded and unfolded:
+ * - its ground is the art itself, heavily blurred and dimmed by the shade's own tint (--shade-tint) over the card's
+ *   shared glass (shell.css .cc-media.has-art ::before/::after); no art: the glass with a faint accent tint;
+ * - the art as a small rounded tile, the track beside it on one line each (title semibold --text-item, artist secondary
+ *   --text-body, ellipsised; a tap opens the app), the app's icon at the corner (its output picker: speaker, Bluetooth,
+ *   cast);
+ * - the transport centred under them (44 px targets), the times at its ends if they fit, the 3 px progress line under it.
+ * Every control acts on this session (its package), not whichever plays.
  */
 function MediaCard({ m }: { m: MediaState }) {
   const icon = appIcon(m.package);
   const art = m.art ? `/_media/${encodeURIComponent(m.art)}` : null;
   return (
-    <div class={`cc-media tile ${art ? "has-art" : ""}`} style={art ? { "--art": `url("${art}")` } : undefined}>
+    <div class={`cc-media tile ${art ? "has-art" : "no-art"} ${m.playing ? "" : "paused"}`} style={art ? { "--art": `url("${art}")` } : undefined}>
       {art ? <img class="cc-art" src={art} alt="" /> : <span class="cc-art cc-art-none"><Icon name="musicNote" /></span>}
       <button type="button" class="cc-track" onClick={() => (shut(), powos.media.control("open", m.package))}>
         <span class="cc-label">{m.title}</span>
-        <span class="cc-detail">{m.artist ?? ""}</span>
+        {m.artist ? <span class="cc-detail">{m.artist}</span> : null}
       </button>
       <button type="button" class="cc-media-app" aria-label={`output: ${m.app ?? "this app"}`} onClick={() => (shut(), powos.media.output(m.package))}>
         {icon ? <img src={icon} alt="" /> : <Icon name="speakerWireless" />}

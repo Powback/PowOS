@@ -72,6 +72,19 @@ function circle(p) {
 const at = (x, y) => ({ bubbles: true, pointerId: 7, isPrimary: true, clientX: x, clientY: y });
 const line = () => (document.querySelector(".crop-stroke polyline")?.getAttribute("points") ?? "").split(" ").filter(Boolean).map((s) => s.split(",").map(Number));
 const zOf = (sel) => Number(getComputedStyle(document.querySelector(sel)).zIndex) || 0;
+const frame = () => new Promise((r) => requestAnimationFrame(r));
+
+/** Until [done], or [el] has no running animations and [value] held for 5 frames (a loaded gate's late fade), max [ms]. */
+async function settled(el, done, value, ms = 3000) {
+  let last, same = 0;
+  for (const t0 = performance.now(); performance.now() - t0 < ms; await frame()) {
+    if (done()) return;
+    const v = value();
+    same = v === last ? same + 1 : 0;
+    last = v;
+    if (same >= 5 && !el?.getAnimations().length) return;
+  }
+}
 
 /** AO1, mid-stroke: the panel unseen and untouchable, the touch over it the drawing's, the points there, the mic paused. */
 function midStroke(p, cx, cy, fails) {
@@ -104,6 +117,7 @@ export async function assistDrawStart() {
   for (const [x, y] of pts.slice(1, 14)) draw.dispatchEvent(new PointerEvent("pointermove", at(x, y)));
   // The fade: ~120 ms.
   await sleep(250);
+  await settled(panel(), () => getComputedStyle(panel()).opacity === "0", () => getComputedStyle(panel()).opacity);
   const inPanel = midStroke(p, cx, cy, fails);
   if (zOf(".crop-stroke") <= Math.max(zOf(".assist-panel"), zOf(".assist-edge"))) fails.push("mid-stroke: the stroke isn't drawn above the panel and the edge");
   if (listening()) fails.push("mid-stroke: the dictation didn't pause");

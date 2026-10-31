@@ -78,6 +78,7 @@ class ShellActivity : Activity() {
             }
         }
         dev.omalauncher.system.Switcher.attach(host.bridge, { host.highRefresh?.boost(it) }, blur::set)
+        applicationContext.getSystemService(android.hardware.display.DisplayManager::class.java).registerDisplayListener(stuckListener, main)
         // Opened from the agents' notification: the page opens the Agents screen.
         dev.omalauncher.AgentsSpool.opened(intent)
         handleDebugExec(intent)
@@ -194,6 +195,67 @@ class ShellActivity : Activity() {
         // picture of it again now, and once more when that has played out.
         ShellWallpaper.refresh(this)
         ShellWallpaper.refresh(this, WALLPAPER_SETTLE_MS)
+        checkStuckSoon("resumed")
+    }
+
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private val stuckCheck = Runnable { unstick() }
+    private var stuckWhy = ""
+    private var stuckTold = ""
+
+    /** A fold or a rotation: home's window should follow it; looked at once the system has applied it. */
+    private val stuckListener =
+        object : android.hardware.display.DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) {}
+
+            override fun onDisplayRemoved(displayId: Int) {}
+
+            override fun onDisplayChanged(displayId: Int) {
+                if (displayId == (display?.displayId ?: android.view.Display.DEFAULT_DISPLAY)) checkStuckSoon("display changed")
+            }
+        }
+
+    private fun checkStuckSoon(why: String) {
+        stuckWhy = why
+        main.removeCallbacks(stuckCheck)
+        main.postDelayed(stuckCheck, STUCK_SETTLE_MS)
+    }
+
+    /**
+     * Home's window stuck at the other screen's size: sent home again (10-31 02:49, folded: only the wallpaper showed).
+     * OxygenOS's canvas (com.oplus.pscanvas, started when an app was opened over another unfolded) took home's task in
+     * (its VRI scenario=2); folding finished the canvas, but home's task kept the inner display's 2268x2440 px on the
+     * 1116x2484 cover - the page laid out 821x883 dp off the screen, alive and drawing nothing visible. A HOME intent
+     * brought to the front gives the task the display's bounds again (`am start -c HOME`, 02:54:39: 404 dp at once).
+     * HACK: re-delivering home is the recovery, not a cure - real fix: keep OxygenOS's canvas off home's task (launch
+     * apps from home so pscanvas doesn't group them with it), which needs its trigger understood first.
+     */
+    private fun unstick() {
+        if (!inFront || isFinishing || isInMultiWindowMode) return
+        val win = windowManager.currentWindowMetrics.bounds
+        val disp = applicationContext.getSystemService(android.hardware.display.DisplayManager::class.java).getDisplay(display?.displayId ?: android.view.Display.DEFAULT_DISPLAY) ?: return
+        val real = android.graphics.Point()
+        // The display's own size (an application context's display, as the WebView's window.screen reads it).
+        @Suppress("DEPRECATION")
+        disp.getRealSize(real)
+        val off = { a: Int, b: Int -> b > 0 && Math.abs(a - b) > b * 0.05 }
+        val now = "${win.width()}x${win.height()} on ${real.x}x${real.y}"
+        if (!off(win.width(), real.x) && !off(win.height(), real.y)) {
+            stuckTold = ""
+            return
+        }
+        // Once per stuck size: a window the system won't resize is logged, not sent home in a loop.
+        if (now == stuckTold) return
+        stuckTold = now
+        Log.w(TAG, "home's window is $now ($stuckWhy): not the display's size - home brought to the front again")
+        runCatching {
+            startActivity(
+                // The launcher's alias itself, as toHome: a package HOME intent may open the desktop's alias when rooted.
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setComponent(android.content.ComponentName(this, "andro.marchy.HomeShell"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(EXTRA_UNSTICK, true),
+            )
+        }.onFailure { Log.w(TAG, "home's window: re-delivering home failed: $it") }
+        checkStuckSoon("after re-delivering home")
     }
 
     /** Drops Recents cards whose Linux window no longer exists (app exited or process restarted). */
@@ -233,6 +295,8 @@ class ShellActivity : Activity() {
      */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // Home re-delivered to resize its window (unstick): not a Home press, the page stays where it is.
+        if (intent.getBooleanExtra(EXTRA_UNSTICK, false)) return
         // Home pressed - not a notification's or the app entry's way here (toHome), which carries what it opens.
         // Nor the recents transition's launch of home or the switcher's (Switcher.EXTRA_RECENTS): its layer is coming up.
         val recents = intent.getBooleanExtra(dev.omalauncher.system.Switcher.EXTRA_RECENTS, false)
@@ -324,6 +388,8 @@ class ShellActivity : Activity() {
     override fun onDestroy() {
         Log.i(TAG, "home destroyed: task $taskId, finishing $isFinishing, config change $isChangingConfigurations")
         scope.cancel()
+        main.removeCallbacks(stuckCheck)
+        runCatching { applicationContext.getSystemService(android.hardware.display.DisplayManager::class.java).unregisterDisplayListener(stuckListener) }
         // Not there when it went on to the home screen's instance (toHome).
         if (::host.isInitialized) {
             dev.omalauncher.system.Switcher.detach(host.bridge)
@@ -336,6 +402,8 @@ class ShellActivity : Activity() {
 
     private companion object {
         const val HOME_ROLE_REQUEST = 1
+        const val STUCK_SETTLE_MS = 1500L
+        const val EXTRA_UNSTICK = "dev.omalauncher.shell.unstick"
         const val TAG = "PowosShell"
 
         /** On a HOME intent that [toHome] sent: not Home pressed. */
