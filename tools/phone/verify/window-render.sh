@@ -142,7 +142,9 @@ hidden() {
   tasks_on() { sh_ "am stack list" | awk -v d="$1" '/^RootTask id=/{on=($0 ~ ("displayId=" d " "))} on && /^ *taskId=/{sub(/^ *taskId=/,"");sub(/:.*/,"");print}' | sort -u | paste -sd' ' -; }
   app_tasks() { sh_ "am stack list" | awk -v p="$APP/" '/^ *taskId=/ && index($0, " " p){x=$0;sub(/^ *taskId=/,"",x);sub(/:.*/,"",x);print x}' | sort -u | paste -sd' ' -; }
   trap 'hclean' EXIT
-  trap 'log "FAIL: timeout (${WR_TIMEOUT_S:-150} s)"; hclean; log "window-render: FAIL (hidden: timeout) - $OUT"; exit 1' TERM INT
+  # A timeout while the phone sleeps is the sleep, not the windows (10-31 17:57, 1943e3e5: an adb su call hung with the
+  # phone Dozing after passing the start check) - NOT JUDGED like every other asleep path.
+  trap 'if asleep; then log "window-render: NOT JUDGED (the phone is $WAKE; timed out after ${WR_TIMEOUT_S:-150} s) - $OUT"; hclean; exit 2; fi; log "FAIL: timeout (${WR_TIMEOUT_S:-150} s)"; hclean; log "window-render: FAIL (hidden: timeout) - $OUT"; exit 1' TERM INT
   # The watchdog: kills whatever adb call hangs (bash runs the trap only once its foreground child is gone), then us.
   ( sleep $(( ${WR_TIMEOUT_S:-150} + HOLD )); pkill -P $$ 2>/dev/null; kill -TERM $$ 2>/dev/null ) & wd=$!
 
