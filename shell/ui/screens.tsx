@@ -34,6 +34,7 @@ import {
 import { Icon, type IconName } from "./icons.tsx";
 import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, mobileSearchPlacement, unfoldedSearch, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
+import { ALIGNS, alignChoice, type AlignMode, type AlignSurface } from "./align.ts";
 
 /** "icon colours" options after "the apps'": theme hues, the accent. */
 const TINTS = ["hue", "mono"];
@@ -189,6 +190,16 @@ function Segmented({ options, picked, onPick }: { options: string[]; picked: num
         </button>
       ))}
     </span>
+  );
+}
+
+/** One surface's alignment for one mode: top / middle / bottom. */
+function AlignOption({ label, surface, mode }: { label: string; surface: AlignSurface; mode: AlignMode }) {
+  const choice = alignChoice(surface, mode);
+  return (
+    <Option label={label}>
+      <Segmented options={ALIGNS} picked={ALIGNS.indexOf(choice.value)} onPick={(i) => (choice.value = ALIGNS[i])} />
+    </Option>
   );
 }
 
@@ -577,6 +588,14 @@ function StyleScreen() {
             </Option>
           )}
         />
+      </Section>
+      {/* The theme's alignment (ui/align.ts): each surface top / middle / bottom, folded and unfolded, applied at once. */}
+      <Section icon="tuneVariant" title="alignment">
+        {(["unfolded", "folded"] as AlignMode[]).flatMap((m) =>
+          ([["launcher", "launcher"], ["shade", "notifications"], ["control", "control center"]] as [AlignSurface, string][]).map(([sf, name]) => (
+            <AlignOption key={`${sf}.${m}`} label={`${m} ${name}`} surface={sf} mode={m} />
+          )),
+        )}
       </Section>
       <Section icon="apps" title="icons">
         {/* The page's own (ui/icontint.ts): each icon redrawn once - its hues the theme's, all the accent - or as drawn. */}
