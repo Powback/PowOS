@@ -22,12 +22,27 @@ function shownPill() {
   return null;
 }
 
+/**
+ * The shown pill once it has stopped moving: its bottom the same for 5 frames (max 3 s). A fixed 500 ms read it
+ * mid-slide when the Mac was loaded (launcher-fit-unfolded-right-kbd, 10-31: 673 vs 553, passing alone).
+ */
+async function settledPill() {
+  const frame = () => new Promise((r) => requestAnimationFrame(r));
+  let last = null, same = 0;
+  for (const end = performance.now() + 3000; performance.now() < end && same < 5; ) {
+    await frame();
+    const b = shownPill()?.r.bottom ?? null;
+    same = b !== null && b === last ? same + 1 : 0;
+    last = b;
+  }
+  return shownPill();
+}
+
 /** PowOS AI's panel opened: its pill above the nav inset or the keyboard ([at]: the case, for the message). */
 async function aiPillFits(E, keyboard, at) {
   E.emit("pull.begin", { kind: "ai" });
   E.emit("pull.end", { open: true });
-  await sleep(500);
-  const pill = shownPill();
+  const pill = await settledPill();
   const floor = innerHeight - (keyboard ? KEYBOARD : INSETS.bottom);
   E.emit("pull.end", { open: false });
   await sleep(500);
