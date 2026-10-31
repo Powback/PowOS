@@ -258,15 +258,16 @@ export const dockPosition = computed(() => validDockPosition(dockTry.value || si
  */
 export const mobileSearchPlacement = stored("search.place.mobile", "bar");
 /**
- * Unfolded's own choice, "" while unset: then it follows the folded one (the user, 13:31: the dock button belongs in
- * the unfolded dock too, as the separator between the pinned apps and the recent ones). [unfoldedSearch] is what the
- * settings show and set: the choice in effect, a pick stored as unfolded's own.
+ * Unfolded's own choice, "" while unset: then the wide bar, a coded default (the user, 15:32: "move the search bar
+ * back" in landscape, after seeing the unfolded dock button - which had followed the folded choice since 13:31; a
+ * default in code can't flip by a stray stored value). [unfoldedSearch] is what the settings show and set: the choice
+ * in effect, a pick stored as unfolded's own (logged, ui/editsheet.tsx).
  */
 migrateUnfoldedSearch();
 const unfoldedSearchOwn = stored("search.place.unfolded", "");
 export const unfoldedSearch = {
   get value() {
-    return unfoldedSearchOwn.value || mobileSearchPlacement.value;
+    return unfoldedSearchOwn.value || "bar";
   },
   set value(v: string) {
     unfoldedSearchOwn.value = v;

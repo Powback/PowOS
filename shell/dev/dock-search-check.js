@@ -293,7 +293,7 @@ function between(btn, above, recent) {
   return fails;
 }
 
-/** Unfolded with no choice of its own follows the folded one (the user, 13:31): folded "dock button", unfolded too. */
+/** Unfolded with no choice of its own is the bar whatever folded picked (the user, 15:32); its own "dock" wins. */
 async function followsFolded(S) {
   if (S.dockMode.value !== "unfolded") return [];
   const was = { mobile: S.mobileSearchPlacement.value, own: localStorage.getItem("powos.search.place.unfolded") ?? "" };
@@ -301,9 +301,9 @@ async function followsFolded(S) {
   S.unfoldedSearch.value = "";
   S.mobileSearchPlacement.value = "dock";
   await sleep(100);
-  const fails = S.searchInDock.value && S.unfoldedSearch.value === "dock" ? [] : ["folded \"dock button\", unfolded unset: no button unfolded"];
-  S.unfoldedSearch.value = "bar";
-  if (S.searchInDock.value) fails.push("unfolded's own \"bar\" didn't win over the folded choice");
+  const fails = !S.searchInDock.value && S.unfoldedSearch.value === "bar" ? [] : ["folded \"dock button\", unfolded unset: not the bar unfolded"];
+  S.unfoldedSearch.value = "dock";
+  if (!S.searchInDock.value) fails.push("unfolded's own \"dock\" didn't give the button");
   S.mobileSearchPlacement.value = was.mobile;
   S.unfoldedSearch.value = was.own;
   S.searchTry.value = "dock";
