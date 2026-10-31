@@ -508,7 +508,8 @@ function sameAbove(id: number, list: WebWin[]): WebWin[] {
 
 export function WebWindowsOn({ page }: { page: number }) {
   const here = webWins.value.filter((w) => w.page === page && !w.minimised && !w.full && !hiddenTab(w.id));
-  if (!here.length) return null;
+  const strips = parkedOn(page);
+  if (!here.length && !strips.length && parkView.value?.page !== page) return null;
   const t = tilings.value[page];
   const o = pageOrigin();
   return (
@@ -518,10 +519,16 @@ export function WebWindowsOn({ page }: { page: number }) {
         <WebWindowEl key={w.el ?? w.id} win={w} z={webWins.value.indexOf(w)} above={sameAbove(w.id, here.slice(i + 1))} />
       ))}
       {t && dividers(t, tileArea()).map((d) => <DividerEl key={d.ratio} page={page} d={d} o={o} />)}
-      {dropView.value?.page === page && <DropPreview d={dropView.value} o={o} />}
-      {snapView.value?.page === page && <DropPreview d={snapView.value} o={o} />}
+      <Previews page={page} o={o} />
+      {strips.map((p) => <ParkStrip key={p.id} p={p} o={o} />)}
     </div>
   );
+}
+
+/** A drag's ghosts on [page]: its tile drop, edge snap or park (TG3a). */
+function Previews({ page, o }: { page: number; o: { x: number; y: number } }) {
+  const d = [dropView.value, snapView.value, parkView.value].find((v) => v?.page === page);
+  return d ? <DropPreview d={d} o={o} /> : null;
 }
 
 // ---- tiles -------------------------------------------------------------------------------------------------------------
@@ -916,7 +923,7 @@ export const dropView = signal<(Landing & { zone: Zone }) | null>(null);
 /** A bar drag's edge snap in progress (no tile or tab drop there): the rect window [id] would take ([DropPreview]). */
 export const snapView = signal<{ id: number; page: number; slot: Slot; rect: Box } | null>(null);
 /** A drag's previews gone (let go, cancelled). */
-const clearAim = () => (dropView.value = tabView.value = snapView.value = null);
+const clearAim = () => (dropView.value = tabView.value = snapView.value = parkView.value = null);
 
 /** [t] as a split tree of its windows ("4": two columns of two). */
 function treeOfTiling(t: Tiling): Tree {
@@ -981,16 +988,32 @@ const perms = (a: number[]): number[][] => (a.length <= 1 ? [a] : a.flatMap((v, 
  * zones (GL1).
  */
 function aim(id: number, x: number, y: number, docks = true) {
+  const a = aimAt(id, x, y, docks);
+  if (aimKey(a) === aimKey({ next: dropView.value, tab: tabView.value, snap: snapView.value, park: parkView.value })) return;
+  if (a.next || a.tab || a.snap || a.park) hapticTick();
+  dropView.value = a.next;
+  tabView.value = a.tab;
+  snapView.value = a.snap;
+  parkView.value = a.park;
+}
+
+/** What a bar drag at (x, y) aims at: a park, a tab drop, a tile drop or an edge snap (at most one). */
+function aimAt(id: number, x: number, y: number, docks: boolean): Aim {
+  // TG3a: a window dragged out of the tiles parks at the screen's very edge (beyond the snap) - before anything else.
+  const park = docks ? null : parkAim(id, x);
+  if (park) return { next: null, tab: null, snap: null, park };
   const tab = tabTarget(id, x, y);
   const next = tab || !docks ? null : tileDrop(id, x, y);
   const snap = tab || next ? null : snapAim(id, x, y);
-  const key = (d: typeof next, t: typeof tab, s: typeof snap) => `${dropKey(d?.zone)}|${tabKey(t)}|${s?.slot ?? ""}`;
-  if (key(next, tab, snap) === key(dropView.value, tabView.value, snapView.value)) return;
-  if (next || tab || snap) hapticTick();
-  dropView.value = next;
-  tabView.value = tab;
-  snapView.value = snap;
+  return { next, tab, snap, park: null };
 }
+interface Aim {
+  next: ReturnType<typeof tileDrop>;
+  tab: ReturnType<typeof tabTarget>;
+  snap: ReturnType<typeof snapAim>;
+  park: ReturnType<typeof parkAim>;
+}
+const aimKey = (a: Aim) => `${dropKey(a.next?.zone)}|${tabKey(a.tab)}|${a.snap?.slot ?? ""}|${a.park?.side ?? ""}`;
 
 /** The edge snap window [id]'s bar makes let go at (x, y) ([release]'s fallback): its slot and rect, or null. */
 function snapAim(id: number, x: number, y: number) {
@@ -1019,7 +1042,9 @@ function tileDrop(id: number, x: number, y: number) {
 function release(id: number, x: number, y: number) {
   const drop = dropView.value;
   const tab = tabView.value;
+  const park = parkView.value;
   clearAim();
+  if (park?.id === id) return parkWindow(park);
   if (tab?.id === id) return joinStack(tab);
   // GL1: over the tiles, the previewed drop; with none (no tiles yet, a full grid), an edge snap as before.
   if (drop?.id === id) return dock(drop);
@@ -1034,6 +1059,111 @@ function dock(l: Landing) {
   for (const o of l.out) refloat(o);
   holdAppSizes(l.tiling.ids);
   console.info(`[tiles] window ${l.id} docked: page ${l.page} ${l.tiling.layout} [${l.tiling.ids.join(",")}]`);
+}
+
+// ---- TG3a: the edge drawer - a tile parked at the screen's edge (the native split's SplitDrawer, FLOAT_PULL) ----------
+//
+// The user, 10-31 01:37: "There's more clues we can steal from the Android version of the grid. For example, the drawer
+// stuff that we made, I think is really great." A tiled window's bar dragged so the finger is within [PARK_PX] of the
+// screen's left or right edge (past the edge snap) and let go there parks it: out of the tiling (the rest close up as
+// for any untile), minimised (its layer hidden, the app running: the minimise path), and a slim strip with its icon on
+// that edge. A tap on the strip, or a drag from it inward, brings it back into the tiles on that side. Folded there
+// are no tiles, so nothing parks.
+
+/** The finger this near the screen's left / right edge (CSS px) parks a window dragged out of the tiles. */
+const PARK_PX = 12;
+/** A strip: [PARK_W] wide, [PARK_H] tall, [PARK_GAP] between strips stacked on one edge, vertically centred. */
+const PARK_W = 28;
+const PARK_H = 72;
+const PARK_GAP = 8;
+
+export interface Parked {
+  id: number;
+  page: number;
+  side: "left" | "right";
+}
+/** The parked windows, in the order they were parked (one strip each, stacked per edge). */
+export const parked = signal<Parked[]>([]);
+/** A park in progress: the strip window [id] would get, previewed ([DropPreview]). */
+export const parkView = signal<(Parked & { rect: Box }) | null>(null);
+
+/** Page [page]'s strips: windows still there and still minimised (a dock tap that brought one back ends its strip). */
+const parkedOn = (page: number) => parked.value.filter((p) => p.page === page && webWins.value.some((w) => w.id === p.id && w.minimised));
+
+/** The strip rect (viewport CSS px) of the [i]th of [n] strips on [side]. */
+function stripRect(side: Parked["side"], i: number, n: number): Box {
+  const top = innerHeight / 2 - (n * PARK_H + (n - 1) * PARK_GAP) / 2 + i * (PARK_H + PARK_GAP);
+  return { x: side === "left" ? 0 : innerWidth - PARK_W, y: Math.round(top), w: PARK_W, h: PARK_H };
+}
+
+/** The park window [id]'s bar makes with the finger at [x]: its edge and strip, or null (not at an edge). */
+function parkAim(id: number, x: number) {
+  const side = x <= PARK_PX ? "left" : x >= innerWidth - PARK_PX ? "right" : null;
+  const w = side && webWins.value.find((v) => v.id === id);
+  if (!w || !side) return null;
+  const on = parkedOn(w.page).filter((p) => p.side === side && p.id !== id);
+  return { id, page: w.page, side, rect: stripRect(side, on.length, on.length + 1) } as Parked & { rect: Box };
+}
+
+/** Window [p.id] parked: minimised (out of the tiles if it still is in them), a strip on its edge. */
+function parkWindow(p: Parked) {
+  minimise(p.id);
+  parked.value = [...parked.value.filter((v) => v.id !== p.id), { id: p.id, page: p.page, side: p.side }];
+  hapticConfirm();
+  console.info(`[tiles] window ${p.id} parked on page ${p.page}'s ${p.side} edge`);
+}
+
+/**
+ * A strip tapped (or dragged inward): its window back into the page's tiles on the side it was parked - a new full-height
+ * column there when the page has a tiling, else a 2-split with the page's window (a full-screen one back in a window
+ * first, as [tileApps]). The strip goes.
+ */
+export async function unpark(id: number) {
+  const p = parked.value.find((v) => v.id === id);
+  parked.value = parked.value.filter((v) => v.id !== id);
+  const w = webWins.value.find((v) => v.id === id);
+  if (!p || !w) return;
+  update(id, { page: p.page, minimised: false });
+  const l = tilings.value[p.page] && landing(p.page, id, { kind: "outer", tile: -1, side: p.side });
+  if (l) return dock(l);
+  for (const f of webWins.value.filter((v) => v.page === p.page && v.full && v.id !== id)) {
+    if (powos.webwindows?.toWindow) await powos.webwindows.toWindow(f.id).catch(() => false);
+    update(f.id, { full: false });
+  }
+  tile(id, p.side);
+  console.info(`[tiles] window ${id} unparked into page ${p.page}'s ${p.side} side`);
+}
+
+/** A parked window's strip: its icon on the shared glass; the accent outline while a finger is on it. */
+function ParkStrip({ p, o }: { p: Parked; o: { x: number; y: number } }) {
+  const [held, setHeld] = useState(false);
+  const from = useRef<number | null>(null);
+  const on = parkedOn(p.page).filter((v) => v.side === p.side);
+  const r = stripRect(p.side, on.indexOf(p), on.length);
+  const w = webWins.value.find((v) => v.id === p.id);
+  const icon = w && iconOf(w.key);
+  const style = { position: "absolute", left: `${r.x - o.x}px`, top: `${r.y - o.y}px`, width: `${r.w}px`, height: `${r.h}px`, zIndex: 1001, touchAction: "none" } as const;
+  const end = (e: PointerEvent, cancelled: boolean) => {
+    e.stopPropagation();
+    setHeld(false);
+    const x0 = from.current;
+    from.current = null;
+    // A tap, or a drag inward (away from its edge); a drag along the edge or outward is no ask.
+    const inward = x0 == null ? 0 : (e.clientX - x0) * (p.side === "left" ? 1 : -1);
+    if (!cancelled && x0 != null && (inward > SLOP || Math.abs(e.clientX - x0) <= SLOP)) void unpark(p.id);
+  };
+  return (
+    <div
+      class={`ww-park tile ${p.side}${held ? " ww-park-held" : ""}`}
+      data-parked={p.id}
+      style={style}
+      onPointerDown={(e) => (e.stopPropagation(), capture(e), (from.current = e.clientX), setHeld(true))}
+      onPointerUp={(e) => end(e, false)}
+      onPointerCancel={(e) => end(e, true)}
+    >
+      {icon && <img class="ww-icon" src={icon} alt="" draggable={false} />}
+    </div>
+  );
 }
 
 // ---- tabs: windows stacked under one bar (WT1-WT3) -------------------------------------------------------------------

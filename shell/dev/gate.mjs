@@ -3846,6 +3846,75 @@ async function webWindowTileDockCheck() {
 }
 
 /**
+ * In the page: TG3a, the edge drawer (the user, 10-31 01:37: "the drawer stuff that we made, I think is really great").
+ * Two tiles; the right one's bar dragged to the screen's right edge shows a ghost and a tick, let go there it parks: the
+ * left one alone fills the area, one strip on the right edge; a tap on the strip -> two tiles again, the strip gone.
+ */
+async function webWindowParkCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const g = window.__dockg;
+  const page = S.pages.value[0];
+  const win = (id, i) => ({ id, key: `a:gate.park${i}`, label: `Park ${i}`, page, x: 120 + 40 * i, y: 160 + 40 * i, w: 360, h: 280, live: true });
+  try {
+    S.page.value = 0;
+    await window.__gw.settled();
+    W.webWins.value = [win(961, 0), win(962, 1)];
+    W.tileWindows(page, [961, 962]);
+    await window.__gw.settled();
+    const edge = [innerWidth - 4, innerHeight / 2];
+    const ticks = window.__hapticsMock?.tick ?? 0;
+    await g.hold(962, edge);
+    const fails = parkHeld(W, ticks);
+    await g.release(962, edge);
+    const strips = document.querySelectorAll(".ww-park");
+    fails.push(...parkLanded(W, g, page, strips));
+    if (strips.length !== 1) return fails;
+    await parkTap(strips[0]);
+    const two = JSON.stringify(W.tilings.value[page]?.ids);
+    if (two !== "[961,962]") fails.push(`TG3a: the strip tapped, the tiles are ${two} (want 961 | 962)`);
+    return document.querySelector(".ww-park") ? [...fails, "TG3a: the strip stayed after it was tapped"] : fails;
+  } finally {
+    W.webWins.value = [];
+    W.tilings.value = {};
+    W.parked.value = [];
+    W.dropView.value = W.parkView.value = null;
+  }
+
+  /** Held at the right edge: the park previewed (a ghost) and a haptic tick since [ticks]. */
+  function parkHeld(W, ticks) {
+    const fails = W.parkView.value?.side === "right" ? [] : [`TG3a: held at the right edge, no park preview (${JSON.stringify(W.parkView.value)})`];
+    if (!document.querySelector(".ww-drop")) fails.push("TG3a: no ghost while about to park");
+    return (window.__hapticsMock?.tick ?? 0) > ticks ? fails : [...fails, "TG3a: no haptic tick entering the park zone"];
+  }
+  /** Let go: 962 parked (minimised, no tiling), 961 alone filling the area, one 28 px strip on the right edge. */
+  function parkLanded(W, g, page, strips) {
+    const fails = parkAlone(W, g, page);
+    if (strips.length !== 1 || strips[0].dataset.parked !== "962") return [...fails, `TG3a: ${strips.length} strips after parking (want one, 962's)`];
+    const r = strips[0].getBoundingClientRect();
+    return r.width === 28 && r.right >= innerWidth - 1 ? fails : [...fails, `TG3a: the strip is at ${g.fmt(r)} (want 28 px wide on the right edge)`];
+  }
+  /** 962 parked (minimised, no tiling), 961 alone filling the area. */
+  function parkAlone(W, g, page) {
+    const fails = [];
+    const one = g.frame(961)?.getBoundingClientRect();
+    const a = W.workArea();
+    if (W.tilings.value[page] || !W.webWins.value.find((w) => w.id === 962)?.minimised) fails.push(`TG3a: let go at the edge, 962 not parked (tiles ${JSON.stringify(W.tilings.value[page])})`);
+    if (!one || one.width < (a.right - a.left) * 0.9) fails.push(`TG3a: the one left doesn't fill the area (${one && g.fmt(one)})`);
+    return fails;
+  }
+  /** A tap on [strip]. */
+  async function parkTap(strip) {
+    const r = strip.getBoundingClientRect();
+    const at = { bubbles: true, cancelable: true, pointerId: 84, isPrimary: true, clientX: r.left + 14, clientY: r.top + r.height / 2 };
+    strip.dispatchEvent(new PointerEvent("pointerdown", at));
+    strip.dispatchEvent(new PointerEvent("pointerup", at));
+    await new Promise((res) => setTimeout(res, 300));
+    await window.__gw.settled();
+  }
+}
+
+/**
  * In the page: the edge snap's ghost (the user, 10-31 03:17: "there should be like a preview showing that hey by doing
  * this you're gonna end up with the window here like a ghost thing"). A floating window's bar held at the left edge's
  * middle shows a .ww-drop at the rect it then takes (+-3 px); back in the middle it goes; let go at the edge, it is there.
@@ -4824,7 +4893,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }
