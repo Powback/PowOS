@@ -1034,6 +1034,50 @@ async function relayout(page, to, from) {
  * cells are written; every tile shows where the side-by-side pages had it (x + 7 on the right); a tile placed across
  * the middle stays there; one bar at the foot - the pinned dock left of the search pill, the recent apps right of it.
  */
+/**
+ * A swipe home from an app (the host's "recents.begin/drag/end" to: home): home is a desktop, always there - nothing of
+ * it scales, fades, moves or reflows, during the swipe or after it is let go (the user, 2026-10-31: "the whole thing pops
+ * up a little bit" ... "it should just like always be there"). Sampled every frame from the swipe's start to 600 ms
+ * after it ends.
+ */
+async function homeReturnCheck() {
+  const fails = [];
+  const host = (event, data) => window.__mockEvents.emit(event, data);
+  const raf = () => new Promise((ok) => requestAnimationFrame(() => ok()));
+  const home = document.querySelector(".home");
+  const screens = document.querySelector(".screens");
+  const dock = document.querySelector(".dock");
+  if (!home || !screens) return ["home-return: no .home / .screens"];
+  const box = (el) => { const r = el?.getBoundingClientRect(); return r ? `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)}x${Math.round(r.height)}` : "-"; };
+  const grid = () => document.querySelector(".page-track") ?? document.querySelector(".pages");
+  const first = { home: box(home), dock: box(dock), grid: box(grid()) };
+  const look = (when) => {
+    for (const [name, el] of [[".home", home], [".screens", screens]]) {
+      const cs = getComputedStyle(el);
+      if (cs.transform !== "none" && cs.transform !== "matrix(1, 0, 0, 1, 0, 0)") fails.push(`${when}: ${name} transform ${cs.transform} (home must stay put)`);
+      if (Number(cs.opacity) !== 1) fails.push(`${when}: ${name} opacity ${cs.opacity} (home must stay in sight)`);
+    }
+    const now = { home: box(home), dock: box(dock), grid: box(grid()) };
+    for (const k of Object.keys(first)) if (now[k] !== first[k]) fails.push(`${when}: ${k} moved ${first[k]} -> ${now[k]}`);
+  };
+  const tasks = [{ id: 501, label: "Chrome", key: null, icon: null, snapshot: "" }, { id: 502, label: "Camera", key: null, icon: null, snapshot: "" }];
+  host("recents.begin", { from: 501, tasks });
+  await raf();
+  look("begin");
+  for (let i = 1; i <= 20; i++) {
+    host("recents.drag", { progress: Math.min(1, i / 12), x: 0, y: -i * 8, home: Math.max(0, (i - 10) / 10) });
+    await raf();
+    look(`drag ${i}`);
+  }
+  host("recents.end", { to: "home" });
+  const t0 = performance.now();
+  for (let f = 0; performance.now() - t0 < 600; f++) {
+    await raf();
+    look(`after end, frame ${f}`);
+  }
+  return [...new Set(fails)].slice(0, 8);
+}
+
 async function wideMigrated() {
   const S = await window.__gw.mod("./state.ts");
   const { powos } = await window.__gw.mod("./bridge.ts");
@@ -5088,6 +5132,8 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "close-up", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(closeUpCheck))));
   // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
   // side-by-side pages without moving a tile.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-return", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(homeReturnCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar)), ...(await r.page.evaluate(wideLauncherBar)), ...(await r.page.evaluate(wideBarParked))])));
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard", { width: 1280, height: 800 }).then((r) => whenReady(r, () => launcherKeyboardKeepsFocus(r.page))));
