@@ -3579,7 +3579,7 @@ html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-n
 .aip-task-title { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 /* The dots by true state (design QA): working the accent, pulsing; awaiting its check blue; needs you amber, filled;
    stalled / no check grey. The blue and the amber are fixed meanings, not the theme's (dev/style-allow.txt). */
-.aip { --aip-blue: #5aa7e8; --aip-amber: #e3a03c; --aip-on-amber: #1a1206; }
+.aip, .ai-screen.status { --aip-blue: #5aa7e8; --aip-amber: #e3a03c; --aip-on-amber: #1a1206; }
 /* Progress's Needs you card (needsyou.tsx): a row per ask, a tap opens its sentence and its answer controls in place. */
 .aip-needs-head { cursor: default; }
 .aip-need-list { display: flex; flex-direction: column; margin: 0; padding: 0 0 6px; list-style: none; }
@@ -3743,7 +3743,7 @@ html:root .ai-screen.status > .ai-glass { --glass-blur-native: var(--backdrop-bl
   --color-foreground: var(--frost-ink);
   --color-muted: color-mix(in srgb, var(--frost-ink) 80%, transparent);
 }
-.ai-screen.status { font-family: var(--font-ui); --ais-spring: linear(0, 0.25 8%, 0.68 18%, 1.02 30%, 1.1 38%, 1.04 50%, 0.99 62%, 1.005 78%, 1); --aip-blue: #5aa7e8; --aip-amber: #e3a03c; --aip-on-amber: #1a1206; }
+.ai-screen.status { font-family: var(--font-ui); --ais-spring: linear(0, 0.25 8%, 0.68 18%, 1.02 30%, 1.1 38%, 1.04 50%, 0.99 62%, 1.005 78%, 1); }
 .ai-screen.status * { font-family: inherit; }
 .ais-top { gap: 12px; }
 .ais-ring { position: relative; flex: none; width: 36px; height: 36px; display: grid; place-items: center; }
@@ -3759,12 +3759,11 @@ html:root .ai-screen.status > .ai-glass { --glass-blur-native: var(--backdrop-bl
 .ais-h { display: flex; white-space: nowrap; align-items: center; gap: 8px; margin: 0 0 4px; padding: 0 4px; font-size: var(--text-small); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-foreground); opacity: 0.9; }
 .ais-n { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--color-foreground) 14%, transparent); font-size: 11px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
 .ais-sec[data-sec="needs"] .ais-n { background: var(--aip-amber); color: var(--aip-on-amber); }
-.ais-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0; border: 0; background: none; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
-.ais-chev { width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translateY(-2px); transition: transform 260ms var(--ais-spring); }
-.ais-toggle[aria-expanded="true"] .ais-chev { transform: rotate(-135deg) translateY(-1px); }
+.ais-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 0; padding: 0; border: 0; background: none; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
+.ais-chev::before { content: "›"; display: inline-block; font-size: 15px; line-height: 1; transform: rotate(90deg); transition: transform 260ms var(--ais-spring); }
+.ais-toggle[aria-expanded="true"] .ais-chev::before { transform: rotate(-90deg); }
 .ais .aip-need-row { padding: 0 4px; min-height: 44px; }
 .ais .aip-need-more { padding: 0 4px 10px 22px; }
-.ais .aip-need + .aip-need, .ais-list > li + li { border-top: 1px solid color-mix(in srgb, var(--color-foreground) 10%, transparent); }
 .ais-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
 .ais-work-row { display: grid; grid-template-columns: 1fr; gap: 3px; width: 100%; padding: 9px 4px 10px; border: 0; background: none; font: inherit; color: var(--color-foreground); text-align: start; }
 .ais-work-line { display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
@@ -3789,7 +3788,7 @@ html:root .ai-screen.status > .ai-glass { --glass-blur-native: var(--backdrop-bl
 @keyframes ais-out { to { opacity: 0; transform: translateY(-60%); } }
 @keyframes ais-sweep { to { transform: translateX(320%); } }
 @media (prefers-reduced-motion: reduce) {
-  .ais-sec, .ais-step-t, .ais-bar-fill, .ais-done-row, .ais-reply, .ais-ring-fill, .ais-chev { animation: none; transition: none; }
+  .ais-sec, .ais-step-t, .ais-bar-fill, .ais-done-row, .ais-reply, .ais-ring-fill, .ais-chev::before { animation: none; transition: none; }
   .ais-step-t.out { display: none; }
   .ais-bar.sweep .ais-bar-fill { transform: none; }
 }
