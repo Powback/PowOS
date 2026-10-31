@@ -4008,17 +4008,21 @@ async function dlDrag(r, f, { from, path, at = {} }) {
   for (const [i, to] of path.entries()) {
     for (let k = 1; k <= 5; k++) (await f.touch("touchMove", [{ x: p[0] + ((to[0] - p[0]) * k) / 5, y: p[1] + ((to[1] - p[1]) * k) / 5 }]), await f.wait(17));
     p = to;
-    if (at[i]) (await f.wait(250), (seen[at[i]] = await dl(r.page, "state")));
+    // The state each point waits for (DL_WANT): under the ship gate's load the moves are handled late.
+    if (at[i]) seen[at[i]] = await dlUntil(r, f, DL_WANT[at[i]]);
   }
   await f.touch("touchEnd", []);
   await f.wait(400);
   return seen;
 }
 
-/** Waits up to 4 s for [ok] on the page's state; the state then. */
+/** What a point of [dlDrag] waits for: "lift" the carry, "end" the ghost, "mid" (a page swipe under way) anything. */
+const DL_WANT = { lift: (s) => s.carry && s.ticks, end: (s) => s.zone, mid: (s) => s.page || s.strip };
+
+/** Waits up to 8 s for [ok] on the page's state; the state then. */
 async function dlUntil(r, f, ok) {
   let s = await dl(r.page, "state");
-  for (let t = 0; t < 40 && !ok(s); t++) (await f.wait(100), (s = await dl(r.page, "state")));
+  for (let t = 0; t < 80 && !ok(s); t++) (await f.wait(100), (s = await dl(r.page, "state")));
   return s;
 }
 
@@ -4070,14 +4074,17 @@ async function dockLiftHome(r, f) {
   await dl(r.page, "reset");
   const c2 = (await dl(r.page, "cell", "a:maps")) ?? c;
   await f.touch("touchStart", [{ x: c2[0], y: c2[1] }]);
-  await f.wait(700);
-  const held = await dl(r.page, "state");
+  // The hold's 420 ms, then its menu (waited for: under load its timer runs late).
+  await f.wait(500);
+  const held = await dlUntil(r, f, (s) => s.menu);
   await f.touch("touchEnd", []);
-  await f.wait(200);
   if (held.menu !== "a:maps" || held.carry) fails.push(`DL1 home: a still hold on a:maps: menu ${held.menu}, carry ${JSON.stringify(held.carry)} (want its menu)`);
   // A tap: full screen.
   await dl(r.page, "reset");
-  await f.tap(c2);
+  // Once the menu's scrim is gone and the cell is the finger's again (cell waits for it).
+  const c3 = await dl(r.page, "cell", "a:maps");
+  if (!c3) return [...fails, "DL1 home: after the menu, a:maps's dock cell never came back to a finger"];
+  await f.tap(c3);
   const tapped = await dlUntil(r, f, (s) => s.launch.length);
   if (String(tapped.launch[0]) !== "a:maps,true") fails.push(`DL1 home: a tap on a:maps launched ${JSON.stringify(tapped.launch)} (want a:maps full screen)`);
   return fails;

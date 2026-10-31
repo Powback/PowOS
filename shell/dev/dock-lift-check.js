@@ -24,16 +24,28 @@ export async function setup(right) {
   S.page.value = 0;
   await window.__gw.settled();
   await window.__gw.frames(2);
-  // The dock's icons glide to their new slots (home.tsx useGlide): measured once they're there.
-  await new Promise((ok) => setTimeout(ok, 500));
   return S.dockPosition.value;
 }
 
-/** The centre of dock app [key]'s cell, or null. */
-export function cell(key) {
-  const el = document.querySelector(`.dock .dock-page .app[data-key="${key}"]`);
-  const r = el?.getBoundingClientRect();
-  return r?.width ? [r.left + r.width / 2, r.top + r.height / 2] : null;
+/**
+ * The centre of dock app [key]'s cell once it's ready for a finger, or null: no carry, no menu, the cell still for two
+ * frames (home.tsx useGlide, a scrim fading) and the topmost thing at its centre. Waits for that (up to 5 s), never a
+ * fixed sleep: under the ship gate's load the dock's glide back after a drop takes longer.
+ */
+export async function cell(key) {
+  const S = await mod("./state.ts");
+  const at = () => {
+    const r = document.querySelector(`.dock .dock-page .app[data-key="${key}"]`)?.getBoundingClientRect();
+    return r?.width ? [r.left + r.width / 2, r.top + r.height / 2] : null;
+  };
+  const ready = (p) => !S.carry.value && !S.menu.value && document.elementFromPoint(p[0], p[1])?.closest(".app")?.dataset.key === key;
+  let was = null;
+  for (const t0 = performance.now(); performance.now() - t0 < 5000; await window.__gw.frames(2)) {
+    const p = at();
+    if (p && was && p[0] === was[0] && p[1] === was[1] && ready(p)) return p;
+    was = p;
+  }
+  return null;
 }
 
 /** What the finger did: the host calls, the carry, the ghost's zone, the menu, home's page, the dock strip's scroll. */
@@ -60,5 +72,4 @@ export async function reset() {
   const strip = document.querySelector(".dock .dock-pages");
   if (strip) strip.scrollLeft = 0;
   await window.__gw.settled();
-  await new Promise((ok) => setTimeout(ok, 300));
 }
