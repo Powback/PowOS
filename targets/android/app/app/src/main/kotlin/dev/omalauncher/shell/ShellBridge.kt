@@ -440,15 +440,22 @@ class ShellBridge(
                 if (a.getString(0) == "perf.meter") runCatching { JSONObject(a.get(1).toString()).toString() }.getOrNull()?.let { broadcast("perf.meter", it) }
                 Unit
             }
-            // SI1: the one search/chat bar input home's bar (and its search widget) and the launcher overlay share: the
-            // latest kept here (last writer wins by its time), re-built (never spliced raw) and sent to the other windows.
+            // SI1: the one search/chat bar input home's bar (and its search widget) and the launcher overlay share (barsync.ts):
+            // re-built (never spliced raw), a write from an older generation refused (a dictation's late words after a send),
+            // every kept one numbered (seq: pages adopt only newer ones) and sent to the other windows. The answer is what
+            // is kept now - this write, or the newer state that refused it.
             "bar.publish" -> a.optJSONObject(0)?.let { v ->
-                val next = JSONObject().put("text", v.optString("text").take(BAR_TEXT_MAX)).put("hearing", v.optBoolean("hearing"))
-                    .put("at", v.optLong("at"))
-                val won = synchronized(live) { (barInput?.optLong("at") ?: Long.MIN_VALUE).let { at -> (next.optLong("at") >= at).also { if (it) barInput = next } } }
-                if (won) broadcast("bar.input", next.toString(), except = this)
-                won
-            } ?: false
+                val kept = synchronized(live) {
+                    val cur = barInput
+                    if (cur != null && v.optLong("gen") < cur.optLong("gen")) return@synchronized null to cur
+                    val next = JSONObject().put("text", v.optString("text").take(BAR_TEXT_MAX)).put("hearing", v.optBoolean("hearing"))
+                        .put("gen", v.optLong("gen")).put("seq", (cur?.optLong("seq") ?: 0L) + 1)
+                    barInput = next
+                    next to next
+                }
+                kept.first?.let { broadcast("bar.input", it.toString(), except = this) }
+                RawJson(kept.second.toString())
+            }
             "bar.get" -> synchronized(live) { barInput?.toString() }?.let { RawJson(it) }
             // The main shell's frame samples (fps + new frame times, ~4 Hz) to the other windows' meter: re-parsed, never spliced raw.
             "perf.publish" -> a.getString(0).takeIf { it.length < 8192 }?.let { broadcast("perf.sample", JSONObject(it).toString(), except = this) }
@@ -1694,7 +1701,7 @@ class ShellBridge(
         /** Every open shell window's bridge (weak: a closed window just drops out), for events meant for all of them. */
         private val live: MutableSet<ShellBridge> = java.util.Collections.newSetFromMap(java.util.WeakHashMap())
 
-        /** SI1: the shared bar input ({text, hearing, at}, "bar.publish"), guarded by [live]'s lock; null until written. */
+        /** SI1: the shared bar input ({text, hearing, gen, seq}, "bar.publish"), guarded by [live]'s lock; null until written. */
         private var barInput: JSONObject? = null
 
         /** The bar's text, at most (a long paste still syncs; the field never holds a book). */
