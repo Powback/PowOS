@@ -226,7 +226,13 @@ EOF
       "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/hold.raw.gz" 2>/dev/null
       hs=$($PY stats "$OUT/hold.raw.gz" 0 0 "$W" "$H" 2>&1)
       hd=$(echo "$hs" | sed -n 's/.*dominant=\([0-9.]*\).*/\1/p'); he=$(echo "$hs" | sed -n 's/.*edges=\([0-9.]*\).*/\1/p')
-      if [ -z "$hd" ] || ! awk "BEGIN{exit !($hd < 0.97 && $he >= 0.003)}"; then lc "hold display $D FLAT: $hs"; hfail "during the hold display $D went flat ($hs)"; fi
+      if [ -z "$hd" ] || ! awk "BEGIN{exit !($hd < 0.97 && $he >= 0.003)}"; then
+        # The phone fell asleep: the test display (own group or not) goes dark with it - not a window fault (10-31 16:15,
+        # 889b6cb5: "went flat" with mWakefulness=Dozing). The checks before the hold already passed; the hold ends here.
+        wake=$("$A" shell "dumpsys power | grep -m1 mWakefulness=" </dev/null 2>/dev/null | tr -d '\r ' | cut -d= -f2)
+        if [ -n "$wake" ] && [ "$wake" != Awake ]; then lc "hold display $D: phone $wake - hold ended early, not judged"; log "hold: the phone went $wake after $(( $(date +%s) - h0 )) s - the hold ends early (not a window fault)"; break; fi
+        lc "hold display $D FLAT: $hs"; hfail "during the hold display $D went flat ($hs)"
+      fi
       [ -n "$(tasks_on "$D")" ] || { lc "hold display $D: task gone"; hfail "during the hold $APP's task left display $D"; }
       lc "hold display $D live $(( $(date +%s) - h0 )) s: $hs"; log "hold $(( $(date +%s) - h0 )) s: $hs"
       [ $(( $(date +%s) - h0 )) -ge "$HOLD" ] && break
