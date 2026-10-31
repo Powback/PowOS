@@ -212,6 +212,52 @@ class WebWindows(
         main.removeCallbacks(heartbeat)
         if (wins.isNotEmpty()) main.postDelayed(heartbeat, HEARTBEAT_MS)
         emit("webwindows.alive", org.json.JSONArray(wins.keys.toList()))
+        watch()
+    }
+
+    // ---- the render watchdog: live windows with no page geometry ([RenderWatch]) ---------------------------------------
+
+    private val renderWatch = RenderWatch()
+
+    /** The last applied "w.f" (uptime ms, and wall-clock ms for the log; 0: none yet). Main thread ([apply]). */
+    private var lastFrameAt = 0L
+    private var lastFrameWall = 0L
+
+    /** Home's page on a lit screen: its frames run, so a live window with no geometry is a stall, not a pause. */
+    private fun homeShown(): Boolean =
+        web.isShown && web.windowVisibility == android.view.View.VISIBLE && !underSwitcher &&
+            context.getSystemService(android.os.PowerManager::class.java).isInteractive
+
+    /** Main thread, on each [tick] (every [HEARTBEAT_MS] while there are windows): [RenderWatch]'s step, acted on. */
+    private fun watch() {
+        val now = SystemClock.uptimeMillis()
+        val live = wins.values.count { it.live && !it.closed && !it.full && !it.linuxFull }
+        when (renderWatch.step(now, live, homeShown(), lastFrameAt)) {
+            RenderWatch.Act.NONE -> Unit
+            // Quiet: the page sends only changed geometry, so an idle second is normal; a working page answers this.
+            RenderWatch.Act.PROBE -> emit("webwindows.resend", 0)
+            RenderWatch.Act.STALL -> {
+                WindowLog.w(TAG, "RENDER STALL: $live live window(s), no geometry for ${stallFor(now)} (last w.f at ${lastFrameText()})")
+                resend("render stall")
+            }
+            RenderWatch.Act.RELOAD -> stallReload(now, live)
+        }
+    }
+
+    private fun stallFor(now: Long) = if (lastFrameAt == 0L) "ever" else "${(now - lastFrameAt) / 1000}s"
+
+    private fun lastFrameText() =
+        if (lastFrameWall == 0L) "never" else java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date(lastFrameWall))
+
+    /** Still no geometry after the stall's resend: reported (`powos shell errors`, the manager) and home's page reloaded. */
+    private fun stallReload(
+        now: Long,
+        live: Int,
+    ) {
+        val why = "web windows render empty: $live live window(s), no geometry for ${stallFor(now)} (last w.f at ${lastFrameText()}), a resend unanswered: home reloaded"
+        WindowLog.e(TAG, "RENDER STALL: $why")
+        ShellErrors.report(context, "home", JSONObject().put("kind", "render-stall").put("message", why).put("ready", true).toString())
+        web.reload()
     }
 
     /** On [io]: [reconcile]'s reads for Android windows [ws]. */
@@ -1126,6 +1172,8 @@ class WebWindows(
             // No invalidate: the page's commit draws ([FrameSync.next]).
             attached.applyTransactionOnDraw(t)
         }
+        lastFrameAt = SystemClock.uptimeMillis()
+        lastFrameWall = System.currentTimeMillis()
         logFrame(frame, geos)
         orderCheckSoon(geos)
     }
@@ -1290,7 +1338,8 @@ class WebWindows(
         if (behind > 0) behindFrames++
         appliedFrames++
         val now = SystemClock.uptimeMillis()
-        if (now - lastPlaceLog < PLACE_LOG_MS || geos.isEmpty()) return
+        // An empty frame too (every window minimised): the ship check (ship.sh render_watch) reads "w.f" lines as the page alive.
+        if (now - lastPlaceLog < PLACE_LOG_MS) return
         lastPlaceLog = now
         WindowLog.i(TAG, "w.f f$frame behind=$behind (${behindFrames}/$appliedFrames applies behind) lag=${sync.lag.joinToString("/")} pf=${sync.pageLag.joinToString("/")} rx=${"%.1f".format(sync.receiptMs / sync.pageLag.sum().coerceAtLeast(1))}ms (page ${"%.1f".format(rxPage / rxSplit.coerceAtLeast(1))} + hop ${"%.1f".format(rxHop / rxSplit.coerceAtLeast(1))}) via=$via " + geos.joinToString { "${it.id}@${it.body.toShortString()} clip ${it.clip.toShortString()} z${it.z} ${if (it.visible) "shown" else "hidden"}" })
     }

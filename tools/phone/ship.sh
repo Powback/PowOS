@@ -127,7 +127,7 @@ status)
   [ -s "$Q/shell-held" ] && { read -r ht hc < "$Q/shell-held"; echo "shell held for its APK ${ht:0:9} (APK inputs + shell in the same commit: $hc) - they land together at the install"; }
   [ -e "$HOME/.config/powos/ship-no-idle-wait" ] && echo "APK installs: at once, no idle wait (~/.config/powos/ship-no-idle-wait)"
   [ -s "$Q/rooted-pending" ] && { read -r rb rt < "$Q/rooted-pending"; echo "rooted deploy pending since ${rb:0:9} (origin ${rt:0:9}; runs after the APK, under the phone-busy rules)"; }
-  [ -s "$Q/window-failed" ] && { read -r wt ww wf < "$Q/window-failed"; echo "WINDOWS BROKEN: ${wt:0:9} ($ww) failed the device window check (verify/window-render.sh; changed: $wf) - log $Q/done/window-render-${wt:0:9}.log"; }
+  [ -s "$Q/window-failed" ] && { read -r wt ww wf < "$Q/window-failed"; if [ "$wf" = render-watch ]; then echo "WINDOWS BROKEN: ${wt:0:9} ($ww) failed the passive window check (render-watch) - log $Q/done/render-watch-${wt:0:9}.log"; else echo "WINDOWS BROKEN: ${wt:0:9} ($ww) failed the device window check (verify/window-render.sh; changed: $wf) - log $Q/done/window-render-${wt:0:9}.log"; fi; }
   [ -s "$Q/window-gate.pid" ] && kill -0 "$(cat "$Q/window-gate.pid")" 2>/dev/null && echo "device window check running (pid $(cat "$Q/window-gate.pid"); waits for a free, unfolded phone)"
   [ -d "$Q/apk" ] && echo "APK ship out: $(cut -c1-9 "$Q/apk/tip" 2>/dev/null) (log $(cat "$Q/apk/log" 2>/dev/null))"
   echo "last ships:"; tail -6 "$Q/shipped.log" 2>/dev/null | sed 's/^/  /' ;;
@@ -301,9 +301,15 @@ run)
     # A copy to run: this checkout is reset under a running script (bash reads it as it goes).
     wb=$Q/window-render/bin; mkdir -p "$wb"; cp "$here/verify/window-render.sh" "$here/verify/window-render.py" "$wb/" || return 0
     echo "$(date +%T) ${t:0:9}: window files changed ($f) - device window check queued ($Q/done/window-render-${t:0:9}.log)"
-    ( wl=$Q/done/window-render-${t:0:9}.log; : > "$wl"; n=0
+    # The log says what happens from the first second (10-31: every window-render-*.log was 0 bytes - the check waited
+    # for an idle phone, said nothing, and the next ship's check killed it): queued, each try's skip, a replacement.
+    ( wl=$Q/done/window-render-${t:0:9}.log; n=0; since=$(date +%T)
+      echo "$since window-render ${t:0:9} ($what; changed: $f): queued - waits for a free, unfolded phone (up to ${WINDOW_GATE_TRIES:-8} tries)" > "$wl"
+      trap 'echo "$(date +%T) stopped: replaced by a newer ship'"'"'s check (try $n; skipped: user active since $since)" >> "$wl"; exit 143' TERM
       while :; do
-        n=$((n + 1)); WR_TOOLS=$here WR_OUT=$Q/window-render bash "$wb/window-render.sh" >> "$wl" 2>&1; wrc=$?
+        n=$((n + 1)); echo "$(date +%T) try $n: started" >> "$wl"
+        WR_TOOLS=$here WR_OUT=$Q/window-render bash "$wb/window-render.sh" >> "$wl" 2>&1; wrc=$?
+        [ $wrc = 2 ] && echo "$(date +%T) try $n: skipped: $(grep '^SKIP: ' "$wl" | tail -1 | cut -c7-200 | grep . || echo "user active since $since")" >> "$wl"
         [ $wrc = 2 ] && [ $n -lt "${WINDOW_GATE_TRIES:-8}" ] && { sleep 60; continue; }; break
       done
       res=$(grep '^window-render: ' "$wl" | tail -1 | cut -c1-300)
@@ -318,6 +324,46 @@ run)
       esac
       rm -f "$Q/window-gate.pid" ) &
     echo $! > "$Q/window-gate.pid"
+  }
+  # render_watch TIP WHAT: after every shell or APK ship, a PASSIVE 20 s look at the phone's log (read-only, no taps,
+  # never waits for an idle phone - unlike window_gate, which the always-active user starved: 10-31's three "windows
+  # render empty" P0s all shipped unchecked). Live web windows (`PowosWebWindows: window N: live`, in the last 2 min,
+  # by the app's current process) with a `RENDER STALL` (WebWindows' watchdog, RenderWatch.kt) or no applied geometry
+  # (`w.f f...` line) since the ship = WINDOWS BROKEN, marked as window_gate marks a FAIL. No geometry while home isn't
+  # on screen (an app full screen) is not judged. SHIP_RENDER_WATCH=0 turns it off; off in tests (SHIP_DIR).
+  render_watch() {
+    [ "${SHIP_RENDER_WATCH:-1}" = 1 ] && [ -z "${SHIP_DIR:-}" ] && [ -x "$here/adb.sh" ] || return 0
+    local t=$1 what=$2
+    ( rl=$Q/done/render-watch-${t:0:9}.log
+      t0=$("$here/adb.sh" shell 'date +%s' 2>/dev/null | tr -d '\r')
+      case $t0 in ''|*[!0-9]*) echo "$(date +%T) render-watch ${t:0:9} ($what): not run - the phone's clock unreadable (no phone?)" > "$rl"; exit 0 ;; esac
+      echo "$(date +%T) render-watch ${t:0:9} ($what): 20 s passive log check from phone time $t0" > "$rl"
+      sleep "${RENDER_WATCH_S:-20}"
+      lc=$("$here/adb.sh" shell 'logcat -d -v epoch -s PowosWebWindows:*' 2>/dev/null | tr -d '\r')
+      # The app's current process: the newest line's pid (an APK ship restarted it; the old one's windows are gone).
+      pid=$(echo "$lc" | awk '/PowosWebWindows:/ {p=$2} END {print p}')
+      v=$(echo "$lc" | awk -v t0="$t0" -v pid="$pid" '$2 != pid {next}
+        $1 >= t0 - 120 && /PowosWebWindows: window [0-9]+: live/ {live++}
+        $1 >= t0 && /RENDER STALL/ {stall++; last=$0}
+        $1 >= t0 && /PowosWebWindows: w\.f f/ {wf++}
+        END {printf "%d %d %d %s", live, stall, wf, last}')
+      read -r live stall wf last <<< "$v"
+      echo "live lines $live, RENDER STALL lines $stall, w.f lines $wf (pid ${pid:-?})${last:+; last stall: $last}" >> "$rl"
+      bad=""
+      if [ "${live:-0}" -gt 0 ] && [ "${stall:-0}" -gt 0 ]; then bad="RENDER STALL after the ship: ${last:0:200}"
+      elif [ "${live:-0}" -gt 0 ] && [ "${wf:-0}" = 0 ]; then
+        foc=$("$here/adb.sh" shell 'dumpsys window | grep -m1 mCurrentFocus' 2>/dev/null | tr -d '\r')
+        home=$("$here/adb.sh" shell "cat /proc/${pid:-0}/cmdline" 2>/dev/null | tr -d '\r\0')
+        if [ -n "$home" ] && echo "$foc" | grep -q "$home"; then bad="no w.f geometry applied in ${RENDER_WATCH_S:-20} s with live windows and home on screen ($foc)"
+        else echo "not judged: no geometry, but home is not on screen ($foc)" >> "$rl"; fi
+      fi
+      if [ -z "$bad" ]; then echo "$(date +%T) render-watch: PASS" >> "$rl"; echo "$(date '+%F %T') ${t:0:9} $what render-watch PASS (live $live, w.f $wf)" >> "$Q/shipped.log"; exit 0; fi
+      echo "$(date +%T) render-watch: FAIL: $bad" >> "$rl"
+      echo "$t $what render-watch" > "$Q/window-failed"
+      if [ "$what" = apk ]; then echo "$t" > "$Q/failed-apk"; else echo "$t" > "$Q/failed"; fi
+      echo "$(date '+%F %T') ${t:0:9} $what render-watch FAILED: $bad" >> "$Q/shipped.log"
+      echo "$(date +%T) ${t:0:9}: WINDOWS BROKEN on the device after this ship (render-watch FAIL, log $rl)"
+      mail "ship ${t:0:9} ($what) FAILED the passive window check - web windows are BROKEN on the phone: $bad - log $rl on the Mac; fix it on origin, then ship.sh request again" ) &
   }
   # done_req FILE RESULT: a request fully on the phone.
   done_req() { echo "result=$2" >> "$1"; mv "$1" "$Q/done/"; }
@@ -388,6 +434,7 @@ run)
         echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
         # The build it replaced: ship-apk's snapshot of the previous install (ship-guard.sh snapshot DIR/commit).
         window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk
+        render_watch "$st" apk
         e2e_round
       elif [ "$arc" = 8 ]; then echo "$(date +%T) ${A:0:9}: a newer APK is wanted - the pending one is replaced"
       elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
@@ -524,6 +571,7 @@ run)
           echo "$T" > "$Q/live"; rm -f "$Q/failed"
           post_gate "$T" "$log" $add
           window_gate "$base" "$T" shell
+          render_watch "$T" shell
           echo "$(date '+%F %T') ${T:0:9} shell ${#sreqs[@]} req ($who_s): ${sn:-(silent)}" >> "$Q/shipped.log"
           units_publish
           for r in ${nreqs[@]+"${nreqs[@]}"}; do [ -f "$r" ] && echo "noted=1" >> "$r"; done
